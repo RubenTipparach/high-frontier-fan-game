@@ -18,6 +18,13 @@
   height: 100%;
   cursor: grab;
   user-select: none;
+  /* Swallow touch gestures inside the map so the browser doesn't
+     also pan/zoom the surrounding page. The rest of the site
+     remains pinch-zoomable normally. */
+  touch-action: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  overscroll-behavior: contain;
 }
 .map-svg.dragging { cursor: grabbing; }
 

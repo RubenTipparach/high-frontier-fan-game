@@ -248,18 +248,11 @@ export class MapRenderer {
       const sx = (ev.clientX - rect.left) / rect.width * VIEW_W;
       const sy = (ev.clientY - rect.top) / rect.height * VIEW_H;
       const factor = ev.deltaY < 0 ? 1.15 : 1 / 1.15;
-      const nextZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, this.zoom * factor));
-      // World coords of cursor pre-zoom = (sx - pan.x) / zoom
-      const wx = (sx - this.pan.x) / this.zoom;
-      const wy = (sy - this.pan.y) / this.zoom;
-      this.pan.x = sx - wx * nextZoom;
-      this.pan.y = sy - wy * nextZoom;
-      this.zoom = nextZoom;
-      this._applyTransform();
-      this._updateLabelVisibility();
+      this._zoomAt(sx, sy, factor);
     }, { passive: false });
 
-    // Drag-pan.
+    // Drag-pan with the mouse. Touch is handled separately below so
+    // pinch-zoom and pan can coexist on a phone or trackpad gesture.
     this.svg.addEventListener('mousedown', (ev) => {
       if (ev.button !== 0) return;
       this._dragStart = { x: ev.clientX, y: ev.clientY, panX: this.pan.x, panY: this.pan.y };
@@ -278,6 +271,124 @@ export class MapRenderer {
       this._dragStart = null;
       this.svg.classList.remove('dragging');
     });
+
+    // Touch handling: 1 finger pans, 2 fingers pinch-zoom anchored
+    // at the midpoint between fingers (Google-Maps style). Page-level
+    // pinch zoom is suppressed *only* within the SVG via CSS
+    // touch-action: none, so the rest of the site still pinches
+    // normally. We preventDefault on touchmove to stop iOS rubber-
+    // banding while the gesture is in flight.
+    this.svg.addEventListener('touchstart', (ev) => {
+      this._snapshotGesture(ev);
+    }, { passive: false });
+
+    this.svg.addEventListener('touchmove', (ev) => {
+      ev.preventDefault();
+      if (!this._gesture) return;
+      const rect = this.svg.getBoundingClientRect();
+      const points = this._activeTouches(ev);
+      if (points.length === 1 && this._gesture.touches.length === 1) {
+        // Single-finger pan: translate the current pan by the touch
+        // delta in viewBox units.
+        const start = this._gesture.touches[0];
+        const dx = (points[0].clientX - start.clientX) * (VIEW_W / rect.width);
+        const dy = (points[0].clientY - start.clientY) * (VIEW_H / rect.height);
+        this.pan.x = this._gesture.pan.x + dx;
+        this.pan.y = this._gesture.pan.y + dy;
+        this._applyTransform();
+      } else if (points.length >= 2 && this._gesture.touches.length >= 2) {
+        // Pinch zoom + pan: compute centroid and pairwise distance
+        // at gesture-start vs. now; ratio drives zoom, centroid drift
+        // drives pan, and we anchor the zoom at the centroid so the
+        // pinch focus stays under the fingers.
+        const startA = this._gesture.touches[0];
+        const startB = this._gesture.touches[1];
+        const startMidX = (startA.clientX + startB.clientX) / 2;
+        const startMidY = (startA.clientY + startB.clientY) / 2;
+        const startDist = Math.hypot(
+          startA.clientX - startB.clientX,
+          startA.clientY - startB.clientY
+        ) || 1;
+
+        const nowA = points[0];
+        const nowB = points[1];
+        const nowMidX = (nowA.clientX + nowB.clientX) / 2;
+        const nowMidY = (nowA.clientY + nowB.clientY) / 2;
+        const nowDist = Math.hypot(
+          nowA.clientX - nowB.clientX,
+          nowA.clientY - nowB.clientY
+        ) || 1;
+
+        const factor = nowDist / startDist;
+        const targetZoom = Math.max(
+          MIN_ZOOM,
+          Math.min(MAX_ZOOM, this._gesture.zoom * factor)
+        );
+        // Centroid in viewBox coords:
+        const sx = (startMidX - rect.left) / rect.width * VIEW_W;
+        const sy = (startMidY - rect.top) / rect.height * VIEW_H;
+        // World coords of the pinch-start centroid (relative to the
+        // pre-zoom viewport):
+        const wx = (sx - this._gesture.pan.x) / this._gesture.zoom;
+        const wy = (sy - this._gesture.pan.y) / this._gesture.zoom;
+        // Current centroid in viewBox coords:
+        const cx = (nowMidX - rect.left) / rect.width * VIEW_W;
+        const cy = (nowMidY - rect.top) / rect.height * VIEW_H;
+        // Pan so the world point lands at the new centroid.
+        this.pan.x = cx - wx * targetZoom;
+        this.pan.y = cy - wy * targetZoom;
+        this.zoom = targetZoom;
+        this._applyTransform();
+        this._updateLabelVisibility();
+      }
+    }, { passive: false });
+
+    this.svg.addEventListener('touchend', (ev) => {
+      // Re-snapshot remaining touches so a finger lifting off a
+      // pinch becomes the new pan anchor without a jump.
+      if (ev.touches.length === 0) {
+        this._gesture = null;
+      } else {
+        this._snapshotGesture(ev);
+      }
+    });
+
+    this.svg.addEventListener('touchcancel', () => {
+      this._gesture = null;
+    });
+  }
+
+  // Helper: zoom by `factor` anchored at the given viewBox-coord
+  // point. Used by the wheel handler and could be reused by buttons.
+  _zoomAt(sx, sy, factor) {
+    const nextZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, this.zoom * factor));
+    const wx = (sx - this.pan.x) / this.zoom;
+    const wy = (sy - this.pan.y) / this.zoom;
+    this.pan.x = sx - wx * nextZoom;
+    this.pan.y = sy - wy * nextZoom;
+    this.zoom = nextZoom;
+    this._applyTransform();
+    this._updateLabelVisibility();
+  }
+
+  // Snapshot the current touch state at the start of a gesture. We
+  // store the original pan/zoom so touchmove can compute deltas
+  // relative to the gesture's origin rather than the previous frame
+  // (avoids drift from rounding).
+  _snapshotGesture(ev) {
+    this._gesture = {
+      touches: this._activeTouches(ev).slice(0, 2),
+      pan: { x: this.pan.x, y: this.pan.y },
+      zoom: this.zoom,
+    };
+  }
+
+  _activeTouches(ev) {
+    const out = [];
+    for (const t of ev.touches) {
+      out.push({ identifier: t.identifier, clientX: t.clientX, clientY: t.clientY });
+    }
+    return out;
   }
 
   reset() {
