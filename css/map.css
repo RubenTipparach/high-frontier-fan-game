@@ -50,6 +50,13 @@
   stroke: #050410;
   stroke-width: 3;
 }
+/* Asteroid / moon / orbit / comet labels stay hidden until the
+   renderer crosses its zoom threshold (~1.5x), otherwise the 188-
+   node graph is unreadable at default zoom. */
+.map-svg .site-label.minor { display: none; }
+.map-svg.zoomed .site-label.minor { display: block; }
+.map-svg .edge-label { display: none; }
+.map-svg.zoomed .edge-label { display: block; }
 .map-svg .class-badge {
   font: 8px ui-monospace, monospace;
   font-weight: 700;

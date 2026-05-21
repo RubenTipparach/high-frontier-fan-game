@@ -155,12 +155,19 @@ export class MapRenderer {
         }, groupNode);
       }
 
-      // Label.
-      el('text', {
+      // Label. The graph has ~190 sites, so we mark "minor" bodies
+      // (asteroids, moons, lagrange points) as zoom-conditional and
+      // only paint their names when the renderer's zoom crosses
+      // LABEL_ZOOM_THRESHOLD. Planets / dwarfs / KBOs stay labeled
+      // at all zooms so the eye has reliable landmarks.
+      const lbl = el('text', {
         y: vis.r + 14,
         class: 'site-label',
         'text-anchor': 'middle',
-      }, groupNode).textContent = site.name;
+      }, groupNode);
+      lbl.textContent = site.name;
+      const isMinor = ['asteroid', 'moon', 'lagrange', 'orbit', 'comet'].includes(site.type);
+      if (isMinor) lbl.classList.add('minor');
 
       // Hover + click wiring.
       groupNode.addEventListener('mouseenter', () => this._showTooltip(site, groupNode));
@@ -225,6 +232,7 @@ export class MapRenderer {
       this.pan.y = sy - wy * nextZoom;
       this.zoom = nextZoom;
       this._applyTransform();
+      this._updateLabelVisibility();
     }, { passive: false });
 
     // Drag-pan.
@@ -252,5 +260,14 @@ export class MapRenderer {
     this.zoom = 1;
     this.pan = { x: 0, y: 0 };
     this._applyTransform();
+    this._updateLabelVisibility();
+  }
+
+  // Toggle the .minor labels in/out of view based on zoom. Keeps the
+  // 188-site graph readable at default zoom (planets only) while
+  // revealing the asteroid + moon labels when the user zooms in.
+  _updateLabelVisibility() {
+    const LABEL_ZOOM_THRESHOLD = 1.5;
+    this.svg.classList.toggle('zoomed', this.zoom >= LABEL_ZOOM_THRESHOLD);
   }
 }
