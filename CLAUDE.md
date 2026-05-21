@@ -44,7 +44,7 @@ Mirrors the murdoku-companion split:
 
 ```
 ┌────────────────────────────────┐   HTTPS+CORS   ┌────────────────────────────────┐
-│ GitHub Pages                   │ <------------> │ Fly.io app: highfrontier-api  │
+│ GitHub Pages                   │ <------------> │ Fly.io app: high-frontier-fan-game  │
 │ static ES modules, no build    │   WS (wss://)  │  Express + ws + better-sqlite3│
 │ index.html, css/*, js/*        │ <------------> │  volume: /data/hf.db          │
 │ deployed on every branch       │                │  admin at /admin              │

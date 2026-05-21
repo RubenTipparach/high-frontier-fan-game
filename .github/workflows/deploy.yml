@@ -103,12 +103,12 @@ jobs:
             exit 0
           fi
           if ! flyctl auth whoami > /dev/null 2>&1; then
-            echo "::notice::FLY_API_TOKEN is set but rejected by Fly; skipping API deploy. Regenerate via 'fly tokens create deploy -a highfrontier-api'."
+            echo "::notice::FLY_API_TOKEN is set but rejected by Fly; skipping API deploy. Regenerate via 'fly tokens create deploy -a high-frontier-fan-game'."
             echo "ready=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if ! flyctl status -a highfrontier-api > /dev/null 2>&1; then
-            echo "::notice::Fly app 'highfrontier-api' not found; skipping API deploy. Bootstrap with 'fly apps create highfrontier-api' + 'fly volumes create hf_data --size 1 --region ams'."
+          if ! flyctl status -a high-frontier-fan-game > /dev/null 2>&1; then
+            echo "::notice::Fly app 'high-frontier-fan-game' not found; skipping API deploy. Bootstrap with 'fly apps create high-frontier-fan-game' + 'fly volumes create hf_data --size 1 --region ams'."
             echo "ready=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -122,7 +122,7 @@ jobs:
         if: steps.fly_gate.outputs.ready == 'true'
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-          APP: highfrontier-api
+          APP: high-frontier-fan-game
           REGION: ams
         run: |
           set -e

@@ -864,5 +864,5 @@ function esc(s) {
 // ----- Boot -----
 
 httpServer.listen(PORT, '0.0.0.0', () => {
-  console.log(`highfrontier-api listening on :${PORT} (HTTP + WS at /ws)`);
+  console.log(`high-frontier-fan-game listening on :${PORT} (HTTP + WS at /ws)`);
 });
