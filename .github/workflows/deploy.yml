@@ -76,42 +76,43 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # First-push gate. If FLY_API_TOKEN isn't set, surface a friendly
-      # notice and skip remaining steps with success — pre-bootstrap is
-      # an expected state, not a failure. The user has to create the
-      # Fly app + volume + token before this job can actually deploy;
-      # see README.md "One-time setup".
-      - name: Check for FLY_API_TOKEN
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # Multi-stage gate. We treat pre-bootstrap as "skip, don't fail":
+      # any of (token missing | token invalid | app not yet created)
+      # marks the job ready=false and the deploy steps skip. The user
+      # has explicit setup steps in README.md "One-time setup" to flip
+      # all three to ready=true. A genuine deploy failure post-bootstrap
+      # still surfaces as a job failure.
+      - name: Check Fly readiness
         id: fly_gate
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
           if [ -z "${FLY_API_TOKEN}" ]; then
-            echo "::notice::FLY_API_TOKEN not configured. Skipping API deploy. See README.md 'One-time setup' to enable."
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::FLY_API_TOKEN not set; skipping API deploy. See README.md 'One-time setup'."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
-
-      - name: Set up flyctl
-        if: steps.fly_gate.outputs.configured == 'true'
-        uses: superfly/flyctl-actions/setup-flyctl@master
-
-      - name: Confirm Fly auth and app exist
-        if: steps.fly_gate.outputs.configured == 'true'
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: |
-          flyctl version
-          flyctl auth whoami
-          flyctl status -a highfrontier-api
+          if ! flyctl auth whoami > /dev/null 2>&1; then
+            echo "::notice::FLY_API_TOKEN is set but rejected by Fly; skipping API deploy. Regenerate via 'fly tokens create deploy -a highfrontier-api'."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! flyctl status -a highfrontier-api > /dev/null 2>&1; then
+            echo "::notice::Fly app 'highfrontier-api' not found; skipping API deploy. Bootstrap with 'fly apps create highfrontier-api' + 'fly volumes create hf_data --size 1 --region ams'."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
 
       # Single-writer sqlite needs exactly one machine on one volume.
       # Ensure a volume in the primary region and reap any extra app
       # machines before deploy. Both steps are idempotent: no-op if
       # already in the desired state.
       - name: Ensure volume + single machine
-        if: steps.fly_gate.outputs.configured == 'true'
+        if: steps.fly_gate.outputs.ready == 'true'
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           APP: highfrontier-api
@@ -146,7 +147,7 @@ jobs:
           flyctl machine list -a "$APP"
 
       - name: Deploy API to Fly.io
-        if: steps.fly_gate.outputs.configured == 'true'
+        if: steps.fly_gate.outputs.ready == 'true'
         working-directory: server
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
