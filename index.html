@@ -4,7 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>High Frontier — fan game</title>
-    <link rel="stylesheet" href="./css/style.css?v=1" />
+    <link rel="stylesheet" href="./css/style.css?v=2" />
+    <link rel="stylesheet" href="./css/map.css?v=1" />
     <!--
       API base URL for the High Frontier companion server. Empty string
       = local-only mode (no profile, no lobby, no multiplayer). The
@@ -26,6 +27,7 @@
         <span class="brand-sub">fan game · stage 1</span>
       </div>
       <div class="topbar-actions">
+        <button id="btn-browse" title="Browse game data (map, patents, milestones, events)">Browse</button>
         <span id="server-status" class="server-status" title="API connectivity">…</span>
         <div id="profile-pill" class="profile-pill hidden">
           <span id="profile-name"></span>
@@ -204,19 +206,63 @@
 
         <!--
           When the host hits Start, lobby.status flips to 'started'
-          and this overlay covers the lobby with a "game would start
-          here" placeholder. Stage 2 will replace this with the actual
-          solar-system board.
+          and this overlay covers the lobby with the solar-system map.
+          Stage 2 renders the map read-only; Stage 3 will add the
+          engine + interactive operation buttons.
         -->
         <div id="game-overlay" class="game-overlay hidden">
-          <div class="overlay-card">
-            <h2>Game would start here</h2>
-            <p class="muted">
-              Stage 1 ships the social layer only. The High Frontier
-              solar system map, ship builder, and engine arrive in
-              Stage 2+ — see <code>CLAUDE.md</code> for the staged plan.
-            </p>
-            <button id="btn-back-to-lobby">Back to lobby panel</button>
+          <div class="overlay-shell">
+            <div class="overlay-header">
+              <h2 id="game-title">Solar system</h2>
+              <div class="overlay-actions">
+                <span class="muted">Stage 2 preview · engine arrives in Stage 3</span>
+                <button id="btn-back-to-lobby">Back to lobby</button>
+              </div>
+            </div>
+            <div class="overlay-main">
+              <div id="game-map" class="game-map"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!--
+        ===== Browse view =====
+        Read-only inspector for the Stage 2 data: solar system map,
+        patent deck, milestones, and event cards. Always reachable
+        from the topbar; doesn't require sign-in.
+      -->
+      <section id="view-browse" class="view hidden">
+        <div class="card">
+          <div class="card-header">
+            <h2>Browse data</h2>
+            <div id="browse-tabs" class="tabbar">
+              <button class="active" data-tab="map">Map</button>
+              <button data-tab="patents">Patents</button>
+              <button data-tab="milestones">Milestones</button>
+              <button data-tab="events">Events</button>
+            </div>
+          </div>
+
+          <div class="browse-panel" data-tab="map">
+            <div class="browse-map-wrap">
+              <div id="browse-map" class="browse-map"></div>
+              <aside id="browse-map-info" class="browse-map-info">
+                <p class="muted">Click any site to see its details. Scroll to zoom, drag to pan.</p>
+              </aside>
+            </div>
+          </div>
+
+          <div class="browse-panel hidden" data-tab="patents">
+            <div id="browse-patents"></div>
+          </div>
+
+          <div class="browse-panel hidden" data-tab="milestones">
+            <div id="browse-milestones"></div>
+          </div>
+
+          <div class="browse-panel hidden" data-tab="events">
+            <div id="browse-events"></div>
           </div>
         </div>
       </section>
@@ -242,6 +288,6 @@
     -->
     <div id="toasts" class="toasts" aria-live="polite"></div>
 
-    <script type="module" src="./js/main.js?v=1"></script>
+    <script type="module" src="./js/main.js?v=2"></script>
   </body>
 </html>

@@ -11,11 +11,13 @@ import { ws } from './ws.js';
 import { saveLastLobbyId } from './storage.js';
 import { mountChat, unmountChat } from './chat.js';
 import { mountInvitesUI, unmountInvitesUI } from './invites.js';
+import { MapRenderer } from './game/render.js';
 
 let _activeLobby = null;
 let _unsubWS = null;
 let _onShowView = null;
 let _onToast = null;
+let _mapRenderer = null;
 
 export function initLobby({ onShowView, onToast }) {
   _onShowView = onShowView;
@@ -180,7 +182,29 @@ function renderLobby(lobby) {
   startBtn.classList.toggle('hidden', !isHost || lobby.status !== 'waiting');
 
   const overlay = document.getElementById('game-overlay');
+  const justStarted = lobby.status === 'started' && overlay.classList.contains('hidden');
   overlay.classList.toggle('hidden', lobby.status !== 'started');
+  if (lobby.status === 'started') {
+    const title = document.getElementById('game-title');
+    if (title) title.textContent = lobby.name;
+    // Mount the map on first reveal so we don't pay the cost of
+    // building 36 SVG nodes when the user is still picking seats.
+    if (justStarted || !_mapRenderer) {
+      const host = document.getElementById('game-map');
+      if (host) _mapRenderer = new MapRenderer(host, {
+        onSelect: (site) => {
+          // Stage 2 is read-only; surface the click as a toast for
+          // visible feedback. Stage 3 will wire this to MOVE / PROSPECT.
+          if (_onToast) _onToast(`${site.name} — ${site.blurb}`);
+        },
+      });
+    }
+  } else if (_mapRenderer) {
+    // Game over (or never started). Tear down so a future start gets
+    // a fresh renderer with up-to-date state.
+    document.getElementById('game-map').innerHTML = '';
+    _mapRenderer = null;
+  }
 }
 
 async function onLeaveLobby() {

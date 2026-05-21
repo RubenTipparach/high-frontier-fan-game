@@ -1,0 +1,305 @@
+/* Solar-system map renderer styles. Sized to fill its host element;
+   pan/zoom is implemented in render.js so the SVG itself is "static"
+   from the layout engine's POV. */
+
+.map-host {
+  position: relative;
+  width: 100%;
+  background:
+    radial-gradient(ellipse at center, #0e0c20 0%, #050410 70%, #000 100%);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.map-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  user-select: none;
+}
+.map-svg.dragging { cursor: grabbing; }
+
+.map-svg .stars circle { pointer-events: none; }
+
+.map-svg .edge {
+  stroke: #2a3552;
+  stroke-width: 1;
+  opacity: 0.6;
+  pointer-events: none;
+}
+.map-svg .edge-label {
+  font: 9px ui-monospace, monospace;
+  fill: #5b6688;
+  pointer-events: none;
+}
+
+.map-svg .site {
+  cursor: pointer;
+}
+.map-svg .site:hover circle:first-of-type {
+  stroke: #fde047;
+  stroke-width: 2.5;
+}
+.map-svg .site-label {
+  font: 11px ui-sans-serif, system-ui, sans-serif;
+  font-weight: 500;
+  fill: #cbd5e1;
+  paint-order: stroke;
+  stroke: #050410;
+  stroke-width: 3;
+}
+.map-svg .class-badge {
+  font: 8px ui-monospace, monospace;
+  font-weight: 700;
+  fill: #0c0a16;
+}
+
+.map-tooltip {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  background: rgba(15, 23, 42, 0.96);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  pointer-events: none;
+  min-width: 180px;
+  max-width: 280px;
+  z-index: 5;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+}
+.map-tooltip .t-name {
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 2px;
+}
+.map-tooltip .t-meta {
+  font-size: 11px;
+  color: var(--ink-mute);
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+  text-transform: lowercase;
+}
+.map-tooltip .t-meta span:empty { display: none; }
+.map-tooltip .t-blurb {
+  font-size: 12px;
+  color: var(--ink-dim);
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* ===== Browse view ===== */
+
+.tabbar { display: flex; gap: 4px; }
+.tabbar button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  padding: 6px 12px;
+  color: var(--ink-dim);
+  border-radius: 6px 6px 0 0;
+}
+.tabbar button.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: var(--bg-2);
+}
+
+.browse-panel {
+  margin-top: 12px;
+}
+
+.browse-map-wrap {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 12px;
+  align-items: stretch;
+}
+@media (max-width: 800px) {
+  .browse-map-wrap { grid-template-columns: 1fr; }
+}
+.browse-map {
+  height: 600px;
+  min-height: 480px;
+}
+.browse-map-info {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  overflow-y: auto;
+}
+.browse-map-info h3 {
+  margin: 0 0 4px;
+  color: var(--accent);
+}
+.browse-map-info p {
+  font-size: 13px;
+  margin: 0 0 12px;
+  line-height: 1.4;
+}
+.browse-map-info ul.kv {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.browse-map-info ul.kv li {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: 13px;
+}
+.browse-map-info ul.kv li:last-child { border-bottom: none; }
+.browse-map-info ul.kv span { color: var(--ink-dim); }
+.browse-map-info ul.kv strong { color: var(--ink); }
+
+.patent-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.patent-filter button {
+  font-size: 12px;
+}
+.patent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.patent-card {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--ink-mute);
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 12px;
+}
+.patent-card.type-thruster  { border-left-color: #f87171; }
+.patent-card.type-reactor   { border-left-color: #fbbf24; }
+.patent-card.type-radiator  { border-left-color: #7dd3fc; }
+.patent-card.type-refinery  { border-left-color: #4ade80; }
+.patent-card.type-robonaut  { border-left-color: #c084fc; }
+.patent-card.type-lab       { border-left-color: #38bdf8; }
+.patent-card.type-generator { border-left-color: #a78bfa; }
+
+.patent-card .pc-header {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 6px;
+}
+.patent-card .pc-type {
+  font-size: 9px; letter-spacing: 1.5px; color: var(--ink-mute); text-transform: uppercase;
+}
+.patent-card .pc-name {
+  font-weight: 600; color: var(--ink);
+}
+.patent-card .pc-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 8px;
+  margin: 6px 0;
+}
+.patent-card .pc-stats > div {
+  display: flex; justify-content: space-between;
+  border-bottom: 1px dashed var(--border);
+  padding-bottom: 2px;
+}
+.patent-card .pc-stats span { color: var(--ink-dim); }
+.patent-card .pc-stats strong { color: var(--accent); font-variant-numeric: tabular-nums; }
+.patent-card .pc-blurb {
+  font-size: 11px;
+  color: var(--ink-dim);
+  margin: 6px 0 0;
+  line-height: 1.4;
+  font-style: italic;
+}
+
+.ms-list, .ev-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+.ms-list li, .ev-list li {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.ms-head, .ev-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+.ms-head strong, .ev-head strong { color: var(--ink); }
+.ms-vp {
+  background: var(--accent);
+  color: #062136;
+  font-weight: 700;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.ev-kind {
+  font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--ink-mute);
+}
+.ms-list p, .ev-list p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* ===== Game-overlay map (used when a lobby starts) ===== */
+
+.overlay-shell {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.9);
+}
+.overlay-header h2 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--accent);
+}
+.overlay-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.overlay-main {
+  flex: 1;
+  padding: 12px;
+  display: flex;
+}
+.game-map {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Override the generic centered overlay-card style so the map can
+   fill its container. The Stage 1 placeholder used a centered card;
+   Stage 2 uses a full-bleed shell. */
+.game-overlay {
+  align-items: stretch;
+  justify-content: stretch;
+}
+.game-overlay > .overlay-shell {
+  background: var(--bg);
+}

@@ -17,19 +17,23 @@ affiliated with the publisher.
 Verify each stage before starting the next. Don't conflate stages in a
 single PR.
 
-- **Stage 1 (current): identity + social layer.** Profile sign-in,
-  lobby (create/list/join games), chat, friend search, invite links.
-  The "game" inside the lobby is a stub that just shows "Coming in
-  Stage 2" once a game is started — the point of Stage 1 is to prove
-  out auth, REST, WS, and the multi-device flow end-to-end.
-- **Stage 2: solar system + ship data.** Static `data/sites.js`,
-  `data/patents.js`, SVG renderer for the delta-v map, ship card
-  builder. Still no engine — just the data and the renderer.
-- **Stage 3: core game engine.** Operations phase, MOVE / BURN /
-  PROSPECT / INDUSTRIALIZE / AUCTION / BUILD ops. Authoritative on
-  the server, optimistic-mirror on the client.
-- **Stage 4: full HF4 coverage.** Refineries, Bernal stations,
-  politics deck, glory cards, futures market, end-of-game scoring.
+- **Stage 1 (done):** Identity + social layer. Profiles, lobby
+  (create / list / join), chat, friend search, invite links. Game
+  surface was a placeholder.
+- **Stage 2 (current):** Static data + read-only renderer. The
+  solar-system map (`data/sites.js`), patent deck (`data/patents.js`),
+  milestones (`data/glory.js`), and events (`data/politics.js`); an
+  SVG renderer with pan/zoom; a ship-card composer (validation
+  rules + burn-cost math) ready for Stage 3 to call. A Browse view
+  on the topbar lets anyone inspect the data; the lobby's
+  game-overlay now mounts the map (read-only) when the host starts.
+- **Stage 3:** Server-authoritative engine. Operations phase, MOVE /
+  BURN / PROSPECT / INDUSTRIALIZE / AUCTION / BUILD ops. Validated
+  on the server; optimistic mirror on the client. New tables in
+  `server/db.js` for games, operations, and per-game state.
+- **Stage 4:** Full coverage. Refineries, habitat / Bernal stations,
+  politics resolution, milestone awards, futures market,
+  end-of-game scoring.
 
 If you're adding a feature, mark the stage it belongs to in the
 commit message so the boundaries stay legible.
