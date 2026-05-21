@@ -782,32 +782,51 @@ setInterval(() => {
   }
 }, 30_000).unref();
 
-// ----- Admin dashboard (minimal) -----
+// ----- Admin dashboard -----
+//
+// Public read-only dashboard at /admin: KPIs, profiles, lobbies,
+// recent chat, pending invites, invite links. Mirrors the
+// murdoku-companion admin in shape: a single HTML render with
+// inline styles, no client framework, and one JS-powered admin
+// action (mint a new device code for a profile).
+//
+// The dashboard is intentionally unauthenticated — the operator's
+// only protection is "the URL isn't linked from anywhere users
+// see". Gate behind a reverse-proxy basic auth or an admin secret
+// before exposing to a hostile audience.
 
 app.get('/admin', (_req, res) => {
   const kpi = db
     .prepare(
       `SELECT
-         (SELECT COUNT(*) FROM profiles)                             AS profiles,
-         (SELECT COUNT(*) FROM lobbies WHERE status = 'waiting')     AS lobbies_waiting,
-         (SELECT COUNT(*) FROM lobbies WHERE status = 'started')     AS lobbies_started,
-         (SELECT COUNT(*) FROM chat_messages)                        AS chat_total,
-         (SELECT COUNT(*) FROM direct_invites WHERE status = 'pending') AS invites_pending`
+         (SELECT COUNT(*) FROM profiles)                                AS profiles,
+         (SELECT COUNT(*) FROM tokens)                                  AS tokens,
+         (SELECT COUNT(*) FROM lobbies WHERE status = 'waiting')        AS lobbies_waiting,
+         (SELECT COUNT(*) FROM lobbies WHERE status = 'started')        AS lobbies_started,
+         (SELECT COUNT(*) FROM lobby_members)                           AS seats_taken,
+         (SELECT COUNT(*) FROM chat_messages)                           AS chat_total,
+         (SELECT COUNT(*) FROM direct_invites WHERE status = 'pending') AS invites_pending,
+         (SELECT COUNT(*) FROM invite_links)                            AS links_total`
     )
     .get();
+
   const profiles = db
     .prepare(
-      `SELECT id, name,
-              datetime(created_at / 1000, 'unixepoch')   AS created,
-              datetime(last_seen_at / 1000, 'unixepoch') AS seen
-       FROM profiles
-       ORDER BY last_seen_at DESC
-       LIMIT 50`
+      `SELECT p.id, p.name,
+              datetime(p.created_at   / 1000, 'unixepoch') AS created,
+              datetime(p.last_seen_at / 1000, 'unixepoch') AS seen,
+              (SELECT COUNT(*) FROM tokens t WHERE t.profile_id = p.id) AS devices,
+              (SELECT COUNT(*) FROM lobby_members lm WHERE lm.profile_id = p.id) AS tables,
+              (SELECT COUNT(*) FROM chat_messages cm WHERE cm.profile_id = p.id) AS chats
+       FROM profiles p
+       ORDER BY p.last_seen_at DESC
+       LIMIT 100`
     )
     .all();
+
   const lobbies = db
     .prepare(
-      `SELECT l.id, l.code, l.name, l.status, l.join_policy,
+      `SELECT l.id, l.code, l.name, l.status, l.join_policy, l.max_players,
               datetime(l.created_at / 1000, 'unixepoch') AS created,
               p.name AS host_name,
               (SELECT COUNT(*) FROM lobby_members lm WHERE lm.lobby_id = l.id) AS members
@@ -817,43 +836,280 @@ app.get('/admin', (_req, res) => {
        LIMIT 50`
     )
     .all();
+
+  const chats = db
+    .prepare(
+      `SELECT cm.id, cm.body,
+              datetime(cm.created_at / 1000, 'unixepoch') AS sent,
+              p.name AS profile_name,
+              l.name AS lobby_name, l.code AS lobby_code
+       FROM chat_messages cm
+       JOIN profiles p ON p.id = cm.profile_id
+       LEFT JOIN lobbies l ON l.id = cm.lobby_id
+       ORDER BY cm.created_at DESC
+       LIMIT 30`
+    )
+    .all();
+
+  const invites = db
+    .prepare(
+      `SELECT di.id, di.status,
+              datetime(di.created_at / 1000, 'unixepoch') AS sent,
+              fp.name AS from_name, tp.name AS to_name,
+              l.name AS lobby_name, l.code AS lobby_code
+       FROM direct_invites di
+       JOIN profiles fp ON fp.id = di.from_id
+       JOIN profiles tp ON tp.id = di.to_id
+       JOIN lobbies  l  ON l.id  = di.lobby_id
+       ORDER BY di.created_at DESC
+       LIMIT 30`
+    )
+    .all();
+
+  const links = db
+    .prepare(
+      `SELECT il.code, il.single_use, il.used_count,
+              datetime(il.created_at / 1000, 'unixepoch') AS created,
+              CASE WHEN il.expires_at IS NULL THEN ''
+                   ELSE datetime(il.expires_at / 1000, 'unixepoch') END AS expires,
+              cp.name AS by_name, l.name AS lobby_name, l.code AS lobby_code
+       FROM invite_links il
+       JOIN profiles cp ON cp.id = il.created_by
+       JOIN lobbies  l  ON l.id  = il.lobby_id
+       ORDER BY il.created_at DESC
+       LIMIT 30`
+    )
+    .all();
+
+  const wsCount = wss ? wss.clients.size : 0;
+  const wsAuthed = wss
+    ? Array.from(wss.clients).filter((c) => c._profile).length
+    : 0;
+
+  const profileRows = profiles.map((r) => `
+    <tr>
+      <td>@${esc(r.name)}</td>
+      <td>${esc(r.created)}</td>
+      <td>${esc(r.seen)}</td>
+      <td class="num">${r.devices}</td>
+      <td class="num">${r.tables}</td>
+      <td class="num">${r.chats}</td>
+      <td>
+        <button class="btn-add-token" data-pid="${r.id}" data-pname="${esc(r.name)}">Issue device code</button>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan=7><em>No profiles yet.</em></td></tr>';
+
+  const lobbyRows = lobbies.map((r) => `
+    <tr>
+      <td><code>${esc(r.code)}</code></td>
+      <td>${esc(r.name)}</td>
+      <td>@${esc(r.host_name)}</td>
+      <td><span class="pill pill-${esc(r.status)}">${esc(r.status)}</span></td>
+      <td>${esc(r.join_policy)}</td>
+      <td class="num">${r.members} / ${r.max_players}</td>
+      <td>${esc(r.created)}</td>
+    </tr>
+  `).join('') || '<tr><td colspan=7><em>No lobbies yet.</em></td></tr>';
+
+  const chatRows = chats.map((r) => `
+    <tr>
+      <td>${esc(r.sent)}</td>
+      <td>@${esc(r.profile_name)}</td>
+      <td>${r.lobby_code ? `<code>${esc(r.lobby_code)}</code> ${esc(r.lobby_name)}` : '<em>(deleted)</em>'}</td>
+      <td>${esc(r.body)}</td>
+    </tr>
+  `).join('') || '<tr><td colspan=4><em>No chat messages yet.</em></td></tr>';
+
+  const inviteRows = invites.map((r) => `
+    <tr>
+      <td>${esc(r.sent)}</td>
+      <td><span class="pill pill-${esc(r.status)}">${esc(r.status)}</span></td>
+      <td>@${esc(r.from_name)} → @${esc(r.to_name)}</td>
+      <td><code>${esc(r.lobby_code)}</code> ${esc(r.lobby_name)}</td>
+    </tr>
+  `).join('') || '<tr><td colspan=4><em>No direct invites yet.</em></td></tr>';
+
+  const linkRows = links.map((r) => `
+    <tr>
+      <td><code>${esc(r.code)}</code></td>
+      <td>${esc(r.created)}</td>
+      <td>${esc(r.expires) || '—'}</td>
+      <td>${r.single_use ? 'single-use' : 'unlimited'}</td>
+      <td class="num">${r.used_count}</td>
+      <td>@${esc(r.by_name)}</td>
+      <td><code>${esc(r.lobby_code)}</code> ${esc(r.lobby_name)}</td>
+    </tr>
+  `).join('') || '<tr><td colspan=7><em>No invite links yet.</em></td></tr>';
+
   res.set('content-type', 'text/html; charset=utf-8');
   res.send(`<!doctype html>
-<html><head><meta charset="utf-8"><title>HF admin</title>
+<html><head><meta charset="utf-8"><title>High Frontier admin</title>
 <style>
-  body{font:14px ui-sans-serif,system-ui,sans-serif;background:#0c0a16;color:#ece8ff;margin:0;padding:24px;max-width:1100px}
-  h1{margin:0 0 8px;color:#7dd3fc}
-  h2{margin:28px 0 8px;font-size:14px;color:#38bdf8;letter-spacing:1px;text-transform:uppercase}
-  table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
-  td,th{border-bottom:1px solid #1e293b;padding:6px 10px;text-align:left;vertical-align:top}
-  th{color:#38bdf8;font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:1px}
-  .num{text-align:right}
-  .kpis{display:flex;gap:14px;margin:12px 0;flex-wrap:wrap}
-  .kpi{background:#0f172a;border:1px solid #1e293b;padding:10px 14px;border-radius:8px;min-width:90px}
-  .kpi strong{font-size:18px;color:#7dd3fc;display:block}
-  .kpi span{font-size:12px;color:#64748b}
-  code{background:#0f172a;padding:1px 6px;border-radius:4px;font-size:12px}
+  :root { color-scheme: dark; }
+  body{font:14px ui-sans-serif,system-ui,-apple-system,sans-serif;background:#07060f;color:#e6e9ff;margin:0;padding:24px;max-width:1200px}
+  h1{margin:0 0 4px;color:#7dd3fc;font-size:22px}
+  .sub{color:#5a5f80;font-size:12px;text-transform:uppercase;letter-spacing:2px;margin-bottom:18px}
+  h2{margin:28px 0 8px;font-size:13px;color:#38bdf8;letter-spacing:1.5px;text-transform:uppercase}
+  table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;background:#0c0a16;border:1px solid #1e293b;border-radius:8px;overflow:hidden}
+  td,th{border-bottom:1px solid #1e293b;padding:8px 12px;text-align:left;vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  th{color:#38bdf8;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:1px;background:#0f172a}
+  .num{text-align:right;font-variant-numeric:tabular-nums}
+  .kpis{display:flex;gap:10px;margin:12px 0 24px;flex-wrap:wrap}
+  .kpi{background:#0c0a16;border:1px solid #1e293b;padding:12px 16px;border-radius:8px;min-width:110px}
+  .kpi strong{font-size:22px;color:#7dd3fc;display:block;font-weight:600}
+  .kpi span{font-size:11px;color:#5a5f80;text-transform:uppercase;letter-spacing:1px;margin-top:2px;display:block}
+  code{background:#0f172a;padding:1px 6px;border-radius:4px;font-size:12px;color:#7dd3fc}
+  em{color:#5a5f80;font-style:normal}
+  .pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600}
+  .pill-waiting{background:#1e293b;color:#7dd3fc}
+  .pill-started{background:#14532d;color:#86efac}
+  .pill-finished{background:#451a03;color:#fdba74}
+  .pill-pending{background:#1e293b;color:#fbbf24}
+  .pill-accepted{background:#14532d;color:#86efac}
+  .pill-declined{background:#450a0a;color:#fda4af}
+  button{font:inherit;background:#1a1830;color:#e6e9ff;border:1px solid #2a2740;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:12px}
+  button:hover{background:#25223e;border-color:#3a3760}
+  button:disabled{opacity:0.5;cursor:not-allowed}
+  input[type=text]{background:#07060f;color:#e6e9ff;border:1px solid #2a2740;border-radius:4px;padding:4px 8px;font:inherit}
+  .ws-info{display:inline-block;background:#0c0a16;border:1px solid #1e293b;padding:8px 14px;border-radius:6px;margin-left:auto;font-size:12px;color:#8b90b8}
+  .ws-info strong{color:#4ade80;font-weight:600}
+  .header-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
 </style></head>
 <body>
-  <h1>High Frontier admin</h1>
+  <div class="header-row">
+    <div>
+      <h1>High Frontier admin</h1>
+      <div class="sub">stage 2 · ${esc(new Date().toISOString())}</div>
+    </div>
+    <div class="ws-info">
+      <strong>${wsCount}</strong> open sockets · <strong>${wsAuthed}</strong> authed
+    </div>
+  </div>
+
   <div class="kpis">
     <div class="kpi"><strong>${kpi.profiles}</strong><span>profiles</span></div>
-    <div class="kpi"><strong>${kpi.lobbies_waiting}</strong><span>lobbies waiting</span></div>
-    <div class="kpi"><strong>${kpi.lobbies_started}</strong><span>games started</span></div>
-    <div class="kpi"><strong>${kpi.chat_total}</strong><span>chat messages</span></div>
-    <div class="kpi"><strong>${kpi.invites_pending}</strong><span>invites pending</span></div>
+    <div class="kpi"><strong>${kpi.tokens}</strong><span>devices</span></div>
+    <div class="kpi"><strong>${kpi.lobbies_waiting}</strong><span>waiting</span></div>
+    <div class="kpi"><strong>${kpi.lobbies_started}</strong><span>in progress</span></div>
+    <div class="kpi"><strong>${kpi.seats_taken}</strong><span>seats</span></div>
+    <div class="kpi"><strong>${kpi.chat_total}</strong><span>chat lines</span></div>
+    <div class="kpi"><strong>${kpi.invites_pending}</strong><span>pending invites</span></div>
+    <div class="kpi"><strong>${kpi.links_total}</strong><span>invite links</span></div>
   </div>
-  <h2>Profiles</h2>
+
+  <h2>Profiles &amp; devices</h2>
   <table>
-    <thead><tr><th>Name</th><th>Created</th><th>Last seen</th></tr></thead>
-    <tbody>${profiles.map((r) => `<tr><td>@${esc(r.name)}</td><td>${esc(r.created)}</td><td>${esc(r.seen)}</td></tr>`).join('') || '<tr><td colspan=3>None</td></tr>'}</tbody>
+    <thead><tr>
+      <th>Name</th><th>Created</th><th>Last seen</th>
+      <th class="num">Devices</th><th class="num">Tables</th><th class="num">Chats</th>
+      <th>Recovery</th>
+    </tr></thead>
+    <tbody>${profileRows}</tbody>
   </table>
+
   <h2>Lobbies</h2>
   <table>
-    <thead><tr><th>Code</th><th>Name</th><th>Host</th><th>Policy</th><th>Status</th><th class="num">Members</th><th>Created</th></tr></thead>
-    <tbody>${lobbies.map((r) => `<tr><td><code>${esc(r.code)}</code></td><td>${esc(r.name)}</td><td>@${esc(r.host_name)}</td><td>${esc(r.join_policy)}</td><td>${esc(r.status)}</td><td class="num">${r.members}</td><td>${esc(r.created)}</td></tr>`).join('') || '<tr><td colspan=7>None</td></tr>'}</tbody>
+    <thead><tr>
+      <th>Code</th><th>Name</th><th>Host</th>
+      <th>Status</th><th>Policy</th><th class="num">Players</th><th>Created</th>
+    </tr></thead>
+    <tbody>${lobbyRows}</tbody>
   </table>
+
+  <h2>Recent chat</h2>
+  <table>
+    <thead><tr>
+      <th>When</th><th>Who</th><th>Lobby</th><th>Body</th>
+    </tr></thead>
+    <tbody>${chatRows}</tbody>
+  </table>
+
+  <h2>Direct invites</h2>
+  <table>
+    <thead><tr>
+      <th>Sent</th><th>Status</th><th>From → To</th><th>Lobby</th>
+    </tr></thead>
+    <tbody>${inviteRows}</tbody>
+  </table>
+
+  <h2>Invite links</h2>
+  <table>
+    <thead><tr>
+      <th>Code</th><th>Created</th><th>Expires</th><th>Mode</th>
+      <th class="num">Uses</th><th>Created by</th><th>Lobby</th>
+    </tr></thead>
+    <tbody>${linkRows}</tbody>
+  </table>
+
+<script>
+// "Issue device code" — mints a fresh recovery code for the
+// profile and replaces the button cell with the one-shot code so
+// the operator can copy + send it out-of-band.
+document.addEventListener('click', function (ev) {
+  var btn = ev.target.closest('.btn-add-token');
+  if (!btn) return;
+  var pid = btn.getAttribute('data-pid');
+  var pname = btn.getAttribute('data-pname');
+  if (!confirm('Issue a new device code for @' + pname + '?\\n\\nThis lets the user sign in on another device. Their existing devices stay signed in.')) return;
+  btn.disabled = true;
+  btn.textContent = 'Working...';
+  fetch('/admin/profiles/' + pid + '/add-token', { method: 'POST' })
+    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+    .then(function (res) {
+      if (!res.ok) {
+        btn.disabled = false;
+        btn.textContent = 'Issue device code';
+        alert('Failed: ' + (res.body && res.body.error || 'unknown'));
+        return;
+      }
+      var cell = btn.parentElement;
+      cell.innerHTML = '';
+      var input = document.createElement('input');
+      input.type = 'text';
+      input.readOnly = true;
+      input.value = res.body.token;
+      input.style.cssText = 'width:120px;font-family:ui-monospace,monospace;font-size:13px;letter-spacing:2px;text-align:center';
+      var copy = document.createElement('button');
+      copy.textContent = 'Copy';
+      copy.style.marginLeft = '4px';
+      copy.addEventListener('click', function () {
+        input.select();
+        if (navigator.clipboard) navigator.clipboard.writeText(input.value);
+        else document.execCommand('copy');
+        copy.textContent = 'Copied';
+      });
+      cell.appendChild(input);
+      cell.appendChild(copy);
+    })
+    .catch(function () {
+      btn.disabled = false;
+      btn.textContent = 'Issue device code';
+      alert('Network error.');
+    });
+});
+</script>
 </body></html>`);
+});
+
+// Mint a fresh device code for a profile and ADD it to the tokens
+// table. The user's existing devices keep working; this just adds
+// another credential. Returns the plaintext once — only chance to
+// see it before it's hashed for storage.
+//
+// Anonymous endpoint to match the open-dashboard posture. Gate
+// behind an admin secret before deploying anywhere that matters.
+app.post('/admin/profiles/:id/add-token', (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  const row = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(id);
+  if (!row) return res.status(404).json({ error: 'not_found' });
+  const token = generateShortCode();
+  db.prepare(
+    'INSERT INTO tokens (profile_id, token_hash, created_at) VALUES (?, ?, ?)'
+  ).run(id, hashToken(token), nowMs());
+  res.json({ ok: true, name: row.name, token });
 });
 
 function esc(s) {
