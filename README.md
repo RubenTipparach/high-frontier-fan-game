@@ -4,7 +4,7 @@ A fan implementation of **High Frontier 4: All** — the rocket-physics solar
 system board game by Phil Eklund (Sierra Madre Games). Educational /
 non-commercial.
 
-Play the latest commit at `https://<owner>.github.io/high-frontier-fan-game/`.
+Play the latest commit at `[https://<owner>.github.io/high-frontier-fan-game/](https://rubentipparach.github.io/high-frontier-fan-game/)`.
 Every push to every branch redeploys, so the most recent commit on any
 branch is what's live.
 
