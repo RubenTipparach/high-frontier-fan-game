@@ -7,7 +7,7 @@
 // Pan/zoom is implemented with a manual transform (no external libs).
 // Hover surfaces a tooltip; click fires onSelect with the site id.
 
-import { SITES, EDGES, SITES_BY_ID } from '../../data/sites.js';
+import { SITES, EDGES, SITES_BY_ID, SOLAR_ZONES } from '../../data/sites.js';
 
 const VIEW_W = 1400;
 const VIEW_H = 900;
@@ -72,6 +72,7 @@ export class MapRenderer {
     // it instead of mutating every child keeps interaction cheap.
     this.viewport = el('g', { class: 'viewport' }, this.svg);
 
+    this._renderZoneBands();
     this._renderEdges();
     this._renderSites();
 
@@ -96,6 +97,29 @@ export class MapRenderer {
         fill: rand() < 0.1 ? '#7dd3fc' : '#cbd5e1',
         opacity: rand() * 0.6 + 0.2,
       }, g);
+    }
+  }
+
+  // Faint horizontal bands behind each solar zone, with the zone name
+  // pinned to the left margin. Makes the layered-tree structure
+  // visually obvious: Mercury runs across the top, Neptune the bottom,
+  // and the eye reads a body's delta-v at a glance from how far right
+  // it is on its lane.
+  _renderZoneBands() {
+    const g = el('g', { class: 'zone-bands' }, this.viewport);
+    const bandH = 90; // matches the generator's (SVG_H - margins) / 9
+    const startY = 60;
+    for (let i = 0; i < SOLAR_ZONES.length; i++) {
+      const y = startY + bandH * i;
+      el('rect', {
+        x: 0, y, width: 1400, height: bandH,
+        class: 'zone-band',
+        'data-zone': SOLAR_ZONES[i],
+      }, g);
+      el('text', {
+        x: 14, y: y + bandH / 2 + 4,
+        class: 'zone-label',
+      }, g).textContent = SOLAR_ZONES[i];
     }
   }
 

@@ -23,6 +23,29 @@
 
 .map-svg .stars circle { pointer-events: none; }
 
+/* Layered-tree zone bands. Even-indexed bands get a slightly lighter
+   fill so the eye can track adjacent zones; the right edge stays open
+   so the chart doesn't look boxed-in. */
+.map-svg .zone-band {
+  fill: #0c0d1f;
+  opacity: 0.32;
+  pointer-events: none;
+}
+.map-svg .zone-band[data-zone="Venus"],
+.map-svg .zone-band[data-zone="Mars"],
+.map-svg .zone-band[data-zone="Jupiter"],
+.map-svg .zone-band[data-zone="Uranus"] {
+  fill: #11142a;
+  opacity: 0.42;
+}
+.map-svg .zone-label {
+  font: 600 11px ui-sans-serif, system-ui, sans-serif;
+  fill: #5b6688;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
 .map-svg .edge {
   stroke: #2a3552;
   stroke-width: 1;
