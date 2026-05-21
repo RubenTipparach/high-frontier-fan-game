@@ -1,0 +1,49 @@
+# Fly.io app config for the High Frontier companion API.
+#
+# Deploys via .github/workflows/deploy.yml using the FLY_API_TOKEN repo
+# secret. Bootstrap on a fresh app (run once locally with flyctl):
+#
+#   fly apps create highfrontier-api
+#   fly volumes create hf_data --size 1 --region ams
+#
+# No app secrets to configure: the server is passwordless and tokens
+# are stored as plain sha256 hashes. Subsequent deploys are automatic
+# on every push to the repo.
+
+app = "highfrontier-api"
+primary_region = "ams"
+
+[build]
+
+[env]
+  PORT = "8080"
+  DATABASE_PATH = "/data/hf.db"
+
+[[mounts]]
+  source = "hf_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 100
+    hard_limit = 200
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256

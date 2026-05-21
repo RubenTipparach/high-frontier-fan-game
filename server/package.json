@@ -1,0 +1,20 @@
+{
+  "name": "highfrontier-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "High Frontier fan game companion API. Stage 1: profiles, lobbies, chat, invites.",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

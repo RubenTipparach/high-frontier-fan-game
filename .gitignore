@@ -1,0 +1,9 @@
+node_modules/
+*.log
+.DS_Store
+*.local
+# Local sqlite databases used during server development.
+server/*.db
+server/*.db-shm
+server/*.db-wal
+.env
