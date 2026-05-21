@@ -51,6 +51,46 @@ for local dev.
 See `CLAUDE.md` for the canonical architecture notes and rule-coverage
 scope.
 
+## One-time setup (repo owner)
+
+The `.github/workflows/deploy.yml` workflow needs two one-time
+prerequisites before it will deploy cleanly. Until you do these, the
+first push will show the build job green but the two deploy jobs
+will fail / skip.
+
+### 1. GitHub Pages — allow every branch to deploy
+
+By default the `github-pages` environment only allows the default
+branch (`main`) to deploy. This project's promise is that every
+branch deploys, so loosen the restriction:
+
+1. Repo → **Settings** → **Pages** → set **Source** to *GitHub Actions*.
+2. Repo → **Settings** → **Environments** → `github-pages` → **Deployment branches and tags**.
+3. Change from *Protected branches only* to *All branches*, or add a
+   pattern like `**` that matches any branch.
+4. Re-run the workflow on the most recent commit; the `deploy` job
+   will now succeed and you'll have the live URL in the run summary.
+
+### 2. Fly.io — bootstrap the API app + token
+
+The `deploy-api` job is a no-op (success, with a notice) until
+`FLY_API_TOKEN` is set. To wire it up:
+
+```sh
+# Locally, with flyctl installed and authenticated:
+fly apps create highfrontier-api
+fly volumes create hf_data --size 1 --region ams
+fly tokens create deploy -a highfrontier-api  # paste this value into the repo secret
+```
+
+Then add the token as `FLY_API_TOKEN` under repo →
+**Settings** → **Secrets and variables** → **Actions** → **New
+repository secret**. Subsequent pushes will deploy the API.
+
+The frontend points at `https://highfrontier-api.fly.dev` via the
+`<meta name="hf-api-base">` tag in `index.html`. If your Fly app
+lives at a different hostname, edit that meta value.
+
 ## Credits
 
 High Frontier is © Phil Eklund / Sierra Madre Games. This repository is

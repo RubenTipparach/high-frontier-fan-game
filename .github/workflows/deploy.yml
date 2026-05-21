@@ -63,10 +63,12 @@ jobs:
   # Companion API deploy. Runs in parallel with the Pages deploy and
   # only fires on the canonical repo so forks without Fly access fall
   # through cleanly. The Fly app, volume, and secrets must exist before
-  # the first run; see server/README.md for the one-time bootstrap.
+  # the first run; see README.md "One-time setup" for the bootstrap.
+  #
+  # Case-insensitive repo gate so a clone under either casing works.
   deploy-api:
     runs-on: ubuntu-latest
-    if: ${{ github.repository == 'rubentipparach/high-frontier-fan-game' }}
+    if: ${{ contains(fromJSON('["rubentipparach/high-frontier-fan-game", "RubenTipparach/high-frontier-fan-game"]'), github.repository) }}
     concurrency:
       group: fly-api
       cancel-in-progress: false
@@ -74,17 +76,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up flyctl
-        uses: superfly/flyctl-actions/setup-flyctl@master
-
-      - name: Confirm Fly auth and app exist
+      # First-push gate. If FLY_API_TOKEN isn't set, surface a friendly
+      # notice and skip remaining steps with success — pre-bootstrap is
+      # an expected state, not a failure. The user has to create the
+      # Fly app + volume + token before this job can actually deploy;
+      # see README.md "One-time setup".
+      - name: Check for FLY_API_TOKEN
+        id: fly_gate
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
           if [ -z "${FLY_API_TOKEN}" ]; then
-            echo "::error::FLY_API_TOKEN repo secret is empty or missing."
-            exit 1
+            echo "::notice::FLY_API_TOKEN not configured. Skipping API deploy. See README.md 'One-time setup' to enable."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Set up flyctl
+        if: steps.fly_gate.outputs.configured == 'true'
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Confirm Fly auth and app exist
+        if: steps.fly_gate.outputs.configured == 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
           flyctl version
           flyctl auth whoami
           flyctl status -a highfrontier-api
@@ -94,6 +111,7 @@ jobs:
       # machines before deploy. Both steps are idempotent: no-op if
       # already in the desired state.
       - name: Ensure volume + single machine
+        if: steps.fly_gate.outputs.configured == 'true'
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           APP: highfrontier-api
@@ -128,6 +146,7 @@ jobs:
           flyctl machine list -a "$APP"
 
       - name: Deploy API to Fly.io
+        if: steps.fly_gate.outputs.configured == 'true'
         working-directory: server
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
