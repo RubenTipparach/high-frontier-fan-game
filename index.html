@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>High Frontier — fan game</title>
+    <link rel="stylesheet" href="./css/style.css?v=1" />
+    <!--
+      API base URL for the High Frontier companion server. Empty string
+      = local-only mode (no profile, no lobby, no multiplayer). The
+      deploy.yml workflow leaves this hard-coded so the site stays
+      buildless; flip the value per environment by editing this tag.
+    -->
+    <meta name="hf-api-base" content="https://highfrontier-api.fly.dev" />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230c0a16'/%3E%3Ccircle cx='8' cy='8' r='3' fill='%23fbbf24'/%3E%3Ccircle cx='13' cy='4' r='1' fill='%237dd3fc'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">☉</span>
+        <h1>High Frontier</h1>
+        <span class="brand-sub">fan game · stage 1</span>
+      </div>
+      <div class="topbar-actions">
+        <span id="server-status" class="server-status" title="API connectivity">…</span>
+        <div id="profile-pill" class="profile-pill hidden">
+          <span id="profile-name"></span>
+          <button id="btn-account" title="Account menu">▾</button>
+        </div>
+        <button id="btn-signin" class="primary hidden">Sign in</button>
+      </div>
+    </header>
+
+    <main id="main">
+      <!--
+        ===== Sign-in panel =====
+        Shown when no active profile exists. The form mirrors the
+        murdoku flow: pick a name + (optionally) paste an existing
+        device code to claim across devices.
+      -->
+      <section id="view-signin" class="view hidden">
+        <div class="card narrow">
+          <h2>Sign in</h2>
+          <p class="muted">
+            Pick a name (3–20 chars, letters / numbers / _ / -). The first
+            person to claim a name owns it. To sign in on a second
+            device, paste the 8-character device code from the original
+            device.
+          </p>
+          <form id="form-signin" autocomplete="off">
+            <label>
+              <span>Profile name</span>
+              <input id="signin-name" type="text" minlength="3" maxlength="20"
+                pattern="[A-Za-z0-9_\-]{3,20}" required autocapitalize="off"
+                spellcheck="false" placeholder="orbitalengineer42" />
+            </label>
+            <label>
+              <span>Device code <em class="muted">(optional, paste from another device)</em></span>
+              <input id="signin-code" type="text" maxlength="8"
+                autocapitalize="off" spellcheck="false"
+                placeholder="leave blank for a new profile" />
+            </label>
+            <div class="form-row">
+              <button type="submit" class="primary">Claim profile</button>
+              <span id="signin-error" class="error"></span>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!--
+        ===== Lobby list =====
+        Default view once signed in. Shows public open lobbies, the
+        user's pending direct invites, and a "Create new" / "Paste
+        invite link" affordance.
+      -->
+      <section id="view-lobby-list" class="view hidden">
+        <div class="row">
+          <div class="card grow">
+            <div class="card-header">
+              <h2>Open tables</h2>
+              <div>
+                <button id="btn-refresh-lobbies" title="Refresh the open-table list">⟳</button>
+                <button id="btn-create-lobby" class="primary">+ New table</button>
+              </div>
+            </div>
+            <ul id="lobby-list" class="lobby-list">
+              <li class="empty">Loading…</li>
+            </ul>
+          </div>
+          <div class="card side">
+            <h2>Pending invites</h2>
+            <ul id="invite-list" class="invite-list">
+              <li class="empty">No pending invites.</li>
+            </ul>
+            <h2>Join by link</h2>
+            <form id="form-claim-link" class="claim-link">
+              <input id="claim-link-code" type="text" maxlength="12"
+                placeholder="invite code" autocapitalize="off" spellcheck="false" />
+              <button type="submit">Join</button>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!--
+        ===== Create lobby modal =====
+      -->
+      <section id="view-create-lobby" class="view hidden">
+        <div class="card narrow">
+          <h2>Create a table</h2>
+          <form id="form-create-lobby">
+            <label>
+              <span>Table name</span>
+              <input id="create-name" type="text" maxlength="60" required
+                placeholder="Friday night Mars run" />
+            </label>
+            <label>
+              <span>Max players</span>
+              <select id="create-max">
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5" selected>5</option>
+              </select>
+            </label>
+            <fieldset class="radio-row">
+              <legend>Visibility</legend>
+              <label><input type="radio" name="policy" value="open" checked /> Open — anyone can join from the lobby list</label>
+              <label><input type="radio" name="policy" value="invite-only" /> Invite-only — invisible, join by invite</label>
+            </fieldset>
+            <div class="form-row">
+              <button type="button" id="create-cancel">Cancel</button>
+              <button type="submit" class="primary">Create</button>
+              <span id="create-error" class="error"></span>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!--
+        ===== Lobby detail =====
+        Shown once a lobby is joined. Three panels:
+        - Roster + ready / start buttons (host sees Start)
+        - Chat
+        - Invite tools (direct invite + invite-link generator)
+      -->
+      <section id="view-lobby" class="view hidden">
+        <div class="lobby-grid">
+          <div class="card">
+            <div class="card-header">
+              <h2 id="lobby-name">Lobby</h2>
+              <div>
+                <span id="lobby-code-pill" class="code-pill"></span>
+                <button id="btn-leave-lobby" class="danger">Leave</button>
+              </div>
+            </div>
+            <p id="lobby-meta" class="muted"></p>
+            <h3>Players</h3>
+            <ul id="lobby-roster" class="roster"></ul>
+            <div class="form-row">
+              <button id="btn-ready">Mark ready</button>
+              <button id="btn-start" class="primary hidden">Start game</button>
+            </div>
+            <p id="lobby-start-error" class="error"></p>
+          </div>
+
+          <div class="card">
+            <h2>Chat</h2>
+            <ul id="chat-list" class="chat-list"></ul>
+            <form id="form-chat" class="chat-form">
+              <input id="chat-input" type="text" maxlength="500"
+                placeholder="Say something…" autocomplete="off" />
+              <button type="submit">Send</button>
+            </form>
+          </div>
+
+          <div class="card">
+            <h2>Invite players</h2>
+            <h3>By name</h3>
+            <div class="invite-search">
+              <input id="invite-search-input" type="text" maxlength="20"
+                placeholder="@name" autocapitalize="off" spellcheck="false" />
+              <ul id="invite-search-results" class="search-results"></ul>
+            </div>
+            <h3>By link</h3>
+            <div class="invite-link-controls">
+              <label class="checkbox">
+                <input type="checkbox" id="link-single-use" />
+                Single use
+              </label>
+              <button id="btn-make-link">Generate link</button>
+            </div>
+            <div id="invite-link-result" class="invite-link-result hidden">
+              <input id="invite-link-url" type="text" readonly />
+              <button id="btn-copy-link">Copy</button>
+            </div>
+          </div>
+        </div>
+
+        <!--
+          When the host hits Start, lobby.status flips to 'started'
+          and this overlay covers the lobby with a "game would start
+          here" placeholder. Stage 2 will replace this with the actual
+          solar-system board.
+        -->
+        <div id="game-overlay" class="game-overlay hidden">
+          <div class="overlay-card">
+            <h2>Game would start here</h2>
+            <p class="muted">
+              Stage 1 ships the social layer only. The High Frontier
+              solar system map, ship builder, and engine arrive in
+              Stage 2+ — see <code>CLAUDE.md</code> for the staged plan.
+            </p>
+            <button id="btn-back-to-lobby">Back to lobby panel</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!--
+      Account / device-code popover. Slides in from the profile pill.
+    -->
+    <div id="account-menu" class="popover hidden">
+      <h3>@<span id="account-name"></span></h3>
+      <button id="btn-add-device">Add another device…</button>
+      <div id="device-code-box" class="device-code-box hidden">
+        <p class="muted">Paste this on the new device's sign-in screen:</p>
+        <input id="device-code-value" type="text" readonly />
+        <button id="btn-copy-device-code">Copy</button>
+      </div>
+      <button id="btn-signout" class="danger">Sign out</button>
+    </div>
+
+    <!--
+      Toast container for transient messages (invite received, joined,
+      error, etc). Toasts are spawned by js/main.js#toast(text, kind).
+    -->
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+
+    <script type="module" src="./js/main.js?v=1"></script>
+  </body>
+</html>
