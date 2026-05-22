@@ -42,6 +42,32 @@ const CLASS_FILL = {
   A: '#4ade80', B: '#7dd3fc', C: '#fbbf24', D: '#f87171', S: '#a78bfa', '': '#475569',
 };
 
+// Cubic Bézier with horizontal control-point handles. Same shape as
+// a Sankey ribbon: the edge leaves the source horizontally, swings
+// through a midpoint at the same Y as either end, then arrives at
+// the target horizontally. Looks tidy at any zoom and keeps the
+// "metro line" aesthetic without needing an external library.
+function curvePath(a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  // Same-zone (small dy) edges stay nearly straight; cross-zone
+  // edges (big dy) get a bigger horizontal anchor so the bend is
+  // gentle rather than a sharp dogleg.
+  const handle = Math.max(20, Math.min(160, Math.abs(dx) * 0.5 + Math.abs(dy) * 0.2));
+  const cx1 = a.x + handle;
+  const cy1 = a.y;
+  const cx2 = b.x - handle;
+  const cy2 = b.y;
+  return `M ${a.x.toFixed(1)} ${a.y.toFixed(1)} ` +
+         `C ${cx1.toFixed(1)} ${cy1.toFixed(1)}, ` +
+         `${cx2.toFixed(1)} ${cy2.toFixed(1)}, ` +
+         `${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
+}
+
+function zoneSlug(zone) {
+  return (zone || 'unknown').toLowerCase();
+}
+
 export class MapRenderer {
   constructor(host, { onSelect } = {}) {
     this.host = host;
@@ -129,18 +155,28 @@ export class MapRenderer {
       const sa = SITES_BY_ID[a];
       const sb = SITES_BY_ID[b];
       if (!sa || !sb) continue;
-      const line = el('line', {
-        x1: sa.x, y1: sa.y, x2: sb.x, y2: sb.y,
-        class: 'edge',
+      // Metro-map-ish S-curve: horizontally anchored cubic Bézier
+      // so adjacent edges curve into each other instead of crossing
+      // at sharp angles. Control points sit on the source/target's
+      // horizontal axis at half the horizontal distance, which makes
+      // long inter-zone edges arc out and short same-zone edges
+      // stay nearly straight.
+      const d = curvePath(sa, sb);
+      // Colour by the source zone so the eye can trace a single
+      // "line" (Mars routes, Belt routes, etc.) across the chart.
+      const zoneClass = zoneSlug(sa.solarZone);
+      const path = el('path', {
+        d,
+        class: 'edge zone-' + zoneClass,
         'data-dv': dv,
       }, g);
-      line.dataset.from = a;
-      line.dataset.to = b;
-      // Mid-edge dv label, faint by default.
+      path.dataset.from = a;
+      path.dataset.to = b;
+      // dv label at the midpoint of the curve, hidden until zoom.
       const mx = (sa.x + sb.x) / 2;
       const my = (sa.y + sb.y) / 2;
       el('text', {
-        x: mx, y: my, class: 'edge-label', 'text-anchor': 'middle',
+        x: mx, y: my - 4, class: 'edge-label', 'text-anchor': 'middle',
       }, g).textContent = dv;
     }
   }
