@@ -282,13 +282,61 @@
    immediate. White text on the saturated tint reads well; the
    card-face[data-face="primary"] rule below restores dark text
    on the lighter backgrounds for the primary face. */
-.card-requires .req[data-supplier="reactor"]   { background: #a78bfa; color: #1c0f3a; border-color: #6d4ce0; }
-.card-requires .req[data-supplier="radiator"]  { background: #7dd3fc; color: #0a2c43; border-color: #0ea5e9; }
-.card-requires .req[data-supplier="refinery"]  { background: #94a3b8; color: #0f172a; border-color: #475569; }
-.card-requires .req[data-supplier="robonaut"]  { background: #f9a8d4; color: #500724; border-color: #db2777; }
-.card-requires .req[data-supplier="generator"] { background: #f97316; color: #2e0f02; border-color: #c2410c; }
-.card-requires .req[data-supplier]             { font-weight: 600; }
-.card-requires .req[data-supplier] b           { color: inherit; opacity: 0.85; }
+/* Bolder outline ring + matching corner pip so each chip
+   announces its supplier card at a glance. The 2px ring is the
+   primary tell; the saturated background is secondary. A small
+   coloured square in the chip's upper-right corner reinforces
+   the supplier colour even when the chip is small. */
+.card-requires .req[data-supplier] {
+  font-weight: 700;
+  border-width: 2px;
+  position: relative;
+  padding-right: 12px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+.card-requires .req[data-supplier]::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.55;
+}
+.card-requires .req[data-supplier] b { color: inherit; opacity: 0.85; }
+
+.card-requires .req[data-supplier="reactor"]   { background: #a78bfa; color: #1c0f3a; border-color: #4c1d95; }
+.card-requires .req[data-supplier="radiator"]  { background: #7dd3fc; color: #0a2c43; border-color: #075985; }
+.card-requires .req[data-supplier="refinery"]  { background: #94a3b8; color: #0f172a; border-color: #334155; }
+.card-requires .req[data-supplier="robonaut"]  { background: #f9a8d4; color: #500724; border-color: #be185d; }
+.card-requires .req[data-supplier="generator"] { background: #f97316; color: #2e0f02; border-color: #9a3412; }
+
+/* Card-properties row: small badges for per-face capabilities
+   (Push, Solar, Air-Eater, ISRU, Afterburn, Bonus Pivots,
+   Missile, Raygun, Buggy). Distinct from the supports box —
+   subtler styling so they don't get confused with chips. */
+.card-properties {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 2px 0;
+}
+.card-properties:empty { display: none; }
+.card-prop {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  padding: 1px 4px;
+  border: 1px dashed var(--border);
+  border-radius: 3px;
+  background: rgba(15, 23, 42, 0.32);
+  color: var(--ink-dim);
+}
+.card-prop em { font-style: normal; font-size: 12px; line-height: 1; }
+.card-prop b { font-weight: 700; font-size: 10px; }
 
 .card-name {
   font-weight: 600;

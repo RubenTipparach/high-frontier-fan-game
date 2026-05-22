@@ -54,6 +54,39 @@ implementation right now:
 Other variants (campaign, scenarios) are explicitly out of scope
 for now. Don't pull them in without a discussion first.
 
+## Card data — single source of truth
+
+**Card data MUST come from the spreadsheet.** The authoritative
+source is `reference/HF4-card-data.xlsx` (kept in sync with the
+shared Google Sheet). The importer
+`scripts/extract-card-data.py` emits `data/card-data.json`
+(for human audit) and `data/card-data.js` (for the browser).
+`data/patents.js` consumes only the `.js` bridge — do not
+hand-author patent records in `patents.js` and do not embed
+literal stat tables in any other file.
+
+If a card concept (a new column, a new card type, a balance
+tweak) doesn't appear in the spreadsheet, it doesn't exist yet
+— either edit the spreadsheet and re-run the importer, or push
+back on the request. Don't paper over missing sheet data with
+ad-hoc constants in JS.
+
+Two structural rules that fall out of the sheet:
+- **Labs and "modifier" cards aren't HF4 cards.** The
+  spreadsheet has no Labs or Modifiers tab. Lab effects live
+  as abilities on the parent card; modifier-style upgrades are
+  the Tier-2 (dark-side) face of an existing card.
+- **The "dark side" is a real second technology.** Every
+  card-row in the spreadsheet is followed by a second row
+  carrying a different name + different stats — that's the
+  Tier-2 tech the same physical card flips to. Render both
+  faces; don't treat the back as a re-skin of the front.
+- **"Support Requirements" banner only.** Only the columns
+  under that banner (the reactor/generator-type matrix) are
+  stack supports. Other booleans like Push / Solar / Air Eater
+  / ISRU describe what a card IS / DOES — render them as
+  card-property badges, never as supports.
+
 ## Card model
 
 Every card on the map / in a hand carries the same minimum set of

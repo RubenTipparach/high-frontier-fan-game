@@ -36,7 +36,6 @@ export const REQUIREMENT_KINDS = [
   'gen-electric',           // e electric / photovoltaic
   // operational supports:
   'beam-receiver',          // ☀ solar / beam-pushed
-  'isru-rig',               // 🛢 in-situ propellant intake
   'aerobrake-shroud',       // 🪂 atmospheric entry (Air Eater)
   // role / hardware supports (legacy hand-written cards used
   // these — kept so old data still loads cleanly):
@@ -62,22 +61,42 @@ const SHEET_TO_TYPE = {
 };
 const SHEETS_NOT_PATENTS = new Set(['Bernals', 'Colonists', 'Freighters']);
 
-// Boolean columns on every face-row whose presence translates to
-// a single requirement-kind. Multiple keys can map to the same
-// kind (the spreadsheet uses several columns for the same idea
-// across different sheets).
+// Columns under the spreadsheet's "Support Requirements" banner —
+// the ONLY columns that translate into stack-level support
+// chips. Everything else (Push, Solar, ISRU, Air Eater,
+// Afterburn, Bonus Pivots, Missile / Raygun / Buggy) describes
+// what the card IS / DOES, not what it needs from other cards
+// in the stack. Those surface as card-properties further down.
 const BOOLEAN_TO_REQ = {
   'X Reactor':      'reactor-fission',
   '∿ Reactor':      'reactor-fusion',
   '💣 Reactor':     'reactor-antimatter',
   '⟛ Generator':   'gen-radioisotope',
   'e Generator':    'gen-electric',
-  'Solar':          'beam-receiver',
-  'ISRU':           'isru-rig',
-  'Air Eater':      'aerobrake-shroud',
+  'Any Reactor':    'reactor-any',
 };
 
-// Build a `requires` array from a face's boolean support flags.
+// Columns that describe a per-card capability/property. Boolean
+// keys gate the property's presence; numeric keys carry a count.
+// These are surfaced as icon badges on the face, not as chips
+// in the supports box.
+const PROPERTY_COLUMNS_BOOL = {
+  'Push':           { key: 'push',           glyph: '🛰', label: 'Push-sat' },
+  'Solar':          { key: 'solar',          glyph: '☀',  label: 'Solar' },
+  'Air Eater':      { key: 'airEater',       glyph: '⛅', label: 'Air-eater' },
+  'Missile':        { key: 'missile',        glyph: '🚀', label: 'Missile' },
+  'Raygun':         { key: 'raygun',         glyph: '🔫', label: 'Raygun' },
+  'Buggy':          { key: 'buggy',          glyph: '🛺', label: 'Buggy' },
+};
+const PROPERTY_COLUMNS_NUM = {
+  'Afterburn':      { key: 'afterburn',      glyph: '🔥', label: 'Afterburn' },
+  'Bonus Pivots':   { key: 'bonusPivots',    glyph: '↺',  label: 'Bonus pivots' },
+  'ISRU':           { key: 'isru',           glyph: '🛢', label: 'ISRU rig' },
+};
+
+// Build a `requires` array from the face's "Support
+// Requirements" booleans. Just the power-source columns — see
+// the BOOLEAN_TO_REQ comment for why this list is tight.
 function requiresFromFace(face) {
   const reqs = [];
   if (!face) return reqs;
@@ -85,6 +104,21 @@ function requiresFromFace(face) {
     if (face[col]) reqs.push({ kind, count: 1 });
   }
   return reqs;
+}
+
+// Build a `properties` array of { key, glyph, label, value }
+// entries from the face's per-card capability columns. Boolean
+// columns drop value=true; numeric columns drop the raw number.
+function propertiesFromFace(face) {
+  const out = [];
+  if (!face) return out;
+  for (const [col, def] of Object.entries(PROPERTY_COLUMNS_BOOL)) {
+    if (face[col]) out.push({ ...def, value: true });
+  }
+  for (const [col, def] of Object.entries(PROPERTY_COLUMNS_NUM)) {
+    if (face[col]) out.push({ ...def, value: face[col] });
+  }
+  return out;
 }
 
 // Stable slug for the card id. Tier-1 + Tier-2 share an id; both
@@ -105,8 +139,9 @@ function buildFace(label, tier, isRadiator) {
   if (!tier) return null;
   const base = {
     label,
-    ability:  tier.Ability || null,
-    requires: requiresFromFace(tier),
+    ability:    tier.Ability || null,
+    requires:   requiresFromFace(tier),
+    properties: propertiesFromFace(tier),
   };
   if (isRadiator) {
     base.light = {
@@ -165,6 +200,7 @@ function buildPatent(sheet, row) {
     fuel:        primaryFace.fuel,
     afterburn:   primaryFace.afterburn,
     requires:    primaryFace.requires,
+    properties:  primaryFace.properties,
     blurb:       primaryFace.ability || '',
     flipOrientation: isRadiator ? 'rotated180' : 'standard',
     rotatable:   isRadiator,

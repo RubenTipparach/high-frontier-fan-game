@@ -43,27 +43,28 @@ const REQ_SUPPLIER_TYPE = {
   'reactor-fission':    'reactor',
   'reactor-fusion':     'reactor',
   'reactor-antimatter': 'reactor',
+  'reactor-any':        'reactor',
   'gen-radioisotope':   'generator',
   'gen-electric':       'generator',
-  'isru-rig':           'refinery',
   'pulse-generator':    'reactor',
   'thermostat':         'radiator',
   'crew-quarters':      'robonaut',
 };
 
 const REQUIREMENT_VIS = {
-  // Power-source supports: match the published-card marker glyphs.
-  'reactor-fission':    { glyph: 'X',  label: 'Fission reactor'      },
-  'reactor-fusion':     { glyph: '∿',  label: 'Fusion reactor'       },
-  'reactor-antimatter': { glyph: '💣', label: 'Antimatter reactor'   },
+  // Power-source supports. These are the ONLY columns under the
+  // spreadsheet's "Support Requirements" banner — operational
+  // flags like Solar, Push, ISRU, Air Eater are card properties
+  // (rendered separately as badges) rather than stack supports.
+  'reactor-fission':    { glyph: 'X',  label: 'Fission reactor'        },
+  'reactor-fusion':     { glyph: '∿',  label: 'Fusion reactor'         },
+  'reactor-antimatter': { glyph: '💣', label: 'Antimatter reactor'     },
+  'reactor-any':        { glyph: '⚛', label: 'Any reactor'             },
   'gen-radioisotope':   { glyph: '⟛', label: 'Radioisotope generator' },
-  'gen-electric':       { glyph: 'e',  label: 'Electric generator'   },
-  // Operational supports.
-  'beam-receiver':      { glyph: '☀️', label: 'Beam receiver / solar' },
-  'isru-rig':           { glyph: '🛢️', label: 'ISRU rig'              },
-  'aerobrake-shroud':   { glyph: '🪂', label: 'Aerobrake / air-eater' },
-  // Legacy / hand-written supports.
-  'pulse-generator':    { glyph: '⚡', label: 'Pulse generator'        },
+  'gen-electric':       { glyph: 'e',  label: 'Electric generator'     },
+  // Legacy / hand-written supports retained so older data still
+  // loads cleanly.
+  'pulse-generator':    { glyph: '⚡', label: 'Pulse generator'         },
   'thermostat':         { glyph: '🌡️', label: 'Thermostat'             },
   'crew-quarters':      { glyph: '👤', label: 'Crew quarters'          },
   'sail':               { glyph: '⛵', label: 'Sail rigging'           },
@@ -168,6 +169,7 @@ function buildFace(card, sideName, kind) {
     </div>
     <div class="card-body">
       ${isThruster ? '<div class="card-thrust"></div>' : ''}
+      <div class="card-properties"></div>
       <ul class="card-stats"></ul>
       <div class="card-supports">
         <div class="card-supports-label">Supports</div>
@@ -262,6 +264,25 @@ function buildFace(card, sideName, kind) {
   }
 
   // Requirements row: icon + ×N for each requirement entry. A
+  // Card-properties row: small badges for the card's per-face
+  // capabilities (Push, Solar, Air-Eater, ISRU, Afterburn, Bonus
+  // Pivots, Missile, Raygun, Buggy). These are NOT supports —
+  // they describe what the card itself does. Each property's
+  // glyph + label lives on the data record so we don't repeat
+  // the catalogue here.
+  const propHost  = face.querySelector('.card-properties');
+  const faceMeta  = (card.faces && card.faces[sideName]) || {};
+  const propsList = faceMeta.properties || card.properties || [];
+  for (const p of propsList) {
+    const b = document.createElement('span');
+    b.className = 'card-prop';
+    b.setAttribute('data-tip', p.value === true ? p.label : `${p.label}: ${p.value}`);
+    const count = (typeof p.value === 'number' && p.value > 1)
+      ? `<b>×${p.value}</b>` : '';
+    b.innerHTML = `<em>${p.glyph}</em>${count}`;
+    propHost.appendChild(b);
+  }
+
   // count of 1 omits the multiplier so a single-icon row reads as
   // a clean bare glyph.
   const reqHost = face.querySelector('.card-requires');
