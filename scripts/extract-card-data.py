@@ -47,14 +47,49 @@ def extract_pairs(ws):
     """Yield (header_row, primary_row, secondary_row) triples.
     Sheets always carry two rows per card starting at row index 3
     (1-indexed): first header is the group banner (Thruster /
-    Support Requirements / etc.) on row 1, the column headers on
-    row 2, then data rows from row 3 onward, two per card."""
+    Support Requirements / Light Side / Heavy Side) on row 1,
+    the column headers on row 2, then data rows from row 3
+    onward, two per card.
+
+    Some sheets — notably Radiators — repeat the same column
+    headers under different banners (Light Side: Mass / Rad-Hard
+    / Therms then Heavy Side: Mass / Rad-Hard / Therms). We
+    fold the banner into the column name when there's a clash,
+    so both sides survive the dict flattening downstream."""
     rows = list(ws.iter_rows(values_only=True))
     if len(rows) < 4:
         return
-    headers = [normalize_header(h) for h in rows[1]]
+
+    # Row 0 holds group banners; they span columns to the right
+    # until the next non-empty banner cell. Spread the labels so
+    # every column knows its banner.
+    spread_banners = []
+    cur = ''
+    for b in rows[0]:
+        bs = ' '.join(str(b or '').split())
+        if bs:
+            cur = bs
+        spread_banners.append(cur)
+
+    raw = [normalize_header(h) for h in rows[1]]
+    # Find headers that appear more than once and qualify them
+    # with their banner. Skip qualifying when the banner is a
+    # generic grouping like 'Support Requirements' or 'Thruster'
+    # — those don't add meaning and the clash is incidental.
+    GENERIC_BANNERS = {'Support Requirements', 'Support Provided',
+                       'Thruster', 'Type', 'ISRU'}
+    counts = {h: raw.count(h) for h in raw if h}
+    headers = []
+    for h, banner in zip(raw, spread_banners):
+        if not h:
+            headers.append('')
+            continue
+        if counts.get(h, 0) > 1 and banner and banner not in GENERIC_BANNERS:
+            headers.append(f'{banner}: {h}')
+        else:
+            headers.append(h)
+
     data = rows[2:]
-    # Skip trailing fully-empty rows.
     while data and not any(c is not None for c in data[-1]):
         data.pop()
     for i in range(0, len(data), 2):

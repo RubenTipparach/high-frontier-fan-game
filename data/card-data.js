@@ -1508,15 +1508,21 @@ export const CARD_DATA = {
       "Name": "Bubble Membrane",
       "Spectral Type": "C",
       "tier1": {
-        "Mass": 1,
-        "Rad-Hard": 0,
-        "Therms": 2,
+        "Light Side: Mass": 0,
+        "Light Side: Rad-Hard": 1,
+        "Light Side: Therms": 1,
+        "Heavy Side: Mass": 1,
+        "Heavy Side: Rad-Hard": 0,
+        "Heavy Side: Therms": 2,
         "e Generator": false
       },
       "tier2": {
-        "Mass": 1,
-        "Rad-Hard": 2,
-        "Therms": 3,
+        "Light Side: Mass": 0,
+        "Light Side: Rad-Hard": 3,
+        "Light Side: Therms": 1,
+        "Heavy Side: Mass": 1,
+        "Heavy Side: Rad-Hard": 2,
+        "Heavy Side: Therms": 3,
         "e Generator": false
       }
     },
@@ -1524,15 +1530,21 @@ export const CARD_DATA = {
       "Name": "Dielectric X-Ray Window",
       "Spectral Type": "D",
       "tier1": {
-        "Mass": 5,
-        "Rad-Hard": 7,
-        "Therms": 3,
+        "Light Side: Mass": 4,
+        "Light Side: Rad-Hard": 7,
+        "Light Side: Therms": 2,
+        "Heavy Side: Mass": 5,
+        "Heavy Side: Rad-Hard": 7,
+        "Heavy Side: Therms": 3,
         "e Generator": false
       },
       "tier2": {
-        "Mass": 1,
-        "Rad-Hard": 7,
-        "Therms": 2,
+        "Light Side: Mass": 0,
+        "Light Side: Rad-Hard": 7,
+        "Light Side: Therms": 1,
+        "Heavy Side: Mass": 1,
+        "Heavy Side: Rad-Hard": 7,
+        "Heavy Side: Therms": 2,
         "e Generator": false
       }
     },
@@ -1540,15 +1552,21 @@ export const CARD_DATA = {
       "Name": "ETHER Charged Dust",
       "Spectral Type": "M",
       "tier1": {
-        "Mass": 2,
-        "Rad-Hard": 1,
-        "Therms": 2,
+        "Light Side: Mass": 1,
+        "Light Side: Rad-Hard": 1,
+        "Light Side: Therms": 1,
+        "Heavy Side: Mass": 2,
+        "Heavy Side: Rad-Hard": 1,
+        "Heavy Side: Therms": 2,
         "e Generator": false
       },
       "tier2": {
-        "Mass": 1,
-        "Rad-Hard": 3,
-        "Therms": 3,
+        "Light Side: Mass": 0,
+        "Light Side: Rad-Hard": 5,
+        "Light Side: Therms": 1,
+        "Heavy Side: Mass": 1,
+        "Heavy Side: Rad-Hard": 3,
+        "Heavy Side: Therms": 3,
         "e Generator": false
       }
     },
@@ -1556,16 +1574,22 @@ export const CARD_DATA = {
       "Name": "Li Heatsink Fountain",
       "Spectral Type": "S",
       "tier1": {
-        "Mass": 3,
-        "Rad-Hard": 6,
-        "Therms": 5,
+        "Light Side: Mass": 2,
+        "Light Side: Rad-Hard": 6,
+        "Light Side: Therms": 1,
+        "Heavy Side: Mass": 3,
+        "Heavy Side: Rad-Hard": 6,
+        "Heavy Side: Therms": 5,
         "e Generator": false,
         "Ability": "[Heavy] Switch to light side after 1st use."
       },
       "tier2": {
-        "Mass": 2,
-        "Rad-Hard": 6,
-        "Therms": 6,
+        "Light Side: Mass": 1,
+        "Light Side: Rad-Hard": 6,
+        "Light Side: Therms": 1,
+        "Heavy Side: Mass": 2,
+        "Heavy Side: Rad-Hard": 6,
+        "Heavy Side: Therms": 6,
         "e Generator": false,
         "Ability": "[Heavy] Switch to light side after 1st use."
       }
@@ -1574,16 +1598,22 @@ export const CARD_DATA = {
       "Name": "Magnetocaloric Refrigerator",
       "Spectral Type": "S",
       "tier1": {
-        "Mass": 3,
-        "Rad-Hard": 6,
-        "Therms": 4,
+        "Light Side: Mass": 2,
+        "Light Side: Rad-Hard": 6,
+        "Light Side: Therms": 3,
+        "Heavy Side: Mass": 3,
+        "Heavy Side: Rad-Hard": 6,
+        "Heavy Side: Therms": 4,
         "e Generator": true,
         "Ability": "This card can cool its own supports."
       },
       "tier2": {
-        "Mass": 1,
-        "Rad-Hard": 4,
-        "Therms": 2,
+        "Light Side: Mass": 0,
+        "Light Side: Rad-Hard": 5,
+        "Light Side: Therms": 1,
+        "Heavy Side: Mass": 1,
+        "Heavy Side: Rad-Hard": 4,
+        "Heavy Side: Therms": 2,
         "e Generator": false
       }
     },
@@ -1591,15 +1621,21 @@ export const CARD_DATA = {
       "Name": "Microtube Array",
       "Spectral Type": "C",
       "tier1": {
-        "Mass": 3,
-        "Rad-Hard": 0,
-        "Therms": 3,
+        "Light Side: Mass": 2,
+        "Light Side: Rad-Hard": 1,
+        "Light Side: Therms": 2,
+        "Heavy Side: Mass": 3,
+        "Heavy Side: Rad-Hard": 0,
+        "Heavy Side: Therms": 3,
         "e Generator": false
       },
       "tier2": {
-        "Mass": 1,
-        "Rad-Hard": 1,
-        "Therms": 3,
+        "Light Side: Mass": 0,
+        "Light Side: Rad-Hard": 2,
+        "Light Side: Therms": 2,
+        "Heavy Side: Mass": 1,
+        "Heavy Side: Rad-Hard": 1,
+        "Heavy Side: Therms": 3,
         "e Generator": false
       }
     },
@@ -1607,15 +1643,21 @@ export const CARD_DATA = {
       "Name": "Mo / Li Heat Pipe",
       "Spectral Type": "M",
       "tier1": {
-        "Mass": 2,
-        "Rad-Hard": 1,
-        "Therms": 3,
+        "Light Side: Mass": 1,
+        "Light Side: Rad-Hard": 2,
+        "Light Side: Therms": 2,
+        "Heavy Side: Mass": 2,
+        "Heavy Side: Rad-Hard": 1,
+        "Heavy Side: Therms": 3,
         "e Generator": false
       },
       "tier2": {
-        "Mass": 1,
-        "Rad-Hard": 2,
-        "Therms": 3,
+        "Light Side: Mass": 0,
+        "Light Side: Rad-Hard": 3,
+        "Light Side: Therms": 2,
+        "Heavy Side: Mass": 1,
+        "Heavy Side: Rad-Hard": 2,
+        "Heavy Side: Therms": 3,
         "e Generator": false
       }
     },
@@ -1623,15 +1665,21 @@ export const CARD_DATA = {
       "Name": "Qu Tube",
       "Spectral Type": "M",
       "tier1": {
-        "Mass": 4,
-        "Rad-Hard": 2,
-        "Therms": 2,
+        "Light Side: Mass": 1,
+        "Light Side: Rad-Hard": 4,
+        "Light Side: Therms": 1,
+        "Heavy Side: Mass": 4,
+        "Heavy Side: Rad-Hard": 2,
+        "Heavy Side: Therms": 2,
         "e Generator": false
       },
       "tier2": {
-        "Mass": 1,
-        "Rad-Hard": 2,
-        "Therms": 3,
+        "Light Side: Mass": 0,
+        "Light Side: Rad-Hard": 3,
+        "Light Side: Therms": 2,
+        "Heavy Side: Mass": 1,
+        "Heavy Side: Rad-Hard": 2,
+        "Heavy Side: Therms": 3,
         "e Generator": false
       }
     },
@@ -1639,15 +1687,21 @@ export const CARD_DATA = {
       "Name": "SS / NaK Pumped Loop",
       "Spectral Type": "M",
       "tier1": {
-        "Mass": 4,
-        "Rad-Hard": 0,
-        "Therms": 3,
+        "Light Side: Mass": 2,
+        "Light Side: Rad-Hard": 1,
+        "Light Side: Therms": 2,
+        "Heavy Side: Mass": 4,
+        "Heavy Side: Rad-Hard": 0,
+        "Heavy Side: Therms": 3,
         "e Generator": false
       },
       "tier2": {
-        "Mass": 2,
-        "Rad-Hard": 6,
-        "Therms": 3,
+        "Light Side: Mass": 1,
+        "Light Side: Rad-Hard": 6,
+        "Light Side: Therms": 2,
+        "Heavy Side: Mass": 2,
+        "Heavy Side: Rad-Hard": 6,
+        "Heavy Side: Therms": 3,
         "e Generator": false
       }
     },
@@ -1655,15 +1709,21 @@ export const CARD_DATA = {
       "Name": "Salt-Cooled Reflux Tube",
       "Spectral Type": "C",
       "tier1": {
-        "Mass": 4,
-        "Rad-Hard": 4,
-        "Therms": 3,
+        "Light Side: Mass": 3,
+        "Light Side: Rad-Hard": 4,
+        "Light Side: Therms": 2,
+        "Heavy Side: Mass": 4,
+        "Heavy Side: Rad-Hard": 4,
+        "Heavy Side: Therms": 3,
         "e Generator": false
       },
       "tier2": {
-        "Mass": 1,
-        "Rad-Hard": 3,
-        "Therms": 3,
+        "Light Side: Mass": 0,
+        "Light Side: Rad-Hard": 4,
+        "Light Side: Therms": 2,
+        "Heavy Side: Mass": 1,
+        "Heavy Side: Rad-Hard": 3,
+        "Heavy Side: Therms": 3,
         "e Generator": false
       }
     },
@@ -1671,15 +1731,21 @@ export const CARD_DATA = {
       "Name": "Steel / Pb-Bi Pumped Loop",
       "Spectral Type": "M",
       "tier1": {
-        "Mass": 4,
-        "Rad-Hard": 2,
-        "Therms": 2,
+        "Light Side: Mass": 2,
+        "Light Side: Rad-Hard": 3,
+        "Light Side: Therms": 1,
+        "Heavy Side: Mass": 4,
+        "Heavy Side: Rad-Hard": 2,
+        "Heavy Side: Therms": 2,
         "e Generator": false
       },
       "tier2": {
-        "Mass": 2,
-        "Rad-Hard": 1,
-        "Therms": 4,
+        "Light Side: Mass": 1,
+        "Light Side: Rad-Hard": 1,
+        "Light Side: Therms": 2,
+        "Heavy Side: Mass": 2,
+        "Heavy Side: Rad-Hard": 1,
+        "Heavy Side: Therms": 4,
         "e Generator": false
       }
     },
@@ -1687,15 +1753,21 @@ export const CARD_DATA = {
       "Name": "Ti / K Heat Pipe",
       "Spectral Type": "M",
       "tier1": {
-        "Mass": 4,
-        "Rad-Hard": 2,
-        "Therms": 2,
+        "Light Side: Mass": 2,
+        "Light Side: Rad-Hard": 3,
+        "Light Side: Therms": 1,
+        "Heavy Side: Mass": 4,
+        "Heavy Side: Rad-Hard": 2,
+        "Heavy Side: Therms": 2,
         "e Generator": false
       },
       "tier2": {
-        "Mass": 2,
-        "Rad-Hard": 5,
-        "Therms": 3,
+        "Light Side: Mass": 1,
+        "Light Side: Rad-Hard": 5,
+        "Light Side: Therms": 1,
+        "Heavy Side: Mass": 2,
+        "Heavy Side: Rad-Hard": 5,
+        "Heavy Side: Therms": 3,
         "e Generator": false
       }
     }
@@ -2218,10 +2290,10 @@ export const CARD_DATA = {
   ],
   "GW Thrusters": [
     {
+      "Type": "GW Thruster",
+      "Promotion Colony": "D",
       "Name": "Amat-Catalyzed Fission-Fusion",
       "Spectral Type": "S",
-      "Promotion Colony": "D",
-      "Type": "GW Thruster",
       "tier1": {
         "Mass": 3,
         "Rad-Hard": 9,
@@ -2249,10 +2321,10 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "GW Thruster",
+      "Promotion Colony": "D",
       "Name": "Dense Plasma H-B Focus Fusion",
       "Spectral Type": "D",
-      "Promotion Colony": "D",
-      "Type": "GW Thruster",
       "tier1": {
         "Mass": 1,
         "Rad-Hard": 8,
@@ -2278,10 +2350,10 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "GW Thruster",
+      "Promotion Colony": "S",
       "Name": "Levitated Dipole 6Li-H Fusion",
       "Spectral Type": "V",
-      "Promotion Colony": "S",
-      "Type": "GW Thruster",
       "tier1": {
         "Mass": 4,
         "Rad-Hard": 5,
@@ -2309,10 +2381,10 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "GW Thruster",
+      "Promotion Colony": "D",
       "Name": "Mini-Mag Orion Z-Pinch Fission",
       "Spectral Type": "M",
-      "Promotion Colony": "D",
-      "Type": "GW Thruster",
       "tier1": {
         "Mass": 1,
         "Rad-Hard": 9,
@@ -2338,10 +2410,10 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "GW Thruster",
+      "Promotion Colony": "M",
       "Name": "Salt-Water Zubrin",
       "Spectral Type": "S",
-      "Promotion Colony": "M",
-      "Type": "GW Thruster",
       "tier1": {
         "Mass": 1,
         "Rad-Hard": 6,
@@ -2369,10 +2441,10 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "GW Thruster",
+      "Promotion Colony": "H",
       "Name": "Spheromak 3He-D Magnetic Fusion",
       "Spectral Type": "H",
-      "Promotion Colony": "H",
-      "Type": "GW Thruster",
       "tier1": {
         "Mass": 4,
         "Rad-Hard": 8,
@@ -2400,10 +2472,10 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "GW Thruster",
+      "Promotion Colony": "H",
       "Name": "VISTA D-T Inertial Fusion",
       "Spectral Type": "H",
-      "Promotion Colony": "H",
-      "Type": "GW Thruster",
       "tier1": {
         "Mass": 5,
         "Rad-Hard": 8,
@@ -2433,10 +2505,10 @@ export const CARD_DATA = {
   ],
   "Freighters": [
     {
+      "Type": "Freighter",
+      "Promotion Colony": "M",
       "Name": "Fission-Heated Steam",
       "Spectral Type": "Any",
-      "Promotion Colony": "M",
-      "Type": "Freighter",
       "tier1": {
         "Mass": 0,
         "Rad-Hard": 5,
@@ -2462,10 +2534,10 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "Freighter",
+      "Promotion Colony": "M",
       "Name": "Fusion Fragment Sail",
       "Spectral Type": "V",
-      "Promotion Colony": "M",
-      "Type": "Freighter",
       "tier1": {
         "Mass": 2,
         "Rad-Hard": 1,
@@ -2489,10 +2561,10 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "Freighter",
+      "Promotion Colony": "Push",
       "Name": "HIIPER Beam Rider",
       "Spectral Type": "V",
-      "Promotion Colony": "Push",
-      "Type": "Freighter",
       "tier1": {
         "Mass": 4,
         "Rad-Hard": 4,
@@ -2515,10 +2587,10 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "Freighter",
+      "Promotion Colony": "C",
       "Name": "Inflatable Solar-Heated",
       "Spectral Type": "Any",
-      "Promotion Colony": "C",
-      "Type": "Freighter",
       "tier1": {
         "Mass": 0,
         "Rad-Hard": 5,
@@ -2544,10 +2616,10 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "Freighter",
+      "Promotion Colony": "S",
       "Name": "Poodle Steam",
       "Spectral Type": "Any",
-      "Promotion Colony": "S",
-      "Type": "Freighter",
       "tier1": {
         "Mass": 0,
         "Rad-Hard": 7,
@@ -2571,10 +2643,10 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "Freighter",
+      "Promotion Colony": "C",
       "Name": "Rotary Dirt Launcher",
       "Spectral Type": "Any",
-      "Promotion Colony": "C",
-      "Type": "Freighter",
       "tier1": {
         "Mass": 5,
         "Rad-Hard": 4,
@@ -2600,10 +2672,10 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "Freighter",
+      "Promotion Colony": "H",
       "Name": "Z-Pinch D-T / 6Li Fusion",
       "Spectral Type": "V",
-      "Promotion Colony": "H",
-      "Type": "Freighter",
       "tier1": {
         "Mass": 5,
         "Rad-Hard": 3,
@@ -2627,9 +2699,9 @@ export const CARD_DATA = {
   ],
   "Bernals": [
     {
-      "Name": "GEO Elevator Bernal",
-      "Promotion Colony": "Atmospheric",
       "Type": "Bernal",
+      "Promotion Colony": "Atmospheric",
+      "Name": "GEO Elevator Bernal",
       "tier1": {
         "Mass": 10,
         "Rad-Hard": 6,
@@ -2652,9 +2724,9 @@ export const CARD_DATA = {
       }
     },
     {
-      "Name": "L1 Climate Control Bernal",
-      "Promotion Colony": "Atmospheric",
       "Type": "Bernal",
+      "Promotion Colony": "Atmospheric",
+      "Name": "L1 Climate Control Bernal",
       "tier1": {
         "Mass": 10,
         "Rad-Hard": 8,
@@ -2677,9 +2749,9 @@ export const CARD_DATA = {
       }
     },
     {
-      "Name": "L2 Collimator Bernal",
-      "Promotion Colony": "Push",
       "Type": "Bernal",
+      "Promotion Colony": "Push",
+      "Name": "L2 Collimator Bernal",
       "tier1": {
         "Mass": 10,
         "Rad-Hard": 8,
@@ -2702,9 +2774,9 @@ export const CARD_DATA = {
       }
     },
     {
-      "Name": "L3 Lofstrom Loop Microgravity",
-      "Promotion Colony": "Submarine",
       "Type": "Bernal",
+      "Promotion Colony": "Submarine",
+      "Name": "L3 Lofstrom Loop Microgravity",
       "tier1": {
         "Mass": 10,
         "Rad-Hard": 8,
@@ -2727,9 +2799,9 @@ export const CARD_DATA = {
       }
     },
     {
-      "Name": "L4 Antimatter Factory",
-      "Promotion Colony": "M",
       "Type": "Bernal",
+      "Promotion Colony": "M",
+      "Name": "L4 Antimatter Factory",
       "tier1": {
         "Mass": 10,
         "Rad-Hard": 9,
@@ -2752,9 +2824,9 @@ export const CARD_DATA = {
       }
     },
     {
-      "Name": "L4s Pharmaceutics Bernal",
-      "Promotion Colony": "Astrobiology",
       "Type": "Bernal",
+      "Promotion Colony": "Astrobiology",
+      "Name": "L4s Pharmaceutics Bernal",
       "tier1": {
         "Mass": 10,
         "Rad-Hard": 6,
@@ -2777,9 +2849,9 @@ export const CARD_DATA = {
       }
     },
     {
-      "Name": "L5 Solar Cell Factory",
-      "Promotion Colony": "Push",
       "Type": "Bernal",
+      "Promotion Colony": "Push",
+      "Name": "L5 Solar Cell Factory",
       "tier1": {
         "Mass": 10,
         "Rad-Hard": 6,
@@ -2802,9 +2874,9 @@ export const CARD_DATA = {
       }
     },
     {
-      "Name": "L5s Cancer Hospital",
-      "Promotion Colony": "Submarine",
       "Type": "Bernal",
+      "Promotion Colony": "Submarine",
+      "Name": "L5s Cancer Hospital",
       "tier1": {
         "Mass": 10,
         "Rad-Hard": 6,
@@ -2827,9 +2899,9 @@ export const CARD_DATA = {
       }
     },
     {
-      "Name": "SSO Diplomatic",
-      "Promotion Colony": "Astrobiology",
       "Type": "Bernal",
+      "Promotion Colony": "Astrobiology",
+      "Name": "SSO Diplomatic",
       "tier1": {
         "Mass": 10,
         "Rad-Hard": 6,
@@ -2852,9 +2924,9 @@ export const CARD_DATA = {
       }
     },
     {
-      "Name": "Tourism Cycler",
-      "Promotion Colony": "Atmospheric",
       "Type": "Bernal",
+      "Promotion Colony": "Atmospheric",
+      "Name": "Tourism Cycler",
       "tier1": {
         "Mass": 10,
         "Rad-Hard": 7,
@@ -2879,12 +2951,12 @@ export const CARD_DATA = {
   ],
   "Colonists": [
     {
+      "Type": "Robot",
       "Ideology": "n/a",
+      "Promotion Colony": "D",
+      "Specialty": "Engineer",
       "Name": "Babbage Halbonauts",
       "Spectral Type": "H",
-      "Specialty": "Engineer",
-      "Promotion Colony": "D",
-      "Type": "Robot",
       "tier1": {
         "Mass": 2,
         "Rad-Hard": 5,
@@ -2917,12 +2989,12 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "Human",
       "Ideology": "Yellow",
+      "Promotion Colony": "H",
+      "Specialty": "Miner",
       "Name": "Biomechs",
       "Spectral Type": "n/a",
-      "Specialty": "Miner",
-      "Promotion Colony": "H",
-      "Type": "Human",
       "tier1": {
         "Mass": 2,
         "Rad-Hard": 4,
@@ -2955,12 +3027,12 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "Human",
       "Ideology": "Purple",
+      "Promotion Colony": "H",
+      "Specialty": "Miner",
       "Name": "Botany Bay Convicts",
       "Spectral Type": "n/a",
-      "Specialty": "Miner",
-      "Promotion Colony": "H",
-      "Type": "Human",
       "tier1": {
         "Mass": 2,
         "Rad-Hard": 4,
@@ -2993,12 +3065,12 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "Human",
       "Ideology": "Yellow",
+      "Promotion Colony": "Atmospheric",
+      "Specialty": "Prospector",
       "Name": "Boyle Engineering Collective",
       "Spectral Type": "n/a",
-      "Specialty": "Prospector",
-      "Promotion Colony": "Atmospheric",
-      "Type": "Human",
       "tier1": {
         "Mass": 3,
         "Rad-Hard": 5,
@@ -3031,12 +3103,12 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "Human",
       "Ideology": "Green",
+      "Promotion Colony": "Astrobiology",
+      "Specialty": "Prospector",
       "Name": "Calypso 2 Seed Sail",
       "Spectral Type": "n/a",
-      "Specialty": "Prospector",
-      "Promotion Colony": "Astrobiology",
-      "Type": "Human",
       "tier1": {
         "Mass": 1,
         "Rad-Hard": 3,
@@ -3078,12 +3150,12 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "Human",
       "Ideology": "Red",
+      "Promotion Colony": "Submarine",
+      "Specialty": "Engineer",
       "Name": "Heavy Water Survivalists",
       "Spectral Type": "n/a",
-      "Specialty": "Engineer",
-      "Promotion Colony": "Submarine",
-      "Type": "Human",
       "tier1": {
         "Mass": 2,
         "Rad-Hard": 5,
@@ -3116,12 +3188,12 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "Human",
       "Ideology": "Purple",
+      "Promotion Colony": "H",
+      "Specialty": "Miner",
       "Name": "House of Saud",
       "Spectral Type": "n/a",
-      "Specialty": "Miner",
-      "Promotion Colony": "H",
-      "Type": "Human",
       "tier1": {
         "Mass": 2,
         "Rad-Hard": 3,
@@ -3154,12 +3226,12 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "Human",
       "Ideology": "Purple",
+      "Promotion Colony": "H",
+      "Specialty": "Prospector",
       "Name": "Juiced Cosmonauts",
       "Spectral Type": "n/a",
-      "Specialty": "Prospector",
-      "Promotion Colony": "H",
-      "Type": "Human",
       "tier1": {
         "Mass": 1,
         "Rad-Hard": 4,
@@ -3200,12 +3272,12 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "Human",
       "Ideology": "Grey",
+      "Promotion Colony": "Astrobiology",
+      "Specialty": "Industrialist",
       "Name": "Lloyd's Salvage Co.",
       "Spectral Type": "n/a",
-      "Specialty": "Industrialist",
-      "Promotion Colony": "Astrobiology",
-      "Type": "Human",
       "tier1": {
         "Mass": 1,
         "Rad-Hard": 5,
@@ -3236,12 +3308,12 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "Human",
       "Ideology": "Red",
+      "Promotion Colony": "H",
+      "Specialty": "Industrialist",
       "Name": "Malcolm",
       "Spectral Type": "n/a",
-      "Specialty": "Industrialist",
-      "Promotion Colony": "H",
-      "Type": "Human",
       "tier1": {
         "Mass": 1,
         "Rad-Hard": 3,
@@ -3272,12 +3344,12 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "Human",
       "Ideology": "Grey",
+      "Promotion Colony": "H",
+      "Specialty": "Engineer",
       "Name": "Microgravity Pantrophists",
       "Spectral Type": "n/a",
-      "Specialty": "Engineer",
-      "Promotion Colony": "H",
-      "Type": "Human",
       "tier1": {
         "Mass": 3,
         "Rad-Hard": 5,
@@ -3308,12 +3380,12 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "Robot",
       "Ideology": "n/a",
+      "Promotion Colony": "D",
+      "Specialty": "Prospector",
       "Name": "Programmable Matter",
       "Spectral Type": "D",
-      "Specialty": "Prospector",
-      "Promotion Colony": "D",
-      "Type": "Robot",
       "tier1": {
         "Mass": 1,
         "Rad-Hard": 4,
@@ -3354,12 +3426,12 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "Human",
       "Ideology": "Green",
+      "Promotion Colony": "H",
+      "Specialty": "Miner",
       "Name": "Rock Rats Miners' Union",
       "Spectral Type": "n/a",
-      "Specialty": "Miner",
-      "Promotion Colony": "H",
-      "Type": "Human",
       "tier1": {
         "Mass": 3,
         "Rad-Hard": 5,
@@ -3392,12 +3464,12 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "Robot",
       "Ideology": "n/a",
+      "Promotion Colony": "D",
+      "Specialty": "Industrialist",
       "Name": "Security System",
       "Spectral Type": "D",
-      "Specialty": "Industrialist",
-      "Promotion Colony": "D",
-      "Type": "Robot",
       "tier1": {
         "Mass": 1,
         "Rad-Hard": 4,
@@ -3428,12 +3500,12 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "Human",
       "Ideology": "Green",
+      "Promotion Colony": "Submarine",
+      "Specialty": "Engineer",
       "Name": "Siren Cybernautics Inc.",
       "Spectral Type": "n/a",
-      "Specialty": "Engineer",
-      "Promotion Colony": "Submarine",
-      "Type": "Human",
       "tier1": {
         "Mass": 3,
         "Rad-Hard": 5,
@@ -3464,12 +3536,12 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "Robot",
       "Ideology": "n/a",
+      "Promotion Colony": "D",
+      "Specialty": "Miner",
       "Name": "Smart Pets",
       "Spectral Type": "D",
-      "Specialty": "Miner",
-      "Promotion Colony": "D",
-      "Type": "Robot",
       "tier1": {
         "Mass": 0,
         "Rad-Hard": 3,
@@ -3502,12 +3574,12 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "Human",
       "Ideology": "White",
+      "Promotion Colony": "H",
+      "Specialty": "Engineer",
       "Name": "Transorbital Railworkers",
       "Spectral Type": "n/a",
-      "Specialty": "Engineer",
-      "Promotion Colony": "H",
-      "Type": "Human",
       "tier1": {
         "Mass": 2,
         "Rad-Hard": 4,
@@ -3538,12 +3610,12 @@ export const CARD_DATA = {
       }
     },
     {
+      "Type": "Human",
       "Ideology": "White",
+      "Promotion Colony": "Astrobiology",
+      "Specialty": "Industrialist",
       "Name": "Vatican Observers",
       "Spectral Type": "n/a",
-      "Specialty": "Industrialist",
-      "Promotion Colony": "Astrobiology",
-      "Type": "Human",
       "tier1": {
         "Mass": 1,
         "Rad-Hard": 4,

@@ -99,6 +99,27 @@ export function renderCard(card, { type } = {}) {
     el.appendChild(flip);
   }
 
+  // Radiators carry TWO stat sets per face — Light Side
+  // (upright) and Heavy Side (rotated 180°). The rotate button
+  // toggles a data-rotated attribute that drives both the
+  // CSS rotation transform and the Light↔Heavy stat swap. Only
+  // emitted for cards flagged `rotatable: true` (radiators).
+  if (card.rotatable) {
+    el.dataset.rotated = '0';
+    const rot = document.createElement('button');
+    rot.type = 'button';
+    rot.className = 'card-rotate';
+    rot.textContent = '↻';
+    rot.title = 'Rotate to heavy side';
+    rot.addEventListener('click', () => {
+      el.dataset.rotated = el.dataset.rotated === '1' ? '0' : '1';
+      rot.title = el.dataset.rotated === '1'
+        ? 'Rotate to light side'
+        : 'Rotate to heavy side';
+    });
+    el.appendChild(rot);
+  }
+
   attachTipsTo(el);
   return el;
 }
@@ -159,7 +180,17 @@ function buildFace(card, sideName, kind) {
       <span class="face-tag"></span>
     </div>
   `;
-  face.querySelector('.card-typebar').textContent = card.type.toUpperCase();
+  // Per-type icon glyph in the typebar, matched to the
+  // published-card iconography (🌡️ thermometer for radiators,
+  // etc.). Keeps the "what kind of card am I looking at" read
+  // working even when the type label is occluded.
+  const TYPE_ICON = {
+    thruster: '🚀', reactor: '⚛️', radiator: '🌡️',
+    refinery: '⚗️', robonaut: '🤖', generator: '🔋',
+  };
+  const tbar = face.querySelector('.card-typebar');
+  const icon = TYPE_ICON[card.type] || '';
+  tbar.textContent = `${icon ? icon + ' ' : ''}${card.type.toUpperCase()}`;
   face.querySelector('.card-name').textContent = card.name;
   face.querySelector('.m').textContent = card.mass != null ? card.mass : '—';
   face.querySelector('.r').textContent = card.radHardness != null ? card.radHardness : '—';
@@ -193,7 +224,29 @@ function buildFace(card, sideName, kind) {
     add('Power', card.power);
     add('Heat',  card.heat);
   } else if (card.type === 'radiator') {
-    add('Heat cap', card.heat_cap);
+    // Radiators carry separate Light Side / Heavy Side stat
+    // blocks per face. Render both — each wrapped in a small
+    // <ul class="side-block"> sub-list — and let CSS toggle
+    // which one is visible based on data-rotated. The "Therms"
+    // row is the rated heat dissipation for that orientation.
+    const sideMeta = card.faces && card.faces[sideName];
+    const light = sideMeta && sideMeta.light;
+    const heavy = sideMeta && sideMeta.heavy;
+    if (light && heavy) {
+      const addSide = (cls, label, block) => {
+        const wrap = document.createElement('li');
+        wrap.className = `side-block ${cls}`;
+        wrap.innerHTML = `<header>${label}</header>`
+          + `<span>Therms <strong>${block.therms ?? '—'}</strong></span>`
+          + `<span>Mass   <strong>${block.mass ?? '—'}</strong></span>`
+          + `<span>Rad    <strong>${block.radHardness ?? '—'}</strong></span>`;
+        stats.appendChild(wrap);
+      };
+      addSide('side-light', 'Light side', light);
+      addSide('side-heavy', 'Heavy side', heavy);
+    } else {
+      add('Therms', card.therms ?? card.heat_cap);
+    }
   } else if (card.type === 'refinery') {
     add('Water out', card.water_out);
   } else if (card.type === 'robonaut') {

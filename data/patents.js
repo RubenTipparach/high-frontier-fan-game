@@ -96,6 +96,47 @@ function slug(name, type) {
   return `${type.slice(0, 3)}_${base}`;
 }
 
+// Build a face stat-block from one tier of the import. For
+// radiators the same tier carries TWO stat sets (Light Side and
+// Heavy Side) under qualified column names; we surface those
+// as face.light / face.heavy. For every other card type the
+// fields sit directly on the face.
+function buildFace(label, tier, isRadiator) {
+  if (!tier) return null;
+  const base = {
+    label,
+    ability:  tier.Ability || null,
+    requires: requiresFromFace(tier),
+  };
+  if (isRadiator) {
+    base.light = {
+      mass:        tier['Light Side: Mass'],
+      radHardness: tier['Light Side: Rad-Hard'],
+      therms:      tier['Light Side: Therms'],
+    };
+    base.heavy = {
+      mass:        tier['Heavy Side: Mass'],
+      radHardness: tier['Heavy Side: Rad-Hard'],
+      therms:      tier['Heavy Side: Therms'],
+    };
+    // Mirror the Light Side at the face level so the generic
+    // renderer paths still see mass / rad-hard when they ask.
+    base.mass        = base.light.mass;
+    base.radHardness = base.light.radHardness;
+    base.therms      = base.light.therms;
+  } else {
+    base.mass        = tier.Mass;
+    base.radHardness = tier['Rad-Hard'];
+    base.thrust      = tier.Thrust;
+    base.fuel        = tier['Fuel Consumption'];
+    base.fuelType    = tier['Fuel Type'];
+    base.afterburn   = !!tier.Afterburn;
+    base.bonusPivots = tier['Bonus Pivots'] || 0;
+    base.therms      = tier.Therms;
+  }
+  return base;
+}
+
 // Translate one Excel row (card) into a PATENT object.
 function buildPatent(sheet, row) {
   const type = SHEET_TO_TYPE[sheet];
@@ -105,34 +146,10 @@ function buildPatent(sheet, row) {
   const id   = slug(name, type);
   const spectral = row['Spectral Type']
     || (type === 'radiator' ? null : 'C');
+  const isRadiator = type === 'radiator';
 
-  const primaryFace = {
-    label: 'Tier 1',
-    mass:        t1.Mass,
-    radHardness: t1['Rad-Hard'],
-    thrust:      t1.Thrust,
-    fuel:        t1['Fuel Consumption'],
-    fuelType:    t1['Fuel Type'],
-    afterburn:   !!t1.Afterburn,
-    bonusPivots: t1['Bonus Pivots'] || 0,
-    therms:      t1.Therms,
-    ability:     t1.Ability || null,
-    requires:    requiresFromFace(t1),
-  };
-
-  const secondaryFace = t2 ? {
-    label: 'Tier 2',
-    mass:        t2.Mass,
-    radHardness: t2['Rad-Hard'],
-    thrust:      t2.Thrust,
-    fuel:        t2['Fuel Consumption'],
-    fuelType:    t2['Fuel Type'],
-    afterburn:   !!t2.Afterburn,
-    bonusPivots: t2['Bonus Pivots'] || 0,
-    therms:      t2.Therms,
-    ability:     t2.Ability || null,
-    requires:    requiresFromFace(t2),
-  } : null;
+  const primaryFace   = buildFace('Tier 1', t1, isRadiator);
+  const secondaryFace = buildFace('Tier 2', t2, isRadiator);
 
   // Top-level convenience fields mirror the primary face so
   // existing renderer / ship-engine code that reads card.thrust /
@@ -149,7 +166,8 @@ function buildPatent(sheet, row) {
     afterburn:   primaryFace.afterburn,
     requires:    primaryFace.requires,
     blurb:       primaryFace.ability || '',
-    flipOrientation: type === 'radiator' ? 'rotated180' : 'standard',
+    flipOrientation: isRadiator ? 'rotated180' : 'standard',
+    rotatable:   isRadiator,
     faces: { primary: primaryFace, secondary: secondaryFace },
   };
 }
