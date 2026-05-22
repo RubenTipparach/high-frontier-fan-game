@@ -69,6 +69,18 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
     edges.push([a, b, dv]);
   }
 
+  // Synthetic bodies the planner doesn't carry: the Sun (anchors
+  // the inner system visually), Earth (you launch from LEO but it
+  // isn't a destination in the planner data), and Jupiter (only
+  // its moons are listed -- the planet itself is implied at the
+  // centroid). Positions are normalized 0..1 and chosen to fit our
+  // viewport's layout.
+  synthesizeBodies(sites, viewW, viewH);
+
+  // Each site picks up a bodyKey so the renderer can group
+  // multi-site bodies (Mars, Luna, Mercury) into one shared halo.
+  for (const s of sites) s.bodyKey = bodyKeyFor(s);
+
   const byId = Object.fromEntries(sites.map((s) => [s.id, s]));
 
   // Chains of decorative routing nodes (degree-2 nodes whose only
@@ -155,10 +167,9 @@ function routingLabel(type) {
 //   planet | dwarf | moon | comet | asteroid (default).
 // Planner data flattens every game destination to type='site', so
 // we use name prefixes / substrings to recover the body class.
-const PLANET_KEYS = [
-  'mercury', 'venus', 'earth', 'mars',
-  'jupiter', 'saturn', 'uranus', 'neptune',
-];
+const GAS_GIANT_KEYS = ['jupiter', 'saturn', 'uranus', 'neptune'];
+const INNER_PLANET_KEYS = ['mercury', 'venus', 'earth', 'mars', 'luna'];
+const PLANET_KEYS = [...GAS_GIANT_KEYS, ...INNER_PLANET_KEYS];
 const DWARF_KEYS = [
   'pluto', 'ceres', 'eris', 'sedna', 'makemake',
   'haumea', 'orcus', 'quaoar', 'gonggong',
@@ -176,10 +187,75 @@ function classifyBody(name) {
   const n = (name || '').toLowerCase();
   if (!n) return 'site';
   if (n.startsWith('comet')) return 'comet';
-  for (const k of PLANET_KEYS) if (n.startsWith(k)) return 'planet';
+  for (const k of GAS_GIANT_KEYS)  if (n.startsWith(k)) return 'gas-giant';
+  for (const k of INNER_PLANET_KEYS) if (n.startsWith(k)) return 'inner-planet';
   for (const k of DWARF_KEYS)  if (n.includes(k))  return 'dwarf';
   for (const k of MOON_KEYS)   if (n.includes(k))  return 'moon';
   return 'asteroid';
+}
+
+// bodyKey clusters all sites that belong to the same celestial
+// body. "Mars: north pole" and "Mars: Hellas Basin" both have
+// bodyKey 'mars'. Used by the renderer to draw a single shared
+// halo per body rather than one per surface site.
+function bodyKeyFor(site) {
+  const n = (site.name || '').toLowerCase();
+  if (!n || site.isWaypoint) return null;
+  // Strip ":" or "-" suffixes and take the first word as the key.
+  const first = n.replace(/[:\-].*$/, '').split(/\s+/)[0];
+  return first || null;
+}
+
+// Inject Sun + Earth + Jupiter as renderable sites. The planner's
+// underlying graph doesn't include them: Sun is implicit, Earth is
+// implicit (LEO is the entry point), and Jupiter's body is implied
+// by the cluster of Galilean moons. We add them with synthetic ids
+// so the renderer can draw them but the pathfinder ignores them
+// (no edges touch them, so they're inert in nav).
+function synthesizeBodies(sites, viewW, viewH) {
+  const synthetics = [
+    {
+      id: 'synthetic_sun',
+      name: 'Sun',
+      type: 'sun',
+      // Just off-canvas to the bottom-right of Mercury, anchoring
+      // the inner-system orbital direction.
+      nx: 0.56, ny: 0.93,
+    },
+    {
+      id: 'synthetic_earth',
+      name: 'Earth',
+      type: 'inner-planet',
+      // Right next to Luna's cluster.
+      nx: 0.82, ny: 0.71,
+    },
+    {
+      id: 'synthetic_jupiter',
+      name: 'Jupiter',
+      type: 'gas-giant',
+      // Centroid of the Galilean moons (Io / Europa / Ganymede /
+      // Callisto sit around 0.27..0.36 horizontally, 0.50..0.58
+      // vertically).
+      nx: 0.305, ny: 0.545,
+    },
+  ];
+  for (const s of synthetics) {
+    sites.push({
+      id: s.id,
+      name: s.name,
+      type: s.type,
+      isWaypoint: false,
+      isDecorative: false,
+      siteSize: null,
+      siteSynodic: null,
+      hydration: 0,
+      hazard: false,
+      landing: null,
+      flybyBoost: null,
+      x: Math.round(s.nx * viewW * 10) / 10,
+      y: Math.round(s.ny * viewH * 10) / 10,
+    });
+  }
 }
 
 // siteWater in the planner is a string like '0', '1', '2', '3', '4'.

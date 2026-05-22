@@ -36,31 +36,33 @@ const HALO_MAX_SCREEN_R = 110;
 // physical objects.
 // Visual sizes per body class. Hex `r` is the actual gameplay
 // marker; `haloFactor` controls how far the body sprite (sphere or
-// rocky polygon) extends past the hex edge. Planets get the biggest
-// halos so gas giants dominate; moons / asteroids stay small so a
-// belt cluster doesn't smother the canvas. `rocky` = irregular
-// polygon shape rather than a smooth sphere.
+// rocky polygon) extends past the hex edge. Gas giants get a huge
+// halo so they dominate; inner planets and moons read at a uniform
+// readable size; asteroids are small + irregular.
 const TYPE_VIS = {
-  site:       { kind: 'hex',    r: 11, haloFactor: 1.55 },
-  planet:     { kind: 'hex',    r: 16, haloFactor: 2.2  },
-  dwarf:      { kind: 'hex',    r: 13, haloFactor: 1.75 },
-  tno:        { kind: 'hex',    r: 11, haloFactor: 1.6  },
-  moon:       { kind: 'hex',    r:  9, haloFactor: 1.5  },
-  comet:      { kind: 'hex',    r:  9, haloFactor: 1.7  },
-  asteroid:   { kind: 'hex',    r:  7, haloFactor: 1.5, rocky: true },
-  surface:    { kind: 'hex',    r: 10, haloFactor: 1.55 },
-  lagrange:   { kind: 'circle', r:  7, fill: 'transparent', stroke: '#c66932' },
-  // Hohmann nodes draw smaller than their click target -- the
-  // visible disc is a quarter the radius of the hit zone so they
-  // read as small route waypoints, but a tap anywhere in the old
-  // generous area still selects them.
-  burn:       { kind: 'circle', r:  6, hitR: 8, fill: '#d60f7a', stroke: '#fde0ee', hideBelowZoom: 1.4 },
-  hohmann:    { kind: 'circle', r:  2, hitR: 8, fill: '#10b981', stroke: '#a7f3d0' },
-  venus:      { kind: 'circle', r:  8, fill: '#fb923c', stroke: '#fed7aa' },
-  radhaz:     { kind: 'circle', r:  7, fill: '#fbbf24', stroke: '#fde68a' },
-  orbit:      { kind: 'circle', r:  6, fill: '#0c0a16', stroke: '#7dd3fc' },
-  decorative: { kind: 'none' },        // routing-only; never rendered
-  unknown:    { kind: 'circle', r:  4, fill: '#0c0a16', stroke: '#475569' },
+  site:           { kind: 'hex',    r: 11, haloFactor: 1.55 },
+  'gas-giant':    { kind: 'hex',    r: 16, haloFactor: 2.6  },
+  'inner-planet': { kind: 'hex',    r: 10, haloFactor: 1.8  },
+  // Backward-compat: any legacy 'planet' lookups behave like a
+  // small inner planet.
+  planet:         { kind: 'hex',    r: 10, haloFactor: 1.8  },
+  dwarf:          { kind: 'hex',    r: 12, haloFactor: 1.7  },
+  tno:            { kind: 'hex',    r: 10, haloFactor: 1.6  },
+  moon:           { kind: 'hex',    r: 10, haloFactor: 1.65 },
+  comet:          { kind: 'hex',    r:  9, haloFactor: 1.7  },
+  asteroid:       { kind: 'hex',    r:  7, haloFactor: 1.5, rocky: true },
+  surface:        { kind: 'hex',    r: 10, haloFactor: 1.55 },
+  // Sun is rendered specially -- no hex marker, no click target,
+  // just a glowing yellow body with a corona halo.
+  sun:            { kind: 'sun',    r: 40 },
+  lagrange:       { kind: 'circle', r:  7, fill: 'transparent', stroke: '#c66932' },
+  burn:           { kind: 'circle', r:  6, hitR: 8, fill: '#d60f7a', stroke: '#fde0ee', hideBelowZoom: 1.4 },
+  hohmann:        { kind: 'circle', r:  2, hitR: 8, fill: '#10b981', stroke: '#a7f3d0' },
+  venus:          { kind: 'circle', r:  8, fill: '#fb923c', stroke: '#fed7aa' },
+  radhaz:         { kind: 'circle', r:  7, fill: '#fbbf24', stroke: '#fde68a' },
+  orbit:          { kind: 'circle', r:  6, fill: '#0c0a16', stroke: '#7dd3fc' },
+  decorative:     { kind: 'none' },
+  unknown:        { kind: 'circle', r:  4, fill: '#0c0a16', stroke: '#475569' },
 };
 
 // Per-body palette. Each entry is {base, light, dark, atmosphere?}.
@@ -261,6 +263,34 @@ const SYNODIC_COLOURS = {
 // polygon so it reads as a rock rather than a tiny planet. Each
 // asteroid caches its own vertex offsets keyed off the site id so
 // the silhouette is stable across frames.
+// The Sun: a hot yellow disc with a bright core, a warm midband,
+// and a wide corona haze. Drawn in world space with everything
+// else; the halo extends well past the visible disc so it reads
+// as "this is the star" rather than just another body. No hex
+// marker -- the Sun isn't a destination.
+function drawSun(ctx, cx, cy, r) {
+  // Corona haze, wide and faint.
+  const corona = ctx.createRadialGradient(cx, cy, r * 0.4, cx, cy, r * 3.5);
+  corona.addColorStop(0,    'rgba(254, 215, 100, 0.45)');
+  corona.addColorStop(0.45, 'rgba(254, 180,  60, 0.12)');
+  corona.addColorStop(1,    'rgba(254, 180,  60, 0)');
+  ctx.fillStyle = corona;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 3.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Disc with hot core in the centre.
+  const disc = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+  disc.addColorStop(0,    '#ffffff');
+  disc.addColorStop(0.25, '#fff3a0');
+  disc.addColorStop(0.7,  '#fbbf24');
+  disc.addColorStop(1,    '#d97706');
+  ctx.fillStyle = disc;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 function drawRockyAsteroid(ctx, cx, cy, r, palette, site) {
   if (!site._rockShape) {
     const VERTS = 9;
@@ -435,8 +465,6 @@ export class MapRenderer {
       arr.push(w);
       this._waypointsByType.set(w.type, arr);
     }
-    // Split STRAIGHT edges into normal and hazard for stroke colour.
-    // Chains (decorative-smoothed routes) are pre-built by the loader.
     this._normalEdges = [];
     this._hazardEdges = [];
     const straight = this.data.straightEdges || this.data.edges;
@@ -447,8 +475,6 @@ export class MapRenderer {
       if (sa.hazard || sb.hazard) this._hazardEdges.push(seg);
       else this._normalEdges.push(seg);
     }
-    // Pre-resolve chains into arrays of {x,y} points so the draw
-    // loop doesn't repeat the lookup every frame.
     this._chains = [];
     this._hazardChains = [];
     for (const chain of (this.data.chains || [])) {
@@ -456,6 +482,48 @@ export class MapRenderer {
       if (pts.length < 2) continue;
       const isHazard = pts.some((p) => p.hazard);
       (isHazard ? this._hazardChains : this._chains).push(pts);
+    }
+
+    // Body groups: every real site picks up a `bodyKey` in the
+    // loader. We collect groups here so the renderer can draw a
+    // single shared halo at the centroid of each multi-site body
+    // (Mars / Luna / Mercury / Jupiter system / Saturn system).
+    // The body class for the group inherits from the member with
+    // the most informative type (gas-giant > inner-planet > dwarf
+    // > moon > comet > asteroid > site).
+    const TYPE_RANK = { 'gas-giant': 7, 'inner-planet': 6, dwarf: 5, moon: 4, comet: 3, asteroid: 2, surface: 1, site: 0 };
+    this._bodyGroups = new Map();
+    for (const s of this._realSites) {
+      const key = s.bodyKey;
+      if (!key) continue;
+      let g = this._bodyGroups.get(key);
+      if (!g) {
+        g = { key, sites: [], sumX: 0, sumY: 0, type: s.type };
+        this._bodyGroups.set(key, g);
+      }
+      g.sites.push(s);
+      g.sumX += s.x;
+      g.sumY += s.y;
+      if ((TYPE_RANK[s.type] ?? -1) > (TYPE_RANK[g.type] ?? -1)) g.type = s.type;
+    }
+    // Pick the exemplar site (closest to centroid) for palette lookup.
+    for (const g of this._bodyGroups.values()) {
+      g.cx = g.sumX / g.sites.length;
+      g.cy = g.sumY / g.sites.length;
+      let best = g.sites[0], bestD = Infinity;
+      for (const s of g.sites) {
+        const dx = s.x - g.cx, dy = s.y - g.cy;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; best = s; }
+      }
+      g.exemplar = best;
+    }
+    // Any site whose group has 2+ members renders only its hex, not
+    // its individual halo -- the group's shared halo takes over.
+    this._mergedSites = new Set();
+    for (const g of this._bodyGroups.values()) {
+      if (g.sites.length < 2) continue;
+      for (const s of g.sites) this._mergedSites.add(s.id);
     }
   }
 
@@ -917,8 +985,34 @@ export class MapRenderer {
   _drawSiteHalosWorld(ctx) {
     const eff = this.zoom * this.fitScale;
     const capWorld = HALO_MAX_SCREEN_R / eff;
+
+    // Pass 1: shared halos for merged body groups (Mars / Luna /
+    // Mercury / Jupiter system / etc.). One big sphere positioned at
+    // the group's centroid; the individual member sites contribute
+    // only their hexes in the screen-space pass.
+    for (const g of this._bodyGroups.values()) {
+      if (g.sites.length < 2) continue;
+      const vis = TYPE_VIS[g.type] || TYPE_VIS.unknown;
+      if (vis.kind !== 'hex' && vis.kind !== 'sun') continue;
+      const worldR = Math.min(vis.r * (vis.haloFactor || 1.6), capWorld);
+      const palette = paletteFor(g.exemplar);
+      const rings = ringDefFor(g.exemplar);
+      if (rings) {
+        drawPlanetRings(ctx, g.cx, g.cy, worldR, rings, 'back');
+        drawShadedSphere(ctx, g.cx, g.cy, worldR, palette, false);
+        drawPlanetRings(ctx, g.cx, g.cy, worldR, rings, 'front');
+      } else {
+        drawShadedSphere(ctx, g.cx, g.cy, worldR, palette, false);
+      }
+    }
+
+    // Pass 2: per-site halos for everything not part of a merged
+    // group, plus the special sun rendering and the rocky asteroid
+    // silhouettes.
     for (const site of this._realSites) {
+      if (this._mergedSites.has(site.id)) continue;
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
+      if (vis.kind === 'sun') { drawSun(ctx, site.x, site.y, vis.r); continue; }
       if (vis.kind !== 'hex') continue;
       const worldR = Math.min(vis.r * vis.haloFactor, capWorld);
       const rings = ringDefFor(site);
@@ -943,6 +1037,8 @@ export class MapRenderer {
       const sx = this.pan.x + site.x * eff;
       const sy = this.pan.y + site.y * eff;
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
+      // Sun has no hex marker -- it's a star, not a destination.
+      if (vis.kind === 'sun') continue;
       const r = vis.r;
       if (sx < -r - 20 || sx > hostW + r + 20 || sy < -r - 20 || sy > hostH + r + 20) continue;
 
@@ -1246,8 +1342,10 @@ export class MapRenderer {
     const sx = this.pan.x + wx * eff;
     const sy = this.pan.y + wy * eff;
     let best = null;
-    let bestDist = 22 * 22;       // real sites: generous touch target
+    let bestDist = 22 * 22;
     for (const s of this._realSites) {
+      const vis = TYPE_VIS[s.type] || TYPE_VIS.unknown;
+      if (vis.kind === 'sun') continue;     // Sun is decorative, not selectable
       const dx = (this.pan.x + s.x * eff) - sx;
       const dy = (this.pan.y + s.y * eff) - sy;
       const d = dx * dx + dy * dy;
