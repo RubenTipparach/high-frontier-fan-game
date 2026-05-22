@@ -33,6 +33,24 @@ const SPECTRAL_LABEL = {
 // Requirement-kind -> { glyph, label }. Each entry describes the
 // icon shown in the requirement row on a card. count is rendered
 // next to the glyph (1 -> bare icon; >1 -> icon + "×N").
+// Which card type supplies each requirement kind. Chips for a
+// support requirement get the same accent colour as that card
+// type's typebar, so a player sees at a glance "this thruster
+// needs a purple-card (reactor) in the stack" without reading
+// labels. Kinds that aren't supplied by a card type fall
+// through to a neutral grey chip.
+const REQ_SUPPLIER_TYPE = {
+  'reactor-fission':    'reactor',
+  'reactor-fusion':     'reactor',
+  'reactor-antimatter': 'reactor',
+  'gen-radioisotope':   'generator',
+  'gen-electric':       'generator',
+  'isru-rig':           'refinery',
+  'pulse-generator':    'reactor',
+  'thermostat':         'radiator',
+  'crew-quarters':      'robonaut',
+};
+
 const REQUIREMENT_VIS = {
   // Power-source supports: match the published-card marker glyphs.
   'reactor-fission':    { glyph: 'X',  label: 'Fission reactor'      },
@@ -42,7 +60,6 @@ const REQUIREMENT_VIS = {
   'gen-electric':       { glyph: 'e',  label: 'Electric generator'   },
   // Operational supports.
   'beam-receiver':      { glyph: '☀️', label: 'Beam receiver / solar' },
-  'push-sat':           { glyph: '🛰️', label: 'Push-sat'              },
   'isru-rig':           { glyph: '🛢️', label: 'ISRU rig'              },
   'aerobrake-shroud':   { glyph: '🪂', label: 'Aerobrake / air-eater' },
   // Legacy / hand-written supports.
@@ -201,9 +218,10 @@ function buildFace(card, sideName, kind) {
     const span = document.createElement('span');
     span.className = 'req';
     span.setAttribute('data-tip', r.count > 1 ? `${vis.label} ×${r.count}` : vis.label);
-    // Use the SVG sun + ballerina for the supports that need
-    // platform-consistent rendering; everything else uses the
-    // requirement-vis emoji glyph.
+    // data-supplier drives the chip's tint colour via cards.css
+    // (same palette as the card-typebar of the supplier type).
+    const supplier = REQ_SUPPLIER_TYPE[r.kind];
+    if (supplier) span.dataset.supplier = supplier;
     let iconHtml;
     if (r.kind === 'beam-receiver')  iconHtml = svgSunChip(16);
     else if (r.kind === 'spin-grav') iconHtml = svgBallerinaChip(16);

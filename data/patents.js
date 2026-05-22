@@ -36,7 +36,6 @@ export const REQUIREMENT_KINDS = [
   'gen-electric',           // e electric / photovoltaic
   // operational supports:
   'beam-receiver',          // ☀ solar / beam-pushed
-  'push-sat',               // 🛰 satellite carrier
   'isru-rig',               // 🛢 in-situ propellant intake
   'aerobrake-shroud',       // 🪂 atmospheric entry (Air Eater)
   // role / hardware supports (legacy hand-written cards used
@@ -74,7 +73,6 @@ const BOOLEAN_TO_REQ = {
   '⟛ Generator':   'gen-radioisotope',
   'e Generator':    'gen-electric',
   'Solar':          'beam-receiver',
-  'Push':           'push-sat',
   'ISRU':           'isru-rig',
   'Air Eater':      'aerobrake-shroud',
 };

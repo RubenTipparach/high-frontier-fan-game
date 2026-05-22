@@ -274,6 +274,22 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Supplier-tinted chips: the chip's background matches the
+   typebar colour of the card type that satisfies this support,
+   so "thruster needs a fission reactor" reads visually as a
+   purple chip on the thruster card. Tints use the same palette
+   as the card-typebar rules above so the cross-reference is
+   immediate. White text on the saturated tint reads well; the
+   card-face[data-face="primary"] rule below restores dark text
+   on the lighter backgrounds for the primary face. */
+.card-requires .req[data-supplier="reactor"]   { background: #a78bfa; color: #1c0f3a; border-color: #6d4ce0; }
+.card-requires .req[data-supplier="radiator"]  { background: #7dd3fc; color: #0a2c43; border-color: #0ea5e9; }
+.card-requires .req[data-supplier="refinery"]  { background: #86efac; color: #06321a; border-color: #16a34a; }
+.card-requires .req[data-supplier="robonaut"]  { background: #c4b5fd; color: #2a1968; border-color: #8b5cf6; }
+.card-requires .req[data-supplier="generator"] { background: #f97316; color: #2e0f02; border-color: #c2410c; }
+.card-requires .req[data-supplier]             { font-weight: 600; }
+.card-requires .req[data-supplier] b           { color: inherit; opacity: 0.85; }
+
 .card-name {
   font-weight: 600;
   color: var(--ink);
