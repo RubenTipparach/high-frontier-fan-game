@@ -45,7 +45,7 @@ const HALO_MAX_SCREEN_R = 110;
 //   haloR  = body sphere radius (world units, per body class)
 // HEX_R can be changed freely without affecting how big Jupiter or
 // Luna looks behind its hex.
-const HEX_R = 26;
+const HEX_R = 30;
 const TYPE_VIS = {
   site:           { kind: 'hex',    r: HEX_R, haloR: 20 },
   'gas-giant':    { kind: 'hex',    r: HEX_R, haloR: 48 },

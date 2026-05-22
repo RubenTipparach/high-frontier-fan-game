@@ -387,26 +387,47 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .browse-sidepanel[data-active=""] { width: 48px; }
 
-@media (orientation: portrait) {
-  /* Bottom flyout. Tabs run horizontally along the top of the
-     sheet; opening a pane expands the sheet upward to ~55vh. */
+/* Phone / narrow-portrait layout. The 720px width breakpoint is
+   more reliable than (orientation: portrait) — landscape phones,
+   foldables, and split-screen tablets all want the same bottom-
+   sheet treatment. The panel anchors to the bottom edge and
+   slides up when a tab is selected. A 4px drag handle sits at
+   the top of the sheet so the affordance reads as "this opens
+   upward" without needing a tutorial. */
+@media (max-width: 720px) {
   .browse-sidepanel {
     flex-direction: column;
     border-left: none;
     border-top: 1px solid var(--border);
+    border-top-left-radius: 14px;
+    border-top-right-radius: 14px;
+    box-shadow: 0 -12px 24px rgba(0, 0, 0, 0.45);
     top: auto;
     left: 0;
     right: 0;
     bottom: 0;
     width: auto !important;
-    height: 56px;
+    height: 64px;
+  }
+  .browse-sidepanel::before {
+    content: "";
+    position: absolute;
+    top: 6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 44px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--ink-mute);
+    opacity: 0.6;
+    pointer-events: none;
   }
   .browse-sidepanel[data-active] {
     width: auto !important;
-    height: 55vh;
+    height: 70vh;
   }
   .browse-sidepanel[data-active=""] {
-    height: 56px;
+    height: 64px;
   }
 }
 
@@ -419,16 +440,23 @@ body:has(#view-browse:not(.hidden)) #main {
   border-right: 1px solid var(--border);
   flex: 0 0 48px;
 }
-@media (orientation: portrait) {
+@media (max-width: 720px) {
   .sidepanel-tabs {
     flex-direction: row;
     border-right: none;
     border-bottom: 1px solid var(--border);
-    height: 56px;
-    padding: 8px 10px;
-    justify-content: flex-start;
-    flex: 0 0 56px;
+    height: 64px;
+    padding: 14px 12px 8px;
+    justify-content: space-around;
+    flex: 0 0 64px;
     overflow-x: auto;
+    gap: 2px;
+  }
+  .sidepanel-tabs button {
+    width: 44px;
+    height: 44px;
+    font-size: 22px;
+    flex-shrink: 0;
   }
 }
 .sidepanel-tabs button {
