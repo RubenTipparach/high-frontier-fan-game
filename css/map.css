@@ -537,7 +537,30 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .patent-filter button {
   font-size: 12px;
+  border-left: 4px solid transparent;
+  font-weight: 600;
 }
+/* Colour-code the filter pills to match the typebar of the
+   card type they filter — instant visual cross-reference
+   between this row and the cards rendered below. The 4px left
+   stripe carries the supplier accent; the chip's background
+   stays subdued so the typography reads cleanly. Active state
+   floods the pill with the supplier colour. */
+.patent-filter button[data-type="thruster"]  { border-left-color: #f8a47a; }
+.patent-filter button[data-type="reactor"]   { border-left-color: #a78bfa; }
+.patent-filter button[data-type="radiator"]  { border-left-color: #7dd3fc; }
+.patent-filter button[data-type="refinery"]  { border-left-color: #94a3b8; }
+.patent-filter button[data-type="robonaut"]  { border-left-color: #f9a8d4; }
+.patent-filter button[data-type="generator"] { border-left-color: #f97316; }
+.patent-filter button[data-type="crew"]      { border-left-color: #fde047; }
+
+.patent-filter button.active[data-type="thruster"]  { background: #f8a47a; color: #2e1407; border-color: #c2410c; }
+.patent-filter button.active[data-type="reactor"]   { background: #a78bfa; color: #1c0f3a; border-color: #4c1d95; }
+.patent-filter button.active[data-type="radiator"]  { background: #7dd3fc; color: #0a2c43; border-color: #075985; }
+.patent-filter button.active[data-type="refinery"]  { background: #94a3b8; color: #0f172a; border-color: #334155; }
+.patent-filter button.active[data-type="robonaut"]  { background: #f9a8d4; color: #500724; border-color: #be185d; }
+.patent-filter button.active[data-type="generator"] { background: #f97316; color: #2e0f02; border-color: #9a3412; }
+.patent-filter button.active[data-type="crew"]      { background: #fde047; color: #3a2a02; border-color: #a16207; }
 .patent-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
