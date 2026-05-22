@@ -853,7 +853,10 @@ body:has(#view-browse:not(.hidden)) #main {
      Tapping a tab still opens the pane as its own modal. */
   .browse-sidepanel {
     position: absolute;
-    top: 12px;
+    /* Clear the map-toolbar (Cleaned up / Classic / Find site)
+       which sits at the top of the browse-stage. ~48px toolbar
+       + a few px of breathing room. */
+    top: 60px;
     left: 50%;
     right: auto;
     bottom: auto;
