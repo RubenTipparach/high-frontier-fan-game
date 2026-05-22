@@ -348,6 +348,58 @@ body:has(#view-browse:not(.hidden)) #main {
   overflow: hidden;
 }
 
+/* Routing pick-mode: the user has pressed "Navigate to" on a
+   site and is now picking a destination. A pulsing orange
+   stripe ring on the map shell announces "you're in destination-
+   picking mode" so it doesn't surprise the user when the next
+   click changes the route. Press Clear route to escape. */
+.browse-shell.is-routing::before {
+  content: "Tap a destination site…";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+  border: 4px dashed rgba(249, 115, 22, 0.85);
+  box-shadow: inset 0 0 24px rgba(249, 115, 22, 0.18);
+  padding: 4px 12px;
+  color: #fbbf24;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  animation: routing-pulse 1.6s ease-in-out infinite;
+}
+@keyframes routing-pulse {
+  0%, 100% { border-color: rgba(249, 115, 22, 0.85); }
+  50%      { border-color: rgba(251, 191, 36, 0.95); }
+}
+
+/* "Navigate to" button on the selected-site info card. Reads as
+   the primary action since it's the only verb in the panel. */
+.site-actions { margin-top: 10px; }
+#site-navigate-to {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  background: var(--accent);
+  color: #062136;
+  border: 1px solid var(--accent-2);
+  border-radius: 6px;
+  cursor: pointer;
+  letter-spacing: 0.6px;
+}
+#site-navigate-to:hover:not(:disabled) {
+  background: var(--accent-2);
+  color: #fff;
+}
+#site-navigate-to:disabled {
+  background: var(--bg-2);
+  color: var(--ink-mute);
+  border-color: var(--border);
+  cursor: not-allowed;
+}
+
 /* Sandbox hand strip: a horizontal panel anchored at the
    bottom of the map area. Holds the cards the player has
    dragged out of the patent deck to build a tentative rocket.

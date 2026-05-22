@@ -169,8 +169,10 @@ function showPane(pane) {
 // Route state: shared across renderer instances. Tapping the first
 // site sets `from`, tapping the second sets `to` and triggers the
 // pathfinder; tapping again starts a new route from that site.
-let _routeFrom = null;
-let _routeTo = null;
+let _routeFrom = null;     // origin once a route has been plotted
+let _routeTo = null;       // destination once a route has been plotted
+let _selectedId = null;    // currently-highlighted site (just info, no routing)
+let _routingMode = false;  // true while the user is picking a destination
 let _activeData = null;
 
 async function renderMap() {
@@ -510,6 +512,11 @@ function populateSiteInfo(site) {
       <li class="row-astro" hidden><span>Astrobiology</span><strong>🌿</strong></li>
       <li class="row-aero" hidden><span>Aerobrakes</span><strong class="aero">—</strong></li>
     </ul>
+    <div class="site-actions">
+      <button id="site-navigate-to" type="button" class="primary">
+        Navigate to here →
+      </button>
+    </div>
   `;
   info.querySelector('.site-name').textContent = site.name;
   info.querySelector('.type').textContent = site.type;
@@ -522,13 +529,42 @@ function populateSiteInfo(site) {
     info.querySelector('.row-aero').hidden = false;
     info.querySelector('.aero').textContent = String(site.aerobrakes);
   }
+  // "Navigate to" arms the routing-pick mode. The next site the
+  // user taps becomes the destination of a route originating
+  // from this one. Disabled on decorative / non-landable sites.
+  const navBtn = info.querySelector('#site-navigate-to');
+  if (site.isDecorative || site.isLandable === false) {
+    navBtn.disabled = true;
+    navBtn.title = 'This site is not landable.';
+  } else {
+    navBtn.addEventListener('click', () => enterRoutingMode(site));
+  }
+}
+
+function enterRoutingMode(origin) {
+  _routingMode = true;
+  _routeFrom = origin;
+  _routeTo = null;
+  if (_renderer) {
+    _renderer.setRoute(null);
+    _renderer.setRouteEndpoints(origin.id, null);
+  }
+  document.querySelector('.browse-shell')?.classList.add('is-routing');
+  document.getElementById('route-clear').hidden = false;
+  setStatus(
+    `Picking destination from <strong>${esc(origin.name)}</strong> — `
+    + `tap any landable site. Press Clear route to cancel.`
+  );
+}
+
+function exitRoutingMode() {
+  _routingMode = false;
+  document.querySelector('.browse-shell')?.classList.remove('is-routing');
 }
 
 function onSiteSelect(site) {
   // Solo mode hijacks clicks: every site you tap becomes the
-  // proposed destination for your ship's current position. The
-  // multiplayer "two-tap route" planner stays available when no
-  // solo game is active.
+  // proposed destination for your ship's current position.
   const s = soloState();
   if (s && !s.gameOver) {
     populateSiteInfo(site);
@@ -542,55 +578,75 @@ function onSiteSelect(site) {
     showPane('solo');
     return;
   }
-  populateSiteInfo(site);
+
+  // Routing-pick mode: the user already pressed "Navigate to" on
+  // an origin and now the next tap is the destination. Plot the
+  // route and exit routing mode.
+  if (_routingMode && _routeFrom) {
+    if (site.isDecorative || site.isLandable === false) {
+      setStatus(`<strong>${esc(site.name)}</strong> is not landable — pick another site.`);
+      return;
+    }
+    if (site.id === _routeFrom.id) {
+      setStatus(`Destination must differ from <strong>${esc(_routeFrom.name)}</strong>.`);
+      return;
+    }
+    _routeTo = site;
+    const result = findPath(_activeData, _routeFrom.id, _routeTo.id);
+    if (!result) {
+      setStatus(`No route from <strong>${esc(_routeFrom.name)}</strong> to <strong>${esc(site.name)}</strong>.`);
+      _renderer.setRoute(null);
+      _renderer.setRouteEndpoints(_routeFrom.id, site.id);
+      exitRoutingMode();
+      return;
+    }
+    _renderer.setRoute(result.segments);
+    _renderer.setRouteEndpoints(_routeFrom.id, _routeTo.id);
+    const hops = result.segments.length;
+    setStatus(
+      `<strong>${esc(_routeFrom.name)}</strong> → <strong>${esc(_routeTo.name)}</strong>: ` +
+      `<strong class="big">${result.totalBurns}</strong> burns over ${hops} hop${hops === 1 ? '' : 's'}.`
+    );
+    exitRoutingMode();
+    return;
+  }
+
+  // Default tap behaviour: tap a site to select + show info;
+  // tap the SAME site again to deselect. No route is started by
+  // simple clicks — the user has to press "Navigate to" in the
+  // info panel to begin routing.
+  if (_selectedId === site.id) {
+    _selectedId = null;
+    if (_renderer) _renderer.setRouteEndpoints(null, null);
+    setStatus('Tap a site to see its info. Press "Navigate to" to plan a route.');
+    showPane(null);
+    return;
+  }
+
+  _selectedId = site.id;
+  if (_renderer) _renderer.setRouteEndpoints(site.id, null);
 
   if (site.isDecorative) {
     setStatus(`Decorative routing node — not selectable.`);
     return;
   }
+
+  populateSiteInfo(site);
   showPane('info');
-
-  if (!_routeFrom || (_routeFrom && _routeTo)) {
-    _routeFrom = site;
-    _routeTo = null;
-    _renderer.setRoute(null);
-    _renderer.setRouteEndpoints(site.id, null);
-    setStatus(`From <strong>${esc(site.name)}</strong> — tap a destination.`);
-    document.getElementById('route-clear').hidden = false;
-    return;
-  }
-
-  if (site.id === _routeFrom.id) {
-    setStatus(`Tap a different site to set the destination.`);
-    return;
-  }
-
-  _routeTo = site;
-  const result = findPath(_activeData, _routeFrom.id, _routeTo.id);
-  if (!result) {
-    setStatus(`No route from <strong>${esc(_routeFrom.name)}</strong> to <strong>${esc(site.name)}</strong>.`);
-    _renderer.setRoute(null);
-    _renderer.setRouteEndpoints(_routeFrom.id, site.id);
-    return;
-  }
-  _renderer.setRoute(result.segments);
-  _renderer.setRouteEndpoints(_routeFrom.id, _routeTo.id);
-  const hops = result.segments.length;
-  setStatus(
-    `<strong>${esc(_routeFrom.name)}</strong> → <strong>${esc(_routeTo.name)}</strong>: ` +
-    `<strong class="big">${result.totalBurns}</strong> burns over ${hops} hop${hops === 1 ? '' : 's'}.`
-  );
+  setStatus(`Selected <strong>${esc(site.name)}</strong>.`);
 }
 
 function clearRoute() {
   _routeFrom = null;
   _routeTo = null;
+  _selectedId = null;
+  exitRoutingMode();
   if (_renderer) {
     _renderer.setRoute(null);
     _renderer.setRouteEndpoints(null, null);
   }
   document.getElementById('route-clear').hidden = true;
-  setStatus('Tap a site to plan a route.');
+  setStatus('Tap a site to see its info. Press "Navigate to" to plan a route.');
 }
 
 function setStatus(html) {

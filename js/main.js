@@ -88,6 +88,23 @@ function initBrowseButton() {
     showView('view-browse');
     mountBrowse();
   });
+
+  // Topbar fullscreen toggle. Uses the same browser API as the
+  // map-toolbar button; this one promotes the whole page so the
+  // sidepanel + hand strip come along for the ride.
+  const fsBtn = document.getElementById('btn-fullscreen');
+  if (fsBtn) {
+    fsBtn.addEventListener('click', () => {
+      if (document.fullscreenElement) {
+        document.exitFullscreen?.();
+      } else {
+        document.documentElement.requestFullscreen?.();
+      }
+    });
+    document.addEventListener('fullscreenchange', () => {
+      fsBtn.textContent = document.fullscreenElement ? '⤬' : '⛶';
+    });
+  }
 }
 
 function initAccountMenu() {
