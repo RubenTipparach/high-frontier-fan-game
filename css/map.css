@@ -335,20 +335,22 @@ body:has(#view-browse:not(.hidden)) #main {
   max-width: none;
 }
 
+/* The browse shell is a positioning context for the full-bleed
+   canvas + the sidebar overlay. The sidebar floats; it never
+   reflows the canvas, so the map always fills the viewport even
+   when the panel is open. */
 .browse-shell {
-  display: flex;
+  position: relative;
   width: 100%;
-  /* topbar is roughly 56px; fall back to a CSS var if it ever
-     becomes configurable. */
   height: calc(100vh - 56px);
   min-height: 480px;
   background: #03020a;
+  overflow: hidden;
 }
 
 .browse-stage {
-  position: relative;
-  flex: 1 1 auto;
-  min-width: 0;
+  position: absolute;
+  inset: 0;
 }
 .browse-stage .browse-map {
   position: absolute;
@@ -357,24 +359,50 @@ body:has(#view-browse:not(.hidden)) #main {
   min-height: 0;
 }
 
-/* Sidebar. The tab strip is always visible (vertical buttons,
-   ~48px wide); the content pane only opens when a tab is active. */
+/* Sidebar overlays the right edge in landscape (default) and the
+   bottom edge in portrait. Tab strip stays visible at all times
+   so the user can re-open a pane; the content area expands when
+   data-active is set. */
 .browse-sidepanel {
+  position: absolute;
+  z-index: 4;
   display: flex;
   flex-direction: row;
-  flex: 0 0 auto;
   border-left: 1px solid var(--border);
   background: rgba(15, 16, 35, 0.94);
-  backdrop-filter: blur(4px);
-  transition: width 0.22s ease;
+  backdrop-filter: blur(6px);
+  transition: width 0.22s ease, height 0.22s ease;
+  top: 0;
+  right: 0;
+  bottom: 0;
   width: 48px;
 }
 .browse-sidepanel[data-active] {
   width: 380px;
 }
 .browse-sidepanel[data-active=""] { width: 48px; }
-@media (max-width: 700px) {
-  .browse-sidepanel[data-active] { width: 280px; }
+
+@media (orientation: portrait) {
+  /* Bottom flyout. Tabs run horizontally along the top of the
+     sheet; opening a pane expands the sheet upward to ~55vh. */
+  .browse-sidepanel {
+    flex-direction: column;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto !important;
+    height: 56px;
+  }
+  .browse-sidepanel[data-active] {
+    width: auto !important;
+    height: 55vh;
+  }
+  .browse-sidepanel[data-active=""] {
+    height: 56px;
+  }
 }
 
 .sidepanel-tabs {
@@ -385,6 +413,18 @@ body:has(#view-browse:not(.hidden)) #main {
   background: rgba(7, 6, 15, 0.85);
   border-right: 1px solid var(--border);
   flex: 0 0 48px;
+}
+@media (orientation: portrait) {
+  .sidepanel-tabs {
+    flex-direction: row;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    height: 56px;
+    padding: 8px 10px;
+    justify-content: flex-start;
+    flex: 0 0 56px;
+    overflow-x: auto;
+  }
 }
 .sidepanel-tabs button {
   width: 40px;

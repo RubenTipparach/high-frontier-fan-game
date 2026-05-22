@@ -60,7 +60,7 @@ const TYPE_VIS = {
   sun:            { kind: 'sun',    r: 30 },
   lagrange:       { kind: 'circle', r:  7, fill: 'transparent', stroke: '#c66932' },
   burn:           { kind: 'circle', r:  6, hitR: 8, fill: '#d60f7a', stroke: '#fde0ee', hideBelowZoom: 1.4 },
-  hohmann:        { kind: 'circle', r:  2, hitR: 8, fill: '#10b981', stroke: '#a7f3d0' },
+  hohmann:        { kind: 'circle', r:  4, hitR: 9, fill: '#10b981', stroke: '#a7f3d0' },
   venus:          { kind: 'circle', r:  8, fill: '#fb923c', stroke: '#fed7aa' },
   radhaz:         { kind: 'circle', r:  7, fill: '#fbbf24', stroke: '#fde68a' },
   orbit:          { kind: 'circle', r:  6, fill: '#0c0a16', stroke: '#7dd3fc' },
@@ -1096,6 +1096,26 @@ export class MapRenderer {
         ctx.stroke();
       }
 
+      // Pink lander rings: every burn node that carries a landing
+      // flag gets a magenta disc behind the rocket glyph, so the
+      // gameplay token is still visually present underneath the
+      // emoji overlay drawn later.
+      if (landings.length) {
+        ctx.fillStyle = vis.fill;
+        ctx.strokeStyle = vis.stroke;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        for (const w of landings) {
+          const sx = this.pan.x + w.x * eff;
+          const sy = this.pan.y + w.y * eff;
+          if (sx < -vis.r * 2 || sx > hostW + vis.r * 2 || sy < -vis.r * 2 || sy > hostH + vis.r * 2) continue;
+          const ringR = vis.r * 1.4;
+          ctx.moveTo(sx + ringR, sy);
+          ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
+        }
+        ctx.fill();
+        ctx.stroke();
+      }
       // Landing burns are now drawn as a 🚀 glyph (with /2 for
       // partial landings); see the per-emoji pass below. Skip
       // drawing the basic circle so we don't paint a magenta dot
