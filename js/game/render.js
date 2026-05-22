@@ -532,6 +532,14 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
+  // Solo: pin a "player ship" marker to a specific site. Drawn as
+  // a screen-space triangle floating above the site so it's
+  // visible regardless of the underlying hex.
+  setPlayerShipId(id) {
+    this._playerShipId = id || null;
+    this._scheduleDraw();
+  }
+
   reset() {
     this._fitToData();
     this._scheduleDraw();
@@ -788,6 +796,7 @@ export class MapRenderer {
     this._drawWaypointsScreen(ctx);
     this._drawSiteHexesScreen(ctx);
     this._drawSiteLabelsScreen(ctx);
+    this._drawPlayerShipScreen(ctx);
 
     // FPS book-keeping. The debug panel polls getFps(); we update
     // ~twice per second so the readout doesn't flicker.
@@ -1405,6 +1414,29 @@ export class MapRenderer {
       // Selected nodes are highlighted via their border + glow
       // above; no extra ring needed.
     }
+  }
+
+  // Player ship marker: bright triangle hovering above the
+  // current site. Solo mode sets this; multiplayer (Stage 3) will
+  // generalise to a per-player array.
+  _drawPlayerShipScreen(ctx) {
+    if (!this._playerShipId || !this.data) return;
+    const here = this.data.byId[this._playerShipId];
+    if (!here) return;
+    const eff = this.zoom * this.fitScale;
+    const sx = this.pan.x + here.x * eff;
+    const sy = this.pan.y + here.y * eff - HEX_R - 6;
+    // Down-pointing chevron so the apex anchors the site.
+    ctx.fillStyle = '#fde047';
+    ctx.strokeStyle = '#0c0a16';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy + 6);
+    ctx.lineTo(sx - 7, sy - 6);
+    ctx.lineTo(sx + 7, sy - 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
   }
 
   _drawSiteLabelsScreen(ctx) {

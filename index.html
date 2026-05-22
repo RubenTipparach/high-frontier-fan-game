@@ -6,6 +6,7 @@
     <title>High Frontier — fan game</title>
     <link rel="stylesheet" href="./css/style.css?v=2" />
     <link rel="stylesheet" href="./css/map.css?v=1" />
+    <link rel="stylesheet" href="./css/cards.css?v=1" />
     <!--
       API base URL for the High Frontier companion server. Empty string
       = local-only mode (no profile, no lobby, no multiplayer). The
@@ -247,6 +248,7 @@
           <aside id="browse-sidepanel" class="browse-sidepanel" data-active="">
             <nav class="sidepanel-tabs" id="sidepanel-tabs">
               <button data-pane="info" title="Site info" aria-label="Site info">📍</button>
+              <button data-pane="solo" title="Solo play" aria-label="Solo play">🚀</button>
               <button data-pane="patents" title="Patents" aria-label="Patents">💎</button>
               <button data-pane="milestones" title="Milestones" aria-label="Milestones">🏆</button>
               <button data-pane="events" title="Events" aria-label="Events">📜</button>
@@ -258,6 +260,12 @@
                 <h3>Site info</h3>
                 <div id="browse-map-info">
                   <p class="muted">Tap any site on the map to see its details.</p>
+                </div>
+              </div>
+              <div class="panel-pane" data-pane="solo">
+                <h3>Solo play</h3>
+                <div id="solo-panel">
+                  <p class="muted">Loading…</p>
                 </div>
               </div>
               <div class="panel-pane" data-pane="patents">

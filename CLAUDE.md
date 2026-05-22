@@ -8,9 +8,66 @@ affiliated with the publisher.
 
 - Core rules PDF (publisher-hosted):
   https://gamers-hq.de/media/pdf/c5/f2/cf/HF4-Core-Rules.pdf
+- Variants & scenarios appendix:
+  https://geekach.com.ua/content/files/varanti-ta-scenar-high-frontier-4-all-anglyskou-movou-62879102.pdf
 - BGG entry: https://boardgamegeek.com/boardgame/281837/high-frontier-4-all
 - Reference repo for architecture/login/deploy patterns:
   https://github.com/RubenTipparach/murdoku-companion
+
+## Variants we target
+
+Scope is intentionally narrow — only two play modes ship in this
+implementation right now:
+
+- **Standard** — the base multiplayer game described in the core
+  rulebook. Drives the lobby / multiplayer engine.
+- **CEO Solitaire** — the published one-player variant. Drives
+  the solo mode (`js/game/solo.js`); a single player runs one
+  ship against a round clock with no AI opponent. Engine is
+  original; only the structural concept (manage water, prospect,
+  claim, end-of-round income) is taken from the variant's design.
+
+Other variants (campaign, scenarios) are explicitly out of scope
+for now. Don't pull them in without a discussion first.
+
+## Card model
+
+Every card on the map / in a hand carries the same minimum set of
+fields so the renderer + engine don't need per-card-type branches
+for the common stats:
+
+- `id` — stable string key
+- `name` — display label
+- `type` — `thruster | reactor | radiator | refinery | robonaut |
+  generator | lab | crew | ...`
+- `mass` — wet mass added to the ship stack (integer units)
+- `radHardness` — rad-hardness rating (integer); cards with low
+  values degrade faster near radiation hazards
+- `faces` — `{ primary, secondary }`. Every component card is
+  double-sided. By convention the **secondary face is the "black"
+  / installed face**. Faces can carry their own stats so a
+  flipped card behaves differently (e.g. a radiator opened vs
+  stowed, or a thruster with a mode change).
+- `flipOrientation` — `'standard'` (default) or `'rotated180'`.
+  Radiators are typically `'rotated180'`: their secondary face is
+  drawn upside-down, matching the published cards.
+
+Thruster-specific fields (carried on whichever face is active):
+- `thrust` — push capacity (drives the thrust triangle visual)
+- `isp` — burns per fuel unit
+- `power_req` — power draw (0 = self-powered)
+
+Crew cards: still double-sided, but the two faces are
+**functionally independent** — each face is its own crew member
+with their own role / skills, sharing only the physical card.
+Use `faces.primary` and `faces.secondary` as fully-formed crew
+records; nothing should treat the "back" of a crew card as a
+secondary mode of the front.
+
+Some cards (boosters, augments, certain robonauts) **modify**
+another card's stats while attached. The engine handles this via
+a `modifier` block on the modifying card; see
+`server/game/engine.js` (Stage 3+) for how those compose.
 
 ## Stages — build incrementally
 

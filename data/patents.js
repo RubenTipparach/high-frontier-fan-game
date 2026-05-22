@@ -127,6 +127,43 @@ export const PATENTS = [
 // Look up patents by id and by type. The renderer uses these to group
 // cards in the browser view; the engine will use them at BUILD time.
 
+// Auto-derived radHardness defaults per type so we don't have to
+// hand-write a value on every card. Hard numbers can be overridden
+// by adding a `radHardness` field on the individual patent. Range
+// 0..3; higher = more tolerant of radiation hazards on the route.
+const RAD_HARDNESS_BY_TYPE = {
+  thruster:  2,
+  reactor:   3,
+  radiator:  1,
+  refinery:  2,
+  robonaut:  2,
+  generator: 1,
+  lab:       1,
+};
+
+// Radiators flip rotated 180° (the published cards show a
+// "stowed" face that reads upside-down when installed). Everything
+// else flips with the same orientation as the front.
+const ROTATED_TYPES = new Set(['radiator']);
+
+// Decorate every patent with the new schema fields lazily so we
+// don't have to repeat them on each record. Faces are minimal --
+// the secondary face is the "installed / black" side and carries
+// the same numbers by default; component-specific overrides go
+// straight on the patent record (modifier, flippedMass, etc.).
+for (const p of PATENTS) {
+  if (!('radHardness' in p)) p.radHardness = RAD_HARDNESS_BY_TYPE[p.type] ?? 1;
+  if (!p.flipOrientation) {
+    p.flipOrientation = ROTATED_TYPES.has(p.type) ? 'rotated180' : 'standard';
+  }
+  if (!p.faces) {
+    p.faces = {
+      primary: { label: 'Stowed', blurb: p.blurb },
+      secondary: { label: 'Installed', blurb: 'Installed face — black side.' },
+    };
+  }
+}
+
 export const PATENTS_BY_ID = Object.fromEntries(PATENTS.map((p) => [p.id, p]));
 
 export function patentsByType(type) {

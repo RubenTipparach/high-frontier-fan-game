@@ -9,10 +9,18 @@ import { MapRenderer } from './render.js';
 import { loadPlannerMap } from './planner-map.js';
 import { loadCleanMap } from './clean-map.js';
 import { findPath } from './nav.js';
+import {
+  getState as soloState, newGame as soloNewGame, abandonGame as soloAbandon,
+  setTarget as soloSetTarget, commitMove as soloCommitMove,
+  prospect as soloProspect, endRound as soloEndRound,
+  bindData as soloBindData, onChange as soloOnChange, SOLO_CONFIG,
+} from './solo.js';
 import { PATENTS, PATENT_TYPES, patentsByType } from '../../data/patents.js';
+import { CREW } from '../../data/crew.js';
 import { MILESTONES } from '../../data/glory.js';
 import { POLITICS } from '../../data/politics.js';
 import { SITES_BY_ID } from '../../data/sites.js';
+import { renderCard } from './card-ui.js';
 
 // User-selected map mode. Persists across sessions so the player
 // keeps whichever view they prefer for playtesting. Default to the
@@ -81,6 +89,7 @@ function showPane(pane) {
   if      (pane === 'patents')    renderPatents();
   else if (pane === 'milestones') renderMilestones();
   else if (pane === 'events')     renderEvents();
+  else if (pane === 'solo')       renderSolo();
 }
 
 // Route state: shared across renderer instances. Tapping the first
@@ -386,19 +395,36 @@ async function mountMapFor(mode) {
   updateRouteStatus();
   try {
     _activeData = await loadMap(mode);
+    soloBindData(_activeData);
     _renderer = new MapRenderer(canvas, {
       data: _activeData,
       onSelect: onSiteSelect,
     });
     wireDebugPanel(_renderer);
+    syncSoloShipMarker();
   } catch (err) {
     canvas.innerHTML = `<div class="map-loading error">Map failed to load: ${err.message}</div>`;
   }
 }
 
-function onSiteSelect(site) {
-  // Populate the Site Info pane and pop it open.
+// Solo state change -> refresh the panel + the ship marker on the
+// map. The listener is hooked once (sidebar wire-up time) and
+// dispatches whenever solo.js calls emit().
+function syncSoloShipMarker() {
+  if (!_renderer) return;
+  const s = soloState();
+  if (s && !s.gameOver) {
+    _renderer.setPlayerShipId(s.ship.at);
+    _renderer.setRoute(s.pendingPath ? s.pendingPath.segments : null);
+    _renderer.setRouteEndpoints(s.ship.at, s.pendingTargetId || null);
+  } else {
+    _renderer.setPlayerShipId(null);
+  }
+}
+
+function populateSiteInfo(site) {
   const info = document.getElementById('browse-map-info');
+  if (!info) return;
   info.innerHTML = `
     <h4 class="site-name"></h4>
     <ul class="kv">
@@ -422,17 +448,33 @@ function onSiteSelect(site) {
     info.querySelector('.row-aero').hidden = false;
     info.querySelector('.aero').textContent = String(site.aerobrakes);
   }
-  showPane('info');
+}
 
-  // Decorative dots only exist to bend chains; they're not
-  // selectable. Every other waypoint (lagrange, burn, hohmann,
-  // radhaz, venus) is fair game as a route endpoint -- the user
-  // explicitly asked that all Hohmann transfer points be
-  // selectable.
+function onSiteSelect(site) {
+  // Solo mode hijacks clicks: every site you tap becomes the
+  // proposed destination for your ship's current position. The
+  // multiplayer "two-tap route" planner stays available when no
+  // solo game is active.
+  const s = soloState();
+  if (s && !s.gameOver) {
+    populateSiteInfo(site);
+    if (site.id === s.ship.at) {
+      soloSetTarget(null);
+    } else if (site.isLandable === false || site.isDecorative) {
+      // Sun, Earth-as-flavour-body, decoratives -- not pickable.
+    } else {
+      soloSetTarget(site.id);
+    }
+    showPane('solo');
+    return;
+  }
+  populateSiteInfo(site);
+
   if (site.isDecorative) {
     setStatus(`Decorative routing node — not selectable.`);
     return;
   }
+  showPane('info');
 
   if (!_routeFrom || (_routeFrom && _routeTo)) {
     _routeFrom = site;
@@ -497,35 +539,52 @@ function renderPatents() {
   if (!host) return;
   host.innerHTML = '';
 
-  // Filter bar.
+  // Filter bar: All / per-type / Crew. Crew lives in its own
+  // deck (data/crew.js) but the card UI handles both.
   const bar = document.createElement('div');
   bar.className = 'patent-filter';
-  bar.innerHTML = `<button class="active" data-type="all">All (${PATENTS.length})</button>`;
+  bar.innerHTML = `<button class="active" data-type="all">All (${PATENTS.length + CREW.length})</button>`;
   for (const t of PATENT_TYPES) {
     const n = patentsByType(t).length;
     bar.innerHTML += `<button data-type="${t}">${cap(t)} (${n})</button>`;
   }
+  bar.innerHTML += `<button data-type="crew">Crew (${CREW.length})</button>`;
   host.appendChild(bar);
+
+  const grid = document.createElement('div');
+  grid.className = 'card-grid';
+  host.appendChild(grid);
+
+  const repaint = (filter) => {
+    grid.innerHTML = '';
+    if (filter === 'crew') {
+      for (const c of CREW) grid.appendChild(renderCard(c, { type: 'crew' }));
+      return;
+    }
+    for (const p of PATENTS) {
+      if (filter !== 'all' && p.type !== filter) continue;
+      grid.appendChild(renderCard(p, { type: 'patent' }));
+    }
+    if (filter === 'all') {
+      // Append crew at the end of "all" so the deck reads as
+      // "everything you can build / staff".
+      for (const c of CREW) grid.appendChild(renderCard(c, { type: 'crew' }));
+    }
+  };
+
   bar.querySelectorAll('button').forEach((b) => {
     b.onclick = () => {
       bar.querySelectorAll('button').forEach((x) => x.classList.toggle('active', x === b));
-      const filter = b.dataset.type;
-      grid.innerHTML = '';
-      for (const p of PATENTS) {
-        if (filter !== 'all' && p.type !== filter) continue;
-        grid.appendChild(patentCard(p));
-      }
+      repaint(b.dataset.type);
     };
   });
-
-  // Grid.
-  const grid = document.createElement('div');
-  grid.className = 'patent-grid';
-  host.appendChild(grid);
-  for (const p of PATENTS) grid.appendChild(patentCard(p));
+  repaint('all');
 }
 
-function patentCard(p) {
+// Legacy patent-card builder kept for now (unused after switch to
+// renderCard; will be removed in a follow-up commit once nothing
+// imports it). Pruning aggressively to keep the bundle small.
+function legacyPatentCard(p) {
   const card = document.createElement('div');
   card.className = 'patent-card type-' + p.type;
   card.innerHTML = `
@@ -585,6 +644,101 @@ function renderMilestones() {
     li.querySelector('p').textContent = m.blurb;
     list.appendChild(li);
   }
+}
+
+// Solo panel: stats + per-round actions when a game is running,
+// "New game" button otherwise. Re-rendered on every solo state
+// change via the soloOnChange listener wired in mountBrowse.
+let _soloListenerHooked = false;
+function renderSolo() {
+  if (!_soloListenerHooked) {
+    _soloListenerHooked = true;
+    soloOnChange(() => {
+      // Re-render only if the solo pane is currently visible; the
+      // ship marker is updated separately.
+      const panel = document.getElementById('browse-sidepanel');
+      if (panel && panel.dataset.active === 'solo') paintSolo();
+      syncSoloShipMarker();
+    });
+  }
+  paintSolo();
+}
+
+function paintSolo() {
+  const host = document.getElementById('solo-panel');
+  if (!host) return;
+  const s = soloState();
+  if (!s) {
+    host.innerHTML = `
+      <p class="muted">A solo game pits one ship against the round
+      clock. ${SOLO_CONFIG.STARTING_WATER} water, ${SOLO_CONFIG.OPS_PER_ROUND}
+      operations per round, ${SOLO_CONFIG.MAX_ROUNDS} rounds,
+      target ${SOLO_CONFIG.TARGET_VP} VP.</p>
+      <button class="primary" id="solo-new">Start solo game</button>
+    `;
+    host.querySelector('#solo-new').onclick = () => {
+      soloNewGame();
+      paintSolo();
+    };
+    return;
+  }
+  const here   = _activeData && _activeData.byId[s.ship.at];
+  const target = s.pendingTargetId && _activeData && _activeData.byId[s.pendingTargetId];
+  const ops    = Math.max(0, SOLO_CONFIG.OPS_PER_ROUND - s.turn);
+  const claimedHere = here && s.claimed.includes(here.id);
+  const canProspect = !!here && !here.isWaypoint && !s.gameOver
+    && ops > 0 && !claimedHere && here.isLandable !== false;
+  const moveCost = s.pendingPath ? s.pendingPath.totalBurns : null;
+  const canMove = !s.gameOver && ops > 0 && moveCost != null && moveCost <= s.water;
+  host.innerHTML = `
+    <div class="solo-stats">
+      <span>Round</span><strong>${s.round}/${SOLO_CONFIG.MAX_ROUNDS}</strong>
+      <span>Ops</span><strong>${ops}/${SOLO_CONFIG.OPS_PER_ROUND}</strong>
+      <span>Water</span><strong>${s.water}</strong>
+      <span>Score</span><strong>${s.score}/${SOLO_CONFIG.TARGET_VP}</strong>
+      <span>Claimed</span><strong>${s.claimed.length}</strong>
+    </div>
+    <p class="solo-here muted">At: <strong></strong></p>
+    <p class="solo-target muted"></p>
+    <div class="solo-actions">
+      <button class="primary" id="solo-move" ${canMove ? '' : 'disabled'}>Move</button>
+      <button id="solo-prospect" ${canProspect ? '' : 'disabled'}>Prospect</button>
+      <button id="solo-end">End round</button>
+    </div>
+    ${s.gameOver ? '<p class="solo-end-banner"></p>' : ''}
+    <details class="solo-log"><summary>Log</summary><ol></ol></details>
+    <button id="solo-abandon" class="danger" style="margin-top:10px">Abandon game</button>
+  `;
+  host.querySelector('.solo-here strong').textContent = here ? here.name : '—';
+  const targetEl = host.querySelector('.solo-target');
+  if (target && moveCost != null) {
+    targetEl.innerHTML = `→ <strong></strong> (${moveCost} burns, ${s.pendingPath.segments.length} hops)`;
+    targetEl.querySelector('strong').textContent = target.name;
+  } else if (s.pendingTargetId && !s.pendingPath) {
+    targetEl.textContent = `No route to ${target ? target.name : 'target'}.`;
+  } else {
+    targetEl.textContent = 'Tap a site on the map to plan a move.';
+  }
+  const log = host.querySelector('.solo-log ol');
+  for (const line of s.log.slice(0, 30)) {
+    const li = document.createElement('li');
+    li.textContent = line;
+    log.appendChild(li);
+  }
+  if (s.gameOver) {
+    host.querySelector('.solo-end-banner').textContent =
+      s.score >= SOLO_CONFIG.TARGET_VP ? '🏆 Victory!' : '⏱ Time up.';
+  }
+  host.querySelector('#solo-move').onclick = () => { soloCommitMove(); paintSolo(); syncSoloShipMarker(); };
+  host.querySelector('#solo-prospect').onclick = () => { soloProspect(); paintSolo(); };
+  host.querySelector('#solo-end').onclick = () => { soloEndRound(); paintSolo(); };
+  host.querySelector('#solo-abandon').onclick = () => {
+    if (confirm('Abandon this solo game? Progress is lost.')) {
+      soloAbandon();
+      paintSolo();
+      syncSoloShipMarker();
+    }
+  };
 }
 
 function renderEvents() {

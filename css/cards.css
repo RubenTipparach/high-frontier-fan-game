@@ -1,0 +1,190 @@
+/* Card grid for the patents/crew browser. Auto-fill responsive
+   columns with a comfortable card size; falls back to single
+   column on narrow screens. */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+/* Solo panel layout */
+.solo-stats {
+  display: grid;
+  grid-template-columns: auto 1fr auto 1fr;
+  gap: 4px 10px;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.solo-stats span { color: var(--ink-dim); }
+.solo-stats strong {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.solo-here, .solo-target {
+  margin: 4px 0;
+  font-size: 12px;
+}
+.solo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
+}
+.solo-actions button { font-size: 12px; padding: 6px 12px; }
+.solo-end-banner {
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--warm);
+  margin: 8px 0;
+}
+.solo-log {
+  margin: 10px 0;
+  font-size: 11px;
+}
+.solo-log summary { color: var(--ink-dim); cursor: pointer; }
+.solo-log ol {
+  margin: 6px 0 0 16px;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  color: var(--ink-dim);
+}
+.solo-log li { margin: 3px 0; }
+
+/* Game-style card silhouette. Built by js/game/card-ui.js;
+   variants are driven by the type-* class on the root node. */
+
+.card {
+  position: relative;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px 8px;
+  width: 220px;
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  color: var(--ink);
+  font-size: 12px;
+  overflow: hidden;
+}
+
+/* Type-coloured left strip so the deck is scannable by category. */
+.card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--ink-mute);
+}
+.card.type-thruster::before  { background: #f87171; }
+.card.type-reactor::before   { background: #fbbf24; }
+.card.type-radiator::before  { background: #7dd3fc; }
+.card.type-refinery::before  { background: #4ade80; }
+.card.type-robonaut::before  { background: #c084fc; }
+.card.type-lab::before       { background: #38bdf8; }
+.card.type-generator::before { background: #a78bfa; }
+.card.kind-crew::before      { background: #fde047; }
+
+/* Toggle face by data-side. Faces stack; only the active one is
+   shown. Radiators flip rotated 180°. */
+.card-face { display: none; flex-direction: column; flex: 1 1 auto; gap: 8px; }
+.card[data-side="primary"]   .card-face[data-face="primary"]   { display: flex; }
+.card[data-side="secondary"] .card-face[data-face="secondary"] { display: flex; }
+.card.flip-rotates[data-side="secondary"] .card-face[data-face="secondary"] {
+  transform: rotate(180deg);
+  transform-origin: center;
+}
+
+.card-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.card-type, .card-role {
+  font-size: 9px;
+  letter-spacing: 1.6px;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+}
+.card-name {
+  font-weight: 600;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 auto;
+}
+
+.thrust-triangle {
+  display: block;
+  max-width: 100px;
+  margin: 4px auto 2px;
+}
+
+.card-stats {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 8px;
+}
+.card-stats li {
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px dashed var(--border);
+  padding-bottom: 1px;
+  font-size: 11px;
+}
+.card-stats span { color: var(--ink-dim); }
+.card-stats strong {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.card-bonus {
+  margin: 0;
+  font-size: 11px;
+  color: var(--accent-2);
+  font-weight: 600;
+}
+.card-blurb {
+  margin: 0;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--ink-dim);
+  line-height: 1.35;
+}
+
+.card-footer {
+  display: flex;
+  gap: 10px;
+  font-size: 10px;
+  color: var(--ink-dim);
+  border-top: 1px dashed var(--border);
+  padding-top: 6px;
+}
+.card-footer em { font-style: normal; color: var(--ink-mute); margin-right: 4px; }
+.card-footer strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.card-footer .face-tag { margin-left: auto; color: var(--ink-mute); }
+
+.card-flip {
+  position: absolute;
+  bottom: 6px;
+  right: 8px;
+  background: rgba(15, 16, 35, 0.85);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--ink-dim);
+  font-size: 10px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.card-flip:hover { color: var(--ink); border-color: var(--accent-2); }
