@@ -22,7 +22,8 @@ import {
 } from './hand.js';
 import {
   getRocketStack, isInRocket, addToStack as rocketAddCard,
-  removeFromStack as rocketRemoveCard, onRocketChange, canRocketFly,
+  removeFromStack as rocketRemoveCard, clearStack as rocketClearStack,
+  onRocketChange, canRocketFly,
 } from './rocket.js';
 import { CREW } from '../../data/crew.js';
 import { MILESTONES } from '../../data/glory.js';
@@ -90,10 +91,14 @@ function wireHandStrip() {
     CREW.some((c) => c.id === id) ? 'crew' : 'patent';
 
   // Drag from the deck → drop onto the strip → append slot.
+  // preventDefault unconditionally on dragover — dataTransfer
+  // .types is normalised differently across browsers and the
+  // "includes" check was silently rejecting valid drags in
+  // Firefox + Safari. The drop handler still validates the
+  // payload before mutating state.
   host.addEventListener('dragover', (e) => {
-    if (!e.dataTransfer.types.includes('text/card-id')) return;
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
+    e.dataTransfer.dropEffect = 'move';
     host.classList.add('is-drop-target');
   });
   host.addEventListener('dragleave', () => host.classList.remove('is-drop-target'));
@@ -187,11 +192,14 @@ let _dragGhost = null;
 let _dragGhostState = null;
 
 function startCustomDragGhost(srcEl, ev) {
-  endCustomDragGhost();  // belt-and-braces cleanup
-  // 1px transparent GIF so the browser's default drag image
-  // shows nothing — our ghost replaces it.
-  const blank = new Image();
-  blank.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  endCustomDragGhost();
+  // 1×1 transparent canvas. setDragImage on a freshly-constructed
+  // <img src=data:…> raced the browser in Safari + Firefox —
+  // the drag started before the image loaded and the native
+  // ghost flickered in. A canvas is fully painted synchronously
+  // at the moment we hand it off, so the swap is reliable.
+  const blank = document.createElement('canvas');
+  blank.width = 1; blank.height = 1;
   try { ev.dataTransfer.setDragImage(blank, 0, 0); } catch { /* IE */ }
 
   const rect = srcEl.getBoundingClientRect();
@@ -261,6 +269,41 @@ function endCustomDragGhost() {
   if (_dragGhost) _dragGhost.remove();
   _dragGhost = null;
   _dragGhostState = null;
+}
+
+// Fly a card from one screen-space rectangle to another in a
+// short CSS transition. Used when the player clicks a "Grab" /
+// "Add to stack" button so the card visibly travels to its
+// destination instead of just teleporting via state change.
+// The flyer is a fresh clone — it's purely cosmetic — and
+// disposes itself when the transition ends.
+function flyCardTo(card, kind, fromRect, destSelector) {
+  const dest = document.querySelector(destSelector);
+  if (!dest) return;
+  const toRect = dest.getBoundingClientRect();
+  const flyer = renderCard(card, { type: kind });
+  flyer.classList.add('card-flyer');
+  flyer.style.left = `${fromRect.left}px`;
+  flyer.style.top  = `${fromRect.top}px`;
+  flyer.style.width  = `${fromRect.width}px`;
+  // Source card is full-size; destination is the hand strip's
+  // first slot region. Use top-right corner of the destination
+  // as the landing point so consecutive flies queue rightward.
+  document.body.appendChild(flyer);
+  // Force a layout pass so the CSS transition kicks in on the
+  // next frame, not the same frame as the append.
+  // eslint-disable-next-line no-unused-expressions
+  flyer.offsetWidth;
+  requestAnimationFrame(() => {
+    const cx = toRect.left + Math.min(toRect.width - 100, 80);
+    const cy = toRect.top  + 40;
+    flyer.style.transform = `translate(${cx - fromRect.left}px, ${cy - fromRect.top}px) scale(0.55) rotate(-6deg)`;
+    flyer.style.opacity = '0.0';
+  });
+  flyer.addEventListener('transitionend', () => flyer.remove(), { once: true });
+  // Safety: remove the flyer after a fixed timeout in case the
+  // transitionend event never fires (e.g. tab backgrounded).
+  setTimeout(() => flyer.remove(), 900);
 }
 
 // Tap modal for a card sitting in the deck. Confirms "add to
@@ -358,9 +401,24 @@ function openCardModal(card, kind, slotIdx) {
   stackBtn.textContent = 'Add to LEO stack';
   stackBtn.title = 'Add this card to your rocket parked in LEO';
   stackBtn.addEventListener('click', () => {
+    // Snapshot the slot's screen position before we mutate
+    // state — the hand strip re-renders and the source slot is
+    // gone by the time the animation kicks off.
+    const slotEl = document.querySelector(`#sandbox-hand-cards .hand-slot[data-slot-idx="${slotIdx}"]`);
+    const sourceRect = slotEl
+      ? slotEl.getBoundingClientRect()
+      : { left: 200, top: 400, width: 121, height: 192 };
     rocketAddCard(card.id, kind);
     removeFromHandAt(slotIdx);
     close();
+    // Open the rocket pane so the player sees the card land,
+    // and fly the card from the (former) hand slot into the
+    // rocket pane's grid.
+    showPane('rocket');
+    // Give the pane a frame to render before measuring it.
+    requestAnimationFrame(() => {
+      flyCardTo(card, kind, sourceRect, '#rocket-stack-cards, #rocket-panel');
+    });
   });
 
   const cancelBtn = document.createElement('button');
@@ -1053,8 +1111,16 @@ function renderPatents() {
     quick.title = 'Add this card to your hand';
     quick.addEventListener('click', (ev) => {
       ev.stopPropagation();
+      // Snapshot the library tile's screen position BEFORE the
+      // hand state mutates (the repaint that follows turns the
+      // tile into a greyed-out ✋ placeholder which is fine to
+      // animate from, but moving the snapshot first keeps the
+      // animation accurate). Then add to hand and launch the
+      // fly animation toward the hand strip.
+      const sourceRect = el.getBoundingClientRect();
       const r = addToHand(card);
-      if (!r.ok) setStatus(`Can't add: ${r.reason}.`);
+      if (!r.ok) { setStatus(`Can't add: ${r.reason}.`); return; }
+      flyCardTo(card, asKind, sourceRect, '#sandbox-hand-cards');
     });
     el.appendChild(quick);
     return el;
@@ -1191,11 +1257,23 @@ function paintSolo() {
       clock. ${SOLO_CONFIG.STARTING_WATER} water, ${SOLO_CONFIG.OPS_PER_ROUND}
       operations per round, ${SOLO_CONFIG.MAX_ROUNDS} rounds,
       target ${SOLO_CONFIG.TARGET_VP} VP.</p>
-      <button class="primary" id="solo-new" title="Start a new solo game">Reset</button>
+      <div class="solo-actions">
+        <button class="primary" id="solo-new" title="Start a new solo game">Start solo game</button>
+        <button class="danger" id="sandbox-reset"
+          title="Empty the hand, the rocket stack, and any board components">Reset sandbox</button>
+      </div>
     `;
     host.querySelector('#solo-new').onclick = () => {
       soloNewGame();
       paintSolo();
+    };
+    host.querySelector('#sandbox-reset').onclick = () => {
+      if (!confirm('Reset sandbox? This clears your hand, your rocket’s stack, and every component on the board.')) return;
+      clearHand();
+      rocketClearStack();
+      // Future: clear factories / refineries / claimed sites as
+      // those land in Stage 3.
+      setStatus('Sandbox reset — hand and rocket stack cleared.');
     };
     return;
   }

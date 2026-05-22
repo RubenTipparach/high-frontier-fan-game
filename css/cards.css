@@ -393,18 +393,29 @@
   line-height: 1.35;
 }
 
+/* Footer is now just a small reserved strip at the bottom of
+   the card for the Flip button (and future per-card actions).
+   The name moved up to .card-name-row right under the typebar
+   so the busy body content doesn't crash into it. */
 .card-footer {
-  display: flex;
-  gap: 10px;
-  font-size: 10px;
-  color: var(--ink-dim);
+  min-height: 26px;
   border-top: 1px dashed var(--border);
-  padding: 6px 10px;
+  padding: 4px 10px;
   background: rgba(15, 16, 35, 0.55);
 }
-.card-footer .card-name {
-  color: var(--ink);
-  font-size: 12px;
+
+/* Title strip right beneath the typebar. Centred, bold, with
+   a thin under-rule to read as the card's title plate. */
+.card-name-row {
+  padding: 4px 10px 5px;
+  text-align: center;
+  border-bottom: 1px dashed var(--border);
+  background: rgba(0, 0, 0, 0.04);
+}
+.card-name-row .card-name {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
 }
 
 .card-flip {
@@ -601,3 +612,19 @@
   transform: translateX(-50%) translateY(0);
 }
 .card-quick-add:hover { background: var(--accent-2); color: #fff; }
+
+/* Flyer card: a temporary clone that animates from the
+   library tile's screen position to the hand strip (or the
+   rocket pane) when the player taps Grab / Add to LEO stack.
+   The flyer is purely cosmetic — state has already updated —
+   it just lets the eye track where the card "went". */
+.card-flyer {
+  position: fixed;
+  z-index: 250;
+  pointer-events: none;
+  transition: transform 0.55s cubic-bezier(0.4, 1.4, 0.6, 1),
+              opacity 0.55s ease-out;
+  filter: drop-shadow(0 20px 30px rgba(0, 0, 0, 0.55));
+  transform: translate(0, 0) scale(1) rotate(0deg);
+  opacity: 1;
+}

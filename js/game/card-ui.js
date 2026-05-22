@@ -170,6 +170,7 @@ function buildFace(card, sideName, kind) {
   const isThruster = card.type === 'thruster' || card.thrust != null;
   face.innerHTML = `
     <div class="card-typebar"></div>
+    <div class="card-name-row"><span class="card-name"></span></div>
     <div class="card-statbox">
       <span><strong class="m"></strong> MASS</span>
       <span><strong class="r"></strong> RAD</span>
@@ -185,9 +186,7 @@ function buildFace(card, sideName, kind) {
       </div>
       <p class="card-blurb"></p>
     </div>
-    <div class="card-footer">
-      <span class="card-name"></span>
-    </div>
+    <div class="card-footer"></div>
   `;
   // Typebar icon strategy: for cards that SUPPLY support chips
   // (reactors, generators, radiators) show the actual chip

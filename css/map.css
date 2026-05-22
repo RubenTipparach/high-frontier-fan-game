@@ -410,9 +410,9 @@ body:has(#view-browse:not(.hidden)) #main {
   left: 0;
   right: 388px;  /* clear the open sidepanel */
   bottom: 0;
-  /* Tall enough that a 1.18× hovered card grows around its
-     centre without clipping at either edge. */
-  height: 260px;
+  /* Tall enough to fit the 40%-bigger default cards (220px ×
+     0.77 scale = 269px tall) plus a header + padding. */
+  height: 320px;
   background: rgba(8, 8, 18, 0.96);
   border-top: 1px solid var(--border);
   z-index: 3;
@@ -421,9 +421,6 @@ body:has(#view-browse:not(.hidden)) #main {
   padding: 6px 10px 10px;
   backdrop-filter: blur(6px);
   transition: right 0.22s ease;
-  /* Allow hover-grown cards to overflow the strip's top edge so
-     they read as floating in front of the map rather than
-     clipped against the strip border. */
   overflow: visible;
 }
 .browse-sidepanel[data-active=""] ~ .sandbox-hand { right: 48px; }
@@ -484,14 +481,18 @@ body:has(#view-browse:not(.hidden)) #main {
 .hand-slot {
   position: relative;
   flex-shrink: 0;
-  /* Slots overlap via negative margin so a multi-card hand
-     reads as a "fan" rather than a row of postage stamps.
-     Width matches the visible rect of the 220px card × 0.55
-     scale (= 121px). Negative margin = ~40% overlap. */
-  width: 121px;
+  /* 40% bigger than the previous pass — 220px card × 0.77
+     scale = ~169px wide. Slots overlap ~40% via negative
+     right margin so the hand reads as a fan. */
+  width: 169px;
   height: 100%;
   cursor: pointer;
-  margin-right: -48px;
+  margin-right: -68px;
+  /* transform-origin: top left so a hover scale grows the card
+     DOWNWARD and to the RIGHT — the top-left stays planted
+     where the pointer first met it. No more "the card moved
+     up away from me." */
+  transform-origin: top left;
   transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.2, 1),
               margin-right 0.22s cubic-bezier(0.2, 0.7, 0.2, 1),
               z-index 0s;
@@ -499,28 +500,19 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .hand-slot:last-child { margin-right: 0; }
 
-/* Hover lifts the card + spreads its neighbours so the hover
-   target reads clearly without overlap. The "+" adjacent
-   selectors push siblings on EITHER side of the hovered slot
-   away, creating the classic fan-spread effect. */
-/* Hover GROWS the card from its centre — no translation, so the
-   pointer never loses alignment with the card. Adjacent slots
-   spread out via margin shifts to keep the hovered card from
-   overlapping its neighbours. */
 .hand-slot:hover {
   transform: scale(1.18);
-  margin-right: 32px;
+  margin-right: 40px;
   z-index: 50;
 }
-.hand-slot:hover + .hand-slot { margin-left: 32px; }
+.hand-slot:hover + .hand-slot { margin-left: 40px; }
 .hand-cards:hover .hand-slot:not(:hover) { z-index: 1; }
 
-/* Scale the actual 220px card down to fit the slot. */
 .hand-slot .card {
-  transform: scale(0.55);
+  transform: scale(0.77);
   transform-origin: top left;
   width: 220px;
-  pointer-events: none;  /* let the slot wrapper get the click */
+  pointer-events: none;
   filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.45));
   transition: filter 0.22s;
 }
