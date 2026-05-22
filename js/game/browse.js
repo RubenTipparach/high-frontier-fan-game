@@ -92,6 +92,8 @@ function ensureMapShell(host) {
       <div class="map-route">
         <span id="route-status" class="muted">Tap a site to plan a route.</span>
         <button id="route-clear" hidden>Clear route</button>
+        <button id="route-fullscreen" title="Toggle fullscreen map"
+          aria-label="Toggle fullscreen">⛶</button>
       </div>
     </div>
     <div id="browse-map-canvas" class="browse-map-canvas"></div>
@@ -105,6 +107,30 @@ function ensureMapShell(host) {
     });
   }
   host.querySelector('#route-clear').addEventListener('click', clearRoute);
+  host.querySelector('#route-fullscreen').addEventListener('click', () => {
+    toggleFullscreen(host);
+  });
+  // When the user exits fullscreen via Esc, swap the icon back so
+  // the affordance reads correctly.
+  document.addEventListener('fullscreenchange', () => {
+    const btn = host.querySelector('#route-fullscreen');
+    if (btn) btn.textContent = document.fullscreenElement ? '⤬' : '⛶';
+  });
+}
+
+// Promote the map host into the browser's fullscreen mode. The
+// ResizeObserver in the renderer picks up the new dimensions and
+// re-fits the canvas. Falls back gracefully on browsers without
+// the Fullscreen API.
+function toggleFullscreen(host) {
+  if (document.fullscreenElement) {
+    document.exitFullscreen?.();
+    return;
+  }
+  const req = host.requestFullscreen
+    || host.webkitRequestFullscreen
+    || host.mozRequestFullScreen;
+  if (req) req.call(host).catch(() => {});
 }
 
 async function mountMapFor(mode) {

@@ -197,6 +197,11 @@ export class MapRenderer {
     this._drawBackdrop(ctx);
 
     const eff = this.zoom * this.fitScale;
+
+    // World-space layer: edges + zone bands + heliocentric rings.
+    // These need to scale with zoom so geometry stays correct, but
+    // node bodies are drawn separately in screen space below so a
+    // very wide view doesn't bloat the hexes off-scale.
     ctx.save();
     ctx.translate(this.pan.x, this.pan.y);
     ctx.scale(eff, eff);
@@ -206,14 +211,15 @@ export class MapRenderer {
     }
     this._drawGuides(ctx);
     this._drawEdges(ctx);
-    this._drawWaypoints(ctx);
     this._drawRoute(ctx);
-    this._drawSiteBodies(ctx);
 
     ctx.restore();
 
-    // Site labels in screen space so they don't scale up at zoom 4.
-    this._drawSiteLabels(ctx);
+    // Screen-space layer: nodes + labels at fixed pixel size so
+    // they stay legible at extreme zooms (just like the planner).
+    this._drawWaypointsScreen(ctx);
+    this._drawSiteBodiesScreen(ctx);
+    this._drawSiteLabelsScreen(ctx);
   }
 
   _drawBackdrop(ctx) {
@@ -411,23 +417,93 @@ export class MapRenderer {
     ctx.shadowBlur = 0;
   }
 
-  _drawSiteLabels(ctx) {
-    // Drawn in screen space so labels stay readable at any zoom and
-    // we can cull off-screen sites without doing fancy clipping.
+  _drawWaypointsScreen(ctx) {
     const eff = this.zoom * this.fitScale;
     const { hostW, hostH } = this;
-    // Inline numbers (siteSize on top, water below) are part of the
-    // hex; we still draw them in screen space at a fixed font size so
-    // they don't blur at low zoom.
-    ctx.font = '600 9px ui-sans-serif, system-ui, sans-serif';
+    ctx.lineWidth = 1.5;
+    for (const [type, items] of this._waypointsByType) {
+      const vis = TYPE_VIS[type] || TYPE_VIS.unknown;
+      const r = vis.r;
+      ctx.beginPath();
+      for (const w of items) {
+        const sx = this.pan.x + w.x * eff;
+        const sy = this.pan.y + w.y * eff;
+        if (sx < -r || sx > hostW + r || sy < -r || sy > hostH + r) continue;
+        ctx.moveTo(sx + r, sy);
+        ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      }
+      if (vis.fill !== 'transparent') {
+        ctx.fillStyle = vis.fill;
+        ctx.fill();
+      }
+      ctx.strokeStyle = vis.stroke;
+      ctx.stroke();
+    }
+  }
+
+  _drawSiteBodiesScreen(ctx) {
+    const eff = this.zoom * this.fitScale;
+    const { hostW, hostH } = this;
+    ctx.lineWidth = 1.6;
+    for (const site of this._realSites) {
+      const sx = this.pan.x + site.x * eff;
+      const sy = this.pan.y + site.y * eff;
+      const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
+      const r = vis.r;
+      if (sx < -r - 20 || sx > hostW + r + 20 || sy < -r - 20 || sy > hostH + r + 20) continue;
+
+      ctx.beginPath();
+      if (vis.kind === 'hex') {
+        for (let i = 0; i < 6; i++) {
+          const t = (i / 6) * Math.PI * 2;
+          const px = sx + Math.cos(t) * r;
+          const py = sy + Math.sin(t) * r;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+      } else {
+        ctx.moveTo(sx + r, sy);
+        ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      }
+      ctx.fillStyle = vis.fill;
+      ctx.fill();
+      ctx.strokeStyle = site.hazard ? '#f87171' : vis.stroke;
+      ctx.stroke();
+
+      if (site.id === this._routeFromId || site.id === this._routeToId) {
+        ctx.strokeStyle = site.id === this._routeFromId ? '#4ade80' : '#f0abfc';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(sx, sy, r + 4, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.lineWidth = 1.6;
+      }
+    }
+  }
+
+  _drawSiteLabelsScreen(ctx) {
+    const eff = this.zoom * this.fitScale;
+    const { hostW, hostH } = this;
+    // Auto-hide rule: below LABEL_ZOOM_THRESHOLD the eye can't
+    // associate a name with its node anyway (nodes are clustered
+    // and labels would smear). Above the threshold, only labels in
+    // the visible viewport are drawn (cheap occlusion culling).
+    const LABEL_ZOOM_THRESHOLD = 0.95;
+    const showLabels = this.zoom >= LABEL_ZOOM_THRESHOLD;
+
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'center';
+
     for (const site of this._realSites) {
       const sx = this.pan.x + site.x * eff;
       const sy = this.pan.y + site.y * eff;
       if (sx < -40 || sx > hostW + 40 || sy < -40 || sy > hostH + 40) continue;
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
-      const labelOffset = vis.r * eff + 12;
+
+      // Inside-hex glyphs stay visible at all zooms so the
+      // "what is this" info is never lost.
+      ctx.font = '600 9px ui-sans-serif, system-ui, sans-serif';
       if (site.siteSize) {
         ctx.fillStyle = '#ffffff';
         ctx.fillText(site.siteSize, sx, sy - 3);
@@ -440,20 +516,19 @@ export class MapRenderer {
         ctx.fillStyle = '#f87171';
         ctx.font = '14px ui-monospace, menlo, monospace';
         ctx.fillText('☠', sx, sy + 5);
-        ctx.font = '600 9px ui-sans-serif, system-ui, sans-serif';
       }
-      // Site name below the body. Outline first for readability over
-      // the background graph.
-      ctx.font = '500 11px ui-sans-serif, system-ui, sans-serif';
-      ctx.strokeStyle = 'rgba(5, 4, 16, 0.85)';
-      ctx.lineWidth = 3;
-      ctx.strokeText(site.name, sx, sy + labelOffset);
-      ctx.fillStyle = '#cbd5e1';
-      ctx.fillText(site.name, sx, sy + labelOffset);
-      ctx.font = '600 9px ui-sans-serif, system-ui, sans-serif';
+
+      if (showLabels) {
+        const labelOffset = vis.r + 12;
+        ctx.font = '500 11px ui-sans-serif, system-ui, sans-serif';
+        ctx.strokeStyle = 'rgba(5, 4, 16, 0.85)';
+        ctx.lineWidth = 3;
+        ctx.strokeText(site.name, sx, sy + labelOffset);
+        ctx.fillStyle = '#cbd5e1';
+        ctx.fillText(site.name, sx, sy + labelOffset);
+      }
     }
 
-    // Route segment dv labels.
     if (this._route) {
       ctx.font = '600 11px ui-sans-serif, system-ui, sans-serif';
       ctx.fillStyle = '#fde047';
@@ -610,19 +685,26 @@ export class MapRenderer {
   // generous radius (so a tap on the hex always wins over a stray
   // waypoint hit). ~1500 distance computations is sub-millisecond.
   _hitTest(wx, wy) {
+    // Hit-test in SCREEN space now that nodes are drawn at fixed
+    // pixel sizes. Convert the candidate world point to screen
+    // first, then compare against each node's screen position with
+    // a fixed-pixel tolerance.
+    const eff = this.zoom * this.fitScale;
+    const sx = this.pan.x + wx * eff;
+    const sy = this.pan.y + wy * eff;
     let best = null;
-    let bestDist = 16 * 16;   // pixel radius in data space, doubled for fat fingers
-    // Pass 1: real sites, larger tolerance.
+    let bestDist = 20 * 20;        // generous touch target for real sites
     for (const s of this._realSites) {
-      const dx = s.x - wx, dy = s.y - wy;
+      const dx = (this.pan.x + s.x * eff) - sx;
+      const dy = (this.pan.y + s.y * eff) - sy;
       const d = dx * dx + dy * dy;
       if (d < bestDist) { bestDist = d; best = s; }
     }
     if (best) return best;
-    // Pass 2: waypoints, tighter tolerance.
-    bestDist = 12 * 12;
+    bestDist = 14 * 14;            // tighter for waypoints (they're smaller)
     for (const w of this._waypoints) {
-      const dx = w.x - wx, dy = w.y - wy;
+      const dx = (this.pan.x + w.x * eff) - sx;
+      const dy = (this.pan.y + w.y * eff) - sy;
       const d = dx * dx + dy * dy;
       if (d < bestDist) { bestDist = d; best = w; }
     }

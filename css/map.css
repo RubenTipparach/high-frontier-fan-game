@@ -93,6 +93,24 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+#route-fullscreen {
+  font-size: 14px;
+  padding: 4px 9px;
+  line-height: 1;
+}
+/* When the map host is in fullscreen, fill the screen and pin the
+   toolbar to the top edge. The contained canvas grabs the rest. */
+.map-host:fullscreen,
+.map-host:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  background: #03020a;
+}
+.map-host:fullscreen .browse-map-canvas,
+.map-host:-webkit-full-screen .browse-map-canvas {
+  height: calc(100vh - 44px);
+  min-height: 0;
+}
 .browse-map-canvas {
   width: 100%;
   height: calc(100% - 44px);
