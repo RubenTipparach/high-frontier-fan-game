@@ -45,7 +45,7 @@ const HALO_MAX_SCREEN_R = 110;
 //   haloR  = body sphere radius (world units, per body class)
 // HEX_R can be changed freely without affecting how big Jupiter or
 // Luna looks behind its hex.
-const HEX_R = 22;
+const HEX_R = 26;
 const TYPE_VIS = {
   site:           { kind: 'hex',    r: HEX_R, haloR: 20 },
   'gas-giant':    { kind: 'hex',    r: HEX_R, haloR: 48 },
@@ -1558,18 +1558,18 @@ export class MapRenderer {
         ctx.fillText('☠', sx, sy);
       }
 
-      // Submarine + astrobiology emoji indicators sit just outside
-      // the hex, tucked to the upper-right corner so they don't
-      // collide with the size badge or droplet row inside.
+      // Submarine + astrobiology flags ride on the hex centre.
+      // When a site carries both we stack them side-by-side; one
+      // on its own sits dead-centre. Comets don't take a hex,
+      // so for them the flags tuck above the lander disc so the
+      // 🚀 glyph still reads clean.
       if (site.submarine || site.astrobiology) {
         ctx.font = `${EMOJI_PX}px ${EMOJI_FONT}`;
-        const corner = vis.r + 4;
-        if (site.submarine) {
-          ctx.fillText('🌊', sx + corner, sy - corner * 0.6);
-        }
-        if (site.astrobiology) {
-          ctx.fillText('🌿', sx + corner, sy + corner * 0.6);
-        }
+        const both = site.submarine && site.astrobiology;
+        const dx = both ? Math.round(EMOJI_PX * 0.55) : 0;
+        const dy = vis.kind === 'comet' ? -EMOJI_PX - 4 : 0;
+        if (site.submarine)    ctx.fillText('🌊', sx - dx, sy + dy);
+        if (site.astrobiology) ctx.fillText('🌿', sx + dx, sy + dy);
       }
 
       if (labelAlpha > 0) {
