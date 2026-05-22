@@ -146,10 +146,14 @@ function ensureMapShell(host) {
     toggleFullscreen(host);
   });
   host.querySelector('#route-debug').addEventListener('click', () => {
-    host.querySelector('#map-debug').classList.toggle('hidden');
+    const panel = host.querySelector('#map-debug');
+    panel.classList.toggle('hidden');
+    const open = !panel.classList.contains('hidden');
+    if (_renderer) _renderer.setOption('debug', open);
   });
   host.querySelector('#dbg-close').addEventListener('click', () => {
     host.querySelector('#map-debug').classList.add('hidden');
+    if (_renderer) _renderer.setOption('debug', false);
   });
   document.addEventListener('fullscreenchange', () => {
     const btn = host.querySelector('#route-fullscreen');
@@ -199,6 +203,12 @@ function wireDebugPanel(renderer) {
     renderer.setOption('showDecoratives', showDec.checked);
   };
   resetBtn.onclick = () => renderer.reset();
+
+  // If the panel is currently open, the new renderer should also
+  // log clicks. (mountMapFor rebuilds the renderer on every mode
+  // toggle; without this the debug flag would reset to false.)
+  const panelOpen = !panel.classList.contains('hidden');
+  renderer.setOption('debug', panelOpen);
 
   let lastZoom = -1, lastFps = -1;
   renderer.onFrame(() => {

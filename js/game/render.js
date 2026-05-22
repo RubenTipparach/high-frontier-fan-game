@@ -224,6 +224,7 @@ export class MapRenderer {
       labelFadeMax: 3.0,           // zoom at which labels are fully opaque
       showDecoratives: true,
       initialZoom: DEFAULT_ZOOM,
+      debug: false,                // when true, _emitDebugClick logs to console
     };
     this._frameCount = 0;
     this._frameTimer = 0;
@@ -896,6 +897,7 @@ export class MapRenderer {
       if (this._dragStart && this._dragStart.moved) return;
       const pt = this._eventToWorld(ev);
       const hit = this._hitTest(pt.x, pt.y);
+      if (this.options.debug) this._emitDebugClick(pt, hit);
       if (hit && this.onSelect) this.onSelect(hit);
     });
 
@@ -952,6 +954,7 @@ export class MapRenderer {
           if (last) {
             const pt = this._eventToWorld(last);
             const hit = this._hitTest(pt.x, pt.y);
+            if (this.options.debug) this._emitDebugClick(pt, hit);
             if (hit && this.onSelect) this.onSelect(hit);
           }
         }
@@ -993,6 +996,33 @@ export class MapRenderer {
     const sy = ev.clientY - rect.top;
     const eff = this.zoom * this.fitScale;
     return { x: (sx - this.pan.x) / eff, y: (sy - this.pan.y) / eff };
+  }
+
+  // Console output for debug mode taps. Logs the world-space click,
+  // the normalised 0..1 coords (matches the planner's storage
+  // format, so it's easy to cross-reference data-hf4.json), and any
+  // node hit. Real sites get their full record dumped.
+  _emitDebugClick(pt, hit) {
+    const info = {
+      world: { x: Math.round(pt.x * 10) / 10, y: Math.round(pt.y * 10) / 10 },
+      normalized: {
+        x: Math.round((pt.x / VIEW_W) * 10000) / 10000,
+        y: Math.round((pt.y / VIEW_H) * 10000) / 10000,
+      },
+      zoom: Math.round(this.zoom * 100) / 100,
+    };
+    if (hit) {
+      info.hit = {
+        id: hit.id,
+        name: hit.name,
+        type: hit.type,
+        siteSize: hit.siteSize,
+        hydration: hit.hydration,
+        hazard: hit.hazard,
+      };
+    }
+    // eslint-disable-next-line no-console
+    console.log('[map debug] click', info);
   }
 
   // JS hit-test against every site, preferring real sites within a
