@@ -380,6 +380,11 @@ body:has(#view-browse:not(.hidden)) #main {
 .browse-sidepanel[data-active] {
   width: 380px;
 }
+/* Patents pane spreads wider so the card library reads as a
+   grid instead of a single tall column. */
+.browse-sidepanel[data-active="patents"] {
+  width: min(620px, 80vw);
+}
 .browse-sidepanel[data-active=""] { width: 48px; }
 
 @media (orientation: portrait) {

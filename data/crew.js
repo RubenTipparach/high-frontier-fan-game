@@ -67,6 +67,41 @@ export const CREW = [
       secondary: { name: 'Cartographer M.', role: 'Surveyor',  mass: 1, radHardness: 2, bonus: 'See one extra hop on MOVE',   blurb: 'Plots burns like origami.' },
     },
   },
+  {
+    id: 'crew_legal',
+    faces: {
+      primary:   { name: 'Mei-Ling Tao',   role: 'Lawyer',     mass: 1, radHardness: 0, bonus: 'Auction reserves -1',        blurb: 'Drafts patents during transit dwell.' },
+      secondary: { name: 'Auditor Wen',    role: 'Accountant', mass: 1, radHardness: 0, bonus: '+1 VP at end-of-game scoring', blurb: 'Files quarterly to three different jurisdictions.' },
+    },
+  },
+  {
+    id: 'crew_chaplain',
+    faces: {
+      primary:   { name: 'Brother Halab',  role: 'Chaplain',   mass: 1, radHardness: 1, bonus: 'Reroll one prospect die',     blurb: 'Carries an oratory the dust storms can\'t drown out.' },
+      secondary: { name: 'Sister Inari',   role: 'Counsellor', mass: 1, radHardness: 1, bonus: 'Crew morale +1 each round',   blurb: 'Keeps the long-haul crews talking to each other.' },
+    },
+  },
+  {
+    id: 'crew_orbital',
+    faces: {
+      primary:   { name: 'Spinner Ravi',   role: 'Spinner',    mass: 1, radHardness: 2, bonus: 'Aerobrake at no fuel cost',   blurb: 'Hand-spins atmospheric entries by eye.' },
+      secondary: { name: 'Jumper Aiko',    role: 'EVA',        mass: 1, radHardness: 2, bonus: '+1 site capture at lagrange', blurb: 'Trained for unsupported space-walks across kilometres.' },
+    },
+  },
+  {
+    id: 'crew_corp',
+    faces: {
+      primary:   { name: 'Director Beck',  role: 'Director',   mass: 2, radHardness: 2, bonus: 'Draw +1 patent each round',   blurb: 'Friends in every R&D lab from Tycho to Titan.' },
+      secondary: { name: 'PR Liaison Pax', role: 'PR',         mass: 1, radHardness: 1, bonus: '+1 income from Earth markets', blurb: 'Spins every disaster as "valuable lessons learned".' },
+    },
+  },
+  {
+    id: 'crew_outer',
+    faces: {
+      primary:   { name: 'Sherpa Kalden',  role: 'Outer Pilot', mass: 1, radHardness: 3, bonus: 'KBO routes -1 burn',         blurb: 'Knows every ice-rock past Saturn by spectrum.' },
+      secondary: { name: 'Cometeer Ouro',  role: 'Comet Miner', mass: 1, radHardness: 3, bonus: '+1 water at comet sites',    blurb: 'Spent two decades on Halley\'s tail.' },
+    },
+  },
 ];
 
 export const CREW_BY_ID = Object.fromEntries(CREW.map((c) => [c.id, c]));

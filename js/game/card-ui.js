@@ -126,10 +126,18 @@ function buildFace(card, sideName, kind) {
     add('+Prospect', card.prospect_bonus);
   } else if (card.type === 'lab' || card.type === 'generator') {
     add('Science', card.science);
+  } else if (card.type === 'modifier' && card.modifier) {
+    const tgt = card.modifier.target === 'any' ? 'Any card' : cap(card.modifier.target);
+    add('Attaches to', tgt);
+    for (const [k, v] of Object.entries(card.modifier.effect || {})) {
+      add('Δ ' + k, (v > 0 ? '+' : '') + v);
+    }
   }
   face.querySelector('.card-blurb').textContent = meta.blurb || card.blurb || '';
   return face;
 }
+
+function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
 // Thrust triangle: scales an isoceles triangle by the thruster's
 // thrust value so the visual reads "more thrust = bigger triangle"

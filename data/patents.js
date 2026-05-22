@@ -45,7 +45,7 @@
 
 export const PATENTS = [
   // ===== Thrusters: chemical / cold (cheap, plentiful) =====
-  { id: 't_chemsust',   name: 'Chemical Sustainer',    type: 'thruster', mass: 2, thrust: 8,  isp: 2,  power_req: 0, blurb: 'LOX/methane workhorse. Burns fast, hauls a lot.' },
+  { id: 't_chemsust',   name: 'Chemical Sustainer',    type: 'thruster', mass: 2, thrust: 8,  isp: 2,  power_req: 0, radHardness: 1, blurb: 'LOX/methane workhorse. Burns fast, hauls a lot.' },
   { id: 't_chemtug',    name: 'Hydrazine Tug',         type: 'thruster', mass: 1, thrust: 5,  isp: 2,  power_req: 0, blurb: 'Storable monoprop. Cheap, reliable.' },
   { id: 't_solidkick',  name: 'Solid Kick Stage',      type: 'thruster', mass: 1, thrust: 10, isp: 1,  power_req: 0, blurb: 'One-shot motor for hard insertions.' },
   { id: 't_resistojet', name: 'Resistojet',            type: 'thruster', mass: 1, thrust: 2,  isp: 4,  power_req: 1, blurb: 'Electrically heated water. Slow but tidy.' },
@@ -59,7 +59,7 @@ export const PATENTS = [
   { id: 't_pit',        name: 'Pulsed Inductive',      type: 'thruster', mass: 2, thrust: 3,  isp: 6,  power_req: 3, blurb: 'Capacitor-banked plasma rings.' },
 
   // ===== Thrusters: nuclear thermal =====
-  { id: 't_nerva',      name: 'Nuclear Thermal',       type: 'thruster', mass: 3, thrust: 6,  isp: 4,  power_req: 0, blurb: 'Solid-core fission heater. NERVA heritage.' },
+  { id: 't_nerva',      name: 'Nuclear Thermal',       type: 'thruster', mass: 3, thrust: 6,  isp: 4,  power_req: 0, radHardness: 3, blurb: 'Solid-core fission heater. NERVA heritage.' },
   { id: 't_lightbulb',  name: 'Gas-Core Nuclear',      type: 'thruster', mass: 3, thrust: 7,  isp: 6,  power_req: 0, blurb: 'Light-bulb topology: hot uranium, cool walls.' },
   { id: 't_saltwater',  name: 'Nuclear Salt-Water',    type: 'thruster', mass: 2, thrust: 9,  isp: 7,  power_req: 0, blurb: 'Continuous open-cycle fission. Mad and effective.' },
   { id: 't_fragment',   name: 'Fission Fragment',      type: 'thruster', mass: 3, thrust: 4,  isp: 9,  power_req: 1, blurb: 'Fission products as their own exhaust.' },
@@ -68,10 +68,10 @@ export const PATENTS = [
   { id: 't_zpinch',     name: 'Z-Pinch Fusion',        type: 'thruster', mass: 4, thrust: 6,  isp: 8,  power_req: 2, blurb: 'Self-pinched plasma column. Loud.' },
   { id: 't_dpfusion',   name: 'D-He3 Fusion Drive',    type: 'thruster', mass: 4, thrust: 5,  isp: 11, power_req: 3, blurb: 'Aneutronic fuel. Needs Saturn-grade He3.' },
   { id: 't_icftorch',   name: 'ICF Torch Drive',       type: 'thruster', mass: 5, thrust: 8,  isp: 10, power_req: 4, blurb: 'Inertial confinement. Pulsed brilliance.' },
-  { id: 't_orion',      name: 'Pulse Propulsion',      type: 'thruster', mass: 5, thrust: 12, isp: 6,  power_req: 0, blurb: 'External nuclear pulse. Pusher plate optional.' },
+  { id: 't_orion',      name: 'Pulse Propulsion',      type: 'thruster', mass: 5, thrust: 12, isp: 6,  power_req: 0, radHardness: 3, blurb: 'External nuclear pulse. Pusher plate optional.' },
 
   // ===== Thrusters: sails / beam =====
-  { id: 't_solarsail',  name: 'Solar Sail',            type: 'thruster', mass: 1, thrust: 1,  isp: 99, power_req: 0, blurb: 'Free fuel in the inner system. Useless past Mars.' },
+  { id: 't_solarsail',  name: 'Solar Sail',            type: 'thruster', mass: 1, thrust: 1,  isp: 99, power_req: 0, radHardness: 0, blurb: 'Free fuel in the inner system. Useless past Mars.' },
   { id: 't_magsail',    name: 'Magnetic Sail',         type: 'thruster', mass: 2, thrust: 1,  isp: 99, power_req: 2, blurb: 'Rides the solar wind. Works further out.' },
   { id: 't_lasersail',  name: 'Laser-Pushed Sail',     type: 'thruster', mass: 1, thrust: 3,  isp: 99, power_req: 0, blurb: 'Needs a friendly laser station. Worth the trip.' },
   { id: 't_tether',     name: 'Electrodynamic Tether', type: 'thruster', mass: 1, thrust: 2,  isp: 99, power_req: 1, blurb: 'Lorentz reboost in any magnetosphere.' },
@@ -88,14 +88,14 @@ export const PATENTS = [
   { id: 'r_fission_s',  name: 'Compact Fission Pile',  type: 'reactor', mass: 2, power: 4, heat: 3, blurb: 'Kilopower-class reactor.' },
   { id: 'r_fission_l',  name: 'Gen-IV Fission',        type: 'reactor', mass: 3, power: 7, heat: 5, blurb: 'Closed-cycle, breeding-capable.' },
   { id: 'r_molten',     name: 'Molten-Salt Reactor',   type: 'reactor', mass: 3, power: 8, heat: 5, blurb: 'High-temp, walks away from prompt-critical.' },
-  { id: 'r_tokamak',    name: 'Tokamak (D-T)',         type: 'reactor', mass: 4, power: 10, heat: 8, blurb: 'Tritium burner. Needs lithium blanket.' },
+  { id: 'r_tokamak',    name: 'Tokamak (D-T)',         type: 'reactor', mass: 4, power: 10, heat: 8, radHardness: 2, blurb: 'Tritium burner. Needs lithium blanket.' },
   { id: 'r_stellarator',name: 'Stellarator',           type: 'reactor', mass: 4, power: 11, heat: 8, blurb: 'Steady-state magnetic confinement.' },
   { id: 'r_polywell',   name: 'Polywell',              type: 'reactor', mass: 3, power: 9, heat: 6, blurb: 'Magnetic-grid inertial confinement.' },
 
   // ===== Radiators =====
   { id: 'h_pumped',     name: 'Pumped-Loop Radiator',  type: 'radiator', mass: 1, heat_cap: 3, blurb: 'Liquid-metal sweeper, off-the-shelf.' },
   { id: 'h_droplet',    name: 'Liquid Droplet Array',  type: 'radiator', mass: 1, heat_cap: 5, blurb: 'Spray a sheet of droplets; catch them downstream.' },
-  { id: 'h_bubble',     name: 'Bubble-Membrane Radiator', type: 'radiator', mass: 2, heat_cap: 8, blurb: 'Foamed dome of vacuum-stable membrane.' },
+  { id: 'h_bubble',     name: 'Bubble-Membrane Radiator', type: 'radiator', mass: 2, heat_cap: 8, radHardness: 0, blurb: 'Foamed dome of vacuum-stable membrane.' },
   { id: 'h_curie',      name: 'Curie-Point Radiator',  type: 'radiator', mass: 2, heat_cap: 6, blurb: 'Magnetic-pumped working fluid.' },
   { id: 'h_heatpipe',   name: 'Heat-Pipe Array',       type: 'radiator', mass: 1, heat_cap: 4, blurb: 'Passive evaporation/condensation loops.' },
 
@@ -114,6 +114,18 @@ export const PATENTS = [
   { id: 'b_geophys',    name: 'Geophysics Drone',      type: 'robonaut', mass: 2, prospect_bonus: 2, blurb: 'Active seismic + neutron spec.' },
   { id: 'b_sample',     name: 'Sample-Return Probe',   type: 'robonaut', mass: 2, prospect_bonus: 1, blurb: 'Brings actual rocks home.' },
   { id: 'b_swarm',      name: 'Cubesat Swarm',         type: 'robonaut', mass: 1, prospect_bonus: 1, blurb: 'Dozens of tiny mappers in parallel.' },
+
+  // ===== Modifiers (attach to another card and adjust its stats) =====
+  // These don't fly on their own. At BUILD time the engine
+  // composes a modifier's `modifier.effect` onto a single attached
+  // card of `modifier.target` type. A ship can carry as many
+  // modifiers as can fit in its mass budget.
+  { id: 'm_nozzle',     name: 'Magnetic Nozzle',     type: 'modifier', mass: 1, radHardness: 2, modifier: { target: 'thruster', effect: { thrust: 2 } },           blurb: 'Adds a magnetic nozzle to any plasma-class thruster. +2 thrust.' },
+  { id: 'm_bell',       name: 'Bell Extension',      type: 'modifier', mass: 1, radHardness: 2, modifier: { target: 'thruster', effect: { isp: 1 } },               blurb: 'Larger expansion ratio. +1 ISP, no mass-flow change.' },
+  { id: 'm_truss',      name: 'Composite Truss',     type: 'modifier', mass: 1, radHardness: 1, modifier: { target: 'any', effect: { mass: -1 } },                  blurb: 'Lightweight strongback shaves one mass off any attached card.' },
+  { id: 'm_radshield',  name: 'Rad Shielding',       type: 'modifier', mass: 2, radHardness: 3, modifier: { target: 'any', effect: { radHardness: 2 } },            blurb: 'Tungsten + boron wrap. +2 RAD hardness on the attached card.' },
+  { id: 'm_capacitor',  name: 'Capacitor Bank',      type: 'modifier', mass: 1, radHardness: 1, modifier: { target: 'thruster', effect: { thrust: 1, power_req: 1 } }, blurb: 'Pulse-charging stack: +1 thrust at +1 power draw.' },
+  { id: 'm_helium3',    name: 'Helium-3 Catalyst',   type: 'modifier', mass: 1, radHardness: 2, modifier: { target: 'thruster', effect: { isp: 2, mass: 1 } },      blurb: 'Aneutronic fuel boost. +2 ISP, +1 mass (tankage).' },
 
   // ===== Generators / Labs =====
   { id: 'g_micrograv',  name: 'Microgravity Lab',      type: 'lab',       mass: 2, science: 1, blurb: 'Pharmaceuticals, alloys, crystals.' },
@@ -139,6 +151,7 @@ const RAD_HARDNESS_BY_TYPE = {
   robonaut:  2,
   generator: 1,
   lab:       1,
+  modifier:  2,
 };
 
 // Radiators flip rotated 180° (the published cards show a
@@ -171,5 +184,6 @@ export function patentsByType(type) {
 }
 
 export const PATENT_TYPES = [
-  'thruster', 'reactor', 'radiator', 'refinery', 'robonaut', 'generator', 'lab',
+  'thruster', 'reactor', 'radiator', 'refinery', 'robonaut',
+  'generator', 'lab', 'modifier',
 ];
