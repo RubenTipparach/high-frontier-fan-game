@@ -1097,29 +1097,48 @@ export class MapRenderer {
       }
 
       // Pink lander rings: every burn node that carries a landing
-      // flag gets a magenta disc behind the rocket glyph, so the
-      // gameplay token is still visually present underneath the
-      // emoji overlay drawn later.
+      // flag gets a magenta disc behind the rocket glyph. Landing=1
+      // paints a full disc; landing<1 paints a half disc clipped on
+      // the left, matching the half-rocket glyph drawn on top.
       if (landings.length) {
         ctx.fillStyle = vis.fill;
         ctx.strokeStyle = vis.stroke;
         ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        for (const w of landings) {
-          const sx = this.pan.x + w.x * eff;
-          const sy = this.pan.y + w.y * eff;
-          if (sx < -vis.r * 2 || sx > hostW + vis.r * 2 || sy < -vis.r * 2 || sy > hostH + vis.r * 2) continue;
-          const ringR = vis.r * 1.4;
-          ctx.moveTo(sx + ringR, sy);
-          ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
+        const fullLandings = landings.filter((w) => w.landing >= 1);
+        const halfLandings = landings.filter((w) => w.landing < 1);
+        if (fullLandings.length) {
+          ctx.beginPath();
+          for (const w of fullLandings) {
+            const sx = this.pan.x + w.x * eff;
+            const sy = this.pan.y + w.y * eff;
+            if (sx < -vis.r * 2 || sx > hostW + vis.r * 2 || sy < -vis.r * 2 || sy > hostH + vis.r * 2) continue;
+            const ringR = vis.r * 1.4;
+            ctx.moveTo(sx + ringR, sy);
+            ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
+          }
+          ctx.fill();
+          ctx.stroke();
         }
-        ctx.fill();
-        ctx.stroke();
+        if (halfLandings.length) {
+          ctx.beginPath();
+          for (const w of halfLandings) {
+            const sx = this.pan.x + w.x * eff;
+            const sy = this.pan.y + w.y * eff;
+            if (sx < -vis.r * 2 || sx > hostW + vis.r * 2 || sy < -vis.r * 2 || sy > hostH + vis.r * 2) continue;
+            const ringR = vis.r * 1.4;
+            // Left semicircle: top through left to bottom, then
+            // straight line back up the diameter to close.
+            ctx.moveTo(sx, sy - ringR);
+            ctx.arc(sx, sy, ringR, -Math.PI / 2, Math.PI / 2, true);
+            ctx.lineTo(sx, sy - ringR);
+          }
+          ctx.fill();
+          ctx.stroke();
+        }
       }
-      // Landing burns are now drawn as a 🚀 glyph (with /2 for
-      // partial landings); see the per-emoji pass below. Skip
-      // drawing the basic circle so we don't paint a magenta dot
-      // behind every rocket.
+      // Landing burns are now drawn as a 🚀 glyph (full or half)
+      // in the per-emoji pass below; we just paint the lander disc
+      // underneath here.
     }
 
     // Selected waypoint highlight: same yellow border + glow used
