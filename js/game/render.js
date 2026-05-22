@@ -34,27 +34,32 @@ const HALO_MAX_SCREEN_R = 110;
 // Body styling. Sites render as shaded spheres; waypoints stay as
 // flat-coloured circles since they're abstract routing nodes, not
 // physical objects.
-// Real sites: black hex marker on top of a shaded-sphere body halo.
-// Hex size is generous enough that the siteSize text + water droplet
-// row fit comfortably inside without crowding. Halo radius is the
-// world-space size of the sphere underneath; it grows with zoom up
-// to HALO_MAX_SCREEN_R so the body's relative size to the layout
-// stays consistent.
+// Visual sizes per body class. Hex `r` is the actual gameplay
+// marker; `haloFactor` controls how far the body sprite (sphere or
+// rocky polygon) extends past the hex edge. Planets get the biggest
+// halos so gas giants dominate; moons / asteroids stay small so a
+// belt cluster doesn't smother the canvas. `rocky` = irregular
+// polygon shape rather than a smooth sphere.
 const TYPE_VIS = {
-  site:       { kind: 'hex',    r: 18, haloFactor: 1.55 },
-  planet:     { kind: 'hex',    r: 22, haloFactor: 1.5 },
-  moon:       { kind: 'hex',    r: 16, haloFactor: 1.55 },
-  dwarf:      { kind: 'hex',    r: 18, haloFactor: 1.55 },
-  asteroid:   { kind: 'hex',    r: 14, haloFactor: 1.6 },
-  tno:        { kind: 'hex',    r: 16, haloFactor: 1.6 },
-  surface:    { kind: 'hex',    r: 16, haloFactor: 1.6 },
+  site:       { kind: 'hex',    r: 11, haloFactor: 1.55 },
+  planet:     { kind: 'hex',    r: 16, haloFactor: 2.2  },
+  dwarf:      { kind: 'hex',    r: 13, haloFactor: 1.75 },
+  tno:        { kind: 'hex',    r: 11, haloFactor: 1.6  },
+  moon:       { kind: 'hex',    r:  9, haloFactor: 1.5  },
+  comet:      { kind: 'hex',    r:  9, haloFactor: 1.7  },
+  asteroid:   { kind: 'hex',    r:  7, haloFactor: 1.5, rocky: true },
+  surface:    { kind: 'hex',    r: 10, haloFactor: 1.55 },
   lagrange:   { kind: 'circle', r:  7, fill: 'transparent', stroke: '#c66932' },
-  burn:       { kind: 'circle', r:  7, fill: '#d60f7a', stroke: '#fde0ee' },
-  hohmann:    { kind: 'circle', r:  7, fill: '#10b981', stroke: '#a7f3d0' },
+  // Hohmann nodes draw smaller than their click target -- the
+  // visible disc is a quarter the radius of the hit zone so they
+  // read as small route waypoints, but a tap anywhere in the old
+  // generous area still selects them.
+  burn:       { kind: 'circle', r:  6, hitR: 8, fill: '#d60f7a', stroke: '#fde0ee', hideBelowZoom: 1.4 },
+  hohmann:    { kind: 'circle', r:  2, hitR: 8, fill: '#10b981', stroke: '#a7f3d0' },
   venus:      { kind: 'circle', r:  8, fill: '#fb923c', stroke: '#fed7aa' },
   radhaz:     { kind: 'circle', r:  7, fill: '#fbbf24', stroke: '#fde68a' },
   orbit:      { kind: 'circle', r:  6, fill: '#0c0a16', stroke: '#7dd3fc' },
-  decorative: { kind: 'dot',    r:  2.5, fill: '#3b4a6d' },
+  decorative: { kind: 'none' },        // routing-only; never rendered
   unknown:    { kind: 'circle', r:  4, fill: '#0c0a16', stroke: '#475569' },
 };
 
@@ -251,6 +256,51 @@ const SYNODIC_COLOURS = {
   blue:   '#60a5fa',
 };
 
+// Irregular rocky polygon for asteroid bodies. Same offset-radial
+// shading as the sphere, but the silhouette is a noisy 9-vertex
+// polygon so it reads as a rock rather than a tiny planet. Each
+// asteroid caches its own vertex offsets keyed off the site id so
+// the silhouette is stable across frames.
+function drawRockyAsteroid(ctx, cx, cy, r, palette, site) {
+  if (!site._rockShape) {
+    const VERTS = 9;
+    let seed = 0;
+    for (let i = 0; i < site.id.length; i++) seed = ((seed * 31) ^ site.id.charCodeAt(i)) | 0;
+    if (seed < 0) seed = -seed;
+    const rand = () => {
+      seed = (seed * 9301 + 49297) & 0x7fffffff;
+      return (seed % 1000) / 1000;
+    };
+    const shape = [];
+    for (let i = 0; i < VERTS; i++) {
+      shape.push(0.72 + rand() * 0.36);   // 0.72..1.08 of r
+    }
+    site._rockShape = shape;
+  }
+  const verts = site._rockShape;
+  const lx = cx - r * 0.35, ly = cy - r * 0.35;
+  const grad = ctx.createRadialGradient(lx, ly, r * 0.05, cx, cy, r * 1.05);
+  grad.addColorStop(0,    palette.light);
+  grad.addColorStop(0.45, palette.base);
+  grad.addColorStop(1,    palette.dark);
+
+  ctx.beginPath();
+  for (let i = 0; i < verts.length; i++) {
+    const t = (i / verts.length) * Math.PI * 2;
+    const vr = r * verts[i];
+    const px = cx + Math.cos(t) * vr;
+    const py = cy + Math.sin(t) * vr;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.lineWidth = 0.9;
+  ctx.strokeStyle = site.hazard ? '#f87171' : 'rgba(255,255,255,0.32)';
+  ctx.stroke();
+}
+
 // Standard 2D planet shading recipe: optional outer atmosphere
 // rim, a base disc, an offset-centre radial gradient for the lit
 // hemisphere (light source assumed at upper-left), and a thin
@@ -313,11 +363,14 @@ export class MapRenderer {
     // is enough for the debug panel to take effect; nothing else
     // caches them.
     this.options = {
-      labelFadeMin: 2.2,           // zoom at which labels start fading in
-      labelFadeMax: 3.0,           // zoom at which labels are fully opaque
-      showDecoratives: true,
+      labelFadeMin: 2.2,
+      labelFadeMax: 3.0,
+      // Decoratives are routing-only (chain bend points); rendering
+      // them as dots clutters the map and adds nothing the user can
+      // act on. Off by default; debug panel can flip it back on.
+      showDecoratives: false,
       initialZoom: DEFAULT_ZOOM,
-      debug: false,                // when true, _emitDebugClick logs to console
+      debug: false,
     };
     this._frameCount = 0;
     this._frameTimer = 0;
@@ -775,6 +828,10 @@ export class MapRenderer {
 
     for (const [type, items] of this._waypointsByType) {
       const vis = TYPE_VIS[type] || TYPE_VIS.unknown;
+      if (vis.kind === 'none') continue;     // decoratives = invisible
+      // Per-type zoom gating: burn nodes only appear once zoomed
+      // past their threshold so they don't speckle the wide view.
+      if (vis.hideBelowZoom && this.zoom < vis.hideBelowZoom) continue;
       if (vis.kind === 'dot') {
         if (!this.options.showDecoratives) continue;
         ctx.fillStyle = vis.fill;
@@ -865,7 +922,9 @@ export class MapRenderer {
       if (vis.kind !== 'hex') continue;
       const worldR = Math.min(vis.r * vis.haloFactor, capWorld);
       const rings = ringDefFor(site);
-      if (rings) {
+      if (vis.rocky) {
+        drawRockyAsteroid(ctx, site.x, site.y, worldR, paletteFor(site), site);
+      } else if (rings) {
         drawPlanetRings(ctx, site.x, site.y, worldR, rings, 'back');
         drawShadedSphere(ctx, site.x, site.y, worldR, paletteFor(site), site.hazard);
         drawPlanetRings(ctx, site.x, site.y, worldR, rings, 'front');
@@ -1187,7 +1246,7 @@ export class MapRenderer {
     const sx = this.pan.x + wx * eff;
     const sy = this.pan.y + wy * eff;
     let best = null;
-    let bestDist = 20 * 20;
+    let bestDist = 22 * 22;       // real sites: generous touch target
     for (const s of this._realSites) {
       const dx = (this.pan.x + s.x * eff) - sx;
       const dy = (this.pan.y + s.y * eff) - sy;
@@ -1195,15 +1254,20 @@ export class MapRenderer {
       if (d < bestDist) { bestDist = d; best = s; }
     }
     if (best) return best;
-    bestDist = 14 * 14;
+    // Waypoints: hit radius can be larger than the visible disc
+    // (e.g. hohmann is 2px painted but accepts a 10px click).
+    let bestRad = 0;
     for (const w of this._waypoints) {
-      // Skip decorative dots in click hit-tests — they're routing
-      // structure, not selectable destinations.
       if (w.isDecorative) continue;
+      const vis = TYPE_VIS[w.type] || TYPE_VIS.unknown;
+      if (vis.kind === 'none') continue;
+      const hitR = (vis.hitR != null ? vis.hitR : Math.max(vis.r, 8)) + 2;
       const dx = (this.pan.x + w.x * eff) - sx;
       const dy = (this.pan.y + w.y * eff) - sy;
       const d = dx * dx + dy * dy;
-      if (d < bestDist) { bestDist = d; best = w; }
+      if (d <= hitR * hitR && (best == null || d < bestRad)) {
+        best = w; bestRad = d;
+      }
     }
     return best;
   }

@@ -34,19 +34,24 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
   // don't get in the way.
   const sites = [];
   for (const [id, p] of Object.entries(raw.points || {})) {
-    const type = p.type || 'unknown';
+    const rawType = p.type || 'unknown';
+    // Re-classify game-destination sites by name so the renderer
+    // can size them correctly: gas giants render huge, dwarf
+    // planets noticeable, moons modest, asteroids small + rocky.
+    // Routing waypoints keep their planner-assigned type.
+    const type = rawType === 'site' ? classifyBody(p.siteName) : rawType;
     sites.push({
       id,
-      name: p.siteName || routingLabel(type),
+      name: p.siteName || routingLabel(rawType),
       type,
-      isWaypoint: type !== 'site',
-      isDecorative: type === 'decorative',
+      isWaypoint: rawType !== 'site',
+      isDecorative: rawType === 'decorative',
       siteSize: p.siteSize || null,
-      siteSynodic: p.siteSynodic || null,    // 'red' | 'yellow' | 'blue'
+      siteSynodic: p.siteSynodic || null,
       hydration: parseHydration(p.siteWater),
       hazard: !!p.hazard,
       landing: typeof p.landing === 'number' ? p.landing : null,
-      flybyBoost: p.flybyBoost || null,      // 1 | 2 | 4 | 'thrust'
+      flybyBoost: p.flybyBoost || null,
       x: Math.round(p.x * viewW * 10) / 10,
       y: Math.round(p.y * viewH * 10) / 10,
     });
@@ -144,6 +149,37 @@ function routingLabel(type) {
     case 'hohmann':  return 'Hohmann xfer';
     default:         return type;
   }
+}
+
+// Re-classify a destination site by its name into one of:
+//   planet | dwarf | moon | comet | asteroid (default).
+// Planner data flattens every game destination to type='site', so
+// we use name prefixes / substrings to recover the body class.
+const PLANET_KEYS = [
+  'mercury', 'venus', 'earth', 'mars',
+  'jupiter', 'saturn', 'uranus', 'neptune',
+];
+const DWARF_KEYS = [
+  'pluto', 'ceres', 'eris', 'sedna', 'makemake',
+  'haumea', 'orcus', 'quaoar', 'gonggong',
+];
+const MOON_KEYS = [
+  'luna', 'phobos', 'deimos',
+  'io ', 'europa', 'ganymede', 'callisto',
+  'titan', 'enceladus', 'iapetus', 'rhea', 'mimas',
+  'hyperion', 'dione', 'tethys', 'phoebe',
+  'charon', 'nix', 'hydra',
+  'miranda', 'ariel', 'umbriel', 'titania', 'oberon',
+  'triton', 'nereid', 'proteus',
+];
+function classifyBody(name) {
+  const n = (name || '').toLowerCase();
+  if (!n) return 'site';
+  if (n.startsWith('comet')) return 'comet';
+  for (const k of PLANET_KEYS) if (n.startsWith(k)) return 'planet';
+  for (const k of DWARF_KEYS)  if (n.includes(k))  return 'dwarf';
+  for (const k of MOON_KEYS)   if (n.includes(k))  return 'moon';
+  return 'asteroid';
 }
 
 // siteWater in the planner is a string like '0', '1', '2', '3', '4'.
