@@ -18,12 +18,21 @@
 //   isRocketActive()                  → { active, reason, missing[] }
 //   canRocketFly()                    → alias of isRocketActive
 //                                       (kept for back-compat)
+//   getTankWater() / setTankWater(n)  → ship's water tank scalar
+//   addFuel(n) / removeFuel(n)        → tank deltas (clamp ≥0)
+//   getStackTotals()                  → { mass, minRadHard, count, fuel }
+//   getActiveThrusterStats()          → { thrust, fuel, isp, … }
 //   onRocketChange(cb)                → unsubscribe
 
 import { PATENTS_BY_ID } from '../../data/patents.js';
 
 const STORAGE_KEY  = 'hf-sandbox-rocket';
 const ACTIVE_KEY   = 'hf-sandbox-rocket-active-thruster';
+const TANK_KEY     = 'hf-sandbox-rocket-tank';
+// Cap the player's water tank so the +/- buttons don't run away
+// at high tap rates. 99 is plenty for any solo run; we'll revisit
+// when Stage 3 hands fuel allocation to the engine.
+const TANK_MAX = 99;
 
 let _stack = (() => {
   try {
@@ -38,6 +47,13 @@ let _activeThrusterId = (() => {
   catch { return null; }
 })();
 
+let _tankWater = (() => {
+  try {
+    const n = parseInt(localStorage.getItem(TANK_KEY) || '0', 10);
+    return Number.isFinite(n) && n >= 0 ? Math.min(TANK_MAX, n) : 0;
+  } catch { return 0; }
+})();
+
 let _listeners = [];
 
 function persist() {
@@ -45,6 +61,7 @@ function persist() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(_stack));
     if (_activeThrusterId) localStorage.setItem(ACTIVE_KEY, _activeThrusterId);
     else                   localStorage.removeItem(ACTIVE_KEY);
+    localStorage.setItem(TANK_KEY, String(_tankWater));
   } catch { /* private mode */ }
 }
 
@@ -101,9 +118,10 @@ export function removeFromStack(index) {
 }
 
 export function clearStack() {
-  if (!_stack.length && !_activeThrusterId) return;
+  if (!_stack.length && !_activeThrusterId && !_tankWater) return;
   _stack = [];
   _activeThrusterId = null;
+  _tankWater = 0;
   persist();
   notify();
 }
@@ -198,4 +216,119 @@ export function isRocketActive() {
 export function canRocketFly() {
   const r = isRocketActive();
   return { ok: r.active, missing: r.missing };
+}
+
+// --------- Tank water (ship fuel) ---------
+
+export function getTankWater() { return _tankWater; }
+export function getTankMax()   { return TANK_MAX; }
+
+export function setTankWater(n) {
+  const v = Math.max(0, Math.min(TANK_MAX, Math.floor(Number(n) || 0)));
+  if (v === _tankWater) return false;
+  _tankWater = v;
+  persist();
+  notify();
+  return true;
+}
+
+export function addFuel(delta = 1) {
+  return setTankWater(_tankWater + (Number(delta) || 1));
+}
+
+export function removeFuel(delta = 1) {
+  return setTankWater(_tankWater - (Number(delta) || 1));
+}
+
+// --------- Stack totals + thruster stats ---------
+
+// Pulls the active face for any card in the stack, with a fallback
+// to top-level fields for the older hand-written records that
+// didn't carry a `faces` block.
+function activeFace(card) {
+  return (card && card.faces && card.faces.primary) || card || {};
+}
+
+// Total dry mass of the stack (no fuel) and minimum rad-hardness
+// across the cards. min rad-hard is the ship's rad-hard limit —
+// the weakest card sets the ceiling at a radhaz crossing.
+export function getStackTotals() {
+  let mass = 0;
+  let minRad = null;
+  let count = 0;
+  for (const slot of _stack) {
+    const card = PATENTS_BY_ID[slot.id];
+    if (!card) continue;
+    const f = activeFace(card);
+    const m = (f.mass != null ? f.mass : card.mass) | 0;
+    const r = (f.radHardness != null ? f.radHardness : card.radHardness);
+    mass += m;
+    if (r != null) minRad = (minRad == null) ? r : Math.min(minRad, r);
+    count++;
+  }
+  return {
+    count,
+    dryMass: mass,
+    fuel: _tankWater,
+    wetMass: mass + _tankWater,
+    minRadHard: minRad,
+  };
+}
+
+// Compute the active thruster's "final" stats after applying every
+// other stack card's thrustMod (additive) + fuelMod (multiplicative).
+// Returns null if there is no active thruster.
+//
+// thrustMod is additive — Cermet NERVA contributes +3 thrust to the
+// thruster it's paired with.
+// fuelMod is multiplicative — values like 0.25 / 0.5 / 1.0 scale the
+// base fuel-consumption-per-burn down (or leave it flat).
+//
+// Wet mass is exposed too so the UI can show "can it actually move":
+// the rocket can move iff finalThrust ≥ wetMass (board-game equiv of
+// having enough push to lift the loaded ship).
+export function getActiveThrusterStats() {
+  const id = _activeThrusterId;
+  if (!id) return null;
+  const card = PATENTS_BY_ID[id];
+  if (!card) return null;
+  const f = activeFace(card);
+  let thrust = f.thrust != null ? f.thrust : card.thrust;
+  let fuel   = f.fuel   != null ? f.fuel   : card.fuel;
+  const isp  = f.isp    != null ? f.isp    : card.isp;
+  if (thrust == null) return null;
+
+  let baseThrust = thrust;
+  let baseFuel = fuel;
+  const modifiers = [];
+  for (const slot of _stack) {
+    if (slot.id === id) continue;
+    const c = PATENTS_BY_ID[slot.id];
+    if (!c) continue;
+    const cf = activeFace(c);
+    const tMod = cf.thrustMod;
+    const fMod = cf.fuelMod;
+    if (tMod != null && tMod !== 0) {
+      thrust += tMod;
+      modifiers.push({ from: c.name, kind: 'thrust', delta: tMod });
+    }
+    if (fMod != null && fMod !== 1 && fuel != null) {
+      fuel *= fMod;
+      modifiers.push({ from: c.name, kind: 'fuel', mult: fMod });
+    }
+  }
+  const totals = getStackTotals();
+  return {
+    cardId: id,
+    name: card.name,
+    baseThrust,
+    baseFuel,
+    thrust,
+    fuel,
+    isp,
+    modifiers,
+    wetMass: totals.wetMass,
+    dryMass: totals.dryMass,
+    canLift: thrust >= totals.wetMass,
+  };
 }

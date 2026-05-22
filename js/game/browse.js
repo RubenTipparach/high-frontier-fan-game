@@ -26,6 +26,8 @@ import {
   removeFromStack as rocketRemoveCard, clearStack as rocketClearStack,
   onRocketChange, isRocketActive,
   getActiveThrusterId, setActiveThruster,
+  getTankWater, addFuel, removeFuel, getTankMax,
+  getStackTotals, getActiveThrusterStats,
 } from './rocket.js';
 import { CREW } from '../../data/crew.js';
 import { MILESTONES } from '../../data/glory.js';
@@ -923,6 +925,8 @@ function openRocketStackModal() {
     // clear the flag so the button text + animation don't lie if
     // the player removes a card mid-flight.
     if (!r.active) engaged = false;
+    const totals = getStackTotals();
+    const thrStats = getActiveThrusterStats();
     panel.querySelector('.rocket-stack-body')?.remove();
     const body = document.createElement('div');
     body.className = 'rocket-stack-body';
@@ -935,16 +939,78 @@ function openRocketStackModal() {
          ${r.missing.length
            ? `<ul class="rocket-issues">${r.missing.map((m) => `<li>${esc(m)}</li>`).join('')}</ul>`
            : ''}`;
+
+    // Totals row: dry + wet mass, min rad-hard, fuel +/-, plus
+    // (when a thruster is active) the modifier-applied thrust and
+    // fuel-per-burn numbers. Rocket can lift iff thrust >= wetMass.
+    const fmt = (n) => Number.isFinite(n) ? (Math.round(n * 100) / 100) : '—';
+    const thrustHtml = thrStats
+      ? `<div class="rocket-totals-cell">
+           <span class="lbl">Thrust</span>
+           <strong class="${thrStats.canLift ? 'ok' : 'bad'}">${fmt(thrStats.thrust)}</strong>
+           ${thrStats.thrust !== thrStats.baseThrust
+              ? `<small>(base ${fmt(thrStats.baseThrust)})</small>` : ''}
+         </div>
+         <div class="rocket-totals-cell">
+           <span class="lbl">Fuel / burn</span>
+           <strong>${thrStats.fuel != null ? fmt(thrStats.fuel) : '—'}</strong>
+           ${thrStats.fuel != null && thrStats.fuel !== thrStats.baseFuel
+              ? `<small>(base ${fmt(thrStats.baseFuel)})</small>` : ''}
+         </div>`
+      : '';
+    const tank = getTankWater();
+    const tankMax = getTankMax();
+    const totalsHtml = `
+      <div class="rocket-totals">
+        <div class="rocket-totals-cell">
+          <span class="lbl">Cards</span><strong>${totals.count}</strong>
+        </div>
+        <div class="rocket-totals-cell">
+          <span class="lbl">Dry mass</span><strong>${totals.dryMass}</strong>
+        </div>
+        <div class="rocket-totals-cell">
+          <span class="lbl">Wet mass</span>
+          <strong class="${thrStats && !thrStats.canLift ? 'bad' : ''}">${totals.wetMass}</strong>
+        </div>
+        <div class="rocket-totals-cell">
+          <span class="lbl">Min rad-hard</span>
+          <strong>${totals.minRadHard != null ? totals.minRadHard : '—'}</strong>
+        </div>
+        <div class="rocket-totals-cell rocket-fuel">
+          <span class="lbl">Fuel 💧</span>
+          <button type="button" class="rocket-fuel-btn"
+            data-act="dec" ${tank <= 0 ? 'disabled' : ''}
+            aria-label="Remove 1 fuel">−</button>
+          <strong>${tank}<small>/${tankMax}</small></strong>
+          <button type="button" class="rocket-fuel-btn"
+            data-act="inc" ${tank >= tankMax ? 'disabled' : ''}
+            aria-label="Add 1 fuel">+</button>
+        </div>
+        ${thrustHtml}
+      </div>
+    `;
+
     body.innerHTML = `
-      <h2 class="rocket-stack-title">🚀 LEO Rocket</h2>
-      ${status}
+      <div class="rocket-stack-header">
+        <h2 class="rocket-stack-title">🚀 LEO Rocket</h2>
+        ${totalsHtml}
+        ${status}
+      </div>
       <div id="rocket-stack-cards"></div>
     `;
     panel.appendChild(body);
 
+    // Fuel +/- wiring on the totals row.
+    body.querySelectorAll('.rocket-fuel-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        if (b.dataset.act === 'inc') addFuel(1);
+        else removeFuel(1);
+      });
+    });
+
     // Engage button: greyed out until supports are satisfied; tap
-    // to ignite the moving-rocket animation. Lives ABOVE the cards
-    // so it stays on screen even on a tall stack.
+    // to ignite the moving-rocket animation. Lives in the pinned
+    // header so it stays on screen even on a tall stack.
     const engageBtn = document.createElement('button');
     engageBtn.type = 'button';
     engageBtn.className = 'rocket-engage' + (engaged ? ' is-engaged' : '');
@@ -957,7 +1023,7 @@ function openRocketStackModal() {
       engaged = !engaged;
       repaint();
     });
-    body.insertBefore(engageBtn, body.querySelector('#rocket-stack-cards'));
+    body.querySelector('.rocket-stack-header').appendChild(engageBtn);
 
     const cards = body.querySelector('#rocket-stack-cards');
     if (!stack.length) {
@@ -1218,12 +1284,13 @@ function renderPatents() {
   // deck (data/crew.js) but the card UI handles both.
   const bar = document.createElement('div');
   bar.className = 'patent-filter';
-  bar.innerHTML = `<button class="active" data-type="all">All (${PATENTS.length + CREW.length})</button>`;
-  for (const t of PATENT_TYPES) {
-    const n = patentsByType(t).length;
-    bar.innerHTML += `<button data-type="${t}">${cap(t)} (${n})</button>`;
-  }
-  bar.innerHTML += `<button data-type="crew">Crew (${CREW.length})</button>`;
+  bar.innerHTML = '';
+  const types = [...PATENT_TYPES, 'crew'];
+  const counts = Object.fromEntries(PATENT_TYPES.map((t) => [t, patentsByType(t).length]));
+  counts.crew = CREW.length;
+  types.forEach((t, i) => {
+    bar.innerHTML += `<button${i === 0 ? ' class="active"' : ''} data-type="${t}">${cap(t)} (${counts[t]})</button>`;
+  });
   host.appendChild(bar);
 
   const grid = document.createElement('div');
@@ -1272,11 +1339,8 @@ function renderPatents() {
       return;
     }
     for (const p of PATENTS) {
-      if (filter !== 'all' && p.type !== filter) continue;
+      if (p.type !== filter) continue;
       grid.appendChild(decorateForHand(p, 'patent'));
-    }
-    if (filter === 'all') {
-      for (const c of CREW) grid.appendChild(decorateForHand(c, 'crew'));
     }
   };
 
@@ -1287,7 +1351,7 @@ function renderPatents() {
   if (host._libUnsubs) host._libUnsubs.forEach((u) => u());
   const repaintActive = () => {
     const active = bar.querySelector('button.active');
-    repaint(active ? active.dataset.type : 'all');
+    repaint(active ? active.dataset.type : types[0]);
   };
   host._libUnsubs = [
     onHandChange(repaintActive),
@@ -1300,7 +1364,7 @@ function renderPatents() {
       repaint(b.dataset.type);
     };
   });
-  repaint('all');
+  repaint(types[0]);
 }
 
 // Legacy patent-card builder kept for now (unused after switch to

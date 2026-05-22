@@ -1297,7 +1297,9 @@ body:has(#view-browse:not(.hidden)) #main {
 
 /* Rocket-stack modal: a centered panel that floats over the
    map. Wider than the inspect modal so the player can scan a
-   multi-card stack at a glance. */
+   multi-card stack at a glance. The panel itself is the flex
+   container — header (totals + status + engage) is pinned to
+   the top via flex-shrink:0, and only the cards grid scrolls. */
 .rocket-stack-panel {
   position: relative;
   background: var(--panel);
@@ -1305,20 +1307,101 @@ body:has(#view-browse:not(.hidden)) #main {
   border-radius: 12px;
   padding: 22px 24px;
   width: min(820px, 90vw);
+  height: 80vh;
   max-height: 80vh;
-  overflow-y: auto;
+  overflow: hidden;
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+}
+.rocket-stack-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 10px;
+}
+.rocket-stack-header {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
 }
 .rocket-stack-title {
-  margin: 0 0 12px;
+  margin: 0;
   font-size: 18px;
   letter-spacing: 0.5px;
 }
 .rocket-stack-panel #rocket-stack-cards {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 16px;
+  padding: 6px 2px 2px;
 }
+
+/* Totals row: compact stat cells. Wraps on narrow screens so
+   the mobile modal stays usable. Each cell carries a tiny label
+   over a big number; the fuel cell adds inline +/- buttons. */
+.rocket-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  font-size: 12px;
+}
+.rocket-totals-cell {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 2px 8px;
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.rocket-totals-cell .lbl {
+  color: var(--ink-mute);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+.rocket-totals-cell strong {
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.rocket-totals-cell strong.ok  { color: #22c55e; }
+.rocket-totals-cell strong.bad { color: #f87171; }
+.rocket-totals-cell small {
+  font-size: 10px;
+  color: var(--ink-dim);
+}
+.rocket-totals-cell.rocket-fuel {
+  gap: 6px;
+}
+.rocket-fuel-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  background: var(--panel-2);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.rocket-fuel-btn:hover:not(:disabled) {
+  background: var(--accent);
+  color: #062136;
+  border-color: var(--accent-2);
+}
+.rocket-fuel-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Rocket stack slot actions row — sits beneath each card in
    the rocket stack modal. Holds the "Set as active" thruster
