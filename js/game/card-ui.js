@@ -205,7 +205,10 @@ function buildFace(card, sideName, kind) {
   const fallback = TYPE_FALLBACK_ICON[card.type] || '';
   const lead = supplyGlyphs || fallback;
   tbar.textContent = `${lead ? lead + '  ' : ''}${card.type.toUpperCase()}`;
-  face.querySelector('.card-name').textContent = card.name;
+  // Card name reads from the active face — the dark side carries
+  // its own printed name on every HF4 card.
+  const faceName = (card.faces && card.faces[sideName] && card.faces[sideName].name);
+  face.querySelector('.card-name').textContent = faceName || card.name;
   // The Tier-2 face is a different tech with different numbers,
   // so mass + rad-hardness come from the face data when present.
   const faceMass = (card.faces && card.faces[sideName] && card.faces[sideName].mass);
@@ -504,6 +507,11 @@ function thrustVisual(card, face) {
     fuel = Math.max(1, Math.ceil(thrust / Math.max(1, isp || 1)));
   }
   const fuelText = Number.isInteger(fuel) ? `${fuel}` : fuel.toFixed(2);
+  // Fuel-type emoji: 💧 for water (the default), 🪨 for dirt /
+  // regolith eaters (mass drivers and similar). Driven straight
+  // off the spreadsheet's "Fuel Type" column on each face.
+  const ftype = (face && face.fuelType) || card.fuelType;
+  const fuelEmoji = ftype === 'Dirt' ? '🪨' : '💧';
   const showAfter = (face && face.afterburn) || (!face && card.afterburn);
 
   // Rounded-triangle path. Apex at (70,12); base (18,86)–(122,86).
@@ -540,8 +548,8 @@ function thrustVisual(card, face) {
         <text x="50" y="76" text-anchor="middle" font-size="13"
           font-weight="700" fill="#ffffff">${thrust}</text>
       </g>
-      <g data-tip="Fuel per burn: ${fuelText}">
-        <text x="88" y="79" text-anchor="middle" font-size="22">💧</text>
+      <g data-tip="Fuel per burn: ${fuelText} ${ftype || 'Water'}">
+        <text x="88" y="79" text-anchor="middle" font-size="22">${fuelEmoji}</text>
         <text x="88" y="75" text-anchor="middle" font-size="9"
           font-weight="700" fill="#0c1d34" stroke="#ffffff"
           stroke-width="2.4" paint-order="stroke">${fuelText}</text>

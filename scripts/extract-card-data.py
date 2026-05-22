@@ -111,26 +111,40 @@ def row_to_dict(headers, row):
 
 def split_card(headers, primary, secondary):
     """Split a card into shared metadata + two face stat-blocks.
-    Fields whose secondary cell is None are treated as inherited
-    from the primary face."""
+    The card-identity Name still surfaces at the top level
+    (taken from the primary row, used for ids / lookups) — but
+    each face also carries its OWN Name field, since the dark
+    side of every published HF4 card is a different technology
+    with a different printed name (Ablative Plate flips to
+    Ablative Nozzle, etc.). Other shared metadata (spectral
+    type, role, etc.) only lives on the primary row."""
     pr = row_to_dict(headers, primary)
     sc = row_to_dict(headers, secondary) if secondary else {}
-    shared_keys = {'Name', 'Spectral Type', 'Type', 'Promotion Colony',
+    # Columns whose value applies to the card as a whole and is
+    # only printed once on the spreadsheet (on the primary row).
+    SHARED_KEYS = {'Spectral Type', 'Type', 'Promotion Colony',
                    'Specialty', 'Ideology'}
-    shared = {k: pr.get(k) for k in shared_keys if pr.get(k) is not None}
-    def face(row, fallback):
+    shared = {'Name': pr.get('Name')}
+    for k in SHARED_KEYS:
+        if pr.get(k) is not None:
+            shared[k] = pr[k]
+
+    def face(row):
+        # Each face owns its own Name + all stat columns; only
+        # the SHARED_KEYS above are stripped out.
         out = {}
         for k, v in row.items():
-            if k in shared_keys:
+            if k in SHARED_KEYS:
                 continue
             if v is None:
                 continue
             out[k] = v
         return out
+
     return {
         **shared,
-        'tier1': face(pr, None),
-        'tier2': face(sc, pr) if sc else None,
+        'tier1': face(pr),
+        'tier2': face(sc) if sc else None,
     }
 
 

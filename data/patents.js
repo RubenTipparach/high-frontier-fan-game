@@ -178,6 +178,11 @@ function buildFace(label, tier, type) {
   const isRadiator = type === 'radiator';
   const base = {
     label,
+    // Each face carries its OWN name — the published HF4 cards
+    // print different names on the two sides (Ablative Plate
+    // flips to Ablative Nozzle). buildPatent still uses the
+    // primary face's name for the card id and lookup.
+    name:       tier.Name || null,
     ability:    tier.Ability || null,
     requires:   requiresFromFace(tier),
     supplies:   suppliesFromFace(tier, type),
