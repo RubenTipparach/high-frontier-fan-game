@@ -77,6 +77,14 @@ export function mountBrowse() {
 // the grabber bar that lets the user drag the strip up to see
 // more cards. Card-click opens the inspect modal instead of
 // removing the slot directly — Discard lives in the modal.
+// Touch-device check used to toggle UI between the desktop
+// hover-driven flow and the mobile tap-to-select flow. Reads
+// the standardised CSS media queries so an external keyboard
+// or external mouse on a tablet still resolves to "hover".
+function isTouchDevice() {
+  return window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+}
+
 let _handWired = false;
 function wireHandStrip() {
   if (_handWired) return;
@@ -169,9 +177,34 @@ function wireHandStrip() {
       );
       cardEl.appendChild(quick);
 
-      wrap.addEventListener('click', (ev) => {
-        if (ev.target.closest('.card-flip, .card-rotate, .hand-q')) return;
+      // Mobile-only "View" button. On touch devices we drop
+      // the hover affordances (no hover on touch) and replace
+      // them with a two-step tap: first tap selects the card
+      // (raised + ring); second tap on the View button opens
+      // the inspect modal. Prevents accidental modal-opens on
+      // a casual fingerprint.
+      const viewBtn = document.createElement('button');
+      viewBtn.type = 'button';
+      viewBtn.className = 'hand-view-btn';
+      viewBtn.textContent = 'View';
+      viewBtn.title = 'Open this card';
+      viewBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
         openCardModal(card, kindOf(id), idx);
+      });
+      wrap.appendChild(viewBtn);
+
+      wrap.addEventListener('click', (ev) => {
+        if (ev.target.closest('.card-flip, .card-rotate, .hand-q, .hand-view-btn')) return;
+        if (isTouchDevice()) {
+          // Tap toggles selection. Only one slot selected at a time.
+          const wasSelected = wrap.classList.contains('is-selected');
+          host.querySelectorAll('.hand-slot.is-selected').forEach((s) =>
+            s.classList.remove('is-selected'));
+          if (!wasSelected) wrap.classList.add('is-selected');
+        } else {
+          openCardModal(card, kindOf(id), idx);
+        }
       });
       host.appendChild(wrap);
     });

@@ -1240,3 +1240,61 @@ body:has(#view-browse:not(.hidden)) #main {
   cursor: default;
   opacity: 1;
 }
+
+/* Mobile / touch device adjustments to the hand strip. Hover
+   doesn't exist on touch, so we replace the hover-driven
+   quick-action row with a two-step tap-to-select flow:
+   tap a card → it raises with a coloured ring; a floating
+   "View" button appears above; tap that to open the inspect
+   modal. Stops accidental modal-opens on casual fingerprints
+   and avoids stuck-hover gotchas. */
+
+/* The floating "View" button sits above a selected card.
+   Hidden by default; CSS shows it only when the slot has
+   .is-selected AND we're on a touch device. */
+.hand-view-btn {
+  display: none;
+  position: absolute;
+  top: -34px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--accent);
+  color: #062136;
+  border: 1px solid var(--accent-2);
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  border-radius: 6px;
+  z-index: 8;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  /* No hover on touch — drop the hover quick-icon row, drop
+     the hover-spread fan effect (the hovered-sibling margin
+     shifts can stick visually), and switch the slot's
+     transform-origin to default so the selected pop-up
+     doesn't drift sideways. */
+  .hand-quick-actions { display: none !important; }
+  .hand-slot:hover {
+    transform: none;
+    margin-right: -68px;
+  }
+  .hand-slot:hover + .hand-slot { margin-left: 0; }
+
+  /* Selected (active tap) state: raise + add the cyan ring +
+     reveal the View button. Same idiom as the boost-marked
+     glow ring but in accent-cyan to read as "selected". */
+  .hand-slot.is-selected {
+    transform: scale(1.10);
+    z-index: 60;
+  }
+  .hand-slot.is-selected .card {
+    box-shadow: 0 0 0 3px var(--accent),
+                0 0 18px rgba(125, 211, 252, 0.55);
+    border-radius: 10px;
+  }
+  .hand-slot.is-selected .hand-view-btn { display: block; }
+}
