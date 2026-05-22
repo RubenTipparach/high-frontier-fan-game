@@ -422,22 +422,24 @@
 }
 .card-flip:hover { color: var(--ink); border-color: var(--accent-2); }
 
-/* Rotate-180 button: only emitted on radiator cards. Sits in the
-   lower-LEFT corner so it doesn't collide with the Flip button
-   in the lower-right. Tapping it toggles data-rotated on the
-   card root, which spins the entire .card-inner 180° AND swaps
-   the visible stat block (Light Side ↔ Heavy Side). */
+/* Rotate-180 button: only emitted on radiator cards. Sits
+   immediately left of the Flip button in the lower-right
+   corner so the two card-actions cluster together and neither
+   collides with the body text. Tapping it toggles data-rotated
+   on the card root, which spins the entire .card-inner 180°
+   AND swaps which side reads as active (the inactive side
+   greys out). */
 .card-rotate {
   position: absolute;
   bottom: 6px;
-  left: 8px;
+  right: 56px;
   background: rgba(15, 16, 35, 0.85);
   border: 1px solid var(--border);
   border-radius: 4px;
   color: var(--ink-dim);
   font-size: 14px;
   line-height: 1;
-  width: 24px;
+  width: 28px;
   height: 22px;
   padding: 0;
   cursor: pointer;
@@ -453,16 +455,21 @@
   transform: rotateY(180deg) rotateZ(180deg);
 }
 
-/* Light/Heavy stat block sub-lists for radiator cards. Both are
-   in the DOM; CSS shows the appropriate one based on rotation. */
+/* Light/Heavy stat block sub-lists for radiator cards. Both
+   are ALWAYS visible — the published HF4 card is mirror-
+   symmetric with the light side upright at the top and the
+   heavy side upside-down at the bottom. CSS rotates the heavy
+   block 180° and dims whichever side is currently inactive
+   (driven by data-rotated on the .card root). */
 .card-stats .side-block {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  padding: 4px 6px;
+  gap: 2px;
+  padding: 5px 7px;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.10);
+  transition: opacity 0.22s ease;
 }
 .card-stats .side-block header {
   font-size: 9px;
@@ -470,15 +477,28 @@
   letter-spacing: 1.2px;
   text-transform: uppercase;
   color: var(--ink-mute);
-  margin-bottom: 2px;
 }
 .card-stats .side-block span {
   display: flex;
   justify-content: space-between;
   font-size: 11px;
 }
-.card[data-rotated="0"] .card-stats .side-heavy { display: none; }
-.card[data-rotated="1"] .card-stats .side-light { display: none; }
+.card-stats .side-block .rad-therms {
+  font-size: 16px;
+  letter-spacing: 1px;
+  line-height: 1.1;
+  padding: 2px 0;
+}
+/* Heavy side is drawn upside-down so flipping the card 180°
+   makes the heavy text read upright. */
+.card-stats .side-heavy { transform: rotate(180deg); }
+/* Active vs inactive side. data-rotated="0" keeps the light
+   side active (the user is reading the card right-side up);
+   data-rotated="1" flips the whole card 180° so the heavy
+   side is now upright + active. Dim the inactive half so the
+   reader knows which numbers count right now. */
+.card[data-rotated="0"] .card-stats .side-heavy { opacity: 0.32; filter: grayscale(0.7); }
+.card[data-rotated="1"] .card-stats .side-light { opacity: 0.32; filter: grayscale(0.7); }
 
 /* Cursor hint on any element that carries a tooltip — works for
    both HTML chips and SVG icons inside the thrust visual. */

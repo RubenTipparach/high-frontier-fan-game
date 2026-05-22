@@ -265,11 +265,13 @@ function buildFace(card, sideName, kind) {
     add('Power', card.power);
     add('Heat',  card.heat);
   } else if (card.type === 'radiator') {
-    // Radiators carry separate Light Side / Heavy Side stat
-    // blocks per face. Render both — each wrapped in a small
-    // <ul class="side-block"> sub-list — and let CSS toggle
-    // which one is visible based on data-rotated. The "Therms"
-    // row is the rated heat dissipation for that orientation.
+    // Radiator cards are mirror-symmetric — the published HF4
+    // card prints the light side at the top (upright) and the
+    // heavy side at the bottom (upside-down). Both are always
+    // visible; whichever is currently "up" (driven by the
+    // rotate button and data-rotated) reads as active and the
+    // other half greys out. Therms render as 🌡️ icons rather
+    // than a numeric row.
     const sideMeta = card.faces && card.faces[sideName];
     const light = sideMeta && sideMeta.light;
     const heavy = sideMeta && sideMeta.heavy;
@@ -277,10 +279,14 @@ function buildFace(card, sideName, kind) {
       const addSide = (cls, label, block) => {
         const wrap = document.createElement('li');
         wrap.className = `side-block ${cls}`;
+        const therms = block.therms ?? 0;
+        const thermRow = therms > 0
+          ? '🌡️'.repeat(Math.min(8, therms))
+          : '—';
         wrap.innerHTML = `<header>${label}</header>`
-          + `<span>Therms <strong>${block.therms ?? '—'}</strong></span>`
-          + `<span>Mass   <strong>${block.mass ?? '—'}</strong></span>`
-          + `<span>Rad    <strong>${block.radHardness ?? '—'}</strong></span>`;
+          + `<div class="rad-therms">${thermRow}</div>`
+          + `<span>Mass <strong>${block.mass ?? '—'}</strong></span>`
+          + `<span>Rad-Hard <strong>${block.radHardness ?? '—'}</strong></span>`;
         stats.appendChild(wrap);
       };
       addSide('side-light', 'Light side', light);
