@@ -41,8 +41,11 @@ const HEX_FULLSIZE_ZOOM = 2.5;
 // World-space anchor of LEO — the sandbox rocket's home and
 // the big yellow "LEO" label rendered on the map. Exported so
 // the Sandbox "Stack" button in the hand header can centre
-// the map on it.
-export const LEO_ANCHOR = { x: 460, y: 270 };
+// the map on it. Coordinates match the LEO lagrange waypoint
+// in the planner JSON (nx=0.8526, ny=0.8215) scaled to the
+// 1400×900 view used by loadPlannerMap(), so the label sits on
+// the actual LEO node rather than floating off near Itokawa.
+export const LEO_ANCHOR = { x: 1193.6, y: 739.3 };
 const DEFAULT_ZOOM = 1.8;
 // Cap the celestial body halo at this many screen pixels so extreme
 // zoom doesn't turn Saturn into the entire canvas.
