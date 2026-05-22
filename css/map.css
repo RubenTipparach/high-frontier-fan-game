@@ -1,0 +1,644 @@
+/* Solar-system map renderer styles. The renderer paints to a
+   <canvas>, so almost all of the visual state lives in render.js;
+   this file just sizes the host + canvas and handles the HTML
+   overlays (tooltip, loading state, toolbar). */
+
+.map-host {
+  position: relative;
+  width: 100%;
+  background: #03020a;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  contain: strict;
+}
+
+.map-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  user-select: none;
+  /* Swallow touch gestures inside the canvas so the browser doesn't
+     also pan/zoom the surrounding page. The rest of the site stays
+     pinch-zoomable. */
+  touch-action: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  overscroll-behavior: contain;
+}
+.map-canvas:active { cursor: grabbing; }
+
+.map-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+  color: var(--ink-mute);
+  font-size: 13px;
+}
+.map-loading.error { color: var(--bad); }
+
+/* Browse-view map shell: toolbar across the top, full-bleed canvas
+   below. The classic vs cleaned-up toggle lives here and persists
+   to localStorage so the player can A/B-test their preference. */
+.map-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background: rgba(15, 16, 35, 0.85);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.map-mode-toggle {
+  display: inline-flex;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.map-mode-toggle button {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+.map-mode-toggle button.active {
+  background: var(--accent);
+  color: #062136;
+  font-weight: 600;
+}
+.map-route {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  flex: 1;
+  justify-content: flex-end;
+  min-width: 0;
+}
+.map-route .big {
+  color: var(--warm);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+.map-route #route-status {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#route-fullscreen,
+#route-debug {
+  font-size: 14px;
+  padding: 4px 9px;
+  line-height: 1;
+}
+
+/* Search box + reactive suggestions. The list is absolutely
+   positioned so it floats over the canvas without reflowing the
+   toolbar. */
+.map-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 180px;
+}
+.map-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.map-search button {
+  padding: 4px 8px;
+  font-size: 14px;
+  line-height: 1;
+}
+.map-search ul {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: rgba(15, 16, 35, 0.96);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.55);
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 6;
+}
+.map-search ul.hidden { display: none; }
+.map-search ul li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--ink);
+}
+.map-search ul li.active,
+.map-search ul li:hover {
+  background: rgba(125, 211, 252, 0.18);
+  color: var(--accent);
+}
+.map-search ul li em {
+  color: var(--ink-mute);
+  font-style: normal;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* Debug panel: floats over the lower-left corner of the map host.
+   The renderer publishes zoom + FPS via onFrame(); sliders write
+   straight into renderer.options. */
+/* The map-stage wraps the canvas + the floating debug overlay so
+   the overlay survives canvas.innerHTML wipes. */
+.browse-map-stage {
+  position: relative;
+  width: 100%;
+  height: calc(100% - 44px);
+  min-height: 0;
+}
+.browse-map-stage .browse-map-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+.browse-map-canvas { position: relative; }
+.map-debug {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  width: 220px;
+  background: rgba(15, 16, 35, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--ink);
+  z-index: 4;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.55);
+}
+.map-debug.hidden { display: none; }
+.map-debug .dbg-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 1.4px;
+  color: var(--accent);
+  font-size: 11px;
+}
+.map-debug .dbg-header button {
+  background: transparent;
+  border: none;
+  color: var(--ink-dim);
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+}
+.map-debug .dbg-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 3px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.map-debug .dbg-row strong {
+  color: var(--accent-2);
+  font-variant-numeric: tabular-nums;
+}
+.map-debug .dbg-slider {
+  display: block;
+  margin: 8px 0 4px;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+.map-debug .dbg-slider span {
+  display: flex;
+  justify-content: space-between;
+}
+.map-debug .dbg-slider em {
+  color: var(--accent-2);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+.map-debug .dbg-slider input[type=range] {
+  width: 100%;
+  margin-top: 2px;
+}
+.map-debug .dbg-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+.map-debug .dbg-reset {
+  margin-top: 10px;
+  width: 100%;
+  font-size: 11px;
+}
+/* When the map host is in fullscreen, fill the screen and pin the
+   toolbar to the top edge. The contained canvas grabs the rest. */
+.map-host:fullscreen,
+.map-host:-webkit-full-screen,
+.browse-shell:fullscreen,
+.browse-shell:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  background: #03020a;
+}
+.map-host:fullscreen .browse-map-stage,
+.map-host:-webkit-full-screen .browse-map-stage {
+  height: calc(100vh - 44px);
+  min-height: 0;
+}
+.map-host:fullscreen .browse-map-canvas,
+.map-host:-webkit-full-screen .browse-map-canvas {
+  height: 100%;
+  min-height: 0;
+}
+.browse-map-canvas {
+  width: 100%;
+  height: calc(100% - 44px);
+  min-height: 440px;
+}
+.browse-map {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+
+/* (All edge / waypoint / site / route styling now lives in
+   render.js as canvas draw calls; nothing else is needed here.) */
+
+.map-tooltip {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  background: rgba(15, 23, 42, 0.96);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  pointer-events: none;
+  min-width: 180px;
+  max-width: 280px;
+  z-index: 5;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+}
+.map-tooltip .t-name {
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 2px;
+}
+.map-tooltip .t-meta {
+  font-size: 11px;
+  color: var(--ink-mute);
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+  text-transform: lowercase;
+}
+.map-tooltip .t-meta span:empty { display: none; }
+.map-tooltip .t-blurb {
+  font-size: 12px;
+  color: var(--ink-dim);
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* ===== Browse view ===== */
+
+/* The Browse view is full-bleed: canvas fills everything below the
+   top bar, with a sidebar on the right that slides out when the
+   user opens a pane. To get there we drop the <main> padding/max
+   width while #view-browse is active. */
+body:has(#view-browse:not(.hidden)) #main {
+  padding: 0;
+  max-width: none;
+}
+
+/* The browse shell is a positioning context for the full-bleed
+   canvas + the sidebar overlay. The sidebar floats; it never
+   reflows the canvas, so the map always fills the viewport even
+   when the panel is open. */
+.browse-shell {
+  position: relative;
+  width: 100%;
+  height: calc(100vh - 56px);
+  min-height: 480px;
+  background: #03020a;
+  overflow: hidden;
+}
+
+.browse-stage {
+  position: absolute;
+  inset: 0;
+}
+.browse-stage .browse-map {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  min-height: 0;
+}
+
+/* Sidebar overlays the right edge in landscape (default) and the
+   bottom edge in portrait. Tab strip stays visible at all times
+   so the user can re-open a pane; the content area expands when
+   data-active is set. */
+.browse-sidepanel {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  flex-direction: row;
+  border-left: 1px solid var(--border);
+  background: rgba(15, 16, 35, 0.94);
+  backdrop-filter: blur(6px);
+  transition: width 0.22s ease, height 0.22s ease;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 48px;
+}
+.browse-sidepanel[data-active] {
+  width: 380px;
+}
+.browse-sidepanel[data-active=""] { width: 48px; }
+
+@media (orientation: portrait) {
+  /* Bottom flyout. Tabs run horizontally along the top of the
+     sheet; opening a pane expands the sheet upward to ~55vh. */
+  .browse-sidepanel {
+    flex-direction: column;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto !important;
+    height: 56px;
+  }
+  .browse-sidepanel[data-active] {
+    width: auto !important;
+    height: 55vh;
+  }
+  .browse-sidepanel[data-active=""] {
+    height: 56px;
+  }
+}
+
+.sidepanel-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 4px;
+  background: rgba(7, 6, 15, 0.85);
+  border-right: 1px solid var(--border);
+  flex: 0 0 48px;
+}
+@media (orientation: portrait) {
+  .sidepanel-tabs {
+    flex-direction: row;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    height: 56px;
+    padding: 8px 10px;
+    justify-content: flex-start;
+    flex: 0 0 56px;
+    overflow-x: auto;
+  }
+}
+.sidepanel-tabs button {
+  width: 40px;
+  height: 40px;
+  font-size: 18px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0;
+  line-height: 1;
+}
+.sidepanel-tabs button.active {
+  background: var(--accent);
+  color: #062136;
+  border-color: var(--accent-2);
+}
+.sidepanel-tabs button:hover { background: var(--panel-2); }
+.sidepanel-tabs button.active:hover { background: var(--accent); }
+
+.sidepanel-content {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 36px 14px 14px;
+  position: relative;
+  display: none;
+}
+.browse-sidepanel[data-active] .sidepanel-content { display: block; }
+.browse-sidepanel[data-active=""] .sidepanel-content { display: none; }
+
+.sidepanel-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: transparent;
+  border: none;
+  color: var(--ink-dim);
+  font-size: 22px;
+  line-height: 1;
+  padding: 2px 6px;
+}
+.sidepanel-close:hover { color: var(--ink); }
+
+.panel-pane { display: none; }
+.panel-pane.active { display: block; }
+.panel-pane h3 {
+  margin: 0 0 10px;
+  color: var(--accent);
+  font-size: 14px;
+}
+
+#browse-map-info p {
+  font-size: 13px;
+  margin: 0 0 12px;
+  line-height: 1.4;
+}
+#browse-map-info ul.kv {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+#browse-map-info ul.kv li {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: 13px;
+}
+#browse-map-info ul.kv li:last-child { border-bottom: none; }
+#browse-map-info ul.kv span { color: var(--ink-dim); }
+#browse-map-info ul.kv strong { color: var(--ink); }
+
+.patent-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.patent-filter button {
+  font-size: 12px;
+}
+.patent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.patent-card {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--ink-mute);
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 12px;
+}
+.patent-card.type-thruster  { border-left-color: #f87171; }
+.patent-card.type-reactor   { border-left-color: #fbbf24; }
+.patent-card.type-radiator  { border-left-color: #7dd3fc; }
+.patent-card.type-refinery  { border-left-color: #4ade80; }
+.patent-card.type-robonaut  { border-left-color: #c084fc; }
+.patent-card.type-lab       { border-left-color: #38bdf8; }
+.patent-card.type-generator { border-left-color: #a78bfa; }
+
+.patent-card .pc-header {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 6px;
+}
+.patent-card .pc-type {
+  font-size: 9px; letter-spacing: 1.5px; color: var(--ink-mute); text-transform: uppercase;
+}
+.patent-card .pc-name {
+  font-weight: 600; color: var(--ink);
+}
+.patent-card .pc-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 8px;
+  margin: 6px 0;
+}
+.patent-card .pc-stats > div {
+  display: flex; justify-content: space-between;
+  border-bottom: 1px dashed var(--border);
+  padding-bottom: 2px;
+}
+.patent-card .pc-stats span { color: var(--ink-dim); }
+.patent-card .pc-stats strong { color: var(--accent); font-variant-numeric: tabular-nums; }
+.patent-card .pc-blurb {
+  font-size: 11px;
+  color: var(--ink-dim);
+  margin: 6px 0 0;
+  line-height: 1.4;
+  font-style: italic;
+}
+
+.ms-list, .ev-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+.ms-list li, .ev-list li {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.ms-head, .ev-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+.ms-head strong, .ev-head strong { color: var(--ink); }
+.ms-vp {
+  background: var(--accent);
+  color: #062136;
+  font-weight: 700;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.ev-kind {
+  font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--ink-mute);
+}
+.ms-list p, .ev-list p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* ===== Game-overlay map (used when a lobby starts) ===== */
+
+.overlay-shell {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.9);
+}
+.overlay-header h2 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--accent);
+}
+.overlay-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.overlay-main {
+  flex: 1;
+  padding: 12px;
+  display: flex;
+}
+.game-map {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Override the generic centered overlay-card style so the map can
+   fill its container. The Stage 1 placeholder used a centered card;
+   Stage 2 uses a full-bleed shell. */
+.game-overlay {
+  align-items: stretch;
+  justify-content: stretch;
+}
+.game-overlay > .overlay-shell {
+  background: var(--bg);
+}

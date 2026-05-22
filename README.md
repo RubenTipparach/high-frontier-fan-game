@@ -78,16 +78,16 @@ The `deploy-api` job is a no-op (success, with a notice) until
 
 ```sh
 # Locally, with flyctl installed and authenticated:
-fly apps create highfrontier-api
+fly apps create high-frontier-fan-game
 fly volumes create hf_data --size 1 --region ams
-fly tokens create deploy -a highfrontier-api  # paste this value into the repo secret
+fly tokens create deploy -a high-frontier-fan-game  # paste this value into the repo secret
 ```
 
 Then add the token as `FLY_API_TOKEN` under repo →
 **Settings** → **Secrets and variables** → **Actions** → **New
 repository secret**. Subsequent pushes will deploy the API.
 
-The frontend points at `https://highfrontier-api.fly.dev` via the
+The frontend points at `https://high-frontier-fan-game.fly.dev` via the
 `<meta name="hf-api-base">` tag in `index.html`. If your Fly app
 lives at a different hostname, edit that meta value.
 

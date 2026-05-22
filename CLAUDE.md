@@ -17,19 +17,23 @@ affiliated with the publisher.
 Verify each stage before starting the next. Don't conflate stages in a
 single PR.
 
-- **Stage 1 (current): identity + social layer.** Profile sign-in,
-  lobby (create/list/join games), chat, friend search, invite links.
-  The "game" inside the lobby is a stub that just shows "Coming in
-  Stage 2" once a game is started — the point of Stage 1 is to prove
-  out auth, REST, WS, and the multi-device flow end-to-end.
-- **Stage 2: solar system + ship data.** Static `data/sites.js`,
-  `data/patents.js`, SVG renderer for the delta-v map, ship card
-  builder. Still no engine — just the data and the renderer.
-- **Stage 3: core game engine.** Operations phase, MOVE / BURN /
-  PROSPECT / INDUSTRIALIZE / AUCTION / BUILD ops. Authoritative on
-  the server, optimistic-mirror on the client.
-- **Stage 4: full HF4 coverage.** Refineries, Bernal stations,
-  politics deck, glory cards, futures market, end-of-game scoring.
+- **Stage 1 (done):** Identity + social layer. Profiles, lobby
+  (create / list / join), chat, friend search, invite links. Game
+  surface was a placeholder.
+- **Stage 2 (current):** Static data + read-only renderer. The
+  solar-system map (`data/sites.js`), patent deck (`data/patents.js`),
+  milestones (`data/glory.js`), and events (`data/politics.js`); an
+  SVG renderer with pan/zoom; a ship-card composer (validation
+  rules + burn-cost math) ready for Stage 3 to call. A Browse view
+  on the topbar lets anyone inspect the data; the lobby's
+  game-overlay now mounts the map (read-only) when the host starts.
+- **Stage 3:** Server-authoritative engine. Operations phase, MOVE /
+  BURN / PROSPECT / INDUSTRIALIZE / AUCTION / BUILD ops. Validated
+  on the server; optimistic mirror on the client. New tables in
+  `server/db.js` for games, operations, and per-game state.
+- **Stage 4:** Full coverage. Refineries, habitat / Bernal stations,
+  politics resolution, milestone awards, futures market,
+  end-of-game scoring.
 
 If you're adding a feature, mark the stage it belongs to in the
 commit message so the boundaries stay legible.
@@ -40,7 +44,7 @@ Mirrors the murdoku-companion split:
 
 ```
 ┌────────────────────────────────┐   HTTPS+CORS   ┌────────────────────────────────┐
-│ GitHub Pages                   │ <------------> │ Fly.io app: highfrontier-api  │
+│ GitHub Pages                   │ <------------> │ Fly.io app: high-frontier-fan-game  │
 │ static ES modules, no build    │   WS (wss://)  │  Express + ws + better-sqlite3│
 │ index.html, css/*, js/*        │ <------------> │  volume: /data/hf.db          │
 │ deployed on every branch       │                │  admin at /admin              │
@@ -146,6 +150,21 @@ Random-numbered seeds are stored per game so replays are deterministic.
 - Don't store raw tokens. Always `sha256(token)`.
 - Don't horizontally scale the API process — single-writer sqlite.
 - Don't break the murdoku-style "every branch deploys" promise.
+- **Hexagons are independent entities.** When the user says "hex"
+  or "hexagon" they mean the gameplay-token marker drawn for each
+  site. Its size lives at `TYPE_VIS[type].r` (or the shared
+  `HEX_R` constant in `js/game/render.js`) and is independent of
+  everything else — body sphere size (`haloR`), halo glow,
+  asteroid silhouette, ring radius, edge width, label font size.
+  Tuning the hex must never resize the bodies behind them, and
+  vice versa. Same goes when the user mentions "halos" / "bodies"
+  / "rings" — those are their own knobs.
+- **Every hexagon is the same size.** All `TYPE_VIS` entries with
+  `kind: 'hex'` use the shared `HEX_R` constant for their `r`
+  field — planets, moons, dwarfs, asteroids, sites, surface sites,
+  everything. Body class differentiation lives in `haloR` and the
+  palette; the hex marker itself is uniform. Don't ship per-type
+  hex sizes again.
   The point is that any commit pushed to any branch is live at the
   GH Pages URL within ~1 minute.
 

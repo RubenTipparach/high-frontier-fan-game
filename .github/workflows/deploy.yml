@@ -26,20 +26,33 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Pull vendored submodules (vendor/hf-mission-planner) so the
+          # live site can serve its data-hf4.json. See
+          # THIRD_PARTY_NOTICES.md for the AGPL implications.
+          submodules: recursive
 
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # Smoke-test that the static entry resolves so a broken index.html
-      # never reaches the live site. Stage 2 will add data-module checks
-      # for sites.js / patents.js / glory.js when those files exist.
-      - name: Verify entry
+      # Smoke-test that the static entry resolves and the Stage 2 data
+      # modules parse + meet a minimum size. The data files are imported
+      # by both frontend ES modules and (Stage 3+) by the Node server,
+      # so failing fast here catches a syntax error before it breaks
+      # either world.
+      - name: Verify entry + data
         run: |
           test -f index.html
           test -f js/main.js
           test -f css/style.css
+          test -f css/map.css
+          test -f vendor/hf-mission-planner/assets/data-hf4.json
+          node --input-type=module -e "import('./data/sites.js').then(m => { if (!Array.isArray(m.SITES) || m.SITES.length < 20) { console.error('sites.js looks empty:', m.SITES && m.SITES.length); process.exit(1); } if (!Array.isArray(m.EDGES) || m.EDGES.length < 30) { console.error('edges look empty:', m.EDGES && m.EDGES.length); process.exit(1); } });"
+          node --input-type=module -e "import('./data/patents.js').then(m => { if (!Array.isArray(m.PATENTS) || m.PATENTS.length < 30) { console.error('patents.js looks empty:', m.PATENTS && m.PATENTS.length); process.exit(1); } });"
+          node --input-type=module -e "import('./data/glory.js').then(m => { if (!Array.isArray(m.GLORY) || m.GLORY.length < 6) { console.error('glory.js looks empty:', m.GLORY && m.GLORY.length); process.exit(1); } });"
+          node --input-type=module -e "import('./data/politics.js').then(m => { if (!Array.isArray(m.POLITICS) || m.POLITICS.length < 6) { console.error('politics.js looks empty:', m.POLITICS && m.POLITICS.length); process.exit(1); } });"
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -96,12 +109,12 @@ jobs:
             exit 0
           fi
           if ! flyctl auth whoami > /dev/null 2>&1; then
-            echo "::notice::FLY_API_TOKEN is set but rejected by Fly; skipping API deploy. Regenerate via 'fly tokens create deploy -a highfrontier-api'."
+            echo "::notice::FLY_API_TOKEN is set but rejected by Fly; skipping API deploy. Regenerate via 'fly tokens create deploy -a high-frontier-fan-game'."
             echo "ready=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if ! flyctl status -a highfrontier-api > /dev/null 2>&1; then
-            echo "::notice::Fly app 'highfrontier-api' not found; skipping API deploy. Bootstrap with 'fly apps create highfrontier-api' + 'fly volumes create hf_data --size 1 --region ams'."
+          if ! flyctl status -a high-frontier-fan-game > /dev/null 2>&1; then
+            echo "::notice::Fly app 'high-frontier-fan-game' not found; skipping API deploy. Bootstrap with 'fly apps create high-frontier-fan-game' + 'fly volumes create hf_data --size 1 --region ams'."
             echo "ready=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -115,7 +128,7 @@ jobs:
         if: steps.fly_gate.outputs.ready == 'true'
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-          APP: highfrontier-api
+          APP: high-frontier-fan-game
           REGION: ams
         run: |
           set -e

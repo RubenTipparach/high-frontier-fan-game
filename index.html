@@ -4,14 +4,15 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>High Frontier — fan game</title>
-    <link rel="stylesheet" href="./css/style.css?v=1" />
+    <link rel="stylesheet" href="./css/style.css?v=2" />
+    <link rel="stylesheet" href="./css/map.css?v=1" />
     <!--
       API base URL for the High Frontier companion server. Empty string
       = local-only mode (no profile, no lobby, no multiplayer). The
       deploy.yml workflow leaves this hard-coded so the site stays
       buildless; flip the value per environment by editing this tag.
     -->
-    <meta name="hf-api-base" content="https://highfrontier-api.fly.dev" />
+    <meta name="hf-api-base" content="https://high-frontier-fan-game.fly.dev" />
     <link
       rel="icon"
       type="image/svg+xml"
@@ -26,6 +27,7 @@
         <span class="brand-sub">fan game · stage 1</span>
       </div>
       <div class="topbar-actions">
+        <button id="btn-browse" title="Browse game data (map, patents, milestones, events)">Browse</button>
         <span id="server-status" class="server-status" title="API connectivity">…</span>
         <div id="profile-pill" class="profile-pill hidden">
           <span id="profile-name"></span>
@@ -204,20 +206,71 @@
 
         <!--
           When the host hits Start, lobby.status flips to 'started'
-          and this overlay covers the lobby with a "game would start
-          here" placeholder. Stage 2 will replace this with the actual
-          solar-system board.
+          and this overlay covers the lobby with the solar-system map.
+          Stage 2 renders the map read-only; Stage 3 will add the
+          engine + interactive operation buttons.
         -->
         <div id="game-overlay" class="game-overlay hidden">
-          <div class="overlay-card">
-            <h2>Game would start here</h2>
-            <p class="muted">
-              Stage 1 ships the social layer only. The High Frontier
-              solar system map, ship builder, and engine arrive in
-              Stage 2+ — see <code>CLAUDE.md</code> for the staged plan.
-            </p>
-            <button id="btn-back-to-lobby">Back to lobby panel</button>
+          <div class="overlay-shell">
+            <div class="overlay-header">
+              <h2 id="game-title">Solar system</h2>
+              <div class="overlay-actions">
+                <span class="muted">Stage 2 preview · engine arrives in Stage 3</span>
+                <button id="btn-back-to-lobby">Back to lobby</button>
+              </div>
+            </div>
+            <div class="overlay-main">
+              <div id="game-map" class="game-map"></div>
+            </div>
           </div>
+        </div>
+      </section>
+
+      <!--
+        ===== Browse view =====
+        Read-only inspector for the Stage 2 data: solar system map,
+        patent deck, milestones, and event cards. Always reachable
+        from the topbar; doesn't require sign-in.
+      -->
+      <!--
+        Browse layout: the map canvas fills the entire viewport
+        below the topbar (planner-style), with a slide-out sidebar
+        on the right that surfaces site info, patents, milestones,
+        and events on demand. The fullscreen button still promotes
+        the whole shell to actual fullscreen.
+      -->
+      <section id="view-browse" class="view hidden">
+        <div class="browse-shell">
+          <div class="browse-stage">
+            <div id="browse-map" class="browse-map"></div>
+          </div>
+          <aside id="browse-sidepanel" class="browse-sidepanel" data-active="">
+            <nav class="sidepanel-tabs" id="sidepanel-tabs">
+              <button data-pane="info" title="Site info" aria-label="Site info">📍</button>
+              <button data-pane="patents" title="Patents" aria-label="Patents">💎</button>
+              <button data-pane="milestones" title="Milestones" aria-label="Milestones">🏆</button>
+              <button data-pane="events" title="Events" aria-label="Events">📜</button>
+            </nav>
+            <div class="sidepanel-content">
+              <button class="sidepanel-close" id="sidepanel-close"
+                aria-label="Close panel" title="Close">×</button>
+              <div class="panel-pane" data-pane="info">
+                <h3>Site info</h3>
+                <div id="browse-map-info">
+                  <p class="muted">Tap any site on the map to see its details.</p>
+                </div>
+              </div>
+              <div class="panel-pane" data-pane="patents">
+                <div id="browse-patents"></div>
+              </div>
+              <div class="panel-pane" data-pane="milestones">
+                <div id="browse-milestones"></div>
+              </div>
+              <div class="panel-pane" data-pane="events">
+                <div id="browse-events"></div>
+              </div>
+            </div>
+          </aside>
         </div>
       </section>
     </main>
@@ -242,6 +295,6 @@
     -->
     <div id="toasts" class="toasts" aria-live="polite"></div>
 
-    <script type="module" src="./js/main.js?v=1"></script>
+    <script type="module" src="./js/main.js?v=2"></script>
   </body>
 </html>

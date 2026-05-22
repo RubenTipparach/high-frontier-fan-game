@@ -3,14 +3,14 @@
 # Deploys via .github/workflows/deploy.yml using the FLY_API_TOKEN repo
 # secret. Bootstrap on a fresh app (run once locally with flyctl):
 #
-#   fly apps create highfrontier-api
+#   fly apps create high-frontier-fan-game
 #   fly volumes create hf_data --size 1 --region ams
 #
 # No app secrets to configure: the server is passwordless and tokens
 # are stored as plain sha256 hashes. Subsequent deploys are automatic
 # on every push to the repo.
 
-app = "highfrontier-api"
+app = "high-frontier-fan-game"
 primary_region = "ams"
 
 [build]

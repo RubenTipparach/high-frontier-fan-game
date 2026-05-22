@@ -12,12 +12,22 @@ import {
 import {
   initInvites, refreshInvitesList, subscribeInvitesForProfile,
 } from './invites.js';
+import { mountBrowse } from './game/browse.js';
 
 const VIEWS = [
   'view-signin', 'view-lobby-list', 'view-create-lobby', 'view-lobby',
+  'view-browse',
 ];
 
+// Track which view the user was on before opening Browse, so the
+// "back" affordance restores them instead of always punting to
+// sign-in / lobby-list.
+let _prevView = null;
+
 function showView(id) {
+  // Remember the view we're leaving so Browse → back returns properly.
+  const current = VIEWS.find((v) => !document.getElementById(v).classList.contains('hidden'));
+  if (current && current !== id && current !== 'view-browse') _prevView = current;
   for (const v of VIEWS) {
     document.getElementById(v).classList.toggle('hidden', v !== id);
   }
@@ -64,6 +74,20 @@ function reflectProfile(profile) {
     pill.classList.add('hidden');
     signin.classList.remove('hidden');
   }
+}
+
+// Browse view: read-only data inspector. Always reachable; doesn't
+// require sign-in. The Browse module itself manages its tabs.
+function initBrowseButton() {
+  document.getElementById('btn-browse').addEventListener('click', () => {
+    if (!document.getElementById('view-browse').classList.contains('hidden')) {
+      // Toggle: clicking Browse while on Browse returns to the prior view.
+      showView(_prevView || (activeProfile() ? 'view-lobby-list' : 'view-signin'));
+      return;
+    }
+    showView('view-browse');
+    mountBrowse();
+  });
 }
 
 function initAccountMenu() {
@@ -183,6 +207,7 @@ async function boot() {
   initAccountMenu();
   initLobby({ onShowView: showView, onToast: toast });
   initInvites({ onToast: toast });
+  initBrowseButton();
   onProfileChange(reflectProfile);
 
   await updateServerStatus();
