@@ -40,18 +40,18 @@ const HALO_MAX_SCREEN_R = 110;
 // halo so they dominate; inner planets and moons read at a uniform
 // readable size; asteroids are small + irregular.
 const TYPE_VIS = {
-  site:           { kind: 'hex',    r: 44, haloFactor: 1.55 },
-  'gas-giant':    { kind: 'hex',    r: 64, haloFactor: 2.6  },
-  'inner-planet': { kind: 'hex',    r: 40, haloFactor: 1.8  },
+  site:           { kind: 'hex',    r: 22, haloFactor: 1.55 },
+  'gas-giant':    { kind: 'hex',    r: 32, haloFactor: 2.6  },
+  'inner-planet': { kind: 'hex',    r: 20, haloFactor: 1.8  },
   // Backward-compat: any legacy 'planet' lookups behave like a
   // small inner planet.
-  planet:         { kind: 'hex',    r: 40, haloFactor: 1.8  },
-  dwarf:          { kind: 'hex',    r: 48, haloFactor: 1.7  },
-  tno:            { kind: 'hex',    r: 40, haloFactor: 1.6  },
-  moon:           { kind: 'hex',    r: 40, haloFactor: 1.65 },
+  planet:         { kind: 'hex',    r: 20, haloFactor: 1.8  },
+  dwarf:          { kind: 'hex',    r: 24, haloFactor: 1.7  },
+  tno:            { kind: 'hex',    r: 20, haloFactor: 1.6  },
+  moon:           { kind: 'hex',    r: 20, haloFactor: 1.65 },
   comet:          { kind: 'comet',  r:  5 },
   asteroid:       { kind: 'hex',    r:  7, haloFactor: 1.5, rocky: true },
-  surface:        { kind: 'hex',    r: 40, haloFactor: 1.55 },
+  surface:        { kind: 'hex',    r: 20, haloFactor: 1.55 },
   sun:            { kind: 'sun',    r: 60 },
   lagrange:       { kind: 'circle', r:  7, fill: 'transparent', stroke: '#c66932' },
   burn:           { kind: 'circle', r:  6, hitR: 8, fill: '#d60f7a', stroke: '#fde0ee', hideBelowZoom: 1.4 },
