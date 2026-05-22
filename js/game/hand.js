@@ -19,6 +19,7 @@
 import { isInRocket } from './rocket.js';
 
 const STORAGE_KEY = 'hf-sandbox-hand';
+const BOOST_KEY = 'hf-sandbox-boost-marks';
 
 let _hand = (() => {
   try {
@@ -28,11 +29,24 @@ let _hand = (() => {
   } catch { return []; }
 })();
 
+// Boost marks: ids of hand cards the player has flagged for the
+// next BOOST commit (which transfers them all to the LEO rocket
+// stack). Stored as a Set; persisted alongside the hand.
+let _boostMarks = (() => {
+  try {
+    const raw = localStorage.getItem(BOOST_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : []);
+  } catch { return new Set(); }
+})();
+
 let _listeners = [];
 
 function persist() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(_hand)); }
-  catch { /* private mode */ }
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(_hand));
+    localStorage.setItem(BOOST_KEY, JSON.stringify([..._boostMarks]));
+  } catch { /* private mode */ }
 }
 
 function notify() {
@@ -66,10 +80,36 @@ export function addToHand(card) {
 
 export function removeFromHandAt(index) {
   if (index < 0 || index >= _hand.length) return false;
+  const id = _hand[index];
   _hand.splice(index, 1);
+  // A card leaving the hand can't carry its boost mark with it.
+  _boostMarks.delete(id);
   persist();
   notify();
   return true;
+}
+
+// Boost-mark API: flag a hand card for the next BOOST commit.
+// The commit (in browse.js) walks every marked id, transfers
+// it to the rocket stack, and clears the marks.
+export function isBoostMarked(id) {
+  return _boostMarks.has(id);
+}
+export function getBoostMarked() {
+  return [..._boostMarks];
+}
+export function toggleBoostMark(id) {
+  if (_boostMarks.has(id)) _boostMarks.delete(id);
+  else _boostMarks.add(id);
+  persist();
+  notify();
+  return _boostMarks.has(id);
+}
+export function clearBoostMarks() {
+  if (!_boostMarks.size) return;
+  _boostMarks.clear();
+  persist();
+  notify();
 }
 
 export function removeFromHand(id) {
@@ -78,8 +118,9 @@ export function removeFromHand(id) {
 }
 
 export function clearHand() {
-  if (!_hand.length) return;
+  if (!_hand.length && !_boostMarks.size) return;
   _hand = [];
+  _boostMarks.clear();
   persist();
   notify();
 }

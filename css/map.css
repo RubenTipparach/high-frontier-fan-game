@@ -1061,3 +1061,106 @@ body:has(#view-browse:not(.hidden)) #main {
 .game-overlay > .overlay-shell {
   background: var(--bg);
 }
+
+/* Hand-slot quick actions: an emoji row at the bottom of each
+   hand card, revealed on hover. Same verbs as the inspect modal
+   but icon-only so they read instantly. */
+.hand-quick-actions {
+  position: absolute;
+  left: 50%;
+  bottom: 4px;
+  transform: translateX(-50%) translateY(6px);
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s, transform 0.15s;
+  z-index: 6;
+  pointer-events: none;
+}
+.hand-slot:hover .hand-quick-actions {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  pointer-events: auto;
+}
+.hand-q {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(15, 16, 35, 0.92);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+.hand-q:hover { background: var(--panel-2); border-color: var(--accent); }
+.hand-q.q-discard:hover { background: #b91c1c; color: #fff; border-color: #7f1d1d; }
+.hand-q.q-boost:hover   { background: var(--accent); color: #062136; border-color: var(--accent-2); }
+
+/* Boost-marked slots get an orange glow ring so the player can
+   see at a glance which cards are queued for the next BOOST
+   commit. */
+.hand-slot.is-boost-marked .card {
+  box-shadow: 0 0 0 3px #f97316, 0 0 16px rgba(249, 115, 22, 0.6);
+  border-radius: 10px;
+}
+
+/* BOOST commit button in the hand header. Inactive looks
+   muted; armed (data-armed="1") flips to a saturated rocket-
+   orange to signal "press me to launch". */
+#hand-boost-commit {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(15, 16, 35, 0.6);
+  color: var(--ink-mute);
+  cursor: not-allowed;
+  transition: background 0.18s, color 0.18s, transform 0.12s;
+}
+#hand-boost-commit[data-armed="1"] {
+  background: #f97316;
+  color: #2e0f02;
+  border-color: #9a3412;
+  cursor: pointer;
+  animation: boost-pulse 1.4s ease-in-out infinite;
+}
+#hand-boost-commit[data-armed="1"]:hover {
+  background: #c2410c;
+  color: #fff;
+  transform: scale(1.04);
+}
+@keyframes boost-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.6); }
+  50%      { box-shadow: 0 0 0 8px rgba(249, 115, 22, 0); }
+}
+
+/* Rocket-stack modal: a centered panel that floats over the
+   map. Wider than the inspect modal so the player can scan a
+   multi-card stack at a glance. */
+.rocket-stack-panel {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 22px 24px;
+  width: min(820px, 90vw);
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);
+}
+.rocket-stack-title {
+  margin: 0 0 12px;
+  font-size: 18px;
+  letter-spacing: 0.5px;
+}
+.rocket-stack-panel #rocket-stack-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+}

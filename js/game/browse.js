@@ -19,6 +19,7 @@ import { PATENTS, PATENTS_BY_ID, PATENT_TYPES, patentsByType } from '../../data/
 import {
   getHandSlots, isInHand, addToHand, removeFromHandAt, removeFromHand,
   clearHand, onHandChange,
+  isBoostMarked, getBoostMarked, toggleBoostMark, clearBoostMarks,
 } from './hand.js';
 import {
   getRocketStack, isInRocket, addToStack as rocketAddCard,
@@ -131,20 +132,73 @@ function wireHandStrip() {
       if (!card) return;
       const wrap = document.createElement('div');
       wrap.className = 'hand-slot';
+      if (isBoostMarked(id)) wrap.classList.add('is-boost-marked');
       wrap.dataset.slotIdx = String(idx);
       wrap.appendChild(renderCard(card, { type: kindOf(id) }));
-      // Click anywhere on the slot opens the inspect modal —
-      // discard / produce / add-to-stack live in there.
+
+      // Quick-action row at the bottom of the slot, revealed on
+      // hover. Same verbs as the inspect modal but emoji-only
+      // so they read fast: 🗑 discard, 💰 sell, 🏭 exo produce,
+      // 🚀 boost-mark (toggles). Clicks here stop propagation
+      // so the slot's own click (which opens the inspect modal)
+      // doesn't also fire.
+      const quick = document.createElement('div');
+      quick.className = 'hand-quick-actions';
+      const qBtn = (cls, glyph, title, handler) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = `hand-q ${cls}`;
+        b.textContent = glyph;
+        b.title = title;
+        b.addEventListener('click', (ev) => { ev.stopPropagation(); handler(); });
+        return b;
+      };
+      quick.append(
+        qBtn('q-discard', '🗑', 'Discard', () => removeFromHandAt(idx)),
+        qBtn('q-sell',    '💰', 'Sell (Stage-3 economy)',
+          () => setStatus('Selling needs the Stage-3 economy.')),
+        qBtn('q-produce', '🏭', `Exo produce (spectral ${card.spectralType || '?'})`,
+          () => setStatus(`Exo-produce needs a Stage-3 factory matching spectral ${card.spectralType || '?'}.`)),
+        qBtn('q-boost',   '🚀', isBoostMarked(id) ? 'Unmark boost' : 'Mark for boost',
+          () => toggleBoostMark(id)),
+      );
+      wrap.appendChild(quick);
+
       wrap.addEventListener('click', (ev) => {
-        // Allow the rotate / flip controls on the card itself
-        // (which stopPropagation) to keep working without
-        // opening the modal.
-        if (ev.target.closest('.card-flip, .card-rotate')) return;
+        if (ev.target.closest('.card-flip, .card-rotate, .hand-q')) return;
         openCardModal(card, kindOf(id), idx);
       });
       host.appendChild(wrap);
     });
+    repaintBoostCommit();
   };
+
+  // BOOST commit button next to the hand title. Lit when at
+  // least one card is marked; pressing it transfers every
+  // marked card from the hand to the rocket stack and pops the
+  // stack modal so the player sees the cards land.
+  const repaintBoostCommit = () => {
+    const btn = document.getElementById('hand-boost-commit');
+    if (!btn) return;
+    const n = getBoostMarked().length;
+    btn.dataset.armed = n > 0 ? '1' : '0';
+    btn.disabled = n === 0;
+    btn.textContent = n > 0 ? `🚀 BOOST (${n})` : '🚀 BOOST';
+  };
+  const commitBoost = () => {
+    const marked = getBoostMarked();
+    if (!marked.length) return;
+    for (const id of marked) {
+      const card = lookup(id);
+      if (!card) continue;
+      rocketAddCard(id, kindOf(id));
+      removeFromHand(id);
+    }
+    clearBoostMarks();
+    openRocketStackModal();
+  };
+  const commitBtn = document.getElementById('hand-boost-commit');
+  if (commitBtn) commitBtn.addEventListener('click', commitBoost);
 
   repaintHand();
   onHandChange(repaintHand);
@@ -376,25 +430,37 @@ function openCardModal(card, kind, slotIdx) {
   const actions = document.createElement('div');
   actions.className = 'card-modal-actions';
 
+  // Four primary actions, emoji-led for the quick-icon row on
+  // hand-slot hover (defined further down) to mirror the same
+  // verbs. Boost flags the card for the next BOOST commit;
+  // the commit lives on the hand strip's BOOST button (lit
+  // when at least one card is marked).
   const discardBtn = document.createElement('button');
   discardBtn.type = 'button';
   discardBtn.className = 'modal-btn discard';
-  discardBtn.textContent = 'Discard';
+  discardBtn.textContent = '🗑 Discard';
   discardBtn.title = 'Return this card to the deck';
   discardBtn.addEventListener('click', () => {
     removeFromHandAt(slotIdx);
     close();
   });
 
+  const sellBtn = document.createElement('button');
+  sellBtn.type = 'button';
+  sellBtn.className = 'modal-btn sell';
+  sellBtn.textContent = '💰 Sell';
+  sellBtn.title = 'Sell this card (Stage-3 economy)';
+  sellBtn.addEventListener('click', () => {
+    setStatus('Selling needs the Stage-3 economy. Coming soon.');
+    close();
+  });
+
   const produceBtn = document.createElement('button');
   produceBtn.type = 'button';
   produceBtn.className = 'modal-btn produce';
-  produceBtn.textContent = `Exo produce (${card.spectralType || '?'})`;
+  produceBtn.textContent = `🏭 Exo produce (${card.spectralType || '?'})`;
   produceBtn.title = `Use a factory matching spectral type ${card.spectralType || '?'} to produce the dark-side resource`;
   produceBtn.addEventListener('click', () => {
-    // Factories don't exist yet — Stage 3 will let the player
-    // build one matching the card's spectral type. Surface the
-    // intent so the player knows what's coming.
     setStatus(
       `Exo-produce needs a factory matching spectral type `
       + `<strong>${card.spectralType || '?'}</strong>. `
@@ -403,34 +469,20 @@ function openCardModal(card, kind, slotIdx) {
     close();
   });
 
-  const stackBtn = document.createElement('button');
-  stackBtn.type = 'button';
-  stackBtn.className = 'modal-btn stack';
-  stackBtn.textContent = 'Add to LEO stack';
-  stackBtn.title = 'Add this card to your rocket parked in LEO';
-  stackBtn.addEventListener('click', () => {
-    // Snapshot the slot's screen position before we mutate
-    // state — the hand strip re-renders and the source slot is
-    // gone by the time the animation kicks off.
-    const slotEl = document.querySelector(`#sandbox-hand-cards .hand-slot[data-slot-idx="${slotIdx}"]`);
-    const sourceRect = slotEl
-      ? slotEl.getBoundingClientRect()
-      : { left: 200, top: 400, width: 121, height: 192 };
-    rocketAddCard(card.id, kind);
-    removeFromHandAt(slotIdx);
+  const boostBtn = document.createElement('button');
+  boostBtn.type = 'button';
+  boostBtn.className = 'modal-btn stack';
+  const marked = isBoostMarked(card.id);
+  boostBtn.textContent = marked ? '🚀 Unmark boost' : '🚀 Boost';
+  boostBtn.title = marked
+    ? 'Remove the boost mark on this card'
+    : 'Mark this card to be boosted to the LEO rocket on the next BOOST commit';
+  boostBtn.addEventListener('click', () => {
+    toggleBoostMark(card.id);
     close();
-    showPane('rocket');
-    // Give the rocket pane a frame to render the new slot, then
-    // fly the card onto the last-appended rocket-slot element.
-    requestAnimationFrame(() => {
-      const target = document.querySelector('#rocket-stack-cards .rocket-slot:last-of-type')
-        ? '#rocket-stack-cards .rocket-slot:last-of-type'
-        : '#rocket-panel';
-      flyCardTo(card, kind, sourceRect, target);
-    });
   });
 
-  actions.append(discardBtn, produceBtn, stackBtn);
+  actions.append(discardBtn, sellBtn, produceBtn, boostBtn);
   panel.appendChild(actions);
   // Top-right × close button — replaces the explicit Close
   // action that was crowding the row of primary actions.
@@ -490,7 +542,16 @@ function showPane(pane) {
   if      (pane === 'patents')    renderPatents();
   else if (pane === 'milestones') renderMilestones();
   else if (pane === 'events')     renderEvents();
-  else if (pane === 'rocket')     renderRocketPane();
+  else if (pane === 'rocket') {
+    // Rocket lives in a centered modal now, not the sidepanel.
+    // Close the sidepanel (if it was just popped to "rocket")
+    // and open the modal instead so the player sees the stack
+    // in the map's centre.
+    panel.dataset.active = '';
+    for (const btn of panel.querySelectorAll('.sidepanel-tabs button')) btn.classList.remove('active');
+    for (const el of panel.querySelectorAll('.panel-pane'))   el.classList.remove('active');
+    openRocketStackModal();
+  }
   else if (pane === 'solo')       renderSolo();
 }
 
@@ -804,7 +865,7 @@ async function mountMapFor(mode) {
       data: _activeData,
       onSelect: onSiteSelect,
     });
-    _renderer.onSandboxRocketClick = () => showPane('rocket');
+    _renderer.onSandboxRocketClick = () => openRocketStackModal();
     wireDebugPanel(_renderer);
     syncSoloShipMarker();
     syncSandboxRocket();
@@ -819,6 +880,85 @@ async function mountMapFor(mode) {
 // now — multiplayer Stage 3 will pick from the 5-colour palette
 // per player. canFly is recomputed from rocket.js on every
 // rocket-state change.
+// Centered modal that shows the rocket's stack — replaces the
+// old sidepanel "rocket" pane. Same data, same actions (pull a
+// card back to the hand), just opens in the middle of the map
+// like the other inspect modals. Press × or Esc to dismiss.
+function openRocketStackModal() {
+  // Close any existing instance first so the modal doesn't
+  // stack up if the player clicks the rocket twice fast.
+  document.querySelector('.rocket-stack-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay rocket-stack-overlay';
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+    if (_rocketModalUnsub) { _rocketModalUnsub(); _rocketModalUnsub = null; }
+  };
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  const panel = document.createElement('div');
+  panel.className = 'rocket-stack-panel';
+  overlay.appendChild(panel);
+
+  const xBtn = document.createElement('button');
+  xBtn.type = 'button';
+  xBtn.className = 'modal-x';
+  xBtn.textContent = '×';
+  xBtn.title = 'Close (Esc)';
+  xBtn.addEventListener('click', close);
+  panel.appendChild(xBtn);
+
+  const repaint = () => {
+    const stack = getRocketStack();
+    const flyable = canRocketFly();
+    panel.querySelector('.rocket-stack-body')?.remove();
+    const body = document.createElement('div');
+    body.className = 'rocket-stack-body';
+    body.innerHTML = `
+      <h2 class="rocket-stack-title">🚀 LEO Rocket</h2>
+      ${flyable.ok
+        ? '<p class="rocket-status ok">✓ Flyable — all supports satisfied.</p>'
+        : `<p class="rocket-status bad">🚫 Cannot fly:</p>
+           <ul class="rocket-issues">${flyable.missing.map((m) => `<li>${esc(m)}</li>`).join('')}</ul>`}
+      <div id="rocket-stack-cards"></div>
+    `;
+    panel.appendChild(body);
+
+    const cards = body.querySelector('#rocket-stack-cards');
+    if (!stack.length) {
+      cards.innerHTML = '<p class="muted">Your rocket is empty. Mark cards 🚀 in your hand, then press BOOST to launch them up here.</p>';
+      return;
+    }
+    stack.forEach((slot, idx) => {
+      const card = lookup(slot.id);
+      if (!card) return;
+      const wrap = document.createElement('div');
+      wrap.className = 'rocket-slot';
+      wrap.appendChild(renderCard(card, { type: slot.kind || 'patent' }));
+      const back = document.createElement('button');
+      back.type = 'button';
+      back.className = 'rocket-back-to-hand';
+      back.textContent = '↩ Back to hand';
+      back.addEventListener('click', () => {
+        rocketRemoveCard(idx);
+        addToHand(card);
+      });
+      wrap.appendChild(back);
+      cards.appendChild(wrap);
+    });
+  };
+  const lookup = (id) => PATENTS_BY_ID[id]
+    || CREW.find((c) => c.id === id) || null;
+  repaint();
+  _rocketModalUnsub = onRocketChange(repaint);
+
+  document.body.appendChild(overlay);
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+}
+let _rocketModalUnsub = null;
+
 // Stack panel: lists every card in the rocket, shows fly-status,
 // and lets the player pull any card back into their hand.
 function renderRocketPane() {
