@@ -868,7 +868,13 @@ body:has(#view-browse:not(.hidden)) #main {
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
     background: rgba(15, 16, 35, 0.94);
     backdrop-filter: blur(6px);
-    z-index: 6;
+    /* Must exceed the modal-backdrop's z-index (9). The sidepanel
+       creates a stacking context with this z-index, so the modal
+       content inside (which gets z-index: 10 relative to this
+       parent context) inherits the ceiling — without this bump
+       the backdrop draws OVER the modal and the player sees an
+       empty dim area when they tap a tab. */
+    z-index: 11;
   }
   .browse-sidepanel .sidepanel-content {
     display: none;
