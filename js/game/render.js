@@ -147,6 +147,99 @@ function drawDroplet(ctx, cx, cy, h) {
   ctx.closePath();
 }
 
+// ----- Planet rings -----
+//
+// Each ring system is a list of concentric bands. Each band has:
+//   r:     inner radius as a multiple of the planet radius
+//   w:     band thickness (also in planet radii)
+//   color: rgba fill — alpha tuned so a band sums with whatever it
+//          overlaps without going opaque.
+// `tilt` is the rotation in radians (Saturn's axial tilt vs. our
+// viewport's horizontal). `flatten` is the vertical squash factor
+// that gives the rings their viewed-from-above perspective.
+//
+// Saturn's bands are an approximation of the C / B / A / F ring
+// system with the Cassini Division left as a gap; the other gas
+// giants get a single faint dust ring tagged to their real-life
+// inclinations (Uranus's rings stand nearly vertical because the
+// planet rolls on its side).
+const RING_DEFS = {
+  saturn: {
+    tilt: -0.42, flatten: 0.32,
+    bands: [
+      { r: 1.18, w: 0.10, color: 'rgba(110, 92, 64, 0.55)' },  // C ring
+      { r: 1.30, w: 0.32, color: 'rgba(225, 195, 145, 0.92)' },// B ring (brightest)
+      // Cassini Division: a deliberate gap between B and A
+      { r: 1.72, w: 0.22, color: 'rgba(180, 150, 105, 0.78)' },// A ring
+      { r: 1.96, w: 0.018, color: 'rgba(200, 175, 130, 0.55)' },// Encke gap edge / F ring trace
+      { r: 2.04, w: 0.05, color: 'rgba(170, 145, 100, 0.40)' },// F ring (faint outer)
+    ],
+  },
+  jupiter: {
+    tilt: -0.05, flatten: 0.28,
+    bands: [
+      { r: 1.50, w: 0.14, color: 'rgba(140, 115, 80, 0.32)' }, // Main + halo ring (very faint)
+    ],
+  },
+  uranus: {
+    tilt: -1.48, flatten: 0.30,   // axial tilt ~98° -> rings nearly vertical
+    bands: [
+      { r: 1.30, w: 0.08, color: 'rgba(120, 170, 200, 0.45)' },// ε ring family
+      { r: 1.48, w: 0.025,color: 'rgba(180, 220, 230, 0.30)' },
+    ],
+  },
+  neptune: {
+    tilt: -0.50, flatten: 0.30,
+    bands: [
+      { r: 1.40, w: 0.05, color: 'rgba(170, 195, 230, 0.30)' },
+      { r: 1.62, w: 0.07, color: 'rgba(170, 195, 230, 0.45)' },// Adams ring
+    ],
+  },
+};
+
+// Which sites get rings: only the planet itself (matched by name
+// prefix), not its moons. Site names in the data look like
+// 'Saturn Aerostat', 'Jupiter Aerostat-XYZ' etc.
+function ringDefFor(site) {
+  const n = (site.name || '').toLowerCase();
+  if (n.startsWith('saturn'))  return RING_DEFS.saturn;
+  if (n.startsWith('jupiter')) return RING_DEFS.jupiter;
+  if (n.startsWith('uranus'))  return RING_DEFS.uranus;
+  if (n.startsWith('neptune')) return RING_DEFS.neptune;
+  return null;
+}
+
+// Draw planet rings either behind or in front of the planet.
+// `phase` is 'back' (clipped to the upper half of the rotated
+// frame, drawn before the sphere) or 'front' (lower half, drawn
+// after). Each band is an annulus stroked as one ellipse so the
+// gap between bands shows through cleanly.
+function drawPlanetRings(ctx, cx, cy, planetR, def, phase) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(def.tilt);
+
+  // Clip the rotated plane to the half currently being drawn.
+  ctx.save();
+  ctx.beginPath();
+  const clipH = planetR * 6;
+  if (phase === 'back') ctx.rect(-clipH, -clipH, clipH * 2, clipH);
+  else                  ctx.rect(-clipH,       0, clipH * 2, clipH);
+  ctx.clip();
+
+  for (const band of def.bands) {
+    const ringR = planetR * band.r;
+    const lineW = planetR * band.w;
+    ctx.strokeStyle = band.color;
+    ctx.lineWidth = Math.max(0.4, lineW);
+    ctx.beginPath();
+    ctx.ellipse(0, 0, ringR, ringR * def.flatten, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+  ctx.restore();
+}
+
 const ZONE_BAND_LIGHT = ['Venus', 'Mars', 'Jupiter', 'Uranus'];
 
 // siteSynodic in the planner data is 'red' | 'yellow' | 'blue'. We
@@ -232,6 +325,7 @@ export class MapRenderer {
     this._onFrame = null;           // optional callback fired each frame
     this._partitionSites();
     this._buildStars();
+    this._buildAsteroidBelt();
     this._mount();
   }
 
@@ -254,6 +348,29 @@ export class MapRenderer {
   }
 
   // ---- setup ----
+
+  _buildAsteroidBelt() {
+    // Seeded particle field placed in a torus-like band around the
+    // implicit Sun position (left edge, vertically centred) at the
+    // radial distance the asteroid belt occupies in our layout.
+    // Particles are static; we just want a textural cue.
+    this._beltParticles = [];
+    let seed = 54321;
+    const rand = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+    const cx = 0, cy = VIEW_H / 2;
+    for (let i = 0; i < 220; i++) {
+      const angle = (rand() * 2 - 1) * Math.PI * 0.45;     // -81° .. +81° from +X axis
+      const r = 460 + rand() * 220;                         // belt inner / outer radius
+      const x = cx + Math.cos(angle) * r;
+      const y = cy + Math.sin(angle) * r;
+      this._beltParticles.push({
+        x, y,
+        size: 0.6 + rand() * 1.2,
+        alpha: 0.25 + rand() * 0.5,
+        tint: rand() < 0.15 ? '#cbb89a' : '#8e7c66',
+      });
+    }
+  }
 
   _partitionSites() {
     if (!this.data) { this._waypoints = []; this._realSites = []; return; }
@@ -391,6 +508,7 @@ export class MapRenderer {
       this._drawZoneBands(ctx, this.data.zones);
     }
     this._drawGuides(ctx);
+    this._drawAsteroidBelt(ctx);
     this._drawEdges(ctx);
     this._drawRoute(ctx);
     this._drawSiteHalosWorld(ctx);
@@ -477,6 +595,31 @@ export class MapRenderer {
       ctx.beginPath();
       ctx.arc(0, VIEW_H / 2, 220 * i, 0, Math.PI * 2);
       ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  _drawAsteroidBelt(ctx) {
+    // Static cloud of rocky particles in the belt zone. Cheap: one
+    // path per tint colour, batched fill.
+    const eff = this.zoom * this.fitScale;
+    // Particle size is in world units; counter-scale so dots stay
+    // small even when zoomed in.
+    const counter = 1 / Math.max(1, eff * 0.5);
+    for (const tint of ['#8e7c66', '#cbb89a']) {
+      ctx.fillStyle = tint;
+      ctx.beginPath();
+      for (const p of this._beltParticles) {
+        if (p.tint !== tint) continue;
+        ctx.globalAlpha = p.alpha;
+        const r = p.size * counter;
+        ctx.moveTo(p.x + r, p.y);
+        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      }
+      // Use stroke=0 fill; we accept that all dots in a batch share
+      // the per-particle alpha being overwritten as we add each
+      // sub-path. Visually fine because the alphas are close.
+      ctx.fill();
     }
     ctx.globalAlpha = 1;
   }
@@ -709,7 +852,11 @@ export class MapRenderer {
   // Celestial body halos drawn in WORLD space so they scale with
   // zoom and stay proportional to the surrounding layout. Capped
   // at HALO_MAX_SCREEN_R screen pixels so very high zooms don't
-  // make a single body swallow the canvas.
+  // make a single body swallow the canvas. Ring-bearing planets
+  // (Saturn / Jupiter / Uranus / Neptune) get the back-half of
+  // their rings drawn before the sphere, then the sphere, then
+  // the front-half on top so the planet sits realistically
+  // through its own ring plane.
   _drawSiteHalosWorld(ctx) {
     const eff = this.zoom * this.fitScale;
     const capWorld = HALO_MAX_SCREEN_R / eff;
@@ -717,7 +864,14 @@ export class MapRenderer {
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
       if (vis.kind !== 'hex') continue;
       const worldR = Math.min(vis.r * vis.haloFactor, capWorld);
-      drawShadedSphere(ctx, site.x, site.y, worldR, paletteFor(site), site.hazard);
+      const rings = ringDefFor(site);
+      if (rings) {
+        drawPlanetRings(ctx, site.x, site.y, worldR, rings, 'back');
+        drawShadedSphere(ctx, site.x, site.y, worldR, paletteFor(site), site.hazard);
+        drawPlanetRings(ctx, site.x, site.y, worldR, rings, 'front');
+      } else {
+        drawShadedSphere(ctx, site.x, site.y, worldR, paletteFor(site), site.hazard);
+      }
     }
   }
 
