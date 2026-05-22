@@ -33,20 +33,21 @@ const MAX_ZOOM = 8;
 // flat-coloured circles since they're abstract routing nodes, not
 // physical objects.
 const TYPE_VIS = {
-  site:     { kind: 'sphere', r: 12 },
-  planet:   { kind: 'sphere', r: 16 },
-  moon:     { kind: 'sphere', r: 10 },
-  dwarf:    { kind: 'sphere', r: 12 },
-  asteroid: { kind: 'sphere', r:  8 },
-  tno:      { kind: 'sphere', r: 10 },
-  surface:  { kind: 'sphere', r: 10 },
-  lagrange: { kind: 'circle', r:  7, fill: 'transparent', stroke: '#c66932' },
-  burn:     { kind: 'circle', r:  7, fill: '#d60f7a', stroke: '#fde0ee' },
-  hohmann:  { kind: 'circle', r:  7, fill: '#10b981', stroke: '#a7f3d0' },
-  venus:    { kind: 'circle', r:  8, fill: '#fb923c', stroke: '#fed7aa' },
-  radhaz:   { kind: 'circle', r:  7, fill: '#fbbf24', stroke: '#fde68a' },
-  orbit:    { kind: 'circle', r:  6, fill: '#0c0a16', stroke: '#7dd3fc' },
-  unknown:  { kind: 'circle', r:  4, fill: '#0c0a16', stroke: '#475569' },
+  site:       { kind: 'sphere', r: 12 },
+  planet:     { kind: 'sphere', r: 16 },
+  moon:       { kind: 'sphere', r: 10 },
+  dwarf:      { kind: 'sphere', r: 12 },
+  asteroid:   { kind: 'sphere', r:  8 },
+  tno:        { kind: 'sphere', r: 10 },
+  surface:    { kind: 'sphere', r: 10 },
+  lagrange:   { kind: 'circle', r:  7, fill: 'transparent', stroke: '#c66932' },
+  burn:       { kind: 'circle', r:  7, fill: '#d60f7a', stroke: '#fde0ee' },
+  hohmann:    { kind: 'circle', r:  7, fill: '#10b981', stroke: '#a7f3d0' },
+  venus:      { kind: 'circle', r:  8, fill: '#fb923c', stroke: '#fed7aa' },
+  radhaz:     { kind: 'circle', r:  7, fill: '#fbbf24', stroke: '#fde68a' },
+  orbit:      { kind: 'circle', r:  6, fill: '#0c0a16', stroke: '#7dd3fc' },
+  decorative: { kind: 'dot',    r:  2.5, fill: '#3b4a6d' },
+  unknown:    { kind: 'circle', r:  4, fill: '#0c0a16', stroke: '#475569' },
 };
 
 // Per-body palette. Each entry is {base, light, dark, atmosphere?}.
@@ -100,6 +101,15 @@ function paletteFor(site) {
 }
 
 const ZONE_BAND_LIGHT = ['Venus', 'Mars', 'Jupiter', 'Uranus'];
+
+// siteSynodic in the planner data is 'red' | 'yellow' | 'blue'. We
+// translate to UI-tuned hex values; same intent, palette adapted
+// to our darker backdrop.
+const SYNODIC_COLOURS = {
+  red:    '#f87171',
+  yellow: '#facc15',
+  blue:   '#60a5fa',
+};
 
 // Standard 2D planet shading recipe: optional outer atmosphere
 // rim, a base disc, an offset-centre radial gradient for the lit
@@ -515,24 +525,84 @@ export class MapRenderer {
   _drawWaypointsScreen(ctx) {
     const eff = this.zoom * this.fitScale;
     const { hostW, hostH } = this;
-    ctx.lineWidth = 1.5;
+
+    // Walk types in a stable order so the per-batch state changes
+    // (stroke / fill colour, line width) happen N=number-of-types
+    // times rather than once per node.
     for (const [type, items] of this._waypointsByType) {
       const vis = TYPE_VIS[type] || TYPE_VIS.unknown;
-      const r = vis.r;
-      ctx.beginPath();
-      for (const w of items) {
-        const sx = this.pan.x + w.x * eff;
-        const sy = this.pan.y + w.y * eff;
-        if (sx < -r || sx > hostW + r || sy < -r || sy > hostH + r) continue;
-        ctx.moveTo(sx + r, sy);
-        ctx.arc(sx, sy, r, 0, Math.PI * 2);
-      }
-      if (vis.fill !== 'transparent') {
+      if (vis.kind === 'dot') {
+        // Decorative routing dots: faint single-colour fills, no
+        // stroke. Cheapest possible per-node draw call.
         ctx.fillStyle = vis.fill;
+        ctx.globalAlpha = 0.55;
+        ctx.beginPath();
+        for (const w of items) {
+          const sx = this.pan.x + w.x * eff;
+          const sy = this.pan.y + w.y * eff;
+          if (sx < -vis.r || sx > hostW + vis.r || sy < -vis.r || sy > hostH + vis.r) continue;
+          ctx.moveTo(sx + vis.r, sy);
+          ctx.arc(sx, sy, vis.r, 0, Math.PI * 2);
+        }
         ctx.fill();
+        ctx.globalAlpha = 1;
+        continue;
       }
-      ctx.strokeStyle = vis.stroke;
-      ctx.stroke();
+      ctx.lineWidth = 1.5;
+      // Burns may carry a `landing` flag → draw as a rectangle
+      // (planner-style), so split landing burns out of the normal
+      // circle batch.
+      const landings = type === 'burn' ? items.filter((w) => w.landing != null) : [];
+      const circles  = type === 'burn' ? items.filter((w) => w.landing == null) : items;
+
+      if (circles.length) {
+        ctx.beginPath();
+        for (const w of circles) {
+          const sx = this.pan.x + w.x * eff;
+          const sy = this.pan.y + w.y * eff;
+          if (sx < -vis.r || sx > hostW + vis.r || sy < -vis.r || sy > hostH + vis.r) continue;
+          ctx.moveTo(sx + vis.r, sy);
+          ctx.arc(sx, sy, vis.r, 0, Math.PI * 2);
+        }
+        if (vis.fill !== 'transparent') { ctx.fillStyle = vis.fill; ctx.fill(); }
+        ctx.strokeStyle = vis.stroke;
+        ctx.stroke();
+      }
+
+      if (landings.length) {
+        // Landing burns: short rect, width scaled by w.landing
+        // (planner uses 1 or 0.5 to indicate full vs. half landing).
+        ctx.fillStyle = vis.fill;
+        ctx.strokeStyle = vis.stroke;
+        for (const w of landings) {
+          const sx = this.pan.x + w.x * eff;
+          const sy = this.pan.y + w.y * eff;
+          if (sx < -vis.r || sx > hostW + vis.r || sy < -vis.r || sy > hostH + vis.r) continue;
+          const halfH = vis.r;
+          const halfW = vis.r * w.landing;
+          ctx.fillRect(sx - halfW, sy - halfH, halfW * 2, halfH * 2);
+          ctx.strokeRect(sx - halfW, sy - halfH, halfW * 2, halfH * 2);
+        }
+      }
+    }
+
+    // Flyby boost glyphs (~15 nodes across the map). One pass with
+    // bold text labels so the gravity-assist markers from the planner
+    // come through.
+    ctx.font = '700 11px ui-sans-serif, system-ui, sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = 'rgba(5, 4, 16, 0.85)';
+    ctx.lineWidth = 3;
+    for (const w of this._waypoints) {
+      if (!w.flybyBoost) continue;
+      const sx = this.pan.x + w.x * eff;
+      const sy = this.pan.y + w.y * eff;
+      if (sx < -20 || sx > hostW + 20 || sy < -20 || sy > hostH + 20) continue;
+      const txt = '+' + (w.flybyBoost === 'thrust' ? 'T' : w.flybyBoost);
+      ctx.strokeText(txt, sx, sy);
+      ctx.fillText(txt, sx, sy);
     }
   }
 
@@ -559,11 +629,22 @@ export class MapRenderer {
         ctx.stroke();
       }
 
+      // siteSynodic from the planner: a coloured ring outside the
+      // disc indicating which synodic group the site belongs to.
+      // Only ~15 sites carry one.
+      if (site.siteSynodic) {
+        ctx.strokeStyle = SYNODIC_COLOURS[site.siteSynodic] || '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(sx, sy, r + 3, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
       if (site.id === this._routeFromId || site.id === this._routeToId) {
         ctx.strokeStyle = site.id === this._routeFromId ? '#4ade80' : '#f0abfc';
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.arc(sx, sy, r + 5, 0, Math.PI * 2);
+        ctx.arc(sx, sy, r + 6, 0, Math.PI * 2);
         ctx.stroke();
       }
     }
@@ -772,15 +853,11 @@ export class MapRenderer {
   // generous radius (so a tap on the hex always wins over a stray
   // waypoint hit). ~1500 distance computations is sub-millisecond.
   _hitTest(wx, wy) {
-    // Hit-test in SCREEN space now that nodes are drawn at fixed
-    // pixel sizes. Convert the candidate world point to screen
-    // first, then compare against each node's screen position with
-    // a fixed-pixel tolerance.
     const eff = this.zoom * this.fitScale;
     const sx = this.pan.x + wx * eff;
     const sy = this.pan.y + wy * eff;
     let best = null;
-    let bestDist = 20 * 20;        // generous touch target for real sites
+    let bestDist = 20 * 20;
     for (const s of this._realSites) {
       const dx = (this.pan.x + s.x * eff) - sx;
       const dy = (this.pan.y + s.y * eff) - sy;
@@ -788,8 +865,11 @@ export class MapRenderer {
       if (d < bestDist) { bestDist = d; best = s; }
     }
     if (best) return best;
-    bestDist = 14 * 14;            // tighter for waypoints (they're smaller)
+    bestDist = 14 * 14;
     for (const w of this._waypoints) {
+      // Skip decorative dots in click hit-tests — they're routing
+      // structure, not selectable destinations.
+      if (w.isDecorative) continue;
       const dx = (this.pan.x + w.x * eff) - sx;
       const dy = (this.pan.y + w.y * eff) - sy;
       const d = dx * dx + dy * dy;

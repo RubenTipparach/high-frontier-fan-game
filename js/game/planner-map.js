@@ -27,35 +27,37 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
   // we keep them as-is (they're stable across reloads of the same
   // data file) and add a human-readable name for display.
   //
-  // Decorative nodes (type === 'decorative') are stripped here.
-  // They're cosmetic markers on the planner's board background and
-  // carry no game-mechanical information; including them clutters
-  // both the canvas and the pathfinder.
+  // Every type is included — decorative nodes are routing waypoints
+  // with no name, but they connect ~half the planner's edges, so
+  // dropping them tears holes in the graph. We render them as tiny
+  // faint dots and exclude them from click hit-testing so they
+  // don't get in the way.
   const sites = [];
-  const dropped = new Set();
   for (const [id, p] of Object.entries(raw.points || {})) {
     const type = p.type || 'unknown';
-    if (type === 'decorative') { dropped.add(id); continue; }
     sites.push({
       id,
       name: p.siteName || routingLabel(type),
       type,
       isWaypoint: type !== 'site',
+      isDecorative: type === 'decorative',
       siteSize: p.siteSize || null,
+      siteSynodic: p.siteSynodic || null,    // 'red' | 'yellow' | 'blue'
       hydration: parseHydration(p.siteWater),
       hazard: !!p.hazard,
+      landing: typeof p.landing === 'number' ? p.landing : null,
+      flybyBoost: p.flybyBoost || null,      // 1 | 2 | 4 | 'thrust'
       x: Math.round(p.x * viewW * 10) / 10,
       y: Math.round(p.y * viewH * 10) / 10,
     });
   }
 
-  // Edges are strings "from:to". We re-package as [from, to, dv]
-  // and drop any edge that touches a stripped decorative node.
+  // Edges are strings "from:to"; keep them all now that decoratives
+  // are back in the graph.
   const edges = [];
   for (const eStr of raw.edges || []) {
     const [a, b] = eStr.split(':');
     if (!a || !b) continue;
-    if (dropped.has(a) || dropped.has(b)) continue;
     const dvA = raw.edgeLabels?.[a]?.[b];
     const dvB = raw.edgeLabels?.[b]?.[a];
     const dv = Number(dvA ?? dvB ?? 1) || 1;
