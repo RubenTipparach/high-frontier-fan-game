@@ -24,22 +24,31 @@
 
 const VIEW_W = 1400;
 const VIEW_H = 900;
-// MIN_ZOOM = 1.0 means "you can never zoom out past the fit-to-view";
-// pinching past that point would just push the data off-screen.
-const MIN_ZOOM = 1.0;
+// MIN_ZOOM allows a little zoom-out below the initial framing so a
+// user can pinch all the way out to see the whole graph. The initial
+// zoom (set in _fitToData) is higher than 1.0 so the default view
+// isn't a smashed-together blob.
+const MIN_ZOOM = 0.7;
 const MAX_ZOOM = 8;
+const DEFAULT_ZOOM = 1.8;
 
 // Body styling. Sites render as shaded spheres; waypoints stay as
 // flat-coloured circles since they're abstract routing nodes, not
 // physical objects.
+// Real sites: black hex marker on top of a shaded-sphere body halo.
+// The hex is the actual gameplay token (carries the siteSize +
+// hydration glyphs); the sphere underneath gives Mars-red /
+// Jupiter-tan / Europa-icy character that reads even with the hex
+// covering most of it. haloFactor sets how far the sphere extends
+// past the hex edge.
 const TYPE_VIS = {
-  site:       { kind: 'sphere', r: 12 },
-  planet:     { kind: 'sphere', r: 16 },
-  moon:       { kind: 'sphere', r: 10 },
-  dwarf:      { kind: 'sphere', r: 12 },
-  asteroid:   { kind: 'sphere', r:  8 },
-  tno:        { kind: 'sphere', r: 10 },
-  surface:    { kind: 'sphere', r: 10 },
+  site:       { kind: 'hex',    r: 12, haloFactor: 1.7 },
+  planet:     { kind: 'hex',    r: 16, haloFactor: 1.65 },
+  moon:       { kind: 'hex',    r: 10, haloFactor: 1.7 },
+  dwarf:      { kind: 'hex',    r: 12, haloFactor: 1.65 },
+  asteroid:   { kind: 'hex',    r:  8, haloFactor: 1.8 },
+  tno:        { kind: 'hex',    r: 10, haloFactor: 1.7 },
+  surface:    { kind: 'hex',    r: 10, haloFactor: 1.7 },
   lagrange:   { kind: 'circle', r:  7, fill: 'transparent', stroke: '#c66932' },
   burn:       { kind: 'circle', r:  7, fill: '#d60f7a', stroke: '#fde0ee' },
   hohmann:    { kind: 'circle', r:  7, fill: '#10b981', stroke: '#a7f3d0' },
@@ -193,6 +202,19 @@ export class MapRenderer {
     this._gesture = null;
     this._rafQueued = false;
     this._tooltipEl = null;
+    // Public-ish tuneables. Mutating them and calling _scheduleDraw
+    // is enough for the debug panel to take effect; nothing else
+    // caches them.
+    this.options = {
+      labelFadeMin: 2.2,           // zoom at which labels start fading in
+      labelFadeMax: 3.0,           // zoom at which labels are fully opaque
+      showDecoratives: true,
+      initialZoom: DEFAULT_ZOOM,
+    };
+    this._frameCount = 0;
+    this._frameTimer = 0;
+    this._fps = 0;
+    this._onFrame = null;           // optional callback fired each frame
     this._partitionSites();
     this._buildStars();
     this._mount();
@@ -311,10 +333,19 @@ export class MapRenderer {
   }
 
   _fitToData() {
-    this.zoom = 1;
-    // Centre the data viewport in the canvas after the fit scale.
-    this.pan.x = (this.hostW - VIEW_W * this.fitScale) / 2;
-    this.pan.y = (this.hostH - VIEW_H * this.fitScale) / 2;
+    this.zoom = this.options.initialZoom;
+    const eff = this.zoom * this.fitScale;
+    this.pan.x = (this.hostW - VIEW_W * eff) / 2;
+    this.pan.y = (this.hostH - VIEW_H * eff) / 2;
+  }
+
+  // Public hooks the debug panel uses to read/observe state.
+  getZoom() { return this.zoom; }
+  getFps()  { return this._fps; }
+  onFrame(fn) { this._onFrame = fn; }
+  setOption(key, value) {
+    this.options[key] = value;
+    this._scheduleDraw();
   }
 
   // ---- drawing ----
@@ -331,17 +362,12 @@ export class MapRenderer {
   _draw() {
     const ctx = this.ctx;
     const { hostW, hostH, dpr } = this;
-    // Reset to device pixels; then every coordinate after is in CSS px.
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     this._drawBackdrop(ctx);
 
     const eff = this.zoom * this.fitScale;
 
-    // World-space layer: edges + zone bands + heliocentric rings.
-    // These need to scale with zoom so geometry stays correct, but
-    // node bodies are drawn separately in screen space below so a
-    // very wide view doesn't bloat the hexes off-scale.
     ctx.save();
     ctx.translate(this.pan.x, this.pan.y);
     ctx.scale(eff, eff);
@@ -355,11 +381,21 @@ export class MapRenderer {
 
     ctx.restore();
 
-    // Screen-space layer: nodes + labels at fixed pixel size so
-    // they stay legible at extreme zooms (just like the planner).
     this._drawWaypointsScreen(ctx);
     this._drawSiteBodiesScreen(ctx);
     this._drawSiteLabelsScreen(ctx);
+
+    // FPS book-keeping. The debug panel polls getFps(); we update
+    // ~twice per second so the readout doesn't flicker.
+    this._frameCount++;
+    const now = performance.now();
+    if (!this._frameTimer) this._frameTimer = now;
+    if (now - this._frameTimer >= 500) {
+      this._fps = Math.round(this._frameCount * 1000 / (now - this._frameTimer));
+      this._frameCount = 0;
+      this._frameTimer = now;
+    }
+    if (this._onFrame) this._onFrame();
   }
 
   _drawBackdrop(ctx) {
@@ -578,14 +614,10 @@ export class MapRenderer {
     const eff = this.zoom * this.fitScale;
     const { hostW, hostH } = this;
 
-    // Walk types in a stable order so the per-batch state changes
-    // (stroke / fill colour, line width) happen N=number-of-types
-    // times rather than once per node.
     for (const [type, items] of this._waypointsByType) {
       const vis = TYPE_VIS[type] || TYPE_VIS.unknown;
       if (vis.kind === 'dot') {
-        // Decorative routing dots: faint single-colour fills, no
-        // stroke. Cheapest possible per-node draw call.
+        if (!this.options.showDecoratives) continue;
         ctx.fillStyle = vis.fill;
         ctx.globalAlpha = 0.55;
         ctx.beginPath();
@@ -668,8 +700,28 @@ export class MapRenderer {
       const r = vis.r;
       if (sx < -r - 20 || sx > hostW + r + 20 || sy < -r - 20 || sy > hostH + r + 20) continue;
 
-      if (vis.kind === 'sphere') {
-        drawShadedSphere(ctx, sx, sy, r, paletteFor(site), site.hazard);
+      if (vis.kind === 'hex') {
+        // Body halo: shaded sphere sits BEHIND the hex, slightly
+        // larger so its colour peeks out around the marker. The
+        // sphere gives Mars-red / Saturn-gold / Europa-icy
+        // character while the hex stays the gameplay token.
+        const haloR = r * (vis.haloFactor || 1.7);
+        drawShadedSphere(ctx, sx, sy, haloR, paletteFor(site), site.hazard);
+        // Black hex on top.
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const t = (i / 6) * Math.PI * 2 - Math.PI / 2;  // flat-top hex
+          const px = sx + Math.cos(t) * r;
+          const py = sy + Math.sin(t) * r;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fillStyle = '#0c0a16';
+        ctx.fill();
+        ctx.lineWidth = 1.6;
+        ctx.strokeStyle = site.hazard ? '#f87171' : '#ffffff';
+        ctx.stroke();
       } else {
         ctx.lineWidth = 1.6;
         ctx.beginPath();
@@ -682,21 +734,23 @@ export class MapRenderer {
       }
 
       // siteSynodic from the planner: a coloured ring outside the
-      // disc indicating which synodic group the site belongs to.
-      // Only ~15 sites carry one.
+      // body halo indicating which synodic group the site belongs
+      // to. Only ~15 sites carry one.
       if (site.siteSynodic) {
+        const haloR = r * (vis.haloFactor || 1.7);
         ctx.strokeStyle = SYNODIC_COLOURS[site.siteSynodic] || '#ffffff';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(sx, sy, r + 3, 0, Math.PI * 2);
+        ctx.arc(sx, sy, haloR + 3, 0, Math.PI * 2);
         ctx.stroke();
       }
 
       if (site.id === this._routeFromId || site.id === this._routeToId) {
+        const haloR = r * (vis.haloFactor || 1.7);
         ctx.strokeStyle = site.id === this._routeFromId ? '#4ade80' : '#f0abfc';
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.arc(sx, sy, r + 6, 0, Math.PI * 2);
+        ctx.arc(sx, sy, haloR + 5, 0, Math.PI * 2);
         ctx.stroke();
       }
     }
@@ -705,12 +759,13 @@ export class MapRenderer {
   _drawSiteLabelsScreen(ctx) {
     const eff = this.zoom * this.fitScale;
     const { hostW, hostH } = this;
-    // Auto-hide rule: below LABEL_ZOOM_THRESHOLD the eye can't
-    // associate a name with its node anyway (nodes are clustered
-    // and labels would smear). Above the threshold, only labels in
-    // the visible viewport are drawn (cheap occlusion culling).
-    const LABEL_ZOOM_THRESHOLD = 0.95;
-    const showLabels = this.zoom >= LABEL_ZOOM_THRESHOLD;
+    // Smooth alpha fade between labelFadeMin and labelFadeMax so the
+    // labels don't pop in/out; configurable via the debug panel.
+    const fadeMin = this.options.labelFadeMin;
+    const fadeMax = this.options.labelFadeMax;
+    const labelAlpha = Math.max(0, Math.min(1,
+      (this.zoom - fadeMin) / Math.max(0.01, fadeMax - fadeMin)
+    ));
 
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'center';
@@ -721,7 +776,7 @@ export class MapRenderer {
       if (sx < -40 || sx > hostW + 40 || sy < -40 || sy > hostH + 40) continue;
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
 
-      // Inside-hex glyphs stay visible at all zooms so the
+      // Inside-hex glyphs stay at full opacity at all zooms so the
       // "what is this" info is never lost.
       ctx.font = '600 9px ui-sans-serif, system-ui, sans-serif';
       if (site.siteSize) {
@@ -738,7 +793,8 @@ export class MapRenderer {
         ctx.fillText('☠', sx, sy + 5);
       }
 
-      if (showLabels) {
+      if (labelAlpha > 0) {
+        ctx.globalAlpha = labelAlpha;
         const labelOffset = vis.r + 12;
         ctx.font = '500 11px ui-sans-serif, system-ui, sans-serif';
         ctx.strokeStyle = 'rgba(5, 4, 16, 0.85)';
@@ -746,6 +802,7 @@ export class MapRenderer {
         ctx.strokeText(site.name, sx, sy + labelOffset);
         ctx.fillStyle = '#cbd5e1';
         ctx.fillText(site.name, sx, sy + labelOffset);
+        ctx.globalAlpha = 1;
       }
     }
 

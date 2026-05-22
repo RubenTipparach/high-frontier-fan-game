@@ -92,11 +92,41 @@ function ensureMapShell(host) {
       <div class="map-route">
         <span id="route-status" class="muted">Tap a site to plan a route.</span>
         <button id="route-clear" hidden>Clear route</button>
+        <button id="route-debug" title="Toggle debug panel"
+          aria-label="Toggle debug panel">🔧</button>
         <button id="route-fullscreen" title="Toggle fullscreen map"
           aria-label="Toggle fullscreen">⛶</button>
       </div>
     </div>
-    <div id="browse-map-canvas" class="browse-map-canvas"></div>
+    <div id="browse-map-canvas" class="browse-map-canvas">
+      <div id="map-debug" class="map-debug hidden">
+        <div class="dbg-header">
+          <span>Debug</span>
+          <button id="dbg-close" aria-label="Close">×</button>
+        </div>
+        <div class="dbg-row">
+          <span>Zoom</span>
+          <strong id="dbg-zoom">—</strong>
+        </div>
+        <div class="dbg-row">
+          <span>FPS</span>
+          <strong id="dbg-fps">—</strong>
+        </div>
+        <label class="dbg-slider">
+          <span>Label fade start <em id="dbg-fade-min-val"></em></span>
+          <input id="dbg-fade-min" type="range" min="1" max="4" step="0.1" />
+        </label>
+        <label class="dbg-slider">
+          <span>Label fade end <em id="dbg-fade-max-val"></em></span>
+          <input id="dbg-fade-max" type="range" min="1" max="4" step="0.1" />
+        </label>
+        <label class="dbg-check">
+          <input id="dbg-show-decoratives" type="checkbox" />
+          <span>Show decoratives</span>
+        </label>
+        <button id="dbg-reset" class="dbg-reset">Reset view</button>
+      </div>
+    </div>
   `;
   for (const btn of host.querySelectorAll('.map-mode-toggle button')) {
     btn.addEventListener('click', async () => {
@@ -110,11 +140,62 @@ function ensureMapShell(host) {
   host.querySelector('#route-fullscreen').addEventListener('click', () => {
     toggleFullscreen(host);
   });
-  // When the user exits fullscreen via Esc, swap the icon back so
-  // the affordance reads correctly.
+  host.querySelector('#route-debug').addEventListener('click', () => {
+    host.querySelector('#map-debug').classList.toggle('hidden');
+  });
+  host.querySelector('#dbg-close').addEventListener('click', () => {
+    host.querySelector('#map-debug').classList.add('hidden');
+  });
   document.addEventListener('fullscreenchange', () => {
     const btn = host.querySelector('#route-fullscreen');
     if (btn) btn.textContent = document.fullscreenElement ? '⤬' : '⛶';
+  });
+}
+
+// Hook the debug-panel widgets to whichever renderer is currently
+// active. Called from mountMapFor() each time the renderer is
+// (re)built, so the panel's bound to the live instance.
+function wireDebugPanel(renderer) {
+  const panel = document.getElementById('map-debug');
+  if (!panel) return;
+  const zoomEl  = panel.querySelector('#dbg-zoom');
+  const fpsEl   = panel.querySelector('#dbg-fps');
+  const fadeMin = panel.querySelector('#dbg-fade-min');
+  const fadeMax = panel.querySelector('#dbg-fade-max');
+  const fadeMinVal = panel.querySelector('#dbg-fade-min-val');
+  const fadeMaxVal = panel.querySelector('#dbg-fade-max-val');
+  const showDec = panel.querySelector('#dbg-show-decoratives');
+  const resetBtn = panel.querySelector('#dbg-reset');
+
+  // Initialise sliders + checkbox from the renderer's current options.
+  fadeMin.value = renderer.options.labelFadeMin;
+  fadeMax.value = renderer.options.labelFadeMax;
+  fadeMinVal.textContent = Number(fadeMin.value).toFixed(1) + 'x';
+  fadeMaxVal.textContent = Number(fadeMax.value).toFixed(1) + 'x';
+  showDec.checked = renderer.options.showDecoratives;
+
+  fadeMin.oninput = () => {
+    renderer.setOption('labelFadeMin', Number(fadeMin.value));
+    fadeMinVal.textContent = Number(fadeMin.value).toFixed(1) + 'x';
+  };
+  fadeMax.oninput = () => {
+    renderer.setOption('labelFadeMax', Number(fadeMax.value));
+    fadeMaxVal.textContent = Number(fadeMax.value).toFixed(1) + 'x';
+  };
+  showDec.onchange = () => {
+    renderer.setOption('showDecoratives', showDec.checked);
+  };
+  resetBtn.onclick = () => renderer.reset();
+
+  // Live zoom + FPS. The renderer fires onFrame each draw cycle;
+  // we update text nodes there but throttle by rounding so the DOM
+  // doesn't churn.
+  let lastZoom = -1, lastFps = -1;
+  renderer.onFrame(() => {
+    const z = Math.round(renderer.getZoom() * 100) / 100;
+    if (z !== lastZoom) { zoomEl.textContent = z.toFixed(2) + 'x'; lastZoom = z; }
+    const f = renderer.getFps();
+    if (f !== lastFps) { fpsEl.textContent = String(f); lastFps = f; }
   });
 }
 
@@ -151,6 +232,7 @@ async function mountMapFor(mode) {
       data: _activeData,
       onSelect: onSiteSelect,
     });
+    wireDebugPanel(_renderer);
   } catch (err) {
     canvas.innerHTML = `<div class="map-loading error">Map failed to load: ${err.message}</div>`;
   }

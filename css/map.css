@@ -93,10 +93,92 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-#route-fullscreen {
+#route-fullscreen,
+#route-debug {
   font-size: 14px;
   padding: 4px 9px;
   line-height: 1;
+}
+
+/* Debug panel: floats over the lower-left corner of the map host.
+   The renderer publishes zoom + FPS via onFrame(); sliders write
+   straight into renderer.options. */
+.browse-map-canvas { position: relative; }
+.map-debug {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  width: 220px;
+  background: rgba(15, 16, 35, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--ink);
+  z-index: 4;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.55);
+}
+.map-debug.hidden { display: none; }
+.map-debug .dbg-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 1.4px;
+  color: var(--accent);
+  font-size: 11px;
+}
+.map-debug .dbg-header button {
+  background: transparent;
+  border: none;
+  color: var(--ink-dim);
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+}
+.map-debug .dbg-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 3px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.map-debug .dbg-row strong {
+  color: var(--accent-2);
+  font-variant-numeric: tabular-nums;
+}
+.map-debug .dbg-slider {
+  display: block;
+  margin: 8px 0 4px;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+.map-debug .dbg-slider span {
+  display: flex;
+  justify-content: space-between;
+}
+.map-debug .dbg-slider em {
+  color: var(--accent-2);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+.map-debug .dbg-slider input[type=range] {
+  width: 100%;
+  margin-top: 2px;
+}
+.map-debug .dbg-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+.map-debug .dbg-reset {
+  margin-top: 10px;
+  width: 100%;
+  font-size: 11px;
 }
 /* When the map host is in fullscreen, fill the screen and pin the
    toolbar to the top edge. The contained canvas grabs the rest. */
