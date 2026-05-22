@@ -60,7 +60,7 @@ const TYPE_VIS = {
   sun:            { kind: 'sun',    r: 30 },
   lagrange:       { kind: 'circle', r:  7, fill: 'transparent', stroke: '#c66932' },
   burn:           { kind: 'circle', r:  6, hitR: 8, fill: '#d60f7a', stroke: '#fde0ee', hideBelowZoom: 1.4 },
-  hohmann:        { kind: 'circle', r:  4, hitR: 9, fill: '#10b981', stroke: '#a7f3d0' },
+  hohmann:        { kind: 'circle', r:  4, hitR: 9, fill: '#10b981', stroke: '#a7f3d0', hideBelowZoom: 2.5 },
   venus:          { kind: 'circle', r:  8, fill: '#fb923c', stroke: '#fed7aa' },
   radhaz:         { kind: 'circle', r:  7, fill: '#fbbf24', stroke: '#fde68a' },
   orbit:          { kind: 'circle', r:  6, fill: '#0c0a16', stroke: '#7dd3fc' },

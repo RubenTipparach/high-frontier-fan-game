@@ -6,6 +6,30 @@ This is a fan implementation of **High Frontier 4: All** (Sierra Madre Games,
 designed by Phil Eklund). Pure educational / fan project, not for sale, not
 affiliated with the publisher.
 
+## Design language — CRITICAL
+
+The audience for this implementation is people who already play HF4 at the
+table. **Every visual and interaction must feel like the published game.**
+If a returning player can't tell at a glance what a glyph means, what a
+hexagon represents, or what step of a turn they're in, the design is wrong.
+
+Concretely:
+- Card glyphs (thrust triangle + pink circle, water-droplet fuel,
+  spectral hex, requirement-icon row, half-rocket for half-lander,
+  ☠ skull, 🪂 aerobrake, 🛰 push-sat, the ⚡ pulse / 🌡 thermostat
+  family for stack requirements) must use the same shapes / colour
+  language as the published cards. If a glyph means N on the
+  table, it must mean N here.
+- Map idioms — flat-top hexagons over body halos, magenta burn
+  pads with rockets, orange Lagrange rings, green Hohmann dots,
+  Saturn ring tilt + Cassini gap, pulsing red hazards — exist
+  because the published board uses them. Don't invent
+  replacements that "look better"; align with the board.
+- When you introduce a new affordance, ask: "would a tabletop
+  player recognise this without a tutorial?" If no, redesign.
+- Mechanics-only changes (engine, scoring, balance tuning) are
+  fine to invent; visual language is not.
+
 - Core rules PDF (publisher-hosted):
   https://gamers-hq.de/media/pdf/c5/f2/cf/HF4-Core-Rules.pdf
 - Variants & scenarios appendix:
