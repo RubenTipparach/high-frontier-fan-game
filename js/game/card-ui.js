@@ -206,8 +206,14 @@ function buildFace(card, sideName, kind) {
   const lead = supplyGlyphs || fallback;
   tbar.textContent = `${lead ? lead + '  ' : ''}${card.type.toUpperCase()}`;
   face.querySelector('.card-name').textContent = card.name;
-  face.querySelector('.m').textContent = card.mass != null ? card.mass : '—';
-  face.querySelector('.r').textContent = card.radHardness != null ? card.radHardness : '—';
+  // The Tier-2 face is a different tech with different numbers,
+  // so mass + rad-hardness come from the face data when present.
+  const faceMass = (card.faces && card.faces[sideName] && card.faces[sideName].mass);
+  const faceRad  = (card.faces && card.faces[sideName] && card.faces[sideName].radHardness);
+  const massVal  = (faceMass != null ? faceMass : card.mass);
+  const radVal   = (faceRad  != null ? faceRad  : card.radHardness);
+  face.querySelector('.m').textContent = massVal != null ? massVal : '—';
+  face.querySelector('.r').textContent = radVal != null ? radVal : '—';
   face.querySelector('.face-tag').textContent =
     (card.faces && card.faces[sideName] && card.faces[sideName].label) ||
     (sideName === 'primary' ? 'A' : 'B');
@@ -216,7 +222,10 @@ function buildFace(card, sideName, kind) {
 
   if (isThruster) {
     const thrustHost = face.querySelector('.card-thrust');
-    thrustHost.appendChild(thrustVisual(card));
+    // Pass the face-specific data so the Tier-2 silhouette
+    // reflects that face's own thrust/fuel/afterburn rather
+    // than copying the primary face's.
+    thrustHost.appendChild(thrustVisual(card, card.faces && card.faces[sideName]));
   }
 
   // Type-specific stat list (everything that doesn't fit in the
@@ -230,10 +239,16 @@ function buildFace(card, sideName, kind) {
     li.querySelector('strong').textContent = v;
     stats.appendChild(li);
   };
-  if (card.type === 'thruster') {
-    add('ISP', card.isp);
-    add('Fuel', card.fuel);
-    if (card.afterburn)  add('Afterburn', '🔥');
+  // Reach into the active face for stats that vary between
+  // Tier-1 (white) and Tier-2 (black). The black side is a
+  // genuinely different technology with different numbers.
+  const fdata = (card.faces && card.faces[sideName]) || {};
+  if (isThruster) {
+    add('ISP', fdata.isp ?? card.isp);
+    const f = fdata.fuel ?? card.fuel;
+    add('Fuel', f != null && !Number.isInteger(f) ? f.toFixed(2) : f);
+    add('Thrust', fdata.thrust ?? card.thrust);
+    if (fdata.afterburn ?? card.afterburn) add('Afterburn', '🔥');
   } else if (card.type === 'reactor') {
     add('Power', card.power);
     add('Heat',  card.heat);
@@ -298,7 +313,9 @@ function buildFace(card, sideName, kind) {
   // count of 1 omits the multiplier so a single-icon row reads as
   // a clean bare glyph.
   const reqHost = face.querySelector('.card-requires');
-  const reqs = card.requires || [];
+  // Each face carries its own supports — Tier-2 is a different
+  // tech with potentially different chip requirements.
+  const reqs = (faceData.requires) || card.requires || [];
   for (const r of reqs) {
     const vis = REQUIREMENT_VIS[r.kind] || { glyph: '◇', label: r.kind };
     const span = document.createElement('span');
@@ -316,8 +333,11 @@ function buildFace(card, sideName, kind) {
     reqHost.appendChild(span);
   }
 
+  // Blurb / ability text varies per face. The Tier-2 dark side
+  // is a different technology with its own ability description.
   const meta = (card.faces && card.faces[sideName]) || {};
-  face.querySelector('.card-blurb').textContent = meta.blurb || card.blurb || '';
+  face.querySelector('.card-blurb').textContent =
+    meta.ability || meta.blurb || card.blurb || '';
   return face;
 }
 
@@ -421,22 +441,32 @@ function svgBallerinaChip(size) {
 // lower portion where they fit comfortably above the base.
 // Support icons live in a separate supports box outside the
 // triangle — they're never drawn here.
-function thrustVisual(card) {
+function thrustVisual(card, face) {
   const wrap = document.createElement('div');
   wrap.className = 'thrust-visual';
-  const thrust = card.thrust ?? 0;
+  // The Tier-2 face is a different technology with different
+  // stats. Prefer face-specific thrust/fuel/afterburn when the
+  // caller passes a face block; fall back to top-level fields
+  // for legacy hand-written cards that don't carry faces.
+  const thrust = (face && face.thrust != null ? face.thrust : card.thrust) ?? 0;
+  const rawFuel = face && face.fuel != null ? face.fuel : card.fuel;
+  const isp = face && face.isp != null ? face.isp : card.isp;
   // Fuel cost per burn. Published-card sheet stores Fuel
-  // Consumption directly, so use `card.fuel` when present.
+  // Consumption directly, so use the face's fuel when present.
   // Fall back to the legacy ceil(thrust / isp) derivation for
-  // any hand-written card still on the old ISP schema.
+  // any hand-written card still on the old ISP schema. Render
+  // fractional values to two decimal places (so 0.33 displays
+  // as "0.33" instead of being rounded to "0.3" or "1").
   let fuel;
-  if (card.fuel != null) {
-    fuel = card.fuel;
-  } else if (card.isp >= 50) {
+  if (rawFuel != null) {
+    fuel = rawFuel;
+  } else if (isp >= 50) {
     fuel = 0;
   } else {
-    fuel = Math.max(1, Math.ceil(thrust / Math.max(1, card.isp || 1)));
+    fuel = Math.max(1, Math.ceil(thrust / Math.max(1, isp || 1)));
   }
+  const fuelText = Number.isInteger(fuel) ? `${fuel}` : fuel.toFixed(2);
+  const showAfter = (face && face.afterburn) || (!face && card.afterburn);
 
   // Rounded-triangle path. Apex at (70,12); base (18,86)–(122,86).
   // Each corner is curved with a small quadratic; tangent points
@@ -462,7 +492,7 @@ function thrustVisual(card) {
       <path d="${trianglePath}"
         fill="rgba(96,165,250,0.35)" stroke="#60a5fa" stroke-width="2.5"
         stroke-linejoin="round"/>
-      ${card.afterburn ? `<text x="70" y="42" text-anchor="middle"
+      ${showAfter ? `<text x="70" y="42" text-anchor="middle"
         font-size="22" data-tip="Afterburn">🔥</text>` : ''}
       <line x1="63" y1="72" x2="76" y2="72"
         stroke="currentColor" stroke-width="1.6"
@@ -472,11 +502,11 @@ function thrustVisual(card) {
         <text x="50" y="76" text-anchor="middle" font-size="13"
           font-weight="700" fill="#ffffff">${thrust}</text>
       </g>
-      <g data-tip="Fuel per burn: ${fuel}">
+      <g data-tip="Fuel per burn: ${fuelText}">
         <text x="88" y="79" text-anchor="middle" font-size="22">💧</text>
-        <text x="88" y="75" text-anchor="middle" font-size="10"
+        <text x="88" y="75" text-anchor="middle" font-size="9"
           font-weight="700" fill="#0c1d34" stroke="#ffffff"
-          stroke-width="2.4" paint-order="stroke">${fuel}</text>
+          stroke-width="2.4" paint-order="stroke">${fuelText}</text>
       </g>
     </svg>
   `;
