@@ -511,6 +511,18 @@ export class MapRenderer {
 
   setRoute(segments) {
     this._route = segments && segments.length ? segments : null;
+    // Pre-compute the set of hazard node ids the route crosses,
+    // so the per-frame hazard-pulse pass only animates the
+    // hazards the player actually needs to worry about.
+    this._routeHazardIds = new Set();
+    if (this._route) {
+      for (const seg of this._route) {
+        const sa = this.data && this.data.byId[seg.from];
+        const sb = this.data && this.data.byId[seg.to];
+        if (sa && sa.hazard) this._routeHazardIds.add(sa.id);
+        if (sb && sb.hazard) this._routeHazardIds.add(sb.id);
+      }
+    }
     this._scheduleDraw();
   }
 
@@ -1021,27 +1033,20 @@ export class MapRenderer {
     ctx.lineCap = 'round';
     ctx.shadowBlur = 6 / eff;
     ctx.shadowColor = 'rgba(251, 191, 36, 0.6)';
-    // Build a single polyline for the whole route, then run it
-    // through the same smooth-Bezier helper so segments that pass
-    // through decorative waypoints curve naturally instead of
-    // zigzagging.
-    const pts = this._routePoints();
+    // Trace exactly over the underlying edges -- one straight
+    // lineTo per segment, no Bezier smoothing. The route is an
+    // overlay highlight, not a new shape; the player should see
+    // their path as a direct copy of the graph segments.
     ctx.beginPath();
-    if (pts.length >= 2) appendSmoothPath(ctx, pts);
+    for (const seg of this._route) {
+      const sa = this.data.byId[seg.from];
+      const sb = this.data.byId[seg.to];
+      if (!sa || !sb) continue;
+      ctx.moveTo(sa.x, sa.y);
+      ctx.lineTo(sb.x, sb.y);
+    }
     ctx.stroke();
     ctx.shadowBlur = 0;
-  }
-
-  _routePoints() {
-    const out = [];
-    if (!this._route || !this._route.length) return out;
-    const first = this.data.byId[this._route[0].from];
-    if (first) out.push(first);
-    for (const seg of this._route) {
-      const sb = this.data.byId[seg.to];
-      if (sb) out.push(sb);
-    }
-    return out;
   }
 
   _drawWaypointsScreen(ctx) {
@@ -1122,27 +1127,30 @@ export class MapRenderer {
       ctx.shadowBlur = 0;
     }
 
-    // Hazard pulse: animated red ring around any waypoint flagged
-    // hazard. Pulses ~once per second so the danger reads without
-    // strobing. Drawn after the body fills so the pulse layers
-    // outside the disc/ring of the node itself.
-    const phase = ((this._animTime || 0) / 1000) * Math.PI;
-    const pulse = (Math.sin(phase) + 1) * 0.5;
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = `rgba(248, 113, 113, ${0.4 + pulse * 0.5})`;
-    ctx.beginPath();
-    for (const w of this._waypoints) {
-      if (!w.hazard) continue;
-      const vis = TYPE_VIS[w.type] || TYPE_VIS.unknown;
-      if (vis.kind === 'none') continue;
-      const sx = this.pan.x + w.x * eff;
-      const sy = this.pan.y + w.y * eff;
-      if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
-      const ringR = vis.r + 4 + pulse * 4;
-      ctx.moveTo(sx + ringR, sy);
-      ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
+    // Hazard pulse: animated red ring around hazard nodes that
+    // the ACTIVE ROUTE crosses. The map already paints a red
+    // border on every hazard for static identification; the
+    // pulse is reserved for "your trajectory goes through this".
+    // No route, no pulse.
+    if (this._routeHazardIds && this._routeHazardIds.size) {
+      const phase = ((this._animTime || 0) / 1000) * Math.PI;
+      const pulse = (Math.sin(phase) + 1) * 0.5;
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = `rgba(248, 113, 113, ${0.4 + pulse * 0.5})`;
+      ctx.beginPath();
+      for (const w of this._waypoints) {
+        if (!this._routeHazardIds.has(w.id)) continue;
+        const vis = TYPE_VIS[w.type] || TYPE_VIS.unknown;
+        if (vis.kind === 'none') continue;
+        const sx = this.pan.x + w.x * eff;
+        const sy = this.pan.y + w.y * eff;
+        if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
+        const ringR = vis.r + 4 + pulse * 4;
+        ctx.moveTo(sx + ringR, sy);
+        ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
+      }
+      ctx.stroke();
     }
-    ctx.stroke();
 
     // Radhaz radiation glyph: three wedges + a centre dot drawn
     // by hand so we don't depend on the ☢ font character being
