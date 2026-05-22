@@ -24,7 +24,8 @@ import {
 import {
   getRocketStack, isInRocket, addToStack as rocketAddCard,
   removeFromStack as rocketRemoveCard, clearStack as rocketClearStack,
-  onRocketChange, canRocketFly,
+  onRocketChange, canRocketFly, isRocketActive,
+  getActiveThrusterId, setActiveThruster,
 } from './rocket.js';
 import { CREW } from '../../data/crew.js';
 import { MILESTONES } from '../../data/glory.js';
@@ -915,16 +916,22 @@ function openRocketStackModal() {
 
   const repaint = () => {
     const stack = getRocketStack();
-    const flyable = canRocketFly();
+    const r = isRocketActive();
+    const activeId = getActiveThrusterId();
     panel.querySelector('.rocket-stack-body')?.remove();
     const body = document.createElement('div');
     body.className = 'rocket-stack-body';
+    // Status banner: active + green when all three rules hold,
+    // grounded + red otherwise with the specific reason inline.
+    const status = r.active
+      ? '<p class="rocket-status ok">✓ Active — rocket can move.</p>'
+      : `<p class="rocket-status bad">🚫 Inactive — ${esc(r.reason)}.</p>
+         ${r.missing.length
+           ? `<ul class="rocket-issues">${r.missing.map((m) => `<li>${esc(m)}</li>`).join('')}</ul>`
+           : ''}`;
     body.innerHTML = `
       <h2 class="rocket-stack-title">🚀 LEO Rocket</h2>
-      ${flyable.ok
-        ? '<p class="rocket-status ok">✓ Flyable — all supports satisfied.</p>'
-        : `<p class="rocket-status bad">🚫 Cannot fly:</p>
-           <ul class="rocket-issues">${flyable.missing.map((m) => `<li>${esc(m)}</li>`).join('')}</ul>`}
+      ${status}
       <div id="rocket-stack-cards"></div>
     `;
     panel.appendChild(body);
@@ -937,9 +944,31 @@ function openRocketStackModal() {
     stack.forEach((slot, idx) => {
       const card = lookup(slot.id);
       if (!card) return;
+      const isThruster = card.type === 'thruster' || card.thrust != null;
       const wrap = document.createElement('div');
       wrap.className = 'rocket-slot';
+      if (isThruster && slot.id === activeId) wrap.classList.add('is-active-thruster');
       wrap.appendChild(renderCard(card, { type: slot.kind || 'patent' }));
+
+      const actions = document.createElement('div');
+      actions.className = 'rocket-slot-actions';
+
+      // Thrusters get a "Set as active" / "Active" toggle so
+      // the player can pick which thruster the rocket runs on.
+      // Non-thrusters skip this control.
+      if (isThruster) {
+        const activate = document.createElement('button');
+        activate.type = 'button';
+        activate.className = 'rocket-activate'
+          + (slot.id === activeId ? ' is-active' : '');
+        activate.textContent = slot.id === activeId
+          ? '⚡ Active thruster'
+          : 'Set as active';
+        activate.disabled = slot.id === activeId;
+        activate.addEventListener('click', () => setActiveThruster(slot.id));
+        actions.appendChild(activate);
+      }
+
       const back = document.createElement('button');
       back.type = 'button';
       back.className = 'rocket-back-to-hand';
@@ -948,7 +977,9 @@ function openRocketStackModal() {
         rocketRemoveCard(idx);
         addToHand(card);
       });
-      wrap.appendChild(back);
+      actions.appendChild(back);
+
+      wrap.appendChild(actions);
       cards.appendChild(wrap);
     });
   };
@@ -1010,15 +1041,18 @@ function renderRocketPane() {
 function syncSandboxRocket() {
   if (!_renderer) return;
   const stack = getRocketStack();
+  // Rocket model is present in LEO whenever the player has ≥1
+  // card in the stack — even when it isn't yet activatable.
+  // The 🚫 overlay distinguishes active vs inactive states.
   if (!stack.length) {
     _renderer.setSandboxRocket(null);
     return;
   }
-  const flyable = canRocketFly();
+  const r = isRocketActive();
   _renderer.setSandboxRocket({
     x: 460, y: 270,         // LEO-ish anchor in cleaned-up coords
     colour: 'yellow',
-    canFly: flyable.ok,
+    canFly: r.active,       // drives the 🚫 + transparency overlay
   });
 }
 

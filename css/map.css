@@ -1175,3 +1175,46 @@ body:has(#view-browse:not(.hidden)) #main {
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 16px;
 }
+
+/* Rocket stack slot actions row — sits beneath each card in
+   the rocket stack modal. Holds the "Set as active" thruster
+   picker (thrusters only) + the "Back to hand" affordance. */
+.rocket-slot-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.rocket-slot-actions button {
+  flex: 1;
+  font-size: 11px;
+  padding: 5px 8px;
+}
+
+/* Active-thruster highlight: the chosen thruster's card gets
+   a saturated rocket-orange ring + soft glow so the player
+   sees which thruster is driving the rocket at a glance. */
+.rocket-slot.is-active-thruster .card {
+  box-shadow: 0 0 0 3px #f97316, 0 0 18px rgba(249, 115, 22, 0.55);
+  border-radius: 10px;
+}
+.rocket-activate {
+  background: rgba(15, 16, 35, 0.85);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.rocket-activate:hover:not(:disabled) {
+  background: var(--accent);
+  color: #062136;
+  border-color: var(--accent-2);
+}
+.rocket-activate.is-active {
+  background: #f97316;
+  color: #2e0f02;
+  border-color: #9a3412;
+  font-weight: 700;
+  cursor: default;
+  opacity: 1;
+}
