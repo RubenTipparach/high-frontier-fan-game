@@ -57,7 +57,7 @@ const TYPE_VIS = {
   comet:          { kind: 'comet',  r:  5 },
   asteroid:       { kind: 'hex',    r: HEX_R, haloR: 10, rocky: true },
   surface:        { kind: 'hex',    r: HEX_R, haloR: 20 },
-  sun:            { kind: 'sun',    r: 60 },
+  sun:            { kind: 'sun',    r: 30 },
   lagrange:       { kind: 'circle', r:  7, fill: 'transparent', stroke: '#c66932' },
   burn:           { kind: 'circle', r:  6, hitR: 8, fill: '#d60f7a', stroke: '#fde0ee', hideBelowZoom: 1.4 },
   hohmann:        { kind: 'circle', r:  2, hitR: 8, fill: '#10b981', stroke: '#a7f3d0' },
