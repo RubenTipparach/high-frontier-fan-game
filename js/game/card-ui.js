@@ -159,7 +159,11 @@ function buildFace(card, sideName, kind) {
     return face;
   }
 
-  const isThruster = card.type === 'thruster';
+  // Show the thrust triangle on any card that carries a thrust
+  // value — that includes Missile-type robonauts (the spreadsheet
+  // gives them their own Thrust / Fuel / Afterburn under the
+  // "Thruster" banner), GW Thrusters, etc.
+  const isThruster = card.type === 'thruster' || card.thrust != null;
   face.innerHTML = `
     <div class="card-typebar"></div>
     <div class="card-statbox">
@@ -182,17 +186,25 @@ function buildFace(card, sideName, kind) {
       <span class="face-tag"></span>
     </div>
   `;
-  // Per-type icon glyph in the typebar, matched to the
-  // published-card iconography (🌡️ thermometer for radiators,
-  // etc.). Keeps the "what kind of card am I looking at" read
-  // working even when the type label is occluded.
-  const TYPE_ICON = {
-    thruster: '🚀', reactor: '⚛️', radiator: '🌡️',
-    refinery: '⚗️', robonaut: '🤖', generator: '🔋',
+  // Typebar icon strategy: for cards that SUPPLY support chips
+  // (reactors, generators, radiators) show the actual chip
+  // glyphs this card supplies — so the player can immediately
+  // see which chip-slots on a thruster this card satisfies.
+  // For cards that don't supply chips (thrusters, refineries,
+  // robonauts) we fall back to a generic type emoji.
+  const TYPE_FALLBACK_ICON = {
+    thruster: '🚀', refinery: '⚗️', robonaut: '🤖',
   };
   const tbar = face.querySelector('.card-typebar');
-  const icon = TYPE_ICON[card.type] || '';
-  tbar.textContent = `${icon ? icon + ' ' : ''}${card.type.toUpperCase()}`;
+  const faceData = (card.faces && card.faces[sideName]) || {};
+  const supplies = faceData.supplies || card.supplies || [];
+  const supplyGlyphs = supplies
+    .map((k) => (REQUIREMENT_VIS[k] || {}).glyph || '')
+    .filter(Boolean)
+    .join(' ');
+  const fallback = TYPE_FALLBACK_ICON[card.type] || '';
+  const lead = supplyGlyphs || fallback;
+  tbar.textContent = `${lead ? lead + '  ' : ''}${card.type.toUpperCase()}`;
   face.querySelector('.card-name').textContent = card.name;
   face.querySelector('.m').textContent = card.mass != null ? card.mass : '—';
   face.querySelector('.r').textContent = card.radHardness != null ? card.radHardness : '—';

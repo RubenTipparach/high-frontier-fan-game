@@ -141,7 +141,7 @@
 
 /* Type bar across the top, coloured by component category. */
 .card-typebar {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 2px;
   padding: 5px 10px;
@@ -149,6 +149,9 @@
   color: #0c0a16;
   background: var(--ink-mute);
   text-transform: uppercase;
+  /* Supply glyphs (X, ∿, 💣, ⟛, e, 🌡) sit at the leading edge
+     of the label. Slight bump in size + bold weight so the
+     symbols read cleanly against the saturated typebar fill. */
 }
 .card.type-thruster  .card-typebar { background: #f8a47a; }
 .card.type-reactor   .card-typebar { background: #a78bfa; }

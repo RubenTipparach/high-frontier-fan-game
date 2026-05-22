@@ -106,6 +106,44 @@ function requiresFromFace(face) {
   return reqs;
 }
 
+// Columns under the "Type" banner of Reactor / Generator sheets
+// that say what THIS card supplies to the stack. A generator
+// with ⟛=true supplies a radioisotope-generator chip, a fission
+// reactor (X=true) supplies the reactor-fission chip, etc.
+// Used to drive the per-card glyphs shown on the typebar.
+const REACTOR_TYPE_COLS = {
+  'X':  'reactor-fission',
+  '∿':  'reactor-fusion',
+  '💣': 'reactor-antimatter',
+};
+const GENERATOR_TYPE_COLS = {
+  '⟛': 'gen-radioisotope',
+  'e':  'gen-electric',
+};
+
+// Return the array of requirement-kinds this card SUPPLIES to
+// the stack — i.e. which support chips a thruster/robonaut/etc
+// is allowed to satisfy by including this card. Radiators
+// always supply the thermostat chip; reactors and generators
+// supply whichever Type-column boxes are ticked; other card
+// types supply nothing (they don't show up as chips on other
+// cards' supports rows).
+function suppliesFromFace(face, type) {
+  if (!face) return [];
+  if (type === 'reactor') {
+    return Object.entries(REACTOR_TYPE_COLS)
+      .filter(([col]) => face[col])
+      .map(([, kind]) => kind);
+  }
+  if (type === 'generator') {
+    return Object.entries(GENERATOR_TYPE_COLS)
+      .filter(([col]) => face[col])
+      .map(([, kind]) => kind);
+  }
+  if (type === 'radiator') return ['thermostat'];
+  return [];
+}
+
 // Build a `properties` array of { key, glyph, label, value }
 // entries from the face's per-card capability columns. Boolean
 // columns drop value=true; numeric columns drop the raw number.
@@ -135,12 +173,14 @@ function slug(name, type) {
 // Heavy Side) under qualified column names; we surface those
 // as face.light / face.heavy. For every other card type the
 // fields sit directly on the face.
-function buildFace(label, tier, isRadiator) {
+function buildFace(label, tier, type) {
   if (!tier) return null;
+  const isRadiator = type === 'radiator';
   const base = {
     label,
     ability:    tier.Ability || null,
     requires:   requiresFromFace(tier),
+    supplies:   suppliesFromFace(tier, type),
     properties: propertiesFromFace(tier),
   };
   if (isRadiator) {
@@ -183,8 +223,8 @@ function buildPatent(sheet, row) {
     || (type === 'radiator' ? null : 'C');
   const isRadiator = type === 'radiator';
 
-  const primaryFace   = buildFace('Tier 1', t1, isRadiator);
-  const secondaryFace = buildFace('Tier 2', t2, isRadiator);
+  const primaryFace   = buildFace('Tier 1', t1, type);
+  const secondaryFace = buildFace('Tier 2', t2, type);
 
   // Top-level convenience fields mirror the primary face so
   // existing renderer / ship-engine code that reads card.thrust /
@@ -200,6 +240,7 @@ function buildPatent(sheet, row) {
     fuel:        primaryFace.fuel,
     afterburn:   primaryFace.afterburn,
     requires:    primaryFace.requires,
+    supplies:    primaryFace.supplies,
     properties:  primaryFace.properties,
     blurb:       primaryFace.ability || '',
     flipOrientation: isRadiator ? 'rotated180' : 'standard',
