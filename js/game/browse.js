@@ -31,36 +31,56 @@ async function loadMap(mode) {
 }
 
 let _renderer = null;
-let _activeTab = 'map';
+let _sidebarWired = false;
 
 export function mountBrowse() {
   const view = document.getElementById('view-browse');
   if (!view) return;
-  setupTabs();
-  showTab(_activeTab);
+  wireSidebar();
+  renderMap();
 }
 
-function setupTabs() {
-  const tabs = document.querySelectorAll('#browse-tabs button');
-  tabs.forEach((btn) => {
-    btn.onclick = () => showTab(btn.dataset.tab);
-  });
-}
+// Side panel: a vertical tab strip on the right edge of the
+// browse view. Each tab pops a different pane in/out. Clicking the
+// active tab closes the panel; clicking the × close button does
+// the same. Pane content (patents / milestones / events) is
+// rendered lazily on first open and then left mounted.
+function wireSidebar() {
+  if (_sidebarWired) return;
+  _sidebarWired = true;
+  const panel = document.getElementById('browse-sidepanel');
+  const tabs  = document.getElementById('sidepanel-tabs');
+  const close = document.getElementById('sidepanel-close');
+  if (!panel || !tabs || !close) return;
 
-function showTab(id) {
-  _activeTab = id;
-  document.querySelectorAll('#browse-tabs button').forEach((b) => {
-    b.classList.toggle('active', b.dataset.tab === id);
-  });
-  document.querySelectorAll('.browse-panel').forEach((p) => {
-    p.classList.toggle('hidden', p.dataset.tab !== id);
-  });
-  switch (id) {
-    case 'map':         renderMap(); break;
-    case 'patents':     renderPatents(); break;
-    case 'milestones':  renderMilestones(); break;
-    case 'events':      renderEvents(); break;
+  for (const btn of tabs.querySelectorAll('button')) {
+    btn.addEventListener('click', () => {
+      const pane = btn.dataset.pane;
+      if (panel.dataset.active === pane) {
+        // Toggle off if already active.
+        showPane(null);
+      } else {
+        showPane(pane);
+      }
+    });
   }
+  close.addEventListener('click', () => showPane(null));
+}
+
+function showPane(pane) {
+  const panel = document.getElementById('browse-sidepanel');
+  if (!panel) return;
+  panel.dataset.active = pane || '';
+  for (const btn of panel.querySelectorAll('.sidepanel-tabs button')) {
+    btn.classList.toggle('active', btn.dataset.pane === pane);
+  }
+  for (const el of panel.querySelectorAll('.panel-pane')) {
+    el.classList.toggle('active', el.dataset.pane === pane);
+  }
+  // Render the pane lazily on first reveal.
+  if      (pane === 'patents')    renderPatents();
+  else if (pane === 'milestones') renderMilestones();
+  else if (pane === 'events')     renderEvents();
 }
 
 // Route state: shared across renderer instances. Tapping the first
@@ -150,7 +170,10 @@ function ensureMapShell(host) {
   }
   host.querySelector('#route-clear').addEventListener('click', clearRoute);
   host.querySelector('#route-fullscreen').addEventListener('click', () => {
-    toggleFullscreen(host);
+    // Promote the whole browse shell to fullscreen, not just the
+    // map host -- this way the sidebar comes along for the ride.
+    const shell = document.querySelector('.browse-shell') || host;
+    toggleFullscreen(shell);
   });
   host.querySelector('#route-debug').addEventListener('click', () => {
     const panel = host.querySelector('#map-debug');
@@ -374,22 +397,32 @@ async function mountMapFor(mode) {
 }
 
 function onSiteSelect(site) {
-  // Update the site-info side panel first.
+  // Populate the Site Info pane and pop it open.
   const info = document.getElementById('browse-map-info');
   info.innerHTML = `
-    <h3></h3>
+    <h4 class="site-name"></h4>
     <ul class="kv">
       <li><span>Type</span><strong class="type"></strong></li>
       <li><span>Size / class</span><strong class="size"></strong></li>
       <li><span>Hydration</span><strong class="hyd"></strong></li>
       <li><span>Hazard</span><strong class="hazard"></strong></li>
+      <li class="row-sub" hidden><span>Submarine</span><strong>🌊</strong></li>
+      <li class="row-astro" hidden><span>Astrobiology</span><strong>🌿</strong></li>
+      <li class="row-aero" hidden><span>Aerobrakes</span><strong class="aero">—</strong></li>
     </ul>
   `;
-  info.querySelector('h3').textContent = site.name;
+  info.querySelector('.site-name').textContent = site.name;
   info.querySelector('.type').textContent = site.type;
   info.querySelector('.size').textContent = site.siteSize || '—';
   info.querySelector('.hyd').textContent = '💧'.repeat(site.hydration) || '—';
   info.querySelector('.hazard').textContent = site.hazard ? 'yes' : 'no';
+  if (site.submarine)    info.querySelector('.row-sub').hidden   = false;
+  if (site.astrobiology) info.querySelector('.row-astro').hidden = false;
+  if (site.aerobrakes) {
+    info.querySelector('.row-aero').hidden = false;
+    info.querySelector('.aero').textContent = String(site.aerobrakes);
+  }
+  showPane('info');
 
   // Decorative dots only exist to bend chains; they're not
   // selectable. Every other waypoint (lagrange, burn, hohmann,

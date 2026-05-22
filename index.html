@@ -232,38 +232,45 @@
         patent deck, milestones, and event cards. Always reachable
         from the topbar; doesn't require sign-in.
       -->
+      <!--
+        Browse layout: the map canvas fills the entire viewport
+        below the topbar (planner-style), with a slide-out sidebar
+        on the right that surfaces site info, patents, milestones,
+        and events on demand. The fullscreen button still promotes
+        the whole shell to actual fullscreen.
+      -->
       <section id="view-browse" class="view hidden">
-        <div class="card">
-          <div class="card-header">
-            <h2>Browse data</h2>
-            <div id="browse-tabs" class="tabbar">
-              <button class="active" data-tab="map">Map</button>
-              <button data-tab="patents">Patents</button>
-              <button data-tab="milestones">Milestones</button>
-              <button data-tab="events">Events</button>
+        <div class="browse-shell">
+          <div class="browse-stage">
+            <div id="browse-map" class="browse-map"></div>
+          </div>
+          <aside id="browse-sidepanel" class="browse-sidepanel" data-active="">
+            <nav class="sidepanel-tabs" id="sidepanel-tabs">
+              <button data-pane="info" title="Site info" aria-label="Site info">📍</button>
+              <button data-pane="patents" title="Patents" aria-label="Patents">💎</button>
+              <button data-pane="milestones" title="Milestones" aria-label="Milestones">🏆</button>
+              <button data-pane="events" title="Events" aria-label="Events">📜</button>
+            </nav>
+            <div class="sidepanel-content">
+              <button class="sidepanel-close" id="sidepanel-close"
+                aria-label="Close panel" title="Close">×</button>
+              <div class="panel-pane" data-pane="info">
+                <h3>Site info</h3>
+                <div id="browse-map-info">
+                  <p class="muted">Tap any site on the map to see its details.</p>
+                </div>
+              </div>
+              <div class="panel-pane" data-pane="patents">
+                <div id="browse-patents"></div>
+              </div>
+              <div class="panel-pane" data-pane="milestones">
+                <div id="browse-milestones"></div>
+              </div>
+              <div class="panel-pane" data-pane="events">
+                <div id="browse-events"></div>
+              </div>
             </div>
-          </div>
-
-          <div class="browse-panel" data-tab="map">
-            <div class="browse-map-wrap">
-              <div id="browse-map" class="browse-map"></div>
-              <aside id="browse-map-info" class="browse-map-info">
-                <p class="muted">Click any site to see its details. Scroll to zoom, drag to pan.</p>
-              </aside>
-            </div>
-          </div>
-
-          <div class="browse-panel hidden" data-tab="patents">
-            <div id="browse-patents"></div>
-          </div>
-
-          <div class="browse-panel hidden" data-tab="milestones">
-            <div id="browse-milestones"></div>
-          </div>
-
-          <div class="browse-panel hidden" data-tab="events">
-            <div id="browse-events"></div>
-          </div>
+          </aside>
         </div>
       </section>
     </main>
