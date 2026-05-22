@@ -1,21 +1,20 @@
-// Sandbox "hand" — the player's tentative rocket stack. Holds at
-// most one card of each PATENT_TYPE so the build represents a
-// real ship: one thruster + one reactor + one radiator + etc.
-// Persists to localStorage so the build survives reloads while
-// the player iterates.
+// Sandbox "hand" — the player's tentative pool of patents and
+// crew. Cards live as ordered slots (duplicates allowed) so the
+// player can hold multiple copies of the same patent / crew if
+// they want to (one to compare against another, or to send to
+// different rockets later).
+//
+// Each slot tracks its card id. Slots are indexed by their
+// position in the array; removeFromHandAt(index) drops one
+// specific copy. Persists to localStorage so the work survives
+// reloads while the player iterates.
 //
 // Public surface:
-//   getHandIds()                 → string[]   (card ids in order added)
-//   isInHand(id)                 → boolean
-//   typeInHand(type, lookup)     → string|null  (id of the card of that type in hand)
-//   addToHand(card, lookup)      → { ok: true } | { ok: false, reason }
-//   removeFromHand(id)
+//   getHandSlots()                → string[]  (card ids, in order)
+//   addToHand(card)               → number    (index of the added slot)
+//   removeFromHandAt(index)       → boolean
 //   clearHand()
-//   onHandChange(cb)             → unsubscribe()
-//
-// `lookup` is the function (id) => card record used to read the
-// type of each id already in hand. We don't import PATENTS here
-// to keep this module side-effect-free.
+//   onHandChange(cb)              → unsubscribe()
 
 const STORAGE_KEY = 'hf-sandbox-hand';
 
@@ -40,43 +39,29 @@ function notify() {
   }
 }
 
+export function getHandSlots() {
+  return _hand.slice();
+}
+
+// Legacy alias kept for callers that haven't migrated yet.
 export function getHandIds() {
   return _hand.slice();
 }
 
-export function isInHand(id) {
-  return _hand.includes(id);
-}
-
-export function typeInHand(type, lookup) {
-  for (const id of _hand) {
-    const c = lookup(id);
-    if (c && c.type === type) return id;
-  }
-  return null;
-}
-
-export function addToHand(card, lookup) {
-  if (!card || !card.id) return { ok: false, reason: 'no card' };
-  if (_hand.includes(card.id)) return { ok: false, reason: 'already in hand' };
-  const clash = typeInHand(card.type, lookup);
-  if (clash) {
-    return {
-      ok: false,
-      reason: `one ${card.type} max — drop the current ${card.type} first`,
-      clashId: clash,
-    };
-  }
+// No more one-of-each-type rule — the player can hold as many
+// copies of a card as they want. Returns the slot index where
+// the new card landed.
+export function addToHand(card) {
+  if (!card || !card.id) return -1;
   _hand.push(card.id);
   persist();
   notify();
-  return { ok: true };
+  return _hand.length - 1;
 }
 
-export function removeFromHand(id) {
-  const i = _hand.indexOf(id);
-  if (i < 0) return false;
-  _hand.splice(i, 1);
+export function removeFromHandAt(index) {
+  if (index < 0 || index >= _hand.length) return false;
+  _hand.splice(index, 1);
   persist();
   notify();
   return true;

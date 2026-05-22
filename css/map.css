@@ -475,57 +475,107 @@ body:has(#view-browse:not(.hidden)) #main {
 .hand-slot {
   position: relative;
   flex-shrink: 0;
+  width: 108px;          /* 240px card × 0.45 scale */
   height: 100%;
+  cursor: pointer;
+  transition: transform 0.12s ease;
 }
-/* Scale the rendered card down to fit the hand strip height. */
+.hand-slot:hover { transform: translateY(-4px); }
+/* Scale the rendered card down so each slot fits in the strip
+   even when it's at its default 152px height. The whole slot is
+   clickable to open the inspect modal. */
 .hand-slot .card {
   transform: scale(0.45);
   transform-origin: top left;
   width: 240px;
+  pointer-events: none;  /* let the slot wrapper get the click */
 }
-.hand-slot {
-  width: 108px;  /* 240 * 0.45 */
-  height: 100%;
-}
-.hand-drop {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #ef4444;
-  color: #fff;
-  border: 1px solid #7f1d1d;
-  font-size: 12px;
-  line-height: 1;
-  cursor: pointer;
-  z-index: 5;
-  padding: 0;
-}
-
-/* Grabbed cards in the deck grid get a ✋ overlay + grey-out so
-   the player sees at a glance which cards are already in their
-   hand. Drag is disabled (a second drag wouldn't do anything
-   useful — duplicates aren't allowed). */
-.card.is-grabbed {
-  position: relative;
-  opacity: 0.55;
-  filter: grayscale(0.6);
-  pointer-events: none;
-}
-.card.is-grabbed::after {
-  content: "✋";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  font-size: 56px;
-  z-index: 10;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
-  pointer-events: none;
+/* Flip / rotate buttons inside the card still need to receive
+   clicks so the player can preview the dark side / heavy side
+   without opening the modal. */
+.hand-slot .card-flip,
+.hand-slot .card-rotate {
+  pointer-events: auto;
 }
 .card.is-dragging { opacity: 0.4; }
+
+/* Hand-strip grabber: a 12px-tall bar at the very top of the
+   strip with a 36×4px handle pip. Pointer-cursor + ns-resize
+   tells the user it's draggable; the JS uses pointer events
+   to track the drag and writes inline height to the strip. */
+.hand-grabber {
+  height: 12px;
+  margin: -6px -10px 0;  /* nudge into the strip's top edge */
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 4;
+  touch-action: none;
+}
+.hand-grabber::before {
+  content: "";
+  width: 44px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ink-mute);
+  opacity: 0.7;
+  transition: opacity 0.15s, background 0.15s;
+}
+.hand-grabber:hover::before { opacity: 1; background: var(--accent); }
+
+/* Inspect modal: covers the viewport with a translucent
+   backdrop and floats an enlarged copy of the clicked card in
+   the centre with action buttons below. */
+.card-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 2, 10, 0.78);
+  backdrop-filter: blur(4px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: modal-fade 0.18s ease-out;
+}
+@keyframes modal-fade { from { opacity: 0; } to { opacity: 1; } }
+.card-modal-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+.card-modal-card {
+  transform: scale(1.6);
+  transform-origin: center;
+  margin: 60px;  /* room for the scale */
+}
+.card-modal-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.modal-btn {
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--ink);
+  cursor: pointer;
+  letter-spacing: 0.5px;
+}
+.modal-btn:hover { background: var(--panel-2); }
+.modal-btn.discard  { background: #7f1d1d; color: #fff;     border-color: #b91c1c; }
+.modal-btn.produce  { background: #14532d; color: #d1fae5; border-color: #166534; }
+.modal-btn.stack    { background: var(--accent); color: #062136; border-color: var(--accent-2); }
+.modal-btn.cancel   { background: transparent; color: var(--ink-dim); }
+.modal-btn.discard:hover { background: #b91c1c; }
+.modal-btn.produce:hover { background: #166534; }
 
 .browse-stage {
   position: absolute;

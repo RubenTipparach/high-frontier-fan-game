@@ -17,9 +17,12 @@ import {
 } from './solo.js';
 import { PATENTS, PATENTS_BY_ID, PATENT_TYPES, patentsByType } from '../../data/patents.js';
 import {
-  getHandIds, isInHand, addToHand, removeFromHand, clearHand,
-  onHandChange, typeInHand,
+  getHandSlots, addToHand, removeFromHandAt, clearHand, onHandChange,
 } from './hand.js';
+import {
+  getRocketStack, addToStack as rocketAddCard, removeFromStack as rocketRemoveCard,
+  onRocketChange, canRocketFly,
+} from './rocket.js';
 import { CREW } from '../../data/crew.js';
 import { MILESTONES } from '../../data/glory.js';
 import { POLITICS } from '../../data/politics.js';
@@ -53,28 +56,31 @@ export function mountBrowse() {
   renderMap();
 }
 
-// Sandbox hand strip wiring: makes the bottom strip a drop
-// target, renders the current hand into it, and keeps it in
-// sync with the hand state via onHandChange.
+// Sandbox hand strip wiring: drop target, slot rendering, +
+// the grabber bar that lets the user drag the strip up to see
+// more cards. Card-click opens the inspect modal instead of
+// removing the slot directly — Discard lives in the modal.
 let _handWired = false;
 function wireHandStrip() {
   if (_handWired) return;
   _handWired = true;
-  const strip   = document.getElementById('sandbox-hand');
-  const host    = document.getElementById('sandbox-hand-cards');
-  const countEl = document.getElementById('hand-count');
+  const strip    = document.getElementById('sandbox-hand');
+  const host     = document.getElementById('sandbox-hand-cards');
+  const countEl  = document.getElementById('hand-count');
   const clearBtn = document.getElementById('hand-clear');
+  const grabber  = document.getElementById('hand-grabber');
   if (!strip || !host) return;
 
   const lookup = (id) => PATENTS_BY_ID[id]
     || CREW.find((c) => c.id === id) || null;
+  const kindOf = (id) =>
+    CREW.some((c) => c.id === id) ? 'crew' : 'patent';
 
-  // Drop target: validates the dropped id, adds to hand if
-  // there's no type-clash, and surfaces the reason on rejection.
+  // Drag from the deck → drop onto the strip → append slot.
   host.addEventListener('dragover', (e) => {
     if (!e.dataTransfer.types.includes('text/card-id')) return;
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
+    e.dataTransfer.dropEffect = 'copy';
     host.classList.add('is-drop-target');
   });
   host.addEventListener('dragleave', () => host.classList.remove('is-drop-target'));
@@ -82,44 +88,149 @@ function wireHandStrip() {
     e.preventDefault();
     host.classList.remove('is-drop-target');
     const id = e.dataTransfer.getData('text/card-id');
-    if (!id) return;
-    const card = lookup(id);
-    if (!card) return;
-    const result = addToHand(card, lookup);
-    if (!result.ok) {
-      host.dataset.errorMsg = result.reason;
-      host.classList.add('flash-error');
-      setTimeout(() => host.classList.remove('flash-error'), 700);
-    }
+    const card = id && lookup(id);
+    if (card) addToHand(card);
   });
 
   if (clearBtn) clearBtn.addEventListener('click', () => clearHand());
 
+  // Grabber: drag vertically to resize the strip between a
+  // collapsed default height (152px) and ~60% of viewport so
+  // the player can audit a many-card hand without leaving the
+  // sandbox view.
+  if (grabber) wireHandGrabber(grabber, strip);
+
   const repaintHand = () => {
-    const ids = getHandIds();
+    const slots = getHandSlots();
     host.innerHTML = '';
     if (countEl) countEl.textContent =
-      `${ids.length} card${ids.length === 1 ? '' : 's'}`;
-    for (const id of ids) {
+      `${slots.length} card${slots.length === 1 ? '' : 's'}`;
+    slots.forEach((id, idx) => {
       const card = lookup(id);
-      if (!card) continue;
-      const kind = CREW.find((c) => c.id === id) ? 'crew' : 'patent';
+      if (!card) return;
       const wrap = document.createElement('div');
       wrap.className = 'hand-slot';
-      wrap.appendChild(renderCard(card, { type: kind }));
-      const drop = document.createElement('button');
-      drop.type = 'button';
-      drop.className = 'hand-drop';
-      drop.textContent = '×';
-      drop.title = 'Remove from hand';
-      drop.addEventListener('click', () => removeFromHand(id));
-      wrap.appendChild(drop);
+      wrap.dataset.slotIdx = String(idx);
+      wrap.appendChild(renderCard(card, { type: kindOf(id) }));
+      // Click anywhere on the slot opens the inspect modal —
+      // discard / produce / add-to-stack live in there.
+      wrap.addEventListener('click', (ev) => {
+        // Allow the rotate / flip controls on the card itself
+        // (which stopPropagation) to keep working without
+        // opening the modal.
+        if (ev.target.closest('.card-flip, .card-rotate')) return;
+        openCardModal(card, kindOf(id), idx);
+      });
       host.appendChild(wrap);
-    }
+    });
   };
 
   repaintHand();
   onHandChange(repaintHand);
+}
+
+// Vertical resize grabber for the hand strip. Tracks a CSS
+// variable on the strip element so the height is restored
+// between repaints + survives onHandChange rerenders.
+function wireHandGrabber(grabber, strip) {
+  let startY = 0;
+  let startH = 0;
+  const onMove = (clientY) => {
+    const dy = startY - clientY;            // drag up = positive
+    const next = Math.max(120, Math.min(window.innerHeight * 0.7, startH + dy));
+    strip.style.height = `${next}px`;
+  };
+  const onPointerDown = (e) => {
+    const cy = e.touches ? e.touches[0].clientY : e.clientY;
+    startY = cy;
+    startH = strip.getBoundingClientRect().height;
+    document.body.style.userSelect = 'none';
+    const moveEv = e.touches ? 'touchmove' : 'pointermove';
+    const upEv   = e.touches ? 'touchend'  : 'pointerup';
+    const onMoveEv = (ev) => onMove(ev.touches ? ev.touches[0].clientY : ev.clientY);
+    const onUpEv   = () => {
+      document.body.style.userSelect = '';
+      document.removeEventListener(moveEv, onMoveEv);
+      document.removeEventListener(upEv, onUpEv);
+    };
+    document.addEventListener(moveEv, onMoveEv);
+    document.addEventListener(upEv, onUpEv);
+  };
+  grabber.addEventListener('pointerdown', onPointerDown);
+  grabber.addEventListener('touchstart', onPointerDown, { passive: true });
+}
+
+// Inspect modal: enlarged copy of the clicked card with three
+// actions — Discard (pop back to the deck), Exo produce (will
+// need a factory location once Stage-3 builds them), and Add to
+// stack (push onto the LEO rocket).
+function openCardModal(card, kind, slotIdx) {
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay';
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  const panel = document.createElement('div');
+  panel.className = 'card-modal-panel';
+  const cardEl = renderCard(card, { type: kind });
+  cardEl.classList.add('card-modal-card');
+  panel.appendChild(cardEl);
+
+  const actions = document.createElement('div');
+  actions.className = 'card-modal-actions';
+
+  const discardBtn = document.createElement('button');
+  discardBtn.type = 'button';
+  discardBtn.className = 'modal-btn discard';
+  discardBtn.textContent = 'Discard';
+  discardBtn.title = 'Return this card to the deck';
+  discardBtn.addEventListener('click', () => {
+    removeFromHandAt(slotIdx);
+    close();
+  });
+
+  const produceBtn = document.createElement('button');
+  produceBtn.type = 'button';
+  produceBtn.className = 'modal-btn produce';
+  produceBtn.textContent = `Exo produce (${card.spectralType || '?'})`;
+  produceBtn.title = `Use a factory matching spectral type ${card.spectralType || '?'} to produce the dark-side resource`;
+  produceBtn.addEventListener('click', () => {
+    // Factories don't exist yet — Stage 3 will let the player
+    // build one matching the card's spectral type. Surface the
+    // intent so the player knows what's coming.
+    setStatus(
+      `Exo-produce needs a factory matching spectral type `
+      + `<strong>${card.spectralType || '?'}</strong>. `
+      + `Factories aren't buildable yet (Stage 3).`
+    );
+    close();
+  });
+
+  const stackBtn = document.createElement('button');
+  stackBtn.type = 'button';
+  stackBtn.className = 'modal-btn stack';
+  stackBtn.textContent = 'Add to LEO stack';
+  stackBtn.title = 'Add this card to your rocket parked in LEO';
+  stackBtn.addEventListener('click', () => {
+    rocketAddCard(card.id, kind);
+    removeFromHandAt(slotIdx);
+    close();
+  });
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'modal-btn cancel';
+  cancelBtn.textContent = 'Close';
+  cancelBtn.addEventListener('click', close);
+
+  actions.append(discardBtn, produceBtn, stackBtn, cancelBtn);
+  panel.appendChild(actions);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+
+  // Escape closes too.
+  const onKey = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
+  document.addEventListener('keydown', onKey);
 }
 
 // Side panel: a vertical tab strip on the right edge of the
@@ -685,9 +796,10 @@ function renderPatents() {
   grid.className = 'card-grid';
   host.appendChild(grid);
 
-  // Wrap renderCard so each tile in the grid is draggable, gets
-  // a data-card-id for hand operations, and shows the ✋ overlay
-  // when it's already sitting in the player's hand.
+  // Each tile in the grid is draggable. Multi-copies allowed
+  // (the hand state stores duplicates as separate slots), so we
+  // no longer mark grabbed cards — every grab just appends a
+  // fresh slot to the hand.
   const decorateForHand = (card, asKind) => {
     const el = renderCard(card, { type: asKind });
     el.dataset.cardId  = card.id;
@@ -696,11 +808,10 @@ function renderPatents() {
     el.addEventListener('dragstart', (ev) => {
       ev.dataTransfer.setData('text/card-id', card.id);
       ev.dataTransfer.setData('text/card-kind', asKind);
-      ev.dataTransfer.effectAllowed = 'move';
+      ev.dataTransfer.effectAllowed = 'copy';
       el.classList.add('is-dragging');
     });
     el.addEventListener('dragend', () => el.classList.remove('is-dragging'));
-    if (isInHand(card.id)) el.classList.add('is-grabbed');
     return el;
   };
 
@@ -715,21 +826,9 @@ function renderPatents() {
       grid.appendChild(decorateForHand(p, 'patent'));
     }
     if (filter === 'all') {
-      // Append crew at the end of "all" so the deck reads as
-      // "everything you can build / staff".
       for (const c of CREW) grid.appendChild(decorateForHand(c, 'crew'));
     }
   };
-
-  // Repaint the grid whenever the hand state changes so the ✋
-  // overlay tracks reality. Subscription is cleaned up when the
-  // patents pane is rebuilt; storing on the host element means
-  // multiple mounts don't stack listeners.
-  if (host._handUnsub) host._handUnsub();
-  host._handUnsub = onHandChange(() => {
-    const active = bar.querySelector('button.active');
-    repaint(active ? active.dataset.type : 'all');
-  });
 
   bar.querySelectorAll('button').forEach((b) => {
     b.onclick = () => {
