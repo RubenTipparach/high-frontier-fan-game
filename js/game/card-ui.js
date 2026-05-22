@@ -34,15 +34,23 @@ const SPECTRAL_LABEL = {
 // icon shown in the requirement row on a card. count is rendered
 // next to the glyph (1 -> bare icon; >1 -> icon + "×N").
 const REQUIREMENT_VIS = {
-  'pulse-generator':  { glyph: '⚡', label: 'Pulse generator' },
-  'thermostat':       { glyph: '🌡️', label: 'Thermostat'      },
-  'crew-quarters':    { glyph: '👤', label: 'Crew quarters'   },
-  'sail':             { glyph: '⛵', label: 'Sail rigging'    },
-  'beam-receiver':    { glyph: '☀️',  label: 'Beam receiver'   },
-  'push-sat':         { glyph: '🛰️', label: 'Push-sat'        },
-  'isru-rig':         { glyph: '🛢️', label: 'ISRU rig'        },
-  'aerobrake-shroud': { glyph: '🪂', label: 'Aerobrake'       },
-  'spin-grav':        { glyph: '💃', label: 'Spin gravity'    },
+  // Power-source supports: match the published-card marker glyphs.
+  'reactor-fission':    { glyph: 'X',  label: 'Fission reactor'      },
+  'reactor-fusion':     { glyph: '∿',  label: 'Fusion reactor'       },
+  'reactor-antimatter': { glyph: '💣', label: 'Antimatter reactor'   },
+  'gen-radioisotope':   { glyph: '⟛', label: 'Radioisotope generator' },
+  'gen-electric':       { glyph: 'e',  label: 'Electric generator'   },
+  // Operational supports.
+  'beam-receiver':      { glyph: '☀️', label: 'Beam receiver / solar' },
+  'push-sat':           { glyph: '🛰️', label: 'Push-sat'              },
+  'isru-rig':           { glyph: '🛢️', label: 'ISRU rig'              },
+  'aerobrake-shroud':   { glyph: '🪂', label: 'Aerobrake / air-eater' },
+  // Legacy / hand-written supports.
+  'pulse-generator':    { glyph: '⚡', label: 'Pulse generator'        },
+  'thermostat':         { glyph: '🌡️', label: 'Thermostat'             },
+  'crew-quarters':      { glyph: '👤', label: 'Crew quarters'          },
+  'sail':               { glyph: '⛵', label: 'Sail rigging'           },
+  'spin-grav':          { glyph: '💃', label: 'Spin gravity'           },
 };
 
 export function renderCard(card, { type } = {}) {
@@ -162,6 +170,8 @@ function buildFace(card, sideName, kind) {
   };
   if (card.type === 'thruster') {
     add('ISP', card.isp);
+    add('Fuel', card.fuel);
+    if (card.afterburn)  add('Afterburn', '🔥');
   } else if (card.type === 'reactor') {
     add('Power', card.power);
     add('Heat',  card.heat);
@@ -311,11 +321,18 @@ function thrustVisual(card) {
   const wrap = document.createElement('div');
   wrap.className = 'thrust-visual';
   const thrust = card.thrust ?? 0;
-  // Fuel cost per burn: simple ceil(thrust / isp). For sail-class
-  // cards with absurdly high ISP, render as 0 (free).
-  const fuel = card.isp >= 50
-    ? 0
-    : Math.max(1, Math.ceil(thrust / Math.max(1, card.isp || 1)));
+  // Fuel cost per burn. Published-card sheet stores Fuel
+  // Consumption directly, so use `card.fuel` when present.
+  // Fall back to the legacy ceil(thrust / isp) derivation for
+  // any hand-written card still on the old ISP schema.
+  let fuel;
+  if (card.fuel != null) {
+    fuel = card.fuel;
+  } else if (card.isp >= 50) {
+    fuel = 0;
+  } else {
+    fuel = Math.max(1, Math.ceil(thrust / Math.max(1, card.isp || 1)));
+  }
 
   // Rounded-triangle path. Apex at (70,12); base (18,86)–(122,86).
   // Each corner is curved with a small quadratic; tangent points

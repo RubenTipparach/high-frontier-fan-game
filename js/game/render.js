@@ -1547,24 +1547,27 @@ export class MapRenderer {
       if (sx < -40 || sx > hostW + 40 || sy < -40 || sy > hostH + 40) continue;
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
 
-      // Site size text in the upper half of the hex.
+      // Site size text in the upper half of the hex. Tuned so it
+      // clears the centre flag glyphs (🌊 / 🌿 / ⛅) with a small
+      // gap; previous 0.55-of-radius / 0.32-offset overlapped.
       if (site.siteSize) {
-        ctx.font = `700 ${Math.round(vis.r * 0.55)}px ui-sans-serif, system-ui, sans-serif`;
+        ctx.font = `700 ${Math.round(vis.r * 0.42)}px ui-sans-serif, system-ui, sans-serif`;
         ctx.fillStyle = '#ffffff';
-        ctx.fillText(site.siteSize, sx, sy - vis.r * 0.32);
+        ctx.fillText(site.siteSize, sx, sy - vis.r * 0.50);
       }
 
       // Water droplets in the lower half of the hex, one teardrop
-      // per hydration unit (capped at 4 so they fit). Cyan fill +
-      // a darker outline so they read against the black hex.
+      // per hydration unit (capped at 4 so they fit). Smaller +
+      // pushed further down for the same reason as the size text:
+      // gives the centre flag glyphs breathing room.
       if (site.hydration) {
         const count = Math.min(4, site.hydration);
-        const dropH = vis.r * 0.45;
+        const dropH = vis.r * 0.32;
         const dropW = dropH * 0.62;
-        const gap   = Math.max(1, vis.r * 0.10);
+        const gap   = Math.max(1, vis.r * 0.08);
         const totalW = count * dropW + (count - 1) * gap;
         const startX = sx - totalW / 2 + dropW / 2;
-        const dropY  = sy + vis.r * 0.38;
+        const dropY  = sy + vis.r * 0.52;
         ctx.fillStyle = '#60a5fa';
         ctx.strokeStyle = 'rgba(15, 30, 60, 0.85)';
         ctx.lineWidth = 0.8;
