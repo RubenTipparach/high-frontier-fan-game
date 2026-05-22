@@ -491,6 +491,19 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
+  // Pan + zoom to centre a specific site / waypoint in the
+  // viewport. Used by the search box's "fly to" affordance.
+  // `zoom` defaults to 5x which fills the cluster around a body
+  // without diving into the hex's individual glyphs.
+  flyTo(target, zoom = 5) {
+    if (!target || typeof target.x !== 'number' || typeof target.y !== 'number') return;
+    this.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
+    const eff = this.zoom * this.fitScale;
+    this.pan.x = this.hostW / 2 - target.x * eff;
+    this.pan.y = this.hostH / 2 - target.y * eff;
+    this._scheduleDraw();
+  }
+
   // ---- setup ----
 
   _buildAsteroidBelt() {
@@ -1113,7 +1126,10 @@ export class MapRenderer {
       if (vis.kind === 'hex') {
         ctx.beginPath();
         for (let i = 0; i < 6; i++) {
-          const t = (i / 6) * Math.PI * 2 - Math.PI / 2;
+          // Flat-top hex: first vertex points right (0°), giving
+          // horizontal flats on top + bottom. Text and water drops
+          // are positioned separately so they stay upright.
+          const t = (i / 6) * Math.PI * 2;
           const px = sx + Math.cos(t) * r;
           const py = sy + Math.sin(t) * r;
           if (i === 0) ctx.moveTo(px, py);

@@ -100,6 +100,67 @@
   line-height: 1;
 }
 
+/* Search box + reactive suggestions. The list is absolutely
+   positioned so it floats over the canvas without reflowing the
+   toolbar. */
+.map-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 180px;
+}
+.map-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.map-search button {
+  padding: 4px 8px;
+  font-size: 14px;
+  line-height: 1;
+}
+.map-search ul {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: rgba(15, 16, 35, 0.96);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.55);
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 6;
+}
+.map-search ul.hidden { display: none; }
+.map-search ul li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--ink);
+}
+.map-search ul li.active,
+.map-search ul li:hover {
+  background: rgba(125, 211, 252, 0.18);
+  color: var(--accent);
+}
+.map-search ul li em {
+  color: var(--ink-mute);
+  font-style: normal;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
 /* Debug panel: floats over the lower-left corner of the map host.
    The renderer publishes zoom + FPS via onFrame(); sliders write
    straight into renderer.options. */

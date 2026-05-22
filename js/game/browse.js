@@ -89,6 +89,13 @@ function ensureMapShell(host) {
         <button data-mode="clean">Cleaned up</button>
         <button data-mode="classic">Classic</button>
       </div>
+      <div class="map-search">
+        <input id="map-search-input" type="text" autocomplete="off"
+          spellcheck="false" placeholder="Find site…" />
+        <button id="map-search-go" title="Fly to site"
+          aria-label="Fly to site">🔍</button>
+        <ul id="map-search-suggestions" class="hidden"></ul>
+      </div>
       <div class="map-route">
         <span id="route-status" class="muted">Tap a site to plan a route.</span>
         <button id="route-clear" hidden>Clear route</button>
@@ -155,6 +162,7 @@ function ensureMapShell(host) {
     host.querySelector('#map-debug').classList.add('hidden');
     if (_renderer) _renderer.setOption('debug', false);
   });
+  wireSearch(host);
   document.addEventListener('fullscreenchange', () => {
     const btn = host.querySelector('#route-fullscreen');
     if (btn) btn.textContent = document.fullscreenElement ? '⤬' : '⛶';
@@ -216,6 +224,113 @@ function wireDebugPanel(renderer) {
     if (z !== lastZoom) { zoomEl.textContent = z.toFixed(2) + 'x'; lastZoom = z; }
     const f = renderer.getFps();
     if (f !== lastFps) { fpsEl.textContent = String(f); lastFps = f; }
+  });
+}
+
+// Site search with reactive suggestions. Each keystroke filters the
+// active dataset's named sites; the dropdown shows up to 8 matches
+// ranked with starts-with first. Pressing Enter or the 🔍 button
+// flies the renderer to the top hit at zoom 5. Suggestions hide
+// when the user clicks outside the search area.
+const SEARCH_FLY_ZOOM = 5;
+
+function wireSearch(host) {
+  const input  = host.querySelector('#map-search-input');
+  const goBtn  = host.querySelector('#map-search-go');
+  const list   = host.querySelector('#map-search-suggestions');
+  if (!input || !goBtn || !list) return;
+  let activeIndex = -1;
+  let currentItems = [];
+
+  function searchSites(q) {
+    if (!_activeData || !q) return [];
+    const ql = q.toLowerCase().trim();
+    if (!ql) return [];
+    const startsWith = [];
+    const includes   = [];
+    for (const s of _activeData.sites) {
+      if (s.isWaypoint || !s.name) continue;
+      const nl = s.name.toLowerCase();
+      if (nl.startsWith(ql))       startsWith.push(s);
+      else if (nl.includes(ql))    includes.push(s);
+      if (startsWith.length + includes.length >= 32) break;
+    }
+    return startsWith.concat(includes).slice(0, 8);
+  }
+
+  function renderList(items) {
+    currentItems = items;
+    activeIndex = items.length ? 0 : -1;
+    list.innerHTML = '';
+    if (!items.length) { list.classList.add('hidden'); return; }
+    items.forEach((s, i) => {
+      const li = document.createElement('li');
+      li.innerHTML = `<strong></strong> <em></em>`;
+      li.querySelector('strong').textContent = s.name;
+      li.querySelector('em').textContent = s.type;
+      li.classList.toggle('active', i === activeIndex);
+      li.addEventListener('mousedown', (e) => {
+        // mousedown not click so the input doesn't blur before we
+        // can read the selection.
+        e.preventDefault();
+        pickItem(s);
+      });
+      list.appendChild(li);
+    });
+    list.classList.remove('hidden');
+  }
+
+  function updateActive() {
+    [...list.children].forEach((li, i) => {
+      li.classList.toggle('active', i === activeIndex);
+    });
+  }
+
+  function pickItem(site) {
+    if (!site || !_renderer) return;
+    _renderer.flyTo(site, SEARCH_FLY_ZOOM);
+    input.value = site.name;
+    list.classList.add('hidden');
+  }
+
+  function commit() {
+    const hit = activeIndex >= 0 ? currentItems[activeIndex] : currentItems[0];
+    if (hit) pickItem(hit);
+  }
+
+  input.addEventListener('input', () => {
+    renderList(searchSites(input.value));
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (currentItems.length) {
+        activeIndex = (activeIndex + 1) % currentItems.length;
+        updateActive();
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (currentItems.length) {
+        activeIndex = (activeIndex - 1 + currentItems.length) % currentItems.length;
+        updateActive();
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      commit();
+    } else if (e.key === 'Escape') {
+      list.classList.add('hidden');
+    }
+  });
+  input.addEventListener('focus', () => {
+    if (input.value) renderList(searchSites(input.value));
+  });
+  goBtn.addEventListener('click', commit);
+
+  // Outside-click closes the dropdown.
+  document.addEventListener('mousedown', (e) => {
+    if (!host.querySelector('.map-search').contains(e.target)) {
+      list.classList.add('hidden');
+    }
   });
 }
 
