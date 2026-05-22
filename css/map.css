@@ -1,6 +1,7 @@
-/* Solar-system map renderer styles. Sized to fill its host element;
-   pan/zoom is implemented in render.js so the SVG itself is "static"
-   from the layout engine's POV. */
+/* Solar-system map renderer styles. The renderer paints to a
+   <canvas>, so almost all of the visual state lives in render.js;
+   this file just sizes the host + canvas and handles the HTML
+   overlays (tooltip, loading state, toolbar). */
 
 .map-host {
   position: relative;
@@ -12,34 +13,21 @@
   contain: strict;
 }
 
-.map-svg {
+.map-canvas {
   display: block;
   width: 100%;
   height: 100%;
   cursor: grab;
   user-select: none;
-  /* Swallow touch gestures inside the map so the browser doesn't
-     also pan/zoom the surrounding page. The rest of the site
-     remains pinch-zoomable normally. */
+  /* Swallow touch gestures inside the canvas so the browser doesn't
+     also pan/zoom the surrounding page. The rest of the site stays
+     pinch-zoomable. */
   touch-action: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
   overscroll-behavior: contain;
 }
-/* Hint the GPU that the viewport group will be transforming; lets
-   the browser composite the static-once star layer separately from
-   the panning graph and avoids re-rasterising the background on
-   every pan frame. */
-.map-svg .viewport { will-change: transform; }
-.map-svg.dragging { cursor: grabbing; }
-
-.map-svg .stars circle { pointer-events: none; }
-
-/* Waypoint nodes (lagrange / burn / hohmann) are small dots; only
-   true site nodes get the larger filled circle. Hover still works
-   on waypoints so the tooltip can explain "Hohmann transfer" etc. */
-.map-svg .site.waypoint circle { opacity: 0.7; }
-.map-svg .site-type-burn:not(.waypoint) circle { stroke: #fbbf24; }
+.map-canvas:active { cursor: grabbing; }
 
 .map-loading {
   display: flex;
@@ -116,128 +104,8 @@
   padding: 0;
 }
 
-/* Planner-style edges: thin white straight lines on a dark
-   backdrop. Collapsed into one path per category for perf.
-   vector-effect keeps the stroke crisp at any zoom level. */
-.map-svg .edge {
-  fill: none;
-  stroke: #cbd5e1;
-  stroke-width: 1.4;
-  opacity: 0.85;
-  pointer-events: none;
-  vector-effect: non-scaling-stroke;
-}
-.map-svg .edge.hazard {
-  stroke: #f87171;
-  stroke-dasharray: 4 3;
-  opacity: 0.7;
-}
-.map-svg .route-label {
-  font: 600 11px ui-sans-serif, system-ui, sans-serif;
-  fill: #fde047;
-  paint-order: stroke;
-  stroke: #050410;
-  stroke-width: 3;
-  pointer-events: none;
-}
-.map-svg .waypoint-blob {
-  pointer-events: visiblePainted;
-  cursor: pointer;
-  vector-effect: non-scaling-stroke;
-}
-.map-svg .site-size {
-  font: 600 9px ui-sans-serif, system-ui, sans-serif;
-  fill: #ffffff;
-  pointer-events: none;
-}
-.map-svg .site-water {
-  font: 600 9px ui-sans-serif, system-ui, sans-serif;
-  fill: #7dd3fc;
-  pointer-events: none;
-}
-.map-svg .site-hazard {
-  font: 14px ui-monospace, menlo, monospace;
-  fill: #f87171;
-  pointer-events: none;
-}
-
-/* Zone bands (cleaned-up view only). Alternating bands get a
-   slightly darker fill so the eye can track a single zone across
-   the chart. */
-.map-svg .zone-band {
-  fill: #0c0d1f;
-  opacity: 0.3;
-  pointer-events: none;
-}
-.map-svg .zone-band[data-zone="Venus"],
-.map-svg .zone-band[data-zone="Mars"],
-.map-svg .zone-band[data-zone="Jupiter"],
-.map-svg .zone-band[data-zone="Uranus"] {
-  fill: #11142a;
-  opacity: 0.4;
-}
-.map-svg .zone-label {
-  font: 600 11px ui-sans-serif, system-ui, sans-serif;
-  fill: #5b6688;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  pointer-events: none;
-}
-
-/* Route layer: highlight a Dijkstra-computed path with thick warm
-   strokes so the underlying graph stays visible but the route
-   pops. Endpoints get a coloured ring (green = source, magenta =
-   destination). */
-.map-svg .route-edge {
-  fill: none;
-  stroke: #fbbf24;
-  stroke-width: 4;
-  stroke-linecap: round;
-  opacity: 0.9;
-  pointer-events: none;
-  filter: drop-shadow(0 0 4px rgba(251, 191, 36, 0.6));
-}
-.map-svg .site.route-from circle:first-of-type {
-  stroke: #4ade80;
-  stroke-width: 3;
-}
-.map-svg .site.route-to circle:first-of-type {
-  stroke: #f0abfc;
-  stroke-width: 3;
-}
-.map-svg .edge-label {
-  font: 9px ui-monospace, monospace;
-  fill: #5b6688;
-  pointer-events: none;
-}
-
-.map-svg .site {
-  cursor: pointer;
-}
-.map-svg .site:hover circle:first-of-type {
-  stroke: #fde047;
-  stroke-width: 2.5;
-}
-.map-svg .site-label {
-  font: 11px ui-sans-serif, system-ui, sans-serif;
-  font-weight: 500;
-  fill: #cbd5e1;
-  paint-order: stroke;
-  stroke: #050410;
-  stroke-width: 3;
-}
-/* Asteroid / moon / orbit / comet labels stay hidden until the
-   renderer crosses its zoom threshold (~1.5x), otherwise the 188-
-   node graph is unreadable at default zoom. */
-.map-svg .site-label.minor { display: none; }
-.map-svg.zoomed .site-label.minor { display: block; }
-.map-svg .edge-label { display: none; }
-.map-svg.zoomed .edge-label { display: block; }
-.map-svg .class-badge {
-  font: 8px ui-monospace, monospace;
-  font-weight: 700;
-  fill: #0c0a16;
-}
+/* (All edge / waypoint / site / route styling now lives in
+   render.js as canvas draw calls; nothing else is needed here.) */
 
 .map-tooltip {
   position: absolute;

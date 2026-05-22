@@ -1,34 +1,32 @@
-// SVG renderer for the delta-v map.
+// Canvas-based renderer for the delta-v map.
 //
-// Inputs:
-//   host         a target <div> the SVG mounts into
-//   data         { sites, edges, byId } as returned by the
-//                planner-map loader. Waypoint nodes (lagrange,
-//                burn, hohmann) render small and unlabelled;
-//                site nodes render with their full label.
-//   onSelect     optional click handler; receives the site object.
+// Why canvas: 1500 nodes + 1750 edges as SVG is ~12k DOM elements,
+// which pays a per-element layout / paint / hit-test cost. Canvas
+// is one drawing surface and one composite layer; the planner uses
+// the same approach and scales effortlessly.
 //
-// Pan/zoom + pinch are implemented with a manual transform (no
-// external libs). Hover surfaces a tooltip.
+// The public surface matches the prior SVG renderer:
+//   new MapRenderer(host, { data, onSelect })
+//   r.setRoute(segments)
+//   r.setRouteEndpoints(fromId, toId)
+//   r.reset()
+// so the callers in browse.js / lobby.js didn't need to change.
+//
+// Coordinate spaces:
+//   data        the planner's coordinate system; sites have x,y in
+//               this space (1400 x 900 normalised viewBox).
+//   screen      CSS pixels relative to the canvas.
+//   device      physical pixels (CSS * devicePixelRatio).
+//
+// The frame transform is: screen = pan + data * (zoom * fitScale).
+// fitScale is recomputed on resize so the whole data viewport fits
+// the available canvas; the user's zoom is a multiplier on top.
 
 const VIEW_W = 1400;
 const VIEW_H = 900;
-const MIN_ZOOM = 0.5;
-const MAX_ZOOM = 4;
+const MIN_ZOOM = 0.4;
+const MAX_ZOOM = 8;
 
-// SVG namespace shortcut.
-const NS = 'http://www.w3.org/2000/svg';
-function el(name, attrs, parent) {
-  const node = document.createElementNS(NS, name);
-  if (attrs) for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
-  if (parent) parent.appendChild(node);
-  return node;
-}
-
-// Visual treatment per node type. Matches the planner's palette
-// (white-stroked nodes on a dark backdrop, magenta burn points,
-// orange lagrange rings, green hohmann transfer nodes, black-
-// filled hex sites) so the two views read the same.
 const TYPE_VIS = {
   site:     { kind: 'hex',    r: 14, fill: '#0c0a16', stroke: '#ffffff' },
   planet:   { kind: 'hex',    r: 14, fill: '#0c0a16', stroke: '#ffffff' },
@@ -36,425 +34,626 @@ const TYPE_VIS = {
   dwarf:    { kind: 'hex',    r: 13, fill: '#0c0a16', stroke: '#a78bfa' },
   asteroid: { kind: 'hex',    r: 10, fill: '#0c0a16', stroke: '#94a3b8' },
   tno:      { kind: 'hex',    r: 11, fill: '#0c0a16', stroke: '#67e8f9' },
-  lagrange: { kind: 'circle', r:  9, fill: 'transparent', stroke: '#c66932' },
-  burn:     { kind: 'circle', r:  9, fill: '#d60f7a', stroke: '#fde0ee' },
-  hohmann:  { kind: 'circle', r:  9, fill: '#10b981', stroke: '#a7f3d0' },
-  venus:    { kind: 'circle', r: 10, fill: '#fb923c', stroke: '#fed7aa' },
-  radhaz:   { kind: 'circle', r:  9, fill: '#fbbf24', stroke: '#fde68a' },
-  orbit:    { kind: 'circle', r:  7, fill: '#0c0a16', stroke: '#7dd3fc' },
+  lagrange: { kind: 'circle', r:  8, fill: 'transparent', stroke: '#c66932' },
+  burn:     { kind: 'circle', r:  8, fill: '#d60f7a', stroke: '#fde0ee' },
+  hohmann:  { kind: 'circle', r:  8, fill: '#10b981', stroke: '#a7f3d0' },
+  venus:    { kind: 'circle', r:  9, fill: '#fb923c', stroke: '#fed7aa' },
+  radhaz:   { kind: 'circle', r:  8, fill: '#fbbf24', stroke: '#fde68a' },
+  orbit:    { kind: 'circle', r:  6, fill: '#0c0a16', stroke: '#7dd3fc' },
   surface:  { kind: 'hex',    r: 11, fill: '#0c0a16', stroke: '#fdba74' },
   unknown:  { kind: 'circle', r:  4, fill: '#0c0a16', stroke: '#475569' },
 };
 
-// Class -> small visual hint on the prospect badge.
-const CLASS_FILL = {
-  A: '#4ade80', B: '#7dd3fc', C: '#fbbf24', D: '#f87171', S: '#a78bfa', '': '#475569',
-};
-
-// Edge path string. Straight line from a to b, to match the
-// planner's edge style. (Previous iteration used Bezier S-curves;
-// the user preferred the planner's straight-line look.)
-function curvePath(a, b) {
-  return `M ${a.x.toFixed(1)} ${a.y.toFixed(1)} ` +
-         `L ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
-}
-
-// Regular hexagon as an SVG points string, centred on (0,0) with
-// the first vertex pointing right. Matches the site-node shape
-// used by the planner.
-function hexPoints(r) {
-  const pts = [];
-  for (let i = 0; i < 6; i++) {
-    const t = (i / 6) * Math.PI * 2;
-    pts.push(`${(Math.cos(t) * r).toFixed(1)},${(Math.sin(t) * r).toFixed(1)}`);
-  }
-  return pts.join(' ');
-}
-
-// CSS.escape polyfill-ish: site ids in the planner data are random
-// floats so they contain '.', which CSS attribute selectors choke
-// on without escaping.
-function cssEsc(s) {
-  if (window.CSS && CSS.escape) return CSS.escape(s);
-  return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
-}
+const ZONE_BAND_LIGHT = ['Venus', 'Mars', 'Jupiter', 'Uranus'];
 
 export class MapRenderer {
   constructor(host, { data, onSelect } = {}) {
     this.host = host;
-    this.data = data;        // { sites, edges, byId } from planner-map.js
+    this.data = data;
     this.onSelect = onSelect || null;
-    this.zoom = 1;
     this.pan = { x: 0, y: 0 };
-    this.tooltipEl = null;
-    this.svg = null;
-    this.viewport = null;
+    this.zoom = 1;
+    this.fitScale = 1;
+    this.dpr = window.devicePixelRatio || 1;
+    this.hostW = 0;
+    this.hostH = 0;
+    this._route = null;             // [{from,to,dv}]
+    this._routeFromId = null;
+    this._routeToId = null;
     this._dragStart = null;
     this._gesture = null;
+    this._rafQueued = false;
+    this._tooltipEl = null;
+    this._partitionSites();
+    this._buildStars();
     this._mount();
+  }
+
+  // ---- public surface ----
+
+  setRoute(segments) {
+    this._route = segments && segments.length ? segments : null;
+    this._scheduleDraw();
+  }
+
+  setRouteEndpoints(fromId, toId) {
+    this._routeFromId = fromId || null;
+    this._routeToId = toId || null;
+    this._scheduleDraw();
+  }
+
+  reset() {
+    this._fitToData();
+    this._scheduleDraw();
+  }
+
+  // ---- setup ----
+
+  _partitionSites() {
+    if (!this.data) { this._waypoints = []; this._realSites = []; return; }
+    this._waypoints = this.data.sites.filter((s) => s.isWaypoint);
+    this._realSites = this.data.sites.filter((s) => !s.isWaypoint);
+    // Group waypoints by type so each kind can be drawn in one path.
+    this._waypointsByType = new Map();
+    for (const w of this._waypoints) {
+      const arr = this._waypointsByType.get(w.type) || [];
+      arr.push(w);
+      this._waypointsByType.set(w.type, arr);
+    }
+    // Split edges into normal and hazard for stroke colour.
+    this._normalEdges = [];
+    this._hazardEdges = [];
+    for (const [a, b, dv] of this.data.edges) {
+      const sa = this.data.byId[a], sb = this.data.byId[b];
+      if (!sa || !sb) continue;
+      const seg = { sa, sb, dv };
+      if (sa.hazard || sb.hazard) this._hazardEdges.push(seg);
+      else this._normalEdges.push(seg);
+    }
+  }
+
+  _buildStars() {
+    // Seeded deterministic backdrop: three star size tiers + a few
+    // bright glow stars. Stored as plain arrays so we can iterate
+    // them straight into the canvas per frame.
+    let seed = 12345;
+    const rand = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+    this._stars = { small: [], med: [], bright: [] };
+    for (let i = 0; i < 220; i++) {
+      this._stars.small.push({ x: rand(), y: rand(), r: rand() * 0.6 + 0.2 });
+    }
+    for (let i = 0; i < 50; i++) {
+      this._stars.med.push({ x: rand(), y: rand(), r: 1 });
+    }
+    for (let i = 0; i < 12; i++) {
+      this._stars.bright.push({ x: rand(), y: rand() });
+    }
   }
 
   _mount() {
     this.host.innerHTML = '';
     this.host.classList.add('map-host');
 
-    this.svg = el('svg', {
-      viewBox: `0 0 ${VIEW_W} ${VIEW_H}`,
-      preserveAspectRatio: 'xMidYMid meet',
-      class: 'map-svg',
-    }, this.host);
+    this.canvas = document.createElement('canvas');
+    this.canvas.className = 'map-canvas';
+    this.host.appendChild(this.canvas);
+    this.ctx = this.canvas.getContext('2d');
 
-    // Static starfield as a backdrop. Just decorative; not interactive.
-    this._renderStars();
+    this._tooltipEl = document.createElement('div');
+    this._tooltipEl.className = 'map-tooltip hidden';
+    this.host.appendChild(this._tooltipEl);
 
-    // Everything pan/zoomable goes inside a single group; transforming
-    // it instead of mutating every child keeps interaction cheap.
-    this.viewport = el('g', { class: 'viewport' }, this.svg);
-
-    if (this.data) {
-      // Cleaned-up mode renders zone bands as a subtle background;
-      // classic mode skips them because the planner's layout doesn't
-      // align with our zone lanes.
-      if (this.data.mode === 'clean' && Array.isArray(this.data.zones)) {
-        this._renderZoneBands(this.data.zones);
-      }
-      this._renderEdges();
-      this._renderRouteLayer();
-      // Partition nodes: routing waypoints (~1300) get combined into
-      // a few typed <path> elements with no per-node DOM. Real sites
-      // (~190) keep individual <g> wrappers so they retain
-      // interactivity, CSS hit-testing, and tooltip targeting.
-      this._waypoints = this.data.sites.filter((s) => s.isWaypoint);
-      this._realSites = this.data.sites.filter((s) => !s.isWaypoint);
-      this._renderWaypoints();
-      this._renderRealSites();
-      this._wireWaypointHitTest();
-    }
-
-    // Tooltip lives outside the SVG so it can use HTML.
-    this.tooltipEl = document.createElement('div');
-    this.tooltipEl.className = 'map-tooltip hidden';
-    this.host.appendChild(this.tooltipEl);
+    // Resize observer keeps the canvas pixel-perfect with whatever
+    // CSS-driven size the host gets. Triggers a redraw on every
+    // change including the initial mount.
+    this._resizeObserver = new ResizeObserver(() => this._resize());
+    this._resizeObserver.observe(this.host);
 
     this._wirePanZoom();
+    this._wireHover();
+
+    this._resize();
+    this._fitToData();
+    this._scheduleDraw();
   }
 
-  _renderStars() {
-    // Layered background: nebula gradients in <defs>, soft glow
-    // halos around the densest star clusters, and ~280 stars seeded
-    // deterministically so the layout is stable across renders.
-    // All original SVG; we do not bundle the publisher's board art.
-    const defs = el('defs', null, this.svg);
-
-    // Three nebula gradients tucked into the corners. Each is a
-    // radial gradient on a fullscreen rect; opacity sums to a faint
-    // cosmic backdrop without overpowering the foreground graph.
-    function nebula(id, cx, cy, color) {
-      const grad = el('radialGradient', { id, cx, cy, r: '50%' }, defs);
-      el('stop', { offset: '0%',   'stop-color': color, 'stop-opacity': 0.35 }, grad);
-      el('stop', { offset: '60%',  'stop-color': color, 'stop-opacity': 0.06 }, grad);
-      el('stop', { offset: '100%', 'stop-color': color, 'stop-opacity': 0 }, grad);
-    }
-    nebula('neb-blue',   '20%', '15%', '#1e3a8a');
-    nebula('neb-violet', '80%', '85%', '#581c87');
-    nebula('neb-cyan',   '70%', '20%', '#155e75');
-    nebula('neb-warm',   '15%', '85%', '#7c2d12');
-
-    const bg = el('g', { class: 'stars' }, this.svg);
-    el('rect', { x: 0, y: 0, width: VIEW_W, height: VIEW_H, fill: 'url(#neb-blue)' }, bg);
-    el('rect', { x: 0, y: 0, width: VIEW_W, height: VIEW_H, fill: 'url(#neb-violet)' }, bg);
-    el('rect', { x: 0, y: 0, width: VIEW_W, height: VIEW_H, fill: 'url(#neb-cyan)' }, bg);
-    el('rect', { x: 0, y: 0, width: VIEW_W, height: VIEW_H, fill: 'url(#neb-warm)' }, bg);
-
-    // Faint heliocentric guide rings centred near the Sun's
-    // notional position (left of the canvas). Subtle enough to feel
-    // like backdrop infrastructure, not a primary line.
-    const sunX = 0, sunY = VIEW_H / 2;
-    for (let i = 1; i <= 4; i++) {
-      el('circle', {
-        cx: sunX, cy: sunY, r: 220 * i,
-        fill: 'none',
-        stroke: '#1e293b',
-        'stroke-width': 0.6,
-        opacity: 0.4,
-      }, bg);
-    }
-
-    // Three star layers at different sizes, with the bigger ones
-    // sparser and a few given a soft outer glow so they read as
-    // distant supergiants instead of pixels.
-    let seed = 12345;
-    const rand = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
-    // Tiny pinprick stars (~200)
-    let starsPath = '';
-    for (let i = 0; i < 200; i++) {
-      const x = (rand() * VIEW_W).toFixed(1);
-      const y = (rand() * VIEW_H).toFixed(1);
-      const r = (rand() * 0.6 + 0.2).toFixed(2);
-      starsPath += `M ${x} ${y} m -${r} 0 a ${r} ${r} 0 1 0 ${r*2} 0 a ${r} ${r} 0 1 0 -${r*2} 0 `;
-    }
-    el('path', { d: starsPath, fill: '#cbd5e1', opacity: 0.55 }, bg);
-
-    // Medium blue-white stars (~50)
-    starsPath = '';
-    for (let i = 0; i < 50; i++) {
-      const x = (rand() * VIEW_W).toFixed(1);
-      const y = (rand() * VIEW_H).toFixed(1);
-      starsPath += `M ${x} ${y} m -1 0 a 1 1 0 1 0 2 0 a 1 1 0 1 0 -2 0 `;
-    }
-    el('path', { d: starsPath, fill: '#bae6fd', opacity: 0.7 }, bg);
-
-    // Bright accent stars with a glow halo (~12)
-    const glow = el('g', null, bg);
-    for (let i = 0; i < 12; i++) {
-      const x = rand() * VIEW_W;
-      const y = rand() * VIEW_H;
-      el('circle', { cx: x, cy: y, r: 4, fill: '#7dd3fc', opacity: 0.12 }, glow);
-      el('circle', { cx: x, cy: y, r: 2, fill: '#7dd3fc', opacity: 0.4 }, glow);
-      el('circle', { cx: x, cy: y, r: 1, fill: '#ffffff', opacity: 0.95 }, glow);
-    }
+  _resize() {
+    const rect = this.host.getBoundingClientRect();
+    this.hostW = Math.max(1, rect.width);
+    this.hostH = Math.max(1, rect.height);
+    this.dpr = window.devicePixelRatio || 1;
+    this.canvas.width = Math.round(this.hostW * this.dpr);
+    this.canvas.height = Math.round(this.hostH * this.dpr);
+    this.canvas.style.width = this.hostW + 'px';
+    this.canvas.style.height = this.hostH + 'px';
+    this.fitScale = Math.min(this.hostW / VIEW_W, this.hostH / VIEW_H);
+    this._scheduleDraw();
   }
 
-  // Subtle horizontal bands behind each solar zone. Only rendered for
-  // the cleaned-up view, where the X-axis is burns-from-LEO and the
-  // Y-axis is zone lane. Classic (planner) data has its own layout
-  // that doesn't map onto those lanes.
-  _renderZoneBands(zones) {
-    const g = el('g', { class: 'zone-bands' }, this.viewport);
-    const startY = 60;
-    const bandH  = (900 - 60 - 60) / zones.length;
-    for (let i = 0; i < zones.length; i++) {
-      const y = startY + bandH * i;
-      el('rect', {
-        x: 0, y, width: 1400, height: bandH,
-        class: 'zone-band',
-        'data-zone': zones[i],
-      }, g);
-      el('text', {
-        x: 14, y: y + bandH / 2 + 4,
-        class: 'zone-label',
-      }, g).textContent = zones[i];
-    }
+  _fitToData() {
+    this.zoom = 1;
+    // Centre the data viewport in the canvas after the fit scale.
+    this.pan.x = (this.hostW - VIEW_W * this.fitScale) / 2;
+    this.pan.y = (this.hostH - VIEW_H * this.fitScale) / 2;
   }
 
-  // A dedicated empty group that setRoute() repaints. Sits between
-  // the static edges and the site discs so the highlighted route
-  // covers the underlying edges but is itself covered by the nodes.
-  _renderRouteLayer() {
-    this.routeLayer = el('g', { class: 'route-layer' }, this.viewport);
-  }
+  // ---- drawing ----
 
-  // Public: paint a highlighted path on top of the static graph.
-  // `segments` is what nav.findPath returns; pass null to clear.
-  setRoute(segments) {
-    if (!this.routeLayer) return;
-    this.routeLayer.innerHTML = '';
-    if (!segments || !segments.length) return;
-    // Single combined path for the route, plus an inline burn-count
-    // label per segment (typical route is < 20 hops so the label
-    // count stays small).
-    let d = '';
-    for (const seg of segments) {
-      const sa = this.data.byId[seg.from];
-      const sb = this.data.byId[seg.to];
-      if (!sa || !sb) continue;
-      d += `M ${sa.x.toFixed(1)} ${sa.y.toFixed(1)} L ${sb.x.toFixed(1)} ${sb.y.toFixed(1)} `;
-    }
-    el('path', { d, class: 'route-edge' }, this.routeLayer);
-    for (const seg of segments) {
-      const sa = this.data.byId[seg.from];
-      const sb = this.data.byId[seg.to];
-      if (!sa || !sb) continue;
-      const mx = (sa.x + sb.x) / 2;
-      const my = (sa.y + sb.y) / 2;
-      el('text', {
-        x: mx.toFixed(1),
-        y: (my - 4).toFixed(1),
-        class: 'route-label',
-        'text-anchor': 'middle',
-      }, this.routeLayer).textContent = seg.dv;
-    }
-  }
-
-  // Public: highlight the source / destination nodes by id so the
-  // UI can show "you tapped here" feedback. Pass null to clear.
-  setRouteEndpoints(fromId, toId) {
-    if (!this.svg) return;
-    for (const g of this.svg.querySelectorAll('.site')) {
-      g.classList.remove('route-from', 'route-to');
-    }
-    if (fromId) {
-      const a = this.svg.querySelector(`.site[data-id="${cssEsc(fromId)}"]`);
-      if (a) a.classList.add('route-from');
-    }
-    if (toId) {
-      const b = this.svg.querySelector(`.site[data-id="${cssEsc(toId)}"]`);
-      if (b) b.classList.add('route-to');
-    }
-  }
-
-  _renderEdges() {
-    // Performance: 1758 edges × (1 line + 2 text labels) = 5274 DOM
-    // nodes is the bulk of our paint cost. Collapse all non-hazard
-    // edges into a single <path>; same for hazard edges. One DOM
-    // node per category, browser does the line drawing.
-    const g = el('g', { class: 'edges' }, this.viewport);
-    let normalD = '';
-    let hazardD = '';
-    for (const [a, b] of this.data.edges) {
-      const sa = this.data.byId[a];
-      const sb = this.data.byId[b];
-      if (!sa || !sb) continue;
-      const seg = `M ${sa.x.toFixed(1)} ${sa.y.toFixed(1)} L ${sb.x.toFixed(1)} ${sb.y.toFixed(1)} `;
-      if (sa.hazard || sb.hazard) hazardD += seg;
-      else normalD += seg;
-    }
-    if (normalD) el('path', { d: normalD, class: 'edge' }, g);
-    if (hazardD) el('path', { d: hazardD, class: 'edge hazard' }, g);
-    // Burn-count labels are NOT pre-rendered (was 3516 text nodes,
-    // most invisible at default zoom). The tooltip surfaces the dv
-    // on hover; the route highlight surfaces it inline.
-  }
-
-  _renderSites() {
-    this._waypoints = this.data.sites.filter((s) => s.isWaypoint);
-    this._realSites = this.data.sites.filter((s) => !s.isWaypoint);
-    this._renderWaypoints();
-    this._renderRealSites();
-  }
-
-  // Combine each waypoint type into ONE <path> using arc subpath
-  // commands. ~1300 DOM nodes -> 3-4 path elements. Hit-testing is
-  // done in JS (like the planner's nearestPoint) so we don't need
-  // per-node click handlers either.
-  _renderWaypoints() {
-    const g = el('g', { class: 'waypoints' }, this.viewport);
-    const byType = new Map();
-    for (const w of this._waypoints) {
-      const arr = byType.get(w.type) || [];
-      arr.push(w);
-      byType.set(w.type, arr);
-    }
-    for (const [type, items] of byType) {
-      const vis = TYPE_VIS[type] || TYPE_VIS.unknown;
-      // Build a path of stamped circles. M cx,cy m -r,0 a r,r 0 1,0 2r,0 a r,r 0 1,0 -2r,0
-      // is the standard SVG idiom for "draw a circle at cx,cy as a
-      // sub-path".
-      let d = '';
-      for (const w of items) {
-        const r = vis.r;
-        d += `M ${w.x.toFixed(1)} ${w.y.toFixed(1)} ` +
-             `m -${r} 0 a ${r} ${r} 0 1 0 ${r*2} 0 a ${r} ${r} 0 1 0 -${r*2} 0 `;
-      }
-      el('path', {
-        d,
-        class: 'waypoint-blob waypoint-' + type,
-        fill: vis.fill,
-        stroke: vis.stroke,
-        'stroke-width': 2,
-      }, g);
-    }
-  }
-
-  // Real sites keep their <g> + per-node click listeners. ~190 of
-  // these, which is well under any DOM perf cliff.
-  _renderRealSites() {
-    const g = el('g', { class: 'sites' }, this.viewport);
-    for (const site of this._realSites) {
-      const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
-      const groupNode = el('g', {
-        class: 'site site-type-' + site.type,
-        transform: `translate(${site.x.toFixed(1)},${site.y.toFixed(1)})`,
-      }, g);
-      groupNode.dataset.id = site.id;
-
-      const stroke = site.hazard ? '#f87171' : vis.stroke;
-      if (vis.kind === 'hex') {
-        el('polygon', {
-          points: hexPoints(vis.r),
-          fill: vis.fill,
-          stroke,
-          'stroke-width': 2,
-        }, groupNode);
-      } else {
-        el('circle', {
-          r: vis.r,
-          fill: vis.fill,
-          stroke,
-          'stroke-width': 2,
-        }, groupNode);
-      }
-
-      if (site.siteSize) {
-        el('text', {
-          y: -3, class: 'site-size', 'text-anchor': 'middle',
-        }, groupNode).textContent = site.siteSize;
-      }
-      const hyd = site.hydration | 0;
-      if (hyd) {
-        el('text', {
-          y: 9, class: 'site-water', 'text-anchor': 'middle',
-        }, groupNode).textContent = hyd;
-      }
-      if (site.hazard) {
-        el('text', {
-          y: 5, class: 'site-hazard', 'text-anchor': 'middle',
-        }, groupNode).textContent = '☠';
-      }
-      el('text', {
-        y: vis.r + 12, class: 'site-label', 'text-anchor': 'middle',
-      }, groupNode).textContent = site.name;
-
-      groupNode.addEventListener('mouseenter', () => this._showTooltip(site, groupNode));
-      groupNode.addEventListener('mouseleave', () => this._hideTooltip());
-      groupNode.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        if (this.onSelect) this.onSelect(site);
-      });
-    }
-  }
-
-  // Click handler on the SVG root: if the click landed on a real
-  // site (DOM-routed), the per-node listener already fired. If not,
-  // hit-test waypoints in JS and dispatch.
-  _wireWaypointHitTest() {
-    this.svg.addEventListener('click', (ev) => {
-      // If the click landed inside a real-site <g>, that node's
-      // own listener already fired and called stopPropagation.
-      // Anything reaching here is on background or on a waypoint.
-      const pt = this._eventToViewport(ev);
-      const hit = this._nearestWaypoint(pt.x, pt.y, 14);
-      if (hit && this.onSelect) this.onSelect(hit);
+  _scheduleDraw() {
+    if (this._rafQueued) return;
+    this._rafQueued = true;
+    requestAnimationFrame(() => {
+      this._rafQueued = false;
+      this._draw();
     });
   }
 
-  // Convert a DOM event's clientX/Y into viewport (post-pan/zoom)
-  // SVG coords. Required for JS hit-testing against the waypoint
-  // positions stored in data-space units.
-  _eventToViewport(ev) {
-    const rect = this.svg.getBoundingClientRect();
-    const sx = (ev.clientX - rect.left) / rect.width * VIEW_W;
-    const sy = (ev.clientY - rect.top) / rect.height * VIEW_H;
-    // Undo the viewport's translate + scale.
-    const wx = (sx - this.pan.x) / this.zoom;
-    const wy = (sy - this.pan.y) / this.zoom;
-    return { x: wx, y: wy };
+  _draw() {
+    const ctx = this.ctx;
+    const { hostW, hostH, dpr } = this;
+    // Reset to device pixels; then every coordinate after is in CSS px.
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    this._drawBackdrop(ctx);
+
+    const eff = this.zoom * this.fitScale;
+    ctx.save();
+    ctx.translate(this.pan.x, this.pan.y);
+    ctx.scale(eff, eff);
+
+    if (this.data.mode === 'clean' && Array.isArray(this.data.zones)) {
+      this._drawZoneBands(ctx, this.data.zones);
+    }
+    this._drawGuides(ctx);
+    this._drawEdges(ctx);
+    this._drawWaypoints(ctx);
+    this._drawRoute(ctx);
+    this._drawSiteBodies(ctx);
+
+    ctx.restore();
+
+    // Site labels in screen space so they don't scale up at zoom 4.
+    this._drawSiteLabels(ctx);
   }
 
-  _nearestWaypoint(x, y, maxR) {
+  _drawBackdrop(ctx) {
+    const { hostW, hostH } = this;
+    ctx.fillStyle = '#03020a';
+    ctx.fillRect(0, 0, hostW, hostH);
+
+    // Nebula radial gradients. Cheap to recreate each frame
+    // (canvas pools them) but if profiling shows a hotspot we can
+    // pre-bake an offscreen canvas.
+    const nebulae = [
+      { x: 0.20, y: 0.15, r: 0.55, c: '30, 58, 138' },   // blue
+      { x: 0.80, y: 0.85, r: 0.55, c: '88, 28, 135' },   // violet
+      { x: 0.70, y: 0.20, r: 0.50, c: '21, 94, 117' },   // cyan
+      { x: 0.15, y: 0.85, r: 0.55, c: '124, 45, 18' },   // warm
+    ];
+    for (const n of nebulae) {
+      const cx = n.x * hostW;
+      const cy = n.y * hostH;
+      const r = n.r * Math.max(hostW, hostH);
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      g.addColorStop(0,    `rgba(${n.c}, 0.35)`);
+      g.addColorStop(0.6,  `rgba(${n.c}, 0.05)`);
+      g.addColorStop(1,    `rgba(${n.c}, 0)`);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, hostW, hostH);
+    }
+
+    // Stars in screen space so they don't pan/zoom with the universe.
+    ctx.fillStyle = '#cbd5e1';
+    ctx.globalAlpha = 0.55;
+    for (const s of this._stars.small) {
+      ctx.beginPath();
+      ctx.arc(s.x * hostW, s.y * hostH, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 0.7;
+    ctx.fillStyle = '#bae6fd';
+    for (const s of this._stars.med) {
+      ctx.beginPath();
+      ctx.arc(s.x * hostW, s.y * hostH, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    for (const s of this._stars.bright) {
+      const sx = s.x * hostW, sy = s.y * hostH;
+      ctx.fillStyle = 'rgba(125, 211, 252, 0.12)';
+      ctx.beginPath(); ctx.arc(sx, sy, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(125, 211, 252, 0.4)';
+      ctx.beginPath(); ctx.arc(sx, sy, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(sx, sy, 1, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  _drawGuides(ctx) {
+    // Heliocentric guide rings centred on the implicit Sun position
+    // (left edge, vertically centred). Subtle infrastructure layer.
+    ctx.strokeStyle = '#1e293b';
+    ctx.globalAlpha = 0.4;
+    ctx.lineWidth = 0.8 / (this.zoom * this.fitScale);
+    for (let i = 1; i <= 4; i++) {
+      ctx.beginPath();
+      ctx.arc(0, VIEW_H / 2, 220 * i, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  _drawZoneBands(ctx, zones) {
+    const startY = 60;
+    const bandH = (VIEW_H - 60 - 60) / zones.length;
+    ctx.font = '600 11px ui-sans-serif, system-ui, sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    for (let i = 0; i < zones.length; i++) {
+      const y = startY + bandH * i;
+      ctx.fillStyle = ZONE_BAND_LIGHT.includes(zones[i])
+        ? 'rgba(17, 20, 42, 0.4)'
+        : 'rgba(12, 13, 31, 0.3)';
+      ctx.fillRect(0, y, VIEW_W, bandH);
+      ctx.fillStyle = '#5b6688';
+      ctx.fillText(zones[i].toUpperCase(), 14, y + bandH / 2 + 2);
+    }
+  }
+
+  _drawEdges(ctx) {
+    // One stroke call per category. Browser batches all the line
+    // segments in the path into a single GPU command.
+    const eff = this.zoom * this.fitScale;
+    ctx.lineWidth = 1.4 / eff;
+
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    for (const { sa, sb } of this._normalEdges) {
+      ctx.moveTo(sa.x, sa.y);
+      ctx.lineTo(sb.x, sb.y);
+    }
+    ctx.stroke();
+
+    if (this._hazardEdges.length) {
+      ctx.strokeStyle = '#f87171';
+      ctx.globalAlpha = 0.7;
+      ctx.setLineDash([4 / eff, 3 / eff]);
+      ctx.beginPath();
+      for (const { sa, sb } of this._hazardEdges) {
+        ctx.moveTo(sa.x, sa.y);
+        ctx.lineTo(sb.x, sb.y);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  _drawWaypoints(ctx) {
+    const eff = this.zoom * this.fitScale;
+    ctx.lineWidth = 2 / eff;
+    for (const [type, items] of this._waypointsByType) {
+      const vis = TYPE_VIS[type] || TYPE_VIS.unknown;
+      const r = vis.r;
+      ctx.beginPath();
+      for (const w of items) {
+        ctx.moveTo(w.x + r, w.y);
+        ctx.arc(w.x, w.y, r, 0, Math.PI * 2);
+      }
+      if (vis.fill !== 'transparent') {
+        ctx.fillStyle = vis.fill;
+        ctx.fill();
+      }
+      ctx.strokeStyle = vis.stroke;
+      ctx.stroke();
+    }
+  }
+
+  _drawSiteBodies(ctx) {
+    const eff = this.zoom * this.fitScale;
+    ctx.lineWidth = 2 / eff;
+    // Group sites by stroke colour so we can stroke once per group.
+    // Sites are ~190 so this is a small optimisation; even per-site
+    // stroking is fast enough.
+    for (const site of this._realSites) {
+      const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
+      const r = vis.r;
+      ctx.beginPath();
+      if (vis.kind === 'hex') {
+        for (let i = 0; i < 6; i++) {
+          const t = (i / 6) * Math.PI * 2;
+          const px = site.x + Math.cos(t) * r;
+          const py = site.y + Math.sin(t) * r;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+      } else {
+        ctx.moveTo(site.x + r, site.y);
+        ctx.arc(site.x, site.y, r, 0, Math.PI * 2);
+      }
+      ctx.fillStyle = vis.fill;
+      ctx.fill();
+      ctx.strokeStyle = site.hazard ? '#f87171' : vis.stroke;
+      ctx.stroke();
+
+      // Route endpoint rings: drawn around the body, only one extra
+      // stroke per highlighted endpoint.
+      if (site.id === this._routeFromId || site.id === this._routeToId) {
+        ctx.strokeStyle = site.id === this._routeFromId ? '#4ade80' : '#f0abfc';
+        ctx.lineWidth = 3 / eff;
+        ctx.beginPath();
+        ctx.arc(site.x, site.y, r + 4, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.lineWidth = 2 / eff;
+      }
+    }
+  }
+
+  _drawRoute(ctx) {
+    if (!this._route) return;
+    const eff = this.zoom * this.fitScale;
+    ctx.strokeStyle = 'rgba(251, 191, 36, 0.9)';
+    ctx.lineWidth = 4 / eff;
+    ctx.lineCap = 'round';
+    ctx.shadowBlur = 6 / eff;
+    ctx.shadowColor = 'rgba(251, 191, 36, 0.6)';
+    ctx.beginPath();
+    for (const seg of this._route) {
+      const sa = this.data.byId[seg.from];
+      const sb = this.data.byId[seg.to];
+      if (!sa || !sb) continue;
+      ctx.moveTo(sa.x, sa.y);
+      ctx.lineTo(sb.x, sb.y);
+    }
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+
+  _drawSiteLabels(ctx) {
+    // Drawn in screen space so labels stay readable at any zoom and
+    // we can cull off-screen sites without doing fancy clipping.
+    const eff = this.zoom * this.fitScale;
+    const { hostW, hostH } = this;
+    // Inline numbers (siteSize on top, water below) are part of the
+    // hex; we still draw them in screen space at a fixed font size so
+    // they don't blur at low zoom.
+    ctx.font = '600 9px ui-sans-serif, system-ui, sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    for (const site of this._realSites) {
+      const sx = this.pan.x + site.x * eff;
+      const sy = this.pan.y + site.y * eff;
+      if (sx < -40 || sx > hostW + 40 || sy < -40 || sy > hostH + 40) continue;
+      const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
+      const labelOffset = vis.r * eff + 12;
+      if (site.siteSize) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(site.siteSize, sx, sy - 3);
+      }
+      if (site.hydration) {
+        ctx.fillStyle = '#7dd3fc';
+        ctx.fillText(String(site.hydration), sx, sy + 9);
+      }
+      if (site.hazard) {
+        ctx.fillStyle = '#f87171';
+        ctx.font = '14px ui-monospace, menlo, monospace';
+        ctx.fillText('☠', sx, sy + 5);
+        ctx.font = '600 9px ui-sans-serif, system-ui, sans-serif';
+      }
+      // Site name below the body. Outline first for readability over
+      // the background graph.
+      ctx.font = '500 11px ui-sans-serif, system-ui, sans-serif';
+      ctx.strokeStyle = 'rgba(5, 4, 16, 0.85)';
+      ctx.lineWidth = 3;
+      ctx.strokeText(site.name, sx, sy + labelOffset);
+      ctx.fillStyle = '#cbd5e1';
+      ctx.fillText(site.name, sx, sy + labelOffset);
+      ctx.font = '600 9px ui-sans-serif, system-ui, sans-serif';
+    }
+
+    // Route segment dv labels.
+    if (this._route) {
+      ctx.font = '600 11px ui-sans-serif, system-ui, sans-serif';
+      ctx.fillStyle = '#fde047';
+      ctx.strokeStyle = 'rgba(5, 4, 16, 0.85)';
+      ctx.lineWidth = 3;
+      for (const seg of this._route) {
+        const sa = this.data.byId[seg.from];
+        const sb = this.data.byId[seg.to];
+        if (!sa || !sb) continue;
+        const mx = this.pan.x + ((sa.x + sb.x) / 2) * eff;
+        const my = this.pan.y + ((sa.y + sb.y) / 2) * eff - 4;
+        ctx.strokeText(String(seg.dv), mx, my);
+        ctx.fillText(String(seg.dv), mx, my);
+      }
+    }
+  }
+
+  // ---- input ----
+
+  _wirePanZoom() {
+    this.canvas.addEventListener('wheel', (ev) => {
+      ev.preventDefault();
+      const rect = this.canvas.getBoundingClientRect();
+      const sx = ev.clientX - rect.left;
+      const sy = ev.clientY - rect.top;
+      const factor = ev.deltaY < 0 ? 1.15 : 1 / 1.15;
+      this._zoomAt(sx, sy, factor);
+    }, { passive: false });
+
+    this.canvas.addEventListener('mousedown', (ev) => {
+      if (ev.button !== 0) return;
+      this._dragStart = {
+        x: ev.clientX, y: ev.clientY,
+        panX: this.pan.x, panY: this.pan.y,
+        moved: false,
+      };
+    });
+    window.addEventListener('mousemove', (ev) => {
+      if (!this._dragStart) return;
+      const dx = ev.clientX - this._dragStart.x;
+      const dy = ev.clientY - this._dragStart.y;
+      if (Math.abs(dx) + Math.abs(dy) > 3) this._dragStart.moved = true;
+      this.pan.x = this._dragStart.panX + dx;
+      this.pan.y = this._dragStart.panY + dy;
+      this._scheduleDraw();
+    });
+    window.addEventListener('mouseup', () => { this._dragStart = null; });
+
+    // Click dispatched only if the mousedown→mouseup didn't drag.
+    this.canvas.addEventListener('click', (ev) => {
+      if (this._dragStart && this._dragStart.moved) return;
+      const pt = this._eventToWorld(ev);
+      const hit = this._hitTest(pt.x, pt.y);
+      if (hit && this.onSelect) this.onSelect(hit);
+    });
+
+    // Touch: 1 finger pan, 2 fingers pinch.
+    this.canvas.addEventListener('touchstart', (ev) => {
+      this._gesture = {
+        touches: this._activeTouches(ev).slice(0, 2),
+        pan: { x: this.pan.x, y: this.pan.y },
+        zoom: this.zoom,
+        moved: false,
+      };
+    }, { passive: false });
+    this.canvas.addEventListener('touchmove', (ev) => {
+      ev.preventDefault();
+      if (!this._gesture) return;
+      const rect = this.canvas.getBoundingClientRect();
+      const points = this._activeTouches(ev);
+      if (points.length === 1 && this._gesture.touches.length === 1) {
+        const t0 = this._gesture.touches[0];
+        const dx = points[0].clientX - t0.clientX;
+        const dy = points[0].clientY - t0.clientY;
+        if (Math.abs(dx) + Math.abs(dy) > 3) this._gesture.moved = true;
+        this.pan.x = this._gesture.pan.x + dx;
+        this.pan.y = this._gesture.pan.y + dy;
+        this._scheduleDraw();
+      } else if (points.length >= 2 && this._gesture.touches.length >= 2) {
+        this._gesture.moved = true;
+        const sa = this._gesture.touches[0];
+        const sb = this._gesture.touches[1];
+        const startMidX = (sa.clientX + sb.clientX) / 2;
+        const startMidY = (sa.clientY + sb.clientY) / 2;
+        const startDist = Math.hypot(sa.clientX - sb.clientX, sa.clientY - sb.clientY) || 1;
+        const na = points[0], nb = points[1];
+        const midX = (na.clientX + nb.clientX) / 2;
+        const midY = (na.clientY + nb.clientY) / 2;
+        const dist = Math.hypot(na.clientX - nb.clientX, na.clientY - nb.clientY) || 1;
+        const factor = dist / startDist;
+        const targetZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, this._gesture.zoom * factor));
+        const eff0 = this._gesture.zoom * this.fitScale;
+        const wx = (startMidX - rect.left - this._gesture.pan.x) / eff0;
+        const wy = (startMidY - rect.top - this._gesture.pan.y) / eff0;
+        const eff1 = targetZoom * this.fitScale;
+        this.pan.x = (midX - rect.left) - wx * eff1;
+        this.pan.y = (midY - rect.top) - wy * eff1;
+        this.zoom = targetZoom;
+        this._scheduleDraw();
+      }
+    }, { passive: false });
+    this.canvas.addEventListener('touchend', (ev) => {
+      if (ev.touches.length === 0) {
+        // Treat a no-drift tap as a click.
+        if (this._gesture && !this._gesture.moved) {
+          const last = this._gesture.touches[0];
+          if (last) {
+            const pt = this._eventToWorld(last);
+            const hit = this._hitTest(pt.x, pt.y);
+            if (hit && this.onSelect) this.onSelect(hit);
+          }
+        }
+        this._gesture = null;
+      } else {
+        this._gesture = {
+          touches: this._activeTouches(ev).slice(0, 2),
+          pan: { x: this.pan.x, y: this.pan.y },
+          zoom: this.zoom,
+          moved: this._gesture ? this._gesture.moved : false,
+        };
+      }
+    });
+    this.canvas.addEventListener('touchcancel', () => { this._gesture = null; });
+  }
+
+  _activeTouches(ev) {
+    const out = [];
+    const list = ev.touches || [ev];
+    for (const t of list) out.push({ clientX: t.clientX, clientY: t.clientY });
+    return out;
+  }
+
+  _zoomAt(sx, sy, factor) {
+    const eff0 = this.zoom * this.fitScale;
+    const wx = (sx - this.pan.x) / eff0;
+    const wy = (sy - this.pan.y) / eff0;
+    const next = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, this.zoom * factor));
+    const eff1 = next * this.fitScale;
+    this.pan.x = sx - wx * eff1;
+    this.pan.y = sy - wy * eff1;
+    this.zoom = next;
+    this._scheduleDraw();
+  }
+
+  _eventToWorld(ev) {
+    const rect = this.canvas.getBoundingClientRect();
+    const sx = ev.clientX - rect.left;
+    const sy = ev.clientY - rect.top;
+    const eff = this.zoom * this.fitScale;
+    return { x: (sx - this.pan.x) / eff, y: (sy - this.pan.y) / eff };
+  }
+
+  // JS hit-test against every site, preferring real sites within a
+  // generous radius (so a tap on the hex always wins over a stray
+  // waypoint hit). ~1500 distance computations is sub-millisecond.
+  _hitTest(wx, wy) {
     let best = null;
-    let bestDist = maxR * maxR;
-    for (const w of this._waypoints || []) {
-      const dx = w.x - x;
-      const dy = w.y - y;
+    let bestDist = 16 * 16;   // pixel radius in data space, doubled for fat fingers
+    // Pass 1: real sites, larger tolerance.
+    for (const s of this._realSites) {
+      const dx = s.x - wx, dy = s.y - wy;
+      const d = dx * dx + dy * dy;
+      if (d < bestDist) { bestDist = d; best = s; }
+    }
+    if (best) return best;
+    // Pass 2: waypoints, tighter tolerance.
+    bestDist = 12 * 12;
+    for (const w of this._waypoints) {
+      const dx = w.x - wx, dy = w.y - wy;
       const d = dx * dx + dy * dy;
       if (d < bestDist) { bestDist = d; best = w; }
     }
     return best;
   }
 
-  _showTooltip(site, node) {
-    const t = this.tooltipEl;
+  _wireHover() {
+    // Mouse hover -> tooltip. Throttled by mousemove cadence which is
+    // already capped by the browser; we do the hit-test work cheaply
+    // and update DOM only on identity change.
+    let lastId = null;
+    this.canvas.addEventListener('mousemove', (ev) => {
+      const pt = this._eventToWorld(ev);
+      const hit = this._hitTest(pt.x, pt.y);
+      const id = hit ? hit.id : null;
+      if (id === lastId) {
+        if (hit) this._positionTooltip(ev);
+        return;
+      }
+      lastId = id;
+      if (!hit) { this._hideTooltip(); return; }
+      this._showTooltipFor(hit, ev);
+    });
+    this.canvas.addEventListener('mouseleave', () => {
+      lastId = null;
+      this._hideTooltip();
+    });
+  }
+
+  _showTooltipFor(site, ev) {
+    const t = this._tooltipEl;
     t.innerHTML = `
       <div class="t-name"></div>
       <div class="t-meta">
@@ -467,190 +666,20 @@ export class MapRenderer {
     t.querySelector('.t-name').textContent = site.name;
     t.querySelector('.t-type').textContent = site.type;
     t.querySelector('.t-size').textContent = site.siteSize || '';
-    t.querySelector('.t-hydr').textContent = site.hydration ? `${'💧'.repeat(site.hydration)}` : '';
+    t.querySelector('.t-hydr').textContent = site.hydration ? '💧'.repeat(site.hydration) : '';
     t.querySelector('.t-hazard').textContent = site.hazard ? '⚠ hazard' : '';
     t.classList.remove('hidden');
-    const bb = node.getBoundingClientRect();
+    this._positionTooltip(ev);
+  }
+
+  _positionTooltip(ev) {
+    const t = this._tooltipEl;
     const hb = this.host.getBoundingClientRect();
-    t.style.left = (bb.left - hb.left + bb.width / 2) + 'px';
-    t.style.top = (bb.top - hb.top - 8) + 'px';
+    t.style.left = (ev.clientX - hb.left) + 'px';
+    t.style.top  = (ev.clientY - hb.top - 8) + 'px';
   }
 
   _hideTooltip() {
-    this.tooltipEl.classList.add('hidden');
-  }
-
-  _applyTransform() {
-    this.viewport.setAttribute(
-      'transform',
-      `translate(${this.pan.x},${this.pan.y}) scale(${this.zoom})`
-    );
-  }
-
-  _wirePanZoom() {
-    // Mouse-wheel zoom anchored at cursor: scale, then re-center pan
-    // so the point under the cursor stays put.
-    this.svg.addEventListener('wheel', (ev) => {
-      ev.preventDefault();
-      const rect = this.svg.getBoundingClientRect();
-      const sx = (ev.clientX - rect.left) / rect.width * VIEW_W;
-      const sy = (ev.clientY - rect.top) / rect.height * VIEW_H;
-      const factor = ev.deltaY < 0 ? 1.15 : 1 / 1.15;
-      this._zoomAt(sx, sy, factor);
-    }, { passive: false });
-
-    // Drag-pan with the mouse. Touch is handled separately below so
-    // pinch-zoom and pan can coexist on a phone or trackpad gesture.
-    this.svg.addEventListener('mousedown', (ev) => {
-      if (ev.button !== 0) return;
-      this._dragStart = { x: ev.clientX, y: ev.clientY, panX: this.pan.x, panY: this.pan.y };
-      this.svg.classList.add('dragging');
-    });
-    window.addEventListener('mousemove', (ev) => {
-      if (!this._dragStart) return;
-      const rect = this.svg.getBoundingClientRect();
-      const scaleX = VIEW_W / rect.width;
-      const scaleY = VIEW_H / rect.height;
-      this.pan.x = this._dragStart.panX + (ev.clientX - this._dragStart.x) * scaleX;
-      this.pan.y = this._dragStart.panY + (ev.clientY - this._dragStart.y) * scaleY;
-      this._applyTransform();
-    });
-    window.addEventListener('mouseup', () => {
-      this._dragStart = null;
-      this.svg.classList.remove('dragging');
-    });
-
-    // Touch handling: 1 finger pans, 2 fingers pinch-zoom anchored
-    // at the midpoint between fingers (Google-Maps style). Page-level
-    // pinch zoom is suppressed *only* within the SVG via CSS
-    // touch-action: none, so the rest of the site still pinches
-    // normally. We preventDefault on touchmove to stop iOS rubber-
-    // banding while the gesture is in flight.
-    this.svg.addEventListener('touchstart', (ev) => {
-      this._snapshotGesture(ev);
-    }, { passive: false });
-
-    this.svg.addEventListener('touchmove', (ev) => {
-      ev.preventDefault();
-      if (!this._gesture) return;
-      const rect = this.svg.getBoundingClientRect();
-      const points = this._activeTouches(ev);
-      if (points.length === 1 && this._gesture.touches.length === 1) {
-        // Single-finger pan: translate the current pan by the touch
-        // delta in viewBox units.
-        const start = this._gesture.touches[0];
-        const dx = (points[0].clientX - start.clientX) * (VIEW_W / rect.width);
-        const dy = (points[0].clientY - start.clientY) * (VIEW_H / rect.height);
-        this.pan.x = this._gesture.pan.x + dx;
-        this.pan.y = this._gesture.pan.y + dy;
-        this._applyTransform();
-      } else if (points.length >= 2 && this._gesture.touches.length >= 2) {
-        // Pinch zoom + pan: compute centroid and pairwise distance
-        // at gesture-start vs. now; ratio drives zoom, centroid drift
-        // drives pan, and we anchor the zoom at the centroid so the
-        // pinch focus stays under the fingers.
-        const startA = this._gesture.touches[0];
-        const startB = this._gesture.touches[1];
-        const startMidX = (startA.clientX + startB.clientX) / 2;
-        const startMidY = (startA.clientY + startB.clientY) / 2;
-        const startDist = Math.hypot(
-          startA.clientX - startB.clientX,
-          startA.clientY - startB.clientY
-        ) || 1;
-
-        const nowA = points[0];
-        const nowB = points[1];
-        const nowMidX = (nowA.clientX + nowB.clientX) / 2;
-        const nowMidY = (nowA.clientY + nowB.clientY) / 2;
-        const nowDist = Math.hypot(
-          nowA.clientX - nowB.clientX,
-          nowA.clientY - nowB.clientY
-        ) || 1;
-
-        const factor = nowDist / startDist;
-        const targetZoom = Math.max(
-          MIN_ZOOM,
-          Math.min(MAX_ZOOM, this._gesture.zoom * factor)
-        );
-        // Centroid in viewBox coords:
-        const sx = (startMidX - rect.left) / rect.width * VIEW_W;
-        const sy = (startMidY - rect.top) / rect.height * VIEW_H;
-        // World coords of the pinch-start centroid (relative to the
-        // pre-zoom viewport):
-        const wx = (sx - this._gesture.pan.x) / this._gesture.zoom;
-        const wy = (sy - this._gesture.pan.y) / this._gesture.zoom;
-        // Current centroid in viewBox coords:
-        const cx = (nowMidX - rect.left) / rect.width * VIEW_W;
-        const cy = (nowMidY - rect.top) / rect.height * VIEW_H;
-        // Pan so the world point lands at the new centroid.
-        this.pan.x = cx - wx * targetZoom;
-        this.pan.y = cy - wy * targetZoom;
-        this.zoom = targetZoom;
-        this._applyTransform();
-        this._updateLabelVisibility();
-      }
-    }, { passive: false });
-
-    this.svg.addEventListener('touchend', (ev) => {
-      // Re-snapshot remaining touches so a finger lifting off a
-      // pinch becomes the new pan anchor without a jump.
-      if (ev.touches.length === 0) {
-        this._gesture = null;
-      } else {
-        this._snapshotGesture(ev);
-      }
-    });
-
-    this.svg.addEventListener('touchcancel', () => {
-      this._gesture = null;
-    });
-  }
-
-  // Helper: zoom by `factor` anchored at the given viewBox-coord
-  // point. Used by the wheel handler and could be reused by buttons.
-  _zoomAt(sx, sy, factor) {
-    const nextZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, this.zoom * factor));
-    const wx = (sx - this.pan.x) / this.zoom;
-    const wy = (sy - this.pan.y) / this.zoom;
-    this.pan.x = sx - wx * nextZoom;
-    this.pan.y = sy - wy * nextZoom;
-    this.zoom = nextZoom;
-    this._applyTransform();
-    this._updateLabelVisibility();
-  }
-
-  // Snapshot the current touch state at the start of a gesture. We
-  // store the original pan/zoom so touchmove can compute deltas
-  // relative to the gesture's origin rather than the previous frame
-  // (avoids drift from rounding).
-  _snapshotGesture(ev) {
-    this._gesture = {
-      touches: this._activeTouches(ev).slice(0, 2),
-      pan: { x: this.pan.x, y: this.pan.y },
-      zoom: this.zoom,
-    };
-  }
-
-  _activeTouches(ev) {
-    const out = [];
-    for (const t of ev.touches) {
-      out.push({ identifier: t.identifier, clientX: t.clientX, clientY: t.clientY });
-    }
-    return out;
-  }
-
-  reset() {
-    this.zoom = 1;
-    this.pan = { x: 0, y: 0 };
-    this._applyTransform();
-    this._updateLabelVisibility();
-  }
-
-  // Toggle the .minor labels in/out of view based on zoom. Keeps the
-  // 188-site graph readable at default zoom (planets only) while
-  // revealing the asteroid + moon labels when the user zooms in.
-  _updateLabelVisibility() {
-    const LABEL_ZOOM_THRESHOLD = 1.5;
-    this.svg.classList.toggle('zoomed', this.zoom >= LABEL_ZOOM_THRESHOLD);
+    this._tooltipEl.classList.add('hidden');
   }
 }
