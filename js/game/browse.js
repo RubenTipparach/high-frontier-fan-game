@@ -51,7 +51,6 @@ async function loadMap(mode) {
 
 let _renderer = null;
 let _sidebarWired = false;
-let _autoOpenedPatents = false;
 
 // Subscribe once: rocket state changes (cards added / removed)
 // trigger a re-render of the sandbox rocket on the map.
@@ -67,15 +66,6 @@ export function mountBrowse() {
   wireSidebar();
   wireHandStrip();
   renderMap();
-  // First-visit auto-open of the card library so the player can
-  // see their patents without hunting for the 🃏 tab. The flag is
-  // session-scoped — once they close the pane it stays closed for
-  // the rest of the session.
-  const panel = document.getElementById('browse-sidepanel');
-  if (panel && !panel.dataset.active && !_autoOpenedPatents) {
-    _autoOpenedPatents = true;
-    showPane('patents');
-  }
 }
 
 // Sandbox hand strip wiring: drop target, slot rendering, +
