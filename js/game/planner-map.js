@@ -114,6 +114,17 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
 
   const byId = Object.fromEntries(sites.map((s) => [s.id, s]));
 
+  // Seasonal-corridor propagation: comets / Icarus / Phaethon /
+  // any other site with `siteSynodic` only exist in their apparition
+  // window, so the lagrange + burn waypoints along their approach
+  // path are functionally the same season. We BFS from each seasonal
+  // site through waypoint-only neighbours and stamp the season onto
+  // the waypoints we touch. The render layer then colours edges and
+  // chains by either endpoint's siteSynodic — which now includes
+  // those waypoints — so the whole corridor reads as one colour
+  // instead of the season abruptly stopping at the destination hex.
+  propagateSeasonsToWaypoints(sites, edges, byId);
+
   // Chains of decorative routing nodes (degree-2 nodes whose only
   // job is to bend a straight line into a curve). We split them out
   // here so the renderer can paint them as smooth Bezier ribbons
@@ -123,6 +134,52 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
 
   _cache = { sites, edges, byId, chains, straightEdges, mode: 'classic' };
   return _cache;
+}
+
+// BFS from each seasonal site through waypoint-only neighbours and
+// stamp the seasonal site's siteSynodic onto each waypoint we visit.
+// A waypoint claimed by two different seasons stays neutral (the
+// rare junction between two corridors); a waypoint claimed by one
+// season inherits it. We never traverse THROUGH a real (non-
+// waypoint) site, so a waypoint that sits between Earth and a comet
+// only picks up the comet's season — Earth doesn't bleed through.
+function propagateSeasonsToWaypoints(sites, edges, byId) {
+  const adj = new Map();
+  for (const s of sites) adj.set(s.id, []);
+  for (const [a, b] of edges) {
+    if (!adj.has(a) || !adj.has(b)) continue;
+    adj.get(a).push(b);
+    adj.get(b).push(a);
+  }
+
+  const claims = new Map();           // waypoint id -> Set<season>
+  function bfs(source) {
+    const season = source.siteSynodic;
+    if (!season) return;
+    const visited = new Set([source.id]);
+    const queue = [source.id];
+    while (queue.length) {
+      const cur = queue.shift();
+      for (const next of adj.get(cur) || []) {
+        if (visited.has(next)) continue;
+        const ns = byId[next];
+        if (!ns || !ns.isWaypoint) continue;
+        visited.add(next);
+        queue.push(next);
+        let set = claims.get(next);
+        if (!set) { set = new Set(); claims.set(next, set); }
+        set.add(season);
+      }
+    }
+  }
+  for (const s of sites) {
+    if (s.siteSynodic && !s.isWaypoint) bfs(s);
+  }
+  for (const s of sites) {
+    if (!s.isWaypoint) continue;
+    const set = claims.get(s.id);
+    if (set && set.size === 1) s.siteSynodic = set.values().next().value;
+  }
 }
 
 // Walk the adjacency graph and pull out every chain of degree-2

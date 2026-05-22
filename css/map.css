@@ -837,22 +837,51 @@ body:has(#view-browse:not(.hidden)) #main {
 
 /* Phone / narrow-portrait layout. The hand strip owns the bottom
    of the screen, so the sidepanel stays anchored to the right edge
-   here too. Collapsed it's a 44px tab strip; opened it slides out
-   to cover most of the width. */
+   here too. Collapsed it's a 44px tab strip; opened it pops as a
+   centered modal that covers most of the screen with a dimmed
+   backdrop behind it (handled in JS via .modal-backdrop). */
 @media (max-width: 720px) {
   .browse-sidepanel {
     width: 44px;
-  }
-  .browse-sidepanel[data-active] {
-    width: min(92vw, 480px) !important;
+    bottom: 0;
   }
   .browse-sidepanel[data-active=""] {
     width: 44px !important;
   }
-  /* Reserve enough room for the hand strip + grabber. The
-     sidepanel sits above the strip so its tabs stay reachable. */
-  .browse-sidepanel { bottom: 0; }
-  .sidepanel-tabs { flex: 0 0 44px; }
+  /* Modal mode: detach from the right edge and float as a
+     centred sheet. The tab strip inside collapses since the user
+     dismisses with × / backdrop tap to switch panes. */
+  .browse-sidepanel[data-active] {
+    position: fixed;
+    top: 60px;
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    width: auto !important;
+    height: auto !important;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
+    z-index: 10;
+  }
+  .browse-sidepanel[data-active] .sidepanel-tabs {
+    display: none;
+  }
+}
+
+/* Modal backdrop: shown only when the sidepanel is open on
+   mobile. Tapping it closes the panel (wired in browse.js). */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(2px);
+  z-index: 9;
+}
+.modal-backdrop.hidden { display: none; }
+@media (min-width: 721px) {
+  /* Desktop / tablet keep the right-edge slide-out, no backdrop. */
+  .modal-backdrop { display: none !important; }
 }
 
 .sidepanel-tabs {

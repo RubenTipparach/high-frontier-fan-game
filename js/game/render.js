@@ -697,11 +697,13 @@ export class MapRenderer {
     }
     this._normalEdges = [];
     this._hazardEdges = [];
-    // Comet edges are bucketed by the destination comet's synodic
-    // season ('red'|'yellow'|'blue') so each apparition draws in
-    // its own colour. A path touching two comets picks the first
-    // endpoint's season — they're rare and a single colour beats
-    // an indecisive blend.
+    // Seasonal edges are bucketed by the synodic season
+    // ('red'|'yellow'|'blue'). Any site with siteSynodic
+    // (comets AND seasonal asteroids like Icarus / Phaethon /
+    // Pholus / Hermes / Bee-Zed / Asbolus) propagates its season
+    // to the edges that touch it; the BFS in planner-map.js
+    // extends that to adjacent lagrange / burn waypoints so the
+    // whole approach corridor reads as one colour.
     this._cometEdgesBySeason = new Map();
     const straight = this.data.straightEdges || this.data.edges;
     for (const [a, b, dv] of straight) {
@@ -709,13 +711,14 @@ export class MapRenderer {
       if (!sa || !sb) continue;
       const seg = { sa, sb, dv };
       if (sa.hazard || sb.hazard) this._hazardEdges.push(seg);
-      else if (sa.type === 'comet' || sb.type === 'comet') {
-        const comet = sa.type === 'comet' ? sa : sb;
-        const season = comet.siteSynodic || 'blue';
-        if (!this._cometEdgesBySeason.has(season)) this._cometEdgesBySeason.set(season, []);
-        this._cometEdgesBySeason.get(season).push(seg);
+      else {
+        const season = sa.siteSynodic || sb.siteSynodic;
+        if (season) {
+          if (!this._cometEdgesBySeason.has(season)) this._cometEdgesBySeason.set(season, []);
+          this._cometEdgesBySeason.get(season).push(seg);
+        }
+        else this._normalEdges.push(seg);
       }
-      else this._normalEdges.push(seg);
     }
     this._chains = [];
     this._hazardChains = [];
@@ -724,13 +727,15 @@ export class MapRenderer {
       const pts = chain.map((id) => this.data.byId[id]).filter(Boolean);
       if (pts.length < 2) continue;
       if (pts.some((p) => p.hazard)) this._hazardChains.push(pts);
-      else if (pts.some((p) => p.type === 'comet')) {
-        const comet = pts.find((p) => p.type === 'comet');
-        const season = comet.siteSynodic || 'blue';
-        if (!this._cometChainsBySeason.has(season)) this._cometChainsBySeason.set(season, []);
-        this._cometChainsBySeason.get(season).push(pts);
+      else {
+        const seasonal = pts.find((p) => p.siteSynodic);
+        if (seasonal) {
+          const season = seasonal.siteSynodic;
+          if (!this._cometChainsBySeason.has(season)) this._cometChainsBySeason.set(season, []);
+          this._cometChainsBySeason.get(season).push(pts);
+        }
+        else this._chains.push(pts);
       }
-      else this._chains.push(pts);
     }
 
     // Body groups: every real site picks up a `bodyKey` in the

@@ -583,6 +583,12 @@ function wireSidebar() {
     });
   }
   close.addEventListener('click', () => showPane(null));
+
+  // Modal backdrop on mobile: tapping the dimmed area closes the
+  // open pane. Backdrop is hidden on desktop via CSS so this is a
+  // no-op there.
+  const backdrop = document.getElementById('browse-modal-backdrop');
+  if (backdrop) backdrop.addEventListener('click', () => showPane(null));
 }
 
 function showPane(pane) {
@@ -595,6 +601,11 @@ function showPane(pane) {
   for (const el of panel.querySelectorAll('.panel-pane')) {
     el.classList.toggle('active', el.dataset.pane === pane);
   }
+  // Backdrop tracks panel state — visible whenever a pane is open
+  // (CSS gates it behind the mobile breakpoint so desktop never
+  // sees it).
+  const backdrop = document.getElementById('browse-modal-backdrop');
+  if (backdrop) backdrop.classList.toggle('hidden', !pane);
   // Render the pane lazily on first reveal.
   if      (pane === 'patents')    renderPatents();
   else if (pane === 'milestones') renderMilestones();
