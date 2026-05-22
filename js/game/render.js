@@ -1160,43 +1160,33 @@ export class MapRenderer {
           ctx.stroke();
         }
         if (halfLandings.length) {
-          // Half-lander disc: full pink ring with diagonal
-          // stripes painted over the right half. The full rocket
-          // glyph rides on top (drawn in the emoji pass below) —
-          // the stripes are what tell the player "half lander."
+          // Half-lander disc: a half-moon — left semicircle
+          // filled solid pink, right semicircle empty, with a
+          // full circular outline + diameter line splitting the
+          // two. The full rocket glyph rides on top in the
+          // emoji pass below.
           for (const w of halfLandings) {
             const sx = this.pan.x + w.x * eff;
             const sy = this.pan.y + w.y * eff;
             if (sx < -vis.r * 2 || sx > hostW + vis.r * 2 || sy < -vis.r * 2 || sy > hostH + vis.r * 2) continue;
             const ringR = vis.r * 1.4;
-            // Solid pink disc underneath.
+            // Fill: left semicircle (top → left → bottom, close
+            // with the diameter).
             ctx.beginPath();
-            ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
+            ctx.moveTo(sx, sy - ringR);
+            ctx.arc(sx, sy, ringR, -Math.PI / 2, Math.PI / 2, true);
+            ctx.closePath();
             ctx.fill();
-            ctx.stroke();
-            // Diagonal stripes, clipped to the right half of
-            // the disc (intersection of disc + right rectangle).
-            ctx.save();
+            // Outline: full circle.
             ctx.beginPath();
             ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
-            ctx.clip();
-            ctx.beginPath();
-            ctx.rect(sx, sy - ringR, ringR + 1, ringR * 2);
-            ctx.clip();
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
-            ctx.lineWidth = 1.2;
-            ctx.beginPath();
-            const step = 4;
-            for (let i = -ringR; i <= ringR * 2; i += step) {
-              ctx.moveTo(sx + i, sy - ringR);
-              ctx.lineTo(sx + i + ringR * 2, sy + ringR);
-            }
             ctx.stroke();
-            ctx.restore();
+            // Diameter line separating the two halves.
+            ctx.beginPath();
+            ctx.moveTo(sx, sy - ringR);
+            ctx.lineTo(sx, sy + ringR);
+            ctx.stroke();
           }
-          // Restore the batch's stroke/width for the next pass.
-          ctx.strokeStyle = vis.stroke;
-          ctx.lineWidth = 1.5;
         }
       }
       // Landing burns are now drawn as a 🚀 glyph (full or half)
@@ -1376,7 +1366,11 @@ export class MapRenderer {
       if (vis.kind === 'sun')   { drawSun(ctx, site.x, site.y, vis.r); continue; }
       if (vis.kind === 'comet') { drawComet(ctx, site.x, site.y, vis.r, site); continue; }
       if (vis.kind !== 'hex') continue;
-      const worldR = Math.min(vis.haloR, capWorld);
+      // Per-body halo overrides. Ceres punches above its dwarf-
+      // class default — shrink it 50% so it doesn't dominate the
+      // belt next to Vesta / Pallas / Hygiea.
+      const bodyScale = /(^|\s)ceres/i.test(site.name || '') ? 0.5 : 1;
+      const worldR = Math.min(vis.haloR * bodyScale, capWorld);
       const rings = ringDefFor(site);
       if (vis.rocky) {
         drawRockyAsteroid(ctx, site.x, site.y, worldR, paletteFor(site), site);
