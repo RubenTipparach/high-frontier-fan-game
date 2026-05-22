@@ -4,16 +4,9 @@ A fan implementation of **High Frontier 4: All** — the rocket-physics solar
 system board game by Phil Eklund (Sierra Madre Games). Educational /
 non-commercial.
 
-## Live links
-
-- **Play the game**: https://rubentipparach.github.io/high-frontier-fan-game/
-- **Operator dashboard**: https://high-frontier-fan-game.fly.dev/admin
-  — profiles, lobbies, recent chat, invites, invite links, and a
-  one-click "issue device code" recovery flow per profile.
-- **API health**: https://high-frontier-fan-game.fly.dev/healthz
-
-Every push to every branch redeploys the frontend, so the most-recent
-commit on any branch is what's live.
+Play the latest commit at [high-frontier-fan-game](https://rubentipparach.github.io/high-frontier-fan-game/).
+Every push to every branch redeploys, so the most recent commit on any
+branch is what's live.
 
 ## Features
 
