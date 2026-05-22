@@ -37,6 +37,12 @@ const MAX_ZOOM = 10;
 // merge when the world spacing is compressed. At and above
 // this zoom level the hex is rendered at full size.
 const HEX_FULLSIZE_ZOOM = 2.5;
+
+// World-space anchor of LEO — the sandbox rocket's home and
+// the big yellow "LEO" label rendered on the map. Exported so
+// the Sandbox "Stack" button in the hand header can centre
+// the map on it.
+export const LEO_ANCHOR = { x: 460, y: 270 };
 const DEFAULT_ZOOM = 1.8;
 // Cap the celestial body halo at this many screen pixels so extreme
 // zoom doesn't turn Saturn into the entire canvas.
@@ -842,6 +848,7 @@ export class MapRenderer {
     this._drawWaypointsScreen(ctx);
     this._drawSiteHexesScreen(ctx);
     this._drawSiteLabelsScreen(ctx);
+    this._drawLeoAnchorScreen(ctx);
     this._drawPlayerShipScreen(ctx);
     if (this._sandboxRocket) this._drawSandboxRocketScreen(ctx);
 
@@ -1519,8 +1526,28 @@ export class MapRenderer {
   }
 
   // Player ship marker: bright triangle hovering above the
-  // current site. Solo mode sets this; multiplayer (Stage 3) will
-  // generalise to a per-player array.
+  // Big "LEO" letters anchoring the sandbox rocket's home
+  // position so the player can find the launch site at a
+  // glance. Lives in world space (so it pans / zooms with the
+  // map) but uses a fixed pixel font size that doesn't shrink
+  // below the hex-fullsize zoom threshold.
+  _drawLeoAnchorScreen(ctx) {
+    const eff = this.zoom * this.fitScale;
+    const sx = this.pan.x + LEO_ANCHOR.x * eff;
+    const sy = this.pan.y + LEO_ANCHOR.y * eff;
+    const fontPx = 28 * Math.max(0.6, Math.min(1.2, this.zoom / 2.5));
+    ctx.save();
+    ctx.font = `900 ${fontPx}px ui-sans-serif, system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.lineWidth = 5;
+    ctx.strokeText('LEO', sx, sy);
+    ctx.fillStyle = '#fde047';
+    ctx.fillText('LEO', sx, sy);
+    ctx.restore();
+  }
+
   _drawPlayerShipScreen(ctx) {
     if (!this._playerShipId || !this.data) return;
     const here = this.data.byId[this._playerShipId];

@@ -5,7 +5,7 @@
 // topbar; also acts as the "preview" surface that Stage 3 will
 // replace with the live game.
 
-import { MapRenderer } from './render.js';
+import { MapRenderer, LEO_ANCHOR } from './render.js';
 import { loadPlannerMap } from './planner-map.js';
 import { loadCleanMap } from './clean-map.js';
 import { findPath } from './nav.js';
@@ -204,6 +204,15 @@ function wireHandStrip() {
   };
   const commitBtn = document.getElementById('hand-boost-commit');
   if (commitBtn) commitBtn.addEventListener('click', commitBoost);
+
+  // Stack button next to ✋ Hand: zooms the map to LEO (so the
+  // rocket sprite is in view) AND pops the stack modal so the
+  // player sees what's on the rocket immediately.
+  const stackBtn = document.getElementById('hand-stack-open');
+  if (stackBtn) stackBtn.addEventListener('click', () => {
+    if (_renderer) _renderer.flyTo(LEO_ANCHOR, 4);
+    openRocketStackModal();
+  });
 
   repaintHand();
   onHandChange(repaintHand);
@@ -1050,7 +1059,8 @@ function syncSandboxRocket() {
   }
   const r = isRocketActive();
   _renderer.setSandboxRocket({
-    x: 460, y: 270,         // LEO-ish anchor in cleaned-up coords
+    x: LEO_ANCHOR.x,
+    y: LEO_ANCHOR.y,
     colour: 'yellow',
     canFly: r.active,       // drives the 🚫 + transparency overlay
   });

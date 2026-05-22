@@ -1121,6 +1121,28 @@ body:has(#view-browse:not(.hidden)) #main {
 /* BOOST commit button in the hand header. Inactive looks
    muted; armed (data-armed="1") flips to a saturated rocket-
    orange to signal "press me to launch". */
+/* Stack-open button next to the ✋ Hand title. Always
+   visible; clicking zooms the map to LEO + opens the rocket
+   stack modal. Neutral styling so it doesn't compete with
+   the boost-pulsing BOOST commit button further along. */
+#hand-stack-open {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(125, 211, 252, 0.18);
+  color: var(--accent);
+  cursor: pointer;
+  transition: background 0.18s, transform 0.12s;
+}
+#hand-stack-open:hover {
+  background: var(--accent);
+  color: #062136;
+  transform: scale(1.03);
+}
+
 #hand-boost-commit {
   margin-left: auto;
   font-size: 12px;
