@@ -33,7 +33,7 @@ const REQUIREMENT_VIS = {
   'push-sat':         { glyph: '🛰️', label: 'Push-sat'        },
   'isru-rig':         { glyph: '🛢️', label: 'ISRU rig'        },
   'aerobrake-shroud': { glyph: '🪂', label: 'Aerobrake'       },
-  'spin-grav':        { glyph: '🌀', label: 'Spin gravity'    },
+  'spin-grav':        { glyph: '💃', label: 'Spin gravity'    },
 };
 
 export function renderCard(card, { type } = {}) {
@@ -220,11 +220,11 @@ function spectralHex(type) {
   return svg;
 }
 
-// Thrust visualisation: fixed-size blue triangle, pink thrust
-// circle at the left vertex, water droplet at the right vertex
-// with the per-burn fuel cost, arrow in between. If the card
-// requires push-sat the satellite glyph appears in the triangle
-// centre.
+// Thrust visualisation: rounded blue triangle, pink thrust circle
+// at the left base, 💧 with per-burn fuel cost at the right base,
+// arrow in between. Requirement glyphs (sun for beam-receiver,
+// ballerina for spin-grav, satellite for push-sat, etc.) sit
+// inside the triangle, matching the chip row below.
 function thrustVisual(card) {
   const wrap = document.createElement('div');
   wrap.className = 'thrust-visual';
@@ -234,7 +234,40 @@ function thrustVisual(card) {
   const fuel = card.isp >= 50
     ? 0
     : Math.max(1, Math.ceil(thrust / Math.max(1, card.isp || 1)));
-  const hasPushSat = (card.requires || []).some((r) => r.kind === 'push-sat');
+
+  // Pull glyphs for every requirement so they appear inside the
+  // triangle. Cap at 3 — beyond that they'd crowd the silhouette;
+  // overflow stays in the chip row below.
+  const reqGlyphs = (card.requires || [])
+    .map((r) => (REQUIREMENT_VIS[r.kind] || {}).glyph)
+    .filter(Boolean)
+    .slice(0, 3);
+  // Layout is count-aware so icons always sit clear of the
+  // sloped edges. y values drift down as count grows because the
+  // triangle is widest near the base.
+  const iconLayouts = {
+    1: [{ x: 70, y: 64, s: 24 }],
+    2: [{ x: 58, y: 66, s: 18 }, { x: 82, y: 66, s: 18 }],
+    3: [{ x: 52, y: 70, s: 14 }, { x: 70, y: 70, s: 14 },
+        { x: 88, y: 70, s: 14 }],
+  };
+  const layout = iconLayouts[reqGlyphs.length] || [];
+  const iconsSvg = reqGlyphs
+    .map((g, i) => {
+      const p = layout[i];
+      return `<text x="${p.x}" y="${p.y}" text-anchor="middle"
+        font-size="${p.s}">${g}</text>`;
+    })
+    .join('');
+
+  // Rounded-triangle path. Apex at (70,12); base (18,86)–(122,86).
+  // Each corner is curved with a small quadratic; tangent points
+  // are pre-computed ~10 units along each edge so the silhouette
+  // reads as a soft equilateral wedge instead of a sharp pennant.
+  const trianglePath = 'M 64.25 20.18 L 23.75 77.82 ' +
+    'Q 18 86 28 86 L 112 86 ' +
+    'Q 122 86 116.25 77.82 L 75.75 20.18 ' +
+    'Q 70 12 64.25 20.18 Z';
 
   // The arrow + base line use currentColor so they read against
   // either the white primary face or the black secondary face.
@@ -248,11 +281,10 @@ function thrustVisual(card) {
           <path d="M0,0 L8,4 L0,8 z" fill="currentColor"/>
         </marker>
       </defs>
-      <polygon points="70,12 18,86 122,86"
+      <path d="${trianglePath}"
         fill="rgba(96,165,250,0.35)" stroke="#60a5fa" stroke-width="2.5"
         stroke-linejoin="round"/>
-      ${hasPushSat ? `<text x="70" y="62" text-anchor="middle"
-        font-size="24">🛰️</text>` : ''}
+      ${iconsSvg}
       <line x1="35" y1="86" x2="100" y2="86"
         stroke="currentColor" stroke-width="1.8"
         marker-end="url(#thrust-arrow)"/>
