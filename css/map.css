@@ -504,14 +504,12 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .browse-sidepanel[data-active=""] ~ .sandbox-hand { right: 48px; }
 @media (max-width: 720px) {
-  /* Right edge is now the 44px tab strip on phones too. The hand
-     extends to the bottom and tucks under the tab column. */
-  .sandbox-hand { right: 44px; bottom: 0; }
-  .browse-sidepanel[data-active=""] ~ .sandbox-hand { right: 44px; }
-  /* When a pane is open it overlays the hand from the right;
-     the hand stays put underneath so the player can still drag
-     cards in / out without the panel re-flowing the strip. */
-  .browse-sidepanel[data-active] ~ .sandbox-hand { right: 44px; }
+  /* Phones: the hand strip takes the full bottom width. The
+     floating tab bar lives at the top of the map, not on the
+     right edge, so the hand isn't pushed in. */
+  .sandbox-hand { right: 0 !important; bottom: 0; }
+  .browse-sidepanel[data-active=""] ~ .sandbox-hand { right: 0 !important; }
+  .browse-sidepanel[data-active] ~ .sandbox-hand { right: 0 !important; }
 }
 .hand-header {
   display: flex;
@@ -850,18 +848,16 @@ body:has(#view-browse:not(.hidden)) #main {
    centered modal that covers most of the screen with a dimmed
    backdrop behind it (handled in JS via .modal-backdrop). */
 @media (max-width: 720px) {
-  /* On phones the sidepanel is a floating button bar that sits
-     over the top of the map — not attached to any edge. Only the
-     tab strip shows; tapping a tab opens that pane's content as
-     its own modal overlay (see .panel-pane.active rules below).
-     Drops the box-shadow from the desktop variant since the
-     floating bar already reads as separate from the map. */
+  /* Phones: floating pill of tab buttons centered horizontally
+     at the top of the map. Always visible, no edge attachment.
+     Tapping a tab still opens the pane as its own modal. */
   .browse-sidepanel {
     position: absolute;
     top: 12px;
-    right: 12px;
+    left: 50%;
+    right: auto;
     bottom: auto;
-    left: auto;
+    transform: translateX(-50%);
     width: auto !important;
     height: auto !important;
     border: 1px solid var(--border);
@@ -875,8 +871,8 @@ body:has(#view-browse:not(.hidden)) #main {
     display: none;
   }
   /* When a tab is active, its pane appears as a fullscreen-ish
-     content modal centred on the map; the floating button bar
-     stays put so the player can switch tabs without dismissing. */
+     content modal over the map; the floating button pill stays
+     put so the player can switch tabs without dismissing. */
   .browse-sidepanel[data-active]:not([data-active=""]) .sidepanel-content {
     display: block;
     position: fixed;
@@ -919,18 +915,19 @@ body:has(#view-browse:not(.hidden)) #main {
   flex: 0 0 48px;
 }
 @media (max-width: 720px) {
-  /* Vertical tab strip on the right edge — same layout as desktop
-     so the hand strip can own the entire bottom of the screen. */
+  /* Horizontal pill of tab buttons centered at the top. */
   .sidepanel-tabs {
-    flex-direction: column;
-    padding: 8px 2px;
-    flex: 0 0 44px;
-    gap: 4px;
+    flex-direction: row;
+    padding: 6px 8px;
+    flex: 0 0 auto;
+    gap: 6px;
+    border-right: none;
+    background: transparent;
   }
   .sidepanel-tabs button {
-    width: 38px;
-    height: 38px;
-    font-size: 20px;
+    width: 40px;
+    height: 40px;
+    font-size: 22px;
     flex-shrink: 0;
   }
 }
