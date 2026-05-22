@@ -89,6 +89,22 @@ function initBrowseButton() {
     mountBrowse();
   });
 
+  // Multiplayer button: jump to the lobby + global-chat view.
+  // Clicking again from the lobby returns to Sandbox so the
+  // pair toggles cleanly.
+  const mpBtn = document.getElementById('btn-multiplayer');
+  if (mpBtn) {
+    mpBtn.addEventListener('click', () => {
+      const onLobby = !document.getElementById('view-lobby-list').classList.contains('hidden');
+      if (onLobby) {
+        showView('view-browse');
+        mountBrowse();
+      } else {
+        showView('view-lobby-list');
+      }
+    });
+  }
+
   // Topbar fullscreen toggle. Uses the same browser API as the
   // map-toolbar button; this one promotes the whole page so the
   // sidepanel + hand strip come along for the ride.
@@ -234,7 +250,12 @@ async function boot() {
   if (me) {
     ws.connect(me.token);
     subscribeInvitesForProfile(me);
-    showView('view-lobby-list');
+    // Default landing view is Sandbox — the player can always
+    // hop to Multiplayer via the topbar. We still kick off the
+    // lobby-list / invites loads so the multiplayer view is
+    // populated when they switch.
+    showView('view-browse');
+    mountBrowse();
     refreshLobbyList();
     refreshInvitesList();
     await maybeClaimInviteFromUrl();

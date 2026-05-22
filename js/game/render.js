@@ -1,3 +1,5 @@
+import { getRocketSprite, getRocketSpriteSize } from './rocket-sprite.js';
+
 // Canvas-based renderer for the delta-v map.
 //
 // Why canvas: 1500 nodes + 1750 edges as SVG is ~12k DOM elements,
@@ -552,6 +554,15 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
+  // Sandbox rocket: a single rocket sprite placed at a world-
+  // space (x, y). canFly drives the "🚫 + transparent" overlay
+  // — the renderer doesn't compute fly-ability itself; that's
+  // js/game/rocket.js's canRocketFly().
+  setSandboxRocket(opts) {
+    this._sandboxRocket = opts || null;
+    this._scheduleDraw();
+  }
+
   // Solo: pin a "player ship" marker to a specific site. Drawn as
   // a screen-space triangle floating above the site so it's
   // visible regardless of the underlying hex.
@@ -832,6 +843,7 @@ export class MapRenderer {
     this._drawSiteHexesScreen(ctx);
     this._drawSiteLabelsScreen(ctx);
     this._drawPlayerShipScreen(ctx);
+    if (this._sandboxRocket) this._drawSandboxRocketScreen(ctx);
 
     // FPS book-keeping. The debug panel polls getFps(); we update
     // ~twice per second so the readout doesn't flicker.
@@ -1542,6 +1554,48 @@ export class MapRenderer {
     ctx.stroke();
   }
 
+  // Draw the sandbox rocket sprite at world-space (x, y).
+  // canFly drives a transparency + 🚫 overlay; the renderer
+  // doesn't compute fly-ability itself.
+  _drawSandboxRocketScreen(ctx) {
+    const r = this._sandboxRocket;
+    if (!r) return;
+    const eff = this.zoom * this.fitScale;
+    const sx = this.pan.x + r.x * eff;
+    const sy = this.pan.y + r.y * eff;
+    const { width: spriteW, height: spriteH } = getRocketSpriteSize();
+    const scale = 0.55;     // map-scale; 35×53 px on screen.
+    const w = spriteW * scale;
+    const h = spriteH * scale;
+    const px = sx - w / 2;
+    const py = sy - h - 2;  // foot of rocket above the anchor
+    ctx.save();
+    if (!r.canFly) ctx.globalAlpha = 0.5;
+    ctx.drawImage(getRocketSprite(r.colour || 'yellow'), px, py, w, h);
+    if (!r.canFly) {
+      ctx.globalAlpha = 1;
+      ctx.font = `${Math.round(h * 0.7)}px ${EMOJI_FONT}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('🚫', sx, py + h / 2);
+    }
+    ctx.restore();
+    // Stash the screen-space bounding box for hit-testing.
+    this._sandboxRocketBox = {
+      x: px, y: py, w, h,
+    };
+  }
+
+  // Returns true if (sx, sy) screen-space pixel lies inside the
+  // last-drawn rocket sprite. Used by the click handler to open
+  // the stack panel.
+  hitTestSandboxRocket(sx, sy) {
+    const b = this._sandboxRocketBox;
+    if (!b) return false;
+    return sx >= b.x && sx <= b.x + b.w
+        && sy >= b.y && sy <= b.y + b.h;
+  }
+
   _drawSiteLabelsScreen(ctx) {
     const eff = this.zoom * this.fitScale;
     const { hostW, hostH } = this;
@@ -1688,6 +1742,16 @@ export class MapRenderer {
     // Click dispatched only if the mousedown→mouseup didn't drag.
     this.canvas.addEventListener('click', (ev) => {
       if (this._dragStart && this._dragStart.moved) return;
+      // Rocket sits on top of the map so test it first; if the
+      // click landed inside the rocket sprite we fire a
+      // sandbox-rocket event instead of a site select.
+      const rect = this.canvas.getBoundingClientRect();
+      const scx = ev.clientX - rect.left;
+      const scy = ev.clientY - rect.top;
+      if (this.hitTestSandboxRocket(scx, scy)) {
+        if (this.onSandboxRocketClick) this.onSandboxRocketClick();
+        return;
+      }
       const pt = this._eventToWorld(ev);
       const hit = this._hitTest(pt.x, pt.y);
       if (this.options.debug) this._emitDebugClick(pt, hit);
