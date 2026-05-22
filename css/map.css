@@ -103,6 +103,21 @@
 /* Debug panel: floats over the lower-left corner of the map host.
    The renderer publishes zoom + FPS via onFrame(); sliders write
    straight into renderer.options. */
+/* The map-stage wraps the canvas + the floating debug overlay so
+   the overlay survives canvas.innerHTML wipes (which we do when
+   the user toggles between the cleaned-up and classic maps). */
+.browse-map-stage {
+  position: relative;
+  width: 100%;
+  height: calc(100% - 44px);
+  min-height: 440px;
+}
+.browse-map-stage .browse-map-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
 .browse-map-canvas { position: relative; }
 .map-debug {
   position: absolute;
@@ -188,9 +203,14 @@
   height: 100vh;
   background: #03020a;
 }
+.map-host:fullscreen .browse-map-stage,
+.map-host:-webkit-full-screen .browse-map-stage {
+  height: calc(100vh - 44px);
+  min-height: 0;
+}
 .map-host:fullscreen .browse-map-canvas,
 .map-host:-webkit-full-screen .browse-map-canvas {
-  height: calc(100vh - 44px);
+  height: 100%;
   min-height: 0;
 }
 .browse-map-canvas {

@@ -24,31 +24,30 @@
 
 const VIEW_W = 1400;
 const VIEW_H = 900;
-// MIN_ZOOM allows a little zoom-out below the initial framing so a
-// user can pinch all the way out to see the whole graph. The initial
-// zoom (set in _fitToData) is higher than 1.0 so the default view
-// isn't a smashed-together blob.
-const MIN_ZOOM = 0.7;
-const MAX_ZOOM = 8;
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 25;
 const DEFAULT_ZOOM = 1.8;
+// Cap the celestial body halo at this many screen pixels so extreme
+// zoom doesn't turn Saturn into the entire canvas.
+const HALO_MAX_SCREEN_R = 110;
 
 // Body styling. Sites render as shaded spheres; waypoints stay as
 // flat-coloured circles since they're abstract routing nodes, not
 // physical objects.
 // Real sites: black hex marker on top of a shaded-sphere body halo.
-// The hex is the actual gameplay token (carries the siteSize +
-// hydration glyphs); the sphere underneath gives Mars-red /
-// Jupiter-tan / Europa-icy character that reads even with the hex
-// covering most of it. haloFactor sets how far the sphere extends
-// past the hex edge.
+// Hex size is generous enough that the siteSize text + water droplet
+// row fit comfortably inside without crowding. Halo radius is the
+// world-space size of the sphere underneath; it grows with zoom up
+// to HALO_MAX_SCREEN_R so the body's relative size to the layout
+// stays consistent.
 const TYPE_VIS = {
-  site:       { kind: 'hex',    r: 12, haloFactor: 1.7 },
-  planet:     { kind: 'hex',    r: 16, haloFactor: 1.65 },
-  moon:       { kind: 'hex',    r: 10, haloFactor: 1.7 },
-  dwarf:      { kind: 'hex',    r: 12, haloFactor: 1.65 },
-  asteroid:   { kind: 'hex',    r:  8, haloFactor: 1.8 },
-  tno:        { kind: 'hex',    r: 10, haloFactor: 1.7 },
-  surface:    { kind: 'hex',    r: 10, haloFactor: 1.7 },
+  site:       { kind: 'hex',    r: 18, haloFactor: 1.55 },
+  planet:     { kind: 'hex',    r: 22, haloFactor: 1.5 },
+  moon:       { kind: 'hex',    r: 16, haloFactor: 1.55 },
+  dwarf:      { kind: 'hex',    r: 18, haloFactor: 1.55 },
+  asteroid:   { kind: 'hex',    r: 14, haloFactor: 1.6 },
+  tno:        { kind: 'hex',    r: 16, haloFactor: 1.6 },
+  surface:    { kind: 'hex',    r: 16, haloFactor: 1.6 },
   lagrange:   { kind: 'circle', r:  7, fill: 'transparent', stroke: '#c66932' },
   burn:       { kind: 'circle', r:  7, fill: '#d60f7a', stroke: '#fde0ee' },
   hohmann:    { kind: 'circle', r:  7, fill: '#10b981', stroke: '#a7f3d0' },
@@ -131,6 +130,21 @@ function appendSmoothPath(ctx, pts) {
   }
   const last = pts[pts.length - 1];
   ctx.lineTo(last.x, last.y);
+}
+
+// Water droplet glyph: teardrop with a pointed top and rounded
+// bottom, traced as one closed sub-path. Caller controls fill +
+// stroke. Drawn at (cx, cy) with total height `h` (the point sits
+// at cy - h/2, the rounded bottom at cy + h/2).
+function drawDroplet(ctx, cx, cy, h) {
+  const r = h * 0.32;          // bottom-circle radius
+  const top = cy - h / 2;
+  const ctrlY = cy + h * 0.05; // pull the bezier in toward centre
+  ctx.beginPath();
+  ctx.moveTo(cx, top);
+  ctx.bezierCurveTo(cx + r * 1.5, ctrlY, cx + r, cy + h * 0.5 - r, cx, cy + h * 0.5);
+  ctx.bezierCurveTo(cx - r, cy + h * 0.5 - r, cx - r * 1.5, ctrlY, cx, top);
+  ctx.closePath();
 }
 
 const ZONE_BAND_LIGHT = ['Venus', 'Mars', 'Jupiter', 'Uranus'];
@@ -378,11 +392,12 @@ export class MapRenderer {
     this._drawGuides(ctx);
     this._drawEdges(ctx);
     this._drawRoute(ctx);
+    this._drawSiteHalosWorld(ctx);
 
     ctx.restore();
 
     this._drawWaypointsScreen(ctx);
-    this._drawSiteBodiesScreen(ctx);
+    this._drawSiteHexesScreen(ctx);
     this._drawSiteLabelsScreen(ctx);
 
     // FPS book-keeping. The debug panel polls getFps(); we update
@@ -690,7 +705,24 @@ export class MapRenderer {
     }
   }
 
-  _drawSiteBodiesScreen(ctx) {
+  // Celestial body halos drawn in WORLD space so they scale with
+  // zoom and stay proportional to the surrounding layout. Capped
+  // at HALO_MAX_SCREEN_R screen pixels so very high zooms don't
+  // make a single body swallow the canvas.
+  _drawSiteHalosWorld(ctx) {
+    const eff = this.zoom * this.fitScale;
+    const capWorld = HALO_MAX_SCREEN_R / eff;
+    for (const site of this._realSites) {
+      const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
+      if (vis.kind !== 'hex') continue;
+      const worldR = Math.min(vis.r * vis.haloFactor, capWorld);
+      drawShadedSphere(ctx, site.x, site.y, worldR, paletteFor(site), site.hazard);
+    }
+  }
+
+  // Hex markers + endpoint rings, drawn in SCREEN space so they
+  // stay readable at any zoom level.
+  _drawSiteHexesScreen(ctx) {
     const eff = this.zoom * this.fitScale;
     const { hostW, hostH } = this;
     for (const site of this._realSites) {
@@ -701,16 +733,9 @@ export class MapRenderer {
       if (sx < -r - 20 || sx > hostW + r + 20 || sy < -r - 20 || sy > hostH + r + 20) continue;
 
       if (vis.kind === 'hex') {
-        // Body halo: shaded sphere sits BEHIND the hex, slightly
-        // larger so its colour peeks out around the marker. The
-        // sphere gives Mars-red / Saturn-gold / Europa-icy
-        // character while the hex stays the gameplay token.
-        const haloR = r * (vis.haloFactor || 1.7);
-        drawShadedSphere(ctx, sx, sy, haloR, paletteFor(site), site.hazard);
-        // Black hex on top.
         ctx.beginPath();
         for (let i = 0; i < 6; i++) {
-          const t = (i / 6) * Math.PI * 2 - Math.PI / 2;  // flat-top hex
+          const t = (i / 6) * Math.PI * 2 - Math.PI / 2;
           const px = sx + Math.cos(t) * r;
           const py = sy + Math.sin(t) * r;
           if (i === 0) ctx.moveTo(px, py);
@@ -733,24 +758,21 @@ export class MapRenderer {
         ctx.stroke();
       }
 
-      // siteSynodic from the planner: a coloured ring outside the
-      // body halo indicating which synodic group the site belongs
-      // to. Only ~15 sites carry one.
+      // Synodic ring sits just outside the hex.
       if (site.siteSynodic) {
-        const haloR = r * (vis.haloFactor || 1.7);
         ctx.strokeStyle = SYNODIC_COLOURS[site.siteSynodic] || '#ffffff';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(sx, sy, haloR + 3, 0, Math.PI * 2);
+        ctx.arc(sx, sy, r + 4, 0, Math.PI * 2);
         ctx.stroke();
       }
 
+      // Route endpoint highlight rings.
       if (site.id === this._routeFromId || site.id === this._routeToId) {
-        const haloR = r * (vis.haloFactor || 1.7);
         ctx.strokeStyle = site.id === this._routeFromId ? '#4ade80' : '#f0abfc';
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.arc(sx, sy, haloR + 5, 0, Math.PI * 2);
+        ctx.arc(sx, sy, r + 8, 0, Math.PI * 2);
         ctx.stroke();
       }
     }
@@ -759,8 +781,6 @@ export class MapRenderer {
   _drawSiteLabelsScreen(ctx) {
     const eff = this.zoom * this.fitScale;
     const { hostW, hostH } = this;
-    // Smooth alpha fade between labelFadeMin and labelFadeMax so the
-    // labels don't pop in/out; configurable via the debug panel.
     const fadeMin = this.options.labelFadeMin;
     const fadeMax = this.options.labelFadeMax;
     const labelAlpha = Math.max(0, Math.min(1,
@@ -776,21 +796,38 @@ export class MapRenderer {
       if (sx < -40 || sx > hostW + 40 || sy < -40 || sy > hostH + 40) continue;
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
 
-      // Inside-hex glyphs stay at full opacity at all zooms so the
-      // "what is this" info is never lost.
-      ctx.font = '600 9px ui-sans-serif, system-ui, sans-serif';
+      // Site size text in the upper half of the hex.
       if (site.siteSize) {
+        ctx.font = `700 ${Math.round(vis.r * 0.55)}px ui-sans-serif, system-ui, sans-serif`;
         ctx.fillStyle = '#ffffff';
-        ctx.fillText(site.siteSize, sx, sy - 3);
+        ctx.fillText(site.siteSize, sx, sy - vis.r * 0.32);
       }
+
+      // Water droplets in the lower half of the hex, one teardrop
+      // per hydration unit (capped at 4 so they fit). Cyan fill +
+      // a darker outline so they read against the black hex.
       if (site.hydration) {
-        ctx.fillStyle = '#7dd3fc';
-        ctx.fillText(String(site.hydration), sx, sy + 9);
+        const count = Math.min(4, site.hydration);
+        const dropH = vis.r * 0.45;
+        const dropW = dropH * 0.62;
+        const gap   = Math.max(1, vis.r * 0.10);
+        const totalW = count * dropW + (count - 1) * gap;
+        const startX = sx - totalW / 2 + dropW / 2;
+        const dropY  = sy + vis.r * 0.38;
+        ctx.fillStyle = '#60a5fa';
+        ctx.strokeStyle = 'rgba(15, 30, 60, 0.85)';
+        ctx.lineWidth = 0.8;
+        for (let i = 0; i < count; i++) {
+          drawDroplet(ctx, startX + i * (dropW + gap), dropY, dropH);
+          ctx.fill();
+          ctx.stroke();
+        }
       }
+
       if (site.hazard) {
         ctx.fillStyle = '#f87171';
-        ctx.font = '14px ui-monospace, menlo, monospace';
-        ctx.fillText('☠', sx, sy + 5);
+        ctx.font = `${Math.round(vis.r * 0.9)}px ui-monospace, menlo, monospace`;
+        ctx.fillText('☠', sx, sy);
       }
 
       if (labelAlpha > 0) {

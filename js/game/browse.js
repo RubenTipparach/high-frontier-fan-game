@@ -98,7 +98,8 @@ function ensureMapShell(host) {
           aria-label="Toggle fullscreen">⛶</button>
       </div>
     </div>
-    <div id="browse-map-canvas" class="browse-map-canvas">
+    <div class="browse-map-stage">
+      <div id="browse-map-canvas" class="browse-map-canvas"></div>
       <div id="map-debug" class="map-debug hidden">
         <div class="dbg-header">
           <span>Debug</span>
@@ -113,12 +114,16 @@ function ensureMapShell(host) {
           <strong id="dbg-fps">—</strong>
         </div>
         <label class="dbg-slider">
+          <span>Initial zoom <em id="dbg-init-zoom-val"></em></span>
+          <input id="dbg-init-zoom" type="range" min="0.5" max="6" step="0.1" />
+        </label>
+        <label class="dbg-slider">
           <span>Label fade start <em id="dbg-fade-min-val"></em></span>
-          <input id="dbg-fade-min" type="range" min="1" max="4" step="0.1" />
+          <input id="dbg-fade-min" type="range" min="0.5" max="6" step="0.1" />
         </label>
         <label class="dbg-slider">
           <span>Label fade end <em id="dbg-fade-max-val"></em></span>
-          <input id="dbg-fade-max" type="range" min="1" max="4" step="0.1" />
+          <input id="dbg-fade-max" type="range" min="0.5" max="6" step="0.1" />
         </label>
         <label class="dbg-check">
           <input id="dbg-show-decoratives" type="checkbox" />
@@ -158,22 +163,30 @@ function ensureMapShell(host) {
 function wireDebugPanel(renderer) {
   const panel = document.getElementById('map-debug');
   if (!panel) return;
-  const zoomEl  = panel.querySelector('#dbg-zoom');
-  const fpsEl   = panel.querySelector('#dbg-fps');
-  const fadeMin = panel.querySelector('#dbg-fade-min');
-  const fadeMax = panel.querySelector('#dbg-fade-max');
-  const fadeMinVal = panel.querySelector('#dbg-fade-min-val');
-  const fadeMaxVal = panel.querySelector('#dbg-fade-max-val');
-  const showDec = panel.querySelector('#dbg-show-decoratives');
-  const resetBtn = panel.querySelector('#dbg-reset');
+  const zoomEl    = panel.querySelector('#dbg-zoom');
+  const fpsEl     = panel.querySelector('#dbg-fps');
+  const initZoom  = panel.querySelector('#dbg-init-zoom');
+  const fadeMin   = panel.querySelector('#dbg-fade-min');
+  const fadeMax   = panel.querySelector('#dbg-fade-max');
+  const initZoomVal = panel.querySelector('#dbg-init-zoom-val');
+  const fadeMinVal  = panel.querySelector('#dbg-fade-min-val');
+  const fadeMaxVal  = panel.querySelector('#dbg-fade-max-val');
+  const showDec   = panel.querySelector('#dbg-show-decoratives');
+  const resetBtn  = panel.querySelector('#dbg-reset');
 
-  // Initialise sliders + checkbox from the renderer's current options.
-  fadeMin.value = renderer.options.labelFadeMin;
-  fadeMax.value = renderer.options.labelFadeMax;
-  fadeMinVal.textContent = Number(fadeMin.value).toFixed(1) + 'x';
-  fadeMaxVal.textContent = Number(fadeMax.value).toFixed(1) + 'x';
+  initZoom.value = renderer.options.initialZoom;
+  fadeMin.value  = renderer.options.labelFadeMin;
+  fadeMax.value  = renderer.options.labelFadeMax;
+  initZoomVal.textContent = Number(initZoom.value).toFixed(1) + 'x';
+  fadeMinVal.textContent  = Number(fadeMin.value).toFixed(1) + 'x';
+  fadeMaxVal.textContent  = Number(fadeMax.value).toFixed(1) + 'x';
   showDec.checked = renderer.options.showDecoratives;
 
+  initZoom.oninput = () => {
+    const v = Number(initZoom.value);
+    renderer.setOption('initialZoom', v);
+    initZoomVal.textContent = v.toFixed(1) + 'x';
+  };
   fadeMin.oninput = () => {
     renderer.setOption('labelFadeMin', Number(fadeMin.value));
     fadeMinVal.textContent = Number(fadeMin.value).toFixed(1) + 'x';
@@ -187,9 +200,6 @@ function wireDebugPanel(renderer) {
   };
   resetBtn.onclick = () => renderer.reset();
 
-  // Live zoom + FPS. The renderer fires onFrame each draw cycle;
-  // we update text nodes there but throttle by rounding so the DOM
-  // doesn't churn.
   let lastZoom = -1, lastFps = -1;
   renderer.onFrame(() => {
     const z = Math.round(renderer.getZoom() * 100) / 100;
