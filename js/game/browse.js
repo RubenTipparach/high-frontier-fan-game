@@ -271,39 +271,46 @@ function endCustomDragGhost() {
   _dragGhostState = null;
 }
 
-// Fly a card from one screen-space rectangle to another in a
-// short CSS transition. Used when the player clicks a "Grab" /
-// "Add to stack" button so the card visibly travels to its
-// destination instead of just teleporting via state change.
-// The flyer is a fresh clone — it's purely cosmetic — and
-// disposes itself when the transition ends.
-function flyCardTo(card, kind, fromRect, destSelector) {
-  const dest = document.querySelector(destSelector);
-  if (!dest) return;
-  const toRect = dest.getBoundingClientRect();
+// Fly a card from one screen-space rectangle to a real target
+// element, landing precisely on top of it. The target's
+// opacity is suppressed during the flight so the card appears
+// continuous — flyer arrives, target reveals, flyer removes
+// in the same frame — instead of fading out into empty air
+// while the target popped in some time ago.
+function flyCardTo(card, kind, fromRect, targetSelector) {
+  const target = document.querySelector(targetSelector);
+  if (!target) return;
+  const toRect = target.getBoundingClientRect();
+
+  // Hide the landing target so the flyer is the only card
+  // visible during the flight. Restore on transitionend so
+  // the reveal happens exactly when the flyer arrives.
+  const prevOpacity = target.style.opacity;
+  target.style.opacity = '0';
+
   const flyer = renderCard(card, { type: kind });
   flyer.classList.add('card-flyer');
-  flyer.style.left = `${fromRect.left}px`;
-  flyer.style.top  = `${fromRect.top}px`;
+  flyer.style.left   = `${fromRect.left}px`;
+  flyer.style.top    = `${fromRect.top}px`;
   flyer.style.width  = `${fromRect.width}px`;
-  // Source card is full-size; destination is the hand strip's
-  // first slot region. Use top-right corner of the destination
-  // as the landing point so consecutive flies queue rightward.
   document.body.appendChild(flyer);
-  // Force a layout pass so the CSS transition kicks in on the
-  // next frame, not the same frame as the append.
+  // Force layout so the next-frame transform actually animates.
   // eslint-disable-next-line no-unused-expressions
   flyer.offsetWidth;
   requestAnimationFrame(() => {
-    const cx = toRect.left + Math.min(toRect.width - 100, 80);
-    const cy = toRect.top  + 40;
-    flyer.style.transform = `translate(${cx - fromRect.left}px, ${cy - fromRect.top}px) scale(0.55) rotate(-6deg)`;
-    flyer.style.opacity = '0.0';
+    const tx = toRect.left - fromRect.left;
+    const ty = toRect.top  - fromRect.top;
+    const scale = toRect.width / Math.max(1, fromRect.width);
+    flyer.style.transform = `translate(${tx}px, ${ty}px) scale(${scale.toFixed(3)}) rotate(0deg)`;
   });
-  flyer.addEventListener('transitionend', () => flyer.remove(), { once: true });
-  // Safety: remove the flyer after a fixed timeout in case the
-  // transitionend event never fires (e.g. tab backgrounded).
-  setTimeout(() => flyer.remove(), 900);
+  const finish = () => {
+    target.style.opacity = prevOpacity;
+    flyer.remove();
+  };
+  flyer.addEventListener('transitionend', finish, { once: true });
+  // Safety: if transitionend never fires (tab backgrounded,
+  // etc.), recover.
+  setTimeout(finish, 900);
 }
 
 // Tap modal for a card sitting in the deck. Confirms "add to
@@ -335,14 +342,15 @@ function openDeckTapModal(card, kind) {
     close();
   });
 
-  const cancelBtn = document.createElement('button');
-  cancelBtn.type = 'button';
-  cancelBtn.className = 'modal-btn cancel';
-  cancelBtn.textContent = 'Cancel';
-  cancelBtn.addEventListener('click', close);
-
-  actions.append(addBtn, cancelBtn);
+  actions.append(addBtn);
   panel.appendChild(actions);
+  const xBtn = document.createElement('button');
+  xBtn.type = 'button';
+  xBtn.className = 'modal-x';
+  xBtn.textContent = '×';
+  xBtn.title = 'Close (Esc)';
+  xBtn.addEventListener('click', close);
+  panel.appendChild(xBtn);
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
   const onKey = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
@@ -411,24 +419,28 @@ function openCardModal(card, kind, slotIdx) {
     rocketAddCard(card.id, kind);
     removeFromHandAt(slotIdx);
     close();
-    // Open the rocket pane so the player sees the card land,
-    // and fly the card from the (former) hand slot into the
-    // rocket pane's grid.
     showPane('rocket');
-    // Give the pane a frame to render before measuring it.
+    // Give the rocket pane a frame to render the new slot, then
+    // fly the card onto the last-appended rocket-slot element.
     requestAnimationFrame(() => {
-      flyCardTo(card, kind, sourceRect, '#rocket-stack-cards, #rocket-panel');
+      const target = document.querySelector('#rocket-stack-cards .rocket-slot:last-of-type')
+        ? '#rocket-stack-cards .rocket-slot:last-of-type'
+        : '#rocket-panel';
+      flyCardTo(card, kind, sourceRect, target);
     });
   });
 
-  const cancelBtn = document.createElement('button');
-  cancelBtn.type = 'button';
-  cancelBtn.className = 'modal-btn cancel';
-  cancelBtn.textContent = 'Close';
-  cancelBtn.addEventListener('click', close);
-
-  actions.append(discardBtn, produceBtn, stackBtn, cancelBtn);
+  actions.append(discardBtn, produceBtn, stackBtn);
   panel.appendChild(actions);
+  // Top-right × close button — replaces the explicit Close
+  // action that was crowding the row of primary actions.
+  const xBtn = document.createElement('button');
+  xBtn.type = 'button';
+  xBtn.className = 'modal-x';
+  xBtn.textContent = '×';
+  xBtn.title = 'Close (Esc)';
+  xBtn.addEventListener('click', close);
+  panel.appendChild(xBtn);
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
 
@@ -1111,16 +1123,19 @@ function renderPatents() {
     quick.title = 'Add this card to your hand';
     quick.addEventListener('click', (ev) => {
       ev.stopPropagation();
-      // Snapshot the library tile's screen position BEFORE the
-      // hand state mutates (the repaint that follows turns the
-      // tile into a greyed-out ✋ placeholder which is fine to
-      // animate from, but moving the snapshot first keeps the
-      // animation accurate). Then add to hand and launch the
-      // fly animation toward the hand strip.
       const sourceRect = el.getBoundingClientRect();
       const r = addToHand(card);
       if (!r.ok) { setStatus(`Can't add: ${r.reason}.`); return; }
-      flyCardTo(card, asKind, sourceRect, '#sandbox-hand-cards');
+      // Find the slot that was just appended (last one) and
+      // fly the card directly onto it, so the landing is
+      // continuous — no gap between flyer fading and slot
+      // appearing.
+      requestAnimationFrame(() => {
+        const slotEl = document.querySelector(
+          '#sandbox-hand-cards .hand-slot:last-of-type'
+        );
+        if (slotEl) flyCardTo(card, asKind, sourceRect, '#sandbox-hand-cards .hand-slot:last-of-type');
+      });
     });
     el.appendChild(quick);
     return el;

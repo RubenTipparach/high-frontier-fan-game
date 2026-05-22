@@ -599,6 +599,34 @@ body:has(#view-browse:not(.hidden)) #main {
      beyond its layout box — without it the actions row crashes
      into the card's footer. */
   gap: 130px;
+  position: relative;
+}
+
+/* × close button in the modal's top-right corner. Replaces the
+   explicit text "Close" / "Cancel" that used to crowd the
+   action row, leaving the actions row for the primary verbs
+   (Discard / Exo produce / Add to LEO stack / Add to hand). */
+.modal-x {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 22px;
+  line-height: 1;
+  background: rgba(15, 16, 35, 0.92);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+  z-index: 10;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+}
+.modal-x:hover {
+  background: #b91c1c;
+  color: #fff;
+  border-color: #7f1d1d;
 }
 .card-modal-card {
   transform: scale(1.6);

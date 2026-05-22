@@ -622,9 +622,13 @@
   position: fixed;
   z-index: 250;
   pointer-events: none;
-  transition: transform 0.55s cubic-bezier(0.4, 1.4, 0.6, 1),
-              opacity 0.55s ease-out;
+  /* No opacity transition — the flyer stays solid all the way
+     to the target. The landing target's opacity is suppressed
+     during flight (see flyCardTo) and revealed on landing, so
+     visually it's one continuous card arrival rather than a
+     flyer fading while the destination popped in earlier. */
+  transition: transform 0.55s cubic-bezier(0.4, 1.4, 0.6, 1);
   filter: drop-shadow(0 20px 30px rgba(0, 0, 0, 0.55));
   transform: translate(0, 0) scale(1) rotate(0deg);
-  opacity: 1;
+  transform-origin: top left;
 }
