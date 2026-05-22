@@ -232,11 +232,74 @@ function spectralHex(type) {
   return svg;
 }
 
-// Thrust visualisation: rounded blue triangle, pink thrust circle
-// at the left base, 💧 with per-burn fuel cost at the right base,
-// arrow in between. Requirement glyphs (sun for beam-receiver,
-// ballerina for spin-grav, satellite for push-sat, etc.) sit
-// inside the triangle, matching the chip row below.
+// Hand-drawn sun glyph: filled disc with 8 rays. Used inside the
+// thrust triangle for beam-receiver supports. Replaces the ☀️
+// emoji so the glyph renders consistently across platforms
+// (some platforms emoji ☀️ as a face).
+function svgSun(cx, cy, size) {
+  const r = size * 0.28;
+  const inner = r + size * 0.06;
+  const outer = size * 0.46;
+  const rays = [];
+  for (let i = 0; i < 8; i++) {
+    const a = (i * Math.PI) / 4;
+    const x1 = cx + Math.cos(a) * inner;
+    const y1 = cy + Math.sin(a) * inner;
+    const x2 = cx + Math.cos(a) * outer;
+    const y2 = cy + Math.sin(a) * outer;
+    rays.push(`<line x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" `
+      + `x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}" stroke="#fde047" `
+      + `stroke-width="1.4" stroke-linecap="round"/>`);
+  }
+  return `<g data-tip="Beam receiver">${rays.join('')}`
+    + `<circle cx="${cx}" cy="${cy}" r="${r.toFixed(2)}" `
+    + `fill="#fbbf24" stroke="#f59e0b" stroke-width="0.6"/></g>`;
+}
+
+// Hand-drawn ballerina stick-figure: head + torso + outstretched
+// arms + V-spread legs, the published-card "spin gravity" glyph.
+// Avoids the 💃 emoji which renders as a balloon-shaped figure
+// on several platforms.
+function svgBallerina(cx, cy, size) {
+  const s = size / 18;
+  const headR = 1.7 * s;
+  const headY = cy - 6 * s;
+  const shoulderY = cy - 3 * s;
+  const armSpan = 6 * s;
+  const hipY = cy + 2 * s;
+  const footSpread = 3.2 * s;
+  const footY = cy + 6 * s;
+  const stroke = (1.1 * s).toFixed(2);
+  return `<g data-tip="Spin gravity" stroke="#f0abfc" `
+    + `stroke-width="${stroke}" stroke-linecap="round" fill="none">`
+    + `<circle cx="${cx}" cy="${headY.toFixed(2)}" r="${headR.toFixed(2)}" `
+    + `fill="#f0abfc" stroke="#a21caf" stroke-width="0.4"/>`
+    + `<line x1="${cx}" y1="${(headY + headR).toFixed(2)}" `
+    + `x2="${cx}" y2="${hipY.toFixed(2)}"/>`
+    + `<line x1="${(cx - armSpan).toFixed(2)}" y1="${shoulderY.toFixed(2)}" `
+    + `x2="${(cx + armSpan).toFixed(2)}" y2="${shoulderY.toFixed(2)}"/>`
+    + `<line x1="${cx}" y1="${hipY.toFixed(2)}" `
+    + `x2="${(cx - footSpread).toFixed(2)}" y2="${footY.toFixed(2)}"/>`
+    + `<line x1="${cx}" y1="${hipY.toFixed(2)}" `
+    + `x2="${(cx + footSpread).toFixed(2)}" y2="${footY.toFixed(2)}"/></g>`;
+}
+
+// Build the SVG fragment for one support icon inside the thrust
+// triangle. Beam-receiver + spin-grav get hand-drawn shapes;
+// other supports fall back to their REQUIREMENT_VIS emoji.
+function triangleIconSvg(kind, count, p) {
+  if (kind === 'beam-receiver') return svgSun(p.x, p.y - 4, p.s);
+  if (kind === 'spin-grav')     return svgBallerina(p.x, p.y - 2, p.s);
+  const vis = REQUIREMENT_VIS[kind] || { glyph: '◇', label: kind };
+  const tip = count > 1 ? `${vis.label} ×${count}` : vis.label;
+  return `<text x="${p.x}" y="${p.y}" text-anchor="middle" `
+    + `font-size="${p.s}" data-tip="${tip}">${vis.glyph}</text>`;
+}
+
+// Thrust visualisation: rounded blue triangle holding the
+// support icons (sun for beam-receiver, ballerina for spin-grav,
+// satellite for push-sat, etc.) in the upper interior, with the
+// pink thrust circle + fuel droplet anchored at the base.
 function thrustVisual(card) {
   const wrap = document.createElement('div');
   wrap.className = 'thrust-visual';
@@ -247,31 +310,17 @@ function thrustVisual(card) {
     ? 0
     : Math.max(1, Math.ceil(thrust / Math.max(1, card.isp || 1)));
 
-  // Pull glyphs for every requirement so they appear inside the
-  // triangle. Cap at 3 — beyond that they'd crowd the silhouette;
-  // overflow stays in the chip row below.
-  const reqList = (card.requires || []).slice(0, 3);
-  const reqIcons = reqList
-    .map((r) => ({ kind: r.kind, count: r.count, vis: REQUIREMENT_VIS[r.kind] }))
-    .filter((r) => r.vis && r.vis.glyph);
-  // Layout is count-aware so icons always sit clear of the
-  // sloped edges. y values drift down as count grows because the
-  // triangle is widest near the base.
+  // Support icons inside the triangle. Layout is count-aware so
+  // every glyph sits clear of the sloped edges.
+  const reqs = (card.requires || []).slice(0, 3).filter((r) => REQUIREMENT_VIS[r.kind]);
   const iconLayouts = {
-    1: [{ x: 70, y: 64, s: 24 }],
-    2: [{ x: 58, y: 66, s: 18 }, { x: 82, y: 66, s: 18 }],
-    3: [{ x: 52, y: 70, s: 14 }, { x: 70, y: 70, s: 14 },
-        { x: 88, y: 70, s: 14 }],
+    1: [{ x: 70, y: 56, s: 26 }],
+    2: [{ x: 56, y: 60, s: 20 }, { x: 84, y: 60, s: 20 }],
+    3: [{ x: 50, y: 66, s: 15 }, { x: 70, y: 66, s: 15 },
+        { x: 90, y: 66, s: 15 }],
   };
-  const layout = iconLayouts[reqIcons.length] || [];
-  const iconsSvg = reqIcons
-    .map((r, i) => {
-      const p = layout[i];
-      const tip = r.count > 1 ? `${r.vis.label} ×${r.count}` : r.vis.label;
-      return `<text x="${p.x}" y="${p.y}" text-anchor="middle"
-        font-size="${p.s}" data-tip="${tip}">${r.vis.glyph}</text>`;
-    })
-    .join('');
+  const layout = iconLayouts[reqs.length] || [];
+  const iconsSvg = reqs.map((r, i) => triangleIconSvg(r.kind, r.count, layout[i])).join('');
 
   // Rounded-triangle path. Apex at (70,12); base (18,86)–(122,86).
   // Each corner is curved with a small quadratic; tangent points

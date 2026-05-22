@@ -1399,9 +1399,29 @@ export class MapRenderer {
       const sx = this.pan.x + site.x * eff;
       const sy = this.pan.y + site.y * eff;
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
-      // Flavour-only bodies (Sun, comets) and explicitly non-
-      // landable synthetics (Earth, Jupiter) skip the hex marker.
-      if (vis.kind === 'sun' || vis.kind === 'comet') continue;
+      if (vis.kind === 'sun') continue;
+      // Comets don't take a hex marker — they're an icy nucleus
+      // floating in space — but they ARE landable. Paint the
+      // pink lander disc + 🚀 here so the player sees the same
+      // "land on this" affordance offered on body surfaces.
+      if (vis.kind === 'comet') {
+        if (sx < -30 || sx > hostW + 30 || sy < -30 || sy > hostH + 30) continue;
+        const burnVis = TYPE_VIS.burn;
+        const ringR = burnVis.r * 1.4;
+        ctx.fillStyle = burnVis.fill;
+        ctx.strokeStyle = burnVis.stroke;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.font = `${EMOJI_PX}px ${EMOJI_FONT}`;
+        ctx.fillStyle = '#ffffff';
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'center';
+        ctx.fillText('🚀', sx, sy);
+        continue;
+      }
       if (site.isLandable === false) continue;
       const r = vis.r;
       if (sx < -r - 20 || sx > hostW + r + 20 || sy < -r - 20 || sy > hostH + r + 20) continue;
