@@ -413,15 +413,11 @@ function openDeckTapModal(card, kind) {
 
   actions.append(addBtn);
   panel.appendChild(actions);
-  const xBtn = document.createElement('button');
-  xBtn.type = 'button';
-  xBtn.className = 'modal-x';
-  xBtn.textContent = '×';
-  xBtn.title = 'Close (Esc)';
-  xBtn.addEventListener('click', close);
-  panel.appendChild(xBtn);
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
+  // Tap the backdrop or press Escape to dismiss — no explicit ×
+  // button. The card modal is small and the backdrop is the
+  // obvious affordance.
   const onKey = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
   document.addEventListener('keydown', onKey);
 }
@@ -499,19 +495,11 @@ function openCardModal(card, kind, slotIdx) {
 
   actions.append(discardBtn, sellBtn, produceBtn, boostBtn);
   panel.appendChild(actions);
-  // Top-right × close button — replaces the explicit Close
-  // action that was crowding the row of primary actions.
-  const xBtn = document.createElement('button');
-  xBtn.type = 'button';
-  xBtn.className = 'modal-x';
-  xBtn.textContent = '×';
-  xBtn.title = 'Close (Esc)';
-  xBtn.addEventListener('click', close);
-  panel.appendChild(xBtn);
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
 
-  // Escape closes too.
+  // Tap the backdrop or press Escape to dismiss — no explicit ×
+  // button (the action row already crowds the bottom).
   const onKey = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
   document.addEventListener('keydown', onKey);
 }

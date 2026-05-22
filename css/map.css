@@ -859,8 +859,12 @@ body:has(#view-browse:not(.hidden)) #main {
   }
   /* Modal mode: detach from the right edge and float as a
      centred sheet. The tab strip inside collapses since the user
-     dismisses with × / backdrop tap to switch panes. */
-  .browse-sidepanel[data-active] {
+     dismisses with × / backdrop tap to switch panes.
+     `[data-active=""]` matches the bare `[data-active]` selector
+     too, so we explicitly exclude the empty-string state — without
+     this, closing a pane leaves the modal styling stuck and the
+     "collapsed" panel renders as an empty floating sheet. */
+  .browse-sidepanel[data-active]:not([data-active=""]) {
     position: fixed;
     top: 60px;
     left: 16px;
@@ -873,7 +877,7 @@ body:has(#view-browse:not(.hidden)) #main {
     box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
     z-index: 10;
   }
-  .browse-sidepanel[data-active] .sidepanel-tabs {
+  .browse-sidepanel[data-active]:not([data-active=""]) .sidepanel-tabs {
     display: none;
   }
 }
