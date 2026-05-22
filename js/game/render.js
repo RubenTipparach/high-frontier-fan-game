@@ -24,27 +24,122 @@
 
 const VIEW_W = 1400;
 const VIEW_H = 900;
-const MIN_ZOOM = 0.4;
+// MIN_ZOOM = 1.0 means "you can never zoom out past the fit-to-view";
+// pinching past that point would just push the data off-screen.
+const MIN_ZOOM = 1.0;
 const MAX_ZOOM = 8;
 
+// Body styling. Sites render as shaded spheres; waypoints stay as
+// flat-coloured circles since they're abstract routing nodes, not
+// physical objects.
 const TYPE_VIS = {
-  site:     { kind: 'hex',    r: 14, fill: '#0c0a16', stroke: '#ffffff' },
-  planet:   { kind: 'hex',    r: 14, fill: '#0c0a16', stroke: '#ffffff' },
-  moon:     { kind: 'hex',    r: 12, fill: '#0c0a16', stroke: '#cbd5e1' },
-  dwarf:    { kind: 'hex',    r: 13, fill: '#0c0a16', stroke: '#a78bfa' },
-  asteroid: { kind: 'hex',    r: 10, fill: '#0c0a16', stroke: '#94a3b8' },
-  tno:      { kind: 'hex',    r: 11, fill: '#0c0a16', stroke: '#67e8f9' },
-  lagrange: { kind: 'circle', r:  8, fill: 'transparent', stroke: '#c66932' },
-  burn:     { kind: 'circle', r:  8, fill: '#d60f7a', stroke: '#fde0ee' },
-  hohmann:  { kind: 'circle', r:  8, fill: '#10b981', stroke: '#a7f3d0' },
-  venus:    { kind: 'circle', r:  9, fill: '#fb923c', stroke: '#fed7aa' },
-  radhaz:   { kind: 'circle', r:  8, fill: '#fbbf24', stroke: '#fde68a' },
+  site:     { kind: 'sphere', r: 12 },
+  planet:   { kind: 'sphere', r: 16 },
+  moon:     { kind: 'sphere', r: 10 },
+  dwarf:    { kind: 'sphere', r: 12 },
+  asteroid: { kind: 'sphere', r:  8 },
+  tno:      { kind: 'sphere', r: 10 },
+  surface:  { kind: 'sphere', r: 10 },
+  lagrange: { kind: 'circle', r:  7, fill: 'transparent', stroke: '#c66932' },
+  burn:     { kind: 'circle', r:  7, fill: '#d60f7a', stroke: '#fde0ee' },
+  hohmann:  { kind: 'circle', r:  7, fill: '#10b981', stroke: '#a7f3d0' },
+  venus:    { kind: 'circle', r:  8, fill: '#fb923c', stroke: '#fed7aa' },
+  radhaz:   { kind: 'circle', r:  7, fill: '#fbbf24', stroke: '#fde68a' },
   orbit:    { kind: 'circle', r:  6, fill: '#0c0a16', stroke: '#7dd3fc' },
-  surface:  { kind: 'hex',    r: 11, fill: '#0c0a16', stroke: '#fdba74' },
   unknown:  { kind: 'circle', r:  4, fill: '#0c0a16', stroke: '#475569' },
 };
 
+// Per-body palette. Each entry is {base, light, dark, atmosphere?}.
+// base is the equator midtone, light is the highlight near the lit
+// pole, dark is the terminator side. atmosphere (when set) draws a
+// soft rim glow outside the disc.
+const BODY_PALETTES = {
+  mercury:  { base: '#9a8773', light: '#d4c0a8', dark: '#3d3326' },
+  venus:    { base: '#e8c87a', light: '#fff0c2', dark: '#7a5a1a', atmosphere: 'rgba(255, 220, 140, 0.5)' },
+  earth:    { base: '#3b7fc0', light: '#8fc1ee', dark: '#0e2c4b', atmosphere: 'rgba(135, 206, 250, 0.55)' },
+  luna:     { base: '#9da3ad', light: '#dfe2e8', dark: '#3a3d44' },
+  mars:     { base: '#c1502e', light: '#f0a47e', dark: '#3c1408', atmosphere: 'rgba(220, 130, 90, 0.3)' },
+  jupiter:  { base: '#c8a373', light: '#f3dab0', dark: '#5a3e22' },
+  io:       { base: '#e6c84a', light: '#fff2a6', dark: '#5a4a12' },
+  europa:   { base: '#d4cdb8', light: '#f3eee0', dark: '#5a5346' },
+  ganymede: { base: '#a39788', light: '#dccfb8', dark: '#3a342c' },
+  callisto: { base: '#6e6357', light: '#a89a87', dark: '#1f1c18' },
+  saturn:   { base: '#dcc587', light: '#fbe9b8', dark: '#5e4f2b' },
+  titan:    { base: '#caa15a', light: '#fbdfa1', dark: '#3f2f15', atmosphere: 'rgba(255, 215, 130, 0.45)' },
+  enceladus:{ base: '#e1ecf5', light: '#ffffff', dark: '#5a6878' },
+  iapetus:  { base: '#7a6d5c', light: '#bcae97', dark: '#272118' },
+  uranus:   { base: '#9fdcd6', light: '#dff7f5', dark: '#1f5e5a', atmosphere: 'rgba(150, 220, 230, 0.45)' },
+  neptune:  { base: '#3c66c7', light: '#9bb9f0', dark: '#0e1f55', atmosphere: 'rgba(120, 160, 240, 0.45)' },
+  pluto:    { base: '#b59c83', light: '#e6d4be', dark: '#3a2f24' },
+  charon:   { base: '#7d7164', light: '#beb2a1', dark: '#241f19' },
+  ceres:    { base: '#9c9387', light: '#d4cbbd', dark: '#2f2b25' },
+  vesta:    { base: '#a89989', light: '#decec0', dark: '#352d24' },
+  comet:    { base: '#cfe6f0', light: '#ffffff', dark: '#3a4a55', atmosphere: 'rgba(180, 220, 240, 0.5)' },
+};
+const PALETTE_DEFAULTS = {
+  planet:   { base: '#a8967e', light: '#e1d2bc', dark: '#2f261a' },
+  moon:     { base: '#9098a3', light: '#cfd4dc', dark: '#2c2f36' },
+  dwarf:    { base: '#a6a09a', light: '#d6d2cd', dark: '#34302c' },
+  asteroid: { base: '#7e6f5c', light: '#b8a78c', dark: '#26201a' },
+  tno:      { base: '#9ec4d2', light: '#d8eaf1', dark: '#2c3f49' },
+  surface:  { base: '#a8967e', light: '#e1d2bc', dark: '#2f261a' },
+  site:     { base: '#a8967e', light: '#e1d2bc', dark: '#2f261a' },
+};
+
+// Pick the palette for a site by matching a known body name keyword
+// first, then falling back to the type default. Cheap substring
+// check on lowercased name; precompute once on first paint.
+function paletteFor(site) {
+  if (site._palette) return site._palette;
+  const n = (site.name || '').toLowerCase();
+  for (const key of Object.keys(BODY_PALETTES)) {
+    if (n.includes(key)) { site._palette = BODY_PALETTES[key]; return site._palette; }
+  }
+  site._palette = PALETTE_DEFAULTS[site.type] || PALETTE_DEFAULTS.asteroid;
+  return site._palette;
+}
+
 const ZONE_BAND_LIGHT = ['Venus', 'Mars', 'Jupiter', 'Uranus'];
+
+// Standard 2D planet shading recipe: optional outer atmosphere
+// rim, a base disc, an offset-centre radial gradient for the lit
+// hemisphere (light source assumed at upper-left), and a thin
+// outer stroke so the disc reads against the starfield.
+//
+// Cheap enough at ~190 nodes per frame; no external library.
+function drawShadedSphere(ctx, cx, cy, r, palette, hazard) {
+  // Atmosphere glow (skipped for airless bodies).
+  if (palette.atmosphere) {
+    const halo = ctx.createRadialGradient(cx, cy, r * 0.85, cx, cy, r * 1.5);
+    halo.addColorStop(0, palette.atmosphere);
+    halo.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 1.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Base disc fills the dark side first so the gradient blends
+  // into a flat colour at the terminator rather than turning
+  // transparent. Light source: upper-left of the body.
+  const lx = cx - r * 0.35;
+  const ly = cy - r * 0.35;
+  const grad = ctx.createRadialGradient(lx, ly, r * 0.05, cx, cy, r * 1.05);
+  grad.addColorStop(0,    palette.light);
+  grad.addColorStop(0.45, palette.base);
+  grad.addColorStop(1,    palette.dark);
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Subtle outer stroke so the disc has a definite edge against
+  // the dark background. Hazard bodies get a red ring instead.
+  ctx.lineWidth = 1.1;
+  ctx.strokeStyle = hazard ? '#f87171' : 'rgba(255,255,255,0.4)';
+  ctx.stroke();
+}
 
 export class MapRenderer {
   constructor(host, { data, onSelect } = {}) {
@@ -444,7 +539,6 @@ export class MapRenderer {
   _drawSiteBodiesScreen(ctx) {
     const eff = this.zoom * this.fitScale;
     const { hostW, hostH } = this;
-    ctx.lineWidth = 1.6;
     for (const site of this._realSites) {
       const sx = this.pan.x + site.x * eff;
       const sy = this.pan.y + site.y * eff;
@@ -452,32 +546,25 @@ export class MapRenderer {
       const r = vis.r;
       if (sx < -r - 20 || sx > hostW + r + 20 || sy < -r - 20 || sy > hostH + r + 20) continue;
 
-      ctx.beginPath();
-      if (vis.kind === 'hex') {
-        for (let i = 0; i < 6; i++) {
-          const t = (i / 6) * Math.PI * 2;
-          const px = sx + Math.cos(t) * r;
-          const py = sy + Math.sin(t) * r;
-          if (i === 0) ctx.moveTo(px, py);
-          else ctx.lineTo(px, py);
-        }
-        ctx.closePath();
+      if (vis.kind === 'sphere') {
+        drawShadedSphere(ctx, sx, sy, r, paletteFor(site), site.hazard);
       } else {
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
         ctx.moveTo(sx + r, sy);
         ctx.arc(sx, sy, r, 0, Math.PI * 2);
+        ctx.fillStyle = vis.fill || '#0c0a16';
+        ctx.fill();
+        ctx.strokeStyle = site.hazard ? '#f87171' : (vis.stroke || '#cbd5e1');
+        ctx.stroke();
       }
-      ctx.fillStyle = vis.fill;
-      ctx.fill();
-      ctx.strokeStyle = site.hazard ? '#f87171' : vis.stroke;
-      ctx.stroke();
 
       if (site.id === this._routeFromId || site.id === this._routeToId) {
         ctx.strokeStyle = site.id === this._routeFromId ? '#4ade80' : '#f0abfc';
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.arc(sx, sy, r + 4, 0, Math.PI * 2);
+        ctx.arc(sx, sy, r + 5, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.lineWidth = 1.6;
       }
     }
   }
