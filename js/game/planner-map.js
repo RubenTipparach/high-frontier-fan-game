@@ -18,6 +18,12 @@ const PLANNER_JSON_URL = './vendor/hf-mission-planner/assets/data-hf4.json';
 // aerobrake / atmospheric / push booleans per site so the renderer
 // can decorate planner nodes with the right glyphs.
 const SITE_FLAGS_URL  = './data/site-flags.json';
+// Pre-computed by scripts/extract-waypoint-seasons.py. Maps
+// waypoint id -> 'red' | 'yellow' | 'blue'. Tags the lagrange /
+// burn waypoints that sit on the linear approach corridor leading
+// to a seasonal site (comet, Icarus, Phaethon, ...). Re-run the
+// script after a planner-data refresh.
+const WAYPOINT_SEASONS_URL = './data/waypoint-seasons.json';
 
 let _cache = null;
 
@@ -44,6 +50,12 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
     if (fr.ok) siteFlags = await fr.json();
   } catch { /* ignore */ }
 
+  let waypointSeasons = {};
+  try {
+    const sr = await fetch(WAYPOINT_SEASONS_URL);
+    if (sr.ok) waypointSeasons = await sr.json();
+  } catch { /* ignore */ }
+
   // Points -> sites array. The planner uses random-float string IDs;
   // we keep them as-is (they're stable across reloads of the same
   // data file) and add a human-readable name for display.
@@ -62,14 +74,21 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
     // body group key so "Mars: Arsia Mons" can inherit any flags
     // recorded against the Mars group.
     const flags = lookupFlags(p.siteName, siteFlags);
+    // Waypoints don't carry siteSynodic in the planner JSON; we
+    // apply the pre-computed corridor tag from the extractor here
+    // so the renderer sees a uniform field on both real sites and
+    // their approach-corridor waypoints.
+    const isWaypoint = rawType !== 'site';
+    const synodic = p.siteSynodic
+      || (isWaypoint ? (waypointSeasons[id] || null) : null);
     sites.push({
       id,
       name: p.siteName || routingLabel(rawType),
       type,
-      isWaypoint: rawType !== 'site',
+      isWaypoint,
       isDecorative: rawType === 'decorative',
       siteSize: p.siteSize || null,
-      siteSynodic: p.siteSynodic || null,
+      siteSynodic: synodic,
       hydration: parseHydration(p.siteWater),
       hazard: !!p.hazard,
       // Comets are always landing sites in HF4 — you touch down
@@ -114,17 +133,6 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
 
   const byId = Object.fromEntries(sites.map((s) => [s.id, s]));
 
-  // Seasonal-corridor propagation: comets / Icarus / Phaethon /
-  // any other site with `siteSynodic` only exist in their apparition
-  // window, so the lagrange + burn waypoints along their approach
-  // path are functionally the same season. We BFS from each seasonal
-  // site through waypoint-only neighbours and stamp the season onto
-  // the waypoints we touch. The render layer then colours edges and
-  // chains by either endpoint's siteSynodic — which now includes
-  // those waypoints — so the whole corridor reads as one colour
-  // instead of the season abruptly stopping at the destination hex.
-  propagateSeasonsToWaypoints(sites, edges, byId);
-
   // Chains of decorative routing nodes (degree-2 nodes whose only
   // job is to bend a straight line into a curve). We split them out
   // here so the renderer can paint them as smooth Bezier ribbons
@@ -134,52 +142,6 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
 
   _cache = { sites, edges, byId, chains, straightEdges, mode: 'classic' };
   return _cache;
-}
-
-// BFS from each seasonal site through waypoint-only neighbours and
-// stamp the seasonal site's siteSynodic onto each waypoint we visit.
-// A waypoint claimed by two different seasons stays neutral (the
-// rare junction between two corridors); a waypoint claimed by one
-// season inherits it. We never traverse THROUGH a real (non-
-// waypoint) site, so a waypoint that sits between Earth and a comet
-// only picks up the comet's season — Earth doesn't bleed through.
-function propagateSeasonsToWaypoints(sites, edges, byId) {
-  const adj = new Map();
-  for (const s of sites) adj.set(s.id, []);
-  for (const [a, b] of edges) {
-    if (!adj.has(a) || !adj.has(b)) continue;
-    adj.get(a).push(b);
-    adj.get(b).push(a);
-  }
-
-  const claims = new Map();           // waypoint id -> Set<season>
-  function bfs(source) {
-    const season = source.siteSynodic;
-    if (!season) return;
-    const visited = new Set([source.id]);
-    const queue = [source.id];
-    while (queue.length) {
-      const cur = queue.shift();
-      for (const next of adj.get(cur) || []) {
-        if (visited.has(next)) continue;
-        const ns = byId[next];
-        if (!ns || !ns.isWaypoint) continue;
-        visited.add(next);
-        queue.push(next);
-        let set = claims.get(next);
-        if (!set) { set = new Set(); claims.set(next, set); }
-        set.add(season);
-      }
-    }
-  }
-  for (const s of sites) {
-    if (s.siteSynodic && !s.isWaypoint) bfs(s);
-  }
-  for (const s of sites) {
-    if (!s.isWaypoint) continue;
-    const set = claims.get(s.id);
-    if (set && set.size === 1) s.siteSynodic = set.values().next().value;
-  }
 }
 
 // Walk the adjacency graph and pull out every chain of degree-2
