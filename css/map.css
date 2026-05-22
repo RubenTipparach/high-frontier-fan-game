@@ -348,6 +348,133 @@ body:has(#view-browse:not(.hidden)) #main {
   overflow: hidden;
 }
 
+/* Sandbox hand strip: a horizontal panel anchored at the
+   bottom of the map area. Holds the cards the player has
+   dragged out of the patent deck to build a tentative rocket.
+   Sits above the map, beside the sidepanel; on mobile it
+   stretches the full width below the map content. */
+.sandbox-hand {
+  position: absolute;
+  left: 0;
+  right: 388px;  /* clear the open sidepanel */
+  bottom: 0;
+  height: 152px;
+  background: rgba(8, 8, 18, 0.96);
+  border-top: 1px solid var(--border);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 10px 10px;
+  backdrop-filter: blur(6px);
+  transition: right 0.22s ease;
+}
+.browse-sidepanel[data-active=""] ~ .sandbox-hand { right: 48px; }
+@media (max-width: 720px) {
+  .sandbox-hand { right: 0 !important; bottom: 64px; }
+}
+.hand-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  padding: 2px 0 4px;
+}
+.hand-title { font-weight: 700; letter-spacing: 1px; }
+.hand-count { color: var(--ink-mute); font-variant-numeric: tabular-nums; }
+#hand-clear {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 2px 8px;
+}
+.hand-cards {
+  flex: 1;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px;
+  border: 1.5px dashed rgba(120, 130, 170, 0.3);
+  border-radius: 6px;
+  position: relative;
+}
+.hand-cards:empty::before {
+  content: attr(data-empty);
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-mute);
+  font-size: 12px;
+  pointer-events: none;
+}
+.hand-cards.is-drop-target {
+  border-color: var(--accent);
+  background: rgba(56, 189, 248, 0.08);
+}
+.hand-cards.flash-error {
+  border-color: #f87171;
+  animation: hand-flash 0.5s ease;
+}
+@keyframes hand-flash {
+  0%   { background: rgba(248, 113, 113, 0.25); }
+  100% { background: transparent; }
+}
+.hand-slot {
+  position: relative;
+  flex-shrink: 0;
+  height: 100%;
+}
+/* Scale the rendered card down to fit the hand strip height. */
+.hand-slot .card {
+  transform: scale(0.45);
+  transform-origin: top left;
+  width: 240px;
+}
+.hand-slot {
+  width: 108px;  /* 240 * 0.45 */
+  height: 100%;
+}
+.hand-drop {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ef4444;
+  color: #fff;
+  border: 1px solid #7f1d1d;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 5;
+  padding: 0;
+}
+
+/* Grabbed cards in the deck grid get a ✋ overlay + grey-out so
+   the player sees at a glance which cards are already in their
+   hand. Drag is disabled (a second drag wouldn't do anything
+   useful — duplicates aren't allowed). */
+.card.is-grabbed {
+  position: relative;
+  opacity: 0.55;
+  filter: grayscale(0.6);
+  pointer-events: none;
+}
+.card.is-grabbed::after {
+  content: "✋";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 56px;
+  z-index: 10;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+.card.is-dragging { opacity: 0.4; }
+
 .browse-stage {
   position: absolute;
   inset: 0;

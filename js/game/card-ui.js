@@ -458,20 +458,27 @@ function spectralHex(type) {
   const style = SPECTRAL_STYLE[type] || SPECTRAL_STYLE.unknown;
   const label = SPECTRAL_LABEL[type] || SPECTRAL_LABEL.unknown;
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '-12 -14 24 28');
+  // viewBox swapped to a wider-than-tall box because the hex is
+  // now FLAT-TOP (a 30° rotation from the pointy-top default).
+  // All hexes use the same black fill regardless of spectral
+  // letter — the letter alone reads the type; colour-coding
+  // turned out to confuse the read against the saturated
+  // typebars sitting next to it.
+  svg.setAttribute('viewBox', '-14 -12 28 24');
   svg.setAttribute('class', 'spectral-hex');
   svg.setAttribute('data-tip', `Spectral type ${style.glyph} — ${label}`);
-  // Pointy-top hex so it reads as a gem rather than a planet hex.
   const r = 12;
   const points = [];
   for (let i = 0; i < 6; i++) {
-    const t = (i / 6) * Math.PI * 2 - Math.PI / 2;
+    // No -π/2 offset → first vertex points right (0°), giving
+    // horizontal flats on top + bottom (flat-top hex).
+    const t = (i / 6) * Math.PI * 2;
     points.push(`${(Math.cos(t) * r).toFixed(1)},${(Math.sin(t) * r).toFixed(1)}`);
   }
   const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
   poly.setAttribute('points', points.join(' '));
-  poly.setAttribute('fill', style.fill);
-  poly.setAttribute('stroke', '#0c0a16');
+  poly.setAttribute('fill', '#0c0a16');
+  poly.setAttribute('stroke', '#1f1b2e');
   poly.setAttribute('stroke-width', '1.2');
   svg.appendChild(poly);
   const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -480,7 +487,7 @@ function spectralHex(type) {
   text.setAttribute('text-anchor', 'middle');
   text.setAttribute('font-size', '12');
   text.setAttribute('font-weight', '700');
-  text.setAttribute('fill', style.ink);
+  text.setAttribute('fill', '#ffffff');
   text.textContent = style.glyph;
   svg.appendChild(text);
   return svg;

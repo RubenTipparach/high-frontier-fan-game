@@ -15,7 +15,11 @@ import {
   prospect as soloProspect, endRound as soloEndRound,
   bindData as soloBindData, onChange as soloOnChange, SOLO_CONFIG,
 } from './solo.js';
-import { PATENTS, PATENT_TYPES, patentsByType } from '../../data/patents.js';
+import { PATENTS, PATENTS_BY_ID, PATENT_TYPES, patentsByType } from '../../data/patents.js';
+import {
+  getHandIds, isInHand, addToHand, removeFromHand, clearHand,
+  onHandChange, typeInHand,
+} from './hand.js';
 import { CREW } from '../../data/crew.js';
 import { MILESTONES } from '../../data/glory.js';
 import { POLITICS } from '../../data/politics.js';
@@ -45,7 +49,77 @@ export function mountBrowse() {
   const view = document.getElementById('view-browse');
   if (!view) return;
   wireSidebar();
+  wireHandStrip();
   renderMap();
+}
+
+// Sandbox hand strip wiring: makes the bottom strip a drop
+// target, renders the current hand into it, and keeps it in
+// sync with the hand state via onHandChange.
+let _handWired = false;
+function wireHandStrip() {
+  if (_handWired) return;
+  _handWired = true;
+  const strip   = document.getElementById('sandbox-hand');
+  const host    = document.getElementById('sandbox-hand-cards');
+  const countEl = document.getElementById('hand-count');
+  const clearBtn = document.getElementById('hand-clear');
+  if (!strip || !host) return;
+
+  const lookup = (id) => PATENTS_BY_ID[id]
+    || CREW.find((c) => c.id === id) || null;
+
+  // Drop target: validates the dropped id, adds to hand if
+  // there's no type-clash, and surfaces the reason on rejection.
+  host.addEventListener('dragover', (e) => {
+    if (!e.dataTransfer.types.includes('text/card-id')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    host.classList.add('is-drop-target');
+  });
+  host.addEventListener('dragleave', () => host.classList.remove('is-drop-target'));
+  host.addEventListener('drop', (e) => {
+    e.preventDefault();
+    host.classList.remove('is-drop-target');
+    const id = e.dataTransfer.getData('text/card-id');
+    if (!id) return;
+    const card = lookup(id);
+    if (!card) return;
+    const result = addToHand(card, lookup);
+    if (!result.ok) {
+      host.dataset.errorMsg = result.reason;
+      host.classList.add('flash-error');
+      setTimeout(() => host.classList.remove('flash-error'), 700);
+    }
+  });
+
+  if (clearBtn) clearBtn.addEventListener('click', () => clearHand());
+
+  const repaintHand = () => {
+    const ids = getHandIds();
+    host.innerHTML = '';
+    if (countEl) countEl.textContent =
+      `${ids.length} card${ids.length === 1 ? '' : 's'}`;
+    for (const id of ids) {
+      const card = lookup(id);
+      if (!card) continue;
+      const kind = CREW.find((c) => c.id === id) ? 'crew' : 'patent';
+      const wrap = document.createElement('div');
+      wrap.className = 'hand-slot';
+      wrap.appendChild(renderCard(card, { type: kind }));
+      const drop = document.createElement('button');
+      drop.type = 'button';
+      drop.className = 'hand-drop';
+      drop.textContent = '×';
+      drop.title = 'Remove from hand';
+      drop.addEventListener('click', () => removeFromHand(id));
+      wrap.appendChild(drop);
+      host.appendChild(wrap);
+    }
+  };
+
+  repaintHand();
+  onHandChange(repaintHand);
 }
 
 // Side panel: a vertical tab strip on the right edge of the
@@ -555,22 +629,51 @@ function renderPatents() {
   grid.className = 'card-grid';
   host.appendChild(grid);
 
+  // Wrap renderCard so each tile in the grid is draggable, gets
+  // a data-card-id for hand operations, and shows the ✋ overlay
+  // when it's already sitting in the player's hand.
+  const decorateForHand = (card, asKind) => {
+    const el = renderCard(card, { type: asKind });
+    el.dataset.cardId  = card.id;
+    el.dataset.cardKind = asKind;
+    el.draggable = true;
+    el.addEventListener('dragstart', (ev) => {
+      ev.dataTransfer.setData('text/card-id', card.id);
+      ev.dataTransfer.setData('text/card-kind', asKind);
+      ev.dataTransfer.effectAllowed = 'move';
+      el.classList.add('is-dragging');
+    });
+    el.addEventListener('dragend', () => el.classList.remove('is-dragging'));
+    if (isInHand(card.id)) el.classList.add('is-grabbed');
+    return el;
+  };
+
   const repaint = (filter) => {
     grid.innerHTML = '';
     if (filter === 'crew') {
-      for (const c of CREW) grid.appendChild(renderCard(c, { type: 'crew' }));
+      for (const c of CREW) grid.appendChild(decorateForHand(c, 'crew'));
       return;
     }
     for (const p of PATENTS) {
       if (filter !== 'all' && p.type !== filter) continue;
-      grid.appendChild(renderCard(p, { type: 'patent' }));
+      grid.appendChild(decorateForHand(p, 'patent'));
     }
     if (filter === 'all') {
       // Append crew at the end of "all" so the deck reads as
       // "everything you can build / staff".
-      for (const c of CREW) grid.appendChild(renderCard(c, { type: 'crew' }));
+      for (const c of CREW) grid.appendChild(decorateForHand(c, 'crew'));
     }
   };
+
+  // Repaint the grid whenever the hand state changes so the ✋
+  // overlay tracks reality. Subscription is cleaned up when the
+  // patents pane is rebuilt; storing on the host element means
+  // multiple mounts don't stack listeners.
+  if (host._handUnsub) host._handUnsub();
+  host._handUnsub = onHandChange(() => {
+    const active = bar.querySelector('button.active');
+    repaint(active ? active.dataset.type : 'all');
+  });
 
   bar.querySelectorAll('button').forEach((b) => {
     b.onclick = () => {

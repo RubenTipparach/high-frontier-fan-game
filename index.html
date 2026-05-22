@@ -28,7 +28,7 @@
         <span class="brand-sub">fan game · stage 1</span>
       </div>
       <div class="topbar-actions">
-        <button id="btn-browse" title="Browse game data (map, patents, milestones, events)">Browse</button>
+        <button id="btn-browse" title="Sandbox: explore the map and build rockets from the patent deck">Sandbox</button>
         <span id="server-status" class="server-status" title="API connectivity">…</span>
         <div id="profile-pill" class="profile-pill hidden">
           <span id="profile-name"></span>
@@ -279,6 +279,25 @@
               </div>
             </div>
           </aside>
+
+          <!--
+            Sandbox hand strip: a thin panel anchored at the bottom
+            of the map area showing the cards the player has
+            dragged out of the patent deck. One card of each type
+            allowed (the rule lives in js/game/hand.js). Drag a
+            card from the Cards tab onto this strip to add it;
+            click the × on a hand card to put it back.
+          -->
+          <div id="sandbox-hand" class="sandbox-hand" aria-label="Your hand">
+            <div class="hand-header">
+              <span class="hand-title">✋ Hand</span>
+              <span class="hand-count" id="hand-count">0 cards</span>
+              <button id="hand-clear" type="button">Clear</button>
+            </div>
+            <div id="sandbox-hand-cards" class="hand-cards"
+              data-empty="Drag cards here to build your stack — one of each type">
+            </div>
+          </div>
         </div>
       </section>
     </main>
