@@ -46,6 +46,13 @@ const HEX_FULLSIZE_ZOOM = 2.5;
 // 1400×900 view used by loadPlannerMap(), so the label sits on
 // the actual LEO node rather than floating off near Itokawa.
 export const LEO_ANCHOR = { x: 1193.6, y: 739.3 };
+
+// True for the planner's LEO lagrange waypoint. The LEO node is
+// rendered larger than a normal lagrange because the sandbox
+// rocket (and eventually multiple players' rockets) park here.
+function isLeoWaypoint(w) {
+  return w && w.type === 'lagrange' && w.name === 'LEO';
+}
 const DEFAULT_ZOOM = 1.8;
 // Cap the celestial body halo at this many screen pixels so extreme
 // zoom doesn't turn Saturn into the entire canvas.
@@ -1058,8 +1065,11 @@ export class MapRenderer {
       const r = vis.r;
       ctx.beginPath();
       for (const w of items) {
-        ctx.moveTo(w.x + r, w.y);
-        ctx.arc(w.x, w.y, r, 0, Math.PI * 2);
+        // LEO is enlarged so multiple parked rockets fit on the
+        // single lagrange node without overlapping.
+        const wr = isLeoWaypoint(w) ? r * 2 : r;
+        ctx.moveTo(w.x + wr, w.y);
+        ctx.arc(w.x, w.y, wr, 0, Math.PI * 2);
       }
       if (vis.fill !== 'transparent') {
         ctx.fillStyle = vis.fill;
@@ -1181,9 +1191,12 @@ export class MapRenderer {
         for (const w of circles) {
           const sx = this.pan.x + w.x * eff;
           const sy = this.pan.y + w.y * eff;
-          if (sx < -vis.r || sx > hostW + vis.r || sy < -vis.r || sy > hostH + vis.r) continue;
-          ctx.moveTo(sx + vis.r, sy);
-          ctx.arc(sx, sy, vis.r, 0, Math.PI * 2);
+          // LEO is enlarged to fit multiple parked rockets; bump
+          // the cull margin so the bigger ring isn't clipped.
+          const wr = isLeoWaypoint(w) ? vis.r * 2 : vis.r;
+          if (sx < -wr || sx > hostW + wr || sy < -wr || sy > hostH + wr) continue;
+          ctx.moveTo(sx + wr, sy);
+          ctx.arc(sx, sy, wr, 0, Math.PI * 2);
         }
         if (vis.fill !== 'transparent') { ctx.fillStyle = vis.fill; ctx.fill(); }
         ctx.strokeStyle = vis.stroke;
@@ -1266,8 +1279,9 @@ export class MapRenderer {
         const sx = this.pan.x + w.x * eff;
         const sy = this.pan.y + w.y * eff;
         if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
+        const wr = isLeoWaypoint(w) ? vis.r * 2 : vis.r;
         ctx.beginPath();
-        ctx.arc(sx, sy, vis.r + 3, 0, Math.PI * 2);
+        ctx.arc(sx, sy, wr + 3, 0, Math.PI * 2);
         ctx.stroke();
       }
       ctx.shadowBlur = 0;
@@ -1335,12 +1349,15 @@ export class MapRenderer {
     // the orange ring stays the dominant cue and the L just tags it.
     const lagrangeItems = this._waypointsByType.get('lagrange');
     if (lagrangeItems) {
-      ctx.font = '700 10px ui-sans-serif, system-ui, sans-serif';
       ctx.fillStyle = '#fdba74';
       for (const w of lagrangeItems) {
         const sx = this.pan.x + w.x * eff;
         const sy = this.pan.y + w.y * eff;
         if (sx < -20 || sx > hostW + 20 || sy < -20 || sy > hostH + 20) continue;
+        // LEO's "L" scales with the enlarged node so the letter
+        // doesn't look lost inside the bigger circle.
+        const fontPx = isLeoWaypoint(w) ? 18 : 10;
+        ctx.font = `700 ${fontPx}px ui-sans-serif, system-ui, sans-serif`;
         ctx.fillText('L', sx, sy + 0.5);
       }
     }
@@ -1528,26 +1545,28 @@ export class MapRenderer {
     }
   }
 
-  // Player ship marker: bright triangle hovering above the
-  // Big "LEO" letters anchoring the sandbox rocket's home
-  // position so the player can find the launch site at a
-  // glance. Lives in world space (so it pans / zooms with the
-  // map) but uses a fixed pixel font size that doesn't shrink
-  // below the hex-fullsize zoom threshold.
+  // "LEO" letters anchoring the sandbox rocket's home position
+  // so the player can find the launch site at a glance. Lives
+  // in world space (so it pans / zooms with the map) but uses a
+  // fixed pixel font size that doesn't shrink below the
+  // hex-fullsize zoom threshold. Sized to read as a label and
+  // offset below the anchor so the lagrange node itself stays
+  // visible above the text.
   _drawLeoAnchorScreen(ctx) {
     const eff = this.zoom * this.fitScale;
     const sx = this.pan.x + LEO_ANCHOR.x * eff;
     const sy = this.pan.y + LEO_ANCHOR.y * eff;
-    const fontPx = 28 * Math.max(0.6, Math.min(1.2, this.zoom / 2.5));
+    const fontPx = 14 * Math.max(0.6, Math.min(1.2, this.zoom / 2.5));
+    const labelY = sy + fontPx * 1.4;   // sit below the node
     ctx.save();
     ctx.font = `900 ${fontPx}px ui-sans-serif, system-ui, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.85)';
-    ctx.lineWidth = 5;
-    ctx.strokeText('LEO', sx, sy);
+    ctx.lineWidth = 4;
+    ctx.strokeText('LEO', sx, labelY);
     ctx.fillStyle = '#fde047';
-    ctx.fillText('LEO', sx, sy);
+    ctx.fillText('LEO', sx, labelY);
     ctx.restore();
   }
 
@@ -1925,7 +1944,8 @@ export class MapRenderer {
       if (w.isDecorative) continue;
       const vis = TYPE_VIS[w.type] || TYPE_VIS.unknown;
       if (vis.kind === 'none') continue;
-      const hitR = (vis.hitR != null ? vis.hitR : Math.max(vis.r, 8)) + 2;
+      const baseR = isLeoWaypoint(w) ? vis.r * 2 : vis.r;
+      const hitR = (vis.hitR != null ? vis.hitR : Math.max(baseR, 8)) + 2;
       const dx = (this.pan.x + w.x * eff) - sx;
       const dy = (this.pan.y + w.y * eff) - sy;
       const d = dx * dx + dy * dy;
