@@ -257,6 +257,19 @@ function drawPlanetRings(ctx, cx, cy, planetR, def, phase) {
 const SUN_X = 1042;
 const SUN_Y = 654;
 
+// Cleaned-up-view zone band: which zones get the slightly lighter
+// alternating shade. Referenced only when data.mode === 'clean'.
+const ZONE_BAND_LIGHT = ['Venus', 'Mars', 'Jupiter', 'Uranus'];
+
+// Cross-platform emoji font stack. Apple Color Emoji on Mac/iOS,
+// Segoe UI Emoji on Windows, Noto Color Emoji on Android / most
+// Linux distros; fall through to "emoji" as a generic name. Used
+// for landing 🚀 / aerobrake 🪂 / submarine 🌊 / astrobiology 🌿
+// glyphs so the icons render in colour where supported and
+// degrade to monochrome where they aren't.
+const EMOJI_FONT = `"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", emoji`;
+const EMOJI_PX   = 14;
+
 // siteSynodic in the planner data is 'red' | 'yellow' | 'blue'. We
 // translate to UI-tuned hex values; same intent, palette adapted
 // to our darker backdrop.
@@ -566,21 +579,25 @@ export class MapRenderer {
     }
     this._normalEdges = [];
     this._hazardEdges = [];
+    this._cometEdges  = [];
     const straight = this.data.straightEdges || this.data.edges;
     for (const [a, b, dv] of straight) {
       const sa = this.data.byId[a], sb = this.data.byId[b];
       if (!sa || !sb) continue;
       const seg = { sa, sb, dv };
       if (sa.hazard || sb.hazard) this._hazardEdges.push(seg);
+      else if (sa.type === 'comet' || sb.type === 'comet') this._cometEdges.push(seg);
       else this._normalEdges.push(seg);
     }
     this._chains = [];
     this._hazardChains = [];
+    this._cometChains  = [];
     for (const chain of (this.data.chains || [])) {
       const pts = chain.map((id) => this.data.byId[id]).filter(Boolean);
       if (pts.length < 2) continue;
-      const isHazard = pts.some((p) => p.hazard);
-      (isHazard ? this._hazardChains : this._chains).push(pts);
+      if (pts.some((p) => p.hazard))            this._hazardChains.push(pts);
+      else if (pts.some((p) => p.type === 'comet')) this._cometChains.push(pts);
+      else                                        this._chains.push(pts);
     }
 
     // Body groups: every real site picks up a `bodyKey` in the
@@ -887,9 +904,13 @@ export class MapRenderer {
   _drawEdges(ctx) {
     // One stroke call per category. Browser batches all the line
     // segments in the path into a single GPU command.
+    // - normal (sign-posted) paths : pale grey
+    // - comet paths               : icy cyan-blue
+    // - hazard paths              : red dashed
     const eff = this.zoom * this.fitScale;
     ctx.lineWidth = 1.4 / eff;
 
+    // Normal "sign-posted" board routes.
     ctx.strokeStyle = '#cbd5e1';
     ctx.globalAlpha = 0.85;
     ctx.beginPath();
@@ -897,12 +918,23 @@ export class MapRenderer {
       ctx.moveTo(sa.x, sa.y);
       ctx.lineTo(sb.x, sb.y);
     }
-    // Decorative chains as smooth Bezier ribbons: planner uses
-    // chains of decoratives to bend a straight line into a curve,
-    // so we draw them as one continuous quadratic-through-midpoints
-    // spline. Same path, no extra style change.
     for (const pts of this._chains) appendSmoothPath(ctx, pts);
     ctx.stroke();
+
+    // Comet routes: anything touching a comet site gets the icy-
+    // blue tint so the cold outer-system itineraries pop out from
+    // the inner-system routes.
+    if (this._cometEdges.length || this._cometChains.length) {
+      ctx.strokeStyle = '#7dd3fc';
+      ctx.globalAlpha = 0.85;
+      ctx.beginPath();
+      for (const { sa, sb } of this._cometEdges) {
+        ctx.moveTo(sa.x, sa.y);
+        ctx.lineTo(sb.x, sb.y);
+      }
+      for (const pts of this._cometChains) appendSmoothPath(ctx, pts);
+      ctx.stroke();
+    }
 
     if (this._hazardEdges.length || this._hazardChains.length) {
       ctx.strokeStyle = '#f87171';
@@ -1059,31 +1091,35 @@ export class MapRenderer {
         ctx.stroke();
       }
 
-      if (landings.length) {
-        // Landing burns: a small pad shape -- short rectangle with
-        // a centre dot to read as "you can put down here". Width
-        // is scaled by the planner's landing flag (1 = full, 0.5 =
-        // partial), height stays uniform.
-        ctx.fillStyle = vis.fill;
-        ctx.strokeStyle = vis.stroke;
-        ctx.lineWidth = 1.5;
-        for (const w of landings) {
-          const sx = this.pan.x + w.x * eff;
-          const sy = this.pan.y + w.y * eff;
-          if (sx < -vis.r || sx > hostW + vis.r || sy < -vis.r || sy > hostH + vis.r) continue;
-          const halfH = vis.r * 0.8;
-          const halfW = vis.r * w.landing;
-          ctx.fillRect(sx - halfW, sy - halfH, halfW * 2, halfH * 2);
-          ctx.strokeRect(sx - halfW, sy - halfH, halfW * 2, halfH * 2);
-          // Centre dot so the pad reads as a landing target rather
-          // than an arbitrary rectangle.
-          ctx.fillStyle = '#ffffff';
-          ctx.beginPath();
-          ctx.arc(sx, sy, Math.max(1.2, halfH * 0.32), 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = vis.fill;
-        }
+      // Landing burns are now drawn as a 🚀 glyph (with /2 for
+      // partial landings); see the per-emoji pass below. Skip
+      // drawing the basic circle so we don't paint a magenta dot
+      // behind every rocket.
+    }
+
+    // Selected waypoint highlight: same yellow border + glow used
+    // on selected hexes. Routed after the main waypoint fills so
+    // the selection ring layers on top.
+    const selectedIds = new Set();
+    if (this._routeFromId) selectedIds.add(this._routeFromId);
+    if (this._routeToId)   selectedIds.add(this._routeToId);
+    if (selectedIds.size) {
+      ctx.shadowBlur = 14;
+      ctx.shadowColor = 'rgba(253, 224, 71, 0.9)';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#fde047';
+      for (const w of this._waypoints) {
+        if (!selectedIds.has(w.id)) continue;
+        const vis = TYPE_VIS[w.type] || TYPE_VIS.unknown;
+        if (vis.kind === 'none') continue;
+        const sx = this.pan.x + w.x * eff;
+        const sy = this.pan.y + w.y * eff;
+        if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
+        ctx.beginPath();
+        ctx.arc(sx, sy, vis.r + 3, 0, Math.PI * 2);
+        ctx.stroke();
       }
+      ctx.shadowBlur = 0;
     }
 
     // Hazard pulse: animated red ring around any waypoint flagged
@@ -1139,6 +1175,55 @@ export class MapRenderer {
       const txt = '+' + (w.flybyBoost === 'thrust' ? 'T' : w.flybyBoost);
       ctx.strokeText(txt, sx, sy);
       ctx.fillText(txt, sx, sy);
+    }
+
+    // Lagrange "L" label inside each Lagrange ring. Small + bold so
+    // the orange ring stays the dominant cue and the L just tags it.
+    const lagrangeItems = this._waypointsByType.get('lagrange');
+    if (lagrangeItems) {
+      ctx.font = '700 10px ui-sans-serif, system-ui, sans-serif';
+      ctx.fillStyle = '#fdba74';
+      for (const w of lagrangeItems) {
+        const sx = this.pan.x + w.x * eff;
+        const sy = this.pan.y + w.y * eff;
+        if (sx < -20 || sx > hostW + 20 || sy < -20 || sy > hostH + 20) continue;
+        ctx.fillText('L', sx, sy + 0.5);
+      }
+    }
+
+    // Emoji indicators for the planner's flagged routing nodes:
+    //   landing == 1   -> 🚀
+    //   landing == 0.5 -> 🚀/2 (with the /2 superscript to the right)
+    //   venus flyby    -> 🪂 (aerobrake)
+    //   hazard nodes   -> ☠
+    // Real-site emoji overlays (🌊 submarine, 🌿 astrobiology) are
+    // drawn in the screen-space hex layer where the icons can sit
+    // adjacent to the hex without colliding with the routing-node
+    // graphics here.
+    ctx.font = `${Math.max(12, EMOJI_PX)}px ${EMOJI_FONT}`;
+    ctx.fillStyle = '#ffffff';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    for (const w of this._waypoints) {
+      const sx = this.pan.x + w.x * eff;
+      const sy = this.pan.y + w.y * eff;
+      if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
+      if (w.type === 'burn' && w.landing != null) {
+        ctx.fillText('🚀', sx, sy);
+        if (w.landing < 1) {
+          ctx.save();
+          ctx.font = '700 9px ui-sans-serif, system-ui, sans-serif';
+          ctx.fillStyle = '#fde0ee';
+          ctx.fillText('/2', sx + EMOJI_PX * 0.7, sy + 1);
+          ctx.restore();
+        }
+      } else if (w.type === 'venus') {
+        ctx.fillText('🪂', sx, sy);
+      } else if (w.hazard && w.type !== 'radhaz') {
+        // radhaz already gets the trefoil; the skull marks generic
+        // hazard nodes (hazard-flagged burns or lagrange points).
+        ctx.fillText('☠', sx, sy);
+      }
     }
   }
 
@@ -1215,6 +1300,7 @@ export class MapRenderer {
       const r = vis.r;
       if (sx < -r - 20 || sx > hostW + r + 20 || sy < -r - 20 || sy > hostH + r + 20) continue;
 
+      const isSelected = site.id === this._routeFromId || site.id === this._routeToId;
       if (vis.kind === 'hex') {
         ctx.beginPath();
         for (let i = 0; i < 6; i++) {
@@ -1230,9 +1316,21 @@ export class MapRenderer {
         ctx.closePath();
         ctx.fillStyle = '#0c0a16';
         ctx.fill();
-        ctx.lineWidth = 1.6;
-        ctx.strokeStyle = site.hazard ? '#f87171' : '#ffffff';
-        ctx.stroke();
+        if (isSelected) {
+          // Selected hex: the BORDER is the highlight. Yellow stroke
+          // + a soft yellow glow via shadowBlur so the marker reads
+          // as picked without needing an extra ring around it.
+          ctx.shadowBlur = 14;
+          ctx.shadowColor = 'rgba(253, 224, 71, 0.9)';
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = '#fde047';
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        } else {
+          ctx.lineWidth = 1.6;
+          ctx.strokeStyle = site.hazard ? '#f87171' : '#ffffff';
+          ctx.stroke();
+        }
       } else {
         ctx.lineWidth = 1.6;
         ctx.beginPath();
@@ -1252,15 +1350,8 @@ export class MapRenderer {
         ctx.arc(sx, sy, r + 4, 0, Math.PI * 2);
         ctx.stroke();
       }
-
-      // Route endpoint highlight rings.
-      if (site.id === this._routeFromId || site.id === this._routeToId) {
-        ctx.strokeStyle = site.id === this._routeFromId ? '#4ade80' : '#f0abfc';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.arc(sx, sy, r + 8, 0, Math.PI * 2);
-        ctx.stroke();
-      }
+      // Selected nodes are highlighted via their border + glow
+      // above; no extra ring needed.
     }
   }
 
@@ -1314,6 +1405,20 @@ export class MapRenderer {
         ctx.fillStyle = '#f87171';
         ctx.font = `${Math.round(vis.r * 0.9)}px ui-monospace, menlo, monospace`;
         ctx.fillText('☠', sx, sy);
+      }
+
+      // Submarine + astrobiology emoji indicators sit just outside
+      // the hex, tucked to the upper-right corner so they don't
+      // collide with the size badge or droplet row inside.
+      if (site.submarine || site.astrobiology) {
+        ctx.font = `${EMOJI_PX}px ${EMOJI_FONT}`;
+        const corner = vis.r + 4;
+        if (site.submarine) {
+          ctx.fillText('🌊', sx + corner, sy - corner * 0.6);
+        }
+        if (site.astrobiology) {
+          ctx.fillText('🌿', sx + corner, sy + corner * 0.6);
+        }
       }
 
       if (labelAlpha > 0) {

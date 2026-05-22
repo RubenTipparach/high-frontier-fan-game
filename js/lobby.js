@@ -210,8 +210,8 @@ function renderLobby(lobby) {
           _mapRenderer = new MapRenderer(host, {
             data,
             onSelect: (site) => {
-              if (site.isWaypoint) {
-                _onToast(`${site.name} is a routing waypoint.`);
+              if (site.isDecorative) {
+                _onToast('Decorative routing node — not selectable.');
                 return;
               }
               if (!from || (from && to)) {

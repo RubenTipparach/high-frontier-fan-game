@@ -13,8 +13,20 @@
 // of the original board image). We scale to our SVG viewBox.
 
 const PLANNER_JSON_URL = './vendor/hf-mission-planner/assets/data-hf4.json';
+// Extracted from reference/HF4-site-list.xlsx by
+// scripts/extract-site-flags.py. Adds astrobiology / submarine /
+// aerobrake / atmospheric / push booleans per site so the renderer
+// can decorate planner nodes with the right glyphs.
+const SITE_FLAGS_URL  = './data/site-flags.json';
 
 let _cache = null;
+
+function normalizeSiteName(name) {
+  if (!name) return null;
+  return String(name).trim().toLowerCase()
+    .replace(/[:\-]+/g, ' ')
+    .replace(/\s+/g, ' ');
+}
 
 export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
   if (_cache) return _cache;
@@ -22,6 +34,15 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
   const res = await fetch(PLANNER_JSON_URL);
   if (!res.ok) throw new Error(`Failed to load planner map: ${res.status}`);
   const raw = await res.json();
+
+  // Best-effort load of the Excel-derived flag table. If it 404s
+  // (older deploy, dev without the data file), sites just don't
+  // get extra glyphs -- everything else still works.
+  let siteFlags = { sites: {}, groups: {} };
+  try {
+    const fr = await fetch(SITE_FLAGS_URL);
+    if (fr.ok) siteFlags = await fr.json();
+  } catch { /* ignore */ }
 
   // Points -> sites array. The planner uses random-float string IDs;
   // we keep them as-is (they're stable across reloads of the same
@@ -35,11 +56,12 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
   const sites = [];
   for (const [id, p] of Object.entries(raw.points || {})) {
     const rawType = p.type || 'unknown';
-    // Re-classify game-destination sites by name so the renderer
-    // can size them correctly: gas giants render huge, dwarf
-    // planets noticeable, moons modest, asteroids small + rocky.
-    // Routing waypoints keep their planner-assigned type.
     const type = rawType === 'site' ? classifyBody(p.siteName) : rawType;
+    // Pull Excel-derived flags for real sites: astrobiology /
+    // submarine / aerobrakes count etc. Falls back through the
+    // body group key so "Mars: Arsia Mons" can inherit any flags
+    // recorded against the Mars group.
+    const flags = lookupFlags(p.siteName, siteFlags);
     sites.push({
       id,
       name: p.siteName || routingLabel(rawType),
@@ -52,6 +74,11 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
       hazard: !!p.hazard,
       landing: typeof p.landing === 'number' ? p.landing : null,
       flybyBoost: p.flybyBoost || null,
+      astrobiology:  !!flags.astrobiology,
+      submarine:     !!flags.submarine,
+      atmospheric:   !!flags.atmospheric,
+      spaceElevator: !!flags.spaceElevator,
+      aerobrakes:    flags.aerobrakes | 0,
       x: Math.round(p.x * viewW * 10) / 10,
       y: Math.round(p.y * viewH * 10) / 10,
     });
@@ -183,6 +210,22 @@ const MOON_KEYS = [
   'miranda', 'ariel', 'umbriel', 'titania', 'oberon',
   'triton', 'nereid', 'proteus',
 ];
+// Resolve site flags by exact site-name match first, then by body
+// group (so a "Mars: ..." surface site picks up any Mars-group
+// flags even if its own row doesn't carry them).
+function lookupFlags(siteName, flagsDoc) {
+  const empty = {};
+  if (!siteName || !flagsDoc) return empty;
+  const key = normalizeSiteName(siteName);
+  if (key && flagsDoc.sites && flagsDoc.sites[key]) return flagsDoc.sites[key];
+  // Body fallback: first word of the normalised name.
+  if (key) {
+    const grp = key.split(' ')[0];
+    if (flagsDoc.groups && flagsDoc.groups[grp]) return flagsDoc.groups[grp];
+  }
+  return empty;
+}
+
 function classifyBody(name) {
   const n = (name || '').toLowerCase();
   if (!n) return 'site';

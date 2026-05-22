@@ -391,11 +391,13 @@ function onSiteSelect(site) {
   info.querySelector('.hyd').textContent = '💧'.repeat(site.hydration) || '—';
   info.querySelector('.hazard').textContent = site.hazard ? 'yes' : 'no';
 
-  // Then advance the route state machine. Don't let users build a
-  // route starting at a routing waypoint (lagrange / hohmann / burn);
-  // those exist as path intermediates, not as ship destinations.
-  if (site.isWaypoint) {
-    setStatus(`${site.name} is a routing waypoint — tap a destination site.`);
+  // Decorative dots only exist to bend chains; they're not
+  // selectable. Every other waypoint (lagrange, burn, hohmann,
+  // radhaz, venus) is fair game as a route endpoint -- the user
+  // explicitly asked that all Hohmann transfer points be
+  // selectable.
+  if (site.isDecorative) {
+    setStatus(`Decorative routing node — not selectable.`);
     return;
   }
 
