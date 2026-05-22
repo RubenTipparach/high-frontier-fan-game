@@ -1217,13 +1217,18 @@ export class MapRenderer {
       const sy = this.pan.y + w.y * eff;
       if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
       if (w.type === 'burn' && w.landing != null) {
-        ctx.fillText('🚀', sx, sy);
         if (w.landing < 1) {
+          // Half-lander: clip the rocket glyph to its left half so
+          // the bbox cuts cleanly down the middle. Reads as
+          // "half a rocket" without needing an extra /2 caption.
           ctx.save();
-          ctx.font = '700 9px ui-sans-serif, system-ui, sans-serif';
-          ctx.fillStyle = '#fde0ee';
-          ctx.fillText('/2', sx + EMOJI_PX * 0.7, sy + 1);
+          ctx.beginPath();
+          ctx.rect(sx - EMOJI_PX, sy - EMOJI_PX, EMOJI_PX, EMOJI_PX * 2);
+          ctx.clip();
+          ctx.fillText('🚀', sx, sy);
           ctx.restore();
+        } else {
+          ctx.fillText('🚀', sx, sy);
         }
       } else if (w.type === 'venus') {
         ctx.fillText('🪂', sx, sy);
