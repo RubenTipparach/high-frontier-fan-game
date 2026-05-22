@@ -73,8 +73,8 @@ export const SITES = [
   { id: 'koronis', name: 'Koronis', body: 'Koronis Family', type: 'asteroid', class: 'A', hydration: 0, vps: 1, dvLeo: 2.0, solarZone: 'Ceres', x: 453.7, y: 477.0 },
   { id: 'lacrimosa', name: 'Lacrimosa', body: 'Koronis Family', type: 'asteroid', class: 'A', hydration: 0, vps: 1, dvLeo: 2.0, solarZone: 'Ceres', x: 453.7, y: 495.0 },
   { id: 'urda', name: 'Urda', body: 'Koronis Family', type: 'asteroid', class: 'A', hydration: 0, vps: 1, dvLeo: 2.0, solarZone: 'Ceres', x: 453.7, y: 531.0 },
-  { id: 'hermes_b', name: 'Hermes B', body: 'MOID Binary', type: 'asteroid', class: 'A', hydration: 0, vps: 1, dvLeo: 5.0, solarZone: 'Ceres', x: 665.1, y: 477.0 },
-  { id: 'hermes_a', name: 'Hermes A', body: 'MOID Binary', type: 'asteroid', class: 'A', hydration: 0, vps: 1, dvLeo: 5.0, solarZone: 'Ceres', x: 665.1, y: 459.0 },
+  { id: 'hermes_b', name: 'Hermes B', body: 'MOID Binary', type: 'asteroid', class: 'A', hydration: 0, vps: 1, dvLeo: 5.0, solarZone: 'Ceres', siteSynodic: 'blue', x: 665.1, y: 477.0 },
+  { id: 'hermes_a', name: 'Hermes A', body: 'MOID Binary', type: 'asteroid', class: 'A', hydration: 0, vps: 1, dvLeo: 5.0, solarZone: 'Ceres', siteSynodic: 'blue', x: 665.1, y: 459.0 },
   { id: 'chaucer', name: 'Chaucer', body: 'Nysa Family', type: 'asteroid', class: 'A', hydration: 2, vps: 2, dvLeo: 3.0, solarZone: 'Ceres', x: 535.5, y: 495.0 },
   { id: 'hertha', name: 'Hertha', body: 'Nysa Family', type: 'asteroid', class: 'A', hydration: 3, vps: 2, dvLeo: 3.0, solarZone: 'Ceres', x: 535.5, y: 513.0 },
   { id: 'nysa', name: 'Nysa', body: 'Nysa Family', type: 'asteroid', class: 'A', hydration: 0, vps: 1, dvLeo: 3.0, solarZone: 'Ceres', x: 535.5, y: 531.0 },
@@ -771,6 +771,25 @@ export const SOLAR_ZONES = [
   'Mercury', 'Venus', 'Earth', 'Mars',
   'Ceres', 'Jupiter', 'Saturn', 'Uranus', 'Neptune',
 ];
+
+// Per-zone canonical palette + solar-thrust modifier, sourced
+// from the iandrea HF gazetteer. The `solar` field is the bonus
+// (positive) or penalty (negative) applied to a sail / photon /
+// solar thruster's effective thrust while it operates in that
+// zone. `solar: null` means sails are dead in that zone (Neptune
+// outward). Conventional thrusters ignore this; they use the
+// flat `burns` cost on each edge instead.
+export const SOLAR_ZONE_INFO = {
+  Mercury: { color: '#fdf441', solar: +2 },
+  Venus:   { color: '#fefab1', solar: +1 },
+  Earth:   { color: '#ffd388', solar:  0 },
+  Mars:    { color: '#ffdd92', solar: -1 },
+  Ceres:   { color: '#97a0bf', solar: -2 },
+  Jupiter: { color: '#585e90', solar: -3 },
+  Saturn:  { color: '#2b3534', solar: -4 },
+  Uranus:  { color: '#2a2d4c', solar: -5 },
+  Neptune: { color: '#1d102e', solar: null },
+};
 
 export function sitesInZone(zone) {
   return SITES.filter((s) => s.solarZone === zone);

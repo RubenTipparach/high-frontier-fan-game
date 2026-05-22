@@ -279,6 +279,17 @@ const SYNODIC_COLOURS = {
   blue:   '#60a5fa',
 };
 
+// Tiny "#rrggbb" → "rgba(r, g, b, a)" helper. Used to dim the
+// canonical zone palette down to ~20% alpha so the lanes read
+// as backdrop washes instead of dominating the orbital edges.
+function hexToRgba(hex, a) {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
+
 // Irregular rocky polygon for asteroid bodies. Same offset-radial
 // shading as the sphere, but the silhouette is a noisy 9-vertex
 // polygon so it reads as a rock rather than a tiny planet. Each
@@ -795,7 +806,7 @@ export class MapRenderer {
     ctx.scale(eff, eff);
 
     if (this.data.mode === 'clean' && Array.isArray(this.data.zones)) {
-      this._drawZoneBands(ctx, this.data.zones);
+      this._drawZoneBands(ctx, this.data.zones, this.data.zoneInfo);
     }
     this._drawGuides(ctx);
     this._drawAsteroidBelt(ctx);
@@ -920,7 +931,15 @@ export class MapRenderer {
     ctx.globalAlpha = 1;
   }
 
-  _drawZoneBands(ctx, zones) {
+  _drawZoneBands(ctx, zones, zoneInfo) {
+    // Heliocentric zone lanes. Each zone gets its published
+    // tint (from the iandrea gazetteer palette) at ~18% alpha so
+    // it reads as a backdrop wash rather than fighting with the
+    // orbital edges drawn over the top. The label calls out the
+    // solar-thrust modifier (e.g. "MARS −1") so the player can
+    // see at a glance how a sail's effective thrust shifts as
+    // their ship moves outward. Neptune+ shows "✕" — sails are
+    // dead past Uranus.
     const startY = 60;
     const bandH = (VIEW_H - 60 - 60) / zones.length;
     ctx.font = '600 11px ui-sans-serif, system-ui, sans-serif';
@@ -928,12 +947,16 @@ export class MapRenderer {
     ctx.textAlign = 'left';
     for (let i = 0; i < zones.length; i++) {
       const y = startY + bandH * i;
-      ctx.fillStyle = ZONE_BAND_LIGHT.includes(zones[i])
-        ? 'rgba(17, 20, 42, 0.4)'
-        : 'rgba(12, 13, 31, 0.3)';
+      const info = (zoneInfo && zoneInfo[zones[i]]) || null;
+      ctx.fillStyle = info
+        ? hexToRgba(info.color, 0.18)
+        : 'rgba(17, 20, 42, 0.30)';
       ctx.fillRect(0, y, VIEW_W, bandH);
-      ctx.fillStyle = '#5b6688';
-      ctx.fillText(zones[i].toUpperCase(), 14, y + bandH / 2 + 2);
+      const mod = info && info.solar !== null
+        ? (info.solar > 0 ? `+${info.solar}` : `${info.solar}`)
+        : (info ? '✕' : '');
+      ctx.fillStyle = '#9aa4c4';
+      ctx.fillText(`${zones[i].toUpperCase()}  ${mod}`, 14, y + bandH / 2 + 2);
     }
   }
 
