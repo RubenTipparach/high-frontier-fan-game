@@ -65,7 +65,7 @@ const TYPE_VIS = {
   dwarf:          { kind: 'hex',    r: HEX_R, haloR: 24 },
   tno:            { kind: 'hex',    r: HEX_R, haloR: 18 },
   moon:           { kind: 'hex',    r: HEX_R, haloR:  9 },
-  comet:          { kind: 'comet',  r:  5 },
+  comet:          { kind: 'hex',    r: HEX_R, haloR: 10, rocky: true },
   asteroid:       { kind: 'hex',    r: HEX_R, haloR: 10, rocky: true },
   surface:        { kind: 'hex',    r: HEX_R, haloR: 20 },
   sun:            { kind: 'sun',    r: 30 },
@@ -1442,28 +1442,12 @@ export class MapRenderer {
       const sy = this.pan.y + site.y * eff;
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
       if (vis.kind === 'sun') continue;
-      // Comets don't take a hex marker — they're an icy nucleus
-      // floating in space — but they ARE landable. Paint the
-      // pink lander disc + 🚀 here so the player sees the same
-      // "land on this" affordance offered on body surfaces.
-      if (vis.kind === 'comet') {
-        if (sx < -30 || sx > hostW + 30 || sy < -30 || sy > hostH + 30) continue;
-        const burnVis = TYPE_VIS.burn;
-        const ringR = burnVis.r * 1.4 * hexS;
-        ctx.fillStyle = burnVis.fill;
-        ctx.strokeStyle = burnVis.stroke;
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        ctx.font = `${EMOJI_PX * hexS}px ${EMOJI_FONT}`;
-        ctx.fillStyle = '#ffffff';
-        ctx.textBaseline = 'middle';
-        ctx.textAlign = 'center';
-        ctx.fillText('🚀', sx, sy);
-        continue;
-      }
+      // Comets used to render as a pink disc + 🚀 marker. The
+      // published HF4 board draws them as real hexes — same
+      // shape as planets / asteroids — with a synodic-coloured
+      // outline (red / yellow / blue per season). The hex path
+      // below handles them. TYPE_VIS.comet was switched to
+      // kind: 'hex' so no special-case here.
       if (site.isLandable === false) continue;
       const r = vis.r * hexS;
       if (sx < -r - 20 || sx > hostW + r + 20 || sy < -r - 20 || sy > hostH + r + 20) continue;
@@ -1504,7 +1488,16 @@ export class MapRenderer {
           ctx.setLineDash([]);
         } else {
           ctx.lineWidth = 1.6;
-          ctx.strokeStyle = site.hazard ? '#f87171' : '#ffffff';
+          // Stroke priority: hazard (red) > synodic season
+          // (red / yellow / blue per the published-card colour
+          // language for comets + similar season-keyed sites) >
+          // default white outline.
+          ctx.strokeStyle = site.hazard
+            ? '#f87171'
+            : (site.siteSynodic ? SYNODIC_COLOURS[site.siteSynodic] : '#ffffff');
+          // Synodic-coloured hexes carry a thicker outline so
+          // the season reads from across the map.
+          if (site.siteSynodic) ctx.lineWidth = 2.4;
           ctx.stroke();
         }
       } else {
@@ -1518,14 +1511,8 @@ export class MapRenderer {
         ctx.stroke();
       }
 
-      // Synodic ring sits just outside the hex.
-      if (site.siteSynodic) {
-        ctx.strokeStyle = SYNODIC_COLOURS[site.siteSynodic] || '#ffffff';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(sx, sy, r + 4, 0, Math.PI * 2);
-        ctx.stroke();
-      }
+      // Synodic colour is painted on the hex border itself
+      // above — no separate outer ring needed.
       // Selected nodes are highlighted via their border + glow
       // above; no extra ring needed.
     }
