@@ -857,11 +857,17 @@ body:has(#view-browse:not(.hidden)) #main {
        which sits at the top of the browse-stage. ~48px toolbar
        + a few px of breathing room. */
     top: 60px;
-    left: 50%;
-    right: auto;
+    left: 0;
+    right: 0;
     bottom: auto;
-    transform: translateX(-50%);
-    width: auto !important;
+    /* Centre via auto margins + intrinsic width instead of
+       transform: translateX(-50%). A transformed ancestor would
+       become the containing block for any `position: fixed`
+       descendant (CSS spec quirk), trapping the .sidepanel-content
+       modal inside the tiny pill — so we deliberately avoid
+       transform here. */
+    margin: 0 auto;
+    width: max-content !important;
     height: auto !important;
     border: 1px solid var(--border);
     border-radius: 10px;
