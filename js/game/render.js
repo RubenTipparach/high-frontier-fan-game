@@ -598,10 +598,61 @@ export class MapRenderer {
   // without diving into the hex's individual glyphs.
   flyTo(target, zoom = 5) {
     if (!target || typeof target.x !== 'number' || typeof target.y !== 'number') return;
+    this._cancelPanAnim();
     this.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
     const eff = this.zoom * this.fitScale;
     this.pan.x = this.hostW / 2 - target.x * eff;
     this.pan.y = this.hostH / 2 - target.y * eff;
+    this._scheduleDraw();
+  }
+
+  // Smoothly pan (no zoom change) to centre a world-space point.
+  // Used when the user taps a site so the camera follows the
+  // selection instead of jumping or staying put.
+  panTo(target, { ms = 320 } = {}) {
+    if (!target || typeof target.x !== 'number' || typeof target.y !== 'number') return;
+    this._cancelPanAnim();
+    const eff = this.zoom * this.fitScale;
+    const targetPanX = this.hostW / 2 - target.x * eff;
+    const targetPanY = this.hostH / 2 - target.y * eff;
+    const startX = this.pan.x;
+    const startY = this.pan.y;
+    const t0 = performance.now();
+    const step = (now) => {
+      const k = Math.min(1, (now - t0) / ms);
+      // ease-out cubic — gets you near the target fast, settles softly
+      const e = 1 - Math.pow(1 - k, 3);
+      this.pan.x = startX + (targetPanX - startX) * e;
+      this.pan.y = startY + (targetPanY - startY) * e;
+      this._scheduleDraw();
+      if (k < 1) this._panAnimRaf = requestAnimationFrame(step);
+      else this._panAnimRaf = null;
+    };
+    this._panAnimRaf = requestAnimationFrame(step);
+  }
+
+  _cancelPanAnim() {
+    if (this._panAnimRaf) {
+      cancelAnimationFrame(this._panAnimRaf);
+      this._panAnimRaf = null;
+    }
+  }
+
+  // Pin a popup card to a world-space site. The renderer keeps
+  // the popup's screen position in sync each frame so it tracks
+  // the underlying hex as the camera pans / zooms. `actions` is
+  // an optional array of { label, onClick } rendered as buttons
+  // at the bottom of the popup.
+  setSitePopup(site, actions = []) {
+    if (!site) { this.clearSitePopup(); return; }
+    this._popupSite = site;
+    this._buildSitePopup(site, actions);
+    this._scheduleDraw();
+  }
+
+  clearSitePopup() {
+    this._popupSite = null;
+    if (this._popupEl) this._popupEl.classList.add('hidden');
     this._scheduleDraw();
   }
 
@@ -756,6 +807,14 @@ export class MapRenderer {
     this._tooltipEl.className = 'map-tooltip hidden';
     this.host.appendChild(this._tooltipEl);
 
+    // Tap popup: persistent variant of the tooltip that anchors to
+    // a site in world space and stays put through pan/zoom. Built
+    // on demand by setSitePopup(); positioned each frame in _draw().
+    this._popupEl = document.createElement('div');
+    this._popupEl.className = 'map-popup hidden';
+    this.host.appendChild(this._popupEl);
+    this._popupSite = null;
+
     // Resize observer keeps the canvas pixel-perfect with whatever
     // CSS-driven size the host gets. Triggers a redraw on every
     // change including the initial mount.
@@ -771,6 +830,22 @@ export class MapRenderer {
   }
 
   _resize() {
+    // Snapshot the world-space point currently under the screen
+    // centre BEFORE the host dimensions change, so we can re-pan
+    // afterwards and keep that point centred. Without this, dragging
+    // the sandbox hand strip up makes the visible map scroll
+    // downward (the canvas shrank from the bottom but the pan didn't
+    // compensate). prevFitScale > 0 gates the very first call where
+    // we haven't measured yet.
+    let prevCenter = null;
+    if (this.hostW > 0 && this.hostH > 0 && this.fitScale > 0) {
+      const prevEff = this.zoom * this.fitScale;
+      prevCenter = {
+        x: (this.hostW / 2 - this.pan.x) / prevEff,
+        y: (this.hostH / 2 - this.pan.y) / prevEff,
+      };
+    }
+
     const rect = this.host.getBoundingClientRect();
     this.hostW = Math.max(1, rect.width);
     this.hostH = Math.max(1, rect.height);
@@ -780,6 +855,13 @@ export class MapRenderer {
     this.canvas.style.width = this.hostW + 'px';
     this.canvas.style.height = this.hostH + 'px';
     this.fitScale = Math.min(this.hostW / VIEW_W, this.hostH / VIEW_H);
+
+    if (prevCenter) {
+      const eff = this.zoom * this.fitScale;
+      this.pan.x = this.hostW / 2 - prevCenter.x * eff;
+      this.pan.y = this.hostH / 2 - prevCenter.y * eff;
+    }
+
     this._scheduleDraw();
   }
 
@@ -861,6 +943,7 @@ export class MapRenderer {
     this._drawLeoAnchorScreen(ctx);
     this._drawPlayerShipScreen(ctx);
     if (this._sandboxRocket) this._drawSandboxRocketScreen(ctx);
+    if (this._popupSite) this._positionSitePopup();
 
     // FPS book-keeping. The debug panel polls getFps(); we update
     // ~twice per second so the readout doesn't flicker.
@@ -1978,6 +2061,65 @@ export class MapRenderer {
       this._hideTooltip();
     });
   }
+
+  _buildSitePopup(site, actions) {
+    const el = this._popupEl;
+    if (!el) return;
+    el.innerHTML = '';
+    const name = document.createElement('div');
+    name.className = 't-name';
+    name.textContent = site.name || '';
+    const meta = document.createElement('div');
+    meta.className = 't-meta';
+    const parts = [];
+    if (site.type)     parts.push(site.type);
+    if (site.siteSize) parts.push(site.siteSize);
+    if (site.hydration) parts.push('💧'.repeat(site.hydration));
+    if (site.hazard)   parts.push('⚠ hazard');
+    meta.textContent = parts.join(' · ');
+    el.appendChild(name);
+    if (meta.textContent) el.appendChild(meta);
+    if (actions && actions.length) {
+      const row = document.createElement('div');
+      row.className = 'popup-actions';
+      for (const a of actions) {
+        if (!a || !a.label) continue;
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = a.primary ? 'popup-btn primary' : 'popup-btn';
+        b.textContent = a.label;
+        b.disabled = !!a.disabled;
+        if (a.onClick) b.addEventListener('click', a.onClick);
+        row.appendChild(b);
+      }
+      el.appendChild(row);
+    }
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'popup-close';
+    close.setAttribute('aria-label', 'Close');
+    close.textContent = '×';
+    close.addEventListener('click', () => {
+      this.clearSitePopup();
+      if (this._onPopupClose) this._onPopupClose();
+    });
+    el.appendChild(close);
+    el.classList.remove('hidden');
+  }
+
+  // Re-anchor the popup to its site's current screen position.
+  // Called from _draw so it tracks pan + zoom + smooth animations.
+  _positionSitePopup() {
+    const el = this._popupEl;
+    if (!el || !this._popupSite) return;
+    const eff = this.zoom * this.fitScale;
+    const sx = this.pan.x + this._popupSite.x * eff;
+    const sy = this.pan.y + this._popupSite.y * eff;
+    el.style.left = `${sx}px`;
+    el.style.top  = `${sy}px`;
+  }
+
+  onPopupClose(fn) { this._onPopupClose = fn || null; }
 
   _showTooltipFor(site, ev) {
     const t = this._tooltipEl;

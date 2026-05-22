@@ -324,6 +324,76 @@
   line-height: 1.4;
 }
 
+/* Tap popup: persistent variant of the tooltip that anchors to a
+   selected site and accepts pointer events so its action buttons
+   (Navigate to, close) are clickable. Renderer keeps `left/top`
+   in sync each frame; we anchor "above and centred" via transform
+   so the popup floats just over the hex. */
+.map-popup {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 14px));
+  background: rgba(15, 23, 42, 0.97);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 10px 28px 10px 12px;
+  min-width: 180px;
+  max-width: 280px;
+  z-index: 6;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.7);
+  pointer-events: auto;
+}
+.map-popup.hidden { display: none; }
+.map-popup .t-name {
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+.map-popup .t-meta {
+  font-size: 11px;
+  color: var(--ink-mute);
+  margin-bottom: 8px;
+  text-transform: lowercase;
+}
+.map-popup .popup-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.map-popup .popup-btn {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--ink);
+  cursor: pointer;
+}
+.map-popup .popup-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent-2);
+  color: #062136;
+  font-weight: 600;
+}
+.map-popup .popup-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.map-popup .popup-close {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--ink-mute);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.map-popup .popup-close:hover { color: var(--ink); }
+
 /* ===== Browse view ===== */
 
 /* The Browse view is full-bleed: canvas fills everything below the

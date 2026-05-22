@@ -1114,48 +1114,6 @@ function syncSoloShipMarker() {
   }
 }
 
-function populateSiteInfo(site) {
-  const info = document.getElementById('browse-map-info');
-  if (!info) return;
-  info.innerHTML = `
-    <h4 class="site-name"></h4>
-    <ul class="kv">
-      <li><span>Type</span><strong class="type"></strong></li>
-      <li><span>Size / class</span><strong class="size"></strong></li>
-      <li><span>Hydration</span><strong class="hyd"></strong></li>
-      <li><span>Hazard</span><strong class="hazard"></strong></li>
-      <li class="row-sub" hidden><span>Submarine</span><strong>🌊</strong></li>
-      <li class="row-astro" hidden><span>Astrobiology</span><strong>🌿</strong></li>
-      <li class="row-aero" hidden><span>Aerobrakes</span><strong class="aero">—</strong></li>
-    </ul>
-    <div class="site-actions">
-      <button id="site-navigate-to" type="button" class="primary">
-        Navigate to here →
-      </button>
-    </div>
-  `;
-  info.querySelector('.site-name').textContent = site.name;
-  info.querySelector('.type').textContent = site.type;
-  info.querySelector('.size').textContent = site.siteSize || '—';
-  info.querySelector('.hyd').textContent = '💧'.repeat(site.hydration) || '—';
-  info.querySelector('.hazard').textContent = site.hazard ? 'yes' : 'no';
-  if (site.submarine)    info.querySelector('.row-sub').hidden   = false;
-  if (site.astrobiology) info.querySelector('.row-astro').hidden = false;
-  if (site.aerobrakes) {
-    info.querySelector('.row-aero').hidden = false;
-    info.querySelector('.aero').textContent = String(site.aerobrakes);
-  }
-  // "Navigate to" arms the routing-pick mode. The next site the
-  // user taps becomes the destination of a route originating
-  // from this one. Disabled on decorative / non-landable sites.
-  const navBtn = info.querySelector('#site-navigate-to');
-  if (site.isDecorative || site.isLandable === false) {
-    navBtn.disabled = true;
-    navBtn.title = 'This site is not landable.';
-  } else {
-    navBtn.addEventListener('click', () => enterRoutingMode(site));
-  }
-}
 
 function enterRoutingMode(origin) {
   _routingMode = true;
@@ -1183,7 +1141,6 @@ function onSiteSelect(site) {
   // proposed destination for your ship's current position.
   const s = soloState();
   if (s && !s.gameOver) {
-    populateSiteInfo(site);
     if (site.id === s.ship.at) {
       soloSetTarget(null);
     } else if (site.isLandable === false || site.isDecorative) {
@@ -1227,29 +1184,59 @@ function onSiteSelect(site) {
     return;
   }
 
-  // Default tap behaviour: tap a site to select + show info;
-  // tap the SAME site again to deselect. No route is started by
-  // simple clicks — the user has to press "Navigate to" in the
-  // info panel to begin routing.
+  // Default tap behaviour: tap a site to select + show popup;
+  // tap the SAME site again to deselect. The on-map popup carries
+  // the site stats + the "Navigate to" button, replacing the old
+  // side-panel info pane.
   if (_selectedId === site.id) {
     _selectedId = null;
-    if (_renderer) _renderer.setRouteEndpoints(null, null);
-    setStatus('Tap a site to see its info. Press "Navigate to" to plan a route.');
-    showPane(null);
+    if (_renderer) {
+      _renderer.setRouteEndpoints(null, null);
+      _renderer.clearSitePopup();
+    }
+    setStatus('Tap a site to see its info. Press "Navigate to" in the popup to plan a route.');
     return;
   }
 
   _selectedId = site.id;
-  if (_renderer) _renderer.setRouteEndpoints(site.id, null);
+  if (_renderer) {
+    _renderer.setRouteEndpoints(site.id, null);
+    // Smooth-pan the camera so the selected hex sits at the centre
+    // of the map. Keeps the existing zoom — jumping zoom on every
+    // tap would be disorienting.
+    _renderer.panTo(site);
+  }
 
   if (site.isDecorative) {
     setStatus(`Decorative routing node — not selectable.`);
     return;
   }
 
-  populateSiteInfo(site);
-  showPane('info');
+  showSitePopupFor(site);
   setStatus(`Selected <strong>${esc(site.name)}</strong>.`);
+}
+
+// Build the on-map popup for a selected site. Carries the same
+// info the old "Site info" sidebar pane used to show, plus the
+// "Navigate to" action that arms routing-pick mode.
+function showSitePopupFor(site) {
+  if (!_renderer) return;
+  const canNavigate = !(site.isDecorative || site.isLandable === false);
+  const actions = [{
+    label: 'Navigate to →',
+    primary: true,
+    disabled: !canNavigate,
+    onClick: () => {
+      if (!canNavigate) return;
+      enterRoutingMode(site);
+      _renderer.clearSitePopup();
+    },
+  }];
+  _renderer.setSitePopup(site, actions);
+  _renderer.onPopupClose(() => {
+    _selectedId = null;
+    if (_renderer) _renderer.setRouteEndpoints(null, null);
+  });
 }
 
 function clearRoute() {
