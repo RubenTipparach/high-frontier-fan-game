@@ -26,12 +26,12 @@ const SPECTRAL_STYLE = {
 // next to the glyph (1 -> bare icon; >1 -> icon + "×N").
 const REQUIREMENT_VIS = {
   'pulse-generator':  { glyph: '⚡', label: 'Pulse generator' },
-  'thermostat':       { glyph: '🌡', label: 'Thermostat'      },
+  'thermostat':       { glyph: '🌡️', label: 'Thermostat'      },
   'crew-quarters':    { glyph: '👤', label: 'Crew quarters'   },
   'sail':             { glyph: '⛵', label: 'Sail rigging'    },
-  'beam-receiver':    { glyph: '☀',  label: 'Beam receiver'   },
-  'push-sat':         { glyph: '🛰', label: 'Push-sat'        },
-  'isru-rig':         { glyph: '🛢', label: 'ISRU rig'        },
+  'beam-receiver':    { glyph: '☀️',  label: 'Beam receiver'   },
+  'push-sat':         { glyph: '🛰️', label: 'Push-sat'        },
+  'isru-rig':         { glyph: '🛢️', label: 'ISRU rig'        },
   'aerobrake-shroud': { glyph: '🪂', label: 'Aerobrake'       },
   'spin-grav':        { glyph: '🌀', label: 'Spin gravity'    },
 };
@@ -43,10 +43,16 @@ export function renderCard(card, { type } = {}) {
   el.dataset.side = 'primary';
   if (card.flipOrientation === 'rotated180') el.classList.add('flip-rotates');
 
-  el.appendChild(buildFace(card, 'primary', kind));
+  // Both faces live inside a single .card-inner that rotates as
+  // one rigid 3D body. Each face uses backface-visibility:hidden,
+  // so only the side facing the viewer is painted.
+  const inner = document.createElement('div');
+  inner.className = 'card-inner';
+  inner.appendChild(buildFace(card, 'primary', kind));
   if (card.faces && card.faces.secondary) {
-    el.appendChild(buildFace(card, 'secondary', kind));
+    inner.appendChild(buildFace(card, 'secondary', kind));
   }
+  el.appendChild(inner);
 
   if (card.faces && card.faces.secondary) {
     const flip = document.createElement('button');
@@ -230,29 +236,33 @@ function thrustVisual(card) {
     : Math.max(1, Math.ceil(thrust / Math.max(1, card.isp || 1)));
   const hasPushSat = (card.requires || []).some((r) => r.kind === 'push-sat');
 
+  // The arrow + base line use currentColor so they read against
+  // either the white primary face or the black secondary face.
+  // The water droplet is the 💧 emoji with the fuel cost overlaid
+  // (white halo for readability on any platform's emoji palette).
   wrap.innerHTML = `
     <svg viewBox="0 0 140 96" class="thrust-svg">
       <defs>
         <marker id="thrust-arrow" viewBox="0 0 8 8" refX="6" refY="4"
           markerWidth="6" markerHeight="6" orient="auto">
-          <path d="M0,0 L8,4 L0,8 z" fill="#ffffff"/>
+          <path d="M0,0 L8,4 L0,8 z" fill="currentColor"/>
         </marker>
       </defs>
       <polygon points="70,12 18,86 122,86"
         fill="rgba(96,165,250,0.35)" stroke="#60a5fa" stroke-width="2.5"
         stroke-linejoin="round"/>
-      ${hasPushSat ? `<text x="70" y="58" text-anchor="middle"
-        font-size="22">🛰</text>` : ''}
+      ${hasPushSat ? `<text x="70" y="62" text-anchor="middle"
+        font-size="24">🛰️</text>` : ''}
       <line x1="35" y1="86" x2="100" y2="86"
-        stroke="#ffffff" stroke-width="1.8"
+        stroke="currentColor" stroke-width="1.8"
         marker-end="url(#thrust-arrow)"/>
       <circle cx="22" cy="86" r="13" fill="#ec4899" stroke="#fbcfe8" stroke-width="1.5"/>
       <text x="22" y="90" text-anchor="middle" font-size="14"
         font-weight="700" fill="#ffffff">${thrust}</text>
-      <path d="M 116 70 C 124 78 124 92 116 96 C 108 92 108 78 116 70 Z"
-        fill="#7dd3fc" stroke="#bae6fd" stroke-width="1.3"/>
-      <text x="116" y="91" text-anchor="middle" font-size="11"
-        font-weight="700" fill="#0c1d34">${fuel}</text>
+      <text x="116" y="98" text-anchor="middle" font-size="28">💧</text>
+      <text x="116" y="93" text-anchor="middle" font-size="11"
+        font-weight="700" fill="#0c1d34" stroke="#ffffff"
+        stroke-width="2.6" paint-order="stroke">${fuel}</text>
     </svg>
   `;
   return wrap;

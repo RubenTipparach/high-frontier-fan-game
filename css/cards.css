@@ -57,26 +57,78 @@
 
 .card {
   position: relative;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
+  background: transparent;
+  border: none;
   border-radius: 10px;
   padding: 0;
   width: 220px;
   min-height: 300px;
-  display: flex;
-  flex-direction: column;
   color: var(--ink);
   font-size: 12px;
-  overflow: hidden;
+  perspective: 1200px;
 }
 
-/* Toggle face by data-side. Radiators flip rotated 180°. */
-.card-face { display: none; flex-direction: column; flex: 1 1 auto; }
-.card[data-side="primary"]   .card-face[data-face="primary"]   { display: flex; }
-.card[data-side="secondary"] .card-face[data-face="secondary"] { display: flex; }
-.card.flip-rotates[data-side="secondary"] .card-face[data-face="secondary"] {
-  transform: rotate(180deg);
-  transform-origin: center;
+/* The inner is the 3D body — both faces ride on it and rotate
+   together when data-side flips. backface-visibility hides the
+   side facing away from the viewer, so we never see the back of
+   either face. */
+.card-inner {
+  position: relative;
+  width: 100%;
+  min-height: 300px;
+  transform-style: preserve-3d;
+  transition: transform 0.7s cubic-bezier(.2, .7, .3, 1);
+}
+.card[data-side="secondary"] .card-inner { transform: rotateY(180deg); }
+
+.card-face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--ink);
+  overflow: hidden;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.card-face[data-face="secondary"] { transform: rotateY(180deg); }
+
+/* Radiators read upside-down on the installed (secondary) face,
+   matching the published cards. The Z-rotation composes with the
+   Y-flip so the back content reads mirrored top-to-bottom. */
+.card.flip-rotates .card-face[data-face="secondary"] {
+  transform: rotateY(180deg) rotate(180deg);
+}
+
+/* Primary face is the "white" published-card look: parchment
+   background, dark ink, muted accents. Variable overrides cascade
+   into every child rule so we don't have to touch each selector. */
+.card-face[data-face="primary"] {
+  --ink: #1a1614;
+  --ink-dim: #5b554c;
+  --ink-mute: #8a8478;
+  --border: #d4cba8;
+  --accent: #0c0a16;
+  --accent-2: #4b5563;
+  --bg-2: #f4ecd8;
+}
+.card-face[data-face="primary"] .card-footer {
+  background: rgba(0, 0, 0, 0.05);
+  border-top-color: rgba(0, 0, 0, 0.15);
+}
+.card-face[data-face="primary"] .card-requires .req {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.15);
+}
+.card-face[data-face="primary"] .card-stats li {
+  border-bottom-color: rgba(0, 0, 0, 0.15);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-inner { transition: none; }
 }
 
 /* Type bar across the top, coloured by component category. */
@@ -131,7 +183,8 @@
 .card-thrust {
   align-self: center;
   width: 100%;
-  max-width: 180px;
+  max-width: 130px;
+  margin: 2px 0 -2px;
 }
 .thrust-visual { display: block; }
 .thrust-svg { width: 100%; height: auto; }
