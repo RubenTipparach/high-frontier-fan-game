@@ -34,27 +34,29 @@ const HALO_MAX_SCREEN_R = 110;
 // Body styling. Sites render as shaded spheres; waypoints stay as
 // flat-coloured circles since they're abstract routing nodes, not
 // physical objects.
-// Visual sizes per body class. Hex `r` is the actual gameplay
-// marker; `haloFactor` controls how far the body sprite (sphere or
-// rocky polygon) extends past the hex edge. Gas giants get a huge
-// halo so they dominate; inner planets and moons read at a uniform
-// readable size; asteroids are small + irregular.
-// Hex markers all share one uniform radius so the gameplay tokens
-// read consistently regardless of body class. The body-class
-// differentiation lives in haloFactor (sphere size behind the hex)
-// and the palette, not the hex itself.
+// Visual sizes per body class. Hex `r` is the gameplay marker
+// (uniform across body classes via HEX_R). `haloR` is the absolute
+// world-space radius of the body sprite (sphere or rocky polygon),
+// independent of `r` -- changing the hex size never resizes the
+// body, and tuning a body's apparent size never shrinks the hex.
+// Hex marker size is the gameplay token and is INDEPENDENT of the
+// body sphere size. Tuning one should never change the other:
+//   r      = hex marker radius (screen pixels, uniform across types)
+//   haloR  = body sphere radius (world units, per body class)
+// HEX_R can be changed freely without affecting how big Jupiter or
+// Luna looks behind its hex.
 const HEX_R = 22;
 const TYPE_VIS = {
-  site:           { kind: 'hex',    r: HEX_R, haloFactor: 1.55 },
-  'gas-giant':    { kind: 'hex',    r: HEX_R, haloFactor: 2.6  },
-  'inner-planet': { kind: 'hex',    r: HEX_R, haloFactor: 1.8  },
-  planet:         { kind: 'hex',    r: HEX_R, haloFactor: 1.8  },
-  dwarf:          { kind: 'hex',    r: HEX_R, haloFactor: 1.7  },
-  tno:            { kind: 'hex',    r: HEX_R, haloFactor: 1.6  },
-  moon:           { kind: 'hex',    r: HEX_R, haloFactor: 1.65 },
+  site:           { kind: 'hex',    r: HEX_R, haloR: 20 },
+  'gas-giant':    { kind: 'hex',    r: HEX_R, haloR: 48 },
+  'inner-planet': { kind: 'hex',    r: HEX_R, haloR: 22 },
+  planet:         { kind: 'hex',    r: HEX_R, haloR: 22 },
+  dwarf:          { kind: 'hex',    r: HEX_R, haloR: 24 },
+  tno:            { kind: 'hex',    r: HEX_R, haloR: 18 },
+  moon:           { kind: 'hex',    r: HEX_R, haloR: 18 },
   comet:          { kind: 'comet',  r:  5 },
-  asteroid:       { kind: 'hex',    r:  7, haloFactor: 1.5, rocky: true },
-  surface:        { kind: 'hex',    r: HEX_R, haloFactor: 1.55 },
+  asteroid:       { kind: 'hex',    r:  7, haloR: 10, rocky: true },
+  surface:        { kind: 'hex',    r: HEX_R, haloR: 20 },
   sun:            { kind: 'sun',    r: 60 },
   lagrange:       { kind: 'circle', r:  7, fill: 'transparent', stroke: '#c66932' },
   burn:           { kind: 'circle', r:  6, hitR: 8, fill: '#d60f7a', stroke: '#fde0ee', hideBelowZoom: 1.4 },
@@ -1055,7 +1057,7 @@ export class MapRenderer {
       if (g.sites.length < 2) continue;
       const vis = TYPE_VIS[g.type] || TYPE_VIS.unknown;
       if (vis.kind !== 'hex' && vis.kind !== 'sun') continue;
-      const worldR = Math.min(vis.r * (vis.haloFactor || 1.6), capWorld);
+      const worldR = Math.min(vis.haloR || 20, capWorld);
       const palette = paletteFor(g.exemplar);
       const rings = ringDefFor(g.exemplar);
       if (rings) {
@@ -1078,7 +1080,7 @@ export class MapRenderer {
       if (vis.kind === 'sun')   { drawSun(ctx, site.x, site.y, vis.r); continue; }
       if (vis.kind === 'comet') { drawComet(ctx, site.x, site.y, vis.r, site); continue; }
       if (vis.kind !== 'hex') continue;
-      const worldR = Math.min(vis.r * vis.haloFactor, capWorld);
+      const worldR = Math.min(vis.haloR, capWorld);
       const rings = ringDefFor(site);
       if (vis.rocky) {
         drawRockyAsteroid(ctx, site.x, site.y, worldR, paletteFor(site), site);

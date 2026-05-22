@@ -150,6 +150,15 @@ Random-numbered seeds are stored per game so replays are deterministic.
 - Don't store raw tokens. Always `sha256(token)`.
 - Don't horizontally scale the API process — single-writer sqlite.
 - Don't break the murdoku-style "every branch deploys" promise.
+- **Hexagons are independent entities.** When the user says "hex"
+  or "hexagon" they mean the gameplay-token marker drawn for each
+  site. Its size lives at `TYPE_VIS[type].r` (or the shared
+  `HEX_R` constant in `js/game/render.js`) and is independent of
+  everything else — body sphere size (`haloR`), halo glow,
+  asteroid silhouette, ring radius, edge width, label font size.
+  Tuning the hex must never resize the bodies behind them, and
+  vice versa. Same goes when the user mentions "halos" / "bodies"
+  / "rings" — those are their own knobs.
   The point is that any commit pushed to any branch is live at the
   GH Pages URL within ~1 minute.
 
