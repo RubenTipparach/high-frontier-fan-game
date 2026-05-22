@@ -898,13 +898,35 @@ function openRocketStackModal() {
   xBtn.addEventListener('click', close);
   panel.appendChild(xBtn);
 
+  // Engagement is a transient UI flag — the player presses
+  // "Engage" once supports are met to trigger the moving-rocket
+  // animation. Any stack change (add / remove / re-pick active)
+  // resets it so a freshly-flyable stack still needs the user to
+  // confirm "yes, engage" before the animation runs.
+  let engaged = false;
   const repaint = () => {
     const stack = getRocketStack();
     const r = isRocketActive();
     const activeId = getActiveThrusterId();
+    // The active thruster's "supplied" set is what the rest of
+    // the stack contributes — used both by isRocketActive() and
+    // by renderCard() to mark each support chip ✓.
+    const supplied = new Set();
+    for (const s of stack) {
+      if (s.id === activeId) continue;
+      const c = lookup(s.id);
+      if (!c) continue;
+      const sup = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
+      for (const k of sup) supplied.add(k);
+    }
+    // Engagement is meaningless when supports aren't satisfied —
+    // clear the flag so the button text + animation don't lie if
+    // the player removes a card mid-flight.
+    if (!r.active) engaged = false;
     panel.querySelector('.rocket-stack-body')?.remove();
     const body = document.createElement('div');
     body.className = 'rocket-stack-body';
+    if (engaged && r.active) body.classList.add('is-engaged');
     // Status banner: active + green when all three rules hold,
     // grounded + red otherwise with the specific reason inline.
     const status = r.active
@@ -920,6 +942,23 @@ function openRocketStackModal() {
     `;
     panel.appendChild(body);
 
+    // Engage button: greyed out until supports are satisfied; tap
+    // to ignite the moving-rocket animation. Lives ABOVE the cards
+    // so it stays on screen even on a tall stack.
+    const engageBtn = document.createElement('button');
+    engageBtn.type = 'button';
+    engageBtn.className = 'rocket-engage' + (engaged ? ' is-engaged' : '');
+    engageBtn.disabled = !r.active;
+    engageBtn.textContent = engaged && r.active
+      ? '🔥 Engaged — rocket is moving!'
+      : r.active ? '🔥 Engage rocket' : '🔥 Engage rocket (supports unmet)';
+    engageBtn.addEventListener('click', () => {
+      if (!r.active) return;
+      engaged = !engaged;
+      repaint();
+    });
+    body.insertBefore(engageBtn, body.querySelector('#rocket-stack-cards'));
+
     const cards = body.querySelector('#rocket-stack-cards');
     if (!stack.length) {
       cards.innerHTML = '<p class="muted">Your rocket is empty. Mark cards 🚀 in your hand, then press BOOST to launch them up here.</p>';
@@ -932,7 +971,12 @@ function openRocketStackModal() {
       const wrap = document.createElement('div');
       wrap.className = 'rocket-slot';
       if (isThruster && slot.id === activeId) wrap.classList.add('is-active-thruster');
-      wrap.appendChild(renderCard(card, { type: slot.kind || 'patent' }));
+      // Only the active thruster's supports are validated against
+      // the rest of the stack — passing `supplied` for others would
+      // mark chips ✓ that aren't actually contributing to flight.
+      const cardOpts = { type: slot.kind || 'patent' };
+      if (isThruster && slot.id === activeId) cardOpts.supplied = supplied;
+      wrap.appendChild(renderCard(card, cardOpts));
 
       const actions = document.createElement('div');
       actions.className = 'rocket-slot-actions';

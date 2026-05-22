@@ -236,6 +236,9 @@
   background: rgba(0, 0, 0, 0.05);
 }
 .card-supports:has(.card-requires:empty) { display: none; }
+/* Explicit fallback for browsers without :has() support — JS
+   stamps .is-empty when the card has no requires. */
+.card-supports.is-empty { display: none; }
 .card-supports-label {
   font-size: 8px;
   font-weight: 700;
@@ -278,6 +281,32 @@
   font-size: 10px;
   color: var(--accent-2);
   font-variant-numeric: tabular-nums;
+}
+/* Support-chip "satisfied" state. Used inside the rocket stack
+   modal: the active thruster's requirement chips get a ✓ tag and
+   a green wash when another card in the stack supplies that
+   support kind. OR-groups (reactor X / ∿ / 💣) tick green when
+   ANY member kind is supplied. */
+.card-requires .req.is-satisfied {
+  background: rgba(34, 197, 94, 0.22);
+  border-color: #22c55e;
+  position: relative;
+  padding-right: 18px;
+}
+.card-requires .req.is-satisfied::after {
+  content: "✓";
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #22c55e;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+.card-requires .req[data-supplier].is-satisfied em {
+  /* Keep the supplier-tinted glyph readable on the green wash. */
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.6));
 }
 
 /* Supplier-tinted chips: the chip's background matches the

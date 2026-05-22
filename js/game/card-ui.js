@@ -71,7 +71,7 @@ const REQUIREMENT_VIS = {
   'spin-grav':          { glyph: '💃', label: 'Spin gravity'           },
 };
 
-export function renderCard(card, { type } = {}) {
+export function renderCard(card, { type, supplied } = {}) {
   const kind = type || (card.faces && card.faces.primary && card.faces.primary.role ? 'crew' : 'patent');
   const el = document.createElement('div');
   el.className = `card kind-${kind}` + (kind === 'patent' ? ` type-${card.type}` : '');
@@ -83,9 +83,9 @@ export function renderCard(card, { type } = {}) {
   // so only the side facing the viewer is painted.
   const inner = document.createElement('div');
   inner.className = 'card-inner';
-  inner.appendChild(buildFace(card, 'primary', kind));
+  inner.appendChild(buildFace(card, 'primary', kind, supplied));
   if (card.faces && card.faces.secondary) {
-    inner.appendChild(buildFace(card, 'secondary', kind));
+    inner.appendChild(buildFace(card, 'secondary', kind, supplied));
   }
   el.appendChild(inner);
 
@@ -116,7 +116,7 @@ export function renderCard(card, { type } = {}) {
   return el;
 }
 
-function buildFace(card, sideName, kind) {
+function buildFace(card, sideName, kind, supplied) {
   const face = document.createElement('div');
   face.className = 'card-face';
   face.dataset.face = sideName;
@@ -330,9 +330,22 @@ function buildFace(card, sideName, kind) {
   // count of 1 omits the multiplier so a single-icon row reads as
   // a clean bare glyph.
   const reqHost = face.querySelector('.card-requires');
+  const supportsRow = face.querySelector('.card-supports');
   // Each face carries its own supports — Tier-2 is a different
   // tech with potentially different chip requirements.
   const reqs = (faceData.requires) || card.requires || [];
+  // Hide the whole supports row when the card needs nothing — a
+  // bare "Supports required" heading over an empty chip row reads
+  // as broken on cards like reactors (which supply, not require).
+  if (!reqs.length) {
+    if (supportsRow) supportsRow.classList.add('is-empty');
+  } else {
+    // Re-label so the row clearly reads as REQUIRED supports.
+    // (Old label was just "Supports", ambiguous against the
+    // typebar's "what this card supplies" glyphs.)
+    const lab = supportsRow && supportsRow.querySelector('.card-supports-label');
+    if (lab) lab.textContent = 'Supports required';
+  }
   // Same-supplier supports are OR-alternatives, not AND-required.
   // A refinery that lists X / ∿ / 💣 reactor needs ANY ONE of the
   // three, so we collapse all reactor-* into one OR-chip with
@@ -347,11 +360,12 @@ function buildFace(card, sideName, kind) {
     if (!groups.has(supplier)) groups.set(supplier, []);
     groups.get(supplier).push(r);
   }
-  const makeChip = (visGlyphs, supplier, tip) => {
+  const makeChip = (visGlyphs, supplier, tip, satisfied) => {
     const span = document.createElement('span');
     span.className = 'req';
-    span.setAttribute('data-tip', tip);
+    span.setAttribute('data-tip', satisfied ? `${tip} — satisfied` : tip);
     if (supplier) span.dataset.supplier = supplier;
+    if (satisfied) span.classList.add('is-satisfied');
     span.innerHTML = visGlyphs;
     reqHost.appendChild(span);
   };
@@ -366,7 +380,9 @@ function buildFace(card, sideName, kind) {
     const tip = group.length > 1
       ? `Any of: ${labelParts.join(' / ')}`
       : labelParts[0];
-    makeChip(parts.join('<span class="req-or">/</span>'), supplier, tip);
+    // OR-group satisfied if ANY member kind is in the supplied set.
+    const satisfied = !!supplied && group.some((r) => supplied.has(r.kind));
+    makeChip(parts.join('<span class="req-or">/</span>'), supplier, tip, satisfied);
   }
   for (const r of loose) {
     const vis = REQUIREMENT_VIS[r.kind] || { glyph: '◇', label: r.kind };
@@ -375,8 +391,10 @@ function buildFace(card, sideName, kind) {
     else if (r.kind === 'spin-grav') iconHtml = svgBallerinaChip(16);
     else                             iconHtml = `<em>${vis.glyph}</em>`;
     const count = r.count > 1 ? `<b>×${r.count}</b>` : '';
+    const satisfied = !!supplied && supplied.has(r.kind);
     makeChip(`${iconHtml}${count}`, null,
-      r.count > 1 ? `${vis.label} ×${r.count}` : vis.label);
+      r.count > 1 ? `${vis.label} ×${r.count}` : vis.label,
+      satisfied);
   }
 
   // Blurb / ability text varies per face. The Tier-2 dark side

@@ -1363,6 +1363,83 @@ body:has(#view-browse:not(.hidden)) #main {
   opacity: 1;
 }
 
+/* Engage button: greyed out when supports are unmet, fiery when
+   ready, and lit up while the rocket is engaged. Sits at the top
+   of the stack body so it's reachable on tall stacks. */
+.rocket-engage {
+  display: block;
+  width: 100%;
+  margin: 4px 0 14px;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  background: linear-gradient(180deg, #f97316, #c2410c);
+  color: #2e0f02;
+  border: 1px solid #9a3412;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.rocket-engage:disabled {
+  background: rgba(15, 16, 35, 0.7);
+  color: var(--ink-dim);
+  border-color: var(--border);
+  cursor: not-allowed;
+}
+.rocket-engage.is-engaged {
+  background: linear-gradient(180deg, #fbbf24, #f97316);
+  color: #1f0a02;
+  border-color: #b45309;
+  box-shadow: 0 0 0 2px #f97316, 0 0 22px rgba(251, 191, 36, 0.6);
+}
+
+/* Engaged rocket animation: yellow/orange marching-ants stripe
+   around the active thruster card AND the whole stack body, so
+   the player gets the visual cue that the rocket can move. The
+   border is drawn via a CSS background-gradient stripe with an
+   offset animation, sharper than a dashed border at small sizes
+   and works the same on mobile + desktop. */
+@keyframes rocket-march {
+  0%   { background-position: 0 0,        0 100%,     0 0,        100% 0; }
+  100% { background-position: 32px 0,    -32px 100%,  0 -32px,    100% 32px; }
+}
+.rocket-stack-body.is-engaged,
+.rocket-slot.is-active-thruster .card:has(*) {
+  /* baseline for the engaged target only — see is-engaged rule */
+}
+.rocket-stack-body.is-engaged {
+  position: relative;
+  padding: 14px;
+  border-radius: 14px;
+  background-image:
+    /* top edge: orange stripes scrolling right */
+    repeating-linear-gradient(90deg,  #f97316 0 12px, #fbbf24 12px 24px),
+    /* bottom edge: scrolling left */
+    repeating-linear-gradient(90deg,  #fbbf24 0 12px, #f97316 12px 24px),
+    /* left edge: scrolling down */
+    repeating-linear-gradient(180deg, #f97316 0 12px, #fbbf24 12px 24px),
+    /* right edge: scrolling up */
+    repeating-linear-gradient(180deg, #fbbf24 0 12px, #f97316 12px 24px);
+  background-position: 0 0, 0 100%, 0 0, 100% 0;
+  background-size: 100% 4px, 100% 4px, 4px 100%, 4px 100%;
+  background-repeat: no-repeat;
+  animation: rocket-march 0.6s linear infinite;
+  box-shadow: 0 0 24px rgba(249, 115, 22, 0.45);
+}
+.rocket-stack-body.is-engaged .rocket-slot.is-active-thruster .card {
+  position: relative;
+  background-image:
+    repeating-linear-gradient(90deg,  #f97316 0 10px, #fbbf24 10px 20px),
+    repeating-linear-gradient(90deg,  #fbbf24 0 10px, #f97316 10px 20px),
+    repeating-linear-gradient(180deg, #f97316 0 10px, #fbbf24 10px 20px),
+    repeating-linear-gradient(180deg, #fbbf24 0 10px, #f97316 10px 20px);
+  background-position: 0 0, 0 100%, 0 0, 100% 0;
+  background-size: 100% 3px, 100% 3px, 3px 100%, 3px 100%;
+  background-repeat: no-repeat;
+  animation: rocket-march 0.5s linear infinite;
+  box-shadow: 0 0 0 1px #fbbf24, 0 0 18px rgba(251, 191, 36, 0.7);
+}
+
 /* Mobile / touch device adjustments to the hand strip. Hover
    doesn't exist on touch, so we replace the hover-driven
    quick-action row with a two-step tap-to-select flow:
