@@ -13,17 +13,26 @@
 //   id            stable key
 //   name          display name
 //   type          thruster | reactor | radiator | refinery |
-//                 robonaut  | generator | lab
+//                 robonaut  | generator | lab | modifier
 //   mass          wet mass added to the ship stack
-//   power_req     power units this component consumes per burn (0 = self-powered)
+//   radHardness   0..3 rad tolerance (auto-defaulted by type)
+//   spectralType  single letter spectral class (C/S/M/V/B/D)
+//                 -- drives the spectral hex glyph on every card
+//   requires      array of { kind, count } the ship's stack must
+//                 collectively supply for the card to fly.
+//                 The card-decoration step can also accept a
+//                 plain string array (e.g. ['push-sat',
+//                 'pulse-generator']) which expands to count=1
+//                 entries.
 //   blurb         one-line flavor
 //
 // Thruster-specific:
-//   thrust        max wet-mass it can push in one burn (so a ship
-//                 with stack mass M needs thrust >= M to MOVE)
-//   isp           burns per fuel unit. Higher = more efficient
-//                 (ion = 10, chemical = 2). Drives water consumption
-//                 in MOVE.
+//   thrust        max wet-mass the thruster can push in one burn
+//                 (so a ship with stack mass M needs thrust >= M
+//                 to MOVE). Rendered as the value inside the
+//                 pink thrust circle on the card.
+//   isp           burns per fuel unit. Higher = more efficient.
+//                 Drives the water-droplet fuel cost in MOVE.
 //
 // Reactor-specific:
 //   power         power units supplied to powered thrusters
@@ -45,40 +54,40 @@
 
 export const PATENTS = [
   // ===== Thrusters: chemical / cold (cheap, plentiful) =====
-  { id: 't_chemsust',   name: 'Chemical Sustainer',    type: 'thruster', mass: 2, thrust: 8,  isp: 2,  power_req: 0, radHardness: 1, blurb: 'LOX/methane workhorse. Burns fast, hauls a lot.' },
-  { id: 't_chemtug',    name: 'Hydrazine Tug',         type: 'thruster', mass: 1, thrust: 5,  isp: 2,  power_req: 0, blurb: 'Storable monoprop. Cheap, reliable.' },
-  { id: 't_solidkick',  name: 'Solid Kick Stage',      type: 'thruster', mass: 1, thrust: 10, isp: 1,  power_req: 0, blurb: 'One-shot motor for hard insertions.' },
-  { id: 't_resistojet', name: 'Resistojet',            type: 'thruster', mass: 1, thrust: 2,  isp: 4,  power_req: 1, blurb: 'Electrically heated water. Slow but tidy.' },
-  { id: 't_arcjet',     name: 'Arcjet',                type: 'thruster', mass: 1, thrust: 3,  isp: 5,  power_req: 2, blurb: 'Arc-heated propellant; needs juice.' },
+  { id: 't_chemsust',   name: 'Chemical Sustainer',    type: 'thruster', mass: 2, thrust: 8,  isp: 2, radHardness: 1, spectralType: 'C', supports: ['aerobrake'],            blurb: 'LOX/methane workhorse. Burns fast, hauls a lot.' },
+  { id: 't_chemtug',    name: 'Hydrazine Tug',         type: 'thruster', mass: 1, thrust: 5,  isp: 2, spectralType: 'C', supports: ['push-sat'],            blurb: 'Storable monoprop. Cheap, reliable.' },
+  { id: 't_solidkick',  name: 'Solid Kick Stage',      type: 'thruster', mass: 1, thrust: 10, isp: 1, spectralType: 'C', supports: ['pulse'],               blurb: 'One-shot motor for hard insertions.' },
+  { id: 't_resistojet', name: 'Resistojet',            type: 'thruster', mass: 1, thrust: 2,  isp: 4, spectralType: 'C', supports: ['isru'],                blurb: 'Electrically heated water. Slow but tidy.' },
+  { id: 't_arcjet',     name: 'Arcjet',                type: 'thruster', mass: 1, thrust: 3,  isp: 5, spectralType: 'C', supports: ['isru'],                blurb: 'Arc-heated propellant; needs juice.' },
 
   // ===== Thrusters: electric / ion (efficient, low thrust) =====
-  { id: 't_iondrive',   name: 'Gridded Ion Drive',     type: 'thruster', mass: 1, thrust: 1,  isp: 10, power_req: 3, blurb: 'Pencil-thin thrust, glacial accelerations.' },
-  { id: 't_hall',       name: 'Hall-Effect Thruster',  type: 'thruster', mass: 1, thrust: 2,  isp: 8,  power_req: 2, blurb: 'Solid workhorse for station tugs.' },
-  { id: 't_mpd',        name: 'Magnetoplasmadynamic',  type: 'thruster', mass: 2, thrust: 3,  isp: 7,  power_req: 4, blurb: 'Lorentz-force accelerated plasma.' },
-  { id: 't_vasimr',     name: 'VASIMR Engine',         type: 'thruster', mass: 2, thrust: 4,  isp: 8,  power_req: 4, blurb: 'Variable specific impulse, mode-switchable.' },
-  { id: 't_pit',        name: 'Pulsed Inductive',      type: 'thruster', mass: 2, thrust: 3,  isp: 6,  power_req: 3, blurb: 'Capacitor-banked plasma rings.' },
+  { id: 't_iondrive',   name: 'Gridded Ion Drive',     type: 'thruster', mass: 1, thrust: 1,  isp: 10, spectralType: 'M', supports: ['push-sat'],            blurb: 'Pencil-thin thrust, glacial accelerations.' },
+  { id: 't_hall',       name: 'Hall-Effect Thruster',  type: 'thruster', mass: 1, thrust: 2,  isp: 8, spectralType: 'M', supports: ['push-sat'],            blurb: 'Solid workhorse for station tugs.' },
+  { id: 't_mpd',        name: 'Magnetoplasmadynamic',  type: 'thruster', mass: 2, thrust: 3,  isp: 7, spectralType: 'M', supports: ['push-sat'],            blurb: 'Lorentz-force accelerated plasma.' },
+  { id: 't_vasimr',     name: 'VASIMR Engine',         type: 'thruster', mass: 2, thrust: 4,  isp: 8, spectralType: 'M', supports: ['push-sat', 'crew'],    blurb: 'Variable specific impulse, mode-switchable.' },
+  { id: 't_pit',        name: 'Pulsed Inductive',      type: 'thruster', mass: 1, thrust: 4,  isp: 6, spectralType: 'C', supports: ['push-sat', 'pulse'],   blurb: 'Capacitor-banked plasma rings.' },
 
   // ===== Thrusters: nuclear thermal =====
-  { id: 't_nerva',      name: 'Nuclear Thermal',       type: 'thruster', mass: 3, thrust: 6,  isp: 4,  power_req: 0, radHardness: 3, blurb: 'Solid-core fission heater. NERVA heritage.' },
-  { id: 't_lightbulb',  name: 'Gas-Core Nuclear',      type: 'thruster', mass: 3, thrust: 7,  isp: 6,  power_req: 0, blurb: 'Light-bulb topology: hot uranium, cool walls.' },
-  { id: 't_saltwater',  name: 'Nuclear Salt-Water',    type: 'thruster', mass: 2, thrust: 9,  isp: 7,  power_req: 0, blurb: 'Continuous open-cycle fission. Mad and effective.' },
-  { id: 't_fragment',   name: 'Fission Fragment',      type: 'thruster', mass: 3, thrust: 4,  isp: 9,  power_req: 1, blurb: 'Fission products as their own exhaust.' },
+  { id: 't_nerva',      name: 'Nuclear Thermal',       type: 'thruster', mass: 3, thrust: 6,  isp: 4, radHardness: 3, spectralType: 'M', supports: ['crew'],                blurb: 'Solid-core fission heater. NERVA heritage.' },
+  { id: 't_lightbulb',  name: 'Gas-Core Nuclear',      type: 'thruster', mass: 3, thrust: 7,  isp: 6, spectralType: 'M', supports: ['crew'],                blurb: 'Light-bulb topology: hot uranium, cool walls.' },
+  { id: 't_saltwater',  name: 'Nuclear Salt-Water',    type: 'thruster', mass: 2, thrust: 9,  isp: 7, spectralType: 'M', supports: ['pulse'],               blurb: 'Continuous open-cycle fission. Mad and effective.' },
+  { id: 't_fragment',   name: 'Fission Fragment',      type: 'thruster', mass: 3, thrust: 4,  isp: 9, spectralType: 'M', supports: ['push-sat'],            blurb: 'Fission products as their own exhaust.' },
 
   // ===== Thrusters: fusion =====
-  { id: 't_zpinch',     name: 'Z-Pinch Fusion',        type: 'thruster', mass: 4, thrust: 6,  isp: 8,  power_req: 2, blurb: 'Self-pinched plasma column. Loud.' },
-  { id: 't_dpfusion',   name: 'D-He3 Fusion Drive',    type: 'thruster', mass: 4, thrust: 5,  isp: 11, power_req: 3, blurb: 'Aneutronic fuel. Needs Saturn-grade He3.' },
-  { id: 't_icftorch',   name: 'ICF Torch Drive',       type: 'thruster', mass: 5, thrust: 8,  isp: 10, power_req: 4, blurb: 'Inertial confinement. Pulsed brilliance.' },
-  { id: 't_orion',      name: 'Pulse Propulsion',      type: 'thruster', mass: 5, thrust: 12, isp: 6,  power_req: 0, radHardness: 3, blurb: 'External nuclear pulse. Pusher plate optional.' },
+  { id: 't_zpinch',     name: 'Z-Pinch Fusion',        type: 'thruster', mass: 4, thrust: 6,  isp: 8, blurb: 'Self-pinched plasma column. Loud.' },
+  { id: 't_dpfusion',   name: 'D-He3 Fusion Drive',    type: 'thruster', mass: 4, thrust: 5,  isp: 11, blurb: 'Aneutronic fuel. Needs Saturn-grade He3.' },
+  { id: 't_icftorch',   name: 'ICF Torch Drive',       type: 'thruster', mass: 5, thrust: 8,  isp: 10, blurb: 'Inertial confinement. Pulsed brilliance.' },
+  { id: 't_orion',      name: 'Pulse Propulsion',      type: 'thruster', mass: 5, thrust: 12, isp: 6, radHardness: 3, blurb: 'External nuclear pulse. Pusher plate optional.' },
 
   // ===== Thrusters: sails / beam =====
-  { id: 't_solarsail',  name: 'Solar Sail',            type: 'thruster', mass: 1, thrust: 1,  isp: 99, power_req: 0, radHardness: 0, blurb: 'Free fuel in the inner system. Useless past Mars.' },
-  { id: 't_magsail',    name: 'Magnetic Sail',         type: 'thruster', mass: 2, thrust: 1,  isp: 99, power_req: 2, blurb: 'Rides the solar wind. Works further out.' },
-  { id: 't_lasersail',  name: 'Laser-Pushed Sail',     type: 'thruster', mass: 1, thrust: 3,  isp: 99, power_req: 0, blurb: 'Needs a friendly laser station. Worth the trip.' },
-  { id: 't_tether',     name: 'Electrodynamic Tether', type: 'thruster', mass: 1, thrust: 2,  isp: 99, power_req: 1, blurb: 'Lorentz reboost in any magnetosphere.' },
+  { id: 't_solarsail',  name: 'Solar Sail',            type: 'thruster', mass: 1, thrust: 1,  isp: 99, radHardness: 0, spectralType: 'C', supports: ['sail', 'beam'],        blurb: 'Free fuel in the inner system. Useless past Mars.' },
+  { id: 't_magsail',    name: 'Magnetic Sail',         type: 'thruster', mass: 2, thrust: 1,  isp: 99, spectralType: 'M', supports: ['sail'],                blurb: 'Rides the solar wind. Works further out.' },
+  { id: 't_lasersail',  name: 'Laser-Pushed Sail',     type: 'thruster', mass: 1, thrust: 3,  isp: 99, spectralType: 'C', supports: ['sail', 'beam'],        blurb: 'Needs a friendly laser station. Worth the trip.' },
+  { id: 't_tether',     name: 'Electrodynamic Tether', type: 'thruster', mass: 1, thrust: 2,  isp: 99, spectralType: 'M', supports: ['push-sat'],            blurb: 'Lorentz reboost in any magnetosphere.' },
 
   // ===== Thrusters: aerobrake / atmospheric =====
-  { id: 't_aerobrake',  name: 'Aerobrake Shroud',      type: 'thruster', mass: 2, thrust: 6,  isp: 99, power_req: 0, blurb: 'One-trick pony: only works on atmospheric arrivals.' },
-  { id: 't_massdriver', name: 'Mass-Driver Catapult',  type: 'thruster', mass: 4, thrust: 15, isp: 1,  power_req: 6, blurb: 'Site-bound launcher. Brutal acceleration.' },
+  { id: 't_aerobrake',  name: 'Aerobrake Shroud',      type: 'thruster', mass: 2, thrust: 6,  isp: 99, blurb: 'One-trick pony: only works on atmospheric arrivals.' },
+  { id: 't_massdriver', name: 'Mass-Driver Catapult',  type: 'thruster', mass: 4, thrust: 15, isp: 1, blurb: 'Site-bound launcher. Brutal acceleration.' },
 
   // ===== Reactors =====
   { id: 'r_solar_s',    name: 'Solar Panel (small)',   type: 'reactor', mass: 1, power: 2, heat: 1, blurb: 'Inner-system only; output halved past Mars.' },
@@ -124,7 +133,7 @@ export const PATENTS = [
   { id: 'm_bell',       name: 'Bell Extension',      type: 'modifier', mass: 1, radHardness: 2, modifier: { target: 'thruster', effect: { isp: 1 } },               blurb: 'Larger expansion ratio. +1 ISP, no mass-flow change.' },
   { id: 'm_truss',      name: 'Composite Truss',     type: 'modifier', mass: 1, radHardness: 1, modifier: { target: 'any', effect: { mass: -1 } },                  blurb: 'Lightweight strongback shaves one mass off any attached card.' },
   { id: 'm_radshield',  name: 'Rad Shielding',       type: 'modifier', mass: 2, radHardness: 3, modifier: { target: 'any', effect: { radHardness: 2 } },            blurb: 'Tungsten + boron wrap. +2 RAD hardness on the attached card.' },
-  { id: 'm_capacitor',  name: 'Capacitor Bank',      type: 'modifier', mass: 1, radHardness: 1, modifier: { target: 'thruster', effect: { thrust: 1, power_req: 1 } }, blurb: 'Pulse-charging stack: +1 thrust at +1 power draw.' },
+  { id: 'm_capacitor',  name: 'Capacitor Bank',      type: 'modifier', mass: 1, radHardness: 1, modifier: { target: 'thruster', effect: { thrust: 1 } }, blurb: 'Pulse-charging stack: +1 thrust at +1 power draw.' },
   { id: 'm_helium3',    name: 'Helium-3 Catalyst',   type: 'modifier', mass: 1, radHardness: 2, modifier: { target: 'thruster', effect: { isp: 2, mass: 1 } },      blurb: 'Aneutronic fuel boost. +2 ISP, +1 mass (tankage).' },
 
   // ===== Generators / Labs =====
@@ -143,6 +152,67 @@ export const PATENTS = [
 // hand-write a value on every card. Hard numbers can be overridden
 // by adding a `radHardness` field on the individual patent. Range
 // 0..3; higher = more tolerant of radiation hazards on the route.
+// Requirement-kind catalogue. Each kind is a single capability
+// the engine tracks across the cards in your stack. Other cards
+// "supply" a kind (e.g. a Pulse Bank reactor supplies 1
+// pulse-generator); a thruster carries a `requires` row that the
+// stack must collectively satisfy. Card-ui maps each kind to a
+// glyph + label.
+export const REQUIREMENT_KINDS = [
+  'pulse-generator',  // capacitor banks / pulse drivers
+  'thermostat',       // active cooling supplied by radiators
+  'crew-quarters',    // crewed thruster: needs habitat space
+  'sail',             // light or magnetic sail rigging
+  'beam-receiver',    // works with a friendly laser/microwave station
+  'push-sat',         // satellite carrier / fuel-pusher pairing
+  'isru-rig',         // in-situ propellant intake
+  'aerobrake-shroud', // atmospheric-entry aeroshell
+  'spin-grav',        // spin-gravity tether or hub
+];
+
+// One-letter / string aliases that older card declarations used
+// before we introduced explicit kinds. Auto-expanded in the
+// decoration loop below.
+const REQUIRE_ALIASES = {
+  'push-sat':  'push-sat',
+  'aerobrake': 'aerobrake-shroud',
+  'crew':      'crew-quarters',
+  'sail':      'sail',
+  'pulse':     'pulse-generator',
+  'isru':      'isru-rig',
+  'beam':      'beam-receiver',
+  'spin-grav': 'spin-grav',
+  'thermo':    'thermostat',
+};
+
+// Spectral types per HF4 convention: C (carbonaceous), S
+// (silicate), M (metallic), V (basaltic/volcanic), B (alkaline),
+// D (icy/cometary). Defaulted to 'C' if the card doesn't carry
+// one explicitly. Used to render the small spectral hex on every
+// card; later (Stage 3+) the engine can require / reward
+// matching site spectral types when building or refuelling.
+const SPECTRAL_DEFAULT = 'C';
+
+// Support icons that may appear in the bottom-right of a thruster
+// card (and a few non-thrusters). One-letter / short codes;
+// card-ui.js maps each to a glyph + label.
+//   'push-sat'   -> 🛰 satellite carrier
+//   'aerobrake'  -> 🪂 atmospheric entry
+//   'lab-bonus'  -> 🧪 lab science boost
+//   'crew'       -> 👤 carries crew quarters
+//   'spin-grav'  -> 🌀 spin gravity capable
+//   'beam'       -> ☀ beam-pushed
+//   'pulse'      -> ⚡ pulse propulsion
+//   'sail'       -> ⛵ light/magnetic sail
+//   'isru'       -> 🛢 in-situ propellant
+// `supports` lives directly on the card; default is empty.
+//
+// Both shapes are accepted at decoration time:
+//   supports: ['push-sat', 'pulse']
+//   requires: [{ kind: 'pulse-generator', count: 1 }]
+// The decoration pass below normalises both into a single
+// `requires` array of { kind, count } records.
+
 const RAD_HARDNESS_BY_TYPE = {
   thruster:  2,
   reactor:   3,
@@ -166,6 +236,21 @@ const ROTATED_TYPES = new Set(['radiator']);
 // straight on the patent record (modifier, flippedMass, etc.).
 for (const p of PATENTS) {
   if (!('radHardness' in p)) p.radHardness = RAD_HARDNESS_BY_TYPE[p.type] ?? 1;
+  if (!p.spectralType) p.spectralType = SPECTRAL_DEFAULT;
+  // Normalise supports/requires into a single requires array of
+  // { kind, count } records. A bare `supports` string is taken to
+  // mean count=1 of the corresponding kind.
+  if (!p.requires) {
+    const fromSupports = Array.isArray(p.supports)
+      ? p.supports.map((s) => ({ kind: REQUIRE_ALIASES[s] || s, count: 1 }))
+      : [];
+    p.requires = fromSupports;
+  } else {
+    p.requires = p.requires.map((r) => (typeof r === 'string'
+      ? { kind: REQUIRE_ALIASES[r] || r, count: 1 }
+      : { kind: REQUIRE_ALIASES[r.kind] || r.kind, count: r.count || 1 }));
+  }
+  delete p.supports;
   if (!p.flipOrientation) {
     p.flipOrientation = ROTATED_TYPES.has(p.type) ? 'rotated180' : 'standard';
   }

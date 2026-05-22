@@ -60,9 +60,9 @@
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 10px 12px 8px;
+  padding: 0;
   width: 220px;
-  min-height: 240px;
+  min-height: 300px;
   display: flex;
   flex-direction: column;
   color: var(--ink);
@@ -70,26 +70,8 @@
   overflow: hidden;
 }
 
-/* Type-coloured left strip so the deck is scannable by category. */
-.card::before {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 4px;
-  background: var(--ink-mute);
-}
-.card.type-thruster::before  { background: #f87171; }
-.card.type-reactor::before   { background: #fbbf24; }
-.card.type-radiator::before  { background: #7dd3fc; }
-.card.type-refinery::before  { background: #4ade80; }
-.card.type-robonaut::before  { background: #c084fc; }
-.card.type-lab::before       { background: #38bdf8; }
-.card.type-generator::before { background: #a78bfa; }
-.card.kind-crew::before      { background: #fde047; }
-
-/* Toggle face by data-side. Faces stack; only the active one is
-   shown. Radiators flip rotated 180°. */
-.card-face { display: none; flex-direction: column; flex: 1 1 auto; gap: 8px; }
+/* Toggle face by data-side. Radiators flip rotated 180°. */
+.card-face { display: none; flex-direction: column; flex: 1 1 auto; }
 .card[data-side="primary"]   .card-face[data-face="primary"]   { display: flex; }
 .card[data-side="secondary"] .card-face[data-face="secondary"] { display: flex; }
 .card.flip-rotates[data-side="secondary"] .card-face[data-face="secondary"] {
@@ -97,36 +79,62 @@
   transform-origin: center;
 }
 
-.card-header {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.card-type, .card-role {
-  font-size: 9px;
-  letter-spacing: 1.6px;
-  color: var(--ink-mute);
+/* Type bar across the top, coloured by component category. */
+.card-typebar {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  padding: 5px 10px;
+  text-align: center;
+  color: #0c0a16;
+  background: var(--ink-mute);
   text-transform: uppercase;
 }
-.card-name {
-  font-weight: 600;
+.card.type-thruster  .card-typebar { background: #f8a47a; }
+.card.type-reactor   .card-typebar { background: #fbbf24; }
+.card.type-radiator  .card-typebar { background: #7dd3fc; }
+.card.type-refinery  .card-typebar { background: #86efac; }
+.card.type-robonaut  .card-typebar { background: #c4b5fd; }
+.card.type-lab       .card-typebar { background: #67e8f9; }
+.card.type-generator .card-typebar { background: #a78bfa; }
+.card.type-modifier  .card-typebar { background: #fda4af; }
+.card.kind-crew      .card-typebar { background: #fde047; }
+
+/* Stats box top-left: mass / rad / spectral hex in a row. */
+.card-statbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px 0;
+  font-size: 10px;
+  color: var(--ink-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.card-statbox span { display: inline-flex; align-items: center; gap: 4px; }
+.card-statbox strong {
   color: var(--ink);
   font-size: 13px;
-  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
 }
+.card-spectral { margin-left: auto; line-height: 0; }
+.spectral-hex { width: 22px; height: 26px; }
 
 .card-body {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  padding: 8px 10px;
   flex: 1 1 auto;
 }
 
-.thrust-triangle {
-  display: block;
-  max-width: 100px;
-  margin: 4px auto 2px;
+.card-thrust {
+  align-self: center;
+  width: 100%;
+  max-width: 180px;
 }
+.thrust-visual { display: block; }
+.thrust-svg { width: 100%; height: auto; }
 
 .card-stats {
   list-style: none;
@@ -149,6 +157,47 @@
   font-variant-numeric: tabular-nums;
 }
 
+.card-requires {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  margin-top: 2px;
+}
+.card-requires .req {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+}
+.card-requires .req em {
+  font-style: normal;
+  font-size: 13px;
+  line-height: 1;
+}
+.card-requires .req b {
+  font-weight: 700;
+  font-size: 10px;
+  color: var(--accent-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.card-name {
+  font-weight: 600;
+  color: var(--ink);
+  font-size: 13px;
+}
+.card-role {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+}
 .card-bonus {
   margin: 0;
   font-size: 11px;
@@ -169,10 +218,13 @@
   font-size: 10px;
   color: var(--ink-dim);
   border-top: 1px dashed var(--border);
-  padding-top: 6px;
+  padding: 6px 10px;
+  background: rgba(15, 16, 35, 0.55);
 }
-.card-footer em { font-style: normal; color: var(--ink-mute); margin-right: 4px; }
-.card-footer strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.card-footer .card-name {
+  color: var(--ink);
+  font-size: 12px;
+}
 .card-footer .face-tag { margin-left: auto; color: var(--ink-mute); }
 
 .card-flip {

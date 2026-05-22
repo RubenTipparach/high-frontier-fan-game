@@ -53,9 +53,32 @@ for the common stats:
   drawn upside-down, matching the published cards.
 
 Thruster-specific fields (carried on whichever face is active):
-- `thrust` — push capacity (drives the thrust triangle visual)
-- `isp` — burns per fuel unit
-- `power_req` — power draw (0 = self-powered)
+- `thrust` — push capacity (rendered as the value inside the pink
+  thrust circle on the card). Triangle silhouette is fixed-size
+  per the published convention; only the number inside the
+  pink circle changes per card.
+- `isp` — burns per fuel unit. The card's fuel droplet shows
+  `ceil(thrust / isp)`, the water cost of one burn.
+- `requires` — array of `{ kind, count }`. Stack constraints the
+  ship's other cards must collectively satisfy. The card UI
+  renders the requirement icons in a row (with an ×N badge for
+  count > 1). `data/patents.js` exports `REQUIREMENT_KINDS` as
+  the canonical enum (pulse-generator, thermostat,
+  crew-quarters, sail, beam-receiver, push-sat, isru-rig,
+  aerobrake-shroud, spin-grav). Other cards "supply" these
+  kinds at BUILD time; thrusters consume them.
+- `supports` (string array) is accepted as shorthand and auto-
+  expanded into `requires` with count: 1 per entry.
+
+NOTE: there is NO `power_req` field. Older drafts had one; it
+was removed because requirements are gated through the kind/
+count system instead.
+
+Spectral type:
+- Every card carries a `spectralType` (default 'C'). One of
+  C / S / M / V / B / D. Rendered as a coloured hex glyph in
+  the card's stat box; the engine (Stage 3+) can use it for
+  refuelling / matching at sites.
 
 Crew cards: still double-sided, but the two faces are
 **functionally independent** — each face is its own crew member

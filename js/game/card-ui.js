@@ -1,20 +1,42 @@
 // Game-style card renderer. Builds a DOM element for any of the
 // component cards (patents, crew) that follows the published
-// card silhouette: name bar across the top, type / role badge,
-// content area (thrust triangle for thrusters, body stats for
-// everything else), and a footer strip with mass + rad hardness.
+// HF4 card silhouette: name bar, stats box (mass + rad), spectral
+// hex, content area (thrust visualization for thrusters, type-
+// specific for everything else), requirement icons, blurb.
 //
 // Cards are double-sided. The active face is stored as a data
 // attribute on the root node; flipping just toggles it. Radiator
 // secondaries render rotated 180° so the "stowed" face reads
-// upside-down when installed, matching the published convention.
-//
-// Returned DOM is plain HTML+CSS so it can be embedded in any
-// pane / panel. The .card class + variants live in css/cards.css.
+// upside-down when installed.
+
+// Spectral type -> { glyph, fill, ink }. Used for the per-card
+// spectral hex. Falls back to 'unknown' for anything unmapped.
+const SPECTRAL_STYLE = {
+  C: { glyph: 'C', fill: '#1f2937', ink: '#e5e7eb' },  // carbonaceous
+  S: { glyph: 'S', fill: '#fbbf24', ink: '#1f2937' },  // silicate
+  M: { glyph: 'M', fill: '#9ca3af', ink: '#0c0a16' },  // metallic
+  V: { glyph: 'V', fill: '#f97316', ink: '#0c0a16' },  // basaltic / volcanic
+  B: { glyph: 'B', fill: '#60a5fa', ink: '#0c0a16' },  // alkaline
+  D: { glyph: 'D', fill: '#67e8f9', ink: '#0c0a16' },  // icy / cometary
+  unknown: { glyph: '?', fill: '#475569', ink: '#e5e7eb' },
+};
+
+// Requirement-kind -> { glyph, label }. Each entry describes the
+// icon shown in the requirement row on a card. count is rendered
+// next to the glyph (1 -> bare icon; >1 -> icon + "×N").
+const REQUIREMENT_VIS = {
+  'pulse-generator':  { glyph: '⚡', label: 'Pulse generator' },
+  'thermostat':       { glyph: '🌡', label: 'Thermostat'      },
+  'crew-quarters':    { glyph: '👤', label: 'Crew quarters'   },
+  'sail':             { glyph: '⛵', label: 'Sail rigging'    },
+  'beam-receiver':    { glyph: '☀',  label: 'Beam receiver'   },
+  'push-sat':         { glyph: '🛰', label: 'Push-sat'        },
+  'isru-rig':         { glyph: '🛢', label: 'ISRU rig'        },
+  'aerobrake-shroud': { glyph: '🪂', label: 'Aerobrake'       },
+  'spin-grav':        { glyph: '🌀', label: 'Spin gravity'    },
+};
 
 export function renderCard(card, { type } = {}) {
-  // `type` lets the caller force patent vs crew handling; if
-  // omitted we sniff for crew-specific fields.
   const kind = type || (card.faces && card.faces.primary && card.faces.primary.role ? 'crew' : 'patent');
   const el = document.createElement('div');
   el.className = `card kind-${kind}` + (kind === 'patent' ? ` type-${card.type}` : '');
@@ -26,7 +48,6 @@ export function renderCard(card, { type } = {}) {
     el.appendChild(buildFace(card, 'secondary', kind));
   }
 
-  // Flip control: only show if the card has two faces.
   if (card.faces && card.faces.secondary) {
     const flip = document.createElement('button');
     flip.type = 'button';
@@ -46,62 +67,71 @@ function buildFace(card, sideName, kind) {
   face.className = 'card-face';
   face.dataset.face = sideName;
 
-  // Crew: each face is a fully independent crew member; the
-  // card-level fields don't carry over.
+  // Crew faces are functionally independent: each face is a
+  // complete crew record. Keep the layout simple (header, bonus,
+  // blurb, mass/rad/spectral footer).
   if (kind === 'crew') {
     const c = card.faces[sideName];
     face.innerHTML = `
-      <div class="card-header">
-        <span class="card-role"></span>
-        <span class="card-name"></span>
+      <div class="card-typebar">CREW</div>
+      <div class="card-statbox">
+        <span><strong class="m"></strong> MASS</span>
+        <span><strong class="r"></strong> RAD</span>
+        <span class="card-spectral"></span>
       </div>
       <div class="card-body">
+        <h4 class="card-name"></h4>
+        <p class="card-role"></p>
         <p class="card-bonus"></p>
         <p class="card-blurb"></p>
       </div>
-      <div class="card-footer">
-        <span><em>M</em><strong class="m"></strong></span>
-        <span><em>RAD</em><strong class="r"></strong></span>
-      </div>
     `;
-    face.querySelector('.card-role').textContent = c.role || '';
     face.querySelector('.card-name').textContent = c.name || '';
+    face.querySelector('.card-role').textContent = c.role || '';
     face.querySelector('.card-bonus').textContent = c.bonus || '';
     face.querySelector('.card-blurb').textContent = c.blurb || '';
     face.querySelector('.m').textContent = c.mass != null ? c.mass : '—';
     face.querySelector('.r').textContent = c.radHardness != null ? c.radHardness : '—';
+    face.querySelector('.card-spectral').appendChild(spectralHex(c.spectralType || 'C'));
     return face;
   }
 
-  // Patent / component card. Card-level fields (mass, radHardness)
-  // apply across both faces; face-level only carries an optional
-  // label + blurb (and any face-specific overrides set by the
-  // engine's modifier composition later).
-  const meta = (card.faces && card.faces[sideName]) || {};
   const isThruster = card.type === 'thruster';
   face.innerHTML = `
-    <div class="card-header">
-      <span class="card-type"></span>
-      <span class="card-name"></span>
+    <div class="card-typebar"></div>
+    <div class="card-statbox">
+      <span><strong class="m"></strong> MASS</span>
+      <span><strong class="r"></strong> RAD</span>
+      <span class="card-spectral"></span>
     </div>
     <div class="card-body">
-      ${isThruster ? thrustTriangleSvg(card) : ''}
+      ${isThruster ? '<div class="card-thrust"></div>' : ''}
       <ul class="card-stats"></ul>
+      <div class="card-requires"></div>
       <p class="card-blurb"></p>
     </div>
     <div class="card-footer">
-      <span><em>M</em><strong class="m"></strong></span>
-      <span><em>RAD</em><strong class="r"></strong></span>
+      <span class="card-name"></span>
       <span class="face-tag"></span>
     </div>
   `;
-  face.querySelector('.card-type').textContent = card.type.toUpperCase();
+  face.querySelector('.card-typebar').textContent = card.type.toUpperCase();
   face.querySelector('.card-name').textContent = card.name;
   face.querySelector('.m').textContent = card.mass != null ? card.mass : '—';
   face.querySelector('.r').textContent = card.radHardness != null ? card.radHardness : '—';
-  face.querySelector('.face-tag').textContent = meta.label || (sideName === 'primary' ? 'A' : 'B');
+  face.querySelector('.face-tag').textContent =
+    (card.faces && card.faces[sideName] && card.faces[sideName].label) ||
+    (sideName === 'primary' ? 'A' : 'B');
 
-  // Component-specific stat rows.
+  face.querySelector('.card-spectral').appendChild(spectralHex(card.spectralType));
+
+  if (isThruster) {
+    const thrustHost = face.querySelector('.card-thrust');
+    thrustHost.appendChild(thrustVisual(card));
+  }
+
+  // Type-specific stat list (everything that doesn't fit in the
+  // thrust visual / requirement row).
   const stats = face.querySelector('.card-stats');
   const add = (k, v) => {
     if (v == null) return;
@@ -112,9 +142,7 @@ function buildFace(card, sideName, kind) {
     stats.appendChild(li);
   };
   if (card.type === 'thruster') {
-    add('Thrust', card.thrust);
-    add('ISP',    card.isp);
-    if (card.power_req) add('Power req', card.power_req);
+    add('ISP', card.isp);
   } else if (card.type === 'reactor') {
     add('Power', card.power);
     add('Heat',  card.heat);
@@ -133,32 +161,101 @@ function buildFace(card, sideName, kind) {
       add('Δ ' + k, (v > 0 ? '+' : '') + v);
     }
   }
+
+  // Requirements row: icon + ×N for each requirement entry. A
+  // count of 1 omits the multiplier so a single-icon row reads as
+  // a clean bare glyph.
+  const reqHost = face.querySelector('.card-requires');
+  const reqs = card.requires || [];
+  for (const r of reqs) {
+    const vis = REQUIREMENT_VIS[r.kind] || { glyph: '◇', label: r.kind };
+    const span = document.createElement('span');
+    span.className = 'req';
+    span.title = `${vis.label} ×${r.count}`;
+    span.innerHTML = `<em></em>${r.count > 1 ? `<b>×${r.count}</b>` : ''}`;
+    span.querySelector('em').textContent = vis.glyph;
+    reqHost.appendChild(span);
+  }
+
+  const meta = (card.faces && card.faces[sideName]) || {};
   face.querySelector('.card-blurb').textContent = meta.blurb || card.blurb || '';
   return face;
 }
 
-function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+// Small flat-top hex with the spectral letter in the centre.
+// Returns an SVG element the caller appends.
+function spectralHex(type) {
+  const style = SPECTRAL_STYLE[type] || SPECTRAL_STYLE.unknown;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '-12 -14 24 28');
+  svg.setAttribute('class', 'spectral-hex');
+  // Pointy-top hex so it reads as a gem rather than a planet hex.
+  const r = 12;
+  const points = [];
+  for (let i = 0; i < 6; i++) {
+    const t = (i / 6) * Math.PI * 2 - Math.PI / 2;
+    points.push(`${(Math.cos(t) * r).toFixed(1)},${(Math.sin(t) * r).toFixed(1)}`);
+  }
+  const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+  poly.setAttribute('points', points.join(' '));
+  poly.setAttribute('fill', style.fill);
+  poly.setAttribute('stroke', '#0c0a16');
+  poly.setAttribute('stroke-width', '1.2');
+  svg.appendChild(poly);
+  const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  text.setAttribute('x', '0');
+  text.setAttribute('y', '4');
+  text.setAttribute('text-anchor', 'middle');
+  text.setAttribute('font-size', '12');
+  text.setAttribute('font-weight', '700');
+  text.setAttribute('fill', style.ink);
+  text.textContent = style.glyph;
+  svg.appendChild(text);
+  return svg;
+}
 
-// Thrust triangle: scales an isoceles triangle by the thruster's
-// thrust value so the visual reads "more thrust = bigger triangle"
-// at a glance. Matches the published-card convention without
-// copying the specific size mapping.
-function thrustTriangleSvg(card) {
-  const t = Math.max(1, Math.min(15, card.thrust || 1));
-  const maxW = 80, maxH = 60;
-  const w = (t / 15) * maxW;
-  const h = (t / 15) * maxH;
-  const cx = maxW / 2;
-  const baseY = maxH - 2;
-  const topY = baseY - h;
-  const leftX = cx - w / 2;
-  const rightX = cx + w / 2;
-  return `
-    <svg class="thrust-triangle" viewBox="0 0 ${maxW} ${maxH}" aria-hidden="true">
-      <polygon points="${cx},${topY} ${leftX},${baseY} ${rightX},${baseY}"
-        fill="rgba(248,113,113,0.7)" stroke="#fde0ee" stroke-width="1.2"/>
-      <text x="${cx}" y="${baseY - 4}" text-anchor="middle"
-        font-size="13" font-weight="700" fill="#0c0a16">${card.thrust}</text>
+// Thrust visualisation: fixed-size blue triangle, pink thrust
+// circle at the left vertex, water droplet at the right vertex
+// with the per-burn fuel cost, arrow in between. If the card
+// requires push-sat the satellite glyph appears in the triangle
+// centre.
+function thrustVisual(card) {
+  const wrap = document.createElement('div');
+  wrap.className = 'thrust-visual';
+  const thrust = card.thrust ?? 0;
+  // Fuel cost per burn: simple ceil(thrust / isp). For sail-class
+  // cards with absurdly high ISP, render as 0 (free).
+  const fuel = card.isp >= 50
+    ? 0
+    : Math.max(1, Math.ceil(thrust / Math.max(1, card.isp || 1)));
+  const hasPushSat = (card.requires || []).some((r) => r.kind === 'push-sat');
+
+  wrap.innerHTML = `
+    <svg viewBox="0 0 140 96" class="thrust-svg">
+      <defs>
+        <marker id="thrust-arrow" viewBox="0 0 8 8" refX="6" refY="4"
+          markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0,0 L8,4 L0,8 z" fill="#ffffff"/>
+        </marker>
+      </defs>
+      <polygon points="70,12 18,86 122,86"
+        fill="rgba(96,165,250,0.35)" stroke="#60a5fa" stroke-width="2.5"
+        stroke-linejoin="round"/>
+      ${hasPushSat ? `<text x="70" y="58" text-anchor="middle"
+        font-size="22">🛰</text>` : ''}
+      <line x1="35" y1="86" x2="100" y2="86"
+        stroke="#ffffff" stroke-width="1.8"
+        marker-end="url(#thrust-arrow)"/>
+      <circle cx="22" cy="86" r="13" fill="#ec4899" stroke="#fbcfe8" stroke-width="1.5"/>
+      <text x="22" y="90" text-anchor="middle" font-size="14"
+        font-weight="700" fill="#ffffff">${thrust}</text>
+      <path d="M 116 70 C 124 78 124 92 116 96 C 108 92 108 78 116 70 Z"
+        fill="#7dd3fc" stroke="#bae6fd" stroke-width="1.3"/>
+      <text x="116" y="91" text-anchor="middle" font-size="11"
+        font-weight="700" fill="#0c1d34">${fuel}</text>
     </svg>
   `;
+  return wrap;
 }
+
+function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
