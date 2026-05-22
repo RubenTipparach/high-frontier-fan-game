@@ -134,14 +134,15 @@ function wireHandStrip() {
       wrap.className = 'hand-slot';
       if (isBoostMarked(id)) wrap.classList.add('is-boost-marked');
       wrap.dataset.slotIdx = String(idx);
-      wrap.appendChild(renderCard(card, { type: kindOf(id) }));
+      const cardEl = renderCard(card, { type: kindOf(id) });
+      wrap.appendChild(cardEl);
 
-      // Quick-action row at the bottom of the slot, revealed on
-      // hover. Same verbs as the inspect modal but emoji-only
-      // so they read fast: 🗑 discard, 💰 sell, 🏭 exo produce,
-      // 🚀 boost-mark (toggles). Clicks here stop propagation
-      // so the slot's own click (which opens the inspect modal)
-      // doesn't also fire.
+      // Quick-action row appended INSIDE the card element so
+      // it shares the same scale + transform as the Flip
+      // button (which card-ui appends to the card root). Both
+      // end up at the card's actual visible bottom edge —
+      // previously the quick-icons sat at the slot's bottom
+      // edge, which is way below the scaled card.
       const quick = document.createElement('div');
       quick.className = 'hand-quick-actions';
       const qBtn = (cls, glyph, title, handler) => {
@@ -155,14 +156,17 @@ function wireHandStrip() {
       };
       quick.append(
         qBtn('q-discard', '🗑', 'Discard', () => removeFromHandAt(idx)),
-        qBtn('q-sell',    '💰', 'Sell (Stage-3 economy)',
-          () => setStatus('Selling needs the Stage-3 economy.')),
+        // Sell is functionally Discard until the Stage-3
+        // economy lands (it'll pay out water/VP for sold cards
+        // then). Same removal action; separate verb so the
+        // intent is preserved when the economy ships.
+        qBtn('q-sell',    '💰', 'Sell card', () => removeFromHandAt(idx)),
         qBtn('q-produce', '🏭', `Exo produce (spectral ${card.spectralType || '?'})`,
           () => setStatus(`Exo-produce needs a Stage-3 factory matching spectral ${card.spectralType || '?'}.`)),
         qBtn('q-boost',   '🚀', isBoostMarked(id) ? 'Unmark boost' : 'Mark for boost',
           () => toggleBoostMark(id)),
       );
-      wrap.appendChild(quick);
+      cardEl.appendChild(quick);
 
       wrap.addEventListener('click', (ev) => {
         if (ev.target.closest('.card-flip, .card-rotate, .hand-q')) return;
@@ -449,9 +453,9 @@ function openCardModal(card, kind, slotIdx) {
   sellBtn.type = 'button';
   sellBtn.className = 'modal-btn sell';
   sellBtn.textContent = '💰 Sell';
-  sellBtn.title = 'Sell this card (Stage-3 economy)';
+  sellBtn.title = 'Sell card — same as discard until the Stage-3 economy lands';
   sellBtn.addEventListener('click', () => {
-    setStatus('Selling needs the Stage-3 economy. Coming soon.');
+    removeFromHandAt(slotIdx);
     close();
   });
 

@@ -482,16 +482,14 @@ body:has(#view-browse:not(.hidden)) #main {
   position: relative;
   flex-shrink: 0;
   /* 40% bigger than the previous pass — 220px card × 0.77
-     scale = ~169px wide. Slots overlap ~40% via negative
-     right margin so the hand reads as a fan. */
+     scale = ~169px wide. Height tight to the visible card
+     (350+px × 0.77 ≈ 280px) so the quick-action row at
+     bottom: 0 actually lands under the card instead of way
+     below it at the strip's edge. */
   width: 169px;
-  height: 100%;
+  height: 280px;
   cursor: pointer;
   margin-right: -68px;
-  /* transform-origin: top left so a hover scale grows the card
-     DOWNWARD and to the RIGHT — the top-left stays planted
-     where the pointer first met it. No more "the card moved
-     up away from me." */
   transform-origin: top left;
   transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.2, 1),
               margin-right 0.22s cubic-bezier(0.2, 0.7, 0.2, 1),
@@ -512,6 +510,16 @@ body:has(#view-browse:not(.hidden)) #main {
   transform: scale(0.77);
   transform-origin: top left;
   width: 220px;
+  /* Lock the card to a known layout-box height in hand
+     context. Without this, cards with more body content grow
+     past min-height: 350 and the bottom-anchored Flip + quick-
+     icons drift below the slot. With it, every hand-slot card
+     is identical 220 × 350 — content beyond clips. Scaled
+     × 0.77 → 169 × 270 visible, fitting the 280px slot. */
+  height: 350px;
+  min-height: 0;
+  max-height: 350px;
+  overflow: hidden;
   pointer-events: none;
   filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.45));
   transition: filter 0.22s;
@@ -1062,14 +1070,17 @@ body:has(#view-browse:not(.hidden)) #main {
   background: var(--bg);
 }
 
-/* Hand-slot quick actions: an emoji row at the bottom of each
-   hand card, revealed on hover. Same verbs as the inspect modal
-   but icon-only so they read instantly. */
-.hand-quick-actions {
+/* Hand-slot quick actions: an emoji row at the card's bottom
+   edge, revealed on hover. Lives INSIDE .card so it shares the
+   same scale + transform as the Flip button (which sits at
+   bottom-right of the same card). The row is anchored to
+   bottom-left so it sits to the LEFT of Flip — both in the
+   footer band of the card. */
+.hand-slot .hand-quick-actions {
   position: absolute;
-  left: 50%;
-  bottom: 4px;
-  transform: translateX(-50%) translateY(6px);
+  left: 8px;
+  bottom: 6px;
+  transform: translateY(4px);
   display: flex;
   gap: 4px;
   opacity: 0;
@@ -1079,7 +1090,7 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .hand-slot:hover .hand-quick-actions {
   opacity: 1;
-  transform: translateX(-50%) translateY(0);
+  transform: translateY(0);
   pointer-events: auto;
 }
 .hand-q {

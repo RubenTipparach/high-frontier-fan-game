@@ -632,3 +632,40 @@
   transform: translate(0, 0) scale(1) rotate(0deg);
   transform-origin: top left;
 }
+
+/* Radiator Light/Heavy toggle row under the name. Replaces
+   the old ↻ rotate button — clicking either label sets
+   data-rotated on the .card root, which dims the inactive
+   half and bolds the active label here. */
+.card-face.is-radiator .rad-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border-bottom: 1px dashed var(--border);
+  background: rgba(0, 0, 0, 0.04);
+}
+.rad-toggle .rad-side {
+  background: transparent;
+  border: none;
+  color: var(--ink-mute);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 6px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.rad-toggle .rad-side:hover { color: var(--ink); background: rgba(0, 0, 0, 0.08); }
+.rad-toggle .rad-sep { color: var(--ink-mute); opacity: 0.5; }
+
+/* Active side bolds + colours. data-rotated="0" = light side
+   active; data-rotated="1" = heavy side active. */
+.card[data-rotated="0"] .rad-toggle .rad-side-light,
+.card[data-rotated="1"] .rad-toggle .rad-side-heavy {
+  color: var(--ink);
+  font-weight: 800;
+  background: rgba(125, 211, 252, 0.18);
+}

@@ -414,10 +414,28 @@ function buildRadiatorFace(card, sideName) {
   // where "Bubble Membrane" hugs the cyan "Radiator" header).
   // Stats sit below, then ability text fills the remainder of
   // the half.
+  const lightT = light.therms || 0;
+  const heavyT = heavy.therms || 0;
+
+  // Per-half toggle row: "Light (N) | Heavy (M)" with the
+  // currently-active side bolded via CSS rule on the .card
+  // root (which carries data-rotated). Tapping either label
+  // sets data-rotated accordingly — the rotate (↻) button is
+  // gone; these labels are the toggle.
+  const toggleHtml = `
+    <div class="rad-toggle">
+      <button type="button" class="rad-side rad-side-light"
+        data-rotated="0">Light (${lightT})</button>
+      <span class="rad-sep">|</span>
+      <button type="button" class="rad-side rad-side-heavy"
+        data-rotated="1">Heavy (${heavyT})</button>
+    </div>`;
+
   const halfHtml = (cls, block, showSpectral) => `
     <div class="rad-half ${cls}">
       <div class="card-typebar">${therms(block.therms || 0)}  RADIATOR</div>
       <div class="card-name-row"><span class="card-name">${escapeText(cardName)}</span></div>
+      ${toggleHtml}
       <div class="card-statbox">
         <span><strong>${block.mass ?? '—'}</strong> MASS</span>
         <span><strong>${block.radHardness ?? '—'}</strong> RAD</span>
@@ -430,6 +448,17 @@ function buildRadiatorFace(card, sideName) {
                  + halfHtml('half-heavy', heavy, false);
   const spec = face.querySelector('.card-spectral');
   if (spec) spec.appendChild(spectralHex(card.spectralType || 'C'));
+
+  // Wire the Light/Heavy toggle buttons to set data-rotated on
+  // the .card root. The CSS rules driven by data-rotated handle
+  // the visual swap (dimmed inactive half + bold active label).
+  face.querySelectorAll('.rad-side').forEach((btn) => {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const cardRoot = face.closest('.card');
+      if (cardRoot) cardRoot.dataset.rotated = btn.dataset.rotated;
+    });
+  });
   return face;
 }
 
