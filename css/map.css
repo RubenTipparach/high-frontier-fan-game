@@ -348,6 +348,377 @@ body:has(#view-browse:not(.hidden)) #main {
   overflow: hidden;
 }
 
+/* Routing pick-mode: the user has pressed "Navigate to" on a
+   site and is now picking a destination. A pulsing orange
+   stripe ring on the map shell announces "you're in destination-
+   picking mode" so it doesn't surprise the user when the next
+   click changes the route. Press Clear route to escape. */
+.browse-shell.is-routing::before {
+  content: "Tap a destination site…";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+  border: 4px dashed rgba(249, 115, 22, 0.85);
+  box-shadow: inset 0 0 24px rgba(249, 115, 22, 0.18);
+  padding: 4px 12px;
+  color: #fbbf24;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  animation: routing-pulse 1.6s ease-in-out infinite;
+}
+@keyframes routing-pulse {
+  0%, 100% { border-color: rgba(249, 115, 22, 0.85); }
+  50%      { border-color: rgba(251, 191, 36, 0.95); }
+}
+
+/* "Navigate to" button on the selected-site info card. Reads as
+   the primary action since it's the only verb in the panel. */
+.site-actions { margin-top: 10px; }
+#site-navigate-to {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  background: var(--accent);
+  color: #062136;
+  border: 1px solid var(--accent-2);
+  border-radius: 6px;
+  cursor: pointer;
+  letter-spacing: 0.6px;
+}
+#site-navigate-to:hover:not(:disabled) {
+  background: var(--accent-2);
+  color: #fff;
+}
+#site-navigate-to:disabled {
+  background: var(--bg-2);
+  color: var(--ink-mute);
+  border-color: var(--border);
+  cursor: not-allowed;
+}
+
+/* Sandbox hand strip: a horizontal panel anchored at the
+   bottom of the map area. Holds the cards the player has
+   dragged out of the patent deck to build a tentative rocket.
+   Sits above the map, beside the sidepanel; on mobile it
+   stretches the full width below the map content. */
+.sandbox-hand {
+  position: absolute;
+  left: 0;
+  right: 388px;  /* clear the open sidepanel */
+  bottom: 0;
+  /* Tall enough to fit the 40%-bigger default cards (220px ×
+     0.77 scale = 269px tall) plus a header + padding. */
+  height: 320px;
+  background: rgba(8, 8, 18, 0.96);
+  border-top: 1px solid var(--border);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 10px 10px;
+  backdrop-filter: blur(6px);
+  transition: right 0.22s ease;
+  overflow: visible;
+}
+.browse-sidepanel[data-active=""] ~ .sandbox-hand { right: 48px; }
+@media (max-width: 720px) {
+  .sandbox-hand { right: 0 !important; bottom: 64px; }
+}
+.hand-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  padding: 2px 0 4px;
+}
+.hand-title { font-weight: 700; letter-spacing: 1px; }
+.hand-count { color: var(--ink-mute); font-variant-numeric: tabular-nums; }
+#hand-clear {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 2px 8px;
+}
+.hand-cards {
+  flex: 1;
+  display: flex;
+  gap: 0;
+  /* Allow hover-grown cards to extend above + below the strip
+     visually. overflow-x stays scrollable for very long hands;
+     overflow-y is visible so the hover doesn't clip. */
+  overflow-x: auto;
+  overflow-y: visible;
+  padding: 24px 32px 16px;
+  border: 1.5px dashed rgba(120, 130, 170, 0.3);
+  border-radius: 6px;
+  position: relative;
+}
+.hand-cards:empty::before {
+  content: attr(data-empty);
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-mute);
+  font-size: 12px;
+  pointer-events: none;
+}
+.hand-cards.is-drop-target {
+  border-color: var(--accent);
+  background: rgba(56, 189, 248, 0.08);
+}
+.hand-cards.flash-error {
+  border-color: #f87171;
+  animation: hand-flash 0.5s ease;
+}
+@keyframes hand-flash {
+  0%   { background: rgba(248, 113, 113, 0.25); }
+  100% { background: transparent; }
+}
+.hand-slot {
+  position: relative;
+  flex-shrink: 0;
+  /* 40% bigger than the previous pass — 220px card × 0.77
+     scale = ~169px wide. Height tight to the visible card
+     (350+px × 0.77 ≈ 280px) so the quick-action row at
+     bottom: 0 actually lands under the card instead of way
+     below it at the strip's edge. */
+  width: 169px;
+  height: 280px;
+  cursor: pointer;
+  margin-right: -68px;
+  transform-origin: top left;
+  transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.2, 1),
+              margin-right 0.22s cubic-bezier(0.2, 0.7, 0.2, 1),
+              z-index 0s;
+  z-index: 1;
+}
+.hand-slot:last-child { margin-right: 0; }
+
+.hand-slot:hover {
+  transform: scale(1.18);
+  margin-right: 40px;
+  z-index: 50;
+}
+.hand-slot:hover + .hand-slot { margin-left: 40px; }
+.hand-cards:hover .hand-slot:not(:hover) { z-index: 1; }
+
+.hand-slot .card {
+  transform: scale(0.77);
+  transform-origin: top left;
+  width: 220px;
+  /* Lock the card to a known layout-box height in hand
+     context. Without this, cards with more body content grow
+     past min-height: 350 and the bottom-anchored Flip + quick-
+     icons drift below the slot. With it, every hand-slot card
+     is identical 220 × 350 — content beyond clips. Scaled
+     × 0.77 → 169 × 270 visible, fitting the 280px slot. */
+  height: 350px;
+  min-height: 0;
+  max-height: 350px;
+  overflow: hidden;
+  pointer-events: none;
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.45));
+  transition: filter 0.22s;
+}
+.hand-slot:hover .card {
+  filter: drop-shadow(0 14px 18px rgba(0, 0, 0, 0.55));
+}
+/* Flip / rotate buttons inside the card still need to receive
+   clicks so the player can preview the dark side / heavy side
+   without opening the modal. */
+.hand-slot .card-flip,
+.hand-slot .card-rotate {
+  pointer-events: auto;
+}
+.card.is-dragging { opacity: 0.4; }
+
+/* Custom drag-image: a fixed-position clone of the source card
+   that follows the pointer with spring-damped rotation (see
+   startCustomDragGhost / animateDragGhost in browse.js). Heavy
+   drop shadow + slight scale-up tell the eye "this is in my
+   hand, not stuck to the page". Pointer events are off so the
+   ghost doesn't intercept dragover on whatever's underneath. */
+.drag-ghost {
+  position: fixed;
+  pointer-events: none;
+  z-index: 200;
+  transform-origin: center center;
+  will-change: transform, left, top;
+  box-shadow: 0 30px 40px rgba(0, 0, 0, 0.55),
+              0 12px 20px rgba(0, 0, 0, 0.35),
+              0 2px 4px rgba(0, 0, 0, 0.25);
+  border-radius: 10px;
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.25));
+  transition: none;  /* movement is JS-driven; no CSS easing */
+  opacity: 0.96;
+}
+
+/* Hand-strip grabber: a 12px-tall bar at the very top of the
+   strip with a 36×4px handle pip. Pointer-cursor + ns-resize
+   tells the user it's draggable; the JS uses pointer events
+   to track the drag and writes inline height to the strip. */
+.hand-grabber {
+  height: 12px;
+  margin: -6px -10px 0;  /* nudge into the strip's top edge */
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 4;
+  touch-action: none;
+}
+.hand-grabber::before {
+  content: "";
+  width: 44px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ink-mute);
+  opacity: 0.7;
+  transition: opacity 0.15s, background 0.15s;
+}
+.hand-grabber:hover::before { opacity: 1; background: var(--accent); }
+
+/* Inspect modal: covers the viewport with a translucent
+   backdrop and floats an enlarged copy of the clicked card in
+   the centre with action buttons below. */
+.card-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 2, 10, 0.78);
+  backdrop-filter: blur(4px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: modal-fade 0.18s ease-out;
+}
+@keyframes modal-fade { from { opacity: 0; } to { opacity: 1; } }
+.card-modal-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* gap accounts for the visual height a scale(1.6) card claims
+     beyond its layout box — without it the actions row crashes
+     into the card's footer. */
+  gap: 130px;
+  position: relative;
+}
+
+/* × close button in the modal's top-right corner. Replaces the
+   explicit text "Close" / "Cancel" that used to crowd the
+   action row, leaving the actions row for the primary verbs
+   (Discard / Exo produce / Add to LEO stack / Add to hand). */
+.modal-x {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 22px;
+  line-height: 1;
+  background: rgba(15, 16, 35, 0.92);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+  z-index: 10;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+}
+.modal-x:hover {
+  background: #b91c1c;
+  color: #fff;
+  border-color: #7f1d1d;
+}
+.card-modal-card {
+  transform: scale(1.6);
+  transform-origin: center;
+  margin: 60px 60px 0;
+}
+.card-modal-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.modal-btn {
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--ink);
+  cursor: pointer;
+  letter-spacing: 0.5px;
+}
+.modal-btn:hover { background: var(--panel-2); }
+.modal-btn.discard  { background: #7f1d1d; color: #fff;     border-color: #b91c1c; }
+.modal-btn.produce  { background: #14532d; color: #d1fae5; border-color: #166534; }
+.modal-btn.stack    { background: var(--accent); color: #062136; border-color: var(--accent-2); }
+.modal-btn.cancel   { background: transparent; color: var(--ink-dim); }
+.modal-btn.discard:hover { background: #b91c1c; }
+.modal-btn.produce:hover { background: #166534; }
+
+/* Rocket stack pane. Cards stack vertically with a small "Back
+   to hand" affordance under each one. Fly status banner uses
+   green for ok / red for grounded. */
+.rocket-status {
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-weight: 700;
+  margin: 0 0 10px;
+}
+.rocket-status.ok  { background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid #166534; }
+.rocket-status.bad { background: rgba(220, 38, 38, 0.15); color: #fca5a5; border: 1px solid #7f1d1d; }
+.rocket-issues {
+  list-style: none;
+  padding: 0 0 0 8px;
+  margin: -4px 0 10px;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+.rocket-issues li::before { content: "• "; color: #f87171; }
+.rocket-slot {
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed var(--border);
+}
+.rocket-back-to-hand {
+  margin-top: 6px;
+  width: 100%;
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
+/* Global chat panel on the multiplayer view. Mirrors the
+   in-lobby chat shape so the player's eye knows where to look
+   once the wiring catches up. */
+.global-chat {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  max-height: 260px;
+}
+.global-chat .chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  list-style: none;
+  padding: 6px 8px;
+  margin: 4px 0;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.global-chat .chat-form { display: flex; gap: 6px; }
+.global-chat .chat-form input { flex: 1; }
+
 .browse-stage {
   position: absolute;
   inset: 0;
@@ -380,28 +751,54 @@ body:has(#view-browse:not(.hidden)) #main {
 .browse-sidepanel[data-active] {
   width: 380px;
 }
+/* Patents pane spreads wider so the card library reads as a
+   grid instead of a single tall column. */
+.browse-sidepanel[data-active="patents"] {
+  width: min(620px, 80vw);
+}
 .browse-sidepanel[data-active=""] { width: 48px; }
 
-@media (orientation: portrait) {
-  /* Bottom flyout. Tabs run horizontally along the top of the
-     sheet; opening a pane expands the sheet upward to ~55vh. */
+/* Phone / narrow-portrait layout. The 720px width breakpoint is
+   more reliable than (orientation: portrait) — landscape phones,
+   foldables, and split-screen tablets all want the same bottom-
+   sheet treatment. The panel anchors to the bottom edge and
+   slides up when a tab is selected. A 4px drag handle sits at
+   the top of the sheet so the affordance reads as "this opens
+   upward" without needing a tutorial. */
+@media (max-width: 720px) {
   .browse-sidepanel {
     flex-direction: column;
     border-left: none;
     border-top: 1px solid var(--border);
+    border-top-left-radius: 14px;
+    border-top-right-radius: 14px;
+    box-shadow: 0 -12px 24px rgba(0, 0, 0, 0.45);
     top: auto;
     left: 0;
     right: 0;
     bottom: 0;
     width: auto !important;
-    height: 56px;
+    height: 64px;
+  }
+  .browse-sidepanel::before {
+    content: "";
+    position: absolute;
+    top: 6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 44px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--ink-mute);
+    opacity: 0.6;
+    pointer-events: none;
   }
   .browse-sidepanel[data-active] {
     width: auto !important;
-    height: 55vh;
+    height: 70vh;
   }
   .browse-sidepanel[data-active=""] {
-    height: 56px;
+    height: 64px;
   }
 }
 
@@ -414,16 +811,23 @@ body:has(#view-browse:not(.hidden)) #main {
   border-right: 1px solid var(--border);
   flex: 0 0 48px;
 }
-@media (orientation: portrait) {
+@media (max-width: 720px) {
   .sidepanel-tabs {
     flex-direction: row;
     border-right: none;
     border-bottom: 1px solid var(--border);
-    height: 56px;
-    padding: 8px 10px;
-    justify-content: flex-start;
-    flex: 0 0 56px;
+    height: 64px;
+    padding: 14px 12px 8px;
+    justify-content: space-around;
+    flex: 0 0 64px;
     overflow-x: auto;
+    gap: 2px;
+  }
+  .sidepanel-tabs button {
+    width: 44px;
+    height: 44px;
+    font-size: 22px;
+    flex-shrink: 0;
   }
 }
 .sidepanel-tabs button {
@@ -504,7 +908,30 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .patent-filter button {
   font-size: 12px;
+  border-left: 4px solid transparent;
+  font-weight: 600;
 }
+/* Colour-code the filter pills to match the typebar of the
+   card type they filter — instant visual cross-reference
+   between this row and the cards rendered below. The 4px left
+   stripe carries the supplier accent; the chip's background
+   stays subdued so the typography reads cleanly. Active state
+   floods the pill with the supplier colour. */
+.patent-filter button[data-type="thruster"]  { border-left-color: #f8a47a; }
+.patent-filter button[data-type="reactor"]   { border-left-color: #a78bfa; }
+.patent-filter button[data-type="radiator"]  { border-left-color: #7dd3fc; }
+.patent-filter button[data-type="refinery"]  { border-left-color: #94a3b8; }
+.patent-filter button[data-type="robonaut"]  { border-left-color: #f9a8d4; }
+.patent-filter button[data-type="generator"] { border-left-color: #f97316; }
+.patent-filter button[data-type="crew"]      { border-left-color: #fde047; }
+
+.patent-filter button.active[data-type="thruster"]  { background: #f8a47a; color: #2e1407; border-color: #c2410c; }
+.patent-filter button.active[data-type="reactor"]   { background: #a78bfa; color: #1c0f3a; border-color: #4c1d95; }
+.patent-filter button.active[data-type="radiator"]  { background: #7dd3fc; color: #0a2c43; border-color: #075985; }
+.patent-filter button.active[data-type="refinery"]  { background: #94a3b8; color: #0f172a; border-color: #334155; }
+.patent-filter button.active[data-type="robonaut"]  { background: #f9a8d4; color: #500724; border-color: #be185d; }
+.patent-filter button.active[data-type="generator"] { background: #f97316; color: #2e0f02; border-color: #9a3412; }
+.patent-filter button.active[data-type="crew"]      { background: #fde047; color: #3a2a02; border-color: #a16207; }
 .patent-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -641,4 +1068,233 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .game-overlay > .overlay-shell {
   background: var(--bg);
+}
+
+/* Hand-slot quick actions: an emoji row at the card's bottom
+   edge, revealed on hover. Lives INSIDE .card so it shares the
+   same scale + transform as the Flip button (which sits at
+   bottom-right of the same card). The row is anchored to
+   bottom-left so it sits to the LEFT of Flip — both in the
+   footer band of the card. */
+.hand-slot .hand-quick-actions {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  transform: translateY(4px);
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s, transform 0.15s;
+  z-index: 6;
+  pointer-events: none;
+}
+.hand-slot:hover .hand-quick-actions {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.hand-q {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(15, 16, 35, 0.92);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+.hand-q:hover { background: var(--panel-2); border-color: var(--accent); }
+.hand-q.q-discard:hover { background: #b91c1c; color: #fff; border-color: #7f1d1d; }
+.hand-q.q-boost:hover   { background: var(--accent); color: #062136; border-color: var(--accent-2); }
+
+/* Boost-marked slots get an orange glow ring so the player can
+   see at a glance which cards are queued for the next BOOST
+   commit. */
+.hand-slot.is-boost-marked .card {
+  box-shadow: 0 0 0 3px #f97316, 0 0 16px rgba(249, 115, 22, 0.6);
+  border-radius: 10px;
+}
+
+/* BOOST commit button in the hand header. Inactive looks
+   muted; armed (data-armed="1") flips to a saturated rocket-
+   orange to signal "press me to launch". */
+/* Stack-open button next to the ✋ Hand title. Always
+   visible; clicking zooms the map to LEO + opens the rocket
+   stack modal. Neutral styling so it doesn't compete with
+   the boost-pulsing BOOST commit button further along. */
+#hand-stack-open {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(125, 211, 252, 0.18);
+  color: var(--accent);
+  cursor: pointer;
+  transition: background 0.18s, transform 0.12s;
+}
+#hand-stack-open:hover {
+  background: var(--accent);
+  color: #062136;
+  transform: scale(1.03);
+}
+
+#hand-boost-commit {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(15, 16, 35, 0.6);
+  color: var(--ink-mute);
+  cursor: not-allowed;
+  transition: background 0.18s, color 0.18s, transform 0.12s;
+}
+#hand-boost-commit[data-armed="1"] {
+  background: #f97316;
+  color: #2e0f02;
+  border-color: #9a3412;
+  cursor: pointer;
+  animation: boost-pulse 1.4s ease-in-out infinite;
+}
+#hand-boost-commit[data-armed="1"]:hover {
+  background: #c2410c;
+  color: #fff;
+  transform: scale(1.04);
+}
+@keyframes boost-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.6); }
+  50%      { box-shadow: 0 0 0 8px rgba(249, 115, 22, 0); }
+}
+
+/* Rocket-stack modal: a centered panel that floats over the
+   map. Wider than the inspect modal so the player can scan a
+   multi-card stack at a glance. */
+.rocket-stack-panel {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 22px 24px;
+  width: min(820px, 90vw);
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);
+}
+.rocket-stack-title {
+  margin: 0 0 12px;
+  font-size: 18px;
+  letter-spacing: 0.5px;
+}
+.rocket-stack-panel #rocket-stack-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+/* Rocket stack slot actions row — sits beneath each card in
+   the rocket stack modal. Holds the "Set as active" thruster
+   picker (thrusters only) + the "Back to hand" affordance. */
+.rocket-slot-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.rocket-slot-actions button {
+  flex: 1;
+  font-size: 11px;
+  padding: 5px 8px;
+}
+
+/* Active-thruster highlight: the chosen thruster's card gets
+   a saturated rocket-orange ring + soft glow so the player
+   sees which thruster is driving the rocket at a glance. */
+.rocket-slot.is-active-thruster .card {
+  box-shadow: 0 0 0 3px #f97316, 0 0 18px rgba(249, 115, 22, 0.55);
+  border-radius: 10px;
+}
+.rocket-activate {
+  background: rgba(15, 16, 35, 0.85);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.rocket-activate:hover:not(:disabled) {
+  background: var(--accent);
+  color: #062136;
+  border-color: var(--accent-2);
+}
+.rocket-activate.is-active {
+  background: #f97316;
+  color: #2e0f02;
+  border-color: #9a3412;
+  font-weight: 700;
+  cursor: default;
+  opacity: 1;
+}
+
+/* Mobile / touch device adjustments to the hand strip. Hover
+   doesn't exist on touch, so we replace the hover-driven
+   quick-action row with a two-step tap-to-select flow:
+   tap a card → it raises with a coloured ring; a floating
+   "View" button appears above; tap that to open the inspect
+   modal. Stops accidental modal-opens on casual fingerprints
+   and avoids stuck-hover gotchas. */
+
+/* The floating "View" button sits above a selected card.
+   Hidden by default; CSS shows it only when the slot has
+   .is-selected AND we're on a touch device. */
+.hand-view-btn {
+  display: none;
+  position: absolute;
+  top: -34px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--accent);
+  color: #062136;
+  border: 1px solid var(--accent-2);
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  border-radius: 6px;
+  z-index: 8;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  /* No hover on touch — drop the hover quick-icon row, drop
+     the hover-spread fan effect (the hovered-sibling margin
+     shifts can stick visually), and switch the slot's
+     transform-origin to default so the selected pop-up
+     doesn't drift sideways. */
+  .hand-quick-actions { display: none !important; }
+  .hand-slot:hover {
+    transform: none;
+    margin-right: -68px;
+  }
+  .hand-slot:hover + .hand-slot { margin-left: 0; }
+
+  /* Selected (active tap) state: raise + add the cyan ring +
+     reveal the View button. Same idiom as the boost-marked
+     glow ring but in accent-cyan to read as "selected". */
+  .hand-slot.is-selected {
+    transform: scale(1.10);
+    z-index: 60;
+  }
+  .hand-slot.is-selected .card {
+    box-shadow: 0 0 0 3px var(--accent),
+                0 0 18px rgba(125, 211, 252, 0.55);
+    border-radius: 10px;
+  }
+  .hand-slot.is-selected .hand-view-btn { display: block; }
 }

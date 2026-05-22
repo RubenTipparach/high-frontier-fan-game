@@ -6,11 +6,148 @@ This is a fan implementation of **High Frontier 4: All** (Sierra Madre Games,
 designed by Phil Eklund). Pure educational / fan project, not for sale, not
 affiliated with the publisher.
 
+## Design language — CRITICAL
+
+The audience for this implementation is people who already play HF4 at the
+table. **Every visual and interaction must feel like the published game.**
+If a returning player can't tell at a glance what a glyph means, what a
+hexagon represents, or what step of a turn they're in, the design is wrong.
+
+Concretely:
+- Card glyphs (thrust triangle + pink circle, water-droplet fuel,
+  spectral hex, requirement-icon row, half-rocket for half-lander,
+  ☠ skull, 🪂 aerobrake, 🛰 push-sat, the ⚡ pulse / 🌡 thermostat
+  family for stack requirements) must use the same shapes / colour
+  language as the published cards. If a glyph means N on the
+  table, it must mean N here.
+- Map idioms — flat-top hexagons over body halos, magenta burn
+  pads with rockets, orange Lagrange rings, green Hohmann dots,
+  Saturn ring tilt + Cassini gap, pulsing red hazards — exist
+  because the published board uses them. Don't invent
+  replacements that "look better"; align with the board.
+- When you introduce a new affordance, ask: "would a tabletop
+  player recognise this without a tutorial?" If no, redesign.
+- Mechanics-only changes (engine, scoring, balance tuning) are
+  fine to invent; visual language is not.
+
 - Core rules PDF (publisher-hosted):
   https://gamers-hq.de/media/pdf/c5/f2/cf/HF4-Core-Rules.pdf
+- Variants & scenarios appendix:
+  https://geekach.com.ua/content/files/varanti-ta-scenar-high-frontier-4-all-anglyskou-movou-62879102.pdf
 - BGG entry: https://boardgamegeek.com/boardgame/281837/high-frontier-4-all
 - Reference repo for architecture/login/deploy patterns:
   https://github.com/RubenTipparach/murdoku-companion
+
+## Variants we target
+
+Scope is intentionally narrow — only two play modes ship in this
+implementation right now:
+
+- **Standard** — the base multiplayer game described in the core
+  rulebook. Drives the lobby / multiplayer engine.
+- **CEO Solitaire** — the published one-player variant. Drives
+  the solo mode (`js/game/solo.js`); a single player runs one
+  ship against a round clock with no AI opponent. Engine is
+  original; only the structural concept (manage water, prospect,
+  claim, end-of-round income) is taken from the variant's design.
+
+Other variants (campaign, scenarios) are explicitly out of scope
+for now. Don't pull them in without a discussion first.
+
+## Card data — single source of truth
+
+**Card data MUST come from the spreadsheet.** The authoritative
+source is `reference/HF4-card-data.xlsx` (kept in sync with the
+shared Google Sheet). The importer
+`scripts/extract-card-data.py` emits `data/card-data.json`
+(for human audit) and `data/card-data.js` (for the browser).
+`data/patents.js` consumes only the `.js` bridge — do not
+hand-author patent records in `patents.js` and do not embed
+literal stat tables in any other file.
+
+If a card concept (a new column, a new card type, a balance
+tweak) doesn't appear in the spreadsheet, it doesn't exist yet
+— either edit the spreadsheet and re-run the importer, or push
+back on the request. Don't paper over missing sheet data with
+ad-hoc constants in JS.
+
+Two structural rules that fall out of the sheet:
+- **Labs and "modifier" cards aren't HF4 cards.** The
+  spreadsheet has no Labs or Modifiers tab. Lab effects live
+  as abilities on the parent card; modifier-style upgrades are
+  the Tier-2 (dark-side) face of an existing card.
+- **The "dark side" is a real second technology.** Every
+  card-row in the spreadsheet is followed by a second row
+  carrying a different name + different stats — that's the
+  Tier-2 tech the same physical card flips to. Render both
+  faces; don't treat the back as a re-skin of the front.
+- **"Support Requirements" banner only.** Only the columns
+  under that banner (the reactor/generator-type matrix) are
+  stack supports. Other booleans like Push / Solar / Air Eater
+  / ISRU describe what a card IS / DOES — render them as
+  card-property badges, never as supports.
+
+## Card model
+
+Every card on the map / in a hand carries the same minimum set of
+fields so the renderer + engine don't need per-card-type branches
+for the common stats:
+
+- `id` — stable string key
+- `name` — display label
+- `type` — `thruster | reactor | radiator | refinery | robonaut |
+  generator | lab | crew | ...`
+- `mass` — wet mass added to the ship stack (integer units)
+- `radHardness` — rad-hardness rating (integer); cards with low
+  values degrade faster near radiation hazards
+- `faces` — `{ primary, secondary }`. Every component card is
+  double-sided. By convention the **secondary face is the "black"
+  / installed face**. Faces can carry their own stats so a
+  flipped card behaves differently (e.g. a radiator opened vs
+  stowed, or a thruster with a mode change).
+- `flipOrientation` — `'standard'` (default) or `'rotated180'`.
+  Radiators are typically `'rotated180'`: their secondary face is
+  drawn upside-down, matching the published cards.
+
+Thruster-specific fields (carried on whichever face is active):
+- `thrust` — push capacity (rendered as the value inside the pink
+  thrust circle on the card). Triangle silhouette is fixed-size
+  per the published convention; only the number inside the
+  pink circle changes per card.
+- `isp` — burns per fuel unit. The card's fuel droplet shows
+  `ceil(thrust / isp)`, the water cost of one burn.
+- `requires` — array of `{ kind, count }`. Stack constraints the
+  ship's other cards must collectively satisfy. The card UI
+  renders the requirement icons in a row (with an ×N badge for
+  count > 1). `data/patents.js` exports `REQUIREMENT_KINDS` as
+  the canonical enum (pulse-generator, thermostat,
+  crew-quarters, sail, beam-receiver, push-sat, isru-rig,
+  aerobrake-shroud, spin-grav). Other cards "supply" these
+  kinds at BUILD time; thrusters consume them.
+- `supports` (string array) is accepted as shorthand and auto-
+  expanded into `requires` with count: 1 per entry.
+
+NOTE: there is NO `power_req` field. Older drafts had one; it
+was removed because requirements are gated through the kind/
+count system instead.
+
+Spectral type:
+- Every card carries a `spectralType` (default 'C'). One of
+  C / S / M / V / B / D. Rendered as a coloured hex glyph in
+  the card's stat box; the engine (Stage 3+) can use it for
+  refuelling / matching at sites.
+
+Crew cards: still double-sided, but the two faces are
+**functionally independent** — each face is its own crew member
+with their own role / skills, sharing only the physical card.
+Use `faces.primary` and `faces.secondary` as fully-formed crew
+records; nothing should treat the "back" of a crew card as a
+secondary mode of the front.
+
+Some cards (boosters, augments, certain robonauts) **modify**
+another card's stats while attached. The engine handles this via
+a `modifier` block on the modifying card; see
+`server/game/engine.js` (Stage 3+) for how those compose.
 
 ## Stages — build incrementally
 

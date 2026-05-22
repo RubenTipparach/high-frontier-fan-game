@@ -1,138 +1,289 @@
-// Patent deck. Each patent is a tradable / auctionable card that can
-// be installed on a rocket stack at build time. Cards are grouped by
-// `type`; a complete ship needs one thruster + one reactor + one
-// radiator at minimum, plus optional refinery / robonaut / lab /
-// generator slots.
+// Patent deck. Tradable/auctionable component cards installed on
+// a rocket stack at build time. The deck is sourced from the
+// published HF4 card spreadsheet via scripts/extract-card-data.py
+// — re-run that script after editing reference/HF4-card-data.xlsx
+// and the entries here regenerate automatically.
 //
-// Stats are designed for playability, not copied from any published
-// source. Real-world propulsion concepts (NERVA, VASIMR, ion, etc.)
-// are public-domain technical terminology; the numerical balance and
-// flavor text here are original.
+// Every physical card carries TWO independent technologies:
+//   faces.primary    — the Tier-1 tech (the "white" face)
+//   faces.secondary  — the Tier-2 tech (the "black" / installed
+//                      face). Different name, different stats,
+//                      different ability text; same card body.
+// Both faces sit on the card object so the renderer can flip
+// without re-querying.
 //
-// Common fields:
-//   id            stable key
-//   name          display name
-//   type          thruster | reactor | radiator | refinery |
-//                 robonaut  | generator | lab
-//   mass          wet mass added to the ship stack
-//   power_req     power units this component consumes per burn (0 = self-powered)
-//   blurb         one-line flavor
-//
-// Thruster-specific:
-//   thrust        max wet-mass it can push in one burn (so a ship
-//                 with stack mass M needs thrust >= M to MOVE)
-//   isp           burns per fuel unit. Higher = more efficient
-//                 (ion = 10, chemical = 2). Drives water consumption
-//                 in MOVE.
-//
-// Reactor-specific:
-//   power         power units supplied to powered thrusters
-//   heat          heat units generated; needs radiator >= heat
-//
-// Radiator-specific:
-//   heat_cap      heat units it can dissipate per burn
-//
-// Refinery-specific:
-//   water_out     water units produced per income phase at a
-//                 hydrated site. Multiplied by site.hydration.
-//
-// Robonaut-specific:
-//   prospect_bonus  +N pips on the prospect die roll
-//
-// Generator-specific:
-//   science       science points per income phase (a future-stage
-//                 currency for the tech tree)
+// Card types come from the spreadsheet tabs. Labs and standalone
+// "modifier" cards do not exist in HF4 — lab effects are
+// abilities on the parent card (a reactor with a science
+// rider, etc.) and modifiers are encoded as the dark-side
+// (Tier-2) face of an existing card. Don't reintroduce either.
 
-export const PATENTS = [
-  // ===== Thrusters: chemical / cold (cheap, plentiful) =====
-  { id: 't_chemsust',   name: 'Chemical Sustainer',    type: 'thruster', mass: 2, thrust: 8,  isp: 2,  power_req: 0, blurb: 'LOX/methane workhorse. Burns fast, hauls a lot.' },
-  { id: 't_chemtug',    name: 'Hydrazine Tug',         type: 'thruster', mass: 1, thrust: 5,  isp: 2,  power_req: 0, blurb: 'Storable monoprop. Cheap, reliable.' },
-  { id: 't_solidkick',  name: 'Solid Kick Stage',      type: 'thruster', mass: 1, thrust: 10, isp: 1,  power_req: 0, blurb: 'One-shot motor for hard insertions.' },
-  { id: 't_resistojet', name: 'Resistojet',            type: 'thruster', mass: 1, thrust: 2,  isp: 4,  power_req: 1, blurb: 'Electrically heated water. Slow but tidy.' },
-  { id: 't_arcjet',     name: 'Arcjet',                type: 'thruster', mass: 1, thrust: 3,  isp: 5,  power_req: 2, blurb: 'Arc-heated propellant; needs juice.' },
+import { CARD_DATA } from './card-data.js';
 
-  // ===== Thrusters: electric / ion (efficient, low thrust) =====
-  { id: 't_iondrive',   name: 'Gridded Ion Drive',     type: 'thruster', mass: 1, thrust: 1,  isp: 10, power_req: 3, blurb: 'Pencil-thin thrust, glacial accelerations.' },
-  { id: 't_hall',       name: 'Hall-Effect Thruster',  type: 'thruster', mass: 1, thrust: 2,  isp: 8,  power_req: 2, blurb: 'Solid workhorse for station tugs.' },
-  { id: 't_mpd',        name: 'Magnetoplasmadynamic',  type: 'thruster', mass: 2, thrust: 3,  isp: 7,  power_req: 4, blurb: 'Lorentz-force accelerated plasma.' },
-  { id: 't_vasimr',     name: 'VASIMR Engine',         type: 'thruster', mass: 2, thrust: 4,  isp: 8,  power_req: 4, blurb: 'Variable specific impulse, mode-switchable.' },
-  { id: 't_pit',        name: 'Pulsed Inductive',      type: 'thruster', mass: 2, thrust: 3,  isp: 6,  power_req: 3, blurb: 'Capacitor-banked plasma rings.' },
-
-  // ===== Thrusters: nuclear thermal =====
-  { id: 't_nerva',      name: 'Nuclear Thermal',       type: 'thruster', mass: 3, thrust: 6,  isp: 4,  power_req: 0, blurb: 'Solid-core fission heater. NERVA heritage.' },
-  { id: 't_lightbulb',  name: 'Gas-Core Nuclear',      type: 'thruster', mass: 3, thrust: 7,  isp: 6,  power_req: 0, blurb: 'Light-bulb topology: hot uranium, cool walls.' },
-  { id: 't_saltwater',  name: 'Nuclear Salt-Water',    type: 'thruster', mass: 2, thrust: 9,  isp: 7,  power_req: 0, blurb: 'Continuous open-cycle fission. Mad and effective.' },
-  { id: 't_fragment',   name: 'Fission Fragment',      type: 'thruster', mass: 3, thrust: 4,  isp: 9,  power_req: 1, blurb: 'Fission products as their own exhaust.' },
-
-  // ===== Thrusters: fusion =====
-  { id: 't_zpinch',     name: 'Z-Pinch Fusion',        type: 'thruster', mass: 4, thrust: 6,  isp: 8,  power_req: 2, blurb: 'Self-pinched plasma column. Loud.' },
-  { id: 't_dpfusion',   name: 'D-He3 Fusion Drive',    type: 'thruster', mass: 4, thrust: 5,  isp: 11, power_req: 3, blurb: 'Aneutronic fuel. Needs Saturn-grade He3.' },
-  { id: 't_icftorch',   name: 'ICF Torch Drive',       type: 'thruster', mass: 5, thrust: 8,  isp: 10, power_req: 4, blurb: 'Inertial confinement. Pulsed brilliance.' },
-  { id: 't_orion',      name: 'Pulse Propulsion',      type: 'thruster', mass: 5, thrust: 12, isp: 6,  power_req: 0, blurb: 'External nuclear pulse. Pusher plate optional.' },
-
-  // ===== Thrusters: sails / beam =====
-  { id: 't_solarsail',  name: 'Solar Sail',            type: 'thruster', mass: 1, thrust: 1,  isp: 99, power_req: 0, blurb: 'Free fuel in the inner system. Useless past Mars.' },
-  { id: 't_magsail',    name: 'Magnetic Sail',         type: 'thruster', mass: 2, thrust: 1,  isp: 99, power_req: 2, blurb: 'Rides the solar wind. Works further out.' },
-  { id: 't_lasersail',  name: 'Laser-Pushed Sail',     type: 'thruster', mass: 1, thrust: 3,  isp: 99, power_req: 0, blurb: 'Needs a friendly laser station. Worth the trip.' },
-  { id: 't_tether',     name: 'Electrodynamic Tether', type: 'thruster', mass: 1, thrust: 2,  isp: 99, power_req: 1, blurb: 'Lorentz reboost in any magnetosphere.' },
-
-  // ===== Thrusters: aerobrake / atmospheric =====
-  { id: 't_aerobrake',  name: 'Aerobrake Shroud',      type: 'thruster', mass: 2, thrust: 6,  isp: 99, power_req: 0, blurb: 'One-trick pony: only works on atmospheric arrivals.' },
-  { id: 't_massdriver', name: 'Mass-Driver Catapult',  type: 'thruster', mass: 4, thrust: 15, isp: 1,  power_req: 6, blurb: 'Site-bound launcher. Brutal acceleration.' },
-
-  // ===== Reactors =====
-  { id: 'r_solar_s',    name: 'Solar Panel (small)',   type: 'reactor', mass: 1, power: 2, heat: 1, blurb: 'Inner-system only; output halved past Mars.' },
-  { id: 'r_solar_l',    name: 'Solar Array',           type: 'reactor', mass: 2, power: 4, heat: 1, blurb: 'Full-spectrum collector. Bulky.' },
-  { id: 'r_concentrator',name:'Concentrating Mirror',  type: 'reactor', mass: 1, power: 3, heat: 2, blurb: 'Focused sunlight on a tiny absorber.' },
-  { id: 'r_rtg',        name: 'Plutonium RTG',         type: 'reactor', mass: 1, power: 1, heat: 1, blurb: 'Decay heat. Endless, anemic.' },
-  { id: 'r_fission_s',  name: 'Compact Fission Pile',  type: 'reactor', mass: 2, power: 4, heat: 3, blurb: 'Kilopower-class reactor.' },
-  { id: 'r_fission_l',  name: 'Gen-IV Fission',        type: 'reactor', mass: 3, power: 7, heat: 5, blurb: 'Closed-cycle, breeding-capable.' },
-  { id: 'r_molten',     name: 'Molten-Salt Reactor',   type: 'reactor', mass: 3, power: 8, heat: 5, blurb: 'High-temp, walks away from prompt-critical.' },
-  { id: 'r_tokamak',    name: 'Tokamak (D-T)',         type: 'reactor', mass: 4, power: 10, heat: 8, blurb: 'Tritium burner. Needs lithium blanket.' },
-  { id: 'r_stellarator',name: 'Stellarator',           type: 'reactor', mass: 4, power: 11, heat: 8, blurb: 'Steady-state magnetic confinement.' },
-  { id: 'r_polywell',   name: 'Polywell',              type: 'reactor', mass: 3, power: 9, heat: 6, blurb: 'Magnetic-grid inertial confinement.' },
-
-  // ===== Radiators =====
-  { id: 'h_pumped',     name: 'Pumped-Loop Radiator',  type: 'radiator', mass: 1, heat_cap: 3, blurb: 'Liquid-metal sweeper, off-the-shelf.' },
-  { id: 'h_droplet',    name: 'Liquid Droplet Array',  type: 'radiator', mass: 1, heat_cap: 5, blurb: 'Spray a sheet of droplets; catch them downstream.' },
-  { id: 'h_bubble',     name: 'Bubble-Membrane Radiator', type: 'radiator', mass: 2, heat_cap: 8, blurb: 'Foamed dome of vacuum-stable membrane.' },
-  { id: 'h_curie',      name: 'Curie-Point Radiator',  type: 'radiator', mass: 2, heat_cap: 6, blurb: 'Magnetic-pumped working fluid.' },
-  { id: 'h_heatpipe',   name: 'Heat-Pipe Array',       type: 'radiator', mass: 1, heat_cap: 4, blurb: 'Passive evaporation/condensation loops.' },
-
-  // ===== Refineries =====
-  { id: 'f_electro',    name: 'Electrolyzer Plant',    type: 'refinery', mass: 2, water_out: 1, blurb: 'Splits any water ice into H2 + O2.' },
-  { id: 'f_sabatier',   name: 'Sabatier Reactor',      type: 'refinery', mass: 2, water_out: 1, blurb: 'CO2 + H2 -> methane + water.' },
-  { id: 'f_centrifuge', name: 'Centrifugal Separator', type: 'refinery', mass: 2, water_out: 1, blurb: 'Spins ore slurry to recover volatiles.' },
-  { id: 'f_cracker',    name: 'Hydrocarbon Cracker',   type: 'refinery', mass: 3, water_out: 2, blurb: 'Titan-grade hydrocarbon refinery.' },
-  { id: 'f_isru_vol',   name: 'ISRU Volatiles Rig',    type: 'refinery', mass: 3, water_out: 2, blurb: 'Bake regolith, condense the steam.' },
-  { id: 'f_slagspinner',name: 'Slag-Spinner',          type: 'refinery', mass: 3, water_out: 2, blurb: 'Smelt + spin in one box.' },
-
-  // ===== Robonauts =====
-  { id: 'b_telebot',    name: 'Telepresence Bot',      type: 'robonaut', mass: 1, prospect_bonus: 1, blurb: 'Remote-piloted from anywhere with a relay.' },
-  { id: 'b_hopper',     name: 'Hopper Probe',          type: 'robonaut', mass: 1, prospect_bonus: 1, blurb: 'Bounces across low-g surfaces.' },
-  { id: 'b_burrower',   name: 'Burrowing Mole',        type: 'robonaut', mass: 2, prospect_bonus: 2, blurb: 'Drills metres, samples deep ice.' },
-  { id: 'b_geophys',    name: 'Geophysics Drone',      type: 'robonaut', mass: 2, prospect_bonus: 2, blurb: 'Active seismic + neutron spec.' },
-  { id: 'b_sample',     name: 'Sample-Return Probe',   type: 'robonaut', mass: 2, prospect_bonus: 1, blurb: 'Brings actual rocks home.' },
-  { id: 'b_swarm',      name: 'Cubesat Swarm',         type: 'robonaut', mass: 1, prospect_bonus: 1, blurb: 'Dozens of tiny mappers in parallel.' },
-
-  // ===== Generators / Labs =====
-  { id: 'g_micrograv',  name: 'Microgravity Lab',      type: 'lab',       mass: 2, science: 1, blurb: 'Pharmaceuticals, alloys, crystals.' },
-  { id: 'g_centrifuge', name: 'Spin-Gravity Module',   type: 'generator', mass: 3, science: 1, blurb: 'Tether-spun lab section.' },
-  { id: 'g_greenhouse', name: 'Greenhouse Module',     type: 'generator', mass: 2, science: 1, blurb: 'Closed-loop agriculture for crew.' },
-  { id: 'g_3dprinter',  name: '3D Printer Bay',        type: 'generator', mass: 2, science: 1, blurb: 'Net-shape parts from regolith.' },
-  { id: 'g_cyclotron',  name: 'Cyclotron',             type: 'lab',       mass: 3, science: 2, blurb: 'Isotopes-on-demand for medicine and science.' },
-  { id: 'g_pbf',        name: 'Particle Beam Bench',   type: 'lab',       mass: 3, science: 2, blurb: 'Multi-GeV bench. Best at deep-space stations.' },
+// Requirement-kind catalogue. Each kind is a single capability
+// the engine tracks across the cards in your stack. Other cards
+// "supply" a kind (e.g. a fission Reactor supplies 1
+// reactor-fission); a thruster or robonaut carries a `requires`
+// row that the stack must collectively satisfy. Card-ui maps
+// each kind to a glyph + label.
+export const REQUIREMENT_KINDS = [
+  // power-source supports (matched against the reactor/generator
+  // slotted in the stack):
+  'reactor-fission',        // X marker on the published cards
+  'reactor-fusion',         // ∿ wave
+  'reactor-antimatter',     // 💣 antimatter pulse
+  'gen-radioisotope',       // ⟛ RTG / radioisotope generator
+  'gen-electric',           // e electric / photovoltaic
+  // operational supports:
+  'beam-receiver',          // ☀ solar / beam-pushed
+  'aerobrake-shroud',       // 🪂 atmospheric entry (Air Eater)
+  // role / hardware supports (legacy hand-written cards used
+  // these — kept so old data still loads cleanly):
+  'crew-quarters',
+  'spin-grav',
+  'pulse-generator',
+  'thermostat',
+  'sail',
 ];
 
-// Look up patents by id and by type. The renderer uses these to group
-// cards in the browser view; the engine will use them at BUILD time.
+// Map each Excel sheet name to the card type. Sheets we don't
+// fold into the patent deck (Bernals are city tiles; Colonists
+// are crew; Freighters are logistics, surfaced separately if
+// Stage 3 wants them) sit in the skip set below.
+const SHEET_TO_TYPE = {
+  'Thrusters':    'thruster',
+  'Reactors':     'reactor',
+  'Radiators':    'radiator',
+  'Refineries':   'refinery',
+  'Robonauts':    'robonaut',
+  'Generators':   'generator',
+  'GW Thrusters': 'thruster',  // gigawatt-class thruster
+};
+const SHEETS_NOT_PATENTS = new Set(['Bernals', 'Colonists', 'Freighters']);
 
-export const PATENTS_BY_ID = Object.fromEntries(PATENTS.map((p) => [p.id, p]));
+// Columns under the spreadsheet's "Support Requirements" banner —
+// the ONLY columns that translate into stack-level support
+// chips. Everything else (Push, Solar, ISRU, Air Eater,
+// Afterburn, Bonus Pivots, Missile / Raygun / Buggy) describes
+// what the card IS / DOES, not what it needs from other cards
+// in the stack. Those surface as card-properties further down.
+const BOOLEAN_TO_REQ = {
+  'X Reactor':      'reactor-fission',
+  '∿ Reactor':      'reactor-fusion',
+  '💣 Reactor':     'reactor-antimatter',
+  '⟛ Generator':   'gen-radioisotope',
+  'e Generator':    'gen-electric',
+  'Any Reactor':    'reactor-any',
+};
+
+// Columns that describe a per-card capability/property. Boolean
+// keys gate the property's presence; numeric keys carry a count.
+// These are surfaced as icon badges on the face, not as chips
+// in the supports box.
+const PROPERTY_COLUMNS_BOOL = {
+  'Push':           { key: 'push',           glyph: '🛰', label: 'Push-sat' },
+  'Solar':          { key: 'solar',          glyph: '☀',  label: 'Solar' },
+  'Air Eater':      { key: 'airEater',       glyph: '⛅', label: 'Air-eater' },
+  'Missile':        { key: 'missile',        glyph: '🚀', label: 'Missile' },
+  'Raygun':         { key: 'raygun',         glyph: '🔫', label: 'Raygun' },
+  'Buggy':          { key: 'buggy',          glyph: '🛺', label: 'Buggy' },
+};
+const PROPERTY_COLUMNS_NUM = {
+  'Afterburn':      { key: 'afterburn',      glyph: '🔥', label: 'Afterburn' },
+  'Bonus Pivots':   { key: 'bonusPivots',    glyph: '↺',  label: 'Bonus pivots' },
+  'ISRU':           { key: 'isru',           glyph: '🛢', label: 'ISRU rig' },
+};
+
+// Build a `requires` array from the face's "Support
+// Requirements" booleans. Just the power-source columns — see
+// the BOOLEAN_TO_REQ comment for why this list is tight.
+function requiresFromFace(face) {
+  const reqs = [];
+  if (!face) return reqs;
+  for (const [col, kind] of Object.entries(BOOLEAN_TO_REQ)) {
+    if (face[col]) reqs.push({ kind, count: 1 });
+  }
+  return reqs;
+}
+
+// Columns under the "Type" banner of Reactor / Generator sheets
+// that say what THIS card supplies to the stack. A generator
+// with ⟛=true supplies a radioisotope-generator chip, a fission
+// reactor (X=true) supplies the reactor-fission chip, etc.
+// Used to drive the per-card glyphs shown on the typebar.
+const REACTOR_TYPE_COLS = {
+  'X':  'reactor-fission',
+  '∿':  'reactor-fusion',
+  '💣': 'reactor-antimatter',
+};
+const GENERATOR_TYPE_COLS = {
+  '⟛': 'gen-radioisotope',
+  'e':  'gen-electric',
+};
+
+// Return the array of requirement-kinds this card SUPPLIES to
+// the stack — i.e. which support chips a thruster/robonaut/etc
+// is allowed to satisfy by including this card. Radiators
+// always supply the thermostat chip; reactors and generators
+// supply whichever Type-column boxes are ticked; other card
+// types supply nothing (they don't show up as chips on other
+// cards' supports rows).
+function suppliesFromFace(face, type) {
+  if (!face) return [];
+  if (type === 'reactor') {
+    return Object.entries(REACTOR_TYPE_COLS)
+      .filter(([col]) => face[col])
+      .map(([, kind]) => kind);
+  }
+  if (type === 'generator') {
+    return Object.entries(GENERATOR_TYPE_COLS)
+      .filter(([col]) => face[col])
+      .map(([, kind]) => kind);
+  }
+  if (type === 'radiator') return ['thermostat'];
+  return [];
+}
+
+// Build a `properties` array of { key, glyph, label, value }
+// entries from the face's per-card capability columns. Boolean
+// columns drop value=true; numeric columns drop the raw number.
+function propertiesFromFace(face) {
+  const out = [];
+  if (!face) return out;
+  for (const [col, def] of Object.entries(PROPERTY_COLUMNS_BOOL)) {
+    if (face[col]) out.push({ ...def, value: true });
+  }
+  for (const [col, def] of Object.entries(PROPERTY_COLUMNS_NUM)) {
+    if (face[col]) out.push({ ...def, value: face[col] });
+  }
+  return out;
+}
+
+// Stable slug for the card id. Tier-1 + Tier-2 share an id; both
+// sides of the same physical card are one entity in the deck.
+function slug(name, type) {
+  const base = String(name).toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return `${type.slice(0, 3)}_${base}`;
+}
+
+// Build a face stat-block from one tier of the import. For
+// radiators the same tier carries TWO stat sets (Light Side and
+// Heavy Side) under qualified column names; we surface those
+// as face.light / face.heavy. For every other card type the
+// fields sit directly on the face.
+function buildFace(label, tier, type) {
+  if (!tier) return null;
+  const isRadiator = type === 'radiator';
+  const base = {
+    label,
+    // Each face carries its OWN name — the published HF4 cards
+    // print different names on the two sides (Ablative Plate
+    // flips to Ablative Nozzle). buildPatent still uses the
+    // primary face's name for the card id and lookup.
+    name:       tier.Name || null,
+    ability:    tier.Ability || null,
+    requires:   requiresFromFace(tier),
+    supplies:   suppliesFromFace(tier, type),
+    properties: propertiesFromFace(tier),
+  };
+  if (isRadiator) {
+    base.light = {
+      mass:        tier['Light Side: Mass'],
+      radHardness: tier['Light Side: Rad-Hard'],
+      therms:      tier['Light Side: Therms'],
+    };
+    base.heavy = {
+      mass:        tier['Heavy Side: Mass'],
+      radHardness: tier['Heavy Side: Rad-Hard'],
+      therms:      tier['Heavy Side: Therms'],
+    };
+    // Mirror the Light Side at the face level so the generic
+    // renderer paths still see mass / rad-hard when they ask.
+    base.mass        = base.light.mass;
+    base.radHardness = base.light.radHardness;
+    base.therms      = base.light.therms;
+  } else {
+    base.mass        = tier.Mass;
+    base.radHardness = tier['Rad-Hard'];
+    base.thrust      = tier.Thrust;
+    base.fuel        = tier['Fuel Consumption'];
+    base.fuelType    = tier['Fuel Type'];
+    base.afterburn   = !!tier.Afterburn;
+    base.bonusPivots = tier['Bonus Pivots'] || 0;
+    base.therms      = tier.Therms;
+    // Reactors / generators that PAIR with a thruster have a
+    // thrust modifier + fuel modifier (e.g. Cermet NERVA's +3
+    // thrust mod). Surface those so the renderer can paint a
+    // small "wrench" modifier triangle next to the typebar.
+    base.thrustMod   = tier['Thrust Modifier'];
+    base.fuelMod     = tier['Fuel Consumption Modifier'];
+  }
+  return base;
+}
+
+// Translate one Excel row (card) into a PATENT object.
+function buildPatent(sheet, row) {
+  const type = SHEET_TO_TYPE[sheet];
+  const t1   = row.tier1 || {};
+  const t2   = row.tier2 || null;
+  const name = row.Name;
+  const id   = slug(name, type);
+  const spectral = row['Spectral Type']
+    || (type === 'radiator' ? null : 'C');
+  const isRadiator = type === 'radiator';
+
+  const primaryFace   = buildFace('Tier 1', t1, type);
+  const secondaryFace = buildFace('Tier 2', t2, type);
+
+  // Top-level convenience fields mirror the primary face so
+  // existing renderer / ship-engine code that reads card.thrust /
+  // card.mass directly keeps working.
+  return {
+    id,
+    name,
+    type,
+    spectralType: spectral || 'C',
+    mass:        primaryFace.mass ?? 1,
+    radHardness: primaryFace.radHardness ?? 5,
+    thrust:      primaryFace.thrust,
+    fuel:        primaryFace.fuel,
+    afterburn:   primaryFace.afterburn,
+    requires:    primaryFace.requires,
+    supplies:    primaryFace.supplies,
+    properties:  primaryFace.properties,
+    blurb:       primaryFace.ability || '',
+    flipOrientation: isRadiator ? 'rotated180' : 'standard',
+    rotatable:   isRadiator,
+    faces: { primary: primaryFace, secondary: secondaryFace },
+  };
+}
+
+// Build the deck from the spreadsheet bundle.
+const _deck = [];
+for (const [sheet, rows] of Object.entries(CARD_DATA)) {
+  if (SHEETS_NOT_PATENTS.has(sheet)) continue;
+  if (!SHEET_TO_TYPE[sheet]) continue;
+  for (const row of rows) {
+    if (!row.Name) continue;
+    _deck.push(buildPatent(sheet, row));
+  }
+}
+
+export const PATENTS = _deck;
+
+export const PATENTS_BY_ID = Object.fromEntries(
+  PATENTS.map((p) => [p.id, p]),
+);
 
 export function patentsByType(type) {
   return PATENTS.filter((p) => p.type === type);
 }
 
+// Public catalogue of card types. Labs and standalone modifiers
+// are not real HF4 cards — see the header note. Don't add them.
 export const PATENT_TYPES = [
-  'thruster', 'reactor', 'radiator', 'refinery', 'robonaut', 'generator', 'lab',
+  'thruster', 'reactor', 'radiator', 'refinery',
+  'robonaut', 'generator',
 ];

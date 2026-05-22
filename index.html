@@ -6,6 +6,7 @@
     <title>High Frontier — fan game</title>
     <link rel="stylesheet" href="./css/style.css?v=2" />
     <link rel="stylesheet" href="./css/map.css?v=1" />
+    <link rel="stylesheet" href="./css/cards.css?v=1" />
     <!--
       API base URL for the High Frontier companion server. Empty string
       = local-only mode (no profile, no lobby, no multiplayer). The
@@ -27,7 +28,9 @@
         <span class="brand-sub">fan game · stage 1</span>
       </div>
       <div class="topbar-actions">
-        <button id="btn-browse" title="Browse game data (map, patents, milestones, events)">Browse</button>
+        <button id="btn-browse" title="Sandbox: explore the map and build rockets from the patent deck">Sandbox</button>
+        <button id="btn-multiplayer" title="Multiplayer: lobby + games + global chat">Multiplayer</button>
+        <button id="btn-fullscreen" title="Toggle fullscreen" aria-label="Toggle fullscreen">⛶</button>
         <span id="server-status" class="server-status" title="API connectivity">…</span>
         <div id="profile-pill" class="profile-pill hidden">
           <span id="profile-name"></span>
@@ -106,6 +109,23 @@
               <button type="submit">Join</button>
             </form>
           </div>
+        </div>
+        <!--
+          Global chat: anyone signed in can talk here, no
+          per-lobby scope. The form is wired in lobby.js once the
+          chat-room API exists; for now the input is parked but
+          inert so the layout reads as intended.
+        -->
+        <div class="card global-chat">
+          <h2>Global chat</h2>
+          <ul id="global-chat-messages" class="chat-messages">
+            <li class="empty">Global chat coming online — say hi to anyone in the lobby.</li>
+          </ul>
+          <form id="global-chat-form" class="chat-form">
+            <input id="global-chat-input" type="text" maxlength="500"
+              placeholder="Message everyone…" autocomplete="off" />
+            <button type="submit">Send</button>
+          </form>
         </div>
       </section>
 
@@ -246,8 +266,10 @@
           </div>
           <aside id="browse-sidepanel" class="browse-sidepanel" data-active="">
             <nav class="sidepanel-tabs" id="sidepanel-tabs">
+              <button data-pane="patents" title="Patents" aria-label="Patents">🃏</button>
               <button data-pane="info" title="Site info" aria-label="Site info">📍</button>
-              <button data-pane="patents" title="Patents" aria-label="Patents">💎</button>
+              <button data-pane="rocket" title="Rocket stack" aria-label="Rocket stack">🛸</button>
+              <button data-pane="solo" title="Solo play" aria-label="Solo play">🚀</button>
               <button data-pane="milestones" title="Milestones" aria-label="Milestones">🏆</button>
               <button data-pane="events" title="Events" aria-label="Events">📜</button>
             </nav>
@@ -258,6 +280,18 @@
                 <h3>Site info</h3>
                 <div id="browse-map-info">
                   <p class="muted">Tap any site on the map to see its details.</p>
+                </div>
+              </div>
+              <div class="panel-pane" data-pane="rocket">
+                <h3>Rocket stack</h3>
+                <div id="rocket-panel">
+                  <p class="muted">Add cards from your hand to build a rocket parked in LEO.</p>
+                </div>
+              </div>
+              <div class="panel-pane" data-pane="solo">
+                <h3>Solo play</h3>
+                <div id="solo-panel">
+                  <p class="muted">Loading…</p>
                 </div>
               </div>
               <div class="panel-pane" data-pane="patents">
@@ -271,6 +305,34 @@
               </div>
             </div>
           </aside>
+
+          <!--
+            Sandbox hand strip: a thin panel anchored at the bottom
+            of the map area showing the cards the player has
+            dragged out of the patent deck. One card of each type
+            allowed (the rule lives in js/game/hand.js). Drag a
+            card from the Cards tab onto this strip to add it;
+            click the × on a hand card to put it back.
+          -->
+          <div id="sandbox-hand" class="sandbox-hand" aria-label="Your hand">
+            <div id="hand-grabber" class="hand-grabber"
+              aria-label="Drag to resize hand" title="Drag to resize"></div>
+            <div class="hand-header">
+              <span class="hand-title">✋ Hand</span>
+              <button id="hand-stack-open" type="button"
+                title="Open the LEO rocket stack — zooms the map to LEO">
+                🚀 Stack
+              </button>
+              <span class="hand-count" id="hand-count">0 cards</span>
+              <button id="hand-boost-commit" type="button" disabled
+                data-armed="0" title="Boost every marked card to the LEO rocket">
+                🚀 BOOST
+              </button>
+            </div>
+            <div id="sandbox-hand-cards" class="hand-cards"
+              data-empty="Drag cards from the deck above — click a card in your hand to discard, exo-produce, or add to your LEO rocket">
+            </div>
+          </div>
         </div>
       </section>
     </main>

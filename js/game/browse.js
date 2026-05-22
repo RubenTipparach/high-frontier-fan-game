@@ -5,14 +5,33 @@
 // topbar; also acts as the "preview" surface that Stage 3 will
 // replace with the live game.
 
-import { MapRenderer } from './render.js';
+import { MapRenderer, LEO_ANCHOR } from './render.js';
 import { loadPlannerMap } from './planner-map.js';
 import { loadCleanMap } from './clean-map.js';
 import { findPath } from './nav.js';
-import { PATENTS, PATENT_TYPES, patentsByType } from '../../data/patents.js';
+import {
+  getState as soloState, newGame as soloNewGame, abandonGame as soloAbandon,
+  setTarget as soloSetTarget, commitMove as soloCommitMove,
+  prospect as soloProspect, endRound as soloEndRound,
+  bindData as soloBindData, onChange as soloOnChange, SOLO_CONFIG,
+} from './solo.js';
+import { PATENTS, PATENTS_BY_ID, PATENT_TYPES, patentsByType } from '../../data/patents.js';
+import {
+  getHandSlots, isInHand, addToHand, removeFromHandAt, removeFromHand,
+  clearHand, onHandChange,
+  isBoostMarked, getBoostMarked, toggleBoostMark, clearBoostMarks,
+} from './hand.js';
+import {
+  getRocketStack, isInRocket, addToStack as rocketAddCard,
+  removeFromStack as rocketRemoveCard, clearStack as rocketClearStack,
+  onRocketChange, canRocketFly, isRocketActive,
+  getActiveThrusterId, setActiveThruster,
+} from './rocket.js';
+import { CREW } from '../../data/crew.js';
 import { MILESTONES } from '../../data/glory.js';
 import { POLITICS } from '../../data/politics.js';
 import { SITES_BY_ID } from '../../data/sites.js';
+import { renderCard } from './card-ui.js';
 
 // User-selected map mode. Persists across sessions so the player
 // keeps whichever view they prefer for playtesting. Default to the
@@ -33,11 +52,500 @@ async function loadMap(mode) {
 let _renderer = null;
 let _sidebarWired = false;
 
+// Subscribe once: rocket state changes (cards added / removed)
+// trigger a re-render of the sandbox rocket on the map.
+let _rocketSubWired = false;
+
 export function mountBrowse() {
   const view = document.getElementById('view-browse');
   if (!view) return;
+  if (!_rocketSubWired) {
+    _rocketSubWired = true;
+    onRocketChange(() => {
+      syncSandboxRocket();
+      // Re-render the rocket pane if it's currently open.
+      const panel = document.getElementById('browse-sidepanel');
+      if (panel && panel.dataset.active === 'rocket') renderRocketPane();
+    });
+  }
   wireSidebar();
+  wireHandStrip();
   renderMap();
+}
+
+// Sandbox hand strip wiring: drop target, slot rendering, +
+// the grabber bar that lets the user drag the strip up to see
+// more cards. Card-click opens the inspect modal instead of
+// removing the slot directly — Discard lives in the modal.
+// Touch-device check used to toggle UI between the desktop
+// hover-driven flow and the mobile tap-to-select flow. Reads
+// the standardised CSS media queries so an external keyboard
+// or external mouse on a tablet still resolves to "hover".
+function isTouchDevice() {
+  return window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+}
+
+let _handWired = false;
+function wireHandStrip() {
+  if (_handWired) return;
+  _handWired = true;
+  const strip    = document.getElementById('sandbox-hand');
+  const host     = document.getElementById('sandbox-hand-cards');
+  const countEl  = document.getElementById('hand-count');
+  const grabber  = document.getElementById('hand-grabber');
+  if (!strip || !host) return;
+
+  const lookup = (id) => PATENTS_BY_ID[id]
+    || CREW.find((c) => c.id === id) || null;
+  const kindOf = (id) =>
+    CREW.some((c) => c.id === id) ? 'crew' : 'patent';
+
+  // Drag from the deck → drop onto the strip → append slot.
+  // preventDefault unconditionally on dragover — dataTransfer
+  // .types is normalised differently across browsers and the
+  // "includes" check was silently rejecting valid drags in
+  // Firefox + Safari. The drop handler still validates the
+  // payload before mutating state.
+  host.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    host.classList.add('is-drop-target');
+  });
+  host.addEventListener('dragleave', () => host.classList.remove('is-drop-target'));
+  host.addEventListener('drop', (e) => {
+    e.preventDefault();
+    host.classList.remove('is-drop-target');
+    const id = e.dataTransfer.getData('text/card-id');
+    const card = id && lookup(id);
+    if (!card) return;
+    const r = addToHand(card);
+    if (!r.ok) {
+      host.classList.add('flash-error');
+      setTimeout(() => host.classList.remove('flash-error'), 700);
+    }
+  });
+
+  // Grabber: drag vertically to resize the strip between a
+  // collapsed default height (152px) and ~60% of viewport so
+  // the player can audit a many-card hand without leaving the
+  // sandbox view.
+  if (grabber) wireHandGrabber(grabber, strip);
+
+  const repaintHand = () => {
+    const slots = getHandSlots();
+    host.innerHTML = '';
+    if (countEl) countEl.textContent =
+      `${slots.length} card${slots.length === 1 ? '' : 's'}`;
+    slots.forEach((id, idx) => {
+      const card = lookup(id);
+      if (!card) return;
+      const wrap = document.createElement('div');
+      wrap.className = 'hand-slot';
+      if (isBoostMarked(id)) wrap.classList.add('is-boost-marked');
+      wrap.dataset.slotIdx = String(idx);
+      const cardEl = renderCard(card, { type: kindOf(id) });
+      wrap.appendChild(cardEl);
+
+      // Quick-action row appended INSIDE the card element so
+      // it shares the same scale + transform as the Flip
+      // button (which card-ui appends to the card root). Both
+      // end up at the card's actual visible bottom edge —
+      // previously the quick-icons sat at the slot's bottom
+      // edge, which is way below the scaled card.
+      const quick = document.createElement('div');
+      quick.className = 'hand-quick-actions';
+      const qBtn = (cls, glyph, title, handler) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = `hand-q ${cls}`;
+        b.textContent = glyph;
+        b.title = title;
+        b.addEventListener('click', (ev) => { ev.stopPropagation(); handler(); });
+        return b;
+      };
+      quick.append(
+        qBtn('q-discard', '🗑', 'Discard', () => removeFromHandAt(idx)),
+        // Sell is functionally Discard until the Stage-3
+        // economy lands (it'll pay out water/VP for sold cards
+        // then). Same removal action; separate verb so the
+        // intent is preserved when the economy ships.
+        qBtn('q-sell',    '💰', 'Sell card', () => removeFromHandAt(idx)),
+        qBtn('q-produce', '🏭', `Exo produce (spectral ${card.spectralType || '?'})`,
+          () => setStatus(`Exo-produce needs a Stage-3 factory matching spectral ${card.spectralType || '?'}.`)),
+        qBtn('q-boost',   '🚀', isBoostMarked(id) ? 'Unmark boost' : 'Mark for boost',
+          () => toggleBoostMark(id)),
+      );
+      cardEl.appendChild(quick);
+
+      // Mobile-only "View" button. On touch devices we drop
+      // the hover affordances (no hover on touch) and replace
+      // them with a two-step tap: first tap selects the card
+      // (raised + ring); second tap on the View button opens
+      // the inspect modal. Prevents accidental modal-opens on
+      // a casual fingerprint.
+      const viewBtn = document.createElement('button');
+      viewBtn.type = 'button';
+      viewBtn.className = 'hand-view-btn';
+      viewBtn.textContent = 'View';
+      viewBtn.title = 'Open this card';
+      viewBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        openCardModal(card, kindOf(id), idx);
+      });
+      wrap.appendChild(viewBtn);
+
+      wrap.addEventListener('click', (ev) => {
+        if (ev.target.closest('.card-flip, .card-rotate, .hand-q, .hand-view-btn')) return;
+        if (isTouchDevice()) {
+          // Tap toggles selection. Only one slot selected at a time.
+          const wasSelected = wrap.classList.contains('is-selected');
+          host.querySelectorAll('.hand-slot.is-selected').forEach((s) =>
+            s.classList.remove('is-selected'));
+          if (!wasSelected) wrap.classList.add('is-selected');
+        } else {
+          openCardModal(card, kindOf(id), idx);
+        }
+      });
+      host.appendChild(wrap);
+    });
+    repaintBoostCommit();
+  };
+
+  // BOOST commit button next to the hand title. Lit when at
+  // least one card is marked; pressing it transfers every
+  // marked card from the hand to the rocket stack and pops the
+  // stack modal so the player sees the cards land.
+  const repaintBoostCommit = () => {
+    const btn = document.getElementById('hand-boost-commit');
+    if (!btn) return;
+    const n = getBoostMarked().length;
+    btn.dataset.armed = n > 0 ? '1' : '0';
+    btn.disabled = n === 0;
+    btn.textContent = n > 0 ? `🚀 BOOST (${n})` : '🚀 BOOST';
+  };
+  const commitBoost = () => {
+    const marked = getBoostMarked();
+    if (!marked.length) return;
+    for (const id of marked) {
+      const card = lookup(id);
+      if (!card) continue;
+      rocketAddCard(id, kindOf(id));
+      removeFromHand(id);
+    }
+    clearBoostMarks();
+    openRocketStackModal();
+  };
+  const commitBtn = document.getElementById('hand-boost-commit');
+  if (commitBtn) commitBtn.addEventListener('click', commitBoost);
+
+  // Stack button next to ✋ Hand: zooms the map to LEO (so the
+  // rocket sprite is in view) AND pops the stack modal so the
+  // player sees what's on the rocket immediately.
+  const stackBtn = document.getElementById('hand-stack-open');
+  if (stackBtn) stackBtn.addEventListener('click', () => {
+    if (_renderer) _renderer.flyTo(LEO_ANCHOR, 4);
+    openRocketStackModal();
+  });
+
+  repaintHand();
+  onHandChange(repaintHand);
+}
+
+// Vertical resize grabber for the hand strip. Tracks a CSS
+// variable on the strip element so the height is restored
+// between repaints + survives onHandChange rerenders.
+function wireHandGrabber(grabber, strip) {
+  let startY = 0;
+  let startH = 0;
+  const onMove = (clientY) => {
+    const dy = startY - clientY;            // drag up = positive
+    const next = Math.max(120, Math.min(window.innerHeight * 0.7, startH + dy));
+    strip.style.height = `${next}px`;
+  };
+  const onPointerDown = (e) => {
+    const cy = e.touches ? e.touches[0].clientY : e.clientY;
+    startY = cy;
+    startH = strip.getBoundingClientRect().height;
+    document.body.style.userSelect = 'none';
+    const moveEv = e.touches ? 'touchmove' : 'pointermove';
+    const upEv   = e.touches ? 'touchend'  : 'pointerup';
+    const onMoveEv = (ev) => onMove(ev.touches ? ev.touches[0].clientY : ev.clientY);
+    const onUpEv   = () => {
+      document.body.style.userSelect = '';
+      document.removeEventListener(moveEv, onMoveEv);
+      document.removeEventListener(upEv, onUpEv);
+    };
+    document.addEventListener(moveEv, onMoveEv);
+    document.addEventListener(upEv, onUpEv);
+  };
+  grabber.addEventListener('pointerdown', onPointerDown);
+  grabber.addEventListener('touchstart', onPointerDown, { passive: true });
+}
+
+// Custom drag-image. The browser's default drag-image is a
+// faded snapshot of the element with no animation; we replace
+// it with a fixed-position clone that follows the pointer, casts
+// a heavy drop shadow, and wiggles with spring-damped rotation
+// driven by horizontal velocity. The native HTML5 drop event
+// still handles the actual data transfer — this only changes
+// the visual the user sees while dragging.
+let _dragGhost = null;
+let _dragGhostState = null;
+
+function startCustomDragGhost(srcEl, ev) {
+  endCustomDragGhost();
+  // 1×1 transparent canvas. setDragImage on a freshly-constructed
+  // <img src=data:…> raced the browser in Safari + Firefox —
+  // the drag started before the image loaded and the native
+  // ghost flickered in. A canvas is fully painted synchronously
+  // at the moment we hand it off, so the swap is reliable.
+  const blank = document.createElement('canvas');
+  blank.width = 1; blank.height = 1;
+  try { ev.dataTransfer.setDragImage(blank, 0, 0); } catch { /* IE */ }
+
+  const rect = srcEl.getBoundingClientRect();
+  const ghost = srcEl.cloneNode(true);
+  ghost.classList.add('drag-ghost');
+  ghost.style.width  = rect.width + 'px';
+  ghost.style.height = rect.height + 'px';
+  // Anchor the ghost so the pointer "holds" the spot where the
+  // user grabbed — feels less floaty than centring it.
+  const offsetX = ev.clientX - rect.left;
+  const offsetY = ev.clientY - rect.top;
+  ghost.style.left = (ev.clientX - offsetX) + 'px';
+  ghost.style.top  = (ev.clientY - offsetY) + 'px';
+  document.body.appendChild(ghost);
+
+  _dragGhost = ghost;
+  _dragGhostState = {
+    offsetX,
+    offsetY,
+    lastX: ev.clientX,
+    lastY: ev.clientY,
+    lastT: performance.now(),
+    rotTarget: 0,
+    rotCurrent: 0,
+    raf: 0,
+  };
+
+  // Track pointer via document-level dragover (the only
+  // drag-event with reliable clientX/clientY across browsers).
+  document.addEventListener('dragover', onDragGhostMove);
+  _dragGhostState.raf = requestAnimationFrame(animateDragGhost);
+}
+
+function onDragGhostMove(ev) {
+  const s = _dragGhostState;
+  if (!s || !_dragGhost) return;
+  ev.preventDefault();   // also acts as dropEffect: copy
+  const now = performance.now();
+  const dt = Math.max(1, now - s.lastT);
+  const vx = (ev.clientX - s.lastX) / dt;   // px/ms
+  s.lastX = ev.clientX;
+  s.lastY = ev.clientY;
+  s.lastT = now;
+  // Rotation target tilts toward the direction of horizontal
+  // motion. Capped so a fast flick doesn't spin the card past
+  // legibility. Wiggle comes from the spring lerp in animate().
+  s.rotTarget = Math.max(-18, Math.min(18, vx * 28));
+  _dragGhost.style.left = (ev.clientX - s.offsetX) + 'px';
+  _dragGhost.style.top  = (ev.clientY - s.offsetY) + 'px';
+}
+
+function animateDragGhost() {
+  const s = _dragGhostState;
+  if (!s || !_dragGhost) return;
+  // Critically-damped spring toward rotTarget. rotTarget decays
+  // on its own so the rotation eases back to 0 when the user
+  // pauses, giving the "wiggle settling" feel.
+  s.rotCurrent += (s.rotTarget - s.rotCurrent) * 0.20;
+  s.rotTarget *= 0.86;
+  _dragGhost.style.transform = `translate3d(0,0,0) rotate(${s.rotCurrent.toFixed(2)}deg)`;
+  s.raf = requestAnimationFrame(animateDragGhost);
+}
+
+function endCustomDragGhost() {
+  document.removeEventListener('dragover', onDragGhostMove);
+  if (_dragGhostState) cancelAnimationFrame(_dragGhostState.raf);
+  if (_dragGhost) _dragGhost.remove();
+  _dragGhost = null;
+  _dragGhostState = null;
+}
+
+// Fly a card from one screen-space rectangle to a real target
+// element, landing precisely on top of it. The target's
+// opacity is suppressed during the flight so the card appears
+// continuous — flyer arrives, target reveals, flyer removes
+// in the same frame — instead of fading out into empty air
+// while the target popped in some time ago.
+function flyCardTo(card, kind, fromRect, targetSelector) {
+  const target = document.querySelector(targetSelector);
+  if (!target) return;
+  const toRect = target.getBoundingClientRect();
+
+  // Hide the landing target so the flyer is the only card
+  // visible during the flight. Restore on transitionend so
+  // the reveal happens exactly when the flyer arrives.
+  const prevOpacity = target.style.opacity;
+  target.style.opacity = '0';
+
+  const flyer = renderCard(card, { type: kind });
+  flyer.classList.add('card-flyer');
+  flyer.style.left   = `${fromRect.left}px`;
+  flyer.style.top    = `${fromRect.top}px`;
+  flyer.style.width  = `${fromRect.width}px`;
+  document.body.appendChild(flyer);
+  // Force layout so the next-frame transform actually animates.
+  // eslint-disable-next-line no-unused-expressions
+  flyer.offsetWidth;
+  requestAnimationFrame(() => {
+    const tx = toRect.left - fromRect.left;
+    const ty = toRect.top  - fromRect.top;
+    const scale = toRect.width / Math.max(1, fromRect.width);
+    flyer.style.transform = `translate(${tx}px, ${ty}px) scale(${scale.toFixed(3)}) rotate(0deg)`;
+  });
+  const finish = () => {
+    target.style.opacity = prevOpacity;
+    flyer.remove();
+  };
+  flyer.addEventListener('transitionend', finish, { once: true });
+  // Safety: if transitionend never fires (tab backgrounded,
+  // etc.), recover.
+  setTimeout(finish, 900);
+}
+
+// Tap modal for a card sitting in the deck. Confirms "add to
+// hand" with a single primary action. Mobile-friendly because
+// HTML5 drag-and-drop doesn't work reliably on touch; pointing
+// + tapping is a more honest gesture for "I want this card."
+function openDeckTapModal(card, kind) {
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay';
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  const panel = document.createElement('div');
+  panel.className = 'card-modal-panel';
+  const cardEl = renderCard(card, { type: kind });
+  cardEl.classList.add('card-modal-card');
+  panel.appendChild(cardEl);
+
+  const actions = document.createElement('div');
+  actions.className = 'card-modal-actions';
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'modal-btn stack';
+  addBtn.textContent = 'Add to hand';
+  addBtn.addEventListener('click', () => {
+    const r = addToHand(card);
+    if (!r.ok) setStatus(`Can't add: ${r.reason}.`);
+    close();
+  });
+
+  actions.append(addBtn);
+  panel.appendChild(actions);
+  const xBtn = document.createElement('button');
+  xBtn.type = 'button';
+  xBtn.className = 'modal-x';
+  xBtn.textContent = '×';
+  xBtn.title = 'Close (Esc)';
+  xBtn.addEventListener('click', close);
+  panel.appendChild(xBtn);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+  const onKey = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
+  document.addEventListener('keydown', onKey);
+}
+
+// Inspect modal: enlarged copy of the clicked card with three
+// actions — Discard (pop back to the deck), Exo produce (will
+// need a factory location once Stage-3 builds them), and Add to
+// stack (push onto the LEO rocket).
+function openCardModal(card, kind, slotIdx) {
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay';
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  const panel = document.createElement('div');
+  panel.className = 'card-modal-panel';
+  const cardEl = renderCard(card, { type: kind });
+  cardEl.classList.add('card-modal-card');
+  panel.appendChild(cardEl);
+
+  const actions = document.createElement('div');
+  actions.className = 'card-modal-actions';
+
+  // Four primary actions, emoji-led for the quick-icon row on
+  // hand-slot hover (defined further down) to mirror the same
+  // verbs. Boost flags the card for the next BOOST commit;
+  // the commit lives on the hand strip's BOOST button (lit
+  // when at least one card is marked).
+  const discardBtn = document.createElement('button');
+  discardBtn.type = 'button';
+  discardBtn.className = 'modal-btn discard';
+  discardBtn.textContent = '🗑 Discard';
+  discardBtn.title = 'Return this card to the deck';
+  discardBtn.addEventListener('click', () => {
+    removeFromHandAt(slotIdx);
+    close();
+  });
+
+  const sellBtn = document.createElement('button');
+  sellBtn.type = 'button';
+  sellBtn.className = 'modal-btn sell';
+  sellBtn.textContent = '💰 Sell';
+  sellBtn.title = 'Sell card — same as discard until the Stage-3 economy lands';
+  sellBtn.addEventListener('click', () => {
+    removeFromHandAt(slotIdx);
+    close();
+  });
+
+  const produceBtn = document.createElement('button');
+  produceBtn.type = 'button';
+  produceBtn.className = 'modal-btn produce';
+  produceBtn.textContent = `🏭 Exo produce (${card.spectralType || '?'})`;
+  produceBtn.title = `Use a factory matching spectral type ${card.spectralType || '?'} to produce the dark-side resource`;
+  produceBtn.addEventListener('click', () => {
+    setStatus(
+      `Exo-produce needs a factory matching spectral type `
+      + `<strong>${card.spectralType || '?'}</strong>. `
+      + `Factories aren't buildable yet (Stage 3).`
+    );
+    close();
+  });
+
+  const boostBtn = document.createElement('button');
+  boostBtn.type = 'button';
+  boostBtn.className = 'modal-btn stack';
+  const marked = isBoostMarked(card.id);
+  boostBtn.textContent = marked ? '🚀 Unmark boost' : '🚀 Boost';
+  boostBtn.title = marked
+    ? 'Remove the boost mark on this card'
+    : 'Mark this card to be boosted to the LEO rocket on the next BOOST commit';
+  boostBtn.addEventListener('click', () => {
+    toggleBoostMark(card.id);
+    close();
+  });
+
+  actions.append(discardBtn, sellBtn, produceBtn, boostBtn);
+  panel.appendChild(actions);
+  // Top-right × close button — replaces the explicit Close
+  // action that was crowding the row of primary actions.
+  const xBtn = document.createElement('button');
+  xBtn.type = 'button';
+  xBtn.className = 'modal-x';
+  xBtn.textContent = '×';
+  xBtn.title = 'Close (Esc)';
+  xBtn.addEventListener('click', close);
+  panel.appendChild(xBtn);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+
+  // Escape closes too.
+  const onKey = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
+  document.addEventListener('keydown', onKey);
 }
 
 // Side panel: a vertical tab strip on the right edge of the
@@ -81,13 +589,26 @@ function showPane(pane) {
   if      (pane === 'patents')    renderPatents();
   else if (pane === 'milestones') renderMilestones();
   else if (pane === 'events')     renderEvents();
+  else if (pane === 'rocket') {
+    // Rocket lives in a centered modal now, not the sidepanel.
+    // Close the sidepanel (if it was just popped to "rocket")
+    // and open the modal instead so the player sees the stack
+    // in the map's centre.
+    panel.dataset.active = '';
+    for (const btn of panel.querySelectorAll('.sidepanel-tabs button')) btn.classList.remove('active');
+    for (const el of panel.querySelectorAll('.panel-pane'))   el.classList.remove('active');
+    openRocketStackModal();
+  }
+  else if (pane === 'solo')       renderSolo();
 }
 
 // Route state: shared across renderer instances. Tapping the first
 // site sets `from`, tapping the second sets `to` and triggers the
 // pathfinder; tapping again starts a new route from that site.
-let _routeFrom = null;
-let _routeTo = null;
+let _routeFrom = null;     // origin once a route has been plotted
+let _routeTo = null;       // destination once a route has been plotted
+let _selectedId = null;    // currently-highlighted site (just info, no routing)
+let _routingMode = false;  // true while the user is picking a destination
 let _activeData = null;
 
 async function renderMap() {
@@ -386,19 +907,216 @@ async function mountMapFor(mode) {
   updateRouteStatus();
   try {
     _activeData = await loadMap(mode);
+    soloBindData(_activeData);
     _renderer = new MapRenderer(canvas, {
       data: _activeData,
       onSelect: onSiteSelect,
     });
+    _renderer.onSandboxRocketClick = () => openRocketStackModal();
     wireDebugPanel(_renderer);
+    syncSoloShipMarker();
+    syncSandboxRocket();
   } catch (err) {
     canvas.innerHTML = `<div class="map-loading error">Map failed to load: ${err.message}</div>`;
   }
 }
 
-function onSiteSelect(site) {
-  // Populate the Site Info pane and pop it open.
+// Paint the sandbox rocket on the map at LEO. Position is a
+// fixed world-space coord that visually reads as "above Earth"
+// on the cleaned-up zone-band layout. Colour stays yellow for
+// now — multiplayer Stage 3 will pick from the 5-colour palette
+// per player. canFly is recomputed from rocket.js on every
+// rocket-state change.
+// Centered modal that shows the rocket's stack — replaces the
+// old sidepanel "rocket" pane. Same data, same actions (pull a
+// card back to the hand), just opens in the middle of the map
+// like the other inspect modals. Press × or Esc to dismiss.
+function openRocketStackModal() {
+  // Close any existing instance first so the modal doesn't
+  // stack up if the player clicks the rocket twice fast.
+  document.querySelector('.rocket-stack-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay rocket-stack-overlay';
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+    if (_rocketModalUnsub) { _rocketModalUnsub(); _rocketModalUnsub = null; }
+  };
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  const panel = document.createElement('div');
+  panel.className = 'rocket-stack-panel';
+  overlay.appendChild(panel);
+
+  const xBtn = document.createElement('button');
+  xBtn.type = 'button';
+  xBtn.className = 'modal-x';
+  xBtn.textContent = '×';
+  xBtn.title = 'Close (Esc)';
+  xBtn.addEventListener('click', close);
+  panel.appendChild(xBtn);
+
+  const repaint = () => {
+    const stack = getRocketStack();
+    const r = isRocketActive();
+    const activeId = getActiveThrusterId();
+    panel.querySelector('.rocket-stack-body')?.remove();
+    const body = document.createElement('div');
+    body.className = 'rocket-stack-body';
+    // Status banner: active + green when all three rules hold,
+    // grounded + red otherwise with the specific reason inline.
+    const status = r.active
+      ? '<p class="rocket-status ok">✓ Active — rocket can move.</p>'
+      : `<p class="rocket-status bad">🚫 Inactive — ${esc(r.reason)}.</p>
+         ${r.missing.length
+           ? `<ul class="rocket-issues">${r.missing.map((m) => `<li>${esc(m)}</li>`).join('')}</ul>`
+           : ''}`;
+    body.innerHTML = `
+      <h2 class="rocket-stack-title">🚀 LEO Rocket</h2>
+      ${status}
+      <div id="rocket-stack-cards"></div>
+    `;
+    panel.appendChild(body);
+
+    const cards = body.querySelector('#rocket-stack-cards');
+    if (!stack.length) {
+      cards.innerHTML = '<p class="muted">Your rocket is empty. Mark cards 🚀 in your hand, then press BOOST to launch them up here.</p>';
+      return;
+    }
+    stack.forEach((slot, idx) => {
+      const card = lookup(slot.id);
+      if (!card) return;
+      const isThruster = card.type === 'thruster' || card.thrust != null;
+      const wrap = document.createElement('div');
+      wrap.className = 'rocket-slot';
+      if (isThruster && slot.id === activeId) wrap.classList.add('is-active-thruster');
+      wrap.appendChild(renderCard(card, { type: slot.kind || 'patent' }));
+
+      const actions = document.createElement('div');
+      actions.className = 'rocket-slot-actions';
+
+      // Thrusters get a "Set as active" / "Active" toggle so
+      // the player can pick which thruster the rocket runs on.
+      // Non-thrusters skip this control.
+      if (isThruster) {
+        const activate = document.createElement('button');
+        activate.type = 'button';
+        activate.className = 'rocket-activate'
+          + (slot.id === activeId ? ' is-active' : '');
+        activate.textContent = slot.id === activeId
+          ? '⚡ Active thruster'
+          : 'Set as active';
+        activate.disabled = slot.id === activeId;
+        activate.addEventListener('click', () => setActiveThruster(slot.id));
+        actions.appendChild(activate);
+      }
+
+      const back = document.createElement('button');
+      back.type = 'button';
+      back.className = 'rocket-back-to-hand';
+      back.textContent = '↩ Back to hand';
+      back.addEventListener('click', () => {
+        rocketRemoveCard(idx);
+        addToHand(card);
+      });
+      actions.appendChild(back);
+
+      wrap.appendChild(actions);
+      cards.appendChild(wrap);
+    });
+  };
+  const lookup = (id) => PATENTS_BY_ID[id]
+    || CREW.find((c) => c.id === id) || null;
+  repaint();
+  _rocketModalUnsub = onRocketChange(repaint);
+
+  document.body.appendChild(overlay);
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+}
+let _rocketModalUnsub = null;
+
+// Stack panel: lists every card in the rocket, shows fly-status,
+// and lets the player pull any card back into their hand.
+function renderRocketPane() {
+  const host = document.getElementById('rocket-panel');
+  if (!host) return;
+  const stack = getRocketStack();
+  const flyable = canRocketFly();
+  const lookup = (id) => PATENTS_BY_ID[id]
+    || CREW.find((c) => c.id === id) || null;
+
+  if (!stack.length) {
+    host.innerHTML = `
+      <p class="muted">Your rocket is empty. Add cards from your
+      hand modal ("Add to LEO stack") to build a flyable ship.</p>
+    `;
+    return;
+  }
+  const statusHtml = flyable.ok
+    ? `<p class="rocket-status ok">✓ Flyable — all supports satisfied.</p>`
+    : `<p class="rocket-status bad">🚫 Cannot fly:</p>
+       <ul class="rocket-issues">
+         ${flyable.missing.map((m) => `<li>${esc(m)}</li>`).join('')}
+       </ul>`;
+  host.innerHTML = `${statusHtml}<div id="rocket-stack-cards"></div>`;
+  const cards = host.querySelector('#rocket-stack-cards');
+  stack.forEach((slot, idx) => {
+    const card = lookup(slot.id);
+    if (!card) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'rocket-slot';
+    wrap.appendChild(renderCard(card, { type: slot.kind || 'patent' }));
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'rocket-back-to-hand';
+    back.textContent = '↩ Back to hand';
+    back.addEventListener('click', () => {
+      rocketRemoveCard(idx);
+      addToHand(card);
+    });
+    wrap.appendChild(back);
+    cards.appendChild(wrap);
+  });
+}
+
+function syncSandboxRocket() {
+  if (!_renderer) return;
+  const stack = getRocketStack();
+  // Rocket model is present in LEO whenever the player has ≥1
+  // card in the stack — even when it isn't yet activatable.
+  // The 🚫 overlay distinguishes active vs inactive states.
+  if (!stack.length) {
+    _renderer.setSandboxRocket(null);
+    return;
+  }
+  const r = isRocketActive();
+  _renderer.setSandboxRocket({
+    x: LEO_ANCHOR.x,
+    y: LEO_ANCHOR.y,
+    colour: 'yellow',
+    canFly: r.active,       // drives the 🚫 + transparency overlay
+  });
+}
+
+// Solo state change -> refresh the panel + the ship marker on the
+// map. The listener is hooked once (sidebar wire-up time) and
+// dispatches whenever solo.js calls emit().
+function syncSoloShipMarker() {
+  if (!_renderer) return;
+  const s = soloState();
+  if (s && !s.gameOver) {
+    _renderer.setPlayerShipId(s.ship.at);
+    _renderer.setRoute(s.pendingPath ? s.pendingPath.segments : null);
+    _renderer.setRouteEndpoints(s.ship.at, s.pendingTargetId || null);
+  } else {
+    _renderer.setPlayerShipId(null);
+  }
+}
+
+function populateSiteInfo(site) {
   const info = document.getElementById('browse-map-info');
+  if (!info) return;
   info.innerHTML = `
     <h4 class="site-name"></h4>
     <ul class="kv">
@@ -410,6 +1128,11 @@ function onSiteSelect(site) {
       <li class="row-astro" hidden><span>Astrobiology</span><strong>🌿</strong></li>
       <li class="row-aero" hidden><span>Aerobrakes</span><strong class="aero">—</strong></li>
     </ul>
+    <div class="site-actions">
+      <button id="site-navigate-to" type="button" class="primary">
+        Navigate to here →
+      </button>
+    </div>
   `;
   info.querySelector('.site-name').textContent = site.name;
   info.querySelector('.type').textContent = site.type;
@@ -422,59 +1145,124 @@ function onSiteSelect(site) {
     info.querySelector('.row-aero').hidden = false;
     info.querySelector('.aero').textContent = String(site.aerobrakes);
   }
-  showPane('info');
+  // "Navigate to" arms the routing-pick mode. The next site the
+  // user taps becomes the destination of a route originating
+  // from this one. Disabled on decorative / non-landable sites.
+  const navBtn = info.querySelector('#site-navigate-to');
+  if (site.isDecorative || site.isLandable === false) {
+    navBtn.disabled = true;
+    navBtn.title = 'This site is not landable.';
+  } else {
+    navBtn.addEventListener('click', () => enterRoutingMode(site));
+  }
+}
 
-  // Decorative dots only exist to bend chains; they're not
-  // selectable. Every other waypoint (lagrange, burn, hohmann,
-  // radhaz, venus) is fair game as a route endpoint -- the user
-  // explicitly asked that all Hohmann transfer points be
-  // selectable.
+function enterRoutingMode(origin) {
+  _routingMode = true;
+  _routeFrom = origin;
+  _routeTo = null;
+  if (_renderer) {
+    _renderer.setRoute(null);
+    _renderer.setRouteEndpoints(origin.id, null);
+  }
+  document.querySelector('.browse-shell')?.classList.add('is-routing');
+  document.getElementById('route-clear').hidden = false;
+  setStatus(
+    `Picking destination from <strong>${esc(origin.name)}</strong> — `
+    + `tap any landable site. Press Clear route to cancel.`
+  );
+}
+
+function exitRoutingMode() {
+  _routingMode = false;
+  document.querySelector('.browse-shell')?.classList.remove('is-routing');
+}
+
+function onSiteSelect(site) {
+  // Solo mode hijacks clicks: every site you tap becomes the
+  // proposed destination for your ship's current position.
+  const s = soloState();
+  if (s && !s.gameOver) {
+    populateSiteInfo(site);
+    if (site.id === s.ship.at) {
+      soloSetTarget(null);
+    } else if (site.isLandable === false || site.isDecorative) {
+      // Sun, Earth-as-flavour-body, decoratives -- not pickable.
+    } else {
+      soloSetTarget(site.id);
+    }
+    showPane('solo');
+    return;
+  }
+
+  // Routing-pick mode: the user already pressed "Navigate to" on
+  // an origin and now the next tap is the destination. Plot the
+  // route and exit routing mode.
+  if (_routingMode && _routeFrom) {
+    if (site.isDecorative || site.isLandable === false) {
+      setStatus(`<strong>${esc(site.name)}</strong> is not landable — pick another site.`);
+      return;
+    }
+    if (site.id === _routeFrom.id) {
+      setStatus(`Destination must differ from <strong>${esc(_routeFrom.name)}</strong>.`);
+      return;
+    }
+    _routeTo = site;
+    const result = findPath(_activeData, _routeFrom.id, _routeTo.id);
+    if (!result) {
+      setStatus(`No route from <strong>${esc(_routeFrom.name)}</strong> to <strong>${esc(site.name)}</strong>.`);
+      _renderer.setRoute(null);
+      _renderer.setRouteEndpoints(_routeFrom.id, site.id);
+      exitRoutingMode();
+      return;
+    }
+    _renderer.setRoute(result.segments);
+    _renderer.setRouteEndpoints(_routeFrom.id, _routeTo.id);
+    const hops = result.segments.length;
+    setStatus(
+      `<strong>${esc(_routeFrom.name)}</strong> → <strong>${esc(_routeTo.name)}</strong>: ` +
+      `<strong class="big">${result.totalBurns}</strong> burns over ${hops} hop${hops === 1 ? '' : 's'}.`
+    );
+    exitRoutingMode();
+    return;
+  }
+
+  // Default tap behaviour: tap a site to select + show info;
+  // tap the SAME site again to deselect. No route is started by
+  // simple clicks — the user has to press "Navigate to" in the
+  // info panel to begin routing.
+  if (_selectedId === site.id) {
+    _selectedId = null;
+    if (_renderer) _renderer.setRouteEndpoints(null, null);
+    setStatus('Tap a site to see its info. Press "Navigate to" to plan a route.');
+    showPane(null);
+    return;
+  }
+
+  _selectedId = site.id;
+  if (_renderer) _renderer.setRouteEndpoints(site.id, null);
+
   if (site.isDecorative) {
     setStatus(`Decorative routing node — not selectable.`);
     return;
   }
 
-  if (!_routeFrom || (_routeFrom && _routeTo)) {
-    _routeFrom = site;
-    _routeTo = null;
-    _renderer.setRoute(null);
-    _renderer.setRouteEndpoints(site.id, null);
-    setStatus(`From <strong>${esc(site.name)}</strong> — tap a destination.`);
-    document.getElementById('route-clear').hidden = false;
-    return;
-  }
-
-  if (site.id === _routeFrom.id) {
-    setStatus(`Tap a different site to set the destination.`);
-    return;
-  }
-
-  _routeTo = site;
-  const result = findPath(_activeData, _routeFrom.id, _routeTo.id);
-  if (!result) {
-    setStatus(`No route from <strong>${esc(_routeFrom.name)}</strong> to <strong>${esc(site.name)}</strong>.`);
-    _renderer.setRoute(null);
-    _renderer.setRouteEndpoints(_routeFrom.id, site.id);
-    return;
-  }
-  _renderer.setRoute(result.segments);
-  _renderer.setRouteEndpoints(_routeFrom.id, _routeTo.id);
-  const hops = result.segments.length;
-  setStatus(
-    `<strong>${esc(_routeFrom.name)}</strong> → <strong>${esc(_routeTo.name)}</strong>: ` +
-    `<strong class="big">${result.totalBurns}</strong> burns over ${hops} hop${hops === 1 ? '' : 's'}.`
-  );
+  populateSiteInfo(site);
+  showPane('info');
+  setStatus(`Selected <strong>${esc(site.name)}</strong>.`);
 }
 
 function clearRoute() {
   _routeFrom = null;
   _routeTo = null;
+  _selectedId = null;
+  exitRoutingMode();
   if (_renderer) {
     _renderer.setRoute(null);
     _renderer.setRouteEndpoints(null, null);
   }
   document.getElementById('route-clear').hidden = true;
-  setStatus('Tap a site to plan a route.');
+  setStatus('Tap a site to see its info. Press "Navigate to" to plan a route.');
 }
 
 function setStatus(html) {
@@ -497,35 +1285,125 @@ function renderPatents() {
   if (!host) return;
   host.innerHTML = '';
 
-  // Filter bar.
+  // Filter bar: All / per-type / Crew. Crew lives in its own
+  // deck (data/crew.js) but the card UI handles both.
   const bar = document.createElement('div');
   bar.className = 'patent-filter';
-  bar.innerHTML = `<button class="active" data-type="all">All (${PATENTS.length})</button>`;
+  bar.innerHTML = `<button class="active" data-type="all">All (${PATENTS.length + CREW.length})</button>`;
   for (const t of PATENT_TYPES) {
     const n = patentsByType(t).length;
     bar.innerHTML += `<button data-type="${t}">${cap(t)} (${n})</button>`;
   }
+  bar.innerHTML += `<button data-type="crew">Crew (${CREW.length})</button>`;
   host.appendChild(bar);
+
+  const grid = document.createElement('div');
+  grid.className = 'card-grid';
+  host.appendChild(grid);
+
+  // Each physical card exists in exactly one location: deck,
+  // hand, or rocket. The library grid decorates every tile with
+  // its current location so the player can see where each card
+  // is at a glance — ✋ overlay for hand, 🛸 overlay for rocket.
+  // Cards not in the deck have drag + tap disabled (no
+  // duplicates allowed; pull them back from hand/rocket first).
+  const decorateForHand = (card, asKind) => {
+    const el = renderCard(card, { type: asKind });
+    el.dataset.cardId  = card.id;
+    el.dataset.cardKind = asKind;
+    const inHand   = isInHand(card.id);
+    const inRocket = isInRocket(card.id);
+    if (inHand)   el.classList.add('in-hand');
+    if (inRocket) el.classList.add('in-rocket');
+    if (inHand || inRocket) return el;   // placeholder — not interactive
+
+    el.draggable = true;
+    el.addEventListener('dragstart', (ev) => {
+      ev.dataTransfer.setData('text/card-id', card.id);
+      ev.dataTransfer.setData('text/card-kind', asKind);
+      ev.dataTransfer.effectAllowed = 'move';
+      el.classList.add('is-dragging');
+      startCustomDragGhost(el, ev);
+    });
+    el.addEventListener('dragend', () => {
+      el.classList.remove('is-dragging');
+      endCustomDragGhost();
+    });
+    el.addEventListener('click', (ev) => {
+      if (ev.target.closest('.card-flip, .card-rotate, .card-quick-add')) return;
+      openDeckTapModal(card, asKind);
+    });
+    // Quick-add button overlay: appears on hover; click adds
+    // straight to hand without the inspect modal. Drag-and-drop
+    // can be flaky on some browsers + touch devices; this is
+    // the always-reliable path the user asked for.
+    const quick = document.createElement('button');
+    quick.type = 'button';
+    quick.className = 'card-quick-add';
+    quick.textContent = '✋ Grab';
+    quick.title = 'Add this card to your hand';
+    quick.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const sourceRect = el.getBoundingClientRect();
+      const r = addToHand(card);
+      if (!r.ok) { setStatus(`Can't add: ${r.reason}.`); return; }
+      // Find the slot that was just appended (last one) and
+      // fly the card directly onto it, so the landing is
+      // continuous — no gap between flyer fading and slot
+      // appearing.
+      requestAnimationFrame(() => {
+        const slotEl = document.querySelector(
+          '#sandbox-hand-cards .hand-slot:last-of-type'
+        );
+        if (slotEl) flyCardTo(card, asKind, sourceRect, '#sandbox-hand-cards .hand-slot:last-of-type');
+      });
+    });
+    el.appendChild(quick);
+    return el;
+  };
+
+  const repaint = (filter) => {
+    grid.innerHTML = '';
+    if (filter === 'crew') {
+      for (const c of CREW) grid.appendChild(decorateForHand(c, 'crew'));
+      return;
+    }
+    for (const p of PATENTS) {
+      if (filter !== 'all' && p.type !== filter) continue;
+      grid.appendChild(decorateForHand(p, 'patent'));
+    }
+    if (filter === 'all') {
+      for (const c of CREW) grid.appendChild(decorateForHand(c, 'crew'));
+    }
+  };
+
+  // Subscribe to hand + rocket changes so the library tiles'
+  // ✋ / 🛸 location markers update as the player moves cards
+  // around. Storing the unsubs on the host element means
+  // remounting the pane doesn't stack listeners.
+  if (host._libUnsubs) host._libUnsubs.forEach((u) => u());
+  const repaintActive = () => {
+    const active = bar.querySelector('button.active');
+    repaint(active ? active.dataset.type : 'all');
+  };
+  host._libUnsubs = [
+    onHandChange(repaintActive),
+    onRocketChange(repaintActive),
+  ];
+
   bar.querySelectorAll('button').forEach((b) => {
     b.onclick = () => {
       bar.querySelectorAll('button').forEach((x) => x.classList.toggle('active', x === b));
-      const filter = b.dataset.type;
-      grid.innerHTML = '';
-      for (const p of PATENTS) {
-        if (filter !== 'all' && p.type !== filter) continue;
-        grid.appendChild(patentCard(p));
-      }
+      repaint(b.dataset.type);
     };
   });
-
-  // Grid.
-  const grid = document.createElement('div');
-  grid.className = 'patent-grid';
-  host.appendChild(grid);
-  for (const p of PATENTS) grid.appendChild(patentCard(p));
+  repaint('all');
 }
 
-function patentCard(p) {
+// Legacy patent-card builder kept for now (unused after switch to
+// renderCard; will be removed in a follow-up commit once nothing
+// imports it). Pruning aggressively to keep the bundle small.
+function legacyPatentCard(p) {
   const card = document.createElement('div');
   card.className = 'patent-card type-' + p.type;
   card.innerHTML = `
@@ -585,6 +1463,113 @@ function renderMilestones() {
     li.querySelector('p').textContent = m.blurb;
     list.appendChild(li);
   }
+}
+
+// Solo panel: stats + per-round actions when a game is running,
+// "New game" button otherwise. Re-rendered on every solo state
+// change via the soloOnChange listener wired in mountBrowse.
+let _soloListenerHooked = false;
+function renderSolo() {
+  if (!_soloListenerHooked) {
+    _soloListenerHooked = true;
+    soloOnChange(() => {
+      // Re-render only if the solo pane is currently visible; the
+      // ship marker is updated separately.
+      const panel = document.getElementById('browse-sidepanel');
+      if (panel && panel.dataset.active === 'solo') paintSolo();
+      syncSoloShipMarker();
+    });
+  }
+  paintSolo();
+}
+
+function paintSolo() {
+  const host = document.getElementById('solo-panel');
+  if (!host) return;
+  const s = soloState();
+  if (!s) {
+    host.innerHTML = `
+      <p class="muted">A solo game pits one ship against the round
+      clock. ${SOLO_CONFIG.STARTING_WATER} water, ${SOLO_CONFIG.OPS_PER_ROUND}
+      operations per round, ${SOLO_CONFIG.MAX_ROUNDS} rounds,
+      target ${SOLO_CONFIG.TARGET_VP} VP.</p>
+      <div class="solo-actions">
+        <button class="primary" id="solo-new" title="Start a new solo game">Start solo game</button>
+        <button class="danger" id="sandbox-reset"
+          title="Empty the hand, the rocket stack, and any board components">Reset sandbox</button>
+      </div>
+    `;
+    host.querySelector('#solo-new').onclick = () => {
+      soloNewGame();
+      paintSolo();
+    };
+    host.querySelector('#sandbox-reset').onclick = () => {
+      if (!confirm('Reset sandbox? This clears your hand, your rocket’s stack, and every component on the board.')) return;
+      clearHand();
+      rocketClearStack();
+      // Future: clear factories / refineries / claimed sites as
+      // those land in Stage 3.
+      setStatus('Sandbox reset — hand and rocket stack cleared.');
+    };
+    return;
+  }
+  const here   = _activeData && _activeData.byId[s.ship.at];
+  const target = s.pendingTargetId && _activeData && _activeData.byId[s.pendingTargetId];
+  const ops    = Math.max(0, SOLO_CONFIG.OPS_PER_ROUND - s.turn);
+  const claimedHere = here && s.claimed.includes(here.id);
+  const canProspect = !!here && !here.isWaypoint && !s.gameOver
+    && ops > 0 && !claimedHere && here.isLandable !== false;
+  const moveCost = s.pendingPath ? s.pendingPath.totalBurns : null;
+  const canMove = !s.gameOver && ops > 0 && moveCost != null && moveCost <= s.water;
+  host.innerHTML = `
+    <div class="solo-stats">
+      <span>Round</span><strong>${s.round}/${SOLO_CONFIG.MAX_ROUNDS}</strong>
+      <span>Ops</span><strong>${ops}/${SOLO_CONFIG.OPS_PER_ROUND}</strong>
+      <span>Water</span><strong>${s.water}</strong>
+      <span>Score</span><strong>${s.score}/${SOLO_CONFIG.TARGET_VP}</strong>
+      <span>Claimed</span><strong>${s.claimed.length}</strong>
+    </div>
+    <p class="solo-here muted">At: <strong></strong></p>
+    <p class="solo-target muted"></p>
+    <div class="solo-actions">
+      <button class="primary" id="solo-move" ${canMove ? '' : 'disabled'}>Move</button>
+      <button id="solo-prospect" ${canProspect ? '' : 'disabled'}>Prospect</button>
+      <button id="solo-end">End round</button>
+    </div>
+    ${s.gameOver ? '<p class="solo-end-banner"></p>' : ''}
+    <details class="solo-log"><summary>Log</summary><ol></ol></details>
+    <button id="solo-abandon" class="danger" style="margin-top:10px">Abandon</button>
+  `;
+  host.querySelector('.solo-here strong').textContent = here ? here.name : '—';
+  const targetEl = host.querySelector('.solo-target');
+  if (target && moveCost != null) {
+    targetEl.innerHTML = `→ <strong></strong> (${moveCost} burns, ${s.pendingPath.segments.length} hops)`;
+    targetEl.querySelector('strong').textContent = target.name;
+  } else if (s.pendingTargetId && !s.pendingPath) {
+    targetEl.textContent = `No route to ${target ? target.name : 'target'}.`;
+  } else {
+    targetEl.textContent = 'Tap a site on the map to plan a move.';
+  }
+  const log = host.querySelector('.solo-log ol');
+  for (const line of s.log.slice(0, 30)) {
+    const li = document.createElement('li');
+    li.textContent = line;
+    log.appendChild(li);
+  }
+  if (s.gameOver) {
+    host.querySelector('.solo-end-banner').textContent =
+      s.score >= SOLO_CONFIG.TARGET_VP ? '🏆 Victory!' : '⏱ Time up.';
+  }
+  host.querySelector('#solo-move').onclick = () => { soloCommitMove(); paintSolo(); syncSoloShipMarker(); };
+  host.querySelector('#solo-prospect').onclick = () => { soloProspect(); paintSolo(); };
+  host.querySelector('#solo-end').onclick = () => { soloEndRound(); paintSolo(); };
+  host.querySelector('#solo-abandon').onclick = () => {
+    if (confirm('Abandon this solo game? Progress is lost.')) {
+      soloAbandon();
+      paintSolo();
+      syncSoloShipMarker();
+    }
+  };
 }
 
 function renderEvents() {

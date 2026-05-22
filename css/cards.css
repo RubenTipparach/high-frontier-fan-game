@@ -1,0 +1,671 @@
+/* Card grid for the patents/crew browser. Auto-fill responsive
+   columns with a comfortable card size; falls back to single
+   column on narrow screens. */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+/* Solo panel layout */
+.solo-stats {
+  display: grid;
+  grid-template-columns: auto 1fr auto 1fr;
+  gap: 4px 10px;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.solo-stats span { color: var(--ink-dim); }
+.solo-stats strong {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.solo-here, .solo-target {
+  margin: 4px 0;
+  font-size: 12px;
+}
+.solo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
+}
+.solo-actions button { font-size: 12px; padding: 6px 12px; }
+.solo-end-banner {
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--warm);
+  margin: 8px 0;
+}
+.solo-log {
+  margin: 10px 0;
+  font-size: 11px;
+}
+.solo-log summary { color: var(--ink-dim); cursor: pointer; }
+.solo-log ol {
+  margin: 6px 0 0 16px;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  color: var(--ink-dim);
+}
+.solo-log li { margin: 3px 0; }
+
+/* Game-style card silhouette. Built by js/game/card-ui.js;
+   variants are driven by the type-* class on the root node. */
+
+.card {
+  position: relative;
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+  padding: 0;
+  width: 220px;
+  min-height: 350px;
+  color: var(--ink);
+  font-size: 12px;
+  perspective: 1200px;
+}
+
+/* The inner is the 3D body — both faces ride on it and rotate
+   together when data-side flips. backface-visibility hides the
+   side facing away from the viewer, so we never see the back of
+   either face. */
+.card-inner {
+  position: relative;
+  width: 100%;
+  min-height: 350px;
+  transform-style: preserve-3d;
+  transition: transform 0.7s cubic-bezier(.2, .7, .3, 1);
+}
+.card[data-side="secondary"] .card-inner { transform: rotateY(180deg); }
+
+.card-face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--ink);
+  overflow: hidden;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.card-face[data-face="secondary"] { transform: rotateY(180deg); }
+
+/* Radiators read upside-down on the installed (secondary) face,
+   matching the published cards. The Z-rotation composes with the
+   Y-flip so the back content reads mirrored top-to-bottom. */
+.card.flip-rotates .card-face[data-face="secondary"] {
+  transform: rotateY(180deg) rotate(180deg);
+}
+
+/* Primary face is the "white" published-card look: parchment
+   background, dark ink, muted accents. Variable overrides cascade
+   into every child rule so we don't have to touch each selector. */
+.card-face[data-face="primary"] {
+  --ink: #1a1614;
+  --ink-dim: #5b554c;
+  --ink-mute: #8a8478;
+  --border: #d4cba8;
+  --accent: #0c0a16;
+  --accent-2: #4b5563;
+  --bg-2: #f4ecd8;
+}
+.card-face[data-face="primary"] .card-footer {
+  background: rgba(0, 0, 0, 0.05);
+  border-top-color: rgba(0, 0, 0, 0.15);
+}
+/* Default chip styling for the primary (white) face — only
+   applies to chips WITHOUT a data-supplier; supplier-tinted
+   chips paint at full saturation on both faces. */
+.card-face[data-face="primary"] .card-requires .req:not([data-supplier]) {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.15);
+}
+.card-face[data-face="primary"] .card-stats li {
+  border-bottom-color: rgba(0, 0, 0, 0.15);
+}
+
+/* Thrust-arrow uses currentColor — pin it dark on the white face
+   and white on the black face so it's always visible. */
+.card-face[data-face="primary"]   .thrust-svg { color: #0c0a16; }
+.card-face[data-face="secondary"] .thrust-svg { color: #ffffff; }
+
+@media (prefers-reduced-motion: reduce) {
+  .card-inner { transition: none; }
+}
+
+/* Type bar across the top, coloured by component category. */
+.card-typebar {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  padding: 5px 10px;
+  text-align: center;
+  color: #0c0a16;
+  background: var(--ink-mute);
+  text-transform: uppercase;
+  /* Supply glyphs (X, ∿, 💣, ⟛, e, 🌡) sit at the leading edge
+     of the label. Slight bump in size + bold weight so the
+     symbols read cleanly against the saturated typebar fill. */
+}
+.card.type-thruster  .card-typebar { background: #f8a47a; }
+.card.type-reactor   .card-typebar { background: #a78bfa; }
+.card.type-radiator  .card-typebar { background: #7dd3fc; }
+.card.type-refinery  .card-typebar { background: #94a3b8; }
+.card.type-robonaut  .card-typebar { background: #f9a8d4; }
+.card.type-lab       .card-typebar { background: #67e8f9; }
+.card.type-generator .card-typebar { background: #f97316; }
+.card.type-modifier  .card-typebar { background: #fda4af; }
+.card.kind-crew      .card-typebar { background: #fde047; }
+
+/* Stats box top-left: mass / rad / spectral hex in a row. */
+.card-statbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px 0;
+  font-size: 10px;
+  color: var(--ink-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.card-statbox span { display: inline-flex; align-items: center; gap: 4px; }
+.card-statbox strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.card-spectral { margin-left: auto; line-height: 0; }
+.spectral-hex { width: 22px; height: 26px; }
+
+.card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  flex: 1 1 auto;
+}
+
+.card-thrust {
+  align-self: center;
+  width: 100%;
+  max-width: 130px;
+  margin: 2px 0 -2px;
+}
+.thrust-visual { display: block; }
+.thrust-svg { width: 100%; height: auto; }
+
+.card-stats {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 8px;
+}
+.card-stats li {
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px dashed var(--border);
+  padding-bottom: 1px;
+  font-size: 11px;
+}
+.card-stats span { color: var(--ink-dim); }
+.card-stats strong {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Supports box: dedicated panel for the support-icon row so the
+   reader sees it as a labelled "what this card needs in your
+   stack" section, separate from the thrust visual above. The
+   :has(:empty) rule hides the panel entirely on cards that
+   carry no support requirements. */
+.card-supports {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 4px 6px;
+  background: rgba(0, 0, 0, 0.05);
+}
+.card-supports:has(.card-requires:empty) { display: none; }
+.card-supports-label {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  text-align: center;
+}
+.card-supports .card-requires { margin-top: 0; justify-content: center; }
+.card-face[data-face="primary"] .card-supports {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.18);
+}
+
+.card-requires {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  margin-top: 2px;
+}
+.card-requires .req-svg { display: block; }
+.card-requires .req {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+}
+.card-requires .req em {
+  font-style: normal;
+  font-size: 13px;
+  line-height: 1;
+}
+.card-requires .req b {
+  font-weight: 700;
+  font-size: 10px;
+  color: var(--accent-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Supplier-tinted chips: the chip's background matches the
+   typebar colour of the card type that satisfies this support,
+   so "thruster needs a fission reactor" reads visually as a
+   purple chip on the thruster card. Tints use the same palette
+   as the card-typebar rules above so the cross-reference is
+   immediate. White text on the saturated tint reads well; the
+   card-face[data-face="primary"] rule below restores dark text
+   on the lighter backgrounds for the primary face. */
+/* Solid supplier-colour tiles: each chip is a saturated square
+   of the supplier card's colour with a bright icon glyph
+   centred inside. The ring/pip approach from the previous
+   revision was too subtle — these read as miniatures of the
+   card type they need. */
+.card-requires .req[data-supplier] {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  border-width: 2px;
+  border-style: solid;
+  border-radius: 5px;
+  font-weight: 800;
+  font-size: 16px;
+  line-height: 1;
+  justify-content: center;
+  gap: 4px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.30),
+              0 1px 2px rgba(0, 0, 0, 0.35);
+}
+.card-requires .req[data-supplier] em {
+  font-size: 18px;
+  font-weight: 800;
+}
+/* OR-separator inside a multi-glyph supplier chip — the "/"
+   between e.g. X / ∿ / 💣 telling the player any one of the
+   listed kinds satisfies the slot. */
+.card-requires .req .req-or {
+  margin: 0 3px;
+  font-weight: 600;
+  opacity: 0.7;
+  font-size: 14px;
+}
+
+/* Modifier triangle for reactor / generator pairing cards.
+   Same silhouette as the thrust triangle but slate-grey with
+   a 🔧 wrench in the apex, signalling "this modifies whatever
+   thruster you stack me with." */
+.thrust-visual.is-modifier {
+  margin: 2px 0;
+}
+.thrust-visual.is-modifier .thrust-svg { color: #cbd5e1; }
+.card-requires .req[data-supplier] b {
+  color: inherit;
+  opacity: 0.85;
+  font-size: 11px;
+}
+
+.card-requires .req[data-supplier="reactor"]   { background: #a78bfa; color: #1c0f3a; border-color: #4c1d95; }
+.card-requires .req[data-supplier="radiator"]  { background: #7dd3fc; color: #0a2c43; border-color: #075985; }
+.card-requires .req[data-supplier="refinery"]  { background: #94a3b8; color: #0f172a; border-color: #334155; }
+.card-requires .req[data-supplier="robonaut"]  { background: #f9a8d4; color: #500724; border-color: #be185d; }
+.card-requires .req[data-supplier="generator"] { background: #f97316; color: #2e0f02; border-color: #9a3412; }
+
+/* Card-properties row: small badges for per-face capabilities
+   (Push, Solar, Air-Eater, ISRU, Afterburn, Bonus Pivots,
+   Missile, Raygun, Buggy). Distinct from the supports box —
+   subtler styling so they don't get confused with chips. */
+.card-properties {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 2px 0;
+}
+.card-properties:empty { display: none; }
+.card-prop {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  padding: 1px 4px;
+  border: 1px dashed var(--border);
+  border-radius: 3px;
+  background: rgba(15, 23, 42, 0.32);
+  color: var(--ink-dim);
+}
+.card-prop em { font-style: normal; font-size: 12px; line-height: 1; }
+.card-prop b { font-weight: 700; font-size: 10px; }
+
+.card-name {
+  font-weight: 600;
+  color: var(--ink);
+  font-size: 13px;
+}
+.card-role {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+}
+.card-bonus {
+  margin: 0;
+  font-size: 11px;
+  color: var(--accent-2);
+  font-weight: 600;
+}
+.card-blurb {
+  margin: 0;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--ink-dim);
+  line-height: 1.35;
+}
+
+/* Footer is now just a small reserved strip at the bottom of
+   the card for the Flip button (and future per-card actions).
+   The name moved up to .card-name-row right under the typebar
+   so the busy body content doesn't crash into it. */
+.card-footer {
+  min-height: 26px;
+  border-top: 1px dashed var(--border);
+  padding: 4px 10px;
+  background: rgba(15, 16, 35, 0.55);
+}
+
+/* Title strip right beneath the typebar. Centred, bold, with
+   a thin under-rule to read as the card's title plate. */
+.card-name-row {
+  padding: 4px 10px 5px;
+  text-align: center;
+  border-bottom: 1px dashed var(--border);
+  background: rgba(0, 0, 0, 0.04);
+}
+.card-name-row .card-name {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.card-flip {
+  position: absolute;
+  bottom: 6px;
+  right: 8px;
+  background: rgba(15, 16, 35, 0.85);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--ink-dim);
+  font-size: 10px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.card-flip:hover { color: var(--ink); border-color: var(--accent-2); }
+
+/* Rotate-180 button: only emitted on radiator cards. Sits
+   immediately left of the Flip button in the lower-right
+   corner so the two card-actions cluster together and neither
+   collides with the body text. Tapping it toggles data-rotated
+   on the card root, which spins the entire .card-inner 180°
+   AND swaps which side reads as active (the inactive side
+   greys out). */
+.card-rotate {
+  position: absolute;
+  bottom: 6px;
+  right: 56px;
+  background: rgba(15, 16, 35, 0.85);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--ink-dim);
+  font-size: 14px;
+  line-height: 1;
+  width: 28px;
+  height: 22px;
+  padding: 0;
+  cursor: pointer;
+  z-index: 4;
+}
+.card-rotate:hover { color: var(--ink); border-color: var(--accent-2); }
+.card[data-rotated="1"] .card-inner {
+  /* Layer on top of the existing rotateY tier-flip. The
+     transform is composed: tier-flip handles Y, rotate adds Z. */
+  transform: rotateZ(180deg);
+}
+.card[data-rotated="1"][data-side="secondary"] .card-inner {
+  transform: rotateY(180deg) rotateZ(180deg);
+}
+
+/* Radiator card layout: each face is two stacked "half-cards"
+   — Light Side at the top (upright) and Heavy Side at the
+   bottom rotated 180°, exactly the way the published HF4
+   radiator prints. Each half carries its own cyan typebar,
+   stat box, ability blurb, and name label so the card reads
+   as two complete radiators sharing one physical body. The
+   inactive half is dimmed (driven by data-rotated on the .card
+   root). */
+.card-face.is-radiator {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 0;
+}
+.card-face.is-radiator .rad-half {
+  display: flex;
+  flex-direction: column;
+  transition: opacity 0.22s ease, filter 0.22s ease;
+}
+.card-face.is-radiator .rad-half .card-typebar {
+  background: #7dd3fc;
+  color: #0a2c43;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+.card-face.is-radiator .rad-half .card-statbox {
+  display: flex;
+  gap: 10px;
+  padding: 4px 8px;
+  font-size: 11px;
+  align-items: center;
+}
+.card-face.is-radiator .rad-half .card-blurb {
+  font-size: 11px;
+  margin: 2px 8px;
+  flex: 1;
+  color: var(--ink-dim);
+}
+.card-face.is-radiator .rad-half .card-name-row {
+  padding: 4px 8px 2px;
+  text-align: center;
+  border-bottom: 1px dashed var(--border);
+}
+.card-face.is-radiator .rad-half .card-name {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+/* Heavy half is upside-down so the player physically rotates
+   the card 180° to read it. */
+.card-face.is-radiator .half-heavy { transform: rotate(180deg); }
+/* Dim the inactive half. data-rotated=0 means light side is
+   currently up, so heavy is dimmed; data-rotated=1 swaps. */
+.card[data-rotated="0"] .card-face.is-radiator .half-heavy,
+.card[data-rotated="1"] .card-face.is-radiator .half-light {
+  opacity: 0.32;
+  filter: grayscale(0.7);
+}
+
+/* Cursor hint on any element that carries a tooltip — works for
+   both HTML chips and SVG icons inside the thrust visual. */
+[data-tip] { cursor: help; }
+.thrust-svg [data-tip] { cursor: help; }
+
+/* Floating tooltip layer. One element appended to <body>; we
+   move/show/hide it via the card-ui tooltip helper. position:
+   fixed + high z-index so it floats above flipped cards and any
+   sidebar panes. */
+.card-tip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  background: rgba(15, 16, 35, 0.96);
+  color: #e5e7eb;
+  border: 1px solid rgba(251, 191, 36, 0.55);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  max-width: 220px;
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity 0.14s ease-out, transform 0.14s ease-out;
+  z-index: 9999;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45);
+  font-family: inherit;
+  letter-spacing: 0.2px;
+}
+.card-tip.visible { opacity: 1; transform: translateY(0); }
+
+/* Library card location markers. Each card lives in exactly one
+   place (deck / hand / rocket); when it's in hand or rocket the
+   library tile reads as a "you already have this" placeholder
+   — greyed out, with an oversized ✋ or 🛸 overlay so the
+   player sees the card's current location at a glance. */
+.card.in-hand,
+.card.in-rocket {
+  opacity: 0.45;
+  filter: grayscale(0.6);
+  pointer-events: none;
+  position: relative;
+}
+.card.in-hand::after,
+.card.in-rocket::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 64px;
+  z-index: 10;
+  text-shadow: 0 4px 12px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+.card.in-hand::after   { content: "✋"; }
+.card.in-rocket::after { content: "🛸"; }
+
+/* Quick-add button on library cards: hover-revealed call-to-
+   action that drops the card into the player's hand without
+   needing the inspect modal. Drag-and-drop works too; this is
+   the reliable always-works path. */
+.card-quick-add {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%) translateY(6px);
+  background: var(--accent);
+  color: #062136;
+  border: 1px solid var(--accent-2);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s, transform 0.15s;
+  z-index: 6;
+}
+.card:hover .card-quick-add {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+.card-quick-add:hover { background: var(--accent-2); color: #fff; }
+
+/* Flyer card: a temporary clone that animates from the
+   library tile's screen position to the hand strip (or the
+   rocket pane) when the player taps Grab / Add to LEO stack.
+   The flyer is purely cosmetic — state has already updated —
+   it just lets the eye track where the card "went". */
+.card-flyer {
+  position: fixed;
+  z-index: 250;
+  pointer-events: none;
+  /* No opacity transition — the flyer stays solid all the way
+     to the target. The landing target's opacity is suppressed
+     during flight (see flyCardTo) and revealed on landing, so
+     visually it's one continuous card arrival rather than a
+     flyer fading while the destination popped in earlier. */
+  transition: transform 0.55s cubic-bezier(0.4, 1.4, 0.6, 1);
+  filter: drop-shadow(0 20px 30px rgba(0, 0, 0, 0.55));
+  transform: translate(0, 0) scale(1) rotate(0deg);
+  transform-origin: top left;
+}
+
+/* Radiator Light/Heavy toggle row under the name. Replaces
+   the old ↻ rotate button — clicking either label sets
+   data-rotated on the .card root, which dims the inactive
+   half and bolds the active label here. */
+.card-face.is-radiator .rad-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border-bottom: 1px dashed var(--border);
+  background: rgba(0, 0, 0, 0.04);
+}
+.rad-toggle .rad-side {
+  background: transparent;
+  border: none;
+  color: var(--ink-mute);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 6px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.rad-toggle .rad-side:hover { color: var(--ink); background: rgba(0, 0, 0, 0.08); }
+.rad-toggle .rad-sep { color: var(--ink-mute); opacity: 0.5; }
+
+/* Active side bolds + colours. data-rotated="0" = light side
+   active; data-rotated="1" = heavy side active. */
+.card[data-rotated="0"] .rad-toggle .rad-side-light,
+.card[data-rotated="1"] .rad-toggle .rad-side-heavy {
+  color: var(--ink);
+  font-weight: 800;
+  background: rgba(125, 211, 252, 0.18);
+}

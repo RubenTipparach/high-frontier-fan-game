@@ -28,7 +28,9 @@ html, body {
     var(--bg);
   background-attachment: fixed;
   color: var(--ink);
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;     /* no page-level scroll; panels scroll
+                           inside themselves where needed */
 }
 
 button {

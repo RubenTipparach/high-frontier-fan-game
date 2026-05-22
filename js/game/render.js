@@ -1,3 +1,5 @@
+import { getRocketSprite, getRocketSpriteSize } from './rocket-sprite.js';
+
 // Canvas-based renderer for the delta-v map.
 //
 // Why canvas: 1500 nodes + 1750 edges as SVG is ~12k DOM elements,
@@ -26,6 +28,21 @@ const VIEW_W = 1400;
 const VIEW_H = 900;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 10;
+
+// Zoom level at which the hex marker (and its size text /
+// hydration droplets / centre flag glyphs) reaches its full
+// HEX_R size. Below this threshold the hex shrinks
+// proportionally so it doesn't dominate the small-scale,
+// zoomed-out view — and so two adjacent hexes don't visually
+// merge when the world spacing is compressed. At and above
+// this zoom level the hex is rendered at full size.
+const HEX_FULLSIZE_ZOOM = 2.5;
+
+// World-space anchor of LEO — the sandbox rocket's home and
+// the big yellow "LEO" label rendered on the map. Exported so
+// the Sandbox "Stack" button in the hand header can centre
+// the map on it.
+export const LEO_ANCHOR = { x: 460, y: 270 };
 const DEFAULT_ZOOM = 1.8;
 // Cap the celestial body halo at this many screen pixels so extreme
 // zoom doesn't turn Saturn into the entire canvas.
@@ -45,7 +62,7 @@ const HALO_MAX_SCREEN_R = 110;
 //   haloR  = body sphere radius (world units, per body class)
 // HEX_R can be changed freely without affecting how big Jupiter or
 // Luna looks behind its hex.
-const HEX_R = 22;
+const HEX_R = 30;
 const TYPE_VIS = {
   site:           { kind: 'hex',    r: HEX_R, haloR: 20 },
   'gas-giant':    { kind: 'hex',    r: HEX_R, haloR: 48 },
@@ -54,13 +71,13 @@ const TYPE_VIS = {
   dwarf:          { kind: 'hex',    r: HEX_R, haloR: 24 },
   tno:            { kind: 'hex',    r: HEX_R, haloR: 18 },
   moon:           { kind: 'hex',    r: HEX_R, haloR:  9 },
-  comet:          { kind: 'comet',  r:  5 },
+  comet:          { kind: 'hex',    r: HEX_R, haloR: 10, rocky: true },
   asteroid:       { kind: 'hex',    r: HEX_R, haloR: 10, rocky: true },
   surface:        { kind: 'hex',    r: HEX_R, haloR: 20 },
   sun:            { kind: 'sun',    r: 30 },
   lagrange:       { kind: 'circle', r:  7, fill: 'transparent', stroke: '#c66932' },
   burn:           { kind: 'circle', r:  6, hitR: 8, fill: '#d60f7a', stroke: '#fde0ee', hideBelowZoom: 1.4 },
-  hohmann:        { kind: 'circle', r:  4, hitR: 9, fill: '#10b981', stroke: '#a7f3d0' },
+  hohmann:        { kind: 'circle', r:  4, hitR: 9, fill: '#10b981', stroke: '#a7f3d0', hideBelowZoom: 2.5 },
   venus:          { kind: 'circle', r:  8, fill: '#fb923c', stroke: '#fed7aa' },
   radhaz:         { kind: 'circle', r:  7, fill: '#fbbf24', stroke: '#fde68a' },
   orbit:          { kind: 'circle', r:  6, fill: '#0c0a16', stroke: '#7dd3fc' },
@@ -278,6 +295,17 @@ const SYNODIC_COLOURS = {
   yellow: '#facc15',
   blue:   '#60a5fa',
 };
+
+// Tiny "#rrggbb" → "rgba(r, g, b, a)" helper. Used to dim the
+// canonical zone palette down to ~20% alpha so the lanes read
+// as backdrop washes instead of dominating the orbital edges.
+function hexToRgba(hex, a) {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
 
 // Irregular rocky polygon for asteroid bodies. Same offset-radial
 // shading as the sphere, but the silhouette is a noisy 9-vertex
@@ -532,6 +560,23 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
+  // Sandbox rocket: a single rocket sprite placed at a world-
+  // space (x, y). canFly drives the "🚫 + transparent" overlay
+  // — the renderer doesn't compute fly-ability itself; that's
+  // js/game/rocket.js's canRocketFly().
+  setSandboxRocket(opts) {
+    this._sandboxRocket = opts || null;
+    this._scheduleDraw();
+  }
+
+  // Solo: pin a "player ship" marker to a specific site. Drawn as
+  // a screen-space triangle floating above the site so it's
+  // visible regardless of the underlying hex.
+  setPlayerShipId(id) {
+    this._playerShipId = id || null;
+    this._scheduleDraw();
+  }
+
   reset() {
     this._fitToData();
     this._scheduleDraw();
@@ -591,25 +636,40 @@ export class MapRenderer {
     }
     this._normalEdges = [];
     this._hazardEdges = [];
-    this._cometEdges  = [];
+    // Comet edges are bucketed by the destination comet's synodic
+    // season ('red'|'yellow'|'blue') so each apparition draws in
+    // its own colour. A path touching two comets picks the first
+    // endpoint's season — they're rare and a single colour beats
+    // an indecisive blend.
+    this._cometEdgesBySeason = new Map();
     const straight = this.data.straightEdges || this.data.edges;
     for (const [a, b, dv] of straight) {
       const sa = this.data.byId[a], sb = this.data.byId[b];
       if (!sa || !sb) continue;
       const seg = { sa, sb, dv };
       if (sa.hazard || sb.hazard) this._hazardEdges.push(seg);
-      else if (sa.type === 'comet' || sb.type === 'comet') this._cometEdges.push(seg);
+      else if (sa.type === 'comet' || sb.type === 'comet') {
+        const comet = sa.type === 'comet' ? sa : sb;
+        const season = comet.siteSynodic || 'blue';
+        if (!this._cometEdgesBySeason.has(season)) this._cometEdgesBySeason.set(season, []);
+        this._cometEdgesBySeason.get(season).push(seg);
+      }
       else this._normalEdges.push(seg);
     }
     this._chains = [];
     this._hazardChains = [];
-    this._cometChains  = [];
+    this._cometChainsBySeason = new Map();
     for (const chain of (this.data.chains || [])) {
       const pts = chain.map((id) => this.data.byId[id]).filter(Boolean);
       if (pts.length < 2) continue;
-      if (pts.some((p) => p.hazard))            this._hazardChains.push(pts);
-      else if (pts.some((p) => p.type === 'comet')) this._cometChains.push(pts);
-      else                                        this._chains.push(pts);
+      if (pts.some((p) => p.hazard)) this._hazardChains.push(pts);
+      else if (pts.some((p) => p.type === 'comet')) {
+        const comet = pts.find((p) => p.type === 'comet');
+        const season = comet.siteSynodic || 'blue';
+        if (!this._cometChainsBySeason.has(season)) this._cometChainsBySeason.set(season, []);
+        this._cometChainsBySeason.get(season).push(pts);
+      }
+      else this._chains.push(pts);
     }
 
     // Body groups: every real site picks up a `bodyKey` in the
@@ -772,7 +832,7 @@ export class MapRenderer {
     ctx.scale(eff, eff);
 
     if (this.data.mode === 'clean' && Array.isArray(this.data.zones)) {
-      this._drawZoneBands(ctx, this.data.zones);
+      this._drawZoneBands(ctx, this.data.zones, this.data.zoneInfo);
     }
     this._drawGuides(ctx);
     this._drawAsteroidBelt(ctx);
@@ -788,6 +848,9 @@ export class MapRenderer {
     this._drawWaypointsScreen(ctx);
     this._drawSiteHexesScreen(ctx);
     this._drawSiteLabelsScreen(ctx);
+    this._drawLeoAnchorScreen(ctx);
+    this._drawPlayerShipScreen(ctx);
+    if (this._sandboxRocket) this._drawSandboxRocketScreen(ctx);
 
     // FPS book-keeping. The debug panel polls getFps(); we update
     // ~twice per second so the readout doesn't flicker.
@@ -896,7 +959,15 @@ export class MapRenderer {
     ctx.globalAlpha = 1;
   }
 
-  _drawZoneBands(ctx, zones) {
+  _drawZoneBands(ctx, zones, zoneInfo) {
+    // Heliocentric zone lanes. Each zone gets its published
+    // tint (from the iandrea gazetteer palette) at ~18% alpha so
+    // it reads as a backdrop wash rather than fighting with the
+    // orbital edges drawn over the top. The label calls out the
+    // solar-thrust modifier (e.g. "MARS −1") so the player can
+    // see at a glance how a sail's effective thrust shifts as
+    // their ship moves outward. Neptune+ shows "✕" — sails are
+    // dead past Uranus.
     const startY = 60;
     const bandH = (VIEW_H - 60 - 60) / zones.length;
     ctx.font = '600 11px ui-sans-serif, system-ui, sans-serif';
@@ -904,12 +975,16 @@ export class MapRenderer {
     ctx.textAlign = 'left';
     for (let i = 0; i < zones.length; i++) {
       const y = startY + bandH * i;
-      ctx.fillStyle = ZONE_BAND_LIGHT.includes(zones[i])
-        ? 'rgba(17, 20, 42, 0.4)'
-        : 'rgba(12, 13, 31, 0.3)';
+      const info = (zoneInfo && zoneInfo[zones[i]]) || null;
+      ctx.fillStyle = info
+        ? hexToRgba(info.color, 0.18)
+        : 'rgba(17, 20, 42, 0.30)';
       ctx.fillRect(0, y, VIEW_W, bandH);
-      ctx.fillStyle = '#5b6688';
-      ctx.fillText(zones[i].toUpperCase(), 14, y + bandH / 2 + 2);
+      const mod = info && info.solar !== null
+        ? (info.solar > 0 ? `+${info.solar}` : `${info.solar}`)
+        : (info ? '✕' : '');
+      ctx.fillStyle = '#9aa4c4';
+      ctx.fillText(`${zones[i].toUpperCase()}  ${mod}`, 14, y + bandH / 2 + 2);
     }
   }
 
@@ -933,18 +1008,26 @@ export class MapRenderer {
     for (const pts of this._chains) appendSmoothPath(ctx, pts);
     ctx.stroke();
 
-    // Comet routes: anything touching a comet site gets the icy-
-    // blue tint so the cold outer-system itineraries pop out from
-    // the inner-system routes.
-    if (this._cometEdges.length || this._cometChains.length) {
-      ctx.strokeStyle = '#7dd3fc';
+    // Comet routes are coloured by the destination comet's
+    // synodic season — red, yellow, or blue — so a glance at
+    // an outer-system itinerary tells you which apparition you'd
+    // be chasing. One stroke pass per season.
+    const seasonKeys = new Set([
+      ...this._cometEdgesBySeason.keys(),
+      ...this._cometChainsBySeason.keys(),
+    ]);
+    for (const season of seasonKeys) {
+      const segs = this._cometEdgesBySeason.get(season) || [];
+      const chains = this._cometChainsBySeason.get(season) || [];
+      if (!segs.length && !chains.length) continue;
+      ctx.strokeStyle = SYNODIC_COLOURS[season] || '#7dd3fc';
       ctx.globalAlpha = 0.85;
       ctx.beginPath();
-      for (const { sa, sb } of this._cometEdges) {
+      for (const { sa, sb } of segs) {
         ctx.moveTo(sa.x, sa.y);
         ctx.lineTo(sb.x, sb.y);
       }
-      for (const pts of this._cometChains) appendSmoothPath(ctx, pts);
+      for (const pts of chains) appendSmoothPath(ctx, pts);
       ctx.stroke();
     }
 
@@ -1028,15 +1111,17 @@ export class MapRenderer {
   _drawRoute(ctx) {
     if (!this._route) return;
     const eff = this.zoom * this.fitScale;
-    ctx.strokeStyle = 'rgba(251, 191, 36, 0.9)';
     ctx.lineWidth = 4 / eff;
     ctx.lineCap = 'round';
     ctx.shadowBlur = 6 / eff;
-    ctx.shadowColor = 'rgba(251, 191, 36, 0.6)';
+    ctx.shadowColor = 'rgba(249, 115, 22, 0.65)';
     // Trace exactly over the underlying edges -- one straight
     // lineTo per segment, no Bezier smoothing. The route is an
     // overlay highlight, not a new shape; the player should see
-    // their path as a direct copy of the graph segments.
+    // their path as a direct copy of the graph segments. We
+    // stroke the same path twice — solid orange first, gold
+    // dashes on top — so the highlight reads as orange/gold
+    // stripes against yellow-season comet paths.
     ctx.beginPath();
     for (const seg of this._route) {
       const sa = this.data.byId[seg.from];
@@ -1045,7 +1130,13 @@ export class MapRenderer {
       ctx.moveTo(sa.x, sa.y);
       ctx.lineTo(sb.x, sb.y);
     }
+    ctx.strokeStyle = 'rgba(249, 115, 22, 0.95)';
+    ctx.setLineDash([]);
     ctx.stroke();
+    ctx.strokeStyle = 'rgba(251, 191, 36, 0.95)';
+    ctx.setLineDash([8 / eff, 8 / eff]);
+    ctx.stroke();
+    ctx.setLineDash([]);
     ctx.shadowBlur = 0;
   }
 
@@ -1120,20 +1211,33 @@ export class MapRenderer {
           ctx.stroke();
         }
         if (halfLandings.length) {
-          ctx.beginPath();
+          // Half-lander disc: a half-moon — left semicircle
+          // filled solid pink, right semicircle empty, with a
+          // full circular outline + diameter line splitting the
+          // two. The full rocket glyph rides on top in the
+          // emoji pass below.
           for (const w of halfLandings) {
             const sx = this.pan.x + w.x * eff;
             const sy = this.pan.y + w.y * eff;
             if (sx < -vis.r * 2 || sx > hostW + vis.r * 2 || sy < -vis.r * 2 || sy > hostH + vis.r * 2) continue;
             const ringR = vis.r * 1.4;
-            // Left semicircle: top through left to bottom, then
-            // straight line back up the diameter to close.
+            // Fill: left semicircle (top → left → bottom, close
+            // with the diameter).
+            ctx.beginPath();
             ctx.moveTo(sx, sy - ringR);
             ctx.arc(sx, sy, ringR, -Math.PI / 2, Math.PI / 2, true);
-            ctx.lineTo(sx, sy - ringR);
+            ctx.closePath();
+            ctx.fill();
+            // Outline: full circle.
+            ctx.beginPath();
+            ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
+            ctx.stroke();
+            // Diameter line separating the two halves.
+            ctx.beginPath();
+            ctx.moveTo(sx, sy - ringR);
+            ctx.lineTo(sx, sy + ringR);
+            ctx.stroke();
           }
-          ctx.fill();
-          ctx.stroke();
         }
       }
       // Landing burns are now drawn as a 🚀 glyph (full or half)
@@ -1239,8 +1343,8 @@ export class MapRenderer {
     }
 
     // Emoji indicators for the planner's flagged routing nodes:
-    //   landing == 1   -> 🚀
-    //   landing == 0.5 -> 🚀/2 (with the /2 superscript to the right)
+    //   landing == 1   -> 🚀 over a solid pink disc
+    //   landing  < 1   -> 🚀 over a pink disc with a striped right half
     //   venus flyby    -> 🪂 (aerobrake)
     //   hazard nodes   -> ☠
     // Real-site emoji overlays (🌊 submarine, 🌿 astrobiology) are
@@ -1256,19 +1360,10 @@ export class MapRenderer {
       const sy = this.pan.y + w.y * eff;
       if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
       if (w.type === 'burn' && w.landing != null) {
-        if (w.landing < 1) {
-          // Half-lander: clip the rocket glyph to its left half so
-          // the bbox cuts cleanly down the middle. Reads as
-          // "half a rocket" without needing an extra /2 caption.
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(sx - EMOJI_PX, sy - EMOJI_PX, EMOJI_PX, EMOJI_PX * 2);
-          ctx.clip();
-          ctx.fillText('🚀', sx, sy);
-          ctx.restore();
-        } else {
-          ctx.fillText('🚀', sx, sy);
-        }
+        // Full rocket on both full and half landers — half-status
+        // is now conveyed by the striped half of the pink disc
+        // drawn underneath, not by a clipped glyph.
+        ctx.fillText('🚀', sx, sy);
       } else if (w.type === 'venus') {
         ctx.fillText('🪂', sx, sy);
       } else if (w.hazard && w.type !== 'radhaz') {
@@ -1322,7 +1417,11 @@ export class MapRenderer {
       if (vis.kind === 'sun')   { drawSun(ctx, site.x, site.y, vis.r); continue; }
       if (vis.kind === 'comet') { drawComet(ctx, site.x, site.y, vis.r, site); continue; }
       if (vis.kind !== 'hex') continue;
-      const worldR = Math.min(vis.haloR, capWorld);
+      // Per-body halo overrides. Ceres punches above its dwarf-
+      // class default — shrink it 50% so it doesn't dominate the
+      // belt next to Vesta / Pallas / Hygiea.
+      const bodyScale = /(^|\s)ceres/i.test(site.name || '') ? 0.5 : 1;
+      const worldR = Math.min(vis.haloR * bodyScale, capWorld);
       const rings = ringDefFor(site);
       if (vis.rocky) {
         drawRockyAsteroid(ctx, site.x, site.y, worldR, paletteFor(site), site);
@@ -1341,15 +1440,23 @@ export class MapRenderer {
   _drawSiteHexesScreen(ctx) {
     const eff = this.zoom * this.fitScale;
     const { hostW, hostH } = this;
+    // hexS: shrink the hex marker below HEX_FULLSIZE_ZOOM so it
+    // doesn't dominate the compressed view at low zoom. At and
+    // above the threshold the hex sits at its full HEX_R.
+    const hexS = Math.min(1, this.zoom / HEX_FULLSIZE_ZOOM);
     for (const site of this._realSites) {
       const sx = this.pan.x + site.x * eff;
       const sy = this.pan.y + site.y * eff;
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
-      // Flavour-only bodies (Sun, comets) and explicitly non-
-      // landable synthetics (Earth, Jupiter) skip the hex marker.
-      if (vis.kind === 'sun' || vis.kind === 'comet') continue;
+      if (vis.kind === 'sun') continue;
+      // Comets used to render as a pink disc + 🚀 marker. The
+      // published HF4 board draws them as real hexes — same
+      // shape as planets / asteroids — with a synodic-coloured
+      // outline (red / yellow / blue per season). The hex path
+      // below handles them. TYPE_VIS.comet was switched to
+      // kind: 'hex' so no special-case here.
       if (site.isLandable === false) continue;
-      const r = vis.r;
+      const r = vis.r * hexS;
       if (sx < -r - 20 || sx > hostW + r + 20 || sy < -r - 20 || sy > hostH + r + 20) continue;
 
       const isSelected = site.id === this._routeFromId || site.id === this._routeToId;
@@ -1369,18 +1476,35 @@ export class MapRenderer {
         ctx.fillStyle = '#0c0a16';
         ctx.fill();
         if (isSelected) {
-          // Selected hex: the BORDER is the highlight. Yellow stroke
-          // + a soft yellow glow via shadowBlur so the marker reads
-          // as picked without needing an extra ring around it.
+          // Selected hex border = gold/orange stripe outline.
+          // Two passes: solid orange first, then gold dashes on
+          // top so the gold reads as bars between orange. We
+          // moved away from solid yellow because yellow-season
+          // comet rings already use that hue.
           ctx.shadowBlur = 14;
-          ctx.shadowColor = 'rgba(253, 224, 71, 0.9)';
+          ctx.shadowColor = 'rgba(249, 115, 22, 0.85)';
           ctx.lineWidth = 3;
-          ctx.strokeStyle = '#fde047';
+          ctx.strokeStyle = '#f97316';
+          ctx.setLineDash([]);
           ctx.stroke();
           ctx.shadowBlur = 0;
+          ctx.strokeStyle = '#fbbf24';
+          ctx.setLineDash([5, 5]);
+          ctx.lineDashOffset = 0;
+          ctx.stroke();
+          ctx.setLineDash([]);
         } else {
           ctx.lineWidth = 1.6;
-          ctx.strokeStyle = site.hazard ? '#f87171' : '#ffffff';
+          // Stroke priority: hazard (red) > synodic season
+          // (red / yellow / blue per the published-card colour
+          // language for comets + similar season-keyed sites) >
+          // default white outline.
+          ctx.strokeStyle = site.hazard
+            ? '#f87171'
+            : (site.siteSynodic ? SYNODIC_COLOURS[site.siteSynodic] : '#ffffff');
+          // Synodic-coloured hexes carry a thicker outline so
+          // the season reads from across the map.
+          if (site.siteSynodic) ctx.lineWidth = 2.4;
           ctx.stroke();
         }
       } else {
@@ -1394,17 +1518,96 @@ export class MapRenderer {
         ctx.stroke();
       }
 
-      // Synodic ring sits just outside the hex.
-      if (site.siteSynodic) {
-        ctx.strokeStyle = SYNODIC_COLOURS[site.siteSynodic] || '#ffffff';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(sx, sy, r + 4, 0, Math.PI * 2);
-        ctx.stroke();
-      }
+      // Synodic colour is painted on the hex border itself
+      // above — no separate outer ring needed.
       // Selected nodes are highlighted via their border + glow
       // above; no extra ring needed.
     }
+  }
+
+  // Player ship marker: bright triangle hovering above the
+  // Big "LEO" letters anchoring the sandbox rocket's home
+  // position so the player can find the launch site at a
+  // glance. Lives in world space (so it pans / zooms with the
+  // map) but uses a fixed pixel font size that doesn't shrink
+  // below the hex-fullsize zoom threshold.
+  _drawLeoAnchorScreen(ctx) {
+    const eff = this.zoom * this.fitScale;
+    const sx = this.pan.x + LEO_ANCHOR.x * eff;
+    const sy = this.pan.y + LEO_ANCHOR.y * eff;
+    const fontPx = 28 * Math.max(0.6, Math.min(1.2, this.zoom / 2.5));
+    ctx.save();
+    ctx.font = `900 ${fontPx}px ui-sans-serif, system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.lineWidth = 5;
+    ctx.strokeText('LEO', sx, sy);
+    ctx.fillStyle = '#fde047';
+    ctx.fillText('LEO', sx, sy);
+    ctx.restore();
+  }
+
+  _drawPlayerShipScreen(ctx) {
+    if (!this._playerShipId || !this.data) return;
+    const here = this.data.byId[this._playerShipId];
+    if (!here) return;
+    const eff = this.zoom * this.fitScale;
+    const sx = this.pan.x + here.x * eff;
+    const sy = this.pan.y + here.y * eff - HEX_R - 6;
+    // Down-pointing chevron so the apex anchors the site.
+    ctx.fillStyle = '#fde047';
+    ctx.strokeStyle = '#0c0a16';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy + 6);
+    ctx.lineTo(sx - 7, sy - 6);
+    ctx.lineTo(sx + 7, sy - 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // Draw the sandbox rocket sprite at world-space (x, y).
+  // canFly drives a transparency + 🚫 overlay; the renderer
+  // doesn't compute fly-ability itself.
+  _drawSandboxRocketScreen(ctx) {
+    const r = this._sandboxRocket;
+    if (!r) return;
+    const eff = this.zoom * this.fitScale;
+    const sx = this.pan.x + r.x * eff;
+    const sy = this.pan.y + r.y * eff;
+    const { width: spriteW, height: spriteH } = getRocketSpriteSize();
+    const scale = 0.55;     // map-scale; 35×53 px on screen.
+    const w = spriteW * scale;
+    const h = spriteH * scale;
+    const px = sx - w / 2;
+    const py = sy - h - 2;  // foot of rocket above the anchor
+    ctx.save();
+    if (!r.canFly) ctx.globalAlpha = 0.5;
+    ctx.drawImage(getRocketSprite(r.colour || 'yellow'), px, py, w, h);
+    if (!r.canFly) {
+      ctx.globalAlpha = 1;
+      ctx.font = `${Math.round(h * 0.7)}px ${EMOJI_FONT}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('🚫', sx, py + h / 2);
+    }
+    ctx.restore();
+    // Stash the screen-space bounding box for hit-testing.
+    this._sandboxRocketBox = {
+      x: px, y: py, w, h,
+    };
+  }
+
+  // Returns true if (sx, sy) screen-space pixel lies inside the
+  // last-drawn rocket sprite. Used by the click handler to open
+  // the stack panel.
+  hitTestSandboxRocket(sx, sy) {
+    const b = this._sandboxRocketBox;
+    if (!b) return false;
+    return sx >= b.x && sx <= b.x + b.w
+        && sy >= b.y && sy <= b.y + b.h;
   }
 
   _drawSiteLabelsScreen(ctx) {
@@ -1415,6 +1618,11 @@ export class MapRenderer {
     const labelAlpha = Math.max(0, Math.min(1,
       (this.zoom - fadeMin) / Math.max(0.01, fadeMax - fadeMin)
     ));
+    // Same proportional shrink as _drawSiteHexesScreen so the
+    // size text / droplets / flag glyphs ride with the hex they
+    // sit inside instead of floating loose when the hex shrinks
+    // below the HEX_FULLSIZE_ZOOM threshold.
+    const hexS = Math.min(1, this.zoom / HEX_FULLSIZE_ZOOM);
 
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'center';
@@ -1424,25 +1632,29 @@ export class MapRenderer {
       const sy = this.pan.y + site.y * eff;
       if (sx < -40 || sx > hostW + 40 || sy < -40 || sy > hostH + 40) continue;
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
+      const r = vis.r * hexS;
 
-      // Site size text in the upper half of the hex.
+      // Site size text in the upper half of the hex. Tuned so it
+      // clears the centre flag glyphs (🌊 / 🌿 / ⛅) with a small
+      // gap; previous 0.55-of-radius / 0.32-offset overlapped.
       if (site.siteSize) {
-        ctx.font = `700 ${Math.round(vis.r * 0.55)}px ui-sans-serif, system-ui, sans-serif`;
+        ctx.font = `700 ${Math.max(8, Math.round(r * 0.42))}px ui-sans-serif, system-ui, sans-serif`;
         ctx.fillStyle = '#ffffff';
-        ctx.fillText(site.siteSize, sx, sy - vis.r * 0.32);
+        ctx.fillText(site.siteSize, sx, sy - r * 0.50);
       }
 
       // Water droplets in the lower half of the hex, one teardrop
-      // per hydration unit (capped at 4 so they fit). Cyan fill +
-      // a darker outline so they read against the black hex.
+      // per hydration unit (capped at 4 so they fit). Smaller +
+      // pushed further down for the same reason as the size text:
+      // gives the centre flag glyphs breathing room.
       if (site.hydration) {
         const count = Math.min(4, site.hydration);
-        const dropH = vis.r * 0.45;
+        const dropH = r * 0.32;
         const dropW = dropH * 0.62;
-        const gap   = Math.max(1, vis.r * 0.10);
+        const gap   = Math.max(1, r * 0.08);
         const totalW = count * dropW + (count - 1) * gap;
         const startX = sx - totalW / 2 + dropW / 2;
-        const dropY  = sy + vis.r * 0.38;
+        const dropY  = sy + r * 0.52;
         ctx.fillStyle = '#60a5fa';
         ctx.strokeStyle = 'rgba(15, 30, 60, 0.85)';
         ctx.lineWidth = 0.8;
@@ -1455,21 +1667,28 @@ export class MapRenderer {
 
       if (site.hazard) {
         ctx.fillStyle = '#f87171';
-        ctx.font = `${Math.round(vis.r * 0.9)}px ui-monospace, menlo, monospace`;
+        ctx.font = `${Math.max(8, Math.round(r * 0.9))}px ui-monospace, menlo, monospace`;
         ctx.fillText('☠', sx, sy);
       }
 
-      // Submarine + astrobiology emoji indicators sit just outside
-      // the hex, tucked to the upper-right corner so they don't
-      // collide with the size badge or droplet row inside.
-      if (site.submarine || site.astrobiology) {
-        ctx.font = `${EMOJI_PX}px ${EMOJI_FONT}`;
-        const corner = vis.r + 4;
-        if (site.submarine) {
-          ctx.fillText('🌊', sx + corner, sy - corner * 0.6);
-        }
-        if (site.astrobiology) {
-          ctx.fillText('🌿', sx + corner, sy + corner * 0.6);
+      // Site-flag glyphs ride on the hex centre — 🌊 submarine,
+      // 🌿 astrobiology, ⛅ aerostat (atmospheric). One flag sits
+      // dead-centre; multiples spread horizontally so they all
+      // fit inside the larger HEX_R. Comets don't take a hex,
+      // so for them we tuck the row above the lander disc to
+      // keep the 🚀 glyph readable.
+      const flags = [];
+      if (site.submarine)    flags.push('🌊');
+      if (site.astrobiology) flags.push('🌿');
+      if (site.atmospheric)  flags.push('⛅');
+      if (flags.length) {
+        const emoji = Math.max(8, EMOJI_PX * hexS);
+        ctx.font = `${emoji}px ${EMOJI_FONT}`;
+        const dy = vis.kind === 'comet' ? -emoji - 4 : 0;
+        const spread = emoji * 0.7;
+        const startX = sx - spread * (flags.length - 1) / 2;
+        for (let i = 0; i < flags.length; i++) {
+          ctx.fillText(flags[i], startX + i * spread, sy + dy);
         }
       }
 
@@ -1537,6 +1756,16 @@ export class MapRenderer {
     // Click dispatched only if the mousedown→mouseup didn't drag.
     this.canvas.addEventListener('click', (ev) => {
       if (this._dragStart && this._dragStart.moved) return;
+      // Rocket sits on top of the map so test it first; if the
+      // click landed inside the rocket sprite we fire a
+      // sandbox-rocket event instead of a site select.
+      const rect = this.canvas.getBoundingClientRect();
+      const scx = ev.clientX - rect.left;
+      const scy = ev.clientY - rect.top;
+      if (this.hitTestSandboxRocket(scx, scy)) {
+        if (this.onSandboxRocketClick) this.onSandboxRocketClick();
+        return;
+      }
       const pt = this._eventToWorld(ev);
       const hit = this._hitTest(pt.x, pt.y);
       if (this.options.debug) this._emitDebugClick(pt, hit);

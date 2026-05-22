@@ -72,7 +72,11 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
       siteSynodic: p.siteSynodic || null,
       hydration: parseHydration(p.siteWater),
       hazard: !!p.hazard,
-      landing: typeof p.landing === 'number' ? p.landing : null,
+      // Comets are always landing sites in HF4 — you touch down
+      // on the nucleus to harvest water. The planner JSON doesn't
+      // flag them, so default landing=1 for any classified comet.
+      landing: typeof p.landing === 'number' ? p.landing
+        : (type === 'comet' ? 1 : null),
       flybyBoost: p.flybyBoost || null,
       astrobiology:  !!flags.astrobiology,
       submarine:     !!flags.submarine,

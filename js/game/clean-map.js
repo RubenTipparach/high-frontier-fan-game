@@ -7,7 +7,7 @@
 // The classic counterpart is planner-map.js, which loads nornagon's
 // ~1500-node planner graph with waypoint nodes.
 
-import { SITES, EDGES, SOLAR_ZONES } from '../../data/sites.js';
+import { SITES, EDGES, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
 
 let _cache = null;
 
@@ -46,6 +46,7 @@ export async function loadCleanMap() {
     straightEdges: edges,
     mode: 'clean',
     zones: SOLAR_ZONES,
+    zoneInfo: SOLAR_ZONE_INFO,
   };
   return _cache;
 }
