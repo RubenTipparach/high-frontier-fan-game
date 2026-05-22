@@ -20,6 +20,15 @@ const SPECTRAL_STYLE = {
   D: { glyph: 'D', fill: '#67e8f9', ink: '#0c0a16' },  // icy / cometary
   unknown: { glyph: '?', fill: '#475569', ink: '#e5e7eb' },
 };
+const SPECTRAL_LABEL = {
+  C: 'Carbonaceous',
+  S: 'Silicate',
+  M: 'Metallic',
+  V: 'Basaltic / volcanic',
+  B: 'Alkaline',
+  D: 'Icy / cometary',
+  unknown: 'Unknown',
+};
 
 // Requirement-kind -> { glyph, label }. Each entry describes the
 // icon shown in the requirement row on a card. count is rendered
@@ -65,6 +74,7 @@ export function renderCard(card, { type } = {}) {
     el.appendChild(flip);
   }
 
+  attachTipsTo(el);
   return el;
 }
 
@@ -177,7 +187,7 @@ function buildFace(card, sideName, kind) {
     const vis = REQUIREMENT_VIS[r.kind] || { glyph: '◇', label: r.kind };
     const span = document.createElement('span');
     span.className = 'req';
-    span.title = `${vis.label} ×${r.count}`;
+    span.setAttribute('data-tip', r.count > 1 ? `${vis.label} ×${r.count}` : vis.label);
     span.innerHTML = `<em></em>${r.count > 1 ? `<b>×${r.count}</b>` : ''}`;
     span.querySelector('em').textContent = vis.glyph;
     reqHost.appendChild(span);
@@ -192,9 +202,11 @@ function buildFace(card, sideName, kind) {
 // Returns an SVG element the caller appends.
 function spectralHex(type) {
   const style = SPECTRAL_STYLE[type] || SPECTRAL_STYLE.unknown;
+  const label = SPECTRAL_LABEL[type] || SPECTRAL_LABEL.unknown;
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '-12 -14 24 28');
   svg.setAttribute('class', 'spectral-hex');
+  svg.setAttribute('data-tip', `Spectral type ${style.glyph} — ${label}`);
   // Pointy-top hex so it reads as a gem rather than a planet hex.
   const r = 12;
   const points = [];
@@ -238,10 +250,10 @@ function thrustVisual(card) {
   // Pull glyphs for every requirement so they appear inside the
   // triangle. Cap at 3 — beyond that they'd crowd the silhouette;
   // overflow stays in the chip row below.
-  const reqGlyphs = (card.requires || [])
-    .map((r) => (REQUIREMENT_VIS[r.kind] || {}).glyph)
-    .filter(Boolean)
-    .slice(0, 3);
+  const reqList = (card.requires || []).slice(0, 3);
+  const reqIcons = reqList
+    .map((r) => ({ kind: r.kind, count: r.count, vis: REQUIREMENT_VIS[r.kind] }))
+    .filter((r) => r.vis && r.vis.glyph);
   // Layout is count-aware so icons always sit clear of the
   // sloped edges. y values drift down as count grows because the
   // triangle is widest near the base.
@@ -251,12 +263,13 @@ function thrustVisual(card) {
     3: [{ x: 52, y: 70, s: 14 }, { x: 70, y: 70, s: 14 },
         { x: 88, y: 70, s: 14 }],
   };
-  const layout = iconLayouts[reqGlyphs.length] || [];
-  const iconsSvg = reqGlyphs
-    .map((g, i) => {
+  const layout = iconLayouts[reqIcons.length] || [];
+  const iconsSvg = reqIcons
+    .map((r, i) => {
       const p = layout[i];
+      const tip = r.count > 1 ? `${r.vis.label} ×${r.count}` : r.vis.label;
       return `<text x="${p.x}" y="${p.y}" text-anchor="middle"
-        font-size="${p.s}">${g}</text>`;
+        font-size="${p.s}" data-tip="${tip}">${r.vis.glyph}</text>`;
     })
     .join('');
 
@@ -288,16 +301,96 @@ function thrustVisual(card) {
       <line x1="35" y1="86" x2="100" y2="86"
         stroke="currentColor" stroke-width="1.8"
         marker-end="url(#thrust-arrow)"/>
-      <circle cx="22" cy="86" r="13" fill="#ec4899" stroke="#fbcfe8" stroke-width="1.5"/>
-      <text x="22" y="90" text-anchor="middle" font-size="14"
-        font-weight="700" fill="#ffffff">${thrust}</text>
-      <text x="116" y="98" text-anchor="middle" font-size="28">💧</text>
-      <text x="116" y="93" text-anchor="middle" font-size="11"
-        font-weight="700" fill="#0c1d34" stroke="#ffffff"
-        stroke-width="2.6" paint-order="stroke">${fuel}</text>
+      <g data-tip="Thrust: ${thrust}">
+        <circle cx="22" cy="86" r="13" fill="#ec4899" stroke="#fbcfe8" stroke-width="1.5"/>
+        <text x="22" y="90" text-anchor="middle" font-size="14"
+          font-weight="700" fill="#ffffff">${thrust}</text>
+      </g>
+      <g data-tip="Fuel per burn: ${fuel}">
+        <text x="116" y="98" text-anchor="middle" font-size="28">💧</text>
+        <text x="116" y="93" text-anchor="middle" font-size="11"
+          font-weight="700" fill="#0c1d34" stroke="#ffffff"
+          stroke-width="2.6" paint-order="stroke">${fuel}</text>
+      </g>
     </svg>
   `;
   return wrap;
 }
 
 function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+// Tooltip layer for card icons. One floating div per page; we
+// reuse it across every [data-tip] target. Hover (mouse) shows
+// after a small delay so it doesn't flicker on accidental
+// crossings; tap (touch) shows immediately and auto-dismisses
+// after TIP_HOLD_MS, or when the user taps somewhere else.
+const TIP_HOVER_DELAY = 200;
+const TIP_HOLD_MS = 2800;
+let _tipEl = null;
+let _tipTarget = null;
+let _tipHideTimer = null;
+
+function ensureTip() {
+  if (_tipEl) return _tipEl;
+  _tipEl = document.createElement('div');
+  _tipEl.className = 'card-tip';
+  _tipEl.setAttribute('role', 'tooltip');
+  document.body.appendChild(_tipEl);
+  document.addEventListener('pointerdown', (e) => {
+    if (!_tipTarget) return;
+    if (_tipTarget === e.target || _tipTarget.contains(e.target)) return;
+    hideTip();
+  });
+  return _tipEl;
+}
+
+function showTip(target, text) {
+  const tip = ensureTip();
+  tip.textContent = text;
+  tip.classList.add('visible');
+  // Position above the target; flip below if it'd clip off-screen.
+  const r = target.getBoundingClientRect();
+  const t = tip.getBoundingClientRect();
+  let left = r.left + r.width / 2 - t.width / 2;
+  let top = r.top - t.height - 8;
+  if (top < 8) top = r.bottom + 8;
+  left = Math.max(8, Math.min(window.innerWidth - t.width - 8, left));
+  tip.style.left = `${left}px`;
+  tip.style.top = `${top}px`;
+  _tipTarget = target;
+  clearTimeout(_tipHideTimer);
+}
+
+function hideTip() {
+  if (_tipEl) _tipEl.classList.remove('visible');
+  _tipTarget = null;
+  clearTimeout(_tipHideTimer);
+}
+
+// Bind hover + tap tooltip behaviour to every [data-tip]
+// descendant of `root`. Safe to call once per card after build.
+function attachTipsTo(root) {
+  const targets = root.querySelectorAll('[data-tip]');
+  for (const el of targets) {
+    let hoverTimer = null;
+    el.addEventListener('pointerenter', (e) => {
+      if (e.pointerType === 'touch') return;
+      clearTimeout(hoverTimer);
+      const text = el.getAttribute('data-tip');
+      if (!text) return;
+      hoverTimer = setTimeout(() => showTip(el, text), TIP_HOVER_DELAY);
+    });
+    el.addEventListener('pointerleave', (e) => {
+      clearTimeout(hoverTimer);
+      if (e.pointerType === 'touch') return;
+      hideTip();
+    });
+    el.addEventListener('click', (e) => {
+      const text = el.getAttribute('data-tip');
+      if (!text) return;
+      showTip(el, text);
+      clearTimeout(_tipHideTimer);
+      _tipHideTimer = setTimeout(hideTip, TIP_HOLD_MS);
+    });
+  }
+}

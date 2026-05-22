@@ -298,3 +298,36 @@
   cursor: pointer;
 }
 .card-flip:hover { color: var(--ink); border-color: var(--accent-2); }
+
+/* Cursor hint on any element that carries a tooltip — works for
+   both HTML chips and SVG icons inside the thrust visual. */
+[data-tip] { cursor: help; }
+.thrust-svg [data-tip] { cursor: help; }
+
+/* Floating tooltip layer. One element appended to <body>; we
+   move/show/hide it via the card-ui tooltip helper. position:
+   fixed + high z-index so it floats above flipped cards and any
+   sidebar panes. */
+.card-tip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  background: rgba(15, 16, 35, 0.96);
+  color: #e5e7eb;
+  border: 1px solid rgba(251, 191, 36, 0.55);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  max-width: 220px;
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity 0.14s ease-out, transform 0.14s ease-out;
+  z-index: 9999;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45);
+  font-family: inherit;
+  letter-spacing: 0.2px;
+}
+.card-tip.visible { opacity: 1; transform: translateY(0); }

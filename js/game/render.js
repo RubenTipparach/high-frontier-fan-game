@@ -599,25 +599,40 @@ export class MapRenderer {
     }
     this._normalEdges = [];
     this._hazardEdges = [];
-    this._cometEdges  = [];
+    // Comet edges are bucketed by the destination comet's synodic
+    // season ('red'|'yellow'|'blue') so each apparition draws in
+    // its own colour. A path touching two comets picks the first
+    // endpoint's season — they're rare and a single colour beats
+    // an indecisive blend.
+    this._cometEdgesBySeason = new Map();
     const straight = this.data.straightEdges || this.data.edges;
     for (const [a, b, dv] of straight) {
       const sa = this.data.byId[a], sb = this.data.byId[b];
       if (!sa || !sb) continue;
       const seg = { sa, sb, dv };
       if (sa.hazard || sb.hazard) this._hazardEdges.push(seg);
-      else if (sa.type === 'comet' || sb.type === 'comet') this._cometEdges.push(seg);
+      else if (sa.type === 'comet' || sb.type === 'comet') {
+        const comet = sa.type === 'comet' ? sa : sb;
+        const season = comet.siteSynodic || 'blue';
+        if (!this._cometEdgesBySeason.has(season)) this._cometEdgesBySeason.set(season, []);
+        this._cometEdgesBySeason.get(season).push(seg);
+      }
       else this._normalEdges.push(seg);
     }
     this._chains = [];
     this._hazardChains = [];
-    this._cometChains  = [];
+    this._cometChainsBySeason = new Map();
     for (const chain of (this.data.chains || [])) {
       const pts = chain.map((id) => this.data.byId[id]).filter(Boolean);
       if (pts.length < 2) continue;
-      if (pts.some((p) => p.hazard))            this._hazardChains.push(pts);
-      else if (pts.some((p) => p.type === 'comet')) this._cometChains.push(pts);
-      else                                        this._chains.push(pts);
+      if (pts.some((p) => p.hazard)) this._hazardChains.push(pts);
+      else if (pts.some((p) => p.type === 'comet')) {
+        const comet = pts.find((p) => p.type === 'comet');
+        const season = comet.siteSynodic || 'blue';
+        if (!this._cometChainsBySeason.has(season)) this._cometChainsBySeason.set(season, []);
+        this._cometChainsBySeason.get(season).push(pts);
+      }
+      else this._chains.push(pts);
     }
 
     // Body groups: every real site picks up a `bodyKey` in the
@@ -942,18 +957,26 @@ export class MapRenderer {
     for (const pts of this._chains) appendSmoothPath(ctx, pts);
     ctx.stroke();
 
-    // Comet routes: anything touching a comet site gets the icy-
-    // blue tint so the cold outer-system itineraries pop out from
-    // the inner-system routes.
-    if (this._cometEdges.length || this._cometChains.length) {
-      ctx.strokeStyle = '#7dd3fc';
+    // Comet routes are coloured by the destination comet's
+    // synodic season — red, yellow, or blue — so a glance at
+    // an outer-system itinerary tells you which apparition you'd
+    // be chasing. One stroke pass per season.
+    const seasonKeys = new Set([
+      ...this._cometEdgesBySeason.keys(),
+      ...this._cometChainsBySeason.keys(),
+    ]);
+    for (const season of seasonKeys) {
+      const segs = this._cometEdgesBySeason.get(season) || [];
+      const chains = this._cometChainsBySeason.get(season) || [];
+      if (!segs.length && !chains.length) continue;
+      ctx.strokeStyle = SYNODIC_COLOURS[season] || '#7dd3fc';
       ctx.globalAlpha = 0.85;
       ctx.beginPath();
-      for (const { sa, sb } of this._cometEdges) {
+      for (const { sa, sb } of segs) {
         ctx.moveTo(sa.x, sa.y);
         ctx.lineTo(sb.x, sb.y);
       }
-      for (const pts of this._cometChains) appendSmoothPath(ctx, pts);
+      for (const pts of chains) appendSmoothPath(ctx, pts);
       ctx.stroke();
     }
 
@@ -1037,15 +1060,17 @@ export class MapRenderer {
   _drawRoute(ctx) {
     if (!this._route) return;
     const eff = this.zoom * this.fitScale;
-    ctx.strokeStyle = 'rgba(251, 191, 36, 0.9)';
     ctx.lineWidth = 4 / eff;
     ctx.lineCap = 'round';
     ctx.shadowBlur = 6 / eff;
-    ctx.shadowColor = 'rgba(251, 191, 36, 0.6)';
+    ctx.shadowColor = 'rgba(249, 115, 22, 0.65)';
     // Trace exactly over the underlying edges -- one straight
     // lineTo per segment, no Bezier smoothing. The route is an
     // overlay highlight, not a new shape; the player should see
-    // their path as a direct copy of the graph segments.
+    // their path as a direct copy of the graph segments. We
+    // stroke the same path twice — solid orange first, gold
+    // dashes on top — so the highlight reads as orange/gold
+    // stripes against yellow-season comet paths.
     ctx.beginPath();
     for (const seg of this._route) {
       const sa = this.data.byId[seg.from];
@@ -1054,7 +1079,13 @@ export class MapRenderer {
       ctx.moveTo(sa.x, sa.y);
       ctx.lineTo(sb.x, sb.y);
     }
+    ctx.strokeStyle = 'rgba(249, 115, 22, 0.95)';
+    ctx.setLineDash([]);
     ctx.stroke();
+    ctx.strokeStyle = 'rgba(251, 191, 36, 0.95)';
+    ctx.setLineDash([8 / eff, 8 / eff]);
+    ctx.stroke();
+    ctx.setLineDash([]);
     ctx.shadowBlur = 0;
   }
 
@@ -1129,20 +1160,43 @@ export class MapRenderer {
           ctx.stroke();
         }
         if (halfLandings.length) {
-          ctx.beginPath();
+          // Half-lander disc: full pink ring with diagonal
+          // stripes painted over the right half. The full rocket
+          // glyph rides on top (drawn in the emoji pass below) —
+          // the stripes are what tell the player "half lander."
           for (const w of halfLandings) {
             const sx = this.pan.x + w.x * eff;
             const sy = this.pan.y + w.y * eff;
             if (sx < -vis.r * 2 || sx > hostW + vis.r * 2 || sy < -vis.r * 2 || sy > hostH + vis.r * 2) continue;
             const ringR = vis.r * 1.4;
-            // Left semicircle: top through left to bottom, then
-            // straight line back up the diameter to close.
-            ctx.moveTo(sx, sy - ringR);
-            ctx.arc(sx, sy, ringR, -Math.PI / 2, Math.PI / 2, true);
-            ctx.lineTo(sx, sy - ringR);
+            // Solid pink disc underneath.
+            ctx.beginPath();
+            ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            // Diagonal stripes, clipped to the right half of
+            // the disc (intersection of disc + right rectangle).
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
+            ctx.clip();
+            ctx.beginPath();
+            ctx.rect(sx, sy - ringR, ringR + 1, ringR * 2);
+            ctx.clip();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            const step = 4;
+            for (let i = -ringR; i <= ringR * 2; i += step) {
+              ctx.moveTo(sx + i, sy - ringR);
+              ctx.lineTo(sx + i + ringR * 2, sy + ringR);
+            }
+            ctx.stroke();
+            ctx.restore();
           }
-          ctx.fill();
-          ctx.stroke();
+          // Restore the batch's stroke/width for the next pass.
+          ctx.strokeStyle = vis.stroke;
+          ctx.lineWidth = 1.5;
         }
       }
       // Landing burns are now drawn as a 🚀 glyph (full or half)
@@ -1248,8 +1302,8 @@ export class MapRenderer {
     }
 
     // Emoji indicators for the planner's flagged routing nodes:
-    //   landing == 1   -> 🚀
-    //   landing == 0.5 -> 🚀/2 (with the /2 superscript to the right)
+    //   landing == 1   -> 🚀 over a solid pink disc
+    //   landing  < 1   -> 🚀 over a pink disc with a striped right half
     //   venus flyby    -> 🪂 (aerobrake)
     //   hazard nodes   -> ☠
     // Real-site emoji overlays (🌊 submarine, 🌿 astrobiology) are
@@ -1265,19 +1319,10 @@ export class MapRenderer {
       const sy = this.pan.y + w.y * eff;
       if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
       if (w.type === 'burn' && w.landing != null) {
-        if (w.landing < 1) {
-          // Half-lander: clip the rocket glyph to its left half so
-          // the bbox cuts cleanly down the middle. Reads as
-          // "half a rocket" without needing an extra /2 caption.
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(sx - EMOJI_PX, sy - EMOJI_PX, EMOJI_PX, EMOJI_PX * 2);
-          ctx.clip();
-          ctx.fillText('🚀', sx, sy);
-          ctx.restore();
-        } else {
-          ctx.fillText('🚀', sx, sy);
-        }
+        // Full rocket on both full and half landers — half-status
+        // is now conveyed by the striped half of the pink disc
+        // drawn underneath, not by a clipped glyph.
+        ctx.fillText('🚀', sx, sy);
       } else if (w.type === 'venus') {
         ctx.fillText('🪂', sx, sy);
       } else if (w.hazard && w.type !== 'radhaz') {
@@ -1378,15 +1423,23 @@ export class MapRenderer {
         ctx.fillStyle = '#0c0a16';
         ctx.fill();
         if (isSelected) {
-          // Selected hex: the BORDER is the highlight. Yellow stroke
-          // + a soft yellow glow via shadowBlur so the marker reads
-          // as picked without needing an extra ring around it.
+          // Selected hex border = gold/orange stripe outline.
+          // Two passes: solid orange first, then gold dashes on
+          // top so the gold reads as bars between orange. We
+          // moved away from solid yellow because yellow-season
+          // comet rings already use that hue.
           ctx.shadowBlur = 14;
-          ctx.shadowColor = 'rgba(253, 224, 71, 0.9)';
+          ctx.shadowColor = 'rgba(249, 115, 22, 0.85)';
           ctx.lineWidth = 3;
-          ctx.strokeStyle = '#fde047';
+          ctx.strokeStyle = '#f97316';
+          ctx.setLineDash([]);
           ctx.stroke();
           ctx.shadowBlur = 0;
+          ctx.strokeStyle = '#fbbf24';
+          ctx.setLineDash([5, 5]);
+          ctx.lineDashOffset = 0;
+          ctx.stroke();
+          ctx.setLineDash([]);
         } else {
           ctx.lineWidth = 1.6;
           ctx.strokeStyle = site.hazard ? '#f87171' : '#ffffff';
