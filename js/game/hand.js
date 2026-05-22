@@ -1,20 +1,22 @@
-// Sandbox "hand" — the player's tentative pool of patents and
-// crew. Cards live as ordered slots (duplicates allowed) so the
-// player can hold multiple copies of the same patent / crew if
-// they want to (one to compare against another, or to send to
-// different rockets later).
+// Sandbox "hand" — the player's holding area for patents and
+// crew on their way to a rocket. Each physical card exists in
+// exactly one location at a time: deck (library), hand, or
+// rocket stack. The hand state stores the ids of cards
+// currently held; addToHand refuses duplicates and also blocks
+// adding a card that's already sitting in the rocket.
 //
-// Each slot tracks its card id. Slots are indexed by their
-// position in the array; removeFromHandAt(index) drops one
-// specific copy. Persists to localStorage so the work survives
-// reloads while the player iterates.
+// Persists to localStorage so the work survives reloads.
 //
 // Public surface:
-//   getHandSlots()                → string[]  (card ids, in order)
-//   addToHand(card)               → number    (index of the added slot)
-//   removeFromHandAt(index)       → boolean
+//   getHandSlots()             → string[]   (card ids, order added)
+//   isInHand(id)               → boolean
+//   addToHand(card)            → { ok: true } | { ok: false, reason }
+//   removeFromHandAt(index)    → boolean
+//   removeFromHand(id)         → boolean
 //   clearHand()
-//   onHandChange(cb)              → unsubscribe()
+//   onHandChange(cb)           → unsubscribe
+
+import { isInRocket } from './rocket.js';
 
 const STORAGE_KEY = 'hf-sandbox-hand';
 
@@ -30,7 +32,7 @@ let _listeners = [];
 
 function persist() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(_hand)); }
-  catch { /* localStorage may be unavailable in private mode */ }
+  catch { /* private mode */ }
 }
 
 function notify() {
@@ -42,21 +44,24 @@ function notify() {
 export function getHandSlots() {
   return _hand.slice();
 }
+export function getHandIds() { return _hand.slice(); }
 
-// Legacy alias kept for callers that haven't migrated yet.
-export function getHandIds() {
-  return _hand.slice();
+export function isInHand(id) {
+  return _hand.includes(id);
 }
 
-// No more one-of-each-type rule — the player can hold as many
-// copies of a card as they want. Returns the slot index where
-// the new card landed.
 export function addToHand(card) {
-  if (!card || !card.id) return -1;
+  if (!card || !card.id) return { ok: false, reason: 'no card' };
+  if (_hand.includes(card.id)) {
+    return { ok: false, reason: 'already in your hand' };
+  }
+  if (isInRocket(card.id)) {
+    return { ok: false, reason: 'currently on your rocket — pull it back first' };
+  }
   _hand.push(card.id);
   persist();
   notify();
-  return _hand.length - 1;
+  return { ok: true };
 }
 
 export function removeFromHandAt(index) {
@@ -65,6 +70,11 @@ export function removeFromHandAt(index) {
   persist();
   notify();
   return true;
+}
+
+export function removeFromHand(id) {
+  const i = _hand.indexOf(id);
+  return i >= 0 ? removeFromHandAt(i) : false;
 }
 
 export function clearHand() {

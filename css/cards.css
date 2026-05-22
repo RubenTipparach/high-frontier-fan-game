@@ -545,3 +545,59 @@
   letter-spacing: 0.2px;
 }
 .card-tip.visible { opacity: 1; transform: translateY(0); }
+
+/* Library card location markers. Each card lives in exactly one
+   place (deck / hand / rocket); when it's in hand or rocket the
+   library tile reads as a "you already have this" placeholder
+   — greyed out, with an oversized ✋ or 🛸 overlay so the
+   player sees the card's current location at a glance. */
+.card.in-hand,
+.card.in-rocket {
+  opacity: 0.45;
+  filter: grayscale(0.6);
+  pointer-events: none;
+  position: relative;
+}
+.card.in-hand::after,
+.card.in-rocket::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 64px;
+  z-index: 10;
+  text-shadow: 0 4px 12px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+.card.in-hand::after   { content: "✋"; }
+.card.in-rocket::after { content: "🛸"; }
+
+/* Quick-add button on library cards: hover-revealed call-to-
+   action that drops the card into the player's hand without
+   needing the inspect modal. Drag-and-drop works too; this is
+   the reliable always-works path. */
+.card-quick-add {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%) translateY(6px);
+  background: var(--accent);
+  color: #062136;
+  border: 1px solid var(--accent-2);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s, transform 0.15s;
+  z-index: 6;
+}
+.card:hover .card-quick-add {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+.card-quick-add:hover { background: var(--accent-2); color: #fff; }

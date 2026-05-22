@@ -44,6 +44,10 @@ export function getRocketStack() {
   return _stack.slice();
 }
 
+export function isInRocket(id) {
+  return _stack.some((s) => s.id === id);
+}
+
 export function addToStack(cardId, kind) {
   if (!cardId) return -1;
   _stack.push({ id: cardId, kind: kind || 'patent' });

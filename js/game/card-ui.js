@@ -105,21 +105,12 @@ export function renderCard(card, { type } = {}) {
   // toggles a data-rotated attribute that drives both the
   // CSS rotation transform and the Light↔Heavy stat swap. Only
   // emitted for cards flagged `rotatable: true` (radiators).
-  if (card.rotatable) {
-    el.dataset.rotated = '0';
-    const rot = document.createElement('button');
-    rot.type = 'button';
-    rot.className = 'card-rotate';
-    rot.textContent = '↻';
-    rot.title = 'Rotate to heavy side';
-    rot.addEventListener('click', () => {
-      el.dataset.rotated = el.dataset.rotated === '1' ? '0' : '1';
-      rot.title = el.dataset.rotated === '1'
-        ? 'Rotate to light side'
-        : 'Rotate to heavy side';
-    });
-    el.appendChild(rot);
-  }
+  // Radiators carry a data-rotated attribute on the root so the
+  // CSS rotation transform + Light↔Heavy active-side dimming
+  // still works. The dedicated rotate (↻) button was removed —
+  // the Light(N) / Heavy(N) labels under each half's name now
+  // act as the side toggle (see buildRadiatorFace).
+  if (card.rotatable) el.dataset.rotated = '0';
 
   attachTipsTo(el);
   return el;

@@ -410,7 +410,9 @@ body:has(#view-browse:not(.hidden)) #main {
   left: 0;
   right: 388px;  /* clear the open sidepanel */
   bottom: 0;
-  height: 232px;
+  /* Tall enough that a 1.18× hovered card grows around its
+     centre without clipping at either edge. */
+  height: 260px;
   background: rgba(8, 8, 18, 0.96);
   border-top: 1px solid var(--border);
   z-index: 3;
@@ -419,6 +421,10 @@ body:has(#view-browse:not(.hidden)) #main {
   padding: 6px 10px 10px;
   backdrop-filter: blur(6px);
   transition: right 0.22s ease;
+  /* Allow hover-grown cards to overflow the strip's top edge so
+     they read as floating in front of the map rather than
+     clipped against the strip border. */
+  overflow: visible;
 }
 .browse-sidepanel[data-active=""] ~ .sandbox-hand { right: 48px; }
 @media (max-width: 720px) {
@@ -441,14 +447,13 @@ body:has(#view-browse:not(.hidden)) #main {
 .hand-cards {
   flex: 1;
   display: flex;
-  /* No gap: cards overlap to give the "fanned hand" feel.
-     Hovering a card spreads the surrounding slots aside (see
-     the :has selectors below) so the hover target reads
-     clearly without overlap.  */
   gap: 0;
+  /* Allow hover-grown cards to extend above + below the strip
+     visually. overflow-x stays scrollable for very long hands;
+     overflow-y is visible so the hover doesn't clip. */
   overflow-x: auto;
-  overflow-y: hidden;
-  padding: 12px 32px 8px;
+  overflow-y: visible;
+  padding: 24px 32px 16px;
   border: 1.5px dashed rgba(120, 130, 170, 0.3);
   border-radius: 6px;
   position: relative;
@@ -498,12 +503,16 @@ body:has(#view-browse:not(.hidden)) #main {
    target reads clearly without overlap. The "+" adjacent
    selectors push siblings on EITHER side of the hovered slot
    away, creating the classic fan-spread effect. */
+/* Hover GROWS the card from its centre — no translation, so the
+   pointer never loses alignment with the card. Adjacent slots
+   spread out via margin shifts to keep the hovered card from
+   overlapping its neighbours. */
 .hand-slot:hover {
-  transform: translateY(-26px) scale(1.10);
-  margin-right: 26px;
+  transform: scale(1.18);
+  margin-right: 32px;
   z-index: 50;
 }
-.hand-slot:hover + .hand-slot { margin-left: 26px; }
+.hand-slot:hover + .hand-slot { margin-left: 32px; }
 .hand-cards:hover .hand-slot:not(:hover) { z-index: 1; }
 
 /* Scale the actual 220px card down to fit the slot. */

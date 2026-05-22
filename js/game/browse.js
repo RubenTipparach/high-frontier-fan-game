@@ -17,11 +17,12 @@ import {
 } from './solo.js';
 import { PATENTS, PATENTS_BY_ID, PATENT_TYPES, patentsByType } from '../../data/patents.js';
 import {
-  getHandSlots, addToHand, removeFromHandAt, clearHand, onHandChange,
+  getHandSlots, isInHand, addToHand, removeFromHandAt, removeFromHand,
+  clearHand, onHandChange,
 } from './hand.js';
 import {
-  getRocketStack, addToStack as rocketAddCard, removeFromStack as rocketRemoveCard,
-  onRocketChange, canRocketFly,
+  getRocketStack, isInRocket, addToStack as rocketAddCard,
+  removeFromStack as rocketRemoveCard, onRocketChange, canRocketFly,
 } from './rocket.js';
 import { CREW } from '../../data/crew.js';
 import { MILESTONES } from '../../data/glory.js';
@@ -101,7 +102,12 @@ function wireHandStrip() {
     host.classList.remove('is-drop-target');
     const id = e.dataTransfer.getData('text/card-id');
     const card = id && lookup(id);
-    if (card) addToHand(card);
+    if (!card) return;
+    const r = addToHand(card);
+    if (!r.ok) {
+      host.classList.add('flash-error');
+      setTimeout(() => host.classList.remove('flash-error'), 700);
+    }
   });
 
   // Grabber: drag vertically to resize the strip between a
@@ -281,7 +287,8 @@ function openDeckTapModal(card, kind) {
   addBtn.className = 'modal-btn stack';
   addBtn.textContent = 'Add to hand';
   addBtn.addEventListener('click', () => {
-    addToHand(card);
+    const r = addToHand(card);
+    if (!r.ok) setStatus(`Can't add: ${r.reason}.`);
     close();
   });
 
@@ -1003,21 +1010,27 @@ function renderPatents() {
   grid.className = 'card-grid';
   host.appendChild(grid);
 
-  // Each tile in the grid is draggable AND tappable. Multi-
-  // copies allowed (the hand state stores duplicates as
-  // separate slots), so we no longer mark grabbed cards —
-  // every grab just appends a fresh slot. On mobile (where
-  // HTML5 drag-and-drop is unreliable) clicking a card pops a
-  // confirm prompt to add it to the hand.
+  // Each physical card exists in exactly one location: deck,
+  // hand, or rocket. The library grid decorates every tile with
+  // its current location so the player can see where each card
+  // is at a glance — ✋ overlay for hand, 🛸 overlay for rocket.
+  // Cards not in the deck have drag + tap disabled (no
+  // duplicates allowed; pull them back from hand/rocket first).
   const decorateForHand = (card, asKind) => {
     const el = renderCard(card, { type: asKind });
     el.dataset.cardId  = card.id;
     el.dataset.cardKind = asKind;
+    const inHand   = isInHand(card.id);
+    const inRocket = isInRocket(card.id);
+    if (inHand)   el.classList.add('in-hand');
+    if (inRocket) el.classList.add('in-rocket');
+    if (inHand || inRocket) return el;   // placeholder — not interactive
+
     el.draggable = true;
     el.addEventListener('dragstart', (ev) => {
       ev.dataTransfer.setData('text/card-id', card.id);
       ev.dataTransfer.setData('text/card-kind', asKind);
-      ev.dataTransfer.effectAllowed = 'copy';
+      ev.dataTransfer.effectAllowed = 'move';
       el.classList.add('is-dragging');
       startCustomDragGhost(el, ev);
     });
@@ -1026,10 +1039,24 @@ function renderPatents() {
       endCustomDragGhost();
     });
     el.addEventListener('click', (ev) => {
-      // Let the card's own Flip / Rotate buttons keep working.
-      if (ev.target.closest('.card-flip, .card-rotate')) return;
+      if (ev.target.closest('.card-flip, .card-rotate, .card-quick-add')) return;
       openDeckTapModal(card, asKind);
     });
+    // Quick-add button overlay: appears on hover; click adds
+    // straight to hand without the inspect modal. Drag-and-drop
+    // can be flaky on some browsers + touch devices; this is
+    // the always-reliable path the user asked for.
+    const quick = document.createElement('button');
+    quick.type = 'button';
+    quick.className = 'card-quick-add';
+    quick.textContent = '✋ Grab';
+    quick.title = 'Add this card to your hand';
+    quick.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const r = addToHand(card);
+      if (!r.ok) setStatus(`Can't add: ${r.reason}.`);
+    });
+    el.appendChild(quick);
     return el;
   };
 
@@ -1047,6 +1074,20 @@ function renderPatents() {
       for (const c of CREW) grid.appendChild(decorateForHand(c, 'crew'));
     }
   };
+
+  // Subscribe to hand + rocket changes so the library tiles'
+  // ✋ / 🛸 location markers update as the player moves cards
+  // around. Storing the unsubs on the host element means
+  // remounting the pane doesn't stack listeners.
+  if (host._libUnsubs) host._libUnsubs.forEach((u) => u());
+  const repaintActive = () => {
+    const active = bar.querySelector('button.active');
+    repaint(active ? active.dataset.type : 'all');
+  };
+  host._libUnsubs = [
+    onHandChange(repaintActive),
+    onRocketChange(repaintActive),
+  ];
 
   bar.querySelectorAll('button').forEach((b) => {
     b.onclick = () => {
