@@ -13,6 +13,15 @@ import { mountChat, unmountChat } from './chat.js';
 import { mountInvitesUI, unmountInvitesUI } from './invites.js';
 import { MapRenderer } from './game/render.js';
 import { loadPlannerMap } from './game/planner-map.js';
+import { loadCleanMap } from './game/clean-map.js';
+import { findPath } from './game/nav.js';
+
+const LOBBY_MAP_MODE_KEY = 'hf.mapMode';
+async function loadLobbyMap() {
+  const mode = localStorage.getItem(LOBBY_MAP_MODE_KEY) === 'clean'
+    ? 'clean' : 'classic';
+  return mode === 'clean' ? loadCleanMap() : loadPlannerMap();
+}
 
 let _activeLobby = null;
 let _unsubWS = null;
@@ -194,11 +203,34 @@ function renderLobby(lobby) {
       const host = document.getElementById('game-map');
       if (host) {
         host.innerHTML = '<div class="map-loading">Loading map…</div>';
-        loadPlannerMap().then((data) => {
+        loadLobbyMap().then((data) => {
+          // Click-to-route: same state machine as the Browse view.
+          // Stage 3 will replace this with engine ops (MOVE / BURN).
+          let from = null, to = null;
           _mapRenderer = new MapRenderer(host, {
             data,
             onSelect: (site) => {
-              if (_onToast) _onToast(`${site.name} (${site.type})`);
+              if (site.isWaypoint) {
+                _onToast(`${site.name} is a routing waypoint.`);
+                return;
+              }
+              if (!from || (from && to)) {
+                from = site; to = null;
+                _mapRenderer.setRoute(null);
+                _mapRenderer.setRouteEndpoints(site.id, null);
+                _onToast(`From ${site.name}. Tap destination.`);
+                return;
+              }
+              if (site.id === from.id) return;
+              to = site;
+              const r = findPath(data, from.id, to.id);
+              if (!r) {
+                _onToast(`No route to ${site.name}.`, 'error');
+                return;
+              }
+              _mapRenderer.setRoute(r.segments);
+              _mapRenderer.setRouteEndpoints(from.id, to.id);
+              _onToast(`${from.name} → ${to.name}: ${r.totalBurns} burns, ${r.segments.length} hops.`, 'success');
             },
           });
         }).catch((err) => {

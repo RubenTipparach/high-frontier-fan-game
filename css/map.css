@@ -48,6 +48,69 @@
 }
 .map-loading.error { color: var(--bad); }
 
+/* Browse-view map shell: toolbar across the top, full-bleed canvas
+   below. The classic vs cleaned-up toggle lives here and persists
+   to localStorage so the player can A/B-test their preference. */
+.map-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background: rgba(15, 16, 35, 0.85);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.map-mode-toggle {
+  display: inline-flex;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.map-mode-toggle button {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+.map-mode-toggle button.active {
+  background: var(--accent);
+  color: #062136;
+  font-weight: 600;
+}
+.map-route {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  flex: 1;
+  justify-content: flex-end;
+  min-width: 0;
+}
+.map-route .big {
+  color: var(--warm);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+.map-route #route-status {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.browse-map-canvas {
+  width: 100%;
+  height: calc(100% - 44px);
+  min-height: 440px;
+}
+.browse-map {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+
 .map-svg .edge {
   fill: none;
   stroke: #3b4a6d;
@@ -60,6 +123,51 @@
   stroke: #f87171;
   stroke-dasharray: 4 3;
   opacity: 0.6;
+}
+
+/* Zone bands (cleaned-up view only). Alternating bands get a
+   slightly darker fill so the eye can track a single zone across
+   the chart. */
+.map-svg .zone-band {
+  fill: #0c0d1f;
+  opacity: 0.3;
+  pointer-events: none;
+}
+.map-svg .zone-band[data-zone="Venus"],
+.map-svg .zone-band[data-zone="Mars"],
+.map-svg .zone-band[data-zone="Jupiter"],
+.map-svg .zone-band[data-zone="Uranus"] {
+  fill: #11142a;
+  opacity: 0.4;
+}
+.map-svg .zone-label {
+  font: 600 11px ui-sans-serif, system-ui, sans-serif;
+  fill: #5b6688;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+/* Route layer: highlight a Dijkstra-computed path with thick warm
+   strokes so the underlying graph stays visible but the route
+   pops. Endpoints get a coloured ring (green = source, magenta =
+   destination). */
+.map-svg .route-edge {
+  fill: none;
+  stroke: #fbbf24;
+  stroke-width: 4;
+  stroke-linecap: round;
+  opacity: 0.9;
+  pointer-events: none;
+  filter: drop-shadow(0 0 4px rgba(251, 191, 36, 0.6));
+}
+.map-svg .site.route-from circle:first-of-type {
+  stroke: #4ade80;
+  stroke-width: 3;
+}
+.map-svg .site.route-to circle:first-of-type {
+  stroke: #f0abfc;
+  stroke-width: 3;
 }
 .map-svg .edge-label {
   font: 9px ui-monospace, monospace;

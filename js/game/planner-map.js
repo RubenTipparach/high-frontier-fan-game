@@ -58,7 +58,7 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
   }
 
   const byId = Object.fromEntries(sites.map((s) => [s.id, s]));
-  _cache = { sites, edges, byId };
+  _cache = { sites, edges, byId, mode: 'classic' };
   return _cache;
 }
 

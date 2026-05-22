@@ -75,6 +75,14 @@ function zoneSlug(zone) {
   return (zone || 'unknown').toLowerCase();
 }
 
+// CSS.escape polyfill-ish: site ids in the planner data are random
+// floats so they contain '.', which CSS attribute selectors choke
+// on without escaping.
+function cssEsc(s) {
+  if (window.CSS && CSS.escape) return CSS.escape(s);
+  return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+}
+
 export class MapRenderer {
   constructor(host, { data, onSelect } = {}) {
     this.host = host;
@@ -108,7 +116,14 @@ export class MapRenderer {
     this.viewport = el('g', { class: 'viewport' }, this.svg);
 
     if (this.data) {
+      // Cleaned-up mode renders zone bands as a subtle background;
+      // classic mode skips them because the planner's layout doesn't
+      // align with our zone lanes.
+      if (this.data.mode === 'clean' && Array.isArray(this.data.zones)) {
+        this._renderZoneBands(this.data.zones);
+      }
       this._renderEdges();
+      this._renderRouteLayer();
       this._renderSites();
     }
 
@@ -133,6 +148,69 @@ export class MapRenderer {
         fill: rand() < 0.1 ? '#7dd3fc' : '#cbd5e1',
         opacity: rand() * 0.6 + 0.2,
       }, g);
+    }
+  }
+
+  // Subtle horizontal bands behind each solar zone. Only rendered for
+  // the cleaned-up view, where the X-axis is burns-from-LEO and the
+  // Y-axis is zone lane. Classic (planner) data has its own layout
+  // that doesn't map onto those lanes.
+  _renderZoneBands(zones) {
+    const g = el('g', { class: 'zone-bands' }, this.viewport);
+    const startY = 60;
+    const bandH  = (900 - 60 - 60) / zones.length;
+    for (let i = 0; i < zones.length; i++) {
+      const y = startY + bandH * i;
+      el('rect', {
+        x: 0, y, width: 1400, height: bandH,
+        class: 'zone-band',
+        'data-zone': zones[i],
+      }, g);
+      el('text', {
+        x: 14, y: y + bandH / 2 + 4,
+        class: 'zone-label',
+      }, g).textContent = zones[i];
+    }
+  }
+
+  // A dedicated empty group that setRoute() repaints. Sits between
+  // the static edges and the site discs so the highlighted route
+  // covers the underlying edges but is itself covered by the nodes.
+  _renderRouteLayer() {
+    this.routeLayer = el('g', { class: 'route-layer' }, this.viewport);
+  }
+
+  // Public: paint a highlighted path on top of the static graph.
+  // `segments` is what nav.findPath returns; pass null to clear.
+  setRoute(segments) {
+    if (!this.routeLayer) return;
+    this.routeLayer.innerHTML = '';
+    if (!segments || !segments.length) return;
+    for (const seg of segments) {
+      const sa = this.data.byId[seg.from];
+      const sb = this.data.byId[seg.to];
+      if (!sa || !sb) continue;
+      el('path', {
+        d: curvePath(sa, sb),
+        class: 'route-edge',
+      }, this.routeLayer);
+    }
+  }
+
+  // Public: highlight the source / destination nodes by id so the
+  // UI can show "you tapped here" feedback. Pass null to clear.
+  setRouteEndpoints(fromId, toId) {
+    if (!this.svg) return;
+    for (const g of this.svg.querySelectorAll('.site')) {
+      g.classList.remove('route-from', 'route-to');
+    }
+    if (fromId) {
+      const a = this.svg.querySelector(`.site[data-id="${cssEsc(fromId)}"]`);
+      if (a) a.classList.add('route-from');
+    }
+    if (toId) {
+      const b = this.svg.querySelector(`.site[data-id="${cssEsc(toId)}"]`);
+      if (b) b.classList.add('route-to');
     }
   }
 
