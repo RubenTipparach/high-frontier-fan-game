@@ -21,7 +21,7 @@
 export const SITES = [
   { id: 'mercury_north_pole', name: 'Mercury North Pole', body: 'Mercury', type: 'moon', class: 'C', hydration: 3, vps: 2, dvLeo: 6.0, solarZone: 'Mercury', x: 720.0, y: 112.3 },
   { id: 'mercury_discovery_rupes', name: 'Mercury Discovery Rupes', body: 'Mercury', type: 'moon', class: 'C', hydration: 0, vps: 1, dvLeo: 6.0, solarZone: 'Mercury', x: 720.0, y: 94.3 },
-  { id: 'venus_aerostat_xity', name: 'Venus Aerostat-Xity', body: 'Venus', type: 'planet', class: 'D', hydration: 0, vps: 1, dvLeo: 4.0, solarZone: 'Venus', x: 604.4, y: 190.0 },
+  { id: 'venus_aerostat_xity', name: 'Venus Aerostat-Xity', body: 'Venus', type: 'planet', class: 'D', hydration: 0, vps: 1, dvLeo: 4.0, solarZone: 'Venus', x: 720.0, y: 190.0 },
   { id: 'hathor', name: 'Hathor', body: 'Hathor', type: 'asteroid', class: 'A', hydration: 1, vps: 1, dvLeo: 5.0, solarZone: 'Venus', x: 665.1, y: 190.0 },
   { id: 'luna_aristarchus_plateau', name: 'Luna Aristarchus Plateau', body: 'Luna', type: 'asteroid', class: 'C', hydration: 0, vps: 1, dvLeo: 3.0, solarZone: 'Earth', x: 535.5, y: 276.7 },
   { id: 'luna_shackleton_polar_rim', name: 'Luna Shackleton Polar Rim', body: 'Luna', type: 'asteroid', class: 'C', hydration: 1, vps: 1, dvLeo: 3.0, solarZone: 'Earth', x: 535.5, y: 294.7 },
