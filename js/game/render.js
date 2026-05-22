@@ -352,6 +352,26 @@ function drawSun(ctx, cx, cy, r) {
   ctx.fill();
 }
 
+// Standard radiation trefoil: three wedges at 120° around a tiny
+// inner dot, centred at (cx, cy). Drawn dark against the yellow
+// radhaz disc so the trefoil reads without needing a glyph font.
+function drawRadiationGlyph(ctx, cx, cy, r) {
+  const outerR  = r * 0.92;
+  const innerR  = r * 0.28;
+  const wedge   = Math.PI / 5;          // half-angle of each blade
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 - Math.PI / 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, innerR, a - wedge, a + wedge);
+    ctx.arc(cx, cy, outerR, a + wedge, a - wedge, true);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.beginPath();
+  ctx.arc(cx, cy, innerR * 0.7, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 function drawRockyAsteroid(ctx, cx, cy, r, palette, site) {
   if (!site._rockShape) {
     const VERTS = 9;
@@ -510,20 +530,23 @@ export class MapRenderer {
   _buildAsteroidBelt() {
     // Seeded particle field placed in an orbital band around the
     // Sun. Each particle stores its base angle, orbital radius, and
-    // angular speed (Keplerian-ish: omega scales with r^-1.5 so
-    // inner particles sweep noticeably faster than outer ones).
+    // angular speed (Keplerian r^-1.5 baseline, then a per-rock
+    // jitter so even rocks sharing a radius drift at noticeably
+    // different rates). A small fraction get retrograde motion for
+    // chaos -- captured-Trojan / family-collision flavour.
     this._beltParticles = [];
     let seed = 54321;
     const rand = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
     for (let i = 0; i < 220; i++) {
       const angle0 = rand() * Math.PI * 2;
       const r = 360 + rand() * 200;
-      // Angular speed tuned so a mid-belt rock makes a full orbit
-      // in ~5 minutes -- visible motion if you watch, but slow
-      // enough that the layout doesn't feel chaotic.
-      const omega = 0.022 / Math.pow(r / 460, 1.5);
+      const base  = 0.022 / Math.pow(r / 460, 1.5);
+      const jitter = 0.45 + rand() * 1.10;       // 0.45..1.55 of baseline
+      const sign  = rand() < 0.08 ? -1 : 1;       // 8% retrograde
       this._beltParticles.push({
-        angle0, r, omega,
+        angle0,
+        r,
+        omega: base * jitter * sign,
         size: 0.6 + rand() * 1.2,
         alpha: 0.25 + rand() * 0.5,
         tint: rand() < 0.15 ? '#cbb89a' : '#8e7c66',
@@ -1037,19 +1060,65 @@ export class MapRenderer {
       }
 
       if (landings.length) {
-        // Landing burns: short rect, width scaled by w.landing
-        // (planner uses 1 or 0.5 to indicate full vs. half landing).
+        // Landing burns: a small pad shape -- short rectangle with
+        // a centre dot to read as "you can put down here". Width
+        // is scaled by the planner's landing flag (1 = full, 0.5 =
+        // partial), height stays uniform.
         ctx.fillStyle = vis.fill;
         ctx.strokeStyle = vis.stroke;
+        ctx.lineWidth = 1.5;
         for (const w of landings) {
           const sx = this.pan.x + w.x * eff;
           const sy = this.pan.y + w.y * eff;
           if (sx < -vis.r || sx > hostW + vis.r || sy < -vis.r || sy > hostH + vis.r) continue;
-          const halfH = vis.r;
+          const halfH = vis.r * 0.8;
           const halfW = vis.r * w.landing;
           ctx.fillRect(sx - halfW, sy - halfH, halfW * 2, halfH * 2);
           ctx.strokeRect(sx - halfW, sy - halfH, halfW * 2, halfH * 2);
+          // Centre dot so the pad reads as a landing target rather
+          // than an arbitrary rectangle.
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(sx, sy, Math.max(1.2, halfH * 0.32), 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = vis.fill;
         }
+      }
+    }
+
+    // Hazard pulse: animated red ring around any waypoint flagged
+    // hazard. Pulses ~once per second so the danger reads without
+    // strobing. Drawn after the body fills so the pulse layers
+    // outside the disc/ring of the node itself.
+    const phase = ((this._animTime || 0) / 1000) * Math.PI;
+    const pulse = (Math.sin(phase) + 1) * 0.5;
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = `rgba(248, 113, 113, ${0.4 + pulse * 0.5})`;
+    ctx.beginPath();
+    for (const w of this._waypoints) {
+      if (!w.hazard) continue;
+      const vis = TYPE_VIS[w.type] || TYPE_VIS.unknown;
+      if (vis.kind === 'none') continue;
+      const sx = this.pan.x + w.x * eff;
+      const sy = this.pan.y + w.y * eff;
+      if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
+      const ringR = vis.r + 4 + pulse * 4;
+      ctx.moveTo(sx + ringR, sy);
+      ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
+    }
+    ctx.stroke();
+
+    // Radhaz radiation glyph: three wedges + a centre dot drawn
+    // by hand so we don't depend on the ☢ font character being
+    // present. Fills only the radhaz-type waypoints.
+    const radhazItems = this._waypointsByType.get('radhaz');
+    if (radhazItems) {
+      ctx.fillStyle = '#0c0a16';
+      for (const w of radhazItems) {
+        const sx = this.pan.x + w.x * eff;
+        const sy = this.pan.y + w.y * eff;
+        if (sx < -20 || sx > hostW + 20 || sy < -20 || sy > hostH + 20) continue;
+        drawRadiationGlyph(ctx, sx, sy, TYPE_VIS.radhaz.r);
       }
     }
 
