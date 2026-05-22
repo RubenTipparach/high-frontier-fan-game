@@ -5,11 +5,11 @@
 .map-host {
   position: relative;
   width: 100%;
-  background:
-    radial-gradient(ellipse at center, #0e0c20 0%, #050410 70%, #000 100%);
+  background: #03020a;
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
+  contain: strict;
 }
 
 .map-svg {
@@ -26,6 +26,11 @@
   -webkit-touch-callout: none;
   overscroll-behavior: contain;
 }
+/* Hint the GPU that the viewport group will be transforming; lets
+   the browser composite the static-once star layer separately from
+   the panning graph and avoids re-rasterising the background on
+   every pan frame. */
+.map-svg .viewport { will-change: transform; }
 .map-svg.dragging { cursor: grabbing; }
 
 .map-svg .stars circle { pointer-events: none; }
@@ -112,17 +117,28 @@
 }
 
 /* Planner-style edges: thin white straight lines on a dark
-   backdrop. Hazard edges turn red + dashed. */
+   backdrop. Collapsed into one path per category for perf.
+   vector-effect keeps the stroke crisp at any zoom level. */
 .map-svg .edge {
+  fill: none;
   stroke: #cbd5e1;
   stroke-width: 1.4;
   opacity: 0.85;
   pointer-events: none;
+  vector-effect: non-scaling-stroke;
 }
 .map-svg .edge.hazard {
   stroke: #f87171;
   stroke-dasharray: 4 3;
   opacity: 0.7;
+}
+.map-svg .route-label {
+  font: 600 11px ui-sans-serif, system-ui, sans-serif;
+  fill: #fde047;
+  paint-order: stroke;
+  stroke: #050410;
+  stroke-width: 3;
+  pointer-events: none;
 }
 .map-svg .site-size {
   font: 600 9px ui-sans-serif, system-ui, sans-serif;

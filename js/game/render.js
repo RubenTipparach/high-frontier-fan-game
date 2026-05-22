@@ -132,18 +132,78 @@ export class MapRenderer {
   }
 
   _renderStars() {
-    // ~120 random points, seeded once. Subtle parallax suggestion.
-    const g = el('g', { class: 'stars' }, this.svg);
+    // Layered background: nebula gradients in <defs>, soft glow
+    // halos around the densest star clusters, and ~280 stars seeded
+    // deterministically so the layout is stable across renders.
+    // All original SVG; we do not bundle the publisher's board art.
+    const defs = el('defs', null, this.svg);
+
+    // Three nebula gradients tucked into the corners. Each is a
+    // radial gradient on a fullscreen rect; opacity sums to a faint
+    // cosmic backdrop without overpowering the foreground graph.
+    function nebula(id, cx, cy, color) {
+      const grad = el('radialGradient', { id, cx, cy, r: '50%' }, defs);
+      el('stop', { offset: '0%',   'stop-color': color, 'stop-opacity': 0.35 }, grad);
+      el('stop', { offset: '60%',  'stop-color': color, 'stop-opacity': 0.06 }, grad);
+      el('stop', { offset: '100%', 'stop-color': color, 'stop-opacity': 0 }, grad);
+    }
+    nebula('neb-blue',   '20%', '15%', '#1e3a8a');
+    nebula('neb-violet', '80%', '85%', '#581c87');
+    nebula('neb-cyan',   '70%', '20%', '#155e75');
+    nebula('neb-warm',   '15%', '85%', '#7c2d12');
+
+    const bg = el('g', { class: 'stars' }, this.svg);
+    el('rect', { x: 0, y: 0, width: VIEW_W, height: VIEW_H, fill: 'url(#neb-blue)' }, bg);
+    el('rect', { x: 0, y: 0, width: VIEW_W, height: VIEW_H, fill: 'url(#neb-violet)' }, bg);
+    el('rect', { x: 0, y: 0, width: VIEW_W, height: VIEW_H, fill: 'url(#neb-cyan)' }, bg);
+    el('rect', { x: 0, y: 0, width: VIEW_W, height: VIEW_H, fill: 'url(#neb-warm)' }, bg);
+
+    // Faint heliocentric guide rings centred near the Sun's
+    // notional position (left of the canvas). Subtle enough to feel
+    // like backdrop infrastructure, not a primary line.
+    const sunX = 0, sunY = VIEW_H / 2;
+    for (let i = 1; i <= 4; i++) {
+      el('circle', {
+        cx: sunX, cy: sunY, r: 220 * i,
+        fill: 'none',
+        stroke: '#1e293b',
+        'stroke-width': 0.6,
+        opacity: 0.4,
+      }, bg);
+    }
+
+    // Three star layers at different sizes, with the bigger ones
+    // sparser and a few given a soft outer glow so they read as
+    // distant supergiants instead of pixels.
     let seed = 12345;
     const rand = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
-    for (let i = 0; i < 120; i++) {
-      el('circle', {
-        cx: rand() * VIEW_W,
-        cy: rand() * VIEW_H,
-        r: rand() * 1.2 + 0.3,
-        fill: rand() < 0.1 ? '#7dd3fc' : '#cbd5e1',
-        opacity: rand() * 0.6 + 0.2,
-      }, g);
+    // Tiny pinprick stars (~200)
+    let starsPath = '';
+    for (let i = 0; i < 200; i++) {
+      const x = (rand() * VIEW_W).toFixed(1);
+      const y = (rand() * VIEW_H).toFixed(1);
+      const r = (rand() * 0.6 + 0.2).toFixed(2);
+      starsPath += `M ${x} ${y} m -${r} 0 a ${r} ${r} 0 1 0 ${r*2} 0 a ${r} ${r} 0 1 0 -${r*2} 0 `;
+    }
+    el('path', { d: starsPath, fill: '#cbd5e1', opacity: 0.55 }, bg);
+
+    // Medium blue-white stars (~50)
+    starsPath = '';
+    for (let i = 0; i < 50; i++) {
+      const x = (rand() * VIEW_W).toFixed(1);
+      const y = (rand() * VIEW_H).toFixed(1);
+      starsPath += `M ${x} ${y} m -1 0 a 1 1 0 1 0 2 0 a 1 1 0 1 0 -2 0 `;
+    }
+    el('path', { d: starsPath, fill: '#bae6fd', opacity: 0.7 }, bg);
+
+    // Bright accent stars with a glow halo (~12)
+    const glow = el('g', null, bg);
+    for (let i = 0; i < 12; i++) {
+      const x = rand() * VIEW_W;
+      const y = rand() * VIEW_H;
+      el('circle', { cx: x, cy: y, r: 4, fill: '#7dd3fc', opacity: 0.12 }, glow);
+      el('circle', { cx: x, cy: y, r: 2, fill: '#7dd3fc', opacity: 0.4 }, glow);
+      el('circle', { cx: x, cy: y, r: 1, fill: '#ffffff', opacity: 0.95 }, glow);
     }
   }
 
@@ -182,14 +242,29 @@ export class MapRenderer {
     if (!this.routeLayer) return;
     this.routeLayer.innerHTML = '';
     if (!segments || !segments.length) return;
+    // Single combined path for the route, plus an inline burn-count
+    // label per segment (typical route is < 20 hops so the label
+    // count stays small).
+    let d = '';
     for (const seg of segments) {
       const sa = this.data.byId[seg.from];
       const sb = this.data.byId[seg.to];
       if (!sa || !sb) continue;
-      el('path', {
-        d: curvePath(sa, sb),
-        class: 'route-edge',
-      }, this.routeLayer);
+      d += `M ${sa.x.toFixed(1)} ${sa.y.toFixed(1)} L ${sb.x.toFixed(1)} ${sb.y.toFixed(1)} `;
+    }
+    el('path', { d, class: 'route-edge' }, this.routeLayer);
+    for (const seg of segments) {
+      const sa = this.data.byId[seg.from];
+      const sb = this.data.byId[seg.to];
+      if (!sa || !sb) continue;
+      const mx = (sa.x + sb.x) / 2;
+      const my = (sa.y + sb.y) / 2;
+      el('text', {
+        x: mx.toFixed(1),
+        y: (my - 4).toFixed(1),
+        class: 'route-label',
+        'text-anchor': 'middle',
+      }, this.routeLayer).textContent = seg.dv;
     }
   }
 
@@ -211,44 +286,26 @@ export class MapRenderer {
   }
 
   _renderEdges() {
+    // Performance: 1758 edges × (1 line + 2 text labels) = 5274 DOM
+    // nodes is the bulk of our paint cost. Collapse all non-hazard
+    // edges into a single <path>; same for hazard edges. One DOM
+    // node per category, browser does the line drawing.
     const g = el('g', { class: 'edges' }, this.viewport);
-    for (const [a, b, dv] of this.data.edges) {
+    let normalD = '';
+    let hazardD = '';
+    for (const [a, b] of this.data.edges) {
       const sa = this.data.byId[a];
       const sb = this.data.byId[b];
       if (!sa || !sb) continue;
-      // Straight line, planner-style. Edge labels (burn cost) get
-      // drawn near each endpoint, not at the midpoint, so they
-      // associate clearly with the node they belong to even when
-      // edges bundle.
-      const line = el('line', {
-        x1: sa.x.toFixed(1), y1: sa.y.toFixed(1),
-        x2: sb.x.toFixed(1), y2: sb.y.toFixed(1),
-        class: sa.hazard || sb.hazard ? 'edge hazard' : 'edge',
-        'data-dv': dv,
-      }, g);
-      line.dataset.from = a;
-      line.dataset.to = b;
-      // dv label nudged 14px along the edge from each endpoint
-      // (matches the planner's edgeLabels presentation).
-      const dx = sb.x - sa.x;
-      const dy = sb.y - sa.y;
-      const d = Math.hypot(dx, dy) || 1;
-      const nx = dx / d;
-      const ny = dy / d;
-      const off = 14;
-      el('text', {
-        x: (sa.x + nx * off).toFixed(1),
-        y: (sa.y + ny * off).toFixed(1),
-        class: 'edge-label',
-        'text-anchor': 'middle',
-      }, g).textContent = dv;
-      el('text', {
-        x: (sb.x - nx * off).toFixed(1),
-        y: (sb.y - ny * off).toFixed(1),
-        class: 'edge-label',
-        'text-anchor': 'middle',
-      }, g).textContent = dv;
+      const seg = `M ${sa.x.toFixed(1)} ${sa.y.toFixed(1)} L ${sb.x.toFixed(1)} ${sb.y.toFixed(1)} `;
+      if (sa.hazard || sb.hazard) hazardD += seg;
+      else normalD += seg;
     }
+    if (normalD) el('path', { d: normalD, class: 'edge' }, g);
+    if (hazardD) el('path', { d: hazardD, class: 'edge hazard' }, g);
+    // Burn-count labels are NOT pre-rendered (was 3516 text nodes,
+    // most invisible at default zoom). The tooltip surfaces the dv
+    // on hover; the route highlight surfaces it inline.
   }
 
   _renderSites() {
