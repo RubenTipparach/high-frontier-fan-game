@@ -148,12 +148,12 @@
   text-transform: uppercase;
 }
 .card.type-thruster  .card-typebar { background: #f8a47a; }
-.card.type-reactor   .card-typebar { background: #fbbf24; }
+.card.type-reactor   .card-typebar { background: #a78bfa; }
 .card.type-radiator  .card-typebar { background: #7dd3fc; }
 .card.type-refinery  .card-typebar { background: #86efac; }
 .card.type-robonaut  .card-typebar { background: #c4b5fd; }
 .card.type-lab       .card-typebar { background: #67e8f9; }
-.card.type-generator .card-typebar { background: #a78bfa; }
+.card.type-generator .card-typebar { background: #f97316; }
 .card.type-modifier  .card-typebar { background: #fda4af; }
 .card.kind-crew      .card-typebar { background: #fde047; }
 
@@ -215,6 +215,35 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Supports box: dedicated panel for the support-icon row so the
+   reader sees it as a labelled "what this card needs in your
+   stack" section, separate from the thrust visual above. The
+   :has(:empty) rule hides the panel entirely on cards that
+   carry no support requirements. */
+.card-supports {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 4px 6px;
+  background: rgba(0, 0, 0, 0.05);
+}
+.card-supports:has(.card-requires:empty) { display: none; }
+.card-supports-label {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  text-align: center;
+}
+.card-supports .card-requires { margin-top: 0; justify-content: center; }
+.card-face[data-face="primary"] .card-supports {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.18);
+}
+
 .card-requires {
   display: flex;
   flex-wrap: wrap;
@@ -222,6 +251,7 @@
   font-size: 12px;
   margin-top: 2px;
 }
+.card-requires .req-svg { display: block; }
 .card-requires .req {
   display: inline-flex;
   align-items: center;

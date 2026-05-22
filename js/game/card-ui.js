@@ -123,7 +123,10 @@ function buildFace(card, sideName, kind) {
     <div class="card-body">
       ${isThruster ? '<div class="card-thrust"></div>' : ''}
       <ul class="card-stats"></ul>
-      <div class="card-requires"></div>
+      <div class="card-supports">
+        <div class="card-supports-label">Supports</div>
+        <div class="card-requires"></div>
+      </div>
       <p class="card-blurb"></p>
     </div>
     <div class="card-footer">
@@ -188,8 +191,14 @@ function buildFace(card, sideName, kind) {
     const span = document.createElement('span');
     span.className = 'req';
     span.setAttribute('data-tip', r.count > 1 ? `${vis.label} ×${r.count}` : vis.label);
-    span.innerHTML = `<em></em>${r.count > 1 ? `<b>×${r.count}</b>` : ''}`;
-    span.querySelector('em').textContent = vis.glyph;
+    // Use the SVG sun + ballerina for the supports that need
+    // platform-consistent rendering; everything else uses the
+    // requirement-vis emoji glyph.
+    let iconHtml;
+    if (r.kind === 'beam-receiver')  iconHtml = svgSunChip(16);
+    else if (r.kind === 'spin-grav') iconHtml = svgBallerinaChip(16);
+    else                             iconHtml = `<em>${vis.glyph}</em>`;
+    span.innerHTML = `${iconHtml}${r.count > 1 ? `<b>×${r.count}</b>` : ''}`;
     reqHost.appendChild(span);
   }
 
@@ -232,11 +241,10 @@ function spectralHex(type) {
   return svg;
 }
 
-// Hand-drawn sun glyph: filled disc with 8 rays. Used inside the
-// thrust triangle for beam-receiver supports. Replaces the ☀️
-// emoji so the glyph renders consistently across platforms
-// (some platforms emoji ☀️ as a face).
-function svgSun(cx, cy, size) {
+// Hand-drawn sun glyph: filled disc + 8 rays. Returns just the
+// shape elements (no wrapper) so callers can drop it into either
+// a triangle, a chip, or anywhere else and add their own data-tip.
+function svgSunContent(cx, cy, size) {
   const r = size * 0.28;
   const inner = r + size * 0.06;
   const outer = size * 0.46;
@@ -251,16 +259,16 @@ function svgSun(cx, cy, size) {
       + `x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}" stroke="#fde047" `
       + `stroke-width="1.4" stroke-linecap="round"/>`);
   }
-  return `<g data-tip="Beam receiver">${rays.join('')}`
+  return rays.join('')
     + `<circle cx="${cx}" cy="${cy}" r="${r.toFixed(2)}" `
-    + `fill="#fbbf24" stroke="#f59e0b" stroke-width="0.6"/></g>`;
+    + `fill="#fbbf24" stroke="#f59e0b" stroke-width="0.6"/>`;
 }
 
 // Hand-drawn ballerina stick-figure: head + torso + outstretched
 // arms + V-spread legs, the published-card "spin gravity" glyph.
 // Avoids the 💃 emoji which renders as a balloon-shaped figure
 // on several platforms.
-function svgBallerina(cx, cy, size) {
+function svgBallerinaContent(cx, cy, size) {
   const s = size / 18;
   const headR = 2.0 * s;
   const headY = cy - 6 * s;
@@ -270,8 +278,8 @@ function svgBallerina(cx, cy, size) {
   const footSpread = 3.2 * s;
   const footY = cy + 6 * s;
   const stroke = (1.4 * s).toFixed(2);
-  return `<g data-tip="Spin gravity" stroke="#ec4899" `
-    + `stroke-width="${stroke}" stroke-linecap="round" fill="none">`
+  return `<g stroke="#ec4899" stroke-width="${stroke}" `
+    + `stroke-linecap="round" fill="none">`
     + `<circle cx="${cx}" cy="${headY.toFixed(2)}" r="${headR.toFixed(2)}" `
     + `fill="#ec4899" stroke="#9d174d" stroke-width="0.5"/>`
     + `<line x1="${cx}" y1="${(headY + headR).toFixed(2)}" `
@@ -284,22 +292,21 @@ function svgBallerina(cx, cy, size) {
     + `x2="${(cx + footSpread).toFixed(2)}" y2="${footY.toFixed(2)}"/></g>`;
 }
 
-// Build the SVG fragment for one support icon inside the thrust
-// triangle. Beam-receiver + spin-grav get hand-drawn shapes;
-// other supports fall back to their REQUIREMENT_VIS emoji.
-function triangleIconSvg(kind, count, p) {
-  if (kind === 'beam-receiver') return svgSun(p.x, p.y - 4, p.s);
-  if (kind === 'spin-grav')     return svgBallerina(p.x, p.y - 2, p.s);
-  const vis = REQUIREMENT_VIS[kind] || { glyph: '◇', label: kind };
-  const tip = count > 1 ? `${vis.label} ×${count}` : vis.label;
-  return `<text x="${p.x}" y="${p.y}" text-anchor="middle" `
-    + `font-size="${p.s}" data-tip="${tip}">${vis.glyph}</text>`;
+// Inline SVG wrapper for use inside HTML chips.
+function svgSunChip(size) {
+  return `<svg class="req-svg" viewBox="-12 -12 24 24" `
+    + `width="${size}" height="${size}">${svgSunContent(0, 0, 22)}</svg>`;
+}
+function svgBallerinaChip(size) {
+  return `<svg class="req-svg" viewBox="-12 -12 24 24" `
+    + `width="${size}" height="${size}">${svgBallerinaContent(0, 1, 22)}</svg>`;
 }
 
-// Thrust visualisation: rounded blue triangle holding the
-// support icons (sun for beam-receiver, ballerina for spin-grav,
-// satellite for push-sat, etc.) in the upper interior, with the
-// pink thrust circle + fuel droplet anchored at the base.
+// Thrust visualisation: rounded blue triangle. The pink thrust
+// circle + 💧 fuel droplet sit INSIDE the triangle, in the wider
+// lower portion where they fit comfortably above the base.
+// Support icons live in a separate supports box outside the
+// triangle — they're never drawn here.
 function thrustVisual(card) {
   const wrap = document.createElement('div');
   wrap.className = 'thrust-visual';
@@ -310,21 +317,6 @@ function thrustVisual(card) {
     ? 0
     : Math.max(1, Math.ceil(thrust / Math.max(1, card.isp || 1)));
 
-  // Support icons inside the triangle, stacked vertically along
-  // the centre line to match the published-card silhouette: one
-  // glyph centred for a single support; two stacked top-and-
-  // bottom for a pair; three packed into a small triangle (one
-  // up high, two flanking lower) when a card carries three.
-  const reqs = (card.requires || []).slice(0, 3).filter((r) => REQUIREMENT_VIS[r.kind]);
-  const iconLayouts = {
-    1: [{ x: 70, y: 58, s: 26 }],
-    2: [{ x: 70, y: 40, s: 20 }, { x: 70, y: 68, s: 20 }],
-    3: [{ x: 70, y: 36, s: 14 }, { x: 56, y: 68, s: 14 },
-        { x: 84, y: 68, s: 14 }],
-  };
-  const layout = iconLayouts[reqs.length] || [];
-  const iconsSvg = reqs.map((r, i) => triangleIconSvg(r.kind, r.count, layout[i])).join('');
-
   // Rounded-triangle path. Apex at (70,12); base (18,86)–(122,86).
   // Each corner is curved with a small quadratic; tangent points
   // are pre-computed ~10 units along each edge so the silhouette
@@ -334,10 +326,10 @@ function thrustVisual(card) {
     'Q 122 86 116.25 77.82 L 75.75 20.18 ' +
     'Q 70 12 64.25 20.18 Z';
 
-  // The arrow + base line use currentColor so they read against
-  // either the white primary face or the black secondary face.
-  // The water droplet is the 💧 emoji with the fuel cost overlaid
-  // (white halo for readability on any platform's emoji palette).
+  // Pink circle at (50, 72) r=10 and droplet at (88, 79) sit
+  // safely inside the triangle: at y≈72 the interior is ~70
+  // viewBox-units wide (32 to 108), giving each icon room.
+  // The arrow connects them at y=72.
   wrap.innerHTML = `
     <svg viewBox="0 0 140 96" class="thrust-svg">
       <defs>
@@ -349,20 +341,21 @@ function thrustVisual(card) {
       <path d="${trianglePath}"
         fill="rgba(96,165,250,0.35)" stroke="#60a5fa" stroke-width="2.5"
         stroke-linejoin="round"/>
-      ${iconsSvg}
-      <line x1="35" y1="86" x2="100" y2="86"
-        stroke="currentColor" stroke-width="1.8"
+      ${card.afterburn ? `<text x="70" y="42" text-anchor="middle"
+        font-size="22" data-tip="Afterburn">🔥</text>` : ''}
+      <line x1="63" y1="72" x2="76" y2="72"
+        stroke="currentColor" stroke-width="1.6"
         marker-end="url(#thrust-arrow)"/>
       <g data-tip="Thrust: ${thrust}">
-        <circle cx="22" cy="86" r="13" fill="#ec4899" stroke="#fbcfe8" stroke-width="1.5"/>
-        <text x="22" y="90" text-anchor="middle" font-size="14"
+        <circle cx="50" cy="72" r="10" fill="#ec4899" stroke="#fbcfe8" stroke-width="1.5"/>
+        <text x="50" y="76" text-anchor="middle" font-size="13"
           font-weight="700" fill="#ffffff">${thrust}</text>
       </g>
       <g data-tip="Fuel per burn: ${fuel}">
-        <text x="116" y="98" text-anchor="middle" font-size="28">💧</text>
-        <text x="116" y="93" text-anchor="middle" font-size="11"
+        <text x="88" y="79" text-anchor="middle" font-size="22">💧</text>
+        <text x="88" y="75" text-anchor="middle" font-size="10"
           font-weight="700" fill="#0c1d34" stroke="#ffffff"
-          stroke-width="2.6" paint-order="stroke">${fuel}</text>
+          stroke-width="2.4" paint-order="stroke">${fuel}</text>
       </g>
     </svg>
   `;
