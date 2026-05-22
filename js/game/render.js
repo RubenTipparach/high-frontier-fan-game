@@ -120,7 +120,15 @@ export class MapRenderer {
       }
       this._renderEdges();
       this._renderRouteLayer();
-      this._renderSites();
+      // Partition nodes: routing waypoints (~1300) get combined into
+      // a few typed <path> elements with no per-node DOM. Real sites
+      // (~190) keep individual <g> wrappers so they retain
+      // interactivity, CSS hit-testing, and tooltip targeting.
+      this._waypoints = this.data.sites.filter((s) => s.isWaypoint);
+      this._realSites = this.data.sites.filter((s) => !s.isWaypoint);
+      this._renderWaypoints();
+      this._renderRealSites();
+      this._wireWaypointHitTest();
     }
 
     // Tooltip lives outside the SVG so it can use HTML.
@@ -309,17 +317,57 @@ export class MapRenderer {
   }
 
   _renderSites() {
+    this._waypoints = this.data.sites.filter((s) => s.isWaypoint);
+    this._realSites = this.data.sites.filter((s) => !s.isWaypoint);
+    this._renderWaypoints();
+    this._renderRealSites();
+  }
+
+  // Combine each waypoint type into ONE <path> using arc subpath
+  // commands. ~1300 DOM nodes -> 3-4 path elements. Hit-testing is
+  // done in JS (like the planner's nearestPoint) so we don't need
+  // per-node click handlers either.
+  _renderWaypoints() {
+    const g = el('g', { class: 'waypoints' }, this.viewport);
+    const byType = new Map();
+    for (const w of this._waypoints) {
+      const arr = byType.get(w.type) || [];
+      arr.push(w);
+      byType.set(w.type, arr);
+    }
+    for (const [type, items] of byType) {
+      const vis = TYPE_VIS[type] || TYPE_VIS.unknown;
+      // Build a path of stamped circles. M cx,cy m -r,0 a r,r 0 1,0 2r,0 a r,r 0 1,0 -2r,0
+      // is the standard SVG idiom for "draw a circle at cx,cy as a
+      // sub-path".
+      let d = '';
+      for (const w of items) {
+        const r = vis.r;
+        d += `M ${w.x.toFixed(1)} ${w.y.toFixed(1)} ` +
+             `m -${r} 0 a ${r} ${r} 0 1 0 ${r*2} 0 a ${r} ${r} 0 1 0 -${r*2} 0 `;
+      }
+      el('path', {
+        d,
+        class: 'waypoint-blob waypoint-' + type,
+        fill: vis.fill,
+        stroke: vis.stroke,
+        'stroke-width': 2,
+      }, g);
+    }
+  }
+
+  // Real sites keep their <g> + per-node click listeners. ~190 of
+  // these, which is well under any DOM perf cliff.
+  _renderRealSites() {
     const g = el('g', { class: 'sites' }, this.viewport);
-    for (const site of this.data.sites) {
+    for (const site of this._realSites) {
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
       const groupNode = el('g', {
-        class: 'site site-type-' + site.type + (site.isWaypoint ? ' waypoint' : ''),
+        class: 'site site-type-' + site.type,
         transform: `translate(${site.x.toFixed(1)},${site.y.toFixed(1)})`,
       }, g);
       groupNode.dataset.id = site.id;
 
-      // Body shape: hexagon for real sites, circle for waypoints.
-      // Black fill + white stroke matches the planner's site idiom.
       const stroke = site.hazard ? '#f87171' : vis.stroke;
       if (vis.kind === 'hex') {
         el('polygon', {
@@ -337,48 +385,25 @@ export class MapRenderer {
         }, groupNode);
       }
 
-      // Inside the hex: siteSize on top, hydration (water) below.
-      // The planner stamps these two short numbers inside the node
-      // because the relevant info at a glance is "how hard to claim,
-      // how wet is it". We do the same.
-      if (!site.isWaypoint) {
-        if (site.siteSize) {
-          el('text', {
-            y: -3,
-            class: 'site-size',
-            'text-anchor': 'middle',
-          }, groupNode).textContent = site.siteSize;
-        }
-        const hyd = site.hydration | 0;
-        if (hyd) {
-          el('text', {
-            y: 9,
-            class: 'site-water',
-            'text-anchor': 'middle',
-          }, groupNode).textContent = hyd;
-        }
+      if (site.siteSize) {
+        el('text', {
+          y: -3, class: 'site-size', 'text-anchor': 'middle',
+        }, groupNode).textContent = site.siteSize;
       }
-
-      // Hazard skull overlay for hazard waypoints (radhaz / lagrange
-      // hazard zones).
+      const hyd = site.hydration | 0;
+      if (hyd) {
+        el('text', {
+          y: 9, class: 'site-water', 'text-anchor': 'middle',
+        }, groupNode).textContent = hyd;
+      }
       if (site.hazard) {
         el('text', {
-          y: 5,
-          class: 'site-hazard',
-          'text-anchor': 'middle',
+          y: 5, class: 'site-hazard', 'text-anchor': 'middle',
         }, groupNode).textContent = '☠';
       }
-
-      // External label below the node for real sites. Routing
-      // waypoints (lagrange / burn / hohmann) stay anonymous; tap
-      // surfaces their type in the tooltip / route status.
-      if (!site.isWaypoint) {
-        el('text', {
-          y: vis.r + 12,
-          class: 'site-label',
-          'text-anchor': 'middle',
-        }, groupNode).textContent = site.name;
-      }
+      el('text', {
+        y: vis.r + 12, class: 'site-label', 'text-anchor': 'middle',
+      }, groupNode).textContent = site.name;
 
       groupNode.addEventListener('mouseenter', () => this._showTooltip(site, groupNode));
       groupNode.addEventListener('mouseleave', () => this._hideTooltip());
@@ -387,6 +412,45 @@ export class MapRenderer {
         if (this.onSelect) this.onSelect(site);
       });
     }
+  }
+
+  // Click handler on the SVG root: if the click landed on a real
+  // site (DOM-routed), the per-node listener already fired. If not,
+  // hit-test waypoints in JS and dispatch.
+  _wireWaypointHitTest() {
+    this.svg.addEventListener('click', (ev) => {
+      // If the click landed inside a real-site <g>, that node's
+      // own listener already fired and called stopPropagation.
+      // Anything reaching here is on background or on a waypoint.
+      const pt = this._eventToViewport(ev);
+      const hit = this._nearestWaypoint(pt.x, pt.y, 14);
+      if (hit && this.onSelect) this.onSelect(hit);
+    });
+  }
+
+  // Convert a DOM event's clientX/Y into viewport (post-pan/zoom)
+  // SVG coords. Required for JS hit-testing against the waypoint
+  // positions stored in data-space units.
+  _eventToViewport(ev) {
+    const rect = this.svg.getBoundingClientRect();
+    const sx = (ev.clientX - rect.left) / rect.width * VIEW_W;
+    const sy = (ev.clientY - rect.top) / rect.height * VIEW_H;
+    // Undo the viewport's translate + scale.
+    const wx = (sx - this.pan.x) / this.zoom;
+    const wy = (sy - this.pan.y) / this.zoom;
+    return { x: wx, y: wy };
+  }
+
+  _nearestWaypoint(x, y, maxR) {
+    let best = null;
+    let bestDist = maxR * maxR;
+    for (const w of this._waypoints || []) {
+      const dx = w.x - x;
+      const dy = w.y - y;
+      const d = dx * dx + dy * dy;
+      if (d < bestDist) { bestDist = d; best = w; }
+    }
+    return best;
   }
 
   _showTooltip(site, node) {

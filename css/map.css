@@ -140,6 +140,11 @@
   stroke-width: 3;
   pointer-events: none;
 }
+.map-svg .waypoint-blob {
+  pointer-events: visiblePainted;
+  cursor: pointer;
+  vector-effect: non-scaling-stroke;
+}
 .map-svg .site-size {
   font: 600 9px ui-sans-serif, system-ui, sans-serif;
   fill: #ffffff;
