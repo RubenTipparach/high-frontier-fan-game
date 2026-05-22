@@ -208,6 +208,12 @@ function buildFace(label, tier, type) {
     base.afterburn   = !!tier.Afterburn;
     base.bonusPivots = tier['Bonus Pivots'] || 0;
     base.therms      = tier.Therms;
+    // Reactors / generators that PAIR with a thruster have a
+    // thrust modifier + fuel modifier (e.g. Cermet NERVA's +3
+    // thrust mod). Surface those so the renderer can paint a
+    // small "wrench" modifier triangle next to the typebar.
+    base.thrustMod   = tier['Thrust Modifier'];
+    base.fuelMod     = tier['Fuel Consumption Modifier'];
   }
   return base;
 }

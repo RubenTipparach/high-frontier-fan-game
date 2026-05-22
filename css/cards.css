@@ -312,6 +312,24 @@
   font-size: 18px;
   font-weight: 800;
 }
+/* OR-separator inside a multi-glyph supplier chip — the "/"
+   between e.g. X / ∿ / 💣 telling the player any one of the
+   listed kinds satisfies the slot. */
+.card-requires .req .req-or {
+  margin: 0 3px;
+  font-weight: 600;
+  opacity: 0.7;
+  font-size: 14px;
+}
+
+/* Modifier triangle for reactor / generator pairing cards.
+   Same silhouette as the thrust triangle but slate-grey with
+   a 🔧 wrench in the apex, signalling "this modifies whatever
+   thruster you stack me with." */
+.thrust-visual.is-modifier {
+  margin: 2px 0;
+}
+.thrust-visual.is-modifier .thrust-svg { color: #cbd5e1; }
 .card-requires .req[data-supplier] b {
   color: inherit;
   opacity: 0.85;

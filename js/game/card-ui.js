@@ -172,7 +172,7 @@ function buildFace(card, sideName, kind) {
       <span class="card-spectral"></span>
     </div>
     <div class="card-body">
-      ${isThruster ? '<div class="card-thrust"></div>' : ''}
+      ${isThruster ? '<div class="card-thrust"></div>' : '<div class="card-thrust-mod"></div>'}
       <div class="card-properties"></div>
       <ul class="card-stats"></ul>
       <div class="card-supports">
@@ -226,6 +226,15 @@ function buildFace(card, sideName, kind) {
     // reflects that face's own thrust/fuel/afterburn rather
     // than copying the primary face's.
     thrustHost.appendChild(thrustVisual(card, card.faces && card.faces[sideName]));
+  } else if (card.faces && card.faces[sideName] &&
+             card.faces[sideName].thrustMod != null) {
+    // Reactor / generator pairing modifier: smaller black-tinted
+    // triangle with a 🔧 wrench corner, showing the thrust +
+    // fuel multipliers this card applies to whichever thruster
+    // it's stacked with. Reuses the same SVG shape as the
+    // normal thruster triangle so the visual idiom carries.
+    const host = face.querySelector('.card-thrust-mod');
+    if (host) host.appendChild(thrustModVisual(card.faces[sideName]));
   }
 
   // Type-specific stat list (everything that doesn't fit in the
@@ -316,21 +325,50 @@ function buildFace(card, sideName, kind) {
   // Each face carries its own supports — Tier-2 is a different
   // tech with potentially different chip requirements.
   const reqs = (faceData.requires) || card.requires || [];
+  // Same-supplier supports are OR-alternatives, not AND-required.
+  // A refinery that lists X / ∿ / 💣 reactor needs ANY ONE of the
+  // three, so we collapse all reactor-* into one OR-chip with
+  // the glyphs slash-separated. Generators do the same. Reqs
+  // that don't share a supplier (e.g. one reactor + one
+  // generator) stay as separate chips — those ARE both needed.
+  const groups = new Map();
+  const loose = [];
   for (const r of reqs) {
-    const vis = REQUIREMENT_VIS[r.kind] || { glyph: '◇', label: r.kind };
+    const supplier = REQ_SUPPLIER_TYPE[r.kind];
+    if (!supplier) { loose.push(r); continue; }
+    if (!groups.has(supplier)) groups.set(supplier, []);
+    groups.get(supplier).push(r);
+  }
+  const makeChip = (visGlyphs, supplier, tip) => {
     const span = document.createElement('span');
     span.className = 'req';
-    span.setAttribute('data-tip', r.count > 1 ? `${vis.label} ×${r.count}` : vis.label);
-    // data-supplier drives the chip's tint colour via cards.css
-    // (same palette as the card-typebar of the supplier type).
-    const supplier = REQ_SUPPLIER_TYPE[r.kind];
+    span.setAttribute('data-tip', tip);
     if (supplier) span.dataset.supplier = supplier;
+    span.innerHTML = visGlyphs;
+    reqHost.appendChild(span);
+  };
+  for (const [supplier, group] of groups) {
+    const parts = group.map((r) => {
+      const vis = REQUIREMENT_VIS[r.kind] || { glyph: '◇', label: r.kind };
+      const count = r.count > 1 ? `<b>×${r.count}</b>` : '';
+      return `<em>${vis.glyph}</em>${count}`;
+    });
+    const labelParts = group.map((r) =>
+      (REQUIREMENT_VIS[r.kind] || { label: r.kind }).label);
+    const tip = group.length > 1
+      ? `Any of: ${labelParts.join(' / ')}`
+      : labelParts[0];
+    makeChip(parts.join('<span class="req-or">/</span>'), supplier, tip);
+  }
+  for (const r of loose) {
+    const vis = REQUIREMENT_VIS[r.kind] || { glyph: '◇', label: r.kind };
     let iconHtml;
     if (r.kind === 'beam-receiver')  iconHtml = svgSunChip(16);
     else if (r.kind === 'spin-grav') iconHtml = svgBallerinaChip(16);
     else                             iconHtml = `<em>${vis.glyph}</em>`;
-    span.innerHTML = `${iconHtml}${r.count > 1 ? `<b>×${r.count}</b>` : ''}`;
-    reqHost.appendChild(span);
+    const count = r.count > 1 ? `<b>×${r.count}</b>` : '';
+    makeChip(`${iconHtml}${count}`, null,
+      r.count > 1 ? `${vis.label} ×${r.count}` : vis.label);
   }
 
   // Blurb / ability text varies per face. The Tier-2 dark side
@@ -508,6 +546,51 @@ function thrustVisual(card, face) {
           font-weight="700" fill="#0c1d34" stroke="#ffffff"
           stroke-width="2.4" paint-order="stroke">${fuelText}</text>
       </g>
+    </svg>
+  `;
+  return wrap;
+}
+
+// Modifier triangle for reactor / generator cards that pair
+// with a thruster. Same rounded-triangle silhouette as the
+// regular thrust visual but rendered in slate-grey + capped
+// with a 🔧 wrench glyph so the player reads it as "this
+// modifies a thruster I'm stacked with" rather than "this is
+// my own thrust." Thrust mod (+N / -N) sits in a darker
+// pink-circle clone; fuel mod (×N or fraction) sits next to
+// a 💧 droplet just like the regular triangle.
+function thrustModVisual(face) {
+  const wrap = document.createElement('div');
+  wrap.className = 'thrust-visual is-modifier';
+  const tm = face.thrustMod;
+  const fm = face.fuelMod;
+  const tmText = (tm > 0 ? '+' : '') + tm;
+  const fmText = fm == null
+    ? ''
+    : (Number.isInteger(fm) ? `×${fm}` : `×${fm.toFixed(2)}`);
+  const trianglePath = 'M 64.25 20.18 L 23.75 77.82 ' +
+    'Q 18 86 28 86 L 112 86 ' +
+    'Q 122 86 116.25 77.82 L 75.75 20.18 ' +
+    'Q 70 12 64.25 20.18 Z';
+  wrap.innerHTML = `
+    <svg viewBox="0 0 140 96" class="thrust-svg thrust-svg-mod">
+      <path d="${trianglePath}"
+        fill="rgba(51, 65, 85, 0.55)" stroke="#94a3b8"
+        stroke-width="2.5" stroke-linejoin="round"/>
+      <text x="70" y="40" text-anchor="middle" font-size="22"
+        data-tip="Thruster modifier">🔧</text>
+      <g data-tip="Thrust modifier: ${tmText}">
+        <circle cx="50" cy="72" r="10" fill="#831843" stroke="#fbcfe8" stroke-width="1.5"/>
+        <text x="50" y="76" text-anchor="middle" font-size="12"
+          font-weight="700" fill="#ffffff">${tmText}</text>
+      </g>
+      ${fm != null ? `
+      <g data-tip="Fuel modifier: ${fmText}">
+        <text x="88" y="79" text-anchor="middle" font-size="22">💧</text>
+        <text x="88" y="75" text-anchor="middle" font-size="9"
+          font-weight="700" fill="#0c1d34" stroke="#ffffff"
+          stroke-width="2.4" paint-order="stroke">${fmText}</text>
+      </g>` : ''}
     </svg>
   `;
   return wrap;
