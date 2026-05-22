@@ -209,34 +209,39 @@ function bodyKeyFor(site) {
 // Inject Sun + Earth + Jupiter as renderable sites. The planner's
 // underlying graph doesn't include them: Sun is implicit, Earth is
 // implicit (LEO is the entry point), and Jupiter's body is implied
-// by the cluster of Galilean moons. We add them with synthetic ids
-// so the renderer can draw them but the pathfinder ignores them
-// (no edges touch them, so they're inert in nav).
+// by the cluster of Galilean moons. Positions match the planner's
+// own board landmarks:
+//   Earth  -> centred on the +2 gravity-assist Lagrange (LEO).
+//   Jupiter -> centred on the +4 gravity-assist (the deep gas-giant
+//             flyby node in the Galilean cluster).
+//   Sun    -> bottom-right corner, sized so its top-right arc
+//             touches the Oberth burn node at the bottom of the map.
 function synthesizeBodies(sites, viewW, viewH) {
   const synthetics = [
     {
       id: 'synthetic_sun',
       name: 'Sun',
       type: 'sun',
-      // Just off-canvas to the bottom-right of Mercury, anchoring
-      // the inner-system orbital direction.
-      nx: 0.56, ny: 0.93,
+      // Sun world-radius is ~120; we want the top-right edge (the
+      // +45° point of the disc) to land on Oberth ~(0.832, 0.983).
+      // Solving: cx = Oberth_x - r/sqrt(2)/viewW, cy = Oberth_y + r/sqrt(2)/viewH.
+      // Pre-computed for r=120, viewW=1400, viewH=900.
+      nx: 0.772, ny: 1.077,
     },
     {
       id: 'synthetic_earth',
       name: 'Earth',
+      // LEO sits on top of the Earth-Moon +2 gravity assist
+      // Lagrange in the planner data.
       type: 'inner-planet',
-      // Right next to Luna's cluster.
-      nx: 0.82, ny: 0.71,
+      nx: 0.871, ny: 0.813,
     },
     {
       id: 'synthetic_jupiter',
       name: 'Jupiter',
+      // +4 gravity-assist Lagrange = Jupiter's gravity well centre.
       type: 'gas-giant',
-      // Centroid of the Galilean moons (Io / Europa / Ganymede /
-      // Callisto sit around 0.27..0.36 horizontally, 0.50..0.58
-      // vertically).
-      nx: 0.305, ny: 0.545,
+      nx: 0.337, ny: 0.429,
     },
   ];
   for (const s of synthetics) {
