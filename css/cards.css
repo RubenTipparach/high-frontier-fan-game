@@ -406,7 +406,6 @@
   color: var(--ink);
   font-size: 12px;
 }
-.card-footer .face-tag { margin-left: auto; color: var(--ink-mute); }
 
 .card-flip {
   position: absolute;

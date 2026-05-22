@@ -196,7 +196,6 @@ function buildFace(card, sideName, kind) {
     </div>
     <div class="card-footer">
       <span class="card-name"></span>
-      <span class="face-tag"></span>
     </div>
   `;
   // Typebar icon strategy: for cards that SUPPLY support chips
@@ -230,9 +229,6 @@ function buildFace(card, sideName, kind) {
   const radVal   = (faceRad  != null ? faceRad  : card.radHardness);
   face.querySelector('.m').textContent = massVal != null ? massVal : '—';
   face.querySelector('.r').textContent = radVal != null ? radVal : '—';
-  face.querySelector('.face-tag').textContent =
-    (card.faces && card.faces[sideName] && card.faces[sideName].label) ||
-    (sideName === 'primary' ? 'A' : 'B');
 
   face.querySelector('.card-spectral').appendChild(spectralHex(card.spectralType));
 
