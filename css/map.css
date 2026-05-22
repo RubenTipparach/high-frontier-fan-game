@@ -495,7 +495,14 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .browse-sidepanel[data-active=""] ~ .sandbox-hand { right: 48px; }
 @media (max-width: 720px) {
-  .sandbox-hand { right: 0 !important; bottom: 64px; }
+  /* Right edge is now the 44px tab strip on phones too. The hand
+     extends to the bottom and tucks under the tab column. */
+  .sandbox-hand { right: 44px; bottom: 0; }
+  .browse-sidepanel[data-active=""] ~ .sandbox-hand { right: 44px; }
+  /* When a pane is open it overlays the hand from the right;
+     the hand stays put underneath so the player can still drag
+     cards in / out without the panel re-flowing the strip. */
+  .browse-sidepanel[data-active] ~ .sandbox-hand { right: 44px; }
 }
 .hand-header {
   display: flex;
@@ -828,48 +835,24 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .browse-sidepanel[data-active=""] { width: 48px; }
 
-/* Phone / narrow-portrait layout. The 720px width breakpoint is
-   more reliable than (orientation: portrait) — landscape phones,
-   foldables, and split-screen tablets all want the same bottom-
-   sheet treatment. The panel anchors to the bottom edge and
-   slides up when a tab is selected. A 4px drag handle sits at
-   the top of the sheet so the affordance reads as "this opens
-   upward" without needing a tutorial. */
+/* Phone / narrow-portrait layout. The hand strip owns the bottom
+   of the screen, so the sidepanel stays anchored to the right edge
+   here too. Collapsed it's a 44px tab strip; opened it slides out
+   to cover most of the width. */
 @media (max-width: 720px) {
   .browse-sidepanel {
-    flex-direction: column;
-    border-left: none;
-    border-top: 1px solid var(--border);
-    border-top-left-radius: 14px;
-    border-top-right-radius: 14px;
-    box-shadow: 0 -12px 24px rgba(0, 0, 0, 0.45);
-    top: auto;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    width: auto !important;
-    height: 64px;
-  }
-  .browse-sidepanel::before {
-    content: "";
-    position: absolute;
-    top: 6px;
-    left: 50%;
-    transform: translateX(-50%);
     width: 44px;
-    height: 4px;
-    border-radius: 2px;
-    background: var(--ink-mute);
-    opacity: 0.6;
-    pointer-events: none;
   }
   .browse-sidepanel[data-active] {
-    width: auto !important;
-    height: 70vh;
+    width: min(92vw, 480px) !important;
   }
   .browse-sidepanel[data-active=""] {
-    height: 64px;
+    width: 44px !important;
   }
+  /* Reserve enough room for the hand strip + grabber. The
+     sidepanel sits above the strip so its tabs stay reachable. */
+  .browse-sidepanel { bottom: 0; }
+  .sidepanel-tabs { flex: 0 0 44px; }
 }
 
 .sidepanel-tabs {
@@ -882,21 +865,18 @@ body:has(#view-browse:not(.hidden)) #main {
   flex: 0 0 48px;
 }
 @media (max-width: 720px) {
+  /* Vertical tab strip on the right edge — same layout as desktop
+     so the hand strip can own the entire bottom of the screen. */
   .sidepanel-tabs {
-    flex-direction: row;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-    height: 64px;
-    padding: 14px 12px 8px;
-    justify-content: space-around;
-    flex: 0 0 64px;
-    overflow-x: auto;
-    gap: 2px;
+    flex-direction: column;
+    padding: 8px 2px;
+    flex: 0 0 44px;
+    gap: 4px;
   }
   .sidepanel-tabs button {
-    width: 44px;
-    height: 44px;
-    font-size: 22px;
+    width: 38px;
+    height: 38px;
+    font-size: 20px;
     flex-shrink: 0;
   }
 }
