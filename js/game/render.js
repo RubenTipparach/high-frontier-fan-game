@@ -1,13 +1,15 @@
 // SVG renderer for the delta-v map.
 //
-// Inputs: a target <svg> element and (optionally) a game-state shape
-// describing which sites are claimed and where ships are. Stage 2 only
-// uses the static SITES + EDGES; Stage 3 will pass live state.
+// Inputs:
+//   host         a target <div> the SVG mounts into
+//   data         { sites, edges, byId } as returned by the
+//                planner-map loader. Waypoint nodes (lagrange,
+//                burn, hohmann) render small and unlabelled;
+//                site nodes render with their full label.
+//   onSelect     optional click handler; receives the site object.
 //
-// Pan/zoom is implemented with a manual transform (no external libs).
-// Hover surfaces a tooltip; click fires onSelect with the site id.
-
-import { SITES, EDGES, SITES_BY_ID, SOLAR_ZONES } from '../../data/sites.js';
+// Pan/zoom + pinch are implemented with a manual transform (no
+// external libs). Hover surfaces a tooltip.
 
 const VIEW_W = 1400;
 const VIEW_H = 900;
@@ -23,18 +25,23 @@ function el(name, attrs, parent) {
   return node;
 }
 
-// Site type -> visual treatment. Larger radius for bigger
-// gravitational players so the eye groups them; colors split
-// rocky / icy / lagrangian.
+// Site type -> visual treatment. Larger radius for sites the
+// player can actually land on, smaller for routing waypoints
+// (the planner's intermediate burn / hohmann / lagrange points
+// along each interplanetary corridor).
 const TYPE_VIS = {
+  site:     { r:  7, fill: '#fbbf24', stroke: '#facc15' },
   planet:   { r: 14, fill: '#fbbf24', stroke: '#facc15' },
   moon:     { r:  8, fill: '#94a3b8', stroke: '#cbd5e1' },
   dwarf:    { r: 10, fill: '#a78bfa', stroke: '#c4b5fd' },
   asteroid: { r:  6, fill: '#9ca3af', stroke: '#d1d5db' },
   tno:      { r:  9, fill: '#67e8f9', stroke: '#a5f3fc' },
-  lagrange: { r:  6, fill: '#38bdf8', stroke: '#7dd3fc' },
+  lagrange: { r:  3, fill: '#1e293b', stroke: '#38bdf8' },
+  burn:     { r:  3, fill: '#1e293b', stroke: '#7dd3fc' },
+  hohmann:  { r:  3, fill: '#1e293b', stroke: '#fbbf24' },
   orbit:    { r:  5, fill: '#1e293b', stroke: '#7dd3fc' },
   surface:  { r:  7, fill: '#fb923c', stroke: '#fdba74' },
+  unknown:  { r:  3, fill: '#1e293b', stroke: '#475569' },
 };
 
 // Class -> small visual hint on the prospect badge.
@@ -69,8 +76,9 @@ function zoneSlug(zone) {
 }
 
 export class MapRenderer {
-  constructor(host, { onSelect } = {}) {
+  constructor(host, { data, onSelect } = {}) {
     this.host = host;
+    this.data = data;        // { sites, edges, byId } from planner-map.js
     this.onSelect = onSelect || null;
     this.zoom = 1;
     this.pan = { x: 0, y: 0 };
@@ -78,6 +86,7 @@ export class MapRenderer {
     this.svg = null;
     this.viewport = null;
     this._dragStart = null;
+    this._gesture = null;
     this._mount();
   }
 
@@ -98,9 +107,10 @@ export class MapRenderer {
     // it instead of mutating every child keeps interaction cheap.
     this.viewport = el('g', { class: 'viewport' }, this.svg);
 
-    this._renderZoneBands();
-    this._renderEdges();
-    this._renderSites();
+    if (this.data) {
+      this._renderEdges();
+      this._renderSites();
+    }
 
     // Tooltip lives outside the SVG so it can use HTML.
     this.tooltipEl = document.createElement('div');
@@ -126,53 +136,26 @@ export class MapRenderer {
     }
   }
 
-  // Faint horizontal bands behind each solar zone, with the zone name
-  // pinned to the left margin. Makes the layered-tree structure
-  // visually obvious: Mercury runs across the top, Neptune the bottom,
-  // and the eye reads a body's delta-v at a glance from how far right
-  // it is on its lane.
-  _renderZoneBands() {
-    const g = el('g', { class: 'zone-bands' }, this.viewport);
-    const bandH = 90; // matches the generator's (SVG_H - margins) / 9
-    const startY = 60;
-    for (let i = 0; i < SOLAR_ZONES.length; i++) {
-      const y = startY + bandH * i;
-      el('rect', {
-        x: 0, y, width: 1400, height: bandH,
-        class: 'zone-band',
-        'data-zone': SOLAR_ZONES[i],
-      }, g);
-      el('text', {
-        x: 14, y: y + bandH / 2 + 4,
-        class: 'zone-label',
-      }, g).textContent = SOLAR_ZONES[i];
-    }
-  }
-
   _renderEdges() {
     const g = el('g', { class: 'edges' }, this.viewport);
-    for (const [a, b, dv] of EDGES) {
-      const sa = SITES_BY_ID[a];
-      const sb = SITES_BY_ID[b];
+    for (const [a, b, dv] of this.data.edges) {
+      const sa = this.data.byId[a];
+      const sb = this.data.byId[b];
       if (!sa || !sb) continue;
-      // Metro-map-ish S-curve: horizontally anchored cubic Bézier
-      // so adjacent edges curve into each other instead of crossing
-      // at sharp angles. Control points sit on the source/target's
-      // horizontal axis at half the horizontal distance, which makes
-      // long inter-zone edges arc out and short same-zone edges
-      // stay nearly straight.
+      // Metro-style soft curve. Same horizontal-anchored Bézier as
+      // the zone-coloured iteration before, just rendered over the
+      // planner's denser waypoint graph so each "route" naturally
+      // becomes a chain of short segments rather than a long line
+      // crossing the whole canvas.
       const d = curvePath(sa, sb);
-      // Colour by the source zone so the eye can trace a single
-      // "line" (Mars routes, Belt routes, etc.) across the chart.
-      const zoneClass = zoneSlug(sa.solarZone);
+      const cls = sa.hazard || sb.hazard ? 'edge hazard' : 'edge';
       const path = el('path', {
         d,
-        class: 'edge zone-' + zoneClass,
+        class: cls,
         'data-dv': dv,
       }, g);
       path.dataset.from = a;
       path.dataset.to = b;
-      // dv label at the midpoint of the curve, hidden until zoom.
       const mx = (sa.x + sb.x) / 2;
       const my = (sa.y + sb.y) / 2;
       el('text', {
@@ -183,51 +166,39 @@ export class MapRenderer {
 
   _renderSites() {
     const g = el('g', { class: 'sites' }, this.viewport);
-    for (const site of SITES) {
-      const vis = TYPE_VIS[site.type] || TYPE_VIS.asteroid;
+    for (const site of this.data.sites) {
+      const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
       const groupNode = el('g', {
-        class: 'site',
+        class: 'site site-type-' + site.type + (site.isWaypoint ? ' waypoint' : ''),
         transform: `translate(${site.x},${site.y})`,
       }, g);
       groupNode.dataset.id = site.id;
 
-      // Body disc.
-      el('circle', { r: vis.r, fill: vis.fill, stroke: vis.stroke, 'stroke-width': 1.5 }, groupNode);
+      const circ = el('circle', { r: vis.r, fill: vis.fill, stroke: vis.stroke, 'stroke-width': 1.5 }, groupNode);
+      if (site.hazard) circ.setAttribute('stroke', '#f87171');
 
-      // Class badge if prospectable.
-      if (site.class) {
-        const bx = vis.r + 2, by = -vis.r - 2;
-        el('rect', {
-          x: bx, y: by - 8, width: 14, height: 11, rx: 2,
-          fill: CLASS_FILL[site.class],
-          opacity: 0.85,
-        }, groupNode);
-        el('text', {
-          x: bx + 7, y: by + 1, class: 'class-badge', 'text-anchor': 'middle',
-        }, groupNode).textContent = site.class;
+      // Hydration drops to the right of the node, only for real
+      // sites (waypoints don't have water).
+      if (!site.isWaypoint && site.hydration) {
+        for (let i = 0; i < site.hydration; i++) {
+          el('circle', {
+            cx: vis.r + 4 + i * 5, cy: -vis.r - 1, r: 2,
+            fill: '#7dd3fc',
+          }, groupNode);
+        }
       }
 
-      // Hydration drops to the right of the badge.
-      for (let i = 0; i < site.hydration; i++) {
-        el('circle', {
-          cx: vis.r + 22 + i * 6, cy: -vis.r - 3, r: 2,
-          fill: '#7dd3fc',
+      // Label. Real sites are always labelled; routing waypoints
+      // (lagrange/burn/hohmann) only show their type on hover so
+      // the 1500-node graph stays readable.
+      if (!site.isWaypoint) {
+        const lbl = el('text', {
+          y: vis.r + 12,
+          class: 'site-label',
+          'text-anchor': 'middle',
         }, groupNode);
+        lbl.textContent = site.name;
       }
-
-      // Label. The graph has ~190 sites, so we mark "minor" bodies
-      // (asteroids, moons, lagrange points) as zoom-conditional and
-      // only paint their names when the renderer's zoom crosses
-      // LABEL_ZOOM_THRESHOLD. Planets / dwarfs / KBOs stay labeled
-      // at all zooms so the eye has reliable landmarks.
-      const lbl = el('text', {
-        y: vis.r + 14,
-        class: 'site-label',
-        'text-anchor': 'middle',
-      }, groupNode);
-      lbl.textContent = site.name;
-      const isMinor = ['asteroid', 'moon', 'lagrange', 'orbit', 'comet'].includes(site.type);
-      if (isMinor) lbl.classList.add('minor');
 
       // Hover + click wiring.
       groupNode.addEventListener('mouseenter', () => this._showTooltip(site, groupNode));
@@ -245,18 +216,16 @@ export class MapRenderer {
       <div class="t-name"></div>
       <div class="t-meta">
         <span class="t-type"></span>
-        <span class="t-class"></span>
+        <span class="t-size"></span>
         <span class="t-hydr"></span>
-        <span class="t-vps"></span>
+        <span class="t-hazard"></span>
       </div>
-      <div class="t-blurb"></div>
     `;
     t.querySelector('.t-name').textContent = site.name;
     t.querySelector('.t-type').textContent = site.type;
-    t.querySelector('.t-class').textContent = site.class ? `class ${site.class}` : '';
+    t.querySelector('.t-size').textContent = site.siteSize || '';
     t.querySelector('.t-hydr').textContent = site.hydration ? `${'💧'.repeat(site.hydration)}` : '';
-    t.querySelector('.t-vps').textContent = site.vps ? `${site.vps} VP` : '';
-    t.querySelector('.t-blurb').textContent = site.blurb;
+    t.querySelector('.t-hazard').textContent = site.hazard ? '⚠ hazard' : '';
     t.classList.remove('hidden');
     const bb = node.getBoundingClientRect();
     const hb = this.host.getBoundingClientRect();

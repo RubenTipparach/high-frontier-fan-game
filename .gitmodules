@@ -1,0 +1,3 @@
+[submodule "vendor/hf-mission-planner"]
+	path = vendor/hf-mission-planner
+	url = https://github.com/nornagon/hf-mission-planner.git

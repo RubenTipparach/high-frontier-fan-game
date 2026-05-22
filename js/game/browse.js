@@ -6,6 +6,7 @@
 // replace with the live game.
 
 import { MapRenderer } from './render.js';
+import { loadPlannerMap } from './planner-map.js';
 import { PATENTS, PATENT_TYPES, patentsByType } from '../../data/patents.js';
 import { MILESTONES } from '../../data/glory.js';
 import { POLITICS } from '../../data/politics.js';
@@ -44,33 +45,35 @@ function showTab(id) {
   }
 }
 
-function renderMap() {
+async function renderMap() {
   const host = document.getElementById('browse-map');
   if (!host) return;
-  if (!_renderer) {
+  if (_renderer) return;
+  host.innerHTML = '<div class="map-loading">Loading map…</div>';
+  try {
+    const data = await loadPlannerMap();
     _renderer = new MapRenderer(host, {
+      data,
       onSelect: (site) => {
         const info = document.getElementById('browse-map-info');
         info.innerHTML = `
           <h3></h3>
-          <p class="muted"></p>
           <ul class="kv">
-            <li><span>Body</span><strong></strong></li>
             <li><span>Type</span><strong class="type"></strong></li>
-            <li><span>Class</span><strong class="cls"></strong></li>
+            <li><span>Size</span><strong class="size"></strong></li>
             <li><span>Hydration</span><strong class="hyd"></strong></li>
-            <li><span>Base VPs</span><strong class="vps"></strong></li>
+            <li><span>Hazard</span><strong class="hazard"></strong></li>
           </ul>
         `;
         info.querySelector('h3').textContent = site.name;
-        info.querySelector('p').textContent = site.blurb;
-        info.querySelector('li:nth-child(1) strong').textContent = site.body;
         info.querySelector('.type').textContent = site.type;
-        info.querySelector('.cls').textContent = site.class || '—';
+        info.querySelector('.size').textContent = site.siteSize || '—';
         info.querySelector('.hyd').textContent = '💧'.repeat(site.hydration) || '—';
-        info.querySelector('.vps').textContent = site.vps;
+        info.querySelector('.hazard').textContent = site.hazard ? 'yes' : 'no';
       },
     });
+  } catch (err) {
+    host.innerHTML = `<div class="map-loading error">Map failed to load: ${err.message}</div>`;
   }
 }
 

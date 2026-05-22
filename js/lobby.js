@@ -12,6 +12,7 @@ import { saveLastLobbyId } from './storage.js';
 import { mountChat, unmountChat } from './chat.js';
 import { mountInvitesUI, unmountInvitesUI } from './invites.js';
 import { MapRenderer } from './game/render.js';
+import { loadPlannerMap } from './game/planner-map.js';
 
 let _activeLobby = null;
 let _unsubWS = null;
@@ -191,13 +192,19 @@ function renderLobby(lobby) {
     // building 36 SVG nodes when the user is still picking seats.
     if (justStarted || !_mapRenderer) {
       const host = document.getElementById('game-map');
-      if (host) _mapRenderer = new MapRenderer(host, {
-        onSelect: (site) => {
-          // Stage 2 is read-only; surface the click as a toast for
-          // visible feedback. Stage 3 will wire this to MOVE / PROSPECT.
-          if (_onToast) _onToast(`${site.name} — ${site.blurb}`);
-        },
-      });
+      if (host) {
+        host.innerHTML = '<div class="map-loading">Loading map…</div>';
+        loadPlannerMap().then((data) => {
+          _mapRenderer = new MapRenderer(host, {
+            data,
+            onSelect: (site) => {
+              if (_onToast) _onToast(`${site.name} (${site.type})`);
+            },
+          });
+        }).catch((err) => {
+          host.innerHTML = `<div class="map-loading error">Map failed: ${err.message}</div>`;
+        });
+      }
     }
   } else if (_mapRenderer) {
     // Game over (or never started). Tear down so a future start gets

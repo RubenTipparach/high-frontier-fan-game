@@ -30,51 +30,37 @@
 
 .map-svg .stars circle { pointer-events: none; }
 
-/* Layered-tree zone bands. Even-indexed bands get a slightly lighter
-   fill so the eye can track adjacent zones; the right edge stays open
-   so the chart doesn't look boxed-in. */
-.map-svg .zone-band {
-  fill: #0c0d1f;
-  opacity: 0.32;
-  pointer-events: none;
+/* Waypoint nodes (lagrange / burn / hohmann) are small dots; only
+   true site nodes get the larger filled circle. Hover still works
+   on waypoints so the tooltip can explain "Hohmann transfer" etc. */
+.map-svg .site.waypoint circle { opacity: 0.7; }
+.map-svg .site-type-burn:not(.waypoint) circle { stroke: #fbbf24; }
+
+.map-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+  color: var(--ink-mute);
+  font-size: 13px;
 }
-.map-svg .zone-band[data-zone="Venus"],
-.map-svg .zone-band[data-zone="Mars"],
-.map-svg .zone-band[data-zone="Jupiter"],
-.map-svg .zone-band[data-zone="Uranus"] {
-  fill: #11142a;
-  opacity: 0.42;
-}
-.map-svg .zone-label {
-  font: 600 11px ui-sans-serif, system-ui, sans-serif;
-  fill: #5b6688;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  pointer-events: none;
-}
+.map-loading.error { color: var(--bad); }
 
 .map-svg .edge {
   fill: none;
-  stroke: #2a3552;
+  stroke: #3b4a6d;
   stroke-width: 1.4;
   stroke-linecap: round;
-  opacity: 0.5;
+  opacity: 0.7;
   pointer-events: none;
-  mix-blend-mode: screen;
 }
-/* Metro-line palette by source solar zone. Edges leaving Mars are
-   one colour, edges leaving Jupiter another, etc. Picked to read
-   over the dark band background while staying distinguishable from
-   the node fills. */
-.map-svg .edge.zone-mercury { stroke: #94a3b8; }
-.map-svg .edge.zone-venus   { stroke: #fb923c; }
-.map-svg .edge.zone-earth   { stroke: #38bdf8; }
-.map-svg .edge.zone-mars    { stroke: #f87171; }
-.map-svg .edge.zone-ceres   { stroke: #c084fc; }
-.map-svg .edge.zone-jupiter { stroke: #fbbf24; }
-.map-svg .edge.zone-saturn  { stroke: #fde047; }
-.map-svg .edge.zone-uranus  { stroke: #5eead4; }
-.map-svg .edge.zone-neptune { stroke: #818cf8; }
+.map-svg .edge.hazard {
+  stroke: #f87171;
+  stroke-dasharray: 4 3;
+  opacity: 0.6;
+}
 .map-svg .edge-label {
   font: 9px ui-monospace, monospace;
   fill: #5b6688;
