@@ -873,7 +873,13 @@ body:has(#view-browse:not(.hidden)) #main {
     border-radius: 10px;
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
     background: rgba(15, 16, 35, 0.94);
-    backdrop-filter: blur(6px);
+    /* Explicitly disable the inherited blur — `backdrop-filter`
+       creates a containing block for `position: fixed`
+       descendants (same spec quirk as `transform`), and that
+       traps the .sidepanel-content modal inside the pill.
+       Removing the blur keeps the position:fixed modal anchored
+       to the viewport. */
+    backdrop-filter: none;
     /* Must exceed the modal-backdrop's z-index (9). The sidepanel
        creates a stacking context with this z-index, so the modal
        content inside (which gets z-index: 10 relative to this
