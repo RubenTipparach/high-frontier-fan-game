@@ -850,35 +850,47 @@ body:has(#view-browse:not(.hidden)) #main {
    centered modal that covers most of the screen with a dimmed
    backdrop behind it (handled in JS via .modal-backdrop). */
 @media (max-width: 720px) {
+  /* On phones the sidepanel is a floating button bar that sits
+     over the top of the map — not attached to any edge. Only the
+     tab strip shows; tapping a tab opens that pane's content as
+     its own modal overlay (see .panel-pane.active rules below).
+     Drops the box-shadow from the desktop variant since the
+     floating bar already reads as separate from the map. */
   .browse-sidepanel {
-    width: 44px;
-    bottom: 0;
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    bottom: auto;
+    left: auto;
+    width: auto !important;
+    height: auto !important;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
+    background: rgba(15, 16, 35, 0.94);
+    backdrop-filter: blur(6px);
+    z-index: 6;
   }
-  .browse-sidepanel[data-active=""] {
-    width: 44px !important;
+  .browse-sidepanel .sidepanel-content {
+    display: none;
   }
-  /* Modal mode: detach from the right edge and float as a
-     centred sheet. The tab strip inside collapses since the user
-     dismisses with × / backdrop tap to switch panes.
-     `[data-active=""]` matches the bare `[data-active]` selector
-     too, so we explicitly exclude the empty-string state — without
-     this, closing a pane leaves the modal styling stuck and the
-     "collapsed" panel renders as an empty floating sheet. */
-  .browse-sidepanel[data-active]:not([data-active=""]) {
+  /* When a tab is active, its pane appears as a fullscreen-ish
+     content modal centred on the map; the floating button bar
+     stays put so the player can switch tabs without dismissing. */
+  .browse-sidepanel[data-active]:not([data-active=""]) .sidepanel-content {
+    display: block;
     position: fixed;
     top: 60px;
     left: 16px;
     right: 16px;
     bottom: 16px;
-    width: auto !important;
-    height: auto !important;
-    border-radius: 14px;
+    background: rgba(15, 16, 35, 0.97);
     border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 36px 14px 14px;
+    overflow-y: auto;
     box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
     z-index: 10;
-  }
-  .browse-sidepanel[data-active]:not([data-active=""]) .sidepanel-tabs {
-    display: none;
   }
 }
 

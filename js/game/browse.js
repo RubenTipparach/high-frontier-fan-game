@@ -24,7 +24,7 @@ import {
 import {
   getRocketStack, isInRocket, addToStack as rocketAddCard,
   removeFromStack as rocketRemoveCard, clearStack as rocketClearStack,
-  onRocketChange, canRocketFly, isRocketActive,
+  onRocketChange, isRocketActive,
   getActiveThrusterId, setActiveThruster,
 } from './rocket.js';
 import { CREW } from '../../data/crew.js';
@@ -62,12 +62,7 @@ export function mountBrowse() {
   if (!view) return;
   if (!_rocketSubWired) {
     _rocketSubWired = true;
-    onRocketChange(() => {
-      syncSandboxRocket();
-      // Re-render the rocket pane if it's currently open.
-      const panel = document.getElementById('browse-sidepanel');
-      if (panel && panel.dataset.active === 'rocket') renderRocketPane();
-    });
+    onRocketChange(syncSandboxRocket);
   }
   wireSidebar();
   wireHandStrip();
@@ -556,16 +551,6 @@ function showPane(pane) {
   if      (pane === 'patents')    renderPatents();
   else if (pane === 'milestones') renderMilestones();
   else if (pane === 'events')     renderEvents();
-  else if (pane === 'rocket') {
-    // Rocket lives in a centered modal now, not the sidepanel.
-    // Close the sidepanel (if it was just popped to "rocket")
-    // and open the modal instead so the player sees the stack
-    // in the map's centre.
-    panel.dataset.active = '';
-    for (const btn of panel.querySelectorAll('.sidepanel-tabs button')) btn.classList.remove('active');
-    for (const el of panel.querySelectorAll('.panel-pane'))   el.classList.remove('active');
-    openRocketStackModal();
-  }
   else if (pane === 'solo')       renderSolo();
 }
 
@@ -1002,50 +987,6 @@ function openRocketStackModal() {
   document.addEventListener('keydown', onKey);
 }
 let _rocketModalUnsub = null;
-
-// Stack panel: lists every card in the rocket, shows fly-status,
-// and lets the player pull any card back into their hand.
-function renderRocketPane() {
-  const host = document.getElementById('rocket-panel');
-  if (!host) return;
-  const stack = getRocketStack();
-  const flyable = canRocketFly();
-  const lookup = (id) => PATENTS_BY_ID[id]
-    || CREW.find((c) => c.id === id) || null;
-
-  if (!stack.length) {
-    host.innerHTML = `
-      <p class="muted">Your rocket is empty. Add cards from your
-      hand modal ("Add to LEO stack") to build a flyable ship.</p>
-    `;
-    return;
-  }
-  const statusHtml = flyable.ok
-    ? `<p class="rocket-status ok">✓ Flyable — all supports satisfied.</p>`
-    : `<p class="rocket-status bad">🚫 Cannot fly:</p>
-       <ul class="rocket-issues">
-         ${flyable.missing.map((m) => `<li>${esc(m)}</li>`).join('')}
-       </ul>`;
-  host.innerHTML = `${statusHtml}<div id="rocket-stack-cards"></div>`;
-  const cards = host.querySelector('#rocket-stack-cards');
-  stack.forEach((slot, idx) => {
-    const card = lookup(slot.id);
-    if (!card) return;
-    const wrap = document.createElement('div');
-    wrap.className = 'rocket-slot';
-    wrap.appendChild(renderCard(card, { type: slot.kind || 'patent' }));
-    const back = document.createElement('button');
-    back.type = 'button';
-    back.className = 'rocket-back-to-hand';
-    back.textContent = '↩ Back to hand';
-    back.addEventListener('click', () => {
-      rocketRemoveCard(idx);
-      addToHand(card);
-    });
-    wrap.appendChild(back);
-    cards.appendChild(wrap);
-  });
-}
 
 function syncSandboxRocket() {
   if (!_renderer) return;
