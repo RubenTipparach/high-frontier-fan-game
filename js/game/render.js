@@ -55,7 +55,7 @@ const TYPE_VIS = {
   tno:            { kind: 'hex',    r: HEX_R, haloR: 18 },
   moon:           { kind: 'hex',    r: HEX_R, haloR: 18 },
   comet:          { kind: 'comet',  r:  5 },
-  asteroid:       { kind: 'hex',    r:  7, haloR: 10, rocky: true },
+  asteroid:       { kind: 'hex',    r: HEX_R, haloR: 10, rocky: true },
   surface:        { kind: 'hex',    r: HEX_R, haloR: 20 },
   sun:            { kind: 'sun',    r: 60 },
   lagrange:       { kind: 'circle', r:  7, fill: 'transparent', stroke: '#c66932' },

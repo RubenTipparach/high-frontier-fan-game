@@ -159,6 +159,12 @@ Random-numbered seeds are stored per game so replays are deterministic.
   Tuning the hex must never resize the bodies behind them, and
   vice versa. Same goes when the user mentions "halos" / "bodies"
   / "rings" — those are their own knobs.
+- **Every hexagon is the same size.** All `TYPE_VIS` entries with
+  `kind: 'hex'` use the shared `HEX_R` constant for their `r`
+  field — planets, moons, dwarfs, asteroids, sites, surface sites,
+  everything. Body class differentiation lives in `haloR` and the
+  palette; the hex marker itself is uniform. Don't ship per-type
+  hex sizes again.
   The point is that any commit pushed to any branch is live at the
   GH Pages URL within ~1 minute.
 
