@@ -119,7 +119,10 @@
   background: rgba(0, 0, 0, 0.05);
   border-top-color: rgba(0, 0, 0, 0.15);
 }
-.card-face[data-face="primary"] .card-requires .req {
+/* Default chip styling for the primary (white) face — only
+   applies to chips WITHOUT a data-supplier; supplier-tinted
+   chips paint at full saturation on both faces. */
+.card-face[data-face="primary"] .card-requires .req:not([data-supplier]) {
   background: rgba(0, 0, 0, 0.06);
   border-color: rgba(0, 0, 0, 0.15);
 }
@@ -282,30 +285,35 @@
    immediate. White text on the saturated tint reads well; the
    card-face[data-face="primary"] rule below restores dark text
    on the lighter backgrounds for the primary face. */
-/* Bolder outline ring + matching corner pip so each chip
-   announces its supplier card at a glance. The 2px ring is the
-   primary tell; the saturated background is secondary. A small
-   coloured square in the chip's upper-right corner reinforces
-   the supplier colour even when the chip is small. */
+/* Solid supplier-colour tiles: each chip is a saturated square
+   of the supplier card's colour with a bright icon glyph
+   centred inside. The ring/pip approach from the previous
+   revision was too subtle — these read as miniatures of the
+   card type they need. */
 .card-requires .req[data-supplier] {
-  font-weight: 700;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
   border-width: 2px;
-  position: relative;
-  padding-right: 12px;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  border-style: solid;
+  border-radius: 5px;
+  font-weight: 800;
+  font-size: 16px;
+  line-height: 1;
+  justify-content: center;
+  gap: 4px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.30),
+              0 1px 2px rgba(0, 0, 0, 0.35);
 }
-.card-requires .req[data-supplier]::after {
-  content: "";
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 5px;
-  height: 5px;
-  border-radius: 1px;
-  background: currentColor;
-  opacity: 0.55;
+.card-requires .req[data-supplier] em {
+  font-size: 18px;
+  font-weight: 800;
 }
-.card-requires .req[data-supplier] b { color: inherit; opacity: 0.85; }
+.card-requires .req[data-supplier] b {
+  color: inherit;
+  opacity: 0.85;
+  font-size: 11px;
+}
 
 .card-requires .req[data-supplier="reactor"]   { background: #a78bfa; color: #1c0f3a; border-color: #4c1d95; }
 .card-requires .req[data-supplier="radiator"]  { background: #7dd3fc; color: #0a2c43; border-color: #075985; }
