@@ -65,8 +65,75 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
   }
 
   const byId = Object.fromEntries(sites.map((s) => [s.id, s]));
-  _cache = { sites, edges, byId, mode: 'classic' };
+
+  // Chains of decorative routing nodes (degree-2 nodes whose only
+  // job is to bend a straight line into a curve). We split them out
+  // here so the renderer can paint them as smooth Bezier ribbons
+  // instead of jagged polylines, while the pathfinder keeps the
+  // full straight-segment graph for shortest-path math.
+  const { chains, straightEdges } = buildChains(sites, edges, byId);
+
+  _cache = { sites, edges, byId, chains, straightEdges, mode: 'classic' };
   return _cache;
+}
+
+// Walk the adjacency graph and pull out every chain of degree-2
+// decorative nodes connecting two non-mid-chain endpoints. Returns
+//   chains:        [[idStart, idDec1, idDec2, ..., idEnd], ...]
+//   straightEdges: [[a, b, dv], ...] for edges NOT consumed by a chain
+function buildChains(sites, edges, byId) {
+  const adj = new Map();
+  for (const s of sites) adj.set(s.id, []);
+  for (const [a, b, dv] of edges) {
+    if (!adj.has(a) || !adj.has(b)) continue;
+    adj.get(a).push({ to: b, dv });
+    adj.get(b).push({ to: a, dv });
+  }
+
+  // A node is "mid-chain" if it's a decorative with exactly two
+  // neighbours; the chain walker hops through these and terminates
+  // at the first non-mid-chain node.
+  function isMidChain(id) {
+    const s = byId[id];
+    return s && s.isDecorative && adj.get(id).length === 2;
+  }
+  function ek(a, b) { return a < b ? a + ':' + b : b + ':' + a; }
+
+  const chains = [];
+  const consumed = new Set();   // edge keys folded into a chain
+
+  function walkChain(start, next) {
+    const chain = [start, next];
+    consumed.add(ek(start, next));
+    let prev = start, cur = next;
+    while (isMidChain(cur)) {
+      const neighbours = adj.get(cur);
+      const onward = neighbours.find((n) => n.to !== prev);
+      if (!onward) break;
+      consumed.add(ek(cur, onward.to));
+      chain.push(onward.to);
+      prev = cur;
+      cur = onward.to;
+    }
+    return chain;
+  }
+
+  for (const s of sites) {
+    if (isMidChain(s.id)) continue;          // mid-chain nodes are entered, not started from
+    for (const { to } of adj.get(s.id) || []) {
+      if (consumed.has(ek(s.id, to))) continue;
+      if (isMidChain(to)) chains.push(walkChain(s.id, to));
+    }
+  }
+
+  // Any edge not folded into a chain is a "straight" edge: draw
+  // as a single line segment in the renderer.
+  const straightEdges = [];
+  for (const [a, b, dv] of edges) {
+    if (!consumed.has(ek(a, b))) straightEdges.push([a, b, dv]);
+  }
+
+  return { chains, straightEdges };
 }
 
 // 'site' -> ''. Other types get a short human-readable hint.

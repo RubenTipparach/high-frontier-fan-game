@@ -100,6 +100,30 @@ function paletteFor(site) {
   return site._palette;
 }
 
+// Append a smooth polyline to the current path. Standard
+// "quadratic-through-midpoints" technique: each intermediate
+// control point is the original node position, and the curve
+// passes through the midpoint of each adjacent pair. Produces
+// a C1-continuous curve that hugs the original polyline closely.
+// Used for both decorative-chained edges and the route overlay so
+// they share the same visual idiom.
+function appendSmoothPath(ctx, pts) {
+  if (!pts || pts.length < 2) return;
+  if (pts.length === 2) {
+    ctx.moveTo(pts[0].x, pts[0].y);
+    ctx.lineTo(pts[1].x, pts[1].y);
+    return;
+  }
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length - 1; i++) {
+    const mx = (pts[i].x + pts[i + 1].x) / 2;
+    const my = (pts[i].y + pts[i + 1].y) / 2;
+    ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+  }
+  const last = pts[pts.length - 1];
+  ctx.lineTo(last.x, last.y);
+}
+
 const ZONE_BAND_LIGHT = ['Venus', 'Mars', 'Jupiter', 'Uranus'];
 
 // siteSynodic in the planner data is 'red' | 'yellow' | 'blue'. We
@@ -198,22 +222,33 @@ export class MapRenderer {
     if (!this.data) { this._waypoints = []; this._realSites = []; return; }
     this._waypoints = this.data.sites.filter((s) => s.isWaypoint);
     this._realSites = this.data.sites.filter((s) => !s.isWaypoint);
-    // Group waypoints by type so each kind can be drawn in one path.
     this._waypointsByType = new Map();
     for (const w of this._waypoints) {
       const arr = this._waypointsByType.get(w.type) || [];
       arr.push(w);
       this._waypointsByType.set(w.type, arr);
     }
-    // Split edges into normal and hazard for stroke colour.
+    // Split STRAIGHT edges into normal and hazard for stroke colour.
+    // Chains (decorative-smoothed routes) are pre-built by the loader.
     this._normalEdges = [];
     this._hazardEdges = [];
-    for (const [a, b, dv] of this.data.edges) {
+    const straight = this.data.straightEdges || this.data.edges;
+    for (const [a, b, dv] of straight) {
       const sa = this.data.byId[a], sb = this.data.byId[b];
       if (!sa || !sb) continue;
       const seg = { sa, sb, dv };
       if (sa.hazard || sb.hazard) this._hazardEdges.push(seg);
       else this._normalEdges.push(seg);
+    }
+    // Pre-resolve chains into arrays of {x,y} points so the draw
+    // loop doesn't repeat the lookup every frame.
+    this._chains = [];
+    this._hazardChains = [];
+    for (const chain of (this.data.chains || [])) {
+      const pts = chain.map((id) => this.data.byId[id]).filter(Boolean);
+      if (pts.length < 2) continue;
+      const isHazard = pts.some((p) => p.hazard);
+      (isHazard ? this._hazardChains : this._chains).push(pts);
     }
   }
 
@@ -424,9 +459,14 @@ export class MapRenderer {
       ctx.moveTo(sa.x, sa.y);
       ctx.lineTo(sb.x, sb.y);
     }
+    // Decorative chains as smooth Bezier ribbons: planner uses
+    // chains of decoratives to bend a straight line into a curve,
+    // so we draw them as one continuous quadratic-through-midpoints
+    // spline. Same path, no extra style change.
+    for (const pts of this._chains) appendSmoothPath(ctx, pts);
     ctx.stroke();
 
-    if (this._hazardEdges.length) {
+    if (this._hazardEdges.length || this._hazardChains.length) {
       ctx.strokeStyle = '#f87171';
       ctx.globalAlpha = 0.7;
       ctx.setLineDash([4 / eff, 3 / eff]);
@@ -435,6 +475,7 @@ export class MapRenderer {
         ctx.moveTo(sa.x, sa.y);
         ctx.lineTo(sb.x, sb.y);
       }
+      for (const pts of this._hazardChains) appendSmoothPath(ctx, pts);
       ctx.stroke();
       ctx.setLineDash([]);
     }
@@ -510,16 +551,27 @@ export class MapRenderer {
     ctx.lineCap = 'round';
     ctx.shadowBlur = 6 / eff;
     ctx.shadowColor = 'rgba(251, 191, 36, 0.6)';
+    // Build a single polyline for the whole route, then run it
+    // through the same smooth-Bezier helper so segments that pass
+    // through decorative waypoints curve naturally instead of
+    // zigzagging.
+    const pts = this._routePoints();
     ctx.beginPath();
-    for (const seg of this._route) {
-      const sa = this.data.byId[seg.from];
-      const sb = this.data.byId[seg.to];
-      if (!sa || !sb) continue;
-      ctx.moveTo(sa.x, sa.y);
-      ctx.lineTo(sb.x, sb.y);
-    }
+    if (pts.length >= 2) appendSmoothPath(ctx, pts);
     ctx.stroke();
     ctx.shadowBlur = 0;
+  }
+
+  _routePoints() {
+    const out = [];
+    if (!this._route || !this._route.length) return out;
+    const first = this.data.byId[this._route[0].from];
+    if (first) out.push(first);
+    for (const seg of this._route) {
+      const sb = this.data.byId[seg.to];
+      if (sb) out.push(sb);
+    }
+    return out;
   }
 
   _drawWaypointsScreen(ctx) {

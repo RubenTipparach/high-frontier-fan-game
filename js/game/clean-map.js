@@ -37,6 +37,15 @@ export async function loadCleanMap() {
   const edges = EDGES.map(([a, b, dv]) => [a, b, dv]);
   const byId = Object.fromEntries(sites.map((s) => [s.id, s]));
 
-  _cache = { sites, edges, byId, mode: 'clean', zones: SOLAR_ZONES };
+  _cache = {
+    sites, edges, byId,
+    // The cleaned-up zone-derived graph has no decorative
+    // intermediates; every edge is a direct site-to-site hop. Pass
+    // an empty `chains` so the renderer's chain path is just a no-op.
+    chains: [],
+    straightEdges: edges,
+    mode: 'clean',
+    zones: SOLAR_ZONES,
+  };
   return _cache;
 }
