@@ -410,7 +410,7 @@ body:has(#view-browse:not(.hidden)) #main {
   left: 0;
   right: 388px;  /* clear the open sidepanel */
   bottom: 0;
-  height: 152px;
+  height: 232px;
   background: rgba(8, 8, 18, 0.96);
   border-top: 1px solid var(--border);
   z-index: 3;
@@ -441,10 +441,14 @@ body:has(#view-browse:not(.hidden)) #main {
 .hand-cards {
   flex: 1;
   display: flex;
-  gap: 8px;
+  /* No gap: cards overlap to give the "fanned hand" feel.
+     Hovering a card spreads the surrounding slots aside (see
+     the :has selectors below) so the hover target reads
+     clearly without overlap.  */
+  gap: 0;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 4px;
+  padding: 12px 32px 8px;
   border: 1.5px dashed rgba(120, 130, 170, 0.3);
   border-radius: 6px;
   position: relative;
@@ -475,20 +479,44 @@ body:has(#view-browse:not(.hidden)) #main {
 .hand-slot {
   position: relative;
   flex-shrink: 0;
-  width: 108px;          /* 240px card × 0.45 scale */
+  /* Slots overlap via negative margin so a multi-card hand
+     reads as a "fan" rather than a row of postage stamps.
+     Width matches the visible rect of the 220px card × 0.55
+     scale (= 121px). Negative margin = ~40% overlap. */
+  width: 121px;
   height: 100%;
   cursor: pointer;
-  transition: transform 0.12s ease;
+  margin-right: -48px;
+  transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.2, 1),
+              margin-right 0.22s cubic-bezier(0.2, 0.7, 0.2, 1),
+              z-index 0s;
+  z-index: 1;
 }
-.hand-slot:hover { transform: translateY(-4px); }
-/* Scale the rendered card down so each slot fits in the strip
-   even when it's at its default 152px height. The whole slot is
-   clickable to open the inspect modal. */
+.hand-slot:last-child { margin-right: 0; }
+
+/* Hover lifts the card + spreads its neighbours so the hover
+   target reads clearly without overlap. The "+" adjacent
+   selectors push siblings on EITHER side of the hovered slot
+   away, creating the classic fan-spread effect. */
+.hand-slot:hover {
+  transform: translateY(-26px) scale(1.10);
+  margin-right: 26px;
+  z-index: 50;
+}
+.hand-slot:hover + .hand-slot { margin-left: 26px; }
+.hand-cards:hover .hand-slot:not(:hover) { z-index: 1; }
+
+/* Scale the actual 220px card down to fit the slot. */
 .hand-slot .card {
-  transform: scale(0.45);
+  transform: scale(0.55);
   transform-origin: top left;
-  width: 240px;
+  width: 220px;
   pointer-events: none;  /* let the slot wrapper get the click */
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.45));
+  transition: filter 0.22s;
+}
+.hand-slot:hover .card {
+  filter: drop-shadow(0 14px 18px rgba(0, 0, 0, 0.55));
 }
 /* Flip / rotate buttons inside the card still need to receive
    clicks so the player can preview the dark side / heavy side
@@ -498,6 +526,27 @@ body:has(#view-browse:not(.hidden)) #main {
   pointer-events: auto;
 }
 .card.is-dragging { opacity: 0.4; }
+
+/* Custom drag-image: a fixed-position clone of the source card
+   that follows the pointer with spring-damped rotation (see
+   startCustomDragGhost / animateDragGhost in browse.js). Heavy
+   drop shadow + slight scale-up tell the eye "this is in my
+   hand, not stuck to the page". Pointer events are off so the
+   ghost doesn't intercept dragover on whatever's underneath. */
+.drag-ghost {
+  position: fixed;
+  pointer-events: none;
+  z-index: 200;
+  transform-origin: center center;
+  will-change: transform, left, top;
+  box-shadow: 0 30px 40px rgba(0, 0, 0, 0.55),
+              0 12px 20px rgba(0, 0, 0, 0.35),
+              0 2px 4px rgba(0, 0, 0, 0.25);
+  border-radius: 10px;
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.25));
+  transition: none;  /* movement is JS-driven; no CSS easing */
+  opacity: 0.96;
+}
 
 /* Hand-strip grabber: a 12px-tall bar at the very top of the
    strip with a 36×4px handle pip. Pointer-cursor + ns-resize
@@ -545,12 +594,15 @@ body:has(#view-browse:not(.hidden)) #main {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  /* gap accounts for the visual height a scale(1.6) card claims
+     beyond its layout box — without it the actions row crashes
+     into the card's footer. */
+  gap: 130px;
 }
 .card-modal-card {
   transform: scale(1.6);
   transform-origin: center;
-  margin: 60px;  /* room for the scale */
+  margin: 60px 60px 0;
 }
 .card-modal-actions {
   display: flex;

@@ -170,6 +170,93 @@ function wireHandGrabber(grabber, strip) {
   grabber.addEventListener('touchstart', onPointerDown, { passive: true });
 }
 
+// Custom drag-image. The browser's default drag-image is a
+// faded snapshot of the element with no animation; we replace
+// it with a fixed-position clone that follows the pointer, casts
+// a heavy drop shadow, and wiggles with spring-damped rotation
+// driven by horizontal velocity. The native HTML5 drop event
+// still handles the actual data transfer — this only changes
+// the visual the user sees while dragging.
+let _dragGhost = null;
+let _dragGhostState = null;
+
+function startCustomDragGhost(srcEl, ev) {
+  endCustomDragGhost();  // belt-and-braces cleanup
+  // 1px transparent GIF so the browser's default drag image
+  // shows nothing — our ghost replaces it.
+  const blank = new Image();
+  blank.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  try { ev.dataTransfer.setDragImage(blank, 0, 0); } catch { /* IE */ }
+
+  const rect = srcEl.getBoundingClientRect();
+  const ghost = srcEl.cloneNode(true);
+  ghost.classList.add('drag-ghost');
+  ghost.style.width  = rect.width + 'px';
+  ghost.style.height = rect.height + 'px';
+  // Anchor the ghost so the pointer "holds" the spot where the
+  // user grabbed — feels less floaty than centring it.
+  const offsetX = ev.clientX - rect.left;
+  const offsetY = ev.clientY - rect.top;
+  ghost.style.left = (ev.clientX - offsetX) + 'px';
+  ghost.style.top  = (ev.clientY - offsetY) + 'px';
+  document.body.appendChild(ghost);
+
+  _dragGhost = ghost;
+  _dragGhostState = {
+    offsetX,
+    offsetY,
+    lastX: ev.clientX,
+    lastY: ev.clientY,
+    lastT: performance.now(),
+    rotTarget: 0,
+    rotCurrent: 0,
+    raf: 0,
+  };
+
+  // Track pointer via document-level dragover (the only
+  // drag-event with reliable clientX/clientY across browsers).
+  document.addEventListener('dragover', onDragGhostMove);
+  _dragGhostState.raf = requestAnimationFrame(animateDragGhost);
+}
+
+function onDragGhostMove(ev) {
+  const s = _dragGhostState;
+  if (!s || !_dragGhost) return;
+  ev.preventDefault();   // also acts as dropEffect: copy
+  const now = performance.now();
+  const dt = Math.max(1, now - s.lastT);
+  const vx = (ev.clientX - s.lastX) / dt;   // px/ms
+  s.lastX = ev.clientX;
+  s.lastY = ev.clientY;
+  s.lastT = now;
+  // Rotation target tilts toward the direction of horizontal
+  // motion. Capped so a fast flick doesn't spin the card past
+  // legibility. Wiggle comes from the spring lerp in animate().
+  s.rotTarget = Math.max(-18, Math.min(18, vx * 28));
+  _dragGhost.style.left = (ev.clientX - s.offsetX) + 'px';
+  _dragGhost.style.top  = (ev.clientY - s.offsetY) + 'px';
+}
+
+function animateDragGhost() {
+  const s = _dragGhostState;
+  if (!s || !_dragGhost) return;
+  // Critically-damped spring toward rotTarget. rotTarget decays
+  // on its own so the rotation eases back to 0 when the user
+  // pauses, giving the "wiggle settling" feel.
+  s.rotCurrent += (s.rotTarget - s.rotCurrent) * 0.20;
+  s.rotTarget *= 0.86;
+  _dragGhost.style.transform = `translate3d(0,0,0) rotate(${s.rotCurrent.toFixed(2)}deg)`;
+  s.raf = requestAnimationFrame(animateDragGhost);
+}
+
+function endCustomDragGhost() {
+  document.removeEventListener('dragover', onDragGhostMove);
+  if (_dragGhostState) cancelAnimationFrame(_dragGhostState.raf);
+  if (_dragGhost) _dragGhost.remove();
+  _dragGhost = null;
+  _dragGhostState = null;
+}
+
 // Tap modal for a card sitting in the deck. Confirms "add to
 // hand" with a single primary action. Mobile-friendly because
 // HTML5 drag-and-drop doesn't work reliably on touch; pointing
@@ -932,8 +1019,12 @@ function renderPatents() {
       ev.dataTransfer.setData('text/card-kind', asKind);
       ev.dataTransfer.effectAllowed = 'copy';
       el.classList.add('is-dragging');
+      startCustomDragGhost(el, ev);
     });
-    el.addEventListener('dragend', () => el.classList.remove('is-dragging'));
+    el.addEventListener('dragend', () => {
+      el.classList.remove('is-dragging');
+      endCustomDragGhost();
+    });
     el.addEventListener('click', (ev) => {
       // Let the card's own Flip / Rotate buttons keep working.
       if (ev.target.closest('.card-flip, .card-rotate')) return;
