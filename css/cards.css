@@ -62,7 +62,7 @@
   border-radius: 10px;
   padding: 0;
   width: 220px;
-  min-height: 300px;
+  min-height: 350px;
   color: var(--ink);
   font-size: 12px;
   perspective: 1200px;
@@ -75,7 +75,7 @@
 .card-inner {
   position: relative;
   width: 100%;
-  min-height: 300px;
+  min-height: 350px;
   transform-style: preserve-3d;
   transition: transform 0.7s cubic-bezier(.2, .7, .3, 1);
 }
@@ -126,6 +126,11 @@
 .card-face[data-face="primary"] .card-stats li {
   border-bottom-color: rgba(0, 0, 0, 0.15);
 }
+
+/* Thrust-arrow uses currentColor — pin it dark on the white face
+   and white on the black face so it's always visible. */
+.card-face[data-face="primary"]   .thrust-svg { color: #0c0a16; }
+.card-face[data-face="secondary"] .thrust-svg { color: #ffffff; }
 
 @media (prefers-reduced-motion: reduce) {
   .card-inner { transition: none; }
