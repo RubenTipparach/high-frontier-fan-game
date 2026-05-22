@@ -354,6 +354,15 @@
   margin-bottom: 8px;
   text-transform: lowercase;
 }
+.map-popup .t-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  color: var(--ink-dim);
+  margin-bottom: 8px;
+  word-break: break-all;
+  user-select: all;
+  -webkit-user-select: all;
+}
 .map-popup .popup-actions {
   display: flex;
   gap: 6px;

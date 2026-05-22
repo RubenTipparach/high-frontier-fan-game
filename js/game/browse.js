@@ -382,48 +382,6 @@ function endCustomDragGhost() {
   _dragGhostState = null;
 }
 
-// Fly a card from one screen-space rectangle to a real target
-// element, landing precisely on top of it. The target's
-// opacity is suppressed during the flight so the card appears
-// continuous — flyer arrives, target reveals, flyer removes
-// in the same frame — instead of fading out into empty air
-// while the target popped in some time ago.
-function flyCardTo(card, kind, fromRect, targetSelector) {
-  const target = document.querySelector(targetSelector);
-  if (!target) return;
-  const toRect = target.getBoundingClientRect();
-
-  // Hide the landing target so the flyer is the only card
-  // visible during the flight. Restore on transitionend so
-  // the reveal happens exactly when the flyer arrives.
-  const prevOpacity = target.style.opacity;
-  target.style.opacity = '0';
-
-  const flyer = renderCard(card, { type: kind });
-  flyer.classList.add('card-flyer');
-  flyer.style.left   = `${fromRect.left}px`;
-  flyer.style.top    = `${fromRect.top}px`;
-  flyer.style.width  = `${fromRect.width}px`;
-  document.body.appendChild(flyer);
-  // Force layout so the next-frame transform actually animates.
-  // eslint-disable-next-line no-unused-expressions
-  flyer.offsetWidth;
-  requestAnimationFrame(() => {
-    const tx = toRect.left - fromRect.left;
-    const ty = toRect.top  - fromRect.top;
-    const scale = toRect.width / Math.max(1, fromRect.width);
-    flyer.style.transform = `translate(${tx}px, ${ty}px) scale(${scale.toFixed(3)}) rotate(0deg)`;
-  });
-  const finish = () => {
-    target.style.opacity = prevOpacity;
-    flyer.remove();
-  };
-  flyer.addEventListener('transitionend', finish, { once: true });
-  // Safety: if transitionend never fires (tab backgrounded,
-  // etc.), recover.
-  setTimeout(finish, 900);
-}
-
 // Tap modal for a card sitting in the deck. Confirms "add to
 // hand" with a single primary action. Mobile-friendly because
 // HTML5 drag-and-drop doesn't work reliably on touch; pointing
@@ -446,7 +404,7 @@ function openDeckTapModal(card, kind) {
   const addBtn = document.createElement('button');
   addBtn.type = 'button';
   addBtn.className = 'modal-btn stack';
-  addBtn.textContent = 'Add to hand';
+  addBtn.textContent = '✋ Add to hand';
   addBtn.addEventListener('click', () => {
     const r = addToHand(card);
     if (!r.ok) setStatus(`Can't add: ${r.reason}.`);
@@ -1338,35 +1296,9 @@ function renderPatents() {
       endCustomDragGhost();
     });
     el.addEventListener('click', (ev) => {
-      if (ev.target.closest('.card-flip, .card-rotate, .card-quick-add')) return;
+      if (ev.target.closest('.card-flip, .card-rotate')) return;
       openDeckTapModal(card, asKind);
     });
-    // Quick-add button overlay: appears on hover; click adds
-    // straight to hand without the inspect modal. Drag-and-drop
-    // can be flaky on some browsers + touch devices; this is
-    // the always-reliable path the user asked for.
-    const quick = document.createElement('button');
-    quick.type = 'button';
-    quick.className = 'card-quick-add';
-    quick.textContent = '✋ Grab';
-    quick.title = 'Add this card to your hand';
-    quick.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      const sourceRect = el.getBoundingClientRect();
-      const r = addToHand(card);
-      if (!r.ok) { setStatus(`Can't add: ${r.reason}.`); return; }
-      // Find the slot that was just appended (last one) and
-      // fly the card directly onto it, so the landing is
-      // continuous — no gap between flyer fading and slot
-      // appearing.
-      requestAnimationFrame(() => {
-        const slotEl = document.querySelector(
-          '#sandbox-hand-cards .hand-slot:last-of-type'
-        );
-        if (slotEl) flyCardTo(card, asKind, sourceRect, '#sandbox-hand-cards .hand-slot:last-of-type');
-      });
-    });
-    el.appendChild(quick);
     return el;
   };
 

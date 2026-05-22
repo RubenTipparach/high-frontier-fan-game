@@ -2084,6 +2084,16 @@ export class MapRenderer {
     meta.textContent = parts.join(' · ');
     el.appendChild(name);
     if (meta.textContent) el.appendChild(meta);
+    // Node id so the player can copy a stable reference into a bug
+    // report. Planner ids are random floats — render them mono and
+    // let the user tap to select the whole string.
+    if (site.id) {
+      const idRow = document.createElement('div');
+      idRow.className = 't-id';
+      idRow.textContent = `id: ${site.id}`;
+      idRow.title = 'Tap to select, then copy';
+      el.appendChild(idRow);
+    }
     if (actions && actions.length) {
       const row = document.createElement('div');
       row.className = 'popup-actions';
