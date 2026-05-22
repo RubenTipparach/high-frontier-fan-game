@@ -111,18 +111,33 @@
   padding: 0;
 }
 
+/* Planner-style edges: thin white straight lines on a dark
+   backdrop. Hazard edges turn red + dashed. */
 .map-svg .edge {
-  fill: none;
-  stroke: #3b4a6d;
+  stroke: #cbd5e1;
   stroke-width: 1.4;
-  stroke-linecap: round;
-  opacity: 0.7;
+  opacity: 0.85;
   pointer-events: none;
 }
 .map-svg .edge.hazard {
   stroke: #f87171;
   stroke-dasharray: 4 3;
-  opacity: 0.6;
+  opacity: 0.7;
+}
+.map-svg .site-size {
+  font: 600 9px ui-sans-serif, system-ui, sans-serif;
+  fill: #ffffff;
+  pointer-events: none;
+}
+.map-svg .site-water {
+  font: 600 9px ui-sans-serif, system-ui, sans-serif;
+  fill: #7dd3fc;
+  pointer-events: none;
+}
+.map-svg .site-hazard {
+  font: 14px ui-monospace, menlo, monospace;
+  fill: #f87171;
+  pointer-events: none;
 }
 
 /* Zone bands (cleaned-up view only). Alternating bands get a

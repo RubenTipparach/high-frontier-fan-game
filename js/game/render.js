@@ -25,23 +25,25 @@ function el(name, attrs, parent) {
   return node;
 }
 
-// Site type -> visual treatment. Larger radius for sites the
-// player can actually land on, smaller for routing waypoints
-// (the planner's intermediate burn / hohmann / lagrange points
-// along each interplanetary corridor).
+// Visual treatment per node type. Matches the planner's palette
+// (white-stroked nodes on a dark backdrop, magenta burn points,
+// orange lagrange rings, green hohmann transfer nodes, black-
+// filled hex sites) so the two views read the same.
 const TYPE_VIS = {
-  site:     { r:  7, fill: '#fbbf24', stroke: '#facc15' },
-  planet:   { r: 14, fill: '#fbbf24', stroke: '#facc15' },
-  moon:     { r:  8, fill: '#94a3b8', stroke: '#cbd5e1' },
-  dwarf:    { r: 10, fill: '#a78bfa', stroke: '#c4b5fd' },
-  asteroid: { r:  6, fill: '#9ca3af', stroke: '#d1d5db' },
-  tno:      { r:  9, fill: '#67e8f9', stroke: '#a5f3fc' },
-  lagrange: { r:  3, fill: '#1e293b', stroke: '#38bdf8' },
-  burn:     { r:  3, fill: '#1e293b', stroke: '#7dd3fc' },
-  hohmann:  { r:  3, fill: '#1e293b', stroke: '#fbbf24' },
-  orbit:    { r:  5, fill: '#1e293b', stroke: '#7dd3fc' },
-  surface:  { r:  7, fill: '#fb923c', stroke: '#fdba74' },
-  unknown:  { r:  3, fill: '#1e293b', stroke: '#475569' },
+  site:     { kind: 'hex',    r: 14, fill: '#0c0a16', stroke: '#ffffff' },
+  planet:   { kind: 'hex',    r: 14, fill: '#0c0a16', stroke: '#ffffff' },
+  moon:     { kind: 'hex',    r: 12, fill: '#0c0a16', stroke: '#cbd5e1' },
+  dwarf:    { kind: 'hex',    r: 13, fill: '#0c0a16', stroke: '#a78bfa' },
+  asteroid: { kind: 'hex',    r: 10, fill: '#0c0a16', stroke: '#94a3b8' },
+  tno:      { kind: 'hex',    r: 11, fill: '#0c0a16', stroke: '#67e8f9' },
+  lagrange: { kind: 'circle', r:  9, fill: 'transparent', stroke: '#c66932' },
+  burn:     { kind: 'circle', r:  9, fill: '#d60f7a', stroke: '#fde0ee' },
+  hohmann:  { kind: 'circle', r:  9, fill: '#10b981', stroke: '#a7f3d0' },
+  venus:    { kind: 'circle', r: 10, fill: '#fb923c', stroke: '#fed7aa' },
+  radhaz:   { kind: 'circle', r:  9, fill: '#fbbf24', stroke: '#fde68a' },
+  orbit:    { kind: 'circle', r:  7, fill: '#0c0a16', stroke: '#7dd3fc' },
+  surface:  { kind: 'hex',    r: 11, fill: '#0c0a16', stroke: '#fdba74' },
+  unknown:  { kind: 'circle', r:  4, fill: '#0c0a16', stroke: '#475569' },
 };
 
 // Class -> small visual hint on the prospect badge.
@@ -49,30 +51,24 @@ const CLASS_FILL = {
   A: '#4ade80', B: '#7dd3fc', C: '#fbbf24', D: '#f87171', S: '#a78bfa', '': '#475569',
 };
 
-// Cubic Bézier with horizontal control-point handles. Same shape as
-// a Sankey ribbon: the edge leaves the source horizontally, swings
-// through a midpoint at the same Y as either end, then arrives at
-// the target horizontally. Looks tidy at any zoom and keeps the
-// "metro line" aesthetic without needing an external library.
+// Edge path string. Straight line from a to b, to match the
+// planner's edge style. (Previous iteration used Bezier S-curves;
+// the user preferred the planner's straight-line look.)
 function curvePath(a, b) {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  // Same-zone (small dy) edges stay nearly straight; cross-zone
-  // edges (big dy) get a bigger horizontal anchor so the bend is
-  // gentle rather than a sharp dogleg.
-  const handle = Math.max(20, Math.min(160, Math.abs(dx) * 0.5 + Math.abs(dy) * 0.2));
-  const cx1 = a.x + handle;
-  const cy1 = a.y;
-  const cx2 = b.x - handle;
-  const cy2 = b.y;
   return `M ${a.x.toFixed(1)} ${a.y.toFixed(1)} ` +
-         `C ${cx1.toFixed(1)} ${cy1.toFixed(1)}, ` +
-         `${cx2.toFixed(1)} ${cy2.toFixed(1)}, ` +
-         `${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
+         `L ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
 }
 
-function zoneSlug(zone) {
-  return (zone || 'unknown').toLowerCase();
+// Regular hexagon as an SVG points string, centred on (0,0) with
+// the first vertex pointing right. Matches the site-node shape
+// used by the planner.
+function hexPoints(r) {
+  const pts = [];
+  for (let i = 0; i < 6; i++) {
+    const t = (i / 6) * Math.PI * 2;
+    pts.push(`${(Math.cos(t) * r).toFixed(1)},${(Math.sin(t) * r).toFixed(1)}`);
+  }
+  return pts.join(' ');
 }
 
 // CSS.escape polyfill-ish: site ids in the planner data are random
@@ -220,24 +216,37 @@ export class MapRenderer {
       const sa = this.data.byId[a];
       const sb = this.data.byId[b];
       if (!sa || !sb) continue;
-      // Metro-style soft curve. Same horizontal-anchored Bézier as
-      // the zone-coloured iteration before, just rendered over the
-      // planner's denser waypoint graph so each "route" naturally
-      // becomes a chain of short segments rather than a long line
-      // crossing the whole canvas.
-      const d = curvePath(sa, sb);
-      const cls = sa.hazard || sb.hazard ? 'edge hazard' : 'edge';
-      const path = el('path', {
-        d,
-        class: cls,
+      // Straight line, planner-style. Edge labels (burn cost) get
+      // drawn near each endpoint, not at the midpoint, so they
+      // associate clearly with the node they belong to even when
+      // edges bundle.
+      const line = el('line', {
+        x1: sa.x.toFixed(1), y1: sa.y.toFixed(1),
+        x2: sb.x.toFixed(1), y2: sb.y.toFixed(1),
+        class: sa.hazard || sb.hazard ? 'edge hazard' : 'edge',
         'data-dv': dv,
       }, g);
-      path.dataset.from = a;
-      path.dataset.to = b;
-      const mx = (sa.x + sb.x) / 2;
-      const my = (sa.y + sb.y) / 2;
+      line.dataset.from = a;
+      line.dataset.to = b;
+      // dv label nudged 14px along the edge from each endpoint
+      // (matches the planner's edgeLabels presentation).
+      const dx = sb.x - sa.x;
+      const dy = sb.y - sa.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const nx = dx / d;
+      const ny = dy / d;
+      const off = 14;
       el('text', {
-        x: mx, y: my - 4, class: 'edge-label', 'text-anchor': 'middle',
+        x: (sa.x + nx * off).toFixed(1),
+        y: (sa.y + ny * off).toFixed(1),
+        class: 'edge-label',
+        'text-anchor': 'middle',
+      }, g).textContent = dv;
+      el('text', {
+        x: (sb.x - nx * off).toFixed(1),
+        y: (sb.y - ny * off).toFixed(1),
+        class: 'edge-label',
+        'text-anchor': 'middle',
       }, g).textContent = dv;
     }
   }
@@ -248,37 +257,72 @@ export class MapRenderer {
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
       const groupNode = el('g', {
         class: 'site site-type-' + site.type + (site.isWaypoint ? ' waypoint' : ''),
-        transform: `translate(${site.x},${site.y})`,
+        transform: `translate(${site.x.toFixed(1)},${site.y.toFixed(1)})`,
       }, g);
       groupNode.dataset.id = site.id;
 
-      const circ = el('circle', { r: vis.r, fill: vis.fill, stroke: vis.stroke, 'stroke-width': 1.5 }, groupNode);
-      if (site.hazard) circ.setAttribute('stroke', '#f87171');
+      // Body shape: hexagon for real sites, circle for waypoints.
+      // Black fill + white stroke matches the planner's site idiom.
+      const stroke = site.hazard ? '#f87171' : vis.stroke;
+      if (vis.kind === 'hex') {
+        el('polygon', {
+          points: hexPoints(vis.r),
+          fill: vis.fill,
+          stroke,
+          'stroke-width': 2,
+        }, groupNode);
+      } else {
+        el('circle', {
+          r: vis.r,
+          fill: vis.fill,
+          stroke,
+          'stroke-width': 2,
+        }, groupNode);
+      }
 
-      // Hydration drops to the right of the node, only for real
-      // sites (waypoints don't have water).
-      if (!site.isWaypoint && site.hydration) {
-        for (let i = 0; i < site.hydration; i++) {
-          el('circle', {
-            cx: vis.r + 4 + i * 5, cy: -vis.r - 1, r: 2,
-            fill: '#7dd3fc',
-          }, groupNode);
+      // Inside the hex: siteSize on top, hydration (water) below.
+      // The planner stamps these two short numbers inside the node
+      // because the relevant info at a glance is "how hard to claim,
+      // how wet is it". We do the same.
+      if (!site.isWaypoint) {
+        if (site.siteSize) {
+          el('text', {
+            y: -3,
+            class: 'site-size',
+            'text-anchor': 'middle',
+          }, groupNode).textContent = site.siteSize;
+        }
+        const hyd = site.hydration | 0;
+        if (hyd) {
+          el('text', {
+            y: 9,
+            class: 'site-water',
+            'text-anchor': 'middle',
+          }, groupNode).textContent = hyd;
         }
       }
 
-      // Label. Real sites are always labelled; routing waypoints
-      // (lagrange/burn/hohmann) only show their type on hover so
-      // the 1500-node graph stays readable.
+      // Hazard skull overlay for hazard waypoints (radhaz / lagrange
+      // hazard zones).
+      if (site.hazard) {
+        el('text', {
+          y: 5,
+          class: 'site-hazard',
+          'text-anchor': 'middle',
+        }, groupNode).textContent = '☠';
+      }
+
+      // External label below the node for real sites. Routing
+      // waypoints (lagrange / burn / hohmann) stay anonymous; tap
+      // surfaces their type in the tooltip / route status.
       if (!site.isWaypoint) {
-        const lbl = el('text', {
+        el('text', {
           y: vis.r + 12,
           class: 'site-label',
           'text-anchor': 'middle',
-        }, groupNode);
-        lbl.textContent = site.name;
+        }, groupNode).textContent = site.name;
       }
 
-      // Hover + click wiring.
       groupNode.addEventListener('mouseenter', () => this._showTooltip(site, groupNode));
       groupNode.addEventListener('mouseleave', () => this._hideTooltip());
       groupNode.addEventListener('click', (ev) => {
