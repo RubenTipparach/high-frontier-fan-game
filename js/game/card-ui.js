@@ -130,6 +130,19 @@ function buildFace(card, sideName, kind) {
   face.className = 'card-face';
   face.dataset.face = sideName;
 
+  // Radiators print as mirror-symmetric two-headed cards: each
+  // face is really two complete mini-cards stacked, one for the
+  // Light Side (upright) and one for the Heavy Side (upside-down
+  // so it reads correctly when the whole card is physically
+  // flipped 180°). Both halves carry their OWN typebar — and
+  // the typebar's leading glyph row is one 🌡 per Therm of THAT
+  // side — their own mass + rad-hardness stats, and a name
+  // label. The inactive half (driven by data-rotated on the
+  // card root) is dimmed.
+  if (card.type === 'radiator') {
+    return buildRadiatorFace(card, sideName);
+  }
+
   // Crew faces are functionally independent: each face is a
   // complete crew record. Keep the layout simple (header, bonus,
   // blurb, mass/rad/spectral footer).
@@ -390,6 +403,61 @@ function buildFace(card, sideName, kind) {
 
 // Small flat-top hex with the spectral letter in the centre.
 // Returns an SVG element the caller appends.
+// Render one face of a radiator card. The face contains two
+// stacked "half-cards" — Light Side at the top (upright) and
+// Heavy Side at the bottom (rotated 180° via CSS). Each half
+// has its own typebar, stat box, and name label so the card
+// reads as two complete radiators sharing a physical body, the
+// way the published HF4 card prints. data-rotated on the .card
+// root dims whichever half is currently inactive.
+function buildRadiatorFace(card, sideName) {
+  const face = document.createElement('div');
+  face.className = 'card-face is-radiator';
+  face.dataset.face = sideName;
+  if (card.flipOrientation === 'rotated180') face.classList.add('flip-rotates');
+
+  const faceMeta = (card.faces && card.faces[sideName]) || {};
+  const light = faceMeta.light || {};
+  const heavy = faceMeta.heavy || {};
+  const cardName = faceMeta.name || card.name;
+  const ability  = faceMeta.ability || '';
+  const therms = (n) => n > 0 ? '🌡️'.repeat(Math.min(8, n)) : '';
+
+  // Name sits directly below the typebar so it reads as a
+  // banner-and-title pair (matching the published radiator card
+  // where "Bubble Membrane" hugs the cyan "Radiator" header).
+  // Stats sit below, then ability text fills the remainder of
+  // the half.
+  const halfHtml = (cls, block, showSpectral) => `
+    <div class="rad-half ${cls}">
+      <div class="card-typebar">${therms(block.therms || 0)}  RADIATOR</div>
+      <div class="card-name-row"><span class="card-name">${escapeText(cardName)}</span></div>
+      <div class="card-statbox">
+        <span><strong>${block.mass ?? '—'}</strong> MASS</span>
+        <span><strong>${block.radHardness ?? '—'}</strong> RAD</span>
+        ${showSpectral ? '<span class="card-spectral"></span>' : '<span></span>'}
+      </div>
+      <p class="card-blurb">${escapeText(ability)}</p>
+    </div>`;
+
+  face.innerHTML = halfHtml('half-light', light, true)
+                 + halfHtml('half-heavy', heavy, false);
+  const spec = face.querySelector('.card-spectral');
+  if (spec) spec.appendChild(spectralHex(card.spectralType || 'C'));
+  return face;
+}
+
+// Tiny safe-escape so radiator-card text drops into innerHTML
+// without re-introducing the XSS attack surface that text
+// content would otherwise prevent.
+function escapeText(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 function spectralHex(type) {
   const style = SPECTRAL_STYLE[type] || SPECTRAL_STYLE.unknown;
   const label = SPECTRAL_LABEL[type] || SPECTRAL_LABEL.unknown;

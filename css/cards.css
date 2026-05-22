@@ -455,50 +455,64 @@
   transform: rotateY(180deg) rotateZ(180deg);
 }
 
-/* Light/Heavy stat block sub-lists for radiator cards. Both
-   are ALWAYS visible — the published HF4 card is mirror-
-   symmetric with the light side upright at the top and the
-   heavy side upside-down at the bottom. CSS rotates the heavy
-   block 180° and dims whichever side is currently inactive
-   (driven by data-rotated on the .card root). */
-.card-stats .side-block {
+/* Radiator card layout: each face is two stacked "half-cards"
+   — Light Side at the top (upright) and Heavy Side at the
+   bottom rotated 180°, exactly the way the published HF4
+   radiator prints. Each half carries its own cyan typebar,
+   stat box, ability blurb, and name label so the card reads
+   as two complete radiators sharing one physical body. The
+   inactive half is dimmed (driven by data-rotated on the .card
+   root). */
+.card-face.is-radiator {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 5px 7px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.10);
-  transition: opacity 0.22s ease;
-}
-.card-stats .side-block header {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 1.2px;
-  text-transform: uppercase;
-  color: var(--ink-mute);
-}
-.card-stats .side-block span {
-  display: flex;
   justify-content: space-between;
+  padding: 0;
+}
+.card-face.is-radiator .rad-half {
+  display: flex;
+  flex-direction: column;
+  transition: opacity 0.22s ease, filter 0.22s ease;
+}
+.card-face.is-radiator .rad-half .card-typebar {
+  background: #7dd3fc;
+  color: #0a2c43;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+.card-face.is-radiator .rad-half .card-statbox {
+  display: flex;
+  gap: 10px;
+  padding: 4px 8px;
   font-size: 11px;
+  align-items: center;
 }
-.card-stats .side-block .rad-therms {
-  font-size: 16px;
-  letter-spacing: 1px;
-  line-height: 1.1;
-  padding: 2px 0;
+.card-face.is-radiator .rad-half .card-blurb {
+  font-size: 11px;
+  margin: 2px 8px;
+  flex: 1;
+  color: var(--ink-dim);
 }
-/* Heavy side is drawn upside-down so flipping the card 180°
-   makes the heavy text read upright. */
-.card-stats .side-heavy { transform: rotate(180deg); }
-/* Active vs inactive side. data-rotated="0" keeps the light
-   side active (the user is reading the card right-side up);
-   data-rotated="1" flips the whole card 180° so the heavy
-   side is now upright + active. Dim the inactive half so the
-   reader knows which numbers count right now. */
-.card[data-rotated="0"] .card-stats .side-heavy { opacity: 0.32; filter: grayscale(0.7); }
-.card[data-rotated="1"] .card-stats .side-light { opacity: 0.32; filter: grayscale(0.7); }
+.card-face.is-radiator .rad-half .card-name-row {
+  padding: 4px 8px 2px;
+  text-align: center;
+  border-bottom: 1px dashed var(--border);
+}
+.card-face.is-radiator .rad-half .card-name {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+/* Heavy half is upside-down so the player physically rotates
+   the card 180° to read it. */
+.card-face.is-radiator .half-heavy { transform: rotate(180deg); }
+/* Dim the inactive half. data-rotated=0 means light side is
+   currently up, so heavy is dimmed; data-rotated=1 swaps. */
+.card[data-rotated="0"] .card-face.is-radiator .half-heavy,
+.card[data-rotated="1"] .card-face.is-radiator .half-light {
+  opacity: 0.32;
+  filter: grayscale(0.7);
+}
 
 /* Cursor hint on any element that carries a tooltip — works for
    both HTML chips and SVG icons inside the thrust visual. */
