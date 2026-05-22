@@ -26,6 +26,15 @@ const VIEW_W = 1400;
 const VIEW_H = 900;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 10;
+
+// Zoom level at which the hex marker (and its size text /
+// hydration droplets / centre flag glyphs) reaches its full
+// HEX_R size. Below this threshold the hex shrinks
+// proportionally so it doesn't dominate the small-scale,
+// zoomed-out view — and so two adjacent hexes don't visually
+// merge when the world spacing is compressed. At and above
+// this zoom level the hex is rendered at full size.
+const HEX_FULLSIZE_ZOOM = 2.5;
 const DEFAULT_ZOOM = 1.8;
 // Cap the celestial body halo at this many screen pixels so extreme
 // zoom doesn't turn Saturn into the entire canvas.
@@ -1412,6 +1421,10 @@ export class MapRenderer {
   _drawSiteHexesScreen(ctx) {
     const eff = this.zoom * this.fitScale;
     const { hostW, hostH } = this;
+    // hexS: shrink the hex marker below HEX_FULLSIZE_ZOOM so it
+    // doesn't dominate the compressed view at low zoom. At and
+    // above the threshold the hex sits at its full HEX_R.
+    const hexS = Math.min(1, this.zoom / HEX_FULLSIZE_ZOOM);
     for (const site of this._realSites) {
       const sx = this.pan.x + site.x * eff;
       const sy = this.pan.y + site.y * eff;
@@ -1424,7 +1437,7 @@ export class MapRenderer {
       if (vis.kind === 'comet') {
         if (sx < -30 || sx > hostW + 30 || sy < -30 || sy > hostH + 30) continue;
         const burnVis = TYPE_VIS.burn;
-        const ringR = burnVis.r * 1.4;
+        const ringR = burnVis.r * 1.4 * hexS;
         ctx.fillStyle = burnVis.fill;
         ctx.strokeStyle = burnVis.stroke;
         ctx.lineWidth = 1.5;
@@ -1432,7 +1445,7 @@ export class MapRenderer {
         ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
-        ctx.font = `${EMOJI_PX}px ${EMOJI_FONT}`;
+        ctx.font = `${EMOJI_PX * hexS}px ${EMOJI_FONT}`;
         ctx.fillStyle = '#ffffff';
         ctx.textBaseline = 'middle';
         ctx.textAlign = 'center';
@@ -1440,7 +1453,7 @@ export class MapRenderer {
         continue;
       }
       if (site.isLandable === false) continue;
-      const r = vis.r;
+      const r = vis.r * hexS;
       if (sx < -r - 20 || sx > hostW + r + 20 || sy < -r - 20 || sy > hostH + r + 20) continue;
 
       const isSelected = site.id === this._routeFromId || site.id === this._routeToId;
@@ -1537,6 +1550,11 @@ export class MapRenderer {
     const labelAlpha = Math.max(0, Math.min(1,
       (this.zoom - fadeMin) / Math.max(0.01, fadeMax - fadeMin)
     ));
+    // Same proportional shrink as _drawSiteHexesScreen so the
+    // size text / droplets / flag glyphs ride with the hex they
+    // sit inside instead of floating loose when the hex shrinks
+    // below the HEX_FULLSIZE_ZOOM threshold.
+    const hexS = Math.min(1, this.zoom / HEX_FULLSIZE_ZOOM);
 
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'center';
@@ -1546,14 +1564,15 @@ export class MapRenderer {
       const sy = this.pan.y + site.y * eff;
       if (sx < -40 || sx > hostW + 40 || sy < -40 || sy > hostH + 40) continue;
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
+      const r = vis.r * hexS;
 
       // Site size text in the upper half of the hex. Tuned so it
       // clears the centre flag glyphs (🌊 / 🌿 / ⛅) with a small
       // gap; previous 0.55-of-radius / 0.32-offset overlapped.
       if (site.siteSize) {
-        ctx.font = `700 ${Math.round(vis.r * 0.42)}px ui-sans-serif, system-ui, sans-serif`;
+        ctx.font = `700 ${Math.max(8, Math.round(r * 0.42))}px ui-sans-serif, system-ui, sans-serif`;
         ctx.fillStyle = '#ffffff';
-        ctx.fillText(site.siteSize, sx, sy - vis.r * 0.50);
+        ctx.fillText(site.siteSize, sx, sy - r * 0.50);
       }
 
       // Water droplets in the lower half of the hex, one teardrop
@@ -1562,12 +1581,12 @@ export class MapRenderer {
       // gives the centre flag glyphs breathing room.
       if (site.hydration) {
         const count = Math.min(4, site.hydration);
-        const dropH = vis.r * 0.32;
+        const dropH = r * 0.32;
         const dropW = dropH * 0.62;
-        const gap   = Math.max(1, vis.r * 0.08);
+        const gap   = Math.max(1, r * 0.08);
         const totalW = count * dropW + (count - 1) * gap;
         const startX = sx - totalW / 2 + dropW / 2;
-        const dropY  = sy + vis.r * 0.52;
+        const dropY  = sy + r * 0.52;
         ctx.fillStyle = '#60a5fa';
         ctx.strokeStyle = 'rgba(15, 30, 60, 0.85)';
         ctx.lineWidth = 0.8;
@@ -1580,7 +1599,7 @@ export class MapRenderer {
 
       if (site.hazard) {
         ctx.fillStyle = '#f87171';
-        ctx.font = `${Math.round(vis.r * 0.9)}px ui-monospace, menlo, monospace`;
+        ctx.font = `${Math.max(8, Math.round(r * 0.9))}px ui-monospace, menlo, monospace`;
         ctx.fillText('☠', sx, sy);
       }
 
@@ -1595,9 +1614,10 @@ export class MapRenderer {
       if (site.astrobiology) flags.push('🌿');
       if (site.atmospheric)  flags.push('⛅');
       if (flags.length) {
-        ctx.font = `${EMOJI_PX}px ${EMOJI_FONT}`;
-        const dy = vis.kind === 'comet' ? -EMOJI_PX - 4 : 0;
-        const spread = EMOJI_PX * 0.7;
+        const emoji = Math.max(8, EMOJI_PX * hexS);
+        ctx.font = `${emoji}px ${EMOJI_FONT}`;
+        const dy = vis.kind === 'comet' ? -emoji - 4 : 0;
+        const spread = emoji * 0.7;
         const startX = sx - spread * (flags.length - 1) / 2;
         for (let i = 0; i < flags.length; i++) {
           ctx.fillText(flags[i], startX + i * spread, sy + dy);
