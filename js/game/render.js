@@ -24,8 +24,8 @@
 
 const VIEW_W = 1400;
 const VIEW_H = 900;
-const MIN_ZOOM = 0.5;
-const MAX_ZOOM = 25;
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 10;
 const DEFAULT_ZOOM = 1.8;
 // Cap the celestial body halo at this many screen pixels so extreme
 // zoom doesn't turn Saturn into the entire canvas.
@@ -49,13 +49,10 @@ const TYPE_VIS = {
   dwarf:          { kind: 'hex',    r: 12, haloFactor: 1.7  },
   tno:            { kind: 'hex',    r: 10, haloFactor: 1.6  },
   moon:           { kind: 'hex',    r: 10, haloFactor: 1.65 },
-  comet:          { kind: 'hex',    r:  9, haloFactor: 1.7  },
+  comet:          { kind: 'comet',  r:  5 },
   asteroid:       { kind: 'hex',    r:  7, haloFactor: 1.5, rocky: true },
   surface:        { kind: 'hex',    r: 10, haloFactor: 1.55 },
-  // Sun is rendered specially -- no hex marker, no click target,
-  // just a glowing yellow body with a corona halo. r is the world-
-  // space radius of the bright disc; the corona extends ~3.5x.
-  sun:            { kind: 'sun',    r: 120 },
+  sun:            { kind: 'sun',    r: 60 },
   lagrange:       { kind: 'circle', r:  7, fill: 'transparent', stroke: '#c66932' },
   burn:           { kind: 'circle', r:  6, hitR: 8, fill: '#d60f7a', stroke: '#fde0ee', hideBelowZoom: 1.4 },
   hohmann:        { kind: 'circle', r:  2, hitR: 8, fill: '#10b981', stroke: '#a7f3d0' },
@@ -248,7 +245,12 @@ function drawPlanetRings(ctx, cx, cy, planetR, def, phase) {
   ctx.restore();
 }
 
-const ZONE_BAND_LIGHT = ['Venus', 'Mars', 'Jupiter', 'Uranus'];
+// Implicit Sun anchor used by the heliocentric guide rings and the
+// asteroid-belt particle field. Kept in sync with the synthetic
+// Sun's position in planner-map.js (normalized 0.7443, 0.7267 in
+// the 1400x900 viewport).
+const SUN_X = 1042;
+const SUN_Y = 654;
 
 // siteSynodic in the planner data is 'red' | 'yellow' | 'blue'. We
 // translate to UI-tuned hex values; same intent, palette adapted
@@ -264,6 +266,59 @@ const SYNODIC_COLOURS = {
 // polygon so it reads as a rock rather than a tiny planet. Each
 // asteroid caches its own vertex offsets keyed off the site id so
 // the silhouette is stable across frames.
+// Comet: small icy nucleus, soft cyan-white coma, dust tail
+// pointing away from the Sun. Drawn in world space alongside the
+// other halos. r is the nucleus radius (small -- smaller than an
+// asteroid).
+function drawComet(ctx, cx, cy, r, site) {
+  // Tail direction = unit vector from Sun to comet (so the tail
+  // streams outward).
+  const dx = cx - SUN_X;
+  const dy = cy - SUN_Y;
+  const dist = Math.hypot(dx, dy) || 1;
+  const tx = dx / dist;
+  const ty = dy / dist;
+  const tailLen = r * 14;
+  const tailEndX = cx + tx * tailLen;
+  const tailEndY = cy + ty * tailLen;
+
+  // Tail: narrow triangle from the nucleus outward, with a linear
+  // gradient that fades to transparent at the tip.
+  const tailGrad = ctx.createLinearGradient(cx, cy, tailEndX, tailEndY);
+  tailGrad.addColorStop(0,    'rgba(195, 225, 245, 0.65)');
+  tailGrad.addColorStop(0.4,  'rgba(180, 215, 240, 0.30)');
+  tailGrad.addColorStop(1,    'rgba(180, 215, 240, 0)');
+  ctx.fillStyle = tailGrad;
+  // Perpendicular offset to give the tail width near the comet.
+  const px = -ty, py = tx;
+  ctx.beginPath();
+  ctx.moveTo(cx + px * r * 1.0, cy + py * r * 1.0);
+  ctx.lineTo(cx - px * r * 1.0, cy - py * r * 1.0);
+  ctx.lineTo(tailEndX, tailEndY);
+  ctx.closePath();
+  ctx.fill();
+
+  // Coma: soft glow around the nucleus.
+  const coma = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 3.2);
+  coma.addColorStop(0,    'rgba(220, 240, 255, 0.55)');
+  coma.addColorStop(0.4,  'rgba(200, 230, 250, 0.20)');
+  coma.addColorStop(1,    'rgba(200, 230, 250, 0)');
+  ctx.fillStyle = coma;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 3.2, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Nucleus: small icy disc with a touch of shading.
+  const nuc = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.3, 0, cx, cy, r);
+  nuc.addColorStop(0,    '#ffffff');
+  nuc.addColorStop(0.5,  '#dbe7f0');
+  nuc.addColorStop(1,    '#5e7280');
+  ctx.fillStyle = nuc;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 // The Sun: a hot yellow disc with a bright core, a warm midband,
 // and a wide corona haze. Drawn in world space with everything
 // else; the halo extends well past the visible disc so it reads
@@ -435,18 +490,17 @@ export class MapRenderer {
 
   _buildAsteroidBelt() {
     // Seeded particle field placed in a torus-like band around the
-    // implicit Sun position (left edge, vertically centred) at the
-    // radial distance the asteroid belt occupies in our layout.
-    // Particles are static; we just want a textural cue.
+    // Sun's position at the radial distance the asteroid belt
+    // occupies in our layout. Particles are static; we just want a
+    // textural cue.
     this._beltParticles = [];
     let seed = 54321;
     const rand = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
-    const cx = 0, cy = VIEW_H / 2;
     for (let i = 0; i < 220; i++) {
-      const angle = (rand() * 2 - 1) * Math.PI * 0.45;     // -81° .. +81° from +X axis
-      const r = 460 + rand() * 220;                         // belt inner / outer radius
-      const x = cx + Math.cos(angle) * r;
-      const y = cy + Math.sin(angle) * r;
+      const angle = rand() * Math.PI * 2;
+      const r = 360 + rand() * 200;
+      const x = SUN_X + Math.cos(angle) * r;
+      const y = SUN_Y + Math.sin(angle) * r;
       this._beltParticles.push({
         x, y,
         size: 0.6 + rand() * 1.2,
@@ -631,9 +685,12 @@ export class MapRenderer {
     }
     this._drawGuides(ctx);
     this._drawAsteroidBelt(ctx);
+    // Planet halos render BEFORE edges so the body sphere sits
+    // behind every other map element. The hex markers (drawn in
+    // screen space later) sit on top.
+    this._drawSiteHalosWorld(ctx);
     this._drawEdges(ctx);
     this._drawRoute(ctx);
-    this._drawSiteHalosWorld(ctx);
 
     ctx.restore();
 
@@ -708,14 +765,14 @@ export class MapRenderer {
   }
 
   _drawGuides(ctx) {
-    // Heliocentric guide rings centred on the implicit Sun position
-    // (left edge, vertically centred). Subtle infrastructure layer.
+    // Heliocentric guide rings centred on the Sun. Subtle
+    // infrastructure layer.
     ctx.strokeStyle = '#1e293b';
     ctx.globalAlpha = 0.4;
     ctx.lineWidth = 0.8 / (this.zoom * this.fitScale);
-    for (let i = 1; i <= 4; i++) {
+    for (let i = 1; i <= 5; i++) {
       ctx.beginPath();
-      ctx.arc(0, VIEW_H / 2, 220 * i, 0, Math.PI * 2);
+      ctx.arc(SUN_X, SUN_Y, 140 * i, 0, Math.PI * 2);
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
@@ -1008,12 +1065,15 @@ export class MapRenderer {
     }
 
     // Pass 2: per-site halos for everything not part of a merged
-    // group, plus the special sun rendering and the rocky asteroid
-    // silhouettes.
+    // group, plus the special sun + comet renderings and the rocky
+    // asteroid silhouettes. Synthetic flavour bodies (Earth /
+    // Jupiter / Sun) draw their sphere too -- they just skip the
+    // hex marker pass later.
     for (const site of this._realSites) {
       if (this._mergedSites.has(site.id)) continue;
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
-      if (vis.kind === 'sun') { drawSun(ctx, site.x, site.y, vis.r); continue; }
+      if (vis.kind === 'sun')   { drawSun(ctx, site.x, site.y, vis.r); continue; }
+      if (vis.kind === 'comet') { drawComet(ctx, site.x, site.y, vis.r, site); continue; }
       if (vis.kind !== 'hex') continue;
       const worldR = Math.min(vis.r * vis.haloFactor, capWorld);
       const rings = ringDefFor(site);
@@ -1038,8 +1098,10 @@ export class MapRenderer {
       const sx = this.pan.x + site.x * eff;
       const sy = this.pan.y + site.y * eff;
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
-      // Sun has no hex marker -- it's a star, not a destination.
-      if (vis.kind === 'sun') continue;
+      // Flavour-only bodies (Sun, comets) and explicitly non-
+      // landable synthetics (Earth, Jupiter) skip the hex marker.
+      if (vis.kind === 'sun' || vis.kind === 'comet') continue;
+      if (site.isLandable === false) continue;
       const r = vis.r;
       if (sx < -r - 20 || sx > hostW + r + 20 || sy < -r - 20 || sy > hostH + r + 20) continue;
 
@@ -1346,7 +1408,8 @@ export class MapRenderer {
     let bestDist = 22 * 22;
     for (const s of this._realSites) {
       const vis = TYPE_VIS[s.type] || TYPE_VIS.unknown;
-      if (vis.kind === 'sun') continue;     // Sun is decorative, not selectable
+      if (vis.kind === 'sun')   continue;
+      if (s.isLandable === false) continue;
       const dx = (this.pan.x + s.x * eff) - sx;
       const dy = (this.pan.y + s.y * eff) - sy;
       const d = dx * dx + dy * dy;

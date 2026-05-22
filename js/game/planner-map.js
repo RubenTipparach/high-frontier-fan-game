@@ -207,40 +207,32 @@ function bodyKeyFor(site) {
 }
 
 // Inject Sun + Earth + Jupiter as renderable sites. The planner's
-// underlying graph doesn't include them: Sun is implicit, Earth is
-// implicit (LEO is the entry point), and Jupiter's body is implied
-// by the cluster of Galilean moons. Positions match the planner's
-// own board landmarks:
-//   Earth  -> centred on the +2 gravity-assist Lagrange (LEO).
-//   Jupiter -> centred on the +4 gravity-assist (the deep gas-giant
-//             flyby node in the Galilean cluster).
-//   Sun    -> bottom-right corner, sized so its top-right arc
-//             touches the Oberth burn node at the bottom of the map.
+// underlying graph doesn't include them; we add them with synthetic
+// ids so the renderer can draw them as flavour bodies. They're
+// marked isLandable=false so the renderer skips the hex marker
+// and the click hit-test ignores them -- you can look at them, you
+// can't land on them.
 function synthesizeBodies(sites, viewW, viewH) {
   const synthetics = [
     {
       id: 'synthetic_sun',
       name: 'Sun',
       type: 'sun',
-      // Sun world-radius is ~120; we want the top-right edge (the
-      // +45° point of the disc) to land on Oberth ~(0.832, 0.983).
-      // Solving: cx = Oberth_x - r/sqrt(2)/viewW, cy = Oberth_y + r/sqrt(2)/viewH.
-      // Pre-computed for r=120, viewW=1400, viewH=900.
-      nx: 0.772, ny: 1.077,
+      nx: 0.7443, ny: 0.7267,
     },
     {
       id: 'synthetic_earth',
       name: 'Earth',
+      type: 'inner-planet',
       // LEO sits on top of the Earth-Moon +2 gravity assist
       // Lagrange in the planner data.
-      type: 'inner-planet',
       nx: 0.871, ny: 0.813,
     },
     {
       id: 'synthetic_jupiter',
       name: 'Jupiter',
-      // +4 gravity-assist Lagrange = Jupiter's gravity well centre.
       type: 'gas-giant',
+      // +4 gravity-assist Lagrange = Jupiter's gravity well centre.
       nx: 0.337, ny: 0.429,
     },
   ];
@@ -251,6 +243,7 @@ function synthesizeBodies(sites, viewW, viewH) {
       type: s.type,
       isWaypoint: false,
       isDecorative: false,
+      isLandable: false,        // visual only -- no hex, no click target
       siteSize: null,
       siteSynodic: null,
       hydration: 0,
