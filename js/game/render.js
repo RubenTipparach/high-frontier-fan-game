@@ -471,6 +471,7 @@ export class MapRenderer {
     this._buildStars();
     this._buildAsteroidBelt();
     this._mount();
+    this._startAnimation();
   }
 
   // ---- public surface ----
@@ -507,20 +508,22 @@ export class MapRenderer {
   // ---- setup ----
 
   _buildAsteroidBelt() {
-    // Seeded particle field placed in a torus-like band around the
-    // Sun's position at the radial distance the asteroid belt
-    // occupies in our layout. Particles are static; we just want a
-    // textural cue.
+    // Seeded particle field placed in an orbital band around the
+    // Sun. Each particle stores its base angle, orbital radius, and
+    // angular speed (Keplerian-ish: omega scales with r^-1.5 so
+    // inner particles sweep noticeably faster than outer ones).
     this._beltParticles = [];
     let seed = 54321;
     const rand = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
     for (let i = 0; i < 220; i++) {
-      const angle = rand() * Math.PI * 2;
+      const angle0 = rand() * Math.PI * 2;
       const r = 360 + rand() * 200;
-      const x = SUN_X + Math.cos(angle) * r;
-      const y = SUN_Y + Math.sin(angle) * r;
+      // Angular speed tuned so a mid-belt rock makes a full orbit
+      // in ~5 minutes -- visible motion if you watch, but slow
+      // enough that the layout doesn't feel chaotic.
+      const omega = 0.022 / Math.pow(r / 460, 1.5);
       this._beltParticles.push({
-        x, y,
+        angle0, r, omega,
         size: 0.6 + rand() * 1.2,
         alpha: 0.25 + rand() * 0.5,
         tint: rand() < 0.15 ? '#cbb89a' : '#8e7c66',
@@ -676,6 +679,24 @@ export class MapRenderer {
 
   // ---- drawing ----
 
+  // Continuous animation loop: each rAF advances the shared anim
+  // clock and queues a draw. Used by the asteroid-belt particle
+  // sweep; cheap because the work per frame is dominated by the
+  // (already batched) draw pass. Stops if the canvas is detached
+  // from the DOM so we don't leak frames on view tear-down.
+  _startAnimation() {
+    const tick = (t) => {
+      if (!this.canvas || !this.canvas.isConnected) {
+        this._animRaf = null;
+        return;
+      }
+      this._animTime = t;
+      this._scheduleDraw();
+      this._animRaf = requestAnimationFrame(tick);
+    };
+    this._animRaf = requestAnimationFrame(tick);
+  }
+
   _scheduleDraw() {
     if (this._rafQueued) return;
     this._rafQueued = true;
@@ -797,25 +818,27 @@ export class MapRenderer {
   }
 
   _drawAsteroidBelt(ctx) {
-    // Static cloud of rocky particles in the belt zone. Cheap: one
-    // path per tint colour, batched fill.
+    // Static cloud of rocky particles in the belt zone, animated:
+    // each particle is sweeping around the Sun on its own orbital
+    // angle. Cheap: one path per tint colour, batched fill.
     const eff = this.zoom * this.fitScale;
     // Particle size is in world units; counter-scale so dots stay
     // small even when zoomed in.
     const counter = 1 / Math.max(1, eff * 0.5);
+    const t = (this._animTime || 0) / 1000;
     for (const tint of ['#8e7c66', '#cbb89a']) {
       ctx.fillStyle = tint;
       ctx.beginPath();
       for (const p of this._beltParticles) {
         if (p.tint !== tint) continue;
+        const angle = p.angle0 + p.omega * t;
+        const x = SUN_X + Math.cos(angle) * p.r;
+        const y = SUN_Y + Math.sin(angle) * p.r;
         ctx.globalAlpha = p.alpha;
-        const r = p.size * counter;
-        ctx.moveTo(p.x + r, p.y);
-        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        const radius = p.size * counter;
+        ctx.moveTo(x + radius, y);
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
       }
-      // Use stroke=0 fill; we accept that all dots in a batch share
-      // the per-particle alpha being overwritten as we add each
-      // sub-path. Visually fine because the alphas are close.
       ctx.fill();
     }
     ctx.globalAlpha = 1;
