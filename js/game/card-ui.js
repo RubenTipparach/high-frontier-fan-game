@@ -262,18 +262,18 @@ function svgSun(cx, cy, size) {
 // on several platforms.
 function svgBallerina(cx, cy, size) {
   const s = size / 18;
-  const headR = 1.7 * s;
+  const headR = 2.0 * s;
   const headY = cy - 6 * s;
   const shoulderY = cy - 3 * s;
   const armSpan = 6 * s;
   const hipY = cy + 2 * s;
   const footSpread = 3.2 * s;
   const footY = cy + 6 * s;
-  const stroke = (1.1 * s).toFixed(2);
-  return `<g data-tip="Spin gravity" stroke="#f0abfc" `
+  const stroke = (1.4 * s).toFixed(2);
+  return `<g data-tip="Spin gravity" stroke="#ec4899" `
     + `stroke-width="${stroke}" stroke-linecap="round" fill="none">`
     + `<circle cx="${cx}" cy="${headY.toFixed(2)}" r="${headR.toFixed(2)}" `
-    + `fill="#f0abfc" stroke="#a21caf" stroke-width="0.4"/>`
+    + `fill="#ec4899" stroke="#9d174d" stroke-width="0.5"/>`
     + `<line x1="${cx}" y1="${(headY + headR).toFixed(2)}" `
     + `x2="${cx}" y2="${hipY.toFixed(2)}"/>`
     + `<line x1="${(cx - armSpan).toFixed(2)}" y1="${shoulderY.toFixed(2)}" `
@@ -310,14 +310,17 @@ function thrustVisual(card) {
     ? 0
     : Math.max(1, Math.ceil(thrust / Math.max(1, card.isp || 1)));
 
-  // Support icons inside the triangle. Layout is count-aware so
-  // every glyph sits clear of the sloped edges.
+  // Support icons inside the triangle, stacked vertically along
+  // the centre line to match the published-card silhouette: one
+  // glyph centred for a single support; two stacked top-and-
+  // bottom for a pair; three packed into a small triangle (one
+  // up high, two flanking lower) when a card carries three.
   const reqs = (card.requires || []).slice(0, 3).filter((r) => REQUIREMENT_VIS[r.kind]);
   const iconLayouts = {
-    1: [{ x: 70, y: 56, s: 26 }],
-    2: [{ x: 56, y: 60, s: 20 }, { x: 84, y: 60, s: 20 }],
-    3: [{ x: 50, y: 66, s: 15 }, { x: 70, y: 66, s: 15 },
-        { x: 90, y: 66, s: 15 }],
+    1: [{ x: 70, y: 58, s: 26 }],
+    2: [{ x: 70, y: 40, s: 20 }, { x: 70, y: 68, s: 20 }],
+    3: [{ x: 70, y: 36, s: 14 }, { x: 56, y: 68, s: 14 },
+        { x: 84, y: 68, s: 14 }],
   };
   const layout = iconLayouts[reqs.length] || [];
   const iconsSvg = reqs.map((r, i) => triangleIconSvg(r.kind, r.count, layout[i])).join('');

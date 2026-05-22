@@ -1558,18 +1558,24 @@ export class MapRenderer {
         ctx.fillText('☠', sx, sy);
       }
 
-      // Submarine + astrobiology flags ride on the hex centre.
-      // When a site carries both we stack them side-by-side; one
-      // on its own sits dead-centre. Comets don't take a hex,
-      // so for them the flags tuck above the lander disc so the
-      // 🚀 glyph still reads clean.
-      if (site.submarine || site.astrobiology) {
+      // Site-flag glyphs ride on the hex centre — 🌊 submarine,
+      // 🌿 astrobiology, ⛅ aerostat (atmospheric). One flag sits
+      // dead-centre; multiples spread horizontally so they all
+      // fit inside the larger HEX_R. Comets don't take a hex,
+      // so for them we tuck the row above the lander disc to
+      // keep the 🚀 glyph readable.
+      const flags = [];
+      if (site.submarine)    flags.push('🌊');
+      if (site.astrobiology) flags.push('🌿');
+      if (site.atmospheric)  flags.push('⛅');
+      if (flags.length) {
         ctx.font = `${EMOJI_PX}px ${EMOJI_FONT}`;
-        const both = site.submarine && site.astrobiology;
-        const dx = both ? Math.round(EMOJI_PX * 0.55) : 0;
         const dy = vis.kind === 'comet' ? -EMOJI_PX - 4 : 0;
-        if (site.submarine)    ctx.fillText('🌊', sx - dx, sy + dy);
-        if (site.astrobiology) ctx.fillText('🌿', sx + dx, sy + dy);
+        const spread = EMOJI_PX * 0.7;
+        const startX = sx - spread * (flags.length - 1) / 2;
+        for (let i = 0; i < flags.length; i++) {
+          ctx.fillText(flags[i], startX + i * spread, sy + dy);
+        }
       }
 
       if (labelAlpha > 0) {
