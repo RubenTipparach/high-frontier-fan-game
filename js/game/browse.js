@@ -1059,12 +1059,12 @@ function ensureMapShell(host) {
     if (!moveBtn) return;
     const remaining = getMovesRemaining();
     if (remaining > 0) {
-      moveBtn.textContent = '🛸';
+      moveBtn.textContent = '🛸 Move to';
       moveBtn.title = 'Move the rocket one step along its planned route';
       moveBtn.setAttribute('aria-label', 'Move rocket');
       moveBtn.dataset.state = 'move';
     } else {
-      moveBtn.textContent = '↩ 🛸';
+      moveBtn.textContent = '↩ Undo';
       moveBtn.title = 'Undo move (operations can happen before OR after the move, not in the middle)';
       moveBtn.setAttribute('aria-label', 'Undo move');
       moveBtn.dataset.state = 'undo';
