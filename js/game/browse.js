@@ -324,6 +324,43 @@ function wireHandGrabber(grabber, strip) {
   grabber.addEventListener('touchstart', onPointerDown, { passive: true });
 }
 
+// Modals + the drag-ghost append to the live overlay root, which
+// is the fullscreen element when one is active (e.g. the user
+// pressed ⛶ on the map toolbar) and document.body otherwise.
+// Anything appended outside the fullscreen root is invisible
+// while the Fullscreen API is engaged - so a modal mounted in
+// body would just silently not show up. The watcher below
+// re-parents any open overlays on fullscreenchange so they
+// follow the user in / out of fullscreen too.
+function overlayRoot() {
+  return document.fullscreenElement || document.body;
+}
+function mountOverlay(el) {
+  overlayRoot().appendChild(el);
+  return el;
+}
+document.addEventListener('fullscreenchange', () => {
+  const root = overlayRoot();
+  // Move every known overlay class into the new root so a modal
+  // that was open when the user toggled fullscreen stays visible.
+  // Selectors cover the card / fuel-tank / rocket-stack /
+  // confirm / hazard / turn-clock modals + the drag ghost.
+  const selectors = [
+    '.card-modal-overlay',
+    '.fuel-tank-overlay',
+    '.confirm-modal-overlay',
+    '.rocket-stack-overlay',
+    '.hazard-confirm-overlay',
+    '.drag-ghost',
+    '.card-tip',
+  ];
+  for (const sel of selectors) {
+    for (const el of document.querySelectorAll(sel)) {
+      if (el.parentNode !== root) root.appendChild(el);
+    }
+  }
+});
+
 // Custom drag-image. The browser's default drag-image is a
 // faded snapshot of the element with no animation; we replace
 // it with a fixed-position clone that follows the pointer, casts
@@ -356,7 +393,7 @@ function startCustomDragGhost(srcEl, ev) {
   const offsetY = ev.clientY - rect.top;
   ghost.style.left = (ev.clientX - offsetX) + 'px';
   ghost.style.top  = (ev.clientY - offsetY) + 'px';
-  document.body.appendChild(ghost);
+  mountOverlay(ghost);
 
   _dragGhost = ghost;
   _dragGhostState = {
@@ -452,7 +489,7 @@ function openDeckTapModal(card, kind) {
   actions.append(addBtn);
   panel.appendChild(actions);
   overlay.appendChild(panel);
-  document.body.appendChild(overlay);
+  mountOverlay(overlay);
   // Tap the backdrop or press Escape to dismiss - no explicit ×
   // button. The card modal is small and the backdrop is the
   // obvious affordance.
@@ -540,7 +577,7 @@ function openCardModal(card, kind, slotIdx) {
   actions.append(discardBtn, sellBtn, produceBtn, boostBtn);
   panel.appendChild(actions);
   overlay.appendChild(panel);
-  document.body.appendChild(overlay);
+  mountOverlay(overlay);
 
   // Tap the backdrop or press Escape to dismiss - no explicit ×
   // button (the action row already crowds the bottom).
@@ -1625,7 +1662,7 @@ function openRocketStackModal() {
   repaint();
   _rocketModalUnsub = onRocketChange(repaint);
 
-  document.body.appendChild(overlay);
+  mountOverlay(overlay);
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
 }
@@ -1779,7 +1816,7 @@ function hazardConfirmModal(hazards) {
       b.addEventListener('click', () => close(b.dataset.act));
     }
     overlay.appendChild(panel);
-    document.body.appendChild(overlay);
+    mountOverlay(overlay);
   });
 }
 
@@ -2069,7 +2106,7 @@ function confirmModal({ title, body, yes = 'OK', no = 'Cancel' }) {
     const noEl = panel.querySelector('[data-act="no"]');
     if (noEl) noEl.addEventListener('click', () => close(false));
     overlay.appendChild(panel);
-    document.body.appendChild(overlay);
+    mountOverlay(overlay);
   });
 }
 
@@ -2367,7 +2404,7 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
   panel.querySelector('.modal-x').addEventListener('click', close);
 
   overlay.appendChild(panel);
-  document.body.appendChild(overlay);
+  mountOverlay(overlay);
 
   // Animate from fromW -> tankNow. The droplet stepper runs on
   // the same rAF tick so the visual stays in sync; once the
@@ -2681,7 +2718,7 @@ function openProspectRollModal({ site, threshold, roll, success, kindGlyph, card
   dieHost.appendChild(die);
 
   overlay.appendChild(panel);
-  document.body.appendChild(overlay);
+  mountOverlay(overlay);
 
   rollDie(die, roll).then(() => {
     die.classList.add(success ? 'die-success' : 'die-fail');
@@ -3320,7 +3357,7 @@ function openRouteOptionsModal(onClose) {
   });
 
   overlay.appendChild(panel);
-  document.body.appendChild(overlay);
+  mountOverlay(overlay);
 }
 
 function refreshOpenSitePopup() {

@@ -800,7 +800,7 @@ function ensureTip() {
   _tipEl = document.createElement('div');
   _tipEl.className = 'card-tip';
   _tipEl.setAttribute('role', 'tooltip');
-  document.body.appendChild(_tipEl);
+  (document.fullscreenElement || document.body).appendChild(_tipEl);
   document.addEventListener('pointerdown', (e) => {
     if (!_tipTarget) return;
     if (_tipTarget === e.target || _tipTarget.contains(e.target)) return;

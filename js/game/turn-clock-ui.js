@@ -54,7 +54,7 @@ export function confirmEndTurn() {
     panel.querySelector('[data-act="yes"]').addEventListener('click', () => close(true));
     panel.querySelector('[data-act="no"]').addEventListener('click',  () => close(false));
     overlay.appendChild(panel);
-    document.body.appendChild(overlay);
+    (document.fullscreenElement || document.body).appendChild(overlay);
   });
 }
 
@@ -333,7 +333,7 @@ export function openEventLegend() {
   `;
   panel.querySelector('.modal-x').addEventListener('click', close);
   overlay.appendChild(panel);
-  document.body.appendChild(overlay);
+  (document.fullscreenElement || document.body).appendChild(overlay);
   return overlay;
 }
 
@@ -463,6 +463,6 @@ export function openTurnClockModal({ rolling = null, animateFrom = null } = {}) 
   };
   repaint(rolling, animateFrom);
   _turnModalEl = overlay;
-  document.body.appendChild(overlay);
+  (document.fullscreenElement || document.body).appendChild(overlay);
   return overlay;
 }
