@@ -2076,11 +2076,18 @@ function syncSandboxRocket() {
   // it's just dead weight and shouldn't read as "active".
   const prosp = getActiveProspectorStats();
   const prospectorKind = (prosp && prosp.canActivate) ? prosp.kind : null;
+  // Card name + ISRU travel with the sprite so the renderer's
+  // badge-hover tooltip can show them without having to import
+  // rocket state itself.
+  const prospectorName = prosp && prosp.card ? prosp.card.name : null;
+  const prospectorIsru = prosp ? prospectorIsruValue(prosp.card) : null;
   _renderer.setSandboxRocket({
     x, y,
     colour: 'yellow',
     canFly: r.active,       // drives the 🚫 + transparency overlay
     prospectorKind,
+    prospectorName,
+    prospectorIsru,
   });
 }
 

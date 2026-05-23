@@ -540,6 +540,9 @@ export class MapRenderer {
                                     // discs (success/fail) drawn over sites
     this._popupRocketInfo = null;   // { isru } - active rig info supplied
                                     // by browse.js for the popup chip
+    this._prospectorBadgeBox = null; // last-drawn badge bounds for hover
+                                    // hit-testing (set inside the sandbox
+                                    // rocket draw, cleared when no badge)
     this._sandboxRocketBadge = null; // 'missile' | 'raygun' | 'buggy' or null
                                     // - small kind icon clipped to the
                                     // rocket sprite so the player sees
@@ -1978,7 +1981,18 @@ export class MapRenderer {
         ctx.textBaseline = 'middle';
         ctx.fillText(glyph, bx, by + 1);
         ctx.restore();
+        // Stash circle bounds + descriptor for hover-tooltip
+        // hit-testing. Browse.js fills name + isru on the
+        // sprite payload so the tooltip stays self-contained.
+        this._prospectorBadgeBox = {
+          x: bx, y: by, r: badgeSize * 0.5,
+          kind: r.prospectorKind,
+          name: r.prospectorName || null,
+          isru: Number.isFinite(r.prospectorIsru) ? r.prospectorIsru : null,
+        };
       }
+    } else {
+      this._prospectorBadgeBox = null;
     }
     // Stash the screen-space bounding box for hit-testing.
     this._sandboxRocketBox = {
@@ -2371,6 +2385,26 @@ export class MapRenderer {
     let lastId = null;
     this.canvas.addEventListener('mousemove', (ev) => {
       if (this._touchActive) return;       // tap path owns the popup
+      // Prospector-badge hover comes first - it's a small overlay
+      // on top of the rocket sprite and would lose to the larger
+      // site hit-test underneath if we checked sites first.
+      const rect = this.canvas.getBoundingClientRect();
+      const scx = ev.clientX - rect.left;
+      const scy = ev.clientY - rect.top;
+      const badge = this._prospectorBadgeBox;
+      if (badge) {
+        const dx = scx - badge.x;
+        const dy = scy - badge.y;
+        if (dx * dx + dy * dy <= badge.r * badge.r) {
+          if (lastId !== '__prosp__') {
+            lastId = '__prosp__';
+            this._showProspectorBadgeTooltip(badge, ev);
+          } else {
+            this._positionTooltip(ev);
+          }
+          return;
+        }
+      }
       const pt = this._eventToWorld(ev);
       const hit = this._hitTest(pt.x, pt.y);
       const id = hit ? hit.id : null;
@@ -2547,5 +2581,29 @@ export class MapRenderer {
 
   _hideTooltip() {
     this._tooltipEl.classList.add('hidden');
+  }
+
+  // Hover tooltip for the prospector badge on the rocket sprite.
+  // Shows the kind name + the rig's ISRU; ISRU is the prospect /
+  // refuel gating value so it's the headline number.
+  _showProspectorBadgeTooltip(badge, ev) {
+    const t = this._tooltipEl;
+    const kindLabel = {
+      missile: 'Missile prospector',
+      raygun:  'Raygun prospector',
+      buggy:   'Buggy prospector',
+    }[badge.kind] || 'Prospector';
+    const isruStr = Number.isFinite(badge.isru) ? badge.isru : '-';
+    const nameLine = badge.name
+      ? `<div class="t-name">${badge.name}</div>` : '';
+    t.innerHTML = `
+      ${nameLine}
+      <div class="t-meta">
+        <span>${kindLabel}</span>
+        <span>· ISRU <strong>${isruStr}</strong></span>
+      </div>
+    `;
+    t.classList.remove('hidden');
+    this._positionTooltip(ev);
   }
 }
