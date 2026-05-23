@@ -1436,18 +1436,22 @@ function siteProspectThreshold(site) {
   return 4;
 }
 
-// Refueling at a hydrated site. The HF4 refining loop is:
-//   1. Rocket must be parked ON the target site (no remote refining)
-//   2. The site has water = site.hydration (0..4)
-//   3. Player needs ISRU >= site requirement to operate the rig.
-//      We piggyback on the active prospector's ISRU rating; until
-//      Stage 3 wires real refinery cards, the ISRU rig is the
-//      refinery.
-//   4. Each refining op adds water = site.hydration to the tank,
-//      capped at the tank's max. One op per (turn, site) per the
-//      published rules - you can't strip-mine a site in one turn.
+// Refueling at a hydrated site. Two distinct refining sources
+// per the HF4 rules:
 //
-// canRefuelAt returns { ok, reason, label } for the popup button.
+//   1. A Refinery card (card.type === 'refinery') with its
+//      supports met: a FLAT +7 water per op. Refineries are
+//      dedicated processing plants, not water-rated rigs.
+//
+//   2. An active ISRU rig (the prospector with an ISRU property,
+//      until dedicated refinery support lands in Stage 3): yield
+//      = site number - ISRU + 1. The site number is the same
+//      value the prospect roll checks against.
+//
+// Either path needs the rocket parked ON the site and the site's
+// number > 0. The refinery path is preferred when both are
+// available because it produces more water (7 > typical formula).
+// One refining op per (turn, site) so a player can't strip-mine.
 const STORAGE_REFUEL_LOG = 'hf-sandbox-refuel-log';   // {turn: number, sites: [id]}
 function getRefuelLog() {
   try {
@@ -1468,11 +1472,73 @@ function hasRefueledThisTurn(siteId) {
   return log.sites.includes(siteId);
 }
 
-function canRefuelAt(site, prosp) {
-  // HF4 refining yield: gain = site number - ISRU + 1. The "site
-  // number" is the same value the prospect roll checks against
-  // (leading integer of siteSize, e.g. "9H" -> 9). Lower-ISRU
-  // rigs at higher-number sites pull more water per op.
+// Flat yield of a refinery card per the rules.
+const REFINERY_YIELD = 7;
+
+// Pick the best refining source available in the rocket stack.
+// Returns either:
+//   { kind: 'refinery', card, rawGain: 7 }
+//   { kind: 'isru', card, rawGain: siteNumber - ISRU + 1 }
+//   null - nothing usable
+// Refinery wins when both are present (always more water). The
+// refinery branch validates supports the same way isRocketActive
+// does; the ISRU branch leans on getActiveProspectorStats so the
+// prospector's per-supplier OR rule applies.
+function pickRefiningSource(site) {
+  const siteNumber = siteProspectThreshold(site);
+  // Refinery path: any stacked card whose type is 'refinery' AND
+  // whose requires are satisfied by the rest of the stack.
+  const stack = getRocketStack();
+  for (const slot of stack) {
+    const c = PATENTS_BY_ID[slot.id];
+    if (!c || c.type !== 'refinery') continue;
+    if (!refineryHasSupports(slot.id, stack)) continue;
+    return { kind: 'refinery', card: c, rawGain: REFINERY_YIELD };
+  }
+  // ISRU rig path: the active prospector with a positive ISRU
+  // value, supports met, and ISRU <= site number.
+  const prosp = getActiveProspectorStats();
+  if (prosp && prosp.canActivate) {
+    const isru = prospectorIsruValue(prosp.card);
+    if (isru > 0 && isru <= siteNumber) {
+      return { kind: 'isru', card: prosp.card, rawGain: siteNumber - isru + 1, isru };
+    }
+  }
+  return null;
+}
+
+// Same supplier-grouped OR check isRocketActive() uses, scoped to
+// one refinery card. Returns true when every required-supplier
+// group has at least one matching supplier in the rest of the
+// stack.
+function refineryHasSupports(cardId, stack) {
+  const c = PATENTS_BY_ID[cardId];
+  if (!c) return false;
+  const f = (c.faces && c.faces.primary) || c;
+  const reqs = Array.isArray(f.requires) ? f.requires : (c.requires || []);
+  if (!reqs.length) return true;
+  const supplied = new Set();
+  for (const slot of stack) {
+    if (slot.id === cardId) continue;
+    const oc = PATENTS_BY_ID[slot.id];
+    if (!oc) continue;
+    const of = (oc.faces && oc.faces.primary) || oc;
+    const sups = of.supplies || oc.supplies || [];
+    for (const k of sups) supplied.add(k);
+  }
+  const groups = new Map();
+  for (const r of reqs) {
+    const supplier = r.kind.split('-')[0];
+    if (!groups.has(supplier)) groups.set(supplier, []);
+    groups.get(supplier).push(r.kind);
+  }
+  for (const [, kinds] of groups) {
+    if (!kinds.some((k) => supplied.has(k))) return false;
+  }
+  return true;
+}
+
+function canRefuelAt(site) {
   const siteNumber = siteProspectThreshold(site);
   const tank  = getTankWater();
   const tmax  = getTankMax();
@@ -1482,61 +1548,55 @@ function canRefuelAt(site, prosp) {
   if (tank >= tmax) {
     return { ok: false, label: `💧 Tank full (${tank}/${tmax})`, reason: 'Tank is already at max.' };
   }
-  if (!prosp) {
-    return { ok: false, label: `💧 Refuel (no rig)`, reason: 'Activate a prospector / refining rig (ISRU) first.' };
-  }
-  const isru = prospectorIsruValue(prosp.card);
-  if (isru <= 0) {
-    return { ok: false, label: `💧 Refuel (no ISRU)`, reason: 'Active rig has no ISRU rating.' };
-  }
-  if (isru > siteNumber) {
+  const source = pickRefiningSource(site);
+  if (!source) {
     return {
       ok: false,
-      label: `💧 Refuel (ISRU ${isru} > site ${siteNumber})`,
-      reason: `Site number ${siteNumber} is below the rig's ISRU ${isru}.`,
+      label: `💧 Refuel (no rig)`,
+      reason: 'Need an active refinery, OR an ISRU prospector with ISRU ≤ site number.',
     };
-  }
-  if (!prosp.canActivate) {
-    return { ok: false, label: `💧 Refuel (unsupported)`, reason: 'Rig is missing supports.' };
   }
   if (hasRefueledThisTurn(site.id)) {
     return { ok: false, label: `💧 Refueled this turn`, reason: 'Already refined here this turn. End turn to refresh.' };
   }
-  // Yield formula: site number - ISRU + 1, then capped at the
-  // tank's headroom so a full tank doesn't reward over-pulling.
-  const rawGain = siteNumber - isru + 1;
-  const gain    = Math.min(rawGain, tmax - tank);
-  return { ok: true, label: `💧 Refuel (+${gain} water)`, reason: null };
+  const gain = Math.min(source.rawGain, tmax - tank);
+  const label = source.kind === 'refinery'
+    ? `💧 Refuel (+${gain} via refinery)`
+    : `💧 Refuel (+${gain} via ISRU)`;
+  return { ok: true, label, reason: null, source };
 }
 
-function doRefuel(site, prosp) {
-  if (!prosp) return;
-  const chk = canRefuelAt(site, prosp);
+function doRefuel(site) {
+  const chk = canRefuelAt(site);
   if (!chk.ok) {
     setStatus(`Refuel blocked: ${chk.reason}`);
     return;
   }
-  const siteNumber = siteProspectThreshold(site);
-  const isru = prospectorIsruValue(prosp.card);
+  const source = chk.source;
   const tankBefore = getTankWater();
   const tmax = getTankMax();
-  const rawGain = siteNumber - isru + 1;
-  const gain    = Math.min(rawGain, tmax - tankBefore);
+  const gain = Math.min(source.rawGain, tmax - tankBefore);
   if (gain <= 0) return;
   addFuel(gain);
   markRefueledThisTurn(site.id);
+  const sourceName = source.card?.name || source.kind;
+  const detail = source.kind === 'refinery'
+    ? `flat +${REFINERY_YIELD} via <em>${esc(sourceName)}</em>`
+    : `site ${siteProspectThreshold(site)} - ISRU ${source.isru} + 1 = ${source.rawGain}`;
   setStatus(
     `💧 Refined <strong>${gain}</strong> water at `
-    + `<strong>${esc(site.name)}</strong> `
-    + `(site ${siteNumber} - ISRU ${isru} + 1 = ${rawGain}). `
+    + `<strong>${esc(site.name)}</strong> (${detail}). `
     + `Tank ${tankBefore} → <strong>${tankBefore + gain}</strong>/${tmax}.`
   );
   logAction({
     type: 'refuel',
     icon: '💧',
-    summary: `Refined +${gain} water at ${site.name} (site ${siteNumber}, ISRU ${isru}, tank ${tankBefore + gain}/${tmax})`,
+    summary: `Refined +${gain} water at ${site.name} via ${source.kind} (${sourceName}); tank ${tankBefore + gain}/${tmax}`,
     undoable: false,
-    data: { siteId: site.id, gain, siteNumber, isru, tankAfter: tankBefore + gain },
+    data: {
+      siteId: site.id, gain, source: source.kind,
+      tankAfter: tankBefore + gain,
+    },
   });
 }
 
@@ -2199,7 +2259,7 @@ function showSitePopupFor(site) {
   // One refuel per (turn, site) so the player can't strip-mine
   // the site by hammering the button.
   if (rocketSite && site.id === rocketSite.id) {
-    const refuelChk = canRefuelAt(site, prosp);
+    const refuelChk = canRefuelAt(site);
     actions.push({
       label: refuelChk.label,
       variant: 'secondary',
@@ -2207,7 +2267,7 @@ function showSitePopupFor(site) {
       title: refuelChk.reason || undefined,
       onClick: () => {
         if (!refuelChk.ok) return;
-        doRefuel(site, prosp);
+        doRefuel(site);
         _renderer.clearSitePopup();
       },
     });
