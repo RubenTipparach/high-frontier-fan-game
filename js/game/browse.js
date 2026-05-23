@@ -2379,6 +2379,80 @@ function radHardnessRollModal(radHazards, stackCards, thrust, seasonBonus) {
 
 // Small info modal used when the player tries to undo a hazardous
 // move. Single OK button; the lockout is informational only.
+// Mid-route choice between hazards. Pops after each roll
+// resolves (and the rocket survived) so the player can:
+//   - Continue: roll the next hazard.
+//   - Stop here: halt the route at the current node. Remaining
+//     planned segments stay in the route so a later turn can
+//     pick them up.
+//   - Pay X aqua to bypass the remaining GENERIC hazards
+//     (rad zones can't be paid, so they still roll). Only
+//     enabled when generic hazards remain unresolved AND the
+//     balance covers the cost.
+// Resolves to 'continue' | 'stop' | 'pay'.
+function midRouteChoiceModal({ atSiteName, remaining, aquaBalance }) {
+  return new Promise((resolve) => {
+    document.querySelector('.mid-route-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay mid-route-overlay';
+    const close = (val) => {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(val);
+    };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close('stop'); });
+    const onKey = (e) => {
+      if (e.key === 'Escape') close('stop');
+      else if (e.key === 'Enter') close('continue');
+    };
+    document.addEventListener('keydown', onKey);
+
+    const remGeneric = remaining.filter((r) => r.hazard.site.type !== 'radhaz');
+    const remRad     = remaining.filter((r) => r.hazard.site.type === 'radhaz');
+    const payCost = remGeneric.length * HAZARD_COST_PER;
+    const canPay = remGeneric.length > 0 && aquaBalance >= payCost;
+    const list = remaining.map((r) =>
+      `<li><span class="haz-glyph">${r.hazard.glyph}</span> `
+      + `${esc(r.hazard.site.name || '')} <em class="muted">${esc(r.hazard.label)}</em></li>`
+    ).join('');
+
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel mid-route-panel';
+    panel.innerHTML = `
+      <h3>🛸 Pause at ${esc(atSiteName)}</h3>
+      <p>Survived. <strong>${remaining.length}</strong> more
+        hazard${remaining.length === 1 ? '' : 's'} along the
+        route:</p>
+      <ul class="hazard-list">${list}</ul>
+      <div class="mid-route-balance muted">
+        💧 Aqua balance: <strong>${aquaBalance}</strong>
+        ${remRad.length ? ` · ${remRad.length} rad zone${remRad.length === 1 ? '' : 's'} can't be paid` : ''}
+      </div>
+      <div class="turn-confirm-actions mid-route-actions">
+        <button type="button" class="popup-btn primary" data-act="continue"
+          title="Roll the next hazard in line">
+          ▶ Continue
+        </button>
+        ${remGeneric.length ? `
+          <button type="button" class="popup-btn" data-act="pay"
+            ${canPay ? '' : 'disabled'}
+            title="${canPay ? 'Spend ' + payCost + ' aqua to skip the remaining generic rolls' : 'Not enough aqua to bypass remaining generic hazards'}">
+            💧 Pay ${payCost} aqua to bypass ${remGeneric.length} generic
+          </button>` : ''}
+        <button type="button" class="popup-btn" data-act="stop"
+          title="Halt the move here. Remaining segments stay in the planned route for a future turn.">
+          ⏹ Stop here
+        </button>
+      </div>
+    `;
+    for (const b of panel.querySelectorAll('button[data-act]')) {
+      b.addEventListener('click', () => close(b.dataset.act));
+    }
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+  });
+}
+
 function blockedUndoModal() {
   return confirmModal({
     title: '⚠ Move locked',
@@ -3697,79 +3771,180 @@ async function moveRocket() {
     persistRocketSite();
     lastIdx = targetIdx + 1;
   };
-  for (const { idx, hazard } of orderedHazards) {
+  // Tracks whether the player switched to "pay for the rest"
+  // mid-queue; flips remaining generic hazards to the paid path
+  // without re-rolling. Starts true when the upfront choice was
+  // already 'pay' so the queue uniformly checks one flag.
+  let payRemainingGeneric = (hazardChoice === 'pay');
+  let earlyHalt = false;
+  let haltSite = null;
+  for (let qi = 0; qi < orderedHazards.length; qi++) {
+    const { idx, hazard } = orderedHazards[qi];
     await advanceTo(idx);
     const isRad = hazard.site.type === 'radhaz';
     if (isRad) {
-      if (!radWillRoll) continue;       // thrust bypass already logged
-      const stackCards = getRocketStack()
-        .map((slot) => {
-          const card = PATENTS_BY_ID[slot.id]
-            || CREW.find((c) => c.id === slot.id) || null;
-          if (!card) return null;
-          return {
-            id: slot.id,
-            name: card.name,
-            radHardness: card.radHardness != null ? card.radHardness : 0,
-          };
-        })
-        .filter(Boolean);
-      const { rolls: radRolls, decommission } = await radHardnessRollModal(
-        [hazard], stackCards, radThrust, radSeasonBonus,
-      );
-      for (const r of radRolls) {
-        logAction({
-          type: 'rad_roll',
-          icon: '☢',
-          summary: `☢ ${esc(r.site.name)} d6=${r.d6}`
-            + (radSeasonBonus ? ` +${radSeasonBonus} (red)` : '')
-            + (radThrust ? ` −${radThrust} thrust` : '')
-            + ` = rad ${r.rad}`,
-          undoable: false,
-          data: { siteId: r.site.id, d6: r.d6, rad: r.rad, thrust: radThrust, seasonBonus: radSeasonBonus },
-        });
-      }
-      if (decommission && decommission.length) {
-        let lost = 0;
-        for (const cardId of decommission) {
-          const ridx = getRocketStack().findIndex((s) => s.id === cardId);
-          if (ridx < 0) continue;
-          rocketRemoveCard(ridx);
-          const card = PATENTS_BY_ID[cardId]
-            || CREW.find((c) => c.id === cardId) || null;
-          if (card) {
-            const r = addToHand(card);
-            if (r && r.ok) lost++;
-          }
+      if (!radWillRoll) {
+        // Bypass already logged upfront; just animate past.
+      } else {
+        const stackCards = getRocketStack()
+          .map((slot) => {
+            const card = PATENTS_BY_ID[slot.id]
+              || CREW.find((c) => c.id === slot.id) || null;
+            if (!card) return null;
+            return {
+              id: slot.id,
+              name: card.name,
+              radHardness: card.radHardness != null ? card.radHardness : 0,
+            };
+          })
+          .filter(Boolean);
+        const { rolls: radRolls, decommission } = await radHardnessRollModal(
+          [hazard], stackCards, radThrust, radSeasonBonus,
+        );
+        for (const r of radRolls) {
+          logAction({
+            type: 'rad_roll',
+            icon: '☢',
+            summary: `☢ ${esc(r.site.name)} d6=${r.d6}`
+              + (radSeasonBonus ? ` +${radSeasonBonus} (red)` : '')
+              + (radThrust ? ` −${radThrust} thrust` : '')
+              + ` = rad ${r.rad}`,
+            undoable: false,
+            data: { siteId: r.site.id, d6: r.d6, rad: r.rad, thrust: radThrust, seasonBonus: radSeasonBonus },
+          });
         }
-        logAction({
-          type: 'rad_decommission',
-          icon: '☢',
-          summary: `☢ ${esc(hazard.site.name)}: ${lost} card${lost === 1 ? '' : 's'} decommissioned to hand`,
-          undoable: false,
-          data: { siteId: hazard.site.id, decommission, count: lost },
-        });
+        if (decommission && decommission.length) {
+          let lost = 0;
+          for (const cardId of decommission) {
+            const ridx = getRocketStack().findIndex((s) => s.id === cardId);
+            if (ridx < 0) continue;
+            rocketRemoveCard(ridx);
+            const card = PATENTS_BY_ID[cardId]
+              || CREW.find((c) => c.id === cardId) || null;
+            if (card) {
+              const r = addToHand(card);
+              if (r && r.ok) lost++;
+            }
+          }
+          logAction({
+            type: 'rad_decommission',
+            icon: '☢',
+            summary: `☢ ${esc(hazard.site.name)}: ${lost} card${lost === 1 ? '' : 's'} decommissioned to hand`,
+            undoable: false,
+            data: { siteId: hazard.site.id, decommission, count: lost },
+          });
+        }
       }
     } else {
       // Generic hazard. Paid path animates past silently; rolled
-      // path opens the dice modal for this single hazard.
-      if (hazardChoice !== 'roll') continue;
-      const rolls = await hazardRollModal([hazard]);
-      const r = rolls[0];
-      const verdict = r.d6 === 1 ? '✗ critical (rolled 1)' : '✓ survived';
-      logAction({
-        type: 'hazard_roll',
-        icon: r.glyph,
-        summary: `${r.glyph} ${esc(r.site.name)} d6=${r.d6} ${verdict}`,
-        undoable: false,
-        data: { siteId: r.site.id, d6: r.d6 },
-      });
-      if (r.d6 === 1) {
-        setStatus(`💥 Critical failure at <strong>${esc(r.site.name)}</strong>…`);
-        await explodeRocket(r.site.id);
-        return false;
+      // path opens the dice modal. payRemainingGeneric flips when
+      // the player switches to "pay the rest" mid-queue.
+      if (!payRemainingGeneric) {
+        const rolls = await hazardRollModal([hazard]);
+        const r = rolls[0];
+        const verdict = r.d6 === 1 ? '✗ critical (rolled 1)' : '✓ survived';
+        logAction({
+          type: 'hazard_roll',
+          icon: r.glyph,
+          summary: `${r.glyph} ${esc(r.site.name)} d6=${r.d6} ${verdict}`,
+          undoable: false,
+          data: { siteId: r.site.id, d6: r.d6 },
+        });
+        if (r.d6 === 1) {
+          setStatus(`💥 Critical failure at <strong>${esc(r.site.name)}</strong>…`);
+          await explodeRocket(r.site.id);
+          return false;
+        }
       }
     }
+    // Post-resolve safety net: a decommissioned active thruster
+    // (or its support cards) might have killed the rocket's
+    // ability to fly. If so, halt right here - the rocket
+    // strands on the hazard node, future turns can rebuild.
+    const flyCheck = isRocketActive();
+    if (!flyCheck.active) {
+      earlyHalt = true;
+      haltSite = hazard.site;
+      logAction({
+        type: 'stranded',
+        icon: '🛰',
+        summary: `Stranded at ${esc(hazard.site.name)} - ${esc(flyCheck.reason || 'rocket cannot fly')}`,
+        undoable: false,
+        data: { siteId: hazard.site.id, reason: flyCheck.reason, missing: flyCheck.missing },
+      });
+      setStatus(`🛰 Stranded at <strong>${esc(hazard.site.name)}</strong> - ${esc(flyCheck.reason)}.`);
+      break;
+    }
+    // Mid-route choice if any hazards still ahead. The player
+    // can Continue, Stop here, or Pay aqua to bypass the
+    // remaining generic hazards.
+    const remaining = orderedHazards.slice(qi + 1);
+    if (remaining.length) {
+      const choice = await midRouteChoiceModal({
+        atSiteName: hazard.site.name,
+        remaining,
+        aquaBalance: getAqua(),
+      });
+      if (choice === 'stop') {
+        earlyHalt = true;
+        haltSite = hazard.site;
+        logAction({
+          type: 'manual_halt',
+          icon: '⏹',
+          summary: `Halted at ${esc(hazard.site.name)} - ${remaining.length} hazard${remaining.length === 1 ? '' : 's'} skipped`,
+          undoable: false,
+          data: { siteId: hazard.site.id, skipped: remaining.length },
+        });
+        setStatus(`⏹ Halted at <strong>${esc(hazard.site.name)}</strong>.`);
+        break;
+      }
+      if (choice === 'pay') {
+        const remGeneric = remaining.filter((r) => r.hazard.site.type !== 'radhaz');
+        const cost = remGeneric.length * HAZARD_COST_PER;
+        if (cost > 0 && spendAqua(cost)) {
+          payRemainingGeneric = true;
+          logAction({
+            type: 'hazard_pay',
+            icon: '💧',
+            summary: `Paid ${cost} aqua mid-route to bypass ${remGeneric.length} remaining generic hazard${remGeneric.length === 1 ? '' : 's'}`,
+            undoable: false,
+            data: { cost, hazards: remGeneric.map((r) => r.hazard.site.id) },
+          });
+        }
+      }
+      // 'continue' falls through to the next iteration.
+    }
+  }
+  // If we halted early, shift remaining segments (the ones we
+  // never walked) into next-turn slots so the player can resume
+  // the journey later. The destination for THIS move is the
+  // last node we actually reached, not the original target.
+  if (earlyHalt) {
+    const haltedSiteId = (haltSite && haltSite.id) || _rocketSiteId;
+    // Carry-over: every segment past `lastIdx` becomes turn 2+
+    // in the planned route. The post-move "shift down" logic
+    // later will turn those into the next turn's playables.
+    const carry = turn1.slice(lastIdx).map((s, i) => ({ ...s, turn: 2 + Math.floor(i / 4) }));
+    const futureTurns = _plannedRoute
+      .filter((s) => s.turn > 1)
+      .map((s) => ({ ...s, turn: s.turn + 1 }));
+    _plannedRoute = carry.concat(futureTurns);
+    persistPlannedRoute();
+    if (_renderer) _renderer.setRoute(_plannedRoute);
+    _rocketSiteId = haltedSiteId;
+    persistRocketSite();
+    // Log the move under the halted site so the audit trail
+    // matches reality.
+    logAction({
+      type: 'move',
+      icon: '🛸',
+      summary: `Moved to ${esc(haltSite ? haltSite.name : haltedSiteId)} (halted early)`,
+      undoable: false,
+      data: { siteId: haltedSiteId, hazardous: true, halted: true },
+    });
+    syncSandboxRocket();
+    refreshOpenSitePopup();
+    return true;
   }
   // Animate the tail (everything past the last hazard) to the
   // final destination.

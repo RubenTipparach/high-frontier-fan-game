@@ -2348,10 +2348,12 @@ body:has(#view-browse:not(.hidden)) #main {
      Tapping a tab still opens the pane as its own modal. */
   .browse-sidepanel {
     position: absolute;
-    /* Clear the map-toolbar (Cleaned up / Classic / Find site)
-       which sits at the top of the browse-stage. ~48px toolbar
-       + a few px of breathing room. */
-    top: 60px;
+    /* Clear the map-toolbar dynamically: --toolbar-h is the
+       live height published by the ResizeObserver in browse.js,
+       so when the toolbar wraps to two rows on a narrow phone
+       the pill drops with it instead of clipping under the new
+       second row. 8 px breathing room below the bar. */
+    top: calc(var(--toolbar-h, 60px) + 8px);
     left: 0;
     right: 0;
     bottom: auto;
