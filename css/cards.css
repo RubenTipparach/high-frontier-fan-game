@@ -68,7 +68,7 @@
   perspective: 1200px;
 }
 
-/* The inner is the 3D body — both faces ride on it and rotate
+/* The inner is the 3D body - both faces ride on it and rotate
    together when data-side flips. backface-visibility hides the
    side facing away from the viewer, so we never see the back of
    either face. */
@@ -119,7 +119,7 @@
   background: rgba(0, 0, 0, 0.05);
   border-top-color: rgba(0, 0, 0, 0.15);
 }
-/* Default chip styling for the primary (white) face — only
+/* Default chip styling for the primary (white) face - only
    applies to chips WITHOUT a data-supplier; supplier-tinted
    chips paint at full saturation on both faces. */
 .card-face[data-face="primary"] .card-requires .req:not([data-supplier]) {
@@ -130,7 +130,7 @@
   border-bottom-color: rgba(0, 0, 0, 0.15);
 }
 
-/* Thrust-arrow uses currentColor — pin it dark on the white face
+/* Thrust-arrow uses currentColor - pin it dark on the white face
    and white on the black face so it's always visible. */
 .card-face[data-face="primary"]   .thrust-svg { color: #0c0a16; }
 .card-face[data-face="secondary"] .thrust-svg { color: #ffffff; }
@@ -236,6 +236,9 @@
   background: rgba(0, 0, 0, 0.05);
 }
 .card-supports:has(.card-requires:empty) { display: none; }
+/* Explicit fallback for browsers without :has() support - JS
+   stamps .is-empty when the card has no requires. */
+.card-supports.is-empty { display: none; }
 .card-supports-label {
   font-size: 8px;
   font-weight: 700;
@@ -279,6 +282,32 @@
   color: var(--accent-2);
   font-variant-numeric: tabular-nums;
 }
+/* Support-chip "satisfied" state. Used inside the rocket stack
+   modal: the active thruster's requirement chips get a ✓ tag and
+   a green wash when another card in the stack supplies that
+   support kind. OR-groups (reactor X / ∿ / 💣) tick green when
+   ANY member kind is supplied. */
+.card-requires .req.is-satisfied {
+  background: rgba(34, 197, 94, 0.22);
+  border-color: #22c55e;
+  position: relative;
+  padding-right: 18px;
+}
+.card-requires .req.is-satisfied::after {
+  content: "✓";
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #22c55e;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+.card-requires .req[data-supplier].is-satisfied em {
+  /* Keep the supplier-tinted glyph readable on the green wash. */
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.6));
+}
 
 /* Supplier-tinted chips: the chip's background matches the
    typebar colour of the card type that satisfies this support,
@@ -291,7 +320,7 @@
 /* Solid supplier-colour tiles: each chip is a saturated square
    of the supplier card's colour with a bright icon glyph
    centred inside. The ring/pip approach from the previous
-   revision was too subtle — these read as miniatures of the
+   revision was too subtle - these read as miniatures of the
    card type they need. */
 .card-requires .req[data-supplier] {
   min-width: 28px;
@@ -312,7 +341,7 @@
   font-size: 18px;
   font-weight: 800;
 }
-/* OR-separator inside a multi-glyph supplier chip — the "/"
+/* OR-separator inside a multi-glyph supplier chip - the "/"
    between e.g. X / ∿ / 💣 telling the player any one of the
    listed kinds satisfies the slot. */
 .card-requires .req .req-or {
@@ -344,7 +373,7 @@
 
 /* Card-properties row: small badges for per-face capabilities
    (Push, Solar, Air-Eater, ISRU, Afterburn, Bonus Pivots,
-   Missile, Raygun, Buggy). Distinct from the supports box —
+   Missile, Raygun, Buggy). Distinct from the supports box -
    subtler styling so they don't get confused with chips. */
 .card-properties {
   display: flex;
@@ -366,6 +395,40 @@
 }
 .card-prop em { font-style: normal; font-size: 12px; line-height: 1; }
 .card-prop b { font-weight: 700; font-size: 10px; }
+/* ISRU chip - shows the literal "ISRU: N" value because the
+   number IS the rule (site water >= ISRU to refuel/prospect).
+   Tap or hover for the long explanation. Cyan-blue tint sets
+   it apart from the generic property chips.
+   Text colour follows the card face: black on the white
+   (primary) side, white on the black (secondary) side - the
+   ISRU value is rule-critical so it stays maximally legible
+   against whichever paper the face is printed on. */
+.card-prop-isru {
+  background: rgba(56, 189, 248, 0.14);
+  border-color: rgba(56, 189, 248, 0.55);
+  border-style: solid;
+}
+.card-face[data-face="primary"] .card-prop-isru,
+.card-face[data-face="primary"] .card-prop-isru strong,
+.card-face[data-face="primary"] .card-prop-isru b {
+  color: #0c0a16;
+}
+.card-face[data-face="secondary"] .card-prop-isru,
+.card-face[data-face="secondary"] .card-prop-isru strong,
+.card-face[data-face="secondary"] .card-prop-isru b {
+  color: #f1f5f9;
+}
+.card-prop-isru strong {
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.card-prop-isru b {
+  font-size: 13px;
+  font-weight: 800;
+  margin-left: 2px;
+}
 
 .card-name {
   font-weight: 600;
@@ -466,7 +529,7 @@
 }
 
 /* Radiator card layout: each face is two stacked "half-cards"
-   — Light Side at the top (upright) and Heavy Side at the
+   - Light Side at the top (upright) and Heavy Side at the
    bottom rotated 180°, exactly the way the published HF4
    radiator prints. Each half carries its own cyan typebar,
    stat box, ability blurb, and name label so the card reads
@@ -524,7 +587,7 @@
   filter: grayscale(0.7);
 }
 
-/* Cursor hint on any element that carries a tooltip — works for
+/* Cursor hint on any element that carries a tooltip - works for
    both HTML chips and SVG icons inside the thrust visual. */
 [data-tip] { cursor: help; }
 .thrust-svg [data-tip] { cursor: help; }
@@ -560,7 +623,7 @@
 /* Library card location markers. Each card lives in exactly one
    place (deck / hand / rocket); when it's in hand or rocket the
    library tile reads as a "you already have this" placeholder
-   — greyed out, with an oversized ✋ or 🛸 overlay so the
+   - greyed out, with an oversized ✋ or 🛸 overlay so the
    player sees the card's current location at a glance. */
 .card.in-hand,
 .card.in-rocket {
@@ -583,58 +646,38 @@
 .card.in-hand::after   { content: "✋"; }
 .card.in-rocket::after { content: "🛸"; }
 
-/* Quick-add button on library cards: hover-revealed call-to-
-   action that drops the card into the player's hand without
-   needing the inspect modal. Drag-and-drop works too; this is
-   the reliable always-works path. */
-.card-quick-add {
+/* Expansion-only cards (GW thrusters today). Render in the
+   library so the player can browse, but greyed out and with a
+   "Coming soon" badge across the corner. No drag handlers,
+   no tap-to-add - the engine refuses anyway, this just signals
+   that intent up front. */
+.card.is-expansion {
+  opacity: 0.6;
+  filter: grayscale(0.4);
+  pointer-events: none;
+  position: relative;
+}
+.card.is-expansion .card-expansion-badge {
   position: absolute;
-  bottom: 8px;
-  left: 50%;
-  transform: translateX(-50%) translateY(6px);
-  background: var(--accent);
-  color: #062136;
-  border: 1px solid var(--accent-2);
+  top: 8px;
+  right: -10px;
+  transform: rotate(8deg);
+  background: linear-gradient(180deg, #f97316, #c2410c);
+  color: #fff7ed;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border: 1px solid #9a3412;
   border-radius: 4px;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 4px 10px;
-  letter-spacing: 0.4px;
-  cursor: pointer;
-  opacity: 0;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+  z-index: 11;
   pointer-events: none;
-  transition: opacity 0.15s, transform 0.15s;
-  z-index: 6;
-}
-.card:hover .card-quick-add {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateX(-50%) translateY(0);
-}
-.card-quick-add:hover { background: var(--accent-2); color: #fff; }
-
-/* Flyer card: a temporary clone that animates from the
-   library tile's screen position to the hand strip (or the
-   rocket pane) when the player taps Grab / Add to LEO stack.
-   The flyer is purely cosmetic — state has already updated —
-   it just lets the eye track where the card "went". */
-.card-flyer {
-  position: fixed;
-  z-index: 250;
-  pointer-events: none;
-  /* No opacity transition — the flyer stays solid all the way
-     to the target. The landing target's opacity is suppressed
-     during flight (see flyCardTo) and revealed on landing, so
-     visually it's one continuous card arrival rather than a
-     flyer fading while the destination popped in earlier. */
-  transition: transform 0.55s cubic-bezier(0.4, 1.4, 0.6, 1);
-  filter: drop-shadow(0 20px 30px rgba(0, 0, 0, 0.55));
-  transform: translate(0, 0) scale(1) rotate(0deg);
-  transform-origin: top left;
 }
 
 /* Radiator Light/Heavy toggle row under the name. Replaces
-   the old ↻ rotate button — clicking either label sets
+   the old ↻ rotate button - clicking either label sets
    data-rotated on the .card root, which dims the inactive
    half and bolds the active label here. */
 .card-face.is-radiator .rad-toggle {

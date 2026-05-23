@@ -53,7 +53,7 @@ const REQ_SUPPLIER_TYPE = {
 
 const REQUIREMENT_VIS = {
   // Power-source supports. These are the ONLY columns under the
-  // spreadsheet's "Support Requirements" banner — operational
+  // spreadsheet's "Support Requirements" banner - operational
   // flags like Solar, Push, ISRU, Air Eater are card properties
   // (rendered separately as badges) rather than stack supports.
   'reactor-fission':    { glyph: 'X',  label: 'Fission reactor'        },
@@ -71,7 +71,7 @@ const REQUIREMENT_VIS = {
   'spin-grav':          { glyph: '💃', label: 'Spin gravity'           },
 };
 
-export function renderCard(card, { type } = {}) {
+export function renderCard(card, { type, supplied } = {}) {
   const kind = type || (card.faces && card.faces.primary && card.faces.primary.role ? 'crew' : 'patent');
   const el = document.createElement('div');
   el.className = `card kind-${kind}` + (kind === 'patent' ? ` type-${card.type}` : '');
@@ -83,9 +83,9 @@ export function renderCard(card, { type } = {}) {
   // so only the side facing the viewer is painted.
   const inner = document.createElement('div');
   inner.className = 'card-inner';
-  inner.appendChild(buildFace(card, 'primary', kind));
+  inner.appendChild(buildFace(card, 'primary', kind, supplied));
   if (card.faces && card.faces.secondary) {
-    inner.appendChild(buildFace(card, 'secondary', kind));
+    inner.appendChild(buildFace(card, 'secondary', kind, supplied));
   }
   el.appendChild(inner);
 
@@ -100,14 +100,14 @@ export function renderCard(card, { type } = {}) {
     el.appendChild(flip);
   }
 
-  // Radiators carry TWO stat sets per face — Light Side
+  // Radiators carry TWO stat sets per face - Light Side
   // (upright) and Heavy Side (rotated 180°). The rotate button
   // toggles a data-rotated attribute that drives both the
   // CSS rotation transform and the Light↔Heavy stat swap. Only
   // emitted for cards flagged `rotatable: true` (radiators).
   // Radiators carry a data-rotated attribute on the root so the
   // CSS rotation transform + Light↔Heavy active-side dimming
-  // still works. The dedicated rotate (↻) button was removed —
+  // still works. The dedicated rotate (↻) button was removed -
   // the Light(N) / Heavy(N) labels under each half's name now
   // act as the side toggle (see buildRadiatorFace).
   if (card.rotatable) el.dataset.rotated = '0';
@@ -116,7 +116,7 @@ export function renderCard(card, { type } = {}) {
   return el;
 }
 
-function buildFace(card, sideName, kind) {
+function buildFace(card, sideName, kind, supplied) {
   const face = document.createElement('div');
   face.className = 'card-face';
   face.dataset.face = sideName;
@@ -125,9 +125,9 @@ function buildFace(card, sideName, kind) {
   // face is really two complete mini-cards stacked, one for the
   // Light Side (upright) and one for the Heavy Side (upside-down
   // so it reads correctly when the whole card is physically
-  // flipped 180°). Both halves carry their OWN typebar — and
+  // flipped 180°). Both halves carry their OWN typebar - and
   // the typebar's leading glyph row is one 🌡 per Therm of THAT
-  // side — their own mass + rad-hardness stats, and a name
+  // side - their own mass + rad-hardness stats, and a name
   // label. The inactive half (driven by data-rotated on the
   // card root) is dimmed.
   if (card.type === 'radiator') {
@@ -157,14 +157,14 @@ function buildFace(card, sideName, kind) {
     face.querySelector('.card-role').textContent = c.role || '';
     face.querySelector('.card-bonus').textContent = c.bonus || '';
     face.querySelector('.card-blurb').textContent = c.blurb || '';
-    face.querySelector('.m').textContent = c.mass != null ? c.mass : '—';
-    face.querySelector('.r').textContent = c.radHardness != null ? c.radHardness : '—';
+    face.querySelector('.m').textContent = c.mass != null ? c.mass : '-';
+    face.querySelector('.r').textContent = c.radHardness != null ? c.radHardness : '-';
     face.querySelector('.card-spectral').appendChild(spectralHex(c.spectralType || 'C'));
     return face;
   }
 
   // Show the thrust triangle on any card that carries a thrust
-  // value — that includes Missile-type robonauts (the spreadsheet
+  // value - that includes Missile-type robonauts (the spreadsheet
   // gives them their own Thrust / Fuel / Afterburn under the
   // "Thruster" banner), GW Thrusters, etc.
   const isThruster = card.type === 'thruster' || card.thrust != null;
@@ -190,7 +190,7 @@ function buildFace(card, sideName, kind) {
   `;
   // Typebar icon strategy: for cards that SUPPLY support chips
   // (reactors, generators, radiators) show the actual chip
-  // glyphs this card supplies — so the player can immediately
+  // glyphs this card supplies - so the player can immediately
   // see which chip-slots on a thruster this card satisfies.
   // For cards that don't supply chips (thrusters, refineries,
   // robonauts) we fall back to a generic type emoji.
@@ -204,10 +204,25 @@ function buildFace(card, sideName, kind) {
     .map((k) => (REQUIREMENT_VIS[k] || {}).glyph || '')
     .filter(Boolean)
     .join(' ');
-  const fallback = TYPE_FALLBACK_ICON[card.type] || '';
+  // Robonauts ARE their prospector role - show the missile / raygun
+  // / buggy glyph (or stack of glyphs for dual-purpose cards like
+  // Helical Railgun which is both missile + raygun on Tier-2)
+  // instead of the generic 🤖. Crews aren't robonauts, so they
+  // skip this branch and keep their existing icon.
+  const ROBONAUT_KIND_GLYPHS = { missile: '🚀', raygun: '🔫', buggy: '🛺' };
+  let robonautGlyphs = '';
+  if (card.type === 'robonaut') {
+    const props = faceData.properties || card.properties || [];
+    const active = [];
+    for (const key of ['missile', 'raygun', 'buggy']) {
+      if (props.some((p) => p.key === key && p.value)) active.push(ROBONAUT_KIND_GLYPHS[key]);
+    }
+    robonautGlyphs = active.join(' ');
+  }
+  const fallback = robonautGlyphs || TYPE_FALLBACK_ICON[card.type] || '';
   const lead = supplyGlyphs || fallback;
   tbar.textContent = `${lead ? lead + '  ' : ''}${card.type.toUpperCase()}`;
-  // Card name reads from the active face — the dark side carries
+  // Card name reads from the active face - the dark side carries
   // its own printed name on every HF4 card.
   const faceName = (card.faces && card.faces[sideName] && card.faces[sideName].name);
   face.querySelector('.card-name').textContent = faceName || card.name;
@@ -217,8 +232,8 @@ function buildFace(card, sideName, kind) {
   const faceRad  = (card.faces && card.faces[sideName] && card.faces[sideName].radHardness);
   const massVal  = (faceMass != null ? faceMass : card.mass);
   const radVal   = (faceRad  != null ? faceRad  : card.radHardness);
-  face.querySelector('.m').textContent = massVal != null ? massVal : '—';
-  face.querySelector('.r').textContent = radVal != null ? radVal : '—';
+  face.querySelector('.m').textContent = massVal != null ? massVal : '-';
+  face.querySelector('.r').textContent = radVal != null ? radVal : '-';
 
   face.querySelector('.card-spectral').appendChild(spectralHex(card.spectralType));
 
@@ -264,7 +279,7 @@ function buildFace(card, sideName, kind) {
     add('Power', card.power);
     add('Heat',  card.heat);
   } else if (card.type === 'radiator') {
-    // Radiator cards are mirror-symmetric — the published HF4
+    // Radiator cards are mirror-symmetric - the published HF4
     // card prints the light side at the top (upright) and the
     // heavy side at the bottom (upside-down). Both are always
     // visible; whichever is currently "up" (driven by the
@@ -281,11 +296,11 @@ function buildFace(card, sideName, kind) {
         const therms = block.therms ?? 0;
         const thermRow = therms > 0
           ? '🌡️'.repeat(Math.min(8, therms))
-          : '—';
+          : '-';
         wrap.innerHTML = `<header>${label}</header>`
           + `<div class="rad-therms">${thermRow}</div>`
-          + `<span>Mass <strong>${block.mass ?? '—'}</strong></span>`
-          + `<span>Rad-Hard <strong>${block.radHardness ?? '—'}</strong></span>`;
+          + `<span>Mass <strong>${block.mass ?? '-'}</strong></span>`
+          + `<span>Rad-Hard <strong>${block.radHardness ?? '-'}</strong></span>`;
         stats.appendChild(wrap);
       };
       addSide('side-light', 'Light side', light);
@@ -310,7 +325,7 @@ function buildFace(card, sideName, kind) {
   // Requirements row: icon + ×N for each requirement entry. A
   // Card-properties row: small badges for the card's per-face
   // capabilities (Push, Solar, Air-Eater, ISRU, Afterburn, Bonus
-  // Pivots, Missile, Raygun, Buggy). These are NOT supports —
+  // Pivots, Missile, Raygun, Buggy). These are NOT supports -
   // they describe what the card itself does. Each property's
   // glyph + label lives on the data record so we don't repeat
   // the catalogue here.
@@ -320,6 +335,22 @@ function buildFace(card, sideName, kind) {
   for (const p of propsList) {
     const b = document.createElement('span');
     b.className = 'card-prop';
+    // ISRU has its own visual treatment: the chip reads as
+    // "ISRU: N" text instead of a glyph + counter, since the
+    // number IS the rule (site water must be >= this value to
+    // refuel or prospect). Tooltip spells out the gating.
+    if (p.key === 'isru') {
+      b.classList.add('card-prop-isru');
+      b.setAttribute(
+        'data-tip',
+        `ISRU ${p.value}. The site's water (💧) must be ≥ ${p.value} `
+        + `to prospect or refuel with this rig. ISRU refuel yield = `
+        + `1 + site water - ${p.value} fuel tanks per op.`,
+      );
+      b.innerHTML = `<strong>ISRU:</strong> <b>${p.value}</b>`;
+      propHost.appendChild(b);
+      continue;
+    }
     b.setAttribute('data-tip', p.value === true ? p.label : `${p.label}: ${p.value}`);
     const count = (typeof p.value === 'number' && p.value > 1)
       ? `<b>×${p.value}</b>` : '';
@@ -330,15 +361,28 @@ function buildFace(card, sideName, kind) {
   // count of 1 omits the multiplier so a single-icon row reads as
   // a clean bare glyph.
   const reqHost = face.querySelector('.card-requires');
-  // Each face carries its own supports — Tier-2 is a different
+  const supportsRow = face.querySelector('.card-supports');
+  // Each face carries its own supports - Tier-2 is a different
   // tech with potentially different chip requirements.
   const reqs = (faceData.requires) || card.requires || [];
+  // Hide the whole supports row when the card needs nothing - a
+  // bare "Supports required" heading over an empty chip row reads
+  // as broken on cards like reactors (which supply, not require).
+  if (!reqs.length) {
+    if (supportsRow) supportsRow.classList.add('is-empty');
+  } else {
+    // Re-label so the row clearly reads as REQUIRED supports.
+    // (Old label was just "Supports", ambiguous against the
+    // typebar's "what this card supplies" glyphs.)
+    const lab = supportsRow && supportsRow.querySelector('.card-supports-label');
+    if (lab) lab.textContent = 'Supports required';
+  }
   // Same-supplier supports are OR-alternatives, not AND-required.
   // A refinery that lists X / ∿ / 💣 reactor needs ANY ONE of the
   // three, so we collapse all reactor-* into one OR-chip with
   // the glyphs slash-separated. Generators do the same. Reqs
   // that don't share a supplier (e.g. one reactor + one
-  // generator) stay as separate chips — those ARE both needed.
+  // generator) stay as separate chips - those ARE both needed.
   const groups = new Map();
   const loose = [];
   for (const r of reqs) {
@@ -347,11 +391,12 @@ function buildFace(card, sideName, kind) {
     if (!groups.has(supplier)) groups.set(supplier, []);
     groups.get(supplier).push(r);
   }
-  const makeChip = (visGlyphs, supplier, tip) => {
+  const makeChip = (visGlyphs, supplier, tip, satisfied) => {
     const span = document.createElement('span');
     span.className = 'req';
-    span.setAttribute('data-tip', tip);
+    span.setAttribute('data-tip', satisfied ? `${tip} - satisfied` : tip);
     if (supplier) span.dataset.supplier = supplier;
+    if (satisfied) span.classList.add('is-satisfied');
     span.innerHTML = visGlyphs;
     reqHost.appendChild(span);
   };
@@ -366,7 +411,9 @@ function buildFace(card, sideName, kind) {
     const tip = group.length > 1
       ? `Any of: ${labelParts.join(' / ')}`
       : labelParts[0];
-    makeChip(parts.join('<span class="req-or">/</span>'), supplier, tip);
+    // OR-group satisfied if ANY member kind is in the supplied set.
+    const satisfied = !!supplied && group.some((r) => supplied.has(r.kind));
+    makeChip(parts.join('<span class="req-or">/</span>'), supplier, tip, satisfied);
   }
   for (const r of loose) {
     const vis = REQUIREMENT_VIS[r.kind] || { glyph: '◇', label: r.kind };
@@ -375,8 +422,10 @@ function buildFace(card, sideName, kind) {
     else if (r.kind === 'spin-grav') iconHtml = svgBallerinaChip(16);
     else                             iconHtml = `<em>${vis.glyph}</em>`;
     const count = r.count > 1 ? `<b>×${r.count}</b>` : '';
+    const satisfied = !!supplied && supplied.has(r.kind);
     makeChip(`${iconHtml}${count}`, null,
-      r.count > 1 ? `${vis.label} ×${r.count}` : vis.label);
+      r.count > 1 ? `${vis.label} ×${r.count}` : vis.label,
+      satisfied);
   }
 
   // Blurb / ability text varies per face. The Tier-2 dark side
@@ -390,7 +439,7 @@ function buildFace(card, sideName, kind) {
 // Small flat-top hex with the spectral letter in the centre.
 // Returns an SVG element the caller appends.
 // Render one face of a radiator card. The face contains two
-// stacked "half-cards" — Light Side at the top (upright) and
+// stacked "half-cards" - Light Side at the top (upright) and
 // Heavy Side at the bottom (rotated 180° via CSS). Each half
 // has its own typebar, stat box, and name label so the card
 // reads as two complete radiators sharing a physical body, the
@@ -420,7 +469,7 @@ function buildRadiatorFace(card, sideName) {
   // Per-half toggle row: "Light (N) | Heavy (M)" with the
   // currently-active side bolded via CSS rule on the .card
   // root (which carries data-rotated). Tapping either label
-  // sets data-rotated accordingly — the rotate (↻) button is
+  // sets data-rotated accordingly - the rotate (↻) button is
   // gone; these labels are the toggle.
   const toggleHtml = `
     <div class="rad-toggle">
@@ -437,8 +486,8 @@ function buildRadiatorFace(card, sideName) {
       <div class="card-name-row"><span class="card-name">${escapeText(cardName)}</span></div>
       ${toggleHtml}
       <div class="card-statbox">
-        <span><strong>${block.mass ?? '—'}</strong> MASS</span>
-        <span><strong>${block.radHardness ?? '—'}</strong> RAD</span>
+        <span><strong>${block.mass ?? '-'}</strong> MASS</span>
+        <span><strong>${block.radHardness ?? '-'}</strong> RAD</span>
         ${showSpectral ? '<span class="card-spectral"></span>' : '<span></span>'}
       </div>
       <p class="card-blurb">${escapeText(ability)}</p>
@@ -480,12 +529,12 @@ function spectralHex(type) {
   // viewBox swapped to a wider-than-tall box because the hex is
   // now FLAT-TOP (a 30° rotation from the pointy-top default).
   // All hexes use the same black fill regardless of spectral
-  // letter — the letter alone reads the type; colour-coding
+  // letter - the letter alone reads the type; colour-coding
   // turned out to confuse the read against the saturated
   // typebars sitting next to it.
   svg.setAttribute('viewBox', '-14 -12 28 24');
   svg.setAttribute('class', 'spectral-hex');
-  svg.setAttribute('data-tip', `Spectral type ${style.glyph} — ${label}`);
+  svg.setAttribute('data-tip', `Spectral type ${style.glyph} - ${label}`);
   const r = 12;
   const points = [];
   for (let i = 0; i < 6; i++) {
@@ -577,8 +626,18 @@ function svgBallerinaChip(size) {
 // circle + 💧 fuel droplet sit INSIDE the triangle, in the wider
 // lower portion where they fit comfortably above the base.
 // Support icons live in a separate supports box outside the
-// triangle — they're never drawn here.
-function thrustVisual(card, face) {
+// triangle - they're never drawn here.
+// Public so callers (rocket-stack modal totals row, hover
+// tooltip on the rocket sprite) can render the same triangle
+// with overridden numbers - synthesise a face-like object with
+// the effective thrust / fuel / afterburn / fuelType values.
+// Optional `opts.breakdown` lets callers override the per-element
+// data-tip text (used by the rocket-stack headliner so clicks on
+// the thrust / fuel / afterburn glyphs surface the full modifier
+// math: "11 = 6 base + 3 reactor mod + 2 WISP mass class").
+// Shape: { thrust?, fuel?, afterburn? } strings; missing keys
+// fall back to the short default text.
+export function thrustVisual(card, face, opts = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'thrust-visual';
   // The Tier-2 face is a different technology with different
@@ -635,16 +694,16 @@ function thrustVisual(card, face) {
         fill="rgba(96,165,250,0.35)" stroke="#60a5fa" stroke-width="2.5"
         stroke-linejoin="round"/>
       ${showAfter ? `<text x="70" y="42" text-anchor="middle"
-        font-size="22" data-tip="Afterburn">🔥</text>` : ''}
+        font-size="22" data-tip="${escapeText(opts.breakdown?.afterburn || 'Afterburn')}">🔥</text>` : ''}
       <line x1="63" y1="72" x2="76" y2="72"
         stroke="currentColor" stroke-width="1.6"
         marker-end="url(#thrust-arrow)"/>
-      <g data-tip="Thrust: ${thrust}">
+      <g data-tip="${escapeText(opts.breakdown?.thrust || `Thrust: ${thrust}`)}">
         <circle cx="50" cy="72" r="10" fill="#ec4899" stroke="#fbcfe8" stroke-width="1.5"/>
         <text x="50" y="76" text-anchor="middle" font-size="13"
           font-weight="700" fill="#ffffff">${thrust}</text>
       </g>
-      <g data-tip="Fuel per burn: ${fuelText} ${ftype || 'Water'}">
+      <g data-tip="${escapeText(opts.breakdown?.fuel || `Fuel per burn: ${fuelText} ${ftype || 'Water'}`)}">
         <text x="88" y="79" text-anchor="middle" font-size="22">${fuelEmoji}</text>
         <text x="88" y="75" text-anchor="middle" font-size="9"
           font-weight="700" fill="#0c1d34" stroke="#ffffff"
@@ -752,7 +811,11 @@ function hideTip() {
 
 // Bind hover + tap tooltip behaviour to every [data-tip]
 // descendant of `root`. Safe to call once per card after build.
-function attachTipsTo(root) {
+// Exported so external callers that render data-tip nodes
+// outside renderCard (the rocket-stack headliner triangle, the
+// modified-thrust hover tooltip) can wire the hover / tap
+// pop-up handlers consistently.
+export function attachTipsTo(root) {
   const targets = root.querySelectorAll('[data-tip]');
   for (const el of targets) {
     let hoverTimer = null;

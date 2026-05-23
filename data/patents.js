@@ -1,19 +1,19 @@
 // Patent deck. Tradable/auctionable component cards installed on
 // a rocket stack at build time. The deck is sourced from the
 // published HF4 card spreadsheet via scripts/extract-card-data.py
-// — re-run that script after editing reference/HF4-card-data.xlsx
+// - re-run that script after editing reference/HF4-card-data.xlsx
 // and the entries here regenerate automatically.
 //
 // Every physical card carries TWO independent technologies:
-//   faces.primary    — the Tier-1 tech (the "white" face)
-//   faces.secondary  — the Tier-2 tech (the "black" / installed
+//   faces.primary    - the Tier-1 tech (the "white" face)
+//   faces.secondary  - the Tier-2 tech (the "black" / installed
 //                      face). Different name, different stats,
 //                      different ability text; same card body.
 // Both faces sit on the card object so the renderer can flip
 // without re-querying.
 //
 // Card types come from the spreadsheet tabs. Labs and standalone
-// "modifier" cards do not exist in HF4 — lab effects are
+// "modifier" cards do not exist in HF4 - lab effects are
 // abilities on the parent card (a reactor with a science
 // rider, etc.) and modifiers are encoded as the dark-side
 // (Tier-2) face of an existing card. Don't reintroduce either.
@@ -38,7 +38,7 @@ export const REQUIREMENT_KINDS = [
   'beam-receiver',          // ☀ solar / beam-pushed
   'aerobrake-shroud',       // 🪂 atmospheric entry (Air Eater)
   // role / hardware supports (legacy hand-written cards used
-  // these — kept so old data still loads cleanly):
+  // these - kept so old data still loads cleanly):
   'crew-quarters',
   'spin-grav',
   'pulse-generator',
@@ -57,11 +57,15 @@ const SHEET_TO_TYPE = {
   'Refineries':   'refinery',
   'Robonauts':    'robonaut',
   'Generators':   'generator',
-  'GW Thrusters': 'thruster',  // gigawatt-class thruster
+  // GW Thrusters (and the future TW class) are an upcoming
+  // expansion. They land in their own type so the UI can group
+  // and gate them; right now the rest of the engine refuses to
+  // hand them out or stack them.
+  'GW Thrusters': 'gw-thruster',
 };
 const SHEETS_NOT_PATENTS = new Set(['Bernals', 'Colonists', 'Freighters']);
 
-// Columns under the spreadsheet's "Support Requirements" banner —
+// Columns under the spreadsheet's "Support Requirements" banner -
 // the ONLY columns that translate into stack-level support
 // chips. Everything else (Push, Solar, ISRU, Air Eater,
 // Afterburn, Bonus Pivots, Missile / Raygun / Buggy) describes
@@ -95,7 +99,7 @@ const PROPERTY_COLUMNS_NUM = {
 };
 
 // Build a `requires` array from the face's "Support
-// Requirements" booleans. Just the power-source columns — see
+// Requirements" booleans. Just the power-source columns - see
 // the BOOLEAN_TO_REQ comment for why this list is tight.
 function requiresFromFace(face) {
   const reqs = [];
@@ -122,7 +126,7 @@ const GENERATOR_TYPE_COLS = {
 };
 
 // Return the array of requirement-kinds this card SUPPLIES to
-// the stack — i.e. which support chips a thruster/robonaut/etc
+// the stack - i.e. which support chips a thruster/robonaut/etc
 // is allowed to satisfy by including this card. Radiators
 // always supply the thermostat chip; reactors and generators
 // supply whichever Type-column boxes are ticked; other card
@@ -178,7 +182,7 @@ function buildFace(label, tier, type) {
   const isRadiator = type === 'radiator';
   const base = {
     label,
-    // Each face carries its OWN name — the published HF4 cards
+    // Each face carries its OWN name - the published HF4 cards
     // print different names on the two sides (Ablative Plate
     // flips to Ablative Nozzle). buildPatent still uses the
     // primary face's name for the card id and lookup.
@@ -282,8 +286,18 @@ export function patentsByType(type) {
 }
 
 // Public catalogue of card types. Labs and standalone modifiers
-// are not real HF4 cards — see the header note. Don't add them.
+// are not real HF4 cards - see the header note. Don't add them.
 export const PATENT_TYPES = [
   'thruster', 'reactor', 'radiator', 'refinery',
   'robonaut', 'generator',
 ];
+
+// Expansion-only card types. Surfaced in the library so the
+// player can browse the future content, but the engine MUST
+// refuse to let them into the hand or rocket stack. Adding a
+// type here is enough to gate it - downstream code that filters
+// the patent deck reads this set.
+export const EXPANSION_TYPES = new Set(['gw-thruster']);
+export function isExpansionType(type) {
+  return EXPANSION_TYPES.has(type);
+}

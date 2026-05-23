@@ -18,12 +18,24 @@
 //   isRocketActive()                  → { active, reason, missing[] }
 //   canRocketFly()                    → alias of isRocketActive
 //                                       (kept for back-compat)
+//   getTankWater() / setTankWater(n)  → ship's water tank scalar
+//   addFuel(n) / removeFuel(n)        → tank deltas (clamp ≥0)
+//   getStackTotals()                  → { mass, minRadHard, count, fuel }
+//   getActiveThrusterStats()          → { thrust, fuel, isp, … }
 //   onRocketChange(cb)                → unsubscribe
 
 import { PATENTS_BY_ID } from '../../data/patents.js';
 
-const STORAGE_KEY  = 'hf-sandbox-rocket';
-const ACTIVE_KEY   = 'hf-sandbox-rocket-active-thruster';
+const STORAGE_KEY      = 'hf-sandbox-rocket';
+const ACTIVE_KEY       = 'hf-sandbox-rocket-active-thruster';
+const PROSPECTOR_KEY   = 'hf-sandbox-rocket-active-prospector';
+const TANK_KEY         = 'hf-sandbox-rocket-tank';
+// Per the published rules the wet-mass track caps at 32 (the
+// "Max wet mass" position on the Net Thrust track). Maximum
+// loadable water = 32 - drymass; we cap the absolute fuel value
+// here at 32 so the +/- pickers / refuels can't push past the
+// published ceiling even on a zero-drymass rocket.
+const TANK_MAX = 32;
 
 let _stack = (() => {
   try {
@@ -38,13 +50,48 @@ let _activeThrusterId = (() => {
   catch { return null; }
 })();
 
+// One prospector can be designated active per turn (HF4: only the
+// active prospector can scan; switching mid-turn is not legal).
+// Cards with `missile`, `raygun`, or `buggy` properties on the
+// active face qualify. Activation also requires the prospector's
+// own `requires` (support chips) to be satisfied by the rest of
+// the stack - the canActivate flag in getActiveProspectorStats()
+// encodes this.
+let _activeProspectorId = (() => {
+  try { return localStorage.getItem(PROSPECTOR_KEY) || null; }
+  catch { return null; }
+})();
+
+// Afterburn engagement (per turn). Engaging is a destructive
+// action - it spends fuel immediately for a one-burn thrust
+// boost, so the UI must confirm before flipping this. End-turn
+// resets it (Stage 3+ will wire that into the turn-clock; for
+// now the button is sticky until manually toggled off or fuel
+// runs out).
+const AFTERBURN_KEY = 'hf-sandbox-rocket-afterburn';
+let _afterburnEngaged = (() => {
+  try { return localStorage.getItem(AFTERBURN_KEY) === '1'; }
+  catch { return false; }
+})();
+
+let _tankWater = (() => {
+  try {
+    const n = parseInt(localStorage.getItem(TANK_KEY) || '0', 10);
+    return Number.isFinite(n) && n >= 0 ? Math.min(TANK_MAX, n) : 0;
+  } catch { return 0; }
+})();
+
 let _listeners = [];
 
 function persist() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(_stack));
-    if (_activeThrusterId) localStorage.setItem(ACTIVE_KEY, _activeThrusterId);
-    else                   localStorage.removeItem(ACTIVE_KEY);
+    if (_activeThrusterId)   localStorage.setItem(ACTIVE_KEY,     _activeThrusterId);
+    else                     localStorage.removeItem(ACTIVE_KEY);
+    if (_activeProspectorId) localStorage.setItem(PROSPECTOR_KEY, _activeProspectorId);
+    else                     localStorage.removeItem(PROSPECTOR_KEY);
+    localStorage.setItem(AFTERBURN_KEY, _afterburnEngaged ? '1' : '0');
+    localStorage.setItem(TANK_KEY, String(_tankWater));
   } catch { /* private mode */ }
 }
 
@@ -64,12 +111,18 @@ export function isInRocket(id) {
 
 export function addToStack(cardId, kind) {
   if (!cardId) return -1;
+  // Expansion cards (currently GW thrusters) are previewable in
+  // the library but cannot be flown until the expansion ships.
+  // Refuse silently here - the calling UI greys the +/grab
+  // buttons out on inspection so this is a defence-in-depth
+  // check, not the only gate.
+  const card = PATENTS_BY_ID[cardId];
+  if (card && card.type === 'gw-thruster') return -1;
   _stack.push({ id: cardId, kind: kind || 'patent' });
   // First thruster added auto-selects as the active thruster
   // so the rocket has a sensible default. The player can
   // re-pick another thruster from the stack modal later.
   if (!_activeThrusterId) {
-    const card = PATENTS_BY_ID[cardId];
     const isThr = card && (card.type === 'thruster' || card.thrust != null);
     if (isThr) _activeThrusterId = cardId;
   }
@@ -95,15 +148,25 @@ export function removeFromStack(index) {
       }
     }
   }
+  // Same auto-recover dance for the active prospector: if it was
+  // pulled, fall to any remaining prospector card.
+  if (removed && removed.id === _activeProspectorId) {
+    _activeProspectorId = null;
+    for (const s of _stack) {
+      if (isProspectorCardId(s.id)) { _activeProspectorId = s.id; break; }
+    }
+  }
   persist();
   notify();
   return true;
 }
 
 export function clearStack() {
-  if (!_stack.length && !_activeThrusterId) return;
+  if (!_stack.length && !_activeThrusterId && !_activeProspectorId && !_tankWater) return;
   _stack = [];
   _activeThrusterId = null;
+  _activeProspectorId = null;
+  _tankWater = 0;
   persist();
   notify();
 }
@@ -115,7 +178,7 @@ export function getActiveThrusterId() {
 export function setActiveThruster(id) {
   // Only allow picking a thruster that's actually in the stack
   // and is genuinely a thruster (or a missile-class robonaut
-  // with its own thrust value — same idiom as the rest of the
+  // with its own thrust value - same idiom as the rest of the
   // app).
   if (!_stack.some((s) => s.id === id)) return false;
   const card = PATENTS_BY_ID[id];
@@ -125,6 +188,104 @@ export function setActiveThruster(id) {
   persist();
   notify();
   return true;
+}
+
+// Prospector classification. A card "is a prospector" when its
+// active face exposes any of the missile / raygun / buggy
+// capability columns. Returns the kind ('missile'|'raygun'|'buggy')
+// or null. Cards can declare more than one kind; we pick the
+// first match in this priority order.
+export function getProspectorKind(card) {
+  if (!card) return null;
+  const f = activeFace(card);
+  const props = f.properties || [];
+  for (const key of ['raygun', 'missile', 'buggy']) {
+    if (props.some((p) => p.key === key && p.value)) return key;
+  }
+  return null;
+}
+function isProspectorCardId(id) {
+  return !!getProspectorKind(PATENTS_BY_ID[id]);
+}
+
+export function getProspectorCards() {
+  const out = [];
+  for (const slot of _stack) {
+    const card = PATENTS_BY_ID[slot.id];
+    const kind = getProspectorKind(card);
+    if (kind) out.push({ id: slot.id, card, kind });
+  }
+  return out;
+}
+
+export function getActiveProspectorId() { return _activeProspectorId; }
+
+export function setActiveProspector(id) {
+  // Must actually be in the stack AND classify as a prospector.
+  if (!_stack.some((s) => s.id === id)) return false;
+  if (!isProspectorCardId(id)) return false;
+  _activeProspectorId = id;
+  persist();
+  notify();
+  return true;
+}
+
+export function clearActiveProspector() {
+  if (!_activeProspectorId) return false;
+  _activeProspectorId = null;
+  persist();
+  notify();
+  return true;
+}
+
+// Detailed view of the active prospector for the UI. Returns
+// null when nothing is selected. `canActivate` reads the card's
+// `requires` and checks them against the rest of the stack via
+// the same supplier-grouped OR rule isRocketActive() uses.
+export function getActiveProspectorStats() {
+  const id = _activeProspectorId;
+  if (!id) return null;
+  const card = PATENTS_BY_ID[id];
+  if (!card) return null;
+  const kind = getProspectorKind(card);
+  if (!kind) return null;
+  const f = activeFace(card);
+  const supplied = collectSupplied(id);
+  const requires = Array.isArray(f.requires) ? f.requires : [];
+  const groups = new Map();
+  for (const r of requires) {
+    const supplier = r.kind.split('-')[0];
+    if (!groups.has(supplier)) groups.set(supplier, []);
+    groups.get(supplier).push(r.kind);
+  }
+  const missing = [];
+  for (const [supplier, kinds] of groups) {
+    if (!kinds.some((k) => supplied.has(k))) missing.push(supplier);
+  }
+  return {
+    id,
+    kind,
+    card,
+    requires,
+    suppliedKinds: [...supplied],
+    missingSuppliers: missing,
+    canActivate: missing.length === 0,
+  };
+}
+
+// Build the set of support-kinds the rest of the stack supplies
+// to the active card. Same logic as isRocketActive()'s supplier
+// scan but scoped to a single excluded card.
+function collectSupplied(excludeId) {
+  const supplied = new Set();
+  for (const slot of _stack) {
+    if (slot.id === excludeId) continue;
+    const c = PATENTS_BY_ID[slot.id];
+    if (!c) continue;
+    const supplies = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
+    for (const k of supplies) supplied.add(k);
+  }
+  return supplied;
 }
 
 export function onRocketChange(cb) {
@@ -169,7 +330,7 @@ export function isRocketActive() {
 
   // Group the active thruster's requires by supplier prefix
   // (reactor-* / gen-* / etc.) so same-supplier kinds read as
-  // OR-alternatives — a thruster listing X / ∿ / 💣 reactor
+  // OR-alternatives - a thruster listing X / ∿ / 💣 reactor
   // is satisfied by ANY reactor that supplies one of those.
   const reqs = (active.faces && active.faces.primary && active.faces.primary.requires) || active.requires || [];
   const missing = [];
@@ -198,4 +359,164 @@ export function isRocketActive() {
 export function canRocketFly() {
   const r = isRocketActive();
   return { ok: r.active, missing: r.missing };
+}
+
+// --------- Tank water (ship fuel) ---------
+
+export function getTankWater() { return _tankWater; }
+export function getTankMax()   { return TANK_MAX; }
+
+export function setTankWater(n) {
+  const v = Math.max(0, Math.min(TANK_MAX, Math.floor(Number(n) || 0)));
+  if (v === _tankWater) return false;
+  _tankWater = v;
+  persist();
+  notify();
+  return true;
+}
+
+export function addFuel(delta = 1) {
+  return setTankWater(_tankWater + (Number(delta) || 1));
+}
+
+export function removeFuel(delta = 1) {
+  return setTankWater(_tankWater - (Number(delta) || 1));
+}
+
+// --------- Stack totals + thruster stats ---------
+
+// Pulls the active face for any card in the stack, with a fallback
+// to top-level fields for the older hand-written records that
+// didn't carry a `faces` block.
+function activeFace(card) {
+  return (card && card.faces && card.faces.primary) || card || {};
+}
+
+// Total dry mass of the stack (no fuel) and minimum rad-hardness
+// across the cards. min rad-hard is the ship's rad-hard limit -
+// the weakest card sets the ceiling at a radhaz crossing.
+export function getStackTotals() {
+  let mass = 0;
+  let minRad = null;
+  let count = 0;
+  for (const slot of _stack) {
+    const card = PATENTS_BY_ID[slot.id];
+    if (!card) continue;
+    const f = activeFace(card);
+    const m = (f.mass != null ? f.mass : card.mass) | 0;
+    const r = (f.radHardness != null ? f.radHardness : card.radHardness);
+    mass += m;
+    if (r != null) minRad = (minRad == null) ? r : Math.min(minRad, r);
+    count++;
+  }
+  return {
+    count,
+    dryMass: mass,
+    fuel: _tankWater,
+    wetMass: mass + _tankWater,
+    minRadHard: minRad,
+  };
+}
+
+// Compute the active thruster's "final" stats after applying every
+// other stack card's thrustMod (additive) + fuelMod (multiplicative).
+// Returns null if there is no active thruster.
+//
+// thrustMod is additive - Cermet NERVA contributes +3 thrust to the
+// thruster it's paired with.
+// fuelMod is multiplicative - values like 0.25 / 0.5 / 1.0 scale the
+// base fuel-consumption-per-burn down (or leave it flat).
+//
+// Wet mass is exposed too so the UI can show "can it actually move":
+// the rocket can move iff finalThrust ≥ wetMass (board-game equiv of
+// having enough push to lift the loaded ship).
+export function getActiveThrusterStats() {
+  const id = _activeThrusterId;
+  if (!id) return null;
+  const card = PATENTS_BY_ID[id];
+  if (!card) return null;
+  const f = activeFace(card);
+  let thrust = f.thrust != null ? f.thrust : card.thrust;
+  let fuel   = f.fuel   != null ? f.fuel   : card.fuel;
+  const isp  = f.isp    != null ? f.isp    : card.isp;
+  if (thrust == null) return null;
+
+  let baseThrust = thrust;
+  let baseFuel = fuel;
+  const modifiers = [];
+  for (const slot of _stack) {
+    if (slot.id === id) continue;
+    const c = PATENTS_BY_ID[slot.id];
+    if (!c) continue;
+    const cf = activeFace(c);
+    const tMod = cf.thrustMod;
+    const fMod = cf.fuelMod;
+    if (tMod != null && tMod !== 0) {
+      thrust += tMod;
+      modifiers.push({ from: c.name, kind: 'thrust', delta: tMod });
+    }
+    if (fMod != null && fMod !== 1 && fuel != null) {
+      fuel *= fMod;
+      modifiers.push({ from: c.name, kind: 'fuel', mult: fMod });
+    }
+  }
+  const totals = getStackTotals();
+  // Weight-class modifier from the published Net Thrust track:
+  //   wet < 2     -> +2  (WISP)
+  //   wet < 4 2/3 -> +1  (PROBE)
+  //   wet < 6 1/2 ->  0  (SCOUT)
+  //   wet < 17    -> -1  (TRANSPORT)
+  //   wet <= 32   -> -2  (TUG)
+  // The chit on the Net Thrust track sits at the rocket's wet
+  // mass; its row marks the modifier this row applies.
+  const wm = totals.wetMass;
+  let wcMod = 0;
+  let wcClass = 'TUG';
+  if      (wm < 2)        { wcMod = +2; wcClass = 'WISP';      }
+  else if (wm < 14 / 3)   { wcMod = +1; wcClass = 'PROBE';     }   // 4 2/3
+  else if (wm < 6.5)      { wcMod =  0; wcClass = 'SCOUT';     }
+  else if (wm < 17)       { wcMod = -1; wcClass = 'TRANSPORT'; }
+  else                    { wcMod = -2; wcClass = 'TUG';       }
+  if (wcMod !== 0) {
+    thrust += wcMod;
+    modifiers.push({ from: `${wcClass} weight class`, kind: 'thrust', delta: wcMod });
+  }
+  // Afterburn engaged: applies the active face's afterburn bonus
+  // (numeric in the spreadsheet). One-shot per turn; UI confirms
+  // before engaging because it spends fuel up front.
+  if (_afterburnEngaged && Number.isFinite(f.afterburn) && f.afterburn) {
+    thrust += f.afterburn;
+    modifiers.push({ from: 'Afterburn', kind: 'thrust', delta: f.afterburn });
+  }
+  return {
+    cardId: id,
+    name: card.name,
+    baseThrust,
+    baseFuel,
+    thrust,
+    fuel,
+    isp,
+    modifiers,
+    weightClass:   wcClass,
+    weightClassMod: wcMod,
+    afterburnAvailable: Number.isFinite(f.afterburn) && f.afterburn > 0,
+    afterburnEngaged:   _afterburnEngaged,
+    wetMass: totals.wetMass,
+    dryMass: totals.dryMass,
+    canLift: thrust >= totals.wetMass,
+  };
+}
+
+// Afterburn toggle. Engaging spends `afterburnCost` water now
+// (the rulebook calls this the "Afterburn (+ thrust for 2 fuel
+// steps shown)" cost), so the caller must confirm. Returns the
+// new engaged-state on success, or null when the rocket can't
+// engage (no active thruster, no afterburn capability, or no
+// water to spend).
+export function isAfterburnEngaged() { return _afterburnEngaged; }
+export function setAfterburn(engaged) {
+  _afterburnEngaged = !!engaged;
+  persist();
+  notify();
+  return _afterburnEngaged;
 }

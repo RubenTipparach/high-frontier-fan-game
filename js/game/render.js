@@ -1,4 +1,5 @@
 import { getRocketSprite, getRocketSpriteSize } from './rocket-sprite.js';
+import { thrustVisual } from './card-ui.js';
 
 // Canvas-based renderer for the delta-v map.
 //
@@ -33,16 +34,41 @@ const MAX_ZOOM = 10;
 // hydration droplets / centre flag glyphs) reaches its full
 // HEX_R size. Below this threshold the hex shrinks
 // proportionally so it doesn't dominate the small-scale,
-// zoomed-out view — and so two adjacent hexes don't visually
+// zoomed-out view - and so two adjacent hexes don't visually
 // merge when the world spacing is compressed. At and above
 // this zoom level the hex is rendered at full size.
 const HEX_FULLSIZE_ZOOM = 2.5;
 
-// World-space anchor of LEO — the sandbox rocket's home and
+// World-space anchor of LEO - the sandbox rocket's home and
 // the big yellow "LEO" label rendered on the map. Exported so
 // the Sandbox "Stack" button in the hand header can centre
-// the map on it.
-export const LEO_ANCHOR = { x: 460, y: 270 };
+// the map on it. Coordinates match the LEO lagrange waypoint
+// in the planner JSON (nx=0.8526, ny=0.8215) scaled to the
+// 1400×900 view used by loadPlannerMap(), so the label sits on
+// the actual LEO node rather than floating off near Itokawa.
+export const LEO_ANCHOR = { x: 1193.6, y: 739.3 };
+
+// Short, stable, copy-friendly reference for a planner node id.
+// The upstream vendor data keys nodes by random floats like
+// "0.9483763498218554" - useless as something a player can quote
+// in a bug report. djb2-hash to a 7-char base36 string. Same input
+// always yields the same output, so it's still a valid stable id;
+// it just reads as "k3xq2pa" instead of a long decimal.
+export function shortRefId(id) {
+  const s = String(id == null ? '' : id);
+  let h = 5381 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  }
+  return h.toString(36).padStart(7, '0').slice(-7);
+}
+
+// True for the planner's LEO lagrange waypoint. The LEO node is
+// rendered larger than a normal lagrange because the sandbox
+// rocket (and eventually multiple players' rockets) park here.
+function isLeoWaypoint(w) {
+  return w && w.type === 'lagrange' && w.name === 'LEO';
+}
 const DEFAULT_ZOOM = 1.8;
 // Cap the celestial body halo at this many screen pixels so extreme
 // zoom doesn't turn Saturn into the entire canvas.
@@ -179,7 +205,7 @@ function drawDroplet(ctx, cx, cy, h) {
 // Each ring system is a list of concentric bands. Each band has:
 //   r:     inner radius as a multiple of the planet radius
 //   w:     band thickness (also in planet radii)
-//   color: rgba fill — alpha tuned so a band sums with whatever it
+//   color: rgba fill - alpha tuned so a band sums with whatever it
 //          overlaps without going opaque.
 // `tilt` is the rotation in radians (Saturn's axial tilt vs. our
 // viewport's horizontal). `flatten` is the vertical squash factor
@@ -507,6 +533,21 @@ export class MapRenderer {
     this._route = null;             // [{from,to,dv}]
     this._routeFromId = null;
     this._routeToId = null;
+    this._rocketTrail = null;       // [{from,to}] history of segments
+                                    // the rocket has actually traversed,
+                                    // drawn under the planned route as
+                                    // a bright cyan ribbon
+    this._discs = null;             // { [siteId]: { outcome } } - prospect
+                                    // discs (success/fail) drawn over sites
+    this._popupRocketInfo = null;   // { isru } - active rig info supplied
+                                    // by browse.js for the popup chip
+    this._prospectorBadgeBox = null; // last-drawn badge bounds for hover
+                                    // hit-testing (set inside the sandbox
+                                    // rocket draw, cleared when no badge)
+    this._sandboxRocketBadge = null; // 'missile' | 'raygun' | 'buggy' or null
+                                    // - small kind icon clipped to the
+                                    // rocket sprite so the player sees
+                                    // their active prospector at a glance
     this._dragStart = null;
     this._gesture = null;
     this._rafQueued = false;
@@ -560,9 +601,26 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
+  // Rocket trail: a list of segments the rocket has already
+  // traversed this game. Drawn as a cyan ribbon beneath the
+  // planned-route overlay so the player sees where they've been
+  // vs. where they're going.
+  setRocketTrail(segments) {
+    this._rocketTrail = segments && segments.length ? segments : null;
+    this._scheduleDraw();
+  }
+
+  // Prospect discs by site id. Shape: { [siteId]: { outcome } }
+  // where outcome is 'success' (player colour) or 'fail' (red).
+  // Drawn over the site hex at the same world position.
+  setDiscs(discs) {
+    this._discs = (discs && Object.keys(discs).length) ? discs : null;
+    this._scheduleDraw();
+  }
+
   // Sandbox rocket: a single rocket sprite placed at a world-
   // space (x, y). canFly drives the "🚫 + transparent" overlay
-  // — the renderer doesn't compute fly-ability itself; that's
+  // - the renderer doesn't compute fly-ability itself; that's
   // js/game/rocket.js's canRocketFly().
   setSandboxRocket(opts) {
     this._sandboxRocket = opts || null;
@@ -588,10 +646,73 @@ export class MapRenderer {
   // without diving into the hex's individual glyphs.
   flyTo(target, zoom = 5) {
     if (!target || typeof target.x !== 'number' || typeof target.y !== 'number') return;
+    this._cancelPanAnim();
     this.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
     const eff = this.zoom * this.fitScale;
     this.pan.x = this.hostW / 2 - target.x * eff;
     this.pan.y = this.hostH / 2 - target.y * eff;
+    this._scheduleDraw();
+  }
+
+  // Smoothly pan (no zoom change) to centre a world-space point.
+  // Used when the user taps a site so the camera follows the
+  // selection instead of jumping or staying put.
+  panTo(target, { ms = 320 } = {}) {
+    if (!target || typeof target.x !== 'number' || typeof target.y !== 'number') return;
+    this._cancelPanAnim();
+    const eff = this.zoom * this.fitScale;
+    const targetPanX = this.hostW / 2 - target.x * eff;
+    const targetPanY = this.hostH / 2 - target.y * eff;
+    const startX = this.pan.x;
+    const startY = this.pan.y;
+    const t0 = performance.now();
+    const step = (now) => {
+      const k = Math.min(1, (now - t0) / ms);
+      // ease-out cubic - gets you near the target fast, settles softly
+      const e = 1 - Math.pow(1 - k, 3);
+      this.pan.x = startX + (targetPanX - startX) * e;
+      this.pan.y = startY + (targetPanY - startY) * e;
+      this._scheduleDraw();
+      if (k < 1) this._panAnimRaf = requestAnimationFrame(step);
+      else this._panAnimRaf = null;
+    };
+    this._panAnimRaf = requestAnimationFrame(step);
+  }
+
+  _cancelPanAnim() {
+    if (this._panAnimRaf) {
+      cancelAnimationFrame(this._panAnimRaf);
+      this._panAnimRaf = null;
+    }
+  }
+
+  // Pin a popup card to a world-space site. The renderer keeps
+  // the popup's screen position in sync each frame so it tracks
+  // the underlying hex as the camera pans / zooms. `actions` is
+  // an optional array of { label, onClick } rendered as buttons
+  // at the bottom of the popup.
+  setSitePopup(site, actions = []) {
+    if (!site) { this.clearSitePopup(); return; }
+    this._popupSite = site;
+    this._buildSitePopup(site, actions);
+    // Place it at the current frame's screen position immediately
+    // so the popup doesn't briefly render at (0, 0) while the
+    // first draw cycle is pending.
+    this._positionSitePopup();
+    this._scheduleDraw();
+  }
+
+  // Set per-popup rocket info (the active rig's ISRU rating, etc.)
+  // so the popup chip can render "Your ISRU 2 vs 4 water ✓" without
+  // the renderer needing to import rocket state. Call before
+  // setSitePopup; values stay until the next call.
+  setPopupRocketInfo(info) {
+    this._popupRocketInfo = info || null;
+  }
+
+  clearSitePopup() {
+    this._popupSite = null;
+    if (this._popupEl) this._popupEl.classList.add('hidden');
     this._scheduleDraw();
   }
 
@@ -636,11 +757,13 @@ export class MapRenderer {
     }
     this._normalEdges = [];
     this._hazardEdges = [];
-    // Comet edges are bucketed by the destination comet's synodic
-    // season ('red'|'yellow'|'blue') so each apparition draws in
-    // its own colour. A path touching two comets picks the first
-    // endpoint's season — they're rare and a single colour beats
-    // an indecisive blend.
+    // Seasonal edges are bucketed by the synodic season
+    // ('red'|'yellow'|'blue'). Any site with siteSynodic
+    // (comets AND seasonal asteroids like Icarus / Phaethon /
+    // Pholus / Hermes / Bee-Zed / Asbolus) propagates its season
+    // to the edges that touch it; the BFS in planner-map.js
+    // extends that to adjacent lagrange / burn waypoints so the
+    // whole approach corridor reads as one colour.
     this._cometEdgesBySeason = new Map();
     const straight = this.data.straightEdges || this.data.edges;
     for (const [a, b, dv] of straight) {
@@ -648,13 +771,14 @@ export class MapRenderer {
       if (!sa || !sb) continue;
       const seg = { sa, sb, dv };
       if (sa.hazard || sb.hazard) this._hazardEdges.push(seg);
-      else if (sa.type === 'comet' || sb.type === 'comet') {
-        const comet = sa.type === 'comet' ? sa : sb;
-        const season = comet.siteSynodic || 'blue';
-        if (!this._cometEdgesBySeason.has(season)) this._cometEdgesBySeason.set(season, []);
-        this._cometEdgesBySeason.get(season).push(seg);
+      else {
+        const season = sa.siteSynodic || sb.siteSynodic;
+        if (season) {
+          if (!this._cometEdgesBySeason.has(season)) this._cometEdgesBySeason.set(season, []);
+          this._cometEdgesBySeason.get(season).push(seg);
+        }
+        else this._normalEdges.push(seg);
       }
-      else this._normalEdges.push(seg);
     }
     this._chains = [];
     this._hazardChains = [];
@@ -663,13 +787,15 @@ export class MapRenderer {
       const pts = chain.map((id) => this.data.byId[id]).filter(Boolean);
       if (pts.length < 2) continue;
       if (pts.some((p) => p.hazard)) this._hazardChains.push(pts);
-      else if (pts.some((p) => p.type === 'comet')) {
-        const comet = pts.find((p) => p.type === 'comet');
-        const season = comet.siteSynodic || 'blue';
-        if (!this._cometChainsBySeason.has(season)) this._cometChainsBySeason.set(season, []);
-        this._cometChainsBySeason.get(season).push(pts);
+      else {
+        const seasonal = pts.find((p) => p.siteSynodic);
+        if (seasonal) {
+          const season = seasonal.siteSynodic;
+          if (!this._cometChainsBySeason.has(season)) this._cometChainsBySeason.set(season, []);
+          this._cometChainsBySeason.get(season).push(pts);
+        }
+        else this._chains.push(pts);
       }
-      else this._chains.push(pts);
     }
 
     // Body groups: every real site picks up a `bodyKey` in the
@@ -746,6 +872,14 @@ export class MapRenderer {
     this._tooltipEl.className = 'map-tooltip hidden';
     this.host.appendChild(this._tooltipEl);
 
+    // Tap popup: persistent variant of the tooltip that anchors to
+    // a site in world space and stays put through pan/zoom. Built
+    // on demand by setSitePopup(); positioned each frame in _draw().
+    this._popupEl = document.createElement('div');
+    this._popupEl.className = 'map-popup hidden';
+    this.host.appendChild(this._popupEl);
+    this._popupSite = null;
+
     // Resize observer keeps the canvas pixel-perfect with whatever
     // CSS-driven size the host gets. Triggers a redraw on every
     // change including the initial mount.
@@ -761,6 +895,22 @@ export class MapRenderer {
   }
 
   _resize() {
+    // Snapshot the world-space point currently under the screen
+    // centre BEFORE the host dimensions change, so we can re-pan
+    // afterwards and keep that point centred. Without this, dragging
+    // the sandbox hand strip up makes the visible map scroll
+    // downward (the canvas shrank from the bottom but the pan didn't
+    // compensate). prevFitScale > 0 gates the very first call where
+    // we haven't measured yet.
+    let prevCenter = null;
+    if (this.hostW > 0 && this.hostH > 0 && this.fitScale > 0) {
+      const prevEff = this.zoom * this.fitScale;
+      prevCenter = {
+        x: (this.hostW / 2 - this.pan.x) / prevEff,
+        y: (this.hostH / 2 - this.pan.y) / prevEff,
+      };
+    }
+
     const rect = this.host.getBoundingClientRect();
     this.hostW = Math.max(1, rect.width);
     this.hostH = Math.max(1, rect.height);
@@ -770,6 +920,13 @@ export class MapRenderer {
     this.canvas.style.width = this.hostW + 'px';
     this.canvas.style.height = this.hostH + 'px';
     this.fitScale = Math.min(this.hostW / VIEW_W, this.hostH / VIEW_H);
+
+    if (prevCenter) {
+      const eff = this.zoom * this.fitScale;
+      this.pan.x = this.hostW / 2 - prevCenter.x * eff;
+      this.pan.y = this.hostH / 2 - prevCenter.y * eff;
+    }
+
     this._scheduleDraw();
   }
 
@@ -841,6 +998,7 @@ export class MapRenderer {
     // screen space later) sit on top.
     this._drawSiteHalosWorld(ctx);
     this._drawEdges(ctx);
+    this._drawRocketTrail(ctx);
     this._drawRoute(ctx);
 
     ctx.restore();
@@ -848,9 +1006,19 @@ export class MapRenderer {
     this._drawWaypointsScreen(ctx);
     this._drawSiteHexesScreen(ctx);
     this._drawSiteLabelsScreen(ctx);
+    this._drawProspectDiscsScreen(ctx);
     this._drawLeoAnchorScreen(ctx);
     this._drawPlayerShipScreen(ctx);
     if (this._sandboxRocket) this._drawSandboxRocketScreen(ctx);
+    // Selection ring drawn LAST so nothing - labels, ships, hexes
+    // - paints over it. On mobile the in-hex orange/gold border is
+    // easy to miss, so we layer a thick bright yellow ring + soft
+    // halo just outside the selected node's body.
+    this._drawSelectionRingScreen(ctx);
+    // Turn-number pills (T2, T3, …) for planned rocket routes;
+    // no-op for plain Navigate-to routes that have no turn tags.
+    this._drawRouteTurnLabelsScreen(ctx);
+    if (this._popupSite) this._positionSitePopup();
 
     // FPS book-keeping. The debug panel polls getFps(); we update
     // ~twice per second so the readout doesn't flicker.
@@ -966,7 +1134,7 @@ export class MapRenderer {
     // orbital edges drawn over the top. The label calls out the
     // solar-thrust modifier (e.g. "MARS −1") so the player can
     // see at a glance how a sail's effective thrust shifts as
-    // their ship moves outward. Neptune+ shows "✕" — sails are
+    // their ship moves outward. Neptune+ shows "✕" - sails are
     // dead past Uranus.
     const startY = 60;
     const bandH = (VIEW_H - 60 - 60) / zones.length;
@@ -1009,7 +1177,7 @@ export class MapRenderer {
     ctx.stroke();
 
     // Comet routes are coloured by the destination comet's
-    // synodic season — red, yellow, or blue — so a glance at
+    // synodic season - red, yellow, or blue - so a glance at
     // an outer-system itinerary tells you which apparition you'd
     // be chasing. One stroke pass per season.
     const seasonKeys = new Set([
@@ -1055,8 +1223,11 @@ export class MapRenderer {
       const r = vis.r;
       ctx.beginPath();
       for (const w of items) {
-        ctx.moveTo(w.x + r, w.y);
-        ctx.arc(w.x, w.y, r, 0, Math.PI * 2);
+        // LEO is enlarged so multiple parked rockets fit on the
+        // single lagrange node without overlapping.
+        const wr = isLeoWaypoint(w) ? r * 2 : r;
+        ctx.moveTo(w.x + wr, w.y);
+        ctx.arc(w.x, w.y, wr, 0, Math.PI * 2);
       }
       if (vis.fill !== 'transparent') {
         ctx.fillStyle = vis.fill;
@@ -1108,36 +1279,136 @@ export class MapRenderer {
     }
   }
 
-  _drawRoute(ctx) {
-    if (!this._route) return;
+  // Bright cyan ribbon tracing every segment the rocket has
+  // already flown. Painted before _drawRoute so the planned-route
+  // overlay (orange + dashed) sits on top at any shared junction.
+  _drawRocketTrail(ctx) {
+    if (!this._rocketTrail) return;
     const eff = this.zoom * this.fitScale;
-    ctx.lineWidth = 4 / eff;
+    ctx.save();
     ctx.lineCap = 'round';
-    ctx.shadowBlur = 6 / eff;
-    ctx.shadowColor = 'rgba(249, 115, 22, 0.65)';
-    // Trace exactly over the underlying edges -- one straight
-    // lineTo per segment, no Bezier smoothing. The route is an
-    // overlay highlight, not a new shape; the player should see
-    // their path as a direct copy of the graph segments. We
-    // stroke the same path twice — solid orange first, gold
-    // dashes on top — so the highlight reads as orange/gold
-    // stripes against yellow-season comet paths.
+    ctx.lineWidth = 3.5 / eff;
+    ctx.shadowBlur = 10 / eff;
+    ctx.shadowColor = 'rgba(56, 189, 248, 0.55)';
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.85)';
     ctx.beginPath();
-    for (const seg of this._route) {
+    for (const seg of this._rocketTrail) {
       const sa = this.data.byId[seg.from];
       const sb = this.data.byId[seg.to];
       if (!sa || !sb) continue;
       ctx.moveTo(sa.x, sa.y);
       ctx.lineTo(sb.x, sb.y);
     }
-    ctx.strokeStyle = 'rgba(249, 115, 22, 0.95)';
-    ctx.setLineDash([]);
     ctx.stroke();
-    ctx.strokeStyle = 'rgba(251, 191, 36, 0.95)';
-    ctx.setLineDash([8 / eff, 8 / eff]);
-    ctx.stroke();
+    ctx.restore();
+  }
+
+  _drawRoute(ctx) {
+    if (!this._route) return;
+    const eff = this.zoom * this.fitScale;
+    ctx.lineCap = 'round';
+    // Segments tagged `turn: 1` (or untagged - plain Navigate-to
+    // routes have no turn data) render as the bright orange/gold
+    // highlight. Segments on later turns render as a dimmer
+    // dashed line; the turn number gets painted on each segment's
+    // midpoint in the screen-space pass (_drawRouteTurnLabelsScreen).
+    const turn1 = [];
+    const laterByTurn = new Map();
+    for (const seg of this._route) {
+      const t = seg.turn || 1;
+      if (t === 1) turn1.push(seg);
+      else {
+        if (!laterByTurn.has(t)) laterByTurn.set(t, []);
+        laterByTurn.get(t).push(seg);
+      }
+    }
+
+    // Later turns first so the bright turn-1 highlight always
+    // paints on top of them at any junction. Drawn as faint
+    // yellow (matching the turn-1 gold-dash but at reduced
+    // alpha) so the preview reads as "same route, just queued
+    // for a future turn".
+    const sortedLater = [...laterByTurn].sort((a, b) => b[0] - a[0]);
+    for (const [turn, segs] of sortedLater) {
+      const alpha = Math.max(0.22, 0.55 - (turn - 2) * 0.08);
+      ctx.lineWidth = 2.5 / eff;
+      ctx.strokeStyle = `rgba(251, 191, 36, ${alpha})`;
+      ctx.setLineDash([6 / eff, 5 / eff]);
+      ctx.beginPath();
+      for (const seg of segs) {
+        const sa = this.data.byId[seg.from];
+        const sb = this.data.byId[seg.to];
+        if (!sa || !sb) continue;
+        ctx.moveTo(sa.x, sa.y);
+        ctx.lineTo(sb.x, sb.y);
+      }
+      ctx.stroke();
+    }
     ctx.setLineDash([]);
-    ctx.shadowBlur = 0;
+
+    // Turn 1 - bright orange + gold-dash highlight. Same look as
+    // a Navigate-to inspection route, but here it specifically
+    // means "you can fly this much this turn."
+    if (turn1.length) {
+      ctx.lineWidth = 4 / eff;
+      ctx.shadowBlur = 6 / eff;
+      ctx.shadowColor = 'rgba(249, 115, 22, 0.65)';
+      ctx.beginPath();
+      for (const seg of turn1) {
+        const sa = this.data.byId[seg.from];
+        const sb = this.data.byId[seg.to];
+        if (!sa || !sb) continue;
+        ctx.moveTo(sa.x, sa.y);
+        ctx.lineTo(sb.x, sb.y);
+      }
+      ctx.strokeStyle = 'rgba(249, 115, 22, 0.95)';
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(251, 191, 36, 0.95)';
+      ctx.setLineDash([8 / eff, 8 / eff]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  // Screen-space "T2", "T3" labels at the midpoint of each later-
+  // turn segment. Drawn in the screen pass so labels stay legible
+  // even when zoomed out. Skipped entirely for plain Navigate-to
+  // routes (they have no .turn tags).
+  _drawRouteTurnLabelsScreen(ctx) {
+    if (!this._route) return;
+    const eff = this.zoom * this.fitScale;
+    const { hostW, hostH } = this;
+    ctx.save();
+    ctx.font = '700 11px ui-sans-serif, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const seg of this._route) {
+      const t = seg.turn || 1;
+      if (t <= 1) continue;
+      const sa = this.data.byId[seg.from];
+      const sb = this.data.byId[seg.to];
+      if (!sa || !sb) continue;
+      const sx = this.pan.x + ((sa.x + sb.x) / 2) * eff;
+      const sy = this.pan.y + ((sa.y + sb.y) / 2) * eff;
+      if (sx < -20 || sx > hostW + 20 || sy < -20 || sy > hostH + 20) continue;
+      const text = `T${t}`;
+      const pad = 5;
+      const w = ctx.measureText(text).width + pad * 2;
+      const h = 16;
+      const rx = sx - w / 2, ry = sy - h / 2;
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+      ctx.strokeStyle = 'rgba(251, 191, 36, 0.65)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(rx, ry, w, h, 4);
+      else ctx.rect(rx, ry, w, h);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#fde68a';
+      ctx.fillText(text, sx, sy + 0.5);
+    }
+    ctx.restore();
   }
 
   _drawWaypointsScreen(ctx) {
@@ -1178,9 +1449,12 @@ export class MapRenderer {
         for (const w of circles) {
           const sx = this.pan.x + w.x * eff;
           const sy = this.pan.y + w.y * eff;
-          if (sx < -vis.r || sx > hostW + vis.r || sy < -vis.r || sy > hostH + vis.r) continue;
-          ctx.moveTo(sx + vis.r, sy);
-          ctx.arc(sx, sy, vis.r, 0, Math.PI * 2);
+          // LEO is enlarged to fit multiple parked rockets; bump
+          // the cull margin so the bigger ring isn't clipped.
+          const wr = isLeoWaypoint(w) ? vis.r * 2 : vis.r;
+          if (sx < -wr || sx > hostW + wr || sy < -wr || sy > hostH + wr) continue;
+          ctx.moveTo(sx + wr, sy);
+          ctx.arc(sx, sy, wr, 0, Math.PI * 2);
         }
         if (vis.fill !== 'transparent') { ctx.fillStyle = vis.fill; ctx.fill(); }
         ctx.strokeStyle = vis.stroke;
@@ -1211,7 +1485,7 @@ export class MapRenderer {
           ctx.stroke();
         }
         if (halfLandings.length) {
-          // Half-lander disc: a half-moon — left semicircle
+          // Half-lander disc: a half-moon - left semicircle
           // filled solid pink, right semicircle empty, with a
           // full circular outline + diameter line splitting the
           // two. The full rocket glyph rides on top in the
@@ -1263,8 +1537,9 @@ export class MapRenderer {
         const sx = this.pan.x + w.x * eff;
         const sy = this.pan.y + w.y * eff;
         if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
+        const wr = isLeoWaypoint(w) ? vis.r * 2 : vis.r;
         ctx.beginPath();
-        ctx.arc(sx, sy, vis.r + 3, 0, Math.PI * 2);
+        ctx.arc(sx, sy, wr + 3, 0, Math.PI * 2);
         ctx.stroke();
       }
       ctx.shadowBlur = 0;
@@ -1332,12 +1607,15 @@ export class MapRenderer {
     // the orange ring stays the dominant cue and the L just tags it.
     const lagrangeItems = this._waypointsByType.get('lagrange');
     if (lagrangeItems) {
-      ctx.font = '700 10px ui-sans-serif, system-ui, sans-serif';
       ctx.fillStyle = '#fdba74';
       for (const w of lagrangeItems) {
         const sx = this.pan.x + w.x * eff;
         const sy = this.pan.y + w.y * eff;
         if (sx < -20 || sx > hostW + 20 || sy < -20 || sy > hostH + 20) continue;
+        // LEO's "L" scales with the enlarged node so the letter
+        // doesn't look lost inside the bigger circle.
+        const fontPx = isLeoWaypoint(w) ? 18 : 10;
+        ctx.font = `700 ${fontPx}px ui-sans-serif, system-ui, sans-serif`;
         ctx.fillText('L', sx, sy + 0.5);
       }
     }
@@ -1360,7 +1638,7 @@ export class MapRenderer {
       const sy = this.pan.y + w.y * eff;
       if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
       if (w.type === 'burn' && w.landing != null) {
-        // Full rocket on both full and half landers — half-status
+        // Full rocket on both full and half landers - half-status
         // is now conveyed by the striped half of the pink disc
         // drawn underneath, not by a clipped glyph.
         ctx.fillText('🚀', sx, sy);
@@ -1418,7 +1696,7 @@ export class MapRenderer {
       if (vis.kind === 'comet') { drawComet(ctx, site.x, site.y, vis.r, site); continue; }
       if (vis.kind !== 'hex') continue;
       // Per-body halo overrides. Ceres punches above its dwarf-
-      // class default — shrink it 50% so it doesn't dominate the
+      // class default - shrink it 50% so it doesn't dominate the
       // belt next to Vesta / Pallas / Hygiea.
       const bodyScale = /(^|\s)ceres/i.test(site.name || '') ? 0.5 : 1;
       const worldR = Math.min(vis.haloR * bodyScale, capWorld);
@@ -1450,8 +1728,8 @@ export class MapRenderer {
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
       if (vis.kind === 'sun') continue;
       // Comets used to render as a pink disc + 🚀 marker. The
-      // published HF4 board draws them as real hexes — same
-      // shape as planets / asteroids — with a synodic-coloured
+      // published HF4 board draws them as real hexes - same
+      // shape as planets / asteroids - with a synodic-coloured
       // outline (red / yellow / blue per season). The hex path
       // below handles them. TYPE_VIS.comet was switched to
       // kind: 'hex' so no special-case here.
@@ -1519,32 +1797,119 @@ export class MapRenderer {
       }
 
       // Synodic colour is painted on the hex border itself
-      // above — no separate outer ring needed.
+      // above - no separate outer ring needed.
       // Selected nodes are highlighted via their border + glow
       // above; no extra ring needed.
     }
   }
 
-  // Player ship marker: bright triangle hovering above the
-  // Big "LEO" letters anchoring the sandbox rocket's home
-  // position so the player can find the launch site at a
-  // glance. Lives in world space (so it pans / zooms with the
-  // map) but uses a fixed pixel font size that doesn't shrink
-  // below the hex-fullsize zoom threshold.
+  // "LEO" letters anchoring the sandbox rocket's home position
+  // so the player can find the launch site at a glance. Lives
+  // in world space (so it pans / zooms with the map) but uses a
+  // Prospect discs. Draw a coloured disc centred on each site
+  // that's been prospected: blue = success (claim placed), red =
+  // fail (site exhausted). Rendered AFTER site labels so the disc
+  // sits on top of the hex without losing the site name behind it
+  // (the label is offset above; the disc tucks under the hex). At
+  // very low zoom the discs collapse to a tiny dot so they stay
+  // legible as a "this site is taken" cue.
+  _drawProspectDiscsScreen(ctx) {
+    if (!this._discs) return;
+    const eff = this.zoom * this.fitScale;
+    ctx.save();
+    for (const id in this._discs) {
+      const site = this.data.byId[id];
+      if (!site) continue;
+      const sx = this.pan.x + site.x * eff;
+      const sy = this.pan.y + site.y * eff;
+      // Skip if offscreen.
+      if (sx < -40 || sx > this.hostW + 40 || sy < -40 || sy > this.hostH + 40) continue;
+      const outcome = this._discs[id].outcome;
+      const radius = Math.max(7, Math.min(18, 10 * Math.sqrt(this.zoom)));
+      // Success = player's yellow claim disc; fail = red exhausted.
+      const fill = outcome === 'success' ? '#facc15' : '#ef4444';
+      ctx.beginPath();
+      ctx.arc(sx, sy, radius, 0, Math.PI * 2);
+      ctx.fillStyle = fill;
+      ctx.globalAlpha = 0.9;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = outcome === 'success' ? '#854d0e' : '#7f1d1d';
+      ctx.stroke();
+      // Inner pip glyph: ✓ for success, ✕ for fail.
+      ctx.fillStyle = '#0c0a16';
+      ctx.font = `700 ${Math.round(radius * 1.1)}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(outcome === 'success' ? '✓' : '✕', sx, sy + 1);
+    }
+    ctx.restore();
+  }
+
+  // fixed pixel font size that doesn't shrink below the
+  // hex-fullsize zoom threshold. Sized to read as a label and
+  // offset below the anchor so the lagrange node itself stays
+  // visible above the text.
   _drawLeoAnchorScreen(ctx) {
     const eff = this.zoom * this.fitScale;
     const sx = this.pan.x + LEO_ANCHOR.x * eff;
     const sy = this.pan.y + LEO_ANCHOR.y * eff;
-    const fontPx = 28 * Math.max(0.6, Math.min(1.2, this.zoom / 2.5));
+    const fontPx = 14 * Math.max(0.6, Math.min(1.2, this.zoom / 2.5));
+    const labelY = sy + fontPx * 1.4;   // sit below the node
     ctx.save();
     ctx.font = `900 ${fontPx}px ui-sans-serif, system-ui, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.85)';
-    ctx.lineWidth = 5;
-    ctx.strokeText('LEO', sx, sy);
+    ctx.lineWidth = 4;
+    ctx.strokeText('LEO', sx, labelY);
     ctx.fillStyle = '#fde047';
-    ctx.fillText('LEO', sx, sy);
+    ctx.fillText('LEO', sx, labelY);
+    ctx.restore();
+  }
+
+  // Top-layer selection halo. The hex / waypoint passes paint a
+  // subtle in-border highlight that's easy to miss on a phone, so
+  // we also draw a bright outer pulse ring here AFTER everything
+  // else - including labels and overlay sprites - has rendered.
+  // Hits any currently-selected route endpoint (the routed `from`
+  // hex is the player's "I just tapped this" target in browse.js).
+  _drawSelectionRingScreen(ctx) {
+    const ids = [];
+    if (this._routeFromId) ids.push(this._routeFromId);
+    if (this._routeToId)   ids.push(this._routeToId);
+    if (!ids.length || !this.data) return;
+    const eff = this.zoom * this.fitScale;
+    const { hostW, hostH } = this;
+    // Pulse 0..1 driven by the same anim clock the asteroid belt
+    // uses. Modulates ring radius + glow alpha so the highlight
+    // visibly moves - important on mobile where a static thin
+    // ring fades into the map's busy background.
+    const t = (this._animTime || 0) / 1000;
+    const pulse = (Math.sin(t * Math.PI * 1.6) + 1) * 0.5;
+    ctx.save();
+    for (const id of ids) {
+      const node = this.data.byId[id];
+      if (!node) continue;
+      const vis = TYPE_VIS[node.type] || TYPE_VIS.unknown;
+      if (vis.kind === 'none') continue;
+      const sx = this.pan.x + node.x * eff;
+      const sy = this.pan.y + node.y * eff;
+      if (sx < -60 || sx > hostW + 60 || sy < -60 || sy > hostH + 60) continue;
+      // Base radius: hex marker shrinks at low zoom (see hexS),
+      // so mirror that here for the ring to track the visible hex.
+      const hexS = Math.min(1, this.zoom / HEX_FULLSIZE_ZOOM);
+      const baseR = (vis.kind === 'hex' ? vis.r * hexS : vis.r);
+      // Single bright yellow pulse ring, well outside the hex.
+      // No shadow (silently dropped by some mobile GPU paths).
+      // The hex's own border styling stays subtle inside the ring.
+      ctx.lineWidth = 5;
+      ctx.strokeStyle = '#fde047';
+      ctx.beginPath();
+      ctx.arc(sx, sy, baseR + 16 + pulse * 6, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     ctx.restore();
   }
 
@@ -1594,9 +1959,49 @@ export class MapRenderer {
       ctx.fillText('🚫', sx, py + h / 2);
     }
     ctx.restore();
-    // Stash the screen-space bounding box for hit-testing.
+    // Active-prospector badge: emoji clipped to the rocket sprite's
+    // bottom-right corner so the player sees their loadout at a
+    // glance. Renders even when the rocket can't fly - prospectors
+    // travel with the ship.
+    if (r.prospectorKind) {
+      const glyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[r.prospectorKind] || '';
+      if (glyph) {
+        const badgeSize = Math.max(14, Math.round(w * 0.55));
+        const bx = px + w - badgeSize * 0.25;
+        const by = py + h - badgeSize * 0.25;
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(bx, by, badgeSize * 0.5, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+        ctx.fill();
+        ctx.strokeStyle = '#fde047';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.font = `${Math.round(badgeSize * 0.7)}px ${EMOJI_FONT}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(glyph, bx, by + 1);
+        ctx.restore();
+        // Stash circle bounds + descriptor for hover-tooltip
+        // hit-testing. Browse.js fills name + isru on the
+        // sprite payload so the tooltip stays self-contained.
+        this._prospectorBadgeBox = {
+          x: bx, y: by, r: badgeSize * 0.5,
+          kind: r.prospectorKind,
+          name: r.prospectorName || null,
+          isru: Number.isFinite(r.prospectorIsru) ? r.prospectorIsru : null,
+        };
+      }
+    } else {
+      this._prospectorBadgeBox = null;
+    }
+    // Stash the screen-space bounding box for hit-testing. The
+    // active-thruster summary rides along for the rocket-hover
+    // tooltip (browse.js fills r.thruster from
+    // getActiveThrusterStats); no thruster = no tooltip.
     this._sandboxRocketBox = {
       x: px, y: py, w, h,
+      thruster: r.thruster || null,
     };
   }
 
@@ -1671,7 +2076,7 @@ export class MapRenderer {
         ctx.fillText('☠', sx, sy);
       }
 
-      // Site-flag glyphs ride on the hex centre — 🌊 submarine,
+      // Site-flag glyphs ride on the hex centre - 🌊 submarine,
       // 🌿 astrobiology, ⛅ aerostat (atmospheric). One flag sits
       // dead-centre; multiples spread horizontally so they all
       // fit inside the larger HEX_R. Comets don't take a hex,
@@ -1755,6 +2160,16 @@ export class MapRenderer {
 
     // Click dispatched only if the mousedown→mouseup didn't drag.
     this.canvas.addEventListener('click', (ev) => {
+      // Mobile browsers fire a synthesized `click` right after a
+      // touchend even with `touch-action: none`. The touchend
+      // handler already called onSelect for the tap; if we let
+      // this click also call onSelect the second invocation
+      // matches _selectedId and immediately DESELECTS - that's
+      // why on mobile the popup + ring "show up and close right
+      // away." Bail when a recent touch interaction owned the
+      // event. _touchActive is set in _wireHover (same flag that
+      // suppresses the hover tooltip on touch).
+      if (this._touchActive) return;
       if (this._dragStart && this._dragStart.moved) return;
       // Rocket sits on top of the map so test it first; if the
       // click landed inside the rocket sprite we fire a
@@ -1790,7 +2205,12 @@ export class MapRenderer {
         const t0 = this._gesture.touches[0];
         const dx = points[0].clientX - t0.clientX;
         const dy = points[0].clientY - t0.clientY;
-        if (Math.abs(dx) + Math.abs(dy) > 3) this._gesture.moved = true;
+        // Manhattan threshold for "this is a drag, not a tap".
+        // A finger naturally wobbles a few pixels when tapping a
+        // small target on a phone screen; 3 px was rejecting
+        // legitimate taps as drags. 10 px is conservative enough
+        // that intentional drags still register.
+        if (Math.abs(dx) + Math.abs(dy) > 10) this._gesture.moved = true;
         this.pan.x = this._gesture.pan.x + dx;
         this.pan.y = this._gesture.pan.y + dy;
         this._scheduleDraw();
@@ -1922,7 +2342,8 @@ export class MapRenderer {
       if (w.isDecorative) continue;
       const vis = TYPE_VIS[w.type] || TYPE_VIS.unknown;
       if (vis.kind === 'none') continue;
-      const hitR = (vis.hitR != null ? vis.hitR : Math.max(vis.r, 8)) + 2;
+      const baseR = isLeoWaypoint(w) ? vis.r * 2 : vis.r;
+      const hitR = (vis.hitR != null ? vis.hitR : Math.max(baseR, 8)) + 2;
       const dx = (this.pan.x + w.x * eff) - sx;
       const dy = (this.pan.y + w.y * eff) - sy;
       const d = dx * dx + dy * dy;
@@ -1937,8 +2358,75 @@ export class MapRenderer {
     // Mouse hover -> tooltip. Throttled by mousemove cadence which is
     // already capped by the browser; we do the hit-test work cheaply
     // and update DOM only on identity change.
+    //
+    // Mobile browsers synthesize mousemove/mouseover events from touch
+    // taps even with `touch-action: none` (Chrome on Android does this
+    // reliably). That fired the hover tooltip on top of the tap popup,
+    // producing the "two popups" bug. _touchActive is set true on
+    // touchstart and cleared with a short tail after touchend; while
+    // it's true we skip the tooltip entirely so the tap popup is the
+    // only thing the player sees.
+    this._touchActive = false;
+    let touchTailTimer = null;
+    const markTouch = () => {
+      this._touchActive = true;
+      this._hideTooltip();
+      if (touchTailTimer) clearTimeout(touchTailTimer);
+    };
+    const releaseTouch = () => {
+      if (touchTailTimer) clearTimeout(touchTailTimer);
+      // Keep the lockout for a moment after touchend so the
+      // synthesized mousemove that fires right after the tap is
+      // still suppressed.
+      touchTailTimer = setTimeout(() => {
+        this._touchActive = false;
+      }, 800);
+    };
+    this.canvas.addEventListener('touchstart',  markTouch,   { passive: true });
+    this.canvas.addEventListener('touchmove',   markTouch,   { passive: true });
+    this.canvas.addEventListener('touchend',    releaseTouch);
+    this.canvas.addEventListener('touchcancel', releaseTouch);
+
     let lastId = null;
     this.canvas.addEventListener('mousemove', (ev) => {
+      if (this._touchActive) return;       // tap path owns the popup
+      // Prospector-badge hover comes first - it's a small overlay
+      // on top of the rocket sprite and would lose to the larger
+      // site hit-test underneath if we checked sites first.
+      const rect = this.canvas.getBoundingClientRect();
+      const scx = ev.clientX - rect.left;
+      const scy = ev.clientY - rect.top;
+      const badge = this._prospectorBadgeBox;
+      if (badge) {
+        const dx = scx - badge.x;
+        const dy = scy - badge.y;
+        if (dx * dx + dy * dy <= badge.r * badge.r) {
+          if (lastId !== '__prosp__') {
+            lastId = '__prosp__';
+            this._showProspectorBadgeTooltip(badge, ev);
+          } else {
+            this._positionTooltip(ev);
+          }
+          return;
+        }
+      }
+      // Rocket sprite (the body, not the badge) - show the
+      // modifier-baked thrust triangle so the player can see the
+      // FINAL active thrust + fuel-per-burn without opening the
+      // stack modal. Only renders when an active thruster is
+      // present (browse.js fills the .thruster slot).
+      const rb = this._sandboxRocketBox;
+      if (rb && rb.thruster
+          && scx >= rb.x && scx <= rb.x + rb.w
+          && scy >= rb.y && scy <= rb.y + rb.h) {
+        if (lastId !== '__rocket__') {
+          lastId = '__rocket__';
+          this._showRocketThrustTooltip(rb, ev);
+        } else {
+          this._positionTooltip(ev);
+        }
+        return;
+      }
       const pt = this._eventToWorld(ev);
       const hit = this._hitTest(pt.x, pt.y);
       const id = hit ? hit.id : null;
@@ -1955,6 +2443,182 @@ export class MapRenderer {
       this._hideTooltip();
     });
   }
+
+  _buildSitePopup(site, actions) {
+    const el = this._popupEl;
+    if (!el) return;
+    el.innerHTML = '';
+    const name = document.createElement('div');
+    name.className = 't-name';
+    name.textContent = site.name || '';
+    const meta = document.createElement('div');
+    meta.className = 't-meta';
+    const parts = [];
+    if (site.type)     parts.push(site.type);
+    if (site.siteSize) parts.push(site.siteSize);
+    if (site.hydration) parts.push('💧'.repeat(site.hydration));
+    if (site.hazard)   parts.push('⚠ hazard');
+    meta.textContent = parts.join(' · ');
+    el.appendChild(name);
+    if (meta.textContent) el.appendChild(meta);
+    // Tags row: season (only if the node requires a specific
+    // apparition) + heliocentric zone. Each renders as its own
+    // chip with a colour that matches the underlying game system
+    // (synodic palette for the season, neutral grey for the zone).
+    if (site.siteSynodic || site.solarZone) {
+      const tags = document.createElement('div');
+      tags.className = 't-tags';
+      if (site.siteSynodic) {
+        const chip = document.createElement('span');
+        chip.className = `t-tag t-tag-season t-tag-season-${site.siteSynodic}`;
+        chip.textContent = `${site.siteSynodic} season`;
+        chip.title = `Only accessible during the ${site.siteSynodic} apparition window.`;
+        tags.appendChild(chip);
+      }
+      if (site.solarZone) {
+        const chip = document.createElement('span');
+        chip.className = 't-tag t-tag-zone';
+        chip.textContent = `${site.solarZone} zone`;
+        chip.title = `Heliocentric zone (drives solar-power modifier).`;
+        tags.appendChild(chip);
+      }
+      el.appendChild(tags);
+    }
+    // Your-ISRU chip. This shows the PLAYER'S active prospector
+    // ISRU (NOT the site's number - that's the leading digit of
+    // siteSize and reads from the meta row above). The chip
+    // exists because the prospect / refuel gate keys on the
+    // RIG'S ISRU vs the SITE'S water: rig.ISRU <= site.hydration
+    // means you can prospect / refuel here. Tag the chip ✓ when
+    // the gate passes, ✗ when it doesn't, so the player can
+    // read pass/fail without doing the math themselves.
+    if (this._popupRocketInfo) {
+      const info = this._popupRocketInfo;
+      const water = Number.isFinite(site.hydration) ? site.hydration : 0;
+      const isru  = info.isru;
+      const hasRig = Number.isFinite(isru) && isru > 0;
+      const passes = hasRig && isru <= water;
+      const chip = document.createElement('div');
+      chip.className = 't-isru' + (hasRig
+        ? (passes ? ' is-pass' : ' is-fail')
+        : ' is-unknown');
+      chip.innerHTML = hasRig
+        ? `<strong>Your ISRU</strong><b>${isru}</b>`
+          + `<em>vs ${water} water ${passes ? '✓' : '✗'}</em>`
+        : `<strong>Your ISRU</strong><em>activate a rig to see</em>`;
+      chip.title = hasRig
+        ? `Your active rig has ISRU ${isru}. The site holds ${water} water. `
+          + `Rig ISRU ≤ site water means you can prospect / refuel here.`
+        : `Activate a missile / raygun / buggy prospector (or refinery) `
+          + `to see your ISRU rating.`;
+      el.appendChild(chip);
+    }
+    // Node id2 - a human-friendly stable reference generated at
+    // data-load time (see planner-map.js#makeRefId). Reads as
+    // e.g. "comet-borrelly", "dresda", "lag-leo", "burn-3a2b9".
+    // The raw vendor float id stays on the title for the rare
+    // case someone needs to grep the planner JSON directly.
+    if (site.id2 || site.id) {
+      const idRow = document.createElement('div');
+      idRow.className = 't-id';
+      idRow.textContent = `id: ${site.id2 || shortRefId(site.id)}`;
+      idRow.title = `Tap to select, then copy. (raw key: ${site.id})`;
+      el.appendChild(idRow);
+    }
+    if (actions && actions.length) {
+      const row = document.createElement('div');
+      row.className = 'popup-actions';
+      for (const a of actions) {
+        if (!a || !a.label) continue;
+        // Variant drives the per-button colour: 'rocket' is the
+        // primary blue plan-route action, 'secondary' is the
+        // dimmer Navigate-to inspection action. Legacy `primary:
+        // true` still resolves to the rocket-blue style so old
+        // callers don't break.
+        const variant = a.variant || (a.primary ? 'rocket' : 'secondary');
+        // Action descriptors may carry a `trailing` sub-action
+        // (e.g. a ⚙ gear next to "Plan rocket route" that pops
+        // route-config options). When present, wrap the main
+        // button + the trailing button in a flex row so they
+        // share one popup line and the gear takes its natural
+        // square width instead of stretching.
+        if (a.trailing && a.trailing.label) {
+          // Inline styles win against the generic .popup-btn rule
+          // no matter what CSS happens to load - the pair sat
+          // invisible behind specificity wars before. Stylesheet
+          // .popup-action-pair / .pair-main / .pair-trailing
+          // still applies as a backup; the inline values just
+          // guarantee the layout works first paint.
+          const slot = document.createElement('div');
+          slot.className = 'popup-action-pair';
+          slot.style.display = 'flex';
+          slot.style.gap = '6px';
+          slot.style.alignItems = 'stretch';
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = `popup-btn popup-btn-${variant} pair-main`;
+          b.textContent = a.label;
+          b.disabled = !!a.disabled;
+          b.style.flex = '1 1 auto';
+          b.style.width = 'auto';
+          b.style.minWidth = '0';
+          if (a.title) b.title = a.title;
+          if (a.onClick) b.addEventListener('click', a.onClick);
+          const g = document.createElement('button');
+          g.type = 'button';
+          g.className = `popup-btn popup-btn-${a.trailing.variant || 'secondary'} pair-trailing`;
+          g.textContent = a.trailing.label;
+          g.disabled = !!a.trailing.disabled;
+          g.style.flex = '0 0 auto';
+          g.style.width = '40px';
+          g.style.minWidth = '40px';
+          g.style.padding = '0';
+          g.style.fontSize = '16px';
+          g.style.lineHeight = '1';
+          if (a.trailing.title) g.title = a.trailing.title;
+          if (a.trailing.onClick) g.addEventListener('click', a.trailing.onClick);
+          slot.appendChild(b);
+          slot.appendChild(g);
+          row.appendChild(slot);
+          continue;
+        }
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = `popup-btn popup-btn-${variant}`;
+        b.textContent = a.label;
+        b.disabled = !!a.disabled;
+        if (a.title) b.title = a.title;
+        if (a.onClick) b.addEventListener('click', a.onClick);
+        row.appendChild(b);
+      }
+      el.appendChild(row);
+    }
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'popup-close';
+    close.setAttribute('aria-label', 'Close');
+    close.textContent = '×';
+    close.addEventListener('click', () => {
+      this.clearSitePopup();
+      if (this._onPopupClose) this._onPopupClose();
+    });
+    el.appendChild(close);
+    el.classList.remove('hidden');
+  }
+
+  // Re-anchor the popup to its site's current screen position.
+  // Called from _draw so it tracks pan + zoom + smooth animations.
+  _positionSitePopup() {
+    const el = this._popupEl;
+    if (!el || !this._popupSite) return;
+    const eff = this.zoom * this.fitScale;
+    const sx = this.pan.x + this._popupSite.x * eff;
+    const sy = this.pan.y + this._popupSite.y * eff;
+    el.style.left = `${sx}px`;
+    el.style.top  = `${sy}px`;
+  }
+
+  onPopupClose(fn) { this._onPopupClose = fn || null; }
 
   _showTooltipFor(site, ev) {
     const t = this._tooltipEl;
@@ -1985,5 +2649,56 @@ export class MapRenderer {
 
   _hideTooltip() {
     this._tooltipEl.classList.add('hidden');
+  }
+
+  // Hover tooltip for the rocket sprite (body, not badge). Renders
+  // the card-ui thrust triangle with modifier-baked numbers so
+  // the player sees the FINAL active thrust + fuel-per-burn at
+  // a glance. We pass a synthetic face so the visual reuses the
+  // exact same SVG idiom as on the cards.
+  _showRocketThrustTooltip(box, ev) {
+    const t = this._tooltipEl;
+    const thr = box.thruster;
+    if (!thr) { this._hideTooltip(); return; }
+    t.innerHTML = `
+      <div class="t-name">${thr.name || 'Active thruster'}</div>
+      <div class="t-meta">
+        <span>Modified final</span>
+        <span class="${thr.canLift ? 'ok' : 'bad'}">· thrust ${thr.thrust} vs wet ${thr.wetMass}</span>
+      </div>
+      <div class="t-rocket-thrust"></div>
+    `;
+    const host = t.querySelector('.t-rocket-thrust');
+    const tv = thrustVisual({}, {
+      thrust: thr.thrust,
+      fuel:   thr.fuel,
+    });
+    host.appendChild(tv);
+    t.classList.remove('hidden');
+    this._positionTooltip(ev);
+  }
+
+  // Hover tooltip for the prospector badge on the rocket sprite.
+  // Shows the kind name + the rig's ISRU; ISRU is the prospect /
+  // refuel gating value so it's the headline number.
+  _showProspectorBadgeTooltip(badge, ev) {
+    const t = this._tooltipEl;
+    const kindLabel = {
+      missile: 'Missile prospector',
+      raygun:  'Raygun prospector',
+      buggy:   'Buggy prospector',
+    }[badge.kind] || 'Prospector';
+    const isruStr = Number.isFinite(badge.isru) ? badge.isru : '-';
+    const nameLine = badge.name
+      ? `<div class="t-name">${badge.name}</div>` : '';
+    t.innerHTML = `
+      ${nameLine}
+      <div class="t-meta">
+        <span>${kindLabel}</span>
+        <span>· ISRU <strong>${isruStr}</strong></span>
+      </div>
+    `;
+    t.classList.remove('hidden');
+    this._positionTooltip(ev);
   }
 }

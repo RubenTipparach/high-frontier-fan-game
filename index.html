@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>High Frontier — fan game</title>
-    <link rel="stylesheet" href="./css/style.css?v=2" />
-    <link rel="stylesheet" href="./css/map.css?v=1" />
-    <link rel="stylesheet" href="./css/cards.css?v=1" />
+    <title>High Frontier - fan game</title>
+    <link rel="stylesheet" href="./css/style.css?v=4" />
+    <link rel="stylesheet" href="./css/map.css?v=13" />
+    <link rel="stylesheet" href="./css/cards.css?v=4" />
     <!--
       API base URL for the High Frontier companion server. Empty string
       = local-only mode (no profile, no lobby, no multiplayer). The
@@ -119,7 +119,7 @@
         <div class="card global-chat">
           <h2>Global chat</h2>
           <ul id="global-chat-messages" class="chat-messages">
-            <li class="empty">Global chat coming online — say hi to anyone in the lobby.</li>
+            <li class="empty">Global chat coming online - say hi to anyone in the lobby.</li>
           </ul>
           <form id="global-chat-form" class="chat-form">
             <input id="global-chat-input" type="text" maxlength="500"
@@ -152,8 +152,8 @@
             </label>
             <fieldset class="radio-row">
               <legend>Visibility</legend>
-              <label><input type="radio" name="policy" value="open" checked /> Open — anyone can join from the lobby list</label>
-              <label><input type="radio" name="policy" value="invite-only" /> Invite-only — invisible, join by invite</label>
+              <label><input type="radio" name="policy" value="open" checked /> Open - anyone can join from the lobby list</label>
+              <label><input type="radio" name="policy" value="invite-only" /> Invite-only - invisible, join by invite</label>
             </fieldset>
             <div class="form-row">
               <button type="button" id="create-cancel">Cancel</button>
@@ -264,30 +264,19 @@
           <div class="browse-stage">
             <div id="browse-map" class="browse-map"></div>
           </div>
+          <div id="browse-modal-backdrop" class="modal-backdrop hidden"
+            aria-hidden="true"></div>
           <aside id="browse-sidepanel" class="browse-sidepanel" data-active="">
             <nav class="sidepanel-tabs" id="sidepanel-tabs">
               <button data-pane="patents" title="Patents" aria-label="Patents">🃏</button>
-              <button data-pane="info" title="Site info" aria-label="Site info">📍</button>
-              <button data-pane="rocket" title="Rocket stack" aria-label="Rocket stack">🛸</button>
-              <button data-pane="solo" title="Solo play" aria-label="Solo play">🚀</button>
-              <button data-pane="milestones" title="Milestones" aria-label="Milestones">🏆</button>
+              <button data-pane="solo" title="Solo play" aria-label="Solo play">🎮</button>
+              <button data-pane="milestones" title="Glory" aria-label="Glory">🏆</button>
+              <button data-pane="log" title="Mission log" aria-label="Mission log">📋</button>
               <button data-pane="events" title="Events" aria-label="Events">📜</button>
             </nav>
             <div class="sidepanel-content">
               <button class="sidepanel-close" id="sidepanel-close"
                 aria-label="Close panel" title="Close">×</button>
-              <div class="panel-pane" data-pane="info">
-                <h3>Site info</h3>
-                <div id="browse-map-info">
-                  <p class="muted">Tap any site on the map to see its details.</p>
-                </div>
-              </div>
-              <div class="panel-pane" data-pane="rocket">
-                <h3>Rocket stack</h3>
-                <div id="rocket-panel">
-                  <p class="muted">Add cards from your hand to build a rocket parked in LEO.</p>
-                </div>
-              </div>
               <div class="panel-pane" data-pane="solo">
                 <h3>Solo play</h3>
                 <div id="solo-panel">
@@ -299,6 +288,9 @@
               </div>
               <div class="panel-pane" data-pane="milestones">
                 <div id="browse-milestones"></div>
+              </div>
+              <div class="panel-pane" data-pane="log">
+                <div id="browse-log"></div>
               </div>
               <div class="panel-pane" data-pane="events">
                 <div id="browse-events"></div>
@@ -320,8 +312,8 @@
             <div class="hand-header">
               <span class="hand-title">✋ Hand</span>
               <button id="hand-stack-open" type="button"
-                title="Open the LEO rocket stack — zooms the map to LEO">
-                🚀 Stack
+                title="Open the LEO rocket stack - zooms the map to LEO">
+                🛸 Stack
               </button>
               <span class="hand-count" id="hand-count">0 cards</span>
               <button id="hand-boost-commit" type="button" disabled
@@ -330,7 +322,7 @@
               </button>
             </div>
             <div id="sandbox-hand-cards" class="hand-cards"
-              data-empty="Drag cards from the deck above — click a card in your hand to discard, exo-produce, or add to your LEO rocket">
+              data-empty="Drag cards from the deck above - click a card in your hand to discard, exo-produce, or add to your LEO rocket">
             </div>
           </div>
         </div>
@@ -357,6 +349,7 @@
     -->
     <div id="toasts" class="toasts" aria-live="polite"></div>
 
-    <script type="module" src="./js/main.js?v=2"></script>
+    <script src="./js/version-check.js?v=4"></script>
+    <script type="module" src="./js/main.js?v=4"></script>
   </body>
 </html>

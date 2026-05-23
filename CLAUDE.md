@@ -1,4 +1,4 @@
-# High Frontier Fan Game — agent notes
+# High Frontier Fan Game - agent notes
 
 Persistent project rules for future sessions. Read this first.
 
@@ -6,7 +6,7 @@ This is a fan implementation of **High Frontier 4: All** (Sierra Madre Games,
 designed by Phil Eklund). Pure educational / fan project, not for sale, not
 affiliated with the publisher.
 
-## Design language — CRITICAL
+## Design language - CRITICAL
 
 The audience for this implementation is people who already play HF4 at the
 table. **Every visual and interaction must feel like the published game.**
@@ -20,9 +20,9 @@ Concretely:
   family for stack requirements) must use the same shapes / colour
   language as the published cards. If a glyph means N on the
   table, it must mean N here.
-- Map idioms — flat-top hexagons over body halos, magenta burn
+- Map idioms - flat-top hexagons over body halos, magenta burn
   pads with rockets, orange Lagrange rings, green Hohmann dots,
-  Saturn ring tilt + Cassini gap, pulsing red hazards — exist
+  Saturn ring tilt + Cassini gap, pulsing red hazards - exist
   because the published board uses them. Don't invent
   replacements that "look better"; align with the board.
 - When you introduce a new affordance, ask: "would a tabletop
@@ -35,17 +35,26 @@ Concretely:
 - Variants & scenarios appendix:
   https://geekach.com.ua/content/files/varanti-ta-scenar-high-frontier-4-all-anglyskou-movou-62879102.pdf
 - BGG entry: https://boardgamegeek.com/boardgame/281837/high-frontier-4-all
+- **HF gazetteer (heliocentric zones, site classifications):**
+  https://www.iandrea.co.uk/sf/resources/hf/HFgazetteer.html
+  - canonical reference for which solar zone (Mercury / Venus /
+  Earth / Mars / Ceres / Jupiter / Saturn / etc.) each named
+  site sits in, plus apparition / synodic season tags. The
+  popup tags rendered in `js/game/render.js#_buildSitePopup`
+  (`<site> zone`, `<season> season`) read from
+  `data/sites.js`'s `solarZone` + `siteSynodic` fields, which
+  are sourced from this gazetteer.
 - Reference repo for architecture/login/deploy patterns:
   https://github.com/RubenTipparach/murdoku-companion
 
 ## Variants we target
 
-Scope is intentionally narrow — only two play modes ship in this
+Scope is intentionally narrow - only two play modes ship in this
 implementation right now:
 
-- **Standard** — the base multiplayer game described in the core
+- **Standard** - the base multiplayer game described in the core
   rulebook. Drives the lobby / multiplayer engine.
-- **CEO Solitaire** — the published one-player variant. Drives
+- **CEO Solitaire** - the published one-player variant. Drives
   the solo mode (`js/game/solo.js`); a single player runs one
   ship against a round clock with no AI opponent. Engine is
   original; only the structural concept (manage water, prospect,
@@ -54,20 +63,20 @@ implementation right now:
 Other variants (campaign, scenarios) are explicitly out of scope
 for now. Don't pull them in without a discussion first.
 
-## Card data — single source of truth
+## Card data - single source of truth
 
 **Card data MUST come from the spreadsheet.** The authoritative
 source is `reference/HF4-card-data.xlsx` (kept in sync with the
 shared Google Sheet). The importer
 `scripts/extract-card-data.py` emits `data/card-data.json`
 (for human audit) and `data/card-data.js` (for the browser).
-`data/patents.js` consumes only the `.js` bridge — do not
+`data/patents.js` consumes only the `.js` bridge - do not
 hand-author patent records in `patents.js` and do not embed
 literal stat tables in any other file.
 
 If a card concept (a new column, a new card type, a balance
 tweak) doesn't appear in the spreadsheet, it doesn't exist yet
-— either edit the spreadsheet and re-run the importer, or push
+- either edit the spreadsheet and re-run the importer, or push
 back on the request. Don't paper over missing sheet data with
 ad-hoc constants in JS.
 
@@ -78,13 +87,13 @@ Two structural rules that fall out of the sheet:
   the Tier-2 (dark-side) face of an existing card.
 - **The "dark side" is a real second technology.** Every
   card-row in the spreadsheet is followed by a second row
-  carrying a different name + different stats — that's the
+  carrying a different name + different stats - that's the
   Tier-2 tech the same physical card flips to. Render both
   faces; don't treat the back as a re-skin of the front.
 - **"Support Requirements" banner only.** Only the columns
   under that banner (the reactor/generator-type matrix) are
   stack supports. Other booleans like Push / Solar / Air Eater
-  / ISRU describe what a card IS / DOES — render them as
+  / ISRU describe what a card IS / DOES - render them as
   card-property badges, never as supports.
 
 ## Card model
@@ -93,30 +102,30 @@ Every card on the map / in a hand carries the same minimum set of
 fields so the renderer + engine don't need per-card-type branches
 for the common stats:
 
-- `id` — stable string key
-- `name` — display label
-- `type` — `thruster | reactor | radiator | refinery | robonaut |
+- `id` - stable string key
+- `name` - display label
+- `type` - `thruster | reactor | radiator | refinery | robonaut |
   generator | lab | crew | ...`
-- `mass` — wet mass added to the ship stack (integer units)
-- `radHardness` — rad-hardness rating (integer); cards with low
+- `mass` - wet mass added to the ship stack (integer units)
+- `radHardness` - rad-hardness rating (integer); cards with low
   values degrade faster near radiation hazards
-- `faces` — `{ primary, secondary }`. Every component card is
+- `faces` - `{ primary, secondary }`. Every component card is
   double-sided. By convention the **secondary face is the "black"
   / installed face**. Faces can carry their own stats so a
   flipped card behaves differently (e.g. a radiator opened vs
   stowed, or a thruster with a mode change).
-- `flipOrientation` — `'standard'` (default) or `'rotated180'`.
+- `flipOrientation` - `'standard'` (default) or `'rotated180'`.
   Radiators are typically `'rotated180'`: their secondary face is
   drawn upside-down, matching the published cards.
 
 Thruster-specific fields (carried on whichever face is active):
-- `thrust` — push capacity (rendered as the value inside the pink
+- `thrust` - push capacity (rendered as the value inside the pink
   thrust circle on the card). Triangle silhouette is fixed-size
   per the published convention; only the number inside the
   pink circle changes per card.
-- `isp` — burns per fuel unit. The card's fuel droplet shows
+- `isp` - burns per fuel unit. The card's fuel droplet shows
   `ceil(thrust / isp)`, the water cost of one burn.
-- `requires` — array of `{ kind, count }`. Stack constraints the
+- `requires` - array of `{ kind, count }`. Stack constraints the
   ship's other cards must collectively satisfy. The card UI
   renders the requirement icons in a row (with an ×N badge for
   count > 1). `data/patents.js` exports `REQUIREMENT_KINDS` as
@@ -138,7 +147,7 @@ Spectral type:
   refuelling / matching at sites.
 
 Crew cards: still double-sided, but the two faces are
-**functionally independent** — each face is its own crew member
+**functionally independent** - each face is its own crew member
 with their own role / skills, sharing only the physical card.
 Use `faces.primary` and `faces.secondary` as fully-formed crew
 records; nothing should treat the "back" of a crew card as a
@@ -149,7 +158,7 @@ another card's stats while attached. The engine handles this via
 a `modifier` block on the modifying card; see
 `server/game/engine.js` (Stage 3+) for how those compose.
 
-## Stages — build incrementally
+## Stages - build incrementally
 
 Verify each stage before starting the next. Don't conflate stages in a
 single PR.
@@ -197,7 +206,7 @@ Mirrors the murdoku-companion split:
 - **Deploy**: `.github/workflows/deploy.yml` runs on every push. Pages and
   Fly deploys are independent jobs; Fly job is gated on the canonical repo.
 
-## Two play modes — async and realtime
+## Two play modes - async and realtime
 
 The game supports both:
 
@@ -209,7 +218,7 @@ The game supports both:
   the other player's session.
 
 REST is the source of truth. WebSocket is a real-time relay on top of
-the same operation log — every WS-applied operation is also written to
+the same operation log - every WS-applied operation is also written to
 SQLite, and every REST operation is broadcast to any open WS clients.
 A player who walks away and comes back gets the same state by REST as
 if they'd been live the whole time.
@@ -227,31 +236,31 @@ if they'd been live the whole time.
 - **Chat**: per-lobby (open chat) and per-game (table chat). Messages
   persist in SQLite, broadcast over WS to subscribed clients.
 - **Invites**: two paths.
-  1. **Search by name** — type a profile name; if it exists you can
+  1. **Search by name** - type a profile name; if it exists you can
      invite them directly. Invite shows up in their /notifications
      feed and pings any open WS session.
-  2. **Invite link** — generate a 12-char share code (`/i/<code>`)
+  2. **Invite link** - generate a 12-char share code (`/i/<code>`)
      that anyone can paste into the game lobby to join the table.
      Links can be single-use or unlimited; host picks at create.
 
-## High Frontier — implementation scope
+## High Frontier - implementation scope
 
 We aim for **maximum coverage** of the HF4 core rules in `server/game/`
 and `js/game/`. Authoritative tables in `data/`:
 
-- `data/sites.js` — solar system map. Each site has `{id, name, body,
+- `data/sites.js` - solar system map. Each site has `{id, name, body,
   class, hydration, type, vps, dvFromLEO, isSurface}`. Class drives
   the prospect die roll; hydration tells the refinery how much water
   it makes per turn; `dvFromLEO` and adjacency edges feed the
   delta-v movement engine. Covers inner planets, Mars system, main
   belt (Ceres, Vesta, Pallas, Hygiea, Psyche, ~12 more), Jupiter
   Trojans, Galilean moons, Saturn system, KBOs.
-- `data/patents.js` — patent deck. Each patent is one of:
+- `data/patents.js` - patent deck. Each patent is one of:
   `thruster`, `reactor`, `radiator`, `refinery`, `robonaut`,
   `generator`, `lab`. Thrusters carry `{thrust, isp, mass}`. The
   deck is shuffled per game from a seeded RNG so replays match.
-- `data/glory.js` — glory cards (first-to-X awards).
-- `data/politics.js` — politics deck drawn at the end of each round.
+- `data/glory.js` - glory cards (first-to-X awards).
+- `data/politics.js` - politics deck drawn at the end of each round.
 
 Server-authoritative engine in `server/game/engine.js`:
 
@@ -277,6 +286,20 @@ Server-authoritative engine in `server/game/engine.js`:
 
 Random-numbered seeds are stored per game so replays are deterministic.
 
+## Style
+
+- **No em dashes (`-`).** Anywhere. Source code, comments,
+  commit messages, UI strings, docs. Use a period, a hyphen
+  with spaces (` - `), a colon, or parentheses depending on
+  what the sentence wants. Em dashes are a tic that betrays
+  AI-generated prose and the project explicitly disowns them.
+  When you find existing ones, replace them.
+- **Navigate-to is always the LAST button in a site popup.** It's
+  a pure inspection affordance (no game state changes), so any
+  real game actions (Plan rocket route, Prospect, Refuel, etc.)
+  must precede it. New site-popup buttons land before
+  Navigate-to, never after.
+
 ## Don'ts
 
 - Don't add a frontend build step. ES modules, plain CSS, plain HTML.
@@ -285,20 +308,20 @@ Random-numbered seeds are stored per game so replays are deterministic.
   current `state`. WS clients send operation intents; the server
   validates, persists, then broadcasts the resulting state diff.
 - Don't store raw tokens. Always `sha256(token)`.
-- Don't horizontally scale the API process — single-writer sqlite.
+- Don't horizontally scale the API process - single-writer sqlite.
 - Don't break the murdoku-style "every branch deploys" promise.
 - **Hexagons are independent entities.** When the user says "hex"
   or "hexagon" they mean the gameplay-token marker drawn for each
   site. Its size lives at `TYPE_VIS[type].r` (or the shared
   `HEX_R` constant in `js/game/render.js`) and is independent of
-  everything else — body sphere size (`haloR`), halo glow,
+  everything else - body sphere size (`haloR`), halo glow,
   asteroid silhouette, ring radius, edge width, label font size.
   Tuning the hex must never resize the bodies behind them, and
   vice versa. Same goes when the user mentions "halos" / "bodies"
-  / "rings" — those are their own knobs.
+  / "rings" - those are their own knobs.
 - **Every hexagon is the same size.** All `TYPE_VIS` entries with
   `kind: 'hex'` use the shared `HEX_R` constant for their `r`
-  field — planets, moons, dwarfs, asteroids, sites, surface sites,
+  field - planets, moons, dwarfs, asteroids, sites, surface sites,
   everything. Body class differentiation lives in `haloR` and the
   palette; the hex marker itself is uniform. Don't ship per-type
   hex sizes again.
@@ -344,7 +367,7 @@ Random-numbered seeds are stored per game so replays are deterministic.
 ```
 
 The `data/` directory is imported by both the frontend (ES modules) and
-the server (Node ESM). Keep it pure data — no DOM, no `node:` imports.
+the server (Node ESM). Keep it pure data - no DOM, no `node:` imports.
 
 ## Local dev
 

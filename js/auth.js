@@ -60,7 +60,7 @@ export async function restoreProfile() {
 
 // Either claim a brand new profile, or attach this device to an
 // existing profile via a device code. The device-code path uses the
-// provided code as the token directly — the server treats it as one
+// provided code as the token directly - the server treats it as one
 // of the profile's valid bearer credentials.
 //
 // Returns { ok, error?, profile? }.

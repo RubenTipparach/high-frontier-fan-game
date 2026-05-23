@@ -6,7 +6,7 @@
 // ~1500 nodes (sites + routing waypoints: lagrange, burn, hohmann
 // transfers, hazard zones) and ~1750 edges. The waypoint nodes are
 // what make the connections look like proper routes instead of a
-// crisscrossed knot — they're literally the intermediate stops along
+// crisscrossed knot - they're literally the intermediate stops along
 // each interplanetary corridor.
 //
 // Coordinates in the planner JSON are normalised 0..1 (proportions
@@ -18,6 +18,18 @@ const PLANNER_JSON_URL = './vendor/hf-mission-planner/assets/data-hf4.json';
 // aerobrake / atmospheric / push booleans per site so the renderer
 // can decorate planner nodes with the right glyphs.
 const SITE_FLAGS_URL  = './data/site-flags.json';
+
+// Hand-curated table from data/sites.js. We name-match planner
+// nodes against it to surface solarZone (the heliocentric band
+// the site sits in) and a siteSynodic fallback. The planner JSON
+// itself carries siteSynodic on 15 sites; sites.js fills in any
+// stragglers (and provides solarZone, which the planner data
+// doesn't have at all).
+import { SITES as LOCAL_SITES } from '../../data/sites.js';
+const LOCAL_SITE_BY_NAME = new Map();
+for (const s of LOCAL_SITES) {
+  if (s && s.name) LOCAL_SITE_BY_NAME.set(normalizeSiteName(s.name), s);
+}
 
 let _cache = null;
 
@@ -44,11 +56,15 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
     if (fr.ok) siteFlags = await fr.json();
   } catch { /* ignore */ }
 
+  // (waypoint-seasons.json fetch removed - see the comment in
+  // the per-point loop below for why the corridor propagation
+  // was disabled.)
+
   // Points -> sites array. The planner uses random-float string IDs;
   // we keep them as-is (they're stable across reloads of the same
   // data file) and add a human-readable name for display.
   //
-  // Every type is included — decorative nodes are routing waypoints
+  // Every type is included - decorative nodes are routing waypoints
   // with no name, but they connect ~half the planner's edges, so
   // dropping them tears holes in the graph. We render them as tiny
   // faint dots and exclude them from click hit-testing so they
@@ -62,17 +78,45 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
     // body group key so "Mars: Arsia Mons" can inherit any flags
     // recorded against the Mars group.
     const flags = lookupFlags(p.siteName, siteFlags);
+    // Waypoint season propagation is disabled - the corridor
+    // boundaries the BFS produced didn't match the published
+    // board's seasonal painting on enough cards that the colours
+    // ended up misleading. Only the canonical site-level
+    // siteSynodic (comets + flagged seasonal asteroids like
+    // Icarus / Phaethon / …) is kept. The extractor + data file
+    // remain in the tree (scripts/extract-waypoint-seasons.py,
+    // data/waypoint-seasons.json) so we can revisit with a
+    // better heuristic later - just don't apply it here.
+    const isWaypoint = rawType !== 'site';
+    // Cross-reference the local hand-curated table by name to pull
+    // solarZone (heliocentric band) + a siteSynodic fallback for
+    // any seasonal sites the planner JSON missed. Waypoints carry
+    // no name → never match → both stay null.
+    const local = LOCAL_SITE_BY_NAME.get(normalizeSiteName(p.siteName)) || null;
+    const synodic = p.siteSynodic || (local && local.siteSynodic) || null;
+    const solarZone = local ? (local.solarZone || null) : null;
+    // id2 - a human-friendly stable reference for every location,
+    // derived once at load time. Real sites: slug of their name
+    // ("comet-borrelly", "dresda"). Waypoints: type prefix + a
+    // short hash of their (x, y) so unnamed lagranges/burns get
+    // unique tags like "lag-3a2b9". Collisions are disambiguated
+    // with a trailing counter further down. The upstream `id`
+    // (random float key from the vendor JSON) stays as the
+    // canonical lookup key so byId / edge data still works.
+    const id2 = makeRefId(p, rawType);
     sites.push({
       id,
+      id2,
       name: p.siteName || routingLabel(rawType),
       type,
-      isWaypoint: rawType !== 'site',
+      isWaypoint,
       isDecorative: rawType === 'decorative',
       siteSize: p.siteSize || null,
-      siteSynodic: p.siteSynodic || null,
+      siteSynodic: synodic,
+      solarZone,
       hydration: parseHydration(p.siteWater),
       hazard: !!p.hazard,
-      // Comets are always landing sites in HF4 — you touch down
+      // Comets are always landing sites in HF4 - you touch down
       // on the nucleus to harvest water. The planner JSON doesn't
       // flag them, so default landing=1 for any classified comet.
       landing: typeof p.landing === 'number' ? p.landing
@@ -90,14 +134,30 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
 
   // Edges are strings "from:to"; keep them all now that decoratives
   // are back in the graph.
+  // Edges come back as flat [a, b] tuples for the renderer; we also
+  // build (a) the raw directional edgeLabels map (preserved AS-IS;
+  // these are direction tags like '0' / '1' / '2', NOT burn costs,
+  // and the planner ported in planner-nav.js needs them to handle
+  // Hohmann pivots correctly) and (b) a neighbours adjacency map.
   const edges = [];
+  const neighbors = new Map();
+  const addNbr = (a, b) => {
+    if (!neighbors.has(a)) neighbors.set(a, new Set());
+    neighbors.get(a).add(b);
+  };
   for (const eStr of raw.edges || []) {
     const [a, b] = eStr.split(':');
     if (!a || !b) continue;
-    const dvA = raw.edgeLabels?.[a]?.[b];
-    const dvB = raw.edgeLabels?.[b]?.[a];
-    const dv = Number(dvA ?? dvB ?? 1) || 1;
-    edges.push([a, b, dv]);
+    edges.push([a, b]);
+    addNbr(a, b);
+    addNbr(b, a);
+  }
+  const edgeLabels = {};
+  for (const a in (raw.edgeLabels || {})) {
+    const row = raw.edgeLabels[a];
+    if (!row || typeof row !== 'object') continue;
+    edgeLabels[a] = {};
+    for (const b in row) edgeLabels[a][b] = String(row[b]);
   }
 
   // Synthetic bodies the planner doesn't carry: the Sun (anchors
@@ -107,6 +167,12 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
   // centroid). Positions are normalized 0..1 and chosen to fit our
   // viewport's layout.
   synthesizeBodies(sites, viewW, viewH);
+
+  // Disambiguate any id2 collisions (rare - only happens if two
+  // unnamed waypoints sit at coords that hash to the same bucket,
+  // or two real sites have the same slugged name). Append a
+  // numeric suffix in iteration order so the result stays stable.
+  disambiguateRefIds(sites);
 
   // Each site picks up a bodyKey so the renderer can group
   // multi-site bodies (Mars, Luna, Mercury) into one shared halo.
@@ -121,8 +187,69 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
   // full straight-segment graph for shortest-path math.
   const { chains, straightEdges } = buildChains(sites, edges, byId);
 
-  _cache = { sites, edges, byId, chains, straightEdges, mode: 'classic' };
+  _cache = {
+    sites, edges, byId, chains, straightEdges,
+    edgeLabels,   // raw direction labels for Hohmann pivots
+    neighbors,    // Map<id, Set<id>> for the ported planner
+    mode: 'classic',
+  };
   return _cache;
+}
+
+// id2 generator: a copy-friendly stable reference for one location.
+// Real sites collapse to a slug of their name ("comet-borrelly").
+// Waypoints get `<typePrefix>-<5-char position hash>` so the LEO
+// lagrange reads as "lag-leo" (named) and an unnamed mid-Trojan
+// burn reads as "burn-3a2b9". Identical position + type always
+// hashes to the same id, so the reference is stable across loads.
+const TYPE_PREFIX = {
+  site: 'site', lagrange: 'lag', burn: 'burn', hohmann: 'hoh',
+  decorative: 'dec', radhaz: 'rad', venus: 'venus', unknown: 'wp',
+};
+function makeRefId(p, rawType) {
+  if (p.siteName) {
+    const slug = slugify(p.siteName);
+    if (slug) {
+      // Named waypoints (LEO) still get a type prefix so they read
+      // distinct from a same-named real site if one ever appears.
+      if (rawType !== 'site') {
+        return `${TYPE_PREFIX[rawType] || 'wp'}-${slug}`;
+      }
+      return slug;
+    }
+  }
+  const prefix = TYPE_PREFIX[rawType] || 'wp';
+  // Hash from the position coords so two waypoints can't collide
+  // unless they're at the exact same x/y - which never happens in
+  // practice in the planner data.
+  const posKey = `${(p.x || 0).toFixed(6)},${(p.y || 0).toFixed(6)}`;
+  return `${prefix}-${shortHash5(posKey)}`;
+}
+
+function slugify(name) {
+  return String(name).toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+// djb2 → base36, 5 chars. Plenty of buckets (60M) for ~1500
+// waypoints; collisions are caught and disambiguated below.
+function shortHash5(s) {
+  let h = 5381 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  }
+  return h.toString(36).padStart(5, '0').slice(-5);
+}
+
+function disambiguateRefIds(sites) {
+  const seen = new Map();           // id2 -> count
+  for (const s of sites) {
+    if (!s.id2) continue;
+    const n = (seen.get(s.id2) || 0) + 1;
+    seen.set(s.id2, n);
+    if (n > 1) s.id2 = `${s.id2}-${n}`;
+  }
 }
 
 // Walk the adjacency graph and pull out every chain of degree-2

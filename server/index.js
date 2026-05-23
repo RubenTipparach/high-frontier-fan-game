@@ -372,7 +372,7 @@ app.post('/lobbies/:id/leave', requireProfile, (req, res) => {
     .run(id, req.profile.id);
   // If the host leaves while waiting, disband the lobby (and rely on
   // ON DELETE CASCADE to clean up members, chat, and invites). Once a
-  // game has started, leaving is just "go AFK" — host can't disband.
+  // game has started, leaving is just "go AFK" - host can't disband.
   if (lobby.host_id === req.profile.id && lobby.status === 'waiting') {
     db.prepare('DELETE FROM lobbies WHERE id = ?').run(id);
     broadcast(`lobby:${id}`, { type: 'lobby_disbanded', lobbyId: id });
@@ -395,7 +395,7 @@ app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
 });
 
 // Host-only. Flips status to 'started'. Stage 1 doesn't ship a game
-// engine yet, so for now this just toggles the flag — the client side
+// engine yet, so for now this just toggles the flag - the client side
 // renders a "Coming in Stage 2" splash. Stage 3 will wire this up to
 // engine.newGame(lobby).
 app.post('/lobbies/:id/start', requireProfile, (req, res) => {
@@ -790,7 +790,7 @@ setInterval(() => {
 // inline styles, no client framework, and one JS-powered admin
 // action (mint a new device code for a profile).
 //
-// The dashboard is intentionally unauthenticated — the operator's
+// The dashboard is intentionally unauthenticated - the operator's
 // only protection is "the URL isn't linked from anywhere users
 // see". Gate behind a reverse-proxy basic auth or an admin secret
 // before exposing to a hostile audience.
@@ -934,7 +934,7 @@ app.get('/admin', (_req, res) => {
     <tr>
       <td><code>${esc(r.code)}</code></td>
       <td>${esc(r.created)}</td>
-      <td>${esc(r.expires) || '—'}</td>
+      <td>${esc(r.expires) || '-'}</td>
       <td>${r.single_use ? 'single-use' : 'unlimited'}</td>
       <td class="num">${r.used_count}</td>
       <td>@${esc(r.by_name)}</td>
@@ -1044,7 +1044,7 @@ app.get('/admin', (_req, res) => {
   </table>
 
 <script>
-// "Issue device code" — mints a fresh recovery code for the
+// "Issue device code" - mints a fresh recovery code for the
 // profile and replaces the button cell with the one-shot code so
 // the operator can copy + send it out-of-band.
 document.addEventListener('click', function (ev) {
@@ -1095,7 +1095,7 @@ document.addEventListener('click', function (ev) {
 
 // Mint a fresh device code for a profile and ADD it to the tokens
 // table. The user's existing devices keep working; this just adds
-// another credential. Returns the plaintext once — only chance to
+// another credential. Returns the plaintext once - only chance to
 // see it before it's hashed for storage.
 //
 // Anonymous endpoint to match the open-dashboard posture. Gate

@@ -54,6 +54,46 @@
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
 }
+/* Turn controls live on the LEFT of the toolbar (before search
+   + route) so an open side panel - which covers the right edge -
+   never hides them. Previous "padding-right when panel open"
+   fix moved the toolbar's RIGHT-aligned items into the padding
+   area which is covered by the panel; the buttons rendered into
+   the dead zone and disappeared from view. */
+.map-turn-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.map-turn-controls button {
+  font-size: 12px;
+  padding: 4px 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.map-turn-controls #turn-end {
+  background: linear-gradient(180deg, #f97316, #c2410c);
+  color: #2e0f02;
+  font-weight: 700;
+  border-color: #9a3412;
+}
+/* Move button in its "undo" state - a move has been queued this
+   turn and can still be taken back. Yellow distinguishes it from
+   the neutral default so the player notices the toggle. */
+.map-turn-controls #turn-move-rocket[data-state="undo"] {
+  background: linear-gradient(180deg, #facc15, #ca8a04);
+  color: #1f1502;
+  font-weight: 700;
+  border-color: #854d0e;
+}
+.map-turn-controls button:hover:not(:disabled) {
+  background: var(--accent);
+  color: #062136;
+  border-color: var(--accent-2);
+}
 .map-mode-toggle {
   display: inline-flex;
   background: var(--bg-2);
@@ -159,6 +199,717 @@
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 1px;
+}
+
+/* Search toggle button - opens the search modal on mobile.
+   Desktop hides the toggle (the inline search is always present
+   in the toolbar); mobile hides the inline search and shows the
+   toggle instead. The toggle styling mirrors the other small
+   toolbar icon buttons (🔧 / ⛶ in .map-route). */
+.map-search-toggle {
+  display: none;
+  font-size: 14px;
+  padding: 4px 9px;
+  line-height: 1;
+}
+.map-search-close {
+  display: none;
+}
+.map-search-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  z-index: 29;
+}
+.map-search-backdrop.hidden { display: none; }
+@media (min-width: 721px) {
+  /* Desktop: the inline search stays in the toolbar; the modal
+     chrome (toggle button, close button, backdrop) is irrelevant. */
+  .map-search-backdrop { display: none !important; }
+}
+@media (max-width: 720px) {
+  /* Mobile: hide the inline search in the toolbar by default.
+     Tapping the 🔍 toolbar button promotes it to a fixed-position
+     modal anchored just below the toolbar. */
+  .map-toolbar .map-search {
+    display: none;
+  }
+  .map-toolbar .map-search.is-open {
+    display: flex;
+    position: fixed;
+    top: 60px;
+    left: 16px;
+    right: 16px;
+    z-index: 30;
+    padding: 12px 12px 14px;
+    background: rgba(15, 16, 35, 0.97);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6);
+    gap: 6px;
+  }
+  .map-toolbar .map-search.is-open input {
+    font-size: 14px;
+    padding: 8px 10px;
+  }
+  .map-toolbar .map-search.is-open #map-search-go {
+    font-size: 16px;
+    padding: 6px 10px;
+  }
+  .map-toolbar .map-search.is-open .map-search-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    font-size: 20px;
+    line-height: 1;
+    padding: 0;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--ink);
+  }
+  .map-toolbar .map-search.is-open ul {
+    /* Anchor the suggestions list inside the modal - the modal
+       itself is the offset parent now. */
+    left: 12px;
+    right: 12px;
+    top: calc(100% + 6px);
+  }
+  .map-search-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+/* Turn-clock confirm dialog + tracker modal + 3D die. State
+   model lives in js/game/turn-clock.js; this block is the visual
+   layer. Toolbar button styles for the turn controls live on the
+   .map-turn-controls block higher up. */
+.turn-confirm-overlay { z-index: 80; }
+.turn-confirm-panel {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 22px 24px;
+  width: min(360px, 90vw);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);
+}
+.turn-confirm-panel h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+  color: var(--accent);
+}
+.turn-confirm-stats {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 16px;
+}
+.turn-confirm-stats li {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: 13px;
+}
+.turn-confirm-stats li:last-child { border-bottom: none; }
+.turn-confirm-stats span { color: var(--ink-dim); }
+.turn-confirm-stats strong {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.turn-confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* Turn tracker modal - Sol Sunspot wheel */
+.turn-clock-overlay { z-index: 60; }
+.event-legend-overlay { z-index: 90; }
+/* Fuel-tank modal: SVG cylinder with rising water level. */
+.fuel-tank-overlay { z-index: 75; }
+.fuel-tank-panel {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px 24px 18px;
+  width: min(360px, 92vw);
+  text-align: center;
+  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+}
+.fuel-tank-title { margin: 0 0 4px; font-size: 16px; color: var(--accent); }
+.fuel-tank-sub   { margin: 0 0 12px; font-size: 11px; }
+.fuel-tank-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  margin: 4px 0 8px;
+}
+.fuel-tank-svg { width: 130px; height: 240px; }
+.tank-shell {
+  fill: rgba(15, 23, 42, 0.55);
+  stroke: rgba(125, 211, 252, 0.65);
+  stroke-width: 2.5;
+}
+.tank-water {
+  fill: #38bdf8;
+  fill-opacity: 0.85;
+  transition: none; /* JS rAF drives it - CSS transition would
+                      fight the per-frame attribute set */
+}
+.tank-water-foam {
+  fill: rgba(125, 211, 252, 0.55);
+}
+.fuel-tank-readout {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  font-variant-numeric: tabular-nums;
+}
+.fuel-tank-readout strong.tank-now {
+  font-size: 38px;
+  line-height: 1;
+  color: #7dd3fc;
+}
+.fuel-tank-readout span {
+  font-size: 18px;
+  color: var(--ink-dim);
+  margin: 4px 0;
+}
+.fuel-tank-readout strong.tank-cap {
+  font-size: 22px;
+  color: var(--ink);
+}
+.fuel-tank-readout em {
+  font-style: normal;
+  font-size: 11px;
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+/* Rocket-stack totals: thrust triangle headliner on the left,
+   stat cells grid on the right. */
+.rocket-totals {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+.rocket-totals-headliner {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 140px;
+  padding: 6px;
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(125, 211, 252, 0.35);
+  border-radius: 8px;
+}
+.rocket-totals-headliner .thrust-visual {
+  width: 100%;
+}
+.rocket-totals-grid {
+  flex: 1 1 320px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px;
+}
+.rocket-totals-grid .rocket-totals-cell {
+  min-height: 56px;
+}
+.rocket-water-readout {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+.rocket-water-readout b { color: #7dd3fc; font-size: 13px; }
+.rocket-water-readout em { font-style: normal; color: var(--ink-mute); }
+.rocket-afterburn-cell {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+}
+.rocket-afterburn-btn {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #9a3412;
+  background: rgba(249, 115, 22, 0.15);
+  color: #fb923c;
+  cursor: pointer;
+}
+.rocket-afterburn-btn.is-engaged {
+  background: linear-gradient(180deg, #f97316, #c2410c);
+  color: #fff7ed;
+  font-weight: 700;
+}
+
+/* Interactive fuel strip diagram (the published Net Thrust
+   track). 32 coloured cells with chit overlays for the current
+   dry-mass and wet-mass positions. Cells are hoverable for the
+   weight-class modifier they apply. Read-only for now. */
+.rocket-fuel-strip {
+  margin: 12px 0 0;
+}
+.rocket-fuel-strip-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--ink-dim);
+  margin-bottom: 4px;
+}
+.rocket-fuel-strip-row {
+  display: grid;
+  grid-template-columns: repeat(32, 1fr);
+  gap: 1px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.fuel-strip-cell {
+  position: relative;
+  font-size: 9px;
+  text-align: center;
+  padding: 6px 0;
+  color: #0c0a16;
+  font-weight: 700;
+}
+.fuel-strip-cell.is-dry-chit::before,
+.fuel-strip-cell.is-wet-chit::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid #0c0a16;
+}
+.fuel-strip-cell.is-dry-chit::before {
+  top: 1px;
+  background: #94a3b8;
+}
+.fuel-strip-cell.is-wet-chit::after {
+  bottom: 1px;
+  background: #facc15;
+}
+.fuel-strip-cell.is-co-chit {
+  outline: 2px solid #facc15;
+  outline-offset: -1px;
+}
+.rocket-fuel-strip-legend {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+.rocket-fuel-strip-legend i.chit-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid #0c0a16;
+  vertical-align: -1px;
+  margin-right: 4px;
+}
+.rocket-fuel-strip-legend .is-dry-chit { background: #94a3b8; }
+.rocket-fuel-strip-legend .is-wet-chit { background: #facc15; }
+
+.fuel-tank-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin: 10px 0 4px;
+}
+.fuel-tank-actions .popup-btn {
+  font-size: 12px;
+  padding: 6px 10px;
+}
+.fuel-tank-dump-note {
+  font-size: 10px;
+  margin: 0 0 4px;
+  text-align: center;
+  line-height: 1.45;
+}
+.fuel-tank-foot {
+  margin: 8px 0 0;
+  font-size: 11px;
+}
+.rocket-wetmass-cell { cursor: pointer; }
+.rocket-wetmass-cell:hover {
+  background: rgba(125, 211, 252, 0.08);
+  border-radius: 4px;
+}
+/* Prospect roll modal. Shows the 3D die rolling against the
+   site's prospect target. Stays mid-stack so the turn-confirm
+   dialog (z80) can still cover it if needed. */
+.prospect-roll-overlay { z-index: 70; }
+.prospect-roll-panel {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px 24px 22px;
+  width: min(420px, 92vw);
+  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.55);
+  text-align: center;
+}
+.prospect-roll-title { margin: 0 0 4px; font-size: 16px; color: var(--accent); }
+.prospect-roll-sub   { margin: 0 0 14px; font-size: 12px; }
+.prospect-roll-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  margin: 12px 0 16px;
+}
+.prospect-die-host { width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; }
+.prospect-roll-vs { font-size: 22px; color: var(--ink-dim); font-weight: 700; }
+.prospect-target {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 14px;
+  background: rgba(250, 204, 21, 0.08);
+  border: 1px solid rgba(250, 204, 21, 0.35);
+  border-radius: 10px;
+  min-width: 72px;
+}
+.prospect-target strong { font-size: 32px; color: #fde047; line-height: 1; }
+.prospect-target em {
+  display: block;
+  font-style: normal;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-top: 4px;
+  color: var(--ink-dim);
+}
+.prospect-roll-result { margin: 8px 0 12px; font-size: 13px; min-height: 18px; }
+.prospect-roll-result .ok  { color: #4ade80; }
+.prospect-roll-result .bad { color: #ef4444; }
+.prospect-roll-actions { display: flex; justify-content: center; }
+/* Die-tint overlay after the roll settles - the player sees the
+   pass/fail at a glance, then taps Place to drop the disc. */
+.die-3d.die-success { filter: drop-shadow(0 0 8px #4ade80); }
+.die-3d.die-fail    { filter: drop-shadow(0 0 8px #ef4444); }
+.event-legend-panel {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px 24px;
+  width: min(520px, 94vw);
+  max-height: 86vh;
+  overflow-y: auto;
+  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.6);
+}
+.event-legend-title {
+  margin: 0 0 4px;
+  font-size: 17px;
+  color: var(--accent);
+}
+.event-legend-sub {
+  margin: 0 0 14px;
+  font-size: 12px;
+}
+.event-legend-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ev-legend-row {
+  display: flex;
+  gap: 12px;
+  padding: 10px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+}
+.ev-legend-pip {
+  flex: 0 0 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(250, 204, 21, 0.08);
+  border: 1px solid rgba(250, 204, 21, 0.35);
+  border-radius: 8px;
+  padding: 6px 4px;
+  line-height: 1;
+  color: #fde047;
+}
+.ev-legend-glyphs {
+  display: inline-flex;
+  gap: 2px;
+  font-size: 24px;
+  line-height: 1;
+}
+.ev-legend-pip em {
+  display: block;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--ink-dim);
+  margin-top: 4px;
+  font-weight: 700;
+}
+.ev-legend-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.ev-legend-body > p {
+  margin: 0;
+}
+.ev-legend-body strong { color: var(--ink); font-size: 13px; }
+.ev-legend-seasons {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ev-legend-seasons li {
+  padding: 6px 8px;
+  background: rgba(15, 23, 42, 0.5);
+  border-left: 3px solid rgba(148, 163, 184, 0.35);
+  border-radius: 4px;
+}
+.ev-legend-seasons p {
+  margin: 4px 0 0;
+  color: var(--ink-dim);
+}
+.ev-legend-season {
+  display: inline-block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-weight: 700;
+  color: #0c0a16;
+  margin-bottom: 4px;
+}
+.ev-legend-season.ev-season-blue   { background: #60a5fa; }
+.ev-legend-season.ev-season-yellow { background: #facc15; }
+.ev-legend-season.ev-season-red    { background: #f87171; }
+/* Hint that the die in the turn-tracker is interactive. */
+.turn-clock-die-host .die-3d {
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+.turn-clock-die-host .die-3d:hover {
+  transform: scale(1.06);
+}
+.turn-clock-panel {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px 24px;
+  width: min(420px, 92vw);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);
+}
+.turn-clock-title {
+  margin: 0 0 4px;
+  font-size: 18px;
+  letter-spacing: 0.5px;
+}
+.turn-clock-sub {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+.turn-clock-sub strong { color: var(--ink); }
+.turn-clock-season { font-weight: 700; }
+.turn-clock-wheel-host {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 10px 0 6px;
+}
+.turn-wheel {
+  width: 100%;
+  max-width: 320px;
+  height: auto;
+}
+.turn-clock-die-host {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+.turn-clock-event-line {
+  margin: 8px 0 0;
+  text-align: center;
+  font-size: 13px;
+}
+.turn-clock-event-line .big {
+  font-size: 18px;
+  color: #fbbf24;
+}
+/* Verbatim HF4 event card surfaced in the turn-tracker modal. The
+   header shows the icon + name + (optional) season tag; the body
+   is the rulebook text reproduced verbatim. Season chips inherit
+   the wheel's blue/yellow/red palette so the player can see at a
+   glance which seasonal branch of the d6 fired. */
+.turn-clock-event-card {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 8px;
+  text-align: left;
+}
+.turn-clock-event-card header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.turn-clock-event-card .ev-icon { font-size: 18px; }
+.turn-clock-event-card strong { color: var(--ink); font-size: 14px; flex: 1; }
+.turn-clock-event-card .ev-season {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-style: normal;
+  font-weight: 700;
+  color: #0c0a16;
+}
+.turn-clock-event-card .ev-season-blue   { background: #60a5fa; }
+.turn-clock-event-card .ev-season-yellow { background: #facc15; }
+.turn-clock-event-card .ev-season-red    { background: #f87171; }
+.turn-clock-event-card .ev-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-dim);
+}
+/* Sandbox-mode note under each event - sets expectations that the
+   effect is shown but NOT auto-applied. Stage 3+ replaces this
+   with the actual application. */
+.turn-clock-event-card .ev-sandbox-note {
+  margin: 8px 0 0;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(148, 163, 184, 0.25);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-mute);
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.turn-clock-event-card .ev-sandbox-badge {
+  background: rgba(148, 163, 184, 0.18);
+  color: var(--ink-dim);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 700;
+}
+
+/* 3D die. Cube w/ 6 faces; .die-cube transforms to face the
+   value via data-value. Rolling state tumbles for 700ms before
+   landing on the value. Each face is a 3x3 grid of pip slots;
+   pip divs render as circular dots in the canonical d6 layout
+   (see FACE_PIPS in turn-clock-ui.js). 44 px is the standard
+   die size across the app - the prospect-roll modal and the
+   turn-tracker modal both render at this scale. */
+.die-3d {
+  width: 44px;
+  height: 44px;
+  perspective: 200px;
+}
+.die-cube {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform 0.35s cubic-bezier(0.4, 1.4, 0.55, 1);
+}
+.die-3d .face {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows:    repeat(3, 1fr);
+  padding: 14%;
+  gap: 0;
+  background: linear-gradient(160deg, #fafafa, #cbd5e1);
+  border: 1px solid #475569;
+  border-radius: 7px;
+  box-shadow: inset 0 -1px 2px rgba(0, 0, 0, 0.12);
+}
+.die-3d .face .pip {
+  display: block;
+  width: 70%;
+  height: 70%;
+  margin: auto;
+  background: radial-gradient(circle at 35% 30%, #1f2937, #0c0a16 70%);
+  border-radius: 50%;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.25);
+}
+/* Position each pip on the 3x3 grid via its canonical index
+   (top-left=1, centre=5, bottom-right=9). */
+.die-3d .face .pip-1 { grid-column: 1; grid-row: 1; }
+.die-3d .face .pip-2 { grid-column: 2; grid-row: 1; }
+.die-3d .face .pip-3 { grid-column: 3; grid-row: 1; }
+.die-3d .face .pip-4 { grid-column: 1; grid-row: 2; }
+.die-3d .face .pip-5 { grid-column: 2; grid-row: 2; }
+.die-3d .face .pip-6 { grid-column: 3; grid-row: 2; }
+.die-3d .face .pip-7 { grid-column: 1; grid-row: 3; }
+.die-3d .face .pip-8 { grid-column: 2; grid-row: 3; }
+.die-3d .face .pip-9 { grid-column: 3; grid-row: 3; }
+.die-3d .face.f1 { transform: translateZ(22px); }
+.die-3d .face.f6 { transform: rotateY(180deg) translateZ(22px); }
+.die-3d .face.f3 { transform: rotateY( 90deg) translateZ(22px); }
+.die-3d .face.f4 { transform: rotateY(-90deg) translateZ(22px); }
+.die-3d .face.f5 { transform: rotateX( 90deg) translateZ(22px); }
+.die-3d .face.f2 { transform: rotateX(-90deg) translateZ(22px); }
+.die-3d[data-value="1"] .die-cube { transform: rotateX(  0deg) rotateY(  0deg); }
+.die-3d[data-value="6"] .die-cube { transform: rotateX(  0deg) rotateY(180deg); }
+.die-3d[data-value="3"] .die-cube { transform: rotateX(  0deg) rotateY(-90deg); }
+.die-3d[data-value="4"] .die-cube { transform: rotateX(  0deg) rotateY( 90deg); }
+.die-3d[data-value="5"] .die-cube { transform: rotateX(-90deg) rotateY(  0deg); }
+.die-3d[data-value="2"] .die-cube { transform: rotateX( 90deg) rotateY(  0deg); }
+.die-3d.rolling .die-cube {
+  animation: die-tumble 0.7s ease-out;
+}
+@keyframes die-tumble {
+  0%   { transform: rotateX(  0deg) rotateY(  0deg); }
+  25%  { transform: rotateX(180deg) rotateY( 90deg); }
+  50%  { transform: rotateX(360deg) rotateY(180deg); }
+  75%  { transform: rotateX(540deg) rotateY(270deg); }
+  100% { transform: rotateX(720deg) rotateY(360deg); }
 }
 
 /* Debug panel: floats over the lower-left corner of the map host.
@@ -324,6 +1075,321 @@
   line-height: 1.4;
 }
 
+/* Tap popup: persistent variant of the tooltip that anchors to a
+   selected site and accepts pointer events ONLY on its action
+   buttons + close X. The body itself is pointer-events:none so a
+   tap on the popup's name / meta / id passes through to the canvas
+   underneath - otherwise the floating popup absorbs taps on sites
+   that happen to sit behind it, and the player gets stuck unable
+   to re-select. Renderer keeps `left/top` in sync each frame; we
+   anchor "above and centred" via transform so the popup floats
+   just over the hex. */
+.map-popup {
+  position: absolute;
+  /* Sit clearly above the anchor hex with enough breathing room
+     that the selection ring + hex glyphs aren't tucked under the
+     popup. Bump this if the popup ever feels crowded on the node. */
+  transform: translate(-50%, calc(-100% - 40px));
+  background: rgba(15, 23, 42, 0.97);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 10px 28px 10px 12px;
+  min-width: 180px;
+  max-width: 280px;
+  z-index: 6;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+}
+.map-popup .popup-actions,
+.map-popup .popup-actions .popup-btn,
+.map-popup .popup-close {
+  pointer-events: auto;
+}
+.map-popup.hidden { display: none; }
+.map-popup .t-name {
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+.map-popup .t-meta {
+  font-size: 11px;
+  color: var(--ink-mute);
+  margin-bottom: 8px;
+  text-transform: lowercase;
+}
+.map-popup .t-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  color: var(--ink-dim);
+  margin-bottom: 8px;
+  word-break: break-all;
+  user-select: all;
+  -webkit-user-select: all;
+}
+/* Site ISRU readout: the gating number for both prospecting and
+   refining. Matches the card-prop-isru chip's cyan styling so the
+   player reads "this number is the same idiom as the rig number
+   on cards". */
+.map-popup .t-isru {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  margin: 0 0 8px;
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.55);
+  border-radius: 5px;
+  font-size: 11px;
+  cursor: help;
+  width: fit-content;
+  max-width: 100%;
+}
+.map-popup .t-isru strong {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #7dd3fc;
+}
+.map-popup .t-isru b {
+  font-size: 14px;
+  font-weight: 800;
+  color: #e0f2fe;
+}
+.map-popup .t-isru em {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--ink-mute);
+}
+/* Modified-thrust visual inside the rocket-sprite hover tooltip
+   + the rocket-stack totals cell. The thrust SVG natively scales
+   to width: 100%; cap the host so the triangle stays a sane
+   chip size in either context. */
+.map-tooltip .t-rocket-thrust {
+  width: 96px;
+  margin: 6px auto 0;
+  color: #fde047;
+}
+.rocket-thrust-visual {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 90px;
+  padding: 0;
+  color: #fde047;
+}
+.rocket-thrust-visual .thrust-visual {
+  width: 90px;
+}
+.rocket-thrust-visual .lbl { display: none; }
+.map-popup .t-isru.is-pass {
+  border-color: rgba(74, 222, 128, 0.7);
+  background: rgba(74, 222, 128, 0.12);
+}
+.map-popup .t-isru.is-pass em { color: #4ade80; }
+.map-popup .t-isru.is-fail {
+  border-color: rgba(239, 68, 68, 0.7);
+  background: rgba(239, 68, 68, 0.12);
+}
+.map-popup .t-isru.is-fail em { color: #ef4444; }
+.map-popup .t-isru.is-unknown {
+  opacity: 0.7;
+}
+/* Tag chips below the meta row. Season chip uses the synodic
+   palette (matching the comet outlines on the map) so the player
+   reads "you need the blue apparition for this site" without
+   needing a legend. Zone chip is neutral grey - it's reference
+   info (which heliocentric band drives solar modifiers), not a
+   gating constraint. */
+.map-popup .t-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.map-popup .t-tag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+}
+.map-popup .t-tag-season-red    { background: rgba(248, 113, 113, 0.22); border-color: #f87171; color: #fecaca; }
+.map-popup .t-tag-season-yellow { background: rgba(250, 204, 21, 0.22);  border-color: #facc15; color: #fde68a; }
+.map-popup .t-tag-season-blue   { background: rgba(96, 165, 250, 0.22);  border-color: #60a5fa; color: #bfdbfe; }
+.map-popup .t-tag-zone {
+  background: rgba(148, 163, 184, 0.18);
+  border-color: rgba(148, 163, 184, 0.6);
+  color: var(--ink-dim);
+}
+.map-popup .popup-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+/* Composite action: main button + small trailing button on the
+   same line (used for "Plan rocket route" + the ⚙ gear). The
+   main button stretches; the gear takes its intrinsic square.
+   Specificity has to beat the generic .map-popup .popup-btn
+   rule below which sets width: 100% on every button - hence
+   the doubled-up .popup-action-pair selector on each rule. */
+.map-popup .popup-action-pair {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+.map-popup .popup-action-pair .popup-btn.pair-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+}
+.map-popup .popup-action-pair .popup-btn.pair-trailing {
+  flex: 0 0 auto;
+  width: 40px;
+  min-width: 40px;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+}
+/* Route-options modal: a small radio-pair lets the player pick
+   the metric priority (turns first vs burns first). */
+.route-options-overlay { z-index: 78; }
+.route-options-panel {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px 24px 18px;
+  width: min(380px, 92vw);
+  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.55);
+}
+.route-options-title {
+  margin: 0 0 4px;
+  font-size: 16px;
+  color: var(--accent);
+}
+.route-options-sub { margin: 0 0 14px; font-size: 12px; line-height: 1.45; }
+.route-options-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.route-options-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.route-options-choice.is-active {
+  border-color: rgba(96, 165, 250, 0.7);
+  background: rgba(96, 165, 250, 0.12);
+}
+.route-options-choice input { margin-top: 3px; }
+.route-options-choice strong {
+  display: block;
+  color: var(--ink);
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+.route-options-choice em {
+  display: block;
+  font-style: normal;
+  color: var(--ink-dim);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.map-popup .popup-btn {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 11px;
+  border-radius: 6px;
+  width: 100%;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--ink);
+  cursor: pointer;
+  /* Visible state changes on hover / press so the buttons feel
+     like real game controls. Box-shadow on hover lifts them off
+     the popup; press collapses them back down. */
+  transform: translateY(0);
+  transition: transform 0.12s ease,
+              box-shadow 0.12s ease,
+              background 0.15s ease,
+              border-color 0.15s ease,
+              filter 0.15s ease;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+}
+.map-popup .popup-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.45);
+}
+.map-popup .popup-btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  filter: brightness(0.95);
+}
+.map-popup .popup-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Rocket plan-route: the primary game-action button. Reads in
+   the rocket / launch palette - blue gradient with a brighter
+   inner ring. Reserved for the "🛸 Plan rocket route" action,
+   which is what the player should actually use during play. */
+.map-popup .popup-btn-rocket {
+  background: linear-gradient(180deg, #60a5fa, #2563eb);
+  border-color: #1d4ed8;
+  color: #06143a;
+  font-weight: 700;
+  box-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.35),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+.map-popup .popup-btn-rocket:hover:not(:disabled) {
+  background: linear-gradient(180deg, #93c5fd, #3b82f6);
+  border-color: #1e40af;
+}
+
+/* Navigate-to / inspection: neutral chip. Less visually loud
+   than the rocket-blue primary; available but doesn't compete. */
+.map-popup .popup-btn-secondary {
+  background: var(--panel-2);
+  border-color: var(--border);
+  color: var(--ink);
+}
+.map-popup .popup-btn-secondary:hover:not(:disabled) {
+  background: var(--panel);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.map-popup .popup-close {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--ink-mute);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.map-popup .popup-close:hover { color: var(--ink); }
+
 /* ===== Browse view ===== */
 
 /* The Browse view is full-bleed: canvas fills everything below the
@@ -424,8 +1490,30 @@ body:has(#view-browse:not(.hidden)) #main {
   overflow: visible;
 }
 .browse-sidepanel[data-active=""] ~ .sandbox-hand { right: 48px; }
+/* IMPORTANT: the hand-offset selectors below MUST match the panel-
+   width selectors above on specificity, or they'll silently
+   desync. `:not([data-active=""])` adds an attribute selector to
+   the specificity count - so the generic "any pane open" rule
+   would beat a bare `[data-active="patents"]` rule and the hand
+   would only get pushed 380 px while the panel is actually
+   620 px wide (= ~240 px of overlap, which is the bug we keep
+   hitting). The fix: both rules use `:not([data-active=""])` to
+   tie specificity, and the patents rule is placed AFTER the
+   generic rule so source order picks the wider value when both
+   match. */
+.browse-sidepanel[data-active]:not([data-active=""]) ~ .sandbox-hand {
+  right: 380px;
+}
+.browse-sidepanel[data-active="patents"]:not([data-active=""]) ~ .sandbox-hand {
+  right: min(620px, 80vw);
+}
 @media (max-width: 720px) {
-  .sandbox-hand { right: 0 !important; bottom: 64px; }
+  /* Phones: the hand strip takes the full bottom width. The
+     floating tab bar lives at the top of the map, not on the
+     right edge, so the hand isn't pushed in. */
+  .sandbox-hand { right: 0 !important; bottom: 0; }
+  .browse-sidepanel[data-active=""] ~ .sandbox-hand { right: 0 !important; }
+  .browse-sidepanel[data-active] ~ .sandbox-hand { right: 0 !important; }
 }
 .hand-header {
   display: flex;
@@ -433,6 +1521,10 @@ body:has(#view-browse:not(.hidden)) #main {
   gap: 10px;
   font-size: 12px;
   padding: 2px 0 4px;
+  /* When the side panel is open the hand strip squishes to the
+     left edge - flex-wrap keeps BOOST on screen by letting items
+     wrap to a second row instead of overflowing horizontally. */
+  flex-wrap: wrap;
 }
 .hand-title { font-weight: 700; letter-spacing: 1px; }
 .hand-count { color: var(--ink-mute); font-variant-numeric: tabular-nums; }
@@ -481,7 +1573,7 @@ body:has(#view-browse:not(.hidden)) #main {
 .hand-slot {
   position: relative;
   flex-shrink: 0;
-  /* 40% bigger than the previous pass — 220px card × 0.77
+  /* 40% bigger than the previous pass - 220px card × 0.77
      scale = ~169px wide. Height tight to the visible card
      (350+px × 0.77 ≈ 280px) so the quick-action row at
      bottom: 0 actually lands under the card instead of way
@@ -514,7 +1606,7 @@ body:has(#view-browse:not(.hidden)) #main {
      context. Without this, cards with more body content grow
      past min-height: 350 and the bottom-anchored Flip + quick-
      icons drift below the slot. With it, every hand-slot card
-     is identical 220 × 350 — content beyond clips. Scaled
+     is identical 220 × 350 - content beyond clips. Scaled
      × 0.77 → 169 × 270 visible, fitting the 280px slot. */
   height: 350px;
   min-height: 0;
@@ -604,7 +1696,7 @@ body:has(#view-browse:not(.hidden)) #main {
   flex-direction: column;
   align-items: center;
   /* gap accounts for the visual height a scale(1.6) card claims
-     beyond its layout box — without it the actions row crashes
+     beyond its layout box - without it the actions row crashes
      into the card's footer. */
   gap: 130px;
   position: relative;
@@ -743,7 +1835,17 @@ body:has(#view-browse:not(.hidden)) #main {
   background: rgba(15, 16, 35, 0.94);
   backdrop-filter: blur(6px);
   transition: width 0.22s ease, height 0.22s ease;
-  top: 0;
+  /* Panel extends full height of the shell EXCEPT for the
+     toolbar at top. --toolbar-h is published by JS via a
+     ResizeObserver on .map-toolbar so the panel tracks the real
+     height even when the toolbar wraps to a second row on narrow
+     viewports. 44 px is a sane fallback for the first frame
+     before the observer fires. The hand strip stays out of the
+     panel's way by being explicitly pushed to the left via the
+     `right: panel-width` rules on .sandbox-hand below, NOT by
+     clipping the panel's bottom edge - the panel needs to draw
+     all the way down so it reads as one continuous surface. */
+  top: var(--toolbar-h, 44px);
   right: 0;
   bottom: 0;
   width: 48px;
@@ -758,48 +1860,109 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .browse-sidepanel[data-active=""] { width: 48px; }
 
-/* Phone / narrow-portrait layout. The 720px width breakpoint is
-   more reliable than (orientation: portrait) — landscape phones,
-   foldables, and split-screen tablets all want the same bottom-
-   sheet treatment. The panel anchors to the bottom edge and
-   slides up when a tab is selected. A 4px drag handle sits at
-   the top of the sheet so the affordance reads as "this opens
-   upward" without needing a tutorial. */
+/* Phone / narrow-portrait layout. The hand strip owns the bottom
+   of the screen, so the sidepanel stays anchored to the right edge
+   here too. Collapsed it's a 44px tab strip; opened it pops as a
+   centered modal that covers most of the screen with a dimmed
+   backdrop behind it (handled in JS via .modal-backdrop). */
 @media (max-width: 720px) {
+  /* Phones: floating pill of tab buttons centered horizontally
+     at the top of the map. Always visible, no edge attachment.
+     Tapping a tab still opens the pane as its own modal. */
   .browse-sidepanel {
-    flex-direction: column;
-    border-left: none;
-    border-top: 1px solid var(--border);
-    border-top-left-radius: 14px;
-    border-top-right-radius: 14px;
-    box-shadow: 0 -12px 24px rgba(0, 0, 0, 0.45);
-    top: auto;
+    position: absolute;
+    /* Clear the map-toolbar (Cleaned up / Classic / Find site)
+       which sits at the top of the browse-stage. ~48px toolbar
+       + a few px of breathing room. */
+    top: 60px;
     left: 0;
     right: 0;
-    bottom: 0;
-    width: auto !important;
-    height: 64px;
+    bottom: auto;
+    /* Centre via auto margins + intrinsic width instead of
+       transform: translateX(-50%). A transformed ancestor would
+       become the containing block for any `position: fixed`
+       descendant (CSS spec quirk), trapping the .sidepanel-content
+       modal inside the tiny pill - so we deliberately avoid
+       transform here. */
+    margin: 0 auto;
+    width: max-content !important;
+    height: auto !important;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
+    background: rgba(15, 16, 35, 0.94);
+    /* Explicitly disable the inherited blur - `backdrop-filter`
+       creates a containing block for `position: fixed`
+       descendants (same spec quirk as `transform`), and that
+       traps the .sidepanel-content modal inside the pill.
+       Removing the blur keeps the position:fixed modal anchored
+       to the viewport. */
+    backdrop-filter: none;
+    /* Must exceed the modal-backdrop's z-index (9). The sidepanel
+       creates a stacking context with this z-index, so the modal
+       content inside (which gets z-index: 10 relative to this
+       parent context) inherits the ceiling - without this bump
+       the backdrop draws OVER the modal and the player sees an
+       empty dim area when they tap a tab. */
+    z-index: 11;
   }
-  .browse-sidepanel::before {
-    content: "";
-    position: absolute;
-    top: 6px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 44px;
-    height: 4px;
-    border-radius: 2px;
-    background: var(--ink-mute);
-    opacity: 0.6;
-    pointer-events: none;
+  .browse-sidepanel .sidepanel-content {
+    display: none;
   }
-  .browse-sidepanel[data-active] {
-    width: auto !important;
-    height: 70vh;
+  /* When a tab is active, its pane appears as a fullscreen-ish
+     content modal over the map; the floating button pill stays
+     put so the player can switch tabs without dismissing. */
+  .browse-sidepanel[data-active]:not([data-active=""]) .sidepanel-content {
+    display: block;
+    position: fixed;
+    top: 60px;
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    background: rgba(15, 16, 35, 0.97);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 36px 14px 14px;
+    overflow-y: auto;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
+    z-index: 10;
   }
-  .browse-sidepanel[data-active=""] {
-    height: 64px;
+  /* Pin the × close button to the viewport so it stays reachable
+     while the player scrolls through a tall pane (e.g. the full
+     patent library). On mobile the absolutely-positioned close
+     button inside the scrolling .sidepanel-content gets visually
+     scrolled with the content on some engines, so we re-anchor
+     it at viewport coords matching the modal's top-right. */
+  .browse-sidepanel[data-active]:not([data-active=""]) .sidepanel-close {
+    position: fixed;
+    top: 66px;
+    right: 22px;
+    z-index: 12;
+    background: rgba(15, 16, 35, 0.96);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    line-height: 28px;
+    text-align: center;
+    font-size: 18px;
   }
+}
+
+/* Modal backdrop: shown only when the sidepanel is open on
+   mobile. Tapping it closes the panel (wired in browse.js). */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(2px);
+  z-index: 9;
+}
+.modal-backdrop.hidden { display: none; }
+@media (min-width: 721px) {
+  /* Desktop / tablet keep the right-edge slide-out, no backdrop. */
+  .modal-backdrop { display: none !important; }
 }
 
 .sidepanel-tabs {
@@ -812,20 +1975,18 @@ body:has(#view-browse:not(.hidden)) #main {
   flex: 0 0 48px;
 }
 @media (max-width: 720px) {
+  /* Horizontal pill of tab buttons centered at the top. */
   .sidepanel-tabs {
     flex-direction: row;
+    padding: 6px 8px;
+    flex: 0 0 auto;
+    gap: 6px;
     border-right: none;
-    border-bottom: 1px solid var(--border);
-    height: 64px;
-    padding: 14px 12px 8px;
-    justify-content: space-around;
-    flex: 0 0 64px;
-    overflow-x: auto;
-    gap: 2px;
+    background: transparent;
   }
   .sidepanel-tabs button {
-    width: 44px;
-    height: 44px;
+    width: 40px;
+    height: 40px;
     font-size: 22px;
     flex-shrink: 0;
   }
@@ -912,7 +2073,7 @@ body:has(#view-browse:not(.hidden)) #main {
   font-weight: 600;
 }
 /* Colour-code the filter pills to match the typebar of the
-   card type they filter — instant visual cross-reference
+   card type they filter - instant visual cross-reference
    between this row and the cards rendered below. The 4px left
    stripe carries the supplier accent; the chip's background
    stays subdued so the typography reads cleanly. Active state
@@ -1023,6 +2184,121 @@ body:has(#view-browse:not(.hidden)) #main {
   line-height: 1.4;
 }
 
+/* Glory pane: ticker-tape chits + VP counter + zone table. */
+.glory-summary { margin-bottom: 16px; }
+.glory-vp-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 8px 12px;
+  margin: 4px 0 12px;
+  background: rgba(250, 204, 21, 0.08);
+  border: 1px solid rgba(250, 204, 21, 0.35);
+  border-radius: 8px;
+}
+.glory-vp {
+  font-size: 22px;
+  color: #facc15;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+.glory-chits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 12px;
+}
+.glory-chit {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 10px;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  border-radius: 6px;
+  font-size: 11px;
+  min-width: 70px;
+}
+.glory-chit strong { color: #7dd3fc; font-size: 12px; }
+.glory-chit em { color: var(--ink-dim); font-style: normal; font-size: 10px; }
+.glory-table {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+}
+.glory-table li {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  font-size: 12px;
+  border-bottom: 1px dashed rgba(148, 163, 184, 0.18);
+}
+.glory-table strong { color: #fde047; font-variant-numeric: tabular-nums; }
+.glory-rules { font-size: 11px; line-height: 1.5; }
+.glory-milestones h4 { margin: 16px 0 8px; }
+
+/* Mission log pane: per-turn action list + per-game history. */
+.log-current h3 { margin-bottom: 8px; }
+.log-actions-bar {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0;
+  flex-wrap: wrap;
+}
+.log-actions-bar .popup-btn { font-size: 12px; padding: 5px 10px; }
+.log-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 16px;
+}
+.log-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px dashed rgba(148, 163, 184, 0.18);
+  font-size: 12px;
+}
+.log-row.is-undoable-now {
+  background: rgba(250, 204, 21, 0.08);
+  border-left: 3px solid #facc15;
+  padding-left: 8px;
+}
+.log-icon { font-size: 14px; line-height: 1; }
+.log-summary { flex: 1; }
+.log-empty { padding: 12px; }
+
+.log-history h4 { margin: 16px 0 6px; }
+.hist-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.hist-row {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 6px;
+  font-size: 11px;
+}
+.hist-row header {
+  font-size: 11px;
+  color: var(--ink-dim);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.hist-row ol {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--ink);
+}
+.hist-row ol li { line-height: 1.5; }
+
 /* ===== Game-overlay map (used when a lobby starts) ===== */
 
 .overlay-shell {
@@ -1074,7 +2350,7 @@ body:has(#view-browse:not(.hidden)) #main {
    edge, revealed on hover. Lives INSIDE .card so it shares the
    same scale + transform as the Flip button (which sits at
    bottom-right of the same card). The row is anchored to
-   bottom-left so it sits to the LEFT of Flip — both in the
+   bottom-left so it sits to the LEFT of Flip - both in the
    footer band of the card. */
 .hand-slot .hand-quick-actions {
   position: absolute;
@@ -1175,7 +2451,9 @@ body:has(#view-browse:not(.hidden)) #main {
 
 /* Rocket-stack modal: a centered panel that floats over the
    map. Wider than the inspect modal so the player can scan a
-   multi-card stack at a glance. */
+   multi-card stack at a glance. The panel itself is the flex
+   container - header (totals + status + engage) is pinned to
+   the top via flex-shrink:0, and only the cards grid scrolls. */
 .rocket-stack-panel {
   position: relative;
   background: var(--panel);
@@ -1183,22 +2461,134 @@ body:has(#view-browse:not(.hidden)) #main {
   border-radius: 12px;
   padding: 22px 24px;
   width: min(820px, 90vw);
+  height: 80vh;
   max-height: 80vh;
-  overflow-y: auto;
+  overflow: hidden;
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+}
+.rocket-stack-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 10px;
+}
+.rocket-stack-header {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
 }
 .rocket-stack-title {
-  margin: 0 0 12px;
+  margin: 0;
   font-size: 18px;
   letter-spacing: 0.5px;
 }
+.rocket-stack-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.rocket-stack-locate {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.rocket-stack-locate .popup-btn {
+  font-size: 11px;
+  padding: 5px 9px;
+}
 .rocket-stack-panel #rocket-stack-cards {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 6px 2px 2px;
+}
+/* Stack rows: thrusters on top, everything else (reactors,
+   radiators, refineries, robonauts, etc.) below. Each row is its
+   own auto-fill grid so a row with a single card sits left-
+   aligned at full card width rather than stretching across. The
+   `others` row gets a thin divider above to visually separate
+   the propulsion line from the rest of the stack. */
+.rocket-stack-row {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 16px;
 }
+.rocket-stack-row.others {
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
+}
 
-/* Rocket stack slot actions row — sits beneath each card in
+/* Totals row: compact stat cells. Wraps on narrow screens so
+   the mobile modal stays usable. Each cell carries a tiny label
+   over a big number; the fuel cell adds inline +/- buttons. */
+.rocket-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  font-size: 12px;
+}
+.rocket-totals-cell {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 2px 8px;
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.rocket-totals-cell .lbl {
+  color: var(--ink-mute);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+.rocket-totals-cell strong {
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.rocket-totals-cell strong.ok  { color: #22c55e; }
+.rocket-totals-cell strong.bad { color: #f87171; }
+.rocket-totals-cell small {
+  font-size: 10px;
+  color: var(--ink-dim);
+}
+.rocket-totals-cell.rocket-fuel {
+  gap: 6px;
+}
+.rocket-fuel-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  background: var(--panel-2);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.rocket-fuel-btn:hover:not(:disabled) {
+  background: var(--accent);
+  color: #062136;
+  border-color: var(--accent-2);
+}
+.rocket-fuel-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Rocket stack slot actions row - sits beneath each card in
    the rocket stack modal. Holds the "Set as active" thruster
    picker (thrusters only) + the "Back to hand" affordance. */
 .rocket-slot-actions {
@@ -1220,6 +2610,14 @@ body:has(#view-browse:not(.hidden)) #main {
   box-shadow: 0 0 0 3px #f97316, 0 0 18px rgba(249, 115, 22, 0.55);
   border-radius: 10px;
 }
+/* Supporting-card highlight: any non-thruster card whose supplies
+   satisfy the active thruster's requires gets a soft green ring
+   so the player can trace the support chain at a glance -
+   mirrors the ✓ green wash on the matching support chips. */
+.rocket-slot.is-supporting .card {
+  box-shadow: 0 0 0 2px #22c55e, 0 0 14px rgba(34, 197, 94, 0.45);
+  border-radius: 10px;
+}
 .rocket-activate {
   background: rgba(15, 16, 35, 0.85);
   color: var(--ink);
@@ -1239,6 +2637,88 @@ body:has(#view-browse:not(.hidden)) #main {
   font-weight: 700;
   cursor: default;
   opacity: 1;
+}
+
+/* Engage button: greyed out when supports are unmet, fiery when
+   ready, and lit up while the rocket is engaged. Sits at the top
+   of the stack body so it's reachable on tall stacks. */
+.rocket-engage {
+  display: block;
+  width: 100%;
+  margin: 4px 0 14px;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  background: linear-gradient(180deg, #f97316, #c2410c);
+  color: #2e0f02;
+  border: 1px solid #9a3412;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.rocket-engage:disabled {
+  background: rgba(15, 16, 35, 0.7);
+  color: var(--ink-dim);
+  border-color: var(--border);
+  cursor: not-allowed;
+}
+.rocket-engage.is-engaged {
+  background: linear-gradient(180deg, #fbbf24, #f97316);
+  color: #1f0a02;
+  border-color: #b45309;
+  box-shadow: 0 0 0 2px #f97316, 0 0 22px rgba(251, 191, 36, 0.6);
+}
+
+/* Engaged rocket animation: yellow/orange marching-ants stripe
+   around the active thruster card AND the whole stack body, so
+   the player gets the visual cue that the rocket can move. The
+   border is drawn via a CSS background-gradient stripe with an
+   offset animation, sharper than a dashed border at small sizes
+   and works the same on mobile + desktop. */
+/* Stripe period must EXACTLY equal the animation delta or the
+   pattern visibly jumps every cycle (gaps appear at the loop
+   point). Stripes are 12 + 12 = 24 px per period; the keyframes
+   below shift each edge by exactly 24 px from 0% to 100% so the
+   end frame paints the same pixels as the start frame and the
+   loop is seamless. Both the body border and the active-thruster
+   card use the same period + keyframes for a consistent look -
+   visual speed differences come from the `animation-duration`
+   value, not from differing stripe widths. */
+@keyframes rocket-march {
+  0%   { background-position: 0    0,    0     100%,  0  0,      100%  0;    }
+  100% { background-position: 24px 0,    -24px 100%,  0  -24px,  100%  24px; }
+}
+.rocket-stack-body.is-engaged {
+  position: relative;
+  padding: 14px;
+  border-radius: 14px;
+  background-image:
+    /* top edge: orange/gold stripes scrolling right */
+    repeating-linear-gradient(90deg,  #f97316 0 12px, #fbbf24 12px 24px),
+    /* bottom edge: scrolling left */
+    repeating-linear-gradient(90deg,  #fbbf24 0 12px, #f97316 12px 24px),
+    /* left edge: scrolling down */
+    repeating-linear-gradient(180deg, #f97316 0 12px, #fbbf24 12px 24px),
+    /* right edge: scrolling up */
+    repeating-linear-gradient(180deg, #fbbf24 0 12px, #f97316 12px 24px);
+  background-position: 0 0, 0 100%, 0 0, 100% 0;
+  background-size: 100% 4px, 100% 4px, 4px 100%, 4px 100%;
+  background-repeat: no-repeat;
+  animation: rocket-march 0.6s linear infinite;
+  box-shadow: 0 0 24px rgba(249, 115, 22, 0.45);
+}
+.rocket-stack-body.is-engaged .rocket-slot.is-active-thruster .card {
+  position: relative;
+  background-image:
+    repeating-linear-gradient(90deg,  #f97316 0 12px, #fbbf24 12px 24px),
+    repeating-linear-gradient(90deg,  #fbbf24 0 12px, #f97316 12px 24px),
+    repeating-linear-gradient(180deg, #f97316 0 12px, #fbbf24 12px 24px),
+    repeating-linear-gradient(180deg, #fbbf24 0 12px, #f97316 12px 24px);
+  background-position: 0 0, 0 100%, 0 0, 100% 0;
+  background-size: 100% 3px, 100% 3px, 3px 100%, 3px 100%;
+  background-repeat: no-repeat;
+  animation: rocket-march 0.5s linear infinite;
+  box-shadow: 0 0 0 1px #fbbf24, 0 0 18px rgba(251, 191, 36, 0.7);
 }
 
 /* Mobile / touch device adjustments to the hand strip. Hover
@@ -1272,7 +2752,7 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 
 @media (hover: none) and (pointer: coarse) {
-  /* No hover on touch — drop the hover quick-icon row, drop
+  /* No hover on touch - drop the hover quick-icon row, drop
      the hover-spread fan effect (the hovered-sibling margin
      shifts can stick visually), and switch the slot's
      transform-origin to default so the selected pop-up
