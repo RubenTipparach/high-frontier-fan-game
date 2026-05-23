@@ -733,7 +733,7 @@ function ensureMapShell(host) {
           aria-label="View turn tracker">🕐</button>
         <span id="aqua-chip" class="map-aqua-chip"
           title="Aqua balance - spend 4 aqua per hazard to bypass rolls, or convert 1:1 to water at LEO">
-          💎 <strong id="aqua-chip-balance">${getAqua()}</strong>
+          💧 <strong id="aqua-chip-balance">${getAqua()}</strong>
         </span>
       </div>
       <button id="map-search-toggle" class="map-search-toggle"
@@ -1955,7 +1955,7 @@ function radBypassThreshold() {
 // effective threshold per card (so two rad crossings = two
 // chances to lose a card). Confirm button arms once every die
 // has settled so the player has to acknowledge the outcome.
-function radHardnessRollModal(radHazards, stackCards) {
+function radHardnessRollModal(radHazards, stackCards, thrust, seasonBonus) {
   return new Promise((resolve) => {
     document.querySelector('.rad-roll-overlay')?.remove();
     const overlay = document.createElement('div');
@@ -1974,20 +1974,35 @@ function radHardnessRollModal(radHazards, stackCards) {
     document.addEventListener('keydown', onKey);
 
     // Pre-roll all dice so visual + log + decommission agree.
-    rolls = radHazards.map((h) => ({
-      site: h.site, glyph: h.glyph,
-      d6: 1 + Math.floor(Math.random() * 6),
-    }));
+    // `rad` is the FINAL radiation strength per zone after the
+    // season bonus is added and the active thruster's thrust is
+    // subtracted - clamped at 0 because a "negative" radiation
+    // strength can't hurt any non-negative rad-hard card. The
+    // raw d6 stays alongside so the UI can show the maths.
+    const t = Math.max(0, thrust | 0);
+    const bonus = (seasonBonus | 0) || 0;
+    rolls = radHazards.map((h) => {
+      const d6 = 1 + Math.floor(Math.random() * 6);
+      const rad = Math.max(0, d6 + bonus - t);
+      return { site: h.site, glyph: h.glyph, d6, rad, bonus, thrust: t };
+    });
+
+    const seasonNote = bonus > 0
+      ? `Red season adds <strong>+${bonus}</strong> to every die.` : '';
+    const thrustNote = t > 0
+      ? `Active thrust <strong>${t}</strong> is subtracted from the die.`
+      : `No active thrust - no subtraction.`;
 
     const panel = document.createElement('div');
     panel.className = 'turn-confirm-panel rad-roll-panel';
     panel.innerHTML = `
       <h3>☢ Rad-hardness check</h3>
       <p class="muted rad-roll-sub">
-        Each rad zone rolls a d6. Cards whose rad-hard is
-        <strong>less than</strong> the highest roll are
-        decommissioned to your hand. Active thruster's thrust
-        couldn't outrun the radiation.
+        ${thrustNote} ${seasonNote}
+        Final radiation = die${bonus > 0 ? ' + ' + bonus : ''}${t > 0 ? ' − ' + t : ''}.
+        Cards whose rad-hard is <strong>less than</strong> the
+        worst final radiation get decommissioned to your hand.
+        Aqua cannot bypass a rad roll.
       </p>
       <ul class="rad-roll-dice"></ul>
       <p class="rad-roll-result muted">Rolling…</p>
@@ -2003,7 +2018,10 @@ function radHardnessRollModal(radHazards, stackCards) {
     const resultLine = panel.querySelector('.rad-roll-result');
     const confirmBtn = panel.querySelector('.rad-roll-confirm');
 
-    // Build a die row per rad zone.
+    // Build a die row per rad zone. The "math chip" to the
+    // right of each die is filled in once the die settles so
+    // the player can watch the formula resolve as the rolls
+    // land.
     const dieEls = rolls.map((r) => {
       const li = document.createElement('li');
       li.className = 'rad-roll-die-row';
@@ -2013,12 +2031,13 @@ function radHardnessRollModal(radHazards, stackCards) {
           <strong>${esc(r.site.name)}</strong>
         </div>
         <div class="rad-roll-die-host"></div>
+        <div class="rad-roll-math muted">…</div>
       `;
       diceList.appendChild(li);
       const dieHost = li.querySelector('.rad-roll-die-host');
       const die = buildDie(1);
       dieHost.appendChild(die);
-      return die;
+      return { die, mathEl: li.querySelector('.rad-roll-math'), roll: r };
     });
 
     // Build the per-card rows: name + rad-hard. Decorated
@@ -2041,17 +2060,29 @@ function radHardnessRollModal(radHazards, stackCards) {
     overlay.appendChild(panel);
     mountOverlay(overlay);
 
-    Promise.all(rolls.map((r, i) => rollDie(dieEls[i], r.d6))).then(() => {
-      // Worst (highest) die across all rad zones is the
-      // effective threshold per card.
-      const worst = rolls.reduce((m, r) => Math.max(m, r.d6), 0);
+    Promise.all(dieEls.map(({ die, roll }) => rollDie(die, roll.d6))).then(() => {
+      // Worst (highest) FINAL radiation across rad zones is the
+      // effective threshold per card. Bonus and thrust are
+      // already baked into roll.rad above.
+      const worst = rolls.reduce((m, r) => Math.max(m, r.rad), 0);
+      // Fill in each math chip so the player can read the
+      // breakdown: "5 + 2 - 7 = 0" etc.
+      for (const { mathEl, roll } of dieEls) {
+        const parts = [String(roll.d6)];
+        if (roll.bonus > 0) parts.push(`+ ${roll.bonus}`);
+        if (roll.thrust > 0) parts.push(`− ${roll.thrust}`);
+        const formula = parts.join(' ');
+        mathEl.classList.remove('muted');
+        mathEl.innerHTML = `${formula} = <strong>rad ${roll.rad}</strong>`;
+        if (roll.rad === worst && worst > 0) mathEl.classList.add('is-worst');
+      }
       let lost = 0;
       for (const { el, card } of cardRowEls) {
         const v = el.querySelector('.rad-roll-card-verdict');
         const rh = card.radHardness != null ? card.radHardness : 0;
-        // Spec: d6 > rad-hard → decommission. So rad-hard >= d6
-        // survives. A card with rad-hard 5 survives a 5, fails
-        // a 6.
+        // Decommission iff final radiation > card rad-hard.
+        // A rad-hard 0 card survives a worst-rad of 0; fails
+        // a worst-rad of 1.
         const failed = worst > rh;
         if (failed) {
           toDecommission.push(card.id);
@@ -2070,12 +2101,12 @@ function radHardnessRollModal(radHazards, stackCards) {
       if (!cardRowEls.length) {
         resultLine.innerHTML = `${dCount} rad zone${dCount === 1 ? '' : 's'} rolled - nothing in stack.`;
       } else if (lost > 0) {
-        resultLine.innerHTML = `Worst roll <strong>${worst}</strong>: `
+        resultLine.innerHTML = `Worst final radiation <strong>${worst}</strong>: `
           + `<strong class="bad">${lost} card${lost === 1 ? '' : 's'} decommissioned</strong>.`;
         confirmBtn.classList.add('rad-roll-confirm-bad');
         confirmBtn.textContent = `Confirm - lose ${lost} card${lost === 1 ? '' : 's'}`;
       } else {
-        resultLine.innerHTML = `Worst roll <strong>${worst}</strong>: `
+        resultLine.innerHTML = `Worst final radiation <strong>${worst}</strong>: `
           + `<strong class="ok">stack survived intact</strong>.`;
         confirmBtn.textContent = 'Confirm - continue';
       }
@@ -3328,14 +3359,19 @@ async function moveRocket() {
       }
     }
   }
-  // Radiation check. Thrust > threshold bypasses the roll
-  // entirely; otherwise the player rolls a d6 per rad zone and
-  // any card with rad-hard < worst-roll is decommissioned to
-  // their hand. The check always runs when the route crosses
-  // rad zones - there's no "pay to skip" option.
+  // Radiation check. Final radiation per zone = d6 + season
+  // bonus - active thrust (clamped at 0). Worst final radiation
+  // across all rad zones is the per-card threshold; cards with
+  // rad-hard < worst get decommissioned to the hand. If thrust
+  // is high enough that even the max die (6 + bonus - thrust)
+  // can't beat any card's rad-hard, we skip the dice
+  // ceremony entirely. Aqua cannot bypass a rad roll.
   if (radHazards.length) {
     const thrStats = getActiveThrusterStats();
     const thrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 0;
+    let season = null;
+    try { season = getSeason(); } catch { season = null; }
+    const seasonBonus = season && season.name === 'red' ? 2 : 0;
     const threshold = radBypassThreshold();
     if (thrust > threshold) {
       logAction({
@@ -3361,14 +3397,19 @@ async function moveRocket() {
           };
         })
         .filter(Boolean);
-      const { rolls: radRolls, decommission } = await radHardnessRollModal(radHazards, stackCards);
+      const { rolls: radRolls, decommission } = await radHardnessRollModal(
+        radHazards, stackCards, thrust, seasonBonus,
+      );
       for (const r of radRolls) {
         logAction({
           type: 'rad_roll',
           icon: '☢',
-          summary: `☢ ${esc(r.site.name)} rad-d6=${r.d6}`,
+          summary: `☢ ${esc(r.site.name)} d6=${r.d6}`
+            + (seasonBonus ? ` +${seasonBonus} (red)` : '')
+            + (thrust ? ` −${thrust} thrust` : '')
+            + ` = rad ${r.rad}`,
           undoable: false,
-          data: { siteId: r.site.id, d6: r.d6 },
+          data: { siteId: r.site.id, d6: r.d6, rad: r.rad, thrust, seasonBonus },
         });
       }
       lockUndo = true;

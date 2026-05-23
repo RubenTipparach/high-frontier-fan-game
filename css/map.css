@@ -66,6 +66,11 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  /* Wrap on narrow phones so the aqua chip can drop to a
+     second row instead of fighting the search / route blocks
+     for horizontal space. */
+  flex-wrap: wrap;
+  row-gap: 4px;
 }
 .map-turn-controls button {
   font-size: 12px;
@@ -99,9 +104,9 @@
 /* Aqua balance chip in the turn-controls row. Read-only display
    surface - clicking it does nothing, but the toolbar position
    keeps the balance visible while the player plans hazardous
-   moves (each hazard bypass costs 4 aqua). The 💎 + number
-   styling mirrors the in-modal aqua row so the chip and the
-   confirm modal read as the same currency. */
+   moves (each hazard bypass costs 4 aqua). The 💧 + number
+   reads as "water you can spend" - aqua is just a water-shaped
+   economy unit in sandbox mode. */
 .map-aqua-chip {
   display: inline-flex;
   align-items: center;
@@ -802,14 +807,23 @@
 }
 .rad-roll-die-row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr auto auto;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   padding: 6px 10px;
   background: rgba(15, 23, 42, 0.55);
   border: 1px solid var(--border);
   border-radius: 6px;
 }
+.rad-roll-math {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  min-width: 92px;
+  text-align: right;
+  color: var(--ink-dim);
+}
+.rad-roll-math strong { color: var(--ink); }
+.rad-roll-math.is-worst strong { color: #fde047; }
 .rad-roll-site {
   display: flex;
   align-items: center;
