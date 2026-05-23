@@ -1280,11 +1280,12 @@ function isLeoSite(site) {
 
 // Sunspot Cube d6 events. Rules text + lookup live in turn-clock.js
 // (single source of truth — the tracker modal reads the same table).
-// Events do NOT directly mutate VP; they change game state (rotate
-// decks, place Glitch tokens, decommission cards, swap faction
-// privileges, force flare rolls). Wiring those state changes into
-// the engine is Stage 3+ territory; for now we just log the event
-// so the player can see what fired.
+// **Sandbox mode**: we DO NOT apply the event to game state. The
+// d6 still rolls so the player sees what the cube would have
+// triggered at the table, but no decks rotate, no cards
+// decommission, no Glitch disks get placed. Log entries are
+// prefixed "Would fire:" to keep that distinction obvious. When
+// the engine ships (Stage 3+) the application path goes here.
 function applyEventDieEffect(event) {
   if (!event || typeof event.dieRoll !== 'number') return;
   const season = getSeasonForSlot(event.turn);
@@ -1293,9 +1294,14 @@ function applyEventDieEffect(event) {
   logAction({
     type: 'event_d6',
     icon: e.icon,
-    summary: `${e.name} (d6 = ${event.dieRoll}) — ${e.text}`,
+    summary: `Would fire: ${e.name} (d6 = ${event.dieRoll}) — ${e.text}`,
     undoable: false,
-    data: { dieRoll: event.dieRoll, eventName: e.name, season: season && season.name },
+    data: {
+      dieRoll: event.dieRoll,
+      eventName: e.name,
+      season: season && season.name,
+      applied: false,
+    },
   });
 }
 

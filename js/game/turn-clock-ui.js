@@ -322,6 +322,11 @@ export function openTurnClockModal({ rolling = null, animateFrom = null } = {}) 
                ${ev.season ? `<em class="ev-season ev-season-${ev.season}">Season ${ev.season}</em>` : ''}
              </header>
              <p class="ev-text">${ev.text}</p>
+             <p class="ev-sandbox-note">
+               <span class="ev-sandbox-badge">Sandbox preview</span>
+               Not applied automatically — resolve at the table if
+               you're using the cube as a play-along clock.
+             </p>
            </div>`
         : '';
       eventHost.innerHTML = `
