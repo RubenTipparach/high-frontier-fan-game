@@ -2606,22 +2606,14 @@ function showSitePopupFor(site) {
       // Inline ⚙ gear next to the plan-route button. Opens the
       // route-options modal so the player can flip the metric
       // priority (turns vs burns) without leaving the popup.
+      // Same modal is also reachable from the toolbar's ⚙
+      // game-settings button.
       trailing: {
         label: '⚙',
         variant: 'secondary',
         title: `Route options (current priority: ${_routePriority} first)`,
         onClick: openRouteOptions,
       },
-    },
-    // Standalone route-options button. Lives as its own action
-    // row right under "Plan rocket route" so it always renders
-    // even if the inline trailing-pair layout fails to land.
-    // Visible per the user's "make it its own button element"
-    // request; same onClick as the inline gear.
-    {
-      label: `⚙ Route options - priority: ${_routePriority} first`,
-      variant: 'rocket',
-      onClick: openRouteOptions,
     },
   ];
   // Prospect action - only show when there's an active prospector
