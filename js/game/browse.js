@@ -1810,6 +1810,16 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
         <em class="muted">water</em>
       </div>
     </div>
+    <div class="fuel-tank-actions">
+      <button type="button" class="popup-btn popup-btn-secondary" id="tank-dump-1"
+        title="Drain 1 water from the tank">💧⤓ Dump 1</button>
+      <button type="button" class="popup-btn popup-btn-secondary" id="tank-dump-all"
+        title="Drain everything (future: forms an outpost stack once factories land)">💧⤓ Dump all</button>
+    </div>
+    <p class="muted fuel-tank-dump-note">
+      Dumped water is destroyed for now. Stage 3+ turns this into
+      an outpost-stack drop once factories land.
+    </p>
     <div class="fuel-tank-foot muted">
       Cap = thrust ${thrStats ? thrStats.thrust : '-'} − dry mass ${totals.dryMass || 0}
       ${liftCap == null ? '(no active thruster)' : ''}
@@ -1981,6 +1991,72 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
   // Note: close() already nulls activeDrops + removes the
   // overlay, so any in-flight drops vanish when the user
   // dismisses mid-animation.
+
+  // Dump-fuel buttons. Drain water from the tank without forming
+  // an outpost stack (that lands once factories ship in Stage
+  // 3+). Each click: removeFuel(N), then animate the level
+  // dropping from before-value to after-value over ~250ms. The
+  // readout updates each frame; in-flight droplets are cleared
+  // because dumping should feel like emptying, not filling.
+  const dump1Btn   = panel.querySelector('#tank-dump-1');
+  const dumpAllBtn = panel.querySelector('#tank-dump-all');
+  const refreshDumpButtons = () => {
+    const cur = getTankWater();
+    if (dump1Btn)   dump1Btn.disabled   = cur <= 0;
+    if (dumpAllBtn) dumpAllBtn.disabled = cur <= 0;
+  };
+  refreshDumpButtons();
+  function drainTo(targetLevel, durationMs = 250) {
+    if (raf) cancelAnimationFrame(raf);
+    clearDrops();
+    animating = true;
+    const startLevel = getTankWater() + Math.max(0,
+      // visual start = current displayed level on screen, not
+      // the stored value (which already reflects the drain).
+      parseFloat(nowReadout.textContent || '0') - getTankWater());
+    const fromLevel = parseFloat(nowReadout.textContent || String(getTankWater()));
+    const toLevel = Math.max(0, targetLevel);
+    if (fromLevel === toLevel) {
+      animating = false;
+      refreshDumpButtons();
+      return;
+    }
+    const t0 = performance.now();
+    const tick = (now) => {
+      const t = Math.min(1, (now - t0) / durationMs);
+      const eased = 1 - Math.pow(1 - t, 3);
+      const v = fromLevel + (toLevel - fromLevel) * eased;
+      setLevel(v);
+      if (t < 1) raf = requestAnimationFrame(tick);
+      else { animating = false; raf = 0; refreshDumpButtons(); }
+    };
+    raf = requestAnimationFrame(tick);
+    // suppress lint for unused startLevel
+    void startLevel;
+  }
+  dump1Btn?.addEventListener('click', () => {
+    if (getTankWater() <= 0) return;
+    removeFuel(1);
+    drainTo(getTankWater());
+    logAction({
+      type: 'dump',
+      icon: '💧⤓',
+      summary: `Dumped 1 water (tank ${getTankWater()}/${getTankMax()})`,
+      undoable: false,
+    });
+  });
+  dumpAllBtn?.addEventListener('click', () => {
+    const drained = getTankWater();
+    if (drained <= 0) return;
+    removeFuel(drained);
+    drainTo(0, 600);
+    logAction({
+      type: 'dump',
+      icon: '💧⤓',
+      summary: `Dumped ${drained} water (tank empty)`,
+      undoable: false,
+    });
+  });
 }
 
 // Read the prospector's ISRU rating off the active face's

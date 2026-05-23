@@ -395,6 +395,22 @@
   text-transform: uppercase;
   letter-spacing: 1px;
 }
+.fuel-tank-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin: 10px 0 4px;
+}
+.fuel-tank-actions .popup-btn {
+  font-size: 12px;
+  padding: 6px 10px;
+}
+.fuel-tank-dump-note {
+  font-size: 10px;
+  margin: 0 0 4px;
+  text-align: center;
+  line-height: 1.45;
+}
 .fuel-tank-foot {
   margin: 8px 0 0;
   font-size: 11px;
