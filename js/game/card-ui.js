@@ -335,6 +335,22 @@ function buildFace(card, sideName, kind, supplied) {
   for (const p of propsList) {
     const b = document.createElement('span');
     b.className = 'card-prop';
+    // ISRU has its own visual treatment: the chip reads as
+    // "ISRU: N" text instead of a glyph + counter, since the
+    // number IS the rule (site water must be >= this value to
+    // refuel or prospect). Tooltip spells out the gating.
+    if (p.key === 'isru') {
+      b.classList.add('card-prop-isru');
+      b.setAttribute(
+        'data-tip',
+        `ISRU ${p.value}. The site's water rating must be `
+        + `≥ ${p.value} to refuel or prospect here. If site `
+        + `water < ${p.value}, neither operation is allowed.`,
+      );
+      b.innerHTML = `<strong>ISRU:</strong> <b>${p.value}</b>`;
+      propHost.appendChild(b);
+      continue;
+    }
     b.setAttribute('data-tip', p.value === true ? p.label : `${p.label}: ${p.value}`);
     const count = (typeof p.value === 'number' && p.value > 1)
       ? `<b>×${p.value}</b>` : '';

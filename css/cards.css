@@ -395,6 +395,29 @@
 }
 .card-prop em { font-style: normal; font-size: 12px; line-height: 1; }
 .card-prop b { font-weight: 700; font-size: 10px; }
+/* ISRU chip - shows the literal "ISRU: N" value because the
+   number IS the rule (site water >= ISRU to refuel/prospect).
+   Tap or hover for the long explanation. Cyan-blue tint sets
+   it apart from the generic property chips. */
+.card-prop-isru {
+  background: rgba(56, 189, 248, 0.14);
+  border-color: rgba(56, 189, 248, 0.55);
+  border-style: solid;
+  color: #7dd3fc;
+}
+.card-prop-isru strong {
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #7dd3fc;
+  font-weight: 700;
+}
+.card-prop-isru b {
+  font-size: 13px;
+  font-weight: 800;
+  color: #e0f2fe;
+  margin-left: 2px;
+}
 
 .card-name {
   font-weight: 600;
