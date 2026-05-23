@@ -10,7 +10,7 @@
 //
 // At runtime we poll version.json with `cache: 'no-store'`. If the
 // deployed SHA no longer matches the one baked into this file, we
-// force-navigate to the same URL with the new SHA — that URL change
+// force-navigate to the same URL with the new SHA - that URL change
 // makes the browser re-fetch index.html (and therefore re-fetch every
 // asset whose `?v=...` now points at the new SHA).
 //

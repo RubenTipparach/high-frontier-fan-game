@@ -207,7 +207,7 @@ function renderLobby(lobby) {
             data,
             onSelect: (site) => {
               if (site.isDecorative) {
-                _onToast('Decorative routing node — not selectable.');
+                _onToast('Decorative routing node - not selectable.');
                 return;
               }
               if (!from || (from && to)) {

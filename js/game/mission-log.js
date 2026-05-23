@@ -1,4 +1,4 @@
-// Mission log — a per-turn chronicle of every action the player
+// Mission log - a per-turn chronicle of every action the player
 // took (move, undo, fuel, glory awarded, event rolled, etc.) plus
 // a per-game history of completed turns. The log is the single
 // source of truth for "what happened this turn"; individual
@@ -17,9 +17,9 @@
 //   getHistory()                                       → turn[]
 //   popLast()                                          → record | null
 //   popLastOfType(type)                                → record | null
-//   commitTurn(meta)                                   — moves
+//   commitTurn(meta)                                   - moves
 //                       currentTurn → history, resets log
-//   resetLog()                                         — full wipe
+//   resetLog()                                         - full wipe
 //   onChange(cb)                                       → unsubscribe
 
 const STORAGE_LOG     = 'hf-mission-log';

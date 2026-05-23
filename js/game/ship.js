@@ -8,7 +8,7 @@
 //   - tank water (a separate scalar, not a patent)
 //
 // Stage 2 ships this composer so the future builder UI and the engine
-// agree on the validation rules, but no engine wires it yet — Stage 3
+// agree on the validation rules, but no engine wires it yet - Stage 3
 // will call validateShip() at BUILD time.
 
 import { PATENTS_BY_ID } from '../../data/patents.js';

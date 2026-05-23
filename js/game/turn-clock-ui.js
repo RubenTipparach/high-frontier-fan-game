@@ -20,7 +20,7 @@ import {
 // The dialog ONLY appears when there's unspent budget on the
 // current turn (moves remaining > 0 OR ops remaining > 0). If
 // everything is spent, the caller should just end the turn
-// directly without the prompt — see triggerEndTurn() below.
+// directly without the prompt - see triggerEndTurn() below.
 export function confirmEndTurn() {
   return new Promise((resolve) => {
     const moves = getMovesRemaining();
@@ -47,7 +47,7 @@ export function confirmEndTurn() {
         <li><span>Operations remaining</span><strong>${ops}</strong></li>
       </ul>
       <div class="turn-confirm-actions">
-        <button type="button" class="popup-btn primary" data-act="yes">Yes — end turn</button>
+        <button type="button" class="popup-btn primary" data-act="yes">End Turn</button>
         <button type="button" class="popup-btn"         data-act="no">No</button>
       </div>
     `;
@@ -70,7 +70,7 @@ export async function triggerEndTurn() {
   }
   const result = endTurn();
   // If the new slot is an event, the dieRoll lives on result.event
-  // — let the caller (or the turn-clock modal, see below) animate
+  // - let the caller (or the turn-clock modal, see below) animate
   // the 3D die and surface the value.
   return result;
 }
@@ -83,7 +83,7 @@ const WHEEL_CY   = WHEEL_VIEW / 2;
 const WHEEL_R    = 140;            // outer radius of the slot ring
 const WHEEL_RING_W = 56;           // band thickness for the slots
 
-// Position helpers — slot 0 sits at the top (12 o'clock); slots
+// Position helpers - slot 0 sits at the top (12 o'clock); slots
 // advance clockwise. Each slot is one of SLOTS arcs around the
 // ring. We render slot boundaries as radial dividers, then label
 // the season wedges + event markers + new round marker, then
@@ -153,7 +153,7 @@ function wheelSvg(displayTurn = null) {
       font-size="14" font-weight="700"
       fill="${i === turn ? '#0c0a16' : 'rgba(15,16,35,0.6)'}">${i}</text>`;
   }
-  // Event marker lines — bold WHITE radial line on the leading
+  // Event marker lines - bold WHITE radial line on the leading
   // boundary of each event slot. This is the line the Sunspot
   // Cube crosses to ENTER the event, so the player visually reads
   // "crossing this fires a d6". Drawn after season wedges + slot
@@ -168,12 +168,12 @@ function wheelSvg(displayTurn = null) {
     svg += `<line x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}"
       stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-opacity="0.95" />`;
   }
-  // New round marker — small triangle on the inner edge of slot 0.
+  // New round marker - small triangle on the inner edge of slot 0.
   const nrp = pointOnRing(NEW_ROUND_SLOT, innerR - 4);
   svg += `<text x="${nrp.x.toFixed(2)}" y="${nrp.y.toFixed(2)}"
     text-anchor="middle" dominant-baseline="middle"
     font-size="18" fill="#fde047">↻</text>`;
-  // Event slot labels — small "EVENT" tag outside the ring.
+  // Event slot labels - small "EVENT" tag outside the ring.
   for (const e of EVENT_SLOTS) {
     const ep = pointOnRing(e, outerR + 14);
     svg += `<text x="${ep.x.toFixed(2)}" y="${ep.y.toFixed(2)}"
@@ -181,7 +181,7 @@ function wheelSvg(displayTurn = null) {
       font-size="9" font-weight="800"
       fill="${lastEvent && lastEvent.turn === e ? '#fbbf24' : 'rgba(203,213,225,0.8)'}">EVENT</text>`;
   }
-  // Active-turn pointer — bright pulsing ring on the current slot.
+  // Active-turn pointer - bright pulsing ring on the current slot.
   // `.turn-pointer` is the hook the end-turn animation tweens via
   // cx/cy in openTurnClockModal.
   const tp = pointOnRing(pointerSlot, labelR);
@@ -200,7 +200,7 @@ function wheelSvg(displayTurn = null) {
 function tweenPointer(pointer, fromSlot, toSlot, durationMs = 650) {
   return new Promise((resolve) => {
     const labelR = WHEEL_R - WHEEL_RING_W / 2;
-    // Forward distance in slots — endTurn always advances by 1, but
+    // Forward distance in slots - endTurn always advances by 1, but
     // we generalise so multi-step tweens (e.g. event replays) work.
     let forward = ((toSlot - fromSlot) % SLOTS + SLOTS) % SLOTS;
     if (forward === 0) forward = SLOTS;
@@ -221,7 +221,7 @@ function tweenPointer(pointer, fromSlot, toSlot, durationMs = 650) {
 
 // 3D CSS die. Six faces (cube), rotated to land on the requested
 // pip count. The CSS `.die-3d.rolling` runs a quick tumble before
-// settling on .face-N — see map.css.
+// settling on .face-N - see map.css.
 function buildDie(value) {
   const wrap = document.createElement('div');
   wrap.className = 'die-3d';
@@ -324,7 +324,7 @@ export function openTurnClockModal({ rolling = null, animateFrom = null } = {}) 
              <p class="ev-text">${ev.text}</p>
              <p class="ev-sandbox-note">
                <span class="ev-sandbox-badge">Sandbox preview</span>
-               Not applied automatically — resolve at the table if
+               Not applied automatically - resolve at the table if
                you're using the cube as a play-along clock.
              </p>
            </div>`
@@ -340,14 +340,14 @@ export function openTurnClockModal({ rolling = null, animateFrom = null } = {}) 
     } else {
       eventHost.innerHTML = `
         <p class="turn-clock-event-line muted">
-          No event rolled this round yet — events fire on slots
+          No event rolled this round yet - events fire on slots
           ${EVENT_SLOTS.join(', ')}.
         </p>
       `;
     }
     panel.appendChild(body);
     // If we were given a starting slot, the pointer is currently
-    // painted at THAT slot — tween it to the live turn so the
+    // painted at THAT slot - tween it to the live turn so the
     // player sees the Sunspot Cube slide into its new home.
     if (startSlot !== null && startSlot !== undefined && startSlot !== turn) {
       const pointer = body.querySelector('.turn-pointer');

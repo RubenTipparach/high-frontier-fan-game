@@ -6,7 +6,7 @@
 // ~1500 nodes (sites + routing waypoints: lagrange, burn, hohmann
 // transfers, hazard zones) and ~1750 edges. The waypoint nodes are
 // what make the connections look like proper routes instead of a
-// crisscrossed knot — they're literally the intermediate stops along
+// crisscrossed knot - they're literally the intermediate stops along
 // each interplanetary corridor.
 //
 // Coordinates in the planner JSON are normalised 0..1 (proportions
@@ -56,7 +56,7 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
     if (fr.ok) siteFlags = await fr.json();
   } catch { /* ignore */ }
 
-  // (waypoint-seasons.json fetch removed — see the comment in
+  // (waypoint-seasons.json fetch removed - see the comment in
   // the per-point loop below for why the corridor propagation
   // was disabled.)
 
@@ -64,7 +64,7 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
   // we keep them as-is (they're stable across reloads of the same
   // data file) and add a human-readable name for display.
   //
-  // Every type is included — decorative nodes are routing waypoints
+  // Every type is included - decorative nodes are routing waypoints
   // with no name, but they connect ~half the planner's edges, so
   // dropping them tears holes in the graph. We render them as tiny
   // faint dots and exclude them from click hit-testing so they
@@ -78,7 +78,7 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
     // body group key so "Mars: Arsia Mons" can inherit any flags
     // recorded against the Mars group.
     const flags = lookupFlags(p.siteName, siteFlags);
-    // Waypoint season propagation is disabled — the corridor
+    // Waypoint season propagation is disabled - the corridor
     // boundaries the BFS produced didn't match the published
     // board's seasonal painting on enough cards that the colours
     // ended up misleading. Only the canonical site-level
@@ -86,7 +86,7 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
     // Icarus / Phaethon / …) is kept. The extractor + data file
     // remain in the tree (scripts/extract-waypoint-seasons.py,
     // data/waypoint-seasons.json) so we can revisit with a
-    // better heuristic later — just don't apply it here.
+    // better heuristic later - just don't apply it here.
     const isWaypoint = rawType !== 'site';
     // Cross-reference the local hand-curated table by name to pull
     // solarZone (heliocentric band) + a siteSynodic fallback for
@@ -95,7 +95,7 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
     const local = LOCAL_SITE_BY_NAME.get(normalizeSiteName(p.siteName)) || null;
     const synodic = p.siteSynodic || (local && local.siteSynodic) || null;
     const solarZone = local ? (local.solarZone || null) : null;
-    // id2 — a human-friendly stable reference for every location,
+    // id2 - a human-friendly stable reference for every location,
     // derived once at load time. Real sites: slug of their name
     // ("comet-borrelly", "dresda"). Waypoints: type prefix + a
     // short hash of their (x, y) so unnamed lagranges/burns get
@@ -116,7 +116,7 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
       solarZone,
       hydration: parseHydration(p.siteWater),
       hazard: !!p.hazard,
-      // Comets are always landing sites in HF4 — you touch down
+      // Comets are always landing sites in HF4 - you touch down
       // on the nucleus to harvest water. The planner JSON doesn't
       // flag them, so default landing=1 for any classified comet.
       landing: typeof p.landing === 'number' ? p.landing
@@ -152,7 +152,7 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
   // viewport's layout.
   synthesizeBodies(sites, viewW, viewH);
 
-  // Disambiguate any id2 collisions (rare — only happens if two
+  // Disambiguate any id2 collisions (rare - only happens if two
   // unnamed waypoints sit at coords that hash to the same bucket,
   // or two real sites have the same slugged name). Append a
   // numeric suffix in iteration order so the result stays stable.
@@ -199,7 +199,7 @@ function makeRefId(p, rawType) {
   }
   const prefix = TYPE_PREFIX[rawType] || 'wp';
   // Hash from the position coords so two waypoints can't collide
-  // unless they're at the exact same x/y — which never happens in
+  // unless they're at the exact same x/y - which never happens in
   // practice in the planner data.
   const posKey = `${(p.x || 0).toFixed(6)},${(p.y || 0).toFixed(6)}`;
   return `${prefix}-${shortHash5(posKey)}`;

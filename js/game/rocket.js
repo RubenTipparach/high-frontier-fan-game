@@ -133,7 +133,7 @@ export function getActiveThrusterId() {
 export function setActiveThruster(id) {
   // Only allow picking a thruster that's actually in the stack
   // and is genuinely a thruster (or a missile-class robonaut
-  // with its own thrust value — same idiom as the rest of the
+  // with its own thrust value - same idiom as the rest of the
   // app).
   if (!_stack.some((s) => s.id === id)) return false;
   const card = PATENTS_BY_ID[id];
@@ -187,7 +187,7 @@ export function isRocketActive() {
 
   // Group the active thruster's requires by supplier prefix
   // (reactor-* / gen-* / etc.) so same-supplier kinds read as
-  // OR-alternatives — a thruster listing X / ∿ / 💣 reactor
+  // OR-alternatives - a thruster listing X / ∿ / 💣 reactor
   // is satisfied by ANY reactor that supplies one of those.
   const reqs = (active.faces && active.faces.primary && active.faces.primary.requires) || active.requires || [];
   const missing = [];
@@ -250,7 +250,7 @@ function activeFace(card) {
 }
 
 // Total dry mass of the stack (no fuel) and minimum rad-hardness
-// across the cards. min rad-hard is the ship's rad-hard limit —
+// across the cards. min rad-hard is the ship's rad-hard limit -
 // the weakest card sets the ceiling at a radhaz crossing.
 export function getStackTotals() {
   let mass = 0;
@@ -279,9 +279,9 @@ export function getStackTotals() {
 // other stack card's thrustMod (additive) + fuelMod (multiplicative).
 // Returns null if there is no active thruster.
 //
-// thrustMod is additive — Cermet NERVA contributes +3 thrust to the
+// thrustMod is additive - Cermet NERVA contributes +3 thrust to the
 // thruster it's paired with.
-// fuelMod is multiplicative — values like 0.25 / 0.5 / 1.0 scale the
+// fuelMod is multiplicative - values like 0.25 / 0.5 / 1.0 scale the
 // base fuel-consumption-per-burn down (or leave it flat).
 //
 // Wet mass is exposed too so the UI can show "can it actually move":

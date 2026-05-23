@@ -33,12 +33,12 @@ const MAX_ZOOM = 10;
 // hydration droplets / centre flag glyphs) reaches its full
 // HEX_R size. Below this threshold the hex shrinks
 // proportionally so it doesn't dominate the small-scale,
-// zoomed-out view — and so two adjacent hexes don't visually
+// zoomed-out view - and so two adjacent hexes don't visually
 // merge when the world spacing is compressed. At and above
 // this zoom level the hex is rendered at full size.
 const HEX_FULLSIZE_ZOOM = 2.5;
 
-// World-space anchor of LEO — the sandbox rocket's home and
+// World-space anchor of LEO - the sandbox rocket's home and
 // the big yellow "LEO" label rendered on the map. Exported so
 // the Sandbox "Stack" button in the hand header can centre
 // the map on it. Coordinates match the LEO lagrange waypoint
@@ -49,7 +49,7 @@ export const LEO_ANCHOR = { x: 1193.6, y: 739.3 };
 
 // Short, stable, copy-friendly reference for a planner node id.
 // The upstream vendor data keys nodes by random floats like
-// "0.9483763498218554" — useless as something a player can quote
+// "0.9483763498218554" - useless as something a player can quote
 // in a bug report. djb2-hash to a 7-char base36 string. Same input
 // always yields the same output, so it's still a valid stable id;
 // it just reads as "k3xq2pa" instead of a long decimal.
@@ -204,7 +204,7 @@ function drawDroplet(ctx, cx, cy, h) {
 // Each ring system is a list of concentric bands. Each band has:
 //   r:     inner radius as a multiple of the planet radius
 //   w:     band thickness (also in planet radii)
-//   color: rgba fill — alpha tuned so a band sums with whatever it
+//   color: rgba fill - alpha tuned so a band sums with whatever it
 //          overlaps without going opaque.
 // `tilt` is the rotation in radians (Saturn's axial tilt vs. our
 // viewport's horizontal). `flatten` is the vertical squash factor
@@ -600,7 +600,7 @@ export class MapRenderer {
 
   // Sandbox rocket: a single rocket sprite placed at a world-
   // space (x, y). canFly drives the "🚫 + transparent" overlay
-  // — the renderer doesn't compute fly-ability itself; that's
+  // - the renderer doesn't compute fly-ability itself; that's
   // js/game/rocket.js's canRocketFly().
   setSandboxRocket(opts) {
     this._sandboxRocket = opts || null;
@@ -648,7 +648,7 @@ export class MapRenderer {
     const t0 = performance.now();
     const step = (now) => {
       const k = Math.min(1, (now - t0) / ms);
-      // ease-out cubic — gets you near the target fast, settles softly
+      // ease-out cubic - gets you near the target fast, settles softly
       const e = 1 - Math.pow(1 - k, 3);
       this.pan.x = startX + (targetPanX - startX) * e;
       this.pan.y = startY + (targetPanY - startY) * e;
@@ -981,8 +981,8 @@ export class MapRenderer {
     this._drawLeoAnchorScreen(ctx);
     this._drawPlayerShipScreen(ctx);
     if (this._sandboxRocket) this._drawSandboxRocketScreen(ctx);
-    // Selection ring drawn LAST so nothing — labels, ships, hexes
-    // — paints over it. On mobile the in-hex orange/gold border is
+    // Selection ring drawn LAST so nothing - labels, ships, hexes
+    // - paints over it. On mobile the in-hex orange/gold border is
     // easy to miss, so we layer a thick bright yellow ring + soft
     // halo just outside the selected node's body.
     this._drawSelectionRingScreen(ctx);
@@ -1105,7 +1105,7 @@ export class MapRenderer {
     // orbital edges drawn over the top. The label calls out the
     // solar-thrust modifier (e.g. "MARS −1") so the player can
     // see at a glance how a sail's effective thrust shifts as
-    // their ship moves outward. Neptune+ shows "✕" — sails are
+    // their ship moves outward. Neptune+ shows "✕" - sails are
     // dead past Uranus.
     const startY = 60;
     const bandH = (VIEW_H - 60 - 60) / zones.length;
@@ -1148,7 +1148,7 @@ export class MapRenderer {
     ctx.stroke();
 
     // Comet routes are coloured by the destination comet's
-    // synodic season — red, yellow, or blue — so a glance at
+    // synodic season - red, yellow, or blue - so a glance at
     // an outer-system itinerary tells you which apparition you'd
     // be chasing. One stroke pass per season.
     const seasonKeys = new Set([
@@ -1278,7 +1278,7 @@ export class MapRenderer {
     if (!this._route) return;
     const eff = this.zoom * this.fitScale;
     ctx.lineCap = 'round';
-    // Segments tagged `turn: 1` (or untagged — plain Navigate-to
+    // Segments tagged `turn: 1` (or untagged - plain Navigate-to
     // routes have no turn data) render as the bright orange/gold
     // highlight. Segments on later turns render as a dimmer
     // dashed line; the turn number gets painted on each segment's
@@ -1314,7 +1314,7 @@ export class MapRenderer {
     }
     ctx.setLineDash([]);
 
-    // Turn 1 — bright orange + gold-dash highlight. Same look as
+    // Turn 1 - bright orange + gold-dash highlight. Same look as
     // a Navigate-to inspection route, but here it specifically
     // means "you can fly this much this turn."
     if (turn1.length) {
@@ -1453,7 +1453,7 @@ export class MapRenderer {
           ctx.stroke();
         }
         if (halfLandings.length) {
-          // Half-lander disc: a half-moon — left semicircle
+          // Half-lander disc: a half-moon - left semicircle
           // filled solid pink, right semicircle empty, with a
           // full circular outline + diameter line splitting the
           // two. The full rocket glyph rides on top in the
@@ -1606,7 +1606,7 @@ export class MapRenderer {
       const sy = this.pan.y + w.y * eff;
       if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
       if (w.type === 'burn' && w.landing != null) {
-        // Full rocket on both full and half landers — half-status
+        // Full rocket on both full and half landers - half-status
         // is now conveyed by the striped half of the pink disc
         // drawn underneath, not by a clipped glyph.
         ctx.fillText('🚀', sx, sy);
@@ -1664,7 +1664,7 @@ export class MapRenderer {
       if (vis.kind === 'comet') { drawComet(ctx, site.x, site.y, vis.r, site); continue; }
       if (vis.kind !== 'hex') continue;
       // Per-body halo overrides. Ceres punches above its dwarf-
-      // class default — shrink it 50% so it doesn't dominate the
+      // class default - shrink it 50% so it doesn't dominate the
       // belt next to Vesta / Pallas / Hygiea.
       const bodyScale = /(^|\s)ceres/i.test(site.name || '') ? 0.5 : 1;
       const worldR = Math.min(vis.haloR * bodyScale, capWorld);
@@ -1696,8 +1696,8 @@ export class MapRenderer {
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
       if (vis.kind === 'sun') continue;
       // Comets used to render as a pink disc + 🚀 marker. The
-      // published HF4 board draws them as real hexes — same
-      // shape as planets / asteroids — with a synodic-coloured
+      // published HF4 board draws them as real hexes - same
+      // shape as planets / asteroids - with a synodic-coloured
       // outline (red / yellow / blue per season). The hex path
       // below handles them. TYPE_VIS.comet was switched to
       // kind: 'hex' so no special-case here.
@@ -1765,7 +1765,7 @@ export class MapRenderer {
       }
 
       // Synodic colour is painted on the hex border itself
-      // above — no separate outer ring needed.
+      // above - no separate outer ring needed.
       // Selected nodes are highlighted via their border + glow
       // above; no extra ring needed.
     }
@@ -1799,7 +1799,7 @@ export class MapRenderer {
   // Top-layer selection halo. The hex / waypoint passes paint a
   // subtle in-border highlight that's easy to miss on a phone, so
   // we also draw a bright outer pulse ring here AFTER everything
-  // else — including labels and overlay sprites — has rendered.
+  // else - including labels and overlay sprites - has rendered.
   // Hits any currently-selected route endpoint (the routed `from`
   // hex is the player's "I just tapped this" target in browse.js).
   _drawSelectionRingScreen(ctx) {
@@ -1811,7 +1811,7 @@ export class MapRenderer {
     const { hostW, hostH } = this;
     // Pulse 0..1 driven by the same anim clock the asteroid belt
     // uses. Modulates ring radius + glow alpha so the highlight
-    // visibly moves — important on mobile where a static thin
+    // visibly moves - important on mobile where a static thin
     // ring fades into the map's busy background.
     const t = (this._animTime || 0) / 1000;
     const pulse = (Math.sin(t * Math.PI * 1.6) + 1) * 0.5;
@@ -1963,7 +1963,7 @@ export class MapRenderer {
         ctx.fillText('☠', sx, sy);
       }
 
-      // Site-flag glyphs ride on the hex centre — 🌊 submarine,
+      // Site-flag glyphs ride on the hex centre - 🌊 submarine,
       // 🌿 astrobiology, ⛅ aerostat (atmospheric). One flag sits
       // dead-centre; multiples spread horizontally so they all
       // fit inside the larger HEX_R. Comets don't take a hex,
@@ -2051,7 +2051,7 @@ export class MapRenderer {
       // touchend even with `touch-action: none`. The touchend
       // handler already called onSelect for the tap; if we let
       // this click also call onSelect the second invocation
-      // matches _selectedId and immediately DESELECTS — that's
+      // matches _selectedId and immediately DESELECTS - that's
       // why on mobile the popup + ring "show up and close right
       // away." Bail when a recent touch interaction owned the
       // event. _touchActive is set in _wireHover (same flag that
@@ -2334,7 +2334,7 @@ export class MapRenderer {
       }
       el.appendChild(tags);
     }
-    // Node id2 — a human-friendly stable reference generated at
+    // Node id2 - a human-friendly stable reference generated at
     // data-load time (see planner-map.js#makeRefId). Reads as
     // e.g. "comet-borrelly", "dresda", "lag-leo", "burn-3a2b9".
     // The raw vendor float id stays on the title for the rare

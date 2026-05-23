@@ -54,7 +54,7 @@ function paintRocket(ctx, w, h, palette) {
   ctx.fill();
   ctx.stroke();
 
-  // Highlight strip on the left side of the body — sells the
+  // Highlight strip on the left side of the body - sells the
   // "lit from one direction" 3D feel without raster lighting.
   ctx.fillStyle = palette.light;
   ctx.beginPath();

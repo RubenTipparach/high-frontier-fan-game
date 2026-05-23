@@ -226,7 +226,7 @@ function humanizeError(code) {
   return ({
     invalid_name: 'Name must be 3-20 letters/numbers/_/-.',
     invalid_token: 'Device code looks wrong.',
-    name_taken: 'That name is taken — paste a device code or pick another name.',
+    name_taken: 'That name is taken - paste a device code or pick another name.',
     rate_limited: 'Too many sign-in attempts. Wait an hour.',
     api_unavailable: 'Server is unreachable. Sign-in requires a server.',
     network: 'Network error. Try again in a moment.',
@@ -250,7 +250,7 @@ async function boot() {
   if (me) {
     ws.connect(me.token);
     subscribeInvitesForProfile(me);
-    // Default landing view is Sandbox — the player can always
+    // Default landing view is Sandbox - the player can always
     // hop to Multiplayer via the topbar. We still kick off the
     // lobby-list / invites loads so the multiplayer view is
     // populated when they switch.

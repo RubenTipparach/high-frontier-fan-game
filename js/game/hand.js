@@ -1,4 +1,4 @@
-// Sandbox "hand" — the player's holding area for patents and
+// Sandbox "hand" - the player's holding area for patents and
 // crew on their way to a rocket. Each physical card exists in
 // exactly one location at a time: deck (library), hand, or
 // rocket stack. The hand state stores the ids of cards
@@ -70,7 +70,7 @@ export function addToHand(card) {
     return { ok: false, reason: 'already in your hand' };
   }
   if (isInRocket(card.id)) {
-    return { ok: false, reason: 'currently on your rocket — pull it back first' };
+    return { ok: false, reason: 'currently on your rocket - pull it back first' };
   }
   _hand.push(card.id);
   persist();

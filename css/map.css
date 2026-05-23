@@ -55,7 +55,7 @@
   flex-wrap: wrap;
 }
 /* Turn controls live on the LEFT of the toolbar (before search
-   + route) so an open side panel — which covers the right edge —
+   + route) so an open side panel - which covers the right edge -
    never hides them. Previous "padding-right when panel open"
    fix moved the toolbar's RIGHT-aligned items into the padding
    area which is covered by the panel; the buttons rendered into
@@ -80,7 +80,7 @@
   font-weight: 700;
   border-color: #9a3412;
 }
-/* Move button in its "undo" state — a move has been queued this
+/* Move button in its "undo" state - a move has been queued this
    turn and can still be taken back. Yellow distinguishes it from
    the neutral default so the player notices the toggle. */
 .map-turn-controls #turn-move-rocket[data-state="undo"] {
@@ -201,7 +201,7 @@
   letter-spacing: 1px;
 }
 
-/* Search toggle button — opens the search modal on mobile.
+/* Search toggle button - opens the search modal on mobile.
    Desktop hides the toggle (the inline search is always present
    in the toolbar); mobile hides the inline search and shows the
    toggle instead. The toggle styling mirrors the other small
@@ -272,7 +272,7 @@
     color: var(--ink);
   }
   .map-toolbar .map-search.is-open ul {
-    /* Anchor the suggestions list inside the modal — the modal
+    /* Anchor the suggestions list inside the modal - the modal
        itself is the offset parent now. */
     left: 12px;
     right: 12px;
@@ -328,7 +328,7 @@
   justify-content: flex-end;
 }
 
-/* Turn tracker modal — Sol Sunspot wheel */
+/* Turn tracker modal - Sol Sunspot wheel */
 .turn-clock-overlay { z-index: 60; }
 .turn-clock-panel {
   position: relative;
@@ -418,7 +418,7 @@
   line-height: 1.55;
   color: var(--ink-dim);
 }
-/* Sandbox-mode note under each event — sets expectations that the
+/* Sandbox-mode note under each event - sets expectations that the
    effect is shown but NOT auto-applied. Stage 3+ replaces this
    with the actual application. */
 .turn-clock-event-card .ev-sandbox-note {
@@ -665,7 +665,7 @@
    selected site and accepts pointer events ONLY on its action
    buttons + close X. The body itself is pointer-events:none so a
    tap on the popup's name / meta / id passes through to the canvas
-   underneath — otherwise the floating popup absorbs taps on sites
+   underneath - otherwise the floating popup absorbs taps on sites
    that happen to sit behind it, and the player gets stuck unable
    to re-select. Renderer keeps `left/top` in sync each frame; we
    anchor "above and centred" via transform so the popup floats
@@ -715,7 +715,7 @@
 /* Tag chips below the meta row. Season chip uses the synodic
    palette (matching the comet outlines on the map) so the player
    reads "you need the blue apparition for this site" without
-   needing a legend. Zone chip is neutral grey — it's reference
+   needing a legend. Zone chip is neutral grey - it's reference
    info (which heliocentric band drives solar modifiers), not a
    gating constraint. */
 .map-popup .t-tags {
@@ -782,7 +782,7 @@
 }
 
 /* Rocket plan-route: the primary game-action button. Reads in
-   the rocket / launch palette — blue gradient with a brighter
+   the rocket / launch palette - blue gradient with a brighter
    inner ring. Reserved for the "🛸 Plan rocket route" action,
    which is what the player should actually use during play. */
 .map-popup .popup-btn-rocket {
@@ -930,7 +930,7 @@ body:has(#view-browse:not(.hidden)) #main {
 /* IMPORTANT: the hand-offset selectors below MUST match the panel-
    width selectors above on specificity, or they'll silently
    desync. `:not([data-active=""])` adds an attribute selector to
-   the specificity count — so the generic "any pane open" rule
+   the specificity count - so the generic "any pane open" rule
    would beat a bare `[data-active="patents"]` rule and the hand
    would only get pushed 380 px while the panel is actually
    620 px wide (= ~240 px of overlap, which is the bug we keep
@@ -959,7 +959,7 @@ body:has(#view-browse:not(.hidden)) #main {
   font-size: 12px;
   padding: 2px 0 4px;
   /* When the side panel is open the hand strip squishes to the
-     left edge — flex-wrap keeps BOOST on screen by letting items
+     left edge - flex-wrap keeps BOOST on screen by letting items
      wrap to a second row instead of overflowing horizontally. */
   flex-wrap: wrap;
 }
@@ -1010,7 +1010,7 @@ body:has(#view-browse:not(.hidden)) #main {
 .hand-slot {
   position: relative;
   flex-shrink: 0;
-  /* 40% bigger than the previous pass — 220px card × 0.77
+  /* 40% bigger than the previous pass - 220px card × 0.77
      scale = ~169px wide. Height tight to the visible card
      (350+px × 0.77 ≈ 280px) so the quick-action row at
      bottom: 0 actually lands under the card instead of way
@@ -1043,7 +1043,7 @@ body:has(#view-browse:not(.hidden)) #main {
      context. Without this, cards with more body content grow
      past min-height: 350 and the bottom-anchored Flip + quick-
      icons drift below the slot. With it, every hand-slot card
-     is identical 220 × 350 — content beyond clips. Scaled
+     is identical 220 × 350 - content beyond clips. Scaled
      × 0.77 → 169 × 270 visible, fitting the 280px slot. */
   height: 350px;
   min-height: 0;
@@ -1133,7 +1133,7 @@ body:has(#view-browse:not(.hidden)) #main {
   flex-direction: column;
   align-items: center;
   /* gap accounts for the visual height a scale(1.6) card claims
-     beyond its layout box — without it the actions row crashes
+     beyond its layout box - without it the actions row crashes
      into the card's footer. */
   gap: 130px;
   position: relative;
@@ -1276,7 +1276,7 @@ body:has(#view-browse:not(.hidden)) #main {
      toolbar at top (~44 px). The hand strip stays out of the
      panel's way by being explicitly pushed to the left via the
      `right: panel-width` rules on .sandbox-hand below, NOT by
-     clipping the panel's bottom edge — the panel needs to draw
+     clipping the panel's bottom edge - the panel needs to draw
      all the way down so it reads as one continuous surface. */
   top: 44px;
   right: 0;
@@ -1315,7 +1315,7 @@ body:has(#view-browse:not(.hidden)) #main {
        transform: translateX(-50%). A transformed ancestor would
        become the containing block for any `position: fixed`
        descendant (CSS spec quirk), trapping the .sidepanel-content
-       modal inside the tiny pill — so we deliberately avoid
+       modal inside the tiny pill - so we deliberately avoid
        transform here. */
     margin: 0 auto;
     width: max-content !important;
@@ -1324,7 +1324,7 @@ body:has(#view-browse:not(.hidden)) #main {
     border-radius: 10px;
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
     background: rgba(15, 16, 35, 0.94);
-    /* Explicitly disable the inherited blur — `backdrop-filter`
+    /* Explicitly disable the inherited blur - `backdrop-filter`
        creates a containing block for `position: fixed`
        descendants (same spec quirk as `transform`), and that
        traps the .sidepanel-content modal inside the pill.
@@ -1334,7 +1334,7 @@ body:has(#view-browse:not(.hidden)) #main {
     /* Must exceed the modal-backdrop's z-index (9). The sidepanel
        creates a stacking context with this z-index, so the modal
        content inside (which gets z-index: 10 relative to this
-       parent context) inherits the ceiling — without this bump
+       parent context) inherits the ceiling - without this bump
        the backdrop draws OVER the modal and the player sees an
        empty dim area when they tap a tab. */
     z-index: 11;
@@ -1506,7 +1506,7 @@ body:has(#view-browse:not(.hidden)) #main {
   font-weight: 600;
 }
 /* Colour-code the filter pills to match the typebar of the
-   card type they filter — instant visual cross-reference
+   card type they filter - instant visual cross-reference
    between this row and the cards rendered below. The 4px left
    stripe carries the supplier accent; the chip's background
    stays subdued so the typography reads cleanly. Active state
@@ -1783,7 +1783,7 @@ body:has(#view-browse:not(.hidden)) #main {
    edge, revealed on hover. Lives INSIDE .card so it shares the
    same scale + transform as the Flip button (which sits at
    bottom-right of the same card). The row is anchored to
-   bottom-left so it sits to the LEFT of Flip — both in the
+   bottom-left so it sits to the LEFT of Flip - both in the
    footer band of the card. */
 .hand-slot .hand-quick-actions {
   position: absolute;
@@ -1885,7 +1885,7 @@ body:has(#view-browse:not(.hidden)) #main {
 /* Rocket-stack modal: a centered panel that floats over the
    map. Wider than the inspect modal so the player can scan a
    multi-card stack at a glance. The panel itself is the flex
-   container — header (totals + status + engage) is pinned to
+   container - header (totals + status + engage) is pinned to
    the top via flex-shrink:0, and only the cards grid scrolls. */
 .rocket-stack-panel {
   position: relative;
@@ -2005,7 +2005,7 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .rocket-fuel-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* Rocket stack slot actions row — sits beneath each card in
+/* Rocket stack slot actions row - sits beneath each card in
    the rocket stack modal. Holds the "Set as active" thruster
    picker (thrusters only) + the "Back to hand" affordance. */
 .rocket-slot-actions {
@@ -2029,7 +2029,7 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 /* Supporting-card highlight: any non-thruster card whose supplies
    satisfy the active thruster's requires gets a soft green ring
-   so the player can trace the support chain at a glance —
+   so the player can trace the support chain at a glance -
    mirrors the ✓ green wash on the matching support chips. */
 .rocket-slot.is-supporting .card {
   box-shadow: 0 0 0 2px #22c55e, 0 0 14px rgba(34, 197, 94, 0.45);
@@ -2098,7 +2098,7 @@ body:has(#view-browse:not(.hidden)) #main {
    below shift each edge by exactly 24 px from 0% to 100% so the
    end frame paints the same pixels as the start frame and the
    loop is seamless. Both the body border and the active-thruster
-   card use the same period + keyframes for a consistent look —
+   card use the same period + keyframes for a consistent look -
    visual speed differences come from the `animation-duration`
    value, not from differing stripe widths. */
 @keyframes rocket-march {
@@ -2169,7 +2169,7 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 
 @media (hover: none) and (pointer: coarse) {
-  /* No hover on touch — drop the hover quick-icon row, drop
+  /* No hover on touch - drop the hover quick-icon row, drop
      the hover-spread fan effect (the hovered-sibling margin
      shifts can stick visually), and switch the slot's
      transform-origin to default so the selected pop-up

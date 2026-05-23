@@ -1,10 +1,10 @@
-// Turn clock — Sol Sunspot Cycle (HF4 core game).
+// Turn clock - Sol Sunspot Cycle (HF4 core game).
 //
 // 12-slot ring divided into 3 seasons of 4 slots each. The Sunspot
 // Cube advances one slot per "End turn". When it crosses the new-
 // round marker the round counter ticks up; when it lands on an
 // event slot we roll a d6 and surface the result so the player can
-// (eventually) act on it. Right now we just report the roll —
+// (eventually) act on it. Right now we just report the roll -
 // translating each Inspiration / Glitch / Pad Explosion / Solar
 // Flare / Budget Cuts outcome into engine effects belongs in
 // Stage 3.
@@ -21,13 +21,13 @@
 //                                until rocket-movement is wired)
 //   consumeOp()                → spend one operation
 //   consumeMove()              → spend one ship move
-//   endTurn()                  → { turn, event } — resets per-turn budgets
+//   endTurn()                  → { turn, event } - resets per-turn budgets
 //   resetClock()               → reset to turn 0, round 1
 //   onTurnChange(cb)           → unsubscribe
 //
 // Layout (slot indexes):
 //   0   = new round marker (middle of Season Blue)
-//   1,3,5,7,9,11 = event slots — "1 turn after new round, then
+//   1,3,5,7,9,11 = event slots - "1 turn after new round, then
 //                  every 2 turns" as specced
 //   0..3  = Blue, 4..7 = Yellow, 8..11 = Red
 
@@ -53,7 +53,7 @@ export const EVENT_SLOTS = [1, 3, 5, 7, 9, 11];
 // season (Blue / Yellow / Red). The text below is reproduced from
 // the published rulebook so the modal can surface it verbatim.
 //
-// NOTE: these events DO NOT directly award or remove VP — they
+// NOTE: these events DO NOT directly award or remove VP - they
 // change game state (rotate decks, place Glitch tokens,
 // decommission cards, swap faction privileges, force flare rolls).
 // VP swings only happen as a side-effect of those state changes
@@ -116,7 +116,7 @@ export const EVENT_TABLE = {
   },
 };
 // Resolve a (dieRoll, seasonName) pair to the canonical event
-// record. Returns null when no entry matches — shouldn't happen
+// record. Returns null when no entry matches - shouldn't happen
 // because every d6 value is covered for every season, but lets
 // callers fail soft.
 export function getEventForRoll(dieRoll, seasonName) {
@@ -130,7 +130,7 @@ export function getEventForRoll(dieRoll, seasonName) {
 // Per-turn budgets. Stage 3's operations engine will take these
 // over (HF4 core is 4 ops/turn); for now they're placeholders so
 // the end-turn confirm dialog can gate on "did you spend
-// everything you had?" — both default to 1.
+// everything you had?" - both default to 1.
 export const OPS_PER_TURN   = 1;
 export const MOVES_PER_TURN = 1;
 
@@ -218,7 +218,7 @@ export function consumeMove() {
 // Refund a previously-consumed move. Used by the toolbar's
 // 🛸 / ↩ toggle so the player can take it back before they end
 // the turn (HF4 lets you do your operation before OR after your
-// move — never in the middle — so the move is reversible right
+// move - never in the middle - so the move is reversible right
 // up until end-turn commits the round). Returns false when nothing
 // to refund (move budget is already full).
 export function refundMove() {

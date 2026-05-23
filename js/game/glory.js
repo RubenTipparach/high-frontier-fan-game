@@ -1,25 +1,25 @@
-// Glory — HF4's "ticker-tape" system. Each rocket carries a set
+// Glory - HF4's "ticker-tape" system. Each rocket carries a set
 // of glory chits earned by being the first to enter a given
 // heliocentric zone. Chits are physical inventory: the rocket
 // hauls them back to LEO (Earth zone) to convert them into VPs.
 // Other VP sources (event d6 outcomes like Catastrophic Failure
 // or Rookie Miscalculation) feed the same VP counter directly.
 //
-// We don't have a per-crew abstraction in the sandbox yet — the
+// We don't have a per-crew abstraction in the sandbox yet - the
 // whole rocket "is" the crew for now. When real crew cards land
 // (post-Stage 3) this module's _chits / _visited / _vps will
 // split per-crew; the API surface won't change.
 //
 // Public API:
-//   ZONE_CHIT_VPS                       — VP table per zone
+//   ZONE_CHIT_VPS                       - VP table per zone
 //   getChits()                          → array of {zone, earnedTurn}
 //   getVisitedZones()                   → array of zone names
 //   getVps()                            → number
 //   awardChitForZone(zone, turn)        → chit | null
 //   revokeChitForZone(zone)             → boolean
 //   cashInChits(reason='returned to LEO') → {vps, chits}
-//   addVps(delta, reason)               — additive (event d6 outcomes)
-//   onChange(cb)                        — unsubscribe
+//   addVps(delta, reason)               - additive (event d6 outcomes)
+//   onChange(cb)                        - unsubscribe
 
 const STORAGE_CHITS   = 'hf-glory-chits';
 const STORAGE_VISITED = 'hf-glory-visited';
@@ -101,7 +101,7 @@ export function awardChitForZone(zone, turn = null) {
   return chit;
 }
 
-// Revert the most recent awardChitForZone(zone) — undo of a rocket
+// Revert the most recent awardChitForZone(zone) - undo of a rocket
 // move that crossed into a new zone. Removes the chit AND drops
 // the zone from the visited set so a subsequent re-entry can
 // re-award it. Returns true when something was actually undone.

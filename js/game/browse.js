@@ -78,7 +78,7 @@ export function mountBrowse() {
 // Sandbox hand strip wiring: drop target, slot rendering, +
 // the grabber bar that lets the user drag the strip up to see
 // more cards. Card-click opens the inspect modal instead of
-// removing the slot directly — Discard lives in the modal.
+// removing the slot directly - Discard lives in the modal.
 // Touch-device check used to toggle UI between the desktop
 // hover-driven flow and the mobile tap-to-select flow. Reads
 // the standardised CSS media queries so an external keyboard
@@ -103,7 +103,7 @@ function wireHandStrip() {
     CREW.some((c) => c.id === id) ? 'crew' : 'patent';
 
   // Drag from the deck → drop onto the strip → append slot.
-  // preventDefault unconditionally on dragover — dataTransfer
+  // preventDefault unconditionally on dragover - dataTransfer
   // .types is normalised differently across browsers and the
   // "includes" check was silently rejecting valid drags in
   // Firefox + Safari. The drop handler still validates the
@@ -151,7 +151,7 @@ function wireHandStrip() {
       // Quick-action row appended INSIDE the card element so
       // it shares the same scale + transform as the Flip
       // button (which card-ui appends to the card root). Both
-      // end up at the card's actual visible bottom edge —
+      // end up at the card's actual visible bottom edge -
       // previously the quick-icons sat at the slot's bottom
       // edge, which is way below the scaled card.
       const quick = document.createElement('div');
@@ -298,7 +298,7 @@ function wireHandGrabber(grabber, strip) {
 // it with a fixed-position clone that follows the pointer, casts
 // a heavy drop shadow, and wiggles with spring-damped rotation
 // driven by horizontal velocity. The native HTML5 drop event
-// still handles the actual data transfer — this only changes
+// still handles the actual data transfer - this only changes
 // the visual the user sees while dragging.
 let _dragGhost = null;
 let _dragGhostState = null;
@@ -306,7 +306,7 @@ let _dragGhostState = null;
 function startCustomDragGhost(srcEl, ev) {
   endCustomDragGhost();
   // 1×1 transparent canvas. setDragImage on a freshly-constructed
-  // <img src=data:…> raced the browser in Safari + Firefox —
+  // <img src=data:…> raced the browser in Safari + Firefox -
   // the drag started before the image loaded and the native
   // ghost flickered in. A canvas is fully painted synchronously
   // at the moment we hand it off, so the swap is reliable.
@@ -320,7 +320,7 @@ function startCustomDragGhost(srcEl, ev) {
   ghost.style.width  = rect.width + 'px';
   ghost.style.height = rect.height + 'px';
   // Anchor the ghost so the pointer "holds" the spot where the
-  // user grabbed — feels less floaty than centring it.
+  // user grabbed - feels less floaty than centring it.
   const offsetX = ev.clientX - rect.left;
   const offsetY = ev.clientY - rect.top;
   ghost.style.left = (ev.clientX - offsetX) + 'px';
@@ -416,7 +416,7 @@ function openDeckTapModal(card, kind) {
   panel.appendChild(actions);
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
-  // Tap the backdrop or press Escape to dismiss — no explicit ×
+  // Tap the backdrop or press Escape to dismiss - no explicit ×
   // button. The card modal is small and the backdrop is the
   // obvious affordance.
   const onKey = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
@@ -424,7 +424,7 @@ function openDeckTapModal(card, kind) {
 }
 
 // Inspect modal: enlarged copy of the clicked card with three
-// actions — Discard (pop back to the deck), Exo produce (will
+// actions - Discard (pop back to the deck), Exo produce (will
 // need a factory location once Stage-3 builds them), and Add to
 // stack (push onto the LEO rocket).
 function openCardModal(card, kind, slotIdx) {
@@ -461,7 +461,7 @@ function openCardModal(card, kind, slotIdx) {
   sellBtn.type = 'button';
   sellBtn.className = 'modal-btn sell';
   sellBtn.textContent = '💰 Sell';
-  sellBtn.title = 'Sell card — same as discard until the Stage-3 economy lands';
+  sellBtn.title = 'Sell card - same as discard until the Stage-3 economy lands';
   sellBtn.addEventListener('click', () => {
     removeFromHandAt(slotIdx);
     close();
@@ -499,7 +499,7 @@ function openCardModal(card, kind, slotIdx) {
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
 
-  // Tap the backdrop or press Escape to dismiss — no explicit ×
+  // Tap the backdrop or press Escape to dismiss - no explicit ×
   // button (the action row already crowds the bottom).
   const onKey = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
   document.addEventListener('keydown', onKey);
@@ -548,7 +548,7 @@ function showPane(pane) {
   for (const el of panel.querySelectorAll('.panel-pane')) {
     el.classList.toggle('active', el.dataset.pane === pane);
   }
-  // Backdrop tracks panel state — visible whenever a pane is open
+  // Backdrop tracks panel state - visible whenever a pane is open
   // (CSS gates it behind the mobile breakpoint so desktop never
   // sees it).
   const backdrop = document.getElementById('browse-modal-backdrop');
@@ -648,11 +648,11 @@ function ensureMapShell(host) {
         </div>
         <div class="dbg-row">
           <span>Zoom</span>
-          <strong id="dbg-zoom">—</strong>
+          <strong id="dbg-zoom">-</strong>
         </div>
         <div class="dbg-row">
           <span>FPS</span>
-          <strong id="dbg-fps">—</strong>
+          <strong id="dbg-fps">-</strong>
         </div>
         <label class="dbg-slider">
           <span>Initial zoom <em id="dbg-init-zoom-val"></em></span>
@@ -691,7 +691,7 @@ function ensureMapShell(host) {
   // when the player still has unspent budget; if they confirm and
   // the new slot is an event, openTurnClockModal animates the d6.
   // Move rocket is a placeholder until the rocket-movement engine
-  // lands — it just consumes the per-turn move budget for now so
+  // lands - it just consumes the per-turn move budget for now so
   // the end-turn confirm reflects the spend.
   host.querySelector('#turn-end').addEventListener('click', async () => {
     // Capture the previous slot BEFORE advancing so the modal can
@@ -701,7 +701,7 @@ function ensureMapShell(host) {
     const prevTurn = getTurn();
     const result = await triggerEndTurn();
     if (!result) return;
-    // Sunspot Cube landed on an event slot — apply the d6 outcome
+    // Sunspot Cube landed on an event slot - apply the d6 outcome
     // (VP credit / debit + flavour log line) BEFORE we commit the
     // mission log so the event appears in this turn's record.
     if (result.event) {
@@ -714,7 +714,7 @@ function ensureMapShell(host) {
       round: result.round,
       event: result.event,
     });
-    // Wipe this turn's cyan rocket trail — each turn starts with a
+    // Wipe this turn's cyan rocket trail - each turn starts with a
     // clean slate so the ribbon reads as "where I went THIS turn",
     // not "everywhere I've ever been". Position + planned route
     // both stay put.
@@ -730,7 +730,7 @@ function ensureMapShell(host) {
     openTurnClockModal();
   });
   // HF4: a turn is "operation, then move" OR "move, then operation"
-  // — never split around the move. So the move stays reversible right
+  // - never split around the move. So the move stays reversible right
   // up until end-turn commits. The 🛸 button toggles between "Move"
   // and "↩ Undo move" based on whether the per-turn move budget has
   // been spent. End turn refills the budget, which calls back here
@@ -847,7 +847,7 @@ function wireSearch(host) {
 
   // Mobile: search lives in a modal triggered by the toolbar 🔍 button.
   // CSS hides .map-search by default at <720px and shows it as a fixed
-  // modal when .is-open is set. Desktop ignores all of this — the inline
+  // modal when .is-open is set. Desktop ignores all of this - the inline
   // search stays in the toolbar and the toggle/close/backdrop are hidden.
   function openSearchModal() {
     searchEl?.classList.add('is-open');
@@ -1009,10 +1009,10 @@ async function mountMapFor() {
 // Paint the sandbox rocket on the map at LEO. Position is a
 // fixed world-space coord that visually reads as "above Earth"
 // on the cleaned-up zone-band layout. Colour stays yellow for
-// now — multiplayer Stage 3 will pick from the 5-colour palette
+// now - multiplayer Stage 3 will pick from the 5-colour palette
 // per player. canFly is recomputed from rocket.js on every
 // rocket-state change.
-// Centered modal that shows the rocket's stack — replaces the
+// Centered modal that shows the rocket's stack - replaces the
 // old sidepanel "rocket" pane. Same data, same actions (pull a
 // card back to the hand), just opens in the middle of the map
 // like the other inspect modals. Press × or Esc to dismiss.
@@ -1041,7 +1041,7 @@ function openRocketStackModal() {
   xBtn.addEventListener('click', close);
   panel.appendChild(xBtn);
 
-  // Engagement is a transient UI flag — the player presses
+  // Engagement is a transient UI flag - the player presses
   // "Engage" once supports are met to trigger the moving-rocket
   // animation. Any stack change (add / remove / re-pick active)
   // resets it so a freshly-flyable stack still needs the user to
@@ -1052,7 +1052,7 @@ function openRocketStackModal() {
     const r = isRocketActive();
     const activeId = getActiveThrusterId();
     // The active thruster's "supplied" set is what the rest of
-    // the stack contributes — used both by isRocketActive() and
+    // the stack contributes - used both by isRocketActive() and
     // by renderCard() to mark each support chip ✓.
     const supplied = new Set();
     for (const s of stack) {
@@ -1062,7 +1062,7 @@ function openRocketStackModal() {
       const sup = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
       for (const k of sup) supplied.add(k);
     }
-    // Engagement is meaningless when supports aren't satisfied —
+    // Engagement is meaningless when supports aren't satisfied -
     // clear the flag so the button text + animation don't lie if
     // the player removes a card mid-flight.
     if (!r.active) engaged = false;
@@ -1075,8 +1075,8 @@ function openRocketStackModal() {
     // Status banner: active + green when all three rules hold,
     // grounded + red otherwise with the specific reason inline.
     const status = r.active
-      ? '<p class="rocket-status ok">✓ Active — rocket can move.</p>'
-      : `<p class="rocket-status bad">🚫 Inactive — ${esc(r.reason)}.</p>
+      ? '<p class="rocket-status ok">✓ Active - rocket can move.</p>'
+      : `<p class="rocket-status bad">🚫 Inactive - ${esc(r.reason)}.</p>
          ${r.missing.length
            ? `<ul class="rocket-issues">${r.missing.map((m) => `<li>${esc(m)}</li>`).join('')}</ul>`
            : ''}`;
@@ -1084,7 +1084,7 @@ function openRocketStackModal() {
     // Totals row: dry + wet mass, min rad-hard, fuel +/-, plus
     // (when a thruster is active) the modifier-applied thrust and
     // fuel-per-burn numbers. Rocket can lift iff thrust >= wetMass.
-    const fmt = (n) => Number.isFinite(n) ? (Math.round(n * 100) / 100) : '—';
+    const fmt = (n) => Number.isFinite(n) ? (Math.round(n * 100) / 100) : '-';
     const thrustHtml = thrStats
       ? `<div class="rocket-totals-cell">
            <span class="lbl">Thrust</span>
@@ -1094,7 +1094,7 @@ function openRocketStackModal() {
          </div>
          <div class="rocket-totals-cell">
            <span class="lbl">Fuel / burn</span>
-           <strong>${thrStats.fuel != null ? fmt(thrStats.fuel) : '—'}</strong>
+           <strong>${thrStats.fuel != null ? fmt(thrStats.fuel) : '-'}</strong>
            ${thrStats.fuel != null && thrStats.fuel !== thrStats.baseFuel
               ? `<small>(base ${fmt(thrStats.baseFuel)})</small>` : ''}
          </div>`
@@ -1115,7 +1115,7 @@ function openRocketStackModal() {
         </div>
         <div class="rocket-totals-cell">
           <span class="lbl">Min rad-hard</span>
-          <strong>${totals.minRadHard != null ? totals.minRadHard : '—'}</strong>
+          <strong>${totals.minRadHard != null ? totals.minRadHard : '-'}</strong>
         </div>
         <div class="rocket-totals-cell rocket-fuel">
           <span class="lbl">Fuel 💧</span>
@@ -1160,7 +1160,7 @@ function openRocketStackModal() {
     engageBtn.className = 'rocket-engage' + (engaged ? ' is-engaged' : '');
     engageBtn.disabled = !r.active;
     engageBtn.textContent = engaged && r.active
-      ? '🔥 Engaged — rocket is moving!'
+      ? '🔥 Engaged - rocket is moving!'
       : r.active ? '🔥 Engage rocket' : '🔥 Engage rocket (supports unmet)';
     engageBtn.addEventListener('click', () => {
       if (!r.active) return;
@@ -1177,7 +1177,7 @@ function openRocketStackModal() {
       return;
     }
 
-    // Pre-compute the set of kinds the active thruster requires —
+    // Pre-compute the set of kinds the active thruster requires -
     // any other card whose supplies intersect this set is an
     // "active supporter" and gets the supporting-card highlight in
     // sync with the thruster's ✓ chips. Robonauts that double as
@@ -1211,7 +1211,7 @@ function openRocketStackModal() {
         }
       }
       // Only the active thruster's supports are validated against
-      // the rest of the stack — passing `supplied` for others would
+      // the rest of the stack - passing `supplied` for others would
       // mark chips ✓ that aren't actually contributing to flight.
       const cardOpts = { type: slot.kind || 'patent' };
       if (isThruster && slot.id === activeId) cardOpts.supplied = supplied;
@@ -1279,7 +1279,7 @@ function isLeoSite(site) {
 }
 
 // Sunspot Cube d6 events. Rules text + lookup live in turn-clock.js
-// (single source of truth — the tracker modal reads the same table).
+// (single source of truth - the tracker modal reads the same table).
 // **Sandbox mode**: we DO NOT apply the event to game state. The
 // d6 still rolls so the player sees what the cube would have
 // triggered at the table, but no decks rotate, no cards
@@ -1294,7 +1294,7 @@ function applyEventDieEffect(event) {
   logAction({
     type: 'event_d6',
     icon: e.icon,
-    summary: `Would fire: ${e.name} (d6 = ${event.dieRoll}) — ${e.text}`,
+    summary: `Would fire: ${e.name} (d6 = ${event.dieRoll}) - ${e.text}`,
     undoable: false,
     data: {
       dieRoll: event.dieRoll,
@@ -1369,7 +1369,7 @@ function animateRocketAlong(segments, totalMs = 700) {
     _rocketAnimating = true;
     const step = (now) => {
       const t = Math.min(1, (now - t0) / totalMs);
-      // ease-in-out cubic — accelerates off the launch site,
+      // ease-in-out cubic - accelerates off the launch site,
       // decelerates into the landing site.
       const eased = t < 0.5
         ? 4 * t * t * t
@@ -1404,7 +1404,7 @@ function syncSandboxRocket() {
   if (!_renderer) return;
   const stack = getRocketStack();
   // Rocket model is present whenever the player has ≥1 card in
-  // the stack — even when it isn't yet activatable. The 🚫
+  // the stack - even when it isn't yet activatable. The 🚫
   // overlay distinguishes active vs inactive states.
   if (!stack.length) {
     _renderer.setSandboxRocket(null);
@@ -1429,7 +1429,7 @@ async function moveRocket() {
   if (!_renderer || !_activeData) return false;
   if (_rocketAnimating) return false;
   if (!_plannedRoute || !_plannedRoute.length) {
-    setStatus('No planned route — tap a site and pick "Plan rocket route" first.');
+    setStatus('No planned route - tap a site and pick "Plan rocket route" first.');
     return false;
   }
   const turn1 = _plannedRoute.filter((s) => s.turn === 1);
@@ -1438,17 +1438,17 @@ async function moveRocket() {
     return false;
   }
   if (!consumeMove()) {
-    setStatus('No moves left this turn — end turn to refresh.');
+    setStatus('No moves left this turn - end turn to refresh.');
     return false;
   }
-  // Snapshot for undo BEFORE mutating — both the rocket's site
+  // Snapshot for undo BEFORE mutating - both the rocket's site
   // and the full route shape + the segments we're about to walk,
   // so an undo can slide back along the exact path.
   const newSiteId = turn1[turn1.length - 1].to;
   const arrived = _activeData.sites.find((x) => x.id === newSiteId);
   const arrivedName = arrived ? arrived.name : newSiteId;
   const arrivedZone = arrived && arrived.solarZone ? arrived.solarZone : null;
-  // Record everything we'll need to undo BEFORE mutating — site,
+  // Record everything we'll need to undo BEFORE mutating - site,
   // route, segments walked, the chit (if any) we're about to
   // award for first-time zone entry, and the auto-cash payload
   // (if we're landing back at LEO with chits in hand).
@@ -1463,7 +1463,7 @@ async function moveRocket() {
     cashedChits: null,        // filled in below if a cash-in fires
     cashedVps:   0,
   };
-  // Animate first — tweens position over ~700 ms, ease-in-out.
+  // Animate first - tweens position over ~700 ms, ease-in-out.
   setStatus(`🛸 Moving rocket to <strong>${esc(arrivedName)}</strong>…`);
   await animateRocketAlong(turn1);
   _rocketSiteId = newSiteId;
@@ -1489,7 +1489,7 @@ async function moveRocket() {
     logAction({
       type: 'glory_award',
       icon: '🏆',
-      summary: `Glory chit earned — ${arrivedZone} (${vp} VP at cash-in)`,
+      summary: `Glory chit earned - ${arrivedZone} (${vp} VP at cash-in)`,
       undoable: false,
     });
   }
@@ -1526,7 +1526,7 @@ async function moveRocket() {
     if (clearBtn) clearBtn.hidden = true;
     setStatus(`🛸 Arrived at <strong>${esc(arrivedName)}</strong>.`);
   }
-  // Final sync — the animation left the sprite at the destination's
+  // Final sync - the animation left the sprite at the destination's
   // pixel coords; this pins it back to the canonical site (x, y)
   // and ensures canFly reflects the live stack state.
   syncSandboxRocket();
@@ -1534,14 +1534,14 @@ async function moveRocket() {
 }
 
 // Restore the pre-move state captured in _moveSnapshot. Wired to
-// the 🛸 toggle's "undo" face (yellow ↩ 🛸) — the player can step
+// the 🛸 toggle's "undo" face (yellow ↩ 🛸) - the player can step
 // back as long as they haven't ended the turn yet. The rocket
 // slides backwards along the exact segments it walked.
 async function undoRocketMove() {
   if (!_renderer) return false;
   if (_rocketAnimating) return false;
   if (!_moveSnapshot) {
-    // No snapshot but the budget is spent — just refund so the
+    // No snapshot but the budget is spent - just refund so the
     // button flips back to the move face. Rare path (e.g. moved
     // before a reload that dropped the snapshot).
     refundMove();
@@ -1620,7 +1620,7 @@ function enterRoutingMode(origin) {
   document.querySelector('.browse-shell')?.classList.add('is-routing');
   document.getElementById('route-clear').hidden = false;
   setStatus(
-    `Picking destination from <strong>${esc(origin.name)}</strong> — `
+    `Picking destination from <strong>${esc(origin.name)}</strong> - `
     + `tap any landable site. Press Clear route to cancel.`
   );
 }
@@ -1653,7 +1653,7 @@ function onSiteSelect(site) {
   // with what the player most recently tapped.
   if (_routingMode && _routeFrom) {
     if (site.isDecorative || site.isLandable === false) {
-      setStatus(`<strong>${esc(site.name)}</strong> is not landable — pick another site.`);
+      setStatus(`<strong>${esc(site.name)}</strong> is not landable - pick another site.`);
       return;
     }
     if (site.id === _routeFrom.id) {
@@ -1707,13 +1707,13 @@ function onSiteSelect(site) {
   if (_renderer) {
     _renderer.setRouteEndpoints(site.id, null);
     // Smooth-pan the camera so the selected hex sits at the centre
-    // of the map. Keeps the existing zoom — jumping zoom on every
+    // of the map. Keeps the existing zoom - jumping zoom on every
     // tap would be disorienting.
     _renderer.panTo(site);
   }
 
   if (site.isDecorative) {
-    setStatus(`Decorative routing node — not selectable.`);
+    setStatus(`Decorative routing node - not selectable.`);
     return;
   }
 
@@ -1728,7 +1728,7 @@ function showSitePopupFor(site) {
   if (!_renderer) return;
   const canNavigate = !(site.isDecorative || site.isLandable === false);
   const rocketReady = canPlanRocketRoute();
-  // Order: rocket-plan FIRST — it's the game action and the one
+  // Order: rocket-plan FIRST - it's the game action and the one
   // the player will reach for most. Navigate-to is the secondary
   // "check distance" affordance. Rocket-plan is enabled whenever
   // the destination is landable; the turn breakdown uses a fixed
@@ -1771,7 +1771,7 @@ function showSitePopupFor(site) {
 
 // True when there's an active thruster (or missile-class robonaut
 // with a thrust value) the player can fly from LEO. Doesn't
-// require all supports satisfied yet — if the route is plannable
+// require all supports satisfied yet - if the route is plannable
 // in principle, show it even if the rocket can't actually engage
 // today; the totals row in the stack modal still flags wet-mass
 // vs thrust separately.
@@ -1784,7 +1784,7 @@ function canPlanRocketRoute() {
 
 // Build a per-turn rocket plan from LEO to the destination. Each
 // edge costs ceil(dv) burns; the per-turn burn budget is BURNS_PER_TURN
-// (4 — matches HF4's 4 operations per turn). Segments are tagged
+// (4 - matches HF4's 4 operations per turn). Segments are tagged
 // with the turn number they belong to; the renderer paints turn 1
 // in the bright highlight and labels later turns with T2/T3 pills.
 const BURNS_PER_TURN = 4;
@@ -1799,7 +1799,7 @@ function planRocketRouteTo(destSite) {
     return false;
   }
   if (destSite.id === origin.id) {
-    setStatus(`Rocket is already at ${esc(origin.name)} — pick a different destination.`);
+    setStatus(`Rocket is already at ${esc(origin.name)} - pick a different destination.`);
     return false;
   }
   const result = findPath(_activeData, origin.id, destSite.id);
@@ -1891,7 +1891,7 @@ function renderPatents() {
   // Each physical card exists in exactly one location: deck,
   // hand, or rocket. The library grid decorates every tile with
   // its current location so the player can see where each card
-  // is at a glance — ✋ overlay for hand, 🛸 overlay for rocket.
+  // is at a glance - ✋ overlay for hand, 🛸 overlay for rocket.
   // Cards not in the deck have drag + tap disabled (no
   // duplicates allowed; pull them back from hand/rocket first).
   const decorateForHand = (card, asKind) => {
@@ -1902,7 +1902,7 @@ function renderPatents() {
     const inRocket = isInRocket(card.id);
     if (inHand)   el.classList.add('in-hand');
     if (inRocket) el.classList.add('in-rocket');
-    if (inHand || inRocket) return el;   // placeholder — not interactive
+    if (inHand || inRocket) return el;   // placeholder - not interactive
 
     el.draggable = true;
     el.addEventListener('dragstart', (ev) => {
@@ -2196,7 +2196,7 @@ function paintSolo() {
       rocketClearStack();
       // Future: clear factories / refineries / claimed sites as
       // those land in Stage 3.
-      setStatus('Sandbox reset — hand and rocket stack cleared.');
+      setStatus('Sandbox reset - hand and rocket stack cleared.');
     };
     return;
   }
@@ -2227,7 +2227,7 @@ function paintSolo() {
     <details class="solo-log"><summary>Log</summary><ol></ol></details>
     <button id="solo-abandon" class="danger" style="margin-top:10px">Abandon</button>
   `;
-  host.querySelector('.solo-here strong').textContent = here ? here.name : '—';
+  host.querySelector('.solo-here strong').textContent = here ? here.name : '-';
   const targetEl = host.querySelector('.solo-target');
   if (target && moveCost != null) {
     targetEl.innerHTML = `→ <strong></strong> (${moveCost} burns, ${s.pendingPath.segments.length} hops)`;

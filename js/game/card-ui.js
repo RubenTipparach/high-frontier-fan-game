@@ -53,7 +53,7 @@ const REQ_SUPPLIER_TYPE = {
 
 const REQUIREMENT_VIS = {
   // Power-source supports. These are the ONLY columns under the
-  // spreadsheet's "Support Requirements" banner — operational
+  // spreadsheet's "Support Requirements" banner - operational
   // flags like Solar, Push, ISRU, Air Eater are card properties
   // (rendered separately as badges) rather than stack supports.
   'reactor-fission':    { glyph: 'X',  label: 'Fission reactor'        },
@@ -100,14 +100,14 @@ export function renderCard(card, { type, supplied } = {}) {
     el.appendChild(flip);
   }
 
-  // Radiators carry TWO stat sets per face — Light Side
+  // Radiators carry TWO stat sets per face - Light Side
   // (upright) and Heavy Side (rotated 180°). The rotate button
   // toggles a data-rotated attribute that drives both the
   // CSS rotation transform and the Light↔Heavy stat swap. Only
   // emitted for cards flagged `rotatable: true` (radiators).
   // Radiators carry a data-rotated attribute on the root so the
   // CSS rotation transform + Light↔Heavy active-side dimming
-  // still works. The dedicated rotate (↻) button was removed —
+  // still works. The dedicated rotate (↻) button was removed -
   // the Light(N) / Heavy(N) labels under each half's name now
   // act as the side toggle (see buildRadiatorFace).
   if (card.rotatable) el.dataset.rotated = '0';
@@ -125,9 +125,9 @@ function buildFace(card, sideName, kind, supplied) {
   // face is really two complete mini-cards stacked, one for the
   // Light Side (upright) and one for the Heavy Side (upside-down
   // so it reads correctly when the whole card is physically
-  // flipped 180°). Both halves carry their OWN typebar — and
+  // flipped 180°). Both halves carry their OWN typebar - and
   // the typebar's leading glyph row is one 🌡 per Therm of THAT
-  // side — their own mass + rad-hardness stats, and a name
+  // side - their own mass + rad-hardness stats, and a name
   // label. The inactive half (driven by data-rotated on the
   // card root) is dimmed.
   if (card.type === 'radiator') {
@@ -157,14 +157,14 @@ function buildFace(card, sideName, kind, supplied) {
     face.querySelector('.card-role').textContent = c.role || '';
     face.querySelector('.card-bonus').textContent = c.bonus || '';
     face.querySelector('.card-blurb').textContent = c.blurb || '';
-    face.querySelector('.m').textContent = c.mass != null ? c.mass : '—';
-    face.querySelector('.r').textContent = c.radHardness != null ? c.radHardness : '—';
+    face.querySelector('.m').textContent = c.mass != null ? c.mass : '-';
+    face.querySelector('.r').textContent = c.radHardness != null ? c.radHardness : '-';
     face.querySelector('.card-spectral').appendChild(spectralHex(c.spectralType || 'C'));
     return face;
   }
 
   // Show the thrust triangle on any card that carries a thrust
-  // value — that includes Missile-type robonauts (the spreadsheet
+  // value - that includes Missile-type robonauts (the spreadsheet
   // gives them their own Thrust / Fuel / Afterburn under the
   // "Thruster" banner), GW Thrusters, etc.
   const isThruster = card.type === 'thruster' || card.thrust != null;
@@ -190,7 +190,7 @@ function buildFace(card, sideName, kind, supplied) {
   `;
   // Typebar icon strategy: for cards that SUPPLY support chips
   // (reactors, generators, radiators) show the actual chip
-  // glyphs this card supplies — so the player can immediately
+  // glyphs this card supplies - so the player can immediately
   // see which chip-slots on a thruster this card satisfies.
   // For cards that don't supply chips (thrusters, refineries,
   // robonauts) we fall back to a generic type emoji.
@@ -207,7 +207,7 @@ function buildFace(card, sideName, kind, supplied) {
   const fallback = TYPE_FALLBACK_ICON[card.type] || '';
   const lead = supplyGlyphs || fallback;
   tbar.textContent = `${lead ? lead + '  ' : ''}${card.type.toUpperCase()}`;
-  // Card name reads from the active face — the dark side carries
+  // Card name reads from the active face - the dark side carries
   // its own printed name on every HF4 card.
   const faceName = (card.faces && card.faces[sideName] && card.faces[sideName].name);
   face.querySelector('.card-name').textContent = faceName || card.name;
@@ -217,8 +217,8 @@ function buildFace(card, sideName, kind, supplied) {
   const faceRad  = (card.faces && card.faces[sideName] && card.faces[sideName].radHardness);
   const massVal  = (faceMass != null ? faceMass : card.mass);
   const radVal   = (faceRad  != null ? faceRad  : card.radHardness);
-  face.querySelector('.m').textContent = massVal != null ? massVal : '—';
-  face.querySelector('.r').textContent = radVal != null ? radVal : '—';
+  face.querySelector('.m').textContent = massVal != null ? massVal : '-';
+  face.querySelector('.r').textContent = radVal != null ? radVal : '-';
 
   face.querySelector('.card-spectral').appendChild(spectralHex(card.spectralType));
 
@@ -264,7 +264,7 @@ function buildFace(card, sideName, kind, supplied) {
     add('Power', card.power);
     add('Heat',  card.heat);
   } else if (card.type === 'radiator') {
-    // Radiator cards are mirror-symmetric — the published HF4
+    // Radiator cards are mirror-symmetric - the published HF4
     // card prints the light side at the top (upright) and the
     // heavy side at the bottom (upside-down). Both are always
     // visible; whichever is currently "up" (driven by the
@@ -281,11 +281,11 @@ function buildFace(card, sideName, kind, supplied) {
         const therms = block.therms ?? 0;
         const thermRow = therms > 0
           ? '🌡️'.repeat(Math.min(8, therms))
-          : '—';
+          : '-';
         wrap.innerHTML = `<header>${label}</header>`
           + `<div class="rad-therms">${thermRow}</div>`
-          + `<span>Mass <strong>${block.mass ?? '—'}</strong></span>`
-          + `<span>Rad-Hard <strong>${block.radHardness ?? '—'}</strong></span>`;
+          + `<span>Mass <strong>${block.mass ?? '-'}</strong></span>`
+          + `<span>Rad-Hard <strong>${block.radHardness ?? '-'}</strong></span>`;
         stats.appendChild(wrap);
       };
       addSide('side-light', 'Light side', light);
@@ -310,7 +310,7 @@ function buildFace(card, sideName, kind, supplied) {
   // Requirements row: icon + ×N for each requirement entry. A
   // Card-properties row: small badges for the card's per-face
   // capabilities (Push, Solar, Air-Eater, ISRU, Afterburn, Bonus
-  // Pivots, Missile, Raygun, Buggy). These are NOT supports —
+  // Pivots, Missile, Raygun, Buggy). These are NOT supports -
   // they describe what the card itself does. Each property's
   // glyph + label lives on the data record so we don't repeat
   // the catalogue here.
@@ -331,10 +331,10 @@ function buildFace(card, sideName, kind, supplied) {
   // a clean bare glyph.
   const reqHost = face.querySelector('.card-requires');
   const supportsRow = face.querySelector('.card-supports');
-  // Each face carries its own supports — Tier-2 is a different
+  // Each face carries its own supports - Tier-2 is a different
   // tech with potentially different chip requirements.
   const reqs = (faceData.requires) || card.requires || [];
-  // Hide the whole supports row when the card needs nothing — a
+  // Hide the whole supports row when the card needs nothing - a
   // bare "Supports required" heading over an empty chip row reads
   // as broken on cards like reactors (which supply, not require).
   if (!reqs.length) {
@@ -351,7 +351,7 @@ function buildFace(card, sideName, kind, supplied) {
   // three, so we collapse all reactor-* into one OR-chip with
   // the glyphs slash-separated. Generators do the same. Reqs
   // that don't share a supplier (e.g. one reactor + one
-  // generator) stay as separate chips — those ARE both needed.
+  // generator) stay as separate chips - those ARE both needed.
   const groups = new Map();
   const loose = [];
   for (const r of reqs) {
@@ -363,7 +363,7 @@ function buildFace(card, sideName, kind, supplied) {
   const makeChip = (visGlyphs, supplier, tip, satisfied) => {
     const span = document.createElement('span');
     span.className = 'req';
-    span.setAttribute('data-tip', satisfied ? `${tip} — satisfied` : tip);
+    span.setAttribute('data-tip', satisfied ? `${tip} - satisfied` : tip);
     if (supplier) span.dataset.supplier = supplier;
     if (satisfied) span.classList.add('is-satisfied');
     span.innerHTML = visGlyphs;
@@ -408,7 +408,7 @@ function buildFace(card, sideName, kind, supplied) {
 // Small flat-top hex with the spectral letter in the centre.
 // Returns an SVG element the caller appends.
 // Render one face of a radiator card. The face contains two
-// stacked "half-cards" — Light Side at the top (upright) and
+// stacked "half-cards" - Light Side at the top (upright) and
 // Heavy Side at the bottom (rotated 180° via CSS). Each half
 // has its own typebar, stat box, and name label so the card
 // reads as two complete radiators sharing a physical body, the
@@ -438,7 +438,7 @@ function buildRadiatorFace(card, sideName) {
   // Per-half toggle row: "Light (N) | Heavy (M)" with the
   // currently-active side bolded via CSS rule on the .card
   // root (which carries data-rotated). Tapping either label
-  // sets data-rotated accordingly — the rotate (↻) button is
+  // sets data-rotated accordingly - the rotate (↻) button is
   // gone; these labels are the toggle.
   const toggleHtml = `
     <div class="rad-toggle">
@@ -455,8 +455,8 @@ function buildRadiatorFace(card, sideName) {
       <div class="card-name-row"><span class="card-name">${escapeText(cardName)}</span></div>
       ${toggleHtml}
       <div class="card-statbox">
-        <span><strong>${block.mass ?? '—'}</strong> MASS</span>
-        <span><strong>${block.radHardness ?? '—'}</strong> RAD</span>
+        <span><strong>${block.mass ?? '-'}</strong> MASS</span>
+        <span><strong>${block.radHardness ?? '-'}</strong> RAD</span>
         ${showSpectral ? '<span class="card-spectral"></span>' : '<span></span>'}
       </div>
       <p class="card-blurb">${escapeText(ability)}</p>
@@ -498,12 +498,12 @@ function spectralHex(type) {
   // viewBox swapped to a wider-than-tall box because the hex is
   // now FLAT-TOP (a 30° rotation from the pointy-top default).
   // All hexes use the same black fill regardless of spectral
-  // letter — the letter alone reads the type; colour-coding
+  // letter - the letter alone reads the type; colour-coding
   // turned out to confuse the read against the saturated
   // typebars sitting next to it.
   svg.setAttribute('viewBox', '-14 -12 28 24');
   svg.setAttribute('class', 'spectral-hex');
-  svg.setAttribute('data-tip', `Spectral type ${style.glyph} — ${label}`);
+  svg.setAttribute('data-tip', `Spectral type ${style.glyph} - ${label}`);
   const r = 12;
   const points = [];
   for (let i = 0; i < 6; i++) {
@@ -595,7 +595,7 @@ function svgBallerinaChip(size) {
 // circle + 💧 fuel droplet sit INSIDE the triangle, in the wider
 // lower portion where they fit comfortably above the base.
 // Support icons live in a separate supports box outside the
-// triangle — they're never drawn here.
+// triangle - they're never drawn here.
 function thrustVisual(card, face) {
   const wrap = document.createElement('div');
   wrap.className = 'thrust-visual';
