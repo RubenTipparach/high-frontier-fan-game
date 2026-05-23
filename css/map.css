@@ -53,6 +53,23 @@
   background: rgba(15, 16, 35, 0.85);
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
+  transition: padding-right 0.22s ease;
+}
+/* When the side panel is open, push the toolbar's content
+   (Find site, route status, debug + fullscreen buttons) to the
+   left via padding-right so it sits next to the panel instead
+   of hiding behind it. We intentionally DON'T resize
+   .browse-stage / the canvas — that triggered a ResizeObserver
+   on the renderer every time the player opened or closed a
+   pane, which forced a re-fit + redraw cycle and made the map
+   flicker / feel laggy. Padding-right on a flex container
+   shifts the items left without touching layout outside the
+   toolbar, so the canvas size never changes. */
+.browse-shell:has(.browse-sidepanel[data-active]:not([data-active=""])) .map-toolbar {
+  padding-right: calc(380px + 12px);
+}
+.browse-shell:has(.browse-sidepanel[data-active="patents"]) .map-toolbar {
+  padding-right: calc(min(620px, 80vw) + 12px);
 }
 .map-mode-toggle {
   display: inline-flex;
@@ -558,21 +575,6 @@ body:has(#view-browse:not(.hidden)) #main {
 .browse-sidepanel[data-active]:not([data-active=""]) ~ .sandbox-hand {
   right: 380px;
 }
-
-/* Top toolbar + canvas: same squish behaviour as the hand strip
-   so the route status / Find site bar isn't hiding behind the
-   open side panel. .browse-stage is positioned BEFORE
-   .browse-sidepanel in the DOM, so `~` won't reach it; use
-   :has() on the shell instead. Modern browser support is fine
-   (Chromium / WebKit 105+, Firefox 121+). */
-.browse-shell:has(.browse-sidepanel[data-active]:not([data-active=""])) .browse-stage {
-  right: 380px;
-  transition: right 0.22s ease;
-}
-.browse-shell:has(.browse-sidepanel[data-active="patents"]) .browse-stage {
-  right: min(620px, 80vw);
-}
-.browse-stage { transition: right 0.22s ease; }
 @media (max-width: 720px) {
   /* Phones: the hand strip takes the full bottom width. The
      floating tab bar lives at the top of the map, not on the
