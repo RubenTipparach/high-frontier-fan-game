@@ -579,11 +579,23 @@ let _activeData = null;
 // toggle's undo restore the previous position + route.
 const STORAGE_ROCKET_SITE  = 'hf-sandbox-rocket-site';
 const STORAGE_ROCKET_TRAIL = 'hf-sandbox-rocket-trail';
+const STORAGE_ROCKET_ROUTE = 'hf-sandbox-planned-route';
 let _rocketSiteId = (() => {
   try { return localStorage.getItem(STORAGE_ROCKET_SITE) || null; }
   catch { return null; }
 })();
-let _plannedRoute = null;
+// Planned route (turn-tagged segments) persists across reloads so
+// a multi-turn plan survives the player putting the game down for
+// a day and picking it back up. Reading it back is just JSON; we
+// validate-on-use by checking that every endpoint resolves in the
+// active data set before handing it to the renderer.
+let _plannedRoute = (() => {
+  try {
+    const s = localStorage.getItem(STORAGE_ROCKET_ROUTE);
+    const parsed = s ? JSON.parse(s) : null;
+    return Array.isArray(parsed) && parsed.length ? parsed : null;
+  } catch { return null; }
+})();
 let _moveSnapshot = null;
 let _rocketTrail = (() => {
   try {
@@ -1016,6 +1028,40 @@ async function mountMapFor() {
     if (_rocketTrail && _rocketTrail.length) {
       _renderer.setRocketTrail(_rocketTrail);
     }
+    // Restore the multi-turn planned route. Validate every segment
+    // resolves in the active data set; if the dataset shape changed
+    // (e.g. planner-map regeneration) drop the route so we don't
+    // hand the renderer dangling ids that would draw to (0, 0).
+    if (_plannedRoute && _plannedRoute.length) {
+      const allValid = _plannedRoute.every((seg) =>
+        _activeData.sites.find((s) => s.id === seg.from) &&
+        _activeData.sites.find((s) => s.id === seg.to)
+      );
+      if (allValid) {
+        _renderer.setRoute(_plannedRoute);
+        const first = _plannedRoute[0];
+        const last  = _plannedRoute[_plannedRoute.length - 1];
+        _renderer.setRouteEndpoints(first.from, last.to);
+        const fromSite = _activeData.sites.find((s) => s.id === first.from);
+        const destSite = _activeData.sites.find((s) => s.id === last.to);
+        _routeFrom = fromSite || null;
+        _routeTo   = destSite || null;
+        const clearBtn = document.getElementById('route-clear');
+        if (clearBtn) clearBtn.hidden = false;
+        if (destSite) {
+          const burns = _plannedRoute.reduce((s, x) => s + (x.burns || 1), 0);
+          const turns = _plannedRoute.reduce((m, x) => Math.max(m, x.turn || 1), 1);
+          setStatus(
+            `🛸 Resumed route to <strong>${esc(destSite.name)}</strong>: `
+            + `<strong class="big">${burns}</strong> burns over `
+            + `<strong>${turns}</strong> turn${turns === 1 ? '' : 's'}.`
+          );
+        }
+      } else {
+        _plannedRoute = null;
+        persistPlannedRoute();
+      }
+    }
   } catch (err) {
     canvas.innerHTML = `<div class="map-loading error">Map failed to load: ${err.message}</div>`;
   }
@@ -1347,6 +1393,19 @@ function persistRocketTrail() {
     }
   } catch { /* private mode */ }
 }
+// Planned route persistence. Called from every assignment to
+// _plannedRoute so the multi-turn plan survives reloads - critical
+// because the player might queue a 4-turn journey, end one turn,
+// close the tab, come back tomorrow and expect to continue.
+function persistPlannedRoute() {
+  try {
+    if (_plannedRoute && _plannedRoute.length) {
+      localStorage.setItem(STORAGE_ROCKET_ROUTE, JSON.stringify(_plannedRoute));
+    } else {
+      localStorage.removeItem(STORAGE_ROCKET_ROUTE);
+    }
+  } catch { /* private mode */ }
+}
 
 // Tween the sandbox rocket sprite along a polyline derived from a
 // list of segments. Each frame writes a new (x, y) to the renderer
@@ -1525,6 +1584,7 @@ async function moveRocket() {
     .map((s) => ({ ...s, turn: s.turn - 1 }));
   if (remaining.length) {
     _plannedRoute = remaining;
+    persistPlannedRoute();
     _renderer.setRoute(remaining);
     const nextBurns = remaining.filter((s) => s.turn === 1).length;
     setStatus(
@@ -1533,6 +1593,7 @@ async function moveRocket() {
     );
   } else {
     _plannedRoute = null;
+    persistPlannedRoute();
     _renderer.setRoute(null);
     _renderer.setRouteEndpoints(null, null);
     _routeFrom = null;
@@ -1593,6 +1654,7 @@ async function undoRocketMove() {
   _rocketSiteId = _moveSnapshot.siteId;
   persistRocketSite();
   _plannedRoute = _moveSnapshot.route;
+  persistPlannedRoute();
   if (_plannedRoute && _plannedRoute.length) {
     _renderer.setRoute(_plannedRoute);
     const first = _plannedRoute[0];
@@ -1841,6 +1903,7 @@ function planRocketRouteTo(destSite) {
   _routeFrom = origin;
   _routeTo = destSite;
   _plannedRoute = segments;
+  persistPlannedRoute();
   _renderer.setRoute(segments);
   _renderer.setRouteEndpoints(origin.id, destSite.id);
   document.getElementById('route-clear').hidden = false;
@@ -1856,6 +1919,7 @@ function clearRoute() {
   _routeFrom = null;
   _routeTo = null;
   _plannedRoute = null;
+  persistPlannedRoute();
   _selectedId = null;
   exitRoutingMode();
   if (_renderer) {

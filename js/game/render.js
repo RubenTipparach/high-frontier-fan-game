@@ -1295,12 +1295,15 @@ export class MapRenderer {
     }
 
     // Later turns first so the bright turn-1 highlight always
-    // paints on top of them at any junction.
+    // paints on top of them at any junction. Drawn as faint
+    // yellow (matching the turn-1 gold-dash but at reduced
+    // alpha) so the preview reads as "same route, just queued
+    // for a future turn".
     const sortedLater = [...laterByTurn].sort((a, b) => b[0] - a[0]);
     for (const [turn, segs] of sortedLater) {
-      const alpha = Math.max(0.25, 0.65 - (turn - 2) * 0.1);
+      const alpha = Math.max(0.22, 0.55 - (turn - 2) * 0.08);
       ctx.lineWidth = 2.5 / eff;
-      ctx.strokeStyle = `rgba(148, 163, 184, ${alpha})`;
+      ctx.strokeStyle = `rgba(251, 191, 36, ${alpha})`;
       ctx.setLineDash([6 / eff, 5 / eff]);
       ctx.beginPath();
       for (const seg of segs) {
@@ -1366,14 +1369,14 @@ export class MapRenderer {
       const h = 16;
       const rx = sx - w / 2, ry = sy - h / 2;
       ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
-      ctx.strokeStyle = 'rgba(148, 163, 184, 0.75)';
+      ctx.strokeStyle = 'rgba(251, 191, 36, 0.65)';
       ctx.lineWidth = 1;
       ctx.beginPath();
       if (ctx.roundRect) ctx.roundRect(rx, ry, w, h, 4);
       else ctx.rect(rx, ry, w, h);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = '#cbd5e1';
+      ctx.fillStyle = '#fde68a';
       ctx.fillText(text, sx, sy + 0.5);
     }
     ctx.restore();
