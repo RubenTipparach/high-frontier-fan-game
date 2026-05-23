@@ -35,6 +35,15 @@ Concretely:
 - Variants & scenarios appendix:
   https://geekach.com.ua/content/files/varanti-ta-scenar-high-frontier-4-all-anglyskou-movou-62879102.pdf
 - BGG entry: https://boardgamegeek.com/boardgame/281837/high-frontier-4-all
+- **HF gazetteer (heliocentric zones, site classifications):**
+  https://www.iandrea.co.uk/sf/resources/hf/HFgazetteer.html
+  — canonical reference for which solar zone (Mercury / Venus /
+  Earth / Mars / Ceres / Jupiter / Saturn / etc.) each named
+  site sits in, plus apparition / synodic season tags. The
+  popup tags rendered in `js/game/render.js#_buildSitePopup`
+  (`<site> zone`, `<season> season`) read from
+  `data/sites.js`'s `solarZone` + `siteSynodic` fields, which
+  are sourced from this gazetteer.
 - Reference repo for architecture/login/deploy patterns:
   https://github.com/RubenTipparach/murdoku-companion
 

@@ -375,6 +375,35 @@
   user-select: all;
   -webkit-user-select: all;
 }
+/* Tag chips below the meta row. Season chip uses the synodic
+   palette (matching the comet outlines on the map) so the player
+   reads "you need the blue apparition for this site" without
+   needing a legend. Zone chip is neutral grey — it's reference
+   info (which heliocentric band drives solar modifiers), not a
+   gating constraint. */
+.map-popup .t-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.map-popup .t-tag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+}
+.map-popup .t-tag-season-red    { background: rgba(248, 113, 113, 0.22); border-color: #f87171; color: #fecaca; }
+.map-popup .t-tag-season-yellow { background: rgba(250, 204, 21, 0.22);  border-color: #facc15; color: #fde68a; }
+.map-popup .t-tag-season-blue   { background: rgba(96, 165, 250, 0.22);  border-color: #60a5fa; color: #bfdbfe; }
+.map-popup .t-tag-zone {
+  background: rgba(148, 163, 184, 0.18);
+  border-color: rgba(148, 163, 184, 0.6);
+  color: var(--ink-dim);
+}
 .map-popup .popup-actions {
   display: flex;
   gap: 6px;

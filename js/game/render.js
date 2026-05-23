@@ -2273,6 +2273,29 @@ export class MapRenderer {
     meta.textContent = parts.join(' · ');
     el.appendChild(name);
     if (meta.textContent) el.appendChild(meta);
+    // Tags row: season (only if the node requires a specific
+    // apparition) + heliocentric zone. Each renders as its own
+    // chip with a colour that matches the underlying game system
+    // (synodic palette for the season, neutral grey for the zone).
+    if (site.siteSynodic || site.solarZone) {
+      const tags = document.createElement('div');
+      tags.className = 't-tags';
+      if (site.siteSynodic) {
+        const chip = document.createElement('span');
+        chip.className = `t-tag t-tag-season t-tag-season-${site.siteSynodic}`;
+        chip.textContent = `${site.siteSynodic} season`;
+        chip.title = `Only accessible during the ${site.siteSynodic} apparition window.`;
+        tags.appendChild(chip);
+      }
+      if (site.solarZone) {
+        const chip = document.createElement('span');
+        chip.className = 't-tag t-tag-zone';
+        chip.textContent = `${site.solarZone} zone`;
+        chip.title = `Heliocentric zone (drives solar-power modifier).`;
+        tags.appendChild(chip);
+      }
+      el.appendChild(tags);
+    }
     // Node id2 — a human-friendly stable reference generated at
     // data-load time (see planner-map.js#makeRefId). Reads as
     // e.g. "comet-borrelly", "dresda", "lag-leo", "burn-3a2b9".

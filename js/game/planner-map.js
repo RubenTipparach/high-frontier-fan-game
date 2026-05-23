@@ -19,6 +19,18 @@ const PLANNER_JSON_URL = './vendor/hf-mission-planner/assets/data-hf4.json';
 // can decorate planner nodes with the right glyphs.
 const SITE_FLAGS_URL  = './data/site-flags.json';
 
+// Hand-curated table from data/sites.js. We name-match planner
+// nodes against it to surface solarZone (the heliocentric band
+// the site sits in) and a siteSynodic fallback. The planner JSON
+// itself carries siteSynodic on 15 sites; sites.js fills in any
+// stragglers (and provides solarZone, which the planner data
+// doesn't have at all).
+import { SITES as LOCAL_SITES } from '../../data/sites.js';
+const LOCAL_SITE_BY_NAME = new Map();
+for (const s of LOCAL_SITES) {
+  if (s && s.name) LOCAL_SITE_BY_NAME.set(normalizeSiteName(s.name), s);
+}
+
 let _cache = null;
 
 function normalizeSiteName(name) {
@@ -76,7 +88,13 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
     // data/waypoint-seasons.json) so we can revisit with a
     // better heuristic later — just don't apply it here.
     const isWaypoint = rawType !== 'site';
-    const synodic = p.siteSynodic || null;
+    // Cross-reference the local hand-curated table by name to pull
+    // solarZone (heliocentric band) + a siteSynodic fallback for
+    // any seasonal sites the planner JSON missed. Waypoints carry
+    // no name → never match → both stay null.
+    const local = LOCAL_SITE_BY_NAME.get(normalizeSiteName(p.siteName)) || null;
+    const synodic = p.siteSynodic || (local && local.siteSynodic) || null;
+    const solarZone = local ? (local.solarZone || null) : null;
     // id2 — a human-friendly stable reference for every location,
     // derived once at load time. Real sites: slug of their name
     // ("comet-borrelly", "dresda"). Waypoints: type prefix + a
@@ -95,6 +113,7 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
       isDecorative: rawType === 'decorative',
       siteSize: p.siteSize || null,
       siteSynodic: synodic,
+      solarZone,
       hydration: parseHydration(p.siteWater),
       hazard: !!p.hazard,
       // Comets are always landing sites in HF4 — you touch down
