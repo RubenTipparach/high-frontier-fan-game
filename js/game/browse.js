@@ -762,6 +762,21 @@ function ensureMapShell(host) {
     if (_renderer) _renderer.setOption('debug', false);
   });
   wireSearch(host);
+  // Toolbar height drives where the side panel starts (panel is
+  // top: var(--toolbar-h) so it sits flush below the toolbar
+  // regardless of whether the toolbar has wrapped to a second row
+  // on narrow viewports). Publish the measured height to the
+  // browse shell so the CSS variable is in-scope for the sidepanel.
+  const toolbarEl = host.querySelector('.map-toolbar');
+  const shellEl   = host.closest('.browse-shell') || host;
+  if (toolbarEl && shellEl && typeof ResizeObserver !== 'undefined') {
+    const publishToolbarHeight = () => {
+      const h = toolbarEl.getBoundingClientRect().height;
+      shellEl.style.setProperty('--toolbar-h', `${Math.ceil(h)}px`);
+    };
+    publishToolbarHeight();
+    new ResizeObserver(publishToolbarHeight).observe(toolbarEl);
+  }
   document.addEventListener('fullscreenchange', () => {
     const btn = host.querySelector('#route-fullscreen');
     if (btn) btn.textContent = document.fullscreenElement ? '⤬' : '⛶';
@@ -2045,30 +2060,10 @@ function paintGlory() {
       <ul class="glory-table">${zoneTableRows}</ul>
       <p class="muted glory-rules">
         Land the rocket in a heliocentric zone for the first time to
-        earn a chit. Return to LEO to convert all chits to VP. Event
-        d6 outcomes (Catastrophic Failure, Inspiration, …) credit
-        VP directly.
+        earn a chit. Return to LEO to convert all chits to VP.
       </p>
     </section>
-    <section class="glory-milestones">
-      <h4>Legacy milestone deck</h4>
-      <ul class="ms-list"></ul>
-    </section>
   `;
-  const list = host.querySelector('.ms-list');
-  for (const m of MILESTONES) {
-    const li = document.createElement('li');
-    li.innerHTML = `
-      <div class="ms-head">
-        <strong></strong>
-        <span class="ms-vp">+${m.vps} VP</span>
-      </div>
-      <p class="muted"></p>
-    `;
-    li.querySelector('strong').textContent = m.name;
-    li.querySelector('p').textContent = m.blurb;
-    list.appendChild(li);
-  }
 }
 
 // Mission log pane: every action the player took this turn, plus

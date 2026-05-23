@@ -1273,12 +1273,16 @@ body:has(#view-browse:not(.hidden)) #main {
   backdrop-filter: blur(6px);
   transition: width 0.22s ease, height 0.22s ease;
   /* Panel extends full height of the shell EXCEPT for the
-     toolbar at top (~44 px). The hand strip stays out of the
+     toolbar at top. --toolbar-h is published by JS via a
+     ResizeObserver on .map-toolbar so the panel tracks the real
+     height even when the toolbar wraps to a second row on narrow
+     viewports. 44 px is a sane fallback for the first frame
+     before the observer fires. The hand strip stays out of the
      panel's way by being explicitly pushed to the left via the
      `right: panel-width` rules on .sandbox-hand below, NOT by
      clipping the panel's bottom edge - the panel needs to draw
      all the way down so it reads as one continuous surface. */
-  top: 44px;
+  top: var(--toolbar-h, 44px);
   right: 0;
   bottom: 0;
   width: 48px;
