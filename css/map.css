@@ -3037,13 +3037,17 @@ body:has(#view-browse:not(.hidden)) #main {
    modal. Stops accidental modal-opens on casual fingerprints
    and avoids stuck-hover gotchas. */
 
-/* The floating "View" button sits above a selected card.
-   Hidden by default; CSS shows it only when the slot has
-   .is-selected AND we're on a touch device. */
+/* The floating "View" button sits inside a selected card's
+   upper area on touch devices. Hidden by default; CSS shows
+   it only when the slot has .is-selected AND we're on a touch
+   device. Anchored inside the slot (positive `top`) instead of
+   floating above it - the previous -34px position landed in
+   the hand-header zone and got visually clipped on mobile
+   viewports where the strip is full-width. */
 .hand-view-btn {
   display: none;
   position: absolute;
-  top: -34px;
+  top: 8px;
   left: 50%;
   transform: translateX(-50%);
   background: var(--accent);
