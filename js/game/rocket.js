@@ -26,9 +26,10 @@
 
 import { PATENTS_BY_ID } from '../../data/patents.js';
 
-const STORAGE_KEY  = 'hf-sandbox-rocket';
-const ACTIVE_KEY   = 'hf-sandbox-rocket-active-thruster';
-const TANK_KEY     = 'hf-sandbox-rocket-tank';
+const STORAGE_KEY      = 'hf-sandbox-rocket';
+const ACTIVE_KEY       = 'hf-sandbox-rocket-active-thruster';
+const PROSPECTOR_KEY   = 'hf-sandbox-rocket-active-prospector';
+const TANK_KEY         = 'hf-sandbox-rocket-tank';
 // Cap the player's water tank so the +/- buttons don't run away
 // at high tap rates. 99 is plenty for any solo run; we'll revisit
 // when Stage 3 hands fuel allocation to the engine.
@@ -47,6 +48,18 @@ let _activeThrusterId = (() => {
   catch { return null; }
 })();
 
+// One prospector can be designated active per turn (HF4: only the
+// active prospector can scan; switching mid-turn is not legal).
+// Cards with `missile`, `raygun`, or `buggy` properties on the
+// active face qualify. Activation also requires the prospector's
+// own `requires` (support chips) to be satisfied by the rest of
+// the stack - the canActivate flag in getActiveProspectorStats()
+// encodes this.
+let _activeProspectorId = (() => {
+  try { return localStorage.getItem(PROSPECTOR_KEY) || null; }
+  catch { return null; }
+})();
+
 let _tankWater = (() => {
   try {
     const n = parseInt(localStorage.getItem(TANK_KEY) || '0', 10);
@@ -59,8 +72,10 @@ let _listeners = [];
 function persist() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(_stack));
-    if (_activeThrusterId) localStorage.setItem(ACTIVE_KEY, _activeThrusterId);
-    else                   localStorage.removeItem(ACTIVE_KEY);
+    if (_activeThrusterId)   localStorage.setItem(ACTIVE_KEY,     _activeThrusterId);
+    else                     localStorage.removeItem(ACTIVE_KEY);
+    if (_activeProspectorId) localStorage.setItem(PROSPECTOR_KEY, _activeProspectorId);
+    else                     localStorage.removeItem(PROSPECTOR_KEY);
     localStorage.setItem(TANK_KEY, String(_tankWater));
   } catch { /* private mode */ }
 }
@@ -112,15 +127,24 @@ export function removeFromStack(index) {
       }
     }
   }
+  // Same auto-recover dance for the active prospector: if it was
+  // pulled, fall to any remaining prospector card.
+  if (removed && removed.id === _activeProspectorId) {
+    _activeProspectorId = null;
+    for (const s of _stack) {
+      if (isProspectorCardId(s.id)) { _activeProspectorId = s.id; break; }
+    }
+  }
   persist();
   notify();
   return true;
 }
 
 export function clearStack() {
-  if (!_stack.length && !_activeThrusterId && !_tankWater) return;
+  if (!_stack.length && !_activeThrusterId && !_activeProspectorId && !_tankWater) return;
   _stack = [];
   _activeThrusterId = null;
+  _activeProspectorId = null;
   _tankWater = 0;
   persist();
   notify();
@@ -143,6 +167,104 @@ export function setActiveThruster(id) {
   persist();
   notify();
   return true;
+}
+
+// Prospector classification. A card "is a prospector" when its
+// active face exposes any of the missile / raygun / buggy
+// capability columns. Returns the kind ('missile'|'raygun'|'buggy')
+// or null. Cards can declare more than one kind; we pick the
+// first match in this priority order.
+export function getProspectorKind(card) {
+  if (!card) return null;
+  const f = activeFace(card);
+  const props = f.properties || [];
+  for (const key of ['raygun', 'missile', 'buggy']) {
+    if (props.some((p) => p.key === key && p.value)) return key;
+  }
+  return null;
+}
+function isProspectorCardId(id) {
+  return !!getProspectorKind(PATENTS_BY_ID[id]);
+}
+
+export function getProspectorCards() {
+  const out = [];
+  for (const slot of _stack) {
+    const card = PATENTS_BY_ID[slot.id];
+    const kind = getProspectorKind(card);
+    if (kind) out.push({ id: slot.id, card, kind });
+  }
+  return out;
+}
+
+export function getActiveProspectorId() { return _activeProspectorId; }
+
+export function setActiveProspector(id) {
+  // Must actually be in the stack AND classify as a prospector.
+  if (!_stack.some((s) => s.id === id)) return false;
+  if (!isProspectorCardId(id)) return false;
+  _activeProspectorId = id;
+  persist();
+  notify();
+  return true;
+}
+
+export function clearActiveProspector() {
+  if (!_activeProspectorId) return false;
+  _activeProspectorId = null;
+  persist();
+  notify();
+  return true;
+}
+
+// Detailed view of the active prospector for the UI. Returns
+// null when nothing is selected. `canActivate` reads the card's
+// `requires` and checks them against the rest of the stack via
+// the same supplier-grouped OR rule isRocketActive() uses.
+export function getActiveProspectorStats() {
+  const id = _activeProspectorId;
+  if (!id) return null;
+  const card = PATENTS_BY_ID[id];
+  if (!card) return null;
+  const kind = getProspectorKind(card);
+  if (!kind) return null;
+  const f = activeFace(card);
+  const supplied = collectSupplied(id);
+  const requires = Array.isArray(f.requires) ? f.requires : [];
+  const groups = new Map();
+  for (const r of requires) {
+    const supplier = r.kind.split('-')[0];
+    if (!groups.has(supplier)) groups.set(supplier, []);
+    groups.get(supplier).push(r.kind);
+  }
+  const missing = [];
+  for (const [supplier, kinds] of groups) {
+    if (!kinds.some((k) => supplied.has(k))) missing.push(supplier);
+  }
+  return {
+    id,
+    kind,
+    card,
+    requires,
+    suppliedKinds: [...supplied],
+    missingSuppliers: missing,
+    canActivate: missing.length === 0,
+  };
+}
+
+// Build the set of support-kinds the rest of the stack supplies
+// to the active card. Same logic as isRocketActive()'s supplier
+// scan but scoped to a single excluded card.
+function collectSupplied(excludeId) {
+  const supplied = new Set();
+  for (const slot of _stack) {
+    if (slot.id === excludeId) continue;
+    const c = PATENTS_BY_ID[slot.id];
+    if (!c) continue;
+    const supplies = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
+    for (const k of supplies) supplied.add(k);
+  }
+  return supplied;
 }
 
 export function onRocketChange(cb) {

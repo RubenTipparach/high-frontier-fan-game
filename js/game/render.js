@@ -2365,6 +2365,7 @@ export class MapRenderer {
         b.className = `popup-btn popup-btn-${variant}`;
         b.textContent = a.label;
         b.disabled = !!a.disabled;
+        if (a.title) b.title = a.title;
         if (a.onClick) b.addEventListener('click', a.onClick);
         row.appendChild(b);
       }

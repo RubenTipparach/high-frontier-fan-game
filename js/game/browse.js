@@ -32,7 +32,10 @@ import {
   getActiveThrusterId, setActiveThruster,
   getTankWater, addFuel, removeFuel, getTankMax,
   getStackTotals, getActiveThrusterStats,
+  getProspectorCards, getActiveProspectorId, setActiveProspector,
+  clearActiveProspector, getActiveProspectorStats,
 } from './rocket.js';
+import { canProspect, computeRaygunTargets } from './scan.js';
 import { CREW } from '../../data/crew.js';
 import { MILESTONES } from '../../data/glory.js';
 import { POLITICS } from '../../data/politics.js';
@@ -1306,6 +1309,33 @@ function openRocketStackModal() {
         activate.addEventListener('click', () => setActiveThruster(slot.id));
         actions.appendChild(activate);
       }
+      // Prospector toggle - same idiom as the thruster activator.
+      // Cards qualify when their active face carries a missile /
+      // raygun / buggy property. Clicking sets THIS card as the
+      // active prospector for the turn.
+      const prospKind = (() => {
+        const f = (card.faces && card.faces.primary) || card;
+        const props = f.properties || [];
+        for (const k of ['raygun', 'missile', 'buggy']) {
+          if (props.some((p) => p.key === k && p.value)) return k;
+        }
+        return null;
+      })();
+      if (prospKind) {
+        const activeProspId = getActiveProspectorId();
+        const isActiveProsp = slot.id === activeProspId;
+        const glyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prospKind];
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'rocket-activate'
+          + (isActiveProsp ? ' is-active' : '');
+        btn.textContent = isActiveProsp
+          ? `${glyph} Active prospector`
+          : `Set as ${prospKind} prospector`;
+        btn.disabled = isActiveProsp;
+        btn.addEventListener('click', () => setActiveProspector(slot.id));
+        actions.appendChild(btn);
+      }
 
       const back = document.createElement('button');
       back.type = 'button';
@@ -1373,6 +1403,39 @@ function applyEventDieEffect(event) {
       season: season && season.name,
       applied: false,
     },
+  });
+}
+
+// Sandbox prospect: rolls Nd6 vs the site's class threshold (the
+// HF4 prospect mechanic) and logs the result. Site state isn't
+// mutated yet - real prospect-success / fail handling (placing a
+// claim marker, awarding the site's VP, advancing the patent
+// economy) is Stage 3+ work. The roll + outcome line gives the
+// player a flavour readout AND a paper trail in the mission log.
+const PROSPECT_CLASS_DICE = { A: 1, B: 2, C: 3, D: 4 };
+const PROSPECT_CLASS_THRESHOLDS = { A: 3, B: 4, C: 4, D: 5 };
+function doProspect(site, prosp) {
+  if (!prosp) return;
+  const cls = String(site.class || 'C').toUpperCase();
+  const dice = PROSPECT_CLASS_DICE[cls] || 1;
+  const threshold = PROSPECT_CLASS_THRESHOLDS[cls] || 4;
+  const rolls = Array.from({ length: dice }, () => 1 + Math.floor(Math.random() * 6));
+  const best = rolls.length ? Math.max(...rolls) : 0;
+  const success = best >= threshold;
+  const cardName = prosp.card?.name || prosp.id;
+  const kindGlyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prosp.kind] || '🔬';
+  setStatus(
+    `${kindGlyph} Prospected <strong>${esc(site.name)}</strong> `
+    + `(class ${cls}) with <em>${esc(cardName)}</em>: `
+    + `rolled ${rolls.join('/')} vs ${threshold} - `
+    + `<strong>${success ? 'success' : 'failed'}</strong>.`
+  );
+  logAction({
+    type: 'prospect',
+    icon: kindGlyph,
+    summary: `${success ? 'Prospected' : 'Prospect failed at'} ${site.name} (class ${cls}, ${prosp.kind}): rolled ${rolls.join('/')} vs ${threshold}`,
+    undoable: false,
+    data: { siteId: site.id, kind: prosp.kind, rolls, threshold, success },
   });
 }
 
@@ -1849,6 +1912,35 @@ function showSitePopupFor(site) {
       },
     },
   ];
+  // Prospect action - only show when there's an active prospector
+  // in the stack AND it's eligible to scan this site. Missile /
+  // buggy require the rocket to be parked on the target; raygun
+  // does a line-of-sight check through transparent waypoints.
+  // Disabled-but-visible when an active prospector exists but
+  // can't reach, so the player gets a tooltip explaining why
+  // (vs. silently dropping the button).
+  const prosp = getActiveProspectorStats();
+  if (prosp) {
+    const rocketSite = getRocketSite();
+    const check = canProspect(_activeData, rocketSite?.id, site.id, prosp.kind);
+    const supportsOk = prosp.canActivate;
+    const ok = check.ok && supportsOk;
+    const kindGlyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prosp.kind] || '🔬';
+    const reason = !supportsOk
+      ? `Prospector needs ${(prosp.missingSuppliers || []).join(' + ')} support.`
+      : check.reason;
+    actions.push({
+      label: `${kindGlyph} Prospect (${prosp.kind})`,
+      variant: 'secondary',
+      disabled: !ok,
+      title: reason || undefined,
+      onClick: () => {
+        if (!ok) return;
+        doProspect(site, prosp);
+        _renderer.clearSitePopup();
+      },
+    });
+  }
   _renderer.setSitePopup(site, actions);
   _renderer.onPopupClose(() => {
     _selectedId = null;
