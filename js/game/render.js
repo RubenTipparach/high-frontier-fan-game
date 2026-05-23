@@ -2196,17 +2196,15 @@ export class MapRenderer {
     meta.textContent = parts.join(' · ');
     el.appendChild(name);
     if (meta.textContent) el.appendChild(meta);
-    // Node id so the player can copy a stable reference into a
-    // bug report. The planner JSON keys nodes by random floats
-    // like "0.9483763498218554" — copy-pasting that as a bug
-    // reference is rough on the eye. djb2-hash the float to a
-    // short base36 string (stable across reloads, so it's still
-    // a valid reference). The full float stays on the title for
-    // the rare case someone really needs the raw key.
-    if (site.id) {
+    // Node id2 — a human-friendly stable reference generated at
+    // data-load time (see planner-map.js#makeRefId). Reads as
+    // e.g. "comet-borrelly", "dresda", "lag-leo", "burn-3a2b9".
+    // The raw vendor float id stays on the title for the rare
+    // case someone needs to grep the planner JSON directly.
+    if (site.id2 || site.id) {
       const idRow = document.createElement('div');
       idRow.className = 't-id';
-      idRow.textContent = `id: ${shortRefId(site.id)}`;
+      idRow.textContent = `id: ${site.id2 || shortRefId(site.id)}`;
       idRow.title = `Tap to select, then copy. (raw key: ${site.id})`;
       el.appendChild(idRow);
     }

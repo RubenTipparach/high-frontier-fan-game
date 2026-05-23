@@ -77,8 +77,18 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
     // better heuristic later — just don't apply it here.
     const isWaypoint = rawType !== 'site';
     const synodic = p.siteSynodic || null;
+    // id2 — a human-friendly stable reference for every location,
+    // derived once at load time. Real sites: slug of their name
+    // ("comet-borrelly", "dresda"). Waypoints: type prefix + a
+    // short hash of their (x, y) so unnamed lagranges/burns get
+    // unique tags like "lag-3a2b9". Collisions are disambiguated
+    // with a trailing counter further down. The upstream `id`
+    // (random float key from the vendor JSON) stays as the
+    // canonical lookup key so byId / edge data still works.
+    const id2 = makeRefId(p, rawType);
     sites.push({
       id,
+      id2,
       name: p.siteName || routingLabel(rawType),
       type,
       isWaypoint,
@@ -123,6 +133,12 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
   // viewport's layout.
   synthesizeBodies(sites, viewW, viewH);
 
+  // Disambiguate any id2 collisions (rare — only happens if two
+  // unnamed waypoints sit at coords that hash to the same bucket,
+  // or two real sites have the same slugged name). Append a
+  // numeric suffix in iteration order so the result stays stable.
+  disambiguateRefIds(sites);
+
   // Each site picks up a bodyKey so the renderer can group
   // multi-site bodies (Mars, Luna, Mercury) into one shared halo.
   for (const s of sites) s.bodyKey = bodyKeyFor(s);
@@ -138,6 +154,62 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
 
   _cache = { sites, edges, byId, chains, straightEdges, mode: 'classic' };
   return _cache;
+}
+
+// id2 generator: a copy-friendly stable reference for one location.
+// Real sites collapse to a slug of their name ("comet-borrelly").
+// Waypoints get `<typePrefix>-<5-char position hash>` so the LEO
+// lagrange reads as "lag-leo" (named) and an unnamed mid-Trojan
+// burn reads as "burn-3a2b9". Identical position + type always
+// hashes to the same id, so the reference is stable across loads.
+const TYPE_PREFIX = {
+  site: 'site', lagrange: 'lag', burn: 'burn', hohmann: 'hoh',
+  decorative: 'dec', radhaz: 'rad', venus: 'venus', unknown: 'wp',
+};
+function makeRefId(p, rawType) {
+  if (p.siteName) {
+    const slug = slugify(p.siteName);
+    if (slug) {
+      // Named waypoints (LEO) still get a type prefix so they read
+      // distinct from a same-named real site if one ever appears.
+      if (rawType !== 'site') {
+        return `${TYPE_PREFIX[rawType] || 'wp'}-${slug}`;
+      }
+      return slug;
+    }
+  }
+  const prefix = TYPE_PREFIX[rawType] || 'wp';
+  // Hash from the position coords so two waypoints can't collide
+  // unless they're at the exact same x/y — which never happens in
+  // practice in the planner data.
+  const posKey = `${(p.x || 0).toFixed(6)},${(p.y || 0).toFixed(6)}`;
+  return `${prefix}-${shortHash5(posKey)}`;
+}
+
+function slugify(name) {
+  return String(name).toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+// djb2 → base36, 5 chars. Plenty of buckets (60M) for ~1500
+// waypoints; collisions are caught and disambiguated below.
+function shortHash5(s) {
+  let h = 5381 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  }
+  return h.toString(36).padStart(5, '0').slice(-5);
+}
+
+function disambiguateRefIds(sites) {
+  const seen = new Map();           // id2 -> count
+  for (const s of sites) {
+    if (!s.id2) continue;
+    const n = (seen.get(s.id2) || 0) + 1;
+    seen.set(s.id2, n);
+    if (n > 1) s.id2 = `${s.id2}-${n}`;
+  }
 }
 
 // Walk the adjacency graph and pull out every chain of degree-2
