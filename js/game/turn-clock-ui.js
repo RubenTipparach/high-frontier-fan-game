@@ -11,6 +11,7 @@ import {
   getOpsRemaining, getMovesRemaining,
   endTurn,
   SLOTS, SEASONS, NEW_ROUND_SLOT, EVENT_SLOTS,
+  getEventForRoll, getSeasonForSlot,
 } from './turn-clock.js';
 
 // --------- Confirm end-turn dialog ---------
@@ -311,12 +312,25 @@ export function openTurnClockModal({ rolling = null, animateFrom = null } = {}) 
     const die = buildDie(dieValue);
     dieHost.appendChild(die);
     if (lastEvent) {
+      const eventSeason = getSeasonForSlot(lastEvent.turn);
+      const ev = getEventForRoll(lastEvent.dieRoll, eventSeason && eventSeason.name);
+      const evBlock = ev
+        ? `<div class="turn-clock-event-card" data-season="${ev.season || 'any'}">
+             <header>
+               <span class="ev-icon">${ev.icon}</span>
+               <strong>${ev.name}</strong>
+               ${ev.season ? `<em class="ev-season ev-season-${ev.season}">Season ${ev.season}</em>` : ''}
+             </header>
+             <p class="ev-text">${ev.text}</p>
+           </div>`
+        : '';
       eventHost.innerHTML = `
         <p class="turn-clock-event-line">
           Last event (round <strong>${lastEvent.round}</strong>,
           turn <strong>${lastEvent.turn}</strong>):
           d6 rolled <strong class="big">${lastEvent.dieRoll}</strong>.
         </p>
+        ${evBlock}
       `;
     } else {
       eventHost.innerHTML = `

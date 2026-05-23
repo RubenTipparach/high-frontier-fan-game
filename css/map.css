@@ -378,6 +378,46 @@
   font-size: 18px;
   color: #fbbf24;
 }
+/* Verbatim HF4 event card surfaced in the turn-tracker modal. The
+   header shows the icon + name + (optional) season tag; the body
+   is the rulebook text reproduced verbatim. Season chips inherit
+   the wheel's blue/yellow/red palette so the player can see at a
+   glance which seasonal branch of the d6 fired. */
+.turn-clock-event-card {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 8px;
+  text-align: left;
+}
+.turn-clock-event-card header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.turn-clock-event-card .ev-icon { font-size: 18px; }
+.turn-clock-event-card strong { color: var(--ink); font-size: 14px; flex: 1; }
+.turn-clock-event-card .ev-season {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-style: normal;
+  font-weight: 700;
+  color: #0c0a16;
+}
+.turn-clock-event-card .ev-season-blue   { background: #60a5fa; }
+.turn-clock-event-card .ev-season-yellow { background: #facc15; }
+.turn-clock-event-card .ev-season-red    { background: #f87171; }
+.turn-clock-event-card .ev-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-dim);
+}
 
 /* 3D die. Cube w/ 6 faces; .die-cube transforms to face the
    value via data-value. Rolling state tumbles for 700 ms before

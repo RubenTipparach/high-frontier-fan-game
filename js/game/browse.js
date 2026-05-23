@@ -8,7 +8,10 @@
 import { MapRenderer, LEO_ANCHOR } from './render.js';
 import { loadPlannerMap } from './planner-map.js';
 import { findPath } from './nav.js';
-import { consumeMove, refundMove, getTurn, getMovesRemaining, onTurnChange } from './turn-clock.js';
+import {
+  consumeMove, refundMove, getTurn, getMovesRemaining, onTurnChange,
+  getEventForRoll, getSeasonForSlot,
+} from './turn-clock.js';
 import { triggerEndTurn, openTurnClockModal } from './turn-clock-ui.js';
 import {
   getState as soloState, newGame as soloNewGame, abandonGame as soloAbandon,
@@ -41,7 +44,7 @@ import {
 } from './mission-log.js';
 import {
   awardChitForZone, revokeChitForZone, cashInChits, uncashChits,
-  getChits, getVps, getChitVpValue, isZoneVisited, addVps,
+  getChits, getVps, getChitVpValue, isZoneVisited,
   onChange as onGloryChange, ZONE_CHIT_VPS,
 } from './glory.js';
 
@@ -711,6 +714,13 @@ function ensureMapShell(host) {
       round: result.round,
       event: result.event,
     });
+    // Wipe this turn's cyan rocket trail — each turn starts with a
+    // clean slate so the ribbon reads as "where I went THIS turn",
+    // not "everywhere I've ever been". Position + planned route
+    // both stay put.
+    _rocketTrail = [];
+    persistRocketTrail();
+    if (_renderer) _renderer.setRocketTrail(null);
     openTurnClockModal({
       animateFrom: prevTurn,
       rolling: result.event ? { value: result.event.dieRoll } : null,
@@ -1268,30 +1278,24 @@ function isLeoSite(site) {
   return !!site && site.type === 'lagrange' && site.name === 'LEO';
 }
 
-// Sunspot Cube d6 effects. HF4's events vary by season; until the
-// full table lands (with seasonal Inspiration / Glitch / Pad
-// Explosion / Solar Flare / Budget Cuts effects), we map the d6
-// to a flat VP swing + a flavour name. Logged in the mission log
-// so the player can audit what the roll cost / gained them.
-const EVENT_DIE_TABLE = {
-  1: { name: 'Catastrophic Failure', vps: -2, icon: '💥' },
-  2: { name: 'Rookie Miscalculation', vps: -1, icon: '🤦' },
-  3: { name: 'Pad Explosion',         vps: -1, icon: '🧨' },
-  4: { name: 'Glitch',                vps:  0, icon: '⚠️' },
-  5: { name: 'Inspiration',           vps: +1, icon: '💡' },
-  6: { name: 'Breakthrough',          vps: +2, icon: '🎉' },
-};
+// Sunspot Cube d6 events. Rules text + lookup live in turn-clock.js
+// (single source of truth — the tracker modal reads the same table).
+// Events do NOT directly mutate VP; they change game state (rotate
+// decks, place Glitch tokens, decommission cards, swap faction
+// privileges, force flare rolls). Wiring those state changes into
+// the engine is Stage 3+ territory; for now we just log the event
+// so the player can see what fired.
 function applyEventDieEffect(event) {
   if (!event || typeof event.dieRoll !== 'number') return;
-  const e = EVENT_DIE_TABLE[event.dieRoll];
+  const season = getSeasonForSlot(event.turn);
+  const e = getEventForRoll(event.dieRoll, season && season.name);
   if (!e) return;
-  if (e.vps) addVps(e.vps, e.name);
   logAction({
     type: 'event_d6',
     icon: e.icon,
-    summary: `${e.name} (d6 = ${event.dieRoll}) → ${e.vps > 0 ? '+' : ''}${e.vps} VP`,
+    summary: `${e.name} (d6 = ${event.dieRoll}) — ${e.text}`,
     undoable: false,
-    data: { dieRoll: event.dieRoll, vps: e.vps, name: e.name },
+    data: { dieRoll: event.dieRoll, eventName: e.name, season: season && season.name },
   });
 }
 

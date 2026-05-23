@@ -45,6 +45,88 @@ export const SEASONS = [
 ];
 export const NEW_ROUND_SLOT = 0;
 export const EVENT_SLOTS = [1, 3, 5, 7, 9, 11];
+
+// Verbatim HF4 Sunspot-Cube event table. Triggered each time the
+// cube crosses an event threshold (slots 1, 3, 5, 7, 9, 11); the
+// player rolls 1d6 and consults this table. For rolls 1-4 the
+// event is universal; for 5-6 the effect depends on the current
+// season (Blue / Yellow / Red). The text below is reproduced from
+// the published rulebook so the modal can surface it verbatim.
+//
+// NOTE: these events DO NOT directly award or remove VP — they
+// change game state (rotate decks, place Glitch tokens,
+// decommission cards, swap faction privileges, force flare rolls).
+// VP swings only happen as a side-effect of those state changes
+// (e.g. losing a card you spent ops to build). Don't wire d6 to
+// VP deltas; the event is the event.
+export const EVENT_TABLE = {
+  inspiration: {
+    name: 'Inspiration',
+    icon: '💡',
+    rolls: [1, 2],
+    season: null,
+    text: 'Put the topmost card of each patent deck (& the Colonist '
+      + 'queue) at the bottom of the deck.',
+  },
+  glitch: {
+    name: 'Glitch',
+    icon: '⚠️',
+    rolls: [3],
+    season: null,
+    text: 'Each player places a Glitch disk on their stack with the '
+      + 'most cards that has neither a Glitch nor Humans.',
+  },
+  pad_explosion: {
+    name: 'Pad Explosion / Space Debris',
+    icon: '🧨',
+    rolls: [4],
+    season: null,
+    text: 'Each player decommissions their card with the highest '
+      + 'Mass in LEO, choosing one if tied. However, Crew, '
+      + 'Black-Side, Purple-Side, Colonists, and Bernals are immune.',
+  },
+  anarchy: {
+    name: 'Anarchy',
+    icon: '🗽',
+    rolls: [5, 6],
+    season: 'blue',
+    text: 'Until the Sunspot Cube exits season blue, each player’s '
+      + 'listed faction privilege is replaced by the Felonious '
+      + 'faction privilege. (Module 0) The Active Law is inactivated, '
+      + 'and make a Purge Roll.',
+  },
+  budget_cuts: {
+    name: 'Budget Cuts',
+    icon: '✂️',
+    rolls: [5, 6],
+    season: 'yellow',
+    text: 'Each player discards a card of their choice from their '
+      + 'Hand to the bottom of the corresponding patent deck.',
+  },
+  solar_flare: {
+    name: 'Solar Flare',
+    icon: '☀️',
+    rolls: [5, 6],
+    season: 'red',
+    text: 'Make a 1d6 Flare Roll and apply the result to every card '
+      + 'in all non-LEO and unshielded stacks. Adjust the result by '
+      + 'the modifier listed in the Heliocentric Zone the stack is '
+      + 'in. If rad-hardness < modified result, then decommission '
+      + 'the card.',
+  },
+};
+// Resolve a (dieRoll, seasonName) pair to the canonical event
+// record. Returns null when no entry matches — shouldn't happen
+// because every d6 value is covered for every season, but lets
+// callers fail soft.
+export function getEventForRoll(dieRoll, seasonName) {
+  for (const e of Object.values(EVENT_TABLE)) {
+    if (!e.rolls.includes(dieRoll)) continue;
+    if (e.season !== null && e.season !== seasonName) continue;
+    return e;
+  }
+  return null;
+}
 // Per-turn budgets. Stage 3's operations engine will take these
 // over (HF4 core is 4 ops/turn); for now they're placeholders so
 // the end-turn confirm dialog can gate on "did you spend
@@ -105,6 +187,13 @@ export function getTurn()  { return _turn;  }
 export function getRound() { return _round; }
 export function getSeason() {
   return SEASONS.find((s) => _turn >= s.from && _turn <= s.to);
+}
+// Look up which season a given slot index sits in (handy for
+// events recorded mid-turn: the event's effect depends on the
+// season at the moment the cube crossed the threshold, not the
+// season as of "now").
+export function getSeasonForSlot(slot) {
+  return SEASONS.find((s) => slot >= s.from && slot <= s.to) || SEASONS[0];
 }
 export function getLastEvent()      { return _lastEvent; }
 export function getOpsRemaining()   { return _opsRemaining; }
