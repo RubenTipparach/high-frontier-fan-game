@@ -661,18 +661,51 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
-  // Pan + zoom to centre a specific site / waypoint in the
-  // viewport. Used by the search box's "fly to" affordance.
-  // `zoom` defaults to 5x which fills the cluster around a body
-  // without diving into the hex's individual glyphs.
-  flyTo(target, zoom = 5) {
+  // Smoothly pan + zoom to centre a specific site / waypoint in
+  // the viewport. Used by the search box, the locator buttons,
+  // and the explosion camera-pan. `zoom` defaults to 5x which
+  // fills the cluster around a body without diving into the
+  // hex's individual glyphs. Tween duration is ~420 ms with
+  // ease-out cubic so the camera feels responsive without
+  // jumping. Pass `{ ms: 0 }` to snap (legacy fast path).
+  flyTo(target, zoom = 5, { ms = 420 } = {}) {
     if (!target || typeof target.x !== 'number' || typeof target.y !== 'number') return;
     this._cancelPanAnim();
-    this.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
-    const eff = this.zoom * this.fitScale;
-    this.pan.x = this.hostW / 2 - target.x * eff;
-    this.pan.y = this.hostH / 2 - target.y * eff;
-    this._scheduleDraw();
+    const endZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
+    const endEff  = endZoom * this.fitScale;
+    const endPanX = this.hostW / 2 - target.x * endEff;
+    const endPanY = this.hostH / 2 - target.y * endEff;
+    if (!Number.isFinite(ms) || ms <= 0) {
+      // Snap path - kept for code that explicitly wants the
+      // instant version (rare; most call sites benefit from the
+      // animated default).
+      this.zoom = endZoom;
+      this.pan.x = endPanX;
+      this.pan.y = endPanY;
+      this._scheduleDraw();
+      return;
+    }
+    const startZoom = this.zoom;
+    const startPanX = this.pan.x;
+    const startPanY = this.pan.y;
+    // No-op short circuit: if we're already exactly there,
+    // skip the tween entirely so callers can flyTo redundantly
+    // without paying for a frame loop.
+    if (startZoom === endZoom && startPanX === endPanX && startPanY === endPanY) {
+      return;
+    }
+    const t0 = performance.now();
+    const step = (now) => {
+      const k = Math.min(1, (now - t0) / ms);
+      const e = 1 - Math.pow(1 - k, 3);   // ease-out cubic
+      this.zoom  = startZoom + (endZoom  - startZoom) * e;
+      this.pan.x = startPanX + (endPanX  - startPanX) * e;
+      this.pan.y = startPanY + (endPanY  - startPanY) * e;
+      this._scheduleDraw();
+      if (k < 1) this._panAnimRaf = requestAnimationFrame(step);
+      else this._panAnimRaf = null;
+    };
+    this._panAnimRaf = requestAnimationFrame(step);
   }
 
   // Smoothly pan (no zoom change) to centre a world-space point.
