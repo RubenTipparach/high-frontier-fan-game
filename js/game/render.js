@@ -2530,14 +2530,42 @@ export class MapRenderer {
       row.className = 'popup-actions';
       for (const a of actions) {
         if (!a || !a.label) continue;
-        const b = document.createElement('button');
-        b.type = 'button';
         // Variant drives the per-button colour: 'rocket' is the
         // primary blue plan-route action, 'secondary' is the
         // dimmer Navigate-to inspection action. Legacy `primary:
         // true` still resolves to the rocket-blue style so old
         // callers don't break.
         const variant = a.variant || (a.primary ? 'rocket' : 'secondary');
+        // Action descriptors may carry a `trailing` sub-action
+        // (e.g. a ⚙ gear next to "Plan rocket route" that pops
+        // route-config options). When present, wrap the main
+        // button + the trailing button in a flex row so they
+        // share one popup line and the gear takes its natural
+        // square width instead of stretching.
+        if (a.trailing && a.trailing.label) {
+          const slot = document.createElement('div');
+          slot.className = 'popup-action-pair';
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = `popup-btn popup-btn-${variant} pair-main`;
+          b.textContent = a.label;
+          b.disabled = !!a.disabled;
+          if (a.title) b.title = a.title;
+          if (a.onClick) b.addEventListener('click', a.onClick);
+          const g = document.createElement('button');
+          g.type = 'button';
+          g.className = `popup-btn popup-btn-${a.trailing.variant || 'secondary'} pair-trailing`;
+          g.textContent = a.trailing.label;
+          g.disabled = !!a.trailing.disabled;
+          if (a.trailing.title) g.title = a.trailing.title;
+          if (a.trailing.onClick) g.addEventListener('click', a.trailing.onClick);
+          slot.appendChild(b);
+          slot.appendChild(g);
+          row.appendChild(slot);
+          continue;
+        }
+        const b = document.createElement('button');
+        b.type = 'button';
         b.className = `popup-btn popup-btn-${variant}`;
         b.textContent = a.label;
         b.disabled = !!a.disabled;

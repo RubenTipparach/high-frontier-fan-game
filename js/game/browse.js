@@ -605,6 +605,28 @@ let _activeData = null;
 const STORAGE_ROCKET_SITE  = 'hf-sandbox-rocket-site';
 const STORAGE_ROCKET_TRAIL = 'hf-sandbox-rocket-trail';
 const STORAGE_ROCKET_ROUTE = 'hf-sandbox-planned-route';
+const STORAGE_ROUTE_PRIORITY = 'hf-sandbox-route-priority';
+// Routing metric priority. 'turns' minimizes turn-ends first (the
+// snap-to-adjacent default); 'burns' minimizes water spend first
+// (favours long Hohmann coasts at the cost of more turns). User-
+// togglable via the ⚙ gear in the site popup; persisted so the
+// pick survives reloads.
+let _routePriority = (() => {
+  try {
+    const s = localStorage.getItem(STORAGE_ROUTE_PRIORITY);
+    return s === 'burns' || s === 'turns' ? s : 'turns';
+  } catch { return 'turns'; }
+})();
+function setRoutePriority(mode) {
+  if (mode !== 'turns' && mode !== 'burns') return;
+  _routePriority = mode;
+  try { localStorage.setItem(STORAGE_ROUTE_PRIORITY, mode); } catch {}
+}
+function routeMetricPriority() {
+  return _routePriority === 'burns'
+    ? ['burns', 'turns', 'hazards', 'radHazards']
+    : ['turns', 'burns', 'hazards', 'radHazards'];
+}
 let _rocketSiteId = (() => {
   try { return localStorage.getItem(STORAGE_ROCKET_SITE) || null; }
   catch { return null; }
@@ -2452,6 +2474,71 @@ function onSiteSelect(site) {
 // active, tank empty/full, supports change) so the popup's
 // enabled / disabled buttons stay in sync with reality. No-op when
 // nothing is selected.
+// Route-options modal: lets the player flip the metric priority
+// the planner uses (turns-first vs burns-first). Persisted via
+// setRoutePriority. onClose fires after the player picks so the
+// site popup can re-render its gear tooltip.
+function openRouteOptionsModal(onClose) {
+  document.querySelector('.route-options-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay route-options-overlay';
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+    if (onClose) onClose();
+  };
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+
+  const panel = document.createElement('div');
+  panel.className = 'route-options-panel';
+  panel.innerHTML = `
+    <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
+    <h2 class="route-options-title">⚙ Route options</h2>
+    <p class="muted route-options-sub">
+      Which metric should the planner minimize first? The other
+      one becomes the tiebreaker.
+    </p>
+    <div class="route-options-choices">
+      <label class="route-options-choice ${_routePriority === 'turns' ? 'is-active' : ''}">
+        <input type="radio" name="route-priority" value="turns"
+          ${_routePriority === 'turns' ? 'checked' : ''}>
+        <div>
+          <strong>Fewer turns first</strong>
+          <em>Default. Adjacent nodes go in 1 hop even when a longer
+          Hohmann path would be free in burns.</em>
+        </div>
+      </label>
+      <label class="route-options-choice ${_routePriority === 'burns' ? 'is-active' : ''}">
+        <input type="radio" name="route-priority" value="burns"
+          ${_routePriority === 'burns' ? 'checked' : ''}>
+        <div>
+          <strong>Fewer burns first</strong>
+          <em>Save water by riding free Hohmann transfers, even if it
+          costs extra turn-ends to coast.</em>
+        </div>
+      </label>
+    </div>
+  `;
+  panel.querySelector('.modal-x').addEventListener('click', close);
+  panel.querySelectorAll('input[name="route-priority"]').forEach((el) => {
+    el.addEventListener('change', () => {
+      if (el.checked) {
+        setRoutePriority(el.value);
+        // Repaint highlight state on the labels.
+        panel.querySelectorAll('.route-options-choice').forEach((c) => {
+          c.classList.toggle('is-active',
+            c.querySelector('input').value === _routePriority);
+        });
+      }
+    });
+  });
+
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+}
+
 function refreshOpenSitePopup() {
   if (!_selectedId || !_activeData) return;
   const site = _activeData.byId && _activeData.byId[_selectedId];
@@ -2487,6 +2574,21 @@ function showSitePopupFor(site) {
         if (!canNavigate) return;
         const ok = planRocketRouteTo(site);
         if (ok) _renderer.clearSitePopup();
+      },
+      // Inline ⚙ gear next to the plan-route button. Opens the
+      // route-options modal so the player can flip the metric
+      // priority (turns vs burns) without leaving the popup.
+      trailing: {
+        label: '⚙',
+        variant: 'secondary',
+        title: `Route options (current priority: ${_routePriority} first)`,
+        onClick: () => {
+          openRouteOptionsModal(() => {
+            // After the modal closes, re-render the popup so the
+            // tooltip on the gear reflects the new priority.
+            if (_selectedId) refreshOpenSitePopup();
+          });
+        },
       },
     },
   ];
@@ -2622,7 +2724,10 @@ function planRocketRouteTo(destSite) {
   // won't be flyable until a thruster is assigned.
   const thrStats = getActiveThrusterStats();
   const thrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 4;
-  const result = planRoute(_activeData, origin.id, destSite.id, { thrust });
+  const result = planRoute(_activeData, origin.id, destSite.id, {
+    thrust,
+    metricPriority: routeMetricPriority(),
+  });
   if (!result || !result.segments.length) {
     setStatus(
       `No rocket route from <strong>${esc(origin.name)}</strong> to `

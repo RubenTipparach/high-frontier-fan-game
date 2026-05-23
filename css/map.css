@@ -1080,6 +1080,75 @@
   align-items: stretch;
   gap: 6px;
 }
+/* Composite action: main button + small trailing button on the
+   same line (used for "Plan rocket route" + the ⚙ gear). The
+   main button stretches; the gear takes its intrinsic square. */
+.map-popup .popup-action-pair {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+.map-popup .popup-action-pair .pair-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.map-popup .popup-action-pair .pair-trailing {
+  flex: 0 0 auto;
+  width: 36px;
+  padding: 7px 0;
+  font-size: 14px;
+}
+/* Route-options modal: a small radio-pair lets the player pick
+   the metric priority (turns first vs burns first). */
+.route-options-overlay { z-index: 78; }
+.route-options-panel {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px 24px 18px;
+  width: min(380px, 92vw);
+  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.55);
+}
+.route-options-title {
+  margin: 0 0 4px;
+  font-size: 16px;
+  color: var(--accent);
+}
+.route-options-sub { margin: 0 0 14px; font-size: 12px; line-height: 1.45; }
+.route-options-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.route-options-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.route-options-choice.is-active {
+  border-color: rgba(96, 165, 250, 0.7);
+  background: rgba(96, 165, 250, 0.12);
+}
+.route-options-choice input { margin-top: 3px; }
+.route-options-choice strong {
+  display: block;
+  color: var(--ink);
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+.route-options-choice em {
+  display: block;
+  font-style: normal;
+  color: var(--ink-dim);
+  font-size: 11px;
+  line-height: 1.45;
+}
 .map-popup .popup-btn {
   font-size: 12px;
   font-weight: 600;
