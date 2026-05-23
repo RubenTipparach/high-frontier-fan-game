@@ -3564,7 +3564,10 @@ async function moveRocket() {
   // Generic hazards prompt the pay/roll/cancel modal first; rad
   // hazards run their own check afterwards (always - they can't
   // be skipped by paying). Both, when actually resolved (paid OR
-  // rolled), lock undo for the rest of the turn.
+  // rolled), lock undo for the rest of the turn. The actual
+  // dice DON'T roll here - they fire one at a time inside the
+  // move-queue below, in route order, so an early rad failure
+  // can stop the ship before a later generic hazard is reached.
   const hazards = routeHazards(turn1);
   const radHazards     = hazards.filter((h) => h.site.type === 'radhaz');
   const genericHazards = hazards.filter((h) => h.site.type !== 'radhaz');
@@ -3592,53 +3595,25 @@ async function moveRocket() {
       });
       lockUndo = true;
     } else if (hazardChoice === 'roll') {
-      const rolls = await hazardRollModal(genericHazards);
-      for (const r of rolls) {
-        const verdict = r.d6 === 1 ? '✗ critical (rolled 1)' : '✓ survived';
-        logAction({
-          type: 'hazard_roll',
-          icon: r.glyph,
-          summary: `${r.glyph} ${esc(r.site.name)} d6=${r.d6} ${verdict}`,
-          undoable: false,
-          data: { siteId: r.site.id, d6: r.d6 },
-        });
-      }
+      // Defer dice to the per-hazard queue. Just mark the
+      // undo-lockout - the player has committed to rolling.
       lockUndo = true;
-      const firstFail = rolls.find((r) => r.d6 === 1);
-      if (firstFail) {
-        if (!consumeMove()) {
-          setStatus('No moves left this turn - end turn to refresh.');
-          return false;
-        }
-        setHazardousMove(true);
-        const failIdx = turn1.findIndex((s) => s.to === firstFail.site.id);
-        const partial = failIdx >= 0 ? turn1.slice(0, failIdx + 1) : turn1;
-        setStatus(`💥 Critical failure at <strong>${esc(firstFail.site.name)}</strong>…`);
-        await animateRocketAlong(partial);
-        await explodeRocket(firstFail.site.id);
-        return false;
-      }
     }
   }
-  // Radiation check. Final radiation per zone = d6 + season
-  // bonus - active thrust (clamped at 0). Worst final radiation
-  // across all rad zones is the per-card threshold; cards with
-  // rad-hard < worst get decommissioned to the hand. If thrust
-  // is high enough that even the max die (6 + bonus - thrust)
-  // can't beat any card's rad-hard, we skip the dice
-  // ceremony entirely. Aqua cannot bypass a rad roll.
+  // Rad confirm. Same shape as the generic confirm: player sees
+  // the formula upfront, picks confirm or cancel. Actual rolls
+  // happen one-at-a-time in the queue below.
+  let radWillRoll = false;
+  let radThrust = 0;
+  let radSeasonBonus = 0;
   if (radHazards.length) {
     const thrStats = getActiveThrusterStats();
-    const thrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 0;
+    radThrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 0;
     let season = null;
     try { season = getSeason(); } catch { season = null; }
-    const seasonBonus = season && season.name === 'red' ? 2 : 0;
+    radSeasonBonus = season && season.name === 'red' ? 2 : 0;
     const threshold = radBypassThreshold();
-    // Confirm BEFORE the rad check runs - the player needs a
-    // chance to back out once they see the formula. Cancelling
-    // refunds any aqua already spent on generic hazards (no-op
-    // unless the route had both flavours and they paid).
-    const radChoice = await radConfirmModal(radHazards, thrust, seasonBonus, threshold);
+    const radChoice = await radConfirmModal(radHazards, radThrust, radSeasonBonus, threshold);
     if (radChoice === 'cancel' || radChoice == null) {
       if (hazardChoice === 'pay') {
         // Generic hazards charged aqua already; refund so the
@@ -3656,73 +3631,18 @@ async function moveRocket() {
       setStatus('Move cancelled at the rad check.');
       return false;
     }
-    if (thrust > threshold) {
+    if (radThrust > threshold) {
       logAction({
         type: 'rad_bypass',
         icon: '☢',
-        summary: `Thrust ${thrust} > ${threshold} - bypassed `
+        summary: `Thrust ${radThrust} > ${threshold} - bypassed `
           + `${radHazards.length} rad zone${radHazards.length === 1 ? '' : 's'} without rolling`,
         undoable: false,
-        data: { thrust, threshold, sites: radHazards.map((h) => h.site.id) },
+        data: { thrust: radThrust, threshold, sites: radHazards.map((h) => h.site.id) },
       });
     } else {
-      // Snapshot the stack so the modal's rad-hard list is
-      // stable across the roll animation.
-      const stackCards = getRocketStack()
-        .map((slot) => {
-          const card = PATENTS_BY_ID[slot.id]
-            || CREW.find((c) => c.id === slot.id) || null;
-          if (!card) return null;
-          return {
-            id: slot.id,
-            name: card.name,
-            radHardness: card.radHardness != null ? card.radHardness : 0,
-          };
-        })
-        .filter(Boolean);
-      const { rolls: radRolls, decommission } = await radHardnessRollModal(
-        radHazards, stackCards, thrust, seasonBonus,
-      );
-      for (const r of radRolls) {
-        logAction({
-          type: 'rad_roll',
-          icon: '☢',
-          summary: `☢ ${esc(r.site.name)} d6=${r.d6}`
-            + (seasonBonus ? ` +${seasonBonus} (red)` : '')
-            + (thrust ? ` −${thrust} thrust` : '')
-            + ` = rad ${r.rad}`,
-          undoable: false,
-          data: { siteId: r.site.id, d6: r.d6, rad: r.rad, thrust, seasonBonus },
-        });
-      }
+      radWillRoll = true;
       lockUndo = true;
-      if (decommission && decommission.length) {
-        // Decommission from rocket → hand. Pull each card by id
-        // (the stack array shifts as we remove, so we find the
-        // index per iteration instead of caching). addToHand
-        // refuses if the card is already in hand or in rocket;
-        // since we just removed it from the stack, addToHand
-        // should succeed.
-        let lost = 0;
-        for (const cardId of decommission) {
-          const idx = getRocketStack().findIndex((s) => s.id === cardId);
-          if (idx < 0) continue;
-          rocketRemoveCard(idx);
-          const card = PATENTS_BY_ID[cardId]
-            || CREW.find((c) => c.id === cardId) || null;
-          if (card) {
-            const r = addToHand(card);
-            if (r && r.ok) lost++;
-          }
-        }
-        logAction({
-          type: 'rad_decommission',
-          icon: '☢',
-          summary: `☢ ${lost} card${lost === 1 ? '' : 's'} decommissioned to hand by radiation`,
-          undoable: false,
-          data: { decommission, count: lost },
-        });
-      }
     }
   }
   if (lockUndo) setHazardousMove(true);
@@ -3752,15 +3672,116 @@ async function moveRocket() {
     cashedChits: null,        // filled in below if a cash-in fires
     cashedVps:   0,
   };
-  // Animate first - tweens position over ~700 ms, ease-in-out.
+  // Move queue. Walk turn1 segments in order, pausing at each
+  // hazard node to resolve it (animate-to + roll modal). An
+  // early critical kills the ship before later hazards even
+  // see the dice. Trail + _rocketSiteId update incrementally
+  // so an explosion mid-route reports the right location.
   setStatus(`🛸 Moving rocket to <strong>${esc(arrivedName)}</strong>…`);
-  await animateRocketAlong(turn1);
+  const hazardIndexById = new Map();
+  for (const h of hazards) {
+    const idx = turn1.findIndex((s) => s.to === h.site.id);
+    if (idx >= 0) hazardIndexById.set(h.site.id, { idx, hazard: h });
+  }
+  const orderedHazards = [...hazardIndexById.values()].sort((a, b) => a.idx - b.idx);
+  let lastIdx = 0;
+  const advanceTo = async (targetIdx) => {
+    if (targetIdx < lastIdx) return;
+    const slice = turn1.slice(lastIdx, targetIdx + 1);
+    if (!slice.length) return;
+    await animateRocketAlong(slice);
+    _rocketTrail = _rocketTrail.concat(slice.map((s) => ({ from: s.from, to: s.to })));
+    persistRocketTrail();
+    _renderer.setRocketTrail(_rocketTrail);
+    _rocketSiteId = slice[slice.length - 1].to;
+    persistRocketSite();
+    lastIdx = targetIdx + 1;
+  };
+  for (const { idx, hazard } of orderedHazards) {
+    await advanceTo(idx);
+    const isRad = hazard.site.type === 'radhaz';
+    if (isRad) {
+      if (!radWillRoll) continue;       // thrust bypass already logged
+      const stackCards = getRocketStack()
+        .map((slot) => {
+          const card = PATENTS_BY_ID[slot.id]
+            || CREW.find((c) => c.id === slot.id) || null;
+          if (!card) return null;
+          return {
+            id: slot.id,
+            name: card.name,
+            radHardness: card.radHardness != null ? card.radHardness : 0,
+          };
+        })
+        .filter(Boolean);
+      const { rolls: radRolls, decommission } = await radHardnessRollModal(
+        [hazard], stackCards, radThrust, radSeasonBonus,
+      );
+      for (const r of radRolls) {
+        logAction({
+          type: 'rad_roll',
+          icon: '☢',
+          summary: `☢ ${esc(r.site.name)} d6=${r.d6}`
+            + (radSeasonBonus ? ` +${radSeasonBonus} (red)` : '')
+            + (radThrust ? ` −${radThrust} thrust` : '')
+            + ` = rad ${r.rad}`,
+          undoable: false,
+          data: { siteId: r.site.id, d6: r.d6, rad: r.rad, thrust: radThrust, seasonBonus: radSeasonBonus },
+        });
+      }
+      if (decommission && decommission.length) {
+        let lost = 0;
+        for (const cardId of decommission) {
+          const ridx = getRocketStack().findIndex((s) => s.id === cardId);
+          if (ridx < 0) continue;
+          rocketRemoveCard(ridx);
+          const card = PATENTS_BY_ID[cardId]
+            || CREW.find((c) => c.id === cardId) || null;
+          if (card) {
+            const r = addToHand(card);
+            if (r && r.ok) lost++;
+          }
+        }
+        logAction({
+          type: 'rad_decommission',
+          icon: '☢',
+          summary: `☢ ${esc(hazard.site.name)}: ${lost} card${lost === 1 ? '' : 's'} decommissioned to hand`,
+          undoable: false,
+          data: { siteId: hazard.site.id, decommission, count: lost },
+        });
+      }
+    } else {
+      // Generic hazard. Paid path animates past silently; rolled
+      // path opens the dice modal for this single hazard.
+      if (hazardChoice !== 'roll') continue;
+      const rolls = await hazardRollModal([hazard]);
+      const r = rolls[0];
+      const verdict = r.d6 === 1 ? '✗ critical (rolled 1)' : '✓ survived';
+      logAction({
+        type: 'hazard_roll',
+        icon: r.glyph,
+        summary: `${r.glyph} ${esc(r.site.name)} d6=${r.d6} ${verdict}`,
+        undoable: false,
+        data: { siteId: r.site.id, d6: r.d6 },
+      });
+      if (r.d6 === 1) {
+        setStatus(`💥 Critical failure at <strong>${esc(r.site.name)}</strong>…`);
+        await explodeRocket(r.site.id);
+        return false;
+      }
+    }
+  }
+  // Animate the tail (everything past the last hazard) to the
+  // final destination.
+  if (lastIdx < turn1.length) {
+    const tail = turn1.slice(lastIdx);
+    await animateRocketAlong(tail);
+    _rocketTrail = _rocketTrail.concat(tail.map((s) => ({ from: s.from, to: s.to })));
+    persistRocketTrail();
+    _renderer.setRocketTrail(_rocketTrail);
+  }
   _rocketSiteId = newSiteId;
   persistRocketSite();
-  // Add the walked segments to the persistent trail (drawn cyan).
-  _rocketTrail = _rocketTrail.concat(turn1.map((s) => ({ from: s.from, to: s.to })));
-  persistRocketTrail();
-  _renderer.setRocketTrail(_rocketTrail);
   // Log the move + award glory chit on first-time zone entry +
   // auto-cash any chits if we just landed at LEO. Each side-
   // effect appends to the mission log so the player can audit
