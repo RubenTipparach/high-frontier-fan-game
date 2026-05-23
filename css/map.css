@@ -700,6 +700,71 @@
   color: #f87171;
 }
 
+/* Rad-confirm modal - the "do you really want to cross these
+   rad zones?" gate that fires BEFORE the dice modal. Reuses
+   the hazard-list rendering from hazard-confirm-panel; adds a
+   formula preview + a status block that flips colour based on
+   whether thrust can outrun the radiation. z-index above the
+   generic hazard-confirm so it can stack when both fire on a
+   mixed route. */
+.rad-confirm-overlay { z-index: 88; }
+.rad-confirm-panel h3 { color: #fde047; }
+.rad-confirm-panel .hazard-list {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 10px;
+  max-height: 140px;
+  overflow-y: auto;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.rad-confirm-panel .hazard-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px dashed var(--border);
+  font-size: 12px;
+}
+.rad-confirm-panel .hazard-list li:last-child { border-bottom: none; }
+.rad-confirm-panel .hazard-list .haz-glyph {
+  font-size: 18px;
+  line-height: 1;
+  min-width: 22px;
+  text-align: center;
+}
+.rad-confirm-season { font-size: 12px; margin: 0 0 6px; }
+.rad-confirm-formula {
+  font-size: 12px;
+  margin: 0 0 10px;
+  text-align: center;
+}
+.rad-confirm-formula code {
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-variant-numeric: tabular-nums;
+}
+.rad-confirm-bypass {
+  background: rgba(20, 83, 45, 0.35);
+  border: 1px solid #16a34a;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+.rad-confirm-warning {
+  background: rgba(127, 29, 29, 0.35);
+  border: 1px solid #b91c1c;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 /* Hazard roll modal. One 3D die per hazard, all spinning in
    parallel. Once every die settles the verdict tags light up
    (green safe / red critical) and the player hits Confirm to

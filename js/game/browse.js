@@ -1944,6 +1944,91 @@ function radBypassThreshold() {
   return season && season.name === 'red' ? RAD_BYPASS_THRUST_RED : RAD_BYPASS_THRUST;
 }
 
+// Pre-roll confirm dialog for rad zones. Mirrors the
+// hazardConfirmModal idiom (list of zones, scary warning,
+// pick-an-action buttons) but tailored to the rad rules: no
+// aqua bypass option, and the body explains the thrust + season
+// math + whether the active thruster auto-clears the bar.
+// Resolves to 'confirm' or 'cancel'. Always shown when the
+// route crosses ≥1 rad zone so the player can back out before
+// the dice roll.
+function radConfirmModal(radHazards, thrust, seasonBonus, bypassThreshold) {
+  return new Promise((resolve) => {
+    document.querySelector('.confirm-modal-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay rad-confirm-overlay';
+    const close = (val) => {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(val);
+    };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close('cancel'); });
+    const onKey = (e) => { if (e.key === 'Escape') close('cancel'); };
+    document.addEventListener('keydown', onKey);
+
+    const n = radHazards.length;
+    const list = radHazards.map((h) =>
+      `<li><span class="haz-glyph">${h.glyph}</span> `
+      + `${esc(h.site.name || h.label)} <em class="muted">${esc(h.label)}</em></li>`
+    ).join('');
+    const willBypass = thrust > bypassThreshold;
+    const seasonLine = seasonBonus > 0
+      ? `Red season adds <strong>+${seasonBonus}</strong> to every rad die.`
+      : '';
+    // Build the maths preview so the player sees the formula
+    // before committing to roll. Active-thrust 0 reads as
+    // "no subtraction" rather than "−0" which looks weird.
+    const formulaParts = [`d6`];
+    if (seasonBonus > 0) formulaParts.push(`+ ${seasonBonus}`);
+    if (thrust > 0)      formulaParts.push(`− ${thrust}`);
+    const formula = formulaParts.join(' ');
+    const bypassNote = willBypass
+      ? `<p class="rad-confirm-bypass ok">
+          ✓ Active thrust <strong>${thrust}</strong> &gt; <strong>${bypassThreshold}</strong>
+          - the rocket outruns the radiation. No roll, no
+          decommissions.
+         </p>`
+      : `<p class="rad-confirm-warning">
+          <strong>Cannot bypass.</strong> Active thrust
+          <strong>${thrust}</strong> ≤ <strong>${bypassThreshold}</strong>
+          - one d6 rolls per zone. Cards with rad-hard less
+          than the worst <em>final</em> rad get decommissioned
+          to your hand. <strong>Aqua cannot bypass a rad
+          roll.</strong>
+         </p>`;
+
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel rad-confirm-panel';
+    panel.innerHTML = `
+      <h3>☢ Radiation zone${n === 1 ? '' : 's'} ahead</h3>
+      <p>Your planned route passes through
+        <strong>${n}</strong> rad zone${n === 1 ? '' : 's'}:</p>
+      <ul class="hazard-list">${list}</ul>
+      ${seasonLine ? `<p class="rad-confirm-season muted">${seasonLine}</p>` : ''}
+      <p class="rad-confirm-formula muted">
+        Final radiation per zone = <code>${formula}</code>
+        (active thrust ${thrust || 0}, bypass at &gt; ${bypassThreshold}).
+      </p>
+      ${bypassNote}
+      <div class="turn-confirm-actions hazard-actions">
+        <button type="button" class="popup-btn primary" data-act="confirm"
+          title="${willBypass ? 'Continue - the thrust check skips the roll' : 'Open the rad-hardness roll modal'}">
+          ${willBypass ? '✓ Confirm - bypass' : '🎲 Confirm - roll rad check'}
+        </button>
+        <button type="button" class="popup-btn" data-act="cancel"
+          title="Return to planning; no move spent">
+          ✕ Cancel move
+        </button>
+      </div>
+    `;
+    for (const b of panel.querySelectorAll('button[data-act]')) {
+      b.addEventListener('click', () => close(b.dataset.act));
+    }
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+  });
+}
+
 // Animated rad-hardness check modal. Different from the regular
 // hazard-roll modal in three ways:
 //   1. No aqua bypass - radiation can't be paid off.
@@ -3373,6 +3458,28 @@ async function moveRocket() {
     try { season = getSeason(); } catch { season = null; }
     const seasonBonus = season && season.name === 'red' ? 2 : 0;
     const threshold = radBypassThreshold();
+    // Confirm BEFORE the rad check runs - the player needs a
+    // chance to back out once they see the formula. Cancelling
+    // refunds any aqua already spent on generic hazards (no-op
+    // unless the route had both flavours and they paid).
+    const radChoice = await radConfirmModal(radHazards, thrust, seasonBonus, threshold);
+    if (radChoice === 'cancel' || radChoice == null) {
+      if (hazardChoice === 'pay') {
+        // Generic hazards charged aqua already; refund so the
+        // cancel doesn't leave the player out of pocket.
+        const refundCost = genericHazards.length * HAZARD_COST_PER;
+        addAqua(refundCost);
+        logAction({
+          type: 'hazard_refund',
+          icon: '💧',
+          summary: `Move cancelled at rad check - refunded ${refundCost} aqua`,
+          undoable: false,
+          data: { refund: refundCost },
+        });
+      }
+      setStatus('Move cancelled at the rad check.');
+      return false;
+    }
     if (thrust > threshold) {
       logAction({
         type: 'rad_bypass',
