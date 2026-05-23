@@ -335,7 +335,10 @@
    just over the hex. */
 .map-popup {
   position: absolute;
-  transform: translate(-50%, calc(-100% - 14px));
+  /* Sit clearly above the anchor hex with enough breathing room
+     that the selection ring + hex glyphs aren't tucked under the
+     popup. Bump this if the popup ever feels crowded on the node. */
+  transform: translate(-50%, calc(-100% - 40px));
   background: rgba(15, 23, 42, 0.97);
   border: 1px solid var(--accent);
   border-radius: 8px;
