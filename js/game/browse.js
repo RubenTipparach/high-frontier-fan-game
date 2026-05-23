@@ -240,12 +240,22 @@ function wireHandStrip() {
   const commitBtn = document.getElementById('hand-boost-commit');
   if (commitBtn) commitBtn.addEventListener('click', commitBoost);
 
-  // Stack button next to ✋ Hand: zooms the map to LEO (so the
-  // rocket sprite is in view) AND pops the stack modal so the
-  // player sees what's on the rocket immediately.
+  // Stack button next to ✋ Hand: zooms the map to wherever the
+  // rocket currently sits (so the sprite stays in view even after
+  // the rocket has left LEO) AND pops the stack modal. Only falls
+  // back to LEO when no rocket has been built yet - i.e. there's
+  // no sprite to follow.
   const stackBtn = document.getElementById('hand-stack-open');
   if (stackBtn) stackBtn.addEventListener('click', () => {
-    if (_renderer) _renderer.flyTo(LEO_ANCHOR, 4);
+    if (_renderer) {
+      const stack = getRocketStack();
+      const site = stack.length ? getRocketSite() : null;
+      if (site && Number.isFinite(site.x) && Number.isFinite(site.y)) {
+        _renderer.flyTo(site, 4);
+      } else {
+        _renderer.flyTo(LEO_ANCHOR, 4);
+      }
+    }
     openRocketStackModal();
   });
 
