@@ -279,6 +279,20 @@ function wireHandStrip() {
     }
     openRocketStackModal();
   });
+  // Locator button: pans to the rocket WITHOUT opening the stack
+  // modal - handy on mobile where the modal hides the map and the
+  // player just wants to see where the ship is.
+  const locateBtn = document.getElementById('hand-stack-locate');
+  if (locateBtn) locateBtn.addEventListener('click', () => {
+    if (!_renderer) return;
+    const stack = getRocketStack();
+    const site = stack.length ? getRocketSite() : null;
+    if (site && Number.isFinite(site.x) && Number.isFinite(site.y)) {
+      _renderer.flyTo(site, 4);
+    } else {
+      _renderer.flyTo(LEO_ANCHOR, 4);
+    }
+  });
 
   repaintHand();
   onHandChange(repaintHand);
@@ -685,25 +699,45 @@ function routeMetricPriority() {
 
 // Manual move mode. Alternative to the auto-planner: the player
 // taps neighbouring sites one at a time to build a route by
-// hand, capped at the active thruster's `thrust` value
-// (= the number of hops allowed). Each manual hop becomes a
-// turn-1 segment in _plannedRoute; once the player hits the Move
-// button the existing moveRocket flow consumes them all in one
-// animation. Cancelling = clearing the planned route. Fuel is
-// not deducted (sandbox mode treats burns as free per the
-// current rules).
+// hand. Burn budget = active thruster's `thrust` value. Each
+// hop's cost obeys the rulebook's Hohmann + pivot rules:
+//
+//   - Entering a non-burn node (Hohmann, lagrange, site, radhaz,
+//     venus, decorative) → 0 burns. They're "free" stops.
+//   - Entering a burn node → its `landing` value (default 1,
+//     half-landers cost 2 the second time).
+//   - Pivoting at a Hohmann (changing direction at a labelled
+//     edge node) → +1 burn. The first pivot of the manual route
+//     is FREE if the active thruster has `bonusPivots > 0`
+//     (pirouette thrusters in the rulebook).
+//
+// Each manual hop becomes a turn-1 segment in _plannedRoute;
+// once the player hits Move the existing moveRocket flow consumes
+// them all in one animation. Cancel = clear route. Fuel is not
+// deducted (sandbox mode treats burns as free per the current
+// rules); thrust is just the planning budget.
 let _manualMode = false;
 let _manualBudget = 0;
+let _manualBudgetMax = 0;
 let _manualOriginId = null;
+let _manualDir = null;          // direction we entered the tip on
+let _manualPivotsUsed = 0;
+let _manualPirouettes = 0;      // free pivots remaining (bonusPivots)
 function manualTipId() {
   if (_plannedRoute && _plannedRoute.length) {
     return _plannedRoute[_plannedRoute.length - 1].to;
   }
   return _manualOriginId;
 }
+function activeThrusterBonusPivots() {
+  const id = getActiveThrusterId();
+  if (!id) return 0;
+  const card = PATENTS_BY_ID[id];
+  if (!card) return 0;
+  const f = (card.faces && card.faces.primary) || card;
+  return Number(f.bonusPivots) || 0;
+}
 function enterManualMoveMode() {
-  // Clear any planner-built route first - manual + planner
-  // shouldn't overlap on the same _plannedRoute store.
   _routeFrom = null;
   _routeTo = null;
   _plannedRoute = null;
@@ -712,8 +746,10 @@ function enterManualMoveMode() {
   const thrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 4;
   _manualMode = true;
   _manualBudget = thrust;
-  // Origin = rocket's current site (falls back to LEO when no
-  // rocket has launched yet, same as getRocketSite()).
+  _manualBudgetMax = thrust;
+  _manualDir = null;
+  _manualPivotsUsed = 0;
+  _manualPirouettes = activeThrusterBonusPivots();
   const here = getRocketSite();
   _manualOriginId = here ? here.id : null;
   _plannedRoute = [];
@@ -723,50 +759,96 @@ function enterManualMoveMode() {
     _renderer.setRouteEndpoints(_manualOriginId, _manualOriginId);
   }
   const clearBtn = document.getElementById('route-clear');
-  if (clearBtn) { clearBtn.hidden = false; clearBtn.textContent = 'Cancel manual'; }
-  setStatus(`✋ Manual mode: <strong>${_manualBudget}</strong>/${thrust} hops left. Tap an adjacent site to extend; tap Move when ready.`);
+  if (clearBtn) { clearBtn.hidden = false; clearBtn.textContent = '✕ Cancel'; }
+  manualMoveStatus();
 }
 function exitManualMoveMode() {
   _manualMode = false;
   _manualBudget = 0;
+  _manualBudgetMax = 0;
   _manualOriginId = null;
+  _manualDir = null;
+  _manualPivotsUsed = 0;
+  _manualPirouettes = 0;
   const clearBtn = document.getElementById('route-clear');
   if (clearBtn) clearBtn.textContent = 'Clear route';
 }
 function manualMoveStatus() {
   if (!_manualMode) return;
   const placed = _plannedRoute ? _plannedRoute.length : 0;
+  const pirouetteHint = _manualPirouettes > 0
+    ? ` <em class="muted">(${_manualPirouettes} free pivot${_manualPirouettes === 1 ? '' : 's'} ready)</em>`
+    : '';
   if (_manualBudget <= 0) {
-    setStatus(`✋ Manual mode: <strong>${placed}</strong> hop${placed === 1 ? '' : 's'} plotted, out of moves. Tap <strong>🛸 Move</strong> to fly, or Cancel.`);
+    setStatus(`✋ Manual: <strong>${placed}</strong> hop${placed === 1 ? '' : 's'} plotted, <strong>0</strong>/${_manualBudgetMax} burns left. Tap <strong>🛸 Move</strong> or Cancel.`);
   } else {
-    setStatus(`✋ Manual mode: <strong>${_manualBudget}</strong> hop${_manualBudget === 1 ? '' : 's'} left. Tap an adjacent site to extend.`);
+    setStatus(`✋ Manual: <strong>${_manualBudget}</strong>/${_manualBudgetMax} burns left.${pirouetteHint} Tap an adjacent site to extend.`);
   }
+}
+// Cost calculator for a single manual hop. Returns:
+//   { ok: false, reason } when the hop isn't allowed
+//   { ok: true, cost, isPivot, freePivot, newDir } when it is
+function manualHopCost(tipId, toId) {
+  if (!_activeData) return { ok: false, reason: 'no map data' };
+  const points = _activeData.byId || {};
+  const edgeLabels = _activeData.edgeLabels || {};
+  const fromNode = points[tipId];
+  const toNode   = points[toId];
+  if (!fromNode || !toNode) return { ok: false, reason: 'unknown site' };
+  if (tipId === toId) return { ok: false, reason: 'already there' };
+  const nbrs = _activeData.neighbors && _activeData.neighbors.get(tipId);
+  if (!nbrs || !nbrs.has(toId)) {
+    return { ok: false, reason: `not adjacent to ${esc(fromNode.name || tipId)}` };
+  }
+  const newDir = (edgeLabels[tipId] && edgeLabels[tipId][toId]) || null;
+  let cost = 0;
+  let isPivot = false;
+  let freePivot = false;
+  // Pivot: leaving a Hohmann (labelled edges) in a different
+  // direction than the one we entered on.
+  const tipHasLabels = !!edgeLabels[tipId];
+  if (tipHasLabels && _manualDir != null && newDir != null && newDir !== _manualDir) {
+    isPivot = true;
+    if (_manualPirouettes - _manualPivotsUsed > 0) {
+      freePivot = true;
+    } else {
+      cost += 1;
+    }
+  }
+  // Burn nodes carry an entry cost. Default 1; half-landers
+  // print 2 on their second face. Everything else (Hohmann,
+  // lagrange, regular site, radhaz, venus, decorative) is 0.
+  if (toNode.type === 'burn') {
+    cost += toNode.landing != null ? toNode.landing : 1;
+  }
+  return { ok: true, cost, isPivot, freePivot, newDir };
 }
 function manualAppendSegment(toId) {
   if (!_manualMode || !_activeData) return false;
   const tipId = manualTipId();
   if (!tipId) return false;
-  if (tipId === toId) {
-    setStatus('Already there. Tap a neighbour to extend the route.');
+  const r = manualHopCost(tipId, toId);
+  if (!r.ok) {
+    setStatus(`Manual: ${r.reason}.`);
     return false;
   }
-  // Validate adjacency via the planner-map's neighbours set.
-  const nbrs = _activeData.neighbors && _activeData.neighbors.get(tipId);
-  if (!nbrs || !nbrs.has(toId)) {
-    const tipSite = _activeData.byId && _activeData.byId[tipId];
-    setStatus(`Not adjacent to <strong>${esc(tipSite ? tipSite.name : tipId)}</strong> - pick a directly-connected site.`);
-    return false;
-  }
-  if (_manualBudget <= 0) {
-    setStatus('Out of hops. Tap <strong>🛸 Move</strong> to fly, or Cancel to start over.');
+  if (r.cost > _manualBudget) {
+    const partsMissing = r.cost - _manualBudget;
+    setStatus(`Manual: needs ${r.cost} burn${r.cost === 1 ? '' : 's'} (short ${partsMissing}). Tap Move to fly or Cancel.`);
     return false;
   }
   _plannedRoute = _plannedRoute || [];
   _plannedRoute.push({
     from: tipId, to: toId,
-    turn: 1, burns: 1, dv: 1,
+    turn: 1,
+    burns: r.cost,
+    dv: r.cost,
+    isPivot: r.isPivot,
+    freePivot: r.freePivot,
   });
-  _manualBudget -= 1;
+  _manualBudget -= r.cost;
+  if (r.isPivot) _manualPivotsUsed += 1;
+  _manualDir = r.newDir;
   persistPlannedRoute();
   if (_renderer) {
     _renderer.setRoute(_plannedRoute);

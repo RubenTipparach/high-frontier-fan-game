@@ -150,6 +150,11 @@
   flex: 1;
   justify-content: flex-end;
   min-width: 0;
+  /* Wrap on narrow viewports so the status text + utility
+     buttons (clear / settings / debug / fullscreen) drop to
+     a second row instead of clipping off the right edge. */
+  flex-wrap: wrap;
+  row-gap: 6px;
 }
 .map-route .big {
   color: var(--warm);
@@ -257,6 +262,41 @@
   .map-search-backdrop { display: none !important; }
 }
 @media (max-width: 720px) {
+  /* Pin the toolbar to the top of the map shell on phones so it
+     stays visible while the map pans / zooms - prior behaviour
+     scrolled it out of reach when the user dragged. The shell
+     gets a top pad equal to the toolbar height so the canvas
+     starts below the floating bar. */
+  .browse-shell {
+    /* Reserve enough space for two rows of toolbar content.
+       The toolbar is fixed and overlays the canvas, so the
+       shell's height doesn't need extra; we only adjust the
+       inner stage to avoid the toolbar covering the top of
+       the canvas content. */
+  }
+  .browse-map-stage {
+    padding-top: 0;
+  }
+  .map-toolbar {
+    /* Tighten gaps on small screens so two-row wrapping happens
+       only when content actually overflows, not from padding
+       slop. row-gap keeps the rows visually distinct when they
+       wrap. */
+    gap: 6px;
+    row-gap: 4px;
+    padding: 6px 8px 6px 58px;
+  }
+  .map-route {
+    /* Mobile: status text is allowed to take the whole second
+       row so the action buttons line up clean on the right. */
+    flex-basis: 100%;
+    justify-content: space-between;
+  }
+  .map-route #route-status {
+    flex: 1;
+    min-width: 0;
+    font-size: 11px;
+  }
   /* Mobile: hide the inline search in the toolbar by default.
      Tapping the 🔍 toolbar button promotes it to a fixed-position
      modal anchored just below the toolbar. */
@@ -2931,6 +2971,24 @@ body:has(#view-browse:not(.hidden)) #main {
   background: var(--accent);
   color: #062136;
   transform: scale(1.03);
+}
+/* Locator button next to the Stack button - pans the camera to
+   the rocket without opening the stack modal. Tighter than the
+   Stack button so the header stays compact. */
+#hand-stack-locate {
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(125, 211, 252, 0.10);
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.18s, transform 0.12s;
+}
+#hand-stack-locate:hover {
+  background: var(--accent);
+  color: #062136;
+  transform: scale(1.05);
 }
 
 #hand-boost-commit {
