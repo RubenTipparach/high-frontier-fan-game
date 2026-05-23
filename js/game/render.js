@@ -647,6 +647,10 @@ export class MapRenderer {
     if (!site) { this.clearSitePopup(); return; }
     this._popupSite = site;
     this._buildSitePopup(site, actions);
+    // Place it at the current frame's screen position immediately
+    // so the popup doesn't briefly render at (0, 0) while the
+    // first draw cycle is pending.
+    this._positionSitePopup();
     this._scheduleDraw();
   }
 
@@ -1695,22 +1699,29 @@ export class MapRenderer {
       // so mirror that here for the ring to track the visible hex.
       const hexS = Math.min(1, this.zoom / HEX_FULLSIZE_ZOOM);
       const baseR = (vis.kind === 'hex' ? vis.r * hexS : vis.r);
-      const ringR = baseR + 8 + pulse * 4;
-      // Outer soft halo — pulsing yellow glow.
-      ctx.shadowBlur = 18;
-      ctx.shadowColor = `rgba(253, 224, 71, ${0.55 + pulse * 0.35})`;
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = `rgba(253, 224, 71, ${0.85 + pulse * 0.15})`;
+      // Generous outer ring — must be unmistakable on a phone where
+      // the hex itself is ~20-30 screen px and competing with hazard
+      // glyphs, edge lines, body halos. Pulse expands the radius
+      // and amps the halo alpha so the ring "breathes" — eye is
+      // pulled to a moving thing even in a busy scene.
+      const ringR = baseR + 14 + pulse * 6;
+      // Outer soft halo — pulsing yellow glow, thicker than the hex
+      // body's own borders so it stands out from a comet's synodic
+      // outline or a hazard's red.
+      ctx.shadowBlur = 24;
+      ctx.shadowColor = `rgba(253, 224, 71, ${0.7 + pulse * 0.25})`;
+      ctx.lineWidth = 6;
+      ctx.strokeStyle = `rgba(253, 224, 71, ${0.95})`;
       ctx.beginPath();
       ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
       ctx.stroke();
       // Inner crisp ring — solid orange so the selection reads even
       // when the halo fades against a bright background body.
       ctx.shadowBlur = 0;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 3;
       ctx.strokeStyle = '#f97316';
       ctx.beginPath();
-      ctx.arc(sx, sy, baseR + 3, 0, Math.PI * 2);
+      ctx.arc(sx, sy, baseR + 4, 0, Math.PI * 2);
       ctx.stroke();
     }
     ctx.restore();
@@ -1958,7 +1969,12 @@ export class MapRenderer {
         const t0 = this._gesture.touches[0];
         const dx = points[0].clientX - t0.clientX;
         const dy = points[0].clientY - t0.clientY;
-        if (Math.abs(dx) + Math.abs(dy) > 3) this._gesture.moved = true;
+        // Manhattan threshold for "this is a drag, not a tap".
+        // A finger naturally wobbles a few pixels when tapping a
+        // small target on a phone screen; 3 px was rejecting
+        // legitimate taps as drags. 10 px is conservative enough
+        // that intentional drags still register.
+        if (Math.abs(dx) + Math.abs(dy) > 10) this._gesture.moved = true;
         this.pan.x = this._gesture.pan.x + dx;
         this.pan.y = this._gesture.pan.y + dy;
         this._scheduleDraw();

@@ -909,6 +909,27 @@ body:has(#view-browse:not(.hidden)) #main {
     box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
     z-index: 10;
   }
+  /* Pin the × close button to the viewport so it stays reachable
+     while the player scrolls through a tall pane (e.g. the full
+     patent library). On mobile the absolutely-positioned close
+     button inside the scrolling .sidepanel-content gets visually
+     scrolled with the content on some engines, so we re-anchor
+     it at viewport coords matching the modal's top-right. */
+  .browse-sidepanel[data-active]:not([data-active=""]) .sidepanel-close {
+    position: fixed;
+    top: 66px;
+    right: 22px;
+    z-index: 12;
+    background: rgba(15, 16, 35, 0.96);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    line-height: 28px;
+    text-align: center;
+    font-size: 18px;
+  }
 }
 
 /* Modal backdrop: shown only when the sidepanel is open on
