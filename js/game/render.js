@@ -2315,7 +2315,13 @@ export class MapRenderer {
         if (!a || !a.label) continue;
         const b = document.createElement('button');
         b.type = 'button';
-        b.className = a.primary ? 'popup-btn primary' : 'popup-btn';
+        // Variant drives the per-button colour: 'rocket' is the
+        // primary blue plan-route action, 'secondary' is the
+        // dimmer Navigate-to inspection action. Legacy `primary:
+        // true` still resolves to the rocket-blue style so old
+        // callers don't break.
+        const variant = a.variant || (a.primary ? 'rocket' : 'secondary');
+        b.className = `popup-btn popup-btn-${variant}`;
         b.textContent = a.label;
         b.disabled = !!a.disabled;
         if (a.onClick) b.addEventListener('click', a.onClick);

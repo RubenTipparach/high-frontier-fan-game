@@ -589,22 +589,68 @@
 }
 .map-popup .popup-btn {
   font-size: 12px;
-  padding: 6px 10px;
+  font-weight: 600;
+  padding: 7px 11px;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--panel-2);
   color: var(--ink);
   cursor: pointer;
+  /* Visible state changes on hover / press so the buttons feel
+     like real game controls. Box-shadow on hover lifts them off
+     the popup; press collapses them back down. */
+  transform: translateY(0);
+  transition: transform 0.12s ease,
+              box-shadow 0.12s ease,
+              background 0.15s ease,
+              border-color 0.15s ease,
+              filter 0.15s ease;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
 }
-.map-popup .popup-btn.primary {
-  background: var(--accent);
-  border-color: var(--accent-2);
-  color: #062136;
-  font-weight: 600;
+.map-popup .popup-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.45);
+}
+.map-popup .popup-btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  filter: brightness(0.95);
 }
 .map-popup .popup-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* Rocket plan-route: the primary game-action button. Reads in
+   the rocket / launch palette — blue gradient with a brighter
+   inner ring. Reserved for the "🛸 Plan rocket route" action,
+   which is what the player should actually use during play. */
+.map-popup .popup-btn-rocket {
+  background: linear-gradient(180deg, #60a5fa, #2563eb);
+  border-color: #1d4ed8;
+  color: #06143a;
+  font-weight: 700;
+  box-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.35),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+.map-popup .popup-btn-rocket:hover:not(:disabled) {
+  background: linear-gradient(180deg, #93c5fd, #3b82f6);
+  border-color: #1e40af;
+}
+
+/* Navigate-to / inspection: neutral chip. Less visually loud
+   than the rocket-blue primary; available but doesn't compete. */
+.map-popup .popup-btn-secondary {
+  background: var(--panel-2);
+  border-color: var(--border);
+  color: var(--ink);
+}
+.map-popup .popup-btn-secondary:hover:not(:disabled) {
+  background: var(--panel);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .map-popup .popup-close {
   position: absolute;

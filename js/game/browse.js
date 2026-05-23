@@ -1293,17 +1293,10 @@ function showSitePopupFor(site) {
   if (!_renderer) return;
   const canNavigate = !(site.isDecorative || site.isLandable === false);
   const rocketReady = canPlanRocketRoute();
+  // Order: rocket-plan FIRST (left) — it's the game action and
+  // the one the player will reach for most. Navigate-to is the
+  // secondary "check distance" affordance.
   const actions = [
-    {
-      label: 'Navigate to →',
-      primary: true,
-      disabled: !canNavigate,
-      onClick: () => {
-        if (!canNavigate) return;
-        enterRoutingMode(site);
-        _renderer.clearSitePopup();
-      },
-    },
     {
       // Plan the rocket's actual flight from LEO to this site,
       // broken into turns based on its active-thruster burn
@@ -1311,12 +1304,22 @@ function showSitePopupFor(site) {
       // later turns get a "T2 / T3" pill at midpoint so the
       // player can read the trip plan at a glance.
       label: '🛸 Plan rocket route',
-      primary: false,
+      variant: 'rocket',
       disabled: !canNavigate || !rocketReady,
       onClick: () => {
         if (!canNavigate || !rocketReady) return;
         const ok = planRocketRouteTo(site);
         if (ok) _renderer.clearSitePopup();
+      },
+    },
+    {
+      label: 'Navigate to →',
+      variant: 'secondary',
+      disabled: !canNavigate,
+      onClick: () => {
+        if (!canNavigate) return;
+        enterRoutingMode(site);
+        _renderer.clearSitePopup();
       },
     },
   ];
