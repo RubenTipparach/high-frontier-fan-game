@@ -76,7 +76,14 @@ export function mountBrowse() {
   if (!_rocketSubWired) {
     _rocketSubWired = true;
     onRocketChange(syncSandboxRocket);
+    onRocketChange(refreshOpenSitePopup);
     onDiscsChange(syncDiscs);
+    onDiscsChange(refreshOpenSitePopup);
+    // Turn-clock changes (end-turn, consumeMove, refundMove)
+    // shift per-turn budgets. Refresh any open site popup so
+    // disabled labels like "Refueled this turn" flip back when
+    // the turn advances.
+    onTurnChange(refreshOpenSitePopup);
   }
   wireSidebar();
   wireHandStrip();
@@ -751,6 +758,11 @@ function ensureMapShell(host) {
     _rocketTrail = [];
     persistRocketTrail();
     if (_renderer) _renderer.setRocketTrail(null);
+    // A new turn refreshes per-turn operation budgets: move,
+    // refuel-per-site, future ops. Any open site popup is now
+    // stale (its disabled / "refueled this turn" labels were
+    // computed from the previous turn's state); refresh it.
+    refreshOpenSitePopup();
     openTurnClockModal({
       animateFrom: prevTurn,
       rolling: result.event ? { value: result.event.dieRoll } : null,
@@ -1214,9 +1226,31 @@ function openRocketStackModal() {
       </div>
     `;
 
+    // Locate / select-current-site buttons (top of the header).
+    // "Find rocket" pans the camera to the sprite without
+    // opening a popup; "Select site" (or "Select node" when the
+    // rocket is parked on a routing waypoint) closes the modal,
+    // pans the camera, and pops the site popup so the player can
+    // immediately fire prospect / refuel / route from the
+    // current location without hunting for it on the map.
+    const here = getRocketSite();
+    const hereIsSite = here && !here.isWaypoint
+      && !['lagrange', 'burn', 'hohmann', 'decorative', 'radhaz'].includes(here.type);
+    const hereLabel = hereIsSite ? 'Select site' : 'Select node';
+    const hereDisabled = !here ? 'disabled' : '';
     body.innerHTML = `
       <div class="rocket-stack-header">
-        <h2 class="rocket-stack-title">🚀 LEO Rocket</h2>
+        <div class="rocket-stack-title-row">
+          <h2 class="rocket-stack-title">🚀 LEO Rocket</h2>
+          <div class="rocket-stack-locate">
+            <button type="button" class="popup-btn popup-btn-secondary"
+              id="rocket-find" ${hereDisabled}
+              title="Pan the map to the rocket sprite">📍 Find rocket</button>
+            <button type="button" class="popup-btn popup-btn-secondary"
+              id="rocket-select-here" ${hereDisabled}
+              title="Open the popup for the site / node the rocket is on">🎯 ${hereLabel}</button>
+          </div>
+        </div>
         ${totalsHtml}
         ${status}
       </div>
@@ -1226,6 +1260,21 @@ function openRocketStackModal() {
       </div>
     `;
     panel.appendChild(body);
+
+    // Find / select wiring.
+    const findBtn = body.querySelector('#rocket-find');
+    if (findBtn) findBtn.addEventListener('click', () => {
+      if (!here || !_renderer) return;
+      close();
+      _renderer.flyTo(here, 4);
+    });
+    const selectBtn = body.querySelector('#rocket-select-here');
+    if (selectBtn) selectBtn.addEventListener('click', () => {
+      if (!here || !_renderer) return;
+      close();
+      _renderer.flyTo(here, 4);
+      onSiteSelect(here);
+    });
 
     // Fuel +/- wiring on the totals row.
     body.querySelectorAll('.rocket-fuel-btn').forEach((b) => {
@@ -2145,6 +2194,7 @@ async function moveRocket() {
   // pixel coords; this pins it back to the canonical site (x, y)
   // and ensures canFly reflects the live stack state.
   syncSandboxRocket();
+  refreshOpenSitePopup();
   return true;
 }
 
@@ -2205,6 +2255,7 @@ async function undoRocketMove() {
   _moveSnapshot = null;
   refundMove();
   syncSandboxRocket();
+  refreshOpenSitePopup();
   setStatus('🛸 Rocket move undone.');
   return true;
 }
@@ -2340,6 +2391,18 @@ function onSiteSelect(site) {
 // Build the on-map popup for a selected site. Carries the same
 // info the old "Site info" sidebar pane used to show, plus the
 // "Navigate to" action that arms routing-pick mode.
+// Re-render the currently-open site popup, if any. Called after
+// per-turn state changes (end-turn refills budgets; refuel-this-
+// turn log resets) and after rocket-state changes (new prospector
+// active, tank empty/full, supports change) so the popup's
+// enabled / disabled buttons stay in sync with reality. No-op when
+// nothing is selected.
+function refreshOpenSitePopup() {
+  if (!_selectedId || !_activeData) return;
+  const site = _activeData.byId && _activeData.byId[_selectedId];
+  if (site) showSitePopupFor(site);
+}
+
 function showSitePopupFor(site) {
   if (!_renderer) return;
   const canNavigate = !(site.isDecorative || site.isLandable === false);
