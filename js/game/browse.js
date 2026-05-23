@@ -1469,11 +1469,15 @@ function hasRefueledThisTurn(siteId) {
 }
 
 function canRefuelAt(site, prosp) {
-  const water = Number.isFinite(site.hydration) ? site.hydration : 0;
+  // HF4 refining yield: gain = site number - ISRU + 1. The "site
+  // number" is the same value the prospect roll checks against
+  // (leading integer of siteSize, e.g. "9H" -> 9). Lower-ISRU
+  // rigs at higher-number sites pull more water per op.
+  const siteNumber = siteProspectThreshold(site);
   const tank  = getTankWater();
   const tmax  = getTankMax();
-  if (water <= 0) {
-    return { ok: false, label: `💧 Refuel (dry site)`, reason: 'Site has no water (hydration 0).' };
+  if (siteNumber <= 0) {
+    return { ok: false, label: `💧 Refuel (dry site)`, reason: 'Site has no refinable water (number 0).' };
   }
   if (tank >= tmax) {
     return { ok: false, label: `💧 Tank full (${tank}/${tmax})`, reason: 'Tank is already at max.' };
@@ -1485,11 +1489,11 @@ function canRefuelAt(site, prosp) {
   if (isru <= 0) {
     return { ok: false, label: `💧 Refuel (no ISRU)`, reason: 'Active rig has no ISRU rating.' };
   }
-  if (isru > water) {
+  if (isru > siteNumber) {
     return {
       ok: false,
-      label: `💧 Refuel (ISRU ${isru} > water ${water})`,
-      reason: `Site water ${water} is below the rig's ISRU ${isru}.`,
+      label: `💧 Refuel (ISRU ${isru} > site ${siteNumber})`,
+      reason: `Site number ${siteNumber} is below the rig's ISRU ${isru}.`,
     };
   }
   if (!prosp.canActivate) {
@@ -1498,7 +1502,10 @@ function canRefuelAt(site, prosp) {
   if (hasRefueledThisTurn(site.id)) {
     return { ok: false, label: `💧 Refueled this turn`, reason: 'Already refined here this turn. End turn to refresh.' };
   }
-  const gain = Math.min(water, tmax - tank);
+  // Yield formula: site number - ISRU + 1, then capped at the
+  // tank's headroom so a full tank doesn't reward over-pulling.
+  const rawGain = siteNumber - isru + 1;
+  const gain    = Math.min(rawGain, tmax - tank);
   return { ok: true, label: `💧 Refuel (+${gain} water)`, reason: null };
 }
 
@@ -1509,25 +1516,27 @@ function doRefuel(site, prosp) {
     setStatus(`Refuel blocked: ${chk.reason}`);
     return;
   }
-  const water = Number.isFinite(site.hydration) ? site.hydration : 0;
+  const siteNumber = siteProspectThreshold(site);
+  const isru = prospectorIsruValue(prosp.card);
   const tankBefore = getTankWater();
   const tmax = getTankMax();
-  const gain = Math.min(water, tmax - tankBefore);
+  const rawGain = siteNumber - isru + 1;
+  const gain    = Math.min(rawGain, tmax - tankBefore);
   if (gain <= 0) return;
   addFuel(gain);
   markRefueledThisTurn(site.id);
   setStatus(
     `💧 Refined <strong>${gain}</strong> water at `
     + `<strong>${esc(site.name)}</strong> `
-    + `(site water ${water}, ISRU ${prospectorIsruValue(prosp.card)}). `
+    + `(site ${siteNumber} - ISRU ${isru} + 1 = ${rawGain}). `
     + `Tank ${tankBefore} → <strong>${tankBefore + gain}</strong>/${tmax}.`
   );
   logAction({
     type: 'refuel',
     icon: '💧',
-    summary: `Refined +${gain} water at ${site.name} (tank ${tankBefore + gain}/${tmax})`,
+    summary: `Refined +${gain} water at ${site.name} (site ${siteNumber}, ISRU ${isru}, tank ${tankBefore + gain}/${tmax})`,
     undoable: false,
-    data: { siteId: site.id, gain, tankAfter: tankBefore + gain },
+    data: { siteId: site.id, gain, siteNumber, isru, tankAfter: tankBefore + gain },
   });
 }
 
@@ -1553,15 +1562,15 @@ function doProspect(site, prosp) {
     setStatus(`This site already has a prospect disc - clear it first.`);
     return;
   }
-  // ISRU rule re-validated server-side-style: even if the button
-  // somehow ends up enabled, refuse to roll when site water is
-  // below the prospector's ISRU rating.
-  const prospIsru = prospectorIsruValue(prosp.card);
-  const siteWater = Number.isFinite(site.hydration) ? site.hydration : 0;
-  if (prospIsru > siteWater) {
+  // ISRU rule re-validated: refuse to roll when site number is
+  // below the prospector's ISRU rating. Mirrors canProspect /
+  // canRefuelAt - the same number gates both ops.
+  const prospIsru  = prospectorIsruValue(prosp.card);
+  const siteNumber = siteProspectThreshold(site);
+  if (prospIsru > siteNumber) {
     setStatus(
-      `Prospect blocked: <em>${esc(prosp.card?.name || '')}</em> needs water ≥ `
-      + `${prospIsru}, site has ${siteWater}.`
+      `Prospect blocked: <em>${esc(prosp.card?.name || '')}</em> needs site number ≥ `
+      + `${prospIsru}, site has ${siteNumber}.`
     );
     return;
   }
@@ -2151,12 +2160,15 @@ function showSitePopupFor(site) {
     const check = canProspect(_activeData, rocketSite?.id, site.id, prosp.kind);
     const supportsOk = prosp.canActivate;
     const existingDisc = getDisc(site.id);
-    // ISRU rule: the prospector can only attempt sites whose
-    // water (hydration) >= its ISRU rating. ISRU 0 / missing
-    // means "no water requirement" and clears the check.
+    // ISRU rule: the prospector's ISRU rating must be <= the
+    // site's number (same value the prospect roll checks
+    // against). ISRU 0 / missing clears the gate. HF4 ties the
+    // refining-rig ISRU to BOTH the prospect attempt AND the
+    // refining yield (gain = number - ISRU + 1), so the gate
+    // applies in both directions.
     const prospIsru   = prospectorIsruValue(prosp.card);
-    const siteWater   = Number.isFinite(site.hydration) ? site.hydration : 0;
-    const isruOk      = prospIsru <= siteWater;
+    const siteNumber  = siteProspectThreshold(site);
+    const isruOk      = prospIsru <= siteNumber;
     const ok = check.ok && supportsOk && !existingDisc && isruOk;
     const kindGlyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prosp.kind] || '🔬';
     const reason = existingDisc
@@ -2164,7 +2176,7 @@ function showSitePopupFor(site) {
       : !supportsOk
         ? `Prospector needs ${(prosp.missingSuppliers || []).join(' + ')} support.`
         : !isruOk
-          ? `Prospector needs ISRU ≤ site water. Site water = ${siteWater}, prospector ISRU = ${prospIsru}.`
+          ? `Prospector needs ISRU ≤ site number. Site number = ${siteNumber}, prospector ISRU = ${prospIsru}.`
           : check.reason;
     actions.push({
       label: `${kindGlyph} Prospect (${prosp.kind})`,

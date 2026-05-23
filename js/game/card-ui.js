@@ -343,9 +343,9 @@ function buildFace(card, sideName, kind, supplied) {
       b.classList.add('card-prop-isru');
       b.setAttribute(
         'data-tip',
-        `ISRU ${p.value}. The site's water rating must be `
-        + `≥ ${p.value} to refuel or prospect here. If site `
-        + `water < ${p.value}, neither operation is allowed.`,
+        `ISRU ${p.value}. The site's number must be ≥ ${p.value} `
+        + `to refuel or prospect here. Refining yield = `
+        + `(site number - ISRU + 1) water per op.`,
       );
       b.innerHTML = `<strong>ISRU:</strong> <b>${p.value}</b>`;
       propHost.appendChild(b);
