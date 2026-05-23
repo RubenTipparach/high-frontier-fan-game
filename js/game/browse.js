@@ -1436,6 +1436,101 @@ function siteProspectThreshold(site) {
   return 4;
 }
 
+// Refueling at a hydrated site. The HF4 refining loop is:
+//   1. Rocket must be parked ON the target site (no remote refining)
+//   2. The site has water = site.hydration (0..4)
+//   3. Player needs ISRU >= site requirement to operate the rig.
+//      We piggyback on the active prospector's ISRU rating; until
+//      Stage 3 wires real refinery cards, the ISRU rig is the
+//      refinery.
+//   4. Each refining op adds water = site.hydration to the tank,
+//      capped at the tank's max. One op per (turn, site) per the
+//      published rules - you can't strip-mine a site in one turn.
+//
+// canRefuelAt returns { ok, reason, label } for the popup button.
+const STORAGE_REFUEL_LOG = 'hf-sandbox-refuel-log';   // {turn: number, sites: [id]}
+function getRefuelLog() {
+  try {
+    const s = localStorage.getItem(STORAGE_REFUEL_LOG);
+    return s ? JSON.parse(s) : null;
+  } catch { return null; }
+}
+function markRefueledThisTurn(siteId) {
+  const turn = getTurn();
+  let log = getRefuelLog();
+  if (!log || log.turn !== turn) log = { turn, sites: [] };
+  if (!log.sites.includes(siteId)) log.sites.push(siteId);
+  try { localStorage.setItem(STORAGE_REFUEL_LOG, JSON.stringify(log)); } catch {}
+}
+function hasRefueledThisTurn(siteId) {
+  const log = getRefuelLog();
+  if (!log || log.turn !== getTurn()) return false;
+  return log.sites.includes(siteId);
+}
+
+function canRefuelAt(site, prosp) {
+  const water = Number.isFinite(site.hydration) ? site.hydration : 0;
+  const tank  = getTankWater();
+  const tmax  = getTankMax();
+  if (water <= 0) {
+    return { ok: false, label: `💧 Refuel (dry site)`, reason: 'Site has no water (hydration 0).' };
+  }
+  if (tank >= tmax) {
+    return { ok: false, label: `💧 Tank full (${tank}/${tmax})`, reason: 'Tank is already at max.' };
+  }
+  if (!prosp) {
+    return { ok: false, label: `💧 Refuel (no rig)`, reason: 'Activate a prospector / refining rig (ISRU) first.' };
+  }
+  const isru = prospectorIsruValue(prosp.card);
+  if (isru <= 0) {
+    return { ok: false, label: `💧 Refuel (no ISRU)`, reason: 'Active rig has no ISRU rating.' };
+  }
+  if (isru > water) {
+    return {
+      ok: false,
+      label: `💧 Refuel (ISRU ${isru} > water ${water})`,
+      reason: `Site water ${water} is below the rig's ISRU ${isru}.`,
+    };
+  }
+  if (!prosp.canActivate) {
+    return { ok: false, label: `💧 Refuel (unsupported)`, reason: 'Rig is missing supports.' };
+  }
+  if (hasRefueledThisTurn(site.id)) {
+    return { ok: false, label: `💧 Refueled this turn`, reason: 'Already refined here this turn. End turn to refresh.' };
+  }
+  const gain = Math.min(water, tmax - tank);
+  return { ok: true, label: `💧 Refuel (+${gain} water)`, reason: null };
+}
+
+function doRefuel(site, prosp) {
+  if (!prosp) return;
+  const chk = canRefuelAt(site, prosp);
+  if (!chk.ok) {
+    setStatus(`Refuel blocked: ${chk.reason}`);
+    return;
+  }
+  const water = Number.isFinite(site.hydration) ? site.hydration : 0;
+  const tankBefore = getTankWater();
+  const tmax = getTankMax();
+  const gain = Math.min(water, tmax - tankBefore);
+  if (gain <= 0) return;
+  addFuel(gain);
+  markRefueledThisTurn(site.id);
+  setStatus(
+    `💧 Refined <strong>${gain}</strong> water at `
+    + `<strong>${esc(site.name)}</strong> `
+    + `(site water ${water}, ISRU ${prospectorIsruValue(prosp.card)}). `
+    + `Tank ${tankBefore} → <strong>${tankBefore + gain}</strong>/${tmax}.`
+  );
+  logAction({
+    type: 'refuel',
+    icon: '💧',
+    summary: `Refined +${gain} water at ${site.name} (tank ${tankBefore + gain}/${tmax})`,
+    undoable: false,
+    data: { siteId: site.id, gain, tankAfter: tankBefore + gain },
+  });
+}
+
 // Read the prospector's ISRU rating off the active face's
 // properties. ISRU is a numeric property (1..N); missing /
 // zero means "no water requirement". Returns the integer.
@@ -2022,6 +2117,10 @@ function showSitePopupFor(site) {
   // per-turn budget so we don't need an active thruster to draw
   // the route (the engage button on the stack modal is where
   // missing-rocket gating lives).
+  // Build the action list in priority order. Navigate-to is the
+  // pure-inspection affordance (no game state changes) and goes
+  // LAST per the CLAUDE.md style rule - all real game actions
+  // (Plan rocket route, Prospect, Refuel) precede it.
   const actions = [
     {
       // Plan the rocket's actual flight from LEO to this site,
@@ -2038,16 +2137,6 @@ function showSitePopupFor(site) {
         if (ok) _renderer.clearSitePopup();
       },
     },
-    {
-      label: 'Navigate to →',
-      variant: 'secondary',
-      disabled: !canNavigate,
-      onClick: () => {
-        if (!canNavigate) return;
-        enterRoutingMode(site);
-        _renderer.clearSitePopup();
-      },
-    },
   ];
   // Prospect action - only show when there's an active prospector
   // in the stack AND it's eligible to scan this site. Missile /
@@ -2057,8 +2146,8 @@ function showSitePopupFor(site) {
   // can't reach, so the player gets a tooltip explaining why
   // (vs. silently dropping the button).
   const prosp = getActiveProspectorStats();
+  const rocketSite = getRocketSite();
   if (prosp) {
-    const rocketSite = getRocketSite();
     const check = canProspect(_activeData, rocketSite?.id, site.id, prosp.kind);
     const supportsOk = prosp.canActivate;
     const existingDisc = getDisc(site.id);
@@ -2089,6 +2178,41 @@ function showSitePopupFor(site) {
       },
     });
   }
+  // Refuel action. The rocket can pull water from a hydrated site
+  // when it's parked on it AND the site's water rating meets the
+  // active prospector's ISRU floor (the ISRU rig drives both
+  // prospecting AND refining capability in this sandbox until
+  // dedicated refinery cards land in Stage 3+). Each refuel adds
+  // water = site.hydration to the tank, capped at the tank max.
+  // One refuel per (turn, site) so the player can't strip-mine
+  // the site by hammering the button.
+  if (rocketSite && site.id === rocketSite.id) {
+    const refuelChk = canRefuelAt(site, prosp);
+    actions.push({
+      label: refuelChk.label,
+      variant: 'secondary',
+      disabled: !refuelChk.ok,
+      title: refuelChk.reason || undefined,
+      onClick: () => {
+        if (!refuelChk.ok) return;
+        doRefuel(site, prosp);
+        _renderer.clearSitePopup();
+      },
+    });
+  }
+  // Navigate-to ALWAYS sits last (CLAUDE.md style rule). It's a
+  // pure inspection affordance - no state mutation - so any new
+  // game-action buttons land above it.
+  actions.push({
+    label: 'Navigate to →',
+    variant: 'secondary',
+    disabled: !canNavigate,
+    onClick: () => {
+      if (!canNavigate) return;
+      enterRoutingMode(site);
+      _renderer.clearSitePopup();
+    },
+  });
   _renderer.setSitePopup(site, actions);
   _renderer.onPopupClose(() => {
     _selectedId = null;
@@ -2518,6 +2642,7 @@ function paintSolo() {
         _renderer.setRocketTrail(null);
       }
       // Game-state systems.
+      try { localStorage.removeItem(STORAGE_REFUEL_LOG); } catch {}
       resetDiscs();
       resetGlory();
       resetLog();

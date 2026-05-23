@@ -294,6 +294,11 @@ Random-numbered seeds are stored per game so replays are deterministic.
   what the sentence wants. Em dashes are a tic that betrays
   AI-generated prose and the project explicitly disowns them.
   When you find existing ones, replace them.
+- **Navigate-to is always the LAST button in a site popup.** It's
+  a pure inspection affordance (no game state changes), so any
+  real game actions (Plan rocket route, Prospect, Refuel, etc.)
+  must precede it. New site-popup buttons land before
+  Navigate-to, never after.
 
 ## Don'ts
 
