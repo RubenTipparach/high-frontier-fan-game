@@ -796,6 +796,10 @@ body:has(#view-browse:not(.hidden)) #main {
   gap: 10px;
   font-size: 12px;
   padding: 2px 0 4px;
+  /* When the side panel is open the hand strip squishes to the
+     left edge — flex-wrap keeps BOOST on screen by letting items
+     wrap to a second row instead of overflowing horizontally. */
+  flex-wrap: wrap;
 }
 .hand-title { font-weight: 700; letter-spacing: 1px; }
 .hand-count { color: var(--ink-mute); font-variant-numeric: tabular-nums; }
@@ -1106,17 +1110,15 @@ body:has(#view-browse:not(.hidden)) #main {
   background: rgba(15, 16, 35, 0.94);
   backdrop-filter: blur(6px);
   transition: width 0.22s ease, height 0.22s ease;
-  /* Clear the toolbar at the top and the hand strip at the
-     bottom — the panel stays in its own vertical band so it
-     never overdraws the End-turn / Move / Tracker buttons or
-     the BOOST button. The toolbar is a fixed 44 px high
-     (see .browse-map-stage's height calc); the hand strip is
-     320 px tall by default but the grabber can resize it, so we
-     read its live value via the --hand-height custom property
-     (set by wireHandGrabber in browse.js). */
+  /* Panel extends full height of the shell EXCEPT for the
+     toolbar at top (~44 px). The hand strip stays out of the
+     panel's way by being explicitly pushed to the left via the
+     `right: panel-width` rules on .sandbox-hand below, NOT by
+     clipping the panel's bottom edge — the panel needs to draw
+     all the way down so it reads as one continuous surface. */
   top: 44px;
   right: 0;
-  bottom: var(--hand-height, 320px);
+  bottom: 0;
   width: 48px;
 }
 .browse-sidepanel[data-active] {
