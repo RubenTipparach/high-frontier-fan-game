@@ -1,4 +1,5 @@
 import { getRocketSprite, getRocketSpriteSize } from './rocket-sprite.js';
+import { thrustVisual } from './card-ui.js';
 
 // Canvas-based renderer for the delta-v map.
 //
@@ -1994,9 +1995,13 @@ export class MapRenderer {
     } else {
       this._prospectorBadgeBox = null;
     }
-    // Stash the screen-space bounding box for hit-testing.
+    // Stash the screen-space bounding box for hit-testing. The
+    // active-thruster summary rides along for the rocket-hover
+    // tooltip (browse.js fills r.thruster from
+    // getActiveThrusterStats); no thruster = no tooltip.
     this._sandboxRocketBox = {
       x: px, y: py, w, h,
+      thruster: r.thruster || null,
     };
   }
 
@@ -2405,6 +2410,23 @@ export class MapRenderer {
           return;
         }
       }
+      // Rocket sprite (the body, not the badge) - show the
+      // modifier-baked thrust triangle so the player can see the
+      // FINAL active thrust + fuel-per-burn without opening the
+      // stack modal. Only renders when an active thruster is
+      // present (browse.js fills the .thruster slot).
+      const rb = this._sandboxRocketBox;
+      if (rb && rb.thruster
+          && scx >= rb.x && scx <= rb.x + rb.w
+          && scy >= rb.y && scy <= rb.y + rb.h) {
+        if (lastId !== '__rocket__') {
+          lastId = '__rocket__';
+          this._showRocketThrustTooltip(rb, ev);
+        } else {
+          this._positionTooltip(ev);
+        }
+        return;
+      }
       const pt = this._eventToWorld(ev);
       const hit = this._hitTest(pt.x, pt.y);
       const id = hit ? hit.id : null;
@@ -2581,6 +2603,33 @@ export class MapRenderer {
 
   _hideTooltip() {
     this._tooltipEl.classList.add('hidden');
+  }
+
+  // Hover tooltip for the rocket sprite (body, not badge). Renders
+  // the card-ui thrust triangle with modifier-baked numbers so
+  // the player sees the FINAL active thrust + fuel-per-burn at
+  // a glance. We pass a synthetic face so the visual reuses the
+  // exact same SVG idiom as on the cards.
+  _showRocketThrustTooltip(box, ev) {
+    const t = this._tooltipEl;
+    const thr = box.thruster;
+    if (!thr) { this._hideTooltip(); return; }
+    t.innerHTML = `
+      <div class="t-name">${thr.name || 'Active thruster'}</div>
+      <div class="t-meta">
+        <span>Modified final</span>
+        <span class="${thr.canLift ? 'ok' : 'bad'}">· thrust ${thr.thrust} vs wet ${thr.wetMass}</span>
+      </div>
+      <div class="t-rocket-thrust"></div>
+    `;
+    const host = t.querySelector('.t-rocket-thrust');
+    const tv = thrustVisual({}, {
+      thrust: thr.thrust,
+      fuel:   thr.fuel,
+    });
+    host.appendChild(tv);
+    t.classList.remove('hidden');
+    this._positionTooltip(ev);
   }
 
   // Hover tooltip for the prospector badge on the rocket sprite.

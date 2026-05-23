@@ -1011,6 +1011,27 @@
   font-size: 10px;
   color: var(--ink-mute);
 }
+/* Modified-thrust visual inside the rocket-sprite hover tooltip
+   + the rocket-stack totals cell. The thrust SVG natively scales
+   to width: 100%; cap the host so the triangle stays a sane
+   chip size in either context. */
+.map-tooltip .t-rocket-thrust {
+  width: 96px;
+  margin: 6px auto 0;
+  color: #fde047;
+}
+.rocket-thrust-visual {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 90px;
+  padding: 0;
+  color: #fde047;
+}
+.rocket-thrust-visual .thrust-visual {
+  width: 90px;
+}
+.rocket-thrust-visual .lbl { display: none; }
 .map-popup .t-isru.is-pass {
   border-color: rgba(74, 222, 128, 0.7);
   background: rgba(74, 222, 128, 0.12);

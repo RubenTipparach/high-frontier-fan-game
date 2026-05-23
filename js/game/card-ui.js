@@ -627,7 +627,11 @@ function svgBallerinaChip(size) {
 // lower portion where they fit comfortably above the base.
 // Support icons live in a separate supports box outside the
 // triangle - they're never drawn here.
-function thrustVisual(card, face) {
+// Public so callers (rocket-stack modal totals row, hover
+// tooltip on the rocket sprite) can render the same triangle
+// with overridden numbers - synthesise a face-like object with
+// the effective thrust / fuel / afterburn / fuelType values.
+export function thrustVisual(card, face) {
   const wrap = document.createElement('div');
   wrap.className = 'thrust-visual';
   // The Tier-2 face is a different technology with different

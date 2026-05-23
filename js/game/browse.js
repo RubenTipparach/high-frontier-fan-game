@@ -44,7 +44,7 @@ import { CREW } from '../../data/crew.js';
 import { MILESTONES } from '../../data/glory.js';
 import { POLITICS } from '../../data/politics.js';
 import { SITES_BY_ID } from '../../data/sites.js';
-import { renderCard } from './card-ui.js';
+import { renderCard, thrustVisual } from './card-ui.js';
 import {
   logAction, getActions, getHistory, popLastOfType,
   commitTurn as commitLogTurn, resetLog, onChange as onLogChange,
@@ -1223,6 +1223,7 @@ function openRocketStackModal() {
             aria-label="Add 1 fuel">+</button>
         </div>
         ${thrustHtml}
+        ${thrStats ? '<div class="rocket-totals-cell rocket-thrust-visual" id="rocket-thrust-visual"></div>' : ''}
       </div>
     `;
 
@@ -1283,6 +1284,30 @@ function openRocketStackModal() {
         else removeFuel(1);
       });
     });
+
+    // "Modified final" thrust triangle - shows the active
+    // thruster with modifier-applied thrust + fuel numbers
+    // baked in (instead of the base values painted on the
+    // card). Reuses card-ui.thrustVisual via a synthetic face
+    // so the silhouette + arrow / droplet idiom is identical
+    // to the cards.
+    const thrustHost = body.querySelector('#rocket-thrust-visual');
+    if (thrustHost && thrStats) {
+      const card = PATENTS_BY_ID[thrStats.cardId] || null;
+      const baseFace = (card && card.faces && card.faces.primary) || card || {};
+      const syntheticFace = {
+        ...baseFace,
+        thrust: thrStats.thrust,
+        fuel:   thrStats.fuel,
+        // Keep the original afterburn / fuelType so the icons
+        // (🔥 / 💧 / 🪨) stay accurate; only thrust + fuel are
+        // overridden with the modified numbers.
+      };
+      const tv = thrustVisual(card || {}, syntheticFace);
+      tv.dataset.tip = `Active thrust ${thrStats.thrust} (base ${thrStats.baseThrust})`
+        + `, fuel ${thrStats.fuel} per burn (base ${thrStats.baseFuel})`;
+      thrustHost.appendChild(tv);
+    }
 
     // Wet-mass cell is clickable: pops the fuel-tank visual in
     // its "view current state" mode (no animation - fromWater
@@ -2081,6 +2106,19 @@ function syncSandboxRocket() {
   // rocket state itself.
   const prospectorName = prosp && prosp.card ? prosp.card.name : null;
   const prospectorIsru = prosp ? prospectorIsruValue(prosp.card) : null;
+  // Active thruster summary for the rocket-hover tooltip
+  // (modifier-baked thrust + fuel-per-burn so the player sees
+  // the "final" numbers, not the printed ones).
+  const thrStats = getActiveThrusterStats();
+  const thrusterSummary = thrStats ? {
+    name:       thrStats.name,
+    thrust:     thrStats.thrust,
+    fuel:       thrStats.fuel,
+    baseThrust: thrStats.baseThrust,
+    baseFuel:   thrStats.baseFuel,
+    canLift:    thrStats.canLift,
+    wetMass:    thrStats.wetMass,
+  } : null;
   _renderer.setSandboxRocket({
     x, y,
     colour: 'yellow',
@@ -2088,6 +2126,7 @@ function syncSandboxRocket() {
     prospectorKind,
     prospectorName,
     prospectorIsru,
+    thruster: thrusterSummary,
   });
 }
 
