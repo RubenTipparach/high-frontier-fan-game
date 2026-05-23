@@ -1189,7 +1189,10 @@ function openRocketStackModal() {
         <div class="rocket-totals-cell">
           <span class="lbl">Dry mass</span><strong>${totals.dryMass}</strong>
         </div>
-        <div class="rocket-totals-cell">
+        <div class="rocket-totals-cell rocket-wetmass-cell"
+             role="button" tabindex="0"
+             data-tip="Tap to open the fuel-tank view"
+             title="Tap to open the fuel-tank view">
           <span class="lbl">Wet mass</span>
           <strong class="${thrStats && !thrStats.canLift ? 'bad' : ''}">${totals.wetMass}</strong>
         </div>
@@ -1231,6 +1234,18 @@ function openRocketStackModal() {
         else removeFuel(1);
       });
     });
+
+    // Wet-mass cell is clickable: pops the fuel-tank visual in
+    // its "view current state" mode (no animation - fromWater
+    // omitted defaults to the live tank reading).
+    const wmCell = body.querySelector('.rocket-wetmass-cell');
+    if (wmCell) {
+      const openTank = () => openFuelTankModal();
+      wmCell.addEventListener('click', openTank);
+      wmCell.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTank(); }
+      });
+    }
 
     // Engage button: greyed out until supports are satisfied; tap
     // to ignite the moving-rocket animation. Lives in the pinned
@@ -1598,6 +1613,156 @@ function doRefuel(site) {
       tankAfter: tankBefore + gain,
     },
   });
+  // Visual: pop the tank modal showing water flowing in. Player
+  // can click to skip or dismiss whenever.
+  openFuelTankModal({ fromWater: tankBefore, toWater: tankBefore + gain });
+}
+
+// Fuel-tank modal. SVG cylinder; water rect grows from
+// `fromWater` to `toWater` over ~1100 ms. Capacity = active
+// thruster's max-liftable fuel (thrust - dryMass) when present,
+// falling back to the engine's hard tank cap. Tap / click /
+// Escape closes; tapping mid-animation skips to the end-state
+// without dismissing so the player sees the final level.
+function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
+  document.querySelector('.fuel-tank-overlay')?.remove();
+  const tankNow = Number.isFinite(toWater) ? toWater : getTankWater();
+  const fromW   = Number.isFinite(fromWater) ? fromWater : tankNow;
+  const totals  = getStackTotals();
+  const thrStats = getActiveThrusterStats();
+  // Capacity model: thrust - dryMass (the HF4 wet-mass lift cap)
+  // so the cylinder visually shows how much room is left under
+  // the thruster's lift limit. When no thruster is active or the
+  // ship is overweight, fall back to the engine's tank cap.
+  const liftCap = (thrStats && Number.isFinite(thrStats.thrust))
+    ? Math.max(0, thrStats.thrust - (totals.dryMass || 0))
+    : null;
+  const cap = liftCap != null && liftCap > 0 ? liftCap : getTankMax();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay fuel-tank-overlay';
+
+  let animating = false;
+  let raf = 0;
+  let finalReached = (fromW === tankNow);
+
+  const close = () => {
+    if (raf) cancelAnimationFrame(raf);
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+  };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+
+  const panel = document.createElement('div');
+  panel.className = 'fuel-tank-panel';
+  panel.innerHTML = `
+    <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
+    <h2 class="fuel-tank-title">💧 Water tank</h2>
+    <p class="muted fuel-tank-sub">Tap to skip animation or close</p>
+    <div class="fuel-tank-stage">
+      <svg viewBox="0 0 120 220" class="fuel-tank-svg" preserveAspectRatio="xMidYMid meet">
+        <!-- Outer cylinder (stroke only) -->
+        <rect class="tank-shell" x="20" y="10" width="80" height="200" rx="14" ry="14" />
+        <!-- Inner clip path so water doesn't bleed past the rim -->
+        <defs>
+          <clipPath id="tank-clip">
+            <rect x="20" y="10" width="80" height="200" rx="14" ry="14" />
+          </clipPath>
+        </defs>
+        <!-- Water level. y + height are recomputed on each frame; the
+             reference height (200) corresponds to 100% full. -->
+        <g clip-path="url(#tank-clip)">
+          <rect class="tank-water" x="20" y="200" width="80" height="10" />
+          <rect class="tank-water-foam" x="20" y="195" width="80" height="6" />
+        </g>
+        <!-- Capacity tick marks every 5 units. -->
+        <g class="tank-ticks"></g>
+      </svg>
+      <div class="fuel-tank-readout">
+        <strong class="tank-now">${fromW}</strong>
+        <span>/</span>
+        <strong class="tank-cap">${cap}</strong>
+        <em class="muted">water</em>
+      </div>
+    </div>
+    <div class="fuel-tank-foot muted">
+      Cap = thrust ${thrStats ? thrStats.thrust : '-'} − dry mass ${totals.dryMass || 0}
+      ${liftCap == null ? '(no active thruster)' : ''}
+    </div>
+  `;
+
+  const waterRect = panel.querySelector('.tank-water');
+  const foamRect  = panel.querySelector('.tank-water-foam');
+  const nowReadout = panel.querySelector('.tank-now');
+  const ticksG     = panel.querySelector('.tank-ticks');
+
+  // Tick marks. One short hatch every 5 units on the right edge.
+  const tickEvery = Math.max(1, Math.round(cap / 10));
+  for (let v = tickEvery; v <= cap; v += tickEvery) {
+    const t = v / cap;
+    const ty = 210 - t * 200;
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', 100); line.setAttribute('x2', 110);
+    line.setAttribute('y1', ty);  line.setAttribute('y2', ty);
+    line.setAttribute('stroke', 'rgba(125, 211, 252, 0.55)');
+    line.setAttribute('stroke-width', '1.5');
+    ticksG.appendChild(line);
+  }
+
+  function setLevel(level) {
+    const clamped = Math.max(0, Math.min(cap, level));
+    const frac = cap > 0 ? clamped / cap : 0;
+    const h    = frac * 200;
+    waterRect.setAttribute('y', String(210 - h));
+    waterRect.setAttribute('height', String(h));
+    foamRect.setAttribute('y',  String(210 - h - 3));
+    foamRect.setAttribute('height', String(Math.min(6, h)));
+    nowReadout.textContent = String(Math.round(clamped));
+  }
+
+  // Initial position.
+  setLevel(fromW);
+
+  // Skip / close. The first tap during animation jumps to the
+  // final state; subsequent taps (or a tap when already final)
+  // close the modal. Two-state click is intentional so the
+  // player has a moment to read the result before dismissing.
+  const onTap = (e) => {
+    if (e.target.classList.contains('modal-x')) return;
+    if (animating) {
+      // Skip animation - snap to final, don't close yet.
+      if (raf) cancelAnimationFrame(raf);
+      animating = false;
+      setLevel(tankNow);
+      finalReached = true;
+      return;
+    }
+    if (finalReached) close();
+  };
+  overlay.addEventListener('click', onTap);
+  panel.querySelector('.modal-x').addEventListener('click', close);
+
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+
+  // Animate from fromW -> tankNow.
+  if (fromW !== tankNow) {
+    animating = true;
+    const durationMs = 1100;
+    const t0 = performance.now();
+    const step = (now) => {
+      const t = Math.min(1, (now - t0) / durationMs);
+      const eased = 1 - Math.pow(1 - t, 3);  // ease-out cubic
+      const v = fromW + (tankNow - fromW) * eased;
+      setLevel(v);
+      if (t < 1) raf = requestAnimationFrame(step);
+      else { animating = false; finalReached = true; raf = 0; }
+    };
+    raf = requestAnimationFrame(step);
+  } else {
+    finalReached = true;
+  }
 }
 
 // Read the prospector's ISRU rating off the active face's

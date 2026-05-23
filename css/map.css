@@ -331,6 +331,79 @@
 /* Turn tracker modal - Sol Sunspot wheel */
 .turn-clock-overlay { z-index: 60; }
 .event-legend-overlay { z-index: 90; }
+/* Fuel-tank modal: SVG cylinder with rising water level. */
+.fuel-tank-overlay { z-index: 75; }
+.fuel-tank-panel {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px 24px 18px;
+  width: min(360px, 92vw);
+  text-align: center;
+  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+}
+.fuel-tank-title { margin: 0 0 4px; font-size: 16px; color: var(--accent); }
+.fuel-tank-sub   { margin: 0 0 12px; font-size: 11px; }
+.fuel-tank-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  margin: 4px 0 8px;
+}
+.fuel-tank-svg { width: 130px; height: 240px; }
+.tank-shell {
+  fill: rgba(15, 23, 42, 0.55);
+  stroke: rgba(125, 211, 252, 0.65);
+  stroke-width: 2.5;
+}
+.tank-water {
+  fill: #38bdf8;
+  fill-opacity: 0.85;
+  transition: none; /* JS rAF drives it - CSS transition would
+                      fight the per-frame attribute set */
+}
+.tank-water-foam {
+  fill: rgba(125, 211, 252, 0.55);
+}
+.fuel-tank-readout {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  font-variant-numeric: tabular-nums;
+}
+.fuel-tank-readout strong.tank-now {
+  font-size: 38px;
+  line-height: 1;
+  color: #7dd3fc;
+}
+.fuel-tank-readout span {
+  font-size: 18px;
+  color: var(--ink-dim);
+  margin: 4px 0;
+}
+.fuel-tank-readout strong.tank-cap {
+  font-size: 22px;
+  color: var(--ink);
+}
+.fuel-tank-readout em {
+  font-style: normal;
+  font-size: 11px;
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.fuel-tank-foot {
+  margin: 8px 0 0;
+  font-size: 11px;
+}
+.rocket-wetmass-cell { cursor: pointer; }
+.rocket-wetmass-cell:hover {
+  background: rgba(125, 211, 252, 0.08);
+  border-radius: 4px;
+}
 /* Prospect roll modal. Shows the 3D die rolling against the
    site's prospect target. Stays mid-stack so the turn-confirm
    dialog (z80) can still cover it if needed. */
