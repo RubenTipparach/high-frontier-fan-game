@@ -178,6 +178,177 @@
   letter-spacing: 1px;
 }
 
+/* Turn-clock toolbar buttons + confirm dialog + tracker modal +
+   3D die. The state model lives in js/game/turn-clock.js; this
+   block is the visual layer. */
+.map-route #turn-move-rocket,
+.map-route #turn-end {
+  font-size: 11px;
+  padding: 4px 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.map-route #turn-end {
+  background: linear-gradient(180deg, #f97316, #c2410c);
+  color: #2e0f02;
+  font-weight: 700;
+  border-color: #9a3412;
+}
+.map-route #turn-tracker {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.turn-confirm-overlay { z-index: 80; }
+.turn-confirm-panel {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 22px 24px;
+  width: min(360px, 90vw);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);
+}
+.turn-confirm-panel h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+  color: var(--accent);
+}
+.turn-confirm-stats {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 16px;
+}
+.turn-confirm-stats li {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: 13px;
+}
+.turn-confirm-stats li:last-child { border-bottom: none; }
+.turn-confirm-stats span { color: var(--ink-dim); }
+.turn-confirm-stats strong {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.turn-confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* Turn tracker modal — Sol Sunspot wheel */
+.turn-clock-overlay { z-index: 60; }
+.turn-clock-panel {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px 24px;
+  width: min(420px, 92vw);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);
+}
+.turn-clock-title {
+  margin: 0 0 4px;
+  font-size: 18px;
+  letter-spacing: 0.5px;
+}
+.turn-clock-sub {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+.turn-clock-sub strong { color: var(--ink); }
+.turn-clock-season { font-weight: 700; }
+.turn-clock-wheel-host {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 10px 0 6px;
+}
+.turn-wheel {
+  width: 100%;
+  max-width: 320px;
+  height: auto;
+}
+.turn-clock-die-host {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+.turn-clock-event-line {
+  margin: 8px 0 0;
+  text-align: center;
+  font-size: 13px;
+}
+.turn-clock-event-line .big {
+  font-size: 18px;
+  color: #fbbf24;
+}
+
+/* 3D die. Cube w/ 6 faces; .die-cube transforms to face the
+   value via data-value. Rolling state tumbles for 700 ms before
+   landing on the value. Each face uses a hex glyph so we don't
+   have to draw pips. */
+.die-3d {
+  width: 56px;
+  height: 56px;
+  perspective: 240px;
+}
+.die-cube {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform 0.35s cubic-bezier(0.4, 1.4, 0.55, 1);
+}
+.die-3d .face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(160deg, #f3f4f6, #94a3b8);
+  border: 1px solid #475569;
+  border-radius: 8px;
+  color: #0c0a16;
+  font-size: 38px;
+  line-height: 1;
+}
+.die-3d .face span { display: block; line-height: 1; }
+.die-3d .face.f1 { transform: translateZ(28px); }
+.die-3d .face.f6 { transform: rotateY(180deg) translateZ(28px); }
+.die-3d .face.f3 { transform: rotateY( 90deg) translateZ(28px); }
+.die-3d .face.f4 { transform: rotateY(-90deg) translateZ(28px); }
+.die-3d .face.f5 { transform: rotateX( 90deg) translateZ(28px); }
+.die-3d .face.f2 { transform: rotateX(-90deg) translateZ(28px); }
+.die-3d[data-value="1"] .die-cube { transform: rotateX(  0deg) rotateY(  0deg); }
+.die-3d[data-value="6"] .die-cube { transform: rotateX(  0deg) rotateY(180deg); }
+.die-3d[data-value="3"] .die-cube { transform: rotateX(  0deg) rotateY(-90deg); }
+.die-3d[data-value="4"] .die-cube { transform: rotateX(  0deg) rotateY( 90deg); }
+.die-3d[data-value="5"] .die-cube { transform: rotateX(-90deg) rotateY(  0deg); }
+.die-3d[data-value="2"] .die-cube { transform: rotateX( 90deg) rotateY(  0deg); }
+.die-3d.rolling .die-cube {
+  animation: die-tumble 0.7s ease-out;
+}
+@keyframes die-tumble {
+  0%   { transform: rotateX(  0deg) rotateY(  0deg); }
+  25%  { transform: rotateX(180deg) rotateY( 90deg); }
+  50%  { transform: rotateX(360deg) rotateY(180deg); }
+  75%  { transform: rotateX(540deg) rotateY(270deg); }
+  100% { transform: rotateX(720deg) rotateY(360deg); }
+}
+
 /* Debug panel: floats over the lower-left corner of the map host.
    The renderer publishes zoom + FPS via onFrame(); sliders write
    straight into renderer.options. */

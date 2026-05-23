@@ -8,6 +8,8 @@
 import { MapRenderer, LEO_ANCHOR } from './render.js';
 import { loadPlannerMap } from './planner-map.js';
 import { findPath } from './nav.js';
+import { consumeMove } from './turn-clock.js';
+import { triggerEndTurn, openTurnClockModal } from './turn-clock-ui.js';
 import {
   getState as soloState, newGame as soloNewGame, abandonGame as soloAbandon,
   setTarget as soloSetTarget, commitMove as soloCommitMove,
@@ -573,6 +575,12 @@ function ensureMapShell(host) {
         <button id="route-clear" hidden>Clear route</button>
         <button id="route-debug" title="Toggle debug panel"
           aria-label="Toggle debug panel">🔧</button>
+        <button id="turn-move-rocket" title="Move the rocket one step along its planned route"
+          aria-label="Move rocket">🛸 Move</button>
+        <button id="turn-end" title="End your turn"
+          aria-label="End turn">⏭ End turn</button>
+        <button id="turn-tracker" title="View turn tracker"
+          aria-label="View turn tracker">🕐</button>
         <button id="route-fullscreen" title="Toggle fullscreen map"
           aria-label="Toggle fullscreen">⛶</button>
       </div>
@@ -624,6 +632,33 @@ function ensureMapShell(host) {
     panel.classList.toggle('hidden');
     const open = !panel.classList.contains('hidden');
     if (_renderer) _renderer.setOption('debug', open);
+  });
+  // Turn clock + rocket-movement controls. End turn pops a confirm
+  // when the player still has unspent budget; if they confirm and
+  // the new slot is an event, openTurnClockModal animates the d6.
+  // Move rocket is a placeholder until the rocket-movement engine
+  // lands — it just consumes the per-turn move budget for now so
+  // the end-turn confirm reflects the spend.
+  host.querySelector('#turn-end').addEventListener('click', async () => {
+    const result = await triggerEndTurn();
+    if (!result) return;
+    if (result.event) {
+      openTurnClockModal({ rolling: { value: result.event.dieRoll } });
+    }
+  });
+  host.querySelector('#turn-tracker').addEventListener('click', () => {
+    openTurnClockModal();
+  });
+  host.querySelector('#turn-move-rocket').addEventListener('click', () => {
+    // Stub for now — Stage 3's movement engine will actually walk
+    // the rocket along its planned-route segments. Until then we
+    // just spend the per-turn move budget so the end-turn confirm
+    // can see "moves remaining: 0".
+    if (!consumeMove()) {
+      setStatus('No moves left this turn — end turn to refresh.');
+      return;
+    }
+    setStatus('🛸 Rocket move queued (engine pending Stage 3).');
   });
   host.querySelector('#dbg-close').addEventListener('click', () => {
     host.querySelector('#map-debug').classList.add('hidden');
