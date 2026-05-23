@@ -2633,7 +2633,10 @@ function showSitePopupFor(site) {
           : check.reason;
     actions.push({
       label: `${kindGlyph} Prospect (${prosp.kind})`,
-      variant: 'secondary',
+      // Blue rocket variant when the action is actually
+      // available; dim secondary when something blocks. Reads
+      // as a real game-action when live.
+      variant: ok ? 'rocket' : 'secondary',
       disabled: !ok,
       title: reason || undefined,
       onClick: () => {
@@ -2655,7 +2658,10 @@ function showSitePopupFor(site) {
     const refuelChk = canRefuelAt(site);
     actions.push({
       label: refuelChk.label,
-      variant: 'secondary',
+      // Blue rocket variant when the action is actually
+      // available; dim secondary when blocked. Same idiom as
+      // the prospect button so live ops read as live ops.
+      variant: refuelChk.ok ? 'rocket' : 'secondary',
       disabled: !refuelChk.ok,
       title: refuelChk.reason || undefined,
       onClick: () => {
