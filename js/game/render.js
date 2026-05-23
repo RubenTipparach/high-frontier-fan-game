@@ -972,6 +972,9 @@ export class MapRenderer {
     // easy to miss, so we layer a thick bright yellow ring + soft
     // halo just outside the selected node's body.
     this._drawSelectionRingScreen(ctx);
+    // Turn-number pills (T2, T3, …) for planned rocket routes;
+    // no-op for plain Navigate-to routes that have no turn tags.
+    this._drawRouteTurnLabelsScreen(ctx);
     if (this._popupSite) this._positionSitePopup();
 
     // FPS book-keeping. The debug panel polls getFps(); we update
@@ -1236,33 +1239,106 @@ export class MapRenderer {
   _drawRoute(ctx) {
     if (!this._route) return;
     const eff = this.zoom * this.fitScale;
-    ctx.lineWidth = 4 / eff;
     ctx.lineCap = 'round';
-    ctx.shadowBlur = 6 / eff;
-    ctx.shadowColor = 'rgba(249, 115, 22, 0.65)';
-    // Trace exactly over the underlying edges -- one straight
-    // lineTo per segment, no Bezier smoothing. The route is an
-    // overlay highlight, not a new shape; the player should see
-    // their path as a direct copy of the graph segments. We
-    // stroke the same path twice — solid orange first, gold
-    // dashes on top — so the highlight reads as orange/gold
-    // stripes against yellow-season comet paths.
-    ctx.beginPath();
+    // Segments tagged `turn: 1` (or untagged — plain Navigate-to
+    // routes have no turn data) render as the bright orange/gold
+    // highlight. Segments on later turns render as a dimmer
+    // dashed line; the turn number gets painted on each segment's
+    // midpoint in the screen-space pass (_drawRouteTurnLabelsScreen).
+    const turn1 = [];
+    const laterByTurn = new Map();
     for (const seg of this._route) {
+      const t = seg.turn || 1;
+      if (t === 1) turn1.push(seg);
+      else {
+        if (!laterByTurn.has(t)) laterByTurn.set(t, []);
+        laterByTurn.get(t).push(seg);
+      }
+    }
+
+    // Later turns first so the bright turn-1 highlight always
+    // paints on top of them at any junction.
+    const sortedLater = [...laterByTurn].sort((a, b) => b[0] - a[0]);
+    for (const [turn, segs] of sortedLater) {
+      const alpha = Math.max(0.25, 0.65 - (turn - 2) * 0.1);
+      ctx.lineWidth = 2.5 / eff;
+      ctx.strokeStyle = `rgba(148, 163, 184, ${alpha})`;
+      ctx.setLineDash([6 / eff, 5 / eff]);
+      ctx.beginPath();
+      for (const seg of segs) {
+        const sa = this.data.byId[seg.from];
+        const sb = this.data.byId[seg.to];
+        if (!sa || !sb) continue;
+        ctx.moveTo(sa.x, sa.y);
+        ctx.lineTo(sb.x, sb.y);
+      }
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // Turn 1 — bright orange + gold-dash highlight. Same look as
+    // a Navigate-to inspection route, but here it specifically
+    // means "you can fly this much this turn."
+    if (turn1.length) {
+      ctx.lineWidth = 4 / eff;
+      ctx.shadowBlur = 6 / eff;
+      ctx.shadowColor = 'rgba(249, 115, 22, 0.65)';
+      ctx.beginPath();
+      for (const seg of turn1) {
+        const sa = this.data.byId[seg.from];
+        const sb = this.data.byId[seg.to];
+        if (!sa || !sb) continue;
+        ctx.moveTo(sa.x, sa.y);
+        ctx.lineTo(sb.x, sb.y);
+      }
+      ctx.strokeStyle = 'rgba(249, 115, 22, 0.95)';
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(251, 191, 36, 0.95)';
+      ctx.setLineDash([8 / eff, 8 / eff]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  // Screen-space "T2", "T3" labels at the midpoint of each later-
+  // turn segment. Drawn in the screen pass so labels stay legible
+  // even when zoomed out. Skipped entirely for plain Navigate-to
+  // routes (they have no .turn tags).
+  _drawRouteTurnLabelsScreen(ctx) {
+    if (!this._route) return;
+    const eff = this.zoom * this.fitScale;
+    const { hostW, hostH } = this;
+    ctx.save();
+    ctx.font = '700 11px ui-sans-serif, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const seg of this._route) {
+      const t = seg.turn || 1;
+      if (t <= 1) continue;
       const sa = this.data.byId[seg.from];
       const sb = this.data.byId[seg.to];
       if (!sa || !sb) continue;
-      ctx.moveTo(sa.x, sa.y);
-      ctx.lineTo(sb.x, sb.y);
+      const sx = this.pan.x + ((sa.x + sb.x) / 2) * eff;
+      const sy = this.pan.y + ((sa.y + sb.y) / 2) * eff;
+      if (sx < -20 || sx > hostW + 20 || sy < -20 || sy > hostH + 20) continue;
+      const text = `T${t}`;
+      const pad = 5;
+      const w = ctx.measureText(text).width + pad * 2;
+      const h = 16;
+      const rx = sx - w / 2, ry = sy - h / 2;
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.75)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(rx, ry, w, h, 4);
+      else ctx.rect(rx, ry, w, h);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#cbd5e1';
+      ctx.fillText(text, sx, sy + 0.5);
     }
-    ctx.strokeStyle = 'rgba(249, 115, 22, 0.95)';
-    ctx.setLineDash([]);
-    ctx.stroke();
-    ctx.strokeStyle = 'rgba(251, 191, 36, 0.95)';
-    ctx.setLineDash([8 / eff, 8 / eff]);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.shadowBlur = 0;
+    ctx.restore();
   }
 
   _drawWaypointsScreen(ctx) {

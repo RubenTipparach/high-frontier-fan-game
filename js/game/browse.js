@@ -1280,21 +1280,108 @@ function onSiteSelect(site) {
 function showSitePopupFor(site) {
   if (!_renderer) return;
   const canNavigate = !(site.isDecorative || site.isLandable === false);
-  const actions = [{
-    label: 'Navigate to →',
-    primary: true,
-    disabled: !canNavigate,
-    onClick: () => {
-      if (!canNavigate) return;
-      enterRoutingMode(site);
-      _renderer.clearSitePopup();
+  const rocketReady = canPlanRocketRoute();
+  const actions = [
+    {
+      label: 'Navigate to →',
+      primary: true,
+      disabled: !canNavigate,
+      onClick: () => {
+        if (!canNavigate) return;
+        enterRoutingMode(site);
+        _renderer.clearSitePopup();
+      },
     },
-  }];
+    {
+      // Plan the rocket's actual flight from LEO to this site,
+      // broken into turns based on its active-thruster burn
+      // budget. Turn-1 segments paint as the bright highlight;
+      // later turns get a "T2 / T3" pill at midpoint so the
+      // player can read the trip plan at a glance.
+      label: '🛸 Plan rocket route',
+      primary: false,
+      disabled: !canNavigate || !rocketReady,
+      onClick: () => {
+        if (!canNavigate || !rocketReady) return;
+        const ok = planRocketRouteTo(site);
+        if (ok) _renderer.clearSitePopup();
+      },
+    },
+  ];
   _renderer.setSitePopup(site, actions);
   _renderer.onPopupClose(() => {
     _selectedId = null;
     if (_renderer) _renderer.setRouteEndpoints(null, null);
   });
+}
+
+// True when there's an active thruster (or missile-class robonaut
+// with a thrust value) the player can fly from LEO. Doesn't
+// require all supports satisfied yet — if the route is plannable
+// in principle, show it even if the rocket can't actually engage
+// today; the totals row in the stack modal still flags wet-mass
+// vs thrust separately.
+function canPlanRocketRoute() {
+  const stack = getRocketStack();
+  const activeId = getActiveThrusterId();
+  if (!activeId) return false;
+  return stack.some((s) => s.id === activeId);
+}
+
+// Build a per-turn rocket plan from LEO to the destination. Each
+// edge costs ceil(dv) burns; the per-turn burn budget is BURNS_PER_TURN
+// (4 — matches HF4's 4 operations per turn). Segments are tagged
+// with the turn number they belong to; the renderer paints turn 1
+// in the bright highlight and labels later turns with T2/T3 pills.
+const BURNS_PER_TURN = 4;
+function planRocketRouteTo(destSite) {
+  if (!_renderer || !_activeData) return false;
+  // LEO origin = the lagrange waypoint named "LEO" in the planner
+  // data (loaded once at data-load time, same node MapRenderer
+  // anchors the sandbox rocket sprite to).
+  const leo = _activeData.sites.find(
+    (s) => s.type === 'lagrange' && s.name === 'LEO'
+  );
+  if (!leo) {
+    setStatus('Could not find the LEO node to launch from.');
+    return false;
+  }
+  if (destSite.id === leo.id) {
+    setStatus('Pick a destination other than LEO.');
+    return false;
+  }
+  const result = findPath(_activeData, leo.id, destSite.id);
+  if (!result) {
+    setStatus(
+      `No rocket route from <strong>LEO</strong> to `
+      + `<strong>${esc(destSite.name)}</strong>.`
+    );
+    _renderer.setRoute(null);
+    _renderer.setRouteEndpoints(leo.id, destSite.id);
+    return false;
+  }
+  let turn = 1;
+  let burnsThisTurn = 0;
+  const segments = result.segments.map((seg) => {
+    const cost = Math.max(1, Math.ceil(seg.dv || 1));
+    if (burnsThisTurn + cost > BURNS_PER_TURN && burnsThisTurn > 0) {
+      turn += 1;
+      burnsThisTurn = 0;
+    }
+    burnsThisTurn += cost;
+    return { ...seg, turn, burns: cost };
+  });
+  _routeFrom = leo;
+  _routeTo = destSite;
+  _renderer.setRoute(segments);
+  _renderer.setRouteEndpoints(leo.id, destSite.id);
+  document.getElementById('route-clear').hidden = false;
+  setStatus(
+    `🛸 <strong>LEO</strong> → <strong>${esc(destSite.name)}</strong>: `
+    + `<strong class="big">${result.totalBurns}</strong> burns over `
+    + `<strong>${turn}</strong> turn${turn === 1 ? '' : 's'}.`
+  );
+  return true;
 }
 
 function clearRoute() {
