@@ -1942,6 +1942,16 @@ export class MapRenderer {
 
     // Click dispatched only if the mousedown→mouseup didn't drag.
     this.canvas.addEventListener('click', (ev) => {
+      // Mobile browsers fire a synthesized `click` right after a
+      // touchend even with `touch-action: none`. The touchend
+      // handler already called onSelect for the tap; if we let
+      // this click also call onSelect the second invocation
+      // matches _selectedId and immediately DESELECTS — that's
+      // why on mobile the popup + ring "show up and close right
+      // away." Bail when a recent touch interaction owned the
+      // event. _touchActive is set in _wireHover (same flag that
+      // suppresses the hover tooltip on touch).
+      if (this._touchActive) return;
       if (this._dragStart && this._dragStart.moved) return;
       // Rocket sits on top of the map so test it first; if the
       // click landed inside the rocket sprite we fire a
