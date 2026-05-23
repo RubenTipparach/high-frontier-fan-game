@@ -990,6 +990,8 @@ function ensureMapShell(host) {
     panel.classList.toggle('hidden');
     const open = !panel.classList.contains('hidden');
     if (_renderer) _renderer.setOption('debug', open);
+    try { localStorage.setItem(STORAGE_DBG_PANEL_OPEN, open ? '1' : '0'); }
+    catch { /* private mode */ }
   });
   // Global game-settings gear on the toolbar. Opens the same
   // settings modal accessible from per-popup affordances; right
@@ -1085,6 +1087,8 @@ function ensureMapShell(host) {
   }
   host.querySelector('#dbg-close').addEventListener('click', () => {
     host.querySelector('#map-debug').classList.add('hidden');
+    try { localStorage.setItem(STORAGE_DBG_PANEL_OPEN, '0'); }
+    catch { /* private mode */ }
     if (_renderer) _renderer.setOption('debug', false);
   });
   wireSearch(host);
@@ -1112,6 +1116,36 @@ function ensureMapShell(host) {
 // Hook the debug-panel widgets to whichever renderer is currently
 // active. Called from mountMapFor() each time the renderer is
 // (re)built, so the panel's bound to the live instance.
+// Persists every slider + checkbox to localStorage so the
+// player's tweaks survive a reload - same pattern as the route
+// priority above. Empty / out-of-range stored values fall back
+// to the renderer's defaults.
+const STORAGE_DBG_INIT_ZOOM   = 'hf-sandbox-map-init-zoom';
+const STORAGE_DBG_FADE_MIN    = 'hf-sandbox-map-fade-min';
+const STORAGE_DBG_FADE_MAX    = 'hf-sandbox-map-fade-max';
+const STORAGE_DBG_SHOW_DECOR  = 'hf-sandbox-map-show-decoratives';
+const STORAGE_DBG_PANEL_OPEN  = 'hf-sandbox-map-debug-open';
+function persistDbg(key, value) {
+  try { localStorage.setItem(key, String(value)); } catch { /* private mode */ }
+}
+function loadDbgNumber(key, fallback, min, max) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw == null) return fallback;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return fallback;
+    if (min != null && n < min) return fallback;
+    if (max != null && n > max) return fallback;
+    return n;
+  } catch { return fallback; }
+}
+function loadDbgBool(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw == null) return fallback;
+    return raw === '1' || raw === 'true';
+  } catch { return fallback; }
+}
 function wireDebugPanel(renderer) {
   const panel = document.getElementById('map-debug');
   if (!panel) return;
@@ -1126,6 +1160,19 @@ function wireDebugPanel(renderer) {
   const showDec   = panel.querySelector('#dbg-show-decoratives');
   const resetBtn  = panel.querySelector('#dbg-reset');
 
+  // Seed the renderer with any persisted values BEFORE we read
+  // them back into the slider UI. Range bounds match the
+  // HTML inputs (initialZoom 0.5-6, fade 0.5-6) so a corrupted
+  // entry can't push the renderer out of band.
+  const storedInit = loadDbgNumber(STORAGE_DBG_INIT_ZOOM, renderer.options.initialZoom, 0.5, 6);
+  const storedFmin = loadDbgNumber(STORAGE_DBG_FADE_MIN,  renderer.options.labelFadeMin, 0.5, 6);
+  const storedFmax = loadDbgNumber(STORAGE_DBG_FADE_MAX,  renderer.options.labelFadeMax, 0.5, 6);
+  const storedDec  = loadDbgBool  (STORAGE_DBG_SHOW_DECOR, renderer.options.showDecoratives);
+  renderer.setOption('initialZoom',     storedInit);
+  renderer.setOption('labelFadeMin',    storedFmin);
+  renderer.setOption('labelFadeMax',    storedFmax);
+  renderer.setOption('showDecoratives', storedDec);
+
   initZoom.value = renderer.options.initialZoom;
   fadeMin.value  = renderer.options.labelFadeMin;
   fadeMax.value  = renderer.options.labelFadeMax;
@@ -1138,23 +1185,44 @@ function wireDebugPanel(renderer) {
     const v = Number(initZoom.value);
     renderer.setOption('initialZoom', v);
     initZoomVal.textContent = v.toFixed(1) + 'x';
+    persistDbg(STORAGE_DBG_INIT_ZOOM, v);
   };
   fadeMin.oninput = () => {
-    renderer.setOption('labelFadeMin', Number(fadeMin.value));
-    fadeMinVal.textContent = Number(fadeMin.value).toFixed(1) + 'x';
+    const v = Number(fadeMin.value);
+    renderer.setOption('labelFadeMin', v);
+    fadeMinVal.textContent = v.toFixed(1) + 'x';
+    persistDbg(STORAGE_DBG_FADE_MIN, v);
   };
   fadeMax.oninput = () => {
-    renderer.setOption('labelFadeMax', Number(fadeMax.value));
-    fadeMaxVal.textContent = Number(fadeMax.value).toFixed(1) + 'x';
+    const v = Number(fadeMax.value);
+    renderer.setOption('labelFadeMax', v);
+    fadeMaxVal.textContent = v.toFixed(1) + 'x';
+    persistDbg(STORAGE_DBG_FADE_MAX, v);
   };
   showDec.onchange = () => {
     renderer.setOption('showDecoratives', showDec.checked);
+    persistDbg(STORAGE_DBG_SHOW_DECOR, showDec.checked ? '1' : '0');
   };
-  resetBtn.onclick = () => renderer.reset();
+  resetBtn.onclick = () => {
+    // Reset returns the renderer to its fit-to-data + default
+    // options. We mirror that by clearing the stored slider
+    // values so the next reload starts clean too.
+    renderer.reset();
+    try {
+      localStorage.removeItem(STORAGE_DBG_INIT_ZOOM);
+      localStorage.removeItem(STORAGE_DBG_FADE_MIN);
+      localStorage.removeItem(STORAGE_DBG_FADE_MAX);
+      localStorage.removeItem(STORAGE_DBG_SHOW_DECOR);
+    } catch { /* private mode */ }
+  };
 
-  // If the panel is currently open, the new renderer should also
-  // log clicks. (mountMapFor rebuilds the renderer on every mode
-  // toggle; without this the debug flag would reset to false.)
+  // Restore the persisted open / closed state for the debug
+  // panel. wireDebugPanel runs every time the renderer is
+  // rebuilt, so this also re-applies on mode toggles. If no
+  // value was stored, we default to closed (the HTML class
+  // already has .hidden in that case).
+  const storedOpen = loadDbgBool(STORAGE_DBG_PANEL_OPEN, false);
+  panel.classList.toggle('hidden', !storedOpen);
   const panelOpen = !panel.classList.contains('hidden');
   renderer.setOption('debug', panelOpen);
 
