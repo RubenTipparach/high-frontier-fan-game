@@ -7,7 +7,7 @@
 
 import { MapRenderer, LEO_ANCHOR } from './render.js';
 import { loadPlannerMap } from './planner-map.js';
-import { findPath } from './nav.js';
+import { planRoute } from './planner-nav.js';
 import {
   consumeMove, refundMove, getTurn, getMovesRemaining, onTurnChange,
   getEventForRoll, getSeasonForSlot,
@@ -1859,12 +1859,13 @@ function canPlanRocketRoute() {
   return stack.some((s) => s.id === activeId);
 }
 
-// Build a per-turn rocket plan from LEO to the destination. Each
-// edge costs ceil(dv) burns; the per-turn burn budget is BURNS_PER_TURN
-// (4 - matches HF4's 4 operations per turn). Segments are tagged
-// with the turn number they belong to; the renderer paints turn 1
-// in the bright highlight and labels later turns with T2/T3 pills.
-const BURNS_PER_TURN = 4;
+// Plan a rocket route from the rocket's current site to `destSite`,
+// using the ported vendor mission planner (planner-nav.js). The
+// planner knows about Hohmann pivots, direction-change costs,
+// burn budgets, hazard avoidance, and Venus flyby bonuses; our
+// old nav.js was a flat Dijkstra over dv values and got all of
+// those wrong. Per-turn burn budget = the active thruster's
+// thrust value (defaults to 4 when no thruster is active).
 function planRocketRouteTo(destSite) {
   if (!_renderer || !_activeData) return false;
   // Origin = wherever the rocket currently is (default LEO). Once
@@ -1879,8 +1880,14 @@ function planRocketRouteTo(destSite) {
     setStatus(`Rocket is already at ${esc(origin.name)} - pick a different destination.`);
     return false;
   }
-  const result = findPath(_activeData, origin.id, destSite.id);
-  if (!result) {
+  // Active-thruster thrust drives the per-turn burn budget. When
+  // no thruster is selected we fall back to 4 (HF4's stock LEO
+  // budget) so the route still computes - the rocket simply
+  // won't be flyable until a thruster is assigned.
+  const thrStats = getActiveThrusterStats();
+  const thrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 4;
+  const result = planRoute(_activeData, origin.id, destSite.id, { thrust });
+  if (!result || !result.segments.length) {
     setStatus(
       `No rocket route from <strong>${esc(origin.name)}</strong> to `
       + `<strong>${esc(destSite.name)}</strong>.`
@@ -1889,28 +1896,19 @@ function planRocketRouteTo(destSite) {
     _renderer.setRouteEndpoints(origin.id, destSite.id);
     return false;
   }
-  let turn = 1;
-  let burnsThisTurn = 0;
-  const segments = result.segments.map((seg) => {
-    const cost = Math.max(1, Math.ceil(seg.dv || 1));
-    if (burnsThisTurn + cost > BURNS_PER_TURN && burnsThisTurn > 0) {
-      turn += 1;
-      burnsThisTurn = 0;
-    }
-    burnsThisTurn += cost;
-    return { ...seg, turn, burns: cost };
-  });
   _routeFrom = origin;
   _routeTo = destSite;
-  _plannedRoute = segments;
+  _plannedRoute = result.segments;
   persistPlannedRoute();
-  _renderer.setRoute(segments);
+  _renderer.setRoute(result.segments);
   _renderer.setRouteEndpoints(origin.id, destSite.id);
   document.getElementById('route-clear').hidden = false;
+  const turns = result.totalTurns;
   setStatus(
     `🛸 <strong>${esc(origin.name)}</strong> → <strong>${esc(destSite.name)}</strong>: `
-    + `<strong class="big">${result.totalBurns}</strong> burns over `
-    + `<strong>${turn}</strong> turn${turn === 1 ? '' : 's'}.`
+    + `<strong class="big">${result.totalBurns}</strong> burn${result.totalBurns === 1 ? '' : 's'} over `
+    + `<strong>${turns}</strong> turn${turns === 1 ? '' : 's'} `
+    + `(thrust ${thrust}).`
   );
   return true;
 }

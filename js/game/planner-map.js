@@ -134,14 +134,30 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
 
   // Edges are strings "from:to"; keep them all now that decoratives
   // are back in the graph.
+  // Edges come back as flat [a, b] tuples for the renderer; we also
+  // build (a) the raw directional edgeLabels map (preserved AS-IS;
+  // these are direction tags like '0' / '1' / '2', NOT burn costs,
+  // and the planner ported in planner-nav.js needs them to handle
+  // Hohmann pivots correctly) and (b) a neighbours adjacency map.
   const edges = [];
+  const neighbors = new Map();
+  const addNbr = (a, b) => {
+    if (!neighbors.has(a)) neighbors.set(a, new Set());
+    neighbors.get(a).add(b);
+  };
   for (const eStr of raw.edges || []) {
     const [a, b] = eStr.split(':');
     if (!a || !b) continue;
-    const dvA = raw.edgeLabels?.[a]?.[b];
-    const dvB = raw.edgeLabels?.[b]?.[a];
-    const dv = Number(dvA ?? dvB ?? 1) || 1;
-    edges.push([a, b, dv]);
+    edges.push([a, b]);
+    addNbr(a, b);
+    addNbr(b, a);
+  }
+  const edgeLabels = {};
+  for (const a in (raw.edgeLabels || {})) {
+    const row = raw.edgeLabels[a];
+    if (!row || typeof row !== 'object') continue;
+    edgeLabels[a] = {};
+    for (const b in row) edgeLabels[a][b] = String(row[b]);
   }
 
   // Synthetic bodies the planner doesn't carry: the Sun (anchors
@@ -171,7 +187,12 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
   // full straight-segment graph for shortest-path math.
   const { chains, straightEdges } = buildChains(sites, edges, byId);
 
-  _cache = { sites, edges, byId, chains, straightEdges, mode: 'classic' };
+  _cache = {
+    sites, edges, byId, chains, straightEdges,
+    edgeLabels,   // raw direction labels for Hohmann pivots
+    neighbors,    // Map<id, Set<id>> for the ported planner
+    mode: 'classic',
+  };
   return _cache;
 }
 
