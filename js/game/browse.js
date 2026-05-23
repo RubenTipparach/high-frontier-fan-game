@@ -10,7 +10,7 @@ import { loadPlannerMap } from './planner-map.js';
 import { planRoute } from './planner-nav.js';
 import {
   consumeMove, refundMove, getTurn, getMovesRemaining, onTurnChange,
-  getEventForRoll, getSeasonForSlot, resetClock,
+  getEventForRoll, getSeasonForSlot, getSeason, resetClock,
 } from './turn-clock.js';
 import { triggerEndTurn, openTurnClockModal, buildDie, rollDie } from './turn-clock-ui.js';
 import {
@@ -1930,6 +1930,162 @@ function hazardRollModal(hazards) {
   });
 }
 
+// Rad-hardness threshold: a card on the stack survives the rad
+// zone iff its rad-hard >= the rolled d6. Cards that fail are
+// decommissioned to the player's hand. Per the HF4 idiom, the
+// active thruster's THRUST stat can skip the test entirely -
+// a fast / hot rocket outruns the radiation. Red-season raises
+// the bypass bar by 2 so the Sun is harder to dodge.
+const RAD_BYPASS_THRUST     = 6;
+const RAD_BYPASS_THRUST_RED = 8;
+function radBypassThreshold() {
+  let season = null;
+  try { season = getSeason(); } catch { season = null; }
+  return season && season.name === 'red' ? RAD_BYPASS_THRUST_RED : RAD_BYPASS_THRUST;
+}
+
+// Animated rad-hardness check modal. Different from the regular
+// hazard-roll modal in three ways:
+//   1. No aqua bypass - radiation can't be paid off.
+//   2. Cards in the stack are checked individually against the
+//      rolled d6 - rad-hard < d6 = decommissioned (sent to hand).
+//   3. Resolves to a list of card-ids to decommission, not a
+//      pass / fail flag.
+// One d6 per rad zone; the worst die across all zones is the
+// effective threshold per card (so two rad crossings = two
+// chances to lose a card). Confirm button arms once every die
+// has settled so the player has to acknowledge the outcome.
+function radHardnessRollModal(radHazards, stackCards) {
+  return new Promise((resolve) => {
+    document.querySelector('.rad-roll-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay rad-roll-overlay';
+    let settled = false;
+    let rolls = null;
+    let toDecommission = [];
+    const close = () => {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve({ rolls: rolls || [], decommission: toDecommission });
+    };
+    const onKey = (e) => {
+      if (e.key === 'Enter' && settled) { e.preventDefault(); close(); }
+    };
+    document.addEventListener('keydown', onKey);
+
+    // Pre-roll all dice so visual + log + decommission agree.
+    rolls = radHazards.map((h) => ({
+      site: h.site, glyph: h.glyph,
+      d6: 1 + Math.floor(Math.random() * 6),
+    }));
+
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel rad-roll-panel';
+    panel.innerHTML = `
+      <h3>☢ Rad-hardness check</h3>
+      <p class="muted rad-roll-sub">
+        Each rad zone rolls a d6. Cards whose rad-hard is
+        <strong>less than</strong> the highest roll are
+        decommissioned to your hand. Active thruster's thrust
+        couldn't outrun the radiation.
+      </p>
+      <ul class="rad-roll-dice"></ul>
+      <p class="rad-roll-result muted">Rolling…</p>
+      <ul class="rad-roll-cards"></ul>
+      <div class="turn-confirm-actions">
+        <button type="button" class="popup-btn primary rad-roll-confirm" disabled>
+          Confirm result
+        </button>
+      </div>
+    `;
+    const diceList = panel.querySelector('.rad-roll-dice');
+    const cardsList = panel.querySelector('.rad-roll-cards');
+    const resultLine = panel.querySelector('.rad-roll-result');
+    const confirmBtn = panel.querySelector('.rad-roll-confirm');
+
+    // Build a die row per rad zone.
+    const dieEls = rolls.map((r) => {
+      const li = document.createElement('li');
+      li.className = 'rad-roll-die-row';
+      li.innerHTML = `
+        <div class="rad-roll-site">
+          <span class="haz-glyph">${r.glyph}</span>
+          <strong>${esc(r.site.name)}</strong>
+        </div>
+        <div class="rad-roll-die-host"></div>
+      `;
+      diceList.appendChild(li);
+      const dieHost = li.querySelector('.rad-roll-die-host');
+      const die = buildDie(1);
+      dieHost.appendChild(die);
+      return die;
+    });
+
+    // Build the per-card rows: name + rad-hard. Decorated
+    // post-roll with safe / decommissioned tags.
+    const cardRowEls = stackCards.map((c) => {
+      const li = document.createElement('li');
+      li.className = 'rad-roll-card';
+      li.innerHTML = `
+        <span class="rad-roll-card-name">${esc(c.name)}</span>
+        <span class="rad-roll-card-rad">RAD <strong>${c.radHardness != null ? c.radHardness : '-'}</strong></span>
+        <span class="rad-roll-card-verdict muted">…</span>
+      `;
+      cardsList.appendChild(li);
+      return { el: li, card: c };
+    });
+    if (!cardRowEls.length) {
+      cardsList.innerHTML = '<li class="muted">Empty stack - nothing to test.</li>';
+    }
+
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+
+    Promise.all(rolls.map((r, i) => rollDie(dieEls[i], r.d6))).then(() => {
+      // Worst (highest) die across all rad zones is the
+      // effective threshold per card.
+      const worst = rolls.reduce((m, r) => Math.max(m, r.d6), 0);
+      let lost = 0;
+      for (const { el, card } of cardRowEls) {
+        const v = el.querySelector('.rad-roll-card-verdict');
+        const rh = card.radHardness != null ? card.radHardness : 0;
+        // Spec: d6 > rad-hard → decommission. So rad-hard >= d6
+        // survives. A card with rad-hard 5 survives a 5, fails
+        // a 6.
+        const failed = worst > rh;
+        if (failed) {
+          toDecommission.push(card.id);
+          lost++;
+          el.classList.add('is-decommissioned');
+          v.classList.remove('muted');
+          v.innerHTML = `<strong class="bad">✗ decommissioned</strong>`;
+        } else {
+          el.classList.add('is-safe');
+          v.classList.remove('muted');
+          v.innerHTML = `<strong class="ok">✓ safe</strong>`;
+        }
+      }
+      const dCount = rolls.length;
+      resultLine.classList.remove('muted');
+      if (!cardRowEls.length) {
+        resultLine.innerHTML = `${dCount} rad zone${dCount === 1 ? '' : 's'} rolled - nothing in stack.`;
+      } else if (lost > 0) {
+        resultLine.innerHTML = `Worst roll <strong>${worst}</strong>: `
+          + `<strong class="bad">${lost} card${lost === 1 ? '' : 's'} decommissioned</strong>.`;
+        confirmBtn.classList.add('rad-roll-confirm-bad');
+        confirmBtn.textContent = `Confirm - lose ${lost} card${lost === 1 ? '' : 's'}`;
+      } else {
+        resultLine.innerHTML = `Worst roll <strong>${worst}</strong>: `
+          + `<strong class="ok">stack survived intact</strong>.`;
+        confirmBtn.textContent = 'Confirm - continue';
+      }
+      settled = true;
+      confirmBtn.disabled = false;
+    });
+    confirmBtn.addEventListener('click', () => { if (settled) close(); });
+  });
+}
+
 // Small info modal used when the player tries to undo a hazardous
 // move. Single OK button; the lockout is informational only.
 function blockedUndoModal() {
@@ -3106,44 +3262,45 @@ async function moveRocket() {
     setStatus('Planned route has no current-turn segments.');
     return false;
   }
-  // Hazard pre-flight check. If the route crosses skull / radhaz /
-  // aerobrake nodes, force a player decision BEFORE consuming the
-  // move - paying or rolling locks out undo for the rest of the
-  // turn. Cancelling returns to the planning state with the
-  // move budget untouched.
+  // Hazard pre-flight check. Two flavours along a route:
+  //   - generic (☠ skull / 🪂 aerobrake) → aqua-payable, or
+  //     roll d6 (1 = rocket destroyed at that node)
+  //   - radiation (☢) → NOT payable; check the active thruster's
+  //     thrust against a season-based bypass threshold, else roll
+  //     d6 per zone and decommission any stack card whose
+  //     rad-hard is less than the highest roll
+  // Generic hazards prompt the pay/roll/cancel modal first; rad
+  // hazards run their own check afterwards (always - they can't
+  // be skipped by paying). Both, when actually resolved (paid OR
+  // rolled), lock undo for the rest of the turn.
   const hazards = routeHazards(turn1);
+  const radHazards     = hazards.filter((h) => h.site.type === 'radhaz');
+  const genericHazards = hazards.filter((h) => h.site.type !== 'radhaz');
   let hazardChoice = null;
-  if (hazards.length) {
-    hazardChoice = await hazardConfirmModal(hazards);
+  let lockUndo = false;
+  if (genericHazards.length) {
+    hazardChoice = await hazardConfirmModal(genericHazards);
     if (hazardChoice === 'cancel' || hazardChoice == null) {
       setStatus('Move cancelled - no aqua spent, no rolls made.');
       return false;
     }
     if (hazardChoice === 'pay') {
-      const cost = hazards.length * HAZARD_COST_PER;
+      const cost = genericHazards.length * HAZARD_COST_PER;
       if (!spendAqua(cost)) {
-        // Race-condition guard: the balance changed between modal
-        // open and confirm. Bail with a status line instead of
-        // silently leaving the player out-of-pocket.
         setStatus(`Need ${cost} aqua to bypass - balance only ${getAqua()}.`);
         return false;
       }
       logAction({
         type: 'hazard_pay',
         icon: '💎',
-        summary: `Paid ${cost} aqua to bypass ${hazards.length} hazard`
-          + `${hazards.length === 1 ? '' : 's'}`,
+        summary: `Paid ${cost} aqua to bypass ${genericHazards.length} hazard`
+          + `${genericHazards.length === 1 ? '' : 's'}`,
         undoable: false,
-        data: { cost, hazards: hazards.map((h) => h.site.id) },
+        data: { cost, hazards: genericHazards.map((h) => h.site.id) },
       });
+      lockUndo = true;
     } else if (hazardChoice === 'roll') {
-      // Animated dice modal - each hazard gets its own d6 that
-      // spins, settles, and reveals survived / critical. Player
-      // hits Confirm before the result applies. Any roll of 1
-      // = critical → rocket explodes at that hazard, halting
-      // the move; otherwise the move continues to the planned
-      // destination.
-      const rolls = await hazardRollModal(hazards);
+      const rolls = await hazardRollModal(genericHazards);
       for (const r of rolls) {
         const verdict = r.d6 === 1 ? '✗ critical (rolled 1)' : '✓ survived';
         logAction({
@@ -3154,11 +3311,9 @@ async function moveRocket() {
           data: { siteId: r.site.id, d6: r.d6 },
         });
       }
+      lockUndo = true;
       const firstFail = rolls.find((r) => r.d6 === 1);
       if (firstFail) {
-        // Move is committed - charge the move budget + lock undo,
-        // then animate the rocket up to the failed hazard and
-        // detonate.
         if (!consumeMove()) {
           setStatus('No moves left this turn - end turn to refresh.');
           return false;
@@ -3173,6 +3328,80 @@ async function moveRocket() {
       }
     }
   }
+  // Radiation check. Thrust > threshold bypasses the roll
+  // entirely; otherwise the player rolls a d6 per rad zone and
+  // any card with rad-hard < worst-roll is decommissioned to
+  // their hand. The check always runs when the route crosses
+  // rad zones - there's no "pay to skip" option.
+  if (radHazards.length) {
+    const thrStats = getActiveThrusterStats();
+    const thrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 0;
+    const threshold = radBypassThreshold();
+    if (thrust > threshold) {
+      logAction({
+        type: 'rad_bypass',
+        icon: '☢',
+        summary: `Thrust ${thrust} > ${threshold} - bypassed `
+          + `${radHazards.length} rad zone${radHazards.length === 1 ? '' : 's'} without rolling`,
+        undoable: false,
+        data: { thrust, threshold, sites: radHazards.map((h) => h.site.id) },
+      });
+    } else {
+      // Snapshot the stack so the modal's rad-hard list is
+      // stable across the roll animation.
+      const stackCards = getRocketStack()
+        .map((slot) => {
+          const card = PATENTS_BY_ID[slot.id]
+            || CREW.find((c) => c.id === slot.id) || null;
+          if (!card) return null;
+          return {
+            id: slot.id,
+            name: card.name,
+            radHardness: card.radHardness != null ? card.radHardness : 0,
+          };
+        })
+        .filter(Boolean);
+      const { rolls: radRolls, decommission } = await radHardnessRollModal(radHazards, stackCards);
+      for (const r of radRolls) {
+        logAction({
+          type: 'rad_roll',
+          icon: '☢',
+          summary: `☢ ${esc(r.site.name)} rad-d6=${r.d6}`,
+          undoable: false,
+          data: { siteId: r.site.id, d6: r.d6 },
+        });
+      }
+      lockUndo = true;
+      if (decommission && decommission.length) {
+        // Decommission from rocket → hand. Pull each card by id
+        // (the stack array shifts as we remove, so we find the
+        // index per iteration instead of caching). addToHand
+        // refuses if the card is already in hand or in rocket;
+        // since we just removed it from the stack, addToHand
+        // should succeed.
+        let lost = 0;
+        for (const cardId of decommission) {
+          const idx = getRocketStack().findIndex((s) => s.id === cardId);
+          if (idx < 0) continue;
+          rocketRemoveCard(idx);
+          const card = PATENTS_BY_ID[cardId]
+            || CREW.find((c) => c.id === cardId) || null;
+          if (card) {
+            const r = addToHand(card);
+            if (r && r.ok) lost++;
+          }
+        }
+        logAction({
+          type: 'rad_decommission',
+          icon: '☢',
+          summary: `☢ ${lost} card${lost === 1 ? '' : 's'} decommissioned to hand by radiation`,
+          undoable: false,
+          data: { decommission, count: lost },
+        });
+      }
+    }
+  }
+  if (lockUndo) setHazardousMove(true);
   if (!consumeMove()) {
     setStatus('No moves left this turn - end turn to refresh.');
     return false;
@@ -3212,23 +3441,22 @@ async function moveRocket() {
   // auto-cash any chits if we just landed at LEO. Each side-
   // effect appends to the mission log so the player can audit
   // (and undo) the whole sequence as one move.
-  // Hazardous moves (paid OR rolled) lock undo for the turn -
-  // both the log entry's undoable flag and a separate flag the
-  // undo button consults so the lockout dialog can explain WHY
-  // the move is sticky.
-  if (hazardChoice === 'pay' || hazardChoice === 'roll') {
-    setHazardousMove(true);
-  }
+  // Hazardous moves (paid generic, rolled generic, OR any rad
+  // resolution that touched the dice) lock undo for the turn -
+  // the lockout flag was already set above; here we just label
+  // the log entry and flip undoable to match.
   logAction({
     type: 'move',
     icon: '🛸',
     summary: hazardChoice === 'pay'
-      ? `Moved to ${arrivedName} (paid past ${hazards.length} hazard${hazards.length === 1 ? '' : 's'})`
+      ? `Moved to ${arrivedName} (paid past ${genericHazards.length} hazard${genericHazards.length === 1 ? '' : 's'})`
       : hazardChoice === 'roll'
-        ? `Moved to ${arrivedName} (rolled through ${hazards.length} hazard${hazards.length === 1 ? '' : 's'})`
-        : `Moved to ${arrivedName}`,
-    undoable: hazardChoice !== 'pay' && hazardChoice !== 'roll',
-    data: { siteId: newSiteId, zone: arrivedZone, hazardous: !!hazardChoice && hazardChoice !== 'cancel' },
+        ? `Moved to ${arrivedName} (rolled through ${genericHazards.length} hazard${genericHazards.length === 1 ? '' : 's'})`
+        : lockUndo
+          ? `Moved to ${arrivedName} (radiation crossed)`
+          : `Moved to ${arrivedName}`,
+    undoable: !lockUndo,
+    data: { siteId: newSiteId, zone: arrivedZone, hazardous: lockUndo },
   });
   if (willAwardChit) {
     awardChitForZone(arrivedZone, getTurn());
