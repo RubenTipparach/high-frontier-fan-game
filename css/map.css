@@ -354,7 +354,7 @@
   gap: 18px;
   margin: 12px 0 16px;
 }
-.prospect-die-host { width: 80px; height: 80px; display: flex; align-items: center; justify-content: center; }
+.prospect-die-host { width: 100px; height: 100px; display: flex; align-items: center; justify-content: center; }
 .prospect-roll-vs { font-size: 22px; color: var(--ink-dim); font-weight: 700; }
 .prospect-target {
   display: flex;
@@ -616,13 +616,15 @@
 }
 
 /* 3D die. Cube w/ 6 faces; .die-cube transforms to face the
-   value via data-value. Rolling state tumbles for 700 ms before
-   landing on the value. Each face uses a hex glyph so we don't
-   have to draw pips. */
+   value via data-value. Rolling state tumbles for 700ms before
+   landing on the value. Each face is a 3x3 grid of pip slots;
+   pip divs render as circular dots in the canonical d6 layout
+   (see FACE_PIPS in turn-clock-ui.js). Bumped to 88px so the
+   die reads as a proper tabletop chit, not a tiny chip. */
 .die-3d {
-  width: 56px;
-  height: 56px;
-  perspective: 240px;
+  width: 88px;
+  height: 88px;
+  perspective: 360px;
 }
 .die-cube {
   position: relative;
@@ -634,23 +636,42 @@
 .die-3d .face {
   position: absolute;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(160deg, #f3f4f6, #94a3b8);
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows:    repeat(3, 1fr);
+  padding: 12%;
+  gap: 0;
+  background: linear-gradient(160deg, #fafafa, #cbd5e1);
   border: 1px solid #475569;
-  border-radius: 8px;
-  color: #0c0a16;
-  font-size: 38px;
-  line-height: 1;
+  border-radius: 12px;
+  box-shadow: inset 0 -2px 4px rgba(0, 0, 0, 0.12);
 }
-.die-3d .face span { display: block; line-height: 1; }
-.die-3d .face.f1 { transform: translateZ(28px); }
-.die-3d .face.f6 { transform: rotateY(180deg) translateZ(28px); }
-.die-3d .face.f3 { transform: rotateY( 90deg) translateZ(28px); }
-.die-3d .face.f4 { transform: rotateY(-90deg) translateZ(28px); }
-.die-3d .face.f5 { transform: rotateX( 90deg) translateZ(28px); }
-.die-3d .face.f2 { transform: rotateX(-90deg) translateZ(28px); }
+.die-3d .face .pip {
+  display: block;
+  width: 60%;
+  height: 60%;
+  margin: auto;
+  background: radial-gradient(circle at 35% 30%, #1f2937, #0c0a16 70%);
+  border-radius: 50%;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.25);
+}
+/* Position each pip on the 3x3 grid via its canonical index
+   (top-left=1, centre=5, bottom-right=9). */
+.die-3d .face .pip-1 { grid-column: 1; grid-row: 1; }
+.die-3d .face .pip-2 { grid-column: 2; grid-row: 1; }
+.die-3d .face .pip-3 { grid-column: 3; grid-row: 1; }
+.die-3d .face .pip-4 { grid-column: 1; grid-row: 2; }
+.die-3d .face .pip-5 { grid-column: 2; grid-row: 2; }
+.die-3d .face .pip-6 { grid-column: 3; grid-row: 2; }
+.die-3d .face .pip-7 { grid-column: 1; grid-row: 3; }
+.die-3d .face .pip-8 { grid-column: 2; grid-row: 3; }
+.die-3d .face .pip-9 { grid-column: 3; grid-row: 3; }
+.die-3d .face.f1 { transform: translateZ(44px); }
+.die-3d .face.f6 { transform: rotateY(180deg) translateZ(44px); }
+.die-3d .face.f3 { transform: rotateY( 90deg) translateZ(44px); }
+.die-3d .face.f4 { transform: rotateY(-90deg) translateZ(44px); }
+.die-3d .face.f5 { transform: rotateX( 90deg) translateZ(44px); }
+.die-3d .face.f2 { transform: rotateX(-90deg) translateZ(44px); }
 .die-3d[data-value="1"] .die-cube { transform: rotateX(  0deg) rotateY(  0deg); }
 .die-3d[data-value="6"] .die-cube { transform: rotateX(  0deg) rotateY(180deg); }
 .die-3d[data-value="3"] .die-cube { transform: rotateX(  0deg) rotateY(-90deg); }

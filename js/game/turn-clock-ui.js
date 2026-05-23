@@ -220,11 +220,26 @@ function tweenPointer(pointer, fromSlot, toSlot, durationMs = 650) {
 }
 
 // 3D CSS die. Six faces (cube), rotated to land on the requested
-// pip count. The CSS `.die-3d.rolling` runs a quick tumble before
-// settling on .face-N - see map.css. Tapping the die pops the
-// event legend so the player can look up what each pip would
-// fire (Inspiration / Glitch / Pad Explosion / season-dependent
-// 5-6 outcomes).
+// pip count. Each face is a 3x3 grid; pips are circular divs
+// placed on canonical d6 positions (1=centre, 2=opposite corners,
+// 3=diagonal, 4=corners, 5=corners+centre, 6=two columns of 3).
+// The CSS .die-3d.rolling tumbles for ~700ms then settles via
+// .die-3d[data-value]. Tapping the die pops the event legend.
+// Pip indices use a 3x3 grid:
+//   1 2 3
+//   4 5 6
+//   7 8 9
+const FACE_PIPS = {
+  1: [5],
+  2: [3, 7],
+  3: [1, 5, 9],
+  4: [1, 3, 7, 9],
+  5: [1, 3, 5, 7, 9],
+  6: [1, 3, 4, 6, 7, 9],
+};
+function pipHtmlFor(value) {
+  return FACE_PIPS[value].map((p) => `<span class="pip pip-${p}"></span>`).join('');
+}
 export function buildDie(value) {
   const wrap = document.createElement('div');
   wrap.className = 'die-3d';
@@ -234,12 +249,12 @@ export function buildDie(value) {
   wrap.title = 'Tap to see what each pip does';
   wrap.innerHTML = `
     <div class="die-cube">
-      <div class="face f1"><span>⚀</span></div>
-      <div class="face f2"><span>⚁</span></div>
-      <div class="face f3"><span>⚂</span></div>
-      <div class="face f4"><span>⚃</span></div>
-      <div class="face f5"><span>⚄</span></div>
-      <div class="face f6"><span>⚅</span></div>
+      <div class="face f1">${pipHtmlFor(1)}</div>
+      <div class="face f2">${pipHtmlFor(2)}</div>
+      <div class="face f3">${pipHtmlFor(3)}</div>
+      <div class="face f4">${pipHtmlFor(4)}</div>
+      <div class="face f5">${pipHtmlFor(5)}</div>
+      <div class="face f6">${pipHtmlFor(6)}</div>
     </div>
   `;
   const open = () => openEventLegend();
