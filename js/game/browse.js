@@ -1763,6 +1763,10 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
 
   const close = () => {
     if (raf) cancelAnimationFrame(raf);
+    // Defensive - drops were appended to a child of the overlay
+    // so they vanish with overlay.remove(), but null out the
+    // array so a stale rAF can't touch detached nodes.
+    activeDrops.length = 0;
     overlay.remove();
     document.removeEventListener('keydown', onKey);
   };
@@ -1785,6 +1789,11 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
             <rect x="20" y="10" width="80" height="200" rx="14" ry="14" />
           </clipPath>
         </defs>
+        <!-- Falling droplet + splash layer. Sits ABOVE the water
+             but inside the clip so the droplets disappear at the
+             rim. JS spawns the droplet + splash <path>s during
+             the fill animation. -->
+        <g class="tank-drops" clip-path="url(#tank-clip)"></g>
         <!-- Water level. y + height are recomputed on each frame; the
              reference height (200) corresponds to 100% full. -->
         <g clip-path="url(#tank-clip)">
@@ -1825,15 +1834,92 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
     ticksG.appendChild(line);
   }
 
+  // Current water surface y (svg coord). Drops use this to know
+  // when they've hit the surface. setLevel writes it each frame.
+  let _surfaceY = 210;
   function setLevel(level) {
     const clamped = Math.max(0, Math.min(cap, level));
     const frac = cap > 0 ? clamped / cap : 0;
     const h    = frac * 200;
+    _surfaceY  = 210 - h;
     waterRect.setAttribute('y', String(210 - h));
     waterRect.setAttribute('height', String(h));
     foamRect.setAttribute('y',  String(210 - h - 3));
     foamRect.setAttribute('height', String(Math.min(6, h)));
     nowReadout.textContent = String(Math.round(clamped));
+  }
+
+  // Falling-droplet animation. Spawns teardrop <path>s at the
+  // top of the tank and lets gravity drop them onto the water
+  // surface. On impact, a quick splash ring expands + fades.
+  // Active only during the fill animation (drops cycle off once
+  // the main tween settles).
+  const dropsLayer = panel.querySelector('.tank-drops');
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const activeDrops = [];
+  let lastSpawn = 0;
+  function spawnDrop(now) {
+    const x = 30 + Math.random() * 60;      // within the tank interior
+    const path = document.createElementNS(SVG_NS, 'path');
+    // Teardrop shape ~6px tall, 4px wide at base.
+    path.setAttribute('d', 'M 0 -3 C 2 0 2 3 0 3 C -2 3 -2 0 0 -3 Z');
+    path.setAttribute('fill', '#7dd3fc');
+    path.setAttribute('opacity', '0.9');
+    path.setAttribute('transform', `translate(${x.toFixed(1)} 14)`);
+    dropsLayer.appendChild(path);
+    activeDrops.push({
+      el: path, x, y: 14,
+      vy: 60 + Math.random() * 30,           // px/s initial speed
+      bornAt: now,
+    });
+  }
+  function spawnSplash(x, y) {
+    const ring = document.createElementNS(SVG_NS, 'circle');
+    ring.setAttribute('cx', String(x.toFixed(1)));
+    ring.setAttribute('cy', String(y.toFixed(1)));
+    ring.setAttribute('r', '1');
+    ring.setAttribute('fill', 'none');
+    ring.setAttribute('stroke', '#bae6fd');
+    ring.setAttribute('stroke-width', '1.2');
+    ring.setAttribute('opacity', '0.85');
+    dropsLayer.appendChild(ring);
+    const t0 = performance.now();
+    const splashTick = (now) => {
+      const t = Math.min(1, (now - t0) / 350);
+      const r = 1 + t * 6;
+      const op = 0.85 * (1 - t);
+      ring.setAttribute('r', String(r.toFixed(2)));
+      ring.setAttribute('opacity', String(op.toFixed(2)));
+      if (t < 1) requestAnimationFrame(splashTick);
+      else ring.remove();
+    };
+    requestAnimationFrame(splashTick);
+  }
+  function stepDrops(now, dtMs) {
+    // Maybe spawn one. Cadence ~110ms; only while the main tween
+    // is still running so drops stop with the fill.
+    if (animating && now - lastSpawn > 110) {
+      spawnDrop(now);
+      lastSpawn = now;
+    }
+    for (let i = activeDrops.length - 1; i >= 0; i--) {
+      const d = activeDrops[i];
+      const dts = dtMs / 1000;
+      d.vy += 220 * dts;        // gravity (px/s^2)
+      d.y  += d.vy * dts;
+      // Landed on the water surface? Spawn splash + remove drop.
+      if (d.y >= _surfaceY - 1) {
+        spawnSplash(d.x, _surfaceY);
+        d.el.remove();
+        activeDrops.splice(i, 1);
+        continue;
+      }
+      d.el.setAttribute('transform', `translate(${d.x.toFixed(1)} ${d.y.toFixed(1)})`);
+    }
+  }
+  function clearDrops() {
+    for (const d of activeDrops) d.el.remove();
+    activeDrops.length = 0;
   }
 
   // Initial position.
@@ -1846,10 +1932,13 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
   const onTap = (e) => {
     if (e.target.classList.contains('modal-x')) return;
     if (animating) {
-      // Skip animation - snap to final, don't close yet.
+      // Skip animation - snap to final, don't close yet. Clear
+      // in-flight droplets too so they don't keep raining after
+      // the snap.
       if (raf) cancelAnimationFrame(raf);
       animating = false;
       setLevel(tankNow);
+      clearDrops();
       finalReached = true;
       return;
     }
@@ -1861,23 +1950,37 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
 
-  // Animate from fromW -> tankNow.
+  // Animate from fromW -> tankNow. The droplet stepper runs on
+  // the same rAF tick so the visual stays in sync; once the
+  // fill settles the loop keeps going briefly to let in-flight
+  // drops land before stopping.
   if (fromW !== tankNow) {
     animating = true;
     const durationMs = 1100;
     const t0 = performance.now();
+    let lastTick = t0;
     const step = (now) => {
+      const dt = now - lastTick;
+      lastTick = now;
       const t = Math.min(1, (now - t0) / durationMs);
       const eased = 1 - Math.pow(1 - t, 3);  // ease-out cubic
       const v = fromW + (tankNow - fromW) * eased;
       setLevel(v);
-      if (t < 1) raf = requestAnimationFrame(step);
-      else { animating = false; finalReached = true; raf = 0; }
+      if (t >= 1) { animating = false; finalReached = true; }
+      stepDrops(now, dt);
+      if (t < 1 || activeDrops.length > 0) {
+        raf = requestAnimationFrame(step);
+      } else {
+        raf = 0;
+      }
     };
     raf = requestAnimationFrame(step);
   } else {
     finalReached = true;
   }
+  // Note: close() already nulls activeDrops + removes the
+  // overlay, so any in-flight drops vanish when the user
+  // dismisses mid-animation.
 }
 
 // Read the prospector's ISRU rating off the active face's
