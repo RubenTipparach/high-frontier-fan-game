@@ -21,24 +21,14 @@
     />
   </head>
   <body>
-    <header class="topbar">
-      <div class="brand">
-        <span class="brand-mark" aria-hidden="true">☉</span>
-        <h1>High Frontier</h1>
-        <span class="brand-sub">fan game · stage 1</span>
-      </div>
-      <div class="topbar-actions">
-        <button id="btn-browse" title="Sandbox: explore the map and build rockets from the patent deck">Sandbox</button>
-        <button id="btn-multiplayer" title="Multiplayer: lobby + games + global chat">Multiplayer</button>
-        <button id="btn-fullscreen" title="Toggle fullscreen" aria-label="Toggle fullscreen">⛶</button>
-        <span id="server-status" class="server-status" title="API connectivity">…</span>
-        <div id="profile-pill" class="profile-pill hidden">
-          <span id="profile-name"></span>
-          <button id="btn-account" title="Account menu">▾</button>
-        </div>
-        <button id="btn-signin" class="primary hidden">Sign in</button>
-      </div>
-    </header>
+    <!--
+      Top-level chrome lives in a hamburger-triggered modal now (see
+      #main-menu-modal below) so the playfield can use the full
+      viewport. The ☰ FAB stays pinned at top-left to summon the
+      modal from any view.
+    -->
+    <button id="btn-main-menu" class="main-menu-fab" type="button"
+      title="Menu - switch view, account, fullscreen" aria-label="Open menu">☰</button>
 
     <main id="main">
       <!--
@@ -341,6 +331,44 @@
         <button id="btn-copy-device-code">Copy</button>
       </div>
       <button id="btn-signout" class="danger">Sign out</button>
+    </div>
+
+    <!--
+      Main menu modal. Replaces the old topbar - same button IDs so
+      every existing handler in js/main.js keeps working. Opened by
+      the ☰ FAB at top-left; backdrop click or Escape closes.
+    -->
+    <div id="main-menu-modal" class="main-menu-overlay hidden"
+      role="dialog" aria-modal="true" aria-labelledby="main-menu-title">
+      <div class="main-menu-panel">
+        <div class="main-menu-header">
+          <div class="brand">
+            <span class="brand-mark" aria-hidden="true">☉</span>
+            <h1 id="main-menu-title">High Frontier</h1>
+          </div>
+          <button id="btn-main-menu-close" class="modal-x" type="button"
+            aria-label="Close menu" title="Close (Esc)">×</button>
+        </div>
+        <div class="main-menu-section">
+          <h2 class="main-menu-heading">View</h2>
+          <div class="main-menu-row">
+            <button id="btn-browse" title="Sandbox: explore the map and build rockets from the patent deck">🗺 Sandbox</button>
+            <button id="btn-multiplayer" title="Multiplayer: lobby + games + global chat">🛰 Multiplayer</button>
+            <button id="btn-fullscreen" title="Toggle fullscreen" aria-label="Toggle fullscreen">⛶ Fullscreen</button>
+          </div>
+        </div>
+        <div class="main-menu-section">
+          <h2 class="main-menu-heading">Profile</h2>
+          <div class="main-menu-row main-menu-profile-row">
+            <div id="profile-pill" class="profile-pill hidden">
+              <span id="profile-name"></span>
+              <button id="btn-account" title="Account menu">▾</button>
+            </div>
+            <button id="btn-signin" class="primary hidden">Sign in</button>
+            <span id="server-status" class="server-status" title="API connectivity">…</span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!--

@@ -49,7 +49,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 12px;
+  /* Left padding clears the ☰ FAB at top:10 left:12 (38px wide)
+     so the turn-controls don't render under it. */
+  padding: 8px 12px 8px 62px;
   background: rgba(15, 16, 35, 0.85);
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
@@ -1548,7 +1550,7 @@ body:has(#view-browse:not(.hidden)) #main {
 .browse-shell {
   position: relative;
   width: 100%;
-  height: calc(100vh - 56px);
+  height: 100vh;
   min-height: 480px;
   background: #03020a;
   overflow: hidden;

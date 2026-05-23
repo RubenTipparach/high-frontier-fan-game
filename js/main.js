@@ -105,9 +105,11 @@ function initBrowseButton() {
     });
   }
 
-  // Topbar fullscreen toggle. Uses the same browser API as the
+  // Menu fullscreen toggle. Uses the same browser API as the
   // map-toolbar button; this one promotes the whole page so the
-  // sidepanel + hand strip come along for the ride.
+  // sidepanel + hand strip come along for the ride. Label
+  // includes "Fullscreen" so the menu reads as a verb row;
+  // fullscreenchange flips the glyph between enter / exit.
   const fsBtn = document.getElementById('btn-fullscreen');
   if (fsBtn) {
     fsBtn.addEventListener('click', () => {
@@ -118,8 +120,47 @@ function initBrowseButton() {
       }
     });
     document.addEventListener('fullscreenchange', () => {
-      fsBtn.textContent = document.fullscreenElement ? '⤬' : '⛶';
+      fsBtn.textContent = document.fullscreenElement
+        ? '⤬ Exit fullscreen'
+        : '⛶ Fullscreen';
     });
+  }
+}
+
+// Hamburger menu wiring. The modal carries the buttons formerly
+// pinned to the topbar; opening it is a single ☰ tap. Picking
+// Sandbox / Multiplayer / Sign in auto-closes so the player
+// isn't stuck behind a backdrop they have to dismiss before
+// using the view they just chose.
+function initMainMenu() {
+  const fab     = document.getElementById('btn-main-menu');
+  const overlay = document.getElementById('main-menu-modal');
+  const closeBtn = document.getElementById('btn-main-menu-close');
+  if (!fab || !overlay) return;
+  const open = () => {
+    overlay.classList.remove('hidden');
+    document.addEventListener('keydown', onKey);
+  };
+  const close = () => {
+    overlay.classList.add('hidden');
+    document.removeEventListener('keydown', onKey);
+    // Tear down any open account popover too so it doesn't get
+    // stranded over an empty backdrop.
+    const acct = document.getElementById('account-menu');
+    if (acct && !acct.classList.contains('hidden')) acct.classList.add('hidden');
+  };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  fab.addEventListener('click', () => {
+    if (overlay.classList.contains('hidden')) open(); else close();
+  });
+  closeBtn?.addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  // Auto-close on a view-switching action - same idiom as any
+  // off-canvas menu. Fullscreen + account-menu stay open because
+  // the user usually wants to flip a setting and keep browsing.
+  for (const id of ['btn-browse', 'btn-multiplayer', 'btn-signin']) {
+    const b = document.getElementById(id);
+    if (b) b.addEventListener('click', close);
   }
 }
 
@@ -241,6 +282,7 @@ async function boot() {
   initLobby({ onShowView: showView, onToast: toast });
   initInvites({ onToast: toast });
   initBrowseButton();
+  initMainMenu();
   onProfileChange(reflectProfile);
 
   await updateServerStatus();

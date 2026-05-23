@@ -82,26 +82,137 @@ code {
 .error { color: var(--bad); min-height: 1.2em; font-size: 13px; }
 .grow { flex: 1 1 auto; }
 
-/* ===== Top bar ===== */
+/* ===== Top bar (legacy) =====
+   The old topbar is gone - chrome moved into #main-menu-modal,
+   summoned by the ☰ FAB. The .brand styles below still apply
+   inside the modal's header so the wordmark reads consistent. */
 
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--border);
-  background: rgba(7, 6, 15, 0.9);
-  backdrop-filter: blur(4px);
-  position: sticky; top: 0; z-index: 10;
-}
 .brand { display: flex; align-items: baseline; gap: 10px; }
 .brand h1 {
   margin: 0; font-size: 18px; letter-spacing: 0.5px; color: var(--accent);
 }
 .brand-mark { font-size: 22px; color: var(--warm); line-height: 1; }
-.brand-sub { font-size: 11px; color: var(--ink-mute); text-transform: uppercase; letter-spacing: 1.5px; }
 
-.topbar-actions { display: flex; align-items: center; gap: 10px; position: relative; }
+/* ===== Main menu FAB + modal ===== */
+
+.main-menu-fab {
+  position: fixed;
+  top: 10px;
+  left: 12px;
+  z-index: 90;
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  background: rgba(15, 16, 35, 0.85);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+  transition: background 0.15s, border-color 0.15s;
+}
+.main-menu-fab:hover {
+  background: var(--accent);
+  color: #062136;
+  border-color: var(--accent-2);
+}
+
+.main-menu-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
+  z-index: 100;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 64px 16px 16px;
+}
+.main-menu-overlay.hidden { display: none; }
+.main-menu-panel {
+  position: relative;
+  width: min(440px, 96vw);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 20px 20px;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);
+}
+.main-menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.main-menu-header .modal-x {
+  position: static;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: rgba(15, 16, 35, 0.6);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.main-menu-header .modal-x:hover {
+  background: var(--accent);
+  color: #062136;
+  border-color: var(--accent-2);
+}
+.main-menu-section {
+  margin-top: 14px;
+}
+.main-menu-section:first-of-type { margin-top: 0; }
+.main-menu-heading {
+  margin: 0 0 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--ink-mute);
+  font-weight: 600;
+}
+.main-menu-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.main-menu-row button {
+  flex: 1 1 auto;
+  min-width: 120px;
+  font-size: 13px;
+  padding: 8px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: center;
+}
+.main-menu-row button:hover {
+  background: var(--accent);
+  color: #062136;
+  border-color: var(--accent-2);
+}
+.main-menu-row button.primary {
+  background: linear-gradient(180deg, #38bdf8, #0284c7);
+  color: #062136;
+  border-color: #075985;
+  font-weight: 700;
+}
+.main-menu-profile-row { gap: 12px; }
+.main-menu-profile-row .profile-pill { flex: 0 0 auto; }
+.main-menu-profile-row .server-status {
+  margin-left: auto;
+  font-size: 11px;
+}
+
 .server-status {
   font-size: 11px; color: var(--ink-mute);
   text-transform: uppercase; letter-spacing: 1px;
@@ -308,13 +419,17 @@ label.checkbox input { accent-color: var(--accent-2); }
 
 .popover {
   position: fixed;
-  top: 56px; right: 20px;
+  /* Anchored just inside the main-menu modal's right edge so the
+     account popover reads as belonging to the profile pill that
+     opened it. z-index > the modal so it doesn't get hidden
+     behind the modal panel when summoned from inside it. */
+  top: 110px; right: calc(50% - 200px);
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 14px;
   min-width: 240px;
-  z-index: 40;
+  z-index: 110;
   box-shadow: 0 6px 30px rgba(0,0,0,0.5);
 }
 .popover h3 { margin: 0 0 10px; color: var(--accent); font-size: 13px; }
