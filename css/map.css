@@ -977,6 +977,38 @@
   user-select: all;
   -webkit-user-select: all;
 }
+/* Site ISRU readout: the gating number for both prospecting and
+   refining. Matches the card-prop-isru chip's cyan styling so the
+   player reads "this number is the same idiom as the rig number
+   on cards". */
+.map-popup .t-isru {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  margin: 0 0 8px;
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.55);
+  border-radius: 5px;
+  font-size: 11px;
+  cursor: help;
+}
+.map-popup .t-isru strong {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #7dd3fc;
+}
+.map-popup .t-isru b {
+  font-size: 14px;
+  font-weight: 800;
+  color: #e0f2fe;
+}
+.map-popup .t-isru em {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--ink-mute);
+}
 /* Tag chips below the meta row. Season chip uses the synodic
    palette (matching the comet outlines on the map) so the player
    reads "you need the blue apparition for this site" without

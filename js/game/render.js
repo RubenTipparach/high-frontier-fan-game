@@ -2418,6 +2418,23 @@ export class MapRenderer {
       }
       el.appendChild(tags);
     }
+    // Site ISRU number. The leading integer of siteSize ("4C" -> 4)
+    // is the gating value for BOTH the prospect roll (1d6 must be
+    // <= this) and the refining yield (gain = N - prospector ISRU
+    // + 1). Surface it explicitly so the player doesn't have to
+    // mentally parse the siteSize string in the meta row.
+    const sizeStr = String(site.siteSize || '');
+    const isruMatch = sizeStr.match(/^(\d+)/);
+    if (isruMatch) {
+      const isru = document.createElement('div');
+      isru.className = 't-isru';
+      isru.innerHTML = `<strong>ISRU</strong><b>${isruMatch[1]}</b>`
+        + `<em>≤ for refuel / prospect</em>`;
+      isru.title = `Site number ${isruMatch[1]}. A prospector needs `
+        + `ISRU ≤ ${isruMatch[1]} to prospect or refuel here. `
+        + `Refining yield = ${isruMatch[1]} - ISRU + 1.`;
+      el.appendChild(isru);
+    }
     // Node id2 - a human-friendly stable reference generated at
     // data-load time (see planner-map.js#makeRefId). Reads as
     // e.g. "comet-borrelly", "dresda", "lag-leo", "burn-3a2b9".
