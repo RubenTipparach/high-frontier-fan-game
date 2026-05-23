@@ -695,6 +695,92 @@
   color: #f87171;
 }
 
+/* Hazard roll modal. One 3D die per hazard, all spinning in
+   parallel. Once every die settles the verdict tags light up
+   (green safe / red critical) and the player hits Confirm to
+   apply. z-index above the hazard-confirm so it can stack
+   over it cleanly. */
+.hazard-roll-overlay { z-index: 90; }
+.hazard-roll-panel {
+  width: min(480px, 96vw);
+}
+.hazard-roll-panel h3 { color: #fbbf24; }
+.hazard-roll-sub { margin: 0 0 12px; font-size: 12px; }
+.hazard-roll-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+  max-height: 50vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hazard-roll-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.hazard-roll-row.is-critical {
+  background: rgba(127, 29, 29, 0.35);
+  border-color: #b91c1c;
+}
+.hazard-roll-row.is-safe {
+  background: rgba(20, 83, 45, 0.30);
+  border-color: #16a34a;
+}
+.hazard-roll-site {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  min-width: 0;
+}
+.hazard-roll-site .haz-glyph {
+  font-size: 18px;
+  line-height: 1;
+}
+.hazard-roll-site strong {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hazard-roll-site em { font-size: 11px; }
+.hazard-roll-die-host {
+  width: 46px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.hazard-roll-die-host .die-3d {
+  width: 40px;
+  height: 40px;
+}
+.hazard-roll-verdict {
+  font-size: 11px;
+  min-width: 78px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.hazard-roll-result {
+  margin: 0 0 12px;
+  text-align: center;
+  font-size: 13px;
+}
+.hazard-roll-confirm-bad {
+  background: linear-gradient(180deg, #ef4444, #b91c1c) !important;
+  color: #fff !important;
+  border-color: #7f1d1d !important;
+}
+
 /* Prospect roll modal. Shows the 3D die rolling against the
    site's prospect target. Stays mid-stack so the turn-confirm
    dialog (z80) can still cover it if needed. */

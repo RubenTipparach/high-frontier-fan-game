@@ -1801,8 +1801,8 @@ function hazardConfirmModal(hazards) {
           💎 Pay ${cost} aqua to bypass
         </button>
         <button type="button" class="popup-btn" data-act="roll"
-          title="Roll a d6 for each hazard. Cannot be undone.">
-          🎲 Roll ${n} d6 (no undo)
+          title="Roll a d6 for each hazard. 1 destroys the rocket. Cannot be undone.">
+          🎲 Roll ${n} d6 (1 = boom, no undo)
         </button>
         <button type="button" class="popup-btn" data-act="cancel"
           title="Return to planning; no move spent">
@@ -1817,6 +1817,116 @@ function hazardConfirmModal(hazards) {
     }
     overlay.appendChild(panel);
     mountOverlay(overlay);
+  });
+}
+
+// Animated hazard-roll modal. One 3D die per hazard, rolled in
+// parallel; once every die settles the player can confirm to
+// apply the result (any 1 = critical, rocket explodes at that
+// node). Cancel is intentionally absent - the player already
+// committed to rolling in the prior confirm; this modal just
+// reveals the dice.
+function hazardRollModal(hazards) {
+  return new Promise((resolve) => {
+    document.querySelector('.hazard-roll-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay hazard-roll-overlay';
+    let settled = false;
+    let rolls = null;
+    const close = () => {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(rolls || []);
+    };
+    const onKey = (e) => {
+      // Enter confirms once the dice have all landed - keeps
+      // the modal keyboard-friendly without letting the player
+      // skip past the suspense.
+      if (e.key === 'Enter' && settled) { e.preventDefault(); close(); }
+    };
+    document.addEventListener('keydown', onKey);
+
+    // Pre-roll every die's outcome so the visual + the logged
+    // result + the explosion decision all agree.
+    rolls = hazards.map((h) => ({
+      site: h.site, label: h.label, glyph: h.glyph,
+      d6: 1 + Math.floor(Math.random() * 6),
+    }));
+
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel hazard-roll-panel';
+    panel.innerHTML = `
+      <h3>🎲 Hazard rolls</h3>
+      <p class="muted hazard-roll-sub">
+        Each die rolls separately. Any <strong>1</strong>
+        destroys the rocket at that hazard.
+      </p>
+      <ul class="hazard-roll-list"></ul>
+      <p class="hazard-roll-result muted">Rolling…</p>
+      <div class="turn-confirm-actions">
+        <button type="button" class="popup-btn primary hazard-roll-confirm" disabled>
+          Confirm result
+        </button>
+      </div>
+    `;
+    const list = panel.querySelector('.hazard-roll-list');
+    const resultLine = panel.querySelector('.hazard-roll-result');
+    const confirmBtn = panel.querySelector('.hazard-roll-confirm');
+
+    // Build the rows + dice. Dice spin together; row gets
+    // `is-critical` / `is-safe` once its die settles so the
+    // colour band updates inline.
+    const rowEls = rolls.map((r) => {
+      const li = document.createElement('li');
+      li.className = 'hazard-roll-row';
+      li.innerHTML = `
+        <div class="hazard-roll-site">
+          <span class="haz-glyph">${r.glyph}</span>
+          <strong>${esc(r.site.name)}</strong>
+          <em class="muted">${esc(r.label)}</em>
+        </div>
+        <div class="hazard-roll-die-host"></div>
+        <div class="hazard-roll-verdict"></div>
+      `;
+      list.appendChild(li);
+      const dieHost = li.querySelector('.hazard-roll-die-host');
+      const verdict = li.querySelector('.hazard-roll-verdict');
+      const die = buildDie(1);
+      dieHost.appendChild(die);
+      return { row: li, die, verdict, roll: r };
+    });
+
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+
+    // Spin every die in parallel; once they all land, update
+    // each row's verdict + the summary line, and arm Confirm.
+    Promise.all(rowEls.map(({ die, roll }) => rollDie(die, roll.d6)))
+      .then(() => {
+        let criticalCount = 0;
+        for (const { row, verdict, roll } of rowEls) {
+          const isCrit = roll.d6 === 1;
+          if (isCrit) criticalCount++;
+          row.classList.add(isCrit ? 'is-critical' : 'is-safe');
+          verdict.innerHTML = isCrit
+            ? `<strong class="bad">✗ destroyed</strong>`
+            : `<strong class="ok">✓ survived</strong>`;
+        }
+        if (criticalCount > 0) {
+          resultLine.innerHTML = `<strong class="bad">💥 Rocket destroyed</strong> `
+            + `- ${criticalCount} critical roll${criticalCount === 1 ? '' : 's'}.`;
+          confirmBtn.textContent = 'Confirm - lose the rocket';
+          confirmBtn.classList.add('hazard-roll-confirm-bad');
+        } else {
+          resultLine.innerHTML = `<strong class="ok">All survived</strong> `
+            + `- continue to destination.`;
+          confirmBtn.textContent = 'Confirm - continue';
+        }
+        resultLine.classList.remove('muted');
+        settled = true;
+        confirmBtn.disabled = false;
+      });
+    confirmBtn.addEventListener('click', () => { if (settled) close(); });
   });
 }
 
@@ -3027,16 +3137,15 @@ async function moveRocket() {
         data: { cost, hazards: hazards.map((h) => h.site.id) },
       });
     } else if (hazardChoice === 'roll') {
-      // Roll 1d6 per hazard in route order. d6 >= 3 survives;
-      // d6 < 3 critically fails and the rocket explodes at that
-      // hazard - the move halts there, cards return to hand,
-      // fuel is lost.
-      const rolls = hazards.map((h) => ({
-        site: h.site, label: h.label, glyph: h.glyph,
-        d6: 1 + Math.floor(Math.random() * 6),
-      }));
+      // Animated dice modal - each hazard gets its own d6 that
+      // spins, settles, and reveals survived / critical. Player
+      // hits Confirm before the result applies. Any roll of 1
+      // = critical → rocket explodes at that hazard, halting
+      // the move; otherwise the move continues to the planned
+      // destination.
+      const rolls = await hazardRollModal(hazards);
       for (const r of rolls) {
-        const verdict = r.d6 >= 3 ? '✓ survived (≥ 3)' : '✗ critical (< 3)';
+        const verdict = r.d6 === 1 ? '✗ critical (rolled 1)' : '✓ survived';
         logAction({
           type: 'hazard_roll',
           icon: r.glyph,
@@ -3045,7 +3154,7 @@ async function moveRocket() {
           data: { siteId: r.site.id, d6: r.d6 },
         });
       }
-      const firstFail = rolls.find((r) => r.d6 < 3);
+      const firstFail = rolls.find((r) => r.d6 === 1);
       if (firstFail) {
         // Move is committed - charge the move budget + lock undo,
         // then animate the rocket up to the failed hazard and
