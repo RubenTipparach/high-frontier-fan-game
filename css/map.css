@@ -768,19 +768,22 @@ body:has(#view-browse:not(.hidden)) #main {
   overflow: visible;
 }
 .browse-sidepanel[data-active=""] ~ .sandbox-hand { right: 48px; }
-/* Patents pane is the wide one (min(620px, 80vw)); squish the
-   hand strip flush against its left edge so BOOST / Stack /
-   hand-cards stay on screen instead of hiding behind the open
-   library. No gap — the hand and panel share their edge so the
-   map area isn't sliced by an unused dead strip. */
-.browse-sidepanel[data-active="patents"] ~ .sandbox-hand {
-  right: min(620px, 80vw);
-}
-/* And tighten the default "any non-patents pane is open" case so
-   the hand sits flush against the 380 px panel too, not 8 px
-   away. The existing `transition: right` keeps the resize smooth. */
+/* IMPORTANT: the hand-offset selectors below MUST match the panel-
+   width selectors above on specificity, or they'll silently
+   desync. `:not([data-active=""])` adds an attribute selector to
+   the specificity count — so the generic "any pane open" rule
+   would beat a bare `[data-active="patents"]` rule and the hand
+   would only get pushed 380 px while the panel is actually
+   620 px wide (= ~240 px of overlap, which is the bug we keep
+   hitting). The fix: both rules use `:not([data-active=""])` to
+   tie specificity, and the patents rule is placed AFTER the
+   generic rule so source order picks the wider value when both
+   match. */
 .browse-sidepanel[data-active]:not([data-active=""]) ~ .sandbox-hand {
   right: 380px;
+}
+.browse-sidepanel[data-active="patents"]:not([data-active=""]) ~ .sandbox-hand {
+  right: min(620px, 80vw);
 }
 @media (max-width: 720px) {
   /* Phones: the hand strip takes the full bottom width. The
