@@ -8,7 +8,7 @@
 import { MapRenderer, LEO_ANCHOR } from './render.js';
 import { loadPlannerMap } from './planner-map.js';
 import { findPath } from './nav.js';
-import { consumeMove, getTurn } from './turn-clock.js';
+import { consumeMove, refundMove, getTurn, getMovesRemaining, onTurnChange } from './turn-clock.js';
 import { triggerEndTurn, openTurnClockModal } from './turn-clock-ui.js';
 import {
   getState as soloState, newGame as soloNewGame, abandonGame as soloAbandon,
@@ -671,7 +671,35 @@ function ensureMapShell(host) {
   host.querySelector('#turn-tracker').addEventListener('click', () => {
     openTurnClockModal();
   });
-  host.querySelector('#turn-move-rocket').addEventListener('click', () => {
+  // HF4: a turn is "operation, then move" OR "move, then operation"
+  // — never split around the move. So the move stays reversible right
+  // up until end-turn commits. The 🛸 button toggles between "Move"
+  // and "↩ Undo move" based on whether the per-turn move budget has
+  // been spent. End turn refills the budget, which calls back here
+  // via onTurnChange and resets the button to "Move".
+  const moveBtn = host.querySelector('#turn-move-rocket');
+  function refreshMoveButton() {
+    if (!moveBtn) return;
+    const remaining = getMovesRemaining();
+    if (remaining > 0) {
+      moveBtn.textContent = '🛸';
+      moveBtn.title = 'Move the rocket one step along its planned route';
+      moveBtn.setAttribute('aria-label', 'Move rocket');
+      moveBtn.dataset.state = 'move';
+    } else {
+      moveBtn.textContent = '↩ 🛸';
+      moveBtn.title = 'Undo move (operations can happen before OR after the move, not in the middle)';
+      moveBtn.setAttribute('aria-label', 'Undo move');
+      moveBtn.dataset.state = 'undo';
+    }
+  }
+  refreshMoveButton();
+  onTurnChange(refreshMoveButton);
+  moveBtn.addEventListener('click', () => {
+    if (moveBtn.dataset.state === 'undo') {
+      if (refundMove()) setStatus('🛸 Rocket move undone.');
+      return;
+    }
     // Stub for now — Stage 3's movement engine will actually walk
     // the rocket along its planned-route segments. Until then we
     // just spend the per-turn move budget so the end-turn confirm

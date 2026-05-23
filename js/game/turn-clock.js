@@ -126,6 +126,20 @@ export function consumeMove() {
   return true;
 }
 
+// Refund a previously-consumed move. Used by the toolbar's
+// 🛸 / ↩ toggle so the player can take it back before they end
+// the turn (HF4 lets you do your operation before OR after your
+// move — never in the middle — so the move is reversible right
+// up until end-turn commits the round). Returns false when nothing
+// to refund (move budget is already full).
+export function refundMove() {
+  if (_movesRemaining >= MOVES_PER_TURN) return false;
+  _movesRemaining = Math.min(MOVES_PER_TURN, _movesRemaining + 1);
+  persist();
+  notify();
+  return true;
+}
+
 export function onTurnChange(cb) {
   _listeners.push(cb);
   return () => { _listeners = _listeners.filter((x) => x !== cb); };

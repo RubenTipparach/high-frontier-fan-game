@@ -80,6 +80,15 @@
   font-weight: 700;
   border-color: #9a3412;
 }
+/* Move button in its "undo" state — a move has been queued this
+   turn and can still be taken back. Yellow distinguishes it from
+   the neutral default so the player notices the toggle. */
+.map-turn-controls #turn-move-rocket[data-state="undo"] {
+  background: linear-gradient(180deg, #facc15, #ca8a04);
+  color: #1f1502;
+  font-weight: 700;
+  border-color: #854d0e;
+}
 .map-turn-controls button:hover:not(:disabled) {
   background: var(--accent);
   color: #062136;
