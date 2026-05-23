@@ -692,6 +692,8 @@ function ensureMapShell(host) {
       <div class="map-route">
         <span id="route-status" class="muted">Tap a site to plan a route.</span>
         <button id="route-clear" hidden>Clear route</button>
+        <button id="game-settings" title="Game settings"
+          aria-label="Game settings">⚙</button>
         <button id="route-debug" title="Toggle debug panel"
           aria-label="Toggle debug panel">🔧</button>
         <button id="route-fullscreen" title="Toggle fullscreen map"
@@ -745,6 +747,14 @@ function ensureMapShell(host) {
     panel.classList.toggle('hidden');
     const open = !panel.classList.contains('hidden');
     if (_renderer) _renderer.setOption('debug', open);
+  });
+  // Global game-settings gear on the toolbar. Opens the same
+  // settings modal accessible from per-popup affordances; right
+  // now only route options live there but future settings (UI
+  // density, accessibility toggles, persistent dev flags) will
+  // land in the same modal.
+  host.querySelector('#game-settings').addEventListener('click', () => {
+    openGameSettingsModal();
   });
   // Turn clock + rocket-movement controls. End turn pops a confirm
   // when the player still has unspent budget; if they confirm and
@@ -2478,6 +2488,21 @@ function onSiteSelect(site) {
 // the planner uses (turns-first vs burns-first). Persisted via
 // setRoutePriority. onClose fires after the player picks so the
 // site popup can re-render its gear tooltip.
+// Top-level game-settings modal. Wraps the route-options chooser
+// and reserves room for any future sandbox settings (display
+// density, accessibility toggles, dev flags). Reachable from the
+// toolbar ⚙ button as well as inline gears scattered through
+// the popups; everything ends up here.
+function openGameSettingsModal() {
+  // For now the only setting block IS the route options; reuse
+  // the same modal so the player sees one familiar surface.
+  // When more settings land, this becomes the parent surface
+  // and route-options collapses into a section heading.
+  openRouteOptionsModal(() => {
+    if (_selectedId) refreshOpenSitePopup();
+  });
+}
+
 function openRouteOptionsModal(onClose) {
   document.querySelector('.route-options-overlay')?.remove();
   const overlay = document.createElement('div');
