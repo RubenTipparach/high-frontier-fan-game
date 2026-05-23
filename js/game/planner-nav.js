@@ -10,8 +10,16 @@
 // space {node, dir, bonus, burnsRemaining, wait, done}, with
 // Pareto-front dominance pruning. The optimization vector is
 // lexicographic over `metricPriority` (default
-// ['burns','turns','hazards','radHazards']) plus 'segments' as
+// ['turns','burns','hazards','radHazards']) plus 'segments' as
 // the final tiebreaker.
+//
+// NOTE on the default: the vendor's UI defaults to BURNS first
+// (water is precious in HF4) but for our sandbox the more
+// intuitive default is TURNS first - the burns-first ordering
+// happily takes you 16 hops through free Hohmann transfers to
+// save 1 water, which surprises players who clicked a node that
+// was literally adjacent to their rocket. Stage 3+ should expose
+// a UI knob for this; for now we ship the turns-first default.
 //
 // Hohmann pivot semantics (the bit our old nav.js missed): each
 // edge between Hohmann-marked nodes carries a *direction label*
@@ -123,7 +131,7 @@ function pathId(p) {
 export function buildPlanner(graph, {
   thrust = 4,
   solarSeason = 'red',
-  metricPriority = ['burns', 'turns', 'hazards', 'radHazards'],
+  metricPriority = ['turns', 'burns', 'hazards', 'radHazards'],
 } = {}) {
   const points = graph.byId;
   const edgeLabels = graph.edgeLabels || {};
