@@ -948,6 +948,11 @@ export class MapRenderer {
     this._drawLeoAnchorScreen(ctx);
     this._drawPlayerShipScreen(ctx);
     if (this._sandboxRocket) this._drawSandboxRocketScreen(ctx);
+    // Selection ring drawn LAST so nothing — labels, ships, hexes
+    // — paints over it. On mobile the in-hex orange/gold border is
+    // easy to miss, so we layer a thick bright yellow ring + soft
+    // halo just outside the selected node's body.
+    this._drawSelectionRingScreen(ctx);
     if (this._popupSite) this._positionSitePopup();
 
     // FPS book-keeping. The debug panel polls getFps(); we update
@@ -1655,6 +1660,59 @@ export class MapRenderer {
     ctx.strokeText('LEO', sx, labelY);
     ctx.fillStyle = '#fde047';
     ctx.fillText('LEO', sx, labelY);
+    ctx.restore();
+  }
+
+  // Top-layer selection halo. The hex / waypoint passes paint a
+  // subtle in-border highlight that's easy to miss on a phone, so
+  // we also draw a bright outer pulse ring here AFTER everything
+  // else — including labels and overlay sprites — has rendered.
+  // Hits any currently-selected route endpoint (the routed `from`
+  // hex is the player's "I just tapped this" target in browse.js).
+  _drawSelectionRingScreen(ctx) {
+    const ids = [];
+    if (this._routeFromId) ids.push(this._routeFromId);
+    if (this._routeToId)   ids.push(this._routeToId);
+    if (!ids.length || !this.data) return;
+    const eff = this.zoom * this.fitScale;
+    const { hostW, hostH } = this;
+    // Pulse 0..1 driven by the same anim clock the asteroid belt
+    // uses. Modulates ring radius + glow alpha so the highlight
+    // visibly moves — important on mobile where a static thin
+    // ring fades into the map's busy background.
+    const t = (this._animTime || 0) / 1000;
+    const pulse = (Math.sin(t * Math.PI * 1.6) + 1) * 0.5;
+    ctx.save();
+    for (const id of ids) {
+      const node = this.data.byId[id];
+      if (!node) continue;
+      const vis = TYPE_VIS[node.type] || TYPE_VIS.unknown;
+      if (vis.kind === 'none') continue;
+      const sx = this.pan.x + node.x * eff;
+      const sy = this.pan.y + node.y * eff;
+      if (sx < -60 || sx > hostW + 60 || sy < -60 || sy > hostH + 60) continue;
+      // Base radius: hex marker shrinks at low zoom (see hexS),
+      // so mirror that here for the ring to track the visible hex.
+      const hexS = Math.min(1, this.zoom / HEX_FULLSIZE_ZOOM);
+      const baseR = (vis.kind === 'hex' ? vis.r * hexS : vis.r);
+      const ringR = baseR + 8 + pulse * 4;
+      // Outer soft halo — pulsing yellow glow.
+      ctx.shadowBlur = 18;
+      ctx.shadowColor = `rgba(253, 224, 71, ${0.55 + pulse * 0.35})`;
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = `rgba(253, 224, 71, ${0.85 + pulse * 0.15})`;
+      ctx.beginPath();
+      ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
+      ctx.stroke();
+      // Inner crisp ring — solid orange so the selection reads even
+      // when the halo fades against a bright background body.
+      ctx.shadowBlur = 0;
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#f97316';
+      ctx.beginPath();
+      ctx.arc(sx, sy, baseR + 3, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     ctx.restore();
   }
 

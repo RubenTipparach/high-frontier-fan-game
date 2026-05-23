@@ -18,12 +18,6 @@ const PLANNER_JSON_URL = './vendor/hf-mission-planner/assets/data-hf4.json';
 // aerobrake / atmospheric / push booleans per site so the renderer
 // can decorate planner nodes with the right glyphs.
 const SITE_FLAGS_URL  = './data/site-flags.json';
-// Pre-computed by scripts/extract-waypoint-seasons.py. Maps
-// waypoint id -> 'red' | 'yellow' | 'blue'. Tags the lagrange /
-// burn waypoints that sit on the linear approach corridor leading
-// to a seasonal site (comet, Icarus, Phaethon, ...). Re-run the
-// script after a planner-data refresh.
-const WAYPOINT_SEASONS_URL = './data/waypoint-seasons.json';
 
 let _cache = null;
 
@@ -50,11 +44,9 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
     if (fr.ok) siteFlags = await fr.json();
   } catch { /* ignore */ }
 
-  let waypointSeasons = {};
-  try {
-    const sr = await fetch(WAYPOINT_SEASONS_URL);
-    if (sr.ok) waypointSeasons = await sr.json();
-  } catch { /* ignore */ }
+  // (waypoint-seasons.json fetch removed — see the comment in
+  // the per-point loop below for why the corridor propagation
+  // was disabled.)
 
   // Points -> sites array. The planner uses random-float string IDs;
   // we keep them as-is (they're stable across reloads of the same
@@ -74,13 +66,17 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
     // body group key so "Mars: Arsia Mons" can inherit any flags
     // recorded against the Mars group.
     const flags = lookupFlags(p.siteName, siteFlags);
-    // Waypoints don't carry siteSynodic in the planner JSON; we
-    // apply the pre-computed corridor tag from the extractor here
-    // so the renderer sees a uniform field on both real sites and
-    // their approach-corridor waypoints.
+    // Waypoint season propagation is disabled — the corridor
+    // boundaries the BFS produced didn't match the published
+    // board's seasonal painting on enough cards that the colours
+    // ended up misleading. Only the canonical site-level
+    // siteSynodic (comets + flagged seasonal asteroids like
+    // Icarus / Phaethon / …) is kept. The extractor + data file
+    // remain in the tree (scripts/extract-waypoint-seasons.py,
+    // data/waypoint-seasons.json) so we can revisit with a
+    // better heuristic later — just don't apply it here.
     const isWaypoint = rawType !== 'site';
-    const synodic = p.siteSynodic
-      || (isWaypoint ? (waypointSeasons[id] || null) : null);
+    const synodic = p.siteSynodic || null;
     sites.push({
       id,
       name: p.siteName || routingLabel(rawType),
