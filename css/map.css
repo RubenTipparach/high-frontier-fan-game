@@ -325,10 +325,14 @@
 }
 
 /* Tap popup: persistent variant of the tooltip that anchors to a
-   selected site and accepts pointer events so its action buttons
-   (Navigate to, close) are clickable. Renderer keeps `left/top`
-   in sync each frame; we anchor "above and centred" via transform
-   so the popup floats just over the hex. */
+   selected site and accepts pointer events ONLY on its action
+   buttons + close X. The body itself is pointer-events:none so a
+   tap on the popup's name / meta / id passes through to the canvas
+   underneath — otherwise the floating popup absorbs taps on sites
+   that happen to sit behind it, and the player gets stuck unable
+   to re-select. Renderer keeps `left/top` in sync each frame; we
+   anchor "above and centred" via transform so the popup floats
+   just over the hex. */
 .map-popup {
   position: absolute;
   transform: translate(-50%, calc(-100% - 14px));
@@ -340,6 +344,11 @@
   max-width: 280px;
   z-index: 6;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+}
+.map-popup .popup-actions,
+.map-popup .popup-actions .popup-btn,
+.map-popup .popup-close {
   pointer-events: auto;
 }
 .map-popup.hidden { display: none; }

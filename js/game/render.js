@@ -47,6 +47,21 @@ const HEX_FULLSIZE_ZOOM = 2.5;
 // the actual LEO node rather than floating off near Itokawa.
 export const LEO_ANCHOR = { x: 1193.6, y: 739.3 };
 
+// Short, stable, copy-friendly reference for a planner node id.
+// The upstream vendor data keys nodes by random floats like
+// "0.9483763498218554" — useless as something a player can quote
+// in a bug report. djb2-hash to a 7-char base36 string. Same input
+// always yields the same output, so it's still a valid stable id;
+// it just reads as "k3xq2pa" instead of a long decimal.
+export function shortRefId(id) {
+  const s = String(id == null ? '' : id);
+  let h = 5381 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  }
+  return h.toString(36).padStart(7, '0').slice(-7);
+}
+
 // True for the planner's LEO lagrange waypoint. The LEO node is
 // rendered larger than a normal lagrange because the sandbox
 // rocket (and eventually multiple players' rockets) park here.
@@ -1699,29 +1714,22 @@ export class MapRenderer {
       // so mirror that here for the ring to track the visible hex.
       const hexS = Math.min(1, this.zoom / HEX_FULLSIZE_ZOOM);
       const baseR = (vis.kind === 'hex' ? vis.r * hexS : vis.r);
-      // Generous outer ring — must be unmistakable on a phone where
-      // the hex itself is ~20-30 screen px and competing with hazard
-      // glyphs, edge lines, body halos. Pulse expands the radius
-      // and amps the halo alpha so the ring "breathes" — eye is
-      // pulled to a moving thing even in a busy scene.
-      const ringR = baseR + 14 + pulse * 6;
-      // Outer soft halo — pulsing yellow glow, thicker than the hex
-      // body's own borders so it stands out from a comet's synodic
-      // outline or a hazard's red.
-      ctx.shadowBlur = 24;
-      ctx.shadowColor = `rgba(253, 224, 71, ${0.7 + pulse * 0.25})`;
-      ctx.lineWidth = 6;
-      ctx.strokeStyle = `rgba(253, 224, 71, ${0.95})`;
+      // Two concentric rings drawn back-to-back so the selection
+      // is unmistakable even when (a) the popup covers the top
+      // half of the hex on mobile or (b) shadowBlur is silently
+      // dropped by some mobile GPU paths. No shadow on either ring
+      // for that reason.
+      // Outer ring — bright cyan-yellow, well outside the hex.
+      ctx.lineWidth = 5;
+      ctx.strokeStyle = '#fde047';
       ctx.beginPath();
-      ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
+      ctx.arc(sx, sy, baseR + 16 + pulse * 6, 0, Math.PI * 2);
       ctx.stroke();
-      // Inner crisp ring — solid orange so the selection reads even
-      // when the halo fades against a bright background body.
-      ctx.shadowBlur = 0;
-      ctx.lineWidth = 3;
+      // Inner ring — saturated orange, hugging the hex border.
+      ctx.lineWidth = 4;
       ctx.strokeStyle = '#f97316';
       ctx.beginPath();
-      ctx.arc(sx, sy, baseR + 4, 0, Math.PI * 2);
+      ctx.arc(sx, sy, baseR + 5, 0, Math.PI * 2);
       ctx.stroke();
     }
     ctx.restore();
@@ -2122,8 +2130,38 @@ export class MapRenderer {
     // Mouse hover -> tooltip. Throttled by mousemove cadence which is
     // already capped by the browser; we do the hit-test work cheaply
     // and update DOM only on identity change.
+    //
+    // Mobile browsers synthesize mousemove/mouseover events from touch
+    // taps even with `touch-action: none` (Chrome on Android does this
+    // reliably). That fired the hover tooltip on top of the tap popup,
+    // producing the "two popups" bug. _touchActive is set true on
+    // touchstart and cleared with a short tail after touchend; while
+    // it's true we skip the tooltip entirely so the tap popup is the
+    // only thing the player sees.
+    this._touchActive = false;
+    let touchTailTimer = null;
+    const markTouch = () => {
+      this._touchActive = true;
+      this._hideTooltip();
+      if (touchTailTimer) clearTimeout(touchTailTimer);
+    };
+    const releaseTouch = () => {
+      if (touchTailTimer) clearTimeout(touchTailTimer);
+      // Keep the lockout for a moment after touchend so the
+      // synthesized mousemove that fires right after the tap is
+      // still suppressed.
+      touchTailTimer = setTimeout(() => {
+        this._touchActive = false;
+      }, 800);
+    };
+    this.canvas.addEventListener('touchstart',  markTouch,   { passive: true });
+    this.canvas.addEventListener('touchmove',   markTouch,   { passive: true });
+    this.canvas.addEventListener('touchend',    releaseTouch);
+    this.canvas.addEventListener('touchcancel', releaseTouch);
+
     let lastId = null;
     this.canvas.addEventListener('mousemove', (ev) => {
+      if (this._touchActive) return;       // tap path owns the popup
       const pt = this._eventToWorld(ev);
       const hit = this._hitTest(pt.x, pt.y);
       const id = hit ? hit.id : null;
@@ -2158,14 +2196,18 @@ export class MapRenderer {
     meta.textContent = parts.join(' · ');
     el.appendChild(name);
     if (meta.textContent) el.appendChild(meta);
-    // Node id so the player can copy a stable reference into a bug
-    // report. Planner ids are random floats — render them mono and
-    // let the user tap to select the whole string.
+    // Node id so the player can copy a stable reference into a
+    // bug report. The planner JSON keys nodes by random floats
+    // like "0.9483763498218554" — copy-pasting that as a bug
+    // reference is rough on the eye. djb2-hash the float to a
+    // short base36 string (stable across reloads, so it's still
+    // a valid reference). The full float stays on the title for
+    // the rare case someone really needs the raw key.
     if (site.id) {
       const idRow = document.createElement('div');
       idRow.className = 't-id';
-      idRow.textContent = `id: ${site.id}`;
-      idRow.title = 'Tap to select, then copy';
+      idRow.textContent = `id: ${shortRefId(site.id)}`;
+      idRow.title = `Tap to select, then copy. (raw key: ${site.id})`;
       el.appendChild(idRow);
     }
     if (actions && actions.length) {
