@@ -247,10 +247,19 @@ function wireHandStrip() {
 function wireHandGrabber(grabber, strip) {
   let startY = 0;
   let startH = 0;
+  // Publish the live hand height as a CSS custom property on the
+  // browse-shell so the sidepanel can stop its `bottom` at the
+  // hand's top edge instead of overdrawing it.
+  const shell = document.querySelector('.browse-shell');
+  const publishHeight = (h) => {
+    if (shell) shell.style.setProperty('--hand-height', `${h}px`);
+  };
+  publishHeight(strip.getBoundingClientRect().height || 320);
   const onMove = (clientY) => {
     const dy = startY - clientY;            // drag up = positive
     const next = Math.max(120, Math.min(window.innerHeight * 0.7, startH + dy));
     strip.style.height = `${next}px`;
+    publishHeight(next);
   };
   const onPointerDown = (e) => {
     const cy = e.touches ? e.touches[0].clientY : e.clientY;
