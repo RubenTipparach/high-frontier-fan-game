@@ -532,6 +532,10 @@ export class MapRenderer {
     this._route = null;             // [{from,to,dv}]
     this._routeFromId = null;
     this._routeToId = null;
+    this._rocketTrail = null;       // [{from,to}] history of segments
+                                    // the rocket has actually traversed,
+                                    // drawn under the planned route as
+                                    // a bright cyan ribbon
     this._dragStart = null;
     this._gesture = null;
     this._rafQueued = false;
@@ -582,6 +586,15 @@ export class MapRenderer {
   setRouteEndpoints(fromId, toId) {
     this._routeFromId = fromId || null;
     this._routeToId = toId || null;
+    this._scheduleDraw();
+  }
+
+  // Rocket trail: a list of segments the rocket has already
+  // traversed this game. Drawn as a cyan ribbon beneath the
+  // planned-route overlay so the player sees where they've been
+  // vs. where they're going.
+  setRocketTrail(segments) {
+    this._rocketTrail = segments && segments.length ? segments : null;
     this._scheduleDraw();
   }
 
@@ -957,6 +970,7 @@ export class MapRenderer {
     // screen space later) sit on top.
     this._drawSiteHalosWorld(ctx);
     this._drawEdges(ctx);
+    this._drawRocketTrail(ctx);
     this._drawRoute(ctx);
 
     ctx.restore();
@@ -1234,6 +1248,30 @@ export class MapRenderer {
         ctx.lineWidth = 2 / eff;
       }
     }
+  }
+
+  // Bright cyan ribbon tracing every segment the rocket has
+  // already flown. Painted before _drawRoute so the planned-route
+  // overlay (orange + dashed) sits on top at any shared junction.
+  _drawRocketTrail(ctx) {
+    if (!this._rocketTrail) return;
+    const eff = this.zoom * this.fitScale;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 3.5 / eff;
+    ctx.shadowBlur = 10 / eff;
+    ctx.shadowColor = 'rgba(56, 189, 248, 0.55)';
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.85)';
+    ctx.beginPath();
+    for (const seg of this._rocketTrail) {
+      const sa = this.data.byId[seg.from];
+      const sb = this.data.byId[seg.to];
+      if (!sa || !sb) continue;
+      ctx.moveTo(sa.x, sa.y);
+      ctx.lineTo(sb.x, sb.y);
+    }
+    ctx.stroke();
+    ctx.restore();
   }
 
   _drawRoute(ctx) {

@@ -564,13 +564,23 @@ let _activeData = null;
 // segments most recently passed to the renderer so moveRocket()
 // can consume them turn-by-turn, and _moveSnapshot lets the 🛸
 // toggle's undo restore the previous position + route.
-const STORAGE_ROCKET_SITE = 'hf-sandbox-rocket-site';
+const STORAGE_ROCKET_SITE  = 'hf-sandbox-rocket-site';
+const STORAGE_ROCKET_TRAIL = 'hf-sandbox-rocket-trail';
 let _rocketSiteId = (() => {
   try { return localStorage.getItem(STORAGE_ROCKET_SITE) || null; }
   catch { return null; }
 })();
 let _plannedRoute = null;
 let _moveSnapshot = null;
+let _rocketTrail = (() => {
+  try {
+    const s = localStorage.getItem(STORAGE_ROCKET_TRAIL);
+    return s ? JSON.parse(s) : [];
+  } catch { return []; }
+})();
+// True while the rocket's animating along a path; blocks a second
+// move/undo from racing with the in-flight tween.
+let _rocketAnimating = false;
 
 async function renderMap() {
   const host = document.getElementById('browse-map');
@@ -952,6 +962,12 @@ async function mountMapFor() {
     wireDebugPanel(_renderer);
     syncSoloShipMarker();
     syncSandboxRocket();
+    // Push any persisted trail back into the renderer so a reload
+    // mid-journey still shows the cyan ribbon for where the rocket
+    // has already been.
+    if (_rocketTrail && _rocketTrail.length) {
+      _renderer.setRocketTrail(_rocketTrail);
+    }
   } catch (err) {
     canvas.innerHTML = `<div class="map-loading error">Map failed to load: ${err.message}</div>`;
   }
@@ -1241,6 +1257,82 @@ function persistRocketSite() {
     else localStorage.removeItem(STORAGE_ROCKET_SITE);
   } catch { /* private mode */ }
 }
+function persistRocketTrail() {
+  try {
+    if (_rocketTrail && _rocketTrail.length) {
+      localStorage.setItem(STORAGE_ROCKET_TRAIL, JSON.stringify(_rocketTrail));
+    } else {
+      localStorage.removeItem(STORAGE_ROCKET_TRAIL);
+    }
+  } catch { /* private mode */ }
+}
+
+// Tween the sandbox rocket sprite along a polyline derived from a
+// list of segments. Each frame writes a new (x, y) to the renderer
+// via setSandboxRocket. Resolves when the tween finishes; rejects
+// silently if another animation pre-empts this one. Distance-
+// weighted so longer segments take proportionally more time.
+function animateRocketAlong(segments, totalMs = 700) {
+  return new Promise((resolve) => {
+    if (!_renderer || !_activeData || !segments || !segments.length) {
+      resolve(); return;
+    }
+    // Build the polyline: start at segments[0].from, then walk
+    // through each .to in order. Skip any segments whose endpoints
+    // we can't resolve (data drift safety).
+    const pts = [];
+    const first = _activeData.sites.find((s) => s.id === segments[0].from);
+    if (first && typeof first.x === 'number') {
+      pts.push({ x: first.x, y: first.y });
+    }
+    for (const seg of segments) {
+      const s = _activeData.sites.find((x) => x.id === seg.to);
+      if (s && typeof s.x === 'number') pts.push({ x: s.x, y: s.y });
+    }
+    if (pts.length < 2) { resolve(); return; }
+    const lens = [];
+    let totalLen = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const L = Math.hypot(pts[i].x - pts[i-1].x, pts[i].y - pts[i-1].y);
+      lens.push(L);
+      totalLen += L;
+    }
+    if (totalLen === 0) { resolve(); return; }
+    const r = isRocketActive();
+    const t0 = performance.now();
+    _rocketAnimating = true;
+    const step = (now) => {
+      const t = Math.min(1, (now - t0) / totalMs);
+      // ease-in-out cubic — accelerates off the launch site,
+      // decelerates into the landing site.
+      const eased = t < 0.5
+        ? 4 * t * t * t
+        : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      let traveled = eased * totalLen;
+      let i = 0;
+      while (i < lens.length - 1 && traveled > lens[i]) {
+        traveled -= lens[i];
+        i += 1;
+      }
+      const k = lens[i] > 0 ? traveled / lens[i] : 0;
+      const pos = {
+        x: pts[i].x + (pts[i+1].x - pts[i].x) * k,
+        y: pts[i].y + (pts[i+1].y - pts[i].y) * k,
+      };
+      _renderer.setSandboxRocket({
+        x: pos.x, y: pos.y,
+        colour: 'yellow',
+        canFly: r.active,
+      });
+      if (t < 1) requestAnimationFrame(step);
+      else {
+        _rocketAnimating = false;
+        resolve();
+      }
+    };
+    requestAnimationFrame(step);
+  });
+}
 
 function syncSandboxRocket() {
   if (!_renderer) return;
@@ -1267,10 +1359,16 @@ function syncSandboxRocket() {
 // (one move per turn, capped at BURNS_PER_TURN burns of cumulative
 // dv). The remaining segments shift down a turn so the next move
 // walks what was previously turn 2. Returns true on success.
-function moveRocket() {
+async function moveRocket() {
   if (!_renderer || !_activeData) return false;
+  if (_rocketAnimating) return false;
   if (!_plannedRoute || !_plannedRoute.length) {
     setStatus('No planned route — tap a site and pick "Plan rocket route" first.');
+    return false;
+  }
+  const turn1 = _plannedRoute.filter((s) => s.turn === 1);
+  if (!turn1.length) {
+    setStatus('Planned route has no current-turn segments.');
     return false;
   }
   if (!consumeMove()) {
@@ -1278,28 +1376,32 @@ function moveRocket() {
     return false;
   }
   // Snapshot for undo BEFORE mutating — both the rocket's site
-  // and the full route shape, so a refundMove() can restore the
-  // exact pre-move state.
+  // and the full route shape + the segments we're about to walk,
+  // so an undo can slide back along the exact path.
   _moveSnapshot = {
     siteId: _rocketSiteId,
     route: _plannedRoute.map((s) => ({ ...s })),
+    movedSegments: turn1.map((s) => ({ ...s })),
   };
-  const turn1 = _plannedRoute.filter((s) => s.turn === 1);
-  if (!turn1.length) {
-    setStatus('Planned route has no current-turn segments.');
-    refundMove();
-    _moveSnapshot = null;
-    return false;
-  }
   const newSiteId = turn1[turn1.length - 1].to;
+  // Animate first — tweens position over ~700 ms, ease-in-out.
+  // Status is set up-front; the rest of the state catches up
+  // once the tween finishes so the player isn't typing into a
+  // half-updated world.
+  const arrived = _activeData.sites.find((x) => x.id === newSiteId);
+  const arrivedName = arrived ? arrived.name : newSiteId;
+  setStatus(`🛸 Moving rocket to <strong>${esc(arrivedName)}</strong>…`);
+  await animateRocketAlong(turn1);
   _rocketSiteId = newSiteId;
   persistRocketSite();
+  // Add the walked segments to the persistent trail (drawn cyan).
+  _rocketTrail = _rocketTrail.concat(turn1.map((s) => ({ from: s.from, to: s.to })));
+  persistRocketTrail();
+  _renderer.setRocketTrail(_rocketTrail);
   // Shift remaining segments down a turn (T2→T1, T3→T2, …).
   const remaining = _plannedRoute
     .filter((s) => s.turn > 1)
     .map((s) => ({ ...s, turn: s.turn - 1 }));
-  const arrived = _activeData.sites.find((x) => x.id === newSiteId);
-  const arrivedName = arrived ? arrived.name : newSiteId;
   if (remaining.length) {
     _plannedRoute = remaining;
     _renderer.setRoute(remaining);
@@ -1318,15 +1420,20 @@ function moveRocket() {
     if (clearBtn) clearBtn.hidden = true;
     setStatus(`🛸 Arrived at <strong>${esc(arrivedName)}</strong>.`);
   }
+  // Final sync — the animation left the sprite at the destination's
+  // pixel coords; this pins it back to the canonical site (x, y)
+  // and ensures canFly reflects the live stack state.
   syncSandboxRocket();
   return true;
 }
 
 // Restore the pre-move state captured in _moveSnapshot. Wired to
 // the 🛸 toggle's "undo" face (yellow ↩ 🛸) — the player can step
-// back as long as they haven't ended the turn yet.
-function undoRocketMove() {
+// back as long as they haven't ended the turn yet. The rocket
+// slides backwards along the exact segments it walked.
+async function undoRocketMove() {
   if (!_renderer) return false;
+  if (_rocketAnimating) return false;
   if (!_moveSnapshot) {
     // No snapshot but the budget is spent — just refund so the
     // button flips back to the move face. Rare path (e.g. moved
@@ -1334,6 +1441,21 @@ function undoRocketMove() {
     refundMove();
     return false;
   }
+  // Animate back along the segments we walked, in reverse.
+  const moved = _moveSnapshot.movedSegments || [];
+  const reverseSegs = moved
+    .slice()
+    .reverse()
+    .map((s) => ({ from: s.to, to: s.from }));
+  // Pop the moved segments off the trail immediately so it doesn't
+  // visually overshoot the rocket during the rewind tween.
+  if (moved.length && _rocketTrail.length >= moved.length) {
+    _rocketTrail = _rocketTrail.slice(0, _rocketTrail.length - moved.length);
+    persistRocketTrail();
+    _renderer.setRocketTrail(_rocketTrail);
+  }
+  setStatus('🛸 Rewinding rocket move…');
+  await animateRocketAlong(reverseSegs);
   _rocketSiteId = _moveSnapshot.siteId;
   persistRocketSite();
   _plannedRoute = _moveSnapshot.route;
