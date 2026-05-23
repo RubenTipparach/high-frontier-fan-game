@@ -7,7 +7,6 @@
 
 import { MapRenderer, LEO_ANCHOR } from './render.js';
 import { loadPlannerMap } from './planner-map.js';
-import { loadCleanMap } from './clean-map.js';
 import { findPath } from './nav.js';
 import {
   getState as soloState, newGame as soloNewGame, abandonGame as soloAbandon,
@@ -35,20 +34,12 @@ import { POLITICS } from '../../data/politics.js';
 import { SITES_BY_ID } from '../../data/sites.js';
 import { renderCard } from './card-ui.js';
 
-// User-selected map mode. Persists across sessions so the player
-// keeps whichever view they prefer for playtesting. Default to the
-// canonical planner graph since it routes more naturally.
-const MAP_MODE_KEY = 'hf.mapMode';
-function getMapMode() {
-  const v = localStorage.getItem(MAP_MODE_KEY);
-  return v === 'clean' ? 'clean' : 'classic';
-}
-function setMapMode(mode) {
-  localStorage.setItem(MAP_MODE_KEY, mode);
-}
-
-async function loadMap(mode) {
-  return mode === 'clean' ? loadCleanMap() : loadPlannerMap();
+// Only one map mode now (planner / "classic"); the old
+// "Cleaned up" variant was disorienting next to the canonical
+// planner graph and has been removed. Kept as a single function
+// rather than a config object so future modes are easy to slot.
+async function loadMap() {
+  return loadPlannerMap();
 }
 
 let _renderer = null;
@@ -559,7 +550,7 @@ async function renderMap() {
   const host = document.getElementById('browse-map');
   if (!host) return;
   ensureMapShell(host);
-  await mountMapFor(getMapMode());
+  await mountMapFor();
 }
 
 // Build the toolbar + route panel skeleton once. Subsequent calls
@@ -570,10 +561,6 @@ function ensureMapShell(host) {
   host.dataset.shellReady = '1';
   host.innerHTML = `
     <div class="map-toolbar">
-      <div class="map-mode-toggle">
-        <button data-mode="clean">Cleaned up</button>
-        <button data-mode="classic">Classic</button>
-      </div>
       <div class="map-search">
         <input id="map-search-input" type="text" autocomplete="off"
           spellcheck="false" placeholder="Find site…" />
@@ -625,14 +612,6 @@ function ensureMapShell(host) {
       </div>
     </div>
   `;
-  for (const btn of host.querySelectorAll('.map-mode-toggle button')) {
-    btn.addEventListener('click', async () => {
-      const mode = btn.dataset.mode;
-      if (mode === getMapMode()) return;
-      setMapMode(mode);
-      await mountMapFor(mode);
-    });
-  }
   host.querySelector('#route-clear').addEventListener('click', clearRoute);
   host.querySelector('#route-fullscreen').addEventListener('click', () => {
     // Promote the whole browse shell to fullscreen, not just the
@@ -837,12 +816,8 @@ function toggleFullscreen(host) {
   if (req) req.call(host).catch(() => {});
 }
 
-async function mountMapFor(mode) {
-  // Mark the active toggle.
+async function mountMapFor() {
   const host = document.getElementById('browse-map');
-  for (const btn of host.querySelectorAll('.map-mode-toggle button')) {
-    btn.classList.toggle('active', btn.dataset.mode === mode);
-  }
   const canvas = host.querySelector('#browse-map-canvas');
   canvas.innerHTML = '<div class="map-loading">Loading map…</div>';
   _renderer = null;
@@ -850,7 +825,7 @@ async function mountMapFor(mode) {
   _routeTo = null;
   updateRouteStatus();
   try {
-    _activeData = await loadMap(mode);
+    _activeData = await loadMap();
     soloBindData(_activeData);
     _renderer = new MapRenderer(canvas, {
       data: _activeData,

@@ -515,13 +515,35 @@ body:has(#view-browse:not(.hidden)) #main {
   overflow: visible;
 }
 .browse-sidepanel[data-active=""] ~ .sandbox-hand { right: 48px; }
-/* The patents pane is the wide one (min(620px, 80vw)); squish
-   the hand strip to match so BOOST / Stack / hand-cards stay on
-   screen instead of hiding behind the open library. The
-   `transition: right` on .sandbox-hand makes the resize smooth. */
+/* Patents pane is the wide one (min(620px, 80vw)); squish the
+   hand strip flush against its left edge so BOOST / Stack /
+   hand-cards stay on screen instead of hiding behind the open
+   library. No gap — the hand and panel share their edge so the
+   map area isn't sliced by an unused dead strip. */
 .browse-sidepanel[data-active="patents"] ~ .sandbox-hand {
-  right: calc(min(620px, 80vw) + 8px);
+  right: min(620px, 80vw);
 }
+/* And tighten the default "any non-patents pane is open" case so
+   the hand sits flush against the 380 px panel too, not 8 px
+   away. The existing `transition: right` keeps the resize smooth. */
+.browse-sidepanel[data-active]:not([data-active=""]) ~ .sandbox-hand {
+  right: 380px;
+}
+
+/* Top toolbar + canvas: same squish behaviour as the hand strip
+   so the route status / Find site bar isn't hiding behind the
+   open side panel. .browse-stage is positioned BEFORE
+   .browse-sidepanel in the DOM, so `~` won't reach it; use
+   :has() on the shell instead. Modern browser support is fine
+   (Chromium / WebKit 105+, Firefox 121+). */
+.browse-shell:has(.browse-sidepanel[data-active]:not([data-active=""])) .browse-stage {
+  right: 380px;
+  transition: right 0.22s ease;
+}
+.browse-shell:has(.browse-sidepanel[data-active="patents"]) .browse-stage {
+  right: min(620px, 80vw);
+}
+.browse-stage { transition: right 0.22s ease; }
 @media (max-width: 720px) {
   /* Phones: the hand strip takes the full bottom width. The
      floating tab bar lives at the top of the map, not on the

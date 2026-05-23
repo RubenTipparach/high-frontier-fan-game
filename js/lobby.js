@@ -13,14 +13,10 @@ import { mountChat, unmountChat } from './chat.js';
 import { mountInvitesUI, unmountInvitesUI } from './invites.js';
 import { MapRenderer } from './game/render.js';
 import { loadPlannerMap } from './game/planner-map.js';
-import { loadCleanMap } from './game/clean-map.js';
 import { findPath } from './game/nav.js';
 
-const LOBBY_MAP_MODE_KEY = 'hf.mapMode';
 async function loadLobbyMap() {
-  const mode = localStorage.getItem(LOBBY_MAP_MODE_KEY) === 'clean'
-    ? 'clean' : 'classic';
-  return mode === 'clean' ? loadCleanMap() : loadPlannerMap();
+  return loadPlannerMap();
 }
 
 let _activeLobby = null;
