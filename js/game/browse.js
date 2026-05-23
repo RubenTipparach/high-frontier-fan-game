@@ -996,7 +996,10 @@ function openRocketStackModal() {
         ${totalsHtml}
         ${status}
       </div>
-      <div id="rocket-stack-cards"></div>
+      <div id="rocket-stack-cards">
+        <div class="rocket-stack-row thrusters" id="rocket-stack-thrusters"></div>
+        <div class="rocket-stack-row others" id="rocket-stack-others"></div>
+      </div>
     `;
     panel.appendChild(body);
 
@@ -1026,10 +1029,27 @@ function openRocketStackModal() {
     body.querySelector('.rocket-stack-header').appendChild(engageBtn);
 
     const cards = body.querySelector('#rocket-stack-cards');
+    const thrustersHost = body.querySelector('#rocket-stack-thrusters');
+    const othersHost    = body.querySelector('#rocket-stack-others');
     if (!stack.length) {
       cards.innerHTML = '<p class="muted">Your rocket is empty. Mark cards 🚀 in your hand, then press BOOST to launch them up here.</p>';
       return;
     }
+
+    // Pre-compute the set of kinds the active thruster requires —
+    // any other card whose supplies intersect this set is an
+    // "active supporter" and gets the supporting-card highlight in
+    // sync with the thruster's ✓ chips. Robonauts that double as
+    // thrusters (card.thrust != null) are treated as thrusters
+    // too, both for the top-row layout and for active selection.
+    const requiredKinds = new Set();
+    if (thrStats) {
+      const active = lookup(thrStats.cardId);
+      const f = (active && active.faces && active.faces.primary) || active || {};
+      const reqs = f.requires || (active && active.requires) || [];
+      for (const r of reqs) if (r && r.kind) requiredKinds.add(r.kind);
+    }
+
     stack.forEach((slot, idx) => {
       const card = lookup(slot.id);
       if (!card) return;
@@ -1037,6 +1057,18 @@ function openRocketStackModal() {
       const wrap = document.createElement('div');
       wrap.className = 'rocket-slot';
       if (isThruster && slot.id === activeId) wrap.classList.add('is-active-thruster');
+      // Non-thruster cards whose supplies satisfy any of the
+      // active thruster's requires get an "is-supporting" wash so
+      // the player can trace which specific cards are powering
+      // their active thruster, not just see the ✓ chips on the
+      // thruster card.
+      if (!isThruster && requiredKinds.size) {
+        const cf = (card.faces && card.faces.primary) || card;
+        const supplies = cf.supplies || card.supplies || [];
+        if (supplies.some((k) => requiredKinds.has(k))) {
+          wrap.classList.add('is-supporting');
+        }
+      }
       // Only the active thruster's supports are validated against
       // the rest of the stack — passing `supplied` for others would
       // mark chips ✓ that aren't actually contributing to flight.
@@ -1074,8 +1106,15 @@ function openRocketStackModal() {
       actions.appendChild(back);
 
       wrap.appendChild(actions);
-      cards.appendChild(wrap);
+      // Thrusters (including missile-class robonauts that carry a
+      // thrust value) live in the top row; everything else falls
+      // through to the lower row.
+      (isThruster ? thrustersHost : othersHost).appendChild(wrap);
     });
+    // Hide the row containers when empty so we don't leave dead
+    // grid space between sections.
+    if (!thrustersHost.children.length) thrustersHost.style.display = 'none';
+    if (!othersHost.children.length)    othersHost.style.display    = 'none';
   };
   const lookup = (id) => PATENTS_BY_ID[id]
     || CREW.find((c) => c.id === id) || null;

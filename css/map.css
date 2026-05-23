@@ -1378,10 +1378,25 @@ body:has(#view-browse:not(.hidden)) #main {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 6px 2px 2px;
+}
+/* Stack rows: thrusters on top, everything else (reactors,
+   radiators, refineries, robonauts, etc.) below. Each row is its
+   own auto-fill grid so a row with a single card sits left-
+   aligned at full card width rather than stretching across. The
+   `others` row gets a thin divider above to visually separate
+   the propulsion line from the rest of the stack. */
+.rocket-stack-row {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 16px;
-  padding: 6px 2px 2px;
+}
+.rocket-stack-row.others {
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
 }
 
 /* Totals row: compact stat cells. Wraps on narrow screens so
@@ -1463,6 +1478,14 @@ body:has(#view-browse:not(.hidden)) #main {
    sees which thruster is driving the rocket at a glance. */
 .rocket-slot.is-active-thruster .card {
   box-shadow: 0 0 0 3px #f97316, 0 0 18px rgba(249, 115, 22, 0.55);
+  border-radius: 10px;
+}
+/* Supporting-card highlight: any non-thruster card whose supplies
+   satisfy the active thruster's requires gets a soft green ring
+   so the player can trace the support chain at a glance —
+   mirrors the ✓ green wash on the matching support chips. */
+.rocket-slot.is-supporting .card {
+  box-shadow: 0 0 0 2px #22c55e, 0 0 14px rgba(34, 197, 94, 0.45);
   border-radius: 10px;
 }
 .rocket-activate {
