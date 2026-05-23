@@ -398,24 +398,35 @@
 /* ISRU chip - shows the literal "ISRU: N" value because the
    number IS the rule (site water >= ISRU to refuel/prospect).
    Tap or hover for the long explanation. Cyan-blue tint sets
-   it apart from the generic property chips. */
+   it apart from the generic property chips.
+   Text colour follows the card face: black on the white
+   (primary) side, white on the black (secondary) side - the
+   ISRU value is rule-critical so it stays maximally legible
+   against whichever paper the face is printed on. */
 .card-prop-isru {
   background: rgba(56, 189, 248, 0.14);
   border-color: rgba(56, 189, 248, 0.55);
   border-style: solid;
-  color: #7dd3fc;
+}
+.card-face[data-face="primary"] .card-prop-isru,
+.card-face[data-face="primary"] .card-prop-isru strong,
+.card-face[data-face="primary"] .card-prop-isru b {
+  color: #0c0a16;
+}
+.card-face[data-face="secondary"] .card-prop-isru,
+.card-face[data-face="secondary"] .card-prop-isru strong,
+.card-face[data-face="secondary"] .card-prop-isru b {
+  color: #f1f5f9;
 }
 .card-prop-isru strong {
   font-size: 10px;
   letter-spacing: 0.5px;
   text-transform: uppercase;
-  color: #7dd3fc;
   font-weight: 700;
 }
 .card-prop-isru b {
   font-size: 13px;
   font-weight: 800;
-  color: #e0f2fe;
   margin-left: 2px;
 }
 
