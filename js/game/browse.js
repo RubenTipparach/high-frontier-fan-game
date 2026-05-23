@@ -557,6 +557,21 @@ let _selectedId = null;    // currently-highlighted site (just info, no routing)
 let _routingMode = false;  // true while the user is picking a destination
 let _activeData = null;
 
+// Rocket position state. The sandbox rocket sprite is drawn at
+// whichever site the rocket currently occupies; defaults to LEO
+// when no id is stored. Persisted so a reload doesn't teleport
+// the rocket back to LEO mid-journey. _plannedRoute mirrors the
+// segments most recently passed to the renderer so moveRocket()
+// can consume them turn-by-turn, and _moveSnapshot lets the 🛸
+// toggle's undo restore the previous position + route.
+const STORAGE_ROCKET_SITE = 'hf-sandbox-rocket-site';
+let _rocketSiteId = (() => {
+  try { return localStorage.getItem(STORAGE_ROCKET_SITE) || null; }
+  catch { return null; }
+})();
+let _plannedRoute = null;
+let _moveSnapshot = null;
+
 async function renderMap() {
   const host = document.getElementById('browse-map');
   if (!host) return;
@@ -696,19 +711,8 @@ function ensureMapShell(host) {
   refreshMoveButton();
   onTurnChange(refreshMoveButton);
   moveBtn.addEventListener('click', () => {
-    if (moveBtn.dataset.state === 'undo') {
-      if (refundMove()) setStatus('🛸 Rocket move undone.');
-      return;
-    }
-    // Stub for now — Stage 3's movement engine will actually walk
-    // the rocket along its planned-route segments. Until then we
-    // just spend the per-turn move budget so the end-turn confirm
-    // can see "moves remaining: 0".
-    if (!consumeMove()) {
-      setStatus('No moves left this turn — end turn to refresh.');
-      return;
-    }
-    setStatus('🛸 Rocket move queued (engine pending Stage 3).');
+    if (moveBtn.dataset.state === 'undo') undoRocketMove();
+    else                                  moveRocket();
   });
   host.querySelector('#dbg-close').addEventListener('click', () => {
     host.querySelector('#map-debug').classList.add('hidden');
@@ -1215,23 +1219,137 @@ function openRocketStackModal() {
 }
 let _rocketModalUnsub = null;
 
+// Resolve the site the rocket is currently sitting on. Falls back
+// to LEO when nothing is stored (fresh session) or when the stored
+// id no longer resolves (data set changed). Side-effects: clears
+// a stale stored id so subsequent calls don't keep retrying it.
+function getRocketSite() {
+  if (!_activeData) return null;
+  if (_rocketSiteId) {
+    const s = _activeData.sites.find((x) => x.id === _rocketSiteId);
+    if (s) return s;
+    _rocketSiteId = null;
+    persistRocketSite();
+  }
+  return _activeData.sites.find(
+    (x) => x.type === 'lagrange' && x.name === 'LEO'
+  ) || null;
+}
+function persistRocketSite() {
+  try {
+    if (_rocketSiteId) localStorage.setItem(STORAGE_ROCKET_SITE, _rocketSiteId);
+    else localStorage.removeItem(STORAGE_ROCKET_SITE);
+  } catch { /* private mode */ }
+}
+
 function syncSandboxRocket() {
   if (!_renderer) return;
   const stack = getRocketStack();
-  // Rocket model is present in LEO whenever the player has ≥1
-  // card in the stack — even when it isn't yet activatable.
-  // The 🚫 overlay distinguishes active vs inactive states.
+  // Rocket model is present whenever the player has ≥1 card in
+  // the stack — even when it isn't yet activatable. The 🚫
+  // overlay distinguishes active vs inactive states.
   if (!stack.length) {
     _renderer.setSandboxRocket(null);
     return;
   }
   const r = isRocketActive();
+  const site = getRocketSite();
+  const x = site && typeof site.x === 'number' ? site.x : LEO_ANCHOR.x;
+  const y = site && typeof site.y === 'number' ? site.y : LEO_ANCHOR.y;
   _renderer.setSandboxRocket({
-    x: LEO_ANCHOR.x,
-    y: LEO_ANCHOR.y,
+    x, y,
     colour: 'yellow',
     canFly: r.active,       // drives the 🚫 + transparency overlay
   });
+}
+
+// Step the rocket through its planned route's "turn 1" segments
+// (one move per turn, capped at BURNS_PER_TURN burns of cumulative
+// dv). The remaining segments shift down a turn so the next move
+// walks what was previously turn 2. Returns true on success.
+function moveRocket() {
+  if (!_renderer || !_activeData) return false;
+  if (!_plannedRoute || !_plannedRoute.length) {
+    setStatus('No planned route — tap a site and pick "Plan rocket route" first.');
+    return false;
+  }
+  if (!consumeMove()) {
+    setStatus('No moves left this turn — end turn to refresh.');
+    return false;
+  }
+  // Snapshot for undo BEFORE mutating — both the rocket's site
+  // and the full route shape, so a refundMove() can restore the
+  // exact pre-move state.
+  _moveSnapshot = {
+    siteId: _rocketSiteId,
+    route: _plannedRoute.map((s) => ({ ...s })),
+  };
+  const turn1 = _plannedRoute.filter((s) => s.turn === 1);
+  if (!turn1.length) {
+    setStatus('Planned route has no current-turn segments.');
+    refundMove();
+    _moveSnapshot = null;
+    return false;
+  }
+  const newSiteId = turn1[turn1.length - 1].to;
+  _rocketSiteId = newSiteId;
+  persistRocketSite();
+  // Shift remaining segments down a turn (T2→T1, T3→T2, …).
+  const remaining = _plannedRoute
+    .filter((s) => s.turn > 1)
+    .map((s) => ({ ...s, turn: s.turn - 1 }));
+  const arrived = _activeData.sites.find((x) => x.id === newSiteId);
+  const arrivedName = arrived ? arrived.name : newSiteId;
+  if (remaining.length) {
+    _plannedRoute = remaining;
+    _renderer.setRoute(remaining);
+    const nextBurns = remaining.filter((s) => s.turn === 1).length;
+    setStatus(
+      `🛸 Moved to <strong>${esc(arrivedName)}</strong>. `
+      + `${nextBurns} burn${nextBurns === 1 ? '' : 's'} queued for next turn.`
+    );
+  } else {
+    _plannedRoute = null;
+    _renderer.setRoute(null);
+    _renderer.setRouteEndpoints(null, null);
+    _routeFrom = null;
+    _routeTo = null;
+    const clearBtn = document.getElementById('route-clear');
+    if (clearBtn) clearBtn.hidden = true;
+    setStatus(`🛸 Arrived at <strong>${esc(arrivedName)}</strong>.`);
+  }
+  syncSandboxRocket();
+  return true;
+}
+
+// Restore the pre-move state captured in _moveSnapshot. Wired to
+// the 🛸 toggle's "undo" face (yellow ↩ 🛸) — the player can step
+// back as long as they haven't ended the turn yet.
+function undoRocketMove() {
+  if (!_renderer) return false;
+  if (!_moveSnapshot) {
+    // No snapshot but the budget is spent — just refund so the
+    // button flips back to the move face. Rare path (e.g. moved
+    // before a reload that dropped the snapshot).
+    refundMove();
+    return false;
+  }
+  _rocketSiteId = _moveSnapshot.siteId;
+  persistRocketSite();
+  _plannedRoute = _moveSnapshot.route;
+  if (_plannedRoute && _plannedRoute.length) {
+    _renderer.setRoute(_plannedRoute);
+    const first = _plannedRoute[0];
+    const last  = _plannedRoute[_plannedRoute.length - 1];
+    _renderer.setRouteEndpoints(first.from, last.to);
+    const clearBtn = document.getElementById('route-clear');
+    if (clearBtn) clearBtn.hidden = false;
+  }
+  _moveSnapshot = null;
+  refundMove();
+  syncSandboxRocket();
+  setStatus('🛸 Rocket move undone.');
+  return true;
 }
 
 // Solo state change -> refresh the panel + the ship marker on the
@@ -1431,28 +1549,26 @@ function canPlanRocketRoute() {
 const BURNS_PER_TURN = 4;
 function planRocketRouteTo(destSite) {
   if (!_renderer || !_activeData) return false;
-  // LEO origin = the lagrange waypoint named "LEO" in the planner
-  // data (loaded once at data-load time, same node MapRenderer
-  // anchors the sandbox rocket sprite to).
-  const leo = _activeData.sites.find(
-    (s) => s.type === 'lagrange' && s.name === 'LEO'
-  );
-  if (!leo) {
-    setStatus('Could not find the LEO node to launch from.');
+  // Origin = wherever the rocket currently is (default LEO). Once
+  // the rocket has moved, plans should start from its actual
+  // position, not snap back to LEO.
+  const origin = getRocketSite();
+  if (!origin) {
+    setStatus('Could not find a launch origin.');
     return false;
   }
-  if (destSite.id === leo.id) {
-    setStatus('Pick a destination other than LEO.');
+  if (destSite.id === origin.id) {
+    setStatus(`Rocket is already at ${esc(origin.name)} — pick a different destination.`);
     return false;
   }
-  const result = findPath(_activeData, leo.id, destSite.id);
+  const result = findPath(_activeData, origin.id, destSite.id);
   if (!result) {
     setStatus(
-      `No rocket route from <strong>LEO</strong> to `
+      `No rocket route from <strong>${esc(origin.name)}</strong> to `
       + `<strong>${esc(destSite.name)}</strong>.`
     );
     _renderer.setRoute(null);
-    _renderer.setRouteEndpoints(leo.id, destSite.id);
+    _renderer.setRouteEndpoints(origin.id, destSite.id);
     return false;
   }
   let turn = 1;
@@ -1466,13 +1582,14 @@ function planRocketRouteTo(destSite) {
     burnsThisTurn += cost;
     return { ...seg, turn, burns: cost };
   });
-  _routeFrom = leo;
+  _routeFrom = origin;
   _routeTo = destSite;
+  _plannedRoute = segments;
   _renderer.setRoute(segments);
-  _renderer.setRouteEndpoints(leo.id, destSite.id);
+  _renderer.setRouteEndpoints(origin.id, destSite.id);
   document.getElementById('route-clear').hidden = false;
   setStatus(
-    `🛸 <strong>LEO</strong> → <strong>${esc(destSite.name)}</strong>: `
+    `🛸 <strong>${esc(origin.name)}</strong> → <strong>${esc(destSite.name)}</strong>: `
     + `<strong class="big">${result.totalBurns}</strong> burns over `
     + `<strong>${turn}</strong> turn${turn === 1 ? '' : 's'}.`
   );
@@ -1482,6 +1599,7 @@ function planRocketRouteTo(destSite) {
 function clearRoute() {
   _routeFrom = null;
   _routeTo = null;
+  _plannedRoute = null;
   _selectedId = null;
   exitRoutingMode();
   if (_renderer) {
