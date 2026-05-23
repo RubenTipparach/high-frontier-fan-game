@@ -2168,9 +2168,12 @@ function buildFuelStrip(host, totals) {
   host.appendChild(legend);
 }
 
-function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
+function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   document.querySelector('.fuel-tank-overlay')?.remove();
   const tankNow = Number.isFinite(toWater) ? toWater : getTankWater();
+  // fromWater default is null (not 0): no-arg opens snap to the
+  // current level immediately, no fill animation. Refuel calls
+  // still pass fromWater explicitly to play the fill tween.
   const fromW   = Number.isFinite(fromWater) ? fromWater : tankNow;
   const totals  = getStackTotals();
   const thrStats = getActiveThrusterStats();
@@ -2207,7 +2210,7 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
   panel.innerHTML = `
     <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
     <h2 class="fuel-tank-title">💧 Water tank</h2>
-    <p class="muted fuel-tank-sub">Tap to skip animation or close</p>
+    <p class="muted fuel-tank-sub">Tap outside or press Esc to close</p>
     <div class="fuel-tank-stage">
       <svg viewBox="0 0 120 220" class="fuel-tank-svg" preserveAspectRatio="xMidYMid meet">
         <!-- Outer cylinder (stroke only) -->
@@ -2308,24 +2311,29 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
   // Falling-droplet animation. Spawns teardrop <path>s at the
   // top of the tank and lets gravity drop them onto the water
   // surface. On impact, a quick splash ring expands + fades.
-  // Active only during the fill animation (drops cycle off once
-  // the main tween settles).
+  // Two cadences:
+  //   - fast (~110ms) while a fill / drain tween is running
+  //   - ambient (~2-5s, random) while idle, so the modal has a
+  //     bit of life without feeling like the tank is filling
   const dropsLayer = panel.querySelector('.tank-drops');
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const activeDrops = [];
   let lastSpawn = 0;
-  function spawnDrop(now) {
+  let nextAmbient = 0;
+  function spawnDrop(now, opts = {}) {
     const x = 30 + Math.random() * 60;      // within the tank interior
     const path = document.createElementNS(SVG_NS, 'path');
     // Teardrop shape ~6px tall, 4px wide at base.
     path.setAttribute('d', 'M 0 -3 C 2 0 2 3 0 3 C -2 3 -2 0 0 -3 Z');
     path.setAttribute('fill', '#7dd3fc');
-    path.setAttribute('opacity', '0.9');
+    // Ambient drops are quieter (lower opacity, slower fall) so
+    // the eye reads them as background pulse rather than fill.
+    path.setAttribute('opacity', opts.ambient ? '0.55' : '0.9');
     path.setAttribute('transform', `translate(${x.toFixed(1)} 14)`);
     dropsLayer.appendChild(path);
     activeDrops.push({
       el: path, x, y: 14,
-      vy: 60 + Math.random() * 30,           // px/s initial speed
+      vy: opts.ambient ? (20 + Math.random() * 15) : (60 + Math.random() * 30),
       bornAt: now,
     });
   }
@@ -2352,11 +2360,23 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
     requestAnimationFrame(splashTick);
   }
   function stepDrops(now, dtMs) {
-    // Maybe spawn one. Cadence ~110ms; only while the main tween
-    // is still running so drops stop with the fill.
-    if (animating && now - lastSpawn > 110) {
-      spawnDrop(now);
-      lastSpawn = now;
+    // Fill / drain mode: spawn rapidly so the column reads as
+    // pouring water. Idle: spawn sparingly so the modal has a
+    // bit of pulse without looking like the tank is refilling
+    // on its own.
+    if (animating) {
+      if (now - lastSpawn > 110) {
+        spawnDrop(now);
+        lastSpawn = now;
+      }
+    } else if (nextAmbient && now >= nextAmbient) {
+      spawnDrop(now, { ambient: true });
+      nextAmbient = now + 2000 + Math.random() * 3000;
+    } else if (!nextAmbient) {
+      // First idle frame seeds the schedule so we don't spawn
+      // a drop instantly on modal open - players see the still
+      // tank first, then a quiet drop after a beat.
+      nextAmbient = now + 1500 + Math.random() * 1500;
     }
     for (let i = activeDrops.length - 1; i >= 0; i--) {
       const d = activeDrops[i];
@@ -2388,12 +2408,14 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
   const onTap = (e) => {
     if (e.target.classList.contains('modal-x')) return;
     if (animating) {
-      // Skip animation - snap to final, don't close yet. Clear
-      // in-flight droplets too so they don't keep raining after
-      // the snap.
-      if (raf) cancelAnimationFrame(raf);
+      // Skip animation - snap the level to the active tween's
+      // target and tear the tween down. The main rAF stays alive
+      // (it's also driving ambient drops), so we only clear the
+      // tween state + in-flight drops.
+      const target = tween ? tween.to : tankNow;
+      tween = null;
       animating = false;
-      setLevel(tankNow);
+      setLevel(target);
       clearDrops();
       finalReached = true;
       return;
@@ -2406,34 +2428,44 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
   overlay.appendChild(panel);
   mountOverlay(overlay);
 
-  // Animate from fromW -> tankNow. The droplet stepper runs on
-  // the same rAF tick so the visual stays in sync; once the
-  // fill settles the loop keeps going briefly to let in-flight
-  // drops land before stopping.
+  // Continuous tick. Runs from open to close so ambient drops
+  // can fall while the modal sits idle. Level tweens (initial
+  // refuel, drain on dump, aqua → water transfer) share this
+  // loop via the `tween` slot below - they set { from, to, t0,
+  // dur, onDone } and the step function handles the rest.
+  // `animating` keys stepDrops's cadence so a running tween
+  // pours drops fast and idle frames pour sparingly.
+  let lastTick = performance.now();
+  let tween = null;
   if (fromW !== tankNow) {
-    animating = true;
-    const durationMs = 1100;
-    const t0 = performance.now();
-    let lastTick = t0;
-    const step = (now) => {
-      const dt = now - lastTick;
-      lastTick = now;
-      const t = Math.min(1, (now - t0) / durationMs);
-      const eased = 1 - Math.pow(1 - t, 3);  // ease-out cubic
-      const v = fromW + (tankNow - fromW) * eased;
-      setLevel(v);
-      if (t >= 1) { animating = false; finalReached = true; }
-      stepDrops(now, dt);
-      if (t < 1 || activeDrops.length > 0) {
-        raf = requestAnimationFrame(step);
-      } else {
-        raf = 0;
-      }
+    tween = {
+      from: fromW, to: tankNow,
+      t0: performance.now(), dur: 1100,
     };
-    raf = requestAnimationFrame(step);
+    animating = true;
   } else {
     finalReached = true;
   }
+  const step = (now) => {
+    const dt = now - lastTick;
+    lastTick = now;
+    if (tween) {
+      const t = Math.min(1, (now - tween.t0) / tween.dur);
+      const eased = 1 - Math.pow(1 - t, 3);  // ease-out cubic
+      const v = tween.from + (tween.to - tween.from) * eased;
+      setLevel(v);
+      if (t >= 1) {
+        const done = tween.onDone;
+        tween = null;
+        animating = false;
+        finalReached = true;
+        if (done) done();
+      }
+    }
+    stepDrops(now, dt);
+    raf = requestAnimationFrame(step);
+  };
+  raf = requestAnimationFrame(step);
   // Note: close() already nulls activeDrops + removes the
   // overlay, so any in-flight drops vanish when the user
   // dismisses mid-animation.
@@ -2453,32 +2485,23 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
   };
   refreshDumpButtons();
   function drainTo(targetLevel, durationMs = 250) {
-    if (raf) cancelAnimationFrame(raf);
+    // Hand off to the unified tween: the continuous step picks
+    // it up next frame and animates setLevel without disturbing
+    // ambient drops. Clearing in-flight drops keeps the visual
+    // honest - emptying shouldn't look like pouring in.
     clearDrops();
-    animating = true;
-    const startLevel = getTankWater() + Math.max(0,
-      // visual start = current displayed level on screen, not
-      // the stored value (which already reflects the drain).
-      parseFloat(nowReadout.textContent || '0') - getTankWater());
     const fromLevel = parseFloat(nowReadout.textContent || String(getTankWater()));
     const toLevel = Math.max(0, targetLevel);
     if (fromLevel === toLevel) {
-      animating = false;
       refreshDumpButtons();
       return;
     }
-    const t0 = performance.now();
-    const tick = (now) => {
-      const t = Math.min(1, (now - t0) / durationMs);
-      const eased = 1 - Math.pow(1 - t, 3);
-      const v = fromLevel + (toLevel - fromLevel) * eased;
-      setLevel(v);
-      if (t < 1) raf = requestAnimationFrame(tick);
-      else { animating = false; raf = 0; refreshDumpButtons(); }
+    animating = true;
+    tween = {
+      from: fromLevel, to: toLevel,
+      t0: performance.now(), dur: durationMs,
+      onDone: () => refreshDumpButtons(),
     };
-    raf = requestAnimationFrame(tick);
-    // suppress lint for unused startLevel
-    void startLevel;
   }
   dump1Btn?.addEventListener('click', (e) => {
     // Stop the overlay's onTap handler from interpreting this
@@ -2545,46 +2568,20 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
     if (want <= 0) { refreshAquaButtons(); return; }
     if (!spendAqua(want)) { refreshAquaButtons(); return; }
     addFuel(want);
-    if (raf) cancelAnimationFrame(raf);
-    clearDrops();
-    animating = true;
     const fromLevel = parseFloat(nowReadout.textContent || String(cur));
     const toLevel = getTankWater();
     if (fromLevel === toLevel) {
-      animating = false;
       refreshAquaButtons();
       return;
     }
-    const t0 = performance.now();
-    const tick = (now) => {
-      const t = Math.min(1, (now - t0) / 400);
-      const eased = 1 - Math.pow(1 - t, 3);
-      const v = fromLevel + (toLevel - fromLevel) * eased;
-      setLevel(v);
-      // Spawn droplets for the "pour" feel even outside the
-      // main fill animation - bounded by stepDrops's clock.
-      if (animating && now - lastSpawn > 110) {
-        spawnDrop(now);
-        lastSpawn = now;
-      }
-      // Tick existing drops down.
-      const dts = 16 / 1000;
-      for (let i = activeDrops.length - 1; i >= 0; i--) {
-        const d = activeDrops[i];
-        d.vy += 220 * dts;
-        d.y  += d.vy * dts;
-        if (d.y >= _surfaceY - 1) {
-          spawnSplash(d.x, _surfaceY);
-          d.el.remove();
-          activeDrops.splice(i, 1);
-          continue;
-        }
-        d.el.setAttribute('transform', `translate(${d.x.toFixed(1)} ${d.y.toFixed(1)})`);
-      }
-      if (t < 1) raf = requestAnimationFrame(tick);
-      else { animating = false; raf = 0; refreshAquaButtons(); refreshDumpButtons(); }
+    // Hand off to the unified tween. animating=true makes
+    // stepDrops pour rapidly while the level climbs.
+    animating = true;
+    tween = {
+      from: fromLevel, to: toLevel,
+      t0: performance.now(), dur: 400,
+      onDone: () => { refreshAquaButtons(); refreshDumpButtons(); },
     };
-    raf = requestAnimationFrame(tick);
     logAction({
       type: 'aqua_transfer',
       icon: '💎→💧',

@@ -2670,9 +2670,10 @@ body:has(#view-browse:not(.hidden)) #main {
 
 /* Rocket-stack modal: a centered panel that floats over the
    map. Wider than the inspect modal so the player can scan a
-   multi-card stack at a glance. The panel itself is the flex
-   container - header (totals + status + engage) is pinned to
-   the top via flex-shrink:0, and only the cards grid scrolls. */
+   multi-card stack at a glance. The body scrolls as a single
+   unit (header + cards) so mobile viewports - where the header
+   itself eats most of the modal - can swipe past the totals to
+   reach the actual cards in the stack. */
 .rocket-stack-panel {
   position: relative;
   background: var(--panel);
@@ -2680,19 +2681,23 @@ body:has(#view-browse:not(.hidden)) #main {
   border-radius: 12px;
   padding: 22px 24px;
   width: min(820px, 90vw);
-  height: 80vh;
-  max-height: 80vh;
+  max-height: 90vh;
   overflow: hidden;
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);
   display: flex;
   flex-direction: column;
 }
 .rocket-stack-body {
-  display: flex;
-  flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
+  /* Soft pad on the right so the scrollbar doesn't crowd the
+     panel content; the cap on padding-right preserves visual
+     balance with the panel's own padding. */
+  padding-right: 4px;
 }
 .rocket-stack-header {
   flex: 0 0 auto;
@@ -2724,9 +2729,7 @@ body:has(#view-browse:not(.hidden)) #main {
   padding: 5px 9px;
 }
 .rocket-stack-panel #rocket-stack-cards {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 14px;
