@@ -1082,21 +1082,27 @@
 }
 /* Composite action: main button + small trailing button on the
    same line (used for "Plan rocket route" + the ⚙ gear). The
-   main button stretches; the gear takes its intrinsic square. */
+   main button stretches; the gear takes its intrinsic square.
+   Specificity has to beat the generic .map-popup .popup-btn
+   rule below which sets width: 100% on every button - hence
+   the doubled-up .popup-action-pair selector on each rule. */
 .map-popup .popup-action-pair {
   display: flex;
   gap: 6px;
   align-items: stretch;
 }
-.map-popup .popup-action-pair .pair-main {
+.map-popup .popup-action-pair .popup-btn.pair-main {
   flex: 1 1 auto;
   min-width: 0;
+  width: auto;
 }
-.map-popup .popup-action-pair .pair-trailing {
+.map-popup .popup-action-pair .popup-btn.pair-trailing {
   flex: 0 0 auto;
-  width: 36px;
-  padding: 7px 0;
-  font-size: 14px;
+  width: 40px;
+  min-width: 40px;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
 }
 /* Route-options modal: a small radio-pair lets the player pick
    the metric priority (turns first vs burns first). */
