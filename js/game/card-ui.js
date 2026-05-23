@@ -204,7 +204,22 @@ function buildFace(card, sideName, kind, supplied) {
     .map((k) => (REQUIREMENT_VIS[k] || {}).glyph || '')
     .filter(Boolean)
     .join(' ');
-  const fallback = TYPE_FALLBACK_ICON[card.type] || '';
+  // Robonauts ARE their prospector role - show the missile / raygun
+  // / buggy glyph (or stack of glyphs for dual-purpose cards like
+  // Helical Railgun which is both missile + raygun on Tier-2)
+  // instead of the generic 🤖. Crews aren't robonauts, so they
+  // skip this branch and keep their existing icon.
+  const ROBONAUT_KIND_GLYPHS = { missile: '🚀', raygun: '🔫', buggy: '🛺' };
+  let robonautGlyphs = '';
+  if (card.type === 'robonaut') {
+    const props = faceData.properties || card.properties || [];
+    const active = [];
+    for (const key of ['missile', 'raygun', 'buggy']) {
+      if (props.some((p) => p.key === key && p.value)) active.push(ROBONAUT_KIND_GLYPHS[key]);
+    }
+    robonautGlyphs = active.join(' ');
+  }
+  const fallback = robonautGlyphs || TYPE_FALLBACK_ICON[card.type] || '';
   const lead = supplyGlyphs || fallback;
   tbar.textContent = `${lead ? lead + '  ' : ''}${card.type.toUpperCase()}`;
   // Card name reads from the active face - the dark side carries

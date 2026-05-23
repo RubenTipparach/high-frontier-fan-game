@@ -10,7 +10,7 @@ import { loadPlannerMap } from './planner-map.js';
 import { planRoute } from './planner-nav.js';
 import {
   consumeMove, refundMove, getTurn, getMovesRemaining, onTurnChange,
-  getEventForRoll, getSeasonForSlot,
+  getEventForRoll, getSeasonForSlot, resetClock,
 } from './turn-clock.js';
 import { triggerEndTurn, openTurnClockModal } from './turn-clock-ui.js';
 import {
@@ -37,7 +37,8 @@ import {
 } from './rocket.js';
 import { canProspect, computeRaygunTargets } from './scan.js';
 import {
-  getDiscs, getDisc, placeDisc, removeDisc, onChange as onDiscsChange,
+  getDiscs, getDisc, placeDisc, removeDisc, resetDiscs,
+  onChange as onDiscsChange,
 } from './discs.js';
 import { CREW } from '../../data/crew.js';
 import { MILESTONES } from '../../data/glory.js';
@@ -50,7 +51,7 @@ import {
 } from './mission-log.js';
 import {
   awardChitForZone, revokeChitForZone, cashInChits, uncashChits,
-  getChits, getVps, getChitVpValue, isZoneVisited,
+  getChits, getVps, getChitVpValue, isZoneVisited, resetGlory,
   onChange as onGloryChange, ZONE_CHIT_VPS,
 } from './glory.js';
 
@@ -2396,12 +2397,31 @@ function paintSolo() {
       paintSolo();
     };
     host.querySelector('#sandbox-reset').onclick = () => {
-      if (!confirm('Reset sandbox? This clears your hand, your rocket’s stack, and every component on the board.')) return;
+      if (!confirm('Reset sandbox? This clears your hand, your rocket’s stack, position, planned route, discs, glory, mission log, and the turn clock.')) return;
       clearHand();
       rocketClearStack();
-      // Future: clear factories / refineries / claimed sites as
-      // those land in Stage 3.
-      setStatus('Sandbox reset - hand and rocket stack cleared.');
+      // Rocket position + trail + planned route + the move
+      // snapshot that backs undo. Clearing _rocketSiteId via the
+      // helper persists the empty state so reload doesn't restore
+      // the prior journey.
+      _rocketSiteId = null;
+      persistRocketSite();
+      _rocketTrail = [];
+      persistRocketTrail();
+      _plannedRoute = null;
+      persistPlannedRoute();
+      _moveSnapshot = null;
+      if (_renderer) {
+        _renderer.setRoute(null);
+        _renderer.setRouteEndpoints(null, null);
+        _renderer.setRocketTrail(null);
+      }
+      // Game-state systems.
+      resetDiscs();
+      resetGlory();
+      resetLog();
+      resetClock();
+      setStatus('Sandbox reset - hand, rocket, position, discs, glory, log, and clock cleared.');
     };
     return;
   }
