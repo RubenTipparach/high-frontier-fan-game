@@ -108,6 +108,15 @@ function isTouchDevice() {
   return window.matchMedia('(hover: none) and (pointer: coarse)').matches;
 }
 
+// On a phone, panning to a site / rocket / search result needs
+// to land MUCH closer than the desktop default - the canvas is
+// pixel-dense and a 4×-5× zoom leaves the target as a tiny dot.
+// Every "find this thing on the map" call routes through here
+// so the touch breakpoint can override in one place.
+function locateZoom(desktopZoom = 4) {
+  return isTouchDevice() ? 7 : desktopZoom;
+}
+
 let _handWired = false;
 function wireHandStrip() {
   if (_handWired) return;
@@ -272,9 +281,9 @@ function wireHandStrip() {
       const stack = getRocketStack();
       const site = stack.length ? getRocketSite() : null;
       if (site && Number.isFinite(site.x) && Number.isFinite(site.y)) {
-        _renderer.flyTo(site, 4);
+        _renderer.flyTo(site, locateZoom(4));
       } else {
-        _renderer.flyTo(LEO_ANCHOR, 4);
+        _renderer.flyTo(LEO_ANCHOR, locateZoom(4));
       }
     }
     openRocketStackModal();
@@ -288,9 +297,9 @@ function wireHandStrip() {
     const stack = getRocketStack();
     const site = stack.length ? getRocketSite() : null;
     if (site && Number.isFinite(site.x) && Number.isFinite(site.y)) {
-      _renderer.flyTo(site, 4);
+      _renderer.flyTo(site, locateZoom(4));
     } else {
-      _renderer.flyTo(LEO_ANCHOR, 4);
+      _renderer.flyTo(LEO_ANCHOR, locateZoom(4));
     }
   });
 
@@ -1245,7 +1254,7 @@ function wireSearch(host) {
 
   function pickItem(site) {
     if (!site || !_renderer) return;
-    _renderer.flyTo(site, SEARCH_FLY_ZOOM);
+    _renderer.flyTo(site, locateZoom(SEARCH_FLY_ZOOM));
     input.value = site.name;
     list.classList.add('hidden');
     closeSearchModal();
@@ -1570,13 +1579,13 @@ function openRocketStackModal() {
     if (findBtn) findBtn.addEventListener('click', () => {
       if (!here || !_renderer) return;
       close();
-      _renderer.flyTo(here, 4);
+      _renderer.flyTo(here, locateZoom(4));
     });
     const selectBtn = body.querySelector('#rocket-select-here');
     if (selectBtn) selectBtn.addEventListener('click', () => {
       if (!here || !_renderer) return;
       close();
-      _renderer.flyTo(here, 4);
+      _renderer.flyTo(here, locateZoom(4));
       onSiteSelect(here);
     });
 
@@ -3544,7 +3553,7 @@ async function explodeRocket(siteId) {
   // mid-modal scroll could've left the map elsewhere.
   if (_renderer && x != null && y != null) {
     if (typeof _renderer.flyTo === 'function') {
-      _renderer.flyTo({ x, y }, Math.max(_renderer.zoom || 2, 3));
+      _renderer.flyTo({ x, y }, locateZoom(Math.max(_renderer.zoom || 2, 3)));
     }
     _renderer.triggerExplosion(x, y);
   }
