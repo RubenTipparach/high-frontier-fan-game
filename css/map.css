@@ -53,23 +53,37 @@
   background: rgba(15, 16, 35, 0.85);
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
-  transition: padding-right 0.22s ease;
 }
-/* When the side panel is open, push the toolbar's content
-   (Find site, route status, debug + fullscreen buttons) to the
-   left via padding-right so it sits next to the panel instead
-   of hiding behind it. We intentionally DON'T resize
-   .browse-stage / the canvas — that triggered a ResizeObserver
-   on the renderer every time the player opened or closed a
-   pane, which forced a re-fit + redraw cycle and made the map
-   flicker / feel laggy. Padding-right on a flex container
-   shifts the items left without touching layout outside the
-   toolbar, so the canvas size never changes. */
-.browse-shell:has(.browse-sidepanel[data-active]:not([data-active=""])) .map-toolbar {
-  padding-right: calc(380px + 12px);
+/* Turn controls live on the LEFT of the toolbar (before search
+   + route) so an open side panel — which covers the right edge —
+   never hides them. Previous "padding-right when panel open"
+   fix moved the toolbar's RIGHT-aligned items into the padding
+   area which is covered by the panel; the buttons rendered into
+   the dead zone and disappeared from view. */
+.map-turn-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
-.browse-shell:has(.browse-sidepanel[data-active="patents"]) .map-toolbar {
-  padding-right: calc(min(620px, 80vw) + 12px);
+.map-turn-controls button {
+  font-size: 12px;
+  padding: 4px 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.map-turn-controls #turn-end {
+  background: linear-gradient(180deg, #f97316, #c2410c);
+  color: #2e0f02;
+  font-weight: 700;
+  border-color: #9a3412;
+}
+.map-turn-controls button:hover:not(:disabled) {
+  background: var(--accent);
+  color: #062136;
+  border-color: var(--accent-2);
 }
 .map-mode-toggle {
   display: inline-flex;
@@ -178,34 +192,10 @@
   letter-spacing: 1px;
 }
 
-/* Turn-clock toolbar buttons + confirm dialog + tracker modal +
-   3D die. The state model lives in js/game/turn-clock.js; this
-   block is the visual layer. */
-.map-route #turn-move-rocket,
-.map-route #turn-end {
-  font-size: 11px;
-  padding: 4px 8px;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  color: var(--ink);
-  border-radius: 4px;
-  cursor: pointer;
-}
-.map-route #turn-end {
-  background: linear-gradient(180deg, #f97316, #c2410c);
-  color: #2e0f02;
-  font-weight: 700;
-  border-color: #9a3412;
-}
-.map-route #turn-tracker {
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  color: var(--ink);
-  border-radius: 4px;
-  cursor: pointer;
-  padding: 4px 8px;
-}
-
+/* Turn-clock confirm dialog + tracker modal + 3D die. State
+   model lives in js/game/turn-clock.js; this block is the visual
+   layer. Toolbar button styles for the turn controls live on the
+   .map-turn-controls block higher up. */
 .turn-confirm-overlay { z-index: 80; }
 .turn-confirm-panel {
   position: relative;

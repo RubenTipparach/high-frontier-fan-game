@@ -563,6 +563,14 @@ function ensureMapShell(host) {
   host.dataset.shellReady = '1';
   host.innerHTML = `
     <div class="map-toolbar">
+      <div class="map-turn-controls">
+        <button id="turn-move-rocket" title="Move the rocket one step along its planned route"
+          aria-label="Move rocket">🛸</button>
+        <button id="turn-end" title="End your turn"
+          aria-label="End turn">⏭ End turn</button>
+        <button id="turn-tracker" title="View turn tracker"
+          aria-label="View turn tracker">🕐</button>
+      </div>
       <div class="map-search">
         <input id="map-search-input" type="text" autocomplete="off"
           spellcheck="false" placeholder="Find site…" />
@@ -575,12 +583,6 @@ function ensureMapShell(host) {
         <button id="route-clear" hidden>Clear route</button>
         <button id="route-debug" title="Toggle debug panel"
           aria-label="Toggle debug panel">🔧</button>
-        <button id="turn-move-rocket" title="Move the rocket one step along its planned route"
-          aria-label="Move rocket">🛸 Move</button>
-        <button id="turn-end" title="End your turn"
-          aria-label="End turn">⏭ End turn</button>
-        <button id="turn-tracker" title="View turn tracker"
-          aria-label="View turn tracker">🕐</button>
         <button id="route-fullscreen" title="Toggle fullscreen map"
           aria-label="Toggle fullscreen">⛶</button>
       </div>
