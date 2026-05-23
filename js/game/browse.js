@@ -1436,6 +1436,19 @@ function siteProspectThreshold(site) {
   return 4;
 }
 
+// Read the prospector's ISRU rating off the active face's
+// properties. ISRU is a numeric property (1..N); missing /
+// zero means "no water requirement". Returns the integer.
+function prospectorIsruValue(card) {
+  if (!card) return 0;
+  const f = (card.faces && card.faces.primary) || card;
+  const props = f.properties || card.properties || [];
+  const e = props.find((p) => p.key === 'isru');
+  if (!e) return 0;
+  const v = typeof e.value === 'number' ? e.value : parseInt(e.value, 10);
+  return Number.isFinite(v) ? v : 0;
+}
+
 function doProspect(site, prosp) {
   if (!prosp) return;
   // Already-prospected sites are off-limits in the sandbox; the UI
@@ -1443,6 +1456,18 @@ function doProspect(site, prosp) {
   // too so an autoclick can't double-spend.
   if (getDisc(site.id)) {
     setStatus(`This site already has a prospect disc - clear it first.`);
+    return;
+  }
+  // ISRU rule re-validated server-side-style: even if the button
+  // somehow ends up enabled, refuse to roll when site water is
+  // below the prospector's ISRU rating.
+  const prospIsru = prospectorIsruValue(prosp.card);
+  const siteWater = Number.isFinite(site.hydration) ? site.hydration : 0;
+  if (prospIsru > siteWater) {
+    setStatus(
+      `Prospect blocked: <em>${esc(prosp.card?.name || '')}</em> needs water ≥ `
+      + `${prospIsru}, site has ${siteWater}.`
+    );
     return;
   }
   const threshold = siteProspectThreshold(site);
@@ -2037,13 +2062,21 @@ function showSitePopupFor(site) {
     const check = canProspect(_activeData, rocketSite?.id, site.id, prosp.kind);
     const supportsOk = prosp.canActivate;
     const existingDisc = getDisc(site.id);
-    const ok = check.ok && supportsOk && !existingDisc;
+    // ISRU rule: the prospector can only attempt sites whose
+    // water (hydration) >= its ISRU rating. ISRU 0 / missing
+    // means "no water requirement" and clears the check.
+    const prospIsru   = prospectorIsruValue(prosp.card);
+    const siteWater   = Number.isFinite(site.hydration) ? site.hydration : 0;
+    const isruOk      = prospIsru <= siteWater;
+    const ok = check.ok && supportsOk && !existingDisc && isruOk;
     const kindGlyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prosp.kind] || '🔬';
     const reason = existingDisc
       ? `This site already has a ${existingDisc.outcome === 'success' ? 'claim' : 'failed-prospect'} disc.`
       : !supportsOk
         ? `Prospector needs ${(prosp.missingSuppliers || []).join(' + ')} support.`
-        : check.reason;
+        : !isruOk
+          ? `Prospector needs ISRU ≤ site water. Site water = ${siteWater}, prospector ISRU = ${prospIsru}.`
+          : check.reason;
     actions.push({
       label: `${kindGlyph} Prospect (${prosp.kind})`,
       variant: 'secondary',
