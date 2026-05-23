@@ -2588,14 +2588,14 @@ function showSitePopupFor(site) {
         onClick: openRouteOptions,
       },
     },
-    // Fallback row: if the inline trailing pair fails to render
-    // (cache / specificity / etc.) the gear still shows as its
-    // own action button below. Cheap insurance; collapses to a
-    // no-op when the pair works because the player just sees two
-    // affordances for the same modal.
+    // Standalone route-options button. Lives as its own action
+    // row right under "Plan rocket route" so it always renders
+    // even if the inline trailing-pair layout fails to land.
+    // Visible per the user's "make it its own button element"
+    // request; same onClick as the inline gear.
     {
-      label: `⚙ Route options (${_routePriority} first)`,
-      variant: 'secondary',
+      label: `⚙ Route options - priority: ${_routePriority} first`,
+      variant: 'rocket',
       onClick: openRouteOptions,
     },
   ];
