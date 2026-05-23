@@ -69,7 +69,7 @@ export function shortRefId(id) {
 function isLeoWaypoint(w) {
   return w && w.type === 'lagrange' && w.name === 'LEO';
 }
-const DEFAULT_ZOOM = 1.8;
+const DEFAULT_ZOOM = 6;
 // Cap the celestial body halo at this many screen pixels so extreme
 // zoom doesn't turn Saturn into the entire canvas.
 const HALO_MAX_SCREEN_R = 110;
