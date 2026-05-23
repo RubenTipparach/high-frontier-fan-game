@@ -2964,6 +2964,20 @@ async function explodeRocket(siteId) {
   });
   syncSandboxRocket();
   refreshOpenSitePopup();
+  // Acknowledge dialog - the explosion + state reset already
+  // happened, but a player who looked away mid-animation needs a
+  // clear "your ship is gone" beat before they go back to the
+  // map. Single OK button; await so the caller's status text
+  // doesn't get clobbered by anything that runs after this.
+  await confirmModal({
+    title: '💥 Spacecraft destroyed',
+    body: `Your rocket was lost at <strong>${esc(site ? site.name : siteId)}</strong>. `
+      + `<strong>${returned}</strong> card${returned === 1 ? '' : 's'} returned to your hand`
+      + (tankLost > 0 ? `, <strong>${tankLost}</strong> water lost` : '')
+      + `. Rebuild from the LEO stack to fly again.`,
+    yes: 'OK',
+    no: '',
+  });
 }
 
 // Step the rocket through its planned route's "turn 1" segments
