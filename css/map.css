@@ -1551,6 +1551,121 @@ body:has(#view-browse:not(.hidden)) #main {
   line-height: 1.4;
 }
 
+/* Glory pane: ticker-tape chits + VP counter + zone table. */
+.glory-summary { margin-bottom: 16px; }
+.glory-vp-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 8px 12px;
+  margin: 4px 0 12px;
+  background: rgba(250, 204, 21, 0.08);
+  border: 1px solid rgba(250, 204, 21, 0.35);
+  border-radius: 8px;
+}
+.glory-vp {
+  font-size: 22px;
+  color: #facc15;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+.glory-chits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 12px;
+}
+.glory-chit {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 10px;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  border-radius: 6px;
+  font-size: 11px;
+  min-width: 70px;
+}
+.glory-chit strong { color: #7dd3fc; font-size: 12px; }
+.glory-chit em { color: var(--ink-dim); font-style: normal; font-size: 10px; }
+.glory-table {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+}
+.glory-table li {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  font-size: 12px;
+  border-bottom: 1px dashed rgba(148, 163, 184, 0.18);
+}
+.glory-table strong { color: #fde047; font-variant-numeric: tabular-nums; }
+.glory-rules { font-size: 11px; line-height: 1.5; }
+.glory-milestones h4 { margin: 16px 0 8px; }
+
+/* Mission log pane: per-turn action list + per-game history. */
+.log-current h3 { margin-bottom: 8px; }
+.log-actions-bar {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0;
+  flex-wrap: wrap;
+}
+.log-actions-bar .popup-btn { font-size: 12px; padding: 5px 10px; }
+.log-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 16px;
+}
+.log-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px dashed rgba(148, 163, 184, 0.18);
+  font-size: 12px;
+}
+.log-row.is-undoable-now {
+  background: rgba(250, 204, 21, 0.08);
+  border-left: 3px solid #facc15;
+  padding-left: 8px;
+}
+.log-icon { font-size: 14px; line-height: 1; }
+.log-summary { flex: 1; }
+.log-empty { padding: 12px; }
+
+.log-history h4 { margin: 16px 0 6px; }
+.hist-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.hist-row {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 6px;
+  font-size: 11px;
+}
+.hist-row header {
+  font-size: 11px;
+  color: var(--ink-dim);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.hist-row ol {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--ink);
+}
+.hist-row ol li { line-height: 1.5; }
+
 /* ===== Game-overlay map (used when a lobby starts) ===== */
 
 .overlay-shell {

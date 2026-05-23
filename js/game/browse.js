@@ -35,6 +35,15 @@ import { MILESTONES } from '../../data/glory.js';
 import { POLITICS } from '../../data/politics.js';
 import { SITES_BY_ID } from '../../data/sites.js';
 import { renderCard } from './card-ui.js';
+import {
+  logAction, getActions, getHistory, popLastOfType,
+  commitTurn as commitLogTurn, resetLog, onChange as onLogChange,
+} from './mission-log.js';
+import {
+  awardChitForZone, revokeChitForZone, cashInChits, uncashChits,
+  getChits, getVps, getChitVpValue, isZoneVisited, addVps,
+  onChange as onGloryChange, ZONE_CHIT_VPS,
+} from './glory.js';
 
 // Only one map mode now (planner / "classic"); the old
 // "Cleaned up" variant was disorienting next to the canonical
@@ -545,6 +554,7 @@ function showPane(pane) {
   if      (pane === 'patents')    renderPatents();
   else if (pane === 'milestones') renderMilestones();
   else if (pane === 'events')     renderEvents();
+  else if (pane === 'log')        renderMissionLog();
   else if (pane === 'solo')       renderSolo();
 }
 
@@ -688,6 +698,19 @@ function ensureMapShell(host) {
     const prevTurn = getTurn();
     const result = await triggerEndTurn();
     if (!result) return;
+    // Sunspot Cube landed on an event slot — apply the d6 outcome
+    // (VP credit / debit + flavour log line) BEFORE we commit the
+    // mission log so the event appears in this turn's record.
+    if (result.event) {
+      applyEventDieEffect(result.event);
+    }
+    // Commit the now-completed turn into the per-game history and
+    // clear the live log for the next turn.
+    commitLogTurn({
+      turn: prevTurn,
+      round: result.round,
+      event: result.event,
+    });
     openTurnClockModal({
       animateFrom: prevTurn,
       rolling: result.event ? { value: result.event.dieRoll } : null,
@@ -1239,6 +1262,39 @@ let _rocketModalUnsub = null;
 // to LEO when nothing is stored (fresh session) or when the stored
 // id no longer resolves (data set changed). Side-effects: clears
 // a stale stored id so subsequent calls don't keep retrying it.
+// Glory + log glue used by moveRocket / undoRocketMove. Kept
+// in browse.js so glory.js doesn't need to know site shapes.
+function isLeoSite(site) {
+  return !!site && site.type === 'lagrange' && site.name === 'LEO';
+}
+
+// Sunspot Cube d6 effects. HF4's events vary by season; until the
+// full table lands (with seasonal Inspiration / Glitch / Pad
+// Explosion / Solar Flare / Budget Cuts effects), we map the d6
+// to a flat VP swing + a flavour name. Logged in the mission log
+// so the player can audit what the roll cost / gained them.
+const EVENT_DIE_TABLE = {
+  1: { name: 'Catastrophic Failure', vps: -2, icon: '💥' },
+  2: { name: 'Rookie Miscalculation', vps: -1, icon: '🤦' },
+  3: { name: 'Pad Explosion',         vps: -1, icon: '🧨' },
+  4: { name: 'Glitch',                vps:  0, icon: '⚠️' },
+  5: { name: 'Inspiration',           vps: +1, icon: '💡' },
+  6: { name: 'Breakthrough',          vps: +2, icon: '🎉' },
+};
+function applyEventDieEffect(event) {
+  if (!event || typeof event.dieRoll !== 'number') return;
+  const e = EVENT_DIE_TABLE[event.dieRoll];
+  if (!e) return;
+  if (e.vps) addVps(e.vps, e.name);
+  logAction({
+    type: 'event_d6',
+    icon: e.icon,
+    summary: `${e.name} (d6 = ${event.dieRoll}) → ${e.vps > 0 ? '+' : ''}${e.vps} VP`,
+    undoable: false,
+    data: { dieRoll: event.dieRoll, vps: e.vps, name: e.name },
+  });
+}
+
 function getRocketSite() {
   if (!_activeData) return null;
   if (_rocketSiteId) {
@@ -1378,18 +1434,26 @@ async function moveRocket() {
   // Snapshot for undo BEFORE mutating — both the rocket's site
   // and the full route shape + the segments we're about to walk,
   // so an undo can slide back along the exact path.
+  const newSiteId = turn1[turn1.length - 1].to;
+  const arrived = _activeData.sites.find((x) => x.id === newSiteId);
+  const arrivedName = arrived ? arrived.name : newSiteId;
+  const arrivedZone = arrived && arrived.solarZone ? arrived.solarZone : null;
+  // Record everything we'll need to undo BEFORE mutating — site,
+  // route, segments walked, the chit (if any) we're about to
+  // award for first-time zone entry, and the auto-cash payload
+  // (if we're landing back at LEO with chits in hand).
+  const willAwardChit = arrivedZone && arrivedZone !== 'Earth' && !isZoneVisited(arrivedZone);
+  const willCashIn = isLeoSite(arrived) && getChits().length > 0;
+  const chitsToCash = willCashIn ? getChits() : [];
   _moveSnapshot = {
     siteId: _rocketSiteId,
     route: _plannedRoute.map((s) => ({ ...s })),
     movedSegments: turn1.map((s) => ({ ...s })),
+    awardedZone: willAwardChit ? arrivedZone : null,
+    cashedChits: null,        // filled in below if a cash-in fires
+    cashedVps:   0,
   };
-  const newSiteId = turn1[turn1.length - 1].to;
   // Animate first — tweens position over ~700 ms, ease-in-out.
-  // Status is set up-front; the rest of the state catches up
-  // once the tween finishes so the player isn't typing into a
-  // half-updated world.
-  const arrived = _activeData.sites.find((x) => x.id === newSiteId);
-  const arrivedName = arrived ? arrived.name : newSiteId;
   setStatus(`🛸 Moving rocket to <strong>${esc(arrivedName)}</strong>…`);
   await animateRocketAlong(turn1);
   _rocketSiteId = newSiteId;
@@ -1398,6 +1462,38 @@ async function moveRocket() {
   _rocketTrail = _rocketTrail.concat(turn1.map((s) => ({ from: s.from, to: s.to })));
   persistRocketTrail();
   _renderer.setRocketTrail(_rocketTrail);
+  // Log the move + award glory chit on first-time zone entry +
+  // auto-cash any chits if we just landed at LEO. Each side-
+  // effect appends to the mission log so the player can audit
+  // (and undo) the whole sequence as one move.
+  logAction({
+    type: 'move',
+    icon: '🛸',
+    summary: `Moved to ${arrivedName}`,
+    undoable: true,
+    data: { siteId: newSiteId, zone: arrivedZone },
+  });
+  if (willAwardChit) {
+    awardChitForZone(arrivedZone, getTurn());
+    const vp = getChitVpValue(arrivedZone);
+    logAction({
+      type: 'glory_award',
+      icon: '🏆',
+      summary: `Glory chit earned — ${arrivedZone} (${vp} VP at cash-in)`,
+      undoable: false,
+    });
+  }
+  if (willCashIn) {
+    const res = cashInChits(`returned to ${arrivedName}`);
+    _moveSnapshot.cashedChits = chitsToCash;
+    _moveSnapshot.cashedVps   = res.vps;
+    logAction({
+      type: 'glory_cash',
+      icon: '💰',
+      summary: `Cashed ${chitsToCash.length} chit${chitsToCash.length === 1 ? '' : 's'} for ${res.vps} VP`,
+      undoable: false,
+    });
+  }
   // Shift remaining segments down a turn (T2→T1, T3→T2, …).
   const remaining = _plannedRoute
     .filter((s) => s.turn > 1)
@@ -1454,6 +1550,19 @@ async function undoRocketMove() {
     persistRocketTrail();
     _renderer.setRocketTrail(_rocketTrail);
   }
+  // Unwind glory side-effects in reverse order: cash-in first
+  // (restore chits to inventory + refund VPs), then revoke the
+  // first-time-zone chit that was earned by the move. Each pops
+  // its matching log entry so the audit trail stays consistent.
+  if (_moveSnapshot.cashedChits && _moveSnapshot.cashedChits.length) {
+    uncashChits(_moveSnapshot.cashedChits, _moveSnapshot.cashedVps || 0);
+    popLastOfType('glory_cash');
+  }
+  if (_moveSnapshot.awardedZone) {
+    revokeChitForZone(_moveSnapshot.awardedZone);
+    popLastOfType('glory_award');
+  }
+  popLastOfType('move');
   setStatus('🛸 Rewinding rocket move…');
   await animateRocketAlong(reverseSegs);
   _rocketSiteId = _moveSnapshot.siteId;
@@ -1884,11 +1993,59 @@ function legacyPatentCard(p) {
   return card;
 }
 
+// Glory pane: live HF4-style ticker-tape readout plus the legacy
+// milestone deck below for reference. Re-renders on every glory
+// state change so the chit row + VP counter stay live.
+let _gloryListenerHooked = false;
 function renderMilestones() {
+  if (!_gloryListenerHooked) {
+    _gloryListenerHooked = true;
+    onGloryChange(() => {
+      const panel = document.getElementById('browse-sidepanel');
+      if (panel && panel.dataset.active === 'milestones') paintGlory();
+    });
+  }
+  paintGlory();
+}
+function paintGlory() {
   const host = document.getElementById('browse-milestones');
   if (!host) return;
-  host.innerHTML = '<ul class="ms-list"></ul>';
-  const list = host.querySelector('ul');
+  const chits = getChits();
+  const vps   = getVps();
+  const zonesEarned = chits.length
+    ? chits.map((c) => `<span class="glory-chit" data-zone="${esc(c.zone)}">
+          <strong>${esc(c.zone)}</strong>
+          <em>+${getChitVpValue(c.zone)} VP</em>
+        </span>`).join('')
+    : '<p class="muted">No glory chits carried. Land the rocket on a new heliocentric zone to earn one.</p>';
+  const zoneTableRows = Object.entries(ZONE_CHIT_VPS)
+    .filter(([z]) => z !== 'Earth')
+    .map(([z, v]) => `<li><span>${esc(z)}</span><strong>+${v} VP</strong></li>`)
+    .join('');
+  host.innerHTML = `
+    <section class="glory-summary">
+      <h3>🏆 Glory</h3>
+      <div class="glory-vp-row">
+        <span class="muted">Career VP</span>
+        <strong class="glory-vp">${vps}</strong>
+      </div>
+      <h4>Chits in hand</h4>
+      <div class="glory-chits">${zonesEarned}</div>
+      <h4>Ticker-tape table</h4>
+      <ul class="glory-table">${zoneTableRows}</ul>
+      <p class="muted glory-rules">
+        Land the rocket in a heliocentric zone for the first time to
+        earn a chit. Return to LEO to convert all chits to VP. Event
+        d6 outcomes (Catastrophic Failure, Inspiration, …) credit
+        VP directly.
+      </p>
+    </section>
+    <section class="glory-milestones">
+      <h4>Legacy milestone deck</h4>
+      <ul class="ms-list"></ul>
+    </section>
+  `;
+  const list = host.querySelector('.ms-list');
   for (const m of MILESTONES) {
     const li = document.createElement('li');
     li.innerHTML = `
@@ -1902,6 +2059,87 @@ function renderMilestones() {
     li.querySelector('p').textContent = m.blurb;
     list.appendChild(li);
   }
+}
+
+// Mission log pane: every action the player took this turn, plus
+// the per-turn history below. Undo Last calls the matching
+// per-feature undo (currently only `move` is wired); the log entry
+// is popped by the feature itself so we stay consistent. Re-paints
+// on every log change.
+let _logListenerHooked = false;
+function renderMissionLog() {
+  if (!_logListenerHooked) {
+    _logListenerHooked = true;
+    onLogChange(() => {
+      const panel = document.getElementById('browse-sidepanel');
+      if (panel && panel.dataset.active === 'log') paintMissionLog();
+    });
+  }
+  paintMissionLog();
+}
+function paintMissionLog() {
+  const host = document.getElementById('browse-log');
+  if (!host) return;
+  const actions = getActions();
+  const history = getHistory();
+  const lastUndoableIdx = (() => {
+    for (let i = actions.length - 1; i >= 0; i--) {
+      if (actions[i].type === 'move') return i;
+    }
+    return -1;
+  })();
+  const turnActions = actions.length
+    ? actions.map((a, i) => `
+        <li class="log-row ${i === lastUndoableIdx ? 'is-undoable-now' : ''}">
+          <span class="log-icon">${esc(a.icon || '·')}</span>
+          <span class="log-summary">${esc(a.summary)}</span>
+        </li>`).join('')
+    : '<li class="muted log-empty">No actions yet this turn.</li>';
+  const historyRows = history.length
+    ? history.slice().reverse().slice(0, 8).map((h) => {
+        const ev = h.event ? ` · d6 = ${h.event.dieRoll}` : '';
+        return `<li class="hist-row">
+          <header>Round ${h.round ?? '?'} · Turn ${h.turn ?? '?'}${ev}</header>
+          <ol>${
+            h.actions.map((a) => `<li>${esc(a.icon)} ${esc(a.summary)}</li>`).join('')
+          }</ol>
+        </li>`;
+      }).join('')
+    : '';
+  host.innerHTML = `
+    <section class="log-current">
+      <h3>📋 This turn</h3>
+      <div class="log-actions-bar">
+        <button class="popup-btn primary"
+          id="log-undo-last" ${lastUndoableIdx < 0 ? 'disabled' : ''}>
+          ↩ Undo last move
+        </button>
+        <button class="popup-btn"
+          id="log-undo-all" ${actions.filter((a) => a.type === 'move').length === 0 ? 'disabled' : ''}>
+          ⏪ Undo all moves this turn
+        </button>
+      </div>
+      <ul class="log-list">${turnActions}</ul>
+    </section>
+    ${history.length ? `
+      <section class="log-history">
+        <h4>Past turns (${history.length})</h4>
+        <ol class="hist-list">${historyRows}</ol>
+      </section>` : ''
+    }
+  `;
+  host.querySelector('#log-undo-last')?.addEventListener('click', () => {
+    undoRocketMove();
+  });
+  host.querySelector('#log-undo-all')?.addEventListener('click', async () => {
+    // Repeatedly undo while there are move entries. Each call
+    // awaits the rewind animation before kicking the next so the
+    // user can watch the rocket trace its way back home.
+    while (getActions().some((a) => a.type === 'move')) {
+      const ok = await undoRocketMove();
+      if (!ok) break;
+    }
+  });
 }
 
 // Solo panel: stats + per-round actions when a game is running,
