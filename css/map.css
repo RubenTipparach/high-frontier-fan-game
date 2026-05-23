@@ -515,6 +515,13 @@ body:has(#view-browse:not(.hidden)) #main {
   overflow: visible;
 }
 .browse-sidepanel[data-active=""] ~ .sandbox-hand { right: 48px; }
+/* The patents pane is the wide one (min(620px, 80vw)); squish
+   the hand strip to match so BOOST / Stack / hand-cards stay on
+   screen instead of hiding behind the open library. The
+   `transition: right` on .sandbox-hand makes the resize smooth. */
+.browse-sidepanel[data-active="patents"] ~ .sandbox-hand {
+  right: calc(min(620px, 80vw) + 8px);
+}
 @media (max-width: 720px) {
   /* Phones: the hand strip takes the full bottom width. The
      floating tab bar lives at the top of the map, not on the
