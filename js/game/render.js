@@ -1714,22 +1714,13 @@ export class MapRenderer {
       // so mirror that here for the ring to track the visible hex.
       const hexS = Math.min(1, this.zoom / HEX_FULLSIZE_ZOOM);
       const baseR = (vis.kind === 'hex' ? vis.r * hexS : vis.r);
-      // Two concentric rings drawn back-to-back so the selection
-      // is unmistakable even when (a) the popup covers the top
-      // half of the hex on mobile or (b) shadowBlur is silently
-      // dropped by some mobile GPU paths. No shadow on either ring
-      // for that reason.
-      // Outer ring — bright cyan-yellow, well outside the hex.
+      // Single bright yellow pulse ring, well outside the hex.
+      // No shadow (silently dropped by some mobile GPU paths).
+      // The hex's own border styling stays subtle inside the ring.
       ctx.lineWidth = 5;
       ctx.strokeStyle = '#fde047';
       ctx.beginPath();
       ctx.arc(sx, sy, baseR + 16 + pulse * 6, 0, Math.PI * 2);
-      ctx.stroke();
-      // Inner ring — saturated orange, hugging the hex border.
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = '#f97316';
-      ctx.beginPath();
-      ctx.arc(sx, sy, baseR + 5, 0, Math.PI * 2);
       ctx.stroke();
     }
     ctx.restore();
