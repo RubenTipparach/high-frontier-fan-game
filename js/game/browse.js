@@ -580,13 +580,18 @@ function ensureMapShell(host) {
         <button id="turn-tracker" title="View turn tracker"
           aria-label="View turn tracker">🕐</button>
       </div>
+      <button id="map-search-toggle" class="map-search-toggle"
+        title="Search sites" aria-label="Search sites">🔍</button>
       <div class="map-search">
         <input id="map-search-input" type="text" autocomplete="off"
           spellcheck="false" placeholder="Find site…" />
         <button id="map-search-go" title="Fly to site"
           aria-label="Fly to site">🔍</button>
+        <button id="map-search-close" class="map-search-close"
+          title="Close search" aria-label="Close search">×</button>
         <ul id="map-search-suggestions" class="hidden"></ul>
       </div>
+      <div id="map-search-backdrop" class="map-search-backdrop hidden"></div>
       <div class="map-route">
         <span id="route-status" class="muted">Tap a site to plan a route.</span>
         <button id="route-clear" hidden>Clear route</button>
@@ -748,12 +753,38 @@ function wireDebugPanel(renderer) {
 const SEARCH_FLY_ZOOM = 5;
 
 function wireSearch(host) {
-  const input  = host.querySelector('#map-search-input');
-  const goBtn  = host.querySelector('#map-search-go');
-  const list   = host.querySelector('#map-search-suggestions');
+  const input    = host.querySelector('#map-search-input');
+  const goBtn    = host.querySelector('#map-search-go');
+  const list     = host.querySelector('#map-search-suggestions');
+  const toggle   = host.querySelector('#map-search-toggle');
+  const closeBtn = host.querySelector('#map-search-close');
+  const backdrop = host.querySelector('#map-search-backdrop');
+  const searchEl = host.querySelector('.map-search');
   if (!input || !goBtn || !list) return;
   let activeIndex = -1;
   let currentItems = [];
+
+  // Mobile: search lives in a modal triggered by the toolbar 🔍 button.
+  // CSS hides .map-search by default at <720px and shows it as a fixed
+  // modal when .is-open is set. Desktop ignores all of this — the inline
+  // search stays in the toolbar and the toggle/close/backdrop are hidden.
+  function openSearchModal() {
+    searchEl?.classList.add('is-open');
+    backdrop?.classList.remove('hidden');
+    // Defer focus so the keyboard pops AFTER layout settles.
+    setTimeout(() => input.focus(), 0);
+  }
+  function closeSearchModal() {
+    searchEl?.classList.remove('is-open');
+    backdrop?.classList.add('hidden');
+    list.classList.add('hidden');
+  }
+  toggle?.addEventListener('click', () => {
+    if (searchEl?.classList.contains('is-open')) closeSearchModal();
+    else openSearchModal();
+  });
+  closeBtn?.addEventListener('click', closeSearchModal);
+  backdrop?.addEventListener('click', closeSearchModal);
 
   function searchSites(q) {
     if (!_activeData || !q) return [];
@@ -804,6 +835,7 @@ function wireSearch(host) {
     _renderer.flyTo(site, SEARCH_FLY_ZOOM);
     input.value = site.name;
     list.classList.add('hidden');
+    closeSearchModal();
   }
 
   function commit() {
@@ -832,6 +864,7 @@ function wireSearch(host) {
       commit();
     } else if (e.key === 'Escape') {
       list.classList.add('hidden');
+      if (searchEl?.classList.contains('is-open')) closeSearchModal();
     }
   });
   input.addEventListener('focus', () => {

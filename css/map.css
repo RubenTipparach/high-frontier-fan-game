@@ -192,6 +192,90 @@
   letter-spacing: 1px;
 }
 
+/* Search toggle button — opens the search modal on mobile.
+   Desktop hides the toggle (the inline search is always present
+   in the toolbar); mobile hides the inline search and shows the
+   toggle instead. The toggle styling mirrors the other small
+   toolbar icon buttons (🔧 / ⛶ in .map-route). */
+.map-search-toggle {
+  display: none;
+  font-size: 14px;
+  padding: 4px 9px;
+  line-height: 1;
+}
+.map-search-close {
+  display: none;
+}
+.map-search-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  z-index: 29;
+}
+.map-search-backdrop.hidden { display: none; }
+@media (min-width: 721px) {
+  /* Desktop: the inline search stays in the toolbar; the modal
+     chrome (toggle button, close button, backdrop) is irrelevant. */
+  .map-search-backdrop { display: none !important; }
+}
+@media (max-width: 720px) {
+  /* Mobile: hide the inline search in the toolbar by default.
+     Tapping the 🔍 toolbar button promotes it to a fixed-position
+     modal anchored just below the toolbar. */
+  .map-toolbar .map-search {
+    display: none;
+  }
+  .map-toolbar .map-search.is-open {
+    display: flex;
+    position: fixed;
+    top: 60px;
+    left: 16px;
+    right: 16px;
+    z-index: 30;
+    padding: 12px 12px 14px;
+    background: rgba(15, 16, 35, 0.97);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6);
+    gap: 6px;
+  }
+  .map-toolbar .map-search.is-open input {
+    font-size: 14px;
+    padding: 8px 10px;
+  }
+  .map-toolbar .map-search.is-open #map-search-go {
+    font-size: 16px;
+    padding: 6px 10px;
+  }
+  .map-toolbar .map-search.is-open .map-search-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    font-size: 20px;
+    line-height: 1;
+    padding: 0;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--ink);
+  }
+  .map-toolbar .map-search.is-open ul {
+    /* Anchor the suggestions list inside the modal — the modal
+       itself is the offset parent now. */
+    left: 12px;
+    right: 12px;
+    top: calc(100% + 6px);
+  }
+  .map-search-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
 /* Turn-clock confirm dialog + tracker modal + 3D die. State
    model lives in js/game/turn-clock.js; this block is the visual
    layer. Toolbar button styles for the turn controls live on the
