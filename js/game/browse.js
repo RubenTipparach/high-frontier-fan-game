@@ -2560,6 +2560,9 @@ function showSitePopupFor(site) {
   // pure-inspection affordance (no game state changes) and goes
   // LAST per the CLAUDE.md style rule - all real game actions
   // (Plan rocket route, Prospect, Refuel) precede it.
+  const openRouteOptions = () => openRouteOptionsModal(() => {
+    if (_selectedId) refreshOpenSitePopup();
+  });
   const actions = [
     {
       // Plan the rocket's actual flight from LEO to this site,
@@ -2582,14 +2585,18 @@ function showSitePopupFor(site) {
         label: '⚙',
         variant: 'secondary',
         title: `Route options (current priority: ${_routePriority} first)`,
-        onClick: () => {
-          openRouteOptionsModal(() => {
-            // After the modal closes, re-render the popup so the
-            // tooltip on the gear reflects the new priority.
-            if (_selectedId) refreshOpenSitePopup();
-          });
-        },
+        onClick: openRouteOptions,
       },
+    },
+    // Fallback row: if the inline trailing pair fails to render
+    // (cache / specificity / etc.) the gear still shows as its
+    // own action button below. Cheap insurance; collapses to a
+    // no-op when the pair works because the player just sees two
+    // affordances for the same modal.
+    {
+      label: `⚙ Route options (${_routePriority} first)`,
+      variant: 'secondary',
+      onClick: openRouteOptions,
     },
   ];
   // Prospect action - only show when there's an active prospector
