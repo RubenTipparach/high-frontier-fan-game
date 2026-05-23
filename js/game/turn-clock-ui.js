@@ -270,32 +270,38 @@ export function openEventLegend() {
 
   const panel = document.createElement('div');
   panel.className = 'event-legend-panel';
-  // Build one row per d6 face. For faces 5-6, group the three
-  // seasonal entries (Anarchy / Budget Cuts / Solar Flare) into a
-  // single row whose body lists each season variant.
+  // Build one row per UNIQUE pip group. Faces that share an event
+  // collapse into a single row labelled with both glyphs (1-2
+  // Inspiration, 5-6 season-dependent). The d6 only has six
+  // outcomes really, but three of them straddle pairs of faces.
+  const groups = [
+    { faces: [1, 2], rolls: [1] },     // Inspiration covers 1 + 2
+    { faces: [3],    rolls: [3] },     // Glitch
+    { faces: [4],    rolls: [4] },     // Pad Explosion
+    { faces: [5, 6], rolls: [5] },     // Anarchy / Budget Cuts / Solar Flare
+  ];
   const all = Object.values(EVENT_TABLE);
-  const rowsByFace = new Map();
-  for (let f = 1; f <= 6; f++) {
-    rowsByFace.set(f, all.filter((e) => e.rolls.includes(f)));
-  }
-  const rowHtml = (face) => {
-    const evs = rowsByFace.get(face);
+  const rowHtml = (group) => {
+    const evs = all.filter((e) => group.rolls.some((r) => e.rolls.includes(r)));
     if (!evs.length) return '';
+    const pipsHtml = group.faces.map((f) => DIE_GLYPHS[f - 1]).join('');
+    const facesLabel = group.faces.join('-');
     const isMulti = evs.length > 1;
     const body = isMulti
-      ? evs.map((e) => `
+      ? `<ul class="ev-legend-seasons">${evs.map((e) => `
           <li>
             <span class="ev-legend-season ev-season-${e.season}">Season ${e.season}</span>
             <strong>${e.icon} ${e.name}</strong>
             <p>${e.text}</p>
-          </li>`).join('')
+          </li>`).join('')}</ul>`
       : `<p><strong>${evs[0].icon} ${evs[0].name}</strong><br>${evs[0].text}</p>`;
     return `
-      <li class="ev-legend-row" data-face="${face}">
-        <div class="ev-legend-pip">${DIE_GLYPHS[face - 1]}<em>${face}</em></div>
-        <div class="ev-legend-body">
-          ${isMulti ? `<ul class="ev-legend-seasons">${body}</ul>` : body}
+      <li class="ev-legend-row" data-faces="${facesLabel}">
+        <div class="ev-legend-pip">
+          <span class="ev-legend-glyphs">${pipsHtml}</span>
+          <em>${facesLabel}</em>
         </div>
+        <div class="ev-legend-body">${body}</div>
       </li>
     `;
   };
@@ -307,7 +313,7 @@ export function openEventLegend() {
       (slots ${EVENT_SLOTS.join(', ')}). Faces 5-6 vary by season.
     </p>
     <ol class="event-legend-list">
-      ${[1,2,3,4,5,6].map(rowHtml).join('')}
+      ${groups.map(rowHtml).join('')}
     </ol>
   `;
   panel.querySelector('.modal-x').addEventListener('click', close);

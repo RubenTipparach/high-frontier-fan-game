@@ -368,7 +368,7 @@
   border-radius: 8px;
 }
 .ev-legend-pip {
-  flex: 0 0 50px;
+  flex: 0 0 64px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -376,10 +376,15 @@
   background: rgba(250, 204, 21, 0.08);
   border: 1px solid rgba(250, 204, 21, 0.35);
   border-radius: 8px;
-  padding: 6px 0;
-  font-size: 26px;
+  padding: 6px 4px;
   line-height: 1;
   color: #fde047;
+}
+.ev-legend-glyphs {
+  display: inline-flex;
+  gap: 2px;
+  font-size: 24px;
+  line-height: 1;
 }
 .ev-legend-pip em {
   display: block;
