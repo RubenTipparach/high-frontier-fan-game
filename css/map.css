@@ -2412,37 +2412,48 @@ body:has(#view-browse:not(.hidden)) #main {
   background: var(--bg);
 }
 
-/* Hand-slot quick actions: an emoji row at the card's bottom
-   edge, revealed on hover. Lives INSIDE .card so it shares the
-   same scale + transform as the Flip button (which sits at
-   bottom-right of the same card). The row is anchored to
-   bottom-left so it sits to the LEFT of Flip - both in the
-   footer band of the card. */
+/* Hand-slot quick actions (desktop): a backdrop pill of emoji
+   buttons that pops up ON TOP of the card's upper area on hover.
+   Lives as a sibling of .card inside .hand-slot so the card's
+   overflow:hidden can't clip it. The slot's 1.18 hover-scale
+   carries the whole row up with the card. Hidden by default;
+   rises + fades in on hover for the "pop up" feel. Anchored
+   inside the slot top - far enough down that it overlays the
+   typebar rather than extending up into the hand-header
+   buttons (🛸 Stack / 🚀 BOOST) that live just above. */
 .hand-slot .hand-quick-actions {
   position: absolute;
-  left: 8px;
-  bottom: 6px;
-  transform: translateY(4px);
+  left: 50%;
+  top: 8px;
+  transform: translate(-50%, 8px) scale(0.85);
+  transform-origin: 50% 50%;
   display: flex;
-  gap: 4px;
+  gap: 5px;
+  padding: 5px 7px;
+  background: rgba(15, 16, 35, 0.92);
+  border: 1px solid rgba(120, 130, 170, 0.45);
+  border-radius: 999px;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.55);
   opacity: 0;
-  transition: opacity 0.15s, transform 0.15s;
-  z-index: 6;
+  transition: opacity 0.18s cubic-bezier(0.2, 0.7, 0.2, 1),
+              transform 0.18s cubic-bezier(0.2, 0.7, 0.2, 1);
+  z-index: 60;
   pointer-events: none;
+  white-space: nowrap;
 }
 .hand-slot:hover .hand-quick-actions {
   opacity: 1;
-  transform: translateY(0);
+  transform: translate(-50%, 0) scale(1);
   pointer-events: auto;
 }
 .hand-q {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   background: rgba(15, 16, 35, 0.92);
   border: 1px solid var(--border);
   color: var(--ink);
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1;
   padding: 0;
   cursor: pointer;

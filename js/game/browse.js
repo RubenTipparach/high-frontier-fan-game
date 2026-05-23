@@ -168,12 +168,12 @@ function wireHandStrip() {
       const cardEl = renderCard(card, { type: kindOf(id) });
       wrap.appendChild(cardEl);
 
-      // Quick-action row appended INSIDE the card element so
-      // it shares the same scale + transform as the Flip
-      // button (which card-ui appends to the card root). Both
-      // end up at the card's actual visible bottom edge -
-      // previously the quick-icons sat at the slot's bottom
-      // edge, which is way below the scaled card.
+      // Quick-action row appended as a sibling of the card so
+      // it CAN'T be clipped by .card's overflow:hidden when it
+      // floats above the card top edge on hover. The slot's
+      // 1.18 hover-scale carries both the card and this row so
+      // they grow together. Positioning + reveal handled in
+      // CSS via .hand-slot:hover.
       const quick = document.createElement('div');
       quick.className = 'hand-quick-actions';
       const qBtn = (cls, glyph, title, handler) => {
@@ -197,7 +197,7 @@ function wireHandStrip() {
         qBtn('q-boost',   '🚀', isBoostMarked(id) ? 'Unmark boost' : 'Mark for boost',
           () => toggleBoostMark(id)),
       );
-      cardEl.appendChild(quick);
+      wrap.appendChild(quick);
 
       // Mobile-only "View" button. On touch devices we drop
       // the hover affordances (no hover on touch) and replace
