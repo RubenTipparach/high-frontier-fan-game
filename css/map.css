@@ -94,6 +94,27 @@
   color: #062136;
   border-color: var(--accent-2);
 }
+/* Aqua balance chip in the turn-controls row. Read-only display
+   surface - clicking it does nothing, but the toolbar position
+   keeps the balance visible while the player plans hazardous
+   moves (each hazard bypass costs 4 aqua). The 💎 + number
+   styling mirrors the in-modal aqua row so the chip and the
+   confirm modal read as the same currency. */
+.map-aqua-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  background: linear-gradient(180deg, #1e3a5f, #0c2540);
+  border: 1px solid #38bdf8;
+  color: #bae6fd;
+  border-radius: 999px;
+  cursor: help;
+  font-variant-numeric: tabular-nums;
+}
+.map-aqua-chip strong { color: #f0f9ff; font-weight: 800; }
 .map-mode-toggle {
   display: inline-flex;
   background: var(--bg-2);
@@ -553,6 +574,125 @@
   background: rgba(125, 211, 252, 0.08);
   border-radius: 4px;
 }
+
+/* Aqua transfer panel inside the fuel-tank modal. Only rendered
+   when the rocket is parked at LEO - converts aqua 1:1 into water
+   up to the tank cap. Same dashed border idiom as the dump-fuel
+   row so it reads as a peer section, not a separate modal. */
+.fuel-tank-aqua {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px dashed #38bdf8;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.fuel-tank-aqua .aqua-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}
+.fuel-tank-aqua .aqua-row strong {
+  color: #bae6fd;
+  font-variant-numeric: tabular-nums;
+}
+.fuel-tank-aqua .aqua-help {
+  margin: 4px 0 6px;
+  font-size: 10px;
+}
+.fuel-tank-aqua .aqua-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.fuel-tank-aqua .aqua-actions .popup-btn {
+  font-size: 11px;
+  padding: 5px 9px;
+}
+
+/* Hazard confirm modal. Reuses the turn-confirm panel chassis
+   plus an extra .hazard-* layer for the route's hazard list, the
+   cost summary, and the three-option action row. The "cannot
+   be undone" line is the headline - emphasising the commitment
+   is the whole point of the modal. */
+.hazard-confirm-overlay { z-index: 85; }
+.hazard-confirm-panel h3 {
+  color: #f97316;
+}
+.hazard-confirm-panel .hazard-list {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 12px;
+  max-height: 140px;
+  overflow-y: auto;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.hazard-confirm-panel .hazard-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px dashed var(--border);
+  font-size: 12px;
+}
+.hazard-confirm-panel .hazard-list li:last-child { border-bottom: none; }
+.hazard-confirm-panel .hazard-list .haz-glyph {
+  font-size: 18px;
+  line-height: 1;
+  min-width: 22px;
+  text-align: center;
+}
+.hazard-confirm-panel .hazard-warning {
+  background: rgba(127, 29, 29, 0.35);
+  border: 1px solid #b91c1c;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.hazard-confirm-panel .hazard-cost-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  margin: 0 0 12px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.hazard-confirm-panel .hazard-cost-row strong { color: #bae6fd; }
+.hazard-actions {
+  flex-direction: column;
+  gap: 6px !important;
+}
+.hazard-actions .popup-btn { width: 100%; text-align: center; }
+.hazard-actions .popup-btn.primary {
+  background: linear-gradient(180deg, #38bdf8, #0284c7);
+  color: #062136;
+  border-color: #075985;
+  font-weight: 700;
+}
+.hazard-actions .popup-btn.primary:disabled {
+  background: #334155;
+  color: #94a3b8;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.hazard-need-aqua {
+  font-size: 11px;
+  text-align: center;
+  margin: 6px 0 0;
+  color: #f87171;
+}
+
 /* Prospect roll modal. Shows the 3D die rolling against the
    site's prospect target. Stays mid-stack so the turn-confirm
    dialog (z80) can still cover it if needed. */

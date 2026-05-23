@@ -35,6 +35,7 @@ import {
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats,
   isAfterburnEngaged, setAfterburn,
+  getAqua, spendAqua, addAqua, onAquaChange,
 } from './rocket.js';
 import { canProspect, computeRaygunTargets } from './scan.js';
 import {
@@ -693,6 +694,10 @@ function ensureMapShell(host) {
           aria-label="End turn">⏭ End turn</button>
         <button id="turn-tracker" title="View turn tracker"
           aria-label="View turn tracker">🕐</button>
+        <span id="aqua-chip" class="map-aqua-chip"
+          title="Aqua balance - spend 4 aqua per hazard to bypass rolls, or convert 1:1 to water at LEO">
+          💎 <strong id="aqua-chip-balance">${getAqua()}</strong>
+        </span>
       </div>
       <button id="map-search-toggle" class="map-search-toggle"
         title="Search sites" aria-label="Search sites">🔍</button>
@@ -848,6 +853,15 @@ function ensureMapShell(host) {
     if (moveBtn.dataset.state === 'undo') undoRocketMove();
     else                                  moveRocket();
   });
+  // Aqua balance chip - live-updates on any spend / income so the
+  // player sees the number tick down when a hazard bypass or an
+  // aqua → water transfer commits.
+  const aquaChipBal = host.querySelector('#aqua-chip-balance');
+  if (aquaChipBal) {
+    const refreshAqua = () => { aquaChipBal.textContent = String(getAqua()); };
+    refreshAqua();
+    onAquaChange(refreshAqua);
+  }
   host.querySelector('#dbg-close').addEventListener('click', () => {
     host.querySelector('#map-debug').classList.add('hidden');
     if (_renderer) _renderer.setOption('debug', false);
@@ -1627,6 +1641,161 @@ function isLeoSite(site) {
   return !!site && site.type === 'lagrange' && site.name === 'LEO';
 }
 
+// Hazard classification. A node is a "hazard" when entering it
+// forces a survival roll (or 4 aqua to bypass). Three flavours
+// today, all drawn with their own glyph in render.js:
+//   - explicit hazard flag → ☠ skull (burn / lagrange nodes
+//     flagged by the planner JSON's `hazard:true`)
+//   - radhaz waypoint type → ☢ radiation trefoil
+//   - venus waypoint type  → 🪂 aerobrake corridor
+// Returns the glyph + a short label so the confirm modal can list
+// what the player is about to fly through.
+const HAZARD_COST_PER = 4;
+function classifyHazard(site) {
+  if (!site) return null;
+  if (site.type === 'radhaz') return { glyph: '☢', label: 'Radiation hazard' };
+  if (site.type === 'venus')  return { glyph: '🪂', label: 'Aerobrake corridor' };
+  if (site.hazard)            return { glyph: '☠', label: 'Hazard node' };
+  return null;
+}
+function isHazardSite(site) {
+  return classifyHazard(site) !== null;
+}
+
+// Walk every endpoint a route's turn-1 segments would touch,
+// collecting the distinct hazard sites along the way. We check
+// only `to` endpoints (the rocket is leaving `from` and arriving
+// at `to`, so the starting node is already paid-for) plus any
+// shared intermediate node, deduped by id so a hazard touched by
+// two adjacent segments doesn't double-charge.
+function routeHazards(segments) {
+  if (!_activeData || !segments || !segments.length) return [];
+  const seen = new Set();
+  const out = [];
+  for (const seg of segments) {
+    const site = _activeData.sites.find((x) => x.id === seg.to);
+    if (!site) continue;
+    const h = classifyHazard(site);
+    if (!h) continue;
+    if (seen.has(site.id)) continue;
+    seen.add(site.id);
+    out.push({ site, ...h });
+  }
+  return out;
+}
+
+// Once-per-turn flag: a move that was paid-out or rolled for at
+// a hazard cannot be undone. Persisted so a reload mid-turn
+// preserves the lockout; cleared on end-turn via onTurnChange.
+const STORAGE_HAZARDOUS_MOVE = 'hf-sandbox-hazardous-move';
+let _lastMoveHazardous = (() => {
+  try { return localStorage.getItem(STORAGE_HAZARDOUS_MOVE) === '1'; }
+  catch { return false; }
+})();
+function setHazardousMove(on) {
+  _lastMoveHazardous = !!on;
+  try {
+    if (_lastMoveHazardous) localStorage.setItem(STORAGE_HAZARDOUS_MOVE, '1');
+    else                    localStorage.removeItem(STORAGE_HAZARDOUS_MOVE);
+  } catch { /* private mode */ }
+}
+// End-of-turn always clears the lockout - a fresh turn refunds
+// the move budget too, but the hazardous flag stays scoped to
+// the turn that flew through the hazard.
+onTurnChange(() => {
+  if (getMovesRemaining() > 0 && _lastMoveHazardous) setHazardousMove(false);
+});
+
+// Three-button modal for the "your route crosses hazards" prompt.
+// Resolves to one of:
+//   'pay'    - player pays HAZARD_COST_PER × N aqua to bypass
+//   'roll'   - player rolls a d6 per hazard, no undo allowed
+//   'cancel' - back to planning; move not consumed
+// Pay button is disabled (but still rendered, with a help line)
+// when the balance can't cover the bill. The wording leans hard
+// on "cannot be undone" because the rulebook commits the dice as
+// soon as they hit the table - same idiom here.
+function hazardConfirmModal(hazards) {
+  return new Promise((resolve) => {
+    document.querySelector('.confirm-modal-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay hazard-confirm-overlay';
+    const close = (val) => {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(val);
+    };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close('cancel'); });
+    const onKey = (e) => {
+      if (e.key === 'Escape') close('cancel');
+    };
+    document.addEventListener('keydown', onKey);
+
+    const n = hazards.length;
+    const cost = n * HAZARD_COST_PER;
+    const have = getAqua();
+    const canPay = have >= cost;
+    const list = hazards.map((h) =>
+      `<li><span class="haz-glyph">${h.glyph}</span> `
+      + `${esc(h.site.name || h.label)} <em class="muted">${esc(h.label)}</em></li>`
+    ).join('');
+
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel hazard-confirm-panel';
+    panel.innerHTML = `
+      <h3>⚠ Hazard zone ahead</h3>
+      <p>Your planned route passes through
+        <strong>${n}</strong> hazard${n === 1 ? '' : 's'}:</p>
+      <ul class="hazard-list">${list}</ul>
+      <p class="hazard-warning">
+        <strong>Whatever you pick, this move CANNOT be undone</strong>
+        - hazard rolls and aqua spends commit the moment the dice
+        leave the cup. End the turn to clear the lockout.
+      </p>
+      <div class="hazard-cost-row">
+        <span>💎 Aqua balance: <strong>${have}</strong></span>
+        <span>Bypass cost: <strong>${cost}</strong>
+          <em class="muted">(${HAZARD_COST_PER}/hazard)</em></span>
+      </div>
+      <div class="turn-confirm-actions hazard-actions">
+        <button type="button" class="popup-btn primary" data-act="pay"
+          ${canPay ? '' : 'disabled'}
+          title="${canPay ? 'Spend ' + cost + ' aqua to skip the rolls' : 'Not enough aqua to bypass all hazards'}">
+          💎 Pay ${cost} aqua to bypass
+        </button>
+        <button type="button" class="popup-btn" data-act="roll"
+          title="Roll a d6 for each hazard. Cannot be undone.">
+          🎲 Roll ${n} d6 (no undo)
+        </button>
+        <button type="button" class="popup-btn" data-act="cancel"
+          title="Return to planning; no move spent">
+          ✕ Cancel move
+        </button>
+      </div>
+      ${canPay ? '' : '<p class="muted hazard-need-aqua">Pay disabled - need '
+        + (cost - have) + ' more aqua. Roll or cancel instead.</p>'}
+    `;
+    for (const b of panel.querySelectorAll('button[data-act]')) {
+      b.addEventListener('click', () => close(b.dataset.act));
+    }
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+  });
+}
+
+// Small info modal used when the player tries to undo a hazardous
+// move. Single OK button; the lockout is informational only.
+function blockedUndoModal() {
+  return confirmModal({
+    title: '⚠ Move locked',
+    body: 'This turn\'s move flew through a hazard spot. '
+      + 'Hazard rolls and aqua bypasses commit the move - it '
+      + 'cannot be undone. End the turn to start fresh.',
+    yes: 'OK',
+    no: '',
+  });
+}
+
 // Sunspot Cube d6 events. Rules text + lookup live in turn-clock.js
 // (single source of truth - the tracker modal reads the same table).
 // **Sandbox mode**: we DO NOT apply the event to game state. The
@@ -1882,16 +2051,23 @@ function confirmModal({ title, body, yes = 'OK', no = 'Cancel' }) {
     document.addEventListener('keydown', onKey);
     const panel = document.createElement('div');
     panel.className = 'turn-confirm-panel';
+    // Single-button (info) mode: pass no='' to hide the secondary
+    // button so the modal reads as an acknowledge instead of a
+    // yes/no. The remaining Yes resolves true on click + Enter.
+    const noBtn = no
+      ? `<button type="button" class="popup-btn" data-act="no">${esc(no)}</button>`
+      : '';
     panel.innerHTML = `
       <h3>${esc(title)}</h3>
       <p>${body}</p>
       <div class="turn-confirm-actions">
         <button type="button" class="popup-btn primary" data-act="yes">${esc(yes)}</button>
-        <button type="button" class="popup-btn"         data-act="no">${esc(no)}</button>
+        ${noBtn}
       </div>
     `;
     panel.querySelector('[data-act="yes"]').addEventListener('click', () => close(true));
-    panel.querySelector('[data-act="no"]').addEventListener('click',  () => close(false));
+    const noEl = panel.querySelector('[data-act="no"]');
+    if (noEl) noEl.addEventListener('click', () => close(false));
     overlay.appendChild(panel);
     document.body.appendChild(overlay);
   });
@@ -2031,6 +2207,23 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
         title="Drain 1 water from the tank">💧⤓ Dump 1</button>
       <button type="button" class="popup-btn popup-btn-secondary" id="tank-dump-all"
         title="Drain everything (future: forms an outpost stack once factories land)">💧⤓ Dump all</button>
+    </div>
+    <div class="fuel-tank-aqua" id="tank-aqua-section" hidden>
+      <div class="aqua-row">
+        <span>💎 Aqua balance</span>
+        <strong id="aqua-balance">${getAqua()}</strong>
+      </div>
+      <p class="muted aqua-help">
+        Convert aqua to water 1:1. Only available at LEO.
+      </p>
+      <div class="aqua-actions">
+        <button type="button" class="popup-btn popup-btn-secondary" id="aqua-buy-1"
+          title="Convert 1 aqua into 1 water">💎→💧 +1</button>
+        <button type="button" class="popup-btn popup-btn-secondary" id="aqua-buy-5"
+          title="Convert 5 aqua into 5 water">💎→💧 +5</button>
+        <button type="button" class="popup-btn" id="aqua-buy-max"
+          title="Fill the tank to its cap by converting aqua">💎→💧 Max fill</button>
+      </div>
     </div>
     <p class="muted fuel-tank-dump-note">
       Dumped water is destroyed for now. Stage 3+ turns this into
@@ -2278,6 +2471,103 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
       undoable: false,
     });
   });
+
+  // Aqua → water transfer panel. Gated behind LEO presence -
+  // refilling water from the aqua reserve is a "back at port"
+  // affordance, not something you can do mid-burn. Tank cap is
+  // the lift-limit `cap` already computed above so the buttons
+  // can't push past wet=32 or past thrust-mass.
+  const aquaSection = panel.querySelector('#tank-aqua-section');
+  const aquaBalEl   = panel.querySelector('#aqua-balance');
+  const aquaBuy1Btn = panel.querySelector('#aqua-buy-1');
+  const aquaBuy5Btn = panel.querySelector('#aqua-buy-5');
+  const aquaBuyMaxBtn = panel.querySelector('#aqua-buy-max');
+  const atLeo = isLeoSite(getRocketSite());
+  if (atLeo && aquaSection) aquaSection.hidden = false;
+  const refreshAquaButtons = () => {
+    if (!aquaSection || aquaSection.hidden) return;
+    const bal = getAqua();
+    const cur = getTankWater();
+    const room = Math.max(0, cap - cur);
+    if (aquaBalEl) aquaBalEl.textContent = String(bal);
+    if (aquaBuy1Btn)   aquaBuy1Btn.disabled   = bal < 1 || room < 1;
+    if (aquaBuy5Btn)   aquaBuy5Btn.disabled   = bal < 5 || room < 1;
+    if (aquaBuyMaxBtn) aquaBuyMaxBtn.disabled = bal < 1 || room < 1;
+  };
+  refreshAquaButtons();
+  // Reuse the same drainTo-style animation in reverse: get the
+  // visual "from" off the on-screen readout and tween up to the
+  // new tank water level. Wraps the spend + addFuel pair so a
+  // failed spend doesn't leave the level mid-animation.
+  const fillFromAqua = (amount, e) => {
+    e?.stopPropagation();
+    if (!atLeo) return;
+    const cur = getTankWater();
+    const room = Math.max(0, cap - cur);
+    const want = Math.min(amount, room, getAqua());
+    if (want <= 0) { refreshAquaButtons(); return; }
+    if (!spendAqua(want)) { refreshAquaButtons(); return; }
+    addFuel(want);
+    if (raf) cancelAnimationFrame(raf);
+    clearDrops();
+    animating = true;
+    const fromLevel = parseFloat(nowReadout.textContent || String(cur));
+    const toLevel = getTankWater();
+    if (fromLevel === toLevel) {
+      animating = false;
+      refreshAquaButtons();
+      return;
+    }
+    const t0 = performance.now();
+    const tick = (now) => {
+      const t = Math.min(1, (now - t0) / 400);
+      const eased = 1 - Math.pow(1 - t, 3);
+      const v = fromLevel + (toLevel - fromLevel) * eased;
+      setLevel(v);
+      // Spawn droplets for the "pour" feel even outside the
+      // main fill animation - bounded by stepDrops's clock.
+      if (animating && now - lastSpawn > 110) {
+        spawnDrop(now);
+        lastSpawn = now;
+      }
+      // Tick existing drops down.
+      const dts = 16 / 1000;
+      for (let i = activeDrops.length - 1; i >= 0; i--) {
+        const d = activeDrops[i];
+        d.vy += 220 * dts;
+        d.y  += d.vy * dts;
+        if (d.y >= _surfaceY - 1) {
+          spawnSplash(d.x, _surfaceY);
+          d.el.remove();
+          activeDrops.splice(i, 1);
+          continue;
+        }
+        d.el.setAttribute('transform', `translate(${d.x.toFixed(1)} ${d.y.toFixed(1)})`);
+      }
+      if (t < 1) raf = requestAnimationFrame(tick);
+      else { animating = false; raf = 0; refreshAquaButtons(); refreshDumpButtons(); }
+    };
+    raf = requestAnimationFrame(tick);
+    logAction({
+      type: 'aqua_transfer',
+      icon: '💎→💧',
+      summary: `Converted ${want} aqua → ${want} water (tank ${getTankWater()}/${cap})`,
+      undoable: false,
+    });
+  };
+  aquaBuy1Btn?.addEventListener('click',   (e) => fillFromAqua(1, e));
+  aquaBuy5Btn?.addEventListener('click',   (e) => fillFromAqua(5, e));
+  aquaBuyMaxBtn?.addEventListener('click', (e) => fillFromAqua(cap, e));
+  const unsubAqua = onAquaChange(refreshAquaButtons);
+  const unsubRocket = onRocketChange(refreshAquaButtons);
+  // Cleanup: detach listeners when the overlay tears down so a
+  // closed modal doesn't keep responding to balance changes.
+  const origRemove = overlay.remove.bind(overlay);
+  overlay.remove = () => {
+    unsubAqua();
+    unsubRocket();
+    origRemove();
+  };
 }
 
 // Read the prospector's ISRU rating off the active face's
@@ -2586,6 +2876,57 @@ async function moveRocket() {
     setStatus('Planned route has no current-turn segments.');
     return false;
   }
+  // Hazard pre-flight check. If the route crosses skull / radhaz /
+  // aerobrake nodes, force a player decision BEFORE consuming the
+  // move - paying or rolling locks out undo for the rest of the
+  // turn. Cancelling returns to the planning state with the
+  // move budget untouched.
+  const hazards = routeHazards(turn1);
+  let hazardChoice = null;
+  if (hazards.length) {
+    hazardChoice = await hazardConfirmModal(hazards);
+    if (hazardChoice === 'cancel' || hazardChoice == null) {
+      setStatus('Move cancelled - no aqua spent, no rolls made.');
+      return false;
+    }
+    if (hazardChoice === 'pay') {
+      const cost = hazards.length * HAZARD_COST_PER;
+      if (!spendAqua(cost)) {
+        // Race-condition guard: the balance changed between modal
+        // open and confirm. Bail with a status line instead of
+        // silently leaving the player out-of-pocket.
+        setStatus(`Need ${cost} aqua to bypass - balance only ${getAqua()}.`);
+        return false;
+      }
+      logAction({
+        type: 'hazard_pay',
+        icon: '💎',
+        summary: `Paid ${cost} aqua to bypass ${hazards.length} hazard`
+          + `${hazards.length === 1 ? '' : 's'}`,
+        undoable: false,
+        data: { cost, hazards: hazards.map((h) => h.site.id) },
+      });
+    } else if (hazardChoice === 'roll') {
+      // Sandbox: roll 1d6 per hazard, log each result. Threshold +
+      // ship-destruction kicks in once Stage 3 wires the engine;
+      // for now the dice surface in the log so the player can see
+      // what would have fired at the table.
+      const rolls = hazards.map((h) => ({
+        site: h.site, label: h.label, glyph: h.glyph,
+        d6: 1 + Math.floor(Math.random() * 6),
+      }));
+      for (const r of rolls) {
+        const verdict = r.d6 >= 3 ? '✓ survived (≥ 3)' : '✗ critical (< 3)';
+        logAction({
+          type: 'hazard_roll',
+          icon: r.glyph,
+          summary: `${r.glyph} ${esc(r.site.name)} d6=${r.d6} ${verdict}`,
+          undoable: false,
+          data: { siteId: r.site.id, d6: r.d6 },
+        });
+      }
+    }
+  }
   if (!consumeMove()) {
     setStatus('No moves left this turn - end turn to refresh.');
     return false;
@@ -2625,12 +2966,23 @@ async function moveRocket() {
   // auto-cash any chits if we just landed at LEO. Each side-
   // effect appends to the mission log so the player can audit
   // (and undo) the whole sequence as one move.
+  // Hazardous moves (paid OR rolled) lock undo for the turn -
+  // both the log entry's undoable flag and a separate flag the
+  // undo button consults so the lockout dialog can explain WHY
+  // the move is sticky.
+  if (hazardChoice === 'pay' || hazardChoice === 'roll') {
+    setHazardousMove(true);
+  }
   logAction({
     type: 'move',
     icon: '🛸',
-    summary: `Moved to ${arrivedName}`,
-    undoable: true,
-    data: { siteId: newSiteId, zone: arrivedZone },
+    summary: hazardChoice === 'pay'
+      ? `Moved to ${arrivedName} (paid past ${hazards.length} hazard${hazards.length === 1 ? '' : 's'})`
+      : hazardChoice === 'roll'
+        ? `Moved to ${arrivedName} (rolled through ${hazards.length} hazard${hazards.length === 1 ? '' : 's'})`
+        : `Moved to ${arrivedName}`,
+    undoable: hazardChoice !== 'pay' && hazardChoice !== 'roll',
+    data: { siteId: newSiteId, zone: arrivedZone, hazardous: !!hazardChoice && hazardChoice !== 'cancel' },
   });
   if (willAwardChit) {
     awardChitForZone(arrivedZone, getTurn());
@@ -2692,6 +3044,13 @@ async function moveRocket() {
 async function undoRocketMove() {
   if (!_renderer) return false;
   if (_rocketAnimating) return false;
+  // Hazard-lockout: if the last move spent aqua or rolled dice,
+  // the undo is blocked for the rest of the turn. Show a clear
+  // "why" dialog so the player isn't confused by the dead button.
+  if (_lastMoveHazardous) {
+    await blockedUndoModal();
+    return false;
+  }
   if (!_moveSnapshot) {
     // No snapshot but the budget is spent - just refund so the
     // button flips back to the move face. Rare path (e.g. moved
