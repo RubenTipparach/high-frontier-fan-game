@@ -2543,13 +2543,25 @@ export class MapRenderer {
         // share one popup line and the gear takes its natural
         // square width instead of stretching.
         if (a.trailing && a.trailing.label) {
+          // Inline styles win against the generic .popup-btn rule
+          // no matter what CSS happens to load - the pair sat
+          // invisible behind specificity wars before. Stylesheet
+          // .popup-action-pair / .pair-main / .pair-trailing
+          // still applies as a backup; the inline values just
+          // guarantee the layout works first paint.
           const slot = document.createElement('div');
           slot.className = 'popup-action-pair';
+          slot.style.display = 'flex';
+          slot.style.gap = '6px';
+          slot.style.alignItems = 'stretch';
           const b = document.createElement('button');
           b.type = 'button';
           b.className = `popup-btn popup-btn-${variant} pair-main`;
           b.textContent = a.label;
           b.disabled = !!a.disabled;
+          b.style.flex = '1 1 auto';
+          b.style.width = 'auto';
+          b.style.minWidth = '0';
           if (a.title) b.title = a.title;
           if (a.onClick) b.addEventListener('click', a.onClick);
           const g = document.createElement('button');
@@ -2557,6 +2569,12 @@ export class MapRenderer {
           g.className = `popup-btn popup-btn-${a.trailing.variant || 'secondary'} pair-trailing`;
           g.textContent = a.trailing.label;
           g.disabled = !!a.trailing.disabled;
+          g.style.flex = '0 0 auto';
+          g.style.width = '40px';
+          g.style.minWidth = '40px';
+          g.style.padding = '0';
+          g.style.fontSize = '16px';
+          g.style.lineHeight = '1';
           if (a.trailing.title) g.title = a.trailing.title;
           if (a.trailing.onClick) g.addEventListener('click', a.trailing.onClick);
           slot.appendChild(b);
