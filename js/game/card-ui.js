@@ -39,7 +39,7 @@ const SPECTRAL_LABEL = {
 // needs a purple-card (reactor) in the stack" without reading
 // labels. Kinds that aren't supplied by a card type fall
 // through to a neutral grey chip.
-const REQ_SUPPLIER_TYPE = {
+export const REQ_SUPPLIER_TYPE = {
   'reactor-fission':    'reactor',
   'reactor-fusion':     'reactor',
   'reactor-antimatter': 'reactor',
@@ -51,7 +51,7 @@ const REQ_SUPPLIER_TYPE = {
   'crew-quarters':      'robonaut',
 };
 
-const REQUIREMENT_VIS = {
+export const REQUIREMENT_VIS = {
   // Power-source supports. These are the ONLY columns under the
   // spreadsheet's "Support Requirements" banner - operational
   // flags like Solar, Push, ISRU, Air Eater are card properties
@@ -71,7 +71,7 @@ const REQUIREMENT_VIS = {
   'spin-grav':          { glyph: '💃', label: 'Spin gravity'           },
 };
 
-export function renderCard(card, { type, supplied } = {}) {
+export function renderCard(card, { type, supplied, onSupportClick } = {}) {
   const kind = type || (card.faces && card.faces.primary && card.faces.primary.role ? 'crew' : 'patent');
   const el = document.createElement('div');
   el.className = `card kind-${kind}` + (kind === 'patent' ? ` type-${card.type}` : '');
@@ -83,9 +83,9 @@ export function renderCard(card, { type, supplied } = {}) {
   // so only the side facing the viewer is painted.
   const inner = document.createElement('div');
   inner.className = 'card-inner';
-  inner.appendChild(buildFace(card, 'primary', kind, supplied));
+  inner.appendChild(buildFace(card, 'primary', kind, supplied, { onSupportClick }));
   if (card.faces && card.faces.secondary) {
-    inner.appendChild(buildFace(card, 'secondary', kind, supplied));
+    inner.appendChild(buildFace(card, 'secondary', kind, supplied, { onSupportClick }));
   }
   el.appendChild(inner);
 
@@ -116,7 +116,7 @@ export function renderCard(card, { type, supplied } = {}) {
   return el;
 }
 
-function buildFace(card, sideName, kind, supplied) {
+function buildFace(card, sideName, kind, supplied, opts = {}) {
   const face = document.createElement('div');
   face.className = 'card-face';
   face.dataset.face = sideName;
@@ -391,13 +391,35 @@ function buildFace(card, sideName, kind, supplied) {
     if (!groups.has(supplier)) groups.set(supplier, []);
     groups.get(supplier).push(r);
   }
-  const makeChip = (visGlyphs, supplier, tip, satisfied) => {
+  // When the caller wires onSupportClick, each chip becomes a
+  // tap target that hands back the requirement-kind(s) it covers.
+  // OR-groups (e.g. a reactor chip stamped X/∿/💣) carry all
+  // member kinds so the library can filter to any-of-the-above.
+  const onSupportClick = opts && opts.onSupportClick;
+  const makeChip = (visGlyphs, supplier, tip, satisfied, kinds) => {
     const span = document.createElement('span');
     span.className = 'req';
     span.setAttribute('data-tip', satisfied ? `${tip} - satisfied` : tip);
     if (supplier) span.dataset.supplier = supplier;
     if (satisfied) span.classList.add('is-satisfied');
+    if (kinds && kinds.length) span.dataset.kinds = kinds.join(',');
     span.innerHTML = visGlyphs;
+    if (onSupportClick && kinds && kinds.length) {
+      span.classList.add('is-clickable');
+      span.setAttribute('role', 'button');
+      span.tabIndex = 0;
+      span.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        ev.preventDefault();
+        onSupportClick(kinds, { label: tip });
+      });
+      span.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          onSupportClick(kinds, { label: tip });
+        }
+      });
+    }
     reqHost.appendChild(span);
   };
   for (const [supplier, group] of groups) {
@@ -413,7 +435,8 @@ function buildFace(card, sideName, kind, supplied) {
       : labelParts[0];
     // OR-group satisfied if ANY member kind is in the supplied set.
     const satisfied = !!supplied && group.some((r) => supplied.has(r.kind));
-    makeChip(parts.join('<span class="req-or">/</span>'), supplier, tip, satisfied);
+    const kinds = group.map((r) => r.kind);
+    makeChip(parts.join('<span class="req-or">/</span>'), supplier, tip, satisfied, kinds);
   }
   for (const r of loose) {
     const vis = REQUIREMENT_VIS[r.kind] || { glyph: '◇', label: r.kind };
@@ -425,7 +448,7 @@ function buildFace(card, sideName, kind, supplied) {
     const satisfied = !!supplied && supplied.has(r.kind);
     makeChip(`${iconHtml}${count}`, null,
       r.count > 1 ? `${vis.label} ×${r.count}` : vis.label,
-      satisfied);
+      satisfied, [r.kind]);
   }
 
   // Blurb / ability text varies per face. The Tier-2 dark side
@@ -613,11 +636,11 @@ function svgBallerinaContent(cx, cy, size) {
 }
 
 // Inline SVG wrapper for use inside HTML chips.
-function svgSunChip(size) {
+export function svgSunChip(size) {
   return `<svg class="req-svg" viewBox="-12 -12 24 24" `
     + `width="${size}" height="${size}">${svgSunContent(0, 0, 22)}</svg>`;
 }
-function svgBallerinaChip(size) {
+export function svgBallerinaChip(size) {
   return `<svg class="req-svg" viewBox="-12 -12 24 24" `
     + `width="${size}" height="${size}">${svgBallerinaContent(0, 1, 22)}</svg>`;
 }

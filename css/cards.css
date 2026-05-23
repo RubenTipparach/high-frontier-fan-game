@@ -287,6 +287,23 @@
    a green wash when another card in the stack supplies that
    support kind. OR-groups (reactor X / ∿ / 💣) tick green when
    ANY member kind is supplied. */
+/* Clickable support chip - wired when the caller passes
+   onSupportClick to renderCard (rocket-stack modal + the hand /
+   deck-tap modals). The chip behaves as a button: hover ring +
+   pointer cursor signal that tapping it does something (jumps
+   to the library Supports tab filtered to this kind). */
+.card-requires .req.is-clickable {
+  cursor: pointer;
+  transition: transform 0.08s ease, box-shadow 0.08s ease;
+}
+.card-requires .req.is-clickable:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 2px var(--accent-2), 0 2px 4px rgba(0, 0, 0, 0.45);
+}
+.card-requires .req.is-clickable:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-2);
+}
 .card-requires .req.is-satisfied {
   background: rgba(34, 197, 94, 0.22);
   border-color: #22c55e;

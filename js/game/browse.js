@@ -45,7 +45,11 @@ import { CREW } from '../../data/crew.js';
 import { MILESTONES } from '../../data/glory.js';
 import { POLITICS } from '../../data/politics.js';
 import { SITES_BY_ID } from '../../data/sites.js';
-import { renderCard, thrustVisual, attachTipsTo } from './card-ui.js';
+import {
+  renderCard, thrustVisual, attachTipsTo,
+  REQUIREMENT_VIS, REQ_SUPPLIER_TYPE,
+  svgSunChip, svgBallerinaChip,
+} from './card-ui.js';
 import {
   logAction, getActions, getHistory, popLastOfType,
   commitTurn as commitLogTurn, resetLog, onChange as onLogChange,
@@ -421,7 +425,13 @@ function openDeckTapModal(card, kind) {
 
   const panel = document.createElement('div');
   panel.className = 'card-modal-panel';
-  const cardEl = renderCard(card, { type: kind });
+  const cardEl = renderCard(card, {
+    type: kind,
+    onSupportClick: (kinds) => {
+      close();
+      openPatentsSupports(kinds);
+    },
+  });
   cardEl.classList.add('card-modal-card');
   panel.appendChild(cardEl);
 
@@ -461,7 +471,13 @@ function openCardModal(card, kind, slotIdx) {
 
   const panel = document.createElement('div');
   panel.className = 'card-modal-panel';
-  const cardEl = renderCard(card, { type: kind });
+  const cardEl = renderCard(card, {
+    type: kind,
+    onSupportClick: (kinds) => {
+      close();
+      openPatentsSupports(kinds);
+    },
+  });
   cardEl.classList.add('card-modal-card');
   panel.appendChild(cardEl);
 
@@ -1511,8 +1527,16 @@ function openRocketStackModal() {
       // Only the active thruster's supports are validated against
       // the rest of the stack - passing `supplied` for others would
       // mark chips ✓ that aren't actually contributing to flight.
+      // Wire support-chip taps so the player can jump straight
+      // from "this thruster needs X" to the library view of every
+      // card that supplies X. We close the rocket-stack modal
+      // first so the patents pane comes up on a clean surface.
       const cardOpts = { type: slot.kind || 'patent' };
       if (isThruster && slot.id === activeId) cardOpts.supplied = supplied;
+      cardOpts.onSupportClick = (kinds) => {
+        close();
+        openPatentsSupports(kinds);
+      };
       wrap.appendChild(renderCard(card, cardOpts));
 
       const actions = document.createElement('div');
@@ -3190,6 +3214,79 @@ function esc(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// Kinds whose supplier is implicit ("any reactor", "any
+// generator") - clicking the chip means filter to all members of
+// the family. Used both by the card-grid filter and the sub-tab
+// auto-select when a card chip points the library here.
+const SUPPORT_KIND_EXPANSIONS = {
+  'reactor-any': ['reactor-fission', 'reactor-fusion', 'reactor-antimatter'],
+};
+function expandSupportKinds(kinds) {
+  const out = new Set();
+  for (const k of kinds) {
+    const exp = SUPPORT_KIND_EXPANSIONS[k];
+    if (exp) for (const e of exp) out.add(e);
+    else out.add(k);
+  }
+  return [...out];
+}
+
+// Build the canonical list of support kinds that have at least
+// one supplier card. Driven off the live deck so the sub-tab row
+// stays in sync with whatever the spreadsheet ships - new
+// supplies show up automatically.
+function listSupplyKinds() {
+  const order = [
+    'reactor-fission', 'reactor-fusion', 'reactor-antimatter',
+    'gen-radioisotope', 'gen-electric',
+    'thermostat',
+    'beam-receiver', 'aerobrake-shroud', 'crew-quarters',
+    'spin-grav', 'pulse-generator', 'sail',
+  ];
+  const present = new Set();
+  for (const p of PATENTS) {
+    const sup = (p.faces && p.faces.primary && p.faces.primary.supplies) || p.supplies || [];
+    for (const k of sup) present.add(k);
+  }
+  // Sort: known order first, anything new appended.
+  const known = order.filter((k) => present.has(k));
+  for (const k of present) if (!order.includes(k)) known.push(k);
+  return known;
+}
+
+// Cards whose primary face supplies at least one of the given
+// kinds. Used to populate the grid under the supports tab.
+function patentsThatSupply(kinds) {
+  if (!kinds || !kinds.length) return [];
+  const want = new Set(expandSupportKinds(kinds));
+  const out = [];
+  for (const p of PATENTS) {
+    const sup = (p.faces && p.faces.primary && p.faces.primary.supplies) || p.supplies || [];
+    if (sup.some((k) => want.has(k))) out.push(p);
+  }
+  return out;
+}
+
+// Inline glyph for a support kind, matching the card chip idiom
+// (SVG for sun / ballerina, emoji for the rest). Wrapped <em> so
+// CSS rules that key off `.req em` apply unchanged.
+function supportKindGlyphHtml(kind) {
+  if (kind === 'beam-receiver')  return svgSunChip(14);
+  if (kind === 'spin-grav')      return svgBallerinaChip(14);
+  const vis = REQUIREMENT_VIS[kind];
+  return `<em>${(vis && vis.glyph) || '◇'}</em>`;
+}
+
+// Module-level seed for openPatentsSupports - lets the rocket-
+// stack modal hand the library a starting selection. Consumed
+// once by renderPatents.
+let _pendingPatentSelection = null;
+export function openPatentsSupports(kinds) {
+  const want = expandSupportKinds(kinds || []);
+  _pendingPatentSelection = { type: 'supports', kinds: want };
+  showPane('patents');
+}
+
 function renderPatents() {
   const host = document.getElementById('browse-patents');
   if (!host) return;
@@ -3206,18 +3303,83 @@ function renderPatents() {
   // marks it as soon-only so there's no surprise when grab
   // buttons refuse to engage.
   const expansionTypes = ['gw-thruster'];
-  const types = [...PATENT_TYPES, 'crew', ...expansionTypes];
+  // 'supports' is a synthetic filter that groups every card
+  // whose primary face SUPPLIES a stack-support chip (reactors,
+  // generators, radiators today). A sub-row of kind chips lets
+  // the player narrow to a single requirement. The rocket-stack
+  // modal jumps directly here when the player taps a support
+  // chip on a card so they can see what would fill that slot.
+  const supplyKinds = listSupplyKinds();
+  const types = [...PATENT_TYPES, 'supports', 'crew', ...expansionTypes];
   const counts = Object.fromEntries(PATENT_TYPES.map((t) => [t, patentsByType(t).length]));
   for (const t of expansionTypes) counts[t] = patentsByType(t).length;
   counts.crew = CREW.length;
+  counts.supports = patentsThatSupply(supplyKinds).length;
   const TYPE_LABEL = {
     'gw-thruster': 'GW thrusters (soon)',
+    'supports': 'Supports',
   };
-  types.forEach((t, i) => {
+  // Seed initial active tab from a pending programmatic open
+  // (openPatentsSupports), falling back to the first type.
+  const seed = _pendingPatentSelection;
+  const initialType = (seed && types.includes(seed.type)) ? seed.type : types[0];
+  types.forEach((t) => {
     const label = TYPE_LABEL[t] || cap(t);
-    bar.innerHTML += `<button${i === 0 ? ' class="active"' : ''} data-type="${t}">${label} (${counts[t]})</button>`;
+    const active = t === initialType ? ' class="active"' : '';
+    bar.innerHTML += `<button${active} data-type="${t}">${label} (${counts[t]})</button>`;
   });
   host.appendChild(bar);
+
+  // Sub-filter row for the Supports tab: one chip per supply
+  // kind, multi-select. Hidden when any other type tab is
+  // active so the row doesn't clutter the non-supports views.
+  const supportRow = document.createElement('div');
+  supportRow.className = 'patent-supports-filter';
+  const activeSupportKinds = new Set();
+  if (seed && seed.type === 'supports' && seed.kinds) {
+    for (const k of seed.kinds) if (supplyKinds.includes(k)) activeSupportKinds.add(k);
+  }
+  const renderSupportRow = () => {
+    supportRow.innerHTML = '';
+    const allBtn = document.createElement('button');
+    allBtn.type = 'button';
+    allBtn.className = 'patent-support-chip is-all'
+      + (activeSupportKinds.size === 0 ? ' is-active' : '');
+    allBtn.textContent = `All (${counts.supports})`;
+    allBtn.addEventListener('click', () => {
+      activeSupportKinds.clear();
+      renderSupportRow();
+      repaintActive();
+    });
+    supportRow.appendChild(allBtn);
+    for (const k of supplyKinds) {
+      const supplier = REQ_SUPPLIER_TYPE[k] || null;
+      const vis = REQUIREMENT_VIS[k] || { label: k };
+      const n = patentsThatSupply([k]).length;
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'patent-support-chip';
+      if (supplier) chip.dataset.supplier = supplier;
+      if (activeSupportKinds.has(k)) chip.classList.add('is-active');
+      chip.dataset.kind = k;
+      chip.title = vis.label;
+      chip.innerHTML = `${supportKindGlyphHtml(k)}<span class="lbl">${vis.label}</span><b>${n}</b>`;
+      chip.addEventListener('click', () => {
+        if (activeSupportKinds.has(k)) activeSupportKinds.delete(k);
+        else activeSupportKinds.add(k);
+        renderSupportRow();
+        repaintActive();
+      });
+      supportRow.appendChild(chip);
+    }
+  };
+  renderSupportRow();
+  host.appendChild(supportRow);
+  supportRow.classList.toggle('is-visible', initialType === 'supports');
+
+  // Consume the programmatic seed so a later manual reopen of
+  // the pane doesn't snap back to the supports tab.
+  _pendingPatentSelection = null;
 
   const grid = document.createElement('div');
   grid.className = 'card-grid';
@@ -3276,6 +3438,18 @@ function renderPatents() {
       for (const c of CREW) grid.appendChild(decorateForHand(c, 'crew'));
       return;
     }
+    if (filter === 'supports') {
+      // No sub-chip selected = every card with a non-empty
+      // supplies list. Sub-chips narrow further; multiple
+      // selected chips OR together.
+      const want = activeSupportKinds.size
+        ? [...activeSupportKinds]
+        : supplyKinds;
+      for (const p of patentsThatSupply(want)) {
+        grid.appendChild(decorateForHand(p, 'patent'));
+      }
+      return;
+    }
     for (const p of PATENTS) {
       if (p.type !== filter) continue;
       grid.appendChild(decorateForHand(p, 'patent'));
@@ -3299,10 +3473,14 @@ function renderPatents() {
   bar.querySelectorAll('button').forEach((b) => {
     b.onclick = () => {
       bar.querySelectorAll('button').forEach((x) => x.classList.toggle('active', x === b));
+      // Show the sub-filter chip row only on the Supports tab -
+      // every other tab hides it so the row doesn't take vertical
+      // space when it's meaningless.
+      supportRow.classList.toggle('is-visible', b.dataset.type === 'supports');
       repaint(b.dataset.type);
     };
   });
-  repaint(types[0]);
+  repaint(initialType);
 }
 
 // Legacy patent-card builder kept for now (unused after switch to

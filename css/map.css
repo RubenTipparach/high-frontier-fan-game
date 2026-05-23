@@ -2093,6 +2093,72 @@ body:has(#view-browse:not(.hidden)) #main {
 .patent-filter button.active[data-type="robonaut"]  { background: #f9a8d4; color: #500724; border-color: #be185d; }
 .patent-filter button.active[data-type="generator"] { background: #f97316; color: #2e0f02; border-color: #9a3412; }
 .patent-filter button.active[data-type="crew"]      { background: #fde047; color: #3a2a02; border-color: #a16207; }
+.patent-filter button[data-type="supports"]         { border-left-color: #34d399; }
+.patent-filter button.active[data-type="supports"]  { background: #34d399; color: #022c1f; border-color: #047857; }
+
+/* Sub-filter row under the Supports tab: one chip per kind of
+   support a card can supply. Hidden on other tabs so the row
+   doesn't take vertical space when it's meaningless. Multi-
+   select - any combination of chips ORs together to filter the
+   grid. Supplier-coloured backgrounds mirror the support-chip
+   palette on the cards themselves so a player can trace
+   "purple = reactor" by eye. */
+.patent-supports-filter {
+  display: none;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 8px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+}
+.patent-supports-filter.is-visible { display: flex; }
+.patent-support-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  font-size: 11px;
+  background: rgba(30, 41, 59, 0.85);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  border-radius: 4px;
+  cursor: pointer;
+  line-height: 1.1;
+}
+.patent-support-chip:hover { background: rgba(51, 65, 85, 0.95); }
+.patent-support-chip em {
+  font-style: normal;
+  font-size: 14px;
+  line-height: 1;
+}
+.patent-support-chip .lbl { font-weight: 600; }
+.patent-support-chip b {
+  font-weight: 700;
+  font-size: 10px;
+  color: var(--accent-2);
+  font-variant-numeric: tabular-nums;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 1px 5px;
+  border-radius: 8px;
+}
+.patent-support-chip.is-all { font-weight: 600; }
+.patent-support-chip.is-active {
+  background: var(--accent);
+  color: #0c0a16;
+  border-color: var(--accent-2);
+}
+.patent-support-chip.is-active b { color: #0c0a16; background: rgba(255, 255, 255, 0.35); }
+.patent-support-chip[data-supplier="reactor"]   { border-color: #4c1d95; }
+.patent-support-chip[data-supplier="reactor"].is-active   { background: #a78bfa; color: #1c0f3a; }
+.patent-support-chip[data-supplier="radiator"]  { border-color: #075985; }
+.patent-support-chip[data-supplier="radiator"].is-active  { background: #7dd3fc; color: #0a2c43; }
+.patent-support-chip[data-supplier="robonaut"]  { border-color: #be185d; }
+.patent-support-chip[data-supplier="robonaut"].is-active  { background: #f9a8d4; color: #500724; }
+.patent-support-chip[data-supplier="generator"] { border-color: #9a3412; }
+.patent-support-chip[data-supplier="generator"].is-active { background: #f97316; color: #2e0f02; }
+
 .patent-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
