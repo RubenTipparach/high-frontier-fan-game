@@ -682,6 +682,99 @@ function routeMetricPriority() {
     ? ['burns', 'turns', 'hazards', 'radHazards']
     : ['turns', 'burns', 'hazards', 'radHazards'];
 }
+
+// Manual move mode. Alternative to the auto-planner: the player
+// taps neighbouring sites one at a time to build a route by
+// hand, capped at the active thruster's `thrust` value
+// (= the number of hops allowed). Each manual hop becomes a
+// turn-1 segment in _plannedRoute; once the player hits the Move
+// button the existing moveRocket flow consumes them all in one
+// animation. Cancelling = clearing the planned route. Fuel is
+// not deducted (sandbox mode treats burns as free per the
+// current rules).
+let _manualMode = false;
+let _manualBudget = 0;
+let _manualOriginId = null;
+function manualTipId() {
+  if (_plannedRoute && _plannedRoute.length) {
+    return _plannedRoute[_plannedRoute.length - 1].to;
+  }
+  return _manualOriginId;
+}
+function enterManualMoveMode() {
+  // Clear any planner-built route first - manual + planner
+  // shouldn't overlap on the same _plannedRoute store.
+  _routeFrom = null;
+  _routeTo = null;
+  _plannedRoute = null;
+  persistPlannedRoute();
+  const thrStats = getActiveThrusterStats();
+  const thrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 4;
+  _manualMode = true;
+  _manualBudget = thrust;
+  // Origin = rocket's current site (falls back to LEO when no
+  // rocket has launched yet, same as getRocketSite()).
+  const here = getRocketSite();
+  _manualOriginId = here ? here.id : null;
+  _plannedRoute = [];
+  persistPlannedRoute();
+  if (_renderer) {
+    _renderer.setRoute(null);
+    _renderer.setRouteEndpoints(_manualOriginId, _manualOriginId);
+  }
+  const clearBtn = document.getElementById('route-clear');
+  if (clearBtn) { clearBtn.hidden = false; clearBtn.textContent = 'Cancel manual'; }
+  setStatus(`✋ Manual mode: <strong>${_manualBudget}</strong>/${thrust} hops left. Tap an adjacent site to extend; tap Move when ready.`);
+}
+function exitManualMoveMode() {
+  _manualMode = false;
+  _manualBudget = 0;
+  _manualOriginId = null;
+  const clearBtn = document.getElementById('route-clear');
+  if (clearBtn) clearBtn.textContent = 'Clear route';
+}
+function manualMoveStatus() {
+  if (!_manualMode) return;
+  const placed = _plannedRoute ? _plannedRoute.length : 0;
+  if (_manualBudget <= 0) {
+    setStatus(`✋ Manual mode: <strong>${placed}</strong> hop${placed === 1 ? '' : 's'} plotted, out of moves. Tap <strong>🛸 Move</strong> to fly, or Cancel.`);
+  } else {
+    setStatus(`✋ Manual mode: <strong>${_manualBudget}</strong> hop${_manualBudget === 1 ? '' : 's'} left. Tap an adjacent site to extend.`);
+  }
+}
+function manualAppendSegment(toId) {
+  if (!_manualMode || !_activeData) return false;
+  const tipId = manualTipId();
+  if (!tipId) return false;
+  if (tipId === toId) {
+    setStatus('Already there. Tap a neighbour to extend the route.');
+    return false;
+  }
+  // Validate adjacency via the planner-map's neighbours set.
+  const nbrs = _activeData.neighbors && _activeData.neighbors.get(tipId);
+  if (!nbrs || !nbrs.has(toId)) {
+    const tipSite = _activeData.byId && _activeData.byId[tipId];
+    setStatus(`Not adjacent to <strong>${esc(tipSite ? tipSite.name : tipId)}</strong> - pick a directly-connected site.`);
+    return false;
+  }
+  if (_manualBudget <= 0) {
+    setStatus('Out of hops. Tap <strong>🛸 Move</strong> to fly, or Cancel to start over.');
+    return false;
+  }
+  _plannedRoute = _plannedRoute || [];
+  _plannedRoute.push({
+    from: tipId, to: toId,
+    turn: 1, burns: 1, dv: 1,
+  });
+  _manualBudget -= 1;
+  persistPlannedRoute();
+  if (_renderer) {
+    _renderer.setRoute(_plannedRoute);
+    _renderer.setRouteEndpoints(_manualOriginId, toId);
+  }
+  manualMoveStatus();
+  return true;
+}
 let _rocketSiteId = (() => {
   try { return localStorage.getItem(STORAGE_ROCKET_SITE) || null; }
   catch { return null; }
@@ -3325,6 +3418,7 @@ async function explodeRocket(siteId) {
   // cyan breadcrumbs don't dangle from a now-dead rocket.
   _plannedRoute = null;
   persistPlannedRoute();
+  exitManualMoveMode();
   _rocketTrail = [];
   persistRocketTrail();
   if (_renderer) {
@@ -3647,6 +3741,10 @@ async function moveRocket() {
     _renderer.setRouteEndpoints(null, null);
     _routeFrom = null;
     _routeTo = null;
+    // Manual mode wraps up here too - no remaining segments
+    // means there's nothing more to plot, so the toolbar should
+    // flip back to its normal "plan a route" labels.
+    exitManualMoveMode();
     const clearBtn = document.getElementById('route-clear');
     if (clearBtn) clearBtn.hidden = true;
     setStatus(`🛸 Arrived at <strong>${esc(arrivedName)}</strong>.`);
@@ -3766,6 +3864,21 @@ function exitRoutingMode() {
 }
 
 function onSiteSelect(site) {
+  // Manual move mode intercepts every tap: each one tries to
+  // append a segment to the planned route from the current tip
+  // (rocket position → last placed segment.to). Non-neighbours
+  // and out-of-budget taps fall through to a status message,
+  // they DON'T open the regular popup so the player doesn't
+  // accidentally exit the planning flow.
+  if (_manualMode && site && site.id) {
+    if (site.isDecorative || site.isLandable === false) {
+      setStatus(`<strong>${esc(site.name)}</strong> isn't a landable site.`);
+      return;
+    }
+    manualAppendSegment(site.id);
+    return;
+  }
+
   // Solo mode hijacks clicks: every site you tap becomes the
   // proposed destination for your ship's current position.
   const s = soloState();
@@ -3897,6 +4010,8 @@ function openRouteOptionsModal(onClose) {
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
 
+  const thrStats = getActiveThrusterStats();
+  const thrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 4;
   const panel = document.createElement('div');
   panel.className = 'route-options-panel';
   panel.innerHTML = `
@@ -3926,6 +4041,16 @@ function openRouteOptionsModal(onClose) {
         </div>
       </label>
     </div>
+    <div class="route-options-manual">
+      <button type="button" class="popup-btn route-options-manual-btn">
+        ✋ Manual move - plot ${thrust} hops by hand
+      </button>
+      <p class="muted route-options-manual-help">
+        Cancels any auto-planned route and lets you tap adjacent
+        sites one at a time. Capped at the active thruster's
+        thrust (${thrust}). Tap Move when you're ready to fly.
+      </p>
+    </div>
   `;
   panel.querySelector('.modal-x').addEventListener('click', close);
   panel.querySelectorAll('input[name="route-priority"]').forEach((el) => {
@@ -3939,6 +4064,14 @@ function openRouteOptionsModal(onClose) {
         });
       }
     });
+  });
+  panel.querySelector('.route-options-manual-btn').addEventListener('click', () => {
+    close();
+    // Close the underlying site popup too - manual mode plots
+    // from the rocket's position, the popup site isn't relevant
+    // any more and leaving it open would block taps under it.
+    if (_renderer) _renderer.setSitePopup(null);
+    enterManualMoveMode();
   });
 
   overlay.appendChild(panel);
@@ -4172,6 +4305,9 @@ function clearRoute() {
   persistPlannedRoute();
   _selectedId = null;
   exitRoutingMode();
+  // Manual mode shares the planned-route store, so clearing the
+  // route also drops the manual flag + budget.
+  exitManualMoveMode();
   if (_renderer) {
     _renderer.setRoute(null);
     _renderer.setRouteEndpoints(null, null);

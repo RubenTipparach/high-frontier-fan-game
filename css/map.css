@@ -1717,6 +1717,30 @@
   font-size: 11px;
   line-height: 1.45;
 }
+.route-options-manual {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+.route-options-manual-btn {
+  width: 100%;
+  font-size: 13px;
+  padding: 9px 12px;
+  font-weight: 700;
+  background: linear-gradient(180deg, #fbbf24, #d97706);
+  color: #1f1502;
+  border: 1px solid #92400e;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.route-options-manual-btn:hover {
+  background: linear-gradient(180deg, #facc15, #b45309);
+}
+.route-options-manual-help {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+}
 .map-popup .popup-btn {
   font-size: 12px;
   font-weight: 600;
