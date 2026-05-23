@@ -1162,7 +1162,9 @@ function onSiteSelect(site) {
 
   // Routing-pick mode: the user already pressed "Navigate to" on
   // an origin and now the next tap is the destination. Plot the
-  // route and exit routing mode.
+  // route and exit routing mode. The destination becomes the
+  // currently-selected site so the popup + highlight stay in sync
+  // with what the player most recently tapped.
   if (_routingMode && _routeFrom) {
     if (site.isDecorative || site.isLandable === false) {
       setStatus(`<strong>${esc(site.name)}</strong> is not landable — pick another site.`);
@@ -1183,6 +1185,8 @@ function onSiteSelect(site) {
     }
     _renderer.setRoute(result.segments);
     _renderer.setRouteEndpoints(_routeFrom.id, _routeTo.id);
+    _selectedId = _routeTo.id;
+    showSitePopupFor(_routeTo);
     const hops = result.segments.length;
     setStatus(
       `<strong>${esc(_routeFrom.name)}</strong> → <strong>${esc(_routeTo.name)}</strong>: ` +
@@ -1205,6 +1209,13 @@ function onSiteSelect(site) {
     setStatus('Tap a site to see its info. Press "Navigate to" in the popup to plan a route.');
     return;
   }
+
+  // Defensive: clear any stale popup BEFORE updating selection so
+  // we can't end up with a popup pointing to the previous site
+  // while the highlight has moved on. If the new tap turns out to
+  // be a decorative (no popup needed), the stale one is already
+  // gone instead of leaking forward.
+  if (_renderer) _renderer.clearSitePopup();
 
   _selectedId = site.id;
   if (_renderer) {
