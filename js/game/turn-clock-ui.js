@@ -225,7 +225,7 @@ function tweenPointer(pointer, fromSlot, toSlot, durationMs = 650) {
 // event legend so the player can look up what each pip would
 // fire (Inspiration / Glitch / Pad Explosion / season-dependent
 // 5-6 outcomes).
-function buildDie(value) {
+export function buildDie(value) {
   const wrap = document.createElement('div');
   wrap.className = 'die-3d';
   wrap.dataset.value = String(value || 1);
@@ -325,7 +325,7 @@ export function openEventLegend() {
 // Animate a roll: spin the cube for ~700 ms, then settle on
 // `value`. Returns a promise that resolves when the animation
 // finishes so the caller can update the result line right after.
-function rollDie(dieEl, value) {
+export function rollDie(dieEl, value) {
   return new Promise((resolve) => {
     dieEl.classList.add('rolling');
     dieEl.dataset.value = String(value);

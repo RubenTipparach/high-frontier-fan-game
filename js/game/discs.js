@@ -19,9 +19,11 @@
 
 const STORAGE_DISCS = 'hf-sandbox-prospect-discs';
 
-// Placeholder "player colour" - the success disc is rendered as
-// this until per-player colours are plumbed (Stage 3 multiplayer).
-export const PLAYER_COLOUR = '#38bdf8';
+// Placeholder "player colour" for the sandbox - matches the
+// yellow rocket sprite so the prospect disc reads as "yours".
+// Stage 3 multiplayer will replace this with a real per-player
+// colour palette.
+export const PLAYER_COLOUR = '#facc15';
 export const FAIL_COLOUR   = '#ef4444';
 
 let _discs = (() => {

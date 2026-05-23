@@ -134,9 +134,11 @@ export function canProspect(graph, fromSiteId, toSiteId, kind) {
     return { ok: true, reason: null };
   }
   if (kind === 'raygun') {
-    if (fromSiteId === toSiteId) {
-      return { ok: false, reason: 'Pick a different site - the rocket is already here.' };
-    }
+    // Raygun also covers the rocket's own site - per the rules,
+    // an active raygun can scan whatever the rocket is parked on
+    // in addition to anything line-of-sight reachable through
+    // transparent waypoints.
+    if (fromSiteId === toSiteId) return { ok: true, reason: null };
     const targets = computeRaygunTargets(graph, fromSiteId);
     if (targets.has(toSiteId)) return { ok: true, reason: null };
     return { ok: false, reason: 'Raygun has no line-of-sight to this site (blocked by burnspaces, hohmann, lagrange, or an aerostat).' };

@@ -331,6 +331,59 @@
 /* Turn tracker modal - Sol Sunspot wheel */
 .turn-clock-overlay { z-index: 60; }
 .event-legend-overlay { z-index: 90; }
+/* Prospect roll modal. Shows the 3D die rolling against the
+   site's prospect target. Stays mid-stack so the turn-confirm
+   dialog (z80) can still cover it if needed. */
+.prospect-roll-overlay { z-index: 70; }
+.prospect-roll-panel {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px 24px 22px;
+  width: min(420px, 92vw);
+  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.55);
+  text-align: center;
+}
+.prospect-roll-title { margin: 0 0 4px; font-size: 16px; color: var(--accent); }
+.prospect-roll-sub   { margin: 0 0 14px; font-size: 12px; }
+.prospect-roll-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  margin: 12px 0 16px;
+}
+.prospect-die-host { width: 80px; height: 80px; display: flex; align-items: center; justify-content: center; }
+.prospect-roll-vs { font-size: 22px; color: var(--ink-dim); font-weight: 700; }
+.prospect-target {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 14px;
+  background: rgba(250, 204, 21, 0.08);
+  border: 1px solid rgba(250, 204, 21, 0.35);
+  border-radius: 10px;
+  min-width: 72px;
+}
+.prospect-target strong { font-size: 32px; color: #fde047; line-height: 1; }
+.prospect-target em {
+  display: block;
+  font-style: normal;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-top: 4px;
+  color: var(--ink-dim);
+}
+.prospect-roll-result { margin: 8px 0 12px; font-size: 13px; min-height: 18px; }
+.prospect-roll-result .ok  { color: #4ade80; }
+.prospect-roll-result .bad { color: #ef4444; }
+.prospect-roll-actions { display: flex; justify-content: center; }
+/* Die-tint overlay after the roll settles - the player sees the
+   pass/fail at a glance, then taps Place to drop the disc. */
+.die-3d.die-success { filter: drop-shadow(0 0 8px #4ade80); }
+.die-3d.die-fail    { filter: drop-shadow(0 0 8px #ef4444); }
 .event-legend-panel {
   position: relative;
   background: var(--panel);

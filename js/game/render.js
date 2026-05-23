@@ -1812,15 +1812,16 @@ export class MapRenderer {
       if (sx < -40 || sx > this.hostW + 40 || sy < -40 || sy > this.hostH + 40) continue;
       const outcome = this._discs[id].outcome;
       const radius = Math.max(7, Math.min(18, 10 * Math.sqrt(this.zoom)));
-      const fill = outcome === 'success' ? '#38bdf8' : '#ef4444';
+      // Success = player's yellow claim disc; fail = red exhausted.
+      const fill = outcome === 'success' ? '#facc15' : '#ef4444';
       ctx.beginPath();
       ctx.arc(sx, sy, radius, 0, Math.PI * 2);
       ctx.fillStyle = fill;
-      ctx.globalAlpha = 0.82;
+      ctx.globalAlpha = 0.9;
       ctx.fill();
       ctx.globalAlpha = 1;
       ctx.lineWidth = 1.5;
-      ctx.strokeStyle = outcome === 'success' ? '#0c4a6e' : '#7f1d1d';
+      ctx.strokeStyle = outcome === 'success' ? '#854d0e' : '#7f1d1d';
       ctx.stroke();
       // Inner pip glyph: ✓ for success, ✕ for fail.
       ctx.fillStyle = '#0c0a16';

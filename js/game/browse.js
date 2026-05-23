@@ -12,7 +12,7 @@ import {
   consumeMove, refundMove, getTurn, getMovesRemaining, onTurnChange,
   getEventForRoll, getSeasonForSlot, resetClock,
 } from './turn-clock.js';
-import { triggerEndTurn, openTurnClockModal } from './turn-clock-ui.js';
+import { triggerEndTurn, openTurnClockModal, buildDie, rollDie } from './turn-clock-ui.js';
 import {
   getState as soloState, newGame as soloNewGame, abandonGame as soloAbandon,
   setTarget as soloSetTarget, commitMove as soloCommitMove,
@@ -1450,22 +1450,90 @@ function doProspect(site, prosp) {
   const success = roll <= threshold;
   const cardName = prosp.card?.name || prosp.id;
   const kindGlyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prosp.kind] || '🔬';
-  placeDisc(site.id, success ? 'success' : 'fail', {
-    roll, threshold, kind: prosp.kind, by: cardName,
+  openProspectRollModal({ site, threshold, roll, success, kindGlyph, cardName }, () => {
+    placeDisc(site.id, success ? 'success' : 'fail', {
+      roll, threshold, kind: prosp.kind, by: cardName,
+    });
+    setStatus(
+      `${kindGlyph} Prospected <strong>${esc(site.name)}</strong> `
+      + `(target ≤ ${threshold}) with <em>${esc(cardName)}</em>: `
+      + `rolled <strong class="big">${roll}</strong> - `
+      + `<strong>${success ? 'success - claim placed' : 'failed - site exhausted'}</strong>.`
+    );
+    logAction({
+      type: 'prospect',
+      icon: kindGlyph,
+      summary: `${success ? 'Claimed' : 'Exhausted'} ${site.name} (${prosp.kind}, rolled ${roll} vs ≤${threshold})`,
+      undoable: false,
+      data: { siteId: site.id, kind: prosp.kind, roll, threshold, success },
+    });
   });
-  setStatus(
-    `${kindGlyph} Prospected <strong>${esc(site.name)}</strong> `
-    + `(threshold ${threshold}) with <em>${esc(cardName)}</em>: `
-    + `rolled <strong class="big">${roll}</strong> - `
-    + `<strong>${success ? 'success - claim placed' : 'failed - site exhausted'}</strong>.`
-  );
-  logAction({
-    type: 'prospect',
-    icon: kindGlyph,
-    summary: `${success ? 'Claimed' : 'Exhausted'} ${site.name} (${prosp.kind}, rolled ${roll} vs ${threshold})`,
-    undoable: false,
-    data: { siteId: site.id, kind: prosp.kind, roll, threshold, success },
+}
+
+// Animated prospect-roll modal. Shows a 3D die on the left, the
+// site's prospect target (≤ N) on the right, rolls the die for
+// ~700 ms, then settles on the rolled value. The die's outer
+// border tints green on success / red on fail so the player reads
+// the outcome at a glance. Player then clicks "Place disc" to
+// commit the result; onPlace fires once the disc lands.
+function openProspectRollModal({ site, threshold, roll, success, kindGlyph, cardName }, onPlace) {
+  document.querySelector('.prospect-roll-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay prospect-roll-overlay';
+  const close = (placed) => {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+    if (placed && onPlace) onPlace();
+  };
+  // Roll animation isn't dismissible by clicking outside / Esc -
+  // the player has to acknowledge the result with the Place button.
+  const onKey = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      const btn = overlay.querySelector('.prospect-place-btn');
+      if (btn && !btn.disabled) { e.preventDefault(); close(true); }
+    }
+  };
+  document.addEventListener('keydown', onKey);
+
+  const panel = document.createElement('div');
+  panel.className = 'prospect-roll-panel';
+  panel.innerHTML = `
+    <h2 class="prospect-roll-title">${kindGlyph} Prospecting ${esc(site.name)}</h2>
+    <p class="muted prospect-roll-sub">with <em>${esc(cardName)}</em></p>
+    <div class="prospect-roll-stage">
+      <div class="prospect-die-host"></div>
+      <div class="prospect-roll-vs">≤</div>
+      <div class="prospect-target">
+        <strong>${threshold}</strong>
+        <em>site size</em>
+      </div>
+    </div>
+    <p class="prospect-roll-result muted">Rolling…</p>
+    <div class="prospect-roll-actions">
+      <button type="button" class="popup-btn primary prospect-place-btn" disabled>
+        Place disc
+      </button>
+    </div>
+  `;
+  const dieHost = panel.querySelector('.prospect-die-host');
+  const resultLine = panel.querySelector('.prospect-roll-result');
+  const placeBtn = panel.querySelector('.prospect-place-btn');
+  const die = buildDie(1);
+  dieHost.appendChild(die);
+
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+
+  rollDie(die, roll).then(() => {
+    die.classList.add(success ? 'die-success' : 'die-fail');
+    resultLine.innerHTML = success
+      ? `Rolled <strong>${roll}</strong> ≤ ${threshold} - <strong class="ok">success</strong>. Claim disc ready.`
+      : `Rolled <strong>${roll}</strong> > ${threshold} - <strong class="bad">failed</strong>. Site exhausted.`;
+    resultLine.classList.remove('muted');
+    placeBtn.disabled = false;
+    placeBtn.textContent = success ? 'Place yellow claim disc' : 'Place red disc';
   });
+  placeBtn.addEventListener('click', () => close(true));
 }
 
 function getRocketSite() {
