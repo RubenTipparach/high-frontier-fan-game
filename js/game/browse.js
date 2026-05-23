@@ -45,7 +45,7 @@ import { CREW } from '../../data/crew.js';
 import { MILESTONES } from '../../data/glory.js';
 import { POLITICS } from '../../data/politics.js';
 import { SITES_BY_ID } from '../../data/sites.js';
-import { renderCard, thrustVisual } from './card-ui.js';
+import { renderCard, thrustVisual, attachTipsTo } from './card-ui.js';
 import {
   logAction, getActions, getHistory, popLastOfType,
   commitTurn as commitLogTurn, resetLog, onChange as onLogChange,
@@ -1403,10 +1403,39 @@ function openRocketStackModal() {
         // (🔥 / 💧 / 🪨) stay accurate; only thrust + fuel are
         // overridden with the modified numbers.
       };
-      const tv = thrustVisual(card || {}, syntheticFace);
-      tv.dataset.tip = `Active thrust ${thrStats.thrust} (base ${thrStats.baseThrust})`
-        + `, fuel ${thrStats.fuel} per burn (base ${thrStats.baseFuel})`;
+      // Build per-element breakdown text so tapping the 11 inside
+      // the pink circle pops "11 = 6 base + 3 reactor mod + 2
+      // WISP mass class" - the exact "where did each number come
+      // from" trail the player wants. Fuel + afterburn glyphs get
+      // their own tap-tips below.
+      const thrustParts = [`${fmt(thrStats.baseThrust)} base`];
+      const fuelParts   = [`${fmt(thrStats.baseFuel)} base`];
+      for (const m of thrStats.modifiers) {
+        if (m.kind === 'thrust') {
+          thrustParts.push(`${m.delta > 0 ? '+' : ''}${fmt(m.delta)} ${m.from}`);
+        } else if (m.kind === 'fuel') {
+          fuelParts.push(`×${fmt(m.mult)} ${m.from}`);
+        }
+      }
+      const breakdown = {
+        thrust: `Thrust ${fmt(thrStats.thrust)} = ${thrustParts.join(' ')}`,
+        fuel:   `Fuel per burn ${fmt(thrStats.fuel)} = ${fuelParts.join(' ')}`,
+      };
+      const abVal = baseFace.afterburn;
+      if (Number.isFinite(abVal) && abVal > 0) {
+        breakdown.afterburn = thrStats.afterburnEngaged
+          ? `🔥 Afterburn ENGAGED - +${abVal} thrust this turn (cost 2 water already spent)`
+          : `🔥 Afterburn: spend 2 water for +${abVal} thrust this turn`;
+      }
+      const tv = thrustVisual(card || {}, syntheticFace, { breakdown });
+      // Wrap-level tip too, for tapping the triangle outside any
+      // specific element (whitespace inside the SVG).
+      tv.dataset.tip = `${breakdown.thrust}. ${breakdown.fuel}.`;
       thrustHost.appendChild(tv);
+      // Wire the [data-tip] hover + tap-to-show tooltips on the
+      // freshly-inserted SVG so clicking the thrust circle / fuel
+      // droplet / afterburn flame pops the per-element breakdown.
+      attachTipsTo(tv);
     }
 
     // Wet-mass cell is clickable: pops the fuel-tank visual in

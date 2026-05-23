@@ -418,10 +418,13 @@
   width: 100%;
 }
 .rocket-totals-grid {
-  flex: 1 1 240px;
+  flex: 1 1 320px;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 6px;
+}
+.rocket-totals-grid .rocket-totals-cell {
+  min-height: 56px;
 }
 .rocket-water-readout {
   display: inline-flex;

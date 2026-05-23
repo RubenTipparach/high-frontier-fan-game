@@ -631,7 +631,13 @@ function svgBallerinaChip(size) {
 // tooltip on the rocket sprite) can render the same triangle
 // with overridden numbers - synthesise a face-like object with
 // the effective thrust / fuel / afterburn / fuelType values.
-export function thrustVisual(card, face) {
+// Optional `opts.breakdown` lets callers override the per-element
+// data-tip text (used by the rocket-stack headliner so clicks on
+// the thrust / fuel / afterburn glyphs surface the full modifier
+// math: "11 = 6 base + 3 reactor mod + 2 WISP mass class").
+// Shape: { thrust?, fuel?, afterburn? } strings; missing keys
+// fall back to the short default text.
+export function thrustVisual(card, face, opts = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'thrust-visual';
   // The Tier-2 face is a different technology with different
@@ -688,16 +694,16 @@ export function thrustVisual(card, face) {
         fill="rgba(96,165,250,0.35)" stroke="#60a5fa" stroke-width="2.5"
         stroke-linejoin="round"/>
       ${showAfter ? `<text x="70" y="42" text-anchor="middle"
-        font-size="22" data-tip="Afterburn">🔥</text>` : ''}
+        font-size="22" data-tip="${escapeText(opts.breakdown?.afterburn || 'Afterburn')}">🔥</text>` : ''}
       <line x1="63" y1="72" x2="76" y2="72"
         stroke="currentColor" stroke-width="1.6"
         marker-end="url(#thrust-arrow)"/>
-      <g data-tip="Thrust: ${thrust}">
+      <g data-tip="${escapeText(opts.breakdown?.thrust || `Thrust: ${thrust}`)}">
         <circle cx="50" cy="72" r="10" fill="#ec4899" stroke="#fbcfe8" stroke-width="1.5"/>
         <text x="50" y="76" text-anchor="middle" font-size="13"
           font-weight="700" fill="#ffffff">${thrust}</text>
       </g>
-      <g data-tip="Fuel per burn: ${fuelText} ${ftype || 'Water'}">
+      <g data-tip="${escapeText(opts.breakdown?.fuel || `Fuel per burn: ${fuelText} ${ftype || 'Water'}`)}">
         <text x="88" y="79" text-anchor="middle" font-size="22">${fuelEmoji}</text>
         <text x="88" y="75" text-anchor="middle" font-size="9"
           font-weight="700" fill="#0c1d34" stroke="#ffffff"
@@ -805,7 +811,11 @@ function hideTip() {
 
 // Bind hover + tap tooltip behaviour to every [data-tip]
 // descendant of `root`. Safe to call once per card after build.
-function attachTipsTo(root) {
+// Exported so external callers that render data-tip nodes
+// outside renderCard (the rocket-stack headliner triangle, the
+// modified-thrust hover tooltip) can wire the hover / tap
+// pop-up handlers consistently.
+export function attachTipsTo(root) {
   const targets = root.querySelectorAll('[data-tip]');
   for (const el of targets) {
     let hoverTimer = null;
