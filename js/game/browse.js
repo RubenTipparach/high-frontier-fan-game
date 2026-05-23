@@ -8,7 +8,7 @@
 import { MapRenderer, LEO_ANCHOR } from './render.js';
 import { loadPlannerMap } from './planner-map.js';
 import { findPath } from './nav.js';
-import { consumeMove } from './turn-clock.js';
+import { consumeMove, getTurn } from './turn-clock.js';
 import { triggerEndTurn, openTurnClockModal } from './turn-clock-ui.js';
 import {
   getState as soloState, newGame as soloNewGame, abandonGame as soloAbandon,
@@ -656,11 +656,17 @@ function ensureMapShell(host) {
   // lands — it just consumes the per-turn move budget for now so
   // the end-turn confirm reflects the spend.
   host.querySelector('#turn-end').addEventListener('click', async () => {
+    // Capture the previous slot BEFORE advancing so the modal can
+    // animate the Sunspot Cube sliding from old → new instead of
+    // teleporting. If the player cancels the confirm, nothing
+    // moved, so we skip the modal entirely.
+    const prevTurn = getTurn();
     const result = await triggerEndTurn();
     if (!result) return;
-    if (result.event) {
-      openTurnClockModal({ rolling: { value: result.event.dieRoll } });
-    }
+    openTurnClockModal({
+      animateFrom: prevTurn,
+      rolling: result.event ? { value: result.event.dieRoll } : null,
+    });
   });
   host.querySelector('#turn-tracker').addEventListener('click', () => {
     openTurnClockModal();

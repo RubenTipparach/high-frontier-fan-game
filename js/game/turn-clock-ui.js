@@ -117,11 +117,17 @@ function seasonArc(from, to, innerR, outerR) {
   ].join(' ');
 }
 
-function wheelSvg() {
+// `displayTurn` lets us render the pointer at an arbitrary slot
+// (used by the end-turn animation: we paint the wheel with the
+// pointer still at the OLD slot, then a JS tween moves it to the
+// new slot). Without it, the pointer would flash at the new slot
+// for one frame before snapping back to animate.
+function wheelSvg(displayTurn = null) {
   const outerR = WHEEL_R;
   const innerR = WHEEL_R - WHEEL_RING_W;
   const labelR = (outerR + innerR) / 2;
   const turn = getTurn();
+  const pointerSlot = displayTurn !== null ? displayTurn : turn;
   const lastEvent = getLastEvent();
 
   let svg = `<svg class="turn-wheel" viewBox="0 0 ${WHEEL_VIEW} ${WHEEL_VIEW}">`;
@@ -146,26 +152,70 @@ function wheelSvg() {
       font-size="14" font-weight="700"
       fill="${i === turn ? '#0c0a16' : 'rgba(15,16,35,0.6)'}">${i}</text>`;
   }
+  // Event marker lines — bold WHITE radial line on the leading
+  // boundary of each event slot. This is the line the Sunspot
+  // Cube crosses to ENTER the event, so the player visually reads
+  // "crossing this fires a d6". Drawn after season wedges + slot
+  // dividers so it sits on top, before the pointer so the pointer
+  // overlays it when the cube is parked on the event.
+  for (const e of EVENT_SLOTS) {
+    const a = slotAngle(e - 0.5);
+    const x1 = WHEEL_CX + Math.cos(a) * (innerR - 2);
+    const y1 = WHEEL_CY + Math.sin(a) * (innerR - 2);
+    const x2 = WHEEL_CX + Math.cos(a) * (outerR + 2);
+    const y2 = WHEEL_CY + Math.sin(a) * (outerR + 2);
+    svg += `<line x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}"
+      stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-opacity="0.95" />`;
+  }
   // New round marker — small triangle on the inner edge of slot 0.
   const nrp = pointOnRing(NEW_ROUND_SLOT, innerR - 4);
   svg += `<text x="${nrp.x.toFixed(2)}" y="${nrp.y.toFixed(2)}"
     text-anchor="middle" dominant-baseline="middle"
     font-size="18" fill="#fde047">↻</text>`;
-  // Event markers — diamond on each event slot's outer edge.
+  // Event slot labels — small "EVENT" tag outside the ring.
   for (const e of EVENT_SLOTS) {
-    const ep = pointOnRing(e, outerR + 8);
+    const ep = pointOnRing(e, outerR + 14);
     svg += `<text x="${ep.x.toFixed(2)}" y="${ep.y.toFixed(2)}"
       text-anchor="middle" dominant-baseline="middle"
-      font-size="11" font-weight="800"
+      font-size="9" font-weight="800"
       fill="${lastEvent && lastEvent.turn === e ? '#fbbf24' : 'rgba(203,213,225,0.8)'}">EVENT</text>`;
   }
   // Active-turn pointer — bright pulsing ring on the current slot.
-  const tp = pointOnRing(turn, labelR);
-  svg += `<circle cx="${tp.x.toFixed(2)}" cy="${tp.y.toFixed(2)}" r="20"
+  // `.turn-pointer` is the hook the end-turn animation tweens via
+  // cx/cy in openTurnClockModal.
+  const tp = pointOnRing(pointerSlot, labelR);
+  svg += `<circle class="turn-pointer" cx="${tp.x.toFixed(2)}" cy="${tp.y.toFixed(2)}" r="20"
     fill="#fde047" fill-opacity="0.35"
     stroke="#fde047" stroke-width="2" />`;
   svg += '</svg>';
   return svg;
+}
+
+// Tween the active-turn pointer from `fromSlot` to `toSlot` along
+// the wheel's circular path. Goes the SHORT way around (forward,
+// matching the direction the cube advances). Used by the end-turn
+// modal so the player sees the Sunspot Cube physically slide into
+// the new slot rather than teleporting.
+function tweenPointer(pointer, fromSlot, toSlot, durationMs = 650) {
+  return new Promise((resolve) => {
+    const labelR = WHEEL_R - WHEEL_RING_W / 2;
+    // Forward distance in slots — endTurn always advances by 1, but
+    // we generalise so multi-step tweens (e.g. event replays) work.
+    let forward = ((toSlot - fromSlot) % SLOTS + SLOTS) % SLOTS;
+    if (forward === 0) forward = SLOTS;
+    const startTime = performance.now();
+    function frame(now) {
+      const t = Math.min(1, (now - startTime) / durationMs);
+      const eased = 1 - Math.pow(1 - t, 3);  // ease-out cubic
+      const interp = (fromSlot + forward * eased) % SLOTS;
+      const pos = pointOnRing(interp, labelR);
+      pointer.setAttribute('cx', pos.x.toFixed(2));
+      pointer.setAttribute('cy', pos.y.toFixed(2));
+      if (t < 1) requestAnimationFrame(frame);
+      else resolve();
+    }
+    requestAnimationFrame(frame);
+  });
 }
 
 // 3D CSS die. Six faces (cube), rotated to land on the requested
@@ -205,7 +255,7 @@ function rollDie(dieEl, value) {
 let _turnModalEl = null;
 let _turnModalUnsub = null;
 
-export function openTurnClockModal({ rolling = null } = {}) {
+export function openTurnClockModal({ rolling = null, animateFrom = null } = {}) {
   // Close any existing instance first (don't stack modals).
   document.querySelector('.turn-clock-overlay')?.remove();
   if (_turnModalUnsub) { _turnModalUnsub(); _turnModalUnsub = null; }
@@ -234,7 +284,7 @@ export function openTurnClockModal({ rolling = null } = {}) {
   xBtn.addEventListener('click', close);
   panel.appendChild(xBtn);
 
-  const repaint = (rollContext) => {
+  const repaint = (rollContext, startSlot) => {
     const season = getSeason();
     const turn = getTurn();
     const round = getRound();
@@ -250,7 +300,7 @@ export function openTurnClockModal({ rolling = null } = {}) {
         <span class="turn-clock-season" style="color:${season.color}">${season.label}</span>
       </p>
       <div class="turn-clock-wheel-host">
-        ${wheelSvg()}
+        ${wheelSvg(startSlot)}
         <div class="turn-clock-die-host"></div>
       </div>
       <div class="turn-clock-event-host"></div>
@@ -277,14 +327,24 @@ export function openTurnClockModal({ rolling = null } = {}) {
       `;
     }
     panel.appendChild(body);
+    // If we were given a starting slot, the pointer is currently
+    // painted at THAT slot — tween it to the live turn so the
+    // player sees the Sunspot Cube slide into its new home.
+    if (startSlot !== null && startSlot !== undefined && startSlot !== turn) {
+      const pointer = body.querySelector('.turn-pointer');
+      if (pointer) tweenPointer(pointer, startSlot, turn);
+    }
     // If the modal was opened in response to a fresh end-turn that
     // landed on an event, animate the die roll right away. The
     // caller passes { rolling: dieRoll } so we know to spin.
     if (rollContext && typeof rollContext.value === 'number') {
-      rollDie(die, rollContext.value);
+      // Slight delay so the pointer animation kicks off first and
+      // the cube-arriving-on-event reads as the cause of the roll.
+      const delay = startSlot !== null ? 400 : 0;
+      setTimeout(() => rollDie(die, rollContext.value), delay);
     }
   };
-  repaint(rolling);
+  repaint(rolling, animateFrom);
   _turnModalEl = overlay;
   document.body.appendChild(overlay);
   return overlay;
