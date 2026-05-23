@@ -538,6 +538,8 @@ export class MapRenderer {
                                     // a bright cyan ribbon
     this._discs = null;             // { [siteId]: { outcome } } - prospect
                                     // discs (success/fail) drawn over sites
+    this._popupRocketInfo = null;   // { isru } - active rig info supplied
+                                    // by browse.js for the popup chip
     this._sandboxRocketBadge = null; // 'missile' | 'raygun' | 'buggy' or null
                                     // - small kind icon clipped to the
                                     // rocket sprite so the player sees
@@ -694,6 +696,14 @@ export class MapRenderer {
     // first draw cycle is pending.
     this._positionSitePopup();
     this._scheduleDraw();
+  }
+
+  // Set per-popup rocket info (the active rig's ISRU rating, etc.)
+  // so the popup chip can render "Your ISRU 2 vs 4 water ✓" without
+  // the renderer needing to import rocket state. Call before
+  // setSitePopup; values stay until the next call.
+  setPopupRocketInfo(info) {
+    this._popupRocketInfo = info || null;
   }
 
   clearSitePopup() {
@@ -2418,22 +2428,34 @@ export class MapRenderer {
       }
       el.appendChild(tags);
     }
-    // Site ISRU number. The leading integer of siteSize ("4C" -> 4)
-    // is the gating value for BOTH the prospect roll (1d6 must be
-    // <= this) and the refining yield (gain = N - prospector ISRU
-    // + 1). Surface it explicitly so the player doesn't have to
-    // mentally parse the siteSize string in the meta row.
-    const sizeStr = String(site.siteSize || '');
-    const isruMatch = sizeStr.match(/^(\d+)/);
-    if (isruMatch) {
-      const isru = document.createElement('div');
-      isru.className = 't-isru';
-      isru.innerHTML = `<strong>ISRU</strong><b>${isruMatch[1]}</b>`
-        + `<em>≤ for refuel / prospect</em>`;
-      isru.title = `Site number ${isruMatch[1]}. A prospector needs `
-        + `ISRU ≤ ${isruMatch[1]} to prospect or refuel here. `
-        + `Refining yield = ${isruMatch[1]} - ISRU + 1.`;
-      el.appendChild(isru);
+    // Your-ISRU chip. This shows the PLAYER'S active prospector
+    // ISRU (NOT the site's number - that's the leading digit of
+    // siteSize and reads from the meta row above). The chip
+    // exists because the prospect / refuel gate keys on the
+    // RIG'S ISRU vs the SITE'S water: rig.ISRU <= site.hydration
+    // means you can prospect / refuel here. Tag the chip ✓ when
+    // the gate passes, ✗ when it doesn't, so the player can
+    // read pass/fail without doing the math themselves.
+    if (this._popupRocketInfo) {
+      const info = this._popupRocketInfo;
+      const water = Number.isFinite(site.hydration) ? site.hydration : 0;
+      const isru  = info.isru;
+      const hasRig = Number.isFinite(isru) && isru > 0;
+      const passes = hasRig && isru <= water;
+      const chip = document.createElement('div');
+      chip.className = 't-isru' + (hasRig
+        ? (passes ? ' is-pass' : ' is-fail')
+        : ' is-unknown');
+      chip.innerHTML = hasRig
+        ? `<strong>Your ISRU</strong><b>${isru}</b>`
+          + `<em>vs ${water} water ${passes ? '✓' : '✗'}</em>`
+        : `<strong>Your ISRU</strong><em>activate a rig to see</em>`;
+      chip.title = hasRig
+        ? `Your active rig has ISRU ${isru}. The site holds ${water} water. `
+          + `Rig ISRU ≤ site water means you can prospect / refuel here.`
+        : `Activate a missile / raygun / buggy prospector (or refinery) `
+          + `to see your ISRU rating.`;
+      el.appendChild(chip);
     }
     // Node id2 - a human-friendly stable reference generated at
     // data-load time (see planner-map.js#makeRefId). Reads as

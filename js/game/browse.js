@@ -1542,14 +1542,21 @@ const REFINERY_YIELD = 7;
 // Pick the best refining source available in the rocket stack.
 // Returns either:
 //   { kind: 'refinery', card, rawGain: 7 }
-//   { kind: 'isru', card, rawGain: siteNumber - ISRU + 1 }
+//   { kind: 'isru', card, rawGain: 1 + hydration - ISRU, isru }
 //   null - nothing usable
-// Refinery wins when both are present (always more water). The
-// refinery branch validates supports the same way isRocketActive
-// does; the ISRU branch leans on getActiveProspectorStats so the
-// prospector's per-supplier OR rule applies.
+//
+// The ISRU formula is the published HF4 Site Refuel Op (I5a):
+// "An Operational card with an ISRU platform produces a number
+// of water FTs equal to one plus the Site's Hydration minus the
+// card's ISRU rating." Gate: ISRU <= hydration (so gain >= 1).
+//
+// Refinery wins when both are present (factory-refuel is up to 7,
+// always strictly better at low-hydration sites). The refinery
+// branch validates supports with the same supplier-grouped OR
+// rule isRocketActive() uses; the ISRU branch leans on
+// getActiveProspectorStats so the prospector's chip math applies.
 function pickRefiningSource(site) {
-  const siteNumber = siteProspectThreshold(site);
+  const water = Number.isFinite(site.hydration) ? site.hydration : 0;
   // Refinery path: any stacked card whose type is 'refinery' AND
   // whose requires are satisfied by the rest of the stack.
   const stack = getRocketStack();
@@ -1560,12 +1567,13 @@ function pickRefiningSource(site) {
     return { kind: 'refinery', card: c, rawGain: REFINERY_YIELD };
   }
   // ISRU rig path: the active prospector with a positive ISRU
-  // value, supports met, and ISRU <= site number.
+  // value, supports met, and ISRU <= site hydration so the
+  // 1 + hydration - ISRU formula gives at least 1 water.
   const prosp = getActiveProspectorStats();
   if (prosp && prosp.canActivate) {
     const isru = prospectorIsruValue(prosp.card);
-    if (isru > 0 && isru <= siteNumber) {
-      return { kind: 'isru', card: prosp.card, rawGain: siteNumber - isru + 1, isru };
+    if (isru > 0 && isru <= water) {
+      return { kind: 'isru', card: prosp.card, rawGain: 1 + water - isru, isru };
     }
   }
   return null;
@@ -1603,11 +1611,11 @@ function refineryHasSupports(cardId, stack) {
 }
 
 function canRefuelAt(site) {
-  const siteNumber = siteProspectThreshold(site);
+  const water = Number.isFinite(site.hydration) ? site.hydration : 0;
   const tank  = getTankWater();
   const tmax  = getTankMax();
-  if (siteNumber <= 0) {
-    return { ok: false, label: `💧 Refuel (dry site)`, reason: 'Site has no refinable water (number 0).' };
+  if (water <= 0) {
+    return { ok: false, label: `💧 Refuel (dry site)`, reason: 'Site has no water (hydration 0).' };
   }
   if (tank >= tmax) {
     return { ok: false, label: `💧 Tank full (${tank}/${tmax})`, reason: 'Tank is already at max.' };
@@ -1617,7 +1625,7 @@ function canRefuelAt(site) {
     return {
       ok: false,
       label: `💧 Refuel (no rig)`,
-      reason: 'Need an active refinery, OR an ISRU prospector with ISRU ≤ site number.',
+      reason: 'Need an active refinery, OR an ISRU prospector with ISRU ≤ site water.',
     };
   }
   if (hasRefueledThisTurn(site.id)) {
@@ -1644,9 +1652,10 @@ function doRefuel(site) {
   addFuel(gain);
   markRefueledThisTurn(site.id);
   const sourceName = source.card?.name || source.kind;
+  const water = Number.isFinite(site.hydration) ? site.hydration : 0;
   const detail = source.kind === 'refinery'
     ? `flat +${REFINERY_YIELD} via <em>${esc(sourceName)}</em>`
-    : `site ${siteProspectThreshold(site)} - ISRU ${source.isru} + 1 = ${source.rawGain}`;
+    : `1 + water ${water} - ISRU ${source.isru} = ${source.rawGain}`;
   setStatus(
     `💧 Refined <strong>${gain}</strong> water at `
     + `<strong>${esc(site.name)}</strong> (${detail}). `
@@ -1836,15 +1845,15 @@ function doProspect(site, prosp) {
     setStatus(`This site already has a prospect disc - clear it first.`);
     return;
   }
-  // ISRU rule re-validated: refuse to roll when site number is
-  // below the prospector's ISRU rating. Mirrors canProspect /
-  // canRefuelAt - the same number gates both ops.
-  const prospIsru  = prospectorIsruValue(prosp.card);
-  const siteNumber = siteProspectThreshold(site);
-  if (prospIsru > siteNumber) {
+  // ISRU rule re-validated against hydration (the "water" gate).
+  // Defence-in-depth in case the popup button somehow ends up
+  // enabled with a stale read.
+  const prospIsru = prospectorIsruValue(prosp.card);
+  const siteWater = Number.isFinite(site.hydration) ? site.hydration : 0;
+  if (prospIsru > siteWater) {
     setStatus(
-      `Prospect blocked: <em>${esc(prosp.card?.name || '')}</em> needs site number ≥ `
-      + `${prospIsru}, site has ${siteNumber}.`
+      `Prospect blocked: <em>${esc(prosp.card?.name || '')}</em> needs site water ≥ `
+      + `${prospIsru}, site has ${siteWater}.`
     );
     return;
   }
@@ -2448,15 +2457,16 @@ function showSitePopupFor(site) {
     const check = canProspect(_activeData, rocketSite?.id, site.id, prosp.kind);
     const supportsOk = prosp.canActivate;
     const existingDisc = getDisc(site.id);
-    // ISRU rule: the prospector's ISRU rating must be <= the
-    // site's number (same value the prospect roll checks
-    // against). ISRU 0 / missing clears the gate. HF4 ties the
-    // refining-rig ISRU to BOTH the prospect attempt AND the
-    // refining yield (gain = number - ISRU + 1), so the gate
-    // applies in both directions.
+    // ISRU rule: the rig's ISRU must be <= the site's water
+    // (hydration). ISRU 0 / missing clears the gate. This is the
+    // "rig sensitivity" gate - a low-ISRU rig handles even dry
+    // sites; a high-ISRU rig only works on wet ones. Note the
+    // site's "number" (siteSize leading digit) is a DIFFERENT
+    // value used for the prospect-roll threshold + the refining-
+    // yield formula; don't confuse them.
     const prospIsru   = prospectorIsruValue(prosp.card);
-    const siteNumber  = siteProspectThreshold(site);
-    const isruOk      = prospIsru <= siteNumber;
+    const siteWater   = Number.isFinite(site.hydration) ? site.hydration : 0;
+    const isruOk      = prospIsru <= siteWater;
     const ok = check.ok && supportsOk && !existingDisc && isruOk;
     const kindGlyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prosp.kind] || '🔬';
     const reason = existingDisc
@@ -2464,7 +2474,7 @@ function showSitePopupFor(site) {
       : !supportsOk
         ? `Prospector needs ${(prosp.missingSuppliers || []).join(' + ')} support.`
         : !isruOk
-          ? `Prospector needs ISRU ≤ site number. Site number = ${siteNumber}, prospector ISRU = ${prospIsru}.`
+          ? `Rig ISRU ${prospIsru} > site water ${siteWater}. Need a rig with ISRU ≤ water.`
           : check.reason;
     actions.push({
       label: `${kindGlyph} Prospect (${prosp.kind})`,
@@ -2513,6 +2523,12 @@ function showSitePopupFor(site) {
       _renderer.clearSitePopup();
     },
   });
+  // Push the player's current rig info so the popup can render
+  // the ISRU chip ("Your ISRU 2 vs 4 water ✓") without the
+  // renderer needing to import rocket state directly.
+  _renderer.setPopupRocketInfo(prosp
+    ? { isru: prospectorIsruValue(prosp.card), kind: prosp.kind }
+    : null);
   _renderer.setSitePopup(site, actions);
   _renderer.onPopupClose(() => {
     _selectedId = null;
