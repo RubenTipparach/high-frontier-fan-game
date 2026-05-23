@@ -536,6 +536,12 @@ export class MapRenderer {
                                     // the rocket has actually traversed,
                                     // drawn under the planned route as
                                     // a bright cyan ribbon
+    this._discs = null;             // { [siteId]: { outcome } } - prospect
+                                    // discs (success/fail) drawn over sites
+    this._sandboxRocketBadge = null; // 'missile' | 'raygun' | 'buggy' or null
+                                    // - small kind icon clipped to the
+                                    // rocket sprite so the player sees
+                                    // their active prospector at a glance
     this._dragStart = null;
     this._gesture = null;
     this._rafQueued = false;
@@ -595,6 +601,14 @@ export class MapRenderer {
   // vs. where they're going.
   setRocketTrail(segments) {
     this._rocketTrail = segments && segments.length ? segments : null;
+    this._scheduleDraw();
+  }
+
+  // Prospect discs by site id. Shape: { [siteId]: { outcome } }
+  // where outcome is 'success' (player colour) or 'fail' (red).
+  // Drawn over the site hex at the same world position.
+  setDiscs(discs) {
+    this._discs = (discs && Object.keys(discs).length) ? discs : null;
     this._scheduleDraw();
   }
 
@@ -978,6 +992,7 @@ export class MapRenderer {
     this._drawWaypointsScreen(ctx);
     this._drawSiteHexesScreen(ctx);
     this._drawSiteLabelsScreen(ctx);
+    this._drawProspectDiscsScreen(ctx);
     this._drawLeoAnchorScreen(ctx);
     this._drawPlayerShipScreen(ctx);
     if (this._sandboxRocket) this._drawSandboxRocketScreen(ctx);
@@ -1777,6 +1792,46 @@ export class MapRenderer {
   // "LEO" letters anchoring the sandbox rocket's home position
   // so the player can find the launch site at a glance. Lives
   // in world space (so it pans / zooms with the map) but uses a
+  // Prospect discs. Draw a coloured disc centred on each site
+  // that's been prospected: blue = success (claim placed), red =
+  // fail (site exhausted). Rendered AFTER site labels so the disc
+  // sits on top of the hex without losing the site name behind it
+  // (the label is offset above; the disc tucks under the hex). At
+  // very low zoom the discs collapse to a tiny dot so they stay
+  // legible as a "this site is taken" cue.
+  _drawProspectDiscsScreen(ctx) {
+    if (!this._discs) return;
+    const eff = this.zoom * this.fitScale;
+    ctx.save();
+    for (const id in this._discs) {
+      const site = this.data.byId[id];
+      if (!site) continue;
+      const sx = this.pan.x + site.x * eff;
+      const sy = this.pan.y + site.y * eff;
+      // Skip if offscreen.
+      if (sx < -40 || sx > this.hostW + 40 || sy < -40 || sy > this.hostH + 40) continue;
+      const outcome = this._discs[id].outcome;
+      const radius = Math.max(7, Math.min(18, 10 * Math.sqrt(this.zoom)));
+      const fill = outcome === 'success' ? '#38bdf8' : '#ef4444';
+      ctx.beginPath();
+      ctx.arc(sx, sy, radius, 0, Math.PI * 2);
+      ctx.fillStyle = fill;
+      ctx.globalAlpha = 0.82;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = outcome === 'success' ? '#0c4a6e' : '#7f1d1d';
+      ctx.stroke();
+      // Inner pip glyph: ✓ for success, ✕ for fail.
+      ctx.fillStyle = '#0c0a16';
+      ctx.font = `700 ${Math.round(radius * 1.1)}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(outcome === 'success' ? '✓' : '✕', sx, sy + 1);
+    }
+    ctx.restore();
+  }
+
   // fixed pixel font size that doesn't shrink below the
   // hex-fullsize zoom threshold. Sized to read as a label and
   // offset below the anchor so the lagrange node itself stays
@@ -1889,6 +1944,31 @@ export class MapRenderer {
       ctx.fillText('🚫', sx, py + h / 2);
     }
     ctx.restore();
+    // Active-prospector badge: emoji clipped to the rocket sprite's
+    // bottom-right corner so the player sees their loadout at a
+    // glance. Renders even when the rocket can't fly - prospectors
+    // travel with the ship.
+    if (r.prospectorKind) {
+      const glyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[r.prospectorKind] || '';
+      if (glyph) {
+        const badgeSize = Math.max(14, Math.round(w * 0.55));
+        const bx = px + w - badgeSize * 0.25;
+        const by = py + h - badgeSize * 0.25;
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(bx, by, badgeSize * 0.5, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+        ctx.fill();
+        ctx.strokeStyle = '#fde047';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.font = `${Math.round(badgeSize * 0.7)}px ${EMOJI_FONT}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(glyph, bx, by + 1);
+        ctx.restore();
+      }
+    }
     // Stash the screen-space bounding box for hit-testing.
     this._sandboxRocketBox = {
       x: px, y: py, w, h,

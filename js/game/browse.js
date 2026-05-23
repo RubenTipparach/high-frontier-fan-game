@@ -36,6 +36,9 @@ import {
   clearActiveProspector, getActiveProspectorStats,
 } from './rocket.js';
 import { canProspect, computeRaygunTargets } from './scan.js';
+import {
+  getDiscs, getDisc, placeDisc, removeDisc, onChange as onDiscsChange,
+} from './discs.js';
 import { CREW } from '../../data/crew.js';
 import { MILESTONES } from '../../data/glory.js';
 import { POLITICS } from '../../data/politics.js';
@@ -72,6 +75,7 @@ export function mountBrowse() {
   if (!_rocketSubWired) {
     _rocketSubWired = true;
     onRocketChange(syncSandboxRocket);
+    onDiscsChange(syncDiscs);
   }
   wireSidebar();
   wireHandStrip();
@@ -1035,6 +1039,7 @@ async function mountMapFor() {
     wireDebugPanel(_renderer);
     syncSoloShipMarker();
     syncSandboxRocket();
+    syncDiscs();
     // Push any persisted trail back into the renderer so a reload
     // mid-journey still shows the cyan ribbon for where the rocket
     // has already been.
@@ -1406,36 +1411,59 @@ function applyEventDieEffect(event) {
   });
 }
 
-// Sandbox prospect: rolls Nd6 vs the site's class threshold (the
-// HF4 prospect mechanic) and logs the result. Site state isn't
-// mutated yet - real prospect-success / fail handling (placing a
-// claim marker, awarding the site's VP, advancing the patent
-// economy) is Stage 3+ work. The roll + outcome line gives the
-// player a flavour readout AND a paper trail in the mission log.
-const PROSPECT_CLASS_DICE = { A: 1, B: 2, C: 3, D: 4 };
-const PROSPECT_CLASS_THRESHOLDS = { A: 3, B: 4, C: 4, D: 5 };
+// Prospect roll. The site's `siteSize` from the planner data
+// encodes the difficulty as "<n><spectral>" (e.g. "9H", "11C",
+// "1S"); we parse the leading integer as the prospect threshold.
+// Falls back to a class-letter -> number map when siteSize is
+// absent (the curated SITES table uses A/B/C/D letters).
+//
+// Rules: roll 1d6. If roll <= threshold, SUCCESS - player's
+// colour disc lands over the site (claim marker). If roll >
+// threshold, FAIL - a red disc lands (site exhausted, can't be
+// re-prospected in this sandbox session until the player
+// manually clears the disc).
+const CLASS_TO_NUMBER = { A: 3, B: 5, C: 7, D: 9 };
+function siteProspectThreshold(site) {
+  if (!site) return 4;
+  const ss = site.siteSize;
+  if (typeof ss === 'string') {
+    const m = ss.match(/^(\d+)/);
+    if (m) return Math.max(1, Math.min(11, parseInt(m[1], 10)));
+  }
+  const cls = String(site.class || '').toUpperCase();
+  if (cls in CLASS_TO_NUMBER) return CLASS_TO_NUMBER[cls];
+  return 4;
+}
+
 function doProspect(site, prosp) {
   if (!prosp) return;
-  const cls = String(site.class || 'C').toUpperCase();
-  const dice = PROSPECT_CLASS_DICE[cls] || 1;
-  const threshold = PROSPECT_CLASS_THRESHOLDS[cls] || 4;
-  const rolls = Array.from({ length: dice }, () => 1 + Math.floor(Math.random() * 6));
-  const best = rolls.length ? Math.max(...rolls) : 0;
-  const success = best >= threshold;
+  // Already-prospected sites are off-limits in the sandbox; the UI
+  // grays out the button when a disc is in place, but guard here
+  // too so an autoclick can't double-spend.
+  if (getDisc(site.id)) {
+    setStatus(`This site already has a prospect disc - clear it first.`);
+    return;
+  }
+  const threshold = siteProspectThreshold(site);
+  const roll = 1 + Math.floor(Math.random() * 6);
+  const success = roll <= threshold;
   const cardName = prosp.card?.name || prosp.id;
   const kindGlyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prosp.kind] || '🔬';
+  placeDisc(site.id, success ? 'success' : 'fail', {
+    roll, threshold, kind: prosp.kind, by: cardName,
+  });
   setStatus(
     `${kindGlyph} Prospected <strong>${esc(site.name)}</strong> `
-    + `(class ${cls}) with <em>${esc(cardName)}</em>: `
-    + `rolled ${rolls.join('/')} vs ${threshold} - `
-    + `<strong>${success ? 'success' : 'failed'}</strong>.`
+    + `(threshold ${threshold}) with <em>${esc(cardName)}</em>: `
+    + `rolled <strong class="big">${roll}</strong> - `
+    + `<strong>${success ? 'success - claim placed' : 'failed - site exhausted'}</strong>.`
   );
   logAction({
     type: 'prospect',
     icon: kindGlyph,
-    summary: `${success ? 'Prospected' : 'Prospect failed at'} ${site.name} (class ${cls}, ${prosp.kind}): rolled ${rolls.join('/')} vs ${threshold}`,
+    summary: `${success ? 'Claimed' : 'Exhausted'} ${site.name} (${prosp.kind}, rolled ${roll} vs ${threshold})`,
     undoable: false,
-    data: { siteId: site.id, kind: prosp.kind, rolls, threshold, success },
+    data: { siteId: site.id, kind: prosp.kind, roll, threshold, success },
   });
 }
 
@@ -1561,11 +1589,26 @@ function syncSandboxRocket() {
   const site = getRocketSite();
   const x = site && typeof site.x === 'number' ? site.x : LEO_ANCHOR.x;
   const y = site && typeof site.y === 'number' ? site.y : LEO_ANCHOR.y;
+  // Active prospector kind is forwarded to the renderer so it can
+  // badge the rocket sprite with the right glyph (🚀 / 🔫 / 🛺).
+  // Only badged when the prospector's supports are met - otherwise
+  // it's just dead weight and shouldn't read as "active".
+  const prosp = getActiveProspectorStats();
+  const prospectorKind = (prosp && prosp.canActivate) ? prosp.kind : null;
   _renderer.setSandboxRocket({
     x, y,
     colour: 'yellow',
     canFly: r.active,       // drives the 🚫 + transparency overlay
+    prospectorKind,
   });
+}
+
+// Push the current disc state into the renderer so already-
+// prospected sites paint a coloured chit. Subscribed once at
+// mount time + on every disc change.
+function syncDiscs() {
+  if (!_renderer) return;
+  _renderer.setDiscs(getDiscs());
 }
 
 // Step the rocket through its planned route's "turn 1" segments
@@ -1924,11 +1967,14 @@ function showSitePopupFor(site) {
     const rocketSite = getRocketSite();
     const check = canProspect(_activeData, rocketSite?.id, site.id, prosp.kind);
     const supportsOk = prosp.canActivate;
-    const ok = check.ok && supportsOk;
+    const existingDisc = getDisc(site.id);
+    const ok = check.ok && supportsOk && !existingDisc;
     const kindGlyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prosp.kind] || '🔬';
-    const reason = !supportsOk
-      ? `Prospector needs ${(prosp.missingSuppliers || []).join(' + ')} support.`
-      : check.reason;
+    const reason = existingDisc
+      ? `This site already has a ${existingDisc.outcome === 'success' ? 'claim' : 'failed-prospect'} disc.`
+      : !supportsOk
+        ? `Prospector needs ${(prosp.missingSuppliers || []).join(' + ')} support.`
+        : check.reason;
     actions.push({
       label: `${kindGlyph} Prospect (${prosp.kind})`,
       variant: 'secondary',
