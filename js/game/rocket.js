@@ -96,12 +96,18 @@ export function isInRocket(id) {
 
 export function addToStack(cardId, kind) {
   if (!cardId) return -1;
+  // Expansion cards (currently GW thrusters) are previewable in
+  // the library but cannot be flown until the expansion ships.
+  // Refuse silently here - the calling UI greys the +/grab
+  // buttons out on inspection so this is a defence-in-depth
+  // check, not the only gate.
+  const card = PATENTS_BY_ID[cardId];
+  if (card && card.type === 'gw-thruster') return -1;
   _stack.push({ id: cardId, kind: kind || 'patent' });
   // First thruster added auto-selects as the active thruster
   // so the rocket has a sensible default. The player can
   // re-pick another thruster from the stack modal later.
   if (!_activeThrusterId) {
-    const card = PATENTS_BY_ID[cardId];
     const isThr = card && (card.type === 'thruster' || card.thrust != null);
     if (isThr) _activeThrusterId = cardId;
   }

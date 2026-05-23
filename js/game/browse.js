@@ -2627,11 +2627,22 @@ function renderPatents() {
   const bar = document.createElement('div');
   bar.className = 'patent-filter';
   bar.innerHTML = '';
-  const types = [...PATENT_TYPES, 'crew'];
+  // Expansion types (currently 'gw-thruster') get their own tab
+  // at the end so the player can preview the unlocked content
+  // without it cluttering the buildable list. The tab label
+  // marks it as soon-only so there's no surprise when grab
+  // buttons refuse to engage.
+  const expansionTypes = ['gw-thruster'];
+  const types = [...PATENT_TYPES, 'crew', ...expansionTypes];
   const counts = Object.fromEntries(PATENT_TYPES.map((t) => [t, patentsByType(t).length]));
+  for (const t of expansionTypes) counts[t] = patentsByType(t).length;
   counts.crew = CREW.length;
+  const TYPE_LABEL = {
+    'gw-thruster': 'GW thrusters (soon)',
+  };
   types.forEach((t, i) => {
-    bar.innerHTML += `<button${i === 0 ? ' class="active"' : ''} data-type="${t}">${cap(t)} (${counts[t]})</button>`;
+    const label = TYPE_LABEL[t] || cap(t);
+    bar.innerHTML += `<button${i === 0 ? ' class="active"' : ''} data-type="${t}">${label} (${counts[t]})</button>`;
   });
   host.appendChild(bar);
 
@@ -2654,6 +2665,18 @@ function renderPatents() {
     if (inHand)   el.classList.add('in-hand');
     if (inRocket) el.classList.add('in-rocket');
     if (inHand || inRocket) return el;   // placeholder - not interactive
+    // Expansion-only cards (GW thrusters today) preview but
+    // can't be played. Mark + return early so the drag /
+    // tap-to-add handlers don't bind. A CSS overlay tells the
+    // player why.
+    if (card.type === 'gw-thruster') {
+      el.classList.add('is-expansion');
+      const badge = document.createElement('div');
+      badge.className = 'card-expansion-badge';
+      badge.textContent = 'Coming soon';
+      el.appendChild(badge);
+      return el;
+    }
 
     el.draggable = true;
     el.addEventListener('dragstart', (ev) => {

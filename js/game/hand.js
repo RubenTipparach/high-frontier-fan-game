@@ -17,6 +17,7 @@
 //   onHandChange(cb)           → unsubscribe
 
 import { isInRocket } from './rocket.js';
+import { isExpansionType } from '../../data/patents.js';
 
 const STORAGE_KEY = 'hf-sandbox-hand';
 const BOOST_KEY = 'hf-sandbox-boost-marks';
@@ -71,6 +72,9 @@ export function addToHand(card) {
   }
   if (isInRocket(card.id)) {
     return { ok: false, reason: 'currently on your rocket - pull it back first' };
+  }
+  if (isExpansionType(card.type)) {
+    return { ok: false, reason: 'expansion-only card (coming soon)' };
   }
   _hand.push(card.id);
   persist();

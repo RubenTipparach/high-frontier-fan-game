@@ -57,7 +57,11 @@ const SHEET_TO_TYPE = {
   'Refineries':   'refinery',
   'Robonauts':    'robonaut',
   'Generators':   'generator',
-  'GW Thrusters': 'thruster',  // gigawatt-class thruster
+  // GW Thrusters (and the future TW class) are an upcoming
+  // expansion. They land in their own type so the UI can group
+  // and gate them; right now the rest of the engine refuses to
+  // hand them out or stack them.
+  'GW Thrusters': 'gw-thruster',
 };
 const SHEETS_NOT_PATENTS = new Set(['Bernals', 'Colonists', 'Freighters']);
 
@@ -287,3 +291,13 @@ export const PATENT_TYPES = [
   'thruster', 'reactor', 'radiator', 'refinery',
   'robonaut', 'generator',
 ];
+
+// Expansion-only card types. Surfaced in the library so the
+// player can browse the future content, but the engine MUST
+// refuse to let them into the hand or rocket stack. Adding a
+// type here is enough to gate it - downstream code that filters
+// the patent deck reads this set.
+export const EXPANSION_TYPES = new Set(['gw-thruster']);
+export function isExpansionType(type) {
+  return EXPANSION_TYPES.has(type);
+}

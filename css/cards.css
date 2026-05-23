@@ -646,6 +646,36 @@
 .card.in-hand::after   { content: "✋"; }
 .card.in-rocket::after { content: "🛸"; }
 
+/* Expansion-only cards (GW thrusters today). Render in the
+   library so the player can browse, but greyed out and with a
+   "Coming soon" badge across the corner. No drag handlers,
+   no tap-to-add - the engine refuses anyway, this just signals
+   that intent up front. */
+.card.is-expansion {
+  opacity: 0.6;
+  filter: grayscale(0.4);
+  pointer-events: none;
+  position: relative;
+}
+.card.is-expansion .card-expansion-badge {
+  position: absolute;
+  top: 8px;
+  right: -10px;
+  transform: rotate(8deg);
+  background: linear-gradient(180deg, #f97316, #c2410c);
+  color: #fff7ed;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border: 1px solid #9a3412;
+  border-radius: 4px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+  z-index: 11;
+  pointer-events: none;
+}
+
 /* Radiator Light/Heavy toggle row under the name. Replaces
    the old ↻ rotate button - clicking either label sets
    data-rotated on the .card root, which dims the inactive
