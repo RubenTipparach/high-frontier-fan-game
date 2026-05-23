@@ -2894,6 +2894,78 @@ function syncDiscs() {
   _renderer.setDiscs(getDiscs());
 }
 
+// Rocket exploded mid-move. Animation runs at the failed-hazard
+// position; once the visual finishes (or in parallel, depending
+// on timing), every card in the stack returns to the player's
+// hand, the tank is dumped, and the rocket vanishes from the map
+// (snapping back to LEO on next sync). Aqua is unaffected; the
+// player's investment is the cards + the wet mass they were
+// hauling. Move is consumed and locked - no undo path.
+async function explodeRocket(siteId) {
+  const site = _activeData && _activeData.sites.find((x) => x.id === siteId);
+  const x = site && Number.isFinite(site.x) ? site.x : null;
+  const y = site && Number.isFinite(site.y) ? site.y : null;
+  const tankLost = getTankWater();
+  // Snapshot stack BEFORE clearing so we know what to return.
+  const stackSnapshot = getRocketStack().slice();
+  // Pan the camera to the explosion so the player actually sees
+  // it - mid-flight the camera may have followed but a
+  // mid-modal scroll could've left the map elsewhere.
+  if (_renderer && x != null && y != null) {
+    if (typeof _renderer.flyTo === 'function') {
+      _renderer.flyTo({ x, y }, Math.max(_renderer.zoom || 2, 3));
+    }
+    _renderer.triggerExplosion(x, y);
+  }
+  setStatus(`💥 Rocket exploded at <strong>${esc(site ? site.name : siteId)}</strong>.`);
+  // Wait roughly the explosion's lifetime so the sprite vanishing
+  // doesn't pop before the burst plays out.
+  await new Promise((res) => setTimeout(res, 1100));
+  // Return cards to hand. addToHand rejects cards already there
+  // or in the rocket; clearing the stack first keeps the second
+  // check from blocking each addToHand call. We collect counts so
+  // the log entry tells the player exactly what came back.
+  rocketClearStack();
+  let returned = 0;
+  for (const slot of stackSnapshot) {
+    const card = PATENTS_BY_ID[slot.id]
+      || CREW.find((c) => c.id === slot.id) || null;
+    if (!card) continue;
+    const r = addToHand(card);
+    if (r && r.ok) returned++;
+  }
+  // Reset the rocket's position - getRocketSite() falls back to
+  // LEO when _rocketSiteId is null, so the sprite redraws there.
+  _rocketSiteId = null;
+  persistRocketSite();
+  // Wipe the planned route + walked trail - the rocket no
+  // longer has a journey to continue. Trail clears too so the
+  // cyan breadcrumbs don't dangle from a now-dead rocket.
+  _plannedRoute = null;
+  persistPlannedRoute();
+  _rocketTrail = [];
+  persistRocketTrail();
+  if (_renderer) {
+    _renderer.setRoute(null);
+    _renderer.setRouteEndpoints(null, null);
+    _renderer.setRocketTrail(null);
+  }
+  _moveSnapshot = null;
+  const clearBtn = document.getElementById('route-clear');
+  if (clearBtn) clearBtn.hidden = true;
+  logAction({
+    type: 'explode',
+    icon: '💥',
+    summary: `Rocket destroyed at ${site ? site.name : siteId}`
+      + ` - ${returned} card${returned === 1 ? '' : 's'} returned to hand`
+      + (tankLost > 0 ? `, ${tankLost} water lost` : ''),
+    undoable: false,
+    data: { siteId, returnedCards: returned, waterLost: tankLost },
+  });
+  syncSandboxRocket();
+  refreshOpenSitePopup();
+}
+
 // Step the rocket through its planned route's "turn 1" segments
 // (one move per turn, capped at BURNS_PER_TURN burns of cumulative
 // dv). The remaining segments shift down a turn so the next move
@@ -2941,10 +3013,10 @@ async function moveRocket() {
         data: { cost, hazards: hazards.map((h) => h.site.id) },
       });
     } else if (hazardChoice === 'roll') {
-      // Sandbox: roll 1d6 per hazard, log each result. Threshold +
-      // ship-destruction kicks in once Stage 3 wires the engine;
-      // for now the dice surface in the log so the player can see
-      // what would have fired at the table.
+      // Roll 1d6 per hazard in route order. d6 >= 3 survives;
+      // d6 < 3 critically fails and the rocket explodes at that
+      // hazard - the move halts there, cards return to hand,
+      // fuel is lost.
       const rolls = hazards.map((h) => ({
         site: h.site, label: h.label, glyph: h.glyph,
         d6: 1 + Math.floor(Math.random() * 6),
@@ -2958,6 +3030,23 @@ async function moveRocket() {
           undoable: false,
           data: { siteId: r.site.id, d6: r.d6 },
         });
+      }
+      const firstFail = rolls.find((r) => r.d6 < 3);
+      if (firstFail) {
+        // Move is committed - charge the move budget + lock undo,
+        // then animate the rocket up to the failed hazard and
+        // detonate.
+        if (!consumeMove()) {
+          setStatus('No moves left this turn - end turn to refresh.');
+          return false;
+        }
+        setHazardousMove(true);
+        const failIdx = turn1.findIndex((s) => s.to === firstFail.site.id);
+        const partial = failIdx >= 0 ? turn1.slice(0, failIdx + 1) : turn1;
+        setStatus(`💥 Critical failure at <strong>${esc(firstFail.site.name)}</strong>…`);
+        await animateRocketAlong(partial);
+        await explodeRocket(firstFail.site.id);
+        return false;
       }
     }
   }
