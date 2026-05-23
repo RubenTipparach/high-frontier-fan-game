@@ -1513,9 +1513,11 @@ function openRocketStackModal() {
     const totals = getStackTotals();
     const thrStats = getActiveThrusterStats();
     panel.querySelector('.rocket-stack-body')?.remove();
+    // Engaged-border is painted by the panel (non-scrolling)
+    // so it doesn't fragment when the body's content overflows.
+    panel.classList.toggle('is-engaged', engaged && r.active);
     const body = document.createElement('div');
     body.className = 'rocket-stack-body';
-    if (engaged && r.active) body.classList.add('is-engaged');
     // Status banner: active + green when all three rules hold,
     // grounded + red otherwise with the specific reason inline.
     const status = r.active
