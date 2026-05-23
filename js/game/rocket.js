@@ -30,10 +30,12 @@ const STORAGE_KEY      = 'hf-sandbox-rocket';
 const ACTIVE_KEY       = 'hf-sandbox-rocket-active-thruster';
 const PROSPECTOR_KEY   = 'hf-sandbox-rocket-active-prospector';
 const TANK_KEY         = 'hf-sandbox-rocket-tank';
-// Cap the player's water tank so the +/- buttons don't run away
-// at high tap rates. 99 is plenty for any solo run; we'll revisit
-// when Stage 3 hands fuel allocation to the engine.
-const TANK_MAX = 99;
+// Per the published rules the wet-mass track caps at 32 (the
+// "Max wet mass" position on the Net Thrust track). Maximum
+// loadable water = 32 - drymass; we cap the absolute fuel value
+// here at 32 so the +/- pickers / refuels can't push past the
+// published ceiling even on a zero-drymass rocket.
+const TANK_MAX = 32;
 
 let _stack = (() => {
   try {
@@ -60,6 +62,18 @@ let _activeProspectorId = (() => {
   catch { return null; }
 })();
 
+// Afterburn engagement (per turn). Engaging is a destructive
+// action - it spends fuel immediately for a one-burn thrust
+// boost, so the UI must confirm before flipping this. End-turn
+// resets it (Stage 3+ will wire that into the turn-clock; for
+// now the button is sticky until manually toggled off or fuel
+// runs out).
+const AFTERBURN_KEY = 'hf-sandbox-rocket-afterburn';
+let _afterburnEngaged = (() => {
+  try { return localStorage.getItem(AFTERBURN_KEY) === '1'; }
+  catch { return false; }
+})();
+
 let _tankWater = (() => {
   try {
     const n = parseInt(localStorage.getItem(TANK_KEY) || '0', 10);
@@ -76,6 +90,7 @@ function persist() {
     else                     localStorage.removeItem(ACTIVE_KEY);
     if (_activeProspectorId) localStorage.setItem(PROSPECTOR_KEY, _activeProspectorId);
     else                     localStorage.removeItem(PROSPECTOR_KEY);
+    localStorage.setItem(AFTERBURN_KEY, _afterburnEngaged ? '1' : '0');
     localStorage.setItem(TANK_KEY, String(_tankWater));
   } catch { /* private mode */ }
 }
@@ -446,6 +461,33 @@ export function getActiveThrusterStats() {
     }
   }
   const totals = getStackTotals();
+  // Weight-class modifier from the published Net Thrust track:
+  //   wet < 2     -> +2  (WISP)
+  //   wet < 4 2/3 -> +1  (PROBE)
+  //   wet < 6 1/2 ->  0  (SCOUT)
+  //   wet < 17    -> -1  (TRANSPORT)
+  //   wet <= 32   -> -2  (TUG)
+  // The chit on the Net Thrust track sits at the rocket's wet
+  // mass; its row marks the modifier this row applies.
+  const wm = totals.wetMass;
+  let wcMod = 0;
+  let wcClass = 'TUG';
+  if      (wm < 2)        { wcMod = +2; wcClass = 'WISP';      }
+  else if (wm < 14 / 3)   { wcMod = +1; wcClass = 'PROBE';     }   // 4 2/3
+  else if (wm < 6.5)      { wcMod =  0; wcClass = 'SCOUT';     }
+  else if (wm < 17)       { wcMod = -1; wcClass = 'TRANSPORT'; }
+  else                    { wcMod = -2; wcClass = 'TUG';       }
+  if (wcMod !== 0) {
+    thrust += wcMod;
+    modifiers.push({ from: `${wcClass} weight class`, kind: 'thrust', delta: wcMod });
+  }
+  // Afterburn engaged: applies the active face's afterburn bonus
+  // (numeric in the spreadsheet). One-shot per turn; UI confirms
+  // before engaging because it spends fuel up front.
+  if (_afterburnEngaged && Number.isFinite(f.afterburn) && f.afterburn) {
+    thrust += f.afterburn;
+    modifiers.push({ from: 'Afterburn', kind: 'thrust', delta: f.afterburn });
+  }
   return {
     cardId: id,
     name: card.name,
@@ -455,8 +497,26 @@ export function getActiveThrusterStats() {
     fuel,
     isp,
     modifiers,
+    weightClass:   wcClass,
+    weightClassMod: wcMod,
+    afterburnAvailable: Number.isFinite(f.afterburn) && f.afterburn > 0,
+    afterburnEngaged:   _afterburnEngaged,
     wetMass: totals.wetMass,
     dryMass: totals.dryMass,
     canLift: thrust >= totals.wetMass,
   };
+}
+
+// Afterburn toggle. Engaging spends `afterburnCost` water now
+// (the rulebook calls this the "Afterburn (+ thrust for 2 fuel
+// steps shown)" cost), so the caller must confirm. Returns the
+// new engaged-state on success, or null when the rocket can't
+// engage (no active thruster, no afterburn capability, or no
+// water to spend).
+export function isAfterburnEngaged() { return _afterburnEngaged; }
+export function setAfterburn(engaged) {
+  _afterburnEngaged = !!engaged;
+  persist();
+  notify();
+  return _afterburnEngaged;
 }

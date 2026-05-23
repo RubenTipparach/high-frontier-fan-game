@@ -34,6 +34,7 @@ import {
   getStackTotals, getActiveThrusterStats,
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats,
+  isAfterburnEngaged, setAfterburn,
 } from './rocket.js';
 import { canProspect, computeRaygunTargets } from './scan.js';
 import {
@@ -1205,57 +1206,84 @@ function openRocketStackModal() {
            ? `<ul class="rocket-issues">${r.missing.map((m) => `<li>${esc(m)}</li>`).join('')}</ul>`
            : ''}`;
 
-    // Totals row: dry + wet mass, min rad-hard, fuel +/-, plus
-    // (when a thruster is active) the modifier-applied thrust and
-    // fuel-per-burn numbers. Rocket can lift iff thrust >= wetMass.
+    // Totals row. Reorganized to surface the modified-thrust
+    // triangle on the LEFT as the headline visual (the player
+    // reads thrust-vs-wet-mass off it at a glance), with the
+    // numeric cells stacked next to it. Fuel +/- buttons are
+    // gone - refueling is the legitimate way to add water now;
+    // the water droplet sits inside the wet-mass cell so the
+    // current fuel value reads alongside the mass it's pushing.
     const fmt = (n) => Number.isFinite(n) ? (Math.round(n * 100) / 100) : '-';
+    const tank = getTankWater();
+    const tankMax = getTankMax();
+    const fuelCapForRocket = Math.max(0, 32 - (totals.dryMass || 0));
+    const wcLine = thrStats && thrStats.weightClassMod !== 0
+      ? `<small>${thrStats.weightClass} ${thrStats.weightClassMod > 0 ? '+' : ''}${thrStats.weightClassMod}</small>`
+      : (thrStats ? `<small>${thrStats.weightClass}</small>` : '');
+    const modifierLines = thrStats && thrStats.modifiers.length
+      ? thrStats.modifiers.map((m) => {
+          if (m.kind === 'thrust') return `${m.delta > 0 ? '+' : ''}${m.delta} thrust from ${m.from}`;
+          if (m.kind === 'fuel')   return `×${m.mult} fuel from ${m.from}`;
+          return '';
+        }).filter(Boolean).join(' · ')
+      : 'no modifiers';
     const thrustHtml = thrStats
-      ? `<div class="rocket-totals-cell">
+      ? `<div class="rocket-totals-cell"
+              data-tip="Thrust = base ${fmt(thrStats.baseThrust)} ${modifierLines !== 'no modifiers' ? '+ ' + modifierLines : ''}. Net thrust must be ≥ wet mass to lift."
+              title="Modified thrust breakdown">
            <span class="lbl">Thrust</span>
            <strong class="${thrStats.canLift ? 'ok' : 'bad'}">${fmt(thrStats.thrust)}</strong>
            ${thrStats.thrust !== thrStats.baseThrust
               ? `<small>(base ${fmt(thrStats.baseThrust)})</small>` : ''}
+           ${wcLine}
          </div>
-         <div class="rocket-totals-cell">
+         <div class="rocket-totals-cell"
+              data-tip="Fuel per burn = ${fmt(thrStats.fuel)} water per move."
+              title="Fuel per burn">
            <span class="lbl">Fuel / burn</span>
            <strong>${thrStats.fuel != null ? fmt(thrStats.fuel) : '-'}</strong>
            ${thrStats.fuel != null && thrStats.fuel !== thrStats.baseFuel
               ? `<small>(base ${fmt(thrStats.baseFuel)})</small>` : ''}
          </div>`
       : '';
-    const tank = getTankWater();
-    const tankMax = getTankMax();
+    // Afterburn toggle - only shown when the active thruster has
+    // an afterburn capability. Engaging spends fuel up front, so
+    // the click handler runs through a confirm.
+    const afterburnHtml = (thrStats && thrStats.afterburnAvailable)
+      ? `<button type="button" class="rocket-afterburn-btn ${thrStats.afterburnEngaged ? 'is-engaged' : ''}"
+           id="rocket-afterburn"
+           title="${thrStats.afterburnEngaged
+             ? 'Afterburn engaged this turn - tap to disengage'
+             : 'Engage afterburn: spends fuel for bonus thrust this turn'}">
+           🔥 Afterburn ${thrStats.afterburnEngaged ? 'ON' : 'OFF'}
+         </button>` : '';
     const totalsHtml = `
       <div class="rocket-totals">
-        <div class="rocket-totals-cell">
-          <span class="lbl">Cards</span><strong>${totals.count}</strong>
+        ${thrStats ? '<div class="rocket-totals-headliner" id="rocket-thrust-visual"></div>' : ''}
+        <div class="rocket-totals-grid">
+          <div class="rocket-totals-cell">
+            <span class="lbl">Cards</span><strong>${totals.count}</strong>
+          </div>
+          <div class="rocket-totals-cell">
+            <span class="lbl">Dry mass</span><strong>${totals.dryMass}</strong>
+          </div>
+          <div class="rocket-totals-cell rocket-wetmass-cell"
+               role="button" tabindex="0"
+               data-tip="Tap to open the fuel-tank view (max wet mass 32)"
+               title="Tap to open the fuel-tank view (max wet mass 32)">
+            <span class="lbl">Wet mass</span>
+            <strong class="${thrStats && !thrStats.canLift ? 'bad' : ''}">${totals.wetMass}<small>/32</small></strong>
+            <span class="rocket-water-readout" title="Water tank (refuel at hydrated sites)">
+              💧 <b>${tank}</b><em>/${fuelCapForRocket}</em>
+            </span>
+          </div>
+          <div class="rocket-totals-cell">
+            <span class="lbl">Min rad-hard</span>
+            <strong>${totals.minRadHard != null ? totals.minRadHard : '-'}</strong>
+          </div>
+          ${thrustHtml}
+          ${afterburnHtml ? `<div class="rocket-totals-cell rocket-afterburn-cell">${afterburnHtml}</div>` : ''}
         </div>
-        <div class="rocket-totals-cell">
-          <span class="lbl">Dry mass</span><strong>${totals.dryMass}</strong>
-        </div>
-        <div class="rocket-totals-cell rocket-wetmass-cell"
-             role="button" tabindex="0"
-             data-tip="Tap to open the fuel-tank view"
-             title="Tap to open the fuel-tank view">
-          <span class="lbl">Wet mass</span>
-          <strong class="${thrStats && !thrStats.canLift ? 'bad' : ''}">${totals.wetMass}</strong>
-        </div>
-        <div class="rocket-totals-cell">
-          <span class="lbl">Min rad-hard</span>
-          <strong>${totals.minRadHard != null ? totals.minRadHard : '-'}</strong>
-        </div>
-        <div class="rocket-totals-cell rocket-fuel">
-          <span class="lbl">Fuel 💧</span>
-          <button type="button" class="rocket-fuel-btn"
-            data-act="dec" ${tank <= 0 ? 'disabled' : ''}
-            aria-label="Remove 1 fuel">−</button>
-          <strong>${tank}<small>/${tankMax}</small></strong>
-          <button type="button" class="rocket-fuel-btn"
-            data-act="inc" ${tank >= tankMax ? 'disabled' : ''}
-            aria-label="Add 1 fuel">+</button>
-        </div>
-        ${thrustHtml}
-        ${thrStats ? '<div class="rocket-totals-cell rocket-thrust-visual" id="rocket-thrust-visual"></div>' : ''}
       </div>
     `;
 
@@ -1285,6 +1313,7 @@ function openRocketStackModal() {
           </div>
         </div>
         ${totalsHtml}
+        <div id="rocket-fuel-strip" class="rocket-fuel-strip"></div>
         ${status}
       </div>
       <div id="rocket-stack-cards">
@@ -1309,13 +1338,52 @@ function openRocketStackModal() {
       onSiteSelect(here);
     });
 
-    // Fuel +/- wiring on the totals row.
-    body.querySelectorAll('.rocket-fuel-btn').forEach((b) => {
-      b.addEventListener('click', () => {
-        if (b.dataset.act === 'inc') addFuel(1);
-        else removeFuel(1);
+    // Fuel-strip diagram. Mirrors the published Net Thrust track:
+    // cells 1..32 coloured by weight class (WISP / PROBE / SCOUT /
+    // TRANSPORT / TUG) with chits drawn for the rocket's current
+    // dry-mass + wet-mass positions. Each cell is hoverable for
+    // its weight-class modifier. Future iterations can wire drag
+    // to relocate chits + react to factory refuel patterns.
+    const stripHost = body.querySelector('#rocket-fuel-strip');
+    if (stripHost) buildFuelStrip(stripHost, totals);
+
+    // Afterburn toggle. Confirms before engaging (spends fuel up
+    // front per the rulebook's "Afterburn (+ thrust for 2 fuel
+    // steps shown)" cost). Disengaging is free.
+    const abBtn = body.querySelector('#rocket-afterburn');
+    if (abBtn && thrStats) {
+      abBtn.addEventListener('click', async () => {
+        if (thrStats.afterburnEngaged) {
+          setAfterburn(false);
+          logAction({ type: 'afterburn', icon: '🔥', summary: 'Afterburn disengaged', undoable: false });
+          return;
+        }
+        // Confirm. Default afterburn cost = 2 water tanks (the
+        // "2 fuel steps shown" wording in the rulebook). Bail
+        // when the tank can't cover it.
+        const cost = 2;
+        if (getTankWater() < cost) {
+          setStatus(`Afterburn needs ${cost} water; tank has ${getTankWater()}.`);
+          return;
+        }
+        const ok = await confirmModal({
+          title: '🔥 Engage afterburn?',
+          body: `Spends ${cost} water now for a +${(thrStats.card?.faces?.primary?.afterburn) || 1} `
+            + `thrust boost this turn. Disengage manually next turn.`,
+          yes: 'Engage',
+          no: 'Cancel',
+        });
+        if (!ok) return;
+        removeFuel(cost);
+        setAfterburn(true);
+        logAction({
+          type: 'afterburn',
+          icon: '🔥',
+          summary: `Afterburn engaged (-${cost} water)`,
+          undoable: false,
+        });
       });
-    });
+    }
 
     // "Modified final" thrust triangle - shows the active
     // thruster with modifier-applied thrust + fuel numbers
@@ -1739,6 +1807,101 @@ function doRefuel(site) {
 // falling back to the engine's hard tank cap. Tap / click /
 // Escape closes; tapping mid-animation skips to the end-state
 // without dismissing so the player sees the final level.
+// Lightweight confirm modal. Returns a Promise<boolean> that
+// resolves true on the "yes" path, false on cancel / Esc /
+// backdrop tap. Used for the afterburn engage prompt; future
+// destructive actions can reuse it.
+function confirmModal({ title, body, yes = 'OK', no = 'Cancel' }) {
+  return new Promise((resolve) => {
+    document.querySelector('.confirm-modal-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay';
+    const close = (val) => {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(!!val);
+    };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+    const onKey = (e) => {
+      if (e.key === 'Escape') close(false);
+      else if (e.key === 'Enter') close(true);
+    };
+    document.addEventListener('keydown', onKey);
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel';
+    panel.innerHTML = `
+      <h3>${esc(title)}</h3>
+      <p>${body}</p>
+      <div class="turn-confirm-actions">
+        <button type="button" class="popup-btn primary" data-act="yes">${esc(yes)}</button>
+        <button type="button" class="popup-btn"         data-act="no">${esc(no)}</button>
+      </div>
+    `;
+    panel.querySelector('[data-act="yes"]').addEventListener('click', () => close(true));
+    panel.querySelector('[data-act="no"]').addEventListener('click',  () => close(false));
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+  });
+}
+
+// Interactive fuel-strip diagram for the rocket-stack header.
+// Cells 1..32 are coloured by the published weight-class band:
+//   1                       MIN DRY MASS marker
+//   2-4 (under 2)           WISP   (+2)
+//   2-4 (under 4 2/3)       PROBE  (+1)
+//   5-6 (under 6 1/2)       SCOUT   (0)
+//   7-16 (under 17)         TRANSPORT (-1)
+//   17-32                   TUG    (-2)
+// Two chits overlay the strip: DRY at the rocket's dry mass and
+// WET at the current wet mass. Hovering any cell reveals its
+// weight-class modifier. The strip is read-only for now; future
+// patches will wire drag-to-relocate-chit, factory refuel
+// patterns, etc.
+function buildFuelStrip(host, totals) {
+  host.innerHTML = '';
+  const cap = 32;
+  const wm = totals.wetMass | 0;
+  const dm = totals.dryMass | 0;
+  // Weight class for a given chit position. Mirrors the
+  // getActiveThrusterStats logic so the strip stays a single
+  // source of truth on the rule.
+  function classify(pos) {
+    if (pos <  2)       return { name: 'WISP',      mod: +2, color: '#f472b6' };
+    if (pos < 14 / 3)   return { name: 'PROBE',     mod: +1, color: '#f9a8d4' };
+    if (pos < 6.5)      return { name: 'SCOUT',     mod:  0, color: '#7dd3fc' };
+    if (pos < 17)       return { name: 'TRANSPORT', mod: -1, color: '#67e8f9' };
+    return                        { name: 'TUG',    mod: -2, color: '#5eead4' };
+  }
+  const wrap = document.createElement('div');
+  wrap.className = 'rocket-fuel-strip-row';
+  const label = document.createElement('div');
+  label.className = 'rocket-fuel-strip-label';
+  label.textContent = 'Net Thrust track';
+  host.appendChild(label);
+  for (let i = 1; i <= cap; i++) {
+    const cell = document.createElement('div');
+    const c = classify(i);
+    cell.className = 'fuel-strip-cell';
+    cell.style.backgroundColor = c.color;
+    cell.dataset.tip = `Position ${i} - ${c.name} weight class (${c.mod >= 0 ? '+' : ''}${c.mod} thrust)`;
+    cell.title = cell.dataset.tip;
+    cell.textContent = String(i);
+    if (i === dm) cell.classList.add('is-dry-chit');
+    if (i === wm) cell.classList.add('is-wet-chit');
+    if (i === dm && i === wm) cell.classList.add('is-co-chit');
+    wrap.appendChild(cell);
+  }
+  host.appendChild(wrap);
+  const legend = document.createElement('div');
+  legend.className = 'rocket-fuel-strip-legend';
+  legend.innerHTML = `
+    <span><i class="chit-dot is-dry-chit"></i> Dry ${dm}</span>
+    <span><i class="chit-dot is-wet-chit"></i> Wet ${wm}</span>
+    <span class="muted">Max wet 32</span>
+  `;
+  host.appendChild(legend);
+}
+
 function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
   document.querySelector('.fuel-tank-overlay')?.remove();
   const tankNow = Number.isFinite(toWater) ? toWater : getTankWater();
@@ -2034,7 +2197,11 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
     // suppress lint for unused startLevel
     void startLevel;
   }
-  dump1Btn?.addEventListener('click', () => {
+  dump1Btn?.addEventListener('click', (e) => {
+    // Stop the overlay's onTap handler from interpreting this
+    // click as "skip animation / close" - that's why dump 1 / all
+    // looked like it dismissed the modal.
+    e.stopPropagation();
     if (getTankWater() <= 0) return;
     removeFuel(1);
     drainTo(getTankWater());
@@ -2045,7 +2212,8 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
       undoable: false,
     });
   });
-  dumpAllBtn?.addEventListener('click', () => {
+  dumpAllBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
     const drained = getTankWater();
     if (drained <= 0) return;
     removeFuel(drained);

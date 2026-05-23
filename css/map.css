@@ -395,6 +395,136 @@
   text-transform: uppercase;
   letter-spacing: 1px;
 }
+/* Rocket-stack totals: thrust triangle headliner on the left,
+   stat cells grid on the right. */
+.rocket-totals {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+.rocket-totals-headliner {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 140px;
+  padding: 6px;
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(125, 211, 252, 0.35);
+  border-radius: 8px;
+}
+.rocket-totals-headliner .thrust-visual {
+  width: 100%;
+}
+.rocket-totals-grid {
+  flex: 1 1 240px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 6px;
+}
+.rocket-water-readout {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+.rocket-water-readout b { color: #7dd3fc; font-size: 13px; }
+.rocket-water-readout em { font-style: normal; color: var(--ink-mute); }
+.rocket-afterburn-cell {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+}
+.rocket-afterburn-btn {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #9a3412;
+  background: rgba(249, 115, 22, 0.15);
+  color: #fb923c;
+  cursor: pointer;
+}
+.rocket-afterburn-btn.is-engaged {
+  background: linear-gradient(180deg, #f97316, #c2410c);
+  color: #fff7ed;
+  font-weight: 700;
+}
+
+/* Interactive fuel strip diagram (the published Net Thrust
+   track). 32 coloured cells with chit overlays for the current
+   dry-mass and wet-mass positions. Cells are hoverable for the
+   weight-class modifier they apply. Read-only for now. */
+.rocket-fuel-strip {
+  margin: 12px 0 0;
+}
+.rocket-fuel-strip-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--ink-dim);
+  margin-bottom: 4px;
+}
+.rocket-fuel-strip-row {
+  display: grid;
+  grid-template-columns: repeat(32, 1fr);
+  gap: 1px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.fuel-strip-cell {
+  position: relative;
+  font-size: 9px;
+  text-align: center;
+  padding: 6px 0;
+  color: #0c0a16;
+  font-weight: 700;
+}
+.fuel-strip-cell.is-dry-chit::before,
+.fuel-strip-cell.is-wet-chit::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid #0c0a16;
+}
+.fuel-strip-cell.is-dry-chit::before {
+  top: 1px;
+  background: #94a3b8;
+}
+.fuel-strip-cell.is-wet-chit::after {
+  bottom: 1px;
+  background: #facc15;
+}
+.fuel-strip-cell.is-co-chit {
+  outline: 2px solid #facc15;
+  outline-offset: -1px;
+}
+.rocket-fuel-strip-legend {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+.rocket-fuel-strip-legend i.chit-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid #0c0a16;
+  vertical-align: -1px;
+  margin-right: 4px;
+}
+.rocket-fuel-strip-legend .is-dry-chit { background: #94a3b8; }
+.rocket-fuel-strip-legend .is-wet-chit { background: #facc15; }
+
 .fuel-tank-actions {
   display: flex;
   gap: 6px;
