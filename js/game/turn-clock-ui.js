@@ -11,7 +11,7 @@ import {
   getOpsRemaining, getMovesRemaining,
   endTurn,
   SLOTS, SEASONS, NEW_ROUND_SLOT, EVENT_SLOTS,
-  getEventForRoll, getSeasonForSlot,
+  getEventForRoll, getSeasonForSlot, EVENT_TABLE,
 } from './turn-clock.js';
 
 // --------- Confirm end-turn dialog ---------
@@ -221,11 +221,17 @@ function tweenPointer(pointer, fromSlot, toSlot, durationMs = 650) {
 
 // 3D CSS die. Six faces (cube), rotated to land on the requested
 // pip count. The CSS `.die-3d.rolling` runs a quick tumble before
-// settling on .face-N - see map.css.
+// settling on .face-N - see map.css. Tapping the die pops the
+// event legend so the player can look up what each pip would
+// fire (Inspiration / Glitch / Pad Explosion / season-dependent
+// 5-6 outcomes).
 function buildDie(value) {
   const wrap = document.createElement('div');
   wrap.className = 'die-3d';
   wrap.dataset.value = String(value || 1);
+  wrap.setAttribute('role', 'button');
+  wrap.setAttribute('tabindex', '0');
+  wrap.title = 'Tap to see what each pip does';
   wrap.innerHTML = `
     <div class="die-cube">
       <div class="face f1"><span>⚀</span></div>
@@ -236,7 +242,78 @@ function buildDie(value) {
       <div class="face f6"><span>⚅</span></div>
     </div>
   `;
+  const open = () => openEventLegend();
+  wrap.addEventListener('click', open);
+  wrap.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+  });
   return wrap;
+}
+
+// d6 legend popup. One row per face (1-6) showing the icon +
+// name + verbatim rulebook text for that outcome. Faces 5-6
+// fan out into three season variants (Anarchy / Budget Cuts /
+// Solar Flare) since the effect depends on which season the
+// cube is in when the d6 is rolled.
+const DIE_GLYPHS = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
+export function openEventLegend() {
+  document.querySelector('.event-legend-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay event-legend-overlay';
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+  };
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+
+  const panel = document.createElement('div');
+  panel.className = 'event-legend-panel';
+  // Build one row per d6 face. For faces 5-6, group the three
+  // seasonal entries (Anarchy / Budget Cuts / Solar Flare) into a
+  // single row whose body lists each season variant.
+  const all = Object.values(EVENT_TABLE);
+  const rowsByFace = new Map();
+  for (let f = 1; f <= 6; f++) {
+    rowsByFace.set(f, all.filter((e) => e.rolls.includes(f)));
+  }
+  const rowHtml = (face) => {
+    const evs = rowsByFace.get(face);
+    if (!evs.length) return '';
+    const isMulti = evs.length > 1;
+    const body = isMulti
+      ? evs.map((e) => `
+          <li>
+            <span class="ev-legend-season ev-season-${e.season}">Season ${e.season}</span>
+            <strong>${e.icon} ${e.name}</strong>
+            <p>${e.text}</p>
+          </li>`).join('')
+      : `<p><strong>${evs[0].icon} ${evs[0].name}</strong><br>${evs[0].text}</p>`;
+    return `
+      <li class="ev-legend-row" data-face="${face}">
+        <div class="ev-legend-pip">${DIE_GLYPHS[face - 1]}<em>${face}</em></div>
+        <div class="ev-legend-body">
+          ${isMulti ? `<ul class="ev-legend-seasons">${body}</ul>` : body}
+        </div>
+      </li>
+    `;
+  };
+  panel.innerHTML = `
+    <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
+    <h2 class="event-legend-title">🎲 Sunspot Cube d6 Events</h2>
+    <p class="muted event-legend-sub">
+      The d6 fires every time the cube crosses an event threshold
+      (slots ${EVENT_SLOTS.join(', ')}). Faces 5-6 vary by season.
+    </p>
+    <ol class="event-legend-list">
+      ${[1,2,3,4,5,6].map(rowHtml).join('')}
+    </ol>
+  `;
+  panel.querySelector('.modal-x').addEventListener('click', close);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+  return overlay;
 }
 
 // Animate a roll: spin the cube for ~700 ms, then settle on
