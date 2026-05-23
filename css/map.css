@@ -1515,20 +1515,25 @@ body:has(#view-browse:not(.hidden)) #main {
    border is drawn via a CSS background-gradient stripe with an
    offset animation, sharper than a dashed border at small sizes
    and works the same on mobile + desktop. */
+/* Stripe period must EXACTLY equal the animation delta or the
+   pattern visibly jumps every cycle (gaps appear at the loop
+   point). Stripes are 12 + 12 = 24 px per period; the keyframes
+   below shift each edge by exactly 24 px from 0% to 100% so the
+   end frame paints the same pixels as the start frame and the
+   loop is seamless. Both the body border and the active-thruster
+   card use the same period + keyframes for a consistent look —
+   visual speed differences come from the `animation-duration`
+   value, not from differing stripe widths. */
 @keyframes rocket-march {
-  0%   { background-position: 0 0,        0 100%,     0 0,        100% 0; }
-  100% { background-position: 32px 0,    -32px 100%,  0 -32px,    100% 32px; }
-}
-.rocket-stack-body.is-engaged,
-.rocket-slot.is-active-thruster .card:has(*) {
-  /* baseline for the engaged target only — see is-engaged rule */
+  0%   { background-position: 0    0,    0     100%,  0  0,      100%  0;    }
+  100% { background-position: 24px 0,    -24px 100%,  0  -24px,  100%  24px; }
 }
 .rocket-stack-body.is-engaged {
   position: relative;
   padding: 14px;
   border-radius: 14px;
   background-image:
-    /* top edge: orange stripes scrolling right */
+    /* top edge: orange/gold stripes scrolling right */
     repeating-linear-gradient(90deg,  #f97316 0 12px, #fbbf24 12px 24px),
     /* bottom edge: scrolling left */
     repeating-linear-gradient(90deg,  #fbbf24 0 12px, #f97316 12px 24px),
@@ -1545,10 +1550,10 @@ body:has(#view-browse:not(.hidden)) #main {
 .rocket-stack-body.is-engaged .rocket-slot.is-active-thruster .card {
   position: relative;
   background-image:
-    repeating-linear-gradient(90deg,  #f97316 0 10px, #fbbf24 10px 20px),
-    repeating-linear-gradient(90deg,  #fbbf24 0 10px, #f97316 10px 20px),
-    repeating-linear-gradient(180deg, #f97316 0 10px, #fbbf24 10px 20px),
-    repeating-linear-gradient(180deg, #fbbf24 0 10px, #f97316 10px 20px);
+    repeating-linear-gradient(90deg,  #f97316 0 12px, #fbbf24 12px 24px),
+    repeating-linear-gradient(90deg,  #fbbf24 0 12px, #f97316 12px 24px),
+    repeating-linear-gradient(180deg, #f97316 0 12px, #fbbf24 12px 24px),
+    repeating-linear-gradient(180deg, #fbbf24 0 12px, #f97316 12px 24px);
   background-position: 0 0, 0 100%, 0 0, 100% 0;
   background-size: 100% 3px, 100% 3px, 3px 100%, 3px 100%;
   background-repeat: no-repeat;
