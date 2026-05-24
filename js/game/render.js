@@ -1995,12 +1995,13 @@ export class MapRenderer {
       const radius = Math.max(7, Math.min(18, 10 * Math.sqrt(this.zoom)));
       // Success = player's yellow claim disc; fail = red exhausted.
       const fill = outcome === 'success' ? '#facc15' : '#ef4444';
+      // Whole disc paints at 60% opacity so the underlying site
+      // hex / label / halo stays legible through it.
+      ctx.globalAlpha = 0.6;
       ctx.beginPath();
       ctx.arc(sx, sy, radius, 0, Math.PI * 2);
       ctx.fillStyle = fill;
-      ctx.globalAlpha = 0.9;
       ctx.fill();
-      ctx.globalAlpha = 1;
       ctx.lineWidth = 1.5;
       ctx.strokeStyle = outcome === 'success' ? '#854d0e' : '#7f1d1d';
       ctx.stroke();
