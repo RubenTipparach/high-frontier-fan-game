@@ -198,26 +198,29 @@ Deferred (will land after I7/I8):
 - **Free Market** (I3)
 - **Delivery Op** (I9)
 
-### Sandbox card-economy toggle (deferred)
+### Sandbox card-economy toggle (implemented)
 
 A sandbox-only setting picks how the patent economy behaves:
 
 - **Free Library (default)**: patents are free draws, auctions
   cost nothing, both still consume the 1-op-per-turn budget.
-  Matches the current sandbox flow.
+  Matches the original sandbox flow.
 - **Card Market (on)**: Research Auction (I2) requires the
   player to consume a card from hand to participate; Free
   Market (I3) sells a card for $3 aqua. Both still consume the
-  1-op-per-turn budget.
+  1-op-per-turn budget. Free Market is only visible in this
+  mode.
 
-Toggling the setting **resets the game** (the patent decks and
-aqua bank re-seed). Surfaces as a switch in the sandbox setup
-panel.
+Toggling the setting **resets the game** (hand, rocket,
+outposts, factories, colonies, discs, glory, log, clock, aqua
+bank). The toggle lives in the sandbox setup panel as two pill
+buttons (📚 Free Library / 🃏 Card Market); flipping confirms
+before applying.
 
-**Not implemented yet.** Both Research Auction and Free Market
-ops currently show a notice dialog: "Market cards not available
-in this build." The toggle UI lands with the ops in the
-follow-up PR after I7 / I8.
+Live in `js/game/card-market.js`: `getMarketMode()`,
+`setMarketMode()`, `openAuctionModal()`, `openFreeMarketModal()`.
+Surfaced at the LEO site popup as "🎯 Research Auction" + "💱
+Free Market (+3 aqua)" buttons.
 
 ### Turn ordering (variant + rulebook)
 
