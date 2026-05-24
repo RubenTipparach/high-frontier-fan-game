@@ -4590,3 +4590,85 @@ body:has(#view-browse:not(.hidden)) #main {
     transform: none !important;
   }
 }
+
+/* ============================================================
+   🛒 Patent Market cart sidebar pane (Card Market mode only).
+   ============================================================ */
+.cart-summary {
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.cart-summary h3 { margin: 0 0 6px; font-size: 16px; letter-spacing: 0.5px; }
+.cart-summary p { margin: 4px 0; font-size: 12px; line-height: 1.45; }
+.cart-warning {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: rgba(202, 138, 4, 0.12);
+  border: 1px solid rgba(202, 138, 4, 0.4);
+  border-radius: 6px;
+  color: #facc15;
+  font-size: 12px;
+}
+.cart-decks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.cart-deck {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.cart-deck-title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  letter-spacing: 0.4px;
+  text-transform: capitalize;
+  color: var(--ink);
+}
+.cart-deck-title em {
+  color: var(--muted, #94a3b8);
+  font-style: normal;
+  font-weight: 500;
+  margin-left: 4px;
+}
+.cart-deck-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cart-card {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.cart-card-name { flex: 1; }
+.cart-card-spec.industrialize-spectral-badge {
+  width: 18px;
+  height: 18px;
+  line-height: 18px;
+  font-size: 11px;
+}
+.cart-buy-btn {
+  background: #14532d;
+  color: #d1fae5;
+  border: 1px solid #166534;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+}
+.cart-buy-btn:hover:not(:disabled) { background: #166534; }
+.cart-buy-btn:disabled { opacity: 0.4; cursor: not-allowed; }

@@ -158,11 +158,18 @@ const DECK_TYPES = ['thruster', 'reactor', 'radiator', 'refinery', 'robonaut', '
 // onCommit fires { cardId, sacrificeId } - sacrificeId is null
 // in library mode.
 export function openAuctionModal({
-  mode, handIds, lookupCard, onCommit,
+  mode, handIds, lookupCard, onCommit, preselect,
 }) {
   document.querySelector('.auction-overlay')?.remove();
-  let selectedType  = DECK_TYPES[0];
-  let selectedCard  = null;
+  // Optional preselect: { type, cardId } - lets a caller open
+  // the auction with a specific deck tab + card already chosen
+  // (used by the cart-tab "Buy" buttons and the deck-tap
+  // "Auction this card" button in market mode so the player
+  // doesn't have to re-pick what they already wanted).
+  let selectedType  = (preselect && DECK_TYPES.includes(preselect.type))
+    ? preselect.type
+    : DECK_TYPES[0];
+  let selectedCard  = preselect?.cardId || null;
   let selectedSacrifice = null;
 
   const overlay = document.createElement('div');

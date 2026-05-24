@@ -98,6 +98,7 @@ import {
   getMarketMode, setMarketMode, onMarketChange,
   resetSandboxEconomy,
   openAuctionModal, openFreeMarketModal,
+  findAuctionableCards,
 } from './card-market.js';
 
 // Only one map mode now (planner / "classic"); the old
@@ -146,11 +147,17 @@ export function mountBrowse() {
     // surface (Free Market only in market mode) and the
     // Auction-button gating, so the popup needs a refresh.
     onMarketChange(refreshOpenSitePopup);
+    // Same flip also toggles the 🛒 cart sidebar tab visible
+    // / hidden - cart is market-mode-only.
+    onMarketChange(syncCartTabVisibility);
     // LEO Stack changes need to refresh the popup so the
     // Transfer button enables / disables when cards or water
     // land in or out of LEO.
     onLeoChange(refreshOpenSitePopup);
   }
+  // Initial pass to set the cart tab's visibility on mount;
+  // the listener above keeps it in sync afterwards.
+  syncCartTabVisibility();
   wireSidebar();
   wireHandStrip();
   renderMap();
@@ -210,6 +217,15 @@ function wireHandStrip() {
     const id = e.dataTransfer.getData('text/card-id');
     const card = id && lookup(id);
     if (!card) return;
+    // Card Market mode locks the library to browse-only;
+    // patents must be acquired via Research Auction. Flash the
+    // strip red, surface the rule.
+    if (getMarketMode() === MARKET_MODE.MARKET) {
+      host.classList.add('flash-error');
+      setTimeout(() => host.classList.remove('flash-error'), 700);
+      setStatus('🃏 Card Market mode: drag-to-hand is disabled. Open the 🛒 Cart tab or use Research Auction at LEO.');
+      return;
+    }
     const r = addToHand(card);
     if (!r.ok) {
       host.classList.add('flash-error');
@@ -1447,33 +1463,49 @@ function openDeckTapModal(card, kind) {
   const addBtn = document.createElement('button');
   addBtn.type = 'button';
   addBtn.className = 'modal-btn stack';
-  addBtn.textContent = '✋ Add to hand';
-  addBtn.addEventListener('click', () => {
-    // Validate up front: don't fly the animation just to bounce
-    // (dup card, expansion card, etc). Surface the reason and
-    // skip the flight.
-    if (isInHand(card.id)) {
-      setStatus(`Can't add: already in your hand.`);
+  // In Card Market mode the library is browse-only: patents
+  // must be acquired through Research Auction (rulebook I2)
+  // instead of dragged into hand for free. The button label +
+  // handler switch accordingly. The auction modal pre-selects
+  // this card + the right deck tab so the player doesn't have
+  // to re-find it.
+  const inMarket = getMarketMode() === MARKET_MODE.MARKET;
+  if (inMarket) {
+    addBtn.textContent = '🎯 Auction this card';
+    addBtn.title = 'Card Market mode: patents are acquired via Research Auction. Costs 1 op + a Hand card sacrifice.';
+    addBtn.addEventListener('click', () => {
       close();
-      return;
-    }
-    // Close the modal first so the user sees the card take
-    // flight against the underlying view, not against a fading
-    // backdrop. The flight clones the modal card element so the
-    // ghost survives the close.
-    const srcEl = cardEl;
-    overlay.classList.add('is-flying');
-    flyCardToHand(srcEl, card, () => {
-      const r = addToHand(card);
-      if (!r.ok) setStatus(`Can't add: ${r.reason}.`);
+      doResearchAuction({ preselect: { type: card.type, cardId: card.id } });
     });
-    // Fade the modal itself out in parallel with the flight so
-    // the player's eye follows the card to the strip rather than
-    // getting stuck on a still-open dialog.
-    overlay.style.transition = 'opacity 220ms ease-out';
-    overlay.style.opacity = '0';
-    setTimeout(close, 240);
-  });
+  } else {
+    addBtn.textContent = '✋ Add to hand';
+    addBtn.addEventListener('click', () => {
+      // Validate up front: don't fly the animation just to bounce
+      // (dup card, expansion card, etc). Surface the reason and
+      // skip the flight.
+      if (isInHand(card.id)) {
+        setStatus(`Can't add: already in your hand.`);
+        close();
+        return;
+      }
+      // Close the modal first so the user sees the card take
+      // flight against the underlying view, not against a fading
+      // backdrop. The flight clones the modal card element so the
+      // ghost survives the close.
+      const srcEl = cardEl;
+      overlay.classList.add('is-flying');
+      flyCardToHand(srcEl, card, () => {
+        const r = addToHand(card);
+        if (!r.ok) setStatus(`Can't add: ${r.reason}.`);
+      });
+      // Fade the modal itself out in parallel with the flight so
+      // the player's eye follows the card to the strip rather than
+      // getting stuck on a still-open dialog.
+      overlay.style.transition = 'opacity 220ms ease-out';
+      overlay.style.opacity = '0';
+      setTimeout(close, 240);
+    });
+  }
 
   actions.append(addBtn);
   panel.appendChild(actions);
@@ -1624,6 +1656,7 @@ function showPane(pane) {
   if (backdrop) backdrop.classList.toggle('hidden', !pane);
   // Render the pane lazily on first reveal.
   if      (pane === 'patents')    renderPatents();
+  else if (pane === 'cart')       renderCart();
   else if (pane === 'milestones') renderMilestones();
   else if (pane === 'events')     renderEvents();
   else if (pane === 'log')        renderMissionLog();
@@ -4154,13 +4187,14 @@ function doSandboxReset() {
 // patent enters the player's hand; in Card Market mode the
 // sacrificed Hand card returns to the library. Op gated inside
 // the commit so cancel doesn't burn the turn.
-function doResearchAuction() {
+function doResearchAuction(opts = {}) {
   const mode = getMarketMode();
   const handIds = getHandSlots();
   openAuctionModal({
     mode,
     handIds,
     lookupCard: cardById,
+    preselect: opts.preselect || null,
     onCommit: ({ cardId, sacrificeId }) => {
       if (!cardId) return;
       if (!requireOp('Research Auction')) return;
@@ -6977,6 +7011,97 @@ export function openPatentsSupports(kinds) {
   const want = expandSupportKinds(kinds || []);
   _pendingPatentSelection = { type: 'supports', kinds: want };
   showPane('patents');
+}
+
+// 🛒 Patent Market cart. Shown only in Card Market mode (the
+// tab is hidden in Free Library mode). Renders one section per
+// rulebook deck type (thruster / reactor / radiator / refinery
+// / robonaut / generator) listing every patent NOT already
+// owned by the player, with a per-card "🎯 Buy" button that
+// opens the auction modal pre-selected on that card. Repaints
+// on hand / rocket / outpost / LEO / market changes so the
+// available pool stays current.
+let _cartListenerHooked = false;
+function renderCart() {
+  if (!_cartListenerHooked) {
+    _cartListenerHooked = true;
+    const repaintIfActive = () => {
+      const panel = document.getElementById('browse-sidepanel');
+      if (panel && panel.dataset.active === 'cart') paintCart();
+    };
+    onHandChange(repaintIfActive);
+    onRocketChange(repaintIfActive);
+    onOutpostsChange(repaintIfActive);
+    onLeoChange(repaintIfActive);
+    onMarketChange(repaintIfActive);
+  }
+  paintCart();
+}
+function paintCart() {
+  const host = document.getElementById('browse-cart');
+  if (!host) return;
+  const mode = getMarketMode();
+  if (mode !== MARKET_MODE.MARKET) {
+    host.innerHTML = `<section class="cart-summary">
+      <h3>🛒 Patent Market</h3>
+      <p class="muted">The cart is empty - you're in 📚 Free Library mode. Switch to 🃏 Card Market in the sandbox panel to enable the patent marketplace.</p>
+    </section>`;
+    return;
+  }
+  const DECK_TYPES = ['thruster', 'reactor', 'radiator', 'refinery', 'robonaut', 'generator'];
+  const handIds = getHandSlots();
+  const handEmpty = handIds.length === 0;
+  const aqua = getAqua();
+  // Build sections.
+  const sections = DECK_TYPES.map((type) => {
+    const cards = findAuctionableCards(type);
+    const cardsHtml = cards.length
+      ? cards.map((c) => {
+          const spec = c.spectralType || 'C';
+          return `<li class="cart-card">
+            <span class="cart-card-spec industrialize-spectral-badge spectral-${esc(spec)}">${esc(spec)}</span>
+            <strong class="cart-card-name">${esc(c.name)}</strong>
+            <button type="button" class="cart-buy-btn" data-id="${esc(c.id)}" data-type="${esc(type)}" ${handEmpty ? 'disabled' : ''} title="${handEmpty ? 'Need a Hand card to sacrifice' : 'Auction this card (1 op + 1 Hand card sacrifice)'}">🎯 Buy</button>
+          </li>`;
+        }).join('')
+      : '<li class="muted">No cards available in this deck.</li>';
+    return `<section class="cart-deck" data-type="${esc(type)}">
+      <h4 class="cart-deck-title">${esc(type)} <em>(${cards.length})</em></h4>
+      <ul class="cart-deck-cards">${cardsHtml}</ul>
+    </section>`;
+  }).join('');
+  host.innerHTML = `
+    <section class="cart-summary">
+      <h3>🛒 Patent Market</h3>
+      <p class="muted">Card Market mode: patents must be auctioned. Each purchase costs <strong>1 operation</strong> + <strong>1 Hand card</strong> sacrificed back to the library.</p>
+      <p class="muted">Aqua bank: <strong class="stat-aqua">${esc(String(aqua))} 💧</strong>. Hand: <strong>${handIds.length}</strong> card${handIds.length === 1 ? '' : 's'} available to sacrifice.</p>
+      ${handEmpty ? '<p class="cart-warning">⚠ Your hand is empty - boost a card from the library first... wait, you can\'t boost from the library in Market mode either. Use the existing hand cards if you have any, or you\'re stuck. Switch to Free Library mode to unlock drag-to-hand.</p>' : ''}
+    </section>
+    <div class="cart-decks">${sections}</div>
+  `;
+  host.querySelectorAll('.cart-buy-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (btn.disabled) return;
+      const id = btn.getAttribute('data-id');
+      const type = btn.getAttribute('data-type');
+      doResearchAuction({ preselect: { type, cardId: id } });
+    });
+  });
+}
+
+// Show or hide the 🛒 sidebar tab based on the current Card
+// Market mode. Called on mount + on every market mode flip.
+// When hiding while the cart pane is open, redirect to patents
+// so the panel doesn't go blank.
+function syncCartTabVisibility() {
+  const tab = document.getElementById('sidepanel-tab-cart');
+  const panel = document.getElementById('browse-sidepanel');
+  if (!tab || !panel) return;
+  const market = getMarketMode() === MARKET_MODE.MARKET;
+  tab.hidden = !market;
+  if (!market && panel.dataset.active === 'cart') {
+    showPane('patents');
+  }
 }
 
 function renderPatents() {
