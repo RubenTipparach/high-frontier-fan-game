@@ -301,24 +301,25 @@
               aria-label="Drag to resize hand" title="Drag to resize"></div>
             <div class="hand-header">
               <span class="hand-title">✋ Hand</span>
-              <!--
-                Stage-3 stack switcher. Renders six buttons (LEO,
-                Rocket, Outpost A/B/C/D), each with its own 📍
-                find-pin. Click the label to open that stack's
-                detail modal; click the pin to fly the map to
-                that stack without opening the modal. Empty
-                outpost slots stay visible but disabled with a
-                "click to learn how to create" affordance.
-                See js/game/browse.js#renderStackSwitcher.
-              -->
-              <div id="hand-stack-switcher" class="hand-stack-switcher"
-                aria-label="Switch focused stack"></div>
               <span class="hand-count" id="hand-count">0 cards</span>
               <button id="hand-boost-commit" type="button" disabled
                 data-armed="0" title="Boost every marked card to the LEO rocket">
                 🚀 BOOST
               </button>
             </div>
+            <!--
+              Stage-3 stack switcher. Lives on its own row below
+              the hand header so the six buttons (LEO, Rocket,
+              Outpost A/B/C/D) have horizontal room to breathe on
+              narrow mobile viewports - the previous inline-in-
+              header layout pushed the outpost chips off-screen.
+              Each button is paired with its own 📍 find-pin;
+              click the label to open the stack's detail modal,
+              click the pin to fly the map there without opening
+              the modal. See js/game/browse.js#renderStackSwitcher.
+            -->
+            <div id="hand-stack-switcher" class="hand-stack-switcher"
+              aria-label="Switch focused stack"></div>
             <div id="sandbox-hand-cards" class="hand-cards"
               data-empty="Drag cards from the deck above - click a card in your hand to discard, exo-produce, or add to your LEO rocket">
             </div>

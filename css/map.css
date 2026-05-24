@@ -3981,9 +3981,20 @@ body:has(#view-browse:not(.hidden)) #main {
    ============================================================ */
 .hand-stack-switcher {
   display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
+  gap: 8px;
   align-items: center;
+  /* Own row below the hand header. Wraps to a second row only
+     on truly tiny viewports; otherwise overflows horizontally
+     with a soft scroll - cleaner than a chip moving off-screen
+     into the wrap and getting lost. */
+  flex-wrap: wrap;
+  padding: 6px 0 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
+  /* Touch-action prevents iOS from treating taps as scroll
+     gestures inside the chip group - fixes the "buttons don't
+     respond on mobile" issue. */
+  touch-action: manipulation;
 }
 /* Each stack gets a group = label chip + pin button, visually
    joined into one pill so the player reads "stack X with its
@@ -3993,10 +4004,13 @@ body:has(#view-browse:not(.hidden)) #main {
   display: inline-flex;
   align-items: stretch;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 14px;
   background: var(--bg-2);
   overflow: hidden;
   line-height: 1;
+  /* Solid floor for mobile touch targets. ~34px tall is enough
+     for fingers without crowding the hand bar. */
+  min-height: 34px;
 }
 .hand-stack-group:hover {
   border-color: var(--accent);
@@ -4016,34 +4030,59 @@ body:has(#view-browse:not(.hidden)) #main {
   background: transparent;
   color: var(--ink);
   border: 0;
-  padding: 3px 8px;
-  font-size: 11px;
+  padding: 4px 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.2px;
   cursor: pointer;
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  justify-content: center;
+  gap: 4px;
+  min-height: 32px;
+  /* Prevent iOS from de-bouncing the click into a hover-then-
+     ignore on the second tap. */
+  touch-action: manipulation;
 }
 .hand-stack-chip:hover,
 .hand-stack-pin:hover:not(:disabled) {
   background: var(--panel-2);
 }
+.hand-stack-chip:active,
+.hand-stack-pin:active:not(:disabled) {
+  background: rgba(125, 211, 252, 0.18);
+}
 .hand-stack-group.is-focused .hand-stack-chip,
 .hand-stack-group.is-focused .hand-stack-pin {
   color: var(--accent);
 }
-.hand-stack-chip .chip-glyph { font-size: 14px; }
-.hand-stack-chip .chip-sub   { font-size: 11px; }
+.hand-stack-chip .chip-glyph { font-size: 16px; }
+.hand-stack-chip .chip-sub   { font-size: 12px; font-weight: 700; }
 .hand-stack-pin {
   border-left: 1px solid var(--border);
-  font-size: 12px;
-  padding: 3px 6px;
+  font-size: 14px;
+  padding: 4px 10px;
+  min-width: 36px;
 }
 .hand-stack-pin:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* On narrow viewports just let the row scroll horizontally;
+   wrapping puts the last chip on a second row that the hand-
+   bar's fixed height can crop. The chips already have flex-
+   wrap as a fallback if the row grows tall enough. */
+@media (max-width: 680px) {
+  .hand-stack-switcher {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+  .hand-stack-group { flex-shrink: 0; }
 }
 
 /* ============================================================
