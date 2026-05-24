@@ -64,6 +64,8 @@ import {
 import {
   getFactory, createFactory,
   getColony, createColony, countColoniesByOwner,
+  allFactories, allColonies,
+  onFactoryChange, onColonyChange,
   COLONY_CAP_PER_PLAYER,
 } from './factories.js';
 import {
@@ -76,6 +78,7 @@ import {
   getOutpost, getOutposts, getAvailableOutpostSlots,
   createOutpost, dissolveOutpost,
   addCardToOutpost, setOutpostTank,
+  getFocusedStackId, onFocusChange, onOutpostsChange,
   OUTPOST_LETTERS,
 } from './stacks.js';
 import {
@@ -104,6 +107,7 @@ export function mountBrowse() {
     _rocketSubWired = true;
     onRocketChange(syncSandboxRocket);
     onRocketChange(refreshOpenSitePopup);
+    onRocketChange(syncFocusedSite);
     onDiscsChange(syncDiscs);
     onDiscsChange(refreshOpenSitePopup);
     // Turn-clock changes (end-turn, consumeMove, refundMove)
@@ -111,6 +115,18 @@ export function mountBrowse() {
     // disabled labels like "Refueled this turn" flip back when
     // the turn advances.
     onTurnChange(refreshOpenSitePopup);
+    // Stage-3 chit / focus syncs - repaint the map layer when
+    // factory / colony / outpost state changes, and refresh the
+    // popup so newly-built factories surface their "Already
+    // industrialized" / "ET Produce" buttons immediately.
+    onFactoryChange(syncFactories);
+    onFactoryChange(refreshOpenSitePopup);
+    onColonyChange(syncColonies);
+    onColonyChange(refreshOpenSitePopup);
+    onOutpostsChange(syncOutposts);
+    onOutpostsChange(syncFocusedSite);
+    onOutpostsChange(refreshOpenSitePopup);
+    onFocusChange(syncFocusedSite);
   }
   wireSidebar();
   wireHandStrip();
@@ -1477,6 +1493,14 @@ async function mountMapFor() {
     syncSoloShipMarker();
     syncSandboxRocket();
     syncDiscs();
+    // Stage-3: push initial chit + focus state to the freshly-
+    // built renderer so factories / colonies / outposts paint
+    // on first frame (instead of waiting for the first state
+    // change to fire the subscribers).
+    syncFactories();
+    syncColonies();
+    syncOutposts();
+    syncFocusedSite();
     // Initial camera: focus on the rocket's current site if the
     // player has built a stack, else LEO. Snap instantly (ms: 0)
     // because the user can't see the pre-mount state - animating
@@ -4237,6 +4261,47 @@ function syncSandboxRocket() {
 function syncDiscs() {
   if (!_renderer) return;
   _renderer.setDiscs(getDiscs());
+}
+
+// Stage-3 sync helpers: push factory / colony / outpost / focus
+// state to the renderer so the chit layers repaint. Each is a
+// thin wrapper around the corresponding all-state getter and
+// setter pair; subscribed at mount time to the state stores.
+function syncFactories() {
+  if (!_renderer) return;
+  const map = {};
+  for (const f of allFactories()) map[f.siteId] = f;
+  _renderer.setFactories(map);
+}
+function syncColonies() {
+  if (!_renderer) return;
+  const map = {};
+  for (const c of allColonies()) map[c.siteId] = c;
+  _renderer.setColonies(map);
+}
+function syncOutposts() {
+  if (!_renderer) return;
+  _renderer.setOutposts(getOutposts());
+}
+// Translate the focused-stack id ('rocket' | 'outpostA' | ...)
+// into a site id for the renderer's focus ring. LEO focus has
+// no map site, so we pass null.
+function syncFocusedSite() {
+  if (!_renderer) return;
+  const id = getFocusedStackId();
+  if (id === 'rocket') {
+    const site = getRocketSite();
+    _renderer.setFocusedSiteId(site ? site.id : null);
+    return;
+  }
+  if (id && id.startsWith('outpost')) {
+    const letter = id.slice('outpost'.length);
+    const op = getOutpost(letter);
+    _renderer.setFocusedSiteId(op ? op.siteId : null);
+    return;
+  }
+  // LEO focus - clear the map ring.
+  _renderer.setFocusedSiteId(null);
 }
 
 // Rocket exploded mid-move. Animation runs at the failed-hazard

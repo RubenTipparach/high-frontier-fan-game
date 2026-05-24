@@ -97,6 +97,20 @@ const HALO_MAX_SCREEN_R = 110;
 // HEX_R can be changed freely without affecting how big Jupiter or
 // Luna looks behind its hex.
 const HEX_R = 30;
+
+// Spectral colour key for factory chits. Mirrors the
+// .industrialize-spectral-badge palette in css/map.css so the
+// modal and the map use one visual vocabulary. C carbon /
+// S stony / M metallic / V Vesta / D dark / H hydrous.
+const SPECTRAL_FILL = {
+  C: '#475569', S: '#ca8a04', M: '#9ca3af',
+  V: '#b91c1c', D: '#1e3a8a', H: '#0ea5e9',
+};
+const SPECTRAL_INK = {
+  C: '#f8fafc', S: '#fefce8', M: '#111827',
+  V: '#fef2f2', D: '#dbeafe', H: '#f0f9ff',
+};
+
 const TYPE_VIS = {
   site:           { kind: 'hex',    r: HEX_R, haloR: 20 },
   'gas-giant':    { kind: 'hex',    r: HEX_R, haloR: 48 },
@@ -547,6 +561,15 @@ export class MapRenderer {
                                     // a bright cyan ribbon
     this._discs = null;             // { [siteId]: { outcome } } - prospect
                                     // discs (success/fail) drawn over sites
+    this._factories = null;         // Stage-3: { [siteId]: { ownerId,
+                                    // spectralType } } factory chits
+    this._colonies = null;          // Stage-3: { [siteId]: { ownerId } }
+                                    // colony rings (overlayed on factories)
+    this._outposts = null;          // Stage-3: { A?, B?, C?, D? }
+                                    // outpost letter chits
+    this._focusedSiteId = null;     // Stage-3: site id of the focused
+                                    // stack (rocket or outpost), drawn
+                                    // with a dashed accent ring
     this._popupRocketInfo = null;   // { isru } - active rig info supplied
                                     // by browse.js for the popup chip
     this._prospectorBadgeBox = null; // last-drawn badge bounds for hover
@@ -661,6 +684,43 @@ export class MapRenderer {
   // visible regardless of the underlying hex.
   setPlayerShipId(id) {
     this._playerShipId = id || null;
+    this._scheduleDraw();
+  }
+
+  // Stage-3 factories. Shape: { [siteId]: { ownerId, spectralType } }
+  // Each factory paints as a small square chit below the site
+  // hex, tinted by spectral type. Colonies (if any) layer a
+  // ring overlay on the same chit.
+  setFactories(factories) {
+    this._factories = (factories && Object.keys(factories).length) ? factories : null;
+    this._scheduleDraw();
+  }
+
+  // Stage-3 colonies. Shape: { [siteId]: { ownerId } }. Colonies
+  // are tokens that sit ON a factory; the renderer expects the
+  // factory state to be set alongside (a colony without a factory
+  // still draws its ring, but the canonical layout assumes both).
+  setColonies(colonies) {
+    this._colonies = (colonies && Object.keys(colonies).length) ? colonies : null;
+    this._scheduleDraw();
+  }
+
+  // Stage-3 outposts. Shape: { A?, B?, C?, D? } where each entry
+  // is { letter, siteId, cards, tank }. Outposts paint as styled
+  // letter chits at their site, offset to the right of any
+  // factory + rocket sprite at the same site.
+  setOutposts(outposts) {
+    this._outposts = (outposts && Object.keys(outposts).length) ? outposts : null;
+    this._scheduleDraw();
+  }
+
+  // Stage-3 focused-stack site id. When set the renderer paints
+  // a thin accent ring around that site so the player can see at
+  // a glance which stack the hand-bar + popup actions target.
+  // Null when focus is the LEO stack (handled by the toolbar
+  // chip, not the map).
+  setFocusedSiteId(siteId) {
+    this._focusedSiteId = siteId || null;
     this._scheduleDraw();
   }
 
@@ -1069,6 +1129,9 @@ export class MapRenderer {
     this._drawSiteHexesScreen(ctx);
     this._drawSiteLabelsScreen(ctx);
     this._drawProspectDiscsScreen(ctx);
+    this._drawFactoriesScreen(ctx);
+    this._drawOutpostsScreen(ctx);
+    this._drawFocusedStackRingScreen(ctx);
     this._drawLeoAnchorScreen(ctx);
     this._drawPlayerShipScreen(ctx);
     if (this._sandboxRocket) this._drawSandboxRocketScreen(ctx);
@@ -1907,6 +1970,150 @@ export class MapRenderer {
       ctx.textBaseline = 'middle';
       ctx.fillText(outcome === 'success' ? '✓' : '✕', sx, sy + 1);
     }
+    ctx.restore();
+  }
+
+  // Stage-3 factory chits + colony rings. Factories paint as
+  // rounded squares offset BELOW the site center (so the claim
+  // disc above stays unobstructed). The chit is tinted by
+  // spectral type using the same palette as the Industrialize
+  // modal badge - C/S/M/V/D/H colours map identically across
+  // the popup chips and the map chits so the player builds one
+  // visual vocabulary.
+  //
+  // When a colony exists at the same site, a thin ring is drawn
+  // OVER the factory chit (the 🌐 = global ring idiom; see
+  // industrialize.md "UX defaults"). One chit per site - the
+  // model caps factories at 1 per site.
+  _drawFactoriesScreen(ctx) {
+    if (!this._factories) return;
+    const eff = this.zoom * this.fitScale;
+    // Match the disc-radius math so chit scales with zoom in
+    // the same way; size derived from the disc radius keeps the
+    // two chits visually paired.
+    const r = Math.max(7, Math.min(18, 10 * Math.sqrt(this.zoom)));
+    const chitSize = r * 1.4;
+    const chitOffset = r * 2.2;
+    ctx.save();
+    for (const id in this._factories) {
+      const site = this.data.byId[id];
+      if (!site) continue;
+      const sx = this.pan.x + site.x * eff;
+      const sy = this.pan.y + site.y * eff + chitOffset;
+      if (sx < -40 || sx > this.hostW + 40 || sy < -40 || sy > this.hostH + 40) continue;
+      const spec = this._factories[id].spectralType || 'C';
+      const fill = SPECTRAL_FILL[spec] || '#475569';
+      const ink  = SPECTRAL_INK[spec]  || '#f8fafc';
+      const half = chitSize / 2;
+      // Rounded square chit; the rim picks up the spectral tint.
+      ctx.beginPath();
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(sx - half, sy - half, chitSize, chitSize, 3);
+      } else {
+        ctx.rect(sx - half, sy - half, chitSize, chitSize);
+      }
+      ctx.fillStyle = fill;
+      ctx.globalAlpha = 0.92;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = '#0c0a16';
+      ctx.stroke();
+      // 🏭 glyph centered in the chit (use the spectral-ink colour
+      // so the glyph reads on the tinted fill).
+      ctx.fillStyle = ink;
+      ctx.font = `700 ${Math.round(chitSize * 0.85)}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('🏭', sx, sy + 1);
+      // Colony ring overlay (a thin accent-cyan ring around the
+      // factory chit). Drawn when the site has a colony record.
+      if (this._colonies && this._colonies[id]) {
+        ctx.beginPath();
+        ctx.arc(sx, sy, half + 3, 0, Math.PI * 2);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#7dd3fc';
+        ctx.globalAlpha = 0.95;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+    }
+    ctx.restore();
+  }
+
+  // Stage-3 outpost chits. Drawn as small rounded squares with a
+  // big letter (A/B/C/D) in them, offset to the upper-right of
+  // the site center. When a factory is also present at the same
+  // site the outpost chit shifts further right so the two chits
+  // don't overlap.
+  _drawOutpostsScreen(ctx) {
+    if (!this._outposts) return;
+    const eff = this.zoom * this.fitScale;
+    const r = Math.max(7, Math.min(18, 10 * Math.sqrt(this.zoom)));
+    const chitSize = r * 1.5;
+    ctx.save();
+    for (const letter of ['A', 'B', 'C', 'D']) {
+      const op = this._outposts[letter];
+      if (!op || !op.siteId) continue;
+      const site = this.data.byId[op.siteId];
+      if (!site) continue;
+      // Stagger by letter index so multiple outposts at the same
+      // site don't overlap (rare, but possible). Each outpost is
+      // pushed right by an extra chitSize per letter index.
+      const idx = ['A', 'B', 'C', 'D'].indexOf(letter);
+      const hasFactory = this._factories && this._factories[op.siteId];
+      const xOffset = (hasFactory ? r * 2.0 : r * 1.2) + idx * chitSize * 1.05;
+      const yOffset = -r * 1.6;
+      const sx = this.pan.x + site.x * eff + xOffset;
+      const sy = this.pan.y + site.y * eff + yOffset;
+      if (sx < -40 || sx > this.hostW + 40 || sy < -40 || sy > this.hostH + 40) continue;
+      const half = chitSize / 2;
+      ctx.beginPath();
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(sx - half, sy - half, chitSize, chitSize, 3);
+      } else {
+        ctx.rect(sx - half, sy - half, chitSize, chitSize);
+      }
+      ctx.fillStyle = '#1e3a8a';
+      ctx.globalAlpha = 0.94;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = '#0c0a16';
+      ctx.stroke();
+      ctx.fillStyle = '#dbeafe';
+      ctx.font = `800 ${Math.round(chitSize * 0.78)}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(letter, sx, sy + 1);
+    }
+    ctx.restore();
+  }
+
+  // Stage-3 focused-stack ring. A thin accent-cyan ring around
+  // the focused stack's site so the player sees at a glance
+  // which stack the popup actions + the cards-in-stack panel
+  // target. Drawn AFTER the chits + sprites so nothing paints
+  // over it, but BEFORE the selection ring (which is the user's
+  // own per-click highlight).
+  _drawFocusedStackRingScreen(ctx) {
+    if (!this._focusedSiteId) return;
+    const site = this.data.byId[this._focusedSiteId];
+    if (!site) return;
+    const eff = this.zoom * this.fitScale;
+    const sx = this.pan.x + site.x * eff;
+    const sy = this.pan.y + site.y * eff;
+    if (sx < -60 || sx > this.hostW + 60 || sy < -60 || sy > this.hostH + 60) return;
+    const r = Math.max(18, Math.min(34, 20 * Math.sqrt(this.zoom)));
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(sx, sy, r, 0, Math.PI * 2);
+    ctx.lineWidth = 1.8;
+    ctx.strokeStyle = '#7dd3fc';
+    ctx.globalAlpha = 0.62;
+    ctx.setLineDash([4, 3]);
+    ctx.stroke();
+    ctx.setLineDash([]);
     ctx.restore();
   }
 
