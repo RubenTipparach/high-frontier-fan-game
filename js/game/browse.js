@@ -7826,13 +7826,16 @@ function paintSolo() {
   if (!s) {
     const marketMode = getMarketMode();
     const marketOn = marketMode === MARKET_MODE.MARKET;
+    // No more 'Start solo game' button - the sandbox itself
+    // IS the solo game now. The legacy soloNewGame() flow
+    // and its descriptive paragraph are gone; the panel just
+    // surfaces the Reset + card-economy toggle.
     host.innerHTML = `
-      <p class="muted">A solo game pits one ship against the round
-      clock. ${SOLO_CONFIG.STARTING_WATER} water, ${SOLO_CONFIG.OPS_PER_ROUND}
-      operations per round, ${SOLO_CONFIG.MAX_ROUNDS} rounds,
-      target ${SOLO_CONFIG.TARGET_VP} VP.</p>
+      <p class="muted">Sandbox / solo mode is always on. Use the
+      Reset button to clear the board, and the card economy
+      toggle below to switch between Free Library and Card
+      Market shopping rules.</p>
       <div class="solo-actions">
-        <button class="primary" id="solo-new" title="Start a new solo game">Start solo game</button>
         <button class="danger" id="sandbox-reset"
           title="Empty the hand, the rocket stack, and any board components">Reset sandbox</button>
       </div>
@@ -7857,10 +7860,6 @@ function paintSolo() {
         </div>
       </div>
     `;
-    host.querySelector('#solo-new').onclick = () => {
-      soloNewGame();
-      paintSolo();
-    };
     host.querySelector('#sandbox-reset').onclick = () => {
       if (!confirm('Reset sandbox? This clears your hand, your rocket’s stack, position, planned route, outposts, factories, colonies, discs, glory, mission log, the turn clock, and your aqua bank.')) return;
       doSandboxReset();
