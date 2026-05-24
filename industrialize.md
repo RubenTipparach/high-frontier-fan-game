@@ -8,52 +8,154 @@ section below it is still negotiable.
 
 ### Industrialize action (builds a factory)
 
+- **Stack scope**: requires a **Rocket Stack** at the site.
+  Outposts cannot industrialize on their own in this variant
+  (see "Outpost capabilities" below).
 - **Trigger**: a player-driven action on a site that already
   carries a successful prospect claim disc.
 - **Prerequisites** (all colocated at the target site as part of
-  the same ship stack):
+  the rocket stack):
   - one **active refinery** with its support requirements met by
     other cards in the stack;
   - one **active robonaut** with its support requirements met by
     other cards in the stack;
   - **nothing else** is required to industrialize.
-- **Result**: a factory chit is placed on the site. The factory
-  IS the refinery for that site - there is no separate refinery
-  upgrade, no two-tier model.
+- **Result**: a factory chit (🏭) is placed on the site. The
+  factory IS the refinery for that site - there is no separate
+  refinery upgrade, no two-tier model.
 - **Decommission**: industrialize **decommissions** the refinery,
   the robonaut, and every card in their **support chains** -
   i.e. the supports that satisfied the refinery + robonaut's
   requirements, plus the supports of those supports, transitively.
-  - **Radiators are exempt** from this decommission. Radiators
-    stay in the stack even when they were part of a support
-    chain.
+  - **Radiators are exempt** from this decommission (house rule
+    on top of published I7). Radiators stay in the stack even
+    when they were part of a support chain.
 
 ### Colonize action (turns crew into colony domes)
 
 - **Trigger**: a **free action** (no operation cost). Available
   whenever the prerequisites are met.
-- **Prerequisites**: one or more **crew cards colocated** at a
-  factory site (in the same stack as the industrializing rocket,
-  on the factory itself).
-- **Result**: each colocated crew card converts into a **colony
-  dome** at the factory site.
-- **Aftermath**: the consumed crew card **returns to LEO**. (Exact
-  destination - hand, LEO availability pool, an LEO stack - is
-  an open question; see B4 below.)
+- **Prerequisites**:
+  - a colocated **Human** card (Crew or Colonist) in the player's
+    stack at a factory site;
+  - the factory does **not** already host a colony (one-colony-
+    per-factory cap, rulebook G3).
+- **Result**: one colony dome (🌐) is placed on the factory. To
+  colonize multiple factories the player runs the free action
+  once per factory; multiple humans colocated at one factory do
+  not stack into a single mega-colony.
+- **Aftermath**: the consumed crew card **returns to the LEO
+  Stack** (variant rule; overrides published G3a which would
+  decommission). It is available to be re-boosted onto another
+  rocket without paying a new Boost cost - it's already in LEO.
+
+### Stack model
+
+The player owns a small fixed set of stacks at any time:
+
+- **LEO Stack** - fixed at Earth, no figure on the map. Holds
+  cards that have been boosted but not yet flown. The player's
+  Bank (aqua + isotopes) lives here.
+- **Rocket Stack** - at most **one** active rocket figure per
+  player on the map. The rocket can move once per turn.
+- **Outpost Stacks** - up to **four** outpost chits per player,
+  labelled `A`, `B`, `C`, `D`. Each chit lives at a specific
+  site. The variant doubles the published cap of 2 (which was a
+  pure component limit, see rulebook E3c-d).
+
+Cargo Transfer (rulebook G1) is a **free action**, **unlimited**
+times per turn, between any two **colocated** stacks owned by
+the player. Special-case: the Rocket Stack is treated as
+colocated with the LEO Stack whenever the rocket is at LEO; if
+the player has no active rocket figure on the map, treat the
+rocket as parked at LEO with an empty (possibly-zero-card)
+stack, so LEO Stack transfers still work as the natural default.
+
+**Movement-vs-transfer ordering** (variant rule, consistent with
+published D1): the rocket may move before or after a transfer in
+the same turn, but cannot move, transfer, then move again. Once
+a transfer has been performed on the rocket, the rocket's per-
+turn movement is locked.
+
+### Rocket ↔ Outpost conversion
+
+- **Rocket → Outpost**: the player may convert their active
+  Rocket Stack into a new Outpost Stack at the rocket's current
+  site at any time during their turn. This consumes one of the
+  four outpost slots (A/B/C/D). The rocket figure returns to the
+  player's reserve. The cards/fuel stay at the site as the
+  outpost's contents.
+- **Outpost → Rocket**: the player may convert an existing
+  Outpost Stack into the active Rocket Stack, provided the
+  outpost contains a thruster with all support requirements
+  satisfied by other cards in the same outpost (i.e. an
+  operational thruster). The outpost chit returns to the
+  reserve, freeing its slot; the rocket figure moves to the
+  outpost's site and inherits all its cards / fuel.
+- **One rocket at a time**: locked at one Rocket Figure per
+  player (matches published, see rulebook E3a). To convert an
+  outpost into a rocket while a rocket is already active, the
+  player must first convert the current rocket into an outpost
+  (or dissolve it).
+
+### Outpost capabilities
+
+An outpost can support these operations on its own (no rocket
+needed):
+
+- **Factory-Refuel Op** (rulebook I5b): an outpost at a site
+  with the player's factory produces 7 blue FTs (water) or 1
+  gold FT (isotope) per op. The FTs land in the outpost (or any
+  colocated stack via free transfer).
+- **ISRU Refuel Op** (rulebook I5a): an outpost containing an
+  **operational robonaut** (active, all supports met) can run
+  ISRU at the site. Yield = 1 + site hydration - robonaut ISRU,
+  per published.
+- **ET Production Op** (rulebook I8): runnable at any of the
+  player's factories. The produced card lands in an outpost
+  stack at that location. If no outpost exists there yet, one
+  of the four slots is consumed to create one; if an outpost is
+  already there, the card joins it.
+
+An outpost **cannot**:
+
+- Industrialize (rocket-only in this variant).
+- Move (outposts are stationary chits).
+- Initiate a Prospect operation (rockets only; prospecting
+  requires the spacecraft to fly to the site).
+
+Cards in an outpost can be:
+
+- Discarded (free action, G6).
+- Delivered back to LEO at a water cost (rulebook I9 Delivery
+  Op; specifics deferred to a later spec round).
 
 ### Visual language
 
 - Factory: `🏭`
-- Colony: `🌐`
-- A factory hosting one or more colonies renders both: `🌐🏭`.
+- Colony: `🌐` (a colonized factory renders both: `🌐🏭`).
+- Outpost: `🏛` plus its slot letter, e.g. `🏛A`, `🏛B`, `🏛C`,
+  `🏛D`. Each outpost chit moves to the site where the outpost
+  is formed.
+- Rocket: existing sandbox rocket sprite (unchanged).
 
-### Multi-stack (forward-looking)
+### UI: stack-switcher in the hand bar
 
-A player can have more than one ship stack in play. Industrialize
-and colonize ops target a specific stack at a specific site, not
-"the rocket". Implementation of multi-stack is staged - see
-"Open questions" section C - but the data model must not assume
-single-stack from this slice onward.
+The hand bar gains a row of stack-buttons mapping to each of the
+player's active stacks:
+
+- `🌍 LEO` - always present (the LEO Stack always exists, even
+  if empty / aqua-only).
+- `🚀 Rocket` - present when a rocket figure is on the map.
+- `🏛A`, `🏛B`, `🏛C`, `🏛D` - one button per active outpost
+  slot, in slot order. Hidden slots fold up.
+
+Tapping a stack button focuses that stack: the cards-in-stack
+panel in the hand bar shows that stack's contents (instead of
+the hand), the map flies to the stack's site, and follow-up
+actions (transfer, ops) target it. The hand itself stays one
+tap away (a separate `✋ Hand` chip or the existing default
+view).
 
 ### Colony cards (new card type)
 
@@ -65,92 +167,102 @@ section F).
 
 ## Open questions
 
-Marked `[?]` and grouped. Need answers before implementation.
+The big ones are now locked in **Spec**. What's left are the
+finer-grained UX / data-model decisions that gate the
+implementation PR.
 
 ### A. Industrialize action
 
-- [?] **A1.** Decommission destination - does a decommissioned
-  refinery / robonaut / support card go to the discard pile, to
-  the player's hand, or vanish from the game entirely?
-- [?] **A2.** Does industrialize cost an operation, water, or is
-  it free given the prereqs?
-- [?] **A3.** What does the factory chit produce, and when?
-  (refuel? aqua income? exo-production capability matched on
-  spectral? something else?)
-- [?] **A4.** Spectral type on a factory chit - inherit from the
-  refinery card, the site, the robonaut, or some combination?
-- [?] **A5.** VP - does industrializing award VP at the moment
-  of build, or do VPs come only through later glory hooks
-  (e.g. industrialize the second site on a body for a chit)?
-- [?] **A6.** "Support chain" decomposition - if card X
-  supports the refinery, and card Y supports card X, do both
-  X and Y get decommissioned, even if Y also supports something
-  else still in the stack?
+- [?] **A1.** Decommission destination - bottom of patent deck
+  (matches rulebook G6), discard pile (lost forever), or back
+  to player's hand?
+- [?] **A2.** Op cost - does industrialize spend the per-turn
+  Operation, or is it free given the prereqs?
+- [?] **A3.** Factory production model - refuel-only (rulebook
+  I5b), or does the factory also produce passive end-of-round
+  aqua income?
+- [?] **A4.** Spectral type on a factory chit - inherit from
+  the refinery card, the site's dominant spectral, or chosen
+  by the player at build time?
+- [?] **A5.** VP - does industrialize award VP at build (and
+  how many), or only via end-game token counting (rulebook M2a
+  scores tokens at endgame)?
+- [?] **A6.** Support-chain semantics - if card X supports the
+  refinery and card Y supports X, and Y also supports a card
+  still in the stack (not in the chain), is Y decommissioned?
+- [?] **E1.** Confirm-modal on industrialize that lists exactly
+  which cards will be decommissioned (with a Cancel)?
+- [?] **E2.** If a stack has multiple valid refineries or
+  robonauts, does the player pick the pair, or does the engine
+  pick deterministically (e.g. lowest mass)?
 
 ### B. Colonize action
 
-- [?] **B1.** Where do colonies live in the data model?
-  - on the factory site (one factory = many possible colonies),
-  - on the body (one colony slot per body),
-  - in a player-owned colony inventory referencing the site.
-- [?] **B2.** Can multiple crews at the same factory be colonized
-  in one free action, or one at a time?
-- [?] **B3.** Does the colonized crew's Promotion Colony field
-  (D / H / Atmospheric / Astrobiology / Submarine) constrain
-  which sites can host the resulting colony, or does any factory
-  accept any crew?
-- [?] **B4.** "Returns to LEO" - which destination?
-  - back to the player's hand at LEO,
-  - into a LEO availability pool the player draws from,
-  - into the LEO stack of an existing rocket.
-- [?] **B5.** VP - colonize awards VP at the moment of
-  conversion, at end-game scoring, or both?
-- [?] **B6.** Does an existing colony at the factory block or
-  enable further colonizes? (Multiple colonies stacked at one
-  factory, or strict 1-per-site cap?)
+- [?] **B3.** Does the colonized crew's `Promotion Colony`
+  field (D / H / Atmospheric / Astrobiology / Submarine, see
+  Colonists table) gate which factory can accept it, or does
+  any factory take any crew?
+- [?] **B5.** VP - does colonize award VP at build, only at
+  endgame (rulebook M2b lists Astrobiology +1 / Submarine +2),
+  or both?
 
-### C. Multi-stack support
+### C. Stacks & UI
 
-- [?] **C1.** Switching stacks - top-bar dropdown, click the
-  rocket on the map, both?
-- [?] **C2.** Are stacks named / numbered, or addressed only by
-  current location?
-- [?] **C3.** Hand sharing - one hand feeding all stacks, or per-
-  stack hands?
-- [?] **C4.** Aqua bank - shared across stacks, or per-stack tank?
-- [?] **C5.** Starting state - one stack at LEO, or several at
-  LEO?
-- [?] **C6.** Refactor scope - lift `rocket.js` into a
-  `stacks.js` keyed-by-id module in this PR, or stay single-
-  stack and refactor next PR?
+- [?] **C1.** Active-stack indication - the focused stack
+  highlights its button in the hand bar, but does the map also
+  paint a ring around the focused stack's site?
+- [?] **C2.** Hand sharing - confirm: one hand feeds all stacks
+  (cards in hand can be boosted to LEO and then transferred to
+  any stack via colocation).
+- [?] **C3.** Aqua bank - confirm: one shared bank at LEO,
+  per-stack water tanks for FTs (matches rulebook E3a / F3b).
+- [?] **C4.** Outpost-slot reuse - when an outpost is dissolved
+  (empty cards + empty FTs, rulebook G6), does its A/B/C/D
+  slot label go back to the pool for re-use, or do slots
+  permanently retain their original site assignment until end-
+  of-game?
+- [?] **C5.** Outpost slot assignment - first-empty wins
+  (deterministic A → B → C → D), or does the player pick which
+  slot a new outpost lands in?
 
 ### D. Map rendering
 
-- [?] **D1.** Factory + colony glyph layout - stacked, side by
-  side, or 🌐 as a small ring over the 🏭?
-- [?] **D2.** Multi-stack indicator at a site - count badge on
-  one sprite, or two staggered sprites?
-
-### E. Decommission UX
-
-- [?] **E1.** When the player previews industrialize, do we show
-  a confirm modal that lists exactly which cards are about to
-  be decommissioned (so the player can back out)?
-- [?] **E2.** If a stack has multiple valid refineries or
-  multiple valid robonauts, who picks which pair gets consumed?
+- [?] **D1.** Glyph stacking for 🌐 + 🏭 on the same factory -
+  side-by-side `🌐🏭`, 🌐 above 🏭, or 🌐 as a small ring on
+  top of the factory chit?
+- [?] **D2.** Multi-card indicator at sites that host both an
+  outpost and a rocket - render two sprites or one with a
+  badge?
+- [?] **D3.** Outpost chit visual: just `🏛A` etc. as text, or
+  a styled chit (background + letter)?
 
 ### F. Colony cards as a card type
 
-- [?] **F1.** What fields does a colony card carry beyond
-  `{ siteId, ownerId, spectralType }`? Does it have its own
-  Mass / Rad-Hard / Ability text?
-- [?] **F2.** Are colony cards drawn from a finite deck (limited
-  supply), or minted on demand at colonize time?
-- [?] **F3.** Inheritance from the consumed crew - does the
-  colony retain the crew's Ability text, or is the ability
-  banked elsewhere and the colony card is purely positional?
-- [?] **F4.** Visibility - is the colony card shown in some
-  player-owned "colonies" panel, on the site popup, or both?
+- [?] **F1.** Schema beyond `{ siteId, ownerId, spectralType }`
+  - does a colony card carry its own Mass / Rad-Hard / Ability
+  text, or just identity + location?
+- [?] **F2.** Card-supply model - finite deck the colony cards
+  are drawn from (capped supply), or minted on demand at
+  colonize time?
+- [?] **F3.** Crew Ability inheritance - does the colony
+  retain the consumed crew's Ability text, or is that ability
+  lost when the crew returns to LEO?
+- [?] **F4.** Visibility - colony cards shown in a player-
+  owned "Colonies" sidebar panel, on the site popup, both?
+- [?] **F5.** Promotion - rulebook references "promoted
+  colonies" (Astrobiology / Submarine give bonus VP at
+  endgame, M2b). Is promotion automatic at colonize time, or
+  a separate later action?
+
+### G. Rocket ↔ Outpost conversion
+
+- [?] **G1.** Rocket → Outpost: is the conversion itself a
+  **free action**, or does it consume the per-turn op / move?
+- [?] **G2.** Outpost → Rocket: same question - free, op, or
+  uses the per-turn move budget? Can the newly-formed rocket
+  also move on the same turn it converted?
+- [?] **G3.** Outpost dissolves when empty (rulebook G6) -
+  confirm this auto-frees the A/B/C/D slot in our variant?
 
 ## What we keep from the existing sandbox
 
