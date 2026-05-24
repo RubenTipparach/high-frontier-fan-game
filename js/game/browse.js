@@ -2875,6 +2875,35 @@ function doRefuel(site) {
   openFuelTankModal({ fromWater: tankBefore, toWater: tankBefore + gain });
 }
 
+// Factory-Refuel handler (rulebook I5b). Adds water FTs to the
+// rocket tank up to the cap; consumes the per-turn op and the
+// per-site refuel lock. The flat 7-water yield is the "blue FT"
+// rulebook value; the gold-FT (isotope) variant lands when
+// isotope storage exists. Caller has already validated that a
+// player-owned factory exists at the site, the rocket is parked,
+// and tank headroom > 0.
+function doFactoryRefuel(site, gain) {
+  if (gain <= 0) return;
+  if (!requireOp('Factory-Refuel')) return;
+  const tankBefore = getTankWater();
+  const tmax = getTankMax();
+  addFuel(gain);
+  markRefueledThisTurn(site.id);
+  setStatus(
+    `🏭 Factory-Refuel at <strong>${esc(site.name)}</strong>: `
+    + `<strong>+${gain}</strong> water (factory produces 7 blue FTs, clamped by tank cap). `
+    + `Tank ${tankBefore} → <strong>${tankBefore + gain}</strong>/${tmax}.`
+  );
+  logAction({
+    type: 'factory_refuel',
+    icon: '🏭',
+    summary: `Factory-Refuel at ${site.name}: +${gain} water; tank ${tankBefore + gain}/${tmax}`,
+    undoable: false,
+    data: { siteId: site.id, gain, tankAfter: tankBefore + gain },
+  });
+  openFuelTankModal({ fromWater: tankBefore, toWater: tankBefore + gain });
+}
+
 // Single sandbox owner id - the local player. Used to tag
 // factories + colonies until Stage 4 multi-player support
 // arrives. Keeping it as a constant (rather than reading from a
@@ -4945,6 +4974,41 @@ function showSitePopupFor(site) {
         onClick: () => {
           if (!refuelChk.ok) return;
           doRefuel(site);
+          _renderer.clearSitePopup();
+        },
+      });
+    }
+  }
+  // Factory-Refuel action (rulebook I5b). Shown when the rocket
+  // is parked at a site with a player-owned factory. Produces a
+  // flat 7 water FTs (the "blue FT" variant from the rulebook).
+  // The gold-FT / isotope variant lands later when isotope
+  // storage is modelled. Shares the per-site "already refueled
+  // this turn" lock with ISRU Refuel since the player only has
+  // one op per turn anyway.
+  if (rocketSite && site.id === rocketSite.id) {
+    const factory = getFactory(site.id);
+    if (factory && factory.ownerId === SANDBOX_OWNER_ID) {
+      const factoryGain = 7;
+      const tank = getTankWater();
+      const tmax = getTankMax();
+      const headroom = Math.max(0, tmax - tank);
+      const gain = Math.min(factoryGain, headroom);
+      const refueledThisTurn = hasRefueledThisTurn(site.id);
+      const ok = !refueledThisTurn && gain > 0;
+      const reason = refueledThisTurn
+        ? 'Already refueled at this site this turn.'
+        : (gain <= 0 ? `Tank full (${tank}/${tmax}).` : null);
+      actions.push({
+        label: refueledThisTurn
+          ? `🏭 Factory-Refuel done`
+          : `🏭 Factory-Refuel (+${gain} water)`,
+        variant: ok ? 'rocket' : 'secondary',
+        disabled: !ok,
+        title: reason || `Factory produces ${factoryGain} blue water FTs (clamped by tank cap).`,
+        onClick: () => {
+          if (!ok) return;
+          doFactoryRefuel(site, gain);
           _renderer.clearSitePopup();
         },
       });
