@@ -255,14 +255,61 @@ function wireHandStrip() {
     btn.disabled = n === 0;
     btn.textContent = n > 0 ? `🚀 BOOST (${n})` : '🚀 BOOST';
   };
-  const commitBoost = () => {
+  const commitBoost = async () => {
     const marked = getBoostMarked();
     if (!marked.length) return;
+    // Pre-flight overflow check: adding cards raises dry mass,
+    // which lowers the rocket's effective fuel cap (wet ≤ 32).
+    // If the tank already holds more water than the new cap
+    // can fit, the excess will spill. Warn before committing
+    // so the player can pull the card OR drain water first
+    // instead of losing it silently.
+    const TANK_MAX = 32;
+    const totals = getStackTotals();
+    let addedMass = 0;
+    for (const id of marked) {
+      const card = lookup(id);
+      if (!card) continue;
+      const f = (card.faces && card.faces.primary) || card;
+      addedMass += ((f.mass != null ? f.mass : card.mass) | 0);
+    }
+    const newDryMass = (totals.dryMass | 0) + addedMass;
+    const newCap = Math.max(0, TANK_MAX - newDryMass);
+    const currentTank = getTankWater();
+    const spillage = Math.max(0, currentTank - newCap);
+    if (spillage > 0) {
+      const ok = await confirmModal({
+        title: '⚠ Tank overflow',
+        body: `Boosting ${marked.length} card${marked.length === 1 ? '' : 's'} `
+          + `raises dry mass to <strong>${newDryMass}</strong>, capping `
+          + `the tank at <strong>${newCap}</strong> water. `
+          + `<strong>${spillage} water will spill out</strong> and be lost. `
+          + `Continue?`,
+        yes: 'Add anyway',
+        no: 'Cancel',
+      });
+      if (!ok) return;
+    }
     for (const id of marked) {
       const card = lookup(id);
       if (!card) continue;
       rocketAddCard(id, kindOf(id));
       removeFromHand(id);
+    }
+    // Clip the tank to the new fuel cap so the wet-mass total
+    // stays honest. addToStack doesn't auto-clip (older call
+    // sites might want the old value preserved), so we do it
+    // here.
+    const finalCap = Math.max(0, TANK_MAX - getStackTotals().dryMass);
+    if (getTankWater() > finalCap) {
+      const lost = getTankWater() - finalCap;
+      removeFuel(lost);
+      logAction({
+        type: 'tank_spill',
+        icon: '💧⤓',
+        summary: `Tank spilled ${lost} water on add (new cap ${finalCap})`,
+        undoable: false,
+      });
     }
     clearBoostMarks();
     openRocketStackModal();
@@ -2925,14 +2972,18 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const fromW   = Number.isFinite(fromWater) ? fromWater : tankNow;
   const totals  = getStackTotals();
   const thrStats = getActiveThrusterStats();
-  // Capacity model: thrust - dryMass (the HF4 wet-mass lift cap)
-  // so the cylinder visually shows how much room is left under
-  // the thruster's lift limit. When no thruster is active or the
-  // ship is overweight, fall back to the engine's tank cap.
-  const liftCap = (thrStats && Number.isFinite(thrStats.thrust))
-    ? Math.max(0, thrStats.thrust - (totals.dryMass || 0))
-    : null;
-  const cap = liftCap != null && liftCap > 0 ? liftCap : getTankMax();
+  // Tank visualisation model: the cylinder always represents the
+  // full TANK_MAX wet-mass cap (32). Dry mass occupies the bottom
+  // of the cylinder as an immutable block; water floats on top
+  // of it. The room left over for water = TANK_MAX − dry mass.
+  // A separate LIFT marker is drawn at the active thruster's
+  // thrust line so the player can see when extra water would
+  // push the rocket below liftable mass.
+  const TANK_VIS_MAX = getTankMax();
+  const dryMass = Math.max(0, Math.min(TANK_VIS_MAX, totals.dryMass || 0));
+  const cap = Math.max(0, TANK_VIS_MAX - dryMass);
+  const thrust = (thrStats && Number.isFinite(thrStats.thrust)) ? thrStats.thrust : null;
+  const liftCap = (thrust != null) ? Math.max(0, thrust - dryMass) : null;
 
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay fuel-tank-overlay';
@@ -2968,7 +3019,18 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
           <clipPath id="tank-clip">
             <rect x="20" y="10" width="80" height="200" rx="14" ry="14" />
           </clipPath>
+          <pattern id="tank-dry-hatch" patternUnits="userSpaceOnUse" width="8" height="8">
+            <rect width="8" height="8" fill="rgba(120, 130, 170, 0.35)"/>
+            <line x1="0" y1="8" x2="8" y2="0" stroke="rgba(180, 190, 210, 0.55)" stroke-width="1"/>
+          </pattern>
         </defs>
+        <!-- Dry-mass block: cards take up wet-mass capacity even
+             before water arrives. Drawn at the bottom of the
+             cylinder with a hatched fill so it reads as 'occupied
+             by the hull' instead of water. -->
+        <g clip-path="url(#tank-clip)">
+          <rect class="tank-dry" x="20" y="200" width="80" height="10" fill="url(#tank-dry-hatch)" />
+        </g>
         <!-- Falling droplet + splash layer. Sits ABOVE the water
              but inside the clip so the droplets disappear at the
              rim. JS spawns the droplet + splash <path>s during
@@ -2980,6 +3042,11 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
           <rect class="tank-water" x="20" y="200" width="80" height="10" />
           <rect class="tank-water-foam" x="20" y="195" width="80" height="6" />
         </g>
+        <!-- Lift-mass marker: a thin amber line at the thrust
+             level so the player sees the can-lift threshold. -->
+        <line class="tank-lift-line" x1="20" y1="0" x2="100" y2="0"
+              stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="3 3"
+              opacity="0" />
         <!-- Capacity tick marks every 5 units. -->
         <g class="tank-ticks"></g>
       </svg>
@@ -2996,21 +3063,36 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
       <button type="button" class="popup-btn popup-btn-secondary" id="tank-dump-all"
         title="Drain everything (future: forms an outpost stack once factories land)">💧⤓ Dump all</button>
     </div>
-    <div class="fuel-tank-aqua" id="tank-aqua-section" hidden>
+<div class="fuel-tank-aqua" id="tank-aqua-section" hidden>
       <div class="aqua-row">
-        <span>💎 Aqua balance</span>
+        <span>🏦 Aqua bank</span>
         <strong id="aqua-balance">${getAqua()}</strong>
       </div>
       <p class="muted aqua-help">
-        Convert aqua to water 1:1. Only available at LEO.
+        At LEO you can swap aqua between your bank and the
+        rocket tank, 1:1, for free.
       </p>
-      <div class="aqua-actions">
-        <button type="button" class="popup-btn popup-btn-secondary" id="aqua-buy-1"
-          title="Convert 1 aqua into 1 water">💎→💧 +1</button>
-        <button type="button" class="popup-btn popup-btn-secondary" id="aqua-buy-5"
-          title="Convert 5 aqua into 5 water">💎→💧 +5</button>
-        <button type="button" class="popup-btn" id="aqua-buy-max"
-          title="Fill the tank to its cap by converting aqua">💎→💧 Max fill</button>
+      <div class="aqua-direction">
+        <span class="aqua-direction-label">🏦 Bank → 💧 Tank</span>
+        <div class="aqua-actions">
+          <button type="button" class="popup-btn popup-btn-secondary" id="aqua-buy-1"
+            title="Move 1 aqua from your bank into the tank">+1</button>
+          <button type="button" class="popup-btn popup-btn-secondary" id="aqua-buy-5"
+            title="Move 5 aqua from your bank into the tank">+5</button>
+          <button type="button" class="popup-btn" id="aqua-buy-max"
+            title="Fill the tank to its cap from your aqua bank">Max fill</button>
+        </div>
+      </div>
+      <div class="aqua-direction aqua-direction-reverse">
+        <span class="aqua-direction-label">💧 Tank → 🏦 Bank</span>
+        <div class="aqua-actions">
+          <button type="button" class="popup-btn popup-btn-secondary" id="aqua-cash-1"
+            title="Drain 1 water from the tank back into your aqua bank">+1</button>
+          <button type="button" class="popup-btn popup-btn-secondary" id="aqua-cash-5"
+            title="Drain 5 water from the tank back into your aqua bank">+5</button>
+          <button type="button" class="popup-btn" id="aqua-cash-all"
+            title="Empty the tank back into your aqua bank">Cash out</button>
+        </div>
       </div>
     </div>
     <p class="muted fuel-tank-dump-note">
@@ -3018,21 +3100,50 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
       an outpost-stack drop once factories land.
     </p>
     <div class="fuel-tank-foot muted">
-      Cap = thrust ${thrStats ? thrStats.thrust : '-'} − dry mass ${totals.dryMass || 0}
-      ${liftCap == null ? '(no active thruster)' : ''}
+      Tank cap = <strong>${TANK_VIS_MAX}</strong> − dry mass
+      <strong>${dryMass}</strong> = <strong>${cap}</strong> water room.
+      ${thrust != null
+        ? `Lift cap = thrust <strong>${thrust}</strong> − dry mass
+           <strong>${dryMass}</strong> = <strong>${liftCap}</strong> liftable water.`
+        : '(no active thruster)'}
     </div>
   `;
 
   const waterRect = panel.querySelector('.tank-water');
   const foamRect  = panel.querySelector('.tank-water-foam');
+  const dryRect   = panel.querySelector('.tank-dry');
+  const liftLine  = panel.querySelector('.tank-lift-line');
   const nowReadout = panel.querySelector('.tank-now');
   const ticksG     = panel.querySelector('.tank-ticks');
 
-  // Tick marks. One short hatch every 5 units on the right edge.
-  const tickEvery = Math.max(1, Math.round(cap / 10));
-  for (let v = tickEvery; v <= cap; v += tickEvery) {
-    const t = v / cap;
-    const ty = 210 - t * 200;
+  // Geometry: 200 svg units span TANK_VIS_MAX wet-mass units.
+  // The dry-mass block fills the bottom; water sits above it.
+  const unitPx = 200 / TANK_VIS_MAX;
+  const dryHeightPx = dryMass * unitPx;
+  const dryTopY = 210 - dryHeightPx;
+  if (dryRect) {
+    dryRect.setAttribute('y', String(dryTopY));
+    dryRect.setAttribute('height', String(dryHeightPx));
+  }
+  // Lift-cap marker. Only show when the active thruster is set
+  // AND the lift cap is BELOW the visual tank cap (i.e., the
+  // rocket would be over-massed before the tank fills).
+  if (liftLine) {
+    if (thrust != null && liftCap < cap && thrust > 0) {
+      const liftY = 210 - (dryMass + liftCap) * unitPx;
+      liftLine.setAttribute('y1', String(liftY));
+      liftLine.setAttribute('y2', String(liftY));
+      liftLine.setAttribute('opacity', '0.85');
+    } else {
+      liftLine.setAttribute('opacity', '0');
+    }
+  }
+
+  // Tick marks. One short hatch every 5 units on the right edge,
+  // across the full TANK_VIS_MAX scale so the player sees the
+  // absolute wet-mass position (matches the Net Thrust track).
+  for (let v = 5; v <= TANK_VIS_MAX; v += 5) {
+    const ty = 210 - v * unitPx;
     const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
     line.setAttribute('x1', 100); line.setAttribute('x2', 110);
     line.setAttribute('y1', ty);  line.setAttribute('y2', ty);
@@ -3043,15 +3154,16 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
 
   // Current water surface y (svg coord). Drops use this to know
   // when they've hit the surface. setLevel writes it each frame.
-  let _surfaceY = 210;
+  // Water floats on top of the dry block, never inside it.
+  let _surfaceY = dryTopY;
   function setLevel(level) {
     const clamped = Math.max(0, Math.min(cap, level));
-    const frac = cap > 0 ? clamped / cap : 0;
-    const h    = frac * 200;
-    _surfaceY  = 210 - h;
-    waterRect.setAttribute('y', String(210 - h));
+    const h = clamped * unitPx;
+    const waterTopY = dryTopY - h;
+    _surfaceY = waterTopY;
+    waterRect.setAttribute('y', String(waterTopY));
     waterRect.setAttribute('height', String(h));
-    foamRect.setAttribute('y',  String(210 - h - 3));
+    foamRect.setAttribute('y',  String(waterTopY - 3));
     foamRect.setAttribute('height', String(Math.min(6, h)));
     nowReadout.textContent = String(Math.round(clamped));
   }
@@ -3290,6 +3402,9 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const aquaBuy1Btn = panel.querySelector('#aqua-buy-1');
   const aquaBuy5Btn = panel.querySelector('#aqua-buy-5');
   const aquaBuyMaxBtn = panel.querySelector('#aqua-buy-max');
+  const aquaCash1Btn  = panel.querySelector('#aqua-cash-1');
+  const aquaCash5Btn  = panel.querySelector('#aqua-cash-5');
+  const aquaCashAllBtn = panel.querySelector('#aqua-cash-all');
   const atLeo = isLeoSite(getRocketSite());
   if (atLeo && aquaSection) aquaSection.hidden = false;
   const refreshAquaButtons = () => {
@@ -3301,6 +3416,12 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     if (aquaBuy1Btn)   aquaBuy1Btn.disabled   = bal < 1 || room < 1;
     if (aquaBuy5Btn)   aquaBuy5Btn.disabled   = bal < 5 || room < 1;
     if (aquaBuyMaxBtn) aquaBuyMaxBtn.disabled = bal < 1 || room < 1;
+    // Reverse direction: tank → bank requires water in the tank
+    // to drain back. No upper cap on the bank balance, so the
+    // only gate is "do we have anything to cash out?".
+    if (aquaCash1Btn)   aquaCash1Btn.disabled   = cur < 1;
+    if (aquaCash5Btn)   aquaCash5Btn.disabled   = cur < 5;
+    if (aquaCashAllBtn) aquaCashAllBtn.disabled = cur < 1;
   };
   refreshAquaButtons();
   // Reuse the same drainTo-style animation in reverse: get the
@@ -3340,6 +3461,40 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   aquaBuy1Btn?.addEventListener('click',   (e) => fillFromAqua(1, e));
   aquaBuy5Btn?.addEventListener('click',   (e) => fillFromAqua(5, e));
   aquaBuyMaxBtn?.addEventListener('click', (e) => fillFromAqua(cap, e));
+  // Reverse: drain water from the tank back into the aqua
+  // bank (1:1). Only available at LEO. Same tween path as
+  // dump-fuel, but credits the player's bank instead of
+  // destroying the water.
+  const cashOutToAqua = (amount, e) => {
+    e?.stopPropagation();
+    if (!atLeo) return;
+    const cur = getTankWater();
+    const want = Math.min(amount, cur);
+    if (want <= 0) { refreshAquaButtons(); return; }
+    removeFuel(want);
+    addAqua(want);
+    const fromLevel = parseFloat(nowReadout.textContent || String(cur));
+    const toLevel = getTankWater();
+    if (fromLevel === toLevel) {
+      refreshAquaButtons();
+      return;
+    }
+    animating = true;
+    tween = {
+      from: fromLevel, to: toLevel,
+      t0: performance.now(), dur: 400,
+      onDone: () => { refreshAquaButtons(); refreshDumpButtons(); },
+    };
+    logAction({
+      type: 'aqua_cashout',
+      icon: '💧→🏦',
+      summary: `Cashed ${want} water → ${want} aqua (bank ${getAqua()})`,
+      undoable: false,
+    });
+  };
+  aquaCash1Btn?.addEventListener('click',   (e) => cashOutToAqua(1, e));
+  aquaCash5Btn?.addEventListener('click',   (e) => cashOutToAqua(5, e));
+  aquaCashAllBtn?.addEventListener('click', (e) => cashOutToAqua(getTankWater(), e));
   const unsubAqua = onAquaChange(refreshAquaButtons);
   const unsubRocket = onRocketChange(refreshAquaButtons);
   // Cleanup: detach listeners when the overlay tears down so a
@@ -4581,21 +4736,39 @@ function showSitePopupFor(site) {
   // One refuel per (turn, site) so the player can't strip-mine
   // the site by hammering the button.
   if (rocketSite && site.id === rocketSite.id) {
-    const refuelChk = canRefuelAt(site);
-    actions.push({
-      label: refuelChk.label,
-      // Blue rocket variant when the action is actually
-      // available; dim secondary when blocked. Same idiom as
-      // the prospect button so live ops read as live ops.
-      variant: refuelChk.ok ? 'rocket' : 'secondary',
-      disabled: !refuelChk.ok,
-      title: refuelChk.reason || undefined,
-      onClick: () => {
-        if (!refuelChk.ok) return;
-        doRefuel(site);
-        _renderer.clearSitePopup();
-      },
-    });
+    if (isLeoSite(site)) {
+      // LEO refuel is a bank-to-tank transfer, not a turn op -
+      // the player just moves water between their aqua bank and
+      // the rocket for free. Skip canRefuelAt entirely + open
+      // the fuel-tank modal so the transfer buttons are right
+      // there.
+      actions.push({
+        label: '💧 Transfer fuel',
+        variant: 'rocket',
+        disabled: false,
+        title: 'At LEO: move water between your aqua bank and the rocket tank for free (no turn op)',
+        onClick: () => {
+          _renderer.clearSitePopup();
+          openFuelTankModal();
+        },
+      });
+    } else {
+      const refuelChk = canRefuelAt(site);
+      actions.push({
+        label: refuelChk.label,
+        // Blue rocket variant when the action is actually
+        // available; dim secondary when blocked. Same idiom as
+        // the prospect button so live ops read as live ops.
+        variant: refuelChk.ok ? 'rocket' : 'secondary',
+        disabled: !refuelChk.ok,
+        title: refuelChk.reason || undefined,
+        onClick: () => {
+          if (!refuelChk.ok) return;
+          doRefuel(site);
+          _renderer.clearSitePopup();
+        },
+      });
+    }
   }
   // Navigate-to ALWAYS sits last (CLAUDE.md style rule). It's a
   // pure inspection affordance - no state mutation - so any new
