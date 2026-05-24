@@ -1389,10 +1389,12 @@ function flyCardToHand(srcEl, card, onLand) {
   ghost.style.transform = 'translate(0, 0) scale(1)';
   ghost.style.transition = 'transform 520ms cubic-bezier(0.22, 0.61, 0.36, 1), opacity 520ms ease-out';
   ghost.style.willChange = 'transform, opacity';
-  // Land near the right edge of the strip so the card looks
-  // like it slots into the next free position. The final scale
-  // (~0.4) matches the hand-strip's visual card size.
-  const targetX = dstRect.right - srcRect.width * 0.4 - 24;
+  // Land near the LEFT edge of the strip so the card looks
+  // like it slots into the first position (cards stack
+  // left-to-right; new hand cards appear at the left end of
+  // the strip). The final scale (~0.4) matches the hand-
+  // strip's visual card size.
+  const targetX = dstRect.left + 24;
   const targetY = dstRect.top + (dstRect.height - srcRect.height * 0.4) / 2;
   const dx = targetX - srcRect.left;
   const dy = targetY - srcRect.top;

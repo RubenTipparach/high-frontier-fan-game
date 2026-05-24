@@ -1,105 +1,146 @@
-// Crew deck. Each physical card carries two FUNCTIONALLY
-// INDEPENDENT crew on the two faces -- pick either by flipping.
-// The two faces share a card body but not stats. Each face is a
-// full crew record with their own role, mass, rad hardness, and
-// special flavour.
+// Crew deck. Each physical card carries TWO functionally
+// independent crew on its two faces (primary + secondary).
 //
-// All names + roles are original to this implementation; they're
-// designed to feel like a typical space-corp roster without
-// transcribing anything from the published card list. Stats are
-// my own balance choices; the engine will treat radHardness +
-// roleBonus the same regardless of which crew you actually run.
+// AUTO-GENERATED from reference/HF4-card-data.xlsx's
+// Colonists sheet via scripts/extract-crew-data.py. Each
+// pair of rows in the sheet is one physical card; the
+// primary row carries name+type+specialty+mass+rad, the
+// secondary row often carries an ability text plus its
+// own mass+rad (and inherits type+specialty from the pair).
+//
+// The Promotion Colony + Ideology columns are reference
+// data only - crew promotion is part of the expansion and
+// is NEVER used in this variant (industrialize.md
+// 'Colonies are tokens, not cards'). They are not emitted.
+//
+// Re-run the extractor when the spreadsheet changes:
+//   python3 scripts/extract-crew-data.py
 
 export const CREW = [
   {
-    id: 'crew_pioneers',
+    id: 'crew_babbage_halbonauts',
     faces: {
-      primary:   { name: 'Vega Holst',     role: 'Pilot',      mass: 1, radHardness: 2, bonus: '+1 to MOVE',      blurb: 'Ex-orbital corps; nerves of tungsten.' },
-      secondary: { name: 'Idris Okonkwo',  role: 'Engineer',   mass: 1, radHardness: 2, bonus: '+1 to BUILD',     blurb: 'Patents three thrusters; can repair anything with a soldering iron.' },
+      primary:   { name: 'Babbage Halbonauts', type: 'Robot', role: 'Engineer', mass: 2, radHardness: 5 },
+      secondary: { name: 'Utility Fog Halbonaut', type: 'Robot', role: 'Engineer', mass: 2, radHardness: 5, ability: 'All of your stacks are Glitch-free.' },
     },
   },
   {
-    id: 'crew_xenobio',
+    id: 'crew_biomechs',
     faces: {
-      primary:   { name: 'Asla Bergmann',  role: 'Xenobiologist', mass: 1, radHardness: 1, bonus: 'Astrobiology auto-success', blurb: 'Hunts for hydrothermal life on icy moons.' },
-      secondary: { name: 'Dr. Mateo Cruz', role: 'Medic',         mass: 1, radHardness: 2, bonus: 'Heal one hazard per round', blurb: 'Microgravity surgeon; carries the kit nobody admits they need.' },
+      primary:   { name: 'Biomechs', type: 'Human', role: 'Miner', mass: 2, radHardness: 4 },
+      secondary: { name: 'Group Mind Immortalists', type: 'Human', role: 'Miner', mass: 2, radHardness: 5, ability: 'May perform the faction privileges on both sides of your Crew card.' },
     },
   },
   {
-    id: 'crew_metallurgy',
+    id: 'crew_botany_bay_convicts',
     faces: {
-      primary:   { name: 'Pilar Romero',   role: 'Metallurgist', mass: 1, radHardness: 2, bonus: '+1 VP at Psyche / Vesta', blurb: 'Refines anything from M-type slag.' },
-      secondary: { name: 'Kestrel Mhlanga', role: 'Geophysicist', mass: 1, radHardness: 1, bonus: '+1 die to PROSPECT', blurb: 'Reads seismic charts like sheet music.' },
+      primary:   { name: 'Botany Bay Convicts', type: 'Human', role: 'Miner', mass: 2, radHardness: 4 },
+      secondary: { name: 'Soldier Caste', type: 'Human', role: 'Miner', mass: 2, radHardness: 9, ability: 'All your Humans can commit Felonies, even if defending Humans are present.' },
     },
   },
   {
-    id: 'crew_command',
+    id: 'crew_boyle_engineering_collective',
     faces: {
-      primary:   { name: 'Cmdr. Yamazaki', role: 'Mission Commander', mass: 2, radHardness: 3, bonus: '+1 op per round', blurb: 'Veteran of the first Mars push.' },
-      secondary: { name: 'Comms Officer Vaeli', role: 'Signals',     mass: 1, radHardness: 2, bonus: 'Free hand reset', blurb: 'Maintains the relay network even at Pluto delay.' },
+      primary:   { name: 'Boyle Engineering Collective', type: 'Human', role: 'Prospector', mass: 3, radHardness: 5 },
+      secondary: { name: 'Martian Assembly', type: 'Human', role: 'Prospector', mass: 3, radHardness: 6, ability: 'Acts as a Freighter when building a Space Elevator.' },
     },
   },
   {
-    id: 'crew_ops',
+    id: 'crew_calypso_2_seed_sail',
     faces: {
-      primary:   { name: 'Lieut. Ramos',   role: 'Logistician', mass: 1, radHardness: 2, bonus: '+1 water income', blurb: 'Knows which bay actually has spare hydrogen.' },
-      secondary: { name: 'Janitor Nyx',    role: 'Quartermaster', mass: 1, radHardness: 2, bonus: 'Reroll a failed PROSPECT', blurb: 'Keeps the airlock clean and the ledger cleaner.' },
+      primary:   { name: 'Calypso 2 Seed Sail', type: 'Human', role: 'Prospector', mass: 1, radHardness: 3, ability: "Can't enter aerobrakes." },
+      secondary: { name: 'Wet-Nano Seed Sail', type: 'Human', role: 'Prospector', mass: 1, radHardness: 5, ability: "-2 to Colocated size rolls on Synodic Comets. Can't enter aerobrakes." },
     },
   },
   {
-    id: 'crew_civilian',
+    id: 'crew_heavy_water_survivalists',
     faces: {
-      primary:   { name: 'Pilgrim Adler',  role: 'Settler',  mass: 1, radHardness: 0, bonus: 'Bernal seeds count +1', blurb: 'First boots-on-soil for a new habitat.' },
-      secondary: { name: 'Botanist Linh',  role: 'Botanist', mass: 1, radHardness: 1, bonus: 'Hydration +1 at lander sites', blurb: 'Closed-loop greenhouse expertise.' },
+      primary:   { name: 'Heavy Water Survivalists', type: 'Human', role: 'Engineer', mass: 2, radHardness: 5 },
+      secondary: { name: 'New Attica Secessionists', type: 'Human', role: 'Engineer', mass: 2, radHardness: 6, ability: 'Boost costs are doubled for all your opponents.' },
     },
   },
   {
-    id: 'crew_research',
+    id: 'crew_house_of_saud',
     faces: {
-      primary:   { name: 'Dr. Sólveig',    role: 'Physicist',   mass: 1, radHardness: 1, bonus: '+1 lab science',         blurb: 'Wrote the textbook on antimatter catalysts.' },
-      secondary: { name: 'Dr. Owusu',      role: 'AI Operator', mass: 1, radHardness: 2, bonus: 'Robonauts act twice',   blurb: 'Whispers Latin to the swarm at midnight.' },
+      primary:   { name: 'House of Saud', type: 'Human', role: 'Miner', mass: 2, radHardness: 3 },
+      secondary: { name: 'Iceworms', type: 'Human', role: 'Miner', mass: 2, radHardness: 4, ability: 'Performs epic hazard operation as a free action, & is not Decommissioned if it fails.' },
     },
   },
   {
-    id: 'crew_outsider',
+    id: 'crew_juiced_cosmonauts',
     faces: {
-      primary:   { name: 'Veteran Quill',  role: 'Salvager',  mass: 1, radHardness: 3, bonus: 'Decommission for full value', blurb: 'Knows which derelicts still have working batteries.' },
-      secondary: { name: 'Cartographer M.', role: 'Surveyor',  mass: 1, radHardness: 2, bonus: 'See one extra hop on MOVE',   blurb: 'Plots burns like origami.' },
+      primary:   { name: 'Juiced Cosmonauts', type: 'Human', role: 'Prospector', mass: 1, radHardness: 4 },
+      secondary: { name: 'Rental Body Guild', type: 'Human', role: 'Prospector', mass: 1, radHardness: 6, ability: '-1 to Colocated size rolls.' },
     },
   },
   {
-    id: 'crew_legal',
+    id: 'crew_lloyd_s_salvage_co',
     faces: {
-      primary:   { name: 'Mei-Ling Tao',   role: 'Lawyer',     mass: 1, radHardness: 0, bonus: 'Auction reserves -1',        blurb: 'Drafts patents during transit dwell.' },
-      secondary: { name: 'Auditor Wen',    role: 'Accountant', mass: 1, radHardness: 0, bonus: '+1 VP at end-of-game scoring', blurb: 'Files quarterly to three different jurisdictions.' },
+      primary:   { name: "Lloyd's Salvage Co.", type: 'Human', role: 'Industrialist', mass: 1, radHardness: 5 },
+      secondary: { name: 'Svalbard Caretakers', type: 'Human', role: 'Industrialist', mass: 1, radHardness: 6, ability: '-1 on all size rolls when prospecting Synodic Sites.' },
     },
   },
   {
-    id: 'crew_chaplain',
+    id: 'crew_malcolm',
     faces: {
-      primary:   { name: 'Brother Halab',  role: 'Chaplain',   mass: 1, radHardness: 1, bonus: 'Reroll one prospect die',     blurb: 'Carries an oratory the dust storms can\'t drown out.' },
-      secondary: { name: 'Sister Inari',   role: 'Counsellor', mass: 1, radHardness: 1, bonus: 'Crew morale +1 each round',   blurb: 'Keeps the long-haul crews talking to each other.' },
+      primary:   { name: 'Malcolm', type: 'Human', role: 'Industrialist', mass: 1, radHardness: 3 },
+      secondary: { name: 'Renaissance Man', type: 'Human', role: 'Industrialist', mass: 1, radHardness: 4, ability: 'If initiating a research auction, can search through one patent deck and choose the card to be auctioned.' },
     },
   },
   {
-    id: 'crew_orbital',
+    id: 'crew_microgravity_pantrophists',
     faces: {
-      primary:   { name: 'Spinner Ravi',   role: 'Spinner',    mass: 1, radHardness: 2, bonus: 'Aerobrake at no fuel cost',   blurb: 'Hand-spins atmospheric entries by eye.' },
-      secondary: { name: 'Jumper Aiko',    role: 'EVA',        mass: 1, radHardness: 2, bonus: '+1 site capture at lagrange', blurb: 'Trained for unsupported space-walks across kilometres.' },
+      primary:   { name: 'Microgravity Pantrophists', type: 'Human', role: 'Engineer', mass: 3, radHardness: 5 },
+      secondary: { name: 'Blue Goo Sybonts', type: 'Human', role: 'Engineer', mass: 3, radHardness: 6, ability: 'Can produce ET products of Spectral Type C at any Factory.' },
     },
   },
   {
-    id: 'crew_corp',
+    id: 'crew_programmable_matter',
     faces: {
-      primary:   { name: 'Director Beck',  role: 'Director',   mass: 2, radHardness: 2, bonus: 'Draw +1 patent each round',   blurb: 'Friends in every R&D lab from Tycho to Titan.' },
-      secondary: { name: 'PR Liaison Pax', role: 'PR',         mass: 1, radHardness: 1, bonus: '+1 income from Earth markets', blurb: 'Spins every disaster as "valuable lessons learned".' },
+      primary:   { name: 'Programmable Matter', type: 'Robot', role: 'Prospector', mass: 1, radHardness: 4 },
+      secondary: { name: 'Neumann Matter', type: 'Robot', role: 'Prospector', mass: 1, radHardness: 5, ability: 'All of your stacks are Glitch-free.' },
     },
   },
   {
-    id: 'crew_outer',
+    id: 'crew_rock_rats_miners_union',
     faces: {
-      primary:   { name: 'Sherpa Kalden',  role: 'Outer Pilot', mass: 1, radHardness: 3, bonus: 'KBO routes -1 burn',         blurb: 'Knows every ice-rock past Saturn by spectrum.' },
-      secondary: { name: 'Cometeer Ouro',  role: 'Comet Miner', mass: 1, radHardness: 3, bonus: '+1 water at comet sites',    blurb: 'Spent two decades on Halley\'s tail.' },
+      primary:   { name: "Rock Rats Miners' Union", type: 'Human', role: 'Miner', mass: 3, radHardness: 5 },
+      secondary: { name: 'Alchemist Aviatrices', type: 'Human', role: 'Miner', mass: 3, radHardness: 6, ability: 'During Factory Refuel, double the amount of isotope fuel.' },
+    },
+  },
+  {
+    id: 'crew_security_system',
+    faces: {
+      primary:   { name: 'Security System', type: 'Robot', role: 'Industrialist', mass: 1, radHardness: 4 },
+      secondary: { name: 'Frankenstein Navigator', type: 'Robot', role: 'Industrialist', mass: 1, radHardness: 5, ability: 'FINAO costs are halved (drop fractions).' },
+    },
+  },
+  {
+    id: 'crew_siren_cybernautics_inc',
+    faces: {
+      primary:   { name: 'Siren Cybernautics Inc.', type: 'Human', role: 'Engineer', mass: 3, radHardness: 5 },
+      secondary: { name: 'Josephson Implants', type: 'Human', role: 'Engineer', mass: 3, radHardness: 6, ability: 'FINAO costs are halved (drop fractions).' },
+    },
+  },
+  {
+    id: 'crew_smart_pets',
+    faces: {
+      primary:   { name: 'Smart Pets', type: 'Robot', role: 'Miner', mass: 0, radHardness: 3 },
+      secondary: { name: 'Creeper Neogen', type: 'Robot', role: 'Miner', mass: 0, radHardness: 6, ability: 'All of your stacks are Glitch-free.' },
+    },
+  },
+  {
+    id: 'crew_transorbital_railworkers',
+    faces: {
+      primary:   { name: 'Transorbital Railworkers', type: 'Human', role: 'Engineer', mass: 2, radHardness: 4 },
+      secondary: { name: 'Kaluga Naniteers', type: 'Human', role: 'Engineer', mass: 2, radHardness: 5, ability: 'Your Aqua from a Free Market is doubled.' },
+    },
+  },
+  {
+    id: 'crew_vatican_observers',
+    faces: {
+      primary:   { name: 'Vatican Observers', type: 'Human', role: 'Industrialist', mass: 1, radHardness: 4 },
+      secondary: { name: 'Eugenic Pilgrims', type: 'Human', role: 'Industrialist', mass: 1, radHardness: 5, ability: 'Faction privilege not lost in Anarchy. -1 to Colocated size rolls on Synodic Comets.' },
     },
   },
 ];
