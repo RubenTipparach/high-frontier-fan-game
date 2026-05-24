@@ -4821,3 +4821,94 @@ body:has(#view-browse:not(.hidden)) #main {
 .auction-confirm-modal {
   max-width: 720px;
 }
+
+/* ============================================================
+   Saved-games list in the game manager panel.
+   ============================================================ */
+.sandbox-saves {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.sandbox-saves h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  letter-spacing: 0.5px;
+}
+.saves-actions {
+  margin-bottom: 10px;
+}
+.saves-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.saves-empty {
+  font-size: 12px;
+  padding: 6px 2px;
+}
+.saves-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+}
+.saves-load-name {
+  flex: 1;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.saves-load-name:hover {
+  background: rgba(125, 211, 252, 0.12);
+}
+.saves-name {
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.saves-time {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.saves-row-actions {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.saves-row-actions button {
+  background: var(--panel-2);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.saves-row-actions button:hover {
+  border-color: var(--accent);
+  background: rgba(125, 211, 252, 0.12);
+}
+.saves-row-actions .saves-delete:hover {
+  border-color: #b91c1c;
+  background: rgba(185, 28, 28, 0.18);
+}

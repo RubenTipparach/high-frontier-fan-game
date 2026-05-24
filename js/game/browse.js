@@ -91,6 +91,10 @@ import {
   findEtProduceOptions, openEtProduceModal,
 } from './et-produce.js';
 import {
+  defaultSaveName, listSaves, createSave, overwriteSave,
+  renameSave, deleteSave, loadSaveAndReload,
+} from './saves.js';
+import {
   computeEndgameScore, SPECTRAL_DIMINISHING_SCHEDULE,
 } from './scoring.js';
 import {
@@ -7592,7 +7596,25 @@ function paintSolo() {
           <button id="market-mode-market"  class="market-mode-btn ${marketOn ? 'is-active' : ''}">🃏 Card Market</button>
         </div>
       </div>
+      <!-- Saved games. Save current state as a new slot or
+           overwrite an existing one; click a save (or its Load
+           button) to restore it. List is sorted newest-first. -->
+      <div class="sandbox-saves">
+        <h4>💾 Saved games</h4>
+        <div class="saves-actions">
+          <button id="save-new" class="primary" title="Snapshot the current game into a new save slot">💾 Save as new</button>
+        </div>
+        <ul id="saves-list" class="saves-list"></ul>
+      </div>
     `;
+    renderSavesList();
+    host.querySelector('#save-new').onclick = () => {
+      const name = prompt('Name this save:', defaultSaveName());
+      if (name === null) return; // cancelled
+      const rec = createSave(name);
+      setStatus(`💾 Saved game as "${esc(rec.name)}".`);
+      renderSavesList();
+    };
     host.querySelector('#sandbox-reset').onclick = () => {
       if (!confirm('Reset sandbox? This clears your hand, your rocket’s stack, position, planned route, outposts, factories, colonies, discs, glory, mission log, the turn clock, and your aqua bank.')) return;
       doSandboxReset();
@@ -7615,63 +7637,69 @@ function paintSolo() {
     host.querySelector('#market-mode-market').onclick  = () => flipMode(MARKET_MODE.MARKET);
     return;
   }
-  const here   = _activeData && _activeData.byId[s.ship.at];
-  const target = s.pendingTargetId && _activeData && _activeData.byId[s.pendingTargetId];
-  const ops    = Math.max(0, SOLO_CONFIG.OPS_PER_ROUND - s.turn);
-  const claimedHere = here && s.claimed.includes(here.id);
-  const canProspect = !!here && !here.isWaypoint && !s.gameOver
-    && ops > 0 && !claimedHere && here.isLandable !== false;
-  const moveCost = s.pendingPath ? s.pendingPath.totalBurns : null;
-  const canMove = !s.gameOver && ops > 0 && moveCost != null && moveCost <= s.water;
-  host.innerHTML = `
-    <div class="solo-stats">
-      <span>Round</span><strong>${s.round}/${SOLO_CONFIG.MAX_ROUNDS}</strong>
-      <span>Ops</span><strong>${ops}/${SOLO_CONFIG.OPS_PER_ROUND}</strong>
-      <span>Water</span><strong>${s.water}</strong>
-      <span>Score</span><strong>${s.score}/${SOLO_CONFIG.TARGET_VP}</strong>
-      <span>Claimed</span><strong>${s.claimed.length}</strong>
-    </div>
-    <p class="solo-here muted">At: <strong></strong></p>
-    <p class="solo-target muted"></p>
-    <div class="solo-actions">
-      <button class="primary" id="solo-move" ${canMove ? '' : 'disabled'}>Move</button>
-      <button id="solo-prospect" ${canProspect ? '' : 'disabled'}>Prospect</button>
-      <button id="solo-end">End round</button>
-    </div>
-    ${s.gameOver ? '<p class="solo-end-banner"></p>' : ''}
-    <details class="solo-log"><summary>Log</summary><ol></ol></details>
-    <button id="solo-abandon" class="danger" style="margin-top:10px">Abandon</button>
-  `;
-  host.querySelector('.solo-here strong').textContent = here ? here.name : '-';
-  const targetEl = host.querySelector('.solo-target');
-  if (target && moveCost != null) {
-    targetEl.innerHTML = `→ <strong></strong> (${moveCost} burns, ${s.pendingPath.segments.length} hops)`;
-    targetEl.querySelector('strong').textContent = target.name;
-  } else if (s.pendingTargetId && !s.pendingPath) {
-    targetEl.textContent = `No route to ${target ? target.name : 'target'}.`;
-  } else {
-    targetEl.textContent = 'Tap a site on the map to plan a move.';
+}
+
+// Render the saved-games list inside the game manager panel.
+// Sorted newest-first by saves.js#listSaves. Each row: name +
+// timestamp, plus Load / Overwrite / Rename / Delete. Clicking
+// the row's name loads it (after a confirm). Kept separate from
+// paintSolo so the save actions can re-render just the list
+// without repainting the whole panel.
+function renderSavesList() {
+  const host = document.getElementById('saves-list');
+  if (!host) return;
+  const saves = listSaves();
+  if (!saves.length) {
+    host.innerHTML = '<li class="saves-empty muted">No saved games yet. Use "Save as new" to snapshot the current game.</li>';
+    return;
   }
-  const log = host.querySelector('.solo-log ol');
-  for (const line of s.log.slice(0, 30)) {
-    const li = document.createElement('li');
-    li.textContent = line;
-    log.appendChild(li);
-  }
-  if (s.gameOver) {
-    host.querySelector('.solo-end-banner').textContent =
-      s.score >= SOLO_CONFIG.TARGET_VP ? '🏆 Victory!' : '⏱ Time up.';
-  }
-  host.querySelector('#solo-move').onclick = () => { soloCommitMove(); paintSolo(); syncSoloShipMarker(); };
-  host.querySelector('#solo-prospect').onclick = () => { soloProspect(); paintSolo(); };
-  host.querySelector('#solo-end').onclick = () => { soloEndRound(); paintSolo(); };
-  host.querySelector('#solo-abandon').onclick = () => {
-    if (confirm('Abandon this solo game? Progress is lost.')) {
-      soloAbandon();
-      paintSolo();
-      syncSoloShipMarker();
-    }
+  const fmtTime = (ts) => {
+    try { return new Date(ts).toLocaleString(); } catch { return ''; }
   };
+  host.innerHTML = saves.map((s) => `
+    <li class="saves-row" data-id="${esc(s.id)}">
+      <button type="button" class="saves-load-name" title="Load this save">
+        <span class="saves-name">${esc(s.name)}</span>
+        <span class="saves-time muted">${esc(fmtTime(s.timestamp))}</span>
+      </button>
+      <div class="saves-row-actions">
+        <button type="button" class="saves-overwrite" title="Overwrite this save with the current game">⤓ Overwrite</button>
+        <button type="button" class="saves-rename" title="Rename this save">✎</button>
+        <button type="button" class="saves-delete" title="Delete this save">🗑</button>
+      </div>
+    </li>
+  `).join('');
+
+  host.querySelectorAll('.saves-row').forEach((row) => {
+    const id = row.getAttribute('data-id');
+    const save = saves.find((s) => s.id === id);
+    row.querySelector('.saves-load-name').addEventListener('click', () => {
+      if (!confirm(`Load "${save.name}"? Your current game state will be replaced (save it first if you want to keep it).`)) return;
+      // Restores localStorage + reloads the page so every
+      // state module re-reads cleanly.
+      loadSaveAndReload(id);
+    });
+    row.querySelector('.saves-overwrite').addEventListener('click', () => {
+      if (!confirm(`Overwrite "${save.name}" with the current game state?`)) return;
+      const rec = overwriteSave(id);
+      if (rec) setStatus(`💾 Overwrote save "${esc(rec.name)}".`);
+      renderSavesList();
+    });
+    row.querySelector('.saves-rename').addEventListener('click', () => {
+      const next = prompt('Rename save:', save.name);
+      if (next === null) return;
+      if (renameSave(id, next)) {
+        setStatus(`💾 Renamed save to "${esc(next.trim())}".`);
+        renderSavesList();
+      }
+    });
+    row.querySelector('.saves-delete').addEventListener('click', () => {
+      if (!confirm(`Delete save "${save.name}"? This can't be undone.`)) return;
+      deleteSave(id);
+      setStatus(`🗑 Deleted save "${esc(save.name)}".`);
+      renderSavesList();
+    });
+  });
 }
 
 function renderEvents() {
