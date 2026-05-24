@@ -416,6 +416,56 @@ export function canRocketFly() {
   return { ok: r.active, missing: r.missing };
 }
 
+// Pure-function version of the thruster-active check used by
+// isRocketActive(), but takes an arbitrary stack array of
+// { id, kind } slots. Returns the list of thruster slot indices
+// whose `requires` are satisfied by the rest of the stack's
+// supplies (with the same OR-by-supplier-prefix rule
+// isRocketActive uses, so reactor-pulse / reactor-fusion are
+// alternatives within a single reactor group).
+//
+// Used by Outpost -> Rocket conversion: an outpost can only
+// lift back into a rocket when it carries at least one
+// functional thruster (i.e. one whose supports are still in
+// the same stack). Empty cargo holds + bare refineries can't
+// fly.
+export function findFunctionalThrusters(stack) {
+  if (!Array.isArray(stack) || !stack.length) return [];
+  const out = [];
+  for (let i = 0; i < stack.length; i++) {
+    const c = PATENTS_BY_ID[stack[i].id];
+    if (!c) continue;
+    const isThruster = c.type === 'thruster' || c.thrust != null;
+    if (!isThruster) continue;
+    const f = (c.faces && c.faces.primary) || c;
+    const reqs = Array.isArray(f.requires) ? f.requires : (c.requires || []);
+    if (!reqs.length) { out.push({ index: i, id: stack[i].id, card: c }); continue; }
+    // Build supplies set from the REST of the stack.
+    const supplied = new Set();
+    for (let j = 0; j < stack.length; j++) {
+      if (j === i) continue;
+      const o = PATENTS_BY_ID[stack[j].id];
+      if (!o) continue;
+      const of = (o.faces && o.faces.primary) || o;
+      const sup = Array.isArray(of.supplies) ? of.supplies : (o.supplies || []);
+      for (const k of sup) supplied.add(k);
+    }
+    // Group requires by supplier prefix (same OR rule).
+    const groups = new Map();
+    for (const r of reqs) {
+      const supplier = String(r.kind || '').split('-')[0];
+      if (!groups.has(supplier)) groups.set(supplier, []);
+      groups.get(supplier).push(r.kind);
+    }
+    let ok = true;
+    for (const [, kinds] of groups) {
+      if (!kinds.some((k) => supplied.has(k))) { ok = false; break; }
+    }
+    if (ok) out.push({ index: i, id: stack[i].id, card: c });
+  }
+  return out;
+}
+
 // --------- Tank water (ship fuel) ---------
 
 export function getTankWater() { return _tankWater; }

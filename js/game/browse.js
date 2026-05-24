@@ -29,7 +29,7 @@ import {
 import {
   getRocketStack, isInRocket, addToStack as rocketAddCard,
   removeFromStack as rocketRemoveCard, clearStack as rocketClearStack,
-  onRocketChange, isRocketActive,
+  onRocketChange, isRocketActive, findFunctionalThrusters,
   getActiveThrusterId, setActiveThruster,
   getTankWater, setTankWater, addFuel, removeFuel, getTankMax,
   getStackTotals, getActiveThrusterStats,
@@ -294,21 +294,18 @@ function wireHandStrip() {
     repaintBoostCommit();
   };
 
-  // BOOST commit button next to the hand title. Lit when at
-  // least one card is marked; pressing it transfers every
-  // marked card from the hand to the rocket stack and pops the
-  // stack modal so the player sees the cards land.
-  const repaintBoostCommit = () => {
-    const btn = document.getElementById('hand-boost-commit');
-    if (!btn) return;
-    const n = getBoostMarked().length;
-    btn.dataset.armed = n > 0 ? '1' : '0';
-    btn.disabled = n === 0;
-    btn.textContent = n > 0 ? `🚀 BOOST (${n})` : '🚀 BOOST';
-  };
   const commitBoost = async () => {
     const marked = getBoostMarked();
     if (!marked.length) return;
+    // Gate: rocket must be parked at LEO (variant rule). The
+    // button gating above also enforces this, but a stale click
+    // (or future programmatic call) could still slip past, so
+    // defense-in-depth here.
+    if (!isLeoSite(getRocketSite())) {
+      const where = getRocketSite()?.name || 'space';
+      setStatus(`Boost blocked: rocket is at <strong>${esc(where)}</strong>, not LEO. Return to LEO to load cards.`);
+      return;
+    }
     // Pre-flight overflow check: adding cards raises dry mass,
     // which lowers the rocket's effective fuel cap (wet ≤ 32).
     // If the tank already holds more water than the new cap
@@ -3393,10 +3390,26 @@ function doConvertToRocket(site, letter) {
     setStatus(`Lift failed - rocket must be empty before lifting an outpost.`);
     return;
   }
+  // Variant rule: an outpost can only become a rocket if it
+  // carries at least one functional thruster (a thruster whose
+  // supports are satisfied by the rest of the outpost's stack).
+  // Re-check here in case state shifted between popup-build and
+  // click.
+  const functional = findFunctionalThrusters(op.cards);
+  if (!functional.length) {
+    setStatus(`Lift failed - Outpost ${esc(letter)} has no functional thruster.`);
+    return;
+  }
   // Move cards over.
   for (const slot of op.cards) {
     rocketAddCard(slot.id, slot.kind);
   }
+  // Explicitly pick the first functional thruster as the active
+  // one. rocket.js auto-picks the FIRST thruster it sees on
+  // add, but that's not necessarily a thruster whose supports
+  // are satisfied; the lift would otherwise leave the rocket
+  // immediately inactive.
+  setActiveThruster(functional[0].id);
   setTankWater(op.tank);
   _rocketSiteId = op.siteId;
   persistRocketSite();
@@ -3406,14 +3419,15 @@ function doConvertToRocket(site, letter) {
   setStatus(
     `🏛${esc(letter)}→🚀 Lifted Outpost ${esc(letter)} into your Rocket at `
     + `<strong>${esc(site.name)}</strong>. `
-    + `${op.cards.length} card${op.cards.length === 1 ? '' : 's'} + ${op.tank} water transferred.`
+    + `${op.cards.length} card${op.cards.length === 1 ? '' : 's'} + ${op.tank} water transferred. `
+    + `Active thruster: <em>${esc(functional[0].card.name)}</em>.`
   );
   logAction({
     type: 'convert_rocket',
     icon: '🏛→🚀',
-    summary: `Lifted Outpost ${letter} into Rocket at ${site.name} (${op.cards.length} cards, ${op.tank} water)`,
+    summary: `Lifted Outpost ${letter} into Rocket at ${site.name} (${op.cards.length} cards, ${op.tank} water, thruster ${functional[0].card.name})`,
     undoable: false,
-    data: { siteId: site.id, letter, cards: op.cards.length, tank: op.tank },
+    data: { siteId: site.id, letter, cards: op.cards.length, tank: op.tank, thrusterId: functional[0].id },
   });
 }
 
@@ -4700,8 +4714,40 @@ function animateRocketAlong(segments, totalMs = 700) {
   });
 }
 
+// BOOST commit button next to the hand title. Lit when at
+// least one card is marked AND the rocket is parked at LEO -
+// per the variant rule (user, 2026-05-24): hand cards can only
+// be loaded onto the rocket when the rocket is parked at LEO
+// (not flying around in space). The button stays visible but
+// disabled when the rocket is away so the player sees the
+// constraint. Called from the hand-strip repaint, the rocket-
+// sync (after every move), and on turn-clock changes.
+function repaintBoostCommit() {
+  const btn = document.getElementById('hand-boost-commit');
+  if (!btn) return;
+  const n = getBoostMarked().length;
+  const atLeo = isLeoSite(getRocketSite());
+  btn.dataset.armed = (n > 0 && atLeo) ? '1' : '0';
+  btn.disabled = (n === 0) || !atLeo;
+  if (!atLeo) {
+    const site = getRocketSite();
+    const where = site ? site.name : 'space';
+    btn.textContent = `🚀 BOOST (rocket at ${where})`;
+    btn.title = `Rocket is at ${where}, not LEO. Boost requires the rocket parked at LEO; return the rocket to LEO to load cards.`;
+  } else {
+    btn.textContent = n > 0 ? `🚀 BOOST (${n})` : '🚀 BOOST';
+    btn.title = n > 0
+      ? `Boost ${n} marked card${n === 1 ? '' : 's'} from hand to the rocket. Costs one operation.`
+      : 'Mark cards in your hand, then press BOOST to load them onto the rocket.';
+  }
+}
+
 function syncSandboxRocket() {
   if (!_renderer) return;
+  // The boost button depends on the rocket's site (which
+  // changes after every move), so refresh it whenever the
+  // sandbox rocket sprite syncs.
+  repaintBoostCommit();
   const stack = getRocketStack();
   // Rocket model is present whenever the player has ≥1 card in
   // the stack - even when it isn't yet activatable. The 🚫
@@ -5997,21 +6043,26 @@ function showSitePopupFor(site) {
     const localOutposts = Object.values(outposts).filter((o) => o.siteId === site.id);
     if (localOutposts.length > 0) {
       const rocketCardCount = getRocketStack().length;
-      const rocketAtLeoEmpty = rocketCardCount === 0;
-      const canConvert = rocketAtLeoEmpty;
-      const reason = !canConvert
-        ? 'Convert your existing rocket first - only one rocket at a time.'
-        : null;
-      // Show one button per local outpost so the player can pick
-      // which one to lift (a site can host more than one outpost
-      // in theory, though only one per letter).
+      const rocketEmpty = rocketCardCount === 0;
+      // Per the variant rule (user, 2026-05-24): an outpost can
+      // become a rocket "at any time IF there is a functional
+      // thruster". A functional thruster is one whose support
+      // requires are satisfied by the rest of the outpost stack.
       for (const op of localOutposts) {
+        const functional = findFunctionalThrusters(op.cards);
+        const canConvert = rocketEmpty && functional.length > 0;
+        let reason = null;
+        if (!rocketEmpty) {
+          reason = 'Convert your existing rocket first - only one rocket at a time.';
+        } else if (functional.length === 0) {
+          reason = `Outpost ${op.letter} has no functional thruster (need a thruster with its supports satisfied in the same stack).`;
+        }
         actions.push({
           label: `🏛${op.letter}→🚀 Lift Outpost`,
           variant: canConvert ? 'rocket' : 'secondary',
           disabled: !canConvert,
           title: reason
-            || `Convert Outpost ${op.letter} into your active Rocket here (${op.cards.length} card${op.cards.length === 1 ? '' : 's'}, ${op.tank} water). Free action.`,
+            || `Lift Outpost ${op.letter} into your Rocket (${op.cards.length} card${op.cards.length === 1 ? '' : 's'}, ${op.tank} water, thruster: ${functional[0].card.name}). Free action.`,
           onClick: () => {
             if (!canConvert) return;
             doConvertToRocket(site, op.letter);
