@@ -1405,6 +1405,16 @@ async function mountMapFor() {
     syncSoloShipMarker();
     syncSandboxRocket();
     syncDiscs();
+    // Initial camera: focus on the rocket's current site if the
+    // player has built a stack, else LEO. Snap instantly (ms: 0)
+    // because the user can't see the pre-mount state - animating
+    // from a default fit-to-data position would just be a brief
+    // flash. Uses the renderer's own initialZoom (which is
+    // already device-aware: 5 on mobile, 6 on desktop).
+    const initialFocus = getRocketSite() || LEO_ANCHOR;
+    if (initialFocus && Number.isFinite(initialFocus.x) && Number.isFinite(initialFocus.y)) {
+      _renderer.flyTo(initialFocus, _renderer.options.initialZoom, { ms: 0 });
+    }
     // Push any persisted trail back into the renderer so a reload
     // mid-journey still shows the cyan ribbon for where the rocket
     // has already been.
