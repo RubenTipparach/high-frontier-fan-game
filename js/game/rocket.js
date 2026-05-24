@@ -419,10 +419,22 @@ export function canRocketFly() {
 // --------- Tank water (ship fuel) ---------
 
 export function getTankWater() { return _tankWater; }
+// TANK_MAX is the WET-MASS cap. The actual water ceiling is
+// TANK_MAX - dryMass because dry mass already takes up wet-mass
+// capacity. Old callers that read getTankMax() as "max water"
+// see the wrong number when the stack has mass; getWaterCap()
+// is the honest reading.
 export function getTankMax()   { return TANK_MAX; }
+export function getWaterCap() {
+  return Math.max(0, TANK_MAX - stackDryMass());
+}
 
 export function setTankWater(n) {
-  const v = Math.max(0, Math.min(TANK_MAX, Math.floor(Number(n) || 0)));
+  // Clamp against the live wet-mass cap so water + dry can
+  // never exceed TANK_MAX. Adding cards shrinks this ceiling
+  // automatically through stackDryMass().
+  const cap = getWaterCap();
+  const v = Math.max(0, Math.min(cap, Math.floor(Number(n) || 0)));
   if (v === _tankWater) return false;
   _tankWater = v;
   persist();
