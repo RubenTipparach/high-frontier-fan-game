@@ -78,7 +78,8 @@ import {
   getOutpost, getOutposts, getAvailableOutpostSlots,
   createOutpost, dissolveOutpost,
   addCardToOutpost, setOutpostTank,
-  getFocusedStackId, onFocusChange, onOutpostsChange,
+  getFocusedStackId, setFocusedStackId,
+  onFocusChange, onOutpostsChange,
   OUTPOST_LETTERS,
 } from './stacks.js';
 import {
@@ -396,6 +397,87 @@ function wireHandStrip() {
 
   repaintHand();
   onHandChange(repaintHand);
+
+  // Stage-3 hand-bar stack switcher. Renders chips for LEO,
+  // Rocket, and any active outposts. Re-renders on focus +
+  // outpost change so newly-created outposts surface their
+  // chip immediately and the focused chip stays highlighted.
+  renderStackSwitcher();
+  onFocusChange(renderStackSwitcher);
+  onOutpostsChange(renderStackSwitcher);
+  onRocketChange(renderStackSwitcher);
+}
+
+// Render the hand-bar stack switcher chips. Always shows
+// 🌍 LEO + 🚀 Rocket; 🏛A..D chips appear only when their
+// slot is occupied. The chip for the currently-focused stack
+// gets the `is-focused` class so the player can spot it at a
+// glance. Tapping a chip:
+//   1. Calls setFocusedStackId(id) - flips the focus state.
+//   2. Flies the map to that stack's site (or LEO anchor).
+// The renderer's focus-ring then repaints automatically via
+// the existing syncFocusedSite subscriber.
+function renderStackSwitcher() {
+  const host = document.getElementById('hand-stack-switcher');
+  if (!host) return;
+  const focused = getFocusedStackId();
+  const outposts = getOutposts();
+  const chips = [];
+  // LEO and Rocket are always present (even if the rocket
+  // stack is empty - the chip still represents the slot).
+  chips.push({ id: 'leo',    label: '🌍 LEO',    title: 'Focus the LEO hand / aqua bank' });
+  chips.push({ id: 'rocket', label: '🚀 Rocket', title: 'Focus the active Rocket stack' });
+  for (const letter of ['A', 'B', 'C', 'D']) {
+    if (outposts[letter]) {
+      chips.push({
+        id: `outpost${letter}`,
+        label: `🏛${letter}`,
+        title: `Focus Outpost ${letter} (${outposts[letter].cards.length} card${outposts[letter].cards.length === 1 ? '' : 's'}, ${outposts[letter].tank} water)`,
+      });
+    }
+  }
+  host.innerHTML = chips.map((c) =>
+    `<button type="button" class="hand-stack-chip ${c.id === focused ? 'is-focused' : ''}" data-stack="${esc(c.id)}" title="${esc(c.title)}">${esc(c.label)}</button>`
+  ).join('');
+  host.querySelectorAll('.hand-stack-chip').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-stack');
+      if (!id || id === focused) return;
+      setFocusedStackId(id);
+      flyToFocusedStack();
+    });
+  });
+}
+
+// Pan the map to whichever stack is currently focused. LEO
+// flies to the LEO_ANCHOR; Rocket flies to the rocket's site
+// (LEO when empty); an outpost flies to its site.
+function flyToFocusedStack() {
+  if (!_renderer) return;
+  const id = getFocusedStackId();
+  if (id === 'leo') {
+    _renderer.flyTo(LEO_ANCHOR, locateZoom(4));
+    return;
+  }
+  if (id === 'rocket') {
+    const stack = getRocketStack();
+    const site = stack.length ? getRocketSite() : null;
+    if (site && Number.isFinite(site.x) && Number.isFinite(site.y)) {
+      _renderer.flyTo(site, locateZoom(4));
+    } else {
+      _renderer.flyTo(LEO_ANCHOR, locateZoom(4));
+    }
+    return;
+  }
+  if (id && id.startsWith('outpost')) {
+    const letter = id.slice('outpost'.length);
+    const op = getOutpost(letter);
+    if (!op || !_activeData) return;
+    const site = _activeData.byId?.[op.siteId];
+    if (site && Number.isFinite(site.x) && Number.isFinite(site.y)) {
+      _renderer.flyTo(site, locateZoom(4));
+    }
+  }
 }
 
 // Vertical resize grabber for the hand strip. Tracks a CSS

@@ -3969,3 +3969,40 @@ body:has(#view-browse:not(.hidden)) #main {
   line-height: 18px;
   font-size: 12px;
 }
+
+/* ============================================================
+   Stage-3 hand-bar stack switcher.
+
+   Compact pill row inside the hand header. LEO + Rocket are
+   always present; outpost chips appear only when the slot is
+   occupied. The focused chip gets the accent-cyan tint that
+   matches the focused-stack ring on the map - one chip / one
+   ring share the same colour vocabulary.
+   ============================================================ */
+.hand-stack-switcher {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.hand-stack-chip {
+  background: var(--bg-2);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.hand-stack-chip:hover {
+  background: var(--panel-2);
+  border-color: var(--accent);
+}
+.hand-stack-chip.is-focused {
+  background: rgba(125, 211, 252, 0.18);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.5);
+}
