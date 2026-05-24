@@ -157,112 +157,155 @@ actions (transfer, ops) target it. The hand itself stays one
 tap away (a separate `✋ Hand` chip or the existing default
 view).
 
-### Colony cards (new card type)
+### Colonies are tokens, not cards
 
-This version introduces **colony cards** as a new card type
-distinct from patents and crew. A colony card is the persistent
-representation of a colony dome dropped at a factory. Schema +
-how it differs from crew / colonist cards is still open (see
-section F).
+Colonies are **dome tokens** placed on factories - there is no
+"colony card" type. Each colony is a per-factory record
+`{ siteId, ownerId }`. Cap per player: 7 domes (matches rulebook
+B8). The published "promoted colonies" concept (which would award
++1 Astrobiology / +2 Submarine endgame, M2b) is part of the
+**expansion** and is out of scope for this slice - crews cannot
+be promoted ever in our variant.
+
+The Colonists table's `Promotion Colony` column (D / H /
+Atmospheric / Astrobiology / Submarine) is **reference data only**
+- the field has no in-game effect in this variant. It's preserved
+in the table so that future expansion work can wire it up.
+
+### Op cost + commit UX (industrialize)
+
+- Industrialize costs the player's **per-turn Operation** (matches
+  rulebook I7). One op per turn means a player can either
+  industrialize OR run another operation (Boost / Auction / Refuel
+  / ET-Produce / etc.) - not both.
+- The Industrialize commit UI **shows a confirm modal** listing
+  every card about to be decommissioned (refinery + robonaut +
+  full support chain), with radiators flagged as "kept" and a
+  Cancel / Confirm pair. Protects against misclicks; the modal
+  is also the place where the player picks which refinery /
+  robonaut pair gets consumed when multiple valid options exist.
+
+### Support-chain decommission semantics
+
+Industrialize walks the support chain rooted at the chosen
+refinery + robonaut and decommissions every card it visits,
+**except radiators**.
+
+When a support card `Y` in that chain was ALSO supporting some
+other card `Z` in the same stack (one that isn't part of the
+industrialize op), `Y` is still decommissioned. `Z` is left in
+the stack but loses its support and becomes **inactive** - any
+op that depended on `Z` (e.g. the rocket's active thruster) is
+now unavailable until the player fixes the support. The
+confirm modal **flags `Z` to the player** as a side-effect of
+the industrialize so the player isn't surprised when their
+thruster goes dark after the build.
+
+### Decommission destination
+
+Decommissioned cards go to the **bottom of their corresponding
+patent deck** (matches rulebook G6). They can re-enter play
+later via the auction / research mechanisms.
+
+### Factory production (no passive income)
+
+A built factory produces **only** through explicit ops:
+
+- **Factory-Refuel Op** (rulebook I5b): 7 blue FTs (water) or
+  1 gold FT (isotope) per op, placed in a colocated stack (or
+  creating an outpost there).
+- **ET Production Op** (rulebook I8): produces a Hand card
+  Black-Side-up at the factory, into the colocated outpost
+  stack (creating a new outpost if needed - consumes one of
+  the player's 4 outpost slots).
+
+No passive end-of-round aqua income from factories. Tightens
+the economy: factories are valuable because they ENABLE refuel
+ops, not because they tick aqua on the clock.
+
+### VP timing (endgame only)
+
+Industrialize and Colonize award **no VP at build time**. All VP
+is tallied at endgame per rulebook M2:
+
+- +1 VP per wooden / plastic token in your colour on the map
+  (rockets, claims, factories, colony domes, outposts).
+- Spectral-based factory stock-price bonus (+4 / +5 / +8 per
+  Exploitation Track, M2b).
+- Glory & Heroism chits as printed.
+
+End-of-round refinery income is therefore **aqua-only** (zero
+VP delta), and the VP counter in glory.js only ticks at
+end-of-game scoring.
+
+### Outpost slot assignment
+
+When the player creates a new outpost (rocket conversion or
+ET production at a new site), they **pick** which free slot
+(A / B / C / D) it takes via a small picker. Lets the player
+keep stable visual mapping (e.g. "A is always my Mars outpost").
+Slots return to the pool when an outpost dissolves (empty cards
++ empty FTs, rulebook G6) and can be re-used freely after.
 
 ## Open questions
 
-The big ones are now locked in **Spec**. What's left are the
-finer-grained UX / data-model decisions that gate the
-implementation PR.
+The big mechanical decisions are now locked in **Spec**. What
+remains are minor UX shape questions that can be defaulted in
+the implementation PR and revisited if the defaults read wrong.
 
-### A. Industrialize action
+### UX defaults that the implementation will adopt
 
-- [?] **A1.** Decommission destination - bottom of patent deck
-  (matches rulebook G6), discard pile (lost forever), or back
-  to player's hand?
-- [?] **A2.** Op cost - does industrialize spend the per-turn
-  Operation, or is it free given the prereqs?
-- [?] **A3.** Factory production model - refuel-only (rulebook
-  I5b), or does the factory also produce passive end-of-round
-  aqua income?
-- [?] **A4.** Spectral type on a factory chit - inherit from
-  the refinery card, the site's dominant spectral, or chosen
-  by the player at build time?
-- [?] **A5.** VP - does industrialize award VP at build (and
-  how many), or only via end-game token counting (rulebook M2a
-  scores tokens at endgame)?
-- [?] **A6.** Support-chain semantics - if card X supports the
-  refinery and card Y supports X, and Y also supports a card
-  still in the stack (not in the chain), is Y decommissioned?
-- [?] **E1.** Confirm-modal on industrialize that lists exactly
-  which cards will be decommissioned (with a Cancel)?
-- [?] **E2.** If a stack has multiple valid refineries or
-  robonauts, does the player pick the pair, or does the engine
-  pick deterministically (e.g. lowest mass)?
+- **Active stack indication on the map**: the focused stack's
+  site gets a thin ring overlay so the player can spot it
+  without checking the hand bar.
+- **Hand sharing**: one shared hand at LEO. Cards in hand are
+  boosted to LEO and then transferred (G1) to any colocated
+  stack.
+- **Aqua bank**: one shared Bank at LEO. Each stack carries
+  its own water-FT tank (matches rulebook E3a / F3b).
+- **🌐 + 🏭 glyph layout**: 🌐 painted as a small ring on top
+  of the 🏭 chit.
+- **Rocket + outpost colocated**: two staggered sprites at the
+  site, slightly offset.
+- **Outpost chit visual**: styled chit (background + letter),
+  not bare emoji text.
 
-### B. Colonize action
+### Genuinely open (need answers eventually)
 
-- [?] **B3.** Does the colonized crew's `Promotion Colony`
-  field (D / H / Atmospheric / Astrobiology / Submarine, see
-  Colonists table) gate which factory can accept it, or does
-  any factory take any crew?
-- [?] **B5.** VP - does colonize award VP at build, only at
-  endgame (rulebook M2b lists Astrobiology +1 / Submarine +2),
-  or both?
+These have plausible defaults but aren't trivial; mark them as
+"will adopt the default unless you object".
 
-### C. Stacks & UI
+- [?] **CARD_RETURN.** When a stack physically dissolves
+  (rocket explosion, etc), do its cards return to LEO Stack
+  or get decommissioned? Default: return to LEO Stack (mirrors
+  the colonize rule).
+- [?] **TRANSFER_LOCK.** When an outpost is at a site with an
+  active opponent's rocket, can the player still transfer
+  cards into/out of their own outpost colocated there?
+  Default: yes (transfers are between the player's own
+  colocated stacks, opponent presence is irrelevant).
+- [?] **STARTING_OUTPOSTS.** Does a player begin the game with
+  any pre-placed outpost chits in reserve, or do they only
+  appear once the player creates one? Default: only on
+  creation (slots A/B/C/D start unassigned).
+- [?] **MULTI_PROSPECT.** Can multiple of the player's stacks
+  at the same site each run their own prospect / refuel ops
+  in the same turn (within the 1-op-per-turn budget)? Default:
+  no - the 1-op-per-turn budget applies to the player, not to
+  each stack.
 
-- [?] **C1.** Active-stack indication - the focused stack
-  highlights its button in the hand bar, but does the map also
-  paint a ring around the focused stack's site?
-- [?] **C2.** Hand sharing - confirm: one hand feeds all stacks
-  (cards in hand can be boosted to LEO and then transferred to
-  any stack via colocation).
-- [?] **C3.** Aqua bank - confirm: one shared bank at LEO,
-  per-stack water tanks for FTs (matches rulebook E3a / F3b).
-- [?] **C4.** Outpost-slot reuse - when an outpost is dissolved
-  (empty cards + empty FTs, rulebook G6), does its A/B/C/D
-  slot label go back to the pool for re-use, or do slots
-  permanently retain their original site assignment until end-
-  of-game?
-- [?] **C5.** Outpost slot assignment - first-empty wins
-  (deterministic A → B → C → D), or does the player pick which
-  slot a new outpost lands in?
+### Stage-4 (multiplayer / server) follow-ups
 
-### D. Map rendering
+These are out of scope for this sandbox slice but worth flagging
+so the data model leaves room:
 
-- [?] **D1.** Glyph stacking for 🌐 + 🏭 on the same factory -
-  side-by-side `🌐🏭`, 🌐 above 🏭, or 🌐 as a small ring on
-  top of the factory chit?
-- [?] **D2.** Multi-card indicator at sites that host both an
-  outpost and a rocket - render two sprites or one with a
-  badge?
-- [?] **D3.** Outpost chit visual: just `🏛A` etc. as text, or
-  a styled chit (background + letter)?
-
-### F. Colony cards as a card type
-
-- [?] **F1.** Schema beyond `{ siteId, ownerId, spectralType }`
-  - does a colony card carry its own Mass / Rad-Hard / Ability
-  text, or just identity + location?
-- [?] **F2.** Card-supply model - finite deck the colony cards
-  are drawn from (capped supply), or minted on demand at
-  colonize time?
-- [?] **F3.** Crew Ability inheritance - does the colony
-  retain the consumed crew's Ability text, or is that ability
-  lost when the crew returns to LEO?
-- [?] **F4.** Visibility - colony cards shown in a player-
-  owned "Colonies" sidebar panel, on the site popup, both?
-- [?] **F5.** Promotion - rulebook references "promoted
-  colonies" (Astrobiology / Submarine give bonus VP at
-  endgame, M2b). Is promotion automatic at colonize time, or
-  a separate later action?
-
-### G. Rocket ↔ Outpost conversion
-
-- [?] **G1.** Rocket → Outpost: is the conversion itself a
-  **free action**, or does it consume the per-turn op / move?
-- [?] **G2.** Outpost → Rocket: same question - free, op, or
-  uses the per-turn move budget? Can the newly-formed rocket
-  also move on the same turn it converted?
-- [?] **G3.** Outpost dissolves when empty (rulebook G6) -
-  confirm this auto-frees the A/B/C/D slot in our variant?
+- Opponent stack visibility on the map.
+- Felony / Claim Jump (rulebook G4 / I7) - requires opponent
+  state, deferred to multiplayer engine.
+- Delivery Op (rulebook I9) - move a Black-Side card from a
+  factory outpost back to LEO at a water cost. The user has
+  noted "we'll talk about this in the future"; surfacing here
+  so it lands somewhere in code review.
 
 ## What we keep from the existing sandbox
 
