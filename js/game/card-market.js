@@ -3,11 +3,16 @@
 //
 // Two modes (toggle in the solo / sandbox-setup panel):
 //   - Free Library (default): patents are free draws. Research
-//     Auction picks a deck and claims a card for free (op cost
-//     only). Free Market is not available.
-//   - Card Market: Research Auction requires the player to
-//     sacrifice a Hand card to participate (in addition to the
-//     op). Free Market sells a Hand card for $3 aqua (op).
+//     Auction picks a deck top and claims it for 1 op + 0 aqua.
+//     Free Market is not available.
+//   - Card Market: drag-to-hand from the library is locked.
+//     Patents must be acquired via Research Auction in the 🛒
+//     Cart - same 1 op + 0 aqua cost in solo / sandbox mode
+//     (the player wins immediately). Auction winners also
+//     receive bonus cards from each support deck. Free Market
+//     sells a Hand card for +$3 aqua (op).
+// There is NO Hand-card sacrifice in either mode (user
+// clarified 2026-05-24).
 //
 // Toggling resets the full sandbox state (hand / rocket /
 // outposts / factories / colonies / discs / glory / log /
@@ -29,10 +34,9 @@
 //   findAuctionableCards(typeFilter)     library cards available to
 //                                        auction (not in hand / rocket
 //                                        / any outpost)
-//   openAuctionModal({ mode, options,
-//                       handIds, lookupCard, onCommit })
-//   openFreeMarketModal({ handIds,
-//                         lookupCard, onCommit })
+//   openAuctionConfirmModal({ card, mode, renderCardFn,
+//                              bonusDeckTypes, onConfirm })
+//   openFreeMarketModal({ handIds, lookupCard, onCommit })
 
 import { PATENTS, PATENTS_BY_ID, PATENT_TYPES } from '../../data/patents.js';
 import { getHandSlots, addToHand, removeFromHand, clearHand } from './hand.js';
@@ -159,145 +163,21 @@ function escapeHtml(s) {
 // that used to live here caused a 'Identifier DECK_TYPES has
 // already been declared' SyntaxError on page load.)
 
-// Open the auction modal. In library mode the user picks a
-// deck type + a specific card; the card enters hand on confirm.
-// In market mode the user ALSO picks a hand card to sacrifice
-// (sent back to the library pool). Both modes consume the op
-// budget (caller enforces via requireOp inside onCommit).
-//
-// onCommit fires { cardId, sacrificeId } - sacrificeId is null
-// in library mode.
-export function openAuctionModal({
-  mode, handIds, lookupCard, onCommit, preselect,
-}) {
-  document.querySelector('.auction-overlay')?.remove();
-  // Optional preselect: { type, cardId } - lets a caller open
-  // the auction with a specific deck tab + card already chosen
-  // (used by the cart-tab "Buy" buttons and the deck-tap
-  // "Auction this card" button in market mode so the player
-  // doesn't have to re-pick what they already wanted).
-  let selectedType  = (preselect && DECK_TYPES.includes(preselect.type))
-    ? preselect.type
-    : DECK_TYPES[0];
-  let selectedCard  = preselect?.cardId || null;
-  let selectedSacrifice = null;
+// The legacy openAuctionModal (deck tabs + per-card picker +
+// Hand-card sacrifice block) lived here. Removed because the
+// sacrifice rule is not in the rules - the user clarified
+// multiple times. The auction flow now lives entirely in the
+// 🛒 Cart pane + openAuctionConfirmModal below: pick from a
+// visible deck top, confirm in a focused modal, no sacrifice.
 
-  const overlay = document.createElement('div');
-  overlay.className = 'card-modal-overlay auction-overlay';
-  overlay.tabIndex = -1;
-  const close = (committed) => {
-    overlay.remove();
-    document.removeEventListener('keydown', onKey);
-    if (!committed) return;
-    if (!selectedCard) return;
-    if (mode === MARKET_MODE.MARKET && !selectedSacrifice) return;
-    onCommit?.({ cardId: selectedCard, sacrificeId: selectedSacrifice });
-  };
-  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(false); } };
-  document.addEventListener('keydown', onKey);
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
-
-  const dialog = document.createElement('div');
-  dialog.className = 'auction-modal';
-  dialog.setAttribute('role', 'dialog');
-  dialog.setAttribute('aria-label', 'Research Auction');
-  overlay.appendChild(dialog);
-
-  const render = () => {
-    const auctionable = findAuctionableCards(selectedType);
-    // If the previously-selected card is no longer in this
-    // type's list, clear it so the modal doesn't ship a stale
-    // pick.
-    if (selectedCard && !auctionable.some((c) => c.id === selectedCard)) {
-      selectedCard = null;
-    }
-    const tabsHtml = DECK_TYPES.map((t) => {
-      const count = findAuctionableCards(t).length;
-      const active = t === selectedType ? 'is-active' : '';
-      return `<button type="button" data-deck="${t}" class="auction-tab ${active}" title="${count} cards available">${escapeHtml(t)} <em>${count}</em></button>`;
-    }).join('');
-    const cardsHtml = auctionable.length
-      ? auctionable.map((c) => {
-          const sel = c.id === selectedCard ? '⦿' : '◯';
-          return `<button type="button" data-card="${escapeHtml(c.id)}" class="auction-card ${c.id === selectedCard ? 'is-selected' : ''}">
-            <span class="auction-radio">${sel}</span>
-            <strong>${escapeHtml(c.name)}</strong>
-            <span class="auction-spectral industrialize-spectral-badge spectral-${escapeHtml(c.spectralType || 'C')}">${escapeHtml(c.spectralType || 'C')}</span>
-          </button>`;
-        }).join('')
-      : '<p class="muted">No cards available in this deck.</p>';
-    const sacrificeHtml = (mode === MARKET_MODE.MARKET)
-      ? `<div class="auction-sacrifice">
-           <div class="auction-section-label">⚠ Card Market mode: sacrifice a Hand card to participate</div>
-           ${handIds.length
-             ? `<div class="auction-sac-cards">
-                 ${handIds.map((id) => {
-                   const c = lookupCard(id);
-                   if (!c) return '';
-                   const sel = id === selectedSacrifice ? '⦿' : '◯';
-                   return `<button type="button" data-sacrifice="${escapeHtml(id)}" class="auction-card ${id === selectedSacrifice ? 'is-selected' : ''}">
-                     <span class="auction-radio">${sel}</span>
-                     <strong>${escapeHtml(c.name)}</strong>
-                     <span class="muted">(${escapeHtml(c.type || '')})</span>
-                   </button>`;
-                 }).join('')}
-               </div>`
-             : '<p class="muted">Your hand is empty - boost a card to LEO Hand first, or auction in Free Library mode.</p>'}
-         </div>`
-      : '';
-    const okEnabled = !!selectedCard
-      && (mode === MARKET_MODE.LIBRARY || !!selectedSacrifice);
-    dialog.innerHTML = `
-      <div class="auction-head">
-        <h3>🎯 Research Auction</h3>
-        <span class="auction-mode">${escapeHtml(mode === MARKET_MODE.MARKET ? 'Card Market' : 'Free Library')}</span>
-      </div>
-      <div class="auction-body">
-        <div class="auction-tabs">${tabsHtml}</div>
-        <div class="auction-section-label">Available cards in <strong>${escapeHtml(selectedType)}</strong> deck:</div>
-        <div class="auction-cards">${cardsHtml}</div>
-        ${sacrificeHtml}
-      </div>
-      <div class="card-modal-actions">
-        <button type="button" class="modal-btn auction-cancel">Cancel</button>
-        <button type="button" class="modal-btn primary auction-commit" ${okEnabled ? '' : 'disabled'}>🎯 Claim</button>
-      </div>
-    `;
-    dialog.querySelectorAll('.auction-tab').forEach((b) => {
-      b.addEventListener('click', () => {
-        selectedType = b.getAttribute('data-deck');
-        render();
-      });
-    });
-    dialog.querySelectorAll('.auction-cards .auction-card').forEach((b) => {
-      b.addEventListener('click', () => {
-        selectedCard = b.getAttribute('data-card');
-        render();
-      });
-    });
-    dialog.querySelectorAll('.auction-sac-cards .auction-card').forEach((b) => {
-      b.addEventListener('click', () => {
-        selectedSacrifice = b.getAttribute('data-sacrifice');
-        render();
-      });
-    });
-    dialog.querySelector('.auction-cancel').addEventListener('click', () => close(false));
-    dialog.querySelector('.auction-commit').addEventListener('click', () => close(true));
-  };
-
-  render();
-  document.body.appendChild(overlay);
-  overlay.focus();
-}
 
 // ---------- Auction confirmation modal ----------
 //
 // Reusable confirmation dialog used by the Cart's Buy button.
 // Will also be used by future Research Auction flows. Shows
-// the card being acquired with its full art, the sacrifice
-// picker (when in Card Market mode), and a COUNT of bonus
-// cards drawn from the corresponding support decks - but NEVER
-// the identities of those bonus cards (per user
+// the card being acquired with its full art and a COUNT of
+// bonus cards drawn from the corresponding support decks -
+// but NEVER the identities of those bonus cards (per user
 // 2026-05-24: "DO NOT SHOW player WHAT Cards are coming up on
 // the support decks").
 //
@@ -305,10 +185,10 @@ export function openAuctionModal({
 // modal doesn't have to import card-ui.js itself; this keeps
 // card-market.js's import graph shallow.
 //
-// onConfirm fires with the sacrifice id (null when in library
-// mode); the deck draws (main card + bonus) are the caller's
-// responsibility because they need to thread through the
-// hand-add + rollback logic.
+// No Hand-card sacrifice (user clarified 2026-05-24:
+// "there's no sacrificing, auctions are cost 0 in sandbox
+// mode"). onConfirm fires with no payload; the deck draws
+// (main card + bonus) are the caller's responsibility.
 export function openAuctionConfirmModal({
   card, mode, renderCardFn, bonusDeckTypes, onConfirm,
 }) {

@@ -98,7 +98,7 @@ import {
   MARKET_MODE, FREE_MARKET_AQUA,
   getMarketMode, setMarketMode, onMarketChange,
   resetSandboxEconomy,
-  openAuctionModal, openAuctionConfirmModal, openFreeMarketModal,
+  openAuctionConfirmModal, openFreeMarketModal,
   findAuctionableCards,
 } from './card-market.js';
 import {
@@ -1477,7 +1477,7 @@ function openDeckTapModal(card, kind) {
   const inMarket = getMarketMode() === MARKET_MODE.MARKET;
   if (inMarket) {
     addBtn.textContent = '🎯 Auction this card';
-    addBtn.title = 'Card Market mode: patents are acquired via Research Auction. Costs 1 op + a Hand card sacrifice.';
+    addBtn.title = 'Card Market mode: patents are acquired via Research Auction. Costs 1 op + 0 aqua (solo).';
     addBtn.addEventListener('click', () => {
       close();
       doResearchAuction({ preselect: { type: card.type, cardId: card.id } });
@@ -4234,61 +4234,43 @@ function doSandboxReset() {
 // patent enters the player's hand; in Card Market mode the
 // sacrificed Hand card returns to the library. Op gated inside
 // the commit so cancel doesn't burn the turn.
+// Research Auction entry point. Two ways in:
+//
+//   1. With a preselect (card the player tapped from the
+//      library or cart): route directly to doAuctionCard,
+//      which uses the no-sacrifice auction-confirm modal.
+//      ONLY fires when the preselected card is the current
+//      top of its deck - per the rule, only deck tops are
+//      auctionable. Off-top picks fall through to the cart.
+//   2. With no preselect (LEO popup's Research Auction
+//      button): open the 🛒 cart pane so the player picks
+//      from the visible deck tops.
+//
+// The old deck-tab + per-card-picker + Hand-card-sacrifice
+// modal (openAuctionModal) is no longer used; the user
+// clarified that sacrifice isn't a rule. Cart + confirm
+// modal is the only flow now.
 function doResearchAuction(opts = {}) {
-  const mode = getMarketMode();
-  const handIds = getHandSlots();
-  openAuctionModal({
-    mode,
-    handIds,
-    lookupCard: cardById,
-    preselect: opts.preselect || null,
-    onCommit: ({ cardId, sacrificeId }) => {
-      if (!cardId) return;
-      if (!requireOp('Research Auction')) return;
-      const card = cardById(cardId);
-      if (!card) {
-        setStatus(`Auction failed - unknown card ${esc(cardId)}.`);
-        return;
-      }
-      // Market mode: pull the sacrifice from hand first so the
-      // claimed card has a free slot to land in.
-      if (mode === MARKET_MODE.MARKET) {
-        if (!sacrificeId) {
-          setStatus('Auction failed - Card Market mode needs a sacrifice.');
-          return;
-        }
-        const sacCard = cardById(sacrificeId);
-        if (!removeFromHand(sacrificeId)) {
-          setStatus(`Auction failed - couldn't pull ${esc(sacCard?.name || sacrificeId)} from hand.`);
-          return;
-        }
-      }
-      const handResult = addToHand(card);
-      if (!handResult.ok) {
-        // Rollback the sacrifice if we already pulled it.
-        if (mode === MARKET_MODE.MARKET && sacrificeId) {
-          const sacCard = cardById(sacrificeId);
-          if (sacCard) addToHand(sacCard);
-        }
-        setStatus(`Auction failed - ${esc(handResult.reason)}.`);
-        return;
-      }
-      const modeLabel = mode === MARKET_MODE.MARKET ? 'Card Market' : 'Free Library';
-      const sacName = sacrificeId ? cardById(sacrificeId)?.name : null;
-      setStatus(
-        `🎯 Auctioned <em>${esc(card.name)}</em> into your Hand `
-        + `(${esc(modeLabel)}${sacName ? `, sacrificed <em>${esc(sacName)}</em>` : ''}).`
-      );
-      logAction({
-        type: 'auction',
-        icon: '🎯',
-        summary: `Auctioned ${card.name} into hand (${modeLabel}`
-          + (sacName ? `, sacrificed ${sacName}` : '') + ')',
-        undoable: false,
-        data: { cardId, sacrificeId, mode },
-      });
-    },
-  });
+  const preselect = opts.preselect || null;
+  if (preselect && preselect.cardId) {
+    const card = cardById(preselect.cardId);
+    if (!card) {
+      setStatus(`Auction failed - unknown card ${esc(preselect.cardId)}.`);
+      return;
+    }
+    // Only the top of each deck is auctionable. If the
+    // player picked a deeper card (e.g. from the patent
+    // library), bounce them to the cart so they can see
+    // what's actually available.
+    if (peekTop(card.type) !== card.id) {
+      setStatus(`Only the top of the ${esc(card.type)} deck is auctionable. Opening the 🛒 Cart so you can see what's available.`);
+      showPane('cart');
+      return;
+    }
+    doAuctionCard(card);
+    return;
+  }
+  showPane('cart');
 }
 
 // Free Market handler (rulebook I3). Only callable in Card
@@ -6599,27 +6581,21 @@ function showSitePopupFor(site) {
       // dropped to avoid duplicate UX surfaces - the inline
       // section in the inspector lives next to the cards being
       // moved, which reads cleaner.
-      // Research Auction (rulebook I2). Always available at LEO;
-      // in market mode it additionally requires a hand card to
-      // sacrifice. Op gated inside the modal commit so cancel
-      // doesn't burn the turn.
+      // Research Auction (rulebook I2). Always available at
+      // LEO; opens the 🛒 Cart pane so the player picks from
+      // the visible deck tops. Solo cost is 1 op + 0 aqua;
+      // there is no Hand-card sacrifice.
       {
         const mode = getMarketMode();
-        const handEmpty = getHandSlots().length === 0;
-        const blockedByMarket = mode === MARKET_MODE.MARKET && handEmpty;
-        const ok = !blockedByMarket;
-        const reason = blockedByMarket
-          ? 'Card Market mode requires a Hand card to sacrifice (boost a card to LEO Hand first).'
-          : (mode === MARKET_MODE.MARKET
-              ? 'Card Market: pick a deck + sacrifice a Hand card to claim a patent.'
-              : 'Free Library: pick a deck and claim a patent. Costs one operation.');
+        const reason = mode === MARKET_MODE.MARKET
+          ? 'Card Market: pick a deck top in the 🛒 Cart.'
+          : 'Free Library: pick a deck top in the 🛒 Cart. Costs 1 op.';
         actions.push({
           label: '🎯 Research Auction',
-          variant: ok ? 'rocket' : 'secondary',
-          disabled: !ok,
+          variant: 'rocket',
+          disabled: false,
           title: reason,
           onClick: () => {
-            if (!ok) return;
             doResearchAuction();
             _renderer.clearSitePopup();
           },
