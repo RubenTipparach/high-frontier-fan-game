@@ -43,7 +43,7 @@ import {
   getDiscs, getDisc, placeDisc, removeDisc, resetDiscs,
   onChange as onDiscsChange,
 } from './discs.js';
-import { CREW } from '../../data/crew.js';
+import { CREW, CREW_BY_ID } from '../../data/crew.js';
 import { MILESTONES } from '../../data/glory.js';
 import { POLITICS } from '../../data/politics.js';
 import { SITES_BY_ID } from '../../data/sites.js';
@@ -62,12 +62,16 @@ import {
   onChange as onGloryChange, ZONE_CHIT_VPS,
 } from './glory.js';
 import {
-  getFactory, createFactory, allFactories,
-  onFactoryChange,
+  getFactory, createFactory,
+  getColony, createColony, countColoniesByOwner,
+  COLONY_CAP_PER_PLAYER,
 } from './factories.js';
 import {
   findIndustrializeOptions, openIndustrializeModal,
 } from './industrialize.js';
+import {
+  findColonizeOptions, openColonizePicker,
+} from './colonize.js';
 
 // Only one map mode now (planner / "classic"); the old
 // "Cleaned up" variant was disorienting next to the canonical
@@ -2951,6 +2955,81 @@ function doIndustrialize(site, stack, options) {
   });
 }
 
+// Build Colony handler (rulebook G3, free action). The caller
+// has already validated that the site has a player-owned
+// factory, no existing colony, the player is under the cap,
+// and at least one colocated Crew card exists.
+//
+// One crew -> auto-commit (picker is skipped). Multiple crews
+// -> picker modal. On commit: the chosen crew slot is removed
+// from the stack and the underlying crew card returns to LEO
+// Hand intact. The colony dome is created on the factory.
+//
+// Free action: no requireOp call.
+function doColonize(site, stack, options) {
+  openColonizePicker({
+    siteName: site.name,
+    options,
+    onCommit: (pick) => {
+      if (!pick) return;
+      // Re-find by id at commit time - splices may have shifted
+      // indices since the modal opened, though in practice
+      // nothing else mutates the stack during the modal's
+      // lifetime. Defence-in-depth.
+      const currentStack = getRocketStack();
+      const idx = currentStack.findIndex((s) => s.id === pick.id && s.kind === 'crew');
+      if (idx === -1) {
+        setStatus(`Colonize aborted - crew ${esc(pick.id)} is no longer in the stack.`);
+        return;
+      }
+      const crewCard = CREW_BY_ID[pick.id];
+      if (!crewCard) {
+        setStatus(`Colonize aborted - unknown crew id ${esc(pick.id)}.`);
+        return;
+      }
+      const removed = rocketRemoveCard(idx);
+      if (!removed) {
+        setStatus(`Colonize aborted - could not remove crew from stack.`);
+        return;
+      }
+      // Crew returns to LEO Hand (variant rule, see
+      // industrialize.md "Decommission / removal destinations").
+      const handResult = addToHand(crewCard);
+      if (!handResult.ok) {
+        // Edge case: hand is full / dup. Surface the reason
+        // and roll back the stack removal so the crew isn't
+        // silently lost.
+        rocketAddCard(pick.id, 'crew');
+        setStatus(`Colonize aborted - crew couldn't return to hand: ${esc(handResult.reason)}.`);
+        return;
+      }
+      const created = createColony(site.id, SANDBOX_OWNER_ID);
+      if (!created) {
+        // Cap or duplicate. Roll back: pull crew back out of
+        // hand, drop it back on the stack.
+        removeFromHand(pick.id);
+        rocketAddCard(pick.id, 'crew');
+        setStatus(`Colonize failed at <strong>${esc(site.name)}</strong> - cap or duplicate.`);
+        return;
+      }
+      const crewName = pick.primary?.name || pick.card.id;
+      setStatus(
+        `🌐 Built colony at <strong>${esc(site.name)}</strong>. `
+        + `<em>${esc(crewName)}</em> returns to your LEO Hand. `
+        + `Colonies: <strong>${countColoniesByOwner(SANDBOX_OWNER_ID)}</strong>/${COLONY_CAP_PER_PLAYER}.`
+      );
+      logAction({
+        type: 'colonize',
+        icon: '🌐',
+        summary: `Built colony at ${site.name} (crew ${crewName} returned to hand); `
+          + `${countColoniesByOwner(SANDBOX_OWNER_ID)}/${COLONY_CAP_PER_PLAYER} colonies`,
+        undoable: false,
+        data: { siteId: site.id, crewId: pick.id },
+      });
+    },
+  });
+}
+
 // Fuel-tank modal. SVG cylinder; water rect grows from
 // `fromWater` to `toWater` over ~1100 ms. Capacity = active
 // thruster's max-liftable fuel (thrust - dryMass) when present,
@@ -4904,6 +4983,47 @@ function showSitePopupFor(site) {
         variant: 'secondary',
         disabled: true,
         title: `A factory already exists at this site (spectral ${existingFactory.spectralType}).`,
+        onClick: () => {},
+      });
+    }
+  }
+  // Colonize action (rulebook G3, free action). Shown when the
+  // rocket is parked at a site with a player-owned factory and
+  // no existing colony. Picker surfaces when 2+ crews are in
+  // the stack; auto-commits when only one. Does NOT consume the
+  // per-turn op (free action).
+  if (rocketSite && site.id === rocketSite.id) {
+    const factory = getFactory(site.id);
+    const colony = getColony(site.id);
+    if (factory && factory.ownerId === SANDBOX_OWNER_ID && !colony) {
+      const colonized = countColoniesByOwner(SANDBOX_OWNER_ID);
+      const capReached = colonized >= COLONY_CAP_PER_PLAYER;
+      const stack = getRocketStack();
+      const colonizeOptions = findColonizeOptions(stack);
+      const hasCrew = colonizeOptions.crews.length > 0;
+      const ok = hasCrew && !capReached;
+      const reason = capReached
+        ? `Colony cap reached (${COLONY_CAP_PER_PLAYER}).`
+        : !hasCrew
+          ? 'Need a Crew card colocated in the stack.'
+          : null;
+      actions.push({
+        label: '🌐 Colonize',
+        variant: ok ? 'rocket' : 'secondary',
+        disabled: !ok,
+        title: reason || `Build a colony dome here. Free action (does not cost an op).`,
+        onClick: () => {
+          if (!ok) return;
+          doColonize(site, stack, colonizeOptions);
+          _renderer.clearSitePopup();
+        },
+      });
+    } else if (colony) {
+      actions.push({
+        label: '🌐 Colonized',
+        variant: 'secondary',
+        disabled: true,
+        title: `Colony already established at this site.`,
         onClick: () => {},
       });
     }

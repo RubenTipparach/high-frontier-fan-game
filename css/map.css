@@ -3711,3 +3711,86 @@ body:has(#view-browse:not(.hidden)) #main {
 .industrialize-modal .modal-btn.primary:hover {
   background: #166534;
 }
+
+/* ============================================================
+   Colonize picker modal (rulebook G3, free action).
+
+   Small picker shown only when 2+ crews are colocated. The
+   single-crew case auto-commits and never opens this.
+   ============================================================ */
+.colonize-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  max-width: 460px;
+  width: 100%;
+  color: var(--ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.colonize-head h3 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0.5px;
+}
+.colonize-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.colonize-note {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--muted, #94a3b8);
+}
+.colonize-crews {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.colonize-crew {
+  text-align: left;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.colonize-crew:hover { background: var(--panel-2); }
+.colonize-crew.is-selected {
+  background: rgba(125, 211, 252, 0.12);
+  border-color: var(--accent);
+}
+.colonize-crew .crew-radio {
+  display: inline-block;
+  width: 16px;
+  color: var(--accent);
+  flex: 0 0 16px;
+}
+.colonize-crew .crew-sep {
+  color: var(--muted, #94a3b8);
+  margin: 0 2px;
+}
+.colonize-modal .card-modal-actions {
+  margin-top: 4px;
+  justify-content: flex-end;
+}
+.colonize-modal .modal-btn.primary {
+  background: #14532d;
+  color: #d1fae5;
+  border-color: #166534;
+}
+.colonize-modal .modal-btn.primary:hover { background: #166534; }
