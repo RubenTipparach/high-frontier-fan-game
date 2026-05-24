@@ -39,6 +39,7 @@ import { getHandSlots, addToHand, removeFromHand, clearHand } from './hand.js';
 import { getRocketStack, clearStack as rocketClearStack, resetAqua } from './rocket.js';
 import { getOutposts, resetStacks } from './stacks.js';
 import { resetFactoriesAndColonies } from './factories.js';
+import { resetLeoStack } from './leo-stack.js';
 import { resetDiscs } from './discs.js';
 import { resetGlory } from './glory.js';
 import { resetLog } from './mission-log.js';
@@ -101,6 +102,7 @@ export function resetSandboxEconomy({ keepMode = true } = {}) {
   clearHand();
   rocketClearStack();
   resetStacks();
+  resetLeoStack();
   resetFactoriesAndColonies();
   resetDiscs();
   resetGlory();

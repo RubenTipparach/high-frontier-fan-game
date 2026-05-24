@@ -4364,3 +4364,110 @@ body:has(#view-browse:not(.hidden)) #main {
 .free-market-modal .modal-btn.primary:hover { background: #166534; }
 .auction-modal .modal-btn.primary:disabled,
 .free-market-modal .modal-btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ============================================================
+   Transfer LEO ↔ Rocket modal (variant cargo flow).
+   ============================================================ */
+.transfer-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  max-width: 720px;
+  width: 100%;
+  color: var(--ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.transfer-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.transfer-head h3 { margin: 0; font-size: 18px; letter-spacing: 0.5px; }
+.transfer-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+@media (max-width: 680px) {
+  .transfer-body { grid-template-columns: 1fr; }
+}
+.transfer-col {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.transfer-col h4 { margin: 0; font-size: 14px; letter-spacing: 0.4px; }
+.transfer-tank-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.transfer-tank-row .stat-water {
+  font-size: 14px;
+  color: #7dd3fc;
+  font-variant-numeric: tabular-nums;
+}
+.transfer-water-btn {
+  background: var(--panel-2);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.2px;
+}
+.transfer-water-btn:hover { background: rgba(125, 211, 252, 0.18); border-color: var(--accent); }
+.transfer-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.transfer-cards li {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.transfer-cardline { flex: 1; }
+.transfer-move {
+  background: var(--bg-2);
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  min-width: 32px;
+  min-height: 28px;
+}
+.transfer-move:hover { background: rgba(125, 211, 252, 0.18); border-color: var(--accent); }
+.transfer-notice {
+  padding: 6px 8px;
+  background: rgba(125, 211, 252, 0.06);
+  border: 1px solid rgba(125, 211, 252, 0.18);
+  border-radius: 4px;
+  font-size: 12px;
+}
+.transfer-modal .card-modal-actions { justify-content: flex-end; }

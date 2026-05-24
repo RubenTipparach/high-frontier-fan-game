@@ -336,11 +336,17 @@ the implementation PR and revisited if the defaults read wrong.
 - **Active stack indication on the map**: the focused stack's
   site gets a thin ring overlay so the player can spot it
   without checking the hand bar.
-- **Hand sharing**: one shared hand at LEO. Cards in hand are
-  boosted to LEO and then transferred (G1) to any colocated
-  stack.
-- **Aqua bank**: one shared Bank at LEO. Each stack carries
-  its own water-FT tank (matches rulebook E3a / F3b).
+- **Cargo flow (Hand → LEO Stack → Rocket)**: three distinct
+  states. Cards drawn from the patent library land in Hand
+  (drag, free). Boost (op) ships them Hand → LEO Stack. LEO
+  Stack is its own stack at LEO with its own water tank.
+  Transfer (free action, rocket-at-LEO only) moves cards /
+  water LEO Stack ↔ Rocket. Boost does NOT gate on rocket
+  location - cards can always go to LEO regardless of where
+  the rocket is. Transfer is the rocket-at-LEO step.
+- **Aqua bank**: one shared Bank at LEO. Each stack (LEO,
+  Rocket, Outpost A/B/C/D) carries its own water-FT tank
+  (matches rulebook E3a / F3b).
 - **🌐 + 🏭 glyph layout**: 🌐 painted as a small ring on top
   of the 🏭 chit.
 - **Rocket + outpost colocated**: two staggered sprites at the
