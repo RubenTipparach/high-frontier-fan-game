@@ -4680,21 +4680,39 @@ function showSitePopupFor(site) {
   // One refuel per (turn, site) so the player can't strip-mine
   // the site by hammering the button.
   if (rocketSite && site.id === rocketSite.id) {
-    const refuelChk = canRefuelAt(site);
-    actions.push({
-      label: refuelChk.label,
-      // Blue rocket variant when the action is actually
-      // available; dim secondary when blocked. Same idiom as
-      // the prospect button so live ops read as live ops.
-      variant: refuelChk.ok ? 'rocket' : 'secondary',
-      disabled: !refuelChk.ok,
-      title: refuelChk.reason || undefined,
-      onClick: () => {
-        if (!refuelChk.ok) return;
-        doRefuel(site);
-        _renderer.clearSitePopup();
-      },
-    });
+    if (isLeoSite(site)) {
+      // LEO refuel is a bank-to-tank transfer, not a turn op -
+      // the player just moves water between their aqua bank and
+      // the rocket for free. Skip canRefuelAt entirely + open
+      // the fuel-tank modal so the transfer buttons are right
+      // there.
+      actions.push({
+        label: '💧 Transfer fuel',
+        variant: 'rocket',
+        disabled: false,
+        title: 'At LEO: move water between your aqua bank and the rocket tank for free (no turn op)',
+        onClick: () => {
+          _renderer.clearSitePopup();
+          openFuelTankModal();
+        },
+      });
+    } else {
+      const refuelChk = canRefuelAt(site);
+      actions.push({
+        label: refuelChk.label,
+        // Blue rocket variant when the action is actually
+        // available; dim secondary when blocked. Same idiom as
+        // the prospect button so live ops read as live ops.
+        variant: refuelChk.ok ? 'rocket' : 'secondary',
+        disabled: !refuelChk.ok,
+        title: refuelChk.reason || undefined,
+        onClick: () => {
+          if (!refuelChk.ok) return;
+          doRefuel(site);
+          _renderer.clearSitePopup();
+        },
+      });
+    }
   }
   // Navigate-to ALWAYS sits last (CLAUDE.md style rule). It's a
   // pure inspection affordance - no state mutation - so any new
