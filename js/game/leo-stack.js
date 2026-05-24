@@ -9,11 +9,11 @@
 //   Rocket          --(Convert, free)-->  Outpost
 //   Outpost         --(Convert, needs functional thruster)-->  Rocket
 //
-// LEO Stack carries its own cards AND its own water tank
-// (matches the per-stack water-FT model from industrialize.md).
-// The Aqua Bank (rocket.js getAqua) is shared and stays at LEO;
-// the LEO Stack's tank is for water FTs that haven't yet been
-// loaded onto the rocket.
+// LEO Stack holds CARDS ONLY. There is no LEO water tank - the
+// Aqua Bank (rocket.js getAqua) already lives at LEO, and
+// launching transfers aqua from the Bank into the rocket's
+// water tank. The LEO Stack is purely a card staging area
+// between Hand and Rocket.
 //
 // Public surface:
 //   getLeoCards()                 -> { id, kind, face? }[]
@@ -22,9 +22,6 @@
 //   removeCardFromLeo(index)      -> { id, kind } | null
 //   removeCardFromLeoById(id)     -> { id, kind } | null
 //   clearLeo()
-//   getLeoTank()                  -> number
-//   setLeoTank(n)                 -> boolean
-//   addLeoFuel(delta)             -> boolean
 //   resetLeoStack()
 //   onLeoChange(cb)               -> unsubscribe
 //
@@ -32,9 +29,6 @@
 // outpost stack slots so cards can move between them freely.
 
 const STORAGE_CARDS = 'hf-sandbox-leo-cards';
-const STORAGE_TANK  = 'hf-sandbox-leo-tank';
-
-const TANK_MAX = 32;
 
 let _cards = (() => {
   try {
@@ -49,20 +43,11 @@ let _cards = (() => {
   } catch { return []; }
 })();
 
-let _tank = (() => {
-  try {
-    const raw = localStorage.getItem(STORAGE_TANK);
-    const n = parseInt(raw || '0', 10);
-    return Number.isFinite(n) && n >= 0 ? Math.min(TANK_MAX, n) : 0;
-  } catch { return 0; }
-})();
-
 let _listeners = [];
 
 function persist() {
   try {
     localStorage.setItem(STORAGE_CARDS, JSON.stringify(_cards));
-    localStorage.setItem(STORAGE_TANK, String(_tank));
   } catch { /* private mode */ }
 }
 function notify() {
@@ -104,34 +89,17 @@ export function removeCardFromLeoById(id) {
 }
 
 export function clearLeo() {
-  if (!_cards.length && _tank === 0) return;
+  if (!_cards.length) return;
   _cards = [];
-  _tank = 0;
   persist();
   notify();
-}
-
-export function getLeoTank() { return _tank; }
-
-export function setLeoTank(n) {
-  const v = Math.max(0, Math.min(TANK_MAX, Math.floor(Number(n) || 0)));
-  if (v === _tank) return false;
-  _tank = v;
-  persist();
-  notify();
-  return true;
-}
-
-export function addLeoFuel(delta = 1) {
-  return setLeoTank(_tank + (Number(delta) || 1));
 }
 
 // Reset LEO Stack to empty state. Called by the sandbox reset
 // flow and the Card Market toggle.
 export function resetLeoStack() {
-  if (!_cards.length && _tank === 0) return;
+  if (!_cards.length) return;
   _cards = [];
-  _tank = 0;
   persist();
   notify();
 }

@@ -85,7 +85,6 @@ import {
 } from './stacks.js';
 import {
   getLeoCards, addCardToLeo, removeCardFromLeoById,
-  getLeoTank, setLeoTank, addLeoFuel,
   onLeoChange,
 } from './leo-stack.js';
 import {
@@ -333,57 +332,18 @@ function wireHandStrip() {
     // parked at LEO. Boost can always fire; there is no rocket-
     // location gate.
     //
-    // Spillage check against the LEO Stack's wet-mass cap
-    // (TANK_MAX - dryMass). LEO has its own tank separate from
-    // the rocket; adding cards to LEO can spill LEO water.
-    const TANK_MAX = 32;
-    let addedMass = 0;
-    for (const id of marked) {
-      const card = lookup(id);
-      if (!card) continue;
-      const f = (card.faces && card.faces.primary) || card;
-      addedMass += ((f.mass != null ? f.mass : card.mass) | 0);
-    }
-    const leoDryMass = leoStackDryMass();
-    const newDryMass = leoDryMass + addedMass;
-    const newCap = Math.max(0, TANK_MAX - newDryMass);
-    const currentTank = getLeoTank();
-    const spillage = Math.max(0, currentTank - newCap);
-    if (spillage > 0) {
-      const ok = await confirmModal({
-        title: '⚠ LEO tank overflow',
-        body: `Boosting ${marked.length} card${marked.length === 1 ? '' : 's'} `
-          + `to LEO raises LEO dry mass to <strong>${newDryMass}</strong>, capping `
-          + `the LEO tank at <strong>${newCap}</strong> water. `
-          + `<strong>${spillage} water will spill out</strong> and be lost. `
-          + `Continue?`,
-        yes: 'Add anyway',
-        no: 'Cancel',
-      });
-      if (!ok) return;
-    }
+    // LEO Stack is cards-only - it has no water tank (the Aqua
+    // Bank already lives at LEO), so there is no wet-mass /
+    // spillage concern here. Cards just move across.
+    //
     // Rulebook I4: Boost is one Operation per turn (multi-card
-    // batch counts as one op). Spillage confirm already passed
-    // - now commit the op cost before mutating state.
+    // batch counts as one op).
     if (!requireOp('Boost')) return;
     for (const id of marked) {
       const card = lookup(id);
       if (!card) continue;
       addCardToLeo({ id, kind: kindOf(id) });
       removeFromHand(id);
-    }
-    // Clip the LEO tank to the new fuel cap so the wet-mass
-    // total stays honest.
-    const finalCap = Math.max(0, TANK_MAX - leoStackDryMass());
-    if (getLeoTank() > finalCap) {
-      const lost = getLeoTank() - finalCap;
-      setLeoTank(finalCap);
-      logAction({
-        type: 'leo_tank_spill',
-        icon: '💧⤓',
-        summary: `LEO tank spilled ${lost} water on add (new cap ${finalCap})`,
-        undoable: false,
-      });
     }
     clearBoostMarks();
     // Open the LEO inspector so the player sees the cards land
@@ -445,7 +405,7 @@ function renderStackSwitcher() {
   const slots = [
     {
       id: 'leo', label: '🌍', sub: 'LEO',
-      title: `LEO Stack - ${getLeoCards().length} card${getLeoCards().length === 1 ? '' : 's'}, ${getLeoTank()} water FT. Aqua bank: ${getAqua()}. Hand: ${getHandSlots().length} card${getHandSlots().length === 1 ? '' : 's'} (not yet boosted).`,
+      title: `LEO Stack - ${getLeoCards().length} card${getLeoCards().length === 1 ? '' : 's'}. Aqua bank: ${getAqua()}. Hand: ${getHandSlots().length} card${getHandSlots().length === 1 ? '' : 's'} (not yet boosted).`,
       siteAvailable: true,
       isEmpty: false,
     },
@@ -712,226 +672,15 @@ function transferOneCard(sourceId, destId, cardId) {
     }
     return false;
   }
-  // Wet-mass clamp on the destination tank.
-  if (destId === 'leo') {
-    const cap = Math.max(0, TANK_MAX - leoStackDryMass());
-    if (getLeoTank() > cap) setLeoTank(cap);
-  } else if (destId === 'rocket') {
+  // Wet-mass clamp on the destination tank. Only the rocket
+  // has a water tank; LEO + outposts that receive cards have
+  // no spillage concern (LEO has no tank; outpost-tank clamps
+  // would live in stacks.js if needed).
+  if (destId === 'rocket') {
     const cap = Math.max(0, TANK_MAX - rocketStackDryMass());
     if (getTankWater() > cap) setTankWater(cap);
   }
   return true;
-}
-
-// Transfer modal: free-action card/water shuffler between the
-// LEO Stack and the Rocket. Per the variant rule (user,
-// 2026-05-24) this is only valid when the rocket is parked at
-// LEO. Two columns (LEO left, Rocket right) with per-card →/←
-// buttons and water +/- buttons.
-//
-// Wet-mass clamps: moving cards into a stack lowers that
-// stack's tank cap (TANK_MAX - dry). If the existing tank
-// exceeds the new cap, water spills out. We surface a small
-// inline warning when a move would spill, and the move still
-// commits (cleaner UX than a confirm modal nested inside a
-// modal).
-function openLeoRocketTransferModal() {
-  if (!isLeoSite(getRocketSite())) {
-    setStatus('Transfer blocked: rocket must be parked at LEO.');
-    return;
-  }
-  document.querySelector('.transfer-overlay')?.remove();
-  const TANK_MAX = 32;
-  const overlay = document.createElement('div');
-  overlay.className = 'card-modal-overlay transfer-overlay';
-  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
-  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
-  document.addEventListener('keydown', onKey);
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  const dialog = document.createElement('div');
-  dialog.className = 'transfer-modal';
-  overlay.appendChild(dialog);
-
-  // Track a transient "last spill" notice so the player sees
-  // how much water vented after a card move clipped a tank.
-  let lastNotice = '';
-
-  const clipTank = (currentTank, dryMass) => {
-    const cap = Math.max(0, TANK_MAX - dryMass);
-    return { cap, spillage: Math.max(0, currentTank - cap) };
-  };
-
-  const moveCardLeoToRocket = (id) => {
-    const slot = removeCardFromLeoById(id);
-    if (!slot) return;
-    rocketAddCard(slot.id, slot.kind);
-    // Re-clip rocket tank after the dry mass changed.
-    const { cap, spillage } = clipTank(getTankWater(), rocketStackDryMass());
-    if (spillage > 0) {
-      removeFuel(spillage);
-      lastNotice = `💧⤓ Rocket tank spilled ${spillage} water (new cap ${cap}).`;
-    } else {
-      lastNotice = `→ Rocket: ${slot.id}`;
-    }
-    logAction({
-      type: 'transfer',
-      icon: '🔄',
-      summary: `Transferred ${slot.id} from LEO Stack to Rocket`
-        + (spillage > 0 ? ` (${spillage} water spilled)` : ''),
-      undoable: false,
-      data: { dir: 'leo-to-rocket', cardId: slot.id, spillage },
-    });
-    render();
-  };
-
-  const moveCardRocketToLeo = (idx) => {
-    const stack = getRocketStack();
-    const slot = stack[idx];
-    if (!slot) return;
-    rocketRemoveCard(idx);
-    addCardToLeo({ id: slot.id, kind: slot.kind });
-    const { cap, spillage } = clipTank(getLeoTank(), leoStackDryMass());
-    if (spillage > 0) {
-      setLeoTank(cap);
-      lastNotice = `💧⤓ LEO tank spilled ${spillage} water (new cap ${cap}).`;
-    } else {
-      lastNotice = `← LEO: ${slot.id}`;
-    }
-    logAction({
-      type: 'transfer',
-      icon: '🔄',
-      summary: `Transferred ${slot.id} from Rocket to LEO Stack`
-        + (spillage > 0 ? ` (${spillage} water spilled)` : ''),
-      undoable: false,
-      data: { dir: 'rocket-to-leo', cardId: slot.id, spillage },
-    });
-    render();
-  };
-
-  const moveWater = (amount, dir) => {
-    if (!Number.isFinite(amount) || amount <= 0) return;
-    if (dir === 'leo-to-rocket') {
-      const have = getLeoTank();
-      const rocketCap = Math.max(0, TANK_MAX - rocketStackDryMass());
-      const room = Math.max(0, rocketCap - getTankWater());
-      const moved = Math.min(amount, have, room);
-      if (moved <= 0) {
-        lastNotice = room <= 0 ? 'Rocket tank full.' : 'LEO tank empty.';
-        render();
-        return;
-      }
-      setLeoTank(have - moved);
-      addFuel(moved);
-      lastNotice = `→ ${moved} water moved to Rocket.`;
-    } else {
-      const have = getTankWater();
-      const leoCap = Math.max(0, TANK_MAX - leoStackDryMass());
-      const room = Math.max(0, leoCap - getLeoTank());
-      const moved = Math.min(amount, have, room);
-      if (moved <= 0) {
-        lastNotice = room <= 0 ? 'LEO tank full.' : 'Rocket tank empty.';
-        render();
-        return;
-      }
-      removeFuel(moved);
-      addLeoFuel(moved);
-      lastNotice = `← ${moved} water moved to LEO.`;
-    }
-    logAction({
-      type: 'transfer',
-      icon: '🔄',
-      summary: lastNotice,
-      undoable: false,
-    });
-    render();
-  };
-
-  function render() {
-    const leoCards = getLeoCards();
-    const rocketCards = getRocketStack();
-    const leoTank = getLeoTank();
-    const rocketTank = getTankWater();
-    const leoDry = leoStackDryMass();
-    const rocketDry = rocketStackDryMass();
-    const leoCap = Math.max(0, TANK_MAX - leoDry);
-    const rocketCap = Math.max(0, TANK_MAX - rocketDry);
-
-    const leoCardsHtml = leoCards.length
-      ? leoCards.map((slot) => {
-          const c = cardById(slot.id);
-          const bs = slot.face === 'secondary' ? '<span class="card-face-tag">BS</span>' : '';
-          return `<li>
-            <span class="transfer-cardline"><strong>${esc(c?.name || slot.id)}</strong> ${bs} <span class="muted">${esc(c?.type || '')}</span></span>
-            <button type="button" class="transfer-move" data-dir="leo-to-rocket" data-id="${esc(slot.id)}" title="Move to Rocket">→</button>
-          </li>`;
-        }).join('')
-      : '<li class="muted">LEO Stack is empty.</li>';
-    const rocketCardsHtml = rocketCards.length
-      ? rocketCards.map((slot, idx) => {
-          const c = cardById(slot.id);
-          return `<li>
-            <button type="button" class="transfer-move" data-dir="rocket-to-leo" data-idx="${idx}" title="Move to LEO">←</button>
-            <span class="transfer-cardline"><strong>${esc(c?.name || slot.id)}</strong> <span class="muted">${esc(c?.type || '')}</span></span>
-          </li>`;
-        }).join('')
-      : '<li class="muted">Rocket is empty.</li>';
-
-    dialog.innerHTML = `
-      <div class="transfer-head">
-        <h3>🔄 Transfer LEO ↔ Rocket</h3>
-        <span class="muted">Free action (no op cost).</span>
-      </div>
-      <div class="transfer-body">
-        <div class="transfer-col">
-          <h4>🌍 LEO Stack</h4>
-          <div class="transfer-tank-row">
-            <span class="muted">Water</span>
-            <strong class="stat-water">${esc(String(leoTank))}/${esc(String(leoCap))}</strong>
-            <button type="button" class="transfer-water-btn" data-dir="leo-to-rocket" data-amt="1" title="Move 1 water to Rocket">+1 →</button>
-            <button type="button" class="transfer-water-btn" data-dir="leo-to-rocket" data-amt="999" title="Move all water to Rocket">all →</button>
-          </div>
-          <ul class="transfer-cards">${leoCardsHtml}</ul>
-        </div>
-        <div class="transfer-col">
-          <h4>🚀 Rocket</h4>
-          <div class="transfer-tank-row">
-            <button type="button" class="transfer-water-btn" data-dir="rocket-to-leo" data-amt="1" title="Move 1 water to LEO">← +1</button>
-            <button type="button" class="transfer-water-btn" data-dir="rocket-to-leo" data-amt="999" title="Move all water to LEO">← all</button>
-            <strong class="stat-water">${esc(String(rocketTank))}/${esc(String(rocketCap))}</strong>
-            <span class="muted">Water</span>
-          </div>
-          <ul class="transfer-cards">${rocketCardsHtml}</ul>
-        </div>
-      </div>
-      ${lastNotice ? `<div class="transfer-notice muted">${esc(lastNotice)}</div>` : ''}
-      <div class="card-modal-actions">
-        <button type="button" class="modal-btn transfer-close">Done</button>
-      </div>
-    `;
-
-    dialog.querySelectorAll('.transfer-move').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const dir = btn.getAttribute('data-dir');
-        if (dir === 'leo-to-rocket') {
-          moveCardLeoToRocket(btn.getAttribute('data-id'));
-        } else {
-          moveCardRocketToLeo(parseInt(btn.getAttribute('data-idx'), 10));
-        }
-      });
-    });
-    dialog.querySelectorAll('.transfer-water-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const dir = btn.getAttribute('data-dir');
-        const amt = parseInt(btn.getAttribute('data-amt'), 10) || 1;
-        moveWater(amt, dir);
-      });
-    });
-    dialog.querySelector('.transfer-close').addEventListener('click', close);
-  }
-
-  render();
-  document.body.appendChild(overlay);
-  overlay.focus();
 }
 
 // LEO inspector. Same card-holder system as the rocket modal:
@@ -994,7 +743,6 @@ function openUnifiedStackInspector(stackId) {
       statsHtml = `
         <div class="stack-inspector-stat-row">
           <div class="stack-inspector-stat"><span class="muted">LEO cards</span><strong>${esc(String(cards.length))}</strong></div>
-          <div class="stack-inspector-stat"><span class="muted">LEO water FT</span><strong class="stat-water">${esc(String(getLeoTank()))} 💧</strong></div>
           <div class="stack-inspector-stat"><span class="muted">Aqua bank</span><strong class="stat-aqua">${esc(String(aqua))} 💧</strong></div>
           <div class="stack-inspector-stat"><span class="muted">Hand (not at LEO)</span><strong>${esc(String(handCount))}</strong></div>
         </div>`;
@@ -5487,25 +5235,10 @@ function repaintBoostCommit() {
     : 'Mark cards in your hand, then press BOOST to ship them up to your LEO Stack.';
 }
 
-// Dry mass of cards currently sitting in the LEO Stack. Used
-// for the LEO tank wet-mass cap (TANK_MAX - dry) so boosting
-// cards into LEO can warn before water spills out of LEO's
-// tank.
-function leoStackDryMass() {
-  let mass = 0;
-  for (const slot of getLeoCards()) {
-    const c = PATENTS_BY_ID[slot.id];
-    if (!c) continue;
-    const f = (c.faces && c.faces.primary) || c;
-    mass += ((f.mass != null ? f.mass : c.mass) | 0);
-  }
-  return mass;
-}
-
 // Dry mass of cards currently on the active rocket stack.
-// Mirror of leoStackDryMass for the rocket side. Used by the
-// LEO->Rocket Transfer modal to gate moves against the
-// rocket's wet-mass cap.
+// Used to compute the rocket's water-tank cap (TANK_MAX - dry)
+// when cards transfer onto the rocket (more cards = less room
+// for water). LEO has no tank, so there's no LEO equivalent.
 function rocketStackDryMass() {
   let mass = 0;
   for (const slot of getRocketStack()) {
