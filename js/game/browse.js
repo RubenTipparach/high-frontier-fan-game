@@ -5339,13 +5339,13 @@ function syncSandboxRocket() {
   // sandbox rocket sprite syncs.
   repaintBoostCommit();
   const stack = getRocketStack();
-  // Rocket model is present whenever the player has ≥1 card in
-  // the stack - even when it isn't yet activatable. The 🚫
-  // overlay distinguishes active vs inactive states.
-  if (!stack.length) {
-    _renderer.setSandboxRocket(null);
-    return;
-  }
+  // The rocket sprite is ALWAYS drawn (per user, 2026-05-24:
+  // "need a rocket sprite here as well to show this is where my
+  // rocket is, but it is not functional"). The 🚫 overlay
+  // distinguishes empty / unactivatable vs active states; an
+  // empty stack at LEO still reads as "your rocket lives here"
+  // so the player isn't confused when their cards are sitting
+  // in LEO Stack but the rocket itself looks gone.
   const r = isRocketActive();
   const site = getRocketSite();
   const x = site && typeof site.x === 'number' ? site.x : LEO_ANCHOR.x;

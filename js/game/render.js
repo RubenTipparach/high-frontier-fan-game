@@ -2265,10 +2265,16 @@ export class MapRenderer {
     ctx.drawImage(getRocketSprite(r.colour || 'yellow'), px, py, w, h);
     if (!r.canFly) {
       ctx.globalAlpha = 1;
-      ctx.font = `${Math.round(h * 0.7)}px ${EMOJI_FONT}`;
+      // 🚫 sits at 35% of the sprite height (half of the previous
+      // 0.7) so it reads as an unobtrusive "not functional" badge
+      // rather than swallowing the rocket sprite underneath.
+      // Anchored top-right of the rocket so the sprite + indicator
+      // both stay legible.
+      const badge = Math.round(h * 0.35);
+      ctx.font = `${badge}px ${EMOJI_FONT}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('🚫', sx, py + h / 2);
+      ctx.fillText('🚫', sx + w * 0.30, py + badge * 0.55);
     }
     ctx.restore();
     // Active-prospector badge: emoji clipped to the rocket sprite's
