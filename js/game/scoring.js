@@ -6,8 +6,11 @@
 //     successful claims (discs), factories, colony domes, and
 //     outposts.
 //   - Spectral-based stock-price bonus per factory (rulebook M2b
-//     Exploitation Track): factories of common spectrals award
-//     +4 VP each, mid-rarity +5, rare +8.
+//     Exploitation Track). Each spectral has its own diminishing
+//     schedule: the 1st factory of spectral X pays 8 VP, the
+//     2nd pays 5 VP, the 3rd and every subsequent factory pay
+//     4 VP each. Schedule is the same for all six spectrals
+//     (C / S / M / V / D / H).
 //   - Career glory VP (the live glory.js counter) is added on
 //     top so the panel shows a single grand total.
 //
@@ -15,20 +18,14 @@
 // instant VP at build time. This function is what surfaces the
 // final tally.
 //
-// IMPORTANT: the SPECTRAL_BONUS_VPS table below uses values
-// pending confirmation against the published Exploitation Track
-// (rulebook M2b). The buckets (+4/+5/+8) are correct; the
-// per-spectral assignment is a rarity-inverse heuristic
-// (commonest = lowest bonus, rarest = highest) which matches the
-// spirit of the published track. Re-tune when the canonical
-// table is wired in - the assignments here live in ONE place so
-// it's a one-line change.
-//
 // Public surface:
-//   SPECTRAL_BONUS_VPS  - table from spectral letter -> VP
+//   SPECTRAL_DIMINISHING_SCHEDULE  - [8, 5, 4]; last value
+//                                    repeats indefinitely
+//   spectralVpForCount(n)          - total VP for N factories
+//                                    of one spectral
 //   computeEndgameScore({ ownerId }) -> {
 //     tokens: { rocket, claims, factories, colonies, outposts, total },
-//     spectralBonus: { byType, total },
+//     spectralBonus: { byType: { C, S, M, V, D, H }, perSpectralCount, total },
 //     glory,
 //     grandTotal,
 //   }
@@ -39,14 +36,26 @@ import { getOutposts } from './stacks.js';
 import { getRocketStack } from './rocket.js';
 import { getVps } from './glory.js';
 
-// Rarity-inverse mapping (placeholder pending rulebook M2b
-// confirmation). Site-population counts as of the May 2026 site
-// manifest: D 50, S 46, C 45, V 24, M 13, H 10.
-export const SPECTRAL_BONUS_VPS = {
-  C: 4, S: 4, D: 4,
-  V: 5,
-  M: 8, H: 8,
-};
+// Per-spectral diminishing schedule from rulebook M2b. Read
+// position by position: index 0 = 1st factory of that spectral,
+// index 1 = 2nd, anything past the end uses the last value.
+// All six spectrals (C/S/M/V/D/H) share this schedule.
+export const SPECTRAL_DIMINISHING_SCHEDULE = [8, 5, 4];
+
+// Total VP for N factories of a single spectral. N <= 0 returns
+// 0. The schedule's final value is the "floor" rate that
+// repeats indefinitely.
+export function spectralVpForCount(n) {
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  const last = SPECTRAL_DIMINISHING_SCHEDULE[SPECTRAL_DIMINISHING_SCHEDULE.length - 1];
+  let total = 0;
+  for (let i = 0; i < n; i++) {
+    total += SPECTRAL_DIMINISHING_SCHEDULE[i] != null
+      ? SPECTRAL_DIMINISHING_SCHEDULE[i]
+      : last;
+  }
+  return total;
+}
 
 export function computeEndgameScore({ ownerId } = {}) {
   // Tokens: rocket counts if the player has any cards in it.
@@ -75,13 +84,22 @@ export function computeEndgameScore({ ownerId } = {}) {
   const tokensTotal =
     rocketCount + claimCount + factoryRecs.length + colonyRecs.length + outpostList.length;
 
-  // Spectral bonus per factory.
+  // Group factories by spectral, then apply the diminishing
+  // schedule per group. Total per spectral and grand total are
+  // both surfaced; the panel uses both (per-spectral row for
+  // the breakdown, grand total for the headline number).
+  const perSpectralCount = { C: 0, S: 0, M: 0, V: 0, D: 0, H: 0 };
+  for (const f of factoryRecs) {
+    if (perSpectralCount[f.spectralType] != null) {
+      perSpectralCount[f.spectralType]++;
+    }
+  }
   const byType = { C: 0, S: 0, M: 0, V: 0, D: 0, H: 0 };
   let spectralTotal = 0;
-  for (const f of factoryRecs) {
-    const bonus = SPECTRAL_BONUS_VPS[f.spectralType] || 0;
-    spectralTotal += bonus;
-    if (byType[f.spectralType] != null) byType[f.spectralType] += bonus;
+  for (const [spec, n] of Object.entries(perSpectralCount)) {
+    const vp = spectralVpForCount(n);
+    byType[spec] = vp;
+    spectralTotal += vp;
   }
 
   const glory = getVps();
@@ -98,6 +116,7 @@ export function computeEndgameScore({ ownerId } = {}) {
     },
     spectralBonus: {
       byType,
+      perSpectralCount,
       total: spectralTotal,
     },
     glory,

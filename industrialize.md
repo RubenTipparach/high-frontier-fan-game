@@ -304,8 +304,12 @@ is tallied at endgame per rulebook M2:
 
 - +1 VP per wooden / plastic token in your colour on the map
   (rockets, claims, factories, colony domes, outposts).
-- Spectral-based factory stock-price bonus (+4 / +5 / +8 per
-  Exploitation Track, M2b).
+- Spectral-based factory stock-price bonus (rulebook M2b
+  Exploitation Track): each spectral has its own diminishing
+  schedule. The 1st factory of a given spectral pays 8 VP, the
+  2nd pays 5 VP, and the 3rd + every subsequent factory of that
+  spectral pay 4 VP each. All six spectrals (C / S / M / V / D
+  / H) share the same schedule.
 - Glory & Heroism chits as printed.
 
 End-of-round refinery income is therefore **aqua-only** (zero

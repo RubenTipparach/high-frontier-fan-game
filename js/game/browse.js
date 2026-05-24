@@ -86,7 +86,7 @@ import {
   findEtProduceOptions, openEtProduceModal,
 } from './et-produce.js';
 import {
-  computeEndgameScore, SPECTRAL_BONUS_VPS,
+  computeEndgameScore, SPECTRAL_DIMINISHING_SCHEDULE,
 } from './scoring.js';
 import {
   MARKET_MODE, FREE_MARKET_AQUA,
@@ -6310,15 +6310,32 @@ function paintGlory() {
   ].map(([label, n]) =>
     `<li><span>${label}</span><strong>+${n} VP</strong></li>`
   ).join('');
-  // Spectral bonus broken down by spectral letter so the player
-  // can see which factory types are paying out.
+  // Spectral bonus broken down by spectral letter, with the
+  // factory count + diminishing schedule chips so the player
+  // can see WHY the totals are what they are. Schedule is
+  // shared across all six spectrals (1st=8, 2nd=5, 3rd+=4 per
+  // SPECTRAL_DIMINISHING_SCHEDULE in scoring.js).
   const spectralRows = Object.entries(score.spectralBonus.byType)
     .filter(([, v]) => v > 0)
-    .map(([spec, v]) => `<li><span class="industrialize-spectral-badge spectral-${esc(spec)}">${esc(spec)}</span><strong>+${v} VP</strong></li>`)
+    .map(([spec, v]) => {
+      const n = score.spectralBonus.perSpectralCount?.[spec] || 0;
+      const factorLabel = n === 1 ? '1 factory' : `${n} factories`;
+      return `<li>
+        <span>
+          <span class="industrialize-spectral-badge spectral-${esc(spec)}">${esc(spec)}</span>
+          <span class="muted">${esc(factorLabel)}</span>
+        </span>
+        <strong>+${v} VP</strong>
+      </li>`;
+    })
     .join('');
+  const scheduleHint = SPECTRAL_DIMINISHING_SCHEDULE
+    .map((v, i) => i === SPECTRAL_DIMINISHING_SCHEDULE.length - 1 ? `${i + 1}+ → ${v}` : `${i + 1}st → ${v}`)
+    .join(', ');
   const spectralBlock = score.spectralBonus.total > 0
     ? `<h4>Spectral bonus (factories)</h4>
-       <ul class="glory-table glory-spectral-list">${spectralRows}</ul>`
+       <ul class="glory-table glory-spectral-list">${spectralRows}</ul>
+       <p class="muted glory-rules glory-schedule-hint">Per spectral: ${esc(scheduleHint)} VP (rulebook M2b).</p>`
     : '';
   host.innerHTML = `
     <section class="glory-summary">
@@ -6347,9 +6364,9 @@ function paintGlory() {
       ${spectralBlock}
       <p class="muted glory-rules">
         Rulebook M2. VP is awarded only at endgame; ops don't tick the
-        counter mid-game. Spectral values per Exploitation Track
-        (M2b) - placeholder buckets pending published-table
-        confirmation.
+        counter mid-game. Spectral bonus is per-spectral diminishing
+        (M2b Exploitation Track): each successive factory of the
+        same spectral pays less than the last.
       </p>
     </section>
   `;
