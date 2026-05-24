@@ -530,30 +530,39 @@
   min-height: 78px;
 }
 @media (max-width: 720px) {
-  /* Mobile: profile card stacks above the stat grid (more
-     room for both) + the stat grid drops to 2 columns. */
+  /* Mobile: keep the row layout (triangle on the LEFT,
+     data on the RIGHT) but compress the triangle column so
+     the stats column gets the breathing room. Stats fall
+     into a single column - one cell per row - so each label
+     / number / equation reads at full width. */
   .rocket-totals {
-    flex-direction: column;
+    flex-direction: row;
   }
   .rocket-profile-triangle {
-    flex-basis: auto;
-    width: 100%;
-    flex-direction: row;
-    align-items: center;
-    gap: 12px;
-    padding: 8px 10px;
+    flex: 0 0 120px;
+    padding: 8px;
+    gap: 4px;
   }
   .rocket-profile-triangle .rocket-totals-headliner {
-    flex: 0 0 110px;
     min-height: 90px;
   }
-  .rocket-profile-triangle-label,
+  .rocket-profile-triangle-label {
+    font-size: 9px;
+    letter-spacing: 1px;
+  }
   .rocket-profile-triangle-sub {
-    flex: 1 1 auto;
-    text-align: left;
+    font-size: 9px;
   }
   .rocket-totals-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .rocket-totals-grid .rocket-totals-cell {
+    min-height: 0;
+    padding: 6px 10px;
+  }
+  .rocket-totals-cell strong {
+    font-size: 20px;
   }
 }
 .rocket-water-readout {
