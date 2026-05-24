@@ -3942,3 +3942,30 @@ body:has(#view-browse:not(.hidden)) #main {
 .et-produce-modal .modal-btn.primary { background: #14532d; color: #d1fae5; border-color: #166534; }
 .et-produce-modal .modal-btn.primary:hover { background: #166534; }
 .et-produce-modal .modal-btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ============================================================
+   Endgame summary block (Stage-3 scoring, rulebook M2).
+
+   Sibling of .glory-summary. Same .glory-vp-row idiom for the
+   grand-total chip, but tinted cyan so it visually reads as
+   "potential / projection" rather than "earned career VP"
+   (which is the yellow Glory VP).
+   ============================================================ */
+.endgame-summary { margin-top: 18px; }
+.endgame-summary .glory-vp-row {
+  background: rgba(125, 211, 252, 0.08);
+  border-color: rgba(125, 211, 252, 0.35);
+}
+.endgame-summary .endgame-grand-vp {
+  font-size: 22px;
+  color: #7dd3fc;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+.glory-spectral-list .industrialize-spectral-badge {
+  margin-right: 4px;
+  width: 18px;
+  height: 18px;
+  line-height: 18px;
+  font-size: 12px;
+}

@@ -84,6 +84,9 @@ import {
 import {
   findEtProduceOptions, openEtProduceModal,
 } from './et-produce.js';
+import {
+  computeEndgameScore, SPECTRAL_BONUS_VPS,
+} from './scoring.js';
 
 // Only one map mode now (planner / "classic"); the old
 // "Cleaned up" variant was disorienting next to the canonical
@@ -5951,10 +5954,19 @@ let _gloryListenerHooked = false;
 function renderMilestones() {
   if (!_gloryListenerHooked) {
     _gloryListenerHooked = true;
-    onGloryChange(() => {
+    // The endgame score depends on factory / colony / outpost
+    // / rocket / disc state in addition to glory, so we repaint
+    // on any of those changing too.
+    const repaintIfActive = () => {
       const panel = document.getElementById('browse-sidepanel');
       if (panel && panel.dataset.active === 'milestones') paintGlory();
-    });
+    };
+    onGloryChange(repaintIfActive);
+    onFactoryChange(repaintIfActive);
+    onColonyChange(repaintIfActive);
+    onOutpostsChange(repaintIfActive);
+    onRocketChange(repaintIfActive);
+    onDiscsChange(repaintIfActive);
   }
   paintGlory();
 }
@@ -5973,6 +5985,31 @@ function paintGlory() {
     .filter(([z]) => z !== 'Earth')
     .map(([z, v]) => `<li><span>${esc(z)}</span><strong>+${v} VP</strong></li>`)
     .join('');
+  // Stage-3 endgame scoring: surfaces "if the game ended now"
+  // VP breakdown. Tokens (+1 each) + spectral bonus per factory
+  // (+4/+5/+8 per Exploitation Track) + the career glory VP
+  // counter above. The values are recomputed every paint so
+  // building a factory or running an op refreshes the total.
+  const score = computeEndgameScore({ ownerId: SANDBOX_OWNER_ID });
+  const tokenRows = [
+    ['🚀 Rocket',    score.tokens.rocket],
+    ['🟡 Claims',    score.tokens.claims],
+    ['🏭 Factories', score.tokens.factories],
+    ['🌐 Colonies',  score.tokens.colonies],
+    ['🏛 Outposts',  score.tokens.outposts],
+  ].map(([label, n]) =>
+    `<li><span>${label}</span><strong>+${n} VP</strong></li>`
+  ).join('');
+  // Spectral bonus broken down by spectral letter so the player
+  // can see which factory types are paying out.
+  const spectralRows = Object.entries(score.spectralBonus.byType)
+    .filter(([, v]) => v > 0)
+    .map(([spec, v]) => `<li><span class="industrialize-spectral-badge spectral-${esc(spec)}">${esc(spec)}</span><strong>+${v} VP</strong></li>`)
+    .join('');
+  const spectralBlock = score.spectralBonus.total > 0
+    ? `<h4>Spectral bonus (factories)</h4>
+       <ul class="glory-table glory-spectral-list">${spectralRows}</ul>`
+    : '';
   host.innerHTML = `
     <section class="glory-summary">
       <h3>🏆 Glory</h3>
@@ -5987,6 +6024,22 @@ function paintGlory() {
       <p class="muted glory-rules">
         Land the rocket in a heliocentric zone for the first time to
         earn a chit. Return to LEO to convert all chits to VP.
+      </p>
+    </section>
+    <section class="endgame-summary">
+      <h3>📊 If the game ended now</h3>
+      <div class="glory-vp-row">
+        <span class="muted">Endgame VP (tokens + spectral + glory)</span>
+        <strong class="endgame-grand-vp">${score.grandTotal}</strong>
+      </div>
+      <h4>Tokens on the map (+1 each)</h4>
+      <ul class="glory-table">${tokenRows}</ul>
+      ${spectralBlock}
+      <p class="muted glory-rules">
+        Rulebook M2. VP is awarded only at endgame; ops don't tick the
+        counter mid-game. Spectral values per Exploitation Track
+        (M2b) - placeholder buckets pending published-table
+        confirmation.
       </p>
     </section>
   `;
