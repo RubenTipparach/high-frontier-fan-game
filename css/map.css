@@ -4779,3 +4779,45 @@ body:has(#view-browse:not(.hidden)) #main {
               0 0 18px rgba(125, 211, 252, 0.55);
   border-radius: 10px;
 }
+
+/* Auction-confirm bonus-cards layout: row of full card art,
+   horizontal by default on desktop with wrap; falls back to
+   a single column on narrow viewports. Scrolls vertically if
+   the bonus stack exceeds the modal height. */
+.auction-bonus-cards {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: center;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 6px 4px;
+}
+.auction-bonus-card {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: center;
+}
+.auction-bonus-card .card {
+  transform: scale(0.75);
+  transform-origin: top center;
+  margin-bottom: -70px;
+}
+/* Cramped viewports (phones) flow the bonus cards vertically
+   so each one gets full readable width. Same scroll region
+   keeps the modal height bounded. */
+@media (max-width: 680px) {
+  .auction-bonus-cards {
+    flex-direction: column;
+    align-items: center;
+    max-height: 50vh;
+  }
+}
+/* The confirm modal itself was previously max-width 480px;
+   widen it on desktop so the row-of-bonus-cards has room to
+   breathe. Mobile stays full-bleed via the existing rules. */
+.auction-confirm-modal {
+  max-width: 720px;
+}

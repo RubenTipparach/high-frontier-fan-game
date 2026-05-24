@@ -190,7 +190,7 @@ function escapeHtml(s) {
 // mode"). onConfirm fires with no payload; the deck draws
 // (main card + bonus) are the caller's responsibility.
 export function openAuctionConfirmModal({
-  card, mode, renderCardFn, bonusDeckTypes, onConfirm,
+  card, mode, renderCardFn, bonusCards, onConfirm,
 }) {
   if (!card) return;
   document.querySelector('.auction-confirm-overlay')?.remove();
@@ -213,26 +213,12 @@ export function openAuctionConfirmModal({
   overlay.appendChild(dialog);
 
   const inMarket = mode === MARKET_MODE.MARKET;
-  const bonus = Array.isArray(bonusDeckTypes) ? bonusDeckTypes : [];
-
-  // Per the variant (user, 2026-05-24): auctions in sandbox /
-  // solo mode have NO Hand-card sacrifice and NO aqua cost -
-  // the player wins the top of the chosen deck immediately for
-  // 1 op + 0 aqua. The bonus cards from support decks land in
-  // hand alongside the main card; the modal lists their count
-  // and deck types but never their identities (so the player
-  // doesn't preview what they're about to get).
-  const bonusBlock = bonus.length === 0
-    ? `<p class="muted">No support requirements - no bonus cards.</p>`
-    : `<p>
-         This card has <strong>${bonus.length}</strong> support
-         requirement${bonus.length === 1 ? '' : 's'}. Confirming the
-         auction also draws the top card of each support deck
-         (you won't see them until they land in your hand):
-       </p>
-       <ul class="auction-bonus-decks">
-         ${bonus.map((t) => `<li><span class="auction-bonus-deck">${escapeHtml(t)}</span> deck (top card, hidden)</li>`).join('')}
-       </ul>`;
+  // bonusCards is an array of full card records (the top of
+  // each support deck at the moment the modal opened). The
+  // player sees each one IN FULL via the shared renderCardFn -
+  // no longer hidden (user reversed the "DO NOT SHOW" rule on
+  // 2026-05-24).
+  const bonus = Array.isArray(bonusCards) ? bonusCards.filter(Boolean) : [];
 
   dialog.innerHTML = `
     <div class="auction-head">
@@ -240,13 +226,22 @@ export function openAuctionConfirmModal({
       <span class="auction-mode">${escapeHtml(inMarket ? 'Card Market' : 'Free Library')}</span>
     </div>
     <div class="auction-body">
+      <div class="auction-section-label">Card up for auction</div>
       <div class="auction-confirm-card" id="auction-confirm-card"></div>
       <div class="auction-cost-line">
         <strong>Cost:</strong> 1 operation + 0 aqua (solo / sandbox mode).
       </div>
       <div class="auction-bonus-section">
         <div class="auction-section-label">Bonus cards (drawn on confirm)</div>
-        ${bonusBlock}
+        ${bonus.length === 0
+          ? `<p class="muted">No support requirements - no bonus cards.</p>`
+          : `<p class="muted">
+               This card has <strong>${bonus.length}</strong> support
+               requirement${bonus.length === 1 ? '' : 's'}. Confirming
+               also draws the top of each support deck shown below;
+               all of these land in your Hand alongside the main card.
+             </p>
+             <div class="auction-bonus-cards" id="auction-bonus-cards"></div>`}
       </div>
     </div>
     <div class="card-modal-actions">
@@ -254,14 +249,24 @@ export function openAuctionConfirmModal({
       <button type="button" class="modal-btn primary auction-commit">🎯 Confirm</button>
     </div>
   `;
-  // Mount the card art via the injected renderCardFn so we pick
-  // up the same renderCard everything else uses.
+  // Mount the main card art.
   const cardSlot = dialog.querySelector('#auction-confirm-card');
   if (cardSlot && renderCardFn) {
-    try {
-      cardSlot.appendChild(renderCardFn(card, { type: 'patent' }));
-    } catch (e) {
-      cardSlot.textContent = card.name || card.id;
+    try { cardSlot.appendChild(renderCardFn(card, { type: 'patent' })); }
+    catch (e) { cardSlot.textContent = card.name || card.id; }
+  }
+  // Mount the bonus card art (one per support deck). Flex
+  // layout in the CSS handles horizontal-on-desktop / vertical-
+  // on-narrow + a scrollable region when the total exceeds the
+  // modal height.
+  const bonusHost = dialog.querySelector('#auction-bonus-cards');
+  if (bonusHost && renderCardFn) {
+    for (const b of bonus) {
+      const wrap = document.createElement('div');
+      wrap.className = 'auction-bonus-card';
+      try { wrap.appendChild(renderCardFn(b, { type: 'patent' })); }
+      catch (e) { wrap.textContent = b.name || b.id; }
+      bonusHost.appendChild(wrap);
     }
   }
   dialog.querySelector('.auction-cancel').addEventListener('click', () => close(false));

@@ -7276,7 +7276,14 @@ function doAuctionCard(card) {
     card,
     mode,
     renderCardFn: renderCard,
-    bonusDeckTypes: supportBonusDecks(card),
+    // Resolve each support deck's TOP card into its full
+    // record so the confirm modal can render the actual card
+    // art (user 2026-05-24: "please show the bonus cards in
+    // full"). Empty decks contribute nothing; the modal just
+    // shows fewer cards.
+    bonusCards: supportBonusDecks(card)
+      .map((t) => cardById(peekTop(t)))
+      .filter(Boolean),
     onConfirm: () => {
       if (!requireOp('Research Auction')) return;
       // Auctions in sandbox / solo mode have NO Hand-card
