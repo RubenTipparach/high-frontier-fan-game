@@ -78,6 +78,9 @@ import {
   addCardToOutpost, setOutpostTank,
   OUTPOST_LETTERS,
 } from './stacks.js';
+import {
+  findEtProduceOptions, openEtProduceModal,
+} from './et-produce.js';
 
 // Only one map mode now (planner / "classic"); the old
 // "Cleaned up" variant was disorienting next to the canonical
@@ -3058,6 +3061,82 @@ function doFactoryRefuel(site, gain) {
   openFuelTankModal({ fromWater: tankBefore, toWater: tankBefore + gain });
 }
 
+// Resolve a hand/stack slot id to its underlying card record
+// (patents or crew). Module-level helper so the popup builders
+// and the Stage-3 op handlers all share one lookup; mirrors the
+// two `const lookup` helpers that live inside the larger UI
+// closures.
+function cardById(id) {
+  return PATENTS_BY_ID[id] || CREW_BY_ID[id] || null;
+}
+
+// ET Production handler (rulebook I8). Caller has validated
+// that a player-owned factory is at the site, the rocket is
+// parked, and there's at least one spectral-matching hand
+// card with either an outpost present or a free slot. Op cost
+// is committed inside the modal commit so cancelling doesn't
+// burn the turn.
+function doEtProduce(site, factory, options, outpostsAtSite, freeSlots) {
+  const existingOutpost = outpostsAtSite.length > 0 ? outpostsAtSite[0].letter : null;
+  openEtProduceModal({
+    siteName: site.name,
+    factorySpectral: factory.spectralType,
+    options,
+    existingOutpost,
+    freeSlots,
+    onCommit: ({ cardId, letter, isNewOutpost }) => {
+      if (!cardId || !letter) return;
+      if (!requireOp('ET Production')) return;
+      // If we need to create the outpost first, do that BEFORE
+      // moving cards - otherwise addCardToOutpost will reject.
+      if (isNewOutpost) {
+        if (!createOutpost(letter, site.id)) {
+          setStatus(`ET Produce failed - could not create Outpost ${esc(letter)}.`);
+          return;
+        }
+      }
+      const card = cardById(cardId);
+      if (!card) {
+        setStatus(`ET Produce failed - unknown card ${esc(cardId)}.`);
+        return;
+      }
+      // Card moves from hand to outpost, Black-Side-up
+      // (face='secondary'). removeFromHand first so the
+      // addCard call doesn't trip the "already in hand" guard
+      // if anything reads back through.
+      removeFromHand(cardId);
+      const added = addCardToOutpost(letter, {
+        id: cardId,
+        kind: 'patent',
+        face: 'secondary',
+      });
+      if (!added) {
+        // Roll back: put card back in hand.
+        addToHand(card);
+        setStatus(`ET Produce failed - outpost ${esc(letter)} refused the card.`);
+        return;
+      }
+      setStatus(
+        `🏭 ET Produced <em>${esc(card.name)}</em> at <strong>${esc(site.name)}</strong> `
+        + `into Outpost <strong>${esc(letter)}</strong> (Black-Side-up, spectral ${esc(factory.spectralType)}).`
+        + (isNewOutpost ? ` New outpost created.` : '')
+      );
+      logAction({
+        type: 'et_produce',
+        icon: '🏭',
+        summary: `ET Produced ${card.name} (Black-Side) at ${site.name} into Outpost ${letter}`
+          + (isNewOutpost ? ' (new outpost)' : ''),
+        undoable: false,
+        data: {
+          siteId: site.id, cardId, letter,
+          factorySpectral: factory.spectralType,
+          isNewOutpost,
+        },
+      });
+    },
+  });
+}
+
 // Single sandbox owner id - the local player. Used to tag
 // factories + colonies until Stage 4 multi-player support
 // arrives. Keeping it as a constant (rather than reading from a
@@ -5243,6 +5322,40 @@ function showSitePopupFor(site) {
         disabled: true,
         title: `Colony already established at this site.`,
         onClick: () => {},
+      });
+    }
+  }
+  // ET Production action (rulebook I8). Shown when the rocket
+  // is parked at a player-owned factory AND the player's hand
+  // has at least one card whose spectral matches the factory's
+  // spectral. Card is produced Black-Side-up into the colocated
+  // outpost (or a fresh outpost the player creates inline).
+  if (rocketSite && site.id === rocketSite.id) {
+    const factory = getFactory(site.id);
+    if (factory && factory.ownerId === SANDBOX_OWNER_ID) {
+      const handIds = getHandSlots();
+      const etOptions = findEtProduceOptions(handIds, cardById, factory.spectralType);
+      const outpostsAtSite = Object.values(getOutposts()).filter((o) => o.siteId === site.id);
+      const freeSlots = getAvailableOutpostSlots();
+      const hasOutpost = outpostsAtSite.length > 0;
+      const canCreateNew = freeSlots.length > 0;
+      const ok = etOptions.length > 0 && (hasOutpost || canCreateNew);
+      const reason = !etOptions.length
+        ? `No Hand cards match spectral ${factory.spectralType}.`
+        : (!hasOutpost && !canCreateNew)
+          ? `No colocated outpost AND all 4 outpost slots are in use.`
+          : null;
+      actions.push({
+        label: `🏭 ET Produce (${factory.spectralType})`,
+        variant: ok ? 'rocket' : 'secondary',
+        disabled: !ok,
+        title: reason
+          || `Produce a spectral-${factory.spectralType} hand card Black-Side-up into the colocated outpost.`,
+        onClick: () => {
+          if (!ok) return;
+          doEtProduce(site, factory, etOptions, outpostsAtSite, freeSlots);
+          _renderer.clearSitePopup();
+        },
       });
     }
   }

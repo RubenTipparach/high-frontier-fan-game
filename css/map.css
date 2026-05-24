@@ -3859,3 +3859,86 @@ body:has(#view-browse:not(.hidden)) #main {
 .outpost-slot-modal .card-modal-actions {
   justify-content: flex-end;
 }
+
+/* ============================================================
+   ET Production modal (rulebook I8).
+
+   Combined card-picker + slot-picker. When the site already
+   has an outpost the slot picker collapses to a "target" line.
+   Reuses .industrialize-spectral-badge for the spectral chip
+   so the colour key stays consistent across the Stage-3 ops.
+   ============================================================ */
+.et-produce-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  max-width: 480px;
+  width: 100%;
+  color: var(--ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.et-produce-head h3 { margin: 0; font-size: 18px; letter-spacing: 0.5px; }
+.et-produce-body { display: flex; flex-direction: column; gap: 12px; font-size: 13px; line-height: 1.45; }
+.et-spectral {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.et-section-label {
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--muted, #94a3b8);
+}
+.et-cards { display: flex; flex-direction: column; gap: 4px; max-height: 280px; overflow-y: auto; }
+.et-card {
+  text-align: left;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.et-card:hover { background: var(--panel-2); }
+.et-card.is-selected {
+  background: rgba(125, 211, 252, 0.12);
+  border-color: var(--accent);
+}
+.et-card .et-radio { display: inline-block; width: 16px; color: var(--accent); flex: 0 0 16px; }
+.et-card .et-type { color: var(--muted, #94a3b8); font-size: 11px; }
+
+.et-slot-block { display: flex; flex-direction: column; gap: 6px; }
+.et-slot-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+.et-slot-btn {
+  width: 44px;
+  height: 44px;
+  font-size: 22px;
+  font-weight: 800;
+  background: var(--bg-2);
+  color: var(--ink);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.et-slot-btn:hover { background: rgba(125, 211, 252, 0.18); border-color: var(--accent); color: var(--accent); }
+.et-slot-btn.is-selected {
+  background: rgba(125, 211, 252, 0.18);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.et-produce-modal .card-modal-actions { margin-top: 4px; justify-content: flex-end; }
+.et-produce-modal .modal-btn.primary { background: #14532d; color: #d1fae5; border-color: #166534; }
+.et-produce-modal .modal-btn.primary:hover { background: #166534; }
+.et-produce-modal .modal-btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }

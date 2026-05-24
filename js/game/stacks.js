@@ -65,10 +65,11 @@ function readOutposts() {
         letter,
         siteId: String(rec.siteId),
         cards: Array.isArray(rec.cards)
-          ? rec.cards.filter((c) => c && c.id).map((c) => ({
-              id: String(c.id),
-              kind: c.kind || 'patent',
-            }))
+          ? rec.cards.filter((c) => c && c.id).map((c) => {
+              const out = { id: String(c.id), kind: c.kind || 'patent' };
+              if (c.face === 'secondary') out.face = 'secondary';
+              return out;
+            })
           : [],
         tank: Number.isFinite(rec.tank) && rec.tank >= 0
           ? Math.min(TANK_MAX, Math.floor(rec.tank))
@@ -169,11 +170,19 @@ export function dissolveOutpost(letter) {
   return cards;
 }
 
+// Slot face: 'primary' (default) is the normal Tier-1 face;
+// 'secondary' is the Black-Side / Tier-2 face that ET Production
+// (rulebook I8) writes when producing into a factory outpost.
+// Endgame scoring (M2) doesn't care about the face today; it's
+// kept here so future Delivery Op (I9) work can flip the face
+// back to primary as the card travels home.
 export function addCardToOutpost(letter, slot) {
   const rec = _outposts[letter];
   if (!rec) return false;
   if (!slot || !slot.id) return false;
-  rec.cards.push({ id: String(slot.id), kind: slot.kind || 'patent' });
+  const entry = { id: String(slot.id), kind: slot.kind || 'patent' };
+  if (slot.face === 'secondary') entry.face = 'secondary';
+  rec.cards.push(entry);
   persistOutposts();
   notifyOutposts();
   return true;
