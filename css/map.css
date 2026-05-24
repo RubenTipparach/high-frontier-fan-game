@@ -4565,3 +4565,28 @@ body:has(#view-browse:not(.hidden)) #main {
 #rocket-stack-transfer {
   margin-top: 10px;
 }
+
+/* ============================================================
+   Hand-flight ghost. Cloned card art that flies from the
+   deck-tap modal to the hand strip when the player taps
+   "Add to hand". Mostly inline-styled from browse.js so the
+   geometry stays under JS control; the rules below are the
+   shared knobs (no transition for users that ask for reduced
+   motion, slight shadow + filter to read against the map).
+   ============================================================ */
+.hand-flight-ghost {
+  filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.55));
+  /* The ghost is a clone of the modal-card element which
+     carries the scale(1.6) of .card-modal-card. Reset that
+     here so the ghost starts at the same VISUAL size as the
+     un-scaled card and our inline transform math (which works
+     in screen pixels) lines up. */
+  transform-origin: top left;
+}
+.hand-flight-ghost.card-modal-card { transform: none; margin: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .hand-flight-ghost {
+    transition: opacity 120ms linear !important;
+    transform: none !important;
+  }
+}

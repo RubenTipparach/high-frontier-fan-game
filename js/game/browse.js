@@ -1351,6 +1351,72 @@ function endCustomDragGhost() {
   _dragGhostState = null;
 }
 
+// Animate a card flying from its on-screen position to the
+// hand strip's drop area, then commit it to the hand. Used by
+// the deck-tap modal's "Add to hand" button so the player sees
+// the card sail from the library / modal to the strip instead
+// of it just popping into existence. srcEl is the card element
+// inside the modal (or any DOM node we can read a bounding
+// rect off); onLand fires AFTER the card has visually arrived.
+//
+// If we can't find a destination (no hand strip mounted, e.g.
+// the player is on a non-browse view) we skip the animation
+// and call onLand immediately so callers never block on a
+// missing target.
+function flyCardToHand(srcEl, card, onLand) {
+  const land = () => { try { onLand?.(); } catch (e) { console.error('flyCardToHand land:', e); } };
+  const dest = document.getElementById('sandbox-hand-cards')
+    || document.getElementById('sandbox-hand');
+  if (!srcEl || !dest) { land(); return; }
+  const srcRect = srcEl.getBoundingClientRect();
+  const dstRect = dest.getBoundingClientRect();
+  if (!srcRect.width || !srcRect.height) { land(); return; }
+  // Build a clone of the card art, fixed-position it over the
+  // source, then transition it toward the hand strip. We use a
+  // CSS transition (transform + opacity) because the runtime is
+  // simple and the browser can keep the transform on the GPU.
+  const ghost = (srcEl.cloneNode(true));
+  ghost.classList.add('hand-flight-ghost');
+  ghost.style.position = 'fixed';
+  ghost.style.left = srcRect.left + 'px';
+  ghost.style.top  = srcRect.top + 'px';
+  ghost.style.width  = srcRect.width + 'px';
+  ghost.style.height = srcRect.height + 'px';
+  ghost.style.margin = '0';
+  ghost.style.pointerEvents = 'none';
+  ghost.style.zIndex = '120';
+  ghost.style.transformOrigin = 'top left';
+  ghost.style.transform = 'translate(0, 0) scale(1)';
+  ghost.style.transition = 'transform 520ms cubic-bezier(0.22, 0.61, 0.36, 1), opacity 520ms ease-out';
+  ghost.style.willChange = 'transform, opacity';
+  // Land near the right edge of the strip so the card looks
+  // like it slots into the next free position. The final scale
+  // (~0.4) matches the hand-strip's visual card size.
+  const targetX = dstRect.right - srcRect.width * 0.4 - 24;
+  const targetY = dstRect.top + (dstRect.height - srcRect.height * 0.4) / 2;
+  const dx = targetX - srcRect.left;
+  const dy = targetY - srcRect.top;
+  document.body.appendChild(ghost);
+  // Force layout before the transform change so the transition
+  // actually fires (otherwise the browser collapses the two
+  // styles and skips animation).
+  void ghost.offsetWidth;
+  ghost.style.transform = `translate(${dx}px, ${dy}px) scale(0.4) rotate(-6deg)`;
+  ghost.style.opacity = '0.05';
+  let settled = false;
+  const finish = () => {
+    if (settled) return;
+    settled = true;
+    ghost.remove();
+    land();
+  };
+  ghost.addEventListener('transitionend', finish);
+  // Safety net in case transitionend doesn't fire (off-screen,
+  // tab inactive, prefers-reduced-motion suppressing the
+  // transition).
+  setTimeout(finish, 700);
+}
+
 // Tap modal for a card sitting in the deck. Confirms "add to
 // hand" with a single primary action. Mobile-friendly because
 // HTML5 drag-and-drop doesn't work reliably on touch; pointing
@@ -1381,9 +1447,30 @@ function openDeckTapModal(card, kind) {
   addBtn.className = 'modal-btn stack';
   addBtn.textContent = '✋ Add to hand';
   addBtn.addEventListener('click', () => {
-    const r = addToHand(card);
-    if (!r.ok) setStatus(`Can't add: ${r.reason}.`);
-    close();
+    // Validate up front: don't fly the animation just to bounce
+    // (dup card, expansion card, etc). Surface the reason and
+    // skip the flight.
+    if (isInHand(card.id)) {
+      setStatus(`Can't add: already in your hand.`);
+      close();
+      return;
+    }
+    // Close the modal first so the user sees the card take
+    // flight against the underlying view, not against a fading
+    // backdrop. The flight clones the modal card element so the
+    // ghost survives the close.
+    const srcEl = cardEl;
+    overlay.classList.add('is-flying');
+    flyCardToHand(srcEl, card, () => {
+      const r = addToHand(card);
+      if (!r.ok) setStatus(`Can't add: ${r.reason}.`);
+    });
+    // Fade the modal itself out in parallel with the flight so
+    // the player's eye follows the card to the strip rather than
+    // getting stuck on a still-open dialog.
+    overlay.style.transition = 'opacity 220ms ease-out';
+    overlay.style.opacity = '0';
+    setTimeout(close, 240);
   });
 
   actions.append(addBtn);
