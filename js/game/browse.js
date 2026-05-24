@@ -2972,14 +2972,18 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const fromW   = Number.isFinite(fromWater) ? fromWater : tankNow;
   const totals  = getStackTotals();
   const thrStats = getActiveThrusterStats();
-  // Capacity model: thrust - dryMass (the HF4 wet-mass lift cap)
-  // so the cylinder visually shows how much room is left under
-  // the thruster's lift limit. When no thruster is active or the
-  // ship is overweight, fall back to the engine's tank cap.
-  const liftCap = (thrStats && Number.isFinite(thrStats.thrust))
-    ? Math.max(0, thrStats.thrust - (totals.dryMass || 0))
-    : null;
-  const cap = liftCap != null && liftCap > 0 ? liftCap : getTankMax();
+  // Tank visualisation model: the cylinder always represents the
+  // full TANK_MAX wet-mass cap (32). Dry mass occupies the bottom
+  // of the cylinder as an immutable block; water floats on top
+  // of it. The room left over for water = TANK_MAX − dry mass.
+  // A separate LIFT marker is drawn at the active thruster's
+  // thrust line so the player can see when extra water would
+  // push the rocket below liftable mass.
+  const TANK_VIS_MAX = getTankMax();
+  const dryMass = Math.max(0, Math.min(TANK_VIS_MAX, totals.dryMass || 0));
+  const cap = Math.max(0, TANK_VIS_MAX - dryMass);
+  const thrust = (thrStats && Number.isFinite(thrStats.thrust)) ? thrStats.thrust : null;
+  const liftCap = (thrust != null) ? Math.max(0, thrust - dryMass) : null;
 
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay fuel-tank-overlay';
@@ -3015,7 +3019,18 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
           <clipPath id="tank-clip">
             <rect x="20" y="10" width="80" height="200" rx="14" ry="14" />
           </clipPath>
+          <pattern id="tank-dry-hatch" patternUnits="userSpaceOnUse" width="8" height="8">
+            <rect width="8" height="8" fill="rgba(120, 130, 170, 0.35)"/>
+            <line x1="0" y1="8" x2="8" y2="0" stroke="rgba(180, 190, 210, 0.55)" stroke-width="1"/>
+          </pattern>
         </defs>
+        <!-- Dry-mass block: cards take up wet-mass capacity even
+             before water arrives. Drawn at the bottom of the
+             cylinder with a hatched fill so it reads as 'occupied
+             by the hull' instead of water. -->
+        <g clip-path="url(#tank-clip)">
+          <rect class="tank-dry" x="20" y="200" width="80" height="10" fill="url(#tank-dry-hatch)" />
+        </g>
         <!-- Falling droplet + splash layer. Sits ABOVE the water
              but inside the clip so the droplets disappear at the
              rim. JS spawns the droplet + splash <path>s during
@@ -3027,6 +3042,11 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
           <rect class="tank-water" x="20" y="200" width="80" height="10" />
           <rect class="tank-water-foam" x="20" y="195" width="80" height="6" />
         </g>
+        <!-- Lift-mass marker: a thin amber line at the thrust
+             level so the player sees the can-lift threshold. -->
+        <line class="tank-lift-line" x1="20" y1="0" x2="100" y2="0"
+              stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="3 3"
+              opacity="0" />
         <!-- Capacity tick marks every 5 units. -->
         <g class="tank-ticks"></g>
       </svg>
@@ -3080,21 +3100,50 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
       an outpost-stack drop once factories land.
     </p>
     <div class="fuel-tank-foot muted">
-      Cap = thrust ${thrStats ? thrStats.thrust : '-'} − dry mass ${totals.dryMass || 0}
-      ${liftCap == null ? '(no active thruster)' : ''}
+      Tank cap = <strong>${TANK_VIS_MAX}</strong> − dry mass
+      <strong>${dryMass}</strong> = <strong>${cap}</strong> water room.
+      ${thrust != null
+        ? `Lift cap = thrust <strong>${thrust}</strong> − dry mass
+           <strong>${dryMass}</strong> = <strong>${liftCap}</strong> liftable water.`
+        : '(no active thruster)'}
     </div>
   `;
 
   const waterRect = panel.querySelector('.tank-water');
   const foamRect  = panel.querySelector('.tank-water-foam');
+  const dryRect   = panel.querySelector('.tank-dry');
+  const liftLine  = panel.querySelector('.tank-lift-line');
   const nowReadout = panel.querySelector('.tank-now');
   const ticksG     = panel.querySelector('.tank-ticks');
 
-  // Tick marks. One short hatch every 5 units on the right edge.
-  const tickEvery = Math.max(1, Math.round(cap / 10));
-  for (let v = tickEvery; v <= cap; v += tickEvery) {
-    const t = v / cap;
-    const ty = 210 - t * 200;
+  // Geometry: 200 svg units span TANK_VIS_MAX wet-mass units.
+  // The dry-mass block fills the bottom; water sits above it.
+  const unitPx = 200 / TANK_VIS_MAX;
+  const dryHeightPx = dryMass * unitPx;
+  const dryTopY = 210 - dryHeightPx;
+  if (dryRect) {
+    dryRect.setAttribute('y', String(dryTopY));
+    dryRect.setAttribute('height', String(dryHeightPx));
+  }
+  // Lift-cap marker. Only show when the active thruster is set
+  // AND the lift cap is BELOW the visual tank cap (i.e., the
+  // rocket would be over-massed before the tank fills).
+  if (liftLine) {
+    if (thrust != null && liftCap < cap && thrust > 0) {
+      const liftY = 210 - (dryMass + liftCap) * unitPx;
+      liftLine.setAttribute('y1', String(liftY));
+      liftLine.setAttribute('y2', String(liftY));
+      liftLine.setAttribute('opacity', '0.85');
+    } else {
+      liftLine.setAttribute('opacity', '0');
+    }
+  }
+
+  // Tick marks. One short hatch every 5 units on the right edge,
+  // across the full TANK_VIS_MAX scale so the player sees the
+  // absolute wet-mass position (matches the Net Thrust track).
+  for (let v = 5; v <= TANK_VIS_MAX; v += 5) {
+    const ty = 210 - v * unitPx;
     const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
     line.setAttribute('x1', 100); line.setAttribute('x2', 110);
     line.setAttribute('y1', ty);  line.setAttribute('y2', ty);
@@ -3105,15 +3154,16 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
 
   // Current water surface y (svg coord). Drops use this to know
   // when they've hit the surface. setLevel writes it each frame.
-  let _surfaceY = 210;
+  // Water floats on top of the dry block, never inside it.
+  let _surfaceY = dryTopY;
   function setLevel(level) {
     const clamped = Math.max(0, Math.min(cap, level));
-    const frac = cap > 0 ? clamped / cap : 0;
-    const h    = frac * 200;
-    _surfaceY  = 210 - h;
-    waterRect.setAttribute('y', String(210 - h));
+    const h = clamped * unitPx;
+    const waterTopY = dryTopY - h;
+    _surfaceY = waterTopY;
+    waterRect.setAttribute('y', String(waterTopY));
     waterRect.setAttribute('height', String(h));
-    foamRect.setAttribute('y',  String(210 - h - 3));
+    foamRect.setAttribute('y',  String(waterTopY - 3));
     foamRect.setAttribute('height', String(Math.min(6, h)));
     nowReadout.textContent = String(Math.round(clamped));
   }

@@ -436,6 +436,19 @@
 .tank-water-foam {
   fill: rgba(125, 211, 252, 0.55);
 }
+/* Dry-mass block: a hatched grey rectangle anchored to the
+   bottom of the tank, representing the wet-mass capacity
+   already claimed by the rocket's cards. Water floats above
+   it; the cylinder's full 32-unit scale stays visible so the
+   player can read the absolute wet-mass position. */
+.tank-dry {
+  /* fill is set inline (SVG pattern reference); border-style
+     here is just for the hover affordance later if needed. */
+  opacity: 0.85;
+}
+.tank-lift-line {
+  pointer-events: none;
+}
 .fuel-tank-readout {
   display: flex;
   flex-direction: column;
