@@ -4768,3 +4768,14 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .auction-confirm-modal .modal-btn.primary:hover { background: #166534; }
 .auction-confirm-modal .modal-btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Cart's top card is tap-to-inspect (opens openDeckTapModal,
+   same as the patent library). Cursor + hover ring tell the
+   player the card is interactive. */
+.cart-deck-topcard-click { cursor: pointer; }
+.cart-deck-topcard-click:hover .card,
+.cart-deck-topcard-click:focus-visible .card {
+  box-shadow: 0 0 0 3px var(--accent),
+              0 0 18px rgba(125, 211, 252, 0.55);
+  border-radius: 10px;
+}

@@ -96,11 +96,20 @@
 }
 .card-face[data-face="secondary"] { transform: rotateY(180deg); }
 
-/* Radiators read upside-down on the installed (secondary) face,
-   matching the published cards. The Z-rotation composes with the
-   Y-flip so the back content reads mirrored top-to-bottom. */
+/* Radiator black-side rotation (the legacy 'flip-rotates' rule)
+   has been disabled - the secondary face now reads upright like
+   every other card type. Per the user (2026-05-24): "radiator
+   cards on the black side are upside down in all instances" -
+   the published-card flip-to-rotate idiom doesn't translate
+   well to a digital surface, where the player isn't physically
+   handling a card to flip it.
+   The intra-face 'Heavy half rotated 180°' design below stays;
+   that's a Light/Heavy split within a single face, not a flip
+   of the whole face. */
 .card.flip-rotates .card-face[data-face="secondary"] {
-  transform: rotateY(180deg) rotate(180deg);
+  /* No extra Z rotation: secondary inherits the standard
+     rotateY(180deg) from the .card-face[data-face="secondary"]
+     rule above. */
 }
 
 /* Primary face is the "white" published-card look: parchment

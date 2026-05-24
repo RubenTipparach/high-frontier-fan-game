@@ -7193,10 +7193,32 @@ function paintCart() {
 
     // Right: the card art for the top card via the shared
     // renderCard. Same card-holder used elsewhere.
+    // Click the card to open the deck-tap inspect modal -
+    // same as the patent library. The modal's "Auction this
+    // card" button (in market mode) routes back through the
+    // auction-confirm flow so the player can buy from the
+    // inspect view too.
     const cardSlot = document.createElement('div');
     cardSlot.className = 'cart-deck-topcard';
     if (card) {
-      cardSlot.appendChild(renderCard(card, { type: 'patent' }));
+      const ce = renderCard(card, { type: 'patent' });
+      ce.classList.add('cart-deck-topcard-click');
+      ce.setAttribute('role', 'button');
+      ce.setAttribute('tabindex', '0');
+      ce.title = 'Tap to inspect this card';
+      ce.addEventListener('click', (ev) => {
+        // Don't intercept clicks on interactive children of
+        // the card (e.g. the flip button, support chips).
+        if (ev.target.closest('.card-flip, .card-support-chip, .card-supports')) return;
+        openDeckTapModal(card, 'patent');
+      });
+      ce.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          openDeckTapModal(card, 'patent');
+        }
+      });
+      cardSlot.appendChild(ce);
     } else {
       cardSlot.innerHTML = '<p class="muted">Deck is empty.</p>';
     }
