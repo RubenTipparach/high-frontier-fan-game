@@ -4286,10 +4286,15 @@ function doFreeMarket() {
         setStatus(`Free Market failed - card not in hand.`);
         return;
       }
+      // Sold card goes to the BOTTOM of its corresponding
+      // deck (variant rule, user 2026-05-24: "free market
+      // card ... goes to the back of the deck"). Routes by
+      // type via addToBottom.
+      addToBottom(cardId);
       addAqua(FREE_MARKET_AQUA);
       setStatus(
         `💱 Sold <em>${esc(card.name)}</em> for <strong>+${FREE_MARKET_AQUA}</strong> aqua. `
-        + `Card returns to the library.`
+        + `Card returns to the bottom of the ${esc(card.type || 'patent')} deck.`
       );
       logAction({
         type: 'free_market',
@@ -4417,12 +4422,14 @@ function doIndustrialize(site, stack, options) {
         const ok = rocketRemoveCard(idx);
         if (ok) {
           removed.push(slot.id);
-          // Rulebook G6 / variant lock: industrialize-decom
-          // cards go to the BOTTOM of their corresponding
-          // deck (vs hand for voluntary removal). addToBottom
-          // routes by card type; non-patent / expansion slots
-          // are silently skipped.
-          addToBottom(slot.id);
+          // Variant rule (user, 2026-05-24): industrialize-
+          // decommissioned cards return to the player's HAND
+          // (NOT to the deck bottom - that earlier reading
+          // was the user's pre-clarification draft). The
+          // refinery + robonaut + support chain you spent
+          // are re-collectable, not consumed.
+          const reclaim = PATENTS_BY_ID[slot.id];
+          if (reclaim) addToHand(reclaim);
         }
       }
       const spectral = site.spectralType || 'C';
@@ -7077,15 +7084,13 @@ function paintCart() {
     return;
   }
   const handIds = getHandSlots();
-  const handEmpty = handIds.length === 0;
   const aqua = getAqua();
 
   host.innerHTML = `
     <section class="cart-summary">
       <h3>🛒 Patent Market</h3>
-      <p class="muted">Card Market mode: each deck is shuffled, and only the <strong>top card</strong> is up for auction. Per-buy cost: <strong>1 operation</strong> + <strong>1 Hand card sacrifice</strong> + 0 aqua (solo).</p>
-      <p class="muted">Aqua bank: <strong class="stat-aqua">${esc(String(aqua))} 💧</strong>. Hand: <strong>${handIds.length}</strong> card${handIds.length === 1 ? '' : 's'} available to sacrifice.</p>
-      ${handEmpty ? '<p class="cart-warning">⚠ Your hand is empty - you need at least one Hand card to sacrifice. Use any existing hand cards or switch back to Free Library mode (resets the game) to unlock drag-to-hand.</p>' : ''}
+      <p class="muted">Card Market mode: each deck is shuffled, and only the <strong>top card</strong> is up for auction. Per-buy cost in sandbox / solo mode: <strong>1 operation</strong> + 0 aqua. The card lands in your Hand.</p>
+      <p class="muted">Aqua bank: <strong class="stat-aqua">${esc(String(aqua))} 💧</strong>. Hand: <strong>${handIds.length}</strong> card${handIds.length === 1 ? '' : 's'}.</p>
       <p class="muted">Inspiration event (d6 roll 1-2): every deck's top card cycles to the bottom.</p>
     </section>
     <div class="cart-decks" id="cart-decks-host"></div>
@@ -7134,12 +7139,10 @@ function paintCart() {
     const buy = document.createElement('button');
     buy.type = 'button';
     buy.className = 'cart-buy-btn';
-    buy.disabled = !card || handEmpty;
+    buy.disabled = !card;
     buy.title = !card
       ? `${type} deck is empty.`
-      : handEmpty
-        ? 'Need a Hand card to sacrifice.'
-        : 'Confirm the auction (1 op + 1 Hand card sacrifice).';
+      : 'Confirm the auction (1 op, 0 aqua in sandbox mode).';
     const supportCount = card ? supportBonusDecks(card).length : 0;
     buy.textContent = supportCount > 0
       ? `🎯 Buy (+${supportCount} bonus)`
@@ -7204,61 +7207,35 @@ function doAuctionCard(card) {
   openAuctionConfirmModal({
     card,
     mode,
-    handIds: getHandSlots(),
-    lookupCard: cardById,
     renderCardFn: renderCard,
     bonusDeckTypes: supportBonusDecks(card),
-    onConfirm: ({ sacrificeId }) => {
+    onConfirm: () => {
       if (!requireOp('Research Auction')) return;
-      // Sacrifice (market mode only).
-      if (mode === MARKET_MODE.MARKET) {
-        if (!sacrificeId) {
-          setStatus('Auction failed - Card Market mode needs a sacrifice.');
-          return;
-        }
-        if (!removeFromHand(sacrificeId)) {
-          setStatus('Auction failed - sacrifice card not in hand.');
-          return;
-        }
-        // Sacrificed card goes to the bottom of its own
-        // type's deck.
-        addToBottom(sacrificeId);
-      }
-      // Draw the main card. drawTop removes it from the deck
-      // and returns its id; we ignore the return because we
-      // already have `card` (the buy was for a SPECIFIC card,
-      // which by definition was at the top when the modal
-      // opened - we double-check below).
+      // Auctions in sandbox / solo mode have NO Hand-card
+      // sacrifice and NO aqua cost (user, 2026-05-24):
+      // "auctions are cost 0 in sandbox mode". The player
+      // wins the top of the chosen deck immediately on
+      // confirm.
       const drawnId = drawTop(card.type);
       if (drawnId !== card.id) {
         // Deck shifted between modal-open and confirm (rare
-        // race - e.g. an Inspiration cycle fired). Roll back
-        // the sacrifice and bail.
+        // race - e.g. an Inspiration cycle fired between
+        // tap and confirm). Put the unexpected card back at
+        // the bottom and tell the player.
         if (drawnId) addToBottom(drawnId);
-        if (mode === MARKET_MODE.MARKET && sacrificeId) {
-          removeFromDeckIfPresent(sacrificeId);
-          const sc = cardById(sacrificeId);
-          if (sc) addToHand(sc);
-        }
         setStatus('Auction failed - deck state shifted. Try again.');
         return;
       }
       const handResult = addToHand(card);
       if (!handResult.ok) {
-        // Roll back everything.
         addToBottom(card.id);
-        if (mode === MARKET_MODE.MARKET && sacrificeId) {
-          removeFromDeckIfPresent(sacrificeId);
-          const sc = cardById(sacrificeId);
-          if (sc) addToHand(sc);
-        }
         setStatus(`Auction failed - ${esc(handResult.reason)}.`);
         return;
       }
-      // Bonus draws: 1 card from the top of each support deck.
-      // Empty support decks skip silently. The player learns
-      // the bonus identities when the cards land in hand
-      // (per the spec: don't pre-reveal).
+      // Bonus draws: 1 card from the top of each support
+      // deck. Empty support decks skip silently. The player
+      // learns the bonus identities when the cards land in
+      // hand (per the spec: don't pre-reveal).
       const bonusTypes = supportBonusDecks(card);
       const bonusCards = [];
       for (const t of bonusTypes) {
@@ -7274,22 +7251,18 @@ function doAuctionCard(card) {
         ? ` Bonus: ${bonusCards.map((b) => `<em>${esc(b.name)}</em>`).join(', ')}.`
         : (bonusTypes.length ? ' (Bonus decks were empty.)' : '');
       const modeLabel = mode === MARKET_MODE.MARKET ? 'Card Market' : 'Free Library';
-      const sacName = sacrificeId ? cardById(sacrificeId)?.name : null;
       setStatus(
-        `🎯 Auctioned <em>${esc(card.name)}</em> into your Hand `
-        + `(${esc(modeLabel)}${sacName ? `, sacrificed <em>${esc(sacName)}</em>` : ''}).`
+        `🎯 Auctioned <em>${esc(card.name)}</em> into your Hand (${esc(modeLabel)}).`
         + bonusNote
       );
       logAction({
         type: 'auction',
         icon: '🎯',
         summary: `Auctioned ${card.name}`
-          + (sacName ? `, sacrificed ${sacName}` : '')
           + (bonusCards.length ? `; bonus: ${bonusCards.map((b) => b.name).join(', ')}` : ''),
         undoable: false,
         data: {
           cardId: card.id,
-          sacrificeId,
           bonusCardIds: bonusCards.map((b) => b.id),
           mode,
         },
@@ -7298,11 +7271,8 @@ function doAuctionCard(card) {
   });
 }
 
-// Defensive helper: only removes a card from the deck when
-// it's actually there. Used by the auction rollback paths.
-function removeFromDeckIfPresent(id) {
-  try { removeFromDeck(id); } catch { /* not present */ }
-}
+// (removeFromDeckIfPresent helper deleted - no longer used
+// now that auctions don't sacrifice a Hand card.)
 
 // Show or hide the 🛒 sidebar tab based on the current Card
 // Market mode. Called on mount + on every market mode flip.

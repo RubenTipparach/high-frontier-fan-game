@@ -154,7 +154,10 @@ function escapeHtml(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-const DECK_TYPES = ['thruster', 'reactor', 'radiator', 'refinery', 'robonaut', 'generator'];
+// (DECK_TYPES imported from ./decks.js above - the deck module
+// owns the canonical list. The duplicate const declaration
+// that used to live here caused a 'Identifier DECK_TYPES has
+// already been declared' SyntaxError on page load.)
 
 // Open the auction modal. In library mode the user picks a
 // deck type + a specific card; the card enters hand on confirm.
@@ -307,11 +310,10 @@ export function openAuctionModal({
 // responsibility because they need to thread through the
 // hand-add + rollback logic.
 export function openAuctionConfirmModal({
-  card, mode, handIds, lookupCard, renderCardFn, bonusDeckTypes, onConfirm,
+  card, mode, renderCardFn, bonusDeckTypes, onConfirm,
 }) {
   if (!card) return;
   document.querySelector('.auction-confirm-overlay')?.remove();
-  let selectedSacrifice = null;
 
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay auction-confirm-overlay';
@@ -320,8 +322,7 @@ export function openAuctionConfirmModal({
     overlay.remove();
     document.removeEventListener('keydown', onKey);
     if (!confirmed) return;
-    if (mode === MARKET_MODE.MARKET && !selectedSacrifice) return;
-    onConfirm?.({ sacrificeId: selectedSacrifice });
+    onConfirm?.({});
   };
   const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(false); } };
   document.addEventListener('keydown', onKey);
@@ -334,77 +335,58 @@ export function openAuctionConfirmModal({
   const inMarket = mode === MARKET_MODE.MARKET;
   const bonus = Array.isArray(bonusDeckTypes) ? bonusDeckTypes : [];
 
-  const render = () => {
-    const bonusBlock = bonus.length === 0
-      ? `<p class="muted">No support requirements - no bonus cards.</p>`
-      : `<p>
-           This card has <strong>${bonus.length}</strong> support
-           requirement${bonus.length === 1 ? '' : 's'}. Confirming the
-           auction also draws the top card of each support deck
-           (you won't see them until they land in your hand):
-         </p>
-         <ul class="auction-bonus-decks">
-           ${bonus.map((t) => `<li><span class="auction-bonus-deck">${escapeHtml(t)}</span> deck (top card, hidden)</li>`).join('')}
-         </ul>`;
-    const sacrificeBlock = !inMarket
-      ? `<p class="muted">Free Library mode: no sacrifice required.</p>`
-      : !handIds.length
-        ? `<p class="cart-warning">⚠ Hand is empty - you need at least one Hand card to sacrifice in Card Market mode. Cancel and acquire cards elsewhere first.</p>`
-        : `<div class="auction-section-label">Sacrifice a Hand card</div>
-           <div class="auction-sac-cards">
-             ${handIds.map((id) => {
-               const sc = lookupCard(id);
-               if (!sc) return '';
-               const sel = id === selectedSacrifice ? '⦿' : '◯';
-               return `<button type="button" data-sac="${escapeHtml(id)}" class="auction-card ${id === selectedSacrifice ? 'is-selected' : ''}">
-                 <span class="auction-radio">${sel}</span>
-                 <strong>${escapeHtml(sc.name)}</strong>
-                 <span class="muted">(${escapeHtml(sc.type || '')})</span>
-               </button>`;
-             }).join('')}
-           </div>`;
-    dialog.innerHTML = `
-      <div class="auction-head">
-        <h3>🎯 Confirm Auction</h3>
-        <span class="auction-mode">${escapeHtml(inMarket ? 'Card Market' : 'Free Library')}</span>
-      </div>
-      <div class="auction-body">
-        <div class="auction-confirm-card" id="auction-confirm-card"></div>
-        <div class="auction-cost-line">
-          <strong>Cost:</strong> 1 operation${inMarket ? ' + 1 Hand card sacrifice' : ''} + 0 aqua (solo).
-        </div>
-        ${sacrificeBlock}
-        <div class="auction-bonus-section">
-          <div class="auction-section-label">Bonus cards (drawn on confirm)</div>
-          ${bonusBlock}
-        </div>
-      </div>
-      <div class="card-modal-actions">
-        <button type="button" class="modal-btn auction-cancel">Cancel</button>
-        <button type="button" class="modal-btn primary auction-commit" ${(inMarket && !selectedSacrifice) ? 'disabled' : ''}>🎯 Confirm</button>
-      </div>
-    `;
-    // Mount the card art via the injected renderCardFn so we
-    // pick up the same renderCard everything else uses.
-    const cardSlot = dialog.querySelector('#auction-confirm-card');
-    if (cardSlot && renderCardFn) {
-      try {
-        cardSlot.appendChild(renderCardFn(card, { type: 'patent' }));
-      } catch (e) {
-        cardSlot.textContent = card.name || card.id;
-      }
-    }
-    dialog.querySelectorAll('.auction-sac-cards .auction-card').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        selectedSacrifice = btn.getAttribute('data-sac');
-        render();
-      });
-    });
-    dialog.querySelector('.auction-cancel').addEventListener('click', () => close(false));
-    dialog.querySelector('.auction-commit').addEventListener('click', () => close(true));
-  };
+  // Per the variant (user, 2026-05-24): auctions in sandbox /
+  // solo mode have NO Hand-card sacrifice and NO aqua cost -
+  // the player wins the top of the chosen deck immediately for
+  // 1 op + 0 aqua. The bonus cards from support decks land in
+  // hand alongside the main card; the modal lists their count
+  // and deck types but never their identities (so the player
+  // doesn't preview what they're about to get).
+  const bonusBlock = bonus.length === 0
+    ? `<p class="muted">No support requirements - no bonus cards.</p>`
+    : `<p>
+         This card has <strong>${bonus.length}</strong> support
+         requirement${bonus.length === 1 ? '' : 's'}. Confirming the
+         auction also draws the top card of each support deck
+         (you won't see them until they land in your hand):
+       </p>
+       <ul class="auction-bonus-decks">
+         ${bonus.map((t) => `<li><span class="auction-bonus-deck">${escapeHtml(t)}</span> deck (top card, hidden)</li>`).join('')}
+       </ul>`;
 
-  render();
+  dialog.innerHTML = `
+    <div class="auction-head">
+      <h3>🎯 Confirm Auction</h3>
+      <span class="auction-mode">${escapeHtml(inMarket ? 'Card Market' : 'Free Library')}</span>
+    </div>
+    <div class="auction-body">
+      <div class="auction-confirm-card" id="auction-confirm-card"></div>
+      <div class="auction-cost-line">
+        <strong>Cost:</strong> 1 operation + 0 aqua (solo / sandbox mode).
+      </div>
+      <div class="auction-bonus-section">
+        <div class="auction-section-label">Bonus cards (drawn on confirm)</div>
+        ${bonusBlock}
+      </div>
+    </div>
+    <div class="card-modal-actions">
+      <button type="button" class="modal-btn auction-cancel">Cancel</button>
+      <button type="button" class="modal-btn primary auction-commit">🎯 Confirm</button>
+    </div>
+  `;
+  // Mount the card art via the injected renderCardFn so we pick
+  // up the same renderCard everything else uses.
+  const cardSlot = dialog.querySelector('#auction-confirm-card');
+  if (cardSlot && renderCardFn) {
+    try {
+      cardSlot.appendChild(renderCardFn(card, { type: 'patent' }));
+    } catch (e) {
+      cardSlot.textContent = card.name || card.id;
+    }
+  }
+  dialog.querySelector('.auction-cancel').addEventListener('click', () => close(false));
+  dialog.querySelector('.auction-commit').addEventListener('click', () => close(true));
+
   document.body.appendChild(overlay);
   overlay.focus();
 }
