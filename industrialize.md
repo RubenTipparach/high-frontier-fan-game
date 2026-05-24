@@ -172,6 +172,44 @@ Atmospheric / Astrobiology / Submarine) is **reference data only**
 - the field has no in-game effect in this variant. It's preserved
 in the table so that future expansion work can wire it up.
 
+### Operations budget (variant)
+
+The player has **one Operation per turn, total**, regardless of
+how many stacks they own. Matches published D1b. Four outposts
+don't grant four ops - they grant four storage/staging nodes.
+
+Each of the following consumes the single per-turn op:
+
+- **Prospect** (I6)
+- **Industrialize** (I7)
+- **ET Production** (I8)
+- **Factory-Refuel** (I5b)
+- **ISRU Refuel** (I5a)
+- **Boost** (I4) - one batch per turn, multi-card allowed
+- **Income** (I1) - +1 aqua
+
+Variant override: **Air-eater Refuel** (rulebook I5c) is a
+**free action** in this variant, not an op. Easier to plumb
+during aerobrake hazard rolls.
+
+Deferred (will land after I7/I8):
+
+- **Research Auction** (I2)
+- **Free Market** (I3)
+- **Delivery Op** (I9)
+
+### Turn ordering (variant + rulebook)
+
+Per rulebook D1: a turn is `[free actions] + (move + op in
+either order) + [free actions]`. Move is atomic; no ops or
+free actions during a move. Op is atomic; no free actions
+during an op. Each is once per turn max.
+
+Variant addition: once a Cargo Transfer (free action G1) has
+been performed on the rocket, the rocket's per-turn move is
+locked. So move-then-transfer is fine; transfer-then-move is
+fine; move-then-transfer-then-move is forbidden.
+
 ### Op cost + commit UX (industrialize)
 
 - Industrialize costs the player's **per-turn Operation** (matches
@@ -201,11 +239,23 @@ confirm modal **flags `Z` to the player** as a side-effect of
 the industrialize so the player isn't surprised when their
 thruster goes dark after the build.
 
-### Decommission destination
+### Decommission / removal destinations
 
-Decommissioned cards go to the **bottom of their corresponding
-patent deck** (matches rulebook G6). They can re-enter play
-later via the auction / research mechanisms.
+Two separate code paths:
+
+- **Industrialize-decommission** (cards removed as the op cost
+  of I7): refinery + robonaut + support chain go to the **bottom
+  of their corresponding patent deck** (matches rulebook G6).
+  They can re-enter play later via the auction / research
+  mechanisms. This is the published cost-bite.
+- **Card removal in every other scenario** (variant rule):
+  - **Voluntary**: player decommissions cards from a stack -
+    cards return to the player's **hand**.
+  - **Involuntary**: rocket explosion / radiation blast / glitch
+    trigger removes cards - they return to the player's **hand**.
+  No bottom-of-deck loss outside the industrialize op. Mirrors
+  the colonize-returns-to-LEO idiom: only specific, op-gated
+  losses bite the patent economy.
 
 ### Factory production (no passive income)
 
