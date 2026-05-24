@@ -12,6 +12,7 @@ import {
   consumeMove, refundMove, getTurn, getMovesRemaining, onTurnChange,
   getEventForRoll, getSeasonForSlot, getSeason, resetClock,
   getOpsRemaining, consumeOp,
+  getDiscardsRemaining, consumeDiscard,
 } from './turn-clock.js';
 import { triggerEndTurn, openTurnClockModal, buildDie, rollDie } from './turn-clock-ui.js';
 import {
@@ -1552,13 +1553,42 @@ function openCardModal(card, kind, slotIdx) {
   // verbs. Boost flags the card for the next BOOST commit;
   // the commit lives on the hand strip's BOOST button (lit
   // when at least one card is marked).
+  // Discard: voluntary free action, 1/turn, sends the Hand
+  // card to the bottom of its corresponding patent deck (user,
+  // 2026-05-24: "you can discard a card from your hand at a
+  // ny time, 1 per turn, that goes to the back of the deck").
+  // Crew cards don't have a deck to return to in this slice -
+  // they just leave the hand. Per-turn budget tracked in
+  // turn-clock.js.
   const discardBtn = document.createElement('button');
   discardBtn.type = 'button';
   discardBtn.className = 'modal-btn discard';
-  discardBtn.textContent = '🗑 Discard';
-  discardBtn.title = 'Return this card to the deck';
+  const discardsLeft = getDiscardsRemaining();
+  discardBtn.textContent = discardsLeft > 0
+    ? '🗑 Discard'
+    : '🗑 Discard (used this turn)';
+  discardBtn.title = discardsLeft > 0
+    ? `Send this card to the bottom of the ${card.type || 'corresponding'} deck. Free action, 1 per turn.`
+    : `Discard already used this turn (1 per turn). End the turn to refresh.`;
+  discardBtn.disabled = discardsLeft <= 0;
   discardBtn.addEventListener('click', () => {
+    if (discardBtn.disabled) return;
+    if (!consumeDiscard()) {
+      setStatus('Discard already used this turn (1 per turn).');
+      return;
+    }
     removeFromHandAt(slotIdx);
+    // Patents return to the bottom of their type's deck.
+    // Crew don't have a deck in this slice; they just leave.
+    if (PATENTS_BY_ID[card.id]) addToBottom(card.id);
+    setStatus(`🗑 Discarded <em>${esc(card.name)}</em> to the bottom of the ${esc(card.type || 'crew')} deck.`);
+    logAction({
+      type: 'discard',
+      icon: '🗑',
+      summary: `Discarded ${card.name} to the bottom of the ${card.type || 'crew'} deck`,
+      undoable: false,
+      data: { cardId: card.id, deckType: card.type || null },
+    });
     close();
   });
 
@@ -4264,6 +4294,24 @@ function doResearchAuction(opts = {}) {
 // Free Market handler (rulebook I3). Only callable in Card
 // Market mode (UI gates on this). Sells one Hand card for
 // FREE_MARKET_AQUA aqua. Op gated inside the commit.
+// Income Operation handler (rulebook I1). Consumes the
+// per-turn op and credits +1 aqua to the Bank. Simple; the
+// op-budget check + the aqua mutation is the whole
+// transaction.
+const INCOME_AQUA = 1;
+function doIncomeOp() {
+  if (!requireOp('Income')) return;
+  addAqua(INCOME_AQUA);
+  setStatus(`💰 Income: <strong>+${INCOME_AQUA}</strong> aqua. Bank now <strong>${esc(String(getAqua()))}</strong>.`);
+  logAction({
+    type: 'income',
+    icon: '💰',
+    summary: `Income: +${INCOME_AQUA} aqua (bank ${getAqua()})`,
+    undoable: false,
+    data: { delta: INCOME_AQUA, bankAfter: getAqua() },
+  });
+}
+
 function doFreeMarket() {
   if (getMarketMode() !== MARKET_MODE.MARKET) {
     setStatus('Free Market is only available in Card Market mode.');
@@ -6573,6 +6621,28 @@ function showSitePopupFor(site) {
           onClick: () => {
             if (!ok) return;
             doResearchAuction();
+            _renderer.clearSitePopup();
+          },
+        });
+      }
+      // Income Operation (rulebook I1). Always available at
+      // LEO. Pays the player 1 aqua from the Pool, consumes
+      // the per-turn op. Recovery path when the aqua bank is
+      // running low - especially in Card Market mode where
+      // running out of cards isn't recoverable, but income
+      // keeps the aqua flowing for Free Market sells.
+      {
+        const opsLeft = getOpsRemaining();
+        actions.push({
+          label: '💰 Income (+1 aqua)',
+          variant: opsLeft > 0 ? 'rocket' : 'secondary',
+          disabled: opsLeft <= 0,
+          title: opsLeft > 0
+            ? 'Receive 1 Aqua from the Pool into your Bank. Costs one operation.'
+            : 'No operations left this turn.',
+          onClick: () => {
+            if (opsLeft <= 0) return;
+            doIncomeOp();
             _renderer.clearSitePopup();
           },
         });
