@@ -77,7 +77,7 @@ import {
 import {
   getOutpost, getOutposts, getAvailableOutpostSlots,
   createOutpost, dissolveOutpost,
-  addCardToOutpost, setOutpostTank,
+  addCardToOutpost, removeCardFromOutpost, setOutpostTank,
   getFocusedStackId, setFocusedStackId,
   onFocusChange, onOutpostsChange,
   OUTPOST_LETTERS,
@@ -549,6 +549,159 @@ function openStackInspectorModal(id) {
   }
 }
 
+// ====== Stack inspector shared helpers ======
+//
+// Every stack (LEO / Rocket / Outpost A-D) holds the same shape
+// of cards. The inspector modals share a card-display + select
+// + transfer pattern: render each card with the same renderCard
+// the patent library uses, give each card a "Select" toggle,
+// and offer one transfer button per colocated destination stack.
+
+const STACK_LABELS = {
+  leo:      { glyph: '🌍', sub: 'LEO',     name: 'LEO Stack' },
+  rocket:   { glyph: '🚀', sub: 'Rocket',  name: 'Rocket' },
+  outpostA: { glyph: '🏛', sub: 'A',       name: 'Outpost A' },
+  outpostB: { glyph: '🏛', sub: 'B',       name: 'Outpost B' },
+  outpostC: { glyph: '🏛', sub: 'C',       name: 'Outpost C' },
+  outpostD: { glyph: '🏛', sub: 'D',       name: 'Outpost D' },
+};
+
+// Where does a stack physically sit? Returns the siteId the
+// stack is currently at, or null when the stack has no location
+// (Hand is not a stack here; LEO is always at the LEO anchor).
+function getStackSiteId(stackId) {
+  if (stackId === 'leo') {
+    // LEO Stack lives at the LEO anchor site. Return the LEO
+    // site id (or 'leo' as a sentinel if _activeData isn't
+    // ready yet).
+    return getLeoSiteId();
+  }
+  if (stackId === 'rocket') {
+    const site = getRocketSite();
+    return site?.id || null;
+  }
+  if (stackId && stackId.startsWith('outpost')) {
+    const letter = stackId.slice('outpost'.length);
+    const op = getOutpost(letter);
+    return op?.siteId || null;
+  }
+  return null;
+}
+
+// Return the site id of the LEO anchor (the dedicated lagrange
+// "LEO" node in the site data). Used by getStackSiteId for the
+// LEO Stack and for colocated-destination math.
+function getLeoSiteId() {
+  if (!_activeData) return 'leo';
+  const leo = _activeData.sites.find(
+    (s) => s.type === 'lagrange' && s.name === 'LEO'
+  );
+  return leo?.id || 'leo';
+}
+
+// Cards owned by a stack. Returns the same { id, kind, face? }
+// shape used everywhere.
+function getStackCards(stackId) {
+  if (stackId === 'leo')    return getLeoCards();
+  if (stackId === 'rocket') return getRocketStack();
+  if (stackId && stackId.startsWith('outpost')) {
+    const letter = stackId.slice('outpost'.length);
+    const op = getOutpost(letter);
+    return op ? op.cards.slice() : [];
+  }
+  return [];
+}
+
+// Destinations the given source stack can transfer cards to
+// RIGHT NOW. A destination is valid when it's a different stack
+// at the SAME site (colocation rule G1). Returns an array of
+// { id, label } objects; empty array when nothing's colocated.
+function getColocatedDestinations(sourceId) {
+  const sourceSite = getStackSiteId(sourceId);
+  if (!sourceSite) return [];
+  const dests = [];
+  // LEO is always at LEO. If source is at LEO and not LEO
+  // itself, LEO is a destination. Skip when source IS LEO.
+  if (sourceId !== 'leo' && sourceSite === getLeoSiteId()) {
+    dests.push({ id: 'leo', label: 'LEO Stack' });
+  }
+  // Rocket is colocated when its site matches the source site
+  // AND the source isn't the rocket.
+  if (sourceId !== 'rocket') {
+    const rs = getRocketSite();
+    if (rs && rs.id === sourceSite) {
+      dests.push({ id: 'rocket', label: 'Rocket' });
+    }
+  }
+  // Outposts at the same site. Skip the source outpost itself.
+  for (const letter of ['A', 'B', 'C', 'D']) {
+    const opId = `outpost${letter}`;
+    if (opId === sourceId) continue;
+    const op = getOutpost(letter);
+    if (op && op.siteId === sourceSite) {
+      dests.push({ id: opId, label: `Outpost ${letter}` });
+    }
+  }
+  return dests;
+}
+
+// Move ONE card by id from sourceStack to destStack. Returns
+// true on success. Wet-mass clamps re-apply on the destination
+// after the move; any spilled water is logged. Used by the
+// transfer section's "Send selected" button.
+function transferOneCard(sourceId, destId, cardId) {
+  const TANK_MAX = 32;
+  // Pull the slot out of the source first so we know exactly
+  // what we're moving (id + kind + face).
+  let slot = null;
+  if (sourceId === 'leo') {
+    slot = removeCardFromLeoById(cardId);
+  } else if (sourceId === 'rocket') {
+    const stack = getRocketStack();
+    const idx = stack.findIndex((s) => s.id === cardId);
+    if (idx === -1) return false;
+    slot = { ...stack[idx] };
+    rocketRemoveCard(idx);
+  } else if (sourceId.startsWith('outpost')) {
+    const letter = sourceId.slice('outpost'.length);
+    const op = getOutpost(letter);
+    if (!op) return false;
+    const idx = op.cards.findIndex((s) => s.id === cardId);
+    if (idx === -1) return false;
+    slot = op.cards[idx];
+    removeCardFromOutpost(letter, idx);
+  }
+  if (!slot) return false;
+  // Drop it into the destination.
+  let added = false;
+  if (destId === 'leo') {
+    added = addCardToLeo(slot);
+  } else if (destId === 'rocket') {
+    added = rocketAddCard(slot.id, slot.kind) !== -1;
+  } else if (destId.startsWith('outpost')) {
+    const letter = destId.slice('outpost'.length);
+    added = addCardToOutpost(letter, slot);
+  }
+  if (!added) {
+    // Roll back to source on failure.
+    if (sourceId === 'leo') addCardToLeo(slot);
+    else if (sourceId === 'rocket') rocketAddCard(slot.id, slot.kind);
+    else if (sourceId.startsWith('outpost')) {
+      addCardToOutpost(sourceId.slice('outpost'.length), slot);
+    }
+    return false;
+  }
+  // Wet-mass clamp on the destination tank.
+  if (destId === 'leo') {
+    const cap = Math.max(0, TANK_MAX - leoStackDryMass());
+    if (getLeoTank() > cap) setLeoTank(cap);
+  } else if (destId === 'rocket') {
+    const cap = Math.max(0, TANK_MAX - rocketStackDryMass());
+    if (getTankWater() > cap) setTankWater(cap);
+  }
+  return true;
+}
+
 // Transfer modal: free-action card/water shuffler between the
 // LEO Stack and the Rocket. Per the variant rule (user,
 // 2026-05-24) this is only valid when the rocket is parked at
@@ -760,146 +913,221 @@ function openLeoRocketTransferModal() {
   overlay.focus();
 }
 
-// LEO inspector: shows the LEO Stack (its own cards + tank,
-// separate from Hand) plus the shared aqua bank. Hand cards
-// live in the bottom strip and are NOT shown here - that was
-// the bug the user flagged. The cargo flow is Hand --(Boost)-->
-// LEO Stack --(free Transfer at LEO)--> Rocket, so the LEO
-// inspector is the staging-area readout between those two
-// steps.
+// LEO inspector. Same card-holder system as the rocket modal:
+// each card is rendered via the shared renderCard() and gets a
+// Select toggle so the player can mark cards for transfer. The
+// transfer section at the bottom lists every colocated stack
+// the player can ship the selected cards to. Free action - no
+// op cost. Subscribes to onLeoChange / onRocketChange /
+// onOutpostsChange so the modal re-renders live as state
+// shifts.
 function openLeoStackModal() {
-  document.querySelector('.stack-inspector-overlay')?.remove();
-  const overlay = document.createElement('div');
-  overlay.className = 'card-modal-overlay stack-inspector-overlay';
-  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
-  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
-  document.addEventListener('keydown', onKey);
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  const leoCards = getLeoCards();
-  const leoTank = getLeoTank();
-  const aqua = getAqua();
-  const handCount = getHandSlots().length;
-  const rocketAtLeo = isLeoSite(getRocketSite());
-  const cardsHtml = leoCards.length
-    ? leoCards.map((slot) => {
-        const c = cardById(slot.id);
-        const bs = slot.face === 'secondary' ? '<span class="card-face-tag" title="Black-Side / Tier 2">BS</span>' : '';
-        return `<li><strong>${esc(c?.name || slot.id)}</strong> ${bs} <span class="muted">${esc(c?.type || slot.kind || '')}</span></li>`;
-      }).join('')
-    : '<li class="muted">LEO Stack is empty. Boost cards from your hand to fill it.</li>';
-  const transferHint = rocketAtLeo
-    ? '<strong>Rocket parked at LEO.</strong> Use the Transfer action in the LEO site popup to move cards between LEO and the Rocket (free action).'
-    : 'Rocket is not at LEO right now. Cards stay in LEO until the rocket returns; then you can Transfer them across as a free action.';
-  const dialog = document.createElement('div');
-  dialog.className = 'stack-inspector-modal';
-  dialog.innerHTML = `
-    <div class="stack-inspector-head">
-      <h3>🌍 LEO Stack</h3>
-      <span class="stack-inspector-loc">orbital staging</span>
-    </div>
-    <div class="stack-inspector-body">
-      <div class="stack-inspector-stat-row">
-        <div class="stack-inspector-stat">
-          <span class="muted">LEO cards</span>
-          <strong>${esc(String(leoCards.length))}</strong>
-        </div>
-        <div class="stack-inspector-stat">
-          <span class="muted">LEO water FT</span>
-          <strong class="stat-water">${esc(String(leoTank))} 💧</strong>
-        </div>
-        <div class="stack-inspector-stat">
-          <span class="muted">Aqua bank</span>
-          <strong class="stat-aqua">${esc(String(aqua))} 💧</strong>
-        </div>
-        <div class="stack-inspector-stat">
-          <span class="muted">Hand (not at LEO)</span>
-          <strong>${esc(String(handCount))}</strong>
-        </div>
-      </div>
-      <h4>Cards in LEO Stack</h4>
-      <ul class="stack-inspector-cards">${cardsHtml}</ul>
-      <p class="muted stack-inspector-foot">${transferHint}</p>
-      <p class="muted stack-inspector-foot">
-        Cargo flow: <strong>library</strong> → drag → <strong>hand</strong>
-        → 🛰 BOOST (op) → <strong>LEO Stack</strong>
-        → 🔄 Transfer (free, at LEO) → <strong>rocket</strong>.
-      </p>
-    </div>
-    <div class="card-modal-actions">
-      <button type="button" class="modal-btn stack-inspector-close">Close</button>
-    </div>
-  `;
-  overlay.appendChild(dialog);
-  dialog.querySelector('.stack-inspector-close').addEventListener('click', close);
-  document.body.appendChild(overlay);
-  overlay.focus();
+  openUnifiedStackInspector('leo');
 }
 
-// Outpost inspector: shows the outpost's cards (with Black-
-// Side markers for ET-Produced cards), tank, factory + colony
-// attachment, and a quick "lift to rocket" button when the
-// player's rocket is empty.
+// Outpost inspector. Same unified shape as the LEO modal.
+// Adds factory / colony attachment chips in the stats row.
 function openOutpostStackModal(letter) {
-  const op = getOutpost(letter);
-  if (!op) return;
+  openUnifiedStackInspector(`outpost${letter}`);
+}
+
+// Unified inspector for any non-rocket stack (LEO, Outpost
+// A-D). The rocket modal stays separate (it has the thruster
+// picker + prospector + afterburn UI) but we layer the same
+// select-and-transfer pattern into it as well via
+// renderRocketTransferSection.
+function openUnifiedStackInspector(stackId) {
   document.querySelector('.stack-inspector-overlay')?.remove();
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay stack-inspector-overlay';
-  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const selected = new Set();
+  let unsubFns = [];
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+    for (const fn of unsubFns) { try { fn(); } catch {} }
+    unsubFns = [];
+  };
   const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
   document.addEventListener('keydown', onKey);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  const site = _activeData?.byId?.[op.siteId];
-  const factory = getFactory(op.siteId);
-  const colony  = getColony(op.siteId);
-  const cardsHtml = op.cards.length
-    ? op.cards.map((slot) => {
-        const c = cardById(slot.id);
-        const blackSide = slot.face === 'secondary' ? '<span class="card-face-tag" title="Black-Side / Tier 2">BS</span>' : '';
-        return `<li><strong>${esc(c?.name || slot.id)}</strong> ${blackSide} <span class="muted">${esc(c?.type || slot.kind || '')}</span></li>`;
-      }).join('')
-    : '<li class="muted">Outpost has no cards.</li>';
-  const rocketEmpty = getRocketStack().length === 0;
   const dialog = document.createElement('div');
   dialog.className = 'stack-inspector-modal';
-  dialog.innerHTML = `
-    <div class="stack-inspector-head">
-      <h3>🏛${esc(letter)} - Outpost</h3>
-      <span class="stack-inspector-loc">${esc(site?.name || op.siteId)}</span>
-    </div>
-    <div class="stack-inspector-body">
-      <div class="stack-inspector-stat-row">
-        <div class="stack-inspector-stat">
-          <span class="muted">Cards</span>
-          <strong>${esc(String(op.cards.length))}</strong>
-        </div>
-        <div class="stack-inspector-stat">
-          <span class="muted">Water FT</span>
-          <strong class="stat-water">${esc(String(op.tank))} 💧</strong>
-        </div>
-        <div class="stack-inspector-stat">
-          <span class="muted">Factory</span>
-          <strong>${factory ? `🏭 spectral <span class="industrialize-spectral-badge spectral-${esc(factory.spectralType)}">${esc(factory.spectralType)}</span>` : '<span class="muted">none</span>'}</strong>
-        </div>
-        <div class="stack-inspector-stat">
-          <span class="muted">Colony</span>
-          <strong>${colony ? '🌐 dome' : '<span class="muted">none</span>'}</strong>
-        </div>
-      </div>
-      <h4>Cards in outpost</h4>
-      <ul class="stack-inspector-cards">${cardsHtml}</ul>
-      <p class="muted stack-inspector-foot">
-        ${rocketEmpty
-          ? 'Your rocket is empty - you can lift this outpost into a rocket from the site popup (🏛→🚀 Lift Outpost).'
-          : 'Your rocket already has cards. Convert your rocket first (🚀→🏛) before lifting this outpost.'}
-      </p>
-    </div>
-    <div class="card-modal-actions">
-      <button type="button" class="modal-btn stack-inspector-close">Close</button>
-    </div>
-  `;
   overlay.appendChild(dialog);
-  dialog.querySelector('.stack-inspector-close').addEventListener('click', close);
+
+  const render = () => {
+    const labelMeta = STACK_LABELS[stackId] || { glyph: '?', sub: stackId, name: stackId };
+    const cards = getStackCards(stackId);
+    // Prune selections of cards that are no longer in this
+    // stack (e.g. moved out by a sibling subscriber).
+    for (const id of [...selected]) {
+      if (!cards.some((c) => c.id === id)) selected.delete(id);
+    }
+    const dests = getColocatedDestinations(stackId);
+
+    // Stat row depends on which stack we're inspecting.
+    let statsHtml = '';
+    if (stackId === 'leo') {
+      const aqua = getAqua();
+      const handCount = getHandSlots().length;
+      statsHtml = `
+        <div class="stack-inspector-stat-row">
+          <div class="stack-inspector-stat"><span class="muted">LEO cards</span><strong>${esc(String(cards.length))}</strong></div>
+          <div class="stack-inspector-stat"><span class="muted">LEO water FT</span><strong class="stat-water">${esc(String(getLeoTank()))} 💧</strong></div>
+          <div class="stack-inspector-stat"><span class="muted">Aqua bank</span><strong class="stat-aqua">${esc(String(aqua))} 💧</strong></div>
+          <div class="stack-inspector-stat"><span class="muted">Hand (not at LEO)</span><strong>${esc(String(handCount))}</strong></div>
+        </div>`;
+    } else if (stackId.startsWith('outpost')) {
+      const letter = stackId.slice('outpost'.length);
+      const op = getOutpost(letter);
+      if (!op) { close(); return; }
+      const factory = getFactory(op.siteId);
+      const colony  = getColony(op.siteId);
+      statsHtml = `
+        <div class="stack-inspector-stat-row">
+          <div class="stack-inspector-stat"><span class="muted">Cards</span><strong>${esc(String(cards.length))}</strong></div>
+          <div class="stack-inspector-stat"><span class="muted">Water FT</span><strong class="stat-water">${esc(String(op.tank))} 💧</strong></div>
+          <div class="stack-inspector-stat"><span class="muted">Factory</span><strong>${factory ? `🏭 <span class="industrialize-spectral-badge spectral-${esc(factory.spectralType)}">${esc(factory.spectralType)}</span>` : '<span class="muted">none</span>'}</strong></div>
+          <div class="stack-inspector-stat"><span class="muted">Colony</span><strong>${colony ? '🌐 dome' : '<span class="muted">none</span>'}</strong></div>
+        </div>`;
+    }
+
+    const headline = stackId === 'leo'
+      ? '🌍 LEO Stack'
+      : `🏛${esc(stackId.slice('outpost'.length))} - Outpost`;
+    const locLabel = stackId === 'leo'
+      ? 'orbital staging'
+      : (() => {
+          const letter = stackId.slice('outpost'.length);
+          const op = getOutpost(letter);
+          const site = _activeData?.byId?.[op?.siteId];
+          return site?.name || op?.siteId || '';
+        })();
+
+    dialog.innerHTML = `
+      <div class="stack-inspector-head">
+        <h3>${headline}</h3>
+        <span class="stack-inspector-loc">${esc(locLabel)}</span>
+      </div>
+      <div class="stack-inspector-body">
+        ${statsHtml}
+        <h4>Cards (${cards.length})</h4>
+        <div class="stack-inspector-cardgrid" id="stack-inspector-cardgrid"></div>
+        <div id="stack-inspector-transfer"></div>
+      </div>
+      <div class="card-modal-actions">
+        <button type="button" class="modal-btn stack-inspector-close">Close</button>
+      </div>
+    `;
+
+    const grid = dialog.querySelector('#stack-inspector-cardgrid');
+    if (!cards.length) {
+      grid.innerHTML = '<p class="muted">Stack is empty.</p>';
+    } else {
+      for (const slot of cards) {
+        const card = cardById(slot.id);
+        if (!card) continue;
+        const wrap = document.createElement('div');
+        wrap.className = 'stack-inspector-slot';
+        if (selected.has(slot.id)) wrap.classList.add('is-selected');
+        // The same renderCard the patent library + rocket modal
+        // use, so the card art is uniform across every stack
+        // view in the app.
+        wrap.appendChild(renderCard(card, { type: slot.kind || 'patent' }));
+        const actions = document.createElement('div');
+        actions.className = 'stack-inspector-slot-actions';
+        const selBtn = document.createElement('button');
+        selBtn.type = 'button';
+        selBtn.className = 'stack-inspector-select' + (selected.has(slot.id) ? ' is-on' : '');
+        selBtn.textContent = selected.has(slot.id) ? '✓ Selected' : 'Select';
+        selBtn.addEventListener('click', () => {
+          if (selected.has(slot.id)) selected.delete(slot.id);
+          else selected.add(slot.id);
+          render();
+        });
+        actions.appendChild(selBtn);
+        if (slot.face === 'secondary') {
+          const tag = document.createElement('span');
+          tag.className = 'card-face-tag';
+          tag.title = 'Black-Side / Tier 2';
+          tag.textContent = 'BS';
+          actions.appendChild(tag);
+        }
+        wrap.appendChild(actions);
+        grid.appendChild(wrap);
+      }
+    }
+
+    // Transfer section. Shown only when at least one
+    // destination is colocated. The rule G1 covers card / FT
+    // transfers between colocated stacks; this is the UI for
+    // moving CARDS - water transfers stay on the existing fuel
+    // modal for now (per-stack water move would be a future
+    // unification).
+    const transferHost = dialog.querySelector('#stack-inspector-transfer');
+    if (dests.length === 0) {
+      transferHost.innerHTML = `
+        <div class="stack-inspector-transfer empty">
+          <h4>🔄 Transfer</h4>
+          <p class="muted">No colocated stacks to transfer to right now.${stackId === 'leo'
+            ? ' Park the rocket at LEO to enable LEO ↔ Rocket transfers.'
+            : ' Park the rocket at this site (or create a second outpost here) to enable transfers.'}</p>
+        </div>`;
+    } else {
+      const selectedCount = selected.size;
+      const destButtonsHtml = dests.map((d) => {
+        const disabled = selectedCount === 0 ? 'disabled' : '';
+        return `<button type="button" class="stack-inspector-xfer-btn" data-dest="${esc(d.id)}" ${disabled}>Send ${selectedCount > 0 ? selectedCount + ' ' : ''}→ ${esc(d.label)}</button>`;
+      }).join('');
+      transferHost.innerHTML = `
+        <div class="stack-inspector-transfer">
+          <h4>🔄 Transfer (free action)</h4>
+          <p class="muted">Select cards above, then send them to a colocated stack. Wet-mass clamps apply on the destination tank.</p>
+          <div class="stack-inspector-xfer-row">${destButtonsHtml}</div>
+        </div>`;
+      transferHost.querySelectorAll('.stack-inspector-xfer-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const destId = btn.getAttribute('data-dest');
+          if (!destId || selected.size === 0) return;
+          // Snapshot ids first - the source array mutates as
+          // we move each card so iteration over `selected` is
+          // safe via spread.
+          const toMove = [...selected];
+          let moved = 0;
+          for (const cardId of toMove) {
+            if (transferOneCard(stackId, destId, cardId)) {
+              moved++;
+              selected.delete(cardId);
+            }
+          }
+          const destMeta = STACK_LABELS[destId] || { name: destId };
+          const sourceMeta = STACK_LABELS[stackId] || { name: stackId };
+          setStatus(`🔄 Transferred <strong>${moved}</strong> card${moved === 1 ? '' : 's'} from <em>${esc(sourceMeta.name)}</em> to <em>${esc(destMeta.name)}</em>.`);
+          logAction({
+            type: 'transfer',
+            icon: '🔄',
+            summary: `Transferred ${moved} card${moved === 1 ? '' : 's'} from ${sourceMeta.name} to ${destMeta.name}`,
+            undoable: false,
+            data: { source: stackId, dest: destId, count: moved },
+          });
+          render();
+        });
+      });
+    }
+
+    dialog.querySelector('.stack-inspector-close').addEventListener('click', close);
+  };
+
+  // Subscribe to every state change that could affect the
+  // displayed cards or the colocated-destination list. The
+  // modal re-renders in place so transfers feel instant.
+  unsubFns.push(onLeoChange(render));
+  unsubFns.push(onRocketChange(render));
+  unsubFns.push(onOutpostsChange(render));
+  unsubFns.push(onFactoryChange(render));
+  unsubFns.push(onColonyChange(render));
+
+  render();
   document.body.appendChild(overlay);
   overlay.focus();
 }
@@ -2191,6 +2419,12 @@ function openRocketStackModal() {
   // resets it so a freshly-flyable stack still needs the user to
   // confirm "yes, engage" before the animation runs.
   let engaged = false;
+  // Transient selection set for the Transfer section. Cards
+  // marked here can be shipped to a colocated stack (LEO if
+  // at LEO; outposts at the rocket's current site). Cleared
+  // when cards leave the stack (e.g. moved out by a transfer
+  // or popped back to hand via the existing ↩ button).
+  const selected = new Set();
   const repaint = () => {
     const stack = getRocketStack();
     const r = isRocketActive();
@@ -2369,6 +2603,10 @@ function openRocketStackModal() {
         <div class="rocket-stack-row thrusters" id="rocket-stack-thrusters"></div>
         <div class="rocket-stack-row others" id="rocket-stack-others"></div>
       </div>
+      <!-- Transfer section: shown when colocated stacks exist
+           (LEO at LEO, outposts at the same site). Populated by
+           the rocket-modal repaint loop. -->
+      <div id="rocket-stack-transfer"></div>
     `;
     panel.appendChild(body);
 
@@ -2618,11 +2856,28 @@ function openRocketStackModal() {
         actions.appendChild(btn);
       }
 
+      // Select toggle for the transfer section. Same idiom as
+      // the LEO / Outpost inspector's per-card Select button -
+      // tap to mark, tap again to clear; the transfer section
+      // below the stack picks up selected ids and offers one
+      // "Send → <stack>" button per colocated destination.
+      const selBtn = document.createElement('button');
+      selBtn.type = 'button';
+      selBtn.className = 'rocket-select' + (selected.has(slot.id) ? ' is-on' : '');
+      selBtn.textContent = selected.has(slot.id) ? '✓ Selected' : 'Select';
+      selBtn.addEventListener('click', () => {
+        if (selected.has(slot.id)) selected.delete(slot.id);
+        else selected.add(slot.id);
+        repaint();
+      });
+      actions.appendChild(selBtn);
+
       const back = document.createElement('button');
       back.type = 'button';
       back.className = 'rocket-back-to-hand';
       back.textContent = '↩ Back to hand';
       back.addEventListener('click', () => {
+        selected.delete(slot.id);
         rocketRemoveCard(idx);
         addToHand(card);
       });
@@ -2638,11 +2893,80 @@ function openRocketStackModal() {
     // grid space between sections.
     if (!thrustersHost.children.length) thrustersHost.style.display = 'none';
     if (!othersHost.children.length)    othersHost.style.display    = 'none';
+
+    // Prune selections whose cards have left the stack (transfer,
+    // back-to-hand, etc) so stale ids don't carry over.
+    for (const id of [...selected]) {
+      if (!stack.some((s) => s.id === id)) selected.delete(id);
+    }
+
+    // Transfer section: lists colocated stacks the rocket can
+    // ship selected cards to. Same getColocatedDestinations
+    // helper the LEO / Outpost inspectors use, so the rules
+    // (rocket at LEO -> can ship to LEO; rocket at site X with
+    // outposts -> can ship to those outposts) stay uniform.
+    const xferHost = body.querySelector('#rocket-stack-transfer');
+    if (xferHost) {
+      const dests = getColocatedDestinations('rocket');
+      if (dests.length === 0) {
+        xferHost.innerHTML = `
+          <div class="stack-inspector-transfer empty">
+            <h4>🔄 Transfer</h4>
+            <p class="muted">No colocated stacks here. Park at LEO or at a site with an outpost to enable transfers.</p>
+          </div>`;
+      } else {
+        const n = selected.size;
+        const dh = dests.map((d) =>
+          `<button type="button" class="stack-inspector-xfer-btn" data-dest="${esc(d.id)}" ${n === 0 ? 'disabled' : ''}>Send ${n > 0 ? n + ' ' : ''}→ ${esc(d.label)}</button>`
+        ).join('');
+        xferHost.innerHTML = `
+          <div class="stack-inspector-transfer">
+            <h4>🔄 Transfer (free action)</h4>
+            <p class="muted">Mark cards above with Select, then ship them to a colocated stack. Wet-mass clamps apply on the destination tank.</p>
+            <div class="stack-inspector-xfer-row">${dh}</div>
+          </div>`;
+        xferHost.querySelectorAll('.stack-inspector-xfer-btn').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const destId = btn.getAttribute('data-dest');
+            if (!destId || selected.size === 0) return;
+            const toMove = [...selected];
+            let moved = 0;
+            for (const cardId of toMove) {
+              if (transferOneCard('rocket', destId, cardId)) {
+                moved++;
+                selected.delete(cardId);
+              }
+            }
+            const destMeta = STACK_LABELS[destId] || { name: destId };
+            setStatus(`🔄 Transferred <strong>${moved}</strong> card${moved === 1 ? '' : 's'} from <em>Rocket</em> to <em>${esc(destMeta.name)}</em>.`);
+            logAction({
+              type: 'transfer',
+              icon: '🔄',
+              summary: `Transferred ${moved} card${moved === 1 ? '' : 's'} from Rocket to ${destMeta.name}`,
+              undoable: false,
+              data: { source: 'rocket', dest: destId, count: moved },
+            });
+            repaint();
+          });
+        });
+      }
+    }
   };
   const lookup = (id) => PATENTS_BY_ID[id]
     || CREW.find((c) => c.id === id) || null;
   repaint();
-  _rocketModalUnsub = onRocketChange(repaint);
+  // Re-render the rocket modal on any state change that affects
+  // its display or the colocated-destination list. Stack changes
+  // (cards added / removed) AND outpost / LEO changes (transfer
+  // destinations appearing or disappearing) all need to refresh.
+  const unsubRocket  = onRocketChange(repaint);
+  const unsubLeo     = onLeoChange(repaint);
+  const unsubOutpost = onOutpostsChange(repaint);
+  _rocketModalUnsub = () => {
+    try { unsubRocket(); } catch {}
+    try { unsubLeo(); } catch {}
+    try { unsubOutpost(); } catch {}
+  };
 
   mountOverlay(overlay);
   const onKey = (e) => { if (e.key === 'Escape') close(); };
@@ -6056,31 +6380,13 @@ function showSitePopupFor(site) {
           openFuelTankModal();
         },
       });
-      // Transfer LEO Stack <-> Rocket. Free action (rulebook G1
-      // / variant cargo flow). Surfaces when the rocket is at
-      // LEO; lets the player move cards and water between the
-      // two stacks card by card. Boost ships things INTO LEO;
-      // Transfer is the bridge from LEO to the rocket.
-      {
-        const leoHasCards = getLeoCards().length > 0;
-        const rocketHasCards = getRocketStack().length > 0;
-        const leoHasWater = getLeoTank() > 0;
-        const rocketHasWater = getTankWater() > 0;
-        const anything = leoHasCards || rocketHasCards || leoHasWater || rocketHasWater;
-        actions.push({
-          label: '🔄 Transfer LEO ↔ Rocket',
-          variant: anything ? 'rocket' : 'secondary',
-          disabled: !anything,
-          title: anything
-            ? 'Move cards and water between the LEO Stack and the Rocket. Free action - no op cost.'
-            : 'Nothing to transfer (both LEO Stack and Rocket are empty).',
-          onClick: () => {
-            if (!anything) return;
-            _renderer.clearSitePopup();
-            openLeoRocketTransferModal();
-          },
-        });
-      }
+      // Card transfers happen inside each stack's inspector
+      // modal (open the LEO or Rocket chip in the hand-bar
+      // switcher and use the Transfer section there). The old
+      // standalone "Transfer LEO <-> Rocket" popup button is
+      // dropped to avoid duplicate UX surfaces - the inline
+      // section in the inspector lives next to the cards being
+      // moved, which reads cleaner.
       // Research Auction (rulebook I2). Always available at LEO;
       // in market mode it additionally requires a hand card to
       // sacrifice. Op gated inside the modal commit so cancel
