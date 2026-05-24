@@ -3127,10 +3127,20 @@ body:has(#view-browse:not(.hidden)) #main {
      which puts it OUTSIDE the panel - fine on desktop where
      the overlay backdrop has 24px padding, but on a full-
      bleed phone panel that's off-screen behind the URL bar.
-     Pull it inside the panel's top-right so it's tappable. */
+     Pin it to the viewport top-right with position:fixed +
+     a beefy z-index so no overlapping element can hide it,
+     and a bigger tap target so a thumb can hit it reliably. */
   .rocket-stack-panel .modal-x {
-    top: 8px;
-    right: 8px;
+    position: fixed;
+    top: max(8px, env(safe-area-inset-top, 8px));
+    right: max(8px, env(safe-area-inset-right, 8px));
+    width: 40px;
+    height: 40px;
+    font-size: 26px;
+    z-index: 120;
+    background: rgba(15, 16, 35, 0.96);
+    border: 1px solid rgba(120, 130, 170, 0.7);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.55);
   }
   /* Bump the engaged stripe thickness so it reads as a clear
      marching band on a phone instead of a hairline that
