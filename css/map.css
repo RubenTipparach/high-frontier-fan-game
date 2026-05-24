@@ -463,36 +463,98 @@
   text-transform: uppercase;
   letter-spacing: 1px;
 }
-/* Rocket-stack totals: thrust triangle headliner on the left,
-   stat cells grid on the right. */
+/* Rocket-stack totals: framed as a profile card. The
+   thrust-triangle ID-photo sits on the LEFT inside its own
+   bordered tile with a "MODIFIED THRUST" header above + a
+   modifier summary below. To the right is the stat grid
+   (label / big number / equation per cell) so every cell
+   reads at a glance as "what / how much / why". */
 .rocket-totals {
   display: flex;
   gap: 12px;
   align-items: stretch;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
-.rocket-totals-headliner {
-  flex: 0 0 auto;
+.rocket-profile-triangle {
+  flex: 0 0 140px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px;
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.10), rgba(15, 23, 42, 0.55));
+  border: 1px solid rgba(125, 211, 252, 0.45);
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.08),
+              0 2px 8px rgba(0, 0, 0, 0.35);
+}
+.rocket-profile-triangle-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  font-weight: 800;
+  color: var(--accent);
+  text-align: center;
+}
+.rocket-profile-triangle .rocket-totals-headliner {
+  flex: 1 1 auto;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 140px;
-  padding: 6px;
-  background: rgba(15, 23, 42, 0.4);
-  border: 1px solid rgba(125, 211, 252, 0.35);
+  padding: 4px;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(125, 211, 252, 0.25);
   border-radius: 8px;
+  min-height: 110px;
 }
-.rocket-totals-headliner .thrust-visual {
+.rocket-profile-triangle .rocket-totals-headliner .thrust-visual {
   width: 100%;
 }
+.rocket-profile-triangle-sub {
+  font-size: 10px;
+  color: var(--ink-dim);
+  text-align: center;
+  line-height: 1.3;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
 .rocket-totals-grid {
-  flex: 1 1 320px;
+  flex: 1 1 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  min-width: 0;
 }
 .rocket-totals-grid .rocket-totals-cell {
-  min-height: 56px;
+  min-height: 78px;
+}
+@media (max-width: 720px) {
+  /* Mobile: profile card stacks above the stat grid (more
+     room for both) + the stat grid drops to 2 columns. */
+  .rocket-totals {
+    flex-direction: column;
+  }
+  .rocket-profile-triangle {
+    flex-basis: auto;
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 10px;
+  }
+  .rocket-profile-triangle .rocket-totals-headliner {
+    flex: 0 0 110px;
+    min-height: 90px;
+  }
+  .rocket-profile-triangle-label,
+  .rocket-profile-triangle-sub {
+    flex: 1 1 auto;
+    text-align: left;
+  }
+  .rocket-totals-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 .rocket-water-readout {
   display: inline-flex;
@@ -3161,24 +3223,35 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .rocket-totals-cell {
   display: flex;
-  align-items: baseline;
-  gap: 4px;
-  padding: 2px 8px;
-  background: rgba(15, 23, 42, 0.5);
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 2px;
+  padding: 8px 10px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.55), rgba(15, 23, 42, 0.30));
   border: 1px solid var(--border);
   border-radius: 6px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 .rocket-totals-cell .lbl {
   color: var(--ink-mute);
   font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.6px;
+  letter-spacing: 1.2px;
+  font-weight: 700;
+  line-height: 1.2;
 }
 .rocket-totals-cell strong {
-  font-size: 15px;
-  font-weight: 700;
+  font-size: 22px;
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
   color: var(--ink);
+  line-height: 1.05;
+}
+.rocket-totals-cell strong small {
+  font-size: 12px;
+  color: var(--ink-mute);
+  font-weight: 600;
 }
 .rocket-totals-cell strong.ok  { color: #22c55e; }
 .rocket-totals-cell strong.bad { color: #f87171; }
@@ -3186,8 +3259,26 @@ body:has(#view-browse:not(.hidden)) #main {
   font-size: 10px;
   color: var(--ink-dim);
 }
+.rocket-totals-cell .cell-eqn {
+  font-size: 9.5px;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+  letter-spacing: 0.3px;
+  text-transform: none;
+}
+.rocket-totals-cell .cell-eqn:empty { display: none; }
 .rocket-totals-cell.rocket-fuel {
   gap: 6px;
+}
+.rocket-totals-cell.rocket-afterburn-cell {
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  align-items: stretch;
+  justify-content: center;
+  min-height: 0 !important;
 }
 .rocket-fuel-btn {
   width: 22px;

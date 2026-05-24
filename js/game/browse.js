@@ -1548,33 +1548,38 @@ function openRocketStackModal() {
     const tank = getTankWater();
     const tankMax = getTankMax();
     const fuelCapForRocket = Math.max(0, 32 - (totals.dryMass || 0));
-    const wcLine = thrStats && thrStats.weightClassMod !== 0
-      ? `<small>${thrStats.weightClass} ${thrStats.weightClassMod > 0 ? '+' : ''}${thrStats.weightClassMod}</small>`
-      : (thrStats ? `<small>${thrStats.weightClass}</small>` : '');
     const modifierLines = thrStats && thrStats.modifiers.length
       ? thrStats.modifiers.map((m) => {
           if (m.kind === 'thrust') return `${m.delta > 0 ? '+' : ''}${m.delta} thrust from ${m.from}`;
           if (m.kind === 'fuel')   return `×${m.mult} fuel from ${m.from}`;
           return '';
         }).filter(Boolean).join(' · ')
-      : 'no modifiers';
+      : '';
+    // Per-cell formula text - shown in the "details" footer of
+    // each profile card cell. Keep them short; the data-tip on
+    // hover spells out the full story for power users.
+    const thrustEqn = thrStats
+      ? (thrStats.thrust !== thrStats.baseThrust
+          ? `base ${fmt(thrStats.baseThrust)} → ${fmt(thrStats.thrust)} (${thrStats.weightClass}${thrStats.weightClassMod !== 0 ? ` ${thrStats.weightClassMod > 0 ? '+' : ''}${thrStats.weightClassMod}` : ''})`
+          : `${thrStats.weightClass} class`)
+      : '';
+    const fuelEqn = (thrStats && thrStats.fuel != null && thrStats.fuel !== thrStats.baseFuel)
+      ? `base ${fmt(thrStats.baseFuel)} → ${fmt(thrStats.fuel)} water/move`
+      : (thrStats && thrStats.fuel != null ? 'water per move' : '');
     const thrustHtml = thrStats
       ? `<div class="rocket-totals-cell"
-              data-tip="Thrust = base ${fmt(thrStats.baseThrust)} ${modifierLines !== 'no modifiers' ? '+ ' + modifierLines : ''}. Net thrust must be ≥ wet mass to lift."
+              data-tip="Thrust = base ${fmt(thrStats.baseThrust)} ${modifierLines ? '+ ' + modifierLines : ''}. Net thrust must be ≥ wet mass to lift."
               title="Modified thrust breakdown">
            <span class="lbl">Thrust</span>
            <strong class="${thrStats.canLift ? 'ok' : 'bad'}">${fmt(thrStats.thrust)}</strong>
-           ${thrStats.thrust !== thrStats.baseThrust
-              ? `<small>(base ${fmt(thrStats.baseThrust)})</small>` : ''}
-           ${wcLine}
+           <small class="cell-eqn">${esc(thrustEqn)}</small>
          </div>
          <div class="rocket-totals-cell"
               data-tip="Fuel per burn = ${fmt(thrStats.fuel)} water per move."
               title="Fuel per burn">
            <span class="lbl">Fuel / burn</span>
            <strong>${thrStats.fuel != null ? fmt(thrStats.fuel) : '-'}</strong>
-           ${thrStats.fuel != null && thrStats.fuel !== thrStats.baseFuel
-              ? `<small>(base ${fmt(thrStats.baseFuel)})</small>` : ''}
+           <small class="cell-eqn">${esc(fuelEqn)}</small>
          </div>`
       : '';
     // Afterburn toggle - only shown when the active thruster has
@@ -1588,15 +1593,30 @@ function openRocketStackModal() {
              : 'Engage afterburn: spends fuel for bonus thrust this turn'}">
            🔥 Afterburn ${thrStats.afterburnEngaged ? 'ON' : 'OFF'}
          </button>` : '';
+    // Wet mass equation - "dry + tank" so the player sees how
+    // the wet number was built. Caps the tank value at the
+    // fuel capacity for the rocket.
+    const wetEqn = totals.dryMass != null
+      ? `dry ${totals.dryMass} + tank ${tank}`
+      : '';
     const totalsHtml = `
       <div class="rocket-totals">
-        ${thrStats ? '<div class="rocket-totals-headliner" id="rocket-thrust-visual"></div>' : ''}
+        ${thrStats ? `
+          <div class="rocket-profile-triangle">
+            <span class="rocket-profile-triangle-label">Modified thrust</span>
+            <div id="rocket-thrust-visual" class="rocket-totals-headliner"></div>
+            <small class="rocket-profile-triangle-sub">${esc(modifierLines || 'no modifiers')}</small>
+          </div>` : ''}
         <div class="rocket-totals-grid">
           <div class="rocket-totals-cell">
-            <span class="lbl">Cards</span><strong>${totals.count}</strong>
+            <span class="lbl">Cards</span>
+            <strong>${totals.count}</strong>
+            <small class="cell-eqn">in stack</small>
           </div>
           <div class="rocket-totals-cell">
-            <span class="lbl">Dry mass</span><strong>${totals.dryMass}</strong>
+            <span class="lbl">Dry mass</span>
+            <strong>${totals.dryMass}</strong>
+            <small class="cell-eqn">card mass sum</small>
           </div>
           <div class="rocket-totals-cell rocket-wetmass-cell"
                role="button" tabindex="0"
@@ -1604,13 +1624,12 @@ function openRocketStackModal() {
                title="Tap to open the fuel-tank view (max wet mass 32)">
             <span class="lbl">Wet mass</span>
             <strong class="${thrStats && !thrStats.canLift ? 'bad' : ''}">${totals.wetMass}<small>/32</small></strong>
-            <span class="rocket-water-readout" title="Water tank (refuel at hydrated sites)">
-              💧 <b>${tank}</b><em>/${fuelCapForRocket}</em>
-            </span>
+            <small class="cell-eqn">${esc(wetEqn)} · 💧 ${tank}/${fuelCapForRocket}</small>
           </div>
           <div class="rocket-totals-cell">
             <span class="lbl">Min rad-hard</span>
             <strong>${totals.minRadHard != null ? totals.minRadHard : '-'}</strong>
+            <small class="cell-eqn">weakest card</small>
           </div>
           ${thrustHtml}
           ${afterburnHtml ? `<div class="rocket-totals-cell rocket-afterburn-cell">${afterburnHtml}</div>` : ''}
