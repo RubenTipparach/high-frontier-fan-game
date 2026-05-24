@@ -1558,11 +1558,20 @@ function openRocketStackModal() {
     // Per-cell formula text - shown in the "details" footer of
     // each profile card cell. Keep them short; the data-tip on
     // hover spells out the full story for power users.
-    const thrustEqn = thrStats
-      ? (thrStats.thrust !== thrStats.baseThrust
-          ? `base ${fmt(thrStats.baseThrust)} → ${fmt(thrStats.thrust)} (${thrStats.weightClass}${thrStats.weightClassMod !== 0 ? ` ${thrStats.weightClassMod > 0 ? '+' : ''}${thrStats.weightClassMod}` : ''})`
-          : `${thrStats.weightClass} class`)
-      : '';
+    // Thrust equation: `base + N (class) → final` matches the
+    // player's mental model - start from base, apply the net
+    // modifier (cards + weight class), get the final number.
+    let thrustEqn = '';
+    if (thrStats) {
+      const totalMod = thrStats.thrust - thrStats.baseThrust;
+      const cls = String(thrStats.weightClass || '').toLowerCase();
+      if (totalMod !== 0) {
+        const sign = totalMod > 0 ? '+' : '−';
+        thrustEqn = `base ${sign} ${fmt(Math.abs(totalMod))} (${cls}) → ${fmt(thrStats.thrust)}`;
+      } else {
+        thrustEqn = `base (${cls}) → ${fmt(thrStats.thrust)}`;
+      }
+    }
     const fuelEqn = (thrStats && thrStats.fuel != null && thrStats.fuel !== thrStats.baseFuel)
       ? `base ${fmt(thrStats.baseFuel)} → ${fmt(thrStats.fuel)} water/move`
       : (thrStats && thrStats.fuel != null ? 'water per move' : '');
