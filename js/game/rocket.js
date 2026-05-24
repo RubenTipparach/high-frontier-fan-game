@@ -490,6 +490,17 @@ export function onAquaChange(cb) {
   return () => { _aquaListeners = _aquaListeners.filter((x) => x !== cb); };
 }
 
+// Reset aqua to the AQUA_DEFAULT starting balance. Used by the
+// sandbox reset flow and the Card Market toggle reset so the
+// player starts from a clean economy.
+export function resetAqua() {
+  if (_aqua === AQUA_DEFAULT) return false;
+  _aqua = AQUA_DEFAULT;
+  persistAqua();
+  notifyAqua();
+  return true;
+}
+
 // --------- Stack totals + thruster stats ---------
 
 // Pulls the active face for any card in the stack, with a fallback

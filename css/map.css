@@ -4006,3 +4006,189 @@ body:has(#view-browse:not(.hidden)) #main {
   color: var(--accent);
   box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.5);
 }
+
+/* ============================================================
+   Card Market sandbox toggle (in the solo / sandbox panel).
+   ============================================================ */
+.sandbox-market-toggle {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.sandbox-market-toggle h4 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  letter-spacing: 0.5px;
+}
+.sandbox-market-toggle p { margin: 0 0 10px; font-size: 12px; line-height: 1.45; }
+.market-mode-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.market-mode-btn {
+  flex: 1 1 0;
+  background: var(--bg-2);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+}
+.market-mode-btn:hover {
+  background: var(--panel-2);
+  border-color: var(--accent);
+}
+.market-mode-btn.is-active {
+  background: rgba(125, 211, 252, 0.18);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.5) inset;
+}
+
+/* ============================================================
+   Research Auction + Free Market modals (rulebook I2, I3).
+
+   Share most styling with the Industrialize / ET-Produce
+   modals; auction-specific extras here.
+   ============================================================ */
+.auction-modal,
+.free-market-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  max-width: 520px;
+  width: 100%;
+  color: var(--ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.auction-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.auction-head h3 { margin: 0; font-size: 18px; letter-spacing: 0.5px; }
+.auction-mode {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: rgba(125, 211, 252, 0.12);
+  border: 1px solid rgba(125, 211, 252, 0.4);
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+.auction-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.auction-section-label {
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--muted, #94a3b8);
+}
+.auction-tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.auction-tab {
+  background: var(--bg-2);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+  text-transform: capitalize;
+}
+.auction-tab em {
+  color: var(--muted, #94a3b8);
+  font-style: normal;
+  font-weight: 500;
+  margin-left: 4px;
+}
+.auction-tab.is-active {
+  background: rgba(125, 211, 252, 0.18);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.auction-cards,
+.auction-sac-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.auction-card {
+  text-align: left;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.auction-card:hover { background: var(--panel-2); }
+.auction-card.is-selected {
+  background: rgba(125, 211, 252, 0.12);
+  border-color: var(--accent);
+}
+.auction-card .auction-radio {
+  display: inline-block;
+  width: 14px;
+  color: var(--accent);
+  flex: 0 0 14px;
+}
+.auction-card .auction-spectral {
+  margin-left: auto;
+  width: 18px;
+  height: 18px;
+  line-height: 18px;
+  font-size: 11px;
+}
+.auction-sacrifice {
+  margin-top: 6px;
+  background: rgba(202, 138, 4, 0.08);
+  border: 1px solid rgba(202, 138, 4, 0.35);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.auction-modal .card-modal-actions,
+.free-market-modal .card-modal-actions {
+  margin-top: 4px;
+  justify-content: flex-end;
+}
+.auction-modal .modal-btn.primary,
+.free-market-modal .modal-btn.primary {
+  background: #14532d;
+  color: #d1fae5;
+  border-color: #166534;
+}
+.auction-modal .modal-btn.primary:hover,
+.free-market-modal .modal-btn.primary:hover { background: #166534; }
+.auction-modal .modal-btn.primary:disabled,
+.free-market-modal .modal-btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }

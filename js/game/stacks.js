@@ -250,3 +250,15 @@ export function onFocusChange(cb) {
   _focusListeners.push(cb);
   return () => { _focusListeners = _focusListeners.filter((x) => x !== cb); };
 }
+
+// Wipe every outpost + reset focus to 'rocket'. Called by the
+// sandbox reset flow and the Card Market toggle reset. Fires
+// both subscriber sets.
+export function resetStacks() {
+  _outposts = {};
+  _focusedStackId = 'rocket';
+  persistOutposts();
+  persistFocus();
+  notifyOutposts();
+  notifyFocus();
+}

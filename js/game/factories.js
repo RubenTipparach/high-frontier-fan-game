@@ -200,3 +200,14 @@ export function onColonyChange(cb) {
   _colonyListeners.push(cb);
   return () => { _colonyListeners = _colonyListeners.filter((x) => x !== cb); };
 }
+
+// Wipe every factory + colony. Called by the sandbox reset flow
+// and the Card Market toggle reset. Fires both subscriber sets.
+export function resetFactoriesAndColonies() {
+  _factories = {};
+  _colonies = {};
+  persistFactories();
+  persistColonies();
+  notifyFactories();
+  notifyColonies();
+}

@@ -88,6 +88,12 @@ import {
 import {
   computeEndgameScore, SPECTRAL_BONUS_VPS,
 } from './scoring.js';
+import {
+  MARKET_MODE, FREE_MARKET_AQUA,
+  getMarketMode, setMarketMode, onMarketChange,
+  resetSandboxEconomy,
+  openAuctionModal, openFreeMarketModal,
+} from './card-market.js';
 
 // Only one map mode now (planner / "classic"); the old
 // "Cleaned up" variant was disorienting next to the canonical
@@ -131,6 +137,10 @@ export function mountBrowse() {
     onOutpostsChange(syncFocusedSite);
     onOutpostsChange(refreshOpenSitePopup);
     onFocusChange(syncFocusedSite);
+    // Card Market mode flip changes which LEO popup actions
+    // surface (Free Market only in market mode) and the
+    // Auction-button gating, so the popup needs a refresh.
+    onMarketChange(refreshOpenSitePopup);
   }
   wireSidebar();
   wireHandStrip();
@@ -3210,6 +3220,139 @@ function doFactoryRefuel(site, gain) {
   openFuelTankModal({ fromWater: tankBefore, toWater: tankBefore + gain });
 }
 
+// Wipe browse.js module-local state that the global resets in
+// card-market.js#resetSandboxEconomy can't reach: the rocket
+// position, planned route, trail, the undo snapshot, the
+// per-turn refuel-log key, and the renderer's overlay layers.
+// Pure cleanup; safe to call multiple times.
+function doBrowseLocalReset() {
+  _rocketSiteId = null;
+  persistRocketSite();
+  _rocketTrail = [];
+  persistRocketTrail();
+  _plannedRoute = null;
+  persistPlannedRoute();
+  _moveSnapshot = null;
+  if (_renderer) {
+    _renderer.setRoute(null);
+    _renderer.setRouteEndpoints(null, null);
+    _renderer.setRocketTrail(null);
+  }
+  try { localStorage.removeItem(STORAGE_REFUEL_LOG); } catch {}
+}
+
+// Full sandbox reset (Reset-sandbox button). Composition of
+// doBrowseLocalReset + the global resetSandboxEconomy from
+// card-market.js. The Card Market mode flag is preserved so a
+// player who has explicitly opted into Card Market doesn't get
+// silently flipped back by a Reset click.
+function doSandboxReset() {
+  doBrowseLocalReset();
+  resetSandboxEconomy({ keepMode: true });
+}
+
+// Research Auction handler (rulebook I2). Opens the auction
+// modal in the current Card Market mode. On commit: the picked
+// patent enters the player's hand; in Card Market mode the
+// sacrificed Hand card returns to the library. Op gated inside
+// the commit so cancel doesn't burn the turn.
+function doResearchAuction() {
+  const mode = getMarketMode();
+  const handIds = getHandSlots();
+  openAuctionModal({
+    mode,
+    handIds,
+    lookupCard: cardById,
+    onCommit: ({ cardId, sacrificeId }) => {
+      if (!cardId) return;
+      if (!requireOp('Research Auction')) return;
+      const card = cardById(cardId);
+      if (!card) {
+        setStatus(`Auction failed - unknown card ${esc(cardId)}.`);
+        return;
+      }
+      // Market mode: pull the sacrifice from hand first so the
+      // claimed card has a free slot to land in.
+      if (mode === MARKET_MODE.MARKET) {
+        if (!sacrificeId) {
+          setStatus('Auction failed - Card Market mode needs a sacrifice.');
+          return;
+        }
+        const sacCard = cardById(sacrificeId);
+        if (!removeFromHand(sacrificeId)) {
+          setStatus(`Auction failed - couldn't pull ${esc(sacCard?.name || sacrificeId)} from hand.`);
+          return;
+        }
+      }
+      const handResult = addToHand(card);
+      if (!handResult.ok) {
+        // Rollback the sacrifice if we already pulled it.
+        if (mode === MARKET_MODE.MARKET && sacrificeId) {
+          const sacCard = cardById(sacrificeId);
+          if (sacCard) addToHand(sacCard);
+        }
+        setStatus(`Auction failed - ${esc(handResult.reason)}.`);
+        return;
+      }
+      const modeLabel = mode === MARKET_MODE.MARKET ? 'Card Market' : 'Free Library';
+      const sacName = sacrificeId ? cardById(sacrificeId)?.name : null;
+      setStatus(
+        `🎯 Auctioned <em>${esc(card.name)}</em> into your Hand `
+        + `(${esc(modeLabel)}${sacName ? `, sacrificed <em>${esc(sacName)}</em>` : ''}).`
+      );
+      logAction({
+        type: 'auction',
+        icon: '🎯',
+        summary: `Auctioned ${card.name} into hand (${modeLabel}`
+          + (sacName ? `, sacrificed ${sacName}` : '') + ')',
+        undoable: false,
+        data: { cardId, sacrificeId, mode },
+      });
+    },
+  });
+}
+
+// Free Market handler (rulebook I3). Only callable in Card
+// Market mode (UI gates on this). Sells one Hand card for
+// FREE_MARKET_AQUA aqua. Op gated inside the commit.
+function doFreeMarket() {
+  if (getMarketMode() !== MARKET_MODE.MARKET) {
+    setStatus('Free Market is only available in Card Market mode.');
+    return;
+  }
+  const handIds = getHandSlots();
+  if (!handIds.length) return;
+  openFreeMarketModal({
+    handIds,
+    lookupCard: cardById,
+    onCommit: ({ cardId }) => {
+      if (!cardId) return;
+      if (!requireOp('Free Market')) return;
+      const card = cardById(cardId);
+      if (!card) {
+        setStatus(`Free Market failed - unknown card ${esc(cardId)}.`);
+        return;
+      }
+      if (!removeFromHand(cardId)) {
+        setStatus(`Free Market failed - card not in hand.`);
+        return;
+      }
+      addAqua(FREE_MARKET_AQUA);
+      setStatus(
+        `💱 Sold <em>${esc(card.name)}</em> for <strong>+${FREE_MARKET_AQUA}</strong> aqua. `
+        + `Card returns to the library.`
+      );
+      logAction({
+        type: 'free_market',
+        icon: '💱',
+        summary: `Sold ${card.name} for +${FREE_MARKET_AQUA} aqua (Free Market)`,
+        undoable: false,
+        data: { cardId, aqua: FREE_MARKET_AQUA },
+      });
+    },
+  });
+}
+
 // Resolve a hand/stack slot id to its underlying card record
 // (patents or crew). Module-level helper so the popup builders
 // and the Stage-3 op handlers all share one lookup; mirrors the
@@ -5384,6 +5527,51 @@ function showSitePopupFor(site) {
           openFuelTankModal();
         },
       });
+      // Research Auction (rulebook I2). Always available at LEO;
+      // in market mode it additionally requires a hand card to
+      // sacrifice. Op gated inside the modal commit so cancel
+      // doesn't burn the turn.
+      {
+        const mode = getMarketMode();
+        const handEmpty = getHandSlots().length === 0;
+        const blockedByMarket = mode === MARKET_MODE.MARKET && handEmpty;
+        const ok = !blockedByMarket;
+        const reason = blockedByMarket
+          ? 'Card Market mode requires a Hand card to sacrifice (boost a card to LEO Hand first).'
+          : (mode === MARKET_MODE.MARKET
+              ? 'Card Market: pick a deck + sacrifice a Hand card to claim a patent.'
+              : 'Free Library: pick a deck and claim a patent. Costs one operation.');
+        actions.push({
+          label: '🎯 Research Auction',
+          variant: ok ? 'rocket' : 'secondary',
+          disabled: !ok,
+          title: reason,
+          onClick: () => {
+            if (!ok) return;
+            doResearchAuction();
+            _renderer.clearSitePopup();
+          },
+        });
+      }
+      // Free Market (rulebook I3). Only visible in Card Market
+      // mode. Sells one Hand card for FREE_MARKET_AQUA aqua.
+      if (getMarketMode() === MARKET_MODE.MARKET) {
+        const handEmpty = getHandSlots().length === 0;
+        const ok = !handEmpty;
+        actions.push({
+          label: `💱 Free Market (+${FREE_MARKET_AQUA} aqua)`,
+          variant: ok ? 'rocket' : 'secondary',
+          disabled: !ok,
+          title: ok
+            ? `Sell a Hand card for +${FREE_MARKET_AQUA} aqua. Costs one operation.`
+            : 'Your hand is empty - nothing to sell.',
+          onClick: () => {
+            if (!ok) return;
+            doFreeMarket();
+            _renderer.clearSitePopup();
+          },
+        });
+      }
     } else {
       const refuelChk = canRefuelAt(site);
       actions.push({
@@ -6271,6 +6459,8 @@ function paintSolo() {
   if (!host) return;
   const s = soloState();
   if (!s) {
+    const marketMode = getMarketMode();
+    const marketOn = marketMode === MARKET_MODE.MARKET;
     host.innerHTML = `
       <p class="muted">A solo game pits one ship against the round
       clock. ${SOLO_CONFIG.STARTING_WATER} water, ${SOLO_CONFIG.OPS_PER_ROUND}
@@ -6281,39 +6471,51 @@ function paintSolo() {
         <button class="danger" id="sandbox-reset"
           title="Empty the hand, the rocket stack, and any board components">Reset sandbox</button>
       </div>
+      <!--
+        Stage-3 Card Market toggle (industrialize.md "Sandbox
+        card-economy toggle"). Flipping the mode RESETS the game
+        - the economy is a setup-time decision, not a mid-game
+        flip - so the click handler confirms first.
+      -->
+      <div class="sandbox-market-toggle">
+        <h4>🃏 Card economy</h4>
+        <p class="muted">
+          <strong>Free Library</strong>: patents are free draws,
+          auctions cost only the per-turn op.
+          <strong>Card Market</strong>: auctions consume a Hand
+          card; Free Market sells a Hand card for +${FREE_MARKET_AQUA} aqua.
+          Toggling resets the game.
+        </p>
+        <div class="market-mode-row">
+          <button id="market-mode-library" class="market-mode-btn ${marketOn ? '' : 'is-active'}">📚 Free Library</button>
+          <button id="market-mode-market"  class="market-mode-btn ${marketOn ? 'is-active' : ''}">🃏 Card Market</button>
+        </div>
+      </div>
     `;
     host.querySelector('#solo-new').onclick = () => {
       soloNewGame();
       paintSolo();
     };
     host.querySelector('#sandbox-reset').onclick = () => {
-      if (!confirm('Reset sandbox? This clears your hand, your rocket’s stack, position, planned route, discs, glory, mission log, and the turn clock.')) return;
-      clearHand();
-      rocketClearStack();
-      // Rocket position + trail + planned route + the move
-      // snapshot that backs undo. Clearing _rocketSiteId via the
-      // helper persists the empty state so reload doesn't restore
-      // the prior journey.
-      _rocketSiteId = null;
-      persistRocketSite();
-      _rocketTrail = [];
-      persistRocketTrail();
-      _plannedRoute = null;
-      persistPlannedRoute();
-      _moveSnapshot = null;
-      if (_renderer) {
-        _renderer.setRoute(null);
-        _renderer.setRouteEndpoints(null, null);
-        _renderer.setRocketTrail(null);
-      }
-      // Game-state systems.
-      try { localStorage.removeItem(STORAGE_REFUEL_LOG); } catch {}
-      resetDiscs();
-      resetGlory();
-      resetLog();
-      resetClock();
-      setStatus('Sandbox reset - hand, rocket, position, discs, glory, log, and clock cleared.');
+      if (!confirm('Reset sandbox? This clears your hand, your rocket’s stack, position, planned route, outposts, factories, colonies, discs, glory, mission log, the turn clock, and your aqua bank.')) return;
+      doSandboxReset();
+      setStatus('Sandbox reset - hand, rocket, position, outposts, factories, colonies, discs, glory, log, clock, and aqua cleared.');
     };
+    const flipMode = (next) => {
+      if (next === marketMode) return;
+      const label = next === MARKET_MODE.MARKET ? 'Card Market' : 'Free Library';
+      if (!confirm(`Switch to ${label}? This RESETS the sandbox (hand, rocket, outposts, factories, colonies, discs, glory, log, clock, aqua).`)) return;
+      // Reset browse-locals first, then flip the mode. setMarketMode
+      // calls resetSandboxEconomy internally, which wipes the
+      // global state stores but doesn't know about browse's
+      // module-locals (_rocketSiteId, route, trail, etc).
+      doBrowseLocalReset();
+      setMarketMode(next);
+      setStatus(`Card economy: ${label}. Sandbox reset.`);
+      paintSolo();
+    };
+    host.querySelector('#market-mode-library').onclick = () => flipMode(MARKET_MODE.LIBRARY);
+    host.querySelector('#market-mode-market').onclick  = () => flipMode(MARKET_MODE.MARKET);
     return;
   }
   const here   = _activeData && _activeData.byId[s.ship.at];
