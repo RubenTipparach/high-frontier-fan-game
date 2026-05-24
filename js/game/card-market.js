@@ -44,6 +44,10 @@ import { resetDiscs } from './discs.js';
 import { resetGlory } from './glory.js';
 import { resetLog } from './mission-log.js';
 import { resetClock } from './turn-clock.js';
+import {
+  DECK_TYPES, peekTop, drawTop, addToBottom, cycleAllDecks,
+  resetDecks, supportBonusDecks, onDeckChange,
+} from './decks.js';
 
 const STORAGE_MODE = 'hf-sandbox-card-market-mode';
 
@@ -109,6 +113,9 @@ export function resetSandboxEconomy({ keepMode = true } = {}) {
   resetLog();
   resetClock();
   resetAqua();
+  // Reshuffle every market deck. Nothing is owned after the
+  // wipes above, so we pass an empty owned-set.
+  resetDecks(new Set());
   if (!keepMode) {
     _mode = MARKET_MODE.LIBRARY;
     persist();
@@ -268,6 +275,128 @@ export function openAuctionModal({
     dialog.querySelectorAll('.auction-sac-cards .auction-card').forEach((b) => {
       b.addEventListener('click', () => {
         selectedSacrifice = b.getAttribute('data-sacrifice');
+        render();
+      });
+    });
+    dialog.querySelector('.auction-cancel').addEventListener('click', () => close(false));
+    dialog.querySelector('.auction-commit').addEventListener('click', () => close(true));
+  };
+
+  render();
+  document.body.appendChild(overlay);
+  overlay.focus();
+}
+
+// ---------- Auction confirmation modal ----------
+//
+// Reusable confirmation dialog used by the Cart's Buy button.
+// Will also be used by future Research Auction flows. Shows
+// the card being acquired with its full art, the sacrifice
+// picker (when in Card Market mode), and a COUNT of bonus
+// cards drawn from the corresponding support decks - but NEVER
+// the identities of those bonus cards (per user
+// 2026-05-24: "DO NOT SHOW player WHAT Cards are coming up on
+// the support decks").
+//
+// `renderCardFn(card, opts)` is passed in by the caller so the
+// modal doesn't have to import card-ui.js itself; this keeps
+// card-market.js's import graph shallow.
+//
+// onConfirm fires with the sacrifice id (null when in library
+// mode); the deck draws (main card + bonus) are the caller's
+// responsibility because they need to thread through the
+// hand-add + rollback logic.
+export function openAuctionConfirmModal({
+  card, mode, handIds, lookupCard, renderCardFn, bonusDeckTypes, onConfirm,
+}) {
+  if (!card) return;
+  document.querySelector('.auction-confirm-overlay')?.remove();
+  let selectedSacrifice = null;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay auction-confirm-overlay';
+  overlay.tabIndex = -1;
+  const close = (confirmed) => {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+    if (!confirmed) return;
+    if (mode === MARKET_MODE.MARKET && !selectedSacrifice) return;
+    onConfirm?.({ sacrificeId: selectedSacrifice });
+  };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(false); } };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+
+  const dialog = document.createElement('div');
+  dialog.className = 'auction-confirm-modal';
+  overlay.appendChild(dialog);
+
+  const inMarket = mode === MARKET_MODE.MARKET;
+  const bonus = Array.isArray(bonusDeckTypes) ? bonusDeckTypes : [];
+
+  const render = () => {
+    const bonusBlock = bonus.length === 0
+      ? `<p class="muted">No support requirements - no bonus cards.</p>`
+      : `<p>
+           This card has <strong>${bonus.length}</strong> support
+           requirement${bonus.length === 1 ? '' : 's'}. Confirming the
+           auction also draws the top card of each support deck
+           (you won't see them until they land in your hand):
+         </p>
+         <ul class="auction-bonus-decks">
+           ${bonus.map((t) => `<li><span class="auction-bonus-deck">${escapeHtml(t)}</span> deck (top card, hidden)</li>`).join('')}
+         </ul>`;
+    const sacrificeBlock = !inMarket
+      ? `<p class="muted">Free Library mode: no sacrifice required.</p>`
+      : !handIds.length
+        ? `<p class="cart-warning">⚠ Hand is empty - you need at least one Hand card to sacrifice in Card Market mode. Cancel and acquire cards elsewhere first.</p>`
+        : `<div class="auction-section-label">Sacrifice a Hand card</div>
+           <div class="auction-sac-cards">
+             ${handIds.map((id) => {
+               const sc = lookupCard(id);
+               if (!sc) return '';
+               const sel = id === selectedSacrifice ? '⦿' : '◯';
+               return `<button type="button" data-sac="${escapeHtml(id)}" class="auction-card ${id === selectedSacrifice ? 'is-selected' : ''}">
+                 <span class="auction-radio">${sel}</span>
+                 <strong>${escapeHtml(sc.name)}</strong>
+                 <span class="muted">(${escapeHtml(sc.type || '')})</span>
+               </button>`;
+             }).join('')}
+           </div>`;
+    dialog.innerHTML = `
+      <div class="auction-head">
+        <h3>🎯 Confirm Auction</h3>
+        <span class="auction-mode">${escapeHtml(inMarket ? 'Card Market' : 'Free Library')}</span>
+      </div>
+      <div class="auction-body">
+        <div class="auction-confirm-card" id="auction-confirm-card"></div>
+        <div class="auction-cost-line">
+          <strong>Cost:</strong> 1 operation${inMarket ? ' + 1 Hand card sacrifice' : ''} + 0 aqua (solo).
+        </div>
+        ${sacrificeBlock}
+        <div class="auction-bonus-section">
+          <div class="auction-section-label">Bonus cards (drawn on confirm)</div>
+          ${bonusBlock}
+        </div>
+      </div>
+      <div class="card-modal-actions">
+        <button type="button" class="modal-btn auction-cancel">Cancel</button>
+        <button type="button" class="modal-btn primary auction-commit" ${(inMarket && !selectedSacrifice) ? 'disabled' : ''}>🎯 Confirm</button>
+      </div>
+    `;
+    // Mount the card art via the injected renderCardFn so we
+    // pick up the same renderCard everything else uses.
+    const cardSlot = dialog.querySelector('#auction-confirm-card');
+    if (cardSlot && renderCardFn) {
+      try {
+        cardSlot.appendChild(renderCardFn(card, { type: 'patent' }));
+      } catch (e) {
+        cardSlot.textContent = card.name || card.id;
+      }
+    }
+    dialog.querySelectorAll('.auction-sac-cards .auction-card').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        selectedSacrifice = btn.getAttribute('data-sac');
         render();
       });
     });

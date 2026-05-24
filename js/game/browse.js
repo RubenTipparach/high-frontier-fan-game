@@ -97,9 +97,13 @@ import {
   MARKET_MODE, FREE_MARKET_AQUA,
   getMarketMode, setMarketMode, onMarketChange,
   resetSandboxEconomy,
-  openAuctionModal, openFreeMarketModal,
+  openAuctionModal, openAuctionConfirmModal, openFreeMarketModal,
   findAuctionableCards,
 } from './card-market.js';
+import {
+  DECK_TYPES, getDeck, peekTop, drawTop, addToBottom, removeFromDeck,
+  cycleAllDecks, supportBonusDecks, onDeckChange,
+} from './decks.js';
 
 // Only one map mode now (planner / "classic"); the old
 // "Cleaned up" variant was disorienting next to the canonical
@@ -3739,16 +3743,29 @@ function applyEventDieEffect(event) {
   const season = getSeasonForSlot(event.turn);
   const e = getEventForRoll(event.dieRoll, season && season.name);
   if (!e) return;
+  // Inspiration (d6 = 1 or 2): cycle every patent deck - the
+  // topmost card of each goes to the bottom. Auto-applies; the
+  // player doesn't have to manually resolve it. This is the
+  // only event with an automatic mechanical effect today;
+  // others still log as "Would fire" until they get
+  // implementations.
+  let applied = false;
+  if (e.rolls.includes(event.dieRoll) && e.name === 'Inspiration') {
+    cycleAllDecks();
+    applied = true;
+  }
   logAction({
     type: 'event_d6',
     icon: e.icon,
-    summary: `Would fire: ${e.name} (d6 = ${event.dieRoll}) - ${e.text}`,
+    summary: applied
+      ? `${e.name} fired (d6 = ${event.dieRoll}) - every market deck cycled top → bottom.`
+      : `Would fire: ${e.name} (d6 = ${event.dieRoll}) - ${e.text}`,
     undoable: false,
     data: {
       dieRoll: event.dieRoll,
       eventName: e.name,
       season: season && season.name,
-      applied: false,
+      applied,
     },
   });
 }
@@ -4398,7 +4415,15 @@ function doIndustrialize(site, stack, options) {
         const slot = stack[idx];
         if (!slot) continue;
         const ok = rocketRemoveCard(idx);
-        if (ok) removed.push(slot.id);
+        if (ok) {
+          removed.push(slot.id);
+          // Rulebook G6 / variant lock: industrialize-decom
+          // cards go to the BOTTOM of their corresponding
+          // deck (vs hand for voluntary removal). addToBottom
+          // routes by card type; non-patent / expansion slots
+          // are silently skipped.
+          addToBottom(slot.id);
+        }
       }
       const spectral = site.spectralType || 'C';
       const built = createFactory(site.id, SANDBOX_OWNER_ID, spectral);
@@ -7034,6 +7059,9 @@ function renderCart() {
     onOutpostsChange(repaintIfActive);
     onLeoChange(repaintIfActive);
     onMarketChange(repaintIfActive);
+    // Deck changes drive the cart's top-of-deck view directly,
+    // so it must repaint on every cycle / draw / addToBottom.
+    onDeckChange(repaintIfActive);
   }
   paintCart();
 }
@@ -7048,45 +7076,232 @@ function paintCart() {
     </section>`;
     return;
   }
-  const DECK_TYPES = ['thruster', 'reactor', 'radiator', 'refinery', 'robonaut', 'generator'];
   const handIds = getHandSlots();
   const handEmpty = handIds.length === 0;
   const aqua = getAqua();
-  // Build sections.
-  const sections = DECK_TYPES.map((type) => {
-    const cards = findAuctionableCards(type);
-    const cardsHtml = cards.length
-      ? cards.map((c) => {
-          const spec = c.spectralType || 'C';
-          return `<li class="cart-card">
-            <span class="cart-card-spec industrialize-spectral-badge spectral-${esc(spec)}">${esc(spec)}</span>
-            <strong class="cart-card-name">${esc(c.name)}</strong>
-            <button type="button" class="cart-buy-btn" data-id="${esc(c.id)}" data-type="${esc(type)}" ${handEmpty ? 'disabled' : ''} title="${handEmpty ? 'Need a Hand card to sacrifice' : 'Auction this card (1 op + 1 Hand card sacrifice)'}">🎯 Buy</button>
-          </li>`;
-        }).join('')
-      : '<li class="muted">No cards available in this deck.</li>';
-    return `<section class="cart-deck" data-type="${esc(type)}">
-      <h4 class="cart-deck-title">${esc(type)} <em>(${cards.length})</em></h4>
-      <ul class="cart-deck-cards">${cardsHtml}</ul>
-    </section>`;
-  }).join('');
+
   host.innerHTML = `
     <section class="cart-summary">
       <h3>🛒 Patent Market</h3>
-      <p class="muted">Card Market mode: patents must be auctioned. Each purchase costs <strong>1 operation</strong> + <strong>1 Hand card</strong> sacrificed back to the library.</p>
+      <p class="muted">Card Market mode: each deck is shuffled, and only the <strong>top card</strong> is up for auction. Per-buy cost: <strong>1 operation</strong> + <strong>1 Hand card sacrifice</strong> + 0 aqua (solo).</p>
       <p class="muted">Aqua bank: <strong class="stat-aqua">${esc(String(aqua))} 💧</strong>. Hand: <strong>${handIds.length}</strong> card${handIds.length === 1 ? '' : 's'} available to sacrifice.</p>
-      ${handEmpty ? '<p class="cart-warning">⚠ Your hand is empty - boost a card from the library first... wait, you can\'t boost from the library in Market mode either. Use the existing hand cards if you have any, or you\'re stuck. Switch to Free Library mode to unlock drag-to-hand.</p>' : ''}
+      ${handEmpty ? '<p class="cart-warning">⚠ Your hand is empty - you need at least one Hand card to sacrifice. Use any existing hand cards or switch back to Free Library mode (resets the game) to unlock drag-to-hand.</p>' : ''}
+      <p class="muted">Inspiration event (d6 roll 1-2): every deck's top card cycles to the bottom.</p>
     </section>
-    <div class="cart-decks">${sections}</div>
+    <div class="cart-decks" id="cart-decks-host"></div>
   `;
-  host.querySelectorAll('.cart-buy-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      if (btn.disabled) return;
-      const id = btn.getAttribute('data-id');
-      const type = btn.getAttribute('data-type');
-      doResearchAuction({ preselect: { type, cardId: id } });
-    });
+
+  const decksHost = host.querySelector('#cart-decks-host');
+  for (const type of DECK_TYPES) {
+    const topId = peekTop(type);
+    const card = topId ? cardById(topId) : null;
+    const deckSize = getDeck(type).length;
+
+    const section = document.createElement('section');
+    section.className = 'cart-deck';
+    section.dataset.type = type;
+
+    const title = document.createElement('h4');
+    title.className = 'cart-deck-title';
+    title.innerHTML = `${esc(type)} <em>(${deckSize} card${deckSize === 1 ? '' : 's'})</em>`;
+    section.appendChild(title);
+
+    const body = document.createElement('div');
+    body.className = 'cart-deck-body';
+
+    // Left: deck-thickness SVG so the player gets a visual cue
+    // of how thick the deck is.
+    const deckArt = document.createElement('div');
+    deckArt.className = 'cart-deck-art';
+    deckArt.appendChild(renderDeckThicknessSvg(deckSize));
+    body.appendChild(deckArt);
+
+    // Right: the card art for the top card via the shared
+    // renderCard. Same card-holder used elsewhere.
+    const cardSlot = document.createElement('div');
+    cardSlot.className = 'cart-deck-topcard';
+    if (card) {
+      cardSlot.appendChild(renderCard(card, { type: 'patent' }));
+    } else {
+      cardSlot.innerHTML = '<p class="muted">Deck is empty.</p>';
+    }
+    body.appendChild(cardSlot);
+
+    section.appendChild(body);
+
+    // Buy button: open the auction-confirm modal. Disabled
+    // when the deck is empty OR the player can't sacrifice.
+    const buy = document.createElement('button');
+    buy.type = 'button';
+    buy.className = 'cart-buy-btn';
+    buy.disabled = !card || handEmpty;
+    buy.title = !card
+      ? `${type} deck is empty.`
+      : handEmpty
+        ? 'Need a Hand card to sacrifice.'
+        : 'Confirm the auction (1 op + 1 Hand card sacrifice).';
+    const supportCount = card ? supportBonusDecks(card).length : 0;
+    buy.textContent = supportCount > 0
+      ? `🎯 Buy (+${supportCount} bonus)`
+      : '🎯 Buy';
+    if (card) {
+      buy.addEventListener('click', () => {
+        if (buy.disabled) return;
+        doAuctionCard(card);
+      });
+    }
+    section.appendChild(buy);
+    decksHost.appendChild(section);
+  }
+}
+
+// SVG showing a stack of cards. Thicker stacks have more
+// layered rectangles offset down-right so it reads as a
+// physical pile. Capped at 5 layers (more would just clutter).
+function renderDeckThicknessSvg(deckSize) {
+  const layers = Math.max(1, Math.min(5, Math.ceil(deckSize / 3)));
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  const w = 60, h = 84;
+  const cardW = 38, cardH = 56;
+  const offset = 4;
+  svg.setAttribute('width', String(w));
+  svg.setAttribute('height', String(h));
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  svg.setAttribute('class', 'cart-deck-svg');
+  // Draw from back (deepest offset) to front (top of deck).
+  for (let i = layers - 1; i >= 0; i--) {
+    const r = document.createElementNS(svgNS, 'rect');
+    r.setAttribute('x', String(2 + i * offset));
+    r.setAttribute('y', String(2 + i * offset));
+    r.setAttribute('width', String(cardW));
+    r.setAttribute('height', String(cardH));
+    r.setAttribute('rx', '4');
+    r.setAttribute('fill', i === 0 ? '#1f2a44' : '#0f172a');
+    r.setAttribute('stroke', i === 0 ? '#7dd3fc' : '#334155');
+    r.setAttribute('stroke-width', '1.2');
+    svg.appendChild(r);
+  }
+  // "?" mark on the top card to suggest "next draw is here".
+  const txt = document.createElementNS(svgNS, 'text');
+  txt.setAttribute('x', String(2 + cardW / 2));
+  txt.setAttribute('y', String(2 + cardH / 2 + 6));
+  txt.setAttribute('text-anchor', 'middle');
+  txt.setAttribute('font-size', '20');
+  txt.setAttribute('font-weight', '800');
+  txt.setAttribute('fill', '#7dd3fc');
+  txt.textContent = String(deckSize);
+  svg.appendChild(txt);
+  return svg;
+}
+
+// Open the auction-confirm modal for a specific card. Used by
+// the Cart's Buy button + the deck-tap modal's "Auction this
+// card" button. The deck draws happen on confirm.
+function doAuctionCard(card) {
+  if (!card) return;
+  const mode = getMarketMode();
+  openAuctionConfirmModal({
+    card,
+    mode,
+    handIds: getHandSlots(),
+    lookupCard: cardById,
+    renderCardFn: renderCard,
+    bonusDeckTypes: supportBonusDecks(card),
+    onConfirm: ({ sacrificeId }) => {
+      if (!requireOp('Research Auction')) return;
+      // Sacrifice (market mode only).
+      if (mode === MARKET_MODE.MARKET) {
+        if (!sacrificeId) {
+          setStatus('Auction failed - Card Market mode needs a sacrifice.');
+          return;
+        }
+        if (!removeFromHand(sacrificeId)) {
+          setStatus('Auction failed - sacrifice card not in hand.');
+          return;
+        }
+        // Sacrificed card goes to the bottom of its own
+        // type's deck.
+        addToBottom(sacrificeId);
+      }
+      // Draw the main card. drawTop removes it from the deck
+      // and returns its id; we ignore the return because we
+      // already have `card` (the buy was for a SPECIFIC card,
+      // which by definition was at the top when the modal
+      // opened - we double-check below).
+      const drawnId = drawTop(card.type);
+      if (drawnId !== card.id) {
+        // Deck shifted between modal-open and confirm (rare
+        // race - e.g. an Inspiration cycle fired). Roll back
+        // the sacrifice and bail.
+        if (drawnId) addToBottom(drawnId);
+        if (mode === MARKET_MODE.MARKET && sacrificeId) {
+          removeFromDeckIfPresent(sacrificeId);
+          const sc = cardById(sacrificeId);
+          if (sc) addToHand(sc);
+        }
+        setStatus('Auction failed - deck state shifted. Try again.');
+        return;
+      }
+      const handResult = addToHand(card);
+      if (!handResult.ok) {
+        // Roll back everything.
+        addToBottom(card.id);
+        if (mode === MARKET_MODE.MARKET && sacrificeId) {
+          removeFromDeckIfPresent(sacrificeId);
+          const sc = cardById(sacrificeId);
+          if (sc) addToHand(sc);
+        }
+        setStatus(`Auction failed - ${esc(handResult.reason)}.`);
+        return;
+      }
+      // Bonus draws: 1 card from the top of each support deck.
+      // Empty support decks skip silently. The player learns
+      // the bonus identities when the cards land in hand
+      // (per the spec: don't pre-reveal).
+      const bonusTypes = supportBonusDecks(card);
+      const bonusCards = [];
+      for (const t of bonusTypes) {
+        const bId = drawTop(t);
+        if (!bId) continue;
+        const bCard = cardById(bId);
+        if (!bCard) continue;
+        const br = addToHand(bCard);
+        if (br.ok) bonusCards.push(bCard);
+        else addToBottom(bId);
+      }
+      const bonusNote = bonusCards.length
+        ? ` Bonus: ${bonusCards.map((b) => `<em>${esc(b.name)}</em>`).join(', ')}.`
+        : (bonusTypes.length ? ' (Bonus decks were empty.)' : '');
+      const modeLabel = mode === MARKET_MODE.MARKET ? 'Card Market' : 'Free Library';
+      const sacName = sacrificeId ? cardById(sacrificeId)?.name : null;
+      setStatus(
+        `🎯 Auctioned <em>${esc(card.name)}</em> into your Hand `
+        + `(${esc(modeLabel)}${sacName ? `, sacrificed <em>${esc(sacName)}</em>` : ''}).`
+        + bonusNote
+      );
+      logAction({
+        type: 'auction',
+        icon: '🎯',
+        summary: `Auctioned ${card.name}`
+          + (sacName ? `, sacrificed ${sacName}` : '')
+          + (bonusCards.length ? `; bonus: ${bonusCards.map((b) => b.name).join(', ')}` : ''),
+        undoable: false,
+        data: {
+          cardId: card.id,
+          sacrificeId,
+          bonusCardIds: bonusCards.map((b) => b.id),
+          mode,
+        },
+      });
+    },
   });
+}
+
+// Defensive helper: only removes a card from the deck when
+// it's actually there. Used by the auction rollback paths.
+function removeFromDeckIfPresent(id) {
+  try { removeFromDeck(id); } catch { /* not present */ }
 }
 
 // Show or hide the 🛒 sidebar tab based on the current Card

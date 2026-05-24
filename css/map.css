@@ -4634,6 +4634,31 @@ body:has(#view-browse:not(.hidden)) #main {
   font-weight: 500;
   margin-left: 4px;
 }
+/* Whole-card deck view: side-by-side deck-thickness SVG +
+   the full card art for the top card. Stacked under each
+   deck section header. */
+.cart-deck-body {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 6px 0 8px;
+}
+.cart-deck-art { flex: 0 0 auto; }
+.cart-deck-svg {
+  display: block;
+}
+.cart-deck-topcard {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+.cart-deck-topcard .card {
+  /* Match the inspector scale so the cart and other stack
+     views read at the same visual size. */
+  transform: scale(0.65);
+  transform-origin: top center;
+  margin-bottom: -90px;
+}
 .cart-deck-cards {
   list-style: none;
   margin: 0;
@@ -4672,3 +4697,74 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .cart-buy-btn:hover:not(:disabled) { background: #166534; }
 .cart-buy-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ============================================================
+   Auction confirm modal. Reusable confirmation dialog shown
+   on the Cart's Buy button (and later for any other auction
+   surface). Same .auction-* class family as the legacy
+   research-auction modal so we share styling; new
+   .auction-confirm-modal box for the focused layout.
+   ============================================================ */
+.auction-confirm-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  max-width: 480px;
+  width: 100%;
+  color: var(--ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.auction-confirm-card {
+  display: flex;
+  justify-content: center;
+  margin: 4px 0 0;
+}
+.auction-confirm-card .card {
+  transform: scale(0.85);
+  transform-origin: top center;
+  margin-bottom: -55px;
+}
+.auction-cost-line {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+.auction-bonus-section {
+  background: rgba(125, 211, 252, 0.06);
+  border: 1px solid rgba(125, 211, 252, 0.25);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.auction-bonus-decks {
+  list-style: disc;
+  margin: 4px 0 0 18px;
+  padding: 0;
+  font-size: 13px;
+}
+.auction-bonus-deck {
+  display: inline-block;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-weight: 700;
+  text-transform: capitalize;
+  margin-right: 4px;
+}
+.auction-confirm-modal .card-modal-actions {
+  margin-top: 4px;
+  justify-content: flex-end;
+}
+.auction-confirm-modal .modal-btn.primary {
+  background: #14532d;
+  color: #d1fae5;
+  border-color: #166534;
+}
+.auction-confirm-modal .modal-btn.primary:hover { background: #166534; }
+.auction-confirm-modal .modal-btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }
