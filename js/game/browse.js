@@ -3043,30 +3043,36 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
       <button type="button" class="popup-btn popup-btn-secondary" id="tank-dump-all"
         title="Drain everything (future: forms an outpost stack once factories land)">💧⤓ Dump all</button>
     </div>
-    <div class="fuel-tank-aqua" id="tank-aqua-section" hidden>
+<div class="fuel-tank-aqua" id="tank-aqua-section" hidden>
       <div class="aqua-row">
-        <span>💧 Aqua balance</span>
+        <span>🏦 Aqua bank</span>
         <strong id="aqua-balance">${getAqua()}</strong>
       </div>
       <p class="muted aqua-help">
-        Convert 1:1 between your aqua bank and the rocket tank.
-        Only available at LEO.
+        At LEO you can swap aqua between your bank and the
+        rocket tank, 1:1, for free.
       </p>
-      <div class="aqua-actions">
-        <button type="button" class="popup-btn popup-btn-secondary" id="aqua-buy-1"
-          title="Move 1 aqua from your bank into the tank">🏦→💧 +1</button>
-        <button type="button" class="popup-btn popup-btn-secondary" id="aqua-buy-5"
-          title="Move 5 aqua from your bank into the tank">🏦→💧 +5</button>
-        <button type="button" class="popup-btn" id="aqua-buy-max"
-          title="Fill the tank to its cap from your aqua bank">🏦→💧 Max fill</button>
+      <div class="aqua-direction">
+        <span class="aqua-direction-label">🏦 Bank → 💧 Tank</span>
+        <div class="aqua-actions">
+          <button type="button" class="popup-btn popup-btn-secondary" id="aqua-buy-1"
+            title="Move 1 aqua from your bank into the tank">+1</button>
+          <button type="button" class="popup-btn popup-btn-secondary" id="aqua-buy-5"
+            title="Move 5 aqua from your bank into the tank">+5</button>
+          <button type="button" class="popup-btn" id="aqua-buy-max"
+            title="Fill the tank to its cap from your aqua bank">Max fill</button>
+        </div>
       </div>
-      <div class="aqua-actions aqua-actions-reverse">
-        <button type="button" class="popup-btn popup-btn-secondary" id="aqua-cash-1"
-          title="Drain 1 water from the tank back into your aqua bank">💧→🏦 +1</button>
-        <button type="button" class="popup-btn popup-btn-secondary" id="aqua-cash-5"
-          title="Drain 5 water from the tank back into your aqua bank">💧→🏦 +5</button>
-        <button type="button" class="popup-btn" id="aqua-cash-all"
-          title="Empty the tank back into your aqua bank">💧→🏦 Cash out</button>
+      <div class="aqua-direction aqua-direction-reverse">
+        <span class="aqua-direction-label">💧 Tank → 🏦 Bank</span>
+        <div class="aqua-actions">
+          <button type="button" class="popup-btn popup-btn-secondary" id="aqua-cash-1"
+            title="Drain 1 water from the tank back into your aqua bank">+1</button>
+          <button type="button" class="popup-btn popup-btn-secondary" id="aqua-cash-5"
+            title="Drain 5 water from the tank back into your aqua bank">+5</button>
+          <button type="button" class="popup-btn" id="aqua-cash-all"
+            title="Empty the tank back into your aqua bank">Cash out</button>
+        </div>
       </div>
     </div>
     <p class="muted fuel-tank-dump-note">

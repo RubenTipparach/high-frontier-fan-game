@@ -731,11 +731,32 @@
 .fuel-tank-aqua .aqua-actions .popup-btn {
   font-size: 11px;
   padding: 5px 9px;
+  min-width: 56px;
 }
-.fuel-tank-aqua .aqua-actions-reverse {
-  margin-top: 4px;
-  padding-top: 6px;
-  border-top: 1px dashed rgba(56, 189, 248, 0.25);
+/* Per-direction rows so the player sees the two transfer
+   modes as clearly distinct: tank-fill on top, cash-out
+   below with a dashed divider between. The direction label
+   on each row spells out which way the water flows. */
+.fuel-tank-aqua .aqua-direction {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fuel-tank-aqua .aqua-direction-reverse {
+  padding-top: 8px;
+  border-top: 1px dashed rgba(56, 189, 248, 0.30);
+}
+.fuel-tank-aqua .aqua-direction-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-weight: 700;
+  color: var(--accent);
+  text-align: center;
+}
+.fuel-tank-aqua .aqua-direction-reverse .aqua-direction-label {
+  color: #fbbf24;
 }
 
 /* Hazard confirm modal. Reuses the turn-confirm panel chassis
