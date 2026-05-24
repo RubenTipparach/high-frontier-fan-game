@@ -3794,3 +3794,68 @@ body:has(#view-browse:not(.hidden)) #main {
   border-color: #166534;
 }
 .colonize-modal .modal-btn.primary:hover { background: #166534; }
+
+/* ============================================================
+   Outpost slot picker (Rocket -> Outpost convert).
+
+   Tiny modal with four big A/B/C/D letter buttons. Taken slots
+   render as disabled with a strikethrough so the player sees
+   the constraint at a glance. Used by doConvertToOutpost and
+   (in the future) by ET Production when creating a fresh
+   outpost at a factory.
+   ============================================================ */
+.outpost-slot-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  max-width: 420px;
+  width: 100%;
+  color: var(--ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.outpost-slot-head h3 {
+  margin: 0;
+  font-size: 17px;
+  letter-spacing: 0.5px;
+}
+.outpost-slot-body {
+  font-size: 13px;
+  color: var(--muted, #94a3b8);
+}
+.outpost-slot-body p { margin: 0; }
+.outpost-slot-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.outpost-slot-btn {
+  width: 64px;
+  height: 64px;
+  font-size: 32px;
+  font-weight: 800;
+  background: var(--bg-2);
+  color: var(--ink);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  letter-spacing: 0;
+}
+.outpost-slot-btn:hover:not(:disabled) {
+  background: rgba(125, 211, 252, 0.18);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.outpost-slot-btn.is-taken,
+.outpost-slot-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  text-decoration: line-through;
+}
+.outpost-slot-modal .card-modal-actions {
+  justify-content: flex-end;
+}

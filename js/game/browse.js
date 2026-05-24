@@ -31,7 +31,7 @@ import {
   removeFromStack as rocketRemoveCard, clearStack as rocketClearStack,
   onRocketChange, isRocketActive,
   getActiveThrusterId, setActiveThruster,
-  getTankWater, addFuel, removeFuel, getTankMax,
+  getTankWater, setTankWater, addFuel, removeFuel, getTankMax,
   getStackTotals, getActiveThrusterStats,
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats,
@@ -72,6 +72,12 @@ import {
 import {
   findColonizeOptions, openColonizePicker,
 } from './colonize.js';
+import {
+  getOutpost, getOutposts, getAvailableOutpostSlots,
+  createOutpost, dissolveOutpost,
+  addCardToOutpost, setOutpostTank,
+  OUTPOST_LETTERS,
+} from './stacks.js';
 
 // Only one map mode now (planner / "classic"); the old
 // "Cleaned up" variant was disorienting next to the canonical
@@ -2875,6 +2881,154 @@ function doRefuel(site) {
   openFuelTankModal({ fromWater: tankBefore, toWater: tankBefore + gain });
 }
 
+// Outpost slot picker. Returns a Promise<letter|null>; resolves
+// null on cancel / Escape. Shows the four A/B/C/D buttons in a
+// row, dimming the ones whose slots are already taken. Used by
+// the Rocket -> Outpost convert flow (user picks which slot
+// letter the new outpost takes - variant rule, see
+// industrialize.md "Outpost slot assignment").
+function pickOutpostSlot({ title = '🏛 Pick a slot for the new Outpost', body = '' } = {}) {
+  return new Promise((resolve) => {
+    document.querySelector('.outpost-slot-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay outpost-slot-overlay';
+    overlay.tabIndex = -1;
+    const close = (letter) => {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(letter || null);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(null); } };
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
+    const free = new Set(getAvailableOutpostSlots());
+    const dialog = document.createElement('div');
+    dialog.className = 'outpost-slot-modal';
+    dialog.innerHTML = `
+      <div class="outpost-slot-head"><h3>${esc(title)}</h3></div>
+      ${body ? `<div class="outpost-slot-body">${body}</div>` : ''}
+      <div class="outpost-slot-buttons">
+        ${OUTPOST_LETTERS.map((L) => {
+          const taken = !free.has(L);
+          return `<button type="button" class="outpost-slot-btn ${taken ? 'is-taken' : ''}" data-letter="${L}" ${taken ? 'disabled' : ''}>${L}</button>`;
+        }).join('')}
+      </div>
+      <div class="card-modal-actions">
+        <button type="button" class="modal-btn outpost-slot-cancel">Cancel</button>
+      </div>
+    `;
+    overlay.appendChild(dialog);
+    dialog.querySelectorAll('.outpost-slot-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (btn.disabled) return;
+        close(btn.getAttribute('data-letter'));
+      });
+    });
+    dialog.querySelector('.outpost-slot-cancel').addEventListener('click', () => close(null));
+    document.body.appendChild(overlay);
+    overlay.focus();
+  });
+}
+
+// Rocket -> Outpost. Free action. Caller has validated the
+// rocket has cards, is at a non-LEO site, and at least one
+// outpost slot is free. Opens the slot picker; on confirm,
+// snapshots the rocket stack + tank, dissolves the rocket
+// (cards cleared, tank zeroed, rocket returns to LEO), and
+// creates the outpost with the snapshotted state.
+async function doConvertToOutpost(site) {
+  const stack = getRocketStack();
+  const tank  = getTankWater();
+  if (!stack.length) return;
+  const letter = await pickOutpostSlot({
+    title: `🚀→🏛 Convert Rocket to Outpost at ${site.name}`,
+    body: `<p>${stack.length} card${stack.length === 1 ? '' : 's'} + ${tank} water will move to the new outpost.</p>`,
+  });
+  if (!letter) return;
+  if (!createOutpost(letter, site.id)) {
+    setStatus(`Convert failed - slot ${esc(letter)} could not be created.`);
+    return;
+  }
+  // Move cards in order so the outpost's stack mirrors the
+  // rocket's. We do NOT route through the patent deck or hand -
+  // cards pass directly from one stack to the other.
+  for (const slot of stack) {
+    addCardToOutpost(letter, { id: slot.id, kind: slot.kind });
+  }
+  setOutpostTank(letter, tank);
+  // Dissolve the rocket: clear its card list + tank, return it
+  // to LEO. Same wipe pattern as explodeRocket minus the boom.
+  rocketClearStack();
+  setTankWater(0);
+  _rocketSiteId = null;
+  persistRocketSite();
+  _plannedRoute = null;
+  persistPlannedRoute();
+  exitManualMoveMode();
+  _rocketTrail = [];
+  persistRocketTrail();
+  if (_renderer) {
+    _renderer.setRoute(null);
+    _renderer.setRouteEndpoints(null, null);
+    _renderer.setRocketTrail(null);
+  }
+  setStatus(
+    `🚀→🏛 Converted rocket to Outpost <strong>${esc(letter)}</strong> at `
+    + `<strong>${esc(site.name)}</strong>. `
+    + `${stack.length} card${stack.length === 1 ? '' : 's'} + ${tank} water moved across; `
+    + `rocket returns to LEO empty.`
+  );
+  logAction({
+    type: 'convert_outpost',
+    icon: '🚀→🏛',
+    summary: `Converted rocket to Outpost ${letter} at ${site.name} (${stack.length} cards, ${tank} water)`,
+    undoable: false,
+    data: { siteId: site.id, letter, cards: stack.length, tank },
+  });
+}
+
+// Outpost -> Rocket. Free action. Caller has validated there's
+// no current rocket (empty stack at LEO) and the outpost exists.
+// Move the outpost's cards + tank to the rocket, place the
+// rocket at the outpost's site, dissolve the outpost.
+function doConvertToRocket(site, letter) {
+  const op = getOutpost(letter);
+  if (!op) {
+    setStatus(`Lift failed - Outpost ${esc(letter)} not found.`);
+    return;
+  }
+  if (op.siteId !== site.id) {
+    setStatus(`Lift failed - Outpost ${esc(letter)} is not at this site.`);
+    return;
+  }
+  if (getRocketStack().length > 0) {
+    setStatus(`Lift failed - rocket must be empty before lifting an outpost.`);
+    return;
+  }
+  // Move cards over.
+  for (const slot of op.cards) {
+    rocketAddCard(slot.id, slot.kind);
+  }
+  setTankWater(op.tank);
+  _rocketSiteId = op.siteId;
+  persistRocketSite();
+  // Dissolve outpost (returns the card list, but we already
+  // moved them - discard the return value).
+  dissolveOutpost(letter);
+  setStatus(
+    `🏛${esc(letter)}→🚀 Lifted Outpost ${esc(letter)} into your Rocket at `
+    + `<strong>${esc(site.name)}</strong>. `
+    + `${op.cards.length} card${op.cards.length === 1 ? '' : 's'} + ${op.tank} water transferred.`
+  );
+  logAction({
+    type: 'convert_rocket',
+    icon: '🏛→🚀',
+    summary: `Lifted Outpost ${letter} into Rocket at ${site.name} (${op.cards.length} cards, ${op.tank} water)`,
+    undoable: false,
+    data: { siteId: site.id, letter, cards: op.cards.length, tank: op.tank },
+  });
+}
+
 // Factory-Refuel handler (rulebook I5b). Adds water FTs to the
 // rocket tank up to the cap; consumes the per-turn op and the
 // per-site refuel lock. The flat 7-water yield is the "blue FT"
@@ -5090,6 +5244,64 @@ function showSitePopupFor(site) {
         title: `Colony already established at this site.`,
         onClick: () => {},
       });
+    }
+  }
+  // Rocket -> Outpost free action. Surfaces when the rocket is
+  // parked at a non-LEO site with at least one card in the
+  // stack, AND there's a free outpost slot. Cards + water tank
+  // transfer to the new outpost; rocket returns to LEO empty.
+  if (rocketSite && site.id === rocketSite.id && !isLeoSite(site)) {
+    const stack = getRocketStack();
+    const freeSlots = getAvailableOutpostSlots();
+    const ok = stack.length > 0 && freeSlots.length > 0;
+    const reason = !stack.length
+      ? 'Rocket has no cards to convert.'
+      : !freeSlots.length
+        ? 'All 4 outpost slots are in use.'
+        : null;
+    actions.push({
+      label: '🚀→🏛 Convert to Outpost',
+      variant: ok ? 'rocket' : 'secondary',
+      disabled: !ok,
+      title: reason || `Park as an Outpost (slots ${freeSlots.join(', ')} free). Free action.`,
+      onClick: () => {
+        if (!ok) return;
+        doConvertToOutpost(site);
+        _renderer.clearSitePopup();
+      },
+    });
+  }
+  // Outpost -> Rocket free action. Surfaces when an outpost
+  // exists at this site AND the rocket is empty (no cards) OR
+  // is parked at LEO. The new rocket inherits the outpost's
+  // cards + tank and is placed at this site.
+  {
+    const outposts = getOutposts();
+    const localOutposts = Object.values(outposts).filter((o) => o.siteId === site.id);
+    if (localOutposts.length > 0) {
+      const rocketCardCount = getRocketStack().length;
+      const rocketAtLeoEmpty = rocketCardCount === 0;
+      const canConvert = rocketAtLeoEmpty;
+      const reason = !canConvert
+        ? 'Convert your existing rocket first - only one rocket at a time.'
+        : null;
+      // Show one button per local outpost so the player can pick
+      // which one to lift (a site can host more than one outpost
+      // in theory, though only one per letter).
+      for (const op of localOutposts) {
+        actions.push({
+          label: `🏛${op.letter}→🚀 Lift Outpost`,
+          variant: canConvert ? 'rocket' : 'secondary',
+          disabled: !canConvert,
+          title: reason
+            || `Convert Outpost ${op.letter} into your active Rocket here (${op.cards.length} card${op.cards.length === 1 ? '' : 's'}, ${op.tank} water). Free action.`,
+          onClick: () => {
+            if (!canConvert) return;
+            doConvertToRocket(site, op.letter);
+            _renderer.clearSitePopup();
+          },
+        });
+      }
     }
   }
   // Navigate-to ALWAYS sits last (CLAUDE.md style rule). It's a
