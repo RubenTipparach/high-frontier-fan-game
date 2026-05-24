@@ -3981,30 +3981,163 @@ body:has(#view-browse:not(.hidden)) #main {
    ============================================================ */
 .hand-stack-switcher {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   flex-wrap: wrap;
+  align-items: center;
 }
-.hand-stack-chip {
-  background: var(--bg-2);
-  color: var(--ink);
+/* Each stack gets a group = label chip + pin button, visually
+   joined into one pill so the player reads "stack X with its
+   own find-pin". Pin has its own click target so tapping the
+   pin doesn't open the modal. */
+.hand-stack-group {
+  display: inline-flex;
+  align-items: stretch;
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 2px 8px;
+  background: var(--bg-2);
+  overflow: hidden;
+  line-height: 1;
+}
+.hand-stack-group:hover {
+  border-color: var(--accent);
+}
+.hand-stack-group.is-focused {
+  background: rgba(125, 211, 252, 0.18);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.5);
+}
+.hand-stack-group.is-empty {
+  opacity: 0.5;
+}
+.hand-stack-group.is-empty:hover { opacity: 0.75; }
+
+.hand-stack-chip,
+.hand-stack-pin {
+  background: transparent;
+  color: var(--ink);
+  border: 0;
+  padding: 3px 8px;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.2px;
   cursor: pointer;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
-.hand-stack-chip:hover {
+.hand-stack-chip:hover,
+.hand-stack-pin:hover:not(:disabled) {
   background: var(--panel-2);
-  border-color: var(--accent);
 }
-.hand-stack-chip.is-focused {
-  background: rgba(125, 211, 252, 0.18);
-  border-color: var(--accent);
+.hand-stack-group.is-focused .hand-stack-chip,
+.hand-stack-group.is-focused .hand-stack-pin {
   color: var(--accent);
-  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.5);
+}
+.hand-stack-chip .chip-glyph { font-size: 14px; }
+.hand-stack-chip .chip-sub   { font-size: 11px; }
+.hand-stack-pin {
+  border-left: 1px solid var(--border);
+  font-size: 12px;
+  padding: 3px 6px;
+}
+.hand-stack-pin:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ============================================================
+   Stack inspector modal (LEO / Outpost / Empty-slot helper).
+   The Rocket case keeps using the existing rocket stack modal;
+   these three are the new lightweight inspectors for the
+   non-rocket stacks.
+   ============================================================ */
+.stack-inspector-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  max-width: 480px;
+  width: 100%;
+  color: var(--ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.stack-inspector-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.stack-inspector-head h3 { margin: 0; font-size: 18px; letter-spacing: 0.5px; }
+.stack-inspector-loc {
+  font-size: 12px;
+  color: var(--muted, #94a3b8);
+}
+.stack-inspector-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.stack-inspector-stat-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.stack-inspector-stat {
+  flex: 1 1 0;
+  min-width: 90px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.stack-inspector-stat .stat-aqua { color: #facc15; font-size: 16px; }
+.stack-inspector-stat .stat-water { color: #7dd3fc; font-size: 16px; }
+.stack-inspector-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.stack-inspector-cards li {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+.stack-inspector-cards .card-face-tag {
+  display: inline-block;
+  background: #0c0a16;
+  color: #fde68a;
+  border: 1px solid #422006;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  margin-left: 4px;
+}
+.stack-inspector-foot { margin: 0; }
+.stack-inspector-howto {
+  margin: 0 0 0 18px;
+  padding: 0;
+  font-size: 13px;
+}
+.stack-inspector-modal .card-modal-actions {
+  margin-top: 4px;
+  justify-content: flex-end;
 }
 
 /* ============================================================

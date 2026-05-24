@@ -302,24 +302,17 @@
             <div class="hand-header">
               <span class="hand-title">✋ Hand</span>
               <!--
-                Stage-3 stack switcher. Chips render dynamically from
-                js/game/browse.js#renderStackSwitcher. Always shows
-                🌍 LEO + 🚀 Rocket; 🏛A..D chips appear only when
-                their slot is occupied. Tapping a chip focuses that
-                stack (flies the map to its site, highlights it on
-                the map via the focus ring).
+                Stage-3 stack switcher. Renders six buttons (LEO,
+                Rocket, Outpost A/B/C/D), each with its own 📍
+                find-pin. Click the label to open that stack's
+                detail modal; click the pin to fly the map to
+                that stack without opening the modal. Empty
+                outpost slots stay visible but disabled with a
+                "click to learn how to create" affordance.
+                See js/game/browse.js#renderStackSwitcher.
               -->
               <div id="hand-stack-switcher" class="hand-stack-switcher"
                 aria-label="Switch focused stack"></div>
-              <button id="hand-stack-open" type="button"
-                title="Open the LEO rocket stack">
-                🛸 Stack
-              </button>
-              <button id="hand-stack-locate" type="button"
-                title="Pan the map to the rocket"
-                aria-label="Locate rocket on map">
-                📍
-              </button>
               <span class="hand-count" id="hand-count">0 cards</span>
               <button id="hand-boost-commit" type="button" disabled
                 data-armed="0" title="Boost every marked card to the LEO rocket">

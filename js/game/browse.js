@@ -372,38 +372,10 @@ function wireHandStrip() {
   const commitBtn = document.getElementById('hand-boost-commit');
   if (commitBtn) commitBtn.addEventListener('click', commitBoost);
 
-  // Stack button next to ✋ Hand: zooms the map to wherever the
-  // rocket currently sits (so the sprite stays in view even after
-  // the rocket has left LEO) AND pops the stack modal. Only falls
-  // back to LEO when no rocket has been built yet - i.e. there's
-  // no sprite to follow.
-  const stackBtn = document.getElementById('hand-stack-open');
-  if (stackBtn) stackBtn.addEventListener('click', () => {
-    if (_renderer) {
-      const stack = getRocketStack();
-      const site = stack.length ? getRocketSite() : null;
-      if (site && Number.isFinite(site.x) && Number.isFinite(site.y)) {
-        _renderer.flyTo(site, locateZoom(4));
-      } else {
-        _renderer.flyTo(LEO_ANCHOR, locateZoom(4));
-      }
-    }
-    openRocketStackModal();
-  });
-  // Locator button: pans to the rocket WITHOUT opening the stack
-  // modal - handy on mobile where the modal hides the map and the
-  // player just wants to see where the ship is.
-  const locateBtn = document.getElementById('hand-stack-locate');
-  if (locateBtn) locateBtn.addEventListener('click', () => {
-    if (!_renderer) return;
-    const stack = getRocketStack();
-    const site = stack.length ? getRocketSite() : null;
-    if (site && Number.isFinite(site.x) && Number.isFinite(site.y)) {
-      _renderer.flyTo(site, locateZoom(4));
-    } else {
-      _renderer.flyTo(LEO_ANCHOR, locateZoom(4));
-    }
-  });
+  // The old #hand-stack-open and #hand-stack-locate top-level
+  // buttons folded into the per-stack chips that the new
+  // switcher renders below (each chip has its own 📍 pin); the
+  // explicit listeners above are gone.
 
   repaintHand();
   onHandChange(repaintHand);
@@ -416,55 +388,125 @@ function wireHandStrip() {
   onFocusChange(renderStackSwitcher);
   onOutpostsChange(renderStackSwitcher);
   onRocketChange(renderStackSwitcher);
+  onAquaChange(renderStackSwitcher);
+  onHandChange(renderStackSwitcher);
+  onFactoryChange(renderStackSwitcher);
+  onColonyChange(renderStackSwitcher);
 }
 
-// Render the hand-bar stack switcher chips. Always shows
-// 🌍 LEO + 🚀 Rocket; 🏛A..D chips appear only when their
-// slot is occupied. The chip for the currently-focused stack
-// gets the `is-focused` class so the player can spot it at a
-// glance. Tapping a chip:
-//   1. Calls setFocusedStackId(id) - flips the focus state.
-//   2. Flies the map to that stack's site (or LEO anchor).
-// The renderer's focus-ring then repaints automatically via
-// the existing syncFocusedSite subscriber.
+// Render the hand-bar stack switcher. ALWAYS shows 6 buttons
+// (LEO, Rocket, Outpost A/B/C/D); empty outpost slots stay
+// visible but disabled. Each button is paired with a 📍 find-
+// pin that flies the map to that stack without opening the
+// modal - the old global Stack/Locate buttons fold into these
+// per-stack controls.
+//
+// Click semantics:
+//   - main button click  : focus this stack + open its inspector modal
+//   - pin button click   : focus this stack + fly the map (no modal)
+//   - empty outpost slot : the main button still opens a modal
+//                          explaining how to create one; the pin is
+//                          disabled (nowhere to fly).
 function renderStackSwitcher() {
   const host = document.getElementById('hand-stack-switcher');
   if (!host) return;
   const focused = getFocusedStackId();
   const outposts = getOutposts();
-  const chips = [];
-  // LEO and Rocket are always present (even if the rocket
-  // stack is empty - the chip still represents the slot).
-  chips.push({ id: 'leo',    label: '🌍 LEO',    title: 'Focus the LEO hand / aqua bank' });
-  chips.push({ id: 'rocket', label: '🚀 Rocket', title: 'Focus the active Rocket stack' });
+  const rocketStack = getRocketStack();
+  const rocketSite = getRocketSite();
+
+  // Build one descriptor per stack slot. `siteAvailable` is what
+  // the pin uses - false when there's no place to fly to (empty
+  // outpost slot; rocket with no cards still has LEO as a sane
+  // fallback, so we treat that as available).
+  const slots = [
+    {
+      id: 'leo', label: '🌍', sub: 'LEO',
+      title: `LEO hand + aqua bank (${getHandSlots().length} hand cards, ${getAqua()} aqua)`,
+      siteAvailable: true,
+      isEmpty: false,
+    },
+    {
+      id: 'rocket', label: '🚀', sub: 'Rocket',
+      title: rocketStack.length
+        ? `Rocket - ${rocketStack.length} card${rocketStack.length === 1 ? '' : 's'}, ${getTankWater()} water${rocketSite ? `, at ${rocketSite.name}` : ', at LEO'}`
+        : 'Rocket - empty (boost cards from hand to build the stack)',
+      siteAvailable: true,
+      isEmpty: false,
+    },
+  ];
   for (const letter of ['A', 'B', 'C', 'D']) {
-    if (outposts[letter]) {
-      chips.push({
-        id: `outpost${letter}`,
-        label: `🏛${letter}`,
-        title: `Focus Outpost ${letter} (${outposts[letter].cards.length} card${outposts[letter].cards.length === 1 ? '' : 's'}, ${outposts[letter].tank} water)`,
+    const op = outposts[letter];
+    if (op) {
+      const opSite = _activeData?.byId?.[op.siteId];
+      const factory = getFactory(op.siteId);
+      const colony = getColony(op.siteId);
+      const factoryTag = factory ? ` 🏭${factory.spectralType}` : '';
+      const colonyTag  = colony  ? ' 🌐' : '';
+      slots.push({
+        id: `outpost${letter}`, label: '🏛', sub: letter,
+        title: `Outpost ${letter} at ${opSite?.name || op.siteId} - ${op.cards.length} card${op.cards.length === 1 ? '' : 's'}, ${op.tank} water${factoryTag}${colonyTag}`,
+        siteAvailable: !!opSite,
+        isEmpty: false,
+      });
+    } else {
+      slots.push({
+        id: `outpost${letter}`, label: '🏛', sub: letter,
+        title: `Outpost slot ${letter} is empty - convert a parked rocket here via 🚀→🏛`,
+        siteAvailable: false,
+        isEmpty: true,
       });
     }
   }
-  host.innerHTML = chips.map((c) =>
-    `<button type="button" class="hand-stack-chip ${c.id === focused ? 'is-focused' : ''}" data-stack="${esc(c.id)}" title="${esc(c.title)}">${esc(c.label)}</button>`
-  ).join('');
-  host.querySelectorAll('.hand-stack-chip').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const id = btn.getAttribute('data-stack');
-      if (!id || id === focused) return;
-      setFocusedStackId(id);
-      flyToFocusedStack();
-    });
+
+  host.innerHTML = slots.map((s) => {
+    const focusedClass = s.id === focused ? 'is-focused' : '';
+    const emptyClass   = s.isEmpty ? 'is-empty' : '';
+    return `<span class="hand-stack-group ${focusedClass} ${emptyClass}" data-stack="${esc(s.id)}">
+      <button type="button" class="hand-stack-chip" title="${esc(s.title)}">
+        <span class="chip-glyph">${esc(s.label)}</span>
+        <span class="chip-sub">${esc(s.sub)}</span>
+      </button>
+      <button type="button" class="hand-stack-pin" title="Fly map to ${esc(s.sub)}" ${s.siteAvailable ? '' : 'disabled'}>📍</button>
+    </span>`;
+  }).join('');
+
+  host.querySelectorAll('.hand-stack-group').forEach((group) => {
+    const id = group.getAttribute('data-stack');
+    const chip = group.querySelector('.hand-stack-chip');
+    const pin  = group.querySelector('.hand-stack-pin');
+    if (chip) chip.addEventListener('click', () => focusAndOpenStack(id));
+    if (pin)  pin.addEventListener('click',  () => focusAndFlyStack(id));
   });
 }
 
-// Pan the map to whichever stack is currently focused. LEO
-// flies to the LEO_ANCHOR; Rocket flies to the rocket's site
-// (LEO when empty); an outpost flies to its site.
-function flyToFocusedStack() {
+// Focus a stack + open its inspector modal. Used by the chip
+// click. Always sets focus, even if the stack is empty - the
+// modal is the affordance that explains the empty state.
+function focusAndOpenStack(id) {
+  if (!id) return;
+  // Only set focus when the slot can actually be focused (empty
+  // outpost slots are not focusable per stacks.js#setFocusedStackId,
+  // which rejects ids whose outpost doesn't exist). For empty
+  // slots we still open the modal so the player learns how to
+  // populate the slot.
+  setFocusedStackId(id);
+  openStackInspectorModal(id);
+}
+
+// Focus a stack + fly the map to its site. Used by the pin
+// click - same as above but no modal.
+function focusAndFlyStack(id) {
+  if (!id) return;
+  setFocusedStackId(id);
+  flyToStack(id);
+}
+
+// Pan the map to the stack with the given id. LEO flies to
+// LEO_ANCHOR; Rocket flies to the rocket's site (LEO when
+// empty); an outpost flies to its site.
+function flyToStack(id) {
   if (!_renderer) return;
-  const id = getFocusedStackId();
   if (id === 'leo') {
     _renderer.flyTo(LEO_ANCHOR, locateZoom(4));
     return;
@@ -488,6 +530,190 @@ function flyToFocusedStack() {
       _renderer.flyTo(site, locateZoom(4));
     }
   }
+}
+
+// Stack inspector modal router. The Rocket case re-uses the
+// existing full-featured openRocketStackModal; LEO and outposts
+// get their own focused modals. Empty outpost slots get an
+// affordance modal that explains how to populate the slot.
+function openStackInspectorModal(id) {
+  if (id === 'leo') { openLeoStackModal(); return; }
+  if (id === 'rocket') { openRocketStackModal(); return; }
+  if (id && id.startsWith('outpost')) {
+    const letter = id.slice('outpost'.length);
+    const op = getOutpost(letter);
+    if (op) openOutpostStackModal(letter);
+    else    openEmptyOutpostModal(letter);
+  }
+}
+
+// LEO inspector: aqua bank + hand cards. Simple read-only view
+// (the hand strip below the map is the primary interaction
+// surface for hand cards; this modal is more of a glanceable
+// summary).
+function openLeoStackModal() {
+  document.querySelector('.stack-inspector-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay stack-inspector-overlay';
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const handIds = getHandSlots();
+  const aqua = getAqua();
+  const cardsHtml = handIds.length
+    ? handIds.map((id) => {
+        const c = cardById(id);
+        return `<li><strong>${esc(c?.name || id)}</strong> <span class="muted">${esc(c?.type || '')}</span></li>`;
+      }).join('')
+    : '<li class="muted">Hand is empty.</li>';
+  const dialog = document.createElement('div');
+  dialog.className = 'stack-inspector-modal';
+  dialog.innerHTML = `
+    <div class="stack-inspector-head">
+      <h3>🌍 LEO - Hand &amp; Aqua Bank</h3>
+    </div>
+    <div class="stack-inspector-body">
+      <div class="stack-inspector-stat-row">
+        <div class="stack-inspector-stat">
+          <span class="muted">Aqua bank</span>
+          <strong class="stat-aqua">${esc(String(aqua))} 💧</strong>
+        </div>
+        <div class="stack-inspector-stat">
+          <span class="muted">Hand cards</span>
+          <strong>${esc(String(handIds.length))}</strong>
+        </div>
+      </div>
+      <h4>Cards in hand</h4>
+      <ul class="stack-inspector-cards">${cardsHtml}</ul>
+      <p class="muted stack-inspector-foot">
+        Drag cards from the patent library to add to your hand;
+        click the boost-mark on a hand card and 🚀 BOOST to ship
+        it to the active rocket stack.
+      </p>
+    </div>
+    <div class="card-modal-actions">
+      <button type="button" class="modal-btn stack-inspector-close">Close</button>
+    </div>
+  `;
+  overlay.appendChild(dialog);
+  dialog.querySelector('.stack-inspector-close').addEventListener('click', close);
+  document.body.appendChild(overlay);
+  overlay.focus();
+}
+
+// Outpost inspector: shows the outpost's cards (with Black-
+// Side markers for ET-Produced cards), tank, factory + colony
+// attachment, and a quick "lift to rocket" button when the
+// player's rocket is empty.
+function openOutpostStackModal(letter) {
+  const op = getOutpost(letter);
+  if (!op) return;
+  document.querySelector('.stack-inspector-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay stack-inspector-overlay';
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const site = _activeData?.byId?.[op.siteId];
+  const factory = getFactory(op.siteId);
+  const colony  = getColony(op.siteId);
+  const cardsHtml = op.cards.length
+    ? op.cards.map((slot) => {
+        const c = cardById(slot.id);
+        const blackSide = slot.face === 'secondary' ? '<span class="card-face-tag" title="Black-Side / Tier 2">BS</span>' : '';
+        return `<li><strong>${esc(c?.name || slot.id)}</strong> ${blackSide} <span class="muted">${esc(c?.type || slot.kind || '')}</span></li>`;
+      }).join('')
+    : '<li class="muted">Outpost has no cards.</li>';
+  const rocketEmpty = getRocketStack().length === 0;
+  const dialog = document.createElement('div');
+  dialog.className = 'stack-inspector-modal';
+  dialog.innerHTML = `
+    <div class="stack-inspector-head">
+      <h3>🏛${esc(letter)} - Outpost</h3>
+      <span class="stack-inspector-loc">${esc(site?.name || op.siteId)}</span>
+    </div>
+    <div class="stack-inspector-body">
+      <div class="stack-inspector-stat-row">
+        <div class="stack-inspector-stat">
+          <span class="muted">Cards</span>
+          <strong>${esc(String(op.cards.length))}</strong>
+        </div>
+        <div class="stack-inspector-stat">
+          <span class="muted">Water FT</span>
+          <strong class="stat-water">${esc(String(op.tank))} 💧</strong>
+        </div>
+        <div class="stack-inspector-stat">
+          <span class="muted">Factory</span>
+          <strong>${factory ? `🏭 spectral <span class="industrialize-spectral-badge spectral-${esc(factory.spectralType)}">${esc(factory.spectralType)}</span>` : '<span class="muted">none</span>'}</strong>
+        </div>
+        <div class="stack-inspector-stat">
+          <span class="muted">Colony</span>
+          <strong>${colony ? '🌐 dome' : '<span class="muted">none</span>'}</strong>
+        </div>
+      </div>
+      <h4>Cards in outpost</h4>
+      <ul class="stack-inspector-cards">${cardsHtml}</ul>
+      <p class="muted stack-inspector-foot">
+        ${rocketEmpty
+          ? 'Your rocket is empty - you can lift this outpost into a rocket from the site popup (🏛→🚀 Lift Outpost).'
+          : 'Your rocket already has cards. Convert your rocket first (🚀→🏛) before lifting this outpost.'}
+      </p>
+    </div>
+    <div class="card-modal-actions">
+      <button type="button" class="modal-btn stack-inspector-close">Close</button>
+    </div>
+  `;
+  overlay.appendChild(dialog);
+  dialog.querySelector('.stack-inspector-close').addEventListener('click', close);
+  document.body.appendChild(overlay);
+  overlay.focus();
+}
+
+// Empty-slot affordance modal. Explains how the player can
+// populate the slot. Tells the player which other slots are
+// occupied so they understand the constraint.
+function openEmptyOutpostModal(letter) {
+  document.querySelector('.stack-inspector-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay stack-inspector-overlay';
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const taken = Object.keys(getOutposts()).sort();
+  const takenLabel = taken.length
+    ? `Occupied slots: <strong>${taken.join(', ')}</strong>`
+    : 'No outpost slots are occupied yet.';
+  const dialog = document.createElement('div');
+  dialog.className = 'stack-inspector-modal';
+  dialog.innerHTML = `
+    <div class="stack-inspector-head">
+      <h3>🏛${esc(letter)} - Empty slot</h3>
+    </div>
+    <div class="stack-inspector-body">
+      <p>Outpost slot <strong>${esc(letter)}</strong> isn't in use yet. To create an outpost in this slot:</p>
+      <ol class="stack-inspector-howto">
+        <li>Park your rocket at any non-LEO site with cards loaded.</li>
+        <li>Open the site popup and tap <strong>🚀→🏛 Convert to Outpost</strong>.</li>
+        <li>Pick slot <strong>${esc(letter)}</strong> from the picker.</li>
+      </ol>
+      <p class="muted">${takenLabel}</p>
+      <p class="muted">
+        ET Production at a player-owned factory can also create
+        a fresh outpost when none exists at that site - the slot
+        picker will offer this letter.
+      </p>
+    </div>
+    <div class="card-modal-actions">
+      <button type="button" class="modal-btn stack-inspector-close">Close</button>
+    </div>
+  `;
+  overlay.appendChild(dialog);
+  dialog.querySelector('.stack-inspector-close').addEventListener('click', close);
+  document.body.appendChild(overlay);
+  overlay.focus();
 }
 
 // Vertical resize grabber for the hand strip. Tracks a CSS
