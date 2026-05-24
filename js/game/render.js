@@ -69,7 +69,15 @@ export function shortRefId(id) {
 function isLeoWaypoint(w) {
   return w && w.type === 'lagrange' && w.name === 'LEO';
 }
-const DEFAULT_ZOOM = 1.8;
+const DEFAULT_ZOOM        = 6;
+const MOBILE_DEFAULT_ZOOM = 5;
+// Mobile viewports (≤720 px) open the map slightly farther
+// out than desktop - the canvas is denser per pixel + a closer
+// initial zoom hides too much of the system at a glance.
+function _isMobileViewport() {
+  try { return window.matchMedia('(max-width: 720px)').matches; }
+  catch { return false; }
+}
 // Cap the celestial body halo at this many screen pixels so extreme
 // zoom doesn't turn Saturn into the entire canvas.
 const HALO_MAX_SCREEN_R = 110;
@@ -562,7 +570,7 @@ export class MapRenderer {
       // them as dots clutters the map and adds nothing the user can
       // act on. Off by default; debug panel can flip it back on.
       showDecoratives: false,
-      initialZoom: DEFAULT_ZOOM,
+      initialZoom: _isMobileViewport() ? MOBILE_DEFAULT_ZOOM : DEFAULT_ZOOM,
       debug: false,
     };
     this._frameCount = 0;
@@ -627,6 +635,27 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
+  // Trigger a one-shot explosion at a world-space position. Used
+  // when a hazard roll critical-fails on the sandbox rocket. The
+  // animation is fully self-clearing - rings expand + fade and
+  // particles fly outward for EXPLOSION_DURATION ms, then this
+  // slot nulls itself on the next draw. Caller awaits the same
+  // duration before returning cards to hand so the visual and
+  // the state mutation land together.
+  triggerExplosion(x, y, opts = {}) {
+    this._explosion = {
+      x, y,
+      startTime: (this._animTime || performance.now()),
+      seed: Math.random(),
+      ...opts,
+    };
+    this._scheduleDraw();
+  }
+  clearExplosion() {
+    this._explosion = null;
+    this._scheduleDraw();
+  }
+
   // Solo: pin a "player ship" marker to a specific site. Drawn as
   // a screen-space triangle floating above the site so it's
   // visible regardless of the underlying hex.
@@ -640,18 +669,51 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
-  // Pan + zoom to centre a specific site / waypoint in the
-  // viewport. Used by the search box's "fly to" affordance.
-  // `zoom` defaults to 5x which fills the cluster around a body
-  // without diving into the hex's individual glyphs.
-  flyTo(target, zoom = 5) {
+  // Smoothly pan + zoom to centre a specific site / waypoint in
+  // the viewport. Used by the search box, the locator buttons,
+  // and the explosion camera-pan. `zoom` defaults to 5x which
+  // fills the cluster around a body without diving into the
+  // hex's individual glyphs. Tween duration is ~420 ms with
+  // ease-out cubic so the camera feels responsive without
+  // jumping. Pass `{ ms: 0 }` to snap (legacy fast path).
+  flyTo(target, zoom = 5, { ms = 420 } = {}) {
     if (!target || typeof target.x !== 'number' || typeof target.y !== 'number') return;
     this._cancelPanAnim();
-    this.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
-    const eff = this.zoom * this.fitScale;
-    this.pan.x = this.hostW / 2 - target.x * eff;
-    this.pan.y = this.hostH / 2 - target.y * eff;
-    this._scheduleDraw();
+    const endZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
+    const endEff  = endZoom * this.fitScale;
+    const endPanX = this.hostW / 2 - target.x * endEff;
+    const endPanY = this.hostH / 2 - target.y * endEff;
+    if (!Number.isFinite(ms) || ms <= 0) {
+      // Snap path - kept for code that explicitly wants the
+      // instant version (rare; most call sites benefit from the
+      // animated default).
+      this.zoom = endZoom;
+      this.pan.x = endPanX;
+      this.pan.y = endPanY;
+      this._scheduleDraw();
+      return;
+    }
+    const startZoom = this.zoom;
+    const startPanX = this.pan.x;
+    const startPanY = this.pan.y;
+    // No-op short circuit: if we're already exactly there,
+    // skip the tween entirely so callers can flyTo redundantly
+    // without paying for a frame loop.
+    if (startZoom === endZoom && startPanX === endPanX && startPanY === endPanY) {
+      return;
+    }
+    const t0 = performance.now();
+    const step = (now) => {
+      const k = Math.min(1, (now - t0) / ms);
+      const e = 1 - Math.pow(1 - k, 3);   // ease-out cubic
+      this.zoom  = startZoom + (endZoom  - startZoom) * e;
+      this.pan.x = startPanX + (endPanX  - startPanX) * e;
+      this.pan.y = startPanY + (endPanY  - startPanY) * e;
+      this._scheduleDraw();
+      if (k < 1) this._panAnimRaf = requestAnimationFrame(step);
+      else this._panAnimRaf = null;
+    };
+    this._panAnimRaf = requestAnimationFrame(step);
   }
 
   // Smoothly pan (no zoom change) to centre a world-space point.
@@ -1010,6 +1072,7 @@ export class MapRenderer {
     this._drawLeoAnchorScreen(ctx);
     this._drawPlayerShipScreen(ctx);
     if (this._sandboxRocket) this._drawSandboxRocketScreen(ctx);
+    if (this._explosion)     this._drawExplosionScreen(ctx);
     // Selection ring drawn LAST so nothing - labels, ships, hexes
     // - paints over it. On mobile the in-hex orange/gold border is
     // easy to miss, so we layer a thick bright yellow ring + soft
@@ -2003,6 +2066,82 @@ export class MapRenderer {
       x: px, y: py, w, h,
       thruster: r.thruster || null,
     };
+  }
+
+  // One-shot explosion at the rocket's world position. Painted
+  // as three concentric rings (hot core → orange → smoke) +
+  // a scattered particle burst, all fading + expanding over
+  // ~1.4 s. The whole thing auto-clears at the end of its
+  // lifetime so the caller doesn't need to schedule a teardown.
+  _drawExplosionScreen(ctx) {
+    const ex = this._explosion;
+    if (!ex) return;
+    const DURATION = 1400;
+    const elapsed = (this._animTime || performance.now()) - ex.startTime;
+    if (elapsed >= DURATION) {
+      this._explosion = null;
+      return;
+    }
+    const t = Math.max(0, elapsed / DURATION);     // 0..1
+    const eff = this.zoom * this.fitScale;
+    const sx = this.pan.x + ex.x * eff;
+    const sy = this.pan.y + ex.y * eff;
+    // Foot offset: same as the rocket sprite so the explosion
+    // sits over where the rocket actually was, not at the anchor.
+    const cy = sy - 18;
+    ctx.save();
+    // Three rings spaced in time so the burst has depth: each
+    // starts a bit later and lasts the rest of the animation.
+    const rings = [
+      { delay: 0.00, color: '#fde047', maxR: 36 },
+      { delay: 0.08, color: '#f97316', maxR: 56 },
+      { delay: 0.18, color: '#7f1d1d', maxR: 78 },
+    ];
+    for (const ring of rings) {
+      if (t < ring.delay) continue;
+      const lt = Math.min(1, (t - ring.delay) / (1 - ring.delay));
+      const r  = 4 + lt * ring.maxR;
+      const a  = Math.max(0, 1 - lt) * 0.85;
+      ctx.beginPath();
+      ctx.arc(sx, cy, r, 0, Math.PI * 2);
+      ctx.strokeStyle = ring.color;
+      ctx.globalAlpha = a;
+      ctx.lineWidth = 3 - lt * 2;
+      ctx.stroke();
+    }
+    // Hot fireball at the centre: solid disc that flares then
+    // collapses to a smoke puff.
+    ctx.globalAlpha = Math.max(0, 1 - t) * 0.9;
+    ctx.beginPath();
+    ctx.arc(sx, cy, 8 + Math.sin(t * Math.PI) * 14, 0, Math.PI * 2);
+    const grad = ctx.createRadialGradient(sx, cy, 1, sx, cy, 22);
+    grad.addColorStop(0, '#fffbeb');
+    grad.addColorStop(0.4, '#fbbf24');
+    grad.addColorStop(1, 'rgba(127, 29, 29, 0)');
+    ctx.fillStyle = grad;
+    ctx.fill();
+    // Particles - 18 sparks flying outward, each on its own
+    // angle + speed seeded from the explosion's RNG seed so the
+    // burst is reproducible per-explosion (slightly varying so
+    // they don't read as identical rings).
+    const N = 18;
+    const seed = ex.seed || 0;
+    for (let i = 0; i < N; i++) {
+      const ang  = (i / N) * Math.PI * 2 + seed * 0.7;
+      const spd  = 70 + ((i * 37 + seed * 1000) % 50);  // px/s
+      const dist = spd * (elapsed / 1000);
+      const px = sx + Math.cos(ang) * dist;
+      const py = cy + Math.sin(ang) * dist;
+      const a  = Math.max(0, 1 - t) * 0.9;
+      ctx.globalAlpha = a;
+      ctx.beginPath();
+      ctx.arc(px, py, 2.4 * (1 - t * 0.5), 0, Math.PI * 2);
+      ctx.fillStyle = i % 3 === 0 ? '#fde047'
+                    : i % 3 === 1 ? '#f97316'
+                                  : '#fca5a5';
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   // Returns true if (sx, sy) screen-space pixel lies inside the

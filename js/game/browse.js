@@ -10,7 +10,7 @@ import { loadPlannerMap } from './planner-map.js';
 import { planRoute } from './planner-nav.js';
 import {
   consumeMove, refundMove, getTurn, getMovesRemaining, onTurnChange,
-  getEventForRoll, getSeasonForSlot, resetClock,
+  getEventForRoll, getSeasonForSlot, getSeason, resetClock,
 } from './turn-clock.js';
 import { triggerEndTurn, openTurnClockModal, buildDie, rollDie } from './turn-clock-ui.js';
 import {
@@ -35,6 +35,7 @@ import {
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats,
   isAfterburnEngaged, setAfterburn,
+  getAqua, spendAqua, addAqua, onAquaChange,
 } from './rocket.js';
 import { canProspect, computeRaygunTargets } from './scan.js';
 import {
@@ -45,7 +46,11 @@ import { CREW } from '../../data/crew.js';
 import { MILESTONES } from '../../data/glory.js';
 import { POLITICS } from '../../data/politics.js';
 import { SITES_BY_ID } from '../../data/sites.js';
-import { renderCard, thrustVisual, attachTipsTo } from './card-ui.js';
+import {
+  renderCard, thrustVisual, attachTipsTo,
+  REQUIREMENT_VIS, REQ_SUPPLIER_TYPE,
+  svgSunChip, svgBallerinaChip,
+} from './card-ui.js';
 import {
   logAction, getActions, getHistory, popLastOfType,
   commitTurn as commitLogTurn, resetLog, onChange as onLogChange,
@@ -101,6 +106,15 @@ export function mountBrowse() {
 // or external mouse on a tablet still resolves to "hover".
 function isTouchDevice() {
   return window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+}
+
+// On a phone, panning to a site / rocket / search result needs
+// to land MUCH closer than the desktop default - the canvas is
+// pixel-dense and a 4×-5× zoom leaves the target as a tiny dot.
+// Every "find this thing on the map" call routes through here
+// so the touch breakpoint can override in one place.
+function locateZoom(desktopZoom = 4) {
+  return isTouchDevice() ? 7 : desktopZoom;
 }
 
 let _handWired = false;
@@ -164,12 +178,12 @@ function wireHandStrip() {
       const cardEl = renderCard(card, { type: kindOf(id) });
       wrap.appendChild(cardEl);
 
-      // Quick-action row appended INSIDE the card element so
-      // it shares the same scale + transform as the Flip
-      // button (which card-ui appends to the card root). Both
-      // end up at the card's actual visible bottom edge -
-      // previously the quick-icons sat at the slot's bottom
-      // edge, which is way below the scaled card.
+      // Quick-action row appended as a sibling of the card so
+      // it CAN'T be clipped by .card's overflow:hidden when it
+      // floats above the card top edge on hover. The slot's
+      // 1.18 hover-scale carries both the card and this row so
+      // they grow together. Positioning + reveal handled in
+      // CSS via .hand-slot:hover.
       const quick = document.createElement('div');
       quick.className = 'hand-quick-actions';
       const qBtn = (cls, glyph, title, handler) => {
@@ -193,7 +207,7 @@ function wireHandStrip() {
         qBtn('q-boost',   '🚀', isBoostMarked(id) ? 'Unmark boost' : 'Mark for boost',
           () => toggleBoostMark(id)),
       );
-      cardEl.appendChild(quick);
+      wrap.appendChild(quick);
 
       // Mobile-only "View" button. On touch devices we drop
       // the hover affordances (no hover on touch) and replace
@@ -267,12 +281,26 @@ function wireHandStrip() {
       const stack = getRocketStack();
       const site = stack.length ? getRocketSite() : null;
       if (site && Number.isFinite(site.x) && Number.isFinite(site.y)) {
-        _renderer.flyTo(site, 4);
+        _renderer.flyTo(site, locateZoom(4));
       } else {
-        _renderer.flyTo(LEO_ANCHOR, 4);
+        _renderer.flyTo(LEO_ANCHOR, locateZoom(4));
       }
     }
     openRocketStackModal();
+  });
+  // Locator button: pans to the rocket WITHOUT opening the stack
+  // modal - handy on mobile where the modal hides the map and the
+  // player just wants to see where the ship is.
+  const locateBtn = document.getElementById('hand-stack-locate');
+  if (locateBtn) locateBtn.addEventListener('click', () => {
+    if (!_renderer) return;
+    const stack = getRocketStack();
+    const site = stack.length ? getRocketSite() : null;
+    if (site && Number.isFinite(site.x) && Number.isFinite(site.y)) {
+      _renderer.flyTo(site, locateZoom(4));
+    } else {
+      _renderer.flyTo(LEO_ANCHOR, locateZoom(4));
+    }
   });
 
   repaintHand();
@@ -319,6 +347,43 @@ function wireHandGrabber(grabber, strip) {
   grabber.addEventListener('touchstart', onPointerDown, { passive: true });
 }
 
+// Modals + the drag-ghost append to the live overlay root, which
+// is the fullscreen element when one is active (e.g. the user
+// pressed ⛶ on the map toolbar) and document.body otherwise.
+// Anything appended outside the fullscreen root is invisible
+// while the Fullscreen API is engaged - so a modal mounted in
+// body would just silently not show up. The watcher below
+// re-parents any open overlays on fullscreenchange so they
+// follow the user in / out of fullscreen too.
+function overlayRoot() {
+  return document.fullscreenElement || document.body;
+}
+function mountOverlay(el) {
+  overlayRoot().appendChild(el);
+  return el;
+}
+document.addEventListener('fullscreenchange', () => {
+  const root = overlayRoot();
+  // Move every known overlay class into the new root so a modal
+  // that was open when the user toggled fullscreen stays visible.
+  // Selectors cover the card / fuel-tank / rocket-stack /
+  // confirm / hazard / turn-clock modals + the drag ghost.
+  const selectors = [
+    '.card-modal-overlay',
+    '.fuel-tank-overlay',
+    '.confirm-modal-overlay',
+    '.rocket-stack-overlay',
+    '.hazard-confirm-overlay',
+    '.drag-ghost',
+    '.card-tip',
+  ];
+  for (const sel of selectors) {
+    for (const el of document.querySelectorAll(sel)) {
+      if (el.parentNode !== root) root.appendChild(el);
+    }
+  }
+});
+
 // Custom drag-image. The browser's default drag-image is a
 // faded snapshot of the element with no animation; we replace
 // it with a fixed-position clone that follows the pointer, casts
@@ -351,7 +416,7 @@ function startCustomDragGhost(srcEl, ev) {
   const offsetY = ev.clientY - rect.top;
   ghost.style.left = (ev.clientX - offsetX) + 'px';
   ghost.style.top  = (ev.clientY - offsetY) + 'px';
-  document.body.appendChild(ghost);
+  mountOverlay(ghost);
 
   _dragGhost = ghost;
   _dragGhostState = {
@@ -421,7 +486,13 @@ function openDeckTapModal(card, kind) {
 
   const panel = document.createElement('div');
   panel.className = 'card-modal-panel';
-  const cardEl = renderCard(card, { type: kind });
+  const cardEl = renderCard(card, {
+    type: kind,
+    onSupportClick: (kinds) => {
+      close();
+      openPatentsSupports(kinds);
+    },
+  });
   cardEl.classList.add('card-modal-card');
   panel.appendChild(cardEl);
 
@@ -441,7 +512,7 @@ function openDeckTapModal(card, kind) {
   actions.append(addBtn);
   panel.appendChild(actions);
   overlay.appendChild(panel);
-  document.body.appendChild(overlay);
+  mountOverlay(overlay);
   // Tap the backdrop or press Escape to dismiss - no explicit ×
   // button. The card modal is small and the backdrop is the
   // obvious affordance.
@@ -461,7 +532,13 @@ function openCardModal(card, kind, slotIdx) {
 
   const panel = document.createElement('div');
   panel.className = 'card-modal-panel';
-  const cardEl = renderCard(card, { type: kind });
+  const cardEl = renderCard(card, {
+    type: kind,
+    onSupportClick: (kinds) => {
+      close();
+      openPatentsSupports(kinds);
+    },
+  });
   cardEl.classList.add('card-modal-card');
   panel.appendChild(cardEl);
 
@@ -523,7 +600,7 @@ function openCardModal(card, kind, slotIdx) {
   actions.append(discardBtn, sellBtn, produceBtn, boostBtn);
   panel.appendChild(actions);
   overlay.appendChild(panel);
-  document.body.appendChild(overlay);
+  mountOverlay(overlay);
 
   // Tap the backdrop or press Escape to dismiss - no explicit ×
   // button (the action row already crowds the bottom).
@@ -628,6 +705,167 @@ function routeMetricPriority() {
     ? ['burns', 'turns', 'hazards', 'radHazards']
     : ['turns', 'burns', 'hazards', 'radHazards'];
 }
+
+// Manual move mode. Alternative to the auto-planner: the player
+// taps neighbouring sites one at a time to build a route by
+// hand. Burn budget = active thruster's `thrust` value. Each
+// hop's cost obeys the rulebook's Hohmann + pivot rules:
+//
+//   - Entering a non-burn node (Hohmann, lagrange, site, radhaz,
+//     venus, decorative) → 0 burns. They're "free" stops.
+//   - Entering a burn node → its `landing` value (default 1,
+//     half-landers cost 2 the second time).
+//   - Pivoting at a Hohmann (changing direction at a labelled
+//     edge node) → +1 burn. The first pivot of the manual route
+//     is FREE if the active thruster has `bonusPivots > 0`
+//     (pirouette thrusters in the rulebook).
+//
+// Each manual hop becomes a turn-1 segment in _plannedRoute;
+// once the player hits Move the existing moveRocket flow consumes
+// them all in one animation. Cancel = clear route. Fuel is not
+// deducted (sandbox mode treats burns as free per the current
+// rules); thrust is just the planning budget.
+let _manualMode = false;
+let _manualBudget = 0;
+let _manualBudgetMax = 0;
+let _manualOriginId = null;
+let _manualDir = null;          // direction we entered the tip on
+let _manualPivotsUsed = 0;
+let _manualPirouettes = 0;      // free pivots remaining (bonusPivots)
+function manualTipId() {
+  if (_plannedRoute && _plannedRoute.length) {
+    return _plannedRoute[_plannedRoute.length - 1].to;
+  }
+  return _manualOriginId;
+}
+function activeThrusterBonusPivots() {
+  const id = getActiveThrusterId();
+  if (!id) return 0;
+  const card = PATENTS_BY_ID[id];
+  if (!card) return 0;
+  const f = (card.faces && card.faces.primary) || card;
+  return Number(f.bonusPivots) || 0;
+}
+function enterManualMoveMode() {
+  _routeFrom = null;
+  _routeTo = null;
+  _plannedRoute = null;
+  persistPlannedRoute();
+  const thrStats = getActiveThrusterStats();
+  const thrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 4;
+  _manualMode = true;
+  _manualBudget = thrust;
+  _manualBudgetMax = thrust;
+  _manualDir = null;
+  _manualPivotsUsed = 0;
+  _manualPirouettes = activeThrusterBonusPivots();
+  const here = getRocketSite();
+  _manualOriginId = here ? here.id : null;
+  _plannedRoute = [];
+  persistPlannedRoute();
+  if (_renderer) {
+    _renderer.setRoute(null);
+    _renderer.setRouteEndpoints(_manualOriginId, _manualOriginId);
+  }
+  const clearBtn = document.getElementById('route-clear');
+  if (clearBtn) { clearBtn.hidden = false; clearBtn.textContent = '✕ Cancel'; }
+  manualMoveStatus();
+}
+function exitManualMoveMode() {
+  _manualMode = false;
+  _manualBudget = 0;
+  _manualBudgetMax = 0;
+  _manualOriginId = null;
+  _manualDir = null;
+  _manualPivotsUsed = 0;
+  _manualPirouettes = 0;
+  const clearBtn = document.getElementById('route-clear');
+  if (clearBtn) clearBtn.textContent = 'Clear route';
+}
+function manualMoveStatus() {
+  if (!_manualMode) return;
+  const placed = _plannedRoute ? _plannedRoute.length : 0;
+  const pirouetteHint = _manualPirouettes > 0
+    ? ` <em class="muted">(${_manualPirouettes} free pivot${_manualPirouettes === 1 ? '' : 's'} ready)</em>`
+    : '';
+  if (_manualBudget <= 0) {
+    setStatus(`✋ Manual: <strong>${placed}</strong> hop${placed === 1 ? '' : 's'} plotted, <strong>0</strong>/${_manualBudgetMax} burns left. Tap <strong>🛸 Move</strong> or Cancel.`);
+  } else {
+    setStatus(`✋ Manual: <strong>${_manualBudget}</strong>/${_manualBudgetMax} burns left.${pirouetteHint} Tap an adjacent site to extend.`);
+  }
+}
+// Cost calculator for a single manual hop. Returns:
+//   { ok: false, reason } when the hop isn't allowed
+//   { ok: true, cost, isPivot, freePivot, newDir } when it is
+function manualHopCost(tipId, toId) {
+  if (!_activeData) return { ok: false, reason: 'no map data' };
+  const points = _activeData.byId || {};
+  const edgeLabels = _activeData.edgeLabels || {};
+  const fromNode = points[tipId];
+  const toNode   = points[toId];
+  if (!fromNode || !toNode) return { ok: false, reason: 'unknown site' };
+  if (tipId === toId) return { ok: false, reason: 'already there' };
+  const nbrs = _activeData.neighbors && _activeData.neighbors.get(tipId);
+  if (!nbrs || !nbrs.has(toId)) {
+    return { ok: false, reason: `not adjacent to ${esc(fromNode.name || tipId)}` };
+  }
+  const newDir = (edgeLabels[tipId] && edgeLabels[tipId][toId]) || null;
+  let cost = 0;
+  let isPivot = false;
+  let freePivot = false;
+  // Pivot: leaving a Hohmann (labelled edges) in a different
+  // direction than the one we entered on.
+  const tipHasLabels = !!edgeLabels[tipId];
+  if (tipHasLabels && _manualDir != null && newDir != null && newDir !== _manualDir) {
+    isPivot = true;
+    if (_manualPirouettes - _manualPivotsUsed > 0) {
+      freePivot = true;
+    } else {
+      cost += 1;
+    }
+  }
+  // Burn nodes carry an entry cost. Default 1; half-landers
+  // print 2 on their second face. Everything else (Hohmann,
+  // lagrange, regular site, radhaz, venus, decorative) is 0.
+  if (toNode.type === 'burn') {
+    cost += toNode.landing != null ? toNode.landing : 1;
+  }
+  return { ok: true, cost, isPivot, freePivot, newDir };
+}
+function manualAppendSegment(toId) {
+  if (!_manualMode || !_activeData) return false;
+  const tipId = manualTipId();
+  if (!tipId) return false;
+  const r = manualHopCost(tipId, toId);
+  if (!r.ok) {
+    setStatus(`Manual: ${r.reason}.`);
+    return false;
+  }
+  if (r.cost > _manualBudget) {
+    const partsMissing = r.cost - _manualBudget;
+    setStatus(`Manual: needs ${r.cost} burn${r.cost === 1 ? '' : 's'} (short ${partsMissing}). Tap Move to fly or Cancel.`);
+    return false;
+  }
+  _plannedRoute = _plannedRoute || [];
+  _plannedRoute.push({
+    from: tipId, to: toId,
+    turn: 1,
+    burns: r.cost,
+    dv: r.cost,
+    isPivot: r.isPivot,
+    freePivot: r.freePivot,
+  });
+  _manualBudget -= r.cost;
+  if (r.isPivot) _manualPivotsUsed += 1;
+  _manualDir = r.newDir;
+  persistPlannedRoute();
+  if (_renderer) {
+    _renderer.setRoute(_plannedRoute);
+    _renderer.setRouteEndpoints(_manualOriginId, toId);
+  }
+  manualMoveStatus();
+  return true;
+}
 let _rocketSiteId = (() => {
   try { return localStorage.getItem(STORAGE_ROCKET_SITE) || null; }
   catch { return null; }
@@ -677,6 +915,10 @@ function ensureMapShell(host) {
           aria-label="End turn">⏭ End turn</button>
         <button id="turn-tracker" title="View turn tracker"
           aria-label="View turn tracker">🕐</button>
+        <span id="aqua-chip" class="map-aqua-chip"
+          title="Aqua balance - spend 4 aqua per hazard to bypass rolls, or convert 1:1 to water at LEO">
+          💧 <strong id="aqua-chip-balance">${getAqua()}</strong>
+        </span>
       </div>
       <button id="map-search-toggle" class="map-search-toggle"
         title="Search sites" aria-label="Search sites">🔍</button>
@@ -748,6 +990,8 @@ function ensureMapShell(host) {
     panel.classList.toggle('hidden');
     const open = !panel.classList.contains('hidden');
     if (_renderer) _renderer.setOption('debug', open);
+    try { localStorage.setItem(STORAGE_DBG_PANEL_OPEN, open ? '1' : '0'); }
+    catch { /* private mode */ }
   });
   // Global game-settings gear on the toolbar. Opens the same
   // settings modal accessible from per-popup affordances; right
@@ -815,12 +1059,12 @@ function ensureMapShell(host) {
     if (!moveBtn) return;
     const remaining = getMovesRemaining();
     if (remaining > 0) {
-      moveBtn.textContent = '🛸';
+      moveBtn.textContent = '🛸 Move to';
       moveBtn.title = 'Move the rocket one step along its planned route';
       moveBtn.setAttribute('aria-label', 'Move rocket');
       moveBtn.dataset.state = 'move';
     } else {
-      moveBtn.textContent = '↩ 🛸';
+      moveBtn.textContent = '↩ Undo';
       moveBtn.title = 'Undo move (operations can happen before OR after the move, not in the middle)';
       moveBtn.setAttribute('aria-label', 'Undo move');
       moveBtn.dataset.state = 'undo';
@@ -832,8 +1076,19 @@ function ensureMapShell(host) {
     if (moveBtn.dataset.state === 'undo') undoRocketMove();
     else                                  moveRocket();
   });
+  // Aqua balance chip - live-updates on any spend / income so the
+  // player sees the number tick down when a hazard bypass or an
+  // aqua → water transfer commits.
+  const aquaChipBal = host.querySelector('#aqua-chip-balance');
+  if (aquaChipBal) {
+    const refreshAqua = () => { aquaChipBal.textContent = String(getAqua()); };
+    refreshAqua();
+    onAquaChange(refreshAqua);
+  }
   host.querySelector('#dbg-close').addEventListener('click', () => {
     host.querySelector('#map-debug').classList.add('hidden');
+    try { localStorage.setItem(STORAGE_DBG_PANEL_OPEN, '0'); }
+    catch { /* private mode */ }
     if (_renderer) _renderer.setOption('debug', false);
   });
   wireSearch(host);
@@ -861,6 +1116,36 @@ function ensureMapShell(host) {
 // Hook the debug-panel widgets to whichever renderer is currently
 // active. Called from mountMapFor() each time the renderer is
 // (re)built, so the panel's bound to the live instance.
+// Persists every slider + checkbox to localStorage so the
+// player's tweaks survive a reload - same pattern as the route
+// priority above. Empty / out-of-range stored values fall back
+// to the renderer's defaults.
+const STORAGE_DBG_INIT_ZOOM   = 'hf-sandbox-map-init-zoom';
+const STORAGE_DBG_FADE_MIN    = 'hf-sandbox-map-fade-min';
+const STORAGE_DBG_FADE_MAX    = 'hf-sandbox-map-fade-max';
+const STORAGE_DBG_SHOW_DECOR  = 'hf-sandbox-map-show-decoratives';
+const STORAGE_DBG_PANEL_OPEN  = 'hf-sandbox-map-debug-open';
+function persistDbg(key, value) {
+  try { localStorage.setItem(key, String(value)); } catch { /* private mode */ }
+}
+function loadDbgNumber(key, fallback, min, max) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw == null) return fallback;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return fallback;
+    if (min != null && n < min) return fallback;
+    if (max != null && n > max) return fallback;
+    return n;
+  } catch { return fallback; }
+}
+function loadDbgBool(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw == null) return fallback;
+    return raw === '1' || raw === 'true';
+  } catch { return fallback; }
+}
 function wireDebugPanel(renderer) {
   const panel = document.getElementById('map-debug');
   if (!panel) return;
@@ -875,6 +1160,19 @@ function wireDebugPanel(renderer) {
   const showDec   = panel.querySelector('#dbg-show-decoratives');
   const resetBtn  = panel.querySelector('#dbg-reset');
 
+  // Seed the renderer with any persisted values BEFORE we read
+  // them back into the slider UI. Range bounds match the
+  // HTML inputs (initialZoom 0.5-6, fade 0.5-6) so a corrupted
+  // entry can't push the renderer out of band.
+  const storedInit = loadDbgNumber(STORAGE_DBG_INIT_ZOOM, renderer.options.initialZoom, 0.5, 6);
+  const storedFmin = loadDbgNumber(STORAGE_DBG_FADE_MIN,  renderer.options.labelFadeMin, 0.5, 6);
+  const storedFmax = loadDbgNumber(STORAGE_DBG_FADE_MAX,  renderer.options.labelFadeMax, 0.5, 6);
+  const storedDec  = loadDbgBool  (STORAGE_DBG_SHOW_DECOR, renderer.options.showDecoratives);
+  renderer.setOption('initialZoom',     storedInit);
+  renderer.setOption('labelFadeMin',    storedFmin);
+  renderer.setOption('labelFadeMax',    storedFmax);
+  renderer.setOption('showDecoratives', storedDec);
+
   initZoom.value = renderer.options.initialZoom;
   fadeMin.value  = renderer.options.labelFadeMin;
   fadeMax.value  = renderer.options.labelFadeMax;
@@ -887,23 +1185,44 @@ function wireDebugPanel(renderer) {
     const v = Number(initZoom.value);
     renderer.setOption('initialZoom', v);
     initZoomVal.textContent = v.toFixed(1) + 'x';
+    persistDbg(STORAGE_DBG_INIT_ZOOM, v);
   };
   fadeMin.oninput = () => {
-    renderer.setOption('labelFadeMin', Number(fadeMin.value));
-    fadeMinVal.textContent = Number(fadeMin.value).toFixed(1) + 'x';
+    const v = Number(fadeMin.value);
+    renderer.setOption('labelFadeMin', v);
+    fadeMinVal.textContent = v.toFixed(1) + 'x';
+    persistDbg(STORAGE_DBG_FADE_MIN, v);
   };
   fadeMax.oninput = () => {
-    renderer.setOption('labelFadeMax', Number(fadeMax.value));
-    fadeMaxVal.textContent = Number(fadeMax.value).toFixed(1) + 'x';
+    const v = Number(fadeMax.value);
+    renderer.setOption('labelFadeMax', v);
+    fadeMaxVal.textContent = v.toFixed(1) + 'x';
+    persistDbg(STORAGE_DBG_FADE_MAX, v);
   };
   showDec.onchange = () => {
     renderer.setOption('showDecoratives', showDec.checked);
+    persistDbg(STORAGE_DBG_SHOW_DECOR, showDec.checked ? '1' : '0');
   };
-  resetBtn.onclick = () => renderer.reset();
+  resetBtn.onclick = () => {
+    // Reset returns the renderer to its fit-to-data + default
+    // options. We mirror that by clearing the stored slider
+    // values so the next reload starts clean too.
+    renderer.reset();
+    try {
+      localStorage.removeItem(STORAGE_DBG_INIT_ZOOM);
+      localStorage.removeItem(STORAGE_DBG_FADE_MIN);
+      localStorage.removeItem(STORAGE_DBG_FADE_MAX);
+      localStorage.removeItem(STORAGE_DBG_SHOW_DECOR);
+    } catch { /* private mode */ }
+  };
 
-  // If the panel is currently open, the new renderer should also
-  // log clicks. (mountMapFor rebuilds the renderer on every mode
-  // toggle; without this the debug flag would reset to false.)
+  // Restore the persisted open / closed state for the debug
+  // panel. wireDebugPanel runs every time the renderer is
+  // rebuilt, so this also re-applies on mode toggles. If no
+  // value was stored, we default to closed (the HTML class
+  // already has .hidden in that case).
+  const storedOpen = loadDbgBool(STORAGE_DBG_PANEL_OPEN, false);
+  panel.classList.toggle('hidden', !storedOpen);
   const panelOpen = !panel.classList.contains('hidden');
   renderer.setOption('debug', panelOpen);
 
@@ -1003,7 +1322,7 @@ function wireSearch(host) {
 
   function pickItem(site) {
     if (!site || !_renderer) return;
-    _renderer.flyTo(site, SEARCH_FLY_ZOOM);
+    _renderer.flyTo(site, locateZoom(SEARCH_FLY_ZOOM));
     input.value = site.name;
     list.classList.add('hidden');
     closeSearchModal();
@@ -1086,6 +1405,16 @@ async function mountMapFor() {
     syncSoloShipMarker();
     syncSandboxRocket();
     syncDiscs();
+    // Initial camera: focus on the rocket's current site if the
+    // player has built a stack, else LEO. Snap instantly (ms: 0)
+    // because the user can't see the pre-mount state - animating
+    // from a default fit-to-data position would just be a brief
+    // flash. Uses the renderer's own initialZoom (which is
+    // already device-aware: 5 on mobile, 6 on desktop).
+    const initialFocus = getRocketSite() || LEO_ANCHOR;
+    if (initialFocus && Number.isFinite(initialFocus.x) && Number.isFinite(initialFocus.y)) {
+      _renderer.flyTo(initialFocus, _renderer.options.initialZoom, { ms: 0 });
+    }
     // Push any persisted trail back into the renderer so a reload
     // mid-journey still shows the cyan ribbon for where the rocket
     // has already been.
@@ -1194,9 +1523,11 @@ function openRocketStackModal() {
     const totals = getStackTotals();
     const thrStats = getActiveThrusterStats();
     panel.querySelector('.rocket-stack-body')?.remove();
+    // Engaged-border is painted by the panel (non-scrolling)
+    // so it doesn't fragment when the body's content overflows.
+    panel.classList.toggle('is-engaged', engaged && r.active);
     const body = document.createElement('div');
     body.className = 'rocket-stack-body';
-    if (engaged && r.active) body.classList.add('is-engaged');
     // Status banner: active + green when all three rules hold,
     // grounded + red otherwise with the specific reason inline.
     const status = r.active
@@ -1217,33 +1548,47 @@ function openRocketStackModal() {
     const tank = getTankWater();
     const tankMax = getTankMax();
     const fuelCapForRocket = Math.max(0, 32 - (totals.dryMass || 0));
-    const wcLine = thrStats && thrStats.weightClassMod !== 0
-      ? `<small>${thrStats.weightClass} ${thrStats.weightClassMod > 0 ? '+' : ''}${thrStats.weightClassMod}</small>`
-      : (thrStats ? `<small>${thrStats.weightClass}</small>` : '');
     const modifierLines = thrStats && thrStats.modifiers.length
       ? thrStats.modifiers.map((m) => {
           if (m.kind === 'thrust') return `${m.delta > 0 ? '+' : ''}${m.delta} thrust from ${m.from}`;
           if (m.kind === 'fuel')   return `×${m.mult} fuel from ${m.from}`;
           return '';
         }).filter(Boolean).join(' · ')
-      : 'no modifiers';
+      : '';
+    // Per-cell formula text - shown in the "details" footer of
+    // each profile card cell. Keep them short; the data-tip on
+    // hover spells out the full story for power users.
+    // Thrust equation: `base + N (class) → final` matches the
+    // player's mental model - start from base, apply the net
+    // modifier (cards + weight class), get the final number.
+    let thrustEqn = '';
+    if (thrStats) {
+      const totalMod = thrStats.thrust - thrStats.baseThrust;
+      const cls = String(thrStats.weightClass || '').toLowerCase();
+      if (totalMod !== 0) {
+        const sign = totalMod > 0 ? '+' : '−';
+        thrustEqn = `base ${sign} ${fmt(Math.abs(totalMod))} (${cls}) → ${fmt(thrStats.thrust)}`;
+      } else {
+        thrustEqn = `base (${cls}) → ${fmt(thrStats.thrust)}`;
+      }
+    }
+    const fuelEqn = (thrStats && thrStats.fuel != null && thrStats.fuel !== thrStats.baseFuel)
+      ? `base ${fmt(thrStats.baseFuel)} → ${fmt(thrStats.fuel)} water/move`
+      : (thrStats && thrStats.fuel != null ? 'water per move' : '');
     const thrustHtml = thrStats
       ? `<div class="rocket-totals-cell"
-              data-tip="Thrust = base ${fmt(thrStats.baseThrust)} ${modifierLines !== 'no modifiers' ? '+ ' + modifierLines : ''}. Net thrust must be ≥ wet mass to lift."
+              data-tip="Thrust = base ${fmt(thrStats.baseThrust)} ${modifierLines ? '+ ' + modifierLines : ''}. Net thrust must be ≥ wet mass to lift."
               title="Modified thrust breakdown">
            <span class="lbl">Thrust</span>
            <strong class="${thrStats.canLift ? 'ok' : 'bad'}">${fmt(thrStats.thrust)}</strong>
-           ${thrStats.thrust !== thrStats.baseThrust
-              ? `<small>(base ${fmt(thrStats.baseThrust)})</small>` : ''}
-           ${wcLine}
+           <small class="cell-eqn">${esc(thrustEqn)}</small>
          </div>
          <div class="rocket-totals-cell"
               data-tip="Fuel per burn = ${fmt(thrStats.fuel)} water per move."
               title="Fuel per burn">
            <span class="lbl">Fuel / burn</span>
            <strong>${thrStats.fuel != null ? fmt(thrStats.fuel) : '-'}</strong>
-           ${thrStats.fuel != null && thrStats.fuel !== thrStats.baseFuel
-              ? `<small>(base ${fmt(thrStats.baseFuel)})</small>` : ''}
+           <small class="cell-eqn">${esc(fuelEqn)}</small>
          </div>`
       : '';
     // Afterburn toggle - only shown when the active thruster has
@@ -1257,15 +1602,30 @@ function openRocketStackModal() {
              : 'Engage afterburn: spends fuel for bonus thrust this turn'}">
            🔥 Afterburn ${thrStats.afterburnEngaged ? 'ON' : 'OFF'}
          </button>` : '';
+    // Wet mass equation - "dry + tank" so the player sees how
+    // the wet number was built. Caps the tank value at the
+    // fuel capacity for the rocket.
+    const wetEqn = totals.dryMass != null
+      ? `dry ${totals.dryMass} + tank ${tank}`
+      : '';
     const totalsHtml = `
       <div class="rocket-totals">
-        ${thrStats ? '<div class="rocket-totals-headliner" id="rocket-thrust-visual"></div>' : ''}
+        ${thrStats ? `
+          <div class="rocket-profile-triangle">
+            <span class="rocket-profile-triangle-label">Modified thrust</span>
+            <div id="rocket-thrust-visual" class="rocket-totals-headliner"></div>
+            <small class="rocket-profile-triangle-sub">${esc(modifierLines || 'no modifiers')}</small>
+          </div>` : ''}
         <div class="rocket-totals-grid">
           <div class="rocket-totals-cell">
-            <span class="lbl">Cards</span><strong>${totals.count}</strong>
+            <span class="lbl">Cards</span>
+            <strong>${totals.count}</strong>
+            <small class="cell-eqn">in stack</small>
           </div>
           <div class="rocket-totals-cell">
-            <span class="lbl">Dry mass</span><strong>${totals.dryMass}</strong>
+            <span class="lbl">Dry mass</span>
+            <strong>${totals.dryMass}</strong>
+            <small class="cell-eqn">card mass sum</small>
           </div>
           <div class="rocket-totals-cell rocket-wetmass-cell"
                role="button" tabindex="0"
@@ -1273,13 +1633,12 @@ function openRocketStackModal() {
                title="Tap to open the fuel-tank view (max wet mass 32)">
             <span class="lbl">Wet mass</span>
             <strong class="${thrStats && !thrStats.canLift ? 'bad' : ''}">${totals.wetMass}<small>/32</small></strong>
-            <span class="rocket-water-readout" title="Water tank (refuel at hydrated sites)">
-              💧 <b>${tank}</b><em>/${fuelCapForRocket}</em>
-            </span>
+            <small class="cell-eqn">${esc(wetEqn)} · 💧 ${tank}/${fuelCapForRocket}</small>
           </div>
           <div class="rocket-totals-cell">
             <span class="lbl">Min rad-hard</span>
             <strong>${totals.minRadHard != null ? totals.minRadHard : '-'}</strong>
+            <small class="cell-eqn">weakest card</small>
           </div>
           ${thrustHtml}
           ${afterburnHtml ? `<div class="rocket-totals-cell rocket-afterburn-cell">${afterburnHtml}</div>` : ''}
@@ -1328,13 +1687,13 @@ function openRocketStackModal() {
     if (findBtn) findBtn.addEventListener('click', () => {
       if (!here || !_renderer) return;
       close();
-      _renderer.flyTo(here, 4);
+      _renderer.flyTo(here, locateZoom(4));
     });
     const selectBtn = body.querySelector('#rocket-select-here');
     if (selectBtn) selectBtn.addEventListener('click', () => {
       if (!here || !_renderer) return;
       close();
-      _renderer.flyTo(here, 4);
+      _renderer.flyTo(here, locateZoom(4));
       onSiteSelect(here);
     });
 
@@ -1511,8 +1870,16 @@ function openRocketStackModal() {
       // Only the active thruster's supports are validated against
       // the rest of the stack - passing `supplied` for others would
       // mark chips ✓ that aren't actually contributing to flight.
+      // Wire support-chip taps so the player can jump straight
+      // from "this thruster needs X" to the library view of every
+      // card that supplies X. We close the rocket-stack modal
+      // first so the patents pane comes up on a clean surface.
       const cardOpts = { type: slot.kind || 'patent' };
       if (isThruster && slot.id === activeId) cardOpts.supplied = supplied;
+      cardOpts.onSupportClick = (kinds) => {
+        close();
+        openPatentsSupports(kinds);
+      };
       wrap.appendChild(renderCard(card, cardOpts));
 
       const actions = document.createElement('div');
@@ -1587,7 +1954,7 @@ function openRocketStackModal() {
   repaint();
   _rocketModalUnsub = onRocketChange(repaint);
 
-  document.body.appendChild(overlay);
+  mountOverlay(overlay);
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
 }
@@ -1601,6 +1968,617 @@ let _rocketModalUnsub = null;
 // in browse.js so glory.js doesn't need to know site shapes.
 function isLeoSite(site) {
   return !!site && site.type === 'lagrange' && site.name === 'LEO';
+}
+
+// Hazard classification. A node is a "hazard" when entering it
+// forces a survival roll (or 4 aqua to bypass). Three flavours
+// today, all drawn with their own glyph in render.js:
+//   - explicit hazard flag → ☠ skull (burn / lagrange nodes
+//     flagged by the planner JSON's `hazard:true`)
+//   - radhaz waypoint type → ☢ radiation trefoil
+//   - venus waypoint type  → 🪂 aerobrake corridor
+// Returns the glyph + a short label so the confirm modal can list
+// what the player is about to fly through.
+const HAZARD_COST_PER = 4;
+function classifyHazard(site) {
+  if (!site) return null;
+  if (site.type === 'radhaz') return { glyph: '☢', label: 'Radiation hazard' };
+  if (site.type === 'venus')  return { glyph: '🪂', label: 'Aerobrake corridor' };
+  if (site.hazard)            return { glyph: '☠', label: 'Hazard node' };
+  return null;
+}
+function isHazardSite(site) {
+  return classifyHazard(site) !== null;
+}
+
+// Walk every endpoint a route's turn-1 segments would touch,
+// collecting the distinct hazard sites along the way. We check
+// only `to` endpoints (the rocket is leaving `from` and arriving
+// at `to`, so the starting node is already paid-for) plus any
+// shared intermediate node, deduped by id so a hazard touched by
+// two adjacent segments doesn't double-charge.
+function routeHazards(segments) {
+  if (!_activeData || !segments || !segments.length) return [];
+  const seen = new Set();
+  const out = [];
+  for (const seg of segments) {
+    const site = _activeData.sites.find((x) => x.id === seg.to);
+    if (!site) continue;
+    const h = classifyHazard(site);
+    if (!h) continue;
+    if (seen.has(site.id)) continue;
+    seen.add(site.id);
+    out.push({ site, ...h });
+  }
+  return out;
+}
+
+// Once-per-turn flag: a move that was paid-out or rolled for at
+// a hazard cannot be undone. Persisted so a reload mid-turn
+// preserves the lockout; cleared on end-turn via onTurnChange.
+const STORAGE_HAZARDOUS_MOVE = 'hf-sandbox-hazardous-move';
+let _lastMoveHazardous = (() => {
+  try { return localStorage.getItem(STORAGE_HAZARDOUS_MOVE) === '1'; }
+  catch { return false; }
+})();
+function setHazardousMove(on) {
+  _lastMoveHazardous = !!on;
+  try {
+    if (_lastMoveHazardous) localStorage.setItem(STORAGE_HAZARDOUS_MOVE, '1');
+    else                    localStorage.removeItem(STORAGE_HAZARDOUS_MOVE);
+  } catch { /* private mode */ }
+}
+// End-of-turn always clears the lockout - a fresh turn refunds
+// the move budget too, but the hazardous flag stays scoped to
+// the turn that flew through the hazard.
+onTurnChange(() => {
+  if (getMovesRemaining() > 0 && _lastMoveHazardous) setHazardousMove(false);
+});
+
+// Three-button modal for the "your route crosses hazards" prompt.
+// Resolves to one of:
+//   'pay'    - player pays HAZARD_COST_PER × N aqua to bypass
+//   'roll'   - player rolls a d6 per hazard, no undo allowed
+//   'cancel' - back to planning; move not consumed
+// Pay button is disabled (but still rendered, with a help line)
+// when the balance can't cover the bill. The wording leans hard
+// on "cannot be undone" because the rulebook commits the dice as
+// soon as they hit the table - same idiom here.
+function hazardConfirmModal(hazards) {
+  return new Promise((resolve) => {
+    document.querySelector('.confirm-modal-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay hazard-confirm-overlay';
+    const close = (val) => {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(val);
+    };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close('cancel'); });
+    const onKey = (e) => {
+      if (e.key === 'Escape') close('cancel');
+    };
+    document.addEventListener('keydown', onKey);
+
+    const n = hazards.length;
+    const cost = n * HAZARD_COST_PER;
+    const have = getAqua();
+    const canPay = have >= cost;
+    const list = hazards.map((h) =>
+      `<li><span class="haz-glyph">${h.glyph}</span> `
+      + `${esc(h.site.name || h.label)} <em class="muted">${esc(h.label)}</em></li>`
+    ).join('');
+
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel hazard-confirm-panel';
+    panel.innerHTML = `
+      <h3>⚠ Hazard zone ahead</h3>
+      <p>Your planned route passes through
+        <strong>${n}</strong> hazard${n === 1 ? '' : 's'}:</p>
+      <ul class="hazard-list">${list}</ul>
+      <p class="hazard-warning">
+        <strong>Whatever you pick, this move CANNOT be undone</strong>
+        - hazard rolls and aqua spends commit the moment the dice
+        leave the cup. End the turn to clear the lockout.
+      </p>
+      <div class="hazard-cost-row">
+        <span>💎 Aqua balance: <strong>${have}</strong></span>
+        <span>Bypass cost: <strong>${cost}</strong>
+          <em class="muted">(${HAZARD_COST_PER}/hazard)</em></span>
+      </div>
+      <div class="turn-confirm-actions hazard-actions">
+        <button type="button" class="popup-btn primary" data-act="pay"
+          ${canPay ? '' : 'disabled'}
+          title="${canPay ? 'Spend ' + cost + ' aqua to skip the rolls' : 'Not enough aqua to bypass all hazards'}">
+          💎 Pay ${cost} aqua to bypass
+        </button>
+        <button type="button" class="popup-btn" data-act="roll"
+          title="Roll a d6 for each hazard. 1 destroys the rocket. Cannot be undone.">
+          🎲 Roll ${n} d6 (1 = boom, no undo)
+        </button>
+        <button type="button" class="popup-btn" data-act="cancel"
+          title="Return to planning; no move spent">
+          ✕ Cancel move
+        </button>
+      </div>
+      ${canPay ? '' : '<p class="muted hazard-need-aqua">Pay disabled - need '
+        + (cost - have) + ' more aqua. Roll or cancel instead.</p>'}
+    `;
+    for (const b of panel.querySelectorAll('button[data-act]')) {
+      b.addEventListener('click', () => close(b.dataset.act));
+    }
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+  });
+}
+
+// Animated hazard-roll modal. One 3D die per hazard, rolled in
+// parallel; once every die settles the player can confirm to
+// apply the result (any 1 = critical, rocket explodes at that
+// node). Cancel is intentionally absent - the player already
+// committed to rolling in the prior confirm; this modal just
+// reveals the dice.
+function hazardRollModal(hazards) {
+  return new Promise((resolve) => {
+    document.querySelector('.hazard-roll-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay hazard-roll-overlay';
+    let settled = false;
+    let rolls = null;
+    const close = () => {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(rolls || []);
+    };
+    const onKey = (e) => {
+      // Enter confirms once the dice have all landed - keeps
+      // the modal keyboard-friendly without letting the player
+      // skip past the suspense.
+      if (e.key === 'Enter' && settled) { e.preventDefault(); close(); }
+    };
+    document.addEventListener('keydown', onKey);
+
+    // Pre-roll every die's outcome so the visual + the logged
+    // result + the explosion decision all agree.
+    rolls = hazards.map((h) => ({
+      site: h.site, label: h.label, glyph: h.glyph,
+      d6: 1 + Math.floor(Math.random() * 6),
+    }));
+
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel hazard-roll-panel';
+    panel.innerHTML = `
+      <h3>🎲 Hazard rolls</h3>
+      <p class="muted hazard-roll-sub">
+        Each die rolls separately. Any <strong>1</strong>
+        destroys the rocket at that hazard.
+      </p>
+      <ul class="hazard-roll-list"></ul>
+      <p class="hazard-roll-result muted">Rolling…</p>
+      <div class="turn-confirm-actions">
+        <button type="button" class="popup-btn primary hazard-roll-confirm" disabled>
+          Confirm result
+        </button>
+      </div>
+    `;
+    const list = panel.querySelector('.hazard-roll-list');
+    const resultLine = panel.querySelector('.hazard-roll-result');
+    const confirmBtn = panel.querySelector('.hazard-roll-confirm');
+
+    // Build the rows + dice. Dice spin together; row gets
+    // `is-critical` / `is-safe` once its die settles so the
+    // colour band updates inline.
+    const rowEls = rolls.map((r) => {
+      const li = document.createElement('li');
+      li.className = 'hazard-roll-row';
+      li.innerHTML = `
+        <div class="hazard-roll-site">
+          <span class="haz-glyph">${r.glyph}</span>
+          <strong>${esc(r.site.name)}</strong>
+          <em class="muted">${esc(r.label)}</em>
+        </div>
+        <div class="hazard-roll-die-host"></div>
+        <div class="hazard-roll-verdict"></div>
+      `;
+      list.appendChild(li);
+      const dieHost = li.querySelector('.hazard-roll-die-host');
+      const verdict = li.querySelector('.hazard-roll-verdict');
+      const die = buildDie(1);
+      dieHost.appendChild(die);
+      return { row: li, die, verdict, roll: r };
+    });
+
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+
+    // Spin every die in parallel; once they all land, update
+    // each row's verdict + the summary line, and arm Confirm.
+    Promise.all(rowEls.map(({ die, roll }) => rollDie(die, roll.d6)))
+      .then(() => {
+        let criticalCount = 0;
+        for (const { row, verdict, roll } of rowEls) {
+          const isCrit = roll.d6 === 1;
+          if (isCrit) criticalCount++;
+          row.classList.add(isCrit ? 'is-critical' : 'is-safe');
+          verdict.innerHTML = isCrit
+            ? `<strong class="bad">✗ destroyed</strong>`
+            : `<strong class="ok">✓ survived</strong>`;
+        }
+        if (criticalCount > 0) {
+          resultLine.innerHTML = `<strong class="bad">💥 Rocket destroyed</strong> `
+            + `- ${criticalCount} critical roll${criticalCount === 1 ? '' : 's'}.`;
+          confirmBtn.textContent = 'Confirm - lose the rocket';
+          confirmBtn.classList.add('hazard-roll-confirm-bad');
+        } else {
+          resultLine.innerHTML = `<strong class="ok">All survived</strong> `
+            + `- continue to destination.`;
+          confirmBtn.textContent = 'Confirm - continue';
+        }
+        resultLine.classList.remove('muted');
+        settled = true;
+        confirmBtn.disabled = false;
+      });
+    confirmBtn.addEventListener('click', () => { if (settled) close(); });
+  });
+}
+
+// Rad-hardness threshold: a card on the stack survives the rad
+// zone iff its rad-hard >= the rolled d6. Cards that fail are
+// decommissioned to the player's hand. Per the HF4 idiom, the
+// active thruster's THRUST stat can skip the test entirely -
+// a fast / hot rocket outruns the radiation. Red-season raises
+// the bypass bar by 2 so the Sun is harder to dodge.
+const RAD_BYPASS_THRUST     = 6;
+const RAD_BYPASS_THRUST_RED = 8;
+function radBypassThreshold() {
+  let season = null;
+  try { season = getSeason(); } catch { season = null; }
+  return season && season.name === 'red' ? RAD_BYPASS_THRUST_RED : RAD_BYPASS_THRUST;
+}
+
+// Pre-roll confirm dialog for rad zones. Mirrors the
+// hazardConfirmModal idiom (list of zones, scary warning,
+// pick-an-action buttons) but tailored to the rad rules: no
+// aqua bypass option, and the body explains the thrust + season
+// math + whether the active thruster auto-clears the bar.
+// Resolves to 'confirm' or 'cancel'. Always shown when the
+// route crosses ≥1 rad zone so the player can back out before
+// the dice roll.
+function radConfirmModal(radHazards, thrust, seasonBonus, bypassThreshold) {
+  return new Promise((resolve) => {
+    document.querySelector('.confirm-modal-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay rad-confirm-overlay';
+    const close = (val) => {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(val);
+    };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close('cancel'); });
+    const onKey = (e) => { if (e.key === 'Escape') close('cancel'); };
+    document.addEventListener('keydown', onKey);
+
+    const n = radHazards.length;
+    const list = radHazards.map((h) =>
+      `<li><span class="haz-glyph">${h.glyph}</span> `
+      + `${esc(h.site.name || h.label)} <em class="muted">${esc(h.label)}</em></li>`
+    ).join('');
+    const willBypass = thrust > bypassThreshold;
+    const seasonLine = seasonBonus > 0
+      ? `Red season adds <strong>+${seasonBonus}</strong> to every rad die.`
+      : '';
+    // Build the maths preview so the player sees the formula
+    // before committing to roll. Active-thrust 0 reads as
+    // "no subtraction" rather than "−0" which looks weird.
+    const formulaParts = [`d6`];
+    if (seasonBonus > 0) formulaParts.push(`+ ${seasonBonus}`);
+    if (thrust > 0)      formulaParts.push(`− ${thrust}`);
+    const formula = formulaParts.join(' ');
+    const bypassNote = willBypass
+      ? `<p class="rad-confirm-bypass ok">
+          ✓ Active thrust <strong>${thrust}</strong> &gt; <strong>${bypassThreshold}</strong>
+          - the rocket outruns the radiation. No roll, no
+          decommissions.
+         </p>`
+      : `<p class="rad-confirm-warning">
+          <strong>Cannot bypass.</strong> Active thrust
+          <strong>${thrust}</strong> ≤ <strong>${bypassThreshold}</strong>
+          - one d6 rolls per zone. Cards with rad-hard less
+          than the worst <em>final</em> rad get decommissioned
+          to your hand. <strong>Aqua cannot bypass a rad
+          roll.</strong>
+         </p>`;
+
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel rad-confirm-panel';
+    panel.innerHTML = `
+      <h3>☢ Radiation zone${n === 1 ? '' : 's'} ahead</h3>
+      <p>Your planned route passes through
+        <strong>${n}</strong> rad zone${n === 1 ? '' : 's'}:</p>
+      <ul class="hazard-list">${list}</ul>
+      ${seasonLine ? `<p class="rad-confirm-season muted">${seasonLine}</p>` : ''}
+      <p class="rad-confirm-formula muted">
+        Final radiation per zone = <code>${formula}</code>
+        (active thrust ${thrust || 0}, bypass at &gt; ${bypassThreshold}).
+      </p>
+      ${bypassNote}
+      <div class="turn-confirm-actions hazard-actions">
+        <button type="button" class="popup-btn primary" data-act="confirm"
+          title="${willBypass ? 'Continue - the thrust check skips the roll' : 'Open the rad-hardness roll modal'}">
+          ${willBypass ? '✓ Confirm - bypass' : '🎲 Confirm - roll rad check'}
+        </button>
+        <button type="button" class="popup-btn" data-act="cancel"
+          title="Return to planning; no move spent">
+          ✕ Cancel move
+        </button>
+      </div>
+    `;
+    for (const b of panel.querySelectorAll('button[data-act]')) {
+      b.addEventListener('click', () => close(b.dataset.act));
+    }
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+  });
+}
+
+// Animated rad-hardness check modal. Different from the regular
+// hazard-roll modal in three ways:
+//   1. No aqua bypass - radiation can't be paid off.
+//   2. Cards in the stack are checked individually against the
+//      rolled d6 - rad-hard < d6 = decommissioned (sent to hand).
+//   3. Resolves to a list of card-ids to decommission, not a
+//      pass / fail flag.
+// One d6 per rad zone; the worst die across all zones is the
+// effective threshold per card (so two rad crossings = two
+// chances to lose a card). Confirm button arms once every die
+// has settled so the player has to acknowledge the outcome.
+function radHardnessRollModal(radHazards, stackCards, thrust, seasonBonus) {
+  return new Promise((resolve) => {
+    document.querySelector('.rad-roll-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay rad-roll-overlay';
+    let settled = false;
+    let rolls = null;
+    let toDecommission = [];
+    const close = () => {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve({ rolls: rolls || [], decommission: toDecommission });
+    };
+    const onKey = (e) => {
+      if (e.key === 'Enter' && settled) { e.preventDefault(); close(); }
+    };
+    document.addEventListener('keydown', onKey);
+
+    // Pre-roll all dice so visual + log + decommission agree.
+    // `rad` is the FINAL radiation strength per zone after the
+    // season bonus is added and the active thruster's thrust is
+    // subtracted - clamped at 0 because a "negative" radiation
+    // strength can't hurt any non-negative rad-hard card. The
+    // raw d6 stays alongside so the UI can show the maths.
+    const t = Math.max(0, thrust | 0);
+    const bonus = (seasonBonus | 0) || 0;
+    rolls = radHazards.map((h) => {
+      const d6 = 1 + Math.floor(Math.random() * 6);
+      const rad = Math.max(0, d6 + bonus - t);
+      return { site: h.site, glyph: h.glyph, d6, rad, bonus, thrust: t };
+    });
+
+    const seasonNote = bonus > 0
+      ? `Red season adds <strong>+${bonus}</strong> to every die.` : '';
+    const thrustNote = t > 0
+      ? `Active thrust <strong>${t}</strong> is subtracted from the die.`
+      : `No active thrust - no subtraction.`;
+
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel rad-roll-panel';
+    panel.innerHTML = `
+      <h3>☢ Rad-hardness check</h3>
+      <p class="muted rad-roll-sub">
+        ${thrustNote} ${seasonNote}
+        Final radiation = die${bonus > 0 ? ' + ' + bonus : ''}${t > 0 ? ' − ' + t : ''}.
+        Cards whose rad-hard is <strong>less than</strong> the
+        worst final radiation get decommissioned to your hand.
+        Aqua cannot bypass a rad roll.
+      </p>
+      <ul class="rad-roll-dice"></ul>
+      <p class="rad-roll-result muted">Rolling…</p>
+      <ul class="rad-roll-cards"></ul>
+      <div class="turn-confirm-actions">
+        <button type="button" class="popup-btn primary rad-roll-confirm" disabled>
+          Confirm result
+        </button>
+      </div>
+    `;
+    const diceList = panel.querySelector('.rad-roll-dice');
+    const cardsList = panel.querySelector('.rad-roll-cards');
+    const resultLine = panel.querySelector('.rad-roll-result');
+    const confirmBtn = panel.querySelector('.rad-roll-confirm');
+
+    // Build a die row per rad zone. The "math chip" to the
+    // right of each die is filled in once the die settles so
+    // the player can watch the formula resolve as the rolls
+    // land.
+    const dieEls = rolls.map((r) => {
+      const li = document.createElement('li');
+      li.className = 'rad-roll-die-row';
+      li.innerHTML = `
+        <div class="rad-roll-site">
+          <span class="haz-glyph">${r.glyph}</span>
+          <strong>${esc(r.site.name)}</strong>
+        </div>
+        <div class="rad-roll-die-host"></div>
+        <div class="rad-roll-math muted">…</div>
+      `;
+      diceList.appendChild(li);
+      const dieHost = li.querySelector('.rad-roll-die-host');
+      const die = buildDie(1);
+      dieHost.appendChild(die);
+      return { die, mathEl: li.querySelector('.rad-roll-math'), roll: r };
+    });
+
+    // Build the per-card rows: name + rad-hard. Decorated
+    // post-roll with safe / decommissioned tags.
+    const cardRowEls = stackCards.map((c) => {
+      const li = document.createElement('li');
+      li.className = 'rad-roll-card';
+      li.innerHTML = `
+        <span class="rad-roll-card-name">${esc(c.name)}</span>
+        <span class="rad-roll-card-rad">RAD <strong>${c.radHardness != null ? c.radHardness : '-'}</strong></span>
+        <span class="rad-roll-card-verdict muted">…</span>
+      `;
+      cardsList.appendChild(li);
+      return { el: li, card: c };
+    });
+    if (!cardRowEls.length) {
+      cardsList.innerHTML = '<li class="muted">Empty stack - nothing to test.</li>';
+    }
+
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+
+    Promise.all(dieEls.map(({ die, roll }) => rollDie(die, roll.d6))).then(() => {
+      // Worst (highest) FINAL radiation across rad zones is the
+      // effective threshold per card. Bonus and thrust are
+      // already baked into roll.rad above.
+      const worst = rolls.reduce((m, r) => Math.max(m, r.rad), 0);
+      // Fill in each math chip so the player can read the
+      // breakdown: "5 + 2 - 7 = 0" etc.
+      for (const { mathEl, roll } of dieEls) {
+        const parts = [String(roll.d6)];
+        if (roll.bonus > 0) parts.push(`+ ${roll.bonus}`);
+        if (roll.thrust > 0) parts.push(`− ${roll.thrust}`);
+        const formula = parts.join(' ');
+        mathEl.classList.remove('muted');
+        mathEl.innerHTML = `${formula} = <strong>rad ${roll.rad}</strong>`;
+        if (roll.rad === worst && worst > 0) mathEl.classList.add('is-worst');
+      }
+      let lost = 0;
+      for (const { el, card } of cardRowEls) {
+        const v = el.querySelector('.rad-roll-card-verdict');
+        const rh = card.radHardness != null ? card.radHardness : 0;
+        // Decommission iff final radiation > card rad-hard.
+        // A rad-hard 0 card survives a worst-rad of 0; fails
+        // a worst-rad of 1.
+        const failed = worst > rh;
+        if (failed) {
+          toDecommission.push(card.id);
+          lost++;
+          el.classList.add('is-decommissioned');
+          v.classList.remove('muted');
+          v.innerHTML = `<strong class="bad">✗ decommissioned</strong>`;
+        } else {
+          el.classList.add('is-safe');
+          v.classList.remove('muted');
+          v.innerHTML = `<strong class="ok">✓ safe</strong>`;
+        }
+      }
+      const dCount = rolls.length;
+      resultLine.classList.remove('muted');
+      if (!cardRowEls.length) {
+        resultLine.innerHTML = `${dCount} rad zone${dCount === 1 ? '' : 's'} rolled - nothing in stack.`;
+      } else if (lost > 0) {
+        resultLine.innerHTML = `Worst final radiation <strong>${worst}</strong>: `
+          + `<strong class="bad">${lost} card${lost === 1 ? '' : 's'} decommissioned</strong>.`;
+        confirmBtn.classList.add('rad-roll-confirm-bad');
+        confirmBtn.textContent = `Confirm - lose ${lost} card${lost === 1 ? '' : 's'}`;
+      } else {
+        resultLine.innerHTML = `Worst final radiation <strong>${worst}</strong>: `
+          + `<strong class="ok">stack survived intact</strong>.`;
+        confirmBtn.textContent = 'Confirm - continue';
+      }
+      settled = true;
+      confirmBtn.disabled = false;
+    });
+    confirmBtn.addEventListener('click', () => { if (settled) close(); });
+  });
+}
+
+// Small info modal used when the player tries to undo a hazardous
+// move. Single OK button; the lockout is informational only.
+// Mid-route choice between hazards. Pops after each roll
+// resolves (and the rocket survived) so the player can:
+//   - Continue: roll the next hazard.
+//   - Stop here: halt the route at the current node. Remaining
+//     planned segments stay in the route so a later turn can
+//     pick them up.
+//   - Pay X aqua to bypass the remaining GENERIC hazards
+//     (rad zones can't be paid, so they still roll). Only
+//     enabled when generic hazards remain unresolved AND the
+//     balance covers the cost.
+// Resolves to 'continue' | 'stop' | 'pay'.
+function midRouteChoiceModal({ atSiteName, remaining, aquaBalance }) {
+  return new Promise((resolve) => {
+    document.querySelector('.mid-route-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay mid-route-overlay';
+    const close = (val) => {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(val);
+    };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close('stop'); });
+    const onKey = (e) => {
+      if (e.key === 'Escape') close('stop');
+      else if (e.key === 'Enter') close('continue');
+    };
+    document.addEventListener('keydown', onKey);
+
+    const remGeneric = remaining.filter((r) => r.hazard.site.type !== 'radhaz');
+    const remRad     = remaining.filter((r) => r.hazard.site.type === 'radhaz');
+    const payCost = remGeneric.length * HAZARD_COST_PER;
+    const canPay = remGeneric.length > 0 && aquaBalance >= payCost;
+    const list = remaining.map((r) =>
+      `<li><span class="haz-glyph">${r.hazard.glyph}</span> `
+      + `${esc(r.hazard.site.name || '')} <em class="muted">${esc(r.hazard.label)}</em></li>`
+    ).join('');
+
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel mid-route-panel';
+    panel.innerHTML = `
+      <h3>🛸 Pause at ${esc(atSiteName)}</h3>
+      <p>Survived. <strong>${remaining.length}</strong> more
+        hazard${remaining.length === 1 ? '' : 's'} along the
+        route:</p>
+      <ul class="hazard-list">${list}</ul>
+      <div class="mid-route-balance muted">
+        💧 Aqua balance: <strong>${aquaBalance}</strong>
+        ${remRad.length ? ` · ${remRad.length} rad zone${remRad.length === 1 ? '' : 's'} can't be paid` : ''}
+      </div>
+      <div class="turn-confirm-actions mid-route-actions">
+        <button type="button" class="popup-btn primary" data-act="continue"
+          title="Roll the next hazard in line">
+          ▶ Continue
+        </button>
+        ${remGeneric.length ? `
+          <button type="button" class="popup-btn" data-act="pay"
+            ${canPay ? '' : 'disabled'}
+            title="${canPay ? 'Spend ' + payCost + ' aqua to skip the remaining generic rolls' : 'Not enough aqua to bypass remaining generic hazards'}">
+            💧 Pay ${payCost} aqua to bypass ${remGeneric.length} generic
+          </button>` : ''}
+        <button type="button" class="popup-btn" data-act="stop"
+          title="Halt the move here. Remaining segments stay in the planned route for a future turn.">
+          ⏹ Stop here
+        </button>
+      </div>
+    `;
+    for (const b of panel.querySelectorAll('button[data-act]')) {
+      b.addEventListener('click', () => close(b.dataset.act));
+    }
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+  });
+}
+
+function blockedUndoModal() {
+  return confirmModal({
+    title: '⚠ Move locked',
+    body: 'This turn\'s move flew through a hazard spot. '
+      + 'Hazard rolls and aqua bypasses commit the move - it '
+      + 'cannot be undone. End the turn to start fresh.',
+    yes: 'OK',
+    no: '',
+  });
 }
 
 // Sunspot Cube d6 events. Rules text + lookup live in turn-clock.js
@@ -1858,18 +2836,25 @@ function confirmModal({ title, body, yes = 'OK', no = 'Cancel' }) {
     document.addEventListener('keydown', onKey);
     const panel = document.createElement('div');
     panel.className = 'turn-confirm-panel';
+    // Single-button (info) mode: pass no='' to hide the secondary
+    // button so the modal reads as an acknowledge instead of a
+    // yes/no. The remaining Yes resolves true on click + Enter.
+    const noBtn = no
+      ? `<button type="button" class="popup-btn" data-act="no">${esc(no)}</button>`
+      : '';
     panel.innerHTML = `
       <h3>${esc(title)}</h3>
       <p>${body}</p>
       <div class="turn-confirm-actions">
         <button type="button" class="popup-btn primary" data-act="yes">${esc(yes)}</button>
-        <button type="button" class="popup-btn"         data-act="no">${esc(no)}</button>
+        ${noBtn}
       </div>
     `;
     panel.querySelector('[data-act="yes"]').addEventListener('click', () => close(true));
-    panel.querySelector('[data-act="no"]').addEventListener('click',  () => close(false));
+    const noEl = panel.querySelector('[data-act="no"]');
+    if (noEl) noEl.addEventListener('click', () => close(false));
     overlay.appendChild(panel);
-    document.body.appendChild(overlay);
+    mountOverlay(overlay);
   });
 }
 
@@ -1931,9 +2916,12 @@ function buildFuelStrip(host, totals) {
   host.appendChild(legend);
 }
 
-function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
+function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   document.querySelector('.fuel-tank-overlay')?.remove();
   const tankNow = Number.isFinite(toWater) ? toWater : getTankWater();
+  // fromWater default is null (not 0): no-arg opens snap to the
+  // current level immediately, no fill animation. Refuel calls
+  // still pass fromWater explicitly to play the fill tween.
   const fromW   = Number.isFinite(fromWater) ? fromWater : tankNow;
   const totals  = getStackTotals();
   const thrStats = getActiveThrusterStats();
@@ -1970,7 +2958,7 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
   panel.innerHTML = `
     <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
     <h2 class="fuel-tank-title">💧 Water tank</h2>
-    <p class="muted fuel-tank-sub">Tap to skip animation or close</p>
+    <p class="muted fuel-tank-sub">Tap outside or press Esc to close</p>
     <div class="fuel-tank-stage">
       <svg viewBox="0 0 120 220" class="fuel-tank-svg" preserveAspectRatio="xMidYMid meet">
         <!-- Outer cylinder (stroke only) -->
@@ -2007,6 +2995,23 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
         title="Drain 1 water from the tank">💧⤓ Dump 1</button>
       <button type="button" class="popup-btn popup-btn-secondary" id="tank-dump-all"
         title="Drain everything (future: forms an outpost stack once factories land)">💧⤓ Dump all</button>
+    </div>
+    <div class="fuel-tank-aqua" id="tank-aqua-section" hidden>
+      <div class="aqua-row">
+        <span>💎 Aqua balance</span>
+        <strong id="aqua-balance">${getAqua()}</strong>
+      </div>
+      <p class="muted aqua-help">
+        Convert aqua to water 1:1. Only available at LEO.
+      </p>
+      <div class="aqua-actions">
+        <button type="button" class="popup-btn popup-btn-secondary" id="aqua-buy-1"
+          title="Convert 1 aqua into 1 water">💎→💧 +1</button>
+        <button type="button" class="popup-btn popup-btn-secondary" id="aqua-buy-5"
+          title="Convert 5 aqua into 5 water">💎→💧 +5</button>
+        <button type="button" class="popup-btn" id="aqua-buy-max"
+          title="Fill the tank to its cap by converting aqua">💎→💧 Max fill</button>
+      </div>
     </div>
     <p class="muted fuel-tank-dump-note">
       Dumped water is destroyed for now. Stage 3+ turns this into
@@ -2054,24 +3059,29 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
   // Falling-droplet animation. Spawns teardrop <path>s at the
   // top of the tank and lets gravity drop them onto the water
   // surface. On impact, a quick splash ring expands + fades.
-  // Active only during the fill animation (drops cycle off once
-  // the main tween settles).
+  // Two cadences:
+  //   - fast (~110ms) while a fill / drain tween is running
+  //   - ambient (~2-5s, random) while idle, so the modal has a
+  //     bit of life without feeling like the tank is filling
   const dropsLayer = panel.querySelector('.tank-drops');
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const activeDrops = [];
   let lastSpawn = 0;
-  function spawnDrop(now) {
+  let nextAmbient = 0;
+  function spawnDrop(now, opts = {}) {
     const x = 30 + Math.random() * 60;      // within the tank interior
     const path = document.createElementNS(SVG_NS, 'path');
     // Teardrop shape ~6px tall, 4px wide at base.
     path.setAttribute('d', 'M 0 -3 C 2 0 2 3 0 3 C -2 3 -2 0 0 -3 Z');
     path.setAttribute('fill', '#7dd3fc');
-    path.setAttribute('opacity', '0.9');
+    // Ambient drops are quieter (lower opacity, slower fall) so
+    // the eye reads them as background pulse rather than fill.
+    path.setAttribute('opacity', opts.ambient ? '0.55' : '0.9');
     path.setAttribute('transform', `translate(${x.toFixed(1)} 14)`);
     dropsLayer.appendChild(path);
     activeDrops.push({
       el: path, x, y: 14,
-      vy: 60 + Math.random() * 30,           // px/s initial speed
+      vy: opts.ambient ? (20 + Math.random() * 15) : (60 + Math.random() * 30),
       bornAt: now,
     });
   }
@@ -2098,11 +3108,23 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
     requestAnimationFrame(splashTick);
   }
   function stepDrops(now, dtMs) {
-    // Maybe spawn one. Cadence ~110ms; only while the main tween
-    // is still running so drops stop with the fill.
-    if (animating && now - lastSpawn > 110) {
-      spawnDrop(now);
-      lastSpawn = now;
+    // Fill / drain mode: spawn rapidly so the column reads as
+    // pouring water. Idle: spawn sparingly so the modal has a
+    // bit of pulse without looking like the tank is refilling
+    // on its own.
+    if (animating) {
+      if (now - lastSpawn > 110) {
+        spawnDrop(now);
+        lastSpawn = now;
+      }
+    } else if (nextAmbient && now >= nextAmbient) {
+      spawnDrop(now, { ambient: true });
+      nextAmbient = now + 2000 + Math.random() * 3000;
+    } else if (!nextAmbient) {
+      // First idle frame seeds the schedule so we don't spawn
+      // a drop instantly on modal open - players see the still
+      // tank first, then a quiet drop after a beat.
+      nextAmbient = now + 1500 + Math.random() * 1500;
     }
     for (let i = activeDrops.length - 1; i >= 0; i--) {
       const d = activeDrops[i];
@@ -2134,12 +3156,14 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
   const onTap = (e) => {
     if (e.target.classList.contains('modal-x')) return;
     if (animating) {
-      // Skip animation - snap to final, don't close yet. Clear
-      // in-flight droplets too so they don't keep raining after
-      // the snap.
-      if (raf) cancelAnimationFrame(raf);
+      // Skip animation - snap the level to the active tween's
+      // target and tear the tween down. The main rAF stays alive
+      // (it's also driving ambient drops), so we only clear the
+      // tween state + in-flight drops.
+      const target = tween ? tween.to : tankNow;
+      tween = null;
       animating = false;
-      setLevel(tankNow);
+      setLevel(target);
       clearDrops();
       finalReached = true;
       return;
@@ -2150,36 +3174,46 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
   panel.querySelector('.modal-x').addEventListener('click', close);
 
   overlay.appendChild(panel);
-  document.body.appendChild(overlay);
+  mountOverlay(overlay);
 
-  // Animate from fromW -> tankNow. The droplet stepper runs on
-  // the same rAF tick so the visual stays in sync; once the
-  // fill settles the loop keeps going briefly to let in-flight
-  // drops land before stopping.
+  // Continuous tick. Runs from open to close so ambient drops
+  // can fall while the modal sits idle. Level tweens (initial
+  // refuel, drain on dump, aqua → water transfer) share this
+  // loop via the `tween` slot below - they set { from, to, t0,
+  // dur, onDone } and the step function handles the rest.
+  // `animating` keys stepDrops's cadence so a running tween
+  // pours drops fast and idle frames pour sparingly.
+  let lastTick = performance.now();
+  let tween = null;
   if (fromW !== tankNow) {
-    animating = true;
-    const durationMs = 1100;
-    const t0 = performance.now();
-    let lastTick = t0;
-    const step = (now) => {
-      const dt = now - lastTick;
-      lastTick = now;
-      const t = Math.min(1, (now - t0) / durationMs);
-      const eased = 1 - Math.pow(1 - t, 3);  // ease-out cubic
-      const v = fromW + (tankNow - fromW) * eased;
-      setLevel(v);
-      if (t >= 1) { animating = false; finalReached = true; }
-      stepDrops(now, dt);
-      if (t < 1 || activeDrops.length > 0) {
-        raf = requestAnimationFrame(step);
-      } else {
-        raf = 0;
-      }
+    tween = {
+      from: fromW, to: tankNow,
+      t0: performance.now(), dur: 1100,
     };
-    raf = requestAnimationFrame(step);
+    animating = true;
   } else {
     finalReached = true;
   }
+  const step = (now) => {
+    const dt = now - lastTick;
+    lastTick = now;
+    if (tween) {
+      const t = Math.min(1, (now - tween.t0) / tween.dur);
+      const eased = 1 - Math.pow(1 - t, 3);  // ease-out cubic
+      const v = tween.from + (tween.to - tween.from) * eased;
+      setLevel(v);
+      if (t >= 1) {
+        const done = tween.onDone;
+        tween = null;
+        animating = false;
+        finalReached = true;
+        if (done) done();
+      }
+    }
+    stepDrops(now, dt);
+    raf = requestAnimationFrame(step);
+  };
+  raf = requestAnimationFrame(step);
   // Note: close() already nulls activeDrops + removes the
   // overlay, so any in-flight drops vanish when the user
   // dismisses mid-animation.
@@ -2199,32 +3233,23 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
   };
   refreshDumpButtons();
   function drainTo(targetLevel, durationMs = 250) {
-    if (raf) cancelAnimationFrame(raf);
+    // Hand off to the unified tween: the continuous step picks
+    // it up next frame and animates setLevel without disturbing
+    // ambient drops. Clearing in-flight drops keeps the visual
+    // honest - emptying shouldn't look like pouring in.
     clearDrops();
-    animating = true;
-    const startLevel = getTankWater() + Math.max(0,
-      // visual start = current displayed level on screen, not
-      // the stored value (which already reflects the drain).
-      parseFloat(nowReadout.textContent || '0') - getTankWater());
     const fromLevel = parseFloat(nowReadout.textContent || String(getTankWater()));
     const toLevel = Math.max(0, targetLevel);
     if (fromLevel === toLevel) {
-      animating = false;
       refreshDumpButtons();
       return;
     }
-    const t0 = performance.now();
-    const tick = (now) => {
-      const t = Math.min(1, (now - t0) / durationMs);
-      const eased = 1 - Math.pow(1 - t, 3);
-      const v = fromLevel + (toLevel - fromLevel) * eased;
-      setLevel(v);
-      if (t < 1) raf = requestAnimationFrame(tick);
-      else { animating = false; raf = 0; refreshDumpButtons(); }
+    animating = true;
+    tween = {
+      from: fromLevel, to: toLevel,
+      t0: performance.now(), dur: durationMs,
+      onDone: () => refreshDumpButtons(),
     };
-    raf = requestAnimationFrame(tick);
-    // suppress lint for unused startLevel
-    void startLevel;
   }
   dump1Btn?.addEventListener('click', (e) => {
     // Stop the overlay's onTap handler from interpreting this
@@ -2254,6 +3279,77 @@ function openFuelTankModal({ fromWater = 0, toWater = null } = {}) {
       undoable: false,
     });
   });
+
+  // Aqua → water transfer panel. Gated behind LEO presence -
+  // refilling water from the aqua reserve is a "back at port"
+  // affordance, not something you can do mid-burn. Tank cap is
+  // the lift-limit `cap` already computed above so the buttons
+  // can't push past wet=32 or past thrust-mass.
+  const aquaSection = panel.querySelector('#tank-aqua-section');
+  const aquaBalEl   = panel.querySelector('#aqua-balance');
+  const aquaBuy1Btn = panel.querySelector('#aqua-buy-1');
+  const aquaBuy5Btn = panel.querySelector('#aqua-buy-5');
+  const aquaBuyMaxBtn = panel.querySelector('#aqua-buy-max');
+  const atLeo = isLeoSite(getRocketSite());
+  if (atLeo && aquaSection) aquaSection.hidden = false;
+  const refreshAquaButtons = () => {
+    if (!aquaSection || aquaSection.hidden) return;
+    const bal = getAqua();
+    const cur = getTankWater();
+    const room = Math.max(0, cap - cur);
+    if (aquaBalEl) aquaBalEl.textContent = String(bal);
+    if (aquaBuy1Btn)   aquaBuy1Btn.disabled   = bal < 1 || room < 1;
+    if (aquaBuy5Btn)   aquaBuy5Btn.disabled   = bal < 5 || room < 1;
+    if (aquaBuyMaxBtn) aquaBuyMaxBtn.disabled = bal < 1 || room < 1;
+  };
+  refreshAquaButtons();
+  // Reuse the same drainTo-style animation in reverse: get the
+  // visual "from" off the on-screen readout and tween up to the
+  // new tank water level. Wraps the spend + addFuel pair so a
+  // failed spend doesn't leave the level mid-animation.
+  const fillFromAqua = (amount, e) => {
+    e?.stopPropagation();
+    if (!atLeo) return;
+    const cur = getTankWater();
+    const room = Math.max(0, cap - cur);
+    const want = Math.min(amount, room, getAqua());
+    if (want <= 0) { refreshAquaButtons(); return; }
+    if (!spendAqua(want)) { refreshAquaButtons(); return; }
+    addFuel(want);
+    const fromLevel = parseFloat(nowReadout.textContent || String(cur));
+    const toLevel = getTankWater();
+    if (fromLevel === toLevel) {
+      refreshAquaButtons();
+      return;
+    }
+    // Hand off to the unified tween. animating=true makes
+    // stepDrops pour rapidly while the level climbs.
+    animating = true;
+    tween = {
+      from: fromLevel, to: toLevel,
+      t0: performance.now(), dur: 400,
+      onDone: () => { refreshAquaButtons(); refreshDumpButtons(); },
+    };
+    logAction({
+      type: 'aqua_transfer',
+      icon: '💎→💧',
+      summary: `Converted ${want} aqua → ${want} water (tank ${getTankWater()}/${cap})`,
+      undoable: false,
+    });
+  };
+  aquaBuy1Btn?.addEventListener('click',   (e) => fillFromAqua(1, e));
+  aquaBuy5Btn?.addEventListener('click',   (e) => fillFromAqua(5, e));
+  aquaBuyMaxBtn?.addEventListener('click', (e) => fillFromAqua(cap, e));
+  const unsubAqua = onAquaChange(refreshAquaButtons);
+  const unsubRocket = onRocketChange(refreshAquaButtons);
+  // Cleanup: detach listeners when the overlay tears down so a
+  // closed modal doesn't keep responding to balance changes.
+  const origRemove = overlay.remove.bind(overlay);
+  overlay.remove = () => {
+    unsubAqua();
+    unsubRocket();
+    origRemove();
+  };
 }
 
 // Read the prospector's ISRU rating off the active face's
@@ -2367,7 +3463,7 @@ function openProspectRollModal({ site, threshold, roll, success, kindGlyph, card
   dieHost.appendChild(die);
 
   overlay.appendChild(panel);
-  document.body.appendChild(overlay);
+  mountOverlay(overlay);
 
   rollDie(die, roll).then(() => {
     die.classList.add(success ? 'die-success' : 'die-fail');
@@ -2546,6 +3642,93 @@ function syncDiscs() {
   _renderer.setDiscs(getDiscs());
 }
 
+// Rocket exploded mid-move. Animation runs at the failed-hazard
+// position; once the visual finishes (or in parallel, depending
+// on timing), every card in the stack returns to the player's
+// hand, the tank is dumped, and the rocket vanishes from the map
+// (snapping back to LEO on next sync). Aqua is unaffected; the
+// player's investment is the cards + the wet mass they were
+// hauling. Move is consumed and locked - no undo path.
+async function explodeRocket(siteId) {
+  const site = _activeData && _activeData.sites.find((x) => x.id === siteId);
+  const x = site && Number.isFinite(site.x) ? site.x : null;
+  const y = site && Number.isFinite(site.y) ? site.y : null;
+  const tankLost = getTankWater();
+  // Snapshot stack BEFORE clearing so we know what to return.
+  const stackSnapshot = getRocketStack().slice();
+  // Pan the camera to the explosion so the player actually sees
+  // it - mid-flight the camera may have followed but a
+  // mid-modal scroll could've left the map elsewhere.
+  if (_renderer && x != null && y != null) {
+    if (typeof _renderer.flyTo === 'function') {
+      _renderer.flyTo({ x, y }, locateZoom(Math.max(_renderer.zoom || 2, 3)));
+    }
+    _renderer.triggerExplosion(x, y);
+  }
+  setStatus(`💥 Rocket exploded at <strong>${esc(site ? site.name : siteId)}</strong>.`);
+  // Wait roughly the explosion's lifetime so the sprite vanishing
+  // doesn't pop before the burst plays out.
+  await new Promise((res) => setTimeout(res, 1100));
+  // Return cards to hand. addToHand rejects cards already there
+  // or in the rocket; clearing the stack first keeps the second
+  // check from blocking each addToHand call. We collect counts so
+  // the log entry tells the player exactly what came back.
+  rocketClearStack();
+  let returned = 0;
+  for (const slot of stackSnapshot) {
+    const card = PATENTS_BY_ID[slot.id]
+      || CREW.find((c) => c.id === slot.id) || null;
+    if (!card) continue;
+    const r = addToHand(card);
+    if (r && r.ok) returned++;
+  }
+  // Reset the rocket's position - getRocketSite() falls back to
+  // LEO when _rocketSiteId is null, so the sprite redraws there.
+  _rocketSiteId = null;
+  persistRocketSite();
+  // Wipe the planned route + walked trail - the rocket no
+  // longer has a journey to continue. Trail clears too so the
+  // cyan breadcrumbs don't dangle from a now-dead rocket.
+  _plannedRoute = null;
+  persistPlannedRoute();
+  exitManualMoveMode();
+  _rocketTrail = [];
+  persistRocketTrail();
+  if (_renderer) {
+    _renderer.setRoute(null);
+    _renderer.setRouteEndpoints(null, null);
+    _renderer.setRocketTrail(null);
+  }
+  _moveSnapshot = null;
+  const clearBtn = document.getElementById('route-clear');
+  if (clearBtn) clearBtn.hidden = true;
+  logAction({
+    type: 'explode',
+    icon: '💥',
+    summary: `Rocket destroyed at ${site ? site.name : siteId}`
+      + ` - ${returned} card${returned === 1 ? '' : 's'} returned to hand`
+      + (tankLost > 0 ? `, ${tankLost} water lost` : ''),
+    undoable: false,
+    data: { siteId, returnedCards: returned, waterLost: tankLost },
+  });
+  syncSandboxRocket();
+  refreshOpenSitePopup();
+  // Acknowledge dialog - the explosion + state reset already
+  // happened, but a player who looked away mid-animation needs a
+  // clear "your ship is gone" beat before they go back to the
+  // map. Single OK button; await so the caller's status text
+  // doesn't get clobbered by anything that runs after this.
+  await confirmModal({
+    title: '💥 Spacecraft destroyed',
+    body: `Your rocket was lost at <strong>${esc(site ? site.name : siteId)}</strong>. `
+      + `<strong>${returned}</strong> card${returned === 1 ? '' : 's'} returned to your hand`
+      + (tankLost > 0 ? `, <strong>${tankLost}</strong> water lost` : '')
+      + `. Rebuild from the LEO stack to fly again.`,
+    yes: 'OK',
+    no: '',
+  });
+}
+
 // Step the rocket through its planned route's "turn 1" segments
 // (one move per turn, capped at BURNS_PER_TURN burns of cumulative
 // dv). The remaining segments shift down a turn so the next move
@@ -2562,6 +3745,98 @@ async function moveRocket() {
     setStatus('Planned route has no current-turn segments.');
     return false;
   }
+  // Hazard pre-flight check. Two flavours along a route:
+  //   - generic (☠ skull / 🪂 aerobrake) → aqua-payable, or
+  //     roll d6 (1 = rocket destroyed at that node)
+  //   - radiation (☢) → NOT payable; check the active thruster's
+  //     thrust against a season-based bypass threshold, else roll
+  //     d6 per zone and decommission any stack card whose
+  //     rad-hard is less than the highest roll
+  // Generic hazards prompt the pay/roll/cancel modal first; rad
+  // hazards run their own check afterwards (always - they can't
+  // be skipped by paying). Both, when actually resolved (paid OR
+  // rolled), lock undo for the rest of the turn. The actual
+  // dice DON'T roll here - they fire one at a time inside the
+  // move-queue below, in route order, so an early rad failure
+  // can stop the ship before a later generic hazard is reached.
+  const hazards = routeHazards(turn1);
+  const radHazards     = hazards.filter((h) => h.site.type === 'radhaz');
+  const genericHazards = hazards.filter((h) => h.site.type !== 'radhaz');
+  let hazardChoice = null;
+  let lockUndo = false;
+  if (genericHazards.length) {
+    hazardChoice = await hazardConfirmModal(genericHazards);
+    if (hazardChoice === 'cancel' || hazardChoice == null) {
+      setStatus('Move cancelled - no aqua spent, no rolls made.');
+      return false;
+    }
+    if (hazardChoice === 'pay') {
+      const cost = genericHazards.length * HAZARD_COST_PER;
+      if (!spendAqua(cost)) {
+        setStatus(`Need ${cost} aqua to bypass - balance only ${getAqua()}.`);
+        return false;
+      }
+      logAction({
+        type: 'hazard_pay',
+        icon: '💎',
+        summary: `Paid ${cost} aqua to bypass ${genericHazards.length} hazard`
+          + `${genericHazards.length === 1 ? '' : 's'}`,
+        undoable: false,
+        data: { cost, hazards: genericHazards.map((h) => h.site.id) },
+      });
+      lockUndo = true;
+    } else if (hazardChoice === 'roll') {
+      // Defer dice to the per-hazard queue. Just mark the
+      // undo-lockout - the player has committed to rolling.
+      lockUndo = true;
+    }
+  }
+  // Rad confirm. Same shape as the generic confirm: player sees
+  // the formula upfront, picks confirm or cancel. Actual rolls
+  // happen one-at-a-time in the queue below.
+  let radWillRoll = false;
+  let radThrust = 0;
+  let radSeasonBonus = 0;
+  if (radHazards.length) {
+    const thrStats = getActiveThrusterStats();
+    radThrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 0;
+    let season = null;
+    try { season = getSeason(); } catch { season = null; }
+    radSeasonBonus = season && season.name === 'red' ? 2 : 0;
+    const threshold = radBypassThreshold();
+    const radChoice = await radConfirmModal(radHazards, radThrust, radSeasonBonus, threshold);
+    if (radChoice === 'cancel' || radChoice == null) {
+      if (hazardChoice === 'pay') {
+        // Generic hazards charged aqua already; refund so the
+        // cancel doesn't leave the player out of pocket.
+        const refundCost = genericHazards.length * HAZARD_COST_PER;
+        addAqua(refundCost);
+        logAction({
+          type: 'hazard_refund',
+          icon: '💧',
+          summary: `Move cancelled at rad check - refunded ${refundCost} aqua`,
+          undoable: false,
+          data: { refund: refundCost },
+        });
+      }
+      setStatus('Move cancelled at the rad check.');
+      return false;
+    }
+    if (radThrust > threshold) {
+      logAction({
+        type: 'rad_bypass',
+        icon: '☢',
+        summary: `Thrust ${radThrust} > ${threshold} - bypassed `
+          + `${radHazards.length} rad zone${radHazards.length === 1 ? '' : 's'} without rolling`,
+        undoable: false,
+        data: { thrust: radThrust, threshold, sites: radHazards.map((h) => h.site.id) },
+      });
+    } else {
+      radWillRoll = true;
+      lockUndo = true;
+    }
+  }
+  if (lockUndo) setHazardousMove(true);
   if (!consumeMove()) {
     setStatus('No moves left this turn - end turn to refresh.');
     return false;
@@ -2588,25 +3863,237 @@ async function moveRocket() {
     cashedChits: null,        // filled in below if a cash-in fires
     cashedVps:   0,
   };
-  // Animate first - tweens position over ~700 ms, ease-in-out.
+  // Move queue. Walk turn1 segments in order, pausing at each
+  // hazard node to resolve it (animate-to + roll modal). An
+  // early critical kills the ship before later hazards even
+  // see the dice. Trail + _rocketSiteId update incrementally
+  // so an explosion mid-route reports the right location.
   setStatus(`🛸 Moving rocket to <strong>${esc(arrivedName)}</strong>…`);
-  await animateRocketAlong(turn1);
+  const hazardIndexById = new Map();
+  for (const h of hazards) {
+    const idx = turn1.findIndex((s) => s.to === h.site.id);
+    if (idx >= 0) hazardIndexById.set(h.site.id, { idx, hazard: h });
+  }
+  const orderedHazards = [...hazardIndexById.values()].sort((a, b) => a.idx - b.idx);
+  let lastIdx = 0;
+  const advanceTo = async (targetIdx) => {
+    if (targetIdx < lastIdx) return;
+    const slice = turn1.slice(lastIdx, targetIdx + 1);
+    if (!slice.length) return;
+    await animateRocketAlong(slice);
+    _rocketTrail = _rocketTrail.concat(slice.map((s) => ({ from: s.from, to: s.to })));
+    persistRocketTrail();
+    _renderer.setRocketTrail(_rocketTrail);
+    _rocketSiteId = slice[slice.length - 1].to;
+    persistRocketSite();
+    lastIdx = targetIdx + 1;
+  };
+  // Tracks whether the player switched to "pay for the rest"
+  // mid-queue; flips remaining generic hazards to the paid path
+  // without re-rolling. Starts true when the upfront choice was
+  // already 'pay' so the queue uniformly checks one flag.
+  let payRemainingGeneric = (hazardChoice === 'pay');
+  let earlyHalt = false;
+  let haltSite = null;
+  for (let qi = 0; qi < orderedHazards.length; qi++) {
+    const { idx, hazard } = orderedHazards[qi];
+    await advanceTo(idx);
+    const isRad = hazard.site.type === 'radhaz';
+    if (isRad) {
+      if (!radWillRoll) {
+        // Bypass already logged upfront; just animate past.
+      } else {
+        const stackCards = getRocketStack()
+          .map((slot) => {
+            const card = PATENTS_BY_ID[slot.id]
+              || CREW.find((c) => c.id === slot.id) || null;
+            if (!card) return null;
+            return {
+              id: slot.id,
+              name: card.name,
+              radHardness: card.radHardness != null ? card.radHardness : 0,
+            };
+          })
+          .filter(Boolean);
+        const { rolls: radRolls, decommission } = await radHardnessRollModal(
+          [hazard], stackCards, radThrust, radSeasonBonus,
+        );
+        for (const r of radRolls) {
+          logAction({
+            type: 'rad_roll',
+            icon: '☢',
+            summary: `☢ ${esc(r.site.name)} d6=${r.d6}`
+              + (radSeasonBonus ? ` +${radSeasonBonus} (red)` : '')
+              + (radThrust ? ` −${radThrust} thrust` : '')
+              + ` = rad ${r.rad}`,
+            undoable: false,
+            data: { siteId: r.site.id, d6: r.d6, rad: r.rad, thrust: radThrust, seasonBonus: radSeasonBonus },
+          });
+        }
+        if (decommission && decommission.length) {
+          let lost = 0;
+          for (const cardId of decommission) {
+            const ridx = getRocketStack().findIndex((s) => s.id === cardId);
+            if (ridx < 0) continue;
+            rocketRemoveCard(ridx);
+            const card = PATENTS_BY_ID[cardId]
+              || CREW.find((c) => c.id === cardId) || null;
+            if (card) {
+              const r = addToHand(card);
+              if (r && r.ok) lost++;
+            }
+          }
+          logAction({
+            type: 'rad_decommission',
+            icon: '☢',
+            summary: `☢ ${esc(hazard.site.name)}: ${lost} card${lost === 1 ? '' : 's'} decommissioned to hand`,
+            undoable: false,
+            data: { siteId: hazard.site.id, decommission, count: lost },
+          });
+        }
+      }
+    } else {
+      // Generic hazard. Paid path animates past silently; rolled
+      // path opens the dice modal. payRemainingGeneric flips when
+      // the player switches to "pay the rest" mid-queue.
+      if (!payRemainingGeneric) {
+        const rolls = await hazardRollModal([hazard]);
+        const r = rolls[0];
+        const verdict = r.d6 === 1 ? '✗ critical (rolled 1)' : '✓ survived';
+        logAction({
+          type: 'hazard_roll',
+          icon: r.glyph,
+          summary: `${r.glyph} ${esc(r.site.name)} d6=${r.d6} ${verdict}`,
+          undoable: false,
+          data: { siteId: r.site.id, d6: r.d6 },
+        });
+        if (r.d6 === 1) {
+          setStatus(`💥 Critical failure at <strong>${esc(r.site.name)}</strong>…`);
+          await explodeRocket(r.site.id);
+          return false;
+        }
+      }
+    }
+    // Post-resolve safety net: a decommissioned active thruster
+    // (or its support cards) might have killed the rocket's
+    // ability to fly. If so, halt right here - the rocket
+    // strands on the hazard node, future turns can rebuild.
+    const flyCheck = isRocketActive();
+    if (!flyCheck.active) {
+      earlyHalt = true;
+      haltSite = hazard.site;
+      logAction({
+        type: 'stranded',
+        icon: '🛰',
+        summary: `Stranded at ${esc(hazard.site.name)} - ${esc(flyCheck.reason || 'rocket cannot fly')}`,
+        undoable: false,
+        data: { siteId: hazard.site.id, reason: flyCheck.reason, missing: flyCheck.missing },
+      });
+      setStatus(`🛰 Stranded at <strong>${esc(hazard.site.name)}</strong> - ${esc(flyCheck.reason)}.`);
+      break;
+    }
+    // Mid-route choice if any hazards still ahead. The player
+    // can Continue, Stop here, or Pay aqua to bypass the
+    // remaining generic hazards.
+    const remaining = orderedHazards.slice(qi + 1);
+    if (remaining.length) {
+      const choice = await midRouteChoiceModal({
+        atSiteName: hazard.site.name,
+        remaining,
+        aquaBalance: getAqua(),
+      });
+      if (choice === 'stop') {
+        earlyHalt = true;
+        haltSite = hazard.site;
+        logAction({
+          type: 'manual_halt',
+          icon: '⏹',
+          summary: `Halted at ${esc(hazard.site.name)} - ${remaining.length} hazard${remaining.length === 1 ? '' : 's'} skipped`,
+          undoable: false,
+          data: { siteId: hazard.site.id, skipped: remaining.length },
+        });
+        setStatus(`⏹ Halted at <strong>${esc(hazard.site.name)}</strong>.`);
+        break;
+      }
+      if (choice === 'pay') {
+        const remGeneric = remaining.filter((r) => r.hazard.site.type !== 'radhaz');
+        const cost = remGeneric.length * HAZARD_COST_PER;
+        if (cost > 0 && spendAqua(cost)) {
+          payRemainingGeneric = true;
+          logAction({
+            type: 'hazard_pay',
+            icon: '💧',
+            summary: `Paid ${cost} aqua mid-route to bypass ${remGeneric.length} remaining generic hazard${remGeneric.length === 1 ? '' : 's'}`,
+            undoable: false,
+            data: { cost, hazards: remGeneric.map((r) => r.hazard.site.id) },
+          });
+        }
+      }
+      // 'continue' falls through to the next iteration.
+    }
+  }
+  // If we halted early, shift remaining segments (the ones we
+  // never walked) into next-turn slots so the player can resume
+  // the journey later. The destination for THIS move is the
+  // last node we actually reached, not the original target.
+  if (earlyHalt) {
+    const haltedSiteId = (haltSite && haltSite.id) || _rocketSiteId;
+    // Carry-over: every segment past `lastIdx` becomes turn 2+
+    // in the planned route. The post-move "shift down" logic
+    // later will turn those into the next turn's playables.
+    const carry = turn1.slice(lastIdx).map((s, i) => ({ ...s, turn: 2 + Math.floor(i / 4) }));
+    const futureTurns = _plannedRoute
+      .filter((s) => s.turn > 1)
+      .map((s) => ({ ...s, turn: s.turn + 1 }));
+    _plannedRoute = carry.concat(futureTurns);
+    persistPlannedRoute();
+    if (_renderer) _renderer.setRoute(_plannedRoute);
+    _rocketSiteId = haltedSiteId;
+    persistRocketSite();
+    // Log the move under the halted site so the audit trail
+    // matches reality.
+    logAction({
+      type: 'move',
+      icon: '🛸',
+      summary: `Moved to ${esc(haltSite ? haltSite.name : haltedSiteId)} (halted early)`,
+      undoable: false,
+      data: { siteId: haltedSiteId, hazardous: true, halted: true },
+    });
+    syncSandboxRocket();
+    refreshOpenSitePopup();
+    return true;
+  }
+  // Animate the tail (everything past the last hazard) to the
+  // final destination.
+  if (lastIdx < turn1.length) {
+    const tail = turn1.slice(lastIdx);
+    await animateRocketAlong(tail);
+    _rocketTrail = _rocketTrail.concat(tail.map((s) => ({ from: s.from, to: s.to })));
+    persistRocketTrail();
+    _renderer.setRocketTrail(_rocketTrail);
+  }
   _rocketSiteId = newSiteId;
   persistRocketSite();
-  // Add the walked segments to the persistent trail (drawn cyan).
-  _rocketTrail = _rocketTrail.concat(turn1.map((s) => ({ from: s.from, to: s.to })));
-  persistRocketTrail();
-  _renderer.setRocketTrail(_rocketTrail);
   // Log the move + award glory chit on first-time zone entry +
   // auto-cash any chits if we just landed at LEO. Each side-
   // effect appends to the mission log so the player can audit
   // (and undo) the whole sequence as one move.
+  // Hazardous moves (paid generic, rolled generic, OR any rad
+  // resolution that touched the dice) lock undo for the turn -
+  // the lockout flag was already set above; here we just label
+  // the log entry and flip undoable to match.
   logAction({
     type: 'move',
     icon: '🛸',
-    summary: `Moved to ${arrivedName}`,
-    undoable: true,
-    data: { siteId: newSiteId, zone: arrivedZone },
+    summary: hazardChoice === 'pay'
+      ? `Moved to ${arrivedName} (paid past ${genericHazards.length} hazard${genericHazards.length === 1 ? '' : 's'})`
+      : hazardChoice === 'roll'
+        ? `Moved to ${arrivedName} (rolled through ${genericHazards.length} hazard${genericHazards.length === 1 ? '' : 's'})`
+        : lockUndo
+          ? `Moved to ${arrivedName} (radiation crossed)`
+          : `Moved to ${arrivedName}`,
+    undoable: !lockUndo,
+    data: { siteId: newSiteId, zone: arrivedZone, hazardous: lockUndo },
   });
   if (willAwardChit) {
     awardChitForZone(arrivedZone, getTurn());
@@ -2649,6 +4136,10 @@ async function moveRocket() {
     _renderer.setRouteEndpoints(null, null);
     _routeFrom = null;
     _routeTo = null;
+    // Manual mode wraps up here too - no remaining segments
+    // means there's nothing more to plot, so the toolbar should
+    // flip back to its normal "plan a route" labels.
+    exitManualMoveMode();
     const clearBtn = document.getElementById('route-clear');
     if (clearBtn) clearBtn.hidden = true;
     setStatus(`🛸 Arrived at <strong>${esc(arrivedName)}</strong>.`);
@@ -2668,6 +4159,13 @@ async function moveRocket() {
 async function undoRocketMove() {
   if (!_renderer) return false;
   if (_rocketAnimating) return false;
+  // Hazard-lockout: if the last move spent aqua or rolled dice,
+  // the undo is blocked for the rest of the turn. Show a clear
+  // "why" dialog so the player isn't confused by the dead button.
+  if (_lastMoveHazardous) {
+    await blockedUndoModal();
+    return false;
+  }
   if (!_moveSnapshot) {
     // No snapshot but the budget is spent - just refund so the
     // button flips back to the move face. Rare path (e.g. moved
@@ -2761,6 +4259,21 @@ function exitRoutingMode() {
 }
 
 function onSiteSelect(site) {
+  // Manual move mode intercepts every tap: each one tries to
+  // append a segment to the planned route from the current tip
+  // (rocket position → last placed segment.to). Non-neighbours
+  // and out-of-budget taps fall through to a status message,
+  // they DON'T open the regular popup so the player doesn't
+  // accidentally exit the planning flow.
+  if (_manualMode && site && site.id) {
+    if (site.isDecorative || site.isLandable === false) {
+      setStatus(`<strong>${esc(site.name)}</strong> isn't a landable site.`);
+      return;
+    }
+    manualAppendSegment(site.id);
+    return;
+  }
+
   // Solo mode hijacks clicks: every site you tap becomes the
   // proposed destination for your ship's current position.
   const s = soloState();
@@ -2892,6 +4405,8 @@ function openRouteOptionsModal(onClose) {
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
 
+  const thrStats = getActiveThrusterStats();
+  const thrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 4;
   const panel = document.createElement('div');
   panel.className = 'route-options-panel';
   panel.innerHTML = `
@@ -2921,6 +4436,16 @@ function openRouteOptionsModal(onClose) {
         </div>
       </label>
     </div>
+    <div class="route-options-manual">
+      <button type="button" class="popup-btn route-options-manual-btn">
+        ✋ Manual move - plot ${thrust} hops by hand
+      </button>
+      <p class="muted route-options-manual-help">
+        Cancels any auto-planned route and lets you tap adjacent
+        sites one at a time. Capped at the active thruster's
+        thrust (${thrust}). Tap Move when you're ready to fly.
+      </p>
+    </div>
   `;
   panel.querySelector('.modal-x').addEventListener('click', close);
   panel.querySelectorAll('input[name="route-priority"]').forEach((el) => {
@@ -2935,9 +4460,17 @@ function openRouteOptionsModal(onClose) {
       }
     });
   });
+  panel.querySelector('.route-options-manual-btn').addEventListener('click', () => {
+    close();
+    // Close the underlying site popup too - manual mode plots
+    // from the rocket's position, the popup site isn't relevant
+    // any more and leaving it open would block taps under it.
+    if (_renderer) _renderer.setSitePopup(null);
+    enterManualMoveMode();
+  });
 
   overlay.appendChild(panel);
-  document.body.appendChild(overlay);
+  mountOverlay(overlay);
 }
 
 function refreshOpenSitePopup() {
@@ -3167,6 +4700,9 @@ function clearRoute() {
   persistPlannedRoute();
   _selectedId = null;
   exitRoutingMode();
+  // Manual mode shares the planned-route store, so clearing the
+  // route also drops the manual flag + budget.
+  exitManualMoveMode();
   if (_renderer) {
     _renderer.setRoute(null);
     _renderer.setRouteEndpoints(null, null);
@@ -3190,6 +4726,79 @@ function esc(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// Kinds whose supplier is implicit ("any reactor", "any
+// generator") - clicking the chip means filter to all members of
+// the family. Used both by the card-grid filter and the sub-tab
+// auto-select when a card chip points the library here.
+const SUPPORT_KIND_EXPANSIONS = {
+  'reactor-any': ['reactor-fission', 'reactor-fusion', 'reactor-antimatter'],
+};
+function expandSupportKinds(kinds) {
+  const out = new Set();
+  for (const k of kinds) {
+    const exp = SUPPORT_KIND_EXPANSIONS[k];
+    if (exp) for (const e of exp) out.add(e);
+    else out.add(k);
+  }
+  return [...out];
+}
+
+// Build the canonical list of support kinds that have at least
+// one supplier card. Driven off the live deck so the sub-tab row
+// stays in sync with whatever the spreadsheet ships - new
+// supplies show up automatically.
+function listSupplyKinds() {
+  const order = [
+    'reactor-fission', 'reactor-fusion', 'reactor-antimatter',
+    'gen-radioisotope', 'gen-electric',
+    'thermostat',
+    'beam-receiver', 'aerobrake-shroud', 'crew-quarters',
+    'spin-grav', 'pulse-generator', 'sail',
+  ];
+  const present = new Set();
+  for (const p of PATENTS) {
+    const sup = (p.faces && p.faces.primary && p.faces.primary.supplies) || p.supplies || [];
+    for (const k of sup) present.add(k);
+  }
+  // Sort: known order first, anything new appended.
+  const known = order.filter((k) => present.has(k));
+  for (const k of present) if (!order.includes(k)) known.push(k);
+  return known;
+}
+
+// Cards whose primary face supplies at least one of the given
+// kinds. Used to populate the grid under the supports tab.
+function patentsThatSupply(kinds) {
+  if (!kinds || !kinds.length) return [];
+  const want = new Set(expandSupportKinds(kinds));
+  const out = [];
+  for (const p of PATENTS) {
+    const sup = (p.faces && p.faces.primary && p.faces.primary.supplies) || p.supplies || [];
+    if (sup.some((k) => want.has(k))) out.push(p);
+  }
+  return out;
+}
+
+// Inline glyph for a support kind, matching the card chip idiom
+// (SVG for sun / ballerina, emoji for the rest). Wrapped <em> so
+// CSS rules that key off `.req em` apply unchanged.
+function supportKindGlyphHtml(kind) {
+  if (kind === 'beam-receiver')  return svgSunChip(14);
+  if (kind === 'spin-grav')      return svgBallerinaChip(14);
+  const vis = REQUIREMENT_VIS[kind];
+  return `<em>${(vis && vis.glyph) || '◇'}</em>`;
+}
+
+// Module-level seed for openPatentsSupports - lets the rocket-
+// stack modal hand the library a starting selection. Consumed
+// once by renderPatents.
+let _pendingPatentSelection = null;
+export function openPatentsSupports(kinds) {
+  const want = expandSupportKinds(kinds || []);
+  _pendingPatentSelection = { type: 'supports', kinds: want };
+  showPane('patents');
+}
+
 function renderPatents() {
   const host = document.getElementById('browse-patents');
   if (!host) return;
@@ -3206,18 +4815,83 @@ function renderPatents() {
   // marks it as soon-only so there's no surprise when grab
   // buttons refuse to engage.
   const expansionTypes = ['gw-thruster'];
-  const types = [...PATENT_TYPES, 'crew', ...expansionTypes];
+  // 'supports' is a synthetic filter that groups every card
+  // whose primary face SUPPLIES a stack-support chip (reactors,
+  // generators, radiators today). A sub-row of kind chips lets
+  // the player narrow to a single requirement. The rocket-stack
+  // modal jumps directly here when the player taps a support
+  // chip on a card so they can see what would fill that slot.
+  const supplyKinds = listSupplyKinds();
+  const types = [...PATENT_TYPES, 'supports', 'crew', ...expansionTypes];
   const counts = Object.fromEntries(PATENT_TYPES.map((t) => [t, patentsByType(t).length]));
   for (const t of expansionTypes) counts[t] = patentsByType(t).length;
   counts.crew = CREW.length;
+  counts.supports = patentsThatSupply(supplyKinds).length;
   const TYPE_LABEL = {
     'gw-thruster': 'GW thrusters (soon)',
+    'supports': 'Supports',
   };
-  types.forEach((t, i) => {
+  // Seed initial active tab from a pending programmatic open
+  // (openPatentsSupports), falling back to the first type.
+  const seed = _pendingPatentSelection;
+  const initialType = (seed && types.includes(seed.type)) ? seed.type : types[0];
+  types.forEach((t) => {
     const label = TYPE_LABEL[t] || cap(t);
-    bar.innerHTML += `<button${i === 0 ? ' class="active"' : ''} data-type="${t}">${label} (${counts[t]})</button>`;
+    const active = t === initialType ? ' class="active"' : '';
+    bar.innerHTML += `<button${active} data-type="${t}">${label} (${counts[t]})</button>`;
   });
   host.appendChild(bar);
+
+  // Sub-filter row for the Supports tab: one chip per supply
+  // kind, multi-select. Hidden when any other type tab is
+  // active so the row doesn't clutter the non-supports views.
+  const supportRow = document.createElement('div');
+  supportRow.className = 'patent-supports-filter';
+  const activeSupportKinds = new Set();
+  if (seed && seed.type === 'supports' && seed.kinds) {
+    for (const k of seed.kinds) if (supplyKinds.includes(k)) activeSupportKinds.add(k);
+  }
+  const renderSupportRow = () => {
+    supportRow.innerHTML = '';
+    const allBtn = document.createElement('button');
+    allBtn.type = 'button';
+    allBtn.className = 'patent-support-chip is-all'
+      + (activeSupportKinds.size === 0 ? ' is-active' : '');
+    allBtn.textContent = `All (${counts.supports})`;
+    allBtn.addEventListener('click', () => {
+      activeSupportKinds.clear();
+      renderSupportRow();
+      repaintActive();
+    });
+    supportRow.appendChild(allBtn);
+    for (const k of supplyKinds) {
+      const supplier = REQ_SUPPLIER_TYPE[k] || null;
+      const vis = REQUIREMENT_VIS[k] || { label: k };
+      const n = patentsThatSupply([k]).length;
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'patent-support-chip';
+      if (supplier) chip.dataset.supplier = supplier;
+      if (activeSupportKinds.has(k)) chip.classList.add('is-active');
+      chip.dataset.kind = k;
+      chip.title = vis.label;
+      chip.innerHTML = `${supportKindGlyphHtml(k)}<span class="lbl">${vis.label}</span><b>${n}</b>`;
+      chip.addEventListener('click', () => {
+        if (activeSupportKinds.has(k)) activeSupportKinds.delete(k);
+        else activeSupportKinds.add(k);
+        renderSupportRow();
+        repaintActive();
+      });
+      supportRow.appendChild(chip);
+    }
+  };
+  renderSupportRow();
+  host.appendChild(supportRow);
+  supportRow.classList.toggle('is-visible', initialType === 'supports');
+
+  // Consume the programmatic seed so a later manual reopen of
+  // the pane doesn't snap back to the supports tab.
+  _pendingPatentSelection = null;
 
   const grid = document.createElement('div');
   grid.className = 'card-grid';
@@ -3276,6 +4950,18 @@ function renderPatents() {
       for (const c of CREW) grid.appendChild(decorateForHand(c, 'crew'));
       return;
     }
+    if (filter === 'supports') {
+      // No sub-chip selected = every card with a non-empty
+      // supplies list. Sub-chips narrow further; multiple
+      // selected chips OR together.
+      const want = activeSupportKinds.size
+        ? [...activeSupportKinds]
+        : supplyKinds;
+      for (const p of patentsThatSupply(want)) {
+        grid.appendChild(decorateForHand(p, 'patent'));
+      }
+      return;
+    }
     for (const p of PATENTS) {
       if (p.type !== filter) continue;
       grid.appendChild(decorateForHand(p, 'patent'));
@@ -3299,10 +4985,14 @@ function renderPatents() {
   bar.querySelectorAll('button').forEach((b) => {
     b.onclick = () => {
       bar.querySelectorAll('button').forEach((x) => x.classList.toggle('active', x === b));
+      // Show the sub-filter chip row only on the Supports tab -
+      // every other tab hides it so the row doesn't take vertical
+      // space when it's meaningless.
+      supportRow.classList.toggle('is-visible', b.dataset.type === 'supports');
       repaint(b.dataset.type);
     };
   });
-  repaint(types[0]);
+  repaint(initialType);
 }
 
 // Legacy patent-card builder kept for now (unused after switch to

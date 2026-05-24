@@ -49,7 +49,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 12px;
+  /* Left padding clears the ☰ FAB at top:10 left:12 (38px wide)
+     so the turn-controls don't render under it. */
+  padding: 8px 12px 8px 62px;
   background: rgba(15, 16, 35, 0.85);
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
@@ -64,6 +66,11 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  /* Wrap on narrow phones so the aqua chip can drop to a
+     second row instead of fighting the search / route blocks
+     for horizontal space. */
+  flex-wrap: wrap;
+  row-gap: 4px;
 }
 .map-turn-controls button {
   font-size: 12px;
@@ -94,6 +101,27 @@
   color: #062136;
   border-color: var(--accent-2);
 }
+/* Aqua balance chip in the turn-controls row. Read-only display
+   surface - clicking it does nothing, but the toolbar position
+   keeps the balance visible while the player plans hazardous
+   moves (each hazard bypass costs 4 aqua). The 💧 + number
+   reads as "water you can spend" - aqua is just a water-shaped
+   economy unit in sandbox mode. */
+.map-aqua-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  background: linear-gradient(180deg, #1e3a5f, #0c2540);
+  border: 1px solid #38bdf8;
+  color: #bae6fd;
+  border-radius: 999px;
+  cursor: help;
+  font-variant-numeric: tabular-nums;
+}
+.map-aqua-chip strong { color: #f0f9ff; font-weight: 800; }
 .map-mode-toggle {
   display: inline-flex;
   background: var(--bg-2);
@@ -122,6 +150,11 @@
   flex: 1;
   justify-content: flex-end;
   min-width: 0;
+  /* Wrap on narrow viewports so the status text + utility
+     buttons (clear / settings / debug / fullscreen) drop to
+     a second row instead of clipping off the right edge. */
+  flex-wrap: wrap;
+  row-gap: 6px;
 }
 .map-route .big {
   color: var(--warm);
@@ -229,6 +262,41 @@
   .map-search-backdrop { display: none !important; }
 }
 @media (max-width: 720px) {
+  /* Pin the toolbar to the top of the map shell on phones so it
+     stays visible while the map pans / zooms - prior behaviour
+     scrolled it out of reach when the user dragged. The shell
+     gets a top pad equal to the toolbar height so the canvas
+     starts below the floating bar. */
+  .browse-shell {
+    /* Reserve enough space for two rows of toolbar content.
+       The toolbar is fixed and overlays the canvas, so the
+       shell's height doesn't need extra; we only adjust the
+       inner stage to avoid the toolbar covering the top of
+       the canvas content. */
+  }
+  .browse-map-stage {
+    padding-top: 0;
+  }
+  .map-toolbar {
+    /* Tighten gaps on small screens so two-row wrapping happens
+       only when content actually overflows, not from padding
+       slop. row-gap keeps the rows visually distinct when they
+       wrap. */
+    gap: 6px;
+    row-gap: 4px;
+    padding: 6px 8px 6px 58px;
+  }
+  .map-route {
+    /* Mobile: status text is allowed to take the whole second
+       row so the action buttons line up clean on the right. */
+    flex-basis: 100%;
+    justify-content: space-between;
+  }
+  .map-route #route-status {
+    flex: 1;
+    min-width: 0;
+    font-size: 11px;
+  }
   /* Mobile: hide the inline search in the toolbar by default.
      Tapping the 🔍 toolbar button promotes it to a fixed-position
      modal anchored just below the toolbar. */
@@ -395,36 +463,110 @@
   text-transform: uppercase;
   letter-spacing: 1px;
 }
-/* Rocket-stack totals: thrust triangle headliner on the left,
-   stat cells grid on the right. */
+/* Rocket-stack totals: framed as a profile card. The
+   thrust-triangle ID-photo sits on the LEFT inside its own
+   bordered tile with a "MODIFIED THRUST" header above + a
+   modifier summary below. To the right is the stat grid
+   (label / big number / equation per cell) so every cell
+   reads at a glance as "what / how much / why". */
 .rocket-totals {
   display: flex;
   gap: 12px;
   align-items: stretch;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
-.rocket-totals-headliner {
-  flex: 0 0 auto;
+.rocket-profile-triangle {
+  flex: 0 0 140px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px;
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.10), rgba(15, 23, 42, 0.55));
+  border: 1px solid rgba(125, 211, 252, 0.45);
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.08),
+              0 2px 8px rgba(0, 0, 0, 0.35);
+}
+.rocket-profile-triangle-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  font-weight: 800;
+  color: var(--accent);
+  text-align: center;
+}
+.rocket-profile-triangle .rocket-totals-headliner {
+  flex: 1 1 auto;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 140px;
-  padding: 6px;
-  background: rgba(15, 23, 42, 0.4);
-  border: 1px solid rgba(125, 211, 252, 0.35);
+  padding: 4px;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(125, 211, 252, 0.25);
   border-radius: 8px;
+  min-height: 110px;
 }
-.rocket-totals-headliner .thrust-visual {
+.rocket-profile-triangle .rocket-totals-headliner .thrust-visual {
   width: 100%;
 }
+.rocket-profile-triangle-sub {
+  font-size: 10px;
+  color: var(--ink-dim);
+  text-align: center;
+  line-height: 1.3;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
 .rocket-totals-grid {
-  flex: 1 1 320px;
+  flex: 1 1 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  min-width: 0;
 }
 .rocket-totals-grid .rocket-totals-cell {
-  min-height: 56px;
+  min-height: 78px;
+}
+@media (max-width: 720px) {
+  /* Mobile: keep the row layout (triangle on the LEFT,
+     data on the RIGHT) but compress the triangle column so
+     the stats column gets the breathing room. Stats fall
+     into a single column - one cell per row - so each label
+     / number / equation reads at full width. */
+  .rocket-totals {
+    flex-direction: row;
+  }
+  .rocket-profile-triangle {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 8px;
+    gap: 4px;
+  }
+  .rocket-profile-triangle .rocket-totals-headliner {
+    min-height: 140px;
+  }
+  .rocket-profile-triangle-label {
+    font-size: 9px;
+    letter-spacing: 1px;
+  }
+  .rocket-profile-triangle-sub {
+    font-size: 9px;
+  }
+  .rocket-totals-grid {
+    flex: 1 1 0;
+    min-width: 0;
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .rocket-totals-grid .rocket-totals-cell {
+    min-height: 0;
+    padding: 6px 10px;
+  }
+  .rocket-totals-cell strong {
+    font-size: 20px;
+  }
 }
 .rocket-water-readout {
   display: inline-flex;
@@ -553,6 +695,391 @@
   background: rgba(125, 211, 252, 0.08);
   border-radius: 4px;
 }
+
+/* Aqua transfer panel inside the fuel-tank modal. Only rendered
+   when the rocket is parked at LEO - converts aqua 1:1 into water
+   up to the tank cap. Same dashed border idiom as the dump-fuel
+   row so it reads as a peer section, not a separate modal. */
+.fuel-tank-aqua {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px dashed #38bdf8;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.fuel-tank-aqua .aqua-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}
+.fuel-tank-aqua .aqua-row strong {
+  color: #bae6fd;
+  font-variant-numeric: tabular-nums;
+}
+.fuel-tank-aqua .aqua-help {
+  margin: 4px 0 6px;
+  font-size: 10px;
+}
+.fuel-tank-aqua .aqua-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.fuel-tank-aqua .aqua-actions .popup-btn {
+  font-size: 11px;
+  padding: 5px 9px;
+}
+
+/* Hazard confirm modal. Reuses the turn-confirm panel chassis
+   plus an extra .hazard-* layer for the route's hazard list, the
+   cost summary, and the three-option action row. The "cannot
+   be undone" line is the headline - emphasising the commitment
+   is the whole point of the modal. */
+.hazard-confirm-overlay { z-index: 85; }
+.hazard-confirm-panel h3 {
+  color: #f97316;
+}
+.hazard-confirm-panel .hazard-list {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 12px;
+  max-height: 140px;
+  overflow-y: auto;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.hazard-confirm-panel .hazard-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px dashed var(--border);
+  font-size: 12px;
+}
+.hazard-confirm-panel .hazard-list li:last-child { border-bottom: none; }
+.hazard-confirm-panel .hazard-list .haz-glyph {
+  font-size: 18px;
+  line-height: 1;
+  min-width: 22px;
+  text-align: center;
+}
+.hazard-confirm-panel .hazard-warning {
+  background: rgba(127, 29, 29, 0.35);
+  border: 1px solid #b91c1c;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.hazard-confirm-panel .hazard-cost-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  margin: 0 0 12px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.hazard-confirm-panel .hazard-cost-row strong { color: #bae6fd; }
+.hazard-actions {
+  flex-direction: column;
+  gap: 6px !important;
+}
+.hazard-actions .popup-btn { width: 100%; text-align: center; }
+.hazard-actions .popup-btn.primary {
+  background: linear-gradient(180deg, #38bdf8, #0284c7);
+  color: #062136;
+  border-color: #075985;
+  font-weight: 700;
+}
+.hazard-actions .popup-btn.primary:disabled {
+  background: #334155;
+  color: #94a3b8;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.hazard-need-aqua {
+  font-size: 11px;
+  text-align: center;
+  margin: 6px 0 0;
+  color: #f87171;
+}
+
+/* Rad-confirm modal - the "do you really want to cross these
+   rad zones?" gate that fires BEFORE the dice modal. Reuses
+   the hazard-list rendering from hazard-confirm-panel; adds a
+   formula preview + a status block that flips colour based on
+   whether thrust can outrun the radiation. z-index above the
+   generic hazard-confirm so it can stack when both fire on a
+   mixed route. */
+.rad-confirm-overlay { z-index: 88; }
+.rad-confirm-panel h3 { color: #fde047; }
+.rad-confirm-panel .hazard-list {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 10px;
+  max-height: 140px;
+  overflow-y: auto;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.rad-confirm-panel .hazard-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px dashed var(--border);
+  font-size: 12px;
+}
+.rad-confirm-panel .hazard-list li:last-child { border-bottom: none; }
+.rad-confirm-panel .hazard-list .haz-glyph {
+  font-size: 18px;
+  line-height: 1;
+  min-width: 22px;
+  text-align: center;
+}
+.rad-confirm-season { font-size: 12px; margin: 0 0 6px; }
+.rad-confirm-formula {
+  font-size: 12px;
+  margin: 0 0 10px;
+  text-align: center;
+}
+.rad-confirm-formula code {
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-variant-numeric: tabular-nums;
+}
+.rad-confirm-bypass {
+  background: rgba(20, 83, 45, 0.35);
+  border: 1px solid #16a34a;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+.rad-confirm-warning {
+  background: rgba(127, 29, 29, 0.35);
+  border: 1px solid #b91c1c;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* Hazard roll modal. One 3D die per hazard, all spinning in
+   parallel. Once every die settles the verdict tags light up
+   (green safe / red critical) and the player hits Confirm to
+   apply. z-index above the hazard-confirm so it can stack
+   over it cleanly. */
+.hazard-roll-overlay { z-index: 90; }
+.hazard-roll-panel {
+  width: min(480px, 96vw);
+}
+.hazard-roll-panel h3 { color: #fbbf24; }
+.hazard-roll-sub { margin: 0 0 12px; font-size: 12px; }
+.hazard-roll-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+  max-height: 50vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hazard-roll-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.hazard-roll-row.is-critical {
+  background: rgba(127, 29, 29, 0.35);
+  border-color: #b91c1c;
+}
+.hazard-roll-row.is-safe {
+  background: rgba(20, 83, 45, 0.30);
+  border-color: #16a34a;
+}
+.hazard-roll-site {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  min-width: 0;
+}
+.hazard-roll-site .haz-glyph {
+  font-size: 18px;
+  line-height: 1;
+}
+.hazard-roll-site strong {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hazard-roll-site em { font-size: 11px; }
+.hazard-roll-die-host {
+  width: 46px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.hazard-roll-die-host .die-3d {
+  width: 40px;
+  height: 40px;
+}
+.hazard-roll-verdict {
+  font-size: 11px;
+  min-width: 78px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.hazard-roll-result {
+  margin: 0 0 12px;
+  text-align: center;
+  font-size: 13px;
+}
+.hazard-roll-confirm-bad {
+  background: linear-gradient(180deg, #ef4444, #b91c1c) !important;
+  color: #fff !important;
+  border-color: #7f1d1d !important;
+}
+
+/* Rad-hardness check modal. Distinct from the generic hazard
+   roll: no aqua bypass, dice test the stack itself instead of
+   a destroy / survive verdict. Top row lists each rad zone +
+   its die; bottom list shows every stack card's rad-hard and
+   tags it safe / decommissioned post-roll. */
+.rad-roll-overlay { z-index: 92; }
+.rad-roll-panel {
+  width: min(480px, 96vw);
+}
+.rad-roll-panel h3 { color: #fde047; }
+.rad-roll-sub { margin: 0 0 12px; font-size: 12px; }
+.rad-roll-dice {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rad-roll-die-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.rad-roll-math {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  min-width: 92px;
+  text-align: right;
+  color: var(--ink-dim);
+}
+.rad-roll-math strong { color: var(--ink); }
+.rad-roll-math.is-worst strong { color: #fde047; }
+.rad-roll-site {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.rad-roll-site .haz-glyph {
+  font-size: 18px;
+  line-height: 1;
+}
+.rad-roll-die-host {
+  width: 46px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rad-roll-die-host .die-3d {
+  width: 40px;
+  height: 40px;
+}
+.rad-roll-result {
+  margin: 0 0 10px;
+  text-align: center;
+  font-size: 13px;
+}
+.rad-roll-cards {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+  max-height: 32vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rad-roll-card {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.rad-roll-card.is-decommissioned {
+  background: rgba(127, 29, 29, 0.35);
+  border-color: #b91c1c;
+}
+.rad-roll-card.is-safe {
+  background: rgba(20, 83, 45, 0.30);
+  border-color: #16a34a;
+}
+.rad-roll-card-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rad-roll-card-rad {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+}
+.rad-roll-card-rad strong { color: var(--ink); }
+.rad-roll-card-verdict {
+  font-size: 11px;
+  min-width: 100px;
+  text-align: right;
+}
+.rad-roll-confirm-bad {
+  background: linear-gradient(180deg, #ef4444, #b91c1c) !important;
+  color: #fff !important;
+  border-color: #7f1d1d !important;
+}
+
 /* Prospect roll modal. Shows the 3D die rolling against the
    site's prospect target. Stays mid-stack so the turn-confirm
    dialog (z80) can still cover it if needed. */
@@ -1304,6 +1831,30 @@
   font-size: 11px;
   line-height: 1.45;
 }
+.route-options-manual {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+.route-options-manual-btn {
+  width: 100%;
+  font-size: 13px;
+  padding: 9px 12px;
+  font-weight: 700;
+  background: linear-gradient(180deg, #fbbf24, #d97706);
+  color: #1f1502;
+  border: 1px solid #92400e;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.route-options-manual-btn:hover {
+  background: linear-gradient(180deg, #facc15, #b45309);
+}
+.route-options-manual-help {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+}
 .map-popup .popup-btn {
   font-size: 12px;
   font-weight: 600;
@@ -1408,7 +1959,7 @@ body:has(#view-browse:not(.hidden)) #main {
 .browse-shell {
   position: relative;
   width: 100%;
-  height: calc(100vh - 56px);
+  height: 100vh;
   min-height: 480px;
   background: #03020a;
   overflow: hidden;
@@ -1871,10 +2422,12 @@ body:has(#view-browse:not(.hidden)) #main {
      Tapping a tab still opens the pane as its own modal. */
   .browse-sidepanel {
     position: absolute;
-    /* Clear the map-toolbar (Cleaned up / Classic / Find site)
-       which sits at the top of the browse-stage. ~48px toolbar
-       + a few px of breathing room. */
-    top: 60px;
+    /* Clear the map-toolbar dynamically: --toolbar-h is the
+       live height published by the ResizeObserver in browse.js,
+       so when the toolbar wraps to two rows on a narrow phone
+       the pill drops with it instead of clipping under the new
+       second row. 8 px breathing room below the bar. */
+    top: calc(var(--toolbar-h, 60px) + 8px);
     left: 0;
     right: 0;
     bottom: auto;
@@ -2093,6 +2646,72 @@ body:has(#view-browse:not(.hidden)) #main {
 .patent-filter button.active[data-type="robonaut"]  { background: #f9a8d4; color: #500724; border-color: #be185d; }
 .patent-filter button.active[data-type="generator"] { background: #f97316; color: #2e0f02; border-color: #9a3412; }
 .patent-filter button.active[data-type="crew"]      { background: #fde047; color: #3a2a02; border-color: #a16207; }
+.patent-filter button[data-type="supports"]         { border-left-color: #34d399; }
+.patent-filter button.active[data-type="supports"]  { background: #34d399; color: #022c1f; border-color: #047857; }
+
+/* Sub-filter row under the Supports tab: one chip per kind of
+   support a card can supply. Hidden on other tabs so the row
+   doesn't take vertical space when it's meaningless. Multi-
+   select - any combination of chips ORs together to filter the
+   grid. Supplier-coloured backgrounds mirror the support-chip
+   palette on the cards themselves so a player can trace
+   "purple = reactor" by eye. */
+.patent-supports-filter {
+  display: none;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 8px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+}
+.patent-supports-filter.is-visible { display: flex; }
+.patent-support-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  font-size: 11px;
+  background: rgba(30, 41, 59, 0.85);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  border-radius: 4px;
+  cursor: pointer;
+  line-height: 1.1;
+}
+.patent-support-chip:hover { background: rgba(51, 65, 85, 0.95); }
+.patent-support-chip em {
+  font-style: normal;
+  font-size: 14px;
+  line-height: 1;
+}
+.patent-support-chip .lbl { font-weight: 600; }
+.patent-support-chip b {
+  font-weight: 700;
+  font-size: 10px;
+  color: var(--accent-2);
+  font-variant-numeric: tabular-nums;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 1px 5px;
+  border-radius: 8px;
+}
+.patent-support-chip.is-all { font-weight: 600; }
+.patent-support-chip.is-active {
+  background: var(--accent);
+  color: #0c0a16;
+  border-color: var(--accent-2);
+}
+.patent-support-chip.is-active b { color: #0c0a16; background: rgba(255, 255, 255, 0.35); }
+.patent-support-chip[data-supplier="reactor"]   { border-color: #4c1d95; }
+.patent-support-chip[data-supplier="reactor"].is-active   { background: #a78bfa; color: #1c0f3a; }
+.patent-support-chip[data-supplier="radiator"]  { border-color: #075985; }
+.patent-support-chip[data-supplier="radiator"].is-active  { background: #7dd3fc; color: #0a2c43; }
+.patent-support-chip[data-supplier="robonaut"]  { border-color: #be185d; }
+.patent-support-chip[data-supplier="robonaut"].is-active  { background: #f9a8d4; color: #500724; }
+.patent-support-chip[data-supplier="generator"] { border-color: #9a3412; }
+.patent-support-chip[data-supplier="generator"].is-active { background: #f97316; color: #2e0f02; }
+
 .patent-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -2346,37 +2965,48 @@ body:has(#view-browse:not(.hidden)) #main {
   background: var(--bg);
 }
 
-/* Hand-slot quick actions: an emoji row at the card's bottom
-   edge, revealed on hover. Lives INSIDE .card so it shares the
-   same scale + transform as the Flip button (which sits at
-   bottom-right of the same card). The row is anchored to
-   bottom-left so it sits to the LEFT of Flip - both in the
-   footer band of the card. */
+/* Hand-slot quick actions (desktop): a backdrop pill of emoji
+   buttons that pops up ON TOP of the card's upper area on hover.
+   Lives as a sibling of .card inside .hand-slot so the card's
+   overflow:hidden can't clip it. The slot's 1.18 hover-scale
+   carries the whole row up with the card. Hidden by default;
+   rises + fades in on hover for the "pop up" feel. Anchored
+   inside the slot top - far enough down that it overlays the
+   typebar rather than extending up into the hand-header
+   buttons (🛸 Stack / 🚀 BOOST) that live just above. */
 .hand-slot .hand-quick-actions {
   position: absolute;
-  left: 8px;
-  bottom: 6px;
-  transform: translateY(4px);
+  left: 50%;
+  top: 8px;
+  transform: translate(-50%, 8px) scale(0.85);
+  transform-origin: 50% 50%;
   display: flex;
-  gap: 4px;
+  gap: 5px;
+  padding: 5px 7px;
+  background: rgba(15, 16, 35, 0.92);
+  border: 1px solid rgba(120, 130, 170, 0.45);
+  border-radius: 999px;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.55);
   opacity: 0;
-  transition: opacity 0.15s, transform 0.15s;
-  z-index: 6;
+  transition: opacity 0.18s cubic-bezier(0.2, 0.7, 0.2, 1),
+              transform 0.18s cubic-bezier(0.2, 0.7, 0.2, 1);
+  z-index: 60;
   pointer-events: none;
+  white-space: nowrap;
 }
 .hand-slot:hover .hand-quick-actions {
   opacity: 1;
-  transform: translateY(0);
+  transform: translate(-50%, 0) scale(1);
   pointer-events: auto;
 }
 .hand-q {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   background: rgba(15, 16, 35, 0.92);
   border: 1px solid var(--border);
   color: var(--ink);
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1;
   padding: 0;
   cursor: pointer;
@@ -2418,6 +3048,24 @@ body:has(#view-browse:not(.hidden)) #main {
   color: #062136;
   transform: scale(1.03);
 }
+/* Locator button next to the Stack button - pans the camera to
+   the rocket without opening the stack modal. Tighter than the
+   Stack button so the header stays compact. */
+#hand-stack-locate {
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(125, 211, 252, 0.10);
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.18s, transform 0.12s;
+}
+#hand-stack-locate:hover {
+  background: var(--accent);
+  color: #062136;
+  transform: scale(1.05);
+}
 
 #hand-boost-commit {
   margin-left: auto;
@@ -2451,9 +3099,10 @@ body:has(#view-browse:not(.hidden)) #main {
 
 /* Rocket-stack modal: a centered panel that floats over the
    map. Wider than the inspect modal so the player can scan a
-   multi-card stack at a glance. The panel itself is the flex
-   container - header (totals + status + engage) is pinned to
-   the top via flex-shrink:0, and only the cards grid scrolls. */
+   multi-card stack at a glance. The body scrolls as a single
+   unit (header + cards) so mobile viewports - where the header
+   itself eats most of the modal - can swipe past the totals to
+   reach the actual cards in the stack. */
 .rocket-stack-panel {
   position: relative;
   background: var(--panel);
@@ -2461,19 +3110,23 @@ body:has(#view-browse:not(.hidden)) #main {
   border-radius: 12px;
   padding: 22px 24px;
   width: min(820px, 90vw);
-  height: 80vh;
-  max-height: 80vh;
+  max-height: 90vh;
   overflow: hidden;
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);
   display: flex;
   flex-direction: column;
 }
 .rocket-stack-body {
-  display: flex;
-  flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
+  /* Soft pad on the right so the scrollbar doesn't crowd the
+     panel content; the cap on padding-right preserves visual
+     balance with the panel's own padding. */
+  padding-right: 4px;
 }
 .rocket-stack-header {
   flex: 0 0 auto;
@@ -2505,9 +3158,7 @@ body:has(#view-browse:not(.hidden)) #main {
   padding: 5px 9px;
 }
 .rocket-stack-panel #rocket-stack-cards {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -2529,6 +3180,50 @@ body:has(#view-browse:not(.hidden)) #main {
   border-top: 1px dashed var(--border);
 }
 
+/* Mobile: rocket-stack modal goes full-bleed. The dark borders
+   + rounded corners + center-alignment eat too much vertical
+   space on a phone; edge-to-edge gives the cards the screen
+   they need. The orange engaged stripe still wraps the panel
+   so it sits flush with the viewport edges. */
+@media (max-width: 720px) {
+  .rocket-stack-overlay { padding: 0; }
+  .rocket-stack-panel {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100vh;
+    max-height: 100vh;
+    padding: 14px 12px;
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+  }
+  /* The shared modal-x sits at top:-8 right:-8 by default,
+     which puts it OUTSIDE the panel - fine on desktop where
+     the overlay backdrop has 24px padding, but on a full-
+     bleed phone panel that's off-screen behind the URL bar.
+     Pin it to the viewport top-right with position:fixed +
+     a beefy z-index so no overlapping element can hide it,
+     and a bigger tap target so a thumb can hit it reliably. */
+  .rocket-stack-panel .modal-x {
+    position: fixed;
+    top: max(8px, env(safe-area-inset-top, 8px));
+    right: max(8px, env(safe-area-inset-right, 8px));
+    width: 40px;
+    height: 40px;
+    font-size: 26px;
+    z-index: 120;
+    background: rgba(15, 16, 35, 0.96);
+    border: 1px solid rgba(120, 130, 170, 0.7);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.55);
+  }
+  /* Bump the engaged stripe thickness so it reads as a clear
+     marching band on a phone instead of a hairline that
+     vanishes against the viewport edge. */
+  .rocket-stack-panel.is-engaged {
+    background-size: 100% 8px, 100% 8px, 8px 100%, 8px 100%, 100% 100%;
+  }
+}
+
 /* Totals row: compact stat cells. Wraps on narrow screens so
    the mobile modal stays usable. Each cell carries a tiny label
    over a big number; the fuel cell adds inline +/- buttons. */
@@ -2540,24 +3235,35 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .rocket-totals-cell {
   display: flex;
-  align-items: baseline;
-  gap: 4px;
-  padding: 2px 8px;
-  background: rgba(15, 23, 42, 0.5);
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 2px;
+  padding: 8px 10px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.55), rgba(15, 23, 42, 0.30));
   border: 1px solid var(--border);
   border-radius: 6px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 .rocket-totals-cell .lbl {
   color: var(--ink-mute);
   font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.6px;
+  letter-spacing: 1.2px;
+  font-weight: 700;
+  line-height: 1.2;
 }
 .rocket-totals-cell strong {
-  font-size: 15px;
-  font-weight: 700;
+  font-size: 22px;
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
   color: var(--ink);
+  line-height: 1.05;
+}
+.rocket-totals-cell strong small {
+  font-size: 12px;
+  color: var(--ink-mute);
+  font-weight: 600;
 }
 .rocket-totals-cell strong.ok  { color: #22c55e; }
 .rocket-totals-cell strong.bad { color: #f87171; }
@@ -2565,8 +3271,26 @@ body:has(#view-browse:not(.hidden)) #main {
   font-size: 10px;
   color: var(--ink-dim);
 }
+.rocket-totals-cell .cell-eqn {
+  font-size: 9.5px;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+  letter-spacing: 0.3px;
+  text-transform: none;
+}
+.rocket-totals-cell .cell-eqn:empty { display: none; }
 .rocket-totals-cell.rocket-fuel {
   gap: 6px;
+}
+.rocket-totals-cell.rocket-afterburn-cell {
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  align-items: stretch;
+  justify-content: center;
+  min-height: 0 !important;
 }
 .rocket-fuel-btn {
   width: 22px;
@@ -2688,10 +3412,14 @@ body:has(#view-browse:not(.hidden)) #main {
   0%   { background-position: 0    0,    0     100%,  0  0,      100%  0;    }
   100% { background-position: 24px 0,    -24px 100%,  0  -24px,  100%  24px; }
 }
-.rocket-stack-body.is-engaged {
-  position: relative;
-  padding: 14px;
-  border-radius: 14px;
+/* Engaged border lives on the panel (not the scrolling body)
+   so the four stripe edges anchor to the modal's static frame
+   and stay aligned no matter how the body scrolls. */
+.rocket-stack-panel.is-engaged {
+  /* Stripe layers go first so they paint ON TOP of the panel
+     bg layer underneath. The keyframes animate the first four
+     positions (top / bottom / left / right edges); the trailing
+     panel-bg layer stays put at 0 0. */
   background-image:
     /* top edge: orange/gold stripes scrolling right */
     repeating-linear-gradient(90deg,  #f97316 0 12px, #fbbf24 12px 24px),
@@ -2700,14 +3428,18 @@ body:has(#view-browse:not(.hidden)) #main {
     /* left edge: scrolling down */
     repeating-linear-gradient(180deg, #f97316 0 12px, #fbbf24 12px 24px),
     /* right edge: scrolling up */
-    repeating-linear-gradient(180deg, #fbbf24 0 12px, #f97316 12px 24px);
-  background-position: 0 0, 0 100%, 0 0, 100% 0;
-  background-size: 100% 4px, 100% 4px, 4px 100%, 4px 100%;
+    repeating-linear-gradient(180deg, #fbbf24 0 12px, #f97316 12px 24px),
+    /* panel background underneath so the stripes don't bleed
+       through onto the modal's dark surface */
+    linear-gradient(var(--panel), var(--panel));
+  background-position: 0 0, 0 100%, 0 0, 100% 0, 0 0;
+  background-size: 100% 4px, 100% 4px, 4px 100%, 4px 100%, 100% 100%;
   background-repeat: no-repeat;
   animation: rocket-march 0.6s linear infinite;
   box-shadow: 0 0 24px rgba(249, 115, 22, 0.45);
+  border-color: #f97316;
 }
-.rocket-stack-body.is-engaged .rocket-slot.is-active-thruster .card {
+.rocket-stack-panel.is-engaged .rocket-slot.is-active-thruster .card {
   position: relative;
   background-image:
     repeating-linear-gradient(90deg,  #f97316 0 12px, #fbbf24 12px 24px),
@@ -2729,13 +3461,17 @@ body:has(#view-browse:not(.hidden)) #main {
    modal. Stops accidental modal-opens on casual fingerprints
    and avoids stuck-hover gotchas. */
 
-/* The floating "View" button sits above a selected card.
-   Hidden by default; CSS shows it only when the slot has
-   .is-selected AND we're on a touch device. */
+/* The floating "View" button sits inside a selected card's
+   upper area on touch devices. Hidden by default; CSS shows
+   it only when the slot has .is-selected AND we're on a touch
+   device. Anchored inside the slot (positive `top`) instead of
+   floating above it - the previous -34px position landed in
+   the hand-header zone and got visually clipped on mobile
+   viewports where the strip is full-width. */
 .hand-view-btn {
   display: none;
   position: absolute;
-  top: -34px;
+  top: 8px;
   left: 50%;
   transform: translateX(-50%);
   background: var(--accent);

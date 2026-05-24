@@ -30,6 +30,12 @@ const STORAGE_KEY      = 'hf-sandbox-rocket';
 const ACTIVE_KEY       = 'hf-sandbox-rocket-active-thruster';
 const PROSPECTOR_KEY   = 'hf-sandbox-rocket-active-prospector';
 const TANK_KEY         = 'hf-sandbox-rocket-tank';
+const AQUA_KEY         = 'hf-sandbox-aqua';
+// Starting aqua balance for a fresh sandbox profile. Aqua is the
+// player's liquid economy unit - spend it to bypass hazard rolls
+// (4 aqua / hazard) or transfer it 1:1 into the ship's water tank
+// while parked at LEO. Refilled by future income flows (Stage 3+).
+const AQUA_DEFAULT = 100;
 // Per the published rules the wet-mass track caps at 32 (the
 // "Max wet mass" position on the Net Thrust track). Maximum
 // loadable water = 32 - drymass; we cap the absolute fuel value
@@ -81,7 +87,24 @@ let _tankWater = (() => {
   } catch { return 0; }
 })();
 
+// Aqua balance is a non-negative integer; persisted independently
+// of the rest of the rocket state so a fresh sandbox profile (no
+// stored key yet) seeds with the default starting amount rather
+// than 0.
+let _aqua = (() => {
+  try {
+    const raw = localStorage.getItem(AQUA_KEY);
+    if (raw == null) return AQUA_DEFAULT;
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) && n >= 0 ? n : AQUA_DEFAULT;
+  } catch { return AQUA_DEFAULT; }
+})();
+
 let _listeners = [];
+// Aqua listeners are separate from the rocket-state listeners so
+// the toolbar's aqua chip doesn't have to repaint every time the
+// stack / tank changes.
+let _aquaListeners = [];
 
 function persist() {
   try {
@@ -93,6 +116,15 @@ function persist() {
     localStorage.setItem(AFTERBURN_KEY, _afterburnEngaged ? '1' : '0');
     localStorage.setItem(TANK_KEY, String(_tankWater));
   } catch { /* private mode */ }
+}
+
+function persistAqua() {
+  try { localStorage.setItem(AQUA_KEY, String(_aqua)); } catch { /* private mode */ }
+}
+function notifyAqua() {
+  for (const cb of _aquaListeners) {
+    try { cb(); } catch (err) { console.error('aqua listener:', err); }
+  }
 }
 
 function notify() {
@@ -381,6 +413,46 @@ export function addFuel(delta = 1) {
 
 export function removeFuel(delta = 1) {
   return setTankWater(_tankWater - (Number(delta) || 1));
+}
+
+// --------- Aqua (sandbox currency) ---------
+//
+// Aqua is the player's liquid economy unit. Two sinks today:
+//   1. Bypass hazard rolls at 4 aqua per hazard along a move route
+//      (browse.js#moveRocket gates the spend behind a confirm).
+//   2. Convert 1:1 into water at LEO via the fuel-tank modal.
+// Starting balance is AQUA_DEFAULT; future income flows
+// (Stage 3+) will pay aqua at end-of-round from factories.
+
+export function getAqua() { return _aqua; }
+
+export function setAqua(n) {
+  const v = Math.max(0, Math.floor(Number(n) || 0));
+  if (v === _aqua) return false;
+  _aqua = v;
+  persistAqua();
+  notifyAqua();
+  return true;
+}
+
+export function addAqua(delta = 1) {
+  return setAqua(_aqua + (Number(delta) || 1));
+}
+
+// Spend a fixed cost. Returns true on success, false if the
+// balance can't cover it (no partial spends).
+export function spendAqua(cost) {
+  const c = Math.max(0, Math.floor(Number(cost) || 0));
+  if (c > _aqua) return false;
+  _aqua -= c;
+  persistAqua();
+  notifyAqua();
+  return true;
+}
+
+export function onAquaChange(cb) {
+  _aquaListeners.push(cb);
+  return () => { _aquaListeners = _aquaListeners.filter((x) => x !== cb); };
 }
 
 // --------- Stack totals + thruster stats ---------
