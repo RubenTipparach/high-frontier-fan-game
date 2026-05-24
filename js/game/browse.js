@@ -255,14 +255,61 @@ function wireHandStrip() {
     btn.disabled = n === 0;
     btn.textContent = n > 0 ? `🚀 BOOST (${n})` : '🚀 BOOST';
   };
-  const commitBoost = () => {
+  const commitBoost = async () => {
     const marked = getBoostMarked();
     if (!marked.length) return;
+    // Pre-flight overflow check: adding cards raises dry mass,
+    // which lowers the rocket's effective fuel cap (wet ≤ 32).
+    // If the tank already holds more water than the new cap
+    // can fit, the excess will spill. Warn before committing
+    // so the player can pull the card OR drain water first
+    // instead of losing it silently.
+    const TANK_MAX = 32;
+    const totals = getStackTotals();
+    let addedMass = 0;
+    for (const id of marked) {
+      const card = lookup(id);
+      if (!card) continue;
+      const f = (card.faces && card.faces.primary) || card;
+      addedMass += ((f.mass != null ? f.mass : card.mass) | 0);
+    }
+    const newDryMass = (totals.dryMass | 0) + addedMass;
+    const newCap = Math.max(0, TANK_MAX - newDryMass);
+    const currentTank = getTankWater();
+    const spillage = Math.max(0, currentTank - newCap);
+    if (spillage > 0) {
+      const ok = await confirmModal({
+        title: '⚠ Tank overflow',
+        body: `Boosting ${marked.length} card${marked.length === 1 ? '' : 's'} `
+          + `raises dry mass to <strong>${newDryMass}</strong>, capping `
+          + `the tank at <strong>${newCap}</strong> water. `
+          + `<strong>${spillage} water will spill out</strong> and be lost. `
+          + `Continue?`,
+        yes: 'Add anyway',
+        no: 'Cancel',
+      });
+      if (!ok) return;
+    }
     for (const id of marked) {
       const card = lookup(id);
       if (!card) continue;
       rocketAddCard(id, kindOf(id));
       removeFromHand(id);
+    }
+    // Clip the tank to the new fuel cap so the wet-mass total
+    // stays honest. addToStack doesn't auto-clip (older call
+    // sites might want the old value preserved), so we do it
+    // here.
+    const finalCap = Math.max(0, TANK_MAX - getStackTotals().dryMass);
+    if (getTankWater() > finalCap) {
+      const lost = getTankWater() - finalCap;
+      removeFuel(lost);
+      logAction({
+        type: 'tank_spill',
+        icon: '💧⤓',
+        summary: `Tank spilled ${lost} water on add (new cap ${finalCap})`,
+        undoable: false,
+      });
     }
     clearBoostMarks();
     openRocketStackModal();
@@ -2998,19 +3045,28 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     </div>
     <div class="fuel-tank-aqua" id="tank-aqua-section" hidden>
       <div class="aqua-row">
-        <span>💎 Aqua balance</span>
+        <span>💧 Aqua balance</span>
         <strong id="aqua-balance">${getAqua()}</strong>
       </div>
       <p class="muted aqua-help">
-        Convert aqua to water 1:1. Only available at LEO.
+        Convert 1:1 between your aqua bank and the rocket tank.
+        Only available at LEO.
       </p>
       <div class="aqua-actions">
         <button type="button" class="popup-btn popup-btn-secondary" id="aqua-buy-1"
-          title="Convert 1 aqua into 1 water">💎→💧 +1</button>
+          title="Move 1 aqua from your bank into the tank">🏦→💧 +1</button>
         <button type="button" class="popup-btn popup-btn-secondary" id="aqua-buy-5"
-          title="Convert 5 aqua into 5 water">💎→💧 +5</button>
+          title="Move 5 aqua from your bank into the tank">🏦→💧 +5</button>
         <button type="button" class="popup-btn" id="aqua-buy-max"
-          title="Fill the tank to its cap by converting aqua">💎→💧 Max fill</button>
+          title="Fill the tank to its cap from your aqua bank">🏦→💧 Max fill</button>
+      </div>
+      <div class="aqua-actions aqua-actions-reverse">
+        <button type="button" class="popup-btn popup-btn-secondary" id="aqua-cash-1"
+          title="Drain 1 water from the tank back into your aqua bank">💧→🏦 +1</button>
+        <button type="button" class="popup-btn popup-btn-secondary" id="aqua-cash-5"
+          title="Drain 5 water from the tank back into your aqua bank">💧→🏦 +5</button>
+        <button type="button" class="popup-btn" id="aqua-cash-all"
+          title="Empty the tank back into your aqua bank">💧→🏦 Cash out</button>
       </div>
     </div>
     <p class="muted fuel-tank-dump-note">
@@ -3290,6 +3346,9 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const aquaBuy1Btn = panel.querySelector('#aqua-buy-1');
   const aquaBuy5Btn = panel.querySelector('#aqua-buy-5');
   const aquaBuyMaxBtn = panel.querySelector('#aqua-buy-max');
+  const aquaCash1Btn  = panel.querySelector('#aqua-cash-1');
+  const aquaCash5Btn  = panel.querySelector('#aqua-cash-5');
+  const aquaCashAllBtn = panel.querySelector('#aqua-cash-all');
   const atLeo = isLeoSite(getRocketSite());
   if (atLeo && aquaSection) aquaSection.hidden = false;
   const refreshAquaButtons = () => {
@@ -3301,6 +3360,12 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     if (aquaBuy1Btn)   aquaBuy1Btn.disabled   = bal < 1 || room < 1;
     if (aquaBuy5Btn)   aquaBuy5Btn.disabled   = bal < 5 || room < 1;
     if (aquaBuyMaxBtn) aquaBuyMaxBtn.disabled = bal < 1 || room < 1;
+    // Reverse direction: tank → bank requires water in the tank
+    // to drain back. No upper cap on the bank balance, so the
+    // only gate is "do we have anything to cash out?".
+    if (aquaCash1Btn)   aquaCash1Btn.disabled   = cur < 1;
+    if (aquaCash5Btn)   aquaCash5Btn.disabled   = cur < 5;
+    if (aquaCashAllBtn) aquaCashAllBtn.disabled = cur < 1;
   };
   refreshAquaButtons();
   // Reuse the same drainTo-style animation in reverse: get the
@@ -3340,6 +3405,40 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   aquaBuy1Btn?.addEventListener('click',   (e) => fillFromAqua(1, e));
   aquaBuy5Btn?.addEventListener('click',   (e) => fillFromAqua(5, e));
   aquaBuyMaxBtn?.addEventListener('click', (e) => fillFromAqua(cap, e));
+  // Reverse: drain water from the tank back into the aqua
+  // bank (1:1). Only available at LEO. Same tween path as
+  // dump-fuel, but credits the player's bank instead of
+  // destroying the water.
+  const cashOutToAqua = (amount, e) => {
+    e?.stopPropagation();
+    if (!atLeo) return;
+    const cur = getTankWater();
+    const want = Math.min(amount, cur);
+    if (want <= 0) { refreshAquaButtons(); return; }
+    removeFuel(want);
+    addAqua(want);
+    const fromLevel = parseFloat(nowReadout.textContent || String(cur));
+    const toLevel = getTankWater();
+    if (fromLevel === toLevel) {
+      refreshAquaButtons();
+      return;
+    }
+    animating = true;
+    tween = {
+      from: fromLevel, to: toLevel,
+      t0: performance.now(), dur: 400,
+      onDone: () => { refreshAquaButtons(); refreshDumpButtons(); },
+    };
+    logAction({
+      type: 'aqua_cashout',
+      icon: '💧→🏦',
+      summary: `Cashed ${want} water → ${want} aqua (bank ${getAqua()})`,
+      undoable: false,
+    });
+  };
+  aquaCash1Btn?.addEventListener('click',   (e) => cashOutToAqua(1, e));
+  aquaCash5Btn?.addEventListener('click',   (e) => cashOutToAqua(5, e));
+  aquaCashAllBtn?.addEventListener('click', (e) => cashOutToAqua(getTankWater(), e));
   const unsubAqua = onAquaChange(refreshAquaButtons);
   const unsubRocket = onRocketChange(refreshAquaButtons);
   // Cleanup: detach listeners when the overlay tears down so a

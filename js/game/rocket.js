@@ -158,9 +158,32 @@ export function addToStack(cardId, kind) {
     const isThr = card && (card.type === 'thruster' || card.thrust != null);
     if (isThr) _activeThrusterId = cardId;
   }
+  // Safety net: a freshly-added card raises dry mass and lowers
+  // the rocket's effective wet-mass cap (TANK_MAX − dry). Clip
+  // the tank to the new ceiling so the wet-mass total never
+  // exceeds the cap. The boost-commit caller in browse.js shows
+  // a confirm modal beforehand so the player isn't surprised by
+  // the loss, but this enforces the invariant for any other
+  // call site too.
+  const newDry = stackDryMass();
+  const cap = Math.max(0, TANK_MAX - newDry);
+  if (_tankWater > cap) _tankWater = cap;
   persist();
   notify();
   return _stack.length - 1;
+}
+// Compute dry mass from the current stack. Mirrors the math in
+// getStackTotals() but kept tight + non-allocating so the
+// addToStack safety clip stays cheap.
+function stackDryMass() {
+  let mass = 0;
+  for (const slot of _stack) {
+    const c = PATENTS_BY_ID[slot.id];
+    if (!c) continue;
+    const f = (c.faces && c.faces.primary) || c;
+    mass += ((f.mass != null ? f.mass : c.mass) | 0);
+  }
+  return mass;
 }
 
 export function removeFromStack(index) {
