@@ -3553,3 +3553,161 @@ body:has(#view-browse:not(.hidden)) #main {
   }
   .hand-slot.is-selected .hand-view-btn { display: block; }
 }
+
+/* ============================================================
+   Industrialize modal (rulebook I7).
+
+   Confirm-modal that surfaces the refinery + robonaut + support
+   chain about to be decommissioned, plus any orphan warnings.
+   Lives on top of the standard .card-modal-overlay backdrop;
+   the .industrialize-modal box is its own panel (not a
+   card-modal-panel) because it's text-heavy, not card-heavy.
+   ============================================================ */
+.industrialize-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  max-width: 480px;
+  width: 100%;
+  color: var(--ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.industrialize-head h3 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0.5px;
+}
+.industrialize-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.industrialize-spectral {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.industrialize-spectral-badge {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  line-height: 22px;
+  text-align: center;
+  border-radius: 4px;
+  font-weight: 800;
+  margin-left: 4px;
+  background: #1f2937;
+  color: #f9fafb;
+}
+/* Spectral tint badges - colour key mirrors the published
+   spectral palette (C carbon, S stony, M metallic, V Vesta,
+   D dark, H hydrous). */
+.industrialize-spectral-badge.spectral-C { background: #475569; color: #f8fafc; }
+.industrialize-spectral-badge.spectral-S { background: #ca8a04; color: #fefce8; }
+.industrialize-spectral-badge.spectral-M { background: #9ca3af; color: #111827; }
+.industrialize-spectral-badge.spectral-V { background: #b91c1c; color: #fef2f2; }
+.industrialize-spectral-badge.spectral-D { background: #1e3a8a; color: #dbeafe; }
+.industrialize-spectral-badge.spectral-H { background: #0ea5e9; color: #f0f9ff; }
+
+.industrialize-section-label {
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--muted, #94a3b8);
+}
+.industrialize-pairs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.industrialize-pair {
+  text-align: left;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 13px;
+}
+.industrialize-pair:hover { background: var(--panel-2); }
+.industrialize-pair.is-selected {
+  background: rgba(125, 211, 252, 0.12);
+  border-color: var(--accent);
+}
+.industrialize-pair .pair-radio {
+  display: inline-block;
+  width: 16px;
+  color: var(--accent);
+}
+
+.industrialize-decom {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.industrialize-decom li {
+  background: rgba(127, 29, 29, 0.18);
+  border-left: 3px solid #b91c1c;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.industrialize-decom .decom-icon {
+  display: inline-block;
+  width: 16px;
+  color: #fca5a5;
+  font-weight: 800;
+}
+.industrialize-decom .decom-icon.decom-kept {
+  color: #86efac;
+}
+.industrialize-decom li:has(.decom-kept) {
+  background: rgba(20, 83, 45, 0.18);
+  border-left-color: #166534;
+}
+.industrialize-decom .decom-type {
+  color: var(--muted, #94a3b8);
+  font-size: 11px;
+}
+
+.industrialize-warn {
+  background: rgba(202, 138, 4, 0.12);
+  border: 1px solid rgba(202, 138, 4, 0.4);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.industrialize-orphans {
+  list-style: disc;
+  margin: 0 0 0 18px;
+  padding: 0;
+  font-size: 13px;
+}
+.industrialize-orphans li { margin-bottom: 2px; }
+
+.industrialize-modal .card-modal-actions {
+  margin-top: 4px;
+  justify-content: flex-end;
+}
+.industrialize-modal .modal-btn.primary {
+  background: #14532d;
+  color: #d1fae5;
+  border-color: #166534;
+}
+.industrialize-modal .modal-btn.primary:hover {
+  background: #166534;
+}

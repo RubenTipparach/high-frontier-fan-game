@@ -61,6 +61,13 @@ import {
   getChits, getVps, getChitVpValue, isZoneVisited, resetGlory,
   onChange as onGloryChange, ZONE_CHIT_VPS,
 } from './glory.js';
+import {
+  getFactory, createFactory, allFactories,
+  onFactoryChange,
+} from './factories.js';
+import {
+  findIndustrializeOptions, openIndustrializeModal,
+} from './industrialize.js';
 
 // Only one map mode now (planner / "classic"); the old
 // "Cleaned up" variant was disorienting next to the canonical
@@ -2864,6 +2871,86 @@ function doRefuel(site) {
   openFuelTankModal({ fromWater: tankBefore, toWater: tankBefore + gain });
 }
 
+// Single sandbox owner id - the local player. Used to tag
+// factories + colonies until Stage 4 multi-player support
+// arrives. Keeping it as a constant (rather than reading from a
+// profile system that doesn't exist yet in the sandbox) is
+// deliberate: when multi-player lands this becomes a parameter,
+// not a runtime lookup.
+const SANDBOX_OWNER_ID = 'sandbox-player';
+
+// Industrialize handler (rulebook I7). The caller has already
+// validated that the rocket is parked at a claimed site with no
+// existing factory AND that findIndustrializeOptions(stack)
+// returned at least one valid pair; we just open the modal and
+// commit when the player confirms.
+//
+// Important: the op cost is consumed inside the modal commit
+// callback (NOT at popup-click time) so cancelling the modal
+// doesn't burn the turn. The chain cards are removed from the
+// stack in reverse-index order so splices don't shift indices
+// we haven't visited yet.
+function doIndustrialize(site, stack, options) {
+  openIndustrializeModal({
+    siteName: site.name,
+    spectralType: site.spectralType || 'C',
+    stack,
+    options,
+    onCommit: (opt) => {
+      if (!opt) return;
+      if (!requireOp('Industrialize')) return;
+      // Remove chain cards in reverse index order so earlier
+      // indices stay valid as we splice. Radiators were already
+      // filtered out into opt.keptRadiators and are NOT in
+      // chainIndices.
+      const removed = [];
+      for (const idx of [...opt.chainIndices].sort((a, b) => b - a)) {
+        const slot = stack[idx];
+        if (!slot) continue;
+        const ok = rocketRemoveCard(idx);
+        if (ok) removed.push(slot.id);
+      }
+      const spectral = site.spectralType || 'C';
+      const built = createFactory(site.id, SANDBOX_OWNER_ID, spectral);
+      const refName = opt.refinery.card.name;
+      const robName = opt.robonaut.card.name;
+      const orphanNote = opt.orphans.length
+        ? ` ⚠ ${opt.orphans.map((o) => o.card.name).join(', ')} now inactive (lost support).`
+        : '';
+      const keptNote = opt.keptRadiators.length
+        ? ` Kept: ${opt.keptRadiators.map((r) => r.card.name).join(', ')}.`
+        : '';
+      if (built) {
+        setStatus(
+          `🏭 Industrialized <strong>${esc(site.name)}</strong> `
+          + `(spectral ${esc(spectral)}). `
+          + `Decommissioned <em>${esc(refName)}</em> + <em>${esc(robName)}</em>`
+          + ` + ${removed.length - 2} support card${removed.length - 2 === 1 ? '' : 's'}.`
+          + `${keptNote}${orphanNote}`
+        );
+        logAction({
+          type: 'industrialize',
+          icon: '🏭',
+          summary: `Industrialized ${site.name} (spectral ${spectral}); `
+            + `decommissioned ${removed.length} card${removed.length === 1 ? '' : 's'} `
+            + `(refinery ${refName} + robonaut ${robName}` +
+            (opt.orphans.length ? `; orphans: ${opt.orphans.map((o) => o.card.name).join(', ')}` : '') + ')',
+          undoable: false,
+          data: {
+            siteId: site.id,
+            spectralType: spectral,
+            decommissioned: removed,
+            keptRadiators: opt.keptRadiators.map((r) => r.id),
+            orphans: opt.orphans.map((o) => o.id),
+          },
+        });
+      } else {
+        setStatus(`Industrialize failed to record - factory may already exist at ${esc(site.name)}.`);
+      }
+    },
+  });
+}
+
 // Fuel-tank modal. SVG cylinder; water rect grows from
 // `fromWater` to `toWater` over ~1100 ms. Capacity = active
 // thruster's max-liftable fuel (thrust - dryMass) when present,
@@ -4781,6 +4868,43 @@ function showSitePopupFor(site) {
           doRefuel(site);
           _renderer.clearSitePopup();
         },
+      });
+    }
+  }
+  // Industrialize action (rulebook I7). Shown only at sites where
+  // the rocket is parked AND a successful claim disc exists. The
+  // button gates on whether the stack has a valid refinery +
+  // robonaut pair with their supports satisfied. The actual op +
+  // op-budget cost is committed inside the modal so cancelling
+  // doesn't burn the player's turn.
+  if (rocketSite && site.id === rocketSite.id) {
+    const disc = getDisc(site.id);
+    const existingFactory = getFactory(site.id);
+    if (disc && disc.outcome === 'success' && !existingFactory) {
+      const stack = getRocketStack();
+      const opts = findIndustrializeOptions(stack);
+      const ok = opts.length > 0;
+      const reason = ok
+        ? null
+        : 'Industrialize needs an active refinery + active robonaut in the stack (with their supports satisfied).';
+      actions.push({
+        label: '🏭 Industrialize',
+        variant: ok ? 'rocket' : 'secondary',
+        disabled: !ok,
+        title: reason || undefined,
+        onClick: () => {
+          if (!ok) return;
+          doIndustrialize(site, stack, opts);
+          _renderer.clearSitePopup();
+        },
+      });
+    } else if (existingFactory) {
+      actions.push({
+        label: '🏭 Already industrialized',
+        variant: 'secondary',
+        disabled: true,
+        title: `A factory already exists at this site (spectral ${existingFactory.spectralType}).`,
+        onClick: () => {},
       });
     }
   }
