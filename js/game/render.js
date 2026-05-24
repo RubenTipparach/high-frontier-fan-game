@@ -552,6 +552,13 @@ export class MapRenderer {
     this.dpr = window.devicePixelRatio || 1;
     this.hostW = 0;
     this.hostH = 0;
+    // Viewport insets that mark portions of the canvas overlaid by
+    // chrome (the bottom hand strip, the right sidebar). Centering
+    // operations - fit, flyTo, panTo, resize recentre - shift to
+    // the midpoint of the UNOBSTRUCTED region instead of the raw
+    // canvas centre so a focused site doesn't end up hidden under
+    // an open panel. Updated externally via setInsets().
+    this.insets = { left: 0, top: 0, right: 0, bottom: 0 };
     this._route = null;             // [{from,to,dv}]
     this._routeFromId = null;
     this._routeToId = null;
@@ -729,6 +736,40 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
+  // Horizontal / vertical centre of the visible (uninsetted) region
+  // of the canvas. Used everywhere centring needs to mean "centre of
+  // the part the player can actually see" rather than "centre of the
+  // raw canvas".
+  _viewCenterX() {
+    return (this.insets.left + (this.hostW - this.insets.right)) / 2;
+  }
+  _viewCenterY() {
+    return (this.insets.top + (this.hostH - this.insets.bottom)) / 2;
+  }
+
+  // Update the overlaid-chrome insets. Re-pans so whatever world
+  // point was at the OLD visible centre stays at the NEW visible
+  // centre - opening a side panel slides the view, it doesn't make
+  // the focused body jump.
+  setInsets({ left = 0, top = 0, right = 0, bottom = 0 } = {}) {
+    const prev = this.insets;
+    if (prev.left === left && prev.top === top && prev.right === right && prev.bottom === bottom) return;
+    let centerPoint = null;
+    if (this.hostW > 0 && this.hostH > 0 && this.fitScale > 0) {
+      const eff = this.zoom * this.fitScale;
+      const cx = (prev.left + (this.hostW - prev.right)) / 2;
+      const cy = (prev.top  + (this.hostH - prev.bottom)) / 2;
+      centerPoint = { x: (cx - this.pan.x) / eff, y: (cy - this.pan.y) / eff };
+    }
+    this.insets = { left, top, right, bottom };
+    if (centerPoint) {
+      const eff = this.zoom * this.fitScale;
+      this.pan.x = this._viewCenterX() - centerPoint.x * eff;
+      this.pan.y = this._viewCenterY() - centerPoint.y * eff;
+    }
+    this._scheduleDraw();
+  }
+
   // Smoothly pan + zoom to centre a specific site / waypoint in
   // the viewport. Used by the search box, the locator buttons,
   // and the explosion camera-pan. `zoom` defaults to 5x which
@@ -741,8 +782,8 @@ export class MapRenderer {
     this._cancelPanAnim();
     const endZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
     const endEff  = endZoom * this.fitScale;
-    const endPanX = this.hostW / 2 - target.x * endEff;
-    const endPanY = this.hostH / 2 - target.y * endEff;
+    const endPanX = this._viewCenterX() - target.x * endEff;
+    const endPanY = this._viewCenterY() - target.y * endEff;
     if (!Number.isFinite(ms) || ms <= 0) {
       // Snap path - kept for code that explicitly wants the
       // instant version (rare; most call sites benefit from the
@@ -783,8 +824,8 @@ export class MapRenderer {
     if (!target || typeof target.x !== 'number' || typeof target.y !== 'number') return;
     this._cancelPanAnim();
     const eff = this.zoom * this.fitScale;
-    const targetPanX = this.hostW / 2 - target.x * eff;
-    const targetPanY = this.hostH / 2 - target.y * eff;
+    const targetPanX = this._viewCenterX() - target.x * eff;
+    const targetPanY = this._viewCenterY() - target.y * eff;
     const startX = this.pan.x;
     const startY = this.pan.y;
     const t0 = performance.now();
@@ -1028,8 +1069,8 @@ export class MapRenderer {
     if (this.hostW > 0 && this.hostH > 0 && this.fitScale > 0) {
       const prevEff = this.zoom * this.fitScale;
       prevCenter = {
-        x: (this.hostW / 2 - this.pan.x) / prevEff,
-        y: (this.hostH / 2 - this.pan.y) / prevEff,
+        x: (this._viewCenterX() - this.pan.x) / prevEff,
+        y: (this._viewCenterY() - this.pan.y) / prevEff,
       };
     }
 
@@ -1045,8 +1086,8 @@ export class MapRenderer {
 
     if (prevCenter) {
       const eff = this.zoom * this.fitScale;
-      this.pan.x = this.hostW / 2 - prevCenter.x * eff;
-      this.pan.y = this.hostH / 2 - prevCenter.y * eff;
+      this.pan.x = this._viewCenterX() - prevCenter.x * eff;
+      this.pan.y = this._viewCenterY() - prevCenter.y * eff;
     }
 
     this._scheduleDraw();
@@ -1055,8 +1096,8 @@ export class MapRenderer {
   _fitToData() {
     this.zoom = this.options.initialZoom;
     const eff = this.zoom * this.fitScale;
-    this.pan.x = (this.hostW - VIEW_W * eff) / 2;
-    this.pan.y = (this.hostH - VIEW_H * eff) / 2;
+    this.pan.x = this._viewCenterX() - (VIEW_W * eff) / 2;
+    this.pan.y = this._viewCenterY() - (VIEW_H * eff) / 2;
   }
 
   // Public hooks the debug panel uses to read/observe state.

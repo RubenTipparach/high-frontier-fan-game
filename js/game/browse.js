@@ -1461,6 +1461,45 @@ function wireSearch(host) {
   });
 }
 
+// Wire ResizeObservers on the bottom hand strip and the right
+// sidebar so the renderer's logical centre stays at the midpoint of
+// the unobstructed canvas region. Without this, opening the side
+// panel (or dragging the hand strip taller) leaves the focused body
+// hidden under the panel - the canvas itself doesn't reflow because
+// both elements are absolute-positioned overlays on top of the map.
+// Mobile (max-width: 720px) ignores the right inset because the
+// sidepanel collapses into a centred modal there instead of an edge
+// panel that visibly steals canvas width.
+let _insetsWired = false;
+function wireMapInsets(renderer) {
+  if (typeof ResizeObserver === 'undefined') return;
+  const hand    = document.getElementById('sandbox-hand');
+  const sidebar = document.getElementById('browse-sidepanel');
+  const mobileMQ = window.matchMedia('(max-width: 720px)');
+  // apply() always reads the live _renderer (the module-level
+  // singleton), so observers wired the first time keep working
+  // across re-mounts without us holding a stale renderer reference.
+  const apply = () => {
+    const r = _renderer;
+    if (!r) return;
+    const isMobile = mobileMQ.matches;
+    const handH    = hand    ? hand.getBoundingClientRect().height    : 0;
+    const sideW    = sidebar ? sidebar.getBoundingClientRect().width  : 0;
+    r.setInsets({
+      bottom: handH,
+      right:  isMobile ? 0 : sideW,
+    });
+  };
+  if (!_insetsWired) {
+    _insetsWired = true;
+    if (hand)    new ResizeObserver(apply).observe(hand);
+    if (sidebar) new ResizeObserver(apply).observe(sidebar);
+    if (mobileMQ.addEventListener) mobileMQ.addEventListener('change', apply);
+    else if (mobileMQ.addListener) mobileMQ.addListener(apply);
+  }
+  apply();
+}
+
 // Promote the map host into the browser's fullscreen mode. The
 // ResizeObserver in the renderer picks up the new dimensions and
 // re-fits the canvas. Falls back gracefully on browsers without
@@ -1493,6 +1532,7 @@ async function mountMapFor() {
     });
     _renderer.onSandboxRocketClick = () => openRocketStackModal();
     wireDebugPanel(_renderer);
+    wireMapInsets(_renderer);
     syncSoloShipMarker();
     syncSandboxRocket();
     syncDiscs();
