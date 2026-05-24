@@ -11,6 +11,7 @@ import { planRoute } from './planner-nav.js';
 import {
   consumeMove, refundMove, getTurn, getMovesRemaining, onTurnChange,
   getEventForRoll, getSeasonForSlot, getSeason, resetClock,
+  getOpsRemaining, consumeOp,
 } from './turn-clock.js';
 import { triggerEndTurn, openTurnClockModal, buildDie, rollDie } from './turn-clock-ui.js';
 import {
@@ -290,6 +291,10 @@ function wireHandStrip() {
       });
       if (!ok) return;
     }
+    // Rulebook I4: Boost is one Operation per turn (multi-card
+    // batch counts as one op). Spillage confirm already passed
+    // - now commit the op cost before mutating state.
+    if (!requireOp('Boost')) return;
     for (const id of marked) {
       const card = lookup(id);
       if (!card) continue;
@@ -2823,6 +2828,10 @@ function doRefuel(site) {
     setStatus(`Refuel blocked: ${chk.reason}`);
     return;
   }
+  // Rulebook I5a: ISRU Refuel is an Operation, consumes the
+  // per-turn op slot. Factory-Refuel (I5b) will route through
+  // this same gate when it lands.
+  if (!requireOp('ISRU Refuel')) return;
   const source = chk.source;
   const tankBefore = getTankWater();
   const tmax = getTankMax();
@@ -3541,6 +3550,11 @@ function doProspect(site, prosp) {
     );
     return;
   }
+  // Rulebook I6: Prospect is an Operation, consumes the per-turn
+  // op slot regardless of dice outcome. Closing the roll modal
+  // without placing the disc still costs the op (you committed to
+  // the roll).
+  if (!requireOp('Prospect')) return;
   const threshold = siteProspectThreshold(site);
   const roll = 1 + Math.floor(Math.random() * 6);
   const success = roll <= threshold;
@@ -4887,6 +4901,25 @@ function clearRoute() {
 function setStatus(html) {
   const el = document.getElementById('route-status');
   if (el) el.innerHTML = html;
+}
+
+// Per-turn operation budget gate. Returns true and consumes one
+// op when the player still has ops remaining; otherwise surfaces
+// a status notice and returns false so the caller bails. Use this
+// at the entry point of every rulebook Operation (I1, I4, I5a/b,
+// I6, I7, I8) - Air-eater Refuel (I5c) is a free action in this
+// variant and skips this gate.
+function requireOp(label) {
+  if (getOpsRemaining() > 0) {
+    consumeOp();
+    return true;
+  }
+  setStatus(
+    `<strong>No operations left this turn.</strong> `
+    + `${label ? esc(label) + ' costs an operation; ' : ''}`
+    + `end the turn (or undo your prior op) to reset the budget.`
+  );
+  return false;
 }
 function updateRouteStatus() {
   setStatus('Tap a site to plan a route.');
