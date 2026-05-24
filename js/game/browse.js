@@ -1012,7 +1012,15 @@ function openUnifiedStackInspector(stackId) {
       <div class="stack-inspector-body">
         ${statsHtml}
         <h4>Cards (${cards.length})</h4>
-        <div class="stack-inspector-cardgrid" id="stack-inspector-cardgrid"></div>
+        <!-- Same #rocket-stack-cards container + .rocket-stack-row
+             grid the rocket modal uses, so the cards render with
+             identical look + spacing across every stack inspector.
+             The 'others' row class gets the dashed divider on top;
+             we use a single row here since LEO / Outpost don't
+             distinguish thrusters from the rest. -->
+        <div id="stack-inspector-cards">
+          <div class="rocket-stack-row" id="stack-inspector-cards-row"></div>
+        </div>
         <div id="stack-inspector-transfer"></div>
       </div>
       <div class="card-modal-actions">
@@ -1020,25 +1028,24 @@ function openUnifiedStackInspector(stackId) {
       </div>
     `;
 
-    const grid = dialog.querySelector('#stack-inspector-cardgrid');
+    const row = dialog.querySelector('#stack-inspector-cards-row');
     if (!cards.length) {
-      grid.innerHTML = '<p class="muted">Stack is empty.</p>';
+      row.innerHTML = '<p class="muted">Stack is empty.</p>';
     } else {
       for (const slot of cards) {
         const card = cardById(slot.id);
         if (!card) continue;
+        // Same .rocket-slot wrapper + renderCard the rocket
+        // modal uses - one design language across every stack.
         const wrap = document.createElement('div');
-        wrap.className = 'stack-inspector-slot';
+        wrap.className = 'rocket-slot';
         if (selected.has(slot.id)) wrap.classList.add('is-selected');
-        // The same renderCard the patent library + rocket modal
-        // use, so the card art is uniform across every stack
-        // view in the app.
         wrap.appendChild(renderCard(card, { type: slot.kind || 'patent' }));
         const actions = document.createElement('div');
-        actions.className = 'stack-inspector-slot-actions';
+        actions.className = 'rocket-slot-actions';
         const selBtn = document.createElement('button');
         selBtn.type = 'button';
-        selBtn.className = 'stack-inspector-select' + (selected.has(slot.id) ? ' is-on' : '');
+        selBtn.className = 'rocket-select' + (selected.has(slot.id) ? ' is-on' : '');
         selBtn.textContent = selected.has(slot.id) ? '✓ Selected' : 'Select';
         selBtn.addEventListener('click', () => {
           if (selected.has(slot.id)) selected.delete(slot.id);
@@ -1054,7 +1061,7 @@ function openUnifiedStackInspector(stackId) {
           actions.appendChild(tag);
         }
         wrap.appendChild(actions);
-        grid.appendChild(wrap);
+        row.appendChild(wrap);
       }
     }
 
@@ -2780,9 +2787,11 @@ function openRocketStackModal() {
       const card = lookup(slot.id);
       if (!card) return;
       const isThruster = card.type === 'thruster' || card.thrust != null;
+
       const wrap = document.createElement('div');
       wrap.className = 'rocket-slot';
       if (isThruster && slot.id === activeId) wrap.classList.add('is-active-thruster');
+      if (selected.has(slot.id)) wrap.classList.add('is-selected');
       // Non-thruster cards whose supplies satisfy any of the
       // active thruster's requires get an "is-supporting" wash so
       // the player can trace which specific cards are powering

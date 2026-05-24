@@ -4473,78 +4473,24 @@ body:has(#view-browse:not(.hidden)) #main {
 .transfer-modal .card-modal-actions { justify-content: flex-end; }
 
 /* ============================================================
-   Unified stack inspector card grid + transfer section.
+   Stack inspector wide variant + transfer section.
 
-   Cards in every stack inspector (LEO / Outpost) use the same
-   renderCard system the rocket modal and patent library use.
-   Each card sits in a slot with a Select toggle below it; the
-   transfer section at the bottom of the modal lists every
-   colocated destination stack the player can ship selected
-   cards to.
+   LEO / Outpost inspectors render their cards with the EXACT
+   same DOM (`.rocket-stack-row` + `.rocket-slot`) the rocket
+   modal uses, so card art + layout + selected-ring + sizing
+   all come from the rocket-stack rules directly. No parallel
+   card-grid CSS here - that was the user's pushback on the
+   previous iteration.
 
-   The .stack-inspector-modal box from the previous commit gets
-   a wider max-width here so the card art has room to breathe.
+   The selected highlight piggybacks on the existing rocket-
+   slot rules; the only new rule below tints the wrap when
+   .is-selected (mirror of .is-active-thruster's ring idiom).
    ============================================================ */
-.stack-inspector-modal {
-  max-width: 720px;
-}
-.stack-inspector-cardgrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: 10px;
-  padding: 4px;
-  max-height: 480px;
-  overflow-y: auto;
-}
-.stack-inspector-slot {
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
-}
-.stack-inspector-slot.is-selected {
-  border-color: var(--accent);
-  background: rgba(125, 211, 252, 0.10);
-  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.5);
-}
-.stack-inspector-slot .card {
-  /* The cards are rendered at their natural size; shrink them
-     slightly in the grid so we can pack 3-4 per row. */
-  transform: scale(0.55);
-  transform-origin: top center;
-  margin-bottom: -130px;
-}
-.stack-inspector-slot-actions {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  justify-content: center;
-}
-.stack-inspector-select {
-  background: var(--panel-2);
-  color: var(--ink);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 4px 10px;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  letter-spacing: 0.3px;
-  min-height: 28px;
-}
-.stack-inspector-select:hover {
-  background: rgba(125, 211, 252, 0.18);
-  border-color: var(--accent);
-}
-.stack-inspector-select.is-on {
-  background: rgba(125, 211, 252, 0.22);
-  border-color: var(--accent);
-  color: var(--accent);
+.stack-inspector-modal { max-width: 720px; }
+.rocket-slot.is-selected .card {
+  box-shadow: 0 0 0 3px var(--accent),
+              0 0 18px rgba(125, 211, 252, 0.55);
+  border-radius: 10px;
 }
 
 .stack-inspector-transfer {
