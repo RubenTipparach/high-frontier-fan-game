@@ -69,7 +69,15 @@ export function shortRefId(id) {
 function isLeoWaypoint(w) {
   return w && w.type === 'lagrange' && w.name === 'LEO';
 }
-const DEFAULT_ZOOM = 6;
+const DEFAULT_ZOOM        = 6;
+const MOBILE_DEFAULT_ZOOM = 5;
+// Mobile viewports (≤720 px) open the map slightly farther
+// out than desktop - the canvas is denser per pixel + a closer
+// initial zoom hides too much of the system at a glance.
+function _isMobileViewport() {
+  try { return window.matchMedia('(max-width: 720px)').matches; }
+  catch { return false; }
+}
 // Cap the celestial body halo at this many screen pixels so extreme
 // zoom doesn't turn Saturn into the entire canvas.
 const HALO_MAX_SCREEN_R = 110;
@@ -562,7 +570,7 @@ export class MapRenderer {
       // them as dots clutters the map and adds nothing the user can
       // act on. Off by default; debug panel can flip it back on.
       showDecoratives: false,
-      initialZoom: DEFAULT_ZOOM,
+      initialZoom: _isMobileViewport() ? MOBILE_DEFAULT_ZOOM : DEFAULT_ZOOM,
       debug: false,
     };
     this._frameCount = 0;
