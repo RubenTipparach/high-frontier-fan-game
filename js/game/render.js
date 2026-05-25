@@ -75,8 +75,15 @@ const MOBILE_DEFAULT_ZOOM = 5;
 // out than desktop - the canvas is denser per pixel + a closer
 // initial zoom hides too much of the system at a glance.
 function _isMobileViewport() {
-  try { return window.matchMedia('(max-width: 720px)').matches; }
-  catch { return false; }
+  try {
+    // Touch devices count as "mobile" regardless of reported width:
+    // tablets and landscape phones can exceed 720 CSS px, so a pure
+    // width query misses them. pointer:coarse / maxTouchPoints catch
+    // the touch hardware directly.
+    return window.matchMedia('(max-width: 720px)').matches
+      || window.matchMedia('(pointer: coarse)').matches
+      || (navigator.maxTouchPoints || 0) > 1;
+  } catch { return false; }
 }
 // Cap the celestial body halo at this many screen pixels so extreme
 // zoom doesn't turn Saturn into the entire canvas.
