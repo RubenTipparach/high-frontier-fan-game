@@ -2084,6 +2084,11 @@ function ensureMapShell(host) {
     opTag.title = 'Operations remaining - tap for the operations menu';
     opTag.addEventListener('click', openOpsMenu);
   }
+  if (moveTag) {
+    moveTag.style.cursor = 'pointer';
+    moveTag.title = 'Moves remaining - tap for the operations menu';
+    moveTag.addEventListener('click', openOpsMenu);
+  }
   moveBtn.addEventListener('click', () => {
     if (moveBtn.dataset.state === 'undo') undoRocketMove();
     else                                  moveRocket();
@@ -4504,6 +4509,10 @@ function doIndustrialize(site, stack, options) {
       for (const idx of [...opt.chainIndices].sort((a, b) => b - a)) {
         const slot = stack[idx];
         if (!slot) continue;
+        // Crew NEVER gets decommissioned / removed by industrialize
+        // (it can only move stack-to-stack or become a colony). Hard
+        // guard so a crew slot can never silently vanish here.
+        if (slot.kind === 'crew' || CREW.some((c) => c.id === slot.id)) continue;
         const ok = rocketRemoveCard(idx);
         if (ok) {
           removed.push(slot.id);
@@ -6771,21 +6780,28 @@ function showSitePopupFor(site) {
         });
       }
     } else {
-      const refuelChk = canRefuelAt(site);
-      actions.push({
-        label: refuelChk.label,
-        // Blue rocket variant when the action is actually
-        // available; dim secondary when blocked. Same idiom as
-        // the prospect button so live ops read as live ops.
-        variant: refuelChk.ok ? 'rocket' : 'secondary',
-        disabled: !refuelChk.ok,
-        title: refuelChk.reason || undefined,
-        onClick: () => {
-          if (!refuelChk.ok) return;
-          doRefuel(site);
-          _renderer.clearSitePopup();
-        },
-      });
+      // Factory refuel (below) requires a player-owned factory and
+      // supersedes the site refuel. Without a factory, fall back to
+      // the site refuel, which follows the robonaut/ISRU rules.
+      const pf = getFactory(site.id);
+      const hasPlayerFactory = pf && pf.ownerId === SANDBOX_OWNER_ID;
+      if (!hasPlayerFactory) {
+        const refuelChk = canRefuelAt(site);
+        actions.push({
+          label: refuelChk.label,
+          // Blue rocket variant when the action is actually
+          // available; dim secondary when blocked. Same idiom as
+          // the prospect button so live ops read as live ops.
+          variant: refuelChk.ok ? 'rocket' : 'secondary',
+          disabled: !refuelChk.ok,
+          title: refuelChk.reason || undefined,
+          onClick: () => {
+            if (!refuelChk.ok) return;
+            doRefuel(site);
+            _renderer.clearSitePopup();
+          },
+        });
+      }
     }
   }
   // Factory-Refuel action (rulebook I5b). Shown when the rocket
