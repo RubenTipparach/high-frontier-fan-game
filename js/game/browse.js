@@ -49,6 +49,7 @@ import {
   WEIGHT_CLASSES, weightClassForMass, TRACK_LEGEND,
   MIN_DRY_MASS, MAX_DRY_MASS, MAX_WET_MASS,
 } from '../../data/net-thrust-track.js';
+import { renderDetailTrack, massLabel } from './net-thrust-detail.js';
 import { MILESTONES } from '../../data/glory.js';
 import { SITES_BY_ID } from '../../data/sites.js';
 import {
@@ -4710,8 +4711,11 @@ function buildFuelStrip(host, totals) {
   label.textContent = 'Net Thrust track';
   host.appendChild(label);
 
+  // The whole strip is a button into the detailed node track.
   const bands = document.createElement('div');
-  bands.className = 'fuel-strip-bands';
+  bands.className = 'fuel-strip-bands is-clickable';
+  bands.title = 'Click to open the detailed Net Thrust track';
+  bands.addEventListener('click', () => openNetThrustDetailModal());
   for (const wc of WEIGHT_CLASSES) {
     const span = wc.massMax - wc.massMin + 1;
     const band = document.createElement('div');
@@ -4726,11 +4730,13 @@ function buildFuelStrip(host, totals) {
     head.innerHTML = `<span class="fs-band-name">${wc.id}</span><span class="fs-band-mod">${mod}</span>`;
     band.appendChild(head);
 
-    // Fraction ladder (fuel sub-steps). Whole-step bands (TUG)
-    // show a single "1" to read as "whole fuel steps".
+    // Fraction ladder (fuel sub-steps), ordered least -> greatest.
+    // Whole-step bands (TUG) show a single "1".
     const fracs = document.createElement('div');
     fracs.className = 'fuel-strip-fracs';
-    const ladder = wc.fractions.length ? wc.fractions : ['1'];
+    const ladder = (wc.fractions.length ? wc.fractions.slice() : ['1'])
+      .slice()
+      .sort((a, b) => fracValue(a) - fracValue(b));
     for (const fr of ladder) {
       const chip = document.createElement('span');
       chip.className = 'fs-frac';
@@ -4749,12 +4755,13 @@ function buildFuelStrip(host, totals) {
       if (i === MIN_DRY_MASS) { cell.classList.add('is-min-dry'); tip += ' - MIN DRY MASS'; }
       if (i === MAX_DRY_MASS) { cell.classList.add('is-max-dry'); tip += ' - MAX DRY MASS'; }
       if (i === MAX_WET_MASS) { cell.classList.add('is-max-wet'); tip += ' - MAX WET MASS'; }
+      // Dry / wet chit cells report their actual mass value on hover.
+      if (i === dm) { cell.classList.add('is-dry-chit'); tip = `Dry mass: ${massLabel(dm)}`; }
+      if (i === wm) { cell.classList.add('is-wet-chit'); tip = `Wet mass: ${massLabel(wm)}`; }
+      if (i === dm && i === wm) { cell.classList.add('is-co-chit'); tip = `Dry + wet mass: ${massLabel(wm)}`; }
       cell.dataset.tip = tip;
       cell.title = tip;
       cell.textContent = String(i);
-      if (i === dm) cell.classList.add('is-dry-chit');
-      if (i === wm) cell.classList.add('is-wet-chit');
-      if (i === dm && i === wm) cell.classList.add('is-co-chit');
       cells.appendChild(cell);
     }
     band.appendChild(cells);
@@ -4770,10 +4777,52 @@ function buildFuelStrip(host, totals) {
     <span><i class="chit-dot is-dry-chit"></i> Dry ${dm}</span>
     <span><i class="chit-dot is-wet-chit"></i> Wet ${wm} (${wc.id} ${netMod})</span>
     <span class="muted">Max wet ${MAX_WET_MASS}</span>
-    <span class="fs-line-key"><i class="fs-line black"></i> burn (FT spend)</span>
-    <span class="fs-line-key"><i class="fs-line red"></i> refuel</span>
+    <span class="fs-detail-hint">🔍 click for detail</span>
   `;
   host.appendChild(legend);
+}
+
+// Parse a "k/d" (or "1") fraction string to a number, for sorting.
+function fracValue(s) {
+  const str = String(s).trim();
+  if (str.includes('/')) { const [a, b] = str.split('/').map(Number); return b ? a / b : 0; }
+  return Number(str) || 0;
+}
+
+// Modal: the full Net Thrust node track (dark), opened by clicking
+// the simplified strip. Shows two chits - DRY + WET - at the
+// rocket's current masses, with the node connections (black burn /
+// red refuel) the fuel logic follows.
+function openNetThrustDetailModal() {
+  document.querySelector('.ntd-overlay')?.remove();
+  const totals = getStackTotals();
+  const dm = Math.max(0, totals.dryMass | 0);
+  const wm = Math.max(0, totals.wetMass | 0);
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay ntd-overlay';
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  const panel = document.createElement('div');
+  panel.className = 'ntd-panel';
+  panel.innerHTML = `
+    <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
+    <h2 class="ntd-title">Net Thrust track</h2>
+    <p class="muted ntd-sub">Dry mass <strong>${esc(massLabel(dm))}</strong> · Wet mass <strong>${esc(massLabel(wm))}</strong>. Hover any node or chit for its value.</p>
+    <div class="ntd-scroll"></div>
+    <div class="ntd-legend">
+      <span><i class="ntd-line burn"></i> burn (spend FT → dry mass)</span>
+      <span><i class="ntd-line refuel"></i> refuel (load FT → wet mass)</span>
+      <span><i class="ntd-chit dry"></i> dry</span>
+      <span><i class="ntd-chit wet"></i> wet</span>
+    </div>
+  `;
+  renderDetailTrack(panel.querySelector('.ntd-scroll'), { dryMass: dm, wetMass: wm });
+  panel.querySelector('.modal-x').addEventListener('click', close);
+  overlay.appendChild(panel);
+  mountOverlay(overlay);
 }
 
 function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
@@ -5833,17 +5882,20 @@ async function moveRocket() {
     return false;
   }
   // Fuel consumption (new-game setting, default on): a move spends
-  // fuel-per-burn × burns of water from the tank. Pre-flight block
-  // when the tank can't cover it. When the setting is off, moves
-  // are free.
-  const turn1Burns = turn1.reduce((s, x) => s + (x.burns || 1), 0);
+  // fuel-per-burn × burns of water from the tank. Only THIS turn's
+  // burns are charged - a Hohmann transfer spans multiple turns,
+  // so coast/wait hops (burns: 0) cost nothing and the later turns
+  // are charged when their Move fires. Use the planner's real
+  // per-segment `burns` (NOT a per-segment fallback of 1, which
+  // wrongly counted every coast hop as a burn).
+  const turn1Burns = turn1.reduce((s, x) => s + (Number(x.burns) || 0), 0);
   const _thrFuel = getActiveThrusterStats();
   const fuelCost = (getFuelConsumption() && _thrFuel && Number.isFinite(_thrFuel.fuel))
     ? Math.ceil(_thrFuel.fuel * turn1Burns) : 0;
   if (fuelCost > 0 && getTankWater() < fuelCost) {
     const per = Math.round(_thrFuel.fuel * 100) / 100;
-    setStatus(`⛽ Not enough water: this move needs <strong>${fuelCost}</strong> `
-      + `(${turn1Burns} burn${turn1Burns === 1 ? '' : 's'} × ${per}), tank has <strong>${getTankWater()}</strong>. Refuel at LEO / a factory first.`);
+    setStatus(`⛽ Not enough water: this turn's move needs <strong>${fuelCost}</strong> `
+      + `(${turn1Burns} burn${turn1Burns === 1 ? '' : 's'} this turn × ${per}), tank has <strong>${getTankWater()}</strong>. Refuel at LEO / a factory first.`);
     return false;
   }
   // Hazard pre-flight check. Two flavours along a route:

@@ -752,6 +752,39 @@
   gap: 3px;
   border-radius: 4px;
 }
+.fuel-strip-bands.is-clickable { cursor: pointer; }
+.fuel-strip-bands.is-clickable:hover { outline: 1px solid rgba(125, 211, 252, 0.5); outline-offset: 2px; }
+.rocket-fuel-strip-legend .fs-detail-hint { color: #7dd3fc; margin-left: auto; }
+
+/* Detailed Net Thrust track modal (click the simple strip). */
+.ntd-panel {
+  position: relative;
+  background: var(--panel, #0e1525);
+  border: 1px solid var(--border, #2b3b55);
+  border-radius: 12px;
+  padding: 18px 20px;
+  max-width: min(96vw, 1200px);
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
+}
+.ntd-title { margin: 0; font-size: 18px; }
+.ntd-sub { margin: 0; font-size: 12px; }
+.ntd-scroll { overflow-x: auto; overflow-y: hidden; flex: 1 1 auto; -webkit-overflow-scrolling: touch; }
+.ntd-scroll .ntd-svg { display: block; }
+.ntd-legend {
+  display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+  font-size: 11px; color: var(--ink-dim, #9fb3cc);
+}
+.ntd-legend .ntd-line { display: inline-block; width: 18px; height: 0; vertical-align: middle; margin-right: 4px; }
+.ntd-legend .ntd-line.burn { border-top: 2px solid #c3ccd9; }
+.ntd-legend .ntd-line.refuel { border-top: 2px dashed #ec5a96; }
+.ntd-legend .ntd-chit { display: inline-block; width: 11px; height: 11px; border-radius: 50%; vertical-align: -1px; margin-right: 4px; border: 2px solid; }
+.ntd-legend .ntd-chit.dry { border-color: #94a3b8; }
+.ntd-legend .ntd-chit.wet { border-color: #f5c518; }
 .fuel-strip-band {
   display: flex;
   flex-direction: column;
