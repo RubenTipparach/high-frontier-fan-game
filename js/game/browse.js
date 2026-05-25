@@ -967,13 +967,6 @@ function openUnifiedStackInspector(stackId) {
           refreshFooter();
         });
         actions.appendChild(selBtn);
-        if (slot.face === 'secondary') {
-          const tag = document.createElement('span');
-          tag.className = 'card-face-tag';
-          tag.title = 'Black-Side / Tier 2';
-          tag.textContent = 'BS';
-          actions.appendChild(tag);
-        }
         wrap.appendChild(actions);
         row.appendChild(wrap);
       }

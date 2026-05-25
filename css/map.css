@@ -4318,18 +4318,6 @@ body:has(#view-browse:not(.hidden)) #main {
   border-radius: 6px;
   padding: 5px 8px;
 }
-.stack-inspector-cards .card-face-tag {
-  display: inline-block;
-  background: #0c0a16;
-  color: #fde68a;
-  border: 1px solid #422006;
-  border-radius: 3px;
-  padding: 1px 4px;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.5px;
-  margin-left: 4px;
-}
 .stack-inspector-foot { margin: 0; }
 .stack-inspector-howto {
   margin: 0 0 0 18px;
