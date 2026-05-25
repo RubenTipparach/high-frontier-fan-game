@@ -528,6 +528,21 @@
   flex: 0 0 auto;
   white-space: nowrap;
 }
+.dump-water-panel .dump-preview {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 12px;
+  margin: 10px 0 2px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+.dump-water-panel .dump-preview strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.dump-water-panel .dump-preview small { color: var(--ink-dim); }
 
 /* Turn tracker modal - Sol Sunspot wheel */
 .turn-clock-overlay { z-index: 60; }

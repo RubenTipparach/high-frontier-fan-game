@@ -4910,6 +4910,12 @@ function openDumpWaterModal(maxWater) {
     document.querySelector('.dump-water-overlay')?.remove();
     const overlay = document.createElement('div');
     overlay.className = 'card-modal-overlay confirm-modal-overlay dump-water-overlay';
+    // Current wet mass drives the preview: dumping water lowers the
+    // wet mass, which can drop the rocket into a lighter weight class
+    // with a better net-thrust modifier.
+    const totals = getStackTotals();
+    const curWet = Math.max(0, totals.wetMass | 0);
+    const tankCap = getTankMax();
     let amount = Math.min(1, max);
     const close = (val) => {
       overlay.remove();
@@ -4935,6 +4941,11 @@ function openDumpWaterModal(maxWater) {
         <button type="button" class="popup-btn popup-btn-secondary dump-step" data-step="1" aria-label="Dump one more">+</button>
         <button type="button" class="popup-btn dump-all" title="Dump the entire tank">All (${max})</button>
       </div>
+      <div class="dump-preview">
+        <span class="dump-preview-mass">Wet mass <strong>${curWet}</strong> →
+          <strong class="dump-after-wet">${curWet}</strong><small>/${tankCap}</small></span>
+        <span class="dump-preview-class"></span>
+      </div>
       <div class="turn-confirm-actions">
         <button type="button" class="popup-btn primary" data-act="yes">💧⤓ Dump <span class="dump-confirm-n">${amount}</span></button>
         <button type="button" class="popup-btn" data-act="no">Cancel</button>
@@ -4942,11 +4953,23 @@ function openDumpWaterModal(maxWater) {
     `;
     const input = panel.querySelector('.dump-amount');
     const confirmN = panel.querySelector('.dump-confirm-n');
+    const afterWetEl = panel.querySelector('.dump-after-wet');
+    const classEl = panel.querySelector('.dump-preview-class');
     const clamp = (v) => Math.max(1, Math.min(max, Math.round(Number(v)) || 1));
+    // Reflect the resulting wet mass + the weight class (net-thrust
+    // modifier) the rocket would fall into after dumping `n` water.
+    const updatePreview = (n) => {
+      const afterWet = Math.max(0, curWet - n);
+      afterWetEl.textContent = String(afterWet);
+      const wc = weightClassForMass(Math.max(1, afterWet));
+      const mod = wc.netThrust >= 0 ? `+${wc.netThrust}` : String(wc.netThrust);
+      classEl.innerHTML = `Class <strong>${esc(wc.id)} ${mod}</strong> net thrust`;
+    };
     const setAmount = (v) => {
       amount = clamp(v);
       input.value = String(amount);
       confirmN.textContent = String(amount);
+      updatePreview(amount);
     };
     panel.querySelectorAll('.dump-step').forEach((b) => {
       b.addEventListener('click', () => setAmount(amount + Number(b.dataset.step)));
@@ -4955,14 +4978,16 @@ function openDumpWaterModal(maxWater) {
     input.addEventListener('input', () => {
       // Allow free typing; only snap to the clamped value on the
       // confirm/step paths so the field doesn't fight the user
-      // mid-keystroke. Keep the confirm label in sync though.
+      // mid-keystroke. Keep the confirm label + preview in sync though.
       const v = clamp(input.value);
       amount = v;
       confirmN.textContent = String(v);
+      updatePreview(v);
     });
     input.addEventListener('blur', () => setAmount(input.value));
     panel.querySelector('[data-act="yes"]').addEventListener('click', () => close(amount));
     panel.querySelector('[data-act="no"]').addEventListener('click', () => close(null));
+    updatePreview(amount);
     overlay.appendChild(panel);
     mountOverlay(overlay);
     setTimeout(() => { input.focus(); input.select(); }, 0);
