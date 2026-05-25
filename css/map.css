@@ -143,6 +143,12 @@
 }
 #turn-tag-op   { border-color: #d4a72c; color: #f4d27a; }
 #turn-tag-move { border-color: #38bdf8; color: #bae6fd; }
+/* Spent budget point: fade the tag so the player sees at a glance
+   the op / move is used up this turn. */
+.map-turn-budget .turn-tag.is-spent {
+  opacity: 0.32;
+  border-style: dashed;
+}
 .map-mode-toggle {
   display: inline-flex;
   background: var(--bg-2);

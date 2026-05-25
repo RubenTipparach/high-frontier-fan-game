@@ -1755,8 +1755,8 @@ function ensureMapShell(host) {
         <button id="turn-tracker" title="View turn tracker"
           aria-label="View turn tracker">🕐</button>
         <span id="turn-budget" class="map-turn-budget" aria-live="polite">
-          <span class="turn-tag" id="turn-tag-op" title="Operations remaining this turn">[op:1]</span>
-          <span class="turn-tag" id="turn-tag-move" title="Moves remaining this turn">[move:1]</span>
+          <span class="turn-tag" id="turn-tag-op" title="Operations remaining this turn">op:1</span>
+          <span class="turn-tag" id="turn-tag-move" title="Moves remaining this turn">move:1</span>
         </span>
         <span id="aqua-chip" class="map-aqua-chip"
           title="Aqua balance - spend 4 aqua per hazard to bypass rolls, or convert 1:1 to water at LEO">
@@ -1921,8 +1921,16 @@ function ensureMapShell(host) {
   const opTag = host.querySelector('#turn-tag-op');
   const moveTag = host.querySelector('#turn-tag-move');
   function refreshTurnBudget() {
-    if (opTag) opTag.textContent = `[op:${getOpsRemaining()}]`;
-    if (moveTag) moveTag.textContent = `[move:${getMovesRemaining()}]`;
+    const ops = getOpsRemaining();
+    const moves = getMovesRemaining();
+    if (opTag) {
+      opTag.textContent = `op:${ops}`;
+      opTag.classList.toggle('is-spent', ops <= 0);
+    }
+    if (moveTag) {
+      moveTag.textContent = `move:${moves}`;
+      moveTag.classList.toggle('is-spent', moves <= 0);
+    }
   }
   refreshTurnBudget();
   onTurnChange(refreshTurnBudget);
