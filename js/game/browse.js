@@ -1217,24 +1217,21 @@ function openDeckTapModal(card, kind) {
   const actions = document.createElement('div');
   actions.className = 'card-modal-actions';
 
-  const addBtn = document.createElement('button');
-  addBtn.type = 'button';
-  addBtn.className = 'modal-btn stack';
-  // In Card Market mode the library is browse-only: patents
-  // must be acquired through Research Auction (rulebook I2)
-  // instead of dragged into hand for free. The button label +
-  // handler switch accordingly. The auction modal pre-selects
-  // this card + the right deck tab so the player doesn't have
-  // to re-find it.
+  // In Card Market mode the library is STRICTLY browse-only:
+  // you cannot add to hand AND you cannot auction from here.
+  // Auctions happen only in the 🛒 Cart (top of each deck).
+  // The deck-tap modal becomes a pure inspector with a note
+  // pointing the player at the cart - no action button.
   const inMarket = getMarketMode() === MARKET_MODE.MARKET;
   if (inMarket) {
-    addBtn.textContent = '🎯 Auction this card';
-    addBtn.title = 'Card Market mode: patents are acquired via Research Auction. Costs 1 op + 0 aqua (solo).';
-    addBtn.addEventListener('click', () => {
-      close();
-      doResearchAuction({ preselect: { type: card.type, cardId: card.id } });
-    });
+    const note = document.createElement('p');
+    note.className = 'muted card-modal-note';
+    note.textContent = '🛒 Card Market: patents are acquired from the Cart tab (top of each deck), not the library. This view is read-only.';
+    actions.append(note);
   } else {
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'modal-btn stack';
     addBtn.textContent = '✋ Add to hand';
     addBtn.addEventListener('click', () => {
       // Validate up front: don't fly the animation just to bounce
@@ -1262,9 +1259,9 @@ function openDeckTapModal(card, kind) {
       overlay.style.opacity = '0';
       setTimeout(close, 240);
     });
+    actions.append(addBtn);
   }
 
-  actions.append(addBtn);
   panel.appendChild(actions);
   overlay.appendChild(panel);
   mountOverlay(overlay);
@@ -3985,42 +3982,12 @@ function doSandboxReset() {
 // patent enters the player's hand; in Card Market mode the
 // sacrificed Hand card returns to the library. Op gated inside
 // the commit so cancel doesn't burn the turn.
-// Research Auction entry point. Two ways in:
-//
-//   1. With a preselect (card the player tapped from the
-//      library or cart): route directly to doAuctionCard,
-//      which uses the no-sacrifice auction-confirm modal.
-//      ONLY fires when the preselected card is the current
-//      top of its deck - per the rule, only deck tops are
-//      auctionable. Off-top picks fall through to the cart.
-//   2. With no preselect (LEO popup's Research Auction
-//      button): open the 🛒 cart pane so the player picks
-//      from the visible deck tops.
-//
-// The old deck-tab + per-card-picker + Hand-card-sacrifice
-// modal (openAuctionModal) is no longer used; the user
-// clarified that sacrifice isn't a rule. Cart + confirm
-// modal is the only flow now.
-function doResearchAuction(opts = {}) {
-  const preselect = opts.preselect || null;
-  if (preselect && preselect.cardId) {
-    const card = cardById(preselect.cardId);
-    if (!card) {
-      setStatus(`Auction failed - unknown card ${esc(preselect.cardId)}.`);
-      return;
-    }
-    // Only the top of each deck is auctionable. If the
-    // player picked a deeper card (e.g. from the patent
-    // library), bounce them to the cart so they can see
-    // what's actually available.
-    if (peekTop(card.type) !== card.id) {
-      setStatus(`Only the top of the ${esc(card.type)} deck is auctionable. Opening the 🛒 Cart so you can see what's available.`);
-      showPane('cart');
-      return;
-    }
-    doAuctionCard(card);
-    return;
-  }
+// Research Auction entry point. Opens the 🛒 Cart pane - the
+// cart IS the auction UI (only the top of each deck is
+// auctionable, via each deck's Buy button). You CANNOT auction
+// from the card library or from the deck-tap inspect modal;
+// the cart is the single place purchases happen.
+function doResearchAuction() {
   showPane('cart');
 }
 
