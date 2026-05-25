@@ -6325,16 +6325,18 @@ function showSitePopupFor(site) {
       // running out of cards isn't recoverable, but income
       // keeps the aqua flowing for Free Market sells.
       {
-        const opsLeft = getOpsRemaining();
+        // Always enabled - the op-budget check happens in
+        // doIncomeOp via requireOp, which pops the "no
+        // operations left" modal when the budget is spent. (We
+        // don't pre-disable on ops==0 because a disabled button
+        // gives no feedback; the modal is the notification the
+        // user asked for.)
         actions.push({
           label: '💰 Income (+1 aqua)',
-          variant: opsLeft > 0 ? 'rocket' : 'secondary',
-          disabled: opsLeft <= 0,
-          title: opsLeft > 0
-            ? 'Receive 1 Aqua from the Pool into your Bank. Costs one operation.'
-            : 'No operations left this turn.',
+          variant: 'rocket',
+          disabled: false,
+          title: 'Receive 1 Aqua from the Pool into your Bank. Costs one operation.',
           onClick: () => {
-            if (opsLeft <= 0) return;
             doIncomeOp();
             _renderer.clearSitePopup();
           },
@@ -6717,11 +6719,20 @@ function requireOp(label) {
     consumeOp();
     return true;
   }
-  setStatus(
-    `<strong>No operations left this turn.</strong> `
-    + `${label ? esc(label) + ' costs an operation; ' : ''}`
-    + `end the turn (or undo your prior op) to reset the budget.`
-  );
+  // Out of operations this turn. Pop an acknowledge modal so the
+  // block is unmissable (a status-line note alone is easy to
+  // overlook). confirmModal with no:'' renders a single OK
+  // button; we fire-and-forget (requireOp is synchronous, the
+  // caller bails on the false return immediately).
+  const verb = label ? `${label} costs an operation` : 'That action costs an operation';
+  confirmModal({
+    title: '⛔ No operations left',
+    body: `${esc(verb)}, but you've already used your operation for this turn. `
+      + `End the turn to refresh your operation budget.`,
+    yes: 'OK',
+    no: '',
+  });
+  setStatus(`<strong>No operations left this turn.</strong> End the turn to reset the budget.`);
   return false;
 }
 function updateRouteStatus() {
