@@ -1,7 +1,11 @@
-// Detailed Net Thrust track - the full node graph (the published
+// Detailed Fuel Strip Track - the full node graph (the published
 // board's fuel/thrust ladder). This is the click-to-open modal
-// view behind the simplified strip. The model + connections are
-// documented in fuel-strip.md.
+// view behind the simplified strip.
+//
+// SINGLE SOURCE OF TRUTH for the fuel-strip node model + the red
+// (refuel) / black (burn) connections. fuel-strip.md is a doc
+// mirror of this module - if you change the model here, update
+// fuel-strip.md to match.
 //
 // Wet-mass nodes: integers 1..32 plus fuel-step sub-nodes at
 // N + k/d (fractions count up). Per-gap fuel-steps d:
@@ -66,7 +70,7 @@ const m = (N, k, d) => N + k / d;
 const RED = (() => {
   const pairs = []; const chain = (...pts) => { for (let i = 0; i < pts.length - 1; i++) pairs.push([pts[i], pts[i + 1]]); };
   for (let N = 1; N < MAX_WET; N++) chain(N, N + 1);
-  chain(m(1, 1, 9), m(2, 1, 6), m(3, 1, 4), m(4, 1, 3), m(5, 1, 3), 5);
+  chain(m(1, 1, 9), m(2, 1, 6), m(3, 1, 4), m(4, 1, 3), m(5, 1, 3), 6);
   chain(m(1, 2, 9), m(2, 1, 6)); chain(m(1, 1, 3), m(2, 1, 3), m(3, 1, 4));
   chain(m(1, 4, 9), m(2, 1, 2), m(3, 1, 2), m(4, 2, 3), m(5, 2, 3), m(6, 1, 2), m(7, 1, 2), m(8, 1, 2), m(9, 1, 2), m(10, 1, 2), 11);
   chain(m(1, 5, 9), m(2, 1, 2)); chain(m(1, 2, 3), m(2, 2, 3), m(3, 3, 4));

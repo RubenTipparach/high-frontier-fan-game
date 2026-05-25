@@ -1885,8 +1885,6 @@ function ensureMapShell(host) {
   host.innerHTML = `
     <div class="map-toolbar">
       <div class="map-turn-controls">
-        <button id="turn-move-rocket" title="Move the rocket one step along its planned route"
-          aria-label="Move rocket">🛸</button>
         <button id="turn-end" title="End your turn"
           aria-label="End turn">⏭ End turn</button>
         <button id="turn-tracker" title="View turn tracker"
@@ -2034,27 +2032,11 @@ function ensureMapShell(host) {
   // and "↩ Undo move" based on whether the per-turn move budget has
   // been spent. End turn refills the budget, which calls back here
   // via onTurnChange and resets the button to "Move".
-  const moveBtn = host.querySelector('#turn-move-rocket');
-  function refreshMoveButton() {
-    if (!moveBtn) return;
-    const remaining = getMovesRemaining();
-    if (remaining > 0) {
-      moveBtn.textContent = '🛸 Move to';
-      moveBtn.title = 'Move the rocket one step along its planned route';
-      moveBtn.setAttribute('aria-label', 'Move rocket');
-      moveBtn.dataset.state = 'move';
-    } else {
-      moveBtn.textContent = '↩ Undo';
-      moveBtn.title = 'Undo move (operations can happen before OR after the move, not in the middle)';
-      moveBtn.setAttribute('aria-label', 'Undo move');
-      moveBtn.dataset.state = 'undo';
-    }
-  }
-  refreshMoveButton();
-  onTurnChange(refreshMoveButton);
-  // Per-turn budget tags [op:N] [move:N] in the toolbar. Live-
-  // update on any consume / refund / turn rollover (all route
-  // through turn-clock's notify -> onTurnChange).
+  // Per-turn budget tags op:N / move:N in the toolbar. The move
+  // tag IS the move control now (the old 🛸 button is gone): tap
+  // to move when a move is left, or to undo when it's spent. The
+  // op tag opens the operations menu. Both live-update on any
+  // consume / refund / turn rollover.
   const opTag = host.querySelector('#turn-tag-op');
   const moveTag = host.querySelector('#turn-tag-move');
   function refreshTurnBudget() {
@@ -2067,12 +2049,13 @@ function ensureMapShell(host) {
     if (moveTag) {
       moveTag.textContent = `move:${moves}`;
       moveTag.classList.toggle('is-spent', moves <= 0);
+      moveTag.title = moves > 0
+        ? 'Move remaining - tap to move the rocket along its route'
+        : 'Move spent - tap to undo this turn\'s move';
     }
   }
   refreshTurnBudget();
   onTurnChange(refreshTurnBudget);
-  // Tapping the op tag opens the operations menu - the player's
-  // main aid for deciding what to spend their op on this turn.
   if (opTag) {
     opTag.style.cursor = 'pointer';
     opTag.title = 'Operations remaining - tap for the operations menu';
@@ -2080,21 +2063,23 @@ function ensureMapShell(host) {
   }
   if (moveTag) {
     moveTag.style.cursor = 'pointer';
-    moveTag.title = 'Moves remaining - tap for the operations menu';
-    moveTag.addEventListener('click', openOpsMenu);
+    moveTag.addEventListener('click', () => {
+      if (getMovesRemaining() > 0) moveRocket();
+      else undoRocketMove();
+    });
   }
-  moveBtn.addEventListener('click', () => {
-    if (moveBtn.dataset.state === 'undo') undoRocketMove();
-    else                                  moveRocket();
-  });
-  // Aqua balance chip - live-updates on any spend / income so the
-  // player sees the number tick down when a hazard bypass or an
-  // aqua → water transfer commits.
+  // Aqua balance chip - live-updates on any spend / income. Tapping
+  // it opens the LEO Stack (the bank lives at LEO).
+  const aquaChip = host.querySelector('#aqua-chip');
   const aquaChipBal = host.querySelector('#aqua-chip-balance');
   if (aquaChipBal) {
     const refreshAqua = () => { aquaChipBal.textContent = String(getAqua()); };
     refreshAqua();
     onAquaChange(refreshAqua);
+  }
+  if (aquaChip) {
+    aquaChip.style.cursor = 'pointer';
+    aquaChip.addEventListener('click', () => openLeoStackModal());
   }
   host.querySelector('#dbg-close').addEventListener('click', () => {
     host.querySelector('#map-debug').classList.add('hidden');
@@ -4313,14 +4298,8 @@ function openOpsMenu() {
     <h2 class="ops-menu-title">⚙ Operations this turn</h2>
     <p class="muted ops-menu-sub">You have <strong${opCls}>op:${ops}</strong> and <strong>move:${moves}</strong> left. One operation per turn - pick wisely.</p>
     <div class="ops-menu-list" id="ops-menu-now"></div>
-    <h4 class="ops-menu-head">At a site (1 op) - open the site you're parked at / colocated with</h4>
-    <ul class="ops-menu-hints">
-      <li>🔭 <strong>Prospect</strong> - roll to claim a site (needs an active prospector)</li>
-      <li>⛽ <strong>ISRU / Factory Refuel</strong> - top up the rocket's water</li>
-      <li>🏭 <strong>Industrialize</strong> - refinery + robonaut become a factory</li>
-      <li>🧪 <strong>ET Produce</strong> - a hand card into a factory outpost (spectral match)</li>
-      <li>🛰 <strong>Boost</strong> - mark cards in your Hand, then press BOOST (costs aqua = mass)</li>
-    </ul>
+    <h4 class="ops-menu-head">At a site (1 op) - prospect · refuel · industrialize · ET produce</h4>
+    <div class="ops-menu-list" id="ops-menu-sites"></div>
     <h4 class="ops-menu-head">Free actions (no op)</h4>
     <ul class="ops-menu-hints">
       <li>🌐 Colonize a factory (consumes a colocated crew)</li>
@@ -4345,6 +4324,46 @@ function openOpsMenu() {
     addOp(`💱 Free Market (+${FREE_MARKET_AQUA} aqua)`,
       handN > 0 ? 'Sell a hand card for aqua. Costs one operation.' : 'No hand cards to sell.',
       doFreeMarket, handN > 0);
+  }
+
+  // Site-op shortcuts: sites where a site-op is possible (your
+  // factories - refuel / ET / colonize; claimed discs without a
+  // factory - industrialize). Each flies the map there and opens
+  // the site popup, where the actual op buttons live.
+  const sitesHost = panel.querySelector('#ops-menu-sites');
+  const siteById = (id) => (_activeData && (_activeData.byId?.[id] || _activeData.sites.find((s) => s.id === id))) || null;
+  const opSites = [];
+  const seen = new Set();
+  for (const f of (allFactories() || [])) {
+    if (f.ownerId !== SANDBOX_OWNER_ID || seen.has(f.siteId)) continue;
+    const site = siteById(f.siteId); if (!site) continue;
+    seen.add(f.siteId);
+    opSites.push({ site, hint: `🏭 factory${getColony(f.siteId) ? ' + 🌐' : ''} · refuel / ET / colonize` });
+  }
+  for (const d of (getDiscs() || [])) {
+    if (d.outcome !== 'success' || seen.has(d.siteId) || getFactory(d.siteId)) continue;
+    const site = siteById(d.siteId); if (!site) continue;
+    seen.add(d.siteId);
+    opSites.push({ site, hint: '🔭 claimed · industrialize here' });
+  }
+  if (sitesHost) {
+    if (!opSites.length) {
+      sitesHost.innerHTML = '<p class="muted ops-menu-emptyhint">No site-ops yet. Prospect (roll) at the rocket\'s site to claim it, then industrialize there. Refuel needs water + a rig/factory.</p>';
+    } else {
+      for (const { site, hint } of opSites) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'ops-menu-op ops-menu-site modal-btn stack';
+        b.innerHTML = `📍 ${esc(site.name)} <span class="ops-site-hint">${esc(hint)}</span>`;
+        b.title = `Fly to ${site.name} and open its site actions`;
+        b.addEventListener('click', () => {
+          close();
+          if (_renderer && typeof _renderer.flyTo === 'function') _renderer.flyTo(site, locateZoom(4));
+          showSitePopupFor(site);
+        });
+        sitesHost.appendChild(b);
+      }
+    }
   }
 
   overlay.appendChild(panel);
@@ -4712,13 +4731,13 @@ function buildFuelStrip(host, totals) {
 
   const label = document.createElement('div');
   label.className = 'rocket-fuel-strip-label';
-  label.textContent = 'Net Thrust track';
+  label.textContent = 'Fuel Strip Track';
   host.appendChild(label);
 
   // The whole strip is a button into the detailed node track.
   const bands = document.createElement('div');
   bands.className = 'fuel-strip-bands is-clickable';
-  bands.title = 'Click to open the detailed Net Thrust track';
+  bands.title = 'Click to open the detailed Fuel Strip Track';
   bands.addEventListener('click', () => openNetThrustDetailModal());
   for (const wc of WEIGHT_CLASSES) {
     const span = wc.massMax - wc.massMin + 1;
@@ -4813,7 +4832,7 @@ function openNetThrustDetailModal() {
   panel.className = 'ntd-panel';
   panel.innerHTML = `
     <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
-    <h2 class="ntd-title">Net Thrust track</h2>
+    <h2 class="ntd-title">Fuel Strip Track</h2>
     <p class="muted ntd-sub">Dry mass <strong>${esc(massLabel(dm))}</strong> · Wet mass <strong>${esc(massLabel(wm))}</strong>. Hover any node or chit for its value.</p>
     <div class="ntd-scroll"></div>
     <div class="ntd-legend">
@@ -4983,7 +5002,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         : '(no active thruster)'}
     </div>
     <div class="fuel-tank-netthrust">
-      <div class="ntt-head">🚀 Net Thrust track</div>
+      <div class="ntt-head">🚀 Fuel Strip Track</div>
       <div class="ntt-row">
         Wet mass <strong>${wmNow}</strong> → <strong>${wcNow.id}</strong>
         weight class (<strong>${ntMod}</strong> net thrust)

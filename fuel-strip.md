@@ -1,4 +1,7 @@
-# Fuel strip - Net Thrust track node model
+# Fuel Strip Track - node model
+
+**Source of truth: `js/game/net-thrust-detail.js`.** This doc
+mirrors that module's node model + connections; keep them in sync.
 
 Wet-mass track. Burning spends fuel (black, toward dry mass);
 refuelling loads fuel (red, toward wet mass).
@@ -120,7 +123,7 @@ refuelling loads fuel (red, toward wet mass).
 | n11 | 2 1/6 | -> | n17 | 3 1/4 |
 | n17 | 3 1/4 | -> | n21 | 4 1/3 |
 | n21 | 4 1/3 | -> | n24 | 5 1/3 |
-| n24 | 5 1/3 | -> | n23 | 5 |
+| n24 | 5 1/3 | -> | n26 | 6 |
 | n3 | 1 2/9 | -> | n11 | 2 1/6 |
 | n4 | 1 1/3 | -> | n12 | 2 1/3 |
 | n12 | 2 1/3 | -> | n17 | 3 1/4 |
