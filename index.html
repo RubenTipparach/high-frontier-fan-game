@@ -258,13 +258,14 @@
             aria-hidden="true"></div>
           <aside id="browse-sidepanel" class="browse-sidepanel" data-active="">
             <nav class="sidepanel-tabs" id="sidepanel-tabs">
-              <button data-pane="patents" title="Card library" aria-label="Card library">🃏</button>
-              <!-- Cart tab: visible only in Card Market mode.
-                   Toggled by js/game/browse.js#syncCartTabVisibility
-                   on mount + on onMarketChange. -->
+              <!-- Market cart tab: pinned to the TOP of the strip.
+                   Visible only in Card Market mode - toggled by
+                   js/game/browse.js#syncCartTabVisibility on mount
+                   + on onMarketChange. -->
               <button data-pane="cart" id="sidepanel-tab-cart"
                 title="Patent Market cart" aria-label="Patent Market cart"
                 hidden>🛒</button>
+              <button data-pane="patents" title="Card library" aria-label="Card library">🃏</button>
               <button data-pane="solo" title="Game mode (Sandbox / Campaign)" aria-label="Game mode">🎮</button>
               <button data-pane="milestones" title="Glory" aria-label="Glory">🏆</button>
               <button data-pane="log" title="Mission log" aria-label="Mission log">📋</button>

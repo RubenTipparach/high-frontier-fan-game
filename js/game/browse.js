@@ -786,9 +786,6 @@ function openUnifiedStackInspector(stackId) {
         <h3>${headline}</h3>
         <span class="stack-inspector-loc">${esc(locLabel)}</span>
       </div>
-      ${stackId === 'leo'
-        ? '<div class="stack-inspector-quickbar"><button type="button" class="modal-btn stack leo-open-market" title="Open the card market (research auction)">🛒 Market</button></div>'
-        : ''}
       <div class="stack-inspector-body">
         ${statsHtml}
         <h4>Cards (${cards.length})</h4>
@@ -915,16 +912,6 @@ function openUnifiedStackInspector(stackId) {
       fuelBtn.addEventListener('click', () => {
         close();
         openFuelTankModal();
-      });
-    }
-    // Market shortcut at the top of the LEO panel - opens the
-    // Cart pane (the research-auction UI) without hunting for the
-    // side-panel tab.
-    const marketBtn = dialog.querySelector('.leo-open-market');
-    if (marketBtn) {
-      marketBtn.addEventListener('click', () => {
-        close();
-        doResearchAuction();
       });
     }
   };
