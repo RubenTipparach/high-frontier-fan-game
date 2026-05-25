@@ -75,8 +75,15 @@ const MOBILE_DEFAULT_ZOOM = 5;
 // out than desktop - the canvas is denser per pixel + a closer
 // initial zoom hides too much of the system at a glance.
 function _isMobileViewport() {
-  try { return window.matchMedia('(max-width: 720px)').matches; }
-  catch { return false; }
+  try {
+    // Touch devices count as "mobile" regardless of reported width:
+    // tablets and landscape phones can exceed 720 CSS px, so a pure
+    // width query misses them. pointer:coarse / maxTouchPoints catch
+    // the touch hardware directly.
+    return window.matchMedia('(max-width: 720px)').matches
+      || window.matchMedia('(pointer: coarse)').matches
+      || (navigator.maxTouchPoints || 0) > 1;
+  } catch { return false; }
 }
 // Cap the celestial body halo at this many screen pixels so extreme
 // zoom doesn't turn Saturn into the entire canvas.
@@ -607,6 +614,19 @@ export class MapRenderer {
     this._frameTimer = 0;
     this._fps = 0;
     this._onFrame = null;           // optional callback fired each frame
+    // Ambient decorative rockets: cosmetic sprites zipping between
+    // random sites in the background. Count is driven externally
+    // (setAmbientRocketCount) - 10 + 5 per factory built. Purely
+    // visual; they ignore the delta-v graph and just lerp between
+    // random site coords.
+    this._ambientRockets = [];
+    this._ambientLastT = 0;
+    this._ambientSprites = [];
+    for (const name of ['rocket-red', 'rocket-blue', 'rocket-green', 'rocket-orange', 'rocket-silver']) {
+      const img = new Image();
+      img.src = `assets/rockets/${name}.png`;
+      this._ambientSprites.push(img);
+    }
     this._partitionSites();
     this._buildStars();
     this._buildAsteroidBelt();
@@ -1116,6 +1136,63 @@ export class MapRenderer {
   // sweep; cheap because the work per frame is dominated by the
   // (already batched) draw pass. Stops if the canvas is detached
   // from the DOM so we don't leak frames on view tear-down.
+  // Set how many ambient decorative rockets fly around the map.
+  // browse.js calls this with 10 + 10*factoryCount.
+  setAmbientRocketCount(n) {
+    const want = Math.max(0, n | 0);
+    const sites = this._ambientSites();
+    while (this._ambientRockets.length < want) this._ambientRockets.push(this._spawnAmbientRocket(sites));
+    if (this._ambientRockets.length > want) this._ambientRockets.length = want;
+    this._scheduleDraw();
+  }
+
+  _ambientSites() {
+    if (this._realSites && this._realSites.length) return this._realSites;
+    return (this.data && this.data.sites) || [];
+  }
+
+  _spawnAmbientRocket(sites) {
+    const pick = () => (sites.length ? sites[(Math.random() * sites.length) | 0] : { x: 0, y: 0 });
+    const a = pick(), b = pick();
+    return {
+      spr: (Math.random() * this._ambientSprites.length) | 0,
+      fromX: a.x || 0, fromY: a.y || 0,
+      toX: b.x || 0, toY: b.y || 0,
+      t: Math.random(),                      // random start phase
+      dur: 14000 + Math.random() * 18000,    // ms per leg (~50% slower)
+      size: 8 + Math.random() * 6,           // world units (~50% smaller)
+    };
+  }
+
+  // Advance + draw the ambient rockets (world space). dt in ms.
+  _drawAmbientRockets(ctx, dt) {
+    if (!this._ambientRockets.length) return;
+    const sites = this._ambientSites();
+    for (const r of this._ambientRockets) {
+      r.t += dt / r.dur;
+      if (r.t >= 1) {
+        // Arrived: start a new leg from here to a fresh random site.
+        const nb = sites.length ? sites[(Math.random() * sites.length) | 0] : { x: r.toX, y: r.toY };
+        r.fromX = r.toX; r.fromY = r.toY;
+        r.toX = nb.x || 0; r.toY = nb.y || 0;
+        r.t = 0; r.dur = 14000 + Math.random() * 18000;
+      }
+      const x = r.fromX + (r.toX - r.fromX) * r.t;
+      const y = r.fromY + (r.toY - r.fromY) * r.t;
+      const img = this._ambientSprites[r.spr];
+      if (!img || !img.complete || !img.naturalWidth) continue;
+      // Sprite nose points up (-y); rotate to face the travel vector.
+      const ang = Math.atan2(r.toY - r.fromY, r.toX - r.fromX) + Math.PI / 2;
+      ctx.save();
+      ctx.globalAlpha = 0.4;
+      ctx.translate(x, y);
+      ctx.rotate(ang);
+      const s = r.size;
+      ctx.drawImage(img, -s / 2, -s / 2, s, s);
+      ctx.restore();
+    }
+  }
+
   _startAnimation() {
     const tick = (t) => {
       if (!this.canvas || !this.canvas.isConnected) {
@@ -1161,6 +1238,14 @@ export class MapRenderer {
     // screen space later) sit on top.
     this._drawSiteHalosWorld(ctx);
     this._drawEdges(ctx);
+    // Ambient decorative rockets (cosmetic background traffic),
+    // translucent above the edges but below the gameplay route/trail.
+    {
+      const now = performance.now();
+      const dt = this._ambientLastT ? Math.min(80, now - this._ambientLastT) : 16;
+      this._ambientLastT = now;
+      this._drawAmbientRockets(ctx, dt);
+    }
     this._drawRocketTrail(ctx);
     this._drawRoute(ctx);
 
@@ -1880,6 +1965,16 @@ export class MapRenderer {
     }
   }
 
+  // Zoom-driven hex scale. Hexes reach full HEX_R at the full-size
+  // zoom and shrink proportionally below it (so they don't dominate
+  // the compressed view / overlap when zoomed out). Mobile pushes
+  // the full-size threshold up to zoom 5 so the hexes keep shrinking
+  // in step with zoom-out instead of "growing" relative to the map.
+  _hexScale() {
+    const full = _isMobileViewport() ? 5 : HEX_FULLSIZE_ZOOM;
+    return Math.min(1, this.zoom / full);
+  }
+
   // Hex markers + endpoint rings, drawn in SCREEN space so they
   // stay readable at any zoom level.
   _drawSiteHexesScreen(ctx) {
@@ -1888,7 +1983,7 @@ export class MapRenderer {
     // hexS: shrink the hex marker below HEX_FULLSIZE_ZOOM so it
     // doesn't dominate the compressed view at low zoom. At and
     // above the threshold the hex sits at its full HEX_R.
-    const hexS = Math.min(1, this.zoom / HEX_FULLSIZE_ZOOM);
+    const hexS = this._hexScale();
     for (const site of this._realSites) {
       const sx = this.pan.x + site.x * eff;
       const sy = this.pan.y + site.y * eff;
@@ -2211,7 +2306,7 @@ export class MapRenderer {
       if (sx < -60 || sx > hostW + 60 || sy < -60 || sy > hostH + 60) continue;
       // Base radius: hex marker shrinks at low zoom (see hexS),
       // so mirror that here for the ring to track the visible hex.
-      const hexS = Math.min(1, this.zoom / HEX_FULLSIZE_ZOOM);
+      const hexS = this._hexScale();
       const baseR = (vis.kind === 'hex' ? vis.r * hexS : vis.r);
       // Single bright yellow pulse ring, well outside the hex.
       // No shadow (silently dropped by some mobile GPU paths).
@@ -2421,7 +2516,7 @@ export class MapRenderer {
     // size text / droplets / flag glyphs ride with the hex they
     // sit inside instead of floating loose when the hex shrinks
     // below the HEX_FULLSIZE_ZOOM threshold.
-    const hexS = Math.min(1, this.zoom / HEX_FULLSIZE_ZOOM);
+    const hexS = this._hexScale();
 
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'center';

@@ -72,14 +72,29 @@
   flex-wrap: wrap;
   row-gap: 4px;
 }
-.map-turn-controls button {
+/* Unified toolbar control sizing. Every persistent control in the
+   bar (End turn, turn tracker, op / move / gear tags, aqua chip)
+   shares this footprint so the row reads as one design language;
+   colour + weight carry the semantic differences. */
+.map-turn-controls button,
+.map-turn-budget .turn-tag,
+.map-aqua-chip {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 30px;
+  padding: 5px 10px;
   font-size: 12px;
-  padding: 4px 8px;
-  background: var(--panel-2);
+  line-height: 1.2;
+  border-radius: 8px;
   border: 1px solid var(--border);
-  color: var(--ink);
-  border-radius: 4px;
   cursor: pointer;
+}
+.map-turn-controls button {
+  background: var(--panel-2);
+  color: var(--ink);
 }
 .map-turn-controls #turn-end {
   background: linear-gradient(180deg, #f97316, #c2410c);
@@ -87,16 +102,7 @@
   font-weight: 700;
   border-color: #9a3412;
 }
-/* Move button in its "undo" state - a move has been queued this
-   turn and can still be taken back. Yellow distinguishes it from
-   the neutral default so the player notices the toggle. */
-.map-turn-controls #turn-move-rocket[data-state="undo"] {
-  background: linear-gradient(180deg, #facc15, #ca8a04);
-  color: #1f1502;
-  font-weight: 700;
-  border-color: #854d0e;
-}
-.map-turn-controls button:hover:not(:disabled) {
+.map-turn-controls button:not(.turn-tag):hover:not(:disabled) {
   background: var(--accent);
   color: #062136;
   border-color: var(--accent-2);
@@ -108,16 +114,10 @@
    reads as "water you can spend" - aqua is just a water-shaped
    economy unit in sandbox mode. */
 .map-aqua-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
   font-weight: 600;
-  padding: 4px 10px;
   background: linear-gradient(180deg, #1e3a5f, #0c2540);
-  border: 1px solid #38bdf8;
+  border-color: #38bdf8;
   color: #bae6fd;
-  border-radius: 999px;
   cursor: help;
   font-variant-numeric: tabular-nums;
 }
@@ -127,22 +127,86 @@
 .map-turn-budget {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 .map-turn-budget .turn-tag {
-  font-size: 11px;
+  font: inherit;
+  font-size: 12px;
   font-weight: 700;
-  padding: 3px 6px;
-  border-radius: 6px;
   background: var(--bg-2, #14233a);
-  border: 1px solid var(--border, #2b3b55);
   color: var(--ink-dim, #9fb3cc);
-  cursor: help;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  /* It's a real <button> now so taps register reliably on touch;
+     manipulation kills the 300ms tap delay + double-tap zoom. */
+  -webkit-appearance: none;
+  appearance: none;
+  touch-action: manipulation;
 }
 #turn-tag-op   { border-color: #d4a72c; color: #f4d27a; }
 #turn-tag-move { border-color: #38bdf8; color: #bae6fd; }
+#turn-tag-op:hover, #turn-tag-move:hover { filter: brightness(1.25); }
+/* The ⚙ gear is welded to the move tag as a single segmented
+   control: shared height, butted edges, one rounded outer profile.
+   Settings (route + fuel options) read as "part of move". */
+.move-group { display: inline-flex; align-items: stretch; }
+.move-group #turn-tag-move {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.move-group .turn-tag-gear {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left-width: 0;
+  padding-left: 8px;
+  padding-right: 8px;
+  color: var(--ink-dim, #9fb3cc);
+  border-color: #38bdf8;
+  font-size: 13px;
+}
+.move-group .turn-tag-gear:hover { filter: brightness(1.25); }
+/* The gear isn't a budget point, so it never pulses or fades. */
+.move-group .turn-tag-gear { animation: none !important; opacity: 1 !important; }
+/* Pulse the budget tags while their action is still available
+   (op / move not yet spent) so the player's eye is drawn to them.
+   Spent tags (faded) don't pulse. */
+.map-turn-budget .turn-tag:not(.is-spent) { animation: turn-tag-pulse 1.7s ease-in-out infinite; }
+@keyframes turn-tag-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 currentColor; }
+  50%      { box-shadow: 0 0 7px 1px currentColor; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .map-turn-budget .turn-tag:not(.is-spent) { animation: none; }
+}
+
+/* Operations menu (tap the op tag). The player's decision aid. */
+.ops-menu-panel {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 20px;
+  max-width: 460px;
+  width: 100%;
+  max-height: 88vh;
+  overflow-y: auto;
+  color: var(--ink);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+}
+.ops-menu-title { margin: 0 0 4px; font-size: 18px; }
+.ops-menu-sub { margin: 0 0 12px; font-size: 12px; }
+.ops-menu-sub strong.muted { color: var(--ink-dim); }
+.ops-menu-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.ops-menu-op { width: 100%; text-align: center; font-size: 14px; padding: 10px; }
+.ops-menu-head {
+  margin: 12px 0 6px; font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.5px; color: var(--ink-dim);
+}
+.ops-menu-hints { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.6; color: var(--ink-dim); }
+.ops-menu-hints strong { color: var(--ink); }
+.ops-menu-site { text-align: left; display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+.ops-menu-site .ops-site-hint { font-size: 11px; opacity: 0.8; font-weight: 400; }
+.ops-menu-emptyhint { margin: 0; font-size: 11px; line-height: 1.5; }
 /* Spent budget point: fade the tag so the player sees at a glance
    the op / move is used up this turn. */
 .map-turn-budget .turn-tag.is-spent {
@@ -177,9 +241,11 @@
   flex: 1;
   justify-content: flex-end;
   min-width: 0;
-  /* Wrap on narrow viewports so the status text + utility
-     buttons (clear / settings / debug / fullscreen) drop to
-     a second row instead of clipping off the right edge. */
+  /* Wrap on narrow viewports so the status text + Clear-route
+     button drop to a second row instead of clipping off the
+     right edge. (Settings / debug / fullscreen moved off this
+     row: settings is welded to the move tag, debug + fullscreen
+     live in the hamburger menu.) */
   flex-wrap: wrap;
   row-gap: 6px;
 }
@@ -193,39 +259,63 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-#route-fullscreen,
-#route-debug {
-  font-size: 14px;
-  padding: 4px 9px;
-  line-height: 1;
-}
 
 /* Search box + reactive suggestions. The list is absolutely
    positioned so it floats over the canvas without reflowing the
    toolbar. */
+/* Search is a fixed-position modal on every viewport now, opened
+   from the 🔍 button in the sidepanel tab strip (no longer an inline
+   toolbar bar). Hidden until .is-open. */
 .map-search {
-  position: relative;
+  display: none;
+}
+.map-search.is-open {
   display: flex;
   align-items: center;
-  gap: 4px;
-  min-width: 180px;
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(460px, 92vw);
+  z-index: 30;
+  padding: 12px;
+  gap: 6px;
+  background: rgba(15, 16, 35, 0.97);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6);
 }
-.map-search input {
+.map-search.is-open input {
   flex: 1;
   min-width: 0;
-  padding: 4px 8px;
-  font-size: 12px;
-}
-.map-search button {
-  padding: 4px 8px;
+  padding: 8px 10px;
   font-size: 14px;
+}
+.map-search.is-open #map-search-go {
+  padding: 6px 10px;
+  font-size: 16px;
   line-height: 1;
+}
+.map-search.is-open .map-search-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font-size: 20px;
+  line-height: 1;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink);
+  flex: 0 0 auto;
 }
 .map-search ul {
   position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
+  top: calc(100% + 6px);
+  left: 12px;
+  right: 12px;
   margin: 0;
   padding: 4px 0;
   list-style: none;
@@ -261,17 +351,8 @@
   letter-spacing: 1px;
 }
 
-/* Search toggle button - opens the search modal on mobile.
-   Desktop hides the toggle (the inline search is always present
-   in the toolbar); mobile hides the inline search and shows the
-   toggle instead. The toggle styling mirrors the other small
-   toolbar icon buttons (🔧 / ⛶ in .map-route). */
-.map-search-toggle {
-  display: none;
-  font-size: 14px;
-  padding: 4px 9px;
-  line-height: 1;
-}
+/* Close (×) button is hidden until the search modal opens (the
+   .is-open rule above reveals it). */
 .map-search-close {
   display: none;
 }
@@ -283,11 +364,6 @@
   z-index: 29;
 }
 .map-search-backdrop.hidden { display: none; }
-@media (min-width: 721px) {
-  /* Desktop: the inline search stays in the toolbar; the modal
-     chrome (toggle button, close button, backdrop) is irrelevant. */
-  .map-search-backdrop { display: none !important; }
-}
 @media (max-width: 720px) {
   /* Pin the toolbar to the top of the map shell on phones so it
      stays visible while the map pans / zooms - prior behaviour
@@ -324,59 +400,13 @@
     min-width: 0;
     font-size: 11px;
   }
-  /* Mobile: hide the inline search in the toolbar by default.
-     Tapping the 🔍 toolbar button promotes it to a fixed-position
-     modal anchored just below the toolbar. */
-  .map-toolbar .map-search {
-    display: none;
-  }
-  .map-toolbar .map-search.is-open {
-    display: flex;
-    position: fixed;
-    top: 60px;
+  /* Mobile: the search modal spans the viewport width (the base
+     rule centres a fixed-width card; phones want edge-to-edge). */
+  .map-search.is-open {
     left: 16px;
     right: 16px;
-    z-index: 30;
-    padding: 12px 12px 14px;
-    background: rgba(15, 16, 35, 0.97);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6);
-    gap: 6px;
-  }
-  .map-toolbar .map-search.is-open input {
-    font-size: 14px;
-    padding: 8px 10px;
-  }
-  .map-toolbar .map-search.is-open #map-search-go {
-    font-size: 16px;
-    padding: 6px 10px;
-  }
-  .map-toolbar .map-search.is-open .map-search-close {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 30px;
-    height: 30px;
-    font-size: 20px;
-    line-height: 1;
-    padding: 0;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--ink);
-  }
-  .map-toolbar .map-search.is-open ul {
-    /* Anchor the suggestions list inside the modal - the modal
-       itself is the offset parent now. */
-    left: 12px;
-    right: 12px;
-    top: calc(100% + 6px);
-  }
-  .map-search-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    transform: none;
+    width: auto;
   }
 }
 
@@ -421,6 +451,47 @@
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+/* Dump-water stepper modal. Sits above the fuel-tank modal that
+   spawns it. The player dials an amount with +/-, types directly,
+   or jumps to the full tank with All. */
+.dump-water-overlay { z-index: 82; }
+.dump-water-panel .dump-stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 16px;
+}
+.dump-water-panel .dump-step {
+  min-width: 40px;
+  font-size: 18px;
+  line-height: 1;
+  padding: 8px 0;
+  flex: 0 0 auto;
+}
+.dump-water-panel .dump-amount {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: center;
+  font-size: 20px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  padding: 8px 6px;
+  background: var(--bg-2, #14233a);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink);
+  -moz-appearance: textfield;
+}
+.dump-water-panel .dump-amount::-webkit-outer-spin-button,
+.dump-water-panel .dump-amount::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.dump-water-panel .dump-all {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 /* Turn tracker modal - Sol Sunspot wheel */
@@ -725,6 +796,39 @@
   gap: 3px;
   border-radius: 4px;
 }
+.fuel-strip-bands.is-clickable { cursor: pointer; }
+.fuel-strip-bands.is-clickable:hover { outline: 1px solid rgba(125, 211, 252, 0.5); outline-offset: 2px; }
+.rocket-fuel-strip-legend .fs-detail-hint { color: #7dd3fc; margin-left: auto; }
+
+/* Detailed Net Thrust track modal (click the simple strip). */
+.ntd-panel {
+  position: relative;
+  background: var(--panel, #0e1525);
+  border: 1px solid var(--border, #2b3b55);
+  border-radius: 12px;
+  padding: 18px 20px;
+  max-width: min(96vw, 1200px);
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
+}
+.ntd-title { margin: 0; font-size: 18px; }
+.ntd-sub { margin: 0; font-size: 12px; }
+.ntd-scroll { overflow-x: auto; overflow-y: hidden; flex: 1 1 auto; -webkit-overflow-scrolling: touch; }
+.ntd-scroll .ntd-svg { display: block; }
+.ntd-legend {
+  display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+  font-size: 11px; color: var(--ink-dim, #9fb3cc);
+}
+.ntd-legend .ntd-line { display: inline-block; width: 18px; height: 0; vertical-align: middle; margin-right: 4px; }
+.ntd-legend .ntd-line.burn { border-top: 2px solid #c3ccd9; }
+.ntd-legend .ntd-line.refuel { border-top: 2px dashed #ec5a96; }
+.ntd-legend .ntd-chit { display: inline-block; width: 11px; height: 11px; border-radius: 50%; vertical-align: -1px; margin-right: 4px; border: 2px solid; }
+.ntd-legend .ntd-chit.dry { border-color: #94a3b8; }
+.ntd-legend .ntd-chit.wet { border-color: #f5c518; }
 .fuel-strip-band {
   display: flex;
   flex-direction: column;
@@ -2728,6 +2832,13 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .sidepanel-tabs button:hover { background: var(--panel-2); }
 .sidepanel-tabs button.active:hover { background: var(--accent); }
+/* Search is a utility, not a pane: push it to the far end of the
+   strip (bottom of the desktop column) so it reads as separate from
+   the pane tabs while still being last in order. */
+.sidepanel-tab-search { margin-top: auto; }
+@media (max-width: 720px) {
+  .sidepanel-tab-search { margin-top: 0; margin-left: auto; }
+}
 
 .sidepanel-content {
   flex: 1 1 auto;
@@ -4291,18 +4402,6 @@ body:has(#view-browse:not(.hidden)) #main {
   border-radius: 6px;
   padding: 5px 8px;
 }
-.stack-inspector-cards .card-face-tag {
-  display: inline-block;
-  background: #0c0a16;
-  color: #fde68a;
-  border: 1px solid #422006;
-  border-radius: 3px;
-  padding: 1px 4px;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.5px;
-  margin-left: 4px;
-}
 .stack-inspector-foot { margin: 0; }
 .stack-inspector-howto {
   margin: 0 0 0 18px;
@@ -5123,19 +5222,25 @@ body:has(#view-browse:not(.hidden)) #main {
   padding: 18px 20px;
   max-width: 900px;
   width: 100%;
+  /* Cap height + pin the confirm button so the 12-card grid can't
+     push it off-screen on short (mobile) viewports. */
+  max-height: 90vh;
+  overflow: hidden;
   color: var(--ink);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
   display: flex;
   flex-direction: column;
   gap: 14px;
 }
+.crew-wizard-head { flex: 0 0 auto; }
 .crew-wizard-head h3 { margin: 0 0 4px; font-size: 18px; letter-spacing: 0.5px; }
 .crew-wizard-head p { margin: 0; font-size: 13px; }
 .crew-faction-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
   gap: 10px;
-  max-height: 68vh;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   padding: 2px;
 }
@@ -5154,7 +5259,7 @@ body:has(#view-browse:not(.hidden)) #main {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(125, 211, 252, 0.45), 0 8px 20px rgba(0, 0, 0, 0.5);
 }
-.crew-wizard-modal .card-modal-actions { justify-content: flex-end; }
+.crew-wizard-modal .card-modal-actions { flex: 0 0 auto; justify-content: flex-end; }
 .crew-wizard-modal .modal-btn.primary {
   background: #14532d; color: #d1fae5; border-color: #166534;
 }

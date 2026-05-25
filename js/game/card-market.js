@@ -55,6 +55,7 @@ import {
 
 const STORAGE_MODE = 'hf-sandbox-card-market-mode';
 const STORAGE_STARTER_CASH = 'hf-sandbox-starter-cash';
+const STORAGE_FUEL_CONSUMPTION = 'hf-sandbox-fuel-consumption';
 
 export const MARKET_MODE = { LIBRARY: 'library', MARKET: 'market' };
 export const FREE_MARKET_AQUA = 3;
@@ -83,6 +84,24 @@ export function getStarterCash() { return _starterCash; }
 export function setStarterCash(on) {
   _starterCash = !!on;
   try { localStorage.setItem(STORAGE_STARTER_CASH, _starterCash ? '1' : '0'); }
+  catch { /* private mode */ }
+}
+
+// Fuel-consumption preference. Default ON (true): a burn / move
+// spends water from the tank (fuel-per-burn). When OFF, movement
+// is free (no water deducted) - a sandbox convenience for laying
+// out routes without juggling fuel.
+let _fuelConsumption = (() => {
+  try {
+    const raw = localStorage.getItem(STORAGE_FUEL_CONSUMPTION);
+    return raw == null ? true : raw === '1';
+  } catch { return true; }
+})();
+
+export function getFuelConsumption() { return _fuelConsumption; }
+export function setFuelConsumption(on) {
+  _fuelConsumption = !!on;
+  try { localStorage.setItem(STORAGE_FUEL_CONSUMPTION, _fuelConsumption ? '1' : '0'); }
   catch { /* private mode */ }
 }
 
