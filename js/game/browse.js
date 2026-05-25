@@ -3855,6 +3855,23 @@ function siteProspectThreshold(site) {
   return 4;
 }
 
+// The site's "size" - the integer printed in the board hexagon
+// (the leading digit of siteSize, e.g. "9H" -> 9). Used by the
+// land / liftoff thrust gate: a rocket needs net thrust strictly
+// greater than this to settle onto or climb off the site. Orbital
+// waypoints (LEO + lagranges) have no siteSize, so they return 0
+// and are always free to enter / leave.
+function siteSizeNumber(site) {
+  if (!site) return 0;
+  const ss = site.siteSize;
+  if (typeof ss === 'string') {
+    const m = ss.match(/^(\d+)/);
+    if (m) return Math.max(0, parseInt(m[1], 10));
+  }
+  if (typeof ss === 'number' && Number.isFinite(ss)) return Math.max(0, ss | 0);
+  return 0;
+}
+
 // Refueling at a hydrated site. Two distinct refining sources
 // per the HF4 rules:
 //
@@ -7138,6 +7155,34 @@ function planRocketRouteTo(destSite) {
   // won't be flyable until a thruster is assigned.
   const thrStats = getActiveThrusterStats();
   const thrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 4;
+  // Land / liftoff thrust gate. Net (band-adjusted) thrust must
+  // strictly exceed a real site's size to lift off from the origin
+  // or land on the destination. Orbital waypoints have size 0 so
+  // they never block. Net thrust = the active thruster's thrust
+  // after weight-class + modifier adjustments (getActiveThrusterStats
+  // already folds the band shift in).
+  const netThrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 0;
+  const originSize = siteSizeNumber(origin);
+  const destSize = siteSizeNumber(destSite);
+  if (originSize > 0 && netThrust <= originSize) {
+    setStatus(
+      `🚀 Can't lift off from <strong>${esc(origin.name)}</strong>: net thrust `
+      + `<strong>${netThrust}</strong> must exceed its size <strong>${originSize}</strong>. `
+      + `Shed mass or fit a stronger thruster.`
+    );
+    _renderer.setRoute(null);
+    _renderer.setRouteEndpoints(origin.id, destSite.id);
+    return false;
+  }
+  if (destSize > 0 && netThrust <= destSize) {
+    setStatus(
+      `🛬 Can't land on <strong>${esc(destSite.name)}</strong>: net thrust `
+      + `<strong>${netThrust}</strong> must exceed its size <strong>${destSize}</strong>.`
+    );
+    _renderer.setRoute(null);
+    _renderer.setRouteEndpoints(origin.id, destSite.id);
+    return false;
+  }
   const result = planRoute(_activeData, origin.id, destSite.id, {
     thrust,
     metricPriority: routeMetricPriority(),
