@@ -4998,12 +4998,20 @@ function buildFuelStrip(host, totals) {
   bands.className = 'fuel-strip-bands is-clickable';
   bands.title = 'Click to open the detailed Fuel Strip Track';
   bands.addEventListener('click', () => openNetThrustDetailModal());
+  // Cap how many mass cells a band lays out per row. Wide bands
+  // (TUG spans 16) wrap onto extra rows instead of stretching the
+  // strip past its box / off-screen on narrow viewports.
+  const MAX_STRIP_COLS = 8;
   for (const wc of WEIGHT_CLASSES) {
     const span = wc.massMax - wc.massMin + 1;
+    const cols = Math.min(span, MAX_STRIP_COLS);
     const band = document.createElement('div');
     band.className = 'fuel-strip-band';
     band.dataset.band = wc.id;
-    band.style.flexGrow = String(span);
+    // Width tracks the column count (not the full span) so a wrapped
+    // band keeps the same cell size as the others rather than
+    // hogging horizontal room for cells it stacks vertically.
+    band.style.flexGrow = String(cols);
     band.style.setProperty('--band-color', wc.color);
 
     const head = document.createElement('div');
@@ -5029,7 +5037,9 @@ function buildFuelStrip(host, totals) {
 
     const cells = document.createElement('div');
     cells.className = 'fuel-strip-cells';
-    cells.style.gridTemplateColumns = `repeat(${span}, 1fr)`;
+    // minmax(0, 1fr) lets the cells shrink to share the band's width
+    // so the strip never overflows its box on narrow viewports.
+    cells.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
     for (let i = wc.massMin; i <= wc.massMax; i++) {
       const cell = document.createElement('div');
       cell.className = 'fuel-strip-cell';

@@ -828,8 +828,9 @@
 .fuel-strip-bands {
   display: flex;
   align-items: stretch;
-  gap: 3px;
+  gap: 2px;
   border-radius: 4px;
+  max-width: 100%;
 }
 .fuel-strip-bands.is-clickable { cursor: pointer; }
 .fuel-strip-bands.is-clickable:hover { outline: 1px solid rgba(125, 211, 252, 0.5); outline-offset: 2px; }
