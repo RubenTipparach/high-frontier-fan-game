@@ -1576,15 +1576,38 @@ function openCardModal(card, kind, slotIdx) {
   const produceBtn = document.createElement('button');
   produceBtn.type = 'button';
   produceBtn.className = 'modal-btn produce';
-  produceBtn.textContent = `🏭 Exo produce (${card.spectralType || '?'})`;
-  produceBtn.title = `Use a factory matching spectral type ${card.spectralType || '?'} to produce the dark-side resource`;
+  // ET / Exo produce: flip this hand card Black-Side-up into an
+  // outpost at a colocated factory whose spectral type matches the
+  // card. Same op as the site-popup "ET Produce", just driven from
+  // the card. Gated on the rocket being parked at a matching,
+  // player-owned factory with outpost room; greyed-out + explained
+  // otherwise.
+  const cardSpectral = card.spectralType || 'C';
+  const exoSite = (kind !== 'crew') ? getRocketSite() : null;
+  const exoFactory = exoSite ? getFactory(exoSite.id) : null;
+  const exoOwned = exoFactory && exoFactory.ownerId === SANDBOX_OWNER_ID;
+  const exoSpectralOk = exoOwned && exoFactory.spectralType === cardSpectral;
+  const exoOutposts = exoSite
+    ? Object.values(getOutposts()).filter((o) => o.siteId === exoSite.id) : [];
+  const exoFreeSlots = getAvailableOutpostSlots();
+  const exoRoom = exoOutposts.length > 0 || exoFreeSlots.length > 0;
+  const canExo = !!(exoSpectralOk && exoRoom);
+  produceBtn.textContent = `🏭 Exo produce (${cardSpectral})`;
+  produceBtn.disabled = !canExo;
+  produceBtn.title = !exoSite
+    ? 'Park the rocket at a site with your factory to ET Produce.'
+    : !exoOwned
+      ? `No factory you own at ${exoSite.name}. Industrialize a site first.`
+      : !exoSpectralOk
+        ? `Factory at ${exoSite.name} is spectral ${exoFactory.spectralType}; this card is ${cardSpectral}.`
+        : !exoRoom
+          ? 'No colocated outpost and all 4 outpost slots are in use.'
+          : `Produce this card Black-Side-up into the outpost at ${exoSite.name}.`;
   produceBtn.addEventListener('click', () => {
-    setStatus(
-      `Exo-produce needs a factory matching spectral type `
-      + `<strong>${card.spectralType || '?'}</strong>. `
-      + `Factories aren't buildable yet (Stage 3).`
-    );
+    if (!canExo) return;
     close();
+    doEtProduce(exoSite, exoFactory,
+      [{ id: card.id, card, name: card.name }], exoOutposts, exoFreeSlots);
   });
 
   const boostBtn = document.createElement('button');
