@@ -7566,6 +7566,19 @@ function paintSolo() {
     // and its descriptive paragraph are gone; the panel just
     // surfaces the Reset + card-economy toggle.
     host.innerHTML = `
+      <!-- Game-mode selector. Sandbox is the only playable mode
+           today and is selected by default; Campaign is a
+           placeholder for the published campaign variant
+           (out of scope for now, see CLAUDE.md). These chips
+           are passive indicators - tapping Sandbox just
+           re-affirms the selection; they do NOT toggle the
+           multiplayer view (that lives on the topbar). -->
+      <div class="game-mode-row">
+        <button class="game-mode-btn is-active" id="game-mode-sandbox"
+          title="Sandbox / solo - always on. The single-player game.">🗺 Sandbox</button>
+        <button class="game-mode-btn" id="game-mode-campaign" disabled
+          title="Campaign variant - not implemented yet.">📖 Campaign (soon)</button>
+      </div>
       <p class="muted">Sandbox / solo mode is always on. Use the
       Reset button to clear the board, and the card economy
       toggle below to switch between Free Library and Card
@@ -7606,6 +7619,13 @@ function paintSolo() {
       </div>
     `;
     renderSavesList();
+    // Sandbox mode chip: already the active mode, so tapping it
+    // is a no-op confirmation - NOT a multiplayer toggle (that
+    // lives on the topbar). Campaign is disabled (out of scope).
+    const sandboxModeBtn = host.querySelector('#game-mode-sandbox');
+    if (sandboxModeBtn) sandboxModeBtn.onclick = () => {
+      setStatus('Sandbox is the active game mode.');
+    };
     host.querySelector('#save-new').onclick = () => {
       const name = prompt('Name this save:', defaultSaveName());
       if (name === null) return; // cancelled

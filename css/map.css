@@ -4909,3 +4909,42 @@ body:has(#view-browse:not(.hidden)) #main {
   border-color: #b91c1c;
   background: rgba(185, 28, 28, 0.18);
 }
+
+/* Game-mode selector chips (Sandbox / Campaign) at the top of
+   the 🎮 Game mode panel. Same pill idiom as the card-economy
+   toggle; the active mode gets the accent-cyan tint. Sandbox
+   is always active; Campaign is disabled (placeholder). */
+.game-mode-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.game-mode-btn {
+  flex: 1 1 0;
+  background: var(--bg-2);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+.game-mode-btn:hover:not(:disabled):not(.is-active) {
+  background: var(--panel-2);
+  border-color: var(--accent);
+}
+.game-mode-btn.is-active {
+  background: rgba(125, 211, 252, 0.18);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.5) inset;
+  cursor: default;
+}
+.game-mode-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
