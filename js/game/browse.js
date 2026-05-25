@@ -6974,12 +6974,13 @@ function showSitePopupFor(site) {
       });
     }
   }
-  // ET Production action (rulebook I8). Shown when the rocket
-  // is parked at a player-owned factory AND the player's hand
-  // has at least one card whose spectral matches the factory's
-  // spectral. Card is produced Black-Side-up into the colocated
-  // outpost (or a fresh outpost the player creates inline).
-  if (rocketSite && site.id === rocketSite.id) {
+  // ET Production action (rulebook I8). Shown whenever the player
+  // owns a factory at this site (the factory does the producing, so
+  // the rocket need not be parked here) AND the player's hand has at
+  // least one card whose spectral matches the factory's spectral.
+  // Card is produced Black-Side-up into the colocated outpost (or a
+  // fresh outpost the player creates inline).
+  {
     const factory = getFactory(site.id);
     if (factory && factory.ownerId === SANDBOX_OWNER_ID) {
       const handIds = getHandSlots();
