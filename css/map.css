@@ -5176,19 +5176,25 @@ body:has(#view-browse:not(.hidden)) #main {
   padding: 18px 20px;
   max-width: 900px;
   width: 100%;
+  /* Cap height + pin the confirm button so the 12-card grid can't
+     push it off-screen on short (mobile) viewports. */
+  max-height: 90vh;
+  overflow: hidden;
   color: var(--ink);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
   display: flex;
   flex-direction: column;
   gap: 14px;
 }
+.crew-wizard-head { flex: 0 0 auto; }
 .crew-wizard-head h3 { margin: 0 0 4px; font-size: 18px; letter-spacing: 0.5px; }
 .crew-wizard-head p { margin: 0; font-size: 13px; }
 .crew-faction-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
   gap: 10px;
-  max-height: 68vh;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   padding: 2px;
 }
@@ -5207,7 +5213,7 @@ body:has(#view-browse:not(.hidden)) #main {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(125, 211, 252, 0.45), 0 8px 20px rgba(0, 0, 0, 0.5);
 }
-.crew-wizard-modal .card-modal-actions { justify-content: flex-end; }
+.crew-wizard-modal .card-modal-actions { flex: 0 0 auto; justify-content: flex-end; }
 .crew-wizard-modal .modal-btn.primary {
   background: #14532d; color: #d1fae5; border-color: #166534;
 }
