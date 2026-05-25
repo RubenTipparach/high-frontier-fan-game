@@ -2056,14 +2056,28 @@ function ensureMapShell(host) {
   }
   refreshTurnBudget();
   onTurnChange(refreshTurnBudget);
+  // Robust cross-device tap: some mobile browsers don't deliver a
+  // reliable `click` on these toolbar controls, so also handle
+  // `touchend` (preventing the ghost click that would double-fire).
+  const onTap = (el, fn) => {
+    if (!el) return;
+    let touched = false;
+    el.addEventListener('touchend', (e) => {
+      touched = true;
+      e.preventDefault();
+      fn(e);
+      setTimeout(() => { touched = false; }, 500);
+    }, { passive: false });
+    el.addEventListener('click', (e) => { if (!touched) fn(e); });
+  };
   if (opTag) {
     opTag.style.cursor = 'pointer';
     opTag.title = 'Operations remaining - tap for the operations menu';
-    opTag.addEventListener('click', openOpsMenu);
+    onTap(opTag, () => openOpsMenu());
   }
   if (moveTag) {
     moveTag.style.cursor = 'pointer';
-    moveTag.addEventListener('click', () => {
+    onTap(moveTag, () => {
       if (getMovesRemaining() > 0) moveRocket();
       else undoRocketMove();
     });
@@ -2079,7 +2093,7 @@ function ensureMapShell(host) {
   }
   if (aquaChip) {
     aquaChip.style.cursor = 'pointer';
-    aquaChip.addEventListener('click', () => openLeoStackModal());
+    onTap(aquaChip, () => openLeoStackModal());
   }
   host.querySelector('#dbg-close').addEventListener('click', () => {
     host.querySelector('#map-debug').classList.add('hidden');
