@@ -1424,7 +1424,8 @@
 .prospect-roll-result { margin: 8px 0 12px; font-size: 13px; min-height: 18px; }
 .prospect-roll-result .ok  { color: #4ade80; }
 .prospect-roll-result .bad { color: #ef4444; }
-.prospect-roll-actions { display: flex; justify-content: center; }
+.prospect-roll-actions { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+.prospect-reroll-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 /* Die-tint overlay after the roll settles - the player sees the
    pass/fail at a glance, then taps Place to drop the disc. */
 .die-3d.die-success { filter: drop-shadow(0 0 8px #4ade80); }

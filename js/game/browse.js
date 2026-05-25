@@ -5691,32 +5691,37 @@ function doProspect(site, prosp) {
     );
     return;
   }
-  // Rulebook I6: Prospect is an Operation, consumes the per-turn
-  // op slot regardless of dice outcome. Closing the roll modal
-  // without placing the disc still costs the op (you committed to
-  // the roll).
-  if (!requireOp('Prospect')) return;
+  // Raygun is a free, unlimited remote scan (rulebook: the beam
+  // fires through line-of-sight, including lander burn spaces). It
+  // never consumes the per-turn operation, so the player can keep
+  // firing it at every reachable site and still spend their op on
+  // something else, and it never touches the move budget. Missile /
+  // buggy land on the target site and DO cost the op (rulebook I6).
+  const isRaygun = prosp.kind === 'raygun';
+  if (!isRaygun && !requireOp('Prospect')) return;
   const threshold = siteProspectThreshold(site);
   const roll = 1 + Math.floor(Math.random() * 6);
   const success = roll <= threshold;
   const cardName = prosp.card?.name || prosp.id;
   const kindGlyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prosp.kind] || '🔬';
-  openProspectRollModal({ site, threshold, roll, success, kindGlyph, cardName }, () => {
-    placeDisc(site.id, success ? 'success' : 'fail', {
-      roll, threshold, kind: prosp.kind, by: cardName,
+  // The buggy can re-roll the prospect die once (optional).
+  const canReroll = prosp.kind === 'buggy';
+  openProspectRollModal({ site, threshold, roll, success, kindGlyph, cardName, canReroll }, (finalRoll, finalSuccess) => {
+    placeDisc(site.id, finalSuccess ? 'success' : 'fail', {
+      roll: finalRoll, threshold, kind: prosp.kind, by: cardName,
     });
     setStatus(
       `${kindGlyph} Prospected <strong>${esc(site.name)}</strong> `
       + `(target ≤ ${threshold}) with <em>${esc(cardName)}</em>: `
-      + `rolled <strong class="big">${roll}</strong> - `
-      + `<strong>${success ? 'success - claim placed' : 'failed - site exhausted'}</strong>.`
+      + `rolled <strong class="big">${finalRoll}</strong> - `
+      + `<strong>${finalSuccess ? 'success - claim placed' : 'failed - site exhausted'}</strong>.`
     );
     logAction({
       type: 'prospect',
       icon: kindGlyph,
-      summary: `${success ? 'Claimed' : 'Exhausted'} ${site.name} (${prosp.kind}, rolled ${roll} vs ≤${threshold})`,
+      summary: `${finalSuccess ? 'Claimed' : 'Exhausted'} ${site.name} (${prosp.kind}, rolled ${finalRoll} vs ≤${threshold})`,
       undoable: false,
-      data: { siteId: site.id, kind: prosp.kind, roll, threshold, success },
+      data: { siteId: site.id, kind: prosp.kind, roll: finalRoll, threshold, success: finalSuccess },
     });
   });
 }
@@ -5727,14 +5732,19 @@ function doProspect(site, prosp) {
 // border tints green on success / red on fail so the player reads
 // the outcome at a glance. Player then clicks "Place disc" to
 // commit the result; onPlace fires once the disc lands.
-function openProspectRollModal({ site, threshold, roll, success, kindGlyph, cardName }, onPlace) {
+function openProspectRollModal({ site, threshold, roll, success, kindGlyph, cardName, canReroll = false }, onPlace) {
   document.querySelector('.prospect-roll-overlay')?.remove();
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay prospect-roll-overlay';
+  // Live result the Place button commits. The buggy reroll mutates
+  // these in place, so onPlace always receives the FINAL roll.
+  let curRoll = roll;
+  let curSuccess = success;
+  let rerollUsed = false;
   const close = (placed) => {
     overlay.remove();
     document.removeEventListener('keydown', onKey);
-    if (placed && onPlace) onPlace();
+    if (placed && onPlace) onPlace(curRoll, curSuccess);
   };
   // Roll animation isn't dismissible by clicking outside / Esc -
   // the player has to acknowledge the result with the Place button.
@@ -5761,6 +5771,7 @@ function openProspectRollModal({ site, threshold, roll, success, kindGlyph, card
     </div>
     <p class="prospect-roll-result muted">Rolling…</p>
     <div class="prospect-roll-actions">
+      ${canReroll ? `<button type="button" class="popup-btn prospect-reroll-btn" disabled>🎲 Reroll (buggy)</button>` : ''}
       <button type="button" class="popup-btn primary prospect-place-btn" disabled>
         Place disc
       </button>
@@ -5769,21 +5780,49 @@ function openProspectRollModal({ site, threshold, roll, success, kindGlyph, card
   const dieHost = panel.querySelector('.prospect-die-host');
   const resultLine = panel.querySelector('.prospect-roll-result');
   const placeBtn = panel.querySelector('.prospect-place-btn');
+  const rerollBtn = panel.querySelector('.prospect-reroll-btn');
   const die = buildDie(1);
   dieHost.appendChild(die);
 
   overlay.appendChild(panel);
   mountOverlay(overlay);
 
-  rollDie(die, roll).then(() => {
-    die.classList.add(success ? 'die-success' : 'die-fail');
-    resultLine.innerHTML = success
-      ? `Rolled <strong>${roll}</strong> ≤ ${threshold} - <strong class="ok">success</strong>. Claim disc ready.`
-      : `Rolled <strong>${roll}</strong> > ${threshold} - <strong class="bad">failed</strong>. Site exhausted.`;
+  // Settle the UI on a finished roll: tint the die, show the verdict,
+  // and re-enable the action buttons.
+  const showResult = (r, ok) => {
+    die.classList.remove('die-success', 'die-fail');
+    die.classList.add(ok ? 'die-success' : 'die-fail');
+    resultLine.innerHTML = ok
+      ? `Rolled <strong>${r}</strong> ≤ ${threshold} - <strong class="ok">success</strong>. Claim disc ready.`
+      : `Rolled <strong>${r}</strong> > ${threshold} - <strong class="bad">failed</strong>. Site exhausted.`;
     resultLine.classList.remove('muted');
     placeBtn.disabled = false;
-    placeBtn.textContent = success ? 'Place yellow claim disc' : 'Place red disc';
-  });
+    placeBtn.textContent = ok ? 'Place yellow claim disc' : 'Place red disc';
+    if (rerollBtn && !rerollUsed) rerollBtn.disabled = false;
+  };
+  // Animate a roll to `r`, locking the buttons until it settles.
+  const animateRoll = (r, ok) => {
+    placeBtn.disabled = true;
+    if (rerollBtn) rerollBtn.disabled = true;
+    die.classList.remove('die-success', 'die-fail');
+    resultLine.textContent = 'Rolling…';
+    resultLine.classList.add('muted');
+    rollDie(die, r).then(() => showResult(r, ok));
+  };
+
+  animateRoll(curRoll, curSuccess);
+
+  if (rerollBtn) {
+    rerollBtn.addEventListener('click', () => {
+      if (rerollUsed) return;
+      rerollUsed = true;
+      curRoll = 1 + Math.floor(Math.random() * 6);
+      curSuccess = curRoll <= threshold;
+      animateRoll(curRoll, curSuccess);
+      // One reroll only - retire the button once spent.
+      rerollBtn.style.display = 'none';
+    });
+  }
   placeBtn.addEventListener('click', () => close(true));
 }
 
