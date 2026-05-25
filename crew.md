@@ -143,3 +143,14 @@ chosen crew face (`synthCrew`), so:
 The rocket-stack modal shows the matching "Set as active
 thruster" / "Set as prospector" buttons on crew, keyed off the
 slot's picked face.
+
+### Crew + factories (edge case)
+
+- Crew can act as the **prospector** (the robonaut role) for a
+  PROSPECT op, but can **NOT** build a factory: Industrialize (I7)
+  requires a real refinery + robonaut patent. `findIndustrialize-
+  Options` skips crew slots.
+- Crew **can** create a **colony** at an already-built factory.
+  Colonize (G3) is a **free action** (no op cost); it consumes a
+  colocated crew, which re-spawns in the LEO Stack, and drops a
+  colony dome on the factory.

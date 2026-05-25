@@ -181,6 +181,12 @@ export function findIndustrializeOptions(stack) {
   const refineries = [];
   const robonauts  = [];
   for (let i = 0; i < stack.length; i++) {
+    // Crew can PROSPECT (act as a robonaut) but can NOT build a
+    // factory: industrialize needs a real refinery + robonaut
+    // patent. Crew isn't in PATENTS_BY_ID, so it's already
+    // excluded; the explicit skip documents the rule. Crew's
+    // role at a factory is Colonize (a separate free action).
+    if (stack[i].kind === 'crew') continue;
     const c = PATENTS_BY_ID[stack[i].id];
     if (!c) continue;
     if (c.type === 'refinery') refineries.push({ id: stack[i].id, card: c, index: i });

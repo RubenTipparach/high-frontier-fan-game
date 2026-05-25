@@ -1754,6 +1754,10 @@ function ensureMapShell(host) {
           aria-label="End turn">⏭ End turn</button>
         <button id="turn-tracker" title="View turn tracker"
           aria-label="View turn tracker">🕐</button>
+        <span id="turn-budget" class="map-turn-budget" aria-live="polite">
+          <span class="turn-tag" id="turn-tag-op" title="Operations remaining this turn">[op:1]</span>
+          <span class="turn-tag" id="turn-tag-move" title="Moves remaining this turn">[move:1]</span>
+        </span>
         <span id="aqua-chip" class="map-aqua-chip"
           title="Aqua balance - spend 4 aqua per hazard to bypass rolls, or convert 1:1 to water at LEO">
           💧 <strong id="aqua-chip-balance">${getAqua()}</strong>
@@ -1911,6 +1915,17 @@ function ensureMapShell(host) {
   }
   refreshMoveButton();
   onTurnChange(refreshMoveButton);
+  // Per-turn budget tags [op:N] [move:N] in the toolbar. Live-
+  // update on any consume / refund / turn rollover (all route
+  // through turn-clock's notify -> onTurnChange).
+  const opTag = host.querySelector('#turn-tag-op');
+  const moveTag = host.querySelector('#turn-tag-move');
+  function refreshTurnBudget() {
+    if (opTag) opTag.textContent = `[op:${getOpsRemaining()}]`;
+    if (moveTag) moveTag.textContent = `[move:${getMovesRemaining()}]`;
+  }
+  refreshTurnBudget();
+  onTurnChange(refreshTurnBudget);
   moveBtn.addEventListener('click', () => {
     if (moveBtn.dataset.state === 'undo') undoRocketMove();
     else                                  moveRocket();

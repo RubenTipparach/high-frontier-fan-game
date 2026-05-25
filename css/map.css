@@ -122,6 +122,27 @@
   font-variant-numeric: tabular-nums;
 }
 .map-aqua-chip strong { color: #f0f9ff; font-weight: 800; }
+/* Per-turn budget tags: [op:N] [move:N]. Monospace-ish brackets
+   so they read as compact status chips next to the turn clock. */
+.map-turn-budget {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.map-turn-budget .turn-tag {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: var(--bg-2, #14233a);
+  border: 1px solid var(--border, #2b3b55);
+  color: var(--ink-dim, #9fb3cc);
+  cursor: help;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+#turn-tag-op   { border-color: #d4a72c; color: #f4d27a; }
+#turn-tag-move { border-color: #38bdf8; color: #bae6fd; }
 .map-mode-toggle {
   display: inline-flex;
   background: var(--bg-2);
@@ -4186,6 +4207,11 @@ body:has(#view-browse:not(.hidden)) #main {
   padding: 18px 20px;
   max-width: 480px;
   width: 100%;
+  /* Cap height + scroll the body, mirroring .rocket-stack-panel,
+     so a big boosted stack can't push the head / Close button off
+     screen. */
+  max-height: 90vh;
+  overflow: hidden;
   color: var(--ink);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
   display: flex;
@@ -4193,6 +4219,7 @@ body:has(#view-browse:not(.hidden)) #main {
   gap: 14px;
 }
 .stack-inspector-head {
+  flex: 0 0 auto;
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -4204,6 +4231,10 @@ body:has(#view-browse:not(.hidden)) #main {
   color: var(--muted, #94a3b8);
 }
 .stack-inspector-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -4263,6 +4294,7 @@ body:has(#view-browse:not(.hidden)) #main {
   font-size: 13px;
 }
 .stack-inspector-modal .card-modal-actions {
+  flex: 0 0 auto;
   margin-top: 4px;
   justify-content: flex-end;
 }
