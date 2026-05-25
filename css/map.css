@@ -122,6 +122,33 @@
   font-variant-numeric: tabular-nums;
 }
 .map-aqua-chip strong { color: #f0f9ff; font-weight: 800; }
+/* Per-turn budget tags: [op:N] [move:N]. Monospace-ish brackets
+   so they read as compact status chips next to the turn clock. */
+.map-turn-budget {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.map-turn-budget .turn-tag {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: var(--bg-2, #14233a);
+  border: 1px solid var(--border, #2b3b55);
+  color: var(--ink-dim, #9fb3cc);
+  cursor: help;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+#turn-tag-op   { border-color: #d4a72c; color: #f4d27a; }
+#turn-tag-move { border-color: #38bdf8; color: #bae6fd; }
+/* Spent budget point: fade the tag so the player sees at a glance
+   the op / move is used up this turn. */
+.map-turn-budget .turn-tag.is-spent {
+  opacity: 0.32;
+  border-style: dashed;
+}
 .map-mode-toggle {
   display: inline-flex;
   background: var(--bg-2);
@@ -682,6 +709,75 @@
 }
 .rocket-fuel-strip-legend .is-dry-chit { background: #94a3b8; }
 .rocket-fuel-strip-legend .is-wet-chit { background: #facc15; }
+.rocket-fuel-strip-legend .fs-line-key { display: inline-flex; align-items: center; gap: 4px; }
+.rocket-fuel-strip-legend .fs-line {
+  display: inline-block; width: 16px; height: 0; vertical-align: middle;
+}
+.rocket-fuel-strip-legend .fs-line.black { border-top: 2px solid #0c0a16; }
+.rocket-fuel-strip-legend .fs-line.red { border-top: 2px dashed #e0457b; }
+
+/* Banded Net Thrust track: each weight class is a flex column,
+   width proportional to its mass span, with the fraction ladder
+   stacked above the mass-position cells (matching the board). */
+.fuel-strip-bands {
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  border-radius: 4px;
+}
+.fuel-strip-band {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: 4px;
+  padding: 3px;
+  background: color-mix(in srgb, var(--band-color) 22%, transparent);
+  border: 1px solid color-mix(in srgb, var(--band-color) 60%, transparent);
+}
+.fuel-strip-band-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+.fuel-strip-band-head .fs-band-mod {
+  font-size: 9px;
+  color: var(--ink-dim);
+}
+.fuel-strip-fracs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-bottom: 3px;
+  min-height: 12px;
+}
+.fuel-strip-fracs .fs-frac {
+  font-size: 8px;
+  line-height: 1;
+  padding: 2px 3px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #0c0a16;
+  font-weight: 600;
+}
+.fuel-strip-cells {
+  display: grid;
+  gap: 1px;
+  margin-top: auto;
+}
+.fuel-strip-cells .fuel-strip-cell {
+  background: var(--band-color);
+  border-radius: 2px;
+}
+.fuel-strip-cell.is-max-wet { outline: 2px solid #e0457b; outline-offset: -1px; }
+.fuel-strip-cell.is-max-dry { box-shadow: inset 0 0 0 2px #94a3b8; }
+.fuel-strip-cell.is-min-dry { box-shadow: inset 0 0 0 2px rgba(12,10,22,0.45); }
 
 .fuel-tank-actions {
   display: flex;
@@ -702,6 +798,28 @@
 .fuel-tank-foot {
   margin: 8px 0 0;
   font-size: 11px;
+}
+.fuel-tank-netthrust {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: 8px;
+  font-size: 11px;
+}
+.fuel-tank-netthrust .ntt-head {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--ink-dim);
+  margin-bottom: 4px;
+}
+.fuel-tank-netthrust .ntt-row { margin: 2px 0; }
+.fuel-tank-netthrust .ntt-note {
+  font-size: 10px;
+  margin: 6px 0 0;
+  line-height: 1.45;
 }
 .rocket-wetmass-cell { cursor: pointer; }
 .rocket-wetmass-cell:hover {
@@ -2347,6 +2465,16 @@ body:has(#view-browse:not(.hidden)) #main {
 .modal-btn.cancel   { background: transparent; color: var(--ink-dim); }
 .modal-btn.discard:hover { background: #b91c1c; }
 .modal-btn.produce:hover { background: #166534; }
+.modal-btn.decommission { background: #5b2741; color: #ffe1ef; border-color: #9d3a6a; }
+.modal-btn.decommission:hover:not(:disabled) { background: #7a3457; }
+.modal-btn.decommission:disabled { opacity: 0.4; cursor: not-allowed; }
+/* Decommission sits as its own row right under the transfer
+   controls in every stack inspector. */
+.stack-decommission-row {
+  display: flex;
+  margin-top: 8px;
+}
+.stack-decommission-row .modal-btn { flex: 1 1 auto; }
 
 /* Rocket stack pane. Cards stack vertically with a small "Back
    to hand" affordance under each one. Fly status banner uses
@@ -2765,13 +2893,13 @@ body:has(#view-browse:not(.hidden)) #main {
   padding: 10px;
   font-size: 12px;
 }
-.patent-card.type-thruster  { border-left-color: #f87171; }
-.patent-card.type-reactor   { border-left-color: #fbbf24; }
-.patent-card.type-radiator  { border-left-color: #7dd3fc; }
-.patent-card.type-refinery  { border-left-color: #4ade80; }
-.patent-card.type-robonaut  { border-left-color: #c084fc; }
+.patent-card.type-thruster  { border-left-color: var(--card-thruster); }
+.patent-card.type-reactor   { border-left-color: var(--card-reactor); }
+.patent-card.type-radiator  { border-left-color: var(--card-radiator); }
+.patent-card.type-refinery  { border-left-color: var(--card-refinery); }
+.patent-card.type-robonaut  { border-left-color: var(--card-robonaut); }
 .patent-card.type-lab       { border-left-color: #38bdf8; }
-.patent-card.type-generator { border-left-color: #a78bfa; }
+.patent-card.type-generator { border-left-color: var(--card-generator); }
 
 .patent-card .pc-header {
   display: flex; align-items: baseline; justify-content: space-between;
@@ -2804,7 +2932,7 @@ body:has(#view-browse:not(.hidden)) #main {
   font-style: italic;
 }
 
-.ms-list, .ev-list {
+.ms-list {
   list-style: none;
   padding: 0;
   margin: 0;
@@ -2812,19 +2940,19 @@ body:has(#view-browse:not(.hidden)) #main {
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 10px;
 }
-.ms-list li, .ev-list li {
+.ms-list li {
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 10px 12px;
 }
-.ms-head, .ev-head {
+.ms-head {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
   margin-bottom: 4px;
 }
-.ms-head strong, .ev-head strong { color: var(--ink); }
+.ms-head strong { color: var(--ink); }
 .ms-vp {
   background: var(--accent);
   color: #062136;
@@ -2833,10 +2961,7 @@ body:has(#view-browse:not(.hidden)) #main {
   padding: 2px 8px;
   border-radius: 4px;
 }
-.ev-kind {
-  font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--ink-mute);
-}
-.ms-list p, .ev-list p {
+.ms-list p {
   margin: 0;
   font-size: 12px;
   line-height: 1.4;
@@ -3553,3 +3678,1485 @@ body:has(#view-browse:not(.hidden)) #main {
   }
   .hand-slot.is-selected .hand-view-btn { display: block; }
 }
+
+/* ============================================================
+   Industrialize modal (rulebook I7).
+
+   Confirm-modal that surfaces the refinery + robonaut + support
+   chain about to be decommissioned, plus any orphan warnings.
+   Lives on top of the standard .card-modal-overlay backdrop;
+   the .industrialize-modal box is its own panel (not a
+   card-modal-panel) because it's text-heavy, not card-heavy.
+   ============================================================ */
+.industrialize-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  max-width: 480px;
+  width: 100%;
+  color: var(--ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.industrialize-head h3 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0.5px;
+}
+.industrialize-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.industrialize-spectral {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.industrialize-spectral-badge {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  line-height: 22px;
+  text-align: center;
+  border-radius: 4px;
+  font-weight: 800;
+  margin-left: 4px;
+  background: #1f2937;
+  color: #f9fafb;
+}
+/* Spectral tint badges - colour key mirrors the published
+   spectral palette (C carbon, S stony, M metallic, V Vesta,
+   D dark, H hydrous). */
+.industrialize-spectral-badge.spectral-C { background: #475569; color: #f8fafc; }
+.industrialize-spectral-badge.spectral-S { background: #ca8a04; color: #fefce8; }
+.industrialize-spectral-badge.spectral-M { background: #9ca3af; color: #111827; }
+.industrialize-spectral-badge.spectral-V { background: #b91c1c; color: #fef2f2; }
+.industrialize-spectral-badge.spectral-D { background: #1e3a8a; color: #dbeafe; }
+.industrialize-spectral-badge.spectral-H { background: #0ea5e9; color: #f0f9ff; }
+
+.industrialize-section-label {
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--muted, #94a3b8);
+}
+.industrialize-pairs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.industrialize-pair {
+  text-align: left;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 13px;
+}
+.industrialize-pair:hover { background: var(--panel-2); }
+.industrialize-pair.is-selected {
+  background: rgba(125, 211, 252, 0.12);
+  border-color: var(--accent);
+}
+.industrialize-pair .pair-radio {
+  display: inline-block;
+  width: 16px;
+  color: var(--accent);
+}
+
+.industrialize-decom {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.industrialize-decom li {
+  background: rgba(127, 29, 29, 0.18);
+  border-left: 3px solid #b91c1c;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.industrialize-decom .decom-icon {
+  display: inline-block;
+  width: 16px;
+  color: #fca5a5;
+  font-weight: 800;
+}
+.industrialize-decom .decom-icon.decom-kept {
+  color: #86efac;
+}
+.industrialize-decom li:has(.decom-kept) {
+  background: rgba(20, 83, 45, 0.18);
+  border-left-color: #166534;
+}
+.industrialize-decom .decom-type {
+  color: var(--muted, #94a3b8);
+  font-size: 11px;
+}
+
+.industrialize-warn {
+  background: rgba(202, 138, 4, 0.12);
+  border: 1px solid rgba(202, 138, 4, 0.4);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.industrialize-orphans {
+  list-style: disc;
+  margin: 0 0 0 18px;
+  padding: 0;
+  font-size: 13px;
+}
+.industrialize-orphans li { margin-bottom: 2px; }
+
+.industrialize-modal .card-modal-actions {
+  margin-top: 4px;
+  justify-content: flex-end;
+}
+.industrialize-modal .modal-btn.primary {
+  background: #14532d;
+  color: #d1fae5;
+  border-color: #166534;
+}
+.industrialize-modal .modal-btn.primary:hover {
+  background: #166534;
+}
+
+/* ============================================================
+   Colonize picker modal (rulebook G3, free action).
+
+   Small picker shown only when 2+ crews are colocated. The
+   single-crew case auto-commits and never opens this.
+   ============================================================ */
+.colonize-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  max-width: 460px;
+  width: 100%;
+  color: var(--ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.colonize-head h3 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0.5px;
+}
+.colonize-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.colonize-note {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--muted, #94a3b8);
+}
+.colonize-crews {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.colonize-crew {
+  text-align: left;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.colonize-crew:hover { background: var(--panel-2); }
+.colonize-crew.is-selected {
+  background: rgba(125, 211, 252, 0.12);
+  border-color: var(--accent);
+}
+.colonize-crew .crew-radio {
+  display: inline-block;
+  width: 16px;
+  color: var(--accent);
+  flex: 0 0 16px;
+}
+.colonize-crew .crew-sep {
+  color: var(--muted, #94a3b8);
+  margin: 0 2px;
+}
+.colonize-modal .card-modal-actions {
+  margin-top: 4px;
+  justify-content: flex-end;
+}
+.colonize-modal .modal-btn.primary {
+  background: #14532d;
+  color: #d1fae5;
+  border-color: #166534;
+}
+.colonize-modal .modal-btn.primary:hover { background: #166534; }
+
+/* ============================================================
+   Outpost slot picker (Rocket -> Outpost convert).
+
+   Tiny modal with four big A/B/C/D letter buttons. Taken slots
+   render as disabled with a strikethrough so the player sees
+   the constraint at a glance. Used by doConvertToOutpost and
+   (in the future) by ET Production when creating a fresh
+   outpost at a factory.
+   ============================================================ */
+.outpost-slot-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  max-width: 420px;
+  width: 100%;
+  color: var(--ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.outpost-slot-head h3 {
+  margin: 0;
+  font-size: 17px;
+  letter-spacing: 0.5px;
+}
+.outpost-slot-body {
+  font-size: 13px;
+  color: var(--muted, #94a3b8);
+}
+.outpost-slot-body p { margin: 0; }
+.outpost-slot-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.outpost-slot-btn {
+  width: 64px;
+  height: 64px;
+  font-size: 32px;
+  font-weight: 800;
+  background: var(--bg-2);
+  color: var(--ink);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  letter-spacing: 0;
+}
+.outpost-slot-btn:hover:not(:disabled) {
+  background: rgba(125, 211, 252, 0.18);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.outpost-slot-btn.is-taken,
+.outpost-slot-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  text-decoration: line-through;
+}
+.outpost-slot-modal .card-modal-actions {
+  justify-content: flex-end;
+}
+
+/* ============================================================
+   ET Production modal (rulebook I8).
+
+   Combined card-picker + slot-picker. When the site already
+   has an outpost the slot picker collapses to a "target" line.
+   Reuses .industrialize-spectral-badge for the spectral chip
+   so the colour key stays consistent across the Stage-3 ops.
+   ============================================================ */
+.et-produce-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  max-width: 480px;
+  width: 100%;
+  color: var(--ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.et-produce-head h3 { margin: 0; font-size: 18px; letter-spacing: 0.5px; }
+.et-produce-body { display: flex; flex-direction: column; gap: 12px; font-size: 13px; line-height: 1.45; }
+.et-spectral {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.et-section-label {
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--muted, #94a3b8);
+}
+.et-cards { display: flex; flex-direction: column; gap: 4px; max-height: 280px; overflow-y: auto; }
+.et-card {
+  text-align: left;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.et-card:hover { background: var(--panel-2); }
+.et-card.is-selected {
+  background: rgba(125, 211, 252, 0.12);
+  border-color: var(--accent);
+}
+.et-card .et-radio { display: inline-block; width: 16px; color: var(--accent); flex: 0 0 16px; }
+.et-card .et-type { color: var(--muted, #94a3b8); font-size: 11px; }
+
+.et-slot-block { display: flex; flex-direction: column; gap: 6px; }
+.et-slot-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+.et-slot-btn {
+  width: 44px;
+  height: 44px;
+  font-size: 22px;
+  font-weight: 800;
+  background: var(--bg-2);
+  color: var(--ink);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.et-slot-btn:hover { background: rgba(125, 211, 252, 0.18); border-color: var(--accent); color: var(--accent); }
+.et-slot-btn.is-selected {
+  background: rgba(125, 211, 252, 0.18);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.et-produce-modal .card-modal-actions { margin-top: 4px; justify-content: flex-end; }
+.et-produce-modal .modal-btn.primary { background: #14532d; color: #d1fae5; border-color: #166534; }
+.et-produce-modal .modal-btn.primary:hover { background: #166534; }
+.et-produce-modal .modal-btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ============================================================
+   Endgame summary block (Stage-3 scoring, rulebook M2).
+
+   Sibling of .glory-summary. Same .glory-vp-row idiom for the
+   grand-total chip, but tinted cyan so it visually reads as
+   "potential / projection" rather than "earned career VP"
+   (which is the yellow Glory VP).
+   ============================================================ */
+.endgame-summary { margin-top: 18px; }
+.endgame-summary .glory-vp-row {
+  background: rgba(125, 211, 252, 0.08);
+  border-color: rgba(125, 211, 252, 0.35);
+}
+.endgame-summary .endgame-grand-vp {
+  font-size: 22px;
+  color: #7dd3fc;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+.glory-spectral-list .industrialize-spectral-badge {
+  margin-right: 4px;
+  width: 18px;
+  height: 18px;
+  line-height: 18px;
+  font-size: 12px;
+}
+
+/* ============================================================
+   Stage-3 hand-bar stack switcher.
+
+   Compact pill row inside the hand header. LEO + Rocket are
+   always present; outpost chips appear only when the slot is
+   occupied. The focused chip gets the accent-cyan tint that
+   matches the focused-stack ring on the map - one chip / one
+   ring share the same colour vocabulary.
+   ============================================================ */
+.hand-stack-switcher {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  /* Own row below the hand header. Wraps to a second row only
+     on truly tiny viewports; otherwise overflows horizontally
+     with a soft scroll - cleaner than a chip moving off-screen
+     into the wrap and getting lost. */
+  flex-wrap: wrap;
+  padding: 6px 0 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
+  /* Touch-action prevents iOS from treating taps as scroll
+     gestures inside the chip group - fixes the "buttons don't
+     respond on mobile" issue. */
+  touch-action: manipulation;
+}
+/* Each stack gets a group = label chip + pin button, visually
+   joined into one pill so the player reads "stack X with its
+   own find-pin". Pin has its own click target so tapping the
+   pin doesn't open the modal. */
+.hand-stack-group {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-2);
+  overflow: hidden;
+  line-height: 1;
+  /* Solid floor for mobile touch targets. ~34px tall is enough
+     for fingers without crowding the hand bar. */
+  min-height: 34px;
+}
+.hand-stack-group:hover {
+  border-color: var(--accent);
+}
+.hand-stack-group.is-focused {
+  background: rgba(125, 211, 252, 0.18);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.5);
+}
+.hand-stack-group.is-empty {
+  opacity: 0.5;
+}
+.hand-stack-group.is-empty:hover { opacity: 0.75; }
+
+.hand-stack-chip,
+.hand-stack-pin {
+  background: transparent;
+  color: var(--ink);
+  border: 0;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 32px;
+  /* Prevent iOS from de-bouncing the click into a hover-then-
+     ignore on the second tap. */
+  touch-action: manipulation;
+}
+.hand-stack-chip:hover,
+.hand-stack-pin:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+.hand-stack-chip:active,
+.hand-stack-pin:active:not(:disabled) {
+  background: rgba(125, 211, 252, 0.18);
+}
+.hand-stack-group.is-focused .hand-stack-chip,
+.hand-stack-group.is-focused .hand-stack-pin {
+  color: var(--accent);
+}
+.hand-stack-chip .chip-glyph { font-size: 16px; }
+.hand-stack-chip .chip-sub   { font-size: 12px; font-weight: 700; }
+.hand-stack-pin {
+  border-left: 1px solid var(--border);
+  font-size: 14px;
+  padding: 4px 10px;
+  min-width: 36px;
+}
+.hand-stack-pin:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* On narrow viewports just let the row scroll horizontally;
+   wrapping puts the last chip on a second row that the hand-
+   bar's fixed height can crop. The chips already have flex-
+   wrap as a fallback if the row grows tall enough. */
+@media (max-width: 680px) {
+  .hand-stack-switcher {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+  .hand-stack-group { flex-shrink: 0; }
+}
+
+/* ============================================================
+   Stack inspector modal (LEO / Outpost / Empty-slot helper).
+   The Rocket case keeps using the existing rocket stack modal;
+   these three are the new lightweight inspectors for the
+   non-rocket stacks.
+   ============================================================ */
+.stack-inspector-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  max-width: 480px;
+  width: 100%;
+  /* Cap height + scroll the body, mirroring .rocket-stack-panel,
+     so a big boosted stack can't push the head / Close button off
+     screen. */
+  max-height: 90vh;
+  overflow: hidden;
+  color: var(--ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.stack-inspector-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.stack-inspector-head h3 { margin: 0; font-size: 18px; letter-spacing: 0.5px; }
+.stack-inspector-loc {
+  font-size: 12px;
+  color: var(--muted, #94a3b8);
+}
+.stack-inspector-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.stack-inspector-stat-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.stack-inspector-stat {
+  flex: 1 1 0;
+  min-width: 90px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.stack-inspector-stat .stat-aqua { color: #facc15; font-size: 16px; }
+.stack-inspector-stat .stat-water { color: #7dd3fc; font-size: 16px; }
+.stack-inspector-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.stack-inspector-cards li {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+.stack-inspector-cards .card-face-tag {
+  display: inline-block;
+  background: #0c0a16;
+  color: #fde68a;
+  border: 1px solid #422006;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  margin-left: 4px;
+}
+.stack-inspector-foot { margin: 0; }
+.stack-inspector-howto {
+  margin: 0 0 0 18px;
+  padding: 0;
+  font-size: 13px;
+}
+.stack-inspector-modal .card-modal-actions {
+  flex: 0 0 auto;
+  margin-top: 0;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+/* Pinned footer: transfer controls + the decommission / fuel /
+   close action row, always visible below the scrollable body. */
+.stack-inspector-footer {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ============================================================
+   Card Market sandbox toggle (in the solo / sandbox panel).
+   ============================================================ */
+.sandbox-market-toggle {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.sandbox-market-toggle h4 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  letter-spacing: 0.5px;
+}
+.sandbox-market-toggle p { margin: 0 0 10px; font-size: 12px; line-height: 1.45; }
+.market-mode-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.market-mode-btn {
+  flex: 1 1 0;
+  background: var(--bg-2);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+}
+.market-mode-btn:hover {
+  background: var(--panel-2);
+  border-color: var(--accent);
+}
+.market-mode-btn.is-active {
+  background: rgba(125, 211, 252, 0.18);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.5) inset;
+}
+
+/* ============================================================
+   Research Auction + Free Market modals (rulebook I2, I3).
+
+   Share most styling with the Industrialize / ET-Produce
+   modals; auction-specific extras here.
+   ============================================================ */
+.auction-modal,
+.free-market-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  max-width: 520px;
+  width: 100%;
+  color: var(--ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.auction-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.auction-head h3 { margin: 0; font-size: 18px; letter-spacing: 0.5px; }
+.auction-mode {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: rgba(125, 211, 252, 0.12);
+  border: 1px solid rgba(125, 211, 252, 0.4);
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+.auction-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.auction-section-label {
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--muted, #94a3b8);
+}
+.auction-tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.auction-tab {
+  background: var(--bg-2);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+  text-transform: capitalize;
+}
+.auction-tab em {
+  color: var(--muted, #94a3b8);
+  font-style: normal;
+  font-weight: 500;
+  margin-left: 4px;
+}
+.auction-tab.is-active {
+  background: rgba(125, 211, 252, 0.18);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.auction-cards,
+.auction-sac-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.auction-card {
+  text-align: left;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.auction-card:hover { background: var(--panel-2); }
+.auction-card.is-selected {
+  background: rgba(125, 211, 252, 0.12);
+  border-color: var(--accent);
+}
+.auction-card .auction-radio {
+  display: inline-block;
+  width: 14px;
+  color: var(--accent);
+  flex: 0 0 14px;
+}
+.auction-card .auction-spectral {
+  margin-left: auto;
+  width: 18px;
+  height: 18px;
+  line-height: 18px;
+  font-size: 11px;
+}
+.auction-sacrifice {
+  margin-top: 6px;
+  background: rgba(202, 138, 4, 0.08);
+  border: 1px solid rgba(202, 138, 4, 0.35);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.auction-modal .card-modal-actions,
+.free-market-modal .card-modal-actions {
+  margin-top: 4px;
+  justify-content: flex-end;
+}
+.auction-modal .modal-btn.primary,
+.free-market-modal .modal-btn.primary {
+  background: #14532d;
+  color: #d1fae5;
+  border-color: #166534;
+}
+.auction-modal .modal-btn.primary:hover,
+.free-market-modal .modal-btn.primary:hover { background: #166534; }
+.auction-modal .modal-btn.primary:disabled,
+.free-market-modal .modal-btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ============================================================
+   Transfer LEO ↔ Rocket modal (variant cargo flow).
+   ============================================================ */
+.transfer-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  max-width: 720px;
+  width: 100%;
+  color: var(--ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.transfer-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.transfer-head h3 { margin: 0; font-size: 18px; letter-spacing: 0.5px; }
+.transfer-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+@media (max-width: 680px) {
+  .transfer-body { grid-template-columns: 1fr; }
+}
+.transfer-col {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.transfer-col h4 { margin: 0; font-size: 14px; letter-spacing: 0.4px; }
+.transfer-tank-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.transfer-tank-row .stat-water {
+  font-size: 14px;
+  color: #7dd3fc;
+  font-variant-numeric: tabular-nums;
+}
+.transfer-water-btn {
+  background: var(--panel-2);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.2px;
+}
+.transfer-water-btn:hover { background: rgba(125, 211, 252, 0.18); border-color: var(--accent); }
+.transfer-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.transfer-cards li {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.transfer-cardline { flex: 1; }
+.transfer-move {
+  background: var(--bg-2);
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  min-width: 32px;
+  min-height: 28px;
+}
+.transfer-move:hover { background: rgba(125, 211, 252, 0.18); border-color: var(--accent); }
+.transfer-notice {
+  padding: 6px 8px;
+  background: rgba(125, 211, 252, 0.06);
+  border: 1px solid rgba(125, 211, 252, 0.18);
+  border-radius: 4px;
+  font-size: 12px;
+}
+.transfer-modal .card-modal-actions { justify-content: flex-end; }
+
+/* ============================================================
+   Stack inspector wide variant + transfer section.
+
+   LEO / Outpost inspectors render their cards with the EXACT
+   same DOM (`.rocket-stack-row` + `.rocket-slot`) the rocket
+   modal uses, so card art + layout + selected-ring + sizing
+   all come from the rocket-stack rules directly. No parallel
+   card-grid CSS here - that was the user's pushback on the
+   previous iteration.
+
+   The selected highlight piggybacks on the existing rocket-
+   slot rules; the only new rule below tints the wrap when
+   .is-selected (mirror of .is-active-thruster's ring idiom).
+   ============================================================ */
+.stack-inspector-modal { max-width: 720px; }
+.rocket-slot.is-selected .card {
+  box-shadow: 0 0 0 3px var(--accent),
+              0 0 18px rgba(125, 211, 252, 0.55);
+  border-radius: 10px;
+}
+
+.stack-inspector-transfer {
+  margin-top: 10px;
+  background: rgba(125, 211, 252, 0.06);
+  border: 1px solid rgba(125, 211, 252, 0.25);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.stack-inspector-transfer.empty {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: var(--border);
+}
+.stack-inspector-transfer h4 {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.4px;
+}
+.stack-inspector-transfer p { margin: 0; font-size: 12px; line-height: 1.45; }
+.stack-inspector-xfer-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.stack-inspector-xfer-btn {
+  background: var(--bg-2);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+}
+.stack-inspector-xfer-btn:hover:not(:disabled) {
+  background: rgba(125, 211, 252, 0.18);
+  border-color: var(--accent);
+}
+.stack-inspector-xfer-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Per-card Select toggle in the rocket modal. Matches the
+   stack-inspector-select idiom so the player sees one
+   consistent affordance across LEO / Rocket / Outpost. */
+.rocket-select {
+  background: var(--panel-2);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+  min-height: 28px;
+}
+.rocket-select:hover {
+  background: rgba(125, 211, 252, 0.18);
+  border-color: var(--accent);
+}
+.rocket-select.is-on {
+  background: rgba(125, 211, 252, 0.22);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+#rocket-stack-transfer {
+  margin-top: 10px;
+}
+
+/* ============================================================
+   Hand-flight ghost. Cloned card art that flies from the
+   deck-tap modal to the hand strip when the player taps
+   "Add to hand". Mostly inline-styled from browse.js so the
+   geometry stays under JS control; the rules below are the
+   shared knobs (no transition for users that ask for reduced
+   motion, slight shadow + filter to read against the map).
+   ============================================================ */
+.hand-flight-ghost {
+  filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.55));
+  /* The ghost is a clone of the modal-card element which
+     carries the scale(1.6) of .card-modal-card. Reset that
+     here so the ghost starts at the same VISUAL size as the
+     un-scaled card and our inline transform math (which works
+     in screen pixels) lines up. */
+  transform-origin: top left;
+}
+.hand-flight-ghost.card-modal-card { transform: none; margin: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .hand-flight-ghost {
+    transition: opacity 120ms linear !important;
+    transform: none !important;
+  }
+}
+
+/* ============================================================
+   🛒 Patent Market cart sidebar pane (Card Market mode only).
+   ============================================================ */
+.cart-summary {
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.cart-summary h3 { margin: 0 0 6px; font-size: 16px; letter-spacing: 0.5px; }
+.cart-summary p { margin: 4px 0; font-size: 12px; line-height: 1.45; }
+.cart-warning {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: rgba(202, 138, 4, 0.12);
+  border: 1px solid rgba(202, 138, 4, 0.4);
+  border-radius: 6px;
+  color: #facc15;
+  font-size: 12px;
+}
+.cart-decks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.cart-deck {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.cart-deck-title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  letter-spacing: 0.4px;
+  text-transform: capitalize;
+  color: var(--ink);
+}
+.cart-deck-title em {
+  color: var(--muted, #94a3b8);
+  font-style: normal;
+  font-weight: 500;
+  margin-left: 4px;
+}
+/* Whole-card deck view: side-by-side deck-thickness SVG +
+   the full card art for the top card. Stacked under each
+   deck section header. */
+.cart-deck-body {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 6px 0 8px;
+}
+.cart-deck-art { flex: 0 0 auto; }
+.cart-deck-svg {
+  display: block;
+}
+.cart-deck-topcard {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+.cart-deck-topcard .card {
+  /* Match the inspector scale so the cart and other stack
+     views read at the same visual size. */
+  transform: scale(0.65);
+  transform-origin: top center;
+  margin-bottom: -90px;
+}
+.cart-deck-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cart-card {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.cart-card-name { flex: 1; }
+.cart-card-spec.industrialize-spectral-badge {
+  width: 18px;
+  height: 18px;
+  line-height: 18px;
+  font-size: 11px;
+}
+.cart-buy-btn {
+  background: #14532d;
+  color: #d1fae5;
+  border: 1px solid #166534;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+}
+.cart-buy-btn:hover:not(:disabled) { background: #166534; }
+.cart-buy-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ============================================================
+   Auction confirm modal. Reusable confirmation dialog shown
+   on the Cart's Buy button (and later for any other auction
+   surface). Same .auction-* class family as the legacy
+   research-auction modal so we share styling; new
+   .auction-confirm-modal box for the focused layout.
+   ============================================================ */
+.auction-confirm-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  max-width: 480px;
+  width: 100%;
+  color: var(--ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.auction-confirm-card {
+  display: flex;
+  justify-content: center;
+  margin: 4px 0 0;
+}
+.auction-confirm-card .card {
+  transform: scale(0.85);
+  transform-origin: top center;
+  margin-bottom: -55px;
+}
+.auction-cost-line {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+.auction-bonus-section {
+  background: rgba(125, 211, 252, 0.06);
+  border: 1px solid rgba(125, 211, 252, 0.25);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.auction-bonus-decks {
+  list-style: disc;
+  margin: 4px 0 0 18px;
+  padding: 0;
+  font-size: 13px;
+}
+.auction-bonus-deck {
+  display: inline-block;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-weight: 700;
+  text-transform: capitalize;
+  margin-right: 4px;
+}
+.auction-confirm-modal .card-modal-actions {
+  margin-top: 4px;
+  justify-content: flex-end;
+}
+.auction-confirm-modal .modal-btn.primary {
+  background: #14532d;
+  color: #d1fae5;
+  border-color: #166534;
+}
+.auction-confirm-modal .modal-btn.primary:hover { background: #166534; }
+.auction-confirm-modal .modal-btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Cart's top card is tap-to-inspect (opens openDeckTapModal,
+   same as the patent library). Cursor + hover ring tell the
+   player the card is interactive. */
+.cart-deck-topcard-click { cursor: pointer; }
+.cart-deck-topcard-click:hover .card,
+.cart-deck-topcard-click:focus-visible .card {
+  box-shadow: 0 0 0 3px var(--accent),
+              0 0 18px rgba(125, 211, 252, 0.55);
+  border-radius: 10px;
+}
+
+/* Auction-confirm bonus-cards layout: row of full card art,
+   horizontal by default on desktop with wrap; falls back to
+   a single column on narrow viewports. Scrolls vertically if
+   the bonus stack exceeds the modal height. */
+.auction-bonus-cards {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: center;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 6px 4px;
+}
+.auction-bonus-card {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: center;
+}
+.auction-bonus-card .card {
+  transform: scale(0.75);
+  transform-origin: top center;
+  margin-bottom: -70px;
+}
+/* Cramped viewports (phones) flow the bonus cards vertically
+   so each one gets full readable width. Same scroll region
+   keeps the modal height bounded. */
+@media (max-width: 680px) {
+  .auction-bonus-cards {
+    flex-direction: column;
+    align-items: center;
+    max-height: 50vh;
+  }
+}
+/* The confirm modal itself was previously max-width 480px;
+   widen it on desktop so the row-of-bonus-cards has room to
+   breathe. Mobile stays full-bleed via the existing rules. */
+.auction-confirm-modal {
+  max-width: 720px;
+}
+
+/* ============================================================
+   Saved-games list in the game manager panel.
+   ============================================================ */
+.sandbox-saves {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.sandbox-saves h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  letter-spacing: 0.5px;
+}
+.saves-actions {
+  margin-bottom: 10px;
+}
+.saves-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.saves-empty {
+  font-size: 12px;
+  padding: 6px 2px;
+}
+.saves-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+}
+.saves-load-name {
+  flex: 1;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.saves-load-name:hover {
+  background: rgba(125, 211, 252, 0.12);
+}
+.saves-name {
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.saves-time {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.saves-row-actions {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.saves-row-actions button {
+  background: var(--panel-2);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.saves-row-actions button:hover {
+  border-color: var(--accent);
+  background: rgba(125, 211, 252, 0.12);
+}
+.saves-row-actions .saves-delete:hover {
+  border-color: #b91c1c;
+  background: rgba(185, 28, 28, 0.18);
+}
+
+/* Game-mode selector chips (Sandbox / Campaign) at the top of
+   the 🎮 Game mode panel. Same pill idiom as the card-economy
+   toggle; the active mode gets the accent-cyan tint. Sandbox
+   is always active; Campaign is disabled (placeholder). */
+.game-mode-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.game-mode-btn {
+  flex: 1 1 0;
+  background: var(--bg-2);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+.game-mode-btn:hover:not(:disabled):not(.is-active) {
+  background: var(--panel-2);
+  border-color: var(--accent);
+}
+.game-mode-btn.is-active {
+  background: rgba(125, 211, 252, 0.18);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.5) inset;
+  cursor: default;
+}
+.game-mode-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* New-game settings (starter-cash toggle) under the New game
+   button in the game-mode panel. */
+.newgame-settings {
+  margin: 8px 0 4px;
+}
+.newgame-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.newgame-toggle input { width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent); }
+.newgame-hint { margin: 4px 0 0; font-size: 11px; line-height: 1.4; }
+
+/* ============================================================
+   Starting-crew wizard (mandatory faction pick on New game).
+   ============================================================ */
+.crew-wizard-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  max-width: 900px;
+  width: 100%;
+  color: var(--ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.crew-wizard-head h3 { margin: 0 0 4px; font-size: 18px; letter-spacing: 0.5px; }
+.crew-wizard-head p { margin: 0; font-size: 13px; }
+.crew-faction-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+  max-height: 68vh;
+  overflow-y: auto;
+  padding: 2px;
+}
+/* Selectable tile wrapping a rendered crew card. */
+.crew-faction-card {
+  cursor: pointer;
+  border-radius: 12px;
+  padding: 4px;
+  border: 2px solid transparent;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+}
+.crew-faction-card .card { width: 100%; }
+.crew-faction-card:hover { transform: translateY(-2px); }
+.crew-faction-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.crew-faction-card.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(125, 211, 252, 0.45), 0 8px 20px rgba(0, 0, 0, 0.5);
+}
+.crew-wizard-modal .card-modal-actions { justify-content: flex-end; }
+.crew-wizard-modal .modal-btn.primary {
+  background: #14532d; color: #d1fae5; border-color: #166534;
+}
+.crew-wizard-modal .modal-btn.primary:hover { background: #166534; }
+.crew-wizard-modal .modal-btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }

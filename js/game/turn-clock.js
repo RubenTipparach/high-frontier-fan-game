@@ -36,6 +36,7 @@ const STORAGE_ROUND  = 'hf-sandbox-round';
 const STORAGE_EVT    = 'hf-sandbox-last-event';
 const STORAGE_OPS    = 'hf-sandbox-ops';
 const STORAGE_MOVES  = 'hf-sandbox-moves';
+const STORAGE_DISC   = 'hf-sandbox-discards';
 
 export const SLOTS = 12;
 export const SEASONS = [
@@ -131,8 +132,12 @@ export function getEventForRoll(dieRoll, seasonName) {
 // over (HF4 core is 4 ops/turn); for now they're placeholders so
 // the end-turn confirm dialog can gate on "did you spend
 // everything you had?" - both default to 1.
-export const OPS_PER_TURN   = 1;
-export const MOVES_PER_TURN = 1;
+export const OPS_PER_TURN      = 1;
+export const MOVES_PER_TURN    = 1;
+// Discards: voluntary free action, 1 per turn. Cards go to
+// the bottom of their corresponding deck (variant rule, user
+// 2026-05-24).
+export const DISCARDS_PER_TURN = 1;
 
 let _turn = (() => {
   try {
@@ -164,6 +169,12 @@ let _movesRemaining = (() => {
     return Number.isFinite(n) && n >= 0 ? n : MOVES_PER_TURN;
   } catch { return MOVES_PER_TURN; }
 })();
+let _discardsRemaining = (() => {
+  try {
+    const n = parseInt(localStorage.getItem(STORAGE_DISC) || String(DISCARDS_PER_TURN), 10);
+    return Number.isFinite(n) && n >= 0 ? n : DISCARDS_PER_TURN;
+  } catch { return DISCARDS_PER_TURN; }
+})();
 
 let _listeners = [];
 
@@ -173,6 +184,7 @@ function persist() {
     localStorage.setItem(STORAGE_ROUND,  String(_round));
     localStorage.setItem(STORAGE_OPS,    String(_opsRemaining));
     localStorage.setItem(STORAGE_MOVES,  String(_movesRemaining));
+    localStorage.setItem(STORAGE_DISC,   String(_discardsRemaining));
     if (_lastEvent) localStorage.setItem(STORAGE_EVT, JSON.stringify(_lastEvent));
     else            localStorage.removeItem(STORAGE_EVT);
   } catch { /* private mode */ }
@@ -215,6 +227,19 @@ export function consumeMove() {
   return true;
 }
 
+// Voluntary free-action discard. Player can dump 1 Hand card
+// per turn to the bottom of the corresponding deck. The card
+// itself is moved by the caller; this just tracks the per-
+// turn budget.
+export function getDiscardsRemaining() { return _discardsRemaining; }
+export function consumeDiscard() {
+  if (_discardsRemaining <= 0) return false;
+  _discardsRemaining -= 1;
+  persist();
+  notify();
+  return true;
+}
+
 // Refund a previously-consumed move. Used by the toolbar's
 // 🛸 / ↩ toggle so the player can take it back before they end
 // the turn (HF4 lets you do your operation before OR after your
@@ -247,8 +272,9 @@ export function endTurn() {
     _lastEvent = event;
   }
   // Per-turn budgets refill for the new turn.
-  _opsRemaining   = OPS_PER_TURN;
-  _movesRemaining = MOVES_PER_TURN;
+  _opsRemaining      = OPS_PER_TURN;
+  _movesRemaining    = MOVES_PER_TURN;
+  _discardsRemaining = DISCARDS_PER_TURN;
   persist();
   notify();
   return { turn: _turn, round: _round, event };
@@ -260,6 +286,7 @@ export function resetClock() {
   _lastEvent = null;
   _opsRemaining = OPS_PER_TURN;
   _movesRemaining = MOVES_PER_TURN;
+  _discardsRemaining = DISCARDS_PER_TURN;
   persist();
   notify();
 }

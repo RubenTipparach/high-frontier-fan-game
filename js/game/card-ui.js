@@ -71,18 +71,52 @@ export const REQUIREMENT_VIS = {
   'spin-grav':          { glyph: '💃', label: 'Spin gravity'           },
 };
 
-export function renderCard(card, { type, supplied, onSupportClick } = {}) {
+// Pick a readable ink (#0c0a16 vs #fff) for text laid over a hex
+// fill, from the fill's perceived luminance.
+function readableInk(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+  if (!m) return '#0c0a16';
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return lum > 0.6 ? '#0c0a16' : '#ffffff';
+}
+
+export function renderCard(card, { type, supplied, onSupportClick, face } = {}) {
   const kind = type || (card.faces && card.faces.primary && card.faces.primary.role ? 'crew' : 'patent');
   const el = document.createElement('div');
   el.className = `card kind-${kind}` + (kind === 'patent' ? ` type-${card.type}` : '');
   el.dataset.side = 'primary';
   if (card.flipOrientation === 'rotated180') el.classList.add('flip-rotates');
+  // Crew cards carry a faction band colour (the player-colour
+  // slot). Expose it (+ a readable ink colour derived from its
+  // luminance) as CSS variables so the typebar + frame can tint
+  // to match the printed card without illegible text.
+  if (kind === 'crew' && card.color) {
+    el.style.setProperty('--crew-color', card.color);
+    el.style.setProperty('--crew-ink', readableInk(card.color));
+  }
+
+  const inner = document.createElement('div');
+  inner.className = 'card-inner';
+
+  // Crew is single-faced in play: each faction face is its own
+  // crew member, and the player committed to ONE. Render just the
+  // chosen face (defaults to primary) and emit NO flip button -
+  // crew cards never flip.
+  if (kind === 'crew') {
+    const showSide = (face === 'secondary' && card.faces && card.faces.secondary)
+      ? 'secondary' : 'primary';
+    el.dataset.side = showSide;
+    inner.appendChild(buildFace(card, showSide, kind, supplied, { onSupportClick }));
+    el.appendChild(inner);
+    attachTipsTo(el);
+    return el;
+  }
 
   // Both faces live inside a single .card-inner that rotates as
   // one rigid 3D body. Each face uses backface-visibility:hidden,
   // so only the side facing the viewer is painted.
-  const inner = document.createElement('div');
-  inner.className = 'card-inner';
   inner.appendChild(buildFace(card, 'primary', kind, supplied, { onSupportClick }));
   if (card.faces && card.faces.secondary) {
     inner.appendChild(buildFace(card, 'secondary', kind, supplied, { onSupportClick }));
@@ -144,7 +178,7 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
       <div class="card-statbox">
         <span><strong class="m"></strong> MASS</span>
         <span><strong class="r"></strong> RAD</span>
-        <span class="card-spectral"></span>
+        <span class="crew-isru"></span>
       </div>
       <div class="card-body">
         <h4 class="card-name"></h4>
@@ -152,6 +186,7 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
         <p class="card-bonus"></p>
         <p class="card-blurb"></p>
       </div>
+      <div class="crew-thrust"></div>
     `;
     face.querySelector('.card-name').textContent = c.name || '';
     face.querySelector('.card-role').textContent = c.role || '';
@@ -159,7 +194,47 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     face.querySelector('.card-blurb').textContent = c.blurb || '';
     face.querySelector('.m').textContent = c.mass != null ? c.mass : '-';
     face.querySelector('.r').textContent = c.radHardness != null ? c.radHardness : '-';
-    face.querySelector('.card-spectral').appendChild(spectralHex(c.spectralType || 'C'));
+    // Crews have NO spectral type. The third stat cell instead
+    // shows the prospector kind glyph + ISRU rating (e.g.
+    // "🛺 4" / "🔫 4") when the face carries one.
+    const isruCell = face.querySelector('.crew-isru');
+    if (isruCell && c.isru != null) {
+      const glyph = c.prospector === 'raygun' ? '🔫'
+        : (c.prospector === 'missile' ? '🚀' : '🛺');
+      isruCell.textContent = `${glyph} ${c.isru}`;
+    }
+    // Thrust triangle. Crew that double as a thruster carry a
+    // { thrust, fuelPerBurn, afterburn, dirt } block; render it
+    // with the same thrustVisual the patent thrusters use, via
+    // a synthetic face that maps the crew field names onto what
+    // thrustVisual expects (fuel = fuelPerBurn; fuelType drives
+    // the 💧 vs 🪨 droplet for dirt thrusters). Lander faces
+    // (thruster == null, e.g. Shimizu) get no triangle + a
+    // "lander" note.
+    const thrustHost = face.querySelector('.crew-thrust');
+    if (thrustHost) {
+      if (c.thruster) {
+        const t = c.thruster;
+        const synthetic = {
+          thrust: t.thrust,
+          fuel: t.fuelPerBurn,
+          afterburn: t.afterburn || false,
+          fuelType: t.dirt ? 'Dirt' : 'Water',
+        };
+        thrustHost.appendChild(thrustVisual(card, synthetic));
+        if (t.name) {
+          const rk = document.createElement('p');
+          rk.className = 'crew-rocket';
+          rk.textContent = t.dirt ? `${t.name} (dirt)` : t.name;
+          thrustHost.appendChild(rk);
+        }
+      } else {
+        const note = document.createElement('p');
+        note.className = 'crew-rocket muted';
+        note.textContent = 'Lander (no thruster)';
+        thrustHost.appendChild(note);
+      }
+    }
     return face;
   }
 

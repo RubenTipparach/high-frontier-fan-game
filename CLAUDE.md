@@ -168,17 +168,25 @@ single PR.
   surface was a placeholder.
 - **Stage 2 (current):** Static data + read-only renderer. The
   solar-system map (`data/sites.js`), patent deck (`data/patents.js`),
-  milestones (`data/glory.js`), and events (`data/politics.js`); an
-  SVG renderer with pan/zoom; a ship-card composer (validation
-  rules + burn-cost math) ready for Stage 3 to call. A Browse view
-  on the topbar lets anyone inspect the data; the lobby's
-  game-overlay now mounts the map (read-only) when the host starts.
+  and milestones (`data/glory.js`); an SVG renderer with pan/zoom;
+  a ship-card composer (validation rules + burn-cost math) ready
+  for Stage 3 to call. A Browse view on the topbar lets anyone
+  inspect the data; the lobby's game-overlay now mounts the map
+  (read-only) when the host starts.
+
+  NOTE: there is no separate "politics / events deck". The only
+  events in this game are the Sunspot Cube events surfaced by the
+  turn-clock modal (Inspiration / Glitch / Pad Explosion / Anarchy
+  / Budget Cuts / Solar Flare - see `EVENT_TABLE` in
+  `js/game/turn-clock.js`). An earlier `data/politics.js` with a
+  "Solar Storm / Mining Boom / Trade War" deck was a fabrication
+  and has been deleted; do not reintroduce it.
 - **Stage 3:** Server-authoritative engine. Operations phase, MOVE /
   BURN / PROSPECT / INDUSTRIALIZE / AUCTION / BUILD ops. Validated
   on the server; optimistic mirror on the client. New tables in
   `server/db.js` for games, operations, and per-game state.
 - **Stage 4:** Full coverage. Refineries, habitat / Bernal stations,
-  politics resolution, milestone awards, futures market,
+  Sunspot-Cube event resolution, milestone awards, futures market,
   end-of-game scoring.
 
 If you're adding a feature, mark the stage it belongs to in the
@@ -260,7 +268,6 @@ and `js/game/`. Authoritative tables in `data/`:
   `generator`, `lab`. Thrusters carry `{thrust, isp, mass}`. The
   deck is shuffled per game from a seeded RNG so replays match.
 - `data/glory.js` - glory cards (first-to-X awards).
-- `data/politics.js` - politics deck drawn at the end of each round.
 
 Server-authoritative engine in `server/game/engine.js`:
 
@@ -351,7 +358,6 @@ Random-numbered seeds are stored per game so replays are deterministic.
     sites.js            solar system sites (server reads via import)
     patents.js          patent deck
     glory.js            glory cards
-    politics.js         politics deck
 /server/                Fly.io node app
   package.json
   Dockerfile

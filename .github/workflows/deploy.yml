@@ -52,7 +52,6 @@ jobs:
           node --input-type=module -e "import('./data/sites.js').then(m => { if (!Array.isArray(m.SITES) || m.SITES.length < 20) { console.error('sites.js looks empty:', m.SITES && m.SITES.length); process.exit(1); } if (!Array.isArray(m.EDGES) || m.EDGES.length < 30) { console.error('edges look empty:', m.EDGES && m.EDGES.length); process.exit(1); } });"
           node --input-type=module -e "import('./data/patents.js').then(m => { if (!Array.isArray(m.PATENTS) || m.PATENTS.length < 30) { console.error('patents.js looks empty:', m.PATENTS && m.PATENTS.length); process.exit(1); } });"
           node --input-type=module -e "import('./data/glory.js').then(m => { if (!Array.isArray(m.GLORY) || m.GLORY.length < 6) { console.error('glory.js looks empty:', m.GLORY && m.GLORY.length); process.exit(1); } });"
-          node --input-type=module -e "import('./data/politics.js').then(m => { if (!Array.isArray(m.POLITICS) || m.POLITICS.length < 6) { console.error('politics.js looks empty:', m.POLITICS && m.POLITICS.length); process.exit(1); } });"
 
       # Bake the commit SHA into every cache-bust query and into
       # version.json so the runtime check (js/version-check.js) can

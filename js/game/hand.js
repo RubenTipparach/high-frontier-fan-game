@@ -18,6 +18,7 @@
 
 import { isInRocket } from './rocket.js';
 import { isExpansionType } from '../../data/patents.js';
+import { CREW_BY_ID } from '../../data/crew.js';
 
 const STORAGE_KEY = 'hf-sandbox-hand';
 const BOOST_KEY = 'hf-sandbox-boost-marks';
@@ -67,6 +68,12 @@ export function isInHand(id) {
 
 export function addToHand(card) {
   if (!card || !card.id) return { ok: false, reason: 'no card' };
+  // Crew NEVER enters the hand (variant rule, user 2026-05). Crew
+  // stages in the LEO Stack and rides the rocket / outposts; it
+  // re-spawns in LEO on mishap or when turned into a colony.
+  if (CREW_BY_ID[card.id] || (card.faces?.primary?.role && card.type == null)) {
+    return { ok: false, reason: 'crew never enters the hand (it stages in the LEO stack)' };
+  }
   if (_hand.includes(card.id)) {
     return { ok: false, reason: 'already in your hand' };
   }

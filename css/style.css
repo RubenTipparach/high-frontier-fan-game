@@ -13,6 +13,19 @@
   --good:      #4ade80;
   --bad:       #f87171;
 
+  /* Card-type colour key - single source of truth. Used by the
+     card typebar (css/cards.css) AND the patent-card border
+     (css/map.css) so a type reads the same colour everywhere.
+     thruster = orange, generator = salmon, robonaut = magenta
+     per the 2026-05 colour pass; the other three keep distinct
+     hues. */
+  --card-thruster:  #f97316;
+  --card-generator: #fa8072;
+  --card-robonaut:  #d946ef;
+  --card-reactor:   #a78bfa;
+  --card-radiator:  #7dd3fc;
+  --card-refinery:  #94a3b8;
+
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color-scheme: dark;
 }
@@ -95,28 +108,41 @@ code {
 
 /* ===== Main menu FAB + modal ===== */
 
+/* Menu FAB. Sized + styled to sit in the same visual family as
+   the map-toolbar buttons (Move to / End turn): same height,
+   border, radius, and panel-tint so it reads as the leftmost
+   member of the toolbar row rather than a mismatched floating
+   blob. Pinned at top:8 left:12 to line up with the toolbar's
+   8px top padding. */
 .main-menu-fab {
   position: fixed;
-  top: 10px;
+  top: 8px;
   left: 12px;
   z-index: 90;
-  width: 38px;
-  height: 38px;
-  border-radius: 8px;
-  background: rgba(15, 16, 35, 0.85);
+  height: 30px;
+  min-width: 40px;
+  padding: 0 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: var(--panel-2);
   border: 1px solid var(--border);
   color: var(--ink);
-  font-size: 20px;
+  font-size: 17px;
   line-height: 1;
   cursor: pointer;
   backdrop-filter: blur(4px);
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
-  transition: background 0.15s, border-color 0.15s;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 .main-menu-fab:hover {
   background: var(--accent);
   color: #062136;
   border-color: var(--accent-2);
+}
+.main-menu-fab:active {
+  transform: translateY(1px);
 }
 
 .main-menu-overlay {
@@ -199,6 +225,23 @@ code {
   background: var(--accent);
   color: #062136;
   border-color: var(--accent-2);
+}
+/* Disabled menu button (e.g. Sandbox while already in sandbox).
+   Greyed, no hover lift, not clickable. The .is-current accent
+   ring reads as "you are here". */
+.main-menu-row button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.main-menu-row button:disabled:hover {
+  background: var(--bg-2);
+  color: var(--ink);
+  border-color: var(--border);
+}
+.main-menu-row button.is-current {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+  opacity: 0.85;
 }
 .main-menu-row button.primary {
   background: linear-gradient(180deg, #38bdf8, #0284c7);

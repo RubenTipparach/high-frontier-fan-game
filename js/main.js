@@ -31,6 +31,18 @@ function showView(id) {
   for (const v of VIEWS) {
     document.getElementById(v).classList.toggle('hidden', v !== id);
   }
+  // The hamburger menu's Sandbox button is disabled while we're
+  // already in sandbox (view-browse) - there's nowhere to go,
+  // and it shouldn't read as a toggle. Multiplayer stays live.
+  const browseBtn = document.getElementById('btn-browse');
+  if (browseBtn) {
+    const inSandbox = id === 'view-browse';
+    browseBtn.disabled = inSandbox;
+    browseBtn.classList.toggle('is-current', inSandbox);
+    browseBtn.title = inSandbox
+      ? 'Sandbox: already active'
+      : 'Sandbox: explore the map and build rockets from the patent deck';
+  }
 }
 
 // ----- Toasts -----

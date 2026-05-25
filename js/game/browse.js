@@ -11,6 +11,8 @@ import { planRoute } from './planner-nav.js';
 import {
   consumeMove, refundMove, getTurn, getMovesRemaining, onTurnChange,
   getEventForRoll, getSeasonForSlot, getSeason, resetClock,
+  getOpsRemaining, consumeOp,
+  getDiscardsRemaining, consumeDiscard,
 } from './turn-clock.js';
 import { triggerEndTurn, openTurnClockModal, buildDie, rollDie } from './turn-clock-ui.js';
 import {
@@ -28,9 +30,9 @@ import {
 import {
   getRocketStack, isInRocket, addToStack as rocketAddCard,
   removeFromStack as rocketRemoveCard, clearStack as rocketClearStack,
-  onRocketChange, isRocketActive,
+  onRocketChange, isRocketActive, findFunctionalThrusters,
   getActiveThrusterId, setActiveThruster,
-  getTankWater, addFuel, removeFuel, getTankMax,
+  getTankWater, setTankWater, addFuel, removeFuel, getTankMax,
   getStackTotals, getActiveThrusterStats,
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats,
@@ -42,9 +44,12 @@ import {
   getDiscs, getDisc, placeDisc, removeDisc, resetDiscs,
   onChange as onDiscsChange,
 } from './discs.js';
-import { CREW } from '../../data/crew.js';
+import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
+import {
+  WEIGHT_CLASSES, weightClassForMass, TRACK_LEGEND,
+  MIN_DRY_MASS, MAX_DRY_MASS, MAX_WET_MASS,
+} from '../../data/net-thrust-track.js';
 import { MILESTONES } from '../../data/glory.js';
-import { POLITICS } from '../../data/politics.js';
 import { SITES_BY_ID } from '../../data/sites.js';
 import {
   renderCard, thrustVisual, attachTipsTo,
@@ -60,6 +65,53 @@ import {
   getChits, getVps, getChitVpValue, isZoneVisited, resetGlory,
   onChange as onGloryChange, ZONE_CHIT_VPS,
 } from './glory.js';
+import {
+  getFactory, createFactory,
+  getColony, createColony, countColoniesByOwner,
+  allFactories, allColonies,
+  onFactoryChange, onColonyChange,
+  COLONY_CAP_PER_PLAYER,
+} from './factories.js';
+import {
+  findIndustrializeOptions, openIndustrializeModal,
+} from './industrialize.js';
+import {
+  findColonizeOptions, openColonizePicker,
+} from './colonize.js';
+import {
+  getOutpost, getOutposts, getAvailableOutpostSlots,
+  createOutpost, dissolveOutpost,
+  addCardToOutpost, removeCardFromOutpost, setOutpostTank,
+  getFocusedStackId, setFocusedStackId,
+  onFocusChange, onOutpostsChange,
+  OUTPOST_LETTERS,
+} from './stacks.js';
+import {
+  getLeoCards, addCardToLeo, removeCardFromLeoById,
+  onLeoChange,
+} from './leo-stack.js';
+import {
+  findEtProduceOptions, openEtProduceModal,
+} from './et-produce.js';
+import {
+  defaultSaveName, listSaves, createSave, overwriteSave,
+  renameSave, deleteSave, loadSaveAndReload,
+} from './saves.js';
+import {
+  computeEndgameScore, SPECTRAL_DIMINISHING_SCHEDULE,
+} from './scoring.js';
+import {
+  MARKET_MODE, FREE_MARKET_AQUA, STARTER_CASH_AMOUNT,
+  getMarketMode, setMarketMode, onMarketChange,
+  getStarterCash, setStarterCash,
+  resetSandboxEconomy,
+  openAuctionConfirmModal, openFreeMarketModal,
+  findAuctionableCards,
+} from './card-market.js';
+import {
+  DECK_TYPES, getDeck, peekTop, drawTop, addToBottom, removeFromDeck,
+  cycleAllDecks, supportBonusDecks, onDeckChange,
+} from './decks.js';
 
 // Only one map mode now (planner / "classic"); the old
 // "Cleaned up" variant was disorienting next to the canonical
@@ -83,6 +135,7 @@ export function mountBrowse() {
     _rocketSubWired = true;
     onRocketChange(syncSandboxRocket);
     onRocketChange(refreshOpenSitePopup);
+    onRocketChange(syncFocusedSite);
     onDiscsChange(syncDiscs);
     onDiscsChange(refreshOpenSitePopup);
     // Turn-clock changes (end-turn, consumeMove, refundMove)
@@ -90,7 +143,33 @@ export function mountBrowse() {
     // disabled labels like "Refueled this turn" flip back when
     // the turn advances.
     onTurnChange(refreshOpenSitePopup);
+    // Stage-3 chit / focus syncs - repaint the map layer when
+    // factory / colony / outpost state changes, and refresh the
+    // popup so newly-built factories surface their "Already
+    // industrialized" / "ET Produce" buttons immediately.
+    onFactoryChange(syncFactories);
+    onFactoryChange(refreshOpenSitePopup);
+    onColonyChange(syncColonies);
+    onColonyChange(refreshOpenSitePopup);
+    onOutpostsChange(syncOutposts);
+    onOutpostsChange(syncFocusedSite);
+    onOutpostsChange(refreshOpenSitePopup);
+    onFocusChange(syncFocusedSite);
+    // Card Market mode flip changes which LEO popup actions
+    // surface (Free Market only in market mode) and the
+    // Auction-button gating, so the popup needs a refresh.
+    onMarketChange(refreshOpenSitePopup);
+    // Same flip also toggles the 🛒 cart sidebar tab visible
+    // / hidden - cart is market-mode-only.
+    onMarketChange(syncCartTabVisibility);
+    // LEO Stack changes need to refresh the popup so the
+    // Transfer button enables / disables when cards or water
+    // land in or out of LEO.
+    onLeoChange(refreshOpenSitePopup);
   }
+  // Initial pass to set the cart tab's visibility on mount;
+  // the listener above keeps it in sync afterwards.
+  syncCartTabVisibility();
   wireSidebar();
   wireHandStrip();
   renderMap();
@@ -150,6 +229,15 @@ function wireHandStrip() {
     const id = e.dataTransfer.getData('text/card-id');
     const card = id && lookup(id);
     if (!card) return;
+    // Card Market mode locks the library to browse-only;
+    // patents must be acquired via Research Auction. Flash the
+    // strip red, surface the rule.
+    if (getMarketMode() === MARKET_MODE.MARKET) {
+      host.classList.add('flash-error');
+      setTimeout(() => host.classList.remove('flash-error'), 700);
+      setStatus('🃏 Card Market mode: drag-to-hand is disabled. Open the 🛒 Cart tab or use Research Auction at LEO.');
+      return;
+    }
     const r = addToHand(card);
     if (!r.ok) {
       host.classList.add('flash-error');
@@ -243,104 +331,219 @@ function wireHandStrip() {
     repaintBoostCommit();
   };
 
-  // BOOST commit button next to the hand title. Lit when at
-  // least one card is marked; pressing it transfers every
-  // marked card from the hand to the rocket stack and pops the
-  // stack modal so the player sees the cards land.
-  const repaintBoostCommit = () => {
-    const btn = document.getElementById('hand-boost-commit');
-    if (!btn) return;
-    const n = getBoostMarked().length;
-    btn.dataset.armed = n > 0 ? '1' : '0';
-    btn.disabled = n === 0;
-    btn.textContent = n > 0 ? `🚀 BOOST (${n})` : '🚀 BOOST';
-  };
   const commitBoost = async () => {
     const marked = getBoostMarked();
     if (!marked.length) return;
-    // Pre-flight overflow check: adding cards raises dry mass,
-    // which lowers the rocket's effective fuel cap (wet ≤ 32).
-    // If the tank already holds more water than the new cap
-    // can fit, the excess will spill. Warn before committing
-    // so the player can pull the card OR drain water first
-    // instead of losing it silently.
-    const TANK_MAX = 32;
-    const totals = getStackTotals();
-    let addedMass = 0;
-    for (const id of marked) {
-      const card = lookup(id);
-      if (!card) continue;
-      const f = (card.faces && card.faces.primary) || card;
-      addedMass += ((f.mass != null ? f.mass : card.mass) | 0);
-    }
-    const newDryMass = (totals.dryMass | 0) + addedMass;
-    const newCap = Math.max(0, TANK_MAX - newDryMass);
-    const currentTank = getTankWater();
-    const spillage = Math.max(0, currentTank - newCap);
-    if (spillage > 0) {
-      const ok = await confirmModal({
-        title: '⚠ Tank overflow',
-        body: `Boosting ${marked.length} card${marked.length === 1 ? '' : 's'} `
-          + `raises dry mass to <strong>${newDryMass}</strong>, capping `
-          + `the tank at <strong>${newCap}</strong> water. `
-          + `<strong>${spillage} water will spill out</strong> and be lost. `
-          + `Continue?`,
-        yes: 'Add anyway',
-        no: 'Cancel',
+    // Variant cargo flow (user, 2026-05-24): Boost moves cards
+    // Hand -> LEO Stack (NOT directly onto the rocket). The
+    // rocket loads from LEO via the free Transfer action when
+    // parked at LEO. Boost can always fire; there is no rocket-
+    // location gate.
+    //
+    // LEO Stack is cards-only - it has no water tank (the Aqua
+    // Bank already lives at LEO), so there is no wet-mass /
+    // spillage concern here. Cards just move across.
+    //
+    // Boost costs Aqua = the total mass of the boosted cards
+    // (user, 2026-05): the player confirms the spend before any
+    // money moves. Rulebook I4: Boost is also one Operation per
+    // turn (the multi-card batch counts as one op).
+    const massOf = (c) => {
+      const f = (c && c.faces && c.faces.primary) || c || {};
+      return (f.mass != null ? f.mass : (c && c.mass)) | 0;
+    };
+    const cards = marked.map((id) => lookup(id)).filter(Boolean);
+    if (!cards.length) return;
+    const cost = cards.reduce((sum, c) => sum + massOf(c), 0);
+    const have = getAqua();
+    const n = cards.length;
+    if (cost > have) {
+      await confirmModal({
+        title: '💸 Not enough Aqua',
+        body: `Boosting ${n} card${n === 1 ? '' : 's'} costs <strong>${cost}</strong> Aqua `
+          + `(total mass), but your bank holds only <strong>${have}</strong>.`,
+        yes: 'OK', no: '',
       });
-      if (!ok) return;
+      return;
+    }
+    const ok = await confirmModal({
+      title: '🛰 Boost to LEO',
+      body: `Boost <strong>${n}</strong> card${n === 1 ? '' : 's'} from your Hand to the LEO Stack `
+        + `for <strong>${cost}</strong> Aqua (total mass ${cost})? `
+        + `Bank: <strong>${have}</strong> → <strong>${have - cost}</strong>. Costs one operation.`,
+      yes: `🛰 Boost (${cost} aqua)`,
+      no: 'Cancel',
+    });
+    if (!ok) return;
+    // Charge the Aqua first (affordability pre-checked above;
+    // spendAqua is defence-in-depth). Then secure the op - if
+    // none is left, refund the Aqua so the player isn't charged
+    // for a boost that didn't happen.
+    if (!spendAqua(cost)) {
+      setStatus(`Boost aborted - not enough Aqua (need ${cost}).`);
+      return;
+    }
+    if (!requireOp('Boost')) {
+      addAqua(cost);
+      return;
     }
     for (const id of marked) {
       const card = lookup(id);
       if (!card) continue;
-      rocketAddCard(id, kindOf(id));
+      addCardToLeo({ id, kind: kindOf(id) });
       removeFromHand(id);
     }
-    // Clip the tank to the new fuel cap so the wet-mass total
-    // stays honest. addToStack doesn't auto-clip (older call
-    // sites might want the old value preserved), so we do it
-    // here.
-    const finalCap = Math.max(0, TANK_MAX - getStackTotals().dryMass);
-    if (getTankWater() > finalCap) {
-      const lost = getTankWater() - finalCap;
-      removeFuel(lost);
-      logAction({
-        type: 'tank_spill',
-        icon: '💧⤓',
-        summary: `Tank spilled ${lost} water on add (new cap ${finalCap})`,
-        undoable: false,
-      });
-    }
     clearBoostMarks();
-    openRocketStackModal();
+    setStatus(`🛰 Boosted <strong>${n}</strong> card${n === 1 ? '' : 's'} to LEO for <strong>${cost}</strong> Aqua. Bank: <strong>${getAqua()}</strong>.`);
+    // Open the LEO inspector so the player sees the cards land
+    // in LEO Stack. They'll Transfer LEO->Rocket separately
+    // when the rocket is parked at LEO.
+    openLeoStackModal();
   };
   const commitBtn = document.getElementById('hand-boost-commit');
   if (commitBtn) commitBtn.addEventListener('click', commitBoost);
 
-  // Stack button next to ✋ Hand: zooms the map to wherever the
-  // rocket currently sits (so the sprite stays in view even after
-  // the rocket has left LEO) AND pops the stack modal. Only falls
-  // back to LEO when no rocket has been built yet - i.e. there's
-  // no sprite to follow.
-  const stackBtn = document.getElementById('hand-stack-open');
-  if (stackBtn) stackBtn.addEventListener('click', () => {
-    if (_renderer) {
-      const stack = getRocketStack();
-      const site = stack.length ? getRocketSite() : null;
-      if (site && Number.isFinite(site.x) && Number.isFinite(site.y)) {
-        _renderer.flyTo(site, locateZoom(4));
-      } else {
-        _renderer.flyTo(LEO_ANCHOR, locateZoom(4));
-      }
+  // The old #hand-stack-open and #hand-stack-locate top-level
+  // buttons folded into the per-stack chips that the new
+  // switcher renders below (each chip has its own 📍 pin); the
+  // explicit listeners above are gone.
+
+  repaintHand();
+  onHandChange(repaintHand);
+
+  // Stage-3 hand-bar stack switcher. Renders chips for LEO,
+  // Rocket, and any active outposts. Re-renders on focus +
+  // outpost change so newly-created outposts surface their
+  // chip immediately and the focused chip stays highlighted.
+  renderStackSwitcher();
+  onFocusChange(renderStackSwitcher);
+  onOutpostsChange(renderStackSwitcher);
+  onRocketChange(renderStackSwitcher);
+  onAquaChange(renderStackSwitcher);
+  onHandChange(renderStackSwitcher);
+  onFactoryChange(renderStackSwitcher);
+  onColonyChange(renderStackSwitcher);
+  onLeoChange(renderStackSwitcher);
+}
+
+// Render the hand-bar stack switcher. ALWAYS shows 6 buttons
+// (LEO, Rocket, Outpost A/B/C/D); empty outpost slots stay
+// visible but disabled. Each button is paired with a 📍 find-
+// pin that flies the map to that stack without opening the
+// modal - the old global Stack/Locate buttons fold into these
+// per-stack controls.
+//
+// Click semantics:
+//   - main button click  : focus this stack + open its inspector modal
+//   - pin button click   : focus this stack + fly the map (no modal)
+//   - empty outpost slot : the main button still opens a modal
+//                          explaining how to create one; the pin is
+//                          disabled (nowhere to fly).
+function renderStackSwitcher() {
+  const host = document.getElementById('hand-stack-switcher');
+  if (!host) return;
+  const focused = getFocusedStackId();
+  const outposts = getOutposts();
+  const rocketStack = getRocketStack();
+  const rocketSite = getRocketSite();
+
+  // Build one descriptor per stack slot. `siteAvailable` is what
+  // the pin uses - false when there's no place to fly to (empty
+  // outpost slot; rocket with no cards still has LEO as a sane
+  // fallback, so we treat that as available).
+  const slots = [
+    {
+      id: 'leo', label: '🌍', sub: 'LEO',
+      title: `LEO Stack - ${getLeoCards().length} card${getLeoCards().length === 1 ? '' : 's'}. Aqua bank: ${getAqua()}. Hand: ${getHandSlots().length} card${getHandSlots().length === 1 ? '' : 's'} (not yet boosted).`,
+      siteAvailable: true,
+      isEmpty: false,
+    },
+    {
+      id: 'rocket', label: '🚀', sub: 'Rocket',
+      title: rocketStack.length
+        ? `Rocket - ${rocketStack.length} card${rocketStack.length === 1 ? '' : 's'}, ${getTankWater()} water${rocketSite ? `, at ${rocketSite.name}` : ', at LEO'}`
+        : 'Rocket - empty (boost cards from hand to build the stack)',
+      siteAvailable: true,
+      isEmpty: false,
+    },
+  ];
+  for (const letter of ['A', 'B', 'C', 'D']) {
+    const op = outposts[letter];
+    if (op) {
+      const opSite = _activeData?.byId?.[op.siteId];
+      const factory = getFactory(op.siteId);
+      const colony = getColony(op.siteId);
+      const factoryTag = factory ? ` 🏭${factory.spectralType}` : '';
+      const colonyTag  = colony  ? ' 🌐' : '';
+      slots.push({
+        id: `outpost${letter}`, label: '🏛', sub: letter,
+        title: `Outpost ${letter} at ${opSite?.name || op.siteId} - ${op.cards.length} card${op.cards.length === 1 ? '' : 's'}, ${op.tank} water${factoryTag}${colonyTag}`,
+        siteAvailable: !!opSite,
+        isEmpty: false,
+      });
+    } else {
+      slots.push({
+        id: `outpost${letter}`, label: '🏛', sub: letter,
+        title: `Outpost slot ${letter} is empty - convert a parked rocket here via 🚀→🏛`,
+        siteAvailable: false,
+        isEmpty: true,
+      });
     }
-    openRocketStackModal();
+  }
+
+  host.innerHTML = slots.map((s) => {
+    const focusedClass = s.id === focused ? 'is-focused' : '';
+    const emptyClass   = s.isEmpty ? 'is-empty' : '';
+    return `<span class="hand-stack-group ${focusedClass} ${emptyClass}" data-stack="${esc(s.id)}">
+      <button type="button" class="hand-stack-chip" title="${esc(s.title)}">
+        <span class="chip-glyph">${esc(s.label)}</span>
+        <span class="chip-sub">${esc(s.sub)}</span>
+      </button>
+      <button type="button" class="hand-stack-pin" title="Fly map to ${esc(s.sub)}" ${s.siteAvailable ? '' : 'disabled'}>📍</button>
+    </span>`;
+  }).join('');
+
+  host.querySelectorAll('.hand-stack-group').forEach((group) => {
+    const id = group.getAttribute('data-stack');
+    const chip = group.querySelector('.hand-stack-chip');
+    const pin  = group.querySelector('.hand-stack-pin');
+    if (chip) chip.addEventListener('click', () => focusAndOpenStack(id));
+    if (pin)  pin.addEventListener('click',  () => focusAndFlyStack(id));
   });
-  // Locator button: pans to the rocket WITHOUT opening the stack
-  // modal - handy on mobile where the modal hides the map and the
-  // player just wants to see where the ship is.
-  const locateBtn = document.getElementById('hand-stack-locate');
-  if (locateBtn) locateBtn.addEventListener('click', () => {
-    if (!_renderer) return;
+}
+
+// Focus a stack + open its inspector modal. Used by the chip
+// click. Always sets focus, even if the stack is empty - the
+// modal is the affordance that explains the empty state.
+function focusAndOpenStack(id) {
+  if (!id) return;
+  // Only set focus when the slot can actually be focused (empty
+  // outpost slots are not focusable per stacks.js#setFocusedStackId,
+  // which rejects ids whose outpost doesn't exist). For empty
+  // slots we still open the modal so the player learns how to
+  // populate the slot.
+  setFocusedStackId(id);
+  openStackInspectorModal(id);
+}
+
+// Focus a stack + fly the map to its site. Used by the pin
+// click - same as above but no modal.
+function focusAndFlyStack(id) {
+  if (!id) return;
+  setFocusedStackId(id);
+  flyToStack(id);
+}
+
+// Pan the map to the stack with the given id. LEO flies to
+// LEO_ANCHOR; Rocket flies to the rocket's site (LEO when
+// empty); an outpost flies to its site.
+function flyToStack(id) {
+  if (!_renderer) return;
+  if (id === 'leo') {
+    _renderer.flyTo(LEO_ANCHOR, locateZoom(4));
+    return;
+  }
+  if (id === 'rocket') {
     const stack = getRocketStack();
     const site = stack.length ? getRocketSite() : null;
     if (site && Number.isFinite(site.x) && Number.isFinite(site.y)) {
@@ -348,10 +551,570 @@ function wireHandStrip() {
     } else {
       _renderer.flyTo(LEO_ANCHOR, locateZoom(4));
     }
-  });
+    return;
+  }
+  if (id && id.startsWith('outpost')) {
+    const letter = id.slice('outpost'.length);
+    const op = getOutpost(letter);
+    if (!op || !_activeData) return;
+    const site = _activeData.byId?.[op.siteId];
+    if (site && Number.isFinite(site.x) && Number.isFinite(site.y)) {
+      _renderer.flyTo(site, locateZoom(4));
+    }
+  }
+}
 
-  repaintHand();
-  onHandChange(repaintHand);
+// Stack inspector modal router. The Rocket case re-uses the
+// existing full-featured openRocketStackModal; LEO and outposts
+// get their own focused modals. Empty outpost slots get an
+// affordance modal that explains how to populate the slot.
+function openStackInspectorModal(id) {
+  if (id === 'leo') { openLeoStackModal(); return; }
+  if (id === 'rocket') { openRocketStackModal(); return; }
+  if (id && id.startsWith('outpost')) {
+    const letter = id.slice('outpost'.length);
+    const op = getOutpost(letter);
+    if (op) openOutpostStackModal(letter);
+    else    openEmptyOutpostModal(letter);
+  }
+}
+
+// ====== Stack inspector shared helpers ======
+//
+// Every stack (LEO / Rocket / Outpost A-D) holds the same shape
+// of cards. The inspector modals share a card-display + select
+// + transfer pattern: render each card with the same renderCard
+// the patent library uses, give each card a "Select" toggle,
+// and offer one transfer button per colocated destination stack.
+
+const STACK_LABELS = {
+  leo:      { glyph: '🌍', sub: 'LEO',     name: 'LEO Stack' },
+  rocket:   { glyph: '🚀', sub: 'Rocket',  name: 'Rocket' },
+  outpostA: { glyph: '🏛', sub: 'A',       name: 'Outpost A' },
+  outpostB: { glyph: '🏛', sub: 'B',       name: 'Outpost B' },
+  outpostC: { glyph: '🏛', sub: 'C',       name: 'Outpost C' },
+  outpostD: { glyph: '🏛', sub: 'D',       name: 'Outpost D' },
+};
+
+// Where does a stack physically sit? Returns the siteId the
+// stack is currently at, or null when the stack has no location
+// (Hand is not a stack here; LEO is always at the LEO anchor).
+function getStackSiteId(stackId) {
+  if (stackId === 'leo') {
+    // LEO Stack lives at the LEO anchor site. Return the LEO
+    // site id (or 'leo' as a sentinel if _activeData isn't
+    // ready yet).
+    return getLeoSiteId();
+  }
+  if (stackId === 'rocket') {
+    const site = getRocketSite();
+    return site?.id || null;
+  }
+  if (stackId && stackId.startsWith('outpost')) {
+    const letter = stackId.slice('outpost'.length);
+    const op = getOutpost(letter);
+    return op?.siteId || null;
+  }
+  return null;
+}
+
+// Return the site id of the LEO anchor (the dedicated lagrange
+// "LEO" node in the site data). Used by getStackSiteId for the
+// LEO Stack and for colocated-destination math.
+function getLeoSiteId() {
+  if (!_activeData) return 'leo';
+  const leo = _activeData.sites.find(
+    (s) => s.type === 'lagrange' && s.name === 'LEO'
+  );
+  return leo?.id || 'leo';
+}
+
+// Cards owned by a stack. Returns the same { id, kind, face? }
+// shape used everywhere.
+function getStackCards(stackId) {
+  if (stackId === 'leo')    return getLeoCards();
+  if (stackId === 'rocket') return getRocketStack();
+  if (stackId && stackId.startsWith('outpost')) {
+    const letter = stackId.slice('outpost'.length);
+    const op = getOutpost(letter);
+    return op ? op.cards.slice() : [];
+  }
+  return [];
+}
+
+// Destinations the given source stack can transfer cards to
+// RIGHT NOW. A destination is valid when it's a different stack
+// at the SAME site (colocation rule G1). Returns an array of
+// { id, label } objects; empty array when nothing's colocated.
+function getColocatedDestinations(sourceId) {
+  const sourceSite = getStackSiteId(sourceId);
+  if (!sourceSite) return [];
+  const dests = [];
+  // LEO is always at LEO. If source is at LEO and not LEO
+  // itself, LEO is a destination. Skip when source IS LEO.
+  if (sourceId !== 'leo' && sourceSite === getLeoSiteId()) {
+    dests.push({ id: 'leo', label: 'LEO Stack' });
+  }
+  // Rocket is colocated when its site matches the source site
+  // AND the source isn't the rocket.
+  if (sourceId !== 'rocket') {
+    const rs = getRocketSite();
+    if (rs && rs.id === sourceSite) {
+      dests.push({ id: 'rocket', label: 'Rocket' });
+    }
+  }
+  // Outposts at the same site. Skip the source outpost itself.
+  for (const letter of ['A', 'B', 'C', 'D']) {
+    const opId = `outpost${letter}`;
+    if (opId === sourceId) continue;
+    const op = getOutpost(letter);
+    if (op && op.siteId === sourceSite) {
+      dests.push({ id: opId, label: `Outpost ${letter}` });
+    }
+  }
+  return dests;
+}
+
+// Move ONE card by id from sourceStack to destStack. Returns
+// true on success. Wet-mass clamps re-apply on the destination
+// after the move; any spilled water is logged. Used by the
+// transfer section's "Send selected" button.
+function transferOneCard(sourceId, destId, cardId) {
+  const TANK_MAX = 32;
+  // Pull the slot out of the source first so we know exactly
+  // what we're moving (id + kind + face).
+  let slot = null;
+  if (sourceId === 'leo') {
+    slot = removeCardFromLeoById(cardId);
+  } else if (sourceId === 'rocket') {
+    const stack = getRocketStack();
+    const idx = stack.findIndex((s) => s.id === cardId);
+    if (idx === -1) return false;
+    slot = { ...stack[idx] };
+    rocketRemoveCard(idx);
+  } else if (sourceId.startsWith('outpost')) {
+    const letter = sourceId.slice('outpost'.length);
+    const op = getOutpost(letter);
+    if (!op) return false;
+    const idx = op.cards.findIndex((s) => s.id === cardId);
+    if (idx === -1) return false;
+    slot = op.cards[idx];
+    removeCardFromOutpost(letter, idx);
+  }
+  if (!slot) return false;
+  // Drop it into the destination.
+  let added = false;
+  if (destId === 'leo') {
+    added = addCardToLeo(slot);
+  } else if (destId === 'rocket') {
+    added = rocketAddCard(slot.id, slot.kind, slot.face) !== -1;
+  } else if (destId.startsWith('outpost')) {
+    const letter = destId.slice('outpost'.length);
+    added = addCardToOutpost(letter, slot);
+  }
+  if (!added) {
+    // Roll back to source on failure.
+    if (sourceId === 'leo') addCardToLeo(slot);
+    else if (sourceId === 'rocket') rocketAddCard(slot.id, slot.kind, slot.face);
+    else if (sourceId.startsWith('outpost')) {
+      addCardToOutpost(sourceId.slice('outpost'.length), slot);
+    }
+    return false;
+  }
+  // Wet-mass clamp on the destination tank. Only the rocket
+  // has a water tank; LEO + outposts that receive cards have
+  // no spillage concern (LEO has no tank; outpost-tank clamps
+  // would live in stacks.js if needed).
+  if (destId === 'rocket') {
+    const cap = Math.max(0, TANK_MAX - rocketStackDryMass());
+    if (getTankWater() > cap) setTankWater(cap);
+  }
+  return true;
+}
+
+// Pull a single slot (by id) out of a stack, returning the
+// removed { id, kind, face } or null. Mirrors transferOneCard's
+// source-removal so decommission + transfer stay consistent.
+function pullSlotFromStack(stackId, id) {
+  if (stackId === 'leo') return removeCardFromLeoById(id);
+  if (stackId === 'rocket') {
+    const stack = getRocketStack();
+    const idx = stack.findIndex((s) => s.id === id);
+    if (idx === -1) return null;
+    const slot = { ...stack[idx] };
+    rocketRemoveCard(idx);
+    return slot;
+  }
+  if (stackId.startsWith('outpost')) {
+    const letter = stackId.slice('outpost'.length);
+    const op = getOutpost(letter);
+    if (!op) return null;
+    const idx = op.cards.findIndex((s) => s.id === id);
+    if (idx === -1) return null;
+    const slot = { ...op.cards[idx] };
+    removeCardFromOutpost(letter, idx);
+    return slot;
+  }
+  return null;
+}
+
+// Put a slot back into its source stack (rollback when a
+// decommission can't complete - e.g. crew, which never enters
+// the hand).
+function readdSlotToStack(stackId, slot) {
+  if (stackId === 'leo') addCardToLeo(slot);
+  else if (stackId === 'rocket') rocketAddCard(slot.id, slot.kind, slot.face);
+  else if (stackId.startsWith('outpost')) {
+    addCardToOutpost(stackId.slice('outpost'.length), slot);
+  }
+}
+
+// Decommission selected cards from a stack back to the player's
+// hand (variant rule: voluntary stack removal returns cards to
+// hand). Confirms first. Crew never enters the hand, so any crew
+// in the selection is rolled back into the stack and reported.
+async function decommissionSelectedToHand(stackId, ids, onDone) {
+  const list = [...ids];
+  if (!list.length) return;
+  const ok = await confirmModal({
+    title: '♻ Decommission to hand',
+    body: `Return <strong>${list.length}</strong> selected card${list.length === 1 ? '' : 's'} `
+      + `from this stack to your hand?`,
+    yes: '♻ Decommission', no: 'Cancel',
+  });
+  if (!ok) return;
+  let returned = 0;
+  let blocked = 0;
+  for (const id of list) {
+    const slot = pullSlotFromStack(stackId, id);
+    if (!slot) continue;
+    const card = cardById(id);
+    const r = card ? addToHand(card) : { ok: false };
+    if (r && r.ok) returned++;
+    else { readdSlotToStack(stackId, slot); blocked++; }
+  }
+  let msg = `♻ Decommissioned <strong>${returned}</strong> card${returned === 1 ? '' : 's'} to your hand.`;
+  if (blocked) msg += ` <strong>${blocked}</strong> stayed (crew can't go to the hand).`;
+  setStatus(msg);
+  try { onDone && onDone(); } catch (e) { console.error('decommission onDone:', e); }
+}
+
+// LEO inspector. Same card-holder system as the rocket modal:
+// each card is rendered via the shared renderCard() and gets a
+// Select toggle so the player can mark cards for transfer. The
+// transfer section at the bottom lists every colocated stack
+// the player can ship the selected cards to. Free action - no
+// op cost. Subscribes to onLeoChange / onRocketChange /
+// onOutpostsChange so the modal re-renders live as state
+// shifts.
+function openLeoStackModal() {
+  openUnifiedStackInspector('leo');
+}
+
+// Outpost inspector. Same unified shape as the LEO modal.
+// Adds factory / colony attachment chips in the stats row.
+function openOutpostStackModal(letter) {
+  openUnifiedStackInspector(`outpost${letter}`);
+}
+
+// Unified inspector for any non-rocket stack (LEO, Outpost
+// A-D). The rocket modal stays separate (it has the thruster
+// picker + prospector + afterburn UI) but we layer the same
+// select-and-transfer pattern into it as well via
+// renderRocketTransferSection.
+function openUnifiedStackInspector(stackId) {
+  document.querySelector('.stack-inspector-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay stack-inspector-overlay';
+  const selected = new Set();
+  let unsubFns = [];
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+    for (const fn of unsubFns) { try { fn(); } catch {} }
+    unsubFns = [];
+  };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const dialog = document.createElement('div');
+  dialog.className = 'stack-inspector-modal';
+  overlay.appendChild(dialog);
+
+  const render = () => {
+    const labelMeta = STACK_LABELS[stackId] || { glyph: '?', sub: stackId, name: stackId };
+    const cards = getStackCards(stackId);
+    // Prune selections of cards that are no longer in this
+    // stack (e.g. moved out by a sibling subscriber).
+    for (const id of [...selected]) {
+      if (!cards.some((c) => c.id === id)) selected.delete(id);
+    }
+    const dests = getColocatedDestinations(stackId);
+
+    // Stat row depends on which stack we're inspecting.
+    let statsHtml = '';
+    if (stackId === 'leo') {
+      const aqua = getAqua();
+      const handCount = getHandSlots().length;
+      statsHtml = `
+        <div class="stack-inspector-stat-row">
+          <div class="stack-inspector-stat"><span class="muted">LEO cards</span><strong>${esc(String(cards.length))}</strong></div>
+          <div class="stack-inspector-stat"><span class="muted">Aqua bank</span><strong class="stat-aqua">${esc(String(aqua))} 💧</strong></div>
+          <div class="stack-inspector-stat"><span class="muted">Hand (not at LEO)</span><strong>${esc(String(handCount))}</strong></div>
+        </div>`;
+    } else if (stackId.startsWith('outpost')) {
+      const letter = stackId.slice('outpost'.length);
+      const op = getOutpost(letter);
+      if (!op) { close(); return; }
+      const factory = getFactory(op.siteId);
+      const colony  = getColony(op.siteId);
+      statsHtml = `
+        <div class="stack-inspector-stat-row">
+          <div class="stack-inspector-stat"><span class="muted">Cards</span><strong>${esc(String(cards.length))}</strong></div>
+          <div class="stack-inspector-stat"><span class="muted">Water FT</span><strong class="stat-water">${esc(String(op.tank))} 💧</strong></div>
+          <div class="stack-inspector-stat"><span class="muted">Factory</span><strong>${factory ? `🏭 <span class="industrialize-spectral-badge spectral-${esc(factory.spectralType)}">${esc(factory.spectralType)}</span>` : '<span class="muted">none</span>'}</strong></div>
+          <div class="stack-inspector-stat"><span class="muted">Colony</span><strong>${colony ? '🌐 dome' : '<span class="muted">none</span>'}</strong></div>
+        </div>`;
+    }
+
+    const headline = stackId === 'leo'
+      ? '🌍 LEO Stack'
+      : `🏛${esc(stackId.slice('outpost'.length))} - Outpost`;
+    const locLabel = stackId === 'leo'
+      ? 'orbital staging'
+      : (() => {
+          const letter = stackId.slice('outpost'.length);
+          const op = getOutpost(letter);
+          const site = _activeData?.byId?.[op?.siteId];
+          return site?.name || op?.siteId || '';
+        })();
+
+    dialog.innerHTML = `
+      <div class="stack-inspector-head">
+        <h3>${headline}</h3>
+        <span class="stack-inspector-loc">${esc(locLabel)}</span>
+      </div>
+      <div class="stack-inspector-body">
+        ${statsHtml}
+        <h4>Cards (${cards.length})</h4>
+        <!-- Same #rocket-stack-cards container + .rocket-stack-row
+             grid the rocket modal uses, so the cards render with
+             identical look + spacing across every stack inspector. -->
+        <div id="stack-inspector-cards">
+          <div class="rocket-stack-row" id="stack-inspector-cards-row"></div>
+        </div>
+      </div>
+      <!-- Footer: transfer + decommission + fuel + close all live
+           in a pinned bar so they stay visible no matter how far
+           the card list is scrolled. -->
+      <div class="stack-inspector-footer">
+        <div id="stack-inspector-transfer"></div>
+        <div class="card-modal-actions">
+          <button type="button" class="modal-btn decommission stack-decom-btn"
+            title="Return the selected cards to your hand" disabled>♻ Decommission to hand</button>
+          ${stackId === 'leo' && isLeoSite(getRocketSite())
+            ? '<button type="button" class="modal-btn stack leo-fuel-tank" title="Open the docked rocket\'s water tank to transfer fuel">💧 Rocket fuel tank</button>'
+            : ''}
+          <button type="button" class="modal-btn stack-inspector-close">Close</button>
+        </div>
+      </div>
+    `;
+
+    // Footer buttons depend on the selection count. refreshFooter
+    // updates them IN PLACE so toggling Select never rebuilds the
+    // card list (and so never resets its scroll position).
+    const refreshFooter = () => {
+      const n = selected.size;
+      dialog.querySelectorAll('.stack-inspector-xfer-btn').forEach((btn) => {
+        btn.disabled = n === 0;
+        btn.textContent = `Send ${n > 0 ? n + ' ' : ''}→ ${btn.dataset.destLabel || ''}`;
+      });
+      const decom = dialog.querySelector('.stack-decom-btn');
+      if (decom) {
+        decom.disabled = n === 0;
+        decom.textContent = `♻ Decommission to hand${n ? ` (${n})` : ''}`;
+      }
+    };
+
+    const row = dialog.querySelector('#stack-inspector-cards-row');
+    if (!cards.length) {
+      row.innerHTML = '<p class="muted">Stack is empty.</p>';
+    } else {
+      for (const slot of cards) {
+        const card = cardById(slot.id);
+        if (!card) continue;
+        // Same .rocket-slot wrapper + renderCard the rocket
+        // modal uses - one design language across every stack.
+        const wrap = document.createElement('div');
+        wrap.className = 'rocket-slot';
+        if (selected.has(slot.id)) wrap.classList.add('is-selected');
+        wrap.appendChild(renderCard(card, { type: slot.kind || 'patent', face: slot.face }));
+        const actions = document.createElement('div');
+        actions.className = 'rocket-slot-actions';
+        const selBtn = document.createElement('button');
+        selBtn.type = 'button';
+        selBtn.className = 'rocket-select' + (selected.has(slot.id) ? ' is-on' : '');
+        selBtn.textContent = selected.has(slot.id) ? '✓ Selected' : 'Select';
+        selBtn.addEventListener('click', () => {
+          const on = selected.has(slot.id);
+          if (on) selected.delete(slot.id); else selected.add(slot.id);
+          // Toggle in place - NO render() - so the card list's
+          // scroll position is untouched.
+          wrap.classList.toggle('is-selected', !on);
+          selBtn.classList.toggle('is-on', !on);
+          selBtn.textContent = !on ? '✓ Selected' : 'Select';
+          refreshFooter();
+        });
+        actions.appendChild(selBtn);
+        if (slot.face === 'secondary') {
+          const tag = document.createElement('span');
+          tag.className = 'card-face-tag';
+          tag.title = 'Black-Side / Tier 2';
+          tag.textContent = 'BS';
+          actions.appendChild(tag);
+        }
+        wrap.appendChild(actions);
+        row.appendChild(wrap);
+      }
+    }
+
+    // Transfer section. Shown only when at least one
+    // destination is colocated. The rule G1 covers card / FT
+    // transfers between colocated stacks; this is the UI for
+    // moving CARDS - water transfers stay on the existing fuel
+    // modal for now (per-stack water move would be a future
+    // unification).
+    const transferHost = dialog.querySelector('#stack-inspector-transfer');
+    if (dests.length === 0) {
+      transferHost.innerHTML = `
+        <div class="stack-inspector-transfer empty">
+          <h4>🔄 Transfer</h4>
+          <p class="muted">No colocated stacks to transfer to right now.${stackId === 'leo'
+            ? ' Park the rocket at LEO to enable LEO ↔ Rocket transfers.'
+            : ' Park the rocket at this site (or create a second outpost here) to enable transfers.'}</p>
+        </div>`;
+    } else {
+      const destButtonsHtml = dests.map((d) =>
+        `<button type="button" class="stack-inspector-xfer-btn" data-dest="${esc(d.id)}" data-dest-label="${esc(d.label)}" disabled>Send → ${esc(d.label)}</button>`
+      ).join('');
+      transferHost.innerHTML = `
+        <div class="stack-inspector-transfer">
+          <h4>🔄 Transfer (free action)</h4>
+          <p class="muted">Select cards above, then send them to a colocated stack. Wet-mass clamps apply on the destination tank.</p>
+          <div class="stack-inspector-xfer-row">${destButtonsHtml}</div>
+        </div>`;
+      transferHost.querySelectorAll('.stack-inspector-xfer-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const destId = btn.getAttribute('data-dest');
+          if (!destId || selected.size === 0) return;
+          // Snapshot ids first - the source array mutates as
+          // we move each card so iteration over `selected` is
+          // safe via spread.
+          const toMove = [...selected];
+          let moved = 0;
+          for (const cardId of toMove) {
+            if (transferOneCard(stackId, destId, cardId)) {
+              moved++;
+              selected.delete(cardId);
+            }
+          }
+          const destMeta = STACK_LABELS[destId] || { name: destId };
+          const sourceMeta = STACK_LABELS[stackId] || { name: stackId };
+          setStatus(`🔄 Transferred <strong>${moved}</strong> card${moved === 1 ? '' : 's'} from <em>${esc(sourceMeta.name)}</em> to <em>${esc(destMeta.name)}</em>.`);
+          logAction({
+            type: 'transfer',
+            icon: '🔄',
+            summary: `Transferred ${moved} card${moved === 1 ? '' : 's'} from ${sourceMeta.name} to ${destMeta.name}`,
+            undoable: false,
+            data: { source: stackId, dest: destId, count: moved },
+          });
+          render();
+        });
+      });
+    }
+
+    dialog.querySelector('.stack-inspector-close').addEventListener('click', close);
+    // When the rocket is docked at LEO, a shortcut into its water
+    // tank (the aqua <-> tank transfer UI lives there). Close the
+    // LEO inspector first so the two modals don't stack / fight
+    // over the Escape key.
+    const fuelBtn = dialog.querySelector('.leo-fuel-tank');
+    if (fuelBtn) {
+      fuelBtn.addEventListener('click', () => {
+        close();
+        openFuelTankModal();
+      });
+    }
+    // Decommission: return the selected cards to hand (free,
+    // any-time). Active only when something is selected.
+    const decomBtn = dialog.querySelector('.stack-decom-btn');
+    if (decomBtn) {
+      decomBtn.addEventListener('click', () => {
+        if (!selected.size) return;
+        decommissionSelectedToHand(stackId, [...selected], render);
+      });
+    }
+    // Initialise footer button states from the current selection.
+    refreshFooter();
+  };
+
+  // Subscribe to every state change that could affect the
+  // displayed cards or the colocated-destination list. The
+  // modal re-renders in place so transfers feel instant.
+  unsubFns.push(onLeoChange(render));
+  unsubFns.push(onRocketChange(render));
+  unsubFns.push(onOutpostsChange(render));
+  unsubFns.push(onFactoryChange(render));
+  unsubFns.push(onColonyChange(render));
+
+  render();
+  document.body.appendChild(overlay);
+  overlay.focus();
+}
+
+// Empty-slot affordance modal. Explains how the player can
+// populate the slot. Tells the player which other slots are
+// occupied so they understand the constraint.
+function openEmptyOutpostModal(letter) {
+  document.querySelector('.stack-inspector-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay stack-inspector-overlay';
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const taken = Object.keys(getOutposts()).sort();
+  const takenLabel = taken.length
+    ? `Occupied slots: <strong>${taken.join(', ')}</strong>`
+    : 'No outpost slots are occupied yet.';
+  const dialog = document.createElement('div');
+  dialog.className = 'stack-inspector-modal';
+  dialog.innerHTML = `
+    <div class="stack-inspector-head">
+      <h3>🏛${esc(letter)} - Empty slot</h3>
+    </div>
+    <div class="stack-inspector-body">
+      <p>Outpost slot <strong>${esc(letter)}</strong> isn't in use yet. To create an outpost in this slot:</p>
+      <ol class="stack-inspector-howto">
+        <li>Park your rocket at any non-LEO site with cards loaded.</li>
+        <li>Open the site popup and tap <strong>🚀→🏛 Convert to Outpost</strong>.</li>
+        <li>Pick slot <strong>${esc(letter)}</strong> from the picker.</li>
+      </ol>
+      <p class="muted">${takenLabel}</p>
+      <p class="muted">
+        ET Production at a player-owned factory can also create
+        a fresh outpost when none exists at that site - the slot
+        picker will offer this letter.
+      </p>
+    </div>
+    <div class="card-modal-actions">
+      <button type="button" class="modal-btn stack-inspector-close">Close</button>
+    </div>
+  `;
+  overlay.appendChild(dialog);
+  dialog.querySelector('.stack-inspector-close').addEventListener('click', close);
+  document.body.appendChild(overlay);
+  overlay.focus();
 }
 
 // Vertical resize grabber for the hand strip. Tracks a CSS
@@ -521,11 +1284,79 @@ function endCustomDragGhost() {
   _dragGhostState = null;
 }
 
+// Animate a card flying from its on-screen position to the
+// hand strip's drop area, then commit it to the hand. Used by
+// the deck-tap modal's "Add to hand" button so the player sees
+// the card sail from the library / modal to the strip instead
+// of it just popping into existence. srcEl is the card element
+// inside the modal (or any DOM node we can read a bounding
+// rect off); onLand fires AFTER the card has visually arrived.
+//
+// If we can't find a destination (no hand strip mounted, e.g.
+// the player is on a non-browse view) we skip the animation
+// and call onLand immediately so callers never block on a
+// missing target.
+function flyCardToHand(srcEl, card, onLand) {
+  const land = () => { try { onLand?.(); } catch (e) { console.error('flyCardToHand land:', e); } };
+  const dest = document.getElementById('sandbox-hand-cards')
+    || document.getElementById('sandbox-hand');
+  if (!srcEl || !dest) { land(); return; }
+  const srcRect = srcEl.getBoundingClientRect();
+  const dstRect = dest.getBoundingClientRect();
+  if (!srcRect.width || !srcRect.height) { land(); return; }
+  // Build a clone of the card art, fixed-position it over the
+  // source, then transition it toward the hand strip. We use a
+  // CSS transition (transform + opacity) because the runtime is
+  // simple and the browser can keep the transform on the GPU.
+  const ghost = (srcEl.cloneNode(true));
+  ghost.classList.add('hand-flight-ghost');
+  ghost.style.position = 'fixed';
+  ghost.style.left = srcRect.left + 'px';
+  ghost.style.top  = srcRect.top + 'px';
+  ghost.style.width  = srcRect.width + 'px';
+  ghost.style.height = srcRect.height + 'px';
+  ghost.style.margin = '0';
+  ghost.style.pointerEvents = 'none';
+  ghost.style.zIndex = '120';
+  ghost.style.transformOrigin = 'top left';
+  ghost.style.transform = 'translate(0, 0) scale(1)';
+  ghost.style.transition = 'transform 520ms cubic-bezier(0.22, 0.61, 0.36, 1), opacity 520ms ease-out';
+  ghost.style.willChange = 'transform, opacity';
+  // Land near the LEFT edge of the strip so the card looks
+  // like it slots into the first position (cards stack
+  // left-to-right; new hand cards appear at the left end of
+  // the strip). The final scale (~0.4) matches the hand-
+  // strip's visual card size.
+  const targetX = dstRect.left + 24;
+  const targetY = dstRect.top + (dstRect.height - srcRect.height * 0.4) / 2;
+  const dx = targetX - srcRect.left;
+  const dy = targetY - srcRect.top;
+  document.body.appendChild(ghost);
+  // Force layout before the transform change so the transition
+  // actually fires (otherwise the browser collapses the two
+  // styles and skips animation).
+  void ghost.offsetWidth;
+  ghost.style.transform = `translate(${dx}px, ${dy}px) scale(0.4) rotate(-6deg)`;
+  ghost.style.opacity = '0.05';
+  let settled = false;
+  const finish = () => {
+    if (settled) return;
+    settled = true;
+    ghost.remove();
+    land();
+  };
+  ghost.addEventListener('transitionend', finish);
+  // Safety net in case transitionend doesn't fire (off-screen,
+  // tab inactive, prefers-reduced-motion suppressing the
+  // transition).
+  setTimeout(finish, 700);
+}
+
 // Tap modal for a card sitting in the deck. Confirms "add to
 // hand" with a single primary action. Mobile-friendly because
 // HTML5 drag-and-drop doesn't work reliably on touch; pointing
 // + tapping is a more honest gesture for "I want this card."
-function openDeckTapModal(card, kind) {
+function openDeckTapModal(card, kind, { allowAuction = false, inspectOnly = false } = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay';
   const close = () => overlay.remove();
@@ -546,17 +1377,73 @@ function openDeckTapModal(card, kind) {
   const actions = document.createElement('div');
   actions.className = 'card-modal-actions';
 
-  const addBtn = document.createElement('button');
-  addBtn.type = 'button';
-  addBtn.className = 'modal-btn stack';
-  addBtn.textContent = '✋ Add to hand';
-  addBtn.addEventListener('click', () => {
-    const r = addToHand(card);
-    if (!r.ok) setStatus(`Can't add: ${r.reason}.`);
-    close();
-  });
+  // Action button depends on context + mode:
+  //   - allowAuction (opened FROM the cart, market mode): a
+  //     "🎯 Auction" button that buys this deck-top card.
+  //   - market mode, opened from the LIBRARY (no allowAuction):
+  //     strictly read-only - no add, no auction. Auctions only
+  //     happen in the cart.
+  //   - Free Library mode: "✋ Add to hand" + flight.
+  const inMarket = getMarketMode() === MARKET_MODE.MARKET;
+  if (inspectOnly) {
+    // Crew library: pure reference. Crew enters play only through
+    // the starting-crew wizard at New game, so there's no add /
+    // auction here.
+    const note = document.createElement('p');
+    note.className = 'muted card-modal-note';
+    note.textContent = '👥 Crew is chosen at New game via the starting-crew wizard.';
+    actions.append(note);
+  } else if (inMarket && allowAuction) {
+    const auctionBtn = document.createElement('button');
+    auctionBtn.type = 'button';
+    auctionBtn.className = 'modal-btn stack';
+    const bonus = supportBonusDecks(card).length;
+    auctionBtn.textContent = bonus > 0 ? `🎯 Auction (+${bonus} bonus)` : '🎯 Auction';
+    auctionBtn.title = 'Auction this card (1 op, 0 aqua in sandbox mode).';
+    auctionBtn.addEventListener('click', () => {
+      close();
+      doAuctionCard(card);
+    });
+    actions.append(auctionBtn);
+  } else if (inMarket) {
+    const note = document.createElement('p');
+    note.className = 'muted card-modal-note';
+    note.textContent = '🛒 Card Market: patents are acquired from the Cart tab, not the library. This view is read-only.';
+    actions.append(note);
+  } else {
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'modal-btn stack';
+    addBtn.textContent = '✋ Add to hand';
+    addBtn.addEventListener('click', () => {
+      // Validate up front: don't fly the animation just to bounce
+      // (dup card, expansion card, etc). Surface the reason and
+      // skip the flight.
+      if (isInHand(card.id)) {
+        setStatus(`Can't add: already in your hand.`);
+        close();
+        return;
+      }
+      // Close the modal first so the user sees the card take
+      // flight against the underlying view, not against a fading
+      // backdrop. The flight clones the modal card element so the
+      // ghost survives the close.
+      const srcEl = cardEl;
+      overlay.classList.add('is-flying');
+      flyCardToHand(srcEl, card, () => {
+        const r = addToHand(card);
+        if (!r.ok) setStatus(`Can't add: ${r.reason}.`);
+      });
+      // Fade the modal itself out in parallel with the flight so
+      // the player's eye follows the card to the strip rather than
+      // getting stuck on a still-open dialog.
+      overlay.style.transition = 'opacity 220ms ease-out';
+      overlay.style.opacity = '0';
+      setTimeout(close, 240);
+    });
+    actions.append(addBtn);
+  }
 
-  actions.append(addBtn);
   panel.appendChild(actions);
   overlay.appendChild(panel);
   mountOverlay(overlay);
@@ -581,6 +1468,7 @@ function openCardModal(card, kind, slotIdx) {
   panel.className = 'card-modal-panel';
   const cardEl = renderCard(card, {
     type: kind,
+    face: getPickedCrew()?.cardId === card.id ? getPickedCrew()?.face : undefined,
     onSupportClick: (kinds) => {
       close();
       openPatentsSupports(kinds);
@@ -592,18 +1480,64 @@ function openCardModal(card, kind, slotIdx) {
   const actions = document.createElement('div');
   actions.className = 'card-modal-actions';
 
+  // Crew has NO per-card actions (no Discard / Sell / Exo-produce
+  // / Boost / Flip). Crew never enters the hand and can ONLY move
+  // stack-to-stack (LEO <-> rocket <-> outpost) via the stack
+  // inspector's transfer controls. Show a note and stop here.
+  if (kind === 'crew') {
+    const note = document.createElement('p');
+    note.className = 'muted card-modal-note';
+    note.textContent = '👥 Crew can only be transferred between stacks (LEO ↔ rocket ↔ outpost). It has no hand actions.';
+    actions.append(note);
+    panel.appendChild(actions);
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+    const onKeyCrew = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKeyCrew); } };
+    document.addEventListener('keydown', onKeyCrew);
+    return;
+  }
+
   // Four primary actions, emoji-led for the quick-icon row on
   // hand-slot hover (defined further down) to mirror the same
   // verbs. Boost flags the card for the next BOOST commit;
   // the commit lives on the hand strip's BOOST button (lit
   // when at least one card is marked).
+  // Discard: voluntary free action, 1/turn, sends the Hand
+  // card to the bottom of its corresponding patent deck (user,
+  // 2026-05-24: "you can discard a card from your hand at a
+  // ny time, 1 per turn, that goes to the back of the deck").
+  // Crew cards don't have a deck to return to in this slice -
+  // they just leave the hand. Per-turn budget tracked in
+  // turn-clock.js.
   const discardBtn = document.createElement('button');
   discardBtn.type = 'button';
   discardBtn.className = 'modal-btn discard';
-  discardBtn.textContent = '🗑 Discard';
-  discardBtn.title = 'Return this card to the deck';
+  const discardsLeft = getDiscardsRemaining();
+  discardBtn.textContent = discardsLeft > 0
+    ? '🗑 Discard'
+    : '🗑 Discard (used this turn)';
+  discardBtn.title = discardsLeft > 0
+    ? `Send this card to the bottom of the ${card.type || 'corresponding'} deck. Free action, 1 per turn.`
+    : `Discard already used this turn (1 per turn). End the turn to refresh.`;
+  discardBtn.disabled = discardsLeft <= 0;
   discardBtn.addEventListener('click', () => {
+    if (discardBtn.disabled) return;
+    if (!consumeDiscard()) {
+      setStatus('Discard already used this turn (1 per turn).');
+      return;
+    }
     removeFromHandAt(slotIdx);
+    // Patents return to the bottom of their type's deck.
+    // Crew don't have a deck in this slice; they just leave.
+    if (PATENTS_BY_ID[card.id]) addToBottom(card.id);
+    setStatus(`🗑 Discarded <em>${esc(card.name)}</em> to the bottom of the ${esc(card.type || 'crew')} deck.`);
+    logAction({
+      type: 'discard',
+      icon: '🗑',
+      summary: `Discarded ${card.name} to the bottom of the ${card.type || 'crew'} deck`,
+      undoable: false,
+      data: { cardId: card.id, deckType: card.type || null },
+    });
     close();
   });
 
@@ -705,8 +1639,8 @@ function showPane(pane) {
   if (backdrop) backdrop.classList.toggle('hidden', !pane);
   // Render the pane lazily on first reveal.
   if      (pane === 'patents')    renderPatents();
+  else if (pane === 'cart')       renderCart();
   else if (pane === 'milestones') renderMilestones();
-  else if (pane === 'events')     renderEvents();
   else if (pane === 'log')        renderMissionLog();
   else if (pane === 'solo')       renderSolo();
 }
@@ -962,6 +1896,10 @@ function ensureMapShell(host) {
           aria-label="End turn">⏭ End turn</button>
         <button id="turn-tracker" title="View turn tracker"
           aria-label="View turn tracker">🕐</button>
+        <span id="turn-budget" class="map-turn-budget" aria-live="polite">
+          <span class="turn-tag" id="turn-tag-op" title="Operations remaining this turn">op:1</span>
+          <span class="turn-tag" id="turn-tag-move" title="Moves remaining this turn">move:1</span>
+        </span>
         <span id="aqua-chip" class="map-aqua-chip"
           title="Aqua balance - spend 4 aqua per hazard to bypass rolls, or convert 1:1 to water at LEO">
           💧 <strong id="aqua-chip-balance">${getAqua()}</strong>
@@ -1119,6 +2057,25 @@ function ensureMapShell(host) {
   }
   refreshMoveButton();
   onTurnChange(refreshMoveButton);
+  // Per-turn budget tags [op:N] [move:N] in the toolbar. Live-
+  // update on any consume / refund / turn rollover (all route
+  // through turn-clock's notify -> onTurnChange).
+  const opTag = host.querySelector('#turn-tag-op');
+  const moveTag = host.querySelector('#turn-tag-move');
+  function refreshTurnBudget() {
+    const ops = getOpsRemaining();
+    const moves = getMovesRemaining();
+    if (opTag) {
+      opTag.textContent = `op:${ops}`;
+      opTag.classList.toggle('is-spent', ops <= 0);
+    }
+    if (moveTag) {
+      moveTag.textContent = `move:${moves}`;
+      moveTag.classList.toggle('is-spent', moves <= 0);
+    }
+  }
+  refreshTurnBudget();
+  onTurnChange(refreshTurnBudget);
   moveBtn.addEventListener('click', () => {
     if (moveBtn.dataset.state === 'undo') undoRocketMove();
     else                                  moveRocket();
@@ -1492,6 +2449,14 @@ async function mountMapFor() {
     syncSoloShipMarker();
     syncSandboxRocket();
     syncDiscs();
+    // Stage-3: push initial chit + focus state to the freshly-
+    // built renderer so factories / colonies / outposts paint
+    // on first frame (instead of waiting for the first state
+    // change to fire the subscribers).
+    syncFactories();
+    syncColonies();
+    syncOutposts();
+    syncFocusedSite();
     // Initial camera: focus on the rocket's current site if the
     // player has built a stack, else LEO. Snap instantly (ms: 0)
     // because the user can't see the pre-mount state - animating
@@ -1588,6 +2553,12 @@ function openRocketStackModal() {
   // resets it so a freshly-flyable stack still needs the user to
   // confirm "yes, engage" before the animation runs.
   let engaged = false;
+  // Transient selection set for the Transfer section. Cards
+  // marked here can be shipped to a colocated stack (LEO if
+  // at LEO; outposts at the rocket's current site). Cleared
+  // when cards leave the stack (e.g. moved out by a transfer
+  // or popped back to hand via the existing ↩ button).
+  const selected = new Set();
   const repaint = () => {
     const stack = getRocketStack();
     const r = isRocketActive();
@@ -1766,6 +2737,10 @@ function openRocketStackModal() {
         <div class="rocket-stack-row thrusters" id="rocket-stack-thrusters"></div>
         <div class="rocket-stack-row others" id="rocket-stack-others"></div>
       </div>
+      <!-- Transfer section: shown when colocated stacks exist
+           (LEO at LEO, outposts at the same site). Populated by
+           the rocket-modal repaint loop. -->
+      <div id="rocket-stack-transfer"></div>
     `;
     panel.appendChild(body);
 
@@ -1938,10 +2913,20 @@ function openRocketStackModal() {
     stack.forEach((slot, idx) => {
       const card = lookup(slot.id);
       if (!card) return;
-      const isThruster = card.type === 'thruster' || card.thrust != null;
+      // Crew can serve as the ship's thruster OR its robonaut.
+      // Resolve the slot's chosen faction face so its thruster
+      // block / prospector kind are recognised here, matching the
+      // engine (rocket.js synthesises the same view).
+      const crewFace = (slot.kind === 'crew' || CREW.some((c) => c.id === slot.id))
+        ? (card.faces && card.faces[slot.face === 'secondary' ? 'secondary' : 'primary'])
+        : null;
+      const isThruster = card.type === 'thruster' || card.thrust != null
+        || !!(crewFace && crewFace.thruster);
+
       const wrap = document.createElement('div');
       wrap.className = 'rocket-slot';
       if (isThruster && slot.id === activeId) wrap.classList.add('is-active-thruster');
+      if (selected.has(slot.id)) wrap.classList.add('is-selected');
       // Non-thruster cards whose supplies satisfy any of the
       // active thruster's requires get an "is-supporting" wash so
       // the player can trace which specific cards are powering
@@ -1961,7 +2946,7 @@ function openRocketStackModal() {
       // from "this thruster needs X" to the library view of every
       // card that supplies X. We close the rocket-stack modal
       // first so the patents pane comes up on a clean surface.
-      const cardOpts = { type: slot.kind || 'patent' };
+      const cardOpts = { type: slot.kind || 'patent', face: slot.face };
       if (isThruster && slot.id === activeId) cardOpts.supplied = supplied;
       cardOpts.onSupportClick = (kinds) => {
         close();
@@ -1992,6 +2977,7 @@ function openRocketStackModal() {
       // raygun / buggy property. Clicking sets THIS card as the
       // active prospector for the turn.
       const prospKind = (() => {
+        if (crewFace) return crewFace.prospector || null;
         const f = (card.faces && card.faces.primary) || card;
         const props = f.properties || [];
         for (const k of ['raygun', 'missile', 'buggy']) {
@@ -2015,15 +3001,38 @@ function openRocketStackModal() {
         actions.appendChild(btn);
       }
 
-      const back = document.createElement('button');
-      back.type = 'button';
-      back.className = 'rocket-back-to-hand';
-      back.textContent = '↩ Back to hand';
-      back.addEventListener('click', () => {
-        rocketRemoveCard(idx);
-        addToHand(card);
+      // Select toggle for the transfer section. Same idiom as
+      // the LEO / Outpost inspector's per-card Select button -
+      // tap to mark, tap again to clear; the transfer section
+      // below the stack picks up selected ids and offers one
+      // "Send → <stack>" button per colocated destination.
+      const selBtn = document.createElement('button');
+      selBtn.type = 'button';
+      selBtn.className = 'rocket-select' + (selected.has(slot.id) ? ' is-on' : '');
+      selBtn.textContent = selected.has(slot.id) ? '✓ Selected' : 'Select';
+      selBtn.addEventListener('click', () => {
+        if (selected.has(slot.id)) selected.delete(slot.id);
+        else selected.add(slot.id);
+        repaint();
       });
-      actions.appendChild(back);
+      actions.appendChild(selBtn);
+
+      // Crew never returns to the hand - it can only move stack-
+      // to-stack (use Select + Transfer below). Non-crew cards get
+      // the "Back to hand" shortcut.
+      const isCrewSlot = slot.kind === 'crew' || CREW.some((c) => c.id === slot.id);
+      if (!isCrewSlot) {
+        const back = document.createElement('button');
+        back.type = 'button';
+        back.className = 'rocket-back-to-hand';
+        back.textContent = '↩ Back to hand';
+        back.addEventListener('click', () => {
+          selected.delete(slot.id);
+          rocketRemoveCard(idx);
+          addToHand(card);
+        });
+        actions.appendChild(back);
+      }
 
       wrap.appendChild(actions);
       // Thrusters (including missile-class robonauts that carry a
@@ -2035,11 +3044,98 @@ function openRocketStackModal() {
     // grid space between sections.
     if (!thrustersHost.children.length) thrustersHost.style.display = 'none';
     if (!othersHost.children.length)    othersHost.style.display    = 'none';
+
+    // Prune selections whose cards have left the stack (transfer,
+    // back-to-hand, etc) so stale ids don't carry over.
+    for (const id of [...selected]) {
+      if (!stack.some((s) => s.id === id)) selected.delete(id);
+    }
+
+    // Transfer section: lists colocated stacks the rocket can
+    // ship selected cards to. Same getColocatedDestinations
+    // helper the LEO / Outpost inspectors use, so the rules
+    // (rocket at LEO -> can ship to LEO; rocket at site X with
+    // outposts -> can ship to those outposts) stay uniform.
+    const xferHost = body.querySelector('#rocket-stack-transfer');
+    if (xferHost) {
+      const dests = getColocatedDestinations('rocket');
+      if (dests.length === 0) {
+        xferHost.innerHTML = `
+          <div class="stack-inspector-transfer empty">
+            <h4>🔄 Transfer</h4>
+            <p class="muted">No colocated stacks here. Park at LEO or at a site with an outpost to enable transfers.</p>
+          </div>`;
+      } else {
+        const n = selected.size;
+        const dh = dests.map((d) =>
+          `<button type="button" class="stack-inspector-xfer-btn" data-dest="${esc(d.id)}" ${n === 0 ? 'disabled' : ''}>Send ${n > 0 ? n + ' ' : ''}→ ${esc(d.label)}</button>`
+        ).join('');
+        xferHost.innerHTML = `
+          <div class="stack-inspector-transfer">
+            <h4>🔄 Transfer (free action)</h4>
+            <p class="muted">Mark cards above with Select, then ship them to a colocated stack. Wet-mass clamps apply on the destination tank.</p>
+            <div class="stack-inspector-xfer-row">${dh}</div>
+          </div>`;
+        xferHost.querySelectorAll('.stack-inspector-xfer-btn').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const destId = btn.getAttribute('data-dest');
+            if (!destId || selected.size === 0) return;
+            const toMove = [...selected];
+            let moved = 0;
+            for (const cardId of toMove) {
+              if (transferOneCard('rocket', destId, cardId)) {
+                moved++;
+                selected.delete(cardId);
+              }
+            }
+            const destMeta = STACK_LABELS[destId] || { name: destId };
+            setStatus(`🔄 Transferred <strong>${moved}</strong> card${moved === 1 ? '' : 's'} from <em>Rocket</em> to <em>${esc(destMeta.name)}</em>.`);
+            logAction({
+              type: 'transfer',
+              icon: '🔄',
+              summary: `Transferred ${moved} card${moved === 1 ? '' : 's'} from Rocket to ${destMeta.name}`,
+              undoable: false,
+              data: { source: 'rocket', dest: destId, count: moved },
+            });
+            repaint();
+          });
+        });
+      }
+      // Decommission: return the selected cards to hand (free,
+      // any-time). Sits next to the transfer controls and is
+      // active only when something is selected. Always present,
+      // even when there are no colocated transfer destinations.
+      const nSel = selected.size;
+      xferHost.insertAdjacentHTML('beforeend',
+        `<div class="stack-decommission-row">
+           <button type="button" class="modal-btn decommission rocket-decom-btn"
+             title="Return the selected cards to your hand" ${nSel ? '' : 'disabled'}>
+             ♻ Decommission to hand${nSel ? ` (${nSel})` : ''}</button>
+         </div>`);
+      const rdecom = xferHost.querySelector('.rocket-decom-btn');
+      if (rdecom) {
+        rdecom.addEventListener('click', () => {
+          if (!selected.size) return;
+          decommissionSelectedToHand('rocket', [...selected], repaint);
+        });
+      }
+    }
   };
   const lookup = (id) => PATENTS_BY_ID[id]
     || CREW.find((c) => c.id === id) || null;
   repaint();
-  _rocketModalUnsub = onRocketChange(repaint);
+  // Re-render the rocket modal on any state change that affects
+  // its display or the colocated-destination list. Stack changes
+  // (cards added / removed) AND outpost / LEO changes (transfer
+  // destinations appearing or disappearing) all need to refresh.
+  const unsubRocket  = onRocketChange(repaint);
+  const unsubLeo     = onLeoChange(repaint);
+  const unsubOutpost = onOutpostsChange(repaint);
+  _rocketModalUnsub = () => {
+    try { unsubRocket(); } catch {}
+    try { unsubLeo(); } catch {}
+    try { unsubOutpost(); } catch {}
+  };
 
   mountOverlay(overlay);
   const onKey = (e) => { if (e.key === 'Escape') close(); };
@@ -2681,16 +3777,29 @@ function applyEventDieEffect(event) {
   const season = getSeasonForSlot(event.turn);
   const e = getEventForRoll(event.dieRoll, season && season.name);
   if (!e) return;
+  // Inspiration (d6 = 1 or 2): cycle every patent deck - the
+  // topmost card of each goes to the bottom. Auto-applies; the
+  // player doesn't have to manually resolve it. This is the
+  // only event with an automatic mechanical effect today;
+  // others still log as "Would fire" until they get
+  // implementations.
+  let applied = false;
+  if (e.rolls.includes(event.dieRoll) && e.name === 'Inspiration') {
+    cycleAllDecks();
+    applied = true;
+  }
   logAction({
     type: 'event_d6',
     icon: e.icon,
-    summary: `Would fire: ${e.name} (d6 = ${event.dieRoll}) - ${e.text}`,
+    summary: applied
+      ? `${e.name} fired (d6 = ${event.dieRoll}) - every market deck cycled top → bottom.`
+      : `Would fire: ${e.name} (d6 = ${event.dieRoll}) - ${e.text}`,
     undoable: false,
     data: {
       dieRoll: event.dieRoll,
       eventName: e.name,
       season: season && season.name,
-      applied: false,
+      applied,
     },
   });
 }
@@ -2863,6 +3972,10 @@ function doRefuel(site) {
     setStatus(`Refuel blocked: ${chk.reason}`);
     return;
   }
+  // Rulebook I5a: ISRU Refuel is an Operation, consumes the
+  // per-turn op slot. Factory-Refuel (I5b) will route through
+  // this same gate when it lands.
+  if (!requireOp('ISRU Refuel')) return;
   const source = chk.source;
   const tankBefore = getTankWater();
   const tmax = getTankMax();
@@ -2893,6 +4006,552 @@ function doRefuel(site) {
   // Visual: pop the tank modal showing water flowing in. Player
   // can click to skip or dismiss whenever.
   openFuelTankModal({ fromWater: tankBefore, toWater: tankBefore + gain });
+}
+
+// Outpost slot picker. Returns a Promise<letter|null>; resolves
+// null on cancel / Escape. Shows the four A/B/C/D buttons in a
+// row, dimming the ones whose slots are already taken. Used by
+// the Rocket -> Outpost convert flow (user picks which slot
+// letter the new outpost takes - variant rule, see
+// industrialize.md "Outpost slot assignment").
+function pickOutpostSlot({ title = '🏛 Pick a slot for the new Outpost', body = '' } = {}) {
+  return new Promise((resolve) => {
+    document.querySelector('.outpost-slot-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay outpost-slot-overlay';
+    overlay.tabIndex = -1;
+    const close = (letter) => {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(letter || null);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(null); } };
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
+    const free = new Set(getAvailableOutpostSlots());
+    const dialog = document.createElement('div');
+    dialog.className = 'outpost-slot-modal';
+    dialog.innerHTML = `
+      <div class="outpost-slot-head"><h3>${esc(title)}</h3></div>
+      ${body ? `<div class="outpost-slot-body">${body}</div>` : ''}
+      <div class="outpost-slot-buttons">
+        ${OUTPOST_LETTERS.map((L) => {
+          const taken = !free.has(L);
+          return `<button type="button" class="outpost-slot-btn ${taken ? 'is-taken' : ''}" data-letter="${L}" ${taken ? 'disabled' : ''}>${L}</button>`;
+        }).join('')}
+      </div>
+      <div class="card-modal-actions">
+        <button type="button" class="modal-btn outpost-slot-cancel">Cancel</button>
+      </div>
+    `;
+    overlay.appendChild(dialog);
+    dialog.querySelectorAll('.outpost-slot-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (btn.disabled) return;
+        close(btn.getAttribute('data-letter'));
+      });
+    });
+    dialog.querySelector('.outpost-slot-cancel').addEventListener('click', () => close(null));
+    document.body.appendChild(overlay);
+    overlay.focus();
+  });
+}
+
+// Rocket -> Outpost. Free action. Caller has validated the
+// rocket has cards, is at a non-LEO site, and at least one
+// outpost slot is free. Opens the slot picker; on confirm,
+// snapshots the rocket stack + tank, dissolves the rocket
+// (cards cleared, tank zeroed, rocket returns to LEO), and
+// creates the outpost with the snapshotted state.
+async function doConvertToOutpost(site) {
+  const stack = getRocketStack();
+  const tank  = getTankWater();
+  if (!stack.length) return;
+  const letter = await pickOutpostSlot({
+    title: `🚀→🏛 Convert Rocket to Outpost at ${site.name}`,
+    body: `<p>${stack.length} card${stack.length === 1 ? '' : 's'} + ${tank} water will move to the new outpost.</p>`,
+  });
+  if (!letter) return;
+  if (!createOutpost(letter, site.id)) {
+    setStatus(`Convert failed - slot ${esc(letter)} could not be created.`);
+    return;
+  }
+  // Move cards in order so the outpost's stack mirrors the
+  // rocket's. We do NOT route through the patent deck or hand -
+  // cards pass directly from one stack to the other.
+  for (const slot of stack) {
+    addCardToOutpost(letter, { id: slot.id, kind: slot.kind });
+  }
+  setOutpostTank(letter, tank);
+  // Dissolve the rocket: clear its card list + tank, return it
+  // to LEO. Same wipe pattern as explodeRocket minus the boom.
+  rocketClearStack();
+  setTankWater(0);
+  _rocketSiteId = null;
+  persistRocketSite();
+  _plannedRoute = null;
+  persistPlannedRoute();
+  exitManualMoveMode();
+  _rocketTrail = [];
+  persistRocketTrail();
+  if (_renderer) {
+    _renderer.setRoute(null);
+    _renderer.setRouteEndpoints(null, null);
+    _renderer.setRocketTrail(null);
+  }
+  setStatus(
+    `🚀→🏛 Converted rocket to Outpost <strong>${esc(letter)}</strong> at `
+    + `<strong>${esc(site.name)}</strong>. `
+    + `${stack.length} card${stack.length === 1 ? '' : 's'} + ${tank} water moved across; `
+    + `rocket returns to LEO empty.`
+  );
+  logAction({
+    type: 'convert_outpost',
+    icon: '🚀→🏛',
+    summary: `Converted rocket to Outpost ${letter} at ${site.name} (${stack.length} cards, ${tank} water)`,
+    undoable: false,
+    data: { siteId: site.id, letter, cards: stack.length, tank },
+  });
+}
+
+// Outpost -> Rocket. Free action. Caller has validated there's
+// no current rocket (empty stack at LEO) and the outpost exists.
+// Move the outpost's cards + tank to the rocket, place the
+// rocket at the outpost's site, dissolve the outpost.
+function doConvertToRocket(site, letter) {
+  const op = getOutpost(letter);
+  if (!op) {
+    setStatus(`Lift failed - Outpost ${esc(letter)} not found.`);
+    return;
+  }
+  if (op.siteId !== site.id) {
+    setStatus(`Lift failed - Outpost ${esc(letter)} is not at this site.`);
+    return;
+  }
+  if (getRocketStack().length > 0) {
+    setStatus(`Lift failed - rocket must be empty before lifting an outpost.`);
+    return;
+  }
+  // Variant rule: an outpost can only become a rocket if it
+  // carries at least one functional thruster (a thruster whose
+  // supports are satisfied by the rest of the outpost's stack).
+  // Re-check here in case state shifted between popup-build and
+  // click.
+  const functional = findFunctionalThrusters(op.cards);
+  if (!functional.length) {
+    setStatus(`Lift failed - Outpost ${esc(letter)} has no functional thruster.`);
+    return;
+  }
+  // Move cards over (preserve each slot's face so crew keep
+  // their faction face + a Black-Side card keeps its tier).
+  for (const slot of op.cards) {
+    rocketAddCard(slot.id, slot.kind, slot.face);
+  }
+  // Explicitly pick the first functional thruster as the active
+  // one. rocket.js auto-picks the FIRST thruster it sees on
+  // add, but that's not necessarily a thruster whose supports
+  // are satisfied; the lift would otherwise leave the rocket
+  // immediately inactive.
+  setActiveThruster(functional[0].id);
+  setTankWater(op.tank);
+  _rocketSiteId = op.siteId;
+  persistRocketSite();
+  // Dissolve outpost (returns the card list, but we already
+  // moved them - discard the return value).
+  dissolveOutpost(letter);
+  setStatus(
+    `🏛${esc(letter)}→🚀 Lifted Outpost ${esc(letter)} into your Rocket at `
+    + `<strong>${esc(site.name)}</strong>. `
+    + `${op.cards.length} card${op.cards.length === 1 ? '' : 's'} + ${op.tank} water transferred. `
+    + `Active thruster: <em>${esc(functional[0].card.name)}</em>.`
+  );
+  logAction({
+    type: 'convert_rocket',
+    icon: '🏛→🚀',
+    summary: `Lifted Outpost ${letter} into Rocket at ${site.name} (${op.cards.length} cards, ${op.tank} water, thruster ${functional[0].card.name})`,
+    undoable: false,
+    data: { siteId: site.id, letter, cards: op.cards.length, tank: op.tank, thrusterId: functional[0].id },
+  });
+}
+
+// Factory-Refuel handler (rulebook I5b). Adds water FTs to the
+// rocket tank up to the cap; consumes the per-turn op and the
+// per-site refuel lock. The flat 7-water yield is the "blue FT"
+// rulebook value; the gold-FT (isotope) variant lands when
+// isotope storage exists. Caller has already validated that a
+// player-owned factory exists at the site, the rocket is parked,
+// and tank headroom > 0.
+function doFactoryRefuel(site, gain) {
+  if (gain <= 0) return;
+  if (!requireOp('Factory-Refuel')) return;
+  const tankBefore = getTankWater();
+  const tmax = getTankMax();
+  addFuel(gain);
+  markRefueledThisTurn(site.id);
+  setStatus(
+    `🏭 Factory-Refuel at <strong>${esc(site.name)}</strong>: `
+    + `<strong>+${gain}</strong> water (factory produces 7 blue FTs, clamped by tank cap). `
+    + `Tank ${tankBefore} → <strong>${tankBefore + gain}</strong>/${tmax}.`
+  );
+  logAction({
+    type: 'factory_refuel',
+    icon: '🏭',
+    summary: `Factory-Refuel at ${site.name}: +${gain} water; tank ${tankBefore + gain}/${tmax}`,
+    undoable: false,
+    data: { siteId: site.id, gain, tankAfter: tankBefore + gain },
+  });
+  openFuelTankModal({ fromWater: tankBefore, toWater: tankBefore + gain });
+}
+
+// Wipe browse.js module-local state that the global resets in
+// card-market.js#resetSandboxEconomy can't reach: the rocket
+// position, planned route, trail, the undo snapshot, the
+// per-turn refuel-log key, and the renderer's overlay layers.
+// Pure cleanup; safe to call multiple times.
+function doBrowseLocalReset() {
+  _rocketSiteId = null;
+  persistRocketSite();
+  _rocketTrail = [];
+  persistRocketTrail();
+  _plannedRoute = null;
+  persistPlannedRoute();
+  _moveSnapshot = null;
+  if (_renderer) {
+    _renderer.setRoute(null);
+    _renderer.setRouteEndpoints(null, null);
+    _renderer.setRocketTrail(null);
+  }
+  try { localStorage.removeItem(STORAGE_REFUEL_LOG); } catch {}
+}
+
+// Full sandbox reset (Reset-sandbox button). Composition of
+// doBrowseLocalReset + the global resetSandboxEconomy from
+// card-market.js. The Card Market mode flag is preserved so a
+// player who has explicitly opted into Card Market doesn't get
+// silently flipped back by a Reset click.
+function doSandboxReset() {
+  doBrowseLocalReset();
+  resetSandboxEconomy({ keepMode: true });
+}
+
+// Research Auction handler (rulebook I2). Opens the auction
+// modal in the current Card Market mode. On commit: the picked
+// patent enters the player's hand; in Card Market mode the
+// sacrificed Hand card returns to the library. Op gated inside
+// the commit so cancel doesn't burn the turn.
+// Research Auction entry point. Opens the 🛒 Cart pane - the
+// cart IS the auction UI (only the top of each deck is
+// auctionable, via each deck's Buy button). You CANNOT auction
+// from the card library or from the deck-tap inspect modal;
+// the cart is the single place purchases happen.
+function doResearchAuction() {
+  showPane('cart');
+}
+
+// Free Market handler (rulebook I3). Only callable in Card
+// Market mode (UI gates on this). Sells one Hand card for
+// FREE_MARKET_AQUA aqua. Op gated inside the commit.
+// Income Operation handler (rulebook I1). Consumes the
+// per-turn op and credits +1 aqua to the Bank. Simple; the
+// op-budget check + the aqua mutation is the whole
+// transaction.
+const INCOME_AQUA = 1;
+function doIncomeOp() {
+  if (!requireOp('Income')) return;
+  addAqua(INCOME_AQUA);
+  setStatus(`💰 Income: <strong>+${INCOME_AQUA}</strong> aqua. Bank now <strong>${esc(String(getAqua()))}</strong>.`);
+  logAction({
+    type: 'income',
+    icon: '💰',
+    summary: `Income: +${INCOME_AQUA} aqua (bank ${getAqua()})`,
+    undoable: false,
+    data: { delta: INCOME_AQUA, bankAfter: getAqua() },
+  });
+}
+
+function doFreeMarket() {
+  if (getMarketMode() !== MARKET_MODE.MARKET) {
+    setStatus('Free Market is only available in Card Market mode.');
+    return;
+  }
+  const handIds = getHandSlots();
+  if (!handIds.length) return;
+  openFreeMarketModal({
+    handIds,
+    lookupCard: cardById,
+    onCommit: ({ cardId }) => {
+      if (!cardId) return;
+      if (!requireOp('Free Market')) return;
+      const card = cardById(cardId);
+      if (!card) {
+        setStatus(`Free Market failed - unknown card ${esc(cardId)}.`);
+        return;
+      }
+      if (!removeFromHand(cardId)) {
+        setStatus(`Free Market failed - card not in hand.`);
+        return;
+      }
+      // Sold card goes to the BOTTOM of its corresponding
+      // deck (variant rule, user 2026-05-24: "free market
+      // card ... goes to the back of the deck"). Routes by
+      // type via addToBottom.
+      addToBottom(cardId);
+      addAqua(FREE_MARKET_AQUA);
+      setStatus(
+        `💱 Sold <em>${esc(card.name)}</em> for <strong>+${FREE_MARKET_AQUA}</strong> aqua. `
+        + `Card returns to the bottom of the ${esc(card.type || 'patent')} deck.`
+      );
+      logAction({
+        type: 'free_market',
+        icon: '💱',
+        summary: `Sold ${card.name} for +${FREE_MARKET_AQUA} aqua (Free Market)`,
+        undoable: false,
+        data: { cardId, aqua: FREE_MARKET_AQUA },
+      });
+    },
+  });
+}
+
+// Resolve a hand/stack slot id to its underlying card record
+// (patents or crew). Module-level helper so the popup builders
+// and the Stage-3 op handlers all share one lookup; mirrors the
+// two `const lookup` helpers that live inside the larger UI
+// closures.
+function cardById(id) {
+  return PATENTS_BY_ID[id] || CREW_BY_ID[id] || null;
+}
+
+// ET Production handler (rulebook I8). Caller has validated
+// that a player-owned factory is at the site, the rocket is
+// parked, and there's at least one spectral-matching hand
+// card with either an outpost present or a free slot. Op cost
+// is committed inside the modal commit so cancelling doesn't
+// burn the turn.
+function doEtProduce(site, factory, options, outpostsAtSite, freeSlots) {
+  const existingOutpost = outpostsAtSite.length > 0 ? outpostsAtSite[0].letter : null;
+  openEtProduceModal({
+    siteName: site.name,
+    factorySpectral: factory.spectralType,
+    options,
+    existingOutpost,
+    freeSlots,
+    onCommit: ({ cardId, letter, isNewOutpost }) => {
+      if (!cardId || !letter) return;
+      if (!requireOp('ET Production')) return;
+      // If we need to create the outpost first, do that BEFORE
+      // moving cards - otherwise addCardToOutpost will reject.
+      if (isNewOutpost) {
+        if (!createOutpost(letter, site.id)) {
+          setStatus(`ET Produce failed - could not create Outpost ${esc(letter)}.`);
+          return;
+        }
+      }
+      const card = cardById(cardId);
+      if (!card) {
+        setStatus(`ET Produce failed - unknown card ${esc(cardId)}.`);
+        return;
+      }
+      // Card moves from hand to outpost, Black-Side-up
+      // (face='secondary'). removeFromHand first so the
+      // addCard call doesn't trip the "already in hand" guard
+      // if anything reads back through.
+      removeFromHand(cardId);
+      const added = addCardToOutpost(letter, {
+        id: cardId,
+        kind: 'patent',
+        face: 'secondary',
+      });
+      if (!added) {
+        // Roll back: put card back in hand.
+        addToHand(card);
+        setStatus(`ET Produce failed - outpost ${esc(letter)} refused the card.`);
+        return;
+      }
+      setStatus(
+        `🏭 ET Produced <em>${esc(card.name)}</em> at <strong>${esc(site.name)}</strong> `
+        + `into Outpost <strong>${esc(letter)}</strong> (Black-Side-up, spectral ${esc(factory.spectralType)}).`
+        + (isNewOutpost ? ` New outpost created.` : '')
+      );
+      logAction({
+        type: 'et_produce',
+        icon: '🏭',
+        summary: `ET Produced ${card.name} (Black-Side) at ${site.name} into Outpost ${letter}`
+          + (isNewOutpost ? ' (new outpost)' : ''),
+        undoable: false,
+        data: {
+          siteId: site.id, cardId, letter,
+          factorySpectral: factory.spectralType,
+          isNewOutpost,
+        },
+      });
+    },
+  });
+}
+
+// Single sandbox owner id - the local player. Used to tag
+// factories + colonies until Stage 4 multi-player support
+// arrives. Keeping it as a constant (rather than reading from a
+// profile system that doesn't exist yet in the sandbox) is
+// deliberate: when multi-player lands this becomes a parameter,
+// not a runtime lookup.
+const SANDBOX_OWNER_ID = 'sandbox-player';
+
+// Industrialize handler (rulebook I7). The caller has already
+// validated that the rocket is parked at a claimed site with no
+// existing factory AND that findIndustrializeOptions(stack)
+// returned at least one valid pair; we just open the modal and
+// commit when the player confirms.
+//
+// Important: the op cost is consumed inside the modal commit
+// callback (NOT at popup-click time) so cancelling the modal
+// doesn't burn the turn. The chain cards are removed from the
+// stack in reverse-index order so splices don't shift indices
+// we haven't visited yet.
+function doIndustrialize(site, stack, options) {
+  openIndustrializeModal({
+    siteName: site.name,
+    spectralType: site.spectralType || 'C',
+    stack,
+    options,
+    onCommit: (opt) => {
+      if (!opt) return;
+      if (!requireOp('Industrialize')) return;
+      // Remove chain cards in reverse index order so earlier
+      // indices stay valid as we splice. Radiators were already
+      // filtered out into opt.keptRadiators and are NOT in
+      // chainIndices.
+      const removed = [];
+      for (const idx of [...opt.chainIndices].sort((a, b) => b - a)) {
+        const slot = stack[idx];
+        if (!slot) continue;
+        const ok = rocketRemoveCard(idx);
+        if (ok) {
+          removed.push(slot.id);
+          // Variant rule (user, 2026-05-24): industrialize-
+          // decommissioned cards return to the player's HAND
+          // (NOT to the deck bottom - that earlier reading
+          // was the user's pre-clarification draft). The
+          // refinery + robonaut + support chain you spent
+          // are re-collectable, not consumed.
+          const reclaim = PATENTS_BY_ID[slot.id];
+          if (reclaim) addToHand(reclaim);
+        }
+      }
+      const spectral = site.spectralType || 'C';
+      const built = createFactory(site.id, SANDBOX_OWNER_ID, spectral);
+      const refName = opt.refinery.card.name;
+      const robName = opt.robonaut.card.name;
+      const orphanNote = opt.orphans.length
+        ? ` ⚠ ${opt.orphans.map((o) => o.card.name).join(', ')} now inactive (lost support).`
+        : '';
+      const keptNote = opt.keptRadiators.length
+        ? ` Kept: ${opt.keptRadiators.map((r) => r.card.name).join(', ')}.`
+        : '';
+      if (built) {
+        setStatus(
+          `🏭 Industrialized <strong>${esc(site.name)}</strong> `
+          + `(spectral ${esc(spectral)}). `
+          + `Decommissioned <em>${esc(refName)}</em> + <em>${esc(robName)}</em>`
+          + ` + ${removed.length - 2} support card${removed.length - 2 === 1 ? '' : 's'}.`
+          + `${keptNote}${orphanNote}`
+        );
+        logAction({
+          type: 'industrialize',
+          icon: '🏭',
+          summary: `Industrialized ${site.name} (spectral ${spectral}); `
+            + `decommissioned ${removed.length} card${removed.length === 1 ? '' : 's'} `
+            + `(refinery ${refName} + robonaut ${robName}` +
+            (opt.orphans.length ? `; orphans: ${opt.orphans.map((o) => o.card.name).join(', ')}` : '') + ')',
+          undoable: false,
+          data: {
+            siteId: site.id,
+            spectralType: spectral,
+            decommissioned: removed,
+            keptRadiators: opt.keptRadiators.map((r) => r.id),
+            orphans: opt.orphans.map((o) => o.id),
+          },
+        });
+      } else {
+        setStatus(`Industrialize failed to record - factory may already exist at ${esc(site.name)}.`);
+      }
+    },
+  });
+}
+
+// Build Colony handler (rulebook G3, free action). The caller
+// has already validated that the site has a player-owned
+// factory, no existing colony, the player is under the cap,
+// and at least one colocated Crew card exists.
+//
+// One crew -> auto-commit (picker is skipped). Multiple crews
+// -> picker modal. On commit: the chosen crew slot is removed
+// from the stack and the underlying crew card returns to the LEO
+// Stack intact (crew always re-spawns in LEO). The colony dome is
+// created on the factory.
+//
+// Free action: no requireOp call.
+function doColonize(site, stack, options) {
+  openColonizePicker({
+    siteName: site.name,
+    options,
+    onCommit: (pick) => {
+      if (!pick) return;
+      // Re-find by id at commit time - splices may have shifted
+      // indices since the modal opened, though in practice
+      // nothing else mutates the stack during the modal's
+      // lifetime. Defence-in-depth.
+      const currentStack = getRocketStack();
+      const idx = currentStack.findIndex((s) => s.id === pick.id && s.kind === 'crew');
+      if (idx === -1) {
+        setStatus(`Colonize aborted - crew ${esc(pick.id)} is no longer in the stack.`);
+        return;
+      }
+      const crewFace = currentStack[idx].face;
+      const crewCard = CREW_BY_ID[pick.id];
+      if (!crewCard) {
+        setStatus(`Colonize aborted - unknown crew id ${esc(pick.id)}.`);
+        return;
+      }
+      const removed = rocketRemoveCard(idx);
+      if (!removed) {
+        setStatus(`Colonize aborted - could not remove crew from stack.`);
+        return;
+      }
+      // Crew always re-spawns in the LEO Stack (variant rule,
+      // user 2026-05). crewCard kept for naming only.
+      void crewCard;
+      const leoOk = addCardToLeo({ id: pick.id, kind: 'crew', face: crewFace });
+      if (!leoOk) {
+        // Roll back the stack removal so the crew isn't lost.
+        rocketAddCard(pick.id, 'crew', crewFace);
+        setStatus(`Colonize aborted - crew couldn't return to the LEO stack.`);
+        return;
+      }
+      const created = createColony(site.id, SANDBOX_OWNER_ID);
+      if (!created) {
+        // Cap or duplicate. Roll back: pull crew back out of
+        // the LEO stack, drop it back on the rocket stack.
+        removeCardFromLeoById(pick.id);
+        rocketAddCard(pick.id, 'crew', crewFace);
+        setStatus(`Colonize failed at <strong>${esc(site.name)}</strong> - cap or duplicate.`);
+        return;
+      }
+      const crewName = pick.primary?.name || pick.card.id;
+      setStatus(
+        `🌐 Built colony at <strong>${esc(site.name)}</strong>. `
+        + `<em>${esc(crewName)}</em> returns to your LEO Stack. `
+        + `Colonies: <strong>${countColoniesByOwner(SANDBOX_OWNER_ID)}</strong>/${COLONY_CAP_PER_PLAYER}.`
+      );
+      logAction({
+        type: 'colonize',
+        icon: '🌐',
+        summary: `Built colony at ${site.name} (crew ${crewName} returned to LEO stack); `
+          + `${countColoniesByOwner(SANDBOX_OWNER_ID)}/${COLONY_CAP_PER_PLAYER} colonies`,
+        undoable: false,
+        data: { siteId: site.id, crewId: pick.id },
+      });
+    },
+  });
 }
 
 // Fuel-tank modal. SVG cylinder; water rect grows from
@@ -2945,60 +4604,92 @@ function confirmModal({ title, body, yes = 'OK', no = 'Cancel' }) {
   });
 }
 
-// Interactive fuel-strip diagram for the rocket-stack header.
-// Cells 1..32 are coloured by the published weight-class band:
-//   1                       MIN DRY MASS marker
-//   2-4 (under 2)           WISP   (+2)
-//   2-4 (under 4 2/3)       PROBE  (+1)
-//   5-6 (under 6 1/2)       SCOUT   (0)
-//   7-16 (under 17)         TRANSPORT (-1)
-//   17-32                   TUG    (-2)
-// Two chits overlay the strip: DRY at the rocket's dry mass and
-// WET at the current wet mass. Hovering any cell reveals its
-// weight-class modifier. The strip is read-only for now; future
-// patches will wire drag-to-relocate-chit, factory refuel
-// patterns, etc.
+// Interactive fuel-strip diagram for the rocket-stack header -
+// the published HF4 "Net Thrust track". Mass positions 1..32 are
+// grouped into the doubling weight-class bands (data/net-thrust-
+// track.js is the single source of truth on the band boundaries
+// and the per-band fuel-step fraction ladders):
+//   WISP +2   mass 1       PROBE +1  mass 2-4
+//   SCOUT 0   mass 5-8      TRANSPORT -1 mass 9-16
+//   TUG -2    mass 17-32
+// Each band shows its fraction ladder (the white sub-step ovals)
+// stacked ABOVE its mass-position cells, matching the board's
+// layered layout. Two chits overlay the cells: DRY at the
+// rocket's dry mass, WET at the current wet mass. Black-line =
+// FT spend (burn); red-dotted = refuel - see the legend. The
+// strip is read-only for now.
 function buildFuelStrip(host, totals) {
   host.innerHTML = '';
-  const cap = 32;
-  const wm = totals.wetMass | 0;
-  const dm = totals.dryMass | 0;
-  // Weight class for a given chit position. Mirrors the
-  // getActiveThrusterStats logic so the strip stays a single
-  // source of truth on the rule.
-  function classify(pos) {
-    if (pos <  2)       return { name: 'WISP',      mod: +2, color: '#f472b6' };
-    if (pos < 14 / 3)   return { name: 'PROBE',     mod: +1, color: '#f9a8d4' };
-    if (pos < 6.5)      return { name: 'SCOUT',     mod:  0, color: '#7dd3fc' };
-    if (pos < 17)       return { name: 'TRANSPORT', mod: -1, color: '#67e8f9' };
-    return                        { name: 'TUG',    mod: -2, color: '#5eead4' };
-  }
-  const wrap = document.createElement('div');
-  wrap.className = 'rocket-fuel-strip-row';
+  const wm = Math.max(0, totals.wetMass | 0);
+  const dm = Math.max(0, totals.dryMass | 0);
+
   const label = document.createElement('div');
   label.className = 'rocket-fuel-strip-label';
   label.textContent = 'Net Thrust track';
   host.appendChild(label);
-  for (let i = 1; i <= cap; i++) {
-    const cell = document.createElement('div');
-    const c = classify(i);
-    cell.className = 'fuel-strip-cell';
-    cell.style.backgroundColor = c.color;
-    cell.dataset.tip = `Position ${i} - ${c.name} weight class (${c.mod >= 0 ? '+' : ''}${c.mod} thrust)`;
-    cell.title = cell.dataset.tip;
-    cell.textContent = String(i);
-    if (i === dm) cell.classList.add('is-dry-chit');
-    if (i === wm) cell.classList.add('is-wet-chit');
-    if (i === dm && i === wm) cell.classList.add('is-co-chit');
-    wrap.appendChild(cell);
+
+  const bands = document.createElement('div');
+  bands.className = 'fuel-strip-bands';
+  for (const wc of WEIGHT_CLASSES) {
+    const span = wc.massMax - wc.massMin + 1;
+    const band = document.createElement('div');
+    band.className = 'fuel-strip-band';
+    band.dataset.band = wc.id;
+    band.style.flexGrow = String(span);
+    band.style.setProperty('--band-color', wc.color);
+
+    const head = document.createElement('div');
+    head.className = 'fuel-strip-band-head';
+    const mod = wc.netThrust >= 0 ? `+${wc.netThrust}` : String(wc.netThrust);
+    head.innerHTML = `<span class="fs-band-name">${wc.id}</span><span class="fs-band-mod">${mod}</span>`;
+    band.appendChild(head);
+
+    // Fraction ladder (fuel sub-steps). Whole-step bands (TUG)
+    // show a single "1" to read as "whole fuel steps".
+    const fracs = document.createElement('div');
+    fracs.className = 'fuel-strip-fracs';
+    const ladder = wc.fractions.length ? wc.fractions : ['1'];
+    for (const fr of ladder) {
+      const chip = document.createElement('span');
+      chip.className = 'fs-frac';
+      chip.textContent = fr;
+      fracs.appendChild(chip);
+    }
+    band.appendChild(fracs);
+
+    const cells = document.createElement('div');
+    cells.className = 'fuel-strip-cells';
+    cells.style.gridTemplateColumns = `repeat(${span}, 1fr)`;
+    for (let i = wc.massMin; i <= wc.massMax; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'fuel-strip-cell';
+      let tip = `Mass ${i} - ${wc.id} weight class (${mod} net thrust)`;
+      if (i === MIN_DRY_MASS) { cell.classList.add('is-min-dry'); tip += ' - MIN DRY MASS'; }
+      if (i === MAX_DRY_MASS) { cell.classList.add('is-max-dry'); tip += ' - MAX DRY MASS'; }
+      if (i === MAX_WET_MASS) { cell.classList.add('is-max-wet'); tip += ' - MAX WET MASS'; }
+      cell.dataset.tip = tip;
+      cell.title = tip;
+      cell.textContent = String(i);
+      if (i === dm) cell.classList.add('is-dry-chit');
+      if (i === wm) cell.classList.add('is-wet-chit');
+      if (i === dm && i === wm) cell.classList.add('is-co-chit');
+      cells.appendChild(cell);
+    }
+    band.appendChild(cells);
+    bands.appendChild(band);
   }
-  host.appendChild(wrap);
+  host.appendChild(bands);
+
+  const wc = weightClassForMass(wm || 1);
+  const netMod = wc.netThrust >= 0 ? `+${wc.netThrust}` : String(wc.netThrust);
   const legend = document.createElement('div');
   legend.className = 'rocket-fuel-strip-legend';
   legend.innerHTML = `
     <span><i class="chit-dot is-dry-chit"></i> Dry ${dm}</span>
-    <span><i class="chit-dot is-wet-chit"></i> Wet ${wm}</span>
-    <span class="muted">Max wet 32</span>
+    <span><i class="chit-dot is-wet-chit"></i> Wet ${wm} (${wc.id} ${netMod})</span>
+    <span class="muted">Max wet ${MAX_WET_MASS}</span>
+    <span class="fs-line-key"><i class="fs-line black"></i> burn (FT spend)</span>
+    <span class="fs-line-key"><i class="fs-line red"></i> refuel</span>
   `;
   host.appendChild(legend);
 }
@@ -3043,6 +4734,15 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   };
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
+
+  // Net Thrust readout: wet mass -> weight class -> net thrust,
+  // mirroring the published Net Thrust track (data/net-thrust-
+  // track.js). Net thrust = base thrust + weight-class modifier.
+  const wmNow = Math.max(0, totals.wetMass | 0);
+  const wcNow = weightClassForMass(wmNow || 1);
+  const ntMod = wcNow.netThrust >= 0 ? `+${wcNow.netThrust}` : String(wcNow.netThrust);
+  const netThrustVal = (thrust != null) ? (thrust + wcNow.netThrust) : null;
+  const fracLadder = wcNow.fractions.length ? wcNow.fractions.join(' ') : 'whole steps';
 
   const panel = document.createElement('div');
   panel.className = 'fuel-tank-panel';
@@ -3146,6 +4846,24 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         ? `Lift cap = thrust <strong>${thrust}</strong> − dry mass
            <strong>${dryMass}</strong> = <strong>${liftCap}</strong> liftable water.`
         : '(no active thruster)'}
+    </div>
+    <div class="fuel-tank-netthrust">
+      <div class="ntt-head">🚀 Net Thrust track</div>
+      <div class="ntt-row">
+        Wet mass <strong>${wmNow}</strong> → <strong>${wcNow.id}</strong>
+        weight class (<strong>${ntMod}</strong> net thrust)
+      </div>
+      ${thrust != null
+        ? `<div class="ntt-row">Base thrust <strong>${thrust}</strong>
+             ${ntMod} weight = net thrust <strong>${netThrustVal}</strong></div>`
+        : '<div class="ntt-row muted">(no active thruster - no base thrust)</div>'}
+      <div class="ntt-row muted">Fuel steps this band: <strong>${fracLadder}</strong></div>
+      <p class="muted ntt-note">
+        Heavier stacks read a lower net thrust. A burn spends fuel
+        and walks the wet-mass chit toward dry mass (black line);
+        refuelling walks it back up (red dotted). Each band spends
+        fuel in finer fractions as mass grows.
+      </p>
     </div>
   `;
 
@@ -3581,6 +5299,11 @@ function doProspect(site, prosp) {
     );
     return;
   }
+  // Rulebook I6: Prospect is an Operation, consumes the per-turn
+  // op slot regardless of dice outcome. Closing the roll modal
+  // without placing the disc still costs the op (you committed to
+  // the roll).
+  if (!requireOp('Prospect')) return;
   const threshold = siteProspectThreshold(site);
   const roll = 1 + Math.floor(Math.random() * 6);
   const success = roll <= threshold;
@@ -3780,16 +5503,54 @@ function animateRocketAlong(segments, totalMs = 700) {
   });
 }
 
+// BOOST commit button next to the hand title. Lit when at
+// least one card is marked. Per the variant cargo flow (user,
+// 2026-05-24): Boost moves cards Hand -> LEO Stack (not
+// directly onto the rocket), so the button is rocket-location-
+// independent - it just needs marked cards. The separate
+// Transfer free action (LEO popup) moves cards LEO -> Rocket
+// when the rocket is parked at LEO.
+function repaintBoostCommit() {
+  const btn = document.getElementById('hand-boost-commit');
+  if (!btn) return;
+  const n = getBoostMarked().length;
+  btn.dataset.armed = n > 0 ? '1' : '0';
+  btn.disabled = n === 0;
+  btn.textContent = n > 0 ? `🛰 BOOST → LEO (${n})` : '🛰 BOOST → LEO';
+  btn.title = n > 0
+    ? `Boost ${n} marked card${n === 1 ? '' : 's'} from your hand into the LEO Stack. Costs one operation. Use the Transfer action at LEO to move them onto the rocket.`
+    : 'Mark cards in your hand, then press BOOST to ship them up to your LEO Stack.';
+}
+
+// Dry mass of cards currently on the active rocket stack.
+// Used to compute the rocket's water-tank cap (TANK_MAX - dry)
+// when cards transfer onto the rocket (more cards = less room
+// for water). LEO has no tank, so there's no LEO equivalent.
+function rocketStackDryMass() {
+  let mass = 0;
+  for (const slot of getRocketStack()) {
+    const c = PATENTS_BY_ID[slot.id];
+    if (!c) continue;
+    const f = (c.faces && c.faces.primary) || c;
+    mass += ((f.mass != null ? f.mass : c.mass) | 0);
+  }
+  return mass;
+}
+
 function syncSandboxRocket() {
   if (!_renderer) return;
+  // The boost button depends on the rocket's site (which
+  // changes after every move), so refresh it whenever the
+  // sandbox rocket sprite syncs.
+  repaintBoostCommit();
   const stack = getRocketStack();
-  // Rocket model is present whenever the player has ≥1 card in
-  // the stack - even when it isn't yet activatable. The 🚫
-  // overlay distinguishes active vs inactive states.
-  if (!stack.length) {
-    _renderer.setSandboxRocket(null);
-    return;
-  }
+  // The rocket sprite is ALWAYS drawn (per user, 2026-05-24:
+  // "need a rocket sprite here as well to show this is where my
+  // rocket is, but it is not functional"). The 🚫 overlay
+  // distinguishes empty / unactivatable vs active states; an
+  // empty stack at LEO still reads as "your rocket lives here"
+  // so the player isn't confused when their cards are sitting
+  // in LEO Stack but the rocket itself looks gone.
   const r = isRocketActive();
   const site = getRocketSite();
   const x = site && typeof site.x === 'number' ? site.x : LEO_ANCHOR.x;
@@ -3837,6 +5598,47 @@ function syncDiscs() {
   _renderer.setDiscs(getDiscs());
 }
 
+// Stage-3 sync helpers: push factory / colony / outpost / focus
+// state to the renderer so the chit layers repaint. Each is a
+// thin wrapper around the corresponding all-state getter and
+// setter pair; subscribed at mount time to the state stores.
+function syncFactories() {
+  if (!_renderer) return;
+  const map = {};
+  for (const f of allFactories()) map[f.siteId] = f;
+  _renderer.setFactories(map);
+}
+function syncColonies() {
+  if (!_renderer) return;
+  const map = {};
+  for (const c of allColonies()) map[c.siteId] = c;
+  _renderer.setColonies(map);
+}
+function syncOutposts() {
+  if (!_renderer) return;
+  _renderer.setOutposts(getOutposts());
+}
+// Translate the focused-stack id ('rocket' | 'outpostA' | ...)
+// into a site id for the renderer's focus ring. LEO focus has
+// no map site, so we pass null.
+function syncFocusedSite() {
+  if (!_renderer) return;
+  const id = getFocusedStackId();
+  if (id === 'rocket') {
+    const site = getRocketSite();
+    _renderer.setFocusedSiteId(site ? site.id : null);
+    return;
+  }
+  if (id && id.startsWith('outpost')) {
+    const letter = id.slice('outpost'.length);
+    const op = getOutpost(letter);
+    _renderer.setFocusedSiteId(op ? op.siteId : null);
+    return;
+  }
+  // LEO focus - clear the map ring.
+  _renderer.setFocusedSiteId(null);
+}
+
 // Rocket exploded mid-move. Animation runs at the failed-hazard
 // position; once the visual finishes (or in parallel, depending
 // on timing), every card in the stack returns to the player's
@@ -3868,11 +5670,17 @@ async function explodeRocket(siteId) {
   // or in the rocket; clearing the stack first keeps the second
   // check from blocking each addToHand call. We collect counts so
   // the log entry tells the player exactly what came back.
+  // Crew is the exception: it always re-spawns in the LEO Stack
+  // (variant rule, user 2026-05), even when it dies in a mishap.
   rocketClearStack();
   let returned = 0;
+  let crewToLeo = 0;
   for (const slot of stackSnapshot) {
-    const card = PATENTS_BY_ID[slot.id]
-      || CREW.find((c) => c.id === slot.id) || null;
+    if (slot.kind === 'crew' || CREW.some((c) => c.id === slot.id)) {
+      if (addCardToLeo({ id: slot.id, kind: 'crew', face: slot.face })) crewToLeo++;
+      continue;
+    }
+    const card = PATENTS_BY_ID[slot.id] || null;
     if (!card) continue;
     const r = addToHand(card);
     if (r && r.ok) returned++;
@@ -3902,9 +5710,10 @@ async function explodeRocket(siteId) {
     icon: '💥',
     summary: `Rocket destroyed at ${site ? site.name : siteId}`
       + ` - ${returned} card${returned === 1 ? '' : 's'} returned to hand`
+      + (crewToLeo > 0 ? `, ${crewToLeo} crew to LEO stack` : '')
       + (tankLost > 0 ? `, ${tankLost} water lost` : ''),
     undoable: false,
-    data: { siteId, returnedCards: returned, waterLost: tankLost },
+    data: { siteId, returnedCards: returned, crewToLeo, waterLost: tankLost },
   });
   syncSandboxRocket();
   refreshOpenSitePopup();
@@ -3917,6 +5726,7 @@ async function explodeRocket(siteId) {
     title: '💥 Spacecraft destroyed',
     body: `Your rocket was lost at <strong>${esc(site ? site.name : siteId)}</strong>. `
       + `<strong>${returned}</strong> card${returned === 1 ? '' : 's'} returned to your hand`
+      + (crewToLeo > 0 ? `, <strong>${crewToLeo}</strong> crew re-spawned in your LEO stack` : '')
       + (tankLost > 0 ? `, <strong>${tankLost}</strong> water lost` : '')
       + `. Rebuild from the LEO stack to fly again.`,
     yes: 'OK',
@@ -4792,6 +6602,76 @@ function showSitePopupFor(site) {
           openFuelTankModal();
         },
       });
+      // Card transfers happen inside each stack's inspector
+      // modal (open the LEO or Rocket chip in the hand-bar
+      // switcher and use the Transfer section there). The old
+      // standalone "Transfer LEO <-> Rocket" popup button is
+      // dropped to avoid duplicate UX surfaces - the inline
+      // section in the inspector lives next to the cards being
+      // moved, which reads cleaner.
+      // Research Auction (rulebook I2). Always available at
+      // LEO; opens the 🛒 Cart pane so the player picks from
+      // the visible deck tops. Solo cost is 1 op + 0 aqua;
+      // there is no Hand-card sacrifice.
+      {
+        const mode = getMarketMode();
+        const reason = mode === MARKET_MODE.MARKET
+          ? 'Card Market: pick a deck top in the 🛒 Cart.'
+          : 'Free Library: pick a deck top in the 🛒 Cart. Costs 1 op.';
+        actions.push({
+          label: '🎯 Research Auction',
+          variant: 'rocket',
+          disabled: false,
+          title: reason,
+          onClick: () => {
+            doResearchAuction();
+            _renderer.clearSitePopup();
+          },
+        });
+      }
+      // Income Operation (rulebook I1). Always available at
+      // LEO. Pays the player 1 aqua from the Pool, consumes
+      // the per-turn op. Recovery path when the aqua bank is
+      // running low - especially in Card Market mode where
+      // running out of cards isn't recoverable, but income
+      // keeps the aqua flowing for Free Market sells.
+      {
+        // Always enabled - the op-budget check happens in
+        // doIncomeOp via requireOp, which pops the "no
+        // operations left" modal when the budget is spent. (We
+        // don't pre-disable on ops==0 because a disabled button
+        // gives no feedback; the modal is the notification the
+        // user asked for.)
+        actions.push({
+          label: '💰 Income (+1 aqua)',
+          variant: 'rocket',
+          disabled: false,
+          title: 'Receive 1 Aqua from the Pool into your Bank. Costs one operation.',
+          onClick: () => {
+            doIncomeOp();
+            _renderer.clearSitePopup();
+          },
+        });
+      }
+      // Free Market (rulebook I3). Only visible in Card Market
+      // mode. Sells one Hand card for FREE_MARKET_AQUA aqua.
+      if (getMarketMode() === MARKET_MODE.MARKET) {
+        const handEmpty = getHandSlots().length === 0;
+        const ok = !handEmpty;
+        actions.push({
+          label: `💱 Free Market (+${FREE_MARKET_AQUA} aqua)`,
+          variant: ok ? 'rocket' : 'secondary',
+          disabled: !ok,
+          title: ok
+            ? `Sell a Hand card for +${FREE_MARKET_AQUA} aqua. Costs one operation.`
+            : 'Your hand is empty - nothing to sell.',
+          onClick: () => {
+            if (!ok) return;
+            doFreeMarket();
+            _renderer.clearSitePopup();
+          },
+        });
+      }
     } else {
       const refuelChk = canRefuelAt(site);
       actions.push({
@@ -4808,6 +6688,216 @@ function showSitePopupFor(site) {
           _renderer.clearSitePopup();
         },
       });
+    }
+  }
+  // Factory-Refuel action (rulebook I5b). Shown when the rocket
+  // is parked at a site with a player-owned factory. Produces a
+  // flat 7 water FTs (the "blue FT" variant from the rulebook).
+  // The gold-FT / isotope variant lands later when isotope
+  // storage is modelled. Shares the per-site "already refueled
+  // this turn" lock with ISRU Refuel since the player only has
+  // one op per turn anyway.
+  if (rocketSite && site.id === rocketSite.id) {
+    const factory = getFactory(site.id);
+    if (factory && factory.ownerId === SANDBOX_OWNER_ID) {
+      const factoryGain = 7;
+      const tank = getTankWater();
+      const tmax = getTankMax();
+      const headroom = Math.max(0, tmax - tank);
+      const gain = Math.min(factoryGain, headroom);
+      const refueledThisTurn = hasRefueledThisTurn(site.id);
+      const ok = !refueledThisTurn && gain > 0;
+      const reason = refueledThisTurn
+        ? 'Already refueled at this site this turn.'
+        : (gain <= 0 ? `Tank full (${tank}/${tmax}).` : null);
+      actions.push({
+        label: refueledThisTurn
+          ? `🏭 Factory-Refuel done`
+          : `🏭 Factory-Refuel (+${gain} water)`,
+        variant: ok ? 'rocket' : 'secondary',
+        disabled: !ok,
+        title: reason || `Factory produces ${factoryGain} blue water FTs (clamped by tank cap).`,
+        onClick: () => {
+          if (!ok) return;
+          doFactoryRefuel(site, gain);
+          _renderer.clearSitePopup();
+        },
+      });
+    }
+  }
+  // Industrialize action (rulebook I7). Shown only at sites where
+  // the rocket is parked AND a successful claim disc exists. The
+  // button gates on whether the stack has a valid refinery +
+  // robonaut pair with their supports satisfied. The actual op +
+  // op-budget cost is committed inside the modal so cancelling
+  // doesn't burn the player's turn.
+  if (rocketSite && site.id === rocketSite.id) {
+    const disc = getDisc(site.id);
+    const existingFactory = getFactory(site.id);
+    if (disc && disc.outcome === 'success' && !existingFactory) {
+      const stack = getRocketStack();
+      const opts = findIndustrializeOptions(stack);
+      const ok = opts.length > 0;
+      const reason = ok
+        ? null
+        : 'Industrialize needs an active refinery + active robonaut in the stack (with their supports satisfied).';
+      actions.push({
+        label: '🏭 Industrialize',
+        variant: ok ? 'rocket' : 'secondary',
+        disabled: !ok,
+        title: reason || undefined,
+        onClick: () => {
+          if (!ok) return;
+          doIndustrialize(site, stack, opts);
+          _renderer.clearSitePopup();
+        },
+      });
+    } else if (existingFactory) {
+      actions.push({
+        label: '🏭 Already industrialized',
+        variant: 'secondary',
+        disabled: true,
+        title: `A factory already exists at this site (spectral ${existingFactory.spectralType}).`,
+        onClick: () => {},
+      });
+    }
+  }
+  // Colonize action (rulebook G3, free action). Shown when the
+  // rocket is parked at a site with a player-owned factory and
+  // no existing colony. Picker surfaces when 2+ crews are in
+  // the stack; auto-commits when only one. Does NOT consume the
+  // per-turn op (free action).
+  if (rocketSite && site.id === rocketSite.id) {
+    const factory = getFactory(site.id);
+    const colony = getColony(site.id);
+    if (factory && factory.ownerId === SANDBOX_OWNER_ID && !colony) {
+      const colonized = countColoniesByOwner(SANDBOX_OWNER_ID);
+      const capReached = colonized >= COLONY_CAP_PER_PLAYER;
+      const stack = getRocketStack();
+      const colonizeOptions = findColonizeOptions(stack);
+      const hasCrew = colonizeOptions.crews.length > 0;
+      const ok = hasCrew && !capReached;
+      const reason = capReached
+        ? `Colony cap reached (${COLONY_CAP_PER_PLAYER}).`
+        : !hasCrew
+          ? 'Need a Crew card colocated in the stack.'
+          : null;
+      actions.push({
+        label: '🌐 Colonize',
+        variant: ok ? 'rocket' : 'secondary',
+        disabled: !ok,
+        title: reason || `Build a colony dome here. Free action (does not cost an op).`,
+        onClick: () => {
+          if (!ok) return;
+          doColonize(site, stack, colonizeOptions);
+          _renderer.clearSitePopup();
+        },
+      });
+    } else if (colony) {
+      actions.push({
+        label: '🌐 Colonized',
+        variant: 'secondary',
+        disabled: true,
+        title: `Colony already established at this site.`,
+        onClick: () => {},
+      });
+    }
+  }
+  // ET Production action (rulebook I8). Shown when the rocket
+  // is parked at a player-owned factory AND the player's hand
+  // has at least one card whose spectral matches the factory's
+  // spectral. Card is produced Black-Side-up into the colocated
+  // outpost (or a fresh outpost the player creates inline).
+  if (rocketSite && site.id === rocketSite.id) {
+    const factory = getFactory(site.id);
+    if (factory && factory.ownerId === SANDBOX_OWNER_ID) {
+      const handIds = getHandSlots();
+      const etOptions = findEtProduceOptions(handIds, cardById, factory.spectralType);
+      const outpostsAtSite = Object.values(getOutposts()).filter((o) => o.siteId === site.id);
+      const freeSlots = getAvailableOutpostSlots();
+      const hasOutpost = outpostsAtSite.length > 0;
+      const canCreateNew = freeSlots.length > 0;
+      const ok = etOptions.length > 0 && (hasOutpost || canCreateNew);
+      const reason = !etOptions.length
+        ? `No Hand cards match spectral ${factory.spectralType}.`
+        : (!hasOutpost && !canCreateNew)
+          ? `No colocated outpost AND all 4 outpost slots are in use.`
+          : null;
+      actions.push({
+        label: `🏭 ET Produce (${factory.spectralType})`,
+        variant: ok ? 'rocket' : 'secondary',
+        disabled: !ok,
+        title: reason
+          || `Produce a spectral-${factory.spectralType} hand card Black-Side-up into the colocated outpost.`,
+        onClick: () => {
+          if (!ok) return;
+          doEtProduce(site, factory, etOptions, outpostsAtSite, freeSlots);
+          _renderer.clearSitePopup();
+        },
+      });
+    }
+  }
+  // Rocket -> Outpost free action. Surfaces when the rocket is
+  // parked at a non-LEO site with at least one card in the
+  // stack, AND there's a free outpost slot. Cards + water tank
+  // transfer to the new outpost; rocket returns to LEO empty.
+  if (rocketSite && site.id === rocketSite.id && !isLeoSite(site)) {
+    const stack = getRocketStack();
+    const freeSlots = getAvailableOutpostSlots();
+    const ok = stack.length > 0 && freeSlots.length > 0;
+    const reason = !stack.length
+      ? 'Rocket has no cards to convert.'
+      : !freeSlots.length
+        ? 'All 4 outpost slots are in use.'
+        : null;
+    actions.push({
+      label: '🚀→🏛 Convert to Outpost',
+      variant: ok ? 'rocket' : 'secondary',
+      disabled: !ok,
+      title: reason || `Park as an Outpost (slots ${freeSlots.join(', ')} free). Free action.`,
+      onClick: () => {
+        if (!ok) return;
+        doConvertToOutpost(site);
+        _renderer.clearSitePopup();
+      },
+    });
+  }
+  // Outpost -> Rocket free action. Surfaces when an outpost
+  // exists at this site AND the rocket is empty (no cards) OR
+  // is parked at LEO. The new rocket inherits the outpost's
+  // cards + tank and is placed at this site.
+  {
+    const outposts = getOutposts();
+    const localOutposts = Object.values(outposts).filter((o) => o.siteId === site.id);
+    if (localOutposts.length > 0) {
+      const rocketCardCount = getRocketStack().length;
+      const rocketEmpty = rocketCardCount === 0;
+      // Per the variant rule (user, 2026-05-24): an outpost can
+      // become a rocket "at any time IF there is a functional
+      // thruster". A functional thruster is one whose support
+      // requires are satisfied by the rest of the outpost stack.
+      for (const op of localOutposts) {
+        const functional = findFunctionalThrusters(op.cards);
+        const canConvert = rocketEmpty && functional.length > 0;
+        let reason = null;
+        if (!rocketEmpty) {
+          reason = 'Convert your existing rocket first - only one rocket at a time.';
+        } else if (functional.length === 0) {
+          reason = `Outpost ${op.letter} has no functional thruster (need a thruster with its supports satisfied in the same stack).`;
+        }
+        actions.push({
+          label: `🏛${op.letter}→🚀 Lift Outpost`,
+          variant: canConvert ? 'rocket' : 'secondary',
+          disabled: !canConvert,
+          title: reason
+            || `Lift Outpost ${op.letter} into your Rocket (${op.cards.length} card${op.cards.length === 1 ? '' : 's'}, ${op.tank} water, thruster: ${functional[0].card.name}). Free action.`,
+          onClick: () => {
+            if (!canConvert) return;
+            doConvertToRocket(site, op.letter);
+            _renderer.clearSitePopup();
+          },
+        });
+      }
     }
   }
   // Navigate-to ALWAYS sits last (CLAUDE.md style rule). It's a
@@ -4928,6 +7018,34 @@ function setStatus(html) {
   const el = document.getElementById('route-status');
   if (el) el.innerHTML = html;
 }
+
+// Per-turn operation budget gate. Returns true and consumes one
+// op when the player still has ops remaining; otherwise surfaces
+// a status notice and returns false so the caller bails. Use this
+// at the entry point of every rulebook Operation (I1, I4, I5a/b,
+// I6, I7, I8) - Air-eater Refuel (I5c) is a free action in this
+// variant and skips this gate.
+function requireOp(label) {
+  if (getOpsRemaining() > 0) {
+    consumeOp();
+    return true;
+  }
+  // Out of operations this turn. Pop an acknowledge modal so the
+  // block is unmissable (a status-line note alone is easy to
+  // overlook). confirmModal with no:'' renders a single OK
+  // button; we fire-and-forget (requireOp is synchronous, the
+  // caller bails on the false return immediately).
+  const verb = label ? `${label} costs an operation` : 'That action costs an operation';
+  confirmModal({
+    title: '⛔ No operations left',
+    body: `${esc(verb)}, but you've already used your operation for this turn. `
+      + `End the turn to refresh your operation budget.`,
+    yes: 'OK',
+    no: '',
+  });
+  setStatus(`<strong>No operations left this turn.</strong> End the turn to reset the budget.`);
+  return false;
+}
 function updateRouteStatus() {
   setStatus('Tap a site to plan a route.');
   const btn = document.getElementById('route-clear');
@@ -5012,6 +7130,283 @@ export function openPatentsSupports(kinds) {
   showPane('patents');
 }
 
+// 🛒 Patent Market cart. Shown only in Card Market mode (the
+// tab is hidden in Free Library mode). Renders one section per
+// rulebook deck type (thruster / reactor / radiator / refinery
+// / robonaut / generator) listing every patent NOT already
+// owned by the player, with a per-deck "🎯 Auction" button that
+// opens the auction-confirm modal for that deck's top card.
+// Repaints
+// on hand / rocket / outpost / LEO / market changes so the
+// available pool stays current.
+let _cartListenerHooked = false;
+function renderCart() {
+  if (!_cartListenerHooked) {
+    _cartListenerHooked = true;
+    const repaintIfActive = () => {
+      const panel = document.getElementById('browse-sidepanel');
+      if (panel && panel.dataset.active === 'cart') paintCart();
+    };
+    onHandChange(repaintIfActive);
+    onRocketChange(repaintIfActive);
+    onOutpostsChange(repaintIfActive);
+    onLeoChange(repaintIfActive);
+    onMarketChange(repaintIfActive);
+    // Deck changes drive the cart's top-of-deck view directly,
+    // so it must repaint on every cycle / draw / addToBottom.
+    onDeckChange(repaintIfActive);
+  }
+  paintCart();
+}
+function paintCart() {
+  const host = document.getElementById('browse-cart');
+  if (!host) return;
+  const mode = getMarketMode();
+  if (mode !== MARKET_MODE.MARKET) {
+    host.innerHTML = `<section class="cart-summary">
+      <h3>🛒 Patent Market</h3>
+      <p class="muted">The cart is empty - you're in 📚 Free Library mode. Switch to 🃏 Card Market in the sandbox panel to enable the patent marketplace.</p>
+    </section>`;
+    return;
+  }
+  const handIds = getHandSlots();
+  const aqua = getAqua();
+
+  host.innerHTML = `
+    <section class="cart-summary">
+      <h3>🛒 Patent Market</h3>
+      <p class="muted">Card Market mode: each deck is shuffled, and only the <strong>top card</strong> is up for auction. Per-buy cost in sandbox / solo mode: <strong>1 operation</strong> + 0 aqua. The card lands in your Hand.</p>
+      <p class="muted">Aqua bank: <strong class="stat-aqua">${esc(String(aqua))} 💧</strong>. Hand: <strong>${handIds.length}</strong> card${handIds.length === 1 ? '' : 's'}.</p>
+      <p class="muted">Inspiration event (d6 roll 1-2): every deck's top card cycles to the bottom.</p>
+    </section>
+    <div class="cart-decks" id="cart-decks-host"></div>
+  `;
+
+  const decksHost = host.querySelector('#cart-decks-host');
+  for (const type of DECK_TYPES) {
+    const topId = peekTop(type);
+    const card = topId ? cardById(topId) : null;
+    const deckSize = getDeck(type).length;
+
+    const section = document.createElement('section');
+    section.className = 'cart-deck';
+    section.dataset.type = type;
+
+    const title = document.createElement('h4');
+    title.className = 'cart-deck-title';
+    title.innerHTML = `${esc(type)} <em>(${deckSize} card${deckSize === 1 ? '' : 's'})</em>`;
+    section.appendChild(title);
+
+    const body = document.createElement('div');
+    body.className = 'cart-deck-body';
+
+    // Left: deck-thickness SVG so the player gets a visual cue
+    // of how thick the deck is.
+    const deckArt = document.createElement('div');
+    deckArt.className = 'cart-deck-art';
+    deckArt.appendChild(renderDeckThicknessSvg(deckSize));
+    body.appendChild(deckArt);
+
+    // Right: the card art for the top card via the shared
+    // renderCard. Same card-holder used elsewhere.
+    // Click the card to open the deck-tap inspect modal -
+    // same as the patent library. The modal's "Auction this
+    // card" button (in market mode) routes back through the
+    // auction-confirm flow so the player can buy from the
+    // inspect view too.
+    const cardSlot = document.createElement('div');
+    cardSlot.className = 'cart-deck-topcard';
+    if (card) {
+      const ce = renderCard(card, { type: 'patent' });
+      ce.classList.add('cart-deck-topcard-click');
+      ce.setAttribute('role', 'button');
+      ce.setAttribute('tabindex', '0');
+      ce.title = 'Tap to inspect this card';
+      // Opened from the cart -> the inspect modal gets an
+      // Auction button (allowAuction:true). The library path
+      // omits this so it stays read-only in market mode.
+      ce.addEventListener('click', (ev) => {
+        // Don't intercept clicks on interactive children of
+        // the card (e.g. the flip button, support chips).
+        if (ev.target.closest('.card-flip, .card-support-chip, .card-supports')) return;
+        openDeckTapModal(card, 'patent', { allowAuction: true });
+      });
+      ce.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          openDeckTapModal(card, 'patent', { allowAuction: true });
+        }
+      });
+      cardSlot.appendChild(ce);
+    } else {
+      cardSlot.innerHTML = '<p class="muted">Deck is empty.</p>';
+    }
+    body.appendChild(cardSlot);
+
+    section.appendChild(body);
+
+    // Auction button: opens the auction-confirm modal for this
+    // deck's top card. Disabled when the deck is empty.
+    const buy = document.createElement('button');
+    buy.type = 'button';
+    buy.className = 'cart-buy-btn';
+    buy.disabled = !card;
+    buy.title = !card
+      ? `${type} deck is empty.`
+      : 'Auction this card (1 op, 0 aqua in sandbox mode).';
+    const supportCount = card ? supportBonusDecks(card).length : 0;
+    buy.textContent = supportCount > 0
+      ? `🎯 Auction (+${supportCount} bonus)`
+      : '🎯 Auction';
+    if (card) {
+      buy.addEventListener('click', () => {
+        if (buy.disabled) return;
+        doAuctionCard(card);
+      });
+    }
+    section.appendChild(buy);
+    decksHost.appendChild(section);
+  }
+}
+
+// SVG showing a stack of cards. Thicker stacks have more
+// layered rectangles offset down-right so it reads as a
+// physical pile. Capped at 5 layers (more would just clutter).
+function renderDeckThicknessSvg(deckSize) {
+  const layers = Math.max(1, Math.min(5, Math.ceil(deckSize / 3)));
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  const w = 60, h = 84;
+  const cardW = 38, cardH = 56;
+  const offset = 4;
+  svg.setAttribute('width', String(w));
+  svg.setAttribute('height', String(h));
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  svg.setAttribute('class', 'cart-deck-svg');
+  // Draw from back (deepest offset) to front (top of deck).
+  for (let i = layers - 1; i >= 0; i--) {
+    const r = document.createElementNS(svgNS, 'rect');
+    r.setAttribute('x', String(2 + i * offset));
+    r.setAttribute('y', String(2 + i * offset));
+    r.setAttribute('width', String(cardW));
+    r.setAttribute('height', String(cardH));
+    r.setAttribute('rx', '4');
+    r.setAttribute('fill', i === 0 ? '#1f2a44' : '#0f172a');
+    r.setAttribute('stroke', i === 0 ? '#7dd3fc' : '#334155');
+    r.setAttribute('stroke-width', '1.2');
+    svg.appendChild(r);
+  }
+  // "?" mark on the top card to suggest "next draw is here".
+  const txt = document.createElementNS(svgNS, 'text');
+  txt.setAttribute('x', String(2 + cardW / 2));
+  txt.setAttribute('y', String(2 + cardH / 2 + 6));
+  txt.setAttribute('text-anchor', 'middle');
+  txt.setAttribute('font-size', '20');
+  txt.setAttribute('font-weight', '800');
+  txt.setAttribute('fill', '#7dd3fc');
+  txt.textContent = String(deckSize);
+  svg.appendChild(txt);
+  return svg;
+}
+
+// Open the auction-confirm modal for a specific card. Used by
+// the Cart's Buy button + the deck-tap modal's "Auction this
+// card" button. The deck draws happen on confirm.
+function doAuctionCard(card) {
+  if (!card) return;
+  const mode = getMarketMode();
+  openAuctionConfirmModal({
+    card,
+    mode,
+    renderCardFn: renderCard,
+    // Resolve each support deck's TOP card into its full
+    // record so the confirm modal can render the actual card
+    // art (user 2026-05-24: "please show the bonus cards in
+    // full"). Empty decks contribute nothing; the modal just
+    // shows fewer cards.
+    bonusCards: supportBonusDecks(card)
+      .map((t) => cardById(peekTop(t)))
+      .filter(Boolean),
+    onConfirm: () => {
+      if (!requireOp('Research Auction')) return;
+      // Auctions in sandbox / solo mode have NO Hand-card
+      // sacrifice and NO aqua cost (user, 2026-05-24):
+      // "auctions are cost 0 in sandbox mode". The player
+      // wins the top of the chosen deck immediately on
+      // confirm.
+      const drawnId = drawTop(card.type);
+      if (drawnId !== card.id) {
+        // Deck shifted between modal-open and confirm (rare
+        // race - e.g. an Inspiration cycle fired between
+        // tap and confirm). Put the unexpected card back at
+        // the bottom and tell the player.
+        if (drawnId) addToBottom(drawnId);
+        setStatus('Auction failed - deck state shifted. Try again.');
+        return;
+      }
+      const handResult = addToHand(card);
+      if (!handResult.ok) {
+        addToBottom(card.id);
+        setStatus(`Auction failed - ${esc(handResult.reason)}.`);
+        return;
+      }
+      // Bonus draws: 1 card from the top of each support
+      // deck. Empty support decks skip silently. The player
+      // learns the bonus identities when the cards land in
+      // hand (per the spec: don't pre-reveal).
+      const bonusTypes = supportBonusDecks(card);
+      const bonusCards = [];
+      for (const t of bonusTypes) {
+        const bId = drawTop(t);
+        if (!bId) continue;
+        const bCard = cardById(bId);
+        if (!bCard) continue;
+        const br = addToHand(bCard);
+        if (br.ok) bonusCards.push(bCard);
+        else addToBottom(bId);
+      }
+      const bonusNote = bonusCards.length
+        ? ` Bonus: ${bonusCards.map((b) => `<em>${esc(b.name)}</em>`).join(', ')}.`
+        : (bonusTypes.length ? ' (Bonus decks were empty.)' : '');
+      const modeLabel = mode === MARKET_MODE.MARKET ? 'Card Market' : 'Free Library';
+      setStatus(
+        `🎯 Auctioned <em>${esc(card.name)}</em> into your Hand (${esc(modeLabel)}).`
+        + bonusNote
+      );
+      logAction({
+        type: 'auction',
+        icon: '🎯',
+        summary: `Auctioned ${card.name}`
+          + (bonusCards.length ? `; bonus: ${bonusCards.map((b) => b.name).join(', ')}` : ''),
+        undoable: false,
+        data: {
+          cardId: card.id,
+          bonusCardIds: bonusCards.map((b) => b.id),
+          mode,
+        },
+      });
+    },
+  });
+}
+
+// (removeFromDeckIfPresent helper deleted - no longer used
+// now that auctions don't sacrifice a Hand card.)
+
+// Show or hide the 🛒 sidebar tab based on the current Card
+// Market mode. Called on mount + on every market mode flip.
+// When hiding while the cart pane is open, redirect to patents
+// so the panel doesn't go blank.
+function syncCartTabVisibility() {
+  const tab = document.getElementById('sidepanel-tab-cart');
+  const panel = document.getElementById('browse-sidepanel');
+  if (!tab || !panel) return;
+  const market = getMarketMode() === MARKET_MODE.MARKET;
+  tab.hidden = !market;
+  if (!market && panel.dataset.active === 'cart') {
+    showPane('patents');
+  }
+}
+
 function renderPatents() {
   const host = document.getElementById('browse-patents');
   if (!host) return;
@@ -5038,7 +7433,7 @@ function renderPatents() {
   const types = [...PATENT_TYPES, 'supports', 'crew', ...expansionTypes];
   const counts = Object.fromEntries(PATENT_TYPES.map((t) => [t, patentsByType(t).length]));
   for (const t of expansionTypes) counts[t] = patentsByType(t).length;
-  counts.crew = CREW.length;
+  counts.crew = CREW_FACES.length;
   counts.supports = patentsThatSupply(supplyKinds).length;
   const TYPE_LABEL = {
     'gw-thruster': 'GW thrusters (soon)',
@@ -5120,8 +7515,12 @@ function renderPatents() {
     const el = renderCard(card, { type: asKind });
     el.dataset.cardId  = card.id;
     el.dataset.cardKind = asKind;
-    const inHand   = isInHand(card.id);
-    const inRocket = isInRocket(card.id);
+    // Crew-face tiles are a display projection of a physical card
+    // (card.srcId); location markers + drag must key off the real
+    // card so both faces of one card light up when it's in hand.
+    const locId = card.srcId || card.id;
+    const inHand   = isInHand(locId);
+    const inRocket = isInRocket(locId);
     if (inHand)   el.classList.add('in-hand');
     if (inRocket) el.classList.add('in-rocket');
     if (inHand || inRocket) return el;   // placeholder - not interactive
@@ -5138,9 +7537,22 @@ function renderPatents() {
       return el;
     }
 
+    // Crew tiles are a visual reference: the 12 faction faces,
+    // each flip-less. Crew enters play via the starting-crew
+    // wizard, not by dragging from the library, so these tiles
+    // are inspect-only (tap opens a read-only card view).
+    if (asKind === 'crew') {
+      el.classList.add('is-crew-tile');
+      el.addEventListener('click', (ev) => {
+        if (ev.target.closest('.card-flip, .card-rotate')) return;
+        openDeckTapModal(card, asKind, { inspectOnly: true });
+      });
+      return el;
+    }
+
     el.draggable = true;
     el.addEventListener('dragstart', (ev) => {
-      ev.dataTransfer.setData('text/card-id', card.id);
+      ev.dataTransfer.setData('text/card-id', locId);
       ev.dataTransfer.setData('text/card-kind', asKind);
       ev.dataTransfer.effectAllowed = 'move';
       el.classList.add('is-dragging');
@@ -5160,7 +7572,8 @@ function renderPatents() {
   const repaint = (filter) => {
     grid.innerHTML = '';
     if (filter === 'crew') {
-      for (const c of CREW) grid.appendChild(decorateForHand(c, 'crew'));
+      // All 12 faction faces, each a flip-less single-face card.
+      for (const c of CREW_FACES) grid.appendChild(decorateForHand(c, 'crew'));
       return;
     }
     if (filter === 'supports') {
@@ -5260,10 +7673,19 @@ let _gloryListenerHooked = false;
 function renderMilestones() {
   if (!_gloryListenerHooked) {
     _gloryListenerHooked = true;
-    onGloryChange(() => {
+    // The endgame score depends on factory / colony / outpost
+    // / rocket / disc state in addition to glory, so we repaint
+    // on any of those changing too.
+    const repaintIfActive = () => {
       const panel = document.getElementById('browse-sidepanel');
       if (panel && panel.dataset.active === 'milestones') paintGlory();
-    });
+    };
+    onGloryChange(repaintIfActive);
+    onFactoryChange(repaintIfActive);
+    onColonyChange(repaintIfActive);
+    onOutpostsChange(repaintIfActive);
+    onRocketChange(repaintIfActive);
+    onDiscsChange(repaintIfActive);
   }
   paintGlory();
 }
@@ -5282,6 +7704,48 @@ function paintGlory() {
     .filter(([z]) => z !== 'Earth')
     .map(([z, v]) => `<li><span>${esc(z)}</span><strong>+${v} VP</strong></li>`)
     .join('');
+  // Stage-3 endgame scoring: surfaces "if the game ended now"
+  // VP breakdown. Tokens (+1 each) + spectral bonus per factory
+  // (+4/+5/+8 per Exploitation Track) + the career glory VP
+  // counter above. The values are recomputed every paint so
+  // building a factory or running an op refreshes the total.
+  const score = computeEndgameScore({ ownerId: SANDBOX_OWNER_ID });
+  const tokenRows = [
+    ['🚀 Rocket',    score.tokens.rocket],
+    ['🟡 Claims',    score.tokens.claims],
+    ['🏭 Factories', score.tokens.factories],
+    ['🌐 Colonies',  score.tokens.colonies],
+    ['🏛 Outposts',  score.tokens.outposts],
+  ].map(([label, n]) =>
+    `<li><span>${label}</span><strong>+${n} VP</strong></li>`
+  ).join('');
+  // Spectral bonus broken down by spectral letter, with the
+  // factory count + diminishing schedule chips so the player
+  // can see WHY the totals are what they are. Schedule is
+  // shared across all six spectrals (1st=8, 2nd=5, 3rd+=4 per
+  // SPECTRAL_DIMINISHING_SCHEDULE in scoring.js).
+  const spectralRows = Object.entries(score.spectralBonus.byType)
+    .filter(([, v]) => v > 0)
+    .map(([spec, v]) => {
+      const n = score.spectralBonus.perSpectralCount?.[spec] || 0;
+      const factorLabel = n === 1 ? '1 factory' : `${n} factories`;
+      return `<li>
+        <span>
+          <span class="industrialize-spectral-badge spectral-${esc(spec)}">${esc(spec)}</span>
+          <span class="muted">${esc(factorLabel)}</span>
+        </span>
+        <strong>+${v} VP</strong>
+      </li>`;
+    })
+    .join('');
+  const scheduleHint = SPECTRAL_DIMINISHING_SCHEDULE
+    .map((v, i) => i === SPECTRAL_DIMINISHING_SCHEDULE.length - 1 ? `${i + 1}+ → ${v}` : `${i + 1}st → ${v}`)
+    .join(', ');
+  const spectralBlock = score.spectralBonus.total > 0
+    ? `<h4>Spectral bonus (factories)</h4>
+       <ul class="glory-table glory-spectral-list">${spectralRows}</ul>
+       <p class="muted glory-rules glory-schedule-hint">Per spectral: ${esc(scheduleHint)} VP (rulebook M2b).</p>`
+    : '';
   host.innerHTML = `
     <section class="glory-summary">
       <h3>🏆 Glory</h3>
@@ -5296,6 +7760,22 @@ function paintGlory() {
       <p class="muted glory-rules">
         Land the rocket in a heliocentric zone for the first time to
         earn a chit. Return to LEO to convert all chits to VP.
+      </p>
+    </section>
+    <section class="endgame-summary">
+      <h3>📊 If the game ended now</h3>
+      <div class="glory-vp-row">
+        <span class="muted">Endgame VP (tokens + spectral + glory)</span>
+        <strong class="endgame-grand-vp">${score.grandTotal}</strong>
+      </div>
+      <h4>Tokens on the map (+1 each)</h4>
+      <ul class="glory-table">${tokenRows}</ul>
+      ${spectralBlock}
+      <p class="muted glory-rules">
+        Rulebook M2. VP is awarded only at endgame; ops don't tick the
+        counter mid-game. Spectral bonus is per-spectral diminishing
+        (M2b Exploitation Track): each successive factory of the
+        same spectral pays less than the last.
       </p>
     </section>
   `;
@@ -5405,129 +7885,289 @@ function paintSolo() {
   if (!host) return;
   const s = soloState();
   if (!s) {
+    const marketMode = getMarketMode();
+    const marketOn = marketMode === MARKET_MODE.MARKET;
+    // No more 'Start solo game' button - the sandbox itself
+    // IS the solo game now. The legacy soloNewGame() flow
+    // and its descriptive paragraph are gone; the panel just
+    // surfaces the Reset + card-economy toggle.
     host.innerHTML = `
-      <p class="muted">A solo game pits one ship against the round
-      clock. ${SOLO_CONFIG.STARTING_WATER} water, ${SOLO_CONFIG.OPS_PER_ROUND}
-      operations per round, ${SOLO_CONFIG.MAX_ROUNDS} rounds,
-      target ${SOLO_CONFIG.TARGET_VP} VP.</p>
+      <!-- Game-mode selector. Sandbox is the only playable mode
+           today and is selected by default; Campaign is a
+           placeholder for the published campaign variant
+           (out of scope for now, see CLAUDE.md). These chips
+           are passive indicators - tapping Sandbox just
+           re-affirms the selection; they do NOT toggle the
+           multiplayer view (that lives on the topbar). -->
+      <div class="game-mode-row">
+        <button class="game-mode-btn is-active" id="game-mode-sandbox"
+          title="Sandbox / solo - always on. The single-player game.">🗺 Sandbox</button>
+        <button class="game-mode-btn" id="game-mode-campaign" disabled
+          title="Campaign variant - not implemented yet.">📖 Campaign (soon)</button>
+      </div>
+      <p class="muted">Sandbox / solo mode is always on. Start a
+      new game to clear the board, and use the card economy
+      toggle below to switch between Free Library and Card
+      Market shopping rules.</p>
       <div class="solo-actions">
-        <button class="primary" id="solo-new" title="Start a new solo game">Start solo game</button>
-        <button class="danger" id="sandbox-reset"
-          title="Empty the hand, the rocket stack, and any board components">Reset sandbox</button>
+        <button class="primary" id="sandbox-reset"
+          title="Clear the board and start a fresh sandbox game">🆕 New game</button>
+      </div>
+      <!-- New-game settings. Starter cash seeds the aqua bank
+           on the next New game. Default ON (100 aqua). -->
+      <div class="newgame-settings">
+        <label class="newgame-toggle">
+          <input type="checkbox" id="starter-cash-toggle" ${getStarterCash() ? 'checked' : ''} />
+          <span>Start with $${STARTER_CASH_AMOUNT} starter cash</span>
+        </label>
+        <p class="muted newgame-hint">When off, a new game starts at $0 - earn aqua via Income ops and Free Market sales.</p>
+      </div>
+      <!--
+        Stage-3 Card Market toggle (industrialize.md "Sandbox
+        card-economy toggle"). Flipping the mode RESETS the game
+        - the economy is a setup-time decision, not a mid-game
+        flip - so the click handler confirms first.
+      -->
+      <div class="sandbox-market-toggle">
+        <h4>🃏 Card economy</h4>
+        <p class="muted">
+          <strong>Free Library</strong>: patents are free draws,
+          auctions cost only the per-turn op.
+          <strong>Card Market</strong>: auctions consume a Hand
+          card; Free Market sells a Hand card for +${FREE_MARKET_AQUA} aqua.
+          Toggling resets the game.
+        </p>
+        <div class="market-mode-row">
+          <button id="market-mode-library" class="market-mode-btn ${marketOn ? '' : 'is-active'}">📚 Free Library</button>
+          <button id="market-mode-market"  class="market-mode-btn ${marketOn ? 'is-active' : ''}">🃏 Card Market</button>
+        </div>
+      </div>
+      <!-- Saved games. Save current state as a new slot or
+           overwrite an existing one; click a save (or its Load
+           button) to restore it. List is sorted newest-first. -->
+      <div class="sandbox-saves">
+        <h4>💾 Saved games</h4>
+        <div class="saves-actions">
+          <button id="save-new" class="primary" title="Snapshot the current game into a new save slot">💾 Save as new</button>
+        </div>
+        <ul id="saves-list" class="saves-list"></ul>
       </div>
     `;
-    host.querySelector('#solo-new').onclick = () => {
-      soloNewGame();
-      paintSolo();
+    renderSavesList();
+    // Sandbox mode chip: already the active mode, so tapping it
+    // is a no-op confirmation - NOT a multiplayer toggle (that
+    // lives on the topbar). Campaign is disabled (out of scope).
+    const sandboxModeBtn = host.querySelector('#game-mode-sandbox');
+    if (sandboxModeBtn) sandboxModeBtn.onclick = () => {
+      setStatus('Sandbox is the active game mode.');
+    };
+    host.querySelector('#save-new').onclick = () => {
+      const name = prompt('Name this save:', defaultSaveName());
+      if (name === null) return; // cancelled
+      const rec = createSave(name);
+      setStatus(`💾 Saved game as "${esc(rec.name)}".`);
+      renderSavesList();
+    };
+    // Starter-cash toggle: persists the new-game preference.
+    // Takes effect on the NEXT New game (doesn't retroactively
+    // change the current bank).
+    const starterToggle = host.querySelector('#starter-cash-toggle');
+    if (starterToggle) starterToggle.onchange = () => {
+      setStarterCash(starterToggle.checked);
+      setStatus(starterToggle.checked
+        ? `New games will start with $${STARTER_CASH_AMOUNT} starter cash.`
+        : 'New games will start with $0 - earn aqua via Income / Free Market.');
     };
     host.querySelector('#sandbox-reset').onclick = () => {
-      if (!confirm('Reset sandbox? This clears your hand, your rocket’s stack, position, planned route, discs, glory, mission log, and the turn clock.')) return;
-      clearHand();
-      rocketClearStack();
-      // Rocket position + trail + planned route + the move
-      // snapshot that backs undo. Clearing _rocketSiteId via the
-      // helper persists the empty state so reload doesn't restore
-      // the prior journey.
-      _rocketSiteId = null;
-      persistRocketSite();
-      _rocketTrail = [];
-      persistRocketTrail();
-      _plannedRoute = null;
-      persistPlannedRoute();
-      _moveSnapshot = null;
-      if (_renderer) {
-        _renderer.setRoute(null);
-        _renderer.setRouteEndpoints(null, null);
-        _renderer.setRocketTrail(null);
-      }
-      // Game-state systems.
-      try { localStorage.removeItem(STORAGE_REFUEL_LOG); } catch {}
-      resetDiscs();
-      resetGlory();
-      resetLog();
-      resetClock();
-      setStatus('Sandbox reset - hand, rocket, position, discs, glory, log, and clock cleared.');
+      const cash = getStarterCash() ? `$${STARTER_CASH_AMOUNT}` : '$0';
+      if (!confirm(`Start a new game? This clears your hand, rocket, position, planned route, outposts, factories, colonies, discs, glory, mission log, the turn clock, and reseeds the aqua bank to ${cash}.`)) return;
+      doSandboxReset();
+      setStatus(`🆕 New game - board cleared, aqua bank reseeded to ${cash}. Pick your starting crew.`);
+      // Mandatory starting-crew pick (user 2026-05): the crew
+      // wizard fires automatically on New game.
+      openCrewWizard();
     };
+    const flipMode = (next) => {
+      if (next === marketMode) return;
+      const label = next === MARKET_MODE.MARKET ? 'Card Market' : 'Free Library';
+      if (!confirm(`Switch to ${label}? This RESETS the sandbox (hand, rocket, outposts, factories, colonies, discs, glory, log, clock, aqua).`)) return;
+      // Reset browse-locals first, then flip the mode. setMarketMode
+      // calls resetSandboxEconomy internally, which wipes the
+      // global state stores but doesn't know about browse's
+      // module-locals (_rocketSiteId, route, trail, etc).
+      doBrowseLocalReset();
+      setMarketMode(next);
+      setStatus(`Card economy: ${label}. Sandbox reset.`);
+      paintSolo();
+    };
+    host.querySelector('#market-mode-library').onclick = () => flipMode(MARKET_MODE.LIBRARY);
+    host.querySelector('#market-mode-market').onclick  = () => flipMode(MARKET_MODE.MARKET);
     return;
   }
-  const here   = _activeData && _activeData.byId[s.ship.at];
-  const target = s.pendingTargetId && _activeData && _activeData.byId[s.pendingTargetId];
-  const ops    = Math.max(0, SOLO_CONFIG.OPS_PER_ROUND - s.turn);
-  const claimedHere = here && s.claimed.includes(here.id);
-  const canProspect = !!here && !here.isWaypoint && !s.gameOver
-    && ops > 0 && !claimedHere && here.isLandable !== false;
-  const moveCost = s.pendingPath ? s.pendingPath.totalBurns : null;
-  const canMove = !s.gameOver && ops > 0 && moveCost != null && moveCost <= s.water;
-  host.innerHTML = `
-    <div class="solo-stats">
-      <span>Round</span><strong>${s.round}/${SOLO_CONFIG.MAX_ROUNDS}</strong>
-      <span>Ops</span><strong>${ops}/${SOLO_CONFIG.OPS_PER_ROUND}</strong>
-      <span>Water</span><strong>${s.water}</strong>
-      <span>Score</span><strong>${s.score}/${SOLO_CONFIG.TARGET_VP}</strong>
-      <span>Claimed</span><strong>${s.claimed.length}</strong>
-    </div>
-    <p class="solo-here muted">At: <strong></strong></p>
-    <p class="solo-target muted"></p>
-    <div class="solo-actions">
-      <button class="primary" id="solo-move" ${canMove ? '' : 'disabled'}>Move</button>
-      <button id="solo-prospect" ${canProspect ? '' : 'disabled'}>Prospect</button>
-      <button id="solo-end">End round</button>
-    </div>
-    ${s.gameOver ? '<p class="solo-end-banner"></p>' : ''}
-    <details class="solo-log"><summary>Log</summary><ol></ol></details>
-    <button id="solo-abandon" class="danger" style="margin-top:10px">Abandon</button>
-  `;
-  host.querySelector('.solo-here strong').textContent = here ? here.name : '-';
-  const targetEl = host.querySelector('.solo-target');
-  if (target && moveCost != null) {
-    targetEl.innerHTML = `→ <strong></strong> (${moveCost} burns, ${s.pendingPath.segments.length} hops)`;
-    targetEl.querySelector('strong').textContent = target.name;
-  } else if (s.pendingTargetId && !s.pendingPath) {
-    targetEl.textContent = `No route to ${target ? target.name : 'target'}.`;
-  } else {
-    targetEl.textContent = 'Tap a site on the map to plan a move.';
-  }
-  const log = host.querySelector('.solo-log ol');
-  for (const line of s.log.slice(0, 30)) {
-    const li = document.createElement('li');
-    li.textContent = line;
-    log.appendChild(li);
-  }
-  if (s.gameOver) {
-    host.querySelector('.solo-end-banner').textContent =
-      s.score >= SOLO_CONFIG.TARGET_VP ? '🏆 Victory!' : '⏱ Time up.';
-  }
-  host.querySelector('#solo-move').onclick = () => { soloCommitMove(); paintSolo(); syncSoloShipMarker(); };
-  host.querySelector('#solo-prospect').onclick = () => { soloProspect(); paintSolo(); };
-  host.querySelector('#solo-end').onclick = () => { soloEndRound(); paintSolo(); };
-  host.querySelector('#solo-abandon').onclick = () => {
-    if (confirm('Abandon this solo game? Progress is lost.')) {
-      soloAbandon();
-      paintSolo();
-      syncSoloShipMarker();
-    }
-  };
 }
 
-function renderEvents() {
-  const host = document.getElementById('browse-events');
-  if (!host) return;
-  host.innerHTML = '<ul class="ev-list"></ul>';
-  const list = host.querySelector('ul');
-  for (const e of POLITICS) {
-    const li = document.createElement('li');
-    li.innerHTML = `
-      <div class="ev-head">
-        <strong></strong>
-        <span class="ev-kind"></span>
+// Render the saved-games list inside the game manager panel.
+// Sorted newest-first by saves.js#listSaves. Each row: name +
+// timestamp, plus Load / Overwrite / Rename / Delete. Clicking
+// the row's name loads it (after a confirm). Kept separate from
+// paintSolo so the save actions can re-render just the list
+// without repainting the whole panel.
+// ---- Starting crew ----
+//
+// The player picks ONE faction face (of the 6 double-faced
+// crew cards) at New-game time. The choice is recorded under
+// hf-sandbox-crew-faction (so it rides along in saves) and the
+// chosen crew card spawns in the LEO Stack (carrying the picked
+// face) as their starting crew. Crew never enters the hand.
+const STORAGE_CREW = 'hf-sandbox-crew-faction';
+
+function getPickedCrew() {
+  try {
+    const raw = localStorage.getItem(STORAGE_CREW);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function setPickedCrew(cardId, face) {
+  try { localStorage.setItem(STORAGE_CREW, JSON.stringify({ cardId, face })); }
+  catch { /* private mode */ }
+}
+
+// Mandatory starting-crew wizard. Modal with no cancel/backdrop
+// dismiss - the player MUST pick a faction before play. On
+// confirm: records the chosen faction, drops the crew card into
+// the Hand. onDone (optional) fires after the pick commits.
+function openCrewWizard(onDone) {
+  document.querySelector('.crew-wizard-overlay')?.remove();
+  let selected = null; // { cardId, face }
+
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay crew-wizard-overlay';
+  overlay.tabIndex = -1;
+  // No backdrop-close, no Escape-close: the pick is mandatory.
+  const dialog = document.createElement('div');
+  dialog.className = 'crew-wizard-modal';
+  overlay.appendChild(dialog);
+
+  const commit = () => {
+    if (!selected) return;
+    setPickedCrew(selected.cardId, selected.face);
+    const card = CREW_BY_ID[selected.cardId];
+    const faction = card?.faces?.[selected.face];
+    // Crew always spawns in the LEO Stack (variant rule, user
+    // 2026-05). The chosen faction is recorded separately as the
+    // player's committed faction; the physical crew card carries
+    // both faces.
+    if (card) addCardToLeo({ id: card.id, kind: 'crew', face: selected.face });
+    overlay.remove();
+    setStatus(`🧑‍🚀 Starting crew: <strong>${esc(faction?.name || selected.cardId)}</strong> (${esc(faction?.bonus || '')}). Crew card spawned in your LEO Stack.`);
+    logAction({
+      type: 'crew_pick',
+      icon: '🧑‍🚀',
+      summary: `Picked starting faction: ${faction?.name || selected.cardId}`,
+      undoable: false,
+      data: { cardId: selected.cardId, face: selected.face },
+    });
+    try { onDone?.(); } catch (e) { console.error('crew wizard onDone:', e); }
+  };
+
+  const render = () => {
+    const selName = selected
+      ? esc(CREW_BY_ID[selected.cardId].faces[selected.face].name)
+      : '...';
+    dialog.innerHTML = `
+      <div class="crew-wizard-head">
+        <h3>🧑‍🚀 Pick your starting crew</h3>
+        <p class="muted">Choose one faction. Its privilege is your edge for the game. (Required to start.)</p>
       </div>
-      <p class="muted"></p>
+      <div class="crew-faction-grid"></div>
+      <div class="card-modal-actions">
+        <button type="button" class="modal-btn primary crew-confirm" ${selected ? '' : 'disabled'}>🚀 Start with ${selName}</button>
+      </div>
     `;
-    li.querySelector('strong').textContent = e.name;
-    li.querySelector('.ev-kind').textContent = e.kind;
-    li.querySelector('p').textContent = e.blurb;
-    list.appendChild(li);
+    // Show the actual crew cards (the 12 single-face faction
+    // faces), each a selectable tile.
+    const grid = dialog.querySelector('.crew-faction-grid');
+    for (const c of CREW_FACES) {
+      const isSel = selected && selected.cardId === c.srcId && selected.face === c.face;
+      const tile = document.createElement('div');
+      tile.className = 'crew-faction-card' + (isSel ? ' is-selected' : '');
+      tile.setAttribute('role', 'button');
+      tile.tabIndex = 0;
+      tile.dataset.card = c.srcId;
+      tile.dataset.face = c.face;
+      tile.appendChild(renderCard(c, { type: 'crew' }));
+      const pick = () => { selected = { cardId: c.srcId, face: c.face }; render(); };
+      tile.addEventListener('click', pick);
+      tile.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); }
+      });
+      grid.appendChild(tile);
+    }
+    dialog.querySelector('.crew-confirm').addEventListener('click', () => {
+      if (selected) commit();
+    });
+  };
+
+  render();
+  document.body.appendChild(overlay);
+  overlay.focus();
+}
+
+function renderSavesList() {
+  const host = document.getElementById('saves-list');
+  if (!host) return;
+  const saves = listSaves();
+  if (!saves.length) {
+    host.innerHTML = '<li class="saves-empty muted">No saved games yet. Use "Save as new" to snapshot the current game.</li>';
+    return;
   }
+  const fmtTime = (ts) => {
+    try { return new Date(ts).toLocaleString(); } catch { return ''; }
+  };
+  host.innerHTML = saves.map((s) => `
+    <li class="saves-row" data-id="${esc(s.id)}">
+      <button type="button" class="saves-load-name" title="Load this save">
+        <span class="saves-name">${esc(s.name)}</span>
+        <span class="saves-time muted">${esc(fmtTime(s.timestamp))}</span>
+      </button>
+      <div class="saves-row-actions">
+        <button type="button" class="saves-overwrite" title="Overwrite this save with the current game">⤓ Overwrite</button>
+        <button type="button" class="saves-rename" title="Rename this save">✎</button>
+        <button type="button" class="saves-delete" title="Delete this save">🗑</button>
+      </div>
+    </li>
+  `).join('');
+
+  host.querySelectorAll('.saves-row').forEach((row) => {
+    const id = row.getAttribute('data-id');
+    const save = saves.find((s) => s.id === id);
+    row.querySelector('.saves-load-name').addEventListener('click', () => {
+      if (!confirm(`Load "${save.name}"? Your current game state will be replaced (save it first if you want to keep it).`)) return;
+      // Restores localStorage + reloads the page so every
+      // state module re-reads cleanly.
+      loadSaveAndReload(id);
+    });
+    row.querySelector('.saves-overwrite').addEventListener('click', () => {
+      if (!confirm(`Overwrite "${save.name}" with the current game state?`)) return;
+      const rec = overwriteSave(id);
+      if (rec) setStatus(`💾 Overwrote save "${esc(rec.name)}".`);
+      renderSavesList();
+    });
+    row.querySelector('.saves-rename').addEventListener('click', () => {
+      const next = prompt('Rename save:', save.name);
+      if (next === null) return;
+      if (renameSave(id, next)) {
+        setStatus(`💾 Renamed save to "${esc(next.trim())}".`);
+        renderSavesList();
+      }
+    });
+    row.querySelector('.saves-delete').addEventListener('click', () => {
+      if (!confirm(`Delete save "${save.name}"? This can't be undone.`)) return;
+      deleteSave(id);
+      setStatus(`🗑 Deleted save "${esc(save.name)}".`);
+      renderSavesList();
+    });
+  });
 }
 
 function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
@@ -5537,5 +8177,4 @@ export const STATS = {
   siteCount: Object.keys(SITES_BY_ID).length,
   patentCount: PATENTS.length,
   milestoneCount: MILESTONES.length,
-  eventCount: POLITICS.length,
 };

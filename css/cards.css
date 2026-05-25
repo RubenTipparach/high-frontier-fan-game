@@ -96,11 +96,20 @@
 }
 .card-face[data-face="secondary"] { transform: rotateY(180deg); }
 
-/* Radiators read upside-down on the installed (secondary) face,
-   matching the published cards. The Z-rotation composes with the
-   Y-flip so the back content reads mirrored top-to-bottom. */
+/* Radiator black-side rotation (the legacy 'flip-rotates' rule)
+   has been disabled - the secondary face now reads upright like
+   every other card type. Per the user (2026-05-24): "radiator
+   cards on the black side are upside down in all instances" -
+   the published-card flip-to-rotate idiom doesn't translate
+   well to a digital surface, where the player isn't physically
+   handling a card to flip it.
+   The intra-face 'Heavy half rotated 180°' design below stays;
+   that's a Light/Heavy split within a single face, not a flip
+   of the whole face. */
 .card.flip-rotates .card-face[data-face="secondary"] {
-  transform: rotateY(180deg) rotate(180deg);
+  /* No extra Z rotation: secondary inherits the standard
+     rotateY(180deg) from the .card-face[data-face="secondary"]
+     rule above. */
 }
 
 /* Primary face is the "white" published-card look: parchment
@@ -153,15 +162,26 @@
      of the label. Slight bump in size + bold weight so the
      symbols read cleanly against the saturated typebar fill. */
 }
-.card.type-thruster  .card-typebar { background: #f8a47a; }
-.card.type-reactor   .card-typebar { background: #a78bfa; }
-.card.type-radiator  .card-typebar { background: #7dd3fc; }
-.card.type-refinery  .card-typebar { background: #94a3b8; }
-.card.type-robonaut  .card-typebar { background: #f9a8d4; }
+.card.type-thruster  .card-typebar { background: var(--card-thruster); }
+.card.type-reactor   .card-typebar { background: var(--card-reactor); }
+.card.type-radiator  .card-typebar { background: var(--card-radiator); }
+.card.type-refinery  .card-typebar { background: var(--card-refinery); }
+.card.type-robonaut  .card-typebar { background: var(--card-robonaut); }
 .card.type-lab       .card-typebar { background: #67e8f9; }
-.card.type-generator .card-typebar { background: #f97316; }
+.card.type-generator .card-typebar { background: var(--card-generator); }
 .card.type-modifier  .card-typebar { background: #fda4af; }
-.card.kind-crew      .card-typebar { background: #fde047; }
+/* Crew typebar + frame tint to the faction band colour
+   (--crew-color, set per card in card-ui.js). --crew-ink keeps
+   the CREW label legible on dark faction colours. Falls back to
+   the old yellow when no colour is supplied. */
+.card.kind-crew      .card-typebar {
+  background: var(--crew-color, #fde047);
+  color: var(--crew-ink, #0c0a16);
+}
+.card.kind-crew .card-face {
+  border: 3px solid var(--crew-color, #fde047);
+  border-radius: 10px;
+}
 
 /* Stats box top-left: mass / rad / spectral hex in a row. */
 .card-statbox {
@@ -728,4 +748,28 @@
   color: var(--ink);
   font-weight: 800;
   background: rgba(125, 211, 252, 0.18);
+}
+
+/* Crew card extras: the third statbox cell shows the
+   prospector glyph + ISRU rating (crews have no spectral
+   hex); the thrust triangle + rocket name sit below the
+   privilege text. */
+.card-face .crew-isru {
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.3px;
+}
+.card-face .crew-thrust {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.card-face .crew-thrust .thrust-visual { width: 96px; }
+.card-face .crew-rocket {
+  margin: 0;
+  font-size: 11px;
+  font-style: italic;
+  text-align: center;
 }
