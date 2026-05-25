@@ -1,22 +1,19 @@
 # Fuel strip - Net Thrust track node model
 
-Wet-mass track for the `buildFuelStrip` strip. Burning spends fuel
-and walks the chit toward dry mass; refuelling loads fuel and walks
-it toward wet mass.
+Wet-mass track. Burning spends fuel (black, toward dry mass);
+refuelling loads fuel (red, toward wet mass).
 
 ## Model
-- Integer mass nodes 1..32. MIN DRY = 1, MAX DRY = 23, MAX WET = 32.
-- Between mass N and N+1 there are fuel-step sub-nodes at N + k/d
-  (fractions count up). Per-gap fuel-steps d: 1->2 9, 2->3 6,
-  3->4 4, 4->5 & 5->6 3, 6..10 2, 11..31 1 (whole, no sub-nodes).
-- 57 nodes total (32 integer + 25 fuel-step).
+- Integer mass nodes 1..32. MIN DRY=1, MAX DRY=23, MAX WET=32.
+- Fuel-step sub-nodes at N + k/d between integers; d: 1->2 9,
+  2->3 6, 3->4 4, 4-5 3, 6-10 2, 11-31 1. 57 nodes.
 
 ## Connections
-- RED = refuel (load 1 FT, toward higher mass). Defined explicitly
-  below - the refuel hop is diagonal (mass +1, the fuel-step lands
-  on the next weight class's nearest step).
-- BLACK = burn (spend 1 FT, toward lower mass) = every red edge
-  reversed.
+- RED = refuel (load 1 FT, toward higher mass). Explicit diagonal
+  chains (the fuel-step lands on the next class's nearest step),
+  plus integers 1..32.
+- BLACK = burn (spend 1 FT, toward lower mass). Linear: every node
+  to the next-lower node in mass order (greatest -> least).
 
 ## Nodes (57)
 | id | mass | band | gap d | kind | marker |
@@ -138,63 +135,65 @@ it toward wet mass.
 | n8 | 1 7/9 | -> | n15 | 2 5/6 |
 | n15 | 2 5/6 | -> | n19 | 3 3/4 |
 | n9 | 1 8/9 | -> | n15 | 2 5/6 |
+| n19 | 3 3/4 | -> | n22 | 4 2/3 |
 
-## Black connections - BURN (spend 1 FT) = red reversed
+## Black connections - BURN (spend 1 FT, linear greatest->least)
 
 | from | mass | -> | to | mass |
 |----|----|----|----|----|
-| n10 | 2 | -> | n1 | 1 |
-| n16 | 3 | -> | n10 | 2 |
-| n20 | 4 | -> | n16 | 3 |
-| n23 | 5 | -> | n20 | 4 |
-| n26 | 6 | -> | n23 | 5 |
-| n28 | 7 | -> | n26 | 6 |
-| n30 | 8 | -> | n28 | 7 |
-| n32 | 9 | -> | n30 | 8 |
-| n34 | 10 | -> | n32 | 9 |
-| n36 | 11 | -> | n34 | 10 |
-| n37 | 12 | -> | n36 | 11 |
-| n38 | 13 | -> | n37 | 12 |
-| n39 | 14 | -> | n38 | 13 |
-| n40 | 15 | -> | n39 | 14 |
-| n41 | 16 | -> | n40 | 15 |
-| n42 | 17 | -> | n41 | 16 |
-| n43 | 18 | -> | n42 | 17 |
-| n44 | 19 | -> | n43 | 18 |
-| n45 | 20 | -> | n44 | 19 |
-| n46 | 21 | -> | n45 | 20 |
-| n47 | 22 | -> | n46 | 21 |
-| n48 | 23 | -> | n47 | 22 |
-| n49 | 24 | -> | n48 | 23 |
-| n50 | 25 | -> | n49 | 24 |
-| n51 | 26 | -> | n50 | 25 |
-| n52 | 27 | -> | n51 | 26 |
-| n53 | 28 | -> | n52 | 27 |
-| n54 | 29 | -> | n53 | 28 |
-| n55 | 30 | -> | n54 | 29 |
-| n56 | 31 | -> | n55 | 30 |
 | n57 | 32 | -> | n56 | 31 |
-| n11 | 2 1/6 | -> | n2 | 1 1/9 |
-| n17 | 3 1/4 | -> | n11 | 2 1/6 |
-| n21 | 4 1/3 | -> | n17 | 3 1/4 |
-| n24 | 5 1/3 | -> | n21 | 4 1/3 |
-| n23 | 5 | -> | n24 | 5 1/3 |
-| n11 | 2 1/6 | -> | n3 | 1 2/9 |
-| n12 | 2 1/3 | -> | n4 | 1 1/3 |
-| n17 | 3 1/4 | -> | n12 | 2 1/3 |
-| n13 | 2 1/2 | -> | n5 | 1 4/9 |
-| n18 | 3 1/2 | -> | n13 | 2 1/2 |
-| n22 | 4 2/3 | -> | n18 | 3 1/2 |
-| n25 | 5 2/3 | -> | n22 | 4 2/3 |
-| n27 | 6 1/2 | -> | n25 | 5 2/3 |
-| n29 | 7 1/2 | -> | n27 | 6 1/2 |
-| n31 | 8 1/2 | -> | n29 | 7 1/2 |
-| n33 | 9 1/2 | -> | n31 | 8 1/2 |
-| n35 | 10 1/2 | -> | n33 | 9 1/2 |
+| n56 | 31 | -> | n55 | 30 |
+| n55 | 30 | -> | n54 | 29 |
+| n54 | 29 | -> | n53 | 28 |
+| n53 | 28 | -> | n52 | 27 |
+| n52 | 27 | -> | n51 | 26 |
+| n51 | 26 | -> | n50 | 25 |
+| n50 | 25 | -> | n49 | 24 |
+| n49 | 24 | -> | n48 | 23 |
+| n48 | 23 | -> | n47 | 22 |
+| n47 | 22 | -> | n46 | 21 |
+| n46 | 21 | -> | n45 | 20 |
+| n45 | 20 | -> | n44 | 19 |
+| n44 | 19 | -> | n43 | 18 |
+| n43 | 18 | -> | n42 | 17 |
+| n42 | 17 | -> | n41 | 16 |
+| n41 | 16 | -> | n40 | 15 |
+| n40 | 15 | -> | n39 | 14 |
+| n39 | 14 | -> | n38 | 13 |
+| n38 | 13 | -> | n37 | 12 |
+| n37 | 12 | -> | n36 | 11 |
 | n36 | 11 | -> | n35 | 10 1/2 |
-| n13 | 2 1/2 | -> | n6 | 1 5/9 |
-| n14 | 2 2/3 | -> | n7 | 1 2/3 |
-| n19 | 3 3/4 | -> | n14 | 2 2/3 |
-| n15 | 2 5/6 | -> | n8 | 1 7/9 |
-| n19 | 3 3/4 | -> | n15 | 2 5/6 |
-| n15 | 2 5/6 | -> | n9 | 1 8/9 |
+| n35 | 10 1/2 | -> | n34 | 10 |
+| n34 | 10 | -> | n33 | 9 1/2 |
+| n33 | 9 1/2 | -> | n32 | 9 |
+| n32 | 9 | -> | n31 | 8 1/2 |
+| n31 | 8 1/2 | -> | n30 | 8 |
+| n30 | 8 | -> | n29 | 7 1/2 |
+| n29 | 7 1/2 | -> | n28 | 7 |
+| n28 | 7 | -> | n27 | 6 1/2 |
+| n27 | 6 1/2 | -> | n26 | 6 |
+| n26 | 6 | -> | n25 | 5 2/3 |
+| n25 | 5 2/3 | -> | n24 | 5 1/3 |
+| n24 | 5 1/3 | -> | n23 | 5 |
+| n23 | 5 | -> | n22 | 4 2/3 |
+| n22 | 4 2/3 | -> | n21 | 4 1/3 |
+| n21 | 4 1/3 | -> | n20 | 4 |
+| n20 | 4 | -> | n19 | 3 3/4 |
+| n19 | 3 3/4 | -> | n18 | 3 1/2 |
+| n18 | 3 1/2 | -> | n17 | 3 1/4 |
+| n17 | 3 1/4 | -> | n16 | 3 |
+| n16 | 3 | -> | n15 | 2 5/6 |
+| n15 | 2 5/6 | -> | n14 | 2 2/3 |
+| n14 | 2 2/3 | -> | n13 | 2 1/2 |
+| n13 | 2 1/2 | -> | n12 | 2 1/3 |
+| n12 | 2 1/3 | -> | n11 | 2 1/6 |
+| n11 | 2 1/6 | -> | n10 | 2 |
+| n10 | 2 | -> | n9 | 1 8/9 |
+| n9 | 1 8/9 | -> | n8 | 1 7/9 |
+| n8 | 1 7/9 | -> | n7 | 1 2/3 |
+| n7 | 1 2/3 | -> | n6 | 1 5/9 |
+| n6 | 1 5/9 | -> | n5 | 1 4/9 |
+| n5 | 1 4/9 | -> | n4 | 1 1/3 |
+| n4 | 1 1/3 | -> | n3 | 1 2/9 |
+| n3 | 1 2/9 | -> | n2 | 1 1/9 |
+| n2 | 1 1/9 | -> | n1 | 1 |
