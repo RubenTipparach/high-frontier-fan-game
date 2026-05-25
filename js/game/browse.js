@@ -51,7 +51,7 @@ import {
 } from '../../data/net-thrust-track.js';
 import { renderDetailTrack, massLabel } from './net-thrust-detail.js';
 import { MILESTONES } from '../../data/glory.js';
-import { SITES_BY_ID } from '../../data/sites.js';
+import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
 import {
   renderCard, thrustVisual, attachTipsTo,
   REQUIREMENT_VIS, REQ_SUPPLIER_TYPE,
@@ -1981,6 +1981,28 @@ function ensureMapShell(host) {
           <input id="dbg-show-decoratives" type="checkbox" />
           <span>Show decoratives</span>
         </label>
+        <div class="dbg-zone">
+          <div class="dbg-zone-title">Zone painter (nodes only)</div>
+          <label class="dbg-slider">
+            <span>Paint zone</span>
+            <select id="dbg-zone-select">
+              <option value="">- off -</option>
+            </select>
+          </label>
+          <p class="dbg-zone-hint" id="dbg-zone-hint">Pick a zone, then click the map to drop polygon points around the nodes you want.</p>
+          <div class="dbg-zone-btns">
+            <button id="dbg-zone-finish" type="button">Finish polygon</button>
+            <button id="dbg-zone-undo" type="button">Undo point</button>
+          </div>
+          <div class="dbg-zone-btns">
+            <button id="dbg-zone-clear" type="button">Clear all</button>
+            <button id="dbg-zone-export" type="button">Export to console</button>
+          </div>
+          <div class="dbg-row">
+            <span>Nodes assigned</span>
+            <strong id="dbg-zone-count">0</strong>
+          </div>
+        </div>
         <button id="dbg-reset" class="dbg-reset">Reset view</button>
       </div>
     </div>
@@ -2254,6 +2276,8 @@ function wireDebugPanel(renderer) {
     } catch { /* private mode */ }
   };
 
+  wireZonePainter(renderer, panel);
+
   // Restore the persisted open / closed state for the debug
   // panel. wireDebugPanel runs every time the renderer is
   // rebuilt, so this also re-applies on mode toggles. If no
@@ -2271,6 +2295,74 @@ function wireDebugPanel(renderer) {
     const f = renderer.getFps();
     if (f !== lastFps) { fpsEl.textContent = String(f); lastFps = f; }
   });
+}
+
+// Debug zone painter: a dropdown + lasso tool for hand-labelling the
+// solar zone of waypoint nodes (burns / lagranges / hohmanns), which
+// the planner data doesn't carry. Pick a zone, click the map to drop
+// polygon vertices, Finish to stamp every node inside, then Export to
+// dump the accumulated id2 -> zone map to the console for wiring into
+// planner-map.js. Real (named) sites are never touched.
+function wireZonePainter(renderer, panel) {
+  const select   = panel.querySelector('#dbg-zone-select');
+  const finishBtn = panel.querySelector('#dbg-zone-finish');
+  const undoBtn   = panel.querySelector('#dbg-zone-undo');
+  const clearBtn  = panel.querySelector('#dbg-zone-clear');
+  const exportBtn = panel.querySelector('#dbg-zone-export');
+  const countEl   = panel.querySelector('#dbg-zone-count');
+  if (!select || !finishBtn) return;
+
+  // Populate the dropdown + hand the per-zone palette to the renderer
+  // so the overlay paints in the published zone colours.
+  if (select.options.length <= 1) {
+    for (const z of SOLAR_ZONES) {
+      const opt = document.createElement('option');
+      opt.value = z;
+      opt.textContent = z;
+      select.appendChild(opt);
+    }
+  }
+  const colors = {};
+  for (const z of SOLAR_ZONES) colors[z] = (SOLAR_ZONE_INFO[z] || {}).color || '#22d3ee';
+  renderer.setZonePaintColors(colors);
+
+  const refreshCount = () => {
+    if (countEl) countEl.textContent = String(renderer.zoneAssignmentCount());
+  };
+  refreshCount();
+
+  select.onchange = () => {
+    renderer.setZonePaintZone(select.value || null);
+  };
+  finishBtn.onclick = () => {
+    const n = renderer.finishZonePolygon();
+    refreshCount();
+    // eslint-disable-next-line no-console
+    console.log(`[zone painter] stamped ${n} node(s) as ${select.value || '(none)'}`);
+  };
+  undoBtn.onclick = () => renderer.undoZonePolyPoint();
+  clearBtn.onclick = () => {
+    renderer.clearZoneAssignments();
+    refreshCount();
+  };
+  exportBtn.onclick = () => {
+    const records = renderer.getZoneAssignments();
+    // Compact id2 -> zone map (the form most convenient for wiring
+    // into planner-map.js), plus the full records for reference.
+    const byRef = {};
+    const byZone = {};
+    for (const r of records) {
+      byRef[r.id2] = r.zone;
+      byZone[r.zone] = (byZone[r.zone] || 0) + 1;
+    }
+    /* eslint-disable no-console */
+    console.log(`[zone painter] ${records.length} node(s) assigned`, byZone);
+    console.log('[zone painter] id2 -> zone map (copy below):');
+    console.log(JSON.stringify(byRef, null, 2));
+    console.log('[zone painter] full records:');
+    console.log(JSON.stringify(records));
+    /* eslint-enable no-console */
+  };
 }
 
 // Site search with reactive suggestions. Each keystroke filters the

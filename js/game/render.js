@@ -30,6 +30,21 @@ const VIEW_H = 900;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 10;
 
+// Ray-casting point-in-polygon test (world coords). Used by the
+// debug zone painter to decide which nodes a hand-drawn lasso
+// contains.
+function pointInPolygon(px, py, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y;
+    const xj = poly[j].x, yj = poly[j].y;
+    const intersect = ((yi > py) !== (yj > py)) &&
+      (px < ((xj - xi) * (py - yi)) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
 // Zoom level at which the hex marker (and its size text /
 // hydration droplets / centre flag glyphs) reaches its full
 // HEX_R size. Below this threshold the hex shrinks
@@ -597,6 +612,19 @@ export class MapRenderer {
     this._gesture = null;
     this._rafQueued = false;
     this._tooltipEl = null;
+    // Debug zone-painter state. When `active` holds a zone name the
+    // map enters polygon-draw mode: clicks drop vertices instead of
+    // selecting sites. Finishing a polygon stamps every waypoint
+    // node inside it with the active zone (real sites are skipped).
+    // `assignments` accumulates across polygons so a zone can be
+    // built from several lassos; `colors` is the per-zone palette
+    // passed in from browse.js for the overlay.
+    this._zonePaint = {
+      active: null,
+      poly: [],
+      assignments: new Map(),  // nodeId -> zone string
+      colors: {},              // zone -> hex colour
+    };
     // Public-ish tuneables. Mutating them and calling _scheduleDraw
     // is enough for the debug panel to take effect; nothing else
     // caches them.
@@ -1129,6 +1157,91 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
+  // ---- debug zone painter ----
+  // Tools the debug panel drives to hand-label which solar zone each
+  // waypoint node belongs to. The map's real sites already carry a
+  // `solarZone`; the planner waypoints (burns / lagranges / hohmanns
+  // / decoratives) don't, so this lets us paint them by region and
+  // export the result for wiring into the data file.
+
+  setZonePaintColors(colors) {
+    this._zonePaint.colors = colors || {};
+    this._scheduleDraw();
+  }
+
+  // Select the zone to paint. Passing a falsy value leaves paint
+  // mode (clicks resume selecting sites). Switching zones abandons
+  // any half-drawn polygon but keeps prior assignments.
+  setZonePaintZone(zone) {
+    this._zonePaint.active = zone || null;
+    this._zonePaint.poly = [];
+    this._scheduleDraw();
+  }
+
+  isZonePainting() { return !!this._zonePaint.active; }
+
+  addZonePolyPoint(wx, wy) {
+    if (!this._zonePaint.active) return;
+    this._zonePaint.poly.push({ x: wx, y: wy });
+    this._scheduleDraw();
+  }
+
+  undoZonePolyPoint() {
+    this._zonePaint.poly.pop();
+    this._scheduleDraw();
+  }
+
+  // Close the in-progress polygon and stamp every waypoint node whose
+  // centre falls inside it with the active zone. Returns the count
+  // stamped this call. Real (named) sites are never touched.
+  finishZonePolygon() {
+    const zp = this._zonePaint;
+    if (!zp.active || zp.poly.length < 3) {
+      zp.poly = [];
+      this._scheduleDraw();
+      return 0;
+    }
+    let n = 0;
+    for (const s of this._waypoints) {
+      if (pointInPolygon(s.x, s.y, zp.poly)) {
+        zp.assignments.set(s.id, zp.active);
+        n++;
+      }
+    }
+    zp.poly = [];
+    this._scheduleDraw();
+    return n;
+  }
+
+  clearZoneAssignments() {
+    this._zonePaint.assignments.clear();
+    this._zonePaint.poly = [];
+    this._scheduleDraw();
+  }
+
+  zoneAssignmentCount() { return this._zonePaint.assignments.size; }
+
+  // Export the accumulated labels as plain records. id2 is the stable
+  // human-friendly reference (e.g. "lag-leo", "burn-3a2b9"); id is the
+  // raw vendor key. Both are emitted so the result can be wired into
+  // planner-map.js by whichever key is convenient.
+  getZoneAssignments() {
+    const out = [];
+    for (const [id, zone] of this._zonePaint.assignments) {
+      const s = this.data && this.data.byId[id];
+      if (!s) continue;
+      out.push({
+        id: s.id,
+        id2: s.id2,
+        type: s.type,
+        x: s.x,
+        y: s.y,
+        zone,
+      });
+    }
+    return out;
+  }
+
   // ---- drawing ----
 
   // Continuous animation loop: each rAF advances the shared anim
@@ -1270,6 +1383,8 @@ export class MapRenderer {
     // Turn-number pills (T2, T3, …) for planned rocket routes;
     // no-op for plain Navigate-to routes that have no turn tags.
     this._drawRouteTurnLabelsScreen(ctx);
+    // Debug zone painter overlay sits on top of everything.
+    this._drawZonePaintScreen(ctx);
     if (this._popupSite) this._positionSitePopup();
 
     // FPS book-keeping. The debug panel polls getFps(); we update
@@ -2660,6 +2775,13 @@ export class MapRenderer {
       // suppresses the hover tooltip on touch).
       if (this._touchActive) return;
       if (this._dragStart && this._dragStart.moved) return;
+      // Zone-painter mode: a click drops a polygon vertex and nothing
+      // else (no site select, no rocket click).
+      if (this._zonePaint.active) {
+        const wp = this._eventToWorld(ev);
+        this.addZonePolyPoint(wp.x, wp.y);
+        return;
+      }
       // Rocket sits on top of the map so test it first; if the
       // click landed inside the rocket sprite we fire a
       // sandbox-rocket event instead of a site select.
@@ -2733,9 +2855,13 @@ export class MapRenderer {
           const last = this._gesture.touches[0];
           if (last) {
             const pt = this._eventToWorld(last);
-            const hit = this._hitTest(pt.x, pt.y);
-            if (this.options.debug) this._emitDebugClick(pt, hit);
-            if (hit && this.onSelect) this.onSelect(hit);
+            if (this._zonePaint.active) {
+              this.addZonePolyPoint(pt.x, pt.y);
+            } else {
+              const hit = this._hitTest(pt.x, pt.y);
+              if (this.options.debug) this._emitDebugClick(pt, hit);
+              if (hit && this.onSelect) this.onSelect(hit);
+            }
           }
         }
         this._gesture = null;
@@ -2803,6 +2929,63 @@ export class MapRenderer {
     }
     // eslint-disable-next-line no-console
     console.log('[map debug] click', info);
+  }
+
+  // Debug zone painter overlay (screen space). Paints a dot in the
+  // zone colour over every already-assigned waypoint, plus the
+  // in-progress lasso (dashed outline + translucent fill + vertex
+  // handles). No-op unless something is assigned or being drawn.
+  _drawZonePaintScreen(ctx) {
+    const zp = this._zonePaint;
+    if (!zp.assignments.size && !zp.poly.length) return;
+    const eff = this.zoom * this.fitScale;
+    const toS = (x, y) => ({ x: this.pan.x + x * eff, y: this.pan.y + y * eff });
+
+    if (zp.assignments.size) {
+      for (const [id, zone] of zp.assignments) {
+        const s = this.data && this.data.byId[id];
+        if (!s) continue;
+        const p = toS(s.x, s.y);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = zp.colors[zone] || '#22d3ee';
+        ctx.globalAlpha = 0.9;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.stroke();
+      }
+    }
+
+    if (zp.active && zp.poly.length) {
+      const col = zp.colors[zp.active] || '#22d3ee';
+      const pts = zp.poly.map((v) => toS(v.x, v.y));
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      if (pts.length >= 3) {
+        ctx.closePath();
+        ctx.globalAlpha = 0.18;
+        ctx.fillStyle = col;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = col;
+      ctx.setLineDash([6, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      for (const p of pts) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = col;
+        ctx.stroke();
+      }
+    }
   }
 
   // JS hit-test against every site, preferring real sites within a
