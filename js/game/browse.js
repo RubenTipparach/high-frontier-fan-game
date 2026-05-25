@@ -125,6 +125,9 @@ async function loadMap() {
 
 let _renderer = null;
 let _sidebarWired = false;
+// Opens the site-search modal. Assigned by wireSearch() on map mount;
+// invoked by the 🔍 button in the sidepanel tab strip.
+let _openMapSearch = null;
 
 // Subscribe once: rocket state changes (cards added / removed)
 // trigger a re-render of the sandbox rocket on the map.
@@ -1598,6 +1601,11 @@ function wireSidebar() {
   if (!panel || !tabs || !close) return;
 
   for (const btn of tabs.querySelectorAll('button')) {
+    // The 🔍 search button isn't a pane - it opens the search modal.
+    if (btn.id === 'sidepanel-search') {
+      btn.addEventListener('click', () => { _openMapSearch?.(); });
+      continue;
+    }
     btn.addEventListener('click', () => {
       const pane = btn.dataset.pane;
       if (panel.dataset.active === pane) {
@@ -1901,8 +1909,6 @@ function ensureMapShell(host) {
           💧 <strong id="aqua-chip-balance">${getAqua()}</strong>
         </span>
       </div>
-      <button id="map-search-toggle" class="map-search-toggle"
-        title="Search sites" aria-label="Search sites">🔍</button>
       <div class="map-search">
         <input id="map-search-input" type="text" autocomplete="off"
           spellcheck="false" placeholder="Find site…" />
@@ -2252,7 +2258,6 @@ function wireSearch(host) {
   const input    = host.querySelector('#map-search-input');
   const goBtn    = host.querySelector('#map-search-go');
   const list     = host.querySelector('#map-search-suggestions');
-  const toggle   = host.querySelector('#map-search-toggle');
   const closeBtn = host.querySelector('#map-search-close');
   const backdrop = host.querySelector('#map-search-backdrop');
   const searchEl = host.querySelector('.map-search');
@@ -2260,25 +2265,23 @@ function wireSearch(host) {
   let activeIndex = -1;
   let currentItems = [];
 
-  // Mobile: search lives in a modal triggered by the toolbar 🔍 button.
-  // CSS hides .map-search by default at <720px and shows it as a fixed
-  // modal when .is-open is set. Desktop ignores all of this - the inline
-  // search stays in the toolbar and the toggle/close/backdrop are hidden.
+  // Search is a fixed-position modal on every viewport, opened by the
+  // 🔍 button in the sidepanel tab strip (via _openMapSearch). CSS
+  // hides .map-search until .is-open is set, then shows it as a
+  // centered card with a dimmed backdrop.
   function openSearchModal() {
     searchEl?.classList.add('is-open');
     backdrop?.classList.remove('hidden');
     // Defer focus so the keyboard pops AFTER layout settles.
-    setTimeout(() => input.focus(), 0);
+    setTimeout(() => { input.focus(); input.select(); }, 0);
   }
   function closeSearchModal() {
     searchEl?.classList.remove('is-open');
     backdrop?.classList.add('hidden');
     list.classList.add('hidden');
   }
-  toggle?.addEventListener('click', () => {
-    if (searchEl?.classList.contains('is-open')) closeSearchModal();
-    else openSearchModal();
-  });
+  // Expose the opener for the sidepanel 🔍 tab button.
+  _openMapSearch = openSearchModal;
   closeBtn?.addEventListener('click', closeSearchModal);
   backdrop?.addEventListener('click', closeSearchModal);
 
@@ -4659,6 +4662,77 @@ function confirmModal({ title, body, yes = 'OK', no = 'Cancel' }) {
   });
 }
 
+// Stepper modal for dumping water. The player dials in how much to
+// drain (1..max) with the +/- steppers, types a value directly, or
+// taps "All" to jump to the full tank, then confirms. Resolves to
+// the chosen amount, or null if cancelled. Dumped water is destroyed
+// for now (Stage 3+ turns this into an outpost-stack drop).
+function openDumpWaterModal(maxWater) {
+  return new Promise((resolve) => {
+    const max = Math.max(0, maxWater | 0);
+    if (max <= 0) { resolve(null); return; }
+    document.querySelector('.dump-water-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay dump-water-overlay';
+    let amount = Math.min(1, max);
+    const close = (val) => {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(val);
+    };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
+    const onKey = (e) => {
+      if (e.key === 'Escape') close(null);
+      else if (e.key === 'Enter') close(amount);
+    };
+    document.addEventListener('keydown', onKey);
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel dump-water-panel';
+    panel.innerHTML = `
+      <h3>💧⤓ Dump water</h3>
+      <p class="muted">Drain water from the rocket tank. Dumped water is
+      destroyed for now (Stage 3+ turns this into an outpost-stack drop
+      once factories land).</p>
+      <div class="dump-stepper">
+        <button type="button" class="popup-btn popup-btn-secondary dump-step" data-step="-1" aria-label="Dump one less">−</button>
+        <input type="number" class="dump-amount" min="1" max="${max}" value="${amount}" inputmode="numeric" aria-label="Water to dump" />
+        <button type="button" class="popup-btn popup-btn-secondary dump-step" data-step="1" aria-label="Dump one more">+</button>
+        <button type="button" class="popup-btn dump-all" title="Dump the entire tank">All (${max})</button>
+      </div>
+      <div class="turn-confirm-actions">
+        <button type="button" class="popup-btn primary" data-act="yes">💧⤓ Dump <span class="dump-confirm-n">${amount}</span></button>
+        <button type="button" class="popup-btn" data-act="no">Cancel</button>
+      </div>
+    `;
+    const input = panel.querySelector('.dump-amount');
+    const confirmN = panel.querySelector('.dump-confirm-n');
+    const clamp = (v) => Math.max(1, Math.min(max, Math.round(Number(v)) || 1));
+    const setAmount = (v) => {
+      amount = clamp(v);
+      input.value = String(amount);
+      confirmN.textContent = String(amount);
+    };
+    panel.querySelectorAll('.dump-step').forEach((b) => {
+      b.addEventListener('click', () => setAmount(amount + Number(b.dataset.step)));
+    });
+    panel.querySelector('.dump-all').addEventListener('click', () => setAmount(max));
+    input.addEventListener('input', () => {
+      // Allow free typing; only snap to the clamped value on the
+      // confirm/step paths so the field doesn't fight the user
+      // mid-keystroke. Keep the confirm label in sync though.
+      const v = clamp(input.value);
+      amount = v;
+      confirmN.textContent = String(v);
+    });
+    input.addEventListener('blur', () => setAmount(input.value));
+    panel.querySelector('[data-act="yes"]').addEventListener('click', () => close(amount));
+    panel.querySelector('[data-act="no"]').addEventListener('click', () => close(null));
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+    setTimeout(() => { input.focus(); input.select(); }, 0);
+  });
+}
+
 // Interactive fuel-strip diagram for the rocket-stack header -
 // the published HF4 "Net Thrust track". Mass positions 1..32 are
 // grouped into the doubling weight-class bands (data/net-thrust-
@@ -4901,10 +4975,8 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
       </div>
     </div>
     <div class="fuel-tank-actions">
-      <button type="button" class="popup-btn popup-btn-secondary" id="tank-dump-1"
-        title="Drain 1 water from the tank">💧⤓ Dump 1</button>
-      <button type="button" class="popup-btn popup-btn-secondary" id="tank-dump-all"
-        title="Drain everything (future: forms an outpost stack once factories land)">💧⤓ Dump all</button>
+      <button type="button" class="popup-btn popup-btn-secondary" id="tank-dump"
+        title="Drain a chosen amount of water from the tank">💧⤓ Dump water</button>
     </div>
 <div class="fuel-tank-aqua" id="tank-aqua-section" hidden>
       <div class="aqua-row">
@@ -5197,12 +5269,10 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   // dropping from before-value to after-value over ~250ms. The
   // readout updates each frame; in-flight droplets are cleared
   // because dumping should feel like emptying, not filling.
-  const dump1Btn   = panel.querySelector('#tank-dump-1');
-  const dumpAllBtn = panel.querySelector('#tank-dump-all');
+  const dumpBtn = panel.querySelector('#tank-dump');
   const refreshDumpButtons = () => {
     const cur = getTankWater();
-    if (dump1Btn)   dump1Btn.disabled   = cur <= 0;
-    if (dumpAllBtn) dumpAllBtn.disabled = cur <= 0;
+    if (dumpBtn) dumpBtn.disabled = cur <= 0;
   };
   refreshDumpButtons();
   function drainTo(targetLevel, durationMs = 250) {
@@ -5224,31 +5294,27 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
       onDone: () => refreshDumpButtons(),
     };
   }
-  dump1Btn?.addEventListener('click', (e) => {
+  dumpBtn?.addEventListener('click', async (e) => {
     // Stop the overlay's onTap handler from interpreting this
-    // click as "skip animation / close" - that's why dump 1 / all
-    // looked like it dismissed the modal.
+    // click as "skip animation / close" - that's why dump looked
+    // like it dismissed the modal.
     e.stopPropagation();
-    if (getTankWater() <= 0) return;
-    removeFuel(1);
-    drainTo(getTankWater());
+    const max = getTankWater();
+    if (max <= 0) return;
+    const amount = await openDumpWaterModal(max);
+    if (!amount || amount <= 0) return;
+    // Re-clamp in case the tank changed while the picker was open.
+    const drain = Math.min(amount, getTankWater());
+    if (drain <= 0) return;
+    removeFuel(drain);
+    const left = getTankWater();
+    drainTo(left, left <= 0 ? 600 : 250);
     logAction({
       type: 'dump',
       icon: '💧⤓',
-      summary: `Dumped 1 water (tank ${getTankWater()}/${getTankMax()})`,
-      undoable: false,
-    });
-  });
-  dumpAllBtn?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const drained = getTankWater();
-    if (drained <= 0) return;
-    removeFuel(drained);
-    drainTo(0, 600);
-    logAction({
-      type: 'dump',
-      icon: '💧⤓',
-      summary: `Dumped ${drained} water (tank empty)`,
+      summary: left <= 0
+        ? `Dumped ${drain} water (tank empty)`
+        : `Dumped ${drain} water (tank ${left}/${getTankMax()})`,
       undoable: false,
     });
   });

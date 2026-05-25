@@ -73,13 +73,12 @@
   row-gap: 4px;
 }
 /* Unified toolbar control sizing. Every persistent control in the
-   bar (End turn, turn tracker, op / move / gear tags, aqua chip,
-   search) shares this footprint so the row reads as one design
-   language; colour + weight carry the semantic differences. */
+   bar (End turn, turn tracker, op / move / gear tags, aqua chip)
+   shares this footprint so the row reads as one design language;
+   colour + weight carry the semantic differences. */
 .map-turn-controls button,
 .map-turn-budget .turn-tag,
-.map-aqua-chip,
-.map-search-toggle {
+.map-aqua-chip {
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;
@@ -264,29 +263,59 @@
 /* Search box + reactive suggestions. The list is absolutely
    positioned so it floats over the canvas without reflowing the
    toolbar. */
+/* Search is a fixed-position modal on every viewport now, opened
+   from the 🔍 button in the sidepanel tab strip (no longer an inline
+   toolbar bar). Hidden until .is-open. */
 .map-search {
-  position: relative;
+  display: none;
+}
+.map-search.is-open {
   display: flex;
   align-items: center;
-  gap: 4px;
-  min-width: 180px;
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(460px, 92vw);
+  z-index: 30;
+  padding: 12px;
+  gap: 6px;
+  background: rgba(15, 16, 35, 0.97);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6);
 }
-.map-search input {
+.map-search.is-open input {
   flex: 1;
   min-width: 0;
-  padding: 4px 8px;
-  font-size: 12px;
-}
-.map-search button {
-  padding: 4px 8px;
+  padding: 8px 10px;
   font-size: 14px;
+}
+.map-search.is-open #map-search-go {
+  padding: 6px 10px;
+  font-size: 16px;
   line-height: 1;
+}
+.map-search.is-open .map-search-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font-size: 20px;
+  line-height: 1;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink);
+  flex: 0 0 auto;
 }
 .map-search ul {
   position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
+  top: calc(100% + 6px);
+  left: 12px;
+  right: 12px;
   margin: 0;
   padding: 4px 0;
   list-style: none;
@@ -322,16 +351,8 @@
   letter-spacing: 1px;
 }
 
-/* Search toggle button - opens the search modal on mobile.
-   Desktop hides the toggle (the inline search is always present
-   in the toolbar); mobile hides the inline search and shows the
-   toggle instead. Sizing comes from the shared toolbar-control
-   rule; this only governs visibility + colour. */
-.map-search-toggle {
-  display: none;
-  background: var(--panel-2);
-  color: var(--ink);
-}
+/* Close (×) button is hidden until the search modal opens (the
+   .is-open rule above reveals it). */
 .map-search-close {
   display: none;
 }
@@ -343,11 +364,6 @@
   z-index: 29;
 }
 .map-search-backdrop.hidden { display: none; }
-@media (min-width: 721px) {
-  /* Desktop: the inline search stays in the toolbar; the modal
-     chrome (toggle button, close button, backdrop) is irrelevant. */
-  .map-search-backdrop { display: none !important; }
-}
 @media (max-width: 720px) {
   /* Pin the toolbar to the top of the map shell on phones so it
      stays visible while the map pans / zooms - prior behaviour
@@ -384,59 +400,13 @@
     min-width: 0;
     font-size: 11px;
   }
-  /* Mobile: hide the inline search in the toolbar by default.
-     Tapping the 🔍 toolbar button promotes it to a fixed-position
-     modal anchored just below the toolbar. */
-  .map-toolbar .map-search {
-    display: none;
-  }
-  .map-toolbar .map-search.is-open {
-    display: flex;
-    position: fixed;
-    top: 60px;
+  /* Mobile: the search modal spans the viewport width (the base
+     rule centres a fixed-width card; phones want edge-to-edge). */
+  .map-search.is-open {
     left: 16px;
     right: 16px;
-    z-index: 30;
-    padding: 12px 12px 14px;
-    background: rgba(15, 16, 35, 0.97);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6);
-    gap: 6px;
-  }
-  .map-toolbar .map-search.is-open input {
-    font-size: 14px;
-    padding: 8px 10px;
-  }
-  .map-toolbar .map-search.is-open #map-search-go {
-    font-size: 16px;
-    padding: 6px 10px;
-  }
-  .map-toolbar .map-search.is-open .map-search-close {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 30px;
-    height: 30px;
-    font-size: 20px;
-    line-height: 1;
-    padding: 0;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--ink);
-  }
-  .map-toolbar .map-search.is-open ul {
-    /* Anchor the suggestions list inside the modal - the modal
-       itself is the offset parent now. */
-    left: 12px;
-    right: 12px;
-    top: calc(100% + 6px);
-  }
-  .map-search-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    transform: none;
+    width: auto;
   }
 }
 
@@ -481,6 +451,47 @@
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+/* Dump-water stepper modal. Sits above the fuel-tank modal that
+   spawns it. The player dials an amount with +/-, types directly,
+   or jumps to the full tank with All. */
+.dump-water-overlay { z-index: 82; }
+.dump-water-panel .dump-stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 16px;
+}
+.dump-water-panel .dump-step {
+  min-width: 40px;
+  font-size: 18px;
+  line-height: 1;
+  padding: 8px 0;
+  flex: 0 0 auto;
+}
+.dump-water-panel .dump-amount {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: center;
+  font-size: 20px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  padding: 8px 6px;
+  background: var(--bg-2, #14233a);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink);
+  -moz-appearance: textfield;
+}
+.dump-water-panel .dump-amount::-webkit-outer-spin-button,
+.dump-water-panel .dump-amount::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.dump-water-panel .dump-all {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 /* Turn tracker modal - Sol Sunspot wheel */
@@ -2821,6 +2832,13 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .sidepanel-tabs button:hover { background: var(--panel-2); }
 .sidepanel-tabs button.active:hover { background: var(--accent); }
+/* Search is a utility, not a pane: push it to the far end of the
+   strip (bottom of the desktop column) so it reads as separate from
+   the pane tabs while still being last in order. */
+.sidepanel-tab-search { margin-top: auto; }
+@media (max-width: 720px) {
+  .sidepanel-tab-search { margin-top: 0; margin-left: auto; }
+}
 
 .sidepanel-content {
   flex: 1 1 auto;
