@@ -652,44 +652,15 @@
   color: var(--ink-dim);
   margin-bottom: 4px;
 }
-.rocket-fuel-strip-row {
-  display: grid;
-  grid-template-columns: repeat(32, 1fr);
-  gap: 1px;
+/* The Net Thrust track is an SVG that scrolls horizontally so all
+   32 nodes stay legible inside narrow modals. */
+.fuel-strip-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
   border-radius: 4px;
-  overflow: hidden;
+  -webkit-overflow-scrolling: touch;
 }
-.fuel-strip-cell {
-  position: relative;
-  font-size: 9px;
-  text-align: center;
-  padding: 6px 0;
-  color: #0c0a16;
-  font-weight: 700;
-}
-.fuel-strip-cell.is-dry-chit::before,
-.fuel-strip-cell.is-wet-chit::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  border: 1.5px solid #0c0a16;
-}
-.fuel-strip-cell.is-dry-chit::before {
-  top: 1px;
-  background: #94a3b8;
-}
-.fuel-strip-cell.is-wet-chit::after {
-  bottom: 1px;
-  background: #facc15;
-}
-.fuel-strip-cell.is-co-chit {
-  outline: 2px solid #facc15;
-  outline-offset: -1px;
-}
+.fuel-strip-svg { display: block; }
 .rocket-fuel-strip-legend {
   display: flex;
   gap: 12px;
@@ -713,71 +684,8 @@
 .rocket-fuel-strip-legend .fs-line {
   display: inline-block; width: 16px; height: 0; vertical-align: middle;
 }
-.rocket-fuel-strip-legend .fs-line.black { border-top: 2px solid #0c0a16; }
+.rocket-fuel-strip-legend .fs-line.black { border-top: 2px solid #94a3b8; }
 .rocket-fuel-strip-legend .fs-line.red { border-top: 2px dashed #e0457b; }
-
-/* Banded Net Thrust track: each weight class is a flex column,
-   width proportional to its mass span, with the fraction ladder
-   stacked above the mass-position cells (matching the board). */
-.fuel-strip-bands {
-  display: flex;
-  align-items: stretch;
-  gap: 3px;
-  border-radius: 4px;
-}
-.fuel-strip-band {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  border-radius: 4px;
-  padding: 3px;
-  background: color-mix(in srgb, var(--band-color) 22%, transparent);
-  border: 1px solid color-mix(in srgb, var(--band-color) 60%, transparent);
-}
-.fuel-strip-band-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 4px;
-  font-size: 8px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--ink);
-  margin-bottom: 2px;
-}
-.fuel-strip-band-head .fs-band-mod {
-  font-size: 9px;
-  color: var(--ink-dim);
-}
-.fuel-strip-fracs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  margin-bottom: 3px;
-  min-height: 12px;
-}
-.fuel-strip-fracs .fs-frac {
-  font-size: 8px;
-  line-height: 1;
-  padding: 2px 3px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.9);
-  color: #0c0a16;
-  font-weight: 600;
-}
-.fuel-strip-cells {
-  display: grid;
-  gap: 1px;
-  margin-top: auto;
-}
-.fuel-strip-cells .fuel-strip-cell {
-  background: var(--band-color);
-  border-radius: 2px;
-}
-.fuel-strip-cell.is-max-wet { outline: 2px solid #e0457b; outline-offset: -1px; }
-.fuel-strip-cell.is-max-dry { box-shadow: inset 0 0 0 2px #94a3b8; }
-.fuel-strip-cell.is-min-dry { box-shadow: inset 0 0 0 2px rgba(12,10,22,0.45); }
 
 .fuel-tank-actions {
   display: flex;
