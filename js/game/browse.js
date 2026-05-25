@@ -104,6 +104,7 @@ import {
   MARKET_MODE, FREE_MARKET_AQUA, STARTER_CASH_AMOUNT,
   getMarketMode, setMarketMode, onMarketChange,
   getStarterCash, setStarterCash,
+  getFuelConsumption, setFuelConsumption,
   resetSandboxEconomy,
   openAuctionConfirmModal, openFreeMarketModal,
   findAuctionableCards,
@@ -2587,7 +2588,12 @@ function openRocketStackModal() {
     if (!r.active) engaged = false;
     const totals = getStackTotals();
     const thrStats = getActiveThrusterStats();
-    panel.querySelector('.rocket-stack-body')?.remove();
+    // Preserve the scroll position across the rebuild so tapping
+    // a button / card in the stack never jumps the list to the
+    // top.
+    const prevBody = panel.querySelector('.rocket-stack-body');
+    const prevScroll = prevBody ? prevBody.scrollTop : 0;
+    prevBody?.remove();
     // Engaged-border is painted by the panel (non-scrolling)
     // so it doesn't fragment when the body's content overflows.
     panel.classList.toggle('is-engaged', engaged && r.active);
@@ -3127,6 +3133,8 @@ function openRocketStackModal() {
         });
       }
     }
+    // Restore the pre-rebuild scroll position.
+    body.scrollTop = prevScroll;
   };
   const lookup = (id) => PATENTS_BY_ID[id]
     || CREW.find((c) => c.id === id) || null;
@@ -5822,6 +5830,20 @@ async function moveRocket() {
     setStatus('Planned route has no current-turn segments.');
     return false;
   }
+  // Fuel consumption (new-game setting, default on): a move spends
+  // fuel-per-burn × burns of water from the tank. Pre-flight block
+  // when the tank can't cover it. When the setting is off, moves
+  // are free.
+  const turn1Burns = turn1.reduce((s, x) => s + (x.burns || 1), 0);
+  const _thrFuel = getActiveThrusterStats();
+  const fuelCost = (getFuelConsumption() && _thrFuel && Number.isFinite(_thrFuel.fuel))
+    ? Math.ceil(_thrFuel.fuel * turn1Burns) : 0;
+  if (fuelCost > 0 && getTankWater() < fuelCost) {
+    const per = Math.round(_thrFuel.fuel * 100) / 100;
+    setStatus(`⛽ Not enough water: this move needs <strong>${fuelCost}</strong> `
+      + `(${turn1Burns} burn${turn1Burns === 1 ? '' : 's'} × ${per}), tank has <strong>${getTankWater()}</strong>. Refuel at LEO / a factory first.`);
+    return false;
+  }
   // Hazard pre-flight check. Two flavours along a route:
   //   - generic (☠ skull / 🪂 aerobrake) → aqua-payable, or
   //     roll d6 (1 = rocket destroyed at that node)
@@ -5918,6 +5940,8 @@ async function moveRocket() {
     setStatus('No moves left this turn - end turn to refresh.');
     return false;
   }
+  // Spend the move's fuel now that it's committed (refunded on undo).
+  if (fuelCost > 0) removeFuel(fuelCost);
   // Snapshot for undo BEFORE mutating - both the rocket's site
   // and the full route shape + the segments we're about to walk,
   // so an undo can slide back along the exact path.
@@ -5939,6 +5963,7 @@ async function moveRocket() {
     awardedZone: willAwardChit ? arrivedZone : null,
     cashedChits: null,        // filled in below if a cash-in fires
     cashedVps:   0,
+    fuelSpent:   fuelCost,
   };
   // Move queue. Walk turn1 segments in order, pausing at each
   // hazard node to resolve it (animate-to + roll modal). An
@@ -6290,6 +6315,7 @@ async function undoRocketMove() {
     const clearBtn = document.getElementById('route-clear');
     if (clearBtn) clearBtn.hidden = false;
   }
+  if (_moveSnapshot.fuelSpent) addFuel(_moveSnapshot.fuelSpent);
   _moveSnapshot = null;
   refundMove();
   syncSandboxRocket();
@@ -7993,6 +8019,11 @@ function paintSolo() {
           <span>Start with $${STARTER_CASH_AMOUNT} starter cash</span>
         </label>
         <p class="muted newgame-hint">When off, a new game starts at $0 - earn aqua via Income ops and Free Market sales.</p>
+        <label class="newgame-toggle">
+          <input type="checkbox" id="fuel-consumption-toggle" ${getFuelConsumption() ? 'checked' : ''} />
+          <span>Fuel consumption</span>
+        </label>
+        <p class="muted newgame-hint">When on (default), each move spends water (fuel-per-burn × burns) and is blocked without enough fuel. When off, movement is free.</p>
       </div>
       <!--
         Stage-3 Card Market toggle (industrialize.md "Sandbox
@@ -8049,6 +8080,15 @@ function paintSolo() {
       setStatus(starterToggle.checked
         ? `New games will start with $${STARTER_CASH_AMOUNT} starter cash.`
         : 'New games will start with $0 - earn aqua via Income / Free Market.');
+    };
+    // Fuel-consumption toggle. Takes effect immediately (moves
+    // start spending water) and persists for new games.
+    const fuelToggle = host.querySelector('#fuel-consumption-toggle');
+    if (fuelToggle) fuelToggle.onchange = () => {
+      setFuelConsumption(fuelToggle.checked);
+      setStatus(fuelToggle.checked
+        ? '⛽ Fuel consumption on - moves now spend water (fuel-per-burn × burns).'
+        : '⛽ Fuel consumption off - movement is free.');
     };
     host.querySelector('#sandbox-reset').onclick = () => {
       const cash = getStarterCash() ? `$${STARTER_CASH_AMOUNT}` : '$0';
