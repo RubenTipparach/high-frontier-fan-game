@@ -7,13 +7,18 @@ refuelling loads fuel (red, toward wet mass).
 - Integer mass nodes 1..32. MIN DRY=1, MAX DRY=23, MAX WET=32.
 - Fuel-step sub-nodes at N + k/d between integers; d: 1->2 9,
   2->3 6, 3->4 4, 4-5 3, 6-10 2, 11-31 1. 57 nodes.
+- Layout: masses 1-11 on the baseline (1-10 with their fuel-steps
+  stacked above); after 11 the track zigzags - EVEN masses on the
+  upper row, ODD on the lower row.
 
 ## Connections
-- RED = refuel (load 1 FT, toward higher mass). Explicit diagonal
-  chains (the fuel-step lands on the next class's nearest step),
-  plus integers 1..32.
-- BLACK = burn (spend 1 FT, toward lower mass). Linear: every node
-  to the next-lower node in mass order (greatest -> least).
+- RED = refuel (load 1 FT, toward higher mass). Diagonal fuel-step
+  chains plus the linear integer chain 1..32 (linear through 11-32).
+- BLACK = burn (spend 1 FT, toward lower mass). Linear through all
+  nodes of mass <= 23 (greatest -> least); above 23 it splits by
+  parity, both arms converging on 23 (MAX DRY):
+  - evens: 32 -> 30 -> 28 -> 26 -> 24 -> 23
+  - odds:  31 -> 29 -> 27 -> 25 -> 23
 
 ## Nodes (57)
 | id | mass | band | gap d | kind | marker |
@@ -137,19 +142,10 @@ refuelling loads fuel (red, toward wet mass).
 | n9 | 1 8/9 | -> | n15 | 2 5/6 |
 | n19 | 3 3/4 | -> | n22 | 4 2/3 |
 
-## Black connections - BURN (spend 1 FT, linear greatest->least)
+## Black connections - BURN (spend 1 FT)
 
 | from | mass | -> | to | mass |
 |----|----|----|----|----|
-| n57 | 32 | -> | n56 | 31 |
-| n56 | 31 | -> | n55 | 30 |
-| n55 | 30 | -> | n54 | 29 |
-| n54 | 29 | -> | n53 | 28 |
-| n53 | 28 | -> | n52 | 27 |
-| n52 | 27 | -> | n51 | 26 |
-| n51 | 26 | -> | n50 | 25 |
-| n50 | 25 | -> | n49 | 24 |
-| n49 | 24 | -> | n48 | 23 |
 | n48 | 23 | -> | n47 | 22 |
 | n47 | 22 | -> | n46 | 21 |
 | n46 | 21 | -> | n45 | 20 |
@@ -197,3 +193,12 @@ refuelling loads fuel (red, toward wet mass).
 | n4 | 1 1/3 | -> | n3 | 1 2/9 |
 | n3 | 1 2/9 | -> | n2 | 1 1/9 |
 | n2 | 1 1/9 | -> | n1 | 1 |
+| n57 | 32 | -> | n55 | 30 |
+| n55 | 30 | -> | n53 | 28 |
+| n53 | 28 | -> | n51 | 26 |
+| n51 | 26 | -> | n49 | 24 |
+| n49 | 24 | -> | n48 | 23 |
+| n56 | 31 | -> | n54 | 29 |
+| n54 | 29 | -> | n52 | 27 |
+| n52 | 27 | -> | n50 | 25 |
+| n50 | 25 | -> | n48 | 23 |
