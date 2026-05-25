@@ -1,0 +1,53 @@
+{
+  "_comment": "Crew (player-faction) card stats. Source: https://www.hf4map.com/cards/crew/ . Six double-faced physical cards, two factions each (12 total). This file is the human-editable audit surface; data/crew.js holds the same data inline for the browser (keep them in sync until a generator exists). privilege.effect 'TODO' = not yet transcribed from the card image. mass/radHardness are placeholders pending the printed values.",
+  "cards": [
+    {
+      "id": "crew_un_b612",
+      "image": "card0",
+      "faces": {
+        "primary":   { "name": "United Nations Cosmonauts", "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "UN MANDATE", "effect": "TODO" } },
+        "secondary": { "name": "B612 Foundation",           "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "B612",       "effect": "TODO" } }
+      }
+    },
+    {
+      "id": "crew_roscosmos_taikonauts",
+      "image": "card1",
+      "faces": {
+        "primary":   { "name": "Roscosmos",  "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "PROTECTION FEES", "effect": "Gain 1 water after any player places a claim or industrializes." } },
+        "secondary": { "name": "Taikonauts", "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "TAIKONAUTS",      "effect": "TODO" } }
+      }
+    },
+    {
+      "id": "crew_nasa_isro",
+      "image": "card2",
+      "faces": {
+        "primary":   { "name": "NASA Astronauts",     "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "NASA LAUNCH FEES", "effect": "Gain 1 aqua whenever any player performs a Boost operation." } },
+        "secondary": { "name": "ISRO Glavcosmonauts", "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "ISRO",             "effect": "TODO" } }
+      }
+    },
+    {
+      "id": "crew_anonp2p_esa",
+      "image": "card3",
+      "faces": {
+        "primary":   { "name": "Anonymous P2P",       "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "ANONYMOUS P2P",      "effect": "TODO" } },
+        "secondary": { "name": "ESA Space Unionists", "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "ESA POWERSAT IN GEO", "effect": "+1 thrust to any one spacecraft during any player turn." } }
+      }
+    },
+    {
+      "id": "crew_shimizu_nasrda",
+      "image": "card4",
+      "faces": {
+        "primary":   { "name": "Shimizu Corp Entrepreneurs", "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "SHIMIZU SKUNKWORKS", "effect": "May bid in research auctions with any number of hand cards." } },
+        "secondary": { "name": "NASRDA Astronauts",          "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "NASRDA",            "effect": "TODO" } }
+      }
+    },
+    {
+      "id": "crew_spacex_norse",
+      "image": "card5",
+      "faces": {
+        "primary":   { "name": "SpaceX",           "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "SPACEX LAUNCH FEES", "effect": "Gain 1 water whenever any player performs a Boost operation." } },
+        "secondary": { "name": "Norse Astronauts", "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "NORSE",              "effect": "TODO" } }
+      }
+    }
+  ]
+}
