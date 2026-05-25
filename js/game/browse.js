@@ -1196,7 +1196,7 @@ function flyCardToHand(srcEl, card, onLand) {
 // hand" with a single primary action. Mobile-friendly because
 // HTML5 drag-and-drop doesn't work reliably on touch; pointing
 // + tapping is a more honest gesture for "I want this card."
-function openDeckTapModal(card, kind) {
+function openDeckTapModal(card, kind, { allowAuction = false } = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay';
   const close = () => overlay.remove();
@@ -1217,16 +1217,30 @@ function openDeckTapModal(card, kind) {
   const actions = document.createElement('div');
   actions.className = 'card-modal-actions';
 
-  // In Card Market mode the library is STRICTLY browse-only:
-  // you cannot add to hand AND you cannot auction from here.
-  // Auctions happen only in the 🛒 Cart (top of each deck).
-  // The deck-tap modal becomes a pure inspector with a note
-  // pointing the player at the cart - no action button.
+  // Action button depends on context + mode:
+  //   - allowAuction (opened FROM the cart, market mode): a
+  //     "🎯 Auction" button that buys this deck-top card.
+  //   - market mode, opened from the LIBRARY (no allowAuction):
+  //     strictly read-only - no add, no auction. Auctions only
+  //     happen in the cart.
+  //   - Free Library mode: "✋ Add to hand" + flight.
   const inMarket = getMarketMode() === MARKET_MODE.MARKET;
-  if (inMarket) {
+  if (inMarket && allowAuction) {
+    const auctionBtn = document.createElement('button');
+    auctionBtn.type = 'button';
+    auctionBtn.className = 'modal-btn stack';
+    const bonus = supportBonusDecks(card).length;
+    auctionBtn.textContent = bonus > 0 ? `🎯 Auction (+${bonus} bonus)` : '🎯 Auction';
+    auctionBtn.title = 'Auction this card (1 op, 0 aqua in sandbox mode).';
+    auctionBtn.addEventListener('click', () => {
+      close();
+      doAuctionCard(card);
+    });
+    actions.append(auctionBtn);
+  } else if (inMarket) {
     const note = document.createElement('p');
     note.className = 'muted card-modal-note';
-    note.textContent = '🛒 Card Market: patents are acquired from the Cart tab (top of each deck), not the library. This view is read-only.';
+    note.textContent = '🛒 Card Market: patents are acquired from the Cart tab, not the library. This view is read-only.';
     actions.append(note);
   } else {
     const addBtn = document.createElement('button');
@@ -6798,8 +6812,9 @@ export function openPatentsSupports(kinds) {
 // tab is hidden in Free Library mode). Renders one section per
 // rulebook deck type (thruster / reactor / radiator / refinery
 // / robonaut / generator) listing every patent NOT already
-// owned by the player, with a per-card "🎯 Buy" button that
-// opens the auction modal pre-selected on that card. Repaints
+// owned by the player, with a per-deck "🎯 Auction" button that
+// opens the auction-confirm modal for that deck's top card.
+// Repaints
 // on hand / rocket / outpost / LEO / market changes so the
 // available pool stays current.
 let _cartListenerHooked = false;
@@ -6885,16 +6900,19 @@ function paintCart() {
       ce.setAttribute('role', 'button');
       ce.setAttribute('tabindex', '0');
       ce.title = 'Tap to inspect this card';
+      // Opened from the cart -> the inspect modal gets an
+      // Auction button (allowAuction:true). The library path
+      // omits this so it stays read-only in market mode.
       ce.addEventListener('click', (ev) => {
         // Don't intercept clicks on interactive children of
         // the card (e.g. the flip button, support chips).
         if (ev.target.closest('.card-flip, .card-support-chip, .card-supports')) return;
-        openDeckTapModal(card, 'patent');
+        openDeckTapModal(card, 'patent', { allowAuction: true });
       });
       ce.addEventListener('keydown', (ev) => {
         if (ev.key === 'Enter' || ev.key === ' ') {
           ev.preventDefault();
-          openDeckTapModal(card, 'patent');
+          openDeckTapModal(card, 'patent', { allowAuction: true });
         }
       });
       cardSlot.appendChild(ce);
@@ -6905,19 +6923,19 @@ function paintCart() {
 
     section.appendChild(body);
 
-    // Buy button: open the auction-confirm modal. Disabled
-    // when the deck is empty OR the player can't sacrifice.
+    // Auction button: opens the auction-confirm modal for this
+    // deck's top card. Disabled when the deck is empty.
     const buy = document.createElement('button');
     buy.type = 'button';
     buy.className = 'cart-buy-btn';
     buy.disabled = !card;
     buy.title = !card
       ? `${type} deck is empty.`
-      : 'Confirm the auction (1 op, 0 aqua in sandbox mode).';
+      : 'Auction this card (1 op, 0 aqua in sandbox mode).';
     const supportCount = card ? supportBonusDecks(card).length : 0;
     buy.textContent = supportCount > 0
-      ? `🎯 Buy (+${supportCount} bonus)`
-      : '🎯 Buy';
+      ? `🎯 Auction (+${supportCount} bonus)`
+      : '🎯 Auction';
     if (card) {
       buy.addEventListener('click', () => {
         if (buy.disabled) return;
