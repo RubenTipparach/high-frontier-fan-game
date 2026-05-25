@@ -88,10 +88,12 @@ Face shape (matches the crew renderer in `js/game/card-ui.js`):
 
 ## Open work
 
-- Wire each faction's privilege into the engine (right now the
-  pick is recorded + the card enters hand, but the privilege
-  effect - e.g. NASA's "+1 Aqua on any Boost" - isn't applied
-  yet).
+- **Faction privilege effects will be wired into the engine in a
+  future update.** Right now the pick is recorded + the chosen
+  crew card enters the player's hand, but the privilege effect
+  (e.g. NASA's "+1 Aqua on any Boost") is NOT applied yet. The
+  `bonus` (title) + `blurb` (effect text) are carried on each
+  face purely for display until that update lands.
 - Surface the crew thrust triangle (thrust / FT-per-burn /
   afterburn) in the crew card renderer + let a crew act as the
   ship's thruster (it carries real thrust values now).
