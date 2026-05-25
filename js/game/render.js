@@ -1958,6 +1958,16 @@ export class MapRenderer {
     }
   }
 
+  // Zoom-driven hex scale. Hexes reach full HEX_R at the full-size
+  // zoom and shrink proportionally below it (so they don't dominate
+  // the compressed view / overlap when zoomed out). Mobile pushes
+  // the full-size threshold up to zoom 5 so the hexes keep shrinking
+  // in step with zoom-out instead of "growing" relative to the map.
+  _hexScale() {
+    const full = _isMobileViewport() ? 5 : HEX_FULLSIZE_ZOOM;
+    return Math.min(1, this.zoom / full);
+  }
+
   // Hex markers + endpoint rings, drawn in SCREEN space so they
   // stay readable at any zoom level.
   _drawSiteHexesScreen(ctx) {
@@ -1966,7 +1976,7 @@ export class MapRenderer {
     // hexS: shrink the hex marker below HEX_FULLSIZE_ZOOM so it
     // doesn't dominate the compressed view at low zoom. At and
     // above the threshold the hex sits at its full HEX_R.
-    const hexS = Math.min(1, this.zoom / HEX_FULLSIZE_ZOOM);
+    const hexS = this._hexScale();
     for (const site of this._realSites) {
       const sx = this.pan.x + site.x * eff;
       const sy = this.pan.y + site.y * eff;
@@ -2289,7 +2299,7 @@ export class MapRenderer {
       if (sx < -60 || sx > hostW + 60 || sy < -60 || sy > hostH + 60) continue;
       // Base radius: hex marker shrinks at low zoom (see hexS),
       // so mirror that here for the ring to track the visible hex.
-      const hexS = Math.min(1, this.zoom / HEX_FULLSIZE_ZOOM);
+      const hexS = this._hexScale();
       const baseR = (vis.kind === 'hex' ? vis.r * hexS : vis.r);
       // Single bright yellow pulse ring, well outside the hex.
       // No shadow (silently dropped by some mobile GPU paths).
@@ -2499,7 +2509,7 @@ export class MapRenderer {
     // size text / droplets / flag glyphs ride with the hex they
     // sit inside instead of floating loose when the hex shrinks
     // below the HEX_FULLSIZE_ZOOM threshold.
-    const hexS = Math.min(1, this.zoom / HEX_FULLSIZE_ZOOM);
+    const hexS = this._hexScale();
 
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'center';
