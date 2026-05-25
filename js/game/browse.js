@@ -107,7 +107,7 @@ import {
   getStarterCash, setStarterCash,
   getFuelConsumption, setFuelConsumption,
   resetSandboxEconomy,
-  openAuctionConfirmModal, openFreeMarketModal,
+  openAuctionConfirmModal, openFreeMarketModal, openSellConfirmModal,
   findAuctionableCards,
 } from './card-market.js';
 import {
@@ -290,11 +290,10 @@ function wireHandStrip() {
       };
       quick.append(
         qBtn('q-discard', '🗑', 'Discard', () => removeFromHandAt(idx)),
-        // Sell is functionally Discard until the Stage-3
-        // economy lands (it'll pay out water/VP for sold cards
-        // then). Same removal action; separate verb so the
-        // intent is preserved when the economy ships.
-        qBtn('q-sell',    '💰', 'Sell card', () => removeFromHandAt(idx)),
+        // Free Market: effectively sells the card for +$3 (to the
+        // bottom of its deck), via the shared op-gated confirm flow.
+        qBtn('q-sell',    '💱', `Free Market: effectively sells this card to gain $${FREE_MARKET_AQUA} (costs 1 operation)`,
+          () => freeMarketSellFromHand(card)),
         qBtn('q-produce', '🏭', `Exo produce (spectral ${card.spectralType || '?'})`,
           () => setStatus(`Exo-produce needs a Stage-3 factory matching spectral ${card.spectralType || '?'}.`)),
         qBtn('q-boost',   '🚀', isBoostMarked(id) ? 'Unmark boost' : 'Mark for boost',
@@ -1568,11 +1567,10 @@ function openCardModal(card, kind, slotIdx) {
   const sellBtn = document.createElement('button');
   sellBtn.type = 'button';
   sellBtn.className = 'modal-btn sell';
-  sellBtn.textContent = '💰 Sell';
-  sellBtn.title = 'Sell card - same as discard until the Stage-3 economy lands';
+  sellBtn.textContent = '💱 Free Market';
+  sellBtn.title = `Free Market: effectively sells this card to gain $${FREE_MARKET_AQUA}, returning it to the bottom of its deck. Costs 1 operation.`;
   sellBtn.addEventListener('click', () => {
-    removeFromHandAt(slotIdx);
-    close();
+    freeMarketSellFromHand(card, close);
   });
 
   const produceBtn = document.createElement('button');
@@ -5668,6 +5666,39 @@ function prospectorIsruValue(card) {
   if (!e) return 0;
   const v = typeof e.value === 'number' ? e.value : parseInt(e.value, 10);
   return Number.isFinite(v) ? v : 0;
+}
+
+// Free-market a single already-chosen Hand card. Same cost + payout
+// as the Free Market operation (1 op, +FREE_MARKET_AQUA aqua, card to
+// the bottom of its deck), but skips the picker and goes straight to
+// the irreversible-sale confirm. afterFn runs once the sale commits
+// (e.g. to close the card popup).
+function freeMarketSellFromHand(card, afterFn) {
+  if (!card) return;
+  openSellConfirmModal({
+    card,
+    aqua: FREE_MARKET_AQUA,
+    renderCardFn: renderCard,
+    onConfirm: () => {
+      if (!requireOp('Free Market')) return;
+      removeFromHand(card.id);
+      addToBottom(card.id);
+      addAqua(FREE_MARKET_AQUA);
+      setStatus(
+        `💱 Free Market: <em>${esc(card.name)}</em> nets `
+        + `<strong>+${FREE_MARKET_AQUA}</strong> aqua and returns to the `
+        + `bottom of the ${esc(card.type || 'patent')} deck.`
+      );
+      logAction({
+        type: 'free_market',
+        icon: '💱',
+        summary: `Free Market: ${card.name} for +${FREE_MARKET_AQUA} aqua`,
+        undoable: false,
+        data: { cardId: card.id, aqua: FREE_MARKET_AQUA },
+      });
+      if (afterFn) afterFn();
+    },
+  });
 }
 
 function doProspect(site, prosp) {
