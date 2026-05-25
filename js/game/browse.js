@@ -6065,14 +6065,18 @@ async function moveRocket() {
       } else {
         const stackCards = getRocketStack()
           .map((slot) => {
-            const card = PATENTS_BY_ID[slot.id]
-              || CREW.find((c) => c.id === slot.id) || null;
-            if (!card) return null;
-            return {
-              id: slot.id,
-              name: card.name,
-              radHardness: card.radHardness != null ? card.radHardness : 0,
-            };
+            const patent = PATENTS_BY_ID[slot.id];
+            if (patent) {
+              return { id: slot.id, name: patent.name, radHardness: patent.radHardness != null ? patent.radHardness : 0 };
+            }
+            // Crew name + rad-hardness live on the chosen FACE, not
+            // the physical card - resolve it so the row isn't blank.
+            const crew = CREW_BY_ID[slot.id];
+            if (crew) {
+              const f = crew.faces[slot.face === 'secondary' ? 'secondary' : 'primary'] || crew.faces.primary || {};
+              return { id: slot.id, name: f.name || crew.id, radHardness: f.radHardness != null ? f.radHardness : 0 };
+            }
+            return null;
           })
           .filter(Boolean);
         const { rolls: radRolls, decommission } = await radHardnessRollModal(
@@ -6092,23 +6096,31 @@ async function moveRocket() {
         }
         if (decommission && decommission.length) {
           let lost = 0;
+          let crewToLeo = 0;
           for (const cardId of decommission) {
-            const ridx = getRocketStack().findIndex((s) => s.id === cardId);
+            const stack = getRocketStack();
+            const ridx = stack.findIndex((s) => s.id === cardId);
             if (ridx < 0) continue;
+            const slot = stack[ridx];
+            const isCrew = slot.kind === 'crew' || CREW.some((c) => c.id === cardId);
             rocketRemoveCard(ridx);
-            const card = PATENTS_BY_ID[cardId]
-              || CREW.find((c) => c.id === cardId) || null;
-            if (card) {
-              const r = addToHand(card);
-              if (r && r.ok) lost++;
+            if (isCrew) {
+              // Crew never goes to the hand - a rad-failed crew
+              // re-spawns in the LEO Stack (keeping its face).
+              addCardToLeo({ id: cardId, kind: 'crew', face: slot.face });
+              crewToLeo++;
+            } else {
+              const card = PATENTS_BY_ID[cardId];
+              if (card) { const r = addToHand(card); if (r && r.ok) lost++; }
             }
           }
           logAction({
             type: 'rad_decommission',
             icon: '☢',
-            summary: `☢ ${esc(hazard.site.name)}: ${lost} card${lost === 1 ? '' : 's'} decommissioned to hand`,
+            summary: `☢ ${esc(hazard.site.name)}: ${lost} card${lost === 1 ? '' : 's'} decommissioned to hand`
+              + (crewToLeo ? `, ${crewToLeo} crew to LEO stack` : ''),
             undoable: false,
-            data: { siteId: hazard.site.id, decommission, count: lost },
+            data: { siteId: hazard.site.id, decommission, count: lost, crewToLeo },
           });
         }
       }
