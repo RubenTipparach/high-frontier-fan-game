@@ -344,9 +344,49 @@ function wireHandStrip() {
     // Bank already lives at LEO), so there is no wet-mass /
     // spillage concern here. Cards just move across.
     //
-    // Rulebook I4: Boost is one Operation per turn (multi-card
-    // batch counts as one op).
-    if (!requireOp('Boost')) return;
+    // Boost costs Aqua = the total mass of the boosted cards
+    // (user, 2026-05): the player confirms the spend before any
+    // money moves. Rulebook I4: Boost is also one Operation per
+    // turn (the multi-card batch counts as one op).
+    const massOf = (c) => {
+      const f = (c && c.faces && c.faces.primary) || c || {};
+      return (f.mass != null ? f.mass : (c && c.mass)) | 0;
+    };
+    const cards = marked.map((id) => lookup(id)).filter(Boolean);
+    if (!cards.length) return;
+    const cost = cards.reduce((sum, c) => sum + massOf(c), 0);
+    const have = getAqua();
+    const n = cards.length;
+    if (cost > have) {
+      await confirmModal({
+        title: '💸 Not enough Aqua',
+        body: `Boosting ${n} card${n === 1 ? '' : 's'} costs <strong>${cost}</strong> Aqua `
+          + `(total mass), but your bank holds only <strong>${have}</strong>.`,
+        yes: 'OK', no: '',
+      });
+      return;
+    }
+    const ok = await confirmModal({
+      title: '🛰 Boost to LEO',
+      body: `Boost <strong>${n}</strong> card${n === 1 ? '' : 's'} from your Hand to the LEO Stack `
+        + `for <strong>${cost}</strong> Aqua (total mass ${cost})? `
+        + `Bank: <strong>${have}</strong> → <strong>${have - cost}</strong>. Costs one operation.`,
+      yes: `🛰 Boost (${cost} aqua)`,
+      no: 'Cancel',
+    });
+    if (!ok) return;
+    // Charge the Aqua first (affordability pre-checked above;
+    // spendAqua is defence-in-depth). Then secure the op - if
+    // none is left, refund the Aqua so the player isn't charged
+    // for a boost that didn't happen.
+    if (!spendAqua(cost)) {
+      setStatus(`Boost aborted - not enough Aqua (need ${cost}).`);
+      return;
+    }
+    if (!requireOp('Boost')) {
+      addAqua(cost);
+      return;
+    }
     for (const id of marked) {
       const card = lookup(id);
       if (!card) continue;
@@ -354,6 +394,7 @@ function wireHandStrip() {
       removeFromHand(id);
     }
     clearBoostMarks();
+    setStatus(`🛰 Boosted <strong>${n}</strong> card${n === 1 ? '' : 's'} to LEO for <strong>${cost}</strong> Aqua. Bank: <strong>${getAqua()}</strong>.`);
     // Open the LEO inspector so the player sees the cards land
     // in LEO Stack. They'll Transfer LEO->Rocket separately
     // when the rocket is parked at LEO.
