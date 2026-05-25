@@ -4948,3 +4948,19 @@ body:has(#view-browse:not(.hidden)) #main {
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* New-game settings (starter-cash toggle) under the New game
+   button in the game-mode panel. */
+.newgame-settings {
+  margin: 8px 0 4px;
+}
+.newgame-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.newgame-toggle input { width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent); }
+.newgame-hint { margin: 4px 0 0; font-size: 11px; line-height: 1.4; }

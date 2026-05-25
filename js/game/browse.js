@@ -97,8 +97,9 @@ import {
   computeEndgameScore, SPECTRAL_DIMINISHING_SCHEDULE,
 } from './scoring.js';
 import {
-  MARKET_MODE, FREE_MARKET_AQUA,
+  MARKET_MODE, FREE_MARKET_AQUA, STARTER_CASH_AMOUNT,
   getMarketMode, setMarketMode, onMarketChange,
+  getStarterCash, setStarterCash,
   resetSandboxEconomy,
   openAuctionConfirmModal, openFreeMarketModal,
   findAuctionableCards,
@@ -7579,13 +7580,22 @@ function paintSolo() {
         <button class="game-mode-btn" id="game-mode-campaign" disabled
           title="Campaign variant - not implemented yet.">📖 Campaign (soon)</button>
       </div>
-      <p class="muted">Sandbox / solo mode is always on. Use the
-      Reset button to clear the board, and the card economy
+      <p class="muted">Sandbox / solo mode is always on. Start a
+      new game to clear the board, and use the card economy
       toggle below to switch between Free Library and Card
       Market shopping rules.</p>
       <div class="solo-actions">
-        <button class="danger" id="sandbox-reset"
-          title="Empty the hand, the rocket stack, and any board components">Reset sandbox</button>
+        <button class="primary" id="sandbox-reset"
+          title="Clear the board and start a fresh sandbox game">🆕 New game</button>
+      </div>
+      <!-- New-game settings. Starter cash seeds the aqua bank
+           on the next New game. Default ON (100 aqua). -->
+      <div class="newgame-settings">
+        <label class="newgame-toggle">
+          <input type="checkbox" id="starter-cash-toggle" ${getStarterCash() ? 'checked' : ''} />
+          <span>Start with $${STARTER_CASH_AMOUNT} starter cash</span>
+        </label>
+        <p class="muted newgame-hint">When off, a new game starts at $0 - earn aqua via Income ops and Free Market sales.</p>
       </div>
       <!--
         Stage-3 Card Market toggle (industrialize.md "Sandbox
@@ -7633,10 +7643,21 @@ function paintSolo() {
       setStatus(`💾 Saved game as "${esc(rec.name)}".`);
       renderSavesList();
     };
+    // Starter-cash toggle: persists the new-game preference.
+    // Takes effect on the NEXT New game (doesn't retroactively
+    // change the current bank).
+    const starterToggle = host.querySelector('#starter-cash-toggle');
+    if (starterToggle) starterToggle.onchange = () => {
+      setStarterCash(starterToggle.checked);
+      setStatus(starterToggle.checked
+        ? `New games will start with $${STARTER_CASH_AMOUNT} starter cash.`
+        : 'New games will start with $0 - earn aqua via Income / Free Market.');
+    };
     host.querySelector('#sandbox-reset').onclick = () => {
-      if (!confirm('Reset sandbox? This clears your hand, your rocket’s stack, position, planned route, outposts, factories, colonies, discs, glory, mission log, the turn clock, and your aqua bank.')) return;
+      const cash = getStarterCash() ? `$${STARTER_CASH_AMOUNT}` : '$0';
+      if (!confirm(`Start a new game? This clears your hand, rocket, position, planned route, outposts, factories, colonies, discs, glory, mission log, the turn clock, and reseeds the aqua bank to ${cash}.`)) return;
       doSandboxReset();
-      setStatus('Sandbox reset - hand, rocket, position, outposts, factories, colonies, discs, glory, log, clock, and aqua cleared.');
+      setStatus(`🆕 New game - board cleared, aqua bank reseeded to ${cash}.`);
     };
     const flipMode = (next) => {
       if (next === marketMode) return;

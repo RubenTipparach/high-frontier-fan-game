@@ -95,28 +95,41 @@ code {
 
 /* ===== Main menu FAB + modal ===== */
 
+/* Menu FAB. Sized + styled to sit in the same visual family as
+   the map-toolbar buttons (Move to / End turn): same height,
+   border, radius, and panel-tint so it reads as the leftmost
+   member of the toolbar row rather than a mismatched floating
+   blob. Pinned at top:8 left:12 to line up with the toolbar's
+   8px top padding. */
 .main-menu-fab {
   position: fixed;
-  top: 10px;
+  top: 8px;
   left: 12px;
   z-index: 90;
-  width: 38px;
-  height: 38px;
-  border-radius: 8px;
-  background: rgba(15, 16, 35, 0.85);
+  height: 30px;
+  min-width: 40px;
+  padding: 0 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: var(--panel-2);
   border: 1px solid var(--border);
   color: var(--ink);
-  font-size: 20px;
+  font-size: 17px;
   line-height: 1;
   cursor: pointer;
   backdrop-filter: blur(4px);
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
-  transition: background 0.15s, border-color 0.15s;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 .main-menu-fab:hover {
   background: var(--accent);
   color: #062136;
   border-color: var(--accent-2);
+}
+.main-menu-fab:active {
+  transform: translateY(1px);
 }
 
 .main-menu-overlay {

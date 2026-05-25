@@ -40,7 +40,7 @@
 
 import { PATENTS, PATENTS_BY_ID, PATENT_TYPES } from '../../data/patents.js';
 import { getHandSlots, addToHand, removeFromHand, clearHand } from './hand.js';
-import { getRocketStack, clearStack as rocketClearStack, resetAqua } from './rocket.js';
+import { getRocketStack, clearStack as rocketClearStack, setAqua } from './rocket.js';
 import { getOutposts, resetStacks } from './stacks.js';
 import { resetFactoriesAndColonies } from './factories.js';
 import { resetLeoStack } from './leo-stack.js';
@@ -54,9 +54,14 @@ import {
 } from './decks.js';
 
 const STORAGE_MODE = 'hf-sandbox-card-market-mode';
+const STORAGE_STARTER_CASH = 'hf-sandbox-starter-cash';
 
 export const MARKET_MODE = { LIBRARY: 'library', MARKET: 'market' };
 export const FREE_MARKET_AQUA = 3;
+// New-game setting: how much aqua a fresh sandbox starts with
+// when "starter cash" is enabled. When disabled the player
+// starts at 0 and has to earn it via Income ops / Free Market.
+export const STARTER_CASH_AMOUNT = 100;
 
 let _mode = (() => {
   try {
@@ -64,6 +69,22 @@ let _mode = (() => {
     return raw === MARKET_MODE.MARKET ? MARKET_MODE.MARKET : MARKET_MODE.LIBRARY;
   } catch { return MARKET_MODE.LIBRARY; }
 })();
+
+// Starter-cash preference. Default ON (true) - matches the
+// historical behaviour where a fresh sandbox seeded 100 aqua.
+let _starterCash = (() => {
+  try {
+    const raw = localStorage.getItem(STORAGE_STARTER_CASH);
+    return raw == null ? true : raw === '1';
+  } catch { return true; }
+})();
+
+export function getStarterCash() { return _starterCash; }
+export function setStarterCash(on) {
+  _starterCash = !!on;
+  try { localStorage.setItem(STORAGE_STARTER_CASH, _starterCash ? '1' : '0'); }
+  catch { /* private mode */ }
+}
 
 let _listeners = [];
 
@@ -116,7 +137,10 @@ export function resetSandboxEconomy({ keepMode = true } = {}) {
   resetGlory();
   resetLog();
   resetClock();
-  resetAqua();
+  // Starting aqua honours the new-game "starter cash" setting:
+  // STARTER_CASH_AMOUNT when enabled, 0 when the player opted
+  // to start broke.
+  setAqua(_starterCash ? STARTER_CASH_AMOUNT : 0);
   // Reshuffle every market deck. Nothing is owned after the
   // wipes above, so we pass an empty owned-set.
   resetDecks(new Set());
