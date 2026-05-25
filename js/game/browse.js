@@ -801,6 +801,9 @@ function openUnifiedStackInspector(stackId) {
         <div id="stack-inspector-transfer"></div>
       </div>
       <div class="card-modal-actions">
+        ${stackId === 'leo' && isLeoSite(getRocketSite())
+          ? '<button type="button" class="modal-btn stack leo-fuel-tank" title="Open the docked rocket\'s water tank to transfer fuel">💧 Rocket fuel tank</button>'
+          : ''}
         <button type="button" class="modal-btn stack-inspector-close">Close</button>
       </div>
     `;
@@ -900,6 +903,17 @@ function openUnifiedStackInspector(stackId) {
     }
 
     dialog.querySelector('.stack-inspector-close').addEventListener('click', close);
+    // When the rocket is docked at LEO, a shortcut into its water
+    // tank (the aqua <-> tank transfer UI lives there). Close the
+    // LEO inspector first so the two modals don't stack / fight
+    // over the Escape key.
+    const fuelBtn = dialog.querySelector('.leo-fuel-tank');
+    if (fuelBtn) {
+      fuelBtn.addEventListener('click', () => {
+        close();
+        openFuelTankModal();
+      });
+    }
   };
 
   // Subscribe to every state change that could affect the
