@@ -25,6 +25,65 @@
 //   onRocketChange(cb)                → unsubscribe
 
 import { PATENTS_BY_ID } from '../../data/patents.js';
+import { CREW_BY_ID } from '../../data/crew.js';
+
+// Crew can act as the ship's thruster OR its robonaut
+// (prospector). Crew records have a different shape than patents
+// (the thruster lives in a `thruster: {thrust, fuelPerBurn,
+// afterburn, dirt}` block and the prospector is a `prospector`
+// string), so synthesize a patent-like view of the chosen crew
+// face. `faceKey` is the picked faction face carried on the slot.
+function synthCrew(crew, faceKey) {
+  const key = faceKey === 'secondary' ? 'secondary' : 'primary';
+  const cf = (crew.faces && (crew.faces[key] || crew.faces.primary)) || {};
+  const face = {
+    name: cf.name,
+    mass: cf.mass,
+    radHardness: cf.radHardness,
+    isru: cf.isru,
+    // Map the crew prospector kind onto the patent property shape
+    // getProspectorKind() scans (raygun / buggy / missile).
+    properties: cf.prospector ? [{ key: cf.prospector, value: true }] : [],
+  };
+  if (cf.thruster) {
+    face.thrust = cf.thruster.thrust;
+    face.fuel = cf.thruster.fuelPerBurn;
+    face.afterburn = cf.thruster.afterburn || 0;
+  }
+  const synth = {
+    id: crew.id,
+    name: cf.name || crew.id,
+    type: 'crew',
+    mass: cf.mass,
+    radHardness: cf.radHardness,
+    faces: { primary: face },
+  };
+  if (cf.thruster) synth.thrust = cf.thruster.thrust;
+  return synth;
+}
+
+// Resolve a stack slot's card. Patents come straight from
+// PATENTS_BY_ID; crew is synthesized from its chosen face so the
+// thruster / prospector / mass reads below are uniform.
+function cardForSlot(slot) {
+  if (!slot || !slot.id) return null;
+  const p = PATENTS_BY_ID[slot.id];
+  if (p) return p;
+  const crew = CREW_BY_ID[slot.id];
+  return crew ? synthCrew(crew, slot.face) : null;
+}
+
+// Resolve a card by id, finding its slot (and thus crew face) in
+// the current stack. Falls back to the primary crew face when the
+// id isn't in the stack.
+function cardById(id) {
+  const p = PATENTS_BY_ID[id];
+  if (p) return p;
+  const slot = _stack.find((s) => s.id === id);
+  if (slot) return cardForSlot(slot);
+  const crew = CREW_BY_ID[id];
+  return crew ? synthCrew(crew, 'primary') : null;
+}
 
 const STORAGE_KEY      = 'hf-sandbox-rocket';
 const ACTIVE_KEY       = 'hf-sandbox-rocket-active-thruster';
@@ -141,7 +200,7 @@ export function isInRocket(id) {
   return _stack.some((s) => s.id === id);
 }
 
-export function addToStack(cardId, kind) {
+export function addToStack(cardId, kind, face) {
   if (!cardId) return -1;
   // Expansion cards (currently GW thrusters) are previewable in
   // the library but cannot be flown until the expansion ships.
@@ -150,12 +209,18 @@ export function addToStack(cardId, kind) {
   // check, not the only gate.
   const card = PATENTS_BY_ID[cardId];
   if (card && card.type === 'gw-thruster') return -1;
-  _stack.push({ id: cardId, kind: kind || 'patent' });
+  const slot = { id: cardId, kind: kind || 'patent' };
+  // Crew carries its picked faction face; preserve it so the
+  // right face's thruster / prospector is in play.
+  if (face === 'secondary') slot.face = 'secondary';
+  _stack.push(slot);
   // First thruster added auto-selects as the active thruster
   // so the rocket has a sensible default. The player can
-  // re-pick another thruster from the stack modal later.
+  // re-pick another thruster from the stack modal later. Crew
+  // that doubles as a thruster qualifies too.
   if (!_activeThrusterId) {
-    const isThr = card && (card.type === 'thruster' || card.thrust != null);
+    const resolved = cardForSlot(slot);
+    const isThr = resolved && (resolved.type === 'thruster' || resolved.thrust != null);
     if (isThr) _activeThrusterId = cardId;
   }
   // Safety net: a freshly-added card raises dry mass and lowers
@@ -178,7 +243,7 @@ export function addToStack(cardId, kind) {
 function stackDryMass() {
   let mass = 0;
   for (const slot of _stack) {
-    const c = PATENTS_BY_ID[slot.id];
+    const c = cardForSlot(slot);
     if (!c) continue;
     const f = (c.faces && c.faces.primary) || c;
     mass += ((f.mass != null ? f.mass : c.mass) | 0);
@@ -196,7 +261,7 @@ export function removeFromStack(index) {
   if (removed && removed.id === _activeThrusterId) {
     _activeThrusterId = null;
     for (const s of _stack) {
-      const c = PATENTS_BY_ID[s.id];
+      const c = cardForSlot(s);
       if (c && (c.type === 'thruster' || c.thrust != null)) {
         _activeThrusterId = s.id;
         break;
@@ -236,7 +301,7 @@ export function setActiveThruster(id) {
   // with its own thrust value - same idiom as the rest of the
   // app).
   if (!_stack.some((s) => s.id === id)) return false;
-  const card = PATENTS_BY_ID[id];
+  const card = cardById(id);
   if (!card) return false;
   if (card.type !== 'thruster' && card.thrust == null) return false;
   _activeThrusterId = id;
@@ -260,13 +325,13 @@ export function getProspectorKind(card) {
   return null;
 }
 function isProspectorCardId(id) {
-  return !!getProspectorKind(PATENTS_BY_ID[id]);
+  return !!getProspectorKind(cardById(id));
 }
 
 export function getProspectorCards() {
   const out = [];
   for (const slot of _stack) {
-    const card = PATENTS_BY_ID[slot.id];
+    const card = cardForSlot(slot);
     const kind = getProspectorKind(card);
     if (kind) out.push({ id: slot.id, card, kind });
   }
@@ -280,6 +345,7 @@ export function setActiveProspector(id) {
   if (!_stack.some((s) => s.id === id)) return false;
   if (!isProspectorCardId(id)) return false;
   _activeProspectorId = id;
+  // (resolution via cardById -> crew prospector faces qualify.)
   persist();
   notify();
   return true;
@@ -300,7 +366,7 @@ export function clearActiveProspector() {
 export function getActiveProspectorStats() {
   const id = _activeProspectorId;
   if (!id) return null;
-  const card = PATENTS_BY_ID[id];
+  const card = cardById(id);
   if (!card) return null;
   const kind = getProspectorKind(card);
   if (!kind) return null;
@@ -335,7 +401,7 @@ function collectSupplied(excludeId) {
   const supplied = new Set();
   for (const slot of _stack) {
     if (slot.id === excludeId) continue;
-    const c = PATENTS_BY_ID[slot.id];
+    const c = cardForSlot(slot);
     if (!c) continue;
     const supplies = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
     for (const k of supplies) supplied.add(k);
@@ -358,7 +424,7 @@ export function isRocketActive() {
     return { active: false, reason: 'empty stack', missing: [] };
   }
   const thrusters = _stack.filter((s) => {
-    const c = PATENTS_BY_ID[s.id];
+    const c = cardForSlot(s);
     return c && (c.type === 'thruster' || c.thrust != null);
   });
   if (!thrusters.length) {
@@ -367,7 +433,7 @@ export function isRocketActive() {
   if (!_activeThrusterId) {
     return { active: false, reason: 'no active thruster selected', missing: [] };
   }
-  const active = PATENTS_BY_ID[_activeThrusterId];
+  const active = cardById(_activeThrusterId);
   if (!active) {
     return { active: false, reason: 'active thruster missing', missing: [] };
   }
@@ -377,7 +443,7 @@ export function isRocketActive() {
   const others = _stack.filter((s) => s.id !== _activeThrusterId);
   const supplied = new Set();
   for (const s of others) {
-    const c = PATENTS_BY_ID[s.id];
+    const c = cardForSlot(s);
     if (!c) continue;
     const supplies = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
     for (const k of supplies) supplied.add(k);
@@ -433,7 +499,7 @@ export function findFunctionalThrusters(stack) {
   if (!Array.isArray(stack) || !stack.length) return [];
   const out = [];
   for (let i = 0; i < stack.length; i++) {
-    const c = PATENTS_BY_ID[stack[i].id];
+    const c = cardForSlot(stack[i]);
     if (!c) continue;
     const isThruster = c.type === 'thruster' || c.thrust != null;
     if (!isThruster) continue;
@@ -444,7 +510,7 @@ export function findFunctionalThrusters(stack) {
     const supplied = new Set();
     for (let j = 0; j < stack.length; j++) {
       if (j === i) continue;
-      const o = PATENTS_BY_ID[stack[j].id];
+      const o = cardForSlot(stack[j]);
       if (!o) continue;
       const of = (o.faces && o.faces.primary) || o;
       const sup = Array.isArray(of.supplies) ? of.supplies : (o.supplies || []);
@@ -568,7 +634,7 @@ export function getStackTotals() {
   let minRad = null;
   let count = 0;
   for (const slot of _stack) {
-    const card = PATENTS_BY_ID[slot.id];
+    const card = cardForSlot(slot);
     if (!card) continue;
     const f = activeFace(card);
     const m = (f.mass != null ? f.mass : card.mass) | 0;
@@ -601,7 +667,7 @@ export function getStackTotals() {
 export function getActiveThrusterStats() {
   const id = _activeThrusterId;
   if (!id) return null;
-  const card = PATENTS_BY_ID[id];
+  const card = cardById(id);
   if (!card) return null;
   const f = activeFace(card);
   let thrust = f.thrust != null ? f.thrust : card.thrust;
@@ -614,7 +680,7 @@ export function getActiveThrusterStats() {
   const modifiers = [];
   for (const slot of _stack) {
     if (slot.id === id) continue;
-    const c = PATENTS_BY_ID[slot.id];
+    const c = cardForSlot(slot);
     if (!c) continue;
     const cf = activeFace(c);
     const tMod = cf.thrustMod;

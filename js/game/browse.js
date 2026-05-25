@@ -666,7 +666,7 @@ function transferOneCard(sourceId, destId, cardId) {
   if (destId === 'leo') {
     added = addCardToLeo(slot);
   } else if (destId === 'rocket') {
-    added = rocketAddCard(slot.id, slot.kind) !== -1;
+    added = rocketAddCard(slot.id, slot.kind, slot.face) !== -1;
   } else if (destId.startsWith('outpost')) {
     const letter = destId.slice('outpost'.length);
     added = addCardToOutpost(letter, slot);
@@ -674,7 +674,7 @@ function transferOneCard(sourceId, destId, cardId) {
   if (!added) {
     // Roll back to source on failure.
     if (sourceId === 'leo') addCardToLeo(slot);
-    else if (sourceId === 'rocket') rocketAddCard(slot.id, slot.kind);
+    else if (sourceId === 'rocket') rocketAddCard(slot.id, slot.kind, slot.face);
     else if (sourceId.startsWith('outpost')) {
       addCardToOutpost(sourceId.slice('outpost'.length), slot);
     }
@@ -2748,7 +2748,15 @@ function openRocketStackModal() {
     stack.forEach((slot, idx) => {
       const card = lookup(slot.id);
       if (!card) return;
-      const isThruster = card.type === 'thruster' || card.thrust != null;
+      // Crew can serve as the ship's thruster OR its robonaut.
+      // Resolve the slot's chosen faction face so its thruster
+      // block / prospector kind are recognised here, matching the
+      // engine (rocket.js synthesises the same view).
+      const crewFace = (slot.kind === 'crew' || CREW.some((c) => c.id === slot.id))
+        ? (card.faces && card.faces[slot.face === 'secondary' ? 'secondary' : 'primary'])
+        : null;
+      const isThruster = card.type === 'thruster' || card.thrust != null
+        || !!(crewFace && crewFace.thruster);
 
       const wrap = document.createElement('div');
       wrap.className = 'rocket-slot';
@@ -2804,6 +2812,7 @@ function openRocketStackModal() {
       // raygun / buggy property. Clicking sets THIS card as the
       // active prospector for the turn.
       const prospKind = (() => {
+        if (crewFace) return crewFace.prospector || null;
         const f = (card.faces && card.faces.primary) || card;
         const props = f.properties || [];
         for (const k of ['raygun', 'missile', 'buggy']) {
@@ -3950,9 +3959,10 @@ function doConvertToRocket(site, letter) {
     setStatus(`Lift failed - Outpost ${esc(letter)} has no functional thruster.`);
     return;
   }
-  // Move cards over.
+  // Move cards over (preserve each slot's face so crew keep
+  // their faction face + a Black-Side card keeps its tier).
   for (const slot of op.cards) {
-    rocketAddCard(slot.id, slot.kind);
+    rocketAddCard(slot.id, slot.kind, slot.face);
   }
   // Explicitly pick the first functional thruster as the active
   // one. rocket.js auto-picks the FIRST thruster it sees on
@@ -4330,7 +4340,7 @@ function doColonize(site, stack, options) {
       const leoOk = addCardToLeo({ id: pick.id, kind: 'crew', face: crewFace });
       if (!leoOk) {
         // Roll back the stack removal so the crew isn't lost.
-        rocketAddCard(pick.id, 'crew');
+        rocketAddCard(pick.id, 'crew', crewFace);
         setStatus(`Colonize aborted - crew couldn't return to the LEO stack.`);
         return;
       }
@@ -4339,7 +4349,7 @@ function doColonize(site, stack, options) {
         // Cap or duplicate. Roll back: pull crew back out of
         // the LEO stack, drop it back on the rocket stack.
         removeCardFromLeoById(pick.id);
-        rocketAddCard(pick.id, 'crew');
+        rocketAddCard(pick.id, 'crew', crewFace);
         setStatus(`Colonize failed at <strong>${esc(site.name)}</strong> - cap or duplicate.`);
         return;
       }

@@ -127,8 +127,19 @@ stack actions (no Discard / Sell / Exo-produce / Boost / Flip):
   (e.g. NASA's "+1 Aqua on any Boost") is NOT applied yet. The
   `bonus` (title) + `blurb` (effect text) are carried on each
   face purely for display until that update lands.
-- Surface the crew thrust triangle (thrust / FT-per-burn /
-  afterburn) in the crew card renderer + let a crew act as the
-  ship's thruster (it carries real thrust values now).
-- Confirm the dirt-thruster afterburn really is absent (read as
-  null) vs. just a differently-styled triangle.
+## Crew as thruster or robonaut (done)
+
+A crew can serve as the ship's **thruster** OR its **robonaut**
+(prospector). `rocket.js` synthesises a patent-like view of the
+chosen crew face (`synthCrew`), so:
+- a crew whose face carries a `thruster` block can be the active
+  thruster (its thrust / FT-per-burn / afterburn feed the Net
+  Thrust math; dirt thrusters read afterburn as absent);
+- a crew whose face carries a `prospector` (buggy / raygun) can be
+  the active prospector;
+- the lander face (Shimizu, no `thruster`) is prospector-only;
+- crew mass now counts toward the stack's dry/wet mass.
+
+The rocket-stack modal shows the matching "Set as active
+thruster" / "Set as prospector" buttons on crew, keyed off the
+slot's picked face.
