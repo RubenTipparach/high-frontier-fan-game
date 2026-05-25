@@ -25,29 +25,36 @@ before touching `data/crew.js` or the starting-crew wizard.
 
 ## The 12 factions
 
-Format: Mass / Rad-Hard, ISRU prospector, thruster (game flavor).
+Format: Mass / Rad-Hard, ISRU prospector, thruster (triangle +
+rocket flavour).
 
-| Card | Face | Faction (promo) | M / R | Prospector | Thruster | Privilege |
-|------|------|-----------------|-------|------------|----------|-----------|
-| card0 | front | United Nations Cosmonauts (A) | 1/4 | 🛺 4 | Liberty 1.34 MN | **SECRETARY GENERAL** - Start with +2 Aqua. (Module 2: after 1st anchor of Home Bernal.) |
-| card0 | back  | B612 Foundation (H) | 1/3 | 🛺 4 | New Glenn 17.1 MN | **BLINK TELESCOPE** - 1 re-roll per prospecting op when using a Raygun. |
-| card1 | front | Roscosmos (B) | 1/5 | 🛺 4 | Angara 5 13.4 MN | **TAXES** - +1 Aqua from the Pool after any player places/industrializes a Claim. |
-| card1 | back  | Taikonauts (C) | 1/4 | 🔫 4 | Long March 9 8.27 MN | **FELONIOUS** - Your Humans may perform Felonious actions. Negotiable. |
-| card2 | front | NASA Astronauts (D) | 1/4 | 🔫 4 | SLS 130t Block II 7.44 MN | **LAUNCH FEES** - +1 Aqua from the Pool after any player Boosts. |
-| card2 | back  | ISRO Glavcosmonauts (G) | 1/4 | 🛺 4 | GSLV MkIII 0.80 MN | **DHARMA REFUEL** - If any of your Humans carry a glory chit, double yield from a Colocated refuel. |
-| card3 | front | Anonymous P2P (E) | 1/4 | 🛺 4 | Skylon 5.88 MN | **OPEN SOURCE FINAO** - Failure Is Not An Option costs 3 Aqua. |
-| card3 | back  | ESA Space Unionists (F) | 1/4 | 🔫 4 | Ariane 64 1.37 MN | **POWERSAT** - During any player's Turn, give +1 thrust to a Spacecraft with a push icon. Negotiable. |
-| card4 | front | Shimizu Corp Entrepreneurs (M) | 1/3 | 🛺 4 | (lander - none) | **SKUNKWORKS** - Ignore academia hand limit when bidding or starting an auction. |
-| card4 | back  | NASRDA Astronauts (L) | 1/4 | 🔫 4 | Pegasus XL 0.074 MN | **MOONCABLE** - Once/turn free: refuel a dirt thrust triangle at LEO/Home Bernal (7 tanks non-crew / 1 crew). Negotiable. |
-| card5 | front | SpaceX (J) | 1/4 | 🔫 4 | Starship 12 MN | **MARKETEER** - If you make the highest bid in an auction, you win even if tied. |
-| card5 | back  | Norse Astronauts (K) | 1/3 | 🛺 4 | OmegA SE 12 MN | **SCRUM TROUBLESHOOTERS** - Perform Glitch repair anywhere (even without Humans). Negotiable. |
+| Card | Face | Faction (promo) | M / R | Prospector | Thrust triangle | Rocket | Privilege |
+|------|------|-----------------|-------|------------|-----------------|--------|-----------|
+| card0 | front | United Nations Cosmonauts (A) | 1/4 | 🛺 4 | 2 | Liberty 1.34 MN | **SECRETARY GENERAL** - Start with +2 Aqua. (Module 2: after 1st anchor of Home Bernal.) |
+| card0 | back  | B612 Foundation (H) | 1/3 | 🛺 4 | 2 | New Glenn 17.1 MN | **BLINK TELESCOPE** - 1 re-roll per prospecting op when using a Raygun. |
+| card1 | front | Roscosmos (B) | 1/5 | 🛺 4 | 2 | Angara 5 13.4 MN | **TAXES** - +1 Aqua from the Pool after any player places/industrializes a Claim. |
+| card1 | back  | Taikonauts (C) | 1/4 | 🔫 4 | 2 | Long March 9 8.27 MN | **FELONIOUS** - Your Humans may perform Felonious actions. Negotiable. |
+| card2 | front | NASA Astronauts (D) | 1/4 | 🔫 4 | 2 | SLS 130t Block II 7.44 MN | **LAUNCH FEES** - +1 Aqua from the Pool after any player Boosts. |
+| card2 | back  | ISRO Glavcosmonauts (G) | 1/4 | 🛺 4 | 2 | GSLV MkIII 0.80 MN | **DHARMA REFUEL** - If any of your Humans carry a glory chit, double yield from a Colocated refuel. |
+| card3 | front | Anonymous P2P (E) | 1/4 | 🛺 4 | 2 | Skylon 5.88 MN | **OPEN SOURCE FINAO** - Failure Is Not An Option costs 3 Aqua. |
+| card3 | back  | ESA Space Unionists (F) | 1/4 | 🔫 4 | 2 | Ariane 64 1.37 MN | **POWERSAT** - During any player's Turn, give +1 thrust to a Spacecraft with a push icon. Negotiable. |
+| card4 | front | Shimizu Corp Entrepreneurs (M) | 1/3 | 🛺 4 | none (lander) | - | **SKUNKWORKS** - Ignore academia hand limit when bidding or starting an auction. |
+| card4 | back  | NASRDA Astronauts (L) | 1/4 | 🔫 4 | dirt | Pegasus XL 0.074 MN | **MOONCABLE** - Once/turn free: refuel a dirt thrust triangle at LEO/Home Bernal (7 tanks non-crew / 1 crew). Negotiable. |
+| card5 | front | SpaceX (J) | 1/4 | 🔫 4 | 2 | Starship 12 MN | **MARKETEER** - If you make the highest bid in an auction, you win even if tied. |
+| card5 | back  | Norse Astronauts (K) | 1/3 | 🛺 4 | dirt | OmegA SE 12 MN | **SCRUM TROUBLESHOOTERS** - Perform Glitch repair anywhere (even without Humans). Negotiable. |
 
-All 12 privileges + stats are now confirmed from the card
-images. Crews have **no spectral type**. The promotion letter
-(A/H/B/C/...) is the (X) printed after "Crew" on each card.
-The two foot badges (magenta + blue circles) are captured in
-`crew-stats.json` as `bottomBadges` - their exact meaning is
-still TBD.
+All 12 privileges + stats are confirmed from the card images.
+Notes:
+- Crews have **no spectral type**.
+- **Thrust triangle**: the orange triangle's game-thrust is **2**
+  on every thruster crew. **Shimizu (M)** has NO thruster (it's
+  a lander). **NASRDA (L)** and **Norse (K)** have a **dirt
+  thruster** (gray triangle; modelled as `dirt: true`, game-
+  thrust 2 inferred since the number wasn't legible in the
+  image).
+- The promotion letter (A/H/B/C/...) is the (X) after "Crew".
+- The two foot badges (magenta + blue circles) are captured in
+  `crew-stats.json` as `bottomBadges` - meaning still TBD.
 
 ## Data files
 
