@@ -1153,7 +1153,7 @@ export class MapRenderer {
       toX: b.x || 0, toY: b.y || 0,
       t: Math.random(),                      // random start phase
       dur: 7000 + Math.random() * 9000,      // ms per leg
-      size: 16 + Math.random() * 12,         // world units
+      size: 8 + Math.random() * 6,           // world units (~50% smaller)
     };
   }
 

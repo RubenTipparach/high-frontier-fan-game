@@ -4305,10 +4305,13 @@ function openOpsMenu() {
     seen.add(f.siteId);
     opSites.push({ site, hint: `🏭 factory${getColony(f.siteId) ? ' + 🌐' : ''} · refuel / ET / colonize` });
   }
-  for (const d of (getDiscs() || [])) {
-    if (d.outcome !== 'success' || seen.has(d.siteId) || getFactory(d.siteId)) continue;
-    const site = siteById(d.siteId); if (!site) continue;
-    seen.add(d.siteId);
+  // getDiscs() is a { siteId: disc } map, not an array.
+  const discs = getDiscs() || {};
+  for (const siteId of Object.keys(discs)) {
+    const d = discs[siteId];
+    if (!d || d.outcome !== 'success' || seen.has(siteId) || getFactory(siteId)) continue;
+    const site = siteById(siteId); if (!site) continue;
+    seen.add(siteId);
     opSites.push({ site, hint: '🔭 claimed · industrialize here' });
   }
   if (sitesHost) {
