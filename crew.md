@@ -103,14 +103,27 @@ Face shape (matches the crew renderer in `js/game/card-ui.js`):
 - Shows all 12 factions; the player picks ONE face.
 - On confirm: the choice is recorded under
   `hf-sandbox-crew-faction` (so it rides along in saves) and the
-  chosen crew card is dropped into the player's Hand as the
-  starting crew. `getPickedCrew` / `setPickedCrew` accessors.
+  chosen crew card **spawns in the LEO Stack** (carrying the
+  picked face) as the starting crew. `getPickedCrew` /
+  `setPickedCrew` accessors.
+
+## Crew never enters the hand
+
+Crew cards can ONLY move stack-to-stack (LEO ↔ rocket ↔
+outpost). They are never in the Hand and have no per-card hand /
+stack actions (no Discard / Sell / Exo-produce / Boost / Flip):
+- They **(re-)spawn in the LEO Stack** on (a) the starting-crew
+  pick, (b) being consumed to build a colony, and (c) dying in a
+  mishap (explosion / blast / glitch).
+- `hand.js#addToHand` hard-rejects crew so the invariant holds.
+- The crew slot carries the picked `face`; the renderer shows
+  that single face with no Flip button.
 
 ## Open work
 
 - **Faction privilege effects will be wired into the engine in a
   future update.** Right now the pick is recorded + the chosen
-  crew card enters the player's hand, but the privilege effect
+  crew card spawns in the LEO Stack, but the privilege effect
   (e.g. NASA's "+1 Aqua on any Boost") is NOT applied yet. The
   `bonus` (title) + `blurb` (effect text) are carried on each
   face purely for display until that update lands.

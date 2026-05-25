@@ -82,7 +82,7 @@ function readableInk(hex) {
   return lum > 0.6 ? '#0c0a16' : '#ffffff';
 }
 
-export function renderCard(card, { type, supplied, onSupportClick } = {}) {
+export function renderCard(card, { type, supplied, onSupportClick, face } = {}) {
   const kind = type || (card.faces && card.faces.primary && card.faces.primary.role ? 'crew' : 'patent');
   const el = document.createElement('div');
   el.className = `card kind-${kind}` + (kind === 'patent' ? ` type-${card.type}` : '');
@@ -97,11 +97,26 @@ export function renderCard(card, { type, supplied, onSupportClick } = {}) {
     el.style.setProperty('--crew-ink', readableInk(card.color));
   }
 
+  const inner = document.createElement('div');
+  inner.className = 'card-inner';
+
+  // Crew is single-faced in play: each faction face is its own
+  // crew member, and the player committed to ONE. Render just the
+  // chosen face (defaults to primary) and emit NO flip button -
+  // crew cards never flip.
+  if (kind === 'crew') {
+    const showSide = (face === 'secondary' && card.faces && card.faces.secondary)
+      ? 'secondary' : 'primary';
+    el.dataset.side = showSide;
+    inner.appendChild(buildFace(card, showSide, kind, supplied, { onSupportClick }));
+    el.appendChild(inner);
+    attachTipsTo(el);
+    return el;
+  }
+
   // Both faces live inside a single .card-inner that rotates as
   // one rigid 3D body. Each face uses backface-visibility:hidden,
   // so only the side facing the viewer is painted.
-  const inner = document.createElement('div');
-  inner.className = 'card-inner';
   inner.appendChild(buildFace(card, 'primary', kind, supplied, { onSupportClick }));
   if (card.faces && card.faces.secondary) {
     inner.appendChild(buildFace(card, 'secondary', kind, supplied, { onSupportClick }));

@@ -280,6 +280,12 @@ Two separate code paths:
   No bottom-of-deck loss outside the industrialize op. Mirrors
   the colonize-returns-to-LEO idiom: only specific, op-gated
   losses bite the patent economy.
+- **Crew is the exception to all of the above. Crew never enters
+  the hand.** A crew card always (re-)spawns in the **LEO Stack**:
+  when it is first picked in the starting-crew wizard, when it is
+  consumed to build a colony, and when it dies in a mishap
+  (explosion / blast / glitch). `hand.js#addToHand` hard-rejects
+  crew so the invariant can't be violated from anywhere.
 
 ### Factory production (no passive income)
 

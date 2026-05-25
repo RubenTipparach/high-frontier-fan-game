@@ -817,7 +817,7 @@ function openUnifiedStackInspector(stackId) {
         const wrap = document.createElement('div');
         wrap.className = 'rocket-slot';
         if (selected.has(slot.id)) wrap.classList.add('is-selected');
-        wrap.appendChild(renderCard(card, { type: slot.kind || 'patent' }));
+        wrap.appendChild(renderCard(card, { type: slot.kind || 'patent', face: slot.face }));
         const actions = document.createElement('div');
         actions.className = 'rocket-slot-actions';
         const selBtn = document.createElement('button');
@@ -1312,6 +1312,7 @@ function openCardModal(card, kind, slotIdx) {
   panel.className = 'card-modal-panel';
   const cardEl = renderCard(card, {
     type: kind,
+    face: getPickedCrew()?.cardId === card.id ? getPickedCrew()?.face : undefined,
     onSupportClick: (kinds) => {
       close();
       openPatentsSupports(kinds);
@@ -1322,6 +1323,23 @@ function openCardModal(card, kind, slotIdx) {
 
   const actions = document.createElement('div');
   actions.className = 'card-modal-actions';
+
+  // Crew has NO per-card actions (no Discard / Sell / Exo-produce
+  // / Boost / Flip). Crew never enters the hand and can ONLY move
+  // stack-to-stack (LEO <-> rocket <-> outpost) via the stack
+  // inspector's transfer controls. Show a note and stop here.
+  if (kind === 'crew') {
+    const note = document.createElement('p');
+    note.className = 'muted card-modal-note';
+    note.textContent = '👥 Crew can only be transferred between stacks (LEO ↔ rocket ↔ outpost). It has no hand actions.';
+    actions.append(note);
+    panel.appendChild(actions);
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+    const onKeyCrew = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKeyCrew); } };
+    document.addEventListener('keydown', onKeyCrew);
+    return;
+  }
 
   // Four primary actions, emoji-led for the quick-icon row on
   // hand-slot hover (defined further down) to mirror the same
@@ -2741,7 +2759,7 @@ function openRocketStackModal() {
       // from "this thruster needs X" to the library view of every
       // card that supplies X. We close the rocket-stack modal
       // first so the patents pane comes up on a clean surface.
-      const cardOpts = { type: slot.kind || 'patent' };
+      const cardOpts = { type: slot.kind || 'patent', face: slot.face };
       if (isThruster && slot.id === activeId) cardOpts.supplied = supplied;
       cardOpts.onSupportClick = (kinds) => {
         close();
@@ -2811,16 +2829,22 @@ function openRocketStackModal() {
       });
       actions.appendChild(selBtn);
 
-      const back = document.createElement('button');
-      back.type = 'button';
-      back.className = 'rocket-back-to-hand';
-      back.textContent = '↩ Back to hand';
-      back.addEventListener('click', () => {
-        selected.delete(slot.id);
-        rocketRemoveCard(idx);
-        addToHand(card);
-      });
-      actions.appendChild(back);
+      // Crew never returns to the hand - it can only move stack-
+      // to-stack (use Select + Transfer below). Non-crew cards get
+      // the "Back to hand" shortcut.
+      const isCrewSlot = slot.kind === 'crew' || CREW.some((c) => c.id === slot.id);
+      if (!isCrewSlot) {
+        const back = document.createElement('button');
+        back.type = 'button';
+        back.className = 'rocket-back-to-hand';
+        back.textContent = '↩ Back to hand';
+        back.addEventListener('click', () => {
+          selected.delete(slot.id);
+          rocketRemoveCard(idx);
+          addToHand(card);
+        });
+        actions.appendChild(back);
+      }
 
       wrap.appendChild(actions);
       // Thrusters (including missile-class robonauts that carry a
@@ -4254,8 +4278,9 @@ function doIndustrialize(site, stack, options) {
 //
 // One crew -> auto-commit (picker is skipped). Multiple crews
 // -> picker modal. On commit: the chosen crew slot is removed
-// from the stack and the underlying crew card returns to LEO
-// Hand intact. The colony dome is created on the factory.
+// from the stack and the underlying crew card returns to the LEO
+// Stack intact (crew always re-spawns in LEO). The colony dome is
+// created on the factory.
 //
 // Free action: no requireOp call.
 function doColonize(site, stack, options) {
@@ -4274,6 +4299,7 @@ function doColonize(site, stack, options) {
         setStatus(`Colonize aborted - crew ${esc(pick.id)} is no longer in the stack.`);
         return;
       }
+      const crewFace = currentStack[idx].face;
       const crewCard = CREW_BY_ID[pick.id];
       if (!crewCard) {
         setStatus(`Colonize aborted - unknown crew id ${esc(pick.id)}.`);
@@ -4284,22 +4310,21 @@ function doColonize(site, stack, options) {
         setStatus(`Colonize aborted - could not remove crew from stack.`);
         return;
       }
-      // Crew returns to LEO Hand (variant rule, see
-      // industrialize.md "Decommission / removal destinations").
-      const handResult = addToHand(crewCard);
-      if (!handResult.ok) {
-        // Edge case: hand is full / dup. Surface the reason
-        // and roll back the stack removal so the crew isn't
-        // silently lost.
+      // Crew always re-spawns in the LEO Stack (variant rule,
+      // user 2026-05). crewCard kept for naming only.
+      void crewCard;
+      const leoOk = addCardToLeo({ id: pick.id, kind: 'crew', face: crewFace });
+      if (!leoOk) {
+        // Roll back the stack removal so the crew isn't lost.
         rocketAddCard(pick.id, 'crew');
-        setStatus(`Colonize aborted - crew couldn't return to hand: ${esc(handResult.reason)}.`);
+        setStatus(`Colonize aborted - crew couldn't return to the LEO stack.`);
         return;
       }
       const created = createColony(site.id, SANDBOX_OWNER_ID);
       if (!created) {
         // Cap or duplicate. Roll back: pull crew back out of
-        // hand, drop it back on the stack.
-        removeFromHand(pick.id);
+        // the LEO stack, drop it back on the rocket stack.
+        removeCardFromLeoById(pick.id);
         rocketAddCard(pick.id, 'crew');
         setStatus(`Colonize failed at <strong>${esc(site.name)}</strong> - cap or duplicate.`);
         return;
@@ -4307,13 +4332,13 @@ function doColonize(site, stack, options) {
       const crewName = pick.primary?.name || pick.card.id;
       setStatus(
         `🌐 Built colony at <strong>${esc(site.name)}</strong>. `
-        + `<em>${esc(crewName)}</em> returns to your LEO Hand. `
+        + `<em>${esc(crewName)}</em> returns to your LEO Stack. `
         + `Colonies: <strong>${countColoniesByOwner(SANDBOX_OWNER_ID)}</strong>/${COLONY_CAP_PER_PLAYER}.`
       );
       logAction({
         type: 'colonize',
         icon: '🌐',
-        summary: `Built colony at ${site.name} (crew ${crewName} returned to hand); `
+        summary: `Built colony at ${site.name} (crew ${crewName} returned to LEO stack); `
           + `${countColoniesByOwner(SANDBOX_OWNER_ID)}/${COLONY_CAP_PER_PLAYER} colonies`,
         undoable: false,
         data: { siteId: site.id, crewId: pick.id },
@@ -5438,11 +5463,17 @@ async function explodeRocket(siteId) {
   // or in the rocket; clearing the stack first keeps the second
   // check from blocking each addToHand call. We collect counts so
   // the log entry tells the player exactly what came back.
+  // Crew is the exception: it always re-spawns in the LEO Stack
+  // (variant rule, user 2026-05), even when it dies in a mishap.
   rocketClearStack();
   let returned = 0;
+  let crewToLeo = 0;
   for (const slot of stackSnapshot) {
-    const card = PATENTS_BY_ID[slot.id]
-      || CREW.find((c) => c.id === slot.id) || null;
+    if (slot.kind === 'crew' || CREW.some((c) => c.id === slot.id)) {
+      if (addCardToLeo({ id: slot.id, kind: 'crew', face: slot.face })) crewToLeo++;
+      continue;
+    }
+    const card = PATENTS_BY_ID[slot.id] || null;
     if (!card) continue;
     const r = addToHand(card);
     if (r && r.ok) returned++;
@@ -5472,9 +5503,10 @@ async function explodeRocket(siteId) {
     icon: '💥',
     summary: `Rocket destroyed at ${site ? site.name : siteId}`
       + ` - ${returned} card${returned === 1 ? '' : 's'} returned to hand`
+      + (crewToLeo > 0 ? `, ${crewToLeo} crew to LEO stack` : '')
       + (tankLost > 0 ? `, ${tankLost} water lost` : ''),
     undoable: false,
-    data: { siteId, returnedCards: returned, waterLost: tankLost },
+    data: { siteId, returnedCards: returned, crewToLeo, waterLost: tankLost },
   });
   syncSandboxRocket();
   refreshOpenSitePopup();
@@ -5487,6 +5519,7 @@ async function explodeRocket(siteId) {
     title: '💥 Spacecraft destroyed',
     body: `Your rocket was lost at <strong>${esc(site ? site.name : siteId)}</strong>. `
       + `<strong>${returned}</strong> card${returned === 1 ? '' : 's'} returned to your hand`
+      + (crewToLeo > 0 ? `, <strong>${crewToLeo}</strong> crew re-spawned in your LEO stack` : '')
       + (tankLost > 0 ? `, <strong>${tankLost}</strong> water lost` : '')
       + `. Rebuild from the LEO stack to fly again.`,
     yes: 'OK',
@@ -7777,8 +7810,8 @@ function paintSolo() {
 // The player picks ONE faction face (of the 6 double-faced
 // crew cards) at New-game time. The choice is recorded under
 // hf-sandbox-crew-faction (so it rides along in saves) and the
-// chosen crew card lands in the player's Hand as their
-// starting crew.
+// chosen crew card spawns in the LEO Stack (carrying the picked
+// face) as their starting crew. Crew never enters the hand.
 const STORAGE_CREW = 'hf-sandbox-crew-faction';
 
 function getPickedCrew() {
@@ -7813,12 +7846,13 @@ function openCrewWizard(onDone) {
     setPickedCrew(selected.cardId, selected.face);
     const card = CREW_BY_ID[selected.cardId];
     const faction = card?.faces?.[selected.face];
-    // Drop the physical crew card into the Hand as the starting
-    // crew. (The card carries both faces; the chosen faction is
-    // recorded separately as the player's committed faction.)
-    if (card) addToHand(card);
+    // Crew always spawns in the LEO Stack (variant rule, user
+    // 2026-05). The chosen faction is recorded separately as the
+    // player's committed faction; the physical crew card carries
+    // both faces.
+    if (card) addCardToLeo({ id: card.id, kind: 'crew', face: selected.face });
     overlay.remove();
-    setStatus(`🧑‍🚀 Starting crew: <strong>${esc(faction?.name || selected.cardId)}</strong> (${esc(faction?.bonus || '')}). Crew card added to your Hand.`);
+    setStatus(`🧑‍🚀 Starting crew: <strong>${esc(faction?.name || selected.cardId)}</strong> (${esc(faction?.bonus || '')}). Crew card spawned in your LEO Stack.`);
     logAction({
       type: 'crew_pick',
       icon: '🧑‍🚀',
