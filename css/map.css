@@ -5064,7 +5064,7 @@ body:has(#view-browse:not(.hidden)) #main {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 18px 20px;
-  max-width: 720px;
+  max-width: 900px;
   width: 100%;
   color: var(--ink);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
@@ -5076,38 +5076,27 @@ body:has(#view-browse:not(.hidden)) #main {
 .crew-wizard-head p { margin: 0; font-size: 13px; }
 .crew-faction-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 8px;
-  max-height: 60vh;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+  max-height: 68vh;
   overflow-y: auto;
+  padding: 2px;
 }
-.crew-faction {
-  text-align: left;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  color: var(--ink);
+/* Selectable tile wrapping a rendered crew card. */
+.crew-faction-card {
   cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  border-radius: 12px;
+  padding: 4px;
+  border: 2px solid transparent;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
 }
-.crew-faction:hover { background: var(--panel-2); border-color: var(--accent); }
-.crew-faction.is-selected {
-  background: rgba(125, 211, 252, 0.14);
+.crew-faction-card .card { width: 100%; }
+.crew-faction-card:hover { transform: translateY(-2px); }
+.crew-faction-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.crew-faction-card.is-selected {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.5) inset;
+  box-shadow: 0 0 0 3px rgba(125, 211, 252, 0.45), 0 8px 20px rgba(0, 0, 0, 0.5);
 }
-.crew-faction-name { font-size: 14px; font-weight: 800; }
-.crew-faction-priv {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-  color: var(--accent);
-}
-.crew-faction-blurb { font-size: 12px; line-height: 1.35; }
 .crew-wizard-modal .card-modal-actions { justify-content: flex-end; }
 .crew-wizard-modal .modal-btn.primary {
   background: #14532d; color: #d1fae5; border-color: #166534;

@@ -44,7 +44,7 @@ import {
   getDiscs, getDisc, placeDisc, removeDisc, resetDiscs,
   onChange as onDiscsChange,
 } from './discs.js';
-import { CREW, CREW_BY_ID, CREW_FACES, FACTIONS } from '../../data/crew.js';
+import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
 import {
   WEIGHT_CLASSES, weightClassForMass, TRACK_LEGEND,
   MIN_DRY_MASS, MAX_DRY_MASS, MAX_WET_MASS,
@@ -7830,31 +7830,38 @@ function openCrewWizard(onDone) {
   };
 
   const render = () => {
-    const factionsHtml = FACTIONS.map((f, i) => {
-      const isSel = selected && selected.cardId === f.cardId && selected.face === f.face;
-      return `<button type="button" class="crew-faction ${isSel ? 'is-selected' : ''}"
-        data-card="${esc(f.cardId)}" data-face="${esc(f.face)}">
-        <span class="crew-faction-name">${esc(f.name)}</span>
-        <span class="crew-faction-priv">${esc(f.bonus)}</span>
-        <span class="crew-faction-blurb muted">${esc(f.blurb)}</span>
-      </button>`;
-    }).join('');
+    const selName = selected
+      ? esc(CREW_BY_ID[selected.cardId].faces[selected.face].name)
+      : '...';
     dialog.innerHTML = `
       <div class="crew-wizard-head">
         <h3>🧑‍🚀 Pick your starting crew</h3>
         <p class="muted">Choose one faction. Its privilege is your edge for the game. (Required to start.)</p>
       </div>
-      <div class="crew-faction-grid">${factionsHtml}</div>
+      <div class="crew-faction-grid"></div>
       <div class="card-modal-actions">
-        <button type="button" class="modal-btn primary crew-confirm" ${selected ? '' : 'disabled'}>🚀 Start with ${selected ? esc(CREW_BY_ID[selected.cardId].faces[selected.face].name) : '...'}</button>
+        <button type="button" class="modal-btn primary crew-confirm" ${selected ? '' : 'disabled'}>🚀 Start with ${selName}</button>
       </div>
     `;
-    dialog.querySelectorAll('.crew-faction').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        selected = { cardId: btn.getAttribute('data-card'), face: btn.getAttribute('data-face') };
-        render();
+    // Show the actual crew cards (the 12 single-face faction
+    // faces), each a selectable tile.
+    const grid = dialog.querySelector('.crew-faction-grid');
+    for (const c of CREW_FACES) {
+      const isSel = selected && selected.cardId === c.srcId && selected.face === c.face;
+      const tile = document.createElement('div');
+      tile.className = 'crew-faction-card' + (isSel ? ' is-selected' : '');
+      tile.setAttribute('role', 'button');
+      tile.tabIndex = 0;
+      tile.dataset.card = c.srcId;
+      tile.dataset.face = c.face;
+      tile.appendChild(renderCard(c, { type: 'crew' }));
+      const pick = () => { selected = { cardId: c.srcId, face: c.face }; render(); };
+      tile.addEventListener('click', pick);
+      tile.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); }
       });
-    });
+      grid.appendChild(tile);
+    }
     dialog.querySelector('.crew-confirm').addEventListener('click', () => {
       if (selected) commit();
     });
