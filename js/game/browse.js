@@ -1705,6 +1705,12 @@ let _activeData = null;
 const STORAGE_ROCKET_SITE  = 'hf-sandbox-rocket-site';
 const STORAGE_ROCKET_TRAIL = 'hf-sandbox-rocket-trail';
 const STORAGE_ROCKET_ROUTE = 'hf-sandbox-planned-route';
+// Pre-move snapshot written while a (possibly hazardous) move is
+// being resolved. If the tab is closed / refreshed mid-resolution
+// the queue is abandoned, so on the next load we roll the move back
+// to this snapshot (refunding the move + fuel) rather than stranding
+// the player with a spent turn. Cleared at every move exit path.
+const STORAGE_PENDING_MOVE = 'hf-sandbox-pending-move';
 const STORAGE_ROUTE_PRIORITY = 'hf-sandbox-route-priority';
 // Routing metric priority. 'turns' minimizes turn-ends first (the
 // snap-to-adjacent default); 'burns' minimizes water spend first
@@ -2587,6 +2593,10 @@ async function mountMapFor() {
   try {
     _activeData = await loadMap();
     soloBindData(_activeData);
+    // Roll back any move that was interrupted mid-hazard-resolution
+    // by a reload, BEFORE the renderer reads rocket / route / trail
+    // state, so it paints the rolled-back (pre-move) position.
+    resumePendingMove();
     _renderer = new MapRenderer(canvas, {
       data: _activeData,
       onSelect: onSiteSelect,
@@ -3313,12 +3323,14 @@ function isLeoSite(site) {
 }
 
 // Hazard classification. A node is a "hazard" when entering it
-// forces a survival roll (or 4 aqua to bypass). Three flavours
-// today, all drawn with their own glyph in render.js:
-//   - explicit hazard flag → ☠ skull (burn / lagrange nodes
-//     flagged by the planner JSON's `hazard:true`)
-//   - radhaz waypoint type → ☢ radiation trefoil
-//   - venus waypoint type  → 🪂 aerobrake corridor
+// forces a survival roll. Per the rulebook only two kinds are
+// payable (4 aqua bypass): the ☠ skull and the 🪂 aerobrake. The
+// ☢ radiation hazard rolls but CANNOT be paid for. Flyby /
+// gravity-assist lagrange points are NOT hazards even when the
+// planner JSON flags them `hazard:true`, so they're excluded here.
+//   - radhaz waypoint type → ☢ radiation (roll only, unpayable)
+//   - venus waypoint type  → 🪂 aerobrake corridor (payable)
+//   - hazard-flagged burn  → ☠ skull (payable)
 // Returns the glyph + a short label so the confirm modal can list
 // what the player is about to fly through.
 const HAZARD_COST_PER = 4;
@@ -3326,7 +3338,10 @@ function classifyHazard(site) {
   if (!site) return null;
   if (site.type === 'radhaz') return { glyph: '☢', label: 'Radiation hazard' };
   if (site.type === 'venus')  return { glyph: '🪂', label: 'Aerobrake corridor' };
-  if (site.hazard)            return { glyph: '☠', label: 'Hazard node' };
+  // Skull hazards live on hazard-flagged burn spaces. Lagrange
+  // (flyby / gravity-assist) nodes are flybys, not hazards, even
+  // when the planner flags them.
+  if (site.hazard && site.type !== 'lagrange') return { glyph: '☠', label: 'Hazard node' };
   return null;
 }
 function isHazardSite(site) {
@@ -5884,6 +5899,49 @@ function persistRocketTrail() {
     }
   } catch { /* private mode */ }
 }
+// Pending-move snapshot helpers. persistPendingMove is called right
+// before a move commits (consumes the move + fuel) so an interrupted
+// hazard-resolution queue can be rolled back on the next load.
+function persistPendingMove(snap) {
+  try { localStorage.setItem(STORAGE_PENDING_MOVE, JSON.stringify(snap)); }
+  catch { /* private mode */ }
+}
+function clearPendingMove() {
+  try { localStorage.removeItem(STORAGE_PENDING_MOVE); }
+  catch { /* private mode */ }
+}
+function loadPendingMove() {
+  try {
+    const s = localStorage.getItem(STORAGE_PENDING_MOVE);
+    return s ? JSON.parse(s) : null;
+  } catch { return null; }
+}
+// On load, if a move was still mid-resolution when the tab closed
+// (the hazard-roll queue never finished), roll it back to its
+// pre-move state: rocket returns to origin, route + trail restored,
+// and the move budget + fuel are refunded so the turn isn't wasted.
+// Mutates only module state + persistence; the caller rebuilds the
+// renderer afterwards, so the rolled-back values are what it reads.
+function resumePendingMove() {
+  const pend = loadPendingMove();
+  if (!pend) return false;
+  clearPendingMove();
+  _rocketSiteId = pend.fromSiteId || null;
+  persistRocketSite();
+  _rocketTrail = Array.isArray(pend.trail) ? pend.trail : [];
+  persistRocketTrail();
+  _plannedRoute = Array.isArray(pend.route) && pend.route.length ? pend.route : null;
+  persistPlannedRoute();
+  if (Number(pend.fuelCost) > 0) addFuel(Number(pend.fuelCost));
+  refundMove();
+  setHazardousMove(false);
+  setStatus(
+    '⚠ Your last move was interrupted by a page reload and has been '
+    + 'rolled back. The move budget and fuel were refunded - replay the '
+    + 'move when ready.'
+  );
+  return true;
+}
 // Planned route persistence. Called from every assignment to
 // _plannedRoute so the multi-turn plan survives reloads - critical
 // because the player might queue a 4-turn journey, end one turn,
@@ -6395,8 +6453,19 @@ async function moveRocket() {
       lockUndo = true;
     }
   }
+  // Snapshot the pre-move state so an interrupted hazard-resolution
+  // queue (tab closed / refreshed) can be rolled back on next load
+  // instead of wasting the turn. Capture BEFORE consuming the move,
+  // fuel, or mutating the rocket position / trail.
+  persistPendingMove({
+    fromSiteId: _rocketSiteId,
+    route: _plannedRoute,
+    trail: _rocketTrail,
+    fuelCost,
+  });
   if (lockUndo) setHazardousMove(true);
   if (!consumeMove()) {
+    clearPendingMove();
     setStatus('No moves left this turn - end turn to refresh.');
     return false;
   }
@@ -6543,6 +6612,9 @@ async function moveRocket() {
         });
         if (r.d6 === 1) {
           setStatus(`💥 Critical failure at <strong>${esc(r.site.name)}</strong>…`);
+          // Committed outcome - the rocket is destroyed, so there's
+          // nothing to roll back.
+          clearPendingMove();
           await explodeRocket(r.site.id);
           return false;
         }
@@ -6611,6 +6683,9 @@ async function moveRocket() {
   // the journey later. The destination for THIS move is the
   // last node we actually reached, not the original target.
   if (earlyHalt) {
+    // Resolved outcome (stop / stranded) - carry-over handled below,
+    // so the move shouldn't be rolled back on a later load.
+    clearPendingMove();
     const haltedSiteId = (haltSite && haltSite.id) || _rocketSiteId;
     // Carry-over: every segment past `lastIdx` becomes turn 2+
     // in the planned route. The post-move "shift down" logic
@@ -6718,6 +6793,8 @@ async function moveRocket() {
     if (clearBtn) clearBtn.hidden = true;
     setStatus(`🛸 Arrived at <strong>${esc(arrivedName)}</strong>.`);
   }
+  // Move fully resolved - clear the rollback snapshot.
+  clearPendingMove();
   // Final sync - the animation left the sprite at the destination's
   // pixel coords; this pins it back to the canonical site (x, y)
   // and ensures canFly reflects the live stack state.

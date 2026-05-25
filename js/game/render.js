@@ -2011,9 +2011,10 @@ export class MapRenderer {
         ctx.fillText('🚀', sx, sy);
       } else if (w.type === 'venus') {
         ctx.fillText('🪂', sx, sy);
-      } else if (w.hazard && w.type !== 'radhaz') {
-        // radhaz already gets the trefoil; the skull marks generic
-        // hazard nodes (hazard-flagged burns or lagrange points).
+      } else if (w.hazard && w.type !== 'radhaz' && w.type !== 'lagrange') {
+        // radhaz gets the trefoil; the skull marks generic hazard
+        // nodes (hazard-flagged burns). Hazard-flagged lagrange
+        // points are flybys, not hazards, so they get no skull.
         ctx.fillText('☠', sx, sy);
       }
     }
