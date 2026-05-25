@@ -1890,8 +1890,8 @@ function ensureMapShell(host) {
         <button id="turn-tracker" title="View turn tracker"
           aria-label="View turn tracker">🕐</button>
         <span id="turn-budget" class="map-turn-budget" aria-live="polite">
-          <span class="turn-tag" id="turn-tag-op" title="Operations remaining this turn">op:1</span>
-          <span class="turn-tag" id="turn-tag-move" title="Moves remaining this turn">move:1</span>
+          <button type="button" class="turn-tag" id="turn-tag-op" title="Operations remaining this turn">op:1</button>
+          <button type="button" class="turn-tag" id="turn-tag-move" title="Moves remaining this turn">move:1</button>
         </span>
         <span id="aqua-chip" class="map-aqua-chip"
           title="Aqua balance - spend 4 aqua per hazard to bypass rolls, or convert 1:1 to water at LEO">
@@ -5709,9 +5709,18 @@ function syncDiscs() {
 // setter pair; subscribed at mount time to the state stores.
 function syncFactories() {
   if (!_renderer) return;
+  const list = allFactories();
   const map = {};
-  for (const f of allFactories()) map[f.siteId] = f;
+  for (const f of list) map[f.siteId] = f;
   _renderer.setFactories(map);
+  syncAmbientRockets(list.length);
+}
+
+// Ambient decorative rockets: 10 baseline + 10 per factory built.
+function syncAmbientRockets(factoryCount) {
+  if (!_renderer || typeof _renderer.setAmbientRocketCount !== 'function') return;
+  const n = (factoryCount == null ? allFactories().length : factoryCount);
+  _renderer.setAmbientRocketCount(10 + 10 * n);
 }
 function syncColonies() {
   if (!_renderer) return;

@@ -121,16 +121,23 @@
   gap: 4px;
 }
 .map-turn-budget .turn-tag {
+  font: inherit;
   font-size: 11px;
   font-weight: 700;
-  padding: 3px 6px;
+  line-height: 1.2;
+  padding: 4px 8px;
   border-radius: 6px;
   background: var(--bg-2, #14233a);
   border: 1px solid var(--border, #2b3b55);
   color: var(--ink-dim, #9fb3cc);
-  cursor: help;
+  cursor: pointer;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  /* It's a real <button> now so taps register reliably on touch;
+     manipulation kills the 300ms tap delay + double-tap zoom. */
+  -webkit-appearance: none;
+  appearance: none;
+  touch-action: manipulation;
 }
 #turn-tag-op   { border-color: #d4a72c; color: #f4d27a; }
 #turn-tag-move { border-color: #38bdf8; color: #bae6fd; }

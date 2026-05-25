@@ -607,6 +607,19 @@ export class MapRenderer {
     this._frameTimer = 0;
     this._fps = 0;
     this._onFrame = null;           // optional callback fired each frame
+    // Ambient decorative rockets: cosmetic sprites zipping between
+    // random sites in the background. Count is driven externally
+    // (setAmbientRocketCount) - 10 + 10 per factory built. Purely
+    // visual; they ignore the delta-v graph and just lerp between
+    // random site coords.
+    this._ambientRockets = [];
+    this._ambientLastT = 0;
+    this._ambientSprites = [];
+    for (const name of ['rocket-red', 'rocket-blue', 'rocket-green', 'rocket-orange', 'rocket-silver']) {
+      const img = new Image();
+      img.src = `assets/rockets/${name}.png`;
+      this._ambientSprites.push(img);
+    }
     this._partitionSites();
     this._buildStars();
     this._buildAsteroidBelt();
@@ -1116,6 +1129,63 @@ export class MapRenderer {
   // sweep; cheap because the work per frame is dominated by the
   // (already batched) draw pass. Stops if the canvas is detached
   // from the DOM so we don't leak frames on view tear-down.
+  // Set how many ambient decorative rockets fly around the map.
+  // browse.js calls this with 10 + 10*factoryCount.
+  setAmbientRocketCount(n) {
+    const want = Math.max(0, n | 0);
+    const sites = this._ambientSites();
+    while (this._ambientRockets.length < want) this._ambientRockets.push(this._spawnAmbientRocket(sites));
+    if (this._ambientRockets.length > want) this._ambientRockets.length = want;
+    this._scheduleDraw();
+  }
+
+  _ambientSites() {
+    if (this._realSites && this._realSites.length) return this._realSites;
+    return (this.data && this.data.sites) || [];
+  }
+
+  _spawnAmbientRocket(sites) {
+    const pick = () => (sites.length ? sites[(Math.random() * sites.length) | 0] : { x: 0, y: 0 });
+    const a = pick(), b = pick();
+    return {
+      spr: (Math.random() * this._ambientSprites.length) | 0,
+      fromX: a.x || 0, fromY: a.y || 0,
+      toX: b.x || 0, toY: b.y || 0,
+      t: Math.random(),                      // random start phase
+      dur: 7000 + Math.random() * 9000,      // ms per leg
+      size: 16 + Math.random() * 12,         // world units
+    };
+  }
+
+  // Advance + draw the ambient rockets (world space). dt in ms.
+  _drawAmbientRockets(ctx, dt) {
+    if (!this._ambientRockets.length) return;
+    const sites = this._ambientSites();
+    for (const r of this._ambientRockets) {
+      r.t += dt / r.dur;
+      if (r.t >= 1) {
+        // Arrived: start a new leg from here to a fresh random site.
+        const nb = sites.length ? sites[(Math.random() * sites.length) | 0] : { x: r.toX, y: r.toY };
+        r.fromX = r.toX; r.fromY = r.toY;
+        r.toX = nb.x || 0; r.toY = nb.y || 0;
+        r.t = 0; r.dur = 7000 + Math.random() * 9000;
+      }
+      const x = r.fromX + (r.toX - r.fromX) * r.t;
+      const y = r.fromY + (r.toY - r.fromY) * r.t;
+      const img = this._ambientSprites[r.spr];
+      if (!img || !img.complete || !img.naturalWidth) continue;
+      // Sprite nose points up (-y); rotate to face the travel vector.
+      const ang = Math.atan2(r.toY - r.fromY, r.toX - r.fromX) + Math.PI / 2;
+      ctx.save();
+      ctx.globalAlpha = 0.4;
+      ctx.translate(x, y);
+      ctx.rotate(ang);
+      const s = r.size;
+      ctx.drawImage(img, -s / 2, -s / 2, s, s);
+      ctx.restore();
+    }
+  }
+
   _startAnimation() {
     const tick = (t) => {
       if (!this.canvas || !this.canvas.isConnected) {
@@ -1161,6 +1231,14 @@ export class MapRenderer {
     // screen space later) sit on top.
     this._drawSiteHalosWorld(ctx);
     this._drawEdges(ctx);
+    // Ambient decorative rockets (cosmetic background traffic),
+    // translucent above the edges but below the gameplay route/trail.
+    {
+      const now = performance.now();
+      const dt = this._ambientLastT ? Math.min(80, now - this._ambientLastT) : 16;
+      this._ambientLastT = now;
+      this._drawAmbientRockets(ctx, dt);
+    }
     this._drawRocketTrail(ctx);
     this._drawRoute(ctx);
 
