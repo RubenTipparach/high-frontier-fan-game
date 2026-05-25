@@ -45,6 +45,10 @@ import {
   onChange as onDiscsChange,
 } from './discs.js';
 import { CREW, CREW_BY_ID, CREW_FACES, FACTIONS } from '../../data/crew.js';
+import {
+  WEIGHT_CLASSES, weightClassForMass, TRACK_LEGEND,
+  MIN_DRY_MASS, MAX_DRY_MASS, MAX_WET_MASS,
+} from '../../data/net-thrust-track.js';
 import { MILESTONES } from '../../data/glory.js';
 import { SITES_BY_ID } from '../../data/sites.js';
 import {
@@ -4368,60 +4372,92 @@ function confirmModal({ title, body, yes = 'OK', no = 'Cancel' }) {
   });
 }
 
-// Interactive fuel-strip diagram for the rocket-stack header.
-// Cells 1..32 are coloured by the published weight-class band:
-//   1                       MIN DRY MASS marker
-//   2-4 (under 2)           WISP   (+2)
-//   2-4 (under 4 2/3)       PROBE  (+1)
-//   5-6 (under 6 1/2)       SCOUT   (0)
-//   7-16 (under 17)         TRANSPORT (-1)
-//   17-32                   TUG    (-2)
-// Two chits overlay the strip: DRY at the rocket's dry mass and
-// WET at the current wet mass. Hovering any cell reveals its
-// weight-class modifier. The strip is read-only for now; future
-// patches will wire drag-to-relocate-chit, factory refuel
-// patterns, etc.
+// Interactive fuel-strip diagram for the rocket-stack header -
+// the published HF4 "Net Thrust track". Mass positions 1..32 are
+// grouped into the doubling weight-class bands (data/net-thrust-
+// track.js is the single source of truth on the band boundaries
+// and the per-band fuel-step fraction ladders):
+//   WISP +2   mass 1       PROBE +1  mass 2-4
+//   SCOUT 0   mass 5-8      TRANSPORT -1 mass 9-16
+//   TUG -2    mass 17-32
+// Each band shows its fraction ladder (the white sub-step ovals)
+// stacked ABOVE its mass-position cells, matching the board's
+// layered layout. Two chits overlay the cells: DRY at the
+// rocket's dry mass, WET at the current wet mass. Black-line =
+// FT spend (burn); red-dotted = refuel - see the legend. The
+// strip is read-only for now.
 function buildFuelStrip(host, totals) {
   host.innerHTML = '';
-  const cap = 32;
-  const wm = totals.wetMass | 0;
-  const dm = totals.dryMass | 0;
-  // Weight class for a given chit position. Mirrors the
-  // getActiveThrusterStats logic so the strip stays a single
-  // source of truth on the rule.
-  function classify(pos) {
-    if (pos <  2)       return { name: 'WISP',      mod: +2, color: '#f472b6' };
-    if (pos < 14 / 3)   return { name: 'PROBE',     mod: +1, color: '#f9a8d4' };
-    if (pos < 6.5)      return { name: 'SCOUT',     mod:  0, color: '#7dd3fc' };
-    if (pos < 17)       return { name: 'TRANSPORT', mod: -1, color: '#67e8f9' };
-    return                        { name: 'TUG',    mod: -2, color: '#5eead4' };
-  }
-  const wrap = document.createElement('div');
-  wrap.className = 'rocket-fuel-strip-row';
+  const wm = Math.max(0, totals.wetMass | 0);
+  const dm = Math.max(0, totals.dryMass | 0);
+
   const label = document.createElement('div');
   label.className = 'rocket-fuel-strip-label';
   label.textContent = 'Net Thrust track';
   host.appendChild(label);
-  for (let i = 1; i <= cap; i++) {
-    const cell = document.createElement('div');
-    const c = classify(i);
-    cell.className = 'fuel-strip-cell';
-    cell.style.backgroundColor = c.color;
-    cell.dataset.tip = `Position ${i} - ${c.name} weight class (${c.mod >= 0 ? '+' : ''}${c.mod} thrust)`;
-    cell.title = cell.dataset.tip;
-    cell.textContent = String(i);
-    if (i === dm) cell.classList.add('is-dry-chit');
-    if (i === wm) cell.classList.add('is-wet-chit');
-    if (i === dm && i === wm) cell.classList.add('is-co-chit');
-    wrap.appendChild(cell);
+
+  const bands = document.createElement('div');
+  bands.className = 'fuel-strip-bands';
+  for (const wc of WEIGHT_CLASSES) {
+    const span = wc.massMax - wc.massMin + 1;
+    const band = document.createElement('div');
+    band.className = 'fuel-strip-band';
+    band.dataset.band = wc.id;
+    band.style.flexGrow = String(span);
+    band.style.setProperty('--band-color', wc.color);
+
+    const head = document.createElement('div');
+    head.className = 'fuel-strip-band-head';
+    const mod = wc.netThrust >= 0 ? `+${wc.netThrust}` : String(wc.netThrust);
+    head.innerHTML = `<span class="fs-band-name">${wc.id}</span><span class="fs-band-mod">${mod}</span>`;
+    band.appendChild(head);
+
+    // Fraction ladder (fuel sub-steps). Whole-step bands (TUG)
+    // show a single "1" to read as "whole fuel steps".
+    const fracs = document.createElement('div');
+    fracs.className = 'fuel-strip-fracs';
+    const ladder = wc.fractions.length ? wc.fractions : ['1'];
+    for (const fr of ladder) {
+      const chip = document.createElement('span');
+      chip.className = 'fs-frac';
+      chip.textContent = fr;
+      fracs.appendChild(chip);
+    }
+    band.appendChild(fracs);
+
+    const cells = document.createElement('div');
+    cells.className = 'fuel-strip-cells';
+    cells.style.gridTemplateColumns = `repeat(${span}, 1fr)`;
+    for (let i = wc.massMin; i <= wc.massMax; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'fuel-strip-cell';
+      let tip = `Mass ${i} - ${wc.id} weight class (${mod} net thrust)`;
+      if (i === MIN_DRY_MASS) { cell.classList.add('is-min-dry'); tip += ' - MIN DRY MASS'; }
+      if (i === MAX_DRY_MASS) { cell.classList.add('is-max-dry'); tip += ' - MAX DRY MASS'; }
+      if (i === MAX_WET_MASS) { cell.classList.add('is-max-wet'); tip += ' - MAX WET MASS'; }
+      cell.dataset.tip = tip;
+      cell.title = tip;
+      cell.textContent = String(i);
+      if (i === dm) cell.classList.add('is-dry-chit');
+      if (i === wm) cell.classList.add('is-wet-chit');
+      if (i === dm && i === wm) cell.classList.add('is-co-chit');
+      cells.appendChild(cell);
+    }
+    band.appendChild(cells);
+    bands.appendChild(band);
   }
-  host.appendChild(wrap);
+  host.appendChild(bands);
+
+  const wc = weightClassForMass(wm || 1);
+  const netMod = wc.netThrust >= 0 ? `+${wc.netThrust}` : String(wc.netThrust);
   const legend = document.createElement('div');
   legend.className = 'rocket-fuel-strip-legend';
   legend.innerHTML = `
     <span><i class="chit-dot is-dry-chit"></i> Dry ${dm}</span>
-    <span><i class="chit-dot is-wet-chit"></i> Wet ${wm}</span>
-    <span class="muted">Max wet 32</span>
+    <span><i class="chit-dot is-wet-chit"></i> Wet ${wm} (${wc.id} ${netMod})</span>
+    <span class="muted">Max wet ${MAX_WET_MASS}</span>
+    <span class="fs-line-key"><i class="fs-line black"></i> burn (FT spend)</span>
+    <span class="fs-line-key"><i class="fs-line red"></i> refuel</span>
   `;
   host.appendChild(legend);
 }
@@ -4466,6 +4502,15 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   };
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
+
+  // Net Thrust readout: wet mass -> weight class -> net thrust,
+  // mirroring the published Net Thrust track (data/net-thrust-
+  // track.js). Net thrust = base thrust + weight-class modifier.
+  const wmNow = Math.max(0, totals.wetMass | 0);
+  const wcNow = weightClassForMass(wmNow || 1);
+  const ntMod = wcNow.netThrust >= 0 ? `+${wcNow.netThrust}` : String(wcNow.netThrust);
+  const netThrustVal = (thrust != null) ? (thrust + wcNow.netThrust) : null;
+  const fracLadder = wcNow.fractions.length ? wcNow.fractions.join(' ') : 'whole steps';
 
   const panel = document.createElement('div');
   panel.className = 'fuel-tank-panel';
@@ -4569,6 +4614,24 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         ? `Lift cap = thrust <strong>${thrust}</strong> − dry mass
            <strong>${dryMass}</strong> = <strong>${liftCap}</strong> liftable water.`
         : '(no active thruster)'}
+    </div>
+    <div class="fuel-tank-netthrust">
+      <div class="ntt-head">🚀 Net Thrust track</div>
+      <div class="ntt-row">
+        Wet mass <strong>${wmNow}</strong> → <strong>${wcNow.id}</strong>
+        weight class (<strong>${ntMod}</strong> net thrust)
+      </div>
+      ${thrust != null
+        ? `<div class="ntt-row">Base thrust <strong>${thrust}</strong>
+             ${ntMod} weight = net thrust <strong>${netThrustVal}</strong></div>`
+        : '<div class="ntt-row muted">(no active thruster - no base thrust)</div>'}
+      <div class="ntt-row muted">Fuel steps this band: <strong>${fracLadder}</strong></div>
+      <p class="muted ntt-note">
+        Heavier stacks read a lower net thrust. A burn spends fuel
+        and walks the wet-mass chit toward dry mass (black line);
+        refuelling walks it back up (red dotted). Each band spends
+        fuel in finer fractions as mass grows.
+      </p>
     </div>
   `;
 

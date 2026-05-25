@@ -682,6 +682,75 @@
 }
 .rocket-fuel-strip-legend .is-dry-chit { background: #94a3b8; }
 .rocket-fuel-strip-legend .is-wet-chit { background: #facc15; }
+.rocket-fuel-strip-legend .fs-line-key { display: inline-flex; align-items: center; gap: 4px; }
+.rocket-fuel-strip-legend .fs-line {
+  display: inline-block; width: 16px; height: 0; vertical-align: middle;
+}
+.rocket-fuel-strip-legend .fs-line.black { border-top: 2px solid #0c0a16; }
+.rocket-fuel-strip-legend .fs-line.red { border-top: 2px dashed #e0457b; }
+
+/* Banded Net Thrust track: each weight class is a flex column,
+   width proportional to its mass span, with the fraction ladder
+   stacked above the mass-position cells (matching the board). */
+.fuel-strip-bands {
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  border-radius: 4px;
+}
+.fuel-strip-band {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: 4px;
+  padding: 3px;
+  background: color-mix(in srgb, var(--band-color) 22%, transparent);
+  border: 1px solid color-mix(in srgb, var(--band-color) 60%, transparent);
+}
+.fuel-strip-band-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+.fuel-strip-band-head .fs-band-mod {
+  font-size: 9px;
+  color: var(--ink-dim);
+}
+.fuel-strip-fracs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-bottom: 3px;
+  min-height: 12px;
+}
+.fuel-strip-fracs .fs-frac {
+  font-size: 8px;
+  line-height: 1;
+  padding: 2px 3px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #0c0a16;
+  font-weight: 600;
+}
+.fuel-strip-cells {
+  display: grid;
+  gap: 1px;
+  margin-top: auto;
+}
+.fuel-strip-cells .fuel-strip-cell {
+  background: var(--band-color);
+  border-radius: 2px;
+}
+.fuel-strip-cell.is-max-wet { outline: 2px solid #e0457b; outline-offset: -1px; }
+.fuel-strip-cell.is-max-dry { box-shadow: inset 0 0 0 2px #94a3b8; }
+.fuel-strip-cell.is-min-dry { box-shadow: inset 0 0 0 2px rgba(12,10,22,0.45); }
 
 .fuel-tank-actions {
   display: flex;
@@ -702,6 +771,28 @@
 .fuel-tank-foot {
   margin: 8px 0 0;
   font-size: 11px;
+}
+.fuel-tank-netthrust {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: 8px;
+  font-size: 11px;
+}
+.fuel-tank-netthrust .ntt-head {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--ink-dim);
+  margin-bottom: 4px;
+}
+.fuel-tank-netthrust .ntt-row { margin: 2px 0; }
+.fuel-tank-netthrust .ntt-note {
+  font-size: 10px;
+  margin: 6px 0 0;
+  line-height: 1.45;
 }
 .rocket-wetmass-cell { cursor: pointer; }
 .rocket-wetmass-cell:hover {
