@@ -3867,9 +3867,6 @@ function hasRefueledThisTurn(siteId) {
   return log.sites.includes(siteId);
 }
 
-// Flat yield of a refinery card per the rules.
-const REFINERY_YIELD = 7;
-
 // Pick the best refining source available in the rocket stack.
 // Returns either:
 //   { kind: 'refinery', card, rawGain: 7 }
@@ -3881,22 +3878,12 @@ const REFINERY_YIELD = 7;
 // of water FTs equal to one plus the Site's Hydration minus the
 // card's ISRU rating." Gate: ISRU <= hydration (so gain >= 1).
 //
-// Refinery wins when both are present (factory-refuel is up to 7,
-// always strictly better at low-hydration sites). The refinery
-// branch validates supports with the same supplier-grouped OR
-// rule isRocketActive() uses; the ISRU branch leans on
-// getActiveProspectorStats so the prospector's chip math applies.
+// Site Refuel (I5a) uses ONLY the active prospector's ISRU rig.
+// A REFINERY card is just a build part for a Factory - it is NOT
+// a refuel source. The flat +7 refuel is Factory-only (I5b), and
+// requires a built factory at the site.
 function pickRefiningSource(site) {
   const water = Number.isFinite(site.hydration) ? site.hydration : 0;
-  // Refinery path: any stacked card whose type is 'refinery' AND
-  // whose requires are satisfied by the rest of the stack.
-  const stack = getRocketStack();
-  for (const slot of stack) {
-    const c = PATENTS_BY_ID[slot.id];
-    if (!c || c.type !== 'refinery') continue;
-    if (!refineryHasSupports(slot.id, stack)) continue;
-    return { kind: 'refinery', card: c, rawGain: REFINERY_YIELD };
-  }
   // ISRU rig path: the active prospector with a positive ISRU
   // value, supports met, and ISRU <= site hydration so the
   // 1 + hydration - ISRU formula gives at least 1 water.
@@ -3908,37 +3895,6 @@ function pickRefiningSource(site) {
     }
   }
   return null;
-}
-
-// Same supplier-grouped OR check isRocketActive() uses, scoped to
-// one refinery card. Returns true when every required-supplier
-// group has at least one matching supplier in the rest of the
-// stack.
-function refineryHasSupports(cardId, stack) {
-  const c = PATENTS_BY_ID[cardId];
-  if (!c) return false;
-  const f = (c.faces && c.faces.primary) || c;
-  const reqs = Array.isArray(f.requires) ? f.requires : (c.requires || []);
-  if (!reqs.length) return true;
-  const supplied = new Set();
-  for (const slot of stack) {
-    if (slot.id === cardId) continue;
-    const oc = PATENTS_BY_ID[slot.id];
-    if (!oc) continue;
-    const of = (oc.faces && oc.faces.primary) || oc;
-    const sups = of.supplies || oc.supplies || [];
-    for (const k of sups) supplied.add(k);
-  }
-  const groups = new Map();
-  for (const r of reqs) {
-    const supplier = r.kind.split('-')[0];
-    if (!groups.has(supplier)) groups.set(supplier, []);
-    groups.get(supplier).push(r.kind);
-  }
-  for (const [, kinds] of groups) {
-    if (!kinds.some((k) => supplied.has(k))) return false;
-  }
-  return true;
 }
 
 function canRefuelAt(site) {
@@ -3956,17 +3912,14 @@ function canRefuelAt(site) {
     return {
       ok: false,
       label: `💧 Refuel (no rig)`,
-      reason: 'Need an active refinery, OR an ISRU prospector with ISRU ≤ site water.',
+      reason: 'Need an active ISRU prospector with ISRU ≤ site water (a Factory gives the +7 refuel instead).',
     };
   }
   if (hasRefueledThisTurn(site.id)) {
     return { ok: false, label: `💧 Refueled this turn`, reason: 'Already refined here this turn. End turn to refresh.' };
   }
   const gain = Math.min(source.rawGain, tmax - tank);
-  const label = source.kind === 'refinery'
-    ? `💧 Refuel (+${gain} via refinery)`
-    : `💧 Refuel (+${gain} via ISRU)`;
-  return { ok: true, label, reason: null, source };
+  return { ok: true, label: `💧 Refuel (+${gain} via ISRU)`, reason: null, source };
 }
 
 function doRefuel(site) {
@@ -3988,9 +3941,7 @@ function doRefuel(site) {
   markRefueledThisTurn(site.id);
   const sourceName = source.card?.name || source.kind;
   const water = Number.isFinite(site.hydration) ? site.hydration : 0;
-  const detail = source.kind === 'refinery'
-    ? `flat +${REFINERY_YIELD} via <em>${esc(sourceName)}</em>`
-    : `1 + water ${water} - ISRU ${source.isru} = ${source.rawGain}`;
+  const detail = `1 + water ${water} - ISRU ${source.isru} = ${source.rawGain} via <em>${esc(sourceName)}</em>`;
   setStatus(
     `💧 Refined <strong>${gain}</strong> water at `
     + `<strong>${esc(site.name)}</strong> (${detail}). `
