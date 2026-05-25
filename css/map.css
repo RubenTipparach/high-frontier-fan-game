@@ -2804,7 +2804,7 @@ body:has(#view-browse:not(.hidden)) #main {
   font-style: italic;
 }
 
-.ms-list, .ev-list {
+.ms-list {
   list-style: none;
   padding: 0;
   margin: 0;
@@ -2812,19 +2812,19 @@ body:has(#view-browse:not(.hidden)) #main {
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 10px;
 }
-.ms-list li, .ev-list li {
+.ms-list li {
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 10px 12px;
 }
-.ms-head, .ev-head {
+.ms-head {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
   margin-bottom: 4px;
 }
-.ms-head strong, .ev-head strong { color: var(--ink); }
+.ms-head strong { color: var(--ink); }
 .ms-vp {
   background: var(--accent);
   color: #062136;
@@ -2833,10 +2833,7 @@ body:has(#view-browse:not(.hidden)) #main {
   padding: 2px 8px;
   border-radius: 4px;
 }
-.ev-kind {
-  font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--ink-mute);
-}
-.ms-list p, .ev-list p {
+.ms-list p {
   margin: 0;
   font-size: 12px;
   line-height: 1.4;

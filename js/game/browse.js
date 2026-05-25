@@ -46,7 +46,6 @@ import {
 } from './discs.js';
 import { CREW, CREW_BY_ID } from '../../data/crew.js';
 import { MILESTONES } from '../../data/glory.js';
-import { POLITICS } from '../../data/politics.js';
 import { SITES_BY_ID } from '../../data/sites.js';
 import {
   renderCard, thrustVisual, attachTipsTo,
@@ -1444,7 +1443,6 @@ function showPane(pane) {
   if      (pane === 'patents')    renderPatents();
   else if (pane === 'cart')       renderCart();
   else if (pane === 'milestones') renderMilestones();
-  else if (pane === 'events')     renderEvents();
   else if (pane === 'log')        renderMissionLog();
   else if (pane === 'solo')       renderSolo();
 }
@@ -7702,27 +7700,6 @@ function renderSavesList() {
   });
 }
 
-function renderEvents() {
-  const host = document.getElementById('browse-events');
-  if (!host) return;
-  host.innerHTML = '<ul class="ev-list"></ul>';
-  const list = host.querySelector('ul');
-  for (const e of POLITICS) {
-    const li = document.createElement('li');
-    li.innerHTML = `
-      <div class="ev-head">
-        <strong></strong>
-        <span class="ev-kind"></span>
-      </div>
-      <p class="muted"></p>
-    `;
-    li.querySelector('strong').textContent = e.name;
-    li.querySelector('.ev-kind').textContent = e.kind;
-    li.querySelector('p').textContent = e.blurb;
-    list.appendChild(li);
-  }
-}
-
 function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
 // Site count and edge count for debug surfaces.
@@ -7730,5 +7707,4 @@ export const STATS = {
   siteCount: Object.keys(SITES_BY_ID).length,
   patentCount: PATENTS.length,
   milestoneCount: MILESTONES.length,
-  eventCount: POLITICS.length,
 };
