@@ -2501,7 +2501,11 @@ async function mountMapFor() {
         const clearBtn = document.getElementById('route-clear');
         if (clearBtn) clearBtn.hidden = false;
         if (destSite) {
-          const burns = _plannedRoute.reduce((s, x) => s + (x.burns || 1), 0);
+          // Actual burns = sum of the planner's per-segment burns
+          // (coast/Hohmann hops are 0). NOT a per-segment fallback
+          // of 1, which counted every coast hop as a burn (e.g. a
+          // resumed Hohmann showing "23 burns" instead of 4).
+          const burns = _plannedRoute.reduce((s, x) => s + (Number(x.burns) || 0), 0);
           const turns = _plannedRoute.reduce((m, x) => Math.max(m, x.turn || 1), 1);
           setStatus(
             `🛸 Resumed route to <strong>${esc(destSite.name)}</strong>: `
