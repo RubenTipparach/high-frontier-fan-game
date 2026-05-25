@@ -2593,10 +2593,18 @@ async function mountMapFor() {
   try {
     _activeData = await loadMap();
     soloBindData(_activeData);
-    // Roll back any move that was interrupted mid-hazard-resolution
-    // by a reload, BEFORE the renderer reads rocket / route / trail
-    // state, so it paints the rolled-back (pre-move) position.
-    resumePendingMove();
+    // A move that was mid-hazard-resolution when the tab closed gets
+    // resumed (per-roll) if its saved state still resolves, else
+    // rolled back so the turn isn't wasted. Rollback only touches
+    // state, so it runs now (before the renderer reads position);
+    // the actual resume animates + opens modals, so it fires AFTER
+    // the renderer + route are restored (see _resumeMoveCtx below).
+    const _savedMove = loadMoveProgress();
+    let _resumeMoveCtx = null;
+    if (_savedMove) {
+      if (canResumeMove(_savedMove)) _resumeMoveCtx = _savedMove;
+      else rollbackMove(_savedMove);
+    }
     _renderer = new MapRenderer(canvas, {
       data: _activeData,
       onSelect: onSiteSelect,
@@ -2668,6 +2676,18 @@ async function mountMapFor() {
         _plannedRoute = null;
         persistPlannedRoute();
       }
+    }
+    // Resume an interrupted hazard queue now that the renderer +
+    // route + trail are live. Fire-and-forget: it animates and opens
+    // the roll modals for the remaining hazards. If it throws, fall
+    // back to rolling the move back so the turn isn't lost.
+    if (_resumeMoveCtx) {
+      runMoveQueue(_resumeMoveCtx, true).catch((e) => {
+        // eslint-disable-next-line no-console
+        console.error('move resume failed:', e);
+        rollbackMove(_resumeMoveCtx);
+        syncSandboxRocket();
+      });
     }
   } catch (err) {
     canvas.innerHTML = `<div class="map-loading error">Map failed to load: ${err.message}</div>`;
@@ -5934,48 +5954,53 @@ function persistRocketTrail() {
     }
   } catch { /* private mode */ }
 }
-// Pending-move snapshot helpers. persistPendingMove is called right
-// before a move commits (consumes the move + fuel) so an interrupted
-// hazard-resolution queue can be rolled back on the next load.
-function persistPendingMove(snap) {
-  try { localStorage.setItem(STORAGE_PENDING_MOVE, JSON.stringify(snap)); }
+// Move-progress helpers. The full resumable queue context (ctx) is
+// persisted as each roll / choice commits, so a tab close mid-
+// resolution can pick up where it left off on the next load (per-roll
+// resume). Committed rolls aren't re-rolled.
+function persistMoveProgress(ctx) {
+  try { localStorage.setItem(STORAGE_PENDING_MOVE, JSON.stringify(ctx)); }
   catch { /* private mode */ }
 }
-function clearPendingMove() {
+function clearMoveProgress() {
   try { localStorage.removeItem(STORAGE_PENDING_MOVE); }
   catch { /* private mode */ }
 }
-function loadPendingMove() {
+function loadMoveProgress() {
   try {
     const s = localStorage.getItem(STORAGE_PENDING_MOVE);
     return s ? JSON.parse(s) : null;
   } catch { return null; }
 }
-// On load, if a move was still mid-resolution when the tab closed
-// (the hazard-roll queue never finished), roll it back to its
-// pre-move state: rocket returns to origin, route + trail restored,
-// and the move budget + fuel are refunded so the turn isn't wasted.
-// Mutates only module state + persistence; the caller rebuilds the
-// renderer afterwards, so the rolled-back values are what it reads.
-function resumePendingMove() {
-  const pend = loadPendingMove();
-  if (!pend) return false;
-  clearPendingMove();
-  _rocketSiteId = pend.fromSiteId || null;
+// True when a saved move ctx still resolves against the active data
+// set (so we can safely re-enter the queue). If not, the move is
+// rolled back instead.
+function canResumeMove(ctx) {
+  if (!ctx || !_activeData || !Array.isArray(ctx.turn1) || !ctx.turn1.length) return false;
+  const has = (id) => !!(_activeData.byId ? _activeData.byId[id]
+    : _activeData.sites.find((x) => x.id === id));
+  return ctx.turn1.every((s) => has(s.from) && has(s.to)) && has(ctx.newSiteId);
+}
+// Roll a move that can't be resumed (data changed, etc.) back to its
+// pre-move state so the turn isn't wasted: rocket returns to origin,
+// route + trail restored, move budget + fuel refunded, hazard lock
+// cleared. Mutates only module state + persistence.
+function rollbackMove(ctx) {
+  clearMoveProgress();
+  if (!ctx) return;
+  _rocketSiteId = ctx.fromSiteId || null;
   persistRocketSite();
-  _rocketTrail = Array.isArray(pend.trail) ? pend.trail : [];
+  _rocketTrail = Array.isArray(ctx.trail) ? ctx.trail : [];
   persistRocketTrail();
-  _plannedRoute = Array.isArray(pend.route) && pend.route.length ? pend.route : null;
+  _plannedRoute = Array.isArray(ctx.route) && ctx.route.length ? ctx.route : null;
   persistPlannedRoute();
-  if (Number(pend.fuelCost) > 0) addFuel(Number(pend.fuelCost));
+  if (Number(ctx.fuelCost) > 0) addFuel(Number(ctx.fuelCost));
   refundMove();
   setHazardousMove(false);
   setStatus(
-    '⚠ Your last move was interrupted by a page reload and has been '
-    + 'rolled back. The move budget and fuel were refunded - replay the '
-    + 'move when ready.'
+    '⚠ Your last move could not be resumed and was rolled back. The '
+    + 'move budget and fuel were refunded - replay the move when ready.'
   );
-  return true;
 }
 // Planned route persistence. Called from every assignment to
 // _plannedRoute so the multi-turn plan survives reloads - critical
@@ -6488,19 +6513,14 @@ async function moveRocket() {
       lockUndo = true;
     }
   }
-  // Snapshot the pre-move state so an interrupted hazard-resolution
-  // queue (tab closed / refreshed) can be rolled back on next load
-  // instead of wasting the turn. Capture BEFORE consuming the move,
-  // fuel, or mutating the rocket position / trail.
-  persistPendingMove({
-    fromSiteId: _rocketSiteId,
-    route: _plannedRoute,
-    trail: _rocketTrail,
-    fuelCost,
-  });
+  // Capture the pre-move position for the rollback fallback (used if
+  // a saved move can't be resumed). The full resumable ctx is built
+  // and persisted just below, after the move commits.
+  const preMoveSiteId = _rocketSiteId;
+  const preMoveRoute = _plannedRoute.map((s) => ({ ...s }));
+  const preMoveTrail = _rocketTrail.map((t) => ({ ...t }));
   if (lockUndo) setHazardousMove(true);
   if (!consumeMove()) {
-    clearPendingMove();
     setStatus('No moves left this turn - end turn to refresh.');
     return false;
   }
@@ -6529,19 +6549,66 @@ async function moveRocket() {
     cashedVps:   0,
     fuelSpent:   fuelCost,
   };
+  // Resumable queue context. Persisted after every committed roll /
+  // choice so a tab close mid-resolution can pick up at the next
+  // unresolved hazard on reload (per-roll resume). fromSiteId / route
+  // / trail are the rollback fallback if the saved state can't be
+  // safely resumed.
+  const ctx = {
+    turn1: turn1.map((s) => ({ ...s })),
+    qi: 0,
+    lastIdx: 0,
+    payRemainingGeneric: (hazardChoice === 'pay'),
+    radWillRoll, radThrust, radSeasonBonus,
+    hazardChoice,
+    genericCount: genericHazards.length,
+    newSiteId, arrivedName, arrivedZone,
+    willAwardChit, willCashIn, chitsToCash,
+    fuelCost, lockUndo,
+    fromSiteId: preMoveSiteId,
+    route: preMoveRoute,
+    trail: preMoveTrail,
+  };
+  persistMoveProgress(ctx);
+  return runMoveQueue(ctx, false);
+}
+
+// Hazard-resolution queue + move completion, factored out of
+// moveRocket so it can be re-entered on reload (per-roll resume).
+// `ctx` carries the saved progress; a fresh run starts at qi 0, a
+// resume at the next unresolved hazard. The locals below re-bind the
+// values the loop reads so its body is identical either way. Persists
+// ctx after each committed step; clears it at every exit.
+async function runMoveQueue(ctx, resuming) {
+  const turn1 = ctx.turn1;
+  const newSiteId = ctx.newSiteId;
+  const arrivedName = ctx.arrivedName;
+  const arrivedZone = ctx.arrivedZone;
+  const willAwardChit = ctx.willAwardChit;
+  const willCashIn = ctx.willCashIn;
+  const chitsToCash = ctx.chitsToCash;
+  const radWillRoll = ctx.radWillRoll;
+  const radThrust = ctx.radThrust;
+  const radSeasonBonus = ctx.radSeasonBonus;
+  const hazardChoice = ctx.hazardChoice;
+  const lockUndo = ctx.lockUndo;
+  const genericHazards = { length: ctx.genericCount };
+  const hazards = routeHazards(turn1);
   // Move queue. Walk turn1 segments in order, pausing at each
   // hazard node to resolve it (animate-to + roll modal). An
   // early critical kills the ship before later hazards even
   // see the dice. Trail + _rocketSiteId update incrementally
   // so an explosion mid-route reports the right location.
-  setStatus(`🛸 Moving rocket to <strong>${esc(arrivedName)}</strong>…`);
+  setStatus(resuming
+    ? `🛸 Resuming move to <strong>${esc(arrivedName)}</strong>…`
+    : `🛸 Moving rocket to <strong>${esc(arrivedName)}</strong>…`);
   const hazardIndexById = new Map();
   for (const h of hazards) {
     const idx = turn1.findIndex((s) => s.to === h.site.id);
     if (idx >= 0) hazardIndexById.set(h.site.id, { idx, hazard: h });
   }
   const orderedHazards = [...hazardIndexById.values()].sort((a, b) => a.idx - b.idx);
-  let lastIdx = 0;
+  let lastIdx = ctx.lastIdx;
   const advanceTo = async (targetIdx) => {
     if (targetIdx < lastIdx) return;
     const slice = turn1.slice(lastIdx, targetIdx + 1);
@@ -6553,15 +6620,17 @@ async function moveRocket() {
     _rocketSiteId = slice[slice.length - 1].to;
     persistRocketSite();
     lastIdx = targetIdx + 1;
+    ctx.lastIdx = lastIdx;
+    persistMoveProgress(ctx);
   };
   // Tracks whether the player switched to "pay for the rest"
   // mid-queue; flips remaining generic hazards to the paid path
   // without re-rolling. Starts true when the upfront choice was
   // already 'pay' so the queue uniformly checks one flag.
-  let payRemainingGeneric = (hazardChoice === 'pay');
+  let payRemainingGeneric = ctx.payRemainingGeneric;
   let earlyHalt = false;
   let haltSite = null;
-  for (let qi = 0; qi < orderedHazards.length; qi++) {
+  for (let qi = ctx.qi; qi < orderedHazards.length; qi++) {
     const { idx, hazard } = orderedHazards[qi];
     await advanceTo(idx);
     const isRad = hazard.site.type === 'radhaz';
@@ -6648,13 +6717,18 @@ async function moveRocket() {
         if (r.d6 === 1) {
           setStatus(`💥 Critical failure at <strong>${esc(r.site.name)}</strong>…`);
           // Committed outcome - the rocket is destroyed, so there's
-          // nothing to roll back.
-          clearPendingMove();
+          // nothing to resume.
+          clearMoveProgress();
           await explodeRocket(r.site.id);
           return false;
         }
       }
     }
+    // This hazard is resolved + logged. Advance the checkpoint so a
+    // reload resumes at the NEXT hazard and never re-rolls this one.
+    ctx.qi = qi + 1;
+    ctx.payRemainingGeneric = payRemainingGeneric;
+    persistMoveProgress(ctx);
     // Post-resolve safety net: a decommissioned active thruster
     // (or its support cards) might have killed the rocket's
     // ability to fly. If so, halt right here - the rocket
@@ -6701,6 +6775,8 @@ async function moveRocket() {
         const cost = remGeneric.length * HAZARD_COST_PER;
         if (cost > 0 && spendAqua(cost)) {
           payRemainingGeneric = true;
+          ctx.payRemainingGeneric = true;
+          persistMoveProgress(ctx);
           logAction({
             type: 'hazard_pay',
             icon: '💧',
@@ -6719,8 +6795,8 @@ async function moveRocket() {
   // last node we actually reached, not the original target.
   if (earlyHalt) {
     // Resolved outcome (stop / stranded) - carry-over handled below,
-    // so the move shouldn't be rolled back on a later load.
-    clearPendingMove();
+    // so there's nothing left to resume.
+    clearMoveProgress();
     const haltedSiteId = (haltSite && haltSite.id) || _rocketSiteId;
     // Carry-over: every segment past `lastIdx` becomes turn 2+
     // in the planned route. The post-move "shift down" logic
@@ -6755,6 +6831,9 @@ async function moveRocket() {
     _rocketTrail = _rocketTrail.concat(tail.map((s) => ({ from: s.from, to: s.to })));
     persistRocketTrail();
     _renderer.setRocketTrail(_rocketTrail);
+    lastIdx = turn1.length;
+    ctx.lastIdx = lastIdx;
+    persistMoveProgress(ctx);
   }
   _rocketSiteId = newSiteId;
   persistRocketSite();
@@ -6791,12 +6870,16 @@ async function moveRocket() {
   }
   if (willCashIn) {
     const res = cashInChits(`returned to ${arrivedName}`);
-    _moveSnapshot.cashedChits = chitsToCash;
-    _moveSnapshot.cashedVps   = res.vps;
+    // _moveSnapshot is null on a resumed move (it lives only in memory);
+    // undo is locked for hazardous moves anyway, so guard the write.
+    if (_moveSnapshot) {
+      _moveSnapshot.cashedChits = chitsToCash;
+      _moveSnapshot.cashedVps   = res.vps;
+    }
     logAction({
       type: 'glory_cash',
       icon: '💰',
-      summary: `Cashed ${chitsToCash.length} chit${chitsToCash.length === 1 ? '' : 's'} for ${res.vps} VP`,
+      summary: `Cashed ${(chitsToCash || []).length} chit${(chitsToCash || []).length === 1 ? '' : 's'} for ${res.vps} VP`,
       undoable: false,
     });
   }
@@ -6828,8 +6911,8 @@ async function moveRocket() {
     if (clearBtn) clearBtn.hidden = true;
     setStatus(`🛸 Arrived at <strong>${esc(arrivedName)}</strong>.`);
   }
-  // Move fully resolved - clear the rollback snapshot.
-  clearPendingMove();
+  // Move fully resolved - clear the resume checkpoint.
+  clearMoveProgress();
   // Final sync - the animation left the sprite at the destination's
   // pixel coords; this pins it back to the canonical site (x, y)
   // and ensures canFly reflects the live stack state.
