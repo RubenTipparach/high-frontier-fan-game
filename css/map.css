@@ -122,6 +122,41 @@
   font-variant-numeric: tabular-nums;
 }
 .map-aqua-chip strong { color: #f0f9ff; font-weight: 800; }
+/* Anchor for the floating "+N" gain indicator. */
+.map-aqua-chip { position: relative; }
+/* Green pulse when the balance is credited (sale / income). The
+   count-up itself is driven in JS; this just flashes the chip. */
+.map-aqua-chip.aqua-gain {
+  animation: aqua-gain-pulse 0.65s ease-out;
+}
+@keyframes aqua-gain-pulse {
+  0%   { transform: scale(1);    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+  30%  { transform: scale(1.18); box-shadow: 0 0 14px 3px rgba(74, 222, 128, 0.7);
+         border-color: #4ade80; color: #bbf7d0; }
+  100% { transform: scale(1);    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+}
+/* The "+N" that rises off the chip and fades. */
+.aqua-gain-float {
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  font-weight: 800;
+  font-size: 13px;
+  color: #4ade80;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+  animation: aqua-gain-rise 1.1s ease-out forwards;
+}
+@keyframes aqua-gain-rise {
+  0%   { opacity: 0; transform: translate(-50%, 4px); }
+  20%  { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -26px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .map-aqua-chip.aqua-gain { animation: none; }
+  .aqua-gain-float { animation: none; opacity: 0; }
+}
 /* Per-turn budget tags: [op:N] [move:N]. Monospace-ish brackets
    so they read as compact status chips next to the turn clock. */
 .map-turn-budget {
@@ -4645,6 +4680,54 @@ body:has(#view-browse:not(.hidden)) #main {
 .free-market-modal .modal-btn.primary:hover { background: #166534; }
 .auction-modal .modal-btn.primary:disabled,
 .free-market-modal .modal-btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Free Market now shows each Hand card IN FULL in a selectable tile
+   grid (same idiom as the starting-crew wizard), so the modal widens
+   to fit a couple of full cards per row. */
+.free-market-modal { max-width: 640px; }
+.free-market-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 2px;
+}
+.free-market-card {
+  cursor: pointer;
+  border-radius: 12px;
+  padding: 4px;
+  border: 2px solid transparent;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+}
+.free-market-card .card { width: 100%; }
+.free-market-card:hover { transform: translateY(-2px); }
+.free-market-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.free-market-card.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(125, 211, 252, 0.45), 0 8px 20px rgba(0, 0, 0, 0.5);
+}
+
+/* Sell confirmation reuses the auction-confirm box styling. */
+.sell-confirm-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  max-width: 420px;
+  width: 100%;
+  color: var(--ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.sell-confirm-note { margin: 0; font-size: 12px; line-height: 1.45; }
+.sell-confirm-modal .card-modal-actions { margin-top: 4px; justify-content: flex-end; }
+.sell-confirm-modal .modal-btn.primary {
+  background: #14532d; color: #d1fae5; border-color: #166534;
+}
+.sell-confirm-modal .modal-btn.primary:hover { background: #166534; }
 
 /* ============================================================
    Transfer LEO ↔ Rocket modal (variant cargo flow).

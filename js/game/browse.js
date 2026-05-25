@@ -1674,6 +1674,20 @@ function showPane(pane) {
   else if (pane === 'solo')       renderSolo();
 }
 
+// Float a "+N" aqua indicator above the balance chip, then remove it
+// once the CSS rise-and-fade animation ends. Purely cosmetic feedback
+// for a credited sale / income.
+function spawnAquaGainFloat(anchor, delta) {
+  if (!anchor || delta <= 0) return;
+  const float = document.createElement('span');
+  float.className = 'aqua-gain-float';
+  float.textContent = `+${delta}`;
+  anchor.appendChild(float);
+  float.addEventListener('animationend', () => float.remove());
+  // Safety net in case animationend doesn't fire (reduced-motion etc).
+  setTimeout(() => float.remove(), 1500);
+}
+
 // Route state: shared across renderer instances. Tapping the first
 // site sets `from`, tapping the second sets `to` and triggers the
 // pathfinder; tapping again starts a new route from that site.
@@ -2139,8 +2153,36 @@ function ensureMapShell(host) {
   const aquaChip = host.querySelector('#aqua-chip');
   const aquaChipBal = host.querySelector('#aqua-chip-balance');
   if (aquaChipBal) {
-    const refreshAqua = () => { aquaChipBal.textContent = String(getAqua()); };
-    refreshAqua();
+    aquaChipBal.textContent = String(getAqua());
+    let aquaAnimRaf = null;
+    // Tween the displayed number toward the live balance instead of
+    // snapping. A gain (sale / income) also pulses the chip green and
+    // floats a "+N" so the money visibly goes up. Mid-flight changes
+    // restart the tween from whatever is currently shown.
+    const refreshAqua = () => {
+      const target = getAqua();
+      const shown = parseInt(aquaChipBal.textContent, 10);
+      const from = Number.isFinite(shown) ? shown : target;
+      if (from === target) { aquaChipBal.textContent = String(target); return; }
+      const delta = target - from;
+      if (delta > 0 && aquaChip) {
+        aquaChip.classList.remove('aqua-gain');
+        void aquaChip.offsetWidth; // restart the animation if re-fired
+        aquaChip.classList.add('aqua-gain');
+        spawnAquaGainFloat(aquaChip, delta);
+      }
+      const dur = Math.min(900, 250 + Math.abs(delta) * 60);
+      const t0 = performance.now();
+      if (aquaAnimRaf) cancelAnimationFrame(aquaAnimRaf);
+      const step = (now) => {
+        const p = Math.min(1, (now - t0) / dur);
+        const e = 1 - Math.pow(1 - p, 3); // ease-out cubic
+        aquaChipBal.textContent = String(Math.round(from + delta * e));
+        if (p < 1) { aquaAnimRaf = requestAnimationFrame(step); }
+        else { aquaChipBal.textContent = String(target); aquaAnimRaf = null; }
+      };
+      aquaAnimRaf = requestAnimationFrame(step);
+    };
     onAquaChange(refreshAqua);
   }
   if (aquaChip) {
@@ -4513,6 +4555,7 @@ function doFreeMarket() {
   openFreeMarketModal({
     handIds,
     lookupCard: cardById,
+    renderCardFn: renderCard,
     onCommit: ({ cardId }) => {
       if (!cardId) return;
       if (!requireOp('Free Market')) return;
