@@ -899,27 +899,42 @@ function openUnifiedStackInspector(stackId) {
         <h4>Cards (${cards.length})</h4>
         <!-- Same #rocket-stack-cards container + .rocket-stack-row
              grid the rocket modal uses, so the cards render with
-             identical look + spacing across every stack inspector.
-             The 'others' row class gets the dashed divider on top;
-             we use a single row here since LEO / Outpost don't
-             distinguish thrusters from the rest. -->
+             identical look + spacing across every stack inspector. -->
         <div id="stack-inspector-cards">
           <div class="rocket-stack-row" id="stack-inspector-cards-row"></div>
         </div>
+      </div>
+      <!-- Footer: transfer + decommission + fuel + close all live
+           in a pinned bar so they stay visible no matter how far
+           the card list is scrolled. -->
+      <div class="stack-inspector-footer">
         <div id="stack-inspector-transfer"></div>
-        <div class="stack-decommission-row">
+        <div class="card-modal-actions">
           <button type="button" class="modal-btn decommission stack-decom-btn"
-            title="Return the selected cards to your hand" ${selected.size ? '' : 'disabled'}>
-            ♻ Decommission to hand${selected.size ? ` (${selected.size})` : ''}</button>
+            title="Return the selected cards to your hand" disabled>♻ Decommission to hand</button>
+          ${stackId === 'leo' && isLeoSite(getRocketSite())
+            ? '<button type="button" class="modal-btn stack leo-fuel-tank" title="Open the docked rocket\'s water tank to transfer fuel">💧 Rocket fuel tank</button>'
+            : ''}
+          <button type="button" class="modal-btn stack-inspector-close">Close</button>
         </div>
       </div>
-      <div class="card-modal-actions">
-        ${stackId === 'leo' && isLeoSite(getRocketSite())
-          ? '<button type="button" class="modal-btn stack leo-fuel-tank" title="Open the docked rocket\'s water tank to transfer fuel">💧 Rocket fuel tank</button>'
-          : ''}
-        <button type="button" class="modal-btn stack-inspector-close">Close</button>
-      </div>
     `;
+
+    // Footer buttons depend on the selection count. refreshFooter
+    // updates them IN PLACE so toggling Select never rebuilds the
+    // card list (and so never resets its scroll position).
+    const refreshFooter = () => {
+      const n = selected.size;
+      dialog.querySelectorAll('.stack-inspector-xfer-btn').forEach((btn) => {
+        btn.disabled = n === 0;
+        btn.textContent = `Send ${n > 0 ? n + ' ' : ''}→ ${btn.dataset.destLabel || ''}`;
+      });
+      const decom = dialog.querySelector('.stack-decom-btn');
+      if (decom) {
+        decom.disabled = n === 0;
+        decom.textContent = `♻ Decommission to hand${n ? ` (${n})` : ''}`;
+      }
+    };
 
     const row = dialog.querySelector('#stack-inspector-cards-row');
     if (!cards.length) {
@@ -941,9 +956,14 @@ function openUnifiedStackInspector(stackId) {
         selBtn.className = 'rocket-select' + (selected.has(slot.id) ? ' is-on' : '');
         selBtn.textContent = selected.has(slot.id) ? '✓ Selected' : 'Select';
         selBtn.addEventListener('click', () => {
-          if (selected.has(slot.id)) selected.delete(slot.id);
-          else selected.add(slot.id);
-          render();
+          const on = selected.has(slot.id);
+          if (on) selected.delete(slot.id); else selected.add(slot.id);
+          // Toggle in place - NO render() - so the card list's
+          // scroll position is untouched.
+          wrap.classList.toggle('is-selected', !on);
+          selBtn.classList.toggle('is-on', !on);
+          selBtn.textContent = !on ? '✓ Selected' : 'Select';
+          refreshFooter();
         });
         actions.appendChild(selBtn);
         if (slot.face === 'secondary') {
@@ -974,11 +994,9 @@ function openUnifiedStackInspector(stackId) {
             : ' Park the rocket at this site (or create a second outpost here) to enable transfers.'}</p>
         </div>`;
     } else {
-      const selectedCount = selected.size;
-      const destButtonsHtml = dests.map((d) => {
-        const disabled = selectedCount === 0 ? 'disabled' : '';
-        return `<button type="button" class="stack-inspector-xfer-btn" data-dest="${esc(d.id)}" ${disabled}>Send ${selectedCount > 0 ? selectedCount + ' ' : ''}→ ${esc(d.label)}</button>`;
-      }).join('');
+      const destButtonsHtml = dests.map((d) =>
+        `<button type="button" class="stack-inspector-xfer-btn" data-dest="${esc(d.id)}" data-dest-label="${esc(d.label)}" disabled>Send → ${esc(d.label)}</button>`
+      ).join('');
       transferHost.innerHTML = `
         <div class="stack-inspector-transfer">
           <h4>🔄 Transfer (free action)</h4>
@@ -1036,6 +1054,8 @@ function openUnifiedStackInspector(stackId) {
         decommissionSelectedToHand(stackId, [...selected], render);
       });
     }
+    // Initialise footer button states from the current selection.
+    refreshFooter();
   };
 
   // Subscribe to every state change that could affect the

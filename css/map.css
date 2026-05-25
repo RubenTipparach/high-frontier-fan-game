@@ -4311,8 +4311,17 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .stack-inspector-modal .card-modal-actions {
   flex: 0 0 auto;
-  margin-top: 4px;
+  margin-top: 0;
   justify-content: flex-end;
+  flex-wrap: wrap;
+}
+/* Pinned footer: transfer controls + the decommission / fuel /
+   close action row, always visible below the scrollable body. */
+.stack-inspector-footer {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 /* ============================================================
