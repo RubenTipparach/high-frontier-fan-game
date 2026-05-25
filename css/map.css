@@ -4964,3 +4964,62 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .newgame-toggle input { width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent); }
 .newgame-hint { margin: 4px 0 0; font-size: 11px; line-height: 1.4; }
+
+/* ============================================================
+   Starting-crew wizard (mandatory faction pick on New game).
+   ============================================================ */
+.crew-wizard-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  max-width: 720px;
+  width: 100%;
+  color: var(--ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.crew-wizard-head h3 { margin: 0 0 4px; font-size: 18px; letter-spacing: 0.5px; }
+.crew-wizard-head p { margin: 0; font-size: 13px; }
+.crew-faction-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.crew-faction {
+  text-align: left;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.crew-faction:hover { background: var(--panel-2); border-color: var(--accent); }
+.crew-faction.is-selected {
+  background: rgba(125, 211, 252, 0.14);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.5) inset;
+}
+.crew-faction-name { font-size: 14px; font-weight: 800; }
+.crew-faction-priv {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.crew-faction-blurb { font-size: 12px; line-height: 1.35; }
+.crew-wizard-modal .card-modal-actions { justify-content: flex-end; }
+.crew-wizard-modal .modal-btn.primary {
+  background: #14532d; color: #d1fae5; border-color: #166534;
+}
+.crew-wizard-modal .modal-btn.primary:hover { background: #166534; }
+.crew-wizard-modal .modal-btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }

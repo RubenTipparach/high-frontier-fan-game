@@ -44,7 +44,7 @@ import {
   getDiscs, getDisc, placeDisc, removeDisc, resetDiscs,
   onChange as onDiscsChange,
 } from './discs.js';
-import { CREW, CREW_BY_ID } from '../../data/crew.js';
+import { CREW, CREW_BY_ID, FACTIONS } from '../../data/crew.js';
 import { MILESTONES } from '../../data/glory.js';
 import { SITES_BY_ID } from '../../data/sites.js';
 import {
@@ -7653,7 +7653,10 @@ function paintSolo() {
       const cash = getStarterCash() ? `$${STARTER_CASH_AMOUNT}` : '$0';
       if (!confirm(`Start a new game? This clears your hand, rocket, position, planned route, outposts, factories, colonies, discs, glory, mission log, the turn clock, and reseeds the aqua bank to ${cash}.`)) return;
       doSandboxReset();
-      setStatus(`🆕 New game - board cleared, aqua bank reseeded to ${cash}.`);
+      setStatus(`🆕 New game - board cleared, aqua bank reseeded to ${cash}. Pick your starting crew.`);
+      // Mandatory starting-crew pick (user 2026-05): the crew
+      // wizard fires automatically on New game.
+      openCrewWizard();
     };
     const flipMode = (next) => {
       if (next === marketMode) return;
@@ -7680,6 +7683,99 @@ function paintSolo() {
 // the row's name loads it (after a confirm). Kept separate from
 // paintSolo so the save actions can re-render just the list
 // without repainting the whole panel.
+// ---- Starting crew ----
+//
+// The player picks ONE faction face (of the 6 double-faced
+// crew cards) at New-game time. The choice is recorded under
+// hf-sandbox-crew-faction (so it rides along in saves) and the
+// chosen crew card lands in the player's Hand as their
+// starting crew.
+const STORAGE_CREW = 'hf-sandbox-crew-faction';
+
+function getPickedCrew() {
+  try {
+    const raw = localStorage.getItem(STORAGE_CREW);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function setPickedCrew(cardId, face) {
+  try { localStorage.setItem(STORAGE_CREW, JSON.stringify({ cardId, face })); }
+  catch { /* private mode */ }
+}
+
+// Mandatory starting-crew wizard. Modal with no cancel/backdrop
+// dismiss - the player MUST pick a faction before play. On
+// confirm: records the chosen faction, drops the crew card into
+// the Hand. onDone (optional) fires after the pick commits.
+function openCrewWizard(onDone) {
+  document.querySelector('.crew-wizard-overlay')?.remove();
+  let selected = null; // { cardId, face }
+
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay crew-wizard-overlay';
+  overlay.tabIndex = -1;
+  // No backdrop-close, no Escape-close: the pick is mandatory.
+  const dialog = document.createElement('div');
+  dialog.className = 'crew-wizard-modal';
+  overlay.appendChild(dialog);
+
+  const commit = () => {
+    if (!selected) return;
+    setPickedCrew(selected.cardId, selected.face);
+    const card = CREW_BY_ID[selected.cardId];
+    const faction = card?.faces?.[selected.face];
+    // Drop the physical crew card into the Hand as the starting
+    // crew. (The card carries both faces; the chosen faction is
+    // recorded separately as the player's committed faction.)
+    if (card) addToHand(card);
+    overlay.remove();
+    setStatus(`🧑‍🚀 Starting crew: <strong>${esc(faction?.name || selected.cardId)}</strong> (${esc(faction?.bonus || '')}). Crew card added to your Hand.`);
+    logAction({
+      type: 'crew_pick',
+      icon: '🧑‍🚀',
+      summary: `Picked starting faction: ${faction?.name || selected.cardId}`,
+      undoable: false,
+      data: { cardId: selected.cardId, face: selected.face },
+    });
+    try { onDone?.(); } catch (e) { console.error('crew wizard onDone:', e); }
+  };
+
+  const render = () => {
+    const factionsHtml = FACTIONS.map((f, i) => {
+      const isSel = selected && selected.cardId === f.cardId && selected.face === f.face;
+      return `<button type="button" class="crew-faction ${isSel ? 'is-selected' : ''}"
+        data-card="${esc(f.cardId)}" data-face="${esc(f.face)}">
+        <span class="crew-faction-name">${esc(f.name)}</span>
+        <span class="crew-faction-priv">${esc(f.bonus)}</span>
+        <span class="crew-faction-blurb muted">${esc(f.blurb)}</span>
+      </button>`;
+    }).join('');
+    dialog.innerHTML = `
+      <div class="crew-wizard-head">
+        <h3>🧑‍🚀 Pick your starting crew</h3>
+        <p class="muted">Choose one faction. Its privilege is your edge for the game. (Required to start.)</p>
+      </div>
+      <div class="crew-faction-grid">${factionsHtml}</div>
+      <div class="card-modal-actions">
+        <button type="button" class="modal-btn primary crew-confirm" ${selected ? '' : 'disabled'}>🚀 Start with ${selected ? esc(CREW_BY_ID[selected.cardId].faces[selected.face].name) : '...'}</button>
+      </div>
+    `;
+    dialog.querySelectorAll('.crew-faction').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        selected = { cardId: btn.getAttribute('data-card'), face: btn.getAttribute('data-face') };
+        render();
+      });
+    });
+    dialog.querySelector('.crew-confirm').addEventListener('click', () => {
+      if (selected) commit();
+    });
+  };
+
+  render();
+  document.body.appendChild(overlay);
+  overlay.focus();
+}
+
 function renderSavesList() {
   const host = document.getElementById('saves-list');
   if (!host) return;

@@ -1,148 +1,89 @@
-// Crew deck. Each physical card carries TWO functionally
-// independent crew on its two faces (primary + secondary).
+// Crew deck - the published HF4 player-faction cards. Each
+// physical card is double-sided and carries TWO factions, one
+// per face. At game start the player picks ONE faction face
+// (the starting-crew wizard) and that faction's privilege is
+// their edge for the game.
 //
-// AUTO-GENERATED from reference/HF4-card-data.xlsx's
-// Colonists sheet via scripts/extract-crew-data.py. Each
-// pair of rows in the sheet is one physical card; the
-// primary row carries name+type+specialty+mass+rad, the
-// secondary row often carries an ability text plus its
-// own mass+rad (and inherits type+specialty from the pair).
+// Source: https://www.hf4map.com/cards/crew/ (the 6 crew
+// cards, card0..card5, front + back). NOTE: this is the CREW
+// deck - distinct from the Colonists deck (a separate set of
+// cards). An earlier build wrongly populated this file from the
+// spreadsheet's Colonists sheet; that was the wrong data.
 //
-// The Promotion Colony + Ideology columns are reference
-// data only - crew promotion is part of the expansion and
-// is NEVER used in this variant (industrialize.md
-// 'Colonies are tokens, not cards'). They are not emitted.
+// Faction PRIVILEGE text: 5 of the 12 were recoverable from
+// published sources (BGG / strategy guides) and are filled in
+// below. The other 7 are marked "TODO: privilege" pending a
+// transcription from the card images (hf4map serves the stats
+// as JPGs, not text). Per-face MASS / RAD-HARD are placeholders
+// (crew are light, low-mass); replace with the printed values
+// when available.
 //
-// Re-run the extractor when the spreadsheet changes:
-//   python3 scripts/extract-crew-data.py
+// Face shape matches the crew renderer in js/game/card-ui.js:
+//   { name, role, bonus, blurb, mass, radHardness, spectralType }
+//   - name  : faction name
+//   - role  : short faction descriptor
+//   - bonus : the privilege's short title (NASA LAUNCH FEES, ...)
+//   - blurb : what the privilege does
+
+const TODO_PRIV = 'TODO: faction privilege (transcribe from card).';
 
 export const CREW = [
   {
-    id: 'crew_babbage_halbonauts',
+    id: 'crew_un_b612',
     faces: {
-      primary:   { name: 'Babbage Halbonauts', type: 'Robot', role: 'Engineer', mass: 2, radHardness: 5 },
-      secondary: { name: 'Utility Fog Halbonaut', type: 'Robot', role: 'Engineer', mass: 2, radHardness: 5, ability: 'All of your stacks are Glitch-free.' },
+      primary:   { name: 'United Nations Cosmonauts', role: 'Faction', bonus: 'UN MANDATE', blurb: TODO_PRIV, mass: 0, radHardness: 3, spectralType: 'C' },
+      secondary: { name: 'B612 Foundation',           role: 'Faction', bonus: 'B612',       blurb: TODO_PRIV, mass: 0, radHardness: 3, spectralType: 'C' },
     },
   },
   {
-    id: 'crew_biomechs',
+    id: 'crew_roscosmos_taikonauts',
     faces: {
-      primary:   { name: 'Biomechs', type: 'Human', role: 'Miner', mass: 2, radHardness: 4 },
-      secondary: { name: 'Group Mind Immortalists', type: 'Human', role: 'Miner', mass: 2, radHardness: 5, ability: 'May perform the faction privileges on both sides of your Crew card.' },
+      primary:   { name: 'Roscosmos',  role: 'Faction', bonus: 'PROTECTION FEES', blurb: 'Gain 1 water after any player places a claim or industrializes.', mass: 0, radHardness: 3, spectralType: 'C' },
+      secondary: { name: 'Taikonauts', role: 'Faction', bonus: 'TAIKONAUTS',      blurb: TODO_PRIV, mass: 0, radHardness: 3, spectralType: 'C' },
     },
   },
   {
-    id: 'crew_botany_bay_convicts',
+    id: 'crew_nasa_isro',
     faces: {
-      primary:   { name: 'Botany Bay Convicts', type: 'Human', role: 'Miner', mass: 2, radHardness: 4 },
-      secondary: { name: 'Soldier Caste', type: 'Human', role: 'Miner', mass: 2, radHardness: 9, ability: 'All your Humans can commit Felonies, even if defending Humans are present.' },
+      primary:   { name: 'NASA Astronauts',     role: 'Faction', bonus: 'NASA LAUNCH FEES', blurb: 'Gain 1 aqua whenever any player performs a Boost operation.', mass: 0, radHardness: 3, spectralType: 'C' },
+      secondary: { name: 'ISRO Glavcosmonauts', role: 'Faction', bonus: 'ISRO',             blurb: TODO_PRIV, mass: 0, radHardness: 3, spectralType: 'C' },
     },
   },
   {
-    id: 'crew_boyle_engineering_collective',
+    id: 'crew_anonp2p_esa',
     faces: {
-      primary:   { name: 'Boyle Engineering Collective', type: 'Human', role: 'Prospector', mass: 3, radHardness: 5 },
-      secondary: { name: 'Martian Assembly', type: 'Human', role: 'Prospector', mass: 3, radHardness: 6, ability: 'Acts as a Freighter when building a Space Elevator.' },
+      primary:   { name: 'Anonymous P2P',       role: 'Faction', bonus: 'ANONYMOUS P2P',      blurb: TODO_PRIV, mass: 0, radHardness: 3, spectralType: 'C' },
+      secondary: { name: 'ESA Space Unionists', role: 'Faction', bonus: 'ESA POWERSAT IN GEO', blurb: '+1 thrust to any one spacecraft during any player turn.', mass: 0, radHardness: 3, spectralType: 'C' },
     },
   },
   {
-    id: 'crew_calypso_2_seed_sail',
+    id: 'crew_shimizu_nasrda',
     faces: {
-      primary:   { name: 'Calypso 2 Seed Sail', type: 'Human', role: 'Prospector', mass: 1, radHardness: 3, ability: "Can't enter aerobrakes." },
-      secondary: { name: 'Wet-Nano Seed Sail', type: 'Human', role: 'Prospector', mass: 1, radHardness: 5, ability: "-2 to Colocated size rolls on Synodic Comets. Can't enter aerobrakes." },
+      primary:   { name: 'Shimizu Corp Entrepreneurs', role: 'Faction', bonus: 'SHIMIZU SKUNKWORKS', blurb: 'May bid in research auctions with any number of hand cards.', mass: 0, radHardness: 3, spectralType: 'C' },
+      secondary: { name: 'NASRDA Astronauts',          role: 'Faction', bonus: 'NASRDA',            blurb: TODO_PRIV, mass: 0, radHardness: 3, spectralType: 'C' },
     },
   },
   {
-    id: 'crew_heavy_water_survivalists',
+    id: 'crew_spacex_norse',
     faces: {
-      primary:   { name: 'Heavy Water Survivalists', type: 'Human', role: 'Engineer', mass: 2, radHardness: 5 },
-      secondary: { name: 'New Attica Secessionists', type: 'Human', role: 'Engineer', mass: 2, radHardness: 6, ability: 'Boost costs are doubled for all your opponents.' },
-    },
-  },
-  {
-    id: 'crew_house_of_saud',
-    faces: {
-      primary:   { name: 'House of Saud', type: 'Human', role: 'Miner', mass: 2, radHardness: 3 },
-      secondary: { name: 'Iceworms', type: 'Human', role: 'Miner', mass: 2, radHardness: 4, ability: 'Performs epic hazard operation as a free action, & is not Decommissioned if it fails.' },
-    },
-  },
-  {
-    id: 'crew_juiced_cosmonauts',
-    faces: {
-      primary:   { name: 'Juiced Cosmonauts', type: 'Human', role: 'Prospector', mass: 1, radHardness: 4 },
-      secondary: { name: 'Rental Body Guild', type: 'Human', role: 'Prospector', mass: 1, radHardness: 6, ability: '-1 to Colocated size rolls.' },
-    },
-  },
-  {
-    id: 'crew_lloyd_s_salvage_co',
-    faces: {
-      primary:   { name: "Lloyd's Salvage Co.", type: 'Human', role: 'Industrialist', mass: 1, radHardness: 5 },
-      secondary: { name: 'Svalbard Caretakers', type: 'Human', role: 'Industrialist', mass: 1, radHardness: 6, ability: '-1 on all size rolls when prospecting Synodic Sites.' },
-    },
-  },
-  {
-    id: 'crew_malcolm',
-    faces: {
-      primary:   { name: 'Malcolm', type: 'Human', role: 'Industrialist', mass: 1, radHardness: 3 },
-      secondary: { name: 'Renaissance Man', type: 'Human', role: 'Industrialist', mass: 1, radHardness: 4, ability: 'If initiating a research auction, can search through one patent deck and choose the card to be auctioned.' },
-    },
-  },
-  {
-    id: 'crew_microgravity_pantrophists',
-    faces: {
-      primary:   { name: 'Microgravity Pantrophists', type: 'Human', role: 'Engineer', mass: 3, radHardness: 5 },
-      secondary: { name: 'Blue Goo Sybonts', type: 'Human', role: 'Engineer', mass: 3, radHardness: 6, ability: 'Can produce ET products of Spectral Type C at any Factory.' },
-    },
-  },
-  {
-    id: 'crew_programmable_matter',
-    faces: {
-      primary:   { name: 'Programmable Matter', type: 'Robot', role: 'Prospector', mass: 1, radHardness: 4 },
-      secondary: { name: 'Neumann Matter', type: 'Robot', role: 'Prospector', mass: 1, radHardness: 5, ability: 'All of your stacks are Glitch-free.' },
-    },
-  },
-  {
-    id: 'crew_rock_rats_miners_union',
-    faces: {
-      primary:   { name: "Rock Rats Miners' Union", type: 'Human', role: 'Miner', mass: 3, radHardness: 5 },
-      secondary: { name: 'Alchemist Aviatrices', type: 'Human', role: 'Miner', mass: 3, radHardness: 6, ability: 'During Factory Refuel, double the amount of isotope fuel.' },
-    },
-  },
-  {
-    id: 'crew_security_system',
-    faces: {
-      primary:   { name: 'Security System', type: 'Robot', role: 'Industrialist', mass: 1, radHardness: 4 },
-      secondary: { name: 'Frankenstein Navigator', type: 'Robot', role: 'Industrialist', mass: 1, radHardness: 5, ability: 'FINAO costs are halved (drop fractions).' },
-    },
-  },
-  {
-    id: 'crew_siren_cybernautics_inc',
-    faces: {
-      primary:   { name: 'Siren Cybernautics Inc.', type: 'Human', role: 'Engineer', mass: 3, radHardness: 5 },
-      secondary: { name: 'Josephson Implants', type: 'Human', role: 'Engineer', mass: 3, radHardness: 6, ability: 'FINAO costs are halved (drop fractions).' },
-    },
-  },
-  {
-    id: 'crew_smart_pets',
-    faces: {
-      primary:   { name: 'Smart Pets', type: 'Robot', role: 'Miner', mass: 0, radHardness: 3 },
-      secondary: { name: 'Creeper Neogen', type: 'Robot', role: 'Miner', mass: 0, radHardness: 6, ability: 'All of your stacks are Glitch-free.' },
-    },
-  },
-  {
-    id: 'crew_transorbital_railworkers',
-    faces: {
-      primary:   { name: 'Transorbital Railworkers', type: 'Human', role: 'Engineer', mass: 2, radHardness: 4 },
-      secondary: { name: 'Kaluga Naniteers', type: 'Human', role: 'Engineer', mass: 2, radHardness: 5, ability: 'Your Aqua from a Free Market is doubled.' },
-    },
-  },
-  {
-    id: 'crew_vatican_observers',
-    faces: {
-      primary:   { name: 'Vatican Observers', type: 'Human', role: 'Industrialist', mass: 1, radHardness: 4 },
-      secondary: { name: 'Eugenic Pilgrims', type: 'Human', role: 'Industrialist', mass: 1, radHardness: 5, ability: 'Faction privilege not lost in Anarchy. -1 to Colocated size rolls on Synodic Comets.' },
+      primary:   { name: 'SpaceX',           role: 'Faction', bonus: 'SPACEX LAUNCH FEES', blurb: 'Gain 1 water whenever any player performs a Boost operation.', mass: 0, radHardness: 3, spectralType: 'C' },
+      secondary: { name: 'Norse Astronauts', role: 'Faction', bonus: 'NORSE',              blurb: TODO_PRIV, mass: 0, radHardness: 3, spectralType: 'C' },
     },
   },
 ];
 
 export const CREW_BY_ID = Object.fromEntries(CREW.map((c) => [c.id, c]));
+
+// Flat list of every selectable faction face, for the
+// starting-crew wizard. Each entry points back at its physical
+// card + which face it is, so the picker can show all 12
+// factions and the engine can record the single chosen one.
+export const FACTIONS = CREW.flatMap((card) => (
+  ['primary', 'secondary'].map((faceKey) => ({
+    cardId: card.id,
+    face: faceKey,
+    name: card.faces[faceKey].name,
+    bonus: card.faces[faceKey].bonus,
+    blurb: card.faces[faceKey].blurb,
+  }))
+));
