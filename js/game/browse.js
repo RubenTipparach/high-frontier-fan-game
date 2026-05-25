@@ -3962,6 +3962,12 @@ function maneuverGate(site, netThrust) {
   if (size <= 0 || netThrust > size) {
     return { ok: true, assist: false, needsRoll: false, size };
   }
+  // Rule exception: a size-1 site can always be landed on or lifted
+  // off by any rocket with a working thruster (supports satisfied),
+  // regardless of net thrust - no factory assist or roll required.
+  if (size === 1 && isRocketActive().active) {
+    return { ok: true, assist: false, needsRoll: false, size };
+  }
   const factory = site && getFactory(site.id);
   if (!factory) return { ok: false, assist: false, needsRoll: false, size };
   const colony = getColony(site.id);
