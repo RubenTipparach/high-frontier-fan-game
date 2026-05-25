@@ -2765,13 +2765,13 @@ body:has(#view-browse:not(.hidden)) #main {
   padding: 10px;
   font-size: 12px;
 }
-.patent-card.type-thruster  { border-left-color: #f87171; }
-.patent-card.type-reactor   { border-left-color: #fbbf24; }
-.patent-card.type-radiator  { border-left-color: #7dd3fc; }
-.patent-card.type-refinery  { border-left-color: #4ade80; }
-.patent-card.type-robonaut  { border-left-color: #c084fc; }
+.patent-card.type-thruster  { border-left-color: var(--card-thruster); }
+.patent-card.type-reactor   { border-left-color: var(--card-reactor); }
+.patent-card.type-radiator  { border-left-color: var(--card-radiator); }
+.patent-card.type-refinery  { border-left-color: var(--card-refinery); }
+.patent-card.type-robonaut  { border-left-color: var(--card-robonaut); }
 .patent-card.type-lab       { border-left-color: #38bdf8; }
-.patent-card.type-generator { border-left-color: #a78bfa; }
+.patent-card.type-generator { border-left-color: var(--card-generator); }
 
 .patent-card .pc-header {
   display: flex; align-items: baseline; justify-content: space-between;

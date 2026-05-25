@@ -13,6 +13,19 @@
   --good:      #4ade80;
   --bad:       #f87171;
 
+  /* Card-type colour key - single source of truth. Used by the
+     card typebar (css/cards.css) AND the patent-card border
+     (css/map.css) so a type reads the same colour everywhere.
+     thruster = orange, generator = salmon, robonaut = magenta
+     per the 2026-05 colour pass; the other three keep distinct
+     hues. */
+  --card-thruster:  #f97316;
+  --card-generator: #fa8072;
+  --card-robonaut:  #d946ef;
+  --card-reactor:   #a78bfa;
+  --card-radiator:  #7dd3fc;
+  --card-refinery:  #94a3b8;
+
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color-scheme: dark;
 }

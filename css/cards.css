@@ -162,13 +162,13 @@
      of the label. Slight bump in size + bold weight so the
      symbols read cleanly against the saturated typebar fill. */
 }
-.card.type-thruster  .card-typebar { background: #f8a47a; }
-.card.type-reactor   .card-typebar { background: #a78bfa; }
-.card.type-radiator  .card-typebar { background: #7dd3fc; }
-.card.type-refinery  .card-typebar { background: #94a3b8; }
-.card.type-robonaut  .card-typebar { background: #f9a8d4; }
+.card.type-thruster  .card-typebar { background: var(--card-thruster); }
+.card.type-reactor   .card-typebar { background: var(--card-reactor); }
+.card.type-radiator  .card-typebar { background: var(--card-radiator); }
+.card.type-refinery  .card-typebar { background: var(--card-refinery); }
+.card.type-robonaut  .card-typebar { background: var(--card-robonaut); }
 .card.type-lab       .card-typebar { background: #67e8f9; }
-.card.type-generator .card-typebar { background: #f97316; }
+.card.type-generator .card-typebar { background: var(--card-generator); }
 .card.type-modifier  .card-typebar { background: #fda4af; }
 .card.kind-crew      .card-typebar { background: #fde047; }
 
