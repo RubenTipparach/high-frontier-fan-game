@@ -5737,7 +5737,7 @@ function syncFactories() {
 function syncAmbientRockets(factoryCount) {
   if (!_renderer || typeof _renderer.setAmbientRocketCount !== 'function') return;
   const n = (factoryCount == null ? allFactories().length : factoryCount);
-  _renderer.setAmbientRocketCount(10 + 10 * n);
+  _renderer.setAmbientRocketCount(10 + 5 * n);
 }
 function syncColonies() {
   if (!_renderer) return;

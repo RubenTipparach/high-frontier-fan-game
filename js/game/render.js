@@ -609,7 +609,7 @@ export class MapRenderer {
     this._onFrame = null;           // optional callback fired each frame
     // Ambient decorative rockets: cosmetic sprites zipping between
     // random sites in the background. Count is driven externally
-    // (setAmbientRocketCount) - 10 + 10 per factory built. Purely
+    // (setAmbientRocketCount) - 10 + 5 per factory built. Purely
     // visual; they ignore the delta-v graph and just lerp between
     // random site coords.
     this._ambientRockets = [];
@@ -1152,7 +1152,7 @@ export class MapRenderer {
       fromX: a.x || 0, fromY: a.y || 0,
       toX: b.x || 0, toY: b.y || 0,
       t: Math.random(),                      // random start phase
-      dur: 7000 + Math.random() * 9000,      // ms per leg
+      dur: 14000 + Math.random() * 18000,    // ms per leg (~50% slower)
       size: 8 + Math.random() * 6,           // world units (~50% smaller)
     };
   }
@@ -1168,7 +1168,7 @@ export class MapRenderer {
         const nb = sites.length ? sites[(Math.random() * sites.length) | 0] : { x: r.toX, y: r.toY };
         r.fromX = r.toX; r.fromY = r.toY;
         r.toX = nb.x || 0; r.toY = nb.y || 0;
-        r.t = 0; r.dur = 7000 + Math.random() * 9000;
+        r.t = 0; r.dur = 14000 + Math.random() * 18000;
       }
       const x = r.fromX + (r.toX - r.fromX) * r.t;
       const y = r.fromY + (r.toY - r.fromY) * r.t;
