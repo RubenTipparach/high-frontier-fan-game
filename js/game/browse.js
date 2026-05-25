@@ -2076,6 +2076,13 @@ function ensureMapShell(host) {
   }
   refreshTurnBudget();
   onTurnChange(refreshTurnBudget);
+  // Tapping the op tag opens the operations menu - the player's
+  // main aid for deciding what to spend their op on this turn.
+  if (opTag) {
+    opTag.style.cursor = 'pointer';
+    opTag.title = 'Operations remaining - tap for the operations menu';
+    opTag.addEventListener('click', openOpsMenu);
+  }
   moveBtn.addEventListener('click', () => {
     if (moveBtn.dataset.state === 'undo') undoRocketMove();
     else                                  moveRocket();
@@ -4267,6 +4274,71 @@ function doIncomeOp() {
     undoable: false,
     data: { delta: INCOME_AQUA, bankAfter: getAqua() },
   });
+}
+
+// Operations menu - opened by tapping the toolbar "op:N" tag. The
+// player's main decision aid: it lists what they can spend their
+// one operation on this turn, with the always-available ops as
+// one-tap shortcuts (Income first) and the context ops as hints.
+function openOpsMenu() {
+  document.querySelector('.ops-menu-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay ops-menu-overlay';
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  const ops = getOpsRemaining();
+  const moves = getMovesRemaining();
+  const market = getMarketMode() === MARKET_MODE.MARKET;
+  const handN = getHandSlots().length;
+  const opCls = ops > 0 ? '' : ' class="muted"';
+
+  const panel = document.createElement('div');
+  panel.className = 'ops-menu-panel';
+  panel.innerHTML = `
+    <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
+    <h2 class="ops-menu-title">⚙ Operations this turn</h2>
+    <p class="muted ops-menu-sub">You have <strong${opCls}>op:${ops}</strong> and <strong>move:${moves}</strong> left. One operation per turn - pick wisely.</p>
+    <div class="ops-menu-list" id="ops-menu-now"></div>
+    <h4 class="ops-menu-head">At a site (1 op) - open the site you're parked at / colocated with</h4>
+    <ul class="ops-menu-hints">
+      <li>🔭 <strong>Prospect</strong> - roll to claim a site (needs an active prospector)</li>
+      <li>⛽ <strong>ISRU / Factory Refuel</strong> - top up the rocket's water</li>
+      <li>🏭 <strong>Industrialize</strong> - refinery + robonaut become a factory</li>
+      <li>🧪 <strong>ET Produce</strong> - a hand card into a factory outpost (spectral match)</li>
+      <li>🛰 <strong>Boost</strong> - mark cards in your Hand, then press BOOST (costs aqua = mass)</li>
+    </ul>
+    <h4 class="ops-menu-head">Free actions (no op)</h4>
+    <ul class="ops-menu-hints">
+      <li>🌐 Colonize a factory (consumes a colocated crew)</li>
+      <li>🗑 Discard 1 hand card per turn · 🔄 Transfer · ♻ Decommission to hand</li>
+      <li>🛸 Move the rocket (uses the move budget, not an op)</li>
+    </ul>
+  `;
+  const now = panel.querySelector('#ops-menu-now');
+  const addOp = (label, title, fn, enabled = true) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ops-menu-op modal-btn stack';
+    b.disabled = !enabled;
+    b.innerHTML = label;
+    b.title = title;
+    b.addEventListener('click', () => { close(); fn(); });
+    now.appendChild(b);
+  };
+  addOp('💰 Income (+1 aqua)', 'Take 1 Aqua from the Pool into your Bank. Costs one operation.', doIncomeOp);
+  addOp('🎯 Research Auction', 'Open the card market / auction. Costs one operation.', doResearchAuction);
+  if (market) {
+    addOp(`💱 Free Market (+${FREE_MARKET_AQUA} aqua)`,
+      handN > 0 ? 'Sell a hand card for aqua. Costs one operation.' : 'No hand cards to sell.',
+      doFreeMarket, handN > 0);
+  }
+
+  overlay.appendChild(panel);
+  panel.querySelector('.modal-x').addEventListener('click', close);
+  mountOverlay(overlay);
 }
 
 function doFreeMarket() {
