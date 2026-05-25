@@ -86,7 +86,12 @@ export function renderCard(card, { type, supplied, onSupportClick, face } = {}) 
   const kind = type || (card.faces && card.faces.primary && card.faces.primary.role ? 'crew' : 'patent');
   const el = document.createElement('div');
   el.className = `card kind-${kind}` + (kind === 'patent' ? ` type-${card.type}` : '');
-  el.dataset.side = 'primary';
+  // Default to the primary face, but honor an explicit secondary
+  // request (e.g. an ET-Produced card lands Black-Side-up) so the
+  // card opens showing its black face instead of needing a manual
+  // flip. Only meaningful when a secondary face actually exists.
+  el.dataset.side = (face === 'secondary' && card.faces && card.faces.secondary)
+    ? 'secondary' : 'primary';
   if (card.flipOrientation === 'rotated180') el.classList.add('flip-rotates');
   // Crew cards carry a faction band colour (the player-colour
   // slot). Expose it (+ a readable ink colour derived from its

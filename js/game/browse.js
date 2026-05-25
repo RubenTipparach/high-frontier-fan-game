@@ -7119,6 +7119,25 @@ function showSitePopupFor(site) {
       }
     }
   }
+  // Outpost inspector shortcut. When an outpost sits at this site,
+  // surface a button that opens its stack inspector directly - a
+  // convenience so the player doesn't have to hunt for the stack
+  // switcher. Pure inspection, so it lands just before Navigate-to.
+  {
+    const localOutposts = Object.values(getOutposts()).filter((o) => o.siteId === site.id);
+    for (const op of localOutposts) {
+      const n = op.cards.length;
+      actions.push({
+        label: `🏛${op.letter} Open Outpost`,
+        variant: 'secondary',
+        title: `Open Outpost ${op.letter}'s stack (${n} card${n === 1 ? '' : 's'}, ${op.tank} water).`,
+        onClick: () => {
+          openOutpostStackModal(op.letter);
+          _renderer.clearSitePopup();
+        },
+      });
+    }
+  }
   // Navigate-to ALWAYS sits last (CLAUDE.md style rule). It's a
   // pure inspection affordance - no state mutation - so any new
   // game-action buttons land above it.
