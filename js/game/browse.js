@@ -3322,6 +3322,79 @@ function hazardConfirmModal(hazards) {
   });
 }
 
+// Factory-assist confirm. Surfaces when a land / liftoff maneuver is
+// under-thrust (net thrust <= site size) but a factory at the site
+// can carry it. Each such maneuver is a hazard roll; the player may
+// pay FINAO (aqua, like the hazard bypass) to guarantee them all,
+// roll the dice (a 1 destroys the rocket), or cancel. Colony-waived
+// maneuvers never reach this modal. Resolves 'pay' | 'roll' | 'cancel'.
+function factoryAssistModal(maneuvers, netThrust) {
+  return new Promise((resolve) => {
+    document.querySelector('.confirm-modal-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay hazard-confirm-overlay';
+    const close = (val) => {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(val);
+    };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close('cancel'); });
+    const onKey = (e) => { if (e.key === 'Escape') close('cancel'); };
+    document.addEventListener('keydown', onKey);
+
+    const n = maneuvers.length;
+    const cost = n * HAZARD_COST_PER;
+    const have = getAqua();
+    const canPay = have >= cost;
+    const list = maneuvers.map((m) =>
+      `<li><span class="haz-glyph">🏭</span> `
+      + `${esc(m.kind === 'liftoff' ? 'Lift off from' : 'Land on')} `
+      + `<strong>${esc(m.site.name || m.site.id)}</strong> `
+      + `<em class="muted">net thrust ${netThrust} ≤ size ${m.size}</em></li>`
+    ).join('');
+
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel hazard-confirm-panel';
+    panel.innerHTML = `
+      <h3>🏭 Factory assist required</h3>
+      <p>Your thrust can't manage ${n === 1 ? 'this maneuver' : 'these maneuvers'} alone,
+        but a factory can carry ${n === 1 ? 'it' : 'them'} as a hazard roll:</p>
+      <ul class="hazard-list">${list}</ul>
+      <p class="hazard-warning">
+        <strong>Whatever you pick, this move CANNOT be undone.</strong>
+        End the turn to clear the lockout.
+      </p>
+      <div class="hazard-cost-row">
+        <span>💎 Aqua balance: <strong>${have}</strong></span>
+        <span>FINAO cost: <strong>${cost}</strong>
+          <em class="muted">(${HAZARD_COST_PER}/assist)</em></span>
+      </div>
+      <div class="turn-confirm-actions hazard-actions">
+        <button type="button" class="popup-btn primary" data-act="pay"
+          ${canPay ? '' : 'disabled'}
+          title="${canPay ? 'Spend ' + cost + ' aqua (FINAO) to guarantee the assist' : 'Not enough aqua for FINAO'}">
+          💎 Pay ${cost} aqua (FINAO)
+        </button>
+        <button type="button" class="popup-btn" data-act="roll"
+          title="Roll a d6 for each assist. 1 destroys the rocket. Cannot be undone.">
+          🎲 Roll ${n} d6 (1 = boom, no undo)
+        </button>
+        <button type="button" class="popup-btn" data-act="cancel"
+          title="Return to planning; no move spent">
+          ✕ Cancel move
+        </button>
+      </div>
+      ${canPay ? '' : '<p class="muted hazard-need-aqua">FINAO disabled - need '
+        + (cost - have) + ' more aqua. Roll or cancel instead.</p>'}
+    `;
+    for (const b of panel.querySelectorAll('button[data-act]')) {
+      b.addEventListener('click', () => close(b.dataset.act));
+    }
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+  });
+}
+
 // Animated hazard-roll modal. One 3D die per hazard, rolled in
 // parallel; once every die settles the player can confirm to
 // apply the result (any 1 = critical, rocket explodes at that
@@ -3870,6 +3943,29 @@ function siteSizeNumber(site) {
   }
   if (typeof ss === 'number' && Number.isFinite(ss)) return Math.max(0, ss | 0);
   return 0;
+}
+
+// Land / liftoff gate for a single site given the rocket's current
+// net (band-adjusted) thrust. The rule: net thrust must strictly
+// exceed the site's size to settle onto or climb off it. When it
+// doesn't, a FACTORY at the site permits the maneuver anyway as a
+// "factory assist" - a hazard roll. A COLONY at the site waives the
+// roll. Returns:
+//   ok        - the maneuver is allowed (true unless under-thrust
+//               with no factory to assist)
+//   assist    - true when a factory is carrying the maneuver
+//   needsRoll - true when the assist still requires a hazard roll
+//               (i.e. no colony to waive it)
+//   size      - the site size used for the comparison
+function maneuverGate(site, netThrust) {
+  const size = siteSizeNumber(site);
+  if (size <= 0 || netThrust > size) {
+    return { ok: true, assist: false, needsRoll: false, size };
+  }
+  const factory = site && getFactory(site.id);
+  if (!factory) return { ok: false, assist: false, needsRoll: false, size };
+  const colony = getColony(site.id);
+  return { ok: true, assist: true, needsRoll: !colony, size };
 }
 
 // Refueling at a hydrated site. Two distinct refining sources
@@ -5948,6 +6044,72 @@ async function moveRocket() {
   const genericHazards = hazards.filter((h) => h.site.type !== 'radhaz');
   let hazardChoice = null;
   let lockUndo = false;
+  // Factory-assist pre-flight. A maneuver where net thrust <= site
+  // size is permitted only because a factory is carrying it - this
+  // turn's liftoff (departing the rocket's current site) and/or
+  // landing (arriving at the journey's destination this turn). Each
+  // such maneuver is a hazard roll unless a colony waives it. The
+  // player can pay FINAO (aqua) to skip the rolls, roll (a 1 destroys
+  // the rocket), or cancel.
+  {
+    const assistNet = (_thrFuel && Number.isFinite(_thrFuel.thrust)) ? _thrFuel.thrust : 0;
+    const assistManeuvers = [];
+    const curSite = getRocketSite();
+    const liftG = maneuverGate(curSite, assistNet);
+    if (liftG.assist && liftG.needsRoll && curSite) {
+      assistManeuvers.push({ site: curSite, kind: 'liftoff', label: 'liftoff assist', glyph: '🏭', size: liftG.size });
+    }
+    const destId = _plannedRoute[_plannedRoute.length - 1].to;
+    if (turn1[turn1.length - 1].to === destId) {
+      const destSite = _activeData.sites.find((s) => s.id === destId);
+      const landG = maneuverGate(destSite, assistNet);
+      if (landG.assist && landG.needsRoll && destSite) {
+        assistManeuvers.push({ site: destSite, kind: 'landing', label: 'landing assist', glyph: '🏭', size: landG.size });
+      }
+    }
+    if (assistManeuvers.length) {
+      const choice = await factoryAssistModal(assistManeuvers, assistNet);
+      if (choice === 'cancel' || choice == null) {
+        setStatus('Move cancelled - factory assist declined.');
+        return false;
+      }
+      if (choice === 'pay') {
+        const cost = assistManeuvers.length * HAZARD_COST_PER;
+        if (!spendAqua(cost)) {
+          setStatus(`Need ${cost} aqua for FINAO - balance only ${getAqua()}.`);
+          return false;
+        }
+        logAction({
+          type: 'factory_assist_finao',
+          icon: '🏭',
+          summary: `Paid ${cost} aqua (FINAO) for factory assist: ${assistManeuvers.map((m) => m.kind).join(' + ')}`,
+          undoable: false,
+          data: { cost, maneuvers: assistManeuvers.map((m) => ({ siteId: m.site.id, kind: m.kind })) },
+        });
+        lockUndo = true;
+      } else if (choice === 'roll') {
+        const rolls = await hazardRollModal(assistManeuvers);
+        lockUndo = true;
+        let boom = null;
+        for (let i = 0; i < rolls.length; i++) {
+          const r = rolls[i];
+          const kind = assistManeuvers[i] ? assistManeuvers[i].kind : 'assist';
+          logAction({
+            type: 'factory_assist_roll',
+            icon: '🏭',
+            summary: `🏭 Factory assist ${kind} at ${r.site.name} d6=${r.d6}${r.d6 === 1 ? ' - MISHAP' : ' ✓'}`,
+            undoable: false,
+            data: { siteId: r.site.id, d6: r.d6, kind },
+          });
+          if (r.d6 === 1 && !boom) boom = r;
+        }
+        if (boom) {
+          await explodeRocket(boom.site.id);
+          return false;
+        }
+      }
+    }
+  }
   if (genericHazards.length) {
     hazardChoice = await hazardConfirmModal(genericHazards);
     if (hazardChoice === 'cancel' || hazardChoice == null) {
@@ -7157,32 +7319,37 @@ function planRocketRouteTo(destSite) {
   const thrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 4;
   // Land / liftoff thrust gate. Net (band-adjusted) thrust must
   // strictly exceed a real site's size to lift off from the origin
-  // or land on the destination. Orbital waypoints have size 0 so
-  // they never block. Net thrust = the active thruster's thrust
-  // after weight-class + modifier adjustments (getActiveThrusterStats
-  // already folds the band shift in).
+  // or land on the destination. A factory at the site can carry an
+  // under-thrust maneuver (factory assist, resolved as a hazard roll
+  // at move time) so we only HARD-block here when the maneuver is
+  // under-thrust AND no factory is present. Orbital waypoints have
+  // size 0 so they never block.
   const netThrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 0;
-  const originSize = siteSizeNumber(origin);
-  const destSize = siteSizeNumber(destSite);
-  if (originSize > 0 && netThrust <= originSize) {
+  const liftGate = maneuverGate(origin, netThrust);
+  const landGate = maneuverGate(destSite, netThrust);
+  if (!liftGate.ok) {
     setStatus(
       `🚀 Can't lift off from <strong>${esc(origin.name)}</strong>: net thrust `
-      + `<strong>${netThrust}</strong> must exceed its size <strong>${originSize}</strong>. `
-      + `Shed mass or fit a stronger thruster.`
+      + `<strong>${netThrust}</strong> must exceed its size <strong>${liftGate.size}</strong> `
+      + `(or build a factory there for an assist). Shed mass or fit a stronger thruster.`
     );
     _renderer.setRoute(null);
     _renderer.setRouteEndpoints(origin.id, destSite.id);
     return false;
   }
-  if (destSize > 0 && netThrust <= destSize) {
+  if (!landGate.ok) {
     setStatus(
       `🛬 Can't land on <strong>${esc(destSite.name)}</strong>: net thrust `
-      + `<strong>${netThrust}</strong> must exceed its size <strong>${destSize}</strong>.`
+      + `<strong>${netThrust}</strong> must exceed its size <strong>${landGate.size}</strong> `
+      + `(or a factory there for an assist).`
     );
     _renderer.setRoute(null);
     _renderer.setRouteEndpoints(origin.id, destSite.id);
     return false;
   }
+  const assistNote = (liftGate.assist || landGate.assist)
+    ? ` <em class="muted">(🏭 factory assist${(liftGate.needsRoll || landGate.needsRoll) ? ' - hazard roll on the move' : ' - free, colony present'})</em>`
+    : '';
   const result = planRoute(_activeData, origin.id, destSite.id, {
     thrust,
     metricPriority: routeMetricPriority(),
@@ -7208,7 +7375,7 @@ function planRocketRouteTo(destSite) {
     `🛸 <strong>${esc(origin.name)}</strong> → <strong>${esc(destSite.name)}</strong>: `
     + `<strong class="big">${result.totalBurns}</strong> burn${result.totalBurns === 1 ? '' : 's'} over `
     + `<strong>${turns}</strong> turn${turns === 1 ? '' : 's'} `
-    + `(thrust ${thrust}).`
+    + `(thrust ${thrust}).${assistNote}`
   );
   return true;
 }
