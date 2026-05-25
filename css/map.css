@@ -2465,6 +2465,16 @@ body:has(#view-browse:not(.hidden)) #main {
 .modal-btn.cancel   { background: transparent; color: var(--ink-dim); }
 .modal-btn.discard:hover { background: #b91c1c; }
 .modal-btn.produce:hover { background: #166534; }
+.modal-btn.decommission { background: #5b2741; color: #ffe1ef; border-color: #9d3a6a; }
+.modal-btn.decommission:hover:not(:disabled) { background: #7a3457; }
+.modal-btn.decommission:disabled { opacity: 0.4; cursor: not-allowed; }
+/* Decommission sits as its own row right under the transfer
+   controls in every stack inspector. */
+.stack-decommission-row {
+  display: flex;
+  margin-top: 8px;
+}
+.stack-decommission-row .modal-btn { flex: 1 1 auto; }
 
 /* Rocket stack pane. Cards stack vertically with a small "Back
    to hand" affordance under each one. Fly status banner uses

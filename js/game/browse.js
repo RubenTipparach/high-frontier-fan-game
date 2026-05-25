@@ -732,6 +732,73 @@ function transferOneCard(sourceId, destId, cardId) {
   return true;
 }
 
+// Pull a single slot (by id) out of a stack, returning the
+// removed { id, kind, face } or null. Mirrors transferOneCard's
+// source-removal so decommission + transfer stay consistent.
+function pullSlotFromStack(stackId, id) {
+  if (stackId === 'leo') return removeCardFromLeoById(id);
+  if (stackId === 'rocket') {
+    const stack = getRocketStack();
+    const idx = stack.findIndex((s) => s.id === id);
+    if (idx === -1) return null;
+    const slot = { ...stack[idx] };
+    rocketRemoveCard(idx);
+    return slot;
+  }
+  if (stackId.startsWith('outpost')) {
+    const letter = stackId.slice('outpost'.length);
+    const op = getOutpost(letter);
+    if (!op) return null;
+    const idx = op.cards.findIndex((s) => s.id === id);
+    if (idx === -1) return null;
+    const slot = { ...op.cards[idx] };
+    removeCardFromOutpost(letter, idx);
+    return slot;
+  }
+  return null;
+}
+
+// Put a slot back into its source stack (rollback when a
+// decommission can't complete - e.g. crew, which never enters
+// the hand).
+function readdSlotToStack(stackId, slot) {
+  if (stackId === 'leo') addCardToLeo(slot);
+  else if (stackId === 'rocket') rocketAddCard(slot.id, slot.kind, slot.face);
+  else if (stackId.startsWith('outpost')) {
+    addCardToOutpost(stackId.slice('outpost'.length), slot);
+  }
+}
+
+// Decommission selected cards from a stack back to the player's
+// hand (variant rule: voluntary stack removal returns cards to
+// hand). Confirms first. Crew never enters the hand, so any crew
+// in the selection is rolled back into the stack and reported.
+async function decommissionSelectedToHand(stackId, ids, onDone) {
+  const list = [...ids];
+  if (!list.length) return;
+  const ok = await confirmModal({
+    title: '♻ Decommission to hand',
+    body: `Return <strong>${list.length}</strong> selected card${list.length === 1 ? '' : 's'} `
+      + `from this stack to your hand?`,
+    yes: '♻ Decommission', no: 'Cancel',
+  });
+  if (!ok) return;
+  let returned = 0;
+  let blocked = 0;
+  for (const id of list) {
+    const slot = pullSlotFromStack(stackId, id);
+    if (!slot) continue;
+    const card = cardById(id);
+    const r = card ? addToHand(card) : { ok: false };
+    if (r && r.ok) returned++;
+    else { readdSlotToStack(stackId, slot); blocked++; }
+  }
+  let msg = `♻ Decommissioned <strong>${returned}</strong> card${returned === 1 ? '' : 's'} to your hand.`;
+  if (blocked) msg += ` <strong>${blocked}</strong> stayed (crew can't go to the hand).`;
+  setStatus(msg);
+  try { onDone && onDone(); } catch (e) { console.error('decommission onDone:', e); }
+}
+
 // LEO inspector. Same card-holder system as the rocket modal:
 // each card is rendered via the shared renderCard() and gets a
 // Select toggle so the player can mark cards for transfer. The
@@ -840,6 +907,11 @@ function openUnifiedStackInspector(stackId) {
           <div class="rocket-stack-row" id="stack-inspector-cards-row"></div>
         </div>
         <div id="stack-inspector-transfer"></div>
+        <div class="stack-decommission-row">
+          <button type="button" class="modal-btn decommission stack-decom-btn"
+            title="Return the selected cards to your hand" ${selected.size ? '' : 'disabled'}>
+            ♻ Decommission to hand${selected.size ? ` (${selected.size})` : ''}</button>
+        </div>
       </div>
       <div class="card-modal-actions">
         ${stackId === 'leo' && isLeoSite(getRocketSite())
@@ -953,6 +1025,15 @@ function openUnifiedStackInspector(stackId) {
       fuelBtn.addEventListener('click', () => {
         close();
         openFuelTankModal();
+      });
+    }
+    // Decommission: return the selected cards to hand (free,
+    // any-time). Active only when something is selected.
+    const decomBtn = dialog.querySelector('.stack-decom-btn');
+    if (decomBtn) {
+      decomBtn.addEventListener('click', () => {
+        if (!selected.size) return;
+        decommissionSelectedToHand(stackId, [...selected], render);
       });
     }
   };
@@ -2998,6 +3079,24 @@ function openRocketStackModal() {
             });
             repaint();
           });
+        });
+      }
+      // Decommission: return the selected cards to hand (free,
+      // any-time). Sits next to the transfer controls and is
+      // active only when something is selected. Always present,
+      // even when there are no colocated transfer destinations.
+      const nSel = selected.size;
+      xferHost.insertAdjacentHTML('beforeend',
+        `<div class="stack-decommission-row">
+           <button type="button" class="modal-btn decommission rocket-decom-btn"
+             title="Return the selected cards to your hand" ${nSel ? '' : 'disabled'}>
+             ♻ Decommission to hand${nSel ? ` (${nSel})` : ''}</button>
+         </div>`);
+      const rdecom = xferHost.querySelector('.rocket-decom-btn');
+      if (rdecom) {
+        rdecom.addEventListener('click', () => {
+          if (!selected.size) return;
+          decommissionSelectedToHand('rocket', [...selected], repaint);
         });
       }
     }
