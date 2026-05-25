@@ -30,7 +30,7 @@ import {
 import {
   getRocketStack, isInRocket, addToStack as rocketAddCard,
   removeFromStack as rocketRemoveCard, clearStack as rocketClearStack,
-  onRocketChange, isRocketActive, findFunctionalThrusters,
+  onRocketChange, isRocketActive,
   getActiveThrusterId, setActiveThruster,
   getTankWater, setTankWater, addFuel, removeFuel, getTankMax,
   getStackTotals, getActiveThrusterStats,
@@ -660,11 +660,18 @@ function getColocatedDestinations(sourceId) {
   if (sourceId !== 'leo' && sourceSite === getLeoSiteId()) {
     dests.push({ id: 'leo', label: 'LEO Stack' });
   }
-  // Rocket is colocated when its site matches the source site
-  // AND the source isn't the rocket.
+  // Rocket is a destination when:
+  //  - it's colocated (its site matches the source site), loading
+  //    the existing rocket, OR
+  //  - the rocket stack is empty AND the source is an outpost: the
+  //    first card transferred FORMS a new rocket at the outpost's
+  //    site. (You can't form a new rocket while one is already
+  //    active - the empty-stack check enforces "one rocket".)
   if (sourceId !== 'rocket') {
     const rs = getRocketSite();
-    if (rs && rs.id === sourceSite) {
+    const rocketEmpty = getRocketStack().length === 0;
+    if ((rs && rs.id === sourceSite)
+        || (rocketEmpty && sourceId.startsWith('outpost'))) {
       dests.push({ id: 'rocket', label: 'Rocket' });
     }
   }
@@ -686,6 +693,14 @@ function getColocatedDestinations(sourceId) {
 // transfer section's "Send selected" button.
 function transferOneCard(sourceId, destId, cardId) {
   const TANK_MAX = 32;
+  // Forming a rocket: an empty rocket stack adopts its location from
+  // the first card transferred in from an outpost. Capture intent +
+  // the previous site (for rollback) before mutating any stacks.
+  const formingRocket = destId === 'rocket'
+    && sourceId.startsWith('outpost')
+    && getRocketStack().length === 0;
+  const sourceSiteId = getStackSiteId(sourceId);
+  const prevRocketSiteId = _rocketSiteId;
   // Pull the slot out of the source first so we know exactly
   // what we're moving (id + kind + face).
   let slot = null;
@@ -712,7 +727,18 @@ function transferOneCard(sourceId, destId, cardId) {
   if (destId === 'leo') {
     added = addCardToLeo(slot);
   } else if (destId === 'rocket') {
+    // Place the (empty) rocket at the source site BEFORE adding the
+    // card, so the onRocketChange sync that rocketAddCard fires
+    // draws the sprite at the freshly-formed location.
+    if (formingRocket && sourceSiteId) {
+      _rocketSiteId = sourceSiteId;
+      persistRocketSite();
+    }
     added = rocketAddCard(slot.id, slot.kind, slot.face) !== -1;
+    if (!added && formingRocket) {
+      _rocketSiteId = prevRocketSiteId;
+      persistRocketSite();
+    }
   } else if (destId.startsWith('outpost')) {
     const letter = destId.slice('outpost'.length);
     added = addCardToOutpost(letter, slot);
@@ -4066,65 +4092,6 @@ async function doConvertToOutpost(site) {
   });
 }
 
-// Outpost -> Rocket. Free action. Caller has validated there's
-// no current rocket (empty stack at LEO) and the outpost exists.
-// Move the outpost's cards + tank to the rocket, place the
-// rocket at the outpost's site, dissolve the outpost.
-function doConvertToRocket(site, letter) {
-  const op = getOutpost(letter);
-  if (!op) {
-    setStatus(`Lift failed - Outpost ${esc(letter)} not found.`);
-    return;
-  }
-  if (op.siteId !== site.id) {
-    setStatus(`Lift failed - Outpost ${esc(letter)} is not at this site.`);
-    return;
-  }
-  if (getRocketStack().length > 0) {
-    setStatus(`Lift failed - rocket must be empty before lifting an outpost.`);
-    return;
-  }
-  // Variant rule: an outpost can only become a rocket if it
-  // carries at least one functional thruster (a thruster whose
-  // supports are satisfied by the rest of the outpost's stack).
-  // Re-check here in case state shifted between popup-build and
-  // click.
-  const functional = findFunctionalThrusters(op.cards);
-  if (!functional.length) {
-    setStatus(`Lift failed - Outpost ${esc(letter)} has no functional thruster.`);
-    return;
-  }
-  // Move cards over (preserve each slot's face so crew keep
-  // their faction face + a Black-Side card keeps its tier).
-  for (const slot of op.cards) {
-    rocketAddCard(slot.id, slot.kind, slot.face);
-  }
-  // Explicitly pick the first functional thruster as the active
-  // one. rocket.js auto-picks the FIRST thruster it sees on
-  // add, but that's not necessarily a thruster whose supports
-  // are satisfied; the lift would otherwise leave the rocket
-  // immediately inactive.
-  setActiveThruster(functional[0].id);
-  setTankWater(op.tank);
-  _rocketSiteId = op.siteId;
-  persistRocketSite();
-  // Dissolve outpost (returns the card list, but we already
-  // moved them - discard the return value).
-  dissolveOutpost(letter);
-  setStatus(
-    `🏛${esc(letter)}→🚀 Lifted Outpost ${esc(letter)} into your Rocket at `
-    + `<strong>${esc(site.name)}</strong>. `
-    + `${op.cards.length} card${op.cards.length === 1 ? '' : 's'} + ${op.tank} water transferred. `
-    + `Active thruster: <em>${esc(functional[0].card.name)}</em>.`
-  );
-  logAction({
-    type: 'convert_rocket',
-    icon: '🏛→🚀',
-    summary: `Lifted Outpost ${letter} into Rocket at ${site.name} (${op.cards.length} cards, ${op.tank} water, thruster ${functional[0].card.name})`,
-    undoable: false,
-    data: { siteId: site.id, letter, cards: op.cards.length, tank: op.tank, thrusterId: functional[0].id },
-  });
-}
 
 // Factory-Refuel handler (rulebook I5b). Adds water FTs to the
 // rocket tank up to the cap; consumes the per-turn op and the
@@ -7081,44 +7048,11 @@ function showSitePopupFor(site) {
       },
     });
   }
-  // Outpost -> Rocket free action. Surfaces when an outpost
-  // exists at this site AND the rocket is empty (no cards) OR
-  // is parked at LEO. The new rocket inherits the outpost's
-  // cards + tank and is placed at this site.
-  {
-    const outposts = getOutposts();
-    const localOutposts = Object.values(outposts).filter((o) => o.siteId === site.id);
-    if (localOutposts.length > 0) {
-      const rocketCardCount = getRocketStack().length;
-      const rocketEmpty = rocketCardCount === 0;
-      // Per the variant rule (user, 2026-05-24): an outpost can
-      // become a rocket "at any time IF there is a functional
-      // thruster". A functional thruster is one whose support
-      // requires are satisfied by the rest of the outpost stack.
-      for (const op of localOutposts) {
-        const functional = findFunctionalThrusters(op.cards);
-        const canConvert = rocketEmpty && functional.length > 0;
-        let reason = null;
-        if (!rocketEmpty) {
-          reason = 'Convert your existing rocket first - only one rocket at a time.';
-        } else if (functional.length === 0) {
-          reason = `Outpost ${op.letter} has no functional thruster (need a thruster with its supports satisfied in the same stack).`;
-        }
-        actions.push({
-          label: `🏛${op.letter}→🚀 Lift Outpost`,
-          variant: canConvert ? 'rocket' : 'secondary',
-          disabled: !canConvert,
-          title: reason
-            || `Lift Outpost ${op.letter} into your Rocket (${op.cards.length} card${op.cards.length === 1 ? '' : 's'}, ${op.tank} water, thruster: ${functional[0].card.name}). Free action.`,
-          onClick: () => {
-            if (!canConvert) return;
-            doConvertToRocket(site, op.letter);
-            _renderer.clearSitePopup();
-          },
-        });
-      }
-    }
-  }
+  // (Forming a rocket from an outpost is no longer a bulk "lift"
+  // action. Per the user's model an outpost transfers cards to the
+  // rocket stack ONE at a time via the stack inspector's transfer
+  // buttons; the first card sent to an empty rocket forms it at the
+  // outpost's site. See getColocatedDestinations + transferOneCard.)
   // Outpost inspector shortcut. When an outpost sits at this site,
   // surface a button that opens its stack inspector directly - a
   // convenience so the player doesn't have to hunt for the stack
