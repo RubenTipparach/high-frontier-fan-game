@@ -152,6 +152,7 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
         <p class="card-bonus"></p>
         <p class="card-blurb"></p>
       </div>
+      <div class="crew-thrust"></div>
     `;
     face.querySelector('.card-name').textContent = c.name || '';
     face.querySelector('.card-role').textContent = c.role || '';
@@ -167,6 +168,38 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
       const glyph = c.prospector === 'raygun' ? '🔫'
         : (c.prospector === 'missile' ? '🚀' : '🛺');
       isruCell.textContent = `${glyph} ${c.isru}`;
+    }
+    // Thrust triangle. Crew that double as a thruster carry a
+    // { thrust, fuelPerBurn, afterburn, dirt } block; render it
+    // with the same thrustVisual the patent thrusters use, via
+    // a synthetic face that maps the crew field names onto what
+    // thrustVisual expects (fuel = fuelPerBurn; fuelType drives
+    // the 💧 vs 🪨 droplet for dirt thrusters). Lander faces
+    // (thruster == null, e.g. Shimizu) get no triangle + a
+    // "lander" note.
+    const thrustHost = face.querySelector('.crew-thrust');
+    if (thrustHost) {
+      if (c.thruster) {
+        const t = c.thruster;
+        const synthetic = {
+          thrust: t.thrust,
+          fuel: t.fuelPerBurn,
+          afterburn: t.afterburn || false,
+          fuelType: t.dirt ? 'Dirt' : 'Water',
+        };
+        thrustHost.appendChild(thrustVisual(card, synthetic));
+        if (t.name) {
+          const rk = document.createElement('p');
+          rk.className = 'crew-rocket';
+          rk.textContent = t.dirt ? `${t.name} (dirt)` : t.name;
+          thrustHost.appendChild(rk);
+        }
+      } else {
+        const note = document.createElement('p');
+        note.className = 'crew-rocket muted';
+        note.textContent = 'Lander (no thruster)';
+        thrustHost.appendChild(note);
+      }
     }
     return face;
   }

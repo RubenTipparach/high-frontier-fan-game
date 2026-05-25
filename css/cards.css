@@ -738,3 +738,27 @@
   font-weight: 800;
   background: rgba(125, 211, 252, 0.18);
 }
+
+/* Crew card extras: the third statbox cell shows the
+   prospector glyph + ISRU rating (crews have no spectral
+   hex); the thrust triangle + rocket name sit below the
+   privilege text. */
+.card-face .crew-isru {
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.3px;
+}
+.card-face .crew-thrust {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.card-face .crew-thrust .thrust-visual { width: 96px; }
+.card-face .crew-rocket {
+  margin: 0;
+  font-size: 11px;
+  font-style: italic;
+  text-align: center;
+}
