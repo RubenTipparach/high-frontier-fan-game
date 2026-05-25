@@ -46,6 +46,15 @@ Thrust triangle = **thrust** (magenta circle) / **FT-per-burn**
 All 12 privileges + stats are confirmed from the card images.
 Notes:
 - Crews have **no spectral type**.
+- **Faction colour.** Each physical card carries a `color` -
+  the faction band colour sampled straight off the printed card.
+  Both faces of a physical card share it (it is that player's
+  colour slot). The six colours: card0 gold `#fccc00`, card1
+  purple `#c09cc0`, card2 silver `#e3e0d4` (NASA / ISRO read as
+  near-white on the card), card3 mint `#a8d8c0`, card4 crimson
+  `#b40054`, card5 gray `#9c9c9c`. The crew card renderer tints
+  the typebar + frame to this; **picking a faction will set the
+  player's colour to it in a future update** (not wired yet).
 - **Thrust triangle** = thrust (magenta circle) / FT-per-burn
   (blue circle) / afterburn (orange triangle). Afterburn is
   **optional**: 2 on the nine standard thruster faces, absent
@@ -66,10 +75,21 @@ Notes:
   **Keep it in sync with crew-stats.json by hand** - there's no
   generator for crew the way there is for patents (crew isn't in
   the spreadsheet). Exports:
-  - `CREW` - the 6 cards, `{ id, faces: { primary, secondary } }`.
+  - `CREW` - the 6 cards, `{ id, color, faces: { primary,
+    secondary } }`.
   - `CREW_BY_ID` - lookup.
   - `FACTIONS` - flat list of all 12 selectable faces for the
-    wizard, each `{ cardId, face, name, bonus, blurb }`.
+    wizard, each `{ cardId, face, color, name, bonus, blurb }`.
+  - `CREW_FACES` - the 12 faces as standalone **single-face**
+    card objects `{ id: '<cardId>__<face>', srcId, face, color,
+    faces: { primary } }`. This is the **Card Library** view: it
+    shows all 12 faction faces, each as its own flip-less card
+    (no `faces.secondary`, so the renderer emits no Flip button).
+    `srcId` maps a tile back to its physical card. Crew enters
+    play only via the wizard, so library crew tiles are
+    **inspect-only** (no add-to-hand / drag). The runtime hand /
+    colonize pipeline still keys off the 6 physical `CREW` cards;
+    `CREW_FACES` is purely a display projection.
 
 Face shape (matches the crew renderer in `js/game/card-ui.js`):
 `{ name, role, bonus, blurb, mass, radHardness, spectralType }`

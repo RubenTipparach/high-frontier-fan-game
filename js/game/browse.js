@@ -44,7 +44,7 @@ import {
   getDiscs, getDisc, placeDisc, removeDisc, resetDiscs,
   onChange as onDiscsChange,
 } from './discs.js';
-import { CREW, CREW_BY_ID, FACTIONS } from '../../data/crew.js';
+import { CREW, CREW_BY_ID, CREW_FACES, FACTIONS } from '../../data/crew.js';
 import { MILESTONES } from '../../data/glory.js';
 import { SITES_BY_ID } from '../../data/sites.js';
 import {
@@ -1196,7 +1196,7 @@ function flyCardToHand(srcEl, card, onLand) {
 // hand" with a single primary action. Mobile-friendly because
 // HTML5 drag-and-drop doesn't work reliably on touch; pointing
 // + tapping is a more honest gesture for "I want this card."
-function openDeckTapModal(card, kind, { allowAuction = false } = {}) {
+function openDeckTapModal(card, kind, { allowAuction = false, inspectOnly = false } = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay';
   const close = () => overlay.remove();
@@ -1225,7 +1225,15 @@ function openDeckTapModal(card, kind, { allowAuction = false } = {}) {
   //     happen in the cart.
   //   - Free Library mode: "✋ Add to hand" + flight.
   const inMarket = getMarketMode() === MARKET_MODE.MARKET;
-  if (inMarket && allowAuction) {
+  if (inspectOnly) {
+    // Crew library: pure reference. Crew enters play only through
+    // the starting-crew wizard at New game, so there's no add /
+    // auction here.
+    const note = document.createElement('p');
+    note.className = 'muted card-modal-note';
+    note.textContent = '👥 Crew is chosen at New game via the starting-crew wizard.';
+    actions.append(note);
+  } else if (inMarket && allowAuction) {
     const auctionBtn = document.createElement('button');
     auctionBtn.type = 'button';
     auctionBtn.className = 'modal-btn stack';
@@ -7122,7 +7130,7 @@ function renderPatents() {
   const types = [...PATENT_TYPES, 'supports', 'crew', ...expansionTypes];
   const counts = Object.fromEntries(PATENT_TYPES.map((t) => [t, patentsByType(t).length]));
   for (const t of expansionTypes) counts[t] = patentsByType(t).length;
-  counts.crew = CREW.length;
+  counts.crew = CREW_FACES.length;
   counts.supports = patentsThatSupply(supplyKinds).length;
   const TYPE_LABEL = {
     'gw-thruster': 'GW thrusters (soon)',
@@ -7204,8 +7212,12 @@ function renderPatents() {
     const el = renderCard(card, { type: asKind });
     el.dataset.cardId  = card.id;
     el.dataset.cardKind = asKind;
-    const inHand   = isInHand(card.id);
-    const inRocket = isInRocket(card.id);
+    // Crew-face tiles are a display projection of a physical card
+    // (card.srcId); location markers + drag must key off the real
+    // card so both faces of one card light up when it's in hand.
+    const locId = card.srcId || card.id;
+    const inHand   = isInHand(locId);
+    const inRocket = isInRocket(locId);
     if (inHand)   el.classList.add('in-hand');
     if (inRocket) el.classList.add('in-rocket');
     if (inHand || inRocket) return el;   // placeholder - not interactive
@@ -7222,9 +7234,22 @@ function renderPatents() {
       return el;
     }
 
+    // Crew tiles are a visual reference: the 12 faction faces,
+    // each flip-less. Crew enters play via the starting-crew
+    // wizard, not by dragging from the library, so these tiles
+    // are inspect-only (tap opens a read-only card view).
+    if (asKind === 'crew') {
+      el.classList.add('is-crew-tile');
+      el.addEventListener('click', (ev) => {
+        if (ev.target.closest('.card-flip, .card-rotate')) return;
+        openDeckTapModal(card, asKind, { inspectOnly: true });
+      });
+      return el;
+    }
+
     el.draggable = true;
     el.addEventListener('dragstart', (ev) => {
-      ev.dataTransfer.setData('text/card-id', card.id);
+      ev.dataTransfer.setData('text/card-id', locId);
       ev.dataTransfer.setData('text/card-kind', asKind);
       ev.dataTransfer.effectAllowed = 'move';
       el.classList.add('is-dragging');
@@ -7244,7 +7269,8 @@ function renderPatents() {
   const repaint = (filter) => {
     grid.innerHTML = '';
     if (filter === 'crew') {
-      for (const c of CREW) grid.appendChild(decorateForHand(c, 'crew'));
+      // All 12 faction faces, each a flip-less single-face card.
+      for (const c of CREW_FACES) grid.appendChild(decorateForHand(c, 'crew'));
       return;
     }
     if (filter === 'supports') {

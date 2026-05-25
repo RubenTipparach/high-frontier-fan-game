@@ -71,12 +71,31 @@ export const REQUIREMENT_VIS = {
   'spin-grav':          { glyph: '💃', label: 'Spin gravity'           },
 };
 
+// Pick a readable ink (#0c0a16 vs #fff) for text laid over a hex
+// fill, from the fill's perceived luminance.
+function readableInk(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+  if (!m) return '#0c0a16';
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return lum > 0.6 ? '#0c0a16' : '#ffffff';
+}
+
 export function renderCard(card, { type, supplied, onSupportClick } = {}) {
   const kind = type || (card.faces && card.faces.primary && card.faces.primary.role ? 'crew' : 'patent');
   const el = document.createElement('div');
   el.className = `card kind-${kind}` + (kind === 'patent' ? ` type-${card.type}` : '');
   el.dataset.side = 'primary';
   if (card.flipOrientation === 'rotated180') el.classList.add('flip-rotates');
+  // Crew cards carry a faction band colour (the player-colour
+  // slot). Expose it (+ a readable ink colour derived from its
+  // luminance) as CSS variables so the typebar + frame can tint
+  // to match the printed card without illegible text.
+  if (kind === 'crew' && card.color) {
+    el.style.setProperty('--crew-color', card.color);
+    el.style.setProperty('--crew-ink', readableInk(card.color));
+  }
 
   // Both faces live inside a single .card-inner that rotates as
   // one rigid 3D body. Each face uses backface-visibility:hidden,

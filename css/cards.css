@@ -170,7 +170,18 @@
 .card.type-lab       .card-typebar { background: #67e8f9; }
 .card.type-generator .card-typebar { background: var(--card-generator); }
 .card.type-modifier  .card-typebar { background: #fda4af; }
-.card.kind-crew      .card-typebar { background: #fde047; }
+/* Crew typebar + frame tint to the faction band colour
+   (--crew-color, set per card in card-ui.js). --crew-ink keeps
+   the CREW label legible on dark faction colours. Falls back to
+   the old yellow when no colour is supplied. */
+.card.kind-crew      .card-typebar {
+  background: var(--crew-color, #fde047);
+  color: var(--crew-ink, #0c0a16);
+}
+.card.kind-crew .card-face {
+  border: 3px solid var(--crew-color, #fde047);
+  border-radius: 10px;
+}
 
 /* Stats box top-left: mass / rad / spectral hex in a row. */
 .card-statbox {
