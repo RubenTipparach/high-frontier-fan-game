@@ -8482,8 +8482,10 @@ function paintSolo() {
       doSandboxReset();
       setStatus(`🆕 New game - board cleared, aqua bank reseeded to ${cash}. Pick your starting crew.`);
       // Mandatory starting-crew pick (user 2026-05): the crew
-      // wizard fires automatically on New game.
-      openCrewWizard();
+      // wizard fires automatically on New game. Once the crew is
+      // committed, close the solo pane so the player drops straight
+      // onto the fresh board with no panels left open.
+      openCrewWizard(() => showPane(null));
     };
     const flipMode = (next) => {
       if (next === marketMode) return;
