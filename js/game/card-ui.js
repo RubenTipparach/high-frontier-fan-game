@@ -144,7 +144,7 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
       <div class="card-statbox">
         <span><strong class="m"></strong> MASS</span>
         <span><strong class="r"></strong> RAD</span>
-        <span class="card-spectral"></span>
+        <span class="crew-isru"></span>
       </div>
       <div class="card-body">
         <h4 class="card-name"></h4>
@@ -159,7 +159,15 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     face.querySelector('.card-blurb').textContent = c.blurb || '';
     face.querySelector('.m').textContent = c.mass != null ? c.mass : '-';
     face.querySelector('.r').textContent = c.radHardness != null ? c.radHardness : '-';
-    face.querySelector('.card-spectral').appendChild(spectralHex(c.spectralType || 'C'));
+    // Crews have NO spectral type. The third stat cell instead
+    // shows the prospector kind glyph + ISRU rating (e.g.
+    // "🛺 4" / "🔫 4") when the face carries one.
+    const isruCell = face.querySelector('.crew-isru');
+    if (isruCell && c.isru != null) {
+      const glyph = c.prospector === 'raygun' ? '🔫'
+        : (c.prospector === 'missile' ? '🚀' : '🛺');
+      isruCell.textContent = `${glyph} ${c.isru}`;
+    }
     return face;
   }
 

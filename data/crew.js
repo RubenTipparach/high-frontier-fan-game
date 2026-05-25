@@ -1,73 +1,71 @@
 // Crew deck - the published HF4 player-faction cards. Each
 // physical card is double-sided and carries TWO factions, one
 // per face. At game start the player picks ONE faction face
-// (the starting-crew wizard) and that faction's privilege is
-// their edge for the game.
+// (the starting-crew wizard); that faction's privilege is the
+// player's edge for the game.
 //
-// Source: https://www.hf4map.com/cards/crew/ (the 6 crew
-// cards, card0..card5, front + back). NOTE: this is the CREW
-// deck - distinct from the Colonists deck (a separate set of
-// cards). An earlier build wrongly populated this file from the
-// spreadsheet's Colonists sheet; that was the wrong data.
+// Source: the card images at https://www.hf4map.com/cards/crew/
+// (card0..card5, front + back), transcribed directly. NOTE:
+// this is the CREW deck - distinct from the Colonists deck (a
+// separate set of cards). Crews have NO spectral type.
 //
-// Faction PRIVILEGE text: 5 of the 12 were recoverable from
-// published sources (BGG / strategy guides) and are filled in
-// below. The other 7 are marked "TODO: privilege" pending a
-// transcription from the card images (hf4map serves the stats
-// as JPGs, not text). Per-face MASS / RAD-HARD are placeholders
-// (crew are light, low-mass); replace with the printed values
-// when available.
+// data/crew-stats.json is the matching human-audit file; keep
+// the two in sync (no generator - crew isn't in the spreadsheet).
 //
-// Face shape matches the crew renderer in js/game/card-ui.js:
-//   { name, role, bonus, blurb, mass, radHardness, spectralType }
-//   - name  : faction name
-//   - role  : short faction descriptor
-//   - bonus : the privilege's short title (NASA LAUNCH FEES, ...)
-//   - blurb : what the privilege does
-
-const TODO_PRIV = 'TODO: faction privilege (transcribe from card).';
+// Face shape (consumed by the crew renderer in
+// js/game/card-ui.js + the starting-crew wizard):
+//   name         faction name
+//   role         short descriptor (the promotion letter (X))
+//   bonus        privilege short title
+//   blurb        privilege effect text
+//   mass, radHardness
+//   isru         ISRU rating (4 on every crew)
+//   prospector   'buggy' | 'raygun' (the top-left icon)
+//   thruster     { name, thrustMN, specImpKs } | null
+//                (crew that double as a thruster; null for the
+//                 lander-only Shimizu face)
 
 export const CREW = [
   {
     id: 'crew_un_b612',
     faces: {
-      primary:   { name: 'United Nations Cosmonauts', role: 'Faction', bonus: 'UN MANDATE', blurb: TODO_PRIV, mass: 0, radHardness: 3, spectralType: 'C' },
-      secondary: { name: 'B612 Foundation',           role: 'Faction', bonus: 'B612',       blurb: TODO_PRIV, mass: 0, radHardness: 3, spectralType: 'C' },
+      primary:   { name: 'United Nations Cosmonauts', role: 'Faction A', bonus: 'SECRETARY GENERAL', blurb: 'Start with +2 Aqua. (Module 2: after 1st anchor of your Home Bernal.)', mass: 1, radHardness: 4, isru: 4, prospector: 'buggy',  thruster: { name: 'Liberty',   thrustMN: 1.34, specImpKs: 0.43 } },
+      secondary: { name: 'B612 Foundation',           role: 'Faction H', bonus: 'BLINK TELESCOPE',   blurb: '1 re-roll per prospecting operation when using a Raygun.',        mass: 1, radHardness: 3, isru: 4, prospector: 'buggy',  thruster: { name: 'New Glenn', thrustMN: 17.1, specImpKs: 0.39 } },
     },
   },
   {
     id: 'crew_roscosmos_taikonauts',
     faces: {
-      primary:   { name: 'Roscosmos',  role: 'Faction', bonus: 'PROTECTION FEES', blurb: 'Gain 1 water after any player places a claim or industrializes.', mass: 0, radHardness: 3, spectralType: 'C' },
-      secondary: { name: 'Taikonauts', role: 'Faction', bonus: 'TAIKONAUTS',      blurb: TODO_PRIV, mass: 0, radHardness: 3, spectralType: 'C' },
+      primary:   { name: 'Roscosmos',  role: 'Faction B', bonus: 'TAXES',     blurb: '+1 Aqua from the Pool after any player places a Claim or industrializes a Claim.', mass: 1, radHardness: 5, isru: 4, prospector: 'buggy',  thruster: { name: 'Angara 5',        thrustMN: 13.4, specImpKs: 0.38 } },
+      secondary: { name: 'Taikonauts', role: 'Faction C', bonus: 'FELONIOUS', blurb: 'Your Humans may perform Felonious actions. Negotiable.',                          mass: 1, radHardness: 4, isru: 4, prospector: 'raygun', thruster: { name: 'The Long March 9', thrustMN: 8.27, specImpKs: 0.43 } },
     },
   },
   {
     id: 'crew_nasa_isro',
     faces: {
-      primary:   { name: 'NASA Astronauts',     role: 'Faction', bonus: 'NASA LAUNCH FEES', blurb: 'Gain 1 aqua whenever any player performs a Boost operation.', mass: 0, radHardness: 3, spectralType: 'C' },
-      secondary: { name: 'ISRO Glavcosmonauts', role: 'Faction', bonus: 'ISRO',             blurb: TODO_PRIV, mass: 0, radHardness: 3, spectralType: 'C' },
+      primary:   { name: 'NASA Astronauts',     role: 'Faction D', bonus: 'LAUNCH FEES',   blurb: '+1 Aqua from the Pool after any player performs a boost operation.',                                  mass: 1, radHardness: 4, isru: 4, prospector: 'raygun', thruster: { name: 'SLS, 130t Block II Crew', thrustMN: 7.44, specImpKs: 0.45 } },
+      secondary: { name: 'ISRO Glavcosmonauts', role: 'Faction G', bonus: 'DHARMA REFUEL', blurb: 'If any of your Humans carry a glory chit, double yield from a Colocated site refuel operation.', mass: 1, radHardness: 4, isru: 4, prospector: 'buggy',  thruster: { name: 'GSLV MkIII (Vikas)',     thrustMN: 0.80, specImpKs: 0.27 } },
     },
   },
   {
     id: 'crew_anonp2p_esa',
     faces: {
-      primary:   { name: 'Anonymous P2P',       role: 'Faction', bonus: 'ANONYMOUS P2P',      blurb: TODO_PRIV, mass: 0, radHardness: 3, spectralType: 'C' },
-      secondary: { name: 'ESA Space Unionists', role: 'Faction', bonus: 'ESA POWERSAT IN GEO', blurb: '+1 thrust to any one spacecraft during any player turn.', mass: 0, radHardness: 3, spectralType: 'C' },
+      primary:   { name: 'Anonymous P2P',       role: 'Faction E', bonus: 'OPEN SOURCE FINAO', blurb: 'Failure Is Not An Option costs 3 Aqua.',                                                                                  mass: 1, radHardness: 4, isru: 4, prospector: 'buggy',  thruster: { name: 'Skylon',    thrustMN: 5.88, specImpKs: 0.46 } },
+      secondary: { name: 'ESA Space Unionists', role: 'Faction F', bonus: 'POWERSAT',          blurb: 'During any player\'s Turn, may give +1 thrust to any Spacecraft that has a push icon in its thruster triangle. Negotiable.', mass: 1, radHardness: 4, isru: 4, prospector: 'raygun', thruster: { name: 'Ariane 64', thrustMN: 1.37, specImpKs: 0.45 } },
     },
   },
   {
     id: 'crew_shimizu_nasrda',
     faces: {
-      primary:   { name: 'Shimizu Corp Entrepreneurs', role: 'Faction', bonus: 'SHIMIZU SKUNKWORKS', blurb: 'May bid in research auctions with any number of hand cards.', mass: 0, radHardness: 3, spectralType: 'C' },
-      secondary: { name: 'NASRDA Astronauts',          role: 'Faction', bonus: 'NASRDA',            blurb: TODO_PRIV, mass: 0, radHardness: 3, spectralType: 'C' },
+      primary:   { name: 'Shimizu Corp Entrepreneurs', role: 'Faction M', bonus: 'SKUNKWORKS', blurb: 'Ignore academia hand limit when bidding or starting an auction.', mass: 1, radHardness: 3, isru: 4, prospector: 'buggy',  thruster: null },
+      secondary: { name: 'NASRDA Astronauts',          role: 'Faction L', bonus: 'MOONCABLE',  blurb: 'Once-per-turn free action: refuel an activated dirt thrust triangle at LEO/Home Bernal with 7 tanks (non-crew thruster) or 1 tank (Crew thruster). Negotiable. An activated dirt thruster can accept 1 tank of dirt max per Turn.', mass: 1, radHardness: 4, isru: 4, prospector: 'raygun', thruster: { name: 'Pegasus XL', thrustMN: 0.074, specImpKs: 0.37 } },
     },
   },
   {
     id: 'crew_spacex_norse',
     faces: {
-      primary:   { name: 'SpaceX',           role: 'Faction', bonus: 'SPACEX LAUNCH FEES', blurb: 'Gain 1 water whenever any player performs a Boost operation.', mass: 0, radHardness: 3, spectralType: 'C' },
-      secondary: { name: 'Norse Astronauts', role: 'Faction', bonus: 'NORSE',              blurb: TODO_PRIV, mass: 0, radHardness: 3, spectralType: 'C' },
+      primary:   { name: 'SpaceX',           role: 'Faction J', bonus: 'MARKETEER',             blurb: 'If you make the highest bid in an auction, you win even if tied.',                                                       mass: 1, radHardness: 4, isru: 4, prospector: 'raygun', thruster: { name: 'Starship', thrustMN: 12.0, specImpKs: 0.38 } },
+      secondary: { name: 'Norse Astronauts', role: 'Faction K', bonus: 'SCRUM TROUBLESHOOTERS', blurb: 'You may perform Glitch repair anywhere (even without Humans present). Negotiable. An activated dirt thruster can accept 1 tank of dirt max per Turn.', mass: 1, radHardness: 3, isru: 4, prospector: 'buggy', thruster: { name: 'OmegA SE', thrustMN: 12.0, specImpKs: 0.30 } },
     },
   },
 ];
@@ -76,8 +74,7 @@ export const CREW_BY_ID = Object.fromEntries(CREW.map((c) => [c.id, c]));
 
 // Flat list of every selectable faction face, for the
 // starting-crew wizard. Each entry points back at its physical
-// card + which face it is, so the picker can show all 12
-// factions and the engine can record the single chosen one.
+// card + which face it is.
 export const FACTIONS = CREW.flatMap((card) => (
   ['primary', 'secondary'].map((faceKey) => ({
     cardId: card.id,

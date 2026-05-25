@@ -1,52 +1,46 @@
 {
-  "_comment": "Crew (player-faction) card stats. Source: https://www.hf4map.com/cards/crew/ . Six double-faced physical cards, two factions each (12 total). This file is the human-editable audit surface; data/crew.js holds the same data inline for the browser (keep them in sync until a generator exists). privilege.effect 'TODO' = not yet transcribed from the card image. mass/radHardness are placeholders pending the printed values.",
+  "_comment": "Crew (player-faction) cards, transcribed from the card images at https://www.hf4map.com/cards/crew/ . Six double-faced physical cards (card0..card5), two factions each = 12. Crews have NO spectral type. Each face: promotion letter (the (X) on the card), mass, radHardness, isru value + prospector kind (buggy/raygun), an optional thruster rocket (name + thrust MN + specImp ks; null when the card shows a lander instead), the bottomBadges (the magenta + blue circle numbers at the card foot - exact meaning TBD), and the faction privilege (title + effect). data/crew.js mirrors this for the browser; keep them in sync (no generator - crew isn't in the spreadsheet).",
   "cards": [
     {
-      "id": "crew_un_b612",
-      "image": "card0",
+      "id": "crew_un_b612", "image": "card0",
       "faces": {
-        "primary":   { "name": "United Nations Cosmonauts", "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "UN MANDATE", "effect": "TODO" } },
-        "secondary": { "name": "B612 Foundation",           "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "B612",       "effect": "TODO" } }
+        "primary":   { "name": "United Nations Cosmonauts", "promotion": "A", "mass": 1, "radHardness": 4, "isru": 4, "prospector": "buggy",  "thruster": { "name": "Liberty",   "thrustMN": 1.34, "specImpKs": 0.43 }, "bottomBadges": [12, 9],  "privilege": { "title": "SECRETARY GENERAL", "effect": "Start with +2 Aqua. (Module 2: after 1st anchor of your Home Bernal.)" } },
+        "secondary": { "name": "B612 Foundation",           "promotion": "H", "mass": 1, "radHardness": 3, "isru": 4, "prospector": "buggy",  "thruster": { "name": "New Glenn", "thrustMN": 17.1, "specImpKs": 0.39 }, "bottomBadges": [15, 10], "privilege": { "title": "BLINK TELESCOPE", "effect": "1 re-roll per prospecting operation when using a Raygun." } }
       }
     },
     {
-      "id": "crew_roscosmos_taikonauts",
-      "image": "card1",
+      "id": "crew_roscosmos_taikonauts", "image": "card1",
       "faces": {
-        "primary":   { "name": "Roscosmos",  "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "PROTECTION FEES", "effect": "Gain 1 water after any player places a claim or industrializes." } },
-        "secondary": { "name": "Taikonauts", "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "TAIKONAUTS",      "effect": "TODO" } }
+        "primary":   { "name": "Roscosmos",  "promotion": "B", "mass": 1, "radHardness": 5, "isru": 4, "prospector": "buggy",  "thruster": { "name": "Angara 5",        "thrustMN": 13.4, "specImpKs": 0.38 }, "bottomBadges": [15, 10], "privilege": { "title": "TAXES",     "effect": "+1 Aqua from the Pool after any player places a Claim or industrializes a Claim." } },
+        "secondary": { "name": "Taikonauts", "promotion": "C", "mass": 1, "radHardness": 4, "isru": 4, "prospector": "raygun", "thruster": { "name": "The Long March 9", "thrustMN": 8.27, "specImpKs": 0.43 }, "bottomBadges": [14, 9],  "privilege": { "title": "FELONIOUS", "effect": "Your Humans may perform Felonious actions. Negotiable." } }
       }
     },
     {
-      "id": "crew_nasa_isro",
-      "image": "card2",
+      "id": "crew_nasa_isro", "image": "card2",
       "faces": {
-        "primary":   { "name": "NASA Astronauts",     "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "NASA LAUNCH FEES", "effect": "Gain 1 aqua whenever any player performs a Boost operation." } },
-        "secondary": { "name": "ISRO Glavcosmonauts", "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "ISRO",             "effect": "TODO" } }
+        "primary":   { "name": "NASA Astronauts",     "promotion": "D", "mass": 1, "radHardness": 4, "isru": 4, "prospector": "raygun", "thruster": { "name": "SLS, 130t Block II Crew", "thrustMN": 7.44, "specImpKs": 0.45 }, "bottomBadges": [14, 8],  "privilege": { "title": "LAUNCH FEES",  "effect": "+1 Aqua from the Pool after any player performs a boost operation." } },
+        "secondary": { "name": "ISRO Glavcosmonauts", "promotion": "G", "mass": 1, "radHardness": 4, "isru": 4, "prospector": "buggy",  "thruster": { "name": "GSLV MkIII (Vikas)",     "thrustMN": 0.80, "specImpKs": 0.27 }, "bottomBadges": [11, 14], "privilege": { "title": "DHARMA REFUEL", "effect": "If any of your Humans carry a glory chit, double yield from a Colocated site refuel operation." } }
       }
     },
     {
-      "id": "crew_anonp2p_esa",
-      "image": "card3",
+      "id": "crew_anonp2p_esa", "image": "card3",
       "faces": {
-        "primary":   { "name": "Anonymous P2P",       "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "ANONYMOUS P2P",      "effect": "TODO" } },
-        "secondary": { "name": "ESA Space Unionists", "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "ESA POWERSAT IN GEO", "effect": "+1 thrust to any one spacecraft during any player turn." } }
+        "primary":   { "name": "Anonymous P2P",       "promotion": "E", "mass": 1, "radHardness": 4, "isru": 4, "prospector": "buggy",  "thruster": { "name": "Skylon",    "thrustMN": 5.88, "specImpKs": 0.46 }, "bottomBadges": [14, 8], "privilege": { "title": "OPEN SOURCE FINAO", "effect": "Failure Is Not An Option costs 3 Aqua." } },
+        "secondary": { "name": "ESA Space Unionists", "promotion": "F", "mass": 1, "radHardness": 4, "isru": 4, "prospector": "raygun", "thruster": { "name": "Ariane 64", "thrustMN": 1.37, "specImpKs": 0.45 }, "bottomBadges": [12, 8], "privilege": { "title": "POWERSAT", "effect": "During any player's Turn, may give +1 thrust to any Spacecraft that has a push icon in its thruster triangle. Negotiable." } }
       }
     },
     {
-      "id": "crew_shimizu_nasrda",
-      "image": "card4",
+      "id": "crew_shimizu_nasrda", "image": "card4",
       "faces": {
-        "primary":   { "name": "Shimizu Corp Entrepreneurs", "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "SHIMIZU SKUNKWORKS", "effect": "May bid in research auctions with any number of hand cards." } },
-        "secondary": { "name": "NASRDA Astronauts",          "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "NASRDA",            "effect": "TODO" } }
+        "primary":   { "name": "Shimizu Corp Entrepreneurs", "promotion": "M", "mass": 1, "radHardness": 3, "isru": 4, "prospector": "buggy",  "thruster": null, "bottomBadges": null, "privilege": { "title": "SKUNKWORKS", "effect": "Ignore academia hand limit when bidding or starting an auction." } },
+        "secondary": { "name": "NASRDA Astronauts",          "promotion": "L", "mass": 1, "radHardness": 4, "isru": 4, "prospector": "raygun", "thruster": { "name": "Pegasus XL", "thrustMN": 0.074, "specImpKs": 0.37 }, "bottomBadges": [7, 11], "privilege": { "title": "MOONCABLE", "effect": "Once-per-turn free action: refuel an activated dirt thrust triangle at LEO/Home Bernal with 7 tanks (non-crew thruster) or 1 tank (Crew thruster). Negotiable. An activated dirt thruster can accept 1 tank of dirt max per Turn." } }
       }
     },
     {
-      "id": "crew_spacex_norse",
-      "image": "card5",
+      "id": "crew_spacex_norse", "image": "card5",
       "faces": {
-        "primary":   { "name": "SpaceX",           "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "SPACEX LAUNCH FEES", "effect": "Gain 1 water whenever any player performs a Boost operation." } },
-        "secondary": { "name": "Norse Astronauts", "mass": 0, "radHardness": 3, "spectralType": "C", "privilege": { "title": "NORSE",              "effect": "TODO" } }
+        "primary":   { "name": "SpaceX",           "promotion": "J", "mass": 1, "radHardness": 4, "isru": 4, "prospector": "raygun", "thruster": { "name": "Starship", "thrustMN": 12.0, "specImpKs": 0.38 }, "bottomBadges": [15, 10], "privilege": { "title": "MARKETEER", "effect": "If you make the highest bid in an auction, you win even if tied." } },
+        "secondary": { "name": "Norse Astronauts", "promotion": "K", "mass": 1, "radHardness": 3, "isru": 4, "prospector": "buggy",  "thruster": { "name": "OmegA SE",  "thrustMN": 12.0, "specImpKs": 0.30 }, "bottomBadges": [15, 14], "privilege": { "title": "SCRUM TROUBLESHOOTERS", "effect": "You may perform Glitch repair anywhere (even without Humans present). Negotiable. An activated dirt thruster can accept 1 tank of dirt max per Turn." } }
       }
     }
   ]
