@@ -213,6 +213,23 @@ code {
   color: #062136;
   border-color: var(--accent-2);
 }
+/* Disabled menu button (e.g. Sandbox while already in sandbox).
+   Greyed, no hover lift, not clickable. The .is-current accent
+   ring reads as "you are here". */
+.main-menu-row button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.main-menu-row button:disabled:hover {
+  background: var(--bg-2);
+  color: var(--ink);
+  border-color: var(--border);
+}
+.main-menu-row button.is-current {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+  opacity: 0.85;
+}
 .main-menu-row button.primary {
   background: linear-gradient(180deg, #38bdf8, #0284c7);
   color: #062136;
