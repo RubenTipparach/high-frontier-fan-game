@@ -72,14 +72,30 @@
   flex-wrap: wrap;
   row-gap: 4px;
 }
-.map-turn-controls button {
+/* Unified toolbar control sizing. Every persistent control in the
+   bar (End turn, turn tracker, op / move / gear tags, aqua chip,
+   search) shares this footprint so the row reads as one design
+   language; colour + weight carry the semantic differences. */
+.map-turn-controls button,
+.map-turn-budget .turn-tag,
+.map-aqua-chip,
+.map-search-toggle {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 30px;
+  padding: 5px 10px;
   font-size: 12px;
-  padding: 4px 8px;
-  background: var(--panel-2);
+  line-height: 1.2;
+  border-radius: 8px;
   border: 1px solid var(--border);
-  color: var(--ink);
-  border-radius: 4px;
   cursor: pointer;
+}
+.map-turn-controls button {
+  background: var(--panel-2);
+  color: var(--ink);
 }
 .map-turn-controls #turn-end {
   background: linear-gradient(180deg, #f97316, #c2410c);
@@ -87,7 +103,7 @@
   font-weight: 700;
   border-color: #9a3412;
 }
-.map-turn-controls button:hover:not(:disabled) {
+.map-turn-controls button:not(.turn-tag):hover:not(:disabled) {
   background: var(--accent);
   color: #062136;
   border-color: var(--accent-2);
@@ -99,16 +115,10 @@
    reads as "water you can spend" - aqua is just a water-shaped
    economy unit in sandbox mode. */
 .map-aqua-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
   font-weight: 600;
-  padding: 4px 10px;
   background: linear-gradient(180deg, #1e3a5f, #0c2540);
-  border: 1px solid #38bdf8;
+  border-color: #38bdf8;
   color: #bae6fd;
-  border-radius: 999px;
   cursor: help;
   font-variant-numeric: tabular-nums;
 }
@@ -118,19 +128,14 @@
 .map-turn-budget {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 .map-turn-budget .turn-tag {
   font: inherit;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
-  line-height: 1.2;
-  padding: 4px 8px;
-  border-radius: 6px;
   background: var(--bg-2, #14233a);
-  border: 1px solid var(--border, #2b3b55);
   color: var(--ink-dim, #9fb3cc);
-  cursor: pointer;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   /* It's a real <button> now so taps register reliably on touch;
@@ -142,6 +147,27 @@
 #turn-tag-op   { border-color: #d4a72c; color: #f4d27a; }
 #turn-tag-move { border-color: #38bdf8; color: #bae6fd; }
 #turn-tag-op:hover, #turn-tag-move:hover { filter: brightness(1.25); }
+/* The ⚙ gear is welded to the move tag as a single segmented
+   control: shared height, butted edges, one rounded outer profile.
+   Settings (route + fuel options) read as "part of move". */
+.move-group { display: inline-flex; align-items: stretch; }
+.move-group #turn-tag-move {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.move-group .turn-tag-gear {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left-width: 0;
+  padding-left: 8px;
+  padding-right: 8px;
+  color: var(--ink-dim, #9fb3cc);
+  border-color: #38bdf8;
+  font-size: 13px;
+}
+.move-group .turn-tag-gear:hover { filter: brightness(1.25); }
+/* The gear isn't a budget point, so it never pulses or fades. */
+.move-group .turn-tag-gear { animation: none !important; opacity: 1 !important; }
 /* Pulse the budget tags while their action is still available
    (op / move not yet spent) so the player's eye is drawn to them.
    Spent tags (faded) don't pulse. */
@@ -216,9 +242,11 @@
   flex: 1;
   justify-content: flex-end;
   min-width: 0;
-  /* Wrap on narrow viewports so the status text + utility
-     buttons (clear / settings / debug / fullscreen) drop to
-     a second row instead of clipping off the right edge. */
+  /* Wrap on narrow viewports so the status text + Clear-route
+     button drop to a second row instead of clipping off the
+     right edge. (Settings / debug / fullscreen moved off this
+     row: settings is welded to the move tag, debug + fullscreen
+     live in the hamburger menu.) */
   flex-wrap: wrap;
   row-gap: 6px;
 }
@@ -231,12 +259,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-#route-fullscreen,
-#route-debug {
-  font-size: 14px;
-  padding: 4px 9px;
-  line-height: 1;
 }
 
 /* Search box + reactive suggestions. The list is absolutely
@@ -303,13 +325,12 @@
 /* Search toggle button - opens the search modal on mobile.
    Desktop hides the toggle (the inline search is always present
    in the toolbar); mobile hides the inline search and shows the
-   toggle instead. The toggle styling mirrors the other small
-   toolbar icon buttons (🔧 / ⛶ in .map-route). */
+   toggle instead. Sizing comes from the shared toolbar-control
+   rule; this only governs visibility + colour. */
 .map-search-toggle {
   display: none;
-  font-size: 14px;
-  padding: 4px 9px;
-  line-height: 1;
+  background: var(--panel-2);
+  color: var(--ink);
 }
 .map-search-close {
   display: none;

@@ -1891,7 +1891,10 @@ function ensureMapShell(host) {
           aria-label="View turn tracker">🕐</button>
         <span id="turn-budget" class="map-turn-budget" aria-live="polite">
           <button type="button" class="turn-tag" id="turn-tag-op" title="Operations remaining this turn">op:1</button>
-          <button type="button" class="turn-tag" id="turn-tag-move" title="Moves remaining this turn">move:1</button>
+          <span class="move-group">
+            <button type="button" class="turn-tag" id="turn-tag-move" title="Moves remaining this turn">move:1</button>
+            <button type="button" class="turn-tag turn-tag-gear" id="game-settings" title="Game settings" aria-label="Game settings">⚙</button>
+          </span>
         </span>
         <span id="aqua-chip" class="map-aqua-chip"
           title="Aqua balance - spend 4 aqua per hazard to bypass rolls, or convert 1:1 to water at LEO">
@@ -1913,12 +1916,6 @@ function ensureMapShell(host) {
       <div class="map-route">
         <span id="route-status" class="muted">Tap a site to plan a route.</span>
         <button id="route-clear" hidden>Clear route</button>
-        <button id="game-settings" title="Game settings"
-          aria-label="Game settings">⚙</button>
-        <button id="route-debug" title="Toggle debug panel"
-          aria-label="Toggle debug panel">🔧</button>
-        <button id="route-fullscreen" title="Toggle fullscreen map"
-          aria-label="Toggle fullscreen">⛶</button>
       </div>
     </div>
     <div class="browse-map-stage">
@@ -1957,28 +1954,29 @@ function ensureMapShell(host) {
     </div>
   `;
   host.querySelector('#route-clear').addEventListener('click', clearRoute);
-  host.querySelector('#route-fullscreen').addEventListener('click', () => {
-    // Promote the whole browse shell to fullscreen, not just the
-    // map host -- this way the sidebar comes along for the ride.
-    const shell = document.querySelector('.browse-shell') || host;
-    toggleFullscreen(shell);
-  });
-  host.querySelector('#route-debug').addEventListener('click', () => {
-    const panel = host.querySelector('#map-debug');
-    panel.classList.toggle('hidden');
-    const open = !panel.classList.contains('hidden');
-    if (_renderer) _renderer.setOption('debug', open);
-    try { localStorage.setItem(STORAGE_DBG_PANEL_OPEN, open ? '1' : '0'); }
-    catch { /* private mode */ }
-  });
-  // Global game-settings gear on the toolbar. Opens the same
-  // settings modal accessible from per-popup affordances; right
-  // now only route options live there but future settings (UI
-  // density, accessibility toggles, persistent dev flags) will
-  // land in the same modal.
-  host.querySelector('#game-settings').addEventListener('click', () => {
-    openGameSettingsModal();
-  });
+  // Debug-panel toggle now lives in the hamburger menu (#btn-debug-panel)
+  // rather than on the map toolbar. Bind it here since browse.js owns
+  // the #map-debug panel; close the menu so the panel is visible.
+  const debugMenuBtn = document.getElementById('btn-debug-panel');
+  if (debugMenuBtn && !debugMenuBtn.dataset.wired) {
+    debugMenuBtn.dataset.wired = '1';
+    debugMenuBtn.addEventListener('click', () => {
+      const panel = host.querySelector('#map-debug');
+      if (!panel) return;
+      panel.classList.toggle('hidden');
+      const open = !panel.classList.contains('hidden');
+      if (_renderer) _renderer.setOption('debug', open);
+      try { localStorage.setItem(STORAGE_DBG_PANEL_OPEN, open ? '1' : '0'); }
+      catch { /* private mode */ }
+      document.getElementById('main-menu-modal')?.classList.add('hidden');
+    });
+  }
+  // Global game-settings gear, welded to the move tag. Opens the
+  // same settings modal accessible from per-popup affordances; right
+  // now route + fuel options live there but future settings (UI
+  // density, accessibility toggles, persistent dev flags) will land
+  // in the same modal. Tap wiring (touchend + click) happens below
+  // alongside the op / move / aqua controls for mobile reliability.
   // Turn clock + rocket-movement controls. End turn pops a confirm
   // when the player still has unspent budget; if they confirm and
   // the new slot is an event, openTurnClockModal animates the d6.
@@ -2095,6 +2093,8 @@ function ensureMapShell(host) {
     aquaChip.style.cursor = 'pointer';
     onTap(aquaChip, () => openLeoStackModal());
   }
+  const gearBtn = host.querySelector('#game-settings');
+  if (gearBtn) onTap(gearBtn, () => openGameSettingsModal());
   host.querySelector('#dbg-close').addEventListener('click', () => {
     host.querySelector('#map-debug').classList.add('hidden');
     try { localStorage.setItem(STORAGE_DBG_PANEL_OPEN, '0'); }
@@ -2117,10 +2117,6 @@ function ensureMapShell(host) {
     publishToolbarHeight();
     new ResizeObserver(publishToolbarHeight).observe(toolbarEl);
   }
-  document.addEventListener('fullscreenchange', () => {
-    const btn = host.querySelector('#route-fullscreen');
-    if (btn) btn.textContent = document.fullscreenElement ? '⤬' : '⛶';
-  });
 }
 
 // Hook the debug-panel widgets to whichever renderer is currently
@@ -2417,21 +2413,6 @@ function wireMapInsets(renderer) {
     else if (mobileMQ.addListener) mobileMQ.addListener(apply);
   }
   apply();
-}
-
-// Promote the map host into the browser's fullscreen mode. The
-// ResizeObserver in the renderer picks up the new dimensions and
-// re-fits the canvas. Falls back gracefully on browsers without
-// the Fullscreen API.
-function toggleFullscreen(host) {
-  if (document.fullscreenElement) {
-    document.exitFullscreen?.();
-    return;
-  }
-  const req = host.requestFullscreen
-    || host.webkitRequestFullscreen
-    || host.mozRequestFullScreen;
-  if (req) req.call(host).catch(() => {});
 }
 
 async function mountMapFor() {
