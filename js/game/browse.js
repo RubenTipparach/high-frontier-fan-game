@@ -4604,20 +4604,20 @@ function confirmModal({ title, body, yes = 'OK', no = 'Cancel' }) {
   });
 }
 
-// Interactive fuel-strip diagram - the published HF4 "Net Thrust
-// track", drawn as an SVG so the node connections are explicit.
-// Mass nodes 1..32 sit in a row, grouped + tinted by the doubling
-// weight-class bands (data/net-thrust-track.js is the single
-// source of truth). Above each band sits its fuel-step fraction
-// ladder. The two flows that move the wet-mass chit are drawn as
-// rails threading every node:
-//   * RED dashed rail (top), pointing right = REFUEL: loading FT
-//     walks the chit toward higher wet mass. Reversible (it runs
-//     backward when transferring fuel out to an outpost / LEO).
-//   * BLACK solid rail (bottom), pointing left = BURN / FT SPEND:
-//     a burn (or discard) walks the chit toward dry mass.
-// DRY (gray) + WET (amber) chit triangles mark the current masses.
-// The strip scrolls horizontally so all 32 nodes stay legible.
+// Interactive fuel-strip diagram for the rocket-stack header -
+// the published HF4 "Net Thrust track". Mass positions 1..32 are
+// grouped into the doubling weight-class bands (data/net-thrust-
+// track.js is the single source of truth on the band boundaries
+// and the per-band fuel-step fraction ladders):
+//   WISP +2   mass 1       PROBE +1  mass 2-4
+//   SCOUT 0   mass 5-8      TRANSPORT -1 mass 9-16
+//   TUG -2    mass 17-32
+// Each band shows its fraction ladder (the white sub-step ovals)
+// stacked ABOVE its mass-position cells, matching the board's
+// layered layout. Two chits overlay the cells: DRY at the
+// rocket's dry mass, WET at the current wet mass. Black-line =
+// FT spend (burn); red-dotted = refuel - see the legend. The
+// strip is read-only for now.
 function buildFuelStrip(host, totals) {
   host.innerHTML = '';
   const wm = Math.max(0, totals.wetMass | 0);
@@ -4628,86 +4628,68 @@ function buildFuelStrip(host, totals) {
   label.textContent = 'Net Thrust track';
   host.appendChild(label);
 
-  // Geometry (fixed px; the strip scrolls rather than squishing).
-  const step = 20, nodeW = 15, nodeH = 15, marginL = 20, marginR = 16;
-  const xOf = (i) => marginL + (i - 1) * step + nodeW / 2;
-  const maxFrac = Math.max(1, ...WEIGHT_CLASSES.map((w) => w.fractions.length));
-  const fracLineH = 11;
-  const bandLabelY = 6 + maxFrac * fracLineH + 4;
-  const redRailY = bandLabelY + 16;
-  const nodeTop = redRailY + 12;
-  const nodeCy = nodeTop + nodeH / 2;
-  const blackRailY = nodeTop + nodeH + 12;
-  const W = marginL + 32 * step + marginR;
-  const H = blackRailY + 14;
-  const left = xOf(1), right = xOf(32);
-  const p = [];
-
-  // Light inset background so the black burn line + dark node
-  // numbers read on top of the dark modal panel (matches the
-  // published board's light field).
-  p.push(`<rect x="0" y="0" width="${W}" height="${H}" rx="6" fill="#e7eef6"/>`);
-
-  // Band backgrounds + labels + fraction ladders (stacked above
-  // the band, bottom-aligned to the band label).
+  const bands = document.createElement('div');
+  bands.className = 'fuel-strip-bands';
   for (const wc of WEIGHT_CLASSES) {
-    const bx1 = xOf(wc.massMin) - nodeW / 2 - 2;
-    const bx2 = xOf(wc.massMax) + nodeW / 2 + 2;
-    p.push(`<rect x="${bx1}" y="${bandLabelY - 2}" width="${bx2 - bx1}" height="${nodeTop + nodeH + 2 - (bandLabelY - 2)}" rx="4" fill="${wc.color}" fill-opacity="0.35" stroke="${wc.color}" stroke-opacity="0.8"/>`);
-    const mod = wc.netThrust >= 0 ? `+${wc.netThrust}` : `${wc.netThrust}`;
-    p.push(`<text x="${bx1 + 3}" y="${bandLabelY + 8}" font-size="8" font-weight="700" fill="#1f2937">${esc(wc.id)} ${mod}</text>`);
-    wc.fractions.forEach((fr, idx) => {
-      const fy = bandLabelY - 4 - (wc.fractions.length - 1 - idx) * fracLineH;
-      p.push(`<text x="${xOf(wc.massMin)}" y="${fy}" font-size="8" fill="#475569" text-anchor="middle">${esc(fr)}</text>`);
-    });
+    const span = wc.massMax - wc.massMin + 1;
+    const band = document.createElement('div');
+    band.className = 'fuel-strip-band';
+    band.dataset.band = wc.id;
+    band.style.flexGrow = String(span);
+    band.style.setProperty('--band-color', wc.color);
+
+    const head = document.createElement('div');
+    head.className = 'fuel-strip-band-head';
+    const mod = wc.netThrust >= 0 ? `+${wc.netThrust}` : String(wc.netThrust);
+    head.innerHTML = `<span class="fs-band-name">${wc.id}</span><span class="fs-band-mod">${mod}</span>`;
+    band.appendChild(head);
+
+    // Fraction ladder (fuel sub-steps). Whole-step bands (TUG)
+    // show a single "1" to read as "whole fuel steps".
+    const fracs = document.createElement('div');
+    fracs.className = 'fuel-strip-fracs';
+    const ladder = wc.fractions.length ? wc.fractions : ['1'];
+    for (const fr of ladder) {
+      const chip = document.createElement('span');
+      chip.className = 'fs-frac';
+      chip.textContent = fr;
+      fracs.appendChild(chip);
+    }
+    band.appendChild(fracs);
+
+    const cells = document.createElement('div');
+    cells.className = 'fuel-strip-cells';
+    cells.style.gridTemplateColumns = `repeat(${span}, 1fr)`;
+    for (let i = wc.massMin; i <= wc.massMax; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'fuel-strip-cell';
+      let tip = `Mass ${i} - ${wc.id} weight class (${mod} net thrust)`;
+      if (i === MIN_DRY_MASS) { cell.classList.add('is-min-dry'); tip += ' - MIN DRY MASS'; }
+      if (i === MAX_DRY_MASS) { cell.classList.add('is-max-dry'); tip += ' - MAX DRY MASS'; }
+      if (i === MAX_WET_MASS) { cell.classList.add('is-max-wet'); tip += ' - MAX WET MASS'; }
+      cell.dataset.tip = tip;
+      cell.title = tip;
+      cell.textContent = String(i);
+      if (i === dm) cell.classList.add('is-dry-chit');
+      if (i === wm) cell.classList.add('is-wet-chit');
+      if (i === dm && i === wm) cell.classList.add('is-co-chit');
+      cells.appendChild(cell);
+    }
+    band.appendChild(cells);
+    bands.appendChild(band);
   }
-
-  // Refuel rail (red dashed, rightward) along the top of the nodes.
-  p.push(`<line x1="${left}" y1="${redRailY}" x2="${right}" y2="${redRailY}" stroke="#e0457b" stroke-width="1.5" stroke-dasharray="4 3"/>`);
-  p.push(`<path d="M${right + 1} ${redRailY} l-7 -3.5 v7 z" fill="#e0457b"/>`);
-  p.push(`<text x="${left}" y="${redRailY - 4}" font-size="8" font-weight="700" fill="#e0457b">refuel →</text>`);
-
-  // Burn rail (black solid, leftward) along the bottom of the nodes.
-  p.push(`<line x1="${left}" y1="${blackRailY}" x2="${right}" y2="${blackRailY}" stroke="#0c0a16" stroke-width="2"/>`);
-  p.push(`<path d="M${left - 1} ${blackRailY} l7 -3.5 v7 z" fill="#0c0a16"/>`);
-  p.push(`<text x="${right}" y="${blackRailY + 10}" font-size="8" font-weight="700" fill="#1f2937" text-anchor="end">← burn (FT spend)</text>`);
-
-  // Nodes + their connectors up to the refuel rail and down to the
-  // burn rail (so each node visibly connects to both flows).
-  for (let i = 1; i <= 32; i++) {
-    const cx = xOf(i);
-    const wc = weightClassForMass(i);
-    p.push(`<line x1="${cx}" y1="${nodeTop}" x2="${cx}" y2="${redRailY}" stroke="#e0457b" stroke-width="0.7" stroke-opacity="0.55" stroke-dasharray="2 2"/>`);
-    p.push(`<line x1="${cx}" y1="${nodeTop + nodeH}" x2="${cx}" y2="${blackRailY}" stroke="#0c0a16" stroke-width="0.7" stroke-opacity="0.55"/>`);
-    let stroke = '#0c0a16', sw = 0.8;
-    if (i === MAX_WET_MASS) { stroke = '#e0457b'; sw = 1.8; }
-    else if (i === MAX_DRY_MASS) { stroke = '#64748b'; sw = 1.8; }
-    else if (i === MIN_DRY_MASS) { stroke = '#0c0a16'; sw = 1.8; }
-    const tip = `Mass ${i} - ${wc.id} (${wc.netThrust >= 0 ? '+' : ''}${wc.netThrust} net thrust)`
-      + (i === MIN_DRY_MASS ? ' - MIN DRY MASS' : '')
-      + (i === MAX_DRY_MASS ? ' - MAX DRY MASS' : '')
-      + (i === MAX_WET_MASS ? ' - MAX WET MASS' : '');
-    p.push(`<g><title>${esc(tip)}</title>`
-      + `<rect x="${cx - nodeW / 2}" y="${nodeTop}" width="${nodeW}" height="${nodeH}" rx="3" fill="${wc.color}" stroke="${stroke}" stroke-width="${sw}"/>`
-      + `<text x="${cx}" y="${nodeCy + 3}" font-size="7.5" font-weight="700" text-anchor="middle" fill="#0c0a16">${i}</text></g>`);
-    if (i === dm) p.push(`<path d="M${cx} ${nodeTop - 2} l-4 -6 h8 z" fill="#94a3b8" stroke="#0c0a16" stroke-width="0.5"/>`);
-    if (i === wm) p.push(`<path d="M${cx} ${nodeTop + nodeH + 2} l-4 6 h8 z" fill="#facc15" stroke="#0c0a16" stroke-width="0.5"/>`);
-  }
-
-  const scroller = document.createElement('div');
-  scroller.className = 'fuel-strip-scroll';
-  scroller.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="fuel-strip-svg" role="img" aria-label="Net Thrust track">${p.join('')}</svg>`;
-  host.appendChild(scroller);
+  host.appendChild(bands);
 
   const wc = weightClassForMass(wm || 1);
-  const netMod = wc.netThrust >= 0 ? `+${wc.netThrust}` : `${wc.netThrust}`;
+  const netMod = wc.netThrust >= 0 ? `+${wc.netThrust}` : String(wc.netThrust);
   const legend = document.createElement('div');
   legend.className = 'rocket-fuel-strip-legend';
   legend.innerHTML = `
     <span><i class="chit-dot is-dry-chit"></i> Dry ${dm}</span>
     <span><i class="chit-dot is-wet-chit"></i> Wet ${wm} (${wc.id} ${netMod})</span>
-    <span class="fs-line-key"><i class="fs-line black"></i> burn: spends FT → dry mass</span>
-    <span class="fs-line-key"><i class="fs-line red"></i> refuel → wet mass (reversible)</span>
+    <span class="muted">Max wet ${MAX_WET_MASS}</span>
+    <span class="fs-line-key"><i class="fs-line black"></i> burn (FT spend)</span>
+    <span class="fs-line-key"><i class="fs-line red"></i> refuel</span>
   `;
   host.appendChild(legend);
 }
@@ -4883,13 +4865,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         fuel in finer fractions as mass grows.
       </p>
     </div>
-    <div id="fuel-tank-strip" class="rocket-fuel-strip"></div>
   `;
-
-  // Draw the Net Thrust track strip inside the tank modal too, so
-  // the player sees where the dry/wet chits sit while fuelling.
-  const stripHost = panel.querySelector('#fuel-tank-strip');
-  if (stripHost) buildFuelStrip(stripHost, totals);
 
   const waterRect = panel.querySelector('.tank-water');
   const foamRect  = panel.querySelector('.tank-water-foam');
