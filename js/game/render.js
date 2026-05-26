@@ -3143,33 +3143,46 @@ export class MapRenderer {
     const cz = this._canonicalZones;
     const order = (cz.order && cz.order.length) ? cz.order : Object.keys(cz.polys);
     if (!order.length) return;
+    // Inner -> outer list of zones that actually have a polygon.
+    const arr = [];
+    for (const zone of order) {
+      const polys = cz.polys[zone];
+      if (polys && polys.length) arr.push({ polys, col: cz.colors[zone] || '#22d3ee' });
+    }
+    if (!arr.length) return;
     const op = Math.max(0.01, Math.min(1, this.options.zoneOpacity ?? 0.5));
     const curved = this.options.zoneCurved !== false;
+    const addPath = (pts) => {
+      if (curved) { appendSmoothClosedPath(ctx, pts); return; }
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k].x, pts[k].y);
+      ctx.closePath();
+    };
     ctx.save();
     ctx.lineJoin = 'round';
-    for (let i = order.length - 1; i >= 0; i--) {
-      const zone = order[i];
-      const polys = cz.polys[zone];
-      if (!polys) continue;
-      const col = cz.colors[zone] || '#22d3ee';
-      for (const pts of polys) {
+    // FILLS: each zone is the RING between its polygon and the
+    // next-inner zone's polygon (punched out with an even-odd hole),
+    // so colours never stack - every pixel is exactly one zone's
+    // colour, independent of what nests beneath it.
+    if (this.options.zoneFill) {
+      ctx.globalAlpha = Math.min(0.95, op * 0.8);
+      for (let i = 0; i < arr.length; i++) {
+        ctx.fillStyle = arr[i].col;
+        ctx.beginPath();
+        for (const pts of arr[i].polys) if (pts && pts.length >= 2) addPath(pts);
+        if (i > 0) for (const pts of arr[i - 1].polys) if (pts && pts.length >= 2) addPath(pts);
+        ctx.fill('evenodd');
+      }
+    }
+    // BORDERS: each zone strokes its own outline once.
+    ctx.globalAlpha = Math.min(1, op + 0.2);
+    ctx.lineWidth = 2.5 / eff; // ~2.5 screen px regardless of zoom
+    for (const z of arr) {
+      ctx.strokeStyle = z.col;
+      for (const pts of z.polys) {
         if (!pts || pts.length < 2) continue;
         ctx.beginPath();
-        if (curved) {
-          appendSmoothClosedPath(ctx, pts);
-        } else {
-          ctx.moveTo(pts[0].x, pts[0].y);
-          for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k].x, pts[k].y);
-          ctx.closePath();
-        }
-        if (this.options.zoneFill) {
-          ctx.globalAlpha = Math.min(0.9, op * 0.7);
-          ctx.fillStyle = col;
-          ctx.fill();
-        }
-        ctx.globalAlpha = Math.min(1, op + 0.15);
-        ctx.lineWidth = 2.5 / eff; // ~2.5 screen px regardless of zoom
-        ctx.strokeStyle = col;
+        addPath(pts);
         ctx.stroke();
       }
     }
