@@ -625,6 +625,8 @@ export class MapRenderer {
       assignments: new Map(),  // nodeId -> zone string
       colors: {},              // zone -> hex colour
     };
+    this._zoneDragVertex = null;    // index of the poly vertex being dragged
+    this._zoneGrabConsumed = false; // swallow the click after a vertex grab
     // Public-ish tuneables. Mutating them and calling _scheduleDraw
     // is enough for the debug panel to take effect; nothing else
     // caches them.
@@ -1184,6 +1186,26 @@ export class MapRenderer {
     if (!this._zonePaint.active) return;
     this._zonePaint.poly.push({ x: wx, y: wy });
     this._scheduleDraw();
+  }
+
+  // Return the index of the in-progress polygon vertex within a small
+  // screen-space grab radius of (wx, wy) world coords, or -1. Used to
+  // pick up a vertex for dragging.
+  _hitTestZoneVertex(wx, wy) {
+    const zp = this._zonePaint;
+    if (!zp.active || !zp.poly.length) return -1;
+    const eff = this.zoom * this.fitScale;
+    const sx = this.pan.x + wx * eff;
+    const sy = this.pan.y + wy * eff;
+    const R2 = 12 * 12; // 12px grab radius
+    let best = -1, bestD = R2;
+    for (let i = 0; i < zp.poly.length; i++) {
+      const px = this.pan.x + zp.poly[i].x * eff;
+      const py = this.pan.y + zp.poly[i].y * eff;
+      const d = (px - sx) * (px - sx) + (py - sy) * (py - sy);
+      if (d <= bestD) { bestD = d; best = i; }
+    }
+    return best;
   }
 
   undoZonePolyPoint() {
@@ -2746,6 +2768,18 @@ export class MapRenderer {
 
     this.canvas.addEventListener('mousedown', (ev) => {
       if (ev.button !== 0) return;
+      // Zone-painter: grabbing an existing polygon vertex starts a
+      // vertex drag instead of a pan, so points can be nudged into
+      // place. A plain press anywhere else still pans.
+      if (this._zonePaint.active) {
+        const wp = this._eventToWorld(ev);
+        const vi = this._hitTestZoneVertex(wp.x, wp.y);
+        if (vi >= 0) {
+          this._zoneDragVertex = vi;
+          this._zoneGrabConsumed = true; // suppress the trailing click
+          return;
+        }
+      }
       this._dragStart = {
         x: ev.clientX, y: ev.clientY,
         panX: this.pan.x, panY: this.pan.y,
@@ -2753,6 +2787,12 @@ export class MapRenderer {
       };
     });
     window.addEventListener('mousemove', (ev) => {
+      if (this._zoneDragVertex != null) {
+        const wp = this._eventToWorld(ev);
+        const v = this._zonePaint.poly[this._zoneDragVertex];
+        if (v) { v.x = wp.x; v.y = wp.y; this._scheduleDraw(); }
+        return;
+      }
       if (!this._dragStart) return;
       const dx = ev.clientX - this._dragStart.x;
       const dy = ev.clientY - this._dragStart.y;
@@ -2761,7 +2801,10 @@ export class MapRenderer {
       this.pan.y = this._dragStart.panY + dy;
       this._scheduleDraw();
     });
-    window.addEventListener('mouseup', () => { this._dragStart = null; });
+    window.addEventListener('mouseup', () => {
+      this._dragStart = null;
+      this._zoneDragVertex = null;
+    });
 
     // Click dispatched only if the mousedown→mouseup didn't drag.
     this.canvas.addEventListener('click', (ev) => {
@@ -2776,11 +2819,16 @@ export class MapRenderer {
       // suppresses the hover tooltip on touch).
       if (this._touchActive) return;
       if (this._dragStart && this._dragStart.moved) return;
-      // Zone-painter mode: a click drops a polygon vertex and nothing
-      // else (no site select, no rocket click).
+      // Zone-painter mode owns clicks: SHIFT+click drops a polygon
+      // vertex; a plain click does nothing (so the map can be panned
+      // / clicked freely). A click right after a vertex grab is
+      // swallowed so it doesn't drop a duplicate point.
       if (this._zonePaint.active) {
-        const wp = this._eventToWorld(ev);
-        this.addZonePolyPoint(wp.x, wp.y);
+        if (this._zoneGrabConsumed) { this._zoneGrabConsumed = false; return; }
+        if (ev.shiftKey) {
+          const wp = this._eventToWorld(ev);
+          this.addZonePolyPoint(wp.x, wp.y);
+        }
         return;
       }
       // Rocket sits on top of the map so test it first; if the

@@ -2030,7 +2030,7 @@ function ensureMapShell(host) {
               <option value="">- off -</option>
             </select>
           </label>
-          <p class="dbg-zone-hint" id="dbg-zone-hint">Pick a zone, then click the map to drop polygon points around the nodes you want.</p>
+          <p class="dbg-zone-hint" id="dbg-zone-hint">Pick a zone, then <strong>Shift+click</strong> the map to drop polygon points around the nodes you want. Drag a point to move it; plain-drag still pans.</p>
           <div class="dbg-zone-btns">
             <button id="dbg-zone-finish" type="button">Finish polygon</button>
             <button id="dbg-zone-undo" type="button">Undo point</button>
