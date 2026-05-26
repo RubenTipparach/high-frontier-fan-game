@@ -2280,12 +2280,12 @@ function persistDbg(key, value) {
   try { localStorage.setItem(key, String(value)); } catch { /* private mode */ }
 }
 // Push the saved zone-view config into a (possibly freshly-built)
-// renderer. Defaults: overlay off, fill on, 50% opacity, edit off.
+// renderer. Defaults: overlay on, fill on, 30% opacity, edit off.
 function applyZoneViewConfig(renderer) {
   if (!renderer) return;
   renderer.setOption('visualizeZones', loadDbgBool(STORAGE_ZONE_VIZ, true));
   renderer.setOption('zoneFill', loadDbgBool(STORAGE_ZONE_FILL, true));
-  renderer.setOption('zoneOpacity', loadDbgNumber(STORAGE_ZONE_VIZ_OP, 50, 1, 100) / 100);
+  renderer.setOption('zoneOpacity', loadDbgNumber(STORAGE_ZONE_VIZ_OP, 30, 1, 100) / 100);
   renderer.setOption('zoneCurved', loadDbgBool(STORAGE_ZONE_CURVED, true));
   renderer.setOption('zoneEditMode', loadDbgBool(STORAGE_ZONE_EDIT, false));
 }
@@ -7280,7 +7280,7 @@ function openConfigModal() {
   const isFs = !!document.fullscreenElement;
   const viz = loadDbgBool(STORAGE_ZONE_VIZ, true);
   const fill = loadDbgBool(STORAGE_ZONE_FILL, true);
-  const op = loadDbgNumber(STORAGE_ZONE_VIZ_OP, 50, 1, 100);
+  const op = loadDbgNumber(STORAGE_ZONE_VIZ_OP, 30, 1, 100);
   const curved = loadDbgBool(STORAGE_ZONE_CURVED, true);
 
   const panel = document.createElement('div');
@@ -7333,7 +7333,7 @@ function openConfigModal() {
     persistDbg(STORAGE_ZONE_VIZ_OP, v);
     if (_renderer) _renderer.setOption('zoneOpacity', v / 100);
   };
-  // Reset the zone visuals to defaults (visualize on, fill on, 50%,
+  // Reset the zone visuals to defaults (visualize on, fill on, 30%,
   // curved on). Clears the saved keys so the defaults persist, then
   // re-applies to the renderer and the modal controls.
   panel.querySelector('.cfg-zone-reset').addEventListener('click', () => {
@@ -7344,8 +7344,8 @@ function openConfigModal() {
     vizCb.checked = true;
     fillCb.checked = true;
     curvedCb.checked = true;
-    opEl.value = 50;
-    opValEl.textContent = '50%';
+    opEl.value = 30;
+    opValEl.textContent = '30%';
   });
   mountOverlay(overlay);
 }

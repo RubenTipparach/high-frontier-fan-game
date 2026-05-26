@@ -667,11 +667,11 @@ export class MapRenderer {
       debug: false,
       // Zone-visualisation (config panel): draw the canonical solar-
       // zone polygons behind everything. On by default. Fill optional;
-      // border opacity 0.01..1 (default 0.5); curved borders smooth the
+      // border opacity 0.01..1 (default 0.3); curved borders smooth the
       // polygon edges (on by default).
       visualizeZones: true,
       zoneFill: true,
-      zoneOpacity: 0.5,
+      zoneOpacity: 0.3,
       zoneCurved: true,
       zoneEditMode: false,
     };
