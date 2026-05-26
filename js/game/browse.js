@@ -7299,7 +7299,7 @@ function openConfigModal() {
       <label class="dbg-check"><input type="checkbox" class="cfg-zone-curved" ${curved ? 'checked' : ''}><span>Curved zone border</span></label>
       <label class="dbg-slider"><span>Zone opacity <em class="cfg-zone-op-val">${op}%</em></span>
         <input type="range" class="cfg-zone-op" min="1" max="100" step="1" value="${op}"></label>
-      <button type="button" class="modal-btn cfg-zone-reset">↺ Reset zone visuals</button>
+      <button type="button" class="modal-btn cfg-zone-reset">↺ Reset to default</button>
     </div>
   `;
   overlay.appendChild(panel);
