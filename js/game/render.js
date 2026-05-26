@@ -670,15 +670,30 @@ export class MapRenderer {
     this._gesture = null;
     this._rafQueued = false;
     this._tooltipEl = null;
-    // Static-layer cache. The heavy, non-animated geometry (backdrop,
-    // zones, guides, halos, edges, waypoints, hexes, labels) is baked
-    // into an offscreen canvas and only re-rendered when the camera /
-    // display options change; each animation frame just blits it and
-    // draws the few moving things (rockets, route, pulses) on top.
+    // Static-layer cache. The heavy, non-animated geometry (zones,
+    // guides, halos, edges, waypoints, hexes, labels) is baked into an
+    // OVERSCAN offscreen canvas (viewport + margin) at a stored camera
+    // pose. While panning we just blit it at an offset (no rebuild)
+    // until the pan drifts past the margin; while zooming we blit it
+    // scaled as a preview and rebuild crisp once the zoom settles. The
+    // screen-fixed backdrop (nebula + stars) lives in its own cache.
+    this._bgCanvas = null;
+    this._bgCtx = null;
+    this._bgKey = null;
     this._staticCanvas = null;
     this._staticCtx = null;
-    this._staticKey = null;
     this._staticEpoch = 0;
+    this._cachePan = { x: 0, y: 0 };
+    this._cacheZoom = 0;
+    this._cacheEpoch = -1;
+    this._cacheHostW = 0;
+    this._cacheHostH = 0;
+    this._cacheDpr = 0;
+    this._cacheMarginX = 0;
+    this._cacheMarginY = 0;
+    this._cacheCssW = 0;
+    this._cacheCssH = 0;
+    this._prevFrameZoom = 0;
     // Debug zone-painter state. When `active` holds a zone name the
     // map enters polygon-draw mode: clicks drop vertices instead of
     // selecting sites. Finishing a polygon stamps every waypoint
@@ -1545,59 +1560,130 @@ export class MapRenderer {
     });
   }
 
-  // Render the heavy, non-animated layers into the offscreen static
-  // cache (only when the camera / display options have changed). The
-  // _drawX helpers all take a ctx, so they render straight into the
-  // cache context.
-  _ensureStaticCache() {
+  // Screen-fixed backdrop (nebula + stars) cache. Depends only on the
+  // canvas size, so it's rebuilt on resize.
+  _ensureBgCache() {
     const { hostW, hostH, dpr } = this;
     const dw = Math.max(1, Math.round(hostW * dpr));
     const dh = Math.max(1, Math.round(hostH * dpr));
-    const key = `${this.pan.x.toFixed(2)},${this.pan.y.toFixed(2)},`
-      + `${this.zoom.toFixed(4)},${dw},${dh},${this._staticEpoch}`;
-    if (this._staticKey === key) return;
-    this._staticKey = key;
+    const key = `${dw}x${dh}`;
+    if (this._bgKey === key) return;
+    this._bgKey = key;
+    if (!this._bgCanvas) this._bgCanvas = document.createElement('canvas');
+    const cv = this._bgCanvas;
+    if (cv.width !== dw || cv.height !== dh) { cv.width = dw; cv.height = dh; this._bgCtx = cv.getContext('2d'); }
+    const bctx = this._bgCtx || (this._bgCtx = cv.getContext('2d'));
+    bctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    bctx.clearRect(0, 0, hostW, hostH);
+    this._drawBackdrop(bctx);
+  }
+
+  // Render the heavy, camera-anchored map layers (zones, guides,
+  // halos, edges, waypoints, hexes, labels) into the OVERSCAN cache,
+  // centred on the current camera pose with a margin on every side so
+  // small pans can be served by an offset blit. Transparent bg so it
+  // composites over the live backdrop.
+  _rebuildStaticCache() {
+    const { hostW, hostH, dpr } = this;
+    const marginX = Math.round(hostW * 0.3);
+    const marginY = Math.round(hostH * 0.3);
+    const cssW = hostW + marginX * 2;
+    const cssH = hostH + marginY * 2;
+    const dw = Math.max(1, Math.round(cssW * dpr));
+    const dh = Math.max(1, Math.round(cssH * dpr));
     if (!this._staticCanvas) this._staticCanvas = document.createElement('canvas');
     const cv = this._staticCanvas;
-    if (cv.width !== dw || cv.height !== dh) {
-      cv.width = dw; cv.height = dh;
-      this._staticCtx = cv.getContext('2d');
-    }
+    if (cv.width !== dw || cv.height !== dh) { cv.width = dw; cv.height = dh; this._staticCtx = cv.getContext('2d'); }
     const sctx = this._staticCtx || (this._staticCtx = cv.getContext('2d'));
-    sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    sctx.clearRect(0, 0, hostW, hostH);
 
-    this._drawBackdrop(sctx);
-    const eff = this.zoom * this.fitScale;
-    sctx.save();
-    sctx.translate(this.pan.x, this.pan.y);
-    sctx.scale(eff, eff);
-    // Canonical solar-zone regions FIRST so they sit behind everything.
-    this._drawCanonicalZones(sctx, eff);
-    if (this.data.mode === 'clean' && Array.isArray(this.data.zones)) {
-      this._drawZoneBands(sctx, this.data.zones, this.data.zoneInfo);
+    // Record the pose this cache was rendered at (BEFORE shifting pan).
+    this._cachePan = { x: this.pan.x, y: this.pan.y };
+    this._cacheZoom = this.zoom;
+    this._cacheEpoch = this._staticEpoch;
+    this._cacheHostW = hostW; this._cacheHostH = hostH; this._cacheDpr = dpr;
+    this._cacheMarginX = marginX; this._cacheMarginY = marginY;
+    this._cacheCssW = cssW; this._cacheCssH = cssH;
+
+    // Temporarily shift pan + grow the viewport bounds so the screen-
+    // space layers (which read this.pan / this.hostW for placement +
+    // culling) fill the whole overscan canvas, including the margin.
+    const savePanX = this.pan.x, savePanY = this.pan.y;
+    const saveHostW = this.hostW, saveHostH = this.hostH;
+    this.pan.x = savePanX + marginX; this.pan.y = savePanY + marginY;
+    this.hostW = cssW; this.hostH = cssH;
+    try {
+      sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      sctx.clearRect(0, 0, cssW, cssH);
+      const eff = this.zoom * this.fitScale;
+      sctx.save();
+      sctx.translate(this.pan.x, this.pan.y);
+      sctx.scale(eff, eff);
+      this._drawCanonicalZones(sctx, eff);
+      if (this.data.mode === 'clean' && Array.isArray(this.data.zones)) {
+        this._drawZoneBands(sctx, this.data.zones, this.data.zoneInfo);
+      }
+      this._drawGuides(sctx);
+      this._drawSiteHalosWorld(sctx);
+      this._drawEdges(sctx);
+      sctx.restore();
+      this._drawWaypointsScreen(sctx);
+      this._drawSiteHexesScreen(sctx);
+      this._drawSiteLabelsScreen(sctx);
+    } finally {
+      this.pan.x = savePanX; this.pan.y = savePanY;
+      this.hostW = saveHostW; this.hostH = saveHostH;
     }
-    this._drawGuides(sctx);
-    // Halos before edges so the body spheres sit behind everything.
-    this._drawSiteHalosWorld(sctx);
-    this._drawEdges(sctx);
-    sctx.restore();
+  }
 
-    this._drawWaypointsScreen(sctx);
-    this._drawSiteHexesScreen(sctx);
-    this._drawSiteLabelsScreen(sctx);
+  // Decide whether the overscan cache can be reused (offset / scaled
+  // blit) or must be rebuilt, then blit it. Drawn in DEVICE pixels
+  // (identity transform) over the already-blitted backdrop.
+  _blitStaticLayer(ctx) {
+    const { hostW, hostH, dpr } = this;
+    const sameStatic = this._staticCanvas
+      && this._cacheEpoch === this._staticEpoch
+      && this._cacheHostW === hostW && this._cacheHostH === hostH && this._cacheDpr === dpr
+      && this._cacheZoom > 0;
+    const dest = () => {
+      const scale = this.zoom / this._cacheZoom;
+      const x = this.pan.x - (this._cacheMarginX + this._cachePan.x) * scale;
+      const y = this.pan.y - (this._cacheMarginY + this._cachePan.y) * scale;
+      const w = this._cacheCssW * scale;
+      const h = this._cacheCssH * scale;
+      const covered = x <= 0.5 && y <= 0.5 && (x + w) >= hostW - 0.5 && (y + h) >= hostH - 0.5;
+      return { x, y, w, h, scale, covered };
+    };
+    let rebuild = !sameStatic;
+    if (!rebuild) {
+      const d = dest();
+      if (!d.covered) rebuild = true;                                   // panned/zoomed past the margin
+      else if (this.zoom !== this._cacheZoom && this.zoom === this._prevFrameZoom) rebuild = true; // zoom settled -> crisp
+    }
+    if (rebuild) this._rebuildStaticCache();
+    const d = dest();
+    const cv = this._staticCanvas;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.imageSmoothingEnabled = (d.scale !== 1); // crisp when 1:1, smooth scaled preview
+    ctx.drawImage(cv, 0, 0, cv.width, cv.height,
+      d.x * dpr, d.y * dpr, d.w * dpr, d.h * dpr);
+    ctx.imageSmoothingEnabled = true;
   }
 
   _draw() {
     const ctx = this.ctx;
-    const { hostW, hostH, dpr } = this;
+    const { dpr } = this;
 
-    // Blit the cached static layer (rebuilt only on camera / option
-    // change), then draw the animated / stateful layers on top.
-    this._ensureStaticCache();
+    // Screen-fixed backdrop, then the camera-anchored static map layer
+    // (offset/scaled-blitted from the overscan cache, rebuilt only when
+    // the pan drifts past the margin or the zoom settles), then the
+    // animated / stateful layers on top.
+    this._ensureBgCache();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
-    ctx.drawImage(this._staticCanvas, 0, 0);
+    ctx.drawImage(this._bgCanvas, 0, 0);
+    this._blitStaticLayer(ctx);
+    this._prevFrameZoom = this.zoom;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const eff = this.zoom * this.fitScale;
