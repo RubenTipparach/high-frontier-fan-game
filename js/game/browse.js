@@ -2030,17 +2030,17 @@ function ensureMapShell(host) {
               <option value="">- off -</option>
             </select>
           </label>
-          <p class="dbg-zone-hint" id="dbg-zone-hint">Pick a zone, then <strong>Shift+click</strong> the map to drop polygon points. Drag a point to move it; plain-drag pans. <strong>Save polygon</strong> stores it (draw as many as you like); <strong>Export</strong> dumps all polygons to the console. Saved polygons persist across refreshes until you Clear.</p>
+          <p class="dbg-zone-hint" id="dbg-zone-hint">Each zone is ONE polygon. Pick a zone, then <strong>Shift+click</strong> to add points to it; drag a point to move it; plain-drag pans. Switch zones to edit another polygon. <strong>Export</strong> dumps all zone polygons. Everything persists across refreshes until you Clear.</p>
           <div class="dbg-zone-btns">
-            <button id="dbg-zone-finish" type="button">Save polygon</button>
-            <button id="dbg-zone-undo" type="button">Undo</button>
+            <button id="dbg-zone-clearzone" type="button">Clear zone</button>
+            <button id="dbg-zone-undo" type="button">Undo point</button>
           </div>
           <div class="dbg-zone-btns">
             <button id="dbg-zone-clear" type="button">Clear all</button>
             <button id="dbg-zone-export" type="button">Export to console</button>
           </div>
           <div class="dbg-row">
-            <span>Saved</span>
+            <span>Zones</span>
             <strong id="dbg-zone-count">0 poly · 0 nodes</strong>
           </div>
         </div>
@@ -2257,9 +2257,8 @@ const STORAGE_DBG_PANEL_OPEN  = 'hf-sandbox-map-debug-open';
 // Zone-painter assignments ({ nodeId: zone }) + the last-picked zone.
 // Persisted so the labels survive reloads / map-mode toggles until
 // the data is exported and the painter is cleared.
-const STORAGE_ZONE_POLYGONS = 'hf-sandbox-zone-polygons'; // committed polygons
+const STORAGE_ZONE_POLYGONS = 'hf-sandbox-zone-polygons'; // per-zone polygons
 const STORAGE_ZONE_ACTIVE = 'hf-sandbox-zone-active';
-const STORAGE_ZONE_POLY   = 'hf-sandbox-zone-poly';      // in-progress polygon
 function persistDbg(key, value) {
   try { localStorage.setItem(key, String(value)); } catch { /* private mode */ }
 }
@@ -2380,12 +2379,12 @@ function wireDebugPanel(renderer) {
 // planner-map.js. Real (named) sites are never touched.
 function wireZonePainter(renderer, panel) {
   const select   = panel.querySelector('#dbg-zone-select');
-  const finishBtn = panel.querySelector('#dbg-zone-finish');
+  const clearZoneBtn = panel.querySelector('#dbg-zone-clearzone');
   const undoBtn   = panel.querySelector('#dbg-zone-undo');
   const clearBtn  = panel.querySelector('#dbg-zone-clear');
   const exportBtn = panel.querySelector('#dbg-zone-export');
   const countEl   = panel.querySelector('#dbg-zone-count');
-  if (!select || !finishBtn) return;
+  if (!select || !clearZoneBtn) return;
 
   // Populate the dropdown + hand the per-zone palette to the renderer
   // so the overlay paints in the published zone colours.
@@ -2401,37 +2400,29 @@ function wireZonePainter(renderer, panel) {
   for (const z of SOLAR_ZONES) colors[z] = (SOLAR_ZONE_INFO[z] || {}).color || '#22d3ee';
   renderer.setZonePaintColors(colors);
 
-  // Persist ALL painted work so a refresh / map-mode toggle never
-  // loses it before export: the committed POLYGONS (the source data),
-  // the in-progress polygon points, and the picked zone. Node
-  // assignments are NOT persisted - they're derived from the polygons.
+  // Persist the per-zone polygons (the source data) + the picked
+  // zone. Node assignments are NOT persisted - they're derived from
+  // the polygons on load.
   const saveAll = () => {
     try {
       const polys = renderer.getZonePolygons();
       if (polys.length) localStorage.setItem(STORAGE_ZONE_POLYGONS, JSON.stringify(polys));
       else localStorage.removeItem(STORAGE_ZONE_POLYGONS);
-      const poly = renderer.getZonePoly();
-      if (poly.length) localStorage.setItem(STORAGE_ZONE_POLY, JSON.stringify(poly));
-      else localStorage.removeItem(STORAGE_ZONE_POLY);
       if (select.value) localStorage.setItem(STORAGE_ZONE_ACTIVE, select.value);
       else localStorage.removeItem(STORAGE_ZONE_ACTIVE);
     } catch { /* private mode */ }
   };
 
   // Restore prior work into this (possibly freshly-rebuilt) renderer
-  // BEFORE wiring the change handler, so the restore doesn't trigger
-  // a redundant save. Order matters: setZonePaintZone clears the
-  // in-progress poly, so set the zone first, then polygons + poly.
+  // BEFORE wiring the change handler so the restore doesn't re-save.
   try {
+    const rawPolys = localStorage.getItem(STORAGE_ZONE_POLYGONS);
+    if (rawPolys) renderer.setZonePolygons(JSON.parse(rawPolys));
     const savedZone = localStorage.getItem(STORAGE_ZONE_ACTIVE);
     if (savedZone && SOLAR_ZONES.includes(savedZone)) {
       select.value = savedZone;
       renderer.setZonePaintZone(savedZone);
     }
-    const rawPolys = localStorage.getItem(STORAGE_ZONE_POLYGONS);
-    if (rawPolys) renderer.setZonePolygons(JSON.parse(rawPolys));
-    const rawP = localStorage.getItem(STORAGE_ZONE_POLY);
-    if (rawP) renderer.setZonePoly(JSON.parse(rawP));
   } catch { /* corrupt / private mode */ }
 
   const refreshCount = () => {
@@ -2443,30 +2434,16 @@ function wireZonePainter(renderer, panel) {
   };
   refreshCount();
 
-  // Every future edit (add / move / undo a point, finish, clear, or
-  // switch zones) funnels through this handler to persist.
-  renderer.setZonePaintChangeHandler(saveAll);
+  // Every future edit (add / move / undo a point, switch / clear a
+  // zone) funnels through this handler to persist + refresh the count.
+  renderer.setZonePaintChangeHandler(() => { saveAll(); refreshCount(); });
 
   select.onchange = () => {
     renderer.setZonePaintZone(select.value || null); // emits -> saveAll
   };
-  finishBtn.onclick = () => {
-    const n = renderer.finishZonePolygon(); // emits -> saveAll
-    refreshCount();
-    // eslint-disable-next-line no-console
-    console.log(`[zone painter] saved polygon for ${select.value || '(none)'} - ${n} polygon(s) total`);
-  };
-  // Undo: drop the last in-progress point, or (if none) the last
-  // committed polygon.
-  undoBtn.onclick = () => {
-    if (renderer.getZonePoly().length) renderer.undoZonePolyPoint();
-    else renderer.removeLastZonePolygon();
-    refreshCount();
-  };
-  clearBtn.onclick = () => {
-    renderer.clearZoneAssignments(); // clears polygons + poly; emits -> saveAll
-    refreshCount();
-  };
+  clearZoneBtn.onclick = () => renderer.clearActiveZonePolygon(); // emits
+  undoBtn.onclick = () => renderer.undoZonePolyPoint();           // emits
+  clearBtn.onclick = () => renderer.clearZoneAssignments();       // emits
   exportBtn.onclick = () => {
     // Polygons are the source data the user uploads; assignments are
     // derived (point-in-polygon) and emitted as a convenience.

@@ -620,9 +620,8 @@ export class MapRenderer {
     // built from several lassos; `colors` is the per-zone palette
     // passed in from browse.js for the overlay.
     this._zonePaint = {
-      active: null,
-      poly: [],                // the in-progress polygon (world coords)
-      polygons: [],            // committed polygons: { zone, points:[{x,y}] }
+      active: null,            // zone currently being edited
+      zonePolys: {},           // zone -> [{x,y}]: ONE polygon per zone
       assignments: new Map(),  // nodeId -> zone, DERIVED from polygons
       colors: {},              // zone -> hex colour
     };
@@ -1180,127 +1179,133 @@ export class MapRenderer {
     if (this._onZonePaintChange) { try { this._onZonePaintChange(); } catch { /* ignore */ } }
   }
 
-  // Read / restore the in-progress polygon vertices (world coords).
-  getZonePoly() { return this._zonePaint.poly.map((p) => ({ x: p.x, y: p.y })); }
-  setZonePoly(arr) {
-    this._zonePaint.poly = Array.isArray(arr)
-      ? arr.filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y))
-          .map((p) => ({ x: p.x, y: p.y }))
-      : [];
-    this._scheduleDraw();
+  // The polygon (point array) for the active zone, creating it on
+  // first use. null when no zone is selected.
+  _activeZonePoly(create = false) {
+    const z = this._zonePaint.active;
+    if (!z) return null;
+    if (!this._zonePaint.zonePolys[z] && create) this._zonePaint.zonePolys[z] = [];
+    return this._zonePaint.zonePolys[z] || null;
   }
 
-  // Select the zone to paint. Passing a falsy value leaves paint
-  // mode (clicks resume selecting sites). Switching zones abandons
-  // any half-drawn polygon but keeps prior assignments.
+  // Select the zone to edit. Each zone owns ONE polygon; switching
+  // zones just changes which polygon is editable - none are cleared.
   setZonePaintZone(zone) {
     this._zonePaint.active = zone || null;
-    this._zonePaint.poly = [];
     this._scheduleDraw();
     this._emitZonePaintChange();
   }
 
   isZonePainting() { return !!this._zonePaint.active; }
 
+  // Append a point to the ACTIVE zone's single polygon.
   addZonePolyPoint(wx, wy) {
-    if (!this._zonePaint.active) return;
-    this._zonePaint.poly.push({ x: wx, y: wy });
+    const poly = this._activeZonePoly(true);
+    if (!poly) return;
+    poly.push({ x: wx, y: wy });
+    this._recomputeDerivedAssignments();
     this._scheduleDraw();
     this._emitZonePaintChange();
   }
 
-  // Return the index of the in-progress polygon vertex within a small
-  // screen-space grab radius of (wx, wy) world coords, or -1. Used to
-  // pick up a vertex for dragging.
+  // Index of the active zone's polygon vertex within a small screen-
+  // space grab radius of (wx, wy), or -1. Used to pick up a vertex.
   _hitTestZoneVertex(wx, wy) {
-    const zp = this._zonePaint;
-    if (!zp.active || !zp.poly.length) return -1;
+    const poly = this._activeZonePoly();
+    if (!poly || !poly.length) return -1;
     const eff = this.zoom * this.fitScale;
     const sx = this.pan.x + wx * eff;
     const sy = this.pan.y + wy * eff;
     const R2 = 12 * 12; // 12px grab radius
     let best = -1, bestD = R2;
-    for (let i = 0; i < zp.poly.length; i++) {
-      const px = this.pan.x + zp.poly[i].x * eff;
-      const py = this.pan.y + zp.poly[i].y * eff;
+    for (let i = 0; i < poly.length; i++) {
+      const px = this.pan.x + poly[i].x * eff;
+      const py = this.pan.y + poly[i].y * eff;
       const d = (px - sx) * (px - sx) + (py - sy) * (py - sy);
       if (d <= bestD) { bestD = d; best = i; }
     }
     return best;
   }
 
-  undoZonePolyPoint() {
-    this._zonePaint.poly.pop();
+  // Move vertex `i` of the active zone's polygon (used while dragging).
+  moveZoneVertex(i, wx, wy) {
+    const poly = this._activeZonePoly();
+    if (!poly || !poly[i]) return;
+    poly[i].x = wx; poly[i].y = wy;
     this._scheduleDraw();
-    this._emitZonePaintChange();
   }
 
-  // Commit the in-progress polygon to the saved list (tagged with the
-  // active zone). Polygons are the source of truth; node assignments
-  // are derived from them. Returns the new polygon count.
-  finishZonePolygon() {
-    const zp = this._zonePaint;
-    if (!zp.active || zp.poly.length < 3) {
-      zp.poly = [];
-      this._scheduleDraw();
-      this._emitZonePaintChange();
-      return zp.polygons.length;
-    }
-    zp.polygons.push({ zone: zp.active, points: zp.poly.map((p) => ({ x: p.x, y: p.y })) });
-    zp.poly = [];
+  // Drop the last point of the active zone's polygon.
+  undoZonePolyPoint() {
+    const z = this._zonePaint.active;
+    const poly = z && this._zonePaint.zonePolys[z];
+    if (!poly || !poly.length) return;
+    poly.pop();
+    if (!poly.length) delete this._zonePaint.zonePolys[z];
     this._recomputeDerivedAssignments();
     this._scheduleDraw();
     this._emitZonePaintChange();
-    return zp.polygons.length;
   }
 
-  // Re-derive { nodeId: zone } from the saved polygons. A node inside
-  // multiple polygons takes the last one's zone (draw order).
+  // Re-derive { nodeId: zone } from every zone polygon (>= 3 points).
+  // A node inside multiple polygons takes whichever resolves last.
   _recomputeDerivedAssignments() {
     const zp = this._zonePaint;
     zp.assignments = new Map();
-    for (const poly of zp.polygons) {
-      if (!poly || !Array.isArray(poly.points) || poly.points.length < 3) continue;
+    for (const zone in zp.zonePolys) {
+      const pts = zp.zonePolys[zone];
+      if (!Array.isArray(pts) || pts.length < 3) continue;
       for (const s of this._waypoints) {
-        if (pointInPolygon(s.x, s.y, poly.points)) zp.assignments.set(s.id, poly.zone);
+        if (pointInPolygon(s.x, s.y, pts)) zp.assignments.set(s.id, zone);
       }
     }
   }
 
+  // Clear EVERYTHING (all zone polygons + derived assignments).
   clearZoneAssignments() {
-    this._zonePaint.polygons = [];
+    this._zonePaint.zonePolys = {};
     this._zonePaint.assignments.clear();
-    this._zonePaint.poly = [];
     this._scheduleDraw();
     this._emitZonePaintChange();
   }
 
-  // Drop only the most recently committed polygon (and re-derive).
-  removeLastZonePolygon() {
-    const zp = this._zonePaint;
-    if (!zp.polygons.length) return;
-    zp.polygons.pop();
+  // Clear just the active zone's polygon.
+  clearActiveZonePolygon() {
+    const z = this._zonePaint.active;
+    if (!z || !this._zonePaint.zonePolys[z]) return;
+    delete this._zonePaint.zonePolys[z];
     this._recomputeDerivedAssignments();
     this._scheduleDraw();
     this._emitZonePaintChange();
   }
 
-  // Read / restore the committed polygons (the data the user exports).
+  // Read / restore the per-zone polygons (the data the user exports).
   getZonePolygons() {
-    return this._zonePaint.polygons.map((p) => ({
-      zone: p.zone, points: p.points.map((q) => ({ x: q.x, y: q.y })),
-    }));
+    const out = [];
+    for (const zone in this._zonePaint.zonePolys) {
+      const pts = this._zonePaint.zonePolys[zone];
+      if (Array.isArray(pts) && pts.length) {
+        out.push({ zone, points: pts.map((q) => ({ x: q.x, y: q.y })) });
+      }
+    }
+    return out;
   }
   setZonePolygons(arr) {
-    this._zonePaint.polygons = Array.isArray(arr)
-      ? arr.filter((p) => p && Array.isArray(p.points))
-          .map((p) => ({ zone: p.zone, points: p.points.map((q) => ({ x: +q.x, y: +q.y })) }))
-      : [];
+    this._zonePaint.zonePolys = {};
+    if (Array.isArray(arr)) {
+      for (const p of arr) {
+        if (p && p.zone && Array.isArray(p.points)) {
+          this._zonePaint.zonePolys[p.zone] = p.points
+            .filter((q) => q && Number.isFinite(+q.x) && Number.isFinite(+q.y))
+            .map((q) => ({ x: +q.x, y: +q.y }));
+        }
+      }
+    }
     this._recomputeDerivedAssignments();
     this._scheduleDraw();
   }
 
-  zonePolygonCount() { return this._zonePaint.polygons.length; }
+  zonePolygonCount() { return this.getZonePolygons().length; }
   zoneAssignmentCount() { return this._zonePaint.assignments.size; }
 
   // Export the accumulated labels as plain records. id2 is the stable
@@ -2849,8 +2854,7 @@ export class MapRenderer {
     window.addEventListener('mousemove', (ev) => {
       if (this._zoneDragVertex != null) {
         const wp = this._eventToWorld(ev);
-        const v = this._zonePaint.poly[this._zoneDragVertex];
-        if (v) { v.x = wp.x; v.y = wp.y; this._scheduleDraw(); }
+        this.moveZoneVertex(this._zoneDragVertex, wp.x, wp.y);
         return;
       }
       if (!this._dragStart) return;
@@ -2865,7 +2869,9 @@ export class MapRenderer {
       this._dragStart = null;
       if (this._zoneDragVertex != null) {
         this._zoneDragVertex = null;
-        this._emitZonePaintChange(); // persist the moved vertex
+        this._recomputeDerivedAssignments(); // moved vertex changed coverage
+        this._scheduleDraw();
+        this._emitZonePaintChange();         // persist the moved vertex
       }
     });
 
@@ -3049,34 +3055,41 @@ export class MapRenderer {
   // handles). No-op unless something is assigned or being drawn.
   _drawZonePaintScreen(ctx) {
     const zp = this._zonePaint;
-    if (!zp.assignments.size && !zp.poly.length && !zp.polygons.length) return;
+    const zones = Object.keys(zp.zonePolys);
+    if (!zp.assignments.size && !zones.length) return;
     const eff = this.zoom * this.fitScale;
     const toS = (x, y) => ({ x: this.pan.x + x * eff, y: this.pan.y + y * eff });
 
-    // Committed polygons: filled + outlined in their zone colour, with
-    // small vertex handles so the saved shapes stay visible.
-    for (const poly of zp.polygons) {
-      if (!poly.points || poly.points.length < 2) continue;
-      const col = zp.colors[poly.zone] || '#22d3ee';
-      const pts = poly.points.map((v) => toS(v.x, v.y));
+    // One polygon per zone, filled + outlined in its colour. The
+    // ACTIVE zone is dashed with draggable white vertex handles; the
+    // others are solid with small colour dots.
+    for (const zone of zones) {
+      const poly = zp.zonePolys[zone];
+      if (!poly || poly.length < 1) continue;
+      const isActive = zone === zp.active;
+      const col = zp.colors[zone] || '#22d3ee';
+      const pts = poly.map((v) => toS(v.x, v.y));
       ctx.beginPath();
       ctx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
       if (pts.length >= 3) {
         ctx.closePath();
-        ctx.globalAlpha = 0.14;
+        ctx.globalAlpha = isActive ? 0.18 : 0.12;
         ctx.fillStyle = col;
         ctx.fill();
         ctx.globalAlpha = 1;
       }
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = isActive ? 2 : 1.5;
       ctx.strokeStyle = col;
+      if (isActive) ctx.setLineDash([6, 4]);
       ctx.stroke();
+      ctx.setLineDash([]);
       for (const p of pts) {
         ctx.beginPath();
-        ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
-        ctx.fillStyle = col;
+        ctx.arc(p.x, p.y, isActive ? 4 : 3, 0, Math.PI * 2);
+        ctx.fillStyle = isActive ? '#fff' : col;
         ctx.fill();
+        if (isActive) { ctx.lineWidth = 2; ctx.strokeStyle = col; ctx.stroke(); }
       }
     }
 
@@ -3097,34 +3110,6 @@ export class MapRenderer {
       }
     }
 
-    if (zp.active && zp.poly.length) {
-      const col = zp.colors[zp.active] || '#22d3ee';
-      const pts = zp.poly.map((v) => toS(v.x, v.y));
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-      if (pts.length >= 3) {
-        ctx.closePath();
-        ctx.globalAlpha = 0.18;
-        ctx.fillStyle = col;
-        ctx.fill();
-        ctx.globalAlpha = 1;
-      }
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = col;
-      ctx.setLineDash([6, 4]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      for (const p of pts) {
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
-        ctx.fillStyle = '#fff';
-        ctx.fill();
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = col;
-        ctx.stroke();
-      }
-    }
   }
 
   // JS hit-test against every site, preferring real sites within a
