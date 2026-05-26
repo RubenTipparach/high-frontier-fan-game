@@ -1814,15 +1814,29 @@
   color: var(--accent-2);
   font-variant-numeric: tabular-nums;
 }
+/* Frame-breakdown profiler: pulled out of the vertical stack into its
+   own column anchored to the right of the panel so it doesn't stretch
+   the panel tall (and clip). Bottom-aligned, scrolls if it ever runs
+   past the available height. */
 .map-debug .dbg-prof {
-  margin: 6px 0;
-  padding: 6px 0;
-  border-bottom: 1px dashed var(--border);
+  position: absolute;
+  left: calc(100% + 8px);
+  bottom: 0;
+  width: 156px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  background: rgba(15, 16, 35, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.55);
 }
 .map-debug .dbg-prof-title {
   font-size: 11px;
-  color: var(--ink-dim);
-  margin-bottom: 4px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
 }
 .map-debug .dbg-prof-body {
   font-size: 11px;
