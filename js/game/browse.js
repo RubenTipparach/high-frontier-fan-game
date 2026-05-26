@@ -2030,7 +2030,7 @@ function ensureMapShell(host) {
               <option value="">- off -</option>
             </select>
           </label>
-          <p class="dbg-zone-hint" id="dbg-zone-hint">Each zone is ONE polygon. Pick a zone, then <strong>Shift+click</strong> to add points to it; drag a point to move it; plain-drag pans. Switch zones to edit another polygon. <strong>Export</strong> dumps all zone polygons. Everything persists across refreshes until you Clear.</p>
+          <p class="dbg-zone-hint" id="dbg-zone-hint">Each zone is ONE polygon. Pick a zone, then <strong>Shift+click</strong> to add points to it; drag a point to move it; plain-drag pans. Switch zones to edit another polygon. Zones nest inner→outer: a node takes the <strong>innermost</strong> polygon that contains it (inside Venus but not Mercury = Venus). <strong>Export</strong> dumps all zone polygons; everything persists across refreshes until you Clear.</p>
           <div class="dbg-zone-btns">
             <button id="dbg-zone-clearzone" type="button">Clear zone</button>
             <button id="dbg-zone-undo" type="button">Undo point</button>
@@ -2399,6 +2399,10 @@ function wireZonePainter(renderer, panel) {
   const colors = {};
   for (const z of SOLAR_ZONES) colors[z] = (SOLAR_ZONE_INFO[z] || {}).color || '#22d3ee';
   renderer.setZonePaintColors(colors);
+  // Zones nest inner -> outer (SOLAR_ZONES is Mercury..Neptune), so a
+  // node is labelled by the innermost polygon containing it. Set the
+  // order BEFORE restoring polygons (restore re-derives assignments).
+  renderer.setZoneOrder(SOLAR_ZONES);
 
   // Persist the per-zone polygons (the source data) + the picked
   // zone. Node assignments are NOT persisted - they're derived from

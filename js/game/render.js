@@ -624,6 +624,7 @@ export class MapRenderer {
       zonePolys: {},           // zone -> [{x,y}]: ONE polygon per zone
       assignments: new Map(),  // nodeId -> zone, DERIVED from polygons
       colors: {},              // zone -> hex colour
+      order: [],               // zones inner -> outer (Mercury first)
     };
     this._zoneDragVertex = null;    // index of the poly vertex being dragged
     this._zoneGrabConsumed = false; // swallow the click after a vertex grab
@@ -1172,6 +1173,15 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
+  // Zones nest inner -> outer (Mercury innermost). The order drives
+  // the derived-assignment rule: a node belongs to the INNERMOST
+  // polygon that contains it.
+  setZoneOrder(order) {
+    this._zonePaint.order = Array.isArray(order) ? order.slice() : [];
+    this._recomputeDerivedAssignments();
+    this._scheduleDraw();
+  }
+
   // Notified (by browse.js) after any poly / assignment edit so it
   // can persist the work to localStorage.
   setZonePaintChangeHandler(fn) { this._onZonePaintChange = fn || null; }
@@ -1247,16 +1257,34 @@ export class MapRenderer {
     this._emitZonePaintChange();
   }
 
-  // Re-derive { nodeId: zone } from every zone polygon (>= 3 points).
-  // A node inside multiple polygons takes whichever resolves last.
+  // Re-derive { nodeId: zone } from the zone polygons (>= 3 points).
+  // Zones are concentric: an outer polygon (e.g. Venus) encloses the
+  // inner ones (Mercury). A node belongs to the INNERMOST zone whose
+  // polygon contains it - i.e. the first hit when zones are tested in
+  // inner -> outer order. So everything inside Mercury is Mercury;
+  // everything inside Venus that ISN'T Mercury is Venus; and so on.
   _recomputeDerivedAssignments() {
     const zp = this._zonePaint;
     zp.assignments = new Map();
-    for (const zone in zp.zonePolys) {
+    // Candidate polygons in inner -> outer order. Fall back to object
+    // key order if no explicit zone order was supplied.
+    const order = (zp.order && zp.order.length) ? zp.order : Object.keys(zp.zonePolys);
+    const ordered = [];
+    const seen = new Set();
+    for (const zone of order) {
       const pts = zp.zonePolys[zone];
-      if (!Array.isArray(pts) || pts.length < 3) continue;
-      for (const s of this._waypoints) {
-        if (pointInPolygon(s.x, s.y, pts)) zp.assignments.set(s.id, zone);
+      if (Array.isArray(pts) && pts.length >= 3) { ordered.push({ zone, pts }); seen.add(zone); }
+    }
+    // Include any polygon zones missing from the order (after the
+    // ordered ones) so nothing is silently dropped.
+    for (const zone in zp.zonePolys) {
+      if (seen.has(zone)) continue;
+      const pts = zp.zonePolys[zone];
+      if (Array.isArray(pts) && pts.length >= 3) ordered.push({ zone, pts });
+    }
+    for (const s of this._waypoints) {
+      for (const o of ordered) {
+        if (pointInPolygon(s.x, s.y, o.pts)) { zp.assignments.set(s.id, o.zone); break; }
       }
     }
   }
