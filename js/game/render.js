@@ -229,6 +229,30 @@ function appendSmoothPath(ctx, pts) {
   ctx.lineTo(last.x, last.y);
 }
 
+// Smooth CLOSED loop through `pts` (quadratic midpoints, wrapping
+// around). Renders a rounded blob through the polygon's edge
+// midpoints with each vertex as a control point. Used for curved
+// zone borders.
+function appendSmoothClosedPath(ctx, pts) {
+  const n = pts.length;
+  if (n < 3) {
+    if (!n) return;
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < n; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.closePath();
+    return;
+  }
+  const sx = (pts[n - 1].x + pts[0].x) / 2;
+  const sy = (pts[n - 1].y + pts[0].y) / 2;
+  ctx.moveTo(sx, sy);
+  for (let i = 0; i < n; i++) {
+    const cur = pts[i];
+    const next = pts[(i + 1) % n];
+    ctx.quadraticCurveTo(cur.x, cur.y, (cur.x + next.x) / 2, (cur.y + next.y) / 2);
+  }
+  ctx.closePath();
+}
+
 // Water droplet glyph: teardrop with a pointed top and rounded
 // bottom, traced as one closed sub-path. Caller controls fill +
 // stroke. Drawn at (cx, cy) with total height `h` (the point sits
@@ -642,11 +666,13 @@ export class MapRenderer {
       initialZoom: _isMobileViewport() ? MOBILE_DEFAULT_ZOOM : DEFAULT_ZOOM,
       debug: false,
       // Zone-visualisation (config panel): draw the canonical solar-
-      // zone polygons behind everything. Fill optional; border opacity
-      // 0.01..1 (default 0.5). zoneEditMode reveals the live painter.
-      visualizeZones: false,
+      // zone polygons behind everything. On by default. Fill optional;
+      // border opacity 0.01..1 (default 0.5); curved borders smooth the
+      // polygon edges (on by default).
+      visualizeZones: true,
       zoneFill: true,
       zoneOpacity: 0.5,
+      zoneCurved: true,
       zoneEditMode: false,
     };
     // Canonical zone polygons (the frozen source-of-truth data),
@@ -3118,6 +3144,7 @@ export class MapRenderer {
     const order = (cz.order && cz.order.length) ? cz.order : Object.keys(cz.polys);
     if (!order.length) return;
     const op = Math.max(0.01, Math.min(1, this.options.zoneOpacity ?? 0.5));
+    const curved = this.options.zoneCurved !== false;
     ctx.save();
     ctx.lineJoin = 'round';
     for (let i = order.length - 1; i >= 0; i--) {
@@ -3128,16 +3155,20 @@ export class MapRenderer {
       for (const pts of polys) {
         if (!pts || pts.length < 2) continue;
         ctx.beginPath();
-        ctx.moveTo(pts[0].x, pts[0].y);
-        for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k].x, pts[k].y);
-        ctx.closePath();
+        if (curved) {
+          appendSmoothClosedPath(ctx, pts);
+        } else {
+          ctx.moveTo(pts[0].x, pts[0].y);
+          for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k].x, pts[k].y);
+          ctx.closePath();
+        }
         if (this.options.zoneFill) {
-          ctx.globalAlpha = op * 0.35;
+          ctx.globalAlpha = Math.min(0.9, op * 0.7);
           ctx.fillStyle = col;
           ctx.fill();
         }
-        ctx.globalAlpha = op;
-        ctx.lineWidth = 2 / eff; // ~2 screen px regardless of zoom
+        ctx.globalAlpha = Math.min(1, op + 0.15);
+        ctx.lineWidth = 2.5 / eff; // ~2.5 screen px regardless of zoom
         ctx.strokeStyle = col;
         ctx.stroke();
       }

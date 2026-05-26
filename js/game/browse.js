@@ -2274,6 +2274,7 @@ const STORAGE_ZONE_ACTIVE = 'hf-sandbox-zone-active';
 const STORAGE_ZONE_VIZ     = 'hf-sandbox-zone-viz';
 const STORAGE_ZONE_FILL    = 'hf-sandbox-zone-fill';
 const STORAGE_ZONE_VIZ_OP  = 'hf-sandbox-zone-viz-opacity';
+const STORAGE_ZONE_CURVED  = 'hf-sandbox-zone-curved';
 const STORAGE_ZONE_EDIT     = 'hf-sandbox-zone-edit';
 function persistDbg(key, value) {
   try { localStorage.setItem(key, String(value)); } catch { /* private mode */ }
@@ -2282,9 +2283,10 @@ function persistDbg(key, value) {
 // renderer. Defaults: overlay off, fill on, 50% opacity, edit off.
 function applyZoneViewConfig(renderer) {
   if (!renderer) return;
-  renderer.setOption('visualizeZones', loadDbgBool(STORAGE_ZONE_VIZ, false));
+  renderer.setOption('visualizeZones', loadDbgBool(STORAGE_ZONE_VIZ, true));
   renderer.setOption('zoneFill', loadDbgBool(STORAGE_ZONE_FILL, true));
   renderer.setOption('zoneOpacity', loadDbgNumber(STORAGE_ZONE_VIZ_OP, 50, 1, 100) / 100);
+  renderer.setOption('zoneCurved', loadDbgBool(STORAGE_ZONE_CURVED, true));
   renderer.setOption('zoneEditMode', loadDbgBool(STORAGE_ZONE_EDIT, false));
 }
 function loadDbgNumber(key, fallback, min, max) {
@@ -7276,9 +7278,10 @@ function openConfigModal() {
   document.addEventListener('keydown', onKey);
 
   const isFs = !!document.fullscreenElement;
-  const viz = loadDbgBool(STORAGE_ZONE_VIZ, false);
+  const viz = loadDbgBool(STORAGE_ZONE_VIZ, true);
   const fill = loadDbgBool(STORAGE_ZONE_FILL, true);
   const op = loadDbgNumber(STORAGE_ZONE_VIZ_OP, 50, 1, 100);
+  const curved = loadDbgBool(STORAGE_ZONE_CURVED, true);
 
   const panel = document.createElement('div');
   panel.className = 'config-panel';
@@ -7292,7 +7295,8 @@ function openConfigModal() {
     <div class="config-section">
       <div class="config-section-title">Zone data</div>
       <label class="dbg-check"><input type="checkbox" class="cfg-zone-viz" ${viz ? 'checked' : ''}><span>Visualize zone data</span></label>
-      <label class="dbg-check"><input type="checkbox" class="cfg-zone-fill" ${fill ? 'checked' : ''}><span>Zone fill</span></label>
+      <label class="dbg-check"><input type="checkbox" class="cfg-zone-fill" ${fill ? 'checked' : ''}><span>Fill zones</span></label>
+      <label class="dbg-check"><input type="checkbox" class="cfg-zone-curved" ${curved ? 'checked' : ''}><span>Curved zone border</span></label>
       <label class="dbg-slider"><span>Zone opacity <em class="cfg-zone-op-val">${op}%</em></span>
         <input type="range" class="cfg-zone-op" min="1" max="100" step="1" value="${op}"></label>
     </div>
@@ -7307,6 +7311,7 @@ function openConfigModal() {
   panel.querySelector('.config-nav').addEventListener('click', () => { close(); openGameSettingsModal(); });
   const vizCb  = panel.querySelector('.cfg-zone-viz');
   const fillCb = panel.querySelector('.cfg-zone-fill');
+  const curvedCb = panel.querySelector('.cfg-zone-curved');
   const opEl   = panel.querySelector('.cfg-zone-op');
   const opValEl = panel.querySelector('.cfg-zone-op-val');
   vizCb.onchange = () => {
@@ -7316,6 +7321,10 @@ function openConfigModal() {
   fillCb.onchange = () => {
     persistDbg(STORAGE_ZONE_FILL, fillCb.checked ? '1' : '0');
     if (_renderer) _renderer.setOption('zoneFill', fillCb.checked);
+  };
+  curvedCb.onchange = () => {
+    persistDbg(STORAGE_ZONE_CURVED, curvedCb.checked ? '1' : '0');
+    if (_renderer) _renderer.setOption('zoneCurved', curvedCb.checked);
   };
   opEl.oninput = () => {
     const v = Number(opEl.value);
