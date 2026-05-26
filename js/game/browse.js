@@ -2023,25 +2023,25 @@ function ensureMapShell(host) {
           <span>Show decoratives</span>
         </label>
         <div class="dbg-zone">
-          <div class="dbg-zone-title">Zone painter (nodes only)</div>
+          <div class="dbg-zone-title">Zone polygon painter</div>
           <label class="dbg-slider">
             <span>Paint zone</span>
             <select id="dbg-zone-select">
               <option value="">- off -</option>
             </select>
           </label>
-          <p class="dbg-zone-hint" id="dbg-zone-hint">Pick a zone, then <strong>Shift+click</strong> the map to drop polygon points around the nodes you want. Drag a point to move it; plain-drag still pans.</p>
+          <p class="dbg-zone-hint" id="dbg-zone-hint">Pick a zone, then <strong>Shift+click</strong> the map to drop polygon points. Drag a point to move it; plain-drag pans. <strong>Save polygon</strong> stores it (draw as many as you like); <strong>Export</strong> dumps all polygons to the console. Saved polygons persist across refreshes until you Clear.</p>
           <div class="dbg-zone-btns">
-            <button id="dbg-zone-finish" type="button">Finish polygon</button>
-            <button id="dbg-zone-undo" type="button">Undo point</button>
+            <button id="dbg-zone-finish" type="button">Save polygon</button>
+            <button id="dbg-zone-undo" type="button">Undo</button>
           </div>
           <div class="dbg-zone-btns">
             <button id="dbg-zone-clear" type="button">Clear all</button>
             <button id="dbg-zone-export" type="button">Export to console</button>
           </div>
           <div class="dbg-row">
-            <span>Nodes assigned</span>
-            <strong id="dbg-zone-count">0</strong>
+            <span>Saved</span>
+            <strong id="dbg-zone-count">0 poly · 0 nodes</strong>
           </div>
         </div>
         <button id="dbg-reset" class="dbg-reset">Reset view</button>
@@ -2257,8 +2257,9 @@ const STORAGE_DBG_PANEL_OPEN  = 'hf-sandbox-map-debug-open';
 // Zone-painter assignments ({ nodeId: zone }) + the last-picked zone.
 // Persisted so the labels survive reloads / map-mode toggles until
 // the data is exported and the painter is cleared.
-const STORAGE_ZONE_PAINT  = 'hf-sandbox-zone-assignments';
+const STORAGE_ZONE_POLYGONS = 'hf-sandbox-zone-polygons'; // committed polygons
 const STORAGE_ZONE_ACTIVE = 'hf-sandbox-zone-active';
+const STORAGE_ZONE_POLY   = 'hf-sandbox-zone-poly';      // in-progress polygon
 function persistDbg(key, value) {
   try { localStorage.setItem(key, String(value)); } catch { /* private mode */ }
 }
@@ -2400,73 +2401,87 @@ function wireZonePainter(renderer, panel) {
   for (const z of SOLAR_ZONES) colors[z] = (SOLAR_ZONE_INFO[z] || {}).color || '#22d3ee';
   renderer.setZonePaintColors(colors);
 
-  // Persist the accumulated { nodeId: zone } map so a reload / map-
-  // mode toggle doesn't lose painted points before they're exported.
-  const saveAssignments = () => {
-    const map = {};
-    for (const r of renderer.getZoneAssignments()) map[r.id] = r.zone;
+  // Persist ALL painted work so a refresh / map-mode toggle never
+  // loses it before export: the committed POLYGONS (the source data),
+  // the in-progress polygon points, and the picked zone. Node
+  // assignments are NOT persisted - they're derived from the polygons.
+  const saveAll = () => {
     try {
-      if (Object.keys(map).length) localStorage.setItem(STORAGE_ZONE_PAINT, JSON.stringify(map));
-      else localStorage.removeItem(STORAGE_ZONE_PAINT);
+      const polys = renderer.getZonePolygons();
+      if (polys.length) localStorage.setItem(STORAGE_ZONE_POLYGONS, JSON.stringify(polys));
+      else localStorage.removeItem(STORAGE_ZONE_POLYGONS);
+      const poly = renderer.getZonePoly();
+      if (poly.length) localStorage.setItem(STORAGE_ZONE_POLY, JSON.stringify(poly));
+      else localStorage.removeItem(STORAGE_ZONE_POLY);
+      if (select.value) localStorage.setItem(STORAGE_ZONE_ACTIVE, select.value);
+      else localStorage.removeItem(STORAGE_ZONE_ACTIVE);
     } catch { /* private mode */ }
   };
-  // Restore any previously-saved assignments into this (possibly
-  // freshly-rebuilt) renderer.
-  try {
-    const raw = localStorage.getItem(STORAGE_ZONE_PAINT);
-    if (raw) renderer.setZoneAssignments(JSON.parse(raw));
-  } catch { /* ignore corrupt / private mode */ }
 
-  const refreshCount = () => {
-    if (countEl) countEl.textContent = String(renderer.zoneAssignmentCount());
-  };
-  refreshCount();
-
-  // Restore the last-picked zone so the dropdown + paint mode survive.
+  // Restore prior work into this (possibly freshly-rebuilt) renderer
+  // BEFORE wiring the change handler, so the restore doesn't trigger
+  // a redundant save. Order matters: setZonePaintZone clears the
+  // in-progress poly, so set the zone first, then polygons + poly.
   try {
     const savedZone = localStorage.getItem(STORAGE_ZONE_ACTIVE);
     if (savedZone && SOLAR_ZONES.includes(savedZone)) {
       select.value = savedZone;
       renderer.setZonePaintZone(savedZone);
     }
-  } catch { /* private mode */ }
+    const rawPolys = localStorage.getItem(STORAGE_ZONE_POLYGONS);
+    if (rawPolys) renderer.setZonePolygons(JSON.parse(rawPolys));
+    const rawP = localStorage.getItem(STORAGE_ZONE_POLY);
+    if (rawP) renderer.setZonePoly(JSON.parse(rawP));
+  } catch { /* corrupt / private mode */ }
+
+  const refreshCount = () => {
+    if (countEl) {
+      const np = renderer.zonePolygonCount();
+      const nn = renderer.zoneAssignmentCount();
+      countEl.textContent = `${np} poly · ${nn} nodes`;
+    }
+  };
+  refreshCount();
+
+  // Every future edit (add / move / undo a point, finish, clear, or
+  // switch zones) funnels through this handler to persist.
+  renderer.setZonePaintChangeHandler(saveAll);
 
   select.onchange = () => {
-    renderer.setZonePaintZone(select.value || null);
-    try {
-      if (select.value) localStorage.setItem(STORAGE_ZONE_ACTIVE, select.value);
-      else localStorage.removeItem(STORAGE_ZONE_ACTIVE);
-    } catch { /* private mode */ }
+    renderer.setZonePaintZone(select.value || null); // emits -> saveAll
   };
   finishBtn.onclick = () => {
-    const n = renderer.finishZonePolygon();
+    const n = renderer.finishZonePolygon(); // emits -> saveAll
     refreshCount();
-    saveAssignments();
     // eslint-disable-next-line no-console
-    console.log(`[zone painter] stamped ${n} node(s) as ${select.value || '(none)'}`);
+    console.log(`[zone painter] saved polygon for ${select.value || '(none)'} - ${n} polygon(s) total`);
   };
-  undoBtn.onclick = () => renderer.undoZonePolyPoint();
-  clearBtn.onclick = () => {
-    renderer.clearZoneAssignments();
+  // Undo: drop the last in-progress point, or (if none) the last
+  // committed polygon.
+  undoBtn.onclick = () => {
+    if (renderer.getZonePoly().length) renderer.undoZonePolyPoint();
+    else renderer.removeLastZonePolygon();
     refreshCount();
-    saveAssignments();
+  };
+  clearBtn.onclick = () => {
+    renderer.clearZoneAssignments(); // clears polygons + poly; emits -> saveAll
+    refreshCount();
   };
   exportBtn.onclick = () => {
+    // Polygons are the source data the user uploads; assignments are
+    // derived (point-in-polygon) and emitted as a convenience.
+    const polygons = renderer.getZonePolygons();
+    const byZonePolys = {};
+    for (const p of polygons) (byZonePolys[p.zone] = byZonePolys[p.zone] || []).push(p.points);
     const records = renderer.getZoneAssignments();
-    // Compact id2 -> zone map (the form most convenient for wiring
-    // into planner-map.js), plus the full records for reference.
     const byRef = {};
-    const byZone = {};
-    for (const r of records) {
-      byRef[r.id2] = r.zone;
-      byZone[r.zone] = (byZone[r.zone] || 0) + 1;
-    }
+    for (const r of records) byRef[r.id2] = r.zone;
     /* eslint-disable no-console */
-    console.log(`[zone painter] ${records.length} node(s) assigned`, byZone);
-    console.log('[zone painter] id2 -> zone map (copy below):');
+    console.log(`[zone painter] ${polygons.length} polygon(s); ${records.length} derived node(s)`);
+    console.log('[zone painter] POLYGONS by zone (copy below - this is the data):');
+    console.log(JSON.stringify(byZonePolys));
+    console.log('[zone painter] derived id2 -> zone map (convenience):');
     console.log(JSON.stringify(byRef, null, 2));
-    console.log('[zone painter] full records:');
-    console.log(JSON.stringify(records));
     /* eslint-enable no-console */
   };
 }

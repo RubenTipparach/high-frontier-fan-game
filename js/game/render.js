@@ -621,12 +621,14 @@ export class MapRenderer {
     // passed in from browse.js for the overlay.
     this._zonePaint = {
       active: null,
-      poly: [],
-      assignments: new Map(),  // nodeId -> zone string
+      poly: [],                // the in-progress polygon (world coords)
+      polygons: [],            // committed polygons: { zone, points:[{x,y}] }
+      assignments: new Map(),  // nodeId -> zone, DERIVED from polygons
       colors: {},              // zone -> hex colour
     };
     this._zoneDragVertex = null;    // index of the poly vertex being dragged
     this._zoneGrabConsumed = false; // swallow the click after a vertex grab
+    this._onZonePaintChange = null; // fired after poly / assignment edits
     // Public-ish tuneables. Mutating them and calling _scheduleDraw
     // is enough for the debug panel to take effect; nothing else
     // caches them.
@@ -1171,6 +1173,23 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
+  // Notified (by browse.js) after any poly / assignment edit so it
+  // can persist the work to localStorage.
+  setZonePaintChangeHandler(fn) { this._onZonePaintChange = fn || null; }
+  _emitZonePaintChange() {
+    if (this._onZonePaintChange) { try { this._onZonePaintChange(); } catch { /* ignore */ } }
+  }
+
+  // Read / restore the in-progress polygon vertices (world coords).
+  getZonePoly() { return this._zonePaint.poly.map((p) => ({ x: p.x, y: p.y })); }
+  setZonePoly(arr) {
+    this._zonePaint.poly = Array.isArray(arr)
+      ? arr.filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y))
+          .map((p) => ({ x: p.x, y: p.y }))
+      : [];
+    this._scheduleDraw();
+  }
+
   // Select the zone to paint. Passing a falsy value leaves paint
   // mode (clicks resume selecting sites). Switching zones abandons
   // any half-drawn polygon but keeps prior assignments.
@@ -1178,6 +1197,7 @@ export class MapRenderer {
     this._zonePaint.active = zone || null;
     this._zonePaint.poly = [];
     this._scheduleDraw();
+    this._emitZonePaintChange();
   }
 
   isZonePainting() { return !!this._zonePaint.active; }
@@ -1186,6 +1206,7 @@ export class MapRenderer {
     if (!this._zonePaint.active) return;
     this._zonePaint.poly.push({ x: wx, y: wy });
     this._scheduleDraw();
+    this._emitZonePaintChange();
   }
 
   // Return the index of the in-progress polygon vertex within a small
@@ -1211,47 +1232,75 @@ export class MapRenderer {
   undoZonePolyPoint() {
     this._zonePaint.poly.pop();
     this._scheduleDraw();
+    this._emitZonePaintChange();
   }
 
-  // Close the in-progress polygon and stamp every waypoint node whose
-  // centre falls inside it with the active zone. Returns the count
-  // stamped this call. Real (named) sites are never touched.
+  // Commit the in-progress polygon to the saved list (tagged with the
+  // active zone). Polygons are the source of truth; node assignments
+  // are derived from them. Returns the new polygon count.
   finishZonePolygon() {
     const zp = this._zonePaint;
     if (!zp.active || zp.poly.length < 3) {
       zp.poly = [];
       this._scheduleDraw();
-      return 0;
+      this._emitZonePaintChange();
+      return zp.polygons.length;
     }
-    let n = 0;
-    for (const s of this._waypoints) {
-      if (pointInPolygon(s.x, s.y, zp.poly)) {
-        zp.assignments.set(s.id, zp.active);
-        n++;
+    zp.polygons.push({ zone: zp.active, points: zp.poly.map((p) => ({ x: p.x, y: p.y })) });
+    zp.poly = [];
+    this._recomputeDerivedAssignments();
+    this._scheduleDraw();
+    this._emitZonePaintChange();
+    return zp.polygons.length;
+  }
+
+  // Re-derive { nodeId: zone } from the saved polygons. A node inside
+  // multiple polygons takes the last one's zone (draw order).
+  _recomputeDerivedAssignments() {
+    const zp = this._zonePaint;
+    zp.assignments = new Map();
+    for (const poly of zp.polygons) {
+      if (!poly || !Array.isArray(poly.points) || poly.points.length < 3) continue;
+      for (const s of this._waypoints) {
+        if (pointInPolygon(s.x, s.y, poly.points)) zp.assignments.set(s.id, poly.zone);
       }
     }
-    zp.poly = [];
-    this._scheduleDraw();
-    return n;
   }
 
   clearZoneAssignments() {
+    this._zonePaint.polygons = [];
     this._zonePaint.assignments.clear();
     this._zonePaint.poly = [];
     this._scheduleDraw();
+    this._emitZonePaintChange();
   }
 
-  // Restore persisted assignments. `obj` is a plain { nodeId: zone }
-  // map (the form browse.js saves to localStorage). Unknown ids are
-  // still stored; the draw pass skips any that aren't in the data.
-  setZoneAssignments(obj) {
-    this._zonePaint.assignments = new Map();
-    if (obj && typeof obj === 'object') {
-      for (const id in obj) this._zonePaint.assignments.set(id, obj[id]);
-    }
+  // Drop only the most recently committed polygon (and re-derive).
+  removeLastZonePolygon() {
+    const zp = this._zonePaint;
+    if (!zp.polygons.length) return;
+    zp.polygons.pop();
+    this._recomputeDerivedAssignments();
+    this._scheduleDraw();
+    this._emitZonePaintChange();
+  }
+
+  // Read / restore the committed polygons (the data the user exports).
+  getZonePolygons() {
+    return this._zonePaint.polygons.map((p) => ({
+      zone: p.zone, points: p.points.map((q) => ({ x: q.x, y: q.y })),
+    }));
+  }
+  setZonePolygons(arr) {
+    this._zonePaint.polygons = Array.isArray(arr)
+      ? arr.filter((p) => p && Array.isArray(p.points))
+          .map((p) => ({ zone: p.zone, points: p.points.map((q) => ({ x: +q.x, y: +q.y })) }))
+      : [];
+    this._recomputeDerivedAssignments();
     this._scheduleDraw();
   }
 
+  zonePolygonCount() { return this._zonePaint.polygons.length; }
   zoneAssignmentCount() { return this._zonePaint.assignments.size; }
 
   // Export the accumulated labels as plain records. id2 is the stable
@@ -2814,7 +2863,10 @@ export class MapRenderer {
     });
     window.addEventListener('mouseup', () => {
       this._dragStart = null;
-      this._zoneDragVertex = null;
+      if (this._zoneDragVertex != null) {
+        this._zoneDragVertex = null;
+        this._emitZonePaintChange(); // persist the moved vertex
+      }
     });
 
     // Click dispatched only if the mousedown→mouseup didn't drag.
@@ -2997,9 +3049,36 @@ export class MapRenderer {
   // handles). No-op unless something is assigned or being drawn.
   _drawZonePaintScreen(ctx) {
     const zp = this._zonePaint;
-    if (!zp.assignments.size && !zp.poly.length) return;
+    if (!zp.assignments.size && !zp.poly.length && !zp.polygons.length) return;
     const eff = this.zoom * this.fitScale;
     const toS = (x, y) => ({ x: this.pan.x + x * eff, y: this.pan.y + y * eff });
+
+    // Committed polygons: filled + outlined in their zone colour, with
+    // small vertex handles so the saved shapes stay visible.
+    for (const poly of zp.polygons) {
+      if (!poly.points || poly.points.length < 2) continue;
+      const col = zp.colors[poly.zone] || '#22d3ee';
+      const pts = poly.points.map((v) => toS(v.x, v.y));
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      if (pts.length >= 3) {
+        ctx.closePath();
+        ctx.globalAlpha = 0.14;
+        ctx.fillStyle = col;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = col;
+      ctx.stroke();
+      for (const p of pts) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+        ctx.fillStyle = col;
+        ctx.fill();
+      }
+    }
 
     if (zp.assignments.size) {
       for (const [id, zone] of zp.assignments) {
