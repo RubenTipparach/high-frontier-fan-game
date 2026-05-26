@@ -1622,13 +1622,13 @@ export class MapRenderer {
       if (this.data.mode === 'clean' && Array.isArray(this.data.zones)) {
         this._drawZoneBands(sctx, this.data.zones, this.data.zoneInfo);
       }
-      this._drawGuides(sctx);
-      this._drawSiteHalosWorld(sctx);
       this._drawEdges(sctx);
       sctx.restore();
-      this._drawWaypointsScreen(sctx);
-      this._drawSiteHexesScreen(sctx);
-      this._drawSiteLabelsScreen(sctx);
+      // NOTE: only the node-connecting edges + the solar-zone fills are
+      // cached here. Guides, body halos / planets, waypoints, hexes and
+      // labels are all drawn live every frame in _draw (with viewport
+      // culling) so they stay crisp during zoom instead of being scaled
+      // up from this bitmap.
     } finally {
       this.pan.x = savePanX; this.pan.y = savePanY;
       this.hostW = saveHostW; this.hostH = saveHostH;
@@ -1691,7 +1691,12 @@ export class MapRenderer {
     ctx.save();
     ctx.translate(this.pan.x, this.pan.y);
     ctx.scale(eff, eff);
-    // Animated belt + cosmetic traffic + the gameplay route/trail.
+    // Guides + body halos / planets used to live in the static cache;
+    // they're now drawn live (under the belt/traffic, as before) so they
+    // stay crisp during zoom. Animated belt + cosmetic traffic + the
+    // gameplay route/trail follow on top.
+    this._drawGuides(ctx);
+    this._drawSiteHalosWorld(ctx);
     this._drawAsteroidBelt(ctx);
     {
       const now = performance.now();
@@ -1702,6 +1707,12 @@ export class MapRenderer {
     this._drawRocketTrail(ctx);
     this._drawRoute(ctx);
     ctx.restore();
+
+    // Crisp, viewport-culled, drawn live (not scaled from the cache) so
+    // node markers / hexes / labels stay sharp at every zoom level.
+    this._drawWaypointsScreen(ctx);
+    this._drawSiteHexesScreen(ctx);
+    this._drawSiteLabelsScreen(ctx);
 
     this._drawHazardPulseScreen(ctx);
     this._drawProspectDiscsScreen(ctx);
@@ -2346,6 +2357,16 @@ export class MapRenderer {
   _drawSiteHalosWorld(ctx) {
     const eff = this.zoom * this.fitScale;
     const capWorld = HALO_MAX_SCREEN_R / eff;
+    const { hostW, hostH } = this;
+    // Screen-space cull test. Rings + glow extend well past the sphere
+    // radius, so the margin is generous (2.5x the screen radius + 80px)
+    // to avoid any pop-in at the edges.
+    const offscreen = (wx, wy, worldR) => {
+      const sx = this.pan.x + wx * eff;
+      const sy = this.pan.y + wy * eff;
+      const m = worldR * eff * 2.5 + 80;
+      return sx < -m || sx > hostW + m || sy < -m || sy > hostH + m;
+    };
 
     // Pass 1: shared halos for merged body groups (Mars / Luna /
     // Mercury / Jupiter system / etc.). One big sphere positioned at
@@ -2356,6 +2377,7 @@ export class MapRenderer {
       const vis = TYPE_VIS[g.type] || TYPE_VIS.unknown;
       if (vis.kind !== 'hex' && vis.kind !== 'sun') continue;
       const worldR = Math.min(vis.haloR || 20, capWorld);
+      if (offscreen(g.cx, g.cy, worldR)) continue;
       const palette = paletteFor(g.exemplar);
       const rings = ringDefFor(g.exemplar);
       if (rings) {
@@ -2375,14 +2397,15 @@ export class MapRenderer {
     for (const site of this._realSites) {
       if (this._mergedSites.has(site.id)) continue;
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
-      if (vis.kind === 'sun')   { drawSun(ctx, site.x, site.y, vis.r); continue; }
-      if (vis.kind === 'comet') { drawComet(ctx, site.x, site.y, vis.r, site); continue; }
+      if (vis.kind === 'sun')   { if (!offscreen(site.x, site.y, vis.r)) drawSun(ctx, site.x, site.y, vis.r); continue; }
+      if (vis.kind === 'comet') { if (!offscreen(site.x, site.y, vis.r)) drawComet(ctx, site.x, site.y, vis.r, site); continue; }
       if (vis.kind !== 'hex') continue;
       // Per-body halo overrides. Ceres punches above its dwarf-
       // class default - shrink it 50% so it doesn't dominate the
       // belt next to Vesta / Pallas / Hygiea.
       const bodyScale = /(^|\s)ceres/i.test(site.name || '') ? 0.5 : 1;
       const worldR = Math.min(vis.haloR * bodyScale, capWorld);
+      if (offscreen(site.x, site.y, worldR)) continue;
       const rings = ringDefFor(site);
       if (vis.rocky) {
         drawRockyAsteroid(ctx, site.x, site.y, worldR, paletteFor(site), site);
