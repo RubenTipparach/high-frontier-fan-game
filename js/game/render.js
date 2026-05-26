@@ -30,6 +30,21 @@ const VIEW_H = 900;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 10;
 
+// Ray-casting point-in-polygon test (world coords). Used by the
+// debug zone painter to decide which nodes a hand-drawn lasso
+// contains.
+function pointInPolygon(px, py, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y;
+    const xj = poly[j].x, yj = poly[j].y;
+    const intersect = ((yi > py) !== (yj > py)) &&
+      (px < ((xj - xi) * (py - yi)) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
 // Zoom level at which the hex marker (and its size text /
 // hydration droplets / centre flag glyphs) reaches its full
 // HEX_R size. Below this threshold the hex shrinks
@@ -212,6 +227,64 @@ function appendSmoothPath(ctx, pts) {
   }
   const last = pts[pts.length - 1];
   ctx.lineTo(last.x, last.y);
+}
+
+// Punch a hex colour up into a richer version for the zone fills:
+// the canonical palette is pale/pastel and washes out under a low
+// overlay alpha, so we cap lightness and floor saturation. Dark zones
+// (Saturn / Neptune) also get lifted so their fill stays visible.
+function vividHex(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ''));
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  let r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0; const l = (max + min) / 2;
+  const d = max - min;
+  if (d) {
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h /= 6;
+  }
+  const nl = Math.max(0.40, Math.min(0.60, l));   // pull toward a mid lightness
+  const ns = Math.max(0.62, s);                    // floor the saturation
+  const hue2rgb = (p, q, t) => {
+    if (t < 0) t += 1; if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  const q = nl < 0.5 ? nl * (1 + ns) : nl + ns - nl * ns;
+  const p = 2 * nl - q;
+  const to = (x) => Math.round(hue2rgb(p, q, x) * 255).toString(16).padStart(2, '0');
+  return `#${to(h + 1 / 3)}${to(h)}${to(h - 1 / 3)}`;
+}
+
+// Smooth CLOSED loop through `pts` (quadratic midpoints, wrapping
+// around). Renders a rounded blob through the polygon's edge
+// midpoints with each vertex as a control point. Used for curved
+// zone borders.
+function appendSmoothClosedPath(ctx, pts) {
+  const n = pts.length;
+  if (n < 3) {
+    if (!n) return;
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < n; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.closePath();
+    return;
+  }
+  const sx = (pts[n - 1].x + pts[0].x) / 2;
+  const sy = (pts[n - 1].y + pts[0].y) / 2;
+  ctx.moveTo(sx, sy);
+  for (let i = 0; i < n; i++) {
+    const cur = pts[i];
+    const next = pts[(i + 1) % n];
+    ctx.quadraticCurveTo(cur.x, cur.y, (cur.x + next.x) / 2, (cur.y + next.y) / 2);
+  }
+  ctx.closePath();
 }
 
 // Water droplet glyph: teardrop with a pointed top and rounded
@@ -597,6 +670,23 @@ export class MapRenderer {
     this._gesture = null;
     this._rafQueued = false;
     this._tooltipEl = null;
+    // Debug zone-painter state. When `active` holds a zone name the
+    // map enters polygon-draw mode: clicks drop vertices instead of
+    // selecting sites. Finishing a polygon stamps every waypoint
+    // node inside it with the active zone (real sites are skipped).
+    // `assignments` accumulates across polygons so a zone can be
+    // built from several lassos; `colors` is the per-zone palette
+    // passed in from browse.js for the overlay.
+    this._zonePaint = {
+      active: null,            // zone currently being edited
+      zonePolys: {},           // zone -> [{x,y}]: ONE polygon per zone
+      assignments: new Map(),  // nodeId -> zone, DERIVED from polygons
+      colors: {},              // zone -> hex colour
+      order: [],               // zones inner -> outer (Mercury first)
+    };
+    this._zoneDragVertex = null;    // index of the poly vertex being dragged
+    this._zoneGrabConsumed = false; // swallow the click after a vertex grab
+    this._onZonePaintChange = null; // fired after poly / assignment edits
     // Public-ish tuneables. Mutating them and calling _scheduleDraw
     // is enough for the debug panel to take effect; nothing else
     // caches them.
@@ -609,7 +699,19 @@ export class MapRenderer {
       showDecoratives: false,
       initialZoom: _isMobileViewport() ? MOBILE_DEFAULT_ZOOM : DEFAULT_ZOOM,
       debug: false,
+      // Zone-visualisation (config panel): draw the canonical solar-
+      // zone polygons behind everything. On by default. Fill optional;
+      // border opacity 0.01..1 (default 0.1); curved borders smooth the
+      // polygon edges (on by default).
+      visualizeZones: true,
+      zoneFill: true,
+      zoneOpacity: 0.1,
+      zoneCurved: true,
+      zoneEditMode: false,
     };
+    // Canonical zone polygons (the frozen source-of-truth data),
+    // wired in from browse.js: { polys: {zone:[[{x,y}]]}, colors, order }.
+    this._canonicalZones = { polys: {}, colors: {}, order: [] };
     this._frameCount = 0;
     this._frameTimer = 0;
     this._fps = 0;
@@ -1129,6 +1231,219 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
+  // ---- debug zone painter ----
+  // Tools the debug panel drives to hand-label which solar zone each
+  // waypoint node belongs to. The map's real sites already carry a
+  // `solarZone`; the planner waypoints (burns / lagranges / hohmanns
+  // / decoratives) don't, so this lets us paint them by region and
+  // export the result for wiring into the data file.
+
+  setZonePaintColors(colors) {
+    this._zonePaint.colors = colors || {};
+    this._scheduleDraw();
+  }
+
+  // The frozen source-of-truth zone polygons drawn behind the map
+  // when `visualizeZones` is on. { polys: {zone:[[{x,y}]]}, colors,
+  // order } - order is inner -> outer (drawn outer-first so inner
+  // regions paint on top).
+  setCanonicalZones({ polys, colors, order } = {}) {
+    const cols = colors || {};
+    const vivid = {};
+    for (const z in cols) vivid[z] = vividHex(cols[z]);
+    this._canonicalZones = {
+      polys: polys || {},
+      colors: cols,
+      vivid,   // richer fill colours (the pale palette washes out)
+      order: Array.isArray(order) ? order.slice() : [],
+    };
+    this._scheduleDraw();
+  }
+
+  // Zones nest inner -> outer (Mercury innermost). The order drives
+  // the derived-assignment rule: a node belongs to the INNERMOST
+  // polygon that contains it.
+  setZoneOrder(order) {
+    this._zonePaint.order = Array.isArray(order) ? order.slice() : [];
+    this._recomputeDerivedAssignments();
+    this._scheduleDraw();
+  }
+
+  // Notified (by browse.js) after any poly / assignment edit so it
+  // can persist the work to localStorage.
+  setZonePaintChangeHandler(fn) { this._onZonePaintChange = fn || null; }
+  _emitZonePaintChange() {
+    if (this._onZonePaintChange) { try { this._onZonePaintChange(); } catch { /* ignore */ } }
+  }
+
+  // The polygon (point array) for the active zone, creating it on
+  // first use. null when no zone is selected.
+  _activeZonePoly(create = false) {
+    const z = this._zonePaint.active;
+    if (!z) return null;
+    if (!this._zonePaint.zonePolys[z] && create) this._zonePaint.zonePolys[z] = [];
+    return this._zonePaint.zonePolys[z] || null;
+  }
+
+  // Select the zone to edit. Each zone owns ONE polygon; switching
+  // zones just changes which polygon is editable - none are cleared.
+  setZonePaintZone(zone) {
+    this._zonePaint.active = zone || null;
+    this._scheduleDraw();
+    this._emitZonePaintChange();
+  }
+
+  isZonePainting() { return !!this._zonePaint.active; }
+
+  // Append a point to the ACTIVE zone's single polygon.
+  addZonePolyPoint(wx, wy) {
+    const poly = this._activeZonePoly(true);
+    if (!poly) return;
+    poly.push({ x: wx, y: wy });
+    this._recomputeDerivedAssignments();
+    this._scheduleDraw();
+    this._emitZonePaintChange();
+  }
+
+  // Index of the active zone's polygon vertex within a small screen-
+  // space grab radius of (wx, wy), or -1. Used to pick up a vertex.
+  _hitTestZoneVertex(wx, wy) {
+    const poly = this._activeZonePoly();
+    if (!poly || !poly.length) return -1;
+    const eff = this.zoom * this.fitScale;
+    const sx = this.pan.x + wx * eff;
+    const sy = this.pan.y + wy * eff;
+    const R2 = 12 * 12; // 12px grab radius
+    let best = -1, bestD = R2;
+    for (let i = 0; i < poly.length; i++) {
+      const px = this.pan.x + poly[i].x * eff;
+      const py = this.pan.y + poly[i].y * eff;
+      const d = (px - sx) * (px - sx) + (py - sy) * (py - sy);
+      if (d <= bestD) { bestD = d; best = i; }
+    }
+    return best;
+  }
+
+  // Move vertex `i` of the active zone's polygon (used while dragging).
+  moveZoneVertex(i, wx, wy) {
+    const poly = this._activeZonePoly();
+    if (!poly || !poly[i]) return;
+    poly[i].x = wx; poly[i].y = wy;
+    this._scheduleDraw();
+  }
+
+  // Drop the last point of the active zone's polygon.
+  undoZonePolyPoint() {
+    const z = this._zonePaint.active;
+    const poly = z && this._zonePaint.zonePolys[z];
+    if (!poly || !poly.length) return;
+    poly.pop();
+    if (!poly.length) delete this._zonePaint.zonePolys[z];
+    this._recomputeDerivedAssignments();
+    this._scheduleDraw();
+    this._emitZonePaintChange();
+  }
+
+  // Re-derive { nodeId: zone } from the zone polygons (>= 3 points).
+  // Zones are concentric: an outer polygon (e.g. Venus) encloses the
+  // inner ones (Mercury). A node belongs to the INNERMOST zone whose
+  // polygon contains it - i.e. the first hit when zones are tested in
+  // inner -> outer order. So everything inside Mercury is Mercury;
+  // everything inside Venus that ISN'T Mercury is Venus; and so on.
+  _recomputeDerivedAssignments() {
+    const zp = this._zonePaint;
+    zp.assignments = new Map();
+    // Candidate polygons in inner -> outer order. Fall back to object
+    // key order if no explicit zone order was supplied.
+    const order = (zp.order && zp.order.length) ? zp.order : Object.keys(zp.zonePolys);
+    const ordered = [];
+    const seen = new Set();
+    for (const zone of order) {
+      const pts = zp.zonePolys[zone];
+      if (Array.isArray(pts) && pts.length >= 3) { ordered.push({ zone, pts }); seen.add(zone); }
+    }
+    // Include any polygon zones missing from the order (after the
+    // ordered ones) so nothing is silently dropped.
+    for (const zone in zp.zonePolys) {
+      if (seen.has(zone)) continue;
+      const pts = zp.zonePolys[zone];
+      if (Array.isArray(pts) && pts.length >= 3) ordered.push({ zone, pts });
+    }
+    for (const s of this._waypoints) {
+      for (const o of ordered) {
+        if (pointInPolygon(s.x, s.y, o.pts)) { zp.assignments.set(s.id, o.zone); break; }
+      }
+    }
+  }
+
+  // Clear EVERYTHING (all zone polygons + derived assignments).
+  clearZoneAssignments() {
+    this._zonePaint.zonePolys = {};
+    this._zonePaint.assignments.clear();
+    this._scheduleDraw();
+    this._emitZonePaintChange();
+  }
+
+  // Clear just the active zone's polygon.
+  clearActiveZonePolygon() {
+    const z = this._zonePaint.active;
+    if (!z || !this._zonePaint.zonePolys[z]) return;
+    delete this._zonePaint.zonePolys[z];
+    this._recomputeDerivedAssignments();
+    this._scheduleDraw();
+    this._emitZonePaintChange();
+  }
+
+  // Read / restore the per-zone polygons (the data the user exports).
+  getZonePolygons() {
+    const out = [];
+    for (const zone in this._zonePaint.zonePolys) {
+      const pts = this._zonePaint.zonePolys[zone];
+      if (Array.isArray(pts) && pts.length) {
+        out.push({ zone, points: pts.map((q) => ({ x: q.x, y: q.y })) });
+      }
+    }
+    return out;
+  }
+  setZonePolygons(arr) {
+    this._zonePaint.zonePolys = {};
+    if (Array.isArray(arr)) {
+      for (const p of arr) {
+        if (p && p.zone && Array.isArray(p.points)) {
+          this._zonePaint.zonePolys[p.zone] = p.points
+            .filter((q) => q && Number.isFinite(+q.x) && Number.isFinite(+q.y))
+            .map((q) => ({ x: +q.x, y: +q.y }));
+        }
+      }
+    }
+    this._recomputeDerivedAssignments();
+    this._scheduleDraw();
+  }
+
+  zonePolygonCount() { return this.getZonePolygons().length; }
+  zoneAssignmentCount() { return this._zonePaint.assignments.size; }
+
+  // Export the accumulated labels as plain records. id2 is the stable
+  // human-friendly reference (e.g. "lag-leo", "burn-3a2b9"); id is the
+  // raw vendor key. Both are emitted so the result can be wired into
+  // planner-map.js by whichever key is convenient.
+  getZoneAssignments() {
+    const out = [];
+    for (const [id, zone] of this._zonePaint.assignments) {
+      const s = this.data && this.data.byId[id];
+      if (!s) continue;
+      out.push({
+        id: s.id,
+        id2: s.id2,
+        type: s.type,
+        x: s.x,
+        y: s.y,
+        zone,
+      });
+    }
+    return out;
+  }
+
   // ---- drawing ----
 
   // Continuous animation loop: each rAF advances the shared anim
@@ -1228,6 +1543,10 @@ export class MapRenderer {
     ctx.translate(this.pan.x, this.pan.y);
     ctx.scale(eff, eff);
 
+    // Canonical solar-zone regions render FIRST so they sit behind
+    // every other map element (config: "visualize zone data").
+    this._drawCanonicalZones(ctx, eff);
+
     if (this.data.mode === 'clean' && Array.isArray(this.data.zones)) {
       this._drawZoneBands(ctx, this.data.zones, this.data.zoneInfo);
     }
@@ -1270,6 +1589,8 @@ export class MapRenderer {
     // Turn-number pills (T2, T3, …) for planned rocket routes;
     // no-op for plain Navigate-to routes that have no turn tags.
     this._drawRouteTurnLabelsScreen(ctx);
+    // Debug zone painter overlay sits on top of everything.
+    this._drawZonePaintScreen(ctx);
     if (this._popupSite) this._positionSitePopup();
 
     // FPS book-keeping. The debug panel polls getFps(); we update
@@ -1896,9 +2217,10 @@ export class MapRenderer {
         ctx.fillText('🚀', sx, sy);
       } else if (w.type === 'venus') {
         ctx.fillText('🪂', sx, sy);
-      } else if (w.hazard && w.type !== 'radhaz') {
-        // radhaz already gets the trefoil; the skull marks generic
-        // hazard nodes (hazard-flagged burns or lagrange points).
+      } else if (w.hazard && w.type !== 'radhaz' && w.type !== 'lagrange') {
+        // radhaz gets the trefoil; the skull marks generic hazard
+        // nodes (hazard-flagged burns). Hazard-flagged lagrange
+        // points are flybys, not hazards, so they get no skull.
         ctx.fillText('☠', sx, sy);
       }
     }
@@ -2630,6 +2952,18 @@ export class MapRenderer {
 
     this.canvas.addEventListener('mousedown', (ev) => {
       if (ev.button !== 0) return;
+      // Zone-painter: grabbing an existing polygon vertex starts a
+      // vertex drag instead of a pan, so points can be nudged into
+      // place. A plain press anywhere else still pans.
+      if (this._zonePaint.active && this.options.zoneEditMode) {
+        const wp = this._eventToWorld(ev);
+        const vi = this._hitTestZoneVertex(wp.x, wp.y);
+        if (vi >= 0) {
+          this._zoneDragVertex = vi;
+          this._zoneGrabConsumed = true; // suppress the trailing click
+          return;
+        }
+      }
       this._dragStart = {
         x: ev.clientX, y: ev.clientY,
         panX: this.pan.x, panY: this.pan.y,
@@ -2637,6 +2971,11 @@ export class MapRenderer {
       };
     });
     window.addEventListener('mousemove', (ev) => {
+      if (this._zoneDragVertex != null) {
+        const wp = this._eventToWorld(ev);
+        this.moveZoneVertex(this._zoneDragVertex, wp.x, wp.y);
+        return;
+      }
       if (!this._dragStart) return;
       const dx = ev.clientX - this._dragStart.x;
       const dy = ev.clientY - this._dragStart.y;
@@ -2645,7 +2984,15 @@ export class MapRenderer {
       this.pan.y = this._dragStart.panY + dy;
       this._scheduleDraw();
     });
-    window.addEventListener('mouseup', () => { this._dragStart = null; });
+    window.addEventListener('mouseup', () => {
+      this._dragStart = null;
+      if (this._zoneDragVertex != null) {
+        this._zoneDragVertex = null;
+        this._recomputeDerivedAssignments(); // moved vertex changed coverage
+        this._scheduleDraw();
+        this._emitZonePaintChange();         // persist the moved vertex
+      }
+    });
 
     // Click dispatched only if the mousedown→mouseup didn't drag.
     this.canvas.addEventListener('click', (ev) => {
@@ -2660,6 +3007,18 @@ export class MapRenderer {
       // suppresses the hover tooltip on touch).
       if (this._touchActive) return;
       if (this._dragStart && this._dragStart.moved) return;
+      // Zone-painter mode owns clicks: SHIFT+click drops a polygon
+      // vertex; a plain click does nothing (so the map can be panned
+      // / clicked freely). A click right after a vertex grab is
+      // swallowed so it doesn't drop a duplicate point.
+      if (this._zonePaint.active && this.options.zoneEditMode) {
+        if (this._zoneGrabConsumed) { this._zoneGrabConsumed = false; return; }
+        if (ev.shiftKey) {
+          const wp = this._eventToWorld(ev);
+          this.addZonePolyPoint(wp.x, wp.y);
+        }
+        return;
+      }
       // Rocket sits on top of the map so test it first; if the
       // click landed inside the rocket sprite we fire a
       // sandbox-rocket event instead of a site select.
@@ -2733,9 +3092,13 @@ export class MapRenderer {
           const last = this._gesture.touches[0];
           if (last) {
             const pt = this._eventToWorld(last);
-            const hit = this._hitTest(pt.x, pt.y);
-            if (this.options.debug) this._emitDebugClick(pt, hit);
-            if (hit && this.onSelect) this.onSelect(hit);
+            if (this._zonePaint.active && this.options.zoneEditMode) {
+              this.addZonePolyPoint(pt.x, pt.y);
+            } else {
+              const hit = this._hitTest(pt.x, pt.y);
+              if (this.options.debug) this._emitDebugClick(pt, hit);
+              if (hit && this.onSelect) this.onSelect(hit);
+            }
           }
         }
         this._gesture = null;
@@ -2803,6 +3166,138 @@ export class MapRenderer {
     }
     // eslint-disable-next-line no-console
     console.log('[map debug] click', info);
+  }
+
+  // Debug zone painter overlay (screen space). Paints a dot in the
+  // zone colour over every already-assigned waypoint, plus the
+  // in-progress lasso (dashed outline + translucent fill + vertex
+  // handles). No-op unless something is assigned or being drawn.
+  // Canonical zone regions (world space, behind everything). Outer
+  // zones drawn first so the nested inner regions paint on top.
+  // `visualizeZones` gates it; `zoneFill` toggles the fill; the border
+  // opacity follows `zoneOpacity` (0.01..1).
+  _drawCanonicalZones(ctx, eff) {
+    if (!this.options.visualizeZones) return;
+    const cz = this._canonicalZones;
+    const order = (cz.order && cz.order.length) ? cz.order : Object.keys(cz.polys);
+    if (!order.length) return;
+    // Inner -> outer list of zones that actually have a polygon.
+    // fillCol uses the richer (vivid) palette so the colour reads even
+    // at low opacity; the border keeps the canonical colour.
+    const arr = [];
+    for (const zone of order) {
+      const polys = cz.polys[zone];
+      if (polys && polys.length) {
+        arr.push({
+          polys,
+          col: cz.colors[zone] || '#22d3ee',
+          fillCol: (cz.vivid && cz.vivid[zone]) || cz.colors[zone] || '#22d3ee',
+        });
+      }
+    }
+    if (!arr.length) return;
+    const op = Math.max(0.01, Math.min(1, this.options.zoneOpacity ?? 0.5));
+    const curved = this.options.zoneCurved !== false;
+    const addPath = (pts) => {
+      if (curved) { appendSmoothClosedPath(ctx, pts); return; }
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k].x, pts[k].y);
+      ctx.closePath();
+    };
+    ctx.save();
+    ctx.lineJoin = 'round';
+    // FILLS: each zone is the RING between its polygon and the
+    // next-inner zone's polygon (punched out with an even-odd hole),
+    // so colours never stack - every pixel is exactly one zone's
+    // colour, independent of what nests beneath it.
+    if (this.options.zoneFill) {
+      // Floor + slope so the fill still reads as a rich colour at low
+      // opacity (10% default) instead of washing out to near-nothing.
+      ctx.globalAlpha = Math.min(0.9, 0.12 + op * 0.7);
+      for (let i = 0; i < arr.length; i++) {
+        ctx.fillStyle = arr[i].fillCol;
+        ctx.beginPath();
+        for (const pts of arr[i].polys) if (pts && pts.length >= 2) addPath(pts);
+        if (i > 0) for (const pts of arr[i - 1].polys) if (pts && pts.length >= 2) addPath(pts);
+        ctx.fill('evenodd');
+      }
+    }
+    // BORDERS: each zone strokes its own outline once.
+    ctx.globalAlpha = Math.min(1, op + 0.2);
+    ctx.lineWidth = 2.5 / eff; // ~2.5 screen px regardless of zoom
+    for (const z of arr) {
+      ctx.strokeStyle = z.col;
+      for (const pts of z.polys) {
+        if (!pts || pts.length < 2) continue;
+        ctx.beginPath();
+        addPath(pts);
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  _drawZonePaintScreen(ctx) {
+    // The live painter overlay only shows in zone-edit mode; the
+    // canonical visualisation is handled separately behind the map.
+    if (!this.options.zoneEditMode) return;
+    const zp = this._zonePaint;
+    const zones = Object.keys(zp.zonePolys);
+    if (!zp.assignments.size && !zones.length) return;
+    const eff = this.zoom * this.fitScale;
+    const toS = (x, y) => ({ x: this.pan.x + x * eff, y: this.pan.y + y * eff });
+
+    // One polygon per zone, filled + outlined in its colour. The
+    // ACTIVE zone is dashed with draggable white vertex handles; the
+    // others are solid with small colour dots.
+    for (const zone of zones) {
+      const poly = zp.zonePolys[zone];
+      if (!poly || poly.length < 1) continue;
+      const isActive = zone === zp.active;
+      const col = zp.colors[zone] || '#22d3ee';
+      const pts = poly.map((v) => toS(v.x, v.y));
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      if (pts.length >= 3) {
+        ctx.closePath();
+        ctx.globalAlpha = isActive ? 0.18 : 0.12;
+        ctx.fillStyle = col;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+      ctx.lineWidth = isActive ? 2 : 1.5;
+      ctx.strokeStyle = col;
+      if (isActive) ctx.setLineDash([6, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      for (const p of pts) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, isActive ? 4 : 3, 0, Math.PI * 2);
+        ctx.fillStyle = isActive ? '#fff' : col;
+        ctx.fill();
+        if (isActive) { ctx.lineWidth = 2; ctx.strokeStyle = col; ctx.stroke(); }
+      }
+    }
+
+    if (zp.assignments.size) {
+      for (const [id, zone] of zp.assignments) {
+        const s = this.data && this.data.byId[id];
+        if (!s) continue;
+        const p = toS(s.x, s.y);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = zp.colors[zone] || '#22d3ee';
+        ctx.globalAlpha = 0.9;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.stroke();
+      }
+    }
+
   }
 
   // JS hit-test against every site, preferring real sites within a

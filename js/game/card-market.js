@@ -36,7 +36,9 @@
 //                                        / any outpost)
 //   openAuctionConfirmModal({ card, mode, renderCardFn,
 //                              bonusDeckTypes, onConfirm })
-//   openFreeMarketModal({ handIds, lookupCard, onCommit })
+//   openFreeMarketModal({ handIds, lookupCard, renderCardFn,
+//                          onCommit })
+//   openSellConfirmModal({ card, aqua, renderCardFn, onConfirm })
 
 import { PATENTS, PATENTS_BY_ID, PATENT_TYPES } from '../../data/patents.js';
 import { getHandSlots, addToHand, removeFromHand, clearHand } from './hand.js';
@@ -325,7 +327,7 @@ export function openAuctionConfirmModal({
 // player picks one Hand card; on confirm the card goes back to
 // the library and the player gains FREE_MARKET_AQUA aqua. Op
 // budget consumed by the caller.
-export function openFreeMarketModal({ handIds, lookupCard, onCommit }) {
+export function openFreeMarketModal({ handIds, lookupCard, renderCardFn, onCommit }) {
   if (!handIds.length) return;
   document.querySelector('.free-market-overlay')?.remove();
 
@@ -351,16 +353,6 @@ export function openFreeMarketModal({ handIds, lookupCard, onCommit }) {
   overlay.appendChild(dialog);
 
   const render = () => {
-    const cardsHtml = handIds.map((id) => {
-      const c = lookupCard(id);
-      if (!c) return '';
-      const sel = id === selected ? '⦿' : '◯';
-      return `<button type="button" data-card="${escapeHtml(id)}" class="auction-card ${id === selected ? 'is-selected' : ''}">
-        <span class="auction-radio">${sel}</span>
-        <strong>${escapeHtml(c.name)}</strong>
-        <span class="muted">(${escapeHtml(c.type || '')})</span>
-      </button>`;
-    }).join('');
     dialog.innerHTML = `
       <div class="auction-head">
         <h3>💱 Free Market</h3>
@@ -368,24 +360,111 @@ export function openFreeMarketModal({ handIds, lookupCard, onCommit }) {
       </div>
       <div class="auction-body">
         <div class="auction-section-label">Pick a Hand card to sell:</div>
-        <div class="auction-cards">${cardsHtml}</div>
+        <div class="auction-cards free-market-cards"></div>
       </div>
       <div class="card-modal-actions">
         <button type="button" class="modal-btn auction-cancel">Cancel</button>
         <button type="button" class="modal-btn primary auction-commit">💱 Sell (+${FREE_MARKET_AQUA} aqua)</button>
       </div>
     `;
-    dialog.querySelectorAll('.auction-cards .auction-card').forEach((b) => {
-      b.addEventListener('click', () => {
-        selected = b.getAttribute('data-card');
-        render();
+    // Each Hand card is shown IN FULL (shared renderCardFn) inside a
+    // selectable tile, so the player sees exactly what they're about
+    // to part with rather than a name row.
+    const grid = dialog.querySelector('.free-market-cards');
+    for (const id of handIds) {
+      const c = lookupCard(id);
+      if (!c) continue;
+      const tile = document.createElement('div');
+      tile.className = 'free-market-card' + (id === selected ? ' is-selected' : '');
+      tile.setAttribute('role', 'button');
+      tile.tabIndex = 0;
+      tile.dataset.card = id;
+      if (renderCardFn) {
+        try { tile.appendChild(renderCardFn(c, { type: c.type === 'crew' ? 'crew' : 'patent' })); }
+        catch { tile.textContent = c.name || id; }
+      } else {
+        tile.textContent = c.name || id;
+      }
+      const pick = () => { selected = id; render(); };
+      tile.addEventListener('click', pick);
+      tile.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); }
+      });
+      grid.appendChild(tile);
+    }
+    dialog.querySelector('.auction-cancel').addEventListener('click', () => close(false));
+    // Selling is irreversible, so the commit button opens a confirm
+    // step (with the chosen card in full) rather than firing the sale
+    // directly. The market stays open behind it, so Cancel returns
+    // the player to the picker.
+    dialog.querySelector('.auction-commit').addEventListener('click', () => {
+      const card = lookupCard(selected);
+      if (!card) { close(true); return; }
+      openSellConfirmModal({
+        card,
+        aqua: FREE_MARKET_AQUA,
+        renderCardFn,
+        onConfirm: () => close(true),
       });
     });
-    dialog.querySelector('.auction-cancel').addEventListener('click', () => close(false));
-    dialog.querySelector('.auction-commit').addEventListener('click', () => close(true));
   };
 
   render();
+  document.body.appendChild(overlay);
+  overlay.focus();
+}
+
+// ---------- Sell confirmation ----------
+
+// Confirm a single Free Market sale. Shows the chosen card in full
+// plus the aqua it fetches; onConfirm fires only if the player
+// commits. Mirrors openAuctionConfirmModal's structure.
+export function openSellConfirmModal({ card, aqua, renderCardFn, onConfirm }) {
+  if (!card) return;
+  document.querySelector('.sell-confirm-overlay')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay sell-confirm-overlay';
+  overlay.tabIndex = -1;
+  const close = (confirmed) => {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+    if (confirmed) onConfirm?.({});
+  };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(false); } };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+
+  const dialog = document.createElement('div');
+  dialog.className = 'sell-confirm-modal';
+  dialog.innerHTML = `
+    <div class="auction-head">
+      <h3>💱 Sell this card?</h3>
+      <span class="auction-mode">+${aqua} aqua</span>
+    </div>
+    <div class="auction-body">
+      <div class="auction-confirm-card" id="sell-confirm-card"></div>
+      <p class="muted sell-confirm-note">
+        <strong>${escapeHtml(card.name || card.id)}</strong> sells for
+        <strong>+${aqua}</strong> aqua and returns to the bottom of the
+        ${escapeHtml(card.type || 'patent')} deck. This can't be undone.
+      </p>
+    </div>
+    <div class="card-modal-actions">
+      <button type="button" class="modal-btn sell-cancel">Cancel</button>
+      <button type="button" class="modal-btn primary sell-commit">💱 Sell for +${aqua}</button>
+    </div>
+  `;
+  overlay.appendChild(dialog);
+
+  const slot = dialog.querySelector('#sell-confirm-card');
+  if (slot && renderCardFn) {
+    try { slot.appendChild(renderCardFn(card, { type: card.type === 'crew' ? 'crew' : 'patent' })); }
+    catch { slot.textContent = card.name || card.id; }
+  }
+  dialog.querySelector('.sell-cancel').addEventListener('click', () => close(false));
+  dialog.querySelector('.sell-commit').addEventListener('click', () => close(true));
+
   document.body.appendChild(overlay);
   overlay.focus();
 }

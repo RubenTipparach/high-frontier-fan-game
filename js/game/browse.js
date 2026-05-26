@@ -51,7 +51,8 @@ import {
 } from '../../data/net-thrust-track.js';
 import { renderDetailTrack, massLabel } from './net-thrust-detail.js';
 import { MILESTONES } from '../../data/glory.js';
-import { SITES_BY_ID } from '../../data/sites.js';
+import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
+import { ZONE_POLYGONS } from '../../data/zones.js';
 import {
   renderCard, thrustVisual, attachTipsTo,
   REQUIREMENT_VIS, REQ_SUPPLIER_TYPE,
@@ -107,7 +108,7 @@ import {
   getStarterCash, setStarterCash,
   getFuelConsumption, setFuelConsumption,
   resetSandboxEconomy,
-  openAuctionConfirmModal, openFreeMarketModal,
+  openAuctionConfirmModal, openFreeMarketModal, openSellConfirmModal,
   findAuctionableCards,
 } from './card-market.js';
 import {
@@ -290,11 +291,10 @@ function wireHandStrip() {
       };
       quick.append(
         qBtn('q-discard', '🗑', 'Discard', () => removeFromHandAt(idx)),
-        // Sell is functionally Discard until the Stage-3
-        // economy lands (it'll pay out water/VP for sold cards
-        // then). Same removal action; separate verb so the
-        // intent is preserved when the economy ships.
-        qBtn('q-sell',    '💰', 'Sell card', () => removeFromHandAt(idx)),
+        // Free Market: effectively sells the card for +$3 (to the
+        // bottom of its deck), via the shared op-gated confirm flow.
+        qBtn('q-sell',    '💱', `Free Market: effectively sells this card to gain $${FREE_MARKET_AQUA} (costs 1 operation)`,
+          () => freeMarketSellFromHand(card)),
         qBtn('q-produce', '🏭', `Exo produce (spectral ${card.spectralType || '?'})`,
           () => setStatus(`Exo-produce needs a Stage-3 factory matching spectral ${card.spectralType || '?'}.`)),
         qBtn('q-boost',   '🚀', isBoostMarked(id) ? 'Unmark boost' : 'Mark for boost',
@@ -1568,25 +1568,47 @@ function openCardModal(card, kind, slotIdx) {
   const sellBtn = document.createElement('button');
   sellBtn.type = 'button';
   sellBtn.className = 'modal-btn sell';
-  sellBtn.textContent = '💰 Sell';
-  sellBtn.title = 'Sell card - same as discard until the Stage-3 economy lands';
+  sellBtn.textContent = '💱 Free Market';
+  sellBtn.title = `Free Market: effectively sells this card to gain $${FREE_MARKET_AQUA}, returning it to the bottom of its deck. Costs 1 operation.`;
   sellBtn.addEventListener('click', () => {
-    removeFromHandAt(slotIdx);
-    close();
+    freeMarketSellFromHand(card, close);
   });
 
   const produceBtn = document.createElement('button');
   produceBtn.type = 'button';
   produceBtn.className = 'modal-btn produce';
-  produceBtn.textContent = `🏭 Exo produce (${card.spectralType || '?'})`;
-  produceBtn.title = `Use a factory matching spectral type ${card.spectralType || '?'} to produce the dark-side resource`;
+  // ET / Exo produce: flip this hand card Black-Side-up into an
+  // outpost at a colocated factory whose spectral type matches the
+  // card. Same op as the site-popup "ET Produce", just driven from
+  // the card. Gated on the rocket being parked at a matching,
+  // player-owned factory with outpost room; greyed-out + explained
+  // otherwise.
+  const cardSpectral = card.spectralType || 'C';
+  const exoSite = (kind !== 'crew') ? getRocketSite() : null;
+  const exoFactory = exoSite ? getFactory(exoSite.id) : null;
+  const exoOwned = exoFactory && exoFactory.ownerId === SANDBOX_OWNER_ID;
+  const exoSpectralOk = exoOwned && exoFactory.spectralType === cardSpectral;
+  const exoOutposts = exoSite
+    ? Object.values(getOutposts()).filter((o) => o.siteId === exoSite.id) : [];
+  const exoFreeSlots = getAvailableOutpostSlots();
+  const exoRoom = exoOutposts.length > 0 || exoFreeSlots.length > 0;
+  const canExo = !!(exoSpectralOk && exoRoom);
+  produceBtn.textContent = `🏭 Exo produce (${cardSpectral})`;
+  produceBtn.disabled = !canExo;
+  produceBtn.title = !exoSite
+    ? 'Park the rocket at a site with your factory to ET Produce.'
+    : !exoOwned
+      ? `No factory you own at ${exoSite.name}. Industrialize a site first.`
+      : !exoSpectralOk
+        ? `Factory at ${exoSite.name} is spectral ${exoFactory.spectralType}; this card is ${cardSpectral}.`
+        : !exoRoom
+          ? 'No colocated outpost and all 4 outpost slots are in use.'
+          : `Produce this card Black-Side-up into the outpost at ${exoSite.name}.`;
   produceBtn.addEventListener('click', () => {
-    setStatus(
-      `Exo-produce needs a factory matching spectral type `
-      + `<strong>${card.spectralType || '?'}</strong>. `
-      + `Factories aren't buildable yet (Stage 3).`
-    );
+    if (!canExo) return;
     close();
+    doEtProduce(exoSite, exoFactory,
+      [{ id: card.id, card, name: card.name }], exoOutposts, exoFreeSlots);
   });
 
   const boostBtn = document.createElement('button');
@@ -1632,6 +1654,11 @@ function wireSidebar() {
       btn.addEventListener('click', () => { _openMapSearch?.(); });
       continue;
     }
+    // The ⚙ config button isn't a pane - it opens the config modal.
+    if (btn.id === 'sidepanel-config') {
+      btn.addEventListener('click', () => openConfigModal());
+      continue;
+    }
     btn.addEventListener('click', () => {
       const pane = btn.dataset.pane;
       if (panel.dataset.active === pane) {
@@ -1674,6 +1701,20 @@ function showPane(pane) {
   else if (pane === 'solo')       renderSolo();
 }
 
+// Float a "+N" aqua indicator above the balance chip, then remove it
+// once the CSS rise-and-fade animation ends. Purely cosmetic feedback
+// for a credited sale / income.
+function spawnAquaGainFloat(anchor, delta) {
+  if (!anchor || delta <= 0) return;
+  const float = document.createElement('span');
+  float.className = 'aqua-gain-float';
+  float.textContent = `+${delta}`;
+  anchor.appendChild(float);
+  float.addEventListener('animationend', () => float.remove());
+  // Safety net in case animationend doesn't fire (reduced-motion etc).
+  setTimeout(() => float.remove(), 1500);
+}
+
 // Route state: shared across renderer instances. Tapping the first
 // site sets `from`, tapping the second sets `to` and triggers the
 // pathfinder; tapping again starts a new route from that site.
@@ -1693,6 +1734,12 @@ let _activeData = null;
 const STORAGE_ROCKET_SITE  = 'hf-sandbox-rocket-site';
 const STORAGE_ROCKET_TRAIL = 'hf-sandbox-rocket-trail';
 const STORAGE_ROCKET_ROUTE = 'hf-sandbox-planned-route';
+// Pre-move snapshot written while a (possibly hazardous) move is
+// being resolved. If the tab is closed / refreshed mid-resolution
+// the queue is abandoned, so on the next load we roll the move back
+// to this snapshot (refunding the move + fuel) rather than stranding
+// the player with a spent turn. Cleared at every move exit path.
+const STORAGE_PENDING_MOVE = 'hf-sandbox-pending-move';
 const STORAGE_ROUTE_PRIORITY = 'hf-sandbox-route-priority';
 // Routing metric priority. 'turns' minimizes turn-ends first (the
 // snap-to-adjacent default); 'burns' minimizes water spend first
@@ -1981,6 +2028,32 @@ function ensureMapShell(host) {
           <input id="dbg-show-decoratives" type="checkbox" />
           <span>Show decoratives</span>
         </label>
+        <div class="dbg-zone">
+          <div class="dbg-zone-title">Zone polygon painter</div>
+          <label class="dbg-check">
+            <input id="dbg-zone-edit" type="checkbox" />
+            <span>Zone edit mode (show + edit polygons)</span>
+          </label>
+          <label class="dbg-slider">
+            <span>Paint zone</span>
+            <select id="dbg-zone-select">
+              <option value="">- off -</option>
+            </select>
+          </label>
+          <p class="dbg-zone-hint" id="dbg-zone-hint">Each zone is ONE polygon. Pick a zone, then <strong>Shift+click</strong> to add points to it; drag a point to move it; plain-drag pans. Switch zones to edit another polygon. Zones nest inner→outer: a node takes the <strong>innermost</strong> polygon that contains it (inside Venus but not Mercury = Venus). <strong>Export</strong> dumps all zone polygons; everything persists across refreshes until you Clear.</p>
+          <div class="dbg-zone-btns">
+            <button id="dbg-zone-clearzone" type="button">Clear zone</button>
+            <button id="dbg-zone-undo" type="button">Undo point</button>
+          </div>
+          <div class="dbg-zone-btns">
+            <button id="dbg-zone-clear" type="button">Clear all</button>
+            <button id="dbg-zone-export" type="button">Export to console</button>
+          </div>
+          <div class="dbg-row">
+            <span>Zones</span>
+            <strong id="dbg-zone-count">0 poly · 0 nodes</strong>
+          </div>
+        </div>
         <button id="dbg-reset" class="dbg-reset">Reset view</button>
       </div>
     </div>
@@ -2117,8 +2190,36 @@ function ensureMapShell(host) {
   const aquaChip = host.querySelector('#aqua-chip');
   const aquaChipBal = host.querySelector('#aqua-chip-balance');
   if (aquaChipBal) {
-    const refreshAqua = () => { aquaChipBal.textContent = String(getAqua()); };
-    refreshAqua();
+    aquaChipBal.textContent = String(getAqua());
+    let aquaAnimRaf = null;
+    // Tween the displayed number toward the live balance instead of
+    // snapping. A gain (sale / income) also pulses the chip green and
+    // floats a "+N" so the money visibly goes up. Mid-flight changes
+    // restart the tween from whatever is currently shown.
+    const refreshAqua = () => {
+      const target = getAqua();
+      const shown = parseInt(aquaChipBal.textContent, 10);
+      const from = Number.isFinite(shown) ? shown : target;
+      if (from === target) { aquaChipBal.textContent = String(target); return; }
+      const delta = target - from;
+      if (delta > 0 && aquaChip) {
+        aquaChip.classList.remove('aqua-gain');
+        void aquaChip.offsetWidth; // restart the animation if re-fired
+        aquaChip.classList.add('aqua-gain');
+        spawnAquaGainFloat(aquaChip, delta);
+      }
+      const dur = Math.min(900, 250 + Math.abs(delta) * 60);
+      const t0 = performance.now();
+      if (aquaAnimRaf) cancelAnimationFrame(aquaAnimRaf);
+      const step = (now) => {
+        const p = Math.min(1, (now - t0) / dur);
+        const e = 1 - Math.pow(1 - p, 3); // ease-out cubic
+        aquaChipBal.textContent = String(Math.round(from + delta * e));
+        if (p < 1) { aquaAnimRaf = requestAnimationFrame(step); }
+        else { aquaChipBal.textContent = String(target); aquaAnimRaf = null; }
+      };
+      aquaAnimRaf = requestAnimationFrame(step);
+    };
     onAquaChange(refreshAqua);
   }
   if (aquaChip) {
@@ -2163,8 +2264,30 @@ const STORAGE_DBG_FADE_MIN    = 'hf-sandbox-map-fade-min';
 const STORAGE_DBG_FADE_MAX    = 'hf-sandbox-map-fade-max';
 const STORAGE_DBG_SHOW_DECOR  = 'hf-sandbox-map-show-decoratives';
 const STORAGE_DBG_PANEL_OPEN  = 'hf-sandbox-map-debug-open';
+// Zone-painter assignments ({ nodeId: zone }) + the last-picked zone.
+// Persisted so the labels survive reloads / map-mode toggles until
+// the data is exported and the painter is cleared.
+const STORAGE_ZONE_POLYGONS = 'hf-sandbox-zone-polygons'; // per-zone polygons
+const STORAGE_ZONE_ACTIVE = 'hf-sandbox-zone-active';
+// Zone-view config (config panel): show the canonical zone overlay,
+// fill on/off, border opacity (1..100 %), and the painter edit mode.
+const STORAGE_ZONE_VIZ     = 'hf-sandbox-zone-viz';
+const STORAGE_ZONE_FILL    = 'hf-sandbox-zone-fill';
+const STORAGE_ZONE_VIZ_OP  = 'hf-sandbox-zone-viz-opacity';
+const STORAGE_ZONE_CURVED  = 'hf-sandbox-zone-curved';
+const STORAGE_ZONE_EDIT     = 'hf-sandbox-zone-edit';
 function persistDbg(key, value) {
   try { localStorage.setItem(key, String(value)); } catch { /* private mode */ }
+}
+// Push the saved zone-view config into a (possibly freshly-built)
+// renderer. Defaults: overlay on, fill on, 10% opacity, edit off.
+function applyZoneViewConfig(renderer) {
+  if (!renderer) return;
+  renderer.setOption('visualizeZones', loadDbgBool(STORAGE_ZONE_VIZ, true));
+  renderer.setOption('zoneFill', loadDbgBool(STORAGE_ZONE_FILL, true));
+  renderer.setOption('zoneOpacity', loadDbgNumber(STORAGE_ZONE_VIZ_OP, 10, 1, 100) / 100);
+  renderer.setOption('zoneCurved', loadDbgBool(STORAGE_ZONE_CURVED, true));
+  renderer.setOption('zoneEditMode', loadDbgBool(STORAGE_ZONE_EDIT, false));
 }
 function loadDbgNumber(key, fallback, min, max) {
   try {
@@ -2254,6 +2377,8 @@ function wireDebugPanel(renderer) {
     } catch { /* private mode */ }
   };
 
+  wireZonePainter(renderer, panel);
+
   // Restore the persisted open / closed state for the debug
   // panel. wireDebugPanel runs every time the renderer is
   // rebuilt, so this also re-applies on mode toggles. If no
@@ -2271,6 +2396,124 @@ function wireDebugPanel(renderer) {
     const f = renderer.getFps();
     if (f !== lastFps) { fpsEl.textContent = String(f); lastFps = f; }
   });
+}
+
+// Debug zone painter: a dropdown + lasso tool for hand-labelling the
+// solar zone of waypoint nodes (burns / lagranges / hohmanns), which
+// the planner data doesn't carry. Pick a zone, click the map to drop
+// polygon vertices, Finish to stamp every node inside, then Export to
+// dump the accumulated id2 -> zone map to the console for wiring into
+// planner-map.js. Real (named) sites are never touched.
+function wireZonePainter(renderer, panel) {
+  const select   = panel.querySelector('#dbg-zone-select');
+  const clearZoneBtn = panel.querySelector('#dbg-zone-clearzone');
+  const undoBtn   = panel.querySelector('#dbg-zone-undo');
+  const clearBtn  = panel.querySelector('#dbg-zone-clear');
+  const exportBtn = panel.querySelector('#dbg-zone-export');
+  const countEl   = panel.querySelector('#dbg-zone-count');
+  // Zone edit mode reveals the live painter overlay (off = editor data
+  // hidden, tools still present). Persisted + applied to the renderer.
+  const editCb = panel.querySelector('#dbg-zone-edit');
+  if (editCb) {
+    editCb.checked = loadDbgBool(STORAGE_ZONE_EDIT, false);
+    renderer.setOption('zoneEditMode', editCb.checked);
+    editCb.onchange = () => {
+      persistDbg(STORAGE_ZONE_EDIT, editCb.checked ? '1' : '0');
+      renderer.setOption('zoneEditMode', editCb.checked);
+    };
+  }
+  if (!select || !clearZoneBtn) return;
+
+  // Populate the dropdown + hand the per-zone palette to the renderer
+  // so the overlay paints in the published zone colours.
+  if (select.options.length <= 1) {
+    for (const z of SOLAR_ZONES) {
+      const opt = document.createElement('option');
+      opt.value = z;
+      opt.textContent = z;
+      select.appendChild(opt);
+    }
+  }
+  const colors = {};
+  for (const z of SOLAR_ZONES) colors[z] = (SOLAR_ZONE_INFO[z] || {}).color || '#22d3ee';
+  renderer.setZonePaintColors(colors);
+  // Zones nest inner -> outer (SOLAR_ZONES is Mercury..Neptune), so a
+  // node is labelled by the innermost polygon containing it. Set the
+  // order BEFORE restoring polygons (restore re-derives assignments).
+  renderer.setZoneOrder(SOLAR_ZONES);
+
+  // Persist the per-zone polygons (the source data) + the picked
+  // zone. Node assignments are NOT persisted - they're derived from
+  // the polygons on load.
+  const saveAll = () => {
+    try {
+      const polys = renderer.getZonePolygons();
+      if (polys.length) localStorage.setItem(STORAGE_ZONE_POLYGONS, JSON.stringify(polys));
+      else localStorage.removeItem(STORAGE_ZONE_POLYGONS);
+      if (select.value) localStorage.setItem(STORAGE_ZONE_ACTIVE, select.value);
+      else localStorage.removeItem(STORAGE_ZONE_ACTIVE);
+    } catch { /* private mode */ }
+  };
+
+  // Restore prior work into this (possibly freshly-rebuilt) renderer
+  // BEFORE wiring the change handler so the restore doesn't re-save.
+  try {
+    const rawPolys = localStorage.getItem(STORAGE_ZONE_POLYGONS);
+    if (rawPolys) {
+      renderer.setZonePolygons(JSON.parse(rawPolys));
+    } else {
+      // No local scratch yet - seed the painter from the canonical
+      // zone data so edits continue from the source of truth.
+      const seed = [];
+      for (const z in ZONE_POLYGONS) {
+        const arr = ZONE_POLYGONS[z];
+        if (arr && arr[0] && arr[0].length) seed.push({ zone: z, points: arr[0] });
+      }
+      renderer.setZonePolygons(seed);
+    }
+    const savedZone = localStorage.getItem(STORAGE_ZONE_ACTIVE);
+    if (savedZone && SOLAR_ZONES.includes(savedZone)) {
+      select.value = savedZone;
+      renderer.setZonePaintZone(savedZone);
+    }
+  } catch { /* corrupt / private mode */ }
+
+  const refreshCount = () => {
+    if (countEl) {
+      const np = renderer.zonePolygonCount();
+      const nn = renderer.zoneAssignmentCount();
+      countEl.textContent = `${np} poly · ${nn} nodes`;
+    }
+  };
+  refreshCount();
+
+  // Every future edit (add / move / undo a point, switch / clear a
+  // zone) funnels through this handler to persist + refresh the count.
+  renderer.setZonePaintChangeHandler(() => { saveAll(); refreshCount(); });
+
+  select.onchange = () => {
+    renderer.setZonePaintZone(select.value || null); // emits -> saveAll
+  };
+  clearZoneBtn.onclick = () => renderer.clearActiveZonePolygon(); // emits
+  undoBtn.onclick = () => renderer.undoZonePolyPoint();           // emits
+  clearBtn.onclick = () => renderer.clearZoneAssignments();       // emits
+  exportBtn.onclick = () => {
+    // Polygons are the source data the user uploads; assignments are
+    // derived (point-in-polygon) and emitted as a convenience.
+    const polygons = renderer.getZonePolygons();
+    const byZonePolys = {};
+    for (const p of polygons) (byZonePolys[p.zone] = byZonePolys[p.zone] || []).push(p.points);
+    const records = renderer.getZoneAssignments();
+    const byRef = {};
+    for (const r of records) byRef[r.id2] = r.zone;
+    /* eslint-disable no-console */
+    console.log(`[zone painter] ${polygons.length} polygon(s); ${records.length} derived node(s)`);
+    console.log('[zone painter] POLYGONS by zone (copy below - this is the data):');
+    console.log(JSON.stringify(byZonePolys));
+    console.log('[zone painter] derived id2 -> zone map (convenience):');
+    console.log(JSON.stringify(byRef, null, 2));
+    /* eslint-enable no-console */
+  };
 }
 
 // Site search with reactive suggestions. Each keystroke filters the
@@ -2455,6 +2698,18 @@ async function mountMapFor() {
   try {
     _activeData = await loadMap();
     soloBindData(_activeData);
+    // A move that was mid-hazard-resolution when the tab closed gets
+    // resumed (per-roll) if its saved state still resolves, else
+    // rolled back so the turn isn't wasted. Rollback only touches
+    // state, so it runs now (before the renderer reads position);
+    // the actual resume animates + opens modals, so it fires AFTER
+    // the renderer + route are restored (see _resumeMoveCtx below).
+    const _savedMove = loadMoveProgress();
+    let _resumeMoveCtx = null;
+    if (_savedMove) {
+      if (canResumeMove(_savedMove)) _resumeMoveCtx = _savedMove;
+      else rollbackMove(_savedMove);
+    }
     _renderer = new MapRenderer(canvas, {
       data: _activeData,
       onSelect: onSiteSelect,
@@ -2462,6 +2717,13 @@ async function mountMapFor() {
     _renderer.onSandboxRocketClick = () => openRocketStackModal();
     wireDebugPanel(_renderer);
     wireMapInsets(_renderer);
+    // Hand the canonical zone polygons + palette to the renderer so
+    // the "visualize zone data" config option can draw them behind
+    // the map, then apply the player's saved zone-view config.
+    const zoneColors = {};
+    for (const z of SOLAR_ZONES) zoneColors[z] = (SOLAR_ZONE_INFO[z] || {}).color || '#22d3ee';
+    _renderer.setCanonicalZones({ polys: ZONE_POLYGONS, colors: zoneColors, order: SOLAR_ZONES });
+    applyZoneViewConfig(_renderer);
     syncSoloShipMarker();
     syncSandboxRocket();
     syncDiscs();
@@ -2526,6 +2788,18 @@ async function mountMapFor() {
         _plannedRoute = null;
         persistPlannedRoute();
       }
+    }
+    // Resume an interrupted hazard queue now that the renderer +
+    // route + trail are live. Fire-and-forget: it animates and opens
+    // the roll modals for the remaining hazards. If it throws, fall
+    // back to rolling the move back so the turn isn't lost.
+    if (_resumeMoveCtx) {
+      runMoveQueue(_resumeMoveCtx, true).catch((e) => {
+        // eslint-disable-next-line no-console
+        console.error('move resume failed:', e);
+        rollbackMove(_resumeMoveCtx);
+        syncSandboxRocket();
+      });
     }
   } catch (err) {
     canvas.innerHTML = `<div class="map-loading error">Map failed to load: ${err.message}</div>`;
@@ -3181,12 +3455,14 @@ function isLeoSite(site) {
 }
 
 // Hazard classification. A node is a "hazard" when entering it
-// forces a survival roll (or 4 aqua to bypass). Three flavours
-// today, all drawn with their own glyph in render.js:
-//   - explicit hazard flag → ☠ skull (burn / lagrange nodes
-//     flagged by the planner JSON's `hazard:true`)
-//   - radhaz waypoint type → ☢ radiation trefoil
-//   - venus waypoint type  → 🪂 aerobrake corridor
+// forces a survival roll. Per the rulebook only two kinds are
+// payable (4 aqua bypass): the ☠ skull and the 🪂 aerobrake. The
+// ☢ radiation hazard rolls but CANNOT be paid for. Flyby /
+// gravity-assist lagrange points are NOT hazards even when the
+// planner JSON flags them `hazard:true`, so they're excluded here.
+//   - radhaz waypoint type → ☢ radiation (roll only, unpayable)
+//   - venus waypoint type  → 🪂 aerobrake corridor (payable)
+//   - hazard-flagged burn  → ☠ skull (payable)
 // Returns the glyph + a short label so the confirm modal can list
 // what the player is about to fly through.
 const HAZARD_COST_PER = 4;
@@ -3194,7 +3470,10 @@ function classifyHazard(site) {
   if (!site) return null;
   if (site.type === 'radhaz') return { glyph: '☢', label: 'Radiation hazard' };
   if (site.type === 'venus')  return { glyph: '🪂', label: 'Aerobrake corridor' };
-  if (site.hazard)            return { glyph: '☠', label: 'Hazard node' };
+  // Skull hazards live on hazard-flagged burn spaces. Lagrange
+  // (flyby / gravity-assist) nodes are flybys, not hazards, even
+  // when the planner flags them.
+  if (site.hazard && site.type !== 'lagrange') return { glyph: '☠', label: 'Hazard node' };
   return null;
 }
 function isHazardSite(site) {
@@ -4421,6 +4700,7 @@ function doFreeMarket() {
   openFreeMarketModal({
     handIds,
     lookupCard: cardById,
+    renderCardFn: renderCard,
     onCommit: ({ cardId }) => {
       if (!cardId) return;
       if (!requireOp('Free Market')) return;
@@ -4762,6 +5042,12 @@ function openDumpWaterModal(maxWater) {
     document.querySelector('.dump-water-overlay')?.remove();
     const overlay = document.createElement('div');
     overlay.className = 'card-modal-overlay confirm-modal-overlay dump-water-overlay';
+    // Current wet mass drives the preview: dumping water lowers the
+    // wet mass, which can drop the rocket into a lighter weight class
+    // with a better net-thrust modifier.
+    const totals = getStackTotals();
+    const curWet = Math.max(0, totals.wetMass | 0);
+    const tankCap = getTankMax();
     let amount = Math.min(1, max);
     const close = (val) => {
       overlay.remove();
@@ -4787,6 +5073,11 @@ function openDumpWaterModal(maxWater) {
         <button type="button" class="popup-btn popup-btn-secondary dump-step" data-step="1" aria-label="Dump one more">+</button>
         <button type="button" class="popup-btn dump-all" title="Dump the entire tank">All (${max})</button>
       </div>
+      <div class="dump-preview">
+        <span class="dump-preview-mass">Wet mass <strong>${curWet}</strong> →
+          <strong class="dump-after-wet">${curWet}</strong><small>/${tankCap}</small></span>
+        <span class="dump-preview-class"></span>
+      </div>
       <div class="turn-confirm-actions">
         <button type="button" class="popup-btn primary" data-act="yes">💧⤓ Dump <span class="dump-confirm-n">${amount}</span></button>
         <button type="button" class="popup-btn" data-act="no">Cancel</button>
@@ -4794,11 +5085,23 @@ function openDumpWaterModal(maxWater) {
     `;
     const input = panel.querySelector('.dump-amount');
     const confirmN = panel.querySelector('.dump-confirm-n');
+    const afterWetEl = panel.querySelector('.dump-after-wet');
+    const classEl = panel.querySelector('.dump-preview-class');
     const clamp = (v) => Math.max(1, Math.min(max, Math.round(Number(v)) || 1));
+    // Reflect the resulting wet mass + the weight class (net-thrust
+    // modifier) the rocket would fall into after dumping `n` water.
+    const updatePreview = (n) => {
+      const afterWet = Math.max(0, curWet - n);
+      afterWetEl.textContent = String(afterWet);
+      const wc = weightClassForMass(Math.max(1, afterWet));
+      const mod = wc.netThrust >= 0 ? `+${wc.netThrust}` : String(wc.netThrust);
+      classEl.innerHTML = `Class <strong>${esc(wc.id)} ${mod}</strong> net thrust`;
+    };
     const setAmount = (v) => {
       amount = clamp(v);
       input.value = String(amount);
       confirmN.textContent = String(amount);
+      updatePreview(amount);
     };
     panel.querySelectorAll('.dump-step').forEach((b) => {
       b.addEventListener('click', () => setAmount(amount + Number(b.dataset.step)));
@@ -4807,14 +5110,16 @@ function openDumpWaterModal(maxWater) {
     input.addEventListener('input', () => {
       // Allow free typing; only snap to the clamped value on the
       // confirm/step paths so the field doesn't fight the user
-      // mid-keystroke. Keep the confirm label in sync though.
+      // mid-keystroke. Keep the confirm label + preview in sync though.
       const v = clamp(input.value);
       amount = v;
       confirmN.textContent = String(v);
+      updatePreview(v);
     });
     input.addEventListener('blur', () => setAmount(input.value));
     panel.querySelector('[data-act="yes"]').addEventListener('click', () => close(amount));
     panel.querySelector('[data-act="no"]').addEventListener('click', () => close(null));
+    updatePreview(amount);
     overlay.appendChild(panel);
     mountOverlay(overlay);
     setTimeout(() => { input.focus(); input.select(); }, 0);
@@ -4850,12 +5155,20 @@ function buildFuelStrip(host, totals) {
   bands.className = 'fuel-strip-bands is-clickable';
   bands.title = 'Click to open the detailed Fuel Strip Track';
   bands.addEventListener('click', () => openNetThrustDetailModal());
+  // Cap how many mass cells a band lays out per row. Wide bands
+  // (TUG spans 16) wrap onto extra rows instead of stretching the
+  // strip past its box / off-screen on narrow viewports.
+  const MAX_STRIP_COLS = 8;
   for (const wc of WEIGHT_CLASSES) {
     const span = wc.massMax - wc.massMin + 1;
+    const cols = Math.min(span, MAX_STRIP_COLS);
     const band = document.createElement('div');
     band.className = 'fuel-strip-band';
     band.dataset.band = wc.id;
-    band.style.flexGrow = String(span);
+    // Width tracks the column count (not the full span) so a wrapped
+    // band keeps the same cell size as the others rather than
+    // hogging horizontal room for cells it stacks vertically.
+    band.style.flexGrow = String(cols);
     band.style.setProperty('--band-color', wc.color);
 
     const head = document.createElement('div');
@@ -4881,7 +5194,9 @@ function buildFuelStrip(host, totals) {
 
     const cells = document.createElement('div');
     cells.className = 'fuel-strip-cells';
-    cells.style.gridTemplateColumns = `repeat(${span}, 1fr)`;
+    // minmax(0, 1fr) lets the cells shrink to share the band's width
+    // so the strip never overflows its box on narrow viewports.
+    cells.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
     for (let i = wc.massMin; i <= wc.massMax; i++) {
       const cell = document.createElement('div');
       cell.className = 'fuel-strip-cell';
@@ -5535,6 +5850,39 @@ function prospectorIsruValue(card) {
   return Number.isFinite(v) ? v : 0;
 }
 
+// Free-market a single already-chosen Hand card. Same cost + payout
+// as the Free Market operation (1 op, +FREE_MARKET_AQUA aqua, card to
+// the bottom of its deck), but skips the picker and goes straight to
+// the irreversible-sale confirm. afterFn runs once the sale commits
+// (e.g. to close the card popup).
+function freeMarketSellFromHand(card, afterFn) {
+  if (!card) return;
+  openSellConfirmModal({
+    card,
+    aqua: FREE_MARKET_AQUA,
+    renderCardFn: renderCard,
+    onConfirm: () => {
+      if (!requireOp('Free Market')) return;
+      removeFromHand(card.id);
+      addToBottom(card.id);
+      addAqua(FREE_MARKET_AQUA);
+      setStatus(
+        `💱 Free Market: <em>${esc(card.name)}</em> nets `
+        + `<strong>+${FREE_MARKET_AQUA}</strong> aqua and returns to the `
+        + `bottom of the ${esc(card.type || 'patent')} deck.`
+      );
+      logAction({
+        type: 'free_market',
+        icon: '💱',
+        summary: `Free Market: ${card.name} for +${FREE_MARKET_AQUA} aqua`,
+        undoable: false,
+        data: { cardId: card.id, aqua: FREE_MARKET_AQUA },
+      });
+      if (afterFn) afterFn();
+    },
+  });
+}
+
 function doProspect(site, prosp) {
   if (!prosp) return;
   // Already-prospected sites are off-limits in the sandbox; the UI
@@ -5556,32 +5904,37 @@ function doProspect(site, prosp) {
     );
     return;
   }
-  // Rulebook I6: Prospect is an Operation, consumes the per-turn
-  // op slot regardless of dice outcome. Closing the roll modal
-  // without placing the disc still costs the op (you committed to
-  // the roll).
-  if (!requireOp('Prospect')) return;
+  // Raygun is a free, unlimited remote scan (rulebook: the beam
+  // fires through line-of-sight, including lander burn spaces). It
+  // never consumes the per-turn operation, so the player can keep
+  // firing it at every reachable site and still spend their op on
+  // something else, and it never touches the move budget. Missile /
+  // buggy land on the target site and DO cost the op (rulebook I6).
+  const isRaygun = prosp.kind === 'raygun';
+  if (!isRaygun && !requireOp('Prospect')) return;
   const threshold = siteProspectThreshold(site);
   const roll = 1 + Math.floor(Math.random() * 6);
   const success = roll <= threshold;
   const cardName = prosp.card?.name || prosp.id;
   const kindGlyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prosp.kind] || '🔬';
-  openProspectRollModal({ site, threshold, roll, success, kindGlyph, cardName }, () => {
-    placeDisc(site.id, success ? 'success' : 'fail', {
-      roll, threshold, kind: prosp.kind, by: cardName,
+  // The buggy can re-roll the prospect die once (optional).
+  const canReroll = prosp.kind === 'buggy';
+  openProspectRollModal({ site, threshold, roll, success, kindGlyph, cardName, canReroll }, (finalRoll, finalSuccess) => {
+    placeDisc(site.id, finalSuccess ? 'success' : 'fail', {
+      roll: finalRoll, threshold, kind: prosp.kind, by: cardName,
     });
     setStatus(
       `${kindGlyph} Prospected <strong>${esc(site.name)}</strong> `
       + `(target ≤ ${threshold}) with <em>${esc(cardName)}</em>: `
-      + `rolled <strong class="big">${roll}</strong> - `
-      + `<strong>${success ? 'success - claim placed' : 'failed - site exhausted'}</strong>.`
+      + `rolled <strong class="big">${finalRoll}</strong> - `
+      + `<strong>${finalSuccess ? 'success - claim placed' : 'failed - site exhausted'}</strong>.`
     );
     logAction({
       type: 'prospect',
       icon: kindGlyph,
-      summary: `${success ? 'Claimed' : 'Exhausted'} ${site.name} (${prosp.kind}, rolled ${roll} vs ≤${threshold})`,
+      summary: `${finalSuccess ? 'Claimed' : 'Exhausted'} ${site.name} (${prosp.kind}, rolled ${finalRoll} vs ≤${threshold})`,
       undoable: false,
-      data: { siteId: site.id, kind: prosp.kind, roll, threshold, success },
+      data: { siteId: site.id, kind: prosp.kind, roll: finalRoll, threshold, success: finalSuccess },
     });
   });
 }
@@ -5592,14 +5945,19 @@ function doProspect(site, prosp) {
 // border tints green on success / red on fail so the player reads
 // the outcome at a glance. Player then clicks "Place disc" to
 // commit the result; onPlace fires once the disc lands.
-function openProspectRollModal({ site, threshold, roll, success, kindGlyph, cardName }, onPlace) {
+function openProspectRollModal({ site, threshold, roll, success, kindGlyph, cardName, canReroll = false }, onPlace) {
   document.querySelector('.prospect-roll-overlay')?.remove();
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay prospect-roll-overlay';
+  // Live result the Place button commits. The buggy reroll mutates
+  // these in place, so onPlace always receives the FINAL roll.
+  let curRoll = roll;
+  let curSuccess = success;
+  let rerollUsed = false;
   const close = (placed) => {
     overlay.remove();
     document.removeEventListener('keydown', onKey);
-    if (placed && onPlace) onPlace();
+    if (placed && onPlace) onPlace(curRoll, curSuccess);
   };
   // Roll animation isn't dismissible by clicking outside / Esc -
   // the player has to acknowledge the result with the Place button.
@@ -5626,6 +5984,7 @@ function openProspectRollModal({ site, threshold, roll, success, kindGlyph, card
     </div>
     <p class="prospect-roll-result muted">Rolling…</p>
     <div class="prospect-roll-actions">
+      ${canReroll ? `<button type="button" class="popup-btn prospect-reroll-btn" disabled>🎲 Reroll (buggy)</button>` : ''}
       <button type="button" class="popup-btn primary prospect-place-btn" disabled>
         Place disc
       </button>
@@ -5634,21 +5993,49 @@ function openProspectRollModal({ site, threshold, roll, success, kindGlyph, card
   const dieHost = panel.querySelector('.prospect-die-host');
   const resultLine = panel.querySelector('.prospect-roll-result');
   const placeBtn = panel.querySelector('.prospect-place-btn');
+  const rerollBtn = panel.querySelector('.prospect-reroll-btn');
   const die = buildDie(1);
   dieHost.appendChild(die);
 
   overlay.appendChild(panel);
   mountOverlay(overlay);
 
-  rollDie(die, roll).then(() => {
-    die.classList.add(success ? 'die-success' : 'die-fail');
-    resultLine.innerHTML = success
-      ? `Rolled <strong>${roll}</strong> ≤ ${threshold} - <strong class="ok">success</strong>. Claim disc ready.`
-      : `Rolled <strong>${roll}</strong> > ${threshold} - <strong class="bad">failed</strong>. Site exhausted.`;
+  // Settle the UI on a finished roll: tint the die, show the verdict,
+  // and re-enable the action buttons.
+  const showResult = (r, ok) => {
+    die.classList.remove('die-success', 'die-fail');
+    die.classList.add(ok ? 'die-success' : 'die-fail');
+    resultLine.innerHTML = ok
+      ? `Rolled <strong>${r}</strong> ≤ ${threshold} - <strong class="ok">success</strong>. Claim disc ready.`
+      : `Rolled <strong>${r}</strong> > ${threshold} - <strong class="bad">failed</strong>. Site exhausted.`;
     resultLine.classList.remove('muted');
     placeBtn.disabled = false;
-    placeBtn.textContent = success ? 'Place yellow claim disc' : 'Place red disc';
-  });
+    placeBtn.textContent = ok ? 'Place yellow claim disc' : 'Place red disc';
+    if (rerollBtn && !rerollUsed) rerollBtn.disabled = false;
+  };
+  // Animate a roll to `r`, locking the buttons until it settles.
+  const animateRoll = (r, ok) => {
+    placeBtn.disabled = true;
+    if (rerollBtn) rerollBtn.disabled = true;
+    die.classList.remove('die-success', 'die-fail');
+    resultLine.textContent = 'Rolling…';
+    resultLine.classList.add('muted');
+    rollDie(die, r).then(() => showResult(r, ok));
+  };
+
+  animateRoll(curRoll, curSuccess);
+
+  if (rerollBtn) {
+    rerollBtn.addEventListener('click', () => {
+      if (rerollUsed) return;
+      rerollUsed = true;
+      curRoll = 1 + Math.floor(Math.random() * 6);
+      curSuccess = curRoll <= threshold;
+      animateRoll(curRoll, curSuccess);
+      // One reroll only - retire the button once spent.
+      rerollBtn.style.display = 'none';
+    });
+  }
   placeBtn.addEventListener('click', () => close(true));
 }
 
@@ -5678,6 +6065,54 @@ function persistRocketTrail() {
       localStorage.removeItem(STORAGE_ROCKET_TRAIL);
     }
   } catch { /* private mode */ }
+}
+// Move-progress helpers. The full resumable queue context (ctx) is
+// persisted as each roll / choice commits, so a tab close mid-
+// resolution can pick up where it left off on the next load (per-roll
+// resume). Committed rolls aren't re-rolled.
+function persistMoveProgress(ctx) {
+  try { localStorage.setItem(STORAGE_PENDING_MOVE, JSON.stringify(ctx)); }
+  catch { /* private mode */ }
+}
+function clearMoveProgress() {
+  try { localStorage.removeItem(STORAGE_PENDING_MOVE); }
+  catch { /* private mode */ }
+}
+function loadMoveProgress() {
+  try {
+    const s = localStorage.getItem(STORAGE_PENDING_MOVE);
+    return s ? JSON.parse(s) : null;
+  } catch { return null; }
+}
+// True when a saved move ctx still resolves against the active data
+// set (so we can safely re-enter the queue). If not, the move is
+// rolled back instead.
+function canResumeMove(ctx) {
+  if (!ctx || !_activeData || !Array.isArray(ctx.turn1) || !ctx.turn1.length) return false;
+  const has = (id) => !!(_activeData.byId ? _activeData.byId[id]
+    : _activeData.sites.find((x) => x.id === id));
+  return ctx.turn1.every((s) => has(s.from) && has(s.to)) && has(ctx.newSiteId);
+}
+// Roll a move that can't be resumed (data changed, etc.) back to its
+// pre-move state so the turn isn't wasted: rocket returns to origin,
+// route + trail restored, move budget + fuel refunded, hazard lock
+// cleared. Mutates only module state + persistence.
+function rollbackMove(ctx) {
+  clearMoveProgress();
+  if (!ctx) return;
+  _rocketSiteId = ctx.fromSiteId || null;
+  persistRocketSite();
+  _rocketTrail = Array.isArray(ctx.trail) ? ctx.trail : [];
+  persistRocketTrail();
+  _plannedRoute = Array.isArray(ctx.route) && ctx.route.length ? ctx.route : null;
+  persistPlannedRoute();
+  if (Number(ctx.fuelCost) > 0) addFuel(Number(ctx.fuelCost));
+  refundMove();
+  setHazardousMove(false);
+  setStatus(
+    '⚠ Your last move could not be resumed and was rolled back. The '
+    + 'move budget and fuel were refunded - replay the move when ready.'
+  );
 }
 // Planned route persistence. Called from every assignment to
 // _plannedRoute so the multi-turn plan survives reloads - critical
@@ -6190,6 +6625,12 @@ async function moveRocket() {
       lockUndo = true;
     }
   }
+  // Capture the pre-move position for the rollback fallback (used if
+  // a saved move can't be resumed). The full resumable ctx is built
+  // and persisted just below, after the move commits.
+  const preMoveSiteId = _rocketSiteId;
+  const preMoveRoute = _plannedRoute.map((s) => ({ ...s }));
+  const preMoveTrail = _rocketTrail.map((t) => ({ ...t }));
   if (lockUndo) setHazardousMove(true);
   if (!consumeMove()) {
     setStatus('No moves left this turn - end turn to refresh.');
@@ -6220,19 +6661,66 @@ async function moveRocket() {
     cashedVps:   0,
     fuelSpent:   fuelCost,
   };
+  // Resumable queue context. Persisted after every committed roll /
+  // choice so a tab close mid-resolution can pick up at the next
+  // unresolved hazard on reload (per-roll resume). fromSiteId / route
+  // / trail are the rollback fallback if the saved state can't be
+  // safely resumed.
+  const ctx = {
+    turn1: turn1.map((s) => ({ ...s })),
+    qi: 0,
+    lastIdx: 0,
+    payRemainingGeneric: (hazardChoice === 'pay'),
+    radWillRoll, radThrust, radSeasonBonus,
+    hazardChoice,
+    genericCount: genericHazards.length,
+    newSiteId, arrivedName, arrivedZone,
+    willAwardChit, willCashIn, chitsToCash,
+    fuelCost, lockUndo,
+    fromSiteId: preMoveSiteId,
+    route: preMoveRoute,
+    trail: preMoveTrail,
+  };
+  persistMoveProgress(ctx);
+  return runMoveQueue(ctx, false);
+}
+
+// Hazard-resolution queue + move completion, factored out of
+// moveRocket so it can be re-entered on reload (per-roll resume).
+// `ctx` carries the saved progress; a fresh run starts at qi 0, a
+// resume at the next unresolved hazard. The locals below re-bind the
+// values the loop reads so its body is identical either way. Persists
+// ctx after each committed step; clears it at every exit.
+async function runMoveQueue(ctx, resuming) {
+  const turn1 = ctx.turn1;
+  const newSiteId = ctx.newSiteId;
+  const arrivedName = ctx.arrivedName;
+  const arrivedZone = ctx.arrivedZone;
+  const willAwardChit = ctx.willAwardChit;
+  const willCashIn = ctx.willCashIn;
+  const chitsToCash = ctx.chitsToCash;
+  const radWillRoll = ctx.radWillRoll;
+  const radThrust = ctx.radThrust;
+  const radSeasonBonus = ctx.radSeasonBonus;
+  const hazardChoice = ctx.hazardChoice;
+  const lockUndo = ctx.lockUndo;
+  const genericHazards = { length: ctx.genericCount };
+  const hazards = routeHazards(turn1);
   // Move queue. Walk turn1 segments in order, pausing at each
   // hazard node to resolve it (animate-to + roll modal). An
   // early critical kills the ship before later hazards even
   // see the dice. Trail + _rocketSiteId update incrementally
   // so an explosion mid-route reports the right location.
-  setStatus(`🛸 Moving rocket to <strong>${esc(arrivedName)}</strong>…`);
+  setStatus(resuming
+    ? `🛸 Resuming move to <strong>${esc(arrivedName)}</strong>…`
+    : `🛸 Moving rocket to <strong>${esc(arrivedName)}</strong>…`);
   const hazardIndexById = new Map();
   for (const h of hazards) {
     const idx = turn1.findIndex((s) => s.to === h.site.id);
     if (idx >= 0) hazardIndexById.set(h.site.id, { idx, hazard: h });
   }
   const orderedHazards = [...hazardIndexById.values()].sort((a, b) => a.idx - b.idx);
-  let lastIdx = 0;
+  let lastIdx = ctx.lastIdx;
   const advanceTo = async (targetIdx) => {
     if (targetIdx < lastIdx) return;
     const slice = turn1.slice(lastIdx, targetIdx + 1);
@@ -6244,15 +6732,17 @@ async function moveRocket() {
     _rocketSiteId = slice[slice.length - 1].to;
     persistRocketSite();
     lastIdx = targetIdx + 1;
+    ctx.lastIdx = lastIdx;
+    persistMoveProgress(ctx);
   };
   // Tracks whether the player switched to "pay for the rest"
   // mid-queue; flips remaining generic hazards to the paid path
   // without re-rolling. Starts true when the upfront choice was
   // already 'pay' so the queue uniformly checks one flag.
-  let payRemainingGeneric = (hazardChoice === 'pay');
+  let payRemainingGeneric = ctx.payRemainingGeneric;
   let earlyHalt = false;
   let haltSite = null;
-  for (let qi = 0; qi < orderedHazards.length; qi++) {
+  for (let qi = ctx.qi; qi < orderedHazards.length; qi++) {
     const { idx, hazard } = orderedHazards[qi];
     await advanceTo(idx);
     const isRad = hazard.site.type === 'radhaz';
@@ -6338,11 +6828,19 @@ async function moveRocket() {
         });
         if (r.d6 === 1) {
           setStatus(`💥 Critical failure at <strong>${esc(r.site.name)}</strong>…`);
+          // Committed outcome - the rocket is destroyed, so there's
+          // nothing to resume.
+          clearMoveProgress();
           await explodeRocket(r.site.id);
           return false;
         }
       }
     }
+    // This hazard is resolved + logged. Advance the checkpoint so a
+    // reload resumes at the NEXT hazard and never re-rolls this one.
+    ctx.qi = qi + 1;
+    ctx.payRemainingGeneric = payRemainingGeneric;
+    persistMoveProgress(ctx);
     // Post-resolve safety net: a decommissioned active thruster
     // (or its support cards) might have killed the rocket's
     // ability to fly. If so, halt right here - the rocket
@@ -6389,6 +6887,8 @@ async function moveRocket() {
         const cost = remGeneric.length * HAZARD_COST_PER;
         if (cost > 0 && spendAqua(cost)) {
           payRemainingGeneric = true;
+          ctx.payRemainingGeneric = true;
+          persistMoveProgress(ctx);
           logAction({
             type: 'hazard_pay',
             icon: '💧',
@@ -6406,6 +6906,9 @@ async function moveRocket() {
   // the journey later. The destination for THIS move is the
   // last node we actually reached, not the original target.
   if (earlyHalt) {
+    // Resolved outcome (stop / stranded) - carry-over handled below,
+    // so there's nothing left to resume.
+    clearMoveProgress();
     const haltedSiteId = (haltSite && haltSite.id) || _rocketSiteId;
     // Carry-over: every segment past `lastIdx` becomes turn 2+
     // in the planned route. The post-move "shift down" logic
@@ -6440,6 +6943,9 @@ async function moveRocket() {
     _rocketTrail = _rocketTrail.concat(tail.map((s) => ({ from: s.from, to: s.to })));
     persistRocketTrail();
     _renderer.setRocketTrail(_rocketTrail);
+    lastIdx = turn1.length;
+    ctx.lastIdx = lastIdx;
+    persistMoveProgress(ctx);
   }
   _rocketSiteId = newSiteId;
   persistRocketSite();
@@ -6476,12 +6982,16 @@ async function moveRocket() {
   }
   if (willCashIn) {
     const res = cashInChits(`returned to ${arrivedName}`);
-    _moveSnapshot.cashedChits = chitsToCash;
-    _moveSnapshot.cashedVps   = res.vps;
+    // _moveSnapshot is null on a resumed move (it lives only in memory);
+    // undo is locked for hazardous moves anyway, so guard the write.
+    if (_moveSnapshot) {
+      _moveSnapshot.cashedChits = chitsToCash;
+      _moveSnapshot.cashedVps   = res.vps;
+    }
     logAction({
       type: 'glory_cash',
       icon: '💰',
-      summary: `Cashed ${chitsToCash.length} chit${chitsToCash.length === 1 ? '' : 's'} for ${res.vps} VP`,
+      summary: `Cashed ${(chitsToCash || []).length} chit${(chitsToCash || []).length === 1 ? '' : 's'} for ${res.vps} VP`,
       undoable: false,
     });
   }
@@ -6513,6 +7023,8 @@ async function moveRocket() {
     if (clearBtn) clearBtn.hidden = true;
     setStatus(`🛸 Arrived at <strong>${esc(arrivedName)}</strong>.`);
   }
+  // Move fully resolved - clear the resume checkpoint.
+  clearMoveProgress();
   // Final sync - the animation left the sprite at the destination's
   // pixel coords; this pins it back to the canonical site (x, y)
   // and ensures canFly reflects the live stack state.
@@ -6752,6 +7264,92 @@ function onSiteSelect(site) {
 // density, accessibility toggles, dev flags). Reachable from the
 // toolbar ⚙ button as well as inline gears scattered through
 // the popups; everything ends up here.
+// Config modal (sidepanel ⚙). Fullscreen toggle, a jump to the nav /
+// route settings, and the canonical zone-data visualisation controls
+// (show overlay, fill, border opacity). All zone-view settings persist
+// and apply live to the active renderer.
+function openConfigModal() {
+  document.querySelector('.config-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay config-overlay';
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+
+  const isFs = !!document.fullscreenElement;
+  const viz = loadDbgBool(STORAGE_ZONE_VIZ, true);
+  const fill = loadDbgBool(STORAGE_ZONE_FILL, true);
+  const op = loadDbgNumber(STORAGE_ZONE_VIZ_OP, 10, 1, 100);
+  const curved = loadDbgBool(STORAGE_ZONE_CURVED, true);
+
+  const panel = document.createElement('div');
+  panel.className = 'config-panel';
+  panel.innerHTML = `
+    <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
+    <h2 class="config-title">⚙ Config</h2>
+    <div class="config-section">
+      <button type="button" class="modal-btn config-fs">${isFs ? '⤬ Exit fullscreen' : '⛶ Fullscreen'}</button>
+      <button type="button" class="modal-btn config-nav">🧭 Nav settings</button>
+    </div>
+    <div class="config-section">
+      <div class="config-section-title">Zone data</div>
+      <label class="dbg-check"><input type="checkbox" class="cfg-zone-viz" ${viz ? 'checked' : ''}><span>Visualize zone data</span></label>
+      <label class="dbg-check"><input type="checkbox" class="cfg-zone-fill" ${fill ? 'checked' : ''}><span>Fill zones</span></label>
+      <label class="dbg-check"><input type="checkbox" class="cfg-zone-curved" ${curved ? 'checked' : ''}><span>Curved zone border</span></label>
+      <label class="dbg-slider"><span>Zone opacity <em class="cfg-zone-op-val">${op}%</em></span>
+        <input type="range" class="cfg-zone-op" min="1" max="100" step="1" value="${op}"></label>
+      <button type="button" class="modal-btn cfg-zone-reset">↺ Reset to default</button>
+    </div>
+  `;
+  overlay.appendChild(panel);
+  panel.querySelector('.modal-x').addEventListener('click', close);
+  panel.querySelector('.config-fs').addEventListener('click', () => {
+    if (document.fullscreenElement) document.exitFullscreen?.();
+    else document.documentElement.requestFullscreen?.();
+    close();
+  });
+  panel.querySelector('.config-nav').addEventListener('click', () => { close(); openGameSettingsModal(); });
+  const vizCb  = panel.querySelector('.cfg-zone-viz');
+  const fillCb = panel.querySelector('.cfg-zone-fill');
+  const curvedCb = panel.querySelector('.cfg-zone-curved');
+  const opEl   = panel.querySelector('.cfg-zone-op');
+  const opValEl = panel.querySelector('.cfg-zone-op-val');
+  vizCb.onchange = () => {
+    persistDbg(STORAGE_ZONE_VIZ, vizCb.checked ? '1' : '0');
+    if (_renderer) _renderer.setOption('visualizeZones', vizCb.checked);
+  };
+  fillCb.onchange = () => {
+    persistDbg(STORAGE_ZONE_FILL, fillCb.checked ? '1' : '0');
+    if (_renderer) _renderer.setOption('zoneFill', fillCb.checked);
+  };
+  curvedCb.onchange = () => {
+    persistDbg(STORAGE_ZONE_CURVED, curvedCb.checked ? '1' : '0');
+    if (_renderer) _renderer.setOption('zoneCurved', curvedCb.checked);
+  };
+  opEl.oninput = () => {
+    const v = Number(opEl.value);
+    opValEl.textContent = v + '%';
+    persistDbg(STORAGE_ZONE_VIZ_OP, v);
+    if (_renderer) _renderer.setOption('zoneOpacity', v / 100);
+  };
+  // Reset the zone visuals to defaults (visualize on, fill on, 10%,
+  // curved on). Clears the saved keys so the defaults persist, then
+  // re-applies to the renderer and the modal controls.
+  panel.querySelector('.cfg-zone-reset').addEventListener('click', () => {
+    for (const k of [STORAGE_ZONE_VIZ, STORAGE_ZONE_FILL, STORAGE_ZONE_VIZ_OP, STORAGE_ZONE_CURVED]) {
+      try { localStorage.removeItem(k); } catch { /* private mode */ }
+    }
+    if (_renderer) applyZoneViewConfig(_renderer);
+    vizCb.checked = true;
+    fillCb.checked = true;
+    curvedCb.checked = true;
+    opEl.value = 10;
+    opValEl.textContent = '10%';
+  });
+  mountOverlay(overlay);
+}
+
 function openGameSettingsModal() {
   // For now the only setting block IS the route options; reuse
   // the same modal so the player sees one familiar surface.
@@ -8390,8 +8988,10 @@ function paintSolo() {
       doSandboxReset();
       setStatus(`🆕 New game - board cleared, aqua bank reseeded to ${cash}. Pick your starting crew.`);
       // Mandatory starting-crew pick (user 2026-05): the crew
-      // wizard fires automatically on New game.
-      openCrewWizard();
+      // wizard fires automatically on New game. Once the crew is
+      // committed, close the solo pane so the player drops straight
+      // onto the fresh board with no panels left open.
+      openCrewWizard(() => showPane(null));
     };
     const flipMode = (next) => {
       if (next === marketMode) return;

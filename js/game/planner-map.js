@@ -26,6 +26,7 @@ const SITE_FLAGS_URL  = './data/site-flags.json';
 // stragglers (and provides solarZone, which the planner data
 // doesn't have at all).
 import { SITES as LOCAL_SITES } from '../../data/sites.js';
+import { ZONE_ASSIGNMENTS } from '../../data/zones.js';
 const LOCAL_SITE_BY_NAME = new Map();
 for (const s of LOCAL_SITES) {
   if (s && s.name) LOCAL_SITE_BY_NAME.set(normalizeSiteName(s.name), s);
@@ -173,6 +174,17 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
   // or two real sites have the same slugged name). Append a
   // numeric suffix in iteration order so the result stays stable.
   disambiguateRefIds(sites);
+
+  // Stamp the canonical solar zone onto every node from the frozen
+  // zone data (keyed by the now-final id2). This covers ALL non-site
+  // nodes - lagranges, hohmanns, burns/landers, rad hazards,
+  // decoratives - which the planner JSON doesn't carry a zone for.
+  // Named sites keep their hand-curated solarZone unless the data
+  // overrides them.
+  for (const s of sites) {
+    const z = ZONE_ASSIGNMENTS[s.id2];
+    if (z) s.solarZone = z;
+  }
 
   // Each site picks up a bodyKey so the renderer can group
   // multi-site bodies (Mars, Luna, Mercury) into one shared halo.
