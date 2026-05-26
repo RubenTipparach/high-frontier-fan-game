@@ -1622,13 +1622,13 @@ export class MapRenderer {
       if (this.data.mode === 'clean' && Array.isArray(this.data.zones)) {
         this._drawZoneBands(sctx, this.data.zones, this.data.zoneInfo);
       }
-      this._drawEdges(sctx);
       sctx.restore();
-      // NOTE: only the node-connecting edges + the solar-zone fills are
-      // cached here. Guides, body halos / planets, waypoints, hexes and
-      // labels are all drawn live every frame in _draw (with viewport
-      // culling) so they stay crisp during zoom instead of being scaled
-      // up from this bitmap.
+      // NOTE: only the solar-zone fills are cached here. Edges, guides,
+      // body halos / planets, waypoints, hexes and labels are all drawn
+      // live every frame in _draw (with viewport culling) so they stay
+      // crisp during zoom instead of being scaled up from this bitmap.
+      // Edges in particular must draw live (over the planets) so the
+      // delta-v lines aren't tucked behind the body spheres.
     } finally {
       this.pan.x = savePanX; this.pan.y = savePanY;
       this.hostW = saveHostW; this.hostH = saveHostH;
@@ -1697,6 +1697,10 @@ export class MapRenderer {
     // gameplay route/trail follow on top.
     this._drawGuides(ctx);
     this._drawSiteHalosWorld(ctx);
+    // Delta-v edges draw live, AFTER the planet halos, so the lines sit
+    // over the body spheres instead of behind them. Cheap: every edge
+    // category batches into a single stroke pass.
+    this._drawEdges(ctx);
     this._drawAsteroidBelt(ctx);
     {
       const now = performance.now();
