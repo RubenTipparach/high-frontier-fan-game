@@ -229,6 +229,40 @@ function appendSmoothPath(ctx, pts) {
   ctx.lineTo(last.x, last.y);
 }
 
+// Punch a hex colour up into a richer version for the zone fills:
+// the canonical palette is pale/pastel and washes out under a low
+// overlay alpha, so we cap lightness and floor saturation. Dark zones
+// (Saturn / Neptune) also get lifted so their fill stays visible.
+function vividHex(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ''));
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  let r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0; const l = (max + min) / 2;
+  const d = max - min;
+  if (d) {
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h /= 6;
+  }
+  const nl = Math.max(0.40, Math.min(0.60, l));   // pull toward a mid lightness
+  const ns = Math.max(0.62, s);                    // floor the saturation
+  const hue2rgb = (p, q, t) => {
+    if (t < 0) t += 1; if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  const q = nl < 0.5 ? nl * (1 + ns) : nl + ns - nl * ns;
+  const p = 2 * nl - q;
+  const to = (x) => Math.round(hue2rgb(p, q, x) * 255).toString(16).padStart(2, '0');
+  return `#${to(h + 1 / 3)}${to(h)}${to(h - 1 / 3)}`;
+}
+
 // Smooth CLOSED loop through `pts` (quadratic midpoints, wrapping
 // around). Renders a rounded blob through the polygon's edge
 // midpoints with each vertex as a control point. Used for curved
@@ -667,11 +701,11 @@ export class MapRenderer {
       debug: false,
       // Zone-visualisation (config panel): draw the canonical solar-
       // zone polygons behind everything. On by default. Fill optional;
-      // border opacity 0.01..1 (default 0.3); curved borders smooth the
+      // border opacity 0.01..1 (default 0.1); curved borders smooth the
       // polygon edges (on by default).
       visualizeZones: true,
       zoneFill: true,
-      zoneOpacity: 0.3,
+      zoneOpacity: 0.1,
       zoneCurved: true,
       zoneEditMode: false,
     };
@@ -1214,9 +1248,13 @@ export class MapRenderer {
   // order } - order is inner -> outer (drawn outer-first so inner
   // regions paint on top).
   setCanonicalZones({ polys, colors, order } = {}) {
+    const cols = colors || {};
+    const vivid = {};
+    for (const z in cols) vivid[z] = vividHex(cols[z]);
     this._canonicalZones = {
       polys: polys || {},
-      colors: colors || {},
+      colors: cols,
+      vivid,   // richer fill colours (the pale palette washes out)
       order: Array.isArray(order) ? order.slice() : [],
     };
     this._scheduleDraw();
@@ -3144,10 +3182,18 @@ export class MapRenderer {
     const order = (cz.order && cz.order.length) ? cz.order : Object.keys(cz.polys);
     if (!order.length) return;
     // Inner -> outer list of zones that actually have a polygon.
+    // fillCol uses the richer (vivid) palette so the colour reads even
+    // at low opacity; the border keeps the canonical colour.
     const arr = [];
     for (const zone of order) {
       const polys = cz.polys[zone];
-      if (polys && polys.length) arr.push({ polys, col: cz.colors[zone] || '#22d3ee' });
+      if (polys && polys.length) {
+        arr.push({
+          polys,
+          col: cz.colors[zone] || '#22d3ee',
+          fillCol: (cz.vivid && cz.vivid[zone]) || cz.colors[zone] || '#22d3ee',
+        });
+      }
     }
     if (!arr.length) return;
     const op = Math.max(0.01, Math.min(1, this.options.zoneOpacity ?? 0.5));
@@ -3165,9 +3211,11 @@ export class MapRenderer {
     // so colours never stack - every pixel is exactly one zone's
     // colour, independent of what nests beneath it.
     if (this.options.zoneFill) {
-      ctx.globalAlpha = Math.min(0.95, op * 0.8);
+      // Floor + slope so the fill still reads as a rich colour at low
+      // opacity (10% default) instead of washing out to near-nothing.
+      ctx.globalAlpha = Math.min(0.9, 0.12 + op * 0.7);
       for (let i = 0; i < arr.length; i++) {
-        ctx.fillStyle = arr[i].col;
+        ctx.fillStyle = arr[i].fillCol;
         ctx.beginPath();
         for (const pts of arr[i].polys) if (pts && pts.length >= 2) addPath(pts);
         if (i > 0) for (const pts of arr[i - 1].polys) if (pts && pts.length >= 2) addPath(pts);
