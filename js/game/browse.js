@@ -7299,6 +7299,7 @@ function openConfigModal() {
       <label class="dbg-check"><input type="checkbox" class="cfg-zone-curved" ${curved ? 'checked' : ''}><span>Curved zone border</span></label>
       <label class="dbg-slider"><span>Zone opacity <em class="cfg-zone-op-val">${op}%</em></span>
         <input type="range" class="cfg-zone-op" min="1" max="100" step="1" value="${op}"></label>
+      <button type="button" class="modal-btn cfg-zone-reset">↺ Reset zone visuals</button>
     </div>
   `;
   overlay.appendChild(panel);
@@ -7332,6 +7333,20 @@ function openConfigModal() {
     persistDbg(STORAGE_ZONE_VIZ_OP, v);
     if (_renderer) _renderer.setOption('zoneOpacity', v / 100);
   };
+  // Reset the zone visuals to defaults (visualize on, fill on, 50%,
+  // curved on). Clears the saved keys so the defaults persist, then
+  // re-applies to the renderer and the modal controls.
+  panel.querySelector('.cfg-zone-reset').addEventListener('click', () => {
+    for (const k of [STORAGE_ZONE_VIZ, STORAGE_ZONE_FILL, STORAGE_ZONE_VIZ_OP, STORAGE_ZONE_CURVED]) {
+      try { localStorage.removeItem(k); } catch { /* private mode */ }
+    }
+    if (_renderer) applyZoneViewConfig(_renderer);
+    vizCb.checked = true;
+    fillCb.checked = true;
+    curvedCb.checked = true;
+    opEl.value = 50;
+    opValEl.textContent = '50%';
+  });
   mountOverlay(overlay);
 }
 
