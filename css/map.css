@@ -2915,6 +2915,9 @@ body:has(#view-browse:not(.hidden)) #main {
   background: rgba(7, 6, 15, 0.85);
   border-right: 1px solid var(--border);
   flex: 0 0 48px;
+  min-height: 0;            /* allow the column to shrink + scroll */
+  overflow-y: auto;         /* never clip the search / config tabs */
+  overflow-x: hidden;
 }
 @media (max-width: 720px) {
   /* Horizontal pill of tab buttons centered at the top. */
@@ -2925,6 +2928,8 @@ body:has(#view-browse:not(.hidden)) #main {
     gap: 6px;
     border-right: none;
     background: transparent;
+    overflow-x: auto;
+    overflow-y: hidden;
   }
   .sidepanel-tabs button {
     width: 40px;
@@ -2950,12 +2955,13 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .sidepanel-tabs button:hover { background: var(--panel-2); }
 .sidepanel-tabs button.active:hover { background: var(--accent); }
-/* Search is a utility, not a pane: push it to the far end of the
-   strip (bottom of the desktop column) so it reads as separate from
-   the pane tabs while still being last in order. */
-.sidepanel-tab-search { margin-top: auto; }
+/* Search + config are utilities, not panes. They flow right after the
+   pane tabs (a small gap separates them) - previously they were pinned
+   to the far end with margin:auto, which clipped them out of view when
+   the strip ran short. */
+.sidepanel-tab-search { margin-top: 10px; }
 @media (max-width: 720px) {
-  .sidepanel-tab-search { margin-top: 0; margin-left: auto; }
+  .sidepanel-tab-search { margin-top: 0; margin-left: 10px; }
 }
 
 .sidepanel-content {

@@ -44,8 +44,14 @@ Concretely:
   (`<site> zone`, `<season> season`) read from
   `data/sites.js`'s `solarZone` + `siteSynodic` fields, which
   are sourced from this gazetteer.
+- **HF reference hub (iandrea):** https://www.iandrea.co.uk/sf/highfrontier/
+  - the author's High Frontier index page: rules summaries, maps,
+    the gazetteer above, and other play aids.
 - Reference repo for architecture/login/deploy patterns:
   https://github.com/RubenTipparach/murdoku-companion
+
+See `reference/references.md` for this same link list alongside the
+checked-in reference assets (manuals, maps, spreadsheets).
 
 ## Variants we target
 
