@@ -12,6 +12,18 @@ shipped product and the static GH Pages site does not link to them.
 | `HF4-site-list.xlsx` | Structured site list with one row per site: name, size, spectral type, hydration, group, solar zone, sol-clock position, burns-from-LEO, and a few capability flags. This is the authoritative input the `scripts/generate-sites.js` tool reads to keep `data/sites.js` in sync. |
 | `HF4-branching-manuals-v0.3.zip` | Branching rulebooks (Core, QS, M0…M4, Futures, Sirens, AgeOfPiracy, Exodus, Panspermia). Reference for the rule details the engine will need in Stage 3+. |
 
+## External reference links
+
+The web references the implementation is built against (mirrored from
+`CLAUDE.md`):
+
+- **Core rules PDF** (publisher-hosted): https://gamers-hq.de/media/pdf/c5/f2/cf/HF4-Core-Rules.pdf
+- **Variants & scenarios appendix:** https://geekach.com.ua/content/files/varanti-ta-scenar-high-frontier-4-all-anglyskou-movou-62879102.pdf
+- **BGG entry:** https://boardgamegeek.com/boardgame/281837/high-frontier-4-all
+- **HF gazetteer** (heliocentric zones, site classifications): https://www.iandrea.co.uk/sf/resources/hf/HFgazetteer.html — canonical source for each named site's solar zone + synodic season tags, feeding `data/sites.js`'s `solarZone` / `siteSynodic` fields.
+- **HF reference hub (iandrea):** https://www.iandrea.co.uk/sf/highfrontier/ — the author's High Frontier index page (rules summaries, maps, the gazetteer above, and other play aids).
+- **Reference repo** for architecture / login / deploy patterns: https://github.com/RubenTipparach/murdoku-companion
+
 ## Licensing posture
 
 This repository is a fan implementation distributed under no license that
