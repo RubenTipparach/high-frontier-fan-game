@@ -220,9 +220,7 @@ export function addToStack(cardId, kind, face) {
   // re-pick another thruster from the stack modal later. Crew
   // that doubles as a thruster qualifies too.
   if (!_activeThrusterId) {
-    const resolved = cardForSlot(slot);
-    const isThr = resolved && (resolved.type === 'thruster' || resolved.thrust != null);
-    if (isThr) _activeThrusterId = cardId;
+    if (slotIsThruster(slot)) _activeThrusterId = cardId;
   }
   // Safety net: a freshly-added card raises dry mass and lowers
   // the rocket's effective wet-mass cap (TANK_MAX − dry). Clip
@@ -262,8 +260,7 @@ export function removeFromStack(index) {
   if (removed && removed.id === _activeThrusterId) {
     _activeThrusterId = null;
     for (const s of _stack) {
-      const c = cardForSlot(s);
-      if (c && (c.type === 'thruster' || c.thrust != null)) {
+      if (slotIsThruster(s)) {
         _activeThrusterId = s.id;
         break;
       }
@@ -301,10 +298,9 @@ export function setActiveThruster(id) {
   // and is genuinely a thruster (or a missile-class robonaut
   // with its own thrust value - same idiom as the rest of the
   // app).
-  if (!_stack.some((s) => s.id === id)) return false;
-  const card = cardById(id);
-  if (!card) return false;
-  if (card.type !== 'thruster' && card.thrust == null) return false;
+  const slot = _stack.find((s) => s.id === id);
+  if (!slot) return false;
+  if (!slotIsThruster(slot)) return false;
   _activeThrusterId = id;
   persist();
   notify();
@@ -424,10 +420,7 @@ export function isRocketActive() {
   if (!_stack.length) {
     return { active: false, reason: 'empty stack', missing: [] };
   }
-  const thrusters = _stack.filter((s) => {
-    const c = cardForSlot(s);
-    return c && (c.type === 'thruster' || c.thrust != null);
-  });
+  const thrusters = _stack.filter((s) => slotIsThruster(s));
   if (!thrusters.length) {
     return { active: false, reason: 'no thruster in the stack', missing: [] };
   }
@@ -502,9 +495,8 @@ export function findFunctionalThrusters(stack) {
   for (let i = 0; i < stack.length; i++) {
     const c = cardForSlot(stack[i]);
     if (!c) continue;
-    const isThruster = c.type === 'thruster' || c.thrust != null;
-    if (!isThruster) continue;
-    const f = (c.faces && c.faces.primary) || c;
+    if (!slotIsThruster(stack[i])) continue;
+    const f = installedFace(stack[i]);
     const reqs = Array.isArray(f.requires) ? f.requires : (c.requires || []);
     if (!reqs.length) { out.push({ index: i, id: stack[i].id, card: c }); continue; }
     // Build supplies set from the REST of the stack.
@@ -627,6 +619,32 @@ function activeFace(card) {
   return (card && card.faces && card.faces.primary) || card || {};
 }
 
+// The face a stack slot is INSTALLED on (Tier-1 primary by default,
+// Tier-2 secondary when flipped). Robonauts used as thrusters and
+// dark-side thruster tech carry their thrust / solar on the secondary
+// face, so thrust stats must read the installed face, not just
+// primary. Crew slots resolve face-specific already via cardForSlot.
+function installedFace(slot) {
+  const c = cardForSlot(slot);
+  if (!c) return {};
+  if (c.faces) {
+    const key = (slot && slot.face === 'secondary' && c.faces.secondary) ? 'secondary' : 'primary';
+    return c.faces[key] || c.faces.primary || c;
+  }
+  return c;
+}
+
+// A stack slot can serve as a thruster if it's a thruster card OR its
+// INSTALLED face carries a thrust value (robonauts whose beam/laser
+// thruster lives on the Tier-2 face, e.g. Rock Splitter's MagBeam).
+function slotIsThruster(slot) {
+  const c = cardForSlot(slot);
+  if (!c) return false;
+  if (c.type === 'thruster') return true;
+  const f = installedFace(slot);
+  return !!(f && f.thrust != null);
+}
+
 // Does this face carry the Solar capability badge? (Sails, photon
 // drives, solar moths - and solar generators.)
 function faceHasSolar(face) {
@@ -687,9 +705,12 @@ export function getStackTotals() {
 export function getActiveThrusterStats() {
   const id = _activeThrusterId;
   if (!id) return null;
-  const card = cardById(id);
+  const slot = _stack.find((s) => s.id === id);
+  const card = (slot ? cardForSlot(slot) : cardById(id));
   if (!card) return null;
-  const f = activeFace(card);
+  // Use the INSTALLED face so a robonaut (or dark-side thruster) flipped
+  // to its thrust/solar face drives the stats, not just Tier-1.
+  const f = slot ? installedFace(slot) : activeFace(card);
   let thrust = f.thrust != null ? f.thrust : card.thrust;
   let fuel   = f.fuel   != null ? f.fuel   : card.fuel;
   const isp  = f.isp    != null ? f.isp    : card.isp;
@@ -702,7 +723,7 @@ export function getActiveThrusterStats() {
     if (slot.id === id) continue;
     const c = cardForSlot(slot);
     if (!c) continue;
-    const cf = activeFace(c);
+    const cf = installedFace(slot);
     const tMod = cf.thrustMod;
     const fMod = cf.fuelMod;
     if (tMod != null && tMod !== 0) {
@@ -756,7 +777,7 @@ export function getActiveThrusterStats() {
       if (slot.id === id) continue;
       const c = cardForSlot(slot);
       if (!c) continue;
-      const cf = activeFace(c);
+      const cf = installedFace(slot);
       if (faceHasSolar(cf) && (cf.supplies || []).includes('gen-electric')) {
         solarDriven = true;
         solarSource = c.name;
