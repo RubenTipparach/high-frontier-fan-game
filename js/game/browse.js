@@ -2254,6 +2254,11 @@ const STORAGE_DBG_FADE_MIN    = 'hf-sandbox-map-fade-min';
 const STORAGE_DBG_FADE_MAX    = 'hf-sandbox-map-fade-max';
 const STORAGE_DBG_SHOW_DECOR  = 'hf-sandbox-map-show-decoratives';
 const STORAGE_DBG_PANEL_OPEN  = 'hf-sandbox-map-debug-open';
+// Zone-painter assignments ({ nodeId: zone }) + the last-picked zone.
+// Persisted so the labels survive reloads / map-mode toggles until
+// the data is exported and the painter is cleared.
+const STORAGE_ZONE_PAINT  = 'hf-sandbox-zone-assignments';
+const STORAGE_ZONE_ACTIVE = 'hf-sandbox-zone-active';
 function persistDbg(key, value) {
   try { localStorage.setItem(key, String(value)); } catch { /* private mode */ }
 }
@@ -2395,17 +2400,48 @@ function wireZonePainter(renderer, panel) {
   for (const z of SOLAR_ZONES) colors[z] = (SOLAR_ZONE_INFO[z] || {}).color || '#22d3ee';
   renderer.setZonePaintColors(colors);
 
+  // Persist the accumulated { nodeId: zone } map so a reload / map-
+  // mode toggle doesn't lose painted points before they're exported.
+  const saveAssignments = () => {
+    const map = {};
+    for (const r of renderer.getZoneAssignments()) map[r.id] = r.zone;
+    try {
+      if (Object.keys(map).length) localStorage.setItem(STORAGE_ZONE_PAINT, JSON.stringify(map));
+      else localStorage.removeItem(STORAGE_ZONE_PAINT);
+    } catch { /* private mode */ }
+  };
+  // Restore any previously-saved assignments into this (possibly
+  // freshly-rebuilt) renderer.
+  try {
+    const raw = localStorage.getItem(STORAGE_ZONE_PAINT);
+    if (raw) renderer.setZoneAssignments(JSON.parse(raw));
+  } catch { /* ignore corrupt / private mode */ }
+
   const refreshCount = () => {
     if (countEl) countEl.textContent = String(renderer.zoneAssignmentCount());
   };
   refreshCount();
 
+  // Restore the last-picked zone so the dropdown + paint mode survive.
+  try {
+    const savedZone = localStorage.getItem(STORAGE_ZONE_ACTIVE);
+    if (savedZone && SOLAR_ZONES.includes(savedZone)) {
+      select.value = savedZone;
+      renderer.setZonePaintZone(savedZone);
+    }
+  } catch { /* private mode */ }
+
   select.onchange = () => {
     renderer.setZonePaintZone(select.value || null);
+    try {
+      if (select.value) localStorage.setItem(STORAGE_ZONE_ACTIVE, select.value);
+      else localStorage.removeItem(STORAGE_ZONE_ACTIVE);
+    } catch { /* private mode */ }
   };
   finishBtn.onclick = () => {
     const n = renderer.finishZonePolygon();
     refreshCount();
+    saveAssignments();
     // eslint-disable-next-line no-console
     console.log(`[zone painter] stamped ${n} node(s) as ${select.value || '(none)'}`);
   };
@@ -2413,6 +2449,7 @@ function wireZonePainter(renderer, panel) {
   clearBtn.onclick = () => {
     renderer.clearZoneAssignments();
     refreshCount();
+    saveAssignments();
   };
   exportBtn.onclick = () => {
     const records = renderer.getZoneAssignments();

@@ -1241,6 +1241,17 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
+  // Restore persisted assignments. `obj` is a plain { nodeId: zone }
+  // map (the form browse.js saves to localStorage). Unknown ids are
+  // still stored; the draw pass skips any that aren't in the data.
+  setZoneAssignments(obj) {
+    this._zonePaint.assignments = new Map();
+    if (obj && typeof obj === 'object') {
+      for (const id in obj) this._zonePaint.assignments.set(id, obj[id]);
+    }
+    this._scheduleDraw();
+  }
+
   zoneAssignmentCount() { return this._zonePaint.assignments.size; }
 
   // Export the accumulated labels as plain records. id2 is the stable
