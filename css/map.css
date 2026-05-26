@@ -1816,12 +1816,12 @@
 }
 /* Frame-breakdown profiler: pulled out of the vertical stack into its
    own column anchored to the right of the panel so it doesn't stretch
-   the panel tall (and clip). Bottom-aligned, scrolls if it ever runs
-   past the available height. */
+   the panel tall (and clip). Top-aligned with the panel, scrolls if it
+   ever runs past the available height. */
 .map-debug .dbg-prof {
   position: absolute;
   left: calc(100% + 8px);
-  bottom: 0;
+  top: 0;
   width: 156px;
   max-height: calc(100vh - 40px);
   overflow-y: auto;
