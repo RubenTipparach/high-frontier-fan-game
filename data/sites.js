@@ -790,7 +790,7 @@ export const SOLAR_ZONES = [
 export const SOLAR_ZONE_INFO = {
   Mercury: { color: '#fdf441', solar: +2 },
   Venus:   { color: '#fefab1', solar: +1 },
-  Earth:   { color: '#ffd388', solar:  0 },
+  Earth:   { color: '#f97316', solar:  0 },
   Mars:    { color: '#ffdd92', solar: -1 },
   Ceres:   { color: '#97a0bf', solar: -2 },
   Jupiter: { color: '#585e90', solar: -3 },
