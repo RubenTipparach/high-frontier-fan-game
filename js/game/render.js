@@ -670,6 +670,15 @@ export class MapRenderer {
     this._gesture = null;
     this._rafQueued = false;
     this._tooltipEl = null;
+    // Static-layer cache. The heavy, non-animated geometry (backdrop,
+    // zones, guides, halos, edges, waypoints, hexes, labels) is baked
+    // into an offscreen canvas and only re-rendered when the camera /
+    // display options change; each animation frame just blits it and
+    // draws the few moving things (rockets, route, pulses) on top.
+    this._staticCanvas = null;
+    this._staticCtx = null;
+    this._staticKey = null;
+    this._staticEpoch = 0;
     // Debug zone-painter state. When `active` holds a zone name the
     // map enters polygon-draw mode: clicks drop vertices instead of
     // selecting sites. Finishing a polygon stamps every waypoint
@@ -1228,8 +1237,12 @@ export class MapRenderer {
   onFrame(fn) { this._onFrame = fn; }
   setOption(key, value) {
     this.options[key] = value;
+    this._invalidateStatic();
     this._scheduleDraw();
   }
+
+  // Force the static-layer cache to rebuild on the next frame.
+  _invalidateStatic() { this._staticEpoch++; }
 
   // ---- debug zone painter ----
   // Tools the debug panel drives to hand-label which solar zone each
@@ -1257,6 +1270,7 @@ export class MapRenderer {
       vivid,   // richer fill colours (the pale palette washes out)
       order: Array.isArray(order) ? order.slice() : [],
     };
+    this._invalidateStatic();
     this._scheduleDraw();
   }
 
@@ -1266,6 +1280,7 @@ export class MapRenderer {
   setZoneOrder(order) {
     this._zonePaint.order = Array.isArray(order) ? order.slice() : [];
     this._recomputeDerivedAssignments();
+    this._invalidateStatic();
     this._scheduleDraw();
   }
 
@@ -1530,35 +1545,68 @@ export class MapRenderer {
     });
   }
 
+  // Render the heavy, non-animated layers into the offscreen static
+  // cache (only when the camera / display options have changed). The
+  // _drawX helpers all take a ctx, so they render straight into the
+  // cache context.
+  _ensureStaticCache() {
+    const { hostW, hostH, dpr } = this;
+    const dw = Math.max(1, Math.round(hostW * dpr));
+    const dh = Math.max(1, Math.round(hostH * dpr));
+    const key = `${this.pan.x.toFixed(2)},${this.pan.y.toFixed(2)},`
+      + `${this.zoom.toFixed(4)},${dw},${dh},${this._staticEpoch}`;
+    if (this._staticKey === key) return;
+    this._staticKey = key;
+    if (!this._staticCanvas) this._staticCanvas = document.createElement('canvas');
+    const cv = this._staticCanvas;
+    if (cv.width !== dw || cv.height !== dh) {
+      cv.width = dw; cv.height = dh;
+      this._staticCtx = cv.getContext('2d');
+    }
+    const sctx = this._staticCtx || (this._staticCtx = cv.getContext('2d'));
+    sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    sctx.clearRect(0, 0, hostW, hostH);
+
+    this._drawBackdrop(sctx);
+    const eff = this.zoom * this.fitScale;
+    sctx.save();
+    sctx.translate(this.pan.x, this.pan.y);
+    sctx.scale(eff, eff);
+    // Canonical solar-zone regions FIRST so they sit behind everything.
+    this._drawCanonicalZones(sctx, eff);
+    if (this.data.mode === 'clean' && Array.isArray(this.data.zones)) {
+      this._drawZoneBands(sctx, this.data.zones, this.data.zoneInfo);
+    }
+    this._drawGuides(sctx);
+    // Halos before edges so the body spheres sit behind everything.
+    this._drawSiteHalosWorld(sctx);
+    this._drawEdges(sctx);
+    sctx.restore();
+
+    this._drawWaypointsScreen(sctx);
+    this._drawSiteHexesScreen(sctx);
+    this._drawSiteLabelsScreen(sctx);
+  }
+
   _draw() {
     const ctx = this.ctx;
     const { hostW, hostH, dpr } = this;
+
+    // Blit the cached static layer (rebuilt only on camera / option
+    // change), then draw the animated / stateful layers on top.
+    this._ensureStaticCache();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.drawImage(this._staticCanvas, 0, 0);
+
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    this._drawBackdrop(ctx);
-
     const eff = this.zoom * this.fitScale;
 
     ctx.save();
     ctx.translate(this.pan.x, this.pan.y);
     ctx.scale(eff, eff);
-
-    // Canonical solar-zone regions render FIRST so they sit behind
-    // every other map element (config: "visualize zone data").
-    this._drawCanonicalZones(ctx, eff);
-
-    if (this.data.mode === 'clean' && Array.isArray(this.data.zones)) {
-      this._drawZoneBands(ctx, this.data.zones, this.data.zoneInfo);
-    }
-    this._drawGuides(ctx);
+    // Animated belt + cosmetic traffic + the gameplay route/trail.
     this._drawAsteroidBelt(ctx);
-    // Planet halos render BEFORE edges so the body sphere sits
-    // behind every other map element. The hex markers (drawn in
-    // screen space later) sit on top.
-    this._drawSiteHalosWorld(ctx);
-    this._drawEdges(ctx);
-    // Ambient decorative rockets (cosmetic background traffic),
-    // translucent above the edges but below the gameplay route/trail.
     {
       const now = performance.now();
       const dt = this._ambientLastT ? Math.min(80, now - this._ambientLastT) : 16;
@@ -1567,12 +1615,9 @@ export class MapRenderer {
     }
     this._drawRocketTrail(ctx);
     this._drawRoute(ctx);
-
     ctx.restore();
 
-    this._drawWaypointsScreen(ctx);
-    this._drawSiteHexesScreen(ctx);
-    this._drawSiteLabelsScreen(ctx);
+    this._drawHazardPulseScreen(ctx);
     this._drawProspectDiscsScreen(ctx);
     this._drawFactoriesScreen(ctx);
     this._drawOutpostsScreen(ctx);
@@ -2118,30 +2163,8 @@ export class MapRenderer {
       ctx.shadowBlur = 0;
     }
 
-    // Hazard pulse: animated red ring around hazard nodes that
-    // the ACTIVE ROUTE crosses. The map already paints a red
-    // border on every hazard for static identification; the
-    // pulse is reserved for "your trajectory goes through this".
-    // No route, no pulse.
-    if (this._routeHazardIds && this._routeHazardIds.size) {
-      const phase = ((this._animTime || 0) / 1000) * Math.PI;
-      const pulse = (Math.sin(phase) + 1) * 0.5;
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = `rgba(248, 113, 113, ${0.4 + pulse * 0.5})`;
-      ctx.beginPath();
-      for (const w of this._waypoints) {
-        if (!this._routeHazardIds.has(w.id)) continue;
-        const vis = TYPE_VIS[w.type] || TYPE_VIS.unknown;
-        if (vis.kind === 'none') continue;
-        const sx = this.pan.x + w.x * eff;
-        const sy = this.pan.y + w.y * eff;
-        if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
-        const ringR = vis.r + 4 + pulse * 4;
-        ctx.moveTo(sx + ringR, sy);
-        ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
-      }
-      ctx.stroke();
-    }
+    // (Hazard pulse moved to _drawHazardPulseScreen so it stays
+    // animated on top of the cached static layer.)
 
     // Radhaz radiation glyph: three wedges + a centre dot drawn
     // by hand so we don't depend on the ☢ font character being
@@ -3176,6 +3199,32 @@ export class MapRenderer {
   // zones drawn first so the nested inner regions paint on top.
   // `visualizeZones` gates it; `zoneFill` toggles the fill; the border
   // opacity follows `zoneOpacity` (0.01..1).
+  // Animated red pulse ring around hazard nodes the active route
+  // crosses. Drawn live (on top of the cached static layer) so it
+  // keeps pulsing without invalidating the cache. No route = no-op.
+  _drawHazardPulseScreen(ctx) {
+    if (!this._routeHazardIds || !this._routeHazardIds.size) return;
+    const eff = this.zoom * this.fitScale;
+    const hostW = this.hostW, hostH = this.hostH;
+    const phase = ((this._animTime || 0) / 1000) * Math.PI;
+    const pulse = (Math.sin(phase) + 1) * 0.5;
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = `rgba(248, 113, 113, ${0.4 + pulse * 0.5})`;
+    ctx.beginPath();
+    for (const w of this._waypoints) {
+      if (!this._routeHazardIds.has(w.id)) continue;
+      const vis = TYPE_VIS[w.type] || TYPE_VIS.unknown;
+      if (vis.kind === 'none') continue;
+      const sx = this.pan.x + w.x * eff;
+      const sy = this.pan.y + w.y * eff;
+      if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
+      const ringR = vis.r + 4 + pulse * 4;
+      ctx.moveTo(sx + ringR, sy);
+      ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
+    }
+    ctx.stroke();
+  }
+
   _drawCanonicalZones(ctx, eff) {
     if (!this.options.visualizeZones) return;
     const cz = this._canonicalZones;
