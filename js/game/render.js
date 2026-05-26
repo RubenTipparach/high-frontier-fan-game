@@ -740,6 +740,21 @@ export class MapRenderer {
     this._frameTimer = 0;
     this._fps = 0;
     this._onFrame = null;           // optional callback fired each frame
+    // Per-step draw profiler. Only armed while the debug panel is open
+    // (this._profileOn). _profAccum sums ms per named step over the fps
+    // window; _profile holds the per-frame average snapshot the panel
+    // polls via getProfile().
+    this._profileOn = false;
+    this._profAccum = {};
+    this._profile = {};
+    // Body-halo sprite cache. Each distinct body appearance (palette +
+    // hazard + rings, or per-id for rocky/ringed bodies) is rendered to
+    // an offscreen canvas once and blitted per frame, instead of
+    // allocating a radial gradient per body every frame. Sprites are
+    // only ever blitted downscaled (<= rendered size) so they stay
+    // crisp; a body zoomed in past its sprite resolution triggers a
+    // one-off re-render at a larger reference radius.
+    this._spriteCache = new Map();
     // Ambient decorative rockets: cosmetic sprites zipping between
     // random sites in the background. Count is driven externally
     // (setAmbientRocketCount) - 10 + 5 per factory built. Purely
@@ -1223,7 +1238,11 @@ export class MapRenderer {
     const rect = this.host.getBoundingClientRect();
     this.hostW = Math.max(1, rect.width);
     this.hostH = Math.max(1, rect.height);
+    const prevDpr = this.dpr;
     this.dpr = window.devicePixelRatio || 1;
+    // Body sprites are rasterised at this.dpr; a dpr change (e.g. window
+    // moved to another monitor) invalidates them.
+    if (this.dpr !== prevDpr && this._spriteCache) this._spriteCache.clear();
     this.canvas.width = Math.round(this.hostW * this.dpr);
     this.canvas.height = Math.round(this.hostH * this.dpr);
     this.canvas.style.width = this.hostW + 'px';
@@ -1678,79 +1697,122 @@ export class MapRenderer {
     // (offset/scaled-blitted from the overscan cache, rebuilt only when
     // the pan drifts past the margin or the zoom settles), then the
     // animated / stateful layers on top.
+    this._profileOn = !!this.options.debug;
+    const drawStart = this._profileOn ? performance.now() : 0;
+
     this._ensureBgCache();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
-    ctx.drawImage(this._bgCanvas, 0, 0);
-    this._blitStaticLayer(ctx);
+    this._step('backdrop', () => { ctx.drawImage(this._bgCanvas, 0, 0); });
+    this._step('zones (blit)', () => this._blitStaticLayer(ctx));
     this._prevFrameZoom = this.zoom;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const eff = this.zoom * this.fitScale;
 
+    // Guides + sun/comet draw in world space UNDER the planet sprites.
+    // The Sun corona and comet tails point relative to the world Sun
+    // anchor, so they stay live (and they're few). Everything else that
+    // used to be a per-frame gradient (the body spheres) is now blitted
+    // from the sprite cache in _drawSiteHalosScreen.
     ctx.save();
     ctx.translate(this.pan.x, this.pan.y);
     ctx.scale(eff, eff);
-    // Guides + body halos / planets used to live in the static cache;
-    // they're now drawn live (under the belt/traffic, as before) so they
-    // stay crisp during zoom. Animated belt + cosmetic traffic + the
-    // gameplay route/trail follow on top.
-    this._drawGuides(ctx);
-    this._drawSiteHalosWorld(ctx);
-    // Delta-v edges draw live, AFTER the planet halos, so the lines sit
-    // over the body spheres instead of behind them. Cheap: every edge
-    // category batches into a single stroke pass.
-    this._drawEdges(ctx);
-    this._drawAsteroidBelt(ctx);
+    this._step('guides', () => this._drawGuides(ctx));
+    this._step('sun/comet', () => this._drawSiteSunCometWorld(ctx));
+    ctx.restore();
+
+    // Body spheres / rocky asteroids: blitted from the sprite cache in
+    // screen space, viewport-culled. Drawn before the edges so the
+    // delta-v lines sit over the planets, not behind them.
+    this._step('planets (sprite)', () => this._drawSiteHalosScreen(ctx));
+
+    ctx.save();
+    ctx.translate(this.pan.x, this.pan.y);
+    ctx.scale(eff, eff);
+    // Delta-v edges over the planets; animated belt + cosmetic traffic +
+    // the gameplay route/trail follow on top.
+    this._step('edges', () => this._drawEdges(ctx));
+    this._step('belt', () => this._drawAsteroidBelt(ctx));
     {
       const now = performance.now();
       const dt = this._ambientLastT ? Math.min(80, now - this._ambientLastT) : 16;
       this._ambientLastT = now;
-      this._drawAmbientRockets(ctx, dt);
+      this._step('ambient', () => this._drawAmbientRockets(ctx, dt));
     }
-    this._drawRocketTrail(ctx);
-    this._drawRoute(ctx);
+    this._step('trail', () => this._drawRocketTrail(ctx));
+    this._step('route', () => this._drawRoute(ctx));
     ctx.restore();
 
     // Crisp, viewport-culled, drawn live (not scaled from the cache) so
     // node markers / hexes / labels stay sharp at every zoom level.
-    this._drawWaypointsScreen(ctx);
-    this._drawSiteHexesScreen(ctx);
-    this._drawSiteLabelsScreen(ctx);
+    this._step('waypoints', () => this._drawWaypointsScreen(ctx));
+    this._step('hexes', () => this._drawSiteHexesScreen(ctx));
+    this._step('labels', () => this._drawSiteLabelsScreen(ctx));
 
-    this._drawHazardPulseScreen(ctx);
-    this._drawProspectDiscsScreen(ctx);
-    this._drawFactoriesScreen(ctx);
-    this._drawOutpostsScreen(ctx);
-    this._drawFocusedStackRingScreen(ctx);
-    this._drawLeoAnchorScreen(ctx);
-    this._drawPlayerShipScreen(ctx);
-    if (this._sandboxRocket) this._drawSandboxRocketScreen(ctx);
-    if (this._explosion)     this._drawExplosionScreen(ctx);
-    // Selection ring drawn LAST so nothing - labels, ships, hexes
-    // - paints over it. On mobile the in-hex orange/gold border is
-    // easy to miss, so we layer a thick bright yellow ring + soft
-    // halo just outside the selected node's body.
-    this._drawSelectionRingScreen(ctx);
-    // Turn-number pills (T2, T3, …) for planned rocket routes;
-    // no-op for plain Navigate-to routes that have no turn tags.
-    this._drawRouteTurnLabelsScreen(ctx);
-    // Debug zone painter overlay sits on top of everything.
-    this._drawZonePaintScreen(ctx);
+    // Hazard pulses + gameplay overlays (prospects, factories, ships,
+    // selection ring, route pills, zone painter). Grouped under one
+    // profiler step so the breakdown total reconciles with the sum.
+    this._step('overlays', () => {
+      this._drawHazardPulseScreen(ctx);
+      this._drawProspectDiscsScreen(ctx);
+      this._drawFactoriesScreen(ctx);
+      this._drawOutpostsScreen(ctx);
+      this._drawFocusedStackRingScreen(ctx);
+      this._drawLeoAnchorScreen(ctx);
+      this._drawPlayerShipScreen(ctx);
+      if (this._sandboxRocket) this._drawSandboxRocketScreen(ctx);
+      if (this._explosion)     this._drawExplosionScreen(ctx);
+      // Selection ring drawn LAST so nothing - labels, ships, hexes
+      // - paints over it. On mobile the in-hex orange/gold border is
+      // easy to miss, so we layer a thick bright yellow ring + soft
+      // halo just outside the selected node's body.
+      this._drawSelectionRingScreen(ctx);
+      // Turn-number pills (T2, T3, …) for planned rocket routes;
+      // no-op for plain Navigate-to routes that have no turn tags.
+      this._drawRouteTurnLabelsScreen(ctx);
+      // Debug zone painter overlay sits on top of everything.
+      this._drawZonePaintScreen(ctx);
+    });
     if (this._popupSite) this._positionSitePopup();
 
     // FPS book-keeping. The debug panel polls getFps(); we update
     // ~twice per second so the readout doesn't flicker.
+    if (this._profileOn) {
+      this._profAccum.frame = (this._profAccum.frame || 0) + (performance.now() - drawStart);
+    }
     this._frameCount++;
     const now = performance.now();
     if (!this._frameTimer) this._frameTimer = now;
     if (now - this._frameTimer >= 500) {
+      const frames = this._frameCount || 1;
       this._fps = Math.round(this._frameCount * 1000 / (now - this._frameTimer));
+      if (this._profileOn) {
+        const snap = {};
+        for (const k in this._profAccum) snap[k] = this._profAccum[k] / frames;
+        this._profile = snap;
+      } else {
+        this._profile = {};
+      }
+      this._profAccum = {};
       this._frameCount = 0;
       this._frameTimer = now;
     }
     if (this._onFrame) this._onFrame();
   }
+
+  // Run one named draw step, timing it only while the profiler is armed
+  // (debug panel open). When off, this is a plain call with no overhead.
+  _step(name, fn) {
+    if (!this._profileOn) { fn(); return; }
+    const t0 = performance.now();
+    fn();
+    this._profAccum[name] = (this._profAccum[name] || 0) + (performance.now() - t0);
+  }
+
+  // Per-step average ms-per-frame over the last fps window. Empty unless
+  // the debug panel armed the profiler. 'frame' is the whole _draw body.
+  getProfile() { return this._profile; }
 
   _drawBackdrop(ctx) {
     const { hostW, hostH } = this;
@@ -2350,76 +2412,128 @@ export class MapRenderer {
     }
   }
 
-  // Celestial body halos drawn in WORLD space so they scale with
-  // zoom and stay proportional to the surrounding layout. Capped
-  // at HALO_MAX_SCREEN_R screen pixels so very high zooms don't
-  // make a single body swallow the canvas. Ring-bearing planets
-  // (Saturn / Jupiter / Uranus / Neptune) get the back-half of
-  // their rings drawn before the sphere, then the sphere, then
-  // the front-half on top so the planet sits realistically
-  // through its own ring plane.
-  _drawSiteHalosWorld(ctx) {
+  // Fetch (or lazily render) the offscreen sprite for one body
+  // appearance. `sr` is the screen radius the sphere needs this frame;
+  // the sprite is (re)rendered at a rounded-up reference radius capped
+  // at HALO_MAX_SCREEN_R, so it never has to be blitted upscaled (which
+  // would blur). `extent` is the sprite half-size as a multiple of the
+  // sphere radius (covers atmosphere glow / ring span). `paint(c, cx,
+  // cy, r)` draws the body centred in the sprite with radius r.
+  _bodySprite(key, sr, extent, paint) {
+    let e = this._spriteCache.get(key);
+    if (e && e.refR >= sr) return e;
+    const refR = Math.min(HALO_MAX_SCREEN_R, Math.max(8, Math.ceil(sr / 16) * 16));
+    if (e && e.refR >= refR) return e;
+    const dpr = this.dpr;
+    const half = Math.ceil(extent * refR) + 2;
+    const cv = (e && e.canvas) || document.createElement('canvas');
+    const dw = Math.max(1, Math.round(half * 2 * dpr));
+    if (cv.width !== dw || cv.height !== dw) { cv.width = dw; cv.height = dw; }
+    const c = cv.getContext('2d');
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, half * 2, half * 2);
+    paint(c, half, half, refR);
+    e = { canvas: cv, refR, half };
+    this._spriteCache.set(key, e);
+    return e;
+  }
+
+  // Celestial body spheres + rocky asteroids, blitted from the sprite
+  // cache in SCREEN space (viewport-culled). The on-screen sphere
+  // radius is capped at HALO_MAX_SCREEN_R, matching the old world-space
+  // path, so layout + proportions are unchanged - the only difference
+  // is that each body's shaded gradient is rendered once into a sprite
+  // instead of re-allocated every frame. Ring-bearing planets (Saturn /
+  // Jupiter / Uranus / Neptune) bake back-rings + sphere + front-rings
+  // into the one sprite. Sun + comets stay live (_drawSiteSunCometWorld).
+  _drawSiteHalosScreen(ctx) {
     const eff = this.zoom * this.fitScale;
-    const capWorld = HALO_MAX_SCREEN_R / eff;
     const { hostW, hostH } = this;
-    // Screen-space cull test. Rings + glow extend well past the sphere
-    // radius, so the margin is generous (2.5x the screen radius + 80px)
-    // to avoid any pop-in at the edges.
+    const cap = HALO_MAX_SCREEN_R;
+
+    const blit = (key, wx, wy, haloR, extent, paint) => {
+      const sr = Math.min(haloR * eff, cap);
+      if (sr < 0.5) return;
+      const sx = this.pan.x + wx * eff;
+      const sy = this.pan.y + wy * eff;
+      const m = extent * sr + 40;
+      if (sx < -m || sx > hostW + m || sy < -m || sy > hostH + m) return;
+      const e = this._bodySprite(key, sr, extent, paint);
+      const scale = sr / e.refR;            // <= 1, downscale -> crisp
+      const halfCss = e.half * scale;
+      ctx.drawImage(e.canvas, sx - halfCss, sy - halfCss, halfCss * 2, halfCss * 2);
+    };
+
+    const palSig = (p) => `${p.light}|${p.base}|${p.dark}|${p.atmosphere || '-'}`;
+    const sphereExtent = (p, rings) => (rings ? 2.3 : (p.atmosphere ? 1.55 : 1.12));
+    const paintSphere = (pal, rings, hazard) => (c, cx, cy, r) => {
+      if (rings) {
+        drawPlanetRings(c, cx, cy, r, rings, 'back');
+        drawShadedSphere(c, cx, cy, r, pal, hazard);
+        drawPlanetRings(c, cx, cy, r, rings, 'front');
+      } else {
+        drawShadedSphere(c, cx, cy, r, pal, hazard);
+      }
+    };
+
+    // Pass 1: shared halos for merged body groups (Mars / Luna /
+    // Mercury / Jupiter system / etc.). One sphere at the group centroid.
+    for (const g of this._bodyGroups.values()) {
+      if (g.sites.length < 2) continue;
+      const vis = TYPE_VIS[g.type] || TYPE_VIS.unknown;
+      if (vis.kind !== 'hex' && vis.kind !== 'sun') continue;
+      const haloR = vis.haloR || 20;
+      const pal = paletteFor(g.exemplar);
+      const rings = ringDefFor(g.exemplar);
+      // Ring-bearing groups key per-group (rings differ per planet);
+      // ring-free groups dedupe on palette so similar bodies share a
+      // sprite.
+      const key = rings ? `grp|${g.exemplar.id}` : `sph|${palSig(pal)}|-`;
+      blit(key, g.cx, g.cy, haloR, sphereExtent(pal, rings), paintSphere(pal, rings, false));
+    }
+
+    // Pass 2: per-site spheres + rocky silhouettes for everything not in
+    // a merged group. Sun + comets are handled live elsewhere.
+    for (const site of this._realSites) {
+      if (this._mergedSites.has(site.id)) continue;
+      const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
+      if (vis.kind === 'sun' || vis.kind === 'comet') continue;
+      if (vis.kind !== 'hex') continue;
+      // Ceres punches above its dwarf-class default - shrink it 50% so
+      // it doesn't dominate the belt next to Vesta / Pallas / Hygiea.
+      const bodyScale = /(^|\s)ceres/i.test(site.name || '') ? 0.5 : 1;
+      const haloR = vis.haloR * bodyScale;
+      const pal = paletteFor(site);
+      if (vis.rocky) {
+        // Rocky silhouettes carry a per-site random vertex shape, so
+        // they can't dedupe - key by id.
+        blit(`rock|${site.id}`, site.x, site.y, haloR, 1.15,
+          (c, cx, cy, r) => drawRockyAsteroid(c, cx, cy, r, pal, site));
+        continue;
+      }
+      const rings = ringDefFor(site);
+      const key = rings ? `ring|${site.id}` : `sph|${palSig(pal)}|${site.hazard ? 'h' : '-'}`;
+      blit(key, site.x, site.y, haloR, sphereExtent(pal, rings), paintSphere(pal, rings, site.hazard));
+    }
+  }
+
+  // The Sun + comets, drawn live in WORLD space. Their coronas / tails
+  // are positioned relative to the world Sun anchor and there are only a
+  // handful, so they skip the sprite cache.
+  _drawSiteSunCometWorld(ctx) {
+    const eff = this.zoom * this.fitScale;
+    const { hostW, hostH } = this;
     const offscreen = (wx, wy, worldR) => {
       const sx = this.pan.x + wx * eff;
       const sy = this.pan.y + wy * eff;
       const m = worldR * eff * 2.5 + 80;
       return sx < -m || sx > hostW + m || sy < -m || sy > hostH + m;
     };
-
-    // Pass 1: shared halos for merged body groups (Mars / Luna /
-    // Mercury / Jupiter system / etc.). One big sphere positioned at
-    // the group's centroid; the individual member sites contribute
-    // only their hexes in the screen-space pass.
-    for (const g of this._bodyGroups.values()) {
-      if (g.sites.length < 2) continue;
-      const vis = TYPE_VIS[g.type] || TYPE_VIS.unknown;
-      if (vis.kind !== 'hex' && vis.kind !== 'sun') continue;
-      const worldR = Math.min(vis.haloR || 20, capWorld);
-      if (offscreen(g.cx, g.cy, worldR)) continue;
-      const palette = paletteFor(g.exemplar);
-      const rings = ringDefFor(g.exemplar);
-      if (rings) {
-        drawPlanetRings(ctx, g.cx, g.cy, worldR, rings, 'back');
-        drawShadedSphere(ctx, g.cx, g.cy, worldR, palette, false);
-        drawPlanetRings(ctx, g.cx, g.cy, worldR, rings, 'front');
-      } else {
-        drawShadedSphere(ctx, g.cx, g.cy, worldR, palette, false);
-      }
-    }
-
-    // Pass 2: per-site halos for everything not part of a merged
-    // group, plus the special sun + comet renderings and the rocky
-    // asteroid silhouettes. Synthetic flavour bodies (Earth /
-    // Jupiter / Sun) draw their sphere too -- they just skip the
-    // hex marker pass later.
     for (const site of this._realSites) {
       if (this._mergedSites.has(site.id)) continue;
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
       if (vis.kind === 'sun')   { if (!offscreen(site.x, site.y, vis.r)) drawSun(ctx, site.x, site.y, vis.r); continue; }
-      if (vis.kind === 'comet') { if (!offscreen(site.x, site.y, vis.r)) drawComet(ctx, site.x, site.y, vis.r, site); continue; }
-      if (vis.kind !== 'hex') continue;
-      // Per-body halo overrides. Ceres punches above its dwarf-
-      // class default - shrink it 50% so it doesn't dominate the
-      // belt next to Vesta / Pallas / Hygiea.
-      const bodyScale = /(^|\s)ceres/i.test(site.name || '') ? 0.5 : 1;
-      const worldR = Math.min(vis.haloR * bodyScale, capWorld);
-      if (offscreen(site.x, site.y, worldR)) continue;
-      const rings = ringDefFor(site);
-      if (vis.rocky) {
-        drawRockyAsteroid(ctx, site.x, site.y, worldR, paletteFor(site), site);
-      } else if (rings) {
-        drawPlanetRings(ctx, site.x, site.y, worldR, rings, 'back');
-        drawShadedSphere(ctx, site.x, site.y, worldR, paletteFor(site), site.hazard);
-        drawPlanetRings(ctx, site.x, site.y, worldR, rings, 'front');
-      } else {
-        drawShadedSphere(ctx, site.x, site.y, worldR, paletteFor(site), site.hazard);
-      }
+      if (vis.kind === 'comet') { if (!offscreen(site.x, site.y, vis.r)) drawComet(ctx, site.x, site.y, vis.r, site); }
     }
   }
 

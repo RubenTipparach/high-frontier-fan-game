@@ -1814,6 +1814,41 @@
   color: var(--accent-2);
   font-variant-numeric: tabular-nums;
 }
+.map-debug .dbg-prof {
+  margin: 6px 0;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.map-debug .dbg-prof-title {
+  font-size: 11px;
+  color: var(--ink-dim);
+  margin-bottom: 4px;
+}
+.map-debug .dbg-prof-body {
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+.map-debug .dbg-prof-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 1px 0;
+}
+.map-debug .dbg-prof-row b {
+  color: var(--accent-2);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.map-debug .dbg-prof-row.dbg-prof-total {
+  border-bottom: 1px dashed var(--border);
+  padding-bottom: 3px;
+  margin-bottom: 3px;
+}
+.map-debug .dbg-prof-row.dbg-prof-total span,
+.map-debug .dbg-prof-row.dbg-prof-total b {
+  color: var(--ink);
+  font-weight: 700;
+}
 .map-debug .dbg-slider {
   display: block;
   margin: 8px 0 4px;

@@ -2012,6 +2012,10 @@ function ensureMapShell(host) {
           <span>FPS</span>
           <strong id="dbg-fps">-</strong>
         </div>
+        <div class="dbg-prof">
+          <div class="dbg-prof-title">Frame breakdown (ms/frame)</div>
+          <div id="dbg-prof-body" class="dbg-prof-body">- pan or zoom the map -</div>
+        </div>
         <label class="dbg-slider">
           <span>Initial zoom <em id="dbg-init-zoom-val"></em></span>
           <input id="dbg-init-zoom" type="range" min="0.5" max="6" step="0.1" />
@@ -2389,12 +2393,35 @@ function wireDebugPanel(renderer) {
   const panelOpen = !panel.classList.contains('hidden');
   renderer.setOption('debug', panelOpen);
 
-  let lastZoom = -1, lastFps = -1;
+  const profBody = panel.querySelector('#dbg-prof-body');
+  let lastZoom = -1, lastFps = -1, lastProfT = 0;
   renderer.onFrame(() => {
     const z = Math.round(renderer.getZoom() * 100) / 100;
     if (z !== lastZoom) { zoomEl.textContent = z.toFixed(2) + 'x'; lastZoom = z; }
     const f = renderer.getFps();
     if (f !== lastFps) { fpsEl.textContent = String(f); lastFps = f; }
+    // Per-step frame breakdown. The snapshot only changes ~twice a
+    // second (it's averaged over the fps window), so we rebuild the
+    // rows on a throttle rather than every frame.
+    if (profBody) {
+      const now = performance.now();
+      if (now - lastProfT > 300) {
+        lastProfT = now;
+        const p = renderer.getProfile();
+        const keys = Object.keys(p);
+        if (!keys.length) {
+          profBody.textContent = '- pan or zoom the map -';
+        } else {
+          const frame = p.frame || 0;
+          const rows = keys.filter((k) => k !== 'frame').sort((a, b) => p[b] - p[a]);
+          let html = `<div class="dbg-prof-row dbg-prof-total"><span>frame</span><b>${frame.toFixed(2)}</b></div>`;
+          for (const k of rows) {
+            html += `<div class="dbg-prof-row"><span>${k}</span><b>${p[k].toFixed(2)}</b></div>`;
+          }
+          profBody.innerHTML = html;
+        }
+      }
+    }
   });
 }
 
