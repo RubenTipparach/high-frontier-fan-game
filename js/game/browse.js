@@ -33,7 +33,7 @@ import {
   onRocketChange, isRocketActive,
   getActiveThrusterId, setActiveThruster,
   getTankWater, setTankWater, addFuel, removeFuel, getTankMax,
-  getStackTotals, getActiveThrusterStats,
+  getStackTotals, getActiveThrusterStats, setSolarZone,
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats,
   isAfterburnEngaged, setAfterburn,
@@ -6245,6 +6245,9 @@ function syncSandboxRocket() {
   // in LEO Stack but the rocket itself looks gone.
   const r = isRocketActive();
   const site = getRocketSite();
+  // Tell the rocket engine which heliocentric zone it's in so solar-
+  // driven thrusters get the zone's solar-power thrust modifier.
+  setSolarZone(site && site.solarZone ? site.solarZone : null);
   const x = site && typeof site.x === 'number' ? site.x : LEO_ANCHOR.x;
   const y = site && typeof site.y === 'number' ? site.y : LEO_ANCHOR.y;
   // Active prospector kind is forwarded to the renderer so it can

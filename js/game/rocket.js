@@ -26,6 +26,7 @@
 
 import { PATENTS_BY_ID } from '../../data/patents.js';
 import { CREW_BY_ID } from '../../data/crew.js';
+import { SOLAR_ZONE_INFO } from '../../data/sites.js';
 
 // Crew can act as the ship's thruster OR its robonaut
 // (prospector). Crew records have a different shape than patents
@@ -626,6 +627,25 @@ function activeFace(card) {
   return (card && card.faces && card.faces.primary) || card || {};
 }
 
+// Does this face carry the Solar capability badge? (Sails, photon
+// drives, solar moths - and solar generators.)
+function faceHasSolar(face) {
+  return !!(face && Array.isArray(face.properties)
+    && face.properties.some((p) => p.key === 'solar' && p.value));
+}
+
+// The rocket's current heliocentric zone, pushed in from browse.js
+// whenever the ship moves. Drives the solar-power thrust modifier on
+// solar-driven thrusters. null = unknown (treated as no modifier).
+let _solarZone = null;
+export function setSolarZone(zone) {
+  const z = zone || null;
+  if (z === _solarZone) return;
+  _solarZone = z;
+  notify(); // thrust changed -> refresh fuel strip / readout / gates
+}
+export function getSolarZone() { return _solarZone; }
+
 // Total dry mass of the stack (no fuel) and minimum rad-hardness
 // across the cards. min rad-hard is the ship's rad-hard limit -
 // the weakest card sets the ceiling at a radhaz crossing.
@@ -722,6 +742,44 @@ export function getActiveThrusterStats() {
     thrust += f.afterburn;
     modifiers.push({ from: 'Afterburn', kind: 'thrust', delta: f.afterburn });
   }
+  // Solar-power modifier (Net Thrust track: "modified by ... solar
+  // power"). A thruster is solar-driven when its active face is solar
+  // (sail / photon / solar moth) OR it runs on electric power from a
+  // solar generator in the stack (requires gen-electric and a solar
+  // generator supplies it). Solar-driven thrust shifts by the rocket's
+  // current zone modifier (Mercury +2 .. Saturn -4, Uranus -5); beyond
+  // Uranus (Neptune outward, solar=null) the solar drive goes inert.
+  let solarDriven = faceHasSolar(f);
+  let solarSource = solarDriven ? card.name : null;
+  if (!solarDriven && (f.requires || []).some((r) => (r.kind || r) === 'gen-electric')) {
+    for (const slot of _stack) {
+      if (slot.id === id) continue;
+      const c = cardForSlot(slot);
+      if (!c) continue;
+      const cf = activeFace(c);
+      if (faceHasSolar(cf) && (cf.supplies || []).includes('gen-electric')) {
+        solarDriven = true;
+        solarSource = c.name;
+        break;
+      }
+    }
+  }
+  let solarMod = 0;
+  let solarDead = false;
+  if (solarDriven) {
+    const info = _solarZone ? SOLAR_ZONE_INFO[_solarZone] : null;
+    const z = info ? info.solar : 0;
+    if (z === null) {
+      solarDead = true;
+      if (thrust !== 0) modifiers.push({ from: `${_solarZone}: no sunlight`, kind: 'thrust', delta: -thrust });
+      thrust = 0;
+    } else if (z !== 0) {
+      solarMod = z;
+      thrust += z;
+      modifiers.push({ from: `${_solarZone} solar`, kind: 'thrust', delta: z });
+    }
+  }
+  if (thrust < 0) thrust = 0;
   return {
     cardId: id,
     name: card.name,
@@ -735,6 +793,11 @@ export function getActiveThrusterStats() {
     weightClassMod: wcMod,
     afterburnAvailable: Number.isFinite(f.afterburn) && f.afterburn > 0,
     afterburnEngaged:   _afterburnEngaged,
+    solarDriven,
+    solarSource,
+    solarZone: _solarZone,
+    solarMod,
+    solarDead,
     wetMass: totals.wetMass,
     dryMass: totals.dryMass,
     canLift: thrust >= totals.wetMass,
