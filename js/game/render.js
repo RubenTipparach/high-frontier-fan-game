@@ -641,7 +641,17 @@ export class MapRenderer {
       showDecoratives: false,
       initialZoom: _isMobileViewport() ? MOBILE_DEFAULT_ZOOM : DEFAULT_ZOOM,
       debug: false,
+      // Zone-visualisation (config panel): draw the canonical solar-
+      // zone polygons behind everything. Fill optional; border opacity
+      // 0.01..1 (default 0.5). zoneEditMode reveals the live painter.
+      visualizeZones: false,
+      zoneFill: true,
+      zoneOpacity: 0.5,
+      zoneEditMode: false,
     };
+    // Canonical zone polygons (the frozen source-of-truth data),
+    // wired in from browse.js: { polys: {zone:[[{x,y}]]}, colors, order }.
+    this._canonicalZones = { polys: {}, colors: {}, order: [] };
     this._frameCount = 0;
     this._frameTimer = 0;
     this._fps = 0;
@@ -1173,6 +1183,19 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
+  // The frozen source-of-truth zone polygons drawn behind the map
+  // when `visualizeZones` is on. { polys: {zone:[[{x,y}]]}, colors,
+  // order } - order is inner -> outer (drawn outer-first so inner
+  // regions paint on top).
+  setCanonicalZones({ polys, colors, order } = {}) {
+    this._canonicalZones = {
+      polys: polys || {},
+      colors: colors || {},
+      order: Array.isArray(order) ? order.slice() : [],
+    };
+    this._scheduleDraw();
+  }
+
   // Zones nest inner -> outer (Mercury innermost). The order drives
   // the derived-assignment rule: a node belongs to the INNERMOST
   // polygon that contains it.
@@ -1455,6 +1478,10 @@ export class MapRenderer {
     ctx.save();
     ctx.translate(this.pan.x, this.pan.y);
     ctx.scale(eff, eff);
+
+    // Canonical solar-zone regions render FIRST so they sit behind
+    // every other map element (config: "visualize zone data").
+    this._drawCanonicalZones(ctx, eff);
 
     if (this.data.mode === 'clean' && Array.isArray(this.data.zones)) {
       this._drawZoneBands(ctx, this.data.zones, this.data.zoneInfo);
@@ -2864,7 +2891,7 @@ export class MapRenderer {
       // Zone-painter: grabbing an existing polygon vertex starts a
       // vertex drag instead of a pan, so points can be nudged into
       // place. A plain press anywhere else still pans.
-      if (this._zonePaint.active) {
+      if (this._zonePaint.active && this.options.zoneEditMode) {
         const wp = this._eventToWorld(ev);
         const vi = this._hitTestZoneVertex(wp.x, wp.y);
         if (vi >= 0) {
@@ -2920,7 +2947,7 @@ export class MapRenderer {
       // vertex; a plain click does nothing (so the map can be panned
       // / clicked freely). A click right after a vertex grab is
       // swallowed so it doesn't drop a duplicate point.
-      if (this._zonePaint.active) {
+      if (this._zonePaint.active && this.options.zoneEditMode) {
         if (this._zoneGrabConsumed) { this._zoneGrabConsumed = false; return; }
         if (ev.shiftKey) {
           const wp = this._eventToWorld(ev);
@@ -3001,7 +3028,7 @@ export class MapRenderer {
           const last = this._gesture.touches[0];
           if (last) {
             const pt = this._eventToWorld(last);
-            if (this._zonePaint.active) {
+            if (this._zonePaint.active && this.options.zoneEditMode) {
               this.addZonePolyPoint(pt.x, pt.y);
             } else {
               const hit = this._hitTest(pt.x, pt.y);
@@ -3081,7 +3108,48 @@ export class MapRenderer {
   // zone colour over every already-assigned waypoint, plus the
   // in-progress lasso (dashed outline + translucent fill + vertex
   // handles). No-op unless something is assigned or being drawn.
+  // Canonical zone regions (world space, behind everything). Outer
+  // zones drawn first so the nested inner regions paint on top.
+  // `visualizeZones` gates it; `zoneFill` toggles the fill; the border
+  // opacity follows `zoneOpacity` (0.01..1).
+  _drawCanonicalZones(ctx, eff) {
+    if (!this.options.visualizeZones) return;
+    const cz = this._canonicalZones;
+    const order = (cz.order && cz.order.length) ? cz.order : Object.keys(cz.polys);
+    if (!order.length) return;
+    const op = Math.max(0.01, Math.min(1, this.options.zoneOpacity ?? 0.5));
+    ctx.save();
+    ctx.lineJoin = 'round';
+    for (let i = order.length - 1; i >= 0; i--) {
+      const zone = order[i];
+      const polys = cz.polys[zone];
+      if (!polys) continue;
+      const col = cz.colors[zone] || '#22d3ee';
+      for (const pts of polys) {
+        if (!pts || pts.length < 2) continue;
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k].x, pts[k].y);
+        ctx.closePath();
+        if (this.options.zoneFill) {
+          ctx.globalAlpha = op * 0.35;
+          ctx.fillStyle = col;
+          ctx.fill();
+        }
+        ctx.globalAlpha = op;
+        ctx.lineWidth = 2 / eff; // ~2 screen px regardless of zoom
+        ctx.strokeStyle = col;
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
   _drawZonePaintScreen(ctx) {
+    // The live painter overlay only shows in zone-edit mode; the
+    // canonical visualisation is handled separately behind the map.
+    if (!this.options.zoneEditMode) return;
     const zp = this._zonePaint;
     const zones = Object.keys(zp.zonePolys);
     if (!zp.assignments.size && !zones.length) return;

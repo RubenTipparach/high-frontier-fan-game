@@ -52,6 +52,7 @@ import {
 import { renderDetailTrack, massLabel } from './net-thrust-detail.js';
 import { MILESTONES } from '../../data/glory.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
+import { ZONE_POLYGONS } from '../../data/zones.js';
 import {
   renderCard, thrustVisual, attachTipsTo,
   REQUIREMENT_VIS, REQ_SUPPLIER_TYPE,
@@ -1653,6 +1654,11 @@ function wireSidebar() {
       btn.addEventListener('click', () => { _openMapSearch?.(); });
       continue;
     }
+    // The ⚙ config button isn't a pane - it opens the config modal.
+    if (btn.id === 'sidepanel-config') {
+      btn.addEventListener('click', () => openConfigModal());
+      continue;
+    }
     btn.addEventListener('click', () => {
       const pane = btn.dataset.pane;
       if (panel.dataset.active === pane) {
@@ -2024,6 +2030,10 @@ function ensureMapShell(host) {
         </label>
         <div class="dbg-zone">
           <div class="dbg-zone-title">Zone polygon painter</div>
+          <label class="dbg-check">
+            <input id="dbg-zone-edit" type="checkbox" />
+            <span>Zone edit mode (show + edit polygons)</span>
+          </label>
           <label class="dbg-slider">
             <span>Paint zone</span>
             <select id="dbg-zone-select">
@@ -2259,8 +2269,23 @@ const STORAGE_DBG_PANEL_OPEN  = 'hf-sandbox-map-debug-open';
 // the data is exported and the painter is cleared.
 const STORAGE_ZONE_POLYGONS = 'hf-sandbox-zone-polygons'; // per-zone polygons
 const STORAGE_ZONE_ACTIVE = 'hf-sandbox-zone-active';
+// Zone-view config (config panel): show the canonical zone overlay,
+// fill on/off, border opacity (1..100 %), and the painter edit mode.
+const STORAGE_ZONE_VIZ     = 'hf-sandbox-zone-viz';
+const STORAGE_ZONE_FILL    = 'hf-sandbox-zone-fill';
+const STORAGE_ZONE_VIZ_OP  = 'hf-sandbox-zone-viz-opacity';
+const STORAGE_ZONE_EDIT     = 'hf-sandbox-zone-edit';
 function persistDbg(key, value) {
   try { localStorage.setItem(key, String(value)); } catch { /* private mode */ }
+}
+// Push the saved zone-view config into a (possibly freshly-built)
+// renderer. Defaults: overlay off, fill on, 50% opacity, edit off.
+function applyZoneViewConfig(renderer) {
+  if (!renderer) return;
+  renderer.setOption('visualizeZones', loadDbgBool(STORAGE_ZONE_VIZ, false));
+  renderer.setOption('zoneFill', loadDbgBool(STORAGE_ZONE_FILL, true));
+  renderer.setOption('zoneOpacity', loadDbgNumber(STORAGE_ZONE_VIZ_OP, 50, 1, 100) / 100);
+  renderer.setOption('zoneEditMode', loadDbgBool(STORAGE_ZONE_EDIT, false));
 }
 function loadDbgNumber(key, fallback, min, max) {
   try {
@@ -2384,6 +2409,17 @@ function wireZonePainter(renderer, panel) {
   const clearBtn  = panel.querySelector('#dbg-zone-clear');
   const exportBtn = panel.querySelector('#dbg-zone-export');
   const countEl   = panel.querySelector('#dbg-zone-count');
+  // Zone edit mode reveals the live painter overlay (off = editor data
+  // hidden, tools still present). Persisted + applied to the renderer.
+  const editCb = panel.querySelector('#dbg-zone-edit');
+  if (editCb) {
+    editCb.checked = loadDbgBool(STORAGE_ZONE_EDIT, false);
+    renderer.setOption('zoneEditMode', editCb.checked);
+    editCb.onchange = () => {
+      persistDbg(STORAGE_ZONE_EDIT, editCb.checked ? '1' : '0');
+      renderer.setOption('zoneEditMode', editCb.checked);
+    };
+  }
   if (!select || !clearZoneBtn) return;
 
   // Populate the dropdown + hand the per-zone palette to the renderer
@@ -2421,7 +2457,18 @@ function wireZonePainter(renderer, panel) {
   // BEFORE wiring the change handler so the restore doesn't re-save.
   try {
     const rawPolys = localStorage.getItem(STORAGE_ZONE_POLYGONS);
-    if (rawPolys) renderer.setZonePolygons(JSON.parse(rawPolys));
+    if (rawPolys) {
+      renderer.setZonePolygons(JSON.parse(rawPolys));
+    } else {
+      // No local scratch yet - seed the painter from the canonical
+      // zone data so edits continue from the source of truth.
+      const seed = [];
+      for (const z in ZONE_POLYGONS) {
+        const arr = ZONE_POLYGONS[z];
+        if (arr && arr[0] && arr[0].length) seed.push({ zone: z, points: arr[0] });
+      }
+      renderer.setZonePolygons(seed);
+    }
     const savedZone = localStorage.getItem(STORAGE_ZONE_ACTIVE);
     if (savedZone && SOLAR_ZONES.includes(savedZone)) {
       select.value = savedZone;
@@ -2668,6 +2715,13 @@ async function mountMapFor() {
     _renderer.onSandboxRocketClick = () => openRocketStackModal();
     wireDebugPanel(_renderer);
     wireMapInsets(_renderer);
+    // Hand the canonical zone polygons + palette to the renderer so
+    // the "visualize zone data" config option can draw them behind
+    // the map, then apply the player's saved zone-view config.
+    const zoneColors = {};
+    for (const z of SOLAR_ZONES) zoneColors[z] = (SOLAR_ZONE_INFO[z] || {}).color || '#22d3ee';
+    _renderer.setCanonicalZones({ polys: ZONE_POLYGONS, colors: zoneColors, order: SOLAR_ZONES });
+    applyZoneViewConfig(_renderer);
     syncSoloShipMarker();
     syncSandboxRocket();
     syncDiscs();
@@ -7208,6 +7262,70 @@ function onSiteSelect(site) {
 // density, accessibility toggles, dev flags). Reachable from the
 // toolbar ⚙ button as well as inline gears scattered through
 // the popups; everything ends up here.
+// Config modal (sidepanel ⚙). Fullscreen toggle, a jump to the nav /
+// route settings, and the canonical zone-data visualisation controls
+// (show overlay, fill, border opacity). All zone-view settings persist
+// and apply live to the active renderer.
+function openConfigModal() {
+  document.querySelector('.config-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay config-overlay';
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+
+  const isFs = !!document.fullscreenElement;
+  const viz = loadDbgBool(STORAGE_ZONE_VIZ, false);
+  const fill = loadDbgBool(STORAGE_ZONE_FILL, true);
+  const op = loadDbgNumber(STORAGE_ZONE_VIZ_OP, 50, 1, 100);
+
+  const panel = document.createElement('div');
+  panel.className = 'config-panel';
+  panel.innerHTML = `
+    <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
+    <h2 class="config-title">⚙ Config</h2>
+    <div class="config-section">
+      <button type="button" class="modal-btn config-fs">${isFs ? '⤬ Exit fullscreen' : '⛶ Fullscreen'}</button>
+      <button type="button" class="modal-btn config-nav">🧭 Nav settings</button>
+    </div>
+    <div class="config-section">
+      <div class="config-section-title">Zone data</div>
+      <label class="dbg-check"><input type="checkbox" class="cfg-zone-viz" ${viz ? 'checked' : ''}><span>Visualize zone data</span></label>
+      <label class="dbg-check"><input type="checkbox" class="cfg-zone-fill" ${fill ? 'checked' : ''}><span>Zone fill</span></label>
+      <label class="dbg-slider"><span>Zone opacity <em class="cfg-zone-op-val">${op}%</em></span>
+        <input type="range" class="cfg-zone-op" min="1" max="100" step="1" value="${op}"></label>
+    </div>
+  `;
+  overlay.appendChild(panel);
+  panel.querySelector('.modal-x').addEventListener('click', close);
+  panel.querySelector('.config-fs').addEventListener('click', () => {
+    if (document.fullscreenElement) document.exitFullscreen?.();
+    else document.documentElement.requestFullscreen?.();
+    close();
+  });
+  panel.querySelector('.config-nav').addEventListener('click', () => { close(); openGameSettingsModal(); });
+  const vizCb  = panel.querySelector('.cfg-zone-viz');
+  const fillCb = panel.querySelector('.cfg-zone-fill');
+  const opEl   = panel.querySelector('.cfg-zone-op');
+  const opValEl = panel.querySelector('.cfg-zone-op-val');
+  vizCb.onchange = () => {
+    persistDbg(STORAGE_ZONE_VIZ, vizCb.checked ? '1' : '0');
+    if (_renderer) _renderer.setOption('visualizeZones', vizCb.checked);
+  };
+  fillCb.onchange = () => {
+    persistDbg(STORAGE_ZONE_FILL, fillCb.checked ? '1' : '0');
+    if (_renderer) _renderer.setOption('zoneFill', fillCb.checked);
+  };
+  opEl.oninput = () => {
+    const v = Number(opEl.value);
+    opValEl.textContent = v + '%';
+    persistDbg(STORAGE_ZONE_VIZ_OP, v);
+    if (_renderer) _renderer.setOption('zoneOpacity', v / 100);
+  };
+  mountOverlay(overlay);
+}
+
 function openGameSettingsModal() {
   // For now the only setting block IS the route options; reuse
   // the same modal so the player sees one familiar surface.

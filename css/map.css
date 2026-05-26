@@ -2142,6 +2142,35 @@
   width: min(380px, 92vw);
   box-shadow: 0 24px 56px rgba(0, 0, 0, 0.55);
 }
+/* Config modal (sidepanel ⚙). */
+.config-panel {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px 22px 18px;
+  width: min(340px, 92vw);
+  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.55);
+  color: var(--ink);
+}
+.config-title { margin: 0 0 14px; font-size: 16px; color: var(--accent); }
+.config-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+.config-section:first-of-type { border-top: none; padding-top: 0; }
+.config-section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--ink-dim);
+  margin-bottom: 2px;
+}
+.config-panel .dbg-check { font-size: 13px; color: var(--ink); }
+.config-panel .dbg-slider { font-size: 12px; color: var(--ink-dim); margin: 2px 0; }
 .route-options-title {
   margin: 0 0 4px;
   font-size: 16px;
