@@ -670,6 +670,30 @@ export class MapRenderer {
     this._gesture = null;
     this._rafQueued = false;
     this._tooltipEl = null;
+    // Static-layer cache. The heavy, non-animated geometry (zones,
+    // guides, halos, edges, waypoints, hexes, labels) is baked into an
+    // OVERSCAN offscreen canvas (viewport + margin) at a stored camera
+    // pose. While panning we just blit it at an offset (no rebuild)
+    // until the pan drifts past the margin; while zooming we blit it
+    // scaled as a preview and rebuild crisp once the zoom settles. The
+    // screen-fixed backdrop (nebula + stars) lives in its own cache.
+    this._bgCanvas = null;
+    this._bgCtx = null;
+    this._bgKey = null;
+    this._staticCanvas = null;
+    this._staticCtx = null;
+    this._staticEpoch = 0;
+    this._cachePan = { x: 0, y: 0 };
+    this._cacheZoom = 0;
+    this._cacheEpoch = -1;
+    this._cacheHostW = 0;
+    this._cacheHostH = 0;
+    this._cacheDpr = 0;
+    this._cacheMarginX = 0;
+    this._cacheMarginY = 0;
+    this._cacheCssW = 0;
+    this._cacheCssH = 0;
+    this._prevFrameZoom = 0;
     // Debug zone-painter state. When `active` holds a zone name the
     // map enters polygon-draw mode: clicks drop vertices instead of
     // selecting sites. Finishing a polygon stamps every waypoint
@@ -716,6 +740,21 @@ export class MapRenderer {
     this._frameTimer = 0;
     this._fps = 0;
     this._onFrame = null;           // optional callback fired each frame
+    // Per-step draw profiler. Only armed while the debug panel is open
+    // (this._profileOn). _profAccum sums ms per named step over the fps
+    // window; _profile holds the per-frame average snapshot the panel
+    // polls via getProfile().
+    this._profileOn = false;
+    this._profAccum = {};
+    this._profile = {};
+    // Body-halo sprite cache. Each distinct body appearance (palette +
+    // hazard + rings, or per-id for rocky/ringed bodies) is rendered to
+    // an offscreen canvas once and blitted per frame, instead of
+    // allocating a radial gradient per body every frame. Sprites are
+    // only ever blitted downscaled (<= rendered size) so they stay
+    // crisp; a body zoomed in past its sprite resolution triggers a
+    // one-off re-render at a larger reference radius.
+    this._spriteCache = new Map();
     // Ambient decorative rockets: cosmetic sprites zipping between
     // random sites in the background. Count is driven externally
     // (setAmbientRocketCount) - 10 + 5 per factory built. Purely
@@ -1199,7 +1238,11 @@ export class MapRenderer {
     const rect = this.host.getBoundingClientRect();
     this.hostW = Math.max(1, rect.width);
     this.hostH = Math.max(1, rect.height);
+    const prevDpr = this.dpr;
     this.dpr = window.devicePixelRatio || 1;
+    // Body sprites are rasterised at this.dpr; a dpr change (e.g. window
+    // moved to another monitor) invalidates them.
+    if (this.dpr !== prevDpr && this._spriteCache) this._spriteCache.clear();
     this.canvas.width = Math.round(this.hostW * this.dpr);
     this.canvas.height = Math.round(this.hostH * this.dpr);
     this.canvas.style.width = this.hostW + 'px';
@@ -1228,8 +1271,12 @@ export class MapRenderer {
   onFrame(fn) { this._onFrame = fn; }
   setOption(key, value) {
     this.options[key] = value;
+    this._invalidateStatic();
     this._scheduleDraw();
   }
+
+  // Force the static-layer cache to rebuild on the next frame.
+  _invalidateStatic() { this._staticEpoch++; }
 
   // ---- debug zone painter ----
   // Tools the debug panel drives to hand-label which solar zone each
@@ -1257,6 +1304,7 @@ export class MapRenderer {
       vivid,   // richer fill colours (the pale palette washes out)
       order: Array.isArray(order) ? order.slice() : [],
     };
+    this._invalidateStatic();
     this._scheduleDraw();
   }
 
@@ -1266,6 +1314,7 @@ export class MapRenderer {
   setZoneOrder(order) {
     this._zonePaint.order = Array.isArray(order) ? order.slice() : [];
     this._recomputeDerivedAssignments();
+    this._invalidateStatic();
     this._scheduleDraw();
   }
 
@@ -1530,81 +1579,240 @@ export class MapRenderer {
     });
   }
 
+  // Screen-fixed backdrop (nebula + stars) cache. Depends only on the
+  // canvas size, so it's rebuilt on resize.
+  _ensureBgCache() {
+    const { hostW, hostH, dpr } = this;
+    const dw = Math.max(1, Math.round(hostW * dpr));
+    const dh = Math.max(1, Math.round(hostH * dpr));
+    const key = `${dw}x${dh}`;
+    if (this._bgKey === key) return;
+    this._bgKey = key;
+    if (!this._bgCanvas) this._bgCanvas = document.createElement('canvas');
+    const cv = this._bgCanvas;
+    if (cv.width !== dw || cv.height !== dh) { cv.width = dw; cv.height = dh; this._bgCtx = cv.getContext('2d'); }
+    const bctx = this._bgCtx || (this._bgCtx = cv.getContext('2d'));
+    bctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    bctx.clearRect(0, 0, hostW, hostH);
+    this._drawBackdrop(bctx);
+  }
+
+  // Render the heavy, camera-anchored map layers (zones, guides,
+  // halos, edges, waypoints, hexes, labels) into the OVERSCAN cache,
+  // centred on the current camera pose with a margin on every side so
+  // small pans can be served by an offset blit. Transparent bg so it
+  // composites over the live backdrop.
+  _rebuildStaticCache() {
+    const { hostW, hostH, dpr } = this;
+    const marginX = Math.round(hostW * 0.3);
+    const marginY = Math.round(hostH * 0.3);
+    const cssW = hostW + marginX * 2;
+    const cssH = hostH + marginY * 2;
+    const dw = Math.max(1, Math.round(cssW * dpr));
+    const dh = Math.max(1, Math.round(cssH * dpr));
+    if (!this._staticCanvas) this._staticCanvas = document.createElement('canvas');
+    const cv = this._staticCanvas;
+    if (cv.width !== dw || cv.height !== dh) { cv.width = dw; cv.height = dh; this._staticCtx = cv.getContext('2d'); }
+    const sctx = this._staticCtx || (this._staticCtx = cv.getContext('2d'));
+
+    // Record the pose this cache was rendered at (BEFORE shifting pan).
+    this._cachePan = { x: this.pan.x, y: this.pan.y };
+    this._cacheZoom = this.zoom;
+    this._cacheEpoch = this._staticEpoch;
+    this._cacheHostW = hostW; this._cacheHostH = hostH; this._cacheDpr = dpr;
+    this._cacheMarginX = marginX; this._cacheMarginY = marginY;
+    this._cacheCssW = cssW; this._cacheCssH = cssH;
+
+    // Temporarily shift pan + grow the viewport bounds so the screen-
+    // space layers (which read this.pan / this.hostW for placement +
+    // culling) fill the whole overscan canvas, including the margin.
+    const savePanX = this.pan.x, savePanY = this.pan.y;
+    const saveHostW = this.hostW, saveHostH = this.hostH;
+    this.pan.x = savePanX + marginX; this.pan.y = savePanY + marginY;
+    this.hostW = cssW; this.hostH = cssH;
+    try {
+      sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      sctx.clearRect(0, 0, cssW, cssH);
+      const eff = this.zoom * this.fitScale;
+      sctx.save();
+      sctx.translate(this.pan.x, this.pan.y);
+      sctx.scale(eff, eff);
+      this._drawCanonicalZones(sctx, eff);
+      if (this.data.mode === 'clean' && Array.isArray(this.data.zones)) {
+        this._drawZoneBands(sctx, this.data.zones, this.data.zoneInfo);
+      }
+      sctx.restore();
+      // NOTE: only the solar-zone fills are cached here. Edges, guides,
+      // body halos / planets, waypoints, hexes and labels are all drawn
+      // live every frame in _draw (with viewport culling) so they stay
+      // crisp during zoom instead of being scaled up from this bitmap.
+      // Edges in particular must draw live (over the planets) so the
+      // delta-v lines aren't tucked behind the body spheres.
+    } finally {
+      this.pan.x = savePanX; this.pan.y = savePanY;
+      this.hostW = saveHostW; this.hostH = saveHostH;
+    }
+  }
+
+  // Decide whether the overscan cache can be reused (offset / scaled
+  // blit) or must be rebuilt, then blit it. Drawn in DEVICE pixels
+  // (identity transform) over the already-blitted backdrop.
+  _blitStaticLayer(ctx) {
+    const { hostW, hostH, dpr } = this;
+    const sameStatic = this._staticCanvas
+      && this._cacheEpoch === this._staticEpoch
+      && this._cacheHostW === hostW && this._cacheHostH === hostH && this._cacheDpr === dpr
+      && this._cacheZoom > 0;
+    const dest = () => {
+      const scale = this.zoom / this._cacheZoom;
+      const x = this.pan.x - (this._cacheMarginX + this._cachePan.x) * scale;
+      const y = this.pan.y - (this._cacheMarginY + this._cachePan.y) * scale;
+      const w = this._cacheCssW * scale;
+      const h = this._cacheCssH * scale;
+      const covered = x <= 0.5 && y <= 0.5 && (x + w) >= hostW - 0.5 && (y + h) >= hostH - 0.5;
+      return { x, y, w, h, scale, covered };
+    };
+    let rebuild = !sameStatic;
+    if (!rebuild) {
+      const d = dest();
+      if (!d.covered) rebuild = true;                                   // panned/zoomed past the margin
+      else if (this.zoom !== this._cacheZoom && this.zoom === this._prevFrameZoom) rebuild = true; // zoom settled -> crisp
+    }
+    if (rebuild) this._rebuildStaticCache();
+    const d = dest();
+    const cv = this._staticCanvas;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.imageSmoothingEnabled = (d.scale !== 1); // crisp when 1:1, smooth scaled preview
+    ctx.drawImage(cv, 0, 0, cv.width, cv.height,
+      d.x * dpr, d.y * dpr, d.w * dpr, d.h * dpr);
+    ctx.imageSmoothingEnabled = true;
+  }
+
   _draw() {
     const ctx = this.ctx;
-    const { hostW, hostH, dpr } = this;
+    const { dpr } = this;
+
+    // Screen-fixed backdrop, then the camera-anchored static map layer
+    // (offset/scaled-blitted from the overscan cache, rebuilt only when
+    // the pan drifts past the margin or the zoom settles), then the
+    // animated / stateful layers on top.
+    this._profileOn = !!this.options.debug;
+    const drawStart = this._profileOn ? performance.now() : 0;
+
+    this._ensureBgCache();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    this._step('backdrop', () => { ctx.drawImage(this._bgCanvas, 0, 0); });
+    this._step('zones (blit)', () => this._blitStaticLayer(ctx));
+    this._prevFrameZoom = this.zoom;
+
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    this._drawBackdrop(ctx);
-
     const eff = this.zoom * this.fitScale;
+
+    // Guides + sun/comet draw in world space UNDER the planet sprites.
+    // The Sun corona and comet tails point relative to the world Sun
+    // anchor, so they stay live (and they're few). Everything else that
+    // used to be a per-frame gradient (the body spheres) is now blitted
+    // from the sprite cache in _drawSiteHalosScreen.
+    ctx.save();
+    ctx.translate(this.pan.x, this.pan.y);
+    ctx.scale(eff, eff);
+    this._step('guides', () => this._drawGuides(ctx));
+    this._step('sun/comet', () => this._drawSiteSunCometWorld(ctx));
+    ctx.restore();
+
+    // Body spheres / rocky asteroids: blitted from the sprite cache in
+    // screen space, viewport-culled. Drawn before the edges so the
+    // delta-v lines sit over the planets, not behind them.
+    this._step('planets (sprite)', () => this._drawSiteHalosScreen(ctx));
 
     ctx.save();
     ctx.translate(this.pan.x, this.pan.y);
     ctx.scale(eff, eff);
-
-    // Canonical solar-zone regions render FIRST so they sit behind
-    // every other map element (config: "visualize zone data").
-    this._drawCanonicalZones(ctx, eff);
-
-    if (this.data.mode === 'clean' && Array.isArray(this.data.zones)) {
-      this._drawZoneBands(ctx, this.data.zones, this.data.zoneInfo);
-    }
-    this._drawGuides(ctx);
-    this._drawAsteroidBelt(ctx);
-    // Planet halos render BEFORE edges so the body sphere sits
-    // behind every other map element. The hex markers (drawn in
-    // screen space later) sit on top.
-    this._drawSiteHalosWorld(ctx);
-    this._drawEdges(ctx);
-    // Ambient decorative rockets (cosmetic background traffic),
-    // translucent above the edges but below the gameplay route/trail.
+    // Delta-v edges over the planets; animated belt + cosmetic traffic +
+    // the gameplay route/trail follow on top.
+    this._step('edges', () => this._drawEdges(ctx));
+    this._step('belt', () => this._drawAsteroidBelt(ctx));
     {
       const now = performance.now();
       const dt = this._ambientLastT ? Math.min(80, now - this._ambientLastT) : 16;
       this._ambientLastT = now;
-      this._drawAmbientRockets(ctx, dt);
+      this._step('ambient', () => this._drawAmbientRockets(ctx, dt));
     }
-    this._drawRocketTrail(ctx);
-    this._drawRoute(ctx);
-
+    this._step('trail', () => this._drawRocketTrail(ctx));
+    this._step('route', () => this._drawRoute(ctx));
     ctx.restore();
 
-    this._drawWaypointsScreen(ctx);
-    this._drawSiteHexesScreen(ctx);
-    this._drawSiteLabelsScreen(ctx);
-    this._drawProspectDiscsScreen(ctx);
-    this._drawFactoriesScreen(ctx);
-    this._drawOutpostsScreen(ctx);
-    this._drawFocusedStackRingScreen(ctx);
-    this._drawLeoAnchorScreen(ctx);
-    this._drawPlayerShipScreen(ctx);
-    if (this._sandboxRocket) this._drawSandboxRocketScreen(ctx);
-    if (this._explosion)     this._drawExplosionScreen(ctx);
-    // Selection ring drawn LAST so nothing - labels, ships, hexes
-    // - paints over it. On mobile the in-hex orange/gold border is
-    // easy to miss, so we layer a thick bright yellow ring + soft
-    // halo just outside the selected node's body.
-    this._drawSelectionRingScreen(ctx);
-    // Turn-number pills (T2, T3, …) for planned rocket routes;
-    // no-op for plain Navigate-to routes that have no turn tags.
-    this._drawRouteTurnLabelsScreen(ctx);
-    // Debug zone painter overlay sits on top of everything.
-    this._drawZonePaintScreen(ctx);
+    // Crisp, viewport-culled, drawn live (not scaled from the cache) so
+    // node markers / hexes / labels stay sharp at every zoom level.
+    this._step('waypoints', () => this._drawWaypointsScreen(ctx));
+    this._step('hexes', () => this._drawSiteHexesScreen(ctx));
+    this._step('labels', () => this._drawSiteLabelsScreen(ctx));
+
+    // Hazard pulses + gameplay overlays (prospects, factories, ships,
+    // selection ring, route pills, zone painter). Grouped under one
+    // profiler step so the breakdown total reconciles with the sum.
+    this._step('overlays', () => {
+      this._drawHazardPulseScreen(ctx);
+      this._drawProspectDiscsScreen(ctx);
+      this._drawFactoriesScreen(ctx);
+      this._drawOutpostsScreen(ctx);
+      this._drawFocusedStackRingScreen(ctx);
+      this._drawLeoAnchorScreen(ctx);
+      this._drawPlayerShipScreen(ctx);
+      if (this._sandboxRocket) this._drawSandboxRocketScreen(ctx);
+      if (this._explosion)     this._drawExplosionScreen(ctx);
+      // Selection ring drawn LAST so nothing - labels, ships, hexes
+      // - paints over it. On mobile the in-hex orange/gold border is
+      // easy to miss, so we layer a thick bright yellow ring + soft
+      // halo just outside the selected node's body.
+      this._drawSelectionRingScreen(ctx);
+      // Turn-number pills (T2, T3, …) for planned rocket routes;
+      // no-op for plain Navigate-to routes that have no turn tags.
+      this._drawRouteTurnLabelsScreen(ctx);
+      // Debug zone painter overlay sits on top of everything.
+      this._drawZonePaintScreen(ctx);
+    });
     if (this._popupSite) this._positionSitePopup();
 
     // FPS book-keeping. The debug panel polls getFps(); we update
     // ~twice per second so the readout doesn't flicker.
+    if (this._profileOn) {
+      this._profAccum.frame = (this._profAccum.frame || 0) + (performance.now() - drawStart);
+    }
     this._frameCount++;
     const now = performance.now();
     if (!this._frameTimer) this._frameTimer = now;
     if (now - this._frameTimer >= 500) {
+      const frames = this._frameCount || 1;
       this._fps = Math.round(this._frameCount * 1000 / (now - this._frameTimer));
+      if (this._profileOn) {
+        const snap = {};
+        for (const k in this._profAccum) snap[k] = this._profAccum[k] / frames;
+        this._profile = snap;
+      } else {
+        this._profile = {};
+      }
+      this._profAccum = {};
       this._frameCount = 0;
       this._frameTimer = now;
     }
     if (this._onFrame) this._onFrame();
   }
+
+  // Run one named draw step, timing it only while the profiler is armed
+  // (debug panel open). When off, this is a plain call with no overhead.
+  _step(name, fn) {
+    if (!this._profileOn) { fn(); return; }
+    const t0 = performance.now();
+    fn();
+    this._profAccum[name] = (this._profAccum[name] || 0) + (performance.now() - t0);
+  }
+
+  // Per-step average ms-per-frame over the last fps window. Empty unless
+  // the debug panel armed the profiler. 'frame' is the whole _draw body.
+  getProfile() { return this._profile; }
 
   _drawBackdrop(ctx) {
     const { hostW, hostH } = this;
@@ -2118,30 +2326,8 @@ export class MapRenderer {
       ctx.shadowBlur = 0;
     }
 
-    // Hazard pulse: animated red ring around hazard nodes that
-    // the ACTIVE ROUTE crosses. The map already paints a red
-    // border on every hazard for static identification; the
-    // pulse is reserved for "your trajectory goes through this".
-    // No route, no pulse.
-    if (this._routeHazardIds && this._routeHazardIds.size) {
-      const phase = ((this._animTime || 0) / 1000) * Math.PI;
-      const pulse = (Math.sin(phase) + 1) * 0.5;
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = `rgba(248, 113, 113, ${0.4 + pulse * 0.5})`;
-      ctx.beginPath();
-      for (const w of this._waypoints) {
-        if (!this._routeHazardIds.has(w.id)) continue;
-        const vis = TYPE_VIS[w.type] || TYPE_VIS.unknown;
-        if (vis.kind === 'none') continue;
-        const sx = this.pan.x + w.x * eff;
-        const sy = this.pan.y + w.y * eff;
-        if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
-        const ringR = vis.r + 4 + pulse * 4;
-        ctx.moveTo(sx + ringR, sy);
-        ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
-      }
-      ctx.stroke();
-    }
+    // (Hazard pulse moved to _drawHazardPulseScreen so it stays
+    // animated on top of the cached static layer.)
 
     // Radhaz radiation glyph: three wedges + a centre dot drawn
     // by hand so we don't depend on the ☢ font character being
@@ -2226,64 +2412,128 @@ export class MapRenderer {
     }
   }
 
-  // Celestial body halos drawn in WORLD space so they scale with
-  // zoom and stay proportional to the surrounding layout. Capped
-  // at HALO_MAX_SCREEN_R screen pixels so very high zooms don't
-  // make a single body swallow the canvas. Ring-bearing planets
-  // (Saturn / Jupiter / Uranus / Neptune) get the back-half of
-  // their rings drawn before the sphere, then the sphere, then
-  // the front-half on top so the planet sits realistically
-  // through its own ring plane.
-  _drawSiteHalosWorld(ctx) {
+  // Fetch (or lazily render) the offscreen sprite for one body
+  // appearance. `sr` is the screen radius the sphere needs this frame;
+  // the sprite is (re)rendered at a rounded-up reference radius capped
+  // at HALO_MAX_SCREEN_R, so it never has to be blitted upscaled (which
+  // would blur). `extent` is the sprite half-size as a multiple of the
+  // sphere radius (covers atmosphere glow / ring span). `paint(c, cx,
+  // cy, r)` draws the body centred in the sprite with radius r.
+  _bodySprite(key, sr, extent, paint) {
+    let e = this._spriteCache.get(key);
+    if (e && e.refR >= sr) return e;
+    const refR = Math.min(HALO_MAX_SCREEN_R, Math.max(8, Math.ceil(sr / 16) * 16));
+    if (e && e.refR >= refR) return e;
+    const dpr = this.dpr;
+    const half = Math.ceil(extent * refR) + 2;
+    const cv = (e && e.canvas) || document.createElement('canvas');
+    const dw = Math.max(1, Math.round(half * 2 * dpr));
+    if (cv.width !== dw || cv.height !== dw) { cv.width = dw; cv.height = dw; }
+    const c = cv.getContext('2d');
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, half * 2, half * 2);
+    paint(c, half, half, refR);
+    e = { canvas: cv, refR, half };
+    this._spriteCache.set(key, e);
+    return e;
+  }
+
+  // Celestial body spheres + rocky asteroids, blitted from the sprite
+  // cache in SCREEN space (viewport-culled). The on-screen sphere
+  // radius is capped at HALO_MAX_SCREEN_R, matching the old world-space
+  // path, so layout + proportions are unchanged - the only difference
+  // is that each body's shaded gradient is rendered once into a sprite
+  // instead of re-allocated every frame. Ring-bearing planets (Saturn /
+  // Jupiter / Uranus / Neptune) bake back-rings + sphere + front-rings
+  // into the one sprite. Sun + comets stay live (_drawSiteSunCometWorld).
+  _drawSiteHalosScreen(ctx) {
     const eff = this.zoom * this.fitScale;
-    const capWorld = HALO_MAX_SCREEN_R / eff;
+    const { hostW, hostH } = this;
+    const cap = HALO_MAX_SCREEN_R;
+
+    const blit = (key, wx, wy, haloR, extent, paint) => {
+      const sr = Math.min(haloR * eff, cap);
+      if (sr < 0.5) return;
+      const sx = this.pan.x + wx * eff;
+      const sy = this.pan.y + wy * eff;
+      const m = extent * sr + 40;
+      if (sx < -m || sx > hostW + m || sy < -m || sy > hostH + m) return;
+      const e = this._bodySprite(key, sr, extent, paint);
+      const scale = sr / e.refR;            // <= 1, downscale -> crisp
+      const halfCss = e.half * scale;
+      ctx.drawImage(e.canvas, sx - halfCss, sy - halfCss, halfCss * 2, halfCss * 2);
+    };
+
+    const palSig = (p) => `${p.light}|${p.base}|${p.dark}|${p.atmosphere || '-'}`;
+    const sphereExtent = (p, rings) => (rings ? 2.3 : (p.atmosphere ? 1.55 : 1.12));
+    const paintSphere = (pal, rings, hazard) => (c, cx, cy, r) => {
+      if (rings) {
+        drawPlanetRings(c, cx, cy, r, rings, 'back');
+        drawShadedSphere(c, cx, cy, r, pal, hazard);
+        drawPlanetRings(c, cx, cy, r, rings, 'front');
+      } else {
+        drawShadedSphere(c, cx, cy, r, pal, hazard);
+      }
+    };
 
     // Pass 1: shared halos for merged body groups (Mars / Luna /
-    // Mercury / Jupiter system / etc.). One big sphere positioned at
-    // the group's centroid; the individual member sites contribute
-    // only their hexes in the screen-space pass.
+    // Mercury / Jupiter system / etc.). One sphere at the group centroid.
     for (const g of this._bodyGroups.values()) {
       if (g.sites.length < 2) continue;
       const vis = TYPE_VIS[g.type] || TYPE_VIS.unknown;
       if (vis.kind !== 'hex' && vis.kind !== 'sun') continue;
-      const worldR = Math.min(vis.haloR || 20, capWorld);
-      const palette = paletteFor(g.exemplar);
+      const haloR = vis.haloR || 20;
+      const pal = paletteFor(g.exemplar);
       const rings = ringDefFor(g.exemplar);
-      if (rings) {
-        drawPlanetRings(ctx, g.cx, g.cy, worldR, rings, 'back');
-        drawShadedSphere(ctx, g.cx, g.cy, worldR, palette, false);
-        drawPlanetRings(ctx, g.cx, g.cy, worldR, rings, 'front');
-      } else {
-        drawShadedSphere(ctx, g.cx, g.cy, worldR, palette, false);
-      }
+      // Ring-bearing groups key per-group (rings differ per planet);
+      // ring-free groups dedupe on palette so similar bodies share a
+      // sprite.
+      const key = rings ? `grp|${g.exemplar.id}` : `sph|${palSig(pal)}|-`;
+      blit(key, g.cx, g.cy, haloR, sphereExtent(pal, rings), paintSphere(pal, rings, false));
     }
 
-    // Pass 2: per-site halos for everything not part of a merged
-    // group, plus the special sun + comet renderings and the rocky
-    // asteroid silhouettes. Synthetic flavour bodies (Earth /
-    // Jupiter / Sun) draw their sphere too -- they just skip the
-    // hex marker pass later.
+    // Pass 2: per-site spheres + rocky silhouettes for everything not in
+    // a merged group. Sun + comets are handled live elsewhere.
     for (const site of this._realSites) {
       if (this._mergedSites.has(site.id)) continue;
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
-      if (vis.kind === 'sun')   { drawSun(ctx, site.x, site.y, vis.r); continue; }
-      if (vis.kind === 'comet') { drawComet(ctx, site.x, site.y, vis.r, site); continue; }
+      if (vis.kind === 'sun' || vis.kind === 'comet') continue;
       if (vis.kind !== 'hex') continue;
-      // Per-body halo overrides. Ceres punches above its dwarf-
-      // class default - shrink it 50% so it doesn't dominate the
-      // belt next to Vesta / Pallas / Hygiea.
+      // Ceres punches above its dwarf-class default - shrink it 50% so
+      // it doesn't dominate the belt next to Vesta / Pallas / Hygiea.
       const bodyScale = /(^|\s)ceres/i.test(site.name || '') ? 0.5 : 1;
-      const worldR = Math.min(vis.haloR * bodyScale, capWorld);
-      const rings = ringDefFor(site);
+      const haloR = vis.haloR * bodyScale;
+      const pal = paletteFor(site);
       if (vis.rocky) {
-        drawRockyAsteroid(ctx, site.x, site.y, worldR, paletteFor(site), site);
-      } else if (rings) {
-        drawPlanetRings(ctx, site.x, site.y, worldR, rings, 'back');
-        drawShadedSphere(ctx, site.x, site.y, worldR, paletteFor(site), site.hazard);
-        drawPlanetRings(ctx, site.x, site.y, worldR, rings, 'front');
-      } else {
-        drawShadedSphere(ctx, site.x, site.y, worldR, paletteFor(site), site.hazard);
+        // Rocky silhouettes carry a per-site random vertex shape, so
+        // they can't dedupe - key by id.
+        blit(`rock|${site.id}`, site.x, site.y, haloR, 1.15,
+          (c, cx, cy, r) => drawRockyAsteroid(c, cx, cy, r, pal, site));
+        continue;
       }
+      const rings = ringDefFor(site);
+      const key = rings ? `ring|${site.id}` : `sph|${palSig(pal)}|${site.hazard ? 'h' : '-'}`;
+      blit(key, site.x, site.y, haloR, sphereExtent(pal, rings), paintSphere(pal, rings, site.hazard));
+    }
+  }
+
+  // The Sun + comets, drawn live in WORLD space. Their coronas / tails
+  // are positioned relative to the world Sun anchor and there are only a
+  // handful, so they skip the sprite cache.
+  _drawSiteSunCometWorld(ctx) {
+    const eff = this.zoom * this.fitScale;
+    const { hostW, hostH } = this;
+    const offscreen = (wx, wy, worldR) => {
+      const sx = this.pan.x + wx * eff;
+      const sy = this.pan.y + wy * eff;
+      const m = worldR * eff * 2.5 + 80;
+      return sx < -m || sx > hostW + m || sy < -m || sy > hostH + m;
+    };
+    for (const site of this._realSites) {
+      if (this._mergedSites.has(site.id)) continue;
+      const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
+      if (vis.kind === 'sun')   { if (!offscreen(site.x, site.y, vis.r)) drawSun(ctx, site.x, site.y, vis.r); continue; }
+      if (vis.kind === 'comet') { if (!offscreen(site.x, site.y, vis.r)) drawComet(ctx, site.x, site.y, vis.r, site); }
     }
   }
 
@@ -3176,6 +3426,32 @@ export class MapRenderer {
   // zones drawn first so the nested inner regions paint on top.
   // `visualizeZones` gates it; `zoneFill` toggles the fill; the border
   // opacity follows `zoneOpacity` (0.01..1).
+  // Animated red pulse ring around hazard nodes the active route
+  // crosses. Drawn live (on top of the cached static layer) so it
+  // keeps pulsing without invalidating the cache. No route = no-op.
+  _drawHazardPulseScreen(ctx) {
+    if (!this._routeHazardIds || !this._routeHazardIds.size) return;
+    const eff = this.zoom * this.fitScale;
+    const hostW = this.hostW, hostH = this.hostH;
+    const phase = ((this._animTime || 0) / 1000) * Math.PI;
+    const pulse = (Math.sin(phase) + 1) * 0.5;
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = `rgba(248, 113, 113, ${0.4 + pulse * 0.5})`;
+    ctx.beginPath();
+    for (const w of this._waypoints) {
+      if (!this._routeHazardIds.has(w.id)) continue;
+      const vis = TYPE_VIS[w.type] || TYPE_VIS.unknown;
+      if (vis.kind === 'none') continue;
+      const sx = this.pan.x + w.x * eff;
+      const sy = this.pan.y + w.y * eff;
+      if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
+      const ringR = vis.r + 4 + pulse * 4;
+      ctx.moveTo(sx + ringR, sy);
+      ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
+    }
+    ctx.stroke();
+  }
+
   _drawCanonicalZones(ctx, eff) {
     if (!this.options.visualizeZones) return;
     const cz = this._canonicalZones;

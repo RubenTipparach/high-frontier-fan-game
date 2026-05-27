@@ -1814,6 +1814,55 @@
   color: var(--accent-2);
   font-variant-numeric: tabular-nums;
 }
+/* Frame-breakdown profiler: pulled out of the vertical stack into its
+   own column anchored to the right of the panel so it doesn't stretch
+   the panel tall (and clip). Top-aligned with the panel, scrolls if it
+   ever runs past the available height. */
+.map-debug .dbg-prof {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 0;
+  width: 156px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  background: rgba(15, 16, 35, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.55);
+}
+.map-debug .dbg-prof-title {
+  font-size: 11px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+}
+.map-debug .dbg-prof-body {
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+.map-debug .dbg-prof-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 1px 0;
+}
+.map-debug .dbg-prof-row b {
+  color: var(--accent-2);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.map-debug .dbg-prof-row.dbg-prof-total {
+  border-bottom: 1px dashed var(--border);
+  padding-bottom: 3px;
+  margin-bottom: 3px;
+}
+.map-debug .dbg-prof-row.dbg-prof-total span,
+.map-debug .dbg-prof-row.dbg-prof-total b {
+  color: var(--ink);
+  font-weight: 700;
+}
 .map-debug .dbg-slider {
   display: block;
   margin: 8px 0 4px;
@@ -2915,6 +2964,9 @@ body:has(#view-browse:not(.hidden)) #main {
   background: rgba(7, 6, 15, 0.85);
   border-right: 1px solid var(--border);
   flex: 0 0 48px;
+  min-height: 0;            /* allow the column to shrink + scroll */
+  overflow-y: auto;         /* never clip the search / config tabs */
+  overflow-x: hidden;
 }
 @media (max-width: 720px) {
   /* Horizontal pill of tab buttons centered at the top. */
@@ -2925,6 +2977,8 @@ body:has(#view-browse:not(.hidden)) #main {
     gap: 6px;
     border-right: none;
     background: transparent;
+    overflow-x: auto;
+    overflow-y: hidden;
   }
   .sidepanel-tabs button {
     width: 40px;
@@ -2950,12 +3004,13 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .sidepanel-tabs button:hover { background: var(--panel-2); }
 .sidepanel-tabs button.active:hover { background: var(--accent); }
-/* Search is a utility, not a pane: push it to the far end of the
-   strip (bottom of the desktop column) so it reads as separate from
-   the pane tabs while still being last in order. */
-.sidepanel-tab-search { margin-top: auto; }
+/* Search + config are utilities, not panes. They flow right after the
+   pane tabs (a small gap separates them) - previously they were pinned
+   to the far end with margin:auto, which clipped them out of view when
+   the strip ran short. */
+.sidepanel-tab-search { margin-top: 10px; }
 @media (max-width: 720px) {
-  .sidepanel-tab-search { margin-top: 0; margin-left: auto; }
+  .sidepanel-tab-search { margin-top: 0; margin-left: 10px; }
 }
 
 .sidepanel-content {
@@ -4323,6 +4378,152 @@ body:has(#view-browse:not(.hidden)) #main {
   line-height: 18px;
   font-size: 12px;
 }
+
+/* ============================================================
+   Scoring pane (renamed Glory tab): the live endgame total, the
+   spectrum exploitation track, and the two-sided glory chits.
+   ============================================================ */
+.score-summary .glory-vp-row {
+  background: rgba(125, 211, 252, 0.08);
+  border-color: rgba(125, 211, 252, 0.35);
+}
+.score-summary .endgame-grand-vp {
+  font-size: 22px;
+  color: #7dd3fc;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+/* Spectrum exploitation track: one column per spectral, a vertical
+   8 / 5 / 4 track, and a translucent red disc on the cell matching
+   the factory count (the published VP-tracker idiom). */
+.spectrum-tracker {
+  display: flex;
+  gap: 6px;
+  justify-content: space-between;
+  margin: 6px 0 4px;
+}
+.spectrum-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 0;
+  min-width: 0;
+}
+.spectrum-col:not(.has-factories) .spectrum-track { opacity: 0.45; }
+.spectrum-track {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 34px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--bg-2);
+}
+.spectrum-cell {
+  position: relative;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--muted, #94a3b8);
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid var(--border);
+}
+.spectrum-cell:last-child { border-bottom: none; }
+.spectrum-cell.is-active { color: var(--ink); font-weight: 700; }
+/* Transparent red disc marker. */
+.spectrum-disc {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(220, 38, 38, 0.42);
+  border: 2px solid rgba(248, 113, 113, 0.95);
+  box-shadow: 0 0 8px rgba(220, 38, 38, 0.55);
+  pointer-events: none;
+}
+.spectrum-count {
+  font-size: 11px;
+  color: var(--muted, #94a3b8);
+  font-variant-numeric: tabular-nums;
+}
+.spectrum-vp {
+  font-size: 12px;
+  font-weight: 700;
+  color: #7dd3fc;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Two-sided chit side badge (front = low/grey, back = high/amber). */
+.glory-ticker li strong { font-variant-numeric: tabular-nums; }
+.chit-side {
+  display: inline-block;
+  font-size: 10px;
+  line-height: 1.6;
+  padding: 0 6px;
+  border-radius: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-right: 4px;
+}
+.chit-side.chit-front { background: #475569; color: #e2e8f0; }
+.chit-side.chit-back  { background: #b45309; color: #fff7ed; }
+
+/* Card-like glory-chit token for the rocket stack (in transit) and
+   the LEO stack (resolved front / back). Sized to sit alongside the
+   .rocket-slot cards in the same grid row. */
+.chit-token {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 72px;
+  min-height: 92px;
+  padding: 8px 6px;
+  border-radius: 8px;
+  border: 2px dashed rgba(248, 113, 113, 0.7);
+  background: rgba(120, 30, 30, 0.28);
+  color: var(--ink);
+  text-align: center;
+  font-size: 11px;
+}
+.chit-token .chit-token-emoji { font-size: 22px; line-height: 1; }
+.chit-token .chit-token-zone { font-weight: 700; font-size: 11px; }
+.chit-token .chit-token-vp { font-variant-numeric: tabular-nums; color: #fca5a5; }
+.chit-token .chit-token-side {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted, #94a3b8);
+}
+.chit-token .chit-token-owner {
+  font-size: 9px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #93c5fd;
+}
+/* Resolved sides: solid border, amber for the valuable back. */
+.chit-token.chit-back {
+  border-style: solid;
+  border-color: #f59e0b;
+  background: rgba(180, 83, 9, 0.32);
+}
+.chit-token.chit-back .chit-token-vp { color: #fcd34d; }
+.chit-token.chit-front {
+  border-style: solid;
+  border-color: var(--border);
+  background: var(--bg-2);
+}
+.chit-token.chit-front .chit-token-vp { color: #cbd5e1; }
+/* In transit with no crew aboard: dimmed + a warning tint. */
+.chit-token.chit-no-crew { opacity: 0.6; border-color: #b45309; }
 
 /* ============================================================
    Stage-3 hand-bar stack switcher.

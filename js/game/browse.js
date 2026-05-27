@@ -33,7 +33,7 @@ import {
   onRocketChange, isRocketActive,
   getActiveThrusterId, setActiveThruster,
   getTankWater, setTankWater, addFuel, removeFuel, getTankMax,
-  getStackTotals, getActiveThrusterStats,
+  getStackTotals, getActiveThrusterStats, setSolarZone,
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats,
   isAfterburnEngaged, setAfterburn,
@@ -64,7 +64,9 @@ import {
 } from './mission-log.js';
 import {
   awardChitForZone, revokeChitForZone, cashInChits, uncashChits,
-  getChits, getVps, getChitVpValue, isZoneVisited, resetGlory,
+  resolveChitsFront, resolveChitsForCrew,
+  getChits, getClaimedChits, getVps, getChitSides,
+  isZoneVisited, resetGlory,
   onChange as onGloryChange, ZONE_CHIT_VPS,
 } from './glory.js';
 import {
@@ -100,7 +102,7 @@ import {
   renameSave, deleteSave, loadSaveAndReload,
 } from './saves.js';
 import {
-  computeEndgameScore, SPECTRAL_DIMINISHING_SCHEDULE,
+  computeEndgameScore, SPECTRAL_DIMINISHING_SCHEDULE, COLONY_VP,
 } from './scoring.js';
 import {
   MARKET_MODE, FREE_MARKET_AQUA, STARTER_CASH_AMOUNT,
@@ -142,6 +144,11 @@ export function mountBrowse() {
     onRocketChange(syncSandboxRocket);
     onRocketChange(refreshOpenSitePopup);
     onRocketChange(syncFocusedSite);
+    // Per-crew chit reconciliation: when a crew leaves the rocket by
+    // any path (transfer / decommission / back-to-hand), its carried
+    // chits flip face-up to FRONT. Colonise is handled explicitly
+    // (and suppressed here) so its rollback path stays clean.
+    onRocketChange(reconcileChitOwners);
     onDiscsChange(syncDiscs);
     onDiscsChange(refreshOpenSitePopup);
     // Turn-clock changes (end-turn, consumeMove, refundMove)
@@ -999,6 +1006,15 @@ function openUnifiedStackInspector(stackId) {
         actions.appendChild(selBtn);
         wrap.appendChild(actions);
         row.appendChild(wrap);
+      }
+    }
+    // Resolved glory chits live in the LEO stack as cards, shown on
+    // their front or back side (back = a crew brought it home).
+    if (stackId === 'leo') {
+      const claimedChits = getClaimedChits();
+      if (claimedChits.length) {
+        if (!cards.length) row.innerHTML = '';
+        for (const c of claimedChits) row.appendChild(buildChitToken(c.zone, { side: c.side, crewId: c.crewId }));
       }
     }
 
@@ -2012,6 +2028,10 @@ function ensureMapShell(host) {
           <span>FPS</span>
           <strong id="dbg-fps">-</strong>
         </div>
+        <div class="dbg-prof">
+          <div class="dbg-prof-title">Frame breakdown (ms/frame)</div>
+          <div id="dbg-prof-body" class="dbg-prof-body">- pan or zoom the map -</div>
+        </div>
         <label class="dbg-slider">
           <span>Initial zoom <em id="dbg-init-zoom-val"></em></span>
           <input id="dbg-init-zoom" type="range" min="0.5" max="6" step="0.1" />
@@ -2389,12 +2409,35 @@ function wireDebugPanel(renderer) {
   const panelOpen = !panel.classList.contains('hidden');
   renderer.setOption('debug', panelOpen);
 
-  let lastZoom = -1, lastFps = -1;
+  const profBody = panel.querySelector('#dbg-prof-body');
+  let lastZoom = -1, lastFps = -1, lastProfT = 0;
   renderer.onFrame(() => {
     const z = Math.round(renderer.getZoom() * 100) / 100;
     if (z !== lastZoom) { zoomEl.textContent = z.toFixed(2) + 'x'; lastZoom = z; }
     const f = renderer.getFps();
     if (f !== lastFps) { fpsEl.textContent = String(f); lastFps = f; }
+    // Per-step frame breakdown. The snapshot only changes ~twice a
+    // second (it's averaged over the fps window), so we rebuild the
+    // rows on a throttle rather than every frame.
+    if (profBody) {
+      const now = performance.now();
+      if (now - lastProfT > 300) {
+        lastProfT = now;
+        const p = renderer.getProfile();
+        const keys = Object.keys(p);
+        if (!keys.length) {
+          profBody.textContent = '- pan or zoom the map -';
+        } else {
+          const frame = p.frame || 0;
+          const rows = keys.filter((k) => k !== 'frame').sort((a, b) => p[b] - p[a]);
+          let html = `<div class="dbg-prof-row dbg-prof-total"><span>frame</span><b>${frame.toFixed(2)}</b></div>`;
+          for (const k of rows) {
+            html += `<div class="dbg-prof-row"><span>${k}</span><b>${p[k].toFixed(2)}</b></div>`;
+          }
+          profBody.innerHTML = html;
+        }
+      }
+    }
   });
 }
 
@@ -3339,6 +3382,23 @@ function openRocketStackModal() {
       // through to the lower row.
       (isThruster ? thrustersHost : othersHost).appendChild(wrap);
     });
+    // Carried glory chits ride in the stack like cards. They're
+    // two-sided in transit: a crew aboard flips them to the BACK
+    // value at home; if the last crew leaves they flip face-up to
+    // the FRONT value. Flag them when no crew is aboard to carry them.
+    const carriedChits = getChits();
+    if (carriedChits.length) {
+      const present = new Set(stack.filter(isCrewSlot).map((s) => s.id));
+      for (const c of carriedChits) {
+        const tok = buildChitToken(c.zone, { transit: true, crewId: c.crewId });
+        // Dim a chit whose owning crew is no longer aboard (it will
+        // score its front value): owned + owner gone, or ownerless
+        // with no crew at all.
+        const ownerGone = c.crewId ? !present.has(c.crewId) : present.size === 0;
+        if (ownerGone) tok.classList.add('chit-no-crew');
+        othersHost.appendChild(tok);
+      }
+    }
     // Hide the row containers when empty so we don't leave dead
     // grid space between sections.
     if (!thrustersHost.children.length) thrustersHost.style.display = 'none';
@@ -4938,6 +4998,11 @@ function doColonize(site, stack, options) {
         setStatus(`Colonize aborted - unknown crew id ${esc(pick.id)}.`);
         return;
       }
+      // Suppress per-crew reconciliation across the mutation dance:
+      // we remove the crew, and roll it back on failure. Colonise
+      // resolves the crew's own chits explicitly on success below.
+      _suppressChitReconcile = true;
+      try {
       const removed = rocketRemoveCard(idx);
       if (!removed) {
         setStatus(`Colonize aborted - could not remove crew from stack.`);
@@ -4976,6 +5041,23 @@ function doColonize(site, stack, options) {
         undoable: false,
         data: { siteId: site.id, crewId: pick.id },
       });
+      // The colonising crew leaves the rocket: ITS glory chits flip
+      // face-up to their FRONT value (published rule: front = crew
+      // colonised or died). Chits owned by other crews still aboard
+      // stay carried and can still be brought home for the back value.
+      const frontRes = resolveChitsForCrew(pick.id, 'front', `${crewName} colonised ${site.name}`);
+      if (frontRes.vps) {
+        logAction({
+          type: 'glory_front',
+          icon: '🎖',
+          summary: `${frontRes.chits.length} glory chit${frontRes.chits.length === 1 ? '' : 's'} flipped face-up `
+            + `for ${frontRes.vps} VP (${crewName} colonised instead of returning home)`,
+          undoable: false,
+        });
+      }
+      } finally {
+        _suppressChitReconcile = false;
+      }
     },
   });
 }
@@ -6245,6 +6327,9 @@ function syncSandboxRocket() {
   // in LEO Stack but the rocket itself looks gone.
   const r = isRocketActive();
   const site = getRocketSite();
+  // Tell the rocket engine which heliocentric zone it's in so solar-
+  // driven thrusters get the zone's solar-power thrust modifier.
+  setSolarZone(site && site.solarZone ? site.solarZone : null);
   const x = site && typeof site.x === 'number' ? site.x : LEO_ANCHOR.x;
   const y = site && typeof site.y === 'number' ? site.y : LEO_ANCHOR.y;
   // Active prospector kind is forwarded to the renderer so it can
@@ -6649,7 +6734,11 @@ async function moveRocket() {
   // route, segments walked, the chit (if any) we're about to
   // award for first-time zone entry, and the auto-cash payload
   // (if we're landing back at LEO with chits in hand).
-  const willAwardChit = arrivedZone && arrivedZone !== 'Earth' && !isZoneVisited(arrivedZone);
+  // A chit is only retrieved if a crew is aboard to carry it. On
+  // return to LEO any carried chits resolve: BACK (flipped) if a crew
+  // brought them home, FRONT (face-up) if no crew is aboard.
+  const crewAboard = stackHasCrew();
+  const willAwardChit = arrivedZone && arrivedZone !== 'Earth' && !isZoneVisited(arrivedZone) && crewAboard;
   const willCashIn = isLeoSite(arrived) && getChits().length > 0;
   const chitsToCash = willCashIn ? getChits() : [];
   _moveSnapshot = {
@@ -6971,27 +7060,38 @@ async function runMoveQueue(ctx, resuming) {
     data: { siteId: newSiteId, zone: arrivedZone, hazardous: lockUndo },
   });
   if (willAwardChit) {
-    awardChitForZone(arrivedZone, getTurn());
-    const vp = getChitVpValue(arrivedZone);
+    const ownerId = firstCrewId();
+    awardChitForZone(arrivedZone, getTurn(), ownerId);
+    const s = getChitSides(arrivedZone);
+    const owner = crewDisplayName(ownerId);
     logAction({
       type: 'glory_award',
       icon: '🏆',
-      summary: `Glory chit earned - ${arrivedZone} (${vp} VP at cash-in)`,
+      summary: `Glory chit earned - ${arrivedZone} (front ${s.front} / back ${s.back} VP)`
+        + (owner ? `, held by ${owner}` : ''),
       undoable: false,
     });
   }
   if (willCashIn) {
-    const res = cashInChits(`returned to ${arrivedName}`);
+    // Crew aboard at home -> flip to the BACK value; no crew -> the
+    // chits score their FRONT value face-up.
+    const broughtHome = stackHasCrew();
+    const res = broughtHome
+      ? cashInChits(`returned to ${arrivedName}`)
+      : resolveChitsFront(`returned crewless to ${arrivedName}`);
     // _moveSnapshot is null on a resumed move (it lives only in memory);
     // undo is locked for hazardous moves anyway, so guard the write.
     if (_moveSnapshot) {
       _moveSnapshot.cashedChits = chitsToCash;
       _moveSnapshot.cashedVps   = res.vps;
     }
+    const n = (chitsToCash || []).length;
     logAction({
       type: 'glory_cash',
-      icon: '💰',
-      summary: `Cashed ${(chitsToCash || []).length} chit${(chitsToCash || []).length === 1 ? '' : 's'} for ${res.vps} VP`,
+      icon: broughtHome ? '💰' : '🎖',
+      summary: broughtHome
+        ? `Flipped ${n} chit${n === 1 ? '' : 's'} (back) for ${res.vps} VP`
+        : `${n} crewless chit${n === 1 ? '' : 's'} score face-up (front) for ${res.vps} VP`,
       undoable: false,
     });
   }
@@ -8679,93 +8779,232 @@ function renderMilestones() {
   }
   paintGlory();
 }
+// A glory chit needs a crew aboard to be retrieved / carried home.
+// Crew slots carry kind 'crew' (older records fall back to the
+// CREW id list).
+function isCrewSlot(s) {
+  return s.kind === 'crew' || CREW.some((c) => c.id === s.id);
+}
+function stackHasCrew() {
+  return getRocketStack().some(isCrewSlot);
+}
+// The crew that retrieves a chit on a first-landing. We assign the
+// chit to the first crew aboard; its fate (returns home vs. leaves)
+// then drives that chit's front/back resolution.
+function firstCrewId() {
+  const slot = getRocketStack().find(isCrewSlot);
+  return slot ? slot.id : null;
+}
+// Display name for a crew id (primary face), for chit-token owner tags.
+function crewDisplayName(crewId) {
+  const c = crewId ? CREW_BY_ID[crewId] : null;
+  return (c && c.faces && c.faces.primary && c.faces.primary.name) || crewId || '';
+}
+// Suppress reconciliation during the colonize commit, which removes
+// the crew then re-adds it on a rollback path; colonize resolves its
+// own crew's chits explicitly after success.
+let _suppressChitReconcile = false;
+// When a chit's owning crew is no longer aboard, flip that chit
+// face-up (FRONT). Ownerless (legacy) chits flip only when no crew
+// is aboard at all. Fires on every rocket-stack change.
+function reconcileChitOwners() {
+  if (_suppressChitReconcile) return;
+  const carried = getChits();
+  if (!carried.length) return;
+  const present = new Set(getRocketStack().filter(isCrewSlot).map((s) => s.id));
+  const anyCrew = present.size > 0;
+  // Group orphaned chits by owning crew so each resolves with its
+  // own log line; ownerless ones resolve as a synthetic group.
+  const orphanCrews = new Set();
+  let ownerlessOrphan = false;
+  for (const c of carried) {
+    if (c.crewId) { if (!present.has(c.crewId)) orphanCrews.add(c.crewId); }
+    else if (!anyCrew) ownerlessOrphan = true;
+  }
+  for (const crewId of orphanCrews) {
+    const res = resolveChitsForCrew(crewId, 'front', 'crew left the rocket');
+    if (res.vps) {
+      logAction({
+        type: 'glory_front',
+        icon: '🎖',
+        summary: `${res.chits.length} glory chit${res.chits.length === 1 ? '' : 's'} flipped face-up `
+          + `for ${res.vps} VP (${crewDisplayName(crewId)} left the rocket)`,
+        undoable: false,
+      });
+    }
+  }
+  if (ownerlessOrphan) {
+    const res = resolveChitsFront('no crew aboard to carry chits');
+    if (res.vps) {
+      logAction({
+        type: 'glory_front',
+        icon: '🎖',
+        summary: `${res.chits.length} glory chit${res.chits.length === 1 ? '' : 's'} flipped face-up for ${res.vps} VP (no crew aboard)`,
+        undoable: false,
+      });
+    }
+  }
+}
+
+// Card-like DOM token for a glory chit. Used in the rocket stack
+// (transit = in-transit, two-sided, needs a crew to bring home) and
+// in the LEO stack (resolved to its front/back side).
+function buildChitToken(zone, { side = null, transit = false, crewId = null } = {}) {
+  const sides = getChitSides(zone);
+  const el = document.createElement('div');
+  el.className = 'chit-token' + (transit ? ' chit-transit' : ` chit-${side}`);
+  const vp = transit
+    ? `${sides.front} / ${sides.back}`
+    : `+${side === 'back' ? sides.back : sides.front}`;
+  const sideLabel = transit ? 'in transit' : side;
+  const owner = crewId ? crewDisplayName(crewId) : '';
+  el.innerHTML = `
+    <span class="chit-token-emoji" aria-hidden="true">🎖</span>
+    <span class="chit-token-zone">${esc(zone)}</span>
+    <span class="chit-token-vp">${esc(vp)} VP</span>
+    <span class="chit-token-side">${esc(sideLabel)}</span>
+    ${owner ? `<span class="chit-token-owner" title="Earned by ${esc(owner)}">${esc(owner)}</span>` : ''}`;
+  return el;
+}
+
+// Classify a colony's site for VP: submarine (+2) beats astrobiology
+// (+1) when a site is both (e.g. Europa). Bernal isn't a flag yet, so
+// it falls through to the default rate. Flags live on the runtime-
+// merged site objects (_activeData), not data/sites.js.
+function colonyTypeOfSite(siteId) {
+  const site = _activeData && (_activeData.byId?.[siteId]
+    || _activeData.sites?.find((s) => s.id === siteId));
+  if (!site) return null;
+  if (site.submarine)    return 'submarine';
+  if (site.astrobiology) return 'astrobiology';
+  return null;
+}
+
 function paintGlory() {
   const host = document.getElementById('browse-milestones');
   if (!host) return;
-  const chits = getChits();
   const vps   = getVps();
-  const zonesEarned = chits.length
-    ? chits.map((c) => `<span class="glory-chit" data-zone="${esc(c.zone)}">
-          <strong>${esc(c.zone)}</strong>
-          <em>+${getChitVpValue(c.zone)} VP</em>
-        </span>`).join('')
-    : '<p class="muted">No glory chits carried. Land the rocket on a new heliocentric zone to earn one.</p>';
-  const zoneTableRows = Object.entries(ZONE_CHIT_VPS)
-    .filter(([z]) => z !== 'Earth')
-    .map(([z, v]) => `<li><span>${esc(z)}</span><strong>+${v} VP</strong></li>`)
-    .join('');
-  // Stage-3 endgame scoring: surfaces "if the game ended now"
-  // VP breakdown. Tokens (+1 each) + spectral bonus per factory
-  // (+4/+5/+8 per Exploitation Track) + the career glory VP
-  // counter above. The values are recomputed every paint so
-  // building a factory or running an op refreshes the total.
-  const score = computeEndgameScore({ ownerId: SANDBOX_OWNER_ID });
+  const score = computeEndgameScore({
+    ownerId: SANDBOX_OWNER_ID,
+    colonyTypeOf: colonyTypeOfSite,
+  });
+
+  // --- Spectrum exploitation track ----------------------------------
+  // One column per spectral; a translucent red disc sits on the cell
+  // matching the factory count (1 -> 8, 2 -> 5, 3+ -> 4). 0 factories
+  // -> no disc. Steps down as more factories of that spectral land.
+  const SPECTRALS = ['C', 'S', 'M', 'V', 'D', 'H'];
+  const spectrumCols = SPECTRALS.map((spec) => {
+    const n  = score.spectralBonus.perSpectralCount?.[spec] || 0;
+    const vp = score.spectralBonus.byType?.[spec] || 0;
+    const step = n <= 0 ? -1 : Math.min(n, SPECTRAL_DIMINISHING_SCHEDULE.length) - 1;
+    const cells = SPECTRAL_DIMINISHING_SCHEDULE.map((v, i) => {
+      const active = i === step;
+      return `<div class="spectrum-cell${active ? ' is-active' : ''}">
+        ${v}${active ? '<span class="spectrum-disc" aria-hidden="true"></span>' : ''}
+      </div>`;
+    }).join('');
+    return `<div class="spectrum-col${n > 0 ? ' has-factories' : ''}">
+      <span class="industrialize-spectral-badge spectral-${esc(spec)}">${esc(spec)}</span>
+      <div class="spectrum-track">${cells}</div>
+      <span class="spectrum-count">${n}×</span>
+      <span class="spectrum-vp">+${vp}</span>
+    </div>`;
+  }).join('');
+
+  // --- Tokens (+1 each) ---------------------------------------------
   const tokenRows = [
     ['🚀 Rocket',    score.tokens.rocket],
     ['🟡 Claims',    score.tokens.claims],
     ['🏭 Factories', score.tokens.factories],
-    ['🌐 Colonies',  score.tokens.colonies],
     ['🏛 Outposts',  score.tokens.outposts],
   ].map(([label, n]) =>
     `<li><span>${label}</span><strong>+${n} VP</strong></li>`
   ).join('');
-  // Spectral bonus broken down by spectral letter, with the
-  // factory count + diminishing schedule chips so the player
-  // can see WHY the totals are what they are. Schedule is
-  // shared across all six spectrals (1st=8, 2nd=5, 3rd+=4 per
-  // SPECTRAL_DIMINISHING_SCHEDULE in scoring.js).
-  const spectralRows = Object.entries(score.spectralBonus.byType)
-    .filter(([, v]) => v > 0)
-    .map(([spec, v]) => {
-      const n = score.spectralBonus.perSpectralCount?.[spec] || 0;
-      const factorLabel = n === 1 ? '1 factory' : `${n} factories`;
-      return `<li>
-        <span>
-          <span class="industrialize-spectral-badge spectral-${esc(spec)}">${esc(spec)}</span>
-          <span class="muted">${esc(factorLabel)}</span>
-        </span>
-        <strong>+${v} VP</strong>
-      </li>`;
-    })
+
+  // --- Colony locations (by type) -----------------------------------
+  const cb = score.colonies.byType;
+  const colonyRows = [
+    ['🌿 Astrobiology', cb.astrobiology, COLONY_VP.astrobiology],
+    ['🌊 Submarine',    cb.submarine,    COLONY_VP.submarine],
+    ['🏙 Bernal',       cb.bernal,       COLONY_VP.bernal],
+    ['🌐 Other',        cb.other,        COLONY_VP.other],
+  ].filter(([, n]) => n > 0)
+    .map(([label, n, per]) =>
+      `<li><span>${label} <span class="muted">×${n}</span></span><strong>+${n * per} VP</strong></li>`)
     .join('');
-  const scheduleHint = SPECTRAL_DIMINISHING_SCHEDULE
-    .map((v, i) => i === SPECTRAL_DIMINISHING_SCHEDULE.length - 1 ? `${i + 1}+ → ${v}` : `${i + 1}st → ${v}`)
-    .join(', ');
-  const spectralBlock = score.spectralBonus.total > 0
-    ? `<h4>Spectral bonus (factories)</h4>
-       <ul class="glory-table glory-spectral-list">${spectralRows}</ul>
-       <p class="muted glory-rules glory-schedule-hint">Per spectral: ${esc(scheduleHint)} VP (rulebook M2b).</p>`
+  const colonyBlock = score.colonies.count > 0
+    ? `<h4>Colony locations</h4>
+       <ul class="glory-table">${colonyRows}</ul>`
     : '';
+
+  // --- Glory chits: carried + claimed + ticker tape -----------------
+  const chits = getChits();
+  const carried = chits.length
+    ? chits.map((c) => {
+        const s = getChitSides(c.zone);
+        return `<span class="glory-chit" data-zone="${esc(c.zone)}">
+          <strong>${esc(c.zone)}</strong>
+          <em>${s.front} / ${s.back} VP</em>
+        </span>`;
+      }).join('')
+    : '<p class="muted">No chits carried. Land a crew in a new heliocentric zone to earn one.</p>';
+
+  const claimed = getClaimedChits();
+  const claimedTable = claimed.length
+    ? `<ul class="glory-table glory-claimed">${
+        claimed.map((c) =>
+          `<li>
+            <span><span class="chit-side chit-${esc(c.side)}">${esc(c.side)}</span> ${esc(c.zone)}</span>
+            <strong>+${c.vp} VP</strong>
+          </li>`).join('')
+      }</ul>`
+    : '<p class="muted">No chits claimed yet.</p>';
+
+  const zoneTableRows = Object.entries(ZONE_CHIT_VPS)
+    .map(([z, v]) => `<li><span>${esc(z)}</span><strong>${v.front} / ${v.back} VP</strong></li>`)
+    .join('');
+
+  const scheduleHint = SPECTRAL_DIMINISHING_SCHEDULE
+    .map((v, i) => i === SPECTRAL_DIMINISHING_SCHEDULE.length - 1 ? `${i + 1}+ → ${v}` : `${i + 1} → ${v}`)
+    .join(', ');
+
   host.innerHTML = `
-    <section class="glory-summary">
-      <h3>🏆 Glory</h3>
+    <section class="score-summary">
+      <h3>🏆 Scoring</h3>
       <div class="glory-vp-row">
-        <span class="muted">Career VP</span>
-        <strong class="glory-vp">${vps}</strong>
-      </div>
-      <h4>Chits in hand</h4>
-      <div class="glory-chits">${zonesEarned}</div>
-      <h4>Ticker-tape table</h4>
-      <ul class="glory-table">${zoneTableRows}</ul>
-      <p class="muted glory-rules">
-        Land the rocket in a heliocentric zone for the first time to
-        earn a chit. Return to LEO to convert all chits to VP.
-      </p>
-    </section>
-    <section class="endgame-summary">
-      <h3>📊 If the game ended now</h3>
-      <div class="glory-vp-row">
-        <span class="muted">Endgame VP (tokens + spectral + glory)</span>
+        <span class="muted">Endgame VP (live)</span>
         <strong class="endgame-grand-vp">${score.grandTotal}</strong>
       </div>
+
+      <h4>Spectrum exploitation track</h4>
+      <div class="spectrum-tracker">${spectrumCols}</div>
+      <p class="muted glory-rules glory-schedule-hint">
+        Factories per spectral. The disc steps down the track:
+        ${esc(scheduleHint)} VP. Spectral total +${score.spectralBonus.total} VP (rulebook M2b).
+      </p>
+
       <h4>Tokens on the map (+1 each)</h4>
       <ul class="glory-table">${tokenRows}</ul>
-      ${spectralBlock}
+      ${colonyBlock}
+    </section>
+
+    <section class="glory-summary">
+      <h3>🎖 Glory &amp; Heroism chits</h3>
+      <div class="glory-vp-row">
+        <span class="muted">Career glory VP</span>
+        <strong class="glory-vp">${vps}</strong>
+      </div>
+      <h4>Carried (in hand)</h4>
+      <div class="glory-chits">${carried}</div>
+      <h4>Claimed</h4>
+      ${claimedTable}
+      <h4>Ticker-tape (front / back VP)</h4>
+      <ul class="glory-table glory-ticker">${zoneTableRows}</ul>
       <p class="muted glory-rules">
-        Rulebook M2. VP is awarded only at endgame; ops don't tick the
-        counter mid-game. Spectral bonus is per-spectral diminishing
-        (M2b Exploitation Track): each successive factory of the
-        same spectral pays less than the last.
+        Earn a chit the first time a crew lands in a heliocentric zone.
+        Bring it home alive to flip it for the BACK value; if the crew
+        colonises or dies, it scores the FRONT value.
       </p>
     </section>
   `;

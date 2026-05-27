@@ -57,7 +57,13 @@ export function spectralVpForCount(n) {
   return total;
 }
 
-export function computeEndgameScore({ ownerId } = {}) {
+// Colony-location VP from the published tracker ("COLONY
+// LOCATIONS"): Astrobiology +1, Submarine +2, Bernal +2 each.
+// Anything else (a plain colony dome) scores +1, matching the old
+// flat token value.
+export const COLONY_VP = { astrobiology: 1, submarine: 2, bernal: 2, other: 1 };
+
+export function computeEndgameScore({ ownerId, colonyTypeOf } = {}) {
   // Tokens: rocket counts if the player has any cards in it.
   // Claims count every success disc on the map (sandbox: all
   // discs belong to the local player; multi-player will gate on
@@ -81,8 +87,24 @@ export function computeEndgameScore({ ownerId } = {}) {
   const colonyRecs   = ownerId ? colonies.filter((c)  => c.ownerId === ownerId) : colonies;
   const outpostList  = Object.values(outpostsMap);
 
+  // Colonies score by location type, not a flat +1. The caller
+  // injects colonyTypeOf(siteId) -> 'astrobiology' | 'submarine' |
+  // 'bernal' | null (the flags live on the runtime-merged site
+  // objects, not in data/sites.js, so scoring stays pure). Without
+  // it, every colony scores the 'other' rate (+1).
+  const colonyByType = { astrobiology: 0, submarine: 0, bernal: 0, other: 0 };
+  for (const c of colonyRecs) {
+    const t = (colonyTypeOf && colonyTypeOf(c.siteId)) || 'other';
+    if (colonyByType[t] != null) colonyByType[t]++;
+    else colonyByType.other++;
+  }
+  let colonyVp = 0;
+  for (const [t, n] of Object.entries(colonyByType)) colonyVp += n * (COLONY_VP[t] || 1);
+
+  // Token total: +1 per rocket / claim / factory / outpost.
+  // Colonies are scored separately (by location type) below.
   const tokensTotal =
-    rocketCount + claimCount + factoryRecs.length + colonyRecs.length + outpostList.length;
+    rocketCount + claimCount + factoryRecs.length + outpostList.length;
 
   // Group factories by spectral, then apply the diminishing
   // schedule per group. Total per spectral and grand total are
@@ -103,16 +125,20 @@ export function computeEndgameScore({ ownerId } = {}) {
   }
 
   const glory = getVps();
-  const grandTotal = tokensTotal + spectralTotal + glory;
+  const grandTotal = tokensTotal + colonyVp + spectralTotal + glory;
 
   return {
     tokens: {
       rocket: rocketCount,
       claims: claimCount,
       factories: factoryRecs.length,
-      colonies: colonyRecs.length,
       outposts: outpostList.length,
       total: tokensTotal,
+    },
+    colonies: {
+      count: colonyRecs.length,
+      byType: colonyByType,
+      vp: colonyVp,
     },
     spectralBonus: {
       byType,
