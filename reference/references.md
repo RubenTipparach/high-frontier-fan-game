@@ -11,6 +11,7 @@ shipped product and the static GH Pages site does not link to them.
 | `HF4-outer-solar-system-maps.pdf` | Outer-system map plates (Jupiter / Saturn / Uranus / Neptune / Kuiper / Oort) with node labels and route segments. Used as the visual guide for the outer half of the map layout. |
 | `HF4-site-list.xlsx` | Structured site list with one row per site: name, size, spectral type, hydration, group, solar zone, sol-clock position, burns-from-LEO, and a few capability flags. This is the authoritative input the `scripts/generate-sites.js` tool reads to keep `data/sites.js` in sync. |
 | `HF4-branching-manuals-v0.3.zip` | Branching rulebooks (Core, QS, M0…M4, Futures, Sirens, AgeOfPiracy, Exodus, Panspermia). Reference for the rule details the engine will need in Stage 3+. |
+| `HF4-victory-point-tracker.pdf` | Published end-of-game Victory Point tracker / scoring mat. Source for the scoring tab: the per-spectral exploitation track (factories built per spectral, marker steps 8 / 5 / 4), the glory-chit ticker tape (earn on first landing in a zone, flip for more on return home), and the VP category list. Expansion-module rows are out of scope. |
 
 ## External reference links
 

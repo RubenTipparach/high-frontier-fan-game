@@ -64,7 +64,8 @@ import {
 } from './mission-log.js';
 import {
   awardChitForZone, revokeChitForZone, cashInChits, uncashChits,
-  getChits, getVps, getChitVpValue, isZoneVisited, resetGlory,
+  getChits, getClaimedChits, getVps, getChitSides,
+  isZoneVisited, resetGlory,
   onChange as onGloryChange, ZONE_CHIT_VPS,
 } from './glory.js';
 import {
@@ -100,7 +101,7 @@ import {
   renameSave, deleteSave, loadSaveAndReload,
 } from './saves.js';
 import {
-  computeEndgameScore, SPECTRAL_DIMINISHING_SCHEDULE,
+  computeEndgameScore, SPECTRAL_DIMINISHING_SCHEDULE, COLONY_VP,
 } from './scoring.js';
 import {
   MARKET_MODE, FREE_MARKET_AQUA, STARTER_CASH_AMOUNT,
@@ -7002,11 +7003,11 @@ async function runMoveQueue(ctx, resuming) {
   });
   if (willAwardChit) {
     awardChitForZone(arrivedZone, getTurn());
-    const vp = getChitVpValue(arrivedZone);
+    const s = getChitSides(arrivedZone);
     logAction({
       type: 'glory_award',
       icon: '🏆',
-      summary: `Glory chit earned - ${arrivedZone} (${vp} VP at cash-in)`,
+      summary: `Glory chit earned - ${arrivedZone} (front ${s.front} / back ${s.back} VP)`,
       undoable: false,
     });
   }
@@ -8709,93 +8710,144 @@ function renderMilestones() {
   }
   paintGlory();
 }
+// Classify a colony's site for VP: submarine (+2) beats astrobiology
+// (+1) when a site is both (e.g. Europa). Bernal isn't a flag yet, so
+// it falls through to the default rate. Flags live on the runtime-
+// merged site objects (_activeData), not data/sites.js.
+function colonyTypeOfSite(siteId) {
+  const site = _activeData && (_activeData.byId?.[siteId]
+    || _activeData.sites?.find((s) => s.id === siteId));
+  if (!site) return null;
+  if (site.submarine)    return 'submarine';
+  if (site.astrobiology) return 'astrobiology';
+  return null;
+}
+
 function paintGlory() {
   const host = document.getElementById('browse-milestones');
   if (!host) return;
-  const chits = getChits();
   const vps   = getVps();
-  const zonesEarned = chits.length
-    ? chits.map((c) => `<span class="glory-chit" data-zone="${esc(c.zone)}">
-          <strong>${esc(c.zone)}</strong>
-          <em>+${getChitVpValue(c.zone)} VP</em>
-        </span>`).join('')
-    : '<p class="muted">No glory chits carried. Land the rocket on a new heliocentric zone to earn one.</p>';
-  const zoneTableRows = Object.entries(ZONE_CHIT_VPS)
-    .filter(([z]) => z !== 'Earth')
-    .map(([z, v]) => `<li><span>${esc(z)}</span><strong>+${v} VP</strong></li>`)
-    .join('');
-  // Stage-3 endgame scoring: surfaces "if the game ended now"
-  // VP breakdown. Tokens (+1 each) + spectral bonus per factory
-  // (+4/+5/+8 per Exploitation Track) + the career glory VP
-  // counter above. The values are recomputed every paint so
-  // building a factory or running an op refreshes the total.
-  const score = computeEndgameScore({ ownerId: SANDBOX_OWNER_ID });
+  const score = computeEndgameScore({
+    ownerId: SANDBOX_OWNER_ID,
+    colonyTypeOf: colonyTypeOfSite,
+  });
+
+  // --- Spectrum exploitation track ----------------------------------
+  // One column per spectral; a translucent red disc sits on the cell
+  // matching the factory count (1 -> 8, 2 -> 5, 3+ -> 4). 0 factories
+  // -> no disc. Steps down as more factories of that spectral land.
+  const SPECTRALS = ['C', 'S', 'M', 'V', 'D', 'H'];
+  const spectrumCols = SPECTRALS.map((spec) => {
+    const n  = score.spectralBonus.perSpectralCount?.[spec] || 0;
+    const vp = score.spectralBonus.byType?.[spec] || 0;
+    const step = n <= 0 ? -1 : Math.min(n, SPECTRAL_DIMINISHING_SCHEDULE.length) - 1;
+    const cells = SPECTRAL_DIMINISHING_SCHEDULE.map((v, i) => {
+      const active = i === step;
+      return `<div class="spectrum-cell${active ? ' is-active' : ''}">
+        ${v}${active ? '<span class="spectrum-disc" aria-hidden="true"></span>' : ''}
+      </div>`;
+    }).join('');
+    return `<div class="spectrum-col${n > 0 ? ' has-factories' : ''}">
+      <span class="industrialize-spectral-badge spectral-${esc(spec)}">${esc(spec)}</span>
+      <div class="spectrum-track">${cells}</div>
+      <span class="spectrum-count">${n}×</span>
+      <span class="spectrum-vp">+${vp}</span>
+    </div>`;
+  }).join('');
+
+  // --- Tokens (+1 each) ---------------------------------------------
   const tokenRows = [
     ['🚀 Rocket',    score.tokens.rocket],
     ['🟡 Claims',    score.tokens.claims],
     ['🏭 Factories', score.tokens.factories],
-    ['🌐 Colonies',  score.tokens.colonies],
     ['🏛 Outposts',  score.tokens.outposts],
   ].map(([label, n]) =>
     `<li><span>${label}</span><strong>+${n} VP</strong></li>`
   ).join('');
-  // Spectral bonus broken down by spectral letter, with the
-  // factory count + diminishing schedule chips so the player
-  // can see WHY the totals are what they are. Schedule is
-  // shared across all six spectrals (1st=8, 2nd=5, 3rd+=4 per
-  // SPECTRAL_DIMINISHING_SCHEDULE in scoring.js).
-  const spectralRows = Object.entries(score.spectralBonus.byType)
-    .filter(([, v]) => v > 0)
-    .map(([spec, v]) => {
-      const n = score.spectralBonus.perSpectralCount?.[spec] || 0;
-      const factorLabel = n === 1 ? '1 factory' : `${n} factories`;
-      return `<li>
-        <span>
-          <span class="industrialize-spectral-badge spectral-${esc(spec)}">${esc(spec)}</span>
-          <span class="muted">${esc(factorLabel)}</span>
-        </span>
-        <strong>+${v} VP</strong>
-      </li>`;
-    })
+
+  // --- Colony locations (by type) -----------------------------------
+  const cb = score.colonies.byType;
+  const colonyRows = [
+    ['🌿 Astrobiology', cb.astrobiology, COLONY_VP.astrobiology],
+    ['🌊 Submarine',    cb.submarine,    COLONY_VP.submarine],
+    ['🏙 Bernal',       cb.bernal,       COLONY_VP.bernal],
+    ['🌐 Other',        cb.other,        COLONY_VP.other],
+  ].filter(([, n]) => n > 0)
+    .map(([label, n, per]) =>
+      `<li><span>${label} <span class="muted">×${n}</span></span><strong>+${n * per} VP</strong></li>`)
     .join('');
-  const scheduleHint = SPECTRAL_DIMINISHING_SCHEDULE
-    .map((v, i) => i === SPECTRAL_DIMINISHING_SCHEDULE.length - 1 ? `${i + 1}+ → ${v}` : `${i + 1}st → ${v}`)
-    .join(', ');
-  const spectralBlock = score.spectralBonus.total > 0
-    ? `<h4>Spectral bonus (factories)</h4>
-       <ul class="glory-table glory-spectral-list">${spectralRows}</ul>
-       <p class="muted glory-rules glory-schedule-hint">Per spectral: ${esc(scheduleHint)} VP (rulebook M2b).</p>`
+  const colonyBlock = score.colonies.count > 0
+    ? `<h4>Colony locations</h4>
+       <ul class="glory-table">${colonyRows}</ul>`
     : '';
+
+  // --- Glory chits: carried + claimed + ticker tape -----------------
+  const chits = getChits();
+  const carried = chits.length
+    ? chits.map((c) => {
+        const s = getChitSides(c.zone);
+        return `<span class="glory-chit" data-zone="${esc(c.zone)}">
+          <strong>${esc(c.zone)}</strong>
+          <em>${s.front} / ${s.back} VP</em>
+        </span>`;
+      }).join('')
+    : '<p class="muted">No chits carried. Land a crew in a new heliocentric zone to earn one.</p>';
+
+  const claimed = getClaimedChits();
+  const claimedTable = claimed.length
+    ? `<ul class="glory-table glory-claimed">${
+        claimed.map((c) =>
+          `<li>
+            <span><span class="chit-side chit-${esc(c.side)}">${esc(c.side)}</span> ${esc(c.zone)}</span>
+            <strong>+${c.vp} VP</strong>
+          </li>`).join('')
+      }</ul>`
+    : '<p class="muted">No chits claimed yet.</p>';
+
+  const zoneTableRows = Object.entries(ZONE_CHIT_VPS)
+    .map(([z, v]) => `<li><span>${esc(z)}</span><strong>${v.front} / ${v.back} VP</strong></li>`)
+    .join('');
+
+  const scheduleHint = SPECTRAL_DIMINISHING_SCHEDULE
+    .map((v, i) => i === SPECTRAL_DIMINISHING_SCHEDULE.length - 1 ? `${i + 1}+ → ${v}` : `${i + 1} → ${v}`)
+    .join(', ');
+
   host.innerHTML = `
-    <section class="glory-summary">
-      <h3>🏆 Glory</h3>
+    <section class="score-summary">
+      <h3>🏆 Scoring</h3>
       <div class="glory-vp-row">
-        <span class="muted">Career VP</span>
-        <strong class="glory-vp">${vps}</strong>
-      </div>
-      <h4>Chits in hand</h4>
-      <div class="glory-chits">${zonesEarned}</div>
-      <h4>Ticker-tape table</h4>
-      <ul class="glory-table">${zoneTableRows}</ul>
-      <p class="muted glory-rules">
-        Land the rocket in a heliocentric zone for the first time to
-        earn a chit. Return to LEO to convert all chits to VP.
-      </p>
-    </section>
-    <section class="endgame-summary">
-      <h3>📊 If the game ended now</h3>
-      <div class="glory-vp-row">
-        <span class="muted">Endgame VP (tokens + spectral + glory)</span>
+        <span class="muted">Endgame VP (live)</span>
         <strong class="endgame-grand-vp">${score.grandTotal}</strong>
       </div>
+
+      <h4>Spectrum exploitation track</h4>
+      <div class="spectrum-tracker">${spectrumCols}</div>
+      <p class="muted glory-rules glory-schedule-hint">
+        Factories per spectral. The disc steps down the track:
+        ${esc(scheduleHint)} VP. Spectral total +${score.spectralBonus.total} VP (rulebook M2b).
+      </p>
+
       <h4>Tokens on the map (+1 each)</h4>
       <ul class="glory-table">${tokenRows}</ul>
-      ${spectralBlock}
+      ${colonyBlock}
+    </section>
+
+    <section class="glory-summary">
+      <h3>🎖 Glory &amp; Heroism chits</h3>
+      <div class="glory-vp-row">
+        <span class="muted">Career glory VP</span>
+        <strong class="glory-vp">${vps}</strong>
+      </div>
+      <h4>Carried (in hand)</h4>
+      <div class="glory-chits">${carried}</div>
+      <h4>Claimed</h4>
+      ${claimedTable}
+      <h4>Ticker-tape (front / back VP)</h4>
+      <ul class="glory-table glory-ticker">${zoneTableRows}</ul>
       <p class="muted glory-rules">
-        Rulebook M2. VP is awarded only at endgame; ops don't tick the
-        counter mid-game. Spectral bonus is per-spectral diminishing
-        (M2b Exploitation Track): each successive factory of the
-        same spectral pays less than the last.
+        Earn a chit the first time a crew lands in a heliocentric zone.
+        Bring it home alive to flip it for the BACK value; if the crew
+        colonises or dies, it scores the FRONT value.
       </p>
     </section>
   `;
