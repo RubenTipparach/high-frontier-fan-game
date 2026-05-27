@@ -14,6 +14,9 @@ import { createServer } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
+import { createInitialState } from './game/state.js';
+import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE } from './game/engine.js';
+import { randomSeed } from './game/rng.js';
 
 const PORT = Number(process.env.PORT) || 8080;
 
@@ -236,6 +239,15 @@ function lobbyRow(lobbyId) {
        ORDER BY lm.joined_at ASC`
     )
     .all(lobbyId);
+  // The most recent active game for this lobby, if started. Clients
+  // mount the game surface off this id once status flips to 'started'.
+  const game = db
+    .prepare(
+      `SELECT id FROM games
+       WHERE lobby_id = ? AND status = 'active'
+       ORDER BY created_at DESC LIMIT 1`
+    )
+    .get(lobbyId);
   return {
     id: row.id,
     code: row.code,
@@ -248,6 +260,7 @@ function lobbyRow(lobbyId) {
     createdAt: row.created_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
+    gameId: game ? game.id : null,
     members,
   };
 }
@@ -394,10 +407,11 @@ app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
   res.json({ ok: true });
 });
 
-// Host-only. Flips status to 'started'. Stage 1 doesn't ship a game
-// engine yet, so for now this just toggles the flag - the client side
-// renders a "Coming in Stage 2" splash. Stage 3 will wire this up to
-// engine.newGame(lobby).
+// Host-only. Flips the lobby to 'started' AND spins up a server-
+// authoritative game: pins an RNG seed, freezes the seat roster, and
+// writes the initial engine state. Everything happens in one
+// transaction so a lobby never ends up 'started' without a game (or
+// vice versa).
 app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
@@ -405,10 +419,234 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
-  db.prepare("UPDATE lobbies SET status = 'started', started_at = ? WHERE id = ?")
-    .run(nowMs(), id);
+
+  const members = db
+    .prepare(
+      `SELECT lm.profile_id AS profileId, p.name, lm.seat, lm.joined_at
+       FROM lobby_members lm
+       JOIN profiles p ON p.id = lm.profile_id
+       WHERE lm.lobby_id = ?
+       ORDER BY lm.seat ASC, lm.joined_at ASC`
+    )
+    .all(id);
+  if (!members.length) return res.status(409).json({ error: 'no_players' });
+
+  const seed = randomSeed();
+  const players = members.map((m, i) => ({
+    profileId: m.profileId,
+    name: m.name,
+    seat: m.seat || i + 1,
+  }));
+  const state = createInitialState({ players, seed });
+
+  const now = nowMs();
+  const gameId = db.transaction(() => {
+    db.prepare("UPDATE lobbies SET status = 'started', started_at = ? WHERE id = ?")
+      .run(now, id);
+    const info = db
+      .prepare(
+        `INSERT INTO games (lobby_id, seed, status, created_at)
+         VALUES (?, ?, 'active', ?)`
+      )
+      .run(id, seed, now);
+    const gid = info.lastInsertRowid;
+    const insPlayer = db.prepare(
+      `INSERT INTO game_players (game_id, profile_id, seat, color)
+       VALUES (?, ?, ?, ?)`
+    );
+    for (const p of state.players) {
+      insPlayer.run(gid, p.profileId, p.seat, p.color);
+    }
+    const stateJson = JSON.stringify(state);
+    db.prepare(
+      `INSERT INTO game_states (game_id, state, seq, updated_at)
+       VALUES (?, ?, 0, ?)`
+    ).run(gid, stateJson, now);
+    // Seq-0 START op carries the initial snapshot so "state at seq K"
+    // is uniform for every K (including the game's opening board, which
+    // is the first turn's undo floor / committed_seq = 0).
+    db.prepare(
+      `INSERT INTO game_operations (game_id, seq, profile_id, kind, payload, log, state_after, created_at)
+       VALUES (?, 0, ?, 'START', NULL, ?, ?, ?)`
+    ).run(gid, req.profile.id, 'Game started.', stateJson, now);
+    return gid;
+  })();
+
   publishLobby(id);
-  res.json({ ok: true });
+  res.json({ ok: true, gameId });
+});
+
+// ----- Game (Stage 3 server-authoritative engine) -----
+
+// Frozen roster + colours for a game.
+function gamePlayers(gameId) {
+  return db
+    .prepare(
+      `SELECT gp.profile_id AS profileId, gp.seat, gp.color, p.name
+       FROM game_players gp
+       JOIN profiles p ON p.id = gp.profile_id
+       WHERE gp.game_id = ?
+       ORDER BY gp.seat ASC`
+    )
+    .all(gameId);
+}
+
+function isGamePlayer(gameId, profileId) {
+  return !!db
+    .prepare('SELECT 1 FROM game_players WHERE game_id = ? AND profile_id = ?')
+    .get(gameId, profileId);
+}
+
+// Full game view: meta + roster + current state snapshot. State is sent
+// whole today (open information; hidden hands aren't populated until
+// the BUILD op lands, at which point this redacts per-player).
+function gameView(gameId) {
+  const g = db
+    .prepare('SELECT id, lobby_id, status, seed, committed_seq, created_at, finished_at FROM games WHERE id = ?')
+    .get(gameId);
+  if (!g) return null;
+  const st = db.prepare('SELECT state, seq, updated_at FROM game_states WHERE game_id = ?').get(gameId);
+  return {
+    id: g.id,
+    lobbyId: g.lobby_id,
+    status: g.status,
+    seq: st ? st.seq : 0,
+    committedSeq: g.committed_seq,
+    updatedAt: st ? st.updated_at : g.created_at,
+    players: gamePlayers(gameId),
+    state: st ? JSON.parse(st.state) : null,
+  };
+}
+
+// The state snapshot a given op produced (git-style "tree at commit").
+// Used for read-only history review and as the undo turn-base.
+function stateAtSeq(gameId, seq) {
+  const row = db
+    .prepare('SELECT state_after FROM game_operations WHERE game_id = ? AND seq = ?')
+    .get(gameId, seq);
+  return row && row.state_after ? JSON.parse(row.state_after) : null;
+}
+
+function publishGame(gameId, payload) {
+  broadcast(`game:${gameId}`, payload);
+}
+
+app.get('/games/:id', requireProfile, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  if (!isGamePlayer(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+  const view = gameView(id);
+  if (!view) return res.status(404).json({ error: 'not_found' });
+  res.json({ game: view });
+});
+
+// Submit one operation. REST is the source of truth: the engine
+// validates against the current snapshot, the new snapshot + op-log
+// row are written in one transaction, and the result is broadcast to
+// any open WS clients on game:<id>.
+app.post('/games/:id/ops', requireProfile, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  if (!isGamePlayer(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+
+  const body = req.body || {};
+  const kind = String(body.kind || '');
+  if (!SUPPORTED_OPS.includes(kind)) return res.status(400).json({ error: 'unknown_op' });
+
+  const meta = db.prepare('SELECT committed_seq FROM games WHERE id = ?').get(id);
+  const row = db.prepare('SELECT state, seq FROM game_states WHERE game_id = ?').get(id);
+  if (!row || !meta) return res.status(404).json({ error: 'not_found' });
+
+  const prevState = JSON.parse(row.state);
+  const op = { ...body, kind };
+  const ctx = { profileId: req.profile.id };
+  // UNDO / REDO recompute from the turn-base snapshot: the state at the
+  // start of the active player's turn, i.e. the committed_seq op's
+  // snapshot (the END_TURN that handed them the turn, or the seq-0
+  // START for the opening turn).
+  if (NEEDS_TURN_BASE.has(kind)) {
+    ctx.turnBaseState = stateAtSeq(id, meta.committed_seq);
+    if (!ctx.turnBaseState) return res.status(409).json({ error: 'no_turn_base' });
+  }
+  const result = applyOperation(prevState, op, ctx);
+  if (!result.ok) return res.status(409).json({ error: result.error });
+
+  const nextSeq = row.seq + 1;
+  const now = nowMs();
+  const stateJson = JSON.stringify(result.state);
+  // Persist the op payload minus the (already-recorded) kind.
+  const { kind: _k, ...payload } = op;
+  db.transaction(() => {
+    db.prepare(
+      'UPDATE game_states SET state = ?, seq = ?, updated_at = ? WHERE game_id = ?'
+    ).run(stateJson, nextSeq, now, id);
+    db.prepare(
+      `INSERT INTO game_operations (game_id, seq, profile_id, kind, payload, log, state_after, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, nextSeq, req.profile.id, kind, JSON.stringify(payload), result.log || null, stateJson, now);
+    // END_TURN is the commit: it becomes the new undo floor (the next
+    // player can never unwind into the turn that just ended).
+    if (kind === 'END_TURN') {
+      db.prepare('UPDATE games SET committed_seq = ? WHERE id = ?').run(nextSeq, id);
+    }
+    if (result.state.status === 'finished') {
+      db.prepare("UPDATE games SET status = 'finished', finished_at = ? WHERE id = ?").run(now, id);
+    }
+  })();
+
+  const view = gameView(id);
+  publishGame(id, {
+    type: 'game_update',
+    gameId: id,
+    seq: nextSeq,
+    op: { seq: nextSeq, kind, profileId: req.profile.id, log: result.log || null },
+    game: view,
+  });
+  res.json({ ok: true, seq: nextSeq, log: result.log || null, game: view });
+});
+
+// Operation log, optionally only the ops after a given seq (catch-up
+// for a reconnecting client that missed broadcasts).
+app.get('/games/:id/ops', requireProfile, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  if (!isGamePlayer(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+  const after = Number(req.query.after) || 0;
+  const rows = db
+    .prepare(
+      `SELECT go.seq, go.kind, go.payload, go.log, go.created_at AS createdAt,
+              go.profile_id AS profileId, p.name AS profileName
+       FROM game_operations go
+       JOIN profiles p ON p.id = go.profile_id
+       WHERE go.game_id = ? AND go.seq > ?
+       ORDER BY go.seq ASC
+       LIMIT 200`
+    )
+    .all(id, after);
+  res.json({
+    entries: rows.map((r) => ({
+      seq: r.seq,
+      kind: r.kind,
+      payload: r.payload ? JSON.parse(r.payload) : {},
+      log: r.log,
+      profileId: r.profileId,
+      profileName: r.profileName,
+      createdAt: r.createdAt,
+    })),
+  });
+});
+
+// Read-only history review: the board state a given op produced. Local
+// to the caller's session (changes nothing, broadcasts nothing); the
+// client uses it to scrub back through the log to the start.
+app.get('/games/:id/states/:seq', requireProfile, (req, res) => {
+  const id = Number(req.params.id);
+  const seq = Number(req.params.seq);
+  if (!Number.isFinite(id) || !Number.isFinite(seq)) return res.status(400).json({ error: 'bad_id' });
+  if (!isGamePlayer(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+  const state = stateAtSeq(id, seq);
+  if (!state) return res.status(404).json({ error: 'not_found' });
+  res.json({ seq, state });
 });
 
 // ----- Invite links -----
@@ -767,6 +1005,14 @@ function isValidChannel(channel, profile) {
       .prepare('SELECT 1 FROM lobby_members WHERE lobby_id = ? AND profile_id = ?')
       .get(lobbyId, profile.id);
     return !!isMember;
+  }
+  const g = /^game:(\d+)$/.exec(channel);
+  if (g) {
+    const gameId = Number(g[1]);
+    const isPlayer = db
+      .prepare('SELECT 1 FROM game_players WHERE game_id = ? AND profile_id = ?')
+      .get(gameId, profile.id);
+    return !!isPlayer;
   }
   const me = /^me:(\d+)$/.exec(channel);
   if (me) return Number(me[1]) === profile.id;

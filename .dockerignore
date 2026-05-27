@@ -1,0 +1,16 @@
+# Docker build context allowlist for the Fly API image (built from the
+# repo root; see server/Dockerfile). The image needs only the server
+# app and the shared data/ tables, so everything else (frontend, the
+# vendored planner submodule, git history, reference assets) is
+# excluded to keep the remote build context small and fast to upload.
+*
+!server
+!data
+
+# Re-exclude things that live under the allowed dirs but must not ship.
+server/node_modules
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.log
+.env

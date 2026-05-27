@@ -4,7 +4,7 @@
 //
 // Stage 1 tables: profiles, tokens, lobbies, lobby_members,
 // chat_messages, invite_links, direct_invites.
-// Stage 3+ will add: games, game_states, game_operations.
+// Stage 3 tables: games, game_players, game_states, game_operations.
 
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
@@ -136,6 +136,72 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_direct_invites_to
     ON direct_invites(to_id, status, created_at DESC);
+
+  -- A game is created when the host starts a lobby. It pins the RNG
+  -- seed (so the deck deal + every roll replays deterministically) and
+  -- its lifecycle status. One game per lobby start; a lobby could be
+  -- re-used for a rematch later, hence lobby_id is not unique.
+  CREATE TABLE IF NOT EXISTS games (
+    id           INTEGER PRIMARY KEY,
+    lobby_id     INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+    seed         INTEGER NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'active',
+    committed_seq INTEGER NOT NULL DEFAULT 0,
+    created_at   INTEGER NOT NULL,
+    finished_at  INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_games_lobby
+    ON games(lobby_id, created_at DESC);
+
+  -- Frozen roster for a game: the seat order + marker colour assigned
+  -- when the game started. Turn order is seat order; the live engine
+  -- state mirrors these but this table is the durable membership gate
+  -- (who may read the game / submit ops).
+  CREATE TABLE IF NOT EXISTS game_players (
+    id           INTEGER PRIMARY KEY,
+    game_id      INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    profile_id   INTEGER NOT NULL REFERENCES profiles(id),
+    seat         INTEGER NOT NULL,
+    color        TEXT,
+    UNIQUE(game_id, profile_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_game_players_game
+    ON game_players(game_id);
+  CREATE INDEX IF NOT EXISTS idx_game_players_profile
+    ON game_players(profile_id);
+
+  -- The current authoritative state snapshot, one row per game. seq
+  -- is the number of operations applied so far (the state version);
+  -- it matches the highest game_operations.seq and lets a client tell
+  -- whether its mirror is stale. The snapshot is derived from the op
+  -- log and could be rebuilt from it.
+  CREATE TABLE IF NOT EXISTS game_states (
+    game_id      INTEGER PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
+    state        TEXT NOT NULL,
+    seq          INTEGER NOT NULL DEFAULT 0,
+    updated_at   INTEGER NOT NULL
+  );
+
+  -- Append-only operation log, git-style: every action (including the
+  -- seq-0 START, plus UNDO / REDO) is recorded in order with the full
+  -- state snapshot it produced (state_after). Nothing is ever deleted,
+  -- so the whole game can be reviewed at any point (the snapshot at
+  -- seq K is that row's state_after) and a reconnecting client can
+  -- fetch just the ops it missed (seq > its last-seen).
+  CREATE TABLE IF NOT EXISTS game_operations (
+    id           INTEGER PRIMARY KEY,
+    game_id      INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    seq          INTEGER NOT NULL,
+    profile_id   INTEGER NOT NULL REFERENCES profiles(id),
+    kind         TEXT NOT NULL,
+    payload      TEXT,
+    log          TEXT,
+    state_after  TEXT,
+    created_at   INTEGER NOT NULL,
+    UNIQUE(game_id, seq)
+  );
+  CREATE INDEX IF NOT EXISTS idx_game_operations_game
+    ON game_operations(game_id, seq);
 `);
 
 export function nowMs() {

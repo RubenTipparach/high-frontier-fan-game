@@ -11,19 +11,13 @@ import { ws } from './ws.js';
 import { saveLastLobbyId } from './storage.js';
 import { mountChat, unmountChat } from './chat.js';
 import { mountInvitesUI, unmountInvitesUI } from './invites.js';
-import { MapRenderer } from './game/render.js';
-import { loadPlannerMap } from './game/planner-map.js';
-import { findPath } from './game/nav.js';
-
-async function loadLobbyMap() {
-  return loadPlannerMap();
-}
+import { mountNetGame, unmountNetGame } from './game/net-game.js';
 
 let _activeLobby = null;
 let _unsubWS = null;
 let _onShowView = null;
 let _onToast = null;
-let _mapRenderer = null;
+let _gameMounted = false;
 
 export function initLobby({ onShowView, onToast }) {
   _onShowView = onShowView;
@@ -188,57 +182,28 @@ function renderLobby(lobby) {
   startBtn.classList.toggle('hidden', !isHost || lobby.status !== 'waiting');
 
   const overlay = document.getElementById('game-overlay');
-  const justStarted = lobby.status === 'started' && overlay.classList.contains('hidden');
   overlay.classList.toggle('hidden', lobby.status !== 'started');
   if (lobby.status === 'started') {
     const title = document.getElementById('game-title');
     if (title) title.textContent = lobby.name;
-    // Mount the map on first reveal so we don't pay the cost of
-    // building 36 SVG nodes when the user is still picking seats.
-    if (justStarted || !_mapRenderer) {
+    const me = activeProfile();
+    // Mount the server-authoritative game once, on first reveal. The
+    // game surface (shared map + turn HUD) manages its own WS sub and
+    // op submission; see js/game/net-game.js.
+    if (lobby.gameId && me && !_gameMounted) {
+      _gameMounted = true;
+      mountNetGame({ gameId: lobby.gameId, me, onToast: _onToast }).catch((err) => {
+        _gameMounted = false;
+        _onToast('Game failed to load: ' + err.message, 'error');
+      });
+    } else if (!lobby.gameId) {
       const host = document.getElementById('game-map');
-      if (host) {
-        host.innerHTML = '<div class="map-loading">Loading map…</div>';
-        loadLobbyMap().then((data) => {
-          // Click-to-route: same state machine as the Browse view.
-          // Stage 3 will replace this with engine ops (MOVE / BURN).
-          let from = null, to = null;
-          _mapRenderer = new MapRenderer(host, {
-            data,
-            onSelect: (site) => {
-              if (site.isDecorative) {
-                _onToast('Decorative routing node - not selectable.');
-                return;
-              }
-              if (!from || (from && to)) {
-                from = site; to = null;
-                _mapRenderer.setRoute(null);
-                _mapRenderer.setRouteEndpoints(site.id, null);
-                _onToast(`From ${site.name}. Tap destination.`);
-                return;
-              }
-              if (site.id === from.id) return;
-              to = site;
-              const r = findPath(data, from.id, to.id);
-              if (!r) {
-                _onToast(`No route to ${site.name}.`, 'error');
-                return;
-              }
-              _mapRenderer.setRoute(r.segments);
-              _mapRenderer.setRouteEndpoints(from.id, to.id);
-              _onToast(`${from.name} → ${to.name}: ${r.totalBurns} burns, ${r.segments.length} hops.`, 'success');
-            },
-          });
-        }).catch((err) => {
-          host.innerHTML = `<div class="map-loading error">Map failed: ${err.message}</div>`;
-        });
-      }
+      if (host) host.innerHTML = '<div class="map-loading">No active game for this table.</div>';
     }
-  } else if (_mapRenderer) {
-    // Game over (or never started). Tear down so a future start gets
-    // a fresh renderer with up-to-date state.
-    document.getElementById('game-map').innerHTML = '';
-    _mapRenderer = null;
+  } else if (_gameMounted) {
+    // Game ended (or lobby reset). Tear down the game surface.
+    unmountNetGame();
+    _gameMounted = false;
   }
 }
 
@@ -252,6 +217,8 @@ async function onLeaveLobby() {
 
 function leaveCurrent() {
   if (_unsubWS) { _unsubWS(); _unsubWS = null; }
+  if (_gameMounted) { unmountNetGame(); _gameMounted = false; }
+  document.getElementById('game-overlay').classList.add('hidden');
   unmountChat();
   unmountInvitesUI();
   _activeLobby = null;
