@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>High Frontier - fan game</title>
     <link rel="stylesheet" href="./css/style.css?v=4" />
-    <link rel="stylesheet" href="./css/map.css?v=14" />
+    <link rel="stylesheet" href="./css/map.css?v=15" />
     <link rel="stylesheet" href="./css/cards.css?v=4" />
     <!--
       API base URL for the High Frontier companion server. Empty string
@@ -251,6 +251,14 @@
                     <button id="btn-auction-start" disabled title="Put the top of a patent deck up for auction (costs 1 op)">Start auction</button>
                   </div>
                   <div id="auction-deck-picker" class="auction-deck-picker hidden"></div>
+                </div>
+                <div class="hud-section">
+                  <h3>Ship</h3>
+                  <div id="hud-stack"></div>
+                </div>
+                <div class="hud-section">
+                  <h3>Hand</h3>
+                  <div id="hud-hand"></div>
                 </div>
                 <div class="hud-section">
                   <h3>Players</h3>

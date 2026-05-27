@@ -518,6 +518,98 @@ function returnToLive() {
   render();
 }
 
+// ----- build / hand / stack -----
+
+// A slot is a thruster client-side (mirror of engine isThrusterSlot):
+// card type thruster, or its active face exposes a thrust value.
+function isThrusterSlotClient(slot) {
+  const c = PATENTS_BY_ID[slot.id];
+  if (!c) return false;
+  if (c.type === 'thruster') return true;
+  const key = slot.face === 'secondary' ? 'secondary' : 'primary';
+  const f = (c.faces && (c.faces[key] || c.faces.primary)) || c;
+  return f.thrust != null;
+}
+
+async function doBuild(cardId) {
+  if (!isMyTurn() || _busy) return;
+  if (await submitOp({ kind: 'BUILD_ROCKET', cardId })) render();
+}
+
+async function doSetActive(cardId) {
+  if (!isMyTurn() || _busy) return;
+  if (await submitOp({ kind: 'SET_ACTIVE_THRUSTER', cardId })) render();
+}
+
+// The player's hand: one compact row per card with a Build button. Full
+// card art shows in the auction overlay; the hand stays a tight list so
+// the narrow HUD column doesn't overflow.
+function renderHand() {
+  const host = document.getElementById('hud-hand');
+  if (!host) return;
+  host.innerHTML = '';
+  const st = reviewing() ? _reviewState : _state;
+  const myp = st && st.players.find((p) => p.profileId === _me.id);
+  const hand = myp ? myp.hand : [];
+  if (!hand.length) { host.appendChild(noteEl('Your hand is empty.')); return; }
+  const canBuild = !reviewing() && isMyTurn() && !_busy
+    && !(_state && _state.auction) && myp.opsRemaining > 0;
+  for (const id of hand) {
+    const card = PATENTS_BY_ID[id];
+    const row = document.createElement('div');
+    row.className = 'hud-item';
+    const name = document.createElement('span');
+    name.className = 'hud-item-name';
+    name.textContent = card ? card.name : id;
+    const tag = document.createElement('span');
+    tag.className = 'hud-item-tag muted';
+    tag.textContent = card ? card.type : '';
+    const b = document.createElement('button');
+    b.className = 'modal-btn build-btn';
+    b.textContent = 'Build';
+    b.disabled = !canBuild;
+    b.addEventListener('click', () => doBuild(id));
+    row.append(name, tag, b);
+    host.appendChild(row);
+  }
+}
+
+// The player's rocket stack: a compact list marking the active thruster
+// with a Set-active button on the other thrusters.
+function renderStack() {
+  const host = document.getElementById('hud-stack');
+  if (!host) return;
+  host.innerHTML = '';
+  const st = reviewing() ? _reviewState : _state;
+  const myp = st && st.players.find((p) => p.profileId === _me.id);
+  const stack = myp ? myp.rocket.stack : [];
+  if (!stack.length) { host.appendChild(noteEl('No cards built onto the rocket yet.')); return; }
+  const activeId = myp.rocket.activeThrusterId;
+  const canAct = !reviewing() && isMyTurn() && !_busy && !(_state && _state.auction);
+  const ul = document.createElement('ul');
+  ul.className = 'hud-stack-list';
+  for (const slot of stack) {
+    const card = PATENTS_BY_ID[slot.id];
+    const isActive = slot.id === activeId;
+    const li = document.createElement('li');
+    if (isActive) li.classList.add('active-thruster');
+    const name = document.createElement('span');
+    name.className = 'stack-name';
+    name.textContent = (card ? card.name : slot.id) + (isActive ? ' ⚡' : '');
+    li.appendChild(name);
+    if (isThrusterSlotClient(slot) && !isActive) {
+      const b = document.createElement('button');
+      b.className = 'modal-btn stack-setactive';
+      b.textContent = 'Set active';
+      b.disabled = !canAct;
+      b.addEventListener('click', () => doSetActive(slot.id));
+      li.appendChild(b);
+    }
+    ul.appendChild(li);
+  }
+  host.appendChild(ul);
+}
+
 // ----- render -----
 
 function render() {
@@ -528,6 +620,8 @@ function render() {
   renderBanner(_state, false);
   renderRoster(_state);
   renderMoveInfo();
+  renderStack();
+  renderHand();
   renderReflog();
   renderReviewControls();
   renderAuction();
@@ -544,6 +638,8 @@ function renderReview() {
   renderBanner(st, true);
   renderRoster(st);
   setMoveInfo('Reviewing history (read-only). Return to live to act.', false);
+  renderStack();
+  renderHand();
   renderReflog();
   renderReviewControls();
   renderAuction();

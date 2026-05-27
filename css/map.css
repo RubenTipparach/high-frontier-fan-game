@@ -3480,6 +3480,30 @@ body:has(#view-browse:not(.hidden)) #main {
 .hud-roster .who { font-weight: 600; }
 .hud-roster .where { flex: 1; font-size: 12px; }
 .hud-roster .water { font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Hand (build-from) + Ship stack rows in the net-game HUD. */
+.hud-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.hud-item:last-child { border-bottom: 0; }
+.hud-item-name { flex: 1 1 auto; font-size: 13px; line-height: 1.3; }
+.hud-item-tag { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+.hud-item .modal-btn { padding: 4px 9px; font-size: 11px; flex: 0 0 auto; }
+.hud-stack-list { list-style: none; margin: 0; padding: 0; }
+.hud-stack-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.hud-stack-list li:last-child { border-bottom: 0; }
+.hud-stack-list li.active-thruster .stack-name { font-weight: 700; color: var(--accent); }
+.stack-name { flex: 1 1 auto; font-size: 13px; }
+.hud-stack-list .modal-btn { padding: 4px 8px; font-size: 11px; flex: 0 0 auto; }
 .hud-log { list-style: none; margin: 0; padding: 0; font-size: 12px; }
 .hud-log li {
   padding: 4px 0;
