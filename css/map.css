@@ -4473,6 +4473,50 @@ body:has(#view-browse:not(.hidden)) #main {
 .chit-side.chit-front { background: #475569; color: #e2e8f0; }
 .chit-side.chit-back  { background: #b45309; color: #fff7ed; }
 
+/* Card-like glory-chit token for the rocket stack (in transit) and
+   the LEO stack (resolved front / back). Sized to sit alongside the
+   .rocket-slot cards in the same grid row. */
+.chit-token {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 72px;
+  min-height: 92px;
+  padding: 8px 6px;
+  border-radius: 8px;
+  border: 2px dashed rgba(248, 113, 113, 0.7);
+  background: rgba(120, 30, 30, 0.28);
+  color: var(--ink);
+  text-align: center;
+  font-size: 11px;
+}
+.chit-token .chit-token-emoji { font-size: 22px; line-height: 1; }
+.chit-token .chit-token-zone { font-weight: 700; font-size: 11px; }
+.chit-token .chit-token-vp { font-variant-numeric: tabular-nums; color: #fca5a5; }
+.chit-token .chit-token-side {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted, #94a3b8);
+}
+/* Resolved sides: solid border, amber for the valuable back. */
+.chit-token.chit-back {
+  border-style: solid;
+  border-color: #f59e0b;
+  background: rgba(180, 83, 9, 0.32);
+}
+.chit-token.chit-back .chit-token-vp { color: #fcd34d; }
+.chit-token.chit-front {
+  border-style: solid;
+  border-color: var(--border);
+  background: var(--bg-2);
+}
+.chit-token.chit-front .chit-token-vp { color: #cbd5e1; }
+/* In transit with no crew aboard: dimmed + a warning tint. */
+.chit-token.chit-no-crew { opacity: 0.6; border-color: #b45309; }
+
 /* ============================================================
    Stage-3 hand-bar stack switcher.
 

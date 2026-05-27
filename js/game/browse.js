@@ -63,7 +63,7 @@ import {
   commitTurn as commitLogTurn, resetLog, onChange as onLogChange,
 } from './mission-log.js';
 import {
-  awardChitForZone, revokeChitForZone, cashInChits, uncashChits,
+  awardChitForZone, revokeChitForZone, cashInChits, uncashChits, resolveChitsFront,
   getChits, getClaimedChits, getVps, getChitSides,
   isZoneVisited, resetGlory,
   onChange as onGloryChange, ZONE_CHIT_VPS,
@@ -1000,6 +1000,15 @@ function openUnifiedStackInspector(stackId) {
         actions.appendChild(selBtn);
         wrap.appendChild(actions);
         row.appendChild(wrap);
+      }
+    }
+    // Resolved glory chits live in the LEO stack as cards, shown on
+    // their front or back side (back = a crew brought it home).
+    if (stackId === 'leo') {
+      const claimedChits = getClaimedChits();
+      if (claimedChits.length) {
+        if (!cards.length) row.innerHTML = '';
+        for (const c of claimedChits) row.appendChild(buildChitToken(c.zone, { side: c.side }));
       }
     }
 
@@ -3367,6 +3376,19 @@ function openRocketStackModal() {
       // through to the lower row.
       (isThruster ? thrustersHost : othersHost).appendChild(wrap);
     });
+    // Carried glory chits ride in the stack like cards. They're
+    // two-sided in transit: a crew aboard flips them to the BACK
+    // value at home; if the last crew leaves they flip face-up to
+    // the FRONT value. Flag them when no crew is aboard to carry them.
+    const carriedChits = getChits();
+    if (carriedChits.length) {
+      const crewAboard = stackHasCrew();
+      for (const c of carriedChits) {
+        const tok = buildChitToken(c.zone, { transit: true });
+        if (!crewAboard) tok.classList.add('chit-no-crew');
+        othersHost.appendChild(tok);
+      }
+    }
     // Hide the row containers when empty so we don't leave dead
     // grid space between sections.
     if (!thrustersHost.children.length) thrustersHost.style.display = 'none';
@@ -5004,6 +5026,22 @@ function doColonize(site, stack, options) {
         undoable: false,
         data: { siteId: site.id, crewId: pick.id },
       });
+      // The crew that could carry the chits home just left the
+      // rocket. If no crew remains aboard, the carried chits flip
+      // face-up to their FRONT value (published rule: front = crew
+      // colonised or died).
+      if (getChits().length && !stackHasCrew()) {
+        const res = resolveChitsFront(`crew colonised ${site.name}`);
+        if (res.vps) {
+          logAction({
+            type: 'glory_front',
+            icon: '🎖',
+            summary: `${res.chits.length} glory chit${res.chits.length === 1 ? '' : 's'} flipped face-up `
+              + `for ${res.vps} VP (no crew left aboard to bring them home)`,
+            undoable: false,
+          });
+        }
+      }
     },
   });
 }
@@ -6680,7 +6718,11 @@ async function moveRocket() {
   // route, segments walked, the chit (if any) we're about to
   // award for first-time zone entry, and the auto-cash payload
   // (if we're landing back at LEO with chits in hand).
-  const willAwardChit = arrivedZone && arrivedZone !== 'Earth' && !isZoneVisited(arrivedZone);
+  // A chit is only retrieved if a crew is aboard to carry it. On
+  // return to LEO any carried chits resolve: BACK (flipped) if a crew
+  // brought them home, FRONT (face-up) if no crew is aboard.
+  const crewAboard = stackHasCrew();
+  const willAwardChit = arrivedZone && arrivedZone !== 'Earth' && !isZoneVisited(arrivedZone) && crewAboard;
   const willCashIn = isLeoSite(arrived) && getChits().length > 0;
   const chitsToCash = willCashIn ? getChits() : [];
   _moveSnapshot = {
@@ -7012,17 +7054,25 @@ async function runMoveQueue(ctx, resuming) {
     });
   }
   if (willCashIn) {
-    const res = cashInChits(`returned to ${arrivedName}`);
+    // Crew aboard at home -> flip to the BACK value; no crew -> the
+    // chits score their FRONT value face-up.
+    const broughtHome = stackHasCrew();
+    const res = broughtHome
+      ? cashInChits(`returned to ${arrivedName}`)
+      : resolveChitsFront(`returned crewless to ${arrivedName}`);
     // _moveSnapshot is null on a resumed move (it lives only in memory);
     // undo is locked for hazardous moves anyway, so guard the write.
     if (_moveSnapshot) {
       _moveSnapshot.cashedChits = chitsToCash;
       _moveSnapshot.cashedVps   = res.vps;
     }
+    const n = (chitsToCash || []).length;
     logAction({
       type: 'glory_cash',
-      icon: '💰',
-      summary: `Cashed ${(chitsToCash || []).length} chit${(chitsToCash || []).length === 1 ? '' : 's'} for ${res.vps} VP`,
+      icon: broughtHome ? '💰' : '🎖',
+      summary: broughtHome
+        ? `Flipped ${n} chit${n === 1 ? '' : 's'} (back) for ${res.vps} VP`
+        : `${n} crewless chit${n === 1 ? '' : 's'} score face-up (front) for ${res.vps} VP`,
       undoable: false,
     });
   }
@@ -8710,6 +8760,32 @@ function renderMilestones() {
   }
   paintGlory();
 }
+// A glory chit needs a crew aboard to be retrieved / carried home.
+// Crew slots carry kind 'crew' (older records fall back to the
+// CREW id list).
+function stackHasCrew() {
+  return getRocketStack().some((s) => s.kind === 'crew' || CREW.some((c) => c.id === s.id));
+}
+
+// Card-like DOM token for a glory chit. Used in the rocket stack
+// (transit = in-transit, two-sided, needs a crew to bring home) and
+// in the LEO stack (resolved to its front/back side).
+function buildChitToken(zone, { side = null, transit = false } = {}) {
+  const sides = getChitSides(zone);
+  const el = document.createElement('div');
+  el.className = 'chit-token' + (transit ? ' chit-transit' : ` chit-${side}`);
+  const vp = transit
+    ? `${sides.front} / ${sides.back}`
+    : `+${side === 'back' ? sides.back : sides.front}`;
+  const sideLabel = transit ? 'in transit' : side;
+  el.innerHTML = `
+    <span class="chit-token-emoji" aria-hidden="true">🎖</span>
+    <span class="chit-token-zone">${esc(zone)}</span>
+    <span class="chit-token-vp">${esc(vp)} VP</span>
+    <span class="chit-token-side">${esc(sideLabel)}</span>`;
+  return el;
+}
+
 // Classify a colony's site for VP: submarine (+2) beats astrobiology
 // (+1) when a site is both (e.g. Europa). Bernal isn't a flag yet, so
 // it falls through to the default rate. Flags live on the runtime-
