@@ -239,6 +239,10 @@
                     <button id="btn-game-move" class="primary" disabled>Move</button>
                     <button id="btn-game-endturn" disabled>End turn</button>
                   </div>
+                  <div class="hud-actions">
+                    <button id="btn-game-undo" disabled title="Take back your last move (until you roll or end your turn)">&#8634; Undo</button>
+                    <button id="btn-game-redo" disabled title="Redo a taken-back move">&#8635; Redo</button>
+                  </div>
                   <div id="hud-move-error" class="hud-error"></div>
                 </div>
                 <div class="hud-section">
@@ -246,7 +250,11 @@
                   <ul id="hud-roster" class="hud-roster"></ul>
                 </div>
                 <div class="hud-section">
-                  <h3>Log</h3>
+                  <div class="hud-log-head">
+                    <h3>Log</h3>
+                    <button id="btn-return-live" class="hidden">&#9679; Return to live</button>
+                  </div>
+                  <div id="hud-review-note" class="hud-review-note hidden"></div>
                   <ul id="hud-log" class="hud-log"></ul>
                 </div>
               </aside>

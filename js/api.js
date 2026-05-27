@@ -151,8 +151,13 @@ export async function submitGameOp(id, op, token) {
 }
 
 export async function getGameOps(id, { after } = {}, token) {
-  const qs = after ? '?after=' + after : '';
+  const qs = (after != null) ? '?after=' + after : '';
   return call('GET', `/games/${id}/ops${qs}`, { token });
+}
+
+// Read-only board snapshot at a given op seq (history review).
+export async function getGameState(id, seq, token) {
+  return call('GET', `/games/${id}/states/${seq}`, { token });
 }
 
 // ----- Chat -----

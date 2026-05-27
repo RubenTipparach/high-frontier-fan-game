@@ -5,28 +5,40 @@
 // broadcasting the resulting snapshot over the game:<id> WS channel.
 // This module mirrors that snapshot, renders the shared map (the
 // "clean" data/sites.js graph, whose site ids match what the server
-// validates moves against), and exposes the two ops wired so far:
-// MOVE (tap a site, then Move) and END_TURN.
+// validates moves against), and exposes the ops wired so far: MOVE,
+// END_TURN, and functional UNDO / REDO.
 //
-// Hidden information: the snapshot is open today (empty hands until the
-// BUILD op lands). When hands fill, the server will redact per-player
-// and this renderer just shows whatever it is handed.
+// Two history surfaces:
+//   - Functional undo/redo: real, broadcast state changes the active
+//     player makes within their own turn, up to the dice-roll barrier
+//     and before END_TURN commits. Opponents see them.
+//   - Review (read-only): scrub the git-style op log back to the start
+//     by fetching the snapshot at any seq. Purely local; emits nothing
+//     and never pulls you out of live until you press Return to live.
 
 import { loadCleanMap } from './clean-map.js';
 import { MapRenderer } from './render.js';
 import { findPath } from './nav.js';
 import { ws } from '../ws.js';
-import { getGame, submitGameOp, getGameOps } from '../api.js';
+import { getGame, submitGameOp, getGameOps, getGameState } from '../api.js';
 
 let _gameId = null;
 let _me = null;            // { id, name, token }
 let _onToast = null;
 let _data = null;          // clean-map graph
 let _renderer = null;
-let _state = null;         // engine state snapshot
+
+let _state = null;         // live engine state snapshot
 let _players = [];         // frozen roster [{ profileId, name, seat, color }]
-let _seq = -1;             // last applied op seq
+let _seq = -1;             // last applied op seq (live)
+let _committedSeq = 0;     // undo floor (last END_TURN)
+let _ops = [];             // reflog entries [{ seq, kind, log, profileName }]
 let _pending = null;       // { toSiteId, path } selected move
+
+let _reviewSeq = null;     // null = live; otherwise the seq being reviewed
+let _reviewState = null;   // fetched snapshot for review
+let _newWhileReview = 0;   // ops that landed live while reviewing
+
 let _offWS = null;
 let _busy = false;
 
@@ -36,8 +48,6 @@ export async function mountNetGame({ gameId, me, onToast }) {
   _me = me;
   _onToast = onToast || (() => {});
 
-  // Subscribe before the first fetch so we don't miss an update that
-  // lands between load and render.
   const channel = 'game:' + gameId;
   ws.subscribe(channel);
   const off = ws.on('game_update', onGameUpdate);
@@ -64,16 +74,13 @@ export async function mountNetGame({ gameId, me, onToast }) {
   }
   applyView(r.data.game);
 
-  // Seed the log panel with recent history so a player who joins late
-  // sees what happened.
-  const ops = await getGameOps(gameId, {}, me.token);
-  if (ops.ok) setLogFromOps(ops.data.entries);
+  // Whole reflog (after=-1 includes the seq-0 START) so review can
+  // scrub to the opening board.
+  const ops = await getGameOps(gameId, { after: -1 }, me.token);
+  if (ops.ok) _ops = ops.data.entries.slice();
 
   if (host) host.innerHTML = '';
-  _renderer = new MapRenderer(host, {
-    data,
-    onSelect: onSiteSelect,
-  });
+  _renderer = new MapRenderer(host, { data, onSelect: onSiteSelect });
   render();
 }
 
@@ -84,7 +91,12 @@ export function unmountNetGame() {
   _state = null;
   _players = [];
   _seq = -1;
+  _committedSeq = 0;
+  _ops = [];
   _pending = null;
+  _reviewSeq = null;
+  _reviewState = null;
+  _newWhileReview = 0;
   _busy = false;
   const host = document.getElementById('game-map');
   if (host) host.innerHTML = '';
@@ -94,23 +106,37 @@ export function unmountNetGame() {
 
 function applyView(view) {
   if (!view) return;
-  // Ignore stale broadcasts (an op we already applied via the REST
-  // response). seq is monotonic.
-  if (typeof view.seq === 'number' && view.seq < _seq) return;
+  if (typeof view.seq === 'number' && view.seq < _seq) return; // stale broadcast
   _state = view.state;
   _players = view.players || [];
   _seq = typeof view.seq === 'number' ? view.seq : _seq;
+  if (typeof view.committedSeq === 'number') _committedSeq = view.committedSeq;
+}
+
+function addOp(entry) {
+  if (!entry || typeof entry.seq !== 'number') return;
+  if (_ops.some((o) => o.seq === entry.seq)) return; // dedupe (REST + WS)
+  _ops.push(entry);
 }
 
 function onGameUpdate(msg) {
   if (!msg || msg.gameId !== _gameId) return;
   if (typeof msg.seq === 'number' && msg.seq <= _seq) return;
   applyView(msg.game);
-  if (msg.op && msg.op.log) appendLog(msg.op.log);
-  // A move/turn-pass may move our ship or change whose turn it is;
-  // clear any stale pending selection that no longer makes sense.
-  if (_pending && me() && !isMyTurn()) clearPending();
-  render();
+  if (msg.op) {
+    const who = _players.find((p) => p.profileId === msg.op.profileId);
+    addOp({ seq: msg.op.seq, kind: msg.op.kind, log: msg.op.log, profileName: who ? who.name : '' });
+  }
+  if (_pending && !isMyTurn()) clearPending();
+  if (_reviewSeq != null) {
+    // Reviewing history: don't yank the player out; just note that live
+    // moved on and refresh the log so the new entry is scrubbable.
+    _newWhileReview += 1;
+    renderReflog();
+    renderReviewControls();
+  } else {
+    render();
+  }
 }
 
 function me() {
@@ -123,11 +149,23 @@ function isMyTurn() {
   const c = currentPlayer();
   return !!c && c.profileId === _me.id;
 }
+function reviewing() { return _reviewSeq != null; }
+
+// Whether the most recent turn action can be unwound: there is one and
+// it did not consume a die roll (the barrier).
+function canUndo() {
+  if (!_state || !_state.turnActions || !_state.turnActions.length) return false;
+  const last = _state.turnActions[_state.turnActions.length - 1];
+  return !last.rolled;
+}
+function canRedo() {
+  return !!(_state && _state.turnRedo && _state.turnRedo.length);
+}
 
 // ----- map interaction -----
 
 function onSiteSelect(site) {
-  if (!site || site.isDecorative || !_state) return;
+  if (reviewing() || !site || site.isDecorative || !_state) return;
   const myp = me();
   if (!myp) return;
   const from = myp.rocket.siteId;
@@ -155,39 +193,61 @@ function clearPending() {
 
 // ----- ops -----
 
-async function doMove() {
-  if (_busy || !_pending || !isMyTurn()) return;
+async function submitOp(op) {
+  if (_busy || reviewing()) return;
   _busy = true;
   updateButtons();
   setError('');
-  const r = await submitGameOp(_gameId, { kind: 'MOVE', toSiteId: _pending.toSiteId }, _me.token);
+  const r = await submitGameOp(_gameId, op, _me.token);
   _busy = false;
   if (!r.ok) {
     setError(humanizeOpError(r.error));
     updateButtons();
-    return;
+    return false;
   }
   applyView(r.data.game);
-  if (r.data.log) appendLog(r.data.log);
-  clearPending();
-  render();
+  addOp({ seq: r.data.seq, kind: op.kind, log: r.data.log, profileName: _me.name });
+  return true;
 }
 
-async function doEndTurn() {
-  if (_busy || !isMyTurn()) return;
-  _busy = true;
-  updateButtons();
-  setError('');
-  const r = await submitGameOp(_gameId, { kind: 'END_TURN' }, _me.token);
-  _busy = false;
-  if (!r.ok) {
-    setError(humanizeOpError(r.error));
-    updateButtons();
-    return;
+async function doMove() {
+  if (!_pending || !isMyTurn()) return;
+  const target = _pending.toSiteId;
+  if (await submitOp({ kind: 'MOVE', toSiteId: target })) {
+    clearPending();
+    render();
   }
-  applyView(r.data.game);
-  if (r.data.log) appendLog(r.data.log);
+}
+async function doEndTurn() {
+  if (!isMyTurn()) return;
+  if (await submitOp({ kind: 'END_TURN' })) { clearPending(); render(); }
+}
+async function doUndo() {
+  if (!isMyTurn() || !canUndo()) return;
+  if (await submitOp({ kind: 'UNDO' })) { clearPending(); render(); }
+}
+async function doRedo() {
+  if (!isMyTurn() || !canRedo()) return;
+  if (await submitOp({ kind: 'REDO' })) { clearPending(); render(); }
+}
+
+// ----- history review (read-only) -----
+
+async function enterReview(seq) {
+  if (seq === _seq) { returnToLive(); return; } // tapping the live tip = back to live
+  const r = await getGameState(_gameId, seq, _me.token);
+  if (!r.ok) { _onToast('Could not load that point in history.', 'error'); return; }
+  _reviewSeq = seq;
+  _reviewState = r.data.state;
+  _newWhileReview = 0;
   clearPending();
+  renderReview();
+}
+
+function returnToLive() {
+  _reviewSeq = null;
+  _reviewState = null;
+  _newWhileReview = 0;
   render();
 }
 
@@ -195,19 +255,41 @@ async function doEndTurn() {
 
 function render() {
   if (!_state) return;
+  if (reviewing()) { renderReview(); return; }
   const myp = me();
   if (_renderer && myp) _renderer.setPlayerShipId(myp.rocket.siteId);
-  renderBanner();
-  renderRoster();
+  renderBanner(_state, false);
+  renderRoster(_state);
   renderMoveInfo();
+  renderReflog();
+  renderReviewControls();
   updateButtons();
 }
 
-function renderBanner() {
+function renderReview() {
+  const st = _reviewState;
+  if (!st) return;
+  const myp = st.players.find((p) => p.profileId === _me.id);
+  if (_renderer && myp) _renderer.setPlayerShipId(myp.rocket.siteId);
+  if (_renderer) { _renderer.setRoute(null); _renderer.setRouteEndpoints(null, null); }
+  renderBanner(st, true);
+  renderRoster(st);
+  setMoveInfo('Reviewing history (read-only). Return to live to act.', false);
+  renderReflog();
+  renderReviewControls();
+  updateButtons();
+}
+
+function renderBanner(st, isReview) {
   const el = document.getElementById('game-turn-banner');
   if (!el) return;
-  const c = currentPlayer();
-  const slot = `round ${_state.round} · slot ${_state.turn}`;
+  const slot = `round ${st.round} · slot ${st.turn}`;
+  if (isReview) {
+    el.textContent = `Reviewing seq ${_reviewSeq} (${slot})`;
+    el.className = 'game-turn-banner reviewing';
+    return;
+  }
+  const c = st.players[st.activeIndex];
   if (isMyTurn()) {
     el.textContent = `Your turn (${slot})`;
     el.className = 'game-turn-banner your-turn';
@@ -217,12 +299,12 @@ function renderBanner() {
   }
 }
 
-function renderRoster() {
+function renderRoster(st) {
   const ul = document.getElementById('hud-roster');
   if (!ul) return;
   ul.innerHTML = '';
-  const activeId = currentPlayer()?.profileId;
-  for (const p of _state.players) {
+  const activeId = st.players[st.activeIndex]?.profileId;
+  for (const p of st.players) {
     const site = _data.byId[p.rocket.siteId];
     const li = document.createElement('li');
     if (p.profileId === activeId) li.classList.add('active');
@@ -269,17 +351,21 @@ function setError(text) {
 }
 
 function updateButtons() {
+  const rev = reviewing();
+  const myTurn = !rev && isMyTurn();
+  const myp = me();
   const moveBtn = document.getElementById('btn-game-move');
   const endBtn = document.getElementById('btn-game-endturn');
-  const myTurn = isMyTurn();
-  const myp = me();
+  const undoBtn = document.getElementById('btn-game-undo');
+  const redoBtn = document.getElementById('btn-game-redo');
   if (moveBtn) {
-    const canMove = !!(myTurn && !_busy && _pending && myp
+    moveBtn.disabled = !(myTurn && !_busy && _pending && myp
       && myp.movesRemaining > 0
       && _pending.path.totalBurns <= myp.rocket.tank);
-    moveBtn.disabled = !canMove;
   }
   if (endBtn) endBtn.disabled = !(myTurn && !_busy);
+  if (undoBtn) undoBtn.disabled = !(myTurn && !_busy && canUndo());
+  if (redoBtn) redoBtn.disabled = !(myTurn && !_busy && canRedo());
 }
 
 let _hudBound = false;
@@ -288,28 +374,43 @@ function bindHudButtons() {
   _hudBound = true;
   document.getElementById('btn-game-move')?.addEventListener('click', doMove);
   document.getElementById('btn-game-endturn')?.addEventListener('click', doEndTurn);
+  document.getElementById('btn-game-undo')?.addEventListener('click', doUndo);
+  document.getElementById('btn-game-redo')?.addEventListener('click', doRedo);
+  document.getElementById('btn-return-live')?.addEventListener('click', returnToLive);
 }
 
-// ----- log -----
+// ----- reflog (clickable history) -----
 
-function appendLog(line) {
-  const ul = document.getElementById('hud-log');
-  if (!ul || !line) return;
-  const li = document.createElement('li');
-  li.textContent = line;
-  ul.insertBefore(li, ul.firstChild);
-  while (ul.children.length > 40) ul.removeChild(ul.lastChild);
-}
-
-function setLogFromOps(entries) {
+function renderReflog() {
   const ul = document.getElementById('hud-log');
   if (!ul) return;
   ul.innerHTML = '';
+  // Newest-first. Each entry is a point in history you can review.
+  const entries = _ops.slice().sort((a, b) => b.seq - a.seq);
   for (const e of entries) {
-    if (!e.log) continue;
     const li = document.createElement('li');
-    li.textContent = e.log;
-    ul.insertBefore(li, ul.firstChild);
+    li.className = 'reflog-entry kind-' + String(e.kind || '').toLowerCase();
+    if (e.seq === _reviewSeq) li.classList.add('reviewing');
+    if (!reviewing() && e.seq === _seq) li.classList.add('live-tip');
+    li.textContent = e.log || e.kind;
+    li.title = `seq ${e.seq}: click to review this point`;
+    li.addEventListener('click', () => enterReview(e.seq));
+    ul.appendChild(li);
+  }
+}
+
+function renderReviewControls() {
+  const btn = document.getElementById('btn-return-live');
+  const note = document.getElementById('hud-review-note');
+  if (btn) {
+    btn.classList.toggle('hidden', !reviewing());
+    btn.textContent = _newWhileReview > 0
+      ? `● Return to live (${_newWhileReview} new)`
+      : '● Return to live';
+  }
+  if (note) {
+    note.classList.toggle('hidden', !reviewing());
+    if (reviewing()) note.textContent = 'Read-only. Nothing here changes the game.';
   }
 }
 
@@ -321,6 +422,9 @@ function humanizeOpError(code) {
     no_route: 'No route to that site.',
     unknown_site: 'Unknown site.',
     already_here: 'Your ship is already there.',
+    nothing_to_undo: 'Nothing to undo.',
+    nothing_to_redo: 'Nothing to redo.',
+    roll_blocks_undo: 'Can\'t undo past a dice roll.',
     game_not_active: 'This game has ended.',
     not_a_player: 'You are not in this game.',
     unknown_op: 'Unsupported operation.',

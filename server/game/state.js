@@ -121,7 +121,7 @@ export function createInitialState({ players, seed }) {
   const gen = makeRng(seed, 0);
   const decks = buildShuffledDecks(gen);
   return {
-    version: 1,
+    version: 2,
     seed,
     rng: { cursor: gen.cursor },
     status: 'active',
@@ -129,6 +129,13 @@ export function createInitialState({ players, seed }) {
     round: 1,
     lastEvent: null,
     activeIndex: 0,
+    // Per-turn functional-op stacks for undo/redo. Only the active
+    // player has an in-progress turn, so these live at the top level
+    // and reset every time a turn passes (see engine END_TURN). They
+    // hold tiny op descriptors ({ kind, payload, rolled }), never
+    // nested snapshots, so the state blob stays flat.
+    turnActions: [],
+    turnRedo: [],
     decks,
     discs: {},
     factories: {},

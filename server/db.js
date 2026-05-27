@@ -146,6 +146,7 @@ db.exec(`
     lobby_id     INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
     seed         INTEGER NOT NULL,
     status       TEXT NOT NULL DEFAULT 'active',
+    committed_seq INTEGER NOT NULL DEFAULT 0,
     created_at   INTEGER NOT NULL,
     finished_at  INTEGER
   );
@@ -181,9 +182,12 @@ db.exec(`
     updated_at   INTEGER NOT NULL
   );
 
-  -- Append-only operation log. Every applied op is recorded here in
-  -- order so the game can be replayed / audited and so a reconnecting
-  -- client can fetch just the ops it missed (seq > its last-seen).
+  -- Append-only operation log, git-style: every action (including the
+  -- seq-0 START, plus UNDO / REDO) is recorded in order with the full
+  -- state snapshot it produced (state_after). Nothing is ever deleted,
+  -- so the whole game can be reviewed at any point (the snapshot at
+  -- seq K is that row's state_after) and a reconnecting client can
+  -- fetch just the ops it missed (seq > its last-seen).
   CREATE TABLE IF NOT EXISTS game_operations (
     id           INTEGER PRIMARY KEY,
     game_id      INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
@@ -192,6 +196,7 @@ db.exec(`
     kind         TEXT NOT NULL,
     payload      TEXT,
     log          TEXT,
+    state_after  TEXT,
     created_at   INTEGER NOT NULL,
     UNIQUE(game_id, seq)
   );

@@ -7,10 +7,24 @@
 // WS layer persists the returned state and appends the op to the log;
 // the engine itself touches no I/O.
 //
-// Ops implemented this stage: MOVE, END_TURN. The vocabulary the rest
-// of the game will grow into (PROSPECT / INDUSTRIALIZE / BUILD_* /
-// AUCTION_* / DECOMMISSION / BUY_FUTURE) is documented in CLAUDE.md;
-// each lands in its own PR with its own validation here.
+// Ops are split into two classes:
+//   - FUNCTIONAL ops (MOVE, later PROSPECT/BUILD/...) change the game
+//     and are pushed onto the active player's per-turn undo stack.
+//   - META ops manage flow/history: END_TURN (commits the turn and
+//     passes control), UNDO, REDO.
+//
+// Undo/redo model (see the PR that introduced it):
+//   - Only the active player, only within their own turn, only before
+//     END_TURN (which commits) and only back as far as the most recent
+//     dice roll. A roll is detected by state.rng.cursor advancing, so
+//     an op that consumed randomness is a hard barrier: you can rewind
+//     forward-of-roll actions but never the roll itself or earlier
+//     (which would leak the now-known outcome).
+//   - UNDO/REDO recompute the state by replaying the surviving turn
+//     actions on top of the turn-base snapshot (the state at the start
+//     of this player's turn), which the caller supplies as
+//     ctx.turnBaseState. This keeps the engine pure and avoids storing
+//     nested snapshots inside the state blob.
 
 import { PATENTS_BY_ID } from '../../data/patents.js';
 import { CREW_BY_ID } from '../../data/crew.js';
@@ -106,6 +120,8 @@ function advanceClock(state) {
   }
 }
 
+// ----- functional ops (undoable) -----
+
 function applyMove(state, op, player) {
   if (player.movesRemaining <= 0) return fail('no_moves_left');
   const toSiteId = String(op.toSiteId || '');
@@ -130,17 +146,62 @@ function applyMove(state, op, player) {
   return { ok: true, state, log };
 }
 
+// Ops that change the game and ride the per-turn undo stack. Each is a
+// pure (state, op, player) -> { ok, state, log } transform; the
+// dispatcher (not the handler) maintains turnActions / turnRedo.
+const FUNCTIONAL = {
+  MOVE: applyMove,
+};
+
+function pickPayload(op) {
+  switch (op.kind) {
+    case 'MOVE': return { toSiteId: op.toSiteId };
+    default: return {};
+  }
+}
+
+function describeAction(a) {
+  if (a.kind === 'MOVE') {
+    const s = siteById(a.payload.toSiteId);
+    return `move to ${s ? s.name : a.payload.toSiteId}`;
+  }
+  return a.kind;
+}
+
+// Replay surviving turn actions on top of the turn-base snapshot. Used
+// by UNDO / REDO so recomputation always derives from a known-good
+// base rather than mutating in place. The active player does not change
+// within a turn (END_TURN is never a turn action), so currentPlayer is
+// stable across the replay.
+function rebuildFromBase(baseState, actions) {
+  const s = clone(baseState);
+  s.turnActions = [];
+  s.turnRedo = [];
+  for (const a of actions) {
+    const handler = FUNCTIONAL[a.kind];
+    if (!handler) return null;
+    const res = handler(s, { kind: a.kind, ...a.payload }, currentPlayer(s));
+    if (!res.ok) return null;
+  }
+  return s;
+}
+
+// ----- meta ops -----
+
 function applyEndTurn(state, _op, player) {
   const n = state.players.length;
   const wrapped = state.activeIndex + 1 >= n;
   state.activeIndex = (state.activeIndex + 1) % n;
 
   // The incoming player's per-turn budgets refill at the start of
-  // their turn.
+  // their turn, and the undo stacks reset (their turn opens with a
+  // clean, empty history; the prior turn is now committed).
   const next = state.players[state.activeIndex];
   next.opsRemaining = OPS_PER_TURN;
   next.movesRemaining = MOVES_PER_TURN;
   next.discardsRemaining = DISCARDS_PER_TURN;
+  state.turnActions = [];
+  state.turnRedo = [];
 
   let log = `${player.name} ended their turn.`;
   // A full pass around the table advances the shared clock once.
@@ -159,24 +220,72 @@ function applyEndTurn(state, _op, player) {
   return { ok: true, state, log };
 }
 
-const HANDLERS = {
-  MOVE: applyMove,
+function applyUndo(state, _op, player, ctx) {
+  if (!ctx || !ctx.turnBaseState) return fail('no_base');
+  if (!state.turnActions.length) return fail('nothing_to_undo');
+  const last = state.turnActions[state.turnActions.length - 1];
+  // Dice-roll barrier: an action that consumed randomness cannot be
+  // unwound (it would leak the now-known outcome). Undo stops here.
+  if (last.rolled) return fail('roll_blocks_undo');
+
+  const survivors = state.turnActions.slice(0, -1);
+  const rebuilt = rebuildFromBase(ctx.turnBaseState, survivors);
+  if (!rebuilt) return fail('undo_replay_failed');
+  rebuilt.turnActions = survivors;
+  rebuilt.turnRedo = [last, ...state.turnRedo];
+  return { ok: true, state: rebuilt, log: `${player.name} undid ${describeAction(last)}.` };
+}
+
+function applyRedo(state, _op, player, ctx) {
+  if (!ctx || !ctx.turnBaseState) return fail('no_base');
+  if (!state.turnRedo.length) return fail('nothing_to_redo');
+  const next = state.turnRedo[0];
+  const actions = [...state.turnActions, next];
+  const rebuilt = rebuildFromBase(ctx.turnBaseState, actions);
+  if (!rebuilt) return fail('redo_replay_failed');
+  rebuilt.turnActions = actions;
+  rebuilt.turnRedo = state.turnRedo.slice(1);
+  return { ok: true, state: rebuilt, log: `${player.name} redid ${describeAction(next)}.` };
+}
+
+const META = {
   END_TURN: applyEndTurn,
+  UNDO: applyUndo,
+  REDO: applyRedo,
 };
 
-// Validate + apply one operation. ctx = { profileId }. Returns
-// { ok:true, state, log } on success or { ok:false, error } on
-// rejection. Never mutates the state passed in.
+// Validate + apply one operation. ctx = { profileId, turnBaseState? }.
+// turnBaseState (the snapshot at the start of the active player's turn)
+// is required for UNDO / REDO and supplied by the caller from the op
+// log. Returns { ok:true, state, log } or { ok:false, error }. Never
+// mutates the state passed in.
 export function applyOperation(prevState, op, ctx) {
   if (!prevState || prevState.status !== 'active') return fail('game_not_active');
   if (!op || typeof op.kind !== 'string') return fail('bad_op');
-  const handler = HANDLERS[op.kind];
-  if (!handler) return fail('unknown_op');
+  const isFunctional = !!FUNCTIONAL[op.kind];
+  if (!isFunctional && !META[op.kind]) return fail('unknown_op');
   if (!isPlayersTurn(prevState, ctx.profileId)) return fail('not_your_turn');
 
   const state = clone(prevState);
   const player = currentPlayer(state);
-  return handler(state, op, player);
+
+  if (isFunctional) {
+    const cursorBefore = state.rng.cursor;
+    const res = FUNCTIONAL[op.kind](state, op, player);
+    if (!res.ok) return res;
+    // Record the action on the undo stack (a new action invalidates
+    // any pending redo), tagging whether it consumed a die roll.
+    res.state.turnActions = [
+      ...res.state.turnActions,
+      { kind: op.kind, payload: pickPayload(op), rolled: res.state.rng.cursor !== cursorBefore },
+    ];
+    res.state.turnRedo = [];
+    return res;
+  }
+  return META[op.kind](state, op, player, ctx);
 }
 
-export const SUPPORTED_OPS = Object.keys(HANDLERS);
+// Ops accepted over the wire. Functional + meta.
+export const SUPPORTED_OPS = [...Object.keys(FUNCTIONAL), ...Object.keys(META)];
+// Ops that require the caller to supply ctx.turnBaseState.
+export const NEEDS_TURN_BASE = new Set(['UNDO', 'REDO']);

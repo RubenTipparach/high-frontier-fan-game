@@ -15,7 +15,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { applyOperation, SUPPORTED_OPS } from './game/engine.js';
+import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE } from './game/engine.js';
 import { randomSeed } from './game/rng.js';
 
 const PORT = Number(process.env.PORT) || 8080;
@@ -457,10 +457,18 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
     for (const p of state.players) {
       insPlayer.run(gid, p.profileId, p.seat, p.color);
     }
+    const stateJson = JSON.stringify(state);
     db.prepare(
       `INSERT INTO game_states (game_id, state, seq, updated_at)
        VALUES (?, ?, 0, ?)`
-    ).run(gid, JSON.stringify(state), now);
+    ).run(gid, stateJson, now);
+    // Seq-0 START op carries the initial snapshot so "state at seq K"
+    // is uniform for every K (including the game's opening board, which
+    // is the first turn's undo floor / committed_seq = 0).
+    db.prepare(
+      `INSERT INTO game_operations (game_id, seq, profile_id, kind, payload, log, state_after, created_at)
+       VALUES (?, 0, ?, 'START', NULL, ?, ?, ?)`
+    ).run(gid, req.profile.id, 'Game started.', stateJson, now);
     return gid;
   })();
 
@@ -494,7 +502,7 @@ function isGamePlayer(gameId, profileId) {
 // the BUILD op lands, at which point this redacts per-player).
 function gameView(gameId) {
   const g = db
-    .prepare('SELECT id, lobby_id, status, seed, created_at, finished_at FROM games WHERE id = ?')
+    .prepare('SELECT id, lobby_id, status, seed, committed_seq, created_at, finished_at FROM games WHERE id = ?')
     .get(gameId);
   if (!g) return null;
   const st = db.prepare('SELECT state, seq, updated_at FROM game_states WHERE game_id = ?').get(gameId);
@@ -503,10 +511,20 @@ function gameView(gameId) {
     lobbyId: g.lobby_id,
     status: g.status,
     seq: st ? st.seq : 0,
+    committedSeq: g.committed_seq,
     updatedAt: st ? st.updated_at : g.created_at,
     players: gamePlayers(gameId),
     state: st ? JSON.parse(st.state) : null,
   };
+}
+
+// The state snapshot a given op produced (git-style "tree at commit").
+// Used for read-only history review and as the undo turn-base.
+function stateAtSeq(gameId, seq) {
+  const row = db
+    .prepare('SELECT state_after FROM game_operations WHERE game_id = ? AND seq = ?')
+    .get(gameId, seq);
+  return row && row.state_after ? JSON.parse(row.state_after) : null;
 }
 
 function publishGame(gameId, payload) {
@@ -535,26 +553,42 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
   const kind = String(body.kind || '');
   if (!SUPPORTED_OPS.includes(kind)) return res.status(400).json({ error: 'unknown_op' });
 
+  const meta = db.prepare('SELECT committed_seq FROM games WHERE id = ?').get(id);
   const row = db.prepare('SELECT state, seq FROM game_states WHERE game_id = ?').get(id);
-  if (!row) return res.status(404).json({ error: 'not_found' });
+  if (!row || !meta) return res.status(404).json({ error: 'not_found' });
 
   const prevState = JSON.parse(row.state);
   const op = { ...body, kind };
-  const result = applyOperation(prevState, op, { profileId: req.profile.id });
+  const ctx = { profileId: req.profile.id };
+  // UNDO / REDO recompute from the turn-base snapshot: the state at the
+  // start of the active player's turn, i.e. the committed_seq op's
+  // snapshot (the END_TURN that handed them the turn, or the seq-0
+  // START for the opening turn).
+  if (NEEDS_TURN_BASE.has(kind)) {
+    ctx.turnBaseState = stateAtSeq(id, meta.committed_seq);
+    if (!ctx.turnBaseState) return res.status(409).json({ error: 'no_turn_base' });
+  }
+  const result = applyOperation(prevState, op, ctx);
   if (!result.ok) return res.status(409).json({ error: result.error });
 
   const nextSeq = row.seq + 1;
   const now = nowMs();
+  const stateJson = JSON.stringify(result.state);
   // Persist the op payload minus the (already-recorded) kind.
   const { kind: _k, ...payload } = op;
   db.transaction(() => {
     db.prepare(
       'UPDATE game_states SET state = ?, seq = ?, updated_at = ? WHERE game_id = ?'
-    ).run(JSON.stringify(result.state), nextSeq, now, id);
+    ).run(stateJson, nextSeq, now, id);
     db.prepare(
-      `INSERT INTO game_operations (game_id, seq, profile_id, kind, payload, log, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, nextSeq, req.profile.id, kind, JSON.stringify(payload), result.log || null, now);
+      `INSERT INTO game_operations (game_id, seq, profile_id, kind, payload, log, state_after, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, nextSeq, req.profile.id, kind, JSON.stringify(payload), result.log || null, stateJson, now);
+    // END_TURN is the commit: it becomes the new undo floor (the next
+    // player can never unwind into the turn that just ended).
+    if (kind === 'END_TURN') {
+      db.prepare('UPDATE games SET committed_seq = ? WHERE id = ?').run(nextSeq, id);
+    }
     if (result.state.status === 'finished') {
       db.prepare("UPDATE games SET status = 'finished', finished_at = ? WHERE id = ?").run(now, id);
     }
@@ -600,6 +634,19 @@ app.get('/games/:id/ops', requireProfile, (req, res) => {
       createdAt: r.createdAt,
     })),
   });
+});
+
+// Read-only history review: the board state a given op produced. Local
+// to the caller's session (changes nothing, broadcasts nothing); the
+// client uses it to scrub back through the log to the start.
+app.get('/games/:id/states/:seq', requireProfile, (req, res) => {
+  const id = Number(req.params.id);
+  const seq = Number(req.params.seq);
+  if (!Number.isFinite(id) || !Number.isFinite(seq)) return res.status(400).json({ error: 'bad_id' });
+  if (!isGamePlayer(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+  const state = stateAtSeq(id, seq);
+  if (!state) return res.status(404).json({ error: 'not_found' });
+  res.json({ seq, state });
 });
 
 // ----- Invite links -----
