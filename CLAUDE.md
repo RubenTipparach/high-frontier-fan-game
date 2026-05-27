@@ -275,6 +275,14 @@ and `js/game/`. Authoritative tables in `data/`:
   deck is shuffled per game from a seeded RNG so replays match.
 - `data/glory.js` - glory cards (first-to-X awards).
 
+**The server engine mirrors the sandbox.** Other than the auction
+(built fresh server-side) and the future M0 + trading mechanics, almost
+all of the stack, build, transfer, and move logic is the same as the
+single-player sandbox (`js/game/*`, e.g. `stacks.js`, `rocket.js`,
+`hand.js`). Don't re-derive those rules on the server; port the sandbox
+logic so the two modes stay in lockstep. `server/game/state.js` already
+carries the same per-player shape for exactly this reason.
+
 Server-authoritative engine in `server/game/engine.js`:
 
 - Round structure: **Income → Operations (each player, 4 ops) →

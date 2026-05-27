@@ -13,6 +13,7 @@
 //     discs                             { [siteId]: {outcome, ownerId, ts} } (discs.js)
 //     factories                         { [siteId]: {ownerId, spectralType} } (factories.js)
 //     colonies                          { [siteId]: {ownerId} }
+//     auction                           open competitive auction | null
 //     players[]                         ordered by seat
 //     activeIndex                       whose turn it is (async turn passing)
 //     status                            'active' | 'finished'
@@ -27,9 +28,9 @@
 //     glory    { chits:[], claimed:[], visited:[], vps }
 //     opsRemaining / movesRemaining / discardsRemaining
 //
-// Only MOVE + END_TURN mutate this today (engine.js); the rest of the
-// shape is carried now so later ops (BUILD / PROSPECT / AUCTION) slot
-// in without a schema migration.
+// MOVE, END_TURN, and the AUCTION ops mutate this today (engine.js);
+// the rest of the shape is carried now so later ops (BUILD / PROSPECT)
+// slot in without a schema migration.
 
 import { PATENTS } from '../../data/patents.js';
 import { makeRng, shuffle } from './rng.js';
@@ -140,6 +141,7 @@ export function createInitialState({ players, seed }) {
     discs: {},
     factories: {},
     colonies: {},
+    auction: null,
     players: ordered.map((p, i) =>
       freshPlayer({
         profileId: p.profileId,

@@ -31,7 +31,7 @@ import { CREW_BY_ID } from '../../data/crew.js';
 import { siteById, findPath } from './graph.js';
 import { makeRng } from './rng.js';
 import {
-  SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS,
+  SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
   currentPlayer, isPlayersTurn,
 } from './state.js';
@@ -254,6 +254,224 @@ const META = {
   REDO: applyRedo,
 };
 
+// ----- auction ops (competitive, built fresh server-side) -----
+//
+// The auction is the one mechanic NOT ported from the sandbox (whose
+// auction is a solo "win the deck top immediately" draw). Flow:
+//   AUCTION_START  auctioneer spends 1 op and reserves a deck-top lot.
+//   AUCTION_BID / AUCTION_PASS  the OTHER players bid ascending. A new
+//     high reopens the floor (passes clear) so everyone gets a say.
+//     When every other player has passed, control goes to the
+//     auctioneer.
+//   AUCTION_SELL  auctioneer accepts the high bid: the winner pays the
+//     auctioneer that many aqua and takes the lot.
+//   AUCTION_JOIN  auctioneer bids >= the current high (matching is
+//     allowed). This reopens a fresh round so every other player can
+//     bid again, looping until they all pass. If the auctioneer is the
+//     standing high bid when that happens, they keep the lot and pay
+//     the bank (the aqua leaves play; free if nobody ever bid).
+// The won lot plus one card off the top of each of its support decks
+// (supportBonusDecks, ported from js/game/decks.js) land in the
+// winner's hand.
+
+// supportBonusDecks port: map a card's `requires` kinds to deck types
+// by supplier prefix (OR-alternatives within a prefix collapse to one
+// draw); abstract kinds that aren't grounded in a deck contribute none.
+const KIND_PREFIX_TO_DECK = {
+  reactor: 'reactor', gen: 'generator', radiator: 'radiator',
+  refinery: 'refinery', robonaut: 'robonaut', thruster: 'thruster',
+};
+function requireKindToDeckType(kind) {
+  if (!kind) return null;
+  return KIND_PREFIX_TO_DECK[String(kind).split('-')[0]] || null;
+}
+function supportBonusDecks(card) {
+  if (!card) return [];
+  const f = (card.faces && card.faces.primary) || card;
+  const requires = Array.isArray(f.requires) ? f.requires : (card.requires || []);
+  const out = new Set();
+  for (const r of requires) {
+    const t = requireKindToDeckType(r && r.kind);
+    if (t) out.add(t);
+  }
+  return [...out];
+}
+
+function playerByProfile(state, profileId) {
+  return state.players.find((p) => p.profileId === profileId) || null;
+}
+
+// Push the reserved lot + one card off the top of each support deck
+// into the winner's hand. Returns { card, cardId, bonusIds } for logs.
+function awardLot(state, winner) {
+  const { cardId } = state.auction;
+  winner.hand.push(cardId);
+  const card = PATENTS_BY_ID[cardId];
+  const bonusIds = [];
+  for (const t of supportBonusDecks(card)) {
+    const deck = state.decks[t];
+    if (deck && deck.length) bonusIds.push(deck.shift());
+  }
+  for (const id of bonusIds) winner.hand.push(id);
+  return { card, cardId, bonusIds };
+}
+
+function bonusNote(bonusIds) {
+  if (!bonusIds.length) return '';
+  const names = bonusIds.map((id) => (PATENTS_BY_ID[id] && PATENTS_BY_ID[id].name) || id);
+  return ` Bonus: ${names.join(', ')}.`;
+}
+
+// True once every non-auctioneer player except the current high bidder
+// has passed: nobody left who could raise, so the round is settled.
+function biddersRoundComplete(state) {
+  const a = state.auction;
+  const toAct = state.players.filter(
+    (p) => p.profileId !== a.auctioneerId && p.profileId !== a.highBidderId
+  );
+  return toAct.every((p) => a.passed.includes(p.profileId));
+}
+
+// Auctioneer wins the lot: pay the high bid to the bank (aqua leaves
+// play; 0 when nobody bid) and award the lot. Closes the auction.
+function resolveKeep(state, log) {
+  const a = state.auction;
+  const auctioneer = playerByProfile(state, a.auctioneerId);
+  const paid = a.highBid;
+  auctioneer.aqua -= paid;
+  const awarded = awardLot(state, auctioneer);
+  state.auction = null;
+  const name = awarded.card ? awarded.card.name : awarded.cardId;
+  const tail = paid > 0 ? ` and paid ${paid} aqua to the bank` : ' unopposed';
+  return {
+    ok: true, state,
+    log: `${log} ${auctioneer.name} kept ${name}${tail}.${bonusNote(awarded.bonusIds)}`,
+  };
+}
+
+// After a bid or pass, settle the round: auctioneer keeps (they hold
+// the high bid), hand them the sell/join decision, or leave bidding open.
+function settleBidders(state, log) {
+  const a = state.auction;
+  if (!biddersRoundComplete(state)) return { ok: true, state, log };
+  if (a.highBidderId === a.auctioneerId) return resolveKeep(state, log);
+  a.awaiting = 'auctioneer';
+  const tail = a.highBidderId
+    ? ` High bid ${a.highBid} aqua; the auctioneer decides.`
+    : ' No bids; the auctioneer decides.';
+  return { ok: true, state, log: log + tail };
+}
+
+function applyAuctionStart(state, op, ctx) {
+  if (state.auction) return fail('auction_in_progress');
+  const player = currentPlayer(state);
+  if (!player || player.profileId !== ctx.profileId) return fail('not_your_turn');
+  if (state.players.length < 2) return fail('need_opponent');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  const deckType = String(op.deckType || '');
+  if (!DECK_TYPES.includes(deckType)) return fail('bad_deck');
+  const deck = state.decks[deckType];
+  if (!deck || !deck.length) return fail('deck_empty');
+
+  const cardId = deck.shift();
+  player.opsRemaining -= 1;
+  state.auction = {
+    deckType, cardId,
+    auctioneerId: player.profileId,
+    highBid: 0, highBidderId: null,
+    passed: [], awaiting: 'bidders',
+  };
+  // Opening commits prior turn actions: undo must not span an auction
+  // (it moves other players' aqua / decks / hands, none of which the
+  // undo replay would restore).
+  state.turnActions = [];
+  state.turnRedo = [];
+  const card = PATENTS_BY_ID[cardId];
+  return { ok: true, state, log: `${player.name} put ${card ? card.name : cardId} up for auction.` };
+}
+
+function applyAuctionBid(state, op, ctx) {
+  const a = state.auction;
+  if (!a) return fail('no_auction');
+  if (a.awaiting !== 'bidders') return fail('not_bidding_phase');
+  const bidder = playerByProfile(state, ctx.profileId);
+  if (!bidder) return fail('not_a_player');
+  if (bidder.profileId === a.auctioneerId) return fail('auctioneer_cannot_bid');
+  const amount = Number(op.amount);
+  if (!Number.isInteger(amount) || amount <= 0) return fail('bad_amount');
+  if (amount <= a.highBid) return fail('bid_too_low');
+  if (amount > bidder.aqua) return fail('insufficient_aqua');
+
+  a.highBid = amount;
+  a.highBidderId = bidder.profileId;
+  a.passed = []; // a new high reopens the floor to the other bidders
+  return settleBidders(state, `${bidder.name} bid ${amount} aqua.`);
+}
+
+function applyAuctionPass(state, op, ctx) {
+  const a = state.auction;
+  if (!a) return fail('no_auction');
+  if (a.awaiting !== 'bidders') return fail('not_bidding_phase');
+  const passer = playerByProfile(state, ctx.profileId);
+  if (!passer) return fail('not_a_player');
+  if (passer.profileId === a.auctioneerId) return fail('auctioneer_cannot_pass');
+  if (passer.profileId === a.highBidderId) return fail('cannot_pass_leading');
+  if (!a.passed.includes(passer.profileId)) a.passed.push(passer.profileId);
+  return settleBidders(state, `${passer.name} passed.`);
+}
+
+function applyAuctionJoin(state, op, ctx) {
+  const a = state.auction;
+  if (!a) return fail('no_auction');
+  if (a.awaiting !== 'auctioneer') return fail('not_auctioneer_phase');
+  if (ctx.profileId !== a.auctioneerId) return fail('not_auctioneer');
+  const auctioneer = playerByProfile(state, a.auctioneerId);
+  const amount = Number(op.amount);
+  if (!Number.isInteger(amount) || amount < 0) return fail('bad_amount');
+  if (amount < a.highBid) return fail('must_match_or_raise');
+  if (amount > auctioneer.aqua) return fail('insufficient_aqua');
+
+  a.highBid = amount;
+  a.highBidderId = a.auctioneerId;
+  a.passed = [];
+  a.awaiting = 'bidders';
+  return {
+    ok: true, state,
+    log: `${auctioneer.name} joined the bidding at ${amount} aqua; another round opens.`,
+  };
+}
+
+function applyAuctionSell(state, op, ctx) {
+  const a = state.auction;
+  if (!a) return fail('no_auction');
+  if (a.awaiting !== 'auctioneer') return fail('not_auctioneer_phase');
+  if (ctx.profileId !== a.auctioneerId) return fail('not_auctioneer');
+  if (!a.highBidderId || a.highBidderId === a.auctioneerId) return fail('no_bid_to_accept');
+  const auctioneer = playerByProfile(state, a.auctioneerId);
+  const winner = playerByProfile(state, a.highBidderId);
+  if (!winner) return fail('winner_gone');
+  const price = a.highBid;
+  if (winner.aqua < price) return fail('winner_cannot_pay');
+
+  winner.aqua -= price;
+  auctioneer.aqua += price;
+  const awarded = awardLot(state, winner);
+  state.auction = null;
+  const name = awarded.card ? awarded.card.name : awarded.cardId;
+  return {
+    ok: true, state,
+    log: `${winner.name} won ${name} for ${price} aqua, paid to ${auctioneer.name}.${bonusNote(awarded.bonusIds)}`,
+  };
+}
+
+const AUCTION = {
+  AUCTION_START: applyAuctionStart,
+  AUCTION_BID: applyAuctionBid,
+  AUCTION_PASS: applyAuctionPass,
+  AUCTION_JOIN: applyAuctionJoin,
+  AUCTION_SELL: applyAuctionSell,
+};
+
 // Validate + apply one operation. ctx = { profileId, turnBaseState? }.
 // turnBaseState (the snapshot at the start of the active player's turn)
 // is required for UNDO / REDO and supplied by the caller from the op
@@ -262,8 +480,17 @@ const META = {
 export function applyOperation(prevState, op, ctx) {
   if (!prevState || prevState.status !== 'active') return fail('game_not_active');
   if (!op || typeof op.kind !== 'string') return fail('bad_op');
+
+  // Auction ops are a third class: bids/passes are sent by non-active
+  // players, so they bypass the turn guard below and each handler
+  // validates its own caller against the auction roles.
+  if (AUCTION[op.kind]) return AUCTION[op.kind](clone(prevState), op, ctx);
+
   const isFunctional = !!FUNCTIONAL[op.kind];
   if (!isFunctional && !META[op.kind]) return fail('unknown_op');
+  // An open auction freezes every other op (MOVE / END_TURN / undo)
+  // until the lot resolves.
+  if (prevState.auction) return fail('auction_in_progress');
   if (!isPlayersTurn(prevState, ctx.profileId)) return fail('not_your_turn');
 
   const state = clone(prevState);
@@ -285,7 +512,9 @@ export function applyOperation(prevState, op, ctx) {
   return META[op.kind](state, op, player, ctx);
 }
 
-// Ops accepted over the wire. Functional + meta.
-export const SUPPORTED_OPS = [...Object.keys(FUNCTIONAL), ...Object.keys(META)];
+// Ops accepted over the wire. Functional + meta + auction.
+export const SUPPORTED_OPS = [
+  ...Object.keys(FUNCTIONAL), ...Object.keys(META), ...Object.keys(AUCTION),
+];
 // Ops that require the caller to supply ctx.turnBaseState.
 export const NEEDS_TURN_BASE = new Set(['UNDO', 'REDO']);
