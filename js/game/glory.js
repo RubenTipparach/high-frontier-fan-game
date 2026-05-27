@@ -27,10 +27,11 @@
 //   getVps()                            → number
 //   getChitVpValue(zone, side='back')   → number
 //   getChitSides(zone)                  → {front, back}
-//   awardChitForZone(zone, turn)        → chit | null
+//   awardChitForZone(zone, turn, crewId)→ chit | null
 //   revokeChitForZone(zone)             → boolean
-//   cashInChits(reason)                 → {vps, chits}  (BACK side)
-//   resolveChitsFront(reason)           → {vps, chits}  (FRONT side)
+//   cashInChits(reason)                 → {vps, chits}  (BACK side, all)
+//   resolveChitsFront(reason)           → {vps, chits}  (FRONT side, all)
+//   resolveChitsForCrew(crewId, side)   → {vps, chits}  (one crew's chits)
 //   addVps(delta, reason)               - additive (event d6 outcomes)
 //   onChange(cb)                        - unsubscribe
 
@@ -119,16 +120,16 @@ export function getChitVpValue(zone, side = 'back') {
   return side === 'front' ? sides.front : sides.back;
 }
 
-// First-time entry into a heliocentric zone earns one chit. Earth
-// is the home zone and never awards. Returns the chit record on
-// success or null when nothing happened (already-visited, Earth,
-// missing zone). Idempotent on re-entry of an already-visited zone.
-export function awardChitForZone(zone, turn = null) {
+// First-time entry into a heliocentric zone earns one chit, owned
+// by the crew that retrieved it (crewId). Earth is the home zone and
+// never awards. Returns the chit record on success or null when
+// nothing happened (already-visited, Earth, missing zone).
+export function awardChitForZone(zone, turn = null, crewId = null) {
   if (!zone || zone === 'Earth') return null;
   if (_visited.has(zone)) return null;
   if (!Object.prototype.hasOwnProperty.call(ZONE_CHIT_VPS, zone)) return null;
   _visited.add(zone);
-  const chit = { zone, earnedTurn: turn };
+  const chit = { zone, earnedTurn: turn, crewId: crewId || null };
   _chits.push(chit);
   persist();
   notify();
@@ -177,13 +178,33 @@ function _resolveCarried(side, reason) {
   for (const c of carried) {
     const vp = getChitVpValue(c.zone, side);
     gained += vp;
-    _claimed.push({ zone: c.zone, side, vp, turn: c.earnedTurn ?? null });
+    _claimed.push({ zone: c.zone, side, vp, turn: c.earnedTurn ?? null, crewId: c.crewId ?? null });
   }
   _chits = [];
   _vps += gained;
   persist();
   notify();
   return { vps: gained, chits: carried, reason, side };
+}
+
+// Resolve only the chits owned by one crew (used when that crew
+// leaves the rocket: colonises or dies). Other crews' chits stay
+// carried. Defaults to the FRONT (face-up) value.
+export function resolveChitsForCrew(crewId, side = 'front', reason = 'crew left the rocket') {
+  if (!crewId) return { vps: 0, chits: [], reason, side };
+  const matched = _chits.filter((c) => c.crewId === crewId);
+  if (!matched.length) return { vps: 0, chits: [], reason, side };
+  let gained = 0;
+  for (const c of matched) {
+    const vp = getChitVpValue(c.zone, side);
+    gained += vp;
+    _claimed.push({ zone: c.zone, side, vp, turn: c.earnedTurn ?? null, crewId: c.crewId ?? null });
+  }
+  _chits = _chits.filter((c) => c.crewId !== crewId);
+  _vps += gained;
+  persist();
+  notify();
+  return { vps: gained, chits: matched, reason, side };
 }
 
 // Restore previously-resolved chits (undo support for the auto-

@@ -4501,6 +4501,14 @@ body:has(#view-browse:not(.hidden)) #main {
   letter-spacing: 0.5px;
   color: var(--muted, #94a3b8);
 }
+.chit-token .chit-token-owner {
+  font-size: 9px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #93c5fd;
+}
 /* Resolved sides: solid border, amber for the valuable back. */
 .chit-token.chit-back {
   border-style: solid;
