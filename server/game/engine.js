@@ -109,6 +109,34 @@ function clipTank(rocket) {
   if (rocket.tank > cap) rocket.tank = cap;
 }
 
+// Prospect threshold by site class (mirror of browse.js#siteProspectThreshold
+// resolved against data/sites.js, which carries only `class`). Success is
+// a single d6 roll AT OR BELOW the threshold, so a higher class is easier.
+const PROSPECT_CLASS_THRESHOLD = { A: 3, B: 5, C: 7, D: 9 };
+function prospectThreshold(site) {
+  return PROSPECT_CLASS_THRESHOLD[String(site.class || '').toUpperCase()] || 4;
+}
+function faceProps(slot) {
+  const f = slotFace(slot);
+  return (f && Array.isArray(f.properties)) ? f.properties : [];
+}
+// Prospector kind from a slot's active face (mirror of
+// rocket.js#getProspectorKind): first of raygun / missile / buggy present.
+function prospectorKind(slot) {
+  const props = faceProps(slot);
+  for (const key of ['raygun', 'missile', 'buggy']) {
+    if (props.some((p) => p.key === key && p.value)) return key;
+  }
+  return null;
+}
+function prospectorIsru(slot) {
+  const p = faceProps(slot).find((x) => x.key === 'isru');
+  return p ? (Number(p.value) | 0) : 0;
+}
+function isProspectorSlot(slot) {
+  return prospectorKind(slot) != null;
+}
+
 // First entry into a non-Earth heliocentric zone earns a glory chit
 // (mirror of js/game/glory.js#awardChitForZone). Earth is home and
 // never awards. Mutates the player's glory record in place.
@@ -193,6 +221,9 @@ function applyBuildRocket(state, op, player) {
   if (!player.rocket.activeThrusterId && isThrusterSlot(slot)) {
     player.rocket.activeThrusterId = cardId;
   }
+  if (!player.rocket.activeProspectorId && isProspectorSlot(slot)) {
+    player.rocket.activeProspectorId = cardId;
+  }
   clipTank(player.rocket);
   player.opsRemaining -= 1;
   return { ok: true, state, log: `${player.name} built ${card.name} onto the rocket.` };
@@ -210,6 +241,59 @@ function applySetActiveThruster(state, op, player) {
   return { ok: true, state, log: `${player.name} set ${card ? card.name : cardId} as the active thruster.` };
 }
 
+// Pick which stacked prospector is used by PROSPECT (mirror of
+// rocket.js#setActiveProspector). Free reconfiguration, not an op.
+function applySetActiveProspector(state, op, player) {
+  const cardId = String(op.cardId || '');
+  const slot = player.rocket.stack.find((s) => s.id === cardId);
+  if (!slot) return fail('not_in_stack');
+  if (!isProspectorSlot(slot)) return fail('not_a_prospector');
+  player.rocket.activeProspectorId = cardId;
+  const card = PATENTS_BY_ID[cardId];
+  return { ok: true, state, log: `${player.name} set ${card ? card.name : cardId} as the active prospector.` };
+}
+
+// Prospect the ship's current site: one seeded d6 vs the site-class
+// threshold (success = roll <= threshold), placing a claim/exhausted
+// disc. Mirrors browse.js#doProspect. v1 simplifications: the ship must
+// be AT the site for every prospector kind (raygun line-of-sight is
+// deferred), there is no buggy reroll, and the prospector's support
+// requirements are not yet gated. missile/buggy cost 1 op; raygun is free.
+function applyProspect(state, op, player) {
+  const toSiteId = String(op.siteId || '');
+  const site = siteById(toSiteId);
+  if (!site) return fail('unknown_site');
+  const provId = player.rocket.activeProspectorId;
+  const provSlot = provId && player.rocket.stack.find((s) => s.id === provId);
+  if (!provSlot) return fail('no_prospector');
+  const kind = prospectorKind(provSlot);
+  if (!kind) return fail('no_prospector');
+  if (player.rocket.siteId !== toSiteId) return fail('not_at_site');
+  if (state.discs[toSiteId]) return fail('already_prospected');
+  if (prospectorIsru(provSlot) > (site.hydration | 0)) return fail('isru_too_high');
+  const costsOp = kind !== 'raygun';
+  if (costsOp && player.opsRemaining <= 0) return fail('no_ops_left');
+
+  const threshold = prospectThreshold(site);
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const roll = gen.d6();
+  state.rng.cursor = gen.cursor;
+  const success = roll <= threshold;
+  state.discs[toSiteId] = {
+    outcome: success ? 'success' : 'fail',
+    roll, threshold, kind,
+    by: player.name,
+    ownerId: player.profileId,
+    turn: state.turn,
+  };
+  if (costsOp) player.opsRemaining -= 1;
+  const verb = success ? 'struck a claim at' : 'came up dry at';
+  return {
+    ok: true, state,
+    log: `${player.name} rolled ${roll} vs ${threshold} and ${verb} ${site.name}.`,
+  };
+}
+
 // Ops that change the game and ride the per-turn undo stack. Each is a
 // pure (state, op, player) -> { ok, state, log } transform; the
 // dispatcher (not the handler) maintains turnActions / turnRedo.
@@ -217,6 +301,8 @@ const FUNCTIONAL = {
   MOVE: applyMove,
   BUILD_ROCKET: applyBuildRocket,
   SET_ACTIVE_THRUSTER: applySetActiveThruster,
+  SET_ACTIVE_PROSPECTOR: applySetActiveProspector,
+  PROSPECT: applyProspect,
 };
 
 function pickPayload(op) {
@@ -224,6 +310,8 @@ function pickPayload(op) {
     case 'MOVE': return { toSiteId: op.toSiteId };
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
+    case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
+    case 'PROSPECT': return { siteId: op.siteId };
     default: return {};
   }
 }
@@ -240,6 +328,14 @@ function describeAction(a) {
   if (a.kind === 'SET_ACTIVE_THRUSTER') {
     const c = PATENTS_BY_ID[a.payload.cardId];
     return `set active thruster ${c ? c.name : a.payload.cardId}`;
+  }
+  if (a.kind === 'SET_ACTIVE_PROSPECTOR') {
+    const c = PATENTS_BY_ID[a.payload.cardId];
+    return `set active prospector ${c ? c.name : a.payload.cardId}`;
+  }
+  if (a.kind === 'PROSPECT') {
+    const s = siteById(a.payload.siteId);
+    return `prospect ${s ? s.name : a.payload.siteId}`;
   }
   return a.kind;
 }
