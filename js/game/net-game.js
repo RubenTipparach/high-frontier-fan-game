@@ -21,6 +21,8 @@ import { MapRenderer } from './render.js';
 import { findPath } from './nav.js';
 import { ws } from '../ws.js';
 import { getGame, submitGameOp, getGameOps, getGameState } from '../api.js';
+import { renderCard } from './card-ui.js';
+import { PATENTS_BY_ID } from '../../data/patents.js';
 
 let _gameId = null;
 let _me = null;            // { id, name, token }
@@ -41,6 +43,18 @@ let _newWhileReview = 0;   // ops that landed live while reviewing
 
 let _offWS = null;
 let _busy = false;
+
+// Auction UI. Drafts keep a half-typed bid across the re-renders that
+// other players' bids trigger; the key resets them when a new lot opens.
+let _auctionKey = null;
+let _bidDraft = '';
+let _joinDraft = '';
+
+// The patent decks a player may put up for auction.
+const AUCTION_DECKS = [
+  ['thruster', 'Thruster'], ['reactor', 'Reactor'], ['radiator', 'Radiator'],
+  ['refinery', 'Refinery'], ['robonaut', 'Robonaut'], ['generator', 'Generator'],
+];
 
 export async function mountNetGame({ gameId, me, onToast }) {
   unmountNetGame();
@@ -98,8 +112,13 @@ export function unmountNetGame() {
   _reviewState = null;
   _newWhileReview = 0;
   _busy = false;
+  _auctionKey = null;
+  _bidDraft = '';
+  _joinDraft = '';
   const host = document.getElementById('game-map');
   if (host) host.innerHTML = '';
+  const auc = document.getElementById('game-auction');
+  if (auc) { auc.classList.add('hidden'); auc.innerHTML = ''; }
 }
 
 // ----- state plumbing -----
@@ -193,15 +212,15 @@ function clearPending() {
 
 // ----- ops -----
 
-async function submitOp(op) {
-  if (_busy || reviewing()) return;
+async function submitOp(op, errSink = setError) {
+  if (_busy || reviewing()) return false;
   _busy = true;
   updateButtons();
-  setError('');
+  errSink('');
   const r = await submitGameOp(_gameId, op, _me.token);
   _busy = false;
   if (!r.ok) {
-    setError(humanizeOpError(r.error));
+    errSink(humanizeOpError(r.error));
     updateButtons();
     return false;
   }
@@ -229,6 +248,254 @@ async function doUndo() {
 async function doRedo() {
   if (!isMyTurn() || !canRedo()) return;
   if (await submitOp({ kind: 'REDO' })) { clearPending(); render(); }
+}
+
+// ----- auction -----
+
+function setAuctionError(text) {
+  const el = document.getElementById('auction-error');
+  if (el) el.textContent = text || '';
+}
+
+function noteEl(text) {
+  const d = document.createElement('div');
+  d.className = 'hud-move-info muted';
+  d.textContent = text;
+  return d;
+}
+
+// A draft amount clamped to at least min (falls back to min when blank
+// or no longer high enough after someone else raised).
+function clampInt(draft, min) {
+  const v = parseInt(draft, 10);
+  return (Number.isInteger(v) && v >= min) ? v : min;
+}
+
+// The auctioneer picks which deck's top card to put up. Toggling shows
+// the six patent decks with their remaining counts.
+function toggleDeckPicker() {
+  if (!isMyTurn() || _busy || (_state && _state.auction) || reviewing()) return;
+  const picker = document.getElementById('auction-deck-picker');
+  if (!picker) return;
+  if (!picker.classList.contains('hidden')) { hideDeckPicker(); return; }
+  picker.innerHTML = '';
+  picker.appendChild(noteEl('Auction the top of which deck? (costs 1 op)'));
+  const row = document.createElement('div');
+  row.className = 'hud-actions auction-deck-row';
+  for (const [type, label] of AUCTION_DECKS) {
+    const n = (_state && _state.decks && _state.decks[type]) ? _state.decks[type].length : 0;
+    const b = document.createElement('button');
+    b.className = 'modal-btn';
+    b.textContent = `${label} (${n})`;
+    b.disabled = n === 0 || _busy;
+    b.addEventListener('click', () => doStartAuction(type));
+    row.appendChild(b);
+  }
+  picker.appendChild(row);
+  picker.classList.remove('hidden');
+}
+
+function hideDeckPicker() {
+  const picker = document.getElementById('auction-deck-picker');
+  if (picker && !picker.classList.contains('hidden')) {
+    picker.classList.add('hidden');
+    picker.innerHTML = '';
+  }
+}
+
+async function doStartAuction(deckType) {
+  if (!isMyTurn() || _busy) return;
+  hideDeckPicker();
+  if (await submitOp({ kind: 'AUCTION_START', deckType })) render();
+}
+
+async function doBid() {
+  const input = document.getElementById('auction-bid-input');
+  if (!input) return;
+  const amount = parseInt(input.value, 10);
+  if (!Number.isInteger(amount)) { setAuctionError('Enter a whole number.'); return; }
+  if (await submitOp({ kind: 'AUCTION_BID', amount }, setAuctionError)) render();
+}
+
+async function doPass() {
+  if (await submitOp({ kind: 'AUCTION_PASS' }, setAuctionError)) render();
+}
+
+async function doJoin(amount) {
+  if (!Number.isInteger(amount)) { setAuctionError('Enter a whole number.'); return; }
+  if (await submitOp({ kind: 'AUCTION_JOIN', amount }, setAuctionError)) render();
+}
+
+async function doSell() {
+  if (await submitOp({ kind: 'AUCTION_SELL' }, setAuctionError)) render();
+}
+
+// Render the live auction overlay from state.auction. It is fully
+// server-driven: the panel appears for every player when a lot opens
+// and clears when it resolves, so there is no open/close handshake.
+function renderAuction() {
+  const overlay = document.getElementById('game-auction');
+  if (!overlay) return;
+  const a = (!reviewing() && _state && _state.auction) ? _state.auction : null;
+  if (!a) {
+    if (!overlay.classList.contains('hidden')) {
+      overlay.classList.add('hidden');
+      overlay.innerHTML = '';
+    }
+    _auctionKey = null; _bidDraft = ''; _joinDraft = '';
+    return;
+  }
+  if (_auctionKey !== a.cardId) { _auctionKey = a.cardId; _bidDraft = ''; _joinDraft = ''; }
+
+  const auctioneer = _state.players.find((p) => p.profileId === a.auctioneerId);
+  const highBidder = a.highBidderId
+    ? _state.players.find((p) => p.profileId === a.highBidderId) : null;
+  const lot = PATENTS_BY_ID[a.cardId];
+
+  overlay.classList.remove('hidden');
+  overlay.innerHTML = `
+    <div class="net-auction-modal" role="dialog" aria-label="Patent auction">
+      <div class="auction-head">
+        <h3>Patent Auction</h3>
+        <span class="auction-mode"></span>
+      </div>
+      <div class="net-auction-body">
+        <div class="net-auction-lot" id="net-auction-lot"></div>
+        <div class="net-auction-side">
+          <div class="net-auction-status">
+            <div class="net-auction-bid"></div>
+            <div class="muted net-auction-phase"></div>
+          </div>
+          <div class="net-auction-controls" id="net-auction-controls"></div>
+          <div class="hud-error" id="auction-error"></div>
+        </div>
+      </div>
+    </div>
+  `;
+  overlay.querySelector('.auction-mode').textContent =
+    auctioneer ? `@${auctioneer.name}'s lot` : 'lot';
+
+  const lotHost = overlay.querySelector('#net-auction-lot');
+  if (lot) {
+    try { lotHost.appendChild(renderCard(lot, { type: 'patent' })); }
+    catch { lotHost.textContent = lot.name || a.cardId; }
+  } else {
+    lotHost.textContent = a.cardId;
+  }
+
+  overlay.querySelector('.net-auction-bid').textContent = a.highBid > 0
+    ? `High bid: ${a.highBid} aqua by @${highBidder ? highBidder.name : '?'}`
+    : 'No bids yet.';
+  overlay.querySelector('.net-auction-phase').textContent =
+    a.awaiting === 'bidders' ? 'Bidding is open.' : 'The auctioneer is deciding.';
+
+  buildAuctionControls(
+    overlay.querySelector('#net-auction-controls'),
+    a, { auctioneer, highBidder }
+  );
+}
+
+// Role + phase aware controls. A bidder sees Bid / Pass during the
+// bidding round; the auctioneer sees Sell / Join (or Keep when no one
+// bid) once everyone has passed. Everyone else sees a waiting note.
+function buildAuctionControls(host, a, { auctioneer, highBidder }) {
+  host.innerHTML = '';
+  const myId = _me.id;
+  const myp = me();
+  if (!myp) { host.appendChild(noteEl('You are spectating this auction.')); return; }
+  const iAmAuctioneer = a.auctioneerId === myId;
+  const myAqua = myp.aqua | 0;
+
+  if (a.awaiting === 'bidders') {
+    if (iAmAuctioneer) {
+      host.appendChild(noteEl('Waiting for the other players to bid or pass.'));
+      return;
+    }
+    if (a.highBidderId === myId) {
+      host.appendChild(noteEl('You hold the high bid. Waiting for the others.'));
+      return;
+    }
+    const minBid = a.highBid + 1;
+    const passed = a.passed.includes(myId);
+    const row = document.createElement('div');
+    row.className = 'net-auction-bidrow';
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.id = 'auction-bid-input';
+    input.className = 'net-auction-input';
+    input.min = String(minBid);
+    input.value = String(clampInt(_bidDraft, minBid));
+    const bidBtn = document.createElement('button');
+    bidBtn.className = 'modal-btn primary';
+    const passBtn = document.createElement('button');
+    passBtn.className = 'modal-btn';
+    passBtn.textContent = passed ? 'Passed' : 'Pass';
+    passBtn.disabled = passed || _busy;
+    const sync = () => {
+      const v = parseInt(input.value, 10);
+      const okAmt = Number.isInteger(v) && v >= minBid && v <= myAqua;
+      bidBtn.textContent = Number.isInteger(v) ? `Bid ${v}` : 'Bid';
+      bidBtn.disabled = !okAmt || _busy;
+    };
+    input.addEventListener('input', () => { _bidDraft = input.value; sync(); });
+    bidBtn.addEventListener('click', doBid);
+    passBtn.addEventListener('click', doPass);
+    row.append(input, bidBtn, passBtn);
+    host.appendChild(row);
+    host.appendChild(noteEl(`You have ${myAqua} aqua. Minimum bid ${minBid}.`));
+    sync();
+    return;
+  }
+
+  // awaiting === 'auctioneer'
+  if (!iAmAuctioneer) {
+    host.appendChild(noteEl(
+      `Waiting for @${auctioneer ? auctioneer.name : 'the auctioneer'} to sell or keep.`
+    ));
+    return;
+  }
+  if (a.highBid === 0) {
+    const keepBtn = document.createElement('button');
+    keepBtn.className = 'modal-btn primary';
+    keepBtn.textContent = 'Keep (no bids)';
+    keepBtn.disabled = _busy;
+    keepBtn.addEventListener('click', () => doJoin(0));
+    host.appendChild(keepBtn);
+    host.appendChild(noteEl('No one bid. Keep it for free (one more pass-round, then it is yours).'));
+    return;
+  }
+  const sellBtn = document.createElement('button');
+  sellBtn.className = 'modal-btn primary';
+  sellBtn.textContent = `Sell to @${highBidder ? highBidder.name : '?'} (${a.highBid} aqua)`;
+  sellBtn.disabled = _busy;
+  sellBtn.addEventListener('click', doSell);
+  host.appendChild(sellBtn);
+
+  const minJoin = a.highBid;
+  const row = document.createElement('div');
+  row.className = 'net-auction-bidrow';
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.id = 'auction-join-input';
+  input.className = 'net-auction-input';
+  input.min = String(minJoin);
+  input.value = String(clampInt(_joinDraft, minJoin));
+  const joinBtn = document.createElement('button');
+  joinBtn.className = 'modal-btn';
+  const sync = () => {
+    const v = parseInt(input.value, 10);
+    const okAmt = Number.isInteger(v) && v >= minJoin && v <= myAqua;
+    joinBtn.textContent = Number.isInteger(v) ? `Join at ${v}` : 'Join';
+    joinBtn.disabled = !okAmt || _busy;
+  };
+  input.addEventListener('input', () => { _joinDraft = input.value; sync(); });
+  joinBtn.addEventListener('click', () => doJoin(parseInt(input.value, 10)));
+  row.append(input, joinBtn);
+  host.appendChild(row);
+  host.appendChild(noteEl(
+    `Join at ${minJoin}+ to keep bidding (you pay the bank if you win). You have ${myAqua} aqua.`
+  ));
+  sync();
 }
 
 // ----- history review (read-only) -----
@@ -263,7 +530,9 @@ function render() {
   renderMoveInfo();
   renderReflog();
   renderReviewControls();
+  renderAuction();
   updateButtons();
+  if (!isMyTurn() || _state.auction) hideDeckPicker();
 }
 
 function renderReview() {
@@ -277,6 +546,8 @@ function renderReview() {
   setMoveInfo('Reviewing history (read-only). Return to live to act.', false);
   renderReflog();
   renderReviewControls();
+  renderAuction();
+  hideDeckPicker();
   updateButtons();
 }
 
@@ -353,19 +624,25 @@ function setError(text) {
 function updateButtons() {
   const rev = reviewing();
   const myTurn = !rev && isMyTurn();
+  const auctionOpen = !!(_state && _state.auction);
+  // An open auction freezes the active player's normal ops until the
+  // lot resolves (the server enforces this too).
+  const free = myTurn && !_busy && !auctionOpen;
   const myp = me();
   const moveBtn = document.getElementById('btn-game-move');
   const endBtn = document.getElementById('btn-game-endturn');
   const undoBtn = document.getElementById('btn-game-undo');
   const redoBtn = document.getElementById('btn-game-redo');
+  const startBtn = document.getElementById('btn-auction-start');
   if (moveBtn) {
-    moveBtn.disabled = !(myTurn && !_busy && _pending && myp
+    moveBtn.disabled = !(free && _pending && myp
       && myp.movesRemaining > 0
       && _pending.path.totalBurns <= myp.rocket.tank);
   }
-  if (endBtn) endBtn.disabled = !(myTurn && !_busy);
-  if (undoBtn) undoBtn.disabled = !(myTurn && !_busy && canUndo());
-  if (redoBtn) redoBtn.disabled = !(myTurn && !_busy && canRedo());
+  if (endBtn) endBtn.disabled = !free;
+  if (undoBtn) undoBtn.disabled = !(free && canUndo());
+  if (redoBtn) redoBtn.disabled = !(free && canRedo());
+  if (startBtn) startBtn.disabled = !(free && myp && myp.opsRemaining > 0);
 }
 
 let _hudBound = false;
@@ -377,6 +654,7 @@ function bindHudButtons() {
   document.getElementById('btn-game-undo')?.addEventListener('click', doUndo);
   document.getElementById('btn-game-redo')?.addEventListener('click', doRedo);
   document.getElementById('btn-return-live')?.addEventListener('click', returnToLive);
+  document.getElementById('btn-auction-start')?.addEventListener('click', toggleDeckPicker);
 }
 
 // ----- reflog (clickable history) -----
@@ -428,5 +706,24 @@ function humanizeOpError(code) {
     game_not_active: 'This game has ended.',
     not_a_player: 'You are not in this game.',
     unknown_op: 'Unsupported operation.',
+    auction_in_progress: 'An auction is already underway.',
+    need_opponent: 'Need another player to hold an auction.',
+    no_ops_left: 'No operations left this turn.',
+    bad_deck: 'Pick a valid deck to auction.',
+    deck_empty: 'That deck is empty.',
+    no_auction: 'No auction is open.',
+    not_bidding_phase: 'Bidding is closed right now.',
+    auctioneer_cannot_bid: 'You are the auctioneer; join after bidding.',
+    auctioneer_cannot_pass: 'The auctioneer does not pass.',
+    cannot_pass_leading: 'You already hold the high bid.',
+    bid_too_low: 'Bid must beat the current high bid.',
+    insufficient_aqua: 'Not enough aqua.',
+    bad_amount: 'Enter a whole number.',
+    not_auctioneer_phase: 'Wait for bidding to finish.',
+    not_auctioneer: 'Only the auctioneer can do that.',
+    must_match_or_raise: 'You must match or beat the high bid.',
+    no_bid_to_accept: 'There is no bid to accept.',
+    winner_gone: 'The high bidder is no longer available.',
+    winner_cannot_pay: 'The high bidder can no longer pay.',
   })[code] || code;
 }

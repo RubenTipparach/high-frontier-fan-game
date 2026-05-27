@@ -5118,6 +5118,83 @@ body:has(#view-browse:not(.hidden)) #main {
 .sell-confirm-modal .modal-btn.primary:hover { background: #166534; }
 
 /* ============================================================
+   Multiplayer competitive auction overlay (js/game/net-game.js).
+   Server-driven: appears for every player while a lot is open and
+   clears when it resolves, so there is no open/close handshake.
+   ============================================================ */
+.game-auction {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(3, 2, 10, 0.78);
+  backdrop-filter: blur(4px);
+  animation: modal-fade 0.18s ease-out;
+}
+.game-auction.hidden { display: none; }
+.net-auction-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 20px 20px;
+  max-width: 700px;
+  width: 100%;
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  color: var(--ink);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+}
+.net-auction-body {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.net-auction-lot {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: center;
+  min-width: 200px;
+}
+.net-auction-side {
+  flex: 1 1 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 220px;
+}
+.net-auction-bid { font-size: 16px; font-weight: 700; letter-spacing: 0.3px; }
+.net-auction-phase { font-size: 13px; margin-top: 2px; }
+.net-auction-controls { display: flex; flex-direction: column; gap: 10px; }
+.net-auction-bidrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.net-auction-input {
+  width: 92px;
+  padding: 7px 9px;
+  font-size: 14px;
+  font-weight: 700;
+  background: var(--bg-2);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.net-auction-controls .modal-btn { white-space: nowrap; }
+.net-auction-controls .modal-btn.primary {
+  background: var(--accent); color: #062136; border-color: var(--accent-2);
+}
+.net-auction-controls .modal-btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+.net-auction-controls .modal-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.auction-deck-picker { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.auction-deck-picker.hidden { display: none; }
+.auction-deck-row { flex-wrap: wrap; gap: 6px; }
+.auction-deck-row .modal-btn { flex: 1 1 auto; }
+@media (max-width: 560px) {
+  .net-auction-lot { transform: scale(0.9); transform-origin: top center; }
+}
+
+/* ============================================================
    Transfer LEO ↔ Rocket modal (variant cargo flow).
    ============================================================ */
 .transfer-modal {
