@@ -1,6 +1,14 @@
+# Built from the REPOSITORY ROOT as the Docker context (not server/),
+# because the API imports the shared, browser/server-common data
+# modules under data/ (the canonical card + site tables that drive the
+# engine). The deploy workflow runs
+#   flyctl deploy --config server/fly.toml --dockerfile server/Dockerfile .
+# from the repo root so this image can COPY both trees. Local dev is
+# unaffected: `node server/index.js` resolves ../data the same way the
+# image's /app/server -> /app/data sibling layout does.
 FROM node:20-slim
 
-WORKDIR /app
+WORKDIR /app/server
 
 # better-sqlite3 has prebuilt binaries for node 20 on linux-x64, but
 # python and build-essential are kept around as a fallback in case the
@@ -9,10 +17,13 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 build-essential ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
-COPY package.json package-lock.json* ./
+COPY server/package.json server/package-lock.json* ./
 RUN npm install --omit=dev --no-audit --no-fund
 
-COPY . .
+# App code lands in /app/server; the shared data tables in /app/data.
+# index.js imports ../data/*.js, so this sibling layout is load-bearing.
+COPY server/ ./
+COPY data/ /app/data/
 
 ENV NODE_ENV=production
 ENV PORT=8080

@@ -138,6 +138,23 @@ export async function declineInvite(id, token) {
   return call('POST', `/invites/${id}/decline`, { token });
 }
 
+// ----- Games (Stage 3 server-authoritative engine) -----
+
+export async function getGame(id, token) {
+  return call('GET', '/games/' + id, { token });
+}
+
+// Submit one operation. `op` is { kind, ...payload }, e.g.
+// { kind: 'MOVE', toSiteId } or { kind: 'END_TURN' }.
+export async function submitGameOp(id, op, token) {
+  return call('POST', `/games/${id}/ops`, { body: op, token });
+}
+
+export async function getGameOps(id, { after } = {}, token) {
+  const qs = after ? '?after=' + after : '';
+  return call('GET', `/games/${id}/ops${qs}`, { token });
+}
+
 // ----- Chat -----
 
 export async function fetchChat(lobbyId, { before } = {}, token) {

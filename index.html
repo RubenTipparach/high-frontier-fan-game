@@ -41,7 +41,7 @@
         <div class="card narrow">
           <h2>Sign in</h2>
           <p class="muted">
-            Pick a name (3–20 chars, letters / numbers / _ / -). The first
+            Pick a name (3-20 chars, letters / numbers / _ / -). The first
             person to claim a name owns it. To sign in on a second
             device, paste the 8-character device code from the original
             device.
@@ -225,12 +225,31 @@
             <div class="overlay-header">
               <h2 id="game-title">Solar system</h2>
               <div class="overlay-actions">
-                <span class="muted">Stage 2 preview · engine arrives in Stage 3</span>
+                <span id="game-turn-banner" class="game-turn-banner muted">Loading game…</span>
                 <button id="btn-back-to-lobby">Back to lobby</button>
               </div>
             </div>
-            <div class="overlay-main">
+            <div class="overlay-main game-layout">
               <div id="game-map" class="game-map"></div>
+              <aside id="game-hud" class="game-hud">
+                <div class="hud-section">
+                  <h3>Move</h3>
+                  <div id="hud-move-info" class="hud-move-info muted">Tap a site to plan a burn.</div>
+                  <div class="hud-actions">
+                    <button id="btn-game-move" class="primary" disabled>Move</button>
+                    <button id="btn-game-endturn" disabled>End turn</button>
+                  </div>
+                  <div id="hud-move-error" class="hud-error"></div>
+                </div>
+                <div class="hud-section">
+                  <h3>Players</h3>
+                  <ul id="hud-roster" class="hud-roster"></ul>
+                </div>
+                <div class="hud-section">
+                  <h3>Log</h3>
+                  <ul id="hud-log" class="hud-log"></ul>
+                </div>
+              </aside>
             </div>
           </div>
         </div>

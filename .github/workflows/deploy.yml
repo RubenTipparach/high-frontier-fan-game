@@ -58,7 +58,7 @@ jobs:
       # force-navigate clients that have a stale index.html cached.
       # Browsers cache ES module imports by URL, so the only reliable
       # way to push a new deploy to a kept-open tab is to change the
-      # URLs — which is what these substitutions accomplish.
+      # URLs, which is what these substitutions accomplish.
       - name: Inject build version
         run: |
           SHA=$(git rev-parse --short HEAD)
@@ -175,9 +175,12 @@ jobs:
           echo "--- machines after ---"
           flyctl machine list -a "$APP"
 
+      # Build from the repo root so the image can include both server/
+      # and the shared data/ tables the engine imports (see
+      # server/Dockerfile). The app + dockerfile are named explicitly
+      # since we are no longer in the server/ directory.
       - name: Deploy API to Fly.io
         if: steps.fly_gate.outputs.ready == 'true'
-        working-directory: server
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: flyctl deploy --remote-only
+        run: flyctl deploy --remote-only --config server/fly.toml --dockerfile server/Dockerfile .
