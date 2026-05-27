@@ -585,8 +585,11 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(id, nextSeq, req.profile.id, kind, JSON.stringify(payload), result.log || null, stateJson, now);
     // END_TURN is the commit: it becomes the new undo floor (the next
-    // player can never unwind into the turn that just ended).
-    if (kind === 'END_TURN') {
+    // player can never unwind into the turn that just ended). Auction
+    // ops advance the floor too: an auction moves aqua / decks / hands
+    // that are not on the per-turn undo stack, so letting undo replay
+    // across one would silently drop those effects.
+    if (kind === 'END_TURN' || kind.startsWith('AUCTION_')) {
       db.prepare('UPDATE games SET committed_seq = ? WHERE id = ?').run(nextSeq, id);
     }
     if (result.state.status === 'finished') {
