@@ -82,6 +82,33 @@ function perBurnCost(rocket) {
   return 1;
 }
 
+const TANK_MAX = 32; // wet-mass cap (mirror of rocket.js#TANK_MAX)
+
+// The active face of a stack slot: secondary when installed
+// black-side-up, else primary. Mirror of rocket.js#installedFace.
+function slotFace(slot, card) {
+  const c = card || PATENTS_BY_ID[slot.id];
+  if (!c) return {};
+  const key = slot.face === 'secondary' ? 'secondary' : 'primary';
+  return (c.faces && (c.faces[key] || c.faces.primary)) || c;
+}
+
+// A slot is a thruster if its card type is thruster or its active face
+// exposes a thrust value (dark-side / robonaut thrusters).
+function isThrusterSlot(slot) {
+  const c = PATENTS_BY_ID[slot.id];
+  if (!c) return false;
+  if (c.type === 'thruster') return true;
+  return slotFace(slot, c).thrust != null;
+}
+
+// Clip the tank down to the wet-mass ceiling after dry mass changes.
+function clipTank(rocket) {
+  const dry = rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const cap = Math.max(0, TANK_MAX - dry);
+  if (rocket.tank > cap) rocket.tank = cap;
+}
+
 // First entry into a non-Earth heliocentric zone earns a glory chit
 // (mirror of js/game/glory.js#awardChitForZone). Earth is home and
 // never awards. Mutates the player's glory record in place.
@@ -146,16 +173,57 @@ function applyMove(state, op, player) {
   return { ok: true, state, log };
 }
 
+// Play a card from the hand onto the rocket stack (rulebook Boost,
+// simplified: no LEO-stack hop and no boost aqua cost yet). Mirrors
+// rocket.js#addToStack: append the slot, auto-select the first
+// thruster, clip the tank to the wet-mass cap. Costs 1 op.
+function applyBuildRocket(state, op, player) {
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  const cardId = String(op.cardId || '');
+  const idx = player.hand.indexOf(cardId);
+  if (idx < 0) return fail('not_in_hand');
+  const card = PATENTS_BY_ID[cardId];
+  if (!card) return fail('unknown_card');
+  if (card.type === 'gw-thruster') return fail('expansion_card');
+
+  player.hand.splice(idx, 1);
+  const slot = { id: cardId, kind: 'patent' };
+  if (op.face === 'secondary' && card.faces && card.faces.secondary) slot.face = 'secondary';
+  player.rocket.stack.push(slot);
+  if (!player.rocket.activeThrusterId && isThrusterSlot(slot)) {
+    player.rocket.activeThrusterId = cardId;
+  }
+  clipTank(player.rocket);
+  player.opsRemaining -= 1;
+  return { ok: true, state, log: `${player.name} built ${card.name} onto the rocket.` };
+}
+
+// Pick which stacked thruster powers burns (rocket.js#setActiveThruster).
+// A free reconfiguration, not an op.
+function applySetActiveThruster(state, op, player) {
+  const cardId = String(op.cardId || '');
+  const slot = player.rocket.stack.find((s) => s.id === cardId);
+  if (!slot) return fail('not_in_stack');
+  if (!isThrusterSlot(slot)) return fail('not_a_thruster');
+  player.rocket.activeThrusterId = cardId;
+  const card = PATENTS_BY_ID[cardId];
+  return { ok: true, state, log: `${player.name} set ${card ? card.name : cardId} as the active thruster.` };
+}
+
 // Ops that change the game and ride the per-turn undo stack. Each is a
 // pure (state, op, player) -> { ok, state, log } transform; the
 // dispatcher (not the handler) maintains turnActions / turnRedo.
 const FUNCTIONAL = {
   MOVE: applyMove,
+  BUILD_ROCKET: applyBuildRocket,
+  SET_ACTIVE_THRUSTER: applySetActiveThruster,
 };
 
 function pickPayload(op) {
   switch (op.kind) {
     case 'MOVE': return { toSiteId: op.toSiteId };
+    case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face };
+    case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
     default: return {};
   }
 }
@@ -164,6 +232,14 @@ function describeAction(a) {
   if (a.kind === 'MOVE') {
     const s = siteById(a.payload.toSiteId);
     return `move to ${s ? s.name : a.payload.toSiteId}`;
+  }
+  if (a.kind === 'BUILD_ROCKET') {
+    const c = PATENTS_BY_ID[a.payload.cardId];
+    return `build ${c ? c.name : a.payload.cardId}`;
+  }
+  if (a.kind === 'SET_ACTIVE_THRUSTER') {
+    const c = PATENTS_BY_ID[a.payload.cardId];
+    return `set active thruster ${c ? c.name : a.payload.cardId}`;
   }
   return a.kind;
 }
