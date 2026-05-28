@@ -11,7 +11,7 @@ import { ws } from './ws.js';
 import { saveLastLobbyId } from './storage.js';
 import { mountChat, unmountChat } from './chat.js';
 import { mountInvitesUI, unmountInvitesUI } from './invites.js';
-import { mountNetGame, unmountNetGame } from './game/net-game.js';
+import { mountBrowse, unmountBrowseOnline } from './game/browse.js';
 
 let _activeLobby = null;
 let _unsubWS = null;
@@ -35,9 +35,6 @@ export function initLobby({ onShowView, onToast }) {
   document.getElementById('btn-leave-lobby').addEventListener('click', onLeaveLobby);
   document.getElementById('btn-ready').addEventListener('click', onReadyClick);
   document.getElementById('btn-start').addEventListener('click', onStartClick);
-  document.getElementById('btn-back-to-lobby').addEventListener('click', () => {
-    document.getElementById('game-overlay').classList.add('hidden');
-  });
 }
 
 export async function refreshLobbyList() {
@@ -148,7 +145,9 @@ export async function enterLobby(lobby) {
   _unsubWS = () => { offUpdate(); offDisband(); ws.unsubscribe(channel); };
   mountChat(lobby);
   mountInvitesUI(lobby);
-  _onShowView('view-lobby');
+  // A started game lives in the sandbox view (renderLobby mounts it +
+  // navigates there); only show the lobby view while still waiting.
+  if (lobby.status !== 'started') _onShowView('view-lobby');
 }
 
 function renderLobby(lobby) {
@@ -181,28 +180,18 @@ function renderLobby(lobby) {
   const isHost = me && me.id === lobby.hostId;
   startBtn.classList.toggle('hidden', !isHost || lobby.status !== 'waiting');
 
-  const overlay = document.getElementById('game-overlay');
-  overlay.classList.toggle('hidden', lobby.status !== 'started');
-  if (lobby.status === 'started') {
-    const title = document.getElementById('game-title');
-    if (title) title.textContent = lobby.name;
-    const me = activeProfile();
-    // Mount the server-authoritative game once, on first reveal. The
-    // game surface (shared map + turn HUD) manages its own WS sub and
-    // op submission; see js/game/net-game.js.
-    if (lobby.gameId && me && !_gameMounted) {
+  // A started game runs in the sandbox view (view-browse) in online
+  // mode: the same classic map + panels as solo, driven by the server.
+  // Mounted once; the sandbox manages its own game WS + op submission.
+  if (lobby.status === 'started' && lobby.gameId && me) {
+    if (!_gameMounted) {
       _gameMounted = true;
-      mountNetGame({ gameId: lobby.gameId, me, onToast: _onToast }).catch((err) => {
-        _gameMounted = false;
-        _onToast('Game failed to load: ' + err.message, 'error');
-      });
-    } else if (!lobby.gameId) {
-      const host = document.getElementById('game-map');
-      if (host) host.innerHTML = '<div class="map-loading">No active game for this table.</div>';
+      mountBrowse({ online: true, gameId: lobby.gameId, me, onToast: _onToast });
+      _onShowView('view-browse');
     }
   } else if (_gameMounted) {
-    // Game ended (or lobby reset). Tear down the game surface.
-    unmountNetGame();
+    // Game ended or the table reset: detach the online layer.
+    unmountBrowseOnline();
     _gameMounted = false;
   }
 }
@@ -217,8 +206,7 @@ async function onLeaveLobby() {
 
 function leaveCurrent() {
   if (_unsubWS) { _unsubWS(); _unsubWS = null; }
-  if (_gameMounted) { unmountNetGame(); _gameMounted = false; }
-  document.getElementById('game-overlay').classList.add('hidden');
+  if (_gameMounted) { unmountBrowseOnline(); _gameMounted = false; }
   unmountChat();
   unmountInvitesUI();
   _activeLobby = null;

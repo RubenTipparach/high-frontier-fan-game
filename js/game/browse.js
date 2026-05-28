@@ -117,6 +117,15 @@ import {
   DECK_TYPES, getDeck, peekTop, drawTop, addToBottom, removeFromDeck,
   cycleAllDecks, supportBonusDecks, onDeckChange,
 } from './decks.js';
+// Multiplayer glue (the sandbox map, driven from a server game). These
+// are inert until mountBrowse({ online:true }) flips _online on; the
+// solo path never touches them.
+import { setOnline, isOnline } from './online-mode.js';
+import {
+  buildIdMaps, hydrateFromSnapshot, toServerId,
+} from './net-bridge.js';
+import { getGame, submitGameOp } from '../api.js';
+import { ws } from '../ws.js';
 
 // Only one map mode now (planner / "classic"); the old
 // "Cleaned up" variant was disorienting next to the canonical
@@ -136,9 +145,43 @@ let _openMapSearch = null;
 // trigger a re-render of the sandbox rocket on the map.
 let _rocketSubWired = false;
 
-export function mountBrowse() {
+// ----- Multiplayer (online) mode state -----
+//
+// When `mountBrowse({ online:true, ... })` runs, the sandbox UI becomes
+// a thin client over a server-authoritative game: every player action
+// is translated to a server op, POSTed, and the resulting snapshot is
+// hydrated back into the sandbox state modules (which redraws the same
+// classic map + panels). Solo mode leaves all of this null/false and
+// behaves exactly as before. Guard every online branch on `_online`.
+let _online = false;          // are we driving from a server game?
+let _onlineGameId = null;     // server game id
+let _onlineMe = null;         // { id, name, token }
+let _onlineToast = null;      // (msg, level) => void, from the caller
+let _onlineMaps = null;       // { serverToPlanner, plannerToServer }
+let _onlineSnapshot = null;   // latest server snapshot (for turn checks)
+let _onlineOffWS = null;      // unsubscribe handle for the game channel
+let _onlineBusy = false;      // in-flight op guard (prevents double submit)
+
+export function isBrowseOnline() { return _online; }
+
+export function mountBrowse(opts = {}) {
   const view = document.getElementById('view-browse');
   if (!view) return;
+  // Stash online context up front so the renderMap()/sync paths below
+  // (which fire synchronously during mount) already see online mode.
+  if (opts && opts.online) {
+    _online = true;
+    _onlineGameId = opts.gameId || null;
+    _onlineMe = opts.me || null;
+    _onlineToast = typeof opts.onToast === 'function' ? opts.onToast : (() => {});
+    setOnline(true);
+  } else if (_online) {
+    // Mounting solo after an online game: detach the online plumbing so
+    // player actions stop routing to the server. (The state modules
+    // still hold the server-hydrated snapshot until a reload re-reads
+    // the solo save - see unmountBrowseOnline's note.)
+    unmountBrowseOnline();
+  }
   if (!_rocketSubWired) {
     _rocketSubWired = true;
     onRocketChange(syncSandboxRocket);
@@ -185,7 +228,171 @@ export function mountBrowse() {
   syncCartTabVisibility();
   wireSidebar();
   wireHandStrip();
-  renderMap();
+  // renderMap() is async (it awaits the map load that populates
+  // _activeData). In online mode we have to wait for it before we can
+  // build the id maps + hydrate the first snapshot, so chain the
+  // bootstrap off the same promise. Solo mode just kicks it and returns.
+  const mapReady = renderMap();
+  if (_online) { mapReady.then(() => bootstrapOnlineGame()); }
+}
+
+// One-time online bootstrap: build the server<->planner id maps from
+// the freshly-loaded planner data, fetch the current game, hydrate it
+// into the sandbox modules, then subscribe to live updates. Safe to
+// no-op if mount raced an unmount.
+async function bootstrapOnlineGame() {
+  if (!_online || !_activeData || !_onlineGameId || !_onlineMe) return;
+  _onlineMaps = buildIdMaps(_activeData);
+  const r = await getGame(_onlineGameId, _onlineMe.token);
+  if (!_online) return; // unmounted while the fetch was in flight
+  if (!r.ok) {
+    _onlineToast(humanizeOnlineOpError(r.error), 'error');
+    return;
+  }
+  applySnapshot(r.data.game.state);
+  // Live relay. Every server-applied op (ours or an opponent's) lands
+  // here as the full game payload; re-hydrate from it.
+  const channel = 'game:' + _onlineGameId;
+  ws.subscribe(channel);
+  const off = ws.on('game_update', (msg) => {
+    if (!_online || !msg || msg.gameId !== _onlineGameId || !msg.game) return;
+    applySnapshot(msg.game.state);
+  });
+  _onlineOffWS = () => { off(); ws.unsubscribe(channel); };
+}
+
+// Replace all sandbox module state from a server snapshot, then repaint
+// the rocket marker at the translated planner node (or LEO when the
+// server site has no planner node / the ship is at LEO). Caches the
+// snapshot so the action routers + turn checks can read activeIndex.
+function applySnapshot(snapshot) {
+  if (!snapshot || !_onlineMaps || !_onlineMe) return;
+  _onlineSnapshot = snapshot;
+  // hydrateFromSnapshot fans the snapshot out to every state module
+  // (rocket/hand/outposts/glory/clock/discs/factories/decks/leo) and
+  // returns the planner-node id our rocket sits on (null = LEO).
+  const pid = hydrateFromSnapshot(snapshot, _onlineMe.id, _onlineMaps);
+  // Drive the same code path the solo move-commit uses: set the
+  // rocket's site id, persist (a no-op for storage while online), and
+  // resync the sprite so the marker repaints at `pid` (LEO when null).
+  _rocketSiteId = pid || null;
+  persistRocketSite();
+  syncSandboxRocket();
+  // Competitive auction overlay is wired separately (see the TODO hook).
+  renderOnlineAuction(snapshot.auction);
+}
+
+// TODO(online-auction): the competitive multiplayer auction overlay is
+// wired separately. The sandbox's solo auction modal is single-player
+// only and must NOT be reused here. For now this is a deliberate no-op;
+// applySnapshot calls it so the wiring point already exists.
+function renderOnlineAuction(_auction) {
+  // intentionally empty - competitive auction overlay handled elsewhere.
+}
+
+// Whether it is the local player's turn in the cached snapshot.
+function isOnlineMyTurn() {
+  if (!_online || !_onlineSnapshot || !_onlineMe) return false;
+  const players = _onlineSnapshot.players || [];
+  const active = players[_onlineSnapshot.activeIndex];
+  return !!active && active.profileId === _onlineMe.id;
+}
+
+// Shared online action router. Translates nothing (caller builds the
+// op), POSTs it, and on success re-hydrates from the returned snapshot
+// while SKIPPING any local mutation/animation. On failure it toasts a
+// humanized error and re-applies the last snapshot so the UI snaps
+// back. Returns true on success. Guards re-entrancy with _onlineBusy.
+async function submitOnlineOp(op) {
+  if (!_online) return false;
+  if (!isOnlineMyTurn()) { _onlineToast('Not your turn.', 'error'); return false; }
+  if (_onlineBusy) return false;
+  _onlineBusy = true;
+  let r;
+  try {
+    r = await submitGameOp(_onlineGameId, op, _onlineMe.token);
+  } finally {
+    _onlineBusy = false;
+  }
+  if (!r || !r.ok) {
+    _onlineToast(humanizeOnlineOpError(r && r.error), 'error');
+    // Snap the UI back to the authoritative last-known state.
+    if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
+    return false;
+  }
+  applySnapshot(r.data.game.state);
+  return true;
+}
+
+// Op-error code -> human message for server rejections surfaced in the
+// online sandbox.
+function humanizeOnlineOpError(code) {
+  return ({
+    api_unavailable: 'The game server is unavailable.',
+    network: 'Network error - check your connection.',
+    not_your_turn: 'It is not your turn.',
+    no_moves_left: 'No moves left this turn. End your turn.',
+    insufficient_water: 'Not enough water for that burn.',
+    no_route: 'No route to that site.',
+    unknown_site: 'Unknown site.',
+    already_here: 'Your ship is already there.',
+    nothing_to_undo: 'Nothing to undo.',
+    nothing_to_redo: 'Nothing to redo.',
+    roll_blocks_undo: 'Can\'t undo past a dice roll.',
+    game_not_active: 'This game has ended.',
+    not_a_player: 'You are not in this game.',
+    unknown_op: 'Unsupported operation.',
+    auction_in_progress: 'An auction is already underway.',
+    need_opponent: 'Need another player to hold an auction.',
+    no_ops_left: 'No operations left this turn.',
+    bad_deck: 'Pick a valid deck to auction.',
+    deck_empty: 'That deck is empty.',
+    no_auction: 'No auction is open.',
+    not_bidding_phase: 'Bidding is closed right now.',
+    bid_too_low: 'Bid must beat the current high bid.',
+    insufficient_aqua: 'Not enough aqua.',
+    bad_amount: 'Enter a whole number.',
+    not_owner: 'You do not own that.',
+    not_in_hand: 'That card is not in your hand.',
+    not_in_stack: 'That card is not on your rocket.',
+    cannot_build: 'That card cannot be built right now.',
+  })[code] || (code ? String(code) : 'Something went wrong.');
+}
+
+// Active-thruster click: online routes a SET_ACTIVE_THRUSTER op (the
+// server flips it and broadcasts; applySnapshot redraws). Solo flips
+// the local rocket state directly, unchanged.
+function onSetActiveThrusterClick(cardId) {
+  if (_online) { submitOnlineOp({ kind: 'SET_ACTIVE_THRUSTER', cardId }); return; }
+  setActiveThruster(cardId);
+}
+
+// Active-prospector click: same split as the thruster activator.
+function onSetActiveProspectorClick(cardId) {
+  if (_online) { submitOnlineOp({ kind: 'SET_ACTIVE_PROSPECTOR', cardId }); return; }
+  setActiveProspector(cardId);
+}
+
+// Tear down the online layer so the page can leave a multiplayer game
+// cleanly. Unsubscribes the WS relay, flips the shared online flag off,
+// and clears the online module vars.
+//
+// NOTE: returning to the SOLO sandbox in the same page load is NOT
+// fully handled here - the state modules were hydrated from the server
+// snapshot, so they need to be reloaded from localStorage (each module
+// re-reading its persisted save) before solo play resumes. That
+// reload is the caller's responsibility (e.g. a full re-mount / reload);
+// this teardown only detaches the online plumbing. Flagging, not solving.
+export function unmountBrowseOnline() {
+  if (_onlineOffWS) { try { _onlineOffWS(); } catch { /* ignore */ } _onlineOffWS = null; }
+  setOnline(false);
+  _online = false;
+  _onlineGameId = null;
+  _onlineMe = null;
+  _onlineToast = null;
+  _onlineMaps = null;
+  _onlineSnapshot = null;
+  _onlineBusy = false;
 }
 
 // Sandbox hand strip wiring: drop target, slot rendering, +
@@ -699,6 +906,21 @@ function getColocatedDestinations(sourceId) {
 // after the move; any spilled water is logged. Used by the
 // transfer section's "Send selected" button.
 function transferOneCard(sourceId, destId, cardId) {
+  // Online: committing a card onto the rocket stack maps to the server
+  // BUILD_ROCKET op. Fire it (fire-and-forget; the broadcast snapshot
+  // re-hydrates the stack and repaints the open inspector) and return
+  // false so the local move below is skipped. Non-rocket transfers
+  // (rocket -> outpost, LEO -> outpost, etc) have no server op yet, so
+  // they no-op with a toast rather than mutating local state that the
+  // next snapshot would clobber.
+  if (_online) {
+    if (destId === 'rocket') {
+      submitOnlineOp({ kind: 'BUILD_ROCKET', cardId });
+    } else {
+      _onlineToast('That transfer is not available in online play yet.', 'error');
+    }
+    return false;
+  }
   const TANK_MAX = 32;
   // Forming a rocket: an empty rocket stack adopts its location from
   // the first card transferred in from an outpost. Capture intent +
@@ -2109,6 +2331,10 @@ function ensureMapShell(host) {
   // lands - it just consumes the per-turn move budget for now so
   // the end-turn confirm reflects the spend.
   host.querySelector('#turn-end').addEventListener('click', async () => {
+    // Online: the server advances the turn (and resolves any Sunspot
+    // Cube event), broadcasting the new snapshot. Send END_TURN and let
+    // applySnapshot redraw; skip the local clock/event/log flow below.
+    if (_online) { await submitOnlineOp({ kind: 'END_TURN' }); return; }
     // Capture the previous slot BEFORE advancing so the modal can
     // animate the Sunspot Cube sliding from old → new instead of
     // teleporting. If the player cancels the confirm, nothing
@@ -3311,7 +3537,7 @@ function openRocketStackModal() {
           ? '⚡ Active thruster'
           : 'Set as active';
         activate.disabled = slot.id === activeId;
-        activate.addEventListener('click', () => setActiveThruster(slot.id));
+        activate.addEventListener('click', () => onSetActiveThrusterClick(slot.id));
         actions.appendChild(activate);
       }
       // Prospector toggle - same idiom as the thruster activator.
@@ -3339,7 +3565,7 @@ function openRocketStackModal() {
           ? `${glyph} Active prospector`
           : `Set as ${prospKind} prospector`;
         btn.disabled = isActiveProsp;
-        btn.addEventListener('click', () => setActiveProspector(slot.id));
+        btn.addEventListener('click', () => onSetActiveProspectorClick(slot.id));
         actions.appendChild(btn);
       }
 
@@ -5967,6 +6193,15 @@ function freeMarketSellFromHand(card, afterFn) {
 
 function doProspect(site, prosp) {
   if (!prosp) return;
+  // Online: the server rolls the prospect die and resolves the disc.
+  // Send PROSPECT for the target site and let the snapshot repaint;
+  // skip the local roll modal + disc placement below.
+  if (_online) {
+    const siteId = toServerId(_onlineMaps, site.id);
+    if (!siteId) { _onlineToast('That site is not on the server map.', 'error'); return; }
+    submitOnlineOp({ kind: 'PROSPECT', siteId });
+    return;
+  }
   // Already-prospected sites are off-limits in the sandbox; the UI
   // grays out the button when a disc is in place, but guard here
   // too so an autoclick can't double-spend.
@@ -6134,12 +6369,14 @@ function getRocketSite() {
   ) || null;
 }
 function persistRocketSite() {
+  if (isOnline()) return; // online state is server-owned; don't touch the solo save
   try {
     if (_rocketSiteId) localStorage.setItem(STORAGE_ROCKET_SITE, _rocketSiteId);
     else localStorage.removeItem(STORAGE_ROCKET_SITE);
   } catch { /* private mode */ }
 }
 function persistRocketTrail() {
+  if (isOnline()) return; // online state is server-owned; don't touch the solo save
   try {
     if (_rocketTrail && _rocketTrail.length) {
       localStorage.setItem(STORAGE_ROCKET_TRAIL, JSON.stringify(_rocketTrail));
@@ -6530,6 +6767,18 @@ async function moveRocket() {
   if (!_plannedRoute || !_plannedRoute.length) {
     setStatus('No planned route - tap a site and pick "Plan rocket route" first.');
     return false;
+  }
+  // Online: the server owns movement, fuel, and hazard resolution. Send
+  // the journey's destination as a single MOVE op and let the broadcast
+  // snapshot drive the marker; skip the entire local hazard/dice/anim
+  // path below. The server validates routing + burns + water itself.
+  if (_online) {
+    const destPlannerId = _plannedRoute[_plannedRoute.length - 1].to;
+    const toSiteId = toServerId(_onlineMaps, destPlannerId);
+    if (!toSiteId) { _onlineToast('That destination is not on the server map.', 'error'); return false; }
+    const ok = await submitOnlineOp({ kind: 'MOVE', toSiteId });
+    if (ok) clearRoute();
+    return ok;
   }
   const turn1 = _plannedRoute.filter((s) => s.turn === 1);
   if (!turn1.length) {
@@ -7139,6 +7388,10 @@ async function runMoveQueue(ctx, resuming) {
 // slides backwards along the exact segments it walked.
 async function undoRocketMove() {
   if (!_renderer) return false;
+  // Online: there is no local move snapshot to unwind (moves go through
+  // the server), and there is no UNDO op wired here. No-op so the move
+  // tag's "undo" face can't corrupt the hydrated state.
+  if (_online) return false;
   if (_rocketAnimating) return false;
   // Hazard-lockout: if the last move spent aqua or rolled dice,
   // the undo is blocked for the rest of the turn. Show a clear
