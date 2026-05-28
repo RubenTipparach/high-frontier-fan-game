@@ -271,6 +271,53 @@ function publishLobby(lobbyId) {
   broadcast(`lobby:${lobbyId}`, { type: 'lobby_update', lobby });
 }
 
+// Cancel pending direct-invites for a lobby and notify each invitee
+// so their notifications UI refreshes immediately. Used when the
+// lobby transitions out of 'waiting' (started / disbanded / cancelled)
+// or when a player joins through any path (their own invite to that
+// lobby becomes moot). `exceptProfileId` skips the cancel for one
+// profile - useful when the join is being recorded for someone whose
+// invite is being accepted separately (so we don't race on the same
+// row). Returns the list of notified profile ids.
+function cancelLobbyInvites(lobbyId, exceptProfileId) {
+  const rows = db
+    .prepare(
+      `SELECT to_id FROM direct_invites
+       WHERE lobby_id = ? AND status = 'pending'
+       ${exceptProfileId != null ? 'AND to_id != ?' : ''}`
+    )
+    .all(...(exceptProfileId != null ? [lobbyId, exceptProfileId] : [lobbyId]));
+  if (!rows.length) return [];
+  db.prepare(
+    `UPDATE direct_invites
+     SET status = 'cancelled', responded_at = ?
+     WHERE lobby_id = ? AND status = 'pending'
+     ${exceptProfileId != null ? 'AND to_id != ?' : ''}`
+  ).run(...(exceptProfileId != null
+    ? [nowMs(), lobbyId, exceptProfileId]
+    : [nowMs(), lobbyId]));
+  for (const r of rows) {
+    broadcast(`me:${r.to_id}`, { type: 'invite_cancelled', lobbyId });
+  }
+  return rows.map((r) => r.to_id);
+}
+
+// Cancel one specific direct-invite (the joiner's invite to this
+// lobby, regardless of source). Idempotent; quietly does nothing if
+// no pending row exists.
+function cancelInviteFor(profileId, lobbyId) {
+  const info = db
+    .prepare(
+      `UPDATE direct_invites
+       SET status = 'cancelled', responded_at = ?
+       WHERE lobby_id = ? AND to_id = ? AND status = 'pending'`
+    )
+    .run(nowMs(), lobbyId, profileId);
+  if (info.changes > 0) {
+    broadcast(`me:${profileId}`, { type: 'invite_cancelled', lobbyId });
+  }
+}
+
 // Create a new lobby. Caller becomes the host AND the first member.
 // `code` is a 6-char short code so the host can read it over voice.
 app.post('/lobbies', requireProfile, (req, res) => {
@@ -344,6 +391,7 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
        JOIN lobby_members lm ON lm.lobby_id = l.id AND lm.profile_id = ?
        JOIN profiles p ON p.id = l.host_id
        LEFT JOIN games g ON g.lobby_id = l.id
+       WHERE l.status != 'cancelled'
        ORDER BY l.created_at DESC
        LIMIT 50`
     )
@@ -398,6 +446,12 @@ function joinLobby(lobbyId, profileId, { acceptedInvite }) {
     `INSERT INTO lobby_members (lobby_id, profile_id, joined_at, seat)
      VALUES (?, ?, ?, ?)`
   ).run(lobbyId, profileId, nowMs(), count + 1);
+  // Any pending invite this player had for this lobby is now moot -
+  // they're in. Direct-invite ACCEPT runs its own UPDATE to 'accepted'
+  // before getting here, so this cancel is a no-op in that path; for
+  // every other join path (open join, invite-link claim) it cleans up
+  // a stranded pending invite that would otherwise dangle.
+  cancelInviteFor(profileId, lobbyId);
   return { ok: true, alreadyMember: false };
 }
 
@@ -412,6 +466,10 @@ app.post('/lobbies/:id/leave', requireProfile, (req, res) => {
   // ON DELETE CASCADE to clean up members, chat, and invites). Once a
   // game has started, leaving is just "go AFK" - host can't disband.
   if (lobby.host_id === req.profile.id && lobby.status === 'waiting') {
+    // Broadcast invite_cancelled to each pending invitee BEFORE the
+    // cascade fires so their notifications chip clears without a stale
+    // row. The cascade will then physically remove the rows.
+    cancelLobbyInvites(id);
     db.prepare('DELETE FROM lobbies WHERE id = ?').run(id);
     broadcast(`lobby:${id}`, { type: 'lobby_disbanded', lobbyId: id });
   } else {
@@ -497,6 +555,11 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
     return gid;
   })();
 
+  // Once a lobby starts, every pending invite for it is moot - the
+  // joinLobby gate refuses 'started' lobbies anyway. Mark them
+  // 'cancelled' and broadcast invite_cancelled so each invitee's
+  // notification chip clears in real time.
+  cancelLobbyInvites(id);
   publishLobby(id);
   res.json({ ok: true, gameId });
 });
@@ -1228,7 +1291,7 @@ app.get('/admin', (_req, res) => {
       <td>${esc(r.join_policy)}</td>
       <td class="num">${r.members} / ${r.max_players}</td>
       <td>${esc(r.created)}</td>
-      <td><button class="btn-del-lobby danger" data-lid="${r.id}" data-lname="${esc(r.name)}">Delete</button></td>
+      <td><button class="btn-del-lobby danger" data-lid="${r.id}" data-lname="${esc(r.name)}">Cancel</button></td>
     </tr>
   `).join('') || '<tr><td colspan=8><em>No lobbies yet.</em></td></tr>';
 
@@ -1412,22 +1475,23 @@ document.addEventListener('click', function (ev) {
     });
 });
 
-// "Delete" - removes a table and its entire game (state, members, chat,
-// invites) after a confirm, then drops the row from the table.
+// "Cancel" - marks the lobby and its game as 'cancelled' (kept in
+// the DB for audit; pending invites are cancelled + broadcast to
+// each invitee), then drops the row from the table.
 document.addEventListener('click', function (ev) {
   var btn = ev.target.closest('.btn-del-lobby');
   if (!btn) return;
   var lid = btn.getAttribute('data-lid');
   var lname = btn.getAttribute('data-lname');
-  if (!confirm('Delete table "' + lname + '" and its game?\\n\\nThis removes the lobby, its game state, members, chat, and invites. This cannot be undone.')) return;
+  if (!confirm('Cancel table "' + lname + '" and its game?\\n\\nThe lobby + game keep their op-log + state rows (status = cancelled), but the players lose access and pending invites are cleared.')) return;
   btn.disabled = true;
-  btn.textContent = 'Deleting...';
+  btn.textContent = 'Cancelling...';
   fetch('/admin/lobbies/' + lid + '/delete', { method: 'POST' })
     .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
     .then(function (res) {
       if (!res.ok) {
         btn.disabled = false;
-        btn.textContent = 'Delete';
+        btn.textContent = 'Cancel';
         alert('Failed: ' + (res.body && res.body.error || 'unknown'));
         return;
       }
@@ -1436,7 +1500,7 @@ document.addEventListener('click', function (ev) {
     })
     .catch(function () {
       btn.disabled = false;
-      btn.textContent = 'Delete';
+      btn.textContent = 'Cancel';
       alert('Network error.');
     });
 });
@@ -1463,18 +1527,31 @@ app.post('/admin/profiles/:id/add-token', (req, res) => {
   res.json({ ok: true, name: row.name, token });
 });
 
-// Delete a lobby and everything under it. The ON DELETE CASCADE chain
-// (lobby_members, chat_messages, invite_links, direct_invites, and
-// games -> game_players / game_states / game_operations) clears the
-// rest in one DELETE. Broadcasts lobby_disbanded so anyone still on the
-// channel is dropped. Anonymous to match the open-dashboard posture -
-// gate behind an admin secret before exposing publicly.
+// Cancel a lobby and its game (formerly a hard DELETE; user 2026-05:
+// "update server to cancel games instead of deleting them to avoid
+// dangling data" - keep the audit trail). Sets lobbies.status and
+// games.status to 'cancelled', cancels pending invites + broadcasts
+// invite_cancelled, then broadcasts lobby_disbanded so anyone still
+// on the channel drops. Anonymous to match the open-dashboard
+// posture - gate behind an admin secret before exposing publicly.
+//
+// Endpoint path is still .../delete so the existing admin button
+// keeps working without a UI change.
 app.post('/admin/lobbies/:id/delete', (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
   const row = db.prepare('SELECT id FROM lobbies WHERE id = ?').get(id);
   if (!row) return res.status(404).json({ error: 'not_found' });
-  db.prepare('DELETE FROM lobbies WHERE id = ?').run(id);
+  const now = nowMs();
+  db.transaction(() => {
+    cancelLobbyInvites(id);
+    db.prepare(
+      "UPDATE lobbies SET status = 'cancelled' WHERE id = ? AND status != 'cancelled'"
+    ).run(id);
+    db.prepare(
+      "UPDATE games SET status = 'cancelled', finished_at = COALESCE(finished_at, ?) WHERE lobby_id = ? AND status != 'cancelled'"
+    ).run(now, id);
+  })();
   broadcast(`lobby:${id}`, { type: 'lobby_disbanded', lobbyId: id });
   res.json({ ok: true });
 });
@@ -1485,6 +1562,33 @@ function esc(s) {
 }
 
 // ----- Boot -----
+
+// One-time cleanup of dangling pending-invites for lobbies that have
+// since left the 'waiting' state (started / cancelled / finished /
+// orphaned). New gameplay paths cancel invites at the right time,
+// but earlier builds left stranded rows that the /invites listing
+// already hides via the lobby-status join - this just stops them
+// accumulating in the table forever.
+(() => {
+  const before = db.prepare(
+    `SELECT COUNT(*) AS n FROM direct_invites di
+     LEFT JOIN lobbies l ON l.id = di.lobby_id
+     WHERE di.status = 'pending'
+       AND (l.id IS NULL OR l.status != 'waiting')`
+  ).get().n;
+  if (!before) return;
+  db.prepare(
+    `UPDATE direct_invites
+     SET status = 'cancelled', responded_at = ?
+     WHERE status = 'pending' AND id IN (
+       SELECT di.id FROM direct_invites di
+       LEFT JOIN lobbies l ON l.id = di.lobby_id
+       WHERE di.status = 'pending'
+         AND (l.id IS NULL OR l.status != 'waiting')
+     )`
+  ).run(nowMs());
+  console.log(`cleaned up ${before} stranded pending invite(s)`);
+})();
 
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`high-frontier-fan-game listening on :${PORT} (HTTP + WS at /ws)`);

@@ -30,6 +30,12 @@ export function initInvites({ onToast }) {
     _onToast(`Invite to "${msg.lobbyName || ('lobby ' + msg.lobbyId)}" from @${msg.from}`, 'invite');
     refreshInvitesList();
   });
+  // Server cancels invites when the lobby starts, is disbanded, or
+  // when the player joins through any path. Refresh so the chip
+  // badge + the dropdown list clear without a manual reload.
+  ws.on('invite_cancelled', () => {
+    refreshInvitesList();
+  });
   ws.on('state', (s) => {
     const me = activeProfile();
     if (s.ready && me) ws.subscribe('me:' + me.id);
