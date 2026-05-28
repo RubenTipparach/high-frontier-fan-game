@@ -47,14 +47,32 @@ export function initLobby({ onShowView, onToast }) {
   const inviteList = document.getElementById('invite-list');
   const badge = document.getElementById('pending-invites-count');
   if (inviteBtn && invitesPop) {
+    // syncBodyClass: pair an `.invites-popover-open` class on <body>
+    // with the popover's open state so the mobile backdrop pseudo
+    // (body.invites-popover-open::before in style.css) tracks it.
+    const syncBodyClass = () => {
+      document.body.classList.toggle(
+        'invites-popover-open',
+        !invitesPop.classList.contains('hidden')
+      );
+    };
     inviteBtn.addEventListener('click', (ev) => {
       ev.stopPropagation();
       invitesPop.classList.toggle('hidden');
+      syncBodyClass();
     });
     document.addEventListener('click', (ev) => {
       if (invitesPop.classList.contains('hidden')) return;
       if (inviteBtn.contains(ev.target) || invitesPop.contains(ev.target)) return;
       invitesPop.classList.add('hidden');
+      syncBodyClass();
+    });
+    // Close on Escape so the mobile modal behaves like a real modal.
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Escape') return;
+      if (invitesPop.classList.contains('hidden')) return;
+      invitesPop.classList.add('hidden');
+      syncBodyClass();
     });
   }
   if (inviteList && badge) {

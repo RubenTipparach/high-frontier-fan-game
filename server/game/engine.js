@@ -730,6 +730,7 @@ export function applyOperation(prevState, op, ctx) {
 // Ops accepted over the wire. Functional + meta + auction.
 export const SUPPORTED_OPS = [
   ...Object.keys(FUNCTIONAL), ...Object.keys(META), ...Object.keys(AUCTION),
+  ...Object.keys(CREW),
 ];
 // Ops that require the caller to supply ctx.turnBaseState.
 export const NEEDS_TURN_BASE = new Set(['UNDO', 'REDO']);

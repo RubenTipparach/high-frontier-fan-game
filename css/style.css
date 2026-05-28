@@ -593,8 +593,37 @@ body.in-lobby .main-menu-fab { display: none; }
   #view-lobby-list .lobby-list li,
   #view-lobby-list .invite-list li { padding: 6px 8px; }
   #view-lobby-list .global-chat { width: 100%; max-width: none; }
-  .invites-popover { max-width: none; }
   #view-lobby-list:not(.hidden) { padding: 12px; }
+}
+@media (max-width: 720px) {
+  /* On mobile, drop the floating-popover anchor and present the
+     pending-invites list as a real modal sheet. position:fixed
+     escapes lobby-top's flex-wrap (which on mobile can stash the
+     chip on its own row and push the popover off-screen), and a
+     full-page backdrop dims the rest so it reads as a modal, not
+     a dropdown. Existing body click-outside handler still closes
+     it: the backdrop pseudo isn't a real element, so a tap
+     anywhere outside the popover hits the lobby and triggers
+     the close path. */
+  .invites-popover {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(92vw, 380px);
+    max-width: none;
+    min-width: 0;
+    max-height: 80vh;
+    overflow-y: auto;
+    z-index: 80;
+  }
+  body.invites-popover-open::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 75;
+  }
 }
 
 /* Phones: backdrop-filter blur is GPU-heavy and the FAB is always
