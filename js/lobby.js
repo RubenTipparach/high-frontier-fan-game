@@ -243,7 +243,23 @@ function renderLobby(lobby) {
   if (lobby.status === 'started' && lobby.gameId && me) {
     if (!_gameMounted) {
       _gameMounted = true;
-      mountBrowse({ online: true, gameId: lobby.gameId, me, onToast: _onToast, room: lobby.name });
+      mountBrowse({
+        online: true,
+        gameId: lobby.gameId,
+        lobbyId: lobby.id,
+        me,
+        onToast: _onToast,
+        room: lobby.name,
+        // The pane's "Back to lobbies" button calls this. Non-destructive:
+        // the online layer detaches and the player lands on the lobby
+        // list (the game keeps running; Resume puts them back in).
+        onLeave: () => {
+          _gameMounted = false;
+          unmountBrowseOnline();
+          _onShowView('view-lobby-list');
+          refreshLobbyList();
+        },
+      });
       _onShowView('view-browse');
     }
   } else if (_gameMounted) {

@@ -124,7 +124,7 @@ import { setOnline, isOnline } from './online-mode.js';
 import {
   buildIdMaps, hydrateFromSnapshot, toServerId,
 } from './net-bridge.js';
-import { getGame, submitGameOp } from '../api.js';
+import { getGame, submitGameOp, fetchChat, sendChat } from '../api.js';
 import { ws } from '../ws.js';
 
 // Only one map mode now (planner / "classic"); the old
@@ -162,6 +162,9 @@ let _onlineSnapshot = null;   // latest server snapshot (for turn checks)
 let _onlineOffWS = null;      // unsubscribe handle for the game channel
 let _onlineBusy = false;      // in-flight op guard (prevents double submit)
 let _onlineRoom = null;       // table / lobby name for the multiplayer panel
+let _onlineLobbyId = null;    // lobby id (for chat REST + WS channel)
+let _onlineLeave = null;      // () => void callback wired by the host page
+let _onlineChatOff = null;    // unsubscribe handle for the lobby chat WS
 
 export function isBrowseOnline() { return _online; }
 
@@ -176,6 +179,8 @@ export function mountBrowse(opts = {}) {
     _onlineMe = opts.me || null;
     _onlineToast = typeof opts.onToast === 'function' ? opts.onToast : (() => {});
     _onlineRoom = opts.room || null;
+    _onlineLobbyId = opts.lobbyId || null;
+    _onlineLeave = typeof opts.onLeave === 'function' ? opts.onLeave : null;
     setOnline(true);
   } else if (_online) {
     // Mounting solo after an online game: detach the online plumbing so
@@ -265,6 +270,24 @@ async function bootstrapOnlineGame() {
     applySnapshot(msg.game.state);
   });
   _onlineOffWS = () => { off(); ws.unsubscribe(channel); };
+
+  // In-pane chat: fetch the lobby's chat history (table conversation)
+  // and subscribe to live 'chat' broadcasts on the lobby channel. Both
+  // are owned by browse.js so the mp pane stays self-contained.
+  if (_onlineLobbyId && _onlineMe) {
+    const chatChannel = 'lobby:' + _onlineLobbyId;
+    ws.subscribe(chatChannel);
+    const offChat = ws.on('chat', (msg) => {
+      if (!_online || !msg || !msg.message) return;
+      if (msg.message.lobbyId !== _onlineLobbyId) return;
+      appendMpChat(msg.message);
+    });
+    _onlineChatOff = () => { offChat(); ws.unsubscribe(chatChannel); };
+    const hist = await fetchChat(_onlineLobbyId, {}, _onlineMe.token);
+    if (_online && hist && hist.ok && hist.data && Array.isArray(hist.data.entries)) {
+      for (const m of hist.data.entries) appendMpChat(m);
+    }
+  }
 }
 
 // Replace all sandbox module state from a server snapshot, then repaint
@@ -331,23 +354,119 @@ function mpCardName(id) {
 // whose turn, the clock, and a roster where each player expands to show
 // their rocket / outposts / resources. Opponent hands stay hidden
 // (count only). Re-rendered on every snapshot (applySnapshot).
-function renderMpPanel(snapshot) {
+// One-time skeleton inside #mp-panel: a #mp-table region (room / turn /
+// roster) which renderMpPanel rewrites on every snapshot, and a
+// persistent #mp-chat (history + input) so the chat survives the
+// per-snapshot re-render. Returns the table region.
+function ensureMpPanelStructure() {
   const host = document.getElementById('mp-panel');
-  if (!host) return;
+  if (!host) return null;
+  let tableEl = host.querySelector('#mp-table');
+  if (!tableEl) {
+    host.innerHTML = '';
+    tableEl = document.createElement('div');
+    tableEl.id = 'mp-table';
+    const chatEl = document.createElement('div');
+    chatEl.id = 'mp-chat';
+    host.append(tableEl, chatEl);
+    setupMpChat(chatEl);
+  }
+  return tableEl;
+}
+
+// In-pane chat shell built once: label + message list + send form. The
+// form posts to the lobby chat REST endpoint; the WS 'chat' broadcast
+// (subscribed in bootstrapOnlineGame) re-renders for everyone including
+// the sender, so we don't append locally on submit.
+function setupMpChat(host) {
+  host.innerHTML = '';
+  const label = document.createElement('div');
+  label.className = 'mp-detail-label';
+  label.textContent = 'Table chat';
+  const list = document.createElement('ul');
+  list.id = 'mp-chat-list';
+  list.className = 'mp-chat-list';
+  const empty = document.createElement('li');
+  empty.className = 'muted mp-chat-empty';
+  empty.textContent = 'No messages yet.';
+  list.appendChild(empty);
+  const form = document.createElement('form');
+  form.id = 'mp-chat-form';
+  form.className = 'mp-chat-form';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.maxLength = 500;
+  input.placeholder = 'Message the table…';
+  input.autocomplete = 'off';
+  const send = document.createElement('button');
+  send.type = 'submit';
+  send.textContent = 'Send';
+  form.append(input, send);
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const body = input.value.trim();
+    if (!body || !_online || !_onlineLobbyId || !_onlineMe) return;
+    input.value = '';
+    send.disabled = true;
+    const r = await sendChat(_onlineLobbyId, body, _onlineMe.token);
+    send.disabled = false;
+    if (!r || !r.ok) {
+      if (_onlineToast) _onlineToast('Chat failed: ' + ((r && r.error) || 'network'), 'error');
+      input.value = body;
+    }
+  });
+  host.append(label, list, form);
+}
+
+function appendMpChat(msg) {
+  const list = document.getElementById('mp-chat-list');
+  if (!list || !msg) return;
+  const empty = list.querySelector('.mp-chat-empty');
+  if (empty) empty.remove();
+  const li = document.createElement('li');
+  li.className = 'mp-chat-msg';
+  const who = document.createElement('span');
+  who.className = 'mp-chat-who';
+  who.textContent = '@' + (msg.profileName || 'someone');
+  const body = document.createElement('span');
+  body.className = 'mp-chat-body';
+  body.textContent = msg.body || '';
+  li.append(who, document.createTextNode(' '), body);
+  list.appendChild(li);
+  list.scrollTop = list.scrollHeight;
+}
+
+function renderMpPanel(snapshot) {
+  const tableEl = ensureMpPanelStructure();
+  if (!tableEl) return;
   if (!snapshot || !Array.isArray(snapshot.players)) {
-    host.innerHTML = '<p class="muted">Connecting to the table…</p>';
+    tableEl.innerHTML = '<p class="muted">Connecting to the table…</p>';
     return;
   }
   const players = snapshot.players;
   const active = players[snapshot.activeIndex] || null;
   const myId = _onlineMe && _onlineMe.id;
-  host.innerHTML = '';
+  tableEl.innerHTML = '';
 
   const head = document.createElement('div');
   head.className = 'mp-head';
+  const row = document.createElement('div');
+  row.className = 'mp-head-row';
   const room = document.createElement('div');
   room.className = 'mp-room';
   room.textContent = _onlineRoom || 'Multiplayer table';
+  row.appendChild(room);
+  if (_onlineLeave) {
+    const leave = document.createElement('button');
+    leave.type = 'button';
+    leave.className = 'mp-leave';
+    leave.textContent = '← Lobbies';
+    leave.title = 'Back to the multiplayer lobbies list (the game stays running; you can resume)';
+    leave.addEventListener('click', () => {
+      try { _onlineLeave(); } catch (err) { console.error('mp leave:', err); }
+    });
+    row.appendChild(leave);
+  }
   const myTurn = !!(active && active.profileId === myId);
   const turn = document.createElement('div');
   turn.className = 'mp-turn' + (myTurn ? ' mp-your-turn' : '');
@@ -357,8 +476,8 @@ function renderMpPanel(snapshot) {
   const clock = document.createElement('div');
   clock.className = 'muted mp-clock';
   clock.textContent = `Round ${snapshot.round} · slot ${snapshot.turn}`;
-  head.append(room, turn, clock);
-  host.appendChild(head);
+  head.append(row, turn, clock);
+  tableEl.appendChild(head);
 
   const roster = document.createElement('div');
   roster.className = 'mp-roster';
@@ -367,7 +486,7 @@ function renderMpPanel(snapshot) {
       p, p.profileId === myId, !!(active && p.profileId === active.profileId)
     ));
   }
-  host.appendChild(roster);
+  tableEl.appendChild(roster);
 }
 
 function renderMpPlayer(p, isMe, isActive) {
@@ -544,10 +663,13 @@ export function unmountBrowseOnline() {
   _onlineGameId = null;
   _onlineMe = null;
   _onlineToast = null;
+  if (_onlineChatOff) { try { _onlineChatOff(); } catch { /* ignore */ } _onlineChatOff = null; }
   _onlineMaps = null;
   _onlineSnapshot = null;
   _onlineBusy = false;
   _onlineRoom = null;
+  _onlineLobbyId = null;
+  _onlineLeave = null;
   syncMpTabVisibility();
 }
 
