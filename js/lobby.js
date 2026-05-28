@@ -24,9 +24,9 @@ export function initLobby({ onShowView, onToast }) {
   _onToast = onToast;
 
   document.getElementById('btn-refresh-lobbies').addEventListener('click', refreshLobbyList);
-  document.getElementById('btn-create-lobby').addEventListener('click', () => {
-    _onShowView('view-create-lobby');
-  });
+  // "+ New game" lives in main.js (initNewGameModal); it opens the
+  // chooser modal that routes to either view-create-lobby (multiplayer)
+  // or view-browse (sandbox). No btn-create-lobby in this view anymore.
   document.getElementById('create-cancel').addEventListener('click', () => {
     _onShowView('view-lobby-list');
   });
@@ -35,6 +35,36 @@ export function initLobby({ onShowView, onToast }) {
   document.getElementById('btn-leave-lobby').addEventListener('click', onLeaveLobby);
   document.getElementById('btn-ready').addEventListener('click', onReadyClick);
   document.getElementById('btn-start').addEventListener('click', onStartClick);
+
+  // Invites chip in the lobby top row. Click toggles a small popover
+  // with the pending-invite list; an outside click closes it. The badge
+  // count is kept in sync with the live #invite-list (invites.js owns
+  // the rendering; a MutationObserver here just recounts on each
+  // render).
+  const inviteBtn = document.getElementById('btn-pending-invites');
+  const invitesPop = document.getElementById('pending-invites-popover');
+  const inviteList = document.getElementById('invite-list');
+  const badge = document.getElementById('pending-invites-count');
+  if (inviteBtn && invitesPop) {
+    inviteBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      invitesPop.classList.toggle('hidden');
+    });
+    document.addEventListener('click', (ev) => {
+      if (invitesPop.classList.contains('hidden')) return;
+      if (inviteBtn.contains(ev.target) || invitesPop.contains(ev.target)) return;
+      invitesPop.classList.add('hidden');
+    });
+  }
+  if (inviteList && badge) {
+    const updateBadge = () => {
+      const n = inviteList.querySelectorAll('li:not(.empty)').length;
+      badge.textContent = String(n);
+      if (inviteBtn) inviteBtn.classList.toggle('has-invites', n > 0);
+    };
+    new MutationObserver(updateBadge).observe(inviteList, { childList: true });
+    updateBadge();
+  }
 }
 
 export async function refreshLobbyList() {

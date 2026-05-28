@@ -32,32 +32,19 @@ function showView(id) {
   for (const v of VIEWS) {
     document.getElementById(v).classList.toggle('hidden', v !== id);
   }
-  // Menu highlight. view-browse is shared by solo + multiplayer, so the
-  // "current" button depends on online state too: Sandbox is current
-  // only on a SOLO view-browse, Multiplayer is current on any MP-list /
-  // lobby view OR on view-browse when it is driven from an online game.
-  // Sandbox is also disabled in that case (clicking it toggles to the
-  // previous view, which doesn't make sense when you ARE there).
-  // Multiplayer is never disabled - clicking it from an online game
-  // navigates back to the lobbies list.
-  const sandboxBtn = document.getElementById('btn-browse');
-  const mpBtn = document.getElementById('btn-multiplayer');
+  // Menu highlight. Lobby is the sole top-level context indicator:
+  // current on the lobby views OR on view-browse when an online game is
+  // driving it. Solo sandbox (view-browse, !online) has no menu button
+  // to light up - it's only entered via "+ New game" in the lobby.
+  const lobbyBtn = document.getElementById('btn-lobby');
   const inOnlineBrowse = id === 'view-browse' && isBrowseOnline();
-  const isSandbox = id === 'view-browse' && !inOnlineBrowse;
-  const isMp = inOnlineBrowse
-    || id === 'view-lobby-list' || id === 'view-lobby' || id === 'view-create-lobby';
-  if (sandboxBtn) {
-    sandboxBtn.disabled = isSandbox;
-    sandboxBtn.classList.toggle('is-current', isSandbox);
-    sandboxBtn.title = isSandbox
-      ? 'Sandbox: already active'
-      : 'Sandbox: explore the map and build rockets from the patent deck';
-  }
-  if (mpBtn) {
-    mpBtn.classList.toggle('is-current', isMp);
-    mpBtn.title = isMp
-      ? 'Multiplayer: already active'
-      : 'Multiplayer: lobby + games + global chat';
+  const inLobby = id === 'view-lobby-list' || id === 'view-lobby' || id === 'view-create-lobby';
+  const lobbyCurrent = inOnlineBrowse || inLobby;
+  if (lobbyBtn) {
+    lobbyBtn.classList.toggle('is-current', lobbyCurrent);
+    lobbyBtn.title = lobbyCurrent
+      ? 'Lobby: already active'
+      : 'Lobby: open tables, your games, global chat';
   }
 }
 
@@ -107,27 +94,14 @@ function reflectProfile(profile) {
 // Browse view: read-only data inspector. Always reachable; doesn't
 // require sign-in. The Browse module itself manages its tabs.
 function initBrowseButton() {
-  document.getElementById('btn-browse').addEventListener('click', () => {
-    if (!document.getElementById('view-browse').classList.contains('hidden')) {
-      // Toggle: clicking Browse while on Browse returns to the prior view.
-      showView(_prevView || (activeProfile() ? 'view-lobby-list' : 'view-signin'));
-      return;
-    }
-    showView('view-browse');
-    mountBrowse();
-  });
-
-  // Multiplayer button: jump to the lobby + global-chat view.
-  // Clicking again from the lobby returns to Sandbox so the
-  // pair toggles cleanly.
-  const mpBtn = document.getElementById('btn-multiplayer');
-  if (mpBtn) {
-    mpBtn.addEventListener('click', () => {
-      const onLobby = !document.getElementById('view-lobby-list').classList.contains('hidden');
-      if (onLobby) {
-        showView('view-browse');
-        mountBrowse();
-      } else {
+  // The hamburger menu now exposes a single top-level nav button: the
+  // Lobby (Sandbox is reached via "+ New game" in the lobby). Clicking
+  // it from anywhere navigates to the lobby; no toggle / no previous-
+  // view dance.
+  const lobbyBtn = document.getElementById('btn-lobby');
+  if (lobbyBtn) {
+    lobbyBtn.addEventListener('click', () => {
+      if (document.getElementById('view-lobby-list').classList.contains('hidden')) {
         showView('view-lobby-list');
       }
     });
@@ -186,10 +160,45 @@ function initMainMenu() {
   // Auto-close on a view-switching action - same idiom as any
   // off-canvas menu. Fullscreen + account-menu stay open because
   // the user usually wants to flip a setting and keep browsing.
-  for (const id of ['btn-browse', 'btn-multiplayer', 'btn-signin']) {
+  for (const id of ['btn-lobby', 'btn-signin']) {
     const b = document.getElementById(id);
     if (b) b.addEventListener('click', close);
   }
+}
+
+// "+ New game" chooser modal: opened from the lobby's top action row
+// (#btn-new-game). Picks Multiplayer (-> view-create-lobby) or Sandbox
+// (-> view-browse solo mount). Mirrors initMainMenu's overlay flow.
+function initNewGameModal() {
+  const trigger = document.getElementById('btn-new-game');
+  const overlay = document.getElementById('new-game-modal');
+  const closeBtn = document.getElementById('btn-new-game-close');
+  const mpBtn = document.getElementById('btn-new-game-mp');
+  const sandboxBtn = document.getElementById('btn-new-game-sandbox');
+  if (!trigger || !overlay || !closeBtn || !mpBtn || !sandboxBtn) return;
+  const open = () => {
+    overlay.classList.remove('hidden');
+    document.addEventListener('keydown', onKey);
+  };
+  const close = () => {
+    overlay.classList.add('hidden');
+    document.removeEventListener('keydown', onKey);
+  };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  trigger.addEventListener('click', open);
+  closeBtn.addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  mpBtn.addEventListener('click', () => {
+    close();
+    showView('view-create-lobby');
+  });
+  sandboxBtn.addEventListener('click', () => {
+    close();
+    // Solo sandbox lives in view-browse with no opts; mountBrowse's
+    // safety reset detaches any prior online plumbing automatically.
+    showView('view-browse');
+    mountBrowse();
+  });
 }
 
 function initAccountMenu() {
@@ -339,6 +348,7 @@ async function boot() {
   initInvites({ onToast: toast });
   initBrowseButton();
   initMainMenu();
+  initNewGameModal();
   onProfileChange(reflectProfile);
 
   await updateServerStatus();
@@ -357,9 +367,10 @@ async function boot() {
     if (!claimed) {
       const resumed = await maybeResumeLobby();
       if (!resumed) {
-        showView('view-browse');
-        mountBrowse();
-        toast('Welcome back to the sandbox.', 'success');
+        // No active game to resume - the lobby is the home view now.
+        // Sandbox is no longer the default; the player starts it from
+        // the lobby's "+ New game" chooser.
+        showView('view-lobby-list');
       }
     }
   } else {

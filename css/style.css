@@ -424,18 +424,81 @@ label.checkbox input { accent-color: var(--accent-2); }
 }
 .search-results li:last-child { border-bottom: none; }
 
-/* ===== Lobby view: compact + scrollable =====
-   body is overflow:hidden ("panels scroll inside themselves") so
-   without an inner scroll the lobby's stacked cards on mobile run off
-   the bottom with no way to reach Ended games / Global chat. Compact
-   the cards, rows, and global-chat so we waste less vertical space
-   too. */
+/* ===== Lobby (home view) layout =====
+   body is overflow:hidden ("panels scroll inside themselves"), so the
+   lobby owns its own scroll container. Three sections stacked: top
+   action row (+ New game / Join by code / invites chip), global chat,
+   then a 3-column games grid (Open / Your / Ended). Mobile collapses
+   the grid to a single column. */
 #view-lobby-list:not(.hidden) {
   max-height: calc(100vh - 40px);
   overflow-y: auto;
 }
+.lobby-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.lobby-top .claim-link {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 0;
+}
+.lobby-top .claim-link input { width: 160px; }
+#btn-new-game { font-weight: 700; }
+
+/* Pending-invites chip + popover (anchored top-right of the action row). */
+.invites-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 6px 12px;
+  font-size: 13px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.invites-chip.has-invites { border-color: var(--accent); color: var(--accent); }
+.invites-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--bg-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+}
+.invites-chip.has-invites .invites-badge { background: var(--accent); color: #062136; }
+.invites-popover {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0 0 12px auto;
+  max-width: 480px;
+}
+.invites-popover.hidden { display: none; }
+.invites-popover h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--ink-dim);
+}
+
+/* Compact card defaults inside the lobby view. */
 #view-lobby-list .card { padding: 12px 14px; margin-bottom: 12px; }
 #view-lobby-list .card h2 { margin-bottom: 8px; }
+#view-lobby-list .global-chat { margin-bottom: 12px; }
 #view-lobby-list .lobby-list li,
 #view-lobby-list .invite-list li { padding: 8px 10px; gap: 8px; }
 #view-lobby-list .lobby-list li.empty,
@@ -447,7 +510,7 @@ label.checkbox input { accent-color: var(--accent-2); }
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: 6px;
-  max-height: 160px;
+  max-height: 180px;
   overflow-y: auto;
   font-size: 13px;
 }
@@ -456,15 +519,29 @@ label.checkbox input { accent-color: var(--accent-2); }
   color: var(--ink-mute);
   font-style: italic;
 }
-@media (max-width: 720px) {
-  /* On phones the side panel stacks under the open tables; let it span
-     the full width so it doesn't read as a half-empty column. */
-  #view-lobby-list .row { gap: 12px; }
-  #view-lobby-list .row > .side { width: 100%; }
+
+/* Three-column games grid. The lobby's own scroll handles overflow. */
+.lobby-games-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+.lobby-games-grid > .card { margin-bottom: 0; }
+
+@media (max-width: 900px) {
+  .lobby-games-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 640px) {
+  .lobby-games-grid { grid-template-columns: 1fr; gap: 10px; }
+  .lobby-top { gap: 8px; }
+  .lobby-top .claim-link input { width: 120px; }
+  .invites-chip { margin-left: 0; }
   #view-lobby-list .card { padding: 10px 12px; margin-bottom: 10px; }
   #view-lobby-list .card h2 { font-size: 13px; margin-bottom: 6px; }
   #view-lobby-list .lobby-list li,
   #view-lobby-list .invite-list li { padding: 6px 8px; }
+  .invites-popover { max-width: none; }
 }
 .search-results .seen {
   font-size: 11px; color: var(--ink-mute);
