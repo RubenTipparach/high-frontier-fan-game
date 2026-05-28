@@ -5,6 +5,7 @@
 import {
   listLobbies, listMyGames, getLobby, createLobby, joinLobby, leaveLobby,
   setReady, startLobby, claimInviteLink, lookupInviteLink,
+  fetchGlobalChat, sendGlobalChat,
 } from './api.js';
 import { activeProfile } from './auth.js';
 import { ws } from './ws.js';
@@ -65,6 +66,92 @@ export function initLobby({ onShowView, onToast }) {
     new MutationObserver(updateBadge).observe(inviteList, { childList: true });
     updateBadge();
   }
+
+  mountGlobalChat();
+}
+
+// Global chat (lobby list). Posts via /chat/global, subscribes to the
+// 'global' WS channel for live broadcasts. Mounted once at init; the
+// list element + form live in index.html under .global-chat.
+function mountGlobalChat() {
+  const form = document.getElementById('global-chat-form');
+  const input = document.getElementById('global-chat-input');
+  const list = document.getElementById('global-chat-messages');
+  if (!form || !input || !list) return;
+
+  const append = (msg) => {
+    if (!msg) return;
+    // Remove the empty-state placeholder once a real message arrives.
+    const empty = list.querySelector('.empty');
+    if (empty) empty.remove();
+    const li = document.createElement('li');
+    const who = document.createElement('span');
+    who.className = 'chat-who';
+    who.textContent = '@' + (msg.profileName || '?') + ':';
+    const body = document.createElement('span');
+    body.className = 'chat-body';
+    body.textContent = ' ' + (msg.body || '');
+    li.append(who, body);
+    list.appendChild(li);
+    list.scrollTop = list.scrollHeight;
+  };
+
+  // Live broadcasts. Subscribed unconditionally - the channel only
+  // receives global chat traffic, so it's cheap.
+  ws.subscribe('global');
+  ws.on('chat', (msg) => {
+    if (!msg || !msg.message || msg.message.lobbyId != null) return;
+    append(msg.message);
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const profile = activeProfile();
+    if (!profile) {
+      _onToast('Sign in to chat.', 'error');
+      return;
+    }
+    const body = input.value.trim();
+    if (!body) return;
+    input.value = '';
+    const r = await sendGlobalChat(body, profile.token);
+    if (!r || !r.ok) {
+      _onToast('Could not send global chat.', 'error');
+      input.value = body;
+    }
+    // Optimistic local append on success; live broadcast may also
+    // echo to this client - dedupe by message id.
+    if (r && r.ok && r.data && r.data.message) {
+      const m = r.data.message;
+      if (!list.querySelector(`li[data-mid="${m.id}"]`)) {
+        const li = document.createElement('li');
+        li.dataset.mid = String(m.id);
+        const who = document.createElement('span');
+        who.className = 'chat-who';
+        who.textContent = '@' + (m.profileName || profile.name) + ':';
+        const body2 = document.createElement('span');
+        body2.className = 'chat-body';
+        body2.textContent = ' ' + m.body;
+        li.append(who, body2);
+        const empty = list.querySelector('.empty');
+        if (empty) empty.remove();
+        list.appendChild(li);
+        list.scrollTop = list.scrollHeight;
+      }
+    }
+  });
+
+  // Backfill recent history once the user is signed in. Re-runs on
+  // every visit to view-lobby-list aren't required since the list
+  // is in the DOM permanently; we just fetch once at init.
+  (async () => {
+    const profile = activeProfile();
+    if (!profile) return;
+    const r = await fetchGlobalChat({}, profile.token);
+    if (r && r.ok && r.data && Array.isArray(r.data.entries)) {
+      for (const m of r.data.entries) append(m);
+    }
+  })();
 }
 
 export async function refreshLobbyList() {

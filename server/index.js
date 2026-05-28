@@ -924,6 +924,48 @@ app.post('/lobbies/:id/chat', requireProfile, (req, res) => {
   res.status(201).json({ ok: true, message: msg });
 });
 
+// Global chat: lobby_id IS NULL rows in chat_messages, anyone signed
+// in can read + post (no membership gate). Broadcast on the 'global'
+// WS channel so every lobby-list session sees new messages live.
+app.get('/chat/global', requireProfile, (req, res) => {
+  const before = Number(req.query.before) || nowMs() + 1;
+  const rows = db
+    .prepare(
+      `SELECT cm.id, cm.body, cm.created_at AS createdAt,
+              p.name AS profileName, p.id AS profileId
+       FROM chat_messages cm
+       JOIN profiles p ON p.id = cm.profile_id
+       WHERE cm.lobby_id IS NULL AND cm.created_at < ?
+       ORDER BY cm.created_at DESC
+       LIMIT 100`
+    )
+    .all(before);
+  res.json({ entries: rows.reverse() });
+});
+
+app.post('/chat/global', requireProfile, (req, res) => {
+  const body = String((req.body && req.body.body) || '').trim();
+  if (!body) return res.status(400).json({ error: 'empty_body' });
+  if (body.length > 500) return res.status(413).json({ error: 'too_long' });
+  const now = nowMs();
+  const info = db
+    .prepare(
+      `INSERT INTO chat_messages (lobby_id, profile_id, body, created_at)
+       VALUES (NULL, ?, ?, ?)`
+    )
+    .run(req.profile.id, body, now);
+  const msg = {
+    id: info.lastInsertRowid,
+    lobbyId: null,
+    profileId: req.profile.id,
+    profileName: req.profile.name,
+    body,
+    createdAt: now,
+  };
+  broadcast('global', { type: 'chat', message: msg });
+  res.status(201).json({ ok: true, message: msg });
+});
+
 // ----- WebSocket layer -----
 
 const httpServer = createServer(app);

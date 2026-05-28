@@ -176,3 +176,14 @@ export async function fetchChat(lobbyId, { before } = {}, token) {
 export async function sendChat(lobbyId, body, token) {
   return call('POST', `/lobbies/${lobbyId}/chat`, { body: { body }, token });
 }
+
+// Global chat: lobby-list-wide channel, no membership required.
+// Server broadcasts on the 'global' WS channel.
+export async function fetchGlobalChat({ before } = {}, token) {
+  const qs = before ? '?before=' + before : '';
+  return call('GET', `/chat/global${qs}`, { token });
+}
+
+export async function sendGlobalChat(body, token) {
+  return call('POST', '/chat/global', { body: { body }, token });
+}
