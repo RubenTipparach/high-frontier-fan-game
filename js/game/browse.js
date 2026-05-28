@@ -166,6 +166,22 @@ let _onlineLobbyId = null;    // lobby id (for chat REST + WS channel)
 let _onlineLeave = null;      // () => void callback wired by the host page
 let _onlineChatOff = null;    // unsubscribe handle for the lobby chat WS
 
+// Online auction state (kept module-level so it survives the snapshot
+// re-renders that opponents' bids trigger): _bidDraft / _joinDraft
+// preserve a half-typed amount; _auctionKey resets them when a new lot
+// opens; _deckPickerOpen tracks the auctioneer's inline deck picker.
+let _bidDraft = '';
+let _joinDraft = '';
+let _auctionKey = null;
+let _deckPickerOpen = false;
+
+// Patent decks the auctioneer can put up for auction (one per server
+// deck type). Counts are read live from the snapshot.
+const MP_AUCTION_DECKS = [
+  ['thruster', 'Thruster'], ['reactor', 'Reactor'], ['radiator', 'Radiator'],
+  ['refinery', 'Refinery'], ['robonaut', 'Robonaut'], ['generator', 'Generator'],
+];
+
 export function isBrowseOnline() { return _online; }
 
 export function mountBrowse(opts = {}) {
@@ -314,12 +330,265 @@ function applySnapshot(snapshot) {
   renderOnlineAuction(snapshot.auction);
 }
 
-// TODO(online-auction): the competitive multiplayer auction overlay is
-// wired separately. The sandbox's solo auction modal is single-player
-// only and must NOT be reused here. For now this is a deliberate no-op;
-// applySnapshot calls it so the wiring point already exists.
-function renderOnlineAuction(_auction) {
-  // intentionally empty - competitive auction overlay handled elsewhere.
+// Competitive multiplayer auction overlay. The sandbox's solo auction
+// modal is single-player only and is NOT reused here. Driven straight
+// off state.auction in the snapshot: appears when a lot opens, refreshes
+// on every update, clears when it resolves. Render is idempotent.
+function renderOnlineAuction(auction) {
+  const existing = document.getElementById('mp-auction-overlay');
+  if (!auction || !_online) {
+    if (existing) existing.remove();
+    _auctionKey = null;
+    _bidDraft = '';
+    _joinDraft = '';
+    return;
+  }
+  if (_auctionKey !== auction.cardId) {
+    _auctionKey = auction.cardId;
+    _bidDraft = '';
+    _joinDraft = '';
+  }
+
+  let overlay = existing;
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'mp-auction-overlay';
+    overlay.className = 'mp-auction-overlay';
+    overlay.innerHTML = `
+      <div class="mp-auction-modal" role="dialog" aria-label="Patent auction">
+        <div class="mp-auction-head">
+          <h3>Patent Auction</h3>
+          <span class="mp-auction-mode"></span>
+        </div>
+        <div class="mp-auction-body">
+          <div class="mp-auction-lot" id="mp-auction-lot"></div>
+          <div class="mp-auction-side">
+            <div class="mp-auction-status">
+              <div class="mp-auction-bid"></div>
+              <div class="muted mp-auction-phase"></div>
+            </div>
+            <div class="mp-auction-controls" id="mp-auction-controls"></div>
+            <div class="hud-error" id="mp-auction-error"></div>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+  }
+
+  const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
+  const auctioneer = players.find((p) => p.profileId === auction.auctioneerId);
+  const highBidder = auction.highBidderId
+    ? players.find((p) => p.profileId === auction.highBidderId) : null;
+  const lot = PATENTS_BY_ID[auction.cardId];
+
+  overlay.querySelector('.mp-auction-mode').textContent = auctioneer
+    ? `@${auctioneer.name}'s lot` : 'Lot';
+
+  const lotHost = overlay.querySelector('#mp-auction-lot');
+  lotHost.innerHTML = '';
+  if (lot) {
+    try { lotHost.appendChild(renderCard(lot, { type: 'patent' })); }
+    catch { lotHost.textContent = lot.name || auction.cardId; }
+  } else {
+    lotHost.textContent = auction.cardId;
+  }
+
+  overlay.querySelector('.mp-auction-bid').textContent = auction.highBid > 0
+    ? `High bid: ${auction.highBid} aqua by @${highBidder ? highBidder.name : '?'}`
+    : 'No bids yet.';
+  overlay.querySelector('.mp-auction-phase').textContent =
+    auction.awaiting === 'bidders' ? 'Bidding is open.' : 'The auctioneer is deciding.';
+
+  buildMpAuctionControls(
+    overlay.querySelector('#mp-auction-controls'),
+    auction, { auctioneer, highBidder },
+  );
+}
+
+function setMpAuctionError(text) {
+  const el = document.getElementById('mp-auction-error');
+  if (el) el.textContent = text || '';
+}
+
+// Clamp a typed amount up to at least `min`; used so the input re-seeds
+// to a valid value after an opponent's bid raises the floor.
+function clampAuctionInt(draft, min) {
+  const v = parseInt(draft, 10);
+  return (Number.isInteger(v) && v >= min) ? v : min;
+}
+
+// Role + phase aware controls inside the auction modal. Mirrors the
+// engine's state machine (server/game/engine.js auction handlers).
+function buildMpAuctionControls(host, a, { auctioneer, highBidder }) {
+  host.innerHTML = '';
+  if (!_onlineMe || !_onlineSnapshot) {
+    host.appendChild(noteEl('Spectating this auction.'));
+    return;
+  }
+  const myId = _onlineMe.id;
+  const myp = (_onlineSnapshot.players || []).find((p) => p.profileId === myId);
+  if (!myp) { host.appendChild(noteEl('Spectating this auction.')); return; }
+  const iAmAuctioneer = a.auctioneerId === myId;
+  const myAqua = myp.aqua | 0;
+
+  if (a.awaiting === 'bidders') {
+    if (iAmAuctioneer) {
+      host.appendChild(noteEl('Waiting for the other players to bid or pass.'));
+      return;
+    }
+    if (a.highBidderId === myId) {
+      host.appendChild(noteEl('You hold the high bid. Waiting for the others.'));
+      return;
+    }
+    const minBid = (a.highBid | 0) + 1;
+    const passed = Array.isArray(a.passed) && a.passed.includes(myId);
+    const row = document.createElement('div');
+    row.className = 'mp-auction-bidrow';
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.className = 'mp-auction-input';
+    input.min = String(minBid);
+    input.value = String(clampAuctionInt(_bidDraft, minBid));
+    const bidBtn = document.createElement('button');
+    bidBtn.type = 'button';
+    bidBtn.className = 'modal-btn primary';
+    const passBtn = document.createElement('button');
+    passBtn.type = 'button';
+    passBtn.className = 'modal-btn';
+    passBtn.textContent = passed ? 'Passed' : 'Pass';
+    passBtn.disabled = passed || _onlineBusy;
+    const sync = () => {
+      const v = parseInt(input.value, 10);
+      const okAmt = Number.isInteger(v) && v >= minBid && v <= myAqua;
+      bidBtn.textContent = Number.isInteger(v) ? `Bid ${v}` : 'Bid';
+      bidBtn.disabled = !okAmt || _onlineBusy;
+    };
+    input.addEventListener('input', () => { _bidDraft = input.value; sync(); });
+    bidBtn.addEventListener('click', () => {
+      const amt = parseInt(input.value, 10);
+      if (!Number.isInteger(amt)) { setMpAuctionError('Enter a whole number.'); return; }
+      submitMpAuctionOp({ kind: 'AUCTION_BID', amount: amt });
+    });
+    passBtn.addEventListener('click', () => {
+      submitMpAuctionOp({ kind: 'AUCTION_PASS' });
+    });
+    row.append(input, bidBtn, passBtn);
+    host.appendChild(row);
+    host.appendChild(noteEl(`You have ${myAqua} aqua. Minimum bid ${minBid}.`));
+    sync();
+    return;
+  }
+
+  // awaiting === 'auctioneer'
+  if (!iAmAuctioneer) {
+    host.appendChild(noteEl(
+      `Waiting for @${auctioneer ? auctioneer.name : 'the auctioneer'} to sell or keep.`
+    ));
+    return;
+  }
+  if ((a.highBid | 0) === 0) {
+    const keepBtn = document.createElement('button');
+    keepBtn.type = 'button';
+    keepBtn.className = 'modal-btn primary';
+    keepBtn.textContent = 'Keep (no bids)';
+    keepBtn.disabled = _onlineBusy;
+    keepBtn.addEventListener('click', () => {
+      submitMpAuctionOp({ kind: 'AUCTION_JOIN', amount: 0 });
+    });
+    host.appendChild(keepBtn);
+    host.appendChild(noteEl('No one bid. Keep it for free (one more pass-round, then it is yours).'));
+    return;
+  }
+  const sellBtn = document.createElement('button');
+  sellBtn.type = 'button';
+  sellBtn.className = 'modal-btn primary';
+  sellBtn.textContent = `Sell to @${highBidder ? highBidder.name : '?'} (${a.highBid} aqua)`;
+  sellBtn.disabled = _onlineBusy;
+  sellBtn.addEventListener('click', () => {
+    submitMpAuctionOp({ kind: 'AUCTION_SELL' });
+  });
+  host.appendChild(sellBtn);
+
+  const minJoin = a.highBid | 0;
+  const row = document.createElement('div');
+  row.className = 'mp-auction-bidrow';
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.className = 'mp-auction-input';
+  input.min = String(minJoin);
+  input.value = String(clampAuctionInt(_joinDraft, minJoin));
+  const joinBtn = document.createElement('button');
+  joinBtn.type = 'button';
+  joinBtn.className = 'modal-btn';
+  const sync = () => {
+    const v = parseInt(input.value, 10);
+    const okAmt = Number.isInteger(v) && v >= minJoin && v <= myAqua;
+    joinBtn.textContent = Number.isInteger(v) ? `Join at ${v}` : 'Join';
+    joinBtn.disabled = !okAmt || _onlineBusy;
+  };
+  input.addEventListener('input', () => { _joinDraft = input.value; sync(); });
+  joinBtn.addEventListener('click', () => {
+    submitMpAuctionOp({ kind: 'AUCTION_JOIN', amount: parseInt(input.value, 10) });
+  });
+  row.append(input, joinBtn);
+  host.appendChild(row);
+  host.appendChild(noteEl(
+    `Join at ${minJoin}+ to keep bidding (you pay the bank if you win). You have ${myAqua} aqua.`
+  ));
+  sync();
+}
+
+// Auction op submitter. Bypasses submitOnlineOp's turn-check: BID/PASS
+// come from NON-active players, and the server has its own caller
+// validation against the auction roles. Re-hydrates on success; on
+// failure surfaces the error in the auction overlay and snaps back to
+// the last-known snapshot so the UI matches authority.
+async function submitMpAuctionOp(op) {
+  if (!_online || _onlineBusy) return false;
+  _onlineBusy = true;
+  setMpAuctionError('');
+  let r;
+  try {
+    r = await submitGameOp(_onlineGameId, op, _onlineMe.token);
+  } finally {
+    _onlineBusy = false;
+  }
+  if (!r || !r.ok) {
+    setMpAuctionError(humanizeOnlineOpError(r && r.error));
+    if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
+    return false;
+  }
+  applySnapshot(r.data.game.state);
+  return true;
+}
+
+// Helper used by the Multiplayer pane: an inline element listing the
+// patent decks with their counts; tapping one fires AUCTION_START. The
+// _deckPickerOpen flag (cleared on auction commit / leave) keeps the
+// picker open across the snapshot re-renders during selection.
+function buildMpDeckPicker(host, snapshot) {
+  host.innerHTML = '';
+  const label = document.createElement('div');
+  label.className = 'mp-detail-label';
+  label.textContent = 'Auction the top of which deck? (costs 1 op)';
+  host.appendChild(label);
+  const row = document.createElement('div');
+  row.className = 'mp-deck-row';
+  for (const [type, name] of MP_AUCTION_DECKS) {
+    const deck = (snapshot.decks && snapshot.decks[type]) || [];
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'modal-btn';
+    b.textContent = `${name} (${deck.length})`;
+    b.disabled = !deck.length || _onlineBusy;
+    b.addEventListener('click', () => {
+      _deckPickerOpen = false;
+      submitOnlineOp({ kind: 'AUCTION_START', deckType: type });
+    });
+    row.appendChild(b);
+  }
+  host.appendChild(row);
 }
 
 // ----- multiplayer table panel (online sidepanel pane) -----
@@ -446,6 +715,11 @@ function renderMpPanel(snapshot) {
   const players = snapshot.players;
   const active = players[snapshot.activeIndex] || null;
   const myId = _onlineMe && _onlineMe.id;
+  const myp = players.find((p) => p.profileId === myId) || null;
+  // Auctioneer-side gating mirrors the server (AUCTION_START needs your
+  // turn, at least one op left, and no auction already open).
+  const canStartAuction = !!(active && active.profileId === myId
+    && myp && myp.opsRemaining > 0 && !snapshot.auction);
   tableEl.innerHTML = '';
 
   const head = document.createElement('div');
@@ -467,6 +741,18 @@ function renderMpPanel(snapshot) {
     });
     row.appendChild(leave);
   }
+  if (canStartAuction) {
+    const startBtn = document.createElement('button');
+    startBtn.type = 'button';
+    startBtn.className = 'mp-leave mp-auction-start';
+    startBtn.textContent = _deckPickerOpen ? 'Cancel' : '🎯 Start auction';
+    startBtn.title = 'Put the top of a patent deck up for auction (costs 1 op)';
+    startBtn.addEventListener('click', () => {
+      _deckPickerOpen = !_deckPickerOpen;
+      renderMpPanel(_onlineSnapshot);
+    });
+    row.appendChild(startBtn);
+  }
   const myTurn = !!(active && active.profileId === myId);
   const turn = document.createElement('div');
   turn.className = 'mp-turn' + (myTurn ? ' mp-your-turn' : '');
@@ -478,6 +764,13 @@ function renderMpPanel(snapshot) {
   clock.textContent = `Round ${snapshot.round} · slot ${snapshot.turn}`;
   head.append(row, turn, clock);
   tableEl.appendChild(head);
+
+  if (_deckPickerOpen && canStartAuction) {
+    const picker = document.createElement('div');
+    picker.className = 'mp-deck-picker';
+    buildMpDeckPicker(picker, snapshot);
+    tableEl.appendChild(picker);
+  }
 
   const roster = document.createElement('div');
   roster.className = 'mp-roster';
@@ -678,6 +971,14 @@ export function unmountBrowseOnline() {
   _onlineRoom = null;
   _onlineLobbyId = null;
   _onlineLeave = null;
+  // Tear down the auction overlay + drafts so nothing lingers when the
+  // player returns to the lobby list.
+  _bidDraft = '';
+  _joinDraft = '';
+  _auctionKey = null;
+  _deckPickerOpen = false;
+  const auctionOverlay = document.getElementById('mp-auction-overlay');
+  if (auctionOverlay) auctionOverlay.remove();
   syncMpTabVisibility();
 }
 

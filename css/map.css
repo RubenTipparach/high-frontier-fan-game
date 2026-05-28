@@ -5700,3 +5700,86 @@ body:has(#view-browse:not(.hidden)) #main {
   cursor: pointer;
 }
 .mp-chat-form button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ===== Multiplayer auction overlay (browse.js renderOnlineAuction) ===== */
+.mp-auction-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(3, 2, 10, 0.78);
+  backdrop-filter: blur(4px);
+  animation: modal-fade 0.18s ease-out;
+}
+.mp-auction-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 20px 20px;
+  max-width: 700px;
+  width: 100%;
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  color: var(--ink);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+}
+.mp-auction-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.mp-auction-head h3 { margin: 0; font-size: 18px; letter-spacing: 0.5px; }
+.mp-auction-mode {
+  color: var(--ink-dim, #8b90b8);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.mp-auction-body { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+.mp-auction-lot { flex: 0 0 auto; display: flex; justify-content: center; min-width: 200px; }
+.mp-auction-side {
+  flex: 1 1 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 220px;
+}
+.mp-auction-bid { font-size: 16px; font-weight: 700; letter-spacing: 0.3px; }
+.mp-auction-phase { font-size: 13px; margin-top: 2px; }
+.mp-auction-controls { display: flex; flex-direction: column; gap: 10px; }
+.mp-auction-bidrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.mp-auction-input {
+  width: 92px;
+  padding: 7px 9px;
+  font-size: 14px;
+  font-weight: 700;
+  background: var(--bg-2);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.mp-auction-controls .modal-btn { white-space: nowrap; }
+.mp-auction-controls .modal-btn.primary {
+  background: var(--accent);
+  color: #062136;
+  border-color: var(--accent-2);
+}
+.mp-auction-controls .modal-btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+.mp-auction-controls .modal-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.mp-deck-picker {
+  margin: 6px 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.5);
+}
+.mp-deck-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.mp-deck-row .modal-btn { flex: 1 1 auto; min-width: 80px; }
+@media (max-width: 560px) {
+  .mp-auction-lot { transform: scale(0.9); transform-origin: top center; }
+}
