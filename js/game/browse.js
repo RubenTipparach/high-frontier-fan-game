@@ -297,6 +297,15 @@ export function mountBrowse(opts = {}) {
 // no-op if mount raced an unmount.
 async function bootstrapOnlineGame() {
   if (!_online || !_activeData || !_onlineGameId || !_onlineMe) return;
+  // Multiplayer is Card Market mode mandatory (user 2026-05: "we're
+  // in multiplayer market mode is mandatory"). Force it on for the
+  // duration of the online session regardless of the player's solo
+  // localStorage preference; skipReset so we don't wipe the freshly
+  // hydrated state. syncCartTabVisibility runs on the resulting
+  // onMarketChange so the 🛒 tab appears.
+  if (getMarketMode() !== MARKET_MODE.MARKET) {
+    setMarketMode(MARKET_MODE.MARKET, { skipReset: true });
+  }
   _onlineMaps = buildIdMaps(_activeData);
   const r = await getGame(_onlineGameId, _onlineMe.token);
   if (!_online) return; // unmounted while the fetch was in flight
