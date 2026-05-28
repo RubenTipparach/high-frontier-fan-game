@@ -585,6 +585,25 @@ function isGamePlayer(gameId, profileId) {
     .get(gameId, profileId);
 }
 
+// Spectator access: any signed-in profile can read a game whose
+// underlying lobby is open (join_policy = 'open') AND whose game is
+// 'active'. Mirrors the "public game" affordance the user asked for -
+// view-only hop-in for in-progress public games. Players keep access
+// for any join_policy, any game.status.
+function canViewGame(gameId, profileId) {
+  if (isGamePlayer(gameId, profileId)) return true;
+  const row = db
+    .prepare(
+      `SELECT l.join_policy AS joinPolicy, g.status AS gameStatus
+       FROM games g
+       JOIN lobbies l ON l.id = g.lobby_id
+       WHERE g.id = ?`
+    )
+    .get(gameId);
+  if (!row) return false;
+  return row.joinPolicy === 'open' && row.gameStatus === 'active';
+}
+
 // Full game view: meta + roster + current state snapshot. State is sent
 // whole today (open information; hidden hands aren't populated until
 // the BUILD op lands, at which point this redacts per-player).
@@ -619,13 +638,37 @@ function publishGame(gameId, payload) {
   broadcast(`game:${gameId}`, payload);
 }
 
+// Public live games: open-lobby games currently in 'active' status,
+// for the lobby-list "Live games" spectator section. Returns enough
+// per-row info to render the chip without an extra fetch.
+app.get('/games/public', requireProfile, (req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT g.id          AS gameId,
+              g.lobby_id    AS lobbyId,
+              g.created_at  AS startedAt,
+              l.name        AS lobbyName,
+              l.code        AS lobbyCode,
+              p.name        AS hostName,
+              (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) AS playerCount
+       FROM games g
+       JOIN lobbies l ON l.id = g.lobby_id
+       JOIN profiles p ON p.id = l.host_id
+       WHERE g.status = 'active' AND l.join_policy = 'open'
+       ORDER BY g.created_at DESC
+       LIMIT 50`
+    )
+    .all();
+  res.json({ entries: rows });
+});
+
 app.get('/games/:id', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  if (!isGamePlayer(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+  if (!canViewGame(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
   const view = gameView(id);
   if (!view) return res.status(404).json({ error: 'not_found' });
-  res.json({ game: view });
+  res.json({ game: view, isSpectator: !isGamePlayer(id, req.profile.id) });
 });
 
 // Submit one operation. REST is the source of truth: the engine
@@ -1145,10 +1188,9 @@ function isValidChannel(channel, profile) {
   const g = /^game:(\d+)$/.exec(channel);
   if (g) {
     const gameId = Number(g[1]);
-    const isPlayer = db
-      .prepare('SELECT 1 FROM game_players WHERE game_id = ? AND profile_id = ?')
-      .get(gameId, profile.id);
-    return !!isPlayer;
+    // Players always allowed; spectators allowed when the underlying
+    // lobby is open and the game is active (read-only live updates).
+    return canViewGame(gameId, profile.id);
   }
   const me = /^me:(\d+)$/.exec(channel);
   if (me) return Number(me[1]) === profile.id;

@@ -80,9 +80,13 @@ function rekeyToPlanner(maps, obj) {
 export function hydrateFromSnapshot(snapshot, myId, maps) {
   if (!snapshot) return null;
   const me = (snapshot.players || []).find((p) => p.profileId === myId);
-  if (!me) return null;
-  const r = me.rocket || {};
-
+  // Personal state (rocket / hand / outposts / glory / clock / LEO).
+  // For a spectator (myId not in the roster) every personal hydrator
+  // gets an empty payload so the side panels read "no rocket" /
+  // "no hand" etc. instead of carrying stale solo state. The shared
+  // board state still hydrates below so the spectator sees the
+  // live map.
+  const r = (me && me.rocket) || {};
   hydrateRocket({
     stack: r.stack || [],
     activeThrusterId: r.activeThrusterId || null,
@@ -90,12 +94,12 @@ export function hydrateFromSnapshot(snapshot, myId, maps) {
     tank: r.tank | 0,
     afterburnEngaged: !!r.afterburnEngaged,
   });
-  setAqua(me.aqua | 0);
-  hydrateHand(me.hand || []);
+  setAqua(me ? (me.aqua | 0) : 0);
+  hydrateHand((me && me.hand) || []);
 
   // Outposts are keyed by letter; translate the site each one sits on.
   const outposts = {};
-  for (const [letter, op] of Object.entries(me.outposts || {})) {
+  for (const [letter, op] of Object.entries((me && me.outposts) || {})) {
     const siteId = op && op.siteId;
     outposts[letter] = {
       ...op,
@@ -104,27 +108,28 @@ export function hydrateFromSnapshot(snapshot, myId, maps) {
   }
   hydrateOutposts(outposts);
 
-  hydrateGlory(me.glory || {});
+  hydrateGlory((me && me.glory) || {});
   hydrateClock({
     turn: snapshot.turn | 0,
     round: snapshot.round || 1,
     lastEvent: snapshot.lastEvent || null,
-    opsRemaining: me.opsRemaining | 0,
-    movesRemaining: me.movesRemaining | 0,
-    discardsRemaining: me.discardsRemaining | 0,
+    opsRemaining: me ? (me.opsRemaining | 0) : 0,
+    movesRemaining: me ? (me.movesRemaining | 0) : 0,
+    discardsRemaining: me ? (me.discardsRemaining | 0) : 0,
   });
 
-  // Shared, site-keyed board state -> re-key onto planner ids.
+  // Shared, site-keyed board state -> re-key onto planner ids. This
+  // is the live map every player + spectator sees.
   hydrateDiscs(rekeyToPlanner(maps, snapshot.discs));
   hydrateFactories(
     rekeyToPlanner(maps, snapshot.factories),
     rekeyToPlanner(maps, snapshot.colonies),
   );
   hydrateDecks(snapshot.decks || {});
-  // LEO Stack: the server carries a flat per-player slot array
-  // (state.js#freshPlayer.leo). Hand it straight to the sandbox
-  // hydrator; slot shape matches.
-  hydrateLeo(me.leo || []);
+  // LEO Stack: server carries a flat per-player slot array
+  // (state.js#freshPlayer.leo). Spectators see no LEO stack (no
+  // player slot of their own).
+  hydrateLeo((me && me.leo) || []);
 
-  return (r.siteId && maps.serverToPlanner.get(r.siteId)) || null;
+  return (me && r.siteId && maps.serverToPlanner.get(r.siteId)) || null;
 }

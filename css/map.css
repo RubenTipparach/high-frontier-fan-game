@@ -5832,17 +5832,21 @@ body:has(#view-browse:not(.hidden)) #main {
   border-radius: 6px;
 }
 .mp-auction-controls .modal-btn { white-space: nowrap; }
+/* Bid / Join / Sell - light-blue accent with explicit dark-navy
+   text. User feedback 2026-05: liked the blue look but the button
+   was rendering with no visible text in their build (the .modal-btn
+   base set color:var(--ink) which is light, and at this specificity
+   tier the override couldn't reliably win against late cascades on
+   some devices). Pin the colour with !important so the navy text
+   shows everywhere. */
 .mp-auction-controls .modal-btn.primary {
-  /* Dark-green / light-mint, matching the auction-commit confirm
-     button below. Reuses the high-contrast palette so Bid / Join /
-     Sell read as the same "this is the action" affordance across
-     every auction surface, and the text stays solid even against
-     a light-blue accent backdrop. */
-  background: #14532d;
-  color: #d1fae5;
-  border-color: #166534;
+  background: var(--accent) !important;
+  color: #062136 !important;
+  border-color: var(--accent-2) !important;
 }
-.mp-auction-controls .modal-btn.primary:hover:not(:disabled) { background: #166534; }
+.mp-auction-controls .modal-btn.primary:hover:not(:disabled) {
+  background: var(--accent-2) !important;
+}
 .mp-auction-controls .modal-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .mp-deck-picker {
   margin: 6px 0 10px;

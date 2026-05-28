@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>High Frontier - fan game</title>
-    <link rel="stylesheet" href="./css/style.css?v=13" />
-    <link rel="stylesheet" href="./css/map.css?v=22" />
+    <link rel="stylesheet" href="./css/style.css?v=14" />
+    <link rel="stylesheet" href="./css/map.css?v=23" />
     <link rel="stylesheet" href="./css/cards.css?v=5" />
     <!--
       API base URL for the High Frontier companion server. Empty string
@@ -116,6 +116,16 @@
           </form>
         </div>
         <div class="lobby-games-grid">
+          <!-- "Your games" intentionally first - it's the most personal
+               and most-acted-on column, so it sits left-most on desktop
+               and top on mobile so players see what they're already in
+               without scrolling. -->
+          <div class="card">
+            <div class="card-header"><h2>Your games</h2></div>
+            <ul id="mygames-started" class="lobby-list">
+              <li class="empty">No games in progress.</li>
+            </ul>
+          </div>
           <div class="card">
             <div class="card-header">
               <h2>Open tables</h2>
@@ -126,9 +136,12 @@
             </ul>
           </div>
           <div class="card">
-            <div class="card-header"><h2>Your games</h2></div>
-            <ul id="mygames-started" class="lobby-list">
-              <li class="empty">No games in progress.</li>
+            <div class="card-header">
+              <h2>Live games</h2>
+              <span class="muted" title="Public games in progress - hop in to spectate">👁</span>
+            </div>
+            <ul id="public-games-list" class="lobby-list">
+              <li class="empty">No public games right now.</li>
             </ul>
           </div>
           <div class="card">

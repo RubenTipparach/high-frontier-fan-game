@@ -3,7 +3,7 @@
 // lobby so chat + roster updates land in real time.
 
 import {
-  listLobbies, listMyGames, getLobby, createLobby, joinLobby, leaveLobby,
+  listLobbies, listMyGames, listPublicGames, getLobby, createLobby, joinLobby, leaveLobby,
   setReady, startLobby, claimInviteLink, lookupInviteLink,
   fetchGlobalChat, sendGlobalChat,
 } from './api.js';
@@ -182,6 +182,7 @@ function mountGlobalChat() {
 
 export async function refreshLobbyList() {
   refreshMyGames();
+  refreshPublicGames();
   const list = document.getElementById('lobby-list');
   list.innerHTML = '<li class="empty">Loading…</li>';
   const r = await listLobbies();
@@ -239,6 +240,76 @@ export async function refreshMyGames() {
   }
   renderMyGames(startedEl, started, 'Resume', 'No games in progress.');
   renderMyGames(endedEl, ended, 'Review', 'No finished games.');
+}
+
+// "Live games": in-progress public games anyone can hop into as a
+// spectator. The list is profile-agnostic (server returns every
+// open-lobby active game); the Watch button mounts the browse view
+// in spectator mode so the viewer sees the live board without any
+// actions.
+export async function refreshPublicGames() {
+  const listEl = document.getElementById('public-games-list');
+  if (!listEl) return;
+  const me = activeProfile();
+  if (!me) {
+    listEl.innerHTML = '<li class="empty">Sign in to watch live games.</li>';
+    return;
+  }
+  const r = await listPublicGames(me.token);
+  if (!r.ok) {
+    listEl.innerHTML = `<li class="empty">Failed to load (${r.error}).</li>`;
+    return;
+  }
+  const entries = (r.data && r.data.entries) || [];
+  if (!entries.length) {
+    listEl.innerHTML = '<li class="empty">No public games right now.</li>';
+    return;
+  }
+  listEl.innerHTML = '';
+  for (const g of entries) {
+    const li = document.createElement('li');
+    li.innerHTML = `
+      <div>
+        <span class="name"></span>
+        <span class="meta">hosted by @<span class="host"></span>
+          · <span class="count"></span> players
+          · <code></code></span>
+      </div>
+      <div class="row-actions">
+        <button class="primary">👁 Watch</button>
+      </div>
+    `;
+    li.querySelector('.name').textContent = g.lobbyName;
+    li.querySelector('.host').textContent = g.hostName;
+    li.querySelector('.count').textContent = g.playerCount;
+    li.querySelector('code').textContent = g.lobbyCode;
+    li.querySelector('button').addEventListener('click', () => {
+      watchGame(g);
+    });
+    listEl.appendChild(li);
+  }
+}
+
+// Mount the browse view in spectator mode for the given public game.
+// The viewer sees the live board (map / roster / turn) but every
+// action submitter refuses with a "Spectator - view only" toast.
+async function watchGame(g) {
+  const me = activeProfile();
+  if (!me) return;
+  _onShowView('view-browse');
+  mountBrowse({
+    online: true,
+    spectator: true,
+    gameId: g.gameId,
+    lobbyId: null,         // spectators don't get the lobby chat
+    me,
+    onToast: _onToast,
+    room: g.lobbyName + ' (spectating)',
+    onLeave: () => {
+      unmountBrowseOnline();
+      _onShowView('view-lobby-list');
+    },
+  });
 }
 
 function renderMyGames(listEl, games, actionLabel, emptyMsg) {

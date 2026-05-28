@@ -156,6 +156,17 @@ let _rocketSubWired = false;
 let _online = false;          // are we driving from a server game?
 let _onlineGameId = null;     // server game id
 let _onlineMe = null;         // { id, name, token }
+// Spectator mode: viewer is signed in but NOT in the game's roster.
+// Set when mountBrowse({ spectator: true, ... }); blocks every action
+// submission path + skips the crew-pick wizard (no faction to set).
+let _spectator = false;
+// Polling fallback for missed WS broadcasts. User reported 2026-05:
+// "auction window didn't auto open either. I had to refresh". WS
+// reconnect/resub races + flaky mobile networks can drop snapshots,
+// so re-fetch the full game state every few seconds and re-apply.
+// applySnapshot is idempotent. Cleared on unmountBrowseOnline.
+let _onlinePoll = null;
+const ONLINE_POLL_MS = 5000;
 let _onlineToast = null;      // (msg, level) => void, from the caller
 let _onlineMaps = null;       // { serverToPlanner, plannerToServer }
 let _onlineSnapshot = null;   // latest server snapshot (for turn checks)
@@ -191,6 +202,7 @@ export function mountBrowse(opts = {}) {
   // (which fire synchronously during mount) already see online mode.
   if (opts && opts.online) {
     _online = true;
+    _spectator = !!opts.spectator;
     _onlineGameId = opts.gameId || null;
     _onlineMe = opts.me || null;
     _onlineToast = typeof opts.onToast === 'function' ? opts.onToast : (() => {});
@@ -287,6 +299,24 @@ async function bootstrapOnlineGame() {
   });
   _onlineOffWS = () => { off(); ws.unsubscribe(channel); };
 
+  // Polling fallback. WS is the primary path, but if a broadcast is
+  // dropped (mobile network, tab backgrounded, server hiccup) the
+  // user can sit with a stale board. Re-fetch every ONLINE_POLL_MS
+  // and re-apply. applySnapshot is a no-op when the seq matches.
+  if (_onlinePoll) clearInterval(_onlinePoll);
+  _onlinePoll = setInterval(async () => {
+    if (!_online || !_onlineGameId || !_onlineMe) return;
+    try {
+      const poll = await getGame(_onlineGameId, _onlineMe.token);
+      if (!_online) return;
+      if (poll && poll.ok && poll.data && poll.data.game && poll.data.game.state) {
+        applySnapshot(poll.data.game.state);
+      }
+    } catch (err) {
+      // Network blips are expected; the next tick will retry.
+    }
+  }, ONLINE_POLL_MS);
+
   // In-pane chat: fetch the lobby's chat history (table conversation)
   // and subscribe to live 'chat' broadcasts on the lobby channel. Both
   // are owned by browse.js so the mp pane stays self-contained.
@@ -344,7 +374,7 @@ function applySnapshot(snapshot) {
 let _crewWizardOpen = false;
 
 function maybePromptCrewPick(snapshot) {
-  if (!_online || _crewWizardOpen || !snapshot || !_onlineMe) return;
+  if (!_online || _spectator || _crewWizardOpen || !snapshot || !_onlineMe) return;
   const myId = _onlineMe.id;
   const myp = (snapshot.players || []).find((p) => p.profileId === myId);
   if (!myp || myp.faction) return;
@@ -372,6 +402,7 @@ function maybePromptCrewPick(snapshot) {
 // open. The server validates that this player owns the pick.
 async function submitMpCrewOp(op) {
   if (!_online || _onlineBusy) return false;
+  if (_spectator) return false;
   _onlineBusy = true;
   let r;
   try {
@@ -644,6 +675,7 @@ function buildMpAuctionControls(host, a, { auctioneer, highBidder }) {
 // the last-known snapshot so the UI matches authority.
 async function submitMpAuctionOp(op) {
   if (!_online || _onlineBusy) return false;
+  if (_spectator) { _onlineToast('Spectator - view only.', 'error'); return false; }
   _onlineBusy = true;
   setMpAuctionError('');
   let r;
@@ -964,7 +996,7 @@ function mpSection(title, names, emptyTxt) {
 
 // Whether it is the local player's turn in the cached snapshot.
 function isOnlineMyTurn() {
-  if (!_online || !_onlineSnapshot || !_onlineMe) return false;
+  if (!_online || _spectator || !_onlineSnapshot || !_onlineMe) return false;
   const players = _onlineSnapshot.players || [];
   const active = players[_onlineSnapshot.activeIndex];
   return !!active && active.profileId === _onlineMe.id;
@@ -977,6 +1009,7 @@ function isOnlineMyTurn() {
 // back. Returns true on success. Guards re-entrancy with _onlineBusy.
 async function submitOnlineOp(op) {
   if (!_online) return false;
+  if (_spectator) { _onlineToast('Spectator - view only.', 'error'); return false; }
   if (!isOnlineMyTurn()) { _onlineToast('Not your turn.', 'error'); return false; }
   if (_onlineBusy) return false;
   _onlineBusy = true;
@@ -1061,8 +1094,10 @@ function onSetActiveProspectorClick(cardId) {
 // this teardown only detaches the online plumbing. Flagging, not solving.
 export function unmountBrowseOnline() {
   if (_onlineOffWS) { try { _onlineOffWS(); } catch { /* ignore */ } _onlineOffWS = null; }
+  if (_onlinePoll) { clearInterval(_onlinePoll); _onlinePoll = null; }
   setOnline(false);
   _online = false;
+  _spectator = false;
   _onlineGameId = null;
   _onlineMe = null;
   _onlineToast = null;

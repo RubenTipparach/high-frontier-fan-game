@@ -87,6 +87,11 @@ export async function listMyGames(token) {
   return call('GET', '/lobbies/mine', { token });
 }
 
+// In-progress games whose lobby was open. Anyone signed in can watch.
+export async function listPublicGames(token) {
+  return call('GET', '/games/public', { token });
+}
+
 export async function getLobby(id) {
   return call('GET', '/lobbies/' + id);
 }

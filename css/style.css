@@ -567,10 +567,10 @@ label.checkbox input { accent-color: var(--accent-2); }
    lobby's own scroll handles overflow. */
 .lobby-games-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   align-items: start;
-  max-width: 1200px;
+  max-width: 1320px;
   margin: 0 auto;
 }
 .lobby-games-grid > .card { margin-bottom: 0; }
@@ -580,7 +580,7 @@ label.checkbox input { accent-color: var(--accent-2); }
    showView in main.js.) */
 body.in-lobby .main-menu-fab { display: none; }
 
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   .lobby-games-grid { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 640px) {
