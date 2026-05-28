@@ -235,7 +235,12 @@ export async function refreshMyGames() {
   const started = [];
   const ended = [];
   for (const g of r.data.entries) {
-    if (g.gameStatus === 'finished') ended.push(g);
+    // Cancelled lobbies/games land in "Ended" so the player still has
+    // a record of them. gameStatus carries through to the renderer
+    // which decorates the row with a "(cancelled)" tag and disables
+    // Review (there's no recoverable terminal state).
+    if (g.status === 'cancelled' || g.gameStatus === 'cancelled') ended.push(g);
+    else if (g.gameStatus === 'finished') ended.push(g);
     else if (g.status === 'started') started.push(g);
   }
   renderMyGames(startedEl, started, 'Resume', 'No games in progress.');
@@ -323,12 +328,15 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg) {
   }
   for (const g of games) {
     const li = document.createElement('li');
+    const cancelled = g.status === 'cancelled' || g.gameStatus === 'cancelled';
+    if (cancelled) li.classList.add('is-cancelled');
     li.innerHTML = `
       <div>
         <span class="name"></span>
         <span class="meta">hosted by @<span class="host"></span>
           · <span class="count"></span>/${g.maxPlayers}
-          · <code></code></span>
+          · <code></code>
+          <span class="tag-cancelled" hidden>· cancelled</span></span>
       </div>
       <div class="row-actions">
         <button class="primary"></button>
@@ -339,8 +347,17 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg) {
     li.querySelector('.count').textContent = g.memberCount;
     li.querySelector('code').textContent = g.code;
     const btn = li.querySelector('button');
-    btn.textContent = actionLabel;
-    btn.addEventListener('click', () => openLobby(g.id, { join: false }));
+    if (cancelled) {
+      li.querySelector('.tag-cancelled').hidden = false;
+      // No recoverable terminal state for a cancelled lobby - the
+      // lobby/game rows still exist for audit but the player can't
+      // resume or review the board.
+      btn.textContent = 'Cancelled';
+      btn.disabled = true;
+    } else {
+      btn.textContent = actionLabel;
+      btn.addEventListener('click', () => openLobby(g.id, { join: false }));
+    }
     listEl.appendChild(li);
   }
 }

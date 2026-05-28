@@ -391,7 +391,6 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
        JOIN lobby_members lm ON lm.lobby_id = l.id AND lm.profile_id = ?
        JOIN profiles p ON p.id = l.host_id
        LEFT JOIN games g ON g.lobby_id = l.id
-       WHERE l.status != 'cancelled'
        ORDER BY l.created_at DESC
        LIMIT 50`
     )
