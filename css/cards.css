@@ -182,6 +182,31 @@
   border: 3px solid var(--crew-color, #fde047);
   border-radius: 10px;
 }
+/* Crew cards are light on BOTH faces (each face is its own faction
+   on a shared physical card; there is no dark "tier-2" back). Pin
+   the secondary face to the same light palette as the primary so a
+   crew card rendered face:secondary in a stack doesn't pick up the
+   patent-card dark-back colours from the :root defaults. Mirrors
+   the data-face="primary" overrides higher up. */
+.card.kind-crew .card-face[data-face="secondary"] {
+  --ink: #1a1614;
+  --ink-dim: #5b554c;
+  --ink-mute: #8a8478;
+  --border: #d4cba8;
+  --accent: #0c0a16;
+  --accent-2: #4b5563;
+  --bg-2: #f4ecd8;
+}
+.card.kind-crew .card-face[data-face="secondary"] .card-footer {
+  background: rgba(0, 0, 0, 0.05);
+  border-top-color: rgba(0, 0, 0, 0.15);
+}
+/* Thrust arrow inherits currentColor; the primary rule pins it
+   dark, we need the same for crew's secondary face since it's also
+   a light face. */
+.card.kind-crew .card-face[data-face="secondary"] .thrust-svg {
+  color: #0c0a16;
+}
 
 /* Stats box top-left: mass / rad / spectral hex in a row. */
 .card-statbox {
@@ -454,6 +479,13 @@
 .card-face[data-face="secondary"] .card-prop-isru strong,
 .card-face[data-face="secondary"] .card-prop-isru b {
   color: #f1f5f9;
+}
+/* Crew secondary face is light (see kind-crew override above), so
+   the ISRU chip needs dark ink like the primary face. */
+.card.kind-crew .card-face[data-face="secondary"] .card-prop-isru,
+.card.kind-crew .card-face[data-face="secondary"] .card-prop-isru strong,
+.card.kind-crew .card-face[data-face="secondary"] .card-prop-isru b {
+  color: #0c0a16;
 }
 .card-prop-isru strong {
   font-size: 10px;
