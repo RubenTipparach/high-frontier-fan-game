@@ -283,6 +283,19 @@ single-player sandbox (`js/game/*`, e.g. `stacks.js`, `rocket.js`,
 logic so the two modes stay in lockstep. `server/game/state.js` already
 carries the same per-player shape for exactly this reason.
 
+**The multiplayer UI IS the sandbox UI - reuse it, never rebuild it.**
+Learned the hard way: do NOT build a separate or "simpler" multiplayer
+front-end. Multiplayer must mount the SAME view as the single-player
+sandbox - the classic solar-system map (the sandbox renderer + map
+data, not a stripped-down delta-v graph), the same rocket-stack / hand /
+outpost / factory / disc panels, the same card rendering and site
+popups. The ONLY differences are that actions route through the
+multiplayer server API (`submitGameOp`) instead of mutating local state,
+and the board hydrates from the server snapshot each update. The
+competitive auction is the lone exception (the sandbox auction is solo),
+so it gets bespoke multiplayer UI layered on top of the shared sandbox
+surface; everything else is sandbox code driven by the multiplayer API.
+
 Server-authoritative engine in `server/game/engine.js`:
 
 - Round structure: **Income → Operations (each player, 4 ops) →
@@ -323,6 +336,11 @@ Random-numbered seeds are stored per game so replays are deterministic.
 
 ## Don'ts
 
+- **Don't build a separate multiplayer UI.** Multiplayer reuses the
+  sandbox front-end (classic map + all panels + card rendering); only
+  the data source (server snapshot) and action sink (`submitGameOp`)
+  change. See "The multiplayer UI IS the sandbox UI" above. The
+  competitive auction is the sole bespoke-MP exception.
 - Don't add a frontend build step. ES modules, plain CSS, plain HTML.
 - Don't trust client moves. Every game mutation goes through
   `server/game/engine.js#applyOperation`, validated against the
