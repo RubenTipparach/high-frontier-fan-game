@@ -406,6 +406,13 @@ function applySnapshot(snapshot) {
   // Big black turn banner above the hand. Mirrors the same source-of-
   // truth (snapshot.activeIndex) the panel uses so the two never drift.
   syncMpTurnBanner(snapshot);
+  // Toolbar end-turn / op / move buttons: greyed out when it's not
+  // my turn. Server is the source of truth for whose turn it is, so
+  // we re-fire refreshTurnBudget on every snapshot.
+  const mapHost = document.getElementById('browse-map');
+  if (mapHost && typeof mapHost._refreshTurnBudget === 'function') {
+    try { mapHost._refreshTurnBudget(); } catch (e) { /* ignore */ }
+  }
   // Competitive auction overlay is wired separately (see the TODO hook).
   renderOnlineAuction(snapshot.auction);
   // Speed the snapshot poll up to ONLINE_POLL_AUCTION_MS while an
@@ -3200,21 +3207,48 @@ function ensureMapShell(host) {
   // consume / refund / turn rollover.
   const opTag = host.querySelector('#turn-tag-op');
   const moveTag = host.querySelector('#turn-tag-move');
+  const endTurnBtn = host.querySelector('#turn-end');
   function refreshTurnBudget() {
     const ops = getOpsRemaining();
     const moves = getMovesRemaining();
+    // Online: lock End turn / op / move when it's not the local
+    // player's turn (or in spectator mode). The server-authoritative
+    // engine would refuse the op anyway, but greying the controls
+    // makes it obvious the action isn't available right now.
+    // CLAUDE.md: async multiplayer can't trust the WS to be live,
+    // so the turn-ownership read uses the cached snapshot the
+    // polling loop refreshes.
+    const lockedByOnline = _online && (_spectator || !isOnlineMyTurn());
     if (opTag) {
       opTag.textContent = `op:${ops}`;
       opTag.classList.toggle('is-spent', ops <= 0);
+      opTag.classList.toggle('is-locked', lockedByOnline);
+      opTag.disabled = lockedByOnline;
+      if (lockedByOnline) opTag.title = 'Waiting for your turn.';
     }
     if (moveTag) {
       moveTag.textContent = `move:${moves}`;
       moveTag.classList.toggle('is-spent', moves <= 0);
-      moveTag.title = moves > 0
-        ? 'Move remaining - tap to move the rocket along its route'
-        : 'Move spent - tap to undo this turn\'s move';
+      moveTag.classList.toggle('is-locked', lockedByOnline);
+      moveTag.disabled = lockedByOnline;
+      moveTag.title = lockedByOnline
+        ? 'Waiting for your turn.'
+        : (moves > 0
+          ? 'Move remaining - tap to move the rocket along its route'
+          : 'Move spent - tap to undo this turn\'s move');
+    }
+    if (endTurnBtn) {
+      endTurnBtn.disabled = lockedByOnline;
+      endTurnBtn.classList.toggle('is-locked', lockedByOnline);
+      endTurnBtn.title = lockedByOnline
+        ? 'Waiting for your turn.'
+        : 'End your turn';
     }
   }
+  // Stash on the host so applySnapshot can re-trigger after a fresh
+  // server snapshot flips active player. The hand off lives on the
+  // DOM element so it survives this closure's GC.
+  host._refreshTurnBudget = refreshTurnBudget;
   refreshTurnBudget();
   onTurnChange(refreshTurnBudget);
   // Robust cross-device tap: some mobile browsers don't deliver a

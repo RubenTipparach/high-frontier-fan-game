@@ -237,6 +237,44 @@ SQLite, and every REST operation is broadcast to any open WS clients.
 A player who walks away and comes back gets the same state by REST as
 if they'd been live the whole time.
 
+### Async-multiplayer doctrine - WS is not a guarantee
+
+Because this is async multiplayer, the WebSocket connection is a
+best-effort optimisation, NOT a reliable transport. Mobile networks,
+backgrounded tabs, server hiccups, and proxy timeouts all silently
+drop broadcasts. The client MUST NOT assume a WS event implies the
+server's current state, and MUST NOT block a UX decision on
+"the broadcast will arrive". Concrete rules:
+
+- **Poll the server on an interval.** `js/game/browse.js` runs a
+  snapshot poll while online: 5s normal, 500ms while an auction is
+  open. The cadence switches in `applySnapshot` based on
+  `snapshot.auction`. Don't disable polling because WS "should
+  cover it".
+- **Cache the last snapshot.** `_onlineSnapshot` holds the most
+  recent server state; every turn-ownership check, action gate, and
+  budget read goes through it instead of trusting transient WS
+  events.
+- **Compare-before-apply isn't needed.** `applySnapshot` is
+  idempotent: hydrating the same seq twice is a no-op. So a poll
+  fetch that returns the cached state is safe to re-apply.
+- **Eager one-shot fetches** on phase transitions where latency
+  matters (e.g. auction `bidders → auctioneer`) shave the
+  worst-case wait below one tick.
+- **Never let a player take a turn without server validation.**
+  Action buttons (End turn, op menu, move, BUILD_ROCKET, PROSPECT,
+  AUCTION_*) are disabled in the toolbar when `isOnlineMyTurn()`
+  is false. `submitOnlineOp` re-checks turn ownership against the
+  cached snapshot and refuses if it's stale. The server then
+  re-validates and rejects any racing op with `not_your_turn` /
+  `auction_in_progress`. UI + client + server all enforce the
+  same rule.
+
+If you're adding a new multiplayer action, follow the chain:
+1. Disable the control in the toolbar when not my turn.
+2. Gate the submit helper on the cached snapshot.
+3. Validate again on the server in the engine handler.
+
 ## Lobby + social
 
 - **Profiles** are token-based, mirroring murdoku-companion exactly:

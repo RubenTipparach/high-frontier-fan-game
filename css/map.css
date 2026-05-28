@@ -248,6 +248,21 @@
   opacity: 0.32;
   border-style: dashed;
 }
+/* Locked = it's not your turn yet (online mode). Greys the control
+   AND kills the pulse animation so the toolbar doesn't draw the
+   eye to a button you can't press. End-turn button shares the
+   class so the styling stays in lockstep. */
+.map-turn-budget .turn-tag.is-locked,
+.map-turn-controls button.is-locked {
+  opacity: 0.35;
+  cursor: not-allowed;
+  animation: none !important;
+  filter: grayscale(0.6);
+}
+.map-turn-budget .turn-tag.is-locked:hover,
+.map-turn-controls button.is-locked:hover {
+  filter: grayscale(0.6);
+}
 .map-mode-toggle {
   display: inline-flex;
   background: var(--bg-2);
