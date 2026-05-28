@@ -535,10 +535,33 @@ label.checkbox input { accent-color: var(--accent-2); }
 /* Global chat: deliberately narrower than the page so it reads as a
    focal chat surface, with the games dashboard below it. width (not
    max-width) is explicit so block-flow can't collapse it to content. */
-#view-lobby-list .global-chat {
-  width: clamp(280px, 50vw, 760px);
+/* Top row: global chat + "Your games" side-by-side on desktop so
+   a returning player sees both the conversation and what they're
+   already in without scrolling. The chat is the wider lane (it
+   carries the live conversation) and your-games is fixed-width
+   on desktop so it doesn't squash. Stacks on mobile with your-
+   games first (per user feedback - players want their tables
+   above the chat on small screens). */
+#view-lobby-list .lobby-top-row {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(260px, 380px);
+  gap: 12px;
+  max-width: 1320px;
   margin: 0 auto 12px;
+  align-items: stretch;
 }
+#view-lobby-list .lobby-top-row > .card { margin-bottom: 0; }
+#view-lobby-list .global-chat {
+  width: auto;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+#view-lobby-list .lobby-your-games {
+  display: flex;
+  flex-direction: column;
+}
+#view-lobby-list .lobby-your-games > .lobby-list { flex: 1; overflow-y: auto; max-height: 260px; }
 
 #view-lobby-list .lobby-list li,
 #view-lobby-list .invite-list li { padding: 8px 10px; gap: 8px; }
@@ -567,7 +590,7 @@ label.checkbox input { accent-color: var(--accent-2); }
    lobby's own scroll handles overflow. */
 .lobby-games-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   align-items: start;
   max-width: 1320px;
@@ -582,6 +605,13 @@ body.in-lobby .main-menu-fab { display: none; }
 
 @media (max-width: 1100px) {
   .lobby-games-grid { grid-template-columns: 1fr 1fr; }
+  /* Tablet: top row collapses to a single column with chat below
+     your-games (your-games is the priority above the fold). */
+  #view-lobby-list .lobby-top-row {
+    grid-template-columns: 1fr;
+  }
+  #view-lobby-list .lobby-your-games { order: -1; }
+  #view-lobby-list .lobby-your-games > .lobby-list { max-height: 200px; }
 }
 @media (max-width: 640px) {
   .lobby-games-grid { grid-template-columns: 1fr; gap: 10px; }
