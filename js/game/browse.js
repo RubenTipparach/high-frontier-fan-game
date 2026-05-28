@@ -165,8 +165,19 @@ let _spectator = false;
 // reconnect/resub races + flaky mobile networks can drop snapshots,
 // so re-fetch the full game state every few seconds and re-apply.
 // applySnapshot is idempotent. Cleared on unmountBrowseOnline.
+//
+// Two cadences:
+//   ONLINE_POLL_MS         normal cadence (board moves at human speed)
+//   ONLINE_POLL_AUCTION_MS fast cadence while an auction is open
+//                          (bidders + auctioneer expect near-realtime
+//                          feedback - 5s feels broken when you're
+//                          waiting on the auctioneer to sell / keep).
+// applyPollCadence() switches the interval based on the current
+// snapshot's auction field.
 let _onlinePoll = null;
+let _onlinePollMs = 0;
 const ONLINE_POLL_MS = 5000;
+const ONLINE_POLL_AUCTION_MS = 1000;
 let _onlineToast = null;      // (msg, level) => void, from the caller
 let _onlineMaps = null;       // { serverToPlanner, plannerToServer }
 let _onlineSnapshot = null;   // latest server snapshot (for turn checks)
@@ -301,21 +312,10 @@ async function bootstrapOnlineGame() {
 
   // Polling fallback. WS is the primary path, but if a broadcast is
   // dropped (mobile network, tab backgrounded, server hiccup) the
-  // user can sit with a stale board. Re-fetch every ONLINE_POLL_MS
-  // and re-apply. applySnapshot is a no-op when the seq matches.
-  if (_onlinePoll) clearInterval(_onlinePoll);
-  _onlinePoll = setInterval(async () => {
-    if (!_online || !_onlineGameId || !_onlineMe) return;
-    try {
-      const poll = await getGame(_onlineGameId, _onlineMe.token);
-      if (!_online) return;
-      if (poll && poll.ok && poll.data && poll.data.game && poll.data.game.state) {
-        applySnapshot(poll.data.game.state);
-      }
-    } catch (err) {
-      // Network blips are expected; the next tick will retry.
-    }
-  }, ONLINE_POLL_MS);
+  // user can sit with a stale board. Re-fetch on the active cadence
+  // (5s normal, 1s while an auction is open) and re-apply.
+  // applySnapshot is a no-op when the seq matches.
+  setPollCadence(ONLINE_POLL_MS);
 
   // In-pane chat: fetch the lobby's chat history (table conversation)
   // and subscribe to live 'chat' broadcasts on the lobby channel. Both
@@ -334,6 +334,27 @@ async function bootstrapOnlineGame() {
       for (const m of hist.data.entries) appendMpChat(m);
     }
   }
+}
+
+// Swap the poll interval to the requested cadence. Idempotent when
+// the cadence already matches, so applySnapshot can call it on every
+// snapshot without thrashing the interval.
+function setPollCadence(ms) {
+  if (_onlinePollMs === ms && _onlinePoll) return;
+  if (_onlinePoll) clearInterval(_onlinePoll);
+  _onlinePollMs = ms;
+  _onlinePoll = setInterval(async () => {
+    if (!_online || !_onlineGameId || !_onlineMe) return;
+    try {
+      const poll = await getGame(_onlineGameId, _onlineMe.token);
+      if (!_online) return;
+      if (poll && poll.ok && poll.data && poll.data.game && poll.data.game.state) {
+        applySnapshot(poll.data.game.state);
+      }
+    } catch (err) {
+      // Network blips are expected; the next tick will retry.
+    }
+  }, ms);
 }
 
 // Replace all sandbox module state from a server snapshot, then repaint
@@ -361,6 +382,11 @@ function applySnapshot(snapshot) {
   syncMpTurnBanner(snapshot);
   // Competitive auction overlay is wired separately (see the TODO hook).
   renderOnlineAuction(snapshot.auction);
+  // Speed the snapshot poll up to 1s while an auction is open so a
+  // bidder waiting on "The auctioneer is deciding" sees Sell / Keep
+  // land in near-realtime if the WS broadcast was dropped. Drop back
+  // to the normal 5s cadence when the auction closes.
+  setPollCadence(snapshot.auction ? ONLINE_POLL_AUCTION_MS : ONLINE_POLL_MS);
   // If I haven't picked my starting crew yet, open the mandatory crew
   // wizard. Driven off the snapshot (player.faction) so it survives
   // reloads / late joins, and so a re-bootstrap won't reopen the
@@ -1100,6 +1126,7 @@ function onSetActiveProspectorClick(cardId) {
 export function unmountBrowseOnline() {
   if (_onlineOffWS) { try { _onlineOffWS(); } catch { /* ignore */ } _onlineOffWS = null; }
   if (_onlinePoll) { clearInterval(_onlinePoll); _onlinePoll = null; }
+  _onlinePollMs = 0;
   setOnline(false);
   _online = false;
   _spectator = false;
