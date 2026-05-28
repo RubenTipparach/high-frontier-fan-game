@@ -12,7 +12,7 @@ import {
 import {
   initInvites, refreshInvitesList, subscribeInvitesForProfile,
 } from './invites.js';
-import { mountBrowse } from './game/browse.js';
+import { mountBrowse, isBrowseOnline } from './game/browse.js';
 import { loadLastLobbyId, saveLastLobbyId } from './storage.js';
 
 const VIEWS = [
@@ -32,17 +32,32 @@ function showView(id) {
   for (const v of VIEWS) {
     document.getElementById(v).classList.toggle('hidden', v !== id);
   }
-  // The hamburger menu's Sandbox button is disabled while we're
-  // already in sandbox (view-browse) - there's nowhere to go,
-  // and it shouldn't read as a toggle. Multiplayer stays live.
-  const browseBtn = document.getElementById('btn-browse');
-  if (browseBtn) {
-    const inSandbox = id === 'view-browse';
-    browseBtn.disabled = inSandbox;
-    browseBtn.classList.toggle('is-current', inSandbox);
-    browseBtn.title = inSandbox
+  // Menu highlight. view-browse is shared by solo + multiplayer, so the
+  // "current" button depends on online state too: Sandbox is current
+  // only on a SOLO view-browse, Multiplayer is current on any MP-list /
+  // lobby view OR on view-browse when it is driven from an online game.
+  // Sandbox is also disabled in that case (clicking it toggles to the
+  // previous view, which doesn't make sense when you ARE there).
+  // Multiplayer is never disabled - clicking it from an online game
+  // navigates back to the lobbies list.
+  const sandboxBtn = document.getElementById('btn-browse');
+  const mpBtn = document.getElementById('btn-multiplayer');
+  const inOnlineBrowse = id === 'view-browse' && isBrowseOnline();
+  const isSandbox = id === 'view-browse' && !inOnlineBrowse;
+  const isMp = inOnlineBrowse
+    || id === 'view-lobby-list' || id === 'view-lobby' || id === 'view-create-lobby';
+  if (sandboxBtn) {
+    sandboxBtn.disabled = isSandbox;
+    sandboxBtn.classList.toggle('is-current', isSandbox);
+    sandboxBtn.title = isSandbox
       ? 'Sandbox: already active'
       : 'Sandbox: explore the map and build rockets from the patent deck';
+  }
+  if (mpBtn) {
+    mpBtn.classList.toggle('is-current', isMp);
+    mpBtn.title = isMp
+      ? 'Multiplayer: already active'
+      : 'Multiplayer: lobby + games + global chat';
   }
 }
 
