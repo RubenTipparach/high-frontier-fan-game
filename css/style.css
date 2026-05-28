@@ -504,7 +504,15 @@ label.checkbox input { accent-color: var(--accent-2); }
 /* Compact card defaults inside the lobby view. */
 #view-lobby-list .card { padding: 12px 14px; margin-bottom: 12px; }
 #view-lobby-list .card h2 { margin-bottom: 8px; }
-#view-lobby-list .global-chat { margin-bottom: 12px; }
+#view-lobby-list .global-chat {
+  /* About half the viewport, centered, so it reads as a chat surface
+     rather than spanning the whole row that the games grid below uses.
+     Falls back to full width on phones (see the 640px media query). */
+  max-width: 50vw;
+  margin-left: auto;
+  margin-right: auto;
+  margin-bottom: 12px;
+}
 #view-lobby-list .lobby-list li,
 #view-lobby-list .invite-list li { padding: 8px 10px; gap: 8px; }
 #view-lobby-list .lobby-list li.empty,
@@ -547,6 +555,7 @@ label.checkbox input { accent-color: var(--accent-2); }
   #view-lobby-list .card h2 { font-size: 13px; margin-bottom: 6px; }
   #view-lobby-list .lobby-list li,
   #view-lobby-list .invite-list li { padding: 6px 8px; }
+  #view-lobby-list .global-chat { max-width: none; }
   .invites-popover { max-width: none; }
   #main { padding: 14px 12px; }
 }

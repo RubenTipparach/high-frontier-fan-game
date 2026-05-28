@@ -29,6 +29,7 @@ function showView(id) {
   // Remember the view we're leaving so Browse → back returns properly.
   const current = VIEWS.find((v) => !document.getElementById(v).classList.contains('hidden'));
   if (current && current !== id && current !== 'view-browse') _prevView = current;
+  console.log('[hf:nav] showView ->', id, '(from', current || '(none)', ')');
   for (const v of VIEWS) {
     document.getElementById(v).classList.toggle('hidden', v !== id);
   }
@@ -310,13 +311,19 @@ async function maybeClaimInviteFromUrl() {
 // table is gone or the player is no longer a member.
 async function maybeResumeLobby() {
   const id = loadLastLobbyId();
+  console.log('[hf:boot] maybeResumeLobby: lastLobbyId =', id);
   if (!id) return false;
   const r = await getLobby(id);
-  if (!r.ok) { saveLastLobbyId(null); return false; }
+  if (!r.ok) {
+    console.log('[hf:boot] resume: getLobby failed (', r.error, ') - clearing lastLobbyId');
+    saveLastLobbyId(null);
+    return false;
+  }
   const lobby = r.data.lobby;
   const me = activeProfile();
   const isMember = me && Array.isArray(lobby.members)
     && lobby.members.some((m) => m.id === me.id);
+  console.log('[hf:boot] resume: lobby', lobby.id, 'status', lobby.status, 'isMember', isMember);
   if (!isMember) { saveLastLobbyId(null); return false; }
   await openLobby(lobby.id, { join: false });
   toast(
@@ -342,6 +349,7 @@ function humanizeError(code) {
 // ----- Boot -----
 
 async function boot() {
+  console.log('[hf:boot] start');
   initSigninForm();
   initAccountMenu();
   initLobby({ onShowView: showView, onToast: toast });
@@ -356,6 +364,7 @@ async function boot() {
   reflectProfile(me);
 
   if (me) {
+    console.log('[hf:boot] signed in as @' + me.name + ' (id=' + me.id + ')');
     ws.connect(me.token);
     subscribeInvitesForProfile(me);
     // Keep the multiplayer view populated for when the player switches.
@@ -364,16 +373,18 @@ async function boot() {
     // Landing priority: a `?invite=` URL wins, then the last table /
     // in-progress game the player was in, else the lobby home view.
     const claimed = await maybeClaimInviteFromUrl();
+    console.log('[hf:boot] inviteClaimed=', claimed);
     if (!claimed) {
       const resumed = await maybeResumeLobby();
+      console.log('[hf:boot] gameResumed=', resumed);
       if (!resumed) {
-        // No active game to resume - the lobby is the home view now.
-        // Sandbox is no longer the default; the player starts it from
-        // the lobby's "+ New game" chooser.
+        // No active game to resume - lobby is the home view.
+        console.log('[hf:boot] landing on lobby (default)');
         showView('view-lobby-list');
       }
     }
   } else {
+    console.log('[hf:boot] no profile - going to signin');
     showView('view-signin');
     // If the URL has an invite code, stash a note so the user sees it
     // after they sign in.
