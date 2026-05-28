@@ -64,7 +64,7 @@ export const DISCARDS_PER_TURN = 1;
 // playable immediately. This is a balance constant, revisited when the
 // build + refuel ops land.
 export const STARTING_WATER = 20;
-export const AQUA_DEFAULT = 100;
+export const AQUA_DEFAULT = 6;
 
 export const DECK_TYPES = [
   'thruster', 'reactor', 'radiator', 'refinery', 'robonaut', 'generator',
