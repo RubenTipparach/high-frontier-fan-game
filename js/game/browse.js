@@ -176,8 +176,16 @@ let _spectator = false;
 // snapshot's auction field.
 let _onlinePoll = null;
 let _onlinePollMs = 0;
+// Tracks the previous snapshot's auction.awaiting so we can detect
+// the bidders -> auctioneer transition and fire one eager fetch.
+let _lastAuctionPhase = null;
 const ONLINE_POLL_MS = 5000;
-const ONLINE_POLL_AUCTION_MS = 1000;
+// 500 ms while an auction is live. The bidder UI gives a "stuck"
+// feel any slower than that - users expect Sell / Keep to land
+// near-instantly once the auctioneer has decided. Mobile networks
+// easily handle two snapshot fetches per second; the snapshot is
+// small JSON.
+const ONLINE_POLL_AUCTION_MS = 500;
 let _onlineToast = null;      // (msg, level) => void, from the caller
 let _onlineMaps = null;       // { serverToPlanner, plannerToServer }
 let _onlineSnapshot = null;   // latest server snapshot (for turn checks)
@@ -336,6 +344,24 @@ async function bootstrapOnlineGame() {
   }
 }
 
+// One-shot snapshot fetch outside the interval cadence. Used to
+// shave the worst-case "I just placed the winning bid and now I
+// wait a full tick before Sell lands" latency. Coalesced: a poll
+// fetch already in flight pre-empts a duplicate.
+let _eagerPollInFlight = false;
+async function eagerPoll() {
+  if (!_online || !_onlineGameId || !_onlineMe || _eagerPollInFlight) return;
+  _eagerPollInFlight = true;
+  try {
+    const r = await getGame(_onlineGameId, _onlineMe.token);
+    if (!_online) return;
+    if (r && r.ok && r.data && r.data.game && r.data.game.state) {
+      applySnapshot(r.data.game.state);
+    }
+  } catch { /* next tick will retry */ }
+  finally { _eagerPollInFlight = false; }
+}
+
 // Swap the poll interval to the requested cadence. Idempotent when
 // the cadence already matches, so applySnapshot can call it on every
 // snapshot without thrashing the interval.
@@ -382,11 +408,26 @@ function applySnapshot(snapshot) {
   syncMpTurnBanner(snapshot);
   // Competitive auction overlay is wired separately (see the TODO hook).
   renderOnlineAuction(snapshot.auction);
-  // Speed the snapshot poll up to 1s while an auction is open so a
-  // bidder waiting on "The auctioneer is deciding" sees Sell / Keep
-  // land in near-realtime if the WS broadcast was dropped. Drop back
-  // to the normal 5s cadence when the auction closes.
+  // Speed the snapshot poll up to ONLINE_POLL_AUCTION_MS while an
+  // auction is open so a bidder waiting on "The auctioneer is
+  // deciding" sees Sell / Keep land in near-realtime if the WS
+  // broadcast was dropped. Drop back to the normal cadence when the
+  // auction closes.
   setPollCadence(snapshot.auction ? ONLINE_POLL_AUCTION_MS : ONLINE_POLL_MS);
+  // Eager one-shot fetch the moment the auctioneer's phase opens
+  // (awaiting === 'auctioneer'). The accept can land within ms of
+  // the bidder seeing this state; without a head-start the bidder
+  // waits a full poll tick AFTER the auctioneer accepts. Skipped
+  // for the auctioneer themself - their own submit response already
+  // applied the post-sell state. _lastAuctionPhase guards against
+  // re-firing on every snapshot in the same phase (would otherwise
+  // loop at network speed).
+  const auctionPhase = snapshot.auction ? snapshot.auction.awaiting : null;
+  if (auctionPhase === 'auctioneer' && _lastAuctionPhase !== 'auctioneer') {
+    const myId = _onlineMe && _onlineMe.id;
+    if (snapshot.auction.auctioneerId !== myId) eagerPoll();
+  }
+  _lastAuctionPhase = auctionPhase;
   // If I haven't picked my starting crew yet, open the mandatory crew
   // wizard. Driven off the snapshot (player.faction) so it survives
   // reloads / late joins, and so a re-bootstrap won't reopen the
@@ -1127,6 +1168,8 @@ export function unmountBrowseOnline() {
   if (_onlineOffWS) { try { _onlineOffWS(); } catch { /* ignore */ } _onlineOffWS = null; }
   if (_onlinePoll) { clearInterval(_onlinePoll); _onlinePoll = null; }
   _onlinePollMs = 0;
+  _lastAuctionPhase = null;
+  _eagerPollInFlight = false;
   setOnline(false);
   _online = false;
   _spectator = false;
