@@ -665,9 +665,12 @@ function applyPickCrew(state, op, ctx) {
   const faceData = card.faces && card.faces[face];
   if (!faceData) return fail('unknown_crew_face');
   player.faction = { cardId, face };
-  // Spawn the crew card in the LEO stack so the rocket carries it
-  // from the first turn. Mirrors openCrewWizard in browse.js.
-  player.rocket.stack.push({ id: cardId, kind: 'crew', face });
+  // Spawn the crew card in the LEO Stack (the per-player parking
+  // lot at LEO, distinct from the flying rocket). Mirrors the
+  // sandbox wizard's addCardToLeo call. From LEO the player can
+  // later Transfer the crew into the Rocket via a free op when
+  // their rocket is at LEO.
+  player.leo.push({ id: cardId, kind: 'crew', face });
   return {
     ok: true,
     state,

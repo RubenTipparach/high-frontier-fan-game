@@ -121,7 +121,10 @@ export function hydrateFromSnapshot(snapshot, myId, maps) {
     rekeyToPlanner(maps, snapshot.colonies),
   );
   hydrateDecks(snapshot.decks || {});
-  hydrateLeo([]); // the server has no LEO-stack field yet
+  // LEO Stack: the server carries a flat per-player slot array
+  // (state.js#freshPlayer.leo). Hand it straight to the sandbox
+  // hydrator; slot shape matches.
+  hydrateLeo(me.leo || []);
 
   return (r.siteId && maps.serverToPlanner.get(r.siteId)) || null;
 }

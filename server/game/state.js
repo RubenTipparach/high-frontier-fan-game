@@ -112,6 +112,22 @@ function freshPlayer({ profileId, name, seat, color }) {
       tank: STARTING_WATER,
       afterburnEngaged: false,
     },
+    // LEO Stack: a per-player parking lot of cards staged at LEO.
+    // Always at LEO by construction (no siteId field needed - LEO
+    // has no real site id). Flat array of { id, kind, face? } slots
+    // matching js/game/leo-stack.js's slot shape, so hydrateLeo
+    // (net-bridge.js) can hand the array straight to the sandbox
+    // module. Starts empty; PICK_CREW pushes the player's chosen
+    // crew here. Future BUILD ops will move cards Hand -> LEO and
+    // LEO -> Rocket.
+    leo: [],
+    // Outposts A-D: keyed by single-letter id when built. Each entry
+    // mirrors the sandbox shape (js/game/stacks.js) so net-bridge's
+    // spread hands the object straight to hydrateOutposts:
+    //   { letter, siteId, cards: [{id, kind, face?}, ...], tank }
+    // Empty until a future BUILD_OUTPOST op fires; the siteId is
+    // the data/sites.js slug the outpost was built at (any non-LEO
+    // node the player chose).
     outposts: {},
     hand: [],
     boostMarks: [],
