@@ -1,6 +1,6 @@
 // Bootstrap and top-level UI coordination.
 
-import { probeServer, apiAvailable, lookupInviteLink, claimInviteLink } from './api.js';
+import { probeServer, apiAvailable, lookupInviteLink, claimInviteLink, getLobby } from './api.js';
 import {
   restoreProfile, activeProfile, signIn, signOut, mintDeviceCode,
   onProfileChange,
@@ -13,6 +13,7 @@ import {
   initInvites, refreshInvitesList, subscribeInvitesForProfile,
 } from './invites.js';
 import { mountBrowse } from './game/browse.js';
+import { loadLastLobbyId, saveLastLobbyId } from './storage.js';
 
 const VIEWS = [
   'view-signin', 'view-lobby-list', 'view-create-lobby', 'view-lobby',
@@ -253,26 +254,54 @@ async function afterSignIn() {
   await maybeClaimInviteFromUrl();
 }
 
+// Returns true if it navigated the user into a lobby (so the caller
+// skips the resume / sandbox fallback).
 async function maybeClaimInviteFromUrl() {
   const url = new URL(window.location.href);
   const code = url.searchParams.get('invite');
-  if (!code) return;
+  if (!code) return false;
   // Clear from the URL so a refresh doesn't double-claim.
   url.searchParams.delete('invite');
   window.history.replaceState({}, '', url.pathname + url.search + url.hash);
   const me = activeProfile();
   if (!me) {
     toast('Sign in to claim that invite link.', 'invite');
-    return;
+    return false;
   }
   const peek = await lookupInviteLink(code);
-  if (!peek.ok) { toast('Invite link not found.', 'error'); return; }
-  if (peek.data.expired) { toast('That invite link expired.', 'error'); return; }
-  if (peek.data.used)    { toast('That invite link is used up.', 'error'); return; }
+  if (!peek.ok) { toast('Invite link not found.', 'error'); return false; }
+  if (peek.data.expired) { toast('That invite link expired.', 'error'); return false; }
+  if (peek.data.used)    { toast('That invite link is used up.', 'error'); return false; }
   const r = await claimInviteLink(code, me.token);
-  if (!r.ok) { toast('Couldn\'t claim invite: ' + r.error, 'error'); return; }
+  if (!r.ok) { toast('Couldn\'t claim invite: ' + r.error, 'error'); return false; }
   toast(`Joined "${peek.data.lobbyName}".`, 'success');
   await openLobby(r.data.lobbyId, { join: false });
+  return true;
+}
+
+// On boot, drop the player back into the last table they were at. If
+// its game is in progress this lands them straight in the game (the
+// lobby view mounts the game overlay when status is 'started'). Returns
+// true if it navigated; clears the stored id and returns false when the
+// table is gone or the player is no longer a member.
+async function maybeResumeLobby() {
+  const id = loadLastLobbyId();
+  if (!id) return false;
+  const r = await getLobby(id);
+  if (!r.ok) { saveLastLobbyId(null); return false; }
+  const lobby = r.data.lobby;
+  const me = activeProfile();
+  const isMember = me && Array.isArray(lobby.members)
+    && lobby.members.some((m) => m.id === me.id);
+  if (!isMember) { saveLastLobbyId(null); return false; }
+  await openLobby(lobby.id, { join: false });
+  toast(
+    lobby.status === 'started'
+      ? `Welcome back to multiplayer: ${lobby.name}`
+      : `Welcome back to the table: ${lobby.name}`,
+    'success',
+  );
+  return true;
 }
 
 function humanizeError(code) {
@@ -304,15 +333,20 @@ async function boot() {
   if (me) {
     ws.connect(me.token);
     subscribeInvitesForProfile(me);
-    // Default landing view is Sandbox - the player can always
-    // hop to Multiplayer via the topbar. We still kick off the
-    // lobby-list / invites loads so the multiplayer view is
-    // populated when they switch.
-    showView('view-browse');
-    mountBrowse();
+    // Keep the multiplayer view populated for when the player switches.
     refreshLobbyList();
     refreshInvitesList();
-    await maybeClaimInviteFromUrl();
+    // Landing priority: a `?invite=` URL wins, then the last table /
+    // in-progress game the player was in, else fall back to Sandbox.
+    const claimed = await maybeClaimInviteFromUrl();
+    if (!claimed) {
+      const resumed = await maybeResumeLobby();
+      if (!resumed) {
+        showView('view-browse');
+        mountBrowse();
+        toast('Welcome back to the sandbox.', 'success');
+      }
+    }
   } else {
     showView('view-signin');
     // If the URL has an invite code, stash a note so the user sees it
