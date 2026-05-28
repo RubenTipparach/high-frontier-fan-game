@@ -3,7 +3,7 @@
 // lobby so chat + roster updates land in real time.
 
 import {
-  listLobbies, getLobby, createLobby, joinLobby, leaveLobby,
+  listLobbies, listMyGames, getLobby, createLobby, joinLobby, leaveLobby,
   setReady, startLobby, claimInviteLink, lookupInviteLink,
 } from './api.js';
 import { activeProfile } from './auth.js';
@@ -38,6 +38,7 @@ export function initLobby({ onShowView, onToast }) {
 }
 
 export async function refreshLobbyList() {
+  refreshMyGames();
   const list = document.getElementById('lobby-list');
   list.innerHTML = '<li class="empty">Loading…</li>';
   const r = await listLobbies();
@@ -71,6 +72,62 @@ export async function refreshLobbyList() {
       await openLobby(lobby.id, { join: true });
     });
     list.appendChild(li);
+  }
+}
+
+// "Your games" (in progress) + "Ended games": the tables the player is
+// a member of, which the open-tables list (waiting + open only) hides.
+// In progress = lobby started and the game still active; ended = the
+// game finished. Both Resume/Review by re-entering the lobby, which
+// remounts the sandbox game view for a started game.
+export async function refreshMyGames() {
+  const startedEl = document.getElementById('mygames-started');
+  const endedEl = document.getElementById('mygames-ended');
+  if (!startedEl || !endedEl) return;
+  const me = activeProfile();
+  if (!me) return;
+  const r = await listMyGames(me.token);
+  if (!r.ok) return;
+  const started = [];
+  const ended = [];
+  for (const g of r.data.entries) {
+    if (g.gameStatus === 'finished') ended.push(g);
+    else if (g.status === 'started') started.push(g);
+  }
+  renderMyGames(startedEl, started, 'Resume', 'No games in progress.');
+  renderMyGames(endedEl, ended, 'Review', 'No finished games.');
+}
+
+function renderMyGames(listEl, games, actionLabel, emptyMsg) {
+  listEl.innerHTML = '';
+  if (!games.length) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = emptyMsg;
+    listEl.appendChild(li);
+    return;
+  }
+  for (const g of games) {
+    const li = document.createElement('li');
+    li.innerHTML = `
+      <div>
+        <span class="name"></span>
+        <span class="meta">hosted by @<span class="host"></span>
+          · <span class="count"></span>/${g.maxPlayers}
+          · <code></code></span>
+      </div>
+      <div class="row-actions">
+        <button class="primary"></button>
+      </div>
+    `;
+    li.querySelector('.name').textContent = g.name;
+    li.querySelector('.host').textContent = g.hostName;
+    li.querySelector('.count').textContent = g.memberCount;
+    li.querySelector('code').textContent = g.code;
+    const btn = li.querySelector('button');
+    btn.textContent = actionLabel;
+    btn.addEventListener('click', () => openLobby(g.id, { join: false }));
+    listEl.appendChild(li);
   }
 }
 

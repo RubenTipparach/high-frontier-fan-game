@@ -326,6 +326,31 @@ app.get('/lobbies', (_req, res) => {
   res.json({ entries: rows });
 });
 
+// Lobbies the caller is a member of, across every status, with the
+// game's id + status attached. Powers the "your games" (in progress)
+// and "ended games" sections; GET /lobbies only lists joinable waiting
+// tables. Registered BEFORE /lobbies/:id so "mine" isn't read as an id.
+app.get('/lobbies/mine', requireProfile, (req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT l.id, l.code, l.name, l.status,
+              l.max_players AS maxPlayers,
+              l.created_at  AS createdAt,
+              p.name        AS hostName,
+              (SELECT COUNT(*) FROM lobby_members lm2 WHERE lm2.lobby_id = l.id) AS memberCount,
+              g.id     AS gameId,
+              g.status AS gameStatus
+       FROM lobbies l
+       JOIN lobby_members lm ON lm.lobby_id = l.id AND lm.profile_id = ?
+       JOIN profiles p ON p.id = l.host_id
+       LEFT JOIN games g ON g.lobby_id = l.id
+       ORDER BY l.created_at DESC
+       LIMIT 50`
+    )
+    .all(req.profile.id);
+  res.json({ entries: rows });
+});
+
 // Lobby detail. Members + full lobby record. Visible to anyone (so
 // the invite-link landing page can render the lobby name before the
 // user claims the invite), but starting / chatting / joining requires

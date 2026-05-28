@@ -81,6 +81,12 @@ export async function listLobbies() {
   return call('GET', '/lobbies');
 }
 
+// Lobbies the caller is in, across all statuses (powers the "your
+// games" + "ended games" sections). Requires the bearer token.
+export async function listMyGames(token) {
+  return call('GET', '/lobbies/mine', { token });
+}
+
 export async function getLobby(id) {
   return call('GET', '/lobbies/' + id);
 }
