@@ -505,7 +505,11 @@ function renderMpPlayer(p, isMe, isActive) {
   stats.className = 'mp-stats';
   const rkt = p.rocket || {};
   const vp = (p.glory && p.glory.vps) || 0;
-  stats.textContent = `📍${onlineSiteLabel(rkt.siteId)} · 💧${rkt.tank || 0} · ${p.aqua || 0}¤ · ${vp}vp`;
+  // 💧 is the AQUA icon in the sandbox top-bar chip (see the
+  // aqua-chip-balance widget), so use it the same way here. Tank water
+  // lives in the expanded detail so the icon means the same thing
+  // everywhere.
+  stats.textContent = `📍${onlineSiteLabel(rkt.siteId)} · 💧${p.aqua || 0} · ${vp}vp`;
   head.append(dot, name, stats);
   const detail = document.createElement('div');
   detail.className = 'mp-player-detail';
@@ -524,7 +528,11 @@ function renderMpPlayer(p, isMe, isActive) {
 function buildMpPlayerDetail(host, p, isMe) {
   host.innerHTML = '';
   const rkt = p.rocket || {};
-  host.appendChild(mpSection('Rocket', (rkt.stack || []).map((s) => mpCardName(s.id)), 'Empty rocket.'));
+  host.appendChild(mpSection(
+    `Rocket (water ${rkt.tank || 0})`,
+    (rkt.stack || []).map((s) => mpCardName(s.id)),
+    'Empty rocket.',
+  ));
   const ops = p.outposts ? Object.values(p.outposts) : [];
   for (const op of ops) {
     host.appendChild(mpSection(
