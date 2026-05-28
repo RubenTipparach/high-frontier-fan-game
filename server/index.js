@@ -1158,8 +1158,9 @@ app.get('/admin', (_req, res) => {
       <td>${esc(r.join_policy)}</td>
       <td class="num">${r.members} / ${r.max_players}</td>
       <td>${esc(r.created)}</td>
+      <td><button class="btn-del-lobby danger" data-lid="${r.id}" data-lname="${esc(r.name)}">Delete</button></td>
     </tr>
-  `).join('') || '<tr><td colspan=7><em>No lobbies yet.</em></td></tr>';
+  `).join('') || '<tr><td colspan=8><em>No lobbies yet.</em></td></tr>';
 
   const chatRows = chats.map((r) => `
     <tr>
@@ -1221,6 +1222,8 @@ app.get('/admin', (_req, res) => {
   button{font:inherit;background:#1a1830;color:#e6e9ff;border:1px solid #2a2740;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:12px}
   button:hover{background:#25223e;border-color:#3a3760}
   button:disabled{opacity:0.5;cursor:not-allowed}
+  button.danger{background:#450a0a;border-color:#7f1d1d;color:#fda4af}
+  button.danger:hover{background:#7f1d1d;color:#fff;border-color:#b91c1c}
   input[type=text]{background:#07060f;color:#e6e9ff;border:1px solid #2a2740;border-radius:4px;padding:4px 8px;font:inherit}
   .ws-info{display:inline-block;background:#0c0a16;border:1px solid #1e293b;padding:8px 14px;border-radius:6px;margin-left:auto;font-size:12px;color:#8b90b8}
   .ws-info strong{color:#4ade80;font-weight:600}
@@ -1262,7 +1265,7 @@ app.get('/admin', (_req, res) => {
   <table>
     <thead><tr>
       <th>Code</th><th>Name</th><th>Host</th>
-      <th>Status</th><th>Policy</th><th class="num">Players</th><th>Created</th>
+      <th>Status</th><th>Policy</th><th class="num">Players</th><th>Created</th><th>Manage</th>
     </tr></thead>
     <tbody>${lobbyRows}</tbody>
   </table>
@@ -1338,6 +1341,35 @@ document.addEventListener('click', function (ev) {
       alert('Network error.');
     });
 });
+
+// "Delete" - removes a table and its entire game (state, members, chat,
+// invites) after a confirm, then drops the row from the table.
+document.addEventListener('click', function (ev) {
+  var btn = ev.target.closest('.btn-del-lobby');
+  if (!btn) return;
+  var lid = btn.getAttribute('data-lid');
+  var lname = btn.getAttribute('data-lname');
+  if (!confirm('Delete table "' + lname + '" and its game?\\n\\nThis removes the lobby, its game state, members, chat, and invites. This cannot be undone.')) return;
+  btn.disabled = true;
+  btn.textContent = 'Deleting...';
+  fetch('/admin/lobbies/' + lid + '/delete', { method: 'POST' })
+    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+    .then(function (res) {
+      if (!res.ok) {
+        btn.disabled = false;
+        btn.textContent = 'Delete';
+        alert('Failed: ' + (res.body && res.body.error || 'unknown'));
+        return;
+      }
+      var tr = btn.closest('tr');
+      if (tr) tr.remove();
+    })
+    .catch(function () {
+      btn.disabled = false;
+      btn.textContent = 'Delete';
+      alert('Network error.');
+    });
+});
 </script>
 </body></html>`);
 });
@@ -1359,6 +1391,22 @@ app.post('/admin/profiles/:id/add-token', (req, res) => {
     'INSERT INTO tokens (profile_id, token_hash, created_at) VALUES (?, ?, ?)'
   ).run(id, hashToken(token), nowMs());
   res.json({ ok: true, name: row.name, token });
+});
+
+// Delete a lobby and everything under it. The ON DELETE CASCADE chain
+// (lobby_members, chat_messages, invite_links, direct_invites, and
+// games -> game_players / game_states / game_operations) clears the
+// rest in one DELETE. Broadcasts lobby_disbanded so anyone still on the
+// channel is dropped. Anonymous to match the open-dashboard posture -
+// gate behind an admin secret before exposing publicly.
+app.post('/admin/lobbies/:id/delete', (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  const row = db.prepare('SELECT id FROM lobbies WHERE id = ?').get(id);
+  if (!row) return res.status(404).json({ error: 'not_found' });
+  db.prepare('DELETE FROM lobbies WHERE id = ?').run(id);
+  broadcast(`lobby:${id}`, { type: 'lobby_disbanded', lobbyId: id });
+  res.json({ ok: true });
 });
 
 function esc(s) {
