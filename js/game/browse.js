@@ -9290,13 +9290,23 @@ function renderDeckThicknessSvg(deckSize) {
 // Open the auction-confirm modal for a specific card. Used by
 // the Cart's Buy button + the deck-tap modal's "Auction this
 // card" button. The deck draws happen on confirm.
+//
+// In ONLINE mode the confirm button instead dispatches the
+// server's AUCTION_START op for the card's deck type - the
+// server pops the top of that deck and opens a competitive
+// auction for every player. Note the auctioned card may not
+// be the specific `card` the user clicked (the server always
+// goes off the deck top), so the confirm modal shows a note
+// surfacing that.
 function doAuctionCard(card) {
   if (!card) return;
   const mode = getMarketMode();
+  const online = _online;
   openAuctionConfirmModal({
     card,
     mode,
     renderCardFn: renderCard,
+    multiplayer: online,
     // Resolve each support deck's TOP card into its full
     // record so the confirm modal can render the actual card
     // art (user 2026-05-24: "please show the bonus cards in
@@ -9306,6 +9316,15 @@ function doAuctionCard(card) {
       .map((t) => cardById(peekTop(t)))
       .filter(Boolean),
     onConfirm: () => {
+      if (online) {
+        // Multiplayer path: fire the server's AUCTION_START for
+        // this card's deck type. The server's auction overlay
+        // (renderOnlineAuction) takes over from here for all
+        // players. submitOnlineOp handles turn / busy guards
+        // and toasts errors.
+        submitOnlineOp({ kind: 'AUCTION_START', deckType: card.type });
+        return;
+      }
       if (!requireOp('Research Auction')) return;
       // Auctions in sandbox / solo mode have NO Hand-card
       // sacrifice and NO aqua cost (user, 2026-05-24):
