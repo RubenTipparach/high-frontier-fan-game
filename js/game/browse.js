@@ -297,15 +297,6 @@ export function mountBrowse(opts = {}) {
 // no-op if mount raced an unmount.
 async function bootstrapOnlineGame() {
   if (!_online || !_activeData || !_onlineGameId || !_onlineMe) return;
-  // Multiplayer is Card Market mode mandatory (user 2026-05: "we're
-  // in multiplayer market mode is mandatory"). Force it on for the
-  // duration of the online session regardless of the player's solo
-  // localStorage preference; skipReset so we don't wipe the freshly
-  // hydrated state. syncCartTabVisibility runs on the resulting
-  // onMarketChange so the 🛒 tab appears.
-  if (getMarketMode() !== MARKET_MODE.MARKET) {
-    setMarketMode(MARKET_MODE.MARKET, { skipReset: true });
-  }
   _onlineMaps = buildIdMaps(_activeData);
   const r = await getGame(_onlineGameId, _onlineMe.token);
   if (!_online) return; // unmounted while the fetch was in flight
@@ -399,6 +390,17 @@ function setPollCadence(ms) {
 function applySnapshot(snapshot) {
   if (!snapshot || !_onlineMaps || !_onlineMe) return;
   _onlineSnapshot = snapshot;
+  // Card economy is server-authoritative in multiplayer (state.economy).
+  // Pin the client's MARKET_MODE to whatever the snapshot says BEFORE
+  // any hydrators run so the cart tab + Free Market / Research Auction
+  // gating reads the right value. skipReset so we don't wipe the
+  // fresh server state. Defaults to 'market' if the snapshot is from
+  // a pre-economy build.
+  const targetMode = snapshot.economy === 'library'
+    ? MARKET_MODE.LIBRARY : MARKET_MODE.MARKET;
+  if (getMarketMode() !== targetMode) {
+    setMarketMode(targetMode, { skipReset: true });
+  }
   // hydrateFromSnapshot fans the snapshot out to every state module
   // (rocket/hand/outposts/glory/clock/discs/factories/decks/leo) and
   // returns the planner-node id our rocket sits on (null = LEO).

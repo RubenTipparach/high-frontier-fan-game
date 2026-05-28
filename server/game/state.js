@@ -161,6 +161,13 @@ export function createInitialState({ players, seed }) {
     seed,
     rng: { cursor: gen.cursor },
     status: 'active',
+    // Card economy. Multiplayer is always 'market' (Card Market
+    // mode is mandatory in MP - patents are auctioned, not free
+    // draws, and the Free Market sell op is available). Server-
+    // owned so the client can't fall back to Free Library by
+    // wiping localStorage; net-bridge reads it on every snapshot
+    // and pins the client's MARKET_MODE.
+    economy: 'market',
     turn: 0,
     round: 1,
     lastEvent: null,
