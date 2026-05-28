@@ -32,6 +32,9 @@ function showView(id) {
   for (const v of VIEWS) {
     document.getElementById(v).classList.toggle('hidden', v !== id);
   }
+  // Body class drives lobby-only CSS (hides the floating FAB while the
+  // lobby has its own inline ☰ button).
+  document.body.classList.toggle('in-lobby', id === 'view-lobby-list');
   // Menu highlight. Lobby is the sole top-level context indicator:
   // current on the lobby views OR on view-browse when an online game is
   // driving it. Solo sandbox (view-browse, !online) has no menu button
@@ -155,6 +158,14 @@ function initMainMenu() {
   fab.addEventListener('click', () => {
     if (overlay.classList.contains('hidden')) open(); else close();
   });
+  // The lobby has its own inline ☰ button (the floating FAB is hidden
+  // there - see body.in-lobby CSS). Wire it to the same toggle.
+  const inlineMenu = document.getElementById('btn-menu-inline');
+  if (inlineMenu) {
+    inlineMenu.addEventListener('click', () => {
+      if (overlay.classList.contains('hidden')) open(); else close();
+    });
+  }
   closeBtn?.addEventListener('click', close);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   // Auto-close on a view-switching action - same idiom as any

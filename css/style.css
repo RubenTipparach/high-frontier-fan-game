@@ -431,14 +431,16 @@ label.checkbox input { accent-color: var(--accent-2); }
 .search-results li:last-child { border-bottom: none; }
 
 /* ===== Lobby (home view) layout =====
-   body is overflow:hidden ("panels scroll inside themselves"), so the
-   lobby owns its own scroll container. Three sections stacked: top
-   action row (+ New game / Join by code / invites chip), global chat,
-   then a 3-column games grid (Open / Your / Ended). Mobile collapses
-   the grid to a single column. */
+   The lobby is a full-screen dashboard. It escapes #main's flow with
+   position:fixed so it owns the whole viewport (no half-empty centred
+   "modal" feel), takes its own scroll, and the scrollbar lands at the
+   real viewport edge. Other views stay inside #main as before. */
 #view-lobby-list:not(.hidden) {
-  max-height: calc(100vh - 40px);
+  position: fixed;
+  inset: 0;
   overflow-y: auto;
+  padding: 14px 24px 24px;
+  box-sizing: border-box;
 }
 .lobby-top {
   display: flex;
@@ -455,6 +457,24 @@ label.checkbox input { accent-color: var(--accent-2); }
 }
 .lobby-top .claim-link input { width: 160px; }
 #btn-new-game { font-weight: 700; }
+
+/* Inline ☰ menu button (replaces the floating FAB while on the lobby). */
+.lobby-menu-btn {
+  height: 32px;
+  min-width: 40px;
+  padding: 0 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+.lobby-menu-btn:hover { background: var(--accent); color: #062136; border-color: var(--accent-2); }
 
 /* Pending-invites chip + popover (anchored top-right of the action row). */
 .invites-chip {
@@ -504,15 +524,15 @@ label.checkbox input { accent-color: var(--accent-2); }
 /* Compact card defaults inside the lobby view. */
 #view-lobby-list .card { padding: 12px 14px; margin-bottom: 12px; }
 #view-lobby-list .card h2 { margin-bottom: 8px; }
+
+/* Global chat: deliberately narrower than the page so it reads as a
+   focal chat surface, with the games dashboard below it. width (not
+   max-width) is explicit so block-flow can't collapse it to content. */
 #view-lobby-list .global-chat {
-  /* About half the viewport, centered, so it reads as a chat surface
-     rather than spanning the whole row that the games grid below uses.
-     Falls back to full width on phones (see the 640px media query). */
-  max-width: 50vw;
-  margin-left: auto;
-  margin-right: auto;
-  margin-bottom: 12px;
+  width: clamp(280px, 50vw, 760px);
+  margin: 0 auto 12px;
 }
+
 #view-lobby-list .lobby-list li,
 #view-lobby-list .invite-list li { padding: 8px 10px; gap: 8px; }
 #view-lobby-list .lobby-list li.empty,
@@ -543,6 +563,11 @@ label.checkbox input { accent-color: var(--accent-2); }
 }
 .lobby-games-grid > .card { margin-bottom: 0; }
 
+/* While the lobby is visible, hide the floating FAB - the lobby has
+   an inline menu button in its action row. (Body class set by
+   showView in main.js.) */
+body.in-lobby .main-menu-fab { display: none; }
+
 @media (max-width: 900px) {
   .lobby-games-grid { grid-template-columns: 1fr 1fr; }
 }
@@ -555,9 +580,9 @@ label.checkbox input { accent-color: var(--accent-2); }
   #view-lobby-list .card h2 { font-size: 13px; margin-bottom: 6px; }
   #view-lobby-list .lobby-list li,
   #view-lobby-list .invite-list li { padding: 6px 8px; }
-  #view-lobby-list .global-chat { max-width: none; }
+  #view-lobby-list .global-chat { width: 100%; max-width: none; }
   .invites-popover { max-width: none; }
-  #main { padding: 14px 12px; }
+  #view-lobby-list:not(.hidden) { padding: 12px; }
 }
 
 /* Phones: backdrop-filter blur is GPU-heavy and the FAB is always
