@@ -5448,6 +5448,13 @@ body:has(#view-browse:not(.hidden)) #main {
    breathe. Mobile stays full-bleed via the existing rules. */
 .auction-confirm-modal {
   max-width: 720px;
+  /* Cap the modal at the viewport (minus the overlay's padding) and
+     let its own body scroll internally - the lot card + bonus card
+     row + multiplayer cost block can easily exceed phone-height,
+     and on desktop they were getting clipped under the actions
+     row. Backdrop stays full-screen + centred. */
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
 }
 
 /* ============================================================
@@ -5826,11 +5833,16 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .mp-auction-controls .modal-btn { white-space: nowrap; }
 .mp-auction-controls .modal-btn.primary {
-  background: var(--accent);
-  color: #062136;
-  border-color: var(--accent-2);
+  /* Dark-green / light-mint, matching the auction-commit confirm
+     button below. Reuses the high-contrast palette so Bid / Join /
+     Sell read as the same "this is the action" affordance across
+     every auction surface, and the text stays solid even against
+     a light-blue accent backdrop. */
+  background: #14532d;
+  color: #d1fae5;
+  border-color: #166534;
 }
-.mp-auction-controls .modal-btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+.mp-auction-controls .modal-btn.primary:hover:not(:disabled) { background: #166534; }
 .mp-auction-controls .modal-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .mp-deck-picker {
   margin: 6px 0 10px;
