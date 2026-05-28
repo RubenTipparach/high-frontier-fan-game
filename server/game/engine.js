@@ -603,6 +603,17 @@ function applyAuctionJoin(state, op, ctx) {
   if (amount < a.highBid) return fail('must_match_or_raise');
   if (amount > auctioneer.aqua) return fail('insufficient_aqua');
 
+  // No-bids keep: when no one has bid yet AND the auctioneer joins
+  // at 0, that's "Keep (no bids)" - the lot is theirs unopposed.
+  // Close the auction now instead of reopening a pass-round that
+  // can only resolve the same way. User report 2026-05: "if the
+  // auctioneer clicks keep (no bids) the auction should end.
+  // currently it's treating it as if there is one more round".
+  if (amount === 0 && a.highBid === 0) {
+    a.highBidderId = a.auctioneerId;
+    return resolveKeep(state, `${auctioneer.name} kept the lot unopposed.`);
+  }
+
   a.highBid = amount;
   a.highBidderId = a.auctioneerId;
   a.passed = [];

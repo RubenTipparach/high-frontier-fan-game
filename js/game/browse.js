@@ -715,7 +715,7 @@ function buildMpAuctionControls(host, a, { auctioneer, highBidder }) {
       submitMpAuctionOp({ kind: 'AUCTION_JOIN', amount: 0 });
     });
     host.appendChild(keepBtn);
-    host.appendChild(noteEl('No one bid. Keep it for free (one more pass-round, then it is yours).'));
+    host.appendChild(noteEl('No one bid. Keep it for free - the auction closes immediately.'));
     return;
   }
   const sellBtn = document.createElement('button');
