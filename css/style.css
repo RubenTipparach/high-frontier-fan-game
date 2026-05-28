@@ -554,12 +554,17 @@ label.checkbox input { accent-color: var(--accent-2); }
   font-style: italic;
 }
 
-/* Three-column games grid. The lobby's own scroll handles overflow. */
+/* Three-column games grid, centered on the page (capped at 1200px) so
+   Open / Your / Ended cluster near the middle alongside the chat above
+   instead of being pinned to the viewport edges on wide screens. The
+   lobby's own scroll handles overflow. */
 .lobby-games-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   align-items: start;
+  max-width: 1200px;
+  margin: 0 auto;
 }
 .lobby-games-grid > .card { margin-bottom: 0; }
 
