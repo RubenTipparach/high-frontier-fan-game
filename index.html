@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>High Frontier - fan game</title>
     <link rel="stylesheet" href="./css/style.css?v=5" />
-    <link rel="stylesheet" href="./css/map.css?v=16" />
+    <link rel="stylesheet" href="./css/map.css?v=17" />
     <link rel="stylesheet" href="./css/cards.css?v=4" />
     <!--
       API base URL for the High Frontier companion server. Empty string
@@ -264,6 +264,7 @@
                 title="Patent Market cart" aria-label="Patent Market cart"
                 hidden>🛒</button>
               <button data-pane="patents" title="Card library" aria-label="Card library">🃏</button>
+              <button data-pane="mp" id="sidepanel-tab-mp" title="Multiplayer table" aria-label="Multiplayer table" hidden>🛰</button>
               <button data-pane="solo" title="Game mode (Sandbox / Campaign)" aria-label="Game mode">🎮</button>
               <button data-pane="milestones" title="Scoring" aria-label="Scoring">🏆</button>
               <button data-pane="log" title="Mission log" aria-label="Mission log">📋</button>
@@ -279,6 +280,10 @@
             <div class="sidepanel-content">
               <button class="sidepanel-close" id="sidepanel-close"
                 aria-label="Close panel" title="Close">×</button>
+              <div class="panel-pane" data-pane="mp">
+                <h3>🛰 Multiplayer</h3>
+                <div id="mp-panel"><p class="muted">Connecting…</p></div>
+              </div>
               <div class="panel-pane" data-pane="solo">
                 <h3>🎮 Game mode</h3>
                 <div id="solo-panel">

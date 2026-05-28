@@ -243,7 +243,7 @@ function renderLobby(lobby) {
   if (lobby.status === 'started' && lobby.gameId && me) {
     if (!_gameMounted) {
       _gameMounted = true;
-      mountBrowse({ online: true, gameId: lobby.gameId, me, onToast: _onToast });
+      mountBrowse({ online: true, gameId: lobby.gameId, me, onToast: _onToast, room: lobby.name });
       _onShowView('view-browse');
     }
   } else if (_gameMounted) {

@@ -161,6 +161,7 @@ let _onlineMaps = null;       // { serverToPlanner, plannerToServer }
 let _onlineSnapshot = null;   // latest server snapshot (for turn checks)
 let _onlineOffWS = null;      // unsubscribe handle for the game channel
 let _onlineBusy = false;      // in-flight op guard (prevents double submit)
+let _onlineRoom = null;       // table / lobby name for the multiplayer panel
 
 export function isBrowseOnline() { return _online; }
 
@@ -174,6 +175,7 @@ export function mountBrowse(opts = {}) {
     _onlineGameId = opts.gameId || null;
     _onlineMe = opts.me || null;
     _onlineToast = typeof opts.onToast === 'function' ? opts.onToast : (() => {});
+    _onlineRoom = opts.room || null;
     setOnline(true);
   } else if (_online) {
     // Mounting solo after an online game: detach the online plumbing so
@@ -226,6 +228,7 @@ export function mountBrowse(opts = {}) {
   // Initial pass to set the cart tab's visibility on mount;
   // the listener above keeps it in sync afterwards.
   syncCartTabVisibility();
+  syncMpTabVisibility();
   wireSidebar();
   wireHandStrip();
   // renderMap() is async (it awaits the map load that populates
@@ -250,6 +253,9 @@ async function bootstrapOnlineGame() {
     return;
   }
   applySnapshot(r.data.game.state);
+  // Open the multiplayer panel so the player lands on the table (room,
+  // turn, roster) rather than the solo game-mode pane.
+  showPane('mp');
   // Live relay. Every server-applied op (ours or an opponent's) lands
   // here as the full game payload; re-hydrate from it.
   const channel = 'game:' + _onlineGameId;
@@ -278,6 +284,9 @@ function applySnapshot(snapshot) {
   _rocketSiteId = pid || null;
   persistRocketSite();
   syncSandboxRocket();
+  // Refresh the multiplayer table panel (room / turn / roster) from the
+  // same snapshot so opponents' positions + resources stay live.
+  renderMpPanel(snapshot);
   // Competitive auction overlay is wired separately (see the TODO hook).
   renderOnlineAuction(snapshot.auction);
 }
@@ -288,6 +297,151 @@ function applySnapshot(snapshot) {
 // applySnapshot calls it so the wiring point already exists.
 function renderOnlineAuction(_auction) {
   // intentionally empty - competitive auction overlay handled elsewhere.
+}
+
+// ----- multiplayer table panel (online sidepanel pane) -----
+
+// Show the multiplayer tab + hide the solo "game mode / new game" tab
+// while online; reverse for solo. Mirrors syncCartTabVisibility.
+function syncMpTabVisibility() {
+  const mpTab = document.getElementById('sidepanel-tab-mp');
+  const soloTab = document.querySelector('#sidepanel-tabs button[data-pane="solo"]');
+  const panel = document.getElementById('browse-sidepanel');
+  if (mpTab) mpTab.hidden = !_online;
+  if (soloTab) soloTab.hidden = !!_online;
+  if (!panel) return;
+  if (_online && panel.dataset.active === 'solo') showPane('mp');
+  if (!_online && panel.dataset.active === 'mp') showPane(null);
+}
+
+// Server site id (data/sites.js slug) -> display name. LEO / unknown
+// fall back gracefully.
+function onlineSiteLabel(serverSiteId) {
+  if (!serverSiteId) return 'LEO';
+  const s = SITES_BY_ID[serverSiteId];
+  return (s && s.name) || serverSiteId;
+}
+
+function mpCardName(id) {
+  const c = PATENTS_BY_ID[id];
+  return c ? c.name : id;
+}
+
+// Render the multiplayer table panel from the latest snapshot: room,
+// whose turn, the clock, and a roster where each player expands to show
+// their rocket / outposts / resources. Opponent hands stay hidden
+// (count only). Re-rendered on every snapshot (applySnapshot).
+function renderMpPanel(snapshot) {
+  const host = document.getElementById('mp-panel');
+  if (!host) return;
+  if (!snapshot || !Array.isArray(snapshot.players)) {
+    host.innerHTML = '<p class="muted">Connecting to the table…</p>';
+    return;
+  }
+  const players = snapshot.players;
+  const active = players[snapshot.activeIndex] || null;
+  const myId = _onlineMe && _onlineMe.id;
+  host.innerHTML = '';
+
+  const head = document.createElement('div');
+  head.className = 'mp-head';
+  const room = document.createElement('div');
+  room.className = 'mp-room';
+  room.textContent = _onlineRoom || 'Multiplayer table';
+  const myTurn = !!(active && active.profileId === myId);
+  const turn = document.createElement('div');
+  turn.className = 'mp-turn' + (myTurn ? ' mp-your-turn' : '');
+  turn.textContent = active
+    ? (myTurn ? 'Your turn' : '@' + active.name + "'s turn")
+    : 'Waiting…';
+  const clock = document.createElement('div');
+  clock.className = 'muted mp-clock';
+  clock.textContent = `Round ${snapshot.round} · slot ${snapshot.turn}`;
+  head.append(room, turn, clock);
+  host.appendChild(head);
+
+  const roster = document.createElement('div');
+  roster.className = 'mp-roster';
+  for (const p of players) {
+    roster.appendChild(renderMpPlayer(
+      p, p.profileId === myId, !!(active && p.profileId === active.profileId)
+    ));
+  }
+  host.appendChild(roster);
+}
+
+function renderMpPlayer(p, isMe, isActive) {
+  const wrap = document.createElement('div');
+  wrap.className = 'mp-player' + (isActive ? ' mp-active' : '');
+  const head = document.createElement('button');
+  head.type = 'button';
+  head.className = 'mp-player-head';
+  const dot = document.createElement('span');
+  dot.className = 'dot';
+  dot.style.background = p.color || '#888';
+  const name = document.createElement('span');
+  name.className = 'mp-name';
+  name.textContent = '@' + p.name + (isMe ? ' (you)' : '');
+  const stats = document.createElement('span');
+  stats.className = 'mp-stats';
+  const rkt = p.rocket || {};
+  const vp = (p.glory && p.glory.vps) || 0;
+  stats.textContent = `📍${onlineSiteLabel(rkt.siteId)} · 💧${rkt.tank || 0} · ${p.aqua || 0}¤ · ${vp}vp`;
+  head.append(dot, name, stats);
+  const detail = document.createElement('div');
+  detail.className = 'mp-player-detail';
+  detail.hidden = true;
+  head.addEventListener('click', () => {
+    detail.hidden = !detail.hidden;
+    if (!detail.hidden && !detail.dataset.built) {
+      buildMpPlayerDetail(detail, p, isMe);
+      detail.dataset.built = '1';
+    }
+  });
+  wrap.append(head, detail);
+  return wrap;
+}
+
+function buildMpPlayerDetail(host, p, isMe) {
+  host.innerHTML = '';
+  const rkt = p.rocket || {};
+  host.appendChild(mpSection('Rocket', (rkt.stack || []).map((s) => mpCardName(s.id)), 'Empty rocket.'));
+  const ops = p.outposts ? Object.values(p.outposts) : [];
+  for (const op of ops) {
+    host.appendChild(mpSection(
+      `Outpost ${op.letter || ''} @ ${onlineSiteLabel(op.siteId)} (water ${op.tank || 0})`,
+      (op.cards || []).map((s) => mpCardName(s.id)),
+      'Empty.'
+    ));
+  }
+  const hand = p.hand ? p.hand.length : 0;
+  const h = document.createElement('div');
+  h.className = 'mp-detail-label muted';
+  h.textContent = isMe ? `Hand: ${hand}` : `Hand: ${hand} card${hand === 1 ? '' : 's'} (hidden)`;
+  host.appendChild(h);
+}
+
+function mpSection(title, names, emptyTxt) {
+  const wrap = document.createElement('div');
+  wrap.className = 'mp-section';
+  const t = document.createElement('div');
+  t.className = 'mp-detail-label';
+  t.textContent = title;
+  wrap.appendChild(t);
+  if (!names.length) {
+    const e = document.createElement('div');
+    e.className = 'muted mp-line';
+    e.textContent = emptyTxt;
+    wrap.appendChild(e);
+  } else {
+    for (const n of names) {
+      const r = document.createElement('div');
+      r.className = 'mp-line';
+      r.textContent = n;
+      wrap.appendChild(r);
+    }
+  }
+  return wrap;
 }
 
 // Whether it is the local player's turn in the cached snapshot.
@@ -393,6 +547,8 @@ export function unmountBrowseOnline() {
   _onlineMaps = null;
   _onlineSnapshot = null;
   _onlineBusy = false;
+  _onlineRoom = null;
+  syncMpTabVisibility();
 }
 
 // Sandbox hand strip wiring: drop target, slot rendering, +
@@ -1937,6 +2093,7 @@ function showPane(pane) {
   else if (pane === 'milestones') renderMilestones();
   else if (pane === 'log')        renderMissionLog();
   else if (pane === 'solo')       renderSolo();
+  else if (pane === 'mp')         renderMpPanel(_onlineSnapshot);
 }
 
 // Float a "+N" aqua indicator above the balance chip, then remove it
