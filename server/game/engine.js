@@ -644,6 +644,41 @@ const AUCTION = {
   AUCTION_SELL: applyAuctionSell,
 };
 
+// ----- starting-crew pick (pre-game; any player, any time) -----
+//
+// Each player picks one of the 12 faction faces at session open. The
+// pick is final and free (no op cost) - it's a session-setup step,
+// not a turn action. PICK_CREW therefore bypasses the turn guard and
+// the auction-in-progress freeze in the same way auction bids do
+// (the caller is the player doing the picking, not the active turn
+// holder). On commit the chosen crew card is also pushed into the
+// player's LEO stack as their starting crew, mirroring the sandbox
+// wizard which spawns the crew into the LEO Stack.
+function applyPickCrew(state, op, ctx) {
+  const player = playerByProfile(state, ctx.profileId);
+  if (!player) return fail('not_a_player');
+  if (player.faction) return fail('crew_already_picked');
+  const cardId = String(op.cardId || '');
+  const face = op.face === 'secondary' ? 'secondary' : 'primary';
+  const card = CREW_BY_ID[cardId];
+  if (!card) return fail('unknown_crew');
+  const faceData = card.faces && card.faces[face];
+  if (!faceData) return fail('unknown_crew_face');
+  player.faction = { cardId, face };
+  // Spawn the crew card in the LEO stack so the rocket carries it
+  // from the first turn. Mirrors openCrewWizard in browse.js.
+  player.rocket.stack.push({ id: cardId, kind: 'crew', face });
+  return {
+    ok: true,
+    state,
+    log: `${player.name} picked ${faceData.name || cardId}.`,
+  };
+}
+
+const CREW = {
+  PICK_CREW: applyPickCrew,
+};
+
 // Validate + apply one operation. ctx = { profileId, turnBaseState? }.
 // turnBaseState (the snapshot at the start of the active player's turn)
 // is required for UNDO / REDO and supplied by the caller from the op
@@ -657,6 +692,11 @@ export function applyOperation(prevState, op, ctx) {
   // players, so they bypass the turn guard below and each handler
   // validates its own caller against the auction roles.
   if (AUCTION[op.kind]) return AUCTION[op.kind](clone(prevState), op, ctx);
+  // Crew-pick is a fourth class: it's a pre-game session-setup step
+  // any player can run at any time (not gated by turn, not gated by
+  // an in-progress auction). PICK_CREW validates the caller against
+  // their own player record.
+  if (CREW[op.kind]) return CREW[op.kind](clone(prevState), op, ctx);
 
   const isFunctional = !!FUNCTIONAL[op.kind];
   if (!isFunctional && !META[op.kind]) return fail('unknown_op');

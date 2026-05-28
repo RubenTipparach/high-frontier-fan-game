@@ -97,6 +97,13 @@ function freshPlayer({ profileId, name, seat, color }) {
     name,
     seat,
     color,
+    // Starting crew faction. Each player picks one face of the 12
+    // crew-card faces via the PICK_CREW op (engine.js) at session
+    // open. Null until the player has picked; the client
+    // (browse.js#bootstrapOnlineGame) opens the crew wizard for
+    // any player whose faction is null on snapshot. Once committed
+    // it is final - PICK_CREW rejects re-picks.
+    faction: null,
     rocket: {
       siteId: startSiteId(),
       stack: [],
@@ -120,6 +127,15 @@ function freshPlayer({ profileId, name, seat, color }) {
 export function createInitialState({ players, seed }) {
   const ordered = [...players].sort((a, b) => (a.seat || 0) - (b.seat || 0));
   const gen = makeRng(seed, 0);
+  // Per-game random colour palette: same six PLAYER_COLORS, shuffled
+  // by the seeded RNG so each session deals a different palette while
+  // still being reproducible from (seed). Colours are then assigned
+  // in seat order so seat 1 = palette[0], seat 2 = palette[1], etc -
+  // which keeps the "colour = turn order" reading the turn banner +
+  // map markers rely on, while making the specific seat -> colour
+  // mapping fresh every game (so no one is always "the yellow
+  // player").
+  const palette = shuffle(gen, PLAYER_COLORS);
   const decks = buildShuffledDecks(gen);
   return {
     version: 2,
@@ -147,7 +163,7 @@ export function createInitialState({ players, seed }) {
         profileId: p.profileId,
         name: p.name,
         seat: p.seat || i + 1,
-        color: PLAYER_COLORS[i % PLAYER_COLORS.length],
+        color: palette[i % palette.length],
       })
     ),
     startedAt: Date.now(),

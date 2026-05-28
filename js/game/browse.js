@@ -331,6 +331,56 @@ function applySnapshot(snapshot) {
   syncMpTurnBanner(snapshot);
   // Competitive auction overlay is wired separately (see the TODO hook).
   renderOnlineAuction(snapshot.auction);
+  // If I haven't picked my starting crew yet, open the mandatory crew
+  // wizard. Driven off the snapshot (player.faction) so it survives
+  // reloads / late joins, and so a re-bootstrap won't reopen the
+  // wizard once the pick is committed server-side.
+  maybePromptCrewPick(snapshot);
+}
+
+// One-at-a-time guard so a flurry of snapshots (e.g. another player's
+// PICK_CREW echoes) doesn't stack multiple wizard overlays. Cleared
+// when the modal closes or when we unmount the online session.
+let _crewWizardOpen = false;
+
+function maybePromptCrewPick(snapshot) {
+  if (!_online || _crewWizardOpen || !snapshot || !_onlineMe) return;
+  const myId = _onlineMe.id;
+  const myp = (snapshot.players || []).find((p) => p.profileId === myId);
+  if (!myp || myp.faction) return;
+  _crewWizardOpen = true;
+  openCrewWizard({
+    description: 'Pick your starting faction. Every player chooses one before play; your pick is permanent for this session.',
+    onCommit: ({ cardId, face }) => {
+      submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
+    },
+    onDone: () => { _crewWizardOpen = false; },
+  });
+}
+
+// Crew-pick op submitter. Like submitMpAuctionOp, this bypasses the
+// turn-check in submitOnlineOp: any player can pick their crew at
+// any time, regardless of whose turn it is or whether an auction is
+// open. The server validates that this player owns the pick.
+async function submitMpCrewOp(op) {
+  if (!_online || _onlineBusy) return false;
+  _onlineBusy = true;
+  let r;
+  try {
+    r = await submitGameOp(_onlineGameId, op, _onlineMe.token);
+  } finally {
+    _onlineBusy = false;
+  }
+  if (!r || !r.ok) {
+    _onlineToast(humanizeOnlineOpError(r && r.error), 'error');
+    // Reopen the wizard so they can pick again - the pick wasn't
+    // committed and the snapshot still says faction === null.
+    _crewWizardOpen = false;
+    if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
+    return false;
+  }
+  applySnapshot(r.data.game.state);
+  return true;
 }
 
 // Big bold "YOUR TURN" / "@<name>'s turn" banner anchored above the
@@ -956,6 +1006,9 @@ function humanizeOnlineOpError(code) {
     game_not_active: 'This game has ended.',
     not_a_player: 'You are not in this game.',
     unknown_op: 'Unsupported operation.',
+    crew_already_picked: 'You have already picked your starting crew.',
+    unknown_crew: 'That crew card does not exist.',
+    unknown_crew_face: 'Pick the primary or secondary face.',
     auction_in_progress: 'An auction is already underway.',
     need_opponent: 'Need another player to hold an auction.',
     no_ops_left: 'No operations left this turn.',
@@ -1019,6 +1072,11 @@ export function unmountBrowseOnline() {
   _deckPickerOpen = false;
   const auctionOverlay = document.getElementById('mp-auction-overlay');
   if (auctionOverlay) auctionOverlay.remove();
+  // Tear down any open crew-pick wizard so it doesn't leak across
+  // sessions when the player returns to the lobby list.
+  const crewOverlay = document.querySelector('.crew-wizard-overlay');
+  if (crewOverlay) crewOverlay.remove();
+  _crewWizardOpen = false;
   const banner = document.getElementById('mp-turn-banner');
   if (banner) {
     banner.hidden = true;
@@ -10188,7 +10246,20 @@ function setPickedCrew(cardId, face) {
 // dismiss - the player MUST pick a faction before play. On
 // confirm: records the chosen faction, drops the crew card into
 // the Hand. onDone (optional) fires after the pick commits.
-function openCrewWizard(onDone) {
+//
+// Two callers:
+//   - Sandbox / solo: no options passed, runs the legacy commit
+//     path (setPickedCrew localStorage + addCardToLeo + logAction).
+//   - Multiplayer: pass { onCommit({cardId, face}), description? }
+//     and the wizard skips all local side effects, handing the
+//     selection off so the caller can dispatch PICK_CREW. onDone
+//     still fires for both modes.
+function openCrewWizard(arg, maybeOnDone) {
+  // Back-compat: openCrewWizard(onDoneFn) keeps working.
+  const opts = typeof arg === 'function' ? { onDone: arg } : (arg || {});
+  if (maybeOnDone) opts.onDone = maybeOnDone;
+  const { onDone, onCommit, description } = opts;
+
   document.querySelector('.crew-wizard-overlay')?.remove();
   let selected = null; // { cardId, face }
 
@@ -10202,9 +10273,21 @@ function openCrewWizard(onDone) {
 
   const commit = () => {
     if (!selected) return;
-    setPickedCrew(selected.cardId, selected.face);
     const card = CREW_BY_ID[selected.cardId];
     const faction = card?.faces?.[selected.face];
+    if (onCommit) {
+      // Multiplayer path: hand the choice to the caller and let
+      // them dispatch PICK_CREW. We don't touch localStorage / LEO
+      // / the mission log here - the server is authoritative and
+      // the eventual snapshot will hydrate the crew slot through
+      // net-bridge.
+      try { onCommit({ cardId: selected.cardId, face: selected.face }); }
+      catch (e) { console.error('crew wizard onCommit:', e); }
+      overlay.remove();
+      try { onDone?.(); } catch (e) { console.error('crew wizard onDone:', e); }
+      return;
+    }
+    setPickedCrew(selected.cardId, selected.face);
     // Crew always spawns in the LEO Stack (variant rule, user
     // 2026-05). The chosen faction is recorded separately as the
     // player's committed faction; the physical crew card carries
@@ -10226,10 +10309,12 @@ function openCrewWizard(onDone) {
     const selName = selected
       ? esc(CREW_BY_ID[selected.cardId].faces[selected.face].name)
       : '...';
+    const descText = description
+      || 'Choose one faction. Its privilege is your edge for the game. (Required to start.)';
     dialog.innerHTML = `
       <div class="crew-wizard-head">
         <h3>🧑‍🚀 Pick your starting crew</h3>
-        <p class="muted">Choose one faction. Its privilege is your edge for the game. (Required to start.)</p>
+        <p class="muted">${esc(descText)}</p>
       </div>
       <div class="crew-faction-grid"></div>
       <div class="card-modal-actions">

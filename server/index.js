@@ -613,8 +613,9 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
     // player can never unwind into the turn that just ended). Auction
     // ops advance the floor too: an auction moves aqua / decks / hands
     // that are not on the per-turn undo stack, so letting undo replay
-    // across one would silently drop those effects.
-    if (kind === 'END_TURN' || kind.startsWith('AUCTION_')) {
+    // across one would silently drop those effects. PICK_CREW is also
+    // permanent (session-setup) so it commits the same way.
+    if (kind === 'END_TURN' || kind === 'PICK_CREW' || kind.startsWith('AUCTION_')) {
       db.prepare('UPDATE games SET committed_seq = ? WHERE id = ?').run(nextSeq, id);
     }
     if (result.state.status === 'finished') {
