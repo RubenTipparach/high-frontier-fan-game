@@ -81,6 +81,17 @@ export async function listLobbies() {
   return call('GET', '/lobbies');
 }
 
+// Lobbies the caller is in, across all statuses (powers the "your
+// games" + "ended games" sections). Requires the bearer token.
+export async function listMyGames(token) {
+  return call('GET', '/lobbies/mine', { token });
+}
+
+// In-progress games whose lobby was open. Anyone signed in can watch.
+export async function listPublicGames(token) {
+  return call('GET', '/games/public', { token });
+}
+
 export async function getLobby(id) {
   return call('GET', '/lobbies/' + id);
 }
@@ -169,4 +180,15 @@ export async function fetchChat(lobbyId, { before } = {}, token) {
 
 export async function sendChat(lobbyId, body, token) {
   return call('POST', `/lobbies/${lobbyId}/chat`, { body: { body }, token });
+}
+
+// Global chat: lobby-list-wide channel, no membership required.
+// Server broadcasts on the 'global' WS channel.
+export async function fetchGlobalChat({ before } = {}, token) {
+  const qs = before ? '?before=' + before : '';
+  return call('GET', `/chat/global${qs}`, { token });
+}
+
+export async function sendGlobalChat(body, token) {
+  return call('POST', '/chat/global', { body: { body }, token });
 }

@@ -4,9 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>High Frontier - fan game</title>
-    <link rel="stylesheet" href="./css/style.css?v=4" />
-    <link rel="stylesheet" href="./css/map.css?v=14" />
-    <link rel="stylesheet" href="./css/cards.css?v=4" />
+    <link rel="stylesheet" href="./css/style.css?v=14" />
+    <link rel="stylesheet" href="./css/map.css?v=23" />
+    <link rel="stylesheet" href="./css/cards.css?v=5" />
     <!--
       API base URL for the High Frontier companion server. Empty string
       = local-only mode (no profile, no lobby, no multiplayer). The
@@ -73,39 +73,37 @@
         user's pending direct invites, and a "Create new" / "Paste
         invite link" affordance.
       -->
+      <!--
+        ===== Lobby (home view) =====
+        Top: + New game (chooser: Multiplayer or Sandbox), Join-by-code,
+        pending invites chip with popover. Middle: global chat. Bottom:
+        three columns - Open tables / Your games / Ended games.
+        body is overflow:hidden so this section owns its own scroll;
+        the games grid collapses to one column on phones.
+      -->
       <section id="view-lobby-list" class="view hidden">
-        <div class="row">
-          <div class="card grow">
-            <div class="card-header">
-              <h2>Open tables</h2>
-              <div>
-                <button id="btn-refresh-lobbies" title="Refresh the open-table list">⟳</button>
-                <button id="btn-create-lobby" class="primary">+ New table</button>
-              </div>
+        <div class="lobby-top">
+          <button id="btn-menu-inline" class="lobby-menu-btn" type="button"
+            aria-label="Menu" title="Menu">☰</button>
+          <button id="btn-new-game" class="primary" type="button">+ New game</button>
+          <form id="form-claim-link" class="claim-link">
+            <input id="claim-link-code" type="text" maxlength="12"
+              placeholder="invite code" autocapitalize="off" spellcheck="false" />
+            <button type="submit">Join</button>
+          </form>
+          <div class="invites-wrap">
+            <button id="btn-pending-invites" class="invites-chip" type="button"
+              title="Pending invites" aria-label="Pending invites">
+              🔔 <span id="pending-invites-count" class="invites-badge">0</span>
+            </button>
+            <div id="pending-invites-popover" class="invites-popover hidden">
+              <h3>Pending invites</h3>
+              <ul id="invite-list" class="invite-list">
+                <li class="empty">No pending invites.</li>
+              </ul>
             </div>
-            <ul id="lobby-list" class="lobby-list">
-              <li class="empty">Loading…</li>
-            </ul>
-          </div>
-          <div class="card side">
-            <h2>Pending invites</h2>
-            <ul id="invite-list" class="invite-list">
-              <li class="empty">No pending invites.</li>
-            </ul>
-            <h2>Join by link</h2>
-            <form id="form-claim-link" class="claim-link">
-              <input id="claim-link-code" type="text" maxlength="12"
-                placeholder="invite code" autocapitalize="off" spellcheck="false" />
-              <button type="submit">Join</button>
-            </form>
           </div>
         </div>
-        <!--
-          Global chat: anyone signed in can talk here, no
-          per-lobby scope. The form is wired in lobby.js once the
-          chat-room API exists; for now the input is parked but
-          inert so the layout reads as intended.
-        -->
         <div class="card global-chat">
           <h2>Global chat</h2>
           <ul id="global-chat-messages" class="chat-messages">
@@ -116,6 +114,42 @@
               placeholder="Message everyone…" autocomplete="off" />
             <button type="submit">Send</button>
           </form>
+        </div>
+        <div class="lobby-games-grid">
+          <!-- "Your games" intentionally first - it's the most personal
+               and most-acted-on column, so it sits left-most on desktop
+               and top on mobile so players see what they're already in
+               without scrolling. -->
+          <div class="card">
+            <div class="card-header"><h2>Your games</h2></div>
+            <ul id="mygames-started" class="lobby-list">
+              <li class="empty">No games in progress.</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <h2>Open tables</h2>
+              <button id="btn-refresh-lobbies" title="Refresh the open-table list">⟳</button>
+            </div>
+            <ul id="lobby-list" class="lobby-list">
+              <li class="empty">Loading…</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <h2>Live games</h2>
+              <span class="muted" title="Public games in progress - hop in to spectate">👁</span>
+            </div>
+            <ul id="public-games-list" class="lobby-list">
+              <li class="empty">No public games right now.</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="card-header"><h2>Ended games</h2></div>
+            <ul id="mygames-ended" class="lobby-list">
+              <li class="empty">No finished games.</li>
+            </ul>
+          </div>
         </div>
       </section>
 
@@ -215,60 +249,11 @@
         </div>
 
         <!--
-          When the host hits Start, lobby.status flips to 'started'
-          and this overlay covers the lobby with the solar-system map.
-          Stage 2 renders the map read-only; Stage 3 will add the
-          engine + interactive operation buttons.
+          Multiplayer games render in the Sandbox view (view-browse) in
+          online mode - the same classic map + panels as solo, driven by
+          the server. See js/lobby.js (mountBrowse({ online: true })) and
+          js/game/browse.js. There is no separate game overlay.
         -->
-        <div id="game-overlay" class="game-overlay hidden">
-          <div class="overlay-shell">
-            <div class="overlay-header">
-              <h2 id="game-title">Solar system</h2>
-              <div class="overlay-actions">
-                <span id="game-turn-banner" class="game-turn-banner muted">Loading game…</span>
-                <button id="btn-back-to-lobby">Back to lobby</button>
-              </div>
-            </div>
-            <div class="overlay-main game-layout">
-              <div id="game-map" class="game-map"></div>
-              <aside id="game-hud" class="game-hud">
-                <div class="hud-section">
-                  <h3>Move</h3>
-                  <div id="hud-move-info" class="hud-move-info muted">Tap a site to plan a burn.</div>
-                  <div class="hud-actions">
-                    <button id="btn-game-move" class="primary" disabled>Move</button>
-                    <button id="btn-game-endturn" disabled>End turn</button>
-                  </div>
-                  <div class="hud-actions">
-                    <button id="btn-game-undo" disabled title="Take back your last move (until you roll or end your turn)">&#8634; Undo</button>
-                    <button id="btn-game-redo" disabled title="Redo a taken-back move">&#8635; Redo</button>
-                  </div>
-                  <div id="hud-move-error" class="hud-error"></div>
-                </div>
-                <div class="hud-section">
-                  <h3>Operations</h3>
-                  <div class="hud-actions">
-                    <button id="btn-auction-start" disabled title="Put the top of a patent deck up for auction (costs 1 op)">Start auction</button>
-                  </div>
-                  <div id="auction-deck-picker" class="auction-deck-picker hidden"></div>
-                </div>
-                <div class="hud-section">
-                  <h3>Players</h3>
-                  <ul id="hud-roster" class="hud-roster"></ul>
-                </div>
-                <div class="hud-section">
-                  <div class="hud-log-head">
-                    <h3>Log</h3>
-                    <button id="btn-return-live" class="hidden">&#9679; Return to live</button>
-                  </div>
-                  <div id="hud-review-note" class="hud-review-note hidden"></div>
-                  <ul id="hud-log" class="hud-log"></ul>
-                </div>
-              </aside>
-            </div>
-          </div>
-          <div id="game-auction" class="game-auction hidden"></div>
-        </div>
       </section>
 
       <!--
@@ -301,6 +286,7 @@
                 title="Patent Market cart" aria-label="Patent Market cart"
                 hidden>🛒</button>
               <button data-pane="patents" title="Card library" aria-label="Card library">🃏</button>
+              <button data-pane="mp" id="sidepanel-tab-mp" title="Multiplayer table" aria-label="Multiplayer table" hidden>🛰</button>
               <button data-pane="solo" title="Game mode (Sandbox / Campaign)" aria-label="Game mode">🎮</button>
               <button data-pane="milestones" title="Scoring" aria-label="Scoring">🏆</button>
               <button data-pane="log" title="Mission log" aria-label="Mission log">📋</button>
@@ -316,6 +302,10 @@
             <div class="sidepanel-content">
               <button class="sidepanel-close" id="sidepanel-close"
                 aria-label="Close panel" title="Close">×</button>
+              <div class="panel-pane" data-pane="mp">
+                <h3>🛰 Multiplayer</h3>
+                <div id="mp-panel"><p class="muted">Connecting…</p></div>
+              </div>
               <div class="panel-pane" data-pane="solo">
                 <h3>🎮 Game mode</h3>
                 <div id="solo-panel">
@@ -336,6 +326,16 @@
               </div>
             </div>
           </aside>
+
+          <!--
+            Multiplayer turn banner. Sits just above the hand strip,
+            anchored to the bottom of the browse-shell. Shows
+            "YOUR TURN" (green) when it's the local player's turn,
+            or "@<name>'s turn" otherwise. Hidden in solo mode and
+            wired by js/game/browse.js#syncMpTurnBanner.
+          -->
+          <div id="mp-turn-banner" class="mp-turn-banner" hidden
+            role="status" aria-live="polite"></div>
 
           <!--
             Sandbox hand strip: a thin panel anchored at the bottom
@@ -410,8 +410,7 @@
         <div class="main-menu-section">
           <h2 class="main-menu-heading">View</h2>
           <div class="main-menu-row">
-            <button id="btn-browse" title="Sandbox: explore the map and build rockets from the patent deck">🗺 Sandbox</button>
-            <button id="btn-multiplayer" title="Multiplayer: lobby + games + global chat">🛰 Multiplayer</button>
+            <button id="btn-lobby" title="Lobby: open tables, your games, global chat">🛰 Lobby</button>
             <button id="btn-fullscreen" title="Toggle fullscreen" aria-label="Toggle fullscreen">⛶ Fullscreen</button>
             <button id="btn-debug-panel" title="Toggle the map debug panel (sandbox)" aria-label="Toggle debug panel">🔧 Debug panel</button>
           </div>
@@ -425,6 +424,32 @@
             </div>
             <button id="btn-signin" class="primary hidden">Sign in</button>
             <span id="server-status" class="server-status" title="API connectivity">…</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!--
+      "+ New game" chooser modal. Opened from the lobby's top action row;
+      picks Multiplayer (-> view-create-lobby) or Sandbox (-> view-browse
+      solo mount). Reuses .main-menu-overlay styling.
+    -->
+    <div id="new-game-modal" class="main-menu-overlay hidden"
+      role="dialog" aria-modal="true" aria-labelledby="new-game-title">
+      <div class="main-menu-panel">
+        <div class="main-menu-header">
+          <div class="brand">
+            <span class="brand-mark" aria-hidden="true">+</span>
+            <h1 id="new-game-title">New game</h1>
+          </div>
+          <button id="btn-new-game-close" class="modal-x" type="button"
+            aria-label="Close" title="Close (Esc)">×</button>
+        </div>
+        <div class="main-menu-section">
+          <h2 class="main-menu-heading">Mode</h2>
+          <div class="main-menu-row">
+            <button id="btn-new-game-mp" class="primary" type="button">🛰 Multiplayer table</button>
+            <button id="btn-new-game-sandbox" type="button">🗺 Sandbox (solo)</button>
           </div>
         </div>
       </div>

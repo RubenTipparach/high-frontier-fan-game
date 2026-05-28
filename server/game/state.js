@@ -33,6 +33,7 @@
 // slot in without a schema migration.
 
 import { PATENTS } from '../../data/patents.js';
+import { CREW } from '../../data/crew.js';
 import { makeRng, shuffle } from './rng.js';
 import { startSiteId } from './graph.js';
 
@@ -64,16 +65,18 @@ export const DISCARDS_PER_TURN = 1;
 // playable immediately. This is a balance constant, revisited when the
 // build + refuel ops land.
 export const STARTING_WATER = 20;
-export const AQUA_DEFAULT = 100;
+export const AQUA_DEFAULT = 6;
 
 export const DECK_TYPES = [
   'thruster', 'reactor', 'radiator', 'refinery', 'robonaut', 'generator',
 ];
 
-// Per-seat marker colours (first six seats; cycles after that).
-export const PLAYER_COLORS = [
-  '#facc15', '#38bdf8', '#f87171', '#a78bfa', '#34d399', '#fb923c',
-];
+// Per-seat marker colours = the six crew-card colours. Each crew
+// card is associated with one of these slots; a player assigned
+// colour X must pick a crew face from the card whose `color === X`.
+// Sourced from data/crew.js so the two stay in lockstep (if a crew
+// colour ever changes there, this list updates automatically).
+export const PLAYER_COLORS = CREW.map((c) => c.color);
 
 // Build the six shuffled patent decks from a seeded generator. Mirrors
 // js/game/decks.js#buildShuffledFresh but driven by the game's RNG so
@@ -97,6 +100,13 @@ function freshPlayer({ profileId, name, seat, color }) {
     name,
     seat,
     color,
+    // Starting crew faction. Each player picks one face of the 12
+    // crew-card faces via the PICK_CREW op (engine.js) at session
+    // open. Null until the player has picked; the client
+    // (browse.js#bootstrapOnlineGame) opens the crew wizard for
+    // any player whose faction is null on snapshot. Once committed
+    // it is final - PICK_CREW rejects re-picks.
+    faction: null,
     rocket: {
       siteId: startSiteId(),
       stack: [],
@@ -105,6 +115,22 @@ function freshPlayer({ profileId, name, seat, color }) {
       tank: STARTING_WATER,
       afterburnEngaged: false,
     },
+    // LEO Stack: a per-player parking lot of cards staged at LEO.
+    // Always at LEO by construction (no siteId field needed - LEO
+    // has no real site id). Flat array of { id, kind, face? } slots
+    // matching js/game/leo-stack.js's slot shape, so hydrateLeo
+    // (net-bridge.js) can hand the array straight to the sandbox
+    // module. Starts empty; PICK_CREW pushes the player's chosen
+    // crew here. Future BUILD ops will move cards Hand -> LEO and
+    // LEO -> Rocket.
+    leo: [],
+    // Outposts A-D: keyed by single-letter id when built. Each entry
+    // mirrors the sandbox shape (js/game/stacks.js) so net-bridge's
+    // spread hands the object straight to hydrateOutposts:
+    //   { letter, siteId, cards: [{id, kind, face?}, ...], tank }
+    // Empty until a future BUILD_OUTPOST op fires; the siteId is
+    // the data/sites.js slug the outpost was built at (any non-LEO
+    // node the player chose).
     outposts: {},
     hand: [],
     boostMarks: [],
@@ -120,6 +146,15 @@ function freshPlayer({ profileId, name, seat, color }) {
 export function createInitialState({ players, seed }) {
   const ordered = [...players].sort((a, b) => (a.seat || 0) - (b.seat || 0));
   const gen = makeRng(seed, 0);
+  // Per-game random colour palette: same six PLAYER_COLORS, shuffled
+  // by the seeded RNG so each session deals a different palette while
+  // still being reproducible from (seed). Colours are then assigned
+  // in seat order so seat 1 = palette[0], seat 2 = palette[1], etc -
+  // which keeps the "colour = turn order" reading the turn banner +
+  // map markers rely on, while making the specific seat -> colour
+  // mapping fresh every game (so no one is always "the yellow
+  // player").
+  const palette = shuffle(gen, PLAYER_COLORS);
   const decks = buildShuffledDecks(gen);
   return {
     version: 2,
@@ -147,7 +182,7 @@ export function createInitialState({ players, seed }) {
         profileId: p.profileId,
         name: p.name,
         seat: p.seat || i + 1,
-        color: PLAYER_COLORS[i % PLAYER_COLORS.length],
+        color: palette[i % palette.length],
       })
     ),
     startedAt: Date.now(),

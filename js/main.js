@@ -12,7 +12,7 @@ import {
 import {
   initInvites, refreshInvitesList, subscribeInvitesForProfile,
 } from './invites.js';
-import { mountBrowse } from './game/browse.js';
+import { mountBrowse, isBrowseOnline } from './game/browse.js';
 
 const VIEWS = [
   'view-signin', 'view-lobby-list', 'view-create-lobby', 'view-lobby',
@@ -28,20 +28,26 @@ function showView(id) {
   // Remember the view we're leaving so Browse → back returns properly.
   const current = VIEWS.find((v) => !document.getElementById(v).classList.contains('hidden'));
   if (current && current !== id && current !== 'view-browse') _prevView = current;
+  console.log('[hf:nav] showView ->', id, '(from', current || '(none)', ')');
   for (const v of VIEWS) {
     document.getElementById(v).classList.toggle('hidden', v !== id);
   }
-  // The hamburger menu's Sandbox button is disabled while we're
-  // already in sandbox (view-browse) - there's nowhere to go,
-  // and it shouldn't read as a toggle. Multiplayer stays live.
-  const browseBtn = document.getElementById('btn-browse');
-  if (browseBtn) {
-    const inSandbox = id === 'view-browse';
-    browseBtn.disabled = inSandbox;
-    browseBtn.classList.toggle('is-current', inSandbox);
-    browseBtn.title = inSandbox
-      ? 'Sandbox: already active'
-      : 'Sandbox: explore the map and build rockets from the patent deck';
+  // Body class drives lobby-only CSS (hides the floating FAB while the
+  // lobby has its own inline ☰ button).
+  document.body.classList.toggle('in-lobby', id === 'view-lobby-list');
+  // Menu highlight. Lobby is the sole top-level context indicator:
+  // current on the lobby views OR on view-browse when an online game is
+  // driving it. Solo sandbox (view-browse, !online) has no menu button
+  // to light up - it's only entered via "+ New game" in the lobby.
+  const lobbyBtn = document.getElementById('btn-lobby');
+  const inOnlineBrowse = id === 'view-browse' && isBrowseOnline();
+  const inLobby = id === 'view-lobby-list' || id === 'view-lobby' || id === 'view-create-lobby';
+  const lobbyCurrent = inOnlineBrowse || inLobby;
+  if (lobbyBtn) {
+    lobbyBtn.classList.toggle('is-current', lobbyCurrent);
+    lobbyBtn.title = lobbyCurrent
+      ? 'Lobby: already active'
+      : 'Lobby: open tables, your games, global chat';
   }
 }
 
@@ -91,27 +97,14 @@ function reflectProfile(profile) {
 // Browse view: read-only data inspector. Always reachable; doesn't
 // require sign-in. The Browse module itself manages its tabs.
 function initBrowseButton() {
-  document.getElementById('btn-browse').addEventListener('click', () => {
-    if (!document.getElementById('view-browse').classList.contains('hidden')) {
-      // Toggle: clicking Browse while on Browse returns to the prior view.
-      showView(_prevView || (activeProfile() ? 'view-lobby-list' : 'view-signin'));
-      return;
-    }
-    showView('view-browse');
-    mountBrowse();
-  });
-
-  // Multiplayer button: jump to the lobby + global-chat view.
-  // Clicking again from the lobby returns to Sandbox so the
-  // pair toggles cleanly.
-  const mpBtn = document.getElementById('btn-multiplayer');
-  if (mpBtn) {
-    mpBtn.addEventListener('click', () => {
-      const onLobby = !document.getElementById('view-lobby-list').classList.contains('hidden');
-      if (onLobby) {
-        showView('view-browse');
-        mountBrowse();
-      } else {
+  // The hamburger menu now exposes a single top-level nav button: the
+  // Lobby (Sandbox is reached via "+ New game" in the lobby). Clicking
+  // it from anywhere navigates to the lobby; no toggle / no previous-
+  // view dance.
+  const lobbyBtn = document.getElementById('btn-lobby');
+  if (lobbyBtn) {
+    lobbyBtn.addEventListener('click', () => {
+      if (document.getElementById('view-lobby-list').classList.contains('hidden')) {
         showView('view-lobby-list');
       }
     });
@@ -165,15 +158,58 @@ function initMainMenu() {
   fab.addEventListener('click', () => {
     if (overlay.classList.contains('hidden')) open(); else close();
   });
+  // The lobby has its own inline ☰ button (the floating FAB is hidden
+  // there - see body.in-lobby CSS). Wire it to the same toggle.
+  const inlineMenu = document.getElementById('btn-menu-inline');
+  if (inlineMenu) {
+    inlineMenu.addEventListener('click', () => {
+      if (overlay.classList.contains('hidden')) open(); else close();
+    });
+  }
   closeBtn?.addEventListener('click', close);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   // Auto-close on a view-switching action - same idiom as any
   // off-canvas menu. Fullscreen + account-menu stay open because
   // the user usually wants to flip a setting and keep browsing.
-  for (const id of ['btn-browse', 'btn-multiplayer', 'btn-signin']) {
+  for (const id of ['btn-lobby', 'btn-signin']) {
     const b = document.getElementById(id);
     if (b) b.addEventListener('click', close);
   }
+}
+
+// "+ New game" chooser modal: opened from the lobby's top action row
+// (#btn-new-game). Picks Multiplayer (-> view-create-lobby) or Sandbox
+// (-> view-browse solo mount). Mirrors initMainMenu's overlay flow.
+function initNewGameModal() {
+  const trigger = document.getElementById('btn-new-game');
+  const overlay = document.getElementById('new-game-modal');
+  const closeBtn = document.getElementById('btn-new-game-close');
+  const mpBtn = document.getElementById('btn-new-game-mp');
+  const sandboxBtn = document.getElementById('btn-new-game-sandbox');
+  if (!trigger || !overlay || !closeBtn || !mpBtn || !sandboxBtn) return;
+  const open = () => {
+    overlay.classList.remove('hidden');
+    document.addEventListener('keydown', onKey);
+  };
+  const close = () => {
+    overlay.classList.add('hidden');
+    document.removeEventListener('keydown', onKey);
+  };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  trigger.addEventListener('click', open);
+  closeBtn.addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  mpBtn.addEventListener('click', () => {
+    close();
+    showView('view-create-lobby');
+  });
+  sandboxBtn.addEventListener('click', () => {
+    close();
+    // Solo sandbox lives in view-browse with no opts; mountBrowse's
+    // safety reset detaches any prior online plumbing automatically.
+    showView('view-browse');
+    mountBrowse();
+  });
 }
 
 function initAccountMenu() {
@@ -253,26 +289,29 @@ async function afterSignIn() {
   await maybeClaimInviteFromUrl();
 }
 
+// Returns true if it navigated the user into a lobby (so the caller
+// skips the resume / sandbox fallback).
 async function maybeClaimInviteFromUrl() {
   const url = new URL(window.location.href);
   const code = url.searchParams.get('invite');
-  if (!code) return;
+  if (!code) return false;
   // Clear from the URL so a refresh doesn't double-claim.
   url.searchParams.delete('invite');
   window.history.replaceState({}, '', url.pathname + url.search + url.hash);
   const me = activeProfile();
   if (!me) {
     toast('Sign in to claim that invite link.', 'invite');
-    return;
+    return false;
   }
   const peek = await lookupInviteLink(code);
-  if (!peek.ok) { toast('Invite link not found.', 'error'); return; }
-  if (peek.data.expired) { toast('That invite link expired.', 'error'); return; }
-  if (peek.data.used)    { toast('That invite link is used up.', 'error'); return; }
+  if (!peek.ok) { toast('Invite link not found.', 'error'); return false; }
+  if (peek.data.expired) { toast('That invite link expired.', 'error'); return false; }
+  if (peek.data.used)    { toast('That invite link is used up.', 'error'); return false; }
   const r = await claimInviteLink(code, me.token);
-  if (!r.ok) { toast('Couldn\'t claim invite: ' + r.error, 'error'); return; }
+  if (!r.ok) { toast('Couldn\'t claim invite: ' + r.error, 'error'); return false; }
   toast(`Joined "${peek.data.lobbyName}".`, 'success');
   await openLobby(r.data.lobbyId, { join: false });
+  return true;
 }
 
 function humanizeError(code) {
@@ -289,12 +328,14 @@ function humanizeError(code) {
 // ----- Boot -----
 
 async function boot() {
+  console.log('[hf:boot] start');
   initSigninForm();
   initAccountMenu();
   initLobby({ onShowView: showView, onToast: toast });
   initInvites({ onToast: toast });
   initBrowseButton();
   initMainMenu();
+  initNewGameModal();
   onProfileChange(reflectProfile);
 
   await updateServerStatus();
@@ -302,18 +343,24 @@ async function boot() {
   reflectProfile(me);
 
   if (me) {
+    console.log('[hf:boot] signed in as @' + me.name + ' (id=' + me.id + ')');
     ws.connect(me.token);
     subscribeInvitesForProfile(me);
-    // Default landing view is Sandbox - the player can always
-    // hop to Multiplayer via the topbar. We still kick off the
-    // lobby-list / invites loads so the multiplayer view is
-    // populated when they switch.
-    showView('view-browse');
-    mountBrowse();
+    // Keep the multiplayer view populated for when the player switches.
     refreshLobbyList();
     refreshInvitesList();
-    await maybeClaimInviteFromUrl();
+    // Landing priority: a `?invite=` URL wins; otherwise always land on
+    // the lobby. Auto-resume is gone - a player can have several games
+    // going at once, so jumping straight into one is presumptuous. Each
+    // game has a Resume button in "Your games".
+    const claimed = await maybeClaimInviteFromUrl();
+    console.log('[hf:boot] inviteClaimed=', claimed);
+    if (!claimed) {
+      console.log('[hf:boot] landing on lobby (default)');
+      showView('view-lobby-list');
+    }
   } else {
+    console.log('[hf:boot] no profile - going to signin');
     showView('view-signin');
     // If the URL has an invite code, stash a note so the user sees it
     // after they sign in.

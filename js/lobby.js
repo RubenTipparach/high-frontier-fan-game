@@ -3,15 +3,16 @@
 // lobby so chat + roster updates land in real time.
 
 import {
-  listLobbies, getLobby, createLobby, joinLobby, leaveLobby,
+  listLobbies, listMyGames, listPublicGames, getLobby, createLobby, joinLobby, leaveLobby,
   setReady, startLobby, claimInviteLink, lookupInviteLink,
+  fetchGlobalChat, sendGlobalChat,
 } from './api.js';
-import { activeProfile } from './auth.js';
+import { activeProfile, onProfileChange } from './auth.js';
 import { ws } from './ws.js';
 import { saveLastLobbyId } from './storage.js';
 import { mountChat, unmountChat } from './chat.js';
 import { mountInvitesUI, unmountInvitesUI } from './invites.js';
-import { mountNetGame, unmountNetGame } from './game/net-game.js';
+import { mountBrowse, unmountBrowseOnline } from './game/browse.js';
 
 let _activeLobby = null;
 let _unsubWS = null;
@@ -24,9 +25,9 @@ export function initLobby({ onShowView, onToast }) {
   _onToast = onToast;
 
   document.getElementById('btn-refresh-lobbies').addEventListener('click', refreshLobbyList);
-  document.getElementById('btn-create-lobby').addEventListener('click', () => {
-    _onShowView('view-create-lobby');
-  });
+  // "+ New game" lives in main.js (initNewGameModal); it opens the
+  // chooser modal that routes to either view-create-lobby (multiplayer)
+  // or view-browse (sandbox). No btn-create-lobby in this view anymore.
   document.getElementById('create-cancel').addEventListener('click', () => {
     _onShowView('view-lobby-list');
   });
@@ -35,12 +36,153 @@ export function initLobby({ onShowView, onToast }) {
   document.getElementById('btn-leave-lobby').addEventListener('click', onLeaveLobby);
   document.getElementById('btn-ready').addEventListener('click', onReadyClick);
   document.getElementById('btn-start').addEventListener('click', onStartClick);
-  document.getElementById('btn-back-to-lobby').addEventListener('click', () => {
-    document.getElementById('game-overlay').classList.add('hidden');
+
+  // Invites chip in the lobby top row. Click toggles a small popover
+  // with the pending-invite list; an outside click closes it. The badge
+  // count is kept in sync with the live #invite-list (invites.js owns
+  // the rendering; a MutationObserver here just recounts on each
+  // render).
+  const inviteBtn = document.getElementById('btn-pending-invites');
+  const invitesPop = document.getElementById('pending-invites-popover');
+  const inviteList = document.getElementById('invite-list');
+  const badge = document.getElementById('pending-invites-count');
+  if (inviteBtn && invitesPop) {
+    // syncBodyClass: pair an `.invites-popover-open` class on <body>
+    // with the popover's open state so the mobile backdrop pseudo
+    // (body.invites-popover-open::before in style.css) tracks it.
+    const syncBodyClass = () => {
+      document.body.classList.toggle(
+        'invites-popover-open',
+        !invitesPop.classList.contains('hidden')
+      );
+    };
+    inviteBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      invitesPop.classList.toggle('hidden');
+      syncBodyClass();
+    });
+    document.addEventListener('click', (ev) => {
+      if (invitesPop.classList.contains('hidden')) return;
+      if (inviteBtn.contains(ev.target) || invitesPop.contains(ev.target)) return;
+      invitesPop.classList.add('hidden');
+      syncBodyClass();
+    });
+    // Close on Escape so the mobile modal behaves like a real modal.
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Escape') return;
+      if (invitesPop.classList.contains('hidden')) return;
+      invitesPop.classList.add('hidden');
+      syncBodyClass();
+    });
+  }
+  if (inviteList && badge) {
+    const updateBadge = () => {
+      const n = inviteList.querySelectorAll('li:not(.empty)').length;
+      badge.textContent = String(n);
+      if (inviteBtn) inviteBtn.classList.toggle('has-invites', n > 0);
+    };
+    new MutationObserver(updateBadge).observe(inviteList, { childList: true });
+    updateBadge();
+  }
+
+  mountGlobalChat();
+}
+
+// Global chat (lobby list). Posts via /chat/global, subscribes to the
+// 'global' WS channel for live broadcasts. Mounted once at init; the
+// list element + form live in index.html under .global-chat.
+//
+// Timing note: initLobby runs BEFORE restoreProfile() in boot(), so the
+// initial activeProfile() is null. The form / live listener wire up
+// immediately (cheap), and the history fetch is deferred until a
+// profile actually arrives via onProfileChange so we don't silently
+// no-op the backfill.
+function mountGlobalChat() {
+  const form = document.getElementById('global-chat-form');
+  const input = document.getElementById('global-chat-input');
+  const list = document.getElementById('global-chat-messages');
+  if (!form || !input || !list) return;
+
+  // Track which message ids we've already rendered so the live WS echo
+  // doesn't double-print messages we just optimistically appended.
+  const seenIds = new Set();
+  const append = (msg) => {
+    if (!msg) return;
+    if (msg.id != null && seenIds.has(msg.id)) return;
+    if (msg.id != null) seenIds.add(msg.id);
+    const empty = list.querySelector('.empty');
+    if (empty) empty.remove();
+    const li = document.createElement('li');
+    if (msg.id != null) li.dataset.mid = String(msg.id);
+    const who = document.createElement('span');
+    who.className = 'chat-who';
+    who.textContent = '@' + (msg.profileName || '?') + ':';
+    const body = document.createElement('span');
+    body.className = 'chat-body';
+    body.textContent = ' ' + (msg.body || '');
+    li.append(who, body);
+    list.appendChild(li);
+    list.scrollTop = list.scrollHeight;
+  };
+
+  // Live broadcasts. Subscribed unconditionally; ws.subscribe queues
+  // the channel and the WS layer replays it whenever a connection
+  // (re)establishes. lobbyId == null narrows to global-only echoes
+  // so per-lobby chat traffic doesn't bleed in here.
+  ws.subscribe('global');
+  ws.on('chat', (msg) => {
+    if (!msg || !msg.message || msg.message.lobbyId != null) return;
+    append(msg.message);
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const profile = activeProfile();
+    if (!profile) {
+      _onToast('Sign in to chat.', 'error');
+      return;
+    }
+    const body = input.value.trim();
+    if (!body) return;
+    input.value = '';
+    const r = await sendGlobalChat(body, profile.token);
+    if (!r || !r.ok) {
+      _onToast('Could not send global chat.', 'error');
+      input.value = body;
+      return;
+    }
+    // Optimistic local append; the WS echo will arrive too but
+    // append() dedupes by message id via seenIds.
+    if (r.data && r.data.message) append(r.data.message);
+  });
+
+  // Backfill recent history every time a profile becomes available
+  // (covers boot, sign-in, and re-sign-in after signout). Wipes the
+  // seenIds set so a fresh backfill isn't blocked by stale ids.
+  let _historyFetching = false;
+  const loadHistory = async () => {
+    const profile = activeProfile();
+    if (!profile || _historyFetching) return;
+    _historyFetching = true;
+    try {
+      const r = await fetchGlobalChat({}, profile.token);
+      if (r && r.ok && r.data && Array.isArray(r.data.entries)) {
+        for (const m of r.data.entries) append(m);
+      }
+    } finally {
+      _historyFetching = false;
+    }
+  };
+  loadHistory();
+  onProfileChange((profile) => {
+    if (!profile) return;
+    loadHistory();
   });
 }
 
 export async function refreshLobbyList() {
+  refreshMyGames();
+  refreshPublicGames();
   const list = document.getElementById('lobby-list');
   list.innerHTML = '<li class="empty">Loading…</li>';
   const r = await listLobbies();
@@ -74,6 +216,132 @@ export async function refreshLobbyList() {
       await openLobby(lobby.id, { join: true });
     });
     list.appendChild(li);
+  }
+}
+
+// "Your games" (in progress) + "Ended games": the tables the player is
+// a member of, which the open-tables list (waiting + open only) hides.
+// In progress = lobby started and the game still active; ended = the
+// game finished. Both Resume/Review by re-entering the lobby, which
+// remounts the sandbox game view for a started game.
+export async function refreshMyGames() {
+  const startedEl = document.getElementById('mygames-started');
+  const endedEl = document.getElementById('mygames-ended');
+  if (!startedEl || !endedEl) return;
+  const me = activeProfile();
+  if (!me) return;
+  const r = await listMyGames(me.token);
+  if (!r.ok) return;
+  const started = [];
+  const ended = [];
+  for (const g of r.data.entries) {
+    if (g.gameStatus === 'finished') ended.push(g);
+    else if (g.status === 'started') started.push(g);
+  }
+  renderMyGames(startedEl, started, 'Resume', 'No games in progress.');
+  renderMyGames(endedEl, ended, 'Review', 'No finished games.');
+}
+
+// "Live games": in-progress public games anyone can hop into as a
+// spectator. The list is profile-agnostic (server returns every
+// open-lobby active game); the Watch button mounts the browse view
+// in spectator mode so the viewer sees the live board without any
+// actions.
+export async function refreshPublicGames() {
+  const listEl = document.getElementById('public-games-list');
+  if (!listEl) return;
+  const me = activeProfile();
+  if (!me) {
+    listEl.innerHTML = '<li class="empty">Sign in to watch live games.</li>';
+    return;
+  }
+  const r = await listPublicGames(me.token);
+  if (!r.ok) {
+    listEl.innerHTML = `<li class="empty">Failed to load (${r.error}).</li>`;
+    return;
+  }
+  const entries = (r.data && r.data.entries) || [];
+  if (!entries.length) {
+    listEl.innerHTML = '<li class="empty">No public games right now.</li>';
+    return;
+  }
+  listEl.innerHTML = '';
+  for (const g of entries) {
+    const li = document.createElement('li');
+    li.innerHTML = `
+      <div>
+        <span class="name"></span>
+        <span class="meta">hosted by @<span class="host"></span>
+          · <span class="count"></span> players
+          · <code></code></span>
+      </div>
+      <div class="row-actions">
+        <button class="primary">👁 Watch</button>
+      </div>
+    `;
+    li.querySelector('.name').textContent = g.lobbyName;
+    li.querySelector('.host').textContent = g.hostName;
+    li.querySelector('.count').textContent = g.playerCount;
+    li.querySelector('code').textContent = g.lobbyCode;
+    li.querySelector('button').addEventListener('click', () => {
+      watchGame(g);
+    });
+    listEl.appendChild(li);
+  }
+}
+
+// Mount the browse view in spectator mode for the given public game.
+// The viewer sees the live board (map / roster / turn) but every
+// action submitter refuses with a "Spectator - view only" toast.
+async function watchGame(g) {
+  const me = activeProfile();
+  if (!me) return;
+  _onShowView('view-browse');
+  mountBrowse({
+    online: true,
+    spectator: true,
+    gameId: g.gameId,
+    lobbyId: null,         // spectators don't get the lobby chat
+    me,
+    onToast: _onToast,
+    room: g.lobbyName + ' (spectating)',
+    onLeave: () => {
+      unmountBrowseOnline();
+      _onShowView('view-lobby-list');
+    },
+  });
+}
+
+function renderMyGames(listEl, games, actionLabel, emptyMsg) {
+  listEl.innerHTML = '';
+  if (!games.length) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = emptyMsg;
+    listEl.appendChild(li);
+    return;
+  }
+  for (const g of games) {
+    const li = document.createElement('li');
+    li.innerHTML = `
+      <div>
+        <span class="name"></span>
+        <span class="meta">hosted by @<span class="host"></span>
+          · <span class="count"></span>/${g.maxPlayers}
+          · <code></code></span>
+      </div>
+      <div class="row-actions">
+        <button class="primary"></button>
+      </div>
+    `;
+    li.querySelector('.name').textContent = g.name;
+    li.querySelector('.host').textContent = g.hostName;
+    li.querySelector('.count').textContent = g.memberCount;
+    li.querySelector('code').textContent = g.code;
+    const btn = li.querySelector('button');
+    btn.textContent = actionLabel;
+    btn.addEventListener('click', () => openLobby(g.id, { join: false }));
+    listEl.appendChild(li);
   }
 }
 
@@ -148,7 +416,9 @@ export async function enterLobby(lobby) {
   _unsubWS = () => { offUpdate(); offDisband(); ws.unsubscribe(channel); };
   mountChat(lobby);
   mountInvitesUI(lobby);
-  _onShowView('view-lobby');
+  // A started game lives in the sandbox view (renderLobby mounts it +
+  // navigates there); only show the lobby view while still waiting.
+  if (lobby.status !== 'started') _onShowView('view-lobby');
 }
 
 function renderLobby(lobby) {
@@ -181,28 +451,34 @@ function renderLobby(lobby) {
   const isHost = me && me.id === lobby.hostId;
   startBtn.classList.toggle('hidden', !isHost || lobby.status !== 'waiting');
 
-  const overlay = document.getElementById('game-overlay');
-  overlay.classList.toggle('hidden', lobby.status !== 'started');
-  if (lobby.status === 'started') {
-    const title = document.getElementById('game-title');
-    if (title) title.textContent = lobby.name;
-    const me = activeProfile();
-    // Mount the server-authoritative game once, on first reveal. The
-    // game surface (shared map + turn HUD) manages its own WS sub and
-    // op submission; see js/game/net-game.js.
-    if (lobby.gameId && me && !_gameMounted) {
+  // A started game runs in the sandbox view (view-browse) in online
+  // mode: the same classic map + panels as solo, driven by the server.
+  // Mounted once; the sandbox manages its own game WS + op submission.
+  if (lobby.status === 'started' && lobby.gameId && me) {
+    if (!_gameMounted) {
       _gameMounted = true;
-      mountNetGame({ gameId: lobby.gameId, me, onToast: _onToast }).catch((err) => {
-        _gameMounted = false;
-        _onToast('Game failed to load: ' + err.message, 'error');
+      mountBrowse({
+        online: true,
+        gameId: lobby.gameId,
+        lobbyId: lobby.id,
+        me,
+        onToast: _onToast,
+        room: lobby.name,
+        // The pane's "Back to lobbies" button calls this. Non-destructive:
+        // the online layer detaches and the player lands on the lobby
+        // list (the game keeps running; Resume puts them back in).
+        onLeave: () => {
+          _gameMounted = false;
+          unmountBrowseOnline();
+          _onShowView('view-lobby-list');
+          refreshLobbyList();
+        },
       });
-    } else if (!lobby.gameId) {
-      const host = document.getElementById('game-map');
-      if (host) host.innerHTML = '<div class="map-loading">No active game for this table.</div>';
+      _onShowView('view-browse');
     }
   } else if (_gameMounted) {
-    // Game ended (or lobby reset). Tear down the game surface.
-    unmountNetGame();
+    // Game ended or the table reset: detach the online layer.
+    unmountBrowseOnline();
     _gameMounted = false;
   }
 }
@@ -217,8 +493,7 @@ async function onLeaveLobby() {
 
 function leaveCurrent() {
   if (_unsubWS) { _unsubWS(); _unsubWS = null; }
-  if (_gameMounted) { unmountNetGame(); _gameMounted = false; }
-  document.getElementById('game-overlay').classList.add('hidden');
+  if (_gameMounted) { unmountBrowseOnline(); _gameMounted = false; }
   unmountChat();
   unmountInvitesUI();
   _activeLobby = null;

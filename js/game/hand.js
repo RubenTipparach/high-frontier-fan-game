@@ -19,6 +19,7 @@
 import { isInRocket } from './rocket.js';
 import { isExpansionType } from '../../data/patents.js';
 import { CREW_BY_ID } from '../../data/crew.js';
+import { isOnline } from './online-mode.js';
 
 const STORAGE_KEY = 'hf-sandbox-hand';
 const BOOST_KEY = 'hf-sandbox-boost-marks';
@@ -45,6 +46,7 @@ let _boostMarks = (() => {
 let _listeners = [];
 
 function persist() {
+  if (isOnline()) return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(_hand));
     localStorage.setItem(BOOST_KEY, JSON.stringify([..._boostMarks]));
@@ -55,6 +57,14 @@ function notify() {
   for (const cb of _listeners) {
     try { cb(); } catch (err) { console.error('hand listener:', err); }
   }
+}
+
+// Replace the in-memory hand from a server snapshot. Clears any
+// pending boost marks (they don't survive a snapshot swap).
+export function hydrateHand(ids = []) {
+  _hand = Array.isArray(ids) ? [...ids] : [];
+  _boostMarks.clear();
+  notify();
 }
 
 export function getHandSlots() {

@@ -37,6 +37,8 @@
 // Colony record shape:
 //   { siteId, ownerId }
 
+import { isOnline } from './online-mode.js';
+
 const FACTORIES_KEY = 'hf-sandbox-factories';
 const COLONIES_KEY  = 'hf-sandbox-colonies';
 
@@ -86,10 +88,12 @@ let _factoryListeners = [];
 let _colonyListeners  = [];
 
 function persistFactories() {
+  if (isOnline()) return;
   try { localStorage.setItem(FACTORIES_KEY, JSON.stringify(_factories)); }
   catch { /* private mode */ }
 }
 function persistColonies() {
+  if (isOnline()) return;
   try { localStorage.setItem(COLONIES_KEY, JSON.stringify(_colonies)); }
   catch { /* private mode */ }
 }
@@ -102,6 +106,21 @@ function notifyColonies() {
   for (const cb of _colonyListeners) {
     try { cb(); } catch (err) { console.error('colony listener:', err); }
   }
+}
+
+// Replace the in-memory factory + colony maps from a server
+// snapshot. Fires both subscriber sets.
+export function hydrateFactories(factories = {}, colonies = {}) {
+  let f;
+  let c;
+  try { f = structuredClone(factories); }
+  catch { f = JSON.parse(JSON.stringify(factories)); }
+  try { c = structuredClone(colonies); }
+  catch { c = JSON.parse(JSON.stringify(colonies)); }
+  _factories = (f && typeof f === 'object') ? f : {};
+  _colonies  = (c && typeof c === 'object') ? c : {};
+  notifyFactories();
+  notifyColonies();
 }
 
 // --------- Factories ---------

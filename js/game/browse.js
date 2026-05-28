@@ -117,6 +117,15 @@ import {
   DECK_TYPES, getDeck, peekTop, drawTop, addToBottom, removeFromDeck,
   cycleAllDecks, supportBonusDecks, onDeckChange,
 } from './decks.js';
+// Multiplayer glue (the sandbox map, driven from a server game). These
+// are inert until mountBrowse({ online:true }) flips _online on; the
+// solo path never touches them.
+import { setOnline, isOnline } from './online-mode.js';
+import {
+  buildIdMaps, hydrateFromSnapshot, toServerId,
+} from './net-bridge.js';
+import { getGame, submitGameOp, fetchChat, sendChat } from '../api.js';
+import { ws } from '../ws.js';
 
 // Only one map mode now (planner / "classic"); the old
 // "Cleaned up" variant was disorienting next to the canonical
@@ -136,9 +145,78 @@ let _openMapSearch = null;
 // trigger a re-render of the sandbox rocket on the map.
 let _rocketSubWired = false;
 
-export function mountBrowse() {
+// ----- Multiplayer (online) mode state -----
+//
+// When `mountBrowse({ online:true, ... })` runs, the sandbox UI becomes
+// a thin client over a server-authoritative game: every player action
+// is translated to a server op, POSTed, and the resulting snapshot is
+// hydrated back into the sandbox state modules (which redraws the same
+// classic map + panels). Solo mode leaves all of this null/false and
+// behaves exactly as before. Guard every online branch on `_online`.
+let _online = false;          // are we driving from a server game?
+let _onlineGameId = null;     // server game id
+let _onlineMe = null;         // { id, name, token }
+// Spectator mode: viewer is signed in but NOT in the game's roster.
+// Set when mountBrowse({ spectator: true, ... }); blocks every action
+// submission path + skips the crew-pick wizard (no faction to set).
+let _spectator = false;
+// Polling fallback for missed WS broadcasts. User reported 2026-05:
+// "auction window didn't auto open either. I had to refresh". WS
+// reconnect/resub races + flaky mobile networks can drop snapshots,
+// so re-fetch the full game state every few seconds and re-apply.
+// applySnapshot is idempotent. Cleared on unmountBrowseOnline.
+let _onlinePoll = null;
+const ONLINE_POLL_MS = 5000;
+let _onlineToast = null;      // (msg, level) => void, from the caller
+let _onlineMaps = null;       // { serverToPlanner, plannerToServer }
+let _onlineSnapshot = null;   // latest server snapshot (for turn checks)
+let _onlineOffWS = null;      // unsubscribe handle for the game channel
+let _onlineBusy = false;      // in-flight op guard (prevents double submit)
+let _onlineRoom = null;       // table / lobby name for the multiplayer panel
+let _onlineLobbyId = null;    // lobby id (for chat REST + WS channel)
+let _onlineLeave = null;      // () => void callback wired by the host page
+let _onlineChatOff = null;    // unsubscribe handle for the lobby chat WS
+
+// Online auction state (kept module-level so it survives the snapshot
+// re-renders that opponents' bids trigger): _bidDraft / _joinDraft
+// preserve a half-typed amount; _auctionKey resets them when a new lot
+// opens; _deckPickerOpen tracks the auctioneer's inline deck picker.
+let _bidDraft = '';
+let _joinDraft = '';
+let _auctionKey = null;
+let _deckPickerOpen = false;
+
+// Patent decks the auctioneer can put up for auction (one per server
+// deck type). Counts are read live from the snapshot.
+const MP_AUCTION_DECKS = [
+  ['thruster', 'Thruster'], ['reactor', 'Reactor'], ['radiator', 'Radiator'],
+  ['refinery', 'Refinery'], ['robonaut', 'Robonaut'], ['generator', 'Generator'],
+];
+
+export function isBrowseOnline() { return _online; }
+
+export function mountBrowse(opts = {}) {
   const view = document.getElementById('view-browse');
   if (!view) return;
+  // Stash online context up front so the renderMap()/sync paths below
+  // (which fire synchronously during mount) already see online mode.
+  if (opts && opts.online) {
+    _online = true;
+    _spectator = !!opts.spectator;
+    _onlineGameId = opts.gameId || null;
+    _onlineMe = opts.me || null;
+    _onlineToast = typeof opts.onToast === 'function' ? opts.onToast : (() => {});
+    _onlineRoom = opts.room || null;
+    _onlineLobbyId = opts.lobbyId || null;
+    _onlineLeave = typeof opts.onLeave === 'function' ? opts.onLeave : null;
+    setOnline(true);
+  } else if (_online) {
+    // Mounting solo after an online game: detach the online plumbing so
+    // player actions stop routing to the server. (The state modules
+    // still hold the server-hydrated snapshot until a reload re-reads
+    // the solo save - see unmountBrowseOnline's note.)
+    unmountBrowseOnline();
+  }
   if (!_rocketSubWired) {
     _rocketSubWired = true;
     onRocketChange(syncSandboxRocket);
@@ -183,9 +261,874 @@ export function mountBrowse() {
   // Initial pass to set the cart tab's visibility on mount;
   // the listener above keeps it in sync afterwards.
   syncCartTabVisibility();
+  syncMpTabVisibility();
   wireSidebar();
   wireHandStrip();
-  renderMap();
+  // renderMap() is async (it awaits the map load that populates
+  // _activeData). In online mode we have to wait for it before we can
+  // build the id maps + hydrate the first snapshot, so chain the
+  // bootstrap off the same promise. Solo mode just kicks it and returns.
+  const mapReady = renderMap();
+  if (_online) { mapReady.then(() => bootstrapOnlineGame()); }
+}
+
+// One-time online bootstrap: build the server<->planner id maps from
+// the freshly-loaded planner data, fetch the current game, hydrate it
+// into the sandbox modules, then subscribe to live updates. Safe to
+// no-op if mount raced an unmount.
+async function bootstrapOnlineGame() {
+  if (!_online || !_activeData || !_onlineGameId || !_onlineMe) return;
+  _onlineMaps = buildIdMaps(_activeData);
+  const r = await getGame(_onlineGameId, _onlineMe.token);
+  if (!_online) return; // unmounted while the fetch was in flight
+  if (!r.ok) {
+    _onlineToast(humanizeOnlineOpError(r.error), 'error');
+    return;
+  }
+  applySnapshot(r.data.game.state);
+  // Open the multiplayer panel so the player lands on the table (room,
+  // turn, roster) rather than the solo game-mode pane.
+  showPane('mp');
+  // Live relay. Every server-applied op (ours or an opponent's) lands
+  // here as the full game payload; re-hydrate from it.
+  const channel = 'game:' + _onlineGameId;
+  ws.subscribe(channel);
+  const off = ws.on('game_update', (msg) => {
+    if (!_online || !msg || msg.gameId !== _onlineGameId || !msg.game) return;
+    applySnapshot(msg.game.state);
+  });
+  _onlineOffWS = () => { off(); ws.unsubscribe(channel); };
+
+  // Polling fallback. WS is the primary path, but if a broadcast is
+  // dropped (mobile network, tab backgrounded, server hiccup) the
+  // user can sit with a stale board. Re-fetch every ONLINE_POLL_MS
+  // and re-apply. applySnapshot is a no-op when the seq matches.
+  if (_onlinePoll) clearInterval(_onlinePoll);
+  _onlinePoll = setInterval(async () => {
+    if (!_online || !_onlineGameId || !_onlineMe) return;
+    try {
+      const poll = await getGame(_onlineGameId, _onlineMe.token);
+      if (!_online) return;
+      if (poll && poll.ok && poll.data && poll.data.game && poll.data.game.state) {
+        applySnapshot(poll.data.game.state);
+      }
+    } catch (err) {
+      // Network blips are expected; the next tick will retry.
+    }
+  }, ONLINE_POLL_MS);
+
+  // In-pane chat: fetch the lobby's chat history (table conversation)
+  // and subscribe to live 'chat' broadcasts on the lobby channel. Both
+  // are owned by browse.js so the mp pane stays self-contained.
+  if (_onlineLobbyId && _onlineMe) {
+    const chatChannel = 'lobby:' + _onlineLobbyId;
+    ws.subscribe(chatChannel);
+    const offChat = ws.on('chat', (msg) => {
+      if (!_online || !msg || !msg.message) return;
+      if (msg.message.lobbyId !== _onlineLobbyId) return;
+      appendMpChat(msg.message);
+    });
+    _onlineChatOff = () => { offChat(); ws.unsubscribe(chatChannel); };
+    const hist = await fetchChat(_onlineLobbyId, {}, _onlineMe.token);
+    if (_online && hist && hist.ok && hist.data && Array.isArray(hist.data.entries)) {
+      for (const m of hist.data.entries) appendMpChat(m);
+    }
+  }
+}
+
+// Replace all sandbox module state from a server snapshot, then repaint
+// the rocket marker at the translated planner node (or LEO when the
+// server site has no planner node / the ship is at LEO). Caches the
+// snapshot so the action routers + turn checks can read activeIndex.
+function applySnapshot(snapshot) {
+  if (!snapshot || !_onlineMaps || !_onlineMe) return;
+  _onlineSnapshot = snapshot;
+  // hydrateFromSnapshot fans the snapshot out to every state module
+  // (rocket/hand/outposts/glory/clock/discs/factories/decks/leo) and
+  // returns the planner-node id our rocket sits on (null = LEO).
+  const pid = hydrateFromSnapshot(snapshot, _onlineMe.id, _onlineMaps);
+  // Drive the same code path the solo move-commit uses: set the
+  // rocket's site id, persist (a no-op for storage while online), and
+  // resync the sprite so the marker repaints at `pid` (LEO when null).
+  _rocketSiteId = pid || null;
+  persistRocketSite();
+  syncSandboxRocket();
+  // Refresh the multiplayer table panel (room / turn / roster) from the
+  // same snapshot so opponents' positions + resources stay live.
+  renderMpPanel(snapshot);
+  // Big black turn banner above the hand. Mirrors the same source-of-
+  // truth (snapshot.activeIndex) the panel uses so the two never drift.
+  syncMpTurnBanner(snapshot);
+  // Competitive auction overlay is wired separately (see the TODO hook).
+  renderOnlineAuction(snapshot.auction);
+  // If I haven't picked my starting crew yet, open the mandatory crew
+  // wizard. Driven off the snapshot (player.faction) so it survives
+  // reloads / late joins, and so a re-bootstrap won't reopen the
+  // wizard once the pick is committed server-side.
+  maybePromptCrewPick(snapshot);
+}
+
+// One-at-a-time guard so a flurry of snapshots (e.g. another player's
+// PICK_CREW echoes) doesn't stack multiple wizard overlays. Cleared
+// when the modal closes or when we unmount the online session.
+let _crewWizardOpen = false;
+
+function maybePromptCrewPick(snapshot) {
+  if (!_online || _spectator || _crewWizardOpen || !snapshot || !_onlineMe) return;
+  const myId = _onlineMe.id;
+  const myp = (snapshot.players || []).find((p) => p.profileId === myId);
+  if (!myp || myp.faction) return;
+  _crewWizardOpen = true;
+  // Server assigns each player one of the six crew-card colours at
+  // game create. The wizard filters down to the two faces of the
+  // crew card matching that colour - both faces are legal picks
+  // (it's a single double-sided card), everything else is locked.
+  const desc = myp.color
+    ? 'Your faction colour is locked in by the server. Pick one of the two faces of your crew card.'
+    : 'Pick your starting faction. Every player chooses one before play; your pick is permanent for this session.';
+  openCrewWizard({
+    description: desc,
+    restrictToColor: myp.color || null,
+    onCommit: ({ cardId, face }) => {
+      submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
+    },
+    onDone: () => { _crewWizardOpen = false; },
+  });
+}
+
+// Crew-pick op submitter. Like submitMpAuctionOp, this bypasses the
+// turn-check in submitOnlineOp: any player can pick their crew at
+// any time, regardless of whose turn it is or whether an auction is
+// open. The server validates that this player owns the pick.
+async function submitMpCrewOp(op) {
+  if (!_online || _onlineBusy) return false;
+  if (_spectator) return false;
+  _onlineBusy = true;
+  let r;
+  try {
+    r = await submitGameOp(_onlineGameId, op, _onlineMe.token);
+  } finally {
+    _onlineBusy = false;
+  }
+  if (!r || !r.ok) {
+    _onlineToast(humanizeOnlineOpError(r && r.error), 'error');
+    // Reopen the wizard so they can pick again - the pick wasn't
+    // committed and the snapshot still says faction === null.
+    _crewWizardOpen = false;
+    if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
+    return false;
+  }
+  applySnapshot(r.data.game.state);
+  return true;
+}
+
+// Big bold "YOUR TURN" / "@<name>'s turn" banner anchored above the
+// hand strip. Visible only in online mode; hidden otherwise so solo
+// play doesn't show a stale label.
+function syncMpTurnBanner(snapshot) {
+  const banner = document.getElementById('mp-turn-banner');
+  if (!banner) return;
+  if (!_online || !snapshot || !Array.isArray(snapshot.players)) {
+    banner.hidden = true;
+    banner.classList.remove('is-your-turn');
+    banner.style.removeProperty('--mp-turn-color');
+    banner.textContent = '';
+    return;
+  }
+  const active = snapshot.players[snapshot.activeIndex] || null;
+  const myId = _onlineMe && _onlineMe.id;
+  const myTurn = !!(active && active.profileId === myId);
+  // Stripe colour = the active player's server-assigned seat colour
+  // (PLAYER_COLORS in server/game/state.js). Same colour the roster dot
+  // uses, so the banner becomes a giant glance-version of the dot.
+  if (active && active.color) {
+    banner.style.setProperty('--mp-turn-color', active.color);
+  } else {
+    banner.style.removeProperty('--mp-turn-color');
+  }
+  if (!active) {
+    banner.textContent = 'Waiting…';
+    banner.classList.remove('is-your-turn');
+  } else if (myTurn) {
+    banner.textContent = 'Your turn';
+    banner.classList.add('is-your-turn');
+  } else {
+    banner.textContent = '@' + active.name + "'s turn";
+    banner.classList.remove('is-your-turn');
+  }
+  banner.hidden = false;
+}
+
+// Competitive multiplayer auction overlay. The sandbox's solo auction
+// modal is single-player only and is NOT reused here. Driven straight
+// off state.auction in the snapshot: appears when a lot opens, refreshes
+// on every update, clears when it resolves. Render is idempotent.
+function renderOnlineAuction(auction) {
+  const existing = document.getElementById('mp-auction-overlay');
+  if (!auction || !_online) {
+    if (existing) existing.remove();
+    _auctionKey = null;
+    _bidDraft = '';
+    _joinDraft = '';
+    return;
+  }
+  if (_auctionKey !== auction.cardId) {
+    _auctionKey = auction.cardId;
+    _bidDraft = '';
+    _joinDraft = '';
+  }
+
+  let overlay = existing;
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'mp-auction-overlay';
+    overlay.className = 'mp-auction-overlay';
+    overlay.innerHTML = `
+      <div class="mp-auction-modal" role="dialog" aria-label="Patent auction">
+        <div class="mp-auction-head">
+          <h3>Patent Auction</h3>
+          <span class="mp-auction-mode"></span>
+        </div>
+        <div class="mp-auction-body">
+          <div class="mp-auction-lot" id="mp-auction-lot"></div>
+          <div class="mp-auction-side">
+            <div class="mp-auction-status">
+              <div class="mp-auction-bid"></div>
+              <div class="muted mp-auction-phase"></div>
+            </div>
+            <div class="mp-auction-controls" id="mp-auction-controls"></div>
+            <div class="hud-error" id="mp-auction-error"></div>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+  }
+
+  const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
+  const auctioneer = players.find((p) => p.profileId === auction.auctioneerId);
+  const highBidder = auction.highBidderId
+    ? players.find((p) => p.profileId === auction.highBidderId) : null;
+  const lot = PATENTS_BY_ID[auction.cardId];
+
+  overlay.querySelector('.mp-auction-mode').textContent = auctioneer
+    ? `@${auctioneer.name}'s lot` : 'Lot';
+
+  const lotHost = overlay.querySelector('#mp-auction-lot');
+  lotHost.innerHTML = '';
+  if (lot) {
+    try { lotHost.appendChild(renderCard(lot, { type: 'patent' })); }
+    catch { lotHost.textContent = lot.name || auction.cardId; }
+  } else {
+    lotHost.textContent = auction.cardId;
+  }
+
+  overlay.querySelector('.mp-auction-bid').textContent = auction.highBid > 0
+    ? `High bid: ${auction.highBid} aqua by @${highBidder ? highBidder.name : '?'}`
+    : 'No bids yet.';
+  overlay.querySelector('.mp-auction-phase').textContent =
+    auction.awaiting === 'bidders' ? 'Bidding is open.' : 'The auctioneer is deciding.';
+
+  buildMpAuctionControls(
+    overlay.querySelector('#mp-auction-controls'),
+    auction, { auctioneer, highBidder },
+  );
+}
+
+function setMpAuctionError(text) {
+  const el = document.getElementById('mp-auction-error');
+  if (el) el.textContent = text || '';
+}
+
+// Clamp a typed amount up to at least `min`; used so the input re-seeds
+// to a valid value after an opponent's bid raises the floor.
+function clampAuctionInt(draft, min) {
+  const v = parseInt(draft, 10);
+  return (Number.isInteger(v) && v >= min) ? v : min;
+}
+
+// Role + phase aware controls inside the auction modal. Mirrors the
+// engine's state machine (server/game/engine.js auction handlers).
+function buildMpAuctionControls(host, a, { auctioneer, highBidder }) {
+  host.innerHTML = '';
+  if (!_onlineMe || !_onlineSnapshot) {
+    host.appendChild(noteEl('Spectating this auction.'));
+    return;
+  }
+  const myId = _onlineMe.id;
+  const myp = (_onlineSnapshot.players || []).find((p) => p.profileId === myId);
+  if (!myp) { host.appendChild(noteEl('Spectating this auction.')); return; }
+  const iAmAuctioneer = a.auctioneerId === myId;
+  const myAqua = myp.aqua | 0;
+
+  if (a.awaiting === 'bidders') {
+    if (iAmAuctioneer) {
+      host.appendChild(noteEl('Waiting for the other players to bid or pass.'));
+      return;
+    }
+    if (a.highBidderId === myId) {
+      host.appendChild(noteEl('You hold the high bid. Waiting for the others.'));
+      return;
+    }
+    const minBid = (a.highBid | 0) + 1;
+    const passed = Array.isArray(a.passed) && a.passed.includes(myId);
+    const row = document.createElement('div');
+    row.className = 'mp-auction-bidrow';
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.className = 'mp-auction-input';
+    input.min = String(minBid);
+    input.value = String(clampAuctionInt(_bidDraft, minBid));
+    const bidBtn = document.createElement('button');
+    bidBtn.type = 'button';
+    bidBtn.className = 'modal-btn primary';
+    const passBtn = document.createElement('button');
+    passBtn.type = 'button';
+    passBtn.className = 'modal-btn';
+    passBtn.textContent = passed ? 'Passed' : 'Pass';
+    passBtn.disabled = passed || _onlineBusy;
+    const sync = () => {
+      const v = parseInt(input.value, 10);
+      const okAmt = Number.isInteger(v) && v >= minBid && v <= myAqua;
+      bidBtn.textContent = Number.isInteger(v) ? `Bid ${v}` : 'Bid';
+      bidBtn.disabled = !okAmt || _onlineBusy;
+    };
+    input.addEventListener('input', () => { _bidDraft = input.value; sync(); });
+    bidBtn.addEventListener('click', () => {
+      const amt = parseInt(input.value, 10);
+      if (!Number.isInteger(amt)) { setMpAuctionError('Enter a whole number.'); return; }
+      submitMpAuctionOp({ kind: 'AUCTION_BID', amount: amt });
+    });
+    passBtn.addEventListener('click', () => {
+      submitMpAuctionOp({ kind: 'AUCTION_PASS' });
+    });
+    row.append(input, bidBtn, passBtn);
+    host.appendChild(row);
+    host.appendChild(noteEl(`You have ${myAqua} aqua. Minimum bid ${minBid}.`));
+    sync();
+    return;
+  }
+
+  // awaiting === 'auctioneer'
+  if (!iAmAuctioneer) {
+    host.appendChild(noteEl(
+      `Waiting for @${auctioneer ? auctioneer.name : 'the auctioneer'} to sell or keep.`
+    ));
+    return;
+  }
+  if ((a.highBid | 0) === 0) {
+    const keepBtn = document.createElement('button');
+    keepBtn.type = 'button';
+    keepBtn.className = 'modal-btn primary';
+    keepBtn.textContent = 'Keep (no bids)';
+    keepBtn.disabled = _onlineBusy;
+    keepBtn.addEventListener('click', () => {
+      submitMpAuctionOp({ kind: 'AUCTION_JOIN', amount: 0 });
+    });
+    host.appendChild(keepBtn);
+    host.appendChild(noteEl('No one bid. Keep it for free (one more pass-round, then it is yours).'));
+    return;
+  }
+  const sellBtn = document.createElement('button');
+  sellBtn.type = 'button';
+  sellBtn.className = 'modal-btn primary';
+  sellBtn.textContent = `Sell to @${highBidder ? highBidder.name : '?'} (${a.highBid} aqua)`;
+  sellBtn.disabled = _onlineBusy;
+  sellBtn.addEventListener('click', () => {
+    submitMpAuctionOp({ kind: 'AUCTION_SELL' });
+  });
+  host.appendChild(sellBtn);
+
+  const minJoin = a.highBid | 0;
+  const row = document.createElement('div');
+  row.className = 'mp-auction-bidrow';
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.className = 'mp-auction-input';
+  input.min = String(minJoin);
+  input.value = String(clampAuctionInt(_joinDraft, minJoin));
+  const joinBtn = document.createElement('button');
+  joinBtn.type = 'button';
+  joinBtn.className = 'modal-btn';
+  const sync = () => {
+    const v = parseInt(input.value, 10);
+    const okAmt = Number.isInteger(v) && v >= minJoin && v <= myAqua;
+    joinBtn.textContent = Number.isInteger(v) ? `Join at ${v}` : 'Join';
+    joinBtn.disabled = !okAmt || _onlineBusy;
+  };
+  input.addEventListener('input', () => { _joinDraft = input.value; sync(); });
+  joinBtn.addEventListener('click', () => {
+    submitMpAuctionOp({ kind: 'AUCTION_JOIN', amount: parseInt(input.value, 10) });
+  });
+  row.append(input, joinBtn);
+  host.appendChild(row);
+  host.appendChild(noteEl(
+    `Join at ${minJoin}+ to keep bidding (you pay the bank if you win). You have ${myAqua} aqua.`
+  ));
+  sync();
+}
+
+// Auction op submitter. Bypasses submitOnlineOp's turn-check: BID/PASS
+// come from NON-active players, and the server has its own caller
+// validation against the auction roles. Re-hydrates on success; on
+// failure surfaces the error in the auction overlay and snaps back to
+// the last-known snapshot so the UI matches authority.
+async function submitMpAuctionOp(op) {
+  if (!_online || _onlineBusy) return false;
+  if (_spectator) { _onlineToast('Spectator - view only.', 'error'); return false; }
+  _onlineBusy = true;
+  setMpAuctionError('');
+  let r;
+  try {
+    r = await submitGameOp(_onlineGameId, op, _onlineMe.token);
+  } finally {
+    _onlineBusy = false;
+  }
+  if (!r || !r.ok) {
+    setMpAuctionError(humanizeOnlineOpError(r && r.error));
+    if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
+    return false;
+  }
+  applySnapshot(r.data.game.state);
+  return true;
+}
+
+// Helper used by the Multiplayer pane: an inline element listing the
+// patent decks with their counts; tapping one fires AUCTION_START. The
+// _deckPickerOpen flag (cleared on auction commit / leave) keeps the
+// picker open across the snapshot re-renders during selection.
+function buildMpDeckPicker(host, snapshot) {
+  host.innerHTML = '';
+  const label = document.createElement('div');
+  label.className = 'mp-detail-label';
+  label.textContent = 'Auction the top of which deck? (costs 1 op)';
+  host.appendChild(label);
+  const row = document.createElement('div');
+  row.className = 'mp-deck-row';
+  for (const [type, name] of MP_AUCTION_DECKS) {
+    const deck = (snapshot.decks && snapshot.decks[type]) || [];
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'modal-btn';
+    b.textContent = `${name} (${deck.length})`;
+    b.disabled = !deck.length || _onlineBusy;
+    b.addEventListener('click', () => {
+      _deckPickerOpen = false;
+      submitOnlineOp({ kind: 'AUCTION_START', deckType: type });
+    });
+    row.appendChild(b);
+  }
+  host.appendChild(row);
+}
+
+// ----- multiplayer table panel (online sidepanel pane) -----
+
+// Show the multiplayer tab + hide the solo "game mode / new game" tab
+// while online; reverse for solo. Mirrors syncCartTabVisibility.
+function syncMpTabVisibility() {
+  const mpTab = document.getElementById('sidepanel-tab-mp');
+  const soloTab = document.querySelector('#sidepanel-tabs button[data-pane="solo"]');
+  const panel = document.getElementById('browse-sidepanel');
+  if (mpTab) mpTab.hidden = !_online;
+  if (soloTab) soloTab.hidden = !!_online;
+  if (!panel) return;
+  if (_online && panel.dataset.active === 'solo') showPane('mp');
+  if (!_online && panel.dataset.active === 'mp') showPane(null);
+}
+
+// Server site id (data/sites.js slug) -> display name. LEO / unknown
+// fall back gracefully.
+function onlineSiteLabel(serverSiteId) {
+  if (!serverSiteId) return 'LEO';
+  const s = SITES_BY_ID[serverSiteId];
+  return (s && s.name) || serverSiteId;
+}
+
+function mpCardName(id) {
+  const c = PATENTS_BY_ID[id];
+  return c ? c.name : id;
+}
+
+// Render the multiplayer table panel from the latest snapshot: room,
+// whose turn, the clock, and a roster where each player expands to show
+// their rocket / outposts / resources. Opponent hands stay hidden
+// (count only). Re-rendered on every snapshot (applySnapshot).
+// One-time skeleton inside #mp-panel: a #mp-table region (room / turn /
+// roster) which renderMpPanel rewrites on every snapshot, and a
+// persistent #mp-chat (history + input) so the chat survives the
+// per-snapshot re-render. Returns the table region.
+function ensureMpPanelStructure() {
+  const host = document.getElementById('mp-panel');
+  if (!host) return null;
+  let tableEl = host.querySelector('#mp-table');
+  if (!tableEl) {
+    host.innerHTML = '';
+    tableEl = document.createElement('div');
+    tableEl.id = 'mp-table';
+    const chatEl = document.createElement('div');
+    chatEl.id = 'mp-chat';
+    host.append(tableEl, chatEl);
+    setupMpChat(chatEl);
+  }
+  return tableEl;
+}
+
+// In-pane chat shell built once: label + message list + send form. The
+// form posts to the lobby chat REST endpoint; the WS 'chat' broadcast
+// (subscribed in bootstrapOnlineGame) re-renders for everyone including
+// the sender, so we don't append locally on submit.
+function setupMpChat(host) {
+  host.innerHTML = '';
+  const label = document.createElement('div');
+  label.className = 'mp-detail-label';
+  label.textContent = 'Table chat';
+  const list = document.createElement('ul');
+  list.id = 'mp-chat-list';
+  list.className = 'mp-chat-list';
+  const empty = document.createElement('li');
+  empty.className = 'muted mp-chat-empty';
+  empty.textContent = 'No messages yet.';
+  list.appendChild(empty);
+  const form = document.createElement('form');
+  form.id = 'mp-chat-form';
+  form.className = 'mp-chat-form';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.maxLength = 500;
+  input.placeholder = 'Message the table…';
+  input.autocomplete = 'off';
+  const send = document.createElement('button');
+  send.type = 'submit';
+  send.textContent = 'Send';
+  form.append(input, send);
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const body = input.value.trim();
+    if (!body || !_online || !_onlineLobbyId || !_onlineMe) return;
+    input.value = '';
+    send.disabled = true;
+    const r = await sendChat(_onlineLobbyId, body, _onlineMe.token);
+    send.disabled = false;
+    if (!r || !r.ok) {
+      if (_onlineToast) _onlineToast('Chat failed: ' + ((r && r.error) || 'network'), 'error');
+      input.value = body;
+    }
+  });
+  host.append(label, list, form);
+}
+
+function appendMpChat(msg) {
+  const list = document.getElementById('mp-chat-list');
+  if (!list || !msg) return;
+  const empty = list.querySelector('.mp-chat-empty');
+  if (empty) empty.remove();
+  const li = document.createElement('li');
+  li.className = 'mp-chat-msg';
+  const who = document.createElement('span');
+  who.className = 'mp-chat-who';
+  who.textContent = '@' + (msg.profileName || 'someone');
+  const body = document.createElement('span');
+  body.className = 'mp-chat-body';
+  body.textContent = msg.body || '';
+  li.append(who, document.createTextNode(' '), body);
+  list.appendChild(li);
+  list.scrollTop = list.scrollHeight;
+}
+
+function renderMpPanel(snapshot) {
+  const tableEl = ensureMpPanelStructure();
+  if (!tableEl) return;
+  if (!snapshot || !Array.isArray(snapshot.players)) {
+    tableEl.innerHTML = '<p class="muted">Connecting to the table…</p>';
+    return;
+  }
+  const players = snapshot.players;
+  const active = players[snapshot.activeIndex] || null;
+  const myId = _onlineMe && _onlineMe.id;
+  const myp = players.find((p) => p.profileId === myId) || null;
+  // Auctioneer-side gating mirrors the server (AUCTION_START needs your
+  // turn, at least one op left, and no auction already open).
+  const canStartAuction = !!(active && active.profileId === myId
+    && myp && myp.opsRemaining > 0 && !snapshot.auction);
+  tableEl.innerHTML = '';
+
+  const head = document.createElement('div');
+  head.className = 'mp-head';
+  const row = document.createElement('div');
+  row.className = 'mp-head-row';
+  const room = document.createElement('div');
+  room.className = 'mp-room';
+  room.textContent = _onlineRoom || 'Multiplayer table';
+  row.appendChild(room);
+  if (_onlineLeave) {
+    const leave = document.createElement('button');
+    leave.type = 'button';
+    leave.className = 'mp-leave';
+    leave.textContent = '← Lobbies';
+    leave.title = 'Back to the multiplayer lobbies list (the game stays running; you can resume)';
+    leave.addEventListener('click', () => {
+      try { _onlineLeave(); } catch (err) { console.error('mp leave:', err); }
+    });
+    row.appendChild(leave);
+  }
+  if (canStartAuction) {
+    const startBtn = document.createElement('button');
+    startBtn.type = 'button';
+    startBtn.className = 'mp-leave mp-auction-start';
+    startBtn.textContent = _deckPickerOpen ? 'Cancel' : '🎯 Start auction';
+    startBtn.title = 'Put the top of a patent deck up for auction (costs 1 op)';
+    startBtn.addEventListener('click', () => {
+      _deckPickerOpen = !_deckPickerOpen;
+      renderMpPanel(_onlineSnapshot);
+    });
+    row.appendChild(startBtn);
+  }
+  const myTurn = !!(active && active.profileId === myId);
+  const turn = document.createElement('div');
+  turn.className = 'mp-turn' + (myTurn ? ' mp-your-turn' : '');
+  turn.textContent = active
+    ? (myTurn ? 'Your turn' : '@' + active.name + "'s turn")
+    : 'Waiting…';
+  const clock = document.createElement('div');
+  clock.className = 'muted mp-clock';
+  clock.textContent = `Round ${snapshot.round} · slot ${snapshot.turn}`;
+  head.append(row, turn, clock);
+  tableEl.appendChild(head);
+
+  if (_deckPickerOpen && canStartAuction) {
+    const picker = document.createElement('div');
+    picker.className = 'mp-deck-picker';
+    buildMpDeckPicker(picker, snapshot);
+    tableEl.appendChild(picker);
+  }
+
+  const roster = document.createElement('div');
+  roster.className = 'mp-roster';
+  for (const p of players) {
+    roster.appendChild(renderMpPlayer(
+      p, p.profileId === myId, !!(active && p.profileId === active.profileId)
+    ));
+  }
+  tableEl.appendChild(roster);
+}
+
+function renderMpPlayer(p, isMe, isActive) {
+  const wrap = document.createElement('div');
+  wrap.className = 'mp-player' + (isActive ? ' mp-active' : '');
+  const head = document.createElement('button');
+  head.type = 'button';
+  head.className = 'mp-player-head';
+  const dot = document.createElement('span');
+  dot.className = 'dot';
+  dot.style.background = p.color || '#888';
+  const name = document.createElement('span');
+  name.className = 'mp-name';
+  name.textContent = '@' + p.name + (isMe ? ' (you)' : '');
+  const stats = document.createElement('span');
+  stats.className = 'mp-stats';
+  const rkt = p.rocket || {};
+  const vp = (p.glory && p.glory.vps) || 0;
+  // 💧 is the AQUA icon in the sandbox top-bar chip (see the
+  // aqua-chip-balance widget), so use it the same way here. Tank water
+  // lives in the expanded detail so the icon means the same thing
+  // everywhere.
+  stats.textContent = `📍${onlineSiteLabel(rkt.siteId)} · 💧${p.aqua || 0} · ${vp}vp`;
+  head.append(dot, name, stats);
+  const detail = document.createElement('div');
+  detail.className = 'mp-player-detail';
+  detail.hidden = true;
+  head.addEventListener('click', () => {
+    detail.hidden = !detail.hidden;
+    if (!detail.hidden && !detail.dataset.built) {
+      buildMpPlayerDetail(detail, p, isMe);
+      detail.dataset.built = '1';
+    }
+  });
+  wrap.append(head, detail);
+  return wrap;
+}
+
+function buildMpPlayerDetail(host, p, isMe) {
+  host.innerHTML = '';
+  const rkt = p.rocket || {};
+  host.appendChild(mpSection(
+    `Rocket (water ${rkt.tank || 0})`,
+    (rkt.stack || []).map((s) => mpCardName(s.id)),
+    'Empty rocket.',
+  ));
+  const ops = p.outposts ? Object.values(p.outposts) : [];
+  for (const op of ops) {
+    host.appendChild(mpSection(
+      `Outpost ${op.letter || ''} @ ${onlineSiteLabel(op.siteId)} (water ${op.tank || 0})`,
+      (op.cards || []).map((s) => mpCardName(s.id)),
+      'Empty.'
+    ));
+  }
+  const hand = p.hand ? p.hand.length : 0;
+  const h = document.createElement('div');
+  h.className = 'mp-detail-label muted';
+  h.textContent = isMe ? `Hand: ${hand}` : `Hand: ${hand} card${hand === 1 ? '' : 's'} (hidden)`;
+  host.appendChild(h);
+}
+
+function mpSection(title, names, emptyTxt) {
+  const wrap = document.createElement('div');
+  wrap.className = 'mp-section';
+  const t = document.createElement('div');
+  t.className = 'mp-detail-label';
+  t.textContent = title;
+  wrap.appendChild(t);
+  if (!names.length) {
+    const e = document.createElement('div');
+    e.className = 'muted mp-line';
+    e.textContent = emptyTxt;
+    wrap.appendChild(e);
+  } else {
+    for (const n of names) {
+      const r = document.createElement('div');
+      r.className = 'mp-line';
+      r.textContent = n;
+      wrap.appendChild(r);
+    }
+  }
+  return wrap;
+}
+
+// Whether it is the local player's turn in the cached snapshot.
+function isOnlineMyTurn() {
+  if (!_online || _spectator || !_onlineSnapshot || !_onlineMe) return false;
+  const players = _onlineSnapshot.players || [];
+  const active = players[_onlineSnapshot.activeIndex];
+  return !!active && active.profileId === _onlineMe.id;
+}
+
+// Shared online action router. Translates nothing (caller builds the
+// op), POSTs it, and on success re-hydrates from the returned snapshot
+// while SKIPPING any local mutation/animation. On failure it toasts a
+// humanized error and re-applies the last snapshot so the UI snaps
+// back. Returns true on success. Guards re-entrancy with _onlineBusy.
+async function submitOnlineOp(op) {
+  if (!_online) return false;
+  if (_spectator) { _onlineToast('Spectator - view only.', 'error'); return false; }
+  if (!isOnlineMyTurn()) { _onlineToast('Not your turn.', 'error'); return false; }
+  if (_onlineBusy) return false;
+  _onlineBusy = true;
+  let r;
+  try {
+    r = await submitGameOp(_onlineGameId, op, _onlineMe.token);
+  } finally {
+    _onlineBusy = false;
+  }
+  if (!r || !r.ok) {
+    _onlineToast(humanizeOnlineOpError(r && r.error), 'error');
+    // Snap the UI back to the authoritative last-known state.
+    if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
+    return false;
+  }
+  applySnapshot(r.data.game.state);
+  return true;
+}
+
+// Op-error code -> human message for server rejections surfaced in the
+// online sandbox.
+function humanizeOnlineOpError(code) {
+  return ({
+    api_unavailable: 'The game server is unavailable.',
+    network: 'Network error - check your connection.',
+    not_your_turn: 'It is not your turn.',
+    no_moves_left: 'No moves left this turn. End your turn.',
+    insufficient_water: 'Not enough water for that burn.',
+    no_route: 'No route to that site.',
+    unknown_site: 'Unknown site.',
+    already_here: 'Your ship is already there.',
+    nothing_to_undo: 'Nothing to undo.',
+    nothing_to_redo: 'Nothing to redo.',
+    roll_blocks_undo: 'Can\'t undo past a dice roll.',
+    game_not_active: 'This game has ended.',
+    not_a_player: 'You are not in this game.',
+    unknown_op: 'Unsupported operation.',
+    crew_already_picked: 'You have already picked your starting crew.',
+    unknown_crew: 'That crew card does not exist.',
+    unknown_crew_face: 'Pick the primary or secondary face.',
+    wrong_crew_colour: 'That crew card is not your assigned colour.',
+    auction_in_progress: 'An auction is already underway.',
+    need_opponent: 'Need another player to hold an auction.',
+    no_ops_left: 'No operations left this turn.',
+    bad_deck: 'Pick a valid deck to auction.',
+    deck_empty: 'That deck is empty.',
+    no_auction: 'No auction is open.',
+    not_bidding_phase: 'Bidding is closed right now.',
+    bid_too_low: 'Bid must beat the current high bid.',
+    insufficient_aqua: 'Not enough aqua.',
+    bad_amount: 'Enter a whole number.',
+    not_owner: 'You do not own that.',
+    not_in_hand: 'That card is not in your hand.',
+    not_in_stack: 'That card is not on your rocket.',
+    cannot_build: 'That card cannot be built right now.',
+  })[code] || (code ? String(code) : 'Something went wrong.');
+}
+
+// Active-thruster click: online routes a SET_ACTIVE_THRUSTER op (the
+// server flips it and broadcasts; applySnapshot redraws). Solo flips
+// the local rocket state directly, unchanged.
+function onSetActiveThrusterClick(cardId) {
+  if (_online) { submitOnlineOp({ kind: 'SET_ACTIVE_THRUSTER', cardId }); return; }
+  setActiveThruster(cardId);
+}
+
+// Active-prospector click: same split as the thruster activator.
+function onSetActiveProspectorClick(cardId) {
+  if (_online) { submitOnlineOp({ kind: 'SET_ACTIVE_PROSPECTOR', cardId }); return; }
+  setActiveProspector(cardId);
+}
+
+// Tear down the online layer so the page can leave a multiplayer game
+// cleanly. Unsubscribes the WS relay, flips the shared online flag off,
+// and clears the online module vars.
+//
+// NOTE: returning to the SOLO sandbox in the same page load is NOT
+// fully handled here - the state modules were hydrated from the server
+// snapshot, so they need to be reloaded from localStorage (each module
+// re-reading its persisted save) before solo play resumes. That
+// reload is the caller's responsibility (e.g. a full re-mount / reload);
+// this teardown only detaches the online plumbing. Flagging, not solving.
+export function unmountBrowseOnline() {
+  if (_onlineOffWS) { try { _onlineOffWS(); } catch { /* ignore */ } _onlineOffWS = null; }
+  if (_onlinePoll) { clearInterval(_onlinePoll); _onlinePoll = null; }
+  setOnline(false);
+  _online = false;
+  _spectator = false;
+  _onlineGameId = null;
+  _onlineMe = null;
+  _onlineToast = null;
+  if (_onlineChatOff) { try { _onlineChatOff(); } catch { /* ignore */ } _onlineChatOff = null; }
+  _onlineMaps = null;
+  _onlineSnapshot = null;
+  _onlineBusy = false;
+  _onlineRoom = null;
+  _onlineLobbyId = null;
+  _onlineLeave = null;
+  // Tear down the auction overlay + drafts so nothing lingers when the
+  // player returns to the lobby list.
+  _bidDraft = '';
+  _joinDraft = '';
+  _auctionKey = null;
+  _deckPickerOpen = false;
+  const auctionOverlay = document.getElementById('mp-auction-overlay');
+  if (auctionOverlay) auctionOverlay.remove();
+  // Tear down any open crew-pick wizard so it doesn't leak across
+  // sessions when the player returns to the lobby list.
+  const crewOverlay = document.querySelector('.crew-wizard-overlay');
+  if (crewOverlay) crewOverlay.remove();
+  _crewWizardOpen = false;
+  const banner = document.getElementById('mp-turn-banner');
+  if (banner) {
+    banner.hidden = true;
+    banner.classList.remove('is-your-turn');
+    banner.style.removeProperty('--mp-turn-color');
+    banner.textContent = '';
+  }
+  syncMpTabVisibility();
 }
 
 // Sandbox hand strip wiring: drop target, slot rendering, +
@@ -699,6 +1642,21 @@ function getColocatedDestinations(sourceId) {
 // after the move; any spilled water is logged. Used by the
 // transfer section's "Send selected" button.
 function transferOneCard(sourceId, destId, cardId) {
+  // Online: committing a card onto the rocket stack maps to the server
+  // BUILD_ROCKET op. Fire it (fire-and-forget; the broadcast snapshot
+  // re-hydrates the stack and repaints the open inspector) and return
+  // false so the local move below is skipped. Non-rocket transfers
+  // (rocket -> outpost, LEO -> outpost, etc) have no server op yet, so
+  // they no-op with a toast rather than mutating local state that the
+  // next snapshot would clobber.
+  if (_online) {
+    if (destId === 'rocket') {
+      submitOnlineOp({ kind: 'BUILD_ROCKET', cardId });
+    } else {
+      _onlineToast('That transfer is not available in online play yet.', 'error');
+    }
+    return false;
+  }
   const TANK_MAX = 32;
   // Forming a rocket: an empty rocket stack adopts its location from
   // the first card transferred in from an outpost. Capture intent +
@@ -1715,6 +2673,7 @@ function showPane(pane) {
   else if (pane === 'milestones') renderMilestones();
   else if (pane === 'log')        renderMissionLog();
   else if (pane === 'solo')       renderSolo();
+  else if (pane === 'mp')         renderMpPanel(_onlineSnapshot);
 }
 
 // Float a "+N" aqua indicator above the balance chip, then remove it
@@ -2109,6 +3068,10 @@ function ensureMapShell(host) {
   // lands - it just consumes the per-turn move budget for now so
   // the end-turn confirm reflects the spend.
   host.querySelector('#turn-end').addEventListener('click', async () => {
+    // Online: the server advances the turn (and resolves any Sunspot
+    // Cube event), broadcasting the new snapshot. Send END_TURN and let
+    // applySnapshot redraw; skip the local clock/event/log flow below.
+    if (_online) { await submitOnlineOp({ kind: 'END_TURN' }); return; }
     // Capture the previous slot BEFORE advancing so the modal can
     // animate the Sunspot Cube sliding from old → new instead of
     // teleporting. If the player cancels the confirm, nothing
@@ -3311,7 +4274,7 @@ function openRocketStackModal() {
           ? '⚡ Active thruster'
           : 'Set as active';
         activate.disabled = slot.id === activeId;
-        activate.addEventListener('click', () => setActiveThruster(slot.id));
+        activate.addEventListener('click', () => onSetActiveThrusterClick(slot.id));
         actions.appendChild(activate);
       }
       // Prospector toggle - same idiom as the thruster activator.
@@ -3339,7 +4302,7 @@ function openRocketStackModal() {
           ? `${glyph} Active prospector`
           : `Set as ${prospKind} prospector`;
         btn.disabled = isActiveProsp;
-        btn.addEventListener('click', () => setActiveProspector(slot.id));
+        btn.addEventListener('click', () => onSetActiveProspectorClick(slot.id));
         actions.appendChild(btn);
       }
 
@@ -5967,6 +6930,15 @@ function freeMarketSellFromHand(card, afterFn) {
 
 function doProspect(site, prosp) {
   if (!prosp) return;
+  // Online: the server rolls the prospect die and resolves the disc.
+  // Send PROSPECT for the target site and let the snapshot repaint;
+  // skip the local roll modal + disc placement below.
+  if (_online) {
+    const siteId = toServerId(_onlineMaps, site.id);
+    if (!siteId) { _onlineToast('That site is not on the server map.', 'error'); return; }
+    submitOnlineOp({ kind: 'PROSPECT', siteId });
+    return;
+  }
   // Already-prospected sites are off-limits in the sandbox; the UI
   // grays out the button when a disc is in place, but guard here
   // too so an autoclick can't double-spend.
@@ -6134,12 +7106,14 @@ function getRocketSite() {
   ) || null;
 }
 function persistRocketSite() {
+  if (isOnline()) return; // online state is server-owned; don't touch the solo save
   try {
     if (_rocketSiteId) localStorage.setItem(STORAGE_ROCKET_SITE, _rocketSiteId);
     else localStorage.removeItem(STORAGE_ROCKET_SITE);
   } catch { /* private mode */ }
 }
 function persistRocketTrail() {
+  if (isOnline()) return; // online state is server-owned; don't touch the solo save
   try {
     if (_rocketTrail && _rocketTrail.length) {
       localStorage.setItem(STORAGE_ROCKET_TRAIL, JSON.stringify(_rocketTrail));
@@ -6530,6 +7504,18 @@ async function moveRocket() {
   if (!_plannedRoute || !_plannedRoute.length) {
     setStatus('No planned route - tap a site and pick "Plan rocket route" first.');
     return false;
+  }
+  // Online: the server owns movement, fuel, and hazard resolution. Send
+  // the journey's destination as a single MOVE op and let the broadcast
+  // snapshot drive the marker; skip the entire local hazard/dice/anim
+  // path below. The server validates routing + burns + water itself.
+  if (_online) {
+    const destPlannerId = _plannedRoute[_plannedRoute.length - 1].to;
+    const toSiteId = toServerId(_onlineMaps, destPlannerId);
+    if (!toSiteId) { _onlineToast('That destination is not on the server map.', 'error'); return false; }
+    const ok = await submitOnlineOp({ kind: 'MOVE', toSiteId });
+    if (ok) clearRoute();
+    return ok;
   }
   const turn1 = _plannedRoute.filter((s) => s.turn === 1);
   if (!turn1.length) {
@@ -7139,6 +8125,10 @@ async function runMoveQueue(ctx, resuming) {
 // slides backwards along the exact segments it walked.
 async function undoRocketMove() {
   if (!_renderer) return false;
+  // Online: there is no local move snapshot to unwind (moves go through
+  // the server), and there is no UNDO op wired here. No-op so the move
+  // tag's "undo" face can't corrupt the hydrated state.
+  if (_online) return false;
   if (_rocketAnimating) return false;
   // Hazard-lockout: if the last move spent aqua or rolled dice,
   // the undo is blocked for the rest of the turn. Show a clear
@@ -8402,13 +9392,23 @@ function renderDeckThicknessSvg(deckSize) {
 // Open the auction-confirm modal for a specific card. Used by
 // the Cart's Buy button + the deck-tap modal's "Auction this
 // card" button. The deck draws happen on confirm.
+//
+// In ONLINE mode the confirm button instead dispatches the
+// server's AUCTION_START op for the card's deck type - the
+// server pops the top of that deck and opens a competitive
+// auction for every player. Note the auctioned card may not
+// be the specific `card` the user clicked (the server always
+// goes off the deck top), so the confirm modal shows a note
+// surfacing that.
 function doAuctionCard(card) {
   if (!card) return;
   const mode = getMarketMode();
+  const online = _online;
   openAuctionConfirmModal({
     card,
     mode,
     renderCardFn: renderCard,
+    multiplayer: online,
     // Resolve each support deck's TOP card into its full
     // record so the confirm modal can render the actual card
     // art (user 2026-05-24: "please show the bonus cards in
@@ -8418,6 +9418,15 @@ function doAuctionCard(card) {
       .map((t) => cardById(peekTop(t)))
       .filter(Boolean),
     onConfirm: () => {
+      if (online) {
+        // Multiplayer path: fire the server's AUCTION_START for
+        // this card's deck type. The server's auction overlay
+        // (renderOnlineAuction) takes over from here for all
+        // players. submitOnlineOp handles turn / busy guards
+        // and toasts errors.
+        submitOnlineOp({ kind: 'AUCTION_START', deckType: card.type });
+        return;
+      }
       if (!requireOp('Research Auction')) return;
       // Auctions in sandbox / solo mode have NO Hand-card
       // sacrifice and NO aqua cost (user, 2026-05-24):
@@ -9281,7 +10290,20 @@ function setPickedCrew(cardId, face) {
 // dismiss - the player MUST pick a faction before play. On
 // confirm: records the chosen faction, drops the crew card into
 // the Hand. onDone (optional) fires after the pick commits.
-function openCrewWizard(onDone) {
+//
+// Two callers:
+//   - Sandbox / solo: no options passed, runs the legacy commit
+//     path (setPickedCrew localStorage + addCardToLeo + logAction).
+//   - Multiplayer: pass { onCommit({cardId, face}), description? }
+//     and the wizard skips all local side effects, handing the
+//     selection off so the caller can dispatch PICK_CREW. onDone
+//     still fires for both modes.
+function openCrewWizard(arg, maybeOnDone) {
+  // Back-compat: openCrewWizard(onDoneFn) keeps working.
+  const opts = typeof arg === 'function' ? { onDone: arg } : (arg || {});
+  if (maybeOnDone) opts.onDone = maybeOnDone;
+  const { onDone, onCommit, description, restrictToColor } = opts;
+
   document.querySelector('.crew-wizard-overlay')?.remove();
   let selected = null; // { cardId, face }
 
@@ -9295,9 +10317,21 @@ function openCrewWizard(onDone) {
 
   const commit = () => {
     if (!selected) return;
-    setPickedCrew(selected.cardId, selected.face);
     const card = CREW_BY_ID[selected.cardId];
     const faction = card?.faces?.[selected.face];
+    if (onCommit) {
+      // Multiplayer path: hand the choice to the caller and let
+      // them dispatch PICK_CREW. We don't touch localStorage / LEO
+      // / the mission log here - the server is authoritative and
+      // the eventual snapshot will hydrate the crew slot through
+      // net-bridge.
+      try { onCommit({ cardId: selected.cardId, face: selected.face }); }
+      catch (e) { console.error('crew wizard onCommit:', e); }
+      overlay.remove();
+      try { onDone?.(); } catch (e) { console.error('crew wizard onDone:', e); }
+      return;
+    }
+    setPickedCrew(selected.cardId, selected.face);
     // Crew always spawns in the LEO Stack (variant rule, user
     // 2026-05). The chosen faction is recorded separately as the
     // player's committed faction; the physical crew card carries
@@ -9319,10 +10353,12 @@ function openCrewWizard(onDone) {
     const selName = selected
       ? esc(CREW_BY_ID[selected.cardId].faces[selected.face].name)
       : '...';
+    const descText = description
+      || 'Choose one faction. Its privilege is your edge for the game. (Required to start.)';
     dialog.innerHTML = `
       <div class="crew-wizard-head">
         <h3>🧑‍🚀 Pick your starting crew</h3>
-        <p class="muted">Choose one faction. Its privilege is your edge for the game. (Required to start.)</p>
+        <p class="muted">${esc(descText)}</p>
       </div>
       <div class="crew-faction-grid"></div>
       <div class="card-modal-actions">
@@ -9330,9 +10366,17 @@ function openCrewWizard(onDone) {
       </div>
     `;
     // Show the actual crew cards (the 12 single-face faction
-    // faces), each a selectable tile.
+    // faces), each a selectable tile. In multiplayer the server
+    // assigns each player one of the six PLAYER_COLORS (which
+    // map 1:1 to the six crew cards), and the player can only
+    // pick from the two faces of the card matching their colour
+    // (restrictToColor). Solo mode passes no restriction and
+    // sees every face.
     const grid = dialog.querySelector('.crew-faction-grid');
-    for (const c of CREW_FACES) {
+    const faces = restrictToColor
+      ? CREW_FACES.filter((c) => c.color === restrictToColor)
+      : CREW_FACES;
+    for (const c of faces) {
       const isSel = selected && selected.cardId === c.srcId && selected.face === c.face;
       const tile = document.createElement('div');
       tile.className = 'crew-faction-card' + (isSel ? ' is-selected' : '');

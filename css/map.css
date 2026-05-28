@@ -2445,6 +2445,67 @@ body:has(#view-browse:not(.hidden)) #main {
   cursor: not-allowed;
 }
 
+/* Multiplayer turn banner. Sits flush on top of the hand strip,
+   spanning the same width (so it slides with the sidepanel open /
+   closed in lockstep with .sandbox-hand). Hidden in solo mode;
+   js/game/browse.js#syncMpTurnBanner flips it on in online mode
+   and rewrites the label per snapshot. The bottom edge tracks
+   the live --hand-height variable the grabber publishes so the
+   banner stays glued to the top of the hand as the player
+   resizes it. */
+.mp-turn-banner {
+  position: absolute;
+  left: 0;
+  right: 388px;
+  bottom: var(--hand-height, 320px);
+  z-index: 4;
+  background: #000;
+  color: #fff;
+  font-weight: 900;
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  border-bottom: 2px solid var(--border);
+  /* Active player's seat colour, set as --mp-turn-color from
+     syncMpTurnBanner. Renders as a left + right colour stripe so
+     you can identify whose turn it is at a glance, even before
+     reading the name. Falls back to white if no colour is set. */
+  border-left: 4px solid var(--mp-turn-color, #fff);
+  border-right: 4px solid var(--mp-turn-color, #fff);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 0 #000;
+  transition: right 0.22s ease, background 0.18s ease, color 0.18s ease,
+    border-color 0.18s ease;
+}
+.mp-turn-banner[hidden] { display: none !important; }
+.mp-turn-banner.is-your-turn {
+  /* Distinct glow when it's the local player's turn so it
+     reads instantly even from a phone-arm's-length away. */
+  background: #000;
+  color: #6cf28a;
+  text-shadow: 0 0 12px rgba(108, 242, 138, 0.55), 0 0 2px #000;
+}
+.browse-sidepanel[data-active=""] ~ .mp-turn-banner { right: 48px; }
+.browse-sidepanel[data-active]:not([data-active=""]) ~ .mp-turn-banner {
+  right: 380px;
+}
+.browse-sidepanel[data-active="patents"]:not([data-active=""]) ~ .mp-turn-banner {
+  right: min(620px, 80vw);
+}
+@media (max-width: 720px) {
+  .mp-turn-banner {
+    right: 0 !important;
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    padding: 5px 10px;
+  }
+  .browse-sidepanel[data-active=""] ~ .mp-turn-banner { right: 0 !important; }
+  .browse-sidepanel[data-active] ~ .mp-turn-banner { right: 0 !important; }
+}
+
 /* Sandbox hand strip: a horizontal panel anchored at the
    bottom of the map area. Holds the cards the player has
    dragged out of the patent deck to build a tentative rocket.
@@ -3366,193 +3427,7 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .hist-row ol li { line-height: 1.5; }
 
-/* ===== Game-overlay map (used when a lobby starts) ===== */
 
-.overlay-shell {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-}
-.overlay-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--border);
-  background: rgba(15, 23, 42, 0.9);
-}
-.overlay-header h2 {
-  margin: 0;
-  font-size: 16px;
-  color: var(--accent);
-}
-.overlay-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.overlay-main {
-  flex: 1;
-  padding: 12px;
-  display: flex;
-}
-.game-map {
-  flex: 1;
-  min-height: 0;
-}
-
-/* Override the generic centered overlay-card style so the map can
-   fill its container. The Stage 1 placeholder used a centered card;
-   Stage 2 uses a full-bleed shell. */
-.game-overlay {
-  align-items: stretch;
-  justify-content: stretch;
-}
-.game-overlay > .overlay-shell {
-  background: var(--bg);
-}
-
-/* ===== Stage 3 multiplayer game HUD ===== */
-/* The started game splits the overlay into the shared map (left) and a
-   turn HUD (right): whose turn it is, a move planner, the player roster
-   with ship positions, and the operation log. */
-.overlay-main.game-layout {
-  gap: 12px;
-  align-items: stretch;
-}
-.game-hud {
-  width: 280px;
-  flex: 0 0 280px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  overflow-y: auto;
-  padding: 4px 4px 4px 0;
-}
-.hud-section {
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-}
-.hud-section h3 {
-  margin: 0 0 8px;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  color: var(--accent);
-}
-.hud-move-info { font-size: 13px; line-height: 1.4; }
-.hud-move-info.warn { color: var(--bad); }
-.hud-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 10px;
-}
-.hud-actions button { flex: 1; }
-.hud-error {
-  color: var(--bad);
-  font-size: 12px;
-  margin-top: 6px;
-  min-height: 1em;
-}
-.hud-roster { list-style: none; margin: 0; padding: 0; }
-.hud-roster li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 6px;
-  border-radius: 6px;
-  font-size: 13px;
-}
-.hud-roster li.active {
-  background: rgba(56, 189, 248, 0.12);
-  outline: 1px solid rgba(56, 189, 248, 0.4);
-}
-.hud-roster .dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex: 0 0 10px;
-  border: 1px solid rgba(0, 0, 0, 0.5);
-}
-.hud-roster .who { font-weight: 600; }
-.hud-roster .where { flex: 1; font-size: 12px; }
-.hud-roster .water { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.hud-log { list-style: none; margin: 0; padding: 0; font-size: 12px; }
-.hud-log li {
-  padding: 4px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  color: var(--muted, #8b90b8);
-  line-height: 1.4;
-}
-.hud-log li:first-child { color: inherit; }
-.game-turn-banner {
-  font-size: 13px;
-  font-weight: 600;
-  padding: 4px 10px;
-  border-radius: 12px;
-}
-.game-turn-banner.your-turn {
-  background: rgba(34, 197, 94, 0.18);
-  color: #86efac;
-}
-.game-turn-banner.reviewing {
-  background: rgba(168, 85, 247, 0.18);
-  color: #d8b4fe;
-}
-
-/* Log header + return-to-live control. */
-.hud-log-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.hud-log-head h3 { margin: 0; }
-#btn-return-live {
-  font-size: 11px;
-  padding: 3px 8px;
-  color: #d8b4fe;
-  border-color: rgba(168, 85, 247, 0.5);
-}
-.hud-review-note {
-  font-size: 11px;
-  color: #d8b4fe;
-  margin: 6px 0 0;
-}
-
-/* Reflog entries are clickable points in history. */
-.hud-log li.reflog-entry {
-  cursor: pointer;
-  padding: 4px 6px;
-  border-radius: 4px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  color: var(--muted, #8b90b8);
-}
-.hud-log li.reflog-entry:hover { background: rgba(255, 255, 255, 0.05); }
-/* Meta entries (start / undo / redo / turn pass) read fainter than the
-   functional moves so the reflog skims easily. */
-.hud-log li.kind-move { color: inherit; }
-.hud-log li.kind-undo,
-.hud-log li.kind-redo { font-style: italic; }
-.hud-log li.live-tip { color: #86efac; }
-.hud-log li.reviewing {
-  background: rgba(168, 85, 247, 0.16);
-  outline: 1px solid rgba(168, 85, 247, 0.45);
-  color: #e9d5ff;
-}
-
-/* Narrow screens: stack the HUD under the map. */
-@media (max-width: 720px) {
-  .overlay-main.game-layout { flex-direction: column; }
-  .game-hud {
-    width: auto;
-    flex: 0 0 auto;
-    max-height: 40vh;
-  }
-}
 
 /* Hand-slot quick actions (desktop): a backdrop pill of emoji
    buttons that pops up ON TOP of the card's upper area on hover.
@@ -5117,82 +4992,6 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .sell-confirm-modal .modal-btn.primary:hover { background: #166534; }
 
-/* ============================================================
-   Multiplayer competitive auction overlay (js/game/net-game.js).
-   Server-driven: appears for every player while a lot is open and
-   clears when it resolves, so there is no open/close handshake.
-   ============================================================ */
-.game-auction {
-  position: fixed;
-  inset: 0;
-  z-index: 120;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(3, 2, 10, 0.78);
-  backdrop-filter: blur(4px);
-  animation: modal-fade 0.18s ease-out;
-}
-.game-auction.hidden { display: none; }
-.net-auction-modal {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px 20px 20px;
-  max-width: 700px;
-  width: 100%;
-  max-height: calc(100vh - 48px);
-  overflow: auto;
-  color: var(--ink);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
-}
-.net-auction-body {
-  display: flex;
-  gap: 24px;
-  align-items: flex-start;
-  flex-wrap: wrap;
-}
-.net-auction-lot {
-  flex: 0 0 auto;
-  display: flex;
-  justify-content: center;
-  min-width: 200px;
-}
-.net-auction-side {
-  flex: 1 1 240px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-width: 220px;
-}
-.net-auction-bid { font-size: 16px; font-weight: 700; letter-spacing: 0.3px; }
-.net-auction-phase { font-size: 13px; margin-top: 2px; }
-.net-auction-controls { display: flex; flex-direction: column; gap: 10px; }
-.net-auction-bidrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.net-auction-input {
-  width: 92px;
-  padding: 7px 9px;
-  font-size: 14px;
-  font-weight: 700;
-  background: var(--bg-2);
-  color: var(--ink);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-}
-.net-auction-controls .modal-btn { white-space: nowrap; }
-.net-auction-controls .modal-btn.primary {
-  background: var(--accent); color: #062136; border-color: var(--accent-2);
-}
-.net-auction-controls .modal-btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
-.net-auction-controls .modal-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.auction-deck-picker { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
-.auction-deck-picker.hidden { display: none; }
-.auction-deck-row { flex-wrap: wrap; gap: 6px; }
-.auction-deck-row .modal-btn { flex: 1 1 auto; }
-@media (max-width: 560px) {
-  .net-auction-lot { transform: scale(0.9); transform-origin: top center; }
-}
 
 /* ============================================================
    Transfer LEO ↔ Rocket modal (variant cargo flow).
@@ -5649,6 +5448,13 @@ body:has(#view-browse:not(.hidden)) #main {
    breathe. Mobile stays full-bleed via the existing rules. */
 .auction-confirm-modal {
   max-width: 720px;
+  /* Cap the modal at the viewport (minus the overlay's padding) and
+     let its own body scroll internally - the lot card + bonus card
+     row + multiplayer cost block can easily exceed phone-height,
+     and on desktop they were getting clipped under the actions
+     row. Backdrop stays full-screen + centred. */
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
 }
 
 /* ============================================================
@@ -5850,3 +5656,207 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .crew-wizard-modal .modal-btn.primary:hover { background: #166534; }
 .crew-wizard-modal .modal-btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ===== Multiplayer table panel (online sidepanel pane) ===== */
+.mp-head { margin-bottom: 12px; }
+.mp-room { font-size: 15px; font-weight: 700; letter-spacing: 0.3px; }
+.mp-turn { font-size: 13px; margin-top: 4px; color: var(--ink-dim, #8b90b8); }
+.mp-turn.mp-your-turn { color: #86efac; font-weight: 700; }
+.mp-clock { font-size: 12px; margin-top: 2px; }
+.mp-roster { display: flex; flex-direction: column; gap: 8px; }
+.mp-player {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(15, 23, 42, 0.5);
+}
+.mp-player.mp-active {
+  outline: 1px solid rgba(56, 189, 248, 0.5);
+  border-color: rgba(56, 189, 248, 0.5);
+}
+.mp-player-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 8px 10px;
+  cursor: pointer;
+  color: var(--ink);
+}
+.mp-player-head:hover { background: rgba(255, 255, 255, 0.04); }
+.mp-player-head .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: 0 0 10px;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+}
+.mp-name { font-weight: 600; font-size: 13px; }
+.mp-stats {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--ink-dim, #8b90b8);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.mp-player-detail { padding: 4px 10px 10px; border-top: 1px solid var(--border); }
+.mp-section { margin-bottom: 6px; }
+.mp-detail-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+  margin: 6px 0 3px;
+}
+.mp-line { font-size: 12px; padding: 1px 0; }
+.mp-head-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+.mp-leave {
+  font-size: 11px;
+  padding: 3px 8px;
+  background: rgba(125, 211, 252, 0.1);
+  color: var(--accent);
+  border: 1px solid rgba(125, 211, 252, 0.35);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.mp-leave:hover { background: rgba(125, 211, 252, 0.2); }
+#mp-chat {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.mp-chat-list {
+  list-style: none;
+  margin: 4px 0;
+  max-height: 180px;
+  overflow-y: auto;
+  background: rgba(7, 6, 15, 0.5);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.mp-chat-list .mp-chat-msg { padding: 2px 0; font-size: 12px; line-height: 1.35; }
+.mp-chat-list .mp-chat-who { font-weight: 600; color: var(--accent); margin-right: 4px; }
+.mp-chat-list .mp-chat-empty { font-size: 12px; padding: 2px 0; }
+.mp-chat-form { display: flex; gap: 6px; margin-top: 6px; }
+.mp-chat-form input {
+  flex: 1 1 auto;
+  background: var(--bg-2);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 12px;
+}
+.mp-chat-form button {
+  background: var(--accent);
+  color: #062136;
+  border: 1px solid var(--accent-2);
+  border-radius: 4px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.mp-chat-form button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ===== Multiplayer auction overlay (browse.js renderOnlineAuction) ===== */
+.mp-auction-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(3, 2, 10, 0.78);
+  backdrop-filter: blur(4px);
+  animation: modal-fade 0.18s ease-out;
+}
+.mp-auction-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 20px 20px;
+  max-width: 700px;
+  width: 100%;
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  color: var(--ink);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+}
+.mp-auction-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.mp-auction-head h3 { margin: 0; font-size: 18px; letter-spacing: 0.5px; }
+.mp-auction-mode {
+  color: var(--ink-dim, #8b90b8);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.mp-auction-body { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+.mp-auction-lot { flex: 0 0 auto; display: flex; justify-content: center; min-width: 200px; }
+.mp-auction-side {
+  flex: 1 1 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 220px;
+}
+.mp-auction-bid { font-size: 16px; font-weight: 700; letter-spacing: 0.3px; }
+.mp-auction-phase { font-size: 13px; margin-top: 2px; }
+.mp-auction-controls { display: flex; flex-direction: column; gap: 10px; }
+.mp-auction-bidrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.mp-auction-input {
+  width: 92px;
+  padding: 7px 9px;
+  font-size: 14px;
+  font-weight: 700;
+  background: var(--bg-2);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.mp-auction-controls .modal-btn { white-space: nowrap; }
+/* Bid / Join / Sell - light-blue accent with explicit dark-navy
+   text. User feedback 2026-05: liked the blue look but the button
+   was rendering with no visible text in their build (the .modal-btn
+   base set color:var(--ink) which is light, and at this specificity
+   tier the override couldn't reliably win against late cascades on
+   some devices). Pin the colour with !important so the navy text
+   shows everywhere. */
+.mp-auction-controls .modal-btn.primary {
+  background: var(--accent) !important;
+  color: #062136 !important;
+  border-color: var(--accent-2) !important;
+}
+.mp-auction-controls .modal-btn.primary:hover:not(:disabled) {
+  background: var(--accent-2) !important;
+}
+.mp-auction-controls .modal-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.mp-deck-picker {
+  margin: 6px 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.5);
+}
+.mp-deck-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.mp-deck-row .modal-btn { flex: 1 1 auto; min-width: 80px; }
+@media (max-width: 560px) {
+  .mp-auction-lot { transform: scale(0.9); transform-origin: top center; }
+}

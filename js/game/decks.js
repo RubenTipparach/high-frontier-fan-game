@@ -38,6 +38,7 @@
 //   onDeckChange(cb)                    unsubscribe
 
 import { PATENTS, PATENTS_BY_ID } from '../../data/patents.js';
+import { isOnline } from './online-mode.js';
 
 export const DECK_TYPES = [
   'thruster', 'reactor', 'radiator',
@@ -112,6 +113,7 @@ let _decks = loadInitial();
 let _listeners = [];
 
 function persist() {
+  if (isOnline()) return;
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(_decks)); }
   catch { /* private mode */ }
 }
@@ -119,6 +121,15 @@ function notify() {
   for (const cb of _listeners) {
     try { cb(); } catch (err) { console.error('decks listener:', err); }
   }
+}
+
+// Replace the in-memory per-type decks from a server snapshot.
+export function hydrateDecks(decks = {}) {
+  let copy;
+  try { copy = structuredClone(decks); }
+  catch { copy = JSON.parse(JSON.stringify(decks)); }
+  _decks = (copy && typeof copy === 'object') ? copy : {};
+  notify();
 }
 
 export function getDeck(type) {

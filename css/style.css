@@ -277,7 +277,13 @@ code {
 
 /* ===== Main layout ===== */
 
-#main { padding: 20px; max-width: 1200px; margin: 0 auto; }
+/* #main is the page shell: full viewport width with breathing-room
+   padding. Views that prefer a narrower column constrain themselves
+   below (the signin card uses .card.narrow; create-lobby + lobby
+   detail get an explicit max-width so a wide monitor doesn't stretch
+   their forms across the whole screen). */
+#main { padding: 20px 28px; margin: 0 auto; }
+#view-create-lobby, #view-lobby { max-width: 720px; margin: 0 auto; }
 .view { animation: fade 0.18s; }
 @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
@@ -423,6 +429,217 @@ label.checkbox input { accent-color: var(--accent-2); }
   padding: 6px 8px; border-bottom: 1px dashed var(--border);
 }
 .search-results li:last-child { border-bottom: none; }
+
+/* ===== Lobby (home view) layout =====
+   The lobby is a full-screen dashboard. It escapes #main's flow with
+   position:fixed so it owns the whole viewport (no half-empty centred
+   "modal" feel), takes its own scroll, and the scrollbar lands at the
+   real viewport edge. Other views stay inside #main as before. */
+#view-lobby-list:not(.hidden) {
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  padding: 14px 24px 24px;
+  box-sizing: border-box;
+}
+.lobby-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.lobby-top .claim-link {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 0;
+}
+.lobby-top .claim-link input { width: 160px; }
+#btn-new-game { font-weight: 700; }
+
+/* Inline ☰ menu button (replaces the floating FAB while on the lobby). */
+.lobby-menu-btn {
+  height: 32px;
+  min-width: 40px;
+  padding: 0 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+.lobby-menu-btn:hover { background: var(--accent); color: #062136; border-color: var(--accent-2); }
+
+/* Pending-invites chip + floating popover (top-right of the action
+   row). The popover is position:absolute relative to .invites-wrap so
+   it overlays page content instead of pushing the chat + games grid
+   down when it opens. */
+.invites-wrap { position: relative; margin-left: auto; }
+.invites-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.invites-chip.has-invites { border-color: var(--accent); color: var(--accent); }
+.invites-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--bg-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+}
+.invites-chip.has-invites .invites-badge { background: var(--accent); color: #062136; }
+.invites-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 60;
+  min-width: 280px;
+  max-width: 360px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+.invites-popover.hidden { display: none; }
+.invites-popover h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--ink-dim);
+}
+
+/* Compact card defaults inside the lobby view. */
+#view-lobby-list .card { padding: 12px 14px; margin-bottom: 12px; }
+#view-lobby-list .card h2 { margin-bottom: 8px; }
+
+/* Global chat: deliberately narrower than the page so it reads as a
+   focal chat surface, with the games dashboard below it. width (not
+   max-width) is explicit so block-flow can't collapse it to content. */
+#view-lobby-list .global-chat {
+  width: clamp(280px, 50vw, 760px);
+  margin: 0 auto 12px;
+}
+
+#view-lobby-list .lobby-list li,
+#view-lobby-list .invite-list li { padding: 8px 10px; gap: 8px; }
+#view-lobby-list .lobby-list li.empty,
+#view-lobby-list .invite-list li.empty { padding: 12px; font-size: 13px; }
+#view-lobby-list .chat-messages {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+  font-size: 13px;
+}
+#view-lobby-list .chat-messages li.empty {
+  text-align: center;
+  color: var(--ink-mute);
+  font-style: italic;
+}
+
+/* Three-column games grid, centered on the page (capped at 1200px) so
+   Open / Your / Ended cluster near the middle alongside the chat above
+   instead of being pinned to the viewport edges on wide screens. The
+   lobby's own scroll handles overflow. */
+.lobby-games-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+  max-width: 1320px;
+  margin: 0 auto;
+}
+.lobby-games-grid > .card { margin-bottom: 0; }
+
+/* While the lobby is visible, hide the floating FAB - the lobby has
+   an inline menu button in its action row. (Body class set by
+   showView in main.js.) */
+body.in-lobby .main-menu-fab { display: none; }
+
+@media (max-width: 1100px) {
+  .lobby-games-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 640px) {
+  .lobby-games-grid { grid-template-columns: 1fr; gap: 10px; }
+  .lobby-top { gap: 8px; }
+  .lobby-top .claim-link input { width: 120px; }
+  .invites-wrap { margin-left: 0; }
+  #view-lobby-list .card { padding: 10px 12px; margin-bottom: 10px; }
+  #view-lobby-list .card h2 { font-size: 13px; margin-bottom: 6px; }
+  #view-lobby-list .lobby-list li,
+  #view-lobby-list .invite-list li { padding: 6px 8px; }
+  #view-lobby-list .global-chat { width: 100%; max-width: none; }
+  #view-lobby-list:not(.hidden) { padding: 12px; }
+}
+@media (max-width: 720px) {
+  /* On mobile, drop the floating-popover anchor and present the
+     pending-invites list as a real modal sheet. position:fixed
+     escapes lobby-top's flex-wrap (which on mobile can stash the
+     chip on its own row and push the popover off-screen), and a
+     full-page backdrop dims the rest so it reads as a modal, not
+     a dropdown. Existing body click-outside handler still closes
+     it: the backdrop pseudo isn't a real element, so a tap
+     anywhere outside the popover hits the lobby and triggers
+     the close path. */
+  .invites-popover {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(92vw, 380px);
+    max-width: none;
+    min-width: 0;
+    max-height: 80vh;
+    overflow-y: auto;
+    z-index: 80;
+  }
+  body.invites-popover-open::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 75;
+  }
+}
+
+/* Phones: backdrop-filter blur is GPU-heavy and the FAB is always
+   on-screen, so the lobby + menu overlays felt laggy on mobile. Drop
+   the blur entirely below 720px; the dark backgrounds still provide
+   enough contrast. */
+@media (max-width: 720px) {
+  .main-menu-fab,
+  .main-menu-overlay,
+  .map-search-backdrop,
+  .card-modal-overlay,
+  .game-auction,
+  .mp-auction-overlay {
+    backdrop-filter: none;
+  }
+}
 .search-results .seen {
   font-size: 11px; color: var(--ink-mute);
 }
@@ -439,24 +656,6 @@ label.checkbox input { accent-color: var(--accent-2); }
   flex: 1; font-family: ui-monospace, monospace; font-size: 12px;
 }
 
-/* ===== Game overlay (stage 1 placeholder) ===== */
-
-.game-overlay {
-  position: fixed; inset: 0;
-  background: rgba(7, 6, 15, 0.88);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 50;
-  backdrop-filter: blur(2px);
-}
-.overlay-card {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 32px;
-  text-align: center;
-  max-width: 500px;
-}
-.overlay-card h2 { color: var(--accent); margin-top: 0; }
 
 /* ===== Account popover ===== */
 

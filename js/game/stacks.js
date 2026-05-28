@@ -39,6 +39,8 @@
 // Outpost record shape:
 //   { letter, siteId, cards: [{id, kind}], tank: number }
 
+import { isOnline } from './online-mode.js';
+
 const OUTPOSTS_KEY = 'hf-sandbox-outposts';
 const FOCUS_KEY    = 'hf-sandbox-focused-stack';
 
@@ -94,11 +96,13 @@ let _outpostListeners = [];
 let _focusListeners   = [];
 
 function persistOutposts() {
+  if (isOnline()) return;
   try {
     localStorage.setItem(OUTPOSTS_KEY, JSON.stringify(_outposts));
   } catch { /* private mode */ }
 }
 function persistFocus() {
+  if (isOnline()) return;
   try { localStorage.setItem(FOCUS_KEY, _focusedStackId); }
   catch { /* private mode */ }
 }
@@ -111,6 +115,16 @@ function notifyFocus() {
   for (const cb of _focusListeners) {
     try { cb(); } catch (err) { console.error('focus listener:', err); }
   }
+}
+
+// Replace the in-memory outpost slots from a server snapshot.
+// Fires the outpost subscribers so the hand-bar / panels re-render.
+export function hydrateOutposts(outposts = {}) {
+  let copy;
+  try { copy = structuredClone(outposts); }
+  catch { copy = JSON.parse(JSON.stringify(outposts)); }
+  _outposts = (copy && typeof copy === 'object') ? copy : {};
+  notifyOutposts();
 }
 
 export function getOutposts() {

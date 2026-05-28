@@ -108,6 +108,11 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
     sites.push({
       id,
       id2,
+      // The matched data/sites.js id (server slug), or null when this
+      // node didn't name-match a real site (waypoints, decoratives).
+      // Lets multiplayer translate between classic-map node ids and the
+      // server's site ids without a second name-match.
+      serverId: local ? local.id : null,
       name: p.siteName || routingLabel(rawType),
       type,
       isWaypoint,

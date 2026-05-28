@@ -271,6 +271,53 @@ function publishLobby(lobbyId) {
   broadcast(`lobby:${lobbyId}`, { type: 'lobby_update', lobby });
 }
 
+// Cancel pending direct-invites for a lobby and notify each invitee
+// so their notifications UI refreshes immediately. Used when the
+// lobby transitions out of 'waiting' (started / disbanded / cancelled)
+// or when a player joins through any path (their own invite to that
+// lobby becomes moot). `exceptProfileId` skips the cancel for one
+// profile - useful when the join is being recorded for someone whose
+// invite is being accepted separately (so we don't race on the same
+// row). Returns the list of notified profile ids.
+function cancelLobbyInvites(lobbyId, exceptProfileId) {
+  const rows = db
+    .prepare(
+      `SELECT to_id FROM direct_invites
+       WHERE lobby_id = ? AND status = 'pending'
+       ${exceptProfileId != null ? 'AND to_id != ?' : ''}`
+    )
+    .all(...(exceptProfileId != null ? [lobbyId, exceptProfileId] : [lobbyId]));
+  if (!rows.length) return [];
+  db.prepare(
+    `UPDATE direct_invites
+     SET status = 'cancelled', responded_at = ?
+     WHERE lobby_id = ? AND status = 'pending'
+     ${exceptProfileId != null ? 'AND to_id != ?' : ''}`
+  ).run(...(exceptProfileId != null
+    ? [nowMs(), lobbyId, exceptProfileId]
+    : [nowMs(), lobbyId]));
+  for (const r of rows) {
+    broadcast(`me:${r.to_id}`, { type: 'invite_cancelled', lobbyId });
+  }
+  return rows.map((r) => r.to_id);
+}
+
+// Cancel one specific direct-invite (the joiner's invite to this
+// lobby, regardless of source). Idempotent; quietly does nothing if
+// no pending row exists.
+function cancelInviteFor(profileId, lobbyId) {
+  const info = db
+    .prepare(
+      `UPDATE direct_invites
+       SET status = 'cancelled', responded_at = ?
+       WHERE lobby_id = ? AND to_id = ? AND status = 'pending'`
+    )
+    .run(nowMs(), lobbyId, profileId);
+  if (info.changes > 0) {
+    broadcast(`me:${profileId}`, { type: 'invite_cancelled', lobbyId });
+  }
+}
+
 // Create a new lobby. Caller becomes the host AND the first member.
 // `code` is a 6-char short code so the host can read it over voice.
 app.post('/lobbies', requireProfile, (req, res) => {
@@ -326,6 +373,32 @@ app.get('/lobbies', (_req, res) => {
   res.json({ entries: rows });
 });
 
+// Lobbies the caller is a member of, across every status, with the
+// game's id + status attached. Powers the "your games" (in progress)
+// and "ended games" sections; GET /lobbies only lists joinable waiting
+// tables. Registered BEFORE /lobbies/:id so "mine" isn't read as an id.
+app.get('/lobbies/mine', requireProfile, (req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT l.id, l.code, l.name, l.status,
+              l.max_players AS maxPlayers,
+              l.created_at  AS createdAt,
+              p.name        AS hostName,
+              (SELECT COUNT(*) FROM lobby_members lm2 WHERE lm2.lobby_id = l.id) AS memberCount,
+              g.id     AS gameId,
+              g.status AS gameStatus
+       FROM lobbies l
+       JOIN lobby_members lm ON lm.lobby_id = l.id AND lm.profile_id = ?
+       JOIN profiles p ON p.id = l.host_id
+       LEFT JOIN games g ON g.lobby_id = l.id
+       WHERE l.status != 'cancelled'
+       ORDER BY l.created_at DESC
+       LIMIT 50`
+    )
+    .all(req.profile.id);
+  res.json({ entries: rows });
+});
+
 // Lobby detail. Members + full lobby record. Visible to anyone (so
 // the invite-link landing page can render the lobby name before the
 // user claims the invite), but starting / chatting / joining requires
@@ -373,6 +446,12 @@ function joinLobby(lobbyId, profileId, { acceptedInvite }) {
     `INSERT INTO lobby_members (lobby_id, profile_id, joined_at, seat)
      VALUES (?, ?, ?, ?)`
   ).run(lobbyId, profileId, nowMs(), count + 1);
+  // Any pending invite this player had for this lobby is now moot -
+  // they're in. Direct-invite ACCEPT runs its own UPDATE to 'accepted'
+  // before getting here, so this cancel is a no-op in that path; for
+  // every other join path (open join, invite-link claim) it cleans up
+  // a stranded pending invite that would otherwise dangle.
+  cancelInviteFor(profileId, lobbyId);
   return { ok: true, alreadyMember: false };
 }
 
@@ -387,6 +466,10 @@ app.post('/lobbies/:id/leave', requireProfile, (req, res) => {
   // ON DELETE CASCADE to clean up members, chat, and invites). Once a
   // game has started, leaving is just "go AFK" - host can't disband.
   if (lobby.host_id === req.profile.id && lobby.status === 'waiting') {
+    // Broadcast invite_cancelled to each pending invitee BEFORE the
+    // cascade fires so their notifications chip clears without a stale
+    // row. The cascade will then physically remove the rows.
+    cancelLobbyInvites(id);
     db.prepare('DELETE FROM lobbies WHERE id = ?').run(id);
     broadcast(`lobby:${id}`, { type: 'lobby_disbanded', lobbyId: id });
   } else {
@@ -472,6 +555,11 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
     return gid;
   })();
 
+  // Once a lobby starts, every pending invite for it is moot - the
+  // joinLobby gate refuses 'started' lobbies anyway. Mark them
+  // 'cancelled' and broadcast invite_cancelled so each invitee's
+  // notification chip clears in real time.
+  cancelLobbyInvites(id);
   publishLobby(id);
   res.json({ ok: true, gameId });
 });
@@ -495,6 +583,25 @@ function isGamePlayer(gameId, profileId) {
   return !!db
     .prepare('SELECT 1 FROM game_players WHERE game_id = ? AND profile_id = ?')
     .get(gameId, profileId);
+}
+
+// Spectator access: any signed-in profile can read a game whose
+// underlying lobby is open (join_policy = 'open') AND whose game is
+// 'active'. Mirrors the "public game" affordance the user asked for -
+// view-only hop-in for in-progress public games. Players keep access
+// for any join_policy, any game.status.
+function canViewGame(gameId, profileId) {
+  if (isGamePlayer(gameId, profileId)) return true;
+  const row = db
+    .prepare(
+      `SELECT l.join_policy AS joinPolicy, g.status AS gameStatus
+       FROM games g
+       JOIN lobbies l ON l.id = g.lobby_id
+       WHERE g.id = ?`
+    )
+    .get(gameId);
+  if (!row) return false;
+  return row.joinPolicy === 'open' && row.gameStatus === 'active';
 }
 
 // Full game view: meta + roster + current state snapshot. State is sent
@@ -531,13 +638,37 @@ function publishGame(gameId, payload) {
   broadcast(`game:${gameId}`, payload);
 }
 
+// Public live games: open-lobby games currently in 'active' status,
+// for the lobby-list "Live games" spectator section. Returns enough
+// per-row info to render the chip without an extra fetch.
+app.get('/games/public', requireProfile, (req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT g.id          AS gameId,
+              g.lobby_id    AS lobbyId,
+              g.created_at  AS startedAt,
+              l.name        AS lobbyName,
+              l.code        AS lobbyCode,
+              p.name        AS hostName,
+              (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) AS playerCount
+       FROM games g
+       JOIN lobbies l ON l.id = g.lobby_id
+       JOIN profiles p ON p.id = l.host_id
+       WHERE g.status = 'active' AND l.join_policy = 'open'
+       ORDER BY g.created_at DESC
+       LIMIT 50`
+    )
+    .all();
+  res.json({ entries: rows });
+});
+
 app.get('/games/:id', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  if (!isGamePlayer(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+  if (!canViewGame(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
   const view = gameView(id);
   if (!view) return res.status(404).json({ error: 'not_found' });
-  res.json({ game: view });
+  res.json({ game: view, isSpectator: !isGamePlayer(id, req.profile.id) });
 });
 
 // Submit one operation. REST is the source of truth: the engine
@@ -585,8 +716,12 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(id, nextSeq, req.profile.id, kind, JSON.stringify(payload), result.log || null, stateJson, now);
     // END_TURN is the commit: it becomes the new undo floor (the next
-    // player can never unwind into the turn that just ended).
-    if (kind === 'END_TURN') {
+    // player can never unwind into the turn that just ended). Auction
+    // ops advance the floor too: an auction moves aqua / decks / hands
+    // that are not on the per-turn undo stack, so letting undo replay
+    // across one would silently drop those effects. PICK_CREW is also
+    // permanent (session-setup) so it commits the same way.
+    if (kind === 'END_TURN' || kind === 'PICK_CREW' || kind.startsWith('AUCTION_')) {
       db.prepare('UPDATE games SET committed_seq = ? WHERE id = ?').run(nextSeq, id);
     }
     if (result.state.status === 'finished') {
@@ -895,6 +1030,48 @@ app.post('/lobbies/:id/chat', requireProfile, (req, res) => {
   res.status(201).json({ ok: true, message: msg });
 });
 
+// Global chat: lobby_id IS NULL rows in chat_messages, anyone signed
+// in can read + post (no membership gate). Broadcast on the 'global'
+// WS channel so every lobby-list session sees new messages live.
+app.get('/chat/global', requireProfile, (req, res) => {
+  const before = Number(req.query.before) || nowMs() + 1;
+  const rows = db
+    .prepare(
+      `SELECT cm.id, cm.body, cm.created_at AS createdAt,
+              p.name AS profileName, p.id AS profileId
+       FROM chat_messages cm
+       JOIN profiles p ON p.id = cm.profile_id
+       WHERE cm.lobby_id IS NULL AND cm.created_at < ?
+       ORDER BY cm.created_at DESC
+       LIMIT 100`
+    )
+    .all(before);
+  res.json({ entries: rows.reverse() });
+});
+
+app.post('/chat/global', requireProfile, (req, res) => {
+  const body = String((req.body && req.body.body) || '').trim();
+  if (!body) return res.status(400).json({ error: 'empty_body' });
+  if (body.length > 500) return res.status(413).json({ error: 'too_long' });
+  const now = nowMs();
+  const info = db
+    .prepare(
+      `INSERT INTO chat_messages (lobby_id, profile_id, body, created_at)
+       VALUES (NULL, ?, ?, ?)`
+    )
+    .run(req.profile.id, body, now);
+  const msg = {
+    id: info.lastInsertRowid,
+    lobbyId: null,
+    profileId: req.profile.id,
+    profileName: req.profile.name,
+    body,
+    createdAt: now,
+  };
+  broadcast('global', { type: 'chat', message: msg });
+  res.status(201).json({ ok: true, message: msg });
+});
+
 // ----- WebSocket layer -----
 
 const httpServer = createServer(app);
@@ -998,6 +1175,8 @@ wss.on('connection', (ws) => {
 // matches the caller. Anything else is rejected so a randomly
 // generated channel name can't be used as a covert pubsub.
 function isValidChannel(channel, profile) {
+  // Global chat: any signed-in profile can subscribe.
+  if (channel === 'global') return true;
   const m = /^lobby:(\d+)$/.exec(channel);
   if (m) {
     const lobbyId = Number(m[1]);
@@ -1009,10 +1188,9 @@ function isValidChannel(channel, profile) {
   const g = /^game:(\d+)$/.exec(channel);
   if (g) {
     const gameId = Number(g[1]);
-    const isPlayer = db
-      .prepare('SELECT 1 FROM game_players WHERE game_id = ? AND profile_id = ?')
-      .get(gameId, profile.id);
-    return !!isPlayer;
+    // Players always allowed; spectators allowed when the underlying
+    // lobby is open and the game is active (read-only live updates).
+    return canViewGame(gameId, profile.id);
   }
   const me = /^me:(\d+)$/.exec(channel);
   if (me) return Number(me[1]) === profile.id;
@@ -1155,8 +1333,9 @@ app.get('/admin', (_req, res) => {
       <td>${esc(r.join_policy)}</td>
       <td class="num">${r.members} / ${r.max_players}</td>
       <td>${esc(r.created)}</td>
+      <td><button class="btn-del-lobby danger" data-lid="${r.id}" data-lname="${esc(r.name)}">Cancel</button></td>
     </tr>
-  `).join('') || '<tr><td colspan=7><em>No lobbies yet.</em></td></tr>';
+  `).join('') || '<tr><td colspan=8><em>No lobbies yet.</em></td></tr>';
 
   const chatRows = chats.map((r) => `
     <tr>
@@ -1218,6 +1397,8 @@ app.get('/admin', (_req, res) => {
   button{font:inherit;background:#1a1830;color:#e6e9ff;border:1px solid #2a2740;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:12px}
   button:hover{background:#25223e;border-color:#3a3760}
   button:disabled{opacity:0.5;cursor:not-allowed}
+  button.danger{background:#450a0a;border-color:#7f1d1d;color:#fda4af}
+  button.danger:hover{background:#7f1d1d;color:#fff;border-color:#b91c1c}
   input[type=text]{background:#07060f;color:#e6e9ff;border:1px solid #2a2740;border-radius:4px;padding:4px 8px;font:inherit}
   .ws-info{display:inline-block;background:#0c0a16;border:1px solid #1e293b;padding:8px 14px;border-radius:6px;margin-left:auto;font-size:12px;color:#8b90b8}
   .ws-info strong{color:#4ade80;font-weight:600}
@@ -1259,7 +1440,7 @@ app.get('/admin', (_req, res) => {
   <table>
     <thead><tr>
       <th>Code</th><th>Name</th><th>Host</th>
-      <th>Status</th><th>Policy</th><th class="num">Players</th><th>Created</th>
+      <th>Status</th><th>Policy</th><th class="num">Players</th><th>Created</th><th>Manage</th>
     </tr></thead>
     <tbody>${lobbyRows}</tbody>
   </table>
@@ -1335,6 +1516,36 @@ document.addEventListener('click', function (ev) {
       alert('Network error.');
     });
 });
+
+// "Cancel" - marks the lobby and its game as 'cancelled' (kept in
+// the DB for audit; pending invites are cancelled + broadcast to
+// each invitee), then drops the row from the table.
+document.addEventListener('click', function (ev) {
+  var btn = ev.target.closest('.btn-del-lobby');
+  if (!btn) return;
+  var lid = btn.getAttribute('data-lid');
+  var lname = btn.getAttribute('data-lname');
+  if (!confirm('Cancel table "' + lname + '" and its game?\\n\\nThe lobby + game keep their op-log + state rows (status = cancelled), but the players lose access and pending invites are cleared.')) return;
+  btn.disabled = true;
+  btn.textContent = 'Cancelling...';
+  fetch('/admin/lobbies/' + lid + '/delete', { method: 'POST' })
+    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+    .then(function (res) {
+      if (!res.ok) {
+        btn.disabled = false;
+        btn.textContent = 'Cancel';
+        alert('Failed: ' + (res.body && res.body.error || 'unknown'));
+        return;
+      }
+      var tr = btn.closest('tr');
+      if (tr) tr.remove();
+    })
+    .catch(function () {
+      btn.disabled = false;
+      btn.textContent = 'Cancel';
+      alert('Network error.');
+    });
+});
 </script>
 </body></html>`);
 });
@@ -1358,12 +1569,68 @@ app.post('/admin/profiles/:id/add-token', (req, res) => {
   res.json({ ok: true, name: row.name, token });
 });
 
+// Cancel a lobby and its game (formerly a hard DELETE; user 2026-05:
+// "update server to cancel games instead of deleting them to avoid
+// dangling data" - keep the audit trail). Sets lobbies.status and
+// games.status to 'cancelled', cancels pending invites + broadcasts
+// invite_cancelled, then broadcasts lobby_disbanded so anyone still
+// on the channel drops. Anonymous to match the open-dashboard
+// posture - gate behind an admin secret before exposing publicly.
+//
+// Endpoint path is still .../delete so the existing admin button
+// keeps working without a UI change.
+app.post('/admin/lobbies/:id/delete', (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  const row = db.prepare('SELECT id FROM lobbies WHERE id = ?').get(id);
+  if (!row) return res.status(404).json({ error: 'not_found' });
+  const now = nowMs();
+  db.transaction(() => {
+    cancelLobbyInvites(id);
+    db.prepare(
+      "UPDATE lobbies SET status = 'cancelled' WHERE id = ? AND status != 'cancelled'"
+    ).run(id);
+    db.prepare(
+      "UPDATE games SET status = 'cancelled', finished_at = COALESCE(finished_at, ?) WHERE lobby_id = ? AND status != 'cancelled'"
+    ).run(now, id);
+  })();
+  broadcast(`lobby:${id}`, { type: 'lobby_disbanded', lobbyId: id });
+  res.json({ ok: true });
+});
+
 function esc(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 // ----- Boot -----
+
+// One-time cleanup of dangling pending-invites for lobbies that have
+// since left the 'waiting' state (started / cancelled / finished /
+// orphaned). New gameplay paths cancel invites at the right time,
+// but earlier builds left stranded rows that the /invites listing
+// already hides via the lobby-status join - this just stops them
+// accumulating in the table forever.
+(() => {
+  const before = db.prepare(
+    `SELECT COUNT(*) AS n FROM direct_invites di
+     LEFT JOIN lobbies l ON l.id = di.lobby_id
+     WHERE di.status = 'pending'
+       AND (l.id IS NULL OR l.status != 'waiting')`
+  ).get().n;
+  if (!before) return;
+  db.prepare(
+    `UPDATE direct_invites
+     SET status = 'cancelled', responded_at = ?
+     WHERE status = 'pending' AND id IN (
+       SELECT di.id FROM direct_invites di
+       LEFT JOIN lobbies l ON l.id = di.lobby_id
+       WHERE di.status = 'pending'
+         AND (l.id IS NULL OR l.status != 'waiting')
+     )`
+  ).run(nowMs());
+  console.log(`cleaned up ${before} stranded pending invite(s)`);
+})();
 
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`high-frontier-fan-game listening on :${PORT} (HTTP + WS at /ws)`);

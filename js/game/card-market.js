@@ -235,7 +235,7 @@ function escapeHtml(s) {
 // mode"). onConfirm fires with no payload; the deck draws
 // (main card + bonus) are the caller's responsibility.
 export function openAuctionConfirmModal({
-  card, mode, renderCardFn, bonusCards, onConfirm,
+  card, mode, renderCardFn, bonusCards, onConfirm, multiplayer,
 }) {
   if (!card) return;
   document.querySelector('.auction-confirm-overlay')?.remove();
@@ -265,33 +265,56 @@ export function openAuctionConfirmModal({
   // 2026-05-24).
   const bonus = Array.isArray(bonusCards) ? bonusCards.filter(Boolean) : [];
 
+  // Multiplayer: the server auctions the deck TOP (not the
+  // specific card picked) and the confirm button dispatches
+  // AUCTION_START. The modal copy + cost line change to reflect
+  // the bidding flow that opens for every player.
+  const modeChip = multiplayer
+    ? 'Multiplayer auction'
+    : escapeHtml(inMarket ? 'Card Market' : 'Free Library');
+  const costLine = multiplayer
+    ? `<strong>Cost:</strong> 1 operation. The server puts the top of
+       the <strong>${escapeHtml(card.type || 'patent')}</strong> deck up
+       for auction; every other player can bid in aqua. You can also
+       Join your own auction to keep the price down.`
+    : `<strong>Cost:</strong> 1 operation + 0 aqua (solo / sandbox mode).`;
+  const bonusBlock = multiplayer
+    ? `<p class="muted">In multiplayer, support bonuses are awarded to
+         the auction winner by the server when the lot resolves. The
+         cards above are a preview of each support deck's current top.</p>`
+    : (bonus.length === 0
+        ? `<p class="muted">No support requirements - no bonus cards.</p>`
+        : `<p class="muted">
+             This card has <strong>${bonus.length}</strong> support
+             requirement${bonus.length === 1 ? '' : 's'}. Confirming
+             also draws the top of each support deck shown below;
+             all of these land in your Hand alongside the main card.
+           </p>`);
+
   dialog.innerHTML = `
     <div class="auction-head">
       <h3>🎯 Confirm Auction</h3>
-      <span class="auction-mode">${escapeHtml(inMarket ? 'Card Market' : 'Free Library')}</span>
+      <span class="auction-mode">${modeChip}</span>
     </div>
     <div class="auction-body">
-      <div class="auction-section-label">Card up for auction</div>
+      <div class="auction-section-label">${multiplayer
+        ? 'Up for auction (top of the ' + escapeHtml(card.type || 'patent') + ' deck)'
+        : 'Card up for auction'}</div>
       <div class="auction-confirm-card" id="auction-confirm-card"></div>
       <div class="auction-cost-line">
-        <strong>Cost:</strong> 1 operation + 0 aqua (solo / sandbox mode).
+        ${costLine}
       </div>
       <div class="auction-bonus-section">
-        <div class="auction-section-label">Bonus cards (drawn on confirm)</div>
-        ${bonus.length === 0
-          ? `<p class="muted">No support requirements - no bonus cards.</p>`
-          : `<p class="muted">
-               This card has <strong>${bonus.length}</strong> support
-               requirement${bonus.length === 1 ? '' : 's'}. Confirming
-               also draws the top of each support deck shown below;
-               all of these land in your Hand alongside the main card.
-             </p>
-             <div class="auction-bonus-cards" id="auction-bonus-cards"></div>`}
+        <div class="auction-section-label">${multiplayer ? 'Support deck previews' : 'Bonus cards (drawn on confirm)'}</div>
+        ${bonusBlock}
+        ${bonus.length === 0 ? '' : `<div class="auction-bonus-cards" id="auction-bonus-cards"></div>`}
       </div>
     </div>
     <div class="card-modal-actions">
       <button type="button" class="modal-btn auction-cancel">Cancel</button>
-      <button type="button" class="modal-btn primary auction-commit">🎯 Confirm</button>
+      <button type="button" class="modal-btn primary auction-commit">${
+        multiplayer ? '🎯 Start auction' : '🎯 Confirm'
+      }</button>
     </div>
   `;
   // Mount the main card art.
