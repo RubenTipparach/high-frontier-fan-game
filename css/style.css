@@ -439,24 +439,6 @@ label.checkbox input { accent-color: var(--accent-2); }
   flex: 1; font-family: ui-monospace, monospace; font-size: 12px;
 }
 
-/* ===== Game overlay (stage 1 placeholder) ===== */
-
-.game-overlay {
-  position: fixed; inset: 0;
-  background: rgba(7, 6, 15, 0.88);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 50;
-  backdrop-filter: blur(2px);
-}
-.overlay-card {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 32px;
-  text-align: center;
-  max-width: 500px;
-}
-.overlay-card h2 { color: var(--accent); margin-top: 0; }
 
 /* ===== Account popover ===== */
 
