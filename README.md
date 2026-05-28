@@ -8,6 +8,9 @@ Play the latest commit at [high-frontier-fan-game](https://rubentipparach.github
 Every push to every branch redeploys, so the most recent commit on any
 branch is what's live.
 
+## Admin Portal
+https://high-frontier-fan-game.fly.dev/admin
+
 ## Features
 
 - 1–5 player solar system race for water, factories, and glory
