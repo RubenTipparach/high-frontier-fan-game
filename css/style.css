@@ -423,6 +423,49 @@ label.checkbox input { accent-color: var(--accent-2); }
   padding: 6px 8px; border-bottom: 1px dashed var(--border);
 }
 .search-results li:last-child { border-bottom: none; }
+
+/* ===== Lobby view: compact + scrollable =====
+   body is overflow:hidden ("panels scroll inside themselves") so
+   without an inner scroll the lobby's stacked cards on mobile run off
+   the bottom with no way to reach Ended games / Global chat. Compact
+   the cards, rows, and global-chat so we waste less vertical space
+   too. */
+#view-lobby-list:not(.hidden) {
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+}
+#view-lobby-list .card { padding: 12px 14px; margin-bottom: 12px; }
+#view-lobby-list .card h2 { margin-bottom: 8px; }
+#view-lobby-list .lobby-list li,
+#view-lobby-list .invite-list li { padding: 8px 10px; gap: 8px; }
+#view-lobby-list .lobby-list li.empty,
+#view-lobby-list .invite-list li.empty { padding: 12px; font-size: 13px; }
+#view-lobby-list .chat-messages {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  max-height: 160px;
+  overflow-y: auto;
+  font-size: 13px;
+}
+#view-lobby-list .chat-messages li.empty {
+  text-align: center;
+  color: var(--ink-mute);
+  font-style: italic;
+}
+@media (max-width: 720px) {
+  /* On phones the side panel stacks under the open tables; let it span
+     the full width so it doesn't read as a half-empty column. */
+  #view-lobby-list .row { gap: 12px; }
+  #view-lobby-list .row > .side { width: 100%; }
+  #view-lobby-list .card { padding: 10px 12px; margin-bottom: 10px; }
+  #view-lobby-list .card h2 { font-size: 13px; margin-bottom: 6px; }
+  #view-lobby-list .lobby-list li,
+  #view-lobby-list .invite-list li { padding: 6px 8px; }
+}
 .search-results .seen {
   font-size: 11px; color: var(--ink-mute);
 }
