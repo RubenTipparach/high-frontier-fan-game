@@ -362,7 +362,7 @@ async function boot() {
     refreshLobbyList();
     refreshInvitesList();
     // Landing priority: a `?invite=` URL wins, then the last table /
-    // in-progress game the player was in, else fall back to Sandbox.
+    // in-progress game the player was in, else the lobby home view.
     const claimed = await maybeClaimInviteFromUrl();
     if (!claimed) {
       const resumed = await maybeResumeLobby();
