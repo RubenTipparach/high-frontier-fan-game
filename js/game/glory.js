@@ -35,6 +35,8 @@
 //   addVps(delta, reason)               - additive (event d6 outcomes)
 //   onChange(cb)                        - unsubscribe
 
+import { isOnline } from './online-mode.js';
+
 const STORAGE_CHITS   = 'hf-glory-chits';
 const STORAGE_CLAIMED = 'hf-glory-claimed';
 const STORAGE_VISITED = 'hf-glory-visited';
@@ -86,6 +88,7 @@ let _vps = (() => {
 let _listeners = [];
 
 function persist() {
+  if (isOnline()) return;
   try {
     localStorage.setItem(STORAGE_CHITS,   JSON.stringify(_chits));
     localStorage.setItem(STORAGE_CLAIMED, JSON.stringify(_claimed));
@@ -97,6 +100,22 @@ function notify() {
   for (const cb of _listeners) {
     try { cb(); } catch (e) { console.error('glory listener:', e); }
   }
+}
+
+// Replace the in-memory glory state from a server snapshot. The
+// visited set is reconstructed from the passed array.
+export function hydrateGlory({ chits = [], claimed = [], visited = [], vps = 0 } = {}) {
+  let chitsCopy;
+  let claimedCopy;
+  try { chitsCopy = structuredClone(chits); }
+  catch { chitsCopy = JSON.parse(JSON.stringify(chits)); }
+  try { claimedCopy = structuredClone(claimed); }
+  catch { claimedCopy = JSON.parse(JSON.stringify(claimed)); }
+  _chits = Array.isArray(chitsCopy) ? chitsCopy : [];
+  _claimed = Array.isArray(claimedCopy) ? claimedCopy : [];
+  _visited = new Set(Array.isArray(visited) ? visited : []);
+  _vps = Number.isFinite(vps) ? vps : 0;
+  notify();
 }
 
 export function getChits()         { return _chits.slice(); }

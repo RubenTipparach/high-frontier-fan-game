@@ -31,6 +31,8 @@
 //                  every 2 turns" as specced
 //   0..3  = Blue, 4..7 = Yellow, 8..11 = Red
 
+import { isOnline } from './online-mode.js';
+
 const STORAGE_TURN   = 'hf-sandbox-turn';
 const STORAGE_ROUND  = 'hf-sandbox-round';
 const STORAGE_EVT    = 'hf-sandbox-last-event';
@@ -179,6 +181,7 @@ let _discardsRemaining = (() => {
 let _listeners = [];
 
 function persist() {
+  if (isOnline()) return;
   try {
     localStorage.setItem(STORAGE_TURN,   String(_turn));
     localStorage.setItem(STORAGE_ROUND,  String(_round));
@@ -193,6 +196,24 @@ function notify() {
   for (const cb of _listeners) {
     try { cb(); } catch (e) { console.error('turn-clock listener:', e); }
   }
+}
+
+// Replace the in-memory clock state from a server snapshot.
+export function hydrateClock({
+  turn = 0,
+  round = 1,
+  lastEvent = null,
+  opsRemaining = 0,
+  movesRemaining = 0,
+  discardsRemaining = 0,
+} = {}) {
+  _turn = turn;
+  _round = round;
+  _lastEvent = lastEvent;
+  _opsRemaining = opsRemaining;
+  _movesRemaining = movesRemaining;
+  _discardsRemaining = discardsRemaining;
+  notify();
 }
 
 export function getTurn()  { return _turn;  }

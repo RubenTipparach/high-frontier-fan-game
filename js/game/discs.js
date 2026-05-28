@@ -17,6 +17,8 @@
 // Disc records are intentionally tiny so they JSON-serialise into
 // localStorage without bloat.
 
+import { isOnline } from './online-mode.js';
+
 const STORAGE_DISCS = 'hf-sandbox-prospect-discs';
 
 // Placeholder "player colour" for the sandbox - matches the
@@ -36,6 +38,7 @@ let _discs = (() => {
 let _listeners = [];
 
 function persist() {
+  if (isOnline()) return;
   try {
     if (Object.keys(_discs).length) {
       localStorage.setItem(STORAGE_DISCS, JSON.stringify(_discs));
@@ -48,6 +51,15 @@ function notify() {
   for (const cb of _listeners) {
     try { cb(); } catch (e) { console.error('discs listener:', e); }
   }
+}
+
+// Replace the in-memory disc map from a server snapshot.
+export function hydrateDiscs(discs = {}) {
+  let copy;
+  try { copy = structuredClone(discs); }
+  catch { copy = JSON.parse(JSON.stringify(discs)); }
+  _discs = (copy && typeof copy === 'object') ? copy : {};
+  notify();
 }
 
 export function getDiscs()        { return { ..._discs }; }

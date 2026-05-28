@@ -27,6 +27,7 @@
 import { PATENTS_BY_ID } from '../../data/patents.js';
 import { CREW_BY_ID } from '../../data/crew.js';
 import { SOLAR_ZONE_INFO } from '../../data/sites.js';
+import { isOnline } from './online-mode.js';
 
 // Crew can act as the ship's thruster OR its robonaut
 // (prospector). Crew records have a different shape than patents
@@ -167,6 +168,7 @@ let _listeners = [];
 let _aquaListeners = [];
 
 function persist() {
+  if (isOnline()) return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(_stack));
     if (_activeThrusterId)   localStorage.setItem(ACTIVE_KEY,     _activeThrusterId);
@@ -191,6 +193,31 @@ function notify() {
   for (const cb of _listeners) {
     try { cb(); } catch (err) { console.error('rocket listener:', err); }
   }
+}
+
+// Deep-copy helper for hydration: structuredClone when available,
+// JSON round-trip otherwise.
+function _clone(x) {
+  try { return structuredClone(x); }
+  catch { return JSON.parse(JSON.stringify(x)); }
+}
+
+// Replace the in-memory rocket state from a server snapshot. Does
+// NOT touch the aqua var (aqua has its own setter / listener and is
+// not part of the multiplayer snapshot here).
+export function hydrateRocket({
+  stack = [],
+  activeThrusterId = null,
+  activeProspectorId = null,
+  tank = 0,
+  afterburnEngaged = false,
+} = {}) {
+  _stack = Array.isArray(stack) ? _clone(stack) : [];
+  _activeThrusterId = activeThrusterId;
+  _activeProspectorId = activeProspectorId;
+  _tankWater = tank;
+  _afterburnEngaged = !!afterburnEngaged;
+  notify();
 }
 
 export function getRocketStack() {

@@ -28,6 +28,8 @@
 // Slot shape: { id, kind, face? }. Same shape as the rocket and
 // outpost stack slots so cards can move between them freely.
 
+import { isOnline } from './online-mode.js';
+
 const STORAGE_CARDS = 'hf-sandbox-leo-cards';
 
 let _cards = (() => {
@@ -46,6 +48,7 @@ let _cards = (() => {
 let _listeners = [];
 
 function persist() {
+  if (isOnline()) return;
   try {
     localStorage.setItem(STORAGE_CARDS, JSON.stringify(_cards));
   } catch { /* private mode */ }
@@ -54,6 +57,15 @@ function notify() {
   for (const cb of _listeners) {
     try { cb(); } catch (err) { console.error('leo-stack listener:', err); }
   }
+}
+
+// Replace the in-memory LEO stack from a server snapshot.
+export function hydrateLeo(cards = []) {
+  let copy;
+  try { copy = structuredClone(cards); }
+  catch { copy = JSON.parse(JSON.stringify(cards)); }
+  _cards = Array.isArray(copy) ? copy : [];
+  notify();
 }
 
 export function getLeoCards() {
