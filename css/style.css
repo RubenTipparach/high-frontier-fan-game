@@ -277,7 +277,13 @@ code {
 
 /* ===== Main layout ===== */
 
-#main { padding: 20px; max-width: 1200px; margin: 0 auto; }
+/* #main is the page shell: full viewport width with breathing-room
+   padding. Views that prefer a narrower column constrain themselves
+   below (the signin card uses .card.narrow; create-lobby + lobby
+   detail get an explicit max-width so a wide monitor doesn't stretch
+   their forms across the whole screen). */
+#main { padding: 20px 28px; margin: 0 auto; }
+#view-create-lobby, #view-lobby { max-width: 720px; margin: 0 auto; }
 .view { animation: fade 0.18s; }
 @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
@@ -506,11 +512,11 @@ label.checkbox input { accent-color: var(--accent-2); }
 #view-lobby-list .chat-messages {
   list-style: none;
   margin: 0 0 8px;
-  padding: 6px 8px;
+  padding: 8px 12px;
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: 6px;
-  max-height: 180px;
+  max-height: 260px;
   overflow-y: auto;
   font-size: 13px;
 }
@@ -542,6 +548,22 @@ label.checkbox input { accent-color: var(--accent-2); }
   #view-lobby-list .lobby-list li,
   #view-lobby-list .invite-list li { padding: 6px 8px; }
   .invites-popover { max-width: none; }
+  #main { padding: 14px 12px; }
+}
+
+/* Phones: backdrop-filter blur is GPU-heavy and the FAB is always
+   on-screen, so the lobby + menu overlays felt laggy on mobile. Drop
+   the blur entirely below 720px; the dark backgrounds still provide
+   enough contrast. */
+@media (max-width: 720px) {
+  .main-menu-fab,
+  .main-menu-overlay,
+  .map-search-backdrop,
+  .card-modal-overlay,
+  .game-auction,
+  .mp-auction-overlay {
+    backdrop-filter: none;
+  }
 }
 .search-results .seen {
   font-size: 11px; color: var(--ink-mute);
