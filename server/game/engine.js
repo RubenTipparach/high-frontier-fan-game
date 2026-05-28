@@ -664,6 +664,14 @@ function applyPickCrew(state, op, ctx) {
   if (!card) return fail('unknown_crew');
   const faceData = card.faces && card.faces[face];
   if (!faceData) return fail('unknown_crew_face');
+  // Each crew card carries one of the six PLAYER_COLORS (the
+  // faction band colour). The player's assigned seat colour pins
+  // them to that card - both faces of that card are valid picks,
+  // every other card is forbidden. Reject mismatches so a client
+  // bug can't bypass the colour gate.
+  if (card.color && player.color && card.color !== player.color) {
+    return fail('wrong_crew_colour');
+  }
   player.faction = { cardId, face };
   // Spawn the crew card in the LEO Stack (the per-player parking
   // lot at LEO, distinct from the flying rocket). Mirrors the

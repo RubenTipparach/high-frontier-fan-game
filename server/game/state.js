@@ -33,6 +33,7 @@
 // slot in without a schema migration.
 
 import { PATENTS } from '../../data/patents.js';
+import { CREW } from '../../data/crew.js';
 import { makeRng, shuffle } from './rng.js';
 import { startSiteId } from './graph.js';
 
@@ -70,10 +71,12 @@ export const DECK_TYPES = [
   'thruster', 'reactor', 'radiator', 'refinery', 'robonaut', 'generator',
 ];
 
-// Per-seat marker colours (first six seats; cycles after that).
-export const PLAYER_COLORS = [
-  '#facc15', '#38bdf8', '#f87171', '#a78bfa', '#34d399', '#fb923c',
-];
+// Per-seat marker colours = the six crew-card colours. Each crew
+// card is associated with one of these slots; a player assigned
+// colour X must pick a crew face from the card whose `color === X`.
+// Sourced from data/crew.js so the two stay in lockstep (if a crew
+// colour ever changes there, this list updates automatically).
+export const PLAYER_COLORS = CREW.map((c) => c.color);
 
 // Build the six shuffled patent decks from a seeded generator. Mirrors
 // js/game/decks.js#buildShuffledFresh but driven by the game's RNG so

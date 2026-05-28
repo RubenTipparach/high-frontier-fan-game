@@ -349,8 +349,16 @@ function maybePromptCrewPick(snapshot) {
   const myp = (snapshot.players || []).find((p) => p.profileId === myId);
   if (!myp || myp.faction) return;
   _crewWizardOpen = true;
+  // Server assigns each player one of the six crew-card colours at
+  // game create. The wizard filters down to the two faces of the
+  // crew card matching that colour - both faces are legal picks
+  // (it's a single double-sided card), everything else is locked.
+  const desc = myp.color
+    ? 'Your faction colour is locked in by the server. Pick one of the two faces of your crew card.'
+    : 'Pick your starting faction. Every player chooses one before play; your pick is permanent for this session.';
   openCrewWizard({
-    description: 'Pick your starting faction. Every player chooses one before play; your pick is permanent for this session.',
+    description: desc,
+    restrictToColor: myp.color || null,
     onCommit: ({ cardId, face }) => {
       submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
     },
@@ -1009,6 +1017,7 @@ function humanizeOnlineOpError(code) {
     crew_already_picked: 'You have already picked your starting crew.',
     unknown_crew: 'That crew card does not exist.',
     unknown_crew_face: 'Pick the primary or secondary face.',
+    wrong_crew_colour: 'That crew card is not your assigned colour.',
     auction_in_progress: 'An auction is already underway.',
     need_opponent: 'Need another player to hold an auction.',
     no_ops_left: 'No operations left this turn.',
@@ -10258,7 +10267,7 @@ function openCrewWizard(arg, maybeOnDone) {
   // Back-compat: openCrewWizard(onDoneFn) keeps working.
   const opts = typeof arg === 'function' ? { onDone: arg } : (arg || {});
   if (maybeOnDone) opts.onDone = maybeOnDone;
-  const { onDone, onCommit, description } = opts;
+  const { onDone, onCommit, description, restrictToColor } = opts;
 
   document.querySelector('.crew-wizard-overlay')?.remove();
   let selected = null; // { cardId, face }
@@ -10322,9 +10331,17 @@ function openCrewWizard(arg, maybeOnDone) {
       </div>
     `;
     // Show the actual crew cards (the 12 single-face faction
-    // faces), each a selectable tile.
+    // faces), each a selectable tile. In multiplayer the server
+    // assigns each player one of the six PLAYER_COLORS (which
+    // map 1:1 to the six crew cards), and the player can only
+    // pick from the two faces of the card matching their colour
+    // (restrictToColor). Solo mode passes no restriction and
+    // sees every face.
     const grid = dialog.querySelector('.crew-faction-grid');
-    for (const c of CREW_FACES) {
+    const faces = restrictToColor
+      ? CREW_FACES.filter((c) => c.color === restrictToColor)
+      : CREW_FACES;
+    for (const c of faces) {
       const isSel = selected && selected.cardId === c.srcId && selected.face === c.face;
       const tile = document.createElement('div');
       tile.className = 'crew-faction-card' + (isSel ? ' is-selected' : '');
