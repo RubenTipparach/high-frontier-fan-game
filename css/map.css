@@ -2445,6 +2445,60 @@ body:has(#view-browse:not(.hidden)) #main {
   cursor: not-allowed;
 }
 
+/* Multiplayer turn banner. Sits flush on top of the hand strip,
+   spanning the same width (so it slides with the sidepanel open /
+   closed in lockstep with .sandbox-hand). Hidden in solo mode;
+   js/game/browse.js#syncMpTurnBanner flips it on in online mode
+   and rewrites the label per snapshot. The bottom edge tracks
+   the live --hand-height variable the grabber publishes so the
+   banner stays glued to the top of the hand as the player
+   resizes it. */
+.mp-turn-banner {
+  position: absolute;
+  left: 0;
+  right: 388px;
+  bottom: var(--hand-height, 320px);
+  z-index: 4;
+  background: #000;
+  color: #fff;
+  font-weight: 900;
+  font-size: 22px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  border-bottom: 2px solid var(--border);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 0 #000;
+  transition: right 0.22s ease, background 0.18s ease, color 0.18s ease;
+}
+.mp-turn-banner[hidden] { display: none !important; }
+.mp-turn-banner.is-your-turn {
+  /* Distinct glow when it's the local player's turn so it
+     reads instantly even from a phone-arm's-length away. */
+  background: #000;
+  color: #6cf28a;
+  text-shadow: 0 0 12px rgba(108, 242, 138, 0.55), 0 0 2px #000;
+}
+.browse-sidepanel[data-active=""] ~ .mp-turn-banner { right: 48px; }
+.browse-sidepanel[data-active]:not([data-active=""]) ~ .mp-turn-banner {
+  right: 380px;
+}
+.browse-sidepanel[data-active="patents"]:not([data-active=""]) ~ .mp-turn-banner {
+  right: min(620px, 80vw);
+}
+@media (max-width: 720px) {
+  .mp-turn-banner {
+    right: 0 !important;
+    font-size: 18px;
+    letter-spacing: 1.5px;
+    padding: 8px 12px;
+  }
+  .browse-sidepanel[data-active=""] ~ .mp-turn-banner { right: 0 !important; }
+  .browse-sidepanel[data-active] ~ .mp-turn-banner { right: 0 !important; }
+}
+
 /* Sandbox hand strip: a horizontal panel anchored at the
    bottom of the map area. Holds the cards the player has
    dragged out of the patent deck to build a tentative rocket.

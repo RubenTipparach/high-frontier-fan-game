@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>High Frontier - fan game</title>
     <link rel="stylesheet" href="./css/style.css?v=12" />
-    <link rel="stylesheet" href="./css/map.css?v=19" />
+    <link rel="stylesheet" href="./css/map.css?v=20" />
     <link rel="stylesheet" href="./css/cards.css?v=4" />
     <!--
       API base URL for the High Frontier companion server. Empty string
@@ -313,6 +313,16 @@
               </div>
             </div>
           </aside>
+
+          <!--
+            Multiplayer turn banner. Sits just above the hand strip,
+            anchored to the bottom of the browse-shell. Shows
+            "YOUR TURN" (green) when it's the local player's turn,
+            or "@<name>'s turn" otherwise. Hidden in solo mode and
+            wired by js/game/browse.js#syncMpTurnBanner.
+          -->
+          <div id="mp-turn-banner" class="mp-turn-banner" hidden
+            role="status" aria-live="polite"></div>
 
           <!--
             Sandbox hand strip: a thin panel anchored at the bottom

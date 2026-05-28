@@ -326,8 +326,39 @@ function applySnapshot(snapshot) {
   // Refresh the multiplayer table panel (room / turn / roster) from the
   // same snapshot so opponents' positions + resources stay live.
   renderMpPanel(snapshot);
+  // Big black turn banner above the hand. Mirrors the same source-of-
+  // truth (snapshot.activeIndex) the panel uses so the two never drift.
+  syncMpTurnBanner(snapshot);
   // Competitive auction overlay is wired separately (see the TODO hook).
   renderOnlineAuction(snapshot.auction);
+}
+
+// Big bold "YOUR TURN" / "@<name>'s turn" banner anchored above the
+// hand strip. Visible only in online mode; hidden otherwise so solo
+// play doesn't show a stale label.
+function syncMpTurnBanner(snapshot) {
+  const banner = document.getElementById('mp-turn-banner');
+  if (!banner) return;
+  if (!_online || !snapshot || !Array.isArray(snapshot.players)) {
+    banner.hidden = true;
+    banner.classList.remove('is-your-turn');
+    banner.textContent = '';
+    return;
+  }
+  const active = snapshot.players[snapshot.activeIndex] || null;
+  const myId = _onlineMe && _onlineMe.id;
+  const myTurn = !!(active && active.profileId === myId);
+  if (!active) {
+    banner.textContent = 'Waiting…';
+    banner.classList.remove('is-your-turn');
+  } else if (myTurn) {
+    banner.textContent = 'Your turn';
+    banner.classList.add('is-your-turn');
+  } else {
+    banner.textContent = '@' + active.name + "'s turn";
+    banner.classList.remove('is-your-turn');
+  }
+  banner.hidden = false;
 }
 
 // Competitive multiplayer auction overlay. The sandbox's solo auction
@@ -979,6 +1010,12 @@ export function unmountBrowseOnline() {
   _deckPickerOpen = false;
   const auctionOverlay = document.getElementById('mp-auction-overlay');
   if (auctionOverlay) auctionOverlay.remove();
+  const banner = document.getElementById('mp-turn-banner');
+  if (banner) {
+    banner.hidden = true;
+    banner.classList.remove('is-your-turn');
+    banner.textContent = '';
+  }
   syncMpTabVisibility();
 }
 
