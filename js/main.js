@@ -1,6 +1,6 @@
 // Bootstrap and top-level UI coordination.
 
-import { probeServer, apiAvailable, lookupInviteLink, claimInviteLink, getLobby } from './api.js';
+import { probeServer, apiAvailable, lookupInviteLink, claimInviteLink } from './api.js';
 import {
   restoreProfile, activeProfile, signIn, signOut, mintDeviceCode,
   onProfileChange,
@@ -13,7 +13,6 @@ import {
   initInvites, refreshInvitesList, subscribeInvitesForProfile,
 } from './invites.js';
 import { mountBrowse, isBrowseOnline } from './game/browse.js';
-import { loadLastLobbyId, saveLastLobbyId } from './storage.js';
 
 const VIEWS = [
   'view-signin', 'view-lobby-list', 'view-create-lobby', 'view-lobby',
@@ -304,37 +303,6 @@ async function maybeClaimInviteFromUrl() {
   return true;
 }
 
-// On boot, drop the player back into the last table they were at. If
-// its game is in progress this lands them straight in the game (the
-// lobby view mounts the game overlay when status is 'started'). Returns
-// true if it navigated; clears the stored id and returns false when the
-// table is gone or the player is no longer a member.
-async function maybeResumeLobby() {
-  const id = loadLastLobbyId();
-  console.log('[hf:boot] maybeResumeLobby: lastLobbyId =', id);
-  if (!id) return false;
-  const r = await getLobby(id);
-  if (!r.ok) {
-    console.log('[hf:boot] resume: getLobby failed (', r.error, ') - clearing lastLobbyId');
-    saveLastLobbyId(null);
-    return false;
-  }
-  const lobby = r.data.lobby;
-  const me = activeProfile();
-  const isMember = me && Array.isArray(lobby.members)
-    && lobby.members.some((m) => m.id === me.id);
-  console.log('[hf:boot] resume: lobby', lobby.id, 'status', lobby.status, 'isMember', isMember);
-  if (!isMember) { saveLastLobbyId(null); return false; }
-  await openLobby(lobby.id, { join: false });
-  toast(
-    lobby.status === 'started'
-      ? `Welcome back to multiplayer: ${lobby.name}`
-      : `Welcome back to the table: ${lobby.name}`,
-    'success',
-  );
-  return true;
-}
-
 function humanizeError(code) {
   return ({
     invalid_name: 'Name must be 3-20 letters/numbers/_/-.',
@@ -370,18 +338,15 @@ async function boot() {
     // Keep the multiplayer view populated for when the player switches.
     refreshLobbyList();
     refreshInvitesList();
-    // Landing priority: a `?invite=` URL wins, then the last table /
-    // in-progress game the player was in, else the lobby home view.
+    // Landing priority: a `?invite=` URL wins; otherwise always land on
+    // the lobby. Auto-resume is gone - a player can have several games
+    // going at once, so jumping straight into one is presumptuous. Each
+    // game has a Resume button in "Your games".
     const claimed = await maybeClaimInviteFromUrl();
     console.log('[hf:boot] inviteClaimed=', claimed);
     if (!claimed) {
-      const resumed = await maybeResumeLobby();
-      console.log('[hf:boot] gameResumed=', resumed);
-      if (!resumed) {
-        // No active game to resume - lobby is the home view.
-        console.log('[hf:boot] landing on lobby (default)');
-        showView('view-lobby-list');
-      }
+      console.log('[hf:boot] landing on lobby (default)');
+      showView('view-lobby-list');
     }
   } else {
     console.log('[hf:boot] no profile - going to signin');
