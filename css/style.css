@@ -476,13 +476,15 @@ label.checkbox input { accent-color: var(--accent-2); }
 }
 .lobby-menu-btn:hover { background: var(--accent); color: #062136; border-color: var(--accent-2); }
 
-/* Pending-invites chip + popover (anchored top-right of the action row). */
+/* Pending-invites chip + floating popover (top-right of the action
+   row). The popover is position:absolute relative to .invites-wrap so
+   it overlays page content instead of pushing the chat + games grid
+   down when it opens. */
+.invites-wrap { position: relative; margin-left: auto; }
 .invites-chip {
-  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-left: auto;
   padding: 6px 12px;
   font-size: 13px;
   background: var(--panel-2);
@@ -505,12 +507,17 @@ label.checkbox input { accent-color: var(--accent-2); }
 }
 .invites-chip.has-invites .invites-badge { background: var(--accent); color: #062136; }
 .invites-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 60;
+  min-width: 280px;
+  max-width: 360px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 12px;
-  margin: 0 0 12px auto;
-  max-width: 480px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
 }
 .invites-popover.hidden { display: none; }
 .invites-popover h3 {
@@ -580,7 +587,7 @@ body.in-lobby .main-menu-fab { display: none; }
   .lobby-games-grid { grid-template-columns: 1fr; gap: 10px; }
   .lobby-top { gap: 8px; }
   .lobby-top .claim-link input { width: 120px; }
-  .invites-chip { margin-left: 0; }
+  .invites-wrap { margin-left: 0; }
   #view-lobby-list .card { padding: 10px 12px; margin-bottom: 10px; }
   #view-lobby-list .card h2 { font-size: 13px; margin-bottom: 6px; }
   #view-lobby-list .lobby-list li,

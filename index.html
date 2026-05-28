@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>High Frontier - fan game</title>
-    <link rel="stylesheet" href="./css/style.css?v=11" />
+    <link rel="stylesheet" href="./css/style.css?v=12" />
     <link rel="stylesheet" href="./css/map.css?v=19" />
     <link rel="stylesheet" href="./css/cards.css?v=4" />
     <!--
@@ -91,16 +91,18 @@
               placeholder="invite code" autocapitalize="off" spellcheck="false" />
             <button type="submit">Join</button>
           </form>
-          <button id="btn-pending-invites" class="invites-chip" type="button"
-            title="Pending invites" aria-label="Pending invites">
-            🔔 <span id="pending-invites-count" class="invites-badge">0</span>
-          </button>
-        </div>
-        <div id="pending-invites-popover" class="invites-popover hidden">
-          <h3>Pending invites</h3>
-          <ul id="invite-list" class="invite-list">
-            <li class="empty">No pending invites.</li>
-          </ul>
+          <div class="invites-wrap">
+            <button id="btn-pending-invites" class="invites-chip" type="button"
+              title="Pending invites" aria-label="Pending invites">
+              🔔 <span id="pending-invites-count" class="invites-badge">0</span>
+            </button>
+            <div id="pending-invites-popover" class="invites-popover hidden">
+              <h3>Pending invites</h3>
+              <ul id="invite-list" class="invite-list">
+                <li class="empty">No pending invites.</li>
+              </ul>
+            </div>
+          </div>
         </div>
         <div class="card global-chat">
           <h2>Global chat</h2>
