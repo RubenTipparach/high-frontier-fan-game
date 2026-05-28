@@ -1069,6 +1069,8 @@ wss.on('connection', (ws) => {
 // matches the caller. Anything else is rejected so a randomly
 // generated channel name can't be used as a covert pubsub.
 function isValidChannel(channel, profile) {
+  // Global chat: any signed-in profile can subscribe.
+  if (channel === 'global') return true;
   const m = /^lobby:(\d+)$/.exec(channel);
   if (m) {
     const lobbyId = Number(m[1]);

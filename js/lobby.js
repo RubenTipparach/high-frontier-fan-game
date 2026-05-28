@@ -7,7 +7,7 @@ import {
   setReady, startLobby, claimInviteLink, lookupInviteLink,
   fetchGlobalChat, sendGlobalChat,
 } from './api.js';
-import { activeProfile } from './auth.js';
+import { activeProfile, onProfileChange } from './auth.js';
 import { ws } from './ws.js';
 import { saveLastLobbyId } from './storage.js';
 import { mountChat, unmountChat } from './chat.js';
@@ -91,18 +91,29 @@ export function initLobby({ onShowView, onToast }) {
 // Global chat (lobby list). Posts via /chat/global, subscribes to the
 // 'global' WS channel for live broadcasts. Mounted once at init; the
 // list element + form live in index.html under .global-chat.
+//
+// Timing note: initLobby runs BEFORE restoreProfile() in boot(), so the
+// initial activeProfile() is null. The form / live listener wire up
+// immediately (cheap), and the history fetch is deferred until a
+// profile actually arrives via onProfileChange so we don't silently
+// no-op the backfill.
 function mountGlobalChat() {
   const form = document.getElementById('global-chat-form');
   const input = document.getElementById('global-chat-input');
   const list = document.getElementById('global-chat-messages');
   if (!form || !input || !list) return;
 
+  // Track which message ids we've already rendered so the live WS echo
+  // doesn't double-print messages we just optimistically appended.
+  const seenIds = new Set();
   const append = (msg) => {
     if (!msg) return;
-    // Remove the empty-state placeholder once a real message arrives.
+    if (msg.id != null && seenIds.has(msg.id)) return;
+    if (msg.id != null) seenIds.add(msg.id);
     const empty = list.querySelector('.empty');
     if (empty) empty.remove();
     const li = document.createElement('li');
+    if (msg.id != null) li.dataset.mid = String(msg.id);
     const who = document.createElement('span');
     who.className = 'chat-who';
     who.textContent = '@' + (msg.profileName || '?') + ':';
@@ -114,8 +125,10 @@ function mountGlobalChat() {
     list.scrollTop = list.scrollHeight;
   };
 
-  // Live broadcasts. Subscribed unconditionally - the channel only
-  // receives global chat traffic, so it's cheap.
+  // Live broadcasts. Subscribed unconditionally; ws.subscribe queues
+  // the channel and the WS layer replays it whenever a connection
+  // (re)establishes. lobbyId == null narrows to global-only echoes
+  // so per-lobby chat traffic doesn't bleed in here.
   ws.subscribe('global');
   ws.on('chat', (msg) => {
     if (!msg || !msg.message || msg.message.lobbyId != null) return;
@@ -136,40 +149,35 @@ function mountGlobalChat() {
     if (!r || !r.ok) {
       _onToast('Could not send global chat.', 'error');
       input.value = body;
+      return;
     }
-    // Optimistic local append on success; live broadcast may also
-    // echo to this client - dedupe by message id.
-    if (r && r.ok && r.data && r.data.message) {
-      const m = r.data.message;
-      if (!list.querySelector(`li[data-mid="${m.id}"]`)) {
-        const li = document.createElement('li');
-        li.dataset.mid = String(m.id);
-        const who = document.createElement('span');
-        who.className = 'chat-who';
-        who.textContent = '@' + (m.profileName || profile.name) + ':';
-        const body2 = document.createElement('span');
-        body2.className = 'chat-body';
-        body2.textContent = ' ' + m.body;
-        li.append(who, body2);
-        const empty = list.querySelector('.empty');
-        if (empty) empty.remove();
-        list.appendChild(li);
-        list.scrollTop = list.scrollHeight;
-      }
-    }
+    // Optimistic local append; the WS echo will arrive too but
+    // append() dedupes by message id via seenIds.
+    if (r.data && r.data.message) append(r.data.message);
   });
 
-  // Backfill recent history once the user is signed in. Re-runs on
-  // every visit to view-lobby-list aren't required since the list
-  // is in the DOM permanently; we just fetch once at init.
-  (async () => {
+  // Backfill recent history every time a profile becomes available
+  // (covers boot, sign-in, and re-sign-in after signout). Wipes the
+  // seenIds set so a fresh backfill isn't blocked by stale ids.
+  let _historyFetching = false;
+  const loadHistory = async () => {
     const profile = activeProfile();
-    if (!profile) return;
-    const r = await fetchGlobalChat({}, profile.token);
-    if (r && r.ok && r.data && Array.isArray(r.data.entries)) {
-      for (const m of r.data.entries) append(m);
+    if (!profile || _historyFetching) return;
+    _historyFetching = true;
+    try {
+      const r = await fetchGlobalChat({}, profile.token);
+      if (r && r.ok && r.data && Array.isArray(r.data.entries)) {
+        for (const m of r.data.entries) append(m);
+      }
+    } finally {
+      _historyFetching = false;
     }
-  })();
+  };
+  loadHistory();
+  onProfileChange((profile) => {
+    if (!profile) return;
+    loadHistory();
+  });
 }
 
 export async function refreshLobbyList() {
