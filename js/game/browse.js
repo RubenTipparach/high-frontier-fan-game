@@ -582,6 +582,10 @@ function buildMpAuctionControls(host, a, { auctioneer, highBidder }) {
     const bidBtn = document.createElement('button');
     bidBtn.type = 'button';
     bidBtn.className = 'modal-btn primary';
+    // Initial text so a render that beats sync() (or a CSS that
+    // accidentally hides the dynamic update) still shows the label.
+    // sync() rewrites this to "Bid <N>" when there's a valid amount.
+    bidBtn.textContent = 'Bid';
     const passBtn = document.createElement('button');
     passBtn.type = 'button';
     passBtn.className = 'modal-btn';
@@ -650,6 +654,7 @@ function buildMpAuctionControls(host, a, { auctioneer, highBidder }) {
   const joinBtn = document.createElement('button');
   joinBtn.type = 'button';
   joinBtn.className = 'modal-btn';
+  joinBtn.textContent = 'Join';
   const sync = () => {
     const v = parseInt(input.value, 10);
     const okAmt = Number.isInteger(v) && v >= minJoin && v <= myAqua;
