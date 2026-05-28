@@ -342,12 +342,21 @@ function syncMpTurnBanner(snapshot) {
   if (!_online || !snapshot || !Array.isArray(snapshot.players)) {
     banner.hidden = true;
     banner.classList.remove('is-your-turn');
+    banner.style.removeProperty('--mp-turn-color');
     banner.textContent = '';
     return;
   }
   const active = snapshot.players[snapshot.activeIndex] || null;
   const myId = _onlineMe && _onlineMe.id;
   const myTurn = !!(active && active.profileId === myId);
+  // Stripe colour = the active player's server-assigned seat colour
+  // (PLAYER_COLORS in server/game/state.js). Same colour the roster dot
+  // uses, so the banner becomes a giant glance-version of the dot.
+  if (active && active.color) {
+    banner.style.setProperty('--mp-turn-color', active.color);
+  } else {
+    banner.style.removeProperty('--mp-turn-color');
+  }
   if (!active) {
     banner.textContent = 'Waiting…';
     banner.classList.remove('is-your-turn');
@@ -1014,6 +1023,7 @@ export function unmountBrowseOnline() {
   if (banner) {
     banner.hidden = true;
     banner.classList.remove('is-your-turn');
+    banner.style.removeProperty('--mp-turn-color');
     banner.textContent = '';
   }
   syncMpTabVisibility();

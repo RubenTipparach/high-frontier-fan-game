@@ -2462,16 +2462,23 @@ body:has(#view-browse:not(.hidden)) #main {
   background: #000;
   color: #fff;
   font-weight: 900;
-  font-size: 22px;
+  font-size: 11px;
   letter-spacing: 2px;
   text-transform: uppercase;
   text-align: center;
-  padding: 10px 16px;
+  padding: 6px 12px;
   border-top: 1px solid var(--border);
   border-bottom: 2px solid var(--border);
+  /* Active player's seat colour, set as --mp-turn-color from
+     syncMpTurnBanner. Renders as a left + right colour stripe so
+     you can identify whose turn it is at a glance, even before
+     reading the name. Falls back to white if no colour is set. */
+  border-left: 4px solid var(--mp-turn-color, #fff);
+  border-right: 4px solid var(--mp-turn-color, #fff);
   font-variant-numeric: tabular-nums;
   text-shadow: 0 1px 0 #000;
-  transition: right 0.22s ease, background 0.18s ease, color 0.18s ease;
+  transition: right 0.22s ease, background 0.18s ease, color 0.18s ease,
+    border-color 0.18s ease;
 }
 .mp-turn-banner[hidden] { display: none !important; }
 .mp-turn-banner.is-your-turn {
@@ -2491,9 +2498,9 @@ body:has(#view-browse:not(.hidden)) #main {
 @media (max-width: 720px) {
   .mp-turn-banner {
     right: 0 !important;
-    font-size: 18px;
+    font-size: 9px;
     letter-spacing: 1.5px;
-    padding: 8px 12px;
+    padding: 5px 10px;
   }
   .browse-sidepanel[data-active=""] ~ .mp-turn-banner { right: 0 !important; }
   .browse-sidepanel[data-active] ~ .mp-turn-banner { right: 0 !important; }
