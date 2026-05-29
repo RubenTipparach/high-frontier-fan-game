@@ -833,6 +833,26 @@ app.post('/lobbies/:id/invite-link', requireProfile, (req, res) => {
 // "Join '<lobby name>' hosted by @X?". Anonymous: a fresh visitor with
 // no profile yet can still see the lobby name and create a profile
 // before claiming.
+// Resolve a lobby by its short share code. Public (no auth) so the
+// ?room=<code> URL bootstrap can find the lobby id before sign-in
+// kicks in - same posture as GET /invites/links/:code below.
+// Cancelled lobbies are excluded so a stale URL doesn't keep a
+// player tied to a dead game.
+app.get('/lobbies/by-code/:code', (req, res) => {
+  const code = String(req.params.code || '').toUpperCase();
+  const row = db
+    .prepare(
+      `SELECT id, code, name, status
+       FROM lobbies
+       WHERE code = ? AND status != 'cancelled'`
+    )
+    .get(code);
+  if (!row) return res.status(404).json({ error: 'not_found' });
+  res.json({
+    id: row.id, code: row.code, name: row.name, status: row.status,
+  });
+});
+
 app.get('/invites/links/:code', (req, res) => {
   const code = String(req.params.code || '').toLowerCase();
   const row = db

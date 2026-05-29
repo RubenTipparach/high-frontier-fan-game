@@ -1,6 +1,6 @@
 // Bootstrap and top-level UI coordination.
 
-import { probeServer, apiAvailable, lookupInviteLink, claimInviteLink } from './api.js';
+import { probeServer, apiAvailable, lookupInviteLink, claimInviteLink, getLobbyByCode } from './api.js';
 import {
   restoreProfile, activeProfile, signIn, signOut, mintDeviceCode,
   onProfileChange,
@@ -290,6 +290,32 @@ async function afterSignIn() {
 }
 
 // Returns true if it navigated the user into a lobby (so the caller
+// ?room=<code>: a fresh page load (refresh, restored tab, WS-lost
+// reconnect) that carries the lobby's 6-char share code re-opens
+// the lobby instead of dropping the player on the lobby list.
+// Returns true on a successful openLobby (caller skips the lobby-
+// list fallback), false otherwise.
+async function maybeResumeRoomFromUrl() {
+  const url = new URL(window.location.href);
+  const code = url.searchParams.get('room');
+  if (!code) return false;
+  try {
+    const r = await getLobbyByCode(code);
+    if (!r || !r.ok || !r.data || !r.data.id) {
+      // Stale code (lobby cancelled or 404). Clear it so we don't
+      // keep trying on every load.
+      url.searchParams.delete('room');
+      window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+      return false;
+    }
+    await openLobby(r.data.id, { join: false });
+    return true;
+  } catch (err) {
+    console.error('[hf:boot] room resume failed:', err);
+    return false;
+  }
+}
+
 // skips the resume / sandbox fallback).
 async function maybeClaimInviteFromUrl() {
   const url = new URL(window.location.href);
@@ -356,8 +382,18 @@ async function boot() {
     const claimed = await maybeClaimInviteFromUrl();
     console.log('[hf:boot] inviteClaimed=', claimed);
     if (!claimed) {
-      console.log('[hf:boot] landing on lobby (default)');
-      showView('view-lobby-list');
+      // ?room=<code> URL bootstrap: a refresh / reconnect drops the
+      // player back into the same lobby instead of the lobby list.
+      // setRoomInUrl in lobby.js writes the param when openLobby
+      // succeeds, and clears it on leaveCurrent. Failure (lobby
+      // cancelled, code stale, network error) falls through to the
+      // default landing.
+      const resumed = await maybeResumeRoomFromUrl();
+      console.log('[hf:boot] roomResumed=', resumed);
+      if (!resumed) {
+        console.log('[hf:boot] landing on lobby (default)');
+        showView('view-lobby-list');
+      }
     }
   } else {
     console.log('[hf:boot] no profile - going to signin');

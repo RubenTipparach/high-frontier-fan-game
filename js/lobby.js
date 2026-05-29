@@ -424,6 +424,13 @@ export async function enterLobby(lobby) {
   _activeLobby = lobby;
   saveLastLobbyId(lobby.id);
   renderLobby(lobby);
+  // Encode the lobby's 6-char share code in the URL so a refresh or
+  // a reconnection-loss puts the player back HERE instead of the
+  // lobby list (user 2026-05-29: "encode game room in url string ...
+  // if connection is lost the player isnt just booted back to the
+  // lobby or if a refresh happens they arent booted to the lobby").
+  // Boot reads ?room=<code> and re-opens this lobby.
+  if (lobby.code) setRoomInUrl(lobby.code);
   // WS subscription so chat + roster updates land immediately.
   const channel = 'lobby:' + lobby.id;
   ws.subscribe(channel);
@@ -541,8 +548,20 @@ function leaveCurrent() {
   unmountInvitesUI();
   _activeLobby = null;
   saveLastLobbyId(null);
+  setRoomInUrl(null);
   _onShowView('view-lobby-list');
   refreshLobbyList();
+}
+
+// Push / clear the ?room=<code> search param without triggering a
+// navigation. Centralised so openLobby + leaveCurrent stay in sync.
+function setRoomInUrl(code) {
+  try {
+    const url = new URL(window.location.href);
+    if (code) url.searchParams.set('room', String(code).toUpperCase());
+    else url.searchParams.delete('room');
+    window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+  } catch { /* private mode / file:// scheme */ }
 }
 
 async function onReadyClick() {
