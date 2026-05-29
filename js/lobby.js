@@ -16,6 +16,14 @@ import { mountBrowse, unmountBrowseOnline } from './game/browse.js';
 
 let _activeLobby = null;
 let _unsubWS = null;
+// Polling fallback for the lobby view: WS push of lobby_update is
+// the primary path, but if the WS is unreachable (user 2026-05-29:
+// "Firefox can't establish a connection to the server at wss://...")
+// or a broadcast is dropped, the other player wouldn't see the host's
+// Start click. Same doctrine as the in-game polling (CLAUDE.md):
+// poll on an interval, cache the last snapshot.
+let _lobbyPoll = null;
+const LOBBY_POLL_MS = 3000;
 let _onShowView = null;
 let _onToast = null;
 let _gameMounted = false;
@@ -431,6 +439,23 @@ export async function enterLobby(lobby) {
     leaveCurrent();
   });
   _unsubWS = () => { offUpdate(); offDisband(); ws.unsubscribe(channel); };
+  // Polling fallback. The host's Start click writes lobby.status =
+  // 'started' on the server and broadcasts lobby_update on WS; if
+  // the other player's WS is down (Firefox failing the wss handshake,
+  // tab backgrounded, server hiccup) the broadcast vanishes and the
+  // lobby view sits on 'waiting' forever. Re-fetch the lobby every
+  // LOBBY_POLL_MS while in this view and re-apply via renderLobby -
+  // renderLobby is idempotent and will mount the game view itself
+  // once status flips to 'started'. Cleared on leaveCurrent.
+  if (_lobbyPoll) clearInterval(_lobbyPoll);
+  _lobbyPoll = setInterval(async () => {
+    if (!_activeLobby || _activeLobby.id !== lobby.id) return;
+    const poll = await getLobby(lobby.id);
+    if (!poll || !poll.ok) return;
+    if (!_activeLobby || _activeLobby.id !== lobby.id) return;
+    _activeLobby = poll.data;
+    renderLobby(_activeLobby);
+  }, LOBBY_POLL_MS);
   mountChat(lobby);
   mountInvitesUI(lobby);
   // A started game lives in the sandbox view (renderLobby mounts it +
@@ -510,6 +535,7 @@ async function onLeaveLobby() {
 
 function leaveCurrent() {
   if (_unsubWS) { _unsubWS(); _unsubWS = null; }
+  if (_lobbyPoll) { clearInterval(_lobbyPoll); _lobbyPoll = null; }
   if (_gameMounted) { unmountBrowseOnline(); _gameMounted = false; }
   unmountChat();
   unmountInvitesUI();

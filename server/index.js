@@ -640,6 +640,12 @@ function publishGame(gameId, payload) {
 // Public live games: open-lobby games currently in 'active' status,
 // for the lobby-list "Live games" spectator section. Returns enough
 // per-row info to render the chip without an extra fetch.
+//
+// Games the caller is ALREADY playing in are excluded - they show up
+// under "Your games" instead, and listing them here just makes the
+// player think they have two tabs into the same table (user 2026-05-
+// 29: "if I'm in a game, do not show that game in the watch list,
+// its my game, thats confusing").
 app.get('/games/public', requireProfile, (req, res) => {
   const rows = db
     .prepare(
@@ -653,11 +659,16 @@ app.get('/games/public', requireProfile, (req, res) => {
        FROM games g
        JOIN lobbies l ON l.id = g.lobby_id
        JOIN profiles p ON p.id = l.host_id
-       WHERE g.status = 'active' AND l.join_policy = 'open'
+       WHERE g.status = 'active'
+         AND l.join_policy = 'open'
+         AND NOT EXISTS (
+           SELECT 1 FROM game_players gp
+           WHERE gp.game_id = g.id AND gp.profile_id = ?
+         )
        ORDER BY g.created_at DESC
        LIMIT 50`
     )
-    .all();
+    .all(req.profile.id);
   res.json({ entries: rows });
 });
 

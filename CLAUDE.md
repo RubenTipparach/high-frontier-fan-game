@@ -237,12 +237,30 @@ SQLite, and every REST operation is broadcast to any open WS clients.
 A player who walks away and comes back gets the same state by REST as
 if they'd been live the whole time.
 
-### Async-multiplayer doctrine - WS is not a guarantee
+### Async-multiplayer doctrine - WS is unreliable
 
-Because this is async multiplayer, the WebSocket connection is a
-best-effort optimisation, NOT a reliable transport. Mobile networks,
-backgrounded tabs, server hiccups, and proxy timeouts all silently
-drop broadcasts. The client MUST NOT assume a WS event implies the
+WebSocket is for **fast updates, NOT async play**. It is a
+best-effort optimisation that makes live sessions feel snappy; it
+is NOT a reliable transport and it is NOT how async-multiplayer
+events arrive at the other player. Treat every WS broadcast as a
+nice-to-have. Failure modes we've actually observed:
+
+- **Browsers fail the WSS handshake outright.** "Firefox can't
+  establish a connection to the server at wss://..." - the player
+  never receives any push for the whole session.
+- **Mobile networks silently drop frames.** Backgrounded tabs,
+  walking out of wifi range, captive portals - the socket stays
+  "open" but no data arrives.
+- **Server hiccups + proxy timeouts close the channel.** Reconnect
+  fires eventually but the missed broadcasts are gone.
+- **WS broadcasts cause desync.** A push that arrives at one player
+  but not another leaves the two clients showing different boards;
+  same for an op that the local client applied optimistically but
+  the server rejected. Any UX decision that "the broadcast will
+  arrive" is a bug waiting to fire.
+
+So: WS is a UX accelerator on top of REST. REST is the source of
+truth. The client MUST NOT assume a WS event implies the
 server's current state, and MUST NOT block a UX decision on
 "the broadcast will arrive". Concrete rules:
 
