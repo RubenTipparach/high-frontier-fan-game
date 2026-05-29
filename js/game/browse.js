@@ -233,6 +233,16 @@ const MP_AUCTION_DECKS = [
 
 export function isBrowseOnline() { return _online; }
 
+// True only while the game-room view is the on-screen view. The
+// crew-draft / auction overlays attach to document.body, so without
+// this gate a snapshot poll that arrives after the player walked back
+// to the lobby would re-create the overlay (or its minimized chip)
+// hovering over the lobby. They belong to the game room only.
+function gameViewVisible() {
+  const view = document.getElementById('view-browse');
+  return !!view && !view.classList.contains('hidden');
+}
+
 export function mountBrowse(opts = {}) {
   const view = document.getElementById('view-browse');
   if (!view) return;
@@ -577,7 +587,8 @@ function maybePromptCrewPick(snapshot) {
 // server flips draftPhase to 'play' and the overlay clears).
 function syncCrewDraftOverlay(snapshot) {
   const existing = document.getElementById('mp-crew-draft-overlay');
-  const drafting = !!(snapshot && snapshot.draftPhase === 'crew') && !_spectator;
+  const drafting = !!(snapshot && snapshot.draftPhase === 'crew') && !_spectator
+    && gameViewVisible();
   if (!drafting) {
     if (existing) existing.remove();
     return;
@@ -770,7 +781,7 @@ function syncMpTurnBanner(snapshot) {
 // on every update, clears when it resolves. Render is idempotent.
 function renderOnlineAuction(auction) {
   const existing = document.getElementById('mp-auction-overlay');
-  if (!auction || !_online) {
+  if (!auction || !_online || !gameViewVisible()) {
     if (existing) existing.remove();
     _auctionKey = null;
     _bidDraft = '';
