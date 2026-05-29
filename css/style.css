@@ -39,7 +39,10 @@ html, body {
     radial-gradient(circle at 20% 10%, #1b1238 0%, transparent 40%),
     radial-gradient(circle at 80% 80%, #102040 0%, transparent 50%),
     var(--bg);
-  background-attachment: fixed;
+  /* NOTE: no `background-attachment: fixed`. The body never scrolls
+     (overflow:hidden, inner panels own their scroll), so fixed gave no
+     visual benefit but forced a full-viewport gradient REPAINT on every
+     mobile scroll frame - the main cause of laggy lobby scrolling. */
   color: var(--ink);
   height: 100vh;
   overflow: hidden;     /* no page-level scroll; panels scroll
@@ -467,6 +470,10 @@ label.checkbox input { accent-color: var(--accent-2); }
   position: fixed;
   inset: 0;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;   /* momentum scroll on iOS */
+  overscroll-behavior: contain;        /* no scroll-chaining jank */
+  transform: translateZ(0);            /* own compositing layer - the body
+                                          gradient doesn't repaint under it */
   padding: 14px 24px 24px;
   box-sizing: border-box;
 }
@@ -481,6 +488,8 @@ label.checkbox input { accent-color: var(--accent-2); }
   inset: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  transform: translateZ(0);
   /* Wide enough for the 3-column grid (roster / chat / invite ~870px);
      the inherited 720px max-width clipped the invite column on desktop.
      margin:auto centres it; the grid already collapses to 1 column
