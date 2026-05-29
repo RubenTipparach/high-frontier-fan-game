@@ -56,6 +56,14 @@
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
 }
+/* In multiplayer the player's own seat colour (--me-color, set on the
+   browse-shell) frames their chrome so "I am this colour" is always
+   visible: a thick coloured underline on the top bar + a matching
+   top border + glow on the hand strip below. */
+.browse-shell.has-me-color .map-toolbar {
+  border-bottom: 3px solid var(--me-color);
+  box-shadow: inset 0 -3px 8px -4px var(--me-color);
+}
 /* Turn controls live on the LEFT of the toolbar (before search
    + route) so an open side panel - which covers the right edge -
    never hides them. Previous "padding-right when panel open"
@@ -2549,6 +2557,27 @@ body:has(#view-browse:not(.hidden)) #main {
   transition: right 0.22s ease;
   overflow: visible;
 }
+/* Seat-colour frame on the player's own hand strip (multiplayer). */
+.browse-shell.has-me-color .sandbox-hand {
+  border-top: 3px solid var(--me-color);
+  box-shadow: inset 0 3px 10px -5px var(--me-color);
+}
+.browse-shell.has-me-color .hand-title {
+  color: var(--me-color);
+}
+/* A colour dot before the hand title spells out "you are this colour"
+   even at a glance. */
+.browse-shell.has-me-color .hand-title::before {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--me-color);
+  margin-right: 6px;
+  vertical-align: middle;
+  box-shadow: 0 0 6px var(--me-color);
+}
 .browse-sidepanel[data-active=""] ~ .sandbox-hand { right: 48px; }
 /* IMPORTANT: the hand-offset selectors below MUST match the panel-
    width selectors above on specificity, or they'll silently
@@ -4610,6 +4639,13 @@ body:has(#view-browse:not(.hidden)) #main {
   background: rgba(125, 211, 252, 0.18);
   border-color: var(--accent);
   box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.5);
+}
+/* In multiplayer the focused stack tab takes the player's seat colour
+   so the whole control row reads as "yours". */
+.browse-shell.has-me-color .hand-stack-group.is-focused {
+  background: color-mix(in srgb, var(--me-color) 22%, transparent);
+  border-color: var(--me-color);
+  box-shadow: 0 0 0 1px var(--me-color);
 }
 .hand-stack-group.is-empty {
   opacity: 0.5;

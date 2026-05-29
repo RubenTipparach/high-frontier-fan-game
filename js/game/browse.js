@@ -427,6 +427,9 @@ function applySnapshot(snapshot, seq) {
   _rocketSiteId = pid || null;
   persistRocketSite();
   syncSandboxRocket();
+  // Paint the player's own seat colour across their chrome (top bar +
+  // hand strip) so they always know "I am this colour".
+  syncMeColor(snapshot);
   // Opponent rockets on the map (colour-coded, offset when colocated).
   syncMpRockets(snapshot);
   // Refresh the multiplayer table panel (room / turn / roster) from the
@@ -1485,6 +1488,8 @@ export function unmountBrowseOnline() {
   if (_renderer) {
     try { _renderer.setMpRockets(null); _renderer.setSandboxRocketOffset(0); } catch { /* ignore */ }
   }
+  const shell = document.querySelector('.browse-shell');
+  if (shell) { shell.style.removeProperty('--me-color'); shell.classList.remove('has-me-color'); }
   _onlineBusy = false;
   _onlineRoom = null;
   _onlineLobbyId = null;
@@ -7784,6 +7789,23 @@ function myRocketColour() {
     if (me && me.color) return me.color;
   }
   return 'yellow';
+}
+
+// Publish the local player's seat colour as --me-color on the browse
+// shell so the player's own chrome (top bar, hand strip, hand title)
+// can tint to it - a persistent "you are this colour" cue. Cleared
+// (removed) in solo so the sandbox keeps its default palette.
+function syncMeColor(snapshot) {
+  const shell = document.querySelector('.browse-shell');
+  if (!shell) return;
+  let color = null;
+  if (_online && snapshot && Array.isArray(snapshot.players) && _onlineMe) {
+    const me = snapshot.players.find((p) => p.profileId === _onlineMe.id);
+    color = (me && me.color) || null;
+  }
+  if (color) shell.style.setProperty('--me-color', color);
+  else shell.style.removeProperty('--me-color');
+  shell.classList.toggle('has-me-color', !!color);
 }
 
 // World-space coords for a server rocket siteId (null = LEO anchor).
