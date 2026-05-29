@@ -48,6 +48,18 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_tokens_profile ON tokens(profile_id);
 
+  -- Per-profile out-of-band turn-notification prefs (opt-in; default off
+  -- = backwards compatible). discord_user_id is the player's Discord
+  -- snowflake; the bot DMs it on the enabled events. Empty / no row =
+  -- no notifications.
+  CREATE TABLE IF NOT EXISTS notify_prefs (
+    profile_id      INTEGER PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+    discord_user_id TEXT,
+    notify_turn     INTEGER NOT NULL DEFAULT 1,
+    notify_auction  INTEGER NOT NULL DEFAULT 1,
+    updated_at      INTEGER NOT NULL
+  );
+
   -- A lobby is a pre-game waiting room. Once status flips to 'started'
   -- the lobby becomes the home for an in-progress game; chat and
   -- members carry over. Stage 1 doesn't ship an engine yet, so

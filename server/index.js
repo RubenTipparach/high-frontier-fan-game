@@ -17,6 +17,7 @@ import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
 import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE } from './game/engine.js';
 import { randomSeed } from './game/rng.js';
+import { sendDM, discordEnabled } from './discord.js';
 
 const PORT = Number(process.env.PORT) || 8080;
 
@@ -651,6 +652,107 @@ function gameView(gameId, viewerId = null) {
   };
 }
 
+// ----- out-of-band turn notifications (opt-in Discord DM) -----
+
+// A game's display name (its lobby's name) for notification text.
+function gameDisplayName(gameId) {
+  const r = db
+    .prepare('SELECT l.name FROM games g JOIN lobbies l ON l.id = g.lobby_id WHERE g.id = ?')
+    .get(gameId);
+  return (r && r.name) || 'your High Frontier game';
+}
+
+// DM one player IF they've opted into this event kind and Discord is on.
+// Fire-and-forget: a send failure is logged, never blocks the op response.
+function notifyProfile(profileId, kind, text) {
+  if (!discordEnabled()) return;
+  const pref = db
+    .prepare('SELECT discord_user_id, notify_turn, notify_auction FROM notify_prefs WHERE profile_id = ?')
+    .get(profileId);
+  if (!pref || !pref.discord_user_id) return;
+  if (kind === 'turn' && !pref.notify_turn) return;
+  if (kind === 'auction' && !pref.notify_auction) return;
+  sendDM(pref.discord_user_id, text).then((r) => {
+    if (!r.ok && r.error !== 'discord_disabled') {
+      console.warn('[notify] DM failed for profile', profileId, '-', r.error);
+    }
+  });
+}
+
+// After an op commits: DM the newly-active player on END_TURN, and the
+// other players when an auction opens. (One event => one DM each, so the
+// natural cadence is the throttle.)
+function dispatchTurnNotifications(gameId, kind, state) {
+  try {
+    if (!discordEnabled() || !state || !Array.isArray(state.players)) return;
+    if (kind === 'END_TURN') {
+      const active = state.players[state.activeIndex];
+      if (active) {
+        notifyProfile(active.profileId, 'turn', `🛸 It's your turn in ${gameDisplayName(gameId)}.`);
+      }
+    } else if (kind === 'AUCTION_START') {
+      const auctioneer = state.auction && state.auction.auctioneerId;
+      const name = gameDisplayName(gameId);
+      for (const p of state.players) {
+        if (p.profileId === auctioneer) continue;
+        notifyProfile(p.profileId, 'auction', `🔨 An auction just opened in ${name} - place your bid.`);
+      }
+    }
+  } catch (e) {
+    console.warn('[notify] dispatch error', e && e.message);
+  }
+}
+
+// Read the caller's notification prefs (+ whether the server even has a
+// bot configured, so the UI can show "notifications unavailable").
+app.get('/me/notify', requireProfile, (req, res) => {
+  const pref = db
+    .prepare('SELECT discord_user_id, notify_turn, notify_auction FROM notify_prefs WHERE profile_id = ?')
+    .get(req.profile.id);
+  res.json({
+    discordEnabled: discordEnabled(),
+    discordUserId: (pref && pref.discord_user_id) || '',
+    notifyTurn: pref ? !!pref.notify_turn : true,
+    notifyAuction: pref ? !!pref.notify_auction : true,
+  });
+});
+
+// Save the caller's notification prefs. An empty discordUserId clears it.
+app.put('/me/notify', requireProfile, (req, res) => {
+  const b = req.body || {};
+  const discordUserId = String(b.discordUserId || '').trim();
+  if (discordUserId && !/^\d{5,25}$/.test(discordUserId)) {
+    return res.status(400).json({ error: 'bad_discord_id' });
+  }
+  db.prepare(
+    `INSERT INTO notify_prefs (profile_id, discord_user_id, notify_turn, notify_auction, updated_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(profile_id) DO UPDATE SET
+       discord_user_id = excluded.discord_user_id,
+       notify_turn     = excluded.notify_turn,
+       notify_auction  = excluded.notify_auction,
+       updated_at      = excluded.updated_at`
+  ).run(req.profile.id, discordUserId || null, b.notifyTurn ? 1 : 0, b.notifyAuction ? 1 : 0, nowMs());
+  res.json({ ok: true });
+});
+
+// Send a test DM (to the supplied id, or the saved one) so a player can
+// confirm the bot can reach them before relying on it.
+app.post('/me/notify/test', requireProfile, async (req, res) => {
+  if (!discordEnabled()) return res.status(503).json({ error: 'discord_disabled' });
+  let uid = String((req.body && req.body.discordUserId) || '').trim();
+  if (!uid) {
+    const pref = db
+      .prepare('SELECT discord_user_id FROM notify_prefs WHERE profile_id = ?')
+      .get(req.profile.id);
+    uid = (pref && pref.discord_user_id) || '';
+  }
+  if (!/^\d{5,25}$/.test(uid)) return res.status(400).json({ error: 'bad_discord_id' });
+  const r = await sendDM(uid, `✅ High Frontier test DM - turn notifications are working for @${req.profile.name}.`);
+  if (!r.ok) return res.status(502).json({ error: r.error });
+  res.json({ ok: true });
+});
+
 // The state snapshot a given op produced (git-style "tree at commit").
 // Used for read-only history review and as the undo turn-base.
 function stateAtSeq(gameId, seq) {
@@ -785,6 +887,8 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
     op: opMeta,
     game: gameView(id, viewerId),
   }));
+  // Out-of-band turn / auction notifications (opt-in, inert without a bot).
+  dispatchTurnNotifications(id, kind, result.state);
   res.json({ ok: true, seq: nextSeq, log: result.log || null, game: gameView(id, req.profile.id) });
 });
 

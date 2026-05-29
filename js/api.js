@@ -199,3 +199,14 @@ export async function fetchGlobalChat({ before } = {}, token) {
 export async function sendGlobalChat(body, token) {
   return call('POST', '/chat/global', { body: { body }, token });
 }
+
+// --- Turn notification prefs (opt-in Discord DM) ---
+export async function getNotifyPrefs(token) {
+  return call('GET', '/me/notify', { token });
+}
+export async function setNotifyPrefs(prefs, token) {
+  return call('PUT', '/me/notify', { body: prefs, token });
+}
+export async function testNotify(discordUserId, token) {
+  return call('POST', '/me/notify/test', { body: { discordUserId }, token });
+}

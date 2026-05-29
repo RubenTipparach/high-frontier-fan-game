@@ -1,6 +1,7 @@
 // Bootstrap and top-level UI coordination.
 
-import { probeServer, apiAvailable, lookupInviteLink, claimInviteLink, getLobbyByCode } from './api.js';
+import { probeServer, apiAvailable, lookupInviteLink, claimInviteLink, getLobbyByCode,
+  getNotifyPrefs, setNotifyPrefs, testNotify } from './api.js';
 import {
   restoreProfile, activeProfile, signIn, signOut, mintDeviceCode,
   onProfileChange,
@@ -192,6 +193,7 @@ function initMainMenu() {
   const open = () => {
     overlay.classList.remove('hidden');
     document.addEventListener('keydown', onKey);
+    loadNotifySection();   // refresh the turn-notification prefs each open
   };
   const close = () => {
     overlay.classList.add('hidden');
@@ -201,6 +203,7 @@ function initMainMenu() {
     const acct = document.getElementById('account-menu');
     if (acct && !acct.classList.contains('hidden')) acct.classList.add('hidden');
   };
+  wireNotifySection();
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   fab.addEventListener('click', () => {
     if (overlay.classList.contains('hidden')) open(); else close();
@@ -222,6 +225,75 @@ function initMainMenu() {
     const b = document.getElementById(id);
     if (b) b.addEventListener('click', close);
   }
+}
+
+// Turn-notification settings (in the menu modal). Opt-in Discord DM:
+// load the caller's prefs on open, save / test on demand. Hidden entirely
+// when there's no signed-in profile; shows a "no bot" note when the server
+// has no DISCORD_BOT_TOKEN.
+let _notifyWired = false;
+async function loadNotifySection() {
+  const section = document.getElementById('notify-section');
+  if (!section) return;
+  const me = activeProfile();
+  if (!me || !apiAvailable()) { section.hidden = true; return; }
+  section.hidden = false;
+  const r = await getNotifyPrefs(me.token);
+  if (!r.ok) { section.hidden = true; return; }
+  const d = r.data || {};
+  const idEl = document.getElementById('notify-discord-id');
+  const turnEl = document.getElementById('notify-turn');
+  const aucEl = document.getElementById('notify-auction');
+  const disabledNote = document.getElementById('notify-disabled-note');
+  if (idEl) idEl.value = d.discordUserId || '';
+  if (turnEl) turnEl.checked = d.notifyTurn !== false;
+  if (aucEl) aucEl.checked = d.notifyAuction !== false;
+  const off = !d.discordEnabled;
+  if (disabledNote) disabledNote.hidden = !off;
+  // Disable the controls (but still show the saved values) when the
+  // server can't actually send.
+  for (const el of [idEl, turnEl, aucEl,
+    document.getElementById('btn-notify-save'),
+    document.getElementById('btn-notify-test')]) {
+    if (el) el.disabled = off;
+  }
+  const status = document.getElementById('notify-status');
+  if (status) status.textContent = '';
+}
+function wireNotifySection() {
+  if (_notifyWired) return;
+  _notifyWired = true;
+  const status = document.getElementById('notify-status');
+  const setStatus = (t) => { if (status) status.textContent = t; };
+  const collect = () => ({
+    discordUserId: (document.getElementById('notify-discord-id')?.value || '').trim(),
+    notifyTurn: !!document.getElementById('notify-turn')?.checked,
+    notifyAuction: !!document.getElementById('notify-auction')?.checked,
+  });
+  document.getElementById('btn-notify-save')?.addEventListener('click', async () => {
+    const me = activeProfile();
+    if (!me) return;
+    setStatus('Saving…');
+    const r = await setNotifyPrefs(collect(), me.token);
+    setStatus(r.ok ? 'Saved.' : `Couldn't save: ${r.error || 'error'}`);
+  });
+  document.getElementById('btn-notify-test')?.addEventListener('click', async () => {
+    const me = activeProfile();
+    if (!me) return;
+    const id = collect().discordUserId;
+    if (!/^\d{5,25}$/.test(id)) { setStatus('Enter a valid Discord user ID first.'); return; }
+    setStatus('Sending test DM…');
+    const r = await testNotify(id, me.token);
+    setStatus(r.ok
+      ? 'Test DM sent - check your Discord.'
+      : `Test failed: ${humanizeNotifyError(r.error)}`);
+  });
+}
+function humanizeNotifyError(code) {
+  return ({
+    discord_disabled: 'this server has no notification bot configured.',
+    bad_discord_id: 'that doesn\'t look like a Discord user ID.',
+  })[code] || (code ? `the bot couldn't DM you (${code}). Make sure you share a server with the bot and your DMs are open.` : 'unknown error.');
 }
 
 // "+ New game" chooser modal: opened from the lobby's top action row
