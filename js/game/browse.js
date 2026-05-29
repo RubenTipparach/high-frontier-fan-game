@@ -769,6 +769,16 @@ function clampAuctionInt(draft, min) {
   return (Number.isInteger(v) && v >= min) ? v : min;
 }
 
+// Small muted note line used throughout the auction controls. (This
+// helper was referenced before it existed - the auction overlay
+// threw "noteEl is not defined" on every snapshot. Defining it here.)
+function noteEl(text) {
+  const p = document.createElement('p');
+  p.className = 'muted mp-auction-note';
+  p.textContent = text;
+  return p;
+}
+
 // Role + phase aware controls inside the auction modal. Mirrors the
 // engine's state machine (server/game/engine.js auction handlers).
 function buildMpAuctionControls(host, a, { auctioneer, highBidder }) {
