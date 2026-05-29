@@ -765,7 +765,12 @@ export class MapRenderer {
     this._ambientSprites = [];
     for (const name of ['rocket-red', 'rocket-blue', 'rocket-green', 'rocket-orange', 'rocket-silver']) {
       const img = new Image();
-      img.src = `assets/rockets/${name}.png`;
+      // Resolve against THIS module's URL, not the address bar. With
+      // room routing the visible URL can be a deep /room/<CODE> path,
+      // and a bare 'assets/...' would resolve to /room/assets/... (404).
+      // import.meta.url is always /js/game/render.js, so ../../assets
+      // lands at the real app-root /assets.
+      img.src = new URL(`../../assets/rockets/${name}.png`, import.meta.url).toString();
       this._ambientSprites.push(img);
     }
     this._partitionSites();

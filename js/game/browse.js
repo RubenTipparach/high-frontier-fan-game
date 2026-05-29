@@ -7515,7 +7515,7 @@ function animateRocketAlong(segments, totalMs = 700) {
       };
       _renderer.setSandboxRocket({
         x: pos.x, y: pos.y,
-        colour: 'yellow',
+        colour: myRocketColour(),
         canFly: r.active,
       });
       if (t < 1) requestAnimationFrame(step);
@@ -7560,6 +7560,19 @@ function rocketStackDryMass() {
     mass += ((f.mass != null ? f.mass : c.mass) | 0);
   }
   return mass;
+}
+
+// Colour for the local player's rocket sprite. Online: the player's
+// server-assigned seat colour (the crew-card hex), so the rocket on
+// the map matches their roster dot + turn banner + name tint. Solo:
+// the legacy 'yellow' named palette. getRocketSprite accepts either a
+// named key or a raw #rrggbb.
+function myRocketColour() {
+  if (_online && _onlineSnapshot && _onlineMe) {
+    const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
+    if (me && me.color) return me.color;
+  }
+  return 'yellow';
 }
 
 function syncSandboxRocket() {
@@ -7609,7 +7622,7 @@ function syncSandboxRocket() {
   } : null;
   _renderer.setSandboxRocket({
     x, y,
-    colour: 'yellow',
+    colour: myRocketColour(),
     canFly: r.active,       // drives the 🚫 + transparency overlay
     prospectorKind,
     prospectorName,

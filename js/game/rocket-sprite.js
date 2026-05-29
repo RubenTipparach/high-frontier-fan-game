@@ -22,6 +22,35 @@ export const ROCKET_COLOURS = {
   purple: { base: '#a78bfa', light: '#ddd6fe', dark: '#5b21b6' },
 };
 
+// Lighten / darken a #rrggbb toward white / black by `amt` (0..1).
+// Used to synthesise a {base, light, dark} palette from an arbitrary
+// seat colour (the six crew-card hexes don't map to the named
+// palettes above, so a multiplayer rocket paints straight from its
+// player's assigned hex).
+function _clamp(n) { return Math.max(0, Math.min(255, Math.round(n))); }
+function _shade(hex, amt) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  if (amt >= 0) { r += (255 - r) * amt; g += (255 - g) * amt; b += (255 - b) * amt; }
+  else { const k = 1 + amt; r *= k; g *= k; b *= k; }
+  return '#' + [_clamp(r), _clamp(g), _clamp(b)]
+    .map((v) => v.toString(16).padStart(2, '0')).join('');
+}
+
+// Resolve a colour token to a {base, light, dark} palette. Accepts a
+// named palette key OR a raw #rrggbb (synthesised). Falls back to
+// white when neither matches.
+function resolvePalette(colour) {
+  if (colour && ROCKET_COLOURS[colour]) return ROCKET_COLOURS[colour];
+  if (/^#?[0-9a-f]{6}$/i.test(String(colour || '').trim())) {
+    const base = colour[0] === '#' ? colour : '#' + colour;
+    return { base, light: _shade(base, 0.45), dark: _shade(base, -0.45) };
+  }
+  return ROCKET_COLOURS.white;
+}
+
 const _cache = new Map();   // colourName -> HTMLCanvasElement
 
 function paintRocket(ctx, w, h, palette) {
@@ -84,7 +113,7 @@ function paintRocket(ctx, w, h, palette) {
 
 export function getRocketSprite(colourName) {
   if (_cache.has(colourName)) return _cache.get(colourName);
-  const palette = ROCKET_COLOURS[colourName] || ROCKET_COLOURS.white;
+  const palette = resolvePalette(colourName);
   const cv = document.createElement('canvas');
   cv.width  = SPRITE_W * DPR;
   cv.height = SPRITE_H * DPR;
