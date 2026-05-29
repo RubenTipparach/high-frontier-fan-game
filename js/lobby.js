@@ -4,7 +4,7 @@
 
 import {
   listLobbies, listMyGames, listPublicGames, getLobby, createLobby, joinLobby, leaveLobby,
-  setReady, startLobby, claimInviteLink, lookupInviteLink,
+  startLobby, claimInviteLink, lookupInviteLink,
   fetchGlobalChat, sendGlobalChat,
 } from './api.js';
 import { activeProfile, onProfileChange } from './auth.js';
@@ -42,7 +42,6 @@ export function initLobby({ onShowView, onToast }) {
   document.getElementById('form-create-lobby').addEventListener('submit', onCreateSubmit);
   document.getElementById('form-claim-link').addEventListener('submit', onClaimLinkSubmit);
   document.getElementById('btn-leave-lobby').addEventListener('click', onLeaveLobby);
-  document.getElementById('btn-ready').addEventListener('click', onReadyClick);
   document.getElementById('btn-start').addEventListener('click', onStartClick);
 
   // Invites chip in the lobby top row. Click toggles a small popover
@@ -498,7 +497,6 @@ function renderLobby(lobby) {
         <strong class="${isYou ? 'you' : ''}">@${escapeHtml(member.name)}</strong>
         ${isHost ? '<span class="host-badge">host</span>' : ''}
       </span>
-      <span class="${member.ready ? 'ready' : 'muted'}">${member.ready ? '✓ ready' : 'not ready'}</span>
     `;
     roster.appendChild(li);
   }
@@ -582,17 +580,6 @@ function setRoomInUrl(code) {
       : base;
     window.history.replaceState({}, '', target + search + cur.hash);
   } catch { /* private mode / file:// scheme */ }
-}
-
-async function onReadyClick() {
-  if (!_activeLobby) return;
-  const me = activeProfile();
-  if (!me) return;
-  const myRow = _activeLobby.members.find((m) => m.id === me.id);
-  const next = myRow ? !myRow.ready : true;
-  await setReady(_activeLobby.id, next, me.token);
-  const r = await getLobby(_activeLobby.id);
-  if (r.ok) { _activeLobby = r.data.lobby; renderLobby(_activeLobby); }
 }
 
 async function onStartClick() {
