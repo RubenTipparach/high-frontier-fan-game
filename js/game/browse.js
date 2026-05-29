@@ -8752,10 +8752,17 @@ async function runMoveQueue(ctx, resuming) {
 // slides backwards along the exact segments it walked.
 async function undoRocketMove() {
   if (!_renderer) return false;
-  // Online: there is no local move snapshot to unwind (moves go through
-  // the server), and there is no UNDO op wired here. No-op so the move
-  // tag's "undo" face can't corrupt the hydrated state.
-  if (_online) return false;
+  // Online: the server UNDO op unwinds the most recent functional op
+  // on the turn (rebuilds from turnBaseState), which is exactly what
+  // the local sandbox undo does - except the server is authoritative.
+  // The snapshot re-hydrate will restore the rocket position, tank,
+  // and the move budget, and refreshTurnBudget will flip the tag back
+  // from "↩ Undo move" to "move:1". roll_blocks_undo / nothing_to_undo
+  // come back via humanizeOnlineOpError.
+  if (_online) {
+    if (!isOnlineMyTurn()) return false;
+    return await submitOnlineOp({ kind: 'UNDO' });
+  }
   if (_rocketAnimating) return false;
   // Hazard-lockout: if the last move spent aqua or rolled dice,
   // the undo is blocked for the rest of the turn. Show a clear
