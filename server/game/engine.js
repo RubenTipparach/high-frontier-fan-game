@@ -671,6 +671,37 @@ function recallIfEmpty(player) {
   }
 }
 
+// Voluntary decommission: send selected cards from the rocket stack (or
+// LEO Stack) back to the HAND (mirror of browse.js#decommissionSelectedToHand).
+// Crew never enters the hand, so any crew in the selection is skipped.
+// op = { cardIds: [...], from: 'rocket' | 'leo' }. Turn-gated (functional).
+function applyDecommission(state, op, player) {
+  const from = op.from === 'leo' ? 'leo' : 'rocket';
+  const ids = Array.isArray(op.cardIds)
+    ? op.cardIds.map(String)
+    : (op.cardId != null ? [String(op.cardId)] : []);
+  if (!ids.length) return fail('bad_decommission');
+  const src = from === 'leo' ? (player.leo || []) : player.rocket.stack;
+  let returned = 0;
+  let blocked = 0;
+  for (const id of ids) {
+    const idx = src.findIndex((s) => s.id === id);
+    if (idx < 0) continue;
+    const slot = src[idx];
+    if (isCrewSlot(slot)) { blocked++; continue; }   // crew can't go to hand
+    src.splice(idx, 1);
+    player.hand.push(id);
+    if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
+    if (player.rocket.activeProspectorId === id) player.rocket.activeProspectorId = null;
+    returned++;
+  }
+  if (!returned) return fail('nothing_decommissioned');
+  if (from === 'rocket') { clipTank(player.rocket); recallIfEmpty(player); }
+  let log = `${player.name} decommissioned ${returned} card${returned === 1 ? '' : 's'} to hand.`;
+  if (blocked) log += ` (${blocked} crew stayed.)`;
+  return { ok: true, state, log };
+}
+
 // Pick which stacked thruster powers burns (rocket.js#setActiveThruster).
 // A free reconfiguration, not an op.
 function applySetActiveThruster(state, op, player) {
@@ -786,6 +817,7 @@ const FUNCTIONAL = {
   BUILD_ROCKET: applyBuildRocket,
   BOOST: applyBoost,
   TRANSFER: applyTransfer,
+  DECOMMISSION: applyDecommission,
   REFUEL: applyRefuel,
   CASH_WATER: applyCashWater,
   FREE_MARKET: applyFreeMarket,
@@ -803,6 +835,7 @@ function pickPayload(op) {
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face };
     case 'BOOST': return { cardIds: op.cardIds };
     case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, to: op.to };
+    case 'DECOMMISSION': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from };
     case 'REFUEL': return { amount: op.amount };
     case 'CASH_WATER': return { amount: op.amount };
     case 'FREE_MARKET': return { cardId: op.cardId };

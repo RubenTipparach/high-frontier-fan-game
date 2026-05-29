@@ -1503,6 +1503,8 @@ function humanizeOnlineOpError(code) {
     not_in_hand: 'That card is not in your hand.',
     not_in_stack: 'That card is not on your rocket.',
     cannot_build: 'That card cannot be built right now.',
+    bad_decommission: 'Pick a card to decommission.',
+    nothing_decommissioned: 'Nothing decommissioned (crew can\'t return to the hand).',
     cannot_liftoff: 'Not enough thrust to lift off (and no factory here to assist).',
     cannot_land: 'Not enough thrust to land there (and no factory to assist).',
     raygun_out_of_range: 'The raygun can only scan your site or one adjacent to it.',
@@ -2268,6 +2270,18 @@ async function decommissionSelectedToHand(stackId, ids, onDone) {
     yes: '♻ Decommission', no: 'Cancel',
   });
   if (!ok) return;
+  // Online: rocket / LEO decommission routes through the server so the
+  // hand actually gains the cards (a local mutation would be clobbered by
+  // the next snapshot). Outpost decommission has no server op yet.
+  if (_online) {
+    if (stackId !== 'rocket' && stackId !== 'leo') {
+      _onlineToast('Decommission from there is not available online yet.', 'error');
+      return;
+    }
+    const okOp = await submitOnlineOp({ kind: 'DECOMMISSION', cardIds: list, from: stackId });
+    if (okOp) { try { onDone && onDone(); } catch (e) { /* ignore */ } }
+    return;
+  }
   let returned = 0;
   let blocked = 0;
   for (const id of list) {
@@ -4884,6 +4898,9 @@ function openRocketStackModal() {
         back.textContent = '↩ Back to hand';
         back.addEventListener('click', () => {
           selected.delete(slot.id);
+          // Online: route through the server (DECOMMISSION) so the hand
+          // actually gains the card; the snapshot re-hydrates the stacks.
+          if (_online) { submitOnlineOp({ kind: 'DECOMMISSION', cardId: slot.id, from: 'rocket' }); return; }
           rocketRemoveCard(idx);
           addToHand(card);
         });
