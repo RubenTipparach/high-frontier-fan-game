@@ -483,6 +483,31 @@ Server-authoritative engine in `server/game/engine.js`:
 - Movement uses the delta-v graph; each "burn" consumes 1 tank unit
   scaled by the active thruster's ISP. Aerobrakes and pivots have
   special edges.
+
+  **Movement authority - current trust model + eventual TODO.**
+  Routing is split between client and server right now. The CLIENT
+  (the vendored mission-planner port, `js/game/planner-nav.js` +
+  `planner-dijkstra.js`) is the source of truth for the *hard* routing
+  math: the Hohmann-aware burn counts (free coasting along a transfer =
+  0 burns, pivots cost extra) and the per-turn split (which legs fire
+  on which turn, bounded by thrust burns/turn). MOVE sends the SERVER
+  this turn's segments `[{from, to, burns, turn}]`; the server VALIDATES
+  structure (node existence, continuity from the rocket's position),
+  charges the real water cost (`ceil(fuel * thisTurnBurns)` from the
+  active thruster face's `fuel`), resolves hazards / factory-assist /
+  dice authoritatively, and executes only that one turn - but it TRUSTS
+  the client's `burns` + `turn` values. The server's own
+  `server/game/planner-graph.js` only does a naive burns-Dijkstra used
+  for the bare-destination fallback (a tap with no planned route).
+  Consequence: a modified client could send fake burns (e.g. 0) and
+  move for free. Fine for friends, not cheat-hardened.
+  **TODO (eventually): make movement fully server-authoritative.** Port
+  `planner-nav.js` + `planner-dijkstra.js` into a shared module (under
+  `data/` or a shared dir both import), have the engine independently
+  recompute the route `from -> dest` with the same Hohmann/pivot/
+  per-turn semantics, and reject any MOVE whose client-supplied
+  `burns` / `turn` don't match. Until then, treat client routing as
+  trusted input. (User OK'd the trust model 2026-05-29.)
 - Prospect: roll Nd6 (N = site class size); thresholds defined per
   site type. Success = place prospect marker; site becomes claimable
   by the prospector for industrialization.
