@@ -335,8 +335,9 @@ label.checkbox input { accent-color: var(--accent-2); }
      of overflowing / clipping (e.g. sandbox rows: Resume + Delete). */
   flex-wrap: wrap;
 }
-/* Info column shrinks/truncates so it never pushes the buttons off-row. */
-.lobby-list li > div:first-child { flex: 1 1 55%; min-width: 0; }
+/* Info column grows to fill the row (pushing the buttons to the right
+   edge) and can shrink/truncate so it never overflows. */
+.lobby-list li > div:first-child { flex: 1 1 auto; min-width: 0; }
 .lobby-list li:last-child, .invite-list li:last-child { border-bottom: none; }
 .lobby-list li.empty, .invite-list li.empty {
   color: var(--ink-mute); justify-content: center; padding: 18px 12px;
@@ -665,6 +666,11 @@ body.in-lobby .main-menu-fab { display: none; }
   #view-lobby-list .lobby-list li,
   #view-lobby-list .invite-list li { padding: 6px 8px; }
   #view-lobby-list .global-chat { width: 100%; max-width: none; }
+  /* Your games uses the full mobile width too (plenty of room) - the
+     box + its list + rows all stretch edge to edge. */
+  #view-lobby-list .lobby-your-games { width: 100%; max-width: none; }
+  #view-lobby-list .lobby-your-games > .lobby-list,
+  #view-lobby-list .lobby-list li { width: 100%; box-sizing: border-box; }
   #view-lobby-list:not(.hidden) { padding: 12px; }
 }
 @media (max-width: 720px) {
