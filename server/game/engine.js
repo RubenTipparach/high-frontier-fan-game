@@ -668,7 +668,12 @@ const AUCTION = {
 function applyPickCrew(state, op, ctx) {
   // Crew picks are open during the draft phase only. Once everyone
   // has committed, draftPhase flips to 'play' and PICK_CREW is locked.
-  if (state.draftPhase !== 'crew') return fail('crew_draft_closed');
+  // Backwards compat: pre-migration games have state.draftPhase
+  // undefined; derive it from "every player has a faction" so a
+  // legacy game with both picks already in still rejects re-picks.
+  const phase = state.draftPhase
+    ?? (state.players.every((p) => !!p.faction) ? 'play' : 'crew');
+  if (phase !== 'crew') return fail('crew_draft_closed');
   const player = playerByProfile(state, ctx.profileId);
   if (!player) return fail('not_a_player');
   const cardId = String(op.cardId || '');
@@ -729,8 +734,14 @@ export function applyOperation(prevState, op, ctx) {
   // Everything else - auctions, functional ops, META - has to wait
   // for the crew draft to finish. Without this, the host could fire
   // END_TURN / AUCTION_START before some seat has picked their
-  // faction.
-  if (prevState.draftPhase !== 'play') return fail('awaiting_crew_picks');
+  // faction. Backwards compat: games created BEFORE state.draftPhase
+  // was introduced have it undefined; treat that as the derived
+  // phase (play if everyone already has a faction, crew otherwise)
+  // so existing tables don't lock up.
+  const draftDone = prevState.draftPhase === 'play'
+    || (prevState.draftPhase == null
+        && prevState.players.every((p) => !!p.faction));
+  if (!draftDone) return fail('awaiting_crew_picks');
 
   // Auction ops bypass the turn guard below - bids/passes are sent
   // by non-active players, and each handler validates its own caller

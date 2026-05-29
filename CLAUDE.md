@@ -389,6 +389,23 @@ Random-numbered seeds are stored per game so replays are deterministic.
   real game actions (Plan rocket route, Prospect, Refuel, etc.)
   must precede it. New site-popup buttons land before
   Navigate-to, never after.
+- **Player names track the player's seat colour.** Every render
+  of `@<name>` in the multiplayer UI tints the text in that
+  player's server-assigned seat colour (the same six crew-card
+  colours, see PLAYER_COLORS). Use the shared `.player-name`
+  CSS class and set `--player-color` on the element from
+  `player.color`. Falls back to currentColor when the seat
+  colour isn't known. Touches every surface: turn banner, mp
+  roster, mp chat, mission log who-name, auction overlay
+  (auctioneer / high bidder), crew-draft roster. Add the class
+  + the var on any new "@name" render so the convention holds.
+- **Sidebar panes stay where the user put them.** Sidepanel
+  navigation is user-driven: bootstrap can open the MP pane
+  once, but no automatic path (snapshot apply, market-mode
+  flip, op response, WS event) is allowed to switch panes out
+  from under the player. If you need to draw attention to a
+  pane, use the existing tab-strip badge / pulse affordances,
+  never showPane(...).
 
 ## Don'ts
 

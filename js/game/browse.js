@@ -551,7 +551,8 @@ function syncCrewDraftOverlay(snapshot) {
     dot.className = 'mp-crew-draft-dot';
     dot.style.background = p.color || '#888';
     const name = document.createElement('span');
-    name.className = 'mp-crew-draft-name';
+    name.className = 'mp-crew-draft-name player-name';
+    if (p.color) name.style.setProperty('--player-color', p.color);
     name.textContent = '@' + p.name + (p.profileId === myId ? ' (you)' : '');
     const status = document.createElement('span');
     status.className = 'mp-crew-draft-status';
@@ -716,8 +717,16 @@ function renderOnlineAuction(auction) {
     ? players.find((p) => p.profileId === auction.highBidderId) : null;
   const lot = PATENTS_BY_ID[auction.cardId];
 
-  overlay.querySelector('.mp-auction-mode').textContent = auctioneer
+  const modeEl = overlay.querySelector('.mp-auction-mode');
+  modeEl.textContent = auctioneer
     ? `@${auctioneer.name}'s lot` : 'Lot';
+  if (auctioneer && auctioneer.color) {
+    modeEl.classList.add('player-name');
+    modeEl.style.setProperty('--player-color', auctioneer.color);
+  } else {
+    modeEl.classList.remove('player-name');
+    modeEl.style.removeProperty('--player-color');
+  }
 
   const lotHost = overlay.querySelector('#mp-auction-lot');
   lotHost.innerHTML = '';
@@ -728,9 +737,17 @@ function renderOnlineAuction(auction) {
     lotHost.textContent = auction.cardId;
   }
 
-  overlay.querySelector('.mp-auction-bid').textContent = auction.highBid > 0
+  const bidEl = overlay.querySelector('.mp-auction-bid');
+  bidEl.textContent = auction.highBid > 0
     ? `High bid: ${auction.highBid} aqua by @${highBidder ? highBidder.name : '?'}`
     : 'No bids yet.';
+  if (auction.highBid > 0 && highBidder && highBidder.color) {
+    bidEl.classList.add('player-name');
+    bidEl.style.setProperty('--player-color', highBidder.color);
+  } else {
+    bidEl.classList.remove('player-name');
+    bidEl.style.removeProperty('--player-color');
+  }
   overlay.querySelector('.mp-auction-phase').textContent =
     auction.awaiting === 'bidders' ? 'Bidding is open.' : 'The auctioneer is deciding.';
 
@@ -1035,7 +1052,12 @@ function appendMpChat(msg) {
   const li = document.createElement('li');
   li.className = 'mp-chat-msg';
   const who = document.createElement('span');
-  who.className = 'mp-chat-who';
+  who.className = 'mp-chat-who player-name';
+  // Resolve the speaker's seat colour from the cached snapshot so
+  // their @name tints to match the rest of the player chrome.
+  const speaker = (_onlineSnapshot && _onlineSnapshot.players || [])
+    .find((p) => p.profileId === msg.profileId);
+  if (speaker && speaker.color) who.style.setProperty('--player-color', speaker.color);
   who.textContent = '@' + (msg.profileName || 'someone');
   const body = document.createElement('span');
   body.className = 'mp-chat-body';
@@ -1132,7 +1154,8 @@ function renderMpPlayer(p, isMe, isActive) {
   dot.className = 'dot';
   dot.style.background = p.color || '#888';
   const name = document.createElement('span');
-  name.className = 'mp-name';
+  name.className = 'mp-name player-name';
+  if (p.color) name.style.setProperty('--player-color', p.color);
   name.textContent = '@' + p.name + (isMe ? ' (you)' : '');
   const stats = document.createElement('span');
   stats.className = 'mp-stats';
@@ -10378,15 +10401,27 @@ async function paintOnlineMissionLog(host) {
   const entries = (r.data && r.data.entries) || [];
   // Server returns ops in seq ASC order. Render newest-first for
   // a tail-friendly read; skip the seq-0 START op (no log line).
+  // Resolve a profileId -> seat colour map so each @name in the log
+  // can render in that player's seat colour (CLAUDE.md doctrine:
+  // "Player names track the player's seat colour"). Falls back to
+  // currentColor when no snapshot is cached yet.
+  const colourFor = new Map();
+  for (const p of (_onlineSnapshot && _onlineSnapshot.players) || []) {
+    if (p.color) colourFor.set(p.profileId, p.color);
+  }
   const rows = entries
     .filter((e) => e.kind !== 'START' && e.log)
     .reverse()
-    .map((e) => `
+    .map((e) => {
+      const col = colourFor.get(e.profileId);
+      const style = col ? ` style="--player-color:${esc(col)}"` : '';
+      return `
       <li class="mp-log-row">
         <span class="mp-log-kind">${esc(e.kind)}</span>
-        <span class="mp-log-who">@${esc(e.profileName || '?')}</span>
+        <span class="mp-log-who player-name"${style}>@${esc(e.profileName || '?')}</span>
         <span class="mp-log-summary">${esc(e.log)}</span>
-      </li>`).join('');
+      </li>`;
+    }).join('');
   host.innerHTML = `
     <h3 style="margin-top:0">📋 Mission log</h3>
     <p class="muted" style="margin:4px 0 8px;font-size:11px;">

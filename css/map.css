@@ -2475,7 +2475,12 @@ body:has(#view-browse:not(.hidden)) #main {
   bottom: var(--hand-height, 320px);
   z-index: 4;
   background: #000;
-  color: #fff;
+  /* Text colour echoes the active player's seat colour by default
+     (set by --mp-turn-color in syncMpTurnBanner). Falls back to
+     white when no player is active (waiting). is-your-turn
+     overrides below so YOUR name renders in the same mint glow
+     the rest of "Your turn" uses. */
+  color: var(--mp-turn-color, #fff);
   font-weight: 900;
   font-size: 11px;
   letter-spacing: 2px;
@@ -5710,6 +5715,16 @@ body:has(#view-browse:not(.hidden)) #main {
   border: 1px solid rgba(0, 0, 0, 0.5);
 }
 .mp-name { font-weight: 600; font-size: 13px; }
+
+/* Shared @name tint. Doctrine (CLAUDE.md "Player names track the
+   player's seat colour"): every render of `@<name>` reads its
+   --player-color CSS var so the name visually maps back to that
+   player's chip + map marker + turn-banner stripe. Fall back to
+   currentColor when no var is set so historical / unowned rows
+   stay readable. */
+.player-name {
+  color: var(--player-color, currentColor);
+}
 .mp-stats {
   margin-left: auto;
   font-size: 11px;
@@ -5759,7 +5774,9 @@ body:has(#view-browse:not(.hidden)) #main {
   padding: 6px 8px;
 }
 .mp-chat-list .mp-chat-msg { padding: 2px 0; font-size: 12px; line-height: 1.35; }
-.mp-chat-list .mp-chat-who { font-weight: 600; color: var(--accent); margin-right: 4px; }
+/* Colour comes from .player-name + --player-color (set in
+   appendMpChat from the cached snapshot). */
+.mp-chat-list .mp-chat-who { font-weight: 600; margin-right: 4px; }
 .mp-chat-list .mp-chat-empty { font-size: 12px; padding: 2px 0; }
 .mp-chat-form { display: flex; gap: 6px; margin-top: 6px; }
 .mp-chat-form input {

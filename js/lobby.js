@@ -460,7 +460,14 @@ export async function enterLobby(lobby) {
     const poll = await getLobby(lobby.id);
     if (!poll || !poll.ok) return;
     if (!_activeLobby || _activeLobby.id !== lobby.id) return;
-    _activeLobby = poll.data;
+    // getLobby returns { lobby: {...} } - unwrap before assignment
+    // (matches enterLobby's r.data.lobby above). Earlier I assigned
+    // poll.data directly which made _activeLobby a wrapper object and
+    // every member-access (lobby.members.length) blew up on the next
+    // render tick.
+    const fresh = poll.data && poll.data.lobby;
+    if (!fresh) return;
+    _activeLobby = fresh;
     renderLobby(_activeLobby);
   }, LOBBY_POLL_MS);
   mountChat(lobby);
