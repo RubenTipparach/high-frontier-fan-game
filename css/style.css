@@ -455,6 +455,20 @@ label.checkbox input { accent-color: var(--accent-2); }
   padding: 14px 24px 24px;
   box-sizing: border-box;
 }
+/* The joined lobby (roster + Mark ready / Start) is also a full-screen
+   panel so it can SCROLL on a short screen. Otherwise its stacked cards
+   (roster, chat, invite) overflow the 100vh app shell (overflow:hidden)
+   and the Start button / lower cards are unreachable on mobile. inset:0 +
+   margin:auto keeps the 720px column centred on desktop, full-width on a
+   phone. */
+#view-lobby:not(.hidden) {
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 20px 24px 32px;
+  box-sizing: border-box;
+}
 .lobby-top {
   display: flex;
   align-items: center;
