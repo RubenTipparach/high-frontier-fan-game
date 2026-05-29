@@ -293,6 +293,47 @@ If you're adding a new multiplayer action, follow the chain:
 2. Gate the submit helper on the cached snapshot.
 3. Validate again on the server in the engine handler.
 
+### Room routing + version reload - DON'T kick players to the lobby
+
+The active room lives in the URL as a real path segment:
+`/<base>/room/<CODE>` (e.g.
+`rubentipparach.github.io/high-frontier-fan-game/room/DPAT3R`). This
+is load-bearing: it's what lets a refresh, a restored tab, a
+dropped-WS reconnect, AND a **version-bump auto-reload** drop the
+player back into the SAME room instead of the lobby list. Breaking
+any link in this chain regresses to "every deploy kicks everyone
+out mid-game", which is the exact failure we're guarding against.
+
+The chain (do not sever any piece):
+
+- **`setRoomInUrl(code)` (js/lobby.js)** writes `/<base>/room/<CODE>`
+  via `history.replaceState` on `openLobby`, clears it on
+  `leaveCurrent`. It preserves the `?v=<sha>` version pin. The app
+  base is resolved from `import.meta.url`, NEVER from the address
+  bar (the bar can already be a deep `/room/...` path).
+- **`404.html`** is the GitHub-Pages SPA fallback. GH Pages has no
+  server routing, so a hard load / version reload of `/room/<CODE>`
+  has no file and hits 404.html, which stashes the code in
+  `sessionStorage['hf-room-redirect']` and redirects to the app
+  root, carrying `?v=` + hash. Keep 404.html dependency-free (inline
+  script, no module imports) - it runs before the app exists.
+- **`maybeResumeRoomFromUrl()` (js/main.js)** runs on boot, reads
+  the code via `readRoomCode()` (sessionStorage stash -> `/room/`
+  path -> legacy `?room=` query), and re-opens the lobby. `openLobby`
+  then calls `setRoomInUrl` to restore the visible `/room/<CODE>`.
+- **`js/version-check.js`** force-navigates to `location.href` with
+  a new `?v=<sha>` when a deploy lands. Because that keeps the
+  `/room/<CODE>` path, the reload flows back through 404.html ->
+  stash -> resume. CRITICAL: version.json is fetched against the
+  SCRIPT's own URL (`new URL('../version.json', currentScript.src)`),
+  NOT a relative `./version.json` - a relative fetch resolves against
+  the deep `/room/...` address bar and 404s, silently disabling the
+  version check.
+
+Net: a `git push` that bumps the deployed SHA reloads every open
+client AND keeps each one in its room. If you touch routing,
+version-check, or the boot landing logic, re-verify this end to end.
+
 ## Lobby + social
 
 - **Profiles** are token-based, mirroring murdoku-companion exactly:

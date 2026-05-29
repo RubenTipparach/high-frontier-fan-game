@@ -290,24 +290,47 @@ async function afterSignIn() {
 }
 
 // Returns true if it navigated the user into a lobby (so the caller
-// ?room=<code>: a fresh page load (refresh, restored tab, WS-lost
-// reconnect) that carries the lobby's 6-char share code re-opens
-// the lobby instead of dropping the player on the lobby list.
-// Returns true on a successful openLobby (caller skips the lobby-
-// list fallback), false otherwise.
+// Read the room code from (in priority order):
+//   1. the 404.html sessionStorage stash (a hard load / version-bump
+//      reload of /room/<CODE> bounces through 404.html, which stashes
+//      the code and redirects to the app root),
+//   2. the /room/<CODE> path itself (in case GH Pages ever serves it
+//      directly, or a future host with real routing),
+//   3. the legacy ?room=<CODE> query (old shared links still work).
+function readRoomCode() {
+  try {
+    const stashed = sessionStorage.getItem('hf-room-redirect');
+    if (stashed) {
+      sessionStorage.removeItem('hf-room-redirect');
+      return stashed;
+    }
+  } catch { /* private mode */ }
+  const pathMatch = window.location.pathname.match(/\/room\/([^/]+)\/?$/);
+  if (pathMatch) return decodeURIComponent(pathMatch[1]);
+  const q = new URL(window.location.href).searchParams.get('room');
+  if (q) return q;
+  return null;
+}
+
+// A fresh page load (refresh, restored tab, WS-lost reconnect, or a
+// version-bump reload) that carries a room code re-opens the lobby
+// instead of dropping the player on the lobby list. Returns true on a
+// successful openLobby (caller skips the lobby-list fallback).
 async function maybeResumeRoomFromUrl() {
-  const url = new URL(window.location.href);
-  const code = url.searchParams.get('room');
+  const code = readRoomCode();
   if (!code) return false;
   try {
     const r = await getLobbyByCode(code);
     if (!r || !r.ok || !r.data || !r.data.id) {
-      // Stale code (lobby cancelled or 404). Clear it so we don't
-      // keep trying on every load.
-      url.searchParams.delete('room');
-      window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+      // Stale code (lobby cancelled or 404). openLobby would've
+      // failed; just fall through to the lobby list. setRoomInUrl
+      // isn't called so the URL naturally resets on the next nav.
+      console.log('[hf:boot] room code stale/not found:', code);
       return false;
     }
+    // openLobby calls setRoomInUrl on success, which rewrites the
+    // address bar to /room/<CODE> (it was the app root after the
+    // 404 redirect).
     await openLobby(r.data.id, { join: false });
     return true;
   } catch (err) {

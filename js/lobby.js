@@ -560,14 +560,23 @@ function leaveCurrent() {
   refreshLobbyList();
 }
 
-// Push / clear the ?room=<code> search param without triggering a
-// navigation. Centralised so openLobby + leaveCurrent stay in sync.
+// Push / clear the /room/<CODE> path without triggering a navigation.
+// Centralised so openLobby + leaveCurrent stay in sync. The room is a
+// real path segment (user request), so the app base must be resolved
+// independently of the address bar - import.meta.url always points at
+// <base>/js/lobby.js, so '../' off it is the app base regardless of how
+// deep the visible URL currently is. The ?v= version pin is preserved
+// so a later version-check reload keeps the same build.
 function setRoomInUrl(code) {
   try {
-    const url = new URL(window.location.href);
-    if (code) url.searchParams.set('room', String(code).toUpperCase());
-    else url.searchParams.delete('room');
-    window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+    const base = new URL('../', import.meta.url).pathname;   // /high-frontier-fan-game/
+    const cur = new URL(window.location.href);
+    const v = cur.searchParams.get('v');
+    const search = v ? ('?v=' + encodeURIComponent(v)) : '';
+    const target = code
+      ? base + 'room/' + encodeURIComponent(String(code).toUpperCase())
+      : base;
+    window.history.replaceState({}, '', target + search + cur.hash);
   } catch { /* private mode / file:// scheme */ }
 }
 

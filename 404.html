@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>High Frontier</title>
+  <!--
+    GitHub Pages SPA fallback. GH Pages has no server-side routing, so a
+    direct load (or a version-bump reload) of a deep path like
+    /high-frontier-fan-game/room/DPAT3R has no file and lands here.
+
+    Our ONLY dynamic route is <base>/room/<CODE>. Capture the code, stash
+    it in sessionStorage, and redirect to the app root (index.html),
+    PRESERVING ?v=<sha> so the version reloader still lands on the right
+    build. main.js#maybeResumeRoomFromUrl reads the stash and re-opens
+    the room, then restores the /room/<CODE> path via replaceState.
+
+    This is what keeps a version-triggered reload from kicking a player
+    back to the lobby (see CLAUDE.md "Room routing + version reload").
+  -->
+  <script>
+    (function () {
+      var loc = window.location;
+      // Match "<anything>/room/<CODE>" - m[1] is the app base (up to and
+      // including the trailing slash before "room/"), m[2] is the code.
+      var m = loc.pathname.match(/^(.*\/)room\/([^/]+)\/?$/);
+      if (m) {
+        try { sessionStorage.setItem('hf-room-redirect', m[2]); } catch (e) { /* private mode */ }
+        // Redirect to the app root, carrying the version query + hash so
+        // a version-bump reload doesn't lose its ?v= pin.
+        loc.replace(m[1] + loc.search + loc.hash);
+        return;
+      }
+      // Any other unknown path: drop the last segment and redirect
+      // there. Trailing slashes are stripped first so "/x/room/" (no
+      // code) resolves to "/x/" instead of looping back into itself.
+      var p = loc.pathname.replace(/\/+$/, '');
+      var base = p.replace(/\/[^/]*$/, '/');
+      loc.replace(base + loc.search + loc.hash);
+    })();
+  </script>
+</head>
+<body>
+  <noscript>This game requires JavaScript. <a href="./">Return to the lobby.</a></noscript>
+</body>
+</html>
