@@ -120,6 +120,10 @@ async function loadAnnouncement() {
   box.hidden = false;
 }
 
+// Cap the on-screen global chat so the box doesn't grow without bound as
+// live messages accumulate past the server's history window.
+const MAX_GLOBAL_CHAT = 200;
+
 function mountGlobalChat() {
   const form = document.getElementById('global-chat-form');
   const input = document.getElementById('global-chat-input');
@@ -146,6 +150,8 @@ function mountGlobalChat() {
     body.textContent = ' ' + (msg.body || '');
     li.append(who, body);
     list.appendChild(li);
+    // Keep only the most recent messages so the box doesn't grow forever.
+    while (list.children.length > MAX_GLOBAL_CHAT) list.removeChild(list.firstChild);
     list.scrollTop = list.scrollHeight;
   };
 
@@ -192,6 +198,9 @@ function mountGlobalChat() {
       const r = await fetchGlobalChat({}, profile.token);
       if (r && r.ok && r.data && Array.isArray(r.data.entries)) {
         for (const m of r.data.entries) append(m);
+        // Pin to the newest message once the rows have laid out (a
+        // per-append scrollTop can fire before layout on a fresh load).
+        requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; });
       }
     } finally {
       _historyFetching = false;
