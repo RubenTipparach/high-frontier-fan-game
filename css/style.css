@@ -381,12 +381,21 @@ label.checkbox input { accent-color: var(--accent-2); }
 
 .lobby-grid {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr) minmax(280px, 1fr);
+  /* Two columns: left = Players + Invite stacked, right = a wider Chat. */
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
   gap: 16px;
   position: relative;
+  align-items: start;
 }
+/* Left column stacks the Players and Invite cards. */
+.lobby-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.lobby-col > .card { margin-bottom: 0; }
+.lobby-chat-card { margin-bottom: 0; }
+/* Fixed-height, scrolling chat list (not a box that grows with messages). */
+.lobby-chat-card .chat-list { height: 440px; max-height: none; }
 @media (max-width: 1000px) {
   .lobby-grid { grid-template-columns: 1fr; }
+  .lobby-chat-card .chat-list { height: 320px; }
 }
 
 .roster { list-style: none; padding: 0; margin: 0 0 10px; }

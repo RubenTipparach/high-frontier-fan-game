@@ -202,24 +202,48 @@
       -->
       <section id="view-lobby" class="view hidden">
         <div class="lobby-grid">
-          <div class="card">
-            <div class="card-header">
-              <h2 id="lobby-name">Lobby</h2>
-              <div>
-                <span id="lobby-code-pill" class="code-pill"></span>
-                <button id="btn-leave-lobby" class="danger">Leave</button>
+          <div class="lobby-col">
+            <div class="card">
+              <div class="card-header">
+                <h2 id="lobby-name">Lobby</h2>
+                <div>
+                  <span id="lobby-code-pill" class="code-pill"></span>
+                  <button id="btn-leave-lobby" class="danger">Leave</button>
+                </div>
+              </div>
+              <p id="lobby-meta" class="muted"></p>
+              <h3>Players</h3>
+              <ul id="lobby-roster" class="roster"></ul>
+              <div class="form-row">
+                <button id="btn-start" class="primary hidden">Start game</button>
+              </div>
+              <p id="lobby-start-error" class="error"></p>
+            </div>
+
+            <div class="card">
+              <h2>Invite players</h2>
+              <h3>By name</h3>
+              <div class="invite-search">
+                <input id="invite-search-input" type="text" maxlength="20"
+                  placeholder="@name" autocapitalize="off" spellcheck="false" />
+                <ul id="invite-search-results" class="search-results"></ul>
+              </div>
+              <h3>By link</h3>
+              <div class="invite-link-controls">
+                <label class="checkbox">
+                  <input type="checkbox" id="link-single-use" />
+                  Single use
+                </label>
+                <button id="btn-make-link">Generate link</button>
+              </div>
+              <div id="invite-link-result" class="invite-link-result hidden">
+                <input id="invite-link-url" type="text" readonly />
+                <button id="btn-copy-link">Copy</button>
               </div>
             </div>
-            <p id="lobby-meta" class="muted"></p>
-            <h3>Players</h3>
-            <ul id="lobby-roster" class="roster"></ul>
-            <div class="form-row">
-              <button id="btn-start" class="primary hidden">Start game</button>
-            </div>
-            <p id="lobby-start-error" class="error"></p>
           </div>
 
-          <div class="card">
+          <div class="card lobby-chat-card">
             <h2>Chat</h2>
             <ul id="chat-list" class="chat-list"></ul>
             <form id="form-chat" class="chat-form">
@@ -227,28 +251,6 @@
                 placeholder="Say something…" autocomplete="off" />
               <button type="submit">Send</button>
             </form>
-          </div>
-
-          <div class="card">
-            <h2>Invite players</h2>
-            <h3>By name</h3>
-            <div class="invite-search">
-              <input id="invite-search-input" type="text" maxlength="20"
-                placeholder="@name" autocapitalize="off" spellcheck="false" />
-              <ul id="invite-search-results" class="search-results"></ul>
-            </div>
-            <h3>By link</h3>
-            <div class="invite-link-controls">
-              <label class="checkbox">
-                <input type="checkbox" id="link-single-use" />
-                Single use
-              </label>
-              <button id="btn-make-link">Generate link</button>
-            </div>
-            <div id="invite-link-result" class="invite-link-result hidden">
-              <input id="invite-link-url" type="text" readonly />
-              <button id="btn-copy-link">Copy</button>
-            </div>
           </div>
         </div>
 
