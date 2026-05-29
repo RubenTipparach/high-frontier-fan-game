@@ -356,7 +356,7 @@ async function bootstrapOnlineGame() {
     const offChat = ws.on('chat', (msg) => {
       if (!_online || !msg || !msg.message) return;
       if (msg.message.lobbyId !== _onlineLobbyId) return;
-      appendMpChat(msg.message);
+      appendMpChat(msg.message, { live: true });
     });
     _onlineChatOff = () => { offChat(); ws.unsubscribe(chatChannel); };
     const hist = await fetchChat(_onlineLobbyId, {}, _onlineMe.token);
@@ -1139,7 +1139,7 @@ function setupMpChat(host) {
   host.append(label, list, form);
 }
 
-function appendMpChat(msg) {
+function appendMpChat(msg, opts = {}) {
   const list = document.getElementById('mp-chat-list');
   if (!list || !msg) return;
   const empty = list.querySelector('.mp-chat-empty');
@@ -1160,6 +1160,24 @@ function appendMpChat(msg) {
   li.append(who, document.createTextNode(' '), body);
   list.appendChild(li);
   list.scrollTop = list.scrollHeight;
+  // Live message from someone else while the MP pane isn't open -> pulse
+  // the 🛰 tab so the player notices. (History backfill passes no `live`
+  // flag; my own messages don't self-notify.)
+  const myId = _onlineMe && _onlineMe.id;
+  if (opts.live && msg.profileId !== myId) flagMpChatUnread();
+}
+
+// Pulsing-star "new chat" badge on the 🛰 (satellite) tab. Skipped when
+// the MP pane is already open (the player is reading it).
+function flagMpChatUnread() {
+  const panel = document.getElementById('browse-sidepanel');
+  if (panel && panel.dataset.active === 'mp') return;
+  const tab = document.getElementById('sidepanel-tab-mp');
+  if (tab) tab.classList.add('has-unread');
+}
+function clearMpChatUnread() {
+  const tab = document.getElementById('sidepanel-tab-mp');
+  if (tab) tab.classList.remove('has-unread');
 }
 
 function renderMpPanel(snapshot) {
@@ -3286,6 +3304,8 @@ function showPane(pane) {
   else if (pane === 'log')        renderMissionLog();
   else if (pane === 'solo')       renderSolo();
   else if (pane === 'mp')         renderMpPanel(_onlineSnapshot);
+  // Opening the table pane clears the "new chat" pulse.
+  if (pane === 'mp') clearMpChatUnread();
 }
 
 // Float a "+N" aqua indicator above the balance chip, then remove it

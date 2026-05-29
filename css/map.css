@@ -3125,6 +3125,30 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .sidepanel-tabs button:hover { background: var(--panel-2); }
 .sidepanel-tabs button.active:hover { background: var(--accent); }
+
+/* New-chat indicator: a pulsing star pinned to the 🛰 tab when a live
+   table-chat message arrives and the MP pane isn't open. Cleared when the
+   pane is opened. */
+.sidepanel-tabs button { position: relative; }
+.sidepanel-tabs button.has-unread:not(.active)::after {
+  content: '\2726';            /* ✦ */
+  position: absolute;
+  top: -2px;
+  right: -1px;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--warm, #fbbf24);
+  text-shadow: 0 0 5px rgba(251, 191, 36, 0.9);
+  pointer-events: none;
+  animation: mp-chat-star-pulse 1.1s ease-in-out infinite;
+}
+@keyframes mp-chat-star-pulse {
+  0%, 100% { transform: scale(0.8); opacity: 0.55; }
+  50%      { transform: scale(1.25); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidepanel-tabs button.has-unread:not(.active)::after { animation: none; opacity: 1; }
+}
 /* Search + config are utilities, not panes. They flow right after the
    pane tabs (a small gap separates them) - previously they were pinned
    to the far end with margin:auto, which clipped them out of view when
