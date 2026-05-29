@@ -8376,6 +8376,25 @@ function applyCardDriftClass() {
   tag(_driftInLeo, '#sandbox-hand-cards, .stack-inspect-cards');
 }
 
+// The Sunspot Cube advanced (a full table wrap). Slide the cube on the
+// turn wheel from the old slot to the new one and, if the new slot rolled
+// a Sunspot event, animate the d6 - the same beat the sandbox shows on
+// end-turn, surfaced to every player when the shared clock ticks. The
+// server owns the event's effect; this only surfaces the roll.
+function animateSnapshotClock(prev, snapshot) {
+  const prevTurn = prev.turn | 0;
+  const newTurn = snapshot.turn | 0;
+  if (newTurn === prevTurn) return;          // clock didn't advance
+  const pe = prev.lastEvent;
+  const ne = snapshot.lastEvent;
+  const evChanged = !!ne && (!pe
+    || pe.turn !== ne.turn || pe.round !== ne.round || pe.dieRoll !== ne.dieRoll);
+  openTurnClockModal({
+    animateFrom: prevTurn,
+    rolling: evChanged ? { value: ne.dieRoll } : null,
+  });
+}
+
 // Orchestrator: run every diff-animation for one applied snapshot.
 // Wrapped individually so one failing animator can't block the others
 // or the hydrate that already committed the final state.
@@ -8384,6 +8403,7 @@ function animateOnlineTransitions(prev, snapshot) {
   try { animateSnapshotMoves(prev, snapshot); } catch { /* non-fatal */ }
   try { animateSnapshotProspects(prev, snapshot); } catch { /* non-fatal */ }
   try { animateSnapshotCardDrift(prev, snapshot); } catch { /* non-fatal */ }
+  try { animateSnapshotClock(prev, snapshot); } catch { /* non-fatal */ }
 }
 
 function syncSandboxRocket() {
