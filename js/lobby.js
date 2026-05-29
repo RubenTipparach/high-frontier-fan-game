@@ -16,6 +16,14 @@ import { mountBrowse, unmountBrowseOnline } from './game/browse.js';
 
 let _activeLobby = null;
 let _unsubWS = null;
+// Polling fallback for the lobby view: WS push of lobby_update is
+// the primary path, but if the WS is unreachable (user 2026-05-29:
+// "Firefox can't establish a connection to the server at wss://...")
+// or a broadcast is dropped, the other player wouldn't see the host's
+// Start click. Same doctrine as the in-game polling (CLAUDE.md):
+// poll on an interval, cache the last snapshot.
+let _lobbyPoll = null;
+const LOBBY_POLL_MS = 3000;
 let _onShowView = null;
 let _onToast = null;
 let _gameMounted = false;
@@ -235,7 +243,12 @@ export async function refreshMyGames() {
   const started = [];
   const ended = [];
   for (const g of r.data.entries) {
-    if (g.gameStatus === 'finished') ended.push(g);
+    // Cancelled lobbies/games land in "Ended" so the player still has
+    // a record of them. gameStatus carries through to the renderer
+    // which decorates the row with a "(cancelled)" tag and disables
+    // Review (there's no recoverable terminal state).
+    if (g.status === 'cancelled' || g.gameStatus === 'cancelled') ended.push(g);
+    else if (g.gameStatus === 'finished') ended.push(g);
     else if (g.status === 'started') started.push(g);
   }
   renderMyGames(startedEl, started, 'Resume', 'No games in progress.');
@@ -323,12 +336,15 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg) {
   }
   for (const g of games) {
     const li = document.createElement('li');
+    const cancelled = g.status === 'cancelled' || g.gameStatus === 'cancelled';
+    if (cancelled) li.classList.add('is-cancelled');
     li.innerHTML = `
       <div>
         <span class="name"></span>
         <span class="meta">hosted by @<span class="host"></span>
           · <span class="count"></span>/${g.maxPlayers}
-          · <code></code></span>
+          · <code></code>
+          <span class="tag-cancelled" hidden>· cancelled</span></span>
       </div>
       <div class="row-actions">
         <button class="primary"></button>
@@ -339,8 +355,17 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg) {
     li.querySelector('.count').textContent = g.memberCount;
     li.querySelector('code').textContent = g.code;
     const btn = li.querySelector('button');
-    btn.textContent = actionLabel;
-    btn.addEventListener('click', () => openLobby(g.id, { join: false }));
+    if (cancelled) {
+      li.querySelector('.tag-cancelled').hidden = false;
+      // No recoverable terminal state for a cancelled lobby - the
+      // lobby/game rows still exist for audit but the player can't
+      // resume or review the board.
+      btn.textContent = 'Cancelled';
+      btn.disabled = true;
+    } else {
+      btn.textContent = actionLabel;
+      btn.addEventListener('click', () => openLobby(g.id, { join: false }));
+    }
     listEl.appendChild(li);
   }
 }
@@ -399,6 +424,13 @@ export async function enterLobby(lobby) {
   _activeLobby = lobby;
   saveLastLobbyId(lobby.id);
   renderLobby(lobby);
+  // Encode the lobby's 6-char share code in the URL so a refresh or
+  // a reconnection-loss puts the player back HERE instead of the
+  // lobby list (user 2026-05-29: "encode game room in url string ...
+  // if connection is lost the player isnt just booted back to the
+  // lobby or if a refresh happens they arent booted to the lobby").
+  // Boot reads ?room=<code> and re-opens this lobby.
+  if (lobby.code) setRoomInUrl(lobby.code);
   // WS subscription so chat + roster updates land immediately.
   const channel = 'lobby:' + lobby.id;
   ws.subscribe(channel);
@@ -414,6 +446,30 @@ export async function enterLobby(lobby) {
     leaveCurrent();
   });
   _unsubWS = () => { offUpdate(); offDisband(); ws.unsubscribe(channel); };
+  // Polling fallback. The host's Start click writes lobby.status =
+  // 'started' on the server and broadcasts lobby_update on WS; if
+  // the other player's WS is down (Firefox failing the wss handshake,
+  // tab backgrounded, server hiccup) the broadcast vanishes and the
+  // lobby view sits on 'waiting' forever. Re-fetch the lobby every
+  // LOBBY_POLL_MS while in this view and re-apply via renderLobby -
+  // renderLobby is idempotent and will mount the game view itself
+  // once status flips to 'started'. Cleared on leaveCurrent.
+  if (_lobbyPoll) clearInterval(_lobbyPoll);
+  _lobbyPoll = setInterval(async () => {
+    if (!_activeLobby || _activeLobby.id !== lobby.id) return;
+    const poll = await getLobby(lobby.id);
+    if (!poll || !poll.ok) return;
+    if (!_activeLobby || _activeLobby.id !== lobby.id) return;
+    // getLobby returns { lobby: {...} } - unwrap before assignment
+    // (matches enterLobby's r.data.lobby above). Earlier I assigned
+    // poll.data directly which made _activeLobby a wrapper object and
+    // every member-access (lobby.members.length) blew up on the next
+    // render tick.
+    const fresh = poll.data && poll.data.lobby;
+    if (!fresh) return;
+    _activeLobby = fresh;
+    renderLobby(_activeLobby);
+  }, LOBBY_POLL_MS);
   mountChat(lobby);
   mountInvitesUI(lobby);
   // A started game lives in the sandbox view (renderLobby mounts it +
@@ -493,13 +549,39 @@ async function onLeaveLobby() {
 
 function leaveCurrent() {
   if (_unsubWS) { _unsubWS(); _unsubWS = null; }
+  if (_lobbyPoll) { clearInterval(_lobbyPoll); _lobbyPoll = null; }
   if (_gameMounted) { unmountBrowseOnline(); _gameMounted = false; }
   unmountChat();
   unmountInvitesUI();
   _activeLobby = null;
   saveLastLobbyId(null);
+  setRoomInUrl(null);
   _onShowView('view-lobby-list');
   refreshLobbyList();
+}
+
+// Push / clear the /room/<CODE> path without triggering a navigation.
+// Centralised so openLobby + leaveCurrent stay in sync. The room is a
+// real path segment (user request), so the app base must be resolved
+// independently of the address bar - import.meta.url always points at
+// <base>/js/lobby.js, so '../' off it is the app base regardless of how
+// deep the visible URL currently is. The ?v= version pin is preserved
+// so a later version-check reload keeps the same build.
+function setRoomInUrl(code) {
+  try {
+    const base = new URL('../', import.meta.url).pathname;   // /high-frontier-fan-game/
+    const cur = new URL(window.location.href);
+    const v = cur.searchParams.get('v');
+    const search = v ? ('?v=' + encodeURIComponent(v)) : '';
+    // Codes are stored lowercase server-side (CODE_ALPHABET is
+    // lowercase + digits). Write the URL in the canonical lowercase
+    // form so a copy-pasted link round-trips exactly. The server
+    // handler is also case-insensitive as a belt-and-braces.
+    const target = code
+      ? base + 'room/' + encodeURIComponent(String(code).toLowerCase())
+      : base;
+    window.history.replaceState({}, '', target + search + cur.hash);
+  } catch { /* private mode / file:// scheme */ }
 }
 
 async function onReadyClick() {

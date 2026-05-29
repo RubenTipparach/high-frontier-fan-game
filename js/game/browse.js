@@ -124,7 +124,7 @@ import { setOnline, isOnline } from './online-mode.js';
 import {
   buildIdMaps, hydrateFromSnapshot, toServerId,
 } from './net-bridge.js';
-import { getGame, submitGameOp, fetchChat, sendChat } from '../api.js';
+import { getGame, getGameOps, submitGameOp, fetchChat, sendChat } from '../api.js';
 import { ws } from '../ws.js';
 
 // Only one map mode now (planner / "classic"); the old
@@ -165,11 +165,39 @@ let _spectator = false;
 // reconnect/resub races + flaky mobile networks can drop snapshots,
 // so re-fetch the full game state every few seconds and re-apply.
 // applySnapshot is idempotent. Cleared on unmountBrowseOnline.
+//
+// Two cadences:
+//   ONLINE_POLL_MS         normal cadence (board moves at human speed)
+//   ONLINE_POLL_AUCTION_MS fast cadence while an auction is open
+//                          (bidders + auctioneer expect near-realtime
+//                          feedback - 5s feels broken when you're
+//                          waiting on the auctioneer to sell / keep).
+// applyPollCadence() switches the interval based on the current
+// snapshot's auction field.
 let _onlinePoll = null;
+let _onlinePollMs = 0;
+// Tracks the previous snapshot's auction.awaiting so we can detect
+// the bidders -> auctioneer transition and fire one eager fetch.
+let _lastAuctionPhase = null;
 const ONLINE_POLL_MS = 5000;
+// 500 ms while an auction is live. The bidder UI gives a "stuck"
+// feel any slower than that - users expect Sell / Keep to land
+// near-instantly once the auctioneer has decided. Mobile networks
+// easily handle two snapshot fetches per second; the snapshot is
+// small JSON.
+const ONLINE_POLL_AUCTION_MS = 500;
+// Academia hand limit for auction participation (mirror of the server
+// constant): can't start / bid / join an auction holding 4+ cards.
+const AUCTION_HAND_LIMIT = 4;
 let _onlineToast = null;      // (msg, level) => void, from the caller
 let _onlineMaps = null;       // { serverToPlanner, plannerToServer }
 let _onlineSnapshot = null;   // latest server snapshot (for turn checks)
+// Op-log seq of the last snapshot we actually hydrated. applySnapshot
+// short-circuits when an incoming snapshot carries the same seq, so a
+// poll tick that finds nothing new is a TRUE no-op: no module
+// re-hydrate, no re-render, no stomping on in-progress local UI
+// (boost marks, open modals, etc). Reset on unmount.
+let _lastAppliedSeq = -1;
 let _onlineOffWS = null;      // unsubscribe handle for the game channel
 let _onlineBusy = false;      // in-flight op guard (prevents double submit)
 let _onlineRoom = null;       // table / lobby name for the multiplayer panel
@@ -285,7 +313,7 @@ async function bootstrapOnlineGame() {
     _onlineToast(humanizeOnlineOpError(r.error), 'error');
     return;
   }
-  applySnapshot(r.data.game.state);
+  applySnapshot(r.data.game.state, r.data.game.seq);
   // Open the multiplayer panel so the player lands on the table (room,
   // turn, roster) rather than the solo game-mode pane.
   showPane('mp');
@@ -295,27 +323,16 @@ async function bootstrapOnlineGame() {
   ws.subscribe(channel);
   const off = ws.on('game_update', (msg) => {
     if (!_online || !msg || msg.gameId !== _onlineGameId || !msg.game) return;
-    applySnapshot(msg.game.state);
+    applySnapshot(msg.game.state, msg.game.seq);
   });
   _onlineOffWS = () => { off(); ws.unsubscribe(channel); };
 
   // Polling fallback. WS is the primary path, but if a broadcast is
   // dropped (mobile network, tab backgrounded, server hiccup) the
-  // user can sit with a stale board. Re-fetch every ONLINE_POLL_MS
-  // and re-apply. applySnapshot is a no-op when the seq matches.
-  if (_onlinePoll) clearInterval(_onlinePoll);
-  _onlinePoll = setInterval(async () => {
-    if (!_online || !_onlineGameId || !_onlineMe) return;
-    try {
-      const poll = await getGame(_onlineGameId, _onlineMe.token);
-      if (!_online) return;
-      if (poll && poll.ok && poll.data && poll.data.game && poll.data.game.state) {
-        applySnapshot(poll.data.game.state);
-      }
-    } catch (err) {
-      // Network blips are expected; the next tick will retry.
-    }
-  }, ONLINE_POLL_MS);
+  // user can sit with a stale board. Re-fetch on the active cadence
+  // (5s normal, 1s while an auction is open) and re-apply.
+  // applySnapshot is a no-op when the seq matches.
+  setPollCadence(ONLINE_POLL_MS);
 
   // In-pane chat: fetch the lobby's chat history (table conversation)
   // and subscribe to live 'chat' broadcasts on the lobby channel. Both
@@ -336,13 +353,73 @@ async function bootstrapOnlineGame() {
   }
 }
 
+// One-shot snapshot fetch outside the interval cadence. Used to
+// shave the worst-case "I just placed the winning bid and now I
+// wait a full tick before Sell lands" latency. Coalesced: a poll
+// fetch already in flight pre-empts a duplicate.
+let _eagerPollInFlight = false;
+async function eagerPoll() {
+  if (!_online || !_onlineGameId || !_onlineMe || _eagerPollInFlight) return;
+  _eagerPollInFlight = true;
+  try {
+    const r = await getGame(_onlineGameId, _onlineMe.token);
+    if (!_online) return;
+    if (r && r.ok && r.data && r.data.game && r.data.game.state) {
+      applySnapshot(r.data.game.state, r.data.game.seq);
+    }
+  } catch { /* next tick will retry */ }
+  finally { _eagerPollInFlight = false; }
+}
+
+// Swap the poll interval to the requested cadence. Idempotent when
+// the cadence already matches, so applySnapshot can call it on every
+// snapshot without thrashing the interval.
+function setPollCadence(ms) {
+  if (_onlinePollMs === ms && _onlinePoll) return;
+  if (_onlinePoll) clearInterval(_onlinePoll);
+  _onlinePollMs = ms;
+  _onlinePoll = setInterval(async () => {
+    if (!_online || !_onlineGameId || !_onlineMe) return;
+    try {
+      const poll = await getGame(_onlineGameId, _onlineMe.token);
+      if (!_online) return;
+      if (poll && poll.ok && poll.data && poll.data.game && poll.data.game.state) {
+        // Seq-gated: a poll that returns the same seq we already have
+        // is a no-op inside applySnapshot - it won't touch local UI.
+        applySnapshot(poll.data.game.state, poll.data.game.seq);
+      }
+    } catch (err) {
+      // Network blips are expected; the next tick will retry.
+    }
+  }, ms);
+}
+
 // Replace all sandbox module state from a server snapshot, then repaint
 // the rocket marker at the translated planner node (or LEO when the
 // server site has no planner node / the ship is at LEO). Caches the
 // snapshot so the action routers + turn checks can read activeIndex.
-function applySnapshot(snapshot) {
+// `seq` is the server op-log sequence the snapshot was taken at (from
+// the game wrapper). When it matches the last applied seq the server
+// state hasn't advanced, so we skip the entire hydrate - polling must
+// NOT invalidate local UI unless the server actually moved. Callers
+// that need to force a re-hydrate (error snap-back to the cached
+// state) pass seq = undefined.
+function applySnapshot(snapshot, seq) {
   if (!snapshot || !_onlineMaps || !_onlineMe) return;
+  if (seq != null && seq === _lastAppliedSeq) return;  // nothing new
+  if (seq != null) _lastAppliedSeq = seq;
   _onlineSnapshot = snapshot;
+  // Card economy is server-authoritative in multiplayer (state.economy).
+  // Pin the client's MARKET_MODE to whatever the snapshot says BEFORE
+  // any hydrators run so the cart tab + Free Market / Research Auction
+  // gating reads the right value. skipReset so we don't wipe the
+  // fresh server state. Defaults to 'market' if the snapshot is from
+  // a pre-economy build.
+  const targetMode = snapshot.economy === 'library'
+    ? MARKET_MODE.LIBRARY : MARKET_MODE.MARKET;
+  if (getMarketMode() !== targetMode) {
+    setMarketMode(targetMode, { skipReset: true });
+  }
   // hydrateFromSnapshot fans the snapshot out to every state module
   // (rocket/hand/outposts/glory/clock/discs/factories/decks/leo) and
   // returns the planner-node id our rocket sits on (null = LEO).
@@ -353,19 +430,61 @@ function applySnapshot(snapshot) {
   _rocketSiteId = pid || null;
   persistRocketSite();
   syncSandboxRocket();
+  // Paint the player's own seat colour across their chrome (top bar +
+  // hand strip) so they always know "I am this colour".
+  syncMeColor(snapshot);
+  // Opponent rockets on the map (colour-coded, offset when colocated).
+  syncMpRockets(snapshot);
   // Refresh the multiplayer table panel (room / turn / roster) from the
   // same snapshot so opponents' positions + resources stay live.
   renderMpPanel(snapshot);
   // Big black turn banner above the hand. Mirrors the same source-of-
   // truth (snapshot.activeIndex) the panel uses so the two never drift.
   syncMpTurnBanner(snapshot);
+  // Toolbar end-turn / op / move buttons: greyed out when it's not
+  // my turn. Server is the source of truth for whose turn it is, so
+  // we re-fire refreshTurnBudget on every snapshot.
+  const mapHost = document.getElementById('browse-map');
+  if (mapHost && typeof mapHost._refreshTurnBudget === 'function') {
+    try { mapHost._refreshTurnBudget(); } catch (e) { /* ignore */ }
+  }
+  // Mission log pane: when open and we're online, re-fetch the server
+  // op log so a newly-landed op (auction, end-turn, etc.) appears in
+  // near-realtime. Local sandbox log changes don't fire in MP so the
+  // existing onLogChange listener wouldn't catch this.
+  const panel = document.getElementById('browse-sidepanel');
+  if (panel && panel.dataset.active === 'log') {
+    const logHost = document.getElementById('browse-log');
+    if (logHost) paintOnlineMissionLog(logHost);
+  }
   // Competitive auction overlay is wired separately (see the TODO hook).
   renderOnlineAuction(snapshot.auction);
+  // Speed the snapshot poll up to ONLINE_POLL_AUCTION_MS while an
+  // auction is open so a bidder waiting on "The auctioneer is
+  // deciding" sees Sell / Keep land in near-realtime if the WS
+  // broadcast was dropped. Drop back to the normal cadence when the
+  // auction closes.
+  setPollCadence(snapshot.auction ? ONLINE_POLL_AUCTION_MS : ONLINE_POLL_MS);
+  // Eager one-shot fetch the moment the auctioneer's phase opens
+  // (awaiting === 'auctioneer'). The accept can land within ms of
+  // the bidder seeing this state; without a head-start the bidder
+  // waits a full poll tick AFTER the auctioneer accepts. Skipped
+  // for the auctioneer themself - their own submit response already
+  // applied the post-sell state. _lastAuctionPhase guards against
+  // re-firing on every snapshot in the same phase (would otherwise
+  // loop at network speed).
+  const auctionPhase = snapshot.auction ? snapshot.auction.awaiting : null;
+  if (auctionPhase === 'auctioneer' && _lastAuctionPhase !== 'auctioneer') {
+    const myId = _onlineMe && _onlineMe.id;
+    if (snapshot.auction.auctioneerId !== myId) eagerPoll();
+  }
+  _lastAuctionPhase = auctionPhase;
   // If I haven't picked my starting crew yet, open the mandatory crew
   // wizard. Driven off the snapshot (player.faction) so it survives
   // reloads / late joins, and so a re-bootstrap won't reopen the
   // wizard once the pick is committed server-side.
   maybePromptCrewPick(snapshot);
+  syncCrewDraftOverlay(snapshot);
 }
 
 // One-at-a-time guard so a flurry of snapshots (e.g. another player's
@@ -396,6 +515,117 @@ function maybePromptCrewPick(snapshot) {
   });
 }
 
+// Crew-draft waiting overlay. Visible whenever the snapshot says
+// state.draftPhase === 'crew'. Shows live "Picked: X / Y" progress
+// + which players still need to commit, and gives the local player
+// a "Change pick" button while they're waiting (they can switch any
+// number of times until the last player commits, at which point the
+// server flips draftPhase to 'play' and the overlay clears).
+function syncCrewDraftOverlay(snapshot) {
+  const existing = document.getElementById('mp-crew-draft-overlay');
+  const drafting = !!(snapshot && snapshot.draftPhase === 'crew') && !_spectator;
+  if (!drafting) {
+    if (existing) existing.remove();
+    return;
+  }
+  const players = snapshot.players || [];
+  const picked = players.filter((p) => !!p.faction);
+  const waitingOn = players.filter((p) => !p.faction);
+  const myId = _onlineMe && _onlineMe.id;
+  const myp = players.find((p) => p.profileId === myId);
+  const myFaction = myp && myp.faction;
+
+  // Keep a single overlay element; rebuild the body each snapshot
+  // so the "Picked: X / Y" counters stay live.
+  let overlay = existing;
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'mp-crew-draft-overlay';
+    overlay.className = 'mp-crew-draft-overlay';
+    document.body.appendChild(overlay);
+  }
+  const fName = (p) => {
+    const card = p.faction && CREW_BY_ID[p.faction.cardId];
+    const face = card && card.faces && card.faces[p.faction.face];
+    return (face && face.name) || (p.faction && p.faction.cardId) || '';
+  };
+  // While the wizard is open we keep the overlay there but dimmed
+  // behind it - the wizard's own backdrop covers it. Otherwise
+  // surface the "waiting" panel front and centre.
+  overlay.innerHTML = `
+    <div class="mp-crew-draft-panel" role="dialog" aria-label="Crew draft">
+      <h3>🧑‍🚀 Crew draft</h3>
+      <p class="muted mp-crew-draft-count">
+        Picked: <strong>${picked.length}</strong> /
+        <strong>${players.length}</strong>
+      </p>
+      <ul class="mp-crew-draft-roster"></ul>
+      ${myFaction
+        ? `<p class="mp-crew-draft-me">You picked <strong>${esc(fName(myp))}</strong>.
+             You can change while others are still deciding.</p>
+           <button type="button" class="modal-btn mp-crew-draft-change">🔄 Change pick</button>`
+        : `<p class="mp-crew-draft-me">Open the picker to commit your faction.</p>
+           <button type="button" class="modal-btn primary mp-crew-draft-open">🧑‍🚀 Pick crew</button>`}
+    </div>
+  `;
+  const roster = overlay.querySelector('.mp-crew-draft-roster');
+  for (const p of players) {
+    const li = document.createElement('li');
+    const dot = document.createElement('span');
+    dot.className = 'mp-crew-draft-dot';
+    dot.style.background = p.color || '#888';
+    const name = document.createElement('span');
+    name.className = 'mp-crew-draft-name player-name';
+    if (p.color) name.style.setProperty('--player-color', p.color);
+    name.textContent = '@' + p.name + (p.profileId === myId ? ' (you)' : '');
+    const status = document.createElement('span');
+    status.className = 'mp-crew-draft-status';
+    if (p.faction) {
+      status.textContent = '✓ ' + fName(p);
+      li.classList.add('is-picked');
+    } else {
+      status.textContent = '… deciding';
+    }
+    li.append(dot, name, status);
+    roster.appendChild(li);
+  }
+  const openBtn = overlay.querySelector('.mp-crew-draft-open');
+  const changeBtn = overlay.querySelector('.mp-crew-draft-change');
+  const reopen = () => {
+    // _crewWizardOpen guard would block a re-open; clear it first
+    // so the user can change their mind.
+    _crewWizardOpen = false;
+    maybePromptCrewPickForced(snapshot);
+  };
+  if (openBtn) openBtn.addEventListener('click', reopen);
+  if (changeBtn) changeBtn.addEventListener('click', reopen);
+  // Suppress the bare waiting overlay while the wizard's own modal
+  // is open - the modal already says everything the overlay would.
+  overlay.classList.toggle('is-behind-wizard', _crewWizardOpen);
+}
+
+// Open the wizard even when the player already has a faction. Used
+// by the "Change pick" button on the draft overlay - the regular
+// maybePromptCrewPick early-returns once myp.faction is set.
+function maybePromptCrewPickForced(snapshot) {
+  if (!_online || _spectator || _crewWizardOpen || !_onlineMe) return;
+  const myId = _onlineMe.id;
+  const myp = (snapshot.players || []).find((p) => p.profileId === myId);
+  if (!myp) return;
+  _crewWizardOpen = true;
+  const desc = myp.faction
+    ? 'Switch to the other face of your crew card. You can change as long as other players are still picking.'
+    : 'Pick one of the two faces of your crew card.';
+  openCrewWizard({
+    description: desc,
+    restrictToColor: myp.color || null,
+    onCommit: ({ cardId, face }) => {
+      submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
+    },
+    onDone: () => { _crewWizardOpen = false; syncCrewDraftOverlay(_onlineSnapshot); },
+  });
+}
+
 // Crew-pick op submitter. Like submitMpAuctionOp, this bypasses the
 // turn-check in submitOnlineOp: any player can pick their crew at
 // any time, regardless of whose turn it is or whether an auction is
@@ -418,7 +648,7 @@ async function submitMpCrewOp(op) {
     if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
     return false;
   }
-  applySnapshot(r.data.game.state);
+  applySnapshot(r.data.game.state, r.data.game.seq);
   return true;
 }
 
@@ -511,8 +741,16 @@ function renderOnlineAuction(auction) {
     ? players.find((p) => p.profileId === auction.highBidderId) : null;
   const lot = PATENTS_BY_ID[auction.cardId];
 
-  overlay.querySelector('.mp-auction-mode').textContent = auctioneer
+  const modeEl = overlay.querySelector('.mp-auction-mode');
+  modeEl.textContent = auctioneer
     ? `@${auctioneer.name}'s lot` : 'Lot';
+  if (auctioneer && auctioneer.color) {
+    modeEl.classList.add('player-name');
+    modeEl.style.setProperty('--player-color', auctioneer.color);
+  } else {
+    modeEl.classList.remove('player-name');
+    modeEl.style.removeProperty('--player-color');
+  }
 
   const lotHost = overlay.querySelector('#mp-auction-lot');
   lotHost.innerHTML = '';
@@ -523,9 +761,17 @@ function renderOnlineAuction(auction) {
     lotHost.textContent = auction.cardId;
   }
 
-  overlay.querySelector('.mp-auction-bid').textContent = auction.highBid > 0
+  const bidEl = overlay.querySelector('.mp-auction-bid');
+  bidEl.textContent = auction.highBid > 0
     ? `High bid: ${auction.highBid} aqua by @${highBidder ? highBidder.name : '?'}`
     : 'No bids yet.';
+  if (auction.highBid > 0 && highBidder && highBidder.color) {
+    bidEl.classList.add('player-name');
+    bidEl.style.setProperty('--player-color', highBidder.color);
+  } else {
+    bidEl.classList.remove('player-name');
+    bidEl.style.removeProperty('--player-color');
+  }
   overlay.querySelector('.mp-auction-phase').textContent =
     auction.awaiting === 'bidders' ? 'Bidding is open.' : 'The auctioneer is deciding.';
 
@@ -545,6 +791,16 @@ function setMpAuctionError(text) {
 function clampAuctionInt(draft, min) {
   const v = parseInt(draft, 10);
   return (Number.isInteger(v) && v >= min) ? v : min;
+}
+
+// Small muted note line used throughout the auction controls. (This
+// helper was referenced before it existed - the auction overlay
+// threw "noteEl is not defined" on every snapshot. Defining it here.)
+function noteEl(text) {
+  const p = document.createElement('p');
+  p.className = 'muted mp-auction-note';
+  p.textContent = text;
+  return p;
 }
 
 // Role + phase aware controls inside the auction modal. Mirrors the
@@ -570,6 +826,22 @@ function buildMpAuctionControls(host, a, { auctioneer, highBidder }) {
       host.appendChild(noteEl('You hold the high bid. Waiting for the others.'));
       return;
     }
+    // Academia hand limit: can't bid holding 4+ cards (a win would
+    // overflow). Server enforces this too; surface why the bid row
+    // is gone. Pass is still allowed.
+    const myHandCount = Array.isArray(myp.hand) ? myp.hand.length : 0;
+    if (myHandCount >= AUCTION_HAND_LIMIT) {
+      host.appendChild(noteEl(`Hand full (${myHandCount}/${AUCTION_HAND_LIMIT}) - you can't bid. Build or transfer cards first.`));
+      const passOnly = document.createElement('button');
+      passOnly.type = 'button';
+      passOnly.className = 'modal-btn';
+      const didPass = Array.isArray(a.passed) && a.passed.includes(myId);
+      passOnly.textContent = didPass ? 'Passed' : 'Pass';
+      passOnly.disabled = didPass || _onlineBusy;
+      passOnly.addEventListener('click', () => submitMpAuctionOp({ kind: 'AUCTION_PASS' }));
+      host.appendChild(passOnly);
+      return;
+    }
     const minBid = (a.highBid | 0) + 1;
     const passed = Array.isArray(a.passed) && a.passed.includes(myId);
     const row = document.createElement('div');
@@ -582,6 +854,10 @@ function buildMpAuctionControls(host, a, { auctioneer, highBidder }) {
     const bidBtn = document.createElement('button');
     bidBtn.type = 'button';
     bidBtn.className = 'modal-btn primary';
+    // Initial text so a render that beats sync() (or a CSS that
+    // accidentally hides the dynamic update) still shows the label.
+    // sync() rewrites this to "Bid <N>" when there's a valid amount.
+    bidBtn.textContent = 'Bid';
     const passBtn = document.createElement('button');
     passBtn.type = 'button';
     passBtn.className = 'modal-btn';
@@ -626,7 +902,7 @@ function buildMpAuctionControls(host, a, { auctioneer, highBidder }) {
       submitMpAuctionOp({ kind: 'AUCTION_JOIN', amount: 0 });
     });
     host.appendChild(keepBtn);
-    host.appendChild(noteEl('No one bid. Keep it for free (one more pass-round, then it is yours).'));
+    host.appendChild(noteEl('No one bid. Keep it for free - the auction closes immediately.'));
     return;
   }
   const sellBtn = document.createElement('button');
@@ -650,6 +926,7 @@ function buildMpAuctionControls(host, a, { auctioneer, highBidder }) {
   const joinBtn = document.createElement('button');
   joinBtn.type = 'button';
   joinBtn.className = 'modal-btn';
+  joinBtn.textContent = 'Join';
   const sync = () => {
     const v = parseInt(input.value, 10);
     const okAmt = Number.isInteger(v) && v >= minJoin && v <= myAqua;
@@ -689,7 +966,7 @@ async function submitMpAuctionOp(op) {
     if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
     return false;
   }
-  applySnapshot(r.data.game.state);
+  applySnapshot(r.data.game.state, r.data.game.seq);
   return true;
 }
 
@@ -825,7 +1102,12 @@ function appendMpChat(msg) {
   const li = document.createElement('li');
   li.className = 'mp-chat-msg';
   const who = document.createElement('span');
-  who.className = 'mp-chat-who';
+  who.className = 'mp-chat-who player-name';
+  // Resolve the speaker's seat colour from the cached snapshot so
+  // their @name tints to match the rest of the player chrome.
+  const speaker = (_onlineSnapshot && _onlineSnapshot.players || [])
+    .find((p) => p.profileId === msg.profileId);
+  if (speaker && speaker.color) who.style.setProperty('--player-color', speaker.color);
   who.textContent = '@' + (msg.profileName || 'someone');
   const body = document.createElement('span');
   body.className = 'mp-chat-body';
@@ -847,9 +1129,13 @@ function renderMpPanel(snapshot) {
   const myId = _onlineMe && _onlineMe.id;
   const myp = players.find((p) => p.profileId === myId) || null;
   // Auctioneer-side gating mirrors the server (AUCTION_START needs your
-  // turn, at least one op left, and no auction already open).
+  // turn, at least one op left, no auction open, AND under the
+  // academia hand limit (can't start with 4+ cards - winning would
+  // overflow the hand; the server enforces the same).
+  const myHandCount = (myp && Array.isArray(myp.hand)) ? myp.hand.length : 0;
   const canStartAuction = !!(active && active.profileId === myId
-    && myp && myp.opsRemaining > 0 && !snapshot.auction);
+    && myp && myp.opsRemaining > 0 && !snapshot.auction
+    && myHandCount < AUCTION_HAND_LIMIT);
   tableEl.innerHTML = '';
 
   const head = document.createElement('div');
@@ -922,7 +1208,8 @@ function renderMpPlayer(p, isMe, isActive) {
   dot.className = 'dot';
   dot.style.background = p.color || '#888';
   const name = document.createElement('span');
-  name.className = 'mp-name';
+  name.className = 'mp-name player-name';
+  if (p.color) name.style.setProperty('--player-color', p.color);
   name.textContent = '@' + p.name + (isMe ? ' (you)' : '');
   const stats = document.createElement('span');
   stats.className = 'mp-stats';
@@ -951,47 +1238,151 @@ function renderMpPlayer(p, isMe, isActive) {
 function buildMpPlayerDetail(host, p, isMe) {
   host.innerHTML = '';
   const rkt = p.rocket || {};
-  host.appendChild(mpSection(
-    `Rocket (water ${rkt.tank || 0})`,
-    (rkt.stack || []).map((s) => mpCardName(s.id)),
-    'Empty rocket.',
-  ));
-  const ops = p.outposts ? Object.values(p.outposts) : [];
-  for (const op of ops) {
-    host.appendChild(mpSection(
-      `Outpost ${op.letter || ''} @ ${onlineSiteLabel(op.siteId)} (water ${op.tank || 0})`,
-      (op.cards || []).map((s) => mpCardName(s.id)),
-      'Empty.'
-    ));
-  }
-  const hand = p.hand ? p.hand.length : 0;
-  const h = document.createElement('div');
-  h.className = 'mp-detail-label muted';
-  h.textContent = isMe ? `Hand: ${hand}` : `Hand: ${hand} card${hand === 1 ? '' : 's'} (hidden)`;
-  host.appendChild(h);
-}
+  const outposts = p.outposts || {};
+  // All six stacks as clickable inspect chips: LEO, Rocket, Outpost
+  // A-D. Rocket / LEO / outpost cards are OPEN information - any player
+  // can inspect them (openMpStackModal). An outpost that isn't built
+  // shows as a disabled "not built" chip so the six slots always read
+  // consistently. The grid lives in .mp-stack-grid.
+  const grid = document.createElement('div');
+  grid.className = 'mp-stack-grid';
 
-function mpSection(title, names, emptyTxt) {
-  const wrap = document.createElement('div');
-  wrap.className = 'mp-section';
-  const t = document.createElement('div');
-  t.className = 'mp-detail-label';
-  t.textContent = title;
-  wrap.appendChild(t);
-  if (!names.length) {
-    const e = document.createElement('div');
-    e.className = 'muted mp-line';
-    e.textContent = emptyTxt;
-    wrap.appendChild(e);
-  } else {
-    for (const n of names) {
-      const r = document.createElement('div');
-      r.className = 'mp-line';
-      r.textContent = n;
-      wrap.appendChild(r);
+  // LEO Stack lives at LEO; Rocket sits at its siteId (null = LEO by
+  // default - "rocket is at LEO unless assembled on an outpost or not
+  // yet disassembled at a site"). Each chip carries a 📍 find button
+  // that flies the map to that stack's location.
+  grid.appendChild(mpStackChip('🛰 LEO Stack', p.leo || [], {
+    who: p.name, hasLocation: true, findServerSite: null,
+  }));
+  grid.appendChild(mpStackChip(
+    `🚀 Rocket${rkt.tank ? ` (💧${rkt.tank})` : ''}`,
+    rkt.stack || [], { who: p.name, hasLocation: true, findServerSite: rkt.siteId || null },
+  ));
+  for (const letter of ['A', 'B', 'C', 'D']) {
+    const op = outposts[letter];
+    if (op) {
+      grid.appendChild(mpStackChip(
+        `🏛 Outpost ${letter} · ${onlineSiteLabel(op.siteId)}${op.tank ? ` (💧${op.tank})` : ''}`,
+        op.cards || [], { who: p.name, hasLocation: true, findServerSite: op.siteId },
+      ));
+    } else {
+      // Not built -> no location, so the find button is disabled.
+      grid.appendChild(mpStackChip(`🏛 Outpost ${letter}: none`, [], {
+        who: p.name, hasLocation: false,
+      }));
     }
   }
-  return wrap;
+  host.appendChild(grid);
+
+  // Hand is OPEN information (user 2026-05-29: "hand cards SHOULD NOT
+  // BE HIDDEN") - inspectable for every player, same as the other
+  // stacks. Not on the map, so no find button.
+  const count = Array.isArray(p.hand) ? p.hand.length : 0;
+  const cell = mpStackChip(`✋ Hand (${count})`, p.hand || [], { who: p.name, hasLocation: false });
+  cell.classList.add('mp-stack-hand');
+  host.appendChild(cell);
+}
+
+// One stack cell: an inspect chip (label + count, opens a read-only
+// card modal) plus an optional 📍 find button that flies the map to
+// the stack's location. findServerSite is the server siteId (null =
+// LEO); hasLocation=false (e.g. an unbuilt outpost, or the hand)
+// renders the find button disabled. Returns the wrapper cell.
+function mpStackChip(title, slots, { who, hasLocation, findServerSite } = {}) {
+  const arr = Array.isArray(slots) ? slots : [];
+  const cell = document.createElement('div');
+  cell.className = 'mp-stack-cell';
+
+  const chip = document.createElement('button');
+  chip.type = 'button';
+  chip.className = 'mp-stack-chip';
+  const label = document.createElement('span');
+  label.className = 'mp-stack-chip-label';
+  label.textContent = title;
+  const n = document.createElement('span');
+  n.className = 'mp-stack-chip-count';
+  n.textContent = String(arr.length);
+  chip.append(label, n);
+  if (!arr.length) {
+    chip.classList.add('is-empty');
+    chip.disabled = true;
+  } else {
+    chip.addEventListener('click', () => openMpStackModal(`${who ? '@' + who + ' - ' : ''}${title}`, arr));
+  }
+  cell.appendChild(chip);
+
+  // 📍 find button. Always rendered (so the six cells line up), but
+  // disabled when the stack has no map location.
+  const find = document.createElement('button');
+  find.type = 'button';
+  find.className = 'mp-stack-find';
+  find.textContent = '📍';
+  find.title = hasLocation ? 'Fly the map to this stack' : 'No location yet';
+  find.disabled = !hasLocation;
+  if (hasLocation) {
+    find.addEventListener('click', () => {
+      const pos = mpRocketCoords(findServerSite); // null -> LEO anchor
+      if (pos && _renderer) _renderer.flyTo(pos, locateZoom(4));
+    });
+  }
+  cell.appendChild(find);
+  return cell;
+}
+
+// Read-only modal listing the cards in a stack (opponent inspection).
+// Renders each slot via the shared renderCard so it looks like every
+// other card surface. No actions - pure inspection.
+function openMpStackModal(title, slots) {
+  document.querySelector('.mp-stack-modal-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay mp-stack-modal-overlay';
+  overlay.tabIndex = -1;
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  const dialog = document.createElement('div');
+  dialog.className = 'mp-stack-modal';
+  const head = document.createElement('div');
+  head.className = 'mp-stack-modal-head';
+  const h = document.createElement('h3');
+  h.textContent = title;
+  const x = document.createElement('button');
+  x.type = 'button';
+  x.className = 'modal-x';
+  x.textContent = '×';
+  x.title = 'Close (Esc)';
+  x.addEventListener('click', close);
+  head.append(h, x);
+  dialog.appendChild(head);
+
+  const body = document.createElement('div');
+  body.className = 'mp-stack-modal-cards';
+  for (const slot of slots) {
+    // The HAND ships as bare id strings; LEO / rocket / outpost ship as
+    // { id, kind, face } slot objects. Normalise so both render.
+    const id = (typeof slot === 'string') ? slot : (slot && slot.id);
+    const face = (slot && typeof slot === 'object') ? slot.face : undefined;
+    const card = PATENTS_BY_ID[id] || CREW_BY_ID[id];
+    if (!card) {
+      const t = document.createElement('div');
+      t.className = 'mp-line';
+      t.textContent = id || '?';
+      body.appendChild(t);
+      continue;
+    }
+    const kind = CREW_BY_ID[id] ? 'crew' : 'patent';
+    const wrap = document.createElement('div');
+    wrap.className = 'mp-stack-modal-card';
+    try { wrap.appendChild(renderCard(card, { type: kind, face })); }
+    catch { wrap.textContent = card.name || id; }
+    body.appendChild(wrap);
+  }
+  dialog.appendChild(body);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  overlay.focus();
 }
 
 // Whether it is the local player's turn in the cached snapshot.
@@ -1025,7 +1416,7 @@ async function submitOnlineOp(op) {
     if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
     return false;
   }
-  applySnapshot(r.data.game.state);
+  applySnapshot(r.data.game.state, r.data.game.seq);
   return true;
 }
 
@@ -1047,12 +1438,24 @@ function humanizeOnlineOpError(code) {
     game_not_active: 'This game has ended.',
     not_a_player: 'You are not in this game.',
     unknown_op: 'Unsupported operation.',
+    rocket_not_at_leo: 'Park the rocket at LEO to move cards between LEO and the rocket.',
+    bad_transfer: 'Invalid transfer.',
+    not_in_leo: 'That card is not in your LEO Stack.',
+    not_in_rocket: 'That card is not on your rocket.',
+    empty_rocket: 'Your rocket is empty - build or board a thruster before moving.',
+    nothing_to_boost: 'Mark at least one hand card to boost.',
+    tank_full: 'The rocket tank is full.',
+    no_water: 'No water in the tank to cash out.',
+    unknown_card: 'That card does not exist.',
     crew_already_picked: 'You have already picked your starting crew.',
+    crew_draft_closed: 'Crew picks are locked - the game has started.',
+    awaiting_crew_picks: 'Waiting for every player to pick a starting crew.',
     unknown_crew: 'That crew card does not exist.',
     unknown_crew_face: 'Pick the primary or secondary face.',
     wrong_crew_colour: 'That crew card is not your assigned colour.',
     auction_in_progress: 'An auction is already underway.',
     need_opponent: 'Need another player to hold an auction.',
+    hand_limit: 'Hand limit reached (4) - you cannot start or join an auction. Build or transfer cards first.',
     no_ops_left: 'No operations left this turn.',
     bad_deck: 'Pick a valid deck to auction.',
     deck_empty: 'That deck is empty.',
@@ -1095,6 +1498,9 @@ function onSetActiveProspectorClick(cardId) {
 export function unmountBrowseOnline() {
   if (_onlineOffWS) { try { _onlineOffWS(); } catch { /* ignore */ } _onlineOffWS = null; }
   if (_onlinePoll) { clearInterval(_onlinePoll); _onlinePoll = null; }
+  _onlinePollMs = 0;
+  _lastAuctionPhase = null;
+  _eagerPollInFlight = false;
   setOnline(false);
   _online = false;
   _spectator = false;
@@ -1104,6 +1510,12 @@ export function unmountBrowseOnline() {
   if (_onlineChatOff) { try { _onlineChatOff(); } catch { /* ignore */ } _onlineChatOff = null; }
   _onlineMaps = null;
   _onlineSnapshot = null;
+  _lastAppliedSeq = -1;
+  if (_renderer) {
+    try { _renderer.setMpRockets(null); _renderer.setSandboxRocketOffset(0); } catch { /* ignore */ }
+  }
+  const shell = document.querySelector('.browse-shell');
+  if (shell) { shell.style.removeProperty('--me-color'); shell.classList.remove('has-me-color'); }
   _onlineBusy = false;
   _onlineRoom = null;
   _onlineLobbyId = null;
@@ -1120,6 +1532,8 @@ export function unmountBrowseOnline() {
   // sessions when the player returns to the lobby list.
   const crewOverlay = document.querySelector('.crew-wizard-overlay');
   if (crewOverlay) crewOverlay.remove();
+  const draftOverlay = document.getElementById('mp-crew-draft-overlay');
+  if (draftOverlay) draftOverlay.remove();
   _crewWizardOpen = false;
   const banner = document.getElementById('mp-turn-banner');
   if (banner) {
@@ -1330,6 +1744,15 @@ function wireHandStrip() {
       no: 'Cancel',
     });
     if (!ok) return;
+    // Online: the BOOST is a server op. Submit the marked ids; the
+    // server moves Hand -> LEO, charges aqua, spends the op, and
+    // broadcasts. Skip the local mutation below - the snapshot
+    // re-hydrate is the source of truth (and other players see it).
+    if (_online) {
+      const sent = await submitOnlineOp({ kind: 'BOOST', cardIds: marked });
+      if (sent) clearBoostMarks();
+      return;
+    }
     // Charge the Aqua first (affordability pre-checked above;
     // spendAqua is defence-in-depth). Then secure the op - if
     // none is left, refund the Aqua so the player isn't charged
@@ -1641,17 +2064,41 @@ function getColocatedDestinations(sourceId) {
 // true on success. Wet-mass clamps re-apply on the destination
 // after the move; any spilled water is logged. Used by the
 // transfer section's "Send selected" button.
+// Online batch transfer: submit ALL selected cards in ONE TRANSFER op.
+// Returns true if it handled the click (online), false to fall through
+// to the solo per-card loop. Fixes "only one card at a time" - the
+// per-card loop fired N submitOnlineOps but _onlineBusy dropped every
+// one after the first. LEO<->Rocket only; other combos toast.
+function transferSelectedOnline(sourceId, destId, ids) {
+  if (!_online) return false;
+  let to = null;
+  if (sourceId === 'leo' && destId === 'rocket') to = 'rocket';
+  else if (sourceId === 'rocket' && destId === 'leo') to = 'leo';
+  if (!to) {
+    _onlineToast('That transfer is not available in online play yet.', 'error');
+    return true;
+  }
+  submitOnlineOp({ kind: 'TRANSFER', cardIds: [...ids], to });
+  return true;
+}
+
 function transferOneCard(sourceId, destId, cardId) {
-  // Online: committing a card onto the rocket stack maps to the server
-  // BUILD_ROCKET op. Fire it (fire-and-forget; the broadcast snapshot
-  // re-hydrates the stack and repaints the open inspector) and return
-  // false so the local move below is skipped. Non-rocket transfers
-  // (rocket -> outpost, LEO -> outpost, etc) have no server op yet, so
-  // they no-op with a toast rather than mutating local state that the
+  // Online: LEO <-> Rocket transfers map to the server TRANSFER op
+  // (valid only while the rocket is parked at LEO; the server enforces
+  // that). Fire-and-forget - the broadcast / poll snapshot re-hydrates
+  // the stacks and repaints the open inspector. Return false so the
+  // local move below is skipped. Other combos (outpost <-> *) have no
+  // server op yet, so they toast rather than mutating local state the
   // next snapshot would clobber.
+  //
+  // NB: LEO -> Rocket is NOT BUILD_ROCKET - that op pulls from the
+  // hand. The crew PICK_CREW staged in LEO lives in player.leo, so it
+  // must travel via TRANSFER.
   if (_online) {
-    if (destId === 'rocket') {
-      submitOnlineOp({ kind: 'BUILD_ROCKET', cardId });
+    if (sourceId === 'leo' && destId === 'rocket') {
+      submitOnlineOp({ kind: 'TRANSFER', cardId, to: 'rocket' });
+    } else if (sourceId === 'rocket' && destId === 'leo') {
+      submitOnlineOp({ kind: 'TRANSFER', cardId, to: 'leo' });
     } else {
       _onlineToast('That transfer is not available in online play yet.', 'error');
     }
@@ -1999,12 +2446,32 @@ function openUnifiedStackInspector(stackId) {
         <div class="stack-inspector-transfer">
           <h4>🔄 Transfer (free action)</h4>
           <p class="muted">Select cards above, then send them to a colocated stack. Wet-mass clamps apply on the destination tank.</p>
+          <div class="stack-inspector-selrow">
+            <button type="button" class="modal-btn stack-selall">Select all</button>
+            <button type="button" class="modal-btn stack-deselall">Deselect all</button>
+          </div>
           <div class="stack-inspector-xfer-row">${destButtonsHtml}</div>
         </div>`;
+      // Select-all / deselect-all over the source stack's cards.
+      const selAll = transferHost.querySelector('.stack-selall');
+      const deselAll = transferHost.querySelector('.stack-deselall');
+      if (selAll) selAll.addEventListener('click', () => {
+        for (const c of cards) selected.add(c.id);
+        render();
+      });
+      if (deselAll) deselAll.addEventListener('click', () => {
+        selected.clear();
+        render();
+      });
       transferHost.querySelectorAll('.stack-inspector-xfer-btn').forEach((btn) => {
         btn.addEventListener('click', () => {
           const destId = btn.getAttribute('data-dest');
           if (!destId || selected.size === 0) return;
+          // Online: one batch op for all selected cards.
+          if (transferSelectedOnline(stackId, destId, [...selected])) {
+            selected.clear();
+            return;
+          }
           // Snapshot ids first - the source array mutates as
           // we move each card so iteration over `selected` is
           // safe via spread.
@@ -3125,21 +3592,48 @@ function ensureMapShell(host) {
   // consume / refund / turn rollover.
   const opTag = host.querySelector('#turn-tag-op');
   const moveTag = host.querySelector('#turn-tag-move');
+  const endTurnBtn = host.querySelector('#turn-end');
   function refreshTurnBudget() {
     const ops = getOpsRemaining();
     const moves = getMovesRemaining();
+    // Online: lock End turn / op / move when it's not the local
+    // player's turn (or in spectator mode). The server-authoritative
+    // engine would refuse the op anyway, but greying the controls
+    // makes it obvious the action isn't available right now.
+    // CLAUDE.md: async multiplayer can't trust the WS to be live,
+    // so the turn-ownership read uses the cached snapshot the
+    // polling loop refreshes.
+    const lockedByOnline = _online && (_spectator || !isOnlineMyTurn());
     if (opTag) {
       opTag.textContent = `op:${ops}`;
       opTag.classList.toggle('is-spent', ops <= 0);
+      opTag.classList.toggle('is-locked', lockedByOnline);
+      opTag.disabled = lockedByOnline;
+      if (lockedByOnline) opTag.title = 'Waiting for your turn.';
     }
     if (moveTag) {
       moveTag.textContent = `move:${moves}`;
       moveTag.classList.toggle('is-spent', moves <= 0);
-      moveTag.title = moves > 0
-        ? 'Move remaining - tap to move the rocket along its route'
-        : 'Move spent - tap to undo this turn\'s move';
+      moveTag.classList.toggle('is-locked', lockedByOnline);
+      moveTag.disabled = lockedByOnline;
+      moveTag.title = lockedByOnline
+        ? 'Waiting for your turn.'
+        : (moves > 0
+          ? 'Move remaining - tap to move the rocket along its route'
+          : 'Move spent - tap to undo this turn\'s move');
+    }
+    if (endTurnBtn) {
+      endTurnBtn.disabled = lockedByOnline;
+      endTurnBtn.classList.toggle('is-locked', lockedByOnline);
+      endTurnBtn.title = lockedByOnline
+        ? 'Waiting for your turn.'
+        : 'End your turn';
     }
   }
+  // Stash on the host so applySnapshot can re-trigger after a fresh
+  // server snapshot flips active player. The hand off lives on the
+  // DOM element so it survives this closure's GC.
+  host._refreshTurnBudget = refreshTurnBudget;
   refreshTurnBudget();
   onTurnChange(refreshTurnBudget);
   // Robust cross-device tap: some mobile browsers don't deliver a
@@ -4396,12 +4890,31 @@ function openRocketStackModal() {
           <div class="stack-inspector-transfer">
             <h4>🔄 Transfer (free action)</h4>
             <p class="muted">Mark cards above with Select, then ship them to a colocated stack. Wet-mass clamps apply on the destination tank.</p>
+            <div class="stack-inspector-selrow">
+              <button type="button" class="modal-btn stack-selall">Select all</button>
+              <button type="button" class="modal-btn stack-deselall">Deselect all</button>
+            </div>
             <div class="stack-inspector-xfer-row">${dh}</div>
           </div>`;
+        const selAll = xferHost.querySelector('.stack-selall');
+        const deselAll = xferHost.querySelector('.stack-deselall');
+        if (selAll) selAll.addEventListener('click', () => {
+          for (const s of stack) selected.add(s.id);
+          repaint();
+        });
+        if (deselAll) deselAll.addEventListener('click', () => {
+          selected.clear();
+          repaint();
+        });
         xferHost.querySelectorAll('.stack-inspector-xfer-btn').forEach((btn) => {
           btn.addEventListener('click', () => {
             const destId = btn.getAttribute('data-dest');
             if (!destId || selected.size === 0) return;
+            // Online: one batch op for all selected cards.
+            if (transferSelectedOnline('rocket', destId, [...selected])) {
+              selected.clear();
+              return;
+            }
             const toMove = [...selected];
             let moved = 0;
             for (const cardId of toMove) {
@@ -5726,6 +6239,10 @@ function doFreeMarket() {
     renderCardFn: renderCard,
     onCommit: ({ cardId }) => {
       if (!cardId) return;
+      // Online: Free Market is the server FREE_MARKET op (sells the
+      // card, credits aqua, spends the op). Submit + re-hydrate; skip
+      // the local mutation that never persisted.
+      if (_online) { submitOnlineOp({ kind: 'FREE_MARKET', cardId }); return; }
       if (!requireOp('Free Market')) return;
       const card = cardById(cardId);
       if (!card) {
@@ -6803,29 +7320,42 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   // visual "from" off the on-screen readout and tween up to the
   // new tank water level. Wraps the spend + addFuel pair so a
   // failed spend doesn't leave the level mid-animation.
-  const fillFromAqua = (amount, e) => {
-    e?.stopPropagation();
-    if (!atLeo) return;
-    const cur = getTankWater();
-    const room = Math.max(0, cap - cur);
-    const want = Math.min(amount, room, getAqua());
-    if (want <= 0) { refreshAquaButtons(); return; }
-    if (!spendAqua(want)) { refreshAquaButtons(); return; }
-    addFuel(want);
-    const fromLevel = parseFloat(nowReadout.textContent || String(cur));
+  // Tween the visible tank level from whatever's displayed to the
+  // current tank value (fill OR drain - the tween handles both).
+  // Shared by the solo + online aqua<->water paths so every transfer
+  // animates the same way, including the free server REFUEL /
+  // CASH_WATER ops in multiplayer.
+  const animateTankLevel = () => {
+    const fromLevel = parseFloat(nowReadout.textContent || String(getTankWater()));
     const toLevel = getTankWater();
-    if (fromLevel === toLevel) {
-      refreshAquaButtons();
-      return;
-    }
-    // Hand off to the unified tween. animating=true makes
-    // stepDrops pour rapidly while the level climbs.
+    if (fromLevel === toLevel) { refreshAquaButtons(); return; }
     animating = true;
     tween = {
       from: fromLevel, to: toLevel,
       t0: performance.now(), dur: 400,
       onDone: () => { refreshAquaButtons(); refreshDumpButtons(); },
     };
+  };
+  const fillFromAqua = async (amount, e) => {
+    e?.stopPropagation();
+    if (!atLeo) return;
+    const cur = getTankWater();
+    const room = Math.max(0, cap - cur);
+    const want = Math.min(amount, room, getAqua());
+    if (want <= 0) { refreshAquaButtons(); return; }
+    // Online: aqua->water is the server REFUEL op. AWAIT it so the
+    // snapshot re-hydrates the tank first, THEN play the same fill
+    // animation from the old displayed level to the new tank value
+    // (previously it returned early and the tank just snapped).
+    if (_online) {
+      const ok = await submitOnlineOp({ kind: 'REFUEL', amount: want });
+      if (!ok) { refreshAquaButtons(); return; }
+      animateTankLevel();
+      return;
+    }
+    if (!spendAqua(want)) { refreshAquaButtons(); return; }
+    addFuel(want);
+    animateTankLevel();
     logAction({
       type: 'aqua_transfer',
       icon: '💎→💧',
@@ -6840,26 +7370,23 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   // bank (1:1). Only available at LEO. Same tween path as
   // dump-fuel, but credits the player's bank instead of
   // destroying the water.
-  const cashOutToAqua = (amount, e) => {
+  const cashOutToAqua = async (amount, e) => {
     e?.stopPropagation();
     if (!atLeo) return;
     const cur = getTankWater();
     const want = Math.min(amount, cur);
     if (want <= 0) { refreshAquaButtons(); return; }
-    removeFuel(want);
-    addAqua(want);
-    const fromLevel = parseFloat(nowReadout.textContent || String(cur));
-    const toLevel = getTankWater();
-    if (fromLevel === toLevel) {
-      refreshAquaButtons();
+    // Online: water->aqua is the server CASH_WATER op. Await it so the
+    // snapshot updates the tank, then drain-animate to the new level.
+    if (_online) {
+      const ok = await submitOnlineOp({ kind: 'CASH_WATER', amount: want });
+      if (!ok) { refreshAquaButtons(); return; }
+      animateTankLevel();
       return;
     }
-    animating = true;
-    tween = {
-      from: fromLevel, to: toLevel,
-      t0: performance.now(), dur: 400,
-      onDone: () => { refreshAquaButtons(); refreshDumpButtons(); },
-    };
+    removeFuel(want);
+    addAqua(want);
+    animateTankLevel();
     logAction({
       type: 'aqua_cashout',
       icon: '💧→🏦',
@@ -6907,6 +7434,12 @@ function freeMarketSellFromHand(card, afterFn) {
     aqua: FREE_MARKET_AQUA,
     renderCardFn: renderCard,
     onConfirm: () => {
+      // Online: route to the server FREE_MARKET op (was client-only).
+      if (_online) {
+        submitOnlineOp({ kind: 'FREE_MARKET', cardId: card.id });
+        if (afterFn) afterFn();
+        return;
+      }
       if (!requireOp('Free Market')) return;
       removeFromHand(card.id);
       addToBottom(card.id);
@@ -7238,7 +7771,7 @@ function animateRocketAlong(segments, totalMs = 700) {
       };
       _renderer.setSandboxRocket({
         x: pos.x, y: pos.y,
-        colour: 'yellow',
+        colour: myRocketColour(),
         canFly: r.active,
       });
       if (t < 1) requestAnimationFrame(step);
@@ -7283,6 +7816,100 @@ function rocketStackDryMass() {
     mass += ((f.mass != null ? f.mass : c.mass) | 0);
   }
   return mass;
+}
+
+// Colour for the local player's rocket sprite. Online: the player's
+// server-assigned seat colour (the crew-card hex), so the rocket on
+// the map matches their roster dot + turn banner + name tint. Solo:
+// the legacy 'yellow' named palette. getRocketSprite accepts either a
+// named key or a raw #rrggbb.
+function myRocketColour() {
+  if (_online && _onlineSnapshot && _onlineMe) {
+    const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
+    if (me && me.color) return me.color;
+  }
+  return 'yellow';
+}
+
+// Publish the local player's seat colour as --me-color on the browse
+// shell so the player's own chrome (top bar, hand strip, hand title)
+// can tint to it - a persistent "you are this colour" cue. Cleared
+// (removed) in solo so the sandbox keeps its default palette.
+function syncMeColor(snapshot) {
+  const shell = document.querySelector('.browse-shell');
+  if (!shell) return;
+  let color = null;
+  if (_online && snapshot && Array.isArray(snapshot.players) && _onlineMe) {
+    const me = snapshot.players.find((p) => p.profileId === _onlineMe.id);
+    color = (me && me.color) || null;
+  }
+  if (color) shell.style.setProperty('--me-color', color);
+  else shell.style.removeProperty('--me-color');
+  shell.classList.toggle('has-me-color', !!color);
+}
+
+// World-space coords for a server rocket siteId (null = LEO anchor).
+// Translates the server slug -> planner node -> {x, y}.
+function mpRocketCoords(serverSiteId) {
+  if (!_activeData) return null;
+  if (!serverSiteId) return { x: LEO_ANCHOR.x, y: LEO_ANCHOR.y };  // at LEO
+  const pid = _onlineMaps && _onlineMaps.serverToPlanner.get(serverSiteId);
+  const site = pid && (_activeData.byId?.[pid]
+    || _activeData.sites.find((s) => s.id === pid));
+  if (site && typeof site.x === 'number') return { x: site.x, y: site.y };
+  return { x: LEO_ANCHOR.x, y: LEO_ANCHOR.y };  // unknown -> LEO
+}
+
+// Lay out every player's rocket on the map. Ships sharing a site are
+// arranged in a CENTRED HORIZONTAL ROW (not a ring) so colocated
+// rockets - everyone at LEO especially - line up side by side at the
+// same size. The local player's own rocket keeps its full-featured
+// draw (badges, hover, click) but gets a horizontal offset so it
+// takes its slot in the row; opponents are colour-coded sprites with
+// a 🚫 when inactive (no active thruster), mirroring the local cue.
+const MP_ROCKET_SPACING = 30;   // screen px between colocated ships
+function syncMpRockets(snapshot) {
+  if (!_renderer) return;
+  if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) {
+    _renderer.setMpRockets(null);
+    _renderer.setSandboxRocketOffset(0);
+    return;
+  }
+  const myId = _onlineMe.id;
+  // One entry per player with a resolved screen-anchor; group by site.
+  const groups = new Map();
+  for (const p of snapshot.players) {
+    const pos = mpRocketCoords(p.rocket && p.rocket.siteId);
+    if (!pos) continue;
+    const key = `${Math.round(pos.x)}:${Math.round(pos.y)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({
+      profileId: p.profileId,
+      seat: p.seat || 0,
+      x: pos.x, y: pos.y,
+      colour: p.color || 'white',
+      name: p.name,
+      inactive: !(p.rocket && p.rocket.activeThrusterId),
+      isLocal: p.profileId === myId,
+    });
+  }
+
+  const opponents = [];
+  let localOffsetX = 0;
+  for (const group of groups.values()) {
+    group.sort((a, b) => a.seat - b.seat);      // stable left-to-right
+    const n = group.length;
+    group.forEach((r, i) => {
+      const offsetX = (i - (n - 1) / 2) * MP_ROCKET_SPACING;
+      if (r.isLocal) {
+        localOffsetX = offsetX;
+      } else {
+        opponents.push({ x: r.x, y: r.y, offsetX, colour: r.colour, name: r.name, inactive: r.inactive });
+      }
+    });
+  }
+  _renderer.setSandboxRocketOffset(localOffsetX);
+  _renderer.setMpRockets(opponents);
 }
 
 function syncSandboxRocket() {
@@ -7332,7 +7959,7 @@ function syncSandboxRocket() {
   } : null;
   _renderer.setSandboxRocket({
     x, y,
-    colour: 'yellow',
+    colour: myRocketColour(),
     canFly: r.active,       // drives the 🚫 + transparency overlay
     prospectorKind,
     prospectorName,
@@ -8125,10 +8752,17 @@ async function runMoveQueue(ctx, resuming) {
 // slides backwards along the exact segments it walked.
 async function undoRocketMove() {
   if (!_renderer) return false;
-  // Online: there is no local move snapshot to unwind (moves go through
-  // the server), and there is no UNDO op wired here. No-op so the move
-  // tag's "undo" face can't corrupt the hydrated state.
-  if (_online) return false;
+  // Online: the server UNDO op unwinds the most recent functional op
+  // on the turn (rebuilds from turnBaseState), which is exactly what
+  // the local sandbox undo does - except the server is authoritative.
+  // The snapshot re-hydrate will restore the rocket position, tank,
+  // and the move budget, and refreshTurnBudget will flip the tag back
+  // from "↩ Undo move" to "move:1". roll_blocks_undo / nothing_to_undo
+  // come back via humanizeOnlineOpError.
+  if (_online) {
+    if (!isOnlineMyTurn()) return false;
+    return await submitOnlineOp({ kind: 'UNDO' });
+  }
   if (_rocketAnimating) return false;
   // Hazard-lockout: if the last move spent aqua or rolled dice,
   // the undo is blocked for the rest of the turn. Show a clear
@@ -10038,6 +10672,15 @@ function renderMissionLog() {
 function paintMissionLog() {
   const host = document.getElementById('browse-log');
   if (!host) return;
+  // Online mode: the sandbox getActions/getHistory localStorage cache
+  // is the player's SOLO history, which would otherwise bleed into a
+  // multiplayer game's panel (user 2026-05: "did you add fake data to
+  // production? lol"). Render from the server's op log instead so the
+  // log reflects this game.
+  if (_online) {
+    paintOnlineMissionLog(host);
+    return;
+  }
   const actions = getActions();
   const history = getHistory();
   const lastUndoableIdx = (() => {
@@ -10098,6 +10741,112 @@ function paintMissionLog() {
       if (!ok) break;
     }
   });
+}
+
+// Online mission log: renders from the server op log via
+// getGameOps. Each op already carries a human log line written by
+// the engine handler (e.g. "ruben-firefox put X up for auction"),
+// so we just stream the most recent ops without trying to
+// recreate the sandbox's turn-grouped layout. Auto-refreshes when
+// a new snapshot lands (applySnapshot triggers a paintMissionLog
+// rerun for the active pane).
+// Per-op-kind glyph for the log icon column. Anything missing falls
+// back to a neutral bullet so a new op kind doesn't disappear.
+const MP_LOG_ICONS = {
+  AUCTION_START: '🎯', AUCTION_BID: '💰', AUCTION_PASS: '🚫',
+  AUCTION_JOIN: '🎯', AUCTION_SELL: '✅',
+  PICK_CREW: '🧑‍🚀',
+  END_TURN: '⏭', MOVE: '🛸', BURN: '🔥',
+  SET_ACTIVE_THRUSTER: '🔥', SET_ACTIVE_PROSPECTOR: '⛏',
+  BUILD_ROCKET: '🚀', PROSPECT: '⛏',
+  INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧',
+  DECOMMISSION: '🗑', BUY_FUTURE: '📈',
+  UNDO: '↩', REDO: '↪',
+};
+
+// Short relative-time string for the log row. Cap at days so the
+// label fits in a tight gutter; precise timestamp lives on the
+// title attribute for hover.
+function relTime(ms) {
+  if (!ms) return '';
+  const d = Date.now() - ms;
+  if (d < 0) return 'now';
+  if (d < 60_000) return Math.max(1, Math.round(d / 1000)) + 's';
+  if (d < 3600_000) return Math.round(d / 60_000) + 'm';
+  if (d < 86_400_000) return Math.round(d / 3600_000) + 'h';
+  return Math.round(d / 86_400_000) + 'd';
+}
+
+async function paintOnlineMissionLog(host) {
+  if (!_online || !_onlineGameId || !_onlineMe) {
+    host.innerHTML = '<p class="muted">Mission log will appear once the game starts.</p>';
+    return;
+  }
+  // Preserve any previous render's scroll position so the user
+  // doesn't get yanked to the top on every poll tick.
+  const list = host.querySelector('.mp-log-list');
+  const scrollTop = list ? list.scrollTop : null;
+  const r = await getGameOps(_onlineGameId, {}, _onlineMe.token);
+  if (!_online) return; // unmounted mid-fetch
+  if (!r || !r.ok) {
+    host.innerHTML = '<p class="muted">Could not load mission log.</p>';
+    return;
+  }
+  const entries = (r.data && r.data.entries) || [];
+  // Resolve a profileId -> seat colour map so each @name in the log
+  // can render in that player's seat colour (CLAUDE.md doctrine:
+  // "Player names track the player's seat colour"). Falls back to
+  // currentColor when no snapshot is cached yet.
+  const colourFor = new Map();
+  for (const p of (_onlineSnapshot && _onlineSnapshot.players) || []) {
+    if (p.color) colourFor.set(p.profileId, p.color);
+  }
+  // The engine's log line already starts with the actor's name
+  // ("Ruben put X up for auction."). The dedicated @name column
+  // would then duplicate that. Strip the leading name (and the
+  // following space) so the summary reads cleanly next to the
+  // coloured @name in its own column.
+  const stripLeadName = (line, name) => {
+    if (!line || !name) return line;
+    if (line.indexOf(name) !== 0) return line;
+    return line.slice(name.length).replace(/^\s+/, '');
+  };
+  // Server returns ops in seq ASC order. Render newest-first.
+  const rows = entries
+    .filter((e) => e.kind !== 'START' && e.log)
+    .reverse()
+    .map((e) => {
+      const col = colourFor.get(e.profileId);
+      const style = col ? ` style="--player-color:${esc(col)}"` : '';
+      const icon = MP_LOG_ICONS[e.kind] || '·';
+      const kindClass = 'mp-log-kind-' + esc(e.kind.toLowerCase().replace(/_/g, '-'));
+      const when = relTime(e.createdAt);
+      const whenTitle = e.createdAt
+        ? new Date(e.createdAt).toLocaleString() : '';
+      const summary = stripLeadName(e.log, e.profileName);
+      return `
+      <li class="mp-log-row ${kindClass}"${style}>
+        <span class="mp-log-icon" aria-hidden="true">${icon}</span>
+        <span class="mp-log-body">
+          <span class="mp-log-who player-name">@${esc(e.profileName || '?')}</span>
+          <span class="mp-log-summary">${esc(summary)}</span>
+        </span>
+        <span class="mp-log-when" title="${esc(whenTitle)}">${esc(when)}</span>
+      </li>`;
+    }).join('');
+  host.innerHTML = `
+    <div class="mp-log-head">
+      <h3>📋 Mission log</h3>
+      <p class="muted">Live from the server. Newest first.</p>
+    </div>
+    <ul class="mp-log-list">
+      ${rows || '<li class="mp-log-empty muted">No actions yet.</li>'}
+    </ul>
+  `;
+  if (scrollTop != null) {
+    const newList = host.querySelector('.mp-log-list');
+    if (newList) newList.scrollTop = scrollTop;
+  }
 }
 
 // Solo panel: stats + per-round actions when a game is running,

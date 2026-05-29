@@ -765,7 +765,12 @@ export class MapRenderer {
     this._ambientSprites = [];
     for (const name of ['rocket-red', 'rocket-blue', 'rocket-green', 'rocket-orange', 'rocket-silver']) {
       const img = new Image();
-      img.src = `assets/rockets/${name}.png`;
+      // Resolve against THIS module's URL, not the address bar. With
+      // room routing the visible URL can be a deep /room/<CODE> path,
+      // and a bare 'assets/...' would resolve to /room/assets/... (404).
+      // import.meta.url is always /js/game/render.js, so ../../assets
+      // lands at the real app-root /assets.
+      img.src = new URL(`../../assets/rockets/${name}.png`, import.meta.url).toString();
       this._ambientSprites.push(img);
     }
     this._partitionSites();
@@ -824,6 +829,27 @@ export class MapRenderer {
   setSandboxRocket(opts) {
     this._sandboxRocket = opts || null;
     this._scheduleDraw();
+  }
+
+  // Opponent rockets in multiplayer. list = [{ x, y, colour, name }].
+  // Drawn as smaller colour-coded sprites; the local player's own
+  // rocket is still the full-featured _sandboxRocket draw. Colocation
+  // offset (multiple ships at one site, e.g. everyone parked at LEO)
+  // is computed at draw time so the pieces fan out instead of
+  // stacking dead-on.
+  setMpRockets(list) {
+    this._mpRockets = Array.isArray(list) ? list : null;
+    this._scheduleDraw();
+  }
+
+  // Horizontal offset for the LOCAL rocket so it takes its slot in a
+  // colocation row (set alongside setMpRockets when other players share
+  // the site). 0 = centred / alone.
+  setSandboxRocketOffset(dx) {
+    if (this._sandboxRocket) {
+      this._sandboxRocket.offsetX = dx || 0;
+      this._scheduleDraw();
+    }
   }
 
   // Trigger a one-shot explosion at a world-space position. Used
@@ -1761,6 +1787,7 @@ export class MapRenderer {
       this._drawFocusedStackRingScreen(ctx);
       this._drawLeoAnchorScreen(ctx);
       this._drawPlayerShipScreen(ctx);
+      if (this._mpRockets && this._mpRockets.length) this._drawMpRocketsScreen(ctx);
       if (this._sandboxRocket) this._drawSandboxRocketScreen(ctx);
       if (this._explosion)     this._drawExplosionScreen(ctx);
       // Selection ring drawn LAST so nothing - labels, ships, hexes
@@ -2915,11 +2942,51 @@ export class MapRenderer {
   // Draw the sandbox rocket sprite at world-space (x, y).
   // canFly drives a transparency + 🚫 overlay; the renderer
   // doesn't compute fly-ability itself.
+  // Opponent rockets, colour-coded by seat. Ships sharing a world
+  // anchor (very common at LEO) fan out around it so they don't stack
+  // dead-on. The local player's own rocket (_sandboxRocket) draws on
+  // top afterwards and is NOT included here.
+  _drawMpRocketsScreen(ctx) {
+    const list = this._mpRockets;
+    if (!list || !list.length) return;
+    const eff = this.zoom * this.fitScale;
+    const { width: spriteW, height: spriteH } = getRocketSpriteSize();
+    // Same scale as the local rocket so every ship reads the same size.
+    const scale = 0.55;
+    const w = spriteW * scale;
+    const h = spriteH * scale;
+    // Each opponent carries a precomputed horizontal offset (browse.js
+    // syncMpRockets lays out all ships at a site in a centred row, so
+    // colocated ships line up side-by-side instead of stacking).
+    for (const r of list) {
+      const sx = this.pan.x + r.x * eff + (r.offsetX || 0);
+      const sy = this.pan.y + r.y * eff;
+      const px = sx - w / 2;
+      const py = sy - h - 2;
+      ctx.save();
+      if (r.inactive) ctx.globalAlpha = 0.5;
+      ctx.drawImage(getRocketSprite(r.colour || 'white'), px, py, w, h);
+      // 🚫 inactive badge, mirroring the local rocket's empty-stack cue.
+      if (r.inactive) {
+        ctx.globalAlpha = 1;
+        const badge = Math.round(h * 0.35);
+        ctx.font = `${badge}px ${EMOJI_FONT}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🚫', sx + w * 0.30, py + badge * 0.55);
+      }
+      ctx.restore();
+    }
+  }
+
   _drawSandboxRocketScreen(ctx) {
     const r = this._sandboxRocket;
     if (!r) return;
     const eff = this.zoom * this.fitScale;
-    const sx = this.pan.x + r.x * eff;
+    // offsetX shifts the local rocket sideways so it takes its slot in
+    // the colocation row (set by browse.js syncMpRockets when other
+    // players share this site). 0 in solo / when alone.
+    const sx = this.pan.x + r.x * eff + (r.offsetX || 0);
     const sy = this.pan.y + r.y * eff;
     const { width: spriteW, height: spriteH } = getRocketSpriteSize();
     const scale = 0.55;     // map-scale; 35×53 px on screen.

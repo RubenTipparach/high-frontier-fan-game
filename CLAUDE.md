@@ -237,6 +237,131 @@ SQLite, and every REST operation is broadcast to any open WS clients.
 A player who walks away and comes back gets the same state by REST as
 if they'd been live the whole time.
 
+### Async-multiplayer doctrine - WS is unreliable
+
+WebSocket is for **fast updates, NOT async play**. It is a
+best-effort optimisation that makes live sessions feel snappy; it
+is NOT a reliable transport and it is NOT how async-multiplayer
+events arrive at the other player. Treat every WS broadcast as a
+nice-to-have. Failure modes we've actually observed:
+
+- **Browsers fail the WSS handshake outright.** "Firefox can't
+  establish a connection to the server at wss://..." - the player
+  never receives any push for the whole session.
+- **Mobile networks silently drop frames.** Backgrounded tabs,
+  walking out of wifi range, captive portals - the socket stays
+  "open" but no data arrives.
+- **Server hiccups + proxy timeouts close the channel.** Reconnect
+  fires eventually but the missed broadcasts are gone.
+- **WS broadcasts cause desync.** A push that arrives at one player
+  but not another leaves the two clients showing different boards;
+  same for an op that the local client applied optimistically but
+  the server rejected. Any UX decision that "the broadcast will
+  arrive" is a bug waiting to fire.
+
+So: WS is a UX accelerator on top of REST. REST is the source of
+truth. The client MUST NOT assume a WS event implies the
+server's current state, and MUST NOT block a UX decision on
+"the broadcast will arrive". Concrete rules:
+
+- **Poll the server on an interval.** `js/game/browse.js` runs a
+  snapshot poll while online: 5s normal, 500ms while an auction is
+  open. The cadence switches in `applySnapshot` based on
+  `snapshot.auction`. Don't disable polling because WS "should
+  cover it".
+- **Cache the last snapshot.** `_onlineSnapshot` holds the most
+  recent server state; every turn-ownership check, action gate, and
+  budget read goes through it instead of trusting transient WS
+  events.
+- **Polling must NOT invalidate local state unless the server
+  actually advanced.** This is the rule, learned the hard way: a
+  naive `applySnapshot` that re-hydrates every module on every poll
+  tick stomps on in-progress local UI (it wiped the player's boost
+  selection every 5s - boost marks were cleared inside `hydrateHand`
+  on every snapshot). The fix is two-layered:
+  1. **Seq-gate the whole apply.** `applySnapshot(state, seq)` takes
+     the server op-log `seq` (from the game wrapper) and returns
+     immediately when `seq === _lastAppliedSeq`. Every meaningful
+     change (any op: MOVE / END_TURN / AUCTION_* / PICK_CREW)
+     advances the seq, so a poll that returns the same seq is a
+     genuine no-op: no module re-hydrate, no re-render, nothing
+     touched. Error snap-back calls pass no seq to force a re-apply.
+  2. **Make each hydrator idempotent + non-destructive.** Even when
+     the seq DOES advance (an opponent moved), re-hydrating my own
+     stacks must preserve my in-progress selections. `hydrateHand`
+     keeps boost marks for cards still in the hand and only fires
+     its change listeners when the hand or marks actually changed.
+     Apply the same discipline to any new hydrator: diff, preserve
+     local-only UI state, and only notify on a real delta.
+- **Eager one-shot fetches** on phase transitions where latency
+  matters (e.g. auction `bidders → auctioneer`) shave the
+  worst-case wait below one tick.
+- **Never let a player take a turn without server validation.**
+  Action buttons (End turn, op menu, move, BUILD_ROCKET, PROSPECT,
+  AUCTION_*) are disabled in the toolbar when `isOnlineMyTurn()`
+  is false. `submitOnlineOp` re-checks turn ownership against the
+  cached snapshot and refuses if it's stale. The server then
+  re-validates and rejects any racing op with `not_your_turn` /
+  `auction_in_progress`. UI + client + server all enforce the
+  same rule.
+
+If you're adding a new multiplayer action, follow the chain:
+1. Disable the control in the toolbar when not my turn.
+2. Gate the submit helper on the cached snapshot.
+3. Validate again on the server in the engine handler.
+
+### Room routing + version reload - DON'T kick players to the lobby
+
+The active room lives in the URL as a real path segment:
+`/<base>/room/<CODE>` (e.g.
+`rubentipparach.github.io/high-frontier-fan-game/room/DPAT3R`). This
+is load-bearing: it's what lets a refresh, a restored tab, a
+dropped-WS reconnect, AND a **version-bump auto-reload** drop the
+player back into the SAME room instead of the lobby list. Breaking
+any link in this chain regresses to "every deploy kicks everyone
+out mid-game", which is the exact failure we're guarding against.
+
+The chain (do not sever any piece):
+
+- **`setRoomInUrl(code)` (js/lobby.js)** writes `/<base>/room/<code>`
+  via `history.replaceState` on `openLobby`, clears it on
+  `leaveCurrent`. It preserves the `?v=<sha>` version pin. The app
+  base is resolved from `import.meta.url`, NEVER from the address
+  bar (the bar can already be a deep `/room/...` path).
+- **Codes are lowercase + Crockford base32.** `CODE_ALPHABET` in
+  `server/index.js` is `0123456789abcdefghjkmnpqrstvwxyz`, and the
+  DB stores codes verbatim. SQLite's `=` is case-sensitive, so the
+  URL form MUST be lowercase or the lookup misses. `setRoomInUrl`
+  lowercases on write; the server's `/lobbies/by-code/:code` (and
+  the two invite-link endpoints) run params through `normaliseCode`
+  which lowercases + alphabet-validates before any query, so a
+  mixed-case shared link still resolves and a garbage segment
+  short-circuits with `bad_code`. Don't reintroduce
+  `.toUpperCase()` on either side - cosmetic uppercase made the
+  URL case-sensitive and broke `/room/DPAT3R` resume.
+- **`404.html`** is the GitHub-Pages SPA fallback. GH Pages has no
+  server routing, so a hard load / version reload of `/room/<CODE>`
+  has no file and hits 404.html, which stashes the code in
+  `sessionStorage['hf-room-redirect']` and redirects to the app
+  root, carrying `?v=` + hash. Keep 404.html dependency-free (inline
+  script, no module imports) - it runs before the app exists.
+- **`maybeResumeRoomFromUrl()` (js/main.js)** runs on boot, reads
+  the code via `readRoomCode()` (sessionStorage stash -> `/room/`
+  path -> legacy `?room=` query), and re-opens the lobby. `openLobby`
+  then calls `setRoomInUrl` to restore the visible `/room/<CODE>`.
+- **`js/version-check.js`** force-navigates to `location.href` with
+  a new `?v=<sha>` when a deploy lands. Because that keeps the
+  `/room/<CODE>` path, the reload flows back through 404.html ->
+  stash -> resume. CRITICAL: version.json is fetched against the
+  SCRIPT's own URL (`new URL('../version.json', currentScript.src)`),
+  NOT a relative `./version.json` - a relative fetch resolves against
+  the deep `/room/...` address bar and 404s, silently disabling the
+  version check.
+
+Net: a `git push` that bumps the deployed SHA reloads every open
+client AND keeps each one in its room. If you touch routing,
+version-check, or the boot landing logic, re-verify this end to end.
+
 ## Lobby + social
 
 - **Profiles** are token-based, mirroring murdoku-companion exactly:
@@ -256,6 +381,57 @@ if they'd been live the whole time.
   2. **Invite link** - generate a 12-char share code (`/i/<code>`)
      that anyone can paste into the game lobby to join the table.
      Links can be single-use or unlimited; host picks at create.
+
+### Snapshot apply is INTERPRETATION, not replacement
+
+Critical lesson (user 2026-05-29: "you are eagerly updating the
+simulation/game state ... server will give you the state, but you
+must interpret state gracefully and smoothly without doing abrupt
+updates").
+
+REST is the source of truth, but `applySnapshot` is NOT licensed to
+slam the new state into every module and call it done. The user sees
+each diff as a CHANGE that needs an animation - the rocket sliding
+along its route, the dice tumbling on a prospect, the cards drifting
+between stacks. A direct hydrate from a server snapshot SKIPS every
+one of those, and play feels jarring and disconnected from intent.
+
+Doctrine:
+
+- **Diff first, apply second.** Before re-hydrating from a new
+  snapshot, compare the relevant slice to `_onlineSnapshot` (the
+  last applied state) and identify what changed at the granularity
+  the player perceives: a rocket move, a card transfer, a dice roll
+  outcome, a deck top consumed, etc.
+- **Animate the transition, then commit.** Drive the same animation
+  the sandbox does (e.g. `animateRocketAlong`, the prospect dice
+  modal, the fuel-tank tween) FROM the previous state TO the new
+  state. The hydrators run AFTER the animation completes, so the
+  final DOM matches the server. If the player skips / interrupts,
+  jump to the final state at once but never *start* by snapping.
+- **Guard against double-animation.** A poll tick that returns the
+  same `seq` as `_lastAppliedSeq` is a no-op; only a real seq
+  advance triggers an animation pass. Sandbox-style "consume your
+  own move locally first then await server" is fine when the
+  server response confirms; the snapshot diff just re-uses the
+  animation infrastructure for OPPONENTS' moves and for any move
+  the client didn't initiate (a refresh-resume, a spectator view).
+- **Animation reads from the op log when needed.** The snapshot
+  state has the final position but not the intermediate hops; for
+  multi-segment MOVE the server publishes the planned route
+  segments alongside the snapshot (or the client recomputes via
+  the same planner graph). For dice (PROSPECT, hazard), the op
+  payload carries the roll value(s) so the animation plays the
+  same outcome the engine resolved.
+- **Default to in-place layout updates** for everything else (turn
+  banner, roster, mp panel, mission log). Those aren't "events" in
+  the player's mind, they're status reads; treat them as live but
+  passive.
+
+When you wire a new op in multiplayer, the question to answer is
+NEVER "does the snapshot apply correctly?" - the engine already
+guarantees that. The question is "what does the player SEE happen,
+and does my code reproduce that motion before the state snaps?"
 
 ## High Frontier - implementation scope
 
@@ -333,6 +509,23 @@ Random-numbered seeds are stored per game so replays are deterministic.
   real game actions (Plan rocket route, Prospect, Refuel, etc.)
   must precede it. New site-popup buttons land before
   Navigate-to, never after.
+- **Player names track the player's seat colour.** Every render
+  of `@<name>` in the multiplayer UI tints the text in that
+  player's server-assigned seat colour (the same six crew-card
+  colours, see PLAYER_COLORS). Use the shared `.player-name`
+  CSS class and set `--player-color` on the element from
+  `player.color`. Falls back to currentColor when the seat
+  colour isn't known. Touches every surface: turn banner, mp
+  roster, mp chat, mission log who-name, auction overlay
+  (auctioneer / high bidder), crew-draft roster. Add the class
+  + the var on any new "@name" render so the convention holds.
+- **Sidebar panes stay where the user put them.** Sidepanel
+  navigation is user-driven: bootstrap can open the MP pane
+  once, but no automatic path (snapshot apply, market-mode
+  flip, op response, WS event) is allowed to switch panes out
+  from under the player. If you need to draw attention to a
+  pane, use the existing tab-strip badge / pulse affordances,
+  never showPane(...).
 
 ## Don'ts
 

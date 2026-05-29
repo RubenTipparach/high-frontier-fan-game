@@ -28,7 +28,8 @@
 
 import { PATENTS_BY_ID } from '../../data/patents.js';
 import { CREW_BY_ID } from '../../data/crew.js';
-import { siteById, findPath } from './graph.js';
+import { siteById } from './graph.js';
+import { siteExists as plannerSiteExists, findPath as plannerFindPath, leoSlug } from './planner-graph.js';
 import { makeRng } from './rng.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES,
@@ -83,6 +84,11 @@ function perBurnCost(rocket) {
 }
 
 const TANK_MAX = 32; // wet-mass cap (mirror of rocket.js#TANK_MAX)
+
+// Academia hand limit for auction participation: a player may not
+// START or JOIN/BID in an auction while holding this many cards or
+// more (winning a lot would overflow the hand). User 2026-05-29.
+const AUCTION_HAND_LIMIT = 4;
 
 // The active face of a stack slot: secondary when installed
 // black-side-up, else primary. Mirror of rocket.js#installedFace.
@@ -179,24 +185,42 @@ function advanceClock(state) {
 
 function applyMove(state, op, player) {
   if (player.movesRemaining <= 0) return fail('no_moves_left');
-  const toSiteId = String(op.toSiteId || '');
-  const dest = siteById(toSiteId);
-  if (!dest) return fail('unknown_site');
-  const from = player.rocket.siteId;
-  if (toSiteId === from) return fail('already_here');
+  // An empty rocket has no thruster and can't burn, so it can't leave
+  // LEO. Enforcing this keeps the "empty rocket == at LEO" invariant
+  // true: the only way off LEO is to build/board a thruster first.
+  if (player.rocket.stack.length === 0) return fail('empty_rocket');
+  const toSlug = String(op.toSiteId || '');
+  if (!plannerSiteExists(toSlug)) return fail('unknown_site');
+  const from = player.rocket.siteId;       // null = LEO
+  if (toSlug === from) return fail('already_here');
 
-  const path = findPath(from, toSiteId);
+  // Path comes from the planner graph (full ~1500 nodes incl. lagrange
+  // / burn / hohmann waypoints). null `from` => start at LEO. Cost is
+  // the sum of edge burn-labels along the shortest path.
+  const path = plannerFindPath(from, toSlug);
   if (!path) return fail('no_route');
+  const totalBurns = path.totalBurns;
 
-  const cost = perBurnCost(player.rocket) * path.totalBurns;
+  const cost = perBurnCost(player.rocket) * totalBurns;
   if (cost > player.rocket.tank) return fail('insufficient_water');
 
   player.rocket.tank -= cost;
-  player.rocket.siteId = toSiteId;
+  player.rocket.siteId = toSlug;
   player.movesRemaining -= 1;
-  const chit = maybeAwardGlory(player, dest, state.turn);
+  // Pop the executed segment off the planned route (if any). Server
+  // keeps the route truncated to "what's still ahead" so a refresh /
+  // snapshot reflects the journey in progress.
+  if (Array.isArray(player.rocket.route) && player.rocket.route.length) {
+    const idx = player.rocket.route.findIndex((s) => s.to === toSlug);
+    if (idx >= 0) player.rocket.route = player.rocket.route.slice(idx + 1);
+  }
+  // Glory awards still gate on data/sites.js (the curated metadata
+  // table). Waypoints (no SITES entry) yield no chit, which is correct.
+  const destSite = siteById(toSlug);
+  const chit = destSite ? maybeAwardGlory(player, destSite, state.turn) : null;
 
-  let log = `${player.name} burned ${cost} water to ${dest.name}.`;
+  const destName = (destSite && destSite.name) || toSlug;
+  let log = `${player.name} burned ${cost} water to ${destName}.`;
   if (chit) log += ` First into the ${chit.zone} zone (+glory chit).`;
   return { ok: true, state, log };
 }
@@ -227,6 +251,226 @@ function applyBuildRocket(state, op, player) {
   clipTank(player.rocket);
   player.opsRemaining -= 1;
   return { ok: true, state, log: `${player.name} built ${card.name} onto the rocket.` };
+}
+
+// Boost: move marked HAND cards up to the LEO Stack (rulebook I4,
+// the sandbox commitBoost flow). Costs 1 op + aqua equal to the total
+// mass of the boosted cards. The cards land in player.leo; from there
+// TRANSFER boards them onto the rocket while it's at LEO. This is the
+// op the sandbox BOOST button fires in online mode - without it the
+// boost was a purely local mutation the server never saw.
+// op = { cardIds: [id, ...] }.
+function applyBoost(state, op, player) {
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];
+  if (!ids.length) return fail('nothing_to_boost');
+  // Every id must currently be in the hand.
+  for (const id of ids) {
+    if (player.hand.indexOf(id) < 0) return fail('not_in_hand');
+  }
+  // Cost = total mass of the boosted cards (aqua).
+  let cost = 0;
+  for (const id of ids) cost += slotMass({ id });
+  if (cost > player.aqua) return fail('insufficient_aqua');
+  // Move them hand -> LEO.
+  for (const id of ids) {
+    const idx = player.hand.indexOf(id);
+    if (idx >= 0) player.hand.splice(idx, 1);
+    player.leo.push({ id, kind: 'patent' });
+  }
+  player.aqua -= cost;
+  player.opsRemaining -= 1;
+  const n = ids.length;
+  return {
+    ok: true, state,
+    log: `${player.name} boosted ${n} card${n === 1 ? '' : 's'} to LEO for ${cost} aqua.`,
+  };
+}
+
+// Free Market sell (rulebook I3): drop a HAND card to the bottom of
+// its deck for +FREE_MARKET_AQUA aqua. Costs 1 op. This was a client-
+// only action before, so in MP the sale never persisted and the aqua
+// was never credited (user 2026-05-29: "the sell didnt write to
+// server" -> a later REFUEL failed insufficient_aqua).
+const FREE_MARKET_AQUA = 3;  // mirror of card-market.js
+function applyFreeMarket(state, op, player) {
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  const cardId = String(op.cardId || '');
+  const idx = player.hand.indexOf(cardId);
+  if (idx < 0) return fail('not_in_hand');
+  const card = PATENTS_BY_ID[cardId];
+  if (!card) return fail('unknown_card');
+  player.hand.splice(idx, 1);
+  // Card returns to the BOTTOM of its deck so it can re-circulate.
+  const deck = state.decks[card.type];
+  if (Array.isArray(deck)) deck.push(cardId);
+  player.aqua += FREE_MARKET_AQUA;
+  player.opsRemaining -= 1;
+  return {
+    ok: true, state,
+    log: `${player.name} sold ${card.name} for +${FREE_MARKET_AQUA} aqua (Free Market).`,
+  };
+}
+
+// Convert aqua -> water 1:1, only while the rocket is at LEO (the Aqua
+// Bank lives at LEO). Clamped by the requested amount, the aqua on
+// hand, and the remaining wet-mass room in the tank. This is where
+// rocket water comes from - ships open with an EMPTY tank now, so a
+// player funds a burn by converting aqua here first. Free (no op
+// cost), turn-gated. op = { amount }.
+function applyRefuel(state, op, player) {
+  if (player.rocket.siteId != null) return fail('rocket_not_at_leo');
+  const want = Math.floor(Number(op.amount));
+  if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
+  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const room = Math.max(0, TANK_MAX - dry - (player.rocket.tank | 0));
+  const amt = Math.min(want, player.aqua | 0, room);
+  if (amt <= 0) {
+    if (room <= 0) return fail('tank_full');
+    return fail('insufficient_aqua');
+  }
+  player.aqua -= amt;
+  player.rocket.tank = (player.rocket.tank | 0) + amt;
+  return { ok: true, state, log: `${player.name} converted ${amt} aqua to water (tank ${player.rocket.tank}).` };
+}
+
+// Planned route persistence. Stored as player.rocket.route, an array
+// of { from, to, burns } segments. The full route is SECRET between
+// players (server gameView redacts opponents' routes - they can see
+// the rocket position but not what's being planned). Cleared on
+// END_TURN naturally? No - the route can span turns (Hohmann waits),
+// so it persists until the player clears it or completes it. The
+// route is the source of truth; the client only computes shortest
+// path via the planner graph and submits the segment list.
+// op = { segments: [{ from, to, burns }, ...] }.
+function applySetRoute(state, op, player) {
+  const segs = Array.isArray(op.segments) ? op.segments : [];
+  const norm = [];
+  for (const s of segs) {
+    if (!s || typeof s !== 'object') return fail('bad_route');
+    const from = String(s.from || '');
+    const to = String(s.to || '');
+    const burns = Math.max(0, Math.floor(Number(s.burns) || 0));
+    if (!plannerSiteExists(from) || !plannerSiteExists(to)) return fail('unknown_site');
+    norm.push({ from, to, burns });
+  }
+  // Validate continuity: each segment's from must be the previous to,
+  // and the first must start at the rocket's current position
+  // (siteId, null = LEO). Prevents a client from sending a
+  // disconnected path the engine couldn't actually execute.
+  const startsFrom = norm.length ? norm[0].from : null;
+  const here = player.rocket.siteId == null ? leoSlug() : player.rocket.siteId;
+  if (norm.length && startsFrom !== here) return fail('route_not_from_here');
+  for (let i = 1; i < norm.length; i++) {
+    if (norm[i].from !== norm[i - 1].to) return fail('route_discontinuous');
+  }
+  player.rocket.route = norm;
+  return { ok: true, state, log: '' };  // empty log: routes are secret
+}
+
+function applyClearRoute(state, _op, player) {
+  player.rocket.route = [];
+  return { ok: true, state, log: '' };
+}
+
+// Reverse of REFUEL: cash tank water back into the aqua bank 1:1, only
+// at LEO. Clamped by the water on hand. Free, turn-gated. op={amount}.
+function applyCashWater(state, op, player) {
+  if (player.rocket.siteId != null) return fail('rocket_not_at_leo');
+  const want = Math.floor(Number(op.amount));
+  if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
+  const amt = Math.min(want, player.rocket.tank | 0);
+  if (amt <= 0) return fail('no_water');
+  player.rocket.tank -= amt;
+  player.aqua = (player.aqua | 0) + amt;
+  return { ok: true, state, log: `${player.name} cashed ${amt} water back to aqua (aqua ${player.aqua}).` };
+}
+
+// Display name for a stack slot (patent or crew face). Used in
+// TRANSFER log lines.
+function slotName(slot) {
+  if (!slot || !slot.id) return '?';
+  const p = PATENTS_BY_ID[slot.id];
+  if (p) return p.name || slot.id;
+  const crew = CREW_BY_ID[slot.id];
+  if (crew) {
+    const key = slot.face === 'secondary' ? 'secondary' : 'primary';
+    const f = (crew.faces && (crew.faces[key] || crew.faces.primary)) || {};
+    return f.name || slot.id;
+  }
+  return slot.id;
+}
+
+// Free LEO <-> Rocket card transfer (rulebook G1 colocation), allowed
+// only while the rocket is parked at LEO (siteId == null). This is how
+// the crew that PICK_CREW staged in the LEO Stack boards the rocket,
+// and how cards come back off before launch. No op cost (a free
+// reconfiguration like SET_ACTIVE_*), but it IS turn-gated (FUNCTIONAL)
+// since it mutates your own rocket. Accepts a BATCH:
+// op = { cardIds: [...], to } (or legacy { cardId, to }). All ids must
+// be valid for the direction or the whole op fails (atomic).
+function applyTransfer(state, op, player) {
+  if (player.rocket.siteId != null) return fail('rocket_not_at_leo');
+  const to = op.to === 'rocket' ? 'rocket' : (op.to === 'leo' ? 'leo' : null);
+  if (!to) return fail('bad_transfer');
+  const ids = Array.isArray(op.cardIds)
+    ? op.cardIds.map(String)
+    : (op.cardId != null ? [String(op.cardId)] : []);
+  if (!ids.length) return fail('bad_transfer');
+
+  const src = to === 'rocket' ? (player.leo || []) : player.rocket.stack;
+  // Validate every id is present in the source before mutating, so a
+  // bad id rejects the batch atomically.
+  for (const id of ids) {
+    if (!src.some((s) => s.id === id)) {
+      return fail(to === 'rocket' ? 'not_in_leo' : 'not_in_rocket');
+    }
+  }
+
+  const moved = [];
+  for (const id of ids) {
+    if (to === 'rocket') {
+      const idx = player.leo.findIndex((s) => s.id === id);
+      const [slot] = player.leo.splice(idx, 1);
+      player.rocket.stack.push(slot);
+      if (!player.rocket.activeThrusterId && isThrusterSlot(slot)) {
+        player.rocket.activeThrusterId = slot.id;
+      }
+      if (!player.rocket.activeProspectorId && isProspectorSlot(slot)) {
+        player.rocket.activeProspectorId = slot.id;
+      }
+      moved.push(slot);
+    } else {
+      const idx = player.rocket.stack.findIndex((s) => s.id === id);
+      const [slot] = player.rocket.stack.splice(idx, 1);
+      if (player.rocket.activeThrusterId === slot.id) player.rocket.activeThrusterId = null;
+      if (player.rocket.activeProspectorId === slot.id) player.rocket.activeProspectorId = null;
+      (player.leo = player.leo || []).push(slot);
+      moved.push(slot);
+    }
+  }
+
+  if (to === 'rocket') {
+    clipTank(player.rocket);
+    const label = moved.length === 1 ? slotName(moved[0]) : `${moved.length} cards`;
+    return { ok: true, state, log: `${player.name} boarded ${label} onto the rocket.` };
+  }
+  // An empty rocket is no longer a real ship - it can't burn without a
+  // thruster, so it can't be anywhere but LEO. Recall it (user
+  // 2026-05-29: "the rocket is empty therefore it is ... at leo").
+  recallIfEmpty(player);
+  const label = moved.length === 1 ? slotName(moved[0]) : `${moved.length} cards`;
+  return { ok: true, state, log: `${player.name} returned ${label} to the LEO Stack.` };
+}
+
+// Invariant: an empty rocket stack sits at LEO with no active
+// thruster / prospector. Called wherever the rocket can become empty.
+function recallIfEmpty(player) {
+  if (player.rocket.stack.length === 0) {
+    player.rocket.siteId = null;
+    player.rocket.activeThrusterId = null;
+    player.rocket.activeProspectorId = null;
+  }
 }
 
 // Pick which stacked thruster powers burns (rocket.js#setActiveThruster).
@@ -300,6 +544,13 @@ function applyProspect(state, op, player) {
 const FUNCTIONAL = {
   MOVE: applyMove,
   BUILD_ROCKET: applyBuildRocket,
+  BOOST: applyBoost,
+  TRANSFER: applyTransfer,
+  REFUEL: applyRefuel,
+  CASH_WATER: applyCashWater,
+  FREE_MARKET: applyFreeMarket,
+  SET_ROUTE: applySetRoute,
+  CLEAR_ROUTE: applyClearRoute,
   SET_ACTIVE_THRUSTER: applySetActiveThruster,
   SET_ACTIVE_PROSPECTOR: applySetActiveProspector,
   PROSPECT: applyProspect,
@@ -309,6 +560,11 @@ function pickPayload(op) {
   switch (op.kind) {
     case 'MOVE': return { toSiteId: op.toSiteId };
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face };
+    case 'BOOST': return { cardIds: op.cardIds };
+    case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, to: op.to };
+    case 'REFUEL': return { amount: op.amount };
+    case 'CASH_WATER': return { amount: op.amount };
+    case 'FREE_MARKET': return { cardId: op.cardId };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
     case 'PROSPECT': return { siteId: op.siteId };
@@ -540,6 +796,7 @@ function applyAuctionStart(state, op, ctx) {
   if (!player || player.profileId !== ctx.profileId) return fail('not_your_turn');
   if (state.players.length < 2) return fail('need_opponent');
   if (player.opsRemaining <= 0) return fail('no_ops_left');
+  if ((player.hand || []).length >= AUCTION_HAND_LIMIT) return fail('hand_limit');
   const deckType = String(op.deckType || '');
   if (!DECK_TYPES.includes(deckType)) return fail('bad_deck');
   const deck = state.decks[deckType];
@@ -569,6 +826,7 @@ function applyAuctionBid(state, op, ctx) {
   const bidder = playerByProfile(state, ctx.profileId);
   if (!bidder) return fail('not_a_player');
   if (bidder.profileId === a.auctioneerId) return fail('auctioneer_cannot_bid');
+  if ((bidder.hand || []).length >= AUCTION_HAND_LIMIT) return fail('hand_limit');
   const amount = Number(op.amount);
   if (!Number.isInteger(amount) || amount <= 0) return fail('bad_amount');
   if (amount <= a.highBid) return fail('bid_too_low');
@@ -600,8 +858,25 @@ function applyAuctionJoin(state, op, ctx) {
   const auctioneer = playerByProfile(state, a.auctioneerId);
   const amount = Number(op.amount);
   if (!Number.isInteger(amount) || amount < 0) return fail('bad_amount');
+  // Joining the bidding (a raise) is participation, so the hand limit
+  // applies. The unopposed keep (amount 0, no bids) is exempt - it
+  // just finalises the lot the auctioneer already legally started.
+  if (amount > 0 && (auctioneer.hand || []).length >= AUCTION_HAND_LIMIT) {
+    return fail('hand_limit');
+  }
   if (amount < a.highBid) return fail('must_match_or_raise');
   if (amount > auctioneer.aqua) return fail('insufficient_aqua');
+
+  // No-bids keep: when no one has bid yet AND the auctioneer joins
+  // at 0, that's "Keep (no bids)" - the lot is theirs unopposed.
+  // Close the auction now instead of reopening a pass-round that
+  // can only resolve the same way. User report 2026-05: "if the
+  // auctioneer clicks keep (no bids) the auction should end.
+  // currently it's treating it as if there is one more round".
+  if (amount === 0 && a.highBid === 0) {
+    a.highBidderId = a.auctioneerId;
+    return resolveKeep(state, `${auctioneer.name} kept the lot unopposed.`);
+  }
 
   a.highBid = amount;
   a.highBidderId = a.auctioneerId;
@@ -655,9 +930,16 @@ const AUCTION = {
 // player's LEO stack as their starting crew, mirroring the sandbox
 // wizard which spawns the crew into the LEO Stack.
 function applyPickCrew(state, op, ctx) {
+  // Crew picks are open during the draft phase only. Once everyone
+  // has committed, draftPhase flips to 'play' and PICK_CREW is locked.
+  // Backwards compat: pre-migration games have state.draftPhase
+  // undefined; derive it from "every player has a faction" so a
+  // legacy game with both picks already in still rejects re-picks.
+  const phase = state.draftPhase
+    ?? (state.players.every((p) => !!p.faction) ? 'play' : 'crew');
+  if (phase !== 'crew') return fail('crew_draft_closed');
   const player = playerByProfile(state, ctx.profileId);
   if (!player) return fail('not_a_player');
-  if (player.faction) return fail('crew_already_picked');
   const cardId = String(op.cardId || '');
   const face = op.face === 'secondary' ? 'secondary' : 'primary';
   const card = CREW_BY_ID[cardId];
@@ -672,17 +954,24 @@ function applyPickCrew(state, op, ctx) {
   if (card.color && player.color && card.color !== player.color) {
     return fail('wrong_crew_colour');
   }
+  const switching = !!player.faction;
   player.faction = { cardId, face };
-  // Spawn the crew card in the LEO Stack (the per-player parking
-  // lot at LEO, distinct from the flying rocket). Mirrors the
-  // sandbox wizard's addCardToLeo call. From LEO the player can
-  // later Transfer the crew into the Rocket via a free op when
-  // their rocket is at LEO.
+  // Replace any previous crew slot in LEO with the new pick so a
+  // re-pick during the draft doesn't leave a stale crew sitting in
+  // the stack. First-time pickers just get one push.
+  player.leo = (player.leo || []).filter((s) => s.kind !== 'crew');
   player.leo.push({ id: cardId, kind: 'crew', face });
+  // Transition to 'play' the moment every player has a faction.
+  // Server-side, not derived client-side, so spectators + future
+  // joiners agree on the phase.
+  if (state.players.every((p) => !!p.faction)) {
+    state.draftPhase = 'play';
+  }
+  const verb = switching ? 'switched to' : 'picked';
   return {
     ok: true,
     state,
-    log: `${player.name} picked ${faceData.name || cardId}.`,
+    log: `${player.name} ${verb} ${faceData.name || cardId}.`,
   };
 }
 
@@ -699,15 +988,29 @@ export function applyOperation(prevState, op, ctx) {
   if (!prevState || prevState.status !== 'active') return fail('game_not_active');
   if (!op || typeof op.kind !== 'string') return fail('bad_op');
 
-  // Auction ops are a third class: bids/passes are sent by non-active
-  // players, so they bypass the turn guard below and each handler
-  // validates its own caller against the auction roles.
-  if (AUCTION[op.kind]) return AUCTION[op.kind](clone(prevState), op, ctx);
-  // Crew-pick is a fourth class: it's a pre-game session-setup step
-  // any player can run at any time (not gated by turn, not gated by
-  // an in-progress auction). PICK_CREW validates the caller against
-  // their own player record.
+  // Crew-pick is its own class: it's the pre-game session-setup step
+  // any player can run during the draft phase. PICK_CREW validates
+  // the caller against their own player record + the draftPhase
+  // gate. Runs BEFORE the AUCTION / functional gates so it can fire
+  // even though no other ops are accepted during the draft.
   if (CREW[op.kind]) return CREW[op.kind](clone(prevState), op, ctx);
+
+  // Everything else - auctions, functional ops, META - has to wait
+  // for the crew draft to finish. Without this, the host could fire
+  // END_TURN / AUCTION_START before some seat has picked their
+  // faction. Backwards compat: games created BEFORE state.draftPhase
+  // was introduced have it undefined; treat that as the derived
+  // phase (play if everyone already has a faction, crew otherwise)
+  // so existing tables don't lock up.
+  const draftDone = prevState.draftPhase === 'play'
+    || (prevState.draftPhase == null
+        && prevState.players.every((p) => !!p.faction));
+  if (!draftDone) return fail('awaiting_crew_picks');
+
+  // Auction ops bypass the turn guard below - bids/passes are sent
+  // by non-active players, and each handler validates its own caller
+  // against the auction roles.
+  if (AUCTION[op.kind]) return AUCTION[op.kind](clone(prevState), op, ctx);
 
   const isFunctional = !!FUNCTIONAL[op.kind];
   if (!isFunctional && !META[op.kind]) return fail('unknown_op');

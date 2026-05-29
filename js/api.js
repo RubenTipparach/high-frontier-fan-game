@@ -96,6 +96,13 @@ export async function getLobby(id) {
   return call('GET', '/lobbies/' + id);
 }
 
+// Resolve a lobby by its 6-char share code. Used by the ?room=<code>
+// URL bootstrap so a refresh / reconnect-loss puts the player back
+// into the same lobby instead of dropping them to the lobby list.
+export async function getLobbyByCode(code) {
+  return call('GET', '/lobbies/by-code/' + encodeURIComponent(code));
+}
+
 export async function createLobby({ name, maxPlayers, joinPolicy }, token) {
   return call('POST', '/lobbies', { body: { name, maxPlayers, joinPolicy }, token });
 }

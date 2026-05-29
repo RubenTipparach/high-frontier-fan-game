@@ -20,10 +20,14 @@ RUN apt-get update \
 COPY server/package.json server/package-lock.json* ./
 RUN npm install --omit=dev --no-audit --no-fund
 
-# App code lands in /app/server; the shared data tables in /app/data.
-# index.js imports ../data/*.js, so this sibling layout is load-bearing.
+# App code lands in /app/server; the shared data tables in /app/data;
+# the planner-map JSON in /app/vendor. planner-graph.js reads
+# vendor/hf-mission-planner/assets/data-hf4.json at boot for the full
+# ~1500-node movement graph (lagrange / burn / hohmann waypoints), so
+# the directory must be present in the image.
 COPY server/ ./
 COPY data/ /app/data/
+COPY vendor/ /app/vendor/
 
 ENV NODE_ENV=production
 ENV PORT=8080

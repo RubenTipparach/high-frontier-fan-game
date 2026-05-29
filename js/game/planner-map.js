@@ -12,12 +12,18 @@
 // Coordinates in the planner JSON are normalised 0..1 (proportions
 // of the original board image). We scale to our SVG viewBox.
 
-const PLANNER_JSON_URL = './vendor/hf-mission-planner/assets/data-hf4.json';
+// Resolve data URLs against THIS module's location, not the address
+// bar. With room routing the visible URL can be a deep /room/<CODE>
+// path; a relative './data/...' would resolve to /room/data/... (404)
+// and the whole map fails to load. import.meta.url is always
+// /js/game/planner-map.js, so ../../ lands at the real app root.
+const PLANNER_JSON_URL = new URL(
+  '../../vendor/hf-mission-planner/assets/data-hf4.json', import.meta.url).toString();
 // Extracted from reference/HF4-site-list.xlsx by
 // scripts/extract-site-flags.py. Adds astrobiology / submarine /
 // aerobrake / atmospheric / push booleans per site so the renderer
 // can decorate planner nodes with the right glyphs.
-const SITE_FLAGS_URL  = './data/site-flags.json';
+const SITE_FLAGS_URL = new URL('../../data/site-flags.json', import.meta.url).toString();
 
 // Hand-curated table from data/sites.js. We name-match planner
 // nodes against it to surface solarZone (the heliocentric band

@@ -43,6 +43,16 @@ function generateShortCode(len = 8) {
   return out;
 }
 
+// Strict shape check used at the route boundary so a bogus value
+// (wrong alphabet, too long / short) is rejected with a typed error
+// instead of round-tripping through the DB only to come back empty.
+// Cap at 32 to keep error responses small.
+const CODE_SHAPE_RE = /^[0-9a-hjkmnp-tv-z]{4,32}$/;
+function normaliseCode(raw) {
+  const s = String(raw || '').trim().toLowerCase();
+  return CODE_SHAPE_RE.test(s) ? s : null;
+}
+
 // 12 chars for invite links: long enough to be unguessable, short
 // enough to drop in a chat. Same alphabet as device codes.
 function generateInviteCode() { return generateShortCode(12); }
@@ -391,7 +401,6 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
        JOIN lobby_members lm ON lm.lobby_id = l.id AND lm.profile_id = ?
        JOIN profiles p ON p.id = l.host_id
        LEFT JOIN games g ON g.lobby_id = l.id
-       WHERE l.status != 'cancelled'
        ORDER BY l.created_at DESC
        LIMIT 50`
     )
@@ -607,12 +616,29 @@ function canViewGame(gameId, profileId) {
 // Full game view: meta + roster + current state snapshot. State is sent
 // whole today (open information; hidden hands aren't populated until
 // the BUILD op lands, at which point this redacts per-player).
-function gameView(gameId) {
+// HF4 is OPEN-information for stacks (hands, LEO, rocket, outposts -
+// all visible to every player). The ONE exception is the PLANNED
+// ROUTE: a player's planned path is private (user 2026-05-29: "rocket
+// path is secret between players ... each player can only see their
+// own rocket path"). gameView strips opponents' rocket.route for
+// each viewer. Spectators (viewerId null) see no routes.
+function redactRoutes(rawState, viewerId) {
+  if (!rawState || !Array.isArray(rawState.players)) return rawState;
+  const clone = JSON.parse(JSON.stringify(rawState));
+  for (const p of clone.players) {
+    if (p.profileId === viewerId) continue;          // your own route stays
+    if (p.rocket) p.rocket.route = [];               // opponents: hidden
+  }
+  return clone;
+}
+
+function gameView(gameId, viewerId = null) {
   const g = db
     .prepare('SELECT id, lobby_id, status, seed, committed_seq, created_at, finished_at FROM games WHERE id = ?')
     .get(gameId);
   if (!g) return null;
   const st = db.prepare('SELECT state, seq, updated_at FROM game_states WHERE game_id = ?').get(gameId);
+  const rawState = st ? JSON.parse(st.state) : null;
   return {
     id: g.id,
     lobbyId: g.lobby_id,
@@ -621,7 +647,7 @@ function gameView(gameId) {
     committedSeq: g.committed_seq,
     updatedAt: st ? st.updated_at : g.created_at,
     players: gamePlayers(gameId),
-    state: st ? JSON.parse(st.state) : null,
+    state: redactRoutes(rawState, viewerId),
   };
 }
 
@@ -634,13 +660,29 @@ function stateAtSeq(gameId, seq) {
   return row && row.state_after ? JSON.parse(row.state_after) : null;
 }
 
-function publishGame(gameId, payload) {
-  broadcast(`game:${gameId}`, payload);
+// Broadcast a game update to every subscriber, with PER-RECIPIENT
+// route redaction (opponents' rocket.route is stripped). makePayload
+// is a function (viewerId) => payload so each viewer's payload
+// references their own viewable game state.
+function publishGame(gameId, makePayload) {
+  const set = channels.get(`game:${gameId}`);
+  if (!set) return;
+  for (const ws of set) {
+    if (ws.readyState !== 1) continue;
+    const viewerId = ws._profile ? ws._profile.id : null;
+    try { ws.send(JSON.stringify(makePayload(viewerId))); } catch { /* dropped */ }
+  }
 }
 
 // Public live games: open-lobby games currently in 'active' status,
 // for the lobby-list "Live games" spectator section. Returns enough
 // per-row info to render the chip without an extra fetch.
+//
+// Games the caller is ALREADY playing in are excluded - they show up
+// under "Your games" instead, and listing them here just makes the
+// player think they have two tabs into the same table (user 2026-05-
+// 29: "if I'm in a game, do not show that game in the watch list,
+// its my game, thats confusing").
 app.get('/games/public', requireProfile, (req, res) => {
   const rows = db
     .prepare(
@@ -654,11 +696,16 @@ app.get('/games/public', requireProfile, (req, res) => {
        FROM games g
        JOIN lobbies l ON l.id = g.lobby_id
        JOIN profiles p ON p.id = l.host_id
-       WHERE g.status = 'active' AND l.join_policy = 'open'
+       WHERE g.status = 'active'
+         AND l.join_policy = 'open'
+         AND NOT EXISTS (
+           SELECT 1 FROM game_players gp
+           WHERE gp.game_id = g.id AND gp.profile_id = ?
+         )
        ORDER BY g.created_at DESC
        LIMIT 50`
     )
-    .all();
+    .all(req.profile.id);
   res.json({ entries: rows });
 });
 
@@ -666,7 +713,8 @@ app.get('/games/:id', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
   if (!canViewGame(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
-  const view = gameView(id);
+  // Per-viewer route redaction: own route stays, opponents' routes hidden.
+  const view = gameView(id, req.profile.id);
   if (!view) return res.status(404).json({ error: 'not_found' });
   res.json({ game: view, isSpectator: !isGamePlayer(id, req.profile.id) });
 });
@@ -729,15 +777,15 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
     }
   })();
 
-  const view = gameView(id);
-  publishGame(id, {
+  const opMeta = { seq: nextSeq, kind, profileId: req.profile.id, log: result.log || null };
+  publishGame(id, (viewerId) => ({
     type: 'game_update',
     gameId: id,
     seq: nextSeq,
-    op: { seq: nextSeq, kind, profileId: req.profile.id, log: result.log || null },
-    game: view,
-  });
-  res.json({ ok: true, seq: nextSeq, log: result.log || null, game: view });
+    op: opMeta,
+    game: gameView(id, viewerId),
+  }));
+  res.json({ ok: true, seq: nextSeq, log: result.log || null, game: gameView(id, req.profile.id) });
 });
 
 // Operation log, optionally only the ops after a given seq (catch-up
@@ -823,8 +871,36 @@ app.post('/lobbies/:id/invite-link', requireProfile, (req, res) => {
 // "Join '<lobby name>' hosted by @X?". Anonymous: a fresh visitor with
 // no profile yet can still see the lobby name and create a profile
 // before claiming.
+// Resolve a lobby by its short share code. Public (no auth) so the
+// ?room=<code> URL bootstrap can find the lobby id before sign-in
+// kicks in - same posture as GET /invites/links/:code below.
+// Cancelled lobbies are excluded so a stale URL doesn't keep a
+// player tied to a dead game.
+app.get('/lobbies/by-code/:code', (req, res) => {
+  // Codes are stored lowercase (CODE_ALPHABET is lowercase + digits)
+  // and SQLite is case-sensitive on `=` - matching the existing
+  // Codes are stored lowercase server-side and the URL form is
+  // case-insensitive (user 2026-05-29: "url shouldnt be case
+  // sensitive"). normaliseCode lowercases + alphabet-checks before
+  // we hit the DB so a garbage path segment short-circuits cleanly.
+  const code = normaliseCode(req.params.code);
+  if (!code) return res.status(400).json({ error: 'bad_code' });
+  const row = db
+    .prepare(
+      `SELECT id, code, name, status
+       FROM lobbies
+       WHERE code = ? AND status != 'cancelled'`
+    )
+    .get(code);
+  if (!row) return res.status(404).json({ error: 'not_found' });
+  res.json({
+    id: row.id, code: row.code, name: row.name, status: row.status,
+  });
+});
+
 app.get('/invites/links/:code', (req, res) => {
-  const code = String(req.params.code || '').toLowerCase();
+  const code = normaliseCode(req.params.code);
+  if (!code) return res.status(400).json({ error: 'bad_code' });
   const row = db
     .prepare(
       `SELECT il.lobby_id, il.expires_at, il.single_use, il.used_count, il.used_by,
@@ -852,7 +928,8 @@ app.get('/invites/links/:code', (req, res) => {
 // Claim an invite link to join. Bumps used_count; if single_use,
 // pins used_by to the first caller.
 app.post('/invites/links/:code/claim', requireProfile, (req, res) => {
-  const code = String(req.params.code || '').toLowerCase();
+  const code = normaliseCode(req.params.code);
+  if (!code) return res.status(400).json({ error: 'bad_code' });
   const row = db
     .prepare(
       `SELECT id, lobby_id, expires_at, single_use, used_count
@@ -1630,6 +1707,48 @@ function esc(s) {
      )`
   ).run(nowMs());
   console.log(`cleaned up ${before} stranded pending invite(s)`);
+})();
+
+// Idempotent normalisation: recall stranded EMPTY rockets to LEO.
+// Games created before "rocket opens at LEO" started every ship at
+// startSiteId() (Itokawa), so an empty rocket that never launched is
+// stranded at a real site. An empty rocket can't burn, so it can only
+// ever be at LEO - this matches the invariant the engine now enforces
+// (applyMove rejects empty_rocket, recallIfEmpty keeps it at LEO), so
+// re-running on already-correct state is a no-op.
+//
+// NOTE: we deliberately do NOT touch rocket.tank here. New rockets
+// spawn with 0 water (STARTING_WATER), which is the real fix for
+// "magic 20 water". A boot-time tank reset would also wipe water a
+// player legitimately converted from aqua at LEO every time the
+// server restarts (user 2026-05-29: "I dont want this to happen every
+// time going forward, just prevent water spawning with brand new
+// rockets"). Pre-fix games keep their old water; start a fresh game
+// for a clean tank.
+(() => {
+  const rows = db.prepare('SELECT game_id, state FROM game_states').all();
+  let fixed = 0;
+  for (const row of rows) {
+    let st;
+    try { st = JSON.parse(row.state); } catch { continue; }
+    if (!st || !Array.isArray(st.players)) continue;
+    let changed = false;
+    for (const p of st.players) {
+      const r = p && p.rocket;
+      if (r && Array.isArray(r.stack) && r.stack.length === 0 && r.siteId != null) {
+        r.siteId = null;
+        r.activeThrusterId = null;
+        r.activeProspectorId = null;
+        changed = true;
+      }
+    }
+    if (changed) {
+      db.prepare('UPDATE game_states SET state = ? WHERE game_id = ?')
+        .run(JSON.stringify(st), row.game_id);
+      fixed += 1;
+    }
+  }
+  if (fixed) console.log(`recalled empty rockets to LEO in ${fixed} game(s)`);
 })();
 
 httpServer.listen(PORT, '0.0.0.0', () => {

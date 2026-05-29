@@ -6,6 +6,16 @@
 import { apiBaseUrl } from './api.js';
 
 const RECONNECT_DELAYS = [500, 1000, 2000, 4000, 8000, 15000];
+// Stop attempting reconnects after this many consecutive failures.
+// User 2026-05-29: Firefox repeatedly fails the wss handshake to the
+// production server and the loop spams the console forever. Polling
+// (lobby + game) is the real fallback path - once we've given up on
+// the socket, the REST polls continue to drive every UI update, and
+// the next deliberate ws.connect() (e.g. a fresh sign-in) restarts
+// the attempt counter. Surfaced as state: { ready:false, giveUp:true }
+// so a UI layer can show "Live updates unavailable - polling for
+// changes" without polling the connection itself.
+const MAX_RECONNECT_ATTEMPTS = 6;
 
 export class WSClient {
   constructor() {
@@ -45,6 +55,9 @@ export class WSClient {
   connect(token) {
     this.token = token;
     this.deliberatelyClosed = false;
+    // Fresh connect resets the give-up counter so a transient outage
+    // earlier in the session doesn't bar WS forever.
+    this.reconnectAttempt = 0;
     this._openSocket();
   }
 
@@ -109,6 +122,14 @@ export class WSClient {
   }
 
   _scheduleReconnect() {
+    if (this.reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
+      // Give up on the socket and let the REST polls handle every
+      // update from here. A fresh connect() (sign-in, etc.) resets
+      // the counter so a transient outage doesn't lock the client
+      // out of WS for the whole session.
+      this.emit('state', { ready: false, giveUp: true });
+      return;
+    }
     const delay = RECONNECT_DELAYS[Math.min(this.reconnectAttempt, RECONNECT_DELAYS.length - 1)];
     this.reconnectAttempt++;
     setTimeout(() => { if (!this.deliberatelyClosed) this._openSocket(); }, delay);

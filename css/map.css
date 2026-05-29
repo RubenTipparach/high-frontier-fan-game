@@ -56,6 +56,17 @@
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
 }
+/* In multiplayer the player's own seat colour (--me-color, set on the
+   browse-shell) frames their chrome so "I am this colour" is always
+   visible: a coloured line + glow on the top bar + hand strip.
+   IMPORTANT: drawn with box-shadow, NOT a thicker border. A border
+   change resizes the toolbar, but the --toolbar-h ResizeObserver
+   watches the CONTENT box and won't re-fire for a border-only change,
+   leaving the sidepanel 2px out of alignment. box-shadow paints the
+   accent without touching layout, so the panel stays flush. */
+.browse-shell.has-me-color .map-toolbar {
+  box-shadow: inset 0 -3px 0 var(--me-color), inset 0 -10px 12px -7px var(--me-color);
+}
 /* Turn controls live on the LEFT of the toolbar (before search
    + route) so an open side panel - which covers the right edge -
    never hides them. Previous "padding-right when panel open"
@@ -247,6 +258,21 @@
 .map-turn-budget .turn-tag.is-spent {
   opacity: 0.32;
   border-style: dashed;
+}
+/* Locked = it's not your turn yet (online mode). Greys the control
+   AND kills the pulse animation so the toolbar doesn't draw the
+   eye to a button you can't press. End-turn button shares the
+   class so the styling stays in lockstep. */
+.map-turn-budget .turn-tag.is-locked,
+.map-turn-controls button.is-locked {
+  opacity: 0.35;
+  cursor: not-allowed;
+  animation: none !important;
+  filter: grayscale(0.6);
+}
+.map-turn-budget .turn-tag.is-locked:hover,
+.map-turn-controls button.is-locked:hover {
+  filter: grayscale(0.6);
 }
 .map-mode-toggle {
   display: inline-flex;
@@ -2460,7 +2486,12 @@ body:has(#view-browse:not(.hidden)) #main {
   bottom: var(--hand-height, 320px);
   z-index: 4;
   background: #000;
-  color: #fff;
+  /* Text colour echoes the active player's seat colour by default
+     (set by --mp-turn-color in syncMpTurnBanner). Falls back to
+     white when no player is active (waiting). is-your-turn
+     overrides below so YOUR name renders in the same mint glow
+     the rest of "Your turn" uses. */
+  color: var(--mp-turn-color, #fff);
   font-weight: 900;
   font-size: 11px;
   letter-spacing: 2px;
@@ -2528,6 +2559,28 @@ body:has(#view-browse:not(.hidden)) #main {
   backdrop-filter: blur(6px);
   transition: right 0.22s ease;
   overflow: visible;
+}
+/* Seat-colour frame on the player's own hand strip (multiplayer).
+   box-shadow only - a border-top would shift the strip's measured
+   height (and the mp-turn-banner that anchors to it). */
+.browse-shell.has-me-color .sandbox-hand {
+  box-shadow: inset 0 3px 0 var(--me-color), inset 0 10px 12px -7px var(--me-color);
+}
+.browse-shell.has-me-color .hand-title {
+  color: var(--me-color);
+}
+/* A colour dot before the hand title spells out "you are this colour"
+   even at a glance. */
+.browse-shell.has-me-color .hand-title::before {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--me-color);
+  margin-right: 6px;
+  vertical-align: middle;
+  box-shadow: 0 0 6px var(--me-color);
 }
 .browse-sidepanel[data-active=""] ~ .sandbox-hand { right: 48px; }
 /* IMPORTANT: the hand-offset selectors below MUST match the panel-
@@ -4591,6 +4644,13 @@ body:has(#view-browse:not(.hidden)) #main {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.5);
 }
+/* In multiplayer the focused stack tab takes the player's seat colour
+   so the whole control row reads as "yours". */
+.browse-shell.has-me-color .hand-stack-group.is-focused {
+  background: color-mix(in srgb, var(--me-color) 22%, transparent);
+  border-color: var(--me-color);
+  box-shadow: 0 0 0 1px var(--me-color);
+}
 .hand-stack-group.is-empty {
   opacity: 0.5;
 }
@@ -5146,6 +5206,13 @@ body:has(#view-browse:not(.hidden)) #main {
   gap: 6px;
   flex-wrap: wrap;
 }
+/* Select-all / deselect-all row above the transfer destinations. */
+.stack-inspector-selrow {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.stack-inspector-selrow .modal-btn { font-size: 11px; padding: 4px 10px; }
 .stack-inspector-xfer-btn {
   background: var(--bg-2);
   color: var(--ink);
@@ -5164,6 +5231,20 @@ body:has(#view-browse:not(.hidden)) #main {
 .stack-inspector-xfer-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+/* Rocket-destination transfers wear an orange motif: a subtle,
+   consistent "this builds your rocket" cue across every Send -> Rocket
+   button (LEO inspector + rocket modal). User 2026-05-29: "send to
+   rocket should be an orange button ... a motif to subtly guide
+   players to building a rocket". */
+.stack-inspector-xfer-btn[data-dest="rocket"] {
+  background: #c2410c;
+  color: #fff7ed;
+  border-color: #f97316;
+}
+.stack-inspector-xfer-btn[data-dest="rocket"]:hover:not(:disabled) {
+  background: #ea580c;
+  border-color: #fb923c;
 }
 
 /* Per-card Select toggle in the rocket modal. Matches the
@@ -5695,6 +5776,16 @@ body:has(#view-browse:not(.hidden)) #main {
   border: 1px solid rgba(0, 0, 0, 0.5);
 }
 .mp-name { font-weight: 600; font-size: 13px; }
+
+/* Shared @name tint. Doctrine (CLAUDE.md "Player names track the
+   player's seat colour"): every render of `@<name>` reads its
+   --player-color CSS var so the name visually maps back to that
+   player's chip + map marker + turn-banner stripe. Fall back to
+   currentColor when no var is set so historical / unowned rows
+   stay readable. */
+.player-name {
+  color: var(--player-color, currentColor);
+}
 .mp-stats {
   margin-left: auto;
   font-size: 11px;
@@ -5712,6 +5803,102 @@ body:has(#view-browse:not(.hidden)) #main {
   margin: 6px 0 3px;
 }
 .mp-line { font-size: 12px; padding: 1px 0; }
+
+/* Per-player stack inspect chips (6 stacks: LEO / Rocket / Outpost
+   A-D, plus the hand row). Each is a tap target that opens a
+   read-only card modal. Two-column grid so the six fit compactly. */
+.mp-stack-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin: 4px 0;
+}
+/* A cell pairs the inspect chip with its 📍 find button. */
+.mp-stack-cell { display: flex; gap: 3px; align-items: stretch; }
+.mp-stack-cell .mp-stack-chip { flex: 1; min-width: 0; }
+.mp-stack-find {
+  flex: 0 0 auto;
+  width: 26px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: rgba(15, 23, 42, 0.45);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.mp-stack-find:hover:not(:disabled) {
+  background: rgba(125, 211, 252, 0.12);
+  border-color: var(--accent-2);
+}
+.mp-stack-find:disabled { opacity: 0.3; cursor: default; }
+.mp-stack-hand { margin-top: 4px; }
+.mp-stack-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  font-size: 11px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: rgba(15, 23, 42, 0.45);
+  color: var(--ink);
+  cursor: pointer;
+}
+.mp-stack-chip:hover:not(:disabled):not(.is-empty) {
+  background: rgba(125, 211, 252, 0.10);
+  border-color: var(--accent-2);
+}
+.mp-stack-chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-stack-chip-count {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--accent-2);
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 3px;
+  padding: 0 5px;
+}
+.mp-stack-chip.is-empty,
+.mp-stack-chip:disabled { opacity: 0.5; cursor: default; }
+.mp-stack-chip.is-hidden {
+  display: block;
+  margin-top: 4px;
+  font-style: italic;
+  color: var(--ink-mute);
+  cursor: default;
+}
+
+/* Read-only stack inspect modal. */
+.mp-stack-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  max-width: 760px;
+  width: 100%;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  color: var(--ink);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+}
+.mp-stack-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 18px 6px;
+}
+.mp-stack-modal-head h3 { margin: 0; font-size: 15px; }
+.mp-stack-modal-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: center;
+  padding: 12px 18px 20px;
+}
+.mp-stack-modal-card { transform: scale(0.9); transform-origin: top center; }
 .mp-head-row {
   display: flex;
   align-items: center;
@@ -5744,7 +5931,9 @@ body:has(#view-browse:not(.hidden)) #main {
   padding: 6px 8px;
 }
 .mp-chat-list .mp-chat-msg { padding: 2px 0; font-size: 12px; line-height: 1.35; }
-.mp-chat-list .mp-chat-who { font-weight: 600; color: var(--accent); margin-right: 4px; }
+/* Colour comes from .player-name + --player-color (set in
+   appendMpChat from the cached snapshot). */
+.mp-chat-list .mp-chat-who { font-weight: 600; margin-right: 4px; }
 .mp-chat-list .mp-chat-empty { font-size: 12px; padding: 2px 0; }
 .mp-chat-form { display: flex; gap: 6px; margin-top: 6px; }
 .mp-chat-form input {
@@ -5769,7 +5958,142 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .mp-chat-form button:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* ===== MP mission log (paintOnlineMissionLog) ===== */
+.mp-log-head { margin: 0 0 8px; }
+.mp-log-head h3 { margin: 0 0 2px; font-size: 13px; letter-spacing: 0.8px; text-transform: uppercase; color: var(--accent-2); }
+.mp-log-head p { margin: 0; font-size: 11px; }
+
+.mp-log-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.mp-log-row {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 8px 6px 10px;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--player-color, var(--accent));
+  border-radius: 4px;
+  transition: background 0.12s ease;
+}
+.mp-log-row:hover { background: rgba(125, 211, 252, 0.06); }
+.mp-log-icon {
+  text-align: center;
+  font-size: 14px;
+  line-height: 1;
+  align-self: center;
+  filter: saturate(0.9);
+}
+.mp-log-body { min-width: 0; }
+.mp-log-who {
+  font-weight: 700;
+  margin-right: 6px;
+  /* .player-name handles colour via --player-color */
+}
+.mp-log-summary { color: var(--ink); opacity: 0.92; }
+.mp-log-when {
+  font-size: 10px;
+  color: var(--ink-mute);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  align-self: center;
+}
+.mp-log-empty { padding: 12px; text-align: center; }
+
+/* Kind-specific accents on top of the player-colour left border.
+   Subtle background washes keep the row readable while letting
+   structural ops (auction / turn) stand out from movement noise. */
+.mp-log-row.mp-log-kind-end-turn { background: rgba(56, 189, 248, 0.08); }
+.mp-log-row.mp-log-kind-auction-start,
+.mp-log-row.mp-log-kind-auction-sell { background: rgba(20, 83, 45, 0.18); }
+.mp-log-row.mp-log-kind-auction-bid,
+.mp-log-row.mp-log-kind-auction-join { background: rgba(125, 211, 252, 0.10); }
+.mp-log-row.mp-log-kind-auction-pass { background: rgba(127, 29, 29, 0.10); }
+.mp-log-row.mp-log-kind-pick-crew { background: rgba(168, 85, 247, 0.12); }
+
 /* ===== Multiplayer auction overlay (browse.js renderOnlineAuction) ===== */
+/* Crew-draft waiting overlay. Visible whenever the snapshot says
+   state.draftPhase === 'crew'. Sits below the wizard's z-index so
+   when the wizard is open it covers this panel; when the wizard
+   closes (after the local player commits) this remains as the
+   "waiting for the others" view with a Change-pick affordance. */
+.mp-crew-draft-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(3, 2, 10, 0.82);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: modal-fade 0.18s ease-out;
+}
+.mp-crew-draft-overlay.is-behind-wizard {
+  /* The wizard's own backdrop is already covering the screen; let
+     it dominate so the player doesn't see two overlapping panels. */
+  background: transparent;
+  backdrop-filter: none;
+}
+.mp-crew-draft-overlay.is-behind-wizard .mp-crew-draft-panel { display: none; }
+.mp-crew-draft-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 22px;
+  max-width: 480px;
+  width: 100%;
+  color: var(--ink);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.mp-crew-draft-panel h3 { margin: 0; font-size: 18px; }
+.mp-crew-draft-count strong { color: var(--accent-2); font-variant-numeric: tabular-nums; }
+.mp-crew-draft-roster {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+.mp-crew-draft-roster li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.35);
+}
+.mp-crew-draft-roster li.is-picked { opacity: 0.85; }
+.mp-crew-draft-dot {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  flex: 0 0 auto;
+}
+.mp-crew-draft-name { flex: 1; }
+.mp-crew-draft-status {
+  font-size: 12px;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+.mp-crew-draft-me { font-size: 13px; margin: 6px 0 2px; }
+.mp-crew-draft-panel .modal-btn { align-self: flex-end; }
+
 .mp-auction-overlay {
   position: fixed;
   inset: 0;

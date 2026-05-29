@@ -35,7 +35,7 @@
 import { PATENTS } from '../../data/patents.js';
 import { CREW } from '../../data/crew.js';
 import { makeRng, shuffle } from './rng.js';
-import { startSiteId } from './graph.js';
+// (startSiteId import dropped: the rocket now opens at LEO, siteId null.)
 
 // --- Sunspot Cube clock (mirror of js/game/turn-clock.js) ---
 export const SLOTS = 12;
@@ -59,12 +59,11 @@ export const MOVES_PER_TURN = 1;
 export const DISCARDS_PER_TURN = 1;
 
 // --- Economy / ship defaults ---
-// The sandbox opens a rocket empty with a 0 tank and refuels at LEO.
-// Multiplayer v1 has no BUILD / refuel op yet, so each ship opens with
-// a starting water budget (akin to solo.js STARTING_WATER) so MOVE is
-// playable immediately. This is a balance constant, revisited when the
-// build + refuel ops land.
-export const STARTING_WATER = 20;
+// The rocket opens with an EMPTY tank, exactly like the sandbox: water
+// is not free. It comes from converting aqua 1:1 at LEO via the REFUEL
+// op (engine.js). The old code spawned a flat 20 water as a stopgap
+// before refuel existed, which read as "magic water" - now removed.
+export const STARTING_WATER = 0;
 export const AQUA_DEFAULT = 6;
 
 export const DECK_TYPES = [
@@ -108,7 +107,16 @@ function freshPlayer({ profileId, name, seat, color }) {
     // it is final - PICK_CREW rejects re-picks.
     faction: null,
     rocket: {
-      siteId: startSiteId(),
+      // siteId null = parked at LEO (the launch anchor). There is no
+      // explicit LEO node in SITES, so null is the canonical "at LEO"
+      // value the whole stack agrees on: the client renders the rocket
+      // at the LEO lagrange node, LEO <-> Rocket transfers are enabled
+      // (TRANSFER op requires siteId == null), and the first MOVE
+      // launches from LEO using the destination's dvLeo (engine
+      // applyMove special-cases a null origin). It used to start at
+      // startSiteId() (a real Earth site), which left the rocket NOT
+      // colocated with the LEO Stack so the crew could never board.
+      siteId: null,
       stack: [],
       activeThrusterId: null,
       activeProspectorId: null,
@@ -161,6 +169,20 @@ export function createInitialState({ players, seed }) {
     seed,
     rng: { cursor: gen.cursor },
     status: 'active',
+    // Draft phase. Every game opens in 'crew' - all players pick a
+    // faction and may re-pick freely until everyone has chosen. The
+    // engine's applyPickCrew flips this to 'play' the moment the
+    // last player commits, and from then on PICK_CREW is locked and
+    // the regular gameplay ops (MOVE / BURN / AUCTION_* / END_TURN
+    // / etc.) start being accepted.
+    draftPhase: 'crew',
+    // Card economy. Multiplayer is always 'market' (Card Market
+    // mode is mandatory in MP - patents are auctioned, not free
+    // draws, and the Free Market sell op is available). Server-
+    // owned so the client can't fall back to Free Library by
+    // wiping localStorage; net-bridge reads it on every snapshot
+    // and pins the client's MARKET_MODE.
+    economy: 'market',
     turn: 0,
     round: 1,
     lastEvent: null,

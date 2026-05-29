@@ -21,11 +21,21 @@ const BUILD = '__BUILD_SHA__';
 const DEV_PLACEHOLDER = '__BUILD' + '_SHA__';
 const POLL_MS = 60_000;
 
+// Resolve version.json against THIS SCRIPT's location, not the address
+// bar. With room routing the address bar can be a deeper path
+// (/high-frontier-fan-game/room/DPAT3R), and a relative './version.json'
+// would resolve to /room/version.json (404) - silently disabling the
+// version check. The script always lives at <base>/js/version-check.js,
+// so '../version.json' off its own src is the real <base>/version.json
+// regardless of how deep the visible URL is.
+const SCRIPT_SRC = (document.currentScript && document.currentScript.src) || location.href;
+const VERSION_URL = new URL('../version.json', SCRIPT_SRC).toString();
+
 async function check() {
   if (BUILD === DEV_PLACEHOLDER) return;
   let r;
   try {
-    r = await fetch('./version.json', { cache: 'no-store' });
+    r = await fetch(VERSION_URL, { cache: 'no-store' });
   } catch {
     return;
   }

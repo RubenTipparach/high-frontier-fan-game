@@ -59,12 +59,25 @@ function notify() {
   }
 }
 
-// Replace the in-memory hand from a server snapshot. Clears any
-// pending boost marks (they don't survive a snapshot swap).
+// Replace the in-memory hand from a server snapshot. Idempotent: a
+// re-hydrate with an identical hand is a no-op (no notify, no
+// re-render) so the polling loop (every ~5s) doesn't stomp on the
+// player's in-progress UI. Boost marks are PRESERVED for cards still
+// in the hand - only marks whose card has actually left the hand are
+// dropped. Previously this cleared every boost mark on every snapshot,
+// which wiped a selection the player was mid-way through building
+// (user 2026-05-29: "something is interfering or reseting my boost
+// operation").
 export function hydrateHand(ids = []) {
-  _hand = Array.isArray(ids) ? [...ids] : [];
-  _boostMarks.clear();
-  notify();
+  const next = Array.isArray(ids) ? [...ids] : [];
+  const handChanged = next.length !== _hand.length
+    || next.some((id, i) => id !== _hand[i]);
+  _hand = next;
+  let marksChanged = false;
+  for (const id of [..._boostMarks]) {
+    if (!_hand.includes(id)) { _boostMarks.delete(id); marksChanged = true; }
+  }
+  if (handChanged || marksChanged) notify();
 }
 
 export function getHandSlots() {
