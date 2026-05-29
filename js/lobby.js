@@ -337,7 +337,9 @@ function sandboxGameRow(sg) {
     </div>
   `;
   li.querySelector('code').textContent = sg.id;
-  li.querySelector('.when').textContent = when.toLocaleString();
+  // Compact date (no seconds) so the row isn't dominated by the timestamp.
+  li.querySelector('.when').textContent = when.toLocaleDateString([], { month: 'short', day: 'numeric' })
+    + ' ' + when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   li.querySelector('.sb-resume').addEventListener('click', () => {
     activateSandboxGame(sg.id);
     window.location.assign(sandboxUrl(sg.id));

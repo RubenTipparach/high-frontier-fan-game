@@ -331,7 +331,12 @@ label.checkbox input { accent-color: var(--accent-2); }
 .lobby-list li, .invite-list li {
   padding: 10px 12px; border-bottom: 1px solid var(--border);
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  /* Let the action buttons wrap to a second line on a narrow box instead
+     of overflowing / clipping (e.g. sandbox rows: Resume + Delete). */
+  flex-wrap: wrap;
 }
+/* Info column shrinks/truncates so it never pushes the buttons off-row. */
+.lobby-list li > div:first-child { flex: 1 1 55%; min-width: 0; }
 .lobby-list li:last-child, .invite-list li:last-child { border-bottom: none; }
 .lobby-list li.empty, .invite-list li.empty {
   color: var(--ink-mute); justify-content: center; padding: 18px 12px;
@@ -355,7 +360,7 @@ label.checkbox input { accent-color: var(--accent-2); }
 .lobby-list .name {
   display: block; font-weight: 500; color: var(--ink);
 }
-.lobby-list .row-actions { display: flex; gap: 6px; }
+.lobby-list .row-actions { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; }
 
 .code-pill {
   background: var(--bg-2);
@@ -581,7 +586,7 @@ label.checkbox input { accent-color: var(--accent-2); }
    above the chat on small screens). */
 #view-lobby-list .lobby-top-row {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) minmax(260px, 380px);
+  grid-template-columns: minmax(280px, 1fr) minmax(320px, 460px);
   gap: 12px;
   max-width: 1320px;
   margin: 0 auto 12px;
