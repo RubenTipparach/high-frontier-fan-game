@@ -5801,6 +5801,70 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .mp-chat-form button:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* ===== MP mission log (paintOnlineMissionLog) ===== */
+.mp-log-head { margin: 0 0 8px; }
+.mp-log-head h3 { margin: 0 0 2px; font-size: 13px; letter-spacing: 0.8px; text-transform: uppercase; color: var(--accent-2); }
+.mp-log-head p { margin: 0; font-size: 11px; }
+
+.mp-log-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.mp-log-row {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 8px 6px 10px;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--player-color, var(--accent));
+  border-radius: 4px;
+  transition: background 0.12s ease;
+}
+.mp-log-row:hover { background: rgba(125, 211, 252, 0.06); }
+.mp-log-icon {
+  text-align: center;
+  font-size: 14px;
+  line-height: 1;
+  align-self: center;
+  filter: saturate(0.9);
+}
+.mp-log-body { min-width: 0; }
+.mp-log-who {
+  font-weight: 700;
+  margin-right: 6px;
+  /* .player-name handles colour via --player-color */
+}
+.mp-log-summary { color: var(--ink); opacity: 0.92; }
+.mp-log-when {
+  font-size: 10px;
+  color: var(--ink-mute);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  align-self: center;
+}
+.mp-log-empty { padding: 12px; text-align: center; }
+
+/* Kind-specific accents on top of the player-colour left border.
+   Subtle background washes keep the row readable while letting
+   structural ops (auction / turn) stand out from movement noise. */
+.mp-log-row.mp-log-kind-end-turn { background: rgba(56, 189, 248, 0.08); }
+.mp-log-row.mp-log-kind-auction-start,
+.mp-log-row.mp-log-kind-auction-sell { background: rgba(20, 83, 45, 0.18); }
+.mp-log-row.mp-log-kind-auction-bid,
+.mp-log-row.mp-log-kind-auction-join { background: rgba(125, 211, 252, 0.10); }
+.mp-log-row.mp-log-kind-auction-pass { background: rgba(127, 29, 29, 0.10); }
+.mp-log-row.mp-log-kind-pick-crew { background: rgba(168, 85, 247, 0.12); }
+
 /* ===== Multiplayer auction overlay (browse.js renderOnlineAuction) ===== */
 /* Crew-draft waiting overlay. Visible whenever the snapshot says
    state.draftPhase === 'crew'. Sits below the wizard's z-index so

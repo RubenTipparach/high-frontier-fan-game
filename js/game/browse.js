@@ -10393,6 +10393,33 @@ function paintMissionLog() {
 // recreate the sandbox's turn-grouped layout. Auto-refreshes when
 // a new snapshot lands (applySnapshot triggers a paintMissionLog
 // rerun for the active pane).
+// Per-op-kind glyph for the log icon column. Anything missing falls
+// back to a neutral bullet so a new op kind doesn't disappear.
+const MP_LOG_ICONS = {
+  AUCTION_START: '🎯', AUCTION_BID: '💰', AUCTION_PASS: '🚫',
+  AUCTION_JOIN: '🎯', AUCTION_SELL: '✅',
+  PICK_CREW: '🧑‍🚀',
+  END_TURN: '⏭', MOVE: '🛸', BURN: '🔥',
+  SET_ACTIVE_THRUSTER: '🔥', SET_ACTIVE_PROSPECTOR: '⛏',
+  BUILD_ROCKET: '🚀', PROSPECT: '⛏',
+  INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧',
+  DECOMMISSION: '🗑', BUY_FUTURE: '📈',
+  UNDO: '↩', REDO: '↪',
+};
+
+// Short relative-time string for the log row. Cap at days so the
+// label fits in a tight gutter; precise timestamp lives on the
+// title attribute for hover.
+function relTime(ms) {
+  if (!ms) return '';
+  const d = Date.now() - ms;
+  if (d < 0) return 'now';
+  if (d < 60_000) return Math.max(1, Math.round(d / 1000)) + 's';
+  if (d < 3600_000) return Math.round(d / 60_000) + 'm';
+  if (d < 86_400_000) return Math.round(d / 3600_000) + 'h';
+  return Math.round(d / 86_400_000) + 'd';
+}
+
 async function paintOnlineMissionLog(host) {
   if (!_online || !_onlineGameId || !_onlineMe) {
     host.innerHTML = '<p class="muted">Mission log will appear once the game starts.</p>';
@@ -10409,8 +10436,6 @@ async function paintOnlineMissionLog(host) {
     return;
   }
   const entries = (r.data && r.data.entries) || [];
-  // Server returns ops in seq ASC order. Render newest-first for
-  // a tail-friendly read; skip the seq-0 START op (no log line).
   // Resolve a profileId -> seat colour map so each @name in the log
   // can render in that player's seat colour (CLAUDE.md doctrine:
   // "Player names track the player's seat colour"). Falls back to
@@ -10419,26 +10444,46 @@ async function paintOnlineMissionLog(host) {
   for (const p of (_onlineSnapshot && _onlineSnapshot.players) || []) {
     if (p.color) colourFor.set(p.profileId, p.color);
   }
+  // The engine's log line already starts with the actor's name
+  // ("Ruben put X up for auction."). The dedicated @name column
+  // would then duplicate that. Strip the leading name (and the
+  // following space) so the summary reads cleanly next to the
+  // coloured @name in its own column.
+  const stripLeadName = (line, name) => {
+    if (!line || !name) return line;
+    if (line.indexOf(name) !== 0) return line;
+    return line.slice(name.length).replace(/^\s+/, '');
+  };
+  // Server returns ops in seq ASC order. Render newest-first.
   const rows = entries
     .filter((e) => e.kind !== 'START' && e.log)
     .reverse()
     .map((e) => {
       const col = colourFor.get(e.profileId);
       const style = col ? ` style="--player-color:${esc(col)}"` : '';
+      const icon = MP_LOG_ICONS[e.kind] || '·';
+      const kindClass = 'mp-log-kind-' + esc(e.kind.toLowerCase().replace(/_/g, '-'));
+      const when = relTime(e.createdAt);
+      const whenTitle = e.createdAt
+        ? new Date(e.createdAt).toLocaleString() : '';
+      const summary = stripLeadName(e.log, e.profileName);
       return `
-      <li class="mp-log-row">
-        <span class="mp-log-kind">${esc(e.kind)}</span>
-        <span class="mp-log-who player-name"${style}>@${esc(e.profileName || '?')}</span>
-        <span class="mp-log-summary">${esc(e.log)}</span>
+      <li class="mp-log-row ${kindClass}"${style}>
+        <span class="mp-log-icon" aria-hidden="true">${icon}</span>
+        <span class="mp-log-body">
+          <span class="mp-log-who player-name">@${esc(e.profileName || '?')}</span>
+          <span class="mp-log-summary">${esc(summary)}</span>
+        </span>
+        <span class="mp-log-when" title="${esc(whenTitle)}">${esc(when)}</span>
       </li>`;
     }).join('');
   host.innerHTML = `
-    <h3 style="margin-top:0">📋 Mission log</h3>
-    <p class="muted" style="margin:4px 0 8px;font-size:11px;">
-      Live from the server's op log. Newest first.
-    </p>
-    <ul class="mp-log-list" style="list-style:none;margin:0;padding:0;max-height:60vh;overflow-y:auto;">
-      ${rows || '<li class="muted">No actions yet.</li>'}
+    <div class="mp-log-head">
+      <h3>📋 Mission log</h3>
+      <p class="muted">Live from the server. Newest first.</p>
+    </div>
+    <ul class="mp-log-list">
+      ${rows || '<li class="mp-log-empty muted">No actions yet.</li>'}
     </ul>
   `;
   if (scrollTop != null) {
