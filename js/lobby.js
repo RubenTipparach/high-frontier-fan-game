@@ -5,7 +5,7 @@
 import {
   listLobbies, listMyGames, listPublicGames, getLobby, createLobby, joinLobby, leaveLobby,
   startLobby, claimInviteLink, lookupInviteLink,
-  fetchGlobalChat, sendGlobalChat,
+  fetchGlobalChat, sendGlobalChat, getAnnouncement,
 } from './api.js';
 import { activeProfile, onProfileChange } from './auth.js';
 import { ws } from './ws.js';
@@ -104,11 +104,27 @@ export function initLobby({ onShowView, onToast }) {
 // immediately (cheap), and the history fetch is deferred until a
 // profile actually arrives via onProfileChange so we don't silently
 // no-op the backfill.
+// Server-wide announcement banner (patches / updates), shown atop global
+// chat. One current message that overrides; hidden when empty. Each line
+// renders as its own row so multi-line posts read cleanly.
+async function loadAnnouncement() {
+  const box = document.getElementById('server-announcement');
+  if (!box) return;
+  const r = await getAnnouncement();
+  const msg = (r.ok && r.data && r.data.message) ? String(r.data.message).trim() : '';
+  if (!msg) { box.hidden = true; box.innerHTML = ''; return; }
+  const lines = msg.split('\n').map((l) => l.trim()).filter(Boolean);
+  box.innerHTML = '<span class="server-announcement-tag">📣 Server update</span>'
+    + lines.map((l) => `<p class="server-announcement-line">${escapeHtml(l)}</p>`).join('');
+  box.hidden = false;
+}
+
 function mountGlobalChat() {
   const form = document.getElementById('global-chat-form');
   const input = document.getElementById('global-chat-input');
   const list = document.getElementById('global-chat-messages');
   if (!form || !input || !list) return;
+  loadAnnouncement();
 
   // Track which message ids we've already rendered so the live WS echo
   // doesn't double-print messages we just optimistically appended.

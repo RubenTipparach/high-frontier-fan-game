@@ -112,6 +112,9 @@
         <div class="lobby-top-row">
           <div class="card global-chat">
             <h2>Global chat</h2>
+            <!-- Server-wide announcement (patches / updates). Populated
+                 from GET /announcement; hidden when empty. -->
+            <div id="server-announcement" class="server-announcement" hidden></div>
             <ul id="global-chat-messages" class="chat-messages">
               <li class="empty">Global chat coming online - say hi to anyone in the lobby.</li>
             </ul>

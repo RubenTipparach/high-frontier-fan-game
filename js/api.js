@@ -210,3 +210,8 @@ export async function setNotifyPrefs(prefs, token) {
 export async function testNotify(discordUserId, token) {
   return call('POST', '/me/notify/test', { body: { discordUserId }, token });
 }
+
+// --- Server-wide announcement banner ---
+export async function getAnnouncement() {
+  return call('GET', '/announcement', {});
+}

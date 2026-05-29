@@ -152,6 +152,31 @@ app.get('/healthz', (_req, res) => {
   res.json({ ok: true, ts: nowMs() });
 });
 
+// Server-wide announcement banner (shown atop global chat). Seeded once
+// with the current note; editable from /admin. A future build can expand
+// this into a richer "post an update" box - it's already a settings row.
+const DEFAULT_ANNOUNCEMENT =
+  '@ruben-phone: discord integration and email notifications are being worked on, '
+  + 'both require some leg work on my part to add 3rd party services\n'
+  + '@ruben-phone: for now I\'ll just ping you when its your turn';
+db.prepare('INSERT OR IGNORE INTO server_settings (key, value, updated_at) VALUES (?, ?, ?)')
+  .run('announcement', DEFAULT_ANNOUNCEMENT, nowMs());
+
+app.get('/announcement', (_req, res) => {
+  const row = db.prepare('SELECT value, updated_at FROM server_settings WHERE key = ?').get('announcement');
+  res.json({ message: (row && row.value) || '', updatedAt: (row && row.updated_at) || 0 });
+});
+
+// Set the announcement (lives under /admin like the other admin actions).
+app.post('/admin/announcement', (req, res) => {
+  const message = String((req.body && req.body.message) || '');
+  db.prepare(
+    `INSERT INTO server_settings (key, value, updated_at) VALUES ('announcement', ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  ).run(message, nowMs());
+  res.json({ ok: true });
+});
+
 // Create or re-claim a profile. Identical contract to murdoku:
 //   201 -> new profile created
 //   200 -> existing profile + matching token (idempotent re-claim)
@@ -1606,6 +1631,27 @@ app.get('/admin', (_req, res) => {
     <div class="kpi"><strong>${kpi.invites_pending}</strong><span>pending invites</span></div>
     <div class="kpi"><strong>${kpi.links_total}</strong><span>invite links</span></div>
   </div>
+
+  <h2>Announcement banner</h2>
+  <p>Shown atop global chat for every player. One current message (this
+  overrides it). Blank to hide.</p>
+  <form onsubmit="saveAnnouncement(event)">
+    <textarea id="announce-text" rows="4" style="width:100%;box-sizing:border-box">${esc(
+      (db.prepare("SELECT value FROM server_settings WHERE key='announcement'").get() || {}).value || ''
+    )}</textarea>
+    <div style="margin-top:6px"><button type="submit">Save announcement</button>
+    <span id="announce-status"></span></div>
+  </form>
+  <script>
+    function saveAnnouncement(e) {
+      e.preventDefault();
+      var msg = document.getElementById('announce-text').value;
+      document.getElementById('announce-status').textContent = 'Saving…';
+      fetch('/admin/announcement', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: msg }) })
+        .then(function (r) { document.getElementById('announce-status').textContent = r.ok ? 'Saved.' : 'Failed.'; })
+        .catch(function () { document.getElementById('announce-status').textContent = 'Failed.'; });
+    }
+  </script>
 
   <h2>Profiles &amp; devices</h2>
   <table>

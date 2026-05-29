@@ -60,6 +60,14 @@ db.exec(`
     updated_at      INTEGER NOT NULL
   );
 
+  -- Server-wide key/value settings (e.g. the global announcement banner).
+  -- Editable from /admin; surfaced to every client.
+  CREATE TABLE IF NOT EXISTS server_settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT,
+    updated_at INTEGER NOT NULL
+  );
+
   -- A lobby is a pre-game waiting room. Once status flips to 'started'
   -- the lobby becomes the home for an in-progress game; chat and
   -- members carry over. Stage 1 doesn't ship an engine yet, so
