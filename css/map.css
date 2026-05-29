@@ -192,6 +192,13 @@
 #turn-tag-op   { border-color: #d4a72c; color: #f4d27a; }
 #turn-tag-move { border-color: #38bdf8; color: #bae6fd; }
 #turn-tag-op:hover, #turn-tag-move:hover { filter: brightness(1.25); }
+/* Once the move is spent the move tag becomes the "↩ undo move" control
+   - amber so it reads as a distinct (reversible) action, not a budget. */
+#turn-tag-move.is-undo {
+  border-color: #d4a72c;
+  color: #f4d27a;
+  background: #2a2410;
+}
 /* The ⚙ gear is welded to the move tag as a single segmented
    control: shared height, butted edges, one rounded outer profile.
    Settings (route + fuel options) read as "part of move". */

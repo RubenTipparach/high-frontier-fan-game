@@ -25,14 +25,21 @@ import { hydrateDecks } from './decks.js';
 import { hydrateLeo } from './leo-stack.js';
 import { hydrateClock } from './turn-clock.js';
 
-// Build server-slug <-> planner-node-id maps from loaded planner data.
+// Build wire-id <-> planner-node-id maps from loaded planner data. The
+// wire id is the node's id2 - the makeRefId slug derived from the shared
+// mission-planner data, IDENTICAL to the slug the server's planner-graph
+// keys on. Every node has one (sites AND lagrange / burn / hohmann / rad
+// waypoints), so the rocket can move to and park at any of them. (id2,
+// not serverId: the server's one id space is the planner slug, with
+// data/sites.js layered on as metadata looked up by that slug.)
 export function buildIdMaps(mapData) {
   const serverToPlanner = new Map();
   const plannerToServer = new Map();
   for (const s of (mapData && mapData.sites) || []) {
-    if (!s.serverId) continue;
-    serverToPlanner.set(s.serverId, s.id);
-    plannerToServer.set(s.id, s.serverId);
+    const wire = s.id2;
+    if (!wire) continue;
+    if (!serverToPlanner.has(wire)) serverToPlanner.set(wire, s.id);
+    plannerToServer.set(s.id, wire);
   }
   return { serverToPlanner, plannerToServer };
 }

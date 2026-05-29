@@ -28,8 +28,14 @@
 
 import { PATENTS_BY_ID } from '../../data/patents.js';
 import { CREW_BY_ID } from '../../data/crew.js';
-import { siteById } from './graph.js';
-import { siteExists as plannerSiteExists, findPath as plannerFindPath, leoSlug } from './planner-graph.js';
+// Movement + metadata both come from the planner graph (the vendor
+// mission-planner data the client also uses). siteBySlug layers the
+// curated data/sites.js metadata onto a planner slug, so there is ONE
+// id space across client + server. (data/graph.js is no longer used.)
+import {
+  siteExists as plannerSiteExists, findPath as plannerFindPath,
+  leoSlug, siteBySlug as siteById,
+} from './planner-graph.js';
 import { makeRng } from './rng.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES,
@@ -568,6 +574,12 @@ function pickPayload(op) {
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
     case 'PROSPECT': return { siteId: op.siteId };
+    // Route ops ride the undo stack like every other functional op, so
+    // an UNDO/REDO replay (rebuildFromBase) must carry their payload or
+    // the replay would re-run SET_ROUTE with no segments and silently
+    // wipe a route the player still has planned.
+    case 'SET_ROUTE': return { segments: op.segments };
+    case 'CLEAR_ROUTE': return {};
     default: return {};
   }
 }

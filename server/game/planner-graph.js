@@ -17,7 +17,19 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { makeRefId } from '../../data/planner-ids.js';
+import { makeRefId, normalizeSiteName } from '../../data/planner-ids.js';
+import { SITES } from '../../data/sites.js';
+
+// The mission-planner data (vendor JSON) is the single source of truth
+// for the movement graph - the SAME file the client renders from - and a
+// node's id is the makeRefId slug the client also stamps (id2). The
+// server does NOT invent its own ids. data/sites.js is layered on top as
+// curated METADATA (class / hydration / vps / solarZone), matched to a
+// planner node by name and looked up by slug via siteBySlug() below.
+const SITE_BY_NAME = new Map();
+for (const s of SITES) {
+  if (s && s.name) SITE_BY_NAME.set(normalizeSiteName(s.name), s);
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -37,7 +49,9 @@ function loadPlanner() {
   const edges = Array.isArray(raw.edges) ? raw.edges : [];
   const edgeLabels = raw.edgeLabels || {};
 
-  // First pass: compute every slug, collect collisions.
+  // First pass: compute every slug (makeRefId - identical to the client's
+  // id2), disambiguating the rare post-rule collision the same way the
+  // client does.
   const rawKeyToSlug = new Map();
   const slugCount = new Map();
   for (const key of Object.keys(points)) {
@@ -49,11 +63,17 @@ function loadPlanner() {
     rawKeyToSlug.set(key, slug);
   }
 
-  // Second pass: build the node table by slug.
+  // Second pass: build the node table by slug, attaching the curated
+  // data/sites.js entry (matched by name) so siteBySlug() can answer
+  // class / hydration / vps / solarZone for the engine. Waypoints
+  // (lagrange / burn / hohmann / rad) match nothing -> site: null.
   const nodes = new Map();
   for (const key of Object.keys(points)) {
     const p = points[key];
     const slug = rawKeyToSlug.get(key);
+    const site = (p.type === 'site' && p.siteName)
+      ? (SITE_BY_NAME.get(normalizeSiteName(p.siteName)) || null)
+      : null;
     nodes.set(slug, {
       slug,
       x: p.x, y: p.y,
@@ -61,6 +81,7 @@ function loadPlanner() {
       name: p.siteName || null,
       siteWater: p.siteWater != null ? Number(p.siteWater) : null,
       siteSize: p.siteSize || null,
+      site,           // curated data/sites.js metadata, or null
     });
   }
 
@@ -94,6 +115,15 @@ export function siteExists(slug) {
 
 export function nodeBySlug(slug) {
   return NODES_BY_SLUG.get(String(slug)) || null;
+}
+
+// Curated data/sites.js metadata for a planner slug (class / hydration /
+// vps / solarZone / name), or null for a waypoint / unmatched node. This
+// is the engine's metadata accessor - the planner slug is the one id, so
+// glory, prospect thresholds, and factory income all resolve through it.
+export function siteBySlug(slug) {
+  const n = NODES_BY_SLUG.get(String(slug));
+  return (n && n.site) || null;
 }
 
 // Find the LEO lagrange node once - that's the canonical "at LEO"

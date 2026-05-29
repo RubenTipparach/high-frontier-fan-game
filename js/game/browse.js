@@ -122,7 +122,7 @@ import {
 // solo path never touches them.
 import { setOnline, isOnline } from './online-mode.js';
 import {
-  buildIdMaps, hydrateFromSnapshot, toServerId,
+  buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
 } from './net-bridge.js';
 import { getGame, getGameOps, submitGameOp, fetchChat, sendChat } from '../api.js';
 import { ws } from '../ws.js';
@@ -408,6 +408,14 @@ function applySnapshot(snapshot, seq) {
   if (!snapshot || !_onlineMaps || !_onlineMe) return;
   if (seq != null && seq === _lastAppliedSeq) return;  // nothing new
   if (seq != null) _lastAppliedSeq = seq;
+  // Hold the state we're about to replace so the transition animator
+  // (below) can DIFF old -> new and replay the motion the player would
+  // otherwise miss: a rocket sliding to its new site, an opponent's
+  // move, the undo rewind, a prospect die, a card drifting between
+  // stacks. Doctrine: animate the diff, then let the hydrate snap the
+  // final state. A forced re-apply (error snap-back, seq omitted) gets
+  // no prev so it snaps without animating.
+  const prevSnapshot = (seq != null) ? _onlineSnapshot : null;
   _onlineSnapshot = snapshot;
   // Card economy is server-authoritative in multiplayer (state.economy).
   // Pin the client's MARKET_MODE to whatever the snapshot says BEFORE
@@ -435,6 +443,13 @@ function applySnapshot(snapshot, seq) {
   syncMeColor(snapshot);
   // Opponent rockets on the map (colour-coded, offset when colocated).
   syncMpRockets(snapshot);
+  // Animate everything that MOVED between the last applied state and
+  // this one: rockets sliding along their route (mine, opponents', and
+  // the undo rewind), prospect dice, and cards drifting between stacks.
+  // The hydrate above already snapped the final state; the animator
+  // overrides the sprites back to their origin and tweens forward, so
+  // the player SEES the change happen instead of it teleporting.
+  animateOnlineTransitions(prevSnapshot, snapshot);
   // Refresh the multiplayer table panel (room / turn / roster) from the
   // same snapshot so opponents' positions + resources stay live.
   renderMpPanel(snapshot);
@@ -3358,6 +3373,8 @@ function manualAppendSegment(toId) {
   if (r.isPivot) _manualPivotsUsed += 1;
   _manualDir = r.newDir;
   persistPlannedRoute();
+  // Keep the server's copy of the plan in step with each manual hop.
+  submitSetRouteOnline();
   if (_renderer) {
     _renderer.setRoute(_plannedRoute);
     _renderer.setRouteEndpoints(_manualOriginId, toId);
@@ -3504,7 +3521,14 @@ function ensureMapShell(host) {
       </div>
     </div>
   `;
-  host.querySelector('#route-clear').addEventListener('click', clearRoute);
+  host.querySelector('#route-clear').addEventListener('click', () => {
+    // Explicit clear is the one place we tell the server to forget the
+    // plan too (the post-move clearRoute stays local - the server
+    // already truncates the consumed route on MOVE, and a CLEAR_ROUTE
+    // there would land on the undo stack ahead of the move).
+    submitClearRouteOnline();
+    clearRoute();
+  });
   // Debug-panel toggle now lives in the hamburger menu (#btn-debug-panel)
   // rather than on the map toolbar. Bind it here since browse.js owns
   // the #map-debug panel; close the menu so the panel is visible.
@@ -3612,15 +3636,21 @@ function ensureMapShell(host) {
       if (lockedByOnline) opTag.title = 'Waiting for your turn.';
     }
     if (moveTag) {
-      moveTag.textContent = `move:${moves}`;
-      moveTag.classList.toggle('is-spent', moves <= 0);
+      // Once the move is spent the tag IS the undo control - it reads
+      // "↩ undo move" so the player knows tapping rewinds this turn's
+      // move (the rocket slides back to where it started). With a move
+      // still in hand it shows the budget and moves the rocket.
+      const spent = moves <= 0;
+      moveTag.textContent = spent ? '↩ undo move' : `move:${moves}`;
+      moveTag.classList.toggle('is-spent', spent);
+      moveTag.classList.toggle('is-undo', spent && !lockedByOnline);
       moveTag.classList.toggle('is-locked', lockedByOnline);
       moveTag.disabled = lockedByOnline;
       moveTag.title = lockedByOnline
         ? 'Waiting for your turn.'
-        : (moves > 0
-          ? 'Move remaining - tap to move the rocket along its route'
-          : 'Move spent - tap to undo this turn\'s move');
+        : (spent
+          ? 'Move spent - tap to undo this turn\'s move (rewinds the rocket)'
+          : 'Move remaining - tap to move the rocket along its route');
     }
     if (endTurnBtn) {
       endTurnBtn.disabled = lockedByOnline;
@@ -7868,17 +7898,14 @@ function mpRocketCoords(serverSiteId) {
 // takes its slot in the row; opponents are colour-coded sprites with
 // a 🚫 when inactive (no active thruster), mirroring the local cue.
 const MP_ROCKET_SPACING = 30;   // screen px between colocated ships
-function syncMpRockets(snapshot) {
-  if (!_renderer) return;
-  if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) {
-    _renderer.setMpRockets(null);
-    _renderer.setSandboxRocketOffset(0);
-    return;
-  }
-  const myId = _onlineMe.id;
-  // One entry per player with a resolved screen-anchor; group by site.
+// Lay out every player's rocket: the colocation row + local offset.
+// Returns { opponents: [{profileId, x, y, offsetX, colour, name, inactive}],
+// localOffsetX }. Factored out of syncMpRockets so the move animator can
+// reuse the SAME final layout while it tweens one ship across the map.
+function computeMpRockets(snapshot) {
+  const myId = _onlineMe && _onlineMe.id;
   const groups = new Map();
-  for (const p of snapshot.players) {
+  for (const p of (snapshot && snapshot.players) || []) {
     const pos = mpRocketCoords(p.rocket && p.rocket.siteId);
     if (!pos) continue;
     const key = `${Math.round(pos.x)}:${Math.round(pos.y)}`;
@@ -7893,7 +7920,6 @@ function syncMpRockets(snapshot) {
       isLocal: p.profileId === myId,
     });
   }
-
   const opponents = [];
   let localOffsetX = 0;
   for (const group of groups.values()) {
@@ -7904,12 +7930,331 @@ function syncMpRockets(snapshot) {
       if (r.isLocal) {
         localOffsetX = offsetX;
       } else {
-        opponents.push({ x: r.x, y: r.y, offsetX, colour: r.colour, name: r.name, inactive: r.inactive });
+        opponents.push({
+          profileId: r.profileId, x: r.x, y: r.y, offsetX,
+          colour: r.colour, name: r.name, inactive: r.inactive,
+        });
       }
     });
   }
+  return { opponents, localOffsetX };
+}
+
+function syncMpRockets(snapshot) {
+  if (!_renderer) return;
+  if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) {
+    _renderer.setMpRockets(null);
+    _renderer.setSandboxRocketOffset(0);
+    return;
+  }
+  const { opponents, localOffsetX } = computeMpRockets(snapshot);
   _renderer.setSandboxRocketOffset(localOffsetX);
   _renderer.setMpRockets(opponents);
+}
+
+// ----- online transition animation (animate the diff, don't snap) -----
+//
+// applySnapshot has already hydrated + snapped the FINAL state by the
+// time these run. Each animator diffs the previous applied snapshot
+// against the new one and replays the motion the player would otherwise
+// miss, overriding the relevant sprites back to their origin and
+// tweening forward. CLAUDE.md doctrine: "animate the transition, then
+// commit". One mechanism covers opponents' moves, the local player's
+// own move, AND the undo rewind (an UNDO lands a snapshot whose rocket
+// sits at the pre-move site, so the same diff slides it back).
+
+// Planner node id of the LEO lagrange (the "at LEO" anchor, server
+// siteId === null). Used as the origin / destination when a ship
+// launches from or returns to LEO.
+function leoPlannerId() {
+  if (!_activeData) return null;
+  const s = _activeData.sites.find((x) => x.type === 'lagrange' && x.name === 'LEO');
+  return s ? s.id : null;
+}
+// World coords for a planner node id (null when it has none).
+function coordOfPlanner(pid) {
+  if (!_activeData || pid == null) return null;
+  const s = _activeData.byId?.[pid] || _activeData.sites.find((x) => x.id === pid);
+  return (s && typeof s.x === 'number') ? { x: s.x, y: s.y } : null;
+}
+// Planner node id -> the id the SERVER speaks for it: the node's id2
+// (the shared mission-planner slug). Same wire id buildIdMaps/toServerId
+// use, so SET_ROUTE segments line up with MOVE destinations + the
+// server's route continuity check.
+function plannerIdToSlug(pid) {
+  if (!_activeData || pid == null) return null;
+  const s = _activeData.byId?.[pid] || _activeData.sites.find((x) => x.id === pid);
+  return (s && s.id2) || null;
+}
+
+// ----- route sync (feature: SET_ROUTE / CLEAR_ROUTE) -----
+//
+// The planned route is server state (player.rocket.route) so it
+// survives a reload / device switch and so the server can truncate it
+// as the rocket walks it. It is SECRET (opponents see the rocket but
+// not the plan), so syncing it changes nothing on their screens; we
+// only sync the local player's own plan. These fire-and-forget (the
+// route drives no hydrated visual, so we don't apply the response - the
+// next poll/WS tick carries the new seq harmlessly). Gated on "my turn"
+// because SET_ROUTE is a turn-functional op the server would reject
+// otherwise.
+
+// Translate the local _plannedRoute (planner node ids) to the server's
+// slug space (id2, universal across sites + waypoints). null when any
+// endpoint can't be translated, so we abort rather than send a partial.
+function routeSegmentsForServer() {
+  if (!_plannedRoute || !_plannedRoute.length) return [];
+  const out = [];
+  for (const s of _plannedRoute) {
+    const from = plannerIdToSlug(s.from);
+    const to = plannerIdToSlug(s.to);
+    if (!from || !to) return null;
+    out.push({ from, to, burns: Number(s.burns) || 0 });
+  }
+  return out;
+}
+function submitSetRouteOnline() {
+  if (!_online || _spectator || !_onlineGameId || !_onlineMe) return;
+  if (!isOnlineMyTurn()) return;
+  const segments = routeSegmentsForServer();
+  if (!segments || !segments.length) return;
+  submitGameOp(_onlineGameId, { kind: 'SET_ROUTE', segments }, _onlineMe.token)
+    .then((r) => { if (r && !r.ok) { /* route stays local; harmless */ } })
+    .catch(() => {});
+}
+function submitClearRouteOnline() {
+  if (!_online || _spectator || !_onlineGameId || !_onlineMe) return;
+  if (!isOnlineMyTurn()) return;
+  submitGameOp(_onlineGameId, { kind: 'CLEAR_ROUTE' }, _onlineMe.token).catch(() => {});
+}
+
+// Shortest-path planner segments [{from, to}] between two server site
+// ids (null = LEO) for animation. Falls back to a single straight
+// segment when the planner can't route it (visually fine - a slide).
+function animPathSegments(fromServerId, toServerId) {
+  const fromPid = fromServerId ? toPlannerId(_onlineMaps, fromServerId) : leoPlannerId();
+  const toPid = toServerId ? toPlannerId(_onlineMaps, toServerId) : leoPlannerId();
+  if (!fromPid || !toPid || fromPid === toPid) return null;
+  let segs = null;
+  try {
+    // Generous thrust so the planner always finds the geometric path
+    // (we only need a polyline to slide along, not a legal burn plan).
+    const r = planRoute(_activeData, fromPid, toPid, { thrust: 12 });
+    if (r && r.segments && r.segments.length) {
+      segs = r.segments.map((s) => ({ from: s.from, to: s.to }));
+    }
+  } catch { /* fall through to straight line */ }
+  if (!segs) segs = [{ from: fromPid, to: toPid }];
+  return segs;
+}
+// Planner segments -> world-space polyline points for the opponent tween.
+function segmentsToWorldPts(segs) {
+  const pts = [];
+  const first = coordOfPlanner(segs[0].from);
+  if (first) pts.push(first);
+  for (const sg of segs) {
+    const c = coordOfPlanner(sg.to);
+    if (c) pts.push(c);
+  }
+  return pts;
+}
+
+// Animate the local player's own rocket along `segs`, then re-pin the
+// canonical state (offset + canFly) the hydrate already computed.
+function animateLocalMoveAlong(segs) {
+  // Pre-set to the origin synchronously so the first paint shows the
+  // launch site, not the (already-hydrated) destination - otherwise
+  // the rocket flashes at the target for one frame before sliding.
+  const o = coordOfPlanner(segs[0].from);
+  if (o) {
+    _renderer.setSandboxRocket({
+      x: o.x, y: o.y, colour: myRocketColour(), canFly: isRocketActive().active,
+    });
+  }
+  animateRocketAlong(segs).then(() => {
+    if (!_online) return;
+    syncSandboxRocket();
+    syncMpRockets(_onlineSnapshot);   // restore colocation offset
+  });
+}
+
+// Animate ONE opponent ship across the map while the rest hold at their
+// final positions. `finalOpponents` is computeMpRockets()'s layout for
+// the new snapshot; we override the moving entry's coords each frame.
+function tweenMpRocketAlong(profileId, pts, finalOpponents, totalMs = 700) {
+  if (!_renderer || pts.length < 2) { _renderer.setMpRockets(finalOpponents); return; }
+  const idx = finalOpponents.findIndex((o) => o.profileId === profileId);
+  if (idx < 0) { _renderer.setMpRockets(finalOpponents); return; }
+  const lens = [];
+  let totalLen = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const L = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    lens.push(L); totalLen += L;
+  }
+  if (totalLen === 0) { _renderer.setMpRockets(finalOpponents); return; }
+  const frameAt = (pos) => finalOpponents.map((o, i) => (
+    i === idx ? { ...o, x: pos.x, y: pos.y, offsetX: 0 } : o
+  ));
+  _renderer.setMpRockets(frameAt(pts[0]));   // origin, this frame
+  const t0 = performance.now();
+  const step = (now) => {
+    const t = Math.min(1, (now - t0) / totalMs);
+    const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    let traveled = eased * totalLen;
+    let i = 0;
+    while (i < lens.length - 1 && traveled > lens[i]) { traveled -= lens[i]; i += 1; }
+    const k = lens[i] > 0 ? traveled / lens[i] : 0;
+    const pos = {
+      x: pts[i].x + (pts[i + 1].x - pts[i].x) * k,
+      y: pts[i].y + (pts[i + 1].y - pts[i].y) * k,
+    };
+    if (t < 1) { _renderer.setMpRockets(frameAt(pos)); requestAnimationFrame(step); }
+    else { _renderer.setMpRockets(finalOpponents); }   // pin final layout
+  };
+  requestAnimationFrame(step);
+}
+
+// Diff rocket positions for every player; slide each ship that moved.
+function animateSnapshotMoves(prev, snapshot) {
+  // A local move/undo tween already in flight - let it land; the next
+  // real seq advance will re-diff. (Opponent tweens don't set this.)
+  if (_rocketAnimating) return;
+  const prevById = new Map((prev.players || []).map((p) => [p.profileId, p]));
+  const myId = _onlineMe && _onlineMe.id;
+  const finalMp = computeMpRockets(snapshot);
+  for (const p of (snapshot.players || [])) {
+    const before = prevById.get(p.profileId);
+    if (!before) continue;
+    const fromSite = (before.rocket && before.rocket.siteId) || null;
+    const toSite = (p.rocket && p.rocket.siteId) || null;
+    if (fromSite === toSite) continue;          // this ship didn't move
+    const segs = animPathSegments(fromSite, toSite);
+    if (!segs) continue;
+    if (p.profileId === myId) {
+      animateLocalMoveAlong(segs);
+    } else {
+      tweenMpRocketAlong(p.profileId, segmentsToWorldPts(segs), finalMp.opponents);
+    }
+  }
+}
+
+// Show the prospect die for a NEWLY landed disc, so every player (the
+// prospector and the watchers) sees the roll happen instead of a disc
+// blinking onto the map. The server already publishes roll + outcome in
+// state.discs, so this is pure read-only playback (no Place button).
+function animateSnapshotProspects(prev, snapshot) {
+  const prevDiscs = prev.discs || {};
+  const newDiscs = snapshot.discs || {};
+  const added = Object.keys(newDiscs).filter((k) => !(k in prevDiscs));
+  // A single PROSPECT op adds exactly one disc; a bulk catch-up (resume
+  // / late join) would queue a pile of modals, so only play the
+  // incremental case.
+  if (added.length !== 1) return;
+  const disc = newDiscs[added[0]];
+  if (!disc || typeof disc.roll !== 'number') return;
+  const pid = toPlannerId(_onlineMaps, added[0]);
+  const site = pid && (_activeData.byId?.[pid] || _activeData.sites.find((x) => x.id === pid));
+  if (!site) return;
+  playRemoteProspectRoll(site, disc);
+}
+
+// Read-only prospect-roll playback. Mirrors openProspectRollModal's die
+// + verdict but with no actions - the disc is already authoritative in
+// the snapshot, so this auto-dismisses once the roll settles.
+function playRemoteProspectRoll(site, disc) {
+  document.querySelector('.prospect-roll-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay prospect-roll-overlay';
+  const ok = disc.outcome === 'success';
+  const kindGlyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[disc.kind] || '🔬';
+  const who = disc.by ? `by <em>${esc(disc.by)}</em>` : '';
+  const panel = document.createElement('div');
+  panel.className = 'prospect-roll-panel';
+  panel.innerHTML = `
+    <h2 class="prospect-roll-title">${kindGlyph} Prospecting ${esc(site.name)}</h2>
+    <p class="muted prospect-roll-sub">${who}</p>
+    <div class="prospect-roll-stage">
+      <div class="prospect-die-host"></div>
+      <div class="prospect-roll-vs">≤</div>
+      <div class="prospect-target"><strong>${disc.threshold}</strong><em>site size</em></div>
+    </div>
+    <p class="prospect-roll-result muted">Rolling…</p>
+  `;
+  const dieHost = panel.querySelector('.prospect-die-host');
+  const resultLine = panel.querySelector('.prospect-roll-result');
+  const die = buildDie(1);
+  dieHost.appendChild(die);
+  overlay.appendChild(panel);
+  mountOverlay(overlay);
+  const close = () => overlay.remove();
+  rollDie(die, disc.roll).then(() => {
+    die.classList.add(ok ? 'die-success' : 'die-fail');
+    resultLine.classList.remove('muted');
+    resultLine.innerHTML = ok
+      ? `Rolled <strong>${disc.roll}</strong> ≤ ${disc.threshold} - <strong class="ok">claim placed</strong>.`
+      : `Rolled <strong>${disc.roll}</strong> > ${disc.threshold} - <strong class="bad">site exhausted</strong>.`;
+    // Linger on the verdict, then clear - the disc is already on the map.
+    setTimeout(close, 1500);
+  });
+  // Safety net: never leave the overlay stuck if the die promise stalls.
+  setTimeout(() => { if (document.body.contains(overlay)) close(); }, 4000);
+}
+
+// Cards the local player just gained in a stack (LEO / rocket), so the
+// next stack repaint can drift them in instead of having them pop. Keyed
+// by location; consumed (cleared) by the renderer that reads it.
+let _driftInRocket = new Set();
+let _driftInLeo = new Set();
+function animateSnapshotCardDrift(prev, snapshot) {
+  const myId = _onlineMe && _onlineMe.id;
+  const before = (prev.players || []).find((p) => p.profileId === myId);
+  const after = (snapshot.players || []).find((p) => p.profileId === myId);
+  if (!before || !after) return;
+  const ids = (slots) => new Set((slots || []).map((s) => s.id));
+  const newcomers = (prevSlots, nextSlots) => {
+    const had = ids(prevSlots);
+    return (nextSlots || []).map((s) => s.id).filter((id) => !had.has(id));
+  };
+  for (const id of newcomers(before.rocket && before.rocket.stack, after.rocket && after.rocket.stack)) {
+    _driftInRocket.add(id);
+  }
+  for (const id of newcomers(before.leo, after.leo)) _driftInLeo.add(id);
+  // Tag any matching card elements already on screen (open stack modal /
+  // LEO panel) so they drift in now; the repaint path also reads the sets.
+  applyCardDriftClass();
+}
+// Add the drift-in class to any rendered card whose id is queued. Cards
+// carry data-card-id (renderCard); the class self-clears via animation.
+function applyCardDriftClass() {
+  const tag = (set, selectorRoot) => {
+    if (!set.size) return;
+    for (const id of [...set]) {
+      const els = document.querySelectorAll(
+        `${selectorRoot} [data-card-id="${CSS.escape(id)}"]`
+      );
+      els.forEach((el) => {
+        el.classList.remove('card-drift-in');
+        // reflow so re-adding the class restarts the keyframe
+        void el.offsetWidth;
+        el.classList.add('card-drift-in');
+      });
+      if (els.length) set.delete(id);
+    }
+  };
+  // Drift in wherever the card is currently on screen: the rocket-stack
+  // modal, the hand strip, and any open transfer / stack inspector.
+  tag(_driftInRocket, '#rocket-stack-cards, .stack-inspect-cards');
+  tag(_driftInLeo, '#sandbox-hand-cards, .stack-inspect-cards');
+}
+
+// Orchestrator: run every diff-animation for one applied snapshot.
+// Wrapped individually so one failing animator can't block the others
+// or the hydrate that already committed the final state.
+function animateOnlineTransitions(prev, snapshot) {
+  if (!prev || !snapshot || !_renderer || !_activeData || !_onlineMaps) return;
+  try { animateSnapshotMoves(prev, snapshot); } catch { /* non-fatal */ }
+  try { animateSnapshotProspects(prev, snapshot); } catch { /* non-fatal */ }
+  try { animateSnapshotCardDrift(prev, snapshot); } catch { /* non-fatal */ }
 }
 
 function syncSandboxRocket() {
@@ -9697,6 +10042,9 @@ function planRocketRouteTo(destSite) {
   _routeTo = destSite;
   _plannedRoute = result.segments;
   persistPlannedRoute();
+  // Mirror the freshly-planned route up to the server so it persists +
+  // truncates as the rocket walks it (online only, no-op solo).
+  submitSetRouteOnline();
   _renderer.setRoute(result.segments);
   _renderer.setRouteEndpoints(origin.id, destSite.id);
   document.getElementById('route-clear').hidden = false;

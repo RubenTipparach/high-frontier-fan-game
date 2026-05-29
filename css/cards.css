@@ -805,3 +805,18 @@
   font-style: italic;
   text-align: center;
 }
+
+/* Card transfer drift-in (multiplayer): when a card lands in a new stack
+   (TRANSFER / BUILD between LEO and the rocket) it drifts up into place
+   instead of popping, so the player sees the card actually move. The
+   browse.js snapshot diff tags arriving cards with .card-drift-in and the
+   keyframe self-clears. */
+@keyframes card-drift-in {
+  from { transform: translateY(14px) scale(0.92); opacity: 0; }
+  to   { transform: translateY(0) scale(1);       opacity: 1; }
+}
+.card.card-drift-in,
+.card-drift-in > .card,
+.card-drift-in.card {
+  animation: card-drift-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}

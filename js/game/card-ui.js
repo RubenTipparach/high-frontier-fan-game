@@ -86,6 +86,10 @@ export function renderCard(card, { type, supplied, onSupportClick, face } = {}) 
   const kind = type || (card.faces && card.faces.primary && card.faces.primary.role ? 'crew' : 'patent');
   const el = document.createElement('div');
   el.className = `card kind-${kind}` + (kind === 'patent' ? ` type-${card.type}` : '');
+  // Stamp the physical card id (crew faces are a projection of one
+  // physical card via srcId) so callers can find a rendered card on the
+  // map - e.g. the multiplayer transfer drift-in animation keys off it.
+  el.dataset.cardId = card.srcId || card.id;
   // Default to the primary face, but honor an explicit secondary
   // request (e.g. an ET-Produced card lands Black-Side-up) so the
   // card opens showing its black face instead of needing a manual
