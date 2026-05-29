@@ -6215,3 +6215,72 @@ body:has(#view-browse:not(.hidden)) #main {
 @media (max-width: 560px) {
   .mp-auction-lot { transform: scale(0.9); transform-origin: top center; }
 }
+
+/* Minimizable MP overlays (crew draft + auction).
+   The minimize button (-) collapses the full-screen modal to a small
+   floating chip docked at the left edge of the map. While minimized
+   the overlay drops its backdrop and goes pointer-events:none so the
+   player can still pan the board, inspect cards, and chat; only the
+   chip itself stays clickable. Tapping the chip restores the modal. */
+.mp-modal-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.mp-modal-titlebar h3 { margin: 0; }
+.mp-mini-btn {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  line-height: 1;
+  font-size: 18px;
+  font-weight: 700;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--ink);
+  cursor: pointer;
+}
+.mp-mini-btn:hover { background: var(--accent); color: #062136; border-color: var(--accent-2); }
+.mp-auction-head .mp-mini-btn { align-self: center; }
+
+.mp-mini-chip {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 13px;
+  border-radius: 10px;
+  border: 1px solid var(--accent-2);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5);
+  animation: modal-fade 0.18s ease-out;
+}
+.mp-mini-chip:hover { border-color: var(--accent); }
+.mp-mini-chip-meta {
+  color: var(--accent-2);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.mp-crew-draft-overlay.is-minimized,
+.mp-auction-overlay.is-minimized {
+  background: transparent;
+  backdrop-filter: none;
+  pointer-events: none;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 14px;
+}
+.mp-crew-draft-overlay.is-minimized .mp-crew-draft-panel,
+.mp-auction-overlay.is-minimized .mp-auction-modal { display: none; }
+.mp-crew-draft-overlay.is-minimized .mp-mini-chip,
+.mp-auction-overlay.is-minimized .mp-mini-chip {
+  display: inline-flex;
+  pointer-events: auto;
+}

@@ -214,6 +214,15 @@ let _bidDraft = '';
 let _joinDraft = '';
 let _auctionKey = null;
 let _deckPickerOpen = false;
+// Minimize state for the two blocking MP overlays. When true the
+// overlay collapses to a small floating chip docked at the map's left
+// edge so the player can still pan the board, inspect cards, and chat
+// while the draft / auction stays live. Persisted module-level so the
+// crew-draft overlay (rebuilt every snapshot) keeps its minimized
+// state across re-renders. The auction resets to expanded on each new
+// lot so a fresh card always surfaces.
+let _crewDraftMin = false;
+let _auctionMin = false;
 
 // Patent decks the auctioneer can put up for auction (one per server
 // deck type). Counts are read live from the snapshot.
@@ -599,7 +608,10 @@ function syncCrewDraftOverlay(snapshot) {
   // surface the "waiting" panel front and centre.
   overlay.innerHTML = `
     <div class="mp-crew-draft-panel" role="dialog" aria-label="Crew draft">
-      <h3>🧑‍🚀 Crew draft</h3>
+      <div class="mp-modal-titlebar">
+        <h3>🧑‍🚀 Crew draft</h3>
+        <button type="button" class="mp-mini-btn" title="Minimize" aria-label="Minimize">&minus;</button>
+      </div>
       <p class="muted mp-crew-draft-count">
         Picked: <strong>${picked.length}</strong> /
         <strong>${players.length}</strong>
@@ -612,6 +624,10 @@ function syncCrewDraftOverlay(snapshot) {
         : `<p class="mp-crew-draft-me">Open the picker to commit your faction.</p>
            <button type="button" class="modal-btn primary mp-crew-draft-open">🧑‍🚀 Pick crew</button>`}
     </div>
+    <button type="button" class="mp-mini-chip" aria-label="Restore crew draft">
+      🧑‍🚀 Crew draft
+      <span class="mp-mini-chip-meta">${picked.length}/${players.length}</span>
+    </button>
   `;
   const roster = overlay.querySelector('.mp-crew-draft-roster');
   for (const p of players) {
@@ -644,6 +660,20 @@ function syncCrewDraftOverlay(snapshot) {
   };
   if (openBtn) openBtn.addEventListener('click', reopen);
   if (changeBtn) changeBtn.addEventListener('click', reopen);
+  // Minimize / restore. The overlay is rebuilt every snapshot, so the
+  // persisted _crewDraftMin flag is re-applied here and the fresh
+  // buttons are re-wired each pass.
+  overlay.classList.toggle('is-minimized', _crewDraftMin);
+  const miniBtn = overlay.querySelector('.mp-mini-btn');
+  const miniChip = overlay.querySelector('.mp-mini-chip');
+  if (miniBtn) miniBtn.addEventListener('click', () => {
+    _crewDraftMin = true;
+    overlay.classList.add('is-minimized');
+  });
+  if (miniChip) miniChip.addEventListener('click', () => {
+    _crewDraftMin = false;
+    overlay.classList.remove('is-minimized');
+  });
   // Suppress the bare waiting overlay while the wizard's own modal
   // is open - the modal already says everything the overlay would.
   overlay.classList.toggle('is-behind-wizard', _crewWizardOpen);
@@ -751,6 +781,9 @@ function renderOnlineAuction(auction) {
     _auctionKey = auction.cardId;
     _bidDraft = '';
     _joinDraft = '';
+    // Surface each new lot expanded so a fresh card isn't missed while
+    // the player has an earlier lot's overlay minimized.
+    _auctionMin = false;
   }
 
   let overlay = existing;
@@ -763,6 +796,7 @@ function renderOnlineAuction(auction) {
         <div class="mp-auction-head">
           <h3>Patent Auction</h3>
           <span class="mp-auction-mode"></span>
+          <button type="button" class="mp-mini-btn" title="Minimize" aria-label="Minimize">&minus;</button>
         </div>
         <div class="mp-auction-body">
           <div class="mp-auction-lot" id="mp-auction-lot"></div>
@@ -776,8 +810,20 @@ function renderOnlineAuction(auction) {
           </div>
         </div>
       </div>
+      <button type="button" class="mp-mini-chip" aria-label="Restore auction">
+        ⚖️ Auction
+        <span class="mp-mini-chip-meta"></span>
+      </button>
     `;
     document.body.appendChild(overlay);
+    overlay.querySelector('.mp-mini-btn').addEventListener('click', () => {
+      _auctionMin = true;
+      overlay.classList.add('is-minimized');
+    });
+    overlay.querySelector('.mp-mini-chip').addEventListener('click', () => {
+      _auctionMin = false;
+      overlay.classList.remove('is-minimized');
+    });
   }
 
   const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
@@ -824,6 +870,16 @@ function renderOnlineAuction(auction) {
     overlay.querySelector('#mp-auction-controls'),
     auction, { auctioneer, highBidder },
   );
+
+  // Minimized chip: keep its summary line live so a glance at the
+  // docked rectangle shows the current high bid, then re-apply the
+  // persisted minimize state.
+  const chipMeta = overlay.querySelector('.mp-mini-chip-meta');
+  if (chipMeta) {
+    chipMeta.textContent = auction.highBid > 0
+      ? `high bid ${auction.highBid}` : 'no bids';
+  }
+  overlay.classList.toggle('is-minimized', _auctionMin);
 }
 
 function setMpAuctionError(text) {
