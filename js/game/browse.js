@@ -124,7 +124,7 @@ import { setOnline, isOnline } from './online-mode.js';
 import {
   buildIdMaps, hydrateFromSnapshot, toServerId,
 } from './net-bridge.js';
-import { getGame, submitGameOp, fetchChat, sendChat } from '../api.js';
+import { getGame, getGameOps, submitGameOp, fetchChat, sendChat } from '../api.js';
 import { ws } from '../ws.js';
 
 // Only one map mode now (planner / "classic"); the old
@@ -423,6 +423,15 @@ function applySnapshot(snapshot) {
   const mapHost = document.getElementById('browse-map');
   if (mapHost && typeof mapHost._refreshTurnBudget === 'function') {
     try { mapHost._refreshTurnBudget(); } catch (e) { /* ignore */ }
+  }
+  // Mission log pane: when open and we're online, re-fetch the server
+  // op log so a newly-landed op (auction, end-turn, etc.) appears in
+  // near-realtime. Local sandbox log changes don't fire in MP so the
+  // existing onLogChange listener wouldn't catch this.
+  const panel = document.getElementById('browse-sidepanel');
+  if (panel && panel.dataset.active === 'log') {
+    const logHost = document.getElementById('browse-log');
+    if (logHost) paintOnlineMissionLog(logHost);
   }
   // Competitive auction overlay is wired separately (see the TODO hook).
   renderOnlineAuction(snapshot.auction);
@@ -10158,6 +10167,15 @@ function renderMissionLog() {
 function paintMissionLog() {
   const host = document.getElementById('browse-log');
   if (!host) return;
+  // Online mode: the sandbox getActions/getHistory localStorage cache
+  // is the player's SOLO history, which would otherwise bleed into a
+  // multiplayer game's panel (user 2026-05: "did you add fake data to
+  // production? lol"). Render from the server's op log instead so the
+  // log reflects this game.
+  if (_online) {
+    paintOnlineMissionLog(host);
+    return;
+  }
   const actions = getActions();
   const history = getHistory();
   const lastUndoableIdx = (() => {
@@ -10218,6 +10236,55 @@ function paintMissionLog() {
       if (!ok) break;
     }
   });
+}
+
+// Online mission log: renders from the server op log via
+// getGameOps. Each op already carries a human log line written by
+// the engine handler (e.g. "ruben-firefox put X up for auction"),
+// so we just stream the most recent ops without trying to
+// recreate the sandbox's turn-grouped layout. Auto-refreshes when
+// a new snapshot lands (applySnapshot triggers a paintMissionLog
+// rerun for the active pane).
+async function paintOnlineMissionLog(host) {
+  if (!_online || !_onlineGameId || !_onlineMe) {
+    host.innerHTML = '<p class="muted">Mission log will appear once the game starts.</p>';
+    return;
+  }
+  // Preserve any previous render's scroll position so the user
+  // doesn't get yanked to the top on every poll tick.
+  const list = host.querySelector('.mp-log-list');
+  const scrollTop = list ? list.scrollTop : null;
+  const r = await getGameOps(_onlineGameId, {}, _onlineMe.token);
+  if (!_online) return; // unmounted mid-fetch
+  if (!r || !r.ok) {
+    host.innerHTML = '<p class="muted">Could not load mission log.</p>';
+    return;
+  }
+  const entries = (r.data && r.data.entries) || [];
+  // Server returns ops in seq ASC order. Render newest-first for
+  // a tail-friendly read; skip the seq-0 START op (no log line).
+  const rows = entries
+    .filter((e) => e.kind !== 'START' && e.log)
+    .reverse()
+    .map((e) => `
+      <li class="mp-log-row">
+        <span class="mp-log-kind">${esc(e.kind)}</span>
+        <span class="mp-log-who">@${esc(e.profileName || '?')}</span>
+        <span class="mp-log-summary">${esc(e.log)}</span>
+      </li>`).join('');
+  host.innerHTML = `
+    <h3 style="margin-top:0">📋 Mission log</h3>
+    <p class="muted" style="margin:4px 0 8px;font-size:11px;">
+      Live from the server's op log. Newest first.
+    </p>
+    <ul class="mp-log-list" style="list-style:none;margin:0;padding:0;max-height:60vh;overflow-y:auto;">
+      ${rows || '<li class="muted">No actions yet.</li>'}
+    </ul>
+  `;
+  if (scrollTop != null) {
+    const newList = host.querySelector('.mp-log-list');
+    if (newList) newList.scrollTop = scrollTop;
+  }
 }
 
 // Solo panel: stats + per-round actions when a game is running,
