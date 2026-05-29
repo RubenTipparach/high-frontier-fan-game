@@ -8,7 +8,7 @@ import {
 } from './auth.js';
 import { ws } from './ws.js';
 import {
-  initLobby, refreshLobbyList, openLobby,
+  initLobby, refreshLobbyList, openLobby, exitToLobbyList,
 } from './lobby.js';
 import {
   initInvites, refreshInvitesList, subscribeInvitesForProfile,
@@ -161,9 +161,11 @@ function initBrowseButton() {
   const lobbyBtn = document.getElementById('btn-lobby');
   if (lobbyBtn) {
     lobbyBtn.addEventListener('click', () => {
-      if (document.getElementById('view-lobby-list').classList.contains('hidden')) {
-        showView('view-lobby-list');
-      }
+      // Always exit the current room: detach the online game layer and
+      // clear the /room/<CODE> path so the URL returns to the lobby
+      // list, where the player can enter another room or a sandbox.
+      // (Keeps server-side membership; Resume puts them back in.)
+      exitToLobbyList();
     });
   }
 

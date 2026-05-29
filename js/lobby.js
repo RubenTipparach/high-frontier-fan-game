@@ -664,6 +664,20 @@ function leaveCurrent() {
   refreshLobbyList();
 }
 
+// Public "exit the current room back to the lobby list" used by the
+// top-menu Lobby button. Detaches the online game layer and clears the
+// /room/<CODE> path so the URL returns to the lobby list, letting the
+// player pick another room or start a sandbox. The server-side lobby
+// membership is kept (no leaveLobby API call), so Resume puts them back
+// in. A no-op when there's nothing to leave.
+export function exitToLobbyList() {
+  if (_activeLobby || _gameMounted) {
+    leaveCurrent();
+  } else {
+    _onShowView('view-lobby-list');
+  }
+}
+
 // Push / clear the /room/<CODE> path without triggering a navigation.
 // Centralised so openLobby + leaveCurrent stay in sync. The room is a
 // real path segment (user request), so the app base must be resolved
