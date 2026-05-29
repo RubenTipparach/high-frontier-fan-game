@@ -666,9 +666,11 @@ const AUCTION = {
 // player's LEO stack as their starting crew, mirroring the sandbox
 // wizard which spawns the crew into the LEO Stack.
 function applyPickCrew(state, op, ctx) {
+  // Crew picks are open during the draft phase only. Once everyone
+  // has committed, draftPhase flips to 'play' and PICK_CREW is locked.
+  if (state.draftPhase !== 'crew') return fail('crew_draft_closed');
   const player = playerByProfile(state, ctx.profileId);
   if (!player) return fail('not_a_player');
-  if (player.faction) return fail('crew_already_picked');
   const cardId = String(op.cardId || '');
   const face = op.face === 'secondary' ? 'secondary' : 'primary';
   const card = CREW_BY_ID[cardId];
@@ -683,17 +685,24 @@ function applyPickCrew(state, op, ctx) {
   if (card.color && player.color && card.color !== player.color) {
     return fail('wrong_crew_colour');
   }
+  const switching = !!player.faction;
   player.faction = { cardId, face };
-  // Spawn the crew card in the LEO Stack (the per-player parking
-  // lot at LEO, distinct from the flying rocket). Mirrors the
-  // sandbox wizard's addCardToLeo call. From LEO the player can
-  // later Transfer the crew into the Rocket via a free op when
-  // their rocket is at LEO.
+  // Replace any previous crew slot in LEO with the new pick so a
+  // re-pick during the draft doesn't leave a stale crew sitting in
+  // the stack. First-time pickers just get one push.
+  player.leo = (player.leo || []).filter((s) => s.kind !== 'crew');
   player.leo.push({ id: cardId, kind: 'crew', face });
+  // Transition to 'play' the moment every player has a faction.
+  // Server-side, not derived client-side, so spectators + future
+  // joiners agree on the phase.
+  if (state.players.every((p) => !!p.faction)) {
+    state.draftPhase = 'play';
+  }
+  const verb = switching ? 'switched to' : 'picked';
   return {
     ok: true,
     state,
-    log: `${player.name} picked ${faceData.name || cardId}.`,
+    log: `${player.name} ${verb} ${faceData.name || cardId}.`,
   };
 }
 
@@ -710,15 +719,23 @@ export function applyOperation(prevState, op, ctx) {
   if (!prevState || prevState.status !== 'active') return fail('game_not_active');
   if (!op || typeof op.kind !== 'string') return fail('bad_op');
 
-  // Auction ops are a third class: bids/passes are sent by non-active
-  // players, so they bypass the turn guard below and each handler
-  // validates its own caller against the auction roles.
-  if (AUCTION[op.kind]) return AUCTION[op.kind](clone(prevState), op, ctx);
-  // Crew-pick is a fourth class: it's a pre-game session-setup step
-  // any player can run at any time (not gated by turn, not gated by
-  // an in-progress auction). PICK_CREW validates the caller against
-  // their own player record.
+  // Crew-pick is its own class: it's the pre-game session-setup step
+  // any player can run during the draft phase. PICK_CREW validates
+  // the caller against their own player record + the draftPhase
+  // gate. Runs BEFORE the AUCTION / functional gates so it can fire
+  // even though no other ops are accepted during the draft.
   if (CREW[op.kind]) return CREW[op.kind](clone(prevState), op, ctx);
+
+  // Everything else - auctions, functional ops, META - has to wait
+  // for the crew draft to finish. Without this, the host could fire
+  // END_TURN / AUCTION_START before some seat has picked their
+  // faction.
+  if (prevState.draftPhase !== 'play') return fail('awaiting_crew_picks');
+
+  // Auction ops bypass the turn guard below - bids/passes are sent
+  // by non-active players, and each handler validates its own caller
+  // against the auction roles.
+  if (AUCTION[op.kind]) return AUCTION[op.kind](clone(prevState), op, ctx);
 
   const isFunctional = !!FUNCTIONAL[op.kind];
   if (!isFunctional && !META[op.kind]) return fail('unknown_op');

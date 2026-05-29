@@ -161,6 +161,13 @@ export function createInitialState({ players, seed }) {
     seed,
     rng: { cursor: gen.cursor },
     status: 'active',
+    // Draft phase. Every game opens in 'crew' - all players pick a
+    // faction and may re-pick freely until everyone has chosen. The
+    // engine's applyPickCrew flips this to 'play' the moment the
+    // last player commits, and from then on PICK_CREW is locked and
+    // the regular gameplay ops (MOVE / BURN / AUCTION_* / END_TURN
+    // / etc.) start being accepted.
+    draftPhase: 'crew',
     // Card economy. Multiplayer is always 'market' (Card Market
     // mode is mandatory in MP - patents are auctioned, not free
     // draws, and the Free Market sell op is available). Server-

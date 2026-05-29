@@ -460,6 +460,7 @@ function applySnapshot(snapshot) {
   // reloads / late joins, and so a re-bootstrap won't reopen the
   // wizard once the pick is committed server-side.
   maybePromptCrewPick(snapshot);
+  syncCrewDraftOverlay(snapshot);
 }
 
 // One-at-a-time guard so a flurry of snapshots (e.g. another player's
@@ -487,6 +488,116 @@ function maybePromptCrewPick(snapshot) {
       submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
     },
     onDone: () => { _crewWizardOpen = false; },
+  });
+}
+
+// Crew-draft waiting overlay. Visible whenever the snapshot says
+// state.draftPhase === 'crew'. Shows live "Picked: X / Y" progress
+// + which players still need to commit, and gives the local player
+// a "Change pick" button while they're waiting (they can switch any
+// number of times until the last player commits, at which point the
+// server flips draftPhase to 'play' and the overlay clears).
+function syncCrewDraftOverlay(snapshot) {
+  const existing = document.getElementById('mp-crew-draft-overlay');
+  const drafting = !!(snapshot && snapshot.draftPhase === 'crew') && !_spectator;
+  if (!drafting) {
+    if (existing) existing.remove();
+    return;
+  }
+  const players = snapshot.players || [];
+  const picked = players.filter((p) => !!p.faction);
+  const waitingOn = players.filter((p) => !p.faction);
+  const myId = _onlineMe && _onlineMe.id;
+  const myp = players.find((p) => p.profileId === myId);
+  const myFaction = myp && myp.faction;
+
+  // Keep a single overlay element; rebuild the body each snapshot
+  // so the "Picked: X / Y" counters stay live.
+  let overlay = existing;
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'mp-crew-draft-overlay';
+    overlay.className = 'mp-crew-draft-overlay';
+    document.body.appendChild(overlay);
+  }
+  const fName = (p) => {
+    const card = p.faction && CREW_BY_ID[p.faction.cardId];
+    const face = card && card.faces && card.faces[p.faction.face];
+    return (face && face.name) || (p.faction && p.faction.cardId) || '';
+  };
+  // While the wizard is open we keep the overlay there but dimmed
+  // behind it - the wizard's own backdrop covers it. Otherwise
+  // surface the "waiting" panel front and centre.
+  overlay.innerHTML = `
+    <div class="mp-crew-draft-panel" role="dialog" aria-label="Crew draft">
+      <h3>🧑‍🚀 Crew draft</h3>
+      <p class="muted mp-crew-draft-count">
+        Picked: <strong>${picked.length}</strong> /
+        <strong>${players.length}</strong>
+      </p>
+      <ul class="mp-crew-draft-roster"></ul>
+      ${myFaction
+        ? `<p class="mp-crew-draft-me">You picked <strong>${esc(fName(myp))}</strong>.
+             You can change while others are still deciding.</p>
+           <button type="button" class="modal-btn mp-crew-draft-change">🔄 Change pick</button>`
+        : `<p class="mp-crew-draft-me">Open the picker to commit your faction.</p>
+           <button type="button" class="modal-btn primary mp-crew-draft-open">🧑‍🚀 Pick crew</button>`}
+    </div>
+  `;
+  const roster = overlay.querySelector('.mp-crew-draft-roster');
+  for (const p of players) {
+    const li = document.createElement('li');
+    const dot = document.createElement('span');
+    dot.className = 'mp-crew-draft-dot';
+    dot.style.background = p.color || '#888';
+    const name = document.createElement('span');
+    name.className = 'mp-crew-draft-name';
+    name.textContent = '@' + p.name + (p.profileId === myId ? ' (you)' : '');
+    const status = document.createElement('span');
+    status.className = 'mp-crew-draft-status';
+    if (p.faction) {
+      status.textContent = '✓ ' + fName(p);
+      li.classList.add('is-picked');
+    } else {
+      status.textContent = '… deciding';
+    }
+    li.append(dot, name, status);
+    roster.appendChild(li);
+  }
+  const openBtn = overlay.querySelector('.mp-crew-draft-open');
+  const changeBtn = overlay.querySelector('.mp-crew-draft-change');
+  const reopen = () => {
+    // _crewWizardOpen guard would block a re-open; clear it first
+    // so the user can change their mind.
+    _crewWizardOpen = false;
+    maybePromptCrewPickForced(snapshot);
+  };
+  if (openBtn) openBtn.addEventListener('click', reopen);
+  if (changeBtn) changeBtn.addEventListener('click', reopen);
+  // Suppress the bare waiting overlay while the wizard's own modal
+  // is open - the modal already says everything the overlay would.
+  overlay.classList.toggle('is-behind-wizard', _crewWizardOpen);
+}
+
+// Open the wizard even when the player already has a faction. Used
+// by the "Change pick" button on the draft overlay - the regular
+// maybePromptCrewPick early-returns once myp.faction is set.
+function maybePromptCrewPickForced(snapshot) {
+  if (!_online || _spectator || _crewWizardOpen || !_onlineMe) return;
+  const myId = _onlineMe.id;
+  const myp = (snapshot.players || []).find((p) => p.profileId === myId);
+  if (!myp) return;
+  _crewWizardOpen = true;
+  const desc = myp.faction
+    ? 'Switch to the other face of your crew card. You can change as long as other players are still picking.'
+    : 'Pick one of the two faces of your crew card.';
+  openCrewWizard({
+    description: desc,
+    restrictToColor: myp.color || null,
+    onCommit: ({ cardId, face }) => {
+      submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
+    },
+    onDone: () => { _crewWizardOpen = false; syncCrewDraftOverlay(_onlineSnapshot); },
   });
 }
 
@@ -1147,6 +1258,8 @@ function humanizeOnlineOpError(code) {
     not_a_player: 'You are not in this game.',
     unknown_op: 'Unsupported operation.',
     crew_already_picked: 'You have already picked your starting crew.',
+    crew_draft_closed: 'Crew picks are locked - the game has started.',
+    awaiting_crew_picks: 'Waiting for every player to pick a starting crew.',
     unknown_crew: 'That crew card does not exist.',
     unknown_crew_face: 'Pick the primary or secondary face.',
     wrong_crew_colour: 'That crew card is not your assigned colour.',
@@ -1222,6 +1335,8 @@ export function unmountBrowseOnline() {
   // sessions when the player returns to the lobby list.
   const crewOverlay = document.querySelector('.crew-wizard-overlay');
   if (crewOverlay) crewOverlay.remove();
+  const draftOverlay = document.getElementById('mp-crew-draft-overlay');
+  if (draftOverlay) draftOverlay.remove();
   _crewWizardOpen = false;
   const banner = document.getElementById('mp-turn-banner');
   if (banner) {
