@@ -189,8 +189,31 @@ jobs:
       # and the shared data/ tables the engine imports (see
       # server/Dockerfile). The app + dockerfile are named explicitly
       # since we are no longer in the server/ directory.
+      # Fly's remote builder + API can drop the connection transiently
+      # (e.g. a regional networking incident), which makes `flyctl deploy`
+      # fail within a few seconds, before any build output. Retry with
+      # exponential backoff, mirroring the network-retry doctrine the repo
+      # already follows for git push/fetch. A genuine, persistent failure
+      # still surfaces as a job failure after the final attempt.
       - name: Deploy API to Fly.io
         if: steps.fly_gate.outputs.ready == 'true'
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: flyctl deploy --remote-only --config server/fly.toml --dockerfile server/Dockerfile .
+        run: |
+          set -e
+          for attempt in 1 2 3 4; do
+            echo "::group::flyctl deploy (attempt ${attempt}/4)"
+            if flyctl deploy --remote-only --config server/fly.toml --dockerfile server/Dockerfile .; then
+              echo "::endgroup::"
+              echo "Deploy succeeded on attempt ${attempt}."
+              exit 0
+            fi
+            echo "::endgroup::"
+            if [ "${attempt}" -lt 4 ]; then
+              backoff=$((attempt * attempt * 10))
+              echo "::warning::flyctl deploy failed (attempt ${attempt}/4); retrying in ${backoff}s"
+              sleep "${backoff}"
+            fi
+          done
+          echo "::error::flyctl deploy failed after 4 attempts"
+          exit 1
