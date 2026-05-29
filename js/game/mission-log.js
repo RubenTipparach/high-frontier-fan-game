@@ -22,6 +22,8 @@
 //   resetLog()                                         - full wipe
 //   onChange(cb)                                       → unsubscribe
 
+import { isOnline } from './online-mode.js';
+
 const STORAGE_LOG     = 'hf-mission-log';
 const STORAGE_HISTORY = 'hf-mission-history';
 
@@ -41,6 +43,14 @@ let _listeners = [];
 let _nextId = (_actions.reduce((m, a) => Math.max(m, a.id || 0), 0)) + 1;
 
 function persist() {
+  // While in a multiplayer session the server's op log is the source
+  // of truth (paintOnlineMissionLog reads /games/:id/ops). If a MP
+  // code path accidentally calls logAction, don't write it to the
+  // sandbox localStorage - that's how solo histories started bleeding
+  // into MP renders. Matches the persist-gate pattern in the other
+  // state modules (rocket / hand / stacks / decks / glory / clock /
+  // leo-stack / factories / discs).
+  if (isOnline()) return;
   try {
     localStorage.setItem(STORAGE_LOG,     JSON.stringify(_actions));
     localStorage.setItem(STORAGE_HISTORY, JSON.stringify(_history));
