@@ -839,7 +839,11 @@ app.post('/lobbies/:id/invite-link', requireProfile, (req, res) => {
 // Cancelled lobbies are excluded so a stale URL doesn't keep a
 // player tied to a dead game.
 app.get('/lobbies/by-code/:code', (req, res) => {
-  const code = String(req.params.code || '').toUpperCase();
+  // Codes are stored lowercase (CODE_ALPHABET is lowercase + digits)
+  // and SQLite is case-sensitive on `=` - matching the existing
+  // invite-link lookup pattern below. The URL displays the code
+  // upper-cased for readability; normalise here so the lookup hits.
+  const code = String(req.params.code || '').toLowerCase();
   const row = db
     .prepare(
       `SELECT id, code, name, status
