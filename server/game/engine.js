@@ -281,6 +281,31 @@ function applyBoost(state, op, player) {
   };
 }
 
+// Free Market sell (rulebook I3): drop a HAND card to the bottom of
+// its deck for +FREE_MARKET_AQUA aqua. Costs 1 op. This was a client-
+// only action before, so in MP the sale never persisted and the aqua
+// was never credited (user 2026-05-29: "the sell didnt write to
+// server" -> a later REFUEL failed insufficient_aqua).
+const FREE_MARKET_AQUA = 3;  // mirror of card-market.js
+function applyFreeMarket(state, op, player) {
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  const cardId = String(op.cardId || '');
+  const idx = player.hand.indexOf(cardId);
+  if (idx < 0) return fail('not_in_hand');
+  const card = PATENTS_BY_ID[cardId];
+  if (!card) return fail('unknown_card');
+  player.hand.splice(idx, 1);
+  // Card returns to the BOTTOM of its deck so it can re-circulate.
+  const deck = state.decks[card.type];
+  if (Array.isArray(deck)) deck.push(cardId);
+  player.aqua += FREE_MARKET_AQUA;
+  player.opsRemaining -= 1;
+  return {
+    ok: true, state,
+    log: `${player.name} sold ${card.name} for +${FREE_MARKET_AQUA} aqua (Free Market).`,
+  };
+}
+
 // Convert aqua -> water 1:1, only while the rocket is at LEO (the Aqua
 // Bank lives at LEO). Clamped by the requested amount, the aqua on
 // hand, and the remaining wet-mass room in the tank. This is where
@@ -301,6 +326,19 @@ function applyRefuel(state, op, player) {
   player.aqua -= amt;
   player.rocket.tank = (player.rocket.tank | 0) + amt;
   return { ok: true, state, log: `${player.name} converted ${amt} aqua to water (tank ${player.rocket.tank}).` };
+}
+
+// Reverse of REFUEL: cash tank water back into the aqua bank 1:1, only
+// at LEO. Clamped by the water on hand. Free, turn-gated. op={amount}.
+function applyCashWater(state, op, player) {
+  if (player.rocket.siteId != null) return fail('rocket_not_at_leo');
+  const want = Math.floor(Number(op.amount));
+  if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
+  const amt = Math.min(want, player.rocket.tank | 0);
+  if (amt <= 0) return fail('no_water');
+  player.rocket.tank -= amt;
+  player.aqua = (player.aqua | 0) + amt;
+  return { ok: true, state, log: `${player.name} cashed ${amt} water back to aqua (aqua ${player.aqua}).` };
 }
 
 // Display name for a stack slot (patent or crew face). Used in
@@ -464,6 +502,8 @@ const FUNCTIONAL = {
   BOOST: applyBoost,
   TRANSFER: applyTransfer,
   REFUEL: applyRefuel,
+  CASH_WATER: applyCashWater,
+  FREE_MARKET: applyFreeMarket,
   SET_ACTIVE_THRUSTER: applySetActiveThruster,
   SET_ACTIVE_PROSPECTOR: applySetActiveProspector,
   PROSPECT: applyProspect,
@@ -476,6 +516,8 @@ function pickPayload(op) {
     case 'BOOST': return { cardIds: op.cardIds };
     case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, to: op.to };
     case 'REFUEL': return { amount: op.amount };
+    case 'CASH_WATER': return { amount: op.amount };
+    case 'FREE_MARKET': return { cardId: op.cardId };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
     case 'PROSPECT': return { siteId: op.siteId };

@@ -1445,6 +1445,8 @@ function humanizeOnlineOpError(code) {
     empty_rocket: 'Your rocket is empty - build or board a thruster before moving.',
     nothing_to_boost: 'Mark at least one hand card to boost.',
     tank_full: 'The rocket tank is full.',
+    no_water: 'No water in the tank to cash out.',
+    unknown_card: 'That card does not exist.',
     crew_already_picked: 'You have already picked your starting crew.',
     crew_draft_closed: 'Crew picks are locked - the game has started.',
     awaiting_crew_picks: 'Waiting for every player to pick a starting crew.',
@@ -6237,6 +6239,10 @@ function doFreeMarket() {
     renderCardFn: renderCard,
     onCommit: ({ cardId }) => {
       if (!cardId) return;
+      // Online: Free Market is the server FREE_MARKET op (sells the
+      // card, credits aqua, spends the op). Submit + re-hydrate; skip
+      // the local mutation that never persisted.
+      if (_online) { submitOnlineOp({ kind: 'FREE_MARKET', cardId }); return; }
       if (!requireOp('Free Market')) return;
       const card = cardById(cardId);
       if (!card) {
@@ -7314,10 +7320,12 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   // visual "from" off the on-screen readout and tween up to the
   // new tank water level. Wraps the spend + addFuel pair so a
   // failed spend doesn't leave the level mid-animation.
-  // Run the fill tween from the currently-displayed level up to the
-  // tank's new value. Shared by the solo + online paths so both pour
-  // the same way.
-  const animateFill = () => {
+  // Tween the visible tank level from whatever's displayed to the
+  // current tank value (fill OR drain - the tween handles both).
+  // Shared by the solo + online aqua<->water paths so every transfer
+  // animates the same way, including the free server REFUEL /
+  // CASH_WATER ops in multiplayer.
+  const animateTankLevel = () => {
     const fromLevel = parseFloat(nowReadout.textContent || String(getTankWater()));
     const toLevel = getTankWater();
     if (fromLevel === toLevel) { refreshAquaButtons(); return; }
@@ -7342,12 +7350,12 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     if (_online) {
       const ok = await submitOnlineOp({ kind: 'REFUEL', amount: want });
       if (!ok) { refreshAquaButtons(); return; }
-      animateFill();
+      animateTankLevel();
       return;
     }
     if (!spendAqua(want)) { refreshAquaButtons(); return; }
     addFuel(want);
-    animateFill();
+    animateTankLevel();
     logAction({
       type: 'aqua_transfer',
       icon: '💎→💧',
@@ -7362,26 +7370,23 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   // bank (1:1). Only available at LEO. Same tween path as
   // dump-fuel, but credits the player's bank instead of
   // destroying the water.
-  const cashOutToAqua = (amount, e) => {
+  const cashOutToAqua = async (amount, e) => {
     e?.stopPropagation();
     if (!atLeo) return;
     const cur = getTankWater();
     const want = Math.min(amount, cur);
     if (want <= 0) { refreshAquaButtons(); return; }
-    removeFuel(want);
-    addAqua(want);
-    const fromLevel = parseFloat(nowReadout.textContent || String(cur));
-    const toLevel = getTankWater();
-    if (fromLevel === toLevel) {
-      refreshAquaButtons();
+    // Online: water->aqua is the server CASH_WATER op. Await it so the
+    // snapshot updates the tank, then drain-animate to the new level.
+    if (_online) {
+      const ok = await submitOnlineOp({ kind: 'CASH_WATER', amount: want });
+      if (!ok) { refreshAquaButtons(); return; }
+      animateTankLevel();
       return;
     }
-    animating = true;
-    tween = {
-      from: fromLevel, to: toLevel,
-      t0: performance.now(), dur: 400,
-      onDone: () => { refreshAquaButtons(); refreshDumpButtons(); },
-    };
+    removeFuel(want);
+    addAqua(want);
+    animateTankLevel();
     logAction({
       type: 'aqua_cashout',
       icon: '💧→🏦',
@@ -7429,6 +7434,12 @@ function freeMarketSellFromHand(card, afterFn) {
     aqua: FREE_MARKET_AQUA,
     renderCardFn: renderCard,
     onConfirm: () => {
+      // Online: route to the server FREE_MARKET op (was client-only).
+      if (_online) {
+        submitOnlineOp({ kind: 'FREE_MARKET', cardId: card.id });
+        if (afterFn) afterFn();
+        return;
+      }
       if (!requireOp('Free Market')) return;
       removeFromHand(card.id);
       addToBottom(card.id);
