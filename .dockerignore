@@ -1,13 +1,31 @@
 # Docker build context allowlist for the Fly API image (built from the
-# repo root; see server/Dockerfile). The image needs only the server
-# app and the shared data/ tables, so everything else (frontend, the
-# vendored planner submodule, git history, reference assets) is
-# excluded to keep the remote build context small and fast to upload.
+# repo root; see server/Dockerfile). The image needs the server app, the
+# shared data/ tables, and the vendored planner submodule; everything
+# else (frontend, git history, reference assets) is excluded to keep the
+# remote build context small and fast to upload.
 *
 !server
 !data
+# Re-include the vendored planner submodule. server/game/planner-graph.js
+# reads vendor/hf-mission-planner/assets/data-hf4.json at boot to build
+# the ~1500-node movement graph, and server/Dockerfile COPYs vendor/.
+# Without this the allowlist above strips vendor/ from the context and the
+# COPY fails with "/vendor: not found". The submodule must also be checked
+# out for the file to exist on disk (deploy-api uses submodules: recursive).
+!vendor
 
 # Re-exclude things that live under the allowed dirs but must not ship.
+# Drop the parts of the planner submodule that aren't needed at runtime
+# (docs, prebuilt dist, source, type stubs, git + node tooling) to keep
+# the context lean. assets/ stays because it holds data-hf4.json. These
+# are plain directory excludes, the same mechanism as server/node_modules.
+vendor/hf-mission-planner/.git
+vendor/hf-mission-planner/.github
+vendor/hf-mission-planner/docs
+vendor/hf-mission-planner/dist
+vendor/hf-mission-planner/src
+vendor/hf-mission-planner/types
+vendor/hf-mission-planner/node_modules
 server/node_modules
 **/*.db
 **/*.db-shm
