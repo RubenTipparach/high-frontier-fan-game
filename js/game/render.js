@@ -842,6 +842,16 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
+  // Horizontal offset for the LOCAL rocket so it takes its slot in a
+  // colocation row (set alongside setMpRockets when other players share
+  // the site). 0 = centred / alone.
+  setSandboxRocketOffset(dx) {
+    if (this._sandboxRocket) {
+      this._sandboxRocket.offsetX = dx || 0;
+      this._scheduleDraw();
+    }
+  }
+
   // Trigger a one-shot explosion at a world-space position. Used
   // when a hazard roll critical-fails on the sandbox rocket. The
   // animation is fully self-clearing - rings expand + fade and
@@ -2941,48 +2951,31 @@ export class MapRenderer {
     if (!list || !list.length) return;
     const eff = this.zoom * this.fitScale;
     const { width: spriteW, height: spriteH } = getRocketSpriteSize();
-    const scale = 0.42;     // a touch smaller than the local rocket
+    // Same scale as the local rocket so every ship reads the same size.
+    const scale = 0.55;
     const w = spriteW * scale;
     const h = spriteH * scale;
-
-    // Group by rounded world anchor so colocated ships can be indexed
-    // for a fan-out offset. The local rocket occupies the centre slot
-    // at each of its sites, so opponents start their ring at index 1.
-    const groups = new Map();
-    const keyOf = (r) => `${Math.round(r.x)}:${Math.round(r.y)}`;
-    const localKey = this._sandboxRocket
-      ? keyOf(this._sandboxRocket) : null;
+    // Each opponent carries a precomputed horizontal offset (browse.js
+    // syncMpRockets lays out all ships at a site in a centred row, so
+    // colocated ships line up side-by-side instead of stacking).
     for (const r of list) {
-      const k = keyOf(r);
-      if (!groups.has(k)) groups.set(k, { items: [], hasLocal: k === localKey });
-      groups.get(k).items.push(r);
-    }
-
-    for (const { items, hasLocal } of groups.values()) {
-      // Total pieces sharing this anchor (incl. the local rocket).
-      const total = items.length + (hasLocal ? 1 : 0);
-      items.forEach((r, i) => {
-        // Index within the ring: skip slot 0 when the local rocket
-        // holds the centre. Single opponent + no local = centred.
-        const ringIndex = hasLocal ? i + 1 : i;
-        let ox = 0, oy = 0;
-        if (total > 1) {
-          // Fan out on a small screen-space ring. Radius grows a hair
-          // with the count so 5-6 ships at LEO stay legible.
-          const radius = 13 + Math.min(total, 6) * 1.5;
-          const ang = (Math.PI * 2 * ringIndex) / total - Math.PI / 2;
-          ox = Math.cos(ang) * radius;
-          oy = Math.sin(ang) * radius;
-        }
-        const sx = this.pan.x + r.x * eff + ox;
-        const sy = this.pan.y + r.y * eff + oy;
-        const px = sx - w / 2;
-        const py = sy - h - 2;
-        ctx.save();
-        ctx.globalAlpha = 0.92;
-        ctx.drawImage(getRocketSprite(r.colour || 'white'), px, py, w, h);
-        ctx.restore();
-      });
+      const sx = this.pan.x + r.x * eff + (r.offsetX || 0);
+      const sy = this.pan.y + r.y * eff;
+      const px = sx - w / 2;
+      const py = sy - h - 2;
+      ctx.save();
+      if (r.inactive) ctx.globalAlpha = 0.5;
+      ctx.drawImage(getRocketSprite(r.colour || 'white'), px, py, w, h);
+      // 🚫 inactive badge, mirroring the local rocket's empty-stack cue.
+      if (r.inactive) {
+        ctx.globalAlpha = 1;
+        const badge = Math.round(h * 0.35);
+        ctx.font = `${badge}px ${EMOJI_FONT}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🚫', sx + w * 0.30, py + badge * 0.55);
+      }
+      ctx.restore();
     }
   }
 
@@ -2990,7 +2983,10 @@ export class MapRenderer {
     const r = this._sandboxRocket;
     if (!r) return;
     const eff = this.zoom * this.fitScale;
-    const sx = this.pan.x + r.x * eff;
+    // offsetX shifts the local rocket sideways so it takes its slot in
+    // the colocation row (set by browse.js syncMpRockets when other
+    // players share this site). 0 in solo / when alone.
+    const sx = this.pan.x + r.x * eff + (r.offsetX || 0);
     const sy = this.pan.y + r.y * eff;
     const { width: spriteW, height: spriteH } = getRocketSpriteSize();
     const scale = 0.55;     // map-scale; 35×53 px on screen.

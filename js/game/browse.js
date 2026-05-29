@@ -1482,7 +1482,9 @@ export function unmountBrowseOnline() {
   _onlineMaps = null;
   _onlineSnapshot = null;
   _lastAppliedSeq = -1;
-  if (_renderer) { try { _renderer.setMpRockets(null); } catch { /* ignore */ } }
+  if (_renderer) {
+    try { _renderer.setMpRockets(null); _renderer.setSandboxRocketOffset(0); } catch { /* ignore */ }
+  }
   _onlineBusy = false;
   _onlineRoom = null;
   _onlineLobbyId = null;
@@ -7796,25 +7798,56 @@ function mpRocketCoords(serverSiteId) {
   return { x: LEO_ANCHOR.x, y: LEO_ANCHOR.y };  // unknown -> LEO
 }
 
-// Push every OTHER player's rocket to the renderer as colour-coded
-// sprites. The local player's own rocket is the full-featured
-// _sandboxRocket draw, so it's excluded here. The renderer fans out
-// ships that share an anchor (e.g. everyone at LEO).
+// Lay out every player's rocket on the map. Ships sharing a site are
+// arranged in a CENTRED HORIZONTAL ROW (not a ring) so colocated
+// rockets - everyone at LEO especially - line up side by side at the
+// same size. The local player's own rocket keeps its full-featured
+// draw (badges, hover, click) but gets a horizontal offset so it
+// takes its slot in the row; opponents are colour-coded sprites with
+// a 🚫 when inactive (no active thruster), mirroring the local cue.
+const MP_ROCKET_SPACING = 30;   // screen px between colocated ships
 function syncMpRockets(snapshot) {
   if (!_renderer) return;
   if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) {
     _renderer.setMpRockets(null);
+    _renderer.setSandboxRocketOffset(0);
     return;
   }
   const myId = _onlineMe.id;
-  const list = [];
+  // One entry per player with a resolved screen-anchor; group by site.
+  const groups = new Map();
   for (const p of snapshot.players) {
-    if (p.profileId === myId) continue;       // own rocket drawn separately
     const pos = mpRocketCoords(p.rocket && p.rocket.siteId);
     if (!pos) continue;
-    list.push({ x: pos.x, y: pos.y, colour: p.color || 'white', name: p.name });
+    const key = `${Math.round(pos.x)}:${Math.round(pos.y)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({
+      profileId: p.profileId,
+      seat: p.seat || 0,
+      x: pos.x, y: pos.y,
+      colour: p.color || 'white',
+      name: p.name,
+      inactive: !(p.rocket && p.rocket.activeThrusterId),
+      isLocal: p.profileId === myId,
+    });
   }
-  _renderer.setMpRockets(list);
+
+  const opponents = [];
+  let localOffsetX = 0;
+  for (const group of groups.values()) {
+    group.sort((a, b) => a.seat - b.seat);      // stable left-to-right
+    const n = group.length;
+    group.forEach((r, i) => {
+      const offsetX = (i - (n - 1) / 2) * MP_ROCKET_SPACING;
+      if (r.isLocal) {
+        localOffsetX = offsetX;
+      } else {
+        opponents.push({ x: r.x, y: r.y, offsetX, colour: r.colour, name: r.name, inactive: r.inactive });
+      }
+    });
+  }
+  _renderer.setSandboxRocketOffset(localOffsetX);
+  _renderer.setMpRockets(opponents);
 }
 
 function syncSandboxRocket() {
