@@ -1681,6 +1681,39 @@ function esc(s) {
   console.log(`cleaned up ${before} stranded pending invite(s)`);
 })();
 
+// One-time migration: recall empty rockets to LEO. Games created
+// before the "rocket opens at LEO" change started every ship at
+// startSiteId() (Itokawa), so an empty rocket that never launched is
+// stranded at a real site. An empty rocket can't burn, so it can
+// only ever be at LEO - normalise the live game_states blob so those
+// games match the invariant the engine now enforces. (Op-log history
+// is left as-is; only the current state matters for play.)
+(() => {
+  const rows = db.prepare('SELECT game_id, state FROM game_states').all();
+  let fixed = 0;
+  for (const row of rows) {
+    let st;
+    try { st = JSON.parse(row.state); } catch { continue; }
+    if (!st || !Array.isArray(st.players)) continue;
+    let changed = false;
+    for (const p of st.players) {
+      const r = p && p.rocket;
+      if (r && Array.isArray(r.stack) && r.stack.length === 0 && r.siteId != null) {
+        r.siteId = null;
+        r.activeThrusterId = null;
+        r.activeProspectorId = null;
+        changed = true;
+      }
+    }
+    if (changed) {
+      db.prepare('UPDATE game_states SET state = ? WHERE game_id = ?')
+        .run(JSON.stringify(st), row.game_id);
+      fixed += 1;
+    }
+  }
+  if (fixed) console.log(`recalled empty rockets to LEO in ${fixed} game(s)`);
+})();
+
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`high-frontier-fan-game listening on :${PORT} (HTTP + WS at /ws)`);
 });

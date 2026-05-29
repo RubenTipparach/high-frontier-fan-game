@@ -1310,6 +1310,8 @@ function humanizeOnlineOpError(code) {
     bad_transfer: 'Invalid transfer.',
     not_in_leo: 'That card is not in your LEO Stack.',
     not_in_rocket: 'That card is not on your rocket.',
+    empty_rocket: 'Your rocket is empty - build or board a thruster before moving.',
+    nothing_to_boost: 'Mark at least one hand card to boost.',
     crew_already_picked: 'You have already picked your starting crew.',
     crew_draft_closed: 'Crew picks are locked - the game has started.',
     awaiting_crew_picks: 'Waiting for every player to pick a starting crew.',
@@ -1601,6 +1603,15 @@ function wireHandStrip() {
       no: 'Cancel',
     });
     if (!ok) return;
+    // Online: the BOOST is a server op. Submit the marked ids; the
+    // server moves Hand -> LEO, charges aqua, spends the op, and
+    // broadcasts. Skip the local mutation below - the snapshot
+    // re-hydrate is the source of truth (and other players see it).
+    if (_online) {
+      const sent = await submitOnlineOp({ kind: 'BOOST', cardIds: marked });
+      if (sent) clearBoostMarks();
+      return;
+    }
     // Charge the Aqua first (affordability pre-checked above;
     // spendAqua is defence-in-depth). Then secure the op - if
     // none is left, refund the Aqua so the player isn't charged

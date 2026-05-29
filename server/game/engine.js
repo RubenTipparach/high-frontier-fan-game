@@ -179,6 +179,10 @@ function advanceClock(state) {
 
 function applyMove(state, op, player) {
   if (player.movesRemaining <= 0) return fail('no_moves_left');
+  // An empty rocket has no thruster and can't burn, so it can't leave
+  // LEO. Enforcing this keeps the "empty rocket == at LEO" invariant
+  // true: the only way off LEO is to build/board a thruster first.
+  if (player.rocket.stack.length === 0) return fail('empty_rocket');
   const toSiteId = String(op.toSiteId || '');
   const dest = siteById(toSiteId);
   if (!dest) return fail('unknown_site');
@@ -238,6 +242,40 @@ function applyBuildRocket(state, op, player) {
   return { ok: true, state, log: `${player.name} built ${card.name} onto the rocket.` };
 }
 
+// Boost: move marked HAND cards up to the LEO Stack (rulebook I4,
+// the sandbox commitBoost flow). Costs 1 op + aqua equal to the total
+// mass of the boosted cards. The cards land in player.leo; from there
+// TRANSFER boards them onto the rocket while it's at LEO. This is the
+// op the sandbox BOOST button fires in online mode - without it the
+// boost was a purely local mutation the server never saw.
+// op = { cardIds: [id, ...] }.
+function applyBoost(state, op, player) {
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];
+  if (!ids.length) return fail('nothing_to_boost');
+  // Every id must currently be in the hand.
+  for (const id of ids) {
+    if (player.hand.indexOf(id) < 0) return fail('not_in_hand');
+  }
+  // Cost = total mass of the boosted cards (aqua).
+  let cost = 0;
+  for (const id of ids) cost += slotMass({ id });
+  if (cost > player.aqua) return fail('insufficient_aqua');
+  // Move them hand -> LEO.
+  for (const id of ids) {
+    const idx = player.hand.indexOf(id);
+    if (idx >= 0) player.hand.splice(idx, 1);
+    player.leo.push({ id, kind: 'patent' });
+  }
+  player.aqua -= cost;
+  player.opsRemaining -= 1;
+  const n = ids.length;
+  return {
+    ok: true, state,
+    log: `${player.name} boosted ${n} card${n === 1 ? '' : 's'} to LEO for ${cost} aqua.`,
+  };
+}
+
 // Display name for a stack slot (patent or crew face). Used in
 // TRANSFER log lines.
 function slotName(slot) {
@@ -287,7 +325,22 @@ function applyTransfer(state, op, player) {
   if (player.rocket.activeThrusterId === slot.id) player.rocket.activeThrusterId = null;
   if (player.rocket.activeProspectorId === slot.id) player.rocket.activeProspectorId = null;
   (player.leo = player.leo || []).push(slot);
+  // An empty rocket is no longer a real ship - it can't burn without a
+  // thruster, so it can't be anywhere but LEO. Recall it (user
+  // 2026-05-29: "I should be able to abandon rocket stack if IT IS
+  // EMPTY", "the rocket is empty therefore it is ... at leo").
+  recallIfEmpty(player);
   return { ok: true, state, log: `${player.name} returned ${slotName(slot)} to the LEO Stack.` };
+}
+
+// Invariant: an empty rocket stack sits at LEO with no active
+// thruster / prospector. Called wherever the rocket can become empty.
+function recallIfEmpty(player) {
+  if (player.rocket.stack.length === 0) {
+    player.rocket.siteId = null;
+    player.rocket.activeThrusterId = null;
+    player.rocket.activeProspectorId = null;
+  }
 }
 
 // Pick which stacked thruster powers burns (rocket.js#setActiveThruster).
@@ -361,6 +414,7 @@ function applyProspect(state, op, player) {
 const FUNCTIONAL = {
   MOVE: applyMove,
   BUILD_ROCKET: applyBuildRocket,
+  BOOST: applyBoost,
   TRANSFER: applyTransfer,
   SET_ACTIVE_THRUSTER: applySetActiveThruster,
   SET_ACTIVE_PROSPECTOR: applySetActiveProspector,
@@ -371,6 +425,7 @@ function pickPayload(op) {
   switch (op.kind) {
     case 'MOVE': return { toSiteId: op.toSiteId };
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face };
+    case 'BOOST': return { cardIds: op.cardIds };
     case 'TRANSFER': return { cardId: op.cardId, to: op.to };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
