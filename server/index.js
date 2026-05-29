@@ -616,29 +616,17 @@ function canViewGame(gameId, profileId) {
 // Full game view: meta + roster + current state snapshot. State is sent
 // whole today (open information; hidden hands aren't populated until
 // the BUILD op lands, at which point this redacts per-player).
-// Redact hidden information from a state snapshot for one viewer. The
-// HAND is the only hidden zone: a player sees their own hand but only
-// the COUNT of every opponent's hand. Rocket / LEO / outpost stacks
-// are open information (anyone can inspect them), so they pass through
-// untouched. viewerId === null (spectator) redacts every hand.
-// Always sets handCount so the client can render "N cards (hidden)".
-function redactStateForViewer(rawState, viewerId) {
-  if (!rawState || !Array.isArray(rawState.players)) return rawState;
-  const clone = JSON.parse(JSON.stringify(rawState));
-  for (const p of clone.players) {
-    p.handCount = Array.isArray(p.hand) ? p.hand.length : 0;
-    if (p.profileId !== viewerId) p.hand = null; // hidden
-  }
-  return clone;
-}
-
-function gameView(gameId, viewerId = null) {
+// HF4 is an OPEN-information game (user 2026-05-29: "hand cards SHOULD
+// NOT BE HIDDEN"). Every zone - hand, LEO, rocket, outposts - is
+// visible to every player, so the full state ships unredacted. (An
+// earlier build hid opponent hands; that was the wrong call and is
+// gone.) viewerId is accepted but unused, kept so callers don't churn.
+function gameView(gameId, _viewerId = null) {
   const g = db
     .prepare('SELECT id, lobby_id, status, seed, committed_seq, created_at, finished_at FROM games WHERE id = ?')
     .get(gameId);
   if (!g) return null;
   const st = db.prepare('SELECT state, seq, updated_at FROM game_states WHERE game_id = ?').get(gameId);
-  const rawState = st ? JSON.parse(st.state) : null;
   return {
     id: g.id,
     lobbyId: g.lobby_id,
@@ -647,7 +635,7 @@ function gameView(gameId, viewerId = null) {
     committedSeq: g.committed_seq,
     updatedAt: st ? st.updated_at : g.created_at,
     players: gamePlayers(gameId),
-    state: redactStateForViewer(rawState, viewerId),
+    state: st ? JSON.parse(st.state) : null,
   };
 }
 
@@ -660,18 +648,10 @@ function stateAtSeq(gameId, seq) {
   return row && row.state_after ? JSON.parse(row.state_after) : null;
 }
 
-// Broadcast a game update with PER-RECIPIENT hand redaction. Each
-// subscriber gets a view built for their own profile, so an opponent's
-// hand is never sent to them over WS (matching the REST redaction).
-// makePayload(viewerId) builds the message for one viewer.
-function publishGame(gameId, makePayload) {
-  const set = channels.get(`game:${gameId}`);
-  if (!set) return;
-  for (const ws of set) {
-    if (ws.readyState !== 1) continue;
-    const viewerId = ws._profile ? ws._profile.id : null;
-    try { ws.send(JSON.stringify(makePayload(viewerId))); } catch { /* dropped socket */ }
-  }
+// Broadcast a game update to every subscriber. State is open
+// information (no per-recipient redaction), so one payload fits all.
+function publishGame(gameId, payload) {
+  broadcast(`game:${gameId}`, payload);
 }
 
 // Public live games: open-lobby games currently in 'active' status,
@@ -713,9 +693,7 @@ app.get('/games/:id', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
   if (!canViewGame(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
-  // Redact opponent hands for the requesting profile (spectators get
-  // all hands hidden - they're not a player).
-  const view = gameView(id, req.profile.id);
+  const view = gameView(id);
   if (!view) return res.status(404).json({ error: 'not_found' });
   res.json({ game: view, isSpectator: !isGamePlayer(id, req.profile.id) });
 });
@@ -778,18 +756,15 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
     }
   })();
 
-  // Per-recipient redaction: each WS subscriber gets a view built for
-  // their own profile (opponent hands hidden); the REST responder gets
-  // their own.
-  const opMeta = { seq: nextSeq, kind, profileId: req.profile.id, log: result.log || null };
-  publishGame(id, (viewerId) => ({
+  const view = gameView(id);
+  publishGame(id, {
     type: 'game_update',
     gameId: id,
     seq: nextSeq,
-    op: opMeta,
-    game: gameView(id, viewerId),
-  }));
-  res.json({ ok: true, seq: nextSeq, log: result.log || null, game: gameView(id, req.profile.id) });
+    op: { seq: nextSeq, kind, profileId: req.profile.id, log: result.log || null },
+    game: view,
+  });
+  res.json({ ok: true, seq: nextSeq, log: result.log || null, game: view });
 });
 
 // Operation log, optionally only the ops after a given seq (catch-up
@@ -1713,15 +1688,22 @@ function esc(s) {
   console.log(`cleaned up ${before} stranded pending invite(s)`);
 })();
 
-// One-time migration for games created before two model changes:
-//  (a) "rocket opens at LEO": ships used to start at startSiteId()
-//      (Itokawa), so an empty rocket that never launched is stranded
-//      at a real site. An empty rocket can't burn, so recall it to LEO.
-//  (b) "water comes from aqua": ships used to spawn with 20 magic
-//      water. Zero the tank for any rocket AT LEO (siteId null) -
-//      that's safe because they can refuel from aqua there. Rockets
-//      away from LEO keep their water so they aren't stranded.
-// Normalises the live game_states blob; op-log history is left as-is.
+// Idempotent normalisation: recall stranded EMPTY rockets to LEO.
+// Games created before "rocket opens at LEO" started every ship at
+// startSiteId() (Itokawa), so an empty rocket that never launched is
+// stranded at a real site. An empty rocket can't burn, so it can only
+// ever be at LEO - this matches the invariant the engine now enforces
+// (applyMove rejects empty_rocket, recallIfEmpty keeps it at LEO), so
+// re-running on already-correct state is a no-op.
+//
+// NOTE: we deliberately do NOT touch rocket.tank here. New rockets
+// spawn with 0 water (STARTING_WATER), which is the real fix for
+// "magic 20 water". A boot-time tank reset would also wipe water a
+// player legitimately converted from aqua at LEO every time the
+// server restarts (user 2026-05-29: "I dont want this to happen every
+// time going forward, just prevent water spawning with brand new
+// rockets"). Pre-fix games keep their old water; start a fresh game
+// for a clean tank.
 (() => {
   const rows = db.prepare('SELECT game_id, state FROM game_states').all();
   let fixed = 0;
@@ -1732,17 +1714,10 @@ function esc(s) {
     let changed = false;
     for (const p of st.players) {
       const r = p && p.rocket;
-      if (!r) continue;
-      // (a) recall stranded empty rockets
-      if (Array.isArray(r.stack) && r.stack.length === 0 && r.siteId != null) {
+      if (r && Array.isArray(r.stack) && r.stack.length === 0 && r.siteId != null) {
         r.siteId = null;
         r.activeThrusterId = null;
         r.activeProspectorId = null;
-        changed = true;
-      }
-      // (b) drop magic starting water for rockets at LEO
-      if (r.siteId == null && (r.tank | 0) > 0) {
-        r.tank = 0;
         changed = true;
       }
     }

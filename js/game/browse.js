@@ -1221,50 +1221,52 @@ function buildMpPlayerDetail(host, p, isMe) {
   const grid = document.createElement('div');
   grid.className = 'mp-stack-grid';
 
-  grid.appendChild(mpStackChip('🛰 LEO Stack', p.leo || [], { who: p.name }));
+  // LEO Stack lives at LEO; Rocket sits at its siteId (null = LEO by
+  // default - "rocket is at LEO unless assembled on an outpost or not
+  // yet disassembled at a site"). Each chip carries a 📍 find button
+  // that flies the map to that stack's location.
+  grid.appendChild(mpStackChip('🛰 LEO Stack', p.leo || [], {
+    who: p.name, hasLocation: true, findServerSite: null,
+  }));
   grid.appendChild(mpStackChip(
     `🚀 Rocket${rkt.tank ? ` (💧${rkt.tank})` : ''}`,
-    rkt.stack || [], { who: p.name },
+    rkt.stack || [], { who: p.name, hasLocation: true, findServerSite: rkt.siteId || null },
   ));
   for (const letter of ['A', 'B', 'C', 'D']) {
     const op = outposts[letter];
     if (op) {
       grid.appendChild(mpStackChip(
         `🏛 Outpost ${letter} · ${onlineSiteLabel(op.siteId)}${op.tank ? ` (💧${op.tank})` : ''}`,
-        op.cards || [], { who: p.name },
+        op.cards || [], { who: p.name, hasLocation: true, findServerSite: op.siteId },
       ));
     } else {
-      const dead = document.createElement('div');
-      dead.className = 'mp-stack-chip is-empty';
-      dead.textContent = `🏛 Outpost ${letter}: none`;
-      grid.appendChild(dead);
+      // Not built -> no location, so the find button is disabled.
+      grid.appendChild(mpStackChip(`🏛 Outpost ${letter}: none`, [], {
+        who: p.name, hasLocation: false,
+      }));
     }
   }
   host.appendChild(grid);
 
-  // Hand: own hand is inspectable; opponent hands are HIDDEN (server
-  // sends handCount, nulls the contents). handCount falls back to the
-  // hand array length for older snapshots.
-  const count = (p.handCount != null)
-    ? p.handCount
-    : (Array.isArray(p.hand) ? p.hand.length : 0);
-  if (isMe && Array.isArray(p.hand)) {
-    const chip = mpStackChip(`✋ Hand (${count})`, p.hand, { who: p.name });
-    chip.classList.add('mp-stack-hand');
-    host.appendChild(chip);
-  } else {
-    const h = document.createElement('div');
-    h.className = 'mp-stack-chip is-hidden';
-    h.textContent = `✋ Hand: ${count} card${count === 1 ? '' : 's'} (hidden)`;
-    host.appendChild(h);
-  }
+  // Hand is OPEN information (user 2026-05-29: "hand cards SHOULD NOT
+  // BE HIDDEN") - inspectable for every player, same as the other
+  // stacks. Not on the map, so no find button.
+  const count = Array.isArray(p.hand) ? p.hand.length : 0;
+  const cell = mpStackChip(`✋ Hand (${count})`, p.hand || [], { who: p.name, hasLocation: false });
+  cell.classList.add('mp-stack-hand');
+  host.appendChild(cell);
 }
 
-// One clickable stack chip. Shows the title + a card count; tapping
-// opens a read-only modal of the cards. Empty stacks render but are
-// non-interactive.
-function mpStackChip(title, slots, { who } = {}) {
+// One stack cell: an inspect chip (label + count, opens a read-only
+// card modal) plus an optional 📍 find button that flies the map to
+// the stack's location. findServerSite is the server siteId (null =
+// LEO); hasLocation=false (e.g. an unbuilt outpost, or the hand)
+// renders the find button disabled. Returns the wrapper cell.
+function mpStackChip(title, slots, { who, hasLocation, findServerSite } = {}) {
   const arr = Array.isArray(slots) ? slots : [];
+  const cell = document.createElement('div');
+  cell.className = 'mp-stack-cell';
+
   const chip = document.createElement('button');
   chip.type = 'button';
   chip.className = 'mp-stack-chip';
@@ -1281,7 +1283,24 @@ function mpStackChip(title, slots, { who } = {}) {
   } else {
     chip.addEventListener('click', () => openMpStackModal(`${who ? '@' + who + ' - ' : ''}${title}`, arr));
   }
-  return chip;
+  cell.appendChild(chip);
+
+  // 📍 find button. Always rendered (so the six cells line up), but
+  // disabled when the stack has no map location.
+  const find = document.createElement('button');
+  find.type = 'button';
+  find.className = 'mp-stack-find';
+  find.textContent = '📍';
+  find.title = hasLocation ? 'Fly the map to this stack' : 'No location yet';
+  find.disabled = !hasLocation;
+  if (hasLocation) {
+    find.addEventListener('click', () => {
+      const pos = mpRocketCoords(findServerSite); // null -> LEO anchor
+      if (pos && _renderer) _renderer.flyTo(pos, locateZoom(4));
+    });
+  }
+  cell.appendChild(find);
+  return cell;
 }
 
 // Read-only modal listing the cards in a stack (opponent inspection).
@@ -2390,8 +2409,23 @@ function openUnifiedStackInspector(stackId) {
         <div class="stack-inspector-transfer">
           <h4>🔄 Transfer (free action)</h4>
           <p class="muted">Select cards above, then send them to a colocated stack. Wet-mass clamps apply on the destination tank.</p>
+          <div class="stack-inspector-selrow">
+            <button type="button" class="modal-btn stack-selall">Select all</button>
+            <button type="button" class="modal-btn stack-deselall">Deselect all</button>
+          </div>
           <div class="stack-inspector-xfer-row">${destButtonsHtml}</div>
         </div>`;
+      // Select-all / deselect-all over the source stack's cards.
+      const selAll = transferHost.querySelector('.stack-selall');
+      const deselAll = transferHost.querySelector('.stack-deselall');
+      if (selAll) selAll.addEventListener('click', () => {
+        for (const c of cards) selected.add(c.id);
+        render();
+      });
+      if (deselAll) deselAll.addEventListener('click', () => {
+        selected.clear();
+        render();
+      });
       transferHost.querySelectorAll('.stack-inspector-xfer-btn').forEach((btn) => {
         btn.addEventListener('click', () => {
           const destId = btn.getAttribute('data-dest');
@@ -4819,8 +4853,22 @@ function openRocketStackModal() {
           <div class="stack-inspector-transfer">
             <h4>🔄 Transfer (free action)</h4>
             <p class="muted">Mark cards above with Select, then ship them to a colocated stack. Wet-mass clamps apply on the destination tank.</p>
+            <div class="stack-inspector-selrow">
+              <button type="button" class="modal-btn stack-selall">Select all</button>
+              <button type="button" class="modal-btn stack-deselall">Deselect all</button>
+            </div>
             <div class="stack-inspector-xfer-row">${dh}</div>
           </div>`;
+        const selAll = xferHost.querySelector('.stack-selall');
+        const deselAll = xferHost.querySelector('.stack-deselall');
+        if (selAll) selAll.addEventListener('click', () => {
+          for (const s of stack) selected.add(s.id);
+          repaint();
+        });
+        if (deselAll) deselAll.addEventListener('click', () => {
+          selected.clear();
+          repaint();
+        });
         xferHost.querySelectorAll('.stack-inspector-xfer-btn').forEach((btn) => {
           btn.addEventListener('click', () => {
             const destId = btn.getAttribute('data-dest');

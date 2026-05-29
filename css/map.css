@@ -5166,6 +5166,13 @@ body:has(#view-browse:not(.hidden)) #main {
   gap: 6px;
   flex-wrap: wrap;
 }
+/* Select-all / deselect-all row above the transfer destinations. */
+.stack-inspector-selrow {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.stack-inspector-selrow .modal-btn { font-size: 11px; padding: 4px 10px; }
 .stack-inspector-xfer-btn {
   background: var(--bg-2);
   color: var(--ink);
@@ -5766,6 +5773,25 @@ body:has(#view-browse:not(.hidden)) #main {
   gap: 4px;
   margin: 4px 0;
 }
+/* A cell pairs the inspect chip with its 📍 find button. */
+.mp-stack-cell { display: flex; gap: 3px; align-items: stretch; }
+.mp-stack-cell .mp-stack-chip { flex: 1; min-width: 0; }
+.mp-stack-find {
+  flex: 0 0 auto;
+  width: 26px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: rgba(15, 23, 42, 0.45);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.mp-stack-find:hover:not(:disabled) {
+  background: rgba(125, 211, 252, 0.12);
+  border-color: var(--accent-2);
+}
+.mp-stack-find:disabled { opacity: 0.3; cursor: default; }
+.mp-stack-hand { margin-top: 4px; }
 .mp-stack-chip {
   display: flex;
   align-items: center;
@@ -5804,7 +5830,6 @@ body:has(#view-browse:not(.hidden)) #main {
   color: var(--ink-mute);
   cursor: default;
 }
-.mp-stack-hand { margin-top: 4px; }
 
 /* Read-only stack inspect modal. */
 .mp-stack-modal {
