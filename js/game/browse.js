@@ -8115,6 +8115,10 @@ function tweenMpRocketAlong(profileId, pts, finalOpponents, totalMs = 700) {
 }
 
 // Diff rocket positions for every player; slide each ship that moved.
+// When the local player's move rolled hazard dice (rocket.lastMove), play
+// those FIRST (the server already resolved them) so the player sees the
+// rolls before the rocket settles - or, if a roll destroyed the ship,
+// instead of a (non-existent) slide.
 function animateSnapshotMoves(prev, snapshot) {
   // A local move/undo tween already in flight - let it land; the next
   // real seq advance will re-diff. (Opponent tweens don't set this.)
@@ -8122,20 +8126,108 @@ function animateSnapshotMoves(prev, snapshot) {
   const prevById = new Map((prev.players || []).map((p) => [p.profileId, p]));
   const myId = _onlineMe && _onlineMe.id;
   const finalMp = computeMpRockets(snapshot);
-  for (const p of (snapshot.players || [])) {
-    const before = prevById.get(p.profileId);
-    if (!before) continue;
-    const fromSite = (before.rocket && before.rocket.siteId) || null;
-    const toSite = (p.rocket && p.rocket.siteId) || null;
-    if (fromSite === toSite) continue;          // this ship didn't move
-    const segs = animPathSegments(fromSite, toSite);
-    if (!segs) continue;
-    if (p.profileId === myId) {
-      animateLocalMoveAlong(segs);
-    } else {
-      tweenMpRocketAlong(p.profileId, segmentsToWorldPts(segs), finalMp.opponents);
+
+  const slides = () => {
+    for (const p of (snapshot.players || [])) {
+      const before = prevById.get(p.profileId);
+      if (!before) continue;
+      const fromSite = (before.rocket && before.rocket.siteId) || null;
+      const toSite = (p.rocket && p.rocket.siteId) || null;
+      if (fromSite === toSite) continue;          // this ship didn't move
+      const segs = animPathSegments(fromSite, toSite);
+      if (!segs) continue;
+      if (p.profileId === myId) {
+        animateLocalMoveAlong(segs);
+      } else {
+        tweenMpRocketAlong(p.profileId, segmentsToWorldPts(segs), finalMp.opponents);
+      }
     }
+  };
+
+  // Local player's own hazard dice (if this move rolled any). Keyed off
+  // the per-move nonce so a re-applied snapshot doesn't replay them.
+  const meBefore = prevById.get(myId);
+  const meNow = (snapshot.players || []).find((p) => p.profileId === myId);
+  const lm = meNow && meNow.rocket && meNow.rocket.lastMove;
+  const prevNonce = (meBefore && meBefore.rocket && meBefore.rocket.lastMove
+    && meBefore.rocket.lastMove.nonce) || 0;
+  if (lm && lm.nonce && lm.nonce !== prevNonce && Array.isArray(lm.rolls) && lm.rolls.length) {
+    playHazardRolls(lm).then(slides);
+  } else {
+    slides();
   }
+}
+
+// Read-only playback of the server's hazard dice for the local player's
+// move. The server rolled every die (seeded, authoritative) and recorded
+// them in rocket.lastMove; this shows them with the same glyph language as
+// the sandbox and the verdict (survived / decommissioned / DESTROYED).
+// Resolves when dismissed so the rocket slide can follow.
+function playHazardRolls(lm) {
+  return new Promise((resolve) => {
+    const rolls = (lm.rolls || []).filter((r) => typeof r.d6 === 'number');
+    if (!rolls.length) { resolve(); return; }
+    document.querySelector('.rad-roll-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay rad-roll-overlay hazard-rolls-overlay';
+    const glyphFor = (k) => (k === 'rad' ? '☢' : k === 'aero' ? '🪂' : '☠');
+    const nameFor = (slug) => {
+      const pid = toPlannerId(_onlineMaps, slug);
+      const s = pid && (_activeData.byId?.[pid] || _activeData.sites.find((x) => x.id === pid));
+      return (s && s.name) || slug;
+    };
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel rad-roll-panel';
+    const title = lm.destroyed ? '💥 Hazard roll - critical!' : '🎲 Hazard rolls';
+    panel.innerHTML = `
+      <h2 class="rad-roll-title">${title}</h2>
+      <p class="muted rad-roll-sub">The server rolled one die per hazard space.</p>
+      <ul class="rad-roll-dice"></ul>
+      <p class="rad-roll-result muted">Rolling…</p>
+      <div class="rad-roll-actions">
+        <button type="button" class="popup-btn primary haz-rolls-ok" disabled>Continue</button>
+      </div>
+    `;
+    const list = panel.querySelector('.rad-roll-dice');
+    const resultLine = panel.querySelector('.rad-roll-result');
+    const okBtn = panel.querySelector('.haz-rolls-ok');
+    const dice = [];
+    for (const r of rolls) {
+      const li = document.createElement('li');
+      li.className = 'rad-roll-die-row';
+      const label = document.createElement('div');
+      label.className = 'rad-roll-site';
+      label.innerHTML = `<span class="haz-glyph">${glyphFor(r.kind)}</span> ${esc(nameFor(r.slug))}`;
+      const host = document.createElement('div');
+      host.className = 'rad-roll-die-host';
+      const die = buildDie(1);
+      host.appendChild(die);
+      li.append(label, host);
+      list.appendChild(li);
+      dice.push({ die, r });
+    }
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+    const close = () => { overlay.remove(); resolve(); };
+    Promise.all(dice.map(({ die, r }) => rollDie(die, r.d6).then(() => {
+      const bad = r.crit || (r.rad != null && r.rad > 0);
+      die.classList.add(bad ? 'die-fail' : 'die-success');
+    }))).then(() => {
+      resultLine.classList.remove('muted');
+      if (lm.destroyed) {
+        resultLine.innerHTML = '<strong class="bad">Critical (rolled a 1) - rocket destroyed.</strong> Cards returned to your hand / LEO.';
+      } else if (lm.decommissioned && lm.decommissioned.length) {
+        const n = lm.decommissioned.length;
+        resultLine.innerHTML = `Radiation decommissioned <strong>${n}</strong> card${n === 1 ? '' : 's'} to your hand / LEO.`;
+      } else {
+        resultLine.innerHTML = '<strong class="ok">Survived</strong> - the rocket flew through unscathed.';
+      }
+      okBtn.disabled = false;
+      okBtn.addEventListener('click', close);
+    });
+    // Auto-dismiss safety net.
+    setTimeout(() => { if (document.body.contains(overlay)) close(); }, 8000);
+  });
 }
 
 // Show the prospect die for a NEWLY landed disc, so every player (the
@@ -8477,15 +8569,52 @@ async function moveRocket() {
     setStatus('No planned route - tap a site and pick "Plan rocket route" first.');
     return false;
   }
-  // Online: the server owns movement, fuel, and hazard resolution. Send
-  // the journey's destination as a single MOVE op and let the broadcast
-  // snapshot drive the marker; skip the entire local hazard/dice/anim
-  // path below. The server validates routing + burns + water itself.
+  // Online: the server owns movement, fuel, and the hazard dice (seeded,
+  // authoritative). The CLIENT still runs the same pre-flight the sandbox
+  // does - it lists the hazards the route crosses, warns that each rad /
+  // hazard space rolls individually, and offers FINAO (pay aqua) to skip
+  // the generic ones - then sends the destination + the pay choice. The
+  // server resolves every die and publishes the results in rocket.lastMove,
+  // which the snapshot animator plays back. Skip the local dice path below.
   if (_online) {
     const destPlannerId = _plannedRoute[_plannedRoute.length - 1].to;
     const toSiteId = toServerId(_onlineMaps, destPlannerId);
     if (!toSiteId) { _onlineToast('That destination is not on the server map.', 'error'); return false; }
-    const ok = await submitOnlineOp({ kind: 'MOVE', toSiteId });
+    // Hazards along the whole planned route (the server resolves the
+    // same path to the destination in one move).
+    const hz = routeHazards(_plannedRoute);
+    const genericHz = hz.filter((h) => h.site.type !== 'radhaz');
+    const radHz = hz.filter((h) => h.site.type === 'radhaz');
+    let hazardPay = false;
+    // Generic (skull / aerobrake): pay aqua, roll, or cancel. Each is a
+    // separate d6 - the modal already says "cannot be undone".
+    if (genericHz.length) {
+      const choice = await hazardConfirmModal(genericHz);
+      if (choice === 'cancel' || choice == null) {
+        setStatus('Move cancelled - no aqua spent, no rolls made.');
+        return false;
+      }
+      hazardPay = choice === 'pay';
+      if (hazardPay) {
+        const cost = genericHz.length * HAZARD_COST_PER;
+        if (getAqua() < cost) {
+          setStatus(`Need ${cost} aqua for FINAO - balance only ${getAqua()}.`);
+          return false;
+        }
+      }
+    }
+    // Rad zones roll regardless (aqua can't bypass). Confirm so the
+    // player sees the thrust/season math + that each zone rolls.
+    if (radHz.length) {
+      const thrStats = getActiveThrusterStats();
+      const radThrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 0;
+      const choice = await radConfirmModal(radHz, radThrust, 0, radBypassThreshold());
+      if (choice === 'cancel' || choice == null) {
+        setStatus('Move cancelled at the rad check.');
+        return false;
+      }
+    }
+    const ok = await submitOnlineOp({ kind: 'MOVE', toSiteId, hazardPay });
     if (ok) clearRoute();
     return ok;
   }

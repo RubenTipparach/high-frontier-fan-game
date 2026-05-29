@@ -82,6 +82,7 @@ function loadPlanner() {
       siteWater: p.siteWater != null ? Number(p.siteWater) : null,
       siteSize: p.siteSize || null,
       site,           // curated data/sites.js metadata, or null
+      hazard: !!p.hazard,   // raw planner skull flag
     });
   }
 
@@ -124,6 +125,21 @@ export function nodeBySlug(slug) {
 export function siteBySlug(slug) {
   const n = NODES_BY_SLUG.get(String(slug));
   return (n && n.site) || null;
+}
+
+// Hazard class of a planner node (mirror of browse.js#classifyHazard so
+// the server resolves the SAME hazards the sandbox shows):
+//   'rad'   - radiation zone (rolls, NOT aqua-payable)
+//   'aero'  - aerobrake / Venus corridor (skull-class, aqua-payable)
+//   'skull' - hazard-flagged burn space (aqua-payable)
+//   null    - safe (lagrange flybys are never hazards even when flagged)
+export function hazardKind(slug) {
+  const n = NODES_BY_SLUG.get(String(slug));
+  if (!n) return null;
+  if (n.type === 'radhaz') return 'rad';
+  if (n.type === 'venus') return 'aero';
+  if (n.hazard && n.type !== 'lagrange') return 'skull';
+  return null;
 }
 
 // Find the LEO lagrange node once - that's the canonical "at LEO"

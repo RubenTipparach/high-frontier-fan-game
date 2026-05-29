@@ -34,7 +34,7 @@ import { CREW_BY_ID } from '../../data/crew.js';
 // id space across client + server. (data/graph.js is no longer used.)
 import {
   siteExists as plannerSiteExists, findPath as plannerFindPath,
-  leoSlug, siteBySlug as siteById,
+  leoSlug, siteBySlug as siteById, hazardKind,
 } from './planner-graph.js';
 import { makeRng } from './rng.js';
 import {
@@ -187,6 +187,57 @@ function advanceClock(state) {
   }
 }
 
+// ----- hazard resolution (mirror of the sandbox move queue) -----
+
+const HAZARD_COST_PER = 4;       // aqua to bypass one generic hazard
+const RAD_BYPASS_THRUST = 6;     // thrust strictly above this skips rad rolls
+
+// Active thruster's thrust value (the number in the pink circle). Drives
+// the rad bypass + factory-assist gate. 0 when no thruster is active.
+function activeThrust(rocket) {
+  const tid = rocket.activeThrusterId;
+  if (!tid) return 0;
+  const slot = rocket.stack.find((s) => s.id === tid);
+  if (!slot) return 0;
+  const f = slotFace(slot);
+  return Number.isFinite(f && f.thrust) ? f.thrust : 0;
+}
+// Rad-hardness of a stack slot's active face (0 when unrated).
+function slotRadHardness(slot) {
+  const p = PATENTS_BY_ID[slot.id];
+  if (p) {
+    const f = (p.faces && p.faces.primary) || p;
+    return (f.radHardness != null ? f.radHardness : p.radHardness) | 0;
+  }
+  const crew = CREW_BY_ID[slot.id];
+  if (crew) {
+    const key = slot.face === 'secondary' ? 'secondary' : 'primary';
+    const cf = (crew.faces && (crew.faces[key] || crew.faces.primary)) || {};
+    return (cf.radHardness | 0);
+  }
+  return 0;
+}
+function isCrewSlot(slot) {
+  return slot.kind === 'crew' || !!CREW_BY_ID[slot.id];
+}
+// Destroy the rocket: patents fall back to the hand, crew re-spawns in
+// the LEO Stack (variant rule), tank is lost, ship recalls to LEO.
+// Mirror of browse.js#explodeRocket's state half.
+function destroyRocket(player) {
+  for (const slot of player.rocket.stack) {
+    if (isCrewSlot(slot)) {
+      (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+    } else {
+      player.hand.push(slot.id);
+    }
+  }
+  player.rocket.stack = [];
+  player.rocket.activeThrusterId = null;
+  player.rocket.activeProspectorId = null;
+  player.rocket.siteId = null;
+  player.rocket.tank = 0;
+}
+
 // ----- functional ops (undoable) -----
 
 function applyMove(state, op, player) {
@@ -210,25 +261,132 @@ function applyMove(state, op, player) {
   const cost = perBurnCost(player.rocket) * totalBurns;
   if (cost > player.rocket.tank) return fail('insufficient_water');
 
+  // Hazards along the path. We check every node the rocket ARRIVES at
+  // (path.path[0] is the origin, already paid for), classified the same
+  // way the sandbox does. Generic (skull / aerobrake) hazards are
+  // aqua-payable (FINAO) or rolled; rad zones always roll (unpayable).
+  const arrivals = path.path.slice(1);
+  const generic = [];   // skull / aero slugs (in travel order)
+  const rad = [];       // rad slugs
+  for (const slug of arrivals) {
+    const k = hazardKind(slug);
+    if (k === 'rad') rad.push(slug);
+    else if (k === 'skull' || k === 'aero') generic.push(slug);
+  }
+  const wantPay = !!op.hazardPay;
+  // FINAO: pay aqua up front to skip the generic rolls. Validated before
+  // anything mutates so a short balance rejects the whole move cleanly.
+  const finaoCost = wantPay ? generic.length * HAZARD_COST_PER : 0;
+  if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
+
+  // Commit the burn + the FINAO payment, then resolve dice in travel
+  // order. rolls[] is recorded on the rocket for the client to play
+  // back (server is authoritative for every die).
   player.rocket.tank -= cost;
-  player.rocket.siteId = toSlug;
+  if (finaoCost > 0) player.aqua -= finaoCost;
+
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const rolls = [];
+  let destroyed = false;
+  let haltSlug = toSlug;          // where the rocket actually ends up
+  const thrust = activeThrust(player.rocket);
+
+  // Generic hazards: a rolled 1 is a critical that destroys the ship at
+  // that node (unless paid past via FINAO).
+  if (!wantPay) {
+    for (const slug of generic) {
+      const d6 = gen.d6();
+      const crit = d6 === 1;
+      rolls.push({ slug, kind: hazardKind(slug), d6, crit });
+      if (crit) { destroyed = true; haltSlug = slug; break; }
+    }
+  }
+  // Rad zones (only if the ship survived the generics). Thrust strictly
+  // above the bypass bar outruns the radiation with no roll; otherwise
+  // each zone rolls and the worst (d6 - thrust) decommissions any stack
+  // card whose rad-hardness is below it.
+  let decommissioned = [];
+  if (!destroyed && rad.length) {
+    if (thrust > RAD_BYPASS_THRUST) {
+      for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, thrust });
+    } else {
+      let worst = 0;
+      for (const slug of rad) {
+        const d6 = gen.d6();
+        const radVal = Math.max(0, d6 - thrust);
+        if (radVal > worst) worst = radVal;
+        rolls.push({ slug, kind: 'rad', d6, rad: radVal, thrust });
+      }
+      if (worst > 0) {
+        const survivors = [];
+        for (const slot of player.rocket.stack) {
+          if (slotRadHardness(slot) < worst) {
+            decommissioned.push(slot.id);
+            if (isCrewSlot(slot)) {
+              (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+            } else {
+              player.hand.push(slot.id);
+            }
+          } else {
+            survivors.push(slot);
+          }
+        }
+        player.rocket.stack = survivors;
+        if (player.rocket.activeThrusterId
+            && !survivors.some((s) => s.id === player.rocket.activeThrusterId)) {
+          player.rocket.activeThrusterId = null;
+        }
+        if (player.rocket.activeProspectorId
+            && !survivors.some((s) => s.id === player.rocket.activeProspectorId)) {
+          player.rocket.activeProspectorId = null;
+        }
+      }
+    }
+  }
+  state.rng.cursor = gen.cursor;
   player.movesRemaining -= 1;
-  // Pop the executed segment off the planned route (if any). Server
-  // keeps the route truncated to "what's still ahead" so a refresh /
-  // snapshot reflects the journey in progress.
+
+  if (destroyed) {
+    // The ship is lost at haltSlug; cards scatter, rocket recalls to LEO.
+    const where = siteById(haltSlug);
+    const whereName = (where && where.name) || haltSlug;
+    player.rocket.route = [];
+    player.rocket.lastMove = { rolls, destroyed: true, at: haltSlug, nonce: nextMoveNonce(player) };
+    destroyRocket(player);
+    return {
+      ok: true, state,
+      log: `${player.name} burned ${cost} water and was DESTROYED at ${whereName} (rolled a 1).`,
+    };
+  }
+
+  player.rocket.siteId = toSlug;
+  // Pop the executed segments off the planned route (if any).
   if (Array.isArray(player.rocket.route) && player.rocket.route.length) {
     const idx = player.rocket.route.findIndex((s) => s.to === toSlug);
     if (idx >= 0) player.rocket.route = player.rocket.route.slice(idx + 1);
   }
-  // Glory awards still gate on data/sites.js (the curated metadata
-  // table). Waypoints (no SITES entry) yield no chit, which is correct.
   const destSite = siteById(toSlug);
   const chit = destSite ? maybeAwardGlory(player, destSite, state.turn) : null;
+  player.rocket.lastMove = {
+    rolls, destroyed: false, decommissioned,
+    at: toSlug, nonce: nextMoveNonce(player),
+  };
 
   const destName = (destSite && destSite.name) || toSlug;
   let log = `${player.name} burned ${cost} water to ${destName}.`;
+  if (finaoCost > 0) log += ` Paid ${finaoCost} aqua (FINAO) past ${generic.length} hazard${generic.length === 1 ? '' : 's'}.`;
+  else if (generic.length) log += ` Rolled through ${generic.length} hazard${generic.length === 1 ? '' : 's'}.`;
+  if (decommissioned.length) log += ` Radiation decommissioned ${decommissioned.length} card${decommissioned.length === 1 ? '' : 's'}.`;
   if (chit) log += ` First into the ${chit.zone} zone (+glory chit).`;
   return { ok: true, state, log };
+}
+
+// Monotonic per-move id so the client can tell a fresh move's dice from
+// a re-applied snapshot (it plays the hazard dice only when this bumps).
+function nextMoveNonce(player) {
+  const n = (player.rocket.moveNonce | 0) + 1;
+  player.rocket.moveNonce = n;
+  return n;
 }
 
 // Play a card from the hand onto the rocket stack (rulebook Boost,
@@ -564,7 +722,7 @@ const FUNCTIONAL = {
 
 function pickPayload(op) {
   switch (op.kind) {
-    case 'MOVE': return { toSiteId: op.toSiteId };
+    case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay };
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face };
     case 'BOOST': return { cardIds: op.cardIds };
     case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, to: op.to };
