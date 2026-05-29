@@ -1483,6 +1483,13 @@ function humanizeOnlineOpError(code) {
     not_in_hand: 'That card is not in your hand.',
     not_in_stack: 'That card is not on your rocket.',
     cannot_build: 'That card cannot be built right now.',
+    cannot_liftoff: 'Not enough thrust to lift off (and no factory here to assist).',
+    cannot_land: 'Not enough thrust to land there (and no factory to assist).',
+    raygun_out_of_range: 'The raygun can only scan your site or one adjacent to it.',
+    no_disc: 'There is no prospect disc to re-roll.',
+    not_buggy: 'Only a buggy prospector can re-roll.',
+    already_rerolled: 'The buggy has already re-rolled this claim.',
+    reroll_window_closed: 'The buggy re-roll is only available the turn you prospect.',
   })[code] || (code ? String(code) : 'Something went wrong.');
 }
 
@@ -8237,23 +8244,35 @@ function playHazardRolls(lm) {
 function animateSnapshotProspects(prev, snapshot) {
   const prevDiscs = prev.discs || {};
   const newDiscs = snapshot.discs || {};
-  const added = Object.keys(newDiscs).filter((k) => !(k in prevDiscs));
-  // A single PROSPECT op adds exactly one disc; a bulk catch-up (resume
-  // / late join) would queue a pile of modals, so only play the
-  // incremental case.
-  if (added.length !== 1) return;
-  const disc = newDiscs[added[0]];
+  // A disc to play: freshly added, OR an existing one whose roll changed
+  // (a buggy re-roll). Either way it's a single op, so only the
+  // incremental case (skip bulk resume / late-join catch-up).
+  const changed = Object.keys(newDiscs).filter((k) => {
+    const a = prevDiscs[k];
+    const b = newDiscs[k];
+    if (!a) return true;                       // newly added
+    return b && a.roll !== b.roll;             // re-rolled
+  });
+  if (changed.length !== 1) return;
+  const serverSiteId = changed[0];
+  const disc = newDiscs[serverSiteId];
   if (!disc || typeof disc.roll !== 'number') return;
-  const pid = toPlannerId(_onlineMaps, added[0]);
+  const pid = toPlannerId(_onlineMaps, serverSiteId);
   const site = pid && (_activeData.byId?.[pid] || _activeData.sites.find((x) => x.id === pid));
   if (!site) return;
-  playRemoteProspectRoll(site, disc);
+  // Offer the buggy re-roll only to the disc's owner while it's still
+  // available (server tracks canReroll, this turn, once).
+  const myId = _onlineMe && _onlineMe.id;
+  const canReroll = !!disc.canReroll && disc.kind === 'buggy'
+    && disc.ownerId === myId && isOnlineMyTurn();
+  playRemoteProspectRoll(site, disc, { serverSiteId, canReroll });
 }
 
-// Read-only prospect-roll playback. Mirrors openProspectRollModal's die
-// + verdict but with no actions - the disc is already authoritative in
-// the snapshot, so this auto-dismisses once the roll settles.
-function playRemoteProspectRoll(site, disc) {
+// Prospect-roll playback. The disc is already authoritative in the
+// snapshot, so this is read-only - EXCEPT a buggy's owner gets a one-time
+// re-roll button (submits PROSPECT_REROLL; the resulting snapshot replays
+// the new die). Without a re-roll it auto-dismisses once the die settles.
+function playRemoteProspectRoll(site, disc, opts = {}) {
   document.querySelector('.prospect-roll-overlay')?.remove();
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay prospect-roll-overlay';
@@ -8271,9 +8290,15 @@ function playRemoteProspectRoll(site, disc) {
       <div class="prospect-target"><strong>${disc.threshold}</strong><em>site size</em></div>
     </div>
     <p class="prospect-roll-result muted">Rolling…</p>
+    <div class="prospect-roll-actions">
+      ${opts.canReroll ? '<button type="button" class="popup-btn prospect-reroll-btn" disabled>🎲 Re-roll (buggy)</button>' : ''}
+      ${opts.canReroll ? '<button type="button" class="popup-btn primary prospect-keep-btn" disabled>Keep</button>' : ''}
+    </div>
   `;
   const dieHost = panel.querySelector('.prospect-die-host');
   const resultLine = panel.querySelector('.prospect-roll-result');
+  const rerollBtn = panel.querySelector('.prospect-reroll-btn');
+  const keepBtn = panel.querySelector('.prospect-keep-btn');
   const die = buildDie(1);
   dieHost.appendChild(die);
   overlay.appendChild(panel);
@@ -8285,11 +8310,23 @@ function playRemoteProspectRoll(site, disc) {
     resultLine.innerHTML = ok
       ? `Rolled <strong>${disc.roll}</strong> ≤ ${disc.threshold} - <strong class="ok">claim placed</strong>.`
       : `Rolled <strong>${disc.roll}</strong> > ${disc.threshold} - <strong class="bad">site exhausted</strong>.`;
-    // Linger on the verdict, then clear - the disc is already on the map.
-    setTimeout(close, 1500);
+    if (opts.canReroll) {
+      if (rerollBtn) {
+        rerollBtn.disabled = false;
+        rerollBtn.addEventListener('click', () => {
+          close();
+          // The new roll's snapshot will replay through this same path.
+          submitOnlineOp({ kind: 'PROSPECT_REROLL', siteId: opts.serverSiteId });
+        });
+      }
+      if (keepBtn) { keepBtn.disabled = false; keepBtn.addEventListener('click', close); }
+    } else {
+      // Linger on the verdict, then clear - the disc is already on the map.
+      setTimeout(close, 1500);
+    }
   });
-  // Safety net: never leave the overlay stuck if the die promise stalls.
-  setTimeout(() => { if (document.body.contains(overlay)) close(); }, 4000);
+  // Safety net: never leave a non-interactive overlay stuck.
+  if (!opts.canReroll) setTimeout(() => { if (document.body.contains(overlay)) close(); }, 4000);
 }
 
 // Cards the local player just gained in a stack (LEO / rocket), so the
@@ -8583,11 +8620,28 @@ async function moveRocket() {
     // Hazards along the whole planned route (the server resolves the
     // same path to the destination in one move).
     const hz = routeHazards(_plannedRoute);
-    const genericHz = hz.filter((h) => h.site.type !== 'radhaz');
     const radHz = hz.filter((h) => h.site.type === 'radhaz');
+    // Factory-assist maneuvers: an under-thrust liftoff (current site) or
+    // landing (destination) is only legal with a factory there and is a
+    // hazard roll unless a colony waives it. These join the generic
+    // (skull / aerobrake) hazards for the pay-or-roll decision; the server
+    // hard-blocks (and we toast) when there's no factory to assist.
+    const thrStatsA = getActiveThrusterStats();
+    const netThrust = thrStatsA && Number.isFinite(thrStatsA.thrust) ? thrStatsA.thrust : 0;
+    const curSite = getRocketSite();
+    const destSite = _activeData.byId?.[destPlannerId]
+      || _activeData.sites.find((s) => s.id === destPlannerId);
+    const assistHz = [];
+    const liftG = curSite ? maneuverGate(curSite, netThrust) : { ok: true };
+    if (curSite && !liftG.ok) { _onlineToast(`Can't lift off from ${curSite.name} - not enough thrust and no factory to assist.`, 'error'); return false; }
+    if (liftG.assist && liftG.needsRoll && curSite) assistHz.push({ site: curSite, glyph: '🏭', label: 'liftoff assist' });
+    const landG = destSite ? maneuverGate(destSite, netThrust) : { ok: true };
+    if (destSite && !landG.ok) { _onlineToast(`Can't land on ${destSite.name} - not enough thrust and no factory to assist.`, 'error'); return false; }
+    if (landG.assist && landG.needsRoll && destSite) assistHz.push({ site: destSite, glyph: '🏭', label: 'landing assist' });
+    const genericHz = hz.filter((h) => h.site.type !== 'radhaz').concat(assistHz);
     let hazardPay = false;
-    // Generic (skull / aerobrake): pay aqua, roll, or cancel. Each is a
-    // separate d6 - the modal already says "cannot be undone".
+    // Generic (skull / aerobrake / factory assist): pay aqua, roll, or
+    // cancel. Each is a separate d6 - the modal says "cannot be undone".
     if (genericHz.length) {
       const choice = await hazardConfirmModal(genericHz);
       if (choice === 'cancel' || choice == null) {

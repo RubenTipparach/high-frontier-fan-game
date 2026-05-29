@@ -35,6 +35,7 @@ import { CREW_BY_ID } from '../../data/crew.js';
 import {
   siteExists as plannerSiteExists, findPath as plannerFindPath,
   leoSlug, siteBySlug as siteById, hazardKind,
+  nodeSizeNumber, lineOfSightSites,
 } from './planner-graph.js';
 import { makeRng } from './rng.js';
 import {
@@ -220,6 +221,21 @@ function slotRadHardness(slot) {
 function isCrewSlot(slot) {
   return slot.kind === 'crew' || !!CREW_BY_ID[slot.id];
 }
+// Liftoff / landing thrust gate (mirror of browse.js#maneuverGate). Net
+// thrust must exceed the site's size to lift off / land; a size-1 site is
+// always doable with any operational thruster. Otherwise a factory at the
+// site can carry the maneuver (assist) - free if a colony is present,
+// else a hazard roll. No factory + under-thrust = hard block.
+//   -> { ok, assist, needsRoll, size }
+function maneuverGate(state, slug, thrust) {
+  const size = nodeSizeNumber(slug);
+  if (size <= 0 || thrust > size) return { ok: true, assist: false, needsRoll: false, size };
+  if (size === 1 && thrust > 0) return { ok: true, assist: false, needsRoll: false, size };
+  if (!state.factories[slug]) return { ok: false, assist: false, needsRoll: false, size };
+  const colony = !!state.colonies[slug];
+  return { ok: true, assist: true, needsRoll: !colony, size };
+}
+
 // Destroy the rocket: patents fall back to the hand, crew re-spawns in
 // the LEO Stack (variant rule), tank is lost, ship recalls to LEO.
 // Mirror of browse.js#explodeRocket's state half.
@@ -273,10 +289,28 @@ function applyMove(state, op, player) {
     if (k === 'rad') rad.push(slug);
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
+  const thrust = activeThrust(player.rocket);
+  // Factory-assist liftoff / landing gate. A maneuver where net thrust
+  // <= site size is only legal if a factory carries it (assist), which
+  // is a hazard roll unless a colony waives it. No factory => hard block.
+  // Liftoff gates the origin (skipped at LEO, siteId null); landing gates
+  // the destination.
+  const liftG = from ? maneuverGate(state, from, thrust) : { ok: true, needsRoll: false };
+  if (!liftG.ok) return fail('cannot_liftoff');
+  const landG = maneuverGate(state, toSlug, thrust);
+  if (!landG.ok) return fail('cannot_land');
+  // Ordered roll items: liftoff assist, route generics (skull/aero), then
+  // landing assist. Each is aqua-payable (FINAO) or a d6 where a 1 is a
+  // critical that destroys the ship.
+  const rollItems = [];
+  if (liftG.needsRoll) rollItems.push({ slug: from, kind: 'assist', phase: 'liftoff' });
+  for (const slug of generic) rollItems.push({ slug, kind: hazardKind(slug) });
+  if (landG.needsRoll) rollItems.push({ slug: toSlug, kind: 'assist', phase: 'landing' });
+
   const wantPay = !!op.hazardPay;
-  // FINAO: pay aqua up front to skip the generic rolls. Validated before
-  // anything mutates so a short balance rejects the whole move cleanly.
-  const finaoCost = wantPay ? generic.length * HAZARD_COST_PER : 0;
+  // FINAO: pay aqua up front to skip the generic + assist rolls. Validated
+  // before anything mutates so a short balance rejects the move cleanly.
+  const finaoCost = wantPay ? rollItems.length * HAZARD_COST_PER : 0;
   if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
 
   // Commit the burn + the FINAO payment, then resolve dice in travel
@@ -289,16 +323,15 @@ function applyMove(state, op, player) {
   const rolls = [];
   let destroyed = false;
   let haltSlug = toSlug;          // where the rocket actually ends up
-  const thrust = activeThrust(player.rocket);
 
-  // Generic hazards: a rolled 1 is a critical that destroys the ship at
-  // that node (unless paid past via FINAO).
+  // Generic + assist rolls: a rolled 1 is a critical that destroys the
+  // ship at that node (unless paid past via FINAO).
   if (!wantPay) {
-    for (const slug of generic) {
+    for (const item of rollItems) {
       const d6 = gen.d6();
       const crit = d6 === 1;
-      rolls.push({ slug, kind: hazardKind(slug), d6, crit });
-      if (crit) { destroyed = true; haltSlug = slug; break; }
+      rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, d6, crit });
+      if (crit) { destroyed = true; haltSlug = item.slug; break; }
     }
   }
   // Rad zones (only if the ship survived the generics). Thrust strictly
@@ -374,8 +407,9 @@ function applyMove(state, op, player) {
 
   const destName = (destSite && destSite.name) || toSlug;
   let log = `${player.name} burned ${cost} water to ${destName}.`;
-  if (finaoCost > 0) log += ` Paid ${finaoCost} aqua (FINAO) past ${generic.length} hazard${generic.length === 1 ? '' : 's'}.`;
-  else if (generic.length) log += ` Rolled through ${generic.length} hazard${generic.length === 1 ? '' : 's'}.`;
+  const nItems = rollItems.length;
+  if (finaoCost > 0) log += ` Paid ${finaoCost} aqua (FINAO) past ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
+  else if (nItems) log += ` Rolled through ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
   if (decommissioned.length) log += ` Radiation decommissioned ${decommissioned.length} card${decommissioned.length === 1 ? '' : 's'}.`;
   if (chit) log += ` First into the ${chit.zone} zone (+glory chit).`;
   return { ok: true, state, log };
@@ -676,7 +710,16 @@ function applyProspect(state, op, player) {
   if (!provSlot) return fail('no_prospector');
   const kind = prospectorKind(provSlot);
   if (!kind) return fail('no_prospector');
-  if (player.rocket.siteId !== toSiteId) return fail('not_at_site');
+  // Raygun fires through line-of-sight: it can prospect the rocket's
+  // current site OR any site one edge away (and is free + unlimited).
+  // Missile / buggy must be AT the target.
+  if (kind === 'raygun') {
+    const here = player.rocket.siteId;
+    const reachable = toSiteId === here || lineOfSightSites(here).has(toSiteId);
+    if (!reachable) return fail('raygun_out_of_range');
+  } else if (player.rocket.siteId !== toSiteId) {
+    return fail('not_at_site');
+  }
   if (state.discs[toSiteId]) return fail('already_prospected');
   if (prospectorIsru(provSlot) > (site.hydration | 0)) return fail('isru_too_high');
   const costsOp = kind !== 'raygun';
@@ -693,12 +736,45 @@ function applyProspect(state, op, player) {
     by: player.name,
     ownerId: player.profileId,
     turn: state.turn,
+    // The buggy may re-roll once, this turn, by its owner.
+    canReroll: kind === 'buggy',
   };
   if (costsOp) player.opsRemaining -= 1;
   const verb = success ? 'struck a claim at' : 'came up dry at';
   return {
     ok: true, state,
     log: `${player.name} rolled ${roll} vs ${threshold} and ${verb} ${site.name}.`,
+  };
+}
+
+// Buggy re-roll (rulebook: the buggy may re-roll its prospect once). The
+// owner re-rolls the disc it just placed, same turn; the new roll stands.
+function applyProspectReroll(state, op, player) {
+  const toSiteId = String(op.siteId || '');
+  const disc = state.discs[toSiteId];
+  if (!disc) return fail('no_disc');
+  if (disc.ownerId !== player.profileId) return fail('not_owner');
+  if (disc.kind !== 'buggy') return fail('not_buggy');
+  if (!disc.canReroll) return fail('already_rerolled');
+  if (disc.turn !== state.turn) return fail('reroll_window_closed');
+  const site = siteById(toSiteId);
+  const threshold = disc.threshold;
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const roll = gen.d6();
+  state.rng.cursor = gen.cursor;
+  const success = roll <= threshold;
+  state.discs[toSiteId] = {
+    ...disc,
+    outcome: success ? 'success' : 'fail',
+    roll,
+    canReroll: false,
+    rerolled: true,
+  };
+  const verb = success ? 'struck a claim at' : 'came up dry at';
+  const where = (site && site.name) || toSiteId;
+  return {
+    ok: true, state,
+    log: `${player.name} re-rolled the buggy: ${roll} vs ${threshold} and ${verb} ${where}.`,
   };
 }
 
@@ -718,6 +794,7 @@ const FUNCTIONAL = {
   SET_ACTIVE_THRUSTER: applySetActiveThruster,
   SET_ACTIVE_PROSPECTOR: applySetActiveProspector,
   PROSPECT: applyProspect,
+  PROSPECT_REROLL: applyProspectReroll,
 };
 
 function pickPayload(op) {
@@ -732,6 +809,7 @@ function pickPayload(op) {
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
     case 'PROSPECT': return { siteId: op.siteId };
+    case 'PROSPECT_REROLL': return { siteId: op.siteId };
     // Route ops ride the undo stack like every other functional op, so
     // an UNDO/REDO replay (rebuildFromBase) must carry their payload or
     // the replay would re-run SET_ROUTE with no segments and silently

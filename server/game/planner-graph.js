@@ -127,6 +127,56 @@ export function siteBySlug(slug) {
   return (n && n.site) || null;
 }
 
+// Numeric site size (the published "site number"), parsed from the
+// planner's "1D" / "2C" style string. 0 for waypoints / unsized nodes.
+// Mirror of browse.js#siteSizeNumber - drives the liftoff / landing
+// thrust gate + factory assist.
+export function nodeSizeNumber(slug) {
+  const n = NODES_BY_SLUG.get(String(slug));
+  const ss = n && n.siteSize;
+  if (typeof ss === 'string') {
+    const m = ss.match(/^(\d+)/);
+    if (m) return Math.max(0, parseInt(m[1], 10));
+  }
+  if (typeof ss === 'number' && Number.isFinite(ss)) return Math.max(0, ss | 0);
+  return 0;
+}
+
+// Slugs directly adjacent to a node (one edge away).
+export function neighborSlugs(slug) {
+  return (ADJ.get(String(slug)) || []).map((e) => e.to);
+}
+
+// Sites in the raygun's line of sight from `fromSlug`: real sites
+// reachable by travelling ONLY through waypoints (burn / lagrange /
+// hohmann), no intervening site, within maxHops waypoint steps. The hop
+// cap keeps "line of sight" to the local neighbourhood - the waypoint web
+// is so connected that an uncapped beam would reach almost every site.
+// Returns a Set of site slugs (excludes the origin).
+const RAYGUN_MAX_HOPS = 3;
+export function lineOfSightSites(fromSlug, maxHops = RAYGUN_MAX_HOPS) {
+  const start = fromSlug == null ? leoSlug() : String(fromSlug);
+  const out = new Set();
+  if (!ADJ.has(start)) return out;
+  const seen = new Set([start]);
+  const queue = [[start, 0]];
+  while (queue.length) {
+    const [cur, depth] = queue.shift();
+    if (depth > maxHops) continue;
+    for (const { to } of ADJ.get(cur) || []) {
+      if (seen.has(to)) continue;
+      seen.add(to);
+      const node = NODES_BY_SLUG.get(to);
+      if (node && node.site) {
+        out.add(to);          // a site: in range, but don't see past it
+      } else {
+        queue.push([to, depth + 1]);   // waypoint: keep tracing the beam
+      }
+    }
+  }
+  return out;
+}
+
 // Hazard class of a planner node (mirror of browse.js#classifyHazard so
 // the server resolves the SAME hazards the sandbox shows):
 //   'rad'   - radiation zone (rolls, NOT aqua-payable)
