@@ -472,7 +472,11 @@ label.checkbox input { accent-color: var(--accent-2); }
      (and full width) at <=1000px for phones. */
   max-width: 1000px;
   margin: 0 auto;
-  padding: 20px 24px 32px;
+  /* Top gap clears the floating ☰ menu FAB (top:8px, ~30px tall), which
+     stays visible in the JOINED lobby - body.in-lobby (and the FAB-hide)
+     is only set for the lobby LIST. Without it the FAB clipped the lobby
+     title on mobile. */
+  padding: 48px 24px 32px;
   box-sizing: border-box;
 }
 .lobby-top {
