@@ -252,13 +252,14 @@ async function loadNotifySection() {
   if (aucEl) aucEl.checked = d.notifyAuction !== false;
   const off = !d.discordEnabled;
   if (disabledNote) disabledNote.hidden = !off;
-  // Disable the controls (but still show the saved values) when the
-  // server can't actually send.
-  for (const el of [idEl, turnEl, aucEl,
-    document.getElementById('btn-notify-save'),
-    document.getElementById('btn-notify-test')]) {
-    if (el) el.disabled = off;
+  // The inputs + Save always work - your prefs persist to the server even
+  // before a bot is configured, so they're ready when one comes online.
+  // Only the live "Send test DM" needs an active bot.
+  for (const el of [idEl, turnEl, aucEl, document.getElementById('btn-notify-save')]) {
+    if (el) el.disabled = false;
   }
+  const testBtn = document.getElementById('btn-notify-test');
+  if (testBtn) testBtn.disabled = off;
   const status = document.getElementById('notify-status');
   if (status) status.textContent = '';
 }
