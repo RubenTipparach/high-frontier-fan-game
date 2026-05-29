@@ -1334,19 +1334,23 @@ function openMpStackModal(title, slots) {
   const body = document.createElement('div');
   body.className = 'mp-stack-modal-cards';
   for (const slot of slots) {
-    const card = PATENTS_BY_ID[slot.id] || CREW_BY_ID[slot.id];
+    // The HAND ships as bare id strings; LEO / rocket / outpost ship as
+    // { id, kind, face } slot objects. Normalise so both render.
+    const id = (typeof slot === 'string') ? slot : (slot && slot.id);
+    const face = (slot && typeof slot === 'object') ? slot.face : undefined;
+    const card = PATENTS_BY_ID[id] || CREW_BY_ID[id];
     if (!card) {
       const t = document.createElement('div');
       t.className = 'mp-line';
-      t.textContent = slot.id;
+      t.textContent = id || '?';
       body.appendChild(t);
       continue;
     }
-    const kind = CREW_BY_ID[slot.id] ? 'crew' : 'patent';
+    const kind = CREW_BY_ID[id] ? 'crew' : 'patent';
     const wrap = document.createElement('div');
     wrap.className = 'mp-stack-modal-card';
-    try { wrap.appendChild(renderCard(card, { type: kind, face: slot.face })); }
-    catch { wrap.textContent = card.name || slot.id; }
+    try { wrap.appendChild(renderCard(card, { type: kind, face })); }
+    catch { wrap.textContent = card.name || id; }
     body.appendChild(wrap);
   }
   dialog.appendChild(body);
