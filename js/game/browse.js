@@ -1306,6 +1306,10 @@ function humanizeOnlineOpError(code) {
     game_not_active: 'This game has ended.',
     not_a_player: 'You are not in this game.',
     unknown_op: 'Unsupported operation.',
+    rocket_not_at_leo: 'Park the rocket at LEO to move cards between LEO and the rocket.',
+    bad_transfer: 'Invalid transfer.',
+    not_in_leo: 'That card is not in your LEO Stack.',
+    not_in_rocket: 'That card is not on your rocket.',
     crew_already_picked: 'You have already picked your starting crew.',
     crew_draft_closed: 'Crew picks are locked - the game has started.',
     awaiting_crew_picks: 'Waiting for every player to pick a starting crew.',
@@ -1909,16 +1913,22 @@ function getColocatedDestinations(sourceId) {
 // after the move; any spilled water is logged. Used by the
 // transfer section's "Send selected" button.
 function transferOneCard(sourceId, destId, cardId) {
-  // Online: committing a card onto the rocket stack maps to the server
-  // BUILD_ROCKET op. Fire it (fire-and-forget; the broadcast snapshot
-  // re-hydrates the stack and repaints the open inspector) and return
-  // false so the local move below is skipped. Non-rocket transfers
-  // (rocket -> outpost, LEO -> outpost, etc) have no server op yet, so
-  // they no-op with a toast rather than mutating local state that the
+  // Online: LEO <-> Rocket transfers map to the server TRANSFER op
+  // (valid only while the rocket is parked at LEO; the server enforces
+  // that). Fire-and-forget - the broadcast / poll snapshot re-hydrates
+  // the stacks and repaints the open inspector. Return false so the
+  // local move below is skipped. Other combos (outpost <-> *) have no
+  // server op yet, so they toast rather than mutating local state the
   // next snapshot would clobber.
+  //
+  // NB: LEO -> Rocket is NOT BUILD_ROCKET - that op pulls from the
+  // hand. The crew PICK_CREW staged in LEO lives in player.leo, so it
+  // must travel via TRANSFER.
   if (_online) {
-    if (destId === 'rocket') {
-      submitOnlineOp({ kind: 'BUILD_ROCKET', cardId });
+    if (sourceId === 'leo' && destId === 'rocket') {
+      submitOnlineOp({ kind: 'TRANSFER', cardId, to: 'rocket' });
+    } else if (sourceId === 'rocket' && destId === 'leo') {
+      submitOnlineOp({ kind: 'TRANSFER', cardId, to: 'leo' });
     } else {
       _onlineToast('That transfer is not available in online play yet.', 'error');
     }

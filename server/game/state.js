@@ -35,7 +35,7 @@
 import { PATENTS } from '../../data/patents.js';
 import { CREW } from '../../data/crew.js';
 import { makeRng, shuffle } from './rng.js';
-import { startSiteId } from './graph.js';
+// (startSiteId import dropped: the rocket now opens at LEO, siteId null.)
 
 // --- Sunspot Cube clock (mirror of js/game/turn-clock.js) ---
 export const SLOTS = 12;
@@ -108,7 +108,16 @@ function freshPlayer({ profileId, name, seat, color }) {
     // it is final - PICK_CREW rejects re-picks.
     faction: null,
     rocket: {
-      siteId: startSiteId(),
+      // siteId null = parked at LEO (the launch anchor). There is no
+      // explicit LEO node in SITES, so null is the canonical "at LEO"
+      // value the whole stack agrees on: the client renders the rocket
+      // at the LEO lagrange node, LEO <-> Rocket transfers are enabled
+      // (TRANSFER op requires siteId == null), and the first MOVE
+      // launches from LEO using the destination's dvLeo (engine
+      // applyMove special-cases a null origin). It used to start at
+      // startSiteId() (a real Earth site), which left the rocket NOT
+      // colocated with the LEO Stack so the crew could never board.
+      siteId: null,
       stack: [],
       activeThrusterId: null,
       activeProspectorId: null,

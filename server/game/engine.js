@@ -185,10 +185,19 @@ function applyMove(state, op, player) {
   const from = player.rocket.siteId;
   if (toSiteId === from) return fail('already_here');
 
-  const path = findPath(from, toSiteId);
-  if (!path) return fail('no_route');
+  // Burn count. A null origin = launching from LEO: every site is
+  // directly reachable and the cost is the destination's delta-v from
+  // LEO (dvLeo). Otherwise it's the shortest site-to-site path.
+  let totalBurns;
+  if (from == null) {
+    totalBurns = Number.isFinite(dest.dvLeo) ? dest.dvLeo : 0;
+  } else {
+    const path = findPath(from, toSiteId);
+    if (!path) return fail('no_route');
+    totalBurns = path.totalBurns;
+  }
 
-  const cost = perBurnCost(player.rocket) * path.totalBurns;
+  const cost = perBurnCost(player.rocket) * totalBurns;
   if (cost > player.rocket.tank) return fail('insufficient_water');
 
   player.rocket.tank -= cost;
@@ -227,6 +236,58 @@ function applyBuildRocket(state, op, player) {
   clipTank(player.rocket);
   player.opsRemaining -= 1;
   return { ok: true, state, log: `${player.name} built ${card.name} onto the rocket.` };
+}
+
+// Display name for a stack slot (patent or crew face). Used in
+// TRANSFER log lines.
+function slotName(slot) {
+  if (!slot || !slot.id) return '?';
+  const p = PATENTS_BY_ID[slot.id];
+  if (p) return p.name || slot.id;
+  const crew = CREW_BY_ID[slot.id];
+  if (crew) {
+    const key = slot.face === 'secondary' ? 'secondary' : 'primary';
+    const f = (crew.faces && (crew.faces[key] || crew.faces.primary)) || {};
+    return f.name || slot.id;
+  }
+  return slot.id;
+}
+
+// Free LEO <-> Rocket card transfer (rulebook G1 colocation), allowed
+// only while the rocket is parked at LEO (siteId == null). This is how
+// the crew that PICK_CREW staged in the LEO Stack boards the rocket,
+// and how cards come back off before launch. No op cost (a free
+// reconfiguration like SET_ACTIVE_*), but it IS turn-gated (FUNCTIONAL)
+// since it mutates your own rocket. op = { cardId, to: 'rocket'|'leo' }.
+function applyTransfer(state, op, player) {
+  if (player.rocket.siteId != null) return fail('rocket_not_at_leo');
+  const cardId = String(op.cardId || '');
+  const to = op.to === 'rocket' ? 'rocket' : (op.to === 'leo' ? 'leo' : null);
+  if (!to) return fail('bad_transfer');
+
+  if (to === 'rocket') {
+    const idx = (player.leo || []).findIndex((s) => s.id === cardId);
+    if (idx < 0) return fail('not_in_leo');
+    const [slot] = player.leo.splice(idx, 1);
+    player.rocket.stack.push(slot);
+    if (!player.rocket.activeThrusterId && isThrusterSlot(slot)) {
+      player.rocket.activeThrusterId = slot.id;
+    }
+    if (!player.rocket.activeProspectorId && isProspectorSlot(slot)) {
+      player.rocket.activeProspectorId = slot.id;
+    }
+    clipTank(player.rocket);
+    return { ok: true, state, log: `${player.name} boarded ${slotName(slot)} onto the rocket.` };
+  }
+
+  // to === 'leo'
+  const idx = player.rocket.stack.findIndex((s) => s.id === cardId);
+  if (idx < 0) return fail('not_in_rocket');
+  const [slot] = player.rocket.stack.splice(idx, 1);
+  if (player.rocket.activeThrusterId === slot.id) player.rocket.activeThrusterId = null;
+  if (player.rocket.activeProspectorId === slot.id) player.rocket.activeProspectorId = null;
+  (player.leo = player.leo || []).push(slot);
+  return { ok: true, state, log: `${player.name} returned ${slotName(slot)} to the LEO Stack.` };
 }
 
 // Pick which stacked thruster powers burns (rocket.js#setActiveThruster).
@@ -300,6 +361,7 @@ function applyProspect(state, op, player) {
 const FUNCTIONAL = {
   MOVE: applyMove,
   BUILD_ROCKET: applyBuildRocket,
+  TRANSFER: applyTransfer,
   SET_ACTIVE_THRUSTER: applySetActiveThruster,
   SET_ACTIVE_PROSPECTOR: applySetActiveProspector,
   PROSPECT: applyProspect,
@@ -309,6 +371,7 @@ function pickPayload(op) {
   switch (op.kind) {
     case 'MOVE': return { toSiteId: op.toSiteId };
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face };
+    case 'TRANSFER': return { cardId: op.cardId, to: op.to };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
     case 'PROSPECT': return { siteId: op.siteId };
