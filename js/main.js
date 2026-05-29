@@ -324,10 +324,10 @@ function initNewGameModal() {
   });
   sandboxBtn.addEventListener('click', () => {
     close();
-    // Solo sandbox lives in view-browse with no opts; mountBrowse's
-    // safety reset detaches any prior online plumbing automatically.
+    // A fresh solo session: newGame resets every state module so an online
+    // (or stale solo) game can't bleed into this sandbox.
     showView('view-browse');
-    mountBrowse();
+    mountBrowse({ newGame: true });
   });
 }
 

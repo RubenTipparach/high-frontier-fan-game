@@ -37,7 +37,7 @@ import {
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats,
   isAfterburnEngaged, setAfterburn,
-  getAqua, spendAqua, addAqua, onAquaChange,
+  getAqua, spendAqua, addAqua, onAquaChange, resetAqua,
 } from './rocket.js';
 import { canProspect, computeRaygunTargets } from './scan.js';
 import {
@@ -74,7 +74,7 @@ import {
   getColony, createColony, countColoniesByOwner,
   allFactories, allColonies,
   onFactoryChange, onColonyChange,
-  COLONY_CAP_PER_PLAYER,
+  COLONY_CAP_PER_PLAYER, resetFactoriesAndColonies,
 } from './factories.js';
 import {
   findIndustrializeOptions, openIndustrializeModal,
@@ -88,11 +88,11 @@ import {
   addCardToOutpost, removeCardFromOutpost, setOutpostTank,
   getFocusedStackId, setFocusedStackId,
   onFocusChange, onOutpostsChange,
-  OUTPOST_LETTERS,
+  OUTPOST_LETTERS, resetStacks,
 } from './stacks.js';
 import {
   getLeoCards, addCardToLeo, removeCardFromLeoById,
-  onLeoChange,
+  onLeoChange, resetLeoStack,
 } from './leo-stack.js';
 import {
   findEtProduceOptions, openEtProduceModal,
@@ -115,7 +115,7 @@ import {
 } from './card-market.js';
 import {
   DECK_TYPES, getDeck, peekTop, drawTop, addToBottom, removeFromDeck,
-  cycleAllDecks, supportBonusDecks, onDeckChange,
+  cycleAllDecks, supportBonusDecks, onDeckChange, resetDecks,
 } from './decks.js';
 // Multiplayer glue (the sandbox map, driven from a server game). These
 // are inert until mountBrowse({ online:true }) flips _online on; the
@@ -238,12 +238,15 @@ export function mountBrowse(opts = {}) {
     _onlineLobbyId = opts.lobbyId || null;
     _onlineLeave = typeof opts.onLeave === 'function' ? opts.onLeave : null;
     setOnline(true);
-  } else if (_online) {
-    // Mounting solo after an online game: detach the online plumbing so
-    // player actions stop routing to the server. (The state modules
-    // still hold the server-hydrated snapshot until a reload re-reads
-    // the solo save - see unmountBrowseOnline's note.)
-    unmountBrowseOnline();
+  } else {
+    // Mounting solo. Detach any prior online plumbing, then isolate this
+    // session: the state modules are process-wide singletons, so an online
+    // game's hydrated state would otherwise bleed straight into the
+    // sandbox. Reset on an explicit new game (opts.newGame) OR whenever we
+    // came from online. A plain resume (neither) keeps the saved solo game.
+    const wasOnline = _online;
+    if (_online) unmountBrowseOnline();
+    if (opts.newGame || wasOnline) resetSoloGame();
   }
   if (!_rocketSubWired) {
     _rocketSubWired = true;
@@ -1600,6 +1603,44 @@ export function unmountBrowseOnline() {
     banner.textContent = '';
   }
   syncMpTabVisibility();
+}
+
+// Reset every shared game-state module to a fresh solo new-game. The
+// state modules are process-wide singletons, so without this an online
+// game's hydrated state (rocket / hand / discs / factories / ...) bleeds
+// straight into a "Sandbox (solo)" session. Called when starting a fresh
+// sandbox so each session is self-contained. (Server-authoritative MP
+// re-hydrates from its snapshot, so a reset there is harmless too.)
+export function resetSoloGame() {
+  const safe = (fn) => { try { fn(); } catch { /* module not ready */ } };
+  safe(() => rocketClearStack());
+  safe(() => clearActiveProspector());
+  safe(() => clearHand());
+  safe(() => clearBoostMarks());
+  safe(() => resetLeoStack());
+  safe(() => resetDiscs());
+  safe(() => resetStacks());                 // outposts
+  safe(() => resetGlory());
+  safe(() => resetFactoriesAndColonies());
+  safe(() => resetDecks(new Set()));         // full fresh shuffled decks
+  safe(() => resetClock());
+  safe(() => resetAqua());
+  safe(() => setTankWater(0));
+  // Rocket position / route / trail module-locals + their saves.
+  _rocketSiteId = null;
+  _plannedRoute = null;
+  _rocketTrail = [];
+  _moveSnapshot = null;
+  setHazardousMove(false);
+  try {
+    localStorage.removeItem(STORAGE_ROCKET_SITE);
+    localStorage.removeItem(STORAGE_ROCKET_TRAIL);
+    localStorage.removeItem(STORAGE_ROCKET_ROUTE);
+    localStorage.removeItem(STORAGE_PENDING_MOVE);
+  } catch { /* private mode */ }
+  if (_renderer) {
+    safe(() => { _renderer.setRoute(null); _renderer.setRouteEndpoints(null, null); _renderer.setRocketTrail(null); });
+  }
 }
 
 // Sandbox hand strip wiring: drop target, slot rendering, +
