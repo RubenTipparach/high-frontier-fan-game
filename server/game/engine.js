@@ -28,7 +28,8 @@
 
 import { PATENTS_BY_ID } from '../../data/patents.js';
 import { CREW_BY_ID } from '../../data/crew.js';
-import { siteById, findPath } from './graph.js';
+import { siteById } from './graph.js';
+import { siteExists as plannerSiteExists, findPath as plannerFindPath, leoSlug } from './planner-graph.js';
 import { makeRng } from './rng.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES,
@@ -188,33 +189,38 @@ function applyMove(state, op, player) {
   // LEO. Enforcing this keeps the "empty rocket == at LEO" invariant
   // true: the only way off LEO is to build/board a thruster first.
   if (player.rocket.stack.length === 0) return fail('empty_rocket');
-  const toSiteId = String(op.toSiteId || '');
-  const dest = siteById(toSiteId);
-  if (!dest) return fail('unknown_site');
-  const from = player.rocket.siteId;
-  if (toSiteId === from) return fail('already_here');
+  const toSlug = String(op.toSiteId || '');
+  if (!plannerSiteExists(toSlug)) return fail('unknown_site');
+  const from = player.rocket.siteId;       // null = LEO
+  if (toSlug === from) return fail('already_here');
 
-  // Burn count. A null origin = launching from LEO: every site is
-  // directly reachable and the cost is the destination's delta-v from
-  // LEO (dvLeo). Otherwise it's the shortest site-to-site path.
-  let totalBurns;
-  if (from == null) {
-    totalBurns = Number.isFinite(dest.dvLeo) ? dest.dvLeo : 0;
-  } else {
-    const path = findPath(from, toSiteId);
-    if (!path) return fail('no_route');
-    totalBurns = path.totalBurns;
-  }
+  // Path comes from the planner graph (full ~1500 nodes incl. lagrange
+  // / burn / hohmann waypoints). null `from` => start at LEO. Cost is
+  // the sum of edge burn-labels along the shortest path.
+  const path = plannerFindPath(from, toSlug);
+  if (!path) return fail('no_route');
+  const totalBurns = path.totalBurns;
 
   const cost = perBurnCost(player.rocket) * totalBurns;
   if (cost > player.rocket.tank) return fail('insufficient_water');
 
   player.rocket.tank -= cost;
-  player.rocket.siteId = toSiteId;
+  player.rocket.siteId = toSlug;
   player.movesRemaining -= 1;
-  const chit = maybeAwardGlory(player, dest, state.turn);
+  // Pop the executed segment off the planned route (if any). Server
+  // keeps the route truncated to "what's still ahead" so a refresh /
+  // snapshot reflects the journey in progress.
+  if (Array.isArray(player.rocket.route) && player.rocket.route.length) {
+    const idx = player.rocket.route.findIndex((s) => s.to === toSlug);
+    if (idx >= 0) player.rocket.route = player.rocket.route.slice(idx + 1);
+  }
+  // Glory awards still gate on data/sites.js (the curated metadata
+  // table). Waypoints (no SITES entry) yield no chit, which is correct.
+  const destSite = siteById(toSlug);
+  const chit = destSite ? maybeAwardGlory(player, destSite, state.turn) : null;
 
-  let log = `${player.name} burned ${cost} water to ${dest.name}.`;
+  const destName = (destSite && destSite.name) || toSlug;
+  let log = `${player.name} burned ${cost} water to ${destName}.`;
   if (chit) log += ` First into the ${chit.zone} zone (+glory chit).`;
   return { ok: true, state, log };
 }
@@ -326,6 +332,45 @@ function applyRefuel(state, op, player) {
   player.aqua -= amt;
   player.rocket.tank = (player.rocket.tank | 0) + amt;
   return { ok: true, state, log: `${player.name} converted ${amt} aqua to water (tank ${player.rocket.tank}).` };
+}
+
+// Planned route persistence. Stored as player.rocket.route, an array
+// of { from, to, burns } segments. The full route is SECRET between
+// players (server gameView redacts opponents' routes - they can see
+// the rocket position but not what's being planned). Cleared on
+// END_TURN naturally? No - the route can span turns (Hohmann waits),
+// so it persists until the player clears it or completes it. The
+// route is the source of truth; the client only computes shortest
+// path via the planner graph and submits the segment list.
+// op = { segments: [{ from, to, burns }, ...] }.
+function applySetRoute(state, op, player) {
+  const segs = Array.isArray(op.segments) ? op.segments : [];
+  const norm = [];
+  for (const s of segs) {
+    if (!s || typeof s !== 'object') return fail('bad_route');
+    const from = String(s.from || '');
+    const to = String(s.to || '');
+    const burns = Math.max(0, Math.floor(Number(s.burns) || 0));
+    if (!plannerSiteExists(from) || !plannerSiteExists(to)) return fail('unknown_site');
+    norm.push({ from, to, burns });
+  }
+  // Validate continuity: each segment's from must be the previous to,
+  // and the first must start at the rocket's current position
+  // (siteId, null = LEO). Prevents a client from sending a
+  // disconnected path the engine couldn't actually execute.
+  const startsFrom = norm.length ? norm[0].from : null;
+  const here = player.rocket.siteId == null ? leoSlug() : player.rocket.siteId;
+  if (norm.length && startsFrom !== here) return fail('route_not_from_here');
+  for (let i = 1; i < norm.length; i++) {
+    if (norm[i].from !== norm[i - 1].to) return fail('route_discontinuous');
+  }
+  player.rocket.route = norm;
+  return { ok: true, state, log: '' };  // empty log: routes are secret
+}
+
+function applyClearRoute(state, _op, player) {
+  player.rocket.route = [];
+  return { ok: true, state, log: '' };
 }
 
 // Reverse of REFUEL: cash tank water back into the aqua bank 1:1, only
@@ -504,6 +549,8 @@ const FUNCTIONAL = {
   REFUEL: applyRefuel,
   CASH_WATER: applyCashWater,
   FREE_MARKET: applyFreeMarket,
+  SET_ROUTE: applySetRoute,
+  CLEAR_ROUTE: applyClearRoute,
   SET_ACTIVE_THRUSTER: applySetActiveThruster,
   SET_ACTIVE_PROSPECTOR: applySetActiveProspector,
   PROSPECT: applyProspect,

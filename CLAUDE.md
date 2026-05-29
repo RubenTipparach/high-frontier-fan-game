@@ -382,6 +382,57 @@ version-check, or the boot landing logic, re-verify this end to end.
      that anyone can paste into the game lobby to join the table.
      Links can be single-use or unlimited; host picks at create.
 
+### Snapshot apply is INTERPRETATION, not replacement
+
+Critical lesson (user 2026-05-29: "you are eagerly updating the
+simulation/game state ... server will give you the state, but you
+must interpret state gracefully and smoothly without doing abrupt
+updates").
+
+REST is the source of truth, but `applySnapshot` is NOT licensed to
+slam the new state into every module and call it done. The user sees
+each diff as a CHANGE that needs an animation - the rocket sliding
+along its route, the dice tumbling on a prospect, the cards drifting
+between stacks. A direct hydrate from a server snapshot SKIPS every
+one of those, and play feels jarring and disconnected from intent.
+
+Doctrine:
+
+- **Diff first, apply second.** Before re-hydrating from a new
+  snapshot, compare the relevant slice to `_onlineSnapshot` (the
+  last applied state) and identify what changed at the granularity
+  the player perceives: a rocket move, a card transfer, a dice roll
+  outcome, a deck top consumed, etc.
+- **Animate the transition, then commit.** Drive the same animation
+  the sandbox does (e.g. `animateRocketAlong`, the prospect dice
+  modal, the fuel-tank tween) FROM the previous state TO the new
+  state. The hydrators run AFTER the animation completes, so the
+  final DOM matches the server. If the player skips / interrupts,
+  jump to the final state at once but never *start* by snapping.
+- **Guard against double-animation.** A poll tick that returns the
+  same `seq` as `_lastAppliedSeq` is a no-op; only a real seq
+  advance triggers an animation pass. Sandbox-style "consume your
+  own move locally first then await server" is fine when the
+  server response confirms; the snapshot diff just re-uses the
+  animation infrastructure for OPPONENTS' moves and for any move
+  the client didn't initiate (a refresh-resume, a spectator view).
+- **Animation reads from the op log when needed.** The snapshot
+  state has the final position but not the intermediate hops; for
+  multi-segment MOVE the server publishes the planned route
+  segments alongside the snapshot (or the client recomputes via
+  the same planner graph). For dice (PROSPECT, hazard), the op
+  payload carries the roll value(s) so the animation plays the
+  same outcome the engine resolved.
+- **Default to in-place layout updates** for everything else (turn
+  banner, roster, mp panel, mission log). Those aren't "events" in
+  the player's mind, they're status reads; treat them as live but
+  passive.
+
+When you wire a new op in multiplayer, the question to answer is
+NEVER "does the snapshot apply correctly?" - the engine already
+guarantees that. The question is "what does the player SEE happen,
+and does my code reproduce that motion before the state snaps?"
+
 ## High Frontier - implementation scope
 
 We aim for **maximum coverage** of the HF4 core rules in `server/game/`

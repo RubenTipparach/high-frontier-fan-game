@@ -616,17 +616,29 @@ function canViewGame(gameId, profileId) {
 // Full game view: meta + roster + current state snapshot. State is sent
 // whole today (open information; hidden hands aren't populated until
 // the BUILD op lands, at which point this redacts per-player).
-// HF4 is an OPEN-information game (user 2026-05-29: "hand cards SHOULD
-// NOT BE HIDDEN"). Every zone - hand, LEO, rocket, outposts - is
-// visible to every player, so the full state ships unredacted. (An
-// earlier build hid opponent hands; that was the wrong call and is
-// gone.) viewerId is accepted but unused, kept so callers don't churn.
-function gameView(gameId, _viewerId = null) {
+// HF4 is OPEN-information for stacks (hands, LEO, rocket, outposts -
+// all visible to every player). The ONE exception is the PLANNED
+// ROUTE: a player's planned path is private (user 2026-05-29: "rocket
+// path is secret between players ... each player can only see their
+// own rocket path"). gameView strips opponents' rocket.route for
+// each viewer. Spectators (viewerId null) see no routes.
+function redactRoutes(rawState, viewerId) {
+  if (!rawState || !Array.isArray(rawState.players)) return rawState;
+  const clone = JSON.parse(JSON.stringify(rawState));
+  for (const p of clone.players) {
+    if (p.profileId === viewerId) continue;          // your own route stays
+    if (p.rocket) p.rocket.route = [];               // opponents: hidden
+  }
+  return clone;
+}
+
+function gameView(gameId, viewerId = null) {
   const g = db
     .prepare('SELECT id, lobby_id, status, seed, committed_seq, created_at, finished_at FROM games WHERE id = ?')
     .get(gameId);
   if (!g) return null;
   const st = db.prepare('SELECT state, seq, updated_at FROM game_states WHERE game_id = ?').get(gameId);
+  const rawState = st ? JSON.parse(st.state) : null;
   return {
     id: g.id,
     lobbyId: g.lobby_id,
@@ -635,7 +647,7 @@ function gameView(gameId, _viewerId = null) {
     committedSeq: g.committed_seq,
     updatedAt: st ? st.updated_at : g.created_at,
     players: gamePlayers(gameId),
-    state: st ? JSON.parse(st.state) : null,
+    state: redactRoutes(rawState, viewerId),
   };
 }
 
@@ -648,10 +660,18 @@ function stateAtSeq(gameId, seq) {
   return row && row.state_after ? JSON.parse(row.state_after) : null;
 }
 
-// Broadcast a game update to every subscriber. State is open
-// information (no per-recipient redaction), so one payload fits all.
-function publishGame(gameId, payload) {
-  broadcast(`game:${gameId}`, payload);
+// Broadcast a game update to every subscriber, with PER-RECIPIENT
+// route redaction (opponents' rocket.route is stripped). makePayload
+// is a function (viewerId) => payload so each viewer's payload
+// references their own viewable game state.
+function publishGame(gameId, makePayload) {
+  const set = channels.get(`game:${gameId}`);
+  if (!set) return;
+  for (const ws of set) {
+    if (ws.readyState !== 1) continue;
+    const viewerId = ws._profile ? ws._profile.id : null;
+    try { ws.send(JSON.stringify(makePayload(viewerId))); } catch { /* dropped */ }
+  }
 }
 
 // Public live games: open-lobby games currently in 'active' status,
@@ -693,7 +713,8 @@ app.get('/games/:id', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
   if (!canViewGame(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
-  const view = gameView(id);
+  // Per-viewer route redaction: own route stays, opponents' routes hidden.
+  const view = gameView(id, req.profile.id);
   if (!view) return res.status(404).json({ error: 'not_found' });
   res.json({ game: view, isSpectator: !isGamePlayer(id, req.profile.id) });
 });
@@ -756,15 +777,15 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
     }
   })();
 
-  const view = gameView(id);
-  publishGame(id, {
+  const opMeta = { seq: nextSeq, kind, profileId: req.profile.id, log: result.log || null };
+  publishGame(id, (viewerId) => ({
     type: 'game_update',
     gameId: id,
     seq: nextSeq,
-    op: { seq: nextSeq, kind, profileId: req.profile.id, log: result.log || null },
-    game: view,
-  });
-  res.json({ ok: true, seq: nextSeq, log: result.log || null, game: view });
+    op: opMeta,
+    game: gameView(id, viewerId),
+  }));
+  res.json({ ok: true, seq: nextSeq, log: result.log || null, game: gameView(id, req.profile.id) });
 });
 
 // Operation log, optionally only the ops after a given seq (catch-up

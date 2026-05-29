@@ -1,0 +1,183 @@
+// Server-side planner graph. Loads vendor/hf-mission-planner/assets/
+// data-hf4.json at module init time and re-keys it against the SHARED
+// slug rules in data/planner-ids.js (the browser builds the same
+// slugs via planner-map.js). The result is:
+//
+//   NODES_BY_SLUG  Map<slug, { slug, x, y, type, name?, siteWater?, siteSize? }>
+//   ADJ            Map<slug, [{ to: slug, burns: number }, ...]>
+//
+// Use findPath(fromSlug, toSlug) for shortest-path; siteExists(slug)
+// to validate a destination. Static data, built once at boot.
+//
+// CLAUDE.md: "all nodes must be on server" + "SERVER MUST UNDERSTAND
+// ROCKET TRAVEL". The engine resolves every MOVE through this graph,
+// so a lagrange/burn/hohmann waypoint is a first-class destination -
+// not just curated SITES entries.
+
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { makeRefId } from '../../data/planner-ids.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const PLANNER_JSON = join(
+  __dirname, '..', '..', 'vendor', 'hf-mission-planner', 'assets', 'data-hf4.json'
+);
+
+function loadPlanner() {
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync(PLANNER_JSON, 'utf8'));
+  } catch (err) {
+    console.error('[planner-graph] failed to load', PLANNER_JSON, err.message);
+    return { nodes: new Map(), adj: new Map(), rawKeyToSlug: new Map() };
+  }
+  const points = raw.points || {};
+  const edges = Array.isArray(raw.edges) ? raw.edges : [];
+  const edgeLabels = raw.edgeLabels || {};
+
+  // First pass: compute every slug, collect collisions.
+  const rawKeyToSlug = new Map();
+  const slugCount = new Map();
+  for (const key of Object.keys(points)) {
+    const p = points[key];
+    let slug = makeRefId(p, p.type || 'unknown');
+    const n = (slugCount.get(slug) || 0) + 1;
+    slugCount.set(slug, n);
+    if (n > 1) slug = `${slug}-${n}`;
+    rawKeyToSlug.set(key, slug);
+  }
+
+  // Second pass: build the node table by slug.
+  const nodes = new Map();
+  for (const key of Object.keys(points)) {
+    const p = points[key];
+    const slug = rawKeyToSlug.get(key);
+    nodes.set(slug, {
+      slug,
+      x: p.x, y: p.y,
+      type: p.type || 'unknown',
+      name: p.siteName || null,
+      siteWater: p.siteWater != null ? Number(p.siteWater) : null,
+      siteSize: p.siteSize || null,
+    });
+  }
+
+  // Build adjacency from the undirected edge list. Burn costs come
+  // from edgeLabels[from][to] (string, parsed to int). Default = 1
+  // when no label exists (the planner uses 1 for unlabelled edges).
+  const adj = new Map();
+  for (const slug of nodes.keys()) adj.set(slug, []);
+  for (const e of edges) {
+    if (typeof e !== 'string') continue;
+    const [a, b] = e.split(':');
+    const sa = rawKeyToSlug.get(a);
+    const sb = rawKeyToSlug.get(b);
+    if (!sa || !sb || sa === sb) continue;
+    const labelAB = edgeLabels[a] && edgeLabels[a][b];
+    const labelBA = edgeLabels[b] && edgeLabels[b][a];
+    const burns = Number(labelAB || labelBA || 1) || 1;
+    adj.get(sa).push({ to: sb, burns });
+    adj.get(sb).push({ to: sa, burns });
+  }
+
+  return { nodes, adj, rawKeyToSlug };
+}
+
+const { nodes: NODES_BY_SLUG, adj: ADJ } = loadPlanner();
+console.log(`[planner-graph] loaded ${NODES_BY_SLUG.size} nodes`);
+
+export function siteExists(slug) {
+  return slug != null && NODES_BY_SLUG.has(String(slug));
+}
+
+export function nodeBySlug(slug) {
+  return NODES_BY_SLUG.get(String(slug)) || null;
+}
+
+// Find the LEO lagrange node once - that's the canonical "at LEO"
+// destination when player.rocket.siteId is null. Falls back to
+// scanning for a lagrange named "LEO".
+let _leoSlug = null;
+export function leoSlug() {
+  if (_leoSlug) return _leoSlug;
+  for (const n of NODES_BY_SLUG.values()) {
+    if (n.type === 'lagrange' && n.name && n.name.toLowerCase() === 'leo') {
+      _leoSlug = n.slug;
+      return _leoSlug;
+    }
+  }
+  return null;
+}
+
+// Dijkstra over the slug-keyed adjacency. Treats null `from` as the
+// LEO lagrange slug so a fresh rocket can launch from LEO without
+// special-casing in every caller. Returns { path, totalBurns,
+// segments } or null when unreachable / unknown ids.
+export function findPath(fromSlug, toSlug) {
+  const f = fromSlug == null ? leoSlug() : String(fromSlug);
+  const t = String(toSlug);
+  if (!ADJ.has(f) || !ADJ.has(t)) return null;
+  if (f === t) return { path: [f], totalBurns: 0, segments: [] };
+
+  const dist = new Map([[f, 0]]);
+  const prev = new Map();
+  const heap = new MinHeap();
+  heap.push(0, f);
+  while (heap.size) {
+    const cur = heap.pop();
+    if (cur === t) break;
+    const d = dist.get(cur);
+    for (const { to, burns } of ADJ.get(cur) || []) {
+      const nd = d + burns;
+      if (nd < (dist.get(to) ?? Infinity)) {
+        dist.set(to, nd);
+        prev.set(to, { from: cur, burns });
+        heap.push(nd, to);
+      }
+    }
+  }
+  if (!dist.has(t)) return null;
+  const path = [t];
+  const segments = [];
+  let cur = t;
+  while (prev.has(cur)) {
+    const { from, burns } = prev.get(cur);
+    segments.unshift({ from, to: cur, burns });
+    path.unshift(from);
+    cur = from;
+  }
+  return { path, totalBurns: dist.get(t), segments };
+}
+
+class MinHeap {
+  constructor() { this.h = []; }
+  get size() { return this.h.length; }
+  push(k, v) { this.h.push([k, v]); this._up(this.h.length - 1); }
+  pop() {
+    const top = this.h[0][1];
+    const last = this.h.pop();
+    if (this.h.length) { this.h[0] = last; this._down(0); }
+    return top;
+  }
+  _up(i) {
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (this.h[p][0] <= this.h[i][0]) break;
+      [this.h[p], this.h[i]] = [this.h[i], this.h[p]];
+      i = p;
+    }
+  }
+  _down(i) {
+    const n = this.h.length;
+    for (;;) {
+      const l = i * 2 + 1, r = l + 1; let s = i;
+      if (l < n && this.h[l][0] < this.h[s][0]) s = l;
+      if (r < n && this.h[r][0] < this.h[s][0]) s = r;
+      if (s === i) break;
+      [this.h[s], this.h[i]] = [this.h[i], this.h[s]];
+      i = s;
+    }
+  }
+}
