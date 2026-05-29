@@ -431,6 +431,32 @@
             <span id="server-status" class="server-status" title="API connectivity">…</span>
           </div>
         </div>
+        <!-- Settings: out-of-band turn notifications (opt-in Discord DM).
+             Hidden when the server has no bot configured. Lives here in the
+             menu's settings area, NOT the new-game chooser. -->
+        <div class="main-menu-section" id="notify-section" hidden>
+          <h2 class="main-menu-heading">Turn notifications</h2>
+          <p class="muted notify-help">
+            Get a Discord DM when it's your turn. Enable Developer Mode in
+            Discord, right-click your name, Copy User ID, and paste it here -
+            then send a test (the bot must share a server with you).
+          </p>
+          <label class="notify-field">
+            <span>Discord user ID</span>
+            <input id="notify-discord-id" type="text" inputmode="numeric"
+              autocomplete="off" spellcheck="false" placeholder="e.g. 123456789012345678" />
+          </label>
+          <label class="checkbox"><input type="checkbox" id="notify-turn" checked /> When it's my turn</label>
+          <label class="checkbox"><input type="checkbox" id="notify-auction" checked /> When an auction needs me</label>
+          <div class="main-menu-row">
+            <button id="btn-notify-save" type="button">Save</button>
+            <button id="btn-notify-test" type="button">Send test DM</button>
+          </div>
+          <p id="notify-status" class="muted notify-status"></p>
+          <p id="notify-disabled-note" class="muted" hidden>
+            This server has no notification bot configured, so DMs are unavailable.
+          </p>
+        </div>
       </div>
     </div>
 
@@ -456,31 +482,6 @@
             <button id="btn-new-game-mp" class="primary" type="button">🛰 Multiplayer table</button>
             <button id="btn-new-game-sandbox" type="button">🗺 Sandbox (solo)</button>
           </div>
-        </div>
-        <!-- Out-of-band turn notifications. Opt-in Discord DM; hidden when
-             the server has no bot configured (set-notify reports it). -->
-        <div class="main-menu-section" id="notify-section" hidden>
-          <h2 class="main-menu-heading">Turn notifications</h2>
-          <p class="muted notify-help">
-            Get a Discord DM when it's your turn. Enable Developer Mode in
-            Discord, right-click your name, Copy User ID, and paste it here -
-            then send a test (the bot must share a server with you).
-          </p>
-          <label class="notify-field">
-            <span>Discord user ID</span>
-            <input id="notify-discord-id" type="text" inputmode="numeric"
-              autocomplete="off" spellcheck="false" placeholder="e.g. 123456789012345678" />
-          </label>
-          <label class="checkbox"><input type="checkbox" id="notify-turn" checked /> When it's my turn</label>
-          <label class="checkbox"><input type="checkbox" id="notify-auction" checked /> When an auction needs me</label>
-          <div class="main-menu-row">
-            <button id="btn-notify-save" type="button">Save</button>
-            <button id="btn-notify-test" type="button">Send test DM</button>
-          </div>
-          <p id="notify-status" class="muted notify-status"></p>
-          <p id="notify-disabled-note" class="muted" hidden>
-            This server has no notification bot configured, so DMs are unavailable.
-          </p>
         </div>
       </div>
     </div>
