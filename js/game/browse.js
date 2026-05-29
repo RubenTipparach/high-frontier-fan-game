@@ -1503,6 +1503,8 @@ function humanizeOnlineOpError(code) {
     not_in_hand: 'That card is not in your hand.',
     not_in_stack: 'That card is not on your rocket.',
     cannot_build: 'That card cannot be built right now.',
+    rocket_at_leo: 'Park out in space to make an outpost - at LEO, use the LEO Stack.',
+    no_outpost_slot: 'All 4 outpost slots are in use.',
     bad_decommission: 'Pick a card to decommission.',
     nothing_decommissioned: 'Nothing decommissioned (crew can\'t return to the hand).',
     cannot_liftoff: 'Not enough thrust to lift off (and no factory here to assist).',
@@ -6055,6 +6057,18 @@ async function doConvertToOutpost(site) {
   const stack = getRocketStack();
   const tank  = getTankWater();
   if (!stack.length) return;
+  // Online: the server parks the stack as an outpost (it picks the slot)
+  // and recalls the rocket. Confirm, submit, let the snapshot re-hydrate.
+  if (_online) {
+    const ok = await confirmModal({
+      title: `🚀→🏛 Convert Rocket to Outpost at ${site.name}`,
+      body: `<p>${stack.length} card${stack.length === 1 ? '' : 's'} + ${tank} water will park as a new outpost here; your rocket returns to LEO empty.</p>`,
+      yes: '🚀→🏛 Convert', no: 'Cancel',
+    });
+    if (!ok) return;
+    await submitOnlineOp({ kind: 'CONVERT_OUTPOST' });
+    return;
+  }
   const letter = await pickOutpostSlot({
     title: `🚀→🏛 Convert Rocket to Outpost at ${site.name}`,
     body: `<p>${stack.length} card${stack.length === 1 ? '' : 's'} + ${tank} water will move to the new outpost.</p>`,

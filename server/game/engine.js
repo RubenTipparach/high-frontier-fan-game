@@ -702,6 +702,43 @@ function applyDecommission(state, op, player) {
   return { ok: true, state, log };
 }
 
+// Convert the rocket to an Outpost at its current site (mirror of
+// browse.js#doConvertToOutpost). The whole stack + tank park as a new
+// outpost in the first free slot (A-D); the rocket empties and recalls to
+// LEO. Allowed anywhere in space EXCEPT LEO (at LEO, cards live in the LEO
+// Stack). Turn-gated, free. op = {} (slot + site are derived from state).
+const OUTPOST_LETTERS = ['A', 'B', 'C', 'D'];
+function applyConvertOutpost(state, op, player) {
+  if (player.rocket.stack.length === 0) return fail('empty_rocket');
+  const siteId = player.rocket.siteId;
+  if (siteId == null) return fail('rocket_at_leo');     // use the LEO Stack instead
+  const taken = new Set(Object.keys(player.outposts || {}));
+  const letter = OUTPOST_LETTERS.find((l) => !taken.has(l));
+  if (!letter) return fail('no_outpost_slot');
+  player.outposts = player.outposts || {};
+  player.outposts[letter] = {
+    letter,
+    siteId,
+    cards: player.rocket.stack.map((s) => ({ id: s.id, kind: s.kind, ...(s.face ? { face: s.face } : {}) })),
+    tank: player.rocket.tank | 0,
+  };
+  const n = player.rocket.stack.length;
+  const water = player.rocket.tank | 0;
+  // Empty the rocket back to LEO (same wipe as a recall).
+  player.rocket.stack = [];
+  player.rocket.tank = 0;
+  player.rocket.siteId = null;
+  player.rocket.activeThrusterId = null;
+  player.rocket.activeProspectorId = null;
+  player.rocket.route = [];
+  const where = siteById(siteId);
+  const whereName = (where && where.name) || siteId;
+  return {
+    ok: true, state,
+    log: `${player.name} converted the rocket to Outpost ${letter} at ${whereName} (${n} card${n === 1 ? '' : 's'}, ${water} water).`,
+  };
+}
+
 // Pick which stacked thruster powers burns (rocket.js#setActiveThruster).
 // A free reconfiguration, not an op.
 function applySetActiveThruster(state, op, player) {
@@ -818,6 +855,7 @@ const FUNCTIONAL = {
   BOOST: applyBoost,
   TRANSFER: applyTransfer,
   DECOMMISSION: applyDecommission,
+  CONVERT_OUTPOST: applyConvertOutpost,
   REFUEL: applyRefuel,
   CASH_WATER: applyCashWater,
   FREE_MARKET: applyFreeMarket,
