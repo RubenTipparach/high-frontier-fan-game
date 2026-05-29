@@ -8134,6 +8134,9 @@ function animateSnapshotMoves(prev, snapshot) {
   const myId = _onlineMe && _onlineMe.id;
   const finalMp = computeMpRockets(snapshot);
 
+  const meNow = (snapshot.players || []).find((p) => p.profileId === myId);
+  const lm = meNow && meNow.rocket && meNow.rocket.lastMove;
+
   const slides = () => {
     for (const p of (snapshot.players || [])) {
       const before = prevById.get(p.profileId);
@@ -8141,6 +8144,9 @@ function animateSnapshotMoves(prev, snapshot) {
       const fromSite = (before.rocket && before.rocket.siteId) || null;
       const toSite = (p.rocket && p.rocket.siteId) || null;
       if (fromSite === toSite) continue;          // this ship didn't move
+      // A ship destroyed by a hazard roll didn't travel - it blew up and
+      // its cards recalled to LEO; the dice modal already told that story.
+      if (p.profileId === myId && lm && lm.destroyed) continue;
       const segs = animPathSegments(fromSite, toSite);
       if (!segs) continue;
       if (p.profileId === myId) {
@@ -8152,13 +8158,12 @@ function animateSnapshotMoves(prev, snapshot) {
   };
 
   // Local player's own hazard dice (if this move rolled any). Keyed off
-  // the per-move nonce so a re-applied snapshot doesn't replay them.
+  // the per-move nonce, and only when it INCREASES - a real new move bumps
+  // it; an UNDO rebuilds to a lower nonce, which must NOT replay the dice.
   const meBefore = prevById.get(myId);
-  const meNow = (snapshot.players || []).find((p) => p.profileId === myId);
-  const lm = meNow && meNow.rocket && meNow.rocket.lastMove;
   const prevNonce = (meBefore && meBefore.rocket && meBefore.rocket.lastMove
     && meBefore.rocket.lastMove.nonce) || 0;
-  if (lm && lm.nonce && lm.nonce !== prevNonce && Array.isArray(lm.rolls) && lm.rolls.length) {
+  if (lm && lm.nonce > prevNonce && Array.isArray(lm.rolls) && lm.rolls.length) {
     playHazardRolls(lm).then(slides);
   } else {
     slides();
