@@ -8098,7 +8098,13 @@ function syncMeColor(snapshot) {
   let color = null;
   if (_online && snapshot && Array.isArray(snapshot.players) && _onlineMe) {
     const me = snapshot.players.find((p) => p.profileId === _onlineMe.id);
-    color = (me && me.color) || null;
+    const active = snapshot.players[snapshot.activeIndex];
+    const myTurn = !!(active && active.profileId === _onlineMe.id);
+    // Only light the player's own seat-colour chrome ON THEIR TURN, so a
+    // glance at the top bar / hand tells you whether it's your move. Off-
+    // turn the chrome goes neutral (the bottom banner still names whose
+    // turn it is, tinted in their colour).
+    color = (myTurn && me && me.color) || null;
   }
   if (color) shell.style.setProperty('--me-color', color);
   else shell.style.removeProperty('--me-color');
