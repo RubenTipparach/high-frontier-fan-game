@@ -243,6 +243,19 @@ function gameViewVisible() {
   return !!view && !view.classList.contains('hidden');
 }
 
+// Re-evaluate the body-attached room overlays (crew draft + auction)
+// against the current view + cached snapshot. Called on every view
+// switch (main.js#showView) because the snapshot poll is seq-gated and
+// won't fire when nothing changed - so leaving the game room would
+// otherwise leave a stale chip hovering over the lobby. Both renderers
+// gate on gameViewVisible() and handle a null/absent payload by
+// removing themselves, so this both tears down (off-room) and restores
+// (back in-room, still drafting/auctioning) from the cached snapshot.
+export function refreshRoomOverlays() {
+  syncCrewDraftOverlay(_online ? _onlineSnapshot : null);
+  renderOnlineAuction(_online && _onlineSnapshot ? _onlineSnapshot.auction : null);
+}
+
 export function mountBrowse(opts = {}) {
   const view = document.getElementById('view-browse');
   if (!view) return;

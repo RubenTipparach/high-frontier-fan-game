@@ -13,7 +13,7 @@ import {
 import {
   initInvites, refreshInvitesList, subscribeInvitesForProfile,
 } from './invites.js';
-import { mountBrowse, isBrowseOnline } from './game/browse.js';
+import { mountBrowse, isBrowseOnline, refreshRoomOverlays } from './game/browse.js';
 import { newSandboxGame, currentSandboxId, activateSandboxGame } from './game/sandbox-games.js';
 
 const VIEWS = [
@@ -76,6 +76,13 @@ function showView(id) {
   for (const v of VIEWS) {
     document.getElementById(v).classList.toggle('hidden', v !== id);
   }
+  // The crew-draft / auction overlays attach to document.body and the
+  // snapshot poll is seq-gated, so a poll alone won't tear them down
+  // when the player navigates away (e.g. the top-menu Lobby button,
+  // which doesn't unmount the online layer). Re-sync them on every view
+  // switch: they remove themselves off the game room and re-appear from
+  // the cached snapshot on return.
+  refreshRoomOverlays();
   // URL <-> view mapping. Online view-browse keeps its /room/<code>
   // form (lobby.js#setRoomInUrl wrote it on enterLobby); everything
   // else routes through setUrlForView.
