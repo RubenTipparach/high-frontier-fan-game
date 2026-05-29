@@ -1514,6 +1514,7 @@ function humanizeOnlineOpError(code) {
     not_in_source: 'That card is not in the source stack.',
     not_colocated: 'Park the rocket at that stack\'s site to transfer.',
     no_outpost: 'That outpost does not exist.',
+    outpost_not_empty: 'Empty the outpost first (move its cards out), then decommission it.',
     crew_no_decommission: 'Crew can\'t be decommissioned here - that happens via an event.',
     bad_decommission: 'Pick a card to decommission.',
     nothing_decommissioned: 'Nothing decommissioned (crew can\'t return to the hand).',
@@ -2429,6 +2430,7 @@ function openUnifiedStackInspector(stackId) {
             ? '<button type="button" class="modal-btn stack leo-fuel-tank" title="Open the docked rocket\'s water tank to transfer fuel">💧 Rocket fuel tank</button>'
             : ''}
           ${outpostPumpBtnHtml(stackId)}
+          ${outpostDissolveBtnHtml(stackId)}
           <button type="button" class="modal-btn stack-inspector-close">Close</button>
         </div>
       </div>
@@ -2590,6 +2592,25 @@ function openUnifiedStackInspector(stackId) {
         if (max <= 0) return;
         close();
         doPumpOutpostFuel(letter, max);
+      });
+    }
+    // Decommission an empty outpost (dissolve it, free the slot).
+    const dissolveBtn = dialog.querySelector('.stack-dissolve-outpost');
+    if (dissolveBtn) {
+      dissolveBtn.addEventListener('click', async () => {
+        const letter = dissolveBtn.dataset.letter;
+        const op = getOutpost(letter);
+        const waterNote = op && (op.tank | 0) > 0
+          ? ` Its ${op.tank} water will be lost.` : '';
+        const ok = await confirmModal({
+          title: `🗑 Decommission Outpost ${letter}`,
+          body: `Free outpost slot ${letter}?${waterNote}`,
+          yes: '🗑 Decommission', no: 'Cancel',
+        });
+        if (!ok) return;
+        if (_online) { await submitOnlineOp({ kind: 'DISSOLVE_OUTPOST', letter }); close(); return; }
+        dissolveOutpost(letter);
+        close();
       });
     }
     // Decommission: return the selected cards to hand (free,
@@ -6183,6 +6204,36 @@ function outpostPumpBtnHtml(stackId) {
   return `<button type="button" class="modal-btn stack stack-pump-fuel" data-letter="${esc(letter)}" data-max="${max}" ${disabled} title="${title}">💧 Pump ${max > 0 ? max + ' ' : ''}→ rocket</button>`;
 }
 
+// Pump buttons for the ROCKET fuel-tank modal: one per colocated outpost
+// that holds water (when the rocket has tank room). This is where players
+// look to fill the rocket, so the outpost-water source surfaces here too.
+function fuelTankPumpBtns() {
+  const rs = getRocketSite();
+  if (!rs || getRocketStack().length === 0) return '';
+  const totals = getStackTotals();
+  const room = Math.max(0, getTankMax() - (totals.dryMass || 0) - getTankWater());
+  if (room <= 0) return '';
+  let html = '';
+  for (const letter of OUTPOST_LETTERS) {
+    const op = getOutpost(letter);
+    if (!op || op.siteId !== rs.id || (op.tank | 0) <= 0) continue;
+    const max = Math.min(op.tank | 0, room);
+    html += `<button type="button" class="popup-btn fuel-pump-from" data-letter="${esc(letter)}" data-max="${max}" title="Pump up to ${max} water from Outpost ${esc(letter)} into the rocket">💧⤒ Pump from Outpost ${esc(letter)} (${op.tank})</button>`;
+  }
+  return html;
+}
+
+// Footer button for an EMPTY outpost: decommission (dissolve) it to free
+// the slot. Empty string when the outpost still holds cards.
+function outpostDissolveBtnHtml(stackId) {
+  if (!stackId.startsWith('outpost')) return '';
+  const letter = stackId.slice('outpost'.length);
+  const op = getOutpost(letter);
+  if (!op || (op.cards && op.cards.length > 0)) return '';
+  const waterNote = (op.tank | 0) > 0 ? ` (forfeits ${op.tank} water)` : '';
+  return `<button type="button" class="modal-btn decommission stack-dissolve-outpost" data-letter="${esc(letter)}" title="Decommission this empty outpost and free the slot${waterNote}">🗑 Decommission outpost</button>`;
+}
+
 // Minimal amount-picker modal (stepper + "All"). Resolves to a positive
 // integer or null on cancel.
 function pickFuelAmount({ title = '💧 Transfer water', max = 1 } = {}) {
@@ -7137,6 +7188,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     <div class="fuel-tank-actions">
       <button type="button" class="popup-btn popup-btn-secondary" id="tank-dump"
         title="Drain a chosen amount of water from the tank">💧⤓ Dump water</button>
+      ${fuelTankPumpBtns()}
     </div>
 <div class="fuel-tank-aqua" id="tank-aqua-section" hidden>
       <div class="aqua-row">
@@ -7435,6 +7487,16 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     if (dumpBtn) dumpBtn.disabled = cur <= 0;
   };
   refreshDumpButtons();
+  // Pump-from-outpost buttons (when a colocated outpost holds water).
+  panel.querySelectorAll('.fuel-pump-from').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const letter = btn.dataset.letter;
+      const max = Number(btn.dataset.max) || 0;
+      if (max <= 0) return;
+      close();
+      doPumpOutpostFuel(letter, max);
+    });
+  });
   function drainTo(targetLevel, durationMs = 250) {
     // Hand off to the unified tween: the continuous step picks
     // it up next frame and animates setLevel without disturbing
@@ -8680,6 +8742,9 @@ function syncColonies() {
 }
 function syncOutposts() {
   if (!_renderer) return;
+  // Tint the local player's outpost cubes with their seat colour (the
+  // same colour as their rocket) so a cube reads as "mine" at a glance.
+  _renderer.setOutpostColor(myRocketColour());
   _renderer.setOutposts(getOutposts());
 }
 // Translate the focused-stack id ('rocket' | 'outpostA' | ...)

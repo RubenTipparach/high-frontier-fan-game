@@ -769,6 +769,18 @@ function applyConvertOutpost(state, op, player) {
   };
 }
 
+// Decommission (dissolve) an EMPTY outpost - frees the slot. Requires the
+// outpost to hold no cards (pump its water out / move its cards first).
+// op = { letter }.
+function applyDissolveOutpost(state, op, player) {
+  const letter = String(op.letter || '');
+  const outpost = player.outposts && player.outposts[letter];
+  if (!outpost) return fail('no_outpost');
+  if (outpost.cards && outpost.cards.length > 0) return fail('outpost_not_empty');
+  delete player.outposts[letter];
+  return { ok: true, state, log: `${player.name} decommissioned Outpost ${letter}.` };
+}
+
 // Pump water from a colocated Outpost into the rocket tank. The rocket
 // must be parked at the outpost's site. Clamped by the outpost's water and
 // the rocket's remaining wet-mass room. Free, turn-gated.
@@ -913,6 +925,7 @@ const FUNCTIONAL = {
   BOOST: applyBoost,
   TRANSFER: applyTransfer,
   TRANSFER_FUEL: applyTransferFuel,
+  DISSOLVE_OUTPOST: applyDissolveOutpost,
   DECOMMISSION: applyDecommission,
   CONVERT_OUTPOST: applyConvertOutpost,
   REFUEL: applyRefuel,
@@ -933,6 +946,7 @@ function pickPayload(op) {
     case 'BOOST': return { cardIds: op.cardIds };
     case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from, to: op.to };
     case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount };
+    case 'DISSOLVE_OUTPOST': return { letter: op.letter };
     case 'DECOMMISSION': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from };
     case 'REFUEL': return { amount: op.amount };
     case 'CASH_WATER': return { amount: op.amount };
