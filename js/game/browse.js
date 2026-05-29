@@ -323,6 +323,15 @@ async function bootstrapOnlineGame() {
   ws.subscribe(channel);
   const off = ws.on('game_update', (msg) => {
     if (!_online || !msg || msg.gameId !== _onlineGameId || !msg.game) return;
+    // Route ops (SET_ROUTE / CLEAR_ROUTE) only change SECRET server state
+    // the client already mirrors locally - re-hydrating from them is
+    // pointless and causes a visible canvas blink (the hand reflow resizes
+    // the map canvas). Absorb them quietly so the seq stays current.
+    const kind = msg.op && msg.op.kind;
+    if (kind === 'SET_ROUTE' || kind === 'CLEAR_ROUTE') {
+      noteQuietSnapshot(msg.game.state, msg.game.seq);
+      return;
+    }
     applySnapshot(msg.game.state, msg.game.seq);
   });
   _onlineOffWS = () => { off(); ws.unsubscribe(channel); };
@@ -404,6 +413,17 @@ function setPollCadence(ms) {
 // NOT invalidate local UI unless the server actually moved. Callers
 // that need to force a re-hydrate (error snap-back to the cached
 // state) pass seq = undefined.
+// Absorb a snapshot WITHOUT re-hydrating any module: update the cached
+// state + the applied-seq so later polls/echoes are seq-gated, but don't
+// touch the DOM or canvas. Used for ops whose only change is invisible to
+// this client (its own secret route), so they never trigger a redraw.
+function noteQuietSnapshot(snapshot, seq) {
+  if (!snapshot) return;
+  if (seq != null && seq <= _lastAppliedSeq) return;
+  if (seq != null) _lastAppliedSeq = seq;
+  _onlineSnapshot = snapshot;
+}
+
 function applySnapshot(snapshot, seq) {
   if (!snapshot || !_onlineMaps || !_onlineMe) return;
   if (seq != null && seq === _lastAppliedSeq) return;  // nothing new
@@ -8026,13 +8046,22 @@ function submitSetRouteOnline() {
   const segments = routeSegmentsForServer();
   if (!segments || !segments.length) return;
   submitGameOp(_onlineGameId, { kind: 'SET_ROUTE', segments }, _onlineMe.token)
-    .then((r) => { if (r && !r.ok) { /* route stays local; harmless */ } })
+    .then((r) => {
+      // Absorb our own op's snapshot quietly (no re-hydrate / no canvas
+      // blink); the route is already drawn locally. Covers the case where
+      // the HTTP response lands before/without the WS echo.
+      if (r && r.ok && r.data && r.data.game) noteQuietSnapshot(r.data.game.state, r.data.game.seq);
+    })
     .catch(() => {});
 }
 function submitClearRouteOnline() {
   if (!_online || _spectator || !_onlineGameId || !_onlineMe) return;
   if (!isOnlineMyTurn()) return;
-  submitGameOp(_onlineGameId, { kind: 'CLEAR_ROUTE' }, _onlineMe.token).catch(() => {});
+  submitGameOp(_onlineGameId, { kind: 'CLEAR_ROUTE' }, _onlineMe.token)
+    .then((r) => {
+      if (r && r.ok && r.data && r.data.game) noteQuietSnapshot(r.data.game.state, r.data.game.seq);
+    })
+    .catch(() => {});
 }
 
 // Shortest-path planner segments [{from, to}] between two server site
@@ -8175,6 +8204,17 @@ function animateSnapshotMoves(prev, snapshot) {
 // them in rocket.lastMove; this shows them with the same glyph language as
 // the sandbox and the verdict (survived / decommissioned / DESTROYED).
 // Resolves when dismissed so the rocket slide can follow.
+// Display name for a decommissioned card id (patent name, else crew name).
+function decommCardName(id) {
+  const p = PATENTS_BY_ID[id];
+  if (p) return p.name || id;
+  const crew = CREW_BY_ID[id];
+  if (crew) {
+    const f = (crew.faces && crew.faces.primary) || {};
+    return f.name || id;
+  }
+  return id;
+}
 function playHazardRolls(lm) {
   return new Promise((resolve) => {
     const rolls = (lm.rolls || []).filter((r) => typeof r.d6 === 'number');
@@ -8229,8 +8269,8 @@ function playHazardRolls(lm) {
       if (lm.destroyed) {
         resultLine.innerHTML = '<strong class="bad">Critical (rolled a 1) - rocket destroyed.</strong> Cards returned to your hand / LEO.';
       } else if (lm.decommissioned && lm.decommissioned.length) {
-        const n = lm.decommissioned.length;
-        resultLine.innerHTML = `Radiation decommissioned <strong>${n}</strong> card${n === 1 ? '' : 's'} to your hand / LEO.`;
+        const names = lm.decommissioned.map(decommCardName);
+        resultLine.innerHTML = `Radiation decommissioned <strong>${names.map(esc).join('</strong>, <strong>')}</strong> to your hand / LEO.`;
       } else {
         resultLine.innerHTML = '<strong class="ok">Survived</strong> - the rocket flew through unscathed.';
       }
