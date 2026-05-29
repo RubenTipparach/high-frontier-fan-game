@@ -104,6 +104,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # The Fly image is built from the repo root (see server/Dockerfile)
+          # and now bundles vendor/hf-mission-planner so the server can read
+          # assets/data-hf4.json at boot (server/game/planner-graph.js builds
+          # the ~1500-node movement graph from it). That directory is a git
+          # submodule, so without this the deploy checkout would copy an empty
+          # vendor/ into the image and the planner graph would load 0 nodes,
+          # breaking all server-side rocket movement. The Pages build job
+          # already checks out submodules for the same JSON.
+          submodules: recursive
 
       - name: Set up flyctl
         uses: superfly/flyctl-actions/setup-flyctl@master
