@@ -331,7 +331,7 @@ export async function refreshPublicGames() {
           · <code></code></span>
       </div>
       <div class="row-actions">
-        <button class="primary">👁 Watch</button>
+        <button class="primary">Watch</button>
       </div>
     `;
     li.querySelector('.name').textContent = g.lobbyName;
