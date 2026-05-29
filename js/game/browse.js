@@ -7314,35 +7314,40 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   // visual "from" off the on-screen readout and tween up to the
   // new tank water level. Wraps the spend + addFuel pair so a
   // failed spend doesn't leave the level mid-animation.
-  const fillFromAqua = (amount, e) => {
-    e?.stopPropagation();
-    if (!atLeo) return;
-    const cur = getTankWater();
-    const room = Math.max(0, cap - cur);
-    const want = Math.min(amount, room, getAqua());
-    if (want <= 0) { refreshAquaButtons(); return; }
-    // Online: aqua->water is the server REFUEL op. Submit it and let
-    // the snapshot re-hydrate the tank + aqua; skip the local spend.
-    if (_online) {
-      submitOnlineOp({ kind: 'REFUEL', amount: want });
-      return;
-    }
-    if (!spendAqua(want)) { refreshAquaButtons(); return; }
-    addFuel(want);
-    const fromLevel = parseFloat(nowReadout.textContent || String(cur));
+  // Run the fill tween from the currently-displayed level up to the
+  // tank's new value. Shared by the solo + online paths so both pour
+  // the same way.
+  const animateFill = () => {
+    const fromLevel = parseFloat(nowReadout.textContent || String(getTankWater()));
     const toLevel = getTankWater();
-    if (fromLevel === toLevel) {
-      refreshAquaButtons();
-      return;
-    }
-    // Hand off to the unified tween. animating=true makes
-    // stepDrops pour rapidly while the level climbs.
+    if (fromLevel === toLevel) { refreshAquaButtons(); return; }
     animating = true;
     tween = {
       from: fromLevel, to: toLevel,
       t0: performance.now(), dur: 400,
       onDone: () => { refreshAquaButtons(); refreshDumpButtons(); },
     };
+  };
+  const fillFromAqua = async (amount, e) => {
+    e?.stopPropagation();
+    if (!atLeo) return;
+    const cur = getTankWater();
+    const room = Math.max(0, cap - cur);
+    const want = Math.min(amount, room, getAqua());
+    if (want <= 0) { refreshAquaButtons(); return; }
+    // Online: aqua->water is the server REFUEL op. AWAIT it so the
+    // snapshot re-hydrates the tank first, THEN play the same fill
+    // animation from the old displayed level to the new tank value
+    // (previously it returned early and the tank just snapped).
+    if (_online) {
+      const ok = await submitOnlineOp({ kind: 'REFUEL', amount: want });
+      if (!ok) { refreshAquaButtons(); return; }
+      animateFill();
+      return;
+    }
+    if (!spendAqua(want)) { refreshAquaButtons(); return; }
+    addFuel(want);
+    animateFill();
     logAction({
       type: 'aqua_transfer',
       icon: '💎→💧',
