@@ -189,6 +189,12 @@ const ONLINE_POLL_AUCTION_MS = 500;
 let _onlineToast = null;      // (msg, level) => void, from the caller
 let _onlineMaps = null;       // { serverToPlanner, plannerToServer }
 let _onlineSnapshot = null;   // latest server snapshot (for turn checks)
+// Op-log seq of the last snapshot we actually hydrated. applySnapshot
+// short-circuits when an incoming snapshot carries the same seq, so a
+// poll tick that finds nothing new is a TRUE no-op: no module
+// re-hydrate, no re-render, no stomping on in-progress local UI
+// (boost marks, open modals, etc). Reset on unmount.
+let _lastAppliedSeq = -1;
 let _onlineOffWS = null;      // unsubscribe handle for the game channel
 let _onlineBusy = false;      // in-flight op guard (prevents double submit)
 let _onlineRoom = null;       // table / lobby name for the multiplayer panel
@@ -304,7 +310,7 @@ async function bootstrapOnlineGame() {
     _onlineToast(humanizeOnlineOpError(r.error), 'error');
     return;
   }
-  applySnapshot(r.data.game.state);
+  applySnapshot(r.data.game.state, r.data.game.seq);
   // Open the multiplayer panel so the player lands on the table (room,
   // turn, roster) rather than the solo game-mode pane.
   showPane('mp');
@@ -314,7 +320,7 @@ async function bootstrapOnlineGame() {
   ws.subscribe(channel);
   const off = ws.on('game_update', (msg) => {
     if (!_online || !msg || msg.gameId !== _onlineGameId || !msg.game) return;
-    applySnapshot(msg.game.state);
+    applySnapshot(msg.game.state, msg.game.seq);
   });
   _onlineOffWS = () => { off(); ws.unsubscribe(channel); };
 
@@ -356,7 +362,7 @@ async function eagerPoll() {
     const r = await getGame(_onlineGameId, _onlineMe.token);
     if (!_online) return;
     if (r && r.ok && r.data && r.data.game && r.data.game.state) {
-      applySnapshot(r.data.game.state);
+      applySnapshot(r.data.game.state, r.data.game.seq);
     }
   } catch { /* next tick will retry */ }
   finally { _eagerPollInFlight = false; }
@@ -375,7 +381,9 @@ function setPollCadence(ms) {
       const poll = await getGame(_onlineGameId, _onlineMe.token);
       if (!_online) return;
       if (poll && poll.ok && poll.data && poll.data.game && poll.data.game.state) {
-        applySnapshot(poll.data.game.state);
+        // Seq-gated: a poll that returns the same seq we already have
+        // is a no-op inside applySnapshot - it won't touch local UI.
+        applySnapshot(poll.data.game.state, poll.data.game.seq);
       }
     } catch (err) {
       // Network blips are expected; the next tick will retry.
@@ -387,8 +395,16 @@ function setPollCadence(ms) {
 // the rocket marker at the translated planner node (or LEO when the
 // server site has no planner node / the ship is at LEO). Caches the
 // snapshot so the action routers + turn checks can read activeIndex.
-function applySnapshot(snapshot) {
+// `seq` is the server op-log sequence the snapshot was taken at (from
+// the game wrapper). When it matches the last applied seq the server
+// state hasn't advanced, so we skip the entire hydrate - polling must
+// NOT invalidate local UI unless the server actually moved. Callers
+// that need to force a re-hydrate (error snap-back to the cached
+// state) pass seq = undefined.
+function applySnapshot(snapshot, seq) {
   if (!snapshot || !_onlineMaps || !_onlineMe) return;
+  if (seq != null && seq === _lastAppliedSeq) return;  // nothing new
+  if (seq != null) _lastAppliedSeq = seq;
   _onlineSnapshot = snapshot;
   // Card economy is server-authoritative in multiplayer (state.economy).
   // Pin the client's MARKET_MODE to whatever the snapshot says BEFORE
@@ -624,7 +640,7 @@ async function submitMpCrewOp(op) {
     if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
     return false;
   }
-  applySnapshot(r.data.game.state);
+  applySnapshot(r.data.game.state, r.data.game.seq);
   return true;
 }
 
@@ -926,7 +942,7 @@ async function submitMpAuctionOp(op) {
     if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
     return false;
   }
-  applySnapshot(r.data.game.state);
+  applySnapshot(r.data.game.state, r.data.game.seq);
   return true;
 }
 
@@ -1268,7 +1284,7 @@ async function submitOnlineOp(op) {
     if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
     return false;
   }
-  applySnapshot(r.data.game.state);
+  applySnapshot(r.data.game.state, r.data.game.seq);
   return true;
 }
 
@@ -1352,6 +1368,7 @@ export function unmountBrowseOnline() {
   if (_onlineChatOff) { try { _onlineChatOff(); } catch { /* ignore */ } _onlineChatOff = null; }
   _onlineMaps = null;
   _onlineSnapshot = null;
+  _lastAppliedSeq = -1;
   _onlineBusy = false;
   _onlineRoom = null;
   _onlineLobbyId = null;

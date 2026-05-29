@@ -273,9 +273,26 @@ server's current state, and MUST NOT block a UX decision on
   recent server state; every turn-ownership check, action gate, and
   budget read goes through it instead of trusting transient WS
   events.
-- **Compare-before-apply isn't needed.** `applySnapshot` is
-  idempotent: hydrating the same seq twice is a no-op. So a poll
-  fetch that returns the cached state is safe to re-apply.
+- **Polling must NOT invalidate local state unless the server
+  actually advanced.** This is the rule, learned the hard way: a
+  naive `applySnapshot` that re-hydrates every module on every poll
+  tick stomps on in-progress local UI (it wiped the player's boost
+  selection every 5s - boost marks were cleared inside `hydrateHand`
+  on every snapshot). The fix is two-layered:
+  1. **Seq-gate the whole apply.** `applySnapshot(state, seq)` takes
+     the server op-log `seq` (from the game wrapper) and returns
+     immediately when `seq === _lastAppliedSeq`. Every meaningful
+     change (any op: MOVE / END_TURN / AUCTION_* / PICK_CREW)
+     advances the seq, so a poll that returns the same seq is a
+     genuine no-op: no module re-hydrate, no re-render, nothing
+     touched. Error snap-back calls pass no seq to force a re-apply.
+  2. **Make each hydrator idempotent + non-destructive.** Even when
+     the seq DOES advance (an opponent moved), re-hydrating my own
+     stacks must preserve my in-progress selections. `hydrateHand`
+     keeps boost marks for cards still in the hand and only fires
+     its change listeners when the hand or marks actually changed.
+     Apply the same discipline to any new hydrator: diff, preserve
+     local-only UI state, and only notify on a real delta.
 - **Eager one-shot fetches** on phase transitions where latency
   matters (e.g. auction `bidders → auctioneer`) shave the
   worst-case wait below one tick.
