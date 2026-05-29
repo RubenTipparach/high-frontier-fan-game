@@ -426,7 +426,13 @@ function noteQuietSnapshot(snapshot, seq) {
 
 function applySnapshot(snapshot, seq) {
   if (!snapshot || !_onlineMaps || !_onlineMe) return;
-  if (seq != null && seq === _lastAppliedSeq) return;  // nothing new
+  // Seq is monotonic: ignore a snapshot we've already passed. `===` alone
+  // wasn't enough - an in-flight poll that resolves with an OLDER seq
+  // AFTER a newer op applied would re-apply stale state and silently
+  // revert the newer op (e.g. a fresh outpost vanishing). `<=` drops both
+  // duplicates and out-of-order arrivals. A forced re-apply passes
+  // seq = undefined (error snap-back) and is never gated.
+  if (seq != null && seq <= _lastAppliedSeq) return;
   if (seq != null) _lastAppliedSeq = seq;
   // Hold the state we're about to replace so the transition animator
   // (below) can DIFF old -> new and replay the motion the player would
@@ -2422,6 +2428,7 @@ function openUnifiedStackInspector(stackId) {
           ${stackId === 'leo' && isLeoSite(getRocketSite())
             ? '<button type="button" class="modal-btn stack leo-fuel-tank" title="Open the docked rocket\'s water tank to transfer fuel">💧 Rocket fuel tank</button>'
             : ''}
+          ${outpostPumpBtnHtml(stackId)}
           <button type="button" class="modal-btn stack-inspector-close">Close</button>
         </div>
       </div>
@@ -2572,6 +2579,17 @@ function openUnifiedStackInspector(stackId) {
       fuelBtn.addEventListener('click', () => {
         close();
         openFuelTankModal();
+      });
+    }
+    // Pump the outpost's water into a colocated rocket.
+    const pumpBtn = dialog.querySelector('.stack-pump-fuel');
+    if (pumpBtn) {
+      pumpBtn.addEventListener('click', () => {
+        const letter = pumpBtn.dataset.letter;
+        const max = Number(pumpBtn.dataset.max) || 0;
+        if (max <= 0) return;
+        close();
+        doPumpOutpostFuel(letter, max);
       });
     }
     // Decommission: return the selected cards to hand (free,
@@ -6145,6 +6163,24 @@ async function doPumpOutpostFuel(letter, max) {
   setOutpostTank(letter, (op.tank | 0) - amt);
   addFuel(amt);
   setStatus(`💧 Pumped ${amt} water from Outpost ${letter} into the rocket.`);
+}
+
+// Footer button for the outpost inspector: pump the outpost's water into
+// a colocated rocket. Empty string when not applicable (not an outpost,
+// no rocket here, no water, or no tank room).
+function outpostPumpBtnHtml(stackId) {
+  if (!stackId.startsWith('outpost')) return '';
+  const letter = stackId.slice('outpost'.length);
+  const op = getOutpost(letter);
+  if (!op || (op.tank | 0) <= 0) return '';
+  const rs = getRocketSite();
+  if (!rs || rs.id !== op.siteId || getRocketStack().length === 0) return '';
+  const totals = getStackTotals();
+  const room = Math.max(0, getTankMax() - (totals.dryMass || 0) - getTankWater());
+  const max = Math.min(op.tank | 0, room);
+  const disabled = max <= 0 ? 'disabled' : '';
+  const title = max > 0 ? `Pump up to ${max} water into the rocket` : 'Rocket tank is full';
+  return `<button type="button" class="modal-btn stack stack-pump-fuel" data-letter="${esc(letter)}" data-max="${max}" ${disabled} title="${title}">💧 Pump ${max > 0 ? max + ' ' : ''}→ rocket</button>`;
 }
 
 // Minimal amount-picker modal (stepper + "All"). Resolves to a positive
@@ -10293,6 +10329,7 @@ function showSitePopupFor(site) {
       actions.push({
         label: `🏛${op.letter} Open Outpost`,
         variant: 'secondary',
+        inspect: true,   // viewing is allowed any time, even off-turn
         title: `Open Outpost ${op.letter}'s stack (${n} card${n === 1 ? '' : 's'}, ${op.tank} water).`,
         onClick: () => {
           openOutpostStackModal(op.letter);
@@ -10307,6 +10344,7 @@ function showSitePopupFor(site) {
   actions.push({
     label: 'Navigate to →',
     variant: 'secondary',
+    inspect: true,   // pure inspection - always available
     disabled: !canNavigate,
     onClick: () => {
       if (!canNavigate) return;
@@ -10314,6 +10352,17 @@ function showSitePopupFor(site) {
       _renderer.clearSitePopup();
     },
   });
+  // Online: grey out every state-mutating action when it isn't my turn
+  // (or in spectator mode) so the player isn't confused by a button that
+  // the server will just reject. Pure-inspection actions (inspect:true -
+  // Navigate-to, Open Outpost) stay live. Mirrors the toolbar lock.
+  if (_online && (_spectator || !isOnlineMyTurn())) {
+    for (const a of actions) {
+      if (a.inspect) continue;
+      a.disabled = true;
+      a.title = _spectator ? 'Spectator - view only.' : 'Waiting for your turn.';
+    }
+  }
   // Push the player's current rig info so the popup can render
   // the ISRU chip ("Your ISRU 2 vs 4 water ✓") without the
   // renderer needing to import rocket state directly.
