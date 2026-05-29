@@ -276,6 +276,28 @@ function applyBoost(state, op, player) {
   };
 }
 
+// Convert aqua -> water 1:1, only while the rocket is at LEO (the Aqua
+// Bank lives at LEO). Clamped by the requested amount, the aqua on
+// hand, and the remaining wet-mass room in the tank. This is where
+// rocket water comes from - ships open with an EMPTY tank now, so a
+// player funds a burn by converting aqua here first. Free (no op
+// cost), turn-gated. op = { amount }.
+function applyRefuel(state, op, player) {
+  if (player.rocket.siteId != null) return fail('rocket_not_at_leo');
+  const want = Math.floor(Number(op.amount));
+  if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
+  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const room = Math.max(0, TANK_MAX - dry - (player.rocket.tank | 0));
+  const amt = Math.min(want, player.aqua | 0, room);
+  if (amt <= 0) {
+    if (room <= 0) return fail('tank_full');
+    return fail('insufficient_aqua');
+  }
+  player.aqua -= amt;
+  player.rocket.tank = (player.rocket.tank | 0) + amt;
+  return { ok: true, state, log: `${player.name} converted ${amt} aqua to water (tank ${player.rocket.tank}).` };
+}
+
 // Display name for a stack slot (patent or crew face). Used in
 // TRANSFER log lines.
 function slotName(slot) {
@@ -416,6 +438,7 @@ const FUNCTIONAL = {
   BUILD_ROCKET: applyBuildRocket,
   BOOST: applyBoost,
   TRANSFER: applyTransfer,
+  REFUEL: applyRefuel,
   SET_ACTIVE_THRUSTER: applySetActiveThruster,
   SET_ACTIVE_PROSPECTOR: applySetActiveProspector,
   PROSPECT: applyProspect,
@@ -427,6 +450,7 @@ function pickPayload(op) {
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face };
     case 'BOOST': return { cardIds: op.cardIds };
     case 'TRANSFER': return { cardId: op.cardId, to: op.to };
+    case 'REFUEL': return { amount: op.amount };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
     case 'PROSPECT': return { siteId: op.siteId };

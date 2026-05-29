@@ -1210,47 +1210,128 @@ function renderMpPlayer(p, isMe, isActive) {
 function buildMpPlayerDetail(host, p, isMe) {
   host.innerHTML = '';
   const rkt = p.rocket || {};
-  host.appendChild(mpSection(
-    `Rocket (water ${rkt.tank || 0})`,
-    (rkt.stack || []).map((s) => mpCardName(s.id)),
-    'Empty rocket.',
-  ));
-  const ops = p.outposts ? Object.values(p.outposts) : [];
-  for (const op of ops) {
-    host.appendChild(mpSection(
-      `Outpost ${op.letter || ''} @ ${onlineSiteLabel(op.siteId)} (water ${op.tank || 0})`,
-      (op.cards || []).map((s) => mpCardName(s.id)),
-      'Empty.'
-    ));
-  }
-  const hand = p.hand ? p.hand.length : 0;
-  const h = document.createElement('div');
-  h.className = 'mp-detail-label muted';
-  h.textContent = isMe ? `Hand: ${hand}` : `Hand: ${hand} card${hand === 1 ? '' : 's'} (hidden)`;
-  host.appendChild(h);
-}
+  const outposts = p.outposts || {};
+  // All six stacks as clickable inspect chips: LEO, Rocket, Outpost
+  // A-D. Rocket / LEO / outpost cards are OPEN information - any player
+  // can inspect them (openMpStackModal). An outpost that isn't built
+  // shows as a disabled "not built" chip so the six slots always read
+  // consistently. The grid lives in .mp-stack-grid.
+  const grid = document.createElement('div');
+  grid.className = 'mp-stack-grid';
 
-function mpSection(title, names, emptyTxt) {
-  const wrap = document.createElement('div');
-  wrap.className = 'mp-section';
-  const t = document.createElement('div');
-  t.className = 'mp-detail-label';
-  t.textContent = title;
-  wrap.appendChild(t);
-  if (!names.length) {
-    const e = document.createElement('div');
-    e.className = 'muted mp-line';
-    e.textContent = emptyTxt;
-    wrap.appendChild(e);
-  } else {
-    for (const n of names) {
-      const r = document.createElement('div');
-      r.className = 'mp-line';
-      r.textContent = n;
-      wrap.appendChild(r);
+  grid.appendChild(mpStackChip('🛰 LEO Stack', p.leo || [], { who: p.name }));
+  grid.appendChild(mpStackChip(
+    `🚀 Rocket${rkt.tank ? ` (💧${rkt.tank})` : ''}`,
+    rkt.stack || [], { who: p.name },
+  ));
+  for (const letter of ['A', 'B', 'C', 'D']) {
+    const op = outposts[letter];
+    if (op) {
+      grid.appendChild(mpStackChip(
+        `🏛 Outpost ${letter} · ${onlineSiteLabel(op.siteId)}${op.tank ? ` (💧${op.tank})` : ''}`,
+        op.cards || [], { who: p.name },
+      ));
+    } else {
+      const dead = document.createElement('div');
+      dead.className = 'mp-stack-chip is-empty';
+      dead.textContent = `🏛 Outpost ${letter}: none`;
+      grid.appendChild(dead);
     }
   }
-  return wrap;
+  host.appendChild(grid);
+
+  // Hand: own hand is inspectable; opponent hands are HIDDEN (server
+  // sends handCount, nulls the contents). handCount falls back to the
+  // hand array length for older snapshots.
+  const count = (p.handCount != null)
+    ? p.handCount
+    : (Array.isArray(p.hand) ? p.hand.length : 0);
+  if (isMe && Array.isArray(p.hand)) {
+    const chip = mpStackChip(`✋ Hand (${count})`, p.hand, { who: p.name });
+    chip.classList.add('mp-stack-hand');
+    host.appendChild(chip);
+  } else {
+    const h = document.createElement('div');
+    h.className = 'mp-stack-chip is-hidden';
+    h.textContent = `✋ Hand: ${count} card${count === 1 ? '' : 's'} (hidden)`;
+    host.appendChild(h);
+  }
+}
+
+// One clickable stack chip. Shows the title + a card count; tapping
+// opens a read-only modal of the cards. Empty stacks render but are
+// non-interactive.
+function mpStackChip(title, slots, { who } = {}) {
+  const arr = Array.isArray(slots) ? slots : [];
+  const chip = document.createElement('button');
+  chip.type = 'button';
+  chip.className = 'mp-stack-chip';
+  const label = document.createElement('span');
+  label.className = 'mp-stack-chip-label';
+  label.textContent = title;
+  const n = document.createElement('span');
+  n.className = 'mp-stack-chip-count';
+  n.textContent = String(arr.length);
+  chip.append(label, n);
+  if (!arr.length) {
+    chip.classList.add('is-empty');
+    chip.disabled = true;
+  } else {
+    chip.addEventListener('click', () => openMpStackModal(`${who ? '@' + who + ' - ' : ''}${title}`, arr));
+  }
+  return chip;
+}
+
+// Read-only modal listing the cards in a stack (opponent inspection).
+// Renders each slot via the shared renderCard so it looks like every
+// other card surface. No actions - pure inspection.
+function openMpStackModal(title, slots) {
+  document.querySelector('.mp-stack-modal-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay mp-stack-modal-overlay';
+  overlay.tabIndex = -1;
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  const dialog = document.createElement('div');
+  dialog.className = 'mp-stack-modal';
+  const head = document.createElement('div');
+  head.className = 'mp-stack-modal-head';
+  const h = document.createElement('h3');
+  h.textContent = title;
+  const x = document.createElement('button');
+  x.type = 'button';
+  x.className = 'modal-x';
+  x.textContent = '×';
+  x.title = 'Close (Esc)';
+  x.addEventListener('click', close);
+  head.append(h, x);
+  dialog.appendChild(head);
+
+  const body = document.createElement('div');
+  body.className = 'mp-stack-modal-cards';
+  for (const slot of slots) {
+    const card = PATENTS_BY_ID[slot.id] || CREW_BY_ID[slot.id];
+    if (!card) {
+      const t = document.createElement('div');
+      t.className = 'mp-line';
+      t.textContent = slot.id;
+      body.appendChild(t);
+      continue;
+    }
+    const kind = CREW_BY_ID[slot.id] ? 'crew' : 'patent';
+    const wrap = document.createElement('div');
+    wrap.className = 'mp-stack-modal-card';
+    try { wrap.appendChild(renderCard(card, { type: kind, face: slot.face })); }
+    catch { wrap.textContent = card.name || slot.id; }
+    body.appendChild(wrap);
+  }
+  dialog.appendChild(body);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  overlay.focus();
 }
 
 // Whether it is the local player's turn in the cached snapshot.
@@ -1312,6 +1393,7 @@ function humanizeOnlineOpError(code) {
     not_in_rocket: 'That card is not on your rocket.',
     empty_rocket: 'Your rocket is empty - build or board a thruster before moving.',
     nothing_to_boost: 'Mark at least one hand card to boost.',
+    tank_full: 'The rocket tank is full.',
     crew_already_picked: 'You have already picked your starting crew.',
     crew_draft_closed: 'Crew picks are locked - the game has started.',
     awaiting_crew_picks: 'Waiting for every player to pick a starting crew.',
@@ -7125,6 +7207,12 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     const room = Math.max(0, cap - cur);
     const want = Math.min(amount, room, getAqua());
     if (want <= 0) { refreshAquaButtons(); return; }
+    // Online: aqua->water is the server REFUEL op. Submit it and let
+    // the snapshot re-hydrate the tank + aqua; skip the local spend.
+    if (_online) {
+      submitOnlineOp({ kind: 'REFUEL', amount: want });
+      return;
+    }
     if (!spendAqua(want)) { refreshAquaButtons(); return; }
     addFuel(want);
     const fromLevel = parseFloat(nowReadout.textContent || String(cur));

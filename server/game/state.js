@@ -59,12 +59,11 @@ export const MOVES_PER_TURN = 1;
 export const DISCARDS_PER_TURN = 1;
 
 // --- Economy / ship defaults ---
-// The sandbox opens a rocket empty with a 0 tank and refuels at LEO.
-// Multiplayer v1 has no BUILD / refuel op yet, so each ship opens with
-// a starting water budget (akin to solo.js STARTING_WATER) so MOVE is
-// playable immediately. This is a balance constant, revisited when the
-// build + refuel ops land.
-export const STARTING_WATER = 20;
+// The rocket opens with an EMPTY tank, exactly like the sandbox: water
+// is not free. It comes from converting aqua 1:1 at LEO via the REFUEL
+// op (engine.js). The old code spawned a flat 20 water as a stopgap
+// before refuel existed, which read as "magic water" - now removed.
+export const STARTING_WATER = 0;
 export const AQUA_DEFAULT = 6;
 
 export const DECK_TYPES = [

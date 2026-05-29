@@ -5742,6 +5742,84 @@ body:has(#view-browse:not(.hidden)) #main {
   margin: 6px 0 3px;
 }
 .mp-line { font-size: 12px; padding: 1px 0; }
+
+/* Per-player stack inspect chips (6 stacks: LEO / Rocket / Outpost
+   A-D, plus the hand row). Each is a tap target that opens a
+   read-only card modal. Two-column grid so the six fit compactly. */
+.mp-stack-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin: 4px 0;
+}
+.mp-stack-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  font-size: 11px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: rgba(15, 23, 42, 0.45);
+  color: var(--ink);
+  cursor: pointer;
+}
+.mp-stack-chip:hover:not(:disabled):not(.is-empty) {
+  background: rgba(125, 211, 252, 0.10);
+  border-color: var(--accent-2);
+}
+.mp-stack-chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-stack-chip-count {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--accent-2);
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 3px;
+  padding: 0 5px;
+}
+.mp-stack-chip.is-empty,
+.mp-stack-chip:disabled { opacity: 0.5; cursor: default; }
+.mp-stack-chip.is-hidden {
+  display: block;
+  margin-top: 4px;
+  font-style: italic;
+  color: var(--ink-mute);
+  cursor: default;
+}
+.mp-stack-hand { margin-top: 4px; }
+
+/* Read-only stack inspect modal. */
+.mp-stack-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  max-width: 760px;
+  width: 100%;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  color: var(--ink);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+}
+.mp-stack-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 18px 6px;
+}
+.mp-stack-modal-head h3 { margin: 0; font-size: 15px; }
+.mp-stack-modal-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: center;
+  padding: 12px 18px 20px;
+}
+.mp-stack-modal-card { transform: scale(0.9); transform-origin: top center; }
 .mp-head-row {
   display: flex;
   align-items: center;
