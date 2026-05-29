@@ -607,58 +607,84 @@ function slotName(slot) {
 // since it mutates your own rocket. Accepts a BATCH:
 // op = { cardIds: [...], to } (or legacy { cardId, to }). All ids must
 // be valid for the direction or the whole op fails (atomic).
+// Colocated card transfer to/from the rocket. Endpoints: 'leo', 'rocket',
+// or 'outpostA'..'outpostD'. One side MUST be the rocket (it's the mobile
+// carrier). Colocation:
+//   - leo <-> rocket: rocket parked at LEO (siteId null)
+//   - outpostX <-> rocket: rocket parked at the outpost's site (or, if the
+//     rocket is empty, it FORMS at the outpost's site - "lift off later")
+// All ids must be present in the source or the whole batch rejects.
+// op = { cardIds | cardId, from, to }. Backward-compat: when only `to` is
+// given it's the old LEO<->rocket op (from is the other of leo/rocket).
+function stackArrayOf(player, id) {
+  if (id === 'leo') return (player.leo = player.leo || []);
+  if (id === 'rocket') return player.rocket.stack;
+  if (id && id.startsWith('outpost')) {
+    const op = player.outposts && player.outposts[id.slice('outpost'.length)];
+    return op ? op.cards : null;
+  }
+  return null;
+}
 function applyTransfer(state, op, player) {
-  if (player.rocket.siteId != null) return fail('rocket_not_at_leo');
-  const to = op.to === 'rocket' ? 'rocket' : (op.to === 'leo' ? 'leo' : null);
-  if (!to) return fail('bad_transfer');
+  let to = op.to;
+  let from = op.from;
+  // Legacy shorthand: only `to` (rocket|leo) given -> the other is `from`.
+  if (!from && (to === 'rocket' || to === 'leo')) from = (to === 'rocket' ? 'leo' : 'rocket');
+  if (!from || !to || from === to) return fail('bad_transfer');
+  if (from !== 'rocket' && to !== 'rocket') return fail('bad_transfer');
+
   const ids = Array.isArray(op.cardIds)
     ? op.cardIds.map(String)
     : (op.cardId != null ? [String(op.cardId)] : []);
   if (!ids.length) return fail('bad_transfer');
 
-  const src = to === 'rocket' ? (player.leo || []) : player.rocket.stack;
-  // Validate every id is present in the source before mutating, so a
-  // bad id rejects the batch atomically.
-  for (const id of ids) {
-    if (!src.some((s) => s.id === id)) {
-      return fail(to === 'rocket' ? 'not_in_leo' : 'not_in_rocket');
+  // The non-rocket endpoint + its colocation requirement.
+  const other = from === 'rocket' ? to : from;
+  const rocketEmpty = player.rocket.stack.length === 0;
+  if (other === 'leo') {
+    if (player.rocket.siteId != null && !rocketEmpty) return fail('rocket_not_at_leo');
+  } else if (other.startsWith('outpost')) {
+    const opp = player.outposts && player.outposts[other.slice('outpost'.length)];
+    if (!opp) return fail('no_outpost');
+    if (rocketEmpty) {
+      // Forming the rocket at the outpost: it adopts the outpost's site.
+      player.rocket.siteId = opp.siteId;
+    } else if (player.rocket.siteId !== opp.siteId) {
+      return fail('not_colocated');
     }
+  } else {
+    return fail('bad_transfer');
+  }
+
+  const srcArr = stackArrayOf(player, from);
+  const dstArr = stackArrayOf(player, to);
+  if (!srcArr || !dstArr) return fail('bad_transfer');
+  for (const id of ids) {
+    if (!srcArr.some((s) => s.id === id)) return fail('not_in_source');
   }
 
   const moved = [];
   for (const id of ids) {
+    const idx = srcArr.findIndex((s) => s.id === id);
+    const [slot] = srcArr.splice(idx, 1);
+    dstArr.push(slot);
     if (to === 'rocket') {
-      const idx = player.leo.findIndex((s) => s.id === id);
-      const [slot] = player.leo.splice(idx, 1);
-      player.rocket.stack.push(slot);
-      if (!player.rocket.activeThrusterId && isThrusterSlot(slot)) {
-        player.rocket.activeThrusterId = slot.id;
-      }
-      if (!player.rocket.activeProspectorId && isProspectorSlot(slot)) {
-        player.rocket.activeProspectorId = slot.id;
-      }
-      moved.push(slot);
-    } else {
-      const idx = player.rocket.stack.findIndex((s) => s.id === id);
-      const [slot] = player.rocket.stack.splice(idx, 1);
+      if (!player.rocket.activeThrusterId && isThrusterSlot(slot)) player.rocket.activeThrusterId = slot.id;
+      if (!player.rocket.activeProspectorId && isProspectorSlot(slot)) player.rocket.activeProspectorId = slot.id;
+    }
+    if (from === 'rocket') {
       if (player.rocket.activeThrusterId === slot.id) player.rocket.activeThrusterId = null;
       if (player.rocket.activeProspectorId === slot.id) player.rocket.activeProspectorId = null;
-      (player.leo = player.leo || []).push(slot);
-      moved.push(slot);
     }
+    moved.push(slot);
   }
 
-  if (to === 'rocket') {
-    clipTank(player.rocket);
-    const label = moved.length === 1 ? slotName(moved[0]) : `${moved.length} cards`;
-    return { ok: true, state, log: `${player.name} boarded ${label} onto the rocket.` };
-  }
-  // An empty rocket is no longer a real ship - it can't burn without a
-  // thruster, so it can't be anywhere but LEO. Recall it (user
-  // 2026-05-29: "the rocket is empty therefore it is ... at leo").
-  recallIfEmpty(player);
+  if (to === 'rocket') clipTank(player.rocket);
+  if (from === 'rocket') recallIfEmpty(player);
   const label = moved.length === 1 ? slotName(moved[0]) : `${moved.length} cards`;
-  return { ok: true, state, log: `${player.name} returned ${label} to the LEO Stack.` };
+  const dstName = to === 'rocket' ? 'the rocket'
+    : to === 'leo' ? 'the LEO Stack' : `Outpost ${to.slice('outpost'.length)}`;
+  return { ok: true, state, log: `${player.name} moved ${label} to ${dstName}.` };
 }
 
 // Invariant: an empty rocket stack sits at LEO with no active
@@ -688,7 +714,11 @@ function applyDecommission(state, op, player) {
     const idx = src.findIndex((s) => s.id === id);
     if (idx < 0) continue;
     const slot = src[idx];
-    if (isCrewSlot(slot)) { blocked++; continue; }   // crew can't go to hand
+    // Crew can NOT be voluntarily decommissioned to the hand. Removing a
+    // crew member is a special action that resolves during an event
+    // (TODO: implement the event-driven crew-removal flow later); for now
+    // crew in a decommission selection is skipped, never returned.
+    if (isCrewSlot(slot)) { blocked++; continue; }
     src.splice(idx, 1);
     player.hand.push(id);
     if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
@@ -736,6 +766,34 @@ function applyConvertOutpost(state, op, player) {
   return {
     ok: true, state,
     log: `${player.name} converted the rocket to Outpost ${letter} at ${whereName} (${n} card${n === 1 ? '' : 's'}, ${water} water).`,
+  };
+}
+
+// Pump water from a colocated Outpost into the rocket tank. The rocket
+// must be parked at the outpost's site. Clamped by the outpost's water and
+// the rocket's remaining wet-mass room. Free, turn-gated.
+// op = { letter, amount }.
+function applyTransferFuel(state, op, player) {
+  const letter = String(op.letter || '');
+  const outpost = player.outposts && player.outposts[letter];
+  if (!outpost) return fail('no_outpost');
+  if (player.rocket.siteId == null || player.rocket.siteId !== outpost.siteId) {
+    return fail('not_colocated');
+  }
+  const want = Math.floor(Number(op.amount));
+  if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
+  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const room = Math.max(0, TANK_MAX - dry - (player.rocket.tank | 0));
+  const amt = Math.min(want, outpost.tank | 0, room);
+  if (amt <= 0) {
+    if (room <= 0) return fail('tank_full');
+    return fail('no_water');
+  }
+  outpost.tank = (outpost.tank | 0) - amt;
+  player.rocket.tank = (player.rocket.tank | 0) + amt;
+  return {
+    ok: true, state,
+    log: `${player.name} pumped ${amt} water from Outpost ${letter} into the rocket (tank ${player.rocket.tank}).`,
   };
 }
 
@@ -854,6 +912,7 @@ const FUNCTIONAL = {
   BUILD_ROCKET: applyBuildRocket,
   BOOST: applyBoost,
   TRANSFER: applyTransfer,
+  TRANSFER_FUEL: applyTransferFuel,
   DECOMMISSION: applyDecommission,
   CONVERT_OUTPOST: applyConvertOutpost,
   REFUEL: applyRefuel,
@@ -872,7 +931,8 @@ function pickPayload(op) {
     case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay };
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face };
     case 'BOOST': return { cardIds: op.cardIds };
-    case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, to: op.to };
+    case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from, to: op.to };
+    case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount };
     case 'DECOMMISSION': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from };
     case 'REFUEL': return { amount: op.amount };
     case 'CASH_WATER': return { amount: op.amount };

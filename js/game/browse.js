@@ -1505,6 +1505,10 @@ function humanizeOnlineOpError(code) {
     cannot_build: 'That card cannot be built right now.',
     rocket_at_leo: 'Park out in space to make an outpost - at LEO, use the LEO Stack.',
     no_outpost_slot: 'All 4 outpost slots are in use.',
+    not_in_source: 'That card is not in the source stack.',
+    not_colocated: 'Park the rocket at that stack\'s site to transfer.',
+    no_outpost: 'That outpost does not exist.',
+    crew_no_decommission: 'Crew can\'t be decommissioned here - that happens via an event.',
     bad_decommission: 'Pick a card to decommission.',
     nothing_decommissioned: 'Nothing decommissioned (crew can\'t return to the hand).',
     cannot_liftoff: 'Not enough thrust to lift off (and no factory here to assist).',
@@ -1899,8 +1903,11 @@ function renderStackSwitcher() {
       const colony = getColony(op.siteId);
       const factoryTag = factory ? ` 🏭${factory.spectralType}` : '';
       const colonyTag  = colony  ? ' 🌐' : '';
+      // 💧 on the chip when the outpost holds water, so a parked rocket
+      // can tell at a glance there's fuel to pump.
+      const hasWater = (op.tank | 0) > 0;
       slots.push({
-        id: `outpost${letter}`, label: '🏛', sub: letter,
+        id: `outpost${letter}`, label: hasWater ? '🏛💧' : '🏛', sub: letter,
         title: `Outpost ${letter} at ${opSite?.name || op.siteId} - ${op.cards.length} card${op.cards.length === 1 ? '' : 's'}, ${op.tank} water${factoryTag}${colonyTag}`,
         siteAvailable: !!opSite,
         isEmpty: false,
@@ -2117,14 +2124,13 @@ function getColocatedDestinations(sourceId) {
 // one after the first. LEO<->Rocket only; other combos toast.
 function transferSelectedOnline(sourceId, destId, ids) {
   if (!_online) return false;
-  let to = null;
-  if (sourceId === 'leo' && destId === 'rocket') to = 'rocket';
-  else if (sourceId === 'rocket' && destId === 'leo') to = 'leo';
-  if (!to) {
-    _onlineToast('That transfer is not available in online play yet.', 'error');
+  // The server understands leo / rocket / outpostX as endpoints; one side
+  // must be the rocket (the mobile carrier). It validates colocation.
+  if (sourceId !== 'rocket' && destId !== 'rocket') {
+    _onlineToast('Card transfers must involve the rocket.', 'error');
     return true;
   }
-  submitOnlineOp({ kind: 'TRANSFER', cardIds: [...ids], to });
+  submitOnlineOp({ kind: 'TRANSFER', cardIds: [...ids], from: sourceId, to: destId });
   return true;
 }
 
@@ -2141,12 +2147,12 @@ function transferOneCard(sourceId, destId, cardId) {
   // hand. The crew PICK_CREW staged in LEO lives in player.leo, so it
   // must travel via TRANSFER.
   if (_online) {
-    if (sourceId === 'leo' && destId === 'rocket') {
-      submitOnlineOp({ kind: 'TRANSFER', cardId, to: 'rocket' });
-    } else if (sourceId === 'rocket' && destId === 'leo') {
-      submitOnlineOp({ kind: 'TRANSFER', cardId, to: 'leo' });
+    // Any colocated stack <-> rocket move (LEO or an outpost). The server
+    // validates colocation + forms the rocket at an outpost when empty.
+    if (sourceId === 'rocket' || destId === 'rocket') {
+      submitOnlineOp({ kind: 'TRANSFER', cardId, from: sourceId, to: destId });
     } else {
-      _onlineToast('That transfer is not available in online play yet.', 'error');
+      _onlineToast('Card transfers must involve the rocket.', 'error');
     }
     return false;
   }
@@ -6116,6 +6122,71 @@ async function doConvertToOutpost(site) {
   });
 }
 
+
+// Pump water from a colocated outpost into the rocket tank. Prompts for
+// an amount (capped by the outpost's water + the rocket's tank room),
+// then routes through the server (TRANSFER_FUEL) online or mutates the
+// local stacks in solo.
+async function doPumpOutpostFuel(letter, max) {
+  if (max <= 0) return;
+  const amount = await pickFuelAmount({
+    title: `💧 Pump fuel from Outpost ${letter}`,
+    max,
+  });
+  if (!amount) return;
+  if (_online) {
+    await submitOnlineOp({ kind: 'TRANSFER_FUEL', letter, amount });
+    return;
+  }
+  const op = getOutpost(letter);
+  if (!op) return;
+  const amt = Math.min(amount, op.tank | 0, max);
+  if (amt <= 0) return;
+  setOutpostTank(letter, (op.tank | 0) - amt);
+  addFuel(amt);
+  setStatus(`💧 Pumped ${amt} water from Outpost ${letter} into the rocket.`);
+}
+
+// Minimal amount-picker modal (stepper + "All"). Resolves to a positive
+// integer or null on cancel.
+function pickFuelAmount({ title = '💧 Transfer water', max = 1 } = {}) {
+  return new Promise((resolve) => {
+    document.querySelector('.fuel-amount-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay fuel-amount-overlay';
+    let amount = Math.min(1, max);
+    const close = (val) => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(val); };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
+    const onKey = (e) => { if (e.key === 'Escape') close(null); else if (e.key === 'Enter') close(amount); };
+    document.addEventListener('keydown', onKey);
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel';
+    panel.innerHTML = `
+      <h3>${esc(title)}</h3>
+      <div class="dump-stepper">
+        <button type="button" class="popup-btn popup-btn-secondary fa-step" data-step="-1" aria-label="Less">−</button>
+        <input type="number" class="fa-amount" min="1" max="${max}" value="${amount}" inputmode="numeric" aria-label="Water to transfer" />
+        <button type="button" class="popup-btn popup-btn-secondary fa-step" data-step="1" aria-label="More">+</button>
+        <button type="button" class="popup-btn fa-all" title="Transfer the maximum">All (${max})</button>
+      </div>
+      <div class="turn-confirm-actions">
+        <button type="button" class="popup-btn primary" data-act="yes">💧 Transfer <span class="fa-n">${amount}</span></button>
+        <button type="button" class="popup-btn" data-act="no">Cancel</button>
+      </div>
+    `;
+    const input = panel.querySelector('.fa-amount');
+    const nLabel = panel.querySelector('.fa-n');
+    const clamp = (v) => Math.max(1, Math.min(max, Math.round(Number(v)) || 1));
+    const set = (v) => { amount = clamp(v); input.value = String(amount); nLabel.textContent = String(amount); };
+    panel.querySelectorAll('.fa-step').forEach((b) => b.addEventListener('click', () => set(amount + Number(b.dataset.step))));
+    panel.querySelector('.fa-all').addEventListener('click', () => set(max));
+    input.addEventListener('input', () => set(input.value));
+    panel.querySelector('[data-act="yes"]').addEventListener('click', () => close(amount));
+    panel.querySelector('[data-act="no"]').addEventListener('click', () => close(null));
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+  });
+}
 
 // Factory-Refuel handler (rulebook I5b). Adds water FTs to the
 // rocket tank up to the cap; consumes the per-turn op and the
@@ -10180,6 +10251,31 @@ function showSitePopupFor(site) {
         _renderer.clearSitePopup();
       },
     });
+  }
+  // Pump fuel from a colocated outpost into the rocket. Surfaces one
+  // action per owned outpost at the rocket's site that holds water, when
+  // the rocket has tank room. Free action.
+  if (rocketSite && site.id === rocketSite.id && getRocketStack().length > 0) {
+    const totals = getStackTotals();
+    const room = Math.max(0, getTankMax() - (totals.dryMass || 0) - getTankWater());
+    for (const letter of OUTPOST_LETTERS) {
+      const op = getOutpost(letter);
+      if (!op || op.siteId !== site.id || (op.tank | 0) <= 0) continue;
+      const max = Math.min(op.tank | 0, room);
+      actions.push({
+        label: `💧 Pump from Outpost ${letter} (${op.tank})`,
+        variant: max > 0 ? 'rocket' : 'secondary',
+        disabled: max <= 0,
+        title: max > 0
+          ? `Transfer up to ${max} water from Outpost ${letter} into the rocket tank.`
+          : 'Rocket tank is full.',
+        onClick: () => {
+          if (max <= 0) return;
+          doPumpOutpostFuel(letter, max);
+          _renderer.clearSitePopup();
+        },
+      });
+    }
   }
   // (Forming a rocket from an outpost is no longer a bulk "lift"
   // action. Per the user's model an outpost transfers cards to the

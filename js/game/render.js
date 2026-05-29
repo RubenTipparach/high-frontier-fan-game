@@ -2822,6 +2822,12 @@ export class MapRenderer {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(letter, sx, sy + 1);
+      // 💧 badge when the outpost holds water, so a colocated rocket can
+      // see at a glance there's fuel to pump.
+      if ((op.tank | 0) > 0) {
+        ctx.font = `${Math.round(chitSize * 0.6)}px ${EMOJI_FONT}`;
+        ctx.fillText('💧', sx + half, sy - half);
+      }
     }
     ctx.restore();
   }
