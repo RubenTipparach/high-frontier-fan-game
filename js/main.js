@@ -359,6 +359,16 @@ async function boot() {
   initAccountMenu();
   initLobby({ onShowView: showView, onToast: toast });
   initInvites({ onToast: toast });
+  // Surface ws give-up so CSS / a future status pill can read it.
+  // The polling layers (lobby + game) already drive the data path
+  // when WS is dead; this is just so we don't pretend WS is alive.
+  ws.on('state', (s) => {
+    document.body.classList.toggle('ws-down', !s.ready && !!s.giveUp);
+    if (s.ready) document.body.classList.remove('ws-down');
+    if (s.giveUp) {
+      console.warn('[hf:ws] gave up on WebSocket - polling is the live path now');
+    }
+  });
   initBrowseButton();
   initMainMenu();
   initNewGameModal();
