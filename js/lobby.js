@@ -573,8 +573,12 @@ function setRoomInUrl(code) {
     const cur = new URL(window.location.href);
     const v = cur.searchParams.get('v');
     const search = v ? ('?v=' + encodeURIComponent(v)) : '';
+    // Codes are stored lowercase server-side (CODE_ALPHABET is
+    // lowercase + digits). Write the URL in the canonical lowercase
+    // form so a copy-pasted link round-trips exactly. The server
+    // handler is also case-insensitive as a belt-and-braces.
     const target = code
-      ? base + 'room/' + encodeURIComponent(String(code).toUpperCase())
+      ? base + 'room/' + encodeURIComponent(String(code).toLowerCase())
       : base;
     window.history.replaceState({}, '', target + search + cur.hash);
   } catch { /* private mode / file:// scheme */ }

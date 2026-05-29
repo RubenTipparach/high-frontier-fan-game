@@ -306,11 +306,22 @@ out mid-game", which is the exact failure we're guarding against.
 
 The chain (do not sever any piece):
 
-- **`setRoomInUrl(code)` (js/lobby.js)** writes `/<base>/room/<CODE>`
+- **`setRoomInUrl(code)` (js/lobby.js)** writes `/<base>/room/<code>`
   via `history.replaceState` on `openLobby`, clears it on
   `leaveCurrent`. It preserves the `?v=<sha>` version pin. The app
   base is resolved from `import.meta.url`, NEVER from the address
   bar (the bar can already be a deep `/room/...` path).
+- **Codes are lowercase + Crockford base32.** `CODE_ALPHABET` in
+  `server/index.js` is `0123456789abcdefghjkmnpqrstvwxyz`, and the
+  DB stores codes verbatim. SQLite's `=` is case-sensitive, so the
+  URL form MUST be lowercase or the lookup misses. `setRoomInUrl`
+  lowercases on write; the server's `/lobbies/by-code/:code` (and
+  the two invite-link endpoints) run params through `normaliseCode`
+  which lowercases + alphabet-validates before any query, so a
+  mixed-case shared link still resolves and a garbage segment
+  short-circuits with `bad_code`. Don't reintroduce
+  `.toUpperCase()` on either side - cosmetic uppercase made the
+  URL case-sensitive and broke `/room/DPAT3R` resume.
 - **`404.html`** is the GitHub-Pages SPA fallback. GH Pages has no
   server routing, so a hard load / version reload of `/room/<CODE>`
   has no file and hits 404.html, which stashes the code in

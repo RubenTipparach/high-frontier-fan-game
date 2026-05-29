@@ -43,6 +43,16 @@ function generateShortCode(len = 8) {
   return out;
 }
 
+// Strict shape check used at the route boundary so a bogus value
+// (wrong alphabet, too long / short) is rejected with a typed error
+// instead of round-tripping through the DB only to come back empty.
+// Cap at 32 to keep error responses small.
+const CODE_SHAPE_RE = /^[0-9a-hjkmnp-tv-z]{4,32}$/;
+function normaliseCode(raw) {
+  const s = String(raw || '').trim().toLowerCase();
+  return CODE_SHAPE_RE.test(s) ? s : null;
+}
+
 // 12 chars for invite links: long enough to be unguessable, short
 // enough to drop in a chat. Same alphabet as device codes.
 function generateInviteCode() { return generateShortCode(12); }
@@ -841,9 +851,12 @@ app.post('/lobbies/:id/invite-link', requireProfile, (req, res) => {
 app.get('/lobbies/by-code/:code', (req, res) => {
   // Codes are stored lowercase (CODE_ALPHABET is lowercase + digits)
   // and SQLite is case-sensitive on `=` - matching the existing
-  // invite-link lookup pattern below. The URL displays the code
-  // upper-cased for readability; normalise here so the lookup hits.
-  const code = String(req.params.code || '').toLowerCase();
+  // Codes are stored lowercase server-side and the URL form is
+  // case-insensitive (user 2026-05-29: "url shouldnt be case
+  // sensitive"). normaliseCode lowercases + alphabet-checks before
+  // we hit the DB so a garbage path segment short-circuits cleanly.
+  const code = normaliseCode(req.params.code);
+  if (!code) return res.status(400).json({ error: 'bad_code' });
   const row = db
     .prepare(
       `SELECT id, code, name, status
@@ -858,7 +871,8 @@ app.get('/lobbies/by-code/:code', (req, res) => {
 });
 
 app.get('/invites/links/:code', (req, res) => {
-  const code = String(req.params.code || '').toLowerCase();
+  const code = normaliseCode(req.params.code);
+  if (!code) return res.status(400).json({ error: 'bad_code' });
   const row = db
     .prepare(
       `SELECT il.lobby_id, il.expires_at, il.single_use, il.used_count, il.used_by,
@@ -886,7 +900,8 @@ app.get('/invites/links/:code', (req, res) => {
 // Claim an invite link to join. Bumps used_count; if single_use,
 // pins used_by to the first caller.
 app.post('/invites/links/:code/claim', requireProfile, (req, res) => {
-  const code = String(req.params.code || '').toLowerCase();
+  const code = normaliseCode(req.params.code);
+  if (!code) return res.status(400).json({ error: 'bad_code' });
   const row = db
     .prepare(
       `SELECT id, lobby_id, expires_at, single_use, used_count

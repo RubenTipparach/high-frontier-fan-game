@@ -24,6 +24,47 @@ const VIEWS = [
 // sign-in / lobby-list.
 let _prevView = null;
 
+// Resolve the app base independently of the address bar (the bar can
+// already be a deep /room/<code> or /sandbox path). import.meta.url is
+// always <base>/js/main.js, so '../' off it is the app base no matter
+// what the visible URL says.
+function appBase() {
+  return new URL('../', import.meta.url).pathname;
+}
+
+// Write the URL for the given view. React-router style: switching views
+// rewrites the path so a refresh / shared link / restore lands on the
+// same surface. The room paths are owned by lobby.js#setRoomInUrl (it
+// knows the active lobby's code); showView calls this only for the
+// non-room destinations. ?v=<sha> + hash are preserved.
+function setUrlForView(view) {
+  try {
+    const base = appBase();
+    const cur = new URL(window.location.href);
+    const v = cur.searchParams.get('v');
+    const search = v ? '?v=' + encodeURIComponent(v) : '';
+    let path;
+    if (view === 'view-browse') {
+      // Solo sandbox; the online case is handled by setRoomInUrl
+      // (called from lobby.js#enterLobby when the lobby's game has
+      // started) and short-circuits via the early-return in
+      // showView's URL block.
+      path = base + 'sandbox';
+    } else if (view === 'view-lobby-list' || view === 'view-create-lobby') {
+      path = base + 'lobby';
+    } else if (view === 'view-lobby') {
+      // The lobby room view's URL is owned by setRoomInUrl - don't
+      // overwrite it here or we'd race with enterLobby's path push.
+      return;
+    } else if (view === 'view-signin') {
+      path = base;
+    } else {
+      path = base;
+    }
+    window.history.replaceState({}, '', path + search + cur.hash);
+  } catch { /* private mode / file:// */ }
+}
+
 function showView(id) {
   // Remember the view we're leaving so Browse → back returns properly.
   const current = VIEWS.find((v) => !document.getElementById(v).classList.contains('hidden'));
@@ -31,6 +72,12 @@ function showView(id) {
   console.log('[hf:nav] showView ->', id, '(from', current || '(none)', ')');
   for (const v of VIEWS) {
     document.getElementById(v).classList.toggle('hidden', v !== id);
+  }
+  // URL <-> view mapping. Online view-browse keeps its /room/<code>
+  // form (lobby.js#setRoomInUrl wrote it on enterLobby); everything
+  // else routes through setUrlForView.
+  if (!(id === 'view-browse' && isBrowseOnline())) {
+    setUrlForView(id);
   }
   // Body class drives lobby-only CSS (hides the floating FAB while the
   // lobby has its own inline ☰ button).
@@ -297,19 +344,52 @@ async function afterSignIn() {
 //   2. the /room/<CODE> path itself (in case GH Pages ever serves it
 //      directly, or a future host with real routing),
 //   3. the legacy ?room=<CODE> query (old shared links still work).
+// Server codes use CODE_ALPHABET = lowercase + digits, length 6.
+// Reject anything else BEFORE hitting the API so a stray path segment
+// (e.g. /room/<garbage>) doesn't trigger a 404 round-trip, and so a
+// mixed-case copy-pasted link still resolves.
+const ROOM_CODE_RE = /^[0-9a-z]{4,12}$/;
+function normaliseRoomCode(raw) {
+  if (raw == null) return null;
+  const c = String(raw).trim().toLowerCase();
+  return ROOM_CODE_RE.test(c) ? c : null;
+}
+
+// Landing intent ('lobby' | 'sandbox' | null) resolved from (in
+// priority order): the 404.html sessionStorage stash, or the visible
+// path if the host server happened to serve index.html directly for
+// /lobby or /sandbox. Null falls through to the default lobby landing.
+function readLandingIntent() {
+  try {
+    const stashed = sessionStorage.getItem('hf-landing-redirect');
+    if (stashed) {
+      sessionStorage.removeItem('hf-landing-redirect');
+      if (stashed === 'sandbox') return 'sandbox';
+      if (stashed === 'lobby') return 'lobby';
+    }
+  } catch { /* private mode */ }
+  const m = window.location.pathname.match(/\/(lobby|sandbox)(?:\/[^/]*)?\/?$/);
+  return m ? m[1] : null;
+}
+
 function readRoomCode() {
+  let raw = null;
   try {
     const stashed = sessionStorage.getItem('hf-room-redirect');
     if (stashed) {
       sessionStorage.removeItem('hf-room-redirect');
-      return stashed;
+      raw = stashed;
     }
   } catch { /* private mode */ }
-  const pathMatch = window.location.pathname.match(/\/room\/([^/]+)\/?$/);
-  if (pathMatch) return decodeURIComponent(pathMatch[1]);
-  const q = new URL(window.location.href).searchParams.get('room');
-  if (q) return q;
-  return null;
+  if (raw == null) {
+    const pathMatch = window.location.pathname.match(/\/room\/([^/]+)\/?$/);
+    if (pathMatch) raw = decodeURIComponent(pathMatch[1]);
+  }
+  if (raw == null) {
+    const q = new URL(window.location.href).searchParams.get('room');
+    if (q) raw = q;
+  }
+  return normaliseRoomCode(raw);
 }
 
 // A fresh page load (refresh, restored tab, WS-lost reconnect, or a
@@ -415,17 +495,25 @@ async function boot() {
     const claimed = await maybeClaimInviteFromUrl();
     console.log('[hf:boot] inviteClaimed=', claimed);
     if (!claimed) {
-      // ?room=<code> URL bootstrap: a refresh / reconnect drops the
-      // player back into the same lobby instead of the lobby list.
-      // setRoomInUrl in lobby.js writes the param when openLobby
-      // succeeds, and clears it on leaveCurrent. Failure (lobby
-      // cancelled, code stale, network error) falls through to the
-      // default landing.
+      // Resolve the landing view from URL state. Priority: a stashed
+      // room code (from 404.html /room/<CODE> bounce) wins; then a
+      // /sandbox path / stash mounts solo; then /lobby (or any other
+      // landing including root) falls through to the lobby list.
       const resumed = await maybeResumeRoomFromUrl();
       console.log('[hf:boot] roomResumed=', resumed);
       if (!resumed) {
-        console.log('[hf:boot] landing on lobby (default)');
-        showView('view-lobby-list');
+        const landing = readLandingIntent();
+        console.log('[hf:boot] landing intent =', landing);
+        if (landing === 'sandbox') {
+          // Land directly in the solo sandbox. mountBrowse with no
+          // online opts spins up the local-only sandbox + writes
+          // /sandbox to the URL via showView's setUrlForView path.
+          mountBrowse({});
+          showView('view-browse');
+        } else {
+          console.log('[hf:boot] landing on lobby (default)');
+          showView('view-lobby-list');
+        }
       }
     }
   } else {
