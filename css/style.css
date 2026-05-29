@@ -805,3 +805,11 @@ body.in-lobby .main-menu-fab { display: none; }
   line-height: 1.4;
   color: var(--ink, #e5e7eb);
 }
+
+/* Local sandbox games in "Your games", + the abandon block in settings. */
+.sandbox-game-row .name { font-weight: 600; }
+.route-options-danger {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}

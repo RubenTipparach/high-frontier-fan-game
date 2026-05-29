@@ -124,6 +124,7 @@ import { setOnline, isOnline } from './online-mode.js';
 import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
 } from './net-bridge.js';
+import { abandonSandboxGame, currentSandboxId } from './sandbox-games.js';
 import { getGame, getGameOps, submitGameOp, fetchChat, sendChat } from '../api.js';
 import { ws } from '../ws.js';
 
@@ -10006,6 +10007,16 @@ function openRouteOptionsModal(onClose) {
         thrust (${thrust}). Tap Move when you're ready to fly.
       </p>
     </div>
+    ${(!_online && currentSandboxId()) ? `
+    <div class="route-options-danger">
+      <button type="button" class="popup-btn danger route-options-abandon-btn">
+        🗑 Abandon this sandbox game
+      </button>
+      <p class="muted route-options-manual-help">
+        Permanently deletes this solo game and returns to the lobby.
+        This can't be undone.
+      </p>
+    </div>` : ''}
   `;
   panel.querySelector('.modal-x').addEventListener('click', close);
   panel.querySelectorAll('input[name="route-priority"]').forEach((el) => {
@@ -10028,6 +10039,28 @@ function openRouteOptionsModal(onClose) {
     if (_renderer) _renderer.setSitePopup(null);
     enterManualMoveMode();
   });
+  const abandonBtn = panel.querySelector('.route-options-abandon-btn');
+  if (abandonBtn) {
+    abandonBtn.addEventListener('click', async () => {
+      const ok = await confirmModal({
+        title: '🗑 Abandon sandbox game',
+        body: 'Permanently delete this solo game and return to the lobby? This can\'t be undone.',
+        yes: '🗑 Abandon', no: 'Cancel',
+      });
+      if (!ok) return;
+      abandonSandboxGame(currentSandboxId());
+      close();
+      // Full navigation to the lobby (drops this game's /sandbox/<id>
+      // URL); a fresh boot lands on the lobby list.
+      try {
+        const cur = new URL(window.location.href);
+        const v = cur.searchParams.get('v');
+        const url = new URL('../../lobby', import.meta.url).pathname
+          + (v ? '?v=' + encodeURIComponent(v) : '');
+        window.location.assign(url);
+      } catch { window.location.assign('../../lobby'); }
+    });
+  }
 
   overlay.appendChild(panel);
   mountOverlay(overlay);

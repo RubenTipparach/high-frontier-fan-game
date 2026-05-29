@@ -14,6 +14,7 @@ import {
   initInvites, refreshInvitesList, subscribeInvitesForProfile,
 } from './invites.js';
 import { mountBrowse, isBrowseOnline } from './game/browse.js';
+import { newSandboxGame, currentSandboxId, activateSandboxGame } from './game/sandbox-games.js';
 
 const VIEWS = [
   'view-signin', 'view-lobby-list', 'view-create-lobby', 'view-lobby',
@@ -49,8 +50,9 @@ function setUrlForView(view) {
       // Solo sandbox; the online case is handled by setRoomInUrl
       // (called from lobby.js#enterLobby when the lobby's game has
       // started) and short-circuits via the early-return in
-      // showView's URL block.
-      path = base + 'sandbox';
+      // showView's URL block. Each solo game routes to /sandbox/<id>.
+      const sid = currentSandboxId();
+      path = base + 'sandbox' + (sid ? '/' + sid : '');
     } else if (view === 'view-lobby-list' || view === 'view-create-lobby') {
       path = base + 'lobby';
     } else if (view === 'view-lobby') {
@@ -324,9 +326,11 @@ function initNewGameModal() {
   });
   sandboxBtn.addEventListener('click', () => {
     close();
-    // A fresh solo session: newGame resets every state module so an online
-    // (or stale solo) game can't bleed into this sandbox.
-    showView('view-browse');
+    // A fresh solo session: register a new sandbox game id (so it shows in
+    // "Your games" + routes to /sandbox/<id>), then mount with newGame so
+    // every state module resets and no prior game bleeds in.
+    newSandboxGame();
+    showView('view-browse');   // setUrlForView reads currentSandboxId()
     mountBrowse({ newGame: true });
   });
 }
@@ -441,6 +445,20 @@ function readLandingIntent() {
     }
   } catch { /* private mode */ }
   const m = window.location.pathname.match(/\/(lobby|sandbox)(?:\/[^/]*)?\/?$/);
+  return m ? m[1] : null;
+}
+
+// The sandbox game id from a /sandbox/<id> URL (or the 404.html stash).
+// Null when there's no id (a bare /sandbox lands on the active game).
+function readSandboxId() {
+  try {
+    const stashed = sessionStorage.getItem('hf-sandbox-redirect');
+    if (stashed) {
+      sessionStorage.removeItem('hf-sandbox-redirect');
+      if (/^[0-9a-z]{3,16}$/.test(stashed)) return stashed;
+    }
+  } catch { /* private mode */ }
+  const m = window.location.pathname.match(/\/sandbox\/([0-9a-z]{3,16})\/?$/);
   return m ? m[1] : null;
 }
 
@@ -577,11 +595,23 @@ async function boot() {
         const landing = readLandingIntent();
         console.log('[hf:boot] landing intent =', landing);
         if (landing === 'sandbox') {
-          // Land directly in the solo sandbox. mountBrowse with no
-          // online opts spins up the local-only sandbox + writes
-          // /sandbox to the URL via showView's setUrlForView path.
-          mountBrowse({});
-          showView('view-browse');
+          // Land directly in the solo sandbox. If the URL names a specific
+          // game (/sandbox/<id>), make it the live game first; otherwise
+          // resume whatever sandbox game is active. mountBrowse({}) (no
+          // newGame) keeps the restored state; showView writes the
+          // /sandbox/<id> URL via setUrlForView.
+          const sid = readSandboxId();
+          // If the URL names a game that ISN'T the live one, switching it
+          // in rewrites the live keys - but the state modules already read
+          // localStorage at import time, so reload once to re-init from the
+          // switched game. (Resume from "Your games" activates BEFORE
+          // navigating, so there it's already live and this is a no-op.)
+          if (sid && activateSandboxGame(sid)) {
+            window.location.reload();
+          } else {
+            mountBrowse({});
+            showView('view-browse');
+          }
         } else {
           console.log('[hf:boot] landing on lobby (default)');
           showView('view-lobby-list');

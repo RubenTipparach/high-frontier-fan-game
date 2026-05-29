@@ -13,6 +13,7 @@ import { saveLastLobbyId } from './storage.js';
 import { mountChat, unmountChat } from './chat.js';
 import { mountInvitesUI, unmountInvitesUI } from './invites.js';
 import { mountBrowse, unmountBrowseOnline } from './game/browse.js';
+import { listSandboxGames, activateSandboxGame, sandboxUrl } from './game/sandbox-games.js';
 
 let _activeLobby = null;
 let _unsubWS = null;
@@ -266,8 +267,34 @@ export async function refreshMyGames() {
     else if (g.gameStatus === 'finished') ended.push(g);
     else if (g.status === 'started') started.push(g);
   }
-  renderMyGames(startedEl, started, 'Resume', 'No games in progress.');
+  // Local solo sandbox games live alongside the server games in
+  // "Your games" - newest first, each Resume re-enters /sandbox/<id>.
+  const sandboxRows = listSandboxGames().map(sandboxGameRow);
+  renderMyGames(startedEl, started, 'Resume', 'No games in progress.', sandboxRows);
   renderMyGames(endedEl, ended, 'Review', 'No finished games.');
+}
+
+// One "Your games" row for a local sandbox game. Resume snapshots the
+// current active game, restores this one to the live keys, and reloads
+// into /sandbox/<id> so the state modules re-read it.
+function sandboxGameRow(sg) {
+  const li = document.createElement('li');
+  li.className = 'sandbox-game-row';
+  const when = new Date(sg.lastPlayedAt || sg.createdAt || Date.now());
+  li.innerHTML = `
+    <div>
+      <span class="name">🗺 Sandbox game</span>
+      <span class="meta">solo · <code></code> · <span class="when"></span></span>
+    </div>
+    <div class="row-actions"><button class="primary">Resume</button></div>
+  `;
+  li.querySelector('code').textContent = sg.id;
+  li.querySelector('.when').textContent = when.toLocaleString();
+  li.querySelector('button').addEventListener('click', () => {
+    activateSandboxGame(sg.id);
+    window.location.assign(sandboxUrl(sg.id));
+  });
+  return li;
 }
 
 // "Live games": in-progress public games anyone can hop into as a
@@ -340,13 +367,16 @@ async function watchGame(g) {
   });
 }
 
-function renderMyGames(listEl, games, actionLabel, emptyMsg) {
+function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
   listEl.innerHTML = '';
+  for (const li of prependRows) listEl.appendChild(li);
   if (!games.length) {
-    const li = document.createElement('li');
-    li.className = 'empty';
-    li.textContent = emptyMsg;
-    listEl.appendChild(li);
+    if (!prependRows.length) {
+      const li = document.createElement('li');
+      li.className = 'empty';
+      li.textContent = emptyMsg;
+      listEl.appendChild(li);
+    }
     return;
   }
   for (const g of games) {
