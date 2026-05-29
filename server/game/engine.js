@@ -84,6 +84,11 @@ function perBurnCost(rocket) {
 
 const TANK_MAX = 32; // wet-mass cap (mirror of rocket.js#TANK_MAX)
 
+// Academia hand limit for auction participation: a player may not
+// START or JOIN/BID in an auction while holding this many cards or
+// more (winning a lot would overflow the hand). User 2026-05-29.
+const AUCTION_HAND_LIMIT = 4;
+
 // The active face of a stack slot: secondary when installed
 // black-side-up, else primary. Mirror of rocket.js#installedFace.
 function slotFace(slot, card) {
@@ -702,6 +707,7 @@ function applyAuctionStart(state, op, ctx) {
   if (!player || player.profileId !== ctx.profileId) return fail('not_your_turn');
   if (state.players.length < 2) return fail('need_opponent');
   if (player.opsRemaining <= 0) return fail('no_ops_left');
+  if ((player.hand || []).length >= AUCTION_HAND_LIMIT) return fail('hand_limit');
   const deckType = String(op.deckType || '');
   if (!DECK_TYPES.includes(deckType)) return fail('bad_deck');
   const deck = state.decks[deckType];
@@ -731,6 +737,7 @@ function applyAuctionBid(state, op, ctx) {
   const bidder = playerByProfile(state, ctx.profileId);
   if (!bidder) return fail('not_a_player');
   if (bidder.profileId === a.auctioneerId) return fail('auctioneer_cannot_bid');
+  if ((bidder.hand || []).length >= AUCTION_HAND_LIMIT) return fail('hand_limit');
   const amount = Number(op.amount);
   if (!Number.isInteger(amount) || amount <= 0) return fail('bad_amount');
   if (amount <= a.highBid) return fail('bid_too_low');
@@ -762,6 +769,12 @@ function applyAuctionJoin(state, op, ctx) {
   const auctioneer = playerByProfile(state, a.auctioneerId);
   const amount = Number(op.amount);
   if (!Number.isInteger(amount) || amount < 0) return fail('bad_amount');
+  // Joining the bidding (a raise) is participation, so the hand limit
+  // applies. The unopposed keep (amount 0, no bids) is exempt - it
+  // just finalises the lot the auctioneer already legally started.
+  if (amount > 0 && (auctioneer.hand || []).length >= AUCTION_HAND_LIMIT) {
+    return fail('hand_limit');
+  }
   if (amount < a.highBid) return fail('must_match_or_raise');
   if (amount > auctioneer.aqua) return fail('insufficient_aqua');
 

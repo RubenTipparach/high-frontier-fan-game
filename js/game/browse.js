@@ -186,6 +186,9 @@ const ONLINE_POLL_MS = 5000;
 // easily handle two snapshot fetches per second; the snapshot is
 // small JSON.
 const ONLINE_POLL_AUCTION_MS = 500;
+// Academia hand limit for auction participation (mirror of the server
+// constant): can't start / bid / join an auction holding 4+ cards.
+const AUCTION_HAND_LIMIT = 4;
 let _onlineToast = null;      // (msg, level) => void, from the caller
 let _onlineMaps = null;       // { serverToPlanner, plannerToServer }
 let _onlineSnapshot = null;   // latest server snapshot (for turn checks)
@@ -823,6 +826,22 @@ function buildMpAuctionControls(host, a, { auctioneer, highBidder }) {
       host.appendChild(noteEl('You hold the high bid. Waiting for the others.'));
       return;
     }
+    // Academia hand limit: can't bid holding 4+ cards (a win would
+    // overflow). Server enforces this too; surface why the bid row
+    // is gone. Pass is still allowed.
+    const myHandCount = Array.isArray(myp.hand) ? myp.hand.length : 0;
+    if (myHandCount >= AUCTION_HAND_LIMIT) {
+      host.appendChild(noteEl(`Hand full (${myHandCount}/${AUCTION_HAND_LIMIT}) - you can't bid. Build or transfer cards first.`));
+      const passOnly = document.createElement('button');
+      passOnly.type = 'button';
+      passOnly.className = 'modal-btn';
+      const didPass = Array.isArray(a.passed) && a.passed.includes(myId);
+      passOnly.textContent = didPass ? 'Passed' : 'Pass';
+      passOnly.disabled = didPass || _onlineBusy;
+      passOnly.addEventListener('click', () => submitMpAuctionOp({ kind: 'AUCTION_PASS' }));
+      host.appendChild(passOnly);
+      return;
+    }
     const minBid = (a.highBid | 0) + 1;
     const passed = Array.isArray(a.passed) && a.passed.includes(myId);
     const row = document.createElement('div');
@@ -1110,9 +1129,13 @@ function renderMpPanel(snapshot) {
   const myId = _onlineMe && _onlineMe.id;
   const myp = players.find((p) => p.profileId === myId) || null;
   // Auctioneer-side gating mirrors the server (AUCTION_START needs your
-  // turn, at least one op left, and no auction already open).
+  // turn, at least one op left, no auction open, AND under the
+  // academia hand limit (can't start with 4+ cards - winning would
+  // overflow the hand; the server enforces the same).
+  const myHandCount = (myp && Array.isArray(myp.hand)) ? myp.hand.length : 0;
   const canStartAuction = !!(active && active.profileId === myId
-    && myp && myp.opsRemaining > 0 && !snapshot.auction);
+    && myp && myp.opsRemaining > 0 && !snapshot.auction
+    && myHandCount < AUCTION_HAND_LIMIT);
   tableEl.innerHTML = '';
 
   const head = document.createElement('div');
@@ -1430,6 +1453,7 @@ function humanizeOnlineOpError(code) {
     wrong_crew_colour: 'That crew card is not your assigned colour.',
     auction_in_progress: 'An auction is already underway.',
     need_opponent: 'Need another player to hold an auction.',
+    hand_limit: 'Hand limit reached (4) - you cannot start or join an auction. Build or transfer cards first.',
     no_ops_left: 'No operations left this turn.',
     bad_deck: 'Pick a valid deck to auction.',
     deck_empty: 'That deck is empty.',
