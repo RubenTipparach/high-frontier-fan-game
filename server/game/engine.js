@@ -203,6 +203,28 @@ function activeThrust(rocket) {
   const f = slotFace(slot);
   return Number.isFinite(f && f.thrust) ? f.thrust : 0;
 }
+// Water spent per burn = the active thruster face's `fuel` value, scaled
+// by any other card's fuelMod (mirror of rocket.js#getActiveThrusterStats,
+// the "N FT per burn" the client shows). The engine must charge the SAME
+// so a move the client says it can afford isn't rejected. The move cost is
+// ceil(fuelPerBurn * burns) (ceil applied to the whole move, as the client
+// does), so free Hohmann coasting (0 burns) costs 0. Falls back to 1.
+function thrusterFuelPerBurn(rocket) {
+  const tid = rocket.activeThrusterId;
+  if (!tid) return 1;
+  const slot = rocket.stack.find((s) => s.id === tid);
+  if (!slot) return 1;
+  const f = slotFace(slot);
+  const p = PATENTS_BY_ID[tid];
+  let fuel = f.fuel != null ? f.fuel : (p && p.fuel);
+  if (fuel == null) return 1;
+  for (const s of rocket.stack) {
+    if (s.id === tid) continue;
+    const cf = slotFace(s);
+    if (cf.fuelMod != null && cf.fuelMod !== 1) fuel *= cf.fuelMod;
+  }
+  return fuel;
+}
 // Rad-hardness of a stack slot's active face (0 when unrated).
 function slotRadHardness(slot) {
   const p = PATENTS_BY_ID[slot.id];
@@ -262,26 +284,61 @@ function applyMove(state, op, player) {
   // LEO. Enforcing this keeps the "empty rocket == at LEO" invariant
   // true: the only way off LEO is to build/board a thruster first.
   if (player.rocket.stack.length === 0) return fail('empty_rocket');
-  const toSlug = String(op.toSiteId || '');
-  if (!plannerSiteExists(toSlug)) return fail('unknown_site');
   const from = player.rocket.siteId;       // null = LEO
-  if (toSlug === from) return fail('already_here');
+  const here = from == null ? leoSlug() : from;
 
-  // Path comes from the planner graph (full ~1500 nodes incl. lagrange
-  // / burn / hohmann waypoints). null `from` => start at LEO. Cost is
-  // the sum of edge burn-labels along the shortest path.
-  const path = plannerFindPath(from, toSlug);
-  if (!path) return fail('no_route');
-  const totalBurns = path.totalBurns;
+  // The CLIENT's mission-planner is the source of truth for routing: it
+  // splits a journey into turns and counts Hohmann-aware burns (free
+  // coasting along a transfer). MOVE executes ONLY this turn's segments -
+  // sent on the op (preferred, race-free) or read from the stored route's
+  // turn-1 - so a multi-turn transfer's later legs are NOT charged now.
+  // Each segment is { from, to, burns }.
+  let segs = null;
+  const opSegs = Array.isArray(op.segments) ? op.segments : null;
+  if (opSegs && opSegs.length) {
+    segs = opSegs.map((s) => ({
+      from: String(s.from), to: String(s.to),
+      burns: Math.max(0, Math.floor(Number(s.burns) || 0)),
+    }));
+  } else if (Array.isArray(player.rocket.route) && player.rocket.route.length
+             && player.rocket.route.some((s) => s.turn != null)) {
+    segs = player.rocket.route
+      .filter((s) => (s.turn || 1) === 1)
+      .map((s) => ({ from: s.from, to: s.to, burns: Math.max(0, Math.floor(Number(s.burns) || 0)) }));
+  }
 
-  const cost = perBurnCost(player.rocket) * totalBurns;
+  let dest, thisTurnBurns, arrivals;
+  if (segs && segs.length) {
+    if (segs[0].from !== here) return fail('route_not_from_here');
+    for (let i = 1; i < segs.length; i++) {
+      if (segs[i].from !== segs[i - 1].to) return fail('route_discontinuous');
+    }
+    for (const s of segs) if (!plannerSiteExists(s.to)) return fail('unknown_site');
+    dest = segs[segs.length - 1].to;
+    thisTurnBurns = segs.reduce((b, s) => b + s.burns, 0);
+    arrivals = segs.map((s) => s.to);
+  } else {
+    // Direct mode: a bare destination tap with no per-turn plan. Falls
+    // back to the planner-graph shortest path for the WHOLE journey - only
+    // reached when the client didn't send segments (e.g. a quick adjacent
+    // hop), so the over-count risk is bounded to short moves.
+    const toSlug = String(op.toSiteId || '');
+    if (!plannerSiteExists(toSlug)) return fail('unknown_site');
+    if (toSlug === here) return fail('already_here');
+    const path = plannerFindPath(from, toSlug);
+    if (!path) return fail('no_route');
+    dest = toSlug;
+    thisTurnBurns = path.totalBurns;
+    arrivals = path.path.slice(1);
+  }
+  if (dest === from) return fail('already_here');
+
+  const cost = Math.ceil(thrusterFuelPerBurn(player.rocket) * thisTurnBurns);
   if (cost > player.rocket.tank) return fail('insufficient_water');
 
-  // Hazards along the path. We check every node the rocket ARRIVES at
-  // (path.path[0] is the origin, already paid for), classified the same
+  // Hazards along the nodes we ARRIVE at this turn, classified the same
   // way the sandbox does. Generic (skull / aerobrake) hazards are
   // aqua-payable (FINAO) or rolled; rad zones always roll (unpayable).
-  const arrivals = path.path.slice(1);
   const generic = [];   // skull / aero slugs (in travel order)
   const rad = [];       // rad slugs
   for (const slug of arrivals) {
@@ -297,7 +354,7 @@ function applyMove(state, op, player) {
   // the destination.
   const liftG = from ? maneuverGate(state, from, thrust) : { ok: true, needsRoll: false };
   if (!liftG.ok) return fail('cannot_liftoff');
-  const landG = maneuverGate(state, toSlug, thrust);
+  const landG = maneuverGate(state, dest, thrust);
   if (!landG.ok) return fail('cannot_land');
   // Ordered roll items: liftoff assist, route generics (skull/aero), then
   // landing assist. Each is aqua-payable (FINAO) or a d6 where a 1 is a
@@ -305,7 +362,7 @@ function applyMove(state, op, player) {
   const rollItems = [];
   if (liftG.needsRoll) rollItems.push({ slug: from, kind: 'assist', phase: 'liftoff' });
   for (const slug of generic) rollItems.push({ slug, kind: hazardKind(slug) });
-  if (landG.needsRoll) rollItems.push({ slug: toSlug, kind: 'assist', phase: 'landing' });
+  if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
 
   const wantPay = !!op.hazardPay;
   // FINAO: pay aqua up front to skip the generic + assist rolls. Validated
@@ -322,7 +379,7 @@ function applyMove(state, op, player) {
   const gen = makeRng(state.seed, state.rng.cursor);
   const rolls = [];
   let destroyed = false;
-  let haltSlug = toSlug;          // where the rocket actually ends up
+  let haltSlug = dest;            // where the rocket actually ends up
 
   // Generic + assist rolls: a rolled 1 is a critical that destroys the
   // ship at that node (unless paid past via FINAO).
@@ -392,20 +449,28 @@ function applyMove(state, op, player) {
     };
   }
 
-  player.rocket.siteId = toSlug;
-  // Pop the executed segments off the planned route (if any).
+  player.rocket.siteId = dest;
+  // Advance the stored route past this turn. A turn-tagged route drops its
+  // turn-1 legs and shifts the rest down (T2 -> T1, ...); a legacy untagged
+  // route pops everything up to the node we reached.
   if (Array.isArray(player.rocket.route) && player.rocket.route.length) {
-    const idx = player.rocket.route.findIndex((s) => s.to === toSlug);
-    if (idx >= 0) player.rocket.route = player.rocket.route.slice(idx + 1);
+    if (player.rocket.route.some((s) => s.turn != null)) {
+      player.rocket.route = player.rocket.route
+        .filter((s) => (s.turn || 1) > 1)
+        .map((s) => ({ ...s, turn: (s.turn || 1) - 1 }));
+    } else {
+      const idx = player.rocket.route.findIndex((s) => s.to === dest);
+      if (idx >= 0) player.rocket.route = player.rocket.route.slice(idx + 1);
+    }
   }
-  const destSite = siteById(toSlug);
+  const destSite = siteById(dest);
   const chit = destSite ? maybeAwardGlory(player, destSite, state.turn) : null;
   player.rocket.lastMove = {
     rolls, destroyed: false, decommissioned,
-    at: toSlug, nonce: nextMoveNonce(player),
+    at: dest, nonce: nextMoveNonce(player),
   };
 
-  const destName = (destSite && destSite.name) || toSlug;
+  const destName = (destSite && destSite.name) || dest;
   let log = `${player.name} burned ${cost} water to ${destName}.`;
   const nItems = rollItems.length;
   if (finaoCost > 0) log += ` Paid ${finaoCost} aqua (FINAO) past ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
@@ -549,8 +614,9 @@ function applySetRoute(state, op, player) {
     const from = String(s.from || '');
     const to = String(s.to || '');
     const burns = Math.max(0, Math.floor(Number(s.burns) || 0));
+    const turn = Math.max(1, Math.floor(Number(s.turn) || 1));
     if (!plannerSiteExists(from) || !plannerSiteExists(to)) return fail('unknown_site');
-    norm.push({ from, to, burns });
+    norm.push({ from, to, burns, turn });   // turn drives per-turn MOVE execution
   }
   // Validate continuity: each segment's from must be the previous to,
   // and the first must start at the rocket's current position
@@ -941,7 +1007,7 @@ const FUNCTIONAL = {
 
 function pickPayload(op) {
   switch (op.kind) {
-    case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay };
+    case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments };
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face };
     case 'BOOST': return { cardIds: op.cardIds };
     case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from, to: op.to };

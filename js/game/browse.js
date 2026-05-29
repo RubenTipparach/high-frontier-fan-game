@@ -8236,7 +8236,7 @@ function routeSegmentsForServer() {
     const from = plannerIdToSlug(s.from);
     const to = plannerIdToSlug(s.to);
     if (!from || !to) return null;
-    out.push({ from, to, burns: Number(s.burns) || 0 });
+    out.push({ from, to, burns: Number(s.burns) || 0, turn: Number(s.turn) || 1 });
   }
   return out;
 }
@@ -8882,12 +8882,23 @@ async function moveRocket() {
   // server resolves every die and publishes the results in rocket.lastMove,
   // which the snapshot animator plays back. Skip the local dice path below.
   if (_online) {
-    const destPlannerId = _plannedRoute[_plannedRoute.length - 1].to;
+    // Execute ONLY this turn's segments - a multi-turn Hohmann transfer's
+    // later legs are NOT charged now. The server is sent these segments
+    // (with the planner's Hohmann-aware burns) and charges just them.
+    const turn1Segs = _plannedRoute.filter((s) => (s.turn || 1) === 1);
+    if (!turn1Segs.length) { setStatus('Planned route has no current-turn segments.'); return false; }
+    const destPlannerId = turn1Segs[turn1Segs.length - 1].to;
     const toSiteId = toServerId(_onlineMaps, destPlannerId);
     if (!toSiteId) { _onlineToast('That destination is not on the server map.', 'error'); return false; }
-    // Hazards along the whole planned route (the server resolves the
-    // same path to the destination in one move).
-    const hz = routeHazards(_plannedRoute);
+    const segments = [];
+    for (const s of turn1Segs) {
+      const f = plannerIdToSlug(s.from);
+      const t = plannerIdToSlug(s.to);
+      if (!f || !t) { _onlineToast('That route is not on the server map.', 'error'); return false; }
+      segments.push({ from: f, to: t, burns: Number(s.burns) || 0, turn: 1 });
+    }
+    // Hazards along THIS turn's segments only.
+    const hz = routeHazards(turn1Segs);
     const radHz = hz.filter((h) => h.site.type === 'radhaz');
     // Factory-assist maneuvers: an under-thrust liftoff (current site) or
     // landing (destination) is only legal with a factory there and is a
@@ -8936,8 +8947,22 @@ async function moveRocket() {
         return false;
       }
     }
-    const ok = await submitOnlineOp({ kind: 'MOVE', toSiteId, hazardPay });
-    if (ok) clearRoute();
+    const ok = await submitOnlineOp({ kind: 'MOVE', toSiteId, hazardPay, segments });
+    if (ok) {
+      // Advance the local plan past this turn so a multi-turn route stays
+      // visible for the next move (mirrors the server's route shift); clear
+      // it when nothing's left.
+      const remaining = _plannedRoute
+        .filter((s) => (s.turn || 1) > 1)
+        .map((s) => ({ ...s, turn: (s.turn || 1) - 1 }));
+      if (remaining.length) {
+        _plannedRoute = remaining;
+        persistPlannedRoute();
+        if (_renderer) _renderer.setRoute(remaining);
+      } else {
+        clearRoute();
+      }
+    }
     return ok;
   }
   const turn1 = _plannedRoute.filter((s) => s.turn === 1);
