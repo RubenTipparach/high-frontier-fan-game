@@ -466,6 +466,12 @@ label.checkbox input { accent-color: var(--accent-2); }
   inset: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  /* Wide enough for the 3-column grid (roster / chat / invite ~870px);
+     the inherited 720px max-width clipped the invite column on desktop.
+     margin:auto centres it; the grid already collapses to 1 column
+     (and full width) at <=1000px for phones. */
+  max-width: 1000px;
+  margin: 0 auto;
   padding: 20px 24px 32px;
   box-sizing: border-box;
 }
