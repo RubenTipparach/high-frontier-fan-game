@@ -831,6 +831,17 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
+  // Opponent rockets in multiplayer. list = [{ x, y, colour, name }].
+  // Drawn as smaller colour-coded sprites; the local player's own
+  // rocket is still the full-featured _sandboxRocket draw. Colocation
+  // offset (multiple ships at one site, e.g. everyone parked at LEO)
+  // is computed at draw time so the pieces fan out instead of
+  // stacking dead-on.
+  setMpRockets(list) {
+    this._mpRockets = Array.isArray(list) ? list : null;
+    this._scheduleDraw();
+  }
+
   // Trigger a one-shot explosion at a world-space position. Used
   // when a hazard roll critical-fails on the sandbox rocket. The
   // animation is fully self-clearing - rings expand + fade and
@@ -1766,6 +1777,7 @@ export class MapRenderer {
       this._drawFocusedStackRingScreen(ctx);
       this._drawLeoAnchorScreen(ctx);
       this._drawPlayerShipScreen(ctx);
+      if (this._mpRockets && this._mpRockets.length) this._drawMpRocketsScreen(ctx);
       if (this._sandboxRocket) this._drawSandboxRocketScreen(ctx);
       if (this._explosion)     this._drawExplosionScreen(ctx);
       // Selection ring drawn LAST so nothing - labels, ships, hexes
@@ -2920,6 +2932,60 @@ export class MapRenderer {
   // Draw the sandbox rocket sprite at world-space (x, y).
   // canFly drives a transparency + 🚫 overlay; the renderer
   // doesn't compute fly-ability itself.
+  // Opponent rockets, colour-coded by seat. Ships sharing a world
+  // anchor (very common at LEO) fan out around it so they don't stack
+  // dead-on. The local player's own rocket (_sandboxRocket) draws on
+  // top afterwards and is NOT included here.
+  _drawMpRocketsScreen(ctx) {
+    const list = this._mpRockets;
+    if (!list || !list.length) return;
+    const eff = this.zoom * this.fitScale;
+    const { width: spriteW, height: spriteH } = getRocketSpriteSize();
+    const scale = 0.42;     // a touch smaller than the local rocket
+    const w = spriteW * scale;
+    const h = spriteH * scale;
+
+    // Group by rounded world anchor so colocated ships can be indexed
+    // for a fan-out offset. The local rocket occupies the centre slot
+    // at each of its sites, so opponents start their ring at index 1.
+    const groups = new Map();
+    const keyOf = (r) => `${Math.round(r.x)}:${Math.round(r.y)}`;
+    const localKey = this._sandboxRocket
+      ? keyOf(this._sandboxRocket) : null;
+    for (const r of list) {
+      const k = keyOf(r);
+      if (!groups.has(k)) groups.set(k, { items: [], hasLocal: k === localKey });
+      groups.get(k).items.push(r);
+    }
+
+    for (const { items, hasLocal } of groups.values()) {
+      // Total pieces sharing this anchor (incl. the local rocket).
+      const total = items.length + (hasLocal ? 1 : 0);
+      items.forEach((r, i) => {
+        // Index within the ring: skip slot 0 when the local rocket
+        // holds the centre. Single opponent + no local = centred.
+        const ringIndex = hasLocal ? i + 1 : i;
+        let ox = 0, oy = 0;
+        if (total > 1) {
+          // Fan out on a small screen-space ring. Radius grows a hair
+          // with the count so 5-6 ships at LEO stay legible.
+          const radius = 13 + Math.min(total, 6) * 1.5;
+          const ang = (Math.PI * 2 * ringIndex) / total - Math.PI / 2;
+          ox = Math.cos(ang) * radius;
+          oy = Math.sin(ang) * radius;
+        }
+        const sx = this.pan.x + r.x * eff + ox;
+        const sy = this.pan.y + r.y * eff + oy;
+        const px = sx - w / 2;
+        const py = sy - h - 2;
+        ctx.save();
+        ctx.globalAlpha = 0.92;
+        ctx.drawImage(getRocketSprite(r.colour || 'white'), px, py, w, h);
+        ctx.restore();
+      });
+    }
+  }
+
   _drawSandboxRocketScreen(ctx) {
     const r = this._sandboxRocket;
     if (!r) return;

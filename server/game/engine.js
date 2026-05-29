@@ -318,41 +318,61 @@ function slotName(slot) {
 // the crew that PICK_CREW staged in the LEO Stack boards the rocket,
 // and how cards come back off before launch. No op cost (a free
 // reconfiguration like SET_ACTIVE_*), but it IS turn-gated (FUNCTIONAL)
-// since it mutates your own rocket. op = { cardId, to: 'rocket'|'leo' }.
+// since it mutates your own rocket. Accepts a BATCH:
+// op = { cardIds: [...], to } (or legacy { cardId, to }). All ids must
+// be valid for the direction or the whole op fails (atomic).
 function applyTransfer(state, op, player) {
   if (player.rocket.siteId != null) return fail('rocket_not_at_leo');
-  const cardId = String(op.cardId || '');
   const to = op.to === 'rocket' ? 'rocket' : (op.to === 'leo' ? 'leo' : null);
   if (!to) return fail('bad_transfer');
+  const ids = Array.isArray(op.cardIds)
+    ? op.cardIds.map(String)
+    : (op.cardId != null ? [String(op.cardId)] : []);
+  if (!ids.length) return fail('bad_transfer');
 
-  if (to === 'rocket') {
-    const idx = (player.leo || []).findIndex((s) => s.id === cardId);
-    if (idx < 0) return fail('not_in_leo');
-    const [slot] = player.leo.splice(idx, 1);
-    player.rocket.stack.push(slot);
-    if (!player.rocket.activeThrusterId && isThrusterSlot(slot)) {
-      player.rocket.activeThrusterId = slot.id;
+  const src = to === 'rocket' ? (player.leo || []) : player.rocket.stack;
+  // Validate every id is present in the source before mutating, so a
+  // bad id rejects the batch atomically.
+  for (const id of ids) {
+    if (!src.some((s) => s.id === id)) {
+      return fail(to === 'rocket' ? 'not_in_leo' : 'not_in_rocket');
     }
-    if (!player.rocket.activeProspectorId && isProspectorSlot(slot)) {
-      player.rocket.activeProspectorId = slot.id;
-    }
-    clipTank(player.rocket);
-    return { ok: true, state, log: `${player.name} boarded ${slotName(slot)} onto the rocket.` };
   }
 
-  // to === 'leo'
-  const idx = player.rocket.stack.findIndex((s) => s.id === cardId);
-  if (idx < 0) return fail('not_in_rocket');
-  const [slot] = player.rocket.stack.splice(idx, 1);
-  if (player.rocket.activeThrusterId === slot.id) player.rocket.activeThrusterId = null;
-  if (player.rocket.activeProspectorId === slot.id) player.rocket.activeProspectorId = null;
-  (player.leo = player.leo || []).push(slot);
+  const moved = [];
+  for (const id of ids) {
+    if (to === 'rocket') {
+      const idx = player.leo.findIndex((s) => s.id === id);
+      const [slot] = player.leo.splice(idx, 1);
+      player.rocket.stack.push(slot);
+      if (!player.rocket.activeThrusterId && isThrusterSlot(slot)) {
+        player.rocket.activeThrusterId = slot.id;
+      }
+      if (!player.rocket.activeProspectorId && isProspectorSlot(slot)) {
+        player.rocket.activeProspectorId = slot.id;
+      }
+      moved.push(slot);
+    } else {
+      const idx = player.rocket.stack.findIndex((s) => s.id === id);
+      const [slot] = player.rocket.stack.splice(idx, 1);
+      if (player.rocket.activeThrusterId === slot.id) player.rocket.activeThrusterId = null;
+      if (player.rocket.activeProspectorId === slot.id) player.rocket.activeProspectorId = null;
+      (player.leo = player.leo || []).push(slot);
+      moved.push(slot);
+    }
+  }
+
+  if (to === 'rocket') {
+    clipTank(player.rocket);
+    const label = moved.length === 1 ? slotName(moved[0]) : `${moved.length} cards`;
+    return { ok: true, state, log: `${player.name} boarded ${label} onto the rocket.` };
+  }
   // An empty rocket is no longer a real ship - it can't burn without a
   // thruster, so it can't be anywhere but LEO. Recall it (user
-  // 2026-05-29: "I should be able to abandon rocket stack if IT IS
-  // EMPTY", "the rocket is empty therefore it is ... at leo").
+  // 2026-05-29: "the rocket is empty therefore it is ... at leo").
   recallIfEmpty(player);
-  return { ok: true, state, log: `${player.name} returned ${slotName(slot)} to the LEO Stack.` };
+  const label = moved.length === 1 ? slotName(moved[0]) : `${moved.length} cards`;
+  return { ok: true, state, log: `${player.name} returned ${label} to the LEO Stack.` };
 }
 
 // Invariant: an empty rocket stack sits at LEO with no active
@@ -449,7 +469,7 @@ function pickPayload(op) {
     case 'MOVE': return { toSiteId: op.toSiteId };
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face };
     case 'BOOST': return { cardIds: op.cardIds };
-    case 'TRANSFER': return { cardId: op.cardId, to: op.to };
+    case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, to: op.to };
     case 'REFUEL': return { amount: op.amount };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };

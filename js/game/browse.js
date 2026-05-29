@@ -427,6 +427,8 @@ function applySnapshot(snapshot, seq) {
   _rocketSiteId = pid || null;
   persistRocketSite();
   syncSandboxRocket();
+  // Opponent rockets on the map (colour-coded, offset when colocated).
+  syncMpRockets(snapshot);
   // Refresh the multiplayer table panel (room / turn / roster) from the
   // same snapshot so opponents' positions + resources stay live.
   renderMpPanel(snapshot);
@@ -1457,6 +1459,7 @@ export function unmountBrowseOnline() {
   _onlineMaps = null;
   _onlineSnapshot = null;
   _lastAppliedSeq = -1;
+  if (_renderer) { try { _renderer.setMpRockets(null); } catch { /* ignore */ } }
   _onlineBusy = false;
   _onlineRoom = null;
   _onlineLobbyId = null;
@@ -2005,6 +2008,24 @@ function getColocatedDestinations(sourceId) {
 // true on success. Wet-mass clamps re-apply on the destination
 // after the move; any spilled water is logged. Used by the
 // transfer section's "Send selected" button.
+// Online batch transfer: submit ALL selected cards in ONE TRANSFER op.
+// Returns true if it handled the click (online), false to fall through
+// to the solo per-card loop. Fixes "only one card at a time" - the
+// per-card loop fired N submitOnlineOps but _onlineBusy dropped every
+// one after the first. LEO<->Rocket only; other combos toast.
+function transferSelectedOnline(sourceId, destId, ids) {
+  if (!_online) return false;
+  let to = null;
+  if (sourceId === 'leo' && destId === 'rocket') to = 'rocket';
+  else if (sourceId === 'rocket' && destId === 'leo') to = 'leo';
+  if (!to) {
+    _onlineToast('That transfer is not available in online play yet.', 'error');
+    return true;
+  }
+  submitOnlineOp({ kind: 'TRANSFER', cardIds: [...ids], to });
+  return true;
+}
+
 function transferOneCard(sourceId, destId, cardId) {
   // Online: LEO <-> Rocket transfers map to the server TRANSFER op
   // (valid only while the rocket is parked at LEO; the server enforces
@@ -2375,6 +2396,11 @@ function openUnifiedStackInspector(stackId) {
         btn.addEventListener('click', () => {
           const destId = btn.getAttribute('data-dest');
           if (!destId || selected.size === 0) return;
+          // Online: one batch op for all selected cards.
+          if (transferSelectedOnline(stackId, destId, [...selected])) {
+            selected.clear();
+            return;
+          }
           // Snapshot ids first - the source array mutates as
           // we move each card so iteration over `selected` is
           // safe via spread.
@@ -4799,6 +4825,11 @@ function openRocketStackModal() {
           btn.addEventListener('click', () => {
             const destId = btn.getAttribute('data-dest');
             if (!destId || selected.size === 0) return;
+            // Online: one batch op for all selected cards.
+            if (transferSelectedOnline('rocket', destId, [...selected])) {
+              selected.clear();
+              return;
+            }
             const toMove = [...selected];
             let moved = 0;
             for (const cardId of toMove) {
@@ -7699,6 +7730,39 @@ function myRocketColour() {
     if (me && me.color) return me.color;
   }
   return 'yellow';
+}
+
+// World-space coords for a server rocket siteId (null = LEO anchor).
+// Translates the server slug -> planner node -> {x, y}.
+function mpRocketCoords(serverSiteId) {
+  if (!_activeData) return null;
+  if (!serverSiteId) return { x: LEO_ANCHOR.x, y: LEO_ANCHOR.y };  // at LEO
+  const pid = _onlineMaps && _onlineMaps.serverToPlanner.get(serverSiteId);
+  const site = pid && (_activeData.byId?.[pid]
+    || _activeData.sites.find((s) => s.id === pid));
+  if (site && typeof site.x === 'number') return { x: site.x, y: site.y };
+  return { x: LEO_ANCHOR.x, y: LEO_ANCHOR.y };  // unknown -> LEO
+}
+
+// Push every OTHER player's rocket to the renderer as colour-coded
+// sprites. The local player's own rocket is the full-featured
+// _sandboxRocket draw, so it's excluded here. The renderer fans out
+// ships that share an anchor (e.g. everyone at LEO).
+function syncMpRockets(snapshot) {
+  if (!_renderer) return;
+  if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) {
+    _renderer.setMpRockets(null);
+    return;
+  }
+  const myId = _onlineMe.id;
+  const list = [];
+  for (const p of snapshot.players) {
+    if (p.profileId === myId) continue;       // own rocket drawn separately
+    const pos = mpRocketCoords(p.rocket && p.rocket.siteId);
+    if (!pos) continue;
+    list.push({ x: pos.x, y: pos.y, colour: p.color || 'white', name: p.name });
+  }
+  _renderer.setMpRockets(list);
 }
 
 function syncSandboxRocket() {

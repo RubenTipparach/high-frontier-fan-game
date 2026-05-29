@@ -1713,13 +1713,15 @@ function esc(s) {
   console.log(`cleaned up ${before} stranded pending invite(s)`);
 })();
 
-// One-time migration: recall empty rockets to LEO. Games created
-// before the "rocket opens at LEO" change started every ship at
-// startSiteId() (Itokawa), so an empty rocket that never launched is
-// stranded at a real site. An empty rocket can't burn, so it can
-// only ever be at LEO - normalise the live game_states blob so those
-// games match the invariant the engine now enforces. (Op-log history
-// is left as-is; only the current state matters for play.)
+// One-time migration for games created before two model changes:
+//  (a) "rocket opens at LEO": ships used to start at startSiteId()
+//      (Itokawa), so an empty rocket that never launched is stranded
+//      at a real site. An empty rocket can't burn, so recall it to LEO.
+//  (b) "water comes from aqua": ships used to spawn with 20 magic
+//      water. Zero the tank for any rocket AT LEO (siteId null) -
+//      that's safe because they can refuel from aqua there. Rockets
+//      away from LEO keep their water so they aren't stranded.
+// Normalises the live game_states blob; op-log history is left as-is.
 (() => {
   const rows = db.prepare('SELECT game_id, state FROM game_states').all();
   let fixed = 0;
@@ -1730,10 +1732,17 @@ function esc(s) {
     let changed = false;
     for (const p of st.players) {
       const r = p && p.rocket;
-      if (r && Array.isArray(r.stack) && r.stack.length === 0 && r.siteId != null) {
+      if (!r) continue;
+      // (a) recall stranded empty rockets
+      if (Array.isArray(r.stack) && r.stack.length === 0 && r.siteId != null) {
         r.siteId = null;
         r.activeThrusterId = null;
         r.activeProspectorId = null;
+        changed = true;
+      }
+      // (b) drop magic starting water for rockets at LEO
+      if (r.siteId == null && (r.tank | 0) > 0) {
+        r.tank = 0;
         changed = true;
       }
     }
