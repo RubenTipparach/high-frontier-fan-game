@@ -13,7 +13,7 @@ import { saveLastLobbyId } from './storage.js';
 import { mountChat, unmountChat } from './chat.js';
 import { mountInvitesUI, unmountInvitesUI } from './invites.js';
 import { mountBrowse, unmountBrowseOnline } from './game/browse.js';
-import { listSandboxGames, activateSandboxGame, sandboxUrl } from './game/sandbox-games.js';
+import { listSandboxGames, activateSandboxGame, sandboxUrl, abandonSandboxGame } from './game/sandbox-games.js';
 
 let _activeLobby = null;
 let _unsubWS = null;
@@ -295,13 +295,21 @@ function sandboxGameRow(sg) {
       <span class="name">🗺 Sandbox game</span>
       <span class="meta">solo · <code></code> · <span class="when"></span></span>
     </div>
-    <div class="row-actions"><button class="primary">Resume</button></div>
+    <div class="row-actions">
+      <button class="primary sb-resume">Resume</button>
+      <button class="danger sb-delete" title="Delete this sandbox game">🗑 Delete</button>
+    </div>
   `;
   li.querySelector('code').textContent = sg.id;
   li.querySelector('.when').textContent = when.toLocaleString();
-  li.querySelector('button').addEventListener('click', () => {
+  li.querySelector('.sb-resume').addEventListener('click', () => {
     activateSandboxGame(sg.id);
     window.location.assign(sandboxUrl(sg.id));
+  });
+  li.querySelector('.sb-delete').addEventListener('click', () => {
+    if (!window.confirm('Delete this sandbox game? This can\'t be undone.')) return;
+    abandonSandboxGame(sg.id);
+    refreshMyGames();   // re-render the list without it
   });
   return li;
 }
