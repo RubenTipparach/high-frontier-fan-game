@@ -118,6 +118,18 @@ async function onMakeLink() {
   input.value = inviteUrl(r.data.code);
   box.classList.remove('hidden');
   input.select();
+  // Auto-copy on generate (the Copy button stays as a fallback for anyone
+  // who gets distracted). Flash the same "Copied" feedback + toast.
+  try {
+    if (navigator.clipboard) await navigator.clipboard.writeText(input.value);
+    else document.execCommand('copy');
+    const copyBtn = document.getElementById('btn-copy-link');
+    if (copyBtn) {
+      copyBtn.textContent = 'Copied';
+      setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1200);
+    }
+    _onToast('Invite link copied to clipboard.', 'success');
+  } catch { /* clipboard blocked - the Copy button is the fallback */ }
 }
 
 function onCopyLink() {
