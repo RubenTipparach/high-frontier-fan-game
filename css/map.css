@@ -5185,6 +5185,20 @@ body:has(#view-browse:not(.hidden)) #main {
   opacity: 0.4;
   cursor: not-allowed;
 }
+/* Rocket-destination transfers wear an orange motif: a subtle,
+   consistent "this builds your rocket" cue across every Send -> Rocket
+   button (LEO inspector + rocket modal). User 2026-05-29: "send to
+   rocket should be an orange button ... a motif to subtly guide
+   players to building a rocket". */
+.stack-inspector-xfer-btn[data-dest="rocket"] {
+  background: #c2410c;
+  color: #fff7ed;
+  border-color: #f97316;
+}
+.stack-inspector-xfer-btn[data-dest="rocket"]:hover:not(:disabled) {
+  background: #ea580c;
+  border-color: #fb923c;
+}
 
 /* Per-card Select toggle in the rocket modal. Matches the
    stack-inspector-select idiom so the player sees one
