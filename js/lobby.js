@@ -124,6 +124,42 @@ async function loadAnnouncement() {
 // live messages accumulate past the server's history window.
 const MAX_GLOBAL_CHAT = 200;
 
+// Styled yes/no confirm (reuses the in-game modal CSS so it matches the
+// rest of the app rather than a native window.confirm, which some embeds
+// suppress). Resolves true on Yes / Enter, false on Cancel / Esc / backdrop.
+function confirmDialog({ title, body, yes = 'OK', no = 'Cancel' }) {
+  return new Promise((resolve) => {
+    document.querySelector('.confirm-modal-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay';
+    const close = (v) => {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(!!v);
+    };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+    const onKey = (e) => {
+      if (e.key === 'Escape') close(false);
+      else if (e.key === 'Enter') close(true);
+    };
+    document.addEventListener('keydown', onKey);
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel';
+    panel.innerHTML = `
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(body)}</p>
+      <div class="turn-confirm-actions">
+        <button type="button" class="popup-btn primary" data-act="yes">${escapeHtml(yes)}</button>
+        <button type="button" class="popup-btn" data-act="no">${escapeHtml(no)}</button>
+      </div>
+    `;
+    panel.querySelector('[data-act="yes"]').addEventListener('click', () => close(true));
+    panel.querySelector('[data-act="no"]').addEventListener('click', () => close(false));
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+  });
+}
+
 function mountGlobalChat() {
   const form = document.getElementById('global-chat-form');
   const input = document.getElementById('global-chat-input');
@@ -306,8 +342,13 @@ function sandboxGameRow(sg) {
     activateSandboxGame(sg.id);
     window.location.assign(sandboxUrl(sg.id));
   });
-  li.querySelector('.sb-delete').addEventListener('click', () => {
-    if (!window.confirm('Delete this sandbox game? This can\'t be undone.')) return;
+  li.querySelector('.sb-delete').addEventListener('click', async () => {
+    const ok = await confirmDialog({
+      title: '🗑 Delete sandbox game',
+      body: 'Delete this sandbox game? This can\'t be undone.',
+      yes: '🗑 Delete', no: 'Cancel',
+    });
+    if (!ok) return;
     abandonSandboxGame(sg.id);
     refreshMyGames();   // re-render the list without it
   });
