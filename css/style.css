@@ -722,6 +722,9 @@ body.in-lobby .main-menu-fab { display: none; }
   #view-lobby-list .lobby-list li,
   #view-lobby-list .invite-list li { padding: 6px 8px; }
   #view-lobby-list .global-chat { width: 100%; max-width: none; }
+  /* Keep the chat usable on mobile: the message list gets a floor of
+     250px so it doesn't collapse to a sliver under the composer. */
+  #view-lobby-list .global-chat .chat-messages { min-height: 250px; }
   /* Your games uses the full mobile width too (plenty of room) - the
      box + its list + rows all stretch edge to edge. */
   #view-lobby-list .lobby-your-games { width: 100%; max-width: none; }
