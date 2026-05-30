@@ -282,7 +282,7 @@ code {
 
 /* #main is the page shell: full viewport width with breathing-room
    padding. Views that prefer a narrower column constrain themselves
-   below (the signin card uses .card.narrow; create-lobby + lobby
+   below (the signin panel uses .panel.narrow; create-lobby + lobby
    detail get an explicit max-width so a wide monitor doesn't stretch
    their forms across the whole screen). */
 #main { padding: 20px 28px; margin: 0 auto; }
@@ -293,7 +293,12 @@ code {
 .row { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
 .row > .side { width: 320px; flex: 0 0 auto; }
 
-.card {
+/* .panel is the generic lobby/UI container box. It is deliberately a
+   different class from the HF4 playing-card silhouette (.card in
+   cards.css): the two used to share the name `card` and the
+   playing-card's fixed 220px width leaked onto lobby panels. Keep them
+   separate. */
+.panel {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -301,9 +306,9 @@ code {
   margin-bottom: 16px;
   min-width: 0;
 }
-.card h2 { margin: 0 0 10px; font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--accent-2); }
-.card h3 { margin: 18px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--ink-dim); }
-.card.narrow { max-width: 520px; margin: 40px auto; }
+.panel h2 { margin: 0 0 10px; font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--accent-2); }
+.panel h3 { margin: 18px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--ink-dim); }
+.panel.narrow { max-width: 520px; margin: 40px auto; }
 .card-header {
   display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;
 }
@@ -392,7 +397,7 @@ label.checkbox input { accent-color: var(--accent-2); }
 }
 /* Left column stacks the Players and Invite cards. */
 .lobby-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.lobby-col > .card { margin-bottom: 0; }
+.lobby-col > .panel { margin-bottom: 0; }
 .lobby-chat-card { margin-bottom: 0; }
 /* Fixed-height, scrolling chat list (not a box that grows with messages). */
 .lobby-chat-card .chat-list { height: 440px; max-height: none; }
@@ -604,10 +609,8 @@ label.checkbox input { accent-color: var(--accent-2); }
 }
 
 /* Compact card defaults inside the lobby view. */
-/* Reset the playing-card sizing (.card { width:220px; min-height:350px })
-   so lobby panels fill their grid column instead of being pinned narrow. */
-#view-lobby-list .card { padding: 12px 14px; margin-bottom: 12px; width: auto; min-height: 0; }
-#view-lobby-list .card h2 { margin-bottom: 8px; }
+#view-lobby-list .panel { padding: 12px 14px; margin-bottom: 12px; }
+#view-lobby-list .panel h2 { margin-bottom: 8px; }
 
 /* Global chat: deliberately narrower than the page so it reads as a
    focal chat surface, with the games dashboard below it. width (not
@@ -629,7 +632,7 @@ label.checkbox input { accent-color: var(--accent-2); }
   margin: 0 auto 12px;
   align-items: stretch;
 }
-#view-lobby-list .lobby-top-row > .card { margin-bottom: 0; }
+#view-lobby-list .lobby-top-row > .panel { margin-bottom: 0; }
 #view-lobby-list .global-chat {
   width: auto;
   margin: 0;
@@ -692,7 +695,7 @@ label.checkbox input { accent-color: var(--accent-2); }
   max-width: 1600px;
   margin: 0 auto;
 }
-.lobby-games-grid > .card { margin-bottom: 0; }
+.lobby-games-grid > .panel { margin-bottom: 0; }
 
 /* While the lobby is visible, hide the floating FAB - the lobby has
    an inline menu button in its action row. (Body class set by
@@ -714,8 +717,8 @@ body.in-lobby .main-menu-fab { display: none; }
   .lobby-top { gap: 8px; }
   .lobby-top .claim-link input { width: 120px; }
   .invites-wrap { margin-left: 0; }
-  #view-lobby-list .card { padding: 10px 12px; margin-bottom: 10px; }
-  #view-lobby-list .card h2 { font-size: 13px; margin-bottom: 6px; }
+  #view-lobby-list .panel { padding: 10px 12px; margin-bottom: 10px; }
+  #view-lobby-list .panel h2 { font-size: 13px; margin-bottom: 6px; }
   #view-lobby-list .lobby-list li,
   #view-lobby-list .invite-list li { padding: 6px 8px; }
   #view-lobby-list .global-chat { width: 100%; max-width: none; }

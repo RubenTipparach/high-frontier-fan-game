@@ -38,7 +38,7 @@
         device code to claim across devices.
       -->
       <section id="view-signin" class="view hidden">
-        <div class="card narrow">
+        <div class="panel narrow">
           <h2>Sign in</h2>
           <p class="muted">
             Pick a name (3-20 chars, letters / numbers / _ / -). The first
@@ -110,7 +110,7 @@
              scrolling. Stacks on mobile (your games first per
              user feedback). -->
         <div class="lobby-top-row">
-          <div class="card global-chat">
+          <div class="panel global-chat">
             <h2>Global chat</h2>
             <!-- Server-wide announcement (patches / updates). Populated
                  from GET /announcement; hidden when empty. -->
@@ -124,7 +124,7 @@
               <button type="submit">Send</button>
             </form>
           </div>
-          <div class="card lobby-your-games">
+          <div class="panel lobby-your-games">
             <div class="card-header"><h2>Your games</h2></div>
             <ul id="mygames-started" class="lobby-list">
               <li class="empty">No games in progress.</li>
@@ -132,7 +132,7 @@
           </div>
         </div>
         <div class="lobby-games-grid">
-          <div class="card">
+          <div class="panel">
             <div class="card-header">
               <h2>Open tables</h2>
               <button id="btn-refresh-lobbies" title="Refresh the open-table list">⟳</button>
@@ -141,7 +141,7 @@
               <li class="empty">Loading…</li>
             </ul>
           </div>
-          <div class="card">
+          <div class="panel">
             <div class="card-header">
               <h2>Live games</h2>
             </div>
@@ -149,7 +149,7 @@
               <li class="empty">No public games right now.</li>
             </ul>
           </div>
-          <div class="card">
+          <div class="panel">
             <div class="card-header"><h2>Ended games</h2></div>
             <ul id="mygames-ended" class="lobby-list">
               <li class="empty">No finished games.</li>
@@ -162,7 +162,7 @@
         ===== Create lobby modal =====
       -->
       <section id="view-create-lobby" class="view hidden">
-        <div class="card narrow">
+        <div class="panel narrow">
           <h2>Create a table</h2>
           <form id="form-create-lobby">
             <label>
@@ -203,7 +203,7 @@
       <section id="view-lobby" class="view hidden">
         <div class="lobby-grid">
           <div class="lobby-col">
-            <div class="card">
+            <div class="panel">
               <div class="card-header">
                 <h2 id="lobby-name">Lobby</h2>
                 <div>
@@ -220,7 +220,7 @@
               <p id="lobby-start-error" class="error"></p>
             </div>
 
-            <div class="card">
+            <div class="panel">
               <h2>Invite players</h2>
               <h3>By name</h3>
               <div class="invite-search">
@@ -243,7 +243,7 @@
             </div>
           </div>
 
-          <div class="card lobby-chat-card">
+          <div class="panel lobby-chat-card">
             <h2>Chat</h2>
             <ul id="chat-list" class="chat-list"></ul>
             <form id="form-chat" class="chat-form">
