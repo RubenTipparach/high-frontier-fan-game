@@ -333,7 +333,15 @@ export function mountBrowse(opts = {}) {
   // build the id maps + hydrate the first snapshot, so chain the
   // bootstrap off the same promise. Solo mode just kicks it and returns.
   const mapReady = renderMap();
-  if (_online) { mapReady.then(() => bootstrapOnlineGame()); }
+  if (_online) {
+    mapReady.then(() => bootstrapOnlineGame());
+  } else if (opts.newGame) {
+    // Fresh solo game: run the setup wizard (card economy + house
+    // rules) and then the mandatory crew pick before play starts, so
+    // the player tweaks how they want to play and chooses a faction
+    // instead of dropping onto a board with defaults and no crew.
+    mapReady.then(() => openSandboxSetupWizard(() => openCrewWizard(() => showPane(null))));
+  }
 }
 
 // One-time online bootstrap: build the server<->planner id maps from
@@ -12186,6 +12194,88 @@ function openCrewWizard(arg, maybeOnDone) {
     dialog.querySelector('.crew-confirm').addEventListener('click', () => {
       if (selected) commit();
     });
+  };
+
+  render();
+  document.body.appendChild(overlay);
+  overlay.focus();
+}
+
+// Sandbox setup wizard. Runs once at the start of a fresh solo game
+// (mountBrowse with opts.newGame), BEFORE the mandatory crew pick, so
+// the player configures how they want to play up front instead of
+// hunting through the game-manager pane after the board is already
+// dealt. Collects the card economy (Free Library vs Card Market) plus
+// the starter-cash and fuel-consumption house rules, applies them,
+// reseeds the board to match (so starter cash / mode take effect from
+// turn one), then chains into the crew wizard via onDone. Same
+// modal idiom as the crew wizard: no backdrop / Escape dismiss, since
+// setup is part of starting the game.
+function openSandboxSetupWizard(onDone) {
+  document.querySelector('.sandbox-setup-overlay')?.remove();
+  let mode = getMarketMode();
+  let starter = getStarterCash();
+  let fuel = getFuelConsumption();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay sandbox-setup-overlay';
+  overlay.tabIndex = -1;
+  const dialog = document.createElement('div');
+  dialog.className = 'sandbox-setup-modal';
+  overlay.appendChild(dialog);
+
+  const render = () => {
+    const marketOn = mode === MARKET_MODE.MARKET;
+    dialog.innerHTML = `
+      <div class="crew-wizard-head">
+        <h3>🛠 New sandbox game</h3>
+        <p class="muted">Set how you want to play. You can change these later in the game-manager pane (it resets the board).</p>
+      </div>
+      <div class="setup-section">
+        <h4>🃏 Card economy</h4>
+        <p class="muted">
+          <strong>Free Library</strong>: patents are free draws; auctions
+          cost only the per-turn op.
+          <strong>Card Market</strong>: auctions consume a Hand card;
+          Free Market sells a Hand card for +${FREE_MARKET_AQUA} aqua.
+        </p>
+        <div class="market-mode-row">
+          <button type="button" class="market-mode-btn ${marketOn ? '' : 'is-active'}" data-mode="library">📚 Free Library</button>
+          <button type="button" class="market-mode-btn ${marketOn ? 'is-active' : ''}" data-mode="market">🃏 Card Market</button>
+        </div>
+      </div>
+      <div class="setup-section">
+        <h4>⚙️ House rules</h4>
+        <label class="setup-toggle">
+          <input type="checkbox" class="setup-starter" ${starter ? 'checked' : ''}>
+          <span>Start with $${STARTER_CASH_AMOUNT} starter cash
+            <span class="muted">(off = start at $0, earn via Income / Free Market)</span></span>
+        </label>
+        <label class="setup-toggle">
+          <input type="checkbox" class="setup-fuel" ${fuel ? 'checked' : ''}>
+          <span>Fuel consumption
+            <span class="muted">(moves spend water: fuel-per-burn × burns)</span></span>
+        </label>
+      </div>
+      <div class="card-modal-actions">
+        <button type="button" class="modal-btn primary setup-confirm">Continue to crew pick →</button>
+      </div>
+    `;
+    dialog.querySelector('[data-mode="library"]').onclick = () => { mode = MARKET_MODE.LIBRARY; render(); };
+    dialog.querySelector('[data-mode="market"]').onclick = () => { mode = MARKET_MODE.MARKET; render(); };
+    dialog.querySelector('.setup-starter').onchange = (e) => { starter = e.target.checked; };
+    dialog.querySelector('.setup-fuel').onchange = (e) => { fuel = e.target.checked; };
+    dialog.querySelector('.setup-confirm').onclick = () => {
+      // Persist the prefs, set the economy without a redundant reset,
+      // then reseed once so aqua / mode reflect the choices from the
+      // first turn.
+      setStarterCash(starter);
+      setFuelConsumption(fuel);
+      setMarketMode(mode, { skipReset: true });
+      doSandboxReset();
+      overlay.remove();
+      try { onDone?.(); } catch (e) { console.error('sandbox setup onDone:', e); }
+    };
   };
 
   render();
