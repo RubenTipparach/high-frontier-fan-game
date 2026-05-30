@@ -619,12 +619,12 @@ label.checkbox input { accent-color: var(--accent-2); }
    above the chat on small screens). */
 #view-lobby-list .lobby-top-row {
   display: grid;
-  /* Both lanes flex so Your-games fills its share of the row instead
-     of being pinned to a fixed cap. Chat keeps a touch more room via
-     the larger min, but Your-games now extends to fill the space. */
-  grid-template-columns: minmax(280px, 1.1fr) minmax(340px, 1fr);
+  /* Your-games gets its own full-width row (it's the thing a returning
+     player wants front and centre); chat stacks below it full-width
+     too. Single column = both cards fill the lobby width. */
+  grid-template-columns: 1fr;
   gap: 12px;
-  max-width: 1320px;
+  max-width: 1600px;
   margin: 0 auto 12px;
   align-items: stretch;
 }
@@ -638,6 +638,7 @@ label.checkbox input { accent-color: var(--accent-2); }
 #view-lobby-list .lobby-your-games {
   display: flex;
   flex-direction: column;
+  order: -1;              /* above the chat in the stacked top row */
 }
 #view-lobby-list .lobby-your-games > .lobby-list {
   flex: 1;
@@ -680,16 +681,15 @@ label.checkbox input { accent-color: var(--accent-2); }
   font-style: italic;
 }
 
-/* Three-column games grid, centered on the page (capped at 1200px) so
-   Open / Your / Ended cluster near the middle alongside the chat above
-   instead of being pinned to the viewport edges on wide screens. The
-   lobby's own scroll handles overflow. */
+/* Three-column games grid, centered on the page so Open / Live /
+   Ended cluster alongside the cards above. Shares the 1600px lobby
+   cap so the whole dashboard fills more of a wide monitor. */
 .lobby-games-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   align-items: start;
-  max-width: 1320px;
+  max-width: 1600px;
   margin: 0 auto;
 }
 .lobby-games-grid > .card { margin-bottom: 0; }
