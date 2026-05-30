@@ -86,7 +86,7 @@ const BOOLEAN_TO_REQ = {
 // in the supports box.
 const PROPERTY_COLUMNS_BOOL = {
   'Push':           { key: 'push',           glyph: '🛰', label: 'Push-sat',
-    desc: 'Push-sat: adds +1 to thrust for any card that carries this icon.' },
+    desc: 'Push-sat: adds +1 to thrust for any card that carries this icon, and helps avoid needing factory assist to land or take off.' },
   'Solar':          { key: 'solar',          glyph: '☀',  label: 'Solar',
     desc: 'Solar-powered: output scales with how close you are to the Sun and falls off in the outer system / in shadow.' },
   'Air Eater':      { key: 'airEater',       glyph: '⛅', label: 'Air-eater',
