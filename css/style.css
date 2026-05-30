@@ -605,7 +605,7 @@ label.checkbox input { accent-color: var(--accent-2); }
    above the chat on small screens). */
 #view-lobby-list .lobby-top-row {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) minmax(320px, 460px);
+  grid-template-columns: minmax(280px, 1fr) minmax(360px, 540px);
   gap: 12px;
   max-width: 1320px;
   margin: 0 auto 12px;
@@ -622,7 +622,20 @@ label.checkbox input { accent-color: var(--accent-2); }
   display: flex;
   flex-direction: column;
 }
-#view-lobby-list .lobby-your-games > .lobby-list { flex: 1; overflow-y: auto; max-height: 260px; }
+#view-lobby-list .lobby-your-games > .lobby-list {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 260px;
+  /* Smooth scrolling: isolate the list's painting to its own
+     composited layer so scrolling it doesn't repaint the rest of the
+     fixed lobby layer (which the body radial-gradients show through).
+     contain:paint clips its subtree; the layer hint keeps the scroll
+     on the GPU. This was the desktop lobby-scroll lag. */
+  contain: paint;
+  transform: translateZ(0);
+  will-change: scroll-position;
+  overscroll-behavior: contain;
+}
 
 #view-lobby-list .lobby-list li,
 #view-lobby-list .invite-list li { padding: 8px 10px; gap: 8px; }
@@ -638,6 +651,11 @@ label.checkbox input { accent-color: var(--accent-2); }
   max-height: 260px;
   overflow-y: auto;
   font-size: 13px;
+  /* Same scroll-isolation as the Your-games list. */
+  contain: paint;
+  transform: translateZ(0);
+  will-change: scroll-position;
+  overscroll-behavior: contain;
 }
 #view-lobby-list .chat-messages li.empty {
   text-align: center;
