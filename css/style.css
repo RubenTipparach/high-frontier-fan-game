@@ -420,6 +420,20 @@ label.checkbox input { accent-color: var(--accent-2); }
 }
 .roster .ready { color: var(--good); }
 .roster .you { color: var(--accent); font-weight: 600; }
+.roster .lobby-kick-btn {
+  flex: 0 0 auto;
+  margin-left: 8px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: var(--bad, #f87171);
+  background: transparent;
+  border: 1px solid var(--bad, #f87171);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.roster .lobby-kick-btn:hover { background: var(--bad, #f87171); color: #1a0606; }
 
 /* ===== Chat ===== */
 
@@ -605,7 +619,10 @@ label.checkbox input { accent-color: var(--accent-2); }
    above the chat on small screens). */
 #view-lobby-list .lobby-top-row {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) minmax(360px, 540px);
+  /* Both lanes flex so Your-games fills its share of the row instead
+     of being pinned to a fixed cap. Chat keeps a touch more room via
+     the larger min, but Your-games now extends to fill the space. */
+  grid-template-columns: minmax(280px, 1.1fr) minmax(340px, 1fr);
   gap: 12px;
   max-width: 1320px;
   margin: 0 auto 12px;

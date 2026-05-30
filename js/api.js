@@ -119,6 +119,11 @@ export async function setReady(id, ready, token) {
   return call('POST', `/lobbies/${id}/ready`, { body: { ready: !!ready }, token });
 }
 
+// Host-only: remove another player from the lobby (waiting state only).
+export async function kickPlayer(id, targetProfileId, token) {
+  return call('POST', `/lobbies/${id}/kick`, { body: { targetProfileId }, token });
+}
+
 export async function startLobby(id, token) {
   return call('POST', `/lobbies/${id}/start`, { token });
 }

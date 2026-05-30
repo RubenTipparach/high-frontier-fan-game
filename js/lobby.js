@@ -4,7 +4,7 @@
 
 import {
   listLobbies, listMyGames, listPublicGames, getLobby, createLobby, joinLobby, leaveLobby,
-  startLobby, claimInviteLink, lookupInviteLink,
+  startLobby, kickPlayer, claimInviteLink, lookupInviteLink,
   fetchGlobalChat, sendGlobalChat, getAnnouncement,
 } from './api.js';
 import { activeProfile, onProfileChange } from './auth.js';
@@ -550,7 +550,15 @@ export async function enterLobby(lobby) {
     _onToast('Lobby was disbanded.', 'error');
     leaveCurrent();
   });
-  _unsubWS = () => { offUpdate(); offDisband(); ws.unsubscribe(channel); };
+  // The host kicked me. Arrives on my personal me:<id> channel; the
+  // roster / poll absence detection in renderLobby is the reliable
+  // fallback, this just makes the bounce immediate with a clear toast.
+  const offKicked = ws.on('lobby_kicked', (msg) => {
+    if (!_activeLobby || msg.lobbyId !== _activeLobby.id) return;
+    _onToast('The host removed you from the table.', 'error');
+    leaveCurrent();
+  });
+  _unsubWS = () => { offUpdate(); offDisband(); offKicked(); ws.unsubscribe(channel); };
   // Polling fallback. The host's Start click writes lobby.status =
   // 'started' on the server and broadcasts lobby_update on WS; if
   // the other player's WS is down (Firefox failing the wss handshake,
@@ -583,6 +591,23 @@ export async function enterLobby(lobby) {
 }
 
 function renderLobby(lobby) {
+  const me = activeProfile();
+  // Kicked-out detection: if I'm holding this lobby but the fresh
+  // roster no longer lists me (and the game hasn't started, where the
+  // roster freezes), the host removed me. This is the RELIABLE path -
+  // it fires off both the WS lobby_update and the 3s poll, so even if
+  // the immediate me:<id> kick ping is dropped I still bounce. Guarded
+  // by _activeLobby so the initial enter render (I'm present) and any
+  // post-leave render don't trip it.
+  if (me && _activeLobby && _activeLobby.id === lobby.id
+      && lobby.status === 'waiting'
+      && Array.isArray(lobby.members)
+      && !lobby.members.some((m) => m.id === me.id)) {
+    _onToast('The host removed you from the table.', 'error');
+    leaveCurrent();
+    return;
+  }
+
   document.getElementById('lobby-name').textContent = lobby.name;
   document.getElementById('lobby-code-pill').textContent = lobby.code;
   document.getElementById('lobby-meta').innerHTML =
@@ -590,7 +615,8 @@ function renderLobby(lobby) {
     `${lobby.members.length}/${lobby.maxPlayers} seats · ` +
     `${lobby.joinPolicy === 'open' ? 'open' : 'invite-only'}`;
 
-  const me = activeProfile();
+  const iAmHost = me && me.id === lobby.hostId;
+  const canKick = iAmHost && lobby.status === 'waiting';
   const roster = document.getElementById('lobby-roster');
   roster.innerHTML = '';
   for (const member of lobby.members) {
@@ -604,12 +630,21 @@ function renderLobby(lobby) {
         ${isHost ? '<span class="host-badge">host</span>' : ''}
       </span>
     `;
+    // Host sees a Kick button on every other player while waiting.
+    if (canKick && !isHost && !isYou) {
+      const kickBtn = document.createElement('button');
+      kickBtn.type = 'button';
+      kickBtn.className = 'lobby-kick-btn';
+      kickBtn.textContent = '✖ Kick';
+      kickBtn.title = `Remove @${member.name} from the table`;
+      kickBtn.addEventListener('click', () => onKickClick(member));
+      li.appendChild(kickBtn);
+    }
     roster.appendChild(li);
   }
 
   const startBtn = document.getElementById('btn-start');
-  const isHost = me && me.id === lobby.hostId;
-  startBtn.classList.toggle('hidden', !isHost || lobby.status !== 'waiting');
+  startBtn.classList.toggle('hidden', !iAmHost || lobby.status !== 'waiting');
 
   // A started game runs in the sandbox view (view-browse) in online
   // mode: the same classic map + panels as solo, driven by the server.
@@ -649,6 +684,26 @@ async function onLeaveLobby() {
   if (!me) return;
   await leaveLobby(_activeLobby.id, me.token);
   leaveCurrent();
+}
+
+// Host action: remove a player from the table. Confirms first, then
+// the server deletes their membership and re-publishes the lobby; the
+// roster re-renders without them on the next update.
+async function onKickClick(member) {
+  if (!_activeLobby) return;
+  const me = activeProfile();
+  if (!me) return;
+  if (!confirm(`Remove @${member.name} from the table?`)) return;
+  const r = await kickPlayer(_activeLobby.id, member.id, me.token);
+  if (!r.ok) {
+    _onToast(humanizeError(r.error) || 'Could not remove that player.', 'error');
+    return;
+  }
+  if (r.data && r.data.lobby) {
+    _activeLobby = r.data.lobby;
+    renderLobby(_activeLobby);
+  }
+  _onToast(`Removed @${member.name} from the table.`);
 }
 
 function leaveCurrent() {
@@ -732,6 +787,8 @@ function humanizeError(code) {
     invite_required: 'That table is invite-only.',
     not_a_member: 'You\'re not in that lobby.',
     not_host: 'Only the host can do that.',
+    cant_kick_host: 'The host can\'t be removed.',
+    bad_target: 'No such player at the table.',
     profile_not_found: 'No profile with that name.',
     self_invite: 'Can\'t invite yourself.',
     already_member: 'They\'re already at the table.',

@@ -513,6 +513,36 @@ app.post('/lobbies/:id/leave', requireProfile, (req, res) => {
   res.json({ ok: true });
 });
 
+// Host-only. Remove another player from the lobby while it's still
+// waiting. The kick deletes the target's membership row and re-
+// publishes the lobby, so every client (including the kicked player,
+// who is still in the lobby:<id> channel set) sees them drop off the
+// roster; the kicked player's client detects its own absence and
+// bounces to the lobby list. We also ping the kicked player's personal
+// me:<id> channel for an immediate notice (best-effort - the roster /
+// poll detection is the reliable path). Kicking is disabled once the
+// game has started, mirroring the "leave is just go-AFK" rule.
+app.post('/lobbies/:id/kick', requireProfile, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  const targetId = Number(req.body && req.body.targetProfileId);
+  if (!Number.isFinite(targetId)) return res.status(400).json({ error: 'bad_target' });
+  const lobby = db.prepare('SELECT id, host_id, status FROM lobbies WHERE id = ?').get(id);
+  if (!lobby) return res.status(404).json({ error: 'not_found' });
+  if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
+  if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
+  if (targetId === lobby.host_id) return res.status(400).json({ error: 'cant_kick_host' });
+  const member = db
+    .prepare('SELECT 1 FROM lobby_members WHERE lobby_id = ? AND profile_id = ?')
+    .get(id, targetId);
+  if (!member) return res.status(404).json({ error: 'not_a_member' });
+  db.prepare('DELETE FROM lobby_members WHERE lobby_id = ? AND profile_id = ?')
+    .run(id, targetId);
+  publishLobby(id);
+  publishToProfile(targetId, { type: 'lobby_kicked', lobbyId: id });
+  res.json({ ok: true, lobby: lobbyRow(id) });
+});
+
 app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
