@@ -38,7 +38,7 @@
         device code to claim across devices.
       -->
       <section id="view-signin" class="view hidden">
-        <div class="card narrow">
+        <div class="panel narrow">
           <h2>Sign in</h2>
           <p class="muted">
             Pick a name (3-20 chars, letters / numbers / _ / -). The first
@@ -110,8 +110,11 @@
              scrolling. Stacks on mobile (your games first per
              user feedback). -->
         <div class="lobby-top-row">
-          <div class="card global-chat">
+          <div class="panel global-chat">
             <h2>Global chat</h2>
+            <!-- Server-wide announcement (patches / updates). Populated
+                 from GET /announcement; hidden when empty. -->
+            <div id="server-announcement" class="server-announcement" hidden></div>
             <ul id="global-chat-messages" class="chat-messages">
               <li class="empty">Global chat coming online - say hi to anyone in the lobby.</li>
             </ul>
@@ -121,7 +124,7 @@
               <button type="submit">Send</button>
             </form>
           </div>
-          <div class="card lobby-your-games">
+          <div class="panel lobby-your-games">
             <div class="card-header"><h2>Your games</h2></div>
             <ul id="mygames-started" class="lobby-list">
               <li class="empty">No games in progress.</li>
@@ -129,7 +132,7 @@
           </div>
         </div>
         <div class="lobby-games-grid">
-          <div class="card">
+          <div class="panel">
             <div class="card-header">
               <h2>Open tables</h2>
               <button id="btn-refresh-lobbies" title="Refresh the open-table list">⟳</button>
@@ -138,16 +141,15 @@
               <li class="empty">Loading…</li>
             </ul>
           </div>
-          <div class="card">
+          <div class="panel">
             <div class="card-header">
               <h2>Live games</h2>
-              <span class="muted" title="Public games in progress - hop in to spectate">👁</span>
             </div>
             <ul id="public-games-list" class="lobby-list">
               <li class="empty">No public games right now.</li>
             </ul>
           </div>
-          <div class="card">
+          <div class="panel">
             <div class="card-header"><h2>Ended games</h2></div>
             <ul id="mygames-ended" class="lobby-list">
               <li class="empty">No finished games.</li>
@@ -160,7 +162,7 @@
         ===== Create lobby modal =====
       -->
       <section id="view-create-lobby" class="view hidden">
-        <div class="card narrow">
+        <div class="panel narrow">
           <h2>Create a table</h2>
           <form id="form-create-lobby">
             <label>
@@ -200,25 +202,48 @@
       -->
       <section id="view-lobby" class="view hidden">
         <div class="lobby-grid">
-          <div class="card">
-            <div class="card-header">
-              <h2 id="lobby-name">Lobby</h2>
-              <div>
-                <span id="lobby-code-pill" class="code-pill"></span>
-                <button id="btn-leave-lobby" class="danger">Leave</button>
+          <div class="lobby-col">
+            <div class="panel">
+              <div class="card-header">
+                <h2 id="lobby-name">Lobby</h2>
+                <div>
+                  <span id="lobby-code-pill" class="code-pill"></span>
+                  <button id="btn-leave-lobby" class="danger">Leave</button>
+                </div>
+              </div>
+              <p id="lobby-meta" class="muted"></p>
+              <h3>Players</h3>
+              <ul id="lobby-roster" class="roster"></ul>
+              <div class="form-row">
+                <button id="btn-start" class="primary hidden">Start game</button>
+              </div>
+              <p id="lobby-start-error" class="error"></p>
+            </div>
+
+            <div class="panel">
+              <h2>Invite players</h2>
+              <h3>By name</h3>
+              <div class="invite-search">
+                <input id="invite-search-input" type="text" maxlength="20"
+                  placeholder="@name" autocapitalize="off" spellcheck="false" />
+                <ul id="invite-search-results" class="search-results"></ul>
+              </div>
+              <h3>By link</h3>
+              <div class="invite-link-controls">
+                <label class="checkbox">
+                  <input type="checkbox" id="link-single-use" />
+                  Single use
+                </label>
+                <button id="btn-make-link">Generate link</button>
+              </div>
+              <div id="invite-link-result" class="invite-link-result hidden">
+                <input id="invite-link-url" type="text" readonly />
+                <button id="btn-copy-link">Copy</button>
               </div>
             </div>
-            <p id="lobby-meta" class="muted"></p>
-            <h3>Players</h3>
-            <ul id="lobby-roster" class="roster"></ul>
-            <div class="form-row">
-              <button id="btn-ready">Mark ready</button>
-              <button id="btn-start" class="primary hidden">Start game</button>
-            </div>
-            <p id="lobby-start-error" class="error"></p>
           </div>
 
-          <div class="card">
+          <div class="panel lobby-chat-card">
             <h2>Chat</h2>
             <ul id="chat-list" class="chat-list"></ul>
             <form id="form-chat" class="chat-form">
@@ -226,28 +251,6 @@
                 placeholder="Say something…" autocomplete="off" />
               <button type="submit">Send</button>
             </form>
-          </div>
-
-          <div class="card">
-            <h2>Invite players</h2>
-            <h3>By name</h3>
-            <div class="invite-search">
-              <input id="invite-search-input" type="text" maxlength="20"
-                placeholder="@name" autocapitalize="off" spellcheck="false" />
-              <ul id="invite-search-results" class="search-results"></ul>
-            </div>
-            <h3>By link</h3>
-            <div class="invite-link-controls">
-              <label class="checkbox">
-                <input type="checkbox" id="link-single-use" />
-                Single use
-              </label>
-              <button id="btn-make-link">Generate link</button>
-            </div>
-            <div id="invite-link-result" class="invite-link-result hidden">
-              <input id="invite-link-url" type="text" readonly />
-              <button id="btn-copy-link">Copy</button>
-            </div>
           </div>
         </div>
 
@@ -428,6 +431,33 @@
             <button id="btn-signin" class="primary hidden">Sign in</button>
             <span id="server-status" class="server-status" title="API connectivity">…</span>
           </div>
+        </div>
+        <!-- Settings: out-of-band turn notifications (opt-in Discord DM).
+             Hidden when the server has no bot configured. Lives here in the
+             menu's settings area, NOT the new-game chooser. -->
+        <div class="main-menu-section" id="notify-section" hidden>
+          <h2 class="main-menu-heading">Turn notifications</h2>
+          <p class="muted notify-help">
+            Get a Discord DM when it's your turn. Enable Developer Mode in
+            Discord, right-click your name, Copy User ID, and paste it here -
+            then send a test (the bot must share a server with you).
+          </p>
+          <label class="notify-field">
+            <span>Discord user ID</span>
+            <input id="notify-discord-id" type="text" inputmode="numeric"
+              autocomplete="off" spellcheck="false" placeholder="e.g. 123456789012345678" />
+          </label>
+          <label class="checkbox"><input type="checkbox" id="notify-turn" checked /> When it's my turn</label>
+          <label class="checkbox"><input type="checkbox" id="notify-auction" checked /> When an auction needs me</label>
+          <div class="main-menu-row">
+            <button id="btn-notify-save" type="button">Save</button>
+            <button id="btn-notify-test" type="button">Send test DM</button>
+          </div>
+          <p id="notify-status" class="muted notify-status"></p>
+          <p id="notify-disabled-note" class="muted" hidden>
+            No notification bot is configured yet, so test DMs are unavailable -
+            but your preferences still save and apply once one is set up.
+          </p>
         </div>
       </div>
     </div>

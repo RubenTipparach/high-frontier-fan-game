@@ -1,18 +1,20 @@
 // Bootstrap and top-level UI coordination.
 
-import { probeServer, apiAvailable, lookupInviteLink, claimInviteLink, getLobbyByCode } from './api.js';
+import { probeServer, apiAvailable, lookupInviteLink, claimInviteLink, getLobbyByCode,
+  getNotifyPrefs, setNotifyPrefs, testNotify } from './api.js';
 import {
   restoreProfile, activeProfile, signIn, signOut, mintDeviceCode,
   onProfileChange,
 } from './auth.js';
 import { ws } from './ws.js';
 import {
-  initLobby, refreshLobbyList, openLobby,
+  initLobby, refreshLobbyList, openLobby, exitToLobbyList,
 } from './lobby.js';
 import {
   initInvites, refreshInvitesList, subscribeInvitesForProfile,
 } from './invites.js';
-import { mountBrowse, isBrowseOnline } from './game/browse.js';
+import { mountBrowse, isBrowseOnline, refreshRoomOverlays } from './game/browse.js';
+import { newSandboxGame, currentSandboxId, activateSandboxGame } from './game/sandbox-games.js';
 
 const VIEWS = [
   'view-signin', 'view-lobby-list', 'view-create-lobby', 'view-lobby',
@@ -48,8 +50,9 @@ function setUrlForView(view) {
       // Solo sandbox; the online case is handled by setRoomInUrl
       // (called from lobby.js#enterLobby when the lobby's game has
       // started) and short-circuits via the early-return in
-      // showView's URL block.
-      path = base + 'sandbox';
+      // showView's URL block. Each solo game routes to /sandbox/<id>.
+      const sid = currentSandboxId();
+      path = base + 'sandbox' + (sid ? '/' + sid : '');
     } else if (view === 'view-lobby-list' || view === 'view-create-lobby') {
       path = base + 'lobby';
     } else if (view === 'view-lobby') {
@@ -73,6 +76,13 @@ function showView(id) {
   for (const v of VIEWS) {
     document.getElementById(v).classList.toggle('hidden', v !== id);
   }
+  // The crew-draft / auction overlays attach to document.body and the
+  // snapshot poll is seq-gated, so a poll alone won't tear them down
+  // when the player navigates away (e.g. the top-menu Lobby button,
+  // which doesn't unmount the online layer). Re-sync them on every view
+  // switch: they remove themselves off the game room and re-appear from
+  // the cached snapshot on return.
+  refreshRoomOverlays();
   // URL <-> view mapping. Online view-browse keeps its /room/<code>
   // form (lobby.js#setRoomInUrl wrote it on enterLobby); everything
   // else routes through setUrlForView.
@@ -151,9 +161,11 @@ function initBrowseButton() {
   const lobbyBtn = document.getElementById('btn-lobby');
   if (lobbyBtn) {
     lobbyBtn.addEventListener('click', () => {
-      if (document.getElementById('view-lobby-list').classList.contains('hidden')) {
-        showView('view-lobby-list');
-      }
+      // Always exit the current room: detach the online game layer and
+      // clear the /room/<CODE> path so the URL returns to the lobby
+      // list, where the player can enter another room or a sandbox.
+      // (Keeps server-side membership; Resume puts them back in.)
+      exitToLobbyList();
     });
   }
 
@@ -192,6 +204,7 @@ function initMainMenu() {
   const open = () => {
     overlay.classList.remove('hidden');
     document.addEventListener('keydown', onKey);
+    loadNotifySection();   // refresh the turn-notification prefs each open
   };
   const close = () => {
     overlay.classList.add('hidden');
@@ -201,6 +214,7 @@ function initMainMenu() {
     const acct = document.getElementById('account-menu');
     if (acct && !acct.classList.contains('hidden')) acct.classList.add('hidden');
   };
+  wireNotifySection();
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   fab.addEventListener('click', () => {
     if (overlay.classList.contains('hidden')) open(); else close();
@@ -222,6 +236,76 @@ function initMainMenu() {
     const b = document.getElementById(id);
     if (b) b.addEventListener('click', close);
   }
+}
+
+// Turn-notification settings (in the menu modal). Opt-in Discord DM:
+// load the caller's prefs on open, save / test on demand. Hidden entirely
+// when there's no signed-in profile; shows a "no bot" note when the server
+// has no DISCORD_BOT_TOKEN.
+let _notifyWired = false;
+async function loadNotifySection() {
+  const section = document.getElementById('notify-section');
+  if (!section) return;
+  const me = activeProfile();
+  if (!me || !apiAvailable()) { section.hidden = true; return; }
+  section.hidden = false;
+  const r = await getNotifyPrefs(me.token);
+  if (!r.ok) { section.hidden = true; return; }
+  const d = r.data || {};
+  const idEl = document.getElementById('notify-discord-id');
+  const turnEl = document.getElementById('notify-turn');
+  const aucEl = document.getElementById('notify-auction');
+  const disabledNote = document.getElementById('notify-disabled-note');
+  if (idEl) idEl.value = d.discordUserId || '';
+  if (turnEl) turnEl.checked = d.notifyTurn !== false;
+  if (aucEl) aucEl.checked = d.notifyAuction !== false;
+  const off = !d.discordEnabled;
+  if (disabledNote) disabledNote.hidden = !off;
+  // The inputs + Save always work - your prefs persist to the server even
+  // before a bot is configured, so they're ready when one comes online.
+  // Only the live "Send test DM" needs an active bot.
+  for (const el of [idEl, turnEl, aucEl, document.getElementById('btn-notify-save')]) {
+    if (el) el.disabled = false;
+  }
+  const testBtn = document.getElementById('btn-notify-test');
+  if (testBtn) testBtn.disabled = off;
+  const status = document.getElementById('notify-status');
+  if (status) status.textContent = '';
+}
+function wireNotifySection() {
+  if (_notifyWired) return;
+  _notifyWired = true;
+  const status = document.getElementById('notify-status');
+  const setStatus = (t) => { if (status) status.textContent = t; };
+  const collect = () => ({
+    discordUserId: (document.getElementById('notify-discord-id')?.value || '').trim(),
+    notifyTurn: !!document.getElementById('notify-turn')?.checked,
+    notifyAuction: !!document.getElementById('notify-auction')?.checked,
+  });
+  document.getElementById('btn-notify-save')?.addEventListener('click', async () => {
+    const me = activeProfile();
+    if (!me) return;
+    setStatus('Saving…');
+    const r = await setNotifyPrefs(collect(), me.token);
+    setStatus(r.ok ? 'Saved.' : `Couldn't save: ${r.error || 'error'}`);
+  });
+  document.getElementById('btn-notify-test')?.addEventListener('click', async () => {
+    const me = activeProfile();
+    if (!me) return;
+    const id = collect().discordUserId;
+    if (!/^\d{5,25}$/.test(id)) { setStatus('Enter a valid Discord user ID first.'); return; }
+    setStatus('Sending test DM…');
+    const r = await testNotify(id, me.token);
+    setStatus(r.ok
+      ? 'Test DM sent - check your Discord.'
+      : `Test failed: ${humanizeNotifyError(r.error)}`);
+  });
+}
+function humanizeNotifyError(code) {
+  return ({
+    discord_disabled: 'this server has no notification bot configured.',
+    bad_discord_id: 'that doesn\'t look like a Discord user ID.',
+  })[code] || (code ? `the bot couldn't DM you (${code}). Make sure you share a server with the bot and your DMs are open.` : 'unknown error.');
 }
 
 // "+ New game" chooser modal: opened from the lobby's top action row
@@ -252,10 +336,12 @@ function initNewGameModal() {
   });
   sandboxBtn.addEventListener('click', () => {
     close();
-    // Solo sandbox lives in view-browse with no opts; mountBrowse's
-    // safety reset detaches any prior online plumbing automatically.
-    showView('view-browse');
-    mountBrowse();
+    // A fresh solo session: register a new sandbox game id (so it shows in
+    // "Your games" + routes to /sandbox/<id>), then mount with newGame so
+    // every state module resets and no prior game bleeds in.
+    newSandboxGame();
+    showView('view-browse');   // setUrlForView reads currentSandboxId()
+    mountBrowse({ newGame: true });
   });
 }
 
@@ -369,6 +455,20 @@ function readLandingIntent() {
     }
   } catch { /* private mode */ }
   const m = window.location.pathname.match(/\/(lobby|sandbox)(?:\/[^/]*)?\/?$/);
+  return m ? m[1] : null;
+}
+
+// The sandbox game id from a /sandbox/<id> URL (or the 404.html stash).
+// Null when there's no id (a bare /sandbox lands on the active game).
+function readSandboxId() {
+  try {
+    const stashed = sessionStorage.getItem('hf-sandbox-redirect');
+    if (stashed) {
+      sessionStorage.removeItem('hf-sandbox-redirect');
+      if (/^[0-9a-z]{3,16}$/.test(stashed)) return stashed;
+    }
+  } catch { /* private mode */ }
+  const m = window.location.pathname.match(/\/sandbox\/([0-9a-z]{3,16})\/?$/);
   return m ? m[1] : null;
 }
 
@@ -505,11 +605,23 @@ async function boot() {
         const landing = readLandingIntent();
         console.log('[hf:boot] landing intent =', landing);
         if (landing === 'sandbox') {
-          // Land directly in the solo sandbox. mountBrowse with no
-          // online opts spins up the local-only sandbox + writes
-          // /sandbox to the URL via showView's setUrlForView path.
-          mountBrowse({});
-          showView('view-browse');
+          // Land directly in the solo sandbox. If the URL names a specific
+          // game (/sandbox/<id>), make it the live game first; otherwise
+          // resume whatever sandbox game is active. mountBrowse({}) (no
+          // newGame) keeps the restored state; showView writes the
+          // /sandbox/<id> URL via setUrlForView.
+          const sid = readSandboxId();
+          // If the URL names a game that ISN'T the live one, switching it
+          // in rewrites the live keys - but the state modules already read
+          // localStorage at import time, so reload once to re-init from the
+          // switched game. (Resume from "Your games" activates BEFORE
+          // navigating, so there it's already live and this is a no-op.)
+          if (sid && activateSandboxGame(sid)) {
+            window.location.reload();
+          } else {
+            mountBrowse({});
+            showView('view-browse');
+          }
         } else {
           console.log('[hf:boot] landing on lobby (default)');
           showView('view-lobby-list');

@@ -415,6 +415,17 @@ const ZONE_BAND_LIGHT = ['Venus', 'Mars', 'Jupiter', 'Uranus'];
 const EMOJI_FONT = `"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", emoji`;
 const EMOJI_PX   = 14;
 
+// Dark vs light ink for text over a #rrggbb fill, from its luminance.
+// Used so an outpost chit's letter stays legible on any seat colour.
+function _readableInkHex(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+  if (!m) return '#dbeafe';
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return lum > 0.6 ? '#0c0a16' : '#ffffff';
+}
+
 // siteSynodic in the planner data is 'red' | 'yellow' | 'blue'. We
 // translate to UI-tuned hex values; same intent, palette adapted
 // to our darker backdrop.
@@ -903,6 +914,13 @@ export class MapRenderer {
   // is { letter, siteId, cards, tank }. Outposts paint as styled
   // letter chits at their site, offset to the right of any
   // factory + rocket sprite at the same site.
+  // Seat colour for the local player's outpost chits (so a cube reads as
+  // "mine"). Falls back to the default blue when unset.
+  setOutpostColor(color) {
+    this._outpostColor = color || null;
+    this._scheduleDraw();
+  }
+
   setOutposts(outposts) {
     this._outposts = (outposts && Object.keys(outposts).length) ? outposts : null;
     this._scheduleDraw();
@@ -2810,18 +2828,26 @@ export class MapRenderer {
       } else {
         ctx.rect(sx - half, sy - half, chitSize, chitSize);
       }
-      ctx.fillStyle = '#1e3a8a';
+      const fill = this._outpostColor || '#1e3a8a';
+      ctx.fillStyle = fill;
       ctx.globalAlpha = 0.94;
       ctx.fill();
       ctx.globalAlpha = 1;
       ctx.lineWidth = 1.4;
       ctx.strokeStyle = '#0c0a16';
       ctx.stroke();
-      ctx.fillStyle = '#dbeafe';
+      // Readable letter ink for light vs dark seat colours.
+      ctx.fillStyle = _readableInkHex(fill);
       ctx.font = `800 ${Math.round(chitSize * 0.78)}px ui-sans-serif, system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(letter, sx, sy + 1);
+      // 💧 badge when the outpost holds water, so a colocated rocket can
+      // see at a glance there's fuel to pump.
+      if ((op.tank | 0) > 0) {
+        ctx.font = `${Math.round(chitSize * 0.6)}px ${EMOJI_FONT}`;
+        ctx.fillText('💧', sx + half, sy - half);
+      }
     }
     ctx.restore();
   }

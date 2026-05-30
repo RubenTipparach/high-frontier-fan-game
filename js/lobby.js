@@ -4,8 +4,8 @@
 
 import {
   listLobbies, listMyGames, listPublicGames, getLobby, createLobby, joinLobby, leaveLobby,
-  setReady, startLobby, claimInviteLink, lookupInviteLink,
-  fetchGlobalChat, sendGlobalChat,
+  startLobby, kickPlayer, claimInviteLink, lookupInviteLink,
+  fetchGlobalChat, sendGlobalChat, getAnnouncement,
 } from './api.js';
 import { activeProfile, onProfileChange } from './auth.js';
 import { ws } from './ws.js';
@@ -13,6 +13,7 @@ import { saveLastLobbyId } from './storage.js';
 import { mountChat, unmountChat } from './chat.js';
 import { mountInvitesUI, unmountInvitesUI } from './invites.js';
 import { mountBrowse, unmountBrowseOnline } from './game/browse.js';
+import { listSandboxGames, activateSandboxGame, sandboxUrl, abandonSandboxGame } from './game/sandbox-games.js';
 
 let _activeLobby = null;
 let _unsubWS = null;
@@ -42,7 +43,6 @@ export function initLobby({ onShowView, onToast }) {
   document.getElementById('form-create-lobby').addEventListener('submit', onCreateSubmit);
   document.getElementById('form-claim-link').addEventListener('submit', onClaimLinkSubmit);
   document.getElementById('btn-leave-lobby').addEventListener('click', onLeaveLobby);
-  document.getElementById('btn-ready').addEventListener('click', onReadyClick);
   document.getElementById('btn-start').addEventListener('click', onStartClick);
 
   // Invites chip in the lobby top row. Click toggles a small popover
@@ -105,11 +105,67 @@ export function initLobby({ onShowView, onToast }) {
 // immediately (cheap), and the history fetch is deferred until a
 // profile actually arrives via onProfileChange so we don't silently
 // no-op the backfill.
+// Server-wide announcement banner (patches / updates), shown atop global
+// chat. One current message that overrides; hidden when empty. Each line
+// renders as its own row so multi-line posts read cleanly.
+async function loadAnnouncement() {
+  const box = document.getElementById('server-announcement');
+  if (!box) return;
+  const r = await getAnnouncement();
+  const msg = (r.ok && r.data && r.data.message) ? String(r.data.message).trim() : '';
+  if (!msg) { box.hidden = true; box.innerHTML = ''; return; }
+  const lines = msg.split('\n').map((l) => l.trim()).filter(Boolean);
+  box.innerHTML = '<span class="server-announcement-tag">📣 Server update</span>'
+    + lines.map((l) => `<p class="server-announcement-line">${escapeHtml(l)}</p>`).join('');
+  box.hidden = false;
+}
+
+// Cap the on-screen global chat so the box doesn't grow without bound as
+// live messages accumulate past the server's history window.
+const MAX_GLOBAL_CHAT = 200;
+
+// Styled yes/no confirm (reuses the in-game modal CSS so it matches the
+// rest of the app rather than a native window.confirm, which some embeds
+// suppress). Resolves true on Yes / Enter, false on Cancel / Esc / backdrop.
+function confirmDialog({ title, body, yes = 'OK', no = 'Cancel' }) {
+  return new Promise((resolve) => {
+    document.querySelector('.confirm-modal-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay';
+    const close = (v) => {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(!!v);
+    };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+    const onKey = (e) => {
+      if (e.key === 'Escape') close(false);
+      else if (e.key === 'Enter') close(true);
+    };
+    document.addEventListener('keydown', onKey);
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel';
+    panel.innerHTML = `
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(body)}</p>
+      <div class="turn-confirm-actions">
+        <button type="button" class="popup-btn primary" data-act="yes">${escapeHtml(yes)}</button>
+        <button type="button" class="popup-btn" data-act="no">${escapeHtml(no)}</button>
+      </div>
+    `;
+    panel.querySelector('[data-act="yes"]').addEventListener('click', () => close(true));
+    panel.querySelector('[data-act="no"]').addEventListener('click', () => close(false));
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+  });
+}
+
 function mountGlobalChat() {
   const form = document.getElementById('global-chat-form');
   const input = document.getElementById('global-chat-input');
   const list = document.getElementById('global-chat-messages');
   if (!form || !input || !list) return;
+  loadAnnouncement();
 
   // Track which message ids we've already rendered so the live WS echo
   // doesn't double-print messages we just optimistically appended.
@@ -130,6 +186,8 @@ function mountGlobalChat() {
     body.textContent = ' ' + (msg.body || '');
     li.append(who, body);
     list.appendChild(li);
+    // Keep only the most recent messages so the box doesn't grow forever.
+    while (list.children.length > MAX_GLOBAL_CHAT) list.removeChild(list.firstChild);
     list.scrollTop = list.scrollHeight;
   };
 
@@ -176,6 +234,9 @@ function mountGlobalChat() {
       const r = await fetchGlobalChat({}, profile.token);
       if (r && r.ok && r.data && Array.isArray(r.data.entries)) {
         for (const m of r.data.entries) append(m);
+        // Pin to the newest message once the rows have laid out (a
+        // per-append scrollTop can fire before layout on a fresh load).
+        requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; });
       }
     } finally {
       _historyFetching = false;
@@ -251,8 +312,49 @@ export async function refreshMyGames() {
     else if (g.gameStatus === 'finished') ended.push(g);
     else if (g.status === 'started') started.push(g);
   }
-  renderMyGames(startedEl, started, 'Resume', 'No games in progress.');
+  // Local solo sandbox games live alongside the server games in
+  // "Your games" - newest first, each Resume re-enters /sandbox/<id>.
+  const sandboxRows = listSandboxGames().map(sandboxGameRow);
+  renderMyGames(startedEl, started, 'Resume', 'No games in progress.', sandboxRows);
   renderMyGames(endedEl, ended, 'Review', 'No finished games.');
+}
+
+// One "Your games" row for a local sandbox game. Resume snapshots the
+// current active game, restores this one to the live keys, and reloads
+// into /sandbox/<id> so the state modules re-read it.
+function sandboxGameRow(sg) {
+  const li = document.createElement('li');
+  li.className = 'sandbox-game-row';
+  const when = new Date(sg.lastPlayedAt || sg.createdAt || Date.now());
+  li.innerHTML = `
+    <div>
+      <span class="name">🗺 Sandbox game</span>
+      <span class="meta">solo · <code></code> · <span class="when"></span></span>
+    </div>
+    <div class="row-actions">
+      <button class="primary sb-resume">Resume</button>
+      <button class="danger sb-delete" title="Delete this sandbox game">🗑 Delete</button>
+    </div>
+  `;
+  li.querySelector('code').textContent = sg.id;
+  // Compact date (no seconds) so the row isn't dominated by the timestamp.
+  li.querySelector('.when').textContent = when.toLocaleDateString([], { month: 'short', day: 'numeric' })
+    + ' ' + when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  li.querySelector('.sb-resume').addEventListener('click', () => {
+    activateSandboxGame(sg.id);
+    window.location.assign(sandboxUrl(sg.id));
+  });
+  li.querySelector('.sb-delete').addEventListener('click', async () => {
+    const ok = await confirmDialog({
+      title: '🗑 Delete sandbox game',
+      body: 'Delete this sandbox game? This can\'t be undone.',
+      yes: '🗑 Delete', no: 'Cancel',
+    });
+    if (!ok) return;
+    abandonSandboxGame(sg.id);
+    refreshMyGames();   // re-render the list without it
+  });
+  return li;
 }
 
 // "Live games": in-progress public games anyone can hop into as a
@@ -289,7 +391,7 @@ export async function refreshPublicGames() {
           · <code></code></span>
       </div>
       <div class="row-actions">
-        <button class="primary">👁 Watch</button>
+        <button class="primary">Watch</button>
       </div>
     `;
     li.querySelector('.name').textContent = g.lobbyName;
@@ -325,13 +427,16 @@ async function watchGame(g) {
   });
 }
 
-function renderMyGames(listEl, games, actionLabel, emptyMsg) {
+function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
   listEl.innerHTML = '';
+  for (const li of prependRows) listEl.appendChild(li);
   if (!games.length) {
-    const li = document.createElement('li');
-    li.className = 'empty';
-    li.textContent = emptyMsg;
-    listEl.appendChild(li);
+    if (!prependRows.length) {
+      const li = document.createElement('li');
+      li.className = 'empty';
+      li.textContent = emptyMsg;
+      listEl.appendChild(li);
+    }
     return;
   }
   for (const g of games) {
@@ -445,7 +550,15 @@ export async function enterLobby(lobby) {
     _onToast('Lobby was disbanded.', 'error');
     leaveCurrent();
   });
-  _unsubWS = () => { offUpdate(); offDisband(); ws.unsubscribe(channel); };
+  // The host kicked me. Arrives on my personal me:<id> channel; the
+  // roster / poll absence detection in renderLobby is the reliable
+  // fallback, this just makes the bounce immediate with a clear toast.
+  const offKicked = ws.on('lobby_kicked', (msg) => {
+    if (!_activeLobby || msg.lobbyId !== _activeLobby.id) return;
+    _onToast('The host removed you from the table.', 'error');
+    leaveCurrent();
+  });
+  _unsubWS = () => { offUpdate(); offDisband(); offKicked(); ws.unsubscribe(channel); };
   // Polling fallback. The host's Start click writes lobby.status =
   // 'started' on the server and broadcasts lobby_update on WS; if
   // the other player's WS is down (Firefox failing the wss handshake,
@@ -478,6 +591,23 @@ export async function enterLobby(lobby) {
 }
 
 function renderLobby(lobby) {
+  const me = activeProfile();
+  // Kicked-out detection: if I'm holding this lobby but the fresh
+  // roster no longer lists me (and the game hasn't started, where the
+  // roster freezes), the host removed me. This is the RELIABLE path -
+  // it fires off both the WS lobby_update and the 3s poll, so even if
+  // the immediate me:<id> kick ping is dropped I still bounce. Guarded
+  // by _activeLobby so the initial enter render (I'm present) and any
+  // post-leave render don't trip it.
+  if (me && _activeLobby && _activeLobby.id === lobby.id
+      && lobby.status === 'waiting'
+      && Array.isArray(lobby.members)
+      && !lobby.members.some((m) => m.id === me.id)) {
+    _onToast('The host removed you from the table.', 'error');
+    leaveCurrent();
+    return;
+  }
+
   document.getElementById('lobby-name').textContent = lobby.name;
   document.getElementById('lobby-code-pill').textContent = lobby.code;
   document.getElementById('lobby-meta').innerHTML =
@@ -485,7 +615,8 @@ function renderLobby(lobby) {
     `${lobby.members.length}/${lobby.maxPlayers} seats · ` +
     `${lobby.joinPolicy === 'open' ? 'open' : 'invite-only'}`;
 
-  const me = activeProfile();
+  const iAmHost = me && me.id === lobby.hostId;
+  const canKick = iAmHost && lobby.status === 'waiting';
   const roster = document.getElementById('lobby-roster');
   roster.innerHTML = '';
   for (const member of lobby.members) {
@@ -498,14 +629,22 @@ function renderLobby(lobby) {
         <strong class="${isYou ? 'you' : ''}">@${escapeHtml(member.name)}</strong>
         ${isHost ? '<span class="host-badge">host</span>' : ''}
       </span>
-      <span class="${member.ready ? 'ready' : 'muted'}">${member.ready ? '✓ ready' : 'not ready'}</span>
     `;
+    // Host sees a Kick button on every other player while waiting.
+    if (canKick && !isHost && !isYou) {
+      const kickBtn = document.createElement('button');
+      kickBtn.type = 'button';
+      kickBtn.className = 'lobby-kick-btn';
+      kickBtn.textContent = '✖ Kick';
+      kickBtn.title = `Remove @${member.name} from the table`;
+      kickBtn.addEventListener('click', () => onKickClick(member));
+      li.appendChild(kickBtn);
+    }
     roster.appendChild(li);
   }
 
   const startBtn = document.getElementById('btn-start');
-  const isHost = me && me.id === lobby.hostId;
-  startBtn.classList.toggle('hidden', !isHost || lobby.status !== 'waiting');
+  startBtn.classList.toggle('hidden', !iAmHost || lobby.status !== 'waiting');
 
   // A started game runs in the sandbox view (view-browse) in online
   // mode: the same classic map + panels as solo, driven by the server.
@@ -547,6 +686,26 @@ async function onLeaveLobby() {
   leaveCurrent();
 }
 
+// Host action: remove a player from the table. Confirms first, then
+// the server deletes their membership and re-publishes the lobby; the
+// roster re-renders without them on the next update.
+async function onKickClick(member) {
+  if (!_activeLobby) return;
+  const me = activeProfile();
+  if (!me) return;
+  if (!confirm(`Remove @${member.name} from the table?`)) return;
+  const r = await kickPlayer(_activeLobby.id, member.id, me.token);
+  if (!r.ok) {
+    _onToast(humanizeError(r.error) || 'Could not remove that player.', 'error');
+    return;
+  }
+  if (r.data && r.data.lobby) {
+    _activeLobby = r.data.lobby;
+    renderLobby(_activeLobby);
+  }
+  _onToast(`Removed @${member.name} from the table.`);
+}
+
 function leaveCurrent() {
   if (_unsubWS) { _unsubWS(); _unsubWS = null; }
   if (_lobbyPoll) { clearInterval(_lobbyPoll); _lobbyPoll = null; }
@@ -558,6 +717,20 @@ function leaveCurrent() {
   setRoomInUrl(null);
   _onShowView('view-lobby-list');
   refreshLobbyList();
+}
+
+// Public "exit the current room back to the lobby list" used by the
+// top-menu Lobby button. Detaches the online game layer and clears the
+// /room/<CODE> path so the URL returns to the lobby list, letting the
+// player pick another room or start a sandbox. The server-side lobby
+// membership is kept (no leaveLobby API call), so Resume puts them back
+// in. A no-op when there's nothing to leave.
+export function exitToLobbyList() {
+  if (_activeLobby || _gameMounted) {
+    leaveCurrent();
+  } else {
+    _onShowView('view-lobby-list');
+  }
 }
 
 // Push / clear the /room/<CODE> path without triggering a navigation.
@@ -582,17 +755,6 @@ function setRoomInUrl(code) {
       : base;
     window.history.replaceState({}, '', target + search + cur.hash);
   } catch { /* private mode / file:// scheme */ }
-}
-
-async function onReadyClick() {
-  if (!_activeLobby) return;
-  const me = activeProfile();
-  if (!me) return;
-  const myRow = _activeLobby.members.find((m) => m.id === me.id);
-  const next = myRow ? !myRow.ready : true;
-  await setReady(_activeLobby.id, next, me.token);
-  const r = await getLobby(_activeLobby.id);
-  if (r.ok) { _activeLobby = r.data.lobby; renderLobby(_activeLobby); }
 }
 
 async function onStartClick() {
@@ -625,6 +787,8 @@ function humanizeError(code) {
     invite_required: 'That table is invite-only.',
     not_a_member: 'You\'re not in that lobby.',
     not_host: 'Only the host can do that.',
+    cant_kick_host: 'The host can\'t be removed.',
+    bad_target: 'No such player at the table.',
     profile_not_found: 'No profile with that name.',
     self_invite: 'Can\'t invite yourself.',
     already_member: 'They\'re already at the table.',

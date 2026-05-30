@@ -119,6 +119,11 @@ export async function setReady(id, ready, token) {
   return call('POST', `/lobbies/${id}/ready`, { body: { ready: !!ready }, token });
 }
 
+// Host-only: remove another player from the lobby (waiting state only).
+export async function kickPlayer(id, targetProfileId, token) {
+  return call('POST', `/lobbies/${id}/kick`, { body: { targetProfileId }, token });
+}
+
 export async function startLobby(id, token) {
   return call('POST', `/lobbies/${id}/start`, { token });
 }
@@ -198,4 +203,20 @@ export async function fetchGlobalChat({ before } = {}, token) {
 
 export async function sendGlobalChat(body, token) {
   return call('POST', '/chat/global', { body: { body }, token });
+}
+
+// --- Turn notification prefs (opt-in Discord DM) ---
+export async function getNotifyPrefs(token) {
+  return call('GET', '/me/notify', { token });
+}
+export async function setNotifyPrefs(prefs, token) {
+  return call('PUT', '/me/notify', { body: prefs, token });
+}
+export async function testNotify(discordUserId, token) {
+  return call('POST', '/me/notify/test', { body: { discordUserId }, token });
+}
+
+// --- Server-wide announcement banner ---
+export async function getAnnouncement() {
+  return call('GET', '/announcement', {});
 }

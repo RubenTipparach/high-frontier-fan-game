@@ -17,7 +17,19 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { makeRefId } from '../../data/planner-ids.js';
+import { makeRefId, normalizeSiteName } from '../../data/planner-ids.js';
+import { SITES } from '../../data/sites.js';
+
+// The mission-planner data (vendor JSON) is the single source of truth
+// for the movement graph - the SAME file the client renders from - and a
+// node's id is the makeRefId slug the client also stamps (id2). The
+// server does NOT invent its own ids. data/sites.js is layered on top as
+// curated METADATA (class / hydration / vps / solarZone), matched to a
+// planner node by name and looked up by slug via siteBySlug() below.
+const SITE_BY_NAME = new Map();
+for (const s of SITES) {
+  if (s && s.name) SITE_BY_NAME.set(normalizeSiteName(s.name), s);
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -37,7 +49,9 @@ function loadPlanner() {
   const edges = Array.isArray(raw.edges) ? raw.edges : [];
   const edgeLabels = raw.edgeLabels || {};
 
-  // First pass: compute every slug, collect collisions.
+  // First pass: compute every slug (makeRefId - identical to the client's
+  // id2), disambiguating the rare post-rule collision the same way the
+  // client does.
   const rawKeyToSlug = new Map();
   const slugCount = new Map();
   for (const key of Object.keys(points)) {
@@ -49,11 +63,17 @@ function loadPlanner() {
     rawKeyToSlug.set(key, slug);
   }
 
-  // Second pass: build the node table by slug.
+  // Second pass: build the node table by slug, attaching the curated
+  // data/sites.js entry (matched by name) so siteBySlug() can answer
+  // class / hydration / vps / solarZone for the engine. Waypoints
+  // (lagrange / burn / hohmann / rad) match nothing -> site: null.
   const nodes = new Map();
   for (const key of Object.keys(points)) {
     const p = points[key];
     const slug = rawKeyToSlug.get(key);
+    const site = (p.type === 'site' && p.siteName)
+      ? (SITE_BY_NAME.get(normalizeSiteName(p.siteName)) || null)
+      : null;
     nodes.set(slug, {
       slug,
       x: p.x, y: p.y,
@@ -61,6 +81,8 @@ function loadPlanner() {
       name: p.siteName || null,
       siteWater: p.siteWater != null ? Number(p.siteWater) : null,
       siteSize: p.siteSize || null,
+      site,           // curated data/sites.js metadata, or null
+      hazard: !!p.hazard,   // raw planner skull flag
     });
   }
 
@@ -94,6 +116,80 @@ export function siteExists(slug) {
 
 export function nodeBySlug(slug) {
   return NODES_BY_SLUG.get(String(slug)) || null;
+}
+
+// Curated data/sites.js metadata for a planner slug (class / hydration /
+// vps / solarZone / name), or null for a waypoint / unmatched node. This
+// is the engine's metadata accessor - the planner slug is the one id, so
+// glory, prospect thresholds, and factory income all resolve through it.
+export function siteBySlug(slug) {
+  const n = NODES_BY_SLUG.get(String(slug));
+  return (n && n.site) || null;
+}
+
+// Numeric site size (the published "site number"), parsed from the
+// planner's "1D" / "2C" style string. 0 for waypoints / unsized nodes.
+// Mirror of browse.js#siteSizeNumber - drives the liftoff / landing
+// thrust gate + factory assist.
+export function nodeSizeNumber(slug) {
+  const n = NODES_BY_SLUG.get(String(slug));
+  const ss = n && n.siteSize;
+  if (typeof ss === 'string') {
+    const m = ss.match(/^(\d+)/);
+    if (m) return Math.max(0, parseInt(m[1], 10));
+  }
+  if (typeof ss === 'number' && Number.isFinite(ss)) return Math.max(0, ss | 0);
+  return 0;
+}
+
+// Slugs directly adjacent to a node (one edge away).
+export function neighborSlugs(slug) {
+  return (ADJ.get(String(slug)) || []).map((e) => e.to);
+}
+
+// Sites in the raygun's line of sight from `fromSlug`: real sites
+// reachable by travelling ONLY through waypoints (burn / lagrange /
+// hohmann), no intervening site, within maxHops waypoint steps. The hop
+// cap keeps "line of sight" to the local neighbourhood - the waypoint web
+// is so connected that an uncapped beam would reach almost every site.
+// Returns a Set of site slugs (excludes the origin).
+const RAYGUN_MAX_HOPS = 3;
+export function lineOfSightSites(fromSlug, maxHops = RAYGUN_MAX_HOPS) {
+  const start = fromSlug == null ? leoSlug() : String(fromSlug);
+  const out = new Set();
+  if (!ADJ.has(start)) return out;
+  const seen = new Set([start]);
+  const queue = [[start, 0]];
+  while (queue.length) {
+    const [cur, depth] = queue.shift();
+    if (depth > maxHops) continue;
+    for (const { to } of ADJ.get(cur) || []) {
+      if (seen.has(to)) continue;
+      seen.add(to);
+      const node = NODES_BY_SLUG.get(to);
+      if (node && node.site) {
+        out.add(to);          // a site: in range, but don't see past it
+      } else {
+        queue.push([to, depth + 1]);   // waypoint: keep tracing the beam
+      }
+    }
+  }
+  return out;
+}
+
+// Hazard class of a planner node (mirror of browse.js#classifyHazard so
+// the server resolves the SAME hazards the sandbox shows):
+//   'rad'   - radiation zone (rolls, NOT aqua-payable)
+//   'aero'  - aerobrake / Venus corridor (skull-class, aqua-payable)
+//   'skull' - hazard-flagged burn space (aqua-payable)
+//   null    - safe (lagrange flybys are never hazards even when flagged)
+export function hazardKind(slug) {
+  const n = NODES_BY_SLUG.get(String(slug));
+  if (!n) return null;
+  if (n.type === 'radhaz') return 'rad';
+  if (n.type === 'venus') return 'aero';
+  if (n.hazard && n.type !== 'lagrange') return 'skull';
+  return null;
 }
 
 // Find the LEO lagrange node once - that's the canonical "at LEO"

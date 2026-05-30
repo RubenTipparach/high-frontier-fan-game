@@ -192,6 +192,13 @@
 #turn-tag-op   { border-color: #d4a72c; color: #f4d27a; }
 #turn-tag-move { border-color: #38bdf8; color: #bae6fd; }
 #turn-tag-op:hover, #turn-tag-move:hover { filter: brightness(1.25); }
+/* Once the move is spent the move tag becomes the "↩ undo move" control
+   - amber so it reads as a distinct (reversible) action, not a budget. */
+#turn-tag-move.is-undo {
+  border-color: #d4a72c;
+  color: #f4d27a;
+  background: #2a2410;
+}
 /* The ⚙ gear is welded to the move tag as a single segmented
    control: shared height, butted edges, one rounded outer profile.
    Settings (route + fuel options) read as "part of move". */
@@ -3118,6 +3125,30 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .sidepanel-tabs button:hover { background: var(--panel-2); }
 .sidepanel-tabs button.active:hover { background: var(--accent); }
+
+/* New-chat indicator: a pulsing star pinned to the 🛰 tab when a live
+   table-chat message arrives and the MP pane isn't open. Cleared when the
+   pane is opened. */
+.sidepanel-tabs button { position: relative; }
+.sidepanel-tabs button.has-unread:not(.active)::after {
+  content: '\2726';            /* ✦ */
+  position: absolute;
+  top: -2px;
+  right: -1px;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--warm, #fbbf24);
+  text-shadow: 0 0 5px rgba(251, 191, 36, 0.9);
+  pointer-events: none;
+  animation: mp-chat-star-pulse 1.1s ease-in-out infinite;
+}
+@keyframes mp-chat-star-pulse {
+  0%, 100% { transform: scale(0.8); opacity: 0.55; }
+  50%      { transform: scale(1.25); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidepanel-tabs button.has-unread:not(.active)::after { animation: none; opacity: 1; }
+}
 /* Search + config are utilities, not panes. They flow right after the
    pane tabs (a small gap separates them) - previously they were pinned
    to the far end with margin:auto, which clipped them out of view when
@@ -5685,6 +5716,42 @@ body:has(#view-browse:not(.hidden)) #main {
 .newgame-hint { margin: 4px 0 0; font-size: 11px; line-height: 1.4; }
 
 /* ============================================================
+   Sandbox setup wizard (card economy + house rules, shown on a
+   fresh solo game before the crew pick).
+   ============================================================ */
+.sandbox-setup-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  max-width: 520px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  color: var(--ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.sandbox-setup-modal .setup-section { display: flex; flex-direction: column; gap: 8px; }
+.sandbox-setup-modal .setup-section h4 { margin: 0; font-size: 14px; letter-spacing: 0.3px; }
+.sandbox-setup-modal .setup-section p { margin: 0; font-size: 12px; line-height: 1.5; }
+.sandbox-setup-modal .setup-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.sandbox-setup-modal .setup-toggle input {
+  width: 16px; height: 16px; margin-top: 2px;
+  cursor: pointer; accent-color: var(--accent); flex: 0 0 auto;
+}
+.sandbox-setup-modal .setup-toggle .muted { font-weight: 400; }
+
+/* ============================================================
    Starting-crew wizard (mandatory faction pick on New game).
    ============================================================ */
 .crew-wizard-modal {
@@ -6183,4 +6250,73 @@ body:has(#view-browse:not(.hidden)) #main {
 .mp-deck-row .modal-btn { flex: 1 1 auto; min-width: 80px; }
 @media (max-width: 560px) {
   .mp-auction-lot { transform: scale(0.9); transform-origin: top center; }
+}
+
+/* Minimizable MP overlays (crew draft + auction).
+   The minimize button (-) collapses the full-screen modal to a small
+   floating chip docked at the left edge of the map. While minimized
+   the overlay drops its backdrop and goes pointer-events:none so the
+   player can still pan the board, inspect cards, and chat; only the
+   chip itself stays clickable. Tapping the chip restores the modal. */
+.mp-modal-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.mp-modal-titlebar h3 { margin: 0; }
+.mp-mini-btn {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  line-height: 1;
+  font-size: 18px;
+  font-weight: 700;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--ink);
+  cursor: pointer;
+}
+.mp-mini-btn:hover { background: var(--accent); color: #062136; border-color: var(--accent-2); }
+.mp-auction-head .mp-mini-btn { align-self: center; }
+
+.mp-mini-chip {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 13px;
+  border-radius: 10px;
+  border: 1px solid var(--accent-2);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5);
+  animation: modal-fade 0.18s ease-out;
+}
+.mp-mini-chip:hover { border-color: var(--accent); }
+.mp-mini-chip-meta {
+  color: var(--accent-2);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.mp-crew-draft-overlay.is-minimized,
+.mp-auction-overlay.is-minimized {
+  background: transparent;
+  backdrop-filter: none;
+  pointer-events: none;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 14px;
+}
+.mp-crew-draft-overlay.is-minimized .mp-crew-draft-panel,
+.mp-auction-overlay.is-minimized .mp-auction-modal { display: none; }
+.mp-crew-draft-overlay.is-minimized .mp-mini-chip,
+.mp-auction-overlay.is-minimized .mp-mini-chip {
+  display: inline-flex;
+  pointer-events: auto;
 }

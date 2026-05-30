@@ -17,6 +17,7 @@ import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
 import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE } from './game/engine.js';
 import { randomSeed } from './game/rng.js';
+import { sendDM, discordEnabled } from './discord.js';
 
 const PORT = Number(process.env.PORT) || 8080;
 
@@ -149,6 +150,31 @@ function requireProfile(req, res, next) {
 
 app.get('/healthz', (_req, res) => {
   res.json({ ok: true, ts: nowMs() });
+});
+
+// Server-wide announcement banner (shown atop global chat). Seeded once
+// with the current note; editable from /admin. A future build can expand
+// this into a richer "post an update" box - it's already a settings row.
+const DEFAULT_ANNOUNCEMENT =
+  '@ruben-phone: discord integration and email notifications are being worked on, '
+  + 'both require some leg work on my part to add 3rd party services\n'
+  + '@ruben-phone: for now I\'ll just ping you when its your turn';
+db.prepare('INSERT OR IGNORE INTO server_settings (key, value, updated_at) VALUES (?, ?, ?)')
+  .run('announcement', DEFAULT_ANNOUNCEMENT, nowMs());
+
+app.get('/announcement', (_req, res) => {
+  const row = db.prepare('SELECT value, updated_at FROM server_settings WHERE key = ?').get('announcement');
+  res.json({ message: (row && row.value) || '', updatedAt: (row && row.updated_at) || 0 });
+});
+
+// Set the announcement (lives under /admin like the other admin actions).
+app.post('/admin/announcement', (req, res) => {
+  const message = String((req.body && req.body.message) || '');
+  db.prepare(
+    `INSERT INTO server_settings (key, value, updated_at) VALUES ('announcement', ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  ).run(message, nowMs());
+  res.json({ ok: true });
 });
 
 // Create or re-claim a profile. Identical contract to murdoku:
@@ -487,6 +513,36 @@ app.post('/lobbies/:id/leave', requireProfile, (req, res) => {
   res.json({ ok: true });
 });
 
+// Host-only. Remove another player from the lobby while it's still
+// waiting. The kick deletes the target's membership row and re-
+// publishes the lobby, so every client (including the kicked player,
+// who is still in the lobby:<id> channel set) sees them drop off the
+// roster; the kicked player's client detects its own absence and
+// bounces to the lobby list. We also ping the kicked player's personal
+// me:<id> channel for an immediate notice (best-effort - the roster /
+// poll detection is the reliable path). Kicking is disabled once the
+// game has started, mirroring the "leave is just go-AFK" rule.
+app.post('/lobbies/:id/kick', requireProfile, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  const targetId = Number(req.body && req.body.targetProfileId);
+  if (!Number.isFinite(targetId)) return res.status(400).json({ error: 'bad_target' });
+  const lobby = db.prepare('SELECT id, host_id, status FROM lobbies WHERE id = ?').get(id);
+  if (!lobby) return res.status(404).json({ error: 'not_found' });
+  if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
+  if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
+  if (targetId === lobby.host_id) return res.status(400).json({ error: 'cant_kick_host' });
+  const member = db
+    .prepare('SELECT 1 FROM lobby_members WHERE lobby_id = ? AND profile_id = ?')
+    .get(id, targetId);
+  if (!member) return res.status(404).json({ error: 'not_a_member' });
+  db.prepare('DELETE FROM lobby_members WHERE lobby_id = ? AND profile_id = ?')
+    .run(id, targetId);
+  publishLobby(id);
+  publishToProfile(targetId, { type: 'lobby_kicked', lobbyId: id });
+  res.json({ ok: true, lobby: lobbyRow(id) });
+});
+
 app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
@@ -651,6 +707,107 @@ function gameView(gameId, viewerId = null) {
   };
 }
 
+// ----- out-of-band turn notifications (opt-in Discord DM) -----
+
+// A game's display name (its lobby's name) for notification text.
+function gameDisplayName(gameId) {
+  const r = db
+    .prepare('SELECT l.name FROM games g JOIN lobbies l ON l.id = g.lobby_id WHERE g.id = ?')
+    .get(gameId);
+  return (r && r.name) || 'your High Frontier game';
+}
+
+// DM one player IF they've opted into this event kind and Discord is on.
+// Fire-and-forget: a send failure is logged, never blocks the op response.
+function notifyProfile(profileId, kind, text) {
+  if (!discordEnabled()) return;
+  const pref = db
+    .prepare('SELECT discord_user_id, notify_turn, notify_auction FROM notify_prefs WHERE profile_id = ?')
+    .get(profileId);
+  if (!pref || !pref.discord_user_id) return;
+  if (kind === 'turn' && !pref.notify_turn) return;
+  if (kind === 'auction' && !pref.notify_auction) return;
+  sendDM(pref.discord_user_id, text).then((r) => {
+    if (!r.ok && r.error !== 'discord_disabled') {
+      console.warn('[notify] DM failed for profile', profileId, '-', r.error);
+    }
+  });
+}
+
+// After an op commits: DM the newly-active player on END_TURN, and the
+// other players when an auction opens. (One event => one DM each, so the
+// natural cadence is the throttle.)
+function dispatchTurnNotifications(gameId, kind, state) {
+  try {
+    if (!discordEnabled() || !state || !Array.isArray(state.players)) return;
+    if (kind === 'END_TURN') {
+      const active = state.players[state.activeIndex];
+      if (active) {
+        notifyProfile(active.profileId, 'turn', `🛸 It's your turn in ${gameDisplayName(gameId)}.`);
+      }
+    } else if (kind === 'AUCTION_START') {
+      const auctioneer = state.auction && state.auction.auctioneerId;
+      const name = gameDisplayName(gameId);
+      for (const p of state.players) {
+        if (p.profileId === auctioneer) continue;
+        notifyProfile(p.profileId, 'auction', `🔨 An auction just opened in ${name} - place your bid.`);
+      }
+    }
+  } catch (e) {
+    console.warn('[notify] dispatch error', e && e.message);
+  }
+}
+
+// Read the caller's notification prefs (+ whether the server even has a
+// bot configured, so the UI can show "notifications unavailable").
+app.get('/me/notify', requireProfile, (req, res) => {
+  const pref = db
+    .prepare('SELECT discord_user_id, notify_turn, notify_auction FROM notify_prefs WHERE profile_id = ?')
+    .get(req.profile.id);
+  res.json({
+    discordEnabled: discordEnabled(),
+    discordUserId: (pref && pref.discord_user_id) || '',
+    notifyTurn: pref ? !!pref.notify_turn : true,
+    notifyAuction: pref ? !!pref.notify_auction : true,
+  });
+});
+
+// Save the caller's notification prefs. An empty discordUserId clears it.
+app.put('/me/notify', requireProfile, (req, res) => {
+  const b = req.body || {};
+  const discordUserId = String(b.discordUserId || '').trim();
+  if (discordUserId && !/^\d{5,25}$/.test(discordUserId)) {
+    return res.status(400).json({ error: 'bad_discord_id' });
+  }
+  db.prepare(
+    `INSERT INTO notify_prefs (profile_id, discord_user_id, notify_turn, notify_auction, updated_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(profile_id) DO UPDATE SET
+       discord_user_id = excluded.discord_user_id,
+       notify_turn     = excluded.notify_turn,
+       notify_auction  = excluded.notify_auction,
+       updated_at      = excluded.updated_at`
+  ).run(req.profile.id, discordUserId || null, b.notifyTurn ? 1 : 0, b.notifyAuction ? 1 : 0, nowMs());
+  res.json({ ok: true });
+});
+
+// Send a test DM (to the supplied id, or the saved one) so a player can
+// confirm the bot can reach them before relying on it.
+app.post('/me/notify/test', requireProfile, async (req, res) => {
+  if (!discordEnabled()) return res.status(503).json({ error: 'discord_disabled' });
+  let uid = String((req.body && req.body.discordUserId) || '').trim();
+  if (!uid) {
+    const pref = db
+      .prepare('SELECT discord_user_id FROM notify_prefs WHERE profile_id = ?')
+      .get(req.profile.id);
+    uid = (pref && pref.discord_user_id) || '';
+  }
+  if (!/^\d{5,25}$/.test(uid)) return res.status(400).json({ error: 'bad_discord_id' });
+  const r = await sendDM(uid, `✅ High Frontier test DM - turn notifications are working for @${req.profile.name}.`);
+  if (!r.ok) return res.status(502).json({ error: r.error });
+  res.json({ ok: true });
+});
+
 // The state snapshot a given op produced (git-style "tree at commit").
 // Used for read-only history review and as the undo turn-base.
 function stateAtSeq(gameId, seq) {
@@ -785,6 +942,8 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
     op: opMeta,
     game: gameView(id, viewerId),
   }));
+  // Out-of-band turn / auction notifications (opt-in, inert without a bot).
+  dispatchTurnNotifications(id, kind, result.state);
   res.json({ ok: true, seq: nextSeq, log: result.log || null, game: gameView(id, req.profile.id) });
 });
 
@@ -1502,6 +1661,27 @@ app.get('/admin', (_req, res) => {
     <div class="kpi"><strong>${kpi.invites_pending}</strong><span>pending invites</span></div>
     <div class="kpi"><strong>${kpi.links_total}</strong><span>invite links</span></div>
   </div>
+
+  <h2>Announcement banner</h2>
+  <p>Shown atop global chat for every player. One current message (this
+  overrides it). Blank to hide.</p>
+  <form onsubmit="saveAnnouncement(event)">
+    <textarea id="announce-text" rows="4" style="width:100%;box-sizing:border-box">${esc(
+      (db.prepare("SELECT value FROM server_settings WHERE key='announcement'").get() || {}).value || ''
+    )}</textarea>
+    <div style="margin-top:6px"><button type="submit">Save announcement</button>
+    <span id="announce-status"></span></div>
+  </form>
+  <script>
+    function saveAnnouncement(e) {
+      e.preventDefault();
+      var msg = document.getElementById('announce-text').value;
+      document.getElementById('announce-status').textContent = 'Saving…';
+      fetch('/admin/announcement', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: msg }) })
+        .then(function (r) { document.getElementById('announce-status').textContent = r.ok ? 'Saved.' : 'Failed.'; })
+        .catch(function () { document.getElementById('announce-status').textContent = 'Failed.'; });
+    }
+  </script>
 
   <h2>Profiles &amp; devices</h2>
   <table>

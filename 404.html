@@ -29,8 +29,19 @@
         loc.replace(room[1] + loc.search + loc.hash);
         return;
       }
-      // /lobby and /sandbox - stash the landing intent so boot routes
-      // to the right view after the bounce to root.
+      // /sandbox/<id> - a specific solo game. Stash the landing intent +
+      // the id so boot resumes that game after the bounce to root.
+      var sandbox = loc.pathname.match(/^(.*\/)sandbox\/([0-9a-z]{3,16})\/?$/);
+      if (sandbox) {
+        try {
+          sessionStorage.setItem('hf-landing-redirect', 'sandbox');
+          sessionStorage.setItem('hf-sandbox-redirect', sandbox[2]);
+        } catch (e) { /* private mode */ }
+        loc.replace(sandbox[1] + loc.search + loc.hash);
+        return;
+      }
+      // /lobby and bare /sandbox - stash the landing intent so boot
+      // routes to the right view after the bounce to root.
       var view = loc.pathname.match(/^(.*\/)(lobby|sandbox)(?:\/[^/]*)?\/?$/);
       if (view) {
         try { sessionStorage.setItem('hf-landing-redirect', view[2]); } catch (e) { /* private mode */ }

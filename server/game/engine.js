@@ -28,8 +28,15 @@
 
 import { PATENTS_BY_ID } from '../../data/patents.js';
 import { CREW_BY_ID } from '../../data/crew.js';
-import { siteById } from './graph.js';
-import { siteExists as plannerSiteExists, findPath as plannerFindPath, leoSlug } from './planner-graph.js';
+// Movement + metadata both come from the planner graph (the vendor
+// mission-planner data the client also uses). siteBySlug layers the
+// curated data/sites.js metadata onto a planner slug, so there is ONE
+// id space across client + server. (data/graph.js is no longer used.)
+import {
+  siteExists as plannerSiteExists, findPath as plannerFindPath,
+  leoSlug, siteBySlug as siteById, hazardKind,
+  nodeSizeNumber, lineOfSightSites,
+} from './planner-graph.js';
 import { makeRng } from './rng.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES,
@@ -181,6 +188,94 @@ function advanceClock(state) {
   }
 }
 
+// ----- hazard resolution (mirror of the sandbox move queue) -----
+
+const HAZARD_COST_PER = 4;       // aqua to bypass one generic hazard
+const RAD_BYPASS_THRUST = 6;     // thrust strictly above this skips rad rolls
+
+// Active thruster's thrust value (the number in the pink circle). Drives
+// the rad bypass + factory-assist gate. 0 when no thruster is active.
+function activeThrust(rocket) {
+  const tid = rocket.activeThrusterId;
+  if (!tid) return 0;
+  const slot = rocket.stack.find((s) => s.id === tid);
+  if (!slot) return 0;
+  const f = slotFace(slot);
+  return Number.isFinite(f && f.thrust) ? f.thrust : 0;
+}
+// Water spent per burn = the active thruster face's `fuel` value, scaled
+// by any other card's fuelMod (mirror of rocket.js#getActiveThrusterStats,
+// the "N FT per burn" the client shows). The engine must charge the SAME
+// so a move the client says it can afford isn't rejected. The move cost is
+// ceil(fuelPerBurn * burns) (ceil applied to the whole move, as the client
+// does), so free Hohmann coasting (0 burns) costs 0. Falls back to 1.
+function thrusterFuelPerBurn(rocket) {
+  const tid = rocket.activeThrusterId;
+  if (!tid) return 1;
+  const slot = rocket.stack.find((s) => s.id === tid);
+  if (!slot) return 1;
+  const f = slotFace(slot);
+  const p = PATENTS_BY_ID[tid];
+  let fuel = f.fuel != null ? f.fuel : (p && p.fuel);
+  if (fuel == null) return 1;
+  for (const s of rocket.stack) {
+    if (s.id === tid) continue;
+    const cf = slotFace(s);
+    if (cf.fuelMod != null && cf.fuelMod !== 1) fuel *= cf.fuelMod;
+  }
+  return fuel;
+}
+// Rad-hardness of a stack slot's active face (0 when unrated).
+function slotRadHardness(slot) {
+  const p = PATENTS_BY_ID[slot.id];
+  if (p) {
+    const f = (p.faces && p.faces.primary) || p;
+    return (f.radHardness != null ? f.radHardness : p.radHardness) | 0;
+  }
+  const crew = CREW_BY_ID[slot.id];
+  if (crew) {
+    const key = slot.face === 'secondary' ? 'secondary' : 'primary';
+    const cf = (crew.faces && (crew.faces[key] || crew.faces.primary)) || {};
+    return (cf.radHardness | 0);
+  }
+  return 0;
+}
+function isCrewSlot(slot) {
+  return slot.kind === 'crew' || !!CREW_BY_ID[slot.id];
+}
+// Liftoff / landing thrust gate (mirror of browse.js#maneuverGate). Net
+// thrust must exceed the site's size to lift off / land; a size-1 site is
+// always doable with any operational thruster. Otherwise a factory at the
+// site can carry the maneuver (assist) - free if a colony is present,
+// else a hazard roll. No factory + under-thrust = hard block.
+//   -> { ok, assist, needsRoll, size }
+function maneuverGate(state, slug, thrust) {
+  const size = nodeSizeNumber(slug);
+  if (size <= 0 || thrust > size) return { ok: true, assist: false, needsRoll: false, size };
+  if (size === 1 && thrust > 0) return { ok: true, assist: false, needsRoll: false, size };
+  if (!state.factories[slug]) return { ok: false, assist: false, needsRoll: false, size };
+  const colony = !!state.colonies[slug];
+  return { ok: true, assist: true, needsRoll: !colony, size };
+}
+
+// Destroy the rocket: patents fall back to the hand, crew re-spawns in
+// the LEO Stack (variant rule), tank is lost, ship recalls to LEO.
+// Mirror of browse.js#explodeRocket's state half.
+function destroyRocket(player) {
+  for (const slot of player.rocket.stack) {
+    if (isCrewSlot(slot)) {
+      (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+    } else {
+      player.hand.push(slot.id);
+    }
+  }
+  player.rocket.stack = [];
+  player.rocket.activeThrusterId = null;
+  player.rocket.activeProspectorId = null;
+  player.rocket.siteId = null;
+  player.rocket.tank = 0;
+}
+
 // ----- functional ops (undoable) -----
 
 function applyMove(state, op, player) {
@@ -189,40 +284,208 @@ function applyMove(state, op, player) {
   // LEO. Enforcing this keeps the "empty rocket == at LEO" invariant
   // true: the only way off LEO is to build/board a thruster first.
   if (player.rocket.stack.length === 0) return fail('empty_rocket');
-  const toSlug = String(op.toSiteId || '');
-  if (!plannerSiteExists(toSlug)) return fail('unknown_site');
   const from = player.rocket.siteId;       // null = LEO
-  if (toSlug === from) return fail('already_here');
+  const here = from == null ? leoSlug() : from;
 
-  // Path comes from the planner graph (full ~1500 nodes incl. lagrange
-  // / burn / hohmann waypoints). null `from` => start at LEO. Cost is
-  // the sum of edge burn-labels along the shortest path.
-  const path = plannerFindPath(from, toSlug);
-  if (!path) return fail('no_route');
-  const totalBurns = path.totalBurns;
+  // The CLIENT's mission-planner is the source of truth for routing: it
+  // splits a journey into turns and counts Hohmann-aware burns (free
+  // coasting along a transfer). MOVE executes ONLY this turn's segments -
+  // sent on the op (preferred, race-free) or read from the stored route's
+  // turn-1 - so a multi-turn transfer's later legs are NOT charged now.
+  // Each segment is { from, to, burns }.
+  let segs = null;
+  const opSegs = Array.isArray(op.segments) ? op.segments : null;
+  if (opSegs && opSegs.length) {
+    segs = opSegs.map((s) => ({
+      from: String(s.from), to: String(s.to),
+      burns: Math.max(0, Math.floor(Number(s.burns) || 0)),
+    }));
+  } else if (Array.isArray(player.rocket.route) && player.rocket.route.length
+             && player.rocket.route.some((s) => s.turn != null)) {
+    segs = player.rocket.route
+      .filter((s) => (s.turn || 1) === 1)
+      .map((s) => ({ from: s.from, to: s.to, burns: Math.max(0, Math.floor(Number(s.burns) || 0)) }));
+  }
 
-  const cost = perBurnCost(player.rocket) * totalBurns;
+  let dest, thisTurnBurns, arrivals;
+  if (segs && segs.length) {
+    if (segs[0].from !== here) return fail('route_not_from_here');
+    for (let i = 1; i < segs.length; i++) {
+      if (segs[i].from !== segs[i - 1].to) return fail('route_discontinuous');
+    }
+    for (const s of segs) if (!plannerSiteExists(s.to)) return fail('unknown_site');
+    dest = segs[segs.length - 1].to;
+    thisTurnBurns = segs.reduce((b, s) => b + s.burns, 0);
+    arrivals = segs.map((s) => s.to);
+  } else {
+    // Direct mode: a bare destination tap with no per-turn plan. Falls
+    // back to the planner-graph shortest path for the WHOLE journey - only
+    // reached when the client didn't send segments (e.g. a quick adjacent
+    // hop), so the over-count risk is bounded to short moves.
+    const toSlug = String(op.toSiteId || '');
+    if (!plannerSiteExists(toSlug)) return fail('unknown_site');
+    if (toSlug === here) return fail('already_here');
+    const path = plannerFindPath(from, toSlug);
+    if (!path) return fail('no_route');
+    dest = toSlug;
+    thisTurnBurns = path.totalBurns;
+    arrivals = path.path.slice(1);
+  }
+  if (dest === from) return fail('already_here');
+
+  const cost = Math.ceil(thrusterFuelPerBurn(player.rocket) * thisTurnBurns);
   if (cost > player.rocket.tank) return fail('insufficient_water');
 
-  player.rocket.tank -= cost;
-  player.rocket.siteId = toSlug;
-  player.movesRemaining -= 1;
-  // Pop the executed segment off the planned route (if any). Server
-  // keeps the route truncated to "what's still ahead" so a refresh /
-  // snapshot reflects the journey in progress.
-  if (Array.isArray(player.rocket.route) && player.rocket.route.length) {
-    const idx = player.rocket.route.findIndex((s) => s.to === toSlug);
-    if (idx >= 0) player.rocket.route = player.rocket.route.slice(idx + 1);
+  // Hazards along the nodes we ARRIVE at this turn, classified the same
+  // way the sandbox does. Generic (skull / aerobrake) hazards are
+  // aqua-payable (FINAO) or rolled; rad zones always roll (unpayable).
+  const generic = [];   // skull / aero slugs (in travel order)
+  const rad = [];       // rad slugs
+  for (const slug of arrivals) {
+    const k = hazardKind(slug);
+    if (k === 'rad') rad.push(slug);
+    else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
-  // Glory awards still gate on data/sites.js (the curated metadata
-  // table). Waypoints (no SITES entry) yield no chit, which is correct.
-  const destSite = siteById(toSlug);
-  const chit = destSite ? maybeAwardGlory(player, destSite, state.turn) : null;
+  const thrust = activeThrust(player.rocket);
+  // Factory-assist liftoff / landing gate. A maneuver where net thrust
+  // <= site size is only legal if a factory carries it (assist), which
+  // is a hazard roll unless a colony waives it. No factory => hard block.
+  // Liftoff gates the origin (skipped at LEO, siteId null); landing gates
+  // the destination.
+  const liftG = from ? maneuverGate(state, from, thrust) : { ok: true, needsRoll: false };
+  if (!liftG.ok) return fail('cannot_liftoff');
+  const landG = maneuverGate(state, dest, thrust);
+  if (!landG.ok) return fail('cannot_land');
+  // Ordered roll items: liftoff assist, route generics (skull/aero), then
+  // landing assist. Each is aqua-payable (FINAO) or a d6 where a 1 is a
+  // critical that destroys the ship.
+  const rollItems = [];
+  if (liftG.needsRoll) rollItems.push({ slug: from, kind: 'assist', phase: 'liftoff' });
+  for (const slug of generic) rollItems.push({ slug, kind: hazardKind(slug) });
+  if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
 
-  const destName = (destSite && destSite.name) || toSlug;
+  const wantPay = !!op.hazardPay;
+  // FINAO: pay aqua up front to skip the generic + assist rolls. Validated
+  // before anything mutates so a short balance rejects the move cleanly.
+  const finaoCost = wantPay ? rollItems.length * HAZARD_COST_PER : 0;
+  if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
+
+  // Commit the burn + the FINAO payment, then resolve dice in travel
+  // order. rolls[] is recorded on the rocket for the client to play
+  // back (server is authoritative for every die).
+  player.rocket.tank -= cost;
+  if (finaoCost > 0) player.aqua -= finaoCost;
+
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const rolls = [];
+  let destroyed = false;
+  let haltSlug = dest;            // where the rocket actually ends up
+
+  // Generic + assist rolls: a rolled 1 is a critical that destroys the
+  // ship at that node (unless paid past via FINAO).
+  if (!wantPay) {
+    for (const item of rollItems) {
+      const d6 = gen.d6();
+      const crit = d6 === 1;
+      rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, d6, crit });
+      if (crit) { destroyed = true; haltSlug = item.slug; break; }
+    }
+  }
+  // Rad zones (only if the ship survived the generics). Thrust strictly
+  // above the bypass bar outruns the radiation with no roll; otherwise
+  // each zone rolls and the worst (d6 - thrust) decommissions any stack
+  // card whose rad-hardness is below it.
+  let decommissioned = [];
+  if (!destroyed && rad.length) {
+    if (thrust > RAD_BYPASS_THRUST) {
+      for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, thrust });
+    } else {
+      let worst = 0;
+      for (const slug of rad) {
+        const d6 = gen.d6();
+        const radVal = Math.max(0, d6 - thrust);
+        if (radVal > worst) worst = radVal;
+        rolls.push({ slug, kind: 'rad', d6, rad: radVal, thrust });
+      }
+      if (worst > 0) {
+        const survivors = [];
+        for (const slot of player.rocket.stack) {
+          if (slotRadHardness(slot) < worst) {
+            decommissioned.push(slot.id);
+            if (isCrewSlot(slot)) {
+              (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+            } else {
+              player.hand.push(slot.id);
+            }
+          } else {
+            survivors.push(slot);
+          }
+        }
+        player.rocket.stack = survivors;
+        if (player.rocket.activeThrusterId
+            && !survivors.some((s) => s.id === player.rocket.activeThrusterId)) {
+          player.rocket.activeThrusterId = null;
+        }
+        if (player.rocket.activeProspectorId
+            && !survivors.some((s) => s.id === player.rocket.activeProspectorId)) {
+          player.rocket.activeProspectorId = null;
+        }
+      }
+    }
+  }
+  state.rng.cursor = gen.cursor;
+  player.movesRemaining -= 1;
+
+  if (destroyed) {
+    // The ship is lost at haltSlug; cards scatter, rocket recalls to LEO.
+    const where = siteById(haltSlug);
+    const whereName = (where && where.name) || haltSlug;
+    player.rocket.route = [];
+    player.rocket.lastMove = { rolls, destroyed: true, at: haltSlug, nonce: nextMoveNonce(player) };
+    destroyRocket(player);
+    return {
+      ok: true, state,
+      log: `${player.name} burned ${cost} water and was DESTROYED at ${whereName} (rolled a 1).`,
+    };
+  }
+
+  player.rocket.siteId = dest;
+  // Advance the stored route past this turn. A turn-tagged route drops its
+  // turn-1 legs and shifts the rest down (T2 -> T1, ...); a legacy untagged
+  // route pops everything up to the node we reached.
+  if (Array.isArray(player.rocket.route) && player.rocket.route.length) {
+    if (player.rocket.route.some((s) => s.turn != null)) {
+      player.rocket.route = player.rocket.route
+        .filter((s) => (s.turn || 1) > 1)
+        .map((s) => ({ ...s, turn: (s.turn || 1) - 1 }));
+    } else {
+      const idx = player.rocket.route.findIndex((s) => s.to === dest);
+      if (idx >= 0) player.rocket.route = player.rocket.route.slice(idx + 1);
+    }
+  }
+  const destSite = siteById(dest);
+  const chit = destSite ? maybeAwardGlory(player, destSite, state.turn) : null;
+  player.rocket.lastMove = {
+    rolls, destroyed: false, decommissioned,
+    at: dest, nonce: nextMoveNonce(player),
+  };
+
+  const destName = (destSite && destSite.name) || dest;
   let log = `${player.name} burned ${cost} water to ${destName}.`;
+  const nItems = rollItems.length;
+  if (finaoCost > 0) log += ` Paid ${finaoCost} aqua (FINAO) past ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
+  else if (nItems) log += ` Rolled through ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
+  if (decommissioned.length) log += ` Radiation decommissioned ${decommissioned.length} card${decommissioned.length === 1 ? '' : 's'}.`;
   if (chit) log += ` First into the ${chit.zone} zone (+glory chit).`;
   return { ok: true, state, log };
+}
+
+// Monotonic per-move id so the client can tell a fresh move's dice from
+// a re-applied snapshot (it plays the hazard dice only when this bumps).
+function nextMoveNonce(player) {
+  const n = (player.rocket.moveNonce | 0) + 1;
+  player.rocket.moveNonce = n;
+  return n;
 }
 
 // Play a card from the hand onto the rocket stack (rulebook Boost,
@@ -351,8 +614,9 @@ function applySetRoute(state, op, player) {
     const from = String(s.from || '');
     const to = String(s.to || '');
     const burns = Math.max(0, Math.floor(Number(s.burns) || 0));
+    const turn = Math.max(1, Math.floor(Number(s.turn) || 1));
     if (!plannerSiteExists(from) || !plannerSiteExists(to)) return fail('unknown_site');
-    norm.push({ from, to, burns });
+    norm.push({ from, to, burns, turn });   // turn drives per-turn MOVE execution
   }
   // Validate continuity: each segment's from must be the previous to,
   // and the first must start at the rocket's current position
@@ -409,58 +673,84 @@ function slotName(slot) {
 // since it mutates your own rocket. Accepts a BATCH:
 // op = { cardIds: [...], to } (or legacy { cardId, to }). All ids must
 // be valid for the direction or the whole op fails (atomic).
+// Colocated card transfer to/from the rocket. Endpoints: 'leo', 'rocket',
+// or 'outpostA'..'outpostD'. One side MUST be the rocket (it's the mobile
+// carrier). Colocation:
+//   - leo <-> rocket: rocket parked at LEO (siteId null)
+//   - outpostX <-> rocket: rocket parked at the outpost's site (or, if the
+//     rocket is empty, it FORMS at the outpost's site - "lift off later")
+// All ids must be present in the source or the whole batch rejects.
+// op = { cardIds | cardId, from, to }. Backward-compat: when only `to` is
+// given it's the old LEO<->rocket op (from is the other of leo/rocket).
+function stackArrayOf(player, id) {
+  if (id === 'leo') return (player.leo = player.leo || []);
+  if (id === 'rocket') return player.rocket.stack;
+  if (id && id.startsWith('outpost')) {
+    const op = player.outposts && player.outposts[id.slice('outpost'.length)];
+    return op ? op.cards : null;
+  }
+  return null;
+}
 function applyTransfer(state, op, player) {
-  if (player.rocket.siteId != null) return fail('rocket_not_at_leo');
-  const to = op.to === 'rocket' ? 'rocket' : (op.to === 'leo' ? 'leo' : null);
-  if (!to) return fail('bad_transfer');
+  let to = op.to;
+  let from = op.from;
+  // Legacy shorthand: only `to` (rocket|leo) given -> the other is `from`.
+  if (!from && (to === 'rocket' || to === 'leo')) from = (to === 'rocket' ? 'leo' : 'rocket');
+  if (!from || !to || from === to) return fail('bad_transfer');
+  if (from !== 'rocket' && to !== 'rocket') return fail('bad_transfer');
+
   const ids = Array.isArray(op.cardIds)
     ? op.cardIds.map(String)
     : (op.cardId != null ? [String(op.cardId)] : []);
   if (!ids.length) return fail('bad_transfer');
 
-  const src = to === 'rocket' ? (player.leo || []) : player.rocket.stack;
-  // Validate every id is present in the source before mutating, so a
-  // bad id rejects the batch atomically.
-  for (const id of ids) {
-    if (!src.some((s) => s.id === id)) {
-      return fail(to === 'rocket' ? 'not_in_leo' : 'not_in_rocket');
+  // The non-rocket endpoint + its colocation requirement.
+  const other = from === 'rocket' ? to : from;
+  const rocketEmpty = player.rocket.stack.length === 0;
+  if (other === 'leo') {
+    if (player.rocket.siteId != null && !rocketEmpty) return fail('rocket_not_at_leo');
+  } else if (other.startsWith('outpost')) {
+    const opp = player.outposts && player.outposts[other.slice('outpost'.length)];
+    if (!opp) return fail('no_outpost');
+    if (rocketEmpty) {
+      // Forming the rocket at the outpost: it adopts the outpost's site.
+      player.rocket.siteId = opp.siteId;
+    } else if (player.rocket.siteId !== opp.siteId) {
+      return fail('not_colocated');
     }
+  } else {
+    return fail('bad_transfer');
+  }
+
+  const srcArr = stackArrayOf(player, from);
+  const dstArr = stackArrayOf(player, to);
+  if (!srcArr || !dstArr) return fail('bad_transfer');
+  for (const id of ids) {
+    if (!srcArr.some((s) => s.id === id)) return fail('not_in_source');
   }
 
   const moved = [];
   for (const id of ids) {
+    const idx = srcArr.findIndex((s) => s.id === id);
+    const [slot] = srcArr.splice(idx, 1);
+    dstArr.push(slot);
     if (to === 'rocket') {
-      const idx = player.leo.findIndex((s) => s.id === id);
-      const [slot] = player.leo.splice(idx, 1);
-      player.rocket.stack.push(slot);
-      if (!player.rocket.activeThrusterId && isThrusterSlot(slot)) {
-        player.rocket.activeThrusterId = slot.id;
-      }
-      if (!player.rocket.activeProspectorId && isProspectorSlot(slot)) {
-        player.rocket.activeProspectorId = slot.id;
-      }
-      moved.push(slot);
-    } else {
-      const idx = player.rocket.stack.findIndex((s) => s.id === id);
-      const [slot] = player.rocket.stack.splice(idx, 1);
+      if (!player.rocket.activeThrusterId && isThrusterSlot(slot)) player.rocket.activeThrusterId = slot.id;
+      if (!player.rocket.activeProspectorId && isProspectorSlot(slot)) player.rocket.activeProspectorId = slot.id;
+    }
+    if (from === 'rocket') {
       if (player.rocket.activeThrusterId === slot.id) player.rocket.activeThrusterId = null;
       if (player.rocket.activeProspectorId === slot.id) player.rocket.activeProspectorId = null;
-      (player.leo = player.leo || []).push(slot);
-      moved.push(slot);
     }
+    moved.push(slot);
   }
 
-  if (to === 'rocket') {
-    clipTank(player.rocket);
-    const label = moved.length === 1 ? slotName(moved[0]) : `${moved.length} cards`;
-    return { ok: true, state, log: `${player.name} boarded ${label} onto the rocket.` };
-  }
-  // An empty rocket is no longer a real ship - it can't burn without a
-  // thruster, so it can't be anywhere but LEO. Recall it (user
-  // 2026-05-29: "the rocket is empty therefore it is ... at leo").
-  recallIfEmpty(player);
+  if (to === 'rocket') clipTank(player.rocket);
+  if (from === 'rocket') recallIfEmpty(player);
   const label = moved.length === 1 ? slotName(moved[0]) : `${moved.length} cards`;
-  return { ok: true, state, log: `${player.name} returned ${label} to the LEO Stack.` };
+  const dstName = to === 'rocket' ? 'the rocket'
+    : to === 'leo' ? 'the LEO Stack' : `Outpost ${to.slice('outpost'.length)}`;
+  return { ok: true, state, log: `${player.name} moved ${label} to ${dstName}.` };
 }
 
 // Invariant: an empty rocket stack sits at LEO with no active
@@ -471,6 +761,118 @@ function recallIfEmpty(player) {
     player.rocket.activeThrusterId = null;
     player.rocket.activeProspectorId = null;
   }
+}
+
+// Voluntary decommission: send selected cards from the rocket stack (or
+// LEO Stack) back to the HAND (mirror of browse.js#decommissionSelectedToHand).
+// Crew never enters the hand, so any crew in the selection is skipped.
+// op = { cardIds: [...], from: 'rocket' | 'leo' }. Turn-gated (functional).
+function applyDecommission(state, op, player) {
+  const from = op.from === 'leo' ? 'leo' : 'rocket';
+  const ids = Array.isArray(op.cardIds)
+    ? op.cardIds.map(String)
+    : (op.cardId != null ? [String(op.cardId)] : []);
+  if (!ids.length) return fail('bad_decommission');
+  const src = from === 'leo' ? (player.leo || []) : player.rocket.stack;
+  let returned = 0;
+  let blocked = 0;
+  for (const id of ids) {
+    const idx = src.findIndex((s) => s.id === id);
+    if (idx < 0) continue;
+    const slot = src[idx];
+    // Crew can NOT be voluntarily decommissioned to the hand. Removing a
+    // crew member is a special action that resolves during an event
+    // (TODO: implement the event-driven crew-removal flow later); for now
+    // crew in a decommission selection is skipped, never returned.
+    if (isCrewSlot(slot)) { blocked++; continue; }
+    src.splice(idx, 1);
+    player.hand.push(id);
+    if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
+    if (player.rocket.activeProspectorId === id) player.rocket.activeProspectorId = null;
+    returned++;
+  }
+  if (!returned) return fail('nothing_decommissioned');
+  if (from === 'rocket') { clipTank(player.rocket); recallIfEmpty(player); }
+  let log = `${player.name} decommissioned ${returned} card${returned === 1 ? '' : 's'} to hand.`;
+  if (blocked) log += ` (${blocked} crew stayed.)`;
+  return { ok: true, state, log };
+}
+
+// Convert the rocket to an Outpost at its current site (mirror of
+// browse.js#doConvertToOutpost). The whole stack + tank park as a new
+// outpost in the first free slot (A-D); the rocket empties and recalls to
+// LEO. Allowed anywhere in space EXCEPT LEO (at LEO, cards live in the LEO
+// Stack). Turn-gated, free. op = {} (slot + site are derived from state).
+const OUTPOST_LETTERS = ['A', 'B', 'C', 'D'];
+function applyConvertOutpost(state, op, player) {
+  if (player.rocket.stack.length === 0) return fail('empty_rocket');
+  const siteId = player.rocket.siteId;
+  if (siteId == null) return fail('rocket_at_leo');     // use the LEO Stack instead
+  const taken = new Set(Object.keys(player.outposts || {}));
+  const letter = OUTPOST_LETTERS.find((l) => !taken.has(l));
+  if (!letter) return fail('no_outpost_slot');
+  player.outposts = player.outposts || {};
+  player.outposts[letter] = {
+    letter,
+    siteId,
+    cards: player.rocket.stack.map((s) => ({ id: s.id, kind: s.kind, ...(s.face ? { face: s.face } : {}) })),
+    tank: player.rocket.tank | 0,
+  };
+  const n = player.rocket.stack.length;
+  const water = player.rocket.tank | 0;
+  // Empty the rocket back to LEO (same wipe as a recall).
+  player.rocket.stack = [];
+  player.rocket.tank = 0;
+  player.rocket.siteId = null;
+  player.rocket.activeThrusterId = null;
+  player.rocket.activeProspectorId = null;
+  player.rocket.route = [];
+  const where = siteById(siteId);
+  const whereName = (where && where.name) || siteId;
+  return {
+    ok: true, state,
+    log: `${player.name} converted the rocket to Outpost ${letter} at ${whereName} (${n} card${n === 1 ? '' : 's'}, ${water} water).`,
+  };
+}
+
+// Decommission (dissolve) an EMPTY outpost - frees the slot. Requires the
+// outpost to hold no cards (pump its water out / move its cards first).
+// op = { letter }.
+function applyDissolveOutpost(state, op, player) {
+  const letter = String(op.letter || '');
+  const outpost = player.outposts && player.outposts[letter];
+  if (!outpost) return fail('no_outpost');
+  if (outpost.cards && outpost.cards.length > 0) return fail('outpost_not_empty');
+  delete player.outposts[letter];
+  return { ok: true, state, log: `${player.name} decommissioned Outpost ${letter}.` };
+}
+
+// Pump water from a colocated Outpost into the rocket tank. The rocket
+// must be parked at the outpost's site. Clamped by the outpost's water and
+// the rocket's remaining wet-mass room. Free, turn-gated.
+// op = { letter, amount }.
+function applyTransferFuel(state, op, player) {
+  const letter = String(op.letter || '');
+  const outpost = player.outposts && player.outposts[letter];
+  if (!outpost) return fail('no_outpost');
+  if (player.rocket.siteId == null || player.rocket.siteId !== outpost.siteId) {
+    return fail('not_colocated');
+  }
+  const want = Math.floor(Number(op.amount));
+  if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
+  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const room = Math.max(0, TANK_MAX - dry - (player.rocket.tank | 0));
+  const amt = Math.min(want, outpost.tank | 0, room);
+  if (amt <= 0) {
+    if (room <= 0) return fail('tank_full');
+    return fail('no_water');
+  }
+  outpost.tank = (outpost.tank | 0) - amt;
+  player.rocket.tank = (player.rocket.tank | 0) + amt;
+  return {
+    ok: true, state,
+    log: `${player.name} pumped ${amt} water from Outpost ${letter} into the rocket (tank ${player.rocket.tank}).`,
+  };
 }
 
 // Pick which stacked thruster powers burns (rocket.js#setActiveThruster).
@@ -512,7 +914,16 @@ function applyProspect(state, op, player) {
   if (!provSlot) return fail('no_prospector');
   const kind = prospectorKind(provSlot);
   if (!kind) return fail('no_prospector');
-  if (player.rocket.siteId !== toSiteId) return fail('not_at_site');
+  // Raygun fires through line-of-sight: it can prospect the rocket's
+  // current site OR any site one edge away (and is free + unlimited).
+  // Missile / buggy must be AT the target.
+  if (kind === 'raygun') {
+    const here = player.rocket.siteId;
+    const reachable = toSiteId === here || lineOfSightSites(here).has(toSiteId);
+    if (!reachable) return fail('raygun_out_of_range');
+  } else if (player.rocket.siteId !== toSiteId) {
+    return fail('not_at_site');
+  }
   if (state.discs[toSiteId]) return fail('already_prospected');
   if (prospectorIsru(provSlot) > (site.hydration | 0)) return fail('isru_too_high');
   const costsOp = kind !== 'raygun';
@@ -529,12 +940,45 @@ function applyProspect(state, op, player) {
     by: player.name,
     ownerId: player.profileId,
     turn: state.turn,
+    // The buggy may re-roll once, this turn, by its owner.
+    canReroll: kind === 'buggy',
   };
   if (costsOp) player.opsRemaining -= 1;
   const verb = success ? 'struck a claim at' : 'came up dry at';
   return {
     ok: true, state,
     log: `${player.name} rolled ${roll} vs ${threshold} and ${verb} ${site.name}.`,
+  };
+}
+
+// Buggy re-roll (rulebook: the buggy may re-roll its prospect once). The
+// owner re-rolls the disc it just placed, same turn; the new roll stands.
+function applyProspectReroll(state, op, player) {
+  const toSiteId = String(op.siteId || '');
+  const disc = state.discs[toSiteId];
+  if (!disc) return fail('no_disc');
+  if (disc.ownerId !== player.profileId) return fail('not_owner');
+  if (disc.kind !== 'buggy') return fail('not_buggy');
+  if (!disc.canReroll) return fail('already_rerolled');
+  if (disc.turn !== state.turn) return fail('reroll_window_closed');
+  const site = siteById(toSiteId);
+  const threshold = disc.threshold;
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const roll = gen.d6();
+  state.rng.cursor = gen.cursor;
+  const success = roll <= threshold;
+  state.discs[toSiteId] = {
+    ...disc,
+    outcome: success ? 'success' : 'fail',
+    roll,
+    canReroll: false,
+    rerolled: true,
+  };
+  const verb = success ? 'struck a claim at' : 'came up dry at';
+  const where = (site && site.name) || toSiteId;
+  return {
+    ok: true, state,
+    log: `${player.name} re-rolled the buggy: ${roll} vs ${threshold} and ${verb} ${where}.`,
   };
 }
 
@@ -546,6 +990,10 @@ const FUNCTIONAL = {
   BUILD_ROCKET: applyBuildRocket,
   BOOST: applyBoost,
   TRANSFER: applyTransfer,
+  TRANSFER_FUEL: applyTransferFuel,
+  DISSOLVE_OUTPOST: applyDissolveOutpost,
+  DECOMMISSION: applyDecommission,
+  CONVERT_OUTPOST: applyConvertOutpost,
   REFUEL: applyRefuel,
   CASH_WATER: applyCashWater,
   FREE_MARKET: applyFreeMarket,
@@ -554,20 +1002,31 @@ const FUNCTIONAL = {
   SET_ACTIVE_THRUSTER: applySetActiveThruster,
   SET_ACTIVE_PROSPECTOR: applySetActiveProspector,
   PROSPECT: applyProspect,
+  PROSPECT_REROLL: applyProspectReroll,
 };
 
 function pickPayload(op) {
   switch (op.kind) {
-    case 'MOVE': return { toSiteId: op.toSiteId };
+    case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments };
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face };
     case 'BOOST': return { cardIds: op.cardIds };
-    case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, to: op.to };
+    case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from, to: op.to };
+    case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount };
+    case 'DISSOLVE_OUTPOST': return { letter: op.letter };
+    case 'DECOMMISSION': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from };
     case 'REFUEL': return { amount: op.amount };
     case 'CASH_WATER': return { amount: op.amount };
     case 'FREE_MARKET': return { cardId: op.cardId };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
     case 'PROSPECT': return { siteId: op.siteId };
+    case 'PROSPECT_REROLL': return { siteId: op.siteId };
+    // Route ops ride the undo stack like every other functional op, so
+    // an UNDO/REDO replay (rebuildFromBase) must carry their payload or
+    // the replay would re-run SET_ROUTE with no segments and silently
+    // wipe a route the player still has planned.
+    case 'SET_ROUTE': return { segments: op.segments };
+    case 'CLEAR_ROUTE': return {};
     default: return {};
   }
 }

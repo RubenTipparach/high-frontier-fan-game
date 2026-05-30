@@ -86,6 +86,10 @@ export function renderCard(card, { type, supplied, onSupportClick, face } = {}) 
   const kind = type || (card.faces && card.faces.primary && card.faces.primary.role ? 'crew' : 'patent');
   const el = document.createElement('div');
   el.className = `card kind-${kind}` + (kind === 'patent' ? ` type-${card.type}` : '');
+  // Stamp the physical card id (crew faces are a projection of one
+  // physical card via srcId) so callers can find a rendered card on the
+  // map - e.g. the multiplayer transfer drift-in animation keys off it.
+  el.dataset.cardId = card.srcId || card.id;
   // Default to the primary face, but honor an explicit secondary
   // request (e.g. an ET-Produced card lands Black-Side-up) so the
   // card opens showing its black face instead of needing a manual
@@ -252,8 +256,10 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     <div class="card-typebar"></div>
     <div class="card-name-row"><span class="card-name"></span></div>
     <div class="card-statbox">
-      <span><strong class="m"></strong> MASS</span>
-      <span><strong class="r"></strong> RAD</span>
+      <span data-tip="Mass: wet mass this card adds to your ship stack. Heavier stacks need more thrust to move.">
+        <strong class="m"></strong> MASS</span>
+      <span data-tip="Rad-hardness: how well this card resists radiation. Lower values degrade faster near radiation hazards.">
+        <strong class="r"></strong> RAD</span>
       <span class="card-spectral"></span>
     </div>
     <div class="card-body">
@@ -431,7 +437,8 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
       propHost.appendChild(b);
       continue;
     }
-    b.setAttribute('data-tip', p.value === true ? p.label : `${p.label}: ${p.value}`);
+    b.setAttribute('data-tip', p.desc
+      || (p.value === true ? p.label : `${p.label}: ${p.value}`));
     const count = (typeof p.value === 'number' && p.value > 1)
       ? `<b>×${p.value}</b>` : '';
     b.innerHTML = `<em>${p.glyph}</em>${count}`;

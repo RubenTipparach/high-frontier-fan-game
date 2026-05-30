@@ -23,6 +23,18 @@ export function slugify(name) {
     .replace(/^-+|-+$/g, '');
 }
 
+// Loose name key for matching a planner node to its data/sites.js entry.
+// Lives here (shared) so the browser (planner-map.js) and the server
+// (planner-graph.js) match by THE SAME rule - they have to agree on
+// which planner node IS which curated site, or the ids drift and moves
+// fail validation. Lowercase, fold ":" / "-" to spaces, collapse runs.
+export function normalizeSiteName(name) {
+  if (!name) return null;
+  return String(name).trim().toLowerCase()
+    .replace(/[:\-]+/g, ' ')
+    .replace(/\s+/g, ' ');
+}
+
 // djb2 -> base36, 5 chars. ~60M buckets for ~1500 waypoints.
 function shortHash5(s) {
   let h = 5381 >>> 0;
