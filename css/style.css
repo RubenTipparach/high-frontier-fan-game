@@ -652,7 +652,11 @@ label.checkbox input { accent-color: var(--accent-2); }
 #view-lobby-list .lobby-your-games > .lobby-list {
   flex: 1;
   overflow-y: auto;
-  max-height: 260px;
+  /* No fixed cap on desktop: the panel is stretched to the global-chat
+     panel's height (grid align-items:stretch), so flex:1 lets the list
+     span the whole panel and only scrolls when its rows actually
+     overflow that height. The mobile breakpoint re-caps it at 200px. */
+  min-height: 0;
   /* Smooth scrolling: isolate the list's painting to its own
      composited layer so scrolling it doesn't repaint the rest of the
      fixed lobby layer (which the body radial-gradients show through).
