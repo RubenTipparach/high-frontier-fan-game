@@ -256,8 +256,10 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     <div class="card-typebar"></div>
     <div class="card-name-row"><span class="card-name"></span></div>
     <div class="card-statbox">
-      <span><strong class="m"></strong> MASS</span>
-      <span><strong class="r"></strong> RAD</span>
+      <span data-tip="Mass: wet mass this card adds to your ship stack. Heavier stacks need more thrust to move.">
+        <strong class="m"></strong> MASS</span>
+      <span data-tip="Rad-hardness: how well this card resists radiation. Lower values degrade faster near radiation hazards.">
+        <strong class="r"></strong> RAD</span>
       <span class="card-spectral"></span>
     </div>
     <div class="card-body">
@@ -435,7 +437,8 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
       propHost.appendChild(b);
       continue;
     }
-    b.setAttribute('data-tip', p.value === true ? p.label : `${p.label}: ${p.value}`);
+    b.setAttribute('data-tip', p.desc
+      || (p.value === true ? p.label : `${p.label}: ${p.value}`));
     const count = (typeof p.value === 'number' && p.value > 1)
       ? `<b>×${p.value}</b>` : '';
     b.innerHTML = `<em>${p.glyph}</em>${count}`;

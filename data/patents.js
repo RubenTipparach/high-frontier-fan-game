@@ -85,16 +85,24 @@ const BOOLEAN_TO_REQ = {
 // These are surfaced as icon badges on the face, not as chips
 // in the supports box.
 const PROPERTY_COLUMNS_BOOL = {
-  'Push':           { key: 'push',           glyph: '🛰', label: 'Push-sat' },
-  'Solar':          { key: 'solar',          glyph: '☀',  label: 'Solar' },
-  'Air Eater':      { key: 'airEater',       glyph: '⛅', label: 'Air-eater' },
-  'Missile':        { key: 'missile',        glyph: '🚀', label: 'Missile' },
-  'Raygun':         { key: 'raygun',         glyph: '🔫', label: 'Raygun' },
-  'Buggy':          { key: 'buggy',          glyph: '🛺', label: 'Buggy' },
+  'Push':           { key: 'push',           glyph: '🛰', label: 'Push-sat',
+    desc: 'Push-sat: a tug that pushes another stack along its route, so a stack with no thruster of its own can still move.' },
+  'Solar':          { key: 'solar',          glyph: '☀',  label: 'Solar',
+    desc: 'Solar-powered: output scales with how close you are to the Sun and falls off in the outer system / in shadow.' },
+  'Air Eater':      { key: 'airEater',       glyph: '⛅', label: 'Air-eater',
+    desc: 'Air-eater: scoops atmosphere at a gas giant or thick-atmosphere body for fuel or aerobraking.' },
+  'Missile':        { key: 'missile',        glyph: '🚀', label: 'Missile',
+    desc: 'Missile robonaut: a one-shot impactor prospector, consumed when it fires.' },
+  'Raygun':         { key: 'raygun',         glyph: '🔫', label: 'Raygun',
+    desc: 'Raygun robonaut: prospects every site within line of sight in a single op, not just the one you sit on.' },
+  'Buggy':          { key: 'buggy',          glyph: '🛺', label: 'Buggy',
+    desc: 'Buggy robonaut: a surface rover that may re-roll one failed prospect die.' },
 };
 const PROPERTY_COLUMNS_NUM = {
-  'Afterburn':      { key: 'afterburn',      glyph: '🔥', label: 'Afterburn' },
-  'Bonus Pivots':   { key: 'bonusPivots',    glyph: '↺',  label: 'Bonus pivots' },
+  'Afterburn':      { key: 'afterburn',      glyph: '🔥', label: 'Afterburn',
+    desc: 'Afterburn: optional high-thrust mode that spends extra fuel for more thrust on a burn.' },
+  'Bonus Pivots':   { key: 'bonusPivots',    glyph: '↺',  label: 'Bonus pivots',
+    desc: 'Bonus pivots: extra free direction changes per turn that do not cost a burn.' },
   'ISRU':           { key: 'isru',           glyph: '🛢', label: 'ISRU rig' },
 };
 
