@@ -638,6 +638,12 @@ label.checkbox input { accent-color: var(--accent-2); }
   margin: 0;
   display: flex;
   flex-direction: column;
+  /* Override the stray in-game `.global-chat { max-height: 260px }` in
+     map.css (an unscoped placeholder that bleeds onto the lobby panel
+     and freezes its height). The lobby panel must grow with its
+     children - the inner .chat-messages box owns the scroll on desktop,
+     and on mobile the list flows - so the panel itself stays uncapped. */
+  max-height: none;
 }
 #view-lobby-list .lobby-your-games {
   display: flex;
