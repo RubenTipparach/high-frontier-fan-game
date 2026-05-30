@@ -604,7 +604,9 @@ label.checkbox input { accent-color: var(--accent-2); }
 }
 
 /* Compact card defaults inside the lobby view. */
-#view-lobby-list .card { padding: 12px 14px; margin-bottom: 12px; }
+/* Reset the playing-card sizing (.card { width:220px; min-height:350px })
+   so lobby panels fill their grid column instead of being pinned narrow. */
+#view-lobby-list .card { padding: 12px 14px; margin-bottom: 12px; width: auto; min-height: 0; }
 #view-lobby-list .card h2 { margin-bottom: 8px; }
 
 /* Global chat: deliberately narrower than the page so it reads as a
