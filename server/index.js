@@ -1569,7 +1569,11 @@ app.get('/admin', (_req, res) => {
       <td>${esc(r.join_policy)}</td>
       <td class="num">${r.members} / ${r.max_players}</td>
       <td>${esc(r.created)}</td>
-      <td><button class="btn-del-lobby danger" data-lid="${r.id}" data-lname="${esc(r.name)}">Cancel</button></td>
+      <td>
+        ${r.status === 'cancelled'
+          ? `<button class="btn-restore-lobby" data-lid="${r.id}" data-lname="${esc(r.name)}">Restore</button>`
+          : `<button class="btn-del-lobby danger" data-lid="${r.id}" data-lname="${esc(r.name)}">Cancel</button>`}
+      </td>
     </tr>
   `).join('') || '<tr><td colspan=8><em>No lobbies yet.</em></td></tr>';
 
@@ -1627,6 +1631,7 @@ app.get('/admin', (_req, res) => {
   .pill-waiting{background:#1e293b;color:#7dd3fc}
   .pill-started{background:#14532d;color:#86efac}
   .pill-finished{background:#451a03;color:#fdba74}
+  .pill-cancelled{background:#450a0a;color:#fda4af}
   .pill-pending{background:#1e293b;color:#fbbf24}
   .pill-accepted{background:#14532d;color:#86efac}
   .pill-declined{background:#450a0a;color:#fda4af}
@@ -1803,6 +1808,35 @@ document.addEventListener('click', function (ev) {
       alert('Network error.');
     });
 });
+
+// "Restore" - un-cancels a lobby + its game so an accidentally-
+// cancelled room reappears in the players' lists. Reloads the
+// dashboard on success so the status pill + action button flip.
+document.addEventListener('click', function (ev) {
+  var btn = ev.target.closest('.btn-restore-lobby');
+  if (!btn) return;
+  var lid = btn.getAttribute('data-lid');
+  var lname = btn.getAttribute('data-lname');
+  if (!confirm('Restore table "' + lname + '"?\\n\\nThe lobby + its game go back to active so the players regain access.')) return;
+  btn.disabled = true;
+  btn.textContent = 'Restoring...';
+  fetch('/admin/lobbies/' + lid + '/restore', { method: 'POST' })
+    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+    .then(function (res) {
+      if (!res.ok) {
+        btn.disabled = false;
+        btn.textContent = 'Restore';
+        alert('Failed: ' + (res.body && res.body.error || 'unknown'));
+        return;
+      }
+      location.reload();
+    })
+    .catch(function () {
+      btn.disabled = false;
+      btn.textContent = 'Restore';
+      alert('Network error.');
+    });
+});
 </script>
 </body></html>`);
 });
@@ -1852,6 +1886,36 @@ app.post('/admin/lobbies/:id/delete', (req, res) => {
     ).run(now, id);
   })();
   broadcast(`lobby:${id}`, { type: 'lobby_disbanded', lobbyId: id });
+  res.json({ ok: true });
+});
+
+// Restore an accidentally-cancelled lobby. Un-cancels the lobby + its
+// game so the room reappears in the player-facing lists (all of which
+// filter on status). A cancelled game row means the lobby had already
+// started, so both are revived (lobby -> started, game -> active, and
+// the finished_at stamp the cancel set is cleared); no game row means
+// it was cancelled while still waiting, so the lobby goes back to
+// waiting. Pending invites are NOT auto-restored (they were resolved
+// at cancel time); the host can re-invite.
+app.post('/admin/lobbies/:id/restore', (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  const row = db.prepare('SELECT id, status FROM lobbies WHERE id = ?').get(id);
+  if (!row) return res.status(404).json({ error: 'not_found' });
+  if (row.status !== 'cancelled') return res.status(409).json({ error: 'not_cancelled' });
+  db.transaction(() => {
+    const game = db.prepare(
+      "SELECT id FROM games WHERE lobby_id = ? AND status = 'cancelled'"
+    ).get(id);
+    if (game) {
+      db.prepare(
+        "UPDATE games SET status = 'active', finished_at = NULL WHERE lobby_id = ? AND status = 'cancelled'"
+      ).run(id);
+      db.prepare("UPDATE lobbies SET status = 'started' WHERE id = ?").run(id);
+    } else {
+      db.prepare("UPDATE lobbies SET status = 'waiting' WHERE id = ?").run(id);
+    }
+  })();
   res.json({ ok: true });
 });
 
