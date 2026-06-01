@@ -17,7 +17,10 @@ import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
 import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE } from './game/engine.js';
 import { randomSeed } from './game/rng.js';
-import { sendDM, discordEnabled } from './discord.js';
+import {
+  sendDM, discordEnabled,
+  sendWebhook, webhookEnabled, isWebhookUrl, defaultWebhookUrl,
+} from './discord.js';
 
 const PORT = Number(process.env.PORT) || 8080;
 
@@ -174,6 +177,31 @@ app.post('/admin/announcement', (req, res) => {
     `INSERT INTO server_settings (key, value, updated_at) VALUES ('announcement', ?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
   ).run(message, nowMs());
+  res.json({ ok: true });
+});
+
+// Save the server-wide Discord channel webhook URL (or clear it with a
+// blank value). Validated so a typo doesn't silently disable the feed.
+// Same open-dashboard posture as the other /admin actions.
+app.post('/admin/discord-webhook', (req, res) => {
+  const url = String((req.body && req.body.url) || '').trim();
+  if (url && !isWebhookUrl(url)) return res.status(400).json({ error: 'bad_webhook_url' });
+  db.prepare(
+    `INSERT INTO server_settings (key, value, updated_at) VALUES ('discord_webhook_url', ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  ).run(url, nowMs());
+  res.json({ ok: true });
+});
+
+// Fire a test message to a webhook URL. Uses the URL in the request
+// body if present (so the operator can verify before saving), else the
+// saved / env URL. 503 if nothing is configured, 502 on a Discord error.
+app.post('/admin/discord-webhook/test', async (req, res) => {
+  let url = String((req.body && req.body.url) || '').trim();
+  if (!url) url = storedWebhookUrl();
+  if (!isWebhookUrl(url)) return res.status(503).json({ error: 'webhook_disabled' });
+  const r = await sendWebhook('✅ High Frontier webhook test - notifications will post here.', url);
+  if (!r.ok) return res.status(502).json({ error: r.error });
   res.json({ ok: true });
 });
 
@@ -734,24 +762,55 @@ function notifyProfile(profileId, kind, text) {
   });
 }
 
+// The server-wide Discord channel webhook URL: the admin-saved value
+// (server_settings) wins, else the DISCORD_WEBHOOK_URL env default.
+// Empty string when neither is set.
+function storedWebhookUrl() {
+  const row = db
+    .prepare("SELECT value FROM server_settings WHERE key = 'discord_webhook_url'")
+    .get();
+  const saved = (row && row.value) || '';
+  return isWebhookUrl(saved) ? saved : defaultWebhookUrl();
+}
+
+// Post a game event to the channel webhook IF one is configured.
+// Fire-and-forget, like notifyProfile. Server-wide (one channel for the
+// whole deployment), so it's not gated on per-player opt-in.
+function notifyWebhook(text) {
+  const url = storedWebhookUrl();
+  if (!webhookEnabled(url)) return;
+  sendWebhook(text, url).then((r) => {
+    if (!r.ok && r.error !== 'webhook_disabled') {
+      console.warn('[notify] webhook failed -', r.error);
+    }
+  });
+}
+
 // After an op commits: DM the newly-active player on END_TURN, and the
 // other players when an auction opens. (One event => one DM each, so the
-// natural cadence is the throttle.)
+// natural cadence is the throttle.) A configured channel webhook also
+// gets a one-line post per event so a play group can watch a channel
+// instead of relying on per-player DMs.
 function dispatchTurnNotifications(gameId, kind, state) {
   try {
-    if (!discordEnabled() || !state || !Array.isArray(state.players)) return;
+    if (!state || !Array.isArray(state.players)) return;
+    const dmOn = discordEnabled();
     if (kind === 'END_TURN') {
       const active = state.players[state.activeIndex];
       if (active) {
-        notifyProfile(active.profileId, 'turn', `🛸 It's your turn in ${gameDisplayName(gameId)}.`);
+        if (dmOn) notifyProfile(active.profileId, 'turn', `🛸 It's your turn in ${gameDisplayName(gameId)}.`);
+        notifyWebhook(`🛸 ${active.name || 'A player'}'s turn in **${gameDisplayName(gameId)}**.`);
       }
     } else if (kind === 'AUCTION_START') {
       const auctioneer = state.auction && state.auction.auctioneerId;
       const name = gameDisplayName(gameId);
-      for (const p of state.players) {
-        if (p.profileId === auctioneer) continue;
-        notifyProfile(p.profileId, 'auction', `🔨 An auction just opened in ${name} - place your bid.`);
+      if (dmOn) {
+        for (const p of state.players) {
+          if (p.profileId === auctioneer) continue;
+          notifyProfile(p.profileId, 'auction', `🔨 An auction just opened in ${name} - place your bid.`);
+        }
       }
+      notifyWebhook(`🔨 An auction just opened in **${name}** - bidding is live.`);
     }
   } catch (e) {
     console.warn('[notify] dispatch error', e && e.message);
@@ -1680,6 +1739,54 @@ app.get('/admin', (_req, res) => {
       fetch('/admin/announcement', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: msg }) })
         .then(function (r) { document.getElementById('announce-status').textContent = r.ok ? 'Saved.' : 'Failed.'; })
         .catch(function () { document.getElementById('announce-status').textContent = 'Failed.'; });
+    }
+  </script>
+
+  <h2>Discord webhook</h2>
+  <p>Optional. A Discord channel <strong>webhook URL</strong> (Channel -&gt;
+  Edit -&gt; Integrations -&gt; Webhooks -&gt; New Webhook -&gt; Copy URL)
+  posts turn / auction events to that channel - no bot required. Server-wide
+  (one channel for the whole deployment). Blank to disable.${
+    defaultWebhookUrl()
+      ? ' A <code>DISCORD_WEBHOOK_URL</code> env default is set; a value saved here overrides it.'
+      : ''
+  }</p>
+  <form onsubmit="saveWebhook(event)">
+    <input id="webhook-url" type="text" placeholder="https://discord.com/api/webhooks/…"
+      style="width:100%;box-sizing:border-box" value="${esc(
+        ((db.prepare("SELECT value FROM server_settings WHERE key='discord_webhook_url'").get() || {}).value) || ''
+      )}">
+    <div style="margin-top:6px">
+      <button type="submit">Save webhook</button>
+      <button type="button" onclick="testWebhook()">Send test message</button>
+      <span id="webhook-status"></span>
+    </div>
+  </form>
+  <script>
+    function saveWebhook(e) {
+      e.preventDefault();
+      var url = document.getElementById('webhook-url').value.trim();
+      document.getElementById('webhook-status').textContent = 'Saving…';
+      fetch('/admin/discord-webhook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url }) })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+        .then(function (res) {
+          document.getElementById('webhook-status').textContent =
+            res.ok ? 'Saved.' : 'Failed: ' + (res.body && res.body.error || 'unknown');
+        })
+        .catch(function () { document.getElementById('webhook-status').textContent = 'Failed.'; });
+    }
+    // Fire whatever is currently in the box (saved or not), so the
+    // operator can verify a URL before committing it.
+    function testWebhook() {
+      var url = document.getElementById('webhook-url').value.trim();
+      document.getElementById('webhook-status').textContent = 'Sending…';
+      fetch('/admin/discord-webhook/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url }) })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+        .then(function (res) {
+          document.getElementById('webhook-status').textContent =
+            res.ok ? 'Test message sent.' : 'Failed: ' + (res.body && res.body.error || 'unknown');
+        })
+        .catch(function () { document.getElementById('webhook-status').textContent = 'Failed.'; });
     }
   </script>
 
