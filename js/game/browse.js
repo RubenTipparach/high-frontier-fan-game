@@ -125,7 +125,7 @@ import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
 } from './net-bridge.js';
 import { abandonSandboxGame, currentSandboxId } from './sandbox-games.js';
-import { getGame, getGameOps, submitGameOp, fetchChat, sendChat } from '../api.js';
+import { getGame, getGameOps, submitGameOp, fetchChat, sendChat, testNotify } from '../api.js';
 import { ws } from '../ws.js';
 
 // Only one map mode now (planner / "classic"); the old
@@ -1347,6 +1347,43 @@ function renderMpPanel(snapshot) {
     ));
   }
   tableEl.appendChild(roster);
+
+  // Footer: send myself a test Discord DM without leaving the table, to
+  // confirm notifications reach me. Uses the id I linked from the menu's
+  // Connect Discord; the server falls back to my saved id when none is
+  // passed. A failure (not linked / DMs closed) is surfaced as a toast.
+  const footer = document.createElement('div');
+  footer.className = 'mp-notify-test';
+  const testBtn = document.createElement('button');
+  testBtn.type = 'button';
+  testBtn.className = 'mp-leave';
+  testBtn.textContent = '🔔 Test Discord DM';
+  testBtn.title = 'Send yourself a test Discord notification to confirm it reaches you';
+  testBtn.addEventListener('click', async () => {
+    if (!_onlineMe) return;
+    testBtn.disabled = true;
+    const prev = testBtn.textContent;
+    testBtn.textContent = 'Sending…';
+    const r = await testNotify(undefined, _onlineMe.token);
+    testBtn.disabled = false;
+    testBtn.textContent = prev;
+    if (r && r.ok) {
+      _onlineToast('Test DM sent - check your Discord.');
+    } else {
+      _onlineToast('Test DM failed: ' + humanizeNotifyTestError(r && r.error), 'error');
+    }
+  });
+  footer.appendChild(testBtn);
+  tableEl.appendChild(footer);
+}
+
+// Friendly text for the in-game test-DM button failures. Mirrors the
+// menu's mapping (js/main.js) but scoped to the codes this path returns.
+function humanizeNotifyTestError(code) {
+  return ({
+    discord_disabled: 'this server has no notification bot configured.',
+    bad_discord_id: 'connect Discord first (menu -> Turn notifications).',
+  })[code] || (code ? `the bot couldn't reach you (${code}).` : 'unknown error.');
 }
 
 function renderMpPlayer(p, isMe, isActive) {

@@ -746,6 +746,22 @@ function gameDisplayName(gameId) {
   return (r && r.name) || 'your High Frontier game';
 }
 
+// Public base URL of the static frontend, used to build "jump into the
+// room" deep links in notifications. Overridable via env for non-canonical
+// deploys; defaults to the GitHub Pages site. Room URLs are
+// `<base>/room/<code>` with the code lowercased (the form the SPA + the
+// case-insensitive server route both resolve).
+const PUBLIC_APP_URL = (process.env.PUBLIC_APP_URL
+  || 'https://rubentipparach.github.io/high-frontier-fan-game').replace(/\/+$/, '');
+
+function gameRoomUrl(gameId) {
+  const r = db
+    .prepare('SELECT l.code FROM games g JOIN lobbies l ON l.id = g.lobby_id WHERE g.id = ?')
+    .get(gameId);
+  const code = r && r.code;
+  return code ? `${PUBLIC_APP_URL}/room/${String(code).toLowerCase()}` : '';
+}
+
 // DM one player IF they've opted into this event kind and Discord is on.
 // Fire-and-forget: a send failure is logged, never blocks the op response.
 function notifyProfile(profileId, kind, text) {
@@ -796,11 +812,16 @@ function dispatchTurnNotifications(gameId, kind, state) {
   try {
     if (!state || !Array.isArray(state.players)) return;
     const dmOn = discordEnabled();
+    const url = gameRoomUrl(gameId);
+    // A trailing deep link so a notified player can tap straight into the
+    // room. Discord renders bare URLs as clickable links in both DMs and
+    // channel posts. Empty (no code) just omits the line.
+    const jump = url ? `\n▶ Play now: ${url}` : '';
     if (kind === 'END_TURN') {
       const active = state.players[state.activeIndex];
       if (active) {
-        if (dmOn) notifyProfile(active.profileId, 'turn', `🛸 It's your turn in ${gameDisplayName(gameId)}.`);
-        notifyWebhook(`🛸 ${active.name || 'A player'}'s turn in **${gameDisplayName(gameId)}**.`);
+        if (dmOn) notifyProfile(active.profileId, 'turn', `🛸 It's your turn in ${gameDisplayName(gameId)}.${jump}`);
+        notifyWebhook(`🛸 ${active.name || 'A player'}'s turn in **${gameDisplayName(gameId)}**.${jump}`);
       }
     } else if (kind === 'AUCTION_START') {
       const auctioneer = state.auction && state.auction.auctioneerId;
@@ -808,10 +829,10 @@ function dispatchTurnNotifications(gameId, kind, state) {
       if (dmOn) {
         for (const p of state.players) {
           if (p.profileId === auctioneer) continue;
-          notifyProfile(p.profileId, 'auction', `🔨 An auction just opened in ${name} - place your bid.`);
+          notifyProfile(p.profileId, 'auction', `🔨 An auction just opened in ${name} - place your bid.${jump}`);
         }
       }
-      notifyWebhook(`🔨 An auction just opened in **${name}** - bidding is live.`);
+      notifyWebhook(`🔨 An auction just opened in **${name}** - bidding is live.${jump}`);
     }
   } catch (e) {
     console.warn('[notify] dispatch error', e && e.message);
