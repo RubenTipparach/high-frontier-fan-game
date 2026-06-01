@@ -635,6 +635,11 @@ function humanizeError(code) {
 
 async function boot() {
   console.log('[hf:boot] start');
+  // Signal the inline boot watchdog (index.html) that the module graph
+  // linked and main.js is executing. If a stale cached module or a
+  // missing export breaks linking, main.js never runs, this stays unset,
+  // and the watchdog shows the hard-refresh banner.
+  window.__hfBooted = true;
   initSigninForm();
   initAccountMenu();
   initLobby({ onShowView: showView, onToast: toast });
