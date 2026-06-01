@@ -320,6 +320,7 @@ function lobbyRow(lobbyId) {
     hostId: row.host_id,
     hostName: row.host_name,
     maxPlayers: row.max_players,
+    maxRounds: row.max_rounds,
     joinPolicy: row.join_policy,
     status: row.status,
     createdAt: row.created_at,
@@ -389,6 +390,8 @@ app.post('/lobbies', requireProfile, (req, res) => {
   const body = req.body || {};
   const name = String(body.name || '').trim().slice(0, 60) || `${req.profile.name}'s table`;
   const maxPlayers = Math.max(2, Math.min(5, Number(body.maxPlayers) || 5));
+  // Game length: 5 (short, default) / 6 (medium) / 7 (extra long).
+  const maxRounds = [5, 6, 7].includes(Number(body.maxRounds)) ? Number(body.maxRounds) : 5;
   const joinPolicy = body.joinPolicy === 'invite-only' ? 'invite-only' : 'open';
   const now = nowMs();
   let code, info;
@@ -397,10 +400,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
     try {
       info = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, join_policy, status, created_at)
-           VALUES (?, ?, ?, ?, ?, 'waiting', ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?)`
         )
-        .run(code, name, req.profile.id, maxPlayers, joinPolicy, now);
+        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now);
       break;
     } catch (err) {
       if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') continue;
@@ -592,7 +595,7 @@ app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
 app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, max_rounds FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -614,7 +617,9 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
     name: m.name,
     seat: m.seat || i + 1,
   }));
-  const state = createInitialState({ players, seed });
+  // Lobbies predating the column come back null; default to 5.
+  const maxRounds = [5, 6, 7].includes(lobby.max_rounds) ? lobby.max_rounds : 5;
+  const state = createInitialState({ players, seed, maxRounds });
 
   const now = nowMs();
   const gameId = db.transaction(() => {
@@ -796,15 +801,31 @@ function dispatchTurnNotifications(gameId, kind, state) {
   try {
     if (!state || !Array.isArray(state.players)) return;
     const dmOn = discordEnabled();
-    if (kind === 'END_TURN') {
+    const name = gameDisplayName(gameId);
+    // Game over: one note to everyone, regardless of which op tripped it.
+    if (state.status === 'finished') {
+      if (dmOn) for (const p of state.players) notifyProfile(p.profileId, 'turn', `🏁 The game in ${name} is over.`);
+      notifyWebhook(`🏁 **${name}** has ended - final standings are in.`);
+      return;
+    }
+    // A round just closed and the leader must name the next first player.
+    if (state.pendingFirstPlayer) {
+      const chooser = state.players.find((p) => p.profileId === state.pendingFirstPlayer.chooserId);
+      if (chooser) {
+        if (dmOn) notifyProfile(chooser.profileId, 'turn', `⭐ Pick the next first player in ${name}.`);
+        notifyWebhook(`⭐ ${chooser.name || 'A player'} is choosing the next first player in **${name}**.`);
+      }
+      return;
+    }
+    // END_TURN and SET_FIRST_PLAYER both hand the turn to a new player.
+    if (kind === 'END_TURN' || kind === 'SET_FIRST_PLAYER') {
       const active = state.players[state.activeIndex];
       if (active) {
-        if (dmOn) notifyProfile(active.profileId, 'turn', `🛸 It's your turn in ${gameDisplayName(gameId)}.`);
-        notifyWebhook(`🛸 ${active.name || 'A player'}'s turn in **${gameDisplayName(gameId)}**.`);
+        if (dmOn) notifyProfile(active.profileId, 'turn', `🛸 It's your turn in ${name}.`);
+        notifyWebhook(`🛸 ${active.name || 'A player'}'s turn in **${name}**.`);
       }
     } else if (kind === 'AUCTION_START') {
       const auctioneer = state.auction && state.auction.auctioneerId;
-      const name = gameDisplayName(gameId);
       if (dmOn) {
         for (const p of state.players) {
           if (p.profileId === auctioneer) continue;
@@ -1074,8 +1095,10 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
     // ops advance the floor too: an auction moves aqua / decks / hands
     // that are not on the per-turn undo stack, so letting undo replay
     // across one would silently drop those effects. PICK_CREW is also
-    // permanent (session-setup) so it commits the same way.
-    if (kind === 'END_TURN' || kind === 'PICK_CREW' || kind.startsWith('AUCTION_')) {
+    // permanent (session-setup), and SET_FIRST_PLAYER opens a fresh
+    // round-leader turn, so both commit the same way.
+    if (kind === 'END_TURN' || kind === 'PICK_CREW' || kind === 'SET_FIRST_PLAYER'
+        || kind.startsWith('AUCTION_')) {
       db.prepare('UPDATE games SET committed_seq = ? WHERE id = ?').run(nextSeq, id);
     }
     if (result.state.status === 'finished') {
@@ -2190,6 +2213,27 @@ function esc(s) {
     }
   }
   if (fixed) console.log(`recalled empty rockets to LEO in ${fixed} game(s)`);
+})();
+
+// Backfill the game-length cap on in-progress games that predate it.
+// Per product decision, existing games default to 5 rounds. This only
+// adds the field; it does NOT reshuffle turn order or switch on the
+// first-player handoff (those are new-game-only), so a running game is
+// otherwise untouched - it simply now finishes at round 5.
+(() => {
+  const rows = db.prepare('SELECT game_id, state FROM game_states').all();
+  let filled = 0;
+  for (const row of rows) {
+    let st;
+    try { st = JSON.parse(row.state); } catch { continue; }
+    if (!st || typeof st !== 'object') continue;
+    if (st.maxRounds != null) continue;
+    st.maxRounds = 5;
+    db.prepare('UPDATE game_states SET state = ? WHERE game_id = ?')
+      .run(JSON.stringify(st), row.game_id);
+    filled += 1;
+  }
+  if (filled) console.log(`backfilled maxRounds=5 on ${filled} in-progress game(s)`);
 })();
 
 httpServer.listen(PORT, '0.0.0.0', () => {

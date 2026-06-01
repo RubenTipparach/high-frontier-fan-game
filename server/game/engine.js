@@ -1075,35 +1075,94 @@ function rebuildFromBase(baseState, actions) {
 
 // ----- meta ops -----
 
-function applyEndTurn(state, _op, player) {
-  const n = state.players.length;
-  const wrapped = state.activeIndex + 1 >= n;
-  state.activeIndex = (state.activeIndex + 1) % n;
-
-  // The incoming player's per-turn budgets refill at the start of
-  // their turn, and the undo stacks reset (their turn opens with a
-  // clean, empty history; the prior turn is now committed).
-  const next = state.players[state.activeIndex];
-  next.opsRemaining = OPS_PER_TURN;
-  next.movesRemaining = MOVES_PER_TURN;
-  next.discardsRemaining = DISCARDS_PER_TURN;
+// Open a player's turn: refill their per-turn budgets and reset the
+// shared undo/redo stacks (the new turn starts with a clean history;
+// the prior turn is committed). Used both when a turn passes and when
+// a first-player handoff lands.
+function openTurnFor(state, player) {
+  player.opsRemaining = OPS_PER_TURN;
+  player.movesRemaining = MOVES_PER_TURN;
+  player.discardsRemaining = DISCARDS_PER_TURN;
   state.turnActions = [];
   state.turnRedo = [];
+}
+
+function applyEndTurn(state, _op, player) {
+  const n = state.players.length;
+  // The first player leads each round; a "lap" is one trip around the
+  // table from there, and it closes when the next seat would be the
+  // first player again. Legacy games carry no firstPlayerIndex - it
+  // defaults to 0, which reduces the test to the original "wrap when
+  // the last seat ends", unchanged.
+  const firstIdx = state.firstPlayerIndex || 0;
+  const nextIndex = (state.activeIndex + 1) % n;
+  const lapDone = nextIndex === firstIdx;
 
   let log = `${player.name} ended their turn.`;
-  // A full pass around the table advances the shared clock once.
-  if (wrapped) {
-    const prevRound = state.round;
-    advanceClock(state);
-    log += state.round > prevRound
-      ? ` Round ${state.round} begins.`
-      : ` Sunspot Cube advances to slot ${state.turn}.`;
+
+  // Mid-lap: the turn simply passes to the next seat.
+  if (!lapDone) {
+    state.activeIndex = nextIndex;
+    openTurnFor(state, state.players[nextIndex]);
+    log += ` ${state.players[nextIndex].name} is up.`;
+    return { ok: true, state, log };
+  }
+
+  // Lap complete: advance the Sunspot Cube one slot (income + event
+  // roll, and the round counter ticks on a full 12-slot cycle).
+  const prevRound = state.round;
+  advanceClock(state);
+  const roundEnded = state.round > prevRound;
+
+  if (!roundEnded) {
+    // Still inside the round: the cube moved a slot, next lap reopens
+    // from the same first player.
+    log += ` Sunspot Cube advances to slot ${state.turn}.`;
     if (state.lastEvent && state.lastEvent.turn === state.turn) {
       log += ` Event roll: ${state.lastEvent.dieRoll}.`;
     }
-  } else {
-    log += ` ${next.name} is up.`;
+    state.activeIndex = firstIdx;
+    openTurnFor(state, state.players[firstIdx]);
+    return { ok: true, state, log };
   }
+
+  // A full round (Sunspot cycle) just closed.
+  log += ` Round ${prevRound} complete.`;
+
+  // Game-length cap: finish once the configured number of rounds has
+  // been played. Legacy games get maxRounds backfilled (default 5);
+  // a game with no cap at all just keeps going.
+  if (state.maxRounds && state.round > state.maxRounds) {
+    state.status = 'finished';
+    state.finishedAt = Date.now();
+    state.pendingFirstPlayer = null;
+    state.turnActions = [];
+    state.turnRedo = [];
+    log += ` Game over after ${state.maxRounds} rounds.`;
+    return { ok: true, state, log };
+  }
+
+  log += ` Round ${state.round} begins.`;
+
+  // First-player rotation (rotation-enabled games, 2+ players): the
+  // player who led the round just finished names the next first
+  // player. Freeze the table on that choice - the active pointer rests
+  // on the chooser and budgets are NOT refilled until the pick lands
+  // (SET_FIRST_PLAYER opens the new leader's turn). Mirrors the auction
+  // freeze: every other op is rejected while pendingFirstPlayer is set.
+  if (state.firstPlayerRotation && n >= 2) {
+    const chooser = state.players[firstIdx];
+    state.activeIndex = firstIdx;
+    state.pendingFirstPlayer = { chooserId: chooser.profileId };
+    state.turnActions = [];
+    state.turnRedo = [];
+    log += ` ${chooser.name} names the next first player.`;
+    return { ok: true, state, log };
+  }
+
+  // Legacy / single-player: the same first player simply leads again.
+  state.activeIndex = firstIdx;
+  openTurnFor(state, state.players[firstIdx]);
   return { ok: true, state, log };
 }
 
@@ -1438,6 +1497,44 @@ const CREW = {
   PICK_CREW: applyPickCrew,
 };
 
+// ----- first-player rotation (round-end handoff) -----
+//
+// When a round (Sunspot cycle) closes, END_TURN sets pendingFirstPlayer
+// and freezes the table; the player who led that round must name the
+// next first player ("another player" - never themselves) before play
+// resumes. SET_FIRST_PLAYER is the only op accepted while the handoff
+// is open. Like crew/auction ops it validates its own caller (against
+// pendingFirstPlayer.chooserId) rather than the active-turn guard, so
+// it runs even though every other op is frozen. Only rotation-enabled
+// games (2+ players) ever reach this path.
+function applySetFirstPlayer(state, op, ctx) {
+  const pending = state.pendingFirstPlayer;
+  if (!pending) return fail('no_first_player_choice');
+  if (pending.chooserId !== ctx.profileId) return fail('not_first_player_chooser');
+  const targetId = String(op.profileId || '');
+  const targetIdx = state.players.findIndex((p) => p.profileId === targetId);
+  if (targetIdx < 0) return fail('unknown_player');
+  // "another player": the first-player token must move off the chooser.
+  if (state.players[targetIdx].profileId === pending.chooserId) {
+    return fail('must_choose_another');
+  }
+  const chooser = playerByProfile(state, pending.chooserId);
+  const next = state.players[targetIdx];
+  state.firstPlayerIndex = targetIdx;
+  state.activeIndex = targetIdx;
+  state.pendingFirstPlayer = null;
+  openTurnFor(state, next);
+  return {
+    ok: true,
+    state,
+    log: `${chooser ? chooser.name : 'The first player'} named ${next.name} first player.`,
+  };
+}
+
+const LIFECYCLE = {
+  SET_FIRST_PLAYER: applySetFirstPlayer,
+};
+
 // Validate + apply one operation. ctx = { profileId, turnBaseState? }.
 // turnBaseState (the snapshot at the start of the active player's turn)
 // is required for UNDO / REDO and supplied by the caller from the op
@@ -1465,6 +1562,14 @@ export function applyOperation(prevState, op, ctx) {
     || (prevState.draftPhase == null
         && prevState.players.every((p) => !!p.faction));
   if (!draftDone) return fail('awaiting_crew_picks');
+
+  // First-player handoff: when a round closes the chooser must name the
+  // next first player before anyone acts. SET_FIRST_PLAYER validates
+  // its own caller (the chooser), so like auction ops it runs ahead of
+  // the turn guard; while the handoff is pending every other op is
+  // frozen, mirroring the auction freeze below.
+  if (LIFECYCLE[op.kind]) return LIFECYCLE[op.kind](clone(prevState), op, ctx);
+  if (prevState.pendingFirstPlayer) return fail('awaiting_first_player');
 
   // Auction ops bypass the turn guard below - bids/passes are sent
   // by non-active players, and each handler validates its own caller
@@ -1497,10 +1602,10 @@ export function applyOperation(prevState, op, ctx) {
   return META[op.kind](state, op, player, ctx);
 }
 
-// Ops accepted over the wire. Functional + meta + auction.
+// Ops accepted over the wire. Functional + meta + auction + lifecycle.
 export const SUPPORTED_OPS = [
   ...Object.keys(FUNCTIONAL), ...Object.keys(META), ...Object.keys(AUCTION),
-  ...Object.keys(CREW),
+  ...Object.keys(CREW), ...Object.keys(LIFECYCLE),
 ];
 // Ops that require the caller to supply ctx.turnBaseState.
 export const NEEDS_TURN_BASE = new Set(['UNDO', 'REDO']);

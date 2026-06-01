@@ -77,12 +77,16 @@ db.exec(`
   --   open         : anyone can join from the public listing
   --   invite-only  : invisible to the public listing; only people with
   --                  a direct invite or an invite-link code can join
+  -- max_rounds: game length in rounds (Sunspot Cube cycles). 5 = short
+  -- (default), 6 = medium, 7 = extra long. Frozen into the engine state
+  -- at game start; the game finishes once that many rounds have played.
   CREATE TABLE IF NOT EXISTS lobbies (
     id            INTEGER PRIMARY KEY,
     code          TEXT UNIQUE NOT NULL,
     name          TEXT NOT NULL,
     host_id       INTEGER NOT NULL REFERENCES profiles(id),
     max_players   INTEGER NOT NULL DEFAULT 5,
+    max_rounds    INTEGER NOT NULL DEFAULT 5,
     join_policy   TEXT NOT NULL DEFAULT 'open',
     status        TEXT NOT NULL DEFAULT 'waiting',
     created_at    INTEGER NOT NULL,
@@ -223,6 +227,20 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_game_operations_game
     ON game_operations(game_id, seq);
 `);
+
+// Idempotent column adds for tables that predate a column. better-sqlite3
+// has no "ADD COLUMN IF NOT EXISTS", so we check PRAGMA table_info first.
+// Run on every boot; a no-op once the column exists.
+function ensureColumn(table, column, ddl) {
+  const exists = db
+    .prepare(`PRAGMA table_info(${table})`)
+    .all()
+    .some((c) => c.name === column);
+  if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+}
+// Lobbies created before game-length was configurable get the default
+// (5 rounds). New rows already carry it from the CREATE TABLE above.
+ensureColumn('lobbies', 'max_rounds', 'max_rounds INTEGER NOT NULL DEFAULT 5');
 
 export function nowMs() {
   return Date.now();
