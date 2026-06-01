@@ -185,37 +185,42 @@ jobs:
           echo "--- machines after ---"
           flyctl machine list -a "$APP"
 
-      # Sync optional Discord secrets to Fly BEFORE the deploy so the
-      # released image boots with them available. We use `--stage` so
-      # setting them does NOT trigger a separate machine restart - the
-      # `flyctl deploy` that follows applies the staged values in one
-      # release. Each secret is only touched when its GH Actions secret
-      # is actually set, so an operator who configures neither (or only
-      # one) gets the matching behaviour and we never clobber a value
-      # set out-of-band with `fly secrets set`. DISCORD_BOT_TOKEN drives
-      # the per-player DM path; DISCORD_WEBHOOK_URL is the channel
-      # webhook default. Both are read by server/discord.js at boot.
+      # Stage optional Discord secrets to Fly BEFORE the deploy so the
+      # released image boots with them. `--stage` defers the restart so
+      # the following `flyctl deploy` applies them in one release (no
+      # extra machine bounce). Each secret is only touched when its
+      # Actions secret is set, so unset ones are a no-op and we never
+      # clobber a value set out-of-band with `fly secrets set`.
+      # DISCORD_BOT_TOKEN drives the per-player DMs; the CLIENT_ID /
+      # CLIENT_SECRET / GUILD_ID trio enables the one-click "Connect
+      # Discord" OAuth flow; DISCORD_WEBHOOK_URL is the channel-webhook
+      # default. All are read by server/discord.js at boot.
       - name: Sync Discord secrets to Fly.io
         if: steps.fly_gate.outputs.ready == 'true'
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
+          DISCORD_CLIENT_SECRET: ${{ secrets.DISCORD_CLIENT_SECRET }}
+          DISCORD_GUILD_ID: ${{ secrets.DISCORD_GUILD_ID }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           APP: high-frontier-fan-game
         run: |
           set -e
-          if [ -n "${DISCORD_BOT_TOKEN}" ]; then
-            echo "Staging DISCORD_BOT_TOKEN"
-            flyctl secrets set "DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}" --app "$APP" --stage
-          else
-            echo "::notice::DISCORD_BOT_TOKEN not set in Actions secrets; leaving Fly value untouched."
-          fi
-          if [ -n "${DISCORD_WEBHOOK_URL}" ]; then
-            echo "Staging DISCORD_WEBHOOK_URL"
-            flyctl secrets set "DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}" --app "$APP" --stage
-          else
-            echo "::notice::DISCORD_WEBHOOK_URL not set in Actions secrets; leaving Fly value untouched."
-          fi
+          stage_secret() {
+            local name="$1" val="$2"
+            if [ -n "$val" ]; then
+              echo "Staging $name"
+              flyctl secrets set "$name=$val" --app "$APP" --stage
+            else
+              echo "::notice::$name not set in Actions secrets; leaving Fly value untouched."
+            fi
+          }
+          stage_secret DISCORD_BOT_TOKEN     "${DISCORD_BOT_TOKEN}"
+          stage_secret DISCORD_CLIENT_ID     "${DISCORD_CLIENT_ID}"
+          stage_secret DISCORD_CLIENT_SECRET "${DISCORD_CLIENT_SECRET}"
+          stage_secret DISCORD_GUILD_ID      "${DISCORD_GUILD_ID}"
+          stage_secret DISCORD_WEBHOOK_URL   "${DISCORD_WEBHOOK_URL}"
 
       # Build from the repo root so the image can include both server/
       # and the shared data/ tables the engine imports (see

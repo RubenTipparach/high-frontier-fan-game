@@ -1,7 +1,7 @@
 // Bootstrap and top-level UI coordination.
 
 import { probeServer, apiAvailable, lookupInviteLink, claimInviteLink, getLobbyByCode,
-  getNotifyPrefs, setNotifyPrefs, testNotify } from './api.js';
+  getNotifyPrefs, setNotifyPrefs, testNotify, startDiscordOauth } from './api.js';
 import {
   restoreProfile, activeProfile, signIn, signOut, mintDeviceCode,
   onProfileChange,
@@ -243,6 +243,9 @@ function initMainMenu() {
 // when there's no signed-in profile; shows a "no bot" note when the server
 // has no DISCORD_BOT_TOKEN.
 let _notifyWired = false;
+// Cached so the OAuth popup-poll and the manual save can re-read the
+// last server state without another round-trip.
+let _notifyPrefs = {};
 async function loadNotifySection() {
   const section = document.getElementById('notify-section');
   if (!section) return;
@@ -251,24 +254,46 @@ async function loadNotifySection() {
   section.hidden = false;
   const r = await getNotifyPrefs(me.token);
   if (!r.ok) { section.hidden = true; return; }
-  const d = r.data || {};
+  const d = _notifyPrefs = r.data || {};
+
   const idEl = document.getElementById('notify-discord-id');
   const turnEl = document.getElementById('notify-turn');
   const aucEl = document.getElementById('notify-auction');
   const disabledNote = document.getElementById('notify-disabled-note');
+  const oauthWrap = document.getElementById('notify-oauth');
+  const manualWrap = document.getElementById('notify-manual-wrap');
+  const connectedEl = document.getElementById('notify-connected');
+  const connectBtn = document.getElementById('btn-notify-connect');
+  const testBtn = document.getElementById('btn-notify-test');
+
+  const off = !d.discordEnabled;          // no bot token at all
+  const oauthOn = !!d.oauthEnabled;       // one-click flow available
+  const connected = /^\d{5,25}$/.test(d.discordUserId || '');
+
   if (idEl) idEl.value = d.discordUserId || '';
   if (turnEl) turnEl.checked = d.notifyTurn !== false;
   if (aucEl) aucEl.checked = d.notifyAuction !== false;
-  const off = !d.discordEnabled;
   if (disabledNote) disabledNote.hidden = !off;
-  // The inputs + Save always work - your prefs persist to the server even
-  // before a bot is configured, so they're ready when one comes online.
-  // Only the live "Send test DM" needs an active bot.
-  for (const el of [idEl, turnEl, aucEl, document.getElementById('btn-notify-save')]) {
+
+  // OAuth block visible only when the server supports it. The manual
+  // user-id block is always present; when OAuth is on it's collapsed
+  // under its <details> disclosure (a fallback), otherwise it's the
+  // primary path so we open it.
+  if (oauthWrap) oauthWrap.hidden = !oauthOn;
+  if (manualWrap) manualWrap.open = !oauthOn;
+  if (connectedEl) connectedEl.hidden = !connected;
+  if (connectBtn) {
+    connectBtn.disabled = off;
+    connectBtn.textContent = connected ? 'Reconnect Discord' : 'Connect Discord';
+  }
+  // Send test DM only works once a bot exists AND an id is linked.
+  if (testBtn) testBtn.disabled = off || !connected;
+
+  for (const el of [idEl, turnEl, aucEl,
+    document.getElementById('btn-notify-save'),
+    document.getElementById('btn-notify-save-manual')]) {
     if (el) el.disabled = false;
   }
-  const testBtn = document.getElementById('btn-notify-test');
-  if (testBtn) testBtn.disabled = off;
   const status = document.getElementById('notify-status');
   if (status) status.textContent = '';
 }
@@ -277,23 +302,74 @@ function wireNotifySection() {
   _notifyWired = true;
   const status = document.getElementById('notify-status');
   const setStatus = (t) => { if (status) status.textContent = t; };
-  const collect = () => ({
-    discordUserId: (document.getElementById('notify-discord-id')?.value || '').trim(),
+  const collectPrefs = () => ({
+    // Keep the already-linked id; the checkboxes are the editable part
+    // of the OAuth block. Manual save (below) supplies its own id.
+    discordUserId: _notifyPrefs.discordUserId || '',
     notifyTurn: !!document.getElementById('notify-turn')?.checked,
     notifyAuction: !!document.getElementById('notify-auction')?.checked,
   });
+
+  // Save the event-kind checkboxes (OAuth block).
   document.getElementById('btn-notify-save')?.addEventListener('click', async () => {
     const me = activeProfile();
     if (!me) return;
     setStatus('Saving…');
-    const r = await setNotifyPrefs(collect(), me.token);
+    const r = await setNotifyPrefs(collectPrefs(), me.token);
     setStatus(r.ok ? 'Saved.' : `Couldn't save: ${r.error || 'error'}`);
   });
+
+  // Save a manually-pasted user id (fallback block).
+  document.getElementById('btn-notify-save-manual')?.addEventListener('click', async () => {
+    const me = activeProfile();
+    if (!me) return;
+    const id = (document.getElementById('notify-discord-id')?.value || '').trim();
+    if (id && !/^\d{5,25}$/.test(id)) { setStatus('That doesn\'t look like a Discord user ID.'); return; }
+    setStatus('Saving…');
+    const r = await setNotifyPrefs({
+      discordUserId: id,
+      notifyTurn: !!document.getElementById('notify-turn')?.checked,
+      notifyAuction: !!document.getElementById('notify-auction')?.checked,
+    }, me.token);
+    if (r.ok) { _notifyPrefs.discordUserId = id; await loadNotifySection(); setStatus('Saved.'); }
+    else setStatus(`Couldn't save: ${r.error || 'error'}`);
+  });
+
+  // One-click "Connect Discord": open the authorize URL in a popup, then
+  // poll prefs until the server-side callback links the account.
+  document.getElementById('btn-notify-connect')?.addEventListener('click', async () => {
+    const me = activeProfile();
+    if (!me) return;
+    setStatus('Opening Discord…');
+    const r = await startDiscordOauth(me.token);
+    if (!r.ok || !r.data || !r.data.url) {
+      setStatus(`Couldn't start: ${humanizeNotifyError(r.error)}`);
+      return;
+    }
+    const popup = window.open(r.data.url, 'hf-discord-oauth', 'width=520,height=720');
+    if (!popup) { setStatus('Allow popups, then click Connect again.'); return; }
+    setStatus('Approve in the Discord window, then come back…');
+    // Poll for the linked id (the callback runs server-side; the popup
+    // self-closes on success). Give up after ~2 minutes.
+    const started = Date.now();
+    const tick = setInterval(async () => {
+      if (Date.now() - started > 120000) { clearInterval(tick); return; }
+      const p = await getNotifyPrefs(me.token);
+      if (p.ok && /^\d{5,25}$/.test((p.data && p.data.discordUserId) || '')) {
+        clearInterval(tick);
+        await loadNotifySection();
+        setStatus('Discord connected. Try Send test DM.');
+        try { popup.close(); } catch { /* cross-origin close may throw */ }
+      }
+    }, 2000);
+  });
+
   document.getElementById('btn-notify-test')?.addEventListener('click', async () => {
     const me = activeProfile();
     if (!me) return;
-    const id = collect().discordUserId;
-    if (!/^\d{5,25}$/.test(id)) { setStatus('Enter a valid Discord user ID first.'); return; }
+    const id = (_notifyPrefs.discordUserId
+      || document.getElementById('notify-discord-id')?.value || '').trim();
+    if (!/^\d{5,25}$/.test(id)) { setStatus('Connect Discord (or enter a user ID) first.'); return; }
     setStatus('Sending test DM…');
     const r = await testNotify(id, me.token);
     setStatus(r.ok
@@ -304,8 +380,9 @@ function wireNotifySection() {
 function humanizeNotifyError(code) {
   return ({
     discord_disabled: 'this server has no notification bot configured.',
+    oauth_disabled: 'one-click Discord linking isn\'t set up on this server.',
     bad_discord_id: 'that doesn\'t look like a Discord user ID.',
-  })[code] || (code ? `the bot couldn't DM you (${code}). Make sure you share a server with the bot and your DMs are open.` : 'unknown error.');
+  })[code] || (code ? `the bot couldn't reach you (${code}).` : 'unknown error.');
 }
 
 // "+ New game" chooser modal: opened from the lobby's top action row
