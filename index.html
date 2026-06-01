@@ -90,8 +90,49 @@
               <span id="signin-error" class="error"></span>
             </div>
           </form>
+
+          <!-- Sign in with Discord: an alternative identity that works
+               on any device with no device code. Hidden when the server
+               has no Discord OAuth configured. -->
+          <div id="signin-discord-wrap" class="signin-discord" hidden>
+            <div class="signin-or"><span>or</span></div>
+            <button id="btn-signin-discord" type="button" class="discord-btn">
+              <span aria-hidden="true">🎮</span> Sign in with Discord
+            </button>
+            <p class="muted signin-discord-help">
+              No name to claim or device code to copy. Connects on any
+              device and enables turn notifications.
+            </p>
+          </div>
         </div>
       </section>
+
+      <!--
+        Name prompt shown after a first-time "Sign in with Discord" (the
+        Discord account has no profile yet). Pre-filled with the Discord
+        username; the player confirms or edits before the profile is made.
+      -->
+      <div id="discord-name-modal" class="modal-overlay hidden">
+        <div class="modal-box panel narrow">
+          <h2>Choose your name</h2>
+          <p class="muted">
+            You're signing in with Discord for the first time. Pick a
+            display name (3-20 chars, letters / numbers / _ / -).
+          </p>
+          <form id="form-discord-name" autocomplete="off">
+            <label>
+              <span>Profile name</span>
+              <input id="discord-name-input" type="text" minlength="3" maxlength="20"
+                pattern="[A-Za-z0-9_\-]{3,20}" required autocapitalize="off"
+                spellcheck="false" placeholder="orbitalengineer42" />
+            </label>
+            <div class="form-row">
+              <button type="submit" class="primary">Create profile</button>
+              <span id="discord-name-error" class="error"></span>
+            </div>
+          </form>
+        </div>
+      </div>
 
       <!--
         ===== Lobby list =====

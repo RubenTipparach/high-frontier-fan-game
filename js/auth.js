@@ -80,6 +80,18 @@ export async function signIn({ name, deviceCode }) {
   return { ok: true, profile };
 }
 
+// Adopt a session the SERVER minted (Discord sign-in / sign-up). Unlike
+// signIn(), the token is generated server-side and handed back through
+// the OAuth handoff; we just store it like any other profile credential.
+export function adoptServerSession({ token, id, name }) {
+  if (!token || !name) return null;
+  const profile = { name, token, id };
+  _active = profile;
+  saveProfile(profile);
+  _publish();
+  return profile;
+}
+
 export function signOut() {
   clearProfile();
   _active = null;

@@ -79,6 +79,42 @@ db.exec(`
     expires_at INTEGER NOT NULL
   );
 
+  -- CSRF state for the UNauthenticated "Sign in with Discord" flow.
+  -- Separate from oauth_states because there is no profile yet (the
+  -- callback either finds the linked profile or starts a signup), so it
+  -- carries no profile_id. Same short TTL + prune discipline.
+  CREATE TABLE IF NOT EXISTS discord_login_states (
+    state      TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL
+  );
+
+  -- Maps a Discord account to a profile for AUTH (distinct from the
+  -- notify_prefs.discord_user_id used only for DM targeting). Linking
+  -- via "Connect Discord" or signing up via Discord writes a row here;
+  -- a later "Sign in with Discord" looks the profile up by discord_id.
+  -- Both columns unique: one Discord account <-> one profile.
+  CREATE TABLE IF NOT EXISTS discord_accounts (
+    discord_id TEXT PRIMARY KEY,
+    profile_id INTEGER NOT NULL UNIQUE REFERENCES profiles(id) ON DELETE CASCADE,
+    username   TEXT,
+    linked_at  INTEGER NOT NULL
+  );
+
+  -- One-time handoff from the server-side OAuth callback to the client.
+  -- The callback can't hand the browser a session token directly (that
+  -- would leak in the redirect URL / history), so it stashes a short-
+  -- lived code here; the app exchanges the code for the token (login) or
+  -- for a "pick your name" prompt (signup) via a normal API call.
+  CREATE TABLE IF NOT EXISTS discord_auth_handoff (
+    code       TEXT PRIMARY KEY,
+    kind       TEXT NOT NULL,            -- 'login' | 'signup'
+    token      TEXT,                     -- login: the minted session token
+    profile_id INTEGER,                  -- login: the signed-in profile
+    discord_id TEXT,                     -- signup: the Discord account
+    username   TEXT,                     -- signup: suggested name
+    expires_at INTEGER NOT NULL
+  );
+
   -- A lobby is a pre-game waiting room. Once status flips to 'started'
   -- the lobby becomes the home for an in-progress game; chat and
   -- members carry over. Stage 1 doesn't ship an engine yet, so

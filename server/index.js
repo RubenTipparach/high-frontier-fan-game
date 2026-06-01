@@ -956,41 +956,191 @@ p{color:#8b90b8;line-height:1.5}</style></head><body><div class="box">
 <script>try{setTimeout(function(){window.close();},2500);}catch(e){}</script>
 </body></html>`);
   };
+  // Bounce the browser back to the app with a result param (used by the
+  // unauthenticated "Sign in with Discord" full-page flow).
+  const appRedirect = (params) =>
+    res.redirect(`${PUBLIC_APP_URL}/?${new URLSearchParams(params).toString()}`);
+
   pruneOauthStates();
-  const err = String(req.query.error || '');
-  if (err) return sendPage('Discord connection cancelled', 'You can close this window and try again.', false);
+  pruneDiscordAuth();
+  const errParam = String(req.query.error || '');
   const state = String(req.query.state || '');
   const code = String(req.query.code || '');
-  // Look up + consume the one-time state (delete so it can't be replayed).
-  const entry = state
+
+  // The mode is determined by which state table holds the state: the
+  // authenticated "Connect" flow stores it in oauth_states (popup, has a
+  // profile); the unauthenticated "Sign in" flow stores it in
+  // discord_login_states (full-page, no profile yet). Consume either.
+  const linkEntry = state
     ? db.prepare('SELECT profile_id, expires_at FROM oauth_states WHERE state = ?').get(state)
     : null;
-  if (entry) db.prepare('DELETE FROM oauth_states WHERE state = ?').run(state);
-  if (!entry || entry.expires_at <= Date.now()) {
+  if (linkEntry) db.prepare('DELETE FROM oauth_states WHERE state = ?').run(state);
+  const loginEntry = (!linkEntry && state)
+    ? db.prepare('SELECT expires_at FROM discord_login_states WHERE state = ?').get(state)
+    : null;
+  if (loginEntry) db.prepare('DELETE FROM discord_login_states WHERE state = ?').run(state);
+
+  // ---------- Sign in with Discord (unauthenticated, full-page) ----------
+  if (loginEntry) {
+    if (errParam) return appRedirect({ hf_discord: 'error', reason: 'cancelled' });
+    if (loginEntry.expires_at <= Date.now()) return appRedirect({ hf_discord: 'error', reason: 'expired' });
+    if (!code) return appRedirect({ hf_discord: 'error', reason: 'no_code' });
+    const r = await completeOauth(code, oauthRedirectUri(req));
+    if (!r.ok) {
+      console.warn('[auth] discord sign-in failed -', r.error);
+      return appRedirect({ hf_discord: 'error', reason: 'oauth' });
+    }
+    const handoff = generateShortCode(20);
+    const exp = Date.now() + 5 * 60 * 1000;
+    const acct = db.prepare('SELECT profile_id FROM discord_accounts WHERE discord_id = ?').get(r.userId);
+    if (acct) {
+      // Known Discord account -> mint a session token for that profile.
+      const prof = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(acct.profile_id);
+      if (!prof) return appRedirect({ hf_discord: 'error', reason: 'no_profile' });
+      const token = randomBytes(32).toString('base64url');
+      db.prepare('INSERT INTO tokens (profile_id, token_hash, created_at) VALUES (?, ?, ?)')
+        .run(prof.id, hashToken(token), nowMs());
+      db.prepare('UPDATE discord_accounts SET username = ?, linked_at = ? WHERE discord_id = ?')
+        .run(r.username || null, nowMs(), r.userId);
+      // Keep the notify target current (re-link can update the DM id).
+      db.prepare(
+        `INSERT INTO notify_prefs (profile_id, discord_user_id, notify_turn, notify_auction, updated_at)
+         VALUES (?, ?, 1, 1, ?)
+         ON CONFLICT(profile_id) DO UPDATE SET discord_user_id = excluded.discord_user_id, updated_at = excluded.updated_at`
+      ).run(prof.id, r.userId, nowMs());
+      db.prepare('INSERT INTO discord_auth_handoff (code, kind, token, profile_id, expires_at) VALUES (?, \'login\', ?, ?, ?)')
+        .run(handoff, token, prof.id, exp);
+      return appRedirect({ hf_discord: 'login', code: handoff });
+    }
+    // New Discord account -> hand off for the "pick your name" prompt.
+    db.prepare('INSERT INTO discord_auth_handoff (code, kind, discord_id, username, expires_at) VALUES (?, \'signup\', ?, ?, ?)')
+      .run(handoff, r.userId, r.username || '', exp);
+    return appRedirect({ hf_discord: 'signup', code: handoff });
+  }
+
+  // ---------- Connect Discord (authenticated, popup) ----------
+  if (errParam) return sendPage('Discord connection cancelled', 'You can close this window and try again.', false);
+  if (!linkEntry || linkEntry.expires_at <= Date.now()) {
     return sendPage('Link expired', 'That link expired or was already used. Reopen the menu and click Connect again.', false);
   }
   if (!code) return sendPage('Missing code', 'Discord did not return an authorization code. Please try again.', false);
-  const profile = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(entry.profile_id);
+  const profile = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(linkEntry.profile_id);
   if (!profile) return sendPage('Profile not found', 'Could not match this link to a profile. Please try again.', false);
 
   const r = await completeOauth(code, oauthRedirectUri(req));
   if (!r.ok) {
-    console.warn('[notify] oauth callback failed for profile', entry.profile_id, '-', r.error);
+    console.warn('[notify] oauth callback failed for profile', linkEntry.profile_id, '-', r.error);
     return sendPage('Connection failed', `Discord linking failed (${esc(r.error)}). You can close this and try again.`, false);
   }
-  // Persist the id + enable both event kinds by default (preserve any
-  // existing notify_turn / notify_auction choices the player already set).
+  // Persist the DM target (preserve existing notify_turn / notify_auction).
   db.prepare(
     `INSERT INTO notify_prefs (profile_id, discord_user_id, notify_turn, notify_auction, updated_at)
      VALUES (?, ?, 1, 1, ?)
      ON CONFLICT(profile_id) DO UPDATE SET
        discord_user_id = excluded.discord_user_id,
        updated_at      = excluded.updated_at`
-  ).run(entry.profile_id, r.userId, nowMs());
+  ).run(linkEntry.profile_id, r.userId, nowMs());
+  // Also record the auth identity so this user can later SIGN IN with
+  // Discord, not just receive DMs.
+  linkDiscordAccount(r.userId, linkEntry.profile_id, r.username);
   // Fire a confirmation DM now that the guild membership exists.
   sendDM(r.userId, `✅ Discord connected for @${profile.name}. You'll get a DM when it's your turn.`)
     .then((d) => { if (!d.ok) console.warn('[notify] confirm DM failed -', d.error); });
   sendPage('Discord connected', 'You can close this window and return to the game. A confirmation DM is on its way.', true);
+});
+
+// Prune expired sign-in states + handoffs (called opportunistically).
+function pruneDiscordAuth() {
+  const now = Date.now();
+  db.prepare('DELETE FROM discord_login_states WHERE expires_at <= ?').run(now);
+  db.prepare('DELETE FROM discord_auth_handoff WHERE expires_at <= ?').run(now);
+}
+
+// Bind a Discord account to a profile for AUTH. A profile holds at most
+// one Discord identity and a Discord id maps to one profile, so clear any
+// prior identity for this profile first, then claim the id (reassigning
+// it from another profile if the same Discord owner re-links elsewhere).
+function linkDiscordAccount(discordId, profileId, username) {
+  db.prepare('DELETE FROM discord_accounts WHERE profile_id = ?').run(profileId);
+  db.prepare('INSERT OR REPLACE INTO discord_accounts (discord_id, profile_id, username, linked_at) VALUES (?, ?, ?, ?)')
+    .run(discordId, profileId, username || null, nowMs());
+}
+
+// Public: whether this deployment offers "Sign in with Discord", so the
+// signin view can show/hide the button without an authed call.
+app.get('/auth/discord/enabled', (_req, res) => {
+  res.json({ enabled: oauthEnabled() });
+});
+
+// Begin "Sign in with Discord" (unauthenticated, full-page redirect).
+// Creates a login state and 302s to Discord; the callback comes back in
+// login mode. Disabled / unreachable bounces to the app with an error.
+app.get('/auth/discord/login/start', (req, res) => {
+  if (!oauthEnabled()) return res.redirect(`${PUBLIC_APP_URL}/?hf_discord=error&reason=disabled`);
+  pruneDiscordAuth();
+  const state = generateShortCode(16);
+  db.prepare('INSERT INTO discord_login_states (state, expires_at) VALUES (?, ?)')
+    .run(state, Date.now() + OAUTH_STATE_TTL_MS);
+  res.redirect(buildAuthorizeUrl(state, oauthRedirectUri(req)));
+});
+
+// Exchange a handoff code from the sign-in redirect. A 'login' handoff
+// returns the minted session token; a 'signup' handoff returns the
+// suggested name (the code stays valid until /auth/discord/signup runs).
+app.post('/auth/discord/exchange', (req, res) => {
+  pruneDiscordAuth();
+  const code = String((req.body && req.body.code) || '');
+  const h = code ? db.prepare('SELECT * FROM discord_auth_handoff WHERE code = ?').get(code) : null;
+  if (!h || h.expires_at <= Date.now()) return res.status(400).json({ error: 'handoff_expired' });
+  if (h.kind === 'login') {
+    db.prepare('DELETE FROM discord_auth_handoff WHERE code = ?').run(code); // one-time
+    const prof = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(h.profile_id);
+    if (!prof) return res.status(400).json({ error: 'no_profile' });
+    return res.json({ ok: true, status: 'signedin', token: h.token, id: prof.id, name: prof.name });
+  }
+  // signup: keep the code; /signup consumes it once a name is chosen.
+  return res.json({ ok: true, status: 'needName', suggestedName: h.username || '' });
+});
+
+// Finalize a first-time Discord sign-up: validate the chosen name, create
+// the profile, link the Discord identity (+ notify target), mint a token.
+app.post('/auth/discord/signup', (req, res) => {
+  pruneDiscordAuth();
+  const code = String((req.body && req.body.code) || '');
+  const name = String((req.body && req.body.name) || '').trim();
+  const h = code
+    ? db.prepare("SELECT * FROM discord_auth_handoff WHERE code = ? AND kind = 'signup'").get(code)
+    : null;
+  if (!h || h.expires_at <= Date.now()) return res.status(400).json({ error: 'handoff_expired' });
+  if (!isValidName(name)) return res.status(400).json({ error: 'invalid_name' });
+
+  let profileId; let profileName;
+  // If the Discord id got linked in the meantime (double submit / race),
+  // just sign into that profile rather than erroring or duplicating.
+  const already = db.prepare('SELECT profile_id FROM discord_accounts WHERE discord_id = ?').get(h.discord_id);
+  if (already) {
+    const prof = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(already.profile_id);
+    if (!prof) return res.status(400).json({ error: 'no_profile' });
+    profileId = prof.id; profileName = prof.name;
+  } else {
+    const nameLower = name.toLowerCase();
+    if (db.prepare('SELECT id FROM profiles WHERE name_lower = ?').get(nameLower)) {
+      return res.status(409).json({ error: 'name_taken' });
+    }
+    const now = nowMs();
+    const info = db.prepare('INSERT INTO profiles (name, name_lower, created_at, last_seen_at) VALUES (?, ?, ?, ?)')
+      .run(name, nameLower, now, now);
+    profileId = info.lastInsertRowid; profileName = name;
+    db.prepare('INSERT INTO discord_accounts (discord_id, profile_id, username, linked_at) VALUES (?, ?, ?, ?)')
+      .run(h.discord_id, profileId, h.username || null, now);
+    db.prepare('INSERT INTO notify_prefs (profile_id, discord_user_id, notify_turn, notify_auction, updated_at) VALUES (?, ?, 1, 1, ?)')
+      .run(profileId, h.discord_id, now);
+  }
+  const token = randomBytes(32).toString('base64url');
+  db.prepare('INSERT INTO tokens (profile_id, token_hash, created_at) VALUES (?, ?, ?)')
+    .run(profileId, hashToken(token), nowMs());
+  db.prepare('DELETE FROM discord_auth_handoff WHERE code = ?').run(code); // one-time
+  return res.json({ ok: true, token, id: profileId, name: profileName });
 });
 
 // The state snapshot a given op produced (git-style "tree at commit").

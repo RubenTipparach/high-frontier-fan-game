@@ -221,6 +221,32 @@ export async function startDiscordOauth(token) {
   return call('POST', '/me/notify/oauth/start', { token });
 }
 
+// ----- Sign in with Discord (unauthenticated) -----
+
+// Whether this deployment offers Discord sign-in (so the signin view can
+// show/hide the button). Returns { enabled } or a soft failure.
+export async function discordSignInEnabled() {
+  return call('GET', '/auth/discord/enabled');
+}
+
+// Full-page URL that kicks off the Discord sign-in redirect. Null when
+// the API isn't configured (local-only mode).
+export function discordLoginStartUrl() {
+  const base = apiBaseUrl();
+  return base ? base + '/auth/discord/login/start' : null;
+}
+
+// Exchange the handoff code from the sign-in redirect. Resolves to
+// { status:'signedin', token, id, name } or { status:'needName', suggestedName }.
+export async function discordExchange(code) {
+  return call('POST', '/auth/discord/exchange', { body: { code } });
+}
+
+// Finalize a first-time Discord sign-up with the chosen name.
+export async function discordSignup(code, name) {
+  return call('POST', '/auth/discord/signup', { body: { code, name } });
+}
+
 // --- Server-wide announcement banner ---
 export async function getAnnouncement() {
   return call('GET', '/announcement', {});
