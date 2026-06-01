@@ -102,12 +102,62 @@ One event = one DM, so there's no extra throttling to configure.
 - Still stuck? Check the API logs (`fly logs`) for `[notify] DM failed` -
   the Discord HTTP status is included.
 
+---
+
+# Channel webhook (no bot)
+
+A second, simpler path: a Discord **channel webhook** posts turn / auction
+events to one channel for the whole deployment. No bot, no token, no
+per-player linking - just a URL. The two paths are independent: you can run
+either, both, or neither.
+
+## Set it up
+
+1. In Discord: open the target channel -> **Edit Channel** ->
+   **Integrations** -> **Webhooks** -> **New Webhook** -> **Copy Webhook
+   URL**. (It looks like
+   `https://discord.com/api/webhooks/<id>/<token>`.)
+2. Give it to the server one of two ways:
+   - **Admin dashboard (recommended):** open `/admin` -> **Discord
+     webhook** -> paste the URL -> **Send test message** (fires whatever
+     is in the box, so you can verify before saving) -> **Save webhook**.
+   - **Env default:** set `DISCORD_WEBHOOK_URL` (e.g.
+     `fly secrets set DISCORD_WEBHOOK_URL=...`). A value saved in the
+     admin dashboard overrides the env default; blank in the dashboard
+     falls back to the env value.
+3. To disable: clear the field in the dashboard and Save (and unset the
+   env var if you set one).
+
+## What posts
+
+Same events as the DMs - a turn advancing and an auction opening - but as
+a single message to the channel instead of a DM to each player. Inert when
+no URL is configured.
+
+## Security
+
+- The webhook URL is a **secret** (anyone with it can post to your
+  channel). It's stored server-side (`server_settings`) or as a Fly secret;
+  never commit it. If it leaks, delete the webhook in Discord and make a
+  new one.
+- The URL is validated server-side against the Discord webhook URL shape,
+  so a typo or a non-Discord host is rejected rather than silently failing.
+
+---
+
 ## Code map (for maintainers)
 
-- `server/discord.js` - REST DM sender (`sendDM`, `discordEnabled`); inert
-  without the token; caches the per-user DM channel id.
-- `server/db.js` - `notify_prefs` table (per-profile opt-in).
-- `server/index.js` - `GET/PUT /me/notify`, `POST /me/notify/test`, and
-  `dispatchTurnNotifications()` called after each committed op.
-- `js/main.js` + `index.html` - the "Turn notifications" menu section.
+- `server/discord.js` - REST DM sender (`sendDM`, `discordEnabled`; inert
+  without the token; caches the per-user DM channel id) AND the webhook
+  sender (`sendWebhook`, `webhookEnabled`, `isWebhookUrl`,
+  `defaultWebhookUrl`; inert without a URL).
+- `server/db.js` - `notify_prefs` table (per-profile DM opt-in). The
+  webhook URL reuses the `server_settings` key/value table under
+  `discord_webhook_url`.
+- `server/index.js` - `GET/PUT /me/notify`, `POST /me/notify/test` (DMs);
+  `POST /admin/discord-webhook` + `POST /admin/discord-webhook/test`
+  (webhook); `dispatchTurnNotifications()` (fires both paths) called after
+  each committed op.
+- `js/main.js` + `index.html` - the "Turn notifications" menu section
+  (per-player DM linking). The webhook is admin-only (the `/admin` page).
 - `js/api.js` - `getNotifyPrefs` / `setNotifyPrefs` / `testNotify`.
