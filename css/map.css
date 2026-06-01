@@ -5982,6 +5982,12 @@ body:has(#view-browse:not(.hidden)) #main {
   cursor: pointer;
 }
 .mp-leave:hover { background: rgba(125, 211, 252, 0.2); }
+.mp-leave:disabled { opacity: 0.6; cursor: default; }
+.mp-notify-test {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border, #2a2740);
+}
 #mp-chat {
   margin-top: 14px;
   border-top: 1px solid var(--border);

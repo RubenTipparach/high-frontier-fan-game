@@ -80,6 +80,28 @@ export async function signIn({ name, deviceCode }) {
   return { ok: true, profile };
 }
 
+// Adopt a session the SERVER minted (Discord sign-in / sign-up). Unlike
+// signIn(), the token is generated server-side and handed back through
+// the OAuth handoff; we just store it like any other profile credential.
+export function adoptServerSession({ token, id, name }) {
+  if (!token || !name) return null;
+  // A Discord-minted session is, by definition, already Discord-linked.
+  const profile = { name, token, id, discordLinked: true };
+  _active = profile;
+  saveProfile(profile);
+  _publish();
+  return profile;
+}
+
+// Mark the active profile as Discord-linked (after the account-menu
+// "Connect to Discord" flow completes) so the connect button hides.
+export function markDiscordLinked() {
+  if (!_active) return;
+  _active = { ..._active, discordLinked: true };
+  saveProfile(_active);
+  _publish();
+}
+
 export function signOut() {
   clearProfile();
   _active = null;
