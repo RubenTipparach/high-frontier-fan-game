@@ -438,21 +438,47 @@
         <div class="main-menu-section" id="notify-section" hidden>
           <h2 class="main-menu-heading">Turn notifications</h2>
           <p class="muted notify-help">
-            Get a Discord DM when it's your turn. Enable Developer Mode in
-            Discord, right-click your name, Copy User ID, and paste it here -
-            then send a test (the bot must share a server with you).
+            Get a Discord DM when it's your turn or an auction needs you.
           </p>
-          <label class="notify-field">
-            <span>Discord user ID</span>
-            <input id="notify-discord-id" type="text" inputmode="numeric"
-              autocomplete="off" spellcheck="false" placeholder="e.g. 123456789012345678" />
-          </label>
-          <label class="checkbox"><input type="checkbox" id="notify-turn" checked /> When it's my turn</label>
-          <label class="checkbox"><input type="checkbox" id="notify-auction" checked /> When an auction needs me</label>
-          <div class="main-menu-row">
-            <button id="btn-notify-save" type="button">Save</button>
-            <button id="btn-notify-test" type="button">Send test DM</button>
+
+          <!-- One-click OAuth path (shown when the server has OAuth set
+               up). Clicking authorizes once on Discord; the server reads
+               your account and links it - no copy-paste, no manual server
+               join. -->
+          <div id="notify-oauth" hidden>
+            <p id="notify-connected" class="muted notify-connected" hidden>
+              ✅ Discord connected.
+            </p>
+            <div class="main-menu-row">
+              <button id="btn-notify-connect" type="button">Connect Discord</button>
+              <button id="btn-notify-test" type="button">Send test DM</button>
+            </div>
+            <label class="checkbox"><input type="checkbox" id="notify-turn" checked /> When it's my turn</label>
+            <label class="checkbox"><input type="checkbox" id="notify-auction" checked /> When an auction needs me</label>
+            <div class="main-menu-row">
+              <button id="btn-notify-save" type="button">Save preferences</button>
+            </div>
           </div>
+
+          <!-- Manual fallback: paste your Discord user id. Used when the
+               server has no OAuth configured, or by anyone who prefers it.
+               When OAuth is on, this is collapsed under a disclosure. -->
+          <details id="notify-manual-wrap">
+            <summary class="muted">Link manually with a user ID instead</summary>
+            <p class="muted notify-help">
+              Enable Developer Mode in Discord, right-click your name, Copy
+              User ID, and paste it here, then send a test.
+            </p>
+            <label class="notify-field">
+              <span>Discord user ID</span>
+              <input id="notify-discord-id" type="text" inputmode="numeric"
+                autocomplete="off" spellcheck="false" placeholder="e.g. 123456789012345678" />
+            </label>
+            <div class="main-menu-row">
+              <button id="btn-notify-save-manual" type="button">Save ID</button>
+            </div>
+          </details>
+
           <p id="notify-status" class="muted notify-status"></p>
           <p id="notify-disabled-note" class="muted" hidden>
             No notification bot is configured yet, so test DMs are unavailable -

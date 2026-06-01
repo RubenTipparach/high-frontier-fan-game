@@ -17,7 +17,10 @@ import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
 import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE } from './game/engine.js';
 import { randomSeed } from './game/rng.js';
-import { sendDM, discordEnabled } from './discord.js';
+import {
+  sendDM, discordEnabled,
+  oauthEnabled, oauthClientId, buildAuthorizeUrl, completeOauth,
+} from './discord.js';
 
 const PORT = Number(process.env.PORT) || 8080;
 
@@ -766,6 +769,9 @@ app.get('/me/notify', requireProfile, (req, res) => {
     .get(req.profile.id);
   res.json({
     discordEnabled: discordEnabled(),
+    // When true, the client shows the one-click "Connect Discord" button
+    // (OAuth identify + guilds.join) instead of the manual user-id field.
+    oauthEnabled: oauthEnabled(),
     discordUserId: (pref && pref.discord_user_id) || '',
     notifyTurn: pref ? !!pref.notify_turn : true,
     notifyAuction: pref ? !!pref.notify_auction : true,
@@ -806,6 +812,92 @@ app.post('/me/notify/test', requireProfile, async (req, res) => {
   const r = await sendDM(uid, `✅ High Frontier test DM - turn notifications are working for @${req.profile.name}.`);
   if (!r.ok) return res.status(502).json({ error: r.error });
   res.json({ ok: true });
+});
+
+// ----- OAuth2 "Connect Discord" flow -----
+//
+// One-click linking: the client (Bearer-authed) asks for an authorize
+// URL, opens it in a popup, the user approves on Discord, and Discord
+// redirects back to /auth/discord/callback. The callback reads the
+// user's id (identify) AND adds them to the bot's guild (guilds.join)
+// so the bot can DM them - no copy-paste, no manual server join.
+//
+// `state` is a one-time CSRF token mapped to the requesting profile,
+// held in memory with a short TTL (the whole flow takes seconds; a
+// process restart mid-flow just means the user clicks again).
+
+const _oauthStates = new Map(); // state -> { profileId, exp }
+const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+
+function pruneOauthStates() {
+  const now = Date.now();
+  for (const [s, v] of _oauthStates) if (v.exp <= now) _oauthStates.delete(s);
+}
+
+// The redirect URI must be byte-identical in the authorize request, the
+// token exchange, AND the Developer Portal's Redirects list. Derive it
+// from an explicit env when set (most robust behind proxies), else from
+// the request host (trust proxy is on, so x-forwarded-proto is honored).
+function oauthRedirectUri(req) {
+  if (process.env.DISCORD_REDIRECT_URI) return process.env.DISCORD_REDIRECT_URI;
+  return `${req.protocol}://${req.get('host')}/auth/discord/callback`;
+}
+
+// Begin linking: returns the Discord authorize URL for the client to open.
+app.post('/me/notify/oauth/start', requireProfile, (req, res) => {
+  if (!oauthEnabled()) return res.status(503).json({ error: 'oauth_disabled' });
+  pruneOauthStates();
+  const state = generateShortCode(16);
+  _oauthStates.set(state, { profileId: req.profile.id, exp: Date.now() + OAUTH_STATE_TTL_MS });
+  res.json({ ok: true, url: buildAuthorizeUrl(state, oauthRedirectUri(req)) });
+});
+
+// Discord redirects here after the user approves. Validates state,
+// completes the exchange + guild join, saves the discord_user_id to the
+// initiating profile, and renders a tiny self-closing success page.
+app.get('/auth/discord/callback', async (req, res) => {
+  const sendPage = (title, body, ok) => {
+    res.set('content-type', 'text/html; charset=utf-8');
+    res.send(`<!doctype html><html><head><meta charset="utf-8">
+<title>${esc(title)}</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font:15px ui-sans-serif,system-ui,sans-serif;background:#07060f;color:#e6e9ff;
+display:flex;min-height:100vh;margin:0;align-items:center;justify-content:center;text-align:center;padding:24px}
+.box{max-width:420px}h1{font-size:18px;color:${ok ? '#4ade80' : '#f87171'};margin:0 0 10px}
+p{color:#8b90b8;line-height:1.5}</style></head><body><div class="box">
+<h1>${esc(title)}</h1><p>${body}</p></div>
+<script>try{setTimeout(function(){window.close();},2500);}catch(e){}</script>
+</body></html>`);
+  };
+  pruneOauthStates();
+  const err = String(req.query.error || '');
+  if (err) return sendPage('Discord connection cancelled', 'You can close this window and try again.', false);
+  const state = String(req.query.state || '');
+  const code = String(req.query.code || '');
+  const entry = state && _oauthStates.get(state);
+  if (!entry) return sendPage('Link expired', 'That link expired or was already used. Reopen the menu and click Connect again.', false);
+  _oauthStates.delete(state);
+  if (!code) return sendPage('Missing code', 'Discord did not return an authorization code. Please try again.', false);
+  const profile = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(entry.profileId);
+  if (!profile) return sendPage('Profile not found', 'Could not match this link to a profile. Please try again.', false);
+
+  const r = await completeOauth(code, oauthRedirectUri(req));
+  if (!r.ok) {
+    console.warn('[notify] oauth callback failed for profile', entry.profileId, '-', r.error);
+    return sendPage('Connection failed', `Discord linking failed (${esc(r.error)}). You can close this and try again.`, false);
+  }
+  // Persist the id + enable both event kinds by default (preserve any
+  // existing notify_turn / notify_auction choices the player already set).
+  db.prepare(
+    `INSERT INTO notify_prefs (profile_id, discord_user_id, notify_turn, notify_auction, updated_at)
+     VALUES (?, ?, 1, 1, ?)
+     ON CONFLICT(profile_id) DO UPDATE SET
+       discord_user_id = excluded.discord_user_id,
+       updated_at      = excluded.updated_at`
+  ).run(entry.profileId, r.userId, nowMs());
+  // Fire a confirmation DM now that the guild membership exists.
+  sendDM(r.userId, `✅ Discord connected for @${profile.name}. You'll get a DM when it's your turn.`)
+    .then((d) => { if (!d.ok) console.warn('[notify] confirm DM failed -', d.error); });
+  sendPage('Discord connected', 'You can close this window and return to the game. A confirmation DM is on its way.', true);
 });
 
 // The state snapshot a given op produced (git-style "tree at commit").
