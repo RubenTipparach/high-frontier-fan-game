@@ -8,6 +8,32 @@
     <link rel="stylesheet" href="./css/map.css?v=31" />
     <link rel="stylesheet" href="./css/cards.css?v=5" />
     <!--
+      Inline (self-contained) styles for the boot-failure banner so it
+      stays legible even if a cached/broken stylesheet didn't load. Kept
+      minimal and dependency-free for the same reason.
+    -->
+    <style>
+      .boot-error {
+        position: fixed; inset: 0; z-index: 99999;
+        display: flex; align-items: center; justify-content: center;
+        background: rgba(7, 6, 15, 0.88); padding: 24px;
+        font: 15px ui-sans-serif, system-ui, -apple-system, sans-serif;
+      }
+      .boot-error-box {
+        max-width: 440px; background: #11101e; color: #e6e9ff;
+        border: 1px solid #2a2740; border-radius: 10px; padding: 20px 22px;
+      }
+      .boot-error-box strong { color: #f87171; font-size: 16px; }
+      .boot-error-box p { color: #8b90b8; line-height: 1.5; }
+      .boot-error-box ul { color: #e6e9ff; line-height: 1.7; padding-left: 20px; margin: 10px 0; }
+      .boot-error-box button {
+        margin-top: 8px; font: inherit; cursor: pointer;
+        background: #1a1830; color: #e6e9ff; border: 1px solid #2a2740;
+        border-radius: 6px; padding: 8px 14px;
+      }
+      .boot-error-box button:hover { background: #25223e; border-color: #3a3760; }
+    </style>
+    <!--
       API base URL for the High Frontier companion server. Empty string
       = local-only mode (no profile, no lobby, no multiplayer). The
       deploy.yml workflow leaves this hard-coded so the site stays
@@ -441,33 +467,24 @@
             Get a Discord DM when it's your turn or an auction needs you.
           </p>
 
-          <!-- One-click OAuth path (shown when the server has OAuth set
-               up). Clicking authorizes once on Discord; the server reads
-               your account and links it - no copy-paste, no manual server
-               join. -->
+          <!-- One-click OAuth link (only shown when the server has OAuth
+               configured). Authorizes once on Discord; the server reads
+               your account and adds you to the bot's server - no
+               copy-paste, no manual join. -->
           <div id="notify-oauth" hidden>
-            <p id="notify-connected" class="muted notify-connected" hidden>
-              ✅ Discord connected.
-            </p>
             <div class="main-menu-row">
               <button id="btn-notify-connect" type="button">Connect Discord</button>
-              <button id="btn-notify-test" type="button">Send test DM</button>
-            </div>
-            <label class="checkbox"><input type="checkbox" id="notify-turn" checked /> When it's my turn</label>
-            <label class="checkbox"><input type="checkbox" id="notify-auction" checked /> When an auction needs me</label>
-            <div class="main-menu-row">
-              <button id="btn-notify-save" type="button">Save preferences</button>
             </div>
           </div>
 
-          <!-- Manual fallback: paste your Discord user id. Used when the
-               server has no OAuth configured, or by anyone who prefers it.
-               When OAuth is on, this is collapsed under a disclosure. -->
+          <!-- Manual link: paste your Discord user id. The primary path
+               when the server has no OAuth; a collapsible fallback when
+               OAuth is available. -->
           <details id="notify-manual-wrap">
-            <summary class="muted">Link manually with a user ID instead</summary>
+            <summary class="muted">Link manually with a user ID</summary>
             <p class="muted notify-help">
               Enable Developer Mode in Discord, right-click your name, Copy
-              User ID, and paste it here, then send a test.
+              User ID, and paste it here.
             </p>
             <label class="notify-field">
               <span>Discord user ID</span>
@@ -478,6 +495,19 @@
               <button id="btn-notify-save-manual" type="button">Save ID</button>
             </div>
           </details>
+
+          <!-- Always-present once a bot exists: connection status, the
+               event-kind toggles, Save, and the test DM button. These
+               apply whether you linked via OAuth or a manual ID. -->
+          <p id="notify-connected" class="muted notify-connected" hidden>
+            ✅ Discord connected.
+          </p>
+          <label class="checkbox"><input type="checkbox" id="notify-turn" checked /> When it's my turn</label>
+          <label class="checkbox"><input type="checkbox" id="notify-auction" checked /> When an auction needs me</label>
+          <div class="main-menu-row">
+            <button id="btn-notify-save" type="button">Save preferences</button>
+            <button id="btn-notify-test" type="button">Send test DM</button>
+          </div>
 
           <p id="notify-status" class="muted notify-status"></p>
           <p id="notify-disabled-note" class="muted" hidden>
@@ -520,7 +550,67 @@
     -->
     <div id="toasts" class="toasts" aria-live="polite"></div>
 
+    <!--
+      Boot-failure banner. Hidden by default; the inline watchdog below
+      reveals it if the app's module graph fails to link/run (the classic
+      cause is a stale CACHED module after a deploy - e.g. a new main.js
+      importing an export that an old cached api.js doesn't have yet).
+      Because that's a module LINK error, main.js never runs and can't
+      surface it from inside, so this lives in plain HTML + an inline
+      (non-module) script that always executes.
+    -->
+    <div id="boot-error" class="boot-error" hidden role="alert">
+      <div class="boot-error-box">
+        <strong>This page didn't load fully.</strong>
+        <p>You're probably on a cached older version. A hard refresh fixes it:</p>
+        <ul>
+          <li><b>Windows / Linux:</b> Ctrl + Shift + R</li>
+          <li><b>Mac:</b> Cmd + Shift + R</li>
+          <li><b>Firefox:</b> Ctrl + Shift + R (Cmd + Shift + R on Mac)</li>
+        </ul>
+        <button type="button" id="boot-error-reload">Hard refresh now</button>
+      </div>
+    </div>
+
     <script src="./js/version-check.js?v=4"></script>
     <script type="module" src="./js/main.js?v=4"></script>
+    <!--
+      Boot watchdog (inline, non-module so it always runs even if the
+      module graph is broken). main.js sets window.__hfBooted = true at
+      the top of boot(). If that flag is still unset a few seconds after
+      load, the app didn't start - show the hard-refresh banner.
+    -->
+    <script>
+      (function () {
+        function showBootError() {
+          if (window.__hfBooted) return;
+          var el = document.getElementById('boot-error');
+          if (el) el.hidden = false;
+        }
+        // Catch the module link/parse error as soon as it fires (faster
+        // than the timeout) - but only treat it as a boot failure if the
+        // app still hasn't started.
+        window.addEventListener('error', function () {
+          setTimeout(showBootError, 1500);
+        });
+        // Fallback: even a silent failure (no error event) is caught by
+        // checking the flag a few seconds after the page settles.
+        window.addEventListener('load', function () {
+          setTimeout(showBootError, 4000);
+        });
+        var reload = document.getElementById('boot-error-reload');
+        if (reload) {
+          reload.addEventListener('click', function () {
+            // A plain reload often suffices once the module's cache
+            // entry has expired; if the cached copy is still fresh the
+            // user needs the keyboard hard-refresh spelled out above
+            // (JS can't force a subresource refetch without a service
+            // worker). We deliberately don't touch the URL so the room
+            // routing chain (?v= / ?room= / ?invite=) is preserved.
+            window.location.reload();
+          });
+        }
+      })();
+    </script>
   </body>
 </html>
