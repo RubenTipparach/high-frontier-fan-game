@@ -1328,6 +1328,19 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
         closeWrap.appendChild(btn);
       }
     }
+    // Reset: clear the OTHER players' bids so they must re-bid (higher)
+    // or pass. Shown when someone else has a standing bid to clear.
+    const othersBid = players.some((p) => p.profileId !== myId && bids[p.profileId] != null);
+    if (othersBid) {
+      const resetBtn = document.createElement('button');
+      resetBtn.type = 'button';
+      resetBtn.className = 'modal-btn';
+      resetBtn.textContent = '↺ Reset others’ bids';
+      resetBtn.title = "Clear the other players' bids and prompt them to bid again (higher) or pass. If they all pass, you win the lot.";
+      resetBtn.disabled = _onlineBusy;
+      resetBtn.addEventListener('click', () => submitMpAuctionOp({ kind: 'AUCTION_RESET' }));
+      closeWrap.appendChild(resetBtn);
+    }
     host.appendChild(closeWrap);
   }
 }
@@ -12200,7 +12213,7 @@ function paintMissionLog() {
 // back to a neutral bullet so a new op kind doesn't disappear.
 const MP_LOG_ICONS = {
   AUCTION_START: '🎯', AUCTION_BID: '💰', AUCTION_PASS: '🚫',
-  AUCTION_JOIN: '🎯', AUCTION_SELL: '✅',
+  AUCTION_RESET: '↺', AUCTION_SELL: '✅',
   PICK_CREW: '🧑‍🚀',
   END_TURN: '⏭', MOVE: '🛸', BURN: '🔥',
   SET_ACTIVE_THRUSTER: '🔥', SET_ACTIVE_PROSPECTOR: '⛏',

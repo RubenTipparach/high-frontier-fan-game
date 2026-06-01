@@ -1111,7 +1111,7 @@ function dispatchTurnNotifications(gameId, kind, state) {
         }
       }
       notifyWebhook(`🔨 An auction just opened in **${name}** - bidding is live.${jump}`);
-    } else if (kind === 'AUCTION_BID' || kind === 'AUCTION_PASS') {
+    } else if (kind === 'AUCTION_BID' || kind === 'AUCTION_PASS' || kind === 'AUCTION_RESET') {
       // The auction round just came back to someone (user: "whenever the
       // auction round comes to you - both the auctioneer and the
       // bidders"). The post-op auction state tells us who is on the clock.
@@ -1125,19 +1125,23 @@ function dispatchTurnNotifications(gameId, kind, state) {
           if (dmOn) notifyProfile(auctioneer.profileId, 'auction', `🔨 Every bidder has acted in ${name} - close the lot (sell to a bidder or keep it).${jump}`);
           notifyWebhook(`🔨 ${auctioneer.name || 'The auctioneer'} can close the lot in **${name}**.${jump}`);
         }
-      } else if (a && a.awaiting === 'bidders' && kind === 'AUCTION_BID') {
-        // A bid reopened the floor: ping everyone who still has to
-        // respond - not the auctioneer, and not anyone who already acted
-        // at this floor (a.acted resets to just the bidder on a reopen).
+      } else if (a && a.awaiting === 'bidders' && (kind === 'AUCTION_BID' || kind === 'AUCTION_RESET')) {
+        // A bid (or an auctioneer reset) reopened the floor: ping everyone
+        // who still has to respond - not the auctioneer, and not anyone
+        // who already acted at this floor (a.acted resets on a reopen).
         const acted = a.acted || [];
+        const isReset = kind === 'AUCTION_RESET';
+        const msg = isReset
+          ? `🔨 The auctioneer reset the bidding in ${name} - bid again (higher) or pass.`
+          : `🔨 The bid in ${name} moved - bid again or pass.`;
         if (dmOn) {
           for (const p of state.players) {
             if (p.profileId === a.auctioneerId) continue;
             if (acted.includes(p.profileId)) continue;
-            notifyProfile(p.profileId, 'auction', `🔨 The bid in ${name} moved - bid again or pass.${jump}`);
+            notifyProfile(p.profileId, 'auction', `${msg}${jump}`);
           }
         }
-        notifyWebhook(`🔨 The bidding reopened in **${name}**.${jump}`);
+        notifyWebhook(`🔨 ${isReset ? 'The auctioneer reset the bidding' : 'The bidding reopened'} in **${name}**.${jump}`);
       }
     }
   } catch (e) {

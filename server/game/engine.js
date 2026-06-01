@@ -1441,10 +1441,33 @@ function applyAuctionSell(state, op, ctx) {
   return { ok: true, state, log };
 }
 
+// Auctioneer resets the bidding: clear every OTHER player's standing
+// bid + pass so they must bid again (or pass), prompting them to go
+// higher. The auctioneer's own bid stays as the floor. If everyone then
+// passes, the auctioneer is the standing top bid and keeps the lot.
+function applyAuctionReset(state, op, ctx) {
+  const a = state.auction;
+  if (!a) return fail('no_auction');
+  if (ctx.profileId !== a.auctioneerId) return fail('not_auctioneer');
+  a.bids = a.bids || {};
+  for (const pid of Object.keys(a.bids)) {
+    if (Number(pid) !== a.auctioneerId) delete a.bids[pid];
+  }
+  a.passed = [];
+  a.acted = [];
+  recomputeAuction(state);
+  const auctioneer = playerByProfile(state, a.auctioneerId);
+  return {
+    ok: true, state,
+    log: `${auctioneer ? auctioneer.name : 'The auctioneer'} reset the bidding - everyone must bid again or pass.`,
+  };
+}
+
 const AUCTION = {
   AUCTION_START: applyAuctionStart,
   AUCTION_BID: applyAuctionBid,
   AUCTION_PASS: applyAuctionPass,
+  AUCTION_RESET: applyAuctionReset,
   AUCTION_SELL: applyAuctionSell,
 };
 
