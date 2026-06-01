@@ -1050,6 +1050,17 @@ function whoNeedsToAct(state) {
   return n.length ? n[0] : null;
 }
 
+// Who a player may MANUALLY nudge. Normally just whoever the game is
+// genuinely waiting on (actorsNeeded). During an auction EVERY other
+// player is fair game (user: "all players are nudgable during auctions"):
+// bids fly in any order and the on-the-clock set churns as people act,
+// so let anyone ping anyone - the auctioneer and already-acted bidders
+// included - to keep the lot moving.
+function nudgeTargets(state) {
+  if (state && state.auction) return (state.players || []).map((p) => p.profileId);
+  return actorsNeeded(state);
+}
+
 // Most-recent nudge per target for a game, so the client can render the
 // "reminded Xh ago" timer and grey out the button during the cooldown.
 function gameReminders(gameId) {
@@ -1633,14 +1644,15 @@ app.post('/games/:id/remind', requireProfile, (req, res) => {
   if (g.status !== 'active') return res.status(409).json({ error: 'not_active' });
   const st = db.prepare('SELECT state FROM game_states WHERE game_id = ?').get(id);
   const state = st ? JSON.parse(st.state) : null;
-  // Players actually on the clock (never the sender - you can't nudge
-  // yourself). During an auction this can be several at once.
-  const needed = actorsNeeded(state).filter((pid) => pid !== req.profile.id);
+  // Who the sender may nudge (never themselves). Normally whoever is on
+  // the clock; during an auction it's every other player.
+  const needed = nudgeTargets(state).filter((pid) => pid !== req.profile.id);
   if (!needed.length) return res.status(409).json({ error: 'nobody_to_nudge' });
+  const inAuction = !!(state && state.auction);
 
-  // Resolve the requested set: one specific player (must be on the
-  // clock), everyone (all=true, for auction rounds), or the primary
-  // actor by default.
+  // Resolve the requested set: one specific player (must be nudgable),
+  // everyone (all=true, for auction rounds), or the primary actor by
+  // default.
   const body = req.body || {};
   let targets;
   if (body.all) {
@@ -1675,7 +1687,8 @@ app.post('/games/:id/remind', requireProfile, (req, res) => {
       continue;
     }
     ins.run(id, tid, req.profile.id, now);
-    notifyProfile(tid, 'turn', `👋 ${req.profile.name} nudged you - it's your turn in ${nm}.${jump}`);
+    const why = inAuction ? `the auction is waiting on you in ${nm}` : `it's your turn in ${nm}`;
+    notifyProfile(tid, 'turn', `👋 ${req.profile.name} nudged you - ${why}.${jump}`);
     nudged.push({ targetId: tid, targetName: tname, sentAt: now });
   }
   if (nudged.length) {

@@ -1569,6 +1569,18 @@ function actorsNeededClient(snapshot) {
   return active ? [active.profileId] : [];
 }
 
+// Who I can manually nudge - mirrors the server's nudgeTargets. Same as
+// actorsNeededClient normally, but during an auction EVERY other player
+// is nudgable (user: "all players are nudgable during auctions"), since
+// the on-the-clock set churns as bids land and you may want to ping the
+// auctioneer or an already-acted bidder to keep things moving.
+function nudgeTargetsClient(snapshot) {
+  if (snapshot && snapshot.auction && Array.isArray(snapshot.players)) {
+    return snapshot.players.map((p) => p.profileId);
+  }
+  return actorsNeededClient(snapshot);
+}
+
 // Effective last-nudge timestamp for a target: the later of the
 // snapshot's reminder record and this client's optimistic local record.
 function lastNudgeAt(snapshot, targetId) {
@@ -1640,8 +1652,8 @@ function makeNudgeButton(snapshot, targetPlayer, allPlayers) {
     });
     btn.textContent = `👋 Nudge all (${(allPlayers || []).length})`;
     btn.disabled = allOnCd;
-    btn.title = allOnCd ? 'Everyone on the clock was nudged recently.'
-      : 'Nudge every player still on the clock (skips anyone on cooldown).';
+    btn.title = allOnCd ? 'Everyone here was nudged recently.'
+      : 'Nudge every listed player (skips anyone on cooldown).';
     if (!allOnCd) btn.addEventListener('click', () => doNudge({ all: true }, btn));
   }
   return btn;
@@ -1727,19 +1739,20 @@ function renderMpPanel(snapshot) {
   }
   tableEl.appendChild(roster);
 
-  // Footer: turn nudge(s). Ping whoever the table is waiting on with a
-  // turn DM. During an auction several players can be on the clock at
-  // once, so each gets a button plus a "Nudge all"; otherwise it's the
-  // single active player / chooser. Always shows WHO is being nudged
+  // Footer: turn nudge(s). Ping whoever can be nudged with a turn DM.
+  // Normally that's whoever the table is waiting on; during an auction
+  // it's every other player (user: "all players are nudgable during
+  // auctions"), so each gets a button plus a "Nudge all". Otherwise it's
+  // the single active player / chooser. Always shows WHO is being nudged
   // (user: "show who you're nudging in case we need to fix it") and the
   // per-target cooldown timer. I am never a nudge target.
-  const needed = actorsNeededClient(snapshot).filter((pid) => pid !== myId);
+  const needed = nudgeTargetsClient(snapshot).filter((pid) => pid !== myId);
   const needP = needed.map((pid) => players.find((p) => p.profileId === pid)).filter(Boolean);
   if (needP.length) {
     const footer = document.createElement('div');
     footer.className = 'mp-notify-test mp-nudge-wrap';
-    // "Nudge all" only when more than one player is genuinely on the
-    // clock (auction rounds); a single actor just gets their button.
+    // "Nudge all" once more than one player is nudgable (auction rounds,
+    // or several actors on the clock); a single actor just gets a button.
     if (needP.length > 1) footer.appendChild(makeNudgeButton(snapshot, null, needP));
     for (const tp of needP) footer.appendChild(makeNudgeButton(snapshot, tp, null));
     tableEl.appendChild(footer);
