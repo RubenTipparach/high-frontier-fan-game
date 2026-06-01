@@ -481,10 +481,11 @@ async function onCreateSubmit(ev) {
   errEl.textContent = '';
   const name = document.getElementById('create-name').value.trim();
   const maxPlayers = Number(document.getElementById('create-max').value);
+  const maxRounds = Number(document.getElementById('create-rounds').value);
   const joinPolicy = document.querySelector('input[name=policy]:checked').value;
   const me = activeProfile();
   if (!me) return;
-  const r = await createLobby({ name, maxPlayers, joinPolicy }, me.token);
+  const r = await createLobby({ name, maxPlayers, maxRounds, joinPolicy }, me.token);
   if (!r.ok) { errEl.textContent = humanizeError(r.error); return; }
   await enterLobby(r.data.lobby);
 }

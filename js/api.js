@@ -103,8 +103,8 @@ export async function getLobbyByCode(code) {
   return call('GET', '/lobbies/by-code/' + encodeURIComponent(code));
 }
 
-export async function createLobby({ name, maxPlayers, joinPolicy }, token) {
-  return call('POST', '/lobbies', { body: { name, maxPlayers, joinPolicy }, token });
+export async function createLobby({ name, maxPlayers, maxRounds, joinPolicy }, token) {
+  return call('POST', '/lobbies', { body: { name, maxPlayers, maxRounds, joinPolicy }, token });
 }
 
 export async function joinLobby(id, token) {
