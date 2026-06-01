@@ -125,7 +125,7 @@ import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
 } from './net-bridge.js';
 import { abandonSandboxGame, currentSandboxId } from './sandbox-games.js';
-import { getGame, getGameOps, submitGameOp, fetchChat, sendChat, testNotify } from '../api.js';
+import { getGame, getGameOps, submitGameOp, fetchChat, sendChat, testNotify, remindTurn } from '../api.js';
 import { ws } from '../ws.js';
 
 // Only one map mode now (planner / "classic"); the old
@@ -904,11 +904,43 @@ function renderOnlineAuction(auction) {
 
   const lotHost = overlay.querySelector('#mp-auction-lot');
   lotHost.innerHTML = '';
+  const lotMain = document.createElement('div');
+  lotMain.className = 'mp-auction-lot-main';
   if (lot) {
-    try { lotHost.appendChild(renderCard(lot, { type: 'patent' })); }
-    catch { lotHost.textContent = lot.name || auction.cardId; }
+    try { lotMain.appendChild(renderCard(lot, { type: 'patent' })); }
+    catch { lotMain.textContent = lot.name || auction.cardId; }
   } else {
-    lotHost.textContent = auction.cardId;
+    lotMain.textContent = auction.cardId;
+  }
+  lotHost.appendChild(lotMain);
+
+  // Support bonus cards that come with the lot: one off the top of each
+  // support deck the card requires (the server awards these to the
+  // winner when the lot resolves). We PEEK the current deck tops - an
+  // open auction freezes every other op, so the tops are exactly what
+  // the winner will draw, and peeking (not drawing) means we never
+  // reveal what sits BEHIND the bonus cards in the deck.
+  const bonusCards = lot
+    ? supportBonusDecks(lot).map((t) => cardById(peekTop(t))).filter(Boolean)
+    : [];
+  if (bonusCards.length) {
+    const sec = document.createElement('div');
+    sec.className = 'mp-auction-bonus';
+    const label = document.createElement('div');
+    label.className = 'mp-auction-bonus-label';
+    label.textContent = `Comes with (${bonusCards.length})`;
+    sec.appendChild(label);
+    const cardsRow = document.createElement('div');
+    cardsRow.className = 'mp-auction-bonus-cards';
+    for (const b of bonusCards) {
+      const w = document.createElement('div');
+      w.className = 'mp-auction-bonus-card';
+      try { w.appendChild(renderCard(b, { type: 'patent' })); }
+      catch { w.textContent = b.name || b.id; }
+      cardsRow.appendChild(w);
+    }
+    sec.appendChild(cardsRow);
+    lotHost.appendChild(sec);
   }
 
   const bidEl = overlay.querySelector('.mp-auction-bid');
@@ -1478,6 +1510,40 @@ function clearMpChatUnread() {
   if (tab) tab.classList.remove('has-unread');
 }
 
+// Manual turn-nudge cooldown (client mirror of the server's 3h gate).
+// _lastNudge optimistically records the most recent nudge this client
+// learned about (from a 200 or a 429) so the button greys out + shows
+// the timer right away, before the next snapshot carries state.reminders.
+const NUDGE_COOLDOWN_MS = 3 * 60 * 60 * 1000;
+let _lastNudge = null; // { gameId, targetId, sentAt }
+
+// Who the game is currently waiting on (mirrors the server's
+// whoNeedsToAct): nobody during the crew draft, else the first-player
+// chooser, the auctioneer in their decide phase, or the active seat.
+function whoNeedsToActClient(snapshot) {
+  if (!snapshot || !Array.isArray(snapshot.players)) return null;
+  const draftDone = snapshot.draftPhase === 'play'
+    || (snapshot.draftPhase == null && snapshot.players.every((p) => !!p.faction));
+  if (!draftDone) return null;
+  if (snapshot.pendingFirstPlayer) return snapshot.pendingFirstPlayer.chooserId;
+  if (snapshot.auction && snapshot.auction.awaiting === 'auctioneer') return snapshot.auction.auctioneerId;
+  const active = snapshot.players[snapshot.activeIndex];
+  return active ? active.profileId : null;
+}
+
+// Effective last-nudge timestamp for a target: the later of the
+// snapshot's reminder record and this client's optimistic _lastNudge.
+function lastNudgeAt(snapshot, targetId) {
+  let t = 0;
+  const rem = snapshot && snapshot.reminders && snapshot.reminders[targetId];
+  if (rem && rem.sentAt) t = rem.sentAt;
+  if (_lastNudge && _lastNudge.gameId === _onlineGameId
+      && _lastNudge.targetId === targetId && _lastNudge.sentAt > t) {
+    t = _lastNudge.sentAt;
+  }
+  return t;
+}
+
 function renderMpPanel(snapshot) {
   const tableEl = ensureMpPanelStructure();
   if (!tableEl) return;
@@ -1564,6 +1630,56 @@ function renderMpPanel(snapshot) {
   // passed. A failure (not linked / DMs closed) is surfaced as a toast.
   const footer = document.createElement('div');
   footer.className = 'mp-notify-test';
+
+  // Turn nudge: ping whoever the table is waiting on with a turn DM.
+  // Hidden when there's nobody to nudge or that player is me. Always
+  // shows WHO is being nudged (so a mis-target is obvious - user:
+  // "show who you're nudging in case we need to fix it") and the
+  // per-target cooldown timer.
+  const nudgeTarget = whoNeedsToActClient(snapshot);
+  const nudgeP = nudgeTarget ? players.find((p) => p.profileId === nudgeTarget) : null;
+  if (nudgeP && nudgeTarget !== myId) {
+    const last = lastNudgeAt(snapshot, nudgeTarget);
+    const since = last ? Date.now() - last : Infinity;
+    const onCooldown = since < NUDGE_COOLDOWN_MS;
+    const nudgeBtn = document.createElement('button');
+    nudgeBtn.type = 'button';
+    nudgeBtn.className = 'mp-leave mp-nudge';
+    const who = document.createElement('span');
+    who.className = 'player-name';
+    if (nudgeP.color) who.style.setProperty('--player-color', nudgeP.color);
+    who.textContent = '@' + nudgeP.name;
+    nudgeBtn.append('👋 Nudge ', who);
+    if (onCooldown) {
+      nudgeBtn.disabled = true;
+      nudgeBtn.title = `Reminded ${relTime(last)} ago. One nudge per player per 3 hours.`;
+      const note = document.createElement('span');
+      note.className = 'mp-nudge-note muted';
+      note.textContent = ` · reminded ${relTime(last)} ago`;
+      nudgeBtn.appendChild(note);
+    } else {
+      nudgeBtn.title = `Send @${nudgeP.name} a turn reminder (Discord DM). One nudge per player per 3 hours.`;
+      nudgeBtn.addEventListener('click', async () => {
+        if (!_onlineMe) return;
+        nudgeBtn.disabled = true;
+        const r = await remindTurn(_onlineGameId, _onlineMe.token);
+        if (r && r.ok) {
+          _lastNudge = { gameId: _onlineGameId, targetId: r.targetId, sentAt: r.sentAt };
+          _onlineToast(`👋 Nudged @${r.targetName || nudgeP.name}.`);
+        } else if (r && r.error === 'cooldown') {
+          _lastNudge = { gameId: _onlineGameId, targetId: r.targetId, sentAt: r.sentAt };
+          _onlineToast(`@${nudgeP.name} was nudged recently - try later.`, 'error');
+        } else if (r && r.error === 'your_turn') {
+          _onlineToast("It's your turn - nothing to nudge.", 'error');
+        } else {
+          _onlineToast('Nudge failed: ' + ((r && r.error) || 'unknown error') + '.', 'error');
+        }
+        renderMpPanel(_onlineSnapshot);
+      });
+    }
+    footer.appendChild(nudgeBtn);
+  }
+
   const testBtn = document.createElement('button');
   testBtn.type = 'button';
   testBtn.className = 'mp-leave';
@@ -12085,6 +12201,88 @@ function relTime(ms) {
   return Math.round(d / 86_400_000) + 'd';
 }
 
+// Lazily-built index of patent card names -> id, plus a single
+// alternation regex (longest names first, so the most specific name
+// wins at a given position). Used to turn card names in the mission
+// log into clickable links.
+let _cardNameIndex = null;
+function cardNameIndex() {
+  if (_cardNameIndex) return _cardNameIndex;
+  const byName = new Map();
+  const add = (nm, id) => { if (nm && id && !byName.has(nm)) byName.set(nm, id); };
+  for (const id of Object.keys(PATENTS_BY_ID)) {
+    const c = PATENTS_BY_ID[id];
+    if (!c) continue;
+    add(c.name, id);
+    if (c.faces) {
+      add(c.faces.primary && c.faces.primary.name, id);
+      add(c.faces.secondary && c.faces.secondary.name, id);
+    }
+  }
+  const names = [...byName.keys()].filter(Boolean).sort((a, b) => b.length - a.length);
+  const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = names.length ? new RegExp(names.map(reEsc).join('|'), 'g') : null;
+  _cardNameIndex = { re, byName };
+  return _cardNameIndex;
+}
+
+// Render log text with any patent card names wrapped in clickable
+// links (data-card-id). Everything else is HTML-escaped as usual; a
+// name embedded inside a larger word is left as plain text.
+function linkifyCardsHtml(raw) {
+  if (!raw) return '';
+  const { re, byName } = cardNameIndex();
+  if (!re) return esc(raw);
+  const wordish = (ch) => /[A-Za-z0-9]/.test(ch || '');
+  let out = '';
+  let last = 0;
+  re.lastIndex = 0;
+  let m;
+  while ((m = re.exec(raw)) !== null) {
+    const name = m[0];
+    const start = m.index;
+    const end = start + name.length;
+    if (wordish(raw[start - 1]) || wordish(raw[end])) continue; // mid-word hit
+    out += esc(raw.slice(last, start));
+    out += `<button type="button" class="mp-log-cardlink" data-card-id="${esc(byName.get(name))}">${esc(name)}</button>`;
+    last = end;
+  }
+  out += esc(raw.slice(last));
+  return out;
+}
+
+// Read-only card detail popup for log links: the full card art (both
+// faces, flippable) with a Close button - none of the hand-management
+// actions of openCardModal (Discard / Sell / Boost / Flip-in-hand),
+// which would be meaningless for inspecting another player's lot.
+function openCardInfoModal(card) {
+  if (!card) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay';
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const panel = document.createElement('div');
+  panel.className = 'card-modal-panel';
+  let cardEl;
+  try { cardEl = renderCard(card, { type: 'patent' }); }
+  catch { cardEl = document.createElement('div'); cardEl.textContent = card.name || card.id; }
+  cardEl.classList.add('card-modal-card');
+  panel.appendChild(cardEl);
+  const actions = document.createElement('div');
+  actions.className = 'card-modal-actions';
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'modal-btn';
+  closeBtn.textContent = 'Close';
+  closeBtn.addEventListener('click', close);
+  actions.appendChild(closeBtn);
+  panel.appendChild(actions);
+  overlay.appendChild(panel);
+  mountOverlay(overlay);
+  document.addEventListener('keydown', onKey);
+}
+
 async function paintOnlineMissionLog(host) {
   if (!_online || !_onlineGameId || !_onlineMe) {
     host.innerHTML = '<p class="muted">Mission log will appear once the game starts.</p>';
@@ -12132,12 +12330,17 @@ async function paintOnlineMissionLog(host) {
       const whenTitle = e.createdAt
         ? new Date(e.createdAt).toLocaleString() : '';
       const summary = stripLeadName(e.log, e.profileName);
+      // Auction lines name the lot + its bonus cards; linkify those so
+      // the card names open the read-only detail modal. Other op lines
+      // stay plain escaped text (no card-name guessing in free prose).
+      const summaryHtml = (e.kind && e.kind.indexOf('AUCTION_') === 0)
+        ? linkifyCardsHtml(summary) : esc(summary);
       return `
       <li class="mp-log-row ${kindClass}"${style}>
         <span class="mp-log-icon" aria-hidden="true">${icon}</span>
         <span class="mp-log-body">
           <span class="mp-log-who player-name">@${esc(e.profileName || '?')}</span>
-          <span class="mp-log-summary">${esc(summary)}</span>
+          <span class="mp-log-summary">${summaryHtml}</span>
         </span>
         <span class="mp-log-when" title="${esc(whenTitle)}">${esc(when)}</span>
       </li>`;
@@ -12151,9 +12354,17 @@ async function paintOnlineMissionLog(host) {
       ${rows || '<li class="mp-log-empty muted">No actions yet.</li>'}
     </ul>
   `;
-  if (scrollTop != null) {
-    const newList = host.querySelector('.mp-log-list');
-    if (newList) newList.scrollTop = scrollTop;
+  // Clicking a linkified card name opens its read-only detail modal.
+  // Delegated off the freshly-rendered list (re-bound each paint).
+  const listEl = host.querySelector('.mp-log-list');
+  if (listEl) {
+    listEl.addEventListener('click', (e) => {
+      const btn = e.target.closest && e.target.closest('.mp-log-cardlink');
+      if (!btn) return;
+      const card = cardById(btn.dataset.cardId);
+      if (card) openCardInfoModal(card);
+    });
+    if (scrollTop != null) listEl.scrollTop = scrollTop;
   }
 }
 

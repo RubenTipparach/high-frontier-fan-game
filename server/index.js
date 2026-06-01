@@ -849,6 +849,23 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   // notification chip clears in real time.
   cancelLobbyInvites(id);
   publishLobby(id);
+  // Out-of-band "the game started, pick your crew" DM to every seat
+  // (opt-in, inert without a bot). The game opens in the crew-draft
+  // phase, so the first thing each player owes the table is a faction
+  // pick - notify them the same way a turn handoff does.
+  try {
+    const nm = gameDisplayName(gameId);
+    const url = gameRoomUrl(gameId);
+    const jump = url ? `\n▶ Play now: ${url}` : '';
+    if (discordEnabled()) {
+      for (const p of state.players) {
+        notifyProfile(p.profileId, 'turn', `🧑‍🚀 ${nm} is starting - pick your crew.${jump}`);
+      }
+    }
+    notifyWebhook(`🧑‍🚀 **${nm}** has started - crew draft is open.${jump}`);
+  } catch (e) {
+    console.warn('[notify] crew-draft dispatch error', e && e.message);
+  }
   res.json({ ok: true, gameId });
 });
 
@@ -918,6 +935,12 @@ function gameView(gameId, viewerId = null) {
   if (!g) return null;
   const st = db.prepare('SELECT state, seq, updated_at FROM game_states WHERE game_id = ?').get(gameId);
   const rawState = st ? JSON.parse(st.state) : null;
+  const viewState = redactRoutes(rawState, viewerId);
+  // View-only: stitch the manual-nudge cooldown timestamps onto the
+  // snapshot the client renders. These are NOT part of the persisted
+  // game state (a nudge mutates no board state); the client reads
+  // state.reminders to show the "reminded Xh ago" timer + cooldown.
+  if (viewState) viewState.reminders = gameReminders(gameId);
   return {
     id: g.id,
     lobbyId: g.lobby_id,
@@ -926,7 +949,7 @@ function gameView(gameId, viewerId = null) {
     committedSeq: g.committed_seq,
     updatedAt: st ? st.updated_at : g.created_at,
     players: gamePlayers(gameId),
-    state: redactRoutes(rawState, viewerId),
+    state: viewState,
   };
 }
 
@@ -997,6 +1020,39 @@ function notifyWebhook(text) {
   });
 }
 
+// The single player a manual "nudge" should remind: whoever the game is
+// currently waiting on. First-player handoff -> the chooser; an auction
+// in its decide phase -> the auctioneer; otherwise the active player
+// whose turn it is. (During an open bidder round the auto-notifications
+// already cover the bidders, so the nudge falls back to the active seat.)
+function whoNeedsToAct(state) {
+  if (!state || !Array.isArray(state.players)) return null;
+  // During the crew draft any seat may pick (no single "turn"), so a
+  // nudge has no well-defined target - the start DM already covers it.
+  const draftDone = state.draftPhase === 'play'
+    || (state.draftPhase == null && state.players.every((p) => !!p.faction));
+  if (!draftDone) return null;
+  if (state.pendingFirstPlayer) return state.pendingFirstPlayer.chooserId;
+  if (state.auction && state.auction.awaiting === 'auctioneer') return state.auction.auctioneerId;
+  const active = state.players[state.activeIndex];
+  return active ? active.profileId : null;
+}
+
+// Most-recent nudge per target for a game, so the client can render the
+// "reminded Xh ago" timer and grey out the button during the cooldown.
+function gameReminders(gameId) {
+  const rows = db
+    .prepare('SELECT target_id AS targetId, sender_id AS senderId, sent_at AS sentAt FROM turn_reminders WHERE game_id = ?')
+    .all(gameId);
+  const out = {};
+  for (const r of rows) out[r.targetId] = { sentAt: r.sentAt, senderId: r.senderId };
+  return out;
+}
+
+// Manual turn-nudge throttle: at most one reminder per target per game
+// inside this window.
+const REMIND_COOLDOWN_MS = 3 * 60 * 60 * 1000; // 3 hours
+
 // After an op commits: DM the newly-active player on END_TURN, and the
 // other players when an auction opens. (One event => one DM each, so the
 // natural cadence is the throttle.) A configured channel webhook also
@@ -1043,6 +1099,33 @@ function dispatchTurnNotifications(gameId, kind, state) {
         }
       }
       notifyWebhook(`🔨 An auction just opened in **${name}** - bidding is live.${jump}`);
+    } else if (kind === 'AUCTION_BID' || kind === 'AUCTION_PASS' || kind === 'AUCTION_JOIN') {
+      // The auction round just came back to someone (user: "whenever the
+      // auction round comes to you - both the auctioneer and the
+      // bidders"). The post-op auction state tells us who is on the clock.
+      const a = state.auction;
+      if (a && a.awaiting === 'auctioneer') {
+        // Settled to the auctioneer's decide phase (sell to the high
+        // bidder or keep the lot).
+        const auctioneer = state.players.find((p) => p.profileId === a.auctioneerId);
+        if (auctioneer) {
+          if (dmOn) notifyProfile(auctioneer.profileId, 'auction', `🔨 The auction in ${name} is back to you - sell to the high bidder or keep the lot.${jump}`);
+          notifyWebhook(`🔨 ${auctioneer.name || 'The auctioneer'} must decide the lot in **${name}**.${jump}`);
+        }
+      } else if (a && a.awaiting === 'bidders' && (kind === 'AUCTION_BID' || kind === 'AUCTION_JOIN')) {
+        // A fresh high bid (or the auctioneer joining) reopens the floor
+        // and resets the pass list - ping everyone who can still raise.
+        // A PASS never reopens a round, so it does not re-notify the
+        // bidders already on the clock from this same round.
+        if (dmOn) {
+          for (const p of state.players) {
+            if (p.profileId === a.auctioneerId || p.profileId === a.highBidderId) continue;
+            if (Array.isArray(a.passed) && a.passed.includes(p.profileId)) continue;
+            notifyProfile(p.profileId, 'auction', `🔨 The auction round in ${name} is back to you - bid or pass.${jump}`);
+          }
+        }
+        notifyWebhook(`🔨 A new bidding round opened in **${name}**.${jump}`);
+      }
     }
   } catch (e) {
     console.warn('[notify] dispatch error', e && e.message);
@@ -1517,6 +1600,53 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
   // Out-of-band turn / auction notifications (opt-in, inert without a bot).
   dispatchTurnNotifications(id, kind, result.state);
   res.json({ ok: true, seq: nextSeq, log: result.log || null, game: gameView(id, req.profile.id) });
+});
+
+// Manual turn nudge ("Remind"). A player who is NOT the one the game is
+// waiting on can ping that player with a turn DM, throttled to one per
+// target per REMIND_COOLDOWN_MS. Not a game op (no board mutation, no
+// seq bump) - just a DM + a cooldown row the gameView surfaces so every
+// client can show who was nudged and when.
+app.post('/games/:id/remind', requireProfile, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  if (!isGamePlayer(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+  const g = db.prepare('SELECT status FROM games WHERE id = ?').get(id);
+  if (!g) return res.status(404).json({ error: 'not_found' });
+  if (g.status !== 'active') return res.status(409).json({ error: 'not_active' });
+  const st = db.prepare('SELECT state FROM game_states WHERE game_id = ?').get(id);
+  const state = st ? JSON.parse(st.state) : null;
+  const targetId = whoNeedsToAct(state);
+  if (!targetId) return res.status(409).json({ error: 'nobody_to_nudge' });
+  if (targetId === req.profile.id) return res.status(409).json({ error: 'your_turn' });
+
+  const now = nowMs();
+  const prev = db
+    .prepare('SELECT sent_at AS sentAt FROM turn_reminders WHERE game_id = ? AND target_id = ?')
+    .get(id, targetId);
+  if (prev && now - prev.sentAt < REMIND_COOLDOWN_MS) {
+    return res.status(429).json({
+      error: 'cooldown', targetId, sentAt: prev.sentAt,
+      retryAfterMs: REMIND_COOLDOWN_MS - (now - prev.sentAt),
+    });
+  }
+  db.prepare(
+    `INSERT INTO turn_reminders (game_id, target_id, sender_id, sent_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(game_id, target_id)
+       DO UPDATE SET sender_id = excluded.sender_id, sent_at = excluded.sent_at`
+  ).run(id, targetId, req.profile.id, now);
+
+  const target = state.players.find((p) => p.profileId === targetId);
+  const nm = gameDisplayName(id);
+  const url = gameRoomUrl(id);
+  const jump = url ? `\n▶ Play now: ${url}` : '';
+  notifyProfile(targetId, 'turn', `👋 ${req.profile.name} nudged you - it's your turn in ${nm}.${jump}`);
+  notifyWebhook(`👋 ${req.profile.name} nudged ${target ? target.name : 'a player'} in **${nm}**.${jump}`);
+  res.json({
+    ok: true, targetId, targetName: target ? target.name : null,
+    sentAt: now, cooldownMs: REMIND_COOLDOWN_MS,
+  });
 });
 
 // Operation log, optionally only the ops after a given seq (catch-up
