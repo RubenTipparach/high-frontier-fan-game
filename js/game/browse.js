@@ -923,23 +923,34 @@ function renderOnlineAuction(auction) {
   const bonusCards = lot
     ? supportBonusDecks(lot).map((t) => cardById(peekTop(t))).filter(Boolean)
     : [];
-  if (bonusCards.length) {
+  // Always render the "Comes with" section while a lot is shown, so the
+  // bonus reveal is visible even for a lot that happens to have no
+  // support requirements (a note explains the empty case rather than
+  // showing nothing, which reads as broken).
+  if (lot) {
     const sec = document.createElement('div');
     sec.className = 'mp-auction-bonus';
     const label = document.createElement('div');
     label.className = 'mp-auction-bonus-label';
-    label.textContent = `Comes with (${bonusCards.length})`;
+    label.textContent = bonusCards.length ? `Comes with (${bonusCards.length})` : 'Comes with';
     sec.appendChild(label);
-    const cardsRow = document.createElement('div');
-    cardsRow.className = 'mp-auction-bonus-cards';
-    for (const b of bonusCards) {
-      const w = document.createElement('div');
-      w.className = 'mp-auction-bonus-card';
-      try { w.appendChild(renderCard(b, { type: 'patent' })); }
-      catch { w.textContent = b.name || b.id; }
-      cardsRow.appendChild(w);
+    if (bonusCards.length) {
+      const cardsRow = document.createElement('div');
+      cardsRow.className = 'mp-auction-bonus-cards';
+      for (const b of bonusCards) {
+        const w = document.createElement('div');
+        w.className = 'mp-auction-bonus-card';
+        try { w.appendChild(renderCard(b, { type: 'patent' })); }
+        catch { w.textContent = b.name || b.id; }
+        cardsRow.appendChild(w);
+      }
+      sec.appendChild(cardsRow);
+    } else {
+      const none = document.createElement('div');
+      none.className = 'mp-auction-bonus-none muted';
+      none.textContent = 'No bonus cards - this lot has no support requirements.';
+      sec.appendChild(none);
     }
-    sec.appendChild(cardsRow);
     lotHost.appendChild(sec);
   }
 
