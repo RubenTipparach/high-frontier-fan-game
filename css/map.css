@@ -6268,6 +6268,33 @@ body:has(#view-browse:not(.hidden)) #main {
    its seat colour via .player-name. */
 .mp-nudge .player-name { font-weight: 700; }
 .mp-nudge-note { font-weight: 400; font-size: 11px; }
+/* Footer can hold several nudge buttons (auction rounds) - wrap them. */
+.mp-nudge-wrap { display: flex; flex-wrap: wrap; gap: 8px; }
+/* Public per-player bid table inside the auction overlay. */
+.mp-auction-bidlist { display: flex; flex-direction: column; gap: 3px; }
+.mp-auction-bidline {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.mp-auction-bidline.is-top { background: rgba(125, 211, 252, 0.12); }
+.mp-auction-bidline.is-waiting { opacity: 0.62; }
+.mp-auction-bidwho { font-weight: 700; }
+.mp-auction-bidamt { font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Auctioneer's close-the-lot controls: a stacked list of "Sell to @X"
+   / "Keep" buttons under a label. */
+.mp-auction-close { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.mp-auction-close-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--muted, #9aa0c0);
+}
 .mp-auction-side {
   flex: 1 1 240px;
   display: flex;

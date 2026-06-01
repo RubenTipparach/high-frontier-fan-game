@@ -178,12 +178,12 @@ export async function getGameOps(id, { after } = {}, token) {
   return call('GET', `/games/${id}/ops${qs}`, { token });
 }
 
-// Manual turn nudge: ping whoever the game is waiting on. Server picks
-// the target and enforces the per-target cooldown; on success returns
-// { targetId, targetName, sentAt, cooldownMs }, on throttle a 429 with
-// { error:'cooldown', targetId, sentAt, retryAfterMs }.
-export async function remindTurn(id, token) {
-  return call('POST', `/games/${id}/remind`, { token });
+// Manual turn nudge. opts: { targetId } to nudge one player on the
+// clock, { all: true } to nudge everyone on the clock (auction rounds),
+// or {} for the primary actor. Server enforces the per-target cooldown
+// and returns { ok, nudged:[{targetId,targetName,sentAt}], skipped:[...] }.
+export async function remindTurn(id, token, opts = {}) {
+  return call('POST', `/games/${id}/remind`, { body: opts, token });
 }
 
 // Read-only board snapshot at a given op seq (history review).
