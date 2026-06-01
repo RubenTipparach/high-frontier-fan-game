@@ -887,7 +887,13 @@ app.post('/me/notify/test', requireProfile, async (req, res) => {
     uid = (pref && pref.discord_user_id) || '';
   }
   if (!/^\d{5,25}$/.test(uid)) return res.status(400).json({ error: 'bad_discord_id' });
-  const r = await sendDM(uid, `✅ High Frontier test DM - turn notifications are working for @${req.profile.name}.`);
+  // Append a deep link: the specific room when the caller is testing from
+  // inside a game (in-game button passes gameId), else the app home so a
+  // menu test still carries a clickable URL.
+  const gid = req.body && req.body.gameId;
+  const url = (gid && gameRoomUrl(gid)) || PUBLIC_APP_URL;
+  const jump = url ? `\n▶ Play now: ${url}` : '';
+  const r = await sendDM(uid, `✅ High Frontier test DM - notifications are working for @${req.profile.name}.${jump}`);
   if (!r.ok) return res.status(502).json({ error: r.error });
   res.json({ ok: true });
 });

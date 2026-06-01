@@ -1364,7 +1364,7 @@ function renderMpPanel(snapshot) {
     testBtn.disabled = true;
     const prev = testBtn.textContent;
     testBtn.textContent = 'Sending…';
-    const r = await testNotify(undefined, _onlineMe.token);
+    const r = await testNotify(undefined, _onlineMe.token, _onlineGameId);
     testBtn.disabled = false;
     testBtn.textContent = prev;
     if (r && r.ok) {
