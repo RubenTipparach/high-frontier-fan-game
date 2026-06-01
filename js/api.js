@@ -215,6 +215,11 @@ export async function setNotifyPrefs(prefs, token) {
 export async function testNotify(discordUserId, token) {
   return call('POST', '/me/notify/test', { body: { discordUserId }, token });
 }
+// Begin the one-click "Connect Discord" OAuth flow: returns { url } the
+// client opens in a popup. The server-side callback links the account.
+export async function startDiscordOauth(token) {
+  return call('POST', '/me/notify/oauth/start', { token });
+}
 
 // --- Server-wide announcement banner ---
 export async function getAnnouncement() {

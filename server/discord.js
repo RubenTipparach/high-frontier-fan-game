@@ -60,3 +60,184 @@ export async function sendDM(userId, content) {
     return { ok: false, error: String((e && e.message) || e) };
   }
 }
+
+// ----- channel webhooks -----
+//
+// A second, simpler notification path that needs NO bot: a Discord
+// channel webhook URL posts a message to that channel. The operator
+// creates one in Discord (Channel -> Edit -> Integrations -> Webhooks
+// -> New Webhook -> Copy URL) and either sets DISCORD_WEBHOOK_URL or
+// pastes it into the admin dashboard. Unlike the bot DM path this is
+// server-wide (one channel for the whole deployment), not per-player.
+//
+// `getWebhookUrl` resolves the effective URL: the explicit argument
+// wins (so a test can fire "whatever is filled" before saving), then
+// the DB-stored value the caller passes in, then the env default.
+
+const ENV_WEBHOOK = process.env.DISCORD_WEBHOOK_URL || '';
+
+// Discord webhook URLs look like
+// https://discord.com/api/webhooks/<id>/<token> (discordapp.com and
+// the ptb/canary subdomains are also valid hosts).
+const WEBHOOK_RE =
+  /^https:\/\/(?:[\w-]+\.)?discord(?:app)?\.com\/api\/(?:v\d+\/)?webhooks\/\d+\/[\w-]+$/;
+
+export function isWebhookUrl(url) {
+  return WEBHOOK_RE.test(String(url || '').trim());
+}
+
+// True when SOME webhook URL is available (env or the stored value the
+// caller hands in). Lets index.js gate dispatch the way discordEnabled
+// gates DMs.
+export function webhookEnabled(storedUrl) {
+  return isWebhookUrl(storedUrl) || isWebhookUrl(ENV_WEBHOOK);
+}
+
+export function defaultWebhookUrl() {
+  return ENV_WEBHOOK;
+}
+
+// Post a message to a channel webhook. `url` is the effective URL
+// (explicit > stored > env, resolved by the caller). Returns { ok } or
+// { ok:false, error }; never throws.
+export async function sendWebhook(content, url) {
+  const hook = (isWebhookUrl(url) ? url : ENV_WEBHOOK).trim();
+  if (!isWebhookUrl(hook)) return { ok: false, error: 'webhook_disabled' };
+  try {
+    const r = await fetch(hook, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: String(content).slice(0, 1800) }),
+    });
+    if (!r.ok) {
+      const body = await r.text().catch(() => '');
+      return { ok: false, error: `webhook ${r.status}: ${body.slice(0, 200)}` };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
+// ----- OAuth2 "Connect Discord" (one-click linking + auto-join) -----
+//
+// The friction-free path: instead of asking a player to enable Developer
+// Mode, copy their user id, and manually join the bot's server, they
+// click "Connect Discord", approve once, and the callback does both
+// steps automatically:
+//   - `identify`    -> read their user id (no copy-paste)
+//   - `guilds.join` -> the BOT adds them to DISCORD_GUILD_ID via the bot
+//                      token, creating the mutual guild Discord requires
+//                      for a bot DM. The player never has to open or use
+//                      that server; it exists only to satisfy the DM rule.
+//
+// Requires three more env values (all alongside DISCORD_BOT_TOKEN):
+//   DISCORD_CLIENT_ID     - the application id (public)
+//   DISCORD_CLIENT_SECRET - the OAuth2 client secret (secret!)
+//   DISCORD_GUILD_ID      - the bot's server, where players are auto-added
+//
+// Inert (oauthEnabled() === false) unless CLIENT_ID + CLIENT_SECRET +
+// GUILD_ID + bot token are all set, so deployments without OAuth keep
+// working on the manual user-id path.
+
+const CLIENT_ID = process.env.DISCORD_CLIENT_ID || '';
+const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || '';
+const GUILD_ID = process.env.DISCORD_GUILD_ID || '';
+
+export function oauthEnabled() {
+  return !!(CLIENT_ID && CLIENT_SECRET && GUILD_ID && TOKEN);
+}
+
+export function oauthClientId() {
+  return CLIENT_ID;
+}
+
+// Build the Discord authorize URL the browser is redirected to. `state`
+// is an opaque CSRF token the caller persists; `redirectUri` must exactly
+// match one registered in the Developer Portal (Redirects).
+export function buildAuthorizeUrl(state, redirectUri) {
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID,
+    response_type: 'code',
+    scope: 'identify guilds.join',
+    state,
+    redirect_uri: redirectUri,
+    prompt: 'consent',
+  });
+  return `https://discord.com/api/oauth2/authorize?${params.toString()}`;
+}
+
+// Exchange the authorization code for an access token. Returns
+// { ok, accessToken } or { ok:false, error }. Never throws.
+async function exchangeCode(code, redirectUri) {
+  try {
+    const r = await fetch(`${API}/oauth2/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: redirectUri,
+      }).toString(),
+    });
+    if (!r.ok) {
+      const body = await r.text().catch(() => '');
+      return { ok: false, error: `token ${r.status}: ${body.slice(0, 200)}` };
+    }
+    const j = await r.json();
+    return { ok: true, accessToken: j.access_token };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
+// Read the authorized user's id via the access token (identify scope).
+async function fetchUserId(accessToken) {
+  try {
+    const r = await fetch(`${API}/users/@me`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!r.ok) {
+      const body = await r.text().catch(() => '');
+      return { ok: false, error: `me ${r.status}: ${body.slice(0, 200)}` };
+    }
+    const j = await r.json();
+    return { ok: true, userId: String(j.id || '') };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
+// Add the user to the bot's guild (guilds.join scope + bot token).
+// 201 = added, 204 = already a member - both are success.
+async function addToGuild(userId, accessToken) {
+  try {
+    const r = await fetch(`${API}/guilds/${GUILD_ID}/members/${userId}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bot ${TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ access_token: accessToken }),
+    });
+    if (r.status === 201 || r.status === 204) return { ok: true };
+    const body = await r.text().catch(() => '');
+    return { ok: false, error: `join ${r.status}: ${body.slice(0, 200)}` };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
+// Full callback flow: code -> access token -> user id -> guild join.
+// Returns { ok, userId } on success so the route can persist the id and
+// confirm DMs will now reach the player. Never throws.
+export async function completeOauth(code, redirectUri) {
+  if (!oauthEnabled()) return { ok: false, error: 'oauth_disabled' };
+  const tok = await exchangeCode(code, redirectUri);
+  if (!tok.ok) return tok;
+  const me = await fetchUserId(tok.accessToken);
+  if (!me.ok) return me;
+  if (!/^\d{5,25}$/.test(me.userId)) return { ok: false, error: 'bad_discord_id' };
+  const joined = await addToGuild(me.userId, tok.accessToken);
+  if (!joined.ok) return joined;
+  return { ok: true, userId: me.userId };
+}

@@ -185,6 +185,43 @@ jobs:
           echo "--- machines after ---"
           flyctl machine list -a "$APP"
 
+      # Stage optional Discord secrets to Fly BEFORE the deploy so the
+      # released image boots with them. `--stage` defers the restart so
+      # the following `flyctl deploy` applies them in one release (no
+      # extra machine bounce). Each secret is only touched when its
+      # Actions secret is set, so unset ones are a no-op and we never
+      # clobber a value set out-of-band with `fly secrets set`.
+      # DISCORD_BOT_TOKEN drives the per-player DMs; the CLIENT_ID /
+      # CLIENT_SECRET / GUILD_ID trio enables the one-click "Connect
+      # Discord" OAuth flow; DISCORD_WEBHOOK_URL is the channel-webhook
+      # default. All are read by server/discord.js at boot.
+      - name: Sync Discord secrets to Fly.io
+        if: steps.fly_gate.outputs.ready == 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
+          DISCORD_CLIENT_SECRET: ${{ secrets.DISCORD_CLIENT_SECRET }}
+          DISCORD_GUILD_ID: ${{ secrets.DISCORD_GUILD_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          APP: high-frontier-fan-game
+        run: |
+          set -e
+          stage_secret() {
+            local name="$1" val="$2"
+            if [ -n "$val" ]; then
+              echo "Staging $name"
+              flyctl secrets set "$name=$val" --app "$APP" --stage
+            else
+              echo "::notice::$name not set in Actions secrets; leaving Fly value untouched."
+            fi
+          }
+          stage_secret DISCORD_BOT_TOKEN     "${DISCORD_BOT_TOKEN}"
+          stage_secret DISCORD_CLIENT_ID     "${DISCORD_CLIENT_ID}"
+          stage_secret DISCORD_CLIENT_SECRET "${DISCORD_CLIENT_SECRET}"
+          stage_secret DISCORD_GUILD_ID      "${DISCORD_GUILD_ID}"
+          stage_secret DISCORD_WEBHOOK_URL   "${DISCORD_WEBHOOK_URL}"
+
       # Build from the repo root so the image can include both server/
       # and the shared data/ tables the engine imports (see
       # server/Dockerfile). The app + dockerfile are named explicitly

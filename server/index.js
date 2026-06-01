@@ -17,7 +17,11 @@ import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
 import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE } from './game/engine.js';
 import { randomSeed } from './game/rng.js';
-import { sendDM, discordEnabled } from './discord.js';
+import {
+  sendDM, discordEnabled,
+  sendWebhook, webhookEnabled, isWebhookUrl, defaultWebhookUrl,
+  oauthEnabled, oauthClientId, buildAuthorizeUrl, completeOauth,
+} from './discord.js';
 
 const PORT = Number(process.env.PORT) || 8080;
 
@@ -174,6 +178,31 @@ app.post('/admin/announcement', (req, res) => {
     `INSERT INTO server_settings (key, value, updated_at) VALUES ('announcement', ?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
   ).run(message, nowMs());
+  res.json({ ok: true });
+});
+
+// Save the server-wide Discord channel webhook URL (or clear it with a
+// blank value). Validated so a typo doesn't silently disable the feed.
+// Same open-dashboard posture as the other /admin actions.
+app.post('/admin/discord-webhook', (req, res) => {
+  const url = String((req.body && req.body.url) || '').trim();
+  if (url && !isWebhookUrl(url)) return res.status(400).json({ error: 'bad_webhook_url' });
+  db.prepare(
+    `INSERT INTO server_settings (key, value, updated_at) VALUES ('discord_webhook_url', ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  ).run(url, nowMs());
+  res.json({ ok: true });
+});
+
+// Fire a test message to a webhook URL. Uses the URL in the request
+// body if present (so the operator can verify before saving), else the
+// saved / env URL. 503 if nothing is configured, 502 on a Discord error.
+app.post('/admin/discord-webhook/test', async (req, res) => {
+  let url = String((req.body && req.body.url) || '').trim();
+  if (!url) url = storedWebhookUrl();
+  if (!isWebhookUrl(url)) return res.status(503).json({ error: 'webhook_disabled' });
+  const r = await sendWebhook('✅ High Frontier webhook test - notifications will post here.', url);
+  if (!r.ok) return res.status(502).json({ error: r.error });
   res.json({ ok: true });
 });
 
@@ -734,24 +763,55 @@ function notifyProfile(profileId, kind, text) {
   });
 }
 
+// The server-wide Discord channel webhook URL: the admin-saved value
+// (server_settings) wins, else the DISCORD_WEBHOOK_URL env default.
+// Empty string when neither is set.
+function storedWebhookUrl() {
+  const row = db
+    .prepare("SELECT value FROM server_settings WHERE key = 'discord_webhook_url'")
+    .get();
+  const saved = (row && row.value) || '';
+  return isWebhookUrl(saved) ? saved : defaultWebhookUrl();
+}
+
+// Post a game event to the channel webhook IF one is configured.
+// Fire-and-forget, like notifyProfile. Server-wide (one channel for the
+// whole deployment), so it's not gated on per-player opt-in.
+function notifyWebhook(text) {
+  const url = storedWebhookUrl();
+  if (!webhookEnabled(url)) return;
+  sendWebhook(text, url).then((r) => {
+    if (!r.ok && r.error !== 'webhook_disabled') {
+      console.warn('[notify] webhook failed -', r.error);
+    }
+  });
+}
+
 // After an op commits: DM the newly-active player on END_TURN, and the
 // other players when an auction opens. (One event => one DM each, so the
-// natural cadence is the throttle.)
+// natural cadence is the throttle.) A configured channel webhook also
+// gets a one-line post per event so a play group can watch a channel
+// instead of relying on per-player DMs.
 function dispatchTurnNotifications(gameId, kind, state) {
   try {
-    if (!discordEnabled() || !state || !Array.isArray(state.players)) return;
+    if (!state || !Array.isArray(state.players)) return;
+    const dmOn = discordEnabled();
     if (kind === 'END_TURN') {
       const active = state.players[state.activeIndex];
       if (active) {
-        notifyProfile(active.profileId, 'turn', `🛸 It's your turn in ${gameDisplayName(gameId)}.`);
+        if (dmOn) notifyProfile(active.profileId, 'turn', `🛸 It's your turn in ${gameDisplayName(gameId)}.`);
+        notifyWebhook(`🛸 ${active.name || 'A player'}'s turn in **${gameDisplayName(gameId)}**.`);
       }
     } else if (kind === 'AUCTION_START') {
       const auctioneer = state.auction && state.auction.auctioneerId;
       const name = gameDisplayName(gameId);
-      for (const p of state.players) {
-        if (p.profileId === auctioneer) continue;
-        notifyProfile(p.profileId, 'auction', `🔨 An auction just opened in ${name} - place your bid.`);
+      if (dmOn) {
+        for (const p of state.players) {
+          if (p.profileId === auctioneer) continue;
+          notifyProfile(p.profileId, 'auction', `🔨 An auction just opened in ${name} - place your bid.`);
+        }
       }
+      notifyWebhook(`🔨 An auction just opened in **${name}** - bidding is live.`);
     }
   } catch (e) {
     console.warn('[notify] dispatch error', e && e.message);
@@ -766,6 +826,9 @@ app.get('/me/notify', requireProfile, (req, res) => {
     .get(req.profile.id);
   res.json({
     discordEnabled: discordEnabled(),
+    // When true, the client shows the one-click "Connect Discord" button
+    // (OAuth identify + guilds.join) instead of the manual user-id field.
+    oauthEnabled: oauthEnabled(),
     discordUserId: (pref && pref.discord_user_id) || '',
     notifyTurn: pref ? !!pref.notify_turn : true,
     notifyAuction: pref ? !!pref.notify_auction : true,
@@ -806,6 +869,92 @@ app.post('/me/notify/test', requireProfile, async (req, res) => {
   const r = await sendDM(uid, `✅ High Frontier test DM - turn notifications are working for @${req.profile.name}.`);
   if (!r.ok) return res.status(502).json({ error: r.error });
   res.json({ ok: true });
+});
+
+// ----- OAuth2 "Connect Discord" flow -----
+//
+// One-click linking: the client (Bearer-authed) asks for an authorize
+// URL, opens it in a popup, the user approves on Discord, and Discord
+// redirects back to /auth/discord/callback. The callback reads the
+// user's id (identify) AND adds them to the bot's guild (guilds.join)
+// so the bot can DM them - no copy-paste, no manual server join.
+//
+// `state` is a one-time CSRF token mapped to the requesting profile,
+// held in memory with a short TTL (the whole flow takes seconds; a
+// process restart mid-flow just means the user clicks again).
+
+const _oauthStates = new Map(); // state -> { profileId, exp }
+const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+
+function pruneOauthStates() {
+  const now = Date.now();
+  for (const [s, v] of _oauthStates) if (v.exp <= now) _oauthStates.delete(s);
+}
+
+// The redirect URI must be byte-identical in the authorize request, the
+// token exchange, AND the Developer Portal's Redirects list. Derive it
+// from an explicit env when set (most robust behind proxies), else from
+// the request host (trust proxy is on, so x-forwarded-proto is honored).
+function oauthRedirectUri(req) {
+  if (process.env.DISCORD_REDIRECT_URI) return process.env.DISCORD_REDIRECT_URI;
+  return `${req.protocol}://${req.get('host')}/auth/discord/callback`;
+}
+
+// Begin linking: returns the Discord authorize URL for the client to open.
+app.post('/me/notify/oauth/start', requireProfile, (req, res) => {
+  if (!oauthEnabled()) return res.status(503).json({ error: 'oauth_disabled' });
+  pruneOauthStates();
+  const state = generateShortCode(16);
+  _oauthStates.set(state, { profileId: req.profile.id, exp: Date.now() + OAUTH_STATE_TTL_MS });
+  res.json({ ok: true, url: buildAuthorizeUrl(state, oauthRedirectUri(req)) });
+});
+
+// Discord redirects here after the user approves. Validates state,
+// completes the exchange + guild join, saves the discord_user_id to the
+// initiating profile, and renders a tiny self-closing success page.
+app.get('/auth/discord/callback', async (req, res) => {
+  const sendPage = (title, body, ok) => {
+    res.set('content-type', 'text/html; charset=utf-8');
+    res.send(`<!doctype html><html><head><meta charset="utf-8">
+<title>${esc(title)}</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font:15px ui-sans-serif,system-ui,sans-serif;background:#07060f;color:#e6e9ff;
+display:flex;min-height:100vh;margin:0;align-items:center;justify-content:center;text-align:center;padding:24px}
+.box{max-width:420px}h1{font-size:18px;color:${ok ? '#4ade80' : '#f87171'};margin:0 0 10px}
+p{color:#8b90b8;line-height:1.5}</style></head><body><div class="box">
+<h1>${esc(title)}</h1><p>${body}</p></div>
+<script>try{setTimeout(function(){window.close();},2500);}catch(e){}</script>
+</body></html>`);
+  };
+  pruneOauthStates();
+  const err = String(req.query.error || '');
+  if (err) return sendPage('Discord connection cancelled', 'You can close this window and try again.', false);
+  const state = String(req.query.state || '');
+  const code = String(req.query.code || '');
+  const entry = state && _oauthStates.get(state);
+  if (!entry) return sendPage('Link expired', 'That link expired or was already used. Reopen the menu and click Connect again.', false);
+  _oauthStates.delete(state);
+  if (!code) return sendPage('Missing code', 'Discord did not return an authorization code. Please try again.', false);
+  const profile = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(entry.profileId);
+  if (!profile) return sendPage('Profile not found', 'Could not match this link to a profile. Please try again.', false);
+
+  const r = await completeOauth(code, oauthRedirectUri(req));
+  if (!r.ok) {
+    console.warn('[notify] oauth callback failed for profile', entry.profileId, '-', r.error);
+    return sendPage('Connection failed', `Discord linking failed (${esc(r.error)}). You can close this and try again.`, false);
+  }
+  // Persist the id + enable both event kinds by default (preserve any
+  // existing notify_turn / notify_auction choices the player already set).
+  db.prepare(
+    `INSERT INTO notify_prefs (profile_id, discord_user_id, notify_turn, notify_auction, updated_at)
+     VALUES (?, ?, 1, 1, ?)
+     ON CONFLICT(profile_id) DO UPDATE SET
+       discord_user_id = excluded.discord_user_id,
+       updated_at      = excluded.updated_at`
+  ).run(entry.profileId, r.userId, nowMs());
+  // Fire a confirmation DM now that the guild membership exists.
+  sendDM(r.userId, `✅ Discord connected for @${profile.name}. You'll get a DM when it's your turn.`)
+    .then((d) => { if (!d.ok) console.warn('[notify] confirm DM failed -', d.error); });
+  sendPage('Discord connected', 'You can close this window and return to the game. A confirmation DM is on its way.', true);
 });
 
 // The state snapshot a given op produced (git-style "tree at commit").
@@ -1569,7 +1718,11 @@ app.get('/admin', (_req, res) => {
       <td>${esc(r.join_policy)}</td>
       <td class="num">${r.members} / ${r.max_players}</td>
       <td>${esc(r.created)}</td>
-      <td><button class="btn-del-lobby danger" data-lid="${r.id}" data-lname="${esc(r.name)}">Cancel</button></td>
+      <td>
+        ${r.status === 'cancelled'
+          ? `<button class="btn-restore-lobby" data-lid="${r.id}" data-lname="${esc(r.name)}">Restore</button>`
+          : `<button class="btn-del-lobby danger" data-lid="${r.id}" data-lname="${esc(r.name)}">Cancel</button>`}
+      </td>
     </tr>
   `).join('') || '<tr><td colspan=8><em>No lobbies yet.</em></td></tr>';
 
@@ -1627,6 +1780,7 @@ app.get('/admin', (_req, res) => {
   .pill-waiting{background:#1e293b;color:#7dd3fc}
   .pill-started{background:#14532d;color:#86efac}
   .pill-finished{background:#451a03;color:#fdba74}
+  .pill-cancelled{background:#450a0a;color:#fda4af}
   .pill-pending{background:#1e293b;color:#fbbf24}
   .pill-accepted{background:#14532d;color:#86efac}
   .pill-declined{background:#450a0a;color:#fda4af}
@@ -1680,6 +1834,54 @@ app.get('/admin', (_req, res) => {
       fetch('/admin/announcement', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: msg }) })
         .then(function (r) { document.getElementById('announce-status').textContent = r.ok ? 'Saved.' : 'Failed.'; })
         .catch(function () { document.getElementById('announce-status').textContent = 'Failed.'; });
+    }
+  </script>
+
+  <h2>Discord webhook</h2>
+  <p>Optional. A Discord channel <strong>webhook URL</strong> (Channel -&gt;
+  Edit -&gt; Integrations -&gt; Webhooks -&gt; New Webhook -&gt; Copy URL)
+  posts turn / auction events to that channel - no bot required. Server-wide
+  (one channel for the whole deployment). Blank to disable.${
+    defaultWebhookUrl()
+      ? ' A <code>DISCORD_WEBHOOK_URL</code> env default is set; a value saved here overrides it.'
+      : ''
+  }</p>
+  <form onsubmit="saveWebhook(event)">
+    <input id="webhook-url" type="text" placeholder="https://discord.com/api/webhooks/…"
+      style="width:100%;box-sizing:border-box" value="${esc(
+        ((db.prepare("SELECT value FROM server_settings WHERE key='discord_webhook_url'").get() || {}).value) || ''
+      )}">
+    <div style="margin-top:6px">
+      <button type="submit">Save webhook</button>
+      <button type="button" onclick="testWebhook()">Send test message</button>
+      <span id="webhook-status"></span>
+    </div>
+  </form>
+  <script>
+    function saveWebhook(e) {
+      e.preventDefault();
+      var url = document.getElementById('webhook-url').value.trim();
+      document.getElementById('webhook-status').textContent = 'Saving…';
+      fetch('/admin/discord-webhook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url }) })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+        .then(function (res) {
+          document.getElementById('webhook-status').textContent =
+            res.ok ? 'Saved.' : 'Failed: ' + (res.body && res.body.error || 'unknown');
+        })
+        .catch(function () { document.getElementById('webhook-status').textContent = 'Failed.'; });
+    }
+    // Fire whatever is currently in the box (saved or not), so the
+    // operator can verify a URL before committing it.
+    function testWebhook() {
+      var url = document.getElementById('webhook-url').value.trim();
+      document.getElementById('webhook-status').textContent = 'Sending…';
+      fetch('/admin/discord-webhook/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url }) })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+        .then(function (res) {
+          document.getElementById('webhook-status').textContent =
+            res.ok ? 'Test message sent.' : 'Failed: ' + (res.body && res.body.error || 'unknown');
+        })
+        .catch(function () { document.getElementById('webhook-status').textContent = 'Failed.'; });
     }
   </script>
 
@@ -1803,6 +2005,35 @@ document.addEventListener('click', function (ev) {
       alert('Network error.');
     });
 });
+
+// "Restore" - un-cancels a lobby + its game so an accidentally-
+// cancelled room reappears in the players' lists. Reloads the
+// dashboard on success so the status pill + action button flip.
+document.addEventListener('click', function (ev) {
+  var btn = ev.target.closest('.btn-restore-lobby');
+  if (!btn) return;
+  var lid = btn.getAttribute('data-lid');
+  var lname = btn.getAttribute('data-lname');
+  if (!confirm('Restore table "' + lname + '"?\\n\\nThe lobby + its game go back to active so the players regain access.')) return;
+  btn.disabled = true;
+  btn.textContent = 'Restoring...';
+  fetch('/admin/lobbies/' + lid + '/restore', { method: 'POST' })
+    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+    .then(function (res) {
+      if (!res.ok) {
+        btn.disabled = false;
+        btn.textContent = 'Restore';
+        alert('Failed: ' + (res.body && res.body.error || 'unknown'));
+        return;
+      }
+      location.reload();
+    })
+    .catch(function () {
+      btn.disabled = false;
+      btn.textContent = 'Restore';
+      alert('Network error.');
+    });
+});
 </script>
 </body></html>`);
 });
@@ -1852,6 +2083,36 @@ app.post('/admin/lobbies/:id/delete', (req, res) => {
     ).run(now, id);
   })();
   broadcast(`lobby:${id}`, { type: 'lobby_disbanded', lobbyId: id });
+  res.json({ ok: true });
+});
+
+// Restore an accidentally-cancelled lobby. Un-cancels the lobby + its
+// game so the room reappears in the player-facing lists (all of which
+// filter on status). A cancelled game row means the lobby had already
+// started, so both are revived (lobby -> started, game -> active, and
+// the finished_at stamp the cancel set is cleared); no game row means
+// it was cancelled while still waiting, so the lobby goes back to
+// waiting. Pending invites are NOT auto-restored (they were resolved
+// at cancel time); the host can re-invite.
+app.post('/admin/lobbies/:id/restore', (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  const row = db.prepare('SELECT id, status FROM lobbies WHERE id = ?').get(id);
+  if (!row) return res.status(404).json({ error: 'not_found' });
+  if (row.status !== 'cancelled') return res.status(409).json({ error: 'not_cancelled' });
+  db.transaction(() => {
+    const game = db.prepare(
+      "SELECT id FROM games WHERE lobby_id = ? AND status = 'cancelled'"
+    ).get(id);
+    if (game) {
+      db.prepare(
+        "UPDATE games SET status = 'active', finished_at = NULL WHERE lobby_id = ? AND status = 'cancelled'"
+      ).run(id);
+      db.prepare("UPDATE lobbies SET status = 'started' WHERE id = ?").run(id);
+    } else {
+      db.prepare("UPDATE lobbies SET status = 'waiting' WHERE id = ?").run(id);
+    }
+  })();
   res.json({ ok: true });
 });
 
