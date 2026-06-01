@@ -102,9 +102,15 @@ function pointOnRing(slot, radius, offset = 0) {
 // to slot `to` (inclusive), at the given inner + outer radii.
 function seasonArc(from, to, innerR, outerR) {
   // Add 0.5 to span the slot's full wedge (centered on the slot index).
+  // The wedge is drawn clockwise from `from` to `to`; the angle math
+  // wraps naturally, so a season that crosses slot 0 (from > to, e.g.
+  // Blue = 10..1) renders as the top wedge. `span` is the wedge width
+  // in slots, computed modulo SLOTS so the large-arc flag is correct
+  // for wrapping wedges too.
   const a0 = slotAngle(from - 0.5);
   const a1 = slotAngle(to + 0.5);
-  const largeArc = (to - from + 1) > (SLOTS / 2) ? 1 : 0;
+  const span = ((to - from + SLOTS) % SLOTS) + 1;
+  const largeArc = span > (SLOTS / 2) ? 1 : 0;
   const outerStart = { x: WHEEL_CX + Math.cos(a0) * outerR, y: WHEEL_CY + Math.sin(a0) * outerR };
   const outerEnd   = { x: WHEEL_CX + Math.cos(a1) * outerR, y: WHEEL_CY + Math.sin(a1) * outerR };
   const innerStart = { x: WHEEL_CX + Math.cos(a1) * innerR, y: WHEEL_CY + Math.sin(a1) * innerR };

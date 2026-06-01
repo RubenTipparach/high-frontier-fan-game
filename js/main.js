@@ -1,10 +1,11 @@
 // Bootstrap and top-level UI coordination.
 
 import { probeServer, apiAvailable, lookupInviteLink, claimInviteLink, getLobbyByCode,
-  getNotifyPrefs, setNotifyPrefs, testNotify, startDiscordOauth } from './api.js';
+  getNotifyPrefs, setNotifyPrefs, testNotify, startDiscordOauth, whoami,
+  discordSignInEnabled, discordLoginStartUrl, discordExchange, discordSignup } from './api.js';
 import {
   restoreProfile, activeProfile, signIn, signOut, mintDeviceCode,
-  onProfileChange,
+  adoptServerSession, markDiscordLinked, onProfileChange,
 } from './auth.js';
 import { ws } from './ws.js';
 import {
@@ -149,6 +150,22 @@ function reflectProfile(profile) {
     pill.classList.add('hidden');
     signin.classList.remove('hidden');
   }
+}
+
+// Show the account-menu "Connect to Discord" button only for a signed-in
+// user whose account ISN'T linked yet, on a deployment that has Discord
+// OAuth. Fetches fresh status from the server so it reflects links made
+// on other devices. Hidden in every other case.
+async function refreshDiscordLinkButton() {
+  const btn = document.getElementById('btn-connect-discord-acct');
+  if (!btn) return;
+  const me = activeProfile();
+  if (!me || !apiAvailable()) { btn.hidden = true; return; }
+  // Fast path: a Discord-minted / freshly-linked session knows it's linked.
+  if (me.discordLinked) { btn.hidden = true; return; }
+  const r = await whoami(me.token);
+  const show = r.ok && r.data && r.data.oauthEnabled && !r.data.discordLinked;
+  btn.hidden = !show;
 }
 
 // Browse view: read-only data inspector. Always reachable; doesn't
@@ -427,6 +444,40 @@ function initAccountMenu() {
   document.getElementById('btn-account').addEventListener('click', (ev) => {
     ev.stopPropagation();
     menu.classList.toggle('hidden');
+    // Re-check link status each time the menu opens so the Connect
+    // button reflects the latest state (e.g. linked from another device).
+    if (!menu.classList.contains('hidden')) refreshDiscordLinkButton();
+  });
+  // "Connect to Discord": migrate this username/token account to Discord
+  // by linking a Discord ID (reuses the same OAuth popup as notifications;
+  // the callback records the auth identity). Polls until linked, then the
+  // button hides for good.
+  document.getElementById('btn-connect-discord-acct')?.addEventListener('click', async () => {
+    const me = activeProfile();
+    if (!me) return;
+    const btn = document.getElementById('btn-connect-discord-acct');
+    btn.disabled = true;
+    const r = await startDiscordOauth(me.token);
+    btn.disabled = false;
+    if (!r.ok || !r.data || !r.data.url) {
+      toast('Could not start Discord linking. Try again.', 'error');
+      return;
+    }
+    const popup = window.open(r.data.url, 'hf-discord-link', 'width=520,height=720');
+    if (!popup) { toast('Allow popups, then click Connect again.', 'error'); return; }
+    toast('Approve in the Discord window…');
+    const started = Date.now();
+    const tick = setInterval(async () => {
+      if (Date.now() - started > 120000) { clearInterval(tick); return; }
+      const w = await whoami(me.token);
+      if (w.ok && w.data && w.data.discordLinked) {
+        clearInterval(tick);
+        markDiscordLinked();            // updates state + hides via refresh below
+        refreshDiscordLinkButton();
+        toast('Discord connected to your account.', 'success');
+        try { popup.close(); } catch { /* cross-origin close may throw */ }
+      }
+    }, 2000);
   });
   document.addEventListener('click', (ev) => {
     if (!menu.classList.contains('hidden')
@@ -483,6 +534,106 @@ function initSigninForm() {
     document.getElementById('signin-code').value = '';
     await afterSignIn();
   });
+
+  // Layout: when Discord sign-in is available, it's the primary action
+  // and the name/device-code form collapses under the "Other" disclosure.
+  // When it's NOT available, expand that form and hide the "Other" summary
+  // so it's simply the sign-in form.
+  const discordWrap = document.getElementById('signin-discord-wrap');
+  const discordBtn = document.getElementById('btn-signin-discord');
+  const otherWrap = document.getElementById('signin-other');
+  if (discordBtn) {
+    discordBtn.addEventListener('click', () => {
+      const url = discordLoginStartUrl();
+      if (url) window.location.href = url;
+    });
+  }
+  const applyDiscordLayout = (enabled) => {
+    if (discordWrap) discordWrap.hidden = !enabled;
+    if (otherWrap) {
+      otherWrap.open = !enabled;                       // expanded when it's the only option
+      otherWrap.classList.toggle('solo', !enabled);    // hides the summary (see CSS)
+    }
+  };
+  if (apiAvailable()) {
+    discordSignInEnabled().then((r) => {
+      applyDiscordLayout(!!(r && r.ok && r.data && r.data.enabled));
+    });
+  } else {
+    applyDiscordLayout(false);
+  }
+
+  // First-time Discord sign-up: the name-prompt modal's confirm handler.
+  const nameForm = document.getElementById('form-discord-name');
+  if (nameForm) {
+    nameForm.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const err = document.getElementById('discord-name-error');
+      err.textContent = '';
+      const name = document.getElementById('discord-name-input').value.trim();
+      const btn = ev.target.querySelector('button[type=submit]');
+      if (!_pendingDiscordSignupCode) { err.textContent = 'This sign-in expired. Try again.'; return; }
+      btn.disabled = true;
+      const r = await discordSignup(_pendingDiscordSignupCode, name);
+      btn.disabled = false;
+      if (!r.ok) { err.textContent = humanizeError(r.error); return; }
+      _pendingDiscordSignupCode = null;
+      document.getElementById('discord-name-modal').classList.add('hidden');
+      adoptServerSession({ token: r.data.token, id: r.data.id, name: r.data.name });
+      await afterSignIn();
+    });
+  }
+}
+
+// Holds the signup handoff code while the name-prompt modal is open.
+let _pendingDiscordSignupCode = null;
+
+// On boot, handle a `?hf_discord=...` redirect from the Discord sign-in
+// flow. Returns true if it signed the user in (so boot can skip the
+// normal signed-out landing). 'login' -> exchange for a token; 'signup'
+// -> show the name prompt; 'error' -> toast and fall through.
+async function maybeHandleDiscordAuth() {
+  const url = new URL(window.location.href);
+  const kind = url.searchParams.get('hf_discord');
+  if (!kind) return false;
+  const code = url.searchParams.get('code') || '';
+  const reason = url.searchParams.get('reason') || '';
+  // Scrub the params so a refresh / share doesn't replay them.
+  url.searchParams.delete('hf_discord');
+  url.searchParams.delete('code');
+  url.searchParams.delete('reason');
+  window.history.replaceState({}, '', url.toString());
+
+  if (kind === 'error') {
+    const msg = ({
+      disabled: 'Discord sign-in is not enabled on this server.',
+      cancelled: 'Discord sign-in was cancelled.',
+      expired: 'That sign-in link expired. Please try again.',
+    })[reason] || 'Discord sign-in did not complete. Please try again.';
+    toast(msg, 'error');
+    return false;
+  }
+  if (kind === 'login' || kind === 'signup') {
+    const r = await discordExchange(code);
+    if (!r.ok || !r.data) {
+      toast('Discord sign-in link expired. Please try again.', 'error');
+      return false;
+    }
+    if (r.data.status === 'signedin') {
+      adoptServerSession({ token: r.data.token, id: r.data.id, name: r.data.name });
+      await afterSignIn();
+      return true;
+    }
+    if (r.data.status === 'needName') {
+      _pendingDiscordSignupCode = code;
+      showView('view-signin');
+      const input = document.getElementById('discord-name-input');
+      if (input) input.value = r.data.suggestedName || '';
+      document.getElementById('discord-name-modal').classList.remove('hidden');
+      return true; // handled (the modal drives the rest)
+    }
+  }
+  return false;
 }
 
 async function afterSignIn() {
@@ -495,6 +646,7 @@ async function afterSignIn() {
   showView('view-lobby-list');
   refreshLobbyList();
   refreshInvitesList();
+  refreshDiscordLinkButton();
   // If the user landed on a `?invite=<code>` URL, claim it now.
   await maybeClaimInviteFromUrl();
 }
@@ -660,6 +812,16 @@ async function boot() {
   onProfileChange(reflectProfile);
 
   await updateServerStatus();
+
+  // A `?hf_discord=...` redirect from the Discord sign-in flow takes
+  // precedence over the normal landing: it either signs the user in
+  // (exchange the handoff for a token) or shows the name prompt. Either
+  // way the landing below is skipped; the 30s status poll is still set.
+  if (await maybeHandleDiscordAuth()) {
+    setInterval(updateServerStatus, 30_000);
+    return;
+  }
+
   const me = await restoreProfile();
   reflectProfile(me);
 
@@ -670,6 +832,7 @@ async function boot() {
     // Keep the multiplayer view populated for when the player switches.
     refreshLobbyList();
     refreshInvitesList();
+    refreshDiscordLinkButton();
     // Landing priority: a `?invite=` URL wins; otherwise always land on
     // the lobby. Auto-resume is gone - a player can have several games
     // going at once, so jumping straight into one is presumptuous. Each

@@ -366,6 +366,17 @@ label.checkbox input { accent-color: var(--accent-2); }
 .lobby-list .meta {
   font-size: 12px; color: var(--ink-dim);
 }
+.lobby-list .turn-meta {
+  display: block;
+  margin-top: 3px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.lobby-list .turn-meta[hidden] { display: none; }
+.lobby-list li.is-your-turn {
+  border-left: 3px solid var(--accent, #fbbf24);
+  padding-left: 9px;
+}
 .lobby-list .name {
   display: block; font-weight: 500; color: var(--ink);
 }
@@ -904,3 +915,50 @@ body.in-lobby .main-menu-fab { display: none; }
   padding-top: 12px;
   border-top: 1px solid var(--border);
 }
+
+/* ===== Sign in with Discord ===== */
+.signin-discord { margin-top: 18px; }
+.signin-or {
+  display: flex; align-items: center; gap: 10px;
+  color: var(--ink-dim); font-size: 12px; text-transform: uppercase;
+  letter-spacing: 1px; margin: 4px 0 12px;
+}
+.signin-or::before, .signin-or::after {
+  content: ""; flex: 1; height: 1px; background: var(--border);
+}
+.discord-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  width: 100%; justify-content: center;
+  background: #5865f2; color: #fff; border: none;
+  padding: 10px 14px; border-radius: 6px; font: inherit; font-weight: 600;
+  cursor: pointer;
+}
+.discord-btn:hover { background: #4752c4; }
+.signin-discord-help { margin-top: 8px; font-size: 12px; }
+
+/* Generic centered modal overlay (Discord name prompt). Hidden via the
+   shared .hidden rule (display:none !important). */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(7, 6, 15, 0.82); padding: 24px;
+}
+.modal-box { margin: 0; max-width: 460px; width: 100%; }
+
+/* "Other sign-in options" disclosure under the primary Discord button. */
+.signin-other { margin-top: 16px; }
+.signin-other > summary {
+  cursor: pointer; color: var(--accent); font-size: 13px;
+  list-style: none; padding: 6px 0;
+}
+.signin-other > summary::-webkit-details-marker { display: none; }
+.signin-other > summary::before { content: "\25B8  "; }   /* ▸ */
+.signin-other[open] > summary::before { content: "\25BE  "; } /* ▾ */
+/* When Discord sign-in is unavailable, this is the only form: drop the
+   "Other" summary and any top spacing so it reads as the plain sign-in. */
+.signin-other.solo { margin-top: 0; }
+.signin-other.solo > summary { display: none; }
+
+/* Breathing room above the notify Save / Test DM buttons so they don't
+   crowd the event checkboxes. */
+#notify-section .notify-actions { margin-top: 14px; }

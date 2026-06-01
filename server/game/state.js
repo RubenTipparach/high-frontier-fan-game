@@ -8,14 +8,18 @@
 //   shared:
 //     seed, rng.cursor                  deterministic RNG (rng.js)
 //     turn (0..11), round (1..)         Sunspot Cube clock (turn-clock.js)
+//     maxRounds                         game length: finish after N rounds
 //     lastEvent                         { turn, round, dieRoll } | null
 //     decks                             { thruster:[id...], ... }  (decks.js)
 //     discs                             { [siteId]: {outcome, ownerId, ts} } (discs.js)
 //     factories                         { [siteId]: {ownerId, spectralType} } (factories.js)
 //     colonies                          { [siteId]: {ownerId} }
 //     auction                           open competitive auction | null
-//     players[]                         ordered by seat
+//     players[]                         turn order (randomised at start)
 //     activeIndex                       whose turn it is (async turn passing)
+//     firstPlayerIndex                  seat that leads the current round
+//     firstPlayerRotation               round-end first-player handoff on?
+//     pendingFirstPlayer                { chooserId } while a handoff is open
 //     status                            'active' | 'finished'
 //
 //   per player (mirrors rocket.js / hand.js / stacks.js / glory.js):
@@ -41,13 +45,21 @@ import { makeRng, shuffle } from './rng.js';
 export const SLOTS = 12;
 export const NEW_ROUND_SLOT = 0;
 export const EVENT_SLOTS = [1, 3, 5, 7, 9, 11];
+// Season wedges mirror js/game/turn-clock.js: the new-round marker
+// (slot 0) sits in the middle of Season Blue, so Blue WRAPS slot 0
+// (slots 10, 11, 0, 1). A `from > to` entry wraps past slot 0.
 export const SEASONS = [
-  { name: 'blue', from: 0, to: 3 },
-  { name: 'yellow', from: 4, to: 7 },
-  { name: 'red', from: 8, to: 11 },
+  { name: 'blue', from: 10, to: 1 },
+  { name: 'yellow', from: 2, to: 5 },
+  { name: 'red', from: 6, to: 9 },
 ];
+function slotInSeason(slot, s) {
+  return s.from <= s.to
+    ? (slot >= s.from && slot <= s.to)
+    : (slot >= s.from || slot <= s.to);
+}
 export function seasonForSlot(slot) {
-  return (SEASONS.find((s) => slot >= s.from && slot <= s.to) || SEASONS[0]).name;
+  return (SEASONS.find((s) => slotInSeason(slot, s)) || SEASONS[0]).name;
 }
 
 // --- Per-turn budgets (mirror turn-clock placeholders) ---
@@ -151,19 +163,26 @@ function freshPlayer({ profileId, name, seat, color }) {
 }
 
 // players: [{ profileId, name, seat }] (seat 1-based, any order).
-export function createInitialState({ players, seed }) {
-  const ordered = [...players].sort((a, b) => (a.seat || 0) - (b.seat || 0));
+// maxRounds: game length (rounds = Sunspot Cube cycles); default 5.
+export function createInitialState({ players, seed, maxRounds = 5 }) {
+  // Sort by the incoming (lobby) seat first so the shuffle has a
+  // deterministic base regardless of how the caller ordered the array,
+  // then randomise the turn order with the seeded RNG. Turn order IS
+  // the array order, so we renumber `seat` to the shuffled position
+  // (seat 1 = leads first) and assign colours by that same index -
+  // which keeps the "seat = colour = turn order" reading the turn
+  // banner + map markers rely on, just fresh every game. Reproducible
+  // from (seed) for replay.
+  const base = [...players].sort((a, b) => (a.seat || 0) - (b.seat || 0));
   const gen = makeRng(seed, 0);
+  const ordered = shuffle(gen, base);
   // Per-game random colour palette: same six PLAYER_COLORS, shuffled
   // by the seeded RNG so each session deals a different palette while
-  // still being reproducible from (seed). Colours are then assigned
-  // in seat order so seat 1 = palette[0], seat 2 = palette[1], etc -
-  // which keeps the "colour = turn order" reading the turn banner +
-  // map markers rely on, while making the specific seat -> colour
-  // mapping fresh every game (so no one is always "the yellow
-  // player").
+  // still being reproducible from (seed). Colours are assigned in the
+  // shuffled turn order so no one is always "the yellow player".
   const palette = shuffle(gen, PLAYER_COLORS);
   const decks = buildShuffledDecks(gen);
+  const rounds = [5, 6, 7].includes(maxRounds) ? maxRounds : 5;
   return {
     version: 2,
     seed,
@@ -185,8 +204,23 @@ export function createInitialState({ players, seed }) {
     economy: 'market',
     turn: 0,
     round: 1,
+    // Game length. The game finishes once `round` passes maxRounds
+    // (rounds are full Sunspot Cube cycles - see engine advanceClock).
+    maxRounds: rounds,
     lastEvent: null,
     activeIndex: 0,
+    // First-player token. Each round runs one lap of the table starting
+    // from firstPlayerIndex; when the round (Sunspot cycle) closes, the
+    // player who led it picks the next first player (engine END_TURN +
+    // SET_FIRST_PLAYER). firstPlayerRotation gates that handoff so it
+    // applies to games created from this version on - older saved games
+    // have neither field and keep the legacy "seat 0 always leads,
+    // rounds auto-advance" flow untouched. pendingFirstPlayer holds the
+    // open handoff ({ chooserId }) and freezes every other op until the
+    // pick lands, the way an open auction does.
+    firstPlayerIndex: 0,
+    firstPlayerRotation: true,
+    pendingFirstPlayer: null,
     // Per-turn functional-op stacks for undo/redo. Only the active
     // player has an in-progress turn, so these live at the top level
     // and reset every time a turn passes (see engine END_TURN). They
@@ -203,7 +237,7 @@ export function createInitialState({ players, seed }) {
       freshPlayer({
         profileId: p.profileId,
         name: p.name,
-        seat: p.seat || i + 1,
+        seat: i + 1,
         color: palette[i % palette.length],
       })
     ),

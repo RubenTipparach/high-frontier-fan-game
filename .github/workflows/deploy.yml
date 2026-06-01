@@ -194,7 +194,9 @@ jobs:
       # DISCORD_BOT_TOKEN drives the per-player DMs; the CLIENT_ID /
       # CLIENT_SECRET / GUILD_ID trio enables the one-click "Connect
       # Discord" OAuth flow; DISCORD_WEBHOOK_URL is the channel-webhook
-      # default. All are read by server/discord.js at boot.
+      # default. ADMIN_DISCORD_ID is the Discord user id allowlisted for
+      # the /admin panel (server/index.js seeds it into the DB on boot).
+      # All are read at boot.
       - name: Sync Discord secrets to Fly.io
         if: steps.fly_gate.outputs.ready == 'true'
         env:
@@ -204,6 +206,7 @@ jobs:
           DISCORD_CLIENT_SECRET: ${{ secrets.DISCORD_CLIENT_SECRET }}
           DISCORD_GUILD_ID: ${{ secrets.DISCORD_GUILD_ID }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          ADMIN_DISCORD_ID: ${{ secrets.ADMIN_DISCORD_ID }}
           APP: high-frontier-fan-game
         run: |
           set -e
@@ -221,6 +224,7 @@ jobs:
           stage_secret DISCORD_CLIENT_SECRET "${DISCORD_CLIENT_SECRET}"
           stage_secret DISCORD_GUILD_ID      "${DISCORD_GUILD_ID}"
           stage_secret DISCORD_WEBHOOK_URL   "${DISCORD_WEBHOOK_URL}"
+          stage_secret ADMIN_DISCORD_ID      "${ADMIN_DISCORD_ID}"
 
       # Build from the repo root so the image can include both server/
       # and the shared data/ tables the engine imports (see

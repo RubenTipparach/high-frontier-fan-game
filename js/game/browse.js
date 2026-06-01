@@ -125,7 +125,7 @@ import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
 } from './net-bridge.js';
 import { abandonSandboxGame, currentSandboxId } from './sandbox-games.js';
-import { getGame, getGameOps, submitGameOp, fetchChat, sendChat } from '../api.js';
+import { getGame, getGameOps, submitGameOp, fetchChat, sendChat, testNotify } from '../api.js';
 import { ws } from '../ws.js';
 
 // Only one map mode now (planner / "classic"); the old
@@ -544,12 +544,17 @@ function applySnapshot(snapshot, seq) {
   }
   // Competitive auction overlay is wired separately (see the TODO hook).
   renderOnlineAuction(snapshot.auction);
-  // Speed the snapshot poll up to ONLINE_POLL_AUCTION_MS while an
-  // auction is open so a bidder waiting on "The auctioneer is
-  // deciding" sees Sell / Keep land in near-realtime if the WS
-  // broadcast was dropped. Drop back to the normal cadence when the
-  // auction closes.
-  setPollCadence(snapshot.auction ? ONLINE_POLL_AUCTION_MS : ONLINE_POLL_MS);
+  // Round-end first-player handoff + end-of-game standings. Both are
+  // driven straight off the snapshot and idempotent, so they appear /
+  // clear as the server state flips.
+  renderFirstPlayerChooser(snapshot.pendingFirstPlayer);
+  renderGameOver(snapshot);
+  // Speed the snapshot poll up while an interactive freeze is open (an
+  // auction, or a first-player handoff) so the waiting players see it
+  // resolve in near-realtime even if the WS broadcast was dropped. Drop
+  // back to the normal cadence otherwise.
+  const fastPoll = snapshot.auction || snapshot.pendingFirstPlayer;
+  setPollCadence(fastPoll ? ONLINE_POLL_AUCTION_MS : ONLINE_POLL_MS);
   // Eager one-shot fetch the moment the auctioneer's phase opens
   // (awaiting === 'auctioneer'). The accept can land within ms of
   // the bidder seeing this state; without a head-start the bidder
@@ -772,8 +777,30 @@ function syncMpTurnBanner(snapshot) {
     banner.textContent = '';
     return;
   }
-  const active = snapshot.players[snapshot.activeIndex] || null;
   const myId = _onlineMe && _onlineMe.id;
+  // Game over takes over the banner: no one is "up" any more.
+  if (snapshot.status === 'finished') {
+    banner.textContent = '🏁 Game over';
+    banner.classList.remove('is-your-turn');
+    banner.style.removeProperty('--mp-turn-color');
+    banner.hidden = false;
+    return;
+  }
+  // Round-end first-player handoff: the chooser is "up" to pick, not to
+  // play. Reflect that so the big banner agrees with the overlay.
+  if (snapshot.pendingFirstPlayer) {
+    const chooser = snapshot.players.find((p) => p.profileId === snapshot.pendingFirstPlayer.chooserId);
+    const mine = !!(chooser && chooser.profileId === myId);
+    if (chooser && chooser.color) banner.style.setProperty('--mp-turn-color', chooser.color);
+    else banner.style.removeProperty('--mp-turn-color');
+    banner.textContent = mine
+      ? '⭐ Pick the first player'
+      : '@' + (chooser ? chooser.name : '?') + ' is picking first player';
+    banner.classList.toggle('is-your-turn', mine);
+    banner.hidden = false;
+    return;
+  }
+  const active = snapshot.players[snapshot.activeIndex] || null;
   const myTurn = !!(active && active.profileId === myId);
   // Stripe colour = the active player's server-assigned seat colour
   // (PLAYER_COLORS in server/game/state.js). Same colour the roster dot
@@ -917,6 +944,189 @@ function renderOnlineAuction(auction) {
 function setMpAuctionError(text) {
   const el = document.getElementById('mp-auction-error');
   if (el) el.textContent = text || '';
+}
+
+// ----- first-player handoff overlay (round-end) -----
+//
+// When a round (Sunspot cycle) closes the server sets
+// snapshot.pendingFirstPlayer = { chooserId } and freezes the table.
+// The player who led the round names the next first player here;
+// everyone else sees a waiting note. Idempotent + driven straight off
+// the snapshot, mirroring the auction overlay: appears when the handoff
+// opens, clears when the pick lands. SET_FIRST_PLAYER bypasses the turn
+// guard server-side, so this submit (like the auction submit) does not
+// gate on isOnlineMyTurn.
+function setFirstPlayerError(text) {
+  const el = document.getElementById('mp-first-player-error');
+  if (el) el.textContent = text || '';
+}
+
+async function submitSetFirstPlayer(profileId) {
+  if (!_online || _onlineBusy) return false;
+  if (_spectator) { _onlineToast('Spectator - view only.', 'error'); return false; }
+  _onlineBusy = true;
+  setFirstPlayerError('');
+  let r;
+  try {
+    r = await submitGameOp(_onlineGameId, { kind: 'SET_FIRST_PLAYER', profileId }, _onlineMe.token);
+  } finally {
+    _onlineBusy = false;
+  }
+  if (!r || !r.ok) {
+    setFirstPlayerError(humanizeOnlineOpError(r && r.error));
+    if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
+    return false;
+  }
+  applySnapshot(r.data.game.state, r.data.game.seq);
+  return true;
+}
+
+function renderFirstPlayerChooser(pending) {
+  const existing = document.getElementById('mp-first-player-overlay');
+  if (!pending || !_online || !gameViewVisible()) {
+    if (existing) existing.remove();
+    return;
+  }
+  const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
+  const chooser = players.find((p) => p.profileId === pending.chooserId);
+  const myId = _onlineMe && _onlineMe.id;
+  const amChooser = !!myId && pending.chooserId === myId;
+
+  let overlay = existing;
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'mp-first-player-overlay';
+    overlay.className = 'mp-first-player-overlay';
+    overlay.innerHTML = `
+      <div class="mp-first-player-modal" role="dialog" aria-label="First player">
+        <h3 class="mp-first-player-title">⭐ First player</h3>
+        <p class="mp-first-player-sub"></p>
+        <div class="mp-first-player-choices" id="mp-first-player-choices"></div>
+        <div class="hud-error" id="mp-first-player-error"></div>
+      </div>`;
+    document.body.appendChild(overlay);
+  }
+
+  const sub = overlay.querySelector('.mp-first-player-sub');
+  const choices = overlay.querySelector('#mp-first-player-choices');
+  choices.innerHTML = '';
+
+  if (amChooser) {
+    sub.textContent = 'A new round begins. Name the next first player.';
+    for (const p of players) {
+      if (p.profileId === myId) continue;          // "another player" only
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'mp-first-player-pick player-name';
+      if (p.color) btn.style.setProperty('--player-color', p.color);
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      dot.style.background = p.color || '#888';
+      const label = document.createElement('span');
+      label.textContent = '@' + p.name;
+      btn.append(dot, label);
+      btn.disabled = _onlineBusy;
+      btn.addEventListener('click', () => submitSetFirstPlayer(p.profileId));
+      choices.appendChild(btn);
+    }
+  } else {
+    sub.textContent = 'Waiting for ';
+    const nm = document.createElement('span');
+    nm.className = 'player-name';
+    if (chooser && chooser.color) nm.style.setProperty('--player-color', chooser.color);
+    nm.textContent = '@' + (chooser ? chooser.name : '?');
+    sub.append(nm, document.createTextNode(' to name the next first player.'));
+  }
+}
+
+// ----- end-of-game standings -----
+//
+// The server marks the state finished once the round cap is reached.
+// Show a final standings overlay ranked by current VPs. Provisional:
+// full end-game scoring (Exploitation Track etc.) is a later stage; this
+// tallies what the engine tracks today (career glory + map tokens),
+// reusing the solo scoring module's spectral / colony rates so the
+// numbers line up.
+let _gameOverDismissed = false;
+
+function computeSnapshotScore(snapshot, profileId) {
+  const player = (snapshot.players || []).find((p) => p.profileId === profileId);
+  const glory = (player && player.glory && player.glory.vps) || 0;
+  let claims = 0;
+  const discs = snapshot.discs || {};
+  for (const id in discs) {
+    const d = discs[id];
+    if (d && d.outcome === 'success' && d.ownerId === profileId) claims += 1;
+  }
+  const facs = Object.values(snapshot.factories || {}).filter((f) => f.ownerId === profileId);
+  const cols = Object.values(snapshot.colonies || {}).filter((c) => c.ownerId === profileId);
+  const rocket = player && player.rocket && (player.rocket.stack || []).length > 0 ? 1 : 0;
+  const outposts = player && player.outposts ? Object.keys(player.outposts).length : 0;
+  const byType = {};
+  for (const f of facs) { const t = f.spectralType || 'C'; byType[t] = (byType[t] || 0) + 1; }
+  let spectralBonus = 0;
+  for (const t in byType) spectralBonus += spectralVpForCount(byType[t]);
+  let colonyVp = 0;
+  for (const c of cols) colonyVp += (COLONY_VP[c.type] || COLONY_VP.other);
+  const tokens = rocket + claims + facs.length + outposts;
+  return {
+    glory, claims, factories: facs.length, colonies: cols.length,
+    rocket, outposts, spectralBonus, colonyVp, tokens,
+    total: tokens + spectralBonus + colonyVp + glory,
+  };
+}
+
+function renderGameOver(snapshot) {
+  const existing = document.getElementById('mp-game-over-overlay');
+  const finished = !!(snapshot && snapshot.status === 'finished') && _online && gameViewVisible();
+  if (!finished || _gameOverDismissed) {
+    if (existing) existing.remove();
+    return;
+  }
+  const myId = _onlineMe && _onlineMe.id;
+  const scored = (snapshot.players || [])
+    .map((p) => ({ p, s: computeSnapshotScore(snapshot, p.profileId) }))
+    .sort((a, b) => b.s.total - a.s.total);
+
+  let overlay = existing;
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'mp-game-over-overlay';
+    overlay.className = 'mp-game-over-overlay';
+    document.body.appendChild(overlay);
+  }
+  overlay.innerHTML = `
+    <div class="mp-game-over-modal" role="dialog" aria-label="Final standings">
+      <button type="button" class="modal-x" aria-label="Close" title="Close">&times;</button>
+      <h2 class="mp-game-over-title">🏁 Game over</h2>
+      <p class="muted mp-game-over-sub">Final standings after ${snapshot.maxRounds || ''} rounds, ranked by victory points.</p>
+      <ol class="mp-game-over-list"></ol>
+      <p class="muted mp-game-over-note">Provisional tally - full end-game scoring lands in a later update.</p>
+    </div>`;
+  const list = overlay.querySelector('.mp-game-over-list');
+  scored.forEach(({ p, s }, i) => {
+    const li = document.createElement('li');
+    li.className = 'mp-go-row' + (i === 0 ? ' is-winner' : '');
+    const rank = document.createElement('span');
+    rank.className = 'mp-go-rank';
+    rank.textContent = i === 0 ? '🏆' : `${i + 1}.`;
+    const name = document.createElement('span');
+    name.className = 'mp-go-name player-name';
+    if (p.color) name.style.setProperty('--player-color', p.color);
+    name.textContent = '@' + p.name + (p.profileId === myId ? ' (you)' : '');
+    const total = document.createElement('span');
+    total.className = 'mp-go-total';
+    total.textContent = `${s.total} VP`;
+    const brk = document.createElement('span');
+    brk.className = 'mp-go-break muted';
+    brk.textContent = `glory ${s.glory} · factories ${s.factories} · colonies ${s.colonies} · claims ${s.claims}`;
+    li.append(rank, name, total, brk);
+    list.appendChild(li);
+  });
+  overlay.querySelector('.modal-x').addEventListener('click', () => {
+    _gameOverDismissed = true;
+    overlay.remove();
+  });
 }
 
 // Clamp a typed amount up to at least `min`; used so the input re-seeds
@@ -1347,6 +1557,43 @@ function renderMpPanel(snapshot) {
     ));
   }
   tableEl.appendChild(roster);
+
+  // Footer: send myself a test Discord DM without leaving the table, to
+  // confirm notifications reach me. Uses the id I linked from the menu's
+  // Connect Discord; the server falls back to my saved id when none is
+  // passed. A failure (not linked / DMs closed) is surfaced as a toast.
+  const footer = document.createElement('div');
+  footer.className = 'mp-notify-test';
+  const testBtn = document.createElement('button');
+  testBtn.type = 'button';
+  testBtn.className = 'mp-leave';
+  testBtn.textContent = '🔔 Test Discord DM';
+  testBtn.title = 'Send yourself a test Discord notification to confirm it reaches you';
+  testBtn.addEventListener('click', async () => {
+    if (!_onlineMe) return;
+    testBtn.disabled = true;
+    const prev = testBtn.textContent;
+    testBtn.textContent = 'Sending…';
+    const r = await testNotify(undefined, _onlineMe.token, _onlineGameId);
+    testBtn.disabled = false;
+    testBtn.textContent = prev;
+    if (r && r.ok) {
+      _onlineToast('Test DM sent - check your Discord.');
+    } else {
+      _onlineToast('Test DM failed: ' + humanizeNotifyTestError(r && r.error), 'error');
+    }
+  });
+  footer.appendChild(testBtn);
+  tableEl.appendChild(footer);
+}
+
+// Friendly text for the in-game test-DM button failures. Mirrors the
+// menu's mapping (js/main.js) but scoped to the codes this path returns.
+function humanizeNotifyTestError(code) {
+  return ({
+    discord_disabled: 'this server has no notification bot configured.',
+    bad_discord_id: 'connect Discord first (menu -> Turn notifications).',
+  })[code] || (code ? `the bot couldn't reach you (${code}).` : 'unknown error.');
 }
 
 function renderMpPlayer(p, isMe, isActive) {
@@ -1695,6 +1942,12 @@ export function unmountBrowseOnline() {
   _deckPickerOpen = false;
   const auctionOverlay = document.getElementById('mp-auction-overlay');
   if (auctionOverlay) auctionOverlay.remove();
+  // Tear down the first-player handoff + end-of-game overlays too.
+  const fpOverlay = document.getElementById('mp-first-player-overlay');
+  if (fpOverlay) fpOverlay.remove();
+  const goOverlay = document.getElementById('mp-game-over-overlay');
+  if (goOverlay) goOverlay.remove();
+  _gameOverDismissed = false;
   // Tear down any open crew-pick wizard so it doesn't leak across
   // sessions when the player returns to the lobby list.
   const crewOverlay = document.querySelector('.crew-wizard-overlay');
@@ -3865,7 +4118,12 @@ function ensureMapShell(host) {
     // CLAUDE.md: async multiplayer can't trust the WS to be live,
     // so the turn-ownership read uses the cached snapshot the
     // polling loop refreshes.
-    const lockedByOnline = _online && (_spectator || !isOnlineMyTurn());
+    // A first-player handoff or a finished game freezes the normal
+    // action toolbar even for the player the active pointer rests on
+    // (the chooser acts through the handoff overlay, not these buttons).
+    const onlineFrozen = _online && !!_onlineSnapshot
+      && (_onlineSnapshot.pendingFirstPlayer || _onlineSnapshot.status === 'finished');
+    const lockedByOnline = _online && (_spectator || !isOnlineMyTurn() || onlineFrozen);
     if (opTag) {
       opTag.textContent = `op:${ops}`;
       opTag.classList.toggle('is-spent', ops <= 0);

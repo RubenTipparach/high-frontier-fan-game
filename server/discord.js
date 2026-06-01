@@ -193,7 +193,9 @@ async function exchangeCode(code, redirectUri) {
   }
 }
 
-// Read the authorized user's id via the access token (identify scope).
+// Read the authorized user's id + username via the access token
+// (identify scope). The username is only used to pre-fill the name
+// prompt on a first-time Discord sign-up.
 async function fetchUserId(accessToken) {
   try {
     const r = await fetch(`${API}/users/@me`, {
@@ -204,7 +206,7 @@ async function fetchUserId(accessToken) {
       return { ok: false, error: `me ${r.status}: ${body.slice(0, 200)}` };
     }
     const j = await r.json();
-    return { ok: true, userId: String(j.id || '') };
+    return { ok: true, userId: String(j.id || ''), username: String(j.username || '') };
   } catch (e) {
     return { ok: false, error: String((e && e.message) || e) };
   }
@@ -228,8 +230,8 @@ async function addToGuild(userId, accessToken) {
 }
 
 // Full callback flow: code -> access token -> user id -> guild join.
-// Returns { ok, userId } on success so the route can persist the id and
-// confirm DMs will now reach the player. Never throws.
+// Returns { ok, userId, username } on success so the route can persist
+// the id (and pre-fill a sign-up name). Never throws.
 export async function completeOauth(code, redirectUri) {
   if (!oauthEnabled()) return { ok: false, error: 'oauth_disabled' };
   const tok = await exchangeCode(code, redirectUri);
@@ -239,5 +241,37 @@ export async function completeOauth(code, redirectUri) {
   if (!/^\d{5,25}$/.test(me.userId)) return { ok: false, error: 'bad_discord_id' };
   const joined = await addToGuild(me.userId, tok.accessToken);
   if (!joined.ok) return joined;
+  return { ok: true, userId: me.userId, username: me.username };
+}
+
+// ----- identify-only OAuth (admin sign-in) -----
+//
+// Admin login only needs to learn WHO authorized (the `identify`
+// scope); it never joins a guild, so it works with just CLIENT_ID +
+// CLIENT_SECRET (no bot token / guild id required) and skips the
+// addToGuild step.
+export function oauthIdentifyEnabled() {
+  return !!(CLIENT_ID && CLIENT_SECRET);
+}
+
+export function buildIdentifyAuthorizeUrl(state, redirectUri) {
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID,
+    response_type: 'code',
+    scope: 'identify',
+    state,
+    redirect_uri: redirectUri,
+  });
+  return `https://discord.com/api/oauth2/authorize?${params.toString()}`;
+}
+
+// code -> access token -> user id, no guild join. Returns { ok, userId }.
+export async function identifyOauth(code, redirectUri) {
+  if (!oauthIdentifyEnabled()) return { ok: false, error: 'oauth_disabled' };
+  const tok = await exchangeCode(code, redirectUri);
+  if (!tok.ok) return tok;
+  const me = await fetchUserId(tok.accessToken);
+  if (!me.ok) return me;
+  if (!/^\d{5,25}$/.test(me.userId)) return { ok: false, error: 'bad_discord_id' };
   return { ok: true, userId: me.userId };
 }

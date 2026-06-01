@@ -41,10 +41,16 @@ const STORAGE_MOVES  = 'hf-sandbox-moves';
 const STORAGE_DISC   = 'hf-sandbox-discards';
 
 export const SLOTS = 12;
+// Season wedges on the 12-slot dial. The new-round marker (slot 0) sits
+// in the MIDDLE of Season Blue, so Blue WRAPS the top of the dial:
+// slots 10, 11, 0, 1 (two blue slots fall before turn 0). Yellow then
+// Red follow clockwise. A `from > to` entry means the wedge wraps past
+// slot 0 - see slotInSeason() / seasonArc(). Event markers (slots 1, 3,
+// 5, 7, 9, 11) are independent of this colouring and stay put.
 export const SEASONS = [
-  { name: 'blue',   color: '#60a5fa', from: 0, to: 3, label: 'Season Blue'   },
-  { name: 'yellow', color: '#facc15', from: 4, to: 7, label: 'Season Yellow' },
-  { name: 'red',    color: '#f87171', from: 8, to: 11, label: 'Season Red'   },
+  { name: 'blue',   color: '#60a5fa', from: 10, to: 1, label: 'Season Blue'   },
+  { name: 'yellow', color: '#facc15', from: 2,  to: 5, label: 'Season Yellow' },
+  { name: 'red',    color: '#f87171', from: 6,  to: 9, label: 'Season Red'   },
 ];
 export const NEW_ROUND_SLOT = 0;
 export const EVENT_SLOTS = [1, 3, 5, 7, 9, 11];
@@ -218,15 +224,22 @@ export function hydrateClock({
 
 export function getTurn()  { return _turn;  }
 export function getRound() { return _round; }
+// True when `slot` falls inside a season wedge, handling wedges that
+// wrap past slot 0 (from > to, e.g. Blue = 10..1).
+export function slotInSeason(slot, s) {
+  return s.from <= s.to
+    ? (slot >= s.from && slot <= s.to)
+    : (slot >= s.from || slot <= s.to);
+}
 export function getSeason() {
-  return SEASONS.find((s) => _turn >= s.from && _turn <= s.to);
+  return SEASONS.find((s) => slotInSeason(_turn, s));
 }
 // Look up which season a given slot index sits in (handy for
 // events recorded mid-turn: the event's effect depends on the
 // season at the moment the cube crossed the threshold, not the
 // season as of "now").
 export function getSeasonForSlot(slot) {
-  return SEASONS.find((s) => slot >= s.from && slot <= s.to) || SEASONS[0];
+  return SEASONS.find((s) => slotInSeason(slot, s)) || SEASONS[0];
 }
 export function getLastEvent()      { return _lastEvent; }
 export function getOpsRemaining()   { return _opsRemaining; }

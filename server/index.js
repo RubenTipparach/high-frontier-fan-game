@@ -21,6 +21,7 @@ import {
   sendDM, discordEnabled,
   sendWebhook, webhookEnabled, isWebhookUrl, defaultWebhookUrl,
   oauthEnabled, oauthClientId, buildAuthorizeUrl, completeOauth,
+  oauthIdentifyEnabled, buildIdentifyAuthorizeUrl, identifyOauth,
 } from './discord.js';
 
 const PORT = Number(process.env.PORT) || 8080;
@@ -171,8 +172,152 @@ app.get('/announcement', (_req, res) => {
   res.json({ message: (row && row.value) || '', updatedAt: (row && row.updated_at) || 0 });
 });
 
+// ===== Admin auth (Discord OAuth, allowlisted) =====
+//
+// The /admin panel is gated behind Discord OAuth: only an allowlisted
+// Discord account may sign in. The allowlist is seeded from the
+// ADMIN_DISCORD_ID secret into server_settings on boot (so the id stays
+// out of source and rotates with the secret), and a successful login
+// mints a DB-backed session - sha256 of the token is stored, the raw
+// token rides in an httpOnly cookie (same posture as profile tokens).
+
+const ADMIN_COOKIE = 'hf_admin';
+const ADMIN_COOKIE_PATH = '/admin';
+const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12h
+
+// Seed the allowlist from the ADMIN_DISCORD_ID(S) secret on every boot,
+// so adding the secret on Fly + redeploy materialises it DB-side and
+// rotating it updates the stored allowlist. Comma-separated ids
+// supported; an absent env leaves whatever is already stored.
+(function seedAdminAllowlist() {
+  const raw = String(process.env.ADMIN_DISCORD_ID || process.env.ADMIN_DISCORD_IDS || '').trim();
+  if (!raw) return;
+  const ids = raw.split(',').map((s) => s.trim()).filter((s) => /^\d{5,25}$/.test(s));
+  if (!ids.length) return;
+  db.prepare(
+    `INSERT INTO server_settings (key, value, updated_at) VALUES ('admin_discord_ids', ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  ).run(ids.join(','), nowMs());
+})();
+
+function adminAllowlist() {
+  const row = db.prepare("SELECT value FROM server_settings WHERE key = 'admin_discord_ids'").get();
+  return new Set(String((row && row.value) || '').split(',').map((s) => s.trim()).filter(Boolean));
+}
+function isAdminDiscordId(id) {
+  return adminAllowlist().has(String(id || ''));
+}
+
+function readCookie(req, name) {
+  const header = req.headers.cookie;
+  if (!header) return null;
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq < 0) continue;
+    if (part.slice(0, eq).trim() === name) return decodeURIComponent(part.slice(eq + 1).trim());
+  }
+  return null;
+}
+
+// Mint a DB-backed admin session; returns the raw token for the cookie.
+function createAdminSession(discordId) {
+  const token = generateShortCode(24);
+  const now = nowMs();
+  db.prepare(
+    `INSERT INTO admin_sessions (token_hash, discord_id, created_at, expires_at)
+     VALUES (?, ?, ?, ?)`
+  ).run(hashToken(token), String(discordId), now, now + ADMIN_SESSION_TTL_MS);
+  return token;
+}
+
+// Resolve the admin from the request cookie. The session must be
+// unexpired AND its Discord id still on the allowlist, so dropping an id
+// from the secret + redeploy revokes any live session. Returns the
+// Discord id or null; prunes the row when it has expired.
+function adminFromRequest(req) {
+  const token = readCookie(req, ADMIN_COOKIE);
+  if (!token) return null;
+  const hash = hashToken(token);
+  const row = db.prepare('SELECT discord_id, expires_at FROM admin_sessions WHERE token_hash = ?').get(hash);
+  if (!row) return null;
+  if (row.expires_at <= nowMs()) {
+    db.prepare('DELETE FROM admin_sessions WHERE token_hash = ?').run(hash);
+    return null;
+  }
+  if (!isAdminDiscordId(row.discord_id)) return null;
+  return row.discord_id;
+}
+
+function setAdminCookie(req, res, token) {
+  res.cookie(ADMIN_COOKIE, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: req.protocol === 'https',
+    maxAge: ADMIN_SESSION_TTL_MS,
+    path: ADMIN_COOKIE_PATH,
+  });
+}
+function clearAdminSession(req, res) {
+  const token = readCookie(req, ADMIN_COOKIE);
+  if (token) db.prepare('DELETE FROM admin_sessions WHERE token_hash = ?').run(hashToken(token));
+  res.clearCookie(ADMIN_COOKIE, { path: ADMIN_COOKIE_PATH });
+}
+
+// Middleware for admin action routes: 403 unless a valid admin session.
+function requireAdmin(req, res, next) {
+  if (adminFromRequest(req)) return next();
+  return res.status(403).json({ error: 'admin_auth_required' });
+}
+
+// Minimal styled HTML page (login screen + error notices), matching the
+// OAuth callback's look.
+function adminHtmlPage(title, bodyHtml, accent = '#f87171') {
+  return `<!doctype html><html><head><meta charset="utf-8">
+<title>${esc(title)}</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font:15px ui-sans-serif,system-ui,sans-serif;background:#07060f;color:#e6e9ff;
+display:flex;min-height:100vh;margin:0;align-items:center;justify-content:center;text-align:center;padding:24px}
+.box{max-width:440px}h1{font-size:20px;color:${accent};margin:0 0 12px}
+p{color:#8b90b8;line-height:1.55}
+a.btn{display:inline-block;margin-top:18px;padding:11px 18px;border-radius:9px;
+background:#5865F2;color:#fff;text-decoration:none;font-weight:700}
+a.btn:hover{background:#4752c4}</style></head><body><div class="box">
+<h1>${esc(title)}</h1>${bodyHtml}</div></body></html>`;
+}
+function adminLoginPage() {
+  const ready = oauthIdentifyEnabled() && adminAllowlist().size > 0;
+  if (!ready) {
+    return adminHtmlPage('Admin locked',
+      `<p>The admin panel is gated behind Discord, but it is not configured on this
+       server yet. Set <code>DISCORD_CLIENT_ID</code> / <code>DISCORD_CLIENT_SECRET</code>
+       and the <code>ADMIN_DISCORD_ID</code> secret, then redeploy.</p>`);
+  }
+  return adminHtmlPage('Admin sign-in',
+    `<p>This panel is restricted. Sign in with the authorized Discord account to continue.</p>
+     <a class="btn" href="/admin/login">Sign in with Discord</a>`, '#4ade80');
+}
+
+// Start admin sign-in: stash an admin OAuth state (persisted in SQLite,
+// like the other no-profile Discord flows, so it survives a Fly
+// cold-start mid-login) and bounce to Discord.
+app.get('/admin/login', (req, res) => {
+  if (!oauthIdentifyEnabled() || !adminAllowlist().size) {
+    return res.status(503).type('html').send(adminLoginPage());
+  }
+  pruneDiscordAuth();
+  const state = generateShortCode(16);
+  db.prepare('INSERT INTO admin_login_states (state, expires_at) VALUES (?, ?)')
+    .run(state, Date.now() + OAUTH_STATE_TTL_MS);
+  res.redirect(buildIdentifyAuthorizeUrl(state, oauthRedirectUri(req)));
+});
+
+// Sign out: drop the session row and clear the cookie.
+app.post('/admin/logout', (req, res) => {
+  clearAdminSession(req, res);
+  res.json({ ok: true });
+});
+
 // Set the announcement (lives under /admin like the other admin actions).
-app.post('/admin/announcement', (req, res) => {
+app.post('/admin/announcement', requireAdmin, (req, res) => {
   const message = String((req.body && req.body.message) || '');
   db.prepare(
     `INSERT INTO server_settings (key, value, updated_at) VALUES ('announcement', ?, ?)
@@ -184,7 +329,7 @@ app.post('/admin/announcement', (req, res) => {
 // Save the server-wide Discord channel webhook URL (or clear it with a
 // blank value). Validated so a typo doesn't silently disable the feed.
 // Same open-dashboard posture as the other /admin actions.
-app.post('/admin/discord-webhook', (req, res) => {
+app.post('/admin/discord-webhook', requireAdmin, (req, res) => {
   const url = String((req.body && req.body.url) || '').trim();
   if (url && !isWebhookUrl(url)) return res.status(400).json({ error: 'bad_webhook_url' });
   db.prepare(
@@ -197,7 +342,7 @@ app.post('/admin/discord-webhook', (req, res) => {
 // Fire a test message to a webhook URL. Uses the URL in the request
 // body if present (so the operator can verify before saving), else the
 // saved / env URL. 503 if nothing is configured, 502 on a Discord error.
-app.post('/admin/discord-webhook/test', async (req, res) => {
+app.post('/admin/discord-webhook/test', requireAdmin, async (req, res) => {
   let url = String((req.body && req.body.url) || '').trim();
   if (!url) url = storedWebhookUrl();
   if (!isWebhookUrl(url)) return res.status(503).json({ error: 'webhook_disabled' });
@@ -250,7 +395,19 @@ app.post('/profiles', (req, res) => {
 });
 
 app.get('/profiles/me', requireProfile, (req, res) => {
-  res.json({ id: req.profile.id, name: req.profile.name });
+  // discordLinked drives the account-menu "Connect to Discord" button:
+  // shown to a signed-in user only until their account has a Discord
+  // identity, then hidden. oauthEnabled lets the client skip the button
+  // entirely on a deployment with no Discord OAuth.
+  const discordLinked = !!db
+    .prepare('SELECT 1 FROM discord_accounts WHERE profile_id = ?')
+    .get(req.profile.id);
+  res.json({
+    id: req.profile.id,
+    name: req.profile.name,
+    discordLinked,
+    oauthEnabled: oauthEnabled(),
+  });
 });
 
 // Add-a-device flow. The caller (already authenticated on this device)
@@ -320,6 +477,7 @@ function lobbyRow(lobbyId) {
     hostId: row.host_id,
     hostName: row.host_name,
     maxPlayers: row.max_players,
+    maxRounds: row.max_rounds,
     joinPolicy: row.join_policy,
     status: row.status,
     createdAt: row.created_at,
@@ -389,6 +547,8 @@ app.post('/lobbies', requireProfile, (req, res) => {
   const body = req.body || {};
   const name = String(body.name || '').trim().slice(0, 60) || `${req.profile.name}'s table`;
   const maxPlayers = Math.max(2, Math.min(5, Number(body.maxPlayers) || 5));
+  // Game length: 5 (short, default) / 6 (medium) / 7 (extra long).
+  const maxRounds = [5, 6, 7].includes(Number(body.maxRounds)) ? Number(body.maxRounds) : 5;
   const joinPolicy = body.joinPolicy === 'invite-only' ? 'invite-only' : 'open';
   const now = nowMs();
   let code, info;
@@ -397,10 +557,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
     try {
       info = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, join_policy, status, created_at)
-           VALUES (?, ?, ?, ?, ?, 'waiting', ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?)`
         )
-        .run(code, name, req.profile.id, maxPlayers, joinPolicy, now);
+        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now);
       break;
     } catch (err) {
       if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') continue;
@@ -460,6 +620,38 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
        LIMIT 50`
     )
     .all(req.profile.id);
+  // Decorate each in-progress game with whose turn it is, the round
+  // progress, and when the last turn ended, so the dashboard can show
+  // it without opening the board. Capped list (50), so the per-row
+  // lookups are fine.
+  const lastTurnStmt = db.prepare(
+    "SELECT MAX(created_at) AS t FROM game_operations WHERE game_id = ? AND kind IN ('END_TURN', 'SET_FIRST_PLAYER')"
+  );
+  const stateStmt = db.prepare('SELECT state FROM game_states WHERE game_id = ?');
+  for (const row of rows) {
+    if (!row.gameId || row.gameStatus !== 'active') continue;
+    try {
+      const st = stateStmt.get(row.gameId);
+      if (st) {
+        const state = JSON.parse(st.state);
+        const players = Array.isArray(state.players) ? state.players : [];
+        const active = players[state.activeIndex];
+        if (active) {
+          row.activePlayerName = active.name;
+          row.activePlayerColor = active.color || null;
+          row.yourTurn = active.profileId === req.profile.id;
+        }
+        if (state.pendingFirstPlayer) {
+          const chooser = players.find((pl) => pl.profileId === state.pendingFirstPlayer.chooserId);
+          row.pendingFirstPlayerName = chooser ? chooser.name : null;
+        }
+        row.round = state.round;
+        row.maxRounds = state.maxRounds;
+      }
+    } catch { /* ignore a malformed state blob */ }
+    const last = lastTurnStmt.get(row.gameId);
+    row.lastTurnEndedAt = (last && last.t) || null;
+  }
   res.json({ entries: rows });
 });
 
@@ -592,7 +784,7 @@ app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
 app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, max_rounds FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -614,7 +806,9 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
     name: m.name,
     seat: m.seat || i + 1,
   }));
-  const state = createInitialState({ players, seed });
+  // Lobbies predating the column come back null; default to 5.
+  const maxRounds = [5, 6, 7].includes(lobby.max_rounds) ? lobby.max_rounds : 5;
+  const state = createInitialState({ players, seed, maxRounds });
 
   const now = nowMs();
   const gameId = db.transaction(() => {
@@ -746,6 +940,22 @@ function gameDisplayName(gameId) {
   return (r && r.name) || 'your High Frontier game';
 }
 
+// Public base URL of the static frontend, used to build "jump into the
+// room" deep links in notifications. Overridable via env for non-canonical
+// deploys; defaults to the GitHub Pages site. Room URLs are
+// `<base>/room/<code>` with the code lowercased (the form the SPA + the
+// case-insensitive server route both resolve).
+const PUBLIC_APP_URL = (process.env.PUBLIC_APP_URL
+  || 'https://rubentipparach.github.io/high-frontier-fan-game').replace(/\/+$/, '');
+
+function gameRoomUrl(gameId) {
+  const r = db
+    .prepare('SELECT l.code FROM games g JOIN lobbies l ON l.id = g.lobby_id WHERE g.id = ?')
+    .get(gameId);
+  const code = r && r.code;
+  return code ? `${PUBLIC_APP_URL}/room/${String(code).toLowerCase()}` : '';
+}
+
 // DM one player IF they've opted into this event kind and Discord is on.
 // Fire-and-forget: a send failure is logged, never blocks the op response.
 function notifyProfile(profileId, kind, text) {
@@ -796,22 +1006,43 @@ function dispatchTurnNotifications(gameId, kind, state) {
   try {
     if (!state || !Array.isArray(state.players)) return;
     const dmOn = discordEnabled();
-    if (kind === 'END_TURN') {
+    const name = gameDisplayName(gameId);
+    const url = gameRoomUrl(gameId);
+    // A trailing deep link so a notified player can tap straight into the
+    // room. Discord renders bare URLs as clickable links in both DMs and
+    // channel posts. Empty (no code) just omits the line.
+    const jump = url ? `\n▶ Play now: ${url}` : '';
+    // Game over: one note to everyone, regardless of which op tripped it.
+    if (state.status === 'finished') {
+      if (dmOn) for (const p of state.players) notifyProfile(p.profileId, 'turn', `🏁 The game in ${name} is over.`);
+      notifyWebhook(`🏁 **${name}** has ended - final standings are in.`);
+      return;
+    }
+    // A round just closed and the leader must name the next first player.
+    if (state.pendingFirstPlayer) {
+      const chooser = state.players.find((p) => p.profileId === state.pendingFirstPlayer.chooserId);
+      if (chooser) {
+        if (dmOn) notifyProfile(chooser.profileId, 'turn', `⭐ Pick the next first player in ${name}.${jump}`);
+        notifyWebhook(`⭐ ${chooser.name || 'A player'} is choosing the next first player in **${name}**.${jump}`);
+      }
+      return;
+    }
+    // END_TURN and SET_FIRST_PLAYER both hand the turn to a new player.
+    if (kind === 'END_TURN' || kind === 'SET_FIRST_PLAYER') {
       const active = state.players[state.activeIndex];
       if (active) {
-        if (dmOn) notifyProfile(active.profileId, 'turn', `🛸 It's your turn in ${gameDisplayName(gameId)}.`);
-        notifyWebhook(`🛸 ${active.name || 'A player'}'s turn in **${gameDisplayName(gameId)}**.`);
+        if (dmOn) notifyProfile(active.profileId, 'turn', `🛸 It's your turn in ${name}.${jump}`);
+        notifyWebhook(`🛸 ${active.name || 'A player'}'s turn in **${name}**.${jump}`);
       }
     } else if (kind === 'AUCTION_START') {
       const auctioneer = state.auction && state.auction.auctioneerId;
-      const name = gameDisplayName(gameId);
       if (dmOn) {
         for (const p of state.players) {
           if (p.profileId === auctioneer) continue;
-          notifyProfile(p.profileId, 'auction', `🔨 An auction just opened in ${name} - place your bid.`);
+          notifyProfile(p.profileId, 'auction', `🔨 An auction just opened in ${name} - place your bid.${jump}`);
         }
       }
-      notifyWebhook(`🔨 An auction just opened in **${name}** - bidding is live.`);
+      notifyWebhook(`🔨 An auction just opened in **${name}** - bidding is live.${jump}`);
     }
   } catch (e) {
     console.warn('[notify] dispatch error', e && e.message);
@@ -866,7 +1097,13 @@ app.post('/me/notify/test', requireProfile, async (req, res) => {
     uid = (pref && pref.discord_user_id) || '';
   }
   if (!/^\d{5,25}$/.test(uid)) return res.status(400).json({ error: 'bad_discord_id' });
-  const r = await sendDM(uid, `✅ High Frontier test DM - turn notifications are working for @${req.profile.name}.`);
+  // Append a deep link: the specific room when the caller is testing from
+  // inside a game (in-game button passes gameId), else the app home so a
+  // menu test still carries a clickable URL.
+  const gid = req.body && req.body.gameId;
+  const url = (gid && gameRoomUrl(gid)) || PUBLIC_APP_URL;
+  const jump = url ? `\n▶ Play now: ${url}` : '';
+  const r = await sendDM(uid, `✅ High Frontier test DM - notifications are working for @${req.profile.name}.${jump}`);
   if (!r.ok) return res.status(502).json({ error: r.error });
   res.json({ ok: true });
 });
@@ -883,12 +1120,15 @@ app.post('/me/notify/test', requireProfile, async (req, res) => {
 // held in memory with a short TTL (the whole flow takes seconds; a
 // process restart mid-flow just means the user clicks again).
 
-const _oauthStates = new Map(); // state -> { profileId, exp }
+// State is persisted in SQLite (oauth_states), NOT in process memory:
+// on Fly the machine can auto-stop while the user is on Discord's consent
+// screen, so an in-memory token would be gone by the time the callback
+// cold-starts a fresh process - which presented as "Link expired" on
+// every attempt. The DB lives on the volume and survives restarts.
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
 function pruneOauthStates() {
-  const now = Date.now();
-  for (const [s, v] of _oauthStates) if (v.exp <= now) _oauthStates.delete(s);
+  db.prepare('DELETE FROM oauth_states WHERE expires_at <= ?').run(Date.now());
 }
 
 // The redirect URI must be byte-identical in the authorize request, the
@@ -905,7 +1145,8 @@ app.post('/me/notify/oauth/start', requireProfile, (req, res) => {
   if (!oauthEnabled()) return res.status(503).json({ error: 'oauth_disabled' });
   pruneOauthStates();
   const state = generateShortCode(16);
-  _oauthStates.set(state, { profileId: req.profile.id, exp: Date.now() + OAUTH_STATE_TTL_MS });
+  db.prepare('INSERT INTO oauth_states (state, profile_id, expires_at) VALUES (?, ?, ?)')
+    .run(state, req.profile.id, Date.now() + OAUTH_STATE_TTL_MS);
   res.json({ ok: true, url: buildAuthorizeUrl(state, oauthRedirectUri(req)) });
 });
 
@@ -925,36 +1166,216 @@ p{color:#8b90b8;line-height:1.5}</style></head><body><div class="box">
 <script>try{setTimeout(function(){window.close();},2500);}catch(e){}</script>
 </body></html>`);
   };
+  // Bounce the browser back to the app with a result param (used by the
+  // unauthenticated "Sign in with Discord" full-page flow).
+  const appRedirect = (params) =>
+    res.redirect(`${PUBLIC_APP_URL}/?${new URLSearchParams(params).toString()}`);
+
   pruneOauthStates();
-  const err = String(req.query.error || '');
-  if (err) return sendPage('Discord connection cancelled', 'You can close this window and try again.', false);
+  pruneDiscordAuth();
+  const errParam = String(req.query.error || '');
   const state = String(req.query.state || '');
   const code = String(req.query.code || '');
-  const entry = state && _oauthStates.get(state);
-  if (!entry) return sendPage('Link expired', 'That link expired or was already used. Reopen the menu and click Connect again.', false);
-  _oauthStates.delete(state);
+
+  // The mode is determined by which state table holds the state: the
+  // authenticated "Connect" flow stores it in oauth_states (popup, has a
+  // profile); the unauthenticated "Sign in" flow stores it in
+  // discord_login_states (full-page, no profile yet). Consume either.
+  const linkEntry = state
+    ? db.prepare('SELECT profile_id, expires_at FROM oauth_states WHERE state = ?').get(state)
+    : null;
+  if (linkEntry) db.prepare('DELETE FROM oauth_states WHERE state = ?').run(state);
+  const loginEntry = (!linkEntry && state)
+    ? db.prepare('SELECT expires_at FROM discord_login_states WHERE state = ?').get(state)
+    : null;
+  if (loginEntry) db.prepare('DELETE FROM discord_login_states WHERE state = ?').run(state);
+  // Admin sign-in stores its state in admin_login_states (no profile;
+  // gated on the Discord allowlist, not a game account).
+  const adminEntry = (!linkEntry && !loginEntry && state)
+    ? db.prepare('SELECT expires_at FROM admin_login_states WHERE state = ?').get(state)
+    : null;
+  if (adminEntry) db.prepare('DELETE FROM admin_login_states WHERE state = ?').run(state);
+
+  // ---------- Admin sign-in (identify-only, Discord allowlist) ----------
+  if (adminEntry) {
+    if (errParam) return sendPage('Login cancelled', 'You can close this window and try again.', false);
+    if (adminEntry.expires_at <= Date.now()) return sendPage('Login expired', 'That sign-in link expired. Reopen /admin and try again.', false);
+    if (!code) return sendPage('Missing code', 'Discord did not return an authorization code. Please try again.', false);
+    const a = await identifyOauth(code, oauthRedirectUri(req));
+    if (!a.ok) {
+      console.warn('[admin] oauth login failed -', a.error);
+      return sendPage('Login failed', `Discord login failed (${esc(a.error)}). You can close this and try again.`, false);
+    }
+    if (!isAdminDiscordId(a.userId)) {
+      console.warn('[admin] denied login for discord id', a.userId);
+      return sendPage('Access denied', 'This Discord account is not authorized for the admin panel.', false);
+    }
+    setAdminCookie(req, res, createAdminSession(a.userId));
+    return res.redirect('/admin');
+  }
+
+  // ---------- Sign in with Discord (unauthenticated, full-page) ----------
+  if (loginEntry) {
+    if (errParam) return appRedirect({ hf_discord: 'error', reason: 'cancelled' });
+    if (loginEntry.expires_at <= Date.now()) return appRedirect({ hf_discord: 'error', reason: 'expired' });
+    if (!code) return appRedirect({ hf_discord: 'error', reason: 'no_code' });
+    const r = await completeOauth(code, oauthRedirectUri(req));
+    if (!r.ok) {
+      console.warn('[auth] discord sign-in failed -', r.error);
+      return appRedirect({ hf_discord: 'error', reason: 'oauth' });
+    }
+    const handoff = generateShortCode(20);
+    const exp = Date.now() + 5 * 60 * 1000;
+    const acct = db.prepare('SELECT profile_id FROM discord_accounts WHERE discord_id = ?').get(r.userId);
+    if (acct) {
+      // Known Discord account -> mint a session token for that profile.
+      const prof = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(acct.profile_id);
+      if (!prof) return appRedirect({ hf_discord: 'error', reason: 'no_profile' });
+      const token = randomBytes(32).toString('base64url');
+      db.prepare('INSERT INTO tokens (profile_id, token_hash, created_at) VALUES (?, ?, ?)')
+        .run(prof.id, hashToken(token), nowMs());
+      db.prepare('UPDATE discord_accounts SET username = ?, linked_at = ? WHERE discord_id = ?')
+        .run(r.username || null, nowMs(), r.userId);
+      // Keep the notify target current (re-link can update the DM id).
+      db.prepare(
+        `INSERT INTO notify_prefs (profile_id, discord_user_id, notify_turn, notify_auction, updated_at)
+         VALUES (?, ?, 1, 1, ?)
+         ON CONFLICT(profile_id) DO UPDATE SET discord_user_id = excluded.discord_user_id, updated_at = excluded.updated_at`
+      ).run(prof.id, r.userId, nowMs());
+      db.prepare('INSERT INTO discord_auth_handoff (code, kind, token, profile_id, expires_at) VALUES (?, \'login\', ?, ?, ?)')
+        .run(handoff, token, prof.id, exp);
+      return appRedirect({ hf_discord: 'login', code: handoff });
+    }
+    // New Discord account -> hand off for the "pick your name" prompt.
+    db.prepare('INSERT INTO discord_auth_handoff (code, kind, discord_id, username, expires_at) VALUES (?, \'signup\', ?, ?, ?)')
+      .run(handoff, r.userId, r.username || '', exp);
+    return appRedirect({ hf_discord: 'signup', code: handoff });
+  }
+
+  // ---------- Connect Discord (authenticated, popup) ----------
+  if (errParam) return sendPage('Discord connection cancelled', 'You can close this window and try again.', false);
+  if (!linkEntry || linkEntry.expires_at <= Date.now()) {
+    return sendPage('Link expired', 'That link expired or was already used. Reopen the menu and click Connect again.', false);
+  }
   if (!code) return sendPage('Missing code', 'Discord did not return an authorization code. Please try again.', false);
-  const profile = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(entry.profileId);
+  const profile = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(linkEntry.profile_id);
   if (!profile) return sendPage('Profile not found', 'Could not match this link to a profile. Please try again.', false);
 
   const r = await completeOauth(code, oauthRedirectUri(req));
   if (!r.ok) {
-    console.warn('[notify] oauth callback failed for profile', entry.profileId, '-', r.error);
+    console.warn('[notify] oauth callback failed for profile', linkEntry.profile_id, '-', r.error);
     return sendPage('Connection failed', `Discord linking failed (${esc(r.error)}). You can close this and try again.`, false);
   }
-  // Persist the id + enable both event kinds by default (preserve any
-  // existing notify_turn / notify_auction choices the player already set).
+  // Persist the DM target (preserve existing notify_turn / notify_auction).
   db.prepare(
     `INSERT INTO notify_prefs (profile_id, discord_user_id, notify_turn, notify_auction, updated_at)
      VALUES (?, ?, 1, 1, ?)
      ON CONFLICT(profile_id) DO UPDATE SET
        discord_user_id = excluded.discord_user_id,
        updated_at      = excluded.updated_at`
-  ).run(entry.profileId, r.userId, nowMs());
+  ).run(linkEntry.profile_id, r.userId, nowMs());
+  // Also record the auth identity so this user can later SIGN IN with
+  // Discord, not just receive DMs.
+  linkDiscordAccount(r.userId, linkEntry.profile_id, r.username);
   // Fire a confirmation DM now that the guild membership exists.
   sendDM(r.userId, `✅ Discord connected for @${profile.name}. You'll get a DM when it's your turn.`)
     .then((d) => { if (!d.ok) console.warn('[notify] confirm DM failed -', d.error); });
   sendPage('Discord connected', 'You can close this window and return to the game. A confirmation DM is on its way.', true);
+});
+
+// Prune expired sign-in states + handoffs (called opportunistically).
+function pruneDiscordAuth() {
+  const now = Date.now();
+  db.prepare('DELETE FROM discord_login_states WHERE expires_at <= ?').run(now);
+  db.prepare('DELETE FROM admin_login_states WHERE expires_at <= ?').run(now);
+  db.prepare('DELETE FROM discord_auth_handoff WHERE expires_at <= ?').run(now);
+}
+
+// Bind a Discord account to a profile for AUTH. A profile holds at most
+// one Discord identity and a Discord id maps to one profile, so clear any
+// prior identity for this profile first, then claim the id (reassigning
+// it from another profile if the same Discord owner re-links elsewhere).
+function linkDiscordAccount(discordId, profileId, username) {
+  db.prepare('DELETE FROM discord_accounts WHERE profile_id = ?').run(profileId);
+  db.prepare('INSERT OR REPLACE INTO discord_accounts (discord_id, profile_id, username, linked_at) VALUES (?, ?, ?, ?)')
+    .run(discordId, profileId, username || null, nowMs());
+}
+
+// Public: whether this deployment offers "Sign in with Discord", so the
+// signin view can show/hide the button without an authed call.
+app.get('/auth/discord/enabled', (_req, res) => {
+  res.json({ enabled: oauthEnabled() });
+});
+
+// Begin "Sign in with Discord" (unauthenticated, full-page redirect).
+// Creates a login state and 302s to Discord; the callback comes back in
+// login mode. Disabled / unreachable bounces to the app with an error.
+app.get('/auth/discord/login/start', (req, res) => {
+  if (!oauthEnabled()) return res.redirect(`${PUBLIC_APP_URL}/?hf_discord=error&reason=disabled`);
+  pruneDiscordAuth();
+  const state = generateShortCode(16);
+  db.prepare('INSERT INTO discord_login_states (state, expires_at) VALUES (?, ?)')
+    .run(state, Date.now() + OAUTH_STATE_TTL_MS);
+  res.redirect(buildAuthorizeUrl(state, oauthRedirectUri(req)));
+});
+
+// Exchange a handoff code from the sign-in redirect. A 'login' handoff
+// returns the minted session token; a 'signup' handoff returns the
+// suggested name (the code stays valid until /auth/discord/signup runs).
+app.post('/auth/discord/exchange', (req, res) => {
+  pruneDiscordAuth();
+  const code = String((req.body && req.body.code) || '');
+  const h = code ? db.prepare('SELECT * FROM discord_auth_handoff WHERE code = ?').get(code) : null;
+  if (!h || h.expires_at <= Date.now()) return res.status(400).json({ error: 'handoff_expired' });
+  if (h.kind === 'login') {
+    db.prepare('DELETE FROM discord_auth_handoff WHERE code = ?').run(code); // one-time
+    const prof = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(h.profile_id);
+    if (!prof) return res.status(400).json({ error: 'no_profile' });
+    return res.json({ ok: true, status: 'signedin', token: h.token, id: prof.id, name: prof.name });
+  }
+  // signup: keep the code; /signup consumes it once a name is chosen.
+  return res.json({ ok: true, status: 'needName', suggestedName: h.username || '' });
+});
+
+// Finalize a first-time Discord sign-up: validate the chosen name, create
+// the profile, link the Discord identity (+ notify target), mint a token.
+app.post('/auth/discord/signup', (req, res) => {
+  pruneDiscordAuth();
+  const code = String((req.body && req.body.code) || '');
+  const name = String((req.body && req.body.name) || '').trim();
+  const h = code
+    ? db.prepare("SELECT * FROM discord_auth_handoff WHERE code = ? AND kind = 'signup'").get(code)
+    : null;
+  if (!h || h.expires_at <= Date.now()) return res.status(400).json({ error: 'handoff_expired' });
+  if (!isValidName(name)) return res.status(400).json({ error: 'invalid_name' });
+
+  let profileId; let profileName;
+  // If the Discord id got linked in the meantime (double submit / race),
+  // just sign into that profile rather than erroring or duplicating.
+  const already = db.prepare('SELECT profile_id FROM discord_accounts WHERE discord_id = ?').get(h.discord_id);
+  if (already) {
+    const prof = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(already.profile_id);
+    if (!prof) return res.status(400).json({ error: 'no_profile' });
+    profileId = prof.id; profileName = prof.name;
+  } else {
+    const nameLower = name.toLowerCase();
+    if (db.prepare('SELECT id FROM profiles WHERE name_lower = ?').get(nameLower)) {
+      return res.status(409).json({ error: 'name_taken' });
+    }
+    const now = nowMs();
+    const info = db.prepare('INSERT INTO profiles (name, name_lower, created_at, last_seen_at) VALUES (?, ?, ?, ?)')
+      .run(name, nameLower, now, now);
+    profileId = info.lastInsertRowid; profileName = name;
+    db.prepare('INSERT INTO discord_accounts (discord_id, profile_id, username, linked_at) VALUES (?, ?, ?, ?)')
+      .run(h.discord_id, profileId, h.username || null, now);
+    db.prepare('INSERT INTO notify_prefs (profile_id, discord_user_id, notify_turn, notify_auction, updated_at) VALUES (?, ?, 1, 1, ?)')
+      .run(profileId, h.discord_id, now);
+  }
+  const token = randomBytes(32).toString('base64url');
+  db.prepare('INSERT INTO tokens (profile_id, token_hash, created_at) VALUES (?, ?, ?)')
+    .run(profileId, hashToken(token), nowMs());
+  db.prepare('DELETE FROM discord_auth_handoff WHERE code = ?').run(code); // one-time
+  return res.json({ ok: true, token, id: profileId, name: profileName });
 });
 
 // The state snapshot a given op produced (git-style "tree at commit").
@@ -1074,8 +1495,10 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
     // ops advance the floor too: an auction moves aqua / decks / hands
     // that are not on the per-turn undo stack, so letting undo replay
     // across one would silently drop those effects. PICK_CREW is also
-    // permanent (session-setup) so it commits the same way.
-    if (kind === 'END_TURN' || kind === 'PICK_CREW' || kind.startsWith('AUCTION_')) {
+    // permanent (session-setup), and SET_FIRST_PLAYER opens a fresh
+    // round-leader turn, so both commit the same way.
+    if (kind === 'END_TURN' || kind === 'PICK_CREW' || kind === 'SET_FIRST_PLAYER'
+        || kind.startsWith('AUCTION_')) {
       db.prepare('UPDATE games SET committed_seq = ? WHERE id = ?').run(nextSeq, id);
     }
     if (result.state.status === 'finished') {
@@ -1593,18 +2016,21 @@ setInterval(() => {
 
 // ----- Admin dashboard -----
 //
-// Public read-only dashboard at /admin: KPIs, profiles, lobbies,
-// recent chat, pending invites, invite links. Mirrors the
-// murdoku-companion admin in shape: a single HTML render with
-// inline styles, no client framework, and one JS-powered admin
-// action (mint a new device code for a profile).
+// Admin dashboard at /admin: KPIs, profiles, lobbies, recent chat,
+// pending invites, invite links. Mirrors the murdoku-companion admin in
+// shape: a single HTML render with inline styles, no client framework.
 //
-// The dashboard is intentionally unauthenticated - the operator's
-// only protection is "the URL isn't linked from anywhere users
-// see". Gate behind a reverse-proxy basic auth or an admin secret
-// before exposing to a hostile audience.
+// Gated behind Discord OAuth (see the "Admin auth" section above): only
+// an allowlisted Discord account may sign in. Unauthenticated visitors
+// get the sign-in screen; the mutating action routes below are wrapped
+// in requireAdmin.
 
-app.get('/admin', (_req, res) => {
+app.get('/admin', (req, res) => {
+  // Gated behind Discord OAuth: unauthenticated visitors get the
+  // sign-in screen instead of the dashboard.
+  if (!adminFromRequest(req)) {
+    return res.type('html').send(adminLoginPage());
+  }
   const kpi = db
     .prepare(
       `SELECT
@@ -1802,6 +2228,7 @@ app.get('/admin', (_req, res) => {
     </div>
     <div class="ws-info">
       <strong>${wsCount}</strong> open sockets · <strong>${wsAuthed}</strong> authed
+      · <a href="#" onclick="fetch('/admin/logout',{method:'POST'}).then(function(){location.href='/admin';});return false;">Sign out</a>
     </div>
   </div>
 
@@ -2041,11 +2468,8 @@ document.addEventListener('click', function (ev) {
 // Mint a fresh device code for a profile and ADD it to the tokens
 // table. The user's existing devices keep working; this just adds
 // another credential. Returns the plaintext once - only chance to
-// see it before it's hashed for storage.
-//
-// Anonymous endpoint to match the open-dashboard posture. Gate
-// behind an admin secret before deploying anywhere that matters.
-app.post('/admin/profiles/:id/add-token', (req, res) => {
+// see it before it's hashed for storage. requireAdmin-gated.
+app.post('/admin/profiles/:id/add-token', requireAdmin, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
   const row = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(id);
@@ -2062,12 +2486,11 @@ app.post('/admin/profiles/:id/add-token', (req, res) => {
 // dangling data" - keep the audit trail). Sets lobbies.status and
 // games.status to 'cancelled', cancels pending invites + broadcasts
 // invite_cancelled, then broadcasts lobby_disbanded so anyone still
-// on the channel drops. Anonymous to match the open-dashboard
-// posture - gate behind an admin secret before exposing publicly.
+// on the channel drops. requireAdmin-gated.
 //
 // Endpoint path is still .../delete so the existing admin button
 // keeps working without a UI change.
-app.post('/admin/lobbies/:id/delete', (req, res) => {
+app.post('/admin/lobbies/:id/delete', requireAdmin, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
   const row = db.prepare('SELECT id FROM lobbies WHERE id = ?').get(id);
@@ -2094,7 +2517,7 @@ app.post('/admin/lobbies/:id/delete', (req, res) => {
 // it was cancelled while still waiting, so the lobby goes back to
 // waiting. Pending invites are NOT auto-restored (they were resolved
 // at cancel time); the host can re-invite.
-app.post('/admin/lobbies/:id/restore', (req, res) => {
+app.post('/admin/lobbies/:id/restore', requireAdmin, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
   const row = db.prepare('SELECT id, status FROM lobbies WHERE id = ?').get(id);
@@ -2190,6 +2613,27 @@ function esc(s) {
     }
   }
   if (fixed) console.log(`recalled empty rockets to LEO in ${fixed} game(s)`);
+})();
+
+// Backfill the game-length cap on in-progress games that predate it.
+// Per product decision, existing games default to 5 rounds. This only
+// adds the field; it does NOT reshuffle turn order or switch on the
+// first-player handoff (those are new-game-only), so a running game is
+// otherwise untouched - it simply now finishes at round 5.
+(() => {
+  const rows = db.prepare('SELECT game_id, state FROM game_states').all();
+  let filled = 0;
+  for (const row of rows) {
+    let st;
+    try { st = JSON.parse(row.state); } catch { continue; }
+    if (!st || typeof st !== 'object') continue;
+    if (st.maxRounds != null) continue;
+    st.maxRounds = 5;
+    db.prepare('UPDATE game_states SET state = ? WHERE game_id = ?')
+      .run(JSON.stringify(st), row.game_id);
+    filled += 1;
+  }
+  if (filled) console.log(`backfilled maxRounds=5 on ${filled} in-progress game(s)`);
 })();
 
 httpServer.listen(PORT, '0.0.0.0', () => {

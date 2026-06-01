@@ -60,12 +60,83 @@ db.exec(`
     updated_at      INTEGER NOT NULL
   );
 
-  -- Server-wide key/value settings (e.g. the global announcement banner).
-  -- Editable from /admin; surfaced to every client.
+  -- Server-wide key/value settings (e.g. the global announcement banner,
+  -- and the admin Discord allowlist seeded from the ADMIN_DISCORD_ID
+  -- secret on boot). Editable from /admin; surfaced to every client.
   CREATE TABLE IF NOT EXISTS server_settings (
     key        TEXT PRIMARY KEY,
     value      TEXT,
     updated_at INTEGER NOT NULL
+  );
+
+  -- Admin browser sessions. The /admin panel is gated behind Discord
+  -- OAuth: only an allowlisted Discord account can sign in. On a
+  -- successful login we mint a random session token, store ONLY its
+  -- sha256 here (never the raw token, mirroring the profile tokens
+  -- table), and hand the raw token back as an httpOnly cookie.
+  CREATE TABLE IF NOT EXISTS admin_sessions (
+    token_hash  TEXT PRIMARY KEY,
+    discord_id  TEXT NOT NULL,
+    created_at  INTEGER NOT NULL,
+    expires_at  INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_admin_sessions_exp
+    ON admin_sessions(expires_at);
+
+  -- CSRF state for the admin "Sign in with Discord" flow. Like
+  -- discord_login_states below it carries no profile (the admin
+  -- authenticates against the Discord allowlist, not a game profile)
+  -- and is persisted so it survives a Fly cold-start mid-login.
+  CREATE TABLE IF NOT EXISTS admin_login_states (
+    state      TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL
+  );
+
+  -- One-time CSRF state for the Discord "Connect" OAuth flow. Persisted
+  -- (not in-memory) so the token survives a Fly machine restart / cold
+  -- start between the authorize redirect and the callback - on Fly the
+  -- machine can auto-stop while the user is on Discord's consent screen,
+  -- which would wipe an in-memory store and break every link.
+  CREATE TABLE IF NOT EXISTS oauth_states (
+    state      TEXT PRIMARY KEY,
+    profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL
+  );
+
+  -- CSRF state for the UNauthenticated "Sign in with Discord" flow.
+  -- Separate from oauth_states because there is no profile yet (the
+  -- callback either finds the linked profile or starts a signup), so it
+  -- carries no profile_id. Same short TTL + prune discipline.
+  CREATE TABLE IF NOT EXISTS discord_login_states (
+    state      TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL
+  );
+
+  -- Maps a Discord account to a profile for AUTH (distinct from the
+  -- notify_prefs.discord_user_id used only for DM targeting). Linking
+  -- via "Connect Discord" or signing up via Discord writes a row here;
+  -- a later "Sign in with Discord" looks the profile up by discord_id.
+  -- Both columns unique: one Discord account <-> one profile.
+  CREATE TABLE IF NOT EXISTS discord_accounts (
+    discord_id TEXT PRIMARY KEY,
+    profile_id INTEGER NOT NULL UNIQUE REFERENCES profiles(id) ON DELETE CASCADE,
+    username   TEXT,
+    linked_at  INTEGER NOT NULL
+  );
+
+  -- One-time handoff from the server-side OAuth callback to the client.
+  -- The callback can't hand the browser a session token directly (that
+  -- would leak in the redirect URL / history), so it stashes a short-
+  -- lived code here; the app exchanges the code for the token (login) or
+  -- for a "pick your name" prompt (signup) via a normal API call.
+  CREATE TABLE IF NOT EXISTS discord_auth_handoff (
+    code       TEXT PRIMARY KEY,
+    kind       TEXT NOT NULL,            -- 'login' | 'signup'
+    token      TEXT,                     -- login: the minted session token
+    profile_id INTEGER,                  -- login: the signed-in profile
+    discord_id TEXT,                     -- signup: the Discord account
+    username   TEXT,                     -- signup: suggested name
+    expires_at INTEGER NOT NULL
   );
 
   -- A lobby is a pre-game waiting room. Once status flips to 'started'
@@ -77,12 +148,16 @@ db.exec(`
   --   open         : anyone can join from the public listing
   --   invite-only  : invisible to the public listing; only people with
   --                  a direct invite or an invite-link code can join
+  -- max_rounds: game length in rounds (Sunspot Cube cycles). 5 = short
+  -- (default), 6 = medium, 7 = extra long. Frozen into the engine state
+  -- at game start; the game finishes once that many rounds have played.
   CREATE TABLE IF NOT EXISTS lobbies (
     id            INTEGER PRIMARY KEY,
     code          TEXT UNIQUE NOT NULL,
     name          TEXT NOT NULL,
     host_id       INTEGER NOT NULL REFERENCES profiles(id),
     max_players   INTEGER NOT NULL DEFAULT 5,
+    max_rounds    INTEGER NOT NULL DEFAULT 5,
     join_policy   TEXT NOT NULL DEFAULT 'open',
     status        TEXT NOT NULL DEFAULT 'waiting',
     created_at    INTEGER NOT NULL,
@@ -223,6 +298,20 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_game_operations_game
     ON game_operations(game_id, seq);
 `);
+
+// Idempotent column adds for tables that predate a column. better-sqlite3
+// has no "ADD COLUMN IF NOT EXISTS", so we check PRAGMA table_info first.
+// Run on every boot; a no-op once the column exists.
+function ensureColumn(table, column, ddl) {
+  const exists = db
+    .prepare(`PRAGMA table_info(${table})`)
+    .all()
+    .some((c) => c.name === column);
+  if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+}
+// Lobbies created before game-length was configurable get the default
+// (5 rounds). New rows already carry it from the CREATE TABLE above.
+ensureColumn('lobbies', 'max_rounds', 'max_rounds INTEGER NOT NULL DEFAULT 5');
 
 export function nowMs() {
   return Date.now();

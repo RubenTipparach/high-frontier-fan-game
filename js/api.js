@@ -103,8 +103,8 @@ export async function getLobbyByCode(code) {
   return call('GET', '/lobbies/by-code/' + encodeURIComponent(code));
 }
 
-export async function createLobby({ name, maxPlayers, joinPolicy }, token) {
-  return call('POST', '/lobbies', { body: { name, maxPlayers, joinPolicy }, token });
+export async function createLobby({ name, maxPlayers, maxRounds, joinPolicy }, token) {
+  return call('POST', '/lobbies', { body: { name, maxPlayers, maxRounds, joinPolicy }, token });
 }
 
 export async function joinLobby(id, token) {
@@ -212,13 +212,39 @@ export async function getNotifyPrefs(token) {
 export async function setNotifyPrefs(prefs, token) {
   return call('PUT', '/me/notify', { body: prefs, token });
 }
-export async function testNotify(discordUserId, token) {
-  return call('POST', '/me/notify/test', { body: { discordUserId }, token });
+export async function testNotify(discordUserId, token, gameId) {
+  return call('POST', '/me/notify/test', { body: { discordUserId, gameId }, token });
 }
 // Begin the one-click "Connect Discord" OAuth flow: returns { url } the
 // client opens in a popup. The server-side callback links the account.
 export async function startDiscordOauth(token) {
   return call('POST', '/me/notify/oauth/start', { token });
+}
+
+// ----- Sign in with Discord (unauthenticated) -----
+
+// Whether this deployment offers Discord sign-in (so the signin view can
+// show/hide the button). Returns { enabled } or a soft failure.
+export async function discordSignInEnabled() {
+  return call('GET', '/auth/discord/enabled');
+}
+
+// Full-page URL that kicks off the Discord sign-in redirect. Null when
+// the API isn't configured (local-only mode).
+export function discordLoginStartUrl() {
+  const base = apiBaseUrl();
+  return base ? base + '/auth/discord/login/start' : null;
+}
+
+// Exchange the handoff code from the sign-in redirect. Resolves to
+// { status:'signedin', token, id, name } or { status:'needName', suggestedName }.
+export async function discordExchange(code) {
+  return call('POST', '/auth/discord/exchange', { body: { code } });
+}
+
+// Finalize a first-time Discord sign-up with the chosen name.
+export async function discordSignup(code, name) {
+  return call('POST', '/auth/discord/signup', { body: { code, name } });
 }
 
 // --- Server-wide announcement banner ---
