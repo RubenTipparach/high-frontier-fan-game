@@ -535,21 +535,32 @@ function initSigninForm() {
     await afterSignIn();
   });
 
-  // "Sign in with Discord": a full-page redirect to the server's OAuth
-  // start (which 302s to Discord and back). Shown only when the server
-  // reports Discord sign-in is configured.
+  // Layout: when Discord sign-in is available, it's the primary action
+  // and the name/device-code form collapses under the "Other" disclosure.
+  // When it's NOT available, expand that form and hide the "Other" summary
+  // so it's simply the sign-in form.
   const discordWrap = document.getElementById('signin-discord-wrap');
   const discordBtn = document.getElementById('btn-signin-discord');
+  const otherWrap = document.getElementById('signin-other');
   if (discordBtn) {
     discordBtn.addEventListener('click', () => {
       const url = discordLoginStartUrl();
       if (url) window.location.href = url;
     });
   }
-  if (discordWrap && apiAvailable()) {
+  const applyDiscordLayout = (enabled) => {
+    if (discordWrap) discordWrap.hidden = !enabled;
+    if (otherWrap) {
+      otherWrap.open = !enabled;                       // expanded when it's the only option
+      otherWrap.classList.toggle('solo', !enabled);    // hides the summary (see CSS)
+    }
+  };
+  if (apiAvailable()) {
     discordSignInEnabled().then((r) => {
-      if (r && r.ok && r.data && r.data.enabled) discordWrap.hidden = false;
+      applyDiscordLayout(!!(r && r.ok && r.data && r.data.enabled));
     });
+  } else {
+    applyDiscordLayout(false);
   }
 
   // First-time Discord sign-up: the name-prompt modal's confirm handler.

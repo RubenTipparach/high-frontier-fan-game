@@ -933,3 +933,21 @@ body.in-lobby .main-menu-fab { display: none; }
   background: rgba(7, 6, 15, 0.82); padding: 24px;
 }
 .modal-box { margin: 0; max-width: 460px; width: 100%; }
+
+/* "Other sign-in options" disclosure under the primary Discord button. */
+.signin-other { margin-top: 16px; }
+.signin-other > summary {
+  cursor: pointer; color: var(--accent); font-size: 13px;
+  list-style: none; padding: 6px 0;
+}
+.signin-other > summary::-webkit-details-marker { display: none; }
+.signin-other > summary::before { content: "\25B8  "; }   /* ▸ */
+.signin-other[open] > summary::before { content: "\25BE  "; } /* ▾ */
+/* When Discord sign-in is unavailable, this is the only form: drop the
+   "Other" summary and any top spacing so it reads as the plain sign-in. */
+.signin-other.solo { margin-top: 0; }
+.signin-other.solo > summary { display: none; }
+
+/* Breathing room above the notify Save / Test DM buttons so they don't
+   crowd the event checkboxes. */
+#notify-section .notify-actions { margin-top: 14px; }

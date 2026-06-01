@@ -66,44 +66,50 @@
       <section id="view-signin" class="view hidden">
         <div class="panel narrow">
           <h2>Sign in</h2>
-          <p class="muted">
-            Pick a name (3-20 chars, letters / numbers / _ / -). The first
-            person to claim a name owns it. To sign in on a second
-            device, paste the 8-character device code from the original
-            device.
-          </p>
-          <form id="form-signin" autocomplete="off">
-            <label>
-              <span>Profile name</span>
-              <input id="signin-name" type="text" minlength="3" maxlength="20"
-                pattern="[A-Za-z0-9_\-]{3,20}" required autocapitalize="off"
-                spellcheck="false" placeholder="orbitalengineer42" />
-            </label>
-            <label>
-              <span>Device code <em class="muted">(optional, paste from another device)</em></span>
-              <input id="signin-code" type="text" maxlength="8"
-                autocapitalize="off" spellcheck="false"
-                placeholder="leave blank for a new profile" />
-            </label>
-            <div class="form-row">
-              <button type="submit" class="primary">Claim profile</button>
-              <span id="signin-error" class="error"></span>
-            </div>
-          </form>
 
-          <!-- Sign in with Discord: an alternative identity that works
-               on any device with no device code. Hidden when the server
-               has no Discord OAuth configured. -->
+          <!-- Primary: Sign in with Discord. Front and center when the
+               server has OAuth configured. -->
           <div id="signin-discord-wrap" class="signin-discord" hidden>
-            <div class="signin-or"><span>or</span></div>
             <button id="btn-signin-discord" type="button" class="discord-btn">
               <span aria-hidden="true">🎮</span> Sign in with Discord
             </button>
             <p class="muted signin-discord-help">
-              No name to claim or device code to copy. Connects on any
-              device and enables turn notifications.
+              No name to claim or device code to copy. Works on any device
+              and enables turn notifications.
             </p>
           </div>
+
+          <!-- Secondary: name claim + device code, collapsed under an
+               "Other" disclosure. When Discord sign-in is unavailable,
+               JS expands this and hides the summary so it's the only
+               (and default) form. -->
+          <details id="signin-other" class="signin-other">
+            <summary>Other sign-in options</summary>
+            <p class="muted">
+              Pick a name (3-20 chars, letters / numbers / _ / -). The first
+              person to claim a name owns it. To sign in on a second
+              device, paste the 8-character device code from the original
+              device.
+            </p>
+            <form id="form-signin" autocomplete="off">
+              <label>
+                <span>Profile name</span>
+                <input id="signin-name" type="text" minlength="3" maxlength="20"
+                  pattern="[A-Za-z0-9_\-]{3,20}" required autocapitalize="off"
+                  spellcheck="false" placeholder="orbitalengineer42" />
+              </label>
+              <label>
+                <span>Device code <em class="muted">(optional, paste from another device)</em></span>
+                <input id="signin-code" type="text" maxlength="8"
+                  autocapitalize="off" spellcheck="false"
+                  placeholder="leave blank for a new profile" />
+              </label>
+              <div class="form-row">
+                <button type="submit" class="primary">Claim profile</button>
+                <span id="signin-error" class="error"></span>
+              </div>
+            </form>
+          </details>
         </div>
       </section>
 
@@ -552,7 +558,7 @@
           </p>
           <label class="checkbox"><input type="checkbox" id="notify-turn" checked /> When it's my turn</label>
           <label class="checkbox"><input type="checkbox" id="notify-auction" checked /> When an auction needs me</label>
-          <div class="main-menu-row">
+          <div class="main-menu-row notify-actions">
             <button id="btn-notify-save" type="button">Save preferences</button>
             <button id="btn-notify-test" type="button">Send test DM</button>
           </div>
