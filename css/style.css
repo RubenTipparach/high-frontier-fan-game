@@ -366,6 +366,17 @@ label.checkbox input { accent-color: var(--accent-2); }
 .lobby-list .meta {
   font-size: 12px; color: var(--ink-dim);
 }
+.lobby-list .turn-meta {
+  display: block;
+  margin-top: 3px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.lobby-list .turn-meta[hidden] { display: none; }
+.lobby-list li.is-your-turn {
+  border-left: 3px solid var(--accent, #fbbf24);
+  padding-left: 9px;
+}
 .lobby-list .name {
   display: block; font-weight: 500; color: var(--ink);
 }

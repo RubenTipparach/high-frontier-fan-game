@@ -427,6 +427,28 @@ async function watchGame(g) {
   });
 }
 
+// Compact relative time ("just now" / "5m ago" / "3h ago" / "2d ago")
+// for the dashboard's "last turn ended" hint.
+function timeAgo(ms) {
+  const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (s < 45) return 'just now';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${Math.max(1, m)}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+// A seat-colour-tinted @name span, matching the in-game .player-name
+// convention (colour falls back to currentColor when unknown).
+function mkPlayerName(text, color) {
+  const span = document.createElement('span');
+  span.className = 'player-name';
+  if (color) span.style.setProperty('--player-color', color);
+  span.textContent = text;
+  return span;
+}
+
 function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
   listEl.innerHTML = '';
   for (const li of prependRows) listEl.appendChild(li);
@@ -450,6 +472,7 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
           · <span class="count"></span>/${g.maxPlayers}
           · <code></code>
           <span class="tag-cancelled" hidden>· cancelled</span></span>
+        <span class="meta turn-meta" hidden></span>
       </div>
       <div class="row-actions">
         <button class="primary"></button>
@@ -459,6 +482,26 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
     li.querySelector('.host').textContent = g.hostName;
     li.querySelector('.count').textContent = g.memberCount;
     li.querySelector('code').textContent = g.code;
+    // In-progress games show whose turn it is, the round, and how long
+    // ago the last turn ended (from /lobbies/mine). The active player's
+    // name is tinted with their seat colour, matching the in-game UI.
+    const turnMeta = li.querySelector('.turn-meta');
+    if (!cancelled && g.gameStatus === 'active' && (g.activePlayerName || g.pendingFirstPlayerName)) {
+      const tail = [];
+      if (g.round && g.maxRounds) tail.push(`Round ${g.round}/${g.maxRounds}`);
+      if (g.lastTurnEndedAt) tail.push(`last turn ended ${timeAgo(g.lastTurnEndedAt)}`);
+      const tailText = tail.length ? ` · ${tail.join(' · ')}` : '';
+      if (g.pendingFirstPlayerName) {
+        if (g.yourTurn) turnMeta.append(`⭐ Pick the first player${tailText}`);
+        else turnMeta.append('⭐ ', mkPlayerName('@' + g.pendingFirstPlayerName, g.activePlayerColor), ` picking first player${tailText}`);
+      } else if (g.yourTurn) {
+        turnMeta.append('🎯 ', mkPlayerName('Your turn', g.activePlayerColor), tailText);
+        li.classList.add('is-your-turn');
+      } else {
+        turnMeta.append('🎯 ', mkPlayerName('@' + g.activePlayerName, g.activePlayerColor), `'s turn${tailText}`);
+      }
+      turnMeta.hidden = false;
+    }
     const btn = li.querySelector('button');
     if (cancelled) {
       li.querySelector('.tag-cancelled').hidden = false;

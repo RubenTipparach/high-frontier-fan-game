@@ -463,6 +463,38 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
        LIMIT 50`
     )
     .all(req.profile.id);
+  // Decorate each in-progress game with whose turn it is, the round
+  // progress, and when the last turn ended, so the dashboard can show
+  // it without opening the board. Capped list (50), so the per-row
+  // lookups are fine.
+  const lastTurnStmt = db.prepare(
+    "SELECT MAX(created_at) AS t FROM game_operations WHERE game_id = ? AND kind IN ('END_TURN', 'SET_FIRST_PLAYER')"
+  );
+  const stateStmt = db.prepare('SELECT state FROM game_states WHERE game_id = ?');
+  for (const row of rows) {
+    if (!row.gameId || row.gameStatus !== 'active') continue;
+    try {
+      const st = stateStmt.get(row.gameId);
+      if (st) {
+        const state = JSON.parse(st.state);
+        const players = Array.isArray(state.players) ? state.players : [];
+        const active = players[state.activeIndex];
+        if (active) {
+          row.activePlayerName = active.name;
+          row.activePlayerColor = active.color || null;
+          row.yourTurn = active.profileId === req.profile.id;
+        }
+        if (state.pendingFirstPlayer) {
+          const chooser = players.find((pl) => pl.profileId === state.pendingFirstPlayer.chooserId);
+          row.pendingFirstPlayerName = chooser ? chooser.name : null;
+        }
+        row.round = state.round;
+        row.maxRounds = state.maxRounds;
+      }
+    } catch { /* ignore a malformed state blob */ }
+    const last = lastTurnStmt.get(row.gameId);
+    row.lastTurnEndedAt = (last && last.t) || null;
+  }
   res.json({ entries: rows });
 });
 
