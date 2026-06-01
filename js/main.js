@@ -1,11 +1,11 @@
 // Bootstrap and top-level UI coordination.
 
 import { probeServer, apiAvailable, lookupInviteLink, claimInviteLink, getLobbyByCode,
-  getNotifyPrefs, setNotifyPrefs, testNotify, startDiscordOauth,
+  getNotifyPrefs, setNotifyPrefs, testNotify, startDiscordOauth, whoami,
   discordSignInEnabled, discordLoginStartUrl, discordExchange, discordSignup } from './api.js';
 import {
   restoreProfile, activeProfile, signIn, signOut, mintDeviceCode,
-  adoptServerSession, onProfileChange,
+  adoptServerSession, markDiscordLinked, onProfileChange,
 } from './auth.js';
 import { ws } from './ws.js';
 import {
@@ -150,6 +150,22 @@ function reflectProfile(profile) {
     pill.classList.add('hidden');
     signin.classList.remove('hidden');
   }
+}
+
+// Show the account-menu "Connect to Discord" button only for a signed-in
+// user whose account ISN'T linked yet, on a deployment that has Discord
+// OAuth. Fetches fresh status from the server so it reflects links made
+// on other devices. Hidden in every other case.
+async function refreshDiscordLinkButton() {
+  const btn = document.getElementById('btn-connect-discord-acct');
+  if (!btn) return;
+  const me = activeProfile();
+  if (!me || !apiAvailable()) { btn.hidden = true; return; }
+  // Fast path: a Discord-minted / freshly-linked session knows it's linked.
+  if (me.discordLinked) { btn.hidden = true; return; }
+  const r = await whoami(me.token);
+  const show = r.ok && r.data && r.data.oauthEnabled && !r.data.discordLinked;
+  btn.hidden = !show;
 }
 
 // Browse view: read-only data inspector. Always reachable; doesn't
@@ -428,6 +444,40 @@ function initAccountMenu() {
   document.getElementById('btn-account').addEventListener('click', (ev) => {
     ev.stopPropagation();
     menu.classList.toggle('hidden');
+    // Re-check link status each time the menu opens so the Connect
+    // button reflects the latest state (e.g. linked from another device).
+    if (!menu.classList.contains('hidden')) refreshDiscordLinkButton();
+  });
+  // "Connect to Discord": migrate this username/token account to Discord
+  // by linking a Discord ID (reuses the same OAuth popup as notifications;
+  // the callback records the auth identity). Polls until linked, then the
+  // button hides for good.
+  document.getElementById('btn-connect-discord-acct')?.addEventListener('click', async () => {
+    const me = activeProfile();
+    if (!me) return;
+    const btn = document.getElementById('btn-connect-discord-acct');
+    btn.disabled = true;
+    const r = await startDiscordOauth(me.token);
+    btn.disabled = false;
+    if (!r.ok || !r.data || !r.data.url) {
+      toast('Could not start Discord linking. Try again.', 'error');
+      return;
+    }
+    const popup = window.open(r.data.url, 'hf-discord-link', 'width=520,height=720');
+    if (!popup) { toast('Allow popups, then click Connect again.', 'error'); return; }
+    toast('Approve in the Discord window…');
+    const started = Date.now();
+    const tick = setInterval(async () => {
+      if (Date.now() - started > 120000) { clearInterval(tick); return; }
+      const w = await whoami(me.token);
+      if (w.ok && w.data && w.data.discordLinked) {
+        clearInterval(tick);
+        markDiscordLinked();            // updates state + hides via refresh below
+        refreshDiscordLinkButton();
+        toast('Discord connected to your account.', 'success');
+        try { popup.close(); } catch { /* cross-origin close may throw */ }
+      }
+    }, 2000);
   });
   document.addEventListener('click', (ev) => {
     if (!menu.classList.contains('hidden')
@@ -585,6 +635,7 @@ async function afterSignIn() {
   showView('view-lobby-list');
   refreshLobbyList();
   refreshInvitesList();
+  refreshDiscordLinkButton();
   // If the user landed on a `?invite=<code>` URL, claim it now.
   await maybeClaimInviteFromUrl();
 }
@@ -770,6 +821,7 @@ async function boot() {
     // Keep the multiplayer view populated for when the player switches.
     refreshLobbyList();
     refreshInvitesList();
+    refreshDiscordLinkButton();
     // Landing priority: a `?invite=` URL wins; otherwise always land on
     // the lobby. Auto-resume is gone - a player can have several games
     // going at once, so jumping straight into one is presumptuous. Each

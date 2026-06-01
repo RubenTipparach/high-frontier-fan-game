@@ -250,7 +250,19 @@ app.post('/profiles', (req, res) => {
 });
 
 app.get('/profiles/me', requireProfile, (req, res) => {
-  res.json({ id: req.profile.id, name: req.profile.name });
+  // discordLinked drives the account-menu "Connect to Discord" button:
+  // shown to a signed-in user only until their account has a Discord
+  // identity, then hidden. oauthEnabled lets the client skip the button
+  // entirely on a deployment with no Discord OAuth.
+  const discordLinked = !!db
+    .prepare('SELECT 1 FROM discord_accounts WHERE profile_id = ?')
+    .get(req.profile.id);
+  res.json({
+    id: req.profile.id,
+    name: req.profile.name,
+    discordLinked,
+    oauthEnabled: oauthEnabled(),
+  });
 });
 
 // Add-a-device flow. The caller (already authenticated on this device)

@@ -455,6 +455,13 @@
     -->
     <div id="account-menu" class="popover hidden">
       <h3>@<span id="account-name"></span></h3>
+      <!-- Migrate an existing (username/token) account to Discord: links
+           a Discord ID so the player can sign in with Discord on any
+           device + get notifications. Hidden once the account is linked
+           (and on deployments without Discord OAuth). -->
+      <button id="btn-connect-discord-acct" class="discord-btn" hidden>
+        <span aria-hidden="true">🎮</span> Connect to Discord
+      </button>
       <button id="btn-add-device">Add another device…</button>
       <div id="device-code-box" class="device-code-box hidden">
         <p class="muted">Paste this on the new device's sign-in screen:</p>
