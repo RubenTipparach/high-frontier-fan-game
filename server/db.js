@@ -60,13 +60,28 @@ db.exec(`
     updated_at      INTEGER NOT NULL
   );
 
-  -- Server-wide key/value settings (e.g. the global announcement banner).
-  -- Editable from /admin; surfaced to every client.
+  -- Server-wide key/value settings (e.g. the global announcement banner,
+  -- and the admin Discord allowlist seeded from the ADMIN_DISCORD_ID
+  -- secret on boot). Editable from /admin; surfaced to every client.
   CREATE TABLE IF NOT EXISTS server_settings (
     key        TEXT PRIMARY KEY,
     value      TEXT,
     updated_at INTEGER NOT NULL
   );
+
+  -- Admin browser sessions. The /admin panel is gated behind Discord
+  -- OAuth: only an allowlisted Discord account can sign in. On a
+  -- successful login we mint a random session token, store ONLY its
+  -- sha256 here (never the raw token, mirroring the profile tokens
+  -- table), and hand the raw token back as an httpOnly cookie.
+  CREATE TABLE IF NOT EXISTS admin_sessions (
+    token_hash  TEXT PRIMARY KEY,
+    discord_id  TEXT NOT NULL,
+    created_at  INTEGER NOT NULL,
+    expires_at  INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_admin_sessions_exp
+    ON admin_sessions(expires_at);
 
   -- A lobby is a pre-game waiting room. Once status flips to 'started'
   -- the lobby becomes the home for an in-progress game; chat and

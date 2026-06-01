@@ -21,6 +21,7 @@ import {
   sendDM, discordEnabled,
   sendWebhook, webhookEnabled, isWebhookUrl, defaultWebhookUrl,
   oauthEnabled, oauthClientId, buildAuthorizeUrl, completeOauth,
+  oauthIdentifyEnabled, buildIdentifyAuthorizeUrl, identifyOauth,
 } from './discord.js';
 
 const PORT = Number(process.env.PORT) || 8080;
@@ -171,8 +172,149 @@ app.get('/announcement', (_req, res) => {
   res.json({ message: (row && row.value) || '', updatedAt: (row && row.updated_at) || 0 });
 });
 
+// ===== Admin auth (Discord OAuth, allowlisted) =====
+//
+// The /admin panel is gated behind Discord OAuth: only an allowlisted
+// Discord account may sign in. The allowlist is seeded from the
+// ADMIN_DISCORD_ID secret into server_settings on boot (so the id stays
+// out of source and rotates with the secret), and a successful login
+// mints a DB-backed session - sha256 of the token is stored, the raw
+// token rides in an httpOnly cookie (same posture as profile tokens).
+
+const ADMIN_COOKIE = 'hf_admin';
+const ADMIN_COOKIE_PATH = '/admin';
+const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12h
+
+// Seed the allowlist from the ADMIN_DISCORD_ID(S) secret on every boot,
+// so adding the secret on Fly + redeploy materialises it DB-side and
+// rotating it updates the stored allowlist. Comma-separated ids
+// supported; an absent env leaves whatever is already stored.
+(function seedAdminAllowlist() {
+  const raw = String(process.env.ADMIN_DISCORD_ID || process.env.ADMIN_DISCORD_IDS || '').trim();
+  if (!raw) return;
+  const ids = raw.split(',').map((s) => s.trim()).filter((s) => /^\d{5,25}$/.test(s));
+  if (!ids.length) return;
+  db.prepare(
+    `INSERT INTO server_settings (key, value, updated_at) VALUES ('admin_discord_ids', ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  ).run(ids.join(','), nowMs());
+})();
+
+function adminAllowlist() {
+  const row = db.prepare("SELECT value FROM server_settings WHERE key = 'admin_discord_ids'").get();
+  return new Set(String((row && row.value) || '').split(',').map((s) => s.trim()).filter(Boolean));
+}
+function isAdminDiscordId(id) {
+  return adminAllowlist().has(String(id || ''));
+}
+
+function readCookie(req, name) {
+  const header = req.headers.cookie;
+  if (!header) return null;
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq < 0) continue;
+    if (part.slice(0, eq).trim() === name) return decodeURIComponent(part.slice(eq + 1).trim());
+  }
+  return null;
+}
+
+// Mint a DB-backed admin session; returns the raw token for the cookie.
+function createAdminSession(discordId) {
+  const token = generateShortCode(24);
+  const now = nowMs();
+  db.prepare(
+    `INSERT INTO admin_sessions (token_hash, discord_id, created_at, expires_at)
+     VALUES (?, ?, ?, ?)`
+  ).run(hashToken(token), String(discordId), now, now + ADMIN_SESSION_TTL_MS);
+  return token;
+}
+
+// Resolve the admin from the request cookie. The session must be
+// unexpired AND its Discord id still on the allowlist, so dropping an id
+// from the secret + redeploy revokes any live session. Returns the
+// Discord id or null; prunes the row when it has expired.
+function adminFromRequest(req) {
+  const token = readCookie(req, ADMIN_COOKIE);
+  if (!token) return null;
+  const hash = hashToken(token);
+  const row = db.prepare('SELECT discord_id, expires_at FROM admin_sessions WHERE token_hash = ?').get(hash);
+  if (!row) return null;
+  if (row.expires_at <= nowMs()) {
+    db.prepare('DELETE FROM admin_sessions WHERE token_hash = ?').run(hash);
+    return null;
+  }
+  if (!isAdminDiscordId(row.discord_id)) return null;
+  return row.discord_id;
+}
+
+function setAdminCookie(req, res, token) {
+  res.cookie(ADMIN_COOKIE, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: req.protocol === 'https',
+    maxAge: ADMIN_SESSION_TTL_MS,
+    path: ADMIN_COOKIE_PATH,
+  });
+}
+function clearAdminSession(req, res) {
+  const token = readCookie(req, ADMIN_COOKIE);
+  if (token) db.prepare('DELETE FROM admin_sessions WHERE token_hash = ?').run(hashToken(token));
+  res.clearCookie(ADMIN_COOKIE, { path: ADMIN_COOKIE_PATH });
+}
+
+// Middleware for admin action routes: 403 unless a valid admin session.
+function requireAdmin(req, res, next) {
+  if (adminFromRequest(req)) return next();
+  return res.status(403).json({ error: 'admin_auth_required' });
+}
+
+// Minimal styled HTML page (login screen + error notices), matching the
+// OAuth callback's look.
+function adminHtmlPage(title, bodyHtml, accent = '#f87171') {
+  return `<!doctype html><html><head><meta charset="utf-8">
+<title>${esc(title)}</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font:15px ui-sans-serif,system-ui,sans-serif;background:#07060f;color:#e6e9ff;
+display:flex;min-height:100vh;margin:0;align-items:center;justify-content:center;text-align:center;padding:24px}
+.box{max-width:440px}h1{font-size:20px;color:${accent};margin:0 0 12px}
+p{color:#8b90b8;line-height:1.55}
+a.btn{display:inline-block;margin-top:18px;padding:11px 18px;border-radius:9px;
+background:#5865F2;color:#fff;text-decoration:none;font-weight:700}
+a.btn:hover{background:#4752c4}</style></head><body><div class="box">
+<h1>${esc(title)}</h1>${bodyHtml}</div></body></html>`;
+}
+function adminLoginPage() {
+  const ready = oauthIdentifyEnabled() && adminAllowlist().size > 0;
+  if (!ready) {
+    return adminHtmlPage('Admin locked',
+      `<p>The admin panel is gated behind Discord, but it is not configured on this
+       server yet. Set <code>DISCORD_CLIENT_ID</code> / <code>DISCORD_CLIENT_SECRET</code>
+       and the <code>ADMIN_DISCORD_ID</code> secret, then redeploy.</p>`);
+  }
+  return adminHtmlPage('Admin sign-in',
+    `<p>This panel is restricted. Sign in with the authorized Discord account to continue.</p>
+     <a class="btn" href="/admin/login">Sign in with Discord</a>`, '#4ade80');
+}
+
+// Start admin sign-in: stash an admin OAuth state and bounce to Discord.
+app.get('/admin/login', (req, res) => {
+  if (!oauthIdentifyEnabled() || !adminAllowlist().size) {
+    return res.status(503).type('html').send(adminLoginPage());
+  }
+  pruneOauthStates();
+  const state = generateShortCode(16);
+  _oauthStates.set(state, { admin: true, exp: Date.now() + OAUTH_STATE_TTL_MS });
+  res.redirect(buildIdentifyAuthorizeUrl(state, oauthRedirectUri(req)));
+});
+
+// Sign out: drop the session row and clear the cookie.
+app.post('/admin/logout', (req, res) => {
+  clearAdminSession(req, res);
+  res.json({ ok: true });
+});
+
 // Set the announcement (lives under /admin like the other admin actions).
-app.post('/admin/announcement', (req, res) => {
+app.post('/admin/announcement', requireAdmin, (req, res) => {
   const message = String((req.body && req.body.message) || '');
   db.prepare(
     `INSERT INTO server_settings (key, value, updated_at) VALUES ('announcement', ?, ?)
@@ -184,7 +326,7 @@ app.post('/admin/announcement', (req, res) => {
 // Save the server-wide Discord channel webhook URL (or clear it with a
 // blank value). Validated so a typo doesn't silently disable the feed.
 // Same open-dashboard posture as the other /admin actions.
-app.post('/admin/discord-webhook', (req, res) => {
+app.post('/admin/discord-webhook', requireAdmin, (req, res) => {
   const url = String((req.body && req.body.url) || '').trim();
   if (url && !isWebhookUrl(url)) return res.status(400).json({ error: 'bad_webhook_url' });
   db.prepare(
@@ -197,7 +339,7 @@ app.post('/admin/discord-webhook', (req, res) => {
 // Fire a test message to a webhook URL. Uses the URL in the request
 // body if present (so the operator can verify before saving), else the
 // saved / env URL. 503 if nothing is configured, 502 on a Discord error.
-app.post('/admin/discord-webhook/test', async (req, res) => {
+app.post('/admin/discord-webhook/test', requireAdmin, async (req, res) => {
   let url = String((req.body && req.body.url) || '').trim();
   if (!url) url = storedWebhookUrl();
   if (!isWebhookUrl(url)) return res.status(503).json({ error: 'webhook_disabled' });
@@ -987,6 +1129,21 @@ p{color:#8b90b8;line-height:1.5}</style></head><body><div class="box">
   if (!entry) return sendPage('Link expired', 'That link expired or was already used. Reopen the menu and click Connect again.', false);
   _oauthStates.delete(state);
   if (!code) return sendPage('Missing code', 'Discord did not return an authorization code. Please try again.', false);
+  // Admin sign-in: identify-only, gate on the Discord allowlist, then
+  // mint a DB-backed session cookie and bounce to the dashboard.
+  if (entry.admin) {
+    const a = await identifyOauth(code, oauthRedirectUri(req));
+    if (!a.ok) {
+      console.warn('[admin] oauth login failed -', a.error);
+      return sendPage('Login failed', `Discord login failed (${esc(a.error)}). You can close this and try again.`, false);
+    }
+    if (!isAdminDiscordId(a.userId)) {
+      console.warn('[admin] denied login for discord id', a.userId);
+      return sendPage('Access denied', 'This Discord account is not authorized for the admin panel.', false);
+    }
+    setAdminCookie(req, res, createAdminSession(a.userId));
+    return res.redirect('/admin');
+  }
   const profile = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(entry.profileId);
   if (!profile) return sendPage('Profile not found', 'Could not match this link to a profile. Please try again.', false);
 
@@ -1648,18 +1805,21 @@ setInterval(() => {
 
 // ----- Admin dashboard -----
 //
-// Public read-only dashboard at /admin: KPIs, profiles, lobbies,
-// recent chat, pending invites, invite links. Mirrors the
-// murdoku-companion admin in shape: a single HTML render with
-// inline styles, no client framework, and one JS-powered admin
-// action (mint a new device code for a profile).
+// Admin dashboard at /admin: KPIs, profiles, lobbies, recent chat,
+// pending invites, invite links. Mirrors the murdoku-companion admin in
+// shape: a single HTML render with inline styles, no client framework.
 //
-// The dashboard is intentionally unauthenticated - the operator's
-// only protection is "the URL isn't linked from anywhere users
-// see". Gate behind a reverse-proxy basic auth or an admin secret
-// before exposing to a hostile audience.
+// Gated behind Discord OAuth (see the "Admin auth" section above): only
+// an allowlisted Discord account may sign in. Unauthenticated visitors
+// get the sign-in screen; the mutating action routes below are wrapped
+// in requireAdmin.
 
-app.get('/admin', (_req, res) => {
+app.get('/admin', (req, res) => {
+  // Gated behind Discord OAuth: unauthenticated visitors get the
+  // sign-in screen instead of the dashboard.
+  if (!adminFromRequest(req)) {
+    return res.type('html').send(adminLoginPage());
+  }
   const kpi = db
     .prepare(
       `SELECT
@@ -1857,6 +2017,7 @@ app.get('/admin', (_req, res) => {
     </div>
     <div class="ws-info">
       <strong>${wsCount}</strong> open sockets · <strong>${wsAuthed}</strong> authed
+      · <a href="#" onclick="fetch('/admin/logout',{method:'POST'}).then(function(){location.href='/admin';});return false;">Sign out</a>
     </div>
   </div>
 
@@ -2096,11 +2257,8 @@ document.addEventListener('click', function (ev) {
 // Mint a fresh device code for a profile and ADD it to the tokens
 // table. The user's existing devices keep working; this just adds
 // another credential. Returns the plaintext once - only chance to
-// see it before it's hashed for storage.
-//
-// Anonymous endpoint to match the open-dashboard posture. Gate
-// behind an admin secret before deploying anywhere that matters.
-app.post('/admin/profiles/:id/add-token', (req, res) => {
+// see it before it's hashed for storage. requireAdmin-gated.
+app.post('/admin/profiles/:id/add-token', requireAdmin, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
   const row = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(id);
@@ -2117,12 +2275,11 @@ app.post('/admin/profiles/:id/add-token', (req, res) => {
 // dangling data" - keep the audit trail). Sets lobbies.status and
 // games.status to 'cancelled', cancels pending invites + broadcasts
 // invite_cancelled, then broadcasts lobby_disbanded so anyone still
-// on the channel drops. Anonymous to match the open-dashboard
-// posture - gate behind an admin secret before exposing publicly.
+// on the channel drops. requireAdmin-gated.
 //
 // Endpoint path is still .../delete so the existing admin button
 // keeps working without a UI change.
-app.post('/admin/lobbies/:id/delete', (req, res) => {
+app.post('/admin/lobbies/:id/delete', requireAdmin, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
   const row = db.prepare('SELECT id FROM lobbies WHERE id = ?').get(id);
@@ -2149,7 +2306,7 @@ app.post('/admin/lobbies/:id/delete', (req, res) => {
 // it was cancelled while still waiting, so the lobby goes back to
 // waiting. Pending invites are NOT auto-restored (they were resolved
 // at cancel time); the host can re-invite.
-app.post('/admin/lobbies/:id/restore', (req, res) => {
+app.post('/admin/lobbies/:id/restore', requireAdmin, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
   const row = db.prepare('SELECT id, status FROM lobbies WHERE id = ?').get(id);

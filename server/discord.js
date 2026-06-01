@@ -241,3 +241,35 @@ export async function completeOauth(code, redirectUri) {
   if (!joined.ok) return joined;
   return { ok: true, userId: me.userId };
 }
+
+// ----- identify-only OAuth (admin sign-in) -----
+//
+// Admin login only needs to learn WHO authorized (the `identify`
+// scope); it never joins a guild, so it works with just CLIENT_ID +
+// CLIENT_SECRET (no bot token / guild id required) and skips the
+// addToGuild step.
+export function oauthIdentifyEnabled() {
+  return !!(CLIENT_ID && CLIENT_SECRET);
+}
+
+export function buildIdentifyAuthorizeUrl(state, redirectUri) {
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID,
+    response_type: 'code',
+    scope: 'identify',
+    state,
+    redirect_uri: redirectUri,
+  });
+  return `https://discord.com/api/oauth2/authorize?${params.toString()}`;
+}
+
+// code -> access token -> user id, no guild join. Returns { ok, userId }.
+export async function identifyOauth(code, redirectUri) {
+  if (!oauthIdentifyEnabled()) return { ok: false, error: 'oauth_disabled' };
+  const tok = await exchangeCode(code, redirectUri);
+  if (!tok.ok) return tok;
+  const me = await fetchUserId(tok.accessToken);
+  if (!me.ok) return me;
+  if (!/^\d{5,25}$/.test(me.userId)) return { ok: false, error: 'bad_discord_id' };
+  return { ok: true, userId: me.userId };
+}
