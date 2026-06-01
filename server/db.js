@@ -68,6 +68,17 @@ db.exec(`
     updated_at INTEGER NOT NULL
   );
 
+  -- One-time CSRF state for the Discord "Connect" OAuth flow. Persisted
+  -- (not in-memory) so the token survives a Fly machine restart / cold
+  -- start between the authorize redirect and the callback - on Fly the
+  -- machine can auto-stop while the user is on Discord's consent screen,
+  -- which would wipe an in-memory store and break every link.
+  CREATE TABLE IF NOT EXISTS oauth_states (
+    state      TEXT PRIMARY KEY,
+    profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL
+  );
+
   -- A lobby is a pre-game waiting room. Once status flips to 'started'
   -- the lobby becomes the home for an in-progress game; chat and
   -- members carry over. Stage 1 doesn't ship an engine yet, so

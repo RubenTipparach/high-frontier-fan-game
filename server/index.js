@@ -883,12 +883,15 @@ app.post('/me/notify/test', requireProfile, async (req, res) => {
 // held in memory with a short TTL (the whole flow takes seconds; a
 // process restart mid-flow just means the user clicks again).
 
-const _oauthStates = new Map(); // state -> { profileId, exp }
+// State is persisted in SQLite (oauth_states), NOT in process memory:
+// on Fly the machine can auto-stop while the user is on Discord's consent
+// screen, so an in-memory token would be gone by the time the callback
+// cold-starts a fresh process - which presented as "Link expired" on
+// every attempt. The DB lives on the volume and survives restarts.
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
 function pruneOauthStates() {
-  const now = Date.now();
-  for (const [s, v] of _oauthStates) if (v.exp <= now) _oauthStates.delete(s);
+  db.prepare('DELETE FROM oauth_states WHERE expires_at <= ?').run(Date.now());
 }
 
 // The redirect URI must be byte-identical in the authorize request, the
@@ -905,7 +908,8 @@ app.post('/me/notify/oauth/start', requireProfile, (req, res) => {
   if (!oauthEnabled()) return res.status(503).json({ error: 'oauth_disabled' });
   pruneOauthStates();
   const state = generateShortCode(16);
-  _oauthStates.set(state, { profileId: req.profile.id, exp: Date.now() + OAUTH_STATE_TTL_MS });
+  db.prepare('INSERT INTO oauth_states (state, profile_id, expires_at) VALUES (?, ?, ?)')
+    .run(state, req.profile.id, Date.now() + OAUTH_STATE_TTL_MS);
   res.json({ ok: true, url: buildAuthorizeUrl(state, oauthRedirectUri(req)) });
 });
 
@@ -930,16 +934,21 @@ p{color:#8b90b8;line-height:1.5}</style></head><body><div class="box">
   if (err) return sendPage('Discord connection cancelled', 'You can close this window and try again.', false);
   const state = String(req.query.state || '');
   const code = String(req.query.code || '');
-  const entry = state && _oauthStates.get(state);
-  if (!entry) return sendPage('Link expired', 'That link expired or was already used. Reopen the menu and click Connect again.', false);
-  _oauthStates.delete(state);
+  // Look up + consume the one-time state (delete so it can't be replayed).
+  const entry = state
+    ? db.prepare('SELECT profile_id, expires_at FROM oauth_states WHERE state = ?').get(state)
+    : null;
+  if (entry) db.prepare('DELETE FROM oauth_states WHERE state = ?').run(state);
+  if (!entry || entry.expires_at <= Date.now()) {
+    return sendPage('Link expired', 'That link expired or was already used. Reopen the menu and click Connect again.', false);
+  }
   if (!code) return sendPage('Missing code', 'Discord did not return an authorization code. Please try again.', false);
-  const profile = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(entry.profileId);
+  const profile = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(entry.profile_id);
   if (!profile) return sendPage('Profile not found', 'Could not match this link to a profile. Please try again.', false);
 
   const r = await completeOauth(code, oauthRedirectUri(req));
   if (!r.ok) {
-    console.warn('[notify] oauth callback failed for profile', entry.profileId, '-', r.error);
+    console.warn('[notify] oauth callback failed for profile', entry.profile_id, '-', r.error);
     return sendPage('Connection failed', `Discord linking failed (${esc(r.error)}). You can close this and try again.`, false);
   }
   // Persist the id + enable both event kinds by default (preserve any
@@ -950,7 +959,7 @@ p{color:#8b90b8;line-height:1.5}</style></head><body><div class="box">
      ON CONFLICT(profile_id) DO UPDATE SET
        discord_user_id = excluded.discord_user_id,
        updated_at      = excluded.updated_at`
-  ).run(entry.profileId, r.userId, nowMs());
+  ).run(entry.profile_id, r.userId, nowMs());
   // Fire a confirmation DM now that the guild membership exists.
   sendDM(r.userId, `✅ Discord connected for @${profile.name}. You'll get a DM when it's your turn.`)
     .then((d) => { if (!d.ok) console.warn('[notify] confirm DM failed -', d.error); });
