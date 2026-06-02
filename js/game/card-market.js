@@ -275,8 +275,7 @@ export function openAuctionConfirmModal({
   const costLine = multiplayer
     ? `<strong>Cost:</strong> 1 operation. The top of the
        <strong>${escapeHtml(card.type || 'patent')}</strong> deck goes up
-       for auction; every other player can bid in aqua. You can bid in your
-       own auction to keep the price down.`
+       for auction; every other player can bid in aqua.`
     : `<strong>Cost:</strong> 1 operation + 0 aqua (solo / sandbox mode).`;
   const bonusBlock = multiplayer
     ? `<p class="muted">The auction winner also receives the top card of
