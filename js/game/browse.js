@@ -1385,8 +1385,14 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
 
   // --- Your bid (ANY player, the auctioneer included) ---
   // Ties are allowed, so the floor is the high bid itself (>=), not +1.
-  // Bids can be 0 (claim it free), so the floor is never below 0.
-  const minBid = Math.max(0, high);
+  // Bids can be 0 (claim it free), so the floor is never below 0. The
+  // auctioneer is the exception: they win ties, so their floor is the top
+  // RIVAL bid, letting them walk an overbid back down to it and still take
+  // the lot.
+  const iAmAuctioneer = (myId === a.auctioneerId);
+  const rivalHigh = Object.entries(bids).reduce(
+    (hi, [pid, amt]) => (Number(pid) !== myId ? Math.max(hi, amt | 0) : hi), 0);
+  const minBid = iAmAuctioneer ? rivalHigh : Math.max(0, high);
   if (iAutoPassed) {
     // Out for the lot - the banner above says so; offer no bid/pass
     // controls (a fresh lot resets this).
@@ -1411,9 +1417,11 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
       // identical amount would only reopen the floor and make everyone bid
       // again (an auctioneer's bid always reopens it), so block it here.
       const unchanged = hasBid && Number.isInteger(v) && v === myBid;
-      const tie = Number.isInteger(v) && v === high && high > 0;
+      const lowering = iAmAuctioneer && hasBid && Number.isInteger(v) && v < myBid;
+      const tie = !lowering && Number.isInteger(v) && v === high && high > 0;
       bidBtn.textContent = !Number.isInteger(v) ? 'Bid'
         : unchanged ? `Your bid: ${v}`
+        : lowering ? `Lower to ${v}`
         : tie ? `Tie at ${v}`
         : myBid ? `Change to ${v}`
         : `Bid ${v}`;
@@ -1431,9 +1439,12 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
     });
     row.append(input, bidBtn);
     host.appendChild(row);
-    const floor = high > 0
-      ? ` Bids must be ${minBid}+ (ties allowed).`
-      : ' Open the bidding at 0+ (bid 0 to claim it free).';
+    const canLower = iAmAuctioneer && hasBid && myBid > minBid;
+    const floor = canLower
+      ? ` You can lower your bid to ${minBid} (the top rival bid) and still take the lot.`
+      : high > 0
+        ? ` Bids must be ${minBid}+ (ties allowed).`
+        : ' Open the bidding at 0+ (bid 0 to claim it free).';
     const mine = (myId in bids) ? ` Your bid: ${bids[myId]}.` : '';
     host.appendChild(noteEl(`You have ${myAqua} aqua.${floor}${mine}`));
     sync();

@@ -1365,6 +1365,18 @@ function allBiddersActed(state) {
     acted.includes(p.profileId) || auto.includes(p.profileId) || biddingBlockedByHand(p));
 }
 
+// Highest standing bid that is NOT this player's own. The auctioneer wins
+// ties, so this is the least they must match to lead - and therefore the
+// floor they may walk an overbid back down to.
+function highestOtherBid(state, profileId) {
+  const bids = (state.auction && state.auction.bids) || {};
+  let hi = 0;
+  for (const [pid, amt] of Object.entries(bids)) {
+    if (Number(pid) !== profileId) hi = Math.max(hi, amt | 0);
+  }
+  return hi;
+}
+
 function applyAuctionStart(state, op, ctx) {
   if (state.auction) return fail('auction_in_progress');
   const player = currentPlayer(state);
@@ -1411,35 +1423,60 @@ function applyAuctionBid(state, op, ctx) {
   const amount = Number(op.amount);
   // Bids can be 0 (claim it free); only negatives are invalid.
   if (!Number.isInteger(amount) || amount < 0) return fail('bad_amount');
-  // Must at least tie the current high (ties are allowed); only the
-  // floor is enforced, so a player may raise or re-tie freely.
-  const floorBefore = a.highBid || 0;
+
+  a.bids = a.bids || {};
+  const isAuctioneer = bidder.profileId === a.auctioneerId;
+  const prevBid = (bidder.profileId in a.bids) ? a.bids[bidder.profileId] : null;
+  // Floor: a non-auctioneer must at least tie the current high (ties are
+  // allowed). The auctioneer wins ties, so their floor excludes their own
+  // bid - they only need to match the top RIVAL bid to lead. That lets them
+  // walk an accidental overbid back down to the real competition instead of
+  // being trapped above it.
+  const rivalHigh = highestOtherBid(state, bidder.profileId);
+  const floorBefore = isAuctioneer ? rivalHigh : (a.highBid || 0);
   if (amount < floorBefore) return fail('bid_too_low');
   if (amount > bidder.aqua) return fail('insufficient_aqua');
 
-  a.bids = a.bids || {};
   a.bids[bidder.profileId] = amount;
   a.passed = (a.passed || []).filter((id) => id !== bidder.profileId);
   // Placing a bid opts the bidder back in - it cancels both a plain pass
   // and a permanent auto-pass.
   a.autoPassed = (a.autoPassed || []).filter((id) => id !== bidder.profileId);
-  // A raise (or ANY auctioneer bid) reopens the floor: clear the pass
-  // list and reset the responded set to just this bidder, so every
-  // other player must bid or pass again (this is what makes an
-  // auctioneer tie force the others to respond). A plain tie by a
-  // non-auctioneer just adds them to the responded set.
-  const reopen = amount > floorBefore || bidder.profileId === a.auctioneerId;
-  if (reopen) {
-    a.passed = [];
-    a.acted = [bidder.profileId];
-  } else if (!(a.acted || []).includes(bidder.profileId)) {
-    a.acted = [...(a.acted || []), bidder.profileId];
+
+  // A LOWER by the auctioneer (reducing a standing overbid toward the top
+  // rival) only drops the price-to-beat, so it puts nobody new on the clock:
+  // everyone who already took a position goes back to acknowledged and the
+  // lot stays closeable. Anyone who never responded stays pending.
+  const isLower = isAuctioneer && prevBid != null && amount < prevBid;
+  if (isLower) {
+    const acked = state.players
+      .filter((p) => p.profileId !== a.auctioneerId)
+      .filter((p) => (p.profileId in a.bids)
+        || (a.passed || []).includes(p.profileId)
+        || (a.autoPassed || []).includes(p.profileId)
+        || biddingBlockedByHand(p))
+      .map((p) => p.profileId);
+    a.acted = [a.auctioneerId, ...acked];
+  } else {
+    // A raise (or ANY fresh/equal auctioneer bid) reopens the floor: clear
+    // the pass list and reset the responded set to just this bidder, so
+    // every other player must bid or pass again (this is what makes an
+    // auctioneer tie force the others to respond). A plain tie by a
+    // non-auctioneer just adds them to the responded set.
+    const reopen = amount > floorBefore || isAuctioneer;
+    if (reopen) {
+      a.passed = [];
+      a.acted = [bidder.profileId];
+    } else if (!(a.acted || []).includes(bidder.profileId)) {
+      a.acted = [...(a.acted || []), bidder.profileId];
+    }
   }
   recomputeAuction(state);
-  const tie = amount === floorBefore && floorBefore > 0;
+  const tie = !isLower && amount === floorBefore && floorBefore > 0;
+  const verb = isLower ? 'lowered the bid to' : tie ? 'tied the bid at' : 'bid';
   return {
     ok: true, state,
-    log: `${bidder.name} ${tie ? 'tied the bid at' : 'bid'} ${amount} aqua.`,
+    log: `${bidder.name} ${verb} ${amount} aqua.`,
   };
 }
 
