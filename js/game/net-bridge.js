@@ -119,6 +119,7 @@ export function hydrateFromSnapshot(snapshot, myId, maps) {
   hydrateClock({
     turn: snapshot.turn | 0,
     round: snapshot.round || 1,
+    maxRounds: snapshot.maxRounds || null,
     lastEvent: snapshot.lastEvent || null,
     opsRemaining: me ? (me.opsRemaining | 0) : 0,
     movesRemaining: me ? (me.movesRemaining | 0) : 0,

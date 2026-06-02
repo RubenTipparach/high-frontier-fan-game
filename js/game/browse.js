@@ -12,7 +12,7 @@ import {
   consumeMove, refundMove, getTurn, getMovesRemaining, onTurnChange,
   getEventForRoll, getSeasonForSlot, getSeason, resetClock,
   getOpsRemaining, consumeOp,
-  getDiscardsRemaining, consumeDiscard,
+  getDiscardsRemaining, consumeDiscard, formatTurnNumber,
 } from './turn-clock.js';
 import { triggerEndTurn, openTurnClockModal, buildDie, rollDie } from './turn-clock-ui.js';
 import {
@@ -822,14 +822,17 @@ function syncMpTurnBanner(snapshot) {
   } else {
     banner.style.removeProperty('--mp-turn-color');
   }
+  // Compact turn number (round.slot/maxRounds, slot 1-based) so the
+  // banner always shows where in the game we are.
+  const tn = formatTurnNumber(snapshot.round, snapshot.turn, snapshot.maxRounds);
   if (!active) {
-    banner.textContent = 'Waiting…';
+    banner.textContent = `Waiting… · ${tn}`;
     banner.classList.remove('is-your-turn');
   } else if (myTurn) {
-    banner.textContent = 'Your turn';
+    banner.textContent = `Your turn · ${tn}`;
     banner.classList.add('is-your-turn');
   } else {
-    banner.textContent = '@' + active.name + "'s turn";
+    banner.textContent = `@${active.name}'s turn · ${tn}`;
     banner.classList.remove('is-your-turn');
   }
   banner.hidden = false;
@@ -1896,7 +1899,7 @@ function renderMpPanel(snapshot) {
     : 'Waiting…';
   const clock = document.createElement('div');
   clock.className = 'muted mp-clock';
-  clock.textContent = `Round ${snapshot.round} · slot ${snapshot.turn}`;
+  clock.textContent = `Turn ${formatTurnNumber(snapshot.round, snapshot.turn, snapshot.maxRounds)} · slot ${(snapshot.turn | 0) + 1}/12`;
   head.append(row, turn, clock);
   tableEl.appendChild(head);
 
@@ -12362,7 +12365,7 @@ function paintMissionLog() {
     ? history.slice().reverse().slice(0, 8).map((h) => {
         const ev = h.event ? ` · d6 = ${h.event.dieRoll}` : '';
         return `<li class="hist-row">
-          <header>Round ${h.round ?? '?'} · Turn ${h.turn ?? '?'}${ev}</header>
+          <header>Round ${h.round ?? '?'} · slot ${h.turn != null ? h.turn + 1 : '?'}${ev}</header>
           <ol>${
             h.actions.map((a) => `<li>${esc(a.icon)} ${esc(a.summary)}</li>`).join('')
           }</ol>
