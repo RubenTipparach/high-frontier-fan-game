@@ -1,10 +1,10 @@
 # Card & Crew Powers
 
-Every text-based ability written on a card or crew/faction face that
-overrides or modifies the normal game rules. Generated from the source
-data (`data/card-data.json` + `data/crew.js`) by
-`scripts/list-powers.mjs` - do not hand-edit; re-run the generator after
-a card-data change.
+Every text-based ability written on a card or crew/faction face, plus
+the Sunspot Cube events, that overrides or modifies the normal game
+rules. Generated from the source data (`data/card-data.json` +
+`data/crew.js` + `data/events.js`) by `scripts/list-powers.mjs` - do
+not hand-edit; re-run the generator after a data change.
 
 Scope note: "Negotiable" tags are listed verbatim where they appear but
 are not yet wired to a trade prompt. Endgame **Future** goal cards are
@@ -30,6 +30,26 @@ faces are independent factions with their own privilege.
 | NASRDA Astronauts | Faction L | MOONCABLE | Once-per-turn free action: refuel an activated dirt thrust triangle at LEO/Home Bernal with 7 tanks (non-crew thruster) or 1 tank (Crew thruster). Negotiable. An activated dirt thruster can accept 1 tank of dirt max per Turn. |
 | SpaceX | Faction J | MARKETEER | If you make the highest bid in an auction, you win even if tied. |
 | Norse Astronauts | Faction K | SCRUM TROUBLESHOOTERS | You may perform Glitch repair anywhere (even without Humans present). Negotiable. An activated dirt thruster can accept 1 tank of dirt max per Turn. |
+
+## Sunspot Cube events
+
+Source: `data/events.js`, the `EVENT_TABLE`. When the Sunspot Cube
+lands on an event slot the player rolls 1d6 and consults this table.
+Rolls 1-4 are universal; 5-6 depend on the season the cube is in
+(Blue / Yellow / Red). These change game state (rotate decks, place
+Glitch tokens, decommission cards, swap faction privileges, force
+flare rolls); they never award or remove VP directly. The `effect`
+column is the engine id resolved when the `eventEffects` feature flag
+is on.
+
+| Event | Trigger | Effect id | Rule text |
+| --- | --- | --- | --- |
+| 💡 Inspiration | d6 1-2, any season | rotate_decks | Put the topmost card of each patent deck (& the Colonist queue) at the bottom of the deck. |
+| ⚠️ Glitch | d6 3, any season | place_glitch | Each player places a Glitch disk on their stack with the most cards that has neither a Glitch nor Humans. |
+| 🧨 Pad Explosion / Space Debris | d6 4, any season | pad_explosion | Each player decommissions their card with the highest Mass in LEO, choosing one if tied. However, Crew, Black-Side, Purple-Side, Colonists, and Bernals are immune. |
+| 🗽 Anarchy | d6 5-6, Blue season | anarchy | Until the Sunspot Cube exits season blue, each player’s listed faction privilege is replaced by the Felonious faction privilege. (Module 0) The Active Law is inactivated, and make a Purge Roll. |
+| ✂️ Budget Cuts | d6 5-6, Yellow season | budget_cuts | Each player discards a card of their choice from their Hand to the bottom of the corresponding patent deck. |
+| ☀️ Solar Flare | d6 5-6, Red season | solar_flare | Make a 1d6 Flare Roll and apply the result to every card in all non-LEO and unshielded stacks. Adjust the result by the modifier listed in the Heliocentric Zone the stack is in. If rad-hardness < modified result, then decommission the card. |
 
 ## Card abilities
 
@@ -207,4 +227,4 @@ the text is printed on the card so it is catalogued here for completeness.
 
 ---
 
-Totals: 12 crew faction privileges, 69 card abilities, 32 future goal cards.
+Totals: 12 crew faction privileges, 6 Sunspot events, 69 card abilities, 32 future goal cards.

@@ -38,31 +38,20 @@
 
 import { PATENTS } from '../../data/patents.js';
 import { CREW } from '../../data/crew.js';
+import {
+  SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, SEASONS, getSeasonForSlot,
+} from '../../data/events.js';
 import { makeRng, shuffle } from './rng.js';
 // (startSiteId import dropped: the rocket now opens at LEO, siteId null.)
 
-// --- Sunspot Cube clock (mirror of js/game/turn-clock.js) ---
-export const SLOTS = 12;
-export const NEW_ROUND_SLOT = 0;
-// Even slots - an event fires when the cube LANDS here, one slot
-// clockwise of the old odd markers so it resolves the turn AFTER the
-// marker line is crossed. Mirror of js/game/turn-clock.js; keep synced.
-export const EVENT_SLOTS = [0, 2, 4, 6, 8, 10];
-// Season wedges mirror js/game/turn-clock.js: the new-round marker
-// (slot 0) sits in the middle of Season Blue, so Blue WRAPS slot 0
-// (slots 10, 11, 0, 1). A `from > to` entry wraps past slot 0.
-export const SEASONS = [
-  { name: 'blue', from: 10, to: 1 },
-  { name: 'yellow', from: 2, to: 5 },
-  { name: 'red', from: 6, to: 9 },
-];
-function slotInSeason(slot, s) {
-  return s.from <= s.to
-    ? (slot >= s.from && slot <= s.to)
-    : (slot >= s.from || slot <= s.to);
-}
+// --- Sunspot Cube clock ---
+// The slot constants, season wedges, and event table are the shared
+// single source of truth in data/events.js (imported above). Re-export
+// the pieces the engine reads so its import surface is unchanged.
+export { SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, SEASONS };
+// Season NAME a slot sits in (the engine wants the bare name).
 export function seasonForSlot(slot) {
-  return (SEASONS.find((s) => slotInSeason(slot, s)) || SEASONS[0]).name;
+  return getSeasonForSlot(slot).name;
 }
 
 // --- Per-turn budgets (mirror turn-clock placeholders) ---

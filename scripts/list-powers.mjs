@@ -10,6 +10,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { CREW } from '../data/crew.js';
+import { EVENT_TABLE } from '../data/events.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const data = JSON.parse(readFileSync(join(ROOT, 'data/card-data.json'), 'utf8'));
@@ -21,11 +22,11 @@ const esc = (s) => String(s ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
 
 w('# Card & Crew Powers');
 w('');
-w('Every text-based ability written on a card or crew/faction face that');
-w('overrides or modifies the normal game rules. Generated from the source');
-w('data (`data/card-data.json` + `data/crew.js`) by');
-w('`scripts/list-powers.mjs` - do not hand-edit; re-run the generator after');
-w('a card-data change.');
+w('Every text-based ability written on a card or crew/faction face, plus');
+w('the Sunspot Cube events, that overrides or modifies the normal game');
+w('rules. Generated from the source data (`data/card-data.json` +');
+w('`data/crew.js` + `data/events.js`) by `scripts/list-powers.mjs` - do');
+w('not hand-edit; re-run the generator after a data change.');
 w('');
 w('Scope note: "Negotiable" tags are listed verbatim where they appear but');
 w('are not yet wired to a trade prompt. Endgame **Future** goal cards are');
@@ -47,6 +48,35 @@ for (const card of CREW) {
     if (!f) continue;
     w(`| ${esc(f.name)} | ${esc(f.role)} | ${esc(f.bonus)} | ${esc(f.blurb)} |`);
   }
+}
+w('');
+
+// ---- Sunspot Cube events ----
+w('## Sunspot Cube events');
+w('');
+w('Source: `data/events.js`, the `EVENT_TABLE`. When the Sunspot Cube');
+w('lands on an event slot the player rolls 1d6 and consults this table.');
+w('Rolls 1-4 are universal; 5-6 depend on the season the cube is in');
+w('(Blue / Yellow / Red). These change game state (rotate decks, place');
+w('Glitch tokens, decommission cards, swap faction privileges, force');
+w('flare rolls); they never award or remove VP directly. The `effect`');
+w('column is the engine id resolved when the `eventEffects` feature flag');
+w('is on.');
+w('');
+w('| Event | Trigger | Effect id | Rule text |');
+w('| --- | --- | --- | --- |');
+let eventCount = 0;
+for (const e of Object.values(EVENT_TABLE)) {
+  const rolls = e.rolls.length > 1
+    ? `${Math.min(...e.rolls)}-${Math.max(...e.rolls)}`
+    : `${e.rolls[0]}`;
+  const season = e.season
+    ? `${e.season[0].toUpperCase()}${e.season.slice(1)} season`
+    : 'any season';
+  const trigger = `d6 ${rolls}, ${season}`;
+  const label = `${e.icon ? e.icon + ' ' : ''}${e.name}`;
+  w(`| ${esc(label)} | ${esc(trigger)} | ${esc(e.effect || '-')} | ${esc(e.text)} |`);
+  eventCount++;
 }
 w('');
 
@@ -116,8 +146,8 @@ const crewCount = CREW.reduce(
 );
 w('---');
 w('');
-w(`Totals: ${crewCount} crew faction privileges, ${abilityCount} card abilities, ${futureCount} future goal cards.`);
+w(`Totals: ${crewCount} crew faction privileges, ${eventCount} Sunspot events, ${abilityCount} card abilities, ${futureCount} future goal cards.`);
 w('');
 
 writeFileSync(join(ROOT, 'docs/card-powers.md'), lines.join('\n'));
-console.log(`wrote docs/card-powers.md (${crewCount} crew, ${abilityCount} abilities, ${futureCount} futures)`);
+console.log(`wrote docs/card-powers.md (${crewCount} crew, ${eventCount} events, ${abilityCount} abilities, ${futureCount} futures)`);
