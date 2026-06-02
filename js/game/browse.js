@@ -1377,6 +1377,10 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   const bids = a.bids || {};
   const high = a.highBid | 0;
   const myBid = bids[myId] | 0;
+  // Distinguish "haven't bid yet" from a real standing bid of 0, so an
+  // opening 0-bid still goes through while re-affirming an existing bid
+  // is treated as no change.
+  const hasBid = (myId in bids);
   const passed = Array.isArray(a.passed) && a.passed.includes(myId);
 
   // --- Your bid (ANY player, the auctioneer included) ---
@@ -1403,15 +1407,26 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
     const sync = () => {
       const v = parseInt(input.value, 10);
       const okAmt = Number.isInteger(v) && v >= minBid && v <= myAqua;
+      // Same as your standing bid: there's nothing to send. Re-placing the
+      // identical amount would only reopen the floor and make everyone bid
+      // again (an auctioneer's bid always reopens it), so block it here.
+      const unchanged = hasBid && Number.isInteger(v) && v === myBid;
       const tie = Number.isInteger(v) && v === high && high > 0;
-      bidBtn.textContent = Number.isInteger(v)
-        ? `${tie ? 'Tie at' : (myBid ? 'Change to' : 'Bid')} ${v}` : 'Bid';
-      bidBtn.disabled = !okAmt || _onlineBusy;
+      bidBtn.textContent = !Number.isInteger(v) ? 'Bid'
+        : unchanged ? `Your bid: ${v}`
+        : tie ? `Tie at ${v}`
+        : myBid ? `Change to ${v}`
+        : `Bid ${v}`;
+      bidBtn.disabled = !okAmt || unchanged || _onlineBusy;
     };
     input.addEventListener('input', () => { _bidDraft = input.value; sync(); });
     bidBtn.addEventListener('click', () => {
       const amt = parseInt(input.value, 10);
       if (!Number.isInteger(amt)) { setMpAuctionError('Enter a whole number.'); return; }
+      // No change from your standing bid: do nothing, so an accidental
+      // re-click can't reset the lot. To clear the others' bids on
+      // purpose, use the Reset others' bids button below.
+      if (hasBid && amt === myBid) return;
       submitMpAuctionOp({ kind: 'AUCTION_BID', amount: amt });
     });
     row.append(input, bidBtn);
