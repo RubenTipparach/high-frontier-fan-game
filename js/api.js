@@ -169,8 +169,20 @@ export async function getGame(id, token) {
 
 // Submit one operation. `op` is { kind, ...payload }, e.g.
 // { kind: 'MOVE', toSiteId } or { kind: 'END_TURN' }.
-export async function submitGameOp(id, op, token) {
-  return call('POST', `/games/${id}/ops`, { body: op, token });
+//
+// Bounded by a timeout: without one, a hung POST (flaky network, dropped
+// frame, Fly cold-start) never resolves, so the caller's `_onlineBusy`
+// in-flight guard never clears and EVERY later action silently jams until
+// a page refresh. On timeout the request aborts and surfaces as a normal
+// network error, the busy guard clears, and the player can retry.
+export async function submitGameOp(id, op, token, { timeoutMs = 15000 } = {}) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    return await call('POST', `/games/${id}/ops`, { body: op, token, signal: ctl.signal });
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 export async function getGameOps(id, { after } = {}, token) {
