@@ -575,6 +575,31 @@ function applyFreeMarket(state, op, player) {
   };
 }
 
+// Discard one Hand card to the BOTTOM of its deck. A FREE action (no op
+// cost) capped at DISCARDS_PER_TURN per turn (mirrors the sandbox's
+// turn-clock budget). Was client-only before, so in MP the discard never
+// persisted and the next snapshot reverted it.
+function applyDiscard(state, op, player) {
+  if ((player.discardsRemaining | 0) <= 0) return fail('no_discards_left');
+  const cardId = String(op.cardId || '');
+  const idx = player.hand.indexOf(cardId);
+  if (idx < 0) return fail('not_in_hand');
+  player.hand.splice(idx, 1);
+  const card = PATENTS_BY_ID[cardId];
+  // Patents recirculate to the bottom of their type's deck; crew (no deck)
+  // just leave the hand.
+  if (card) {
+    const deck = state.decks[card.type];
+    if (Array.isArray(deck)) deck.push(cardId);
+  }
+  player.discardsRemaining -= 1;
+  const name = card ? card.name : cardId;
+  return {
+    ok: true, state,
+    log: `${player.name} discarded ${name} to the bottom of the ${card ? card.type : 'crew'} deck.`,
+  };
+}
+
 // Convert aqua -> water 1:1, only while the rocket is at LEO (the Aqua
 // Bank lives at LEO). Clamped by the requested amount, the aqua on
 // hand, and the remaining wet-mass room in the tank. This is where
@@ -997,6 +1022,7 @@ const FUNCTIONAL = {
   REFUEL: applyRefuel,
   CASH_WATER: applyCashWater,
   FREE_MARKET: applyFreeMarket,
+  DISCARD: applyDiscard,
   SET_ROUTE: applySetRoute,
   CLEAR_ROUTE: applyClearRoute,
   SET_ACTIVE_THRUSTER: applySetActiveThruster,
@@ -1017,6 +1043,7 @@ function pickPayload(op) {
     case 'REFUEL': return { amount: op.amount };
     case 'CASH_WATER': return { amount: op.amount };
     case 'FREE_MARKET': return { cardId: op.cardId };
+    case 'DISCARD': return { cardId: op.cardId };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
     case 'PROSPECT': return { siteId: op.siteId };
@@ -1228,6 +1255,10 @@ const META = {
 const KIND_PREFIX_TO_DECK = {
   reactor: 'reactor', gen: 'generator', radiator: 'radiator',
   refinery: 'refinery', robonaut: 'robonaut', thruster: 'thruster',
+  // A heat card's cooling requirement (the 🌡️ thermostat support) is
+  // satisfied by a radiator, so a lot that needs cooling comes with one
+  // off the radiator deck.
+  thermostat: 'radiator',
 };
 function requireKindToDeckType(kind) {
   if (!kind) return null;
@@ -1283,26 +1314,45 @@ function recomputeAuction(state) {
   let high = 0;
   for (const [, amt] of entries) if (amt > high) high = amt;
   a.highBid = high;
+  // Leader = whoever sits at the high bid; the auctioneer wins ties, but
+  // only if they actually placed a bid. Bids can be 0, so the leader is
+  // computed whenever ANY bid exists (not just when high > 0).
   let leader = null;
-  if (high > 0) {
-    if ((a.bids[a.auctioneerId] || 0) === high) leader = a.auctioneerId;
+  if (entries.length) {
+    const aucBid = a.bids[a.auctioneerId];
+    if (aucBid != null && aucBid === high) leader = a.auctioneerId;
     else { const e = entries.find(([, amt]) => amt === high); leader = e ? Number(e[0]) : null; }
   }
   a.highBidderId = leader;
   a.awaiting = allBiddersActed(state) ? 'auctioneer' : 'bidders';
 }
 
+// A player whose hand is already at the limit can't take the lot (they
+// can neither bid nor be sold to), so they're auto-passed: they never
+// hold up the auctioneer and don't need to act. Their hand can't change
+// mid-auction (an open lot freezes every other op), so this is stable
+// for the life of the lot.
+function biddingBlockedByHand(player) {
+  return ((player.hand || []).length >= AUCTION_HAND_LIMIT);
+}
+
 // Every non-auctioneer has responded to the current floor (bid or
 // passed since it last reopened) - nobody left who will raise, so the
 // auctioneer may close. `acted` resets to just the actor whenever the
 // floor reopens (a raise or any auctioneer bid), which is what makes an
-// auctioneer tie force the others to respond again.
+// auctioneer tie force the others to respond again. Full-hand players
+// count as already-acted (auto-passed) so they never block the close.
 function allBiddersActed(state) {
   const a = state.auction;
   const acted = a.acted || [];
+  const auto = a.autoPassed || [];
   const others = state.players.filter((p) => p.profileId !== a.auctioneerId);
   if (!others.length) return false;
-  return others.every((p) => acted.includes(p.profileId));
+  // Auto-passed players have opted out for the rest of the lot, and
+  // full-hand players can't take it - both count as already acted so
+  // they never hold up the close, even after a reopen resets `acted`.
+  return others.every((p) =>
+    acted.includes(p.profileId) || auto.includes(p.profileId) || biddingBlockedByHand(p));
 }
 
 function applyAuctionStart(state, op, ctx) {
@@ -1322,7 +1372,7 @@ function applyAuctionStart(state, op, ctx) {
   state.auction = {
     deckType, cardId,
     auctioneerId: player.profileId,
-    bids: {}, passed: [], acted: [],
+    bids: {}, passed: [], acted: [], autoPassed: [],
     highBid: 0, highBidderId: null, awaiting: 'bidders',
   };
   // Opening commits prior turn actions: undo must not span an auction
@@ -1330,6 +1380,12 @@ function applyAuctionStart(state, op, ctx) {
   // undo replay would restore).
   state.turnActions = [];
   state.turnRedo = [];
+  // Compute the phase so `awaiting` reflects full-hand auto-passes right
+  // away. Without this the auctioneer's close button never enables when
+  // every opponent's hand is full (no bid/pass op ever fires to recompute),
+  // leaving the lot stuck. With it, a no-contest lot opens already in the
+  // auctioneer's phase, so the "Keep (no bids)" button is live immediately.
+  recomputeAuction(state);
   const card = PATENTS_BY_ID[cardId];
   return { ok: true, state, log: `${player.name} put ${card ? card.name : cardId} up for auction.` };
 }
@@ -1343,7 +1399,8 @@ function applyAuctionBid(state, op, ctx) {
   if (!bidder) return fail('not_a_player');
   if ((bidder.hand || []).length >= AUCTION_HAND_LIMIT) return fail('hand_limit');
   const amount = Number(op.amount);
-  if (!Number.isInteger(amount) || amount <= 0) return fail('bad_amount');
+  // Bids can be 0 (claim it free); only negatives are invalid.
+  if (!Number.isInteger(amount) || amount < 0) return fail('bad_amount');
   // Must at least tie the current high (ties are allowed); only the
   // floor is enforced, so a player may raise or re-tie freely.
   const floorBefore = a.highBid || 0;
@@ -1353,6 +1410,9 @@ function applyAuctionBid(state, op, ctx) {
   a.bids = a.bids || {};
   a.bids[bidder.profileId] = amount;
   a.passed = (a.passed || []).filter((id) => id !== bidder.profileId);
+  // Placing a bid opts the bidder back in - it cancels both a plain pass
+  // and a permanent auto-pass.
+  a.autoPassed = (a.autoPassed || []).filter((id) => id !== bidder.profileId);
   // A raise (or ANY auctioneer bid) reopens the floor: clear the pass
   // list and reset the responded set to just this bidder, so every
   // other player must bid or pass again (this is what makes an
@@ -1386,8 +1446,19 @@ function applyAuctionPass(state, op, ctx) {
   if (!(a.acted || []).includes(passer.profileId)) {
     a.acted = [...(a.acted || []), passer.profileId];
   }
+  // Permanent ("auto") pass: stay out for the rest of the lot, so an
+  // auctioneer's raise (which reopens the floor and resets `acted`)
+  // never puts this player back on the clock. A later bid by them
+  // cancels it. Their standing bid, if any, still stands.
+  if (op.permanent) {
+    a.autoPassed = a.autoPassed || [];
+    if (!a.autoPassed.includes(passer.profileId)) a.autoPassed.push(passer.profileId);
+  }
   recomputeAuction(state);
-  return { ok: true, state, log: `${passer.name} passed.` };
+  return {
+    ok: true, state,
+    log: `${passer.name} ${op.permanent ? 'auto-passed (out for this lot)' : 'passed'}.`,
+  };
 }
 
 // The auctioneer CLOSES the lot by naming a buyer. The buyer must be a
@@ -1400,21 +1471,30 @@ function applyAuctionSell(state, op, ctx) {
   const a = state.auction;
   if (!a) return fail('no_auction');
   if (ctx.profileId !== a.auctioneerId) return fail('not_auctioneer');
+  // The lot can't close until every other player has acted at the
+  // current floor (bid or passed). Bidders are still on the clock until
+  // then, so the auctioneer can't snatch the card - even a free keep
+  // with no bids - out from under someone who hasn't responded yet.
+  // AUCTION_RESET deliberately reopens the clock when the auctioneer
+  // wants another round.
+  if (!allBiddersActed(state)) return fail('bidders_pending');
   const auctioneer = playerByProfile(state, a.auctioneerId);
   const high = a.highBid || 0;
   const buyerId = Number(op.buyerId);
   if (!Number.isInteger(buyerId)) return fail('bad_buyer');
 
+  // "No bids" means nobody placed one - NOT high === 0, since 0 is now a
+  // valid bid. With no bids the only legal close is the auctioneer keeping
+  // it free; otherwise the buyer must be a top bidder (price may be 0).
+  const anyBids = Object.keys(a.bids || {}).length > 0;
   let winner;
   let price;
-  if (high <= 0) {
-    // No bids: the only legal close is the auctioneer keeping it free.
+  if (!anyBids) {
     if (buyerId !== a.auctioneerId) return fail('no_bid_to_accept');
     winner = auctioneer;
     price = 0;
   } else {
-    // Sell to a top bidder (possibly the auctioneer themselves).
-    if ((a.bids[buyerId] || 0) !== high) return fail('not_top_bidder');
+    if (!(buyerId in a.bids) || a.bids[buyerId] !== high) return fail('not_top_bidder');
     winner = playerByProfile(state, buyerId);
     if (!winner) return fail('winner_gone');
     price = high;

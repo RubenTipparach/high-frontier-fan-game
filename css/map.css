@@ -6184,7 +6184,7 @@ body:has(#view-browse:not(.hidden)) #main {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 16px 20px 20px;
-  max-width: 700px;
+  max-width: 880px;
   width: 100%;
   max-height: calc(100vh - 48px);
   overflow: auto;
@@ -6289,11 +6289,21 @@ body:has(#view-browse:not(.hidden)) #main {
    / "Keep" buttons under a label. */
 .mp-auction-close { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
 .mp-auction-close-label {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 1px;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--muted, #9aa0c0);
+}
+/* "It's your turn" call-to-action banner. Accent-tinted so it stands out
+   from the muted status notes; same 13px scale so it stays in family. */
+.mp-auction-prompt {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent, #7dd3fc);
+  background: rgba(125, 211, 252, 0.1);
+  border: 1px solid var(--accent-2, #38bdf8);
+  border-radius: 6px;
+  padding: 7px 9px;
 }
 .mp-auction-side {
   flex: 1 1 240px;
@@ -6302,8 +6312,28 @@ body:has(#view-browse:not(.hidden)) #main {
   gap: 12px;
   min-width: 220px;
 }
+/* Small table-chat column beside the lot card. Sized so it never grows
+   taller than the lot card itself (.card min-height is 350px): the
+   scrollable list is capped and the column lives between label + list +
+   send form. The list scrolls internally so a long backlog stays put. */
+.mp-auction-chat {
+  flex: 1 1 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 180px;
+  max-width: 280px;
+}
+.mp-auction-chat-list {
+  flex: 1 1 auto;
+  max-height: 264px;
+  margin: 0;
+}
 .mp-auction-bid { font-size: 16px; font-weight: 700; letter-spacing: 0.3px; }
 .mp-auction-phase { font-size: 13px; margin-top: 2px; }
+/* Instructional notes (aqua balance, floor, waiting hints) share the
+   phase line's size so the whole status block reads at one scale. */
+.mp-auction-note { font-size: 13px; }
 .mp-auction-controls { display: flex; flex-direction: column; gap: 10px; }
 .mp-auction-bidrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .mp-auction-input {
@@ -6396,6 +6426,16 @@ body:has(#view-browse:not(.hidden)) #main {
   color: var(--accent-2);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+/* When the docked (minimized) overlay is waiting on this player, pulse the
+   chip so they notice it owes an action even with the modal collapsed. */
+.mp-mini-chip.needs-action {
+  border-color: var(--accent);
+  animation: mp-chip-needs-action 1.4s ease-in-out infinite;
+}
+@keyframes mp-chip-needs-action {
+  0%, 100% { box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5); }
+  50% { box-shadow: 0 0 0 3px rgba(125, 211, 252, 0.45), 0 8px 26px rgba(0, 0, 0, 0.5); }
 }
 
 .mp-crew-draft-overlay.is-minimized,

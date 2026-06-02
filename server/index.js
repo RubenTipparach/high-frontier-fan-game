@@ -269,6 +269,11 @@ function requireAdmin(req, res, next) {
   return res.status(403).json({ error: 'admin_auth_required' });
 }
 
+// Public game URL (GitHub Pages). Surfaced on the admin login / notice
+// pages so a player who wandered into the admin portal has a one-tap way
+// back to the game.
+const GAME_URL = 'https://rubentipparach.github.io/high-frontier-fan-game/';
+
 // Minimal styled HTML page (login screen + error notices), matching the
 // OAuth callback's look.
 function adminHtmlPage(title, bodyHtml, accent = '#f87171') {
@@ -278,10 +283,13 @@ function adminHtmlPage(title, bodyHtml, accent = '#f87171') {
 display:flex;min-height:100vh;margin:0;align-items:center;justify-content:center;text-align:center;padding:24px}
 .box{max-width:440px}h1{font-size:20px;color:${accent};margin:0 0 12px}
 p{color:#8b90b8;line-height:1.55}
+a.play{display:inline-block;margin-top:22px;color:#7dd3fc;text-decoration:none;font-size:13px}
+a.play:hover{text-decoration:underline}
 a.btn{display:inline-block;margin-top:18px;padding:11px 18px;border-radius:9px;
 background:#5865F2;color:#fff;text-decoration:none;font-weight:700}
 a.btn:hover{background:#4752c4}</style></head><body><div class="box">
-<h1>${esc(title)}</h1>${bodyHtml}</div></body></html>`;
+<h1>${esc(title)}</h1>${bodyHtml}
+<p><a class="play" href="${GAME_URL}">Play High Frontier 4: All -&gt;</a></p></div></body></html>`;
 }
 function adminLoginPage() {
   const ready = oauthIdentifyEnabled() && adminAllowlist().size > 0;
@@ -611,11 +619,13 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
               p.name        AS hostName,
               (SELECT COUNT(*) FROM lobby_members lm2 WHERE lm2.lobby_id = l.id) AS memberCount,
               g.id     AS gameId,
-              g.status AS gameStatus
+              g.status AS gameStatus,
+              gs.updated_at AS lastActionAt
        FROM lobbies l
        JOIN lobby_members lm ON lm.lobby_id = l.id AND lm.profile_id = ?
        JOIN profiles p ON p.id = l.host_id
        LEFT JOIN games g ON g.lobby_id = l.id
+       LEFT JOIN game_states gs ON gs.game_id = g.id
        ORDER BY l.created_at DESC
        LIMIT 50`
     )
@@ -1319,7 +1329,10 @@ p{color:#8b90b8;line-height:1.5}</style></head><body><div class="box">
     }
     if (!isAdminDiscordId(a.userId)) {
       console.warn('[admin] denied login for discord id', a.userId);
-      return sendPage('Access denied', 'This Discord account is not authorized for the admin panel.', false);
+      return sendPage('Access denied',
+        'This Discord account is not authorized for the admin panel.'
+        + `<br><br><a href="${GAME_URL}" style="color:#7dd3fc;text-decoration:none">Play High Frontier 4: All -&gt;</a>`,
+        false);
     }
     setAdminCookie(req, res, createAdminSession(a.userId));
     return res.redirect('/admin');
@@ -2231,7 +2244,9 @@ app.get('/admin', (req, res) => {
               datetime(p.last_seen_at / 1000, 'unixepoch') AS seen,
               (SELECT COUNT(*) FROM tokens t WHERE t.profile_id = p.id) AS devices,
               (SELECT COUNT(*) FROM lobby_members lm WHERE lm.profile_id = p.id) AS tables,
-              (SELECT COUNT(*) FROM chat_messages cm WHERE cm.profile_id = p.id) AS chats
+              (SELECT COUNT(*) FROM chat_messages cm WHERE cm.profile_id = p.id) AS chats,
+              (SELECT da.username   FROM discord_accounts da WHERE da.profile_id = p.id) AS discord_name,
+              (SELECT da.discord_id FROM discord_accounts da WHERE da.profile_id = p.id) AS discord_id
        FROM profiles p
        ORDER BY p.last_seen_at DESC
        LIMIT 100`
@@ -2300,7 +2315,15 @@ app.get('/admin', (req, res) => {
     ? Array.from(wss.clients).filter((c) => c._profile).length
     : 0;
 
-  const profileRows = profiles.map((r) => `
+  const profileRows = profiles.map((r) => {
+    const linked = !!r.discord_id;
+    const discordCell = linked
+      ? `🔗 ${esc(r.discord_name || r.discord_id)}`
+      : '<span class="muted">not linked</span>';
+    const unlinkBtn = linked
+      ? `<button class="btn-unlink-discord" data-pid="${r.id}" data-pname="${esc(r.name)}">Unlink Discord</button>`
+      : '';
+    return `
     <tr>
       <td>@${esc(r.name)}</td>
       <td>${esc(r.created)}</td>
@@ -2308,11 +2331,15 @@ app.get('/admin', (req, res) => {
       <td class="num">${r.devices}</td>
       <td class="num">${r.tables}</td>
       <td class="num">${r.chats}</td>
+      <td class="discord-cell">${discordCell}</td>
       <td>
         <button class="btn-add-token" data-pid="${r.id}" data-pname="${esc(r.name)}">Issue device code</button>
+        ${unlinkBtn}
+        <button class="btn-del-profile danger" data-pid="${r.id}" data-pname="${esc(r.name)}">Delete account</button>
       </td>
     </tr>
-  `).join('') || '<tr><td colspan=7><em>No profiles yet.</em></td></tr>';
+  `;
+  }).join('') || '<tr><td colspan=8><em>No profiles yet.</em></td></tr>';
 
   const lobbyRows = lobbies.map((r) => `
     <tr>
@@ -2394,6 +2421,7 @@ app.get('/admin', (req, res) => {
   button:disabled{opacity:0.5;cursor:not-allowed}
   button.danger{background:#450a0a;border-color:#7f1d1d;color:#fda4af}
   button.danger:hover{background:#7f1d1d;color:#fff;border-color:#b91c1c}
+  .muted{color:#6b7194}
   input[type=text]{background:#07060f;color:#e6e9ff;border:1px solid #2a2740;border-radius:4px;padding:4px 8px;font:inherit}
   .ws-info{display:inline-block;background:#0c0a16;border:1px solid #1e293b;padding:8px 14px;border-radius:6px;margin-left:auto;font-size:12px;color:#8b90b8}
   .ws-info strong{color:#4ade80;font-weight:600}
@@ -2496,7 +2524,7 @@ app.get('/admin', (req, res) => {
     <thead><tr>
       <th>Name</th><th>Created</th><th>Last seen</th>
       <th class="num">Devices</th><th class="num">Tables</th><th class="num">Chats</th>
-      <th>Recovery</th>
+      <th>Discord</th><th>Actions</th>
     </tr></thead>
     <tbody>${profileRows}</tbody>
   </table>
@@ -2612,6 +2640,75 @@ document.addEventListener('click', function (ev) {
     });
 });
 
+// "Unlink Discord" - removes the discord_accounts row for a profile so
+// the Discord ID is free to link to a different (correct) account. Keeps
+// the profile and all its data; only the link is dropped.
+document.addEventListener('click', function (ev) {
+  var btn = ev.target.closest('.btn-unlink-discord');
+  if (!btn) return;
+  var pid = btn.getAttribute('data-pid');
+  var pname = btn.getAttribute('data-pname');
+  if (!confirm('Unlink Discord from @' + pname + '?\\n\\nThe Discord account becomes free to link to a different game account. @' + pname + ' itself is kept.')) return;
+  btn.disabled = true;
+  btn.textContent = 'Unlinking...';
+  fetch('/admin/profiles/' + pid + '/unlink-discord', { method: 'POST' })
+    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+    .then(function (res) {
+      if (!res.ok) {
+        btn.disabled = false;
+        btn.textContent = 'Unlink Discord';
+        alert('Failed: ' + (res.body && res.body.error || 'unknown'));
+        return;
+      }
+      var tr = btn.closest('tr');
+      var cell = tr ? tr.querySelector('.discord-cell') : null;
+      if (cell) cell.innerHTML = '<span class="muted">not linked</span>';
+      btn.remove();
+    })
+    .catch(function () {
+      btn.disabled = false;
+      btn.textContent = 'Unlink Discord';
+      alert('Network error.');
+    });
+});
+
+// "Delete account" - hard-deletes the profile and all its data (device
+// tokens, Discord link, memberships, chat, invites). Refused by the
+// server if the account is in any game or hosts a table, to avoid
+// corrupting other players' games.
+document.addEventListener('click', function (ev) {
+  var btn = ev.target.closest('.btn-del-profile');
+  if (!btn) return;
+  var pid = btn.getAttribute('data-pid');
+  var pname = btn.getAttribute('data-pname');
+  if (!confirm('Permanently DELETE account @' + pname + ' and all of its data?\\n\\nThis removes the profile, its device codes, its Discord link, lobby memberships, chat, and invites. This cannot be undone.')) return;
+  btn.disabled = true;
+  btn.textContent = 'Deleting...';
+  fetch('/admin/profiles/' + pid + '/delete', { method: 'POST' })
+    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+    .then(function (res) {
+      if (!res.ok) {
+        btn.disabled = false;
+        btn.textContent = 'Delete account';
+        var code = res.body && res.body.error;
+        var msg = code === 'in_games'
+          ? 'This account is in one or more games. Cancel those tables first.'
+          : code === 'hosts_tables'
+            ? 'This account hosts one or more tables. Cancel those tables first.'
+            : ('Failed: ' + (code || 'unknown'));
+        alert(msg);
+        return;
+      }
+      var tr = btn.closest('tr');
+      if (tr) tr.remove();
+    })
+    .catch(function () {
+      btn.disabled = false;
+      btn.textContent = 'Delete account';
+      alert('Network error.');
+    });
+});
+
 // "Restore" - un-cancels a lobby + its game so an accidentally-
 // cancelled room reappears in the players' lists. Reloads the
 // dashboard on success so the status pill + action button flip.
@@ -2658,6 +2755,50 @@ app.post('/admin/profiles/:id/add-token', requireAdmin, (req, res) => {
     'INSERT INTO tokens (profile_id, token_hash, created_at) VALUES (?, ?, ?)'
   ).run(id, hashToken(token), nowMs());
   res.json({ ok: true, name: row.name, token });
+});
+
+// Unlink the Discord account from a profile. Use when someone linked the
+// WRONG game account to their Discord: dropping the discord_accounts row
+// frees the Discord ID so they can link the correct account. The profile
+// (and all its other data) is untouched.
+app.post('/admin/profiles/:id/unlink-discord', requireAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  const row = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(id);
+  if (!row) return res.status(404).json({ error: 'not_found' });
+  const info = db.prepare('DELETE FROM discord_accounts WHERE profile_id = ?').run(id);
+  res.json({ ok: true, name: row.name, unlinked: info.changes > 0 });
+});
+
+// Hard-delete a profile and everything it owns. Cascade tables (tokens,
+// notify_prefs, oauth_states, discord_accounts, turn_reminders.target_id)
+// clear automatically; the non-cascade references are removed here in one
+// transaction so the FK-enforced DELETE succeeds. Refused when the account
+// is in any game or hosts a table - those rows are shared state whose
+// removal would corrupt other players' games, so the admin must cancel
+// those tables first.
+app.post('/admin/profiles/:id/delete', requireAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  const row = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(id);
+  if (!row) return res.status(404).json({ error: 'not_found' });
+  const games = db.prepare(
+    `SELECT (SELECT COUNT(*) FROM game_players WHERE profile_id = ?)
+          + (SELECT COUNT(*) FROM game_operations WHERE profile_id = ?) AS n`
+  ).get(id, id);
+  if (games.n > 0) return res.status(409).json({ error: 'in_games' });
+  const hosts = db.prepare('SELECT COUNT(*) AS n FROM lobbies WHERE host_id = ?').get(id);
+  if (hosts.n > 0) return res.status(409).json({ error: 'hosts_tables' });
+  db.transaction(() => {
+    db.prepare('DELETE FROM direct_invites WHERE from_id = ? OR to_id = ?').run(id, id);
+    db.prepare('DELETE FROM invite_links WHERE created_by = ?').run(id);
+    db.prepare('UPDATE invite_links SET used_by = NULL WHERE used_by = ?').run(id);
+    db.prepare('DELETE FROM chat_messages WHERE profile_id = ?').run(id);
+    db.prepare('DELETE FROM lobby_members WHERE profile_id = ?').run(id);
+    db.prepare('DELETE FROM turn_reminders WHERE sender_id = ?').run(id);
+    db.prepare('DELETE FROM profiles WHERE id = ?').run(id);
+  })();
+  res.json({ ok: true, name: row.name });
 });
 
 // Cancel a lobby and its game (formerly a hard DELETE; user 2026-05:

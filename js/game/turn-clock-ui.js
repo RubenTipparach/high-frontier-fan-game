@@ -9,7 +9,7 @@
 import {
   getTurn, getRound, getSeason, getLastEvent,
   getOpsRemaining, getMovesRemaining,
-  endTurn,
+  endTurn, formatTurnNumber,
   SLOTS, SEASONS, NEW_ROUND_SLOT, EVENT_SLOTS,
   getEventForRoll, getSeasonForSlot, EVENT_TABLE,
 } from './turn-clock.js';
@@ -157,7 +157,7 @@ function wheelSvg(displayTurn = null) {
     svg += `<text x="${lp.x.toFixed(2)}" y="${lp.y.toFixed(2)}"
       text-anchor="middle" dominant-baseline="middle"
       font-size="14" font-weight="700"
-      fill="${i === turn ? '#0c0a16' : 'rgba(15,16,35,0.6)'}">${i}</text>`;
+      fill="${i === turn ? '#0c0a16' : 'rgba(15,16,35,0.6)'}">${i + 1}</text>`;
   }
   // Event marker lines - bold WHITE radial line on the leading
   // boundary of each event slot. This is the line the Sunspot
@@ -400,8 +400,8 @@ export function openTurnClockModal({ rolling = null, animateFrom = null } = {}) 
     body.innerHTML = `
       <h2 class="turn-clock-title">🕐 Sol Sunspot Cycle</h2>
       <p class="turn-clock-sub">
-        Round <strong>${round}</strong> ·
-        Turn <strong>${turn}</strong>/<strong>${SLOTS - 1}</strong> ·
+        Turn <strong>${formatTurnNumber(round, turn)}</strong>
+        <span class="muted">(round.slot/rounds)</span> ·
         <span class="turn-clock-season" style="color:${season.color}">${season.label}</span>
       </p>
       <div class="turn-clock-wheel-host">

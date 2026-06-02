@@ -12,7 +12,7 @@ import {
   consumeMove, refundMove, getTurn, getMovesRemaining, onTurnChange,
   getEventForRoll, getSeasonForSlot, getSeason, resetClock,
   getOpsRemaining, consumeOp,
-  getDiscardsRemaining, consumeDiscard,
+  getDiscardsRemaining, consumeDiscard, formatTurnNumber,
 } from './turn-clock.js';
 import { triggerEndTurn, openTurnClockModal, buildDie, rollDie } from './turn-clock-ui.js';
 import {
@@ -205,6 +205,12 @@ let _onlineRoom = null;       // table / lobby name for the multiplayer panel
 let _onlineLobbyId = null;    // lobby id (for chat REST + WS channel)
 let _onlineLeave = null;      // () => void callback wired by the host page
 let _onlineChatOff = null;    // unsubscribe handle for the lobby chat WS
+// In-memory mirror of the table chat. Kept module-level so a second
+// chat surface (the auction overlay's side chat) can backfill from it
+// when it mounts mid-conversation, without re-fetching history. Capped
+// so a long session can't grow it without bound.
+const _chatLog = [];
+const CHAT_LOG_CAP = 200;
 
 // Online auction state (kept module-level so it survives the snapshot
 // re-renders that opponents' bids trigger): _bidDraft / _joinDraft
@@ -223,6 +229,12 @@ let _deckPickerOpen = false;
 // lot so a fresh card always surfaces.
 let _crewDraftMin = false;
 let _auctionMin = false;
+// Rising-edge tracker for auction turn notifications: remembers, per lot,
+// whether it was already "my turn" (bid/pass) or "my close" so a re-render
+// only toasts when the turn newly lands on me - e.g. the auctioneer raises
+// (others get re-prompted) or the last bidder acts (auctioneer prompted to
+// close). Reset when the lot (cardId) changes.
+let _auctionTurnEdge = null;
 
 // Patent decks the auctioneer can put up for auction (one per server
 // deck type). Counts are read live from the snapshot.
@@ -810,17 +822,88 @@ function syncMpTurnBanner(snapshot) {
   } else {
     banner.style.removeProperty('--mp-turn-color');
   }
+  // Compact turn number (round.slot/maxRounds, slot 1-based) so the
+  // banner always shows where in the game we are.
+  const tn = formatTurnNumber(snapshot.round, snapshot.turn, snapshot.maxRounds);
   if (!active) {
-    banner.textContent = 'Waiting…';
+    banner.textContent = `Waiting… · ${tn}`;
     banner.classList.remove('is-your-turn');
   } else if (myTurn) {
-    banner.textContent = 'Your turn';
+    banner.textContent = `Your turn · ${tn}`;
     banner.classList.add('is-your-turn');
   } else {
-    banner.textContent = '@' + active.name + "'s turn";
+    banner.textContent = `@${active.name}'s turn · ${tn}`;
     banner.classList.remove('is-your-turn');
   }
   banner.hidden = false;
+}
+
+// A player at the hand limit can't take the lot, so the server
+// auto-passes them: they never owe an action and never block the close.
+// Hands are open info in the snapshot, so this reads for any seat.
+function auctionHandFull(player) {
+  return !!player && Array.isArray(player.hand) && player.hand.length >= AUCTION_HAND_LIMIT;
+}
+
+// Has every non-auctioneer acted, so the auctioneer may close? Mirrors the
+// server's allBiddersActed: a player counts as done if they bid/passed at
+// the current floor, permanently auto-passed, or are full-hand. Computed
+// from the snapshot rather than trusting auction.awaiting, so a lot whose
+// stored phase is stale (e.g. one opened before this logic shipped, where
+// every opponent is already full-hand) still lets the auctioneer close.
+function auctionAllBiddersActed(auction, players) {
+  if (!auction) return false;
+  const acted = auction.acted || [];
+  const auto = auction.autoPassed || [];
+  const others = (players || []).filter((p) => p.profileId !== auction.auctioneerId);
+  if (!others.length) return false;
+  return others.every((p) =>
+    acted.includes(p.profileId) || auto.includes(p.profileId) || auctionHandFull(p));
+}
+
+// Whether the lot is currently waiting on ME, from the cached snapshot.
+//   shouldAct   - I'm a bidder (not the auctioneer) still on the clock at
+//                 the current floor (haven't bid/passed since it last
+//                 reopened). A full hand clears this: I'm auto-passed and
+//                 can't take the lot, so I owe nothing.
+//   shouldClose - I'm the auctioneer and every bidder has acted, so the
+//                 lot is waiting on me to close (or reset for another
+//                 round).
+// Spectators and players not at the table get neither.
+function auctionTurnFlags(auction) {
+  const me = _onlineMe && _onlineMe.id;
+  const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
+  const myp = players.find((p) => p.profileId === me);
+  if (!me || !auction || !myp) {
+    return { shouldAct: false, shouldClose: false };
+  }
+  if (auction.auctioneerId === me) {
+    return { shouldAct: false, shouldClose: auctionAllBiddersActed(auction, players) };
+  }
+  const acted = auction.acted || [];
+  const autoPassed = (auction.autoPassed || []).includes(me);
+  return {
+    shouldAct: !acted.includes(me) && !autoPassed && !auctionHandFull(myp),
+    shouldClose: false,
+  };
+}
+
+// Toast the player when the turn NEWLY lands on them for this lot (rising
+// edge only, so a no-op re-render or an unrelated snapshot doesn't nag).
+// Covers both directions the user asked for: an auctioneer raising their
+// bid reopens the floor and re-prompts every bidder; the last bidder
+// acting flips the lot to the auctioneer to close.
+function notifyAuctionTurn(auction) {
+  const flags = auctionTurnFlags(auction);
+  const prev = _auctionTurnEdge;
+  const sameLot = prev && prev.cardId === auction.cardId;
+  if (flags.shouldAct && !(sameLot && prev.shouldAct)) {
+    _onlineToast('Auction: it is your turn - bid or pass.');
+  } else if (flags.shouldClose && !(sameLot && prev.shouldClose)) {
+    _onlineToast('Auction: every bidder has acted - close the lot.');
+  }
+  _auctionTurnEdge = { cardId: auction.cardId, shouldAct: flags.shouldAct, shouldClose: flags.shouldClose };
+  return flags;
 }
 
 // Competitive multiplayer auction overlay. The sandbox's solo auction
@@ -832,6 +915,7 @@ function renderOnlineAuction(auction) {
   if (!auction || !_online || !gameViewVisible()) {
     if (existing) existing.remove();
     _auctionKey = null;
+    _auctionTurnEdge = null;
     _bidDraft = '';
     _joinDraft = '';
     return;
@@ -867,6 +951,12 @@ function renderOnlineAuction(auction) {
             <div class="mp-auction-controls" id="mp-auction-controls"></div>
             <div class="hud-error" id="mp-auction-error"></div>
           </div>
+          <div class="mp-auction-chat">
+            <div class="mp-detail-label">Table chat</div>
+            <ul id="mp-auction-chat-list" class="mp-chat-list mp-auction-chat-list">
+              <li class="muted mp-chat-empty">No messages yet.</li>
+            </ul>
+          </div>
         </div>
       </div>
       <button type="button" class="mp-mini-chip" aria-label="Restore auction">
@@ -883,6 +973,10 @@ function renderOnlineAuction(auction) {
       _auctionMin = false;
       overlay.classList.remove('is-minimized');
     });
+    // Mount the side chat once: backfill from the in-memory log and wire
+    // its own send form (live messages fan in via appendMpChat).
+    overlay.querySelector('.mp-auction-chat').appendChild(buildChatForm());
+    fillChatList(overlay.querySelector('#mp-auction-chat-list'));
   }
 
   const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
@@ -975,18 +1069,26 @@ function renderOnlineAuction(auction) {
     amt.className = 'mp-auction-bidamt';
     const b = bids[p.profileId];
     const didPass = Array.isArray(auction.passed) && auction.passed.includes(p.profileId);
-    const isTop = high > 0 && (b | 0) === high;
+    const autoPassed = Array.isArray(auction.autoPassed) && auction.autoPassed.includes(p.profileId);
+    // Top marker: this player placed the high bid. 0 is a valid bid, so
+    // the test is "has a bid equal to the high", not "high > 0".
+    const isTop = (p.profileId in bids) && b === high;
+    const isAuctioneer = p.profileId === auction.auctioneerId;
+    const handFull = !isAuctioneer && auctionHandFull(p);
+    // Status suffix on a standing bid, or the standalone status when the
+    // player has no bid. Auto-pass (out for the lot) reads over a plain
+    // floor pass.
+    const tag = autoPassed ? 'auto-passed' : (didPass ? 'passed' : (handFull ? 'auto-passed (hand full)' : ''));
     if (b != null) {
-      amt.textContent = `${b} aqua${isTop ? ' ◄ top' : ''}${didPass ? ' · passed' : ''}`;
-    } else if (didPass) {
-      amt.textContent = 'passed';
+      amt.textContent = `${b} aqua${isTop ? ' ◄ top' : ''}${tag ? ' · ' + tag : ''}`;
     } else {
-      amt.textContent = '-';
+      amt.textContent = tag || '-';
     }
     if (isTop) line.classList.add('is-top');
-    // A non-auctioneer who has not acted at the current floor is still
-    // on the clock.
-    if (p.profileId !== auction.auctioneerId && !acted.includes(p.profileId)) {
+    // A non-auctioneer who has not acted at the current floor is still on
+    // the clock - unless they've auto-passed or their hand is full, in
+    // which case they're out and never hold up the close.
+    if (!isAuctioneer && !acted.includes(p.profileId) && !autoPassed && !handFull) {
       line.classList.add('is-waiting');
     }
     line.append(nm, amt);
@@ -994,23 +1096,33 @@ function renderOnlineAuction(auction) {
   }
   bidEl.appendChild(list);
   overlay.querySelector('.mp-auction-phase').textContent =
-    auction.awaiting === 'bidders'
-      ? 'Bidding is open - anyone can bid or raise (ties allowed).'
-      : 'All bidders have acted - the auctioneer can close.';
+    auctionAllBiddersActed(auction, players)
+      ? 'All bidders have acted - the auctioneer can close.'
+      : 'Bidding is open - anyone can bid or raise (ties allowed).';
 
   buildMpAuctionControls(
     overlay.querySelector('#mp-auction-controls'),
     auction, { auctioneer },
   );
 
-  // Minimized chip: keep its summary line live so a glance at the
-  // docked rectangle shows the current high bid, then re-apply the
-  // persisted minimize state.
+  // Notify on the rising edge when the lot lands on me (also returns the
+  // current flags so the chip can echo the call to action when minimized).
+  const turn = notifyAuctionTurn(auction);
+  const actionNeeded = turn.shouldAct || turn.shouldClose;
+
+  // Minimized chip: surface the call to action when the lot is waiting on
+  // me (so a docked overlay still tells me to act), otherwise show the
+  // live high-bid summary. Re-apply the persisted minimize state.
+  const chip = overlay.querySelector('.mp-mini-chip');
   const chipMeta = overlay.querySelector('.mp-mini-chip-meta');
   if (chipMeta) {
-    chipMeta.textContent = auction.highBid > 0
-      ? `high bid ${auction.highBid}` : 'no bids';
+    chipMeta.textContent = turn.shouldAct
+      ? 'your turn - bid or pass'
+      : turn.shouldClose
+        ? 'ready to close'
+        : (auction.highBid > 0 ? `high bid ${auction.highBid}` : 'no bids');
   }
+  if (chip) chip.classList.toggle('needs-action', actionNeeded);
   overlay.classList.toggle('is-minimized', _auctionMin);
 }
 
@@ -1219,6 +1331,16 @@ function noteEl(text) {
   return p;
 }
 
+// Prominent call-to-action banner (accent, not muted) for the player the
+// lot is currently waiting on. Distinct from noteEl so "it's your turn"
+// can't be mistaken for the passive status notes around it.
+function promptEl(text) {
+  const p = document.createElement('p');
+  p.className = 'mp-auction-prompt';
+  p.textContent = text;
+  return p;
+}
+
 // Role + phase aware controls inside the auction modal. Mirrors the
 // engine's state machine (server/game/engine.js auction handlers).
 function buildMpAuctionControls(host, a, { auctioneer } = {}) {
@@ -1232,6 +1354,24 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   const myp = players.find((p) => p.profileId === myId);
   if (!myp) { host.appendChild(noteEl('Spectating this auction.')); return; }
   const iAmAuctioneer = a.auctioneerId === myId;
+  const myHandFull = auctionHandFull(myp);
+  const iAutoPassed = Array.isArray(a.autoPassed) && a.autoPassed.includes(myId);
+  // Call-to-action banner at the top of the controls when the lot is
+  // waiting on me, so a glance says whether I owe an action. A bidder is
+  // "on the clock" until they bid or pass at the current floor; the
+  // auctioneer is prompted once every bidder has acted. Auto-passed and
+  // full-hand bidders owe nothing.
+  const iShouldAct = !iAmAuctioneer && !myHandFull && !iAutoPassed && !(a.acted || []).includes(myId);
+  const iShouldClose = iAmAuctioneer && auctionAllBiddersActed(a, players);
+  if (iShouldAct) {
+    host.appendChild(promptEl('Your turn - bid or pass below to continue the auction.'));
+  } else if (iShouldClose) {
+    host.appendChild(promptEl('Every bidder has acted - close the lot below.'));
+  } else if (iAutoPassed) {
+    host.appendChild(promptEl("You auto-passed - you're out for the rest of this lot."));
+  } else if (myHandFull && !iAmAuctioneer) {
+    host.appendChild(promptEl('Your hand is full - you are auto-passed for this lot.'));
+  }
   const myAqua = myp.aqua | 0;
   const myHandCount = Array.isArray(myp.hand) ? myp.hand.length : 0;
   const bids = a.bids || {};
@@ -1241,9 +1381,13 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
 
   // --- Your bid (ANY player, the auctioneer included) ---
   // Ties are allowed, so the floor is the high bid itself (>=), not +1.
-  const minBid = Math.max(1, high);
-  if (myHandCount >= AUCTION_HAND_LIMIT) {
-    host.appendChild(noteEl(`Hand full (${myHandCount}/${AUCTION_HAND_LIMIT}) - you can't bid. Build or transfer cards first.`));
+  // Bids can be 0 (claim it free), so the floor is never below 0.
+  const minBid = Math.max(0, high);
+  if (iAutoPassed) {
+    // Out for the lot - the banner above says so; offer no bid/pass
+    // controls (a fresh lot resets this).
+  } else if (myHandCount >= AUCTION_HAND_LIMIT) {
+    host.appendChild(noteEl(`Hand full (${myHandCount}/${AUCTION_HAND_LIMIT}) - you're auto-passed and can't take this lot. Build or transfer cards first.`));
   } else {
     const row = document.createElement('div');
     row.className = 'mp-auction-bidrow';
@@ -1274,13 +1418,19 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
     host.appendChild(row);
     const floor = high > 0
       ? ` Bids must be ${minBid}+ (ties allowed).`
-      : ' Open the bidding at 1+.';
-    host.appendChild(noteEl(`You have ${myAqua} aqua.${floor}${myBid ? ` Your bid: ${myBid}.` : ''}`));
+      : ' Open the bidding at 0+ (bid 0 to claim it free).';
+    const mine = (myId in bids) ? ` Your bid: ${bids[myId]}.` : '';
+    host.appendChild(noteEl(`You have ${myAqua} aqua.${floor}${mine}`));
     sync();
   }
 
-  // --- Pass (non-auctioneer only) ---
-  if (!iAmAuctioneer) {
+  // --- Pass options (non-auctioneer only). A full-hand or already
+  // auto-passed player is out, so the buttons are omitted. ---
+  //   Pass       - won't raise at the current floor; re-prompted if the
+  //                auctioneer raises (reopens the floor).
+  //   Auto-pass  - won't raise for the rest of the lot; never re-prompted
+  //                (a permanent pass). A later bid opts back in.
+  if (!iAmAuctioneer && !myHandFull && !iAutoPassed) {
     const passBtn = document.createElement('button');
     passBtn.type = 'button';
     passBtn.className = 'modal-btn';
@@ -1288,6 +1438,15 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
     passBtn.disabled = passed || _onlineBusy;
     passBtn.addEventListener('click', () => submitMpAuctionOp({ kind: 'AUCTION_PASS' }));
     host.appendChild(passBtn);
+
+    const autoBtn = document.createElement('button');
+    autoBtn.type = 'button';
+    autoBtn.className = 'modal-btn';
+    autoBtn.textContent = 'Auto-pass (stay out)';
+    autoBtn.title = "Pass for the rest of this lot - you won't be asked again when the bid is raised.";
+    autoBtn.disabled = _onlineBusy;
+    autoBtn.addEventListener('click', () => submitMpAuctionOp({ kind: 'AUCTION_PASS', permanent: true }));
+    host.appendChild(autoBtn);
   }
 
   // --- Close the lot (auctioneer only). Name a top bidder to sell to;
@@ -1296,22 +1455,28 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   if (iAmAuctioneer) {
     const closeWrap = document.createElement('div');
     closeWrap.className = 'mp-auction-close';
+    // The lot can only close once every other player has bid or passed.
+    // Until then the close buttons are disabled (the server enforces the
+    // same rule); the auctioneer can still Reset to start a fresh round.
+    const canClose = auctionAllBiddersActed(a, players);
     const lbl = document.createElement('div');
     lbl.className = 'mp-auction-close-label';
-    lbl.textContent = a.awaiting === 'auctioneer'
-      ? 'Every bidder has acted - close the lot:'
-      : 'Close the lot (or wait for more bids):';
+    lbl.textContent = canClose
+      ? 'Close the lot:'
+      : 'Waiting on bidders - everyone must bid or pass before you can close:';
     closeWrap.appendChild(lbl);
-    if (high <= 0) {
+    // "No bids" = nobody placed one (0 is a real bid now, not "no bid").
+    const anyBids = Object.keys(bids).length > 0;
+    if (!anyBids) {
       const keepBtn = document.createElement('button');
       keepBtn.type = 'button';
       keepBtn.className = 'modal-btn primary';
       keepBtn.textContent = 'Keep (no bids)';
-      keepBtn.disabled = _onlineBusy;
+      keepBtn.disabled = _onlineBusy || !canClose;
       keepBtn.addEventListener('click', () => submitMpAuctionOp({ kind: 'AUCTION_SELL', buyerId: myId }));
       closeWrap.appendChild(keepBtn);
     } else {
-      const topIds = players.filter((p) => (bids[p.profileId] | 0) === high).map((p) => p.profileId);
+      const topIds = players.filter((p) => (p.profileId in bids) && bids[p.profileId] === high).map((p) => p.profileId);
       for (const tid of topIds) {
         const tp = players.find((p) => p.profileId === tid);
         const btn = document.createElement('button');
@@ -1323,10 +1488,13 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
         } else {
           btn.textContent = `Sell to @${tp ? tp.name : '?'} (${high})`;
         }
-        btn.disabled = _onlineBusy;
+        btn.disabled = _onlineBusy || !canClose;
         btn.addEventListener('click', () => submitMpAuctionOp({ kind: 'AUCTION_SELL', buyerId: tid }));
         closeWrap.appendChild(btn);
       }
+    }
+    if (!canClose) {
+      closeWrap.appendChild(noteEl('Bidders still on the clock - close unlocks once they have all acted.'));
     }
     // Reset: clear the OTHER players' bids so they must re-bid (higher)
     // or pass. Shown when someone else has a standing bid to clear.
@@ -1454,20 +1622,11 @@ function ensureMpPanelStructure() {
 // form posts to the lobby chat REST endpoint; the WS 'chat' broadcast
 // (subscribed in bootstrapOnlineGame) re-renders for everyone including
 // the sender, so we don't append locally on submit.
-function setupMpChat(host) {
-  host.innerHTML = '';
-  const label = document.createElement('div');
-  label.className = 'mp-detail-label';
-  label.textContent = 'Table chat';
-  const list = document.createElement('ul');
-  list.id = 'mp-chat-list';
-  list.className = 'mp-chat-list';
-  const empty = document.createElement('li');
-  empty.className = 'muted mp-chat-empty';
-  empty.textContent = 'No messages yet.';
-  list.appendChild(empty);
+// Build the send form shared by every chat surface. Posts to the lobby
+// chat REST endpoint; the WS 'chat' broadcast re-renders for everyone
+// (sender included), so we never append locally on submit.
+function buildChatForm() {
   const form = document.createElement('form');
-  form.id = 'mp-chat-form';
   form.className = 'mp-chat-form';
   const input = document.createElement('input');
   input.type = 'text';
@@ -1491,20 +1650,35 @@ function setupMpChat(host) {
       input.value = body;
     }
   });
-  host.append(label, list, form);
+  return form;
 }
 
-function appendMpChat(msg, opts = {}) {
-  const list = document.getElementById('mp-chat-list');
-  if (!list || !msg) return;
-  const empty = list.querySelector('.mp-chat-empty');
-  if (empty) empty.remove();
+function setupMpChat(host) {
+  host.innerHTML = '';
+  const label = document.createElement('div');
+  label.className = 'mp-detail-label';
+  label.textContent = 'Table chat';
+  const list = document.createElement('ul');
+  list.id = 'mp-chat-list';
+  list.className = 'mp-chat-list';
+  const empty = document.createElement('li');
+  empty.className = 'muted mp-chat-empty';
+  empty.textContent = 'No messages yet.';
+  list.appendChild(empty);
+  host.append(label, list, buildChatForm());
+  // Backfill from the in-memory log so the pane shows prior messages
+  // even when it mounts after the conversation already started.
+  fillChatList(list);
+}
+
+// Build one chat <li> for a message, tinting the speaker's @name with
+// their seat colour (resolved from the cached snapshot). Shared by every
+// chat surface so they render identically.
+function chatMsgEl(msg) {
   const li = document.createElement('li');
   li.className = 'mp-chat-msg';
   const who = document.createElement('span');
   who.className = 'mp-chat-who player-name';
-  // Resolve the speaker's seat colour from the cached snapshot so
-  // their @name tints to match the rest of the player chrome.
   const speaker = (_onlineSnapshot && _onlineSnapshot.players || [])
     .find((p) => p.profileId === msg.profileId);
   if (speaker && speaker.color) who.style.setProperty('--player-color', speaker.color);
@@ -1513,8 +1687,36 @@ function appendMpChat(msg, opts = {}) {
   body.className = 'mp-chat-body';
   body.textContent = msg.body || '';
   li.append(who, document.createTextNode(' '), body);
-  list.appendChild(li);
+  return li;
+}
+
+// Append a message to a given chat list element (drops the empty-state
+// placeholder, then sticks the scroll to the bottom). No-op if the list
+// isn't mounted.
+function appendChatToList(list, msg) {
+  if (!list || !msg) return;
+  const empty = list.querySelector('.mp-chat-empty');
+  if (empty) empty.remove();
+  list.appendChild(chatMsgEl(msg));
   list.scrollTop = list.scrollHeight;
+}
+
+// Backfill a freshly-mounted chat list from the in-memory log (used by
+// the auction overlay's side chat so it isn't blank when it opens after
+// the conversation has already started).
+function fillChatList(list) {
+  if (!list) return;
+  for (const m of _chatLog) appendChatToList(list, m);
+}
+
+function appendMpChat(msg, opts = {}) {
+  if (!msg) return;
+  _chatLog.push(msg);
+  if (_chatLog.length > CHAT_LOG_CAP) _chatLog.splice(0, _chatLog.length - CHAT_LOG_CAP);
+  // Fan the message out to every chat surface that's currently mounted:
+  // the Multiplayer pane and (when a lot is open) the auction overlay.
+  appendChatToList(document.getElementById('mp-chat-list'), msg);
+  appendChatToList(document.getElementById('mp-auction-chat-list'), msg);
   // Live message from someone else while the MP pane isn't open -> pulse
   // the 🛰 tab so the player notices. (History backfill passes no `live`
   // flag; my own messages don't self-notify.)
@@ -1559,10 +1761,12 @@ function actorsNeededClient(snapshot) {
   }
   const a = snapshot.auction;
   if (a) {
-    if (a.awaiting === 'auctioneer') return [a.auctioneerId];
+    if (auctionAllBiddersActed(a, snapshot.players)) return [a.auctioneerId];
     const acted = a.acted || [];
+    const auto = a.autoPassed || [];
     return snapshot.players
-      .filter((p) => p.profileId !== a.auctioneerId && !acted.includes(p.profileId))
+      .filter((p) => p.profileId !== a.auctioneerId
+        && !acted.includes(p.profileId) && !auto.includes(p.profileId) && !auctionHandFull(p))
       .map((p) => p.profileId);
   }
   const active = snapshot.players[snapshot.activeIndex];
@@ -1719,7 +1923,7 @@ function renderMpPanel(snapshot) {
     : 'Waiting…';
   const clock = document.createElement('div');
   clock.className = 'muted mp-clock';
-  clock.textContent = `Round ${snapshot.round} · slot ${snapshot.turn}`;
+  clock.textContent = `Turn ${formatTurnNumber(snapshot.round, snapshot.turn, snapshot.maxRounds)} · slot ${(snapshot.turn | 0) + 1}/12`;
   head.append(row, turn, clock);
   tableEl.appendChild(head);
 
@@ -2023,6 +2227,8 @@ function humanizeOnlineOpError(code) {
     deck_empty: 'That deck is empty.',
     no_auction: 'No auction is open.',
     not_bidding_phase: 'Bidding is closed right now.',
+    bidders_pending: 'You can\'t close the lot yet - every other player must bid or pass first.',
+    no_discards_left: 'You\'ve already discarded this turn (1 per turn).',
     bid_too_low: 'Bid must beat the current high bid.',
     insufficient_aqua: 'Not enough aqua.',
     bad_amount: 'Enter a whole number.',
@@ -2275,8 +2481,12 @@ function wireHandStrip() {
         b.addEventListener('click', (ev) => { ev.stopPropagation(); handler(); });
         return b;
       };
+      const discardQ = qBtn('q-discard', '🗑',
+        getDiscardsRemaining() > 0 ? 'Discard (free, 1 per turn)' : 'Discard already used this turn',
+        () => discardHandCard(card, idx));
+      discardQ.disabled = getDiscardsRemaining() <= 0;
       quick.append(
-        qBtn('q-discard', '🗑', 'Discard', () => removeFromHandAt(idx)),
+        discardQ,
         // Free Market: effectively sells the card for +$3 (to the
         // bottom of its deck), via the shared op-gated confirm flow.
         qBtn('q-sell',    '💱', `Free Market: effectively sells this card to gain $${FREE_MARKET_AQUA} (costs 1 operation)`,
@@ -3653,25 +3863,12 @@ function openCardModal(card, kind, slotIdx) {
     ? `Send this card to the bottom of the ${card.type || 'corresponding'} deck. Free action, 1 per turn.`
     : `Discard already used this turn (1 per turn). End the turn to refresh.`;
   discardBtn.disabled = discardsLeft <= 0;
+  // Shared discard path (online routes the DISCARD server op so it
+  // persists; solo mutates locally). Same helper the hand quick-action
+  // trash icon uses, so the two can't drift.
   discardBtn.addEventListener('click', () => {
     if (discardBtn.disabled) return;
-    if (!consumeDiscard()) {
-      setStatus('Discard already used this turn (1 per turn).');
-      return;
-    }
-    removeFromHandAt(slotIdx);
-    // Patents return to the bottom of their type's deck.
-    // Crew don't have a deck in this slice; they just leave.
-    if (PATENTS_BY_ID[card.id]) addToBottom(card.id);
-    setStatus(`🗑 Discarded <em>${esc(card.name)}</em> to the bottom of the ${esc(card.type || 'crew')} deck.`);
-    logAction({
-      type: 'discard',
-      icon: '🗑',
-      summary: `Discarded ${card.name} to the bottom of the ${card.type || 'crew'} deck`,
-      undoable: false,
-      data: { cardId: card.id, deckType: card.type || null },
-    });
-    close();
+    discardHandCard(card, slotIdx, close);
   });
 
   const sellBtn = document.createElement('button');
@@ -8254,6 +8451,52 @@ function prospectorIsruValue(card) {
 // Free-market a single already-chosen Hand card. Same cost + payout
 // as the Free Market operation (1 op, +FREE_MARKET_AQUA aqua, card to
 // the bottom of its deck), but skips the picker and goes straight to
+// Discard one hand card to the bottom of its deck (free action, 1 per
+// turn). Online routes the DISCARD server op so the discard persists and
+// is validated/budgeted server-side; solo mutates locally. Shared by the
+// hand quick-action trash icon and the card modal's Discard button so the
+// two behave identically. afterFn runs once the discard fires (e.g. to
+// close the card popup).
+async function discardHandCard(card, idx, afterFn) {
+  if (!card) return;
+  // Locally we know the budget up front, so don't even prompt when the
+  // turn's discard is already spent. (Online the server is authoritative.)
+  if (!_online && getDiscardsRemaining() <= 0) {
+    setStatus('Discard already used this turn (1 per turn).');
+    return;
+  }
+  const dest = PATENTS_BY_ID[card.id]
+    ? `the bottom of the ${card.type || 'patent'} deck`
+    : 'out of play';
+  const ok = await confirmModal({
+    title: '🗑 Discard card',
+    body: `Discard <strong>${esc(card.name)}</strong> to ${dest}? This uses your one discard for the turn.`,
+    yes: '🗑 Discard', no: 'Cancel',
+  });
+  if (!ok) return;
+  if (_online) {
+    submitOnlineOp({ kind: 'DISCARD', cardId: card.id });
+    if (afterFn) afterFn();
+    return;
+  }
+  if (getDiscardsRemaining() <= 0 || !consumeDiscard()) {
+    setStatus('Discard already used this turn (1 per turn).');
+    return;
+  }
+  removeFromHandAt(idx);
+  // Patents return to the bottom of their type's deck; crew just leave.
+  if (PATENTS_BY_ID[card.id]) addToBottom(card.id);
+  setStatus(`🗑 Discarded <em>${esc(card.name)}</em> to the bottom of the ${esc(card.type || 'crew')} deck.`);
+  logAction({
+    type: 'discard',
+    icon: '🗑',
+    summary: `Discarded ${card.name} to the bottom of the ${card.type || 'crew'} deck`,
+    undoable: false,
+    data: { cardId: card.id, deckType: card.type || null },
+  });
+  if (afterFn) afterFn();
+}
+
 // the irreversible-sale confirm. afterFn runs once the sale commits
 // (e.g. to close the card popup).
 function freeMarketSellFromHand(card, afterFn) {
@@ -8297,7 +8540,7 @@ function doProspect(site, prosp) {
   // skip the local roll modal + disc placement below.
   if (_online) {
     const siteId = toServerId(_onlineMaps, site.id);
-    if (!siteId) { _onlineToast('That site is not on the server map.', 'error'); return; }
+    if (!siteId) { _onlineToast('That site is not on the map.', 'error'); return; }
     submitOnlineOp({ kind: 'PROSPECT', siteId });
     return;
   }
@@ -8623,12 +8866,23 @@ function animateRocketAlong(segments, totalMs = 700) {
 function repaintBoostCommit() {
   const btn = document.getElementById('hand-boost-commit');
   if (!btn) return;
-  const n = getBoostMarked().length;
+  const marked = getBoostMarked();
+  const n = marked.length;
+  // Boost costs Aqua = the total mass of the marked cards (see
+  // commitBoost). Show the cost on the button, not the card count, so the
+  // player sees the spend before committing.
+  let cost = 0;
+  for (const id of marked) {
+    const c = PATENTS_BY_ID[id];
+    if (!c) continue;
+    const f = (c.faces && c.faces.primary) || c;
+    cost += ((f.mass != null ? f.mass : c.mass) | 0);
+  }
   btn.dataset.armed = n > 0 ? '1' : '0';
   btn.disabled = n === 0;
-  btn.textContent = n > 0 ? `🛰 BOOST → LEO (${n})` : '🛰 BOOST → LEO';
+  btn.textContent = n > 0 ? `🛰 BOOST → LEO 💧${cost}` : '🛰 BOOST → LEO';
   btn.title = n > 0
-    ? `Boost ${n} marked card${n === 1 ? '' : 's'} from your hand into the LEO Stack. Costs one operation. Use the Transfer action at LEO to move them onto the rocket.`
+    ? `Boost ${n} marked card${n === 1 ? '' : 's'} from your hand into the LEO Stack for ${cost} aqua (total mass). Costs one operation. Use the Transfer action at LEO to move them onto the rocket.`
     : 'Mark cards in your hand, then press BOOST to ship them up to your LEO Stack.';
 }
 
@@ -9452,6 +9706,18 @@ async function moveRocket() {
     setStatus('No planned route - tap a site and pick "Plan rocket route" first.');
     return false;
   }
+  // Supports must be chained before anything moves. Check this BEFORE the
+  // fuel math (and before the server round-trip) so a broken stack reports
+  // the real reason - a missing reactor / radiator / unmet therm balance -
+  // instead of falling through to a misleading "not enough water" error.
+  const act = isRocketActive();
+  if (!act.active) {
+    const why = (act.missing && act.missing.length)
+      ? act.missing.join('; ')
+      : (act.reason || 'support chain not satisfied');
+    setStatus(`⛓️ Can't move - support chain broken: ${why}`);
+    return false;
+  }
   // Online: the server owns movement, fuel, and the hazard dice (seeded,
   // authoritative). The CLIENT still runs the same pre-flight the sandbox
   // does - it lists the hazards the route crosses, warns that each rad /
@@ -9467,12 +9733,12 @@ async function moveRocket() {
     if (!turn1Segs.length) { setStatus('Planned route has no current-turn segments.'); return false; }
     const destPlannerId = turn1Segs[turn1Segs.length - 1].to;
     const toSiteId = toServerId(_onlineMaps, destPlannerId);
-    if (!toSiteId) { _onlineToast('That destination is not on the server map.', 'error'); return false; }
+    if (!toSiteId) { _onlineToast('That destination is not on the map.', 'error'); return false; }
     const segments = [];
     for (const s of turn1Segs) {
       const f = plannerIdToSlug(s.from);
       const t = plannerIdToSlug(s.to);
-      if (!f || !t) { _onlineToast('That route is not on the server map.', 'error'); return false; }
+      if (!f || !t) { _onlineToast('That route is not on the map.', 'error'); return false; }
       segments.push({ from: f, to: t, burns: Number(s.burns) || 0, turn: 1 });
     }
     // Hazards along THIS turn's segments only.
@@ -12172,7 +12438,7 @@ function paintMissionLog() {
     ? history.slice().reverse().slice(0, 8).map((h) => {
         const ev = h.event ? ` · d6 = ${h.event.dieRoll}` : '';
         return `<li class="hist-row">
-          <header>Round ${h.round ?? '?'} · Turn ${h.turn ?? '?'}${ev}</header>
+          <header>Round ${h.round ?? '?'} · slot ${h.turn != null ? h.turn + 1 : '?'}${ev}</header>
           <ol>${
             h.actions.map((a) => `<li>${esc(a.icon)} ${esc(a.summary)}</li>`).join('')
           }</ol>

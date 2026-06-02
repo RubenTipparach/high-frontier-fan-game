@@ -340,9 +340,19 @@ export async function refreshMyGames() {
     else if (g.gameStatus === 'finished') ended.push(g);
     else if (g.status === 'started') started.push(g);
   }
+  // Sort by most recent activity first (least active sink to the bottom).
+  // lastActionAt = the game's last server op (game_states.updated_at);
+  // fall back to the last turn-end, then lobby creation for a game that
+  // hasn't moved yet.
+  const lastActiveAt = (g) => g.lastActionAt || g.lastTurnEndedAt || g.createdAt || 0;
+  started.sort((a, b) => lastActiveAt(b) - lastActiveAt(a));
+  ended.sort((a, b) => lastActiveAt(b) - lastActiveAt(a));
   // Local solo sandbox games live alongside the server games in
-  // "Your games" - newest first, each Resume re-enters /sandbox/<id>.
-  const sandboxRows = listSandboxGames().map(sandboxGameRow);
+  // "Your games", ALWAYS on top, and themselves sorted most-recent first.
+  const sandboxRows = listSandboxGames()
+    .slice()
+    .sort((a, b) => (b.lastPlayedAt || b.createdAt || 0) - (a.lastPlayedAt || a.createdAt || 0))
+    .map(sandboxGameRow);
   renderMyGames(startedEl, started, 'Resume', 'No games in progress.', sandboxRows);
   renderMyGames(endedEl, ended, 'Review', 'No finished games.');
 }

@@ -24,7 +24,7 @@
 //   getActiveThrusterStats()          → { thrust, fuel, isp, … }
 //   onRocketChange(cb)                → unsubscribe
 
-import { PATENTS_BY_ID } from '../../data/patents.js';
+import { PATENTS_BY_ID, thermsRequired, thermsSupplied } from '../../data/patents.js';
 import { CREW_BY_ID } from '../../data/crew.js';
 import { SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { isOnline } from './online-mode.js';
@@ -407,6 +407,11 @@ export function getActiveProspectorStats() {
   for (const [supplier, kinds] of groups) {
     if (!kinds.some((k) => supplied.has(k))) missing.push(supplier);
   }
+  // The prospector's operating chain (itself + the reactor/generator it
+  // needs) must be cooled too, same as the thruster chain.
+  const slot = _stack.find((s) => s.id === id);
+  const therm = chainThermBalance(id, installedFace(slot));
+  if (!therm.ok) missing.push('thermostat');
   return {
     id,
     kind,
@@ -414,6 +419,7 @@ export function getActiveProspectorStats() {
     requires,
     suppliedKinds: [...supplied],
     missingSuppliers: missing,
+    therm,
     canActivate: missing.length === 0,
   };
 }
@@ -436,6 +442,58 @@ function collectSupplied(excludeId) {
 export function onRocketChange(cb) {
   _listeners.push(cb);
   return () => { _listeners = _listeners.filter((x) => x !== cb); };
+}
+
+// Therms the stack's radiators can dissipate (active/installed face of
+// each radiator). The shared cooling pool every operating chain draws on.
+function radiatorThermSupply() {
+  let supply = 0;
+  for (const slot of _stack) {
+    const c = cardForSlot(slot);
+    if (!c || c.type !== 'radiator') continue;
+    supply += thermsSupplied(c, installedFace(slot));
+  }
+  return supply;
+}
+
+// Therm demand of operating `consumer` (its own heat) PLUS the heat of
+// the reactor/generator chain that powers it. Active-chain only: only the
+// power sources the consumer actually needs are counted, and within an
+// OR-group (e.g. X / ∿ / 💣 reactor) the lowest-heat matching supplier is
+// assumed in use, so a spare hot reactor sitting idle doesn't block.
+// Supports that aren't power sources (sail, beam, aerobrake) carry no heat.
+function chainThermDemand(consumerId, consumerFace) {
+  let demand = thermsRequired(consumerFace);
+  const groups = new Map(); // supplier prefix -> Set(kinds)
+  for (const r of (consumerFace.requires || [])) {
+    const pre = String(r.kind).split('-')[0];
+    if (pre !== 'reactor' && pre !== 'gen') continue;
+    if (!groups.has(pre)) groups.set(pre, new Set());
+    groups.get(pre).add(r.kind);
+  }
+  for (const [, kinds] of groups) {
+    let best = null;
+    for (const slot of _stack) {
+      if (slot.id === consumerId) continue;
+      const c = cardForSlot(slot);
+      if (!c) continue;
+      const f = installedFace(slot);
+      const sup = (f && f.supplies) || c.supplies || [];
+      if (!sup.some((k) => kinds.has(k))) continue;
+      const t = thermsRequired(f);
+      if (best === null || t < best) best = t;
+    }
+    if (best !== null) demand += best;
+  }
+  return demand;
+}
+
+// Is `consumerId`'s operating chain thermally balanced (radiators cover
+// the chain's heat)? Returns { ok, demand, supply }.
+function chainThermBalance(consumerId, consumerFace) {
+  const demand = chainThermDemand(consumerId, consumerFace);
+  const supply = radiatorThermSupply();
+  return { ok: demand <= supply, demand, supply };
 }
 
 // Activation check. Returns { active, reason, missing } where:
@@ -488,6 +546,15 @@ export function isRocketActive() {
         missing.push(`${active.name} needs ${supplier} (${kinds.join(' / ')})`);
       }
     }
+  }
+
+  // Thermal balance: the active thruster's heat plus the heat of the
+  // reactor/generator powering it must be dissipated by the stack's
+  // radiators, the same hard gate as the reactor-type support above.
+  const activeSlot = _stack.find((s) => s.id === _activeThrusterId);
+  const therm = chainThermBalance(_activeThrusterId, installedFace(activeSlot));
+  if (!therm.ok) {
+    missing.push(`${active.name} runs ${therm.demand}🌡️ but radiators supply ${therm.supply}🌡️`);
   }
 
   return {
