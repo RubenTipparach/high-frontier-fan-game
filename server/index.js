@@ -269,6 +269,11 @@ function requireAdmin(req, res, next) {
   return res.status(403).json({ error: 'admin_auth_required' });
 }
 
+// Public game URL (GitHub Pages). Surfaced on the admin login / notice
+// pages so a player who wandered into the admin portal has a one-tap way
+// back to the game.
+const GAME_URL = 'https://rubentipparach.github.io/high-frontier-fan-game/';
+
 // Minimal styled HTML page (login screen + error notices), matching the
 // OAuth callback's look.
 function adminHtmlPage(title, bodyHtml, accent = '#f87171') {
@@ -278,10 +283,13 @@ function adminHtmlPage(title, bodyHtml, accent = '#f87171') {
 display:flex;min-height:100vh;margin:0;align-items:center;justify-content:center;text-align:center;padding:24px}
 .box{max-width:440px}h1{font-size:20px;color:${accent};margin:0 0 12px}
 p{color:#8b90b8;line-height:1.55}
+a.play{display:inline-block;margin-top:22px;color:#7dd3fc;text-decoration:none;font-size:13px}
+a.play:hover{text-decoration:underline}
 a.btn{display:inline-block;margin-top:18px;padding:11px 18px;border-radius:9px;
 background:#5865F2;color:#fff;text-decoration:none;font-weight:700}
 a.btn:hover{background:#4752c4}</style></head><body><div class="box">
-<h1>${esc(title)}</h1>${bodyHtml}</div></body></html>`;
+<h1>${esc(title)}</h1>${bodyHtml}
+<p><a class="play" href="${GAME_URL}">Play High Frontier 4: All -&gt;</a></p></div></body></html>`;
 }
 function adminLoginPage() {
   const ready = oauthIdentifyEnabled() && adminAllowlist().size > 0;
@@ -1319,7 +1327,10 @@ p{color:#8b90b8;line-height:1.5}</style></head><body><div class="box">
     }
     if (!isAdminDiscordId(a.userId)) {
       console.warn('[admin] denied login for discord id', a.userId);
-      return sendPage('Access denied', 'This Discord account is not authorized for the admin panel.', false);
+      return sendPage('Access denied',
+        'This Discord account is not authorized for the admin panel.'
+        + `<br><br><a href="${GAME_URL}" style="color:#7dd3fc;text-decoration:none">Play High Frontier 4: All -&gt;</a>`,
+        false);
     }
     setAdminCookie(req, res, createAdminSession(a.userId));
     return res.redirect('/admin');
