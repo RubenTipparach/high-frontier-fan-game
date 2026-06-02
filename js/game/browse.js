@@ -5413,6 +5413,22 @@ function openRocketStackModal() {
     const fuelEqn = (thrStats && thrStats.fuel != null && thrStats.fuel !== thrStats.baseFuel)
       ? `base ${fmt(thrStats.baseFuel)} → ${fmt(thrStats.fuel)} water/move`
       : (thrStats && thrStats.fuel != null ? 'water per move' : '');
+    // Fuel/burn cell shows "N FT (B burns)" with the fuel-strip math
+    // underneath. B is counted along the net-thrust ladder (fuel steps
+    // from wet to dry / fuel-per-burn), NOT tank ÷ fuel - a lighter ship
+    // squeezes more burns out of the same water.
+    const hasBurns = !!(thrStats && thrStats.fuel != null && thrStats.burnsAvailable != null);
+    const burnsLabel = hasBurns
+      ? `${thrStats.burnsAvailable} burn${thrStats.burnsAvailable === 1 ? '' : 's'}` : '';
+    const fuelValHtml = (thrStats && thrStats.fuel != null)
+      ? `${fmt(thrStats.fuel)} FT${hasBurns ? ` <span class="muted">(${burnsLabel})</span>` : ''}`
+      : '-';
+    const fuelStepEqn = hasBurns
+      ? `${thrStats.fuelSteps}/${fmt(thrStats.fuel)} FT steps = ${burnsLabel}`
+      : fuelEqn;
+    const fuelTip = hasBurns
+      ? `Each burn spends ${fmt(thrStats.fuel)} fuel steps; from wet ${totals.wetMass} to dry ${totals.dryMass} the strip has ${thrStats.fuelSteps} steps, so ${burnsLabel} (leftover steps can't finish another).`
+      : (thrStats && thrStats.fuel != null ? `Fuel per burn = ${fmt(thrStats.fuel)} water per move.` : '');
     const thrustHtml = thrStats
       ? `<div class="rocket-totals-cell"
               data-tip="Thrust = base ${fmt(thrStats.baseThrust)} ${modifierLines ? '+ ' + modifierLines : ''}. Net thrust must be ≥ wet mass to lift."
@@ -5422,11 +5438,11 @@ function openRocketStackModal() {
            <small class="cell-eqn">${esc(thrustEqn)}</small>
          </div>
          <div class="rocket-totals-cell"
-              data-tip="Fuel per burn = ${fmt(thrStats.fuel)} water per move."
+              data-tip="${esc(fuelTip)}"
               title="Fuel per burn">
            <span class="lbl">Fuel / burn</span>
-           <strong>${thrStats.fuel != null ? fmt(thrStats.fuel) : '-'}</strong>
-           <small class="cell-eqn">${esc(fuelEqn)}</small>
+           <strong>${fuelValHtml}</strong>
+           <small class="cell-eqn">${esc(fuelStepEqn)}</small>
          </div>`
       : '';
     // Afterburn toggle - only shown when the active thruster has

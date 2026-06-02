@@ -27,7 +27,7 @@
 import { PATENTS_BY_ID, thermsRequired, thermsSupplied } from '../../data/patents.js';
 import { CREW_BY_ID } from '../../data/crew.js';
 import { SOLAR_ZONE_INFO } from '../../data/sites.js';
-import { weightClassForMass } from '../../data/net-thrust-track.js';
+import { weightClassForMass, fuelStepsBetween } from '../../data/net-thrust-track.js';
 import { isOnline } from './online-mode.js';
 
 // Crew can act as the ship's thruster OR its robonaut
@@ -900,6 +900,11 @@ export function getActiveThrusterStats() {
     }
   }
   if (thrust < 0) thrust = 0;
+  // Fuel-strip burns: how many whole burns the current tank affords,
+  // counting fuel steps along the net-thrust ladder from wet down to dry
+  // (non-linear across weight classes) and dividing by the per-burn cost.
+  const fuelSteps = fuelStepsBetween(totals.dryMass, totals.wetMass);
+  const burnsAvail = (fuel != null && fuel > 0) ? Math.floor(fuelSteps / fuel) : null;
   return {
     cardId: id,
     name: card.name,
@@ -908,6 +913,8 @@ export function getActiveThrusterStats() {
     thrust,
     fuel,
     isp,
+    fuelSteps,
+    burnsAvailable: burnsAvail,
     modifiers,
     weightClass:   wcClass,
     weightClassMod: wcMod,
