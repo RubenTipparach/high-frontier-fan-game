@@ -27,6 +27,7 @@
 import { PATENTS_BY_ID, thermsRequired, thermsSupplied } from '../../data/patents.js';
 import { CREW_BY_ID } from '../../data/crew.js';
 import { SOLAR_ZONE_INFO } from '../../data/sites.js';
+import { weightClassForMass } from '../../data/net-thrust-track.js';
 import { isOnline } from './online-mode.js';
 
 // Crew can act as the ship's thruster OR its robonaut
@@ -841,22 +842,15 @@ export function getActiveThrusterStats() {
     }
   }
   const totals = getStackTotals();
-  // Weight-class modifier from the published Net Thrust track:
-  //   wet < 2     -> +2  (WISP)
-  //   wet < 4 2/3 -> +1  (PROBE)
-  //   wet < 6 1/2 ->  0  (SCOUT)
-  //   wet < 17    -> -1  (TRANSPORT)
-  //   wet <= 32   -> -2  (TUG)
-  // The chit on the Net Thrust track sits at the rocket's wet
-  // mass; its row marks the modifier this row applies.
+  // Weight-class modifier from the published Net Thrust track, keyed off
+  // wet mass. weightClassForMass (data/net-thrust-track.js) is the single
+  // source of truth the fuel-strip renderer also reads, so the thrust
+  // triangle and the strip can never disagree on the band (WISP +2 / PROBE
+  // +1 / SCOUT 0 / TRANSPORT -1 / TUG -2, in doubling mass brackets).
   const wm = totals.wetMass;
-  let wcMod = 0;
-  let wcClass = 'TUG';
-  if      (wm < 2)        { wcMod = +2; wcClass = 'WISP';      }
-  else if (wm < 14 / 3)   { wcMod = +1; wcClass = 'PROBE';     }   // 4 2/3
-  else if (wm < 6.5)      { wcMod =  0; wcClass = 'SCOUT';     }
-  else if (wm < 17)       { wcMod = -1; wcClass = 'TRANSPORT'; }
-  else                    { wcMod = -2; wcClass = 'TUG';       }
+  const wc = weightClassForMass(wm);
+  const wcMod = wc.netThrust;
+  const wcClass = wc.id;
   if (wcMod !== 0) {
     thrust += wcMod;
     modifiers.push({ from: `${wcClass} weight class`, kind: 'thrust', delta: wcMod });
