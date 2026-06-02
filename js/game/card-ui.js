@@ -67,7 +67,7 @@ export const REQUIREMENT_VIS = {
   // Legacy / hand-written supports retained so older data still
   // loads cleanly.
   'pulse-generator':    { glyph: '⚡', label: 'Pulse generator'         },
-  'thermostat':         { glyph: '🌡️', label: 'Thermostat'             },
+  'thermostat':         { glyph: '🌡️', label: 'Radiator therms'         },
   'crew-quarters':      { glyph: '👤', label: 'Crew quarters'          },
   'sail':               { glyph: '⛵', label: 'Sail rigging'           },
   'spin-grav':          { glyph: '💃', label: 'Spin gravity'           },

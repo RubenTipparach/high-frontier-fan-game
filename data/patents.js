@@ -109,11 +109,25 @@ const PROPERTY_COLUMNS_NUM = {
 // Build a `requires` array from the face's "Support
 // Requirements" booleans. Just the power-source columns - see
 // the BOOLEAN_TO_REQ comment for why this list is tight.
-function requiresFromFace(face) {
+//
+// Heat is a support too: a card that generates therms (reactors,
+// generators, robonauts, the hotter thrusters) needs that many
+// therms of radiator cooling in the stack to operate. We surface
+// it as a counted `thermostat` requirement so it renders as 🌡️×N
+// in the supports-required row and feeds the support-chain
+// thermal-balance check (see thermsRequired / thermsSupplied).
+// Radiators SUPPLY therms, they never require them, so the
+// radiator type is skipped (its Light/Heavy therm columns are the
+// cooling capacity, read via thermsSupplied).
+function requiresFromFace(face, type) {
   const reqs = [];
   if (!face) return reqs;
   for (const [col, kind] of Object.entries(BOOLEAN_TO_REQ)) {
     if (face[col]) reqs.push({ kind, count: 1 });
+  }
+  if (type !== 'radiator') {
+    const therms = Number(face.Therms) || 0;
+    if (therms > 0) reqs.push({ kind: 'thermostat', count: therms });
   }
   return reqs;
 }
@@ -196,7 +210,7 @@ function buildFace(label, tier, type) {
     // primary face's name for the card id and lookup.
     name:       tier.Name || null,
     ability:    tier.Ability || null,
-    requires:   requiresFromFace(tier),
+    requires:   requiresFromFace(tier, type),
     supplies:   suppliesFromFace(tier, type),
     properties: propertiesFromFace(tier),
   };
@@ -288,6 +302,30 @@ export const PATENTS = _deck;
 export const PATENTS_BY_ID = Object.fromEntries(
   PATENTS.map((p) => [p.id, p]),
 );
+
+// ---- Thermal-balance helpers (shared by every support-chain check) ----
+//
+// Therms a face DEMANDS: its heat output, surfaced as the counted
+// `thermostat` requirement (see requiresFromFace). 0 for cards that
+// generate no heat. Pass the INSTALLED face so a flipped card (Tier-2
+// dark side) reports its own heat, not Tier-1's.
+export function thermsRequired(face) {
+  if (!face) return 0;
+  const r = (face.requires || []).find((x) => x.kind === 'thermostat');
+  return r ? (Number(r.count) || 0) : 0;
+}
+
+// Therms a radiator SUPPLIES: its cooling capacity. Light/Heavy flip is
+// not yet tracked as stack state, so we credit the radiator's larger
+// (deployed) side - a radiator in a flying stack is assumed deployed to
+// cool. Non-radiators supply 0.
+export function thermsSupplied(card, face) {
+  if (!card || card.type !== 'radiator') return 0;
+  const f = face || (card.faces && card.faces.primary) || card;
+  const light = Number(f.light && f.light.therms) || 0;
+  const heavy = Number(f.heavy && f.heavy.therms) || 0;
+  return Math.max(light, heavy, Number(f.therms) || 0);
+}
 
 export function patentsByType(type) {
   return PATENTS.filter((p) => p.type === type);
