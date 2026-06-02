@@ -53,6 +53,17 @@ jobs:
           node --input-type=module -e "import('./data/patents.js').then(m => { if (!Array.isArray(m.PATENTS) || m.PATENTS.length < 30) { console.error('patents.js looks empty:', m.PATENTS && m.PATENTS.length); process.exit(1); } });"
           node --input-type=module -e "import('./data/glory.js').then(m => { if (!Array.isArray(m.GLORY) || m.GLORY.length < 6) { console.error('glory.js looks empty:', m.GLORY && m.GLORY.length); process.exit(1); } });"
 
+      # Boot validation gate. Links the WHOLE browser module graph (imports
+      # js/main.js with browser globals stubbed) so a broken import - a
+      # missing export, a bad path, a parse error, or a duplicate
+      # declaration - fails the build BEFORE it deploys, instead of shipping
+      # a blank page / the boot-failure banner. This is stronger than
+      # `node --check`, which does NOT flag a duplicate declaration in a .js
+      # file that uses ESM syntax (that exact gap shipped the 2026-06-02
+      # outage). Run the same check locally with `node scripts/check-boot.mjs`.
+      - name: Validate boot graph
+        run: node scripts/check-boot.mjs
+
       # Bake the commit SHA into every cache-bust query and into
       # version.json so the runtime check (js/version-check.js) can
       # force-navigate clients that have a stale index.html cached.
