@@ -27,8 +27,10 @@
 //
 // Layout (slot indexes):
 //   0   = new round marker (middle of Season Blue)
-//   1,3,5,7,9,11 = event slots - "1 turn after new round, then
-//                  every 2 turns" as specced
+//   0,2,4,6,8,10 = event slots. An event fires when the cube LANDS on
+//                  one of these (every 2 turns). One slot clockwise of
+//                  the old odd markers, so the event resolves the turn
+//                  AFTER the cube crosses the marker line, not on it.
 //   0..3  = Blue, 4..7 = Yellow, 8..11 = Red
 
 import { isOnline } from './online-mode.js';
@@ -45,18 +47,23 @@ export const SLOTS = 12;
 // in the MIDDLE of Season Blue, so Blue WRAPS the top of the dial:
 // slots 10, 11, 0, 1 (two blue slots fall before turn 0). Yellow then
 // Red follow clockwise. A `from > to` entry means the wedge wraps past
-// slot 0 - see slotInSeason() / seasonArc(). Event markers (slots 1, 3,
-// 5, 7, 9, 11) are independent of this colouring and stay put.
+// slot 0 - see slotInSeason() / seasonArc(). Event markers (slots 0, 2,
+// 4, 6, 8, 10) are independent of this colouring and stay put.
 export const SEASONS = [
   { name: 'blue',   color: '#60a5fa', from: 10, to: 1, label: 'Season Blue'   },
   { name: 'yellow', color: '#facc15', from: 2,  to: 5, label: 'Season Yellow' },
   { name: 'red',    color: '#f87171', from: 6,  to: 9, label: 'Season Red'   },
 ];
 export const NEW_ROUND_SLOT = 0;
-export const EVENT_SLOTS = [1, 3, 5, 7, 9, 11];
+// Even slots. An event fires when the cube LANDS here; this is one slot
+// clockwise of the old odd markers [1,3,5,7,9,11], so each event now
+// resolves the turn AFTER the cube crosses its marker line (events used
+// to trigger one turn too early). Slot 0 fires on the new-round tick.
+// Mirrored in server/game/state.js - keep both in sync.
+export const EVENT_SLOTS = [0, 2, 4, 6, 8, 10];
 
 // Verbatim HF4 Sunspot-Cube event table. Triggered each time the
-// cube crosses an event threshold (slots 1, 3, 5, 7, 9, 11); the
+// cube lands on an event slot (0, 2, 4, 6, 8, 10); the
 // player rolls 1d6 and consults this table. For rolls 1-4 the
 // event is universal; for 5-6 the effect depends on the current
 // season (Blue / Yellow / Red). The text below is reproduced from

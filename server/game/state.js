@@ -44,7 +44,10 @@ import { makeRng, shuffle } from './rng.js';
 // --- Sunspot Cube clock (mirror of js/game/turn-clock.js) ---
 export const SLOTS = 12;
 export const NEW_ROUND_SLOT = 0;
-export const EVENT_SLOTS = [1, 3, 5, 7, 9, 11];
+// Even slots - an event fires when the cube LANDS here, one slot
+// clockwise of the old odd markers so it resolves the turn AFTER the
+// marker line is crossed. Mirror of js/game/turn-clock.js; keep synced.
+export const EVENT_SLOTS = [0, 2, 4, 6, 8, 10];
 // Season wedges mirror js/game/turn-clock.js: the new-round marker
 // (slot 0) sits in the middle of Season Blue, so Blue WRAPS slot 0
 // (slots 10, 11, 0, 1). A `from > to` entry wraps past slot 0.
