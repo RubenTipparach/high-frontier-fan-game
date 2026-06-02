@@ -813,11 +813,22 @@ export function getActiveThrusterStats() {
   let baseThrust = thrust;
   let baseFuel = fuel;
   const modifiers = [];
+  // A reactor/generator's thrust + fuel modifiers only count when it
+  // actually powers THIS thruster, i.e. it supplies a kind the active
+  // thruster requires (it sits in the thruster's support chain). A power
+  // source wired to some other card (say a generator feeding a robonaut's
+  // gen-electric) must not shift the thruster's stats, and a self-powered
+  // thruster (a solar moth, which requires nothing) takes no stack thrust
+  // modifiers at all. Same supply/require match isRocketActive() gates
+  // activation on, so "modified" stats and "can it fly" stay consistent.
+  const reqKinds = new Set((f.requires || []).map((r) => (r && r.kind) || r));
   for (const slot of _stack) {
     if (slot.id === id) continue;
     const c = cardForSlot(slot);
     if (!c) continue;
     const cf = installedFace(slot);
+    const cSupplies = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
+    if (!cSupplies.some((k) => reqKinds.has(k))) continue;
     const tMod = cf.thrustMod;
     const fMod = cf.fuelMod;
     if (tMod != null && tMod !== 0) {

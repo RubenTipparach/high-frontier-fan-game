@@ -218,8 +218,18 @@ function thrusterFuelPerBurn(rocket) {
   const p = PATENTS_BY_ID[tid];
   let fuel = f.fuel != null ? f.fuel : (p && p.fuel);
   if (fuel == null) return 1;
+  // Only a power source in THIS thruster's support chain scales its fuel
+  // (mirror of rocket.js#getActiveThrusterStats): a card's fuelMod counts
+  // only when it supplies a kind the active thruster requires. A generator
+  // wired to some other card (or a self-powered thruster that requires
+  // nothing) leaves the fuel-per-burn untouched.
+  const reqKinds = new Set((f.requires || []).map((r) => (r && r.kind) || r));
   for (const s of rocket.stack) {
     if (s.id === tid) continue;
+    const c = PATENTS_BY_ID[s.id];
+    if (!c) continue;
+    const cSupplies = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
+    if (!cSupplies.some((k) => reqKinds.has(k))) continue;
     const cf = slotFace(s);
     if (cf.fuelMod != null && cf.fuelMod !== 1) fuel *= cf.fuelMod;
   }
