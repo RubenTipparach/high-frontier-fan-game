@@ -11430,15 +11430,46 @@ function planRocketRouteTo(destSite) {
   const assistNote = (liftGate.assist || landGate.assist)
     ? ` <em class="muted">(🏭 factory assist${(liftGate.needsRoll || landGate.needsRoll) ? ' - hazard roll on the move' : ' - free, colony present'})</em>`
     : '';
+  const metricPriority = routeMetricPriority();
   const result = planRoute(_activeData, origin.id, destSite.id, {
     thrust,
-    metricPriority: routeMetricPriority(),
+    metricPriority,
   });
   if (!result || !result.segments.length) {
-    setStatus(
-      `No rocket route from <strong>${esc(origin.name)}</strong> to `
-      + `<strong>${esc(destSite.name)}</strong>.`
-    );
+    // Every map location is reachable from LEO (the route graph has no
+    // disjoint nodes), so a genuine "no path" is almost impossible.
+    // When the planner still comes back empty it's nearly always that
+    // one endpoint isn't a recognised graph node (a stale board, or a
+    // rocket position that didn't resync from the server). Dump the
+    // specifics to the console so the failure is explainable, then give
+    // the player the actual reason instead of a blanket "no route".
+    const g = _activeData;
+    const inGraph = (id) => !!(g && g.byId && g.byId[id]);
+    const degree = (id) =>
+      (g && g.neighbors && g.neighbors.get(id)) ? g.neighbors.get(id).size : 0;
+    const diag = {
+      origin: { id: origin.id, name: origin.name, inGraph: inGraph(origin.id), neighbors: degree(origin.id) },
+      dest: { id: destSite.id, name: destSite.name, inGraph: inGraph(destSite.id), neighbors: degree(destSite.id) },
+      thrust,
+      metricPriority,
+      resultNull: !result,
+      segments: result ? result.segments.length : 0,
+      online: _online,
+      graph: g
+        ? { sites: Array.isArray(g.sites) ? g.sites.length : null, hasNeighbors: !!g.neighbors, hasEdgeLabels: !!g.edgeLabels }
+        : null,
+    };
+    console.warn('[route] planRoute returned no path', diag);
+    let msg;
+    if (!diag.origin.inGraph) {
+      msg = `🚀 The rocket's position isn't on the map right now. Reload the page, then plan the route again.`;
+    } else if (!diag.dest.inGraph) {
+      msg = `🛸 Couldn't find <strong>${esc(destSite.name)}</strong> on the map. Reload the page, then try again.`;
+    } else {
+      msg = `No route found from <strong>${esc(origin.name)}</strong> to `
+        + `<strong>${esc(destSite.name)}</strong> at thrust <strong>${thrust}</strong>.`;
+    }
+    setStatus(msg);
     _renderer.setRoute(null);
     _renderer.setRouteEndpoints(origin.id, destSite.id);
     return false;
