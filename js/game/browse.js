@@ -845,6 +845,22 @@ function auctionHandFull(player) {
   return !!player && Array.isArray(player.hand) && player.hand.length >= AUCTION_HAND_LIMIT;
 }
 
+// Has every non-auctioneer acted, so the auctioneer may close? Mirrors the
+// server's allBiddersActed: a player counts as done if they bid/passed at
+// the current floor, permanently auto-passed, or are full-hand. Computed
+// from the snapshot rather than trusting auction.awaiting, so a lot whose
+// stored phase is stale (e.g. one opened before this logic shipped, where
+// every opponent is already full-hand) still lets the auctioneer close.
+function auctionAllBiddersActed(auction, players) {
+  if (!auction) return false;
+  const acted = auction.acted || [];
+  const auto = auction.autoPassed || [];
+  const others = (players || []).filter((p) => p.profileId !== auction.auctioneerId);
+  if (!others.length) return false;
+  return others.every((p) =>
+    acted.includes(p.profileId) || auto.includes(p.profileId) || auctionHandFull(p));
+}
+
 // Whether the lot is currently waiting on ME, from the cached snapshot.
 //   shouldAct   - I'm a bidder (not the auctioneer) still on the clock at
 //                 the current floor (haven't bid/passed since it last
@@ -862,7 +878,7 @@ function auctionTurnFlags(auction) {
     return { shouldAct: false, shouldClose: false };
   }
   if (auction.auctioneerId === me) {
-    return { shouldAct: false, shouldClose: auction.awaiting === 'auctioneer' };
+    return { shouldAct: false, shouldClose: auctionAllBiddersActed(auction, players) };
   }
   const acted = auction.acted || [];
   const autoPassed = (auction.autoPassed || []).includes(me);
@@ -1078,9 +1094,9 @@ function renderOnlineAuction(auction) {
   }
   bidEl.appendChild(list);
   overlay.querySelector('.mp-auction-phase').textContent =
-    auction.awaiting === 'bidders'
-      ? 'Bidding is open - anyone can bid or raise (ties allowed).'
-      : 'All bidders have acted - the auctioneer can close.';
+    auctionAllBiddersActed(auction, players)
+      ? 'All bidders have acted - the auctioneer can close.'
+      : 'Bidding is open - anyone can bid or raise (ties allowed).';
 
   buildMpAuctionControls(
     overlay.querySelector('#mp-auction-controls'),
@@ -1344,7 +1360,7 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   // auctioneer is prompted once every bidder has acted. Auto-passed and
   // full-hand bidders owe nothing.
   const iShouldAct = !iAmAuctioneer && !myHandFull && !iAutoPassed && !(a.acted || []).includes(myId);
-  const iShouldClose = iAmAuctioneer && a.awaiting === 'auctioneer';
+  const iShouldClose = iAmAuctioneer && auctionAllBiddersActed(a, players);
   if (iShouldAct) {
     host.appendChild(promptEl('Your turn - bid or pass below to continue the auction.'));
   } else if (iShouldClose) {
@@ -1438,7 +1454,7 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
     // The lot can only close once every other player has bid or passed.
     // Until then the close buttons are disabled (the server enforces the
     // same rule); the auctioneer can still Reset to start a fresh round.
-    const canClose = a.awaiting === 'auctioneer';
+    const canClose = auctionAllBiddersActed(a, players);
     const lbl = document.createElement('div');
     lbl.className = 'mp-auction-close-label';
     lbl.textContent = canClose
@@ -1739,10 +1755,12 @@ function actorsNeededClient(snapshot) {
   }
   const a = snapshot.auction;
   if (a) {
-    if (a.awaiting === 'auctioneer') return [a.auctioneerId];
+    if (auctionAllBiddersActed(a, snapshot.players)) return [a.auctioneerId];
     const acted = a.acted || [];
+    const auto = a.autoPassed || [];
     return snapshot.players
-      .filter((p) => p.profileId !== a.auctioneerId && !acted.includes(p.profileId))
+      .filter((p) => p.profileId !== a.auctioneerId
+        && !acted.includes(p.profileId) && !auto.includes(p.profileId) && !auctionHandFull(p))
       .map((p) => p.profileId);
   }
   const active = snapshot.players[snapshot.activeIndex];
