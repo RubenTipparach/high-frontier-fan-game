@@ -1778,6 +1778,19 @@ function clearMpChatUnread() {
 // (from the POST response) so a button greys out + shows the timer right
 // away, before the next snapshot carries state.reminders.
 const NUDGE_COOLDOWN_MS = 3 * 60 * 60 * 1000;
+// A live auction resolves in minutes, so it uses a much shorter nudge
+// throttle than async turn reminders (mirrors the server's
+// AUCTION_REMIND_COOLDOWN_MS). The stored last-nudge timestamp is shared;
+// only the window we compare against changes while a lot is open.
+const AUCTION_NUDGE_COOLDOWN_MS = 2 * 60 * 1000;
+function nudgeCooldownMs(snapshot) {
+  return (snapshot && snapshot.auction) ? AUCTION_NUDGE_COOLDOWN_MS : NUDGE_COOLDOWN_MS;
+}
+// Short "2m" / "45s" label for how long until a cooled-down nudge frees up.
+function fmtNudgeWait(ms) {
+  if (ms <= 0) return '';
+  return ms < 60000 ? `${Math.ceil(ms / 1000)}s` : `${Math.ceil(ms / 60000)}m`;
+}
 let _localNudges = {}; // `${gameId}:${targetId}` -> sentAt
 function recordLocalNudge(targetId, sentAt) {
   if (sentAt) _localNudges[`${_onlineGameId}:${targetId}`] = sentAt;
@@ -1863,12 +1876,13 @@ async function doNudge(opts, btn) {
 // One nudge button. Pass a single targetPlayer for a per-player nudge,
 // or allPlayers (+ targetPlayer null) for a "Nudge all" button.
 function makeNudgeButton(snapshot, targetPlayer, allPlayers) {
+  const cd = nudgeCooldownMs(snapshot);
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'mp-leave mp-nudge';
   if (targetPlayer) {
     const last = lastNudgeAt(snapshot, targetPlayer.profileId);
-    const onCd = last && (Date.now() - last) < NUDGE_COOLDOWN_MS;
+    const onCd = last && (Date.now() - last) < cd;
     const who = document.createElement('span');
     who.className = 'player-name';
     if (targetPlayer.color) who.style.setProperty('--player-color', targetPlayer.color);
@@ -1876,19 +1890,19 @@ function makeNudgeButton(snapshot, targetPlayer, allPlayers) {
     btn.append('👋 Nudge ', who);
     if (onCd) {
       btn.disabled = true;
-      btn.title = `Reminded ${relTime(last)} ago. One nudge per player per 3 hours.`;
+      btn.title = `Reminded ${relTime(last)} ago. Available again in ${fmtNudgeWait(cd - (Date.now() - last))}.`;
       const note = document.createElement('span');
       note.className = 'mp-nudge-note muted';
       note.textContent = ` · ${relTime(last)} ago`;
       btn.appendChild(note);
     } else {
-      btn.title = `Send @${targetPlayer.name} a turn reminder (Discord DM). One per player per 3h.`;
+      btn.title = `Send @${targetPlayer.name} a turn reminder (Discord DM).`;
       btn.addEventListener('click', () => doNudge({ targetId: targetPlayer.profileId }, btn));
     }
   } else {
-    const allOnCd = (allPlayers || []).every((p) => {
+    const allOnCd = (allPlayers || []).length > 0 && (allPlayers || []).every((p) => {
       const l = lastNudgeAt(snapshot, p.profileId);
-      return l && (Date.now() - l) < NUDGE_COOLDOWN_MS;
+      return l && (Date.now() - l) < cd;
     });
     btn.textContent = `👋 Nudge all (${(allPlayers || []).length})`;
     btn.disabled = allOnCd;
@@ -1906,20 +1920,35 @@ function makeNudgeButton(snapshot, targetPlayer, allPlayers) {
 // per-player cooldown (the server skips any that are). Reuses doNudge so
 // the toast + optimistic cooldown record match the roster-panel nudges.
 function makeAuctionNudgeButton(snapshot, label, opts, targetIds, title) {
+  const cd = nudgeCooldownMs(snapshot);
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'modal-btn';
-  btn.textContent = `${label} (${targetIds.length})`;
-  const allOnCd = targetIds.length > 0 && targetIds.every((pid) => {
+  // Soonest any target frees up (0 = at least one is nudgable right now).
+  let soonest = Infinity;
+  for (const pid of targetIds) {
     const l = lastNudgeAt(snapshot, pid);
-    return l && (Date.now() - l) < NUDGE_COOLDOWN_MS;
-  });
-  btn.disabled = _onlineBusy || targetIds.length === 0 || allOnCd;
-  btn.title = targetIds.length === 0
-    ? 'No one is waiting on a response right now.'
-    : allOnCd
-      ? 'Everyone here was nudged recently (one nudge per player per 3 hours).'
+    const left = l ? cd - (Date.now() - l) : 0;
+    if (left <= 0) { soonest = 0; break; }
+    soonest = Math.min(soonest, left);
+  }
+  const onCd = targetIds.length > 0 && soonest > 0;
+  btn.textContent = `${label} (${targetIds.length})`;
+  btn.disabled = _onlineBusy || targetIds.length === 0 || onCd;
+  if (onCd) {
+    // Surface WHY it's greyed right on the button - the hover tooltip is
+    // invisible on touch: everyone in this set was nudged within the
+    // cooldown, and here's when another nudge frees up.
+    const note = document.createElement('span');
+    note.className = 'mp-nudge-note muted';
+    note.textContent = ` · ready in ${fmtNudgeWait(soonest)}`;
+    btn.appendChild(note);
+    btn.title = `Everyone here was nudged recently. Another nudge frees up in ${fmtNudgeWait(soonest)}.`;
+  } else {
+    btn.title = targetIds.length === 0
+      ? 'No one is waiting on a response right now.'
       : title;
+  }
   if (!btn.disabled) btn.addEventListener('click', () => doNudge(opts, btn));
   return btn;
 }
