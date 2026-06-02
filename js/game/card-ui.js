@@ -18,6 +18,7 @@ const SPECTRAL_STYLE = {
   V: { glyph: 'V', fill: '#f97316', ink: '#0c0a16' },  // basaltic / volcanic
   B: { glyph: 'B', fill: '#60a5fa', ink: '#0c0a16' },  // alkaline
   D: { glyph: 'D', fill: '#67e8f9', ink: '#0c0a16' },  // icy / cometary
+  H: { glyph: 'H', fill: '#0ea5e9', ink: '#f0f9ff' },  // hydrous (matches map + industrialize badge)
   unknown: { glyph: '?', fill: '#475569', ink: '#e5e7eb' },
 };
 const SPECTRAL_LABEL = {
@@ -27,6 +28,7 @@ const SPECTRAL_LABEL = {
   V: 'Basaltic / volcanic',
   B: 'Alkaline',
   D: 'Icy / cometary',
+  H: 'Hydrous',
   unknown: 'Unknown',
 };
 
