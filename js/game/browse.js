@@ -1070,7 +1070,9 @@ function renderOnlineAuction(auction) {
     const b = bids[p.profileId];
     const didPass = Array.isArray(auction.passed) && auction.passed.includes(p.profileId);
     const autoPassed = Array.isArray(auction.autoPassed) && auction.autoPassed.includes(p.profileId);
-    const isTop = high > 0 && (b | 0) === high;
+    // Top marker: this player placed the high bid. 0 is a valid bid, so
+    // the test is "has a bid equal to the high", not "high > 0".
+    const isTop = (p.profileId in bids) && b === high;
     const isAuctioneer = p.profileId === auction.auctioneerId;
     const handFull = !isAuctioneer && auctionHandFull(p);
     // Status suffix on a standing bid, or the standalone status when the
@@ -1379,7 +1381,8 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
 
   // --- Your bid (ANY player, the auctioneer included) ---
   // Ties are allowed, so the floor is the high bid itself (>=), not +1.
-  const minBid = Math.max(1, high);
+  // Bids can be 0 (claim it free), so the floor is never below 0.
+  const minBid = Math.max(0, high);
   if (iAutoPassed) {
     // Out for the lot - the banner above says so; offer no bid/pass
     // controls (a fresh lot resets this).
@@ -1415,8 +1418,9 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
     host.appendChild(row);
     const floor = high > 0
       ? ` Bids must be ${minBid}+ (ties allowed).`
-      : ' Open the bidding at 1+.';
-    host.appendChild(noteEl(`You have ${myAqua} aqua.${floor}${myBid ? ` Your bid: ${myBid}.` : ''}`));
+      : ' Open the bidding at 0+ (bid 0 to claim it free).';
+    const mine = (myId in bids) ? ` Your bid: ${bids[myId]}.` : '';
+    host.appendChild(noteEl(`You have ${myAqua} aqua.${floor}${mine}`));
     sync();
   }
 
@@ -1461,7 +1465,9 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
       ? 'Close the lot:'
       : 'Waiting on bidders - everyone must bid or pass before you can close:';
     closeWrap.appendChild(lbl);
-    if (high <= 0) {
+    // "No bids" = nobody placed one (0 is a real bid now, not "no bid").
+    const anyBids = Object.keys(bids).length > 0;
+    if (!anyBids) {
       const keepBtn = document.createElement('button');
       keepBtn.type = 'button';
       keepBtn.className = 'modal-btn primary';
@@ -1470,7 +1476,7 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
       keepBtn.addEventListener('click', () => submitMpAuctionOp({ kind: 'AUCTION_SELL', buyerId: myId }));
       closeWrap.appendChild(keepBtn);
     } else {
-      const topIds = players.filter((p) => (bids[p.profileId] | 0) === high).map((p) => p.profileId);
+      const topIds = players.filter((p) => (p.profileId in bids) && bids[p.profileId] === high).map((p) => p.profileId);
       for (const tid of topIds) {
         const tp = players.find((p) => p.profileId === tid);
         const btn = document.createElement('button');

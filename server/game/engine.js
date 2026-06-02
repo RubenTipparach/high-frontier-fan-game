@@ -1287,9 +1287,13 @@ function recomputeAuction(state) {
   let high = 0;
   for (const [, amt] of entries) if (amt > high) high = amt;
   a.highBid = high;
+  // Leader = whoever sits at the high bid; the auctioneer wins ties, but
+  // only if they actually placed a bid. Bids can be 0, so the leader is
+  // computed whenever ANY bid exists (not just when high > 0).
   let leader = null;
-  if (high > 0) {
-    if ((a.bids[a.auctioneerId] || 0) === high) leader = a.auctioneerId;
+  if (entries.length) {
+    const aucBid = a.bids[a.auctioneerId];
+    if (aucBid != null && aucBid === high) leader = a.auctioneerId;
     else { const e = entries.find(([, amt]) => amt === high); leader = e ? Number(e[0]) : null; }
   }
   a.highBidderId = leader;
@@ -1368,7 +1372,8 @@ function applyAuctionBid(state, op, ctx) {
   if (!bidder) return fail('not_a_player');
   if ((bidder.hand || []).length >= AUCTION_HAND_LIMIT) return fail('hand_limit');
   const amount = Number(op.amount);
-  if (!Number.isInteger(amount) || amount <= 0) return fail('bad_amount');
+  // Bids can be 0 (claim it free); only negatives are invalid.
+  if (!Number.isInteger(amount) || amount < 0) return fail('bad_amount');
   // Must at least tie the current high (ties are allowed); only the
   // floor is enforced, so a player may raise or re-tie freely.
   const floorBefore = a.highBid || 0;
@@ -1451,16 +1456,18 @@ function applyAuctionSell(state, op, ctx) {
   const buyerId = Number(op.buyerId);
   if (!Number.isInteger(buyerId)) return fail('bad_buyer');
 
+  // "No bids" means nobody placed one - NOT high === 0, since 0 is now a
+  // valid bid. With no bids the only legal close is the auctioneer keeping
+  // it free; otherwise the buyer must be a top bidder (price may be 0).
+  const anyBids = Object.keys(a.bids || {}).length > 0;
   let winner;
   let price;
-  if (high <= 0) {
-    // No bids: the only legal close is the auctioneer keeping it free.
+  if (!anyBids) {
     if (buyerId !== a.auctioneerId) return fail('no_bid_to_accept');
     winner = auctioneer;
     price = 0;
   } else {
-    // Sell to a top bidder (possibly the auctioneer themselves).
-    if ((a.bids[buyerId] || 0) !== high) return fail('not_top_bidder');
+    if (!(buyerId in a.bids) || a.bids[buyerId] !== high) return fail('not_top_bidder');
     winner = playerByProfile(state, buyerId);
     if (!winner) return fail('winner_gone');
     price = high;
