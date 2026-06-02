@@ -1292,17 +1292,27 @@ function recomputeAuction(state) {
   a.awaiting = allBiddersActed(state) ? 'auctioneer' : 'bidders';
 }
 
+// A player whose hand is already at the limit can't take the lot (they
+// can neither bid nor be sold to), so they're auto-passed: they never
+// hold up the auctioneer and don't need to act. Their hand can't change
+// mid-auction (an open lot freezes every other op), so this is stable
+// for the life of the lot.
+function biddingBlockedByHand(player) {
+  return ((player.hand || []).length >= AUCTION_HAND_LIMIT);
+}
+
 // Every non-auctioneer has responded to the current floor (bid or
 // passed since it last reopened) - nobody left who will raise, so the
 // auctioneer may close. `acted` resets to just the actor whenever the
 // floor reopens (a raise or any auctioneer bid), which is what makes an
-// auctioneer tie force the others to respond again.
+// auctioneer tie force the others to respond again. Full-hand players
+// count as already-acted (auto-passed) so they never block the close.
 function allBiddersActed(state) {
   const a = state.auction;
   const acted = a.acted || [];
   const others = state.players.filter((p) => p.profileId !== a.auctioneerId);
   if (!others.length) return false;
-  return others.every((p) => acted.includes(p.profileId));
+  return others.every((p) => acted.includes(p.profileId) || biddingBlockedByHand(p));
 }
 
 function applyAuctionStart(state, op, ctx) {

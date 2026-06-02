@@ -835,11 +835,18 @@ function syncMpTurnBanner(snapshot) {
   banner.hidden = false;
 }
 
+// A player at the hand limit can't take the lot, so the server
+// auto-passes them: they never owe an action and never block the close.
+// Hands are open info in the snapshot, so this reads for any seat.
+function auctionHandFull(player) {
+  return !!player && Array.isArray(player.hand) && player.hand.length >= AUCTION_HAND_LIMIT;
+}
+
 // Whether the lot is currently waiting on ME, from the cached snapshot.
 //   shouldAct   - I'm a bidder (not the auctioneer) still on the clock at
 //                 the current floor (haven't bid/passed since it last
-//                 reopened). A full hand doesn't clear this: I can still
-//                 pass to unblock the table.
+//                 reopened). A full hand clears this: I'm auto-passed and
+//                 can't take the lot, so I owe nothing.
 //   shouldClose - I'm the auctioneer and every bidder has acted, so the
 //                 lot is waiting on me to close (or reset for another
 //                 round).
@@ -847,14 +854,15 @@ function syncMpTurnBanner(snapshot) {
 function auctionTurnFlags(auction) {
   const me = _onlineMe && _onlineMe.id;
   const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
-  if (!me || !auction || !players.some((p) => p.profileId === me)) {
+  const myp = players.find((p) => p.profileId === me);
+  if (!me || !auction || !myp) {
     return { shouldAct: false, shouldClose: false };
   }
   if (auction.auctioneerId === me) {
     return { shouldAct: false, shouldClose: auction.awaiting === 'auctioneer' };
   }
   const acted = auction.acted || [];
-  return { shouldAct: !acted.includes(me), shouldClose: false };
+  return { shouldAct: !acted.includes(me) && !auctionHandFull(myp), shouldClose: false };
 }
 
 // Toast the player when the turn NEWLY lands on them for this lot (rising
@@ -1039,17 +1047,22 @@ function renderOnlineAuction(auction) {
     const b = bids[p.profileId];
     const didPass = Array.isArray(auction.passed) && auction.passed.includes(p.profileId);
     const isTop = high > 0 && (b | 0) === high;
+    const isAuctioneer = p.profileId === auction.auctioneerId;
+    const handFull = !isAuctioneer && auctionHandFull(p);
     if (b != null) {
       amt.textContent = `${b} aqua${isTop ? ' ◄ top' : ''}${didPass ? ' · passed' : ''}`;
     } else if (didPass) {
       amt.textContent = 'passed';
+    } else if (handFull) {
+      amt.textContent = 'auto-passed (hand full)';
     } else {
       amt.textContent = '-';
     }
     if (isTop) line.classList.add('is-top');
-    // A non-auctioneer who has not acted at the current floor is still
-    // on the clock.
-    if (p.profileId !== auction.auctioneerId && !acted.includes(p.profileId)) {
+    // A non-auctioneer who has not acted at the current floor is still on
+    // the clock - unless their hand is full, in which case they're
+    // auto-passed and never hold up the close.
+    if (!isAuctioneer && !acted.includes(p.profileId) && !handFull) {
       line.classList.add('is-waiting');
     }
     line.append(nm, amt);
@@ -1315,16 +1328,20 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   const myp = players.find((p) => p.profileId === myId);
   if (!myp) { host.appendChild(noteEl('Spectating this auction.')); return; }
   const iAmAuctioneer = a.auctioneerId === myId;
+  const myHandFull = auctionHandFull(myp);
   // Call-to-action banner at the top of the controls when the lot is
   // waiting on me, so a glance says whether I owe an action. A bidder is
   // "on the clock" until they bid or pass at the current floor; the
-  // auctioneer is prompted once every bidder has acted.
-  const iShouldAct = !iAmAuctioneer && !(a.acted || []).includes(myId);
+  // auctioneer is prompted once every bidder has acted. A full-hand
+  // bidder is auto-passed by the server, so they owe nothing.
+  const iShouldAct = !iAmAuctioneer && !myHandFull && !(a.acted || []).includes(myId);
   const iShouldClose = iAmAuctioneer && a.awaiting === 'auctioneer';
   if (iShouldAct) {
     host.appendChild(promptEl('Your turn - bid or pass below to continue the auction.'));
   } else if (iShouldClose) {
     host.appendChild(promptEl('Every bidder has acted - close the lot below.'));
+  } else if (myHandFull && !iAmAuctioneer) {
+    host.appendChild(promptEl('Your hand is full - you are auto-passed for this lot.'));
   }
   const myAqua = myp.aqua | 0;
   const myHandCount = Array.isArray(myp.hand) ? myp.hand.length : 0;
@@ -1337,7 +1354,7 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   // Ties are allowed, so the floor is the high bid itself (>=), not +1.
   const minBid = Math.max(1, high);
   if (myHandCount >= AUCTION_HAND_LIMIT) {
-    host.appendChild(noteEl(`Hand full (${myHandCount}/${AUCTION_HAND_LIMIT}) - you can't bid. Build or transfer cards first.`));
+    host.appendChild(noteEl(`Hand full (${myHandCount}/${AUCTION_HAND_LIMIT}) - you're auto-passed and can't take this lot. Build or transfer cards first.`));
   } else {
     const row = document.createElement('div');
     row.className = 'mp-auction-bidrow';
@@ -1373,8 +1390,9 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
     sync();
   }
 
-  // --- Pass (non-auctioneer only) ---
-  if (!iAmAuctioneer) {
+  // --- Pass (non-auctioneer only). A full-hand player is auto-passed by
+  // the server, so the button is omitted - there's nothing to do. ---
+  if (!iAmAuctioneer && !myHandFull) {
     const passBtn = document.createElement('button');
     passBtn.type = 'button';
     passBtn.className = 'modal-btn';
