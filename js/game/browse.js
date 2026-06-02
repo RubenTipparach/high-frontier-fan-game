@@ -8457,8 +8457,23 @@ function prospectorIsruValue(card) {
 // hand quick-action trash icon and the card modal's Discard button so the
 // two behave identically. afterFn runs once the discard fires (e.g. to
 // close the card popup).
-function discardHandCard(card, idx, afterFn) {
+async function discardHandCard(card, idx, afterFn) {
   if (!card) return;
+  // Locally we know the budget up front, so don't even prompt when the
+  // turn's discard is already spent. (Online the server is authoritative.)
+  if (!_online && getDiscardsRemaining() <= 0) {
+    setStatus('Discard already used this turn (1 per turn).');
+    return;
+  }
+  const dest = PATENTS_BY_ID[card.id]
+    ? `the bottom of the ${card.type || 'patent'} deck`
+    : 'out of play';
+  const ok = await confirmModal({
+    title: '🗑 Discard card',
+    body: `Discard <strong>${esc(card.name)}</strong> to ${dest}? This uses your one discard for the turn.`,
+    yes: '🗑 Discard', no: 'Cancel',
+  });
+  if (!ok) return;
   if (_online) {
     submitOnlineOp({ kind: 'DISCARD', cardId: card.id });
     if (afterFn) afterFn();
