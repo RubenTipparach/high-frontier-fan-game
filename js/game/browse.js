@@ -1871,6 +1871,10 @@ async function doNudge(opts, btn) {
     _onlineToast(msg, 'error');
   }
   renderMpPanel(_onlineSnapshot);
+  // If a lot is open, refresh the auction overlay too so its nudge buttons
+  // reflect the new cooldown right away (render is idempotent; the
+  // turn-edge notify is guarded, so this won't re-toast).
+  if (_onlineSnapshot && _onlineSnapshot.auction) renderOnlineAuction(_onlineSnapshot.auction);
 }
 
 // One nudge button. Pass a single targetPlayer for a per-player nudge,
