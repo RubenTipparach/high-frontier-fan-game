@@ -523,6 +523,22 @@ Random-numbered seeds are stored per game so replays are deterministic.
 
 ## Style
 
+- **Game text describes GAMEPLAY, never implementation.** Player-
+  facing copy (modal body text, tooltips / `data-tip`, status
+  toasts, button labels, info blurbs) must talk about the game -
+  what a card does, what an action costs, whose turn it is, what
+  a glyph means. It must NOT narrate the architecture: don't say
+  "the server" does X, don't mention snapshots, WebSockets,
+  decks-as-data-structures, op logs, validation, or any
+  client/server split. A returning tabletop player reads these
+  strings; "the server puts the top of the deck up for auction"
+  is wrong - "the top of the deck goes up for auction" is right.
+  Tooltips in particular MUST be gameplay hints, not notes about
+  what the code is doing. (Legitimate exceptions: genuine
+  connection / account / service messages like "Server is
+  unreachable" or "name taken on this server" - those are about
+  the live service the player is interacting with, not gameplay
+  mechanics narrated as implementation.)
 - **No em dashes (`-`).** Anywhere. Source code, comments,
   commit messages, UI strings, docs. Use a period, a hyphen
   with spaces (` - `), a colon, or parentheses depending on

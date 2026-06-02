@@ -273,15 +273,14 @@ export function openAuctionConfirmModal({
     ? 'Multiplayer auction'
     : escapeHtml(inMarket ? 'Card Market' : 'Free Library');
   const costLine = multiplayer
-    ? `<strong>Cost:</strong> 1 operation. The server puts the top of
-       the <strong>${escapeHtml(card.type || 'patent')}</strong> deck up
-       for auction; every other player can bid in aqua. You can also
-       Join your own auction to keep the price down.`
+    ? `<strong>Cost:</strong> 1 operation. The top of the
+       <strong>${escapeHtml(card.type || 'patent')}</strong> deck goes up
+       for auction; every other player can bid in aqua. You can bid in your
+       own auction to keep the price down.`
     : `<strong>Cost:</strong> 1 operation + 0 aqua (solo / sandbox mode).`;
   const bonusBlock = multiplayer
-    ? `<p class="muted">In multiplayer, support bonuses are awarded to
-         the auction winner by the server when the lot resolves. The
-         cards above are a preview of each support deck's current top.</p>`
+    ? `<p class="muted">The auction winner also receives the top card of
+         each support deck this card needs (previewed above).</p>`
     : (bonus.length === 0
         ? `<p class="muted">No support requirements - no bonus cards.</p>`
         : `<p class="muted">

@@ -8478,7 +8478,7 @@ function doProspect(site, prosp) {
   // skip the local roll modal + disc placement below.
   if (_online) {
     const siteId = toServerId(_onlineMaps, site.id);
-    if (!siteId) { _onlineToast('That site is not on the server map.', 'error'); return; }
+    if (!siteId) { _onlineToast('That site is not on the map.', 'error'); return; }
     submitOnlineOp({ kind: 'PROSPECT', siteId });
     return;
   }
@@ -9660,12 +9660,12 @@ async function moveRocket() {
     if (!turn1Segs.length) { setStatus('Planned route has no current-turn segments.'); return false; }
     const destPlannerId = turn1Segs[turn1Segs.length - 1].to;
     const toSiteId = toServerId(_onlineMaps, destPlannerId);
-    if (!toSiteId) { _onlineToast('That destination is not on the server map.', 'error'); return false; }
+    if (!toSiteId) { _onlineToast('That destination is not on the map.', 'error'); return false; }
     const segments = [];
     for (const s of turn1Segs) {
       const f = plannerIdToSlug(s.from);
       const t = plannerIdToSlug(s.to);
-      if (!f || !t) { _onlineToast('That route is not on the server map.', 'error'); return false; }
+      if (!f || !t) { _onlineToast('That route is not on the map.', 'error'); return false; }
       segments.push({ from: f, to: t, burns: Number(s.burns) || 0, turn: 1 });
     }
     // Hazards along THIS turn's segments only.
