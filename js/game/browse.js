@@ -2481,8 +2481,12 @@ function wireHandStrip() {
         b.addEventListener('click', (ev) => { ev.stopPropagation(); handler(); });
         return b;
       };
+      const discardQ = qBtn('q-discard', '🗑',
+        getDiscardsRemaining() > 0 ? 'Discard (free, 1 per turn)' : 'Discard already used this turn',
+        () => discardHandCard(card, idx));
+      discardQ.disabled = getDiscardsRemaining() <= 0;
       quick.append(
-        qBtn('q-discard', '🗑', 'Discard', () => removeFromHandAt(idx)),
+        discardQ,
         // Free Market: effectively sells the card for +$3 (to the
         // bottom of its deck), via the shared op-gated confirm flow.
         qBtn('q-sell',    '💱', `Free Market: effectively sells this card to gain $${FREE_MARKET_AQUA} (costs 1 operation)`,
@@ -3859,34 +3863,12 @@ function openCardModal(card, kind, slotIdx) {
     ? `Send this card to the bottom of the ${card.type || 'corresponding'} deck. Free action, 1 per turn.`
     : `Discard already used this turn (1 per turn). End the turn to refresh.`;
   discardBtn.disabled = discardsLeft <= 0;
+  // Shared discard path (online routes the DISCARD server op so it
+  // persists; solo mutates locally). Same helper the hand quick-action
+  // trash icon uses, so the two can't drift.
   discardBtn.addEventListener('click', () => {
     if (discardBtn.disabled) return;
-    // Online: route to the server DISCARD op (free, 1/turn). Was
-    // client-only, so in MP the discard never persisted and the next
-    // snapshot reverted it. The server tracks discardsRemaining; the
-    // snapshot re-hydrates the budget + hand + deck.
-    if (_online) {
-      submitOnlineOp({ kind: 'DISCARD', cardId: card.id });
-      close();
-      return;
-    }
-    if (!consumeDiscard()) {
-      setStatus('Discard already used this turn (1 per turn).');
-      return;
-    }
-    removeFromHandAt(slotIdx);
-    // Patents return to the bottom of their type's deck.
-    // Crew don't have a deck in this slice; they just leave.
-    if (PATENTS_BY_ID[card.id]) addToBottom(card.id);
-    setStatus(`🗑 Discarded <em>${esc(card.name)}</em> to the bottom of the ${esc(card.type || 'crew')} deck.`);
-    logAction({
-      type: 'discard',
-      icon: '🗑',
-      summary: `Discarded ${card.name} to the bottom of the ${card.type || 'crew'} deck`,
-      undoable: false,
-      data: { cardId: card.id, deckType: card.type || null },
-    });
-    close();
+    discardHandCard(card, slotIdx, close);
   });
 
   const sellBtn = document.createElement('button');
@@ -8469,6 +8451,37 @@ function prospectorIsruValue(card) {
 // Free-market a single already-chosen Hand card. Same cost + payout
 // as the Free Market operation (1 op, +FREE_MARKET_AQUA aqua, card to
 // the bottom of its deck), but skips the picker and goes straight to
+// Discard one hand card to the bottom of its deck (free action, 1 per
+// turn). Online routes the DISCARD server op so the discard persists and
+// is validated/budgeted server-side; solo mutates locally. Shared by the
+// hand quick-action trash icon and the card modal's Discard button so the
+// two behave identically. afterFn runs once the discard fires (e.g. to
+// close the card popup).
+function discardHandCard(card, idx, afterFn) {
+  if (!card) return;
+  if (_online) {
+    submitOnlineOp({ kind: 'DISCARD', cardId: card.id });
+    if (afterFn) afterFn();
+    return;
+  }
+  if (getDiscardsRemaining() <= 0 || !consumeDiscard()) {
+    setStatus('Discard already used this turn (1 per turn).');
+    return;
+  }
+  removeFromHandAt(idx);
+  // Patents return to the bottom of their type's deck; crew just leave.
+  if (PATENTS_BY_ID[card.id]) addToBottom(card.id);
+  setStatus(`🗑 Discarded <em>${esc(card.name)}</em> to the bottom of the ${esc(card.type || 'crew')} deck.`);
+  logAction({
+    type: 'discard',
+    icon: '🗑',
+    summary: `Discarded ${card.name} to the bottom of the ${card.type || 'crew'} deck`,
+    undoable: false,
+    data: { cardId: card.id, deckType: card.type || null },
+  });
+  if (afterFn) afterFn();
+}
+
 // the irreversible-sale confirm. afterFn runs once the sale commits
 // (e.g. to close the card popup).
 function freeMarketSellFromHand(card, afterFn) {
