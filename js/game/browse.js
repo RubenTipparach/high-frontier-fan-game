@@ -8828,12 +8828,23 @@ function animateRocketAlong(segments, totalMs = 700) {
 function repaintBoostCommit() {
   const btn = document.getElementById('hand-boost-commit');
   if (!btn) return;
-  const n = getBoostMarked().length;
+  const marked = getBoostMarked();
+  const n = marked.length;
+  // Boost costs Aqua = the total mass of the marked cards (see
+  // commitBoost). Show the cost on the button, not the card count, so the
+  // player sees the spend before committing.
+  let cost = 0;
+  for (const id of marked) {
+    const c = PATENTS_BY_ID[id];
+    if (!c) continue;
+    const f = (c.faces && c.faces.primary) || c;
+    cost += ((f.mass != null ? f.mass : c.mass) | 0);
+  }
   btn.dataset.armed = n > 0 ? '1' : '0';
   btn.disabled = n === 0;
-  btn.textContent = n > 0 ? `🛰 BOOST → LEO (${n})` : '🛰 BOOST → LEO';
+  btn.textContent = n > 0 ? `🛰 BOOST → LEO 💧${cost}` : '🛰 BOOST → LEO';
   btn.title = n > 0
-    ? `Boost ${n} marked card${n === 1 ? '' : 's'} from your hand into the LEO Stack. Costs one operation. Use the Transfer action at LEO to move them onto the rocket.`
+    ? `Boost ${n} marked card${n === 1 ? '' : 's'} from your hand into the LEO Stack for ${cost} aqua (total mass). Costs one operation. Use the Transfer action at LEO to move them onto the rocket.`
     : 'Mark cards in your hand, then press BOOST to ship them up to your LEO Stack.';
 }
 
