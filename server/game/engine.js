@@ -575,6 +575,31 @@ function applyFreeMarket(state, op, player) {
   };
 }
 
+// Discard one Hand card to the BOTTOM of its deck. A FREE action (no op
+// cost) capped at DISCARDS_PER_TURN per turn (mirrors the sandbox's
+// turn-clock budget). Was client-only before, so in MP the discard never
+// persisted and the next snapshot reverted it.
+function applyDiscard(state, op, player) {
+  if ((player.discardsRemaining | 0) <= 0) return fail('no_discards_left');
+  const cardId = String(op.cardId || '');
+  const idx = player.hand.indexOf(cardId);
+  if (idx < 0) return fail('not_in_hand');
+  player.hand.splice(idx, 1);
+  const card = PATENTS_BY_ID[cardId];
+  // Patents recirculate to the bottom of their type's deck; crew (no deck)
+  // just leave the hand.
+  if (card) {
+    const deck = state.decks[card.type];
+    if (Array.isArray(deck)) deck.push(cardId);
+  }
+  player.discardsRemaining -= 1;
+  const name = card ? card.name : cardId;
+  return {
+    ok: true, state,
+    log: `${player.name} discarded ${name} to the bottom of the ${card ? card.type : 'crew'} deck.`,
+  };
+}
+
 // Convert aqua -> water 1:1, only while the rocket is at LEO (the Aqua
 // Bank lives at LEO). Clamped by the requested amount, the aqua on
 // hand, and the remaining wet-mass room in the tank. This is where
@@ -997,6 +1022,7 @@ const FUNCTIONAL = {
   REFUEL: applyRefuel,
   CASH_WATER: applyCashWater,
   FREE_MARKET: applyFreeMarket,
+  DISCARD: applyDiscard,
   SET_ROUTE: applySetRoute,
   CLEAR_ROUTE: applyClearRoute,
   SET_ACTIVE_THRUSTER: applySetActiveThruster,
@@ -1017,6 +1043,7 @@ function pickPayload(op) {
     case 'REFUEL': return { amount: op.amount };
     case 'CASH_WATER': return { amount: op.amount };
     case 'FREE_MARKET': return { cardId: op.cardId };
+    case 'DISCARD': return { cardId: op.cardId };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
     case 'PROSPECT': return { siteId: op.siteId };

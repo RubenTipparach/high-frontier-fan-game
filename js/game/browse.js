@@ -2228,6 +2228,7 @@ function humanizeOnlineOpError(code) {
     no_auction: 'No auction is open.',
     not_bidding_phase: 'Bidding is closed right now.',
     bidders_pending: 'You can\'t close the lot yet - every other player must bid or pass first.',
+    no_discards_left: 'You\'ve already discarded this turn (1 per turn).',
     bid_too_low: 'Bid must beat the current high bid.',
     insufficient_aqua: 'Not enough aqua.',
     bad_amount: 'Enter a whole number.',
@@ -3860,6 +3861,15 @@ function openCardModal(card, kind, slotIdx) {
   discardBtn.disabled = discardsLeft <= 0;
   discardBtn.addEventListener('click', () => {
     if (discardBtn.disabled) return;
+    // Online: route to the server DISCARD op (free, 1/turn). Was
+    // client-only, so in MP the discard never persisted and the next
+    // snapshot reverted it. The server tracks discardsRemaining; the
+    // snapshot re-hydrates the budget + hand + deck.
+    if (_online) {
+      submitOnlineOp({ kind: 'DISCARD', cardId: card.id });
+      close();
+      return;
+    }
     if (!consumeDiscard()) {
       setStatus('Discard already used this turn (1 per turn).');
       return;
