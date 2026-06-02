@@ -1670,6 +1670,21 @@ app.post('/games/:id/remind', requireProfile, (req, res) => {
   let targets;
   if (body.all) {
     targets = needed;
+  } else if (body.waiting) {
+    // Only the players the round is genuinely waiting on. During an
+    // auction that's the bidders who have not bid, passed, or auto-passed
+    // this lot (a.acted holds everyone who has responded; autoPassed
+    // survives a floor reopen). Off-auction it's just the active seat.
+    // Always a subset of `needed`.
+    const a = state.auction;
+    if (a) {
+      const acted = a.acted || [];
+      const auto = a.autoPassed || [];
+      targets = needed.filter((pid) =>
+        pid !== a.auctioneerId && !acted.includes(pid) && !auto.includes(pid));
+    } else {
+      targets = [needed[0]];
+    }
   } else if (body.targetId != null) {
     const tid = Number(body.targetId);
     if (!needed.includes(tid)) return res.status(409).json({ error: 'not_actionable' });

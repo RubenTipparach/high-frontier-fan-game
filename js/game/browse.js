@@ -1525,6 +1525,27 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
       closeWrap.appendChild(resetBtn);
     }
     host.appendChild(closeWrap);
+    // Nudge for a response (auctioneer): ping the bidders still on the
+    // clock, or everyone else at the table, to keep the lot moving. The
+    // waiting set is the bidders who have not bid or passed yet; nudge-all
+    // covers every other seat. Per-player cooldown is enforced server-side.
+    const allOthers = players.map((p) => p.profileId).filter((pid) => pid !== myId);
+    if (allOthers.length) {
+      const waiting = actorsNeededClient(_onlineSnapshot).filter((pid) => pid !== myId);
+      const nudgeWrap = document.createElement('div');
+      nudgeWrap.className = 'mp-auction-close';
+      const nlbl = document.createElement('div');
+      nlbl.className = 'mp-auction-close-label';
+      nlbl.textContent = 'Nudge for a response:';
+      nudgeWrap.appendChild(nlbl);
+      nudgeWrap.appendChild(makeAuctionNudgeButton(
+        _onlineSnapshot, '👋 Nudge waiting', { waiting: true }, waiting,
+        'Remind the bidders who have not bid or passed yet.'));
+      nudgeWrap.appendChild(makeAuctionNudgeButton(
+        _onlineSnapshot, '👋 Nudge all', { all: true }, allOthers,
+        'Remind every other player at the table.'));
+      host.appendChild(nudgeWrap);
+    }
   }
 }
 
@@ -1875,6 +1896,31 @@ function makeNudgeButton(snapshot, targetPlayer, allPlayers) {
       : 'Nudge every listed player (skips anyone on cooldown).';
     if (!allOnCd) btn.addEventListener('click', () => doNudge({ all: true }, btn));
   }
+  return btn;
+}
+
+// Multi-target auction nudge button for the auctioneer: "Nudge waiting"
+// (the bidders still owing a response) or "Nudge all" (every other seat).
+// targetIds is the set this would ping - the button shows the count and
+// greys out when that set is empty or every target is still inside the
+// per-player cooldown (the server skips any that are). Reuses doNudge so
+// the toast + optimistic cooldown record match the roster-panel nudges.
+function makeAuctionNudgeButton(snapshot, label, opts, targetIds, title) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'modal-btn';
+  btn.textContent = `${label} (${targetIds.length})`;
+  const allOnCd = targetIds.length > 0 && targetIds.every((pid) => {
+    const l = lastNudgeAt(snapshot, pid);
+    return l && (Date.now() - l) < NUDGE_COOLDOWN_MS;
+  });
+  btn.disabled = _onlineBusy || targetIds.length === 0 || allOnCd;
+  btn.title = targetIds.length === 0
+    ? 'No one is waiting on a response right now.'
+    : allOnCd
+      ? 'Everyone here was nudged recently (one nudge per player per 3 hours).'
+      : title;
+  if (!btn.disabled) btn.addEventListener('click', () => doNudge(opts, btn));
   return btn;
 }
 
