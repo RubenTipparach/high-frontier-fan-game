@@ -6289,10 +6289,8 @@ body:has(#view-browse:not(.hidden)) #main {
    / "Keep" buttons under a label. */
 .mp-auction-close { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
 .mp-auction-close-label {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 1px;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--muted, #9aa0c0);
 }
 .mp-auction-side {
@@ -6321,6 +6319,9 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .mp-auction-bid { font-size: 16px; font-weight: 700; letter-spacing: 0.3px; }
 .mp-auction-phase { font-size: 13px; margin-top: 2px; }
+/* Instructional notes (aqua balance, floor, waiting hints) share the
+   phase line's size so the whole status block reads at one scale. */
+.mp-auction-note { font-size: 13px; }
 .mp-auction-controls { display: flex; flex-direction: column; gap: 10px; }
 .mp-auction-bidrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .mp-auction-input {
