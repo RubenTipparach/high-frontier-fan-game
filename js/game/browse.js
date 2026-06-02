@@ -1388,8 +1388,7 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   // Bids can be 0 (claim it free), so the floor is never below 0. The
   // auctioneer is the exception: they win ties, so their floor is the top
   // RIVAL bid, letting them walk an overbid back down to it and still take
-  // the lot.
-  const iAmAuctioneer = (myId === a.auctioneerId);
+  // the lot. (iAmAuctioneer is already computed above.)
   const rivalHigh = Object.entries(bids).reduce(
     (hi, [pid, amt]) => (Number(pid) !== myId ? Math.max(hi, amt | 0) : hi), 0);
   const minBid = iAmAuctioneer ? rivalHigh : Math.max(0, high);
