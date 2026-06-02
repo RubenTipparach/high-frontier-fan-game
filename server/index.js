@@ -2323,6 +2323,12 @@ app.get('/admin', (req, res) => {
     const unlinkBtn = linked
       ? `<button class="btn-unlink-discord" data-pid="${r.id}" data-pname="${esc(r.name)}">Unlink Discord</button>`
       : '';
+    // "Reassign Discord" moves this profile's Discord link to a different
+    // game account in one step (freeing it from this one). Only shown where
+    // there is a link to move.
+    const reassignBtn = linked
+      ? `<button class="btn-reassign-discord" data-pid="${r.id}" data-pname="${esc(r.name)}" data-dname="${esc(r.discord_name || r.discord_id)}">Reassign Discord</button>`
+      : '';
     return `
     <tr>
       <td>@${esc(r.name)}</td>
@@ -2335,6 +2341,7 @@ app.get('/admin', (req, res) => {
       <td>
         <button class="btn-add-token" data-pid="${r.id}" data-pname="${esc(r.name)}">Issue device code</button>
         ${unlinkBtn}
+        ${reassignBtn}
         <button class="btn-del-profile danger" data-pid="${r.id}" data-pname="${esc(r.name)}">Delete account</button>
       </td>
     </tr>
@@ -2564,6 +2571,10 @@ app.get('/admin', (req, res) => {
   </table>
 
 <script>
+// The profiles currently shown in the table (id + name), used to populate
+// the "Reassign Discord" destination picker without another round-trip.
+var ADMIN_PROFILES = ${JSON.stringify(profiles.map((p) => ({ id: p.id, name: p.name })))};
+
 // "Issue device code" - mints a fresh recovery code for the
 // profile and replaces the button cell with the one-shot code so
 // the operator can copy + send it out-of-band.
@@ -2672,6 +2683,73 @@ document.addEventListener('click', function (ev) {
     });
 });
 
+// "Reassign Discord" - moves a profile's Discord link to a different game
+// account. Opens an inline picker of the other accounts; choosing one and
+// confirming frees the Discord from THIS account and links it to the chosen
+// one (and moves the turn-DM target with it). Reloads on success so both the
+// source row (now "not linked") and the destination row update.
+document.addEventListener('click', function (ev) {
+  var btn = ev.target.closest('.btn-reassign-discord');
+  if (!btn) return;
+  var pid = btn.getAttribute('data-pid');
+  var pname = btn.getAttribute('data-pname');
+  var dname = btn.getAttribute('data-dname');
+  var cell = btn.parentElement;
+  if (cell.querySelector('.reassign-picker')) return; // already open
+  var others = ADMIN_PROFILES.filter(function (p) { return String(p.id) !== String(pid); });
+  if (!others.length) { alert('No other account to move the Discord link to.'); return; }
+  var wrap = document.createElement('span');
+  wrap.className = 'reassign-picker';
+  wrap.style.cssText = 'display:inline-flex;gap:4px;align-items:center;margin-left:4px';
+  var sel = document.createElement('select');
+  others.forEach(function (p) {
+    var opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = '@' + p.name;
+    sel.appendChild(opt);
+  });
+  var go = document.createElement('button');
+  go.textContent = 'Move';
+  var cancel = document.createElement('button');
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', function () { wrap.remove(); btn.style.display = ''; });
+  go.addEventListener('click', function () {
+    var toId = sel.value;
+    var toName = sel.options[sel.selectedIndex].textContent;
+    if (!confirm('Move the Discord link (' + dname + ') from @' + pname + ' to ' + toName + '?\\n\\n@' + pname + ' loses the Discord link and ' + toName + ' gains it. If ' + toName + ' already had a different Discord linked, that prior link is dropped.')) return;
+    go.disabled = true; cancel.disabled = true; go.textContent = 'Moving...';
+    fetch('/admin/profiles/' + pid + '/reassign-discord', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ toId: Number(toId) })
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+      .then(function (res) {
+        if (!res.ok) {
+          go.disabled = false; cancel.disabled = false; go.textContent = 'Move';
+          var code = res.body && res.body.error;
+          var msg = code === 'not_linked'
+            ? 'That account no longer has a Discord link to move.'
+            : code === 'same_profile'
+              ? 'Pick a different destination account.'
+              : ('Failed: ' + (code || 'unknown'));
+          alert(msg);
+          return;
+        }
+        location.reload();
+      })
+      .catch(function () {
+        go.disabled = false; cancel.disabled = false; go.textContent = 'Move';
+        alert('Network error.');
+      });
+  });
+  wrap.appendChild(sel);
+  wrap.appendChild(go);
+  wrap.appendChild(cancel);
+  btn.style.display = 'none';
+  cell.appendChild(wrap);
+});
+
 // "Delete account" - hard-deletes the profile and all its data (device
 // tokens, Discord link, memberships, chat, invites). Refused by the
 // server if the account is in any game or hosts a table, to avoid
@@ -2768,6 +2846,44 @@ app.post('/admin/profiles/:id/unlink-discord', requireAdmin, (req, res) => {
   if (!row) return res.status(404).json({ error: 'not_found' });
   const info = db.prepare('DELETE FROM discord_accounts WHERE profile_id = ?').run(id);
   res.json({ ok: true, name: row.name, unlinked: info.changes > 0 });
+});
+
+// Reassign (move) a Discord link from one profile to another. Use when the
+// Discord owner linked the WRONG game account: instead of unlink + re-auth,
+// move the existing discord_accounts row to the correct profile in one step.
+// :id is the SOURCE profile (currently holds the link); body.toId is the
+// DESTINATION. The source is freed (its Discord link + DM target cleared) and
+// the destination receives the Discord identity + DM target. If the
+// destination already had a DIFFERENT Discord linked, that prior link is
+// dropped (its Discord id is freed) so the destination ends with exactly the
+// moved identity. Reuses linkDiscordAccount so the result matches the OAuth
+// linking path. requireAdmin-gated.
+app.post('/admin/profiles/:id/reassign-discord', requireAdmin, (req, res) => {
+  const fromId = Number(req.params.id);
+  const toId = Number(req.body && req.body.toId);
+  if (!Number.isFinite(fromId) || !Number.isFinite(toId)) return res.status(400).json({ error: 'bad_id' });
+  if (fromId === toId) return res.status(400).json({ error: 'same_profile' });
+  const from = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(fromId);
+  const to = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(toId);
+  if (!from || !to) return res.status(404).json({ error: 'not_found' });
+  const link = db.prepare('SELECT discord_id, username FROM discord_accounts WHERE profile_id = ?').get(fromId);
+  if (!link) return res.status(409).json({ error: 'not_linked' });
+  db.transaction(() => {
+    // Move the auth identity onto the destination. linkDiscordAccount clears
+    // any prior link the destination held, then INSERT OR REPLACE reclaims
+    // the discord_id from the source (discord_id is the PK) - so the source
+    // row is dropped automatically.
+    linkDiscordAccount(link.discord_id, toId, link.username);
+    // Move the turn-DM target too: clear the source's, set the destination's.
+    db.prepare('UPDATE notify_prefs SET discord_user_id = NULL, updated_at = ? WHERE profile_id = ?')
+      .run(nowMs(), fromId);
+    db.prepare(
+      `INSERT INTO notify_prefs (profile_id, discord_user_id, notify_turn, notify_auction, updated_at)
+       VALUES (?, ?, 1, 1, ?)
+       ON CONFLICT(profile_id) DO UPDATE SET discord_user_id = excluded.discord_user_id, updated_at = excluded.updated_at`
+    ).run(toId, link.discord_id, nowMs());
+  })();
+  res.json({ ok: true, fromName: from.name, toName: to.name, discordName: link.username || link.discord_id });
 });
 
 // Hard-delete a profile and everything it owns. Cascade tables (tokens,
