@@ -619,11 +619,13 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
               p.name        AS hostName,
               (SELECT COUNT(*) FROM lobby_members lm2 WHERE lm2.lobby_id = l.id) AS memberCount,
               g.id     AS gameId,
-              g.status AS gameStatus
+              g.status AS gameStatus,
+              gs.updated_at AS lastActionAt
        FROM lobbies l
        JOIN lobby_members lm ON lm.lobby_id = l.id AND lm.profile_id = ?
        JOIN profiles p ON p.id = l.host_id
        LEFT JOIN games g ON g.lobby_id = l.id
+       LEFT JOIN game_states gs ON gs.game_id = g.id
        ORDER BY l.created_at DESC
        LIMIT 50`
     )
