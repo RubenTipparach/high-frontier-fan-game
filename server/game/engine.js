@@ -1228,6 +1228,10 @@ const META = {
 const KIND_PREFIX_TO_DECK = {
   reactor: 'reactor', gen: 'generator', radiator: 'radiator',
   refinery: 'refinery', robonaut: 'robonaut', thruster: 'thruster',
+  // A heat card's cooling requirement (the 🌡️ thermostat support) is
+  // satisfied by a radiator, so a lot that needs cooling comes with one
+  // off the radiator deck.
+  thermostat: 'radiator',
 };
 function requireKindToDeckType(kind) {
   if (!kind) return null;

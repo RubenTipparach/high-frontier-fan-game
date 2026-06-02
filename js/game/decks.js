@@ -246,6 +246,10 @@ const KIND_PREFIX_TO_DECK = {
   refinery: 'refinery',
   robonaut: 'robonaut',
   thruster: 'thruster',
+  // A heat card's cooling requirement (the 🌡️ thermostat support) is
+  // satisfied by a radiator, so a lot that needs cooling draws one off
+  // the radiator deck as a bonus support card.
+  thermostat: 'radiator',
 };
 export function requireKindToDeckType(kind) {
   if (!kind) return null;
