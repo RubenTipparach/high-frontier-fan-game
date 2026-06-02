@@ -1310,9 +1310,14 @@ function biddingBlockedByHand(player) {
 function allBiddersActed(state) {
   const a = state.auction;
   const acted = a.acted || [];
+  const auto = a.autoPassed || [];
   const others = state.players.filter((p) => p.profileId !== a.auctioneerId);
   if (!others.length) return false;
-  return others.every((p) => acted.includes(p.profileId) || biddingBlockedByHand(p));
+  // Auto-passed players have opted out for the rest of the lot, and
+  // full-hand players can't take it - both count as already acted so
+  // they never hold up the close, even after a reopen resets `acted`.
+  return others.every((p) =>
+    acted.includes(p.profileId) || auto.includes(p.profileId) || biddingBlockedByHand(p));
 }
 
 function applyAuctionStart(state, op, ctx) {
@@ -1332,7 +1337,7 @@ function applyAuctionStart(state, op, ctx) {
   state.auction = {
     deckType, cardId,
     auctioneerId: player.profileId,
-    bids: {}, passed: [], acted: [],
+    bids: {}, passed: [], acted: [], autoPassed: [],
     highBid: 0, highBidderId: null, awaiting: 'bidders',
   };
   // Opening commits prior turn actions: undo must not span an auction
@@ -1363,6 +1368,9 @@ function applyAuctionBid(state, op, ctx) {
   a.bids = a.bids || {};
   a.bids[bidder.profileId] = amount;
   a.passed = (a.passed || []).filter((id) => id !== bidder.profileId);
+  // Placing a bid opts the bidder back in - it cancels both a plain pass
+  // and a permanent auto-pass.
+  a.autoPassed = (a.autoPassed || []).filter((id) => id !== bidder.profileId);
   // A raise (or ANY auctioneer bid) reopens the floor: clear the pass
   // list and reset the responded set to just this bidder, so every
   // other player must bid or pass again (this is what makes an
@@ -1396,8 +1404,19 @@ function applyAuctionPass(state, op, ctx) {
   if (!(a.acted || []).includes(passer.profileId)) {
     a.acted = [...(a.acted || []), passer.profileId];
   }
+  // Permanent ("auto") pass: stay out for the rest of the lot, so an
+  // auctioneer's raise (which reopens the floor and resets `acted`)
+  // never puts this player back on the clock. A later bid by them
+  // cancels it. Their standing bid, if any, still stands.
+  if (op.permanent) {
+    a.autoPassed = a.autoPassed || [];
+    if (!a.autoPassed.includes(passer.profileId)) a.autoPassed.push(passer.profileId);
+  }
   recomputeAuction(state);
-  return { ok: true, state, log: `${passer.name} passed.` };
+  return {
+    ok: true, state,
+    log: `${passer.name} ${op.permanent ? 'auto-passed (out for this lot)' : 'passed'}.`,
+  };
 }
 
 // The auctioneer CLOSES the lot by naming a buyer. The buyer must be a

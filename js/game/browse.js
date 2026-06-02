@@ -862,7 +862,11 @@ function auctionTurnFlags(auction) {
     return { shouldAct: false, shouldClose: auction.awaiting === 'auctioneer' };
   }
   const acted = auction.acted || [];
-  return { shouldAct: !acted.includes(me) && !auctionHandFull(myp), shouldClose: false };
+  const autoPassed = (auction.autoPassed || []).includes(me);
+  return {
+    shouldAct: !acted.includes(me) && !autoPassed && !auctionHandFull(myp),
+    shouldClose: false,
+  };
 }
 
 // Toast the player when the turn NEWLY lands on them for this lot (rising
@@ -1046,23 +1050,24 @@ function renderOnlineAuction(auction) {
     amt.className = 'mp-auction-bidamt';
     const b = bids[p.profileId];
     const didPass = Array.isArray(auction.passed) && auction.passed.includes(p.profileId);
+    const autoPassed = Array.isArray(auction.autoPassed) && auction.autoPassed.includes(p.profileId);
     const isTop = high > 0 && (b | 0) === high;
     const isAuctioneer = p.profileId === auction.auctioneerId;
     const handFull = !isAuctioneer && auctionHandFull(p);
+    // Status suffix on a standing bid, or the standalone status when the
+    // player has no bid. Auto-pass (out for the lot) reads over a plain
+    // floor pass.
+    const tag = autoPassed ? 'auto-passed' : (didPass ? 'passed' : (handFull ? 'auto-passed (hand full)' : ''));
     if (b != null) {
-      amt.textContent = `${b} aqua${isTop ? ' ◄ top' : ''}${didPass ? ' · passed' : ''}`;
-    } else if (didPass) {
-      amt.textContent = 'passed';
-    } else if (handFull) {
-      amt.textContent = 'auto-passed (hand full)';
+      amt.textContent = `${b} aqua${isTop ? ' ◄ top' : ''}${tag ? ' · ' + tag : ''}`;
     } else {
-      amt.textContent = '-';
+      amt.textContent = tag || '-';
     }
     if (isTop) line.classList.add('is-top');
     // A non-auctioneer who has not acted at the current floor is still on
-    // the clock - unless their hand is full, in which case they're
-    // auto-passed and never hold up the close.
-    if (!isAuctioneer && !acted.includes(p.profileId) && !handFull) {
+    // the clock - unless they've auto-passed or their hand is full, in
+    // which case they're out and never hold up the close.
+    if (!isAuctioneer && !acted.includes(p.profileId) && !autoPassed && !handFull) {
       line.classList.add('is-waiting');
     }
     line.append(nm, amt);
@@ -1329,17 +1334,20 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   if (!myp) { host.appendChild(noteEl('Spectating this auction.')); return; }
   const iAmAuctioneer = a.auctioneerId === myId;
   const myHandFull = auctionHandFull(myp);
+  const iAutoPassed = Array.isArray(a.autoPassed) && a.autoPassed.includes(myId);
   // Call-to-action banner at the top of the controls when the lot is
   // waiting on me, so a glance says whether I owe an action. A bidder is
   // "on the clock" until they bid or pass at the current floor; the
-  // auctioneer is prompted once every bidder has acted. A full-hand
-  // bidder is auto-passed by the server, so they owe nothing.
-  const iShouldAct = !iAmAuctioneer && !myHandFull && !(a.acted || []).includes(myId);
+  // auctioneer is prompted once every bidder has acted. Auto-passed and
+  // full-hand bidders owe nothing.
+  const iShouldAct = !iAmAuctioneer && !myHandFull && !iAutoPassed && !(a.acted || []).includes(myId);
   const iShouldClose = iAmAuctioneer && a.awaiting === 'auctioneer';
   if (iShouldAct) {
     host.appendChild(promptEl('Your turn - bid or pass below to continue the auction.'));
   } else if (iShouldClose) {
     host.appendChild(promptEl('Every bidder has acted - close the lot below.'));
+  } else if (iAutoPassed) {
+    host.appendChild(promptEl("You auto-passed - you're out for the rest of this lot."));
   } else if (myHandFull && !iAmAuctioneer) {
     host.appendChild(promptEl('Your hand is full - you are auto-passed for this lot.'));
   }
@@ -1353,7 +1361,10 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   // --- Your bid (ANY player, the auctioneer included) ---
   // Ties are allowed, so the floor is the high bid itself (>=), not +1.
   const minBid = Math.max(1, high);
-  if (myHandCount >= AUCTION_HAND_LIMIT) {
+  if (iAutoPassed) {
+    // Out for the lot - the banner above says so; offer no bid/pass
+    // controls (a fresh lot resets this).
+  } else if (myHandCount >= AUCTION_HAND_LIMIT) {
     host.appendChild(noteEl(`Hand full (${myHandCount}/${AUCTION_HAND_LIMIT}) - you're auto-passed and can't take this lot. Build or transfer cards first.`));
   } else {
     const row = document.createElement('div');
@@ -1390,9 +1401,13 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
     sync();
   }
 
-  // --- Pass (non-auctioneer only). A full-hand player is auto-passed by
-  // the server, so the button is omitted - there's nothing to do. ---
-  if (!iAmAuctioneer && !myHandFull) {
+  // --- Pass options (non-auctioneer only). A full-hand or already
+  // auto-passed player is out, so the buttons are omitted. ---
+  //   Pass       - won't raise at the current floor; re-prompted if the
+  //                auctioneer raises (reopens the floor).
+  //   Auto-pass  - won't raise for the rest of the lot; never re-prompted
+  //                (a permanent pass). A later bid opts back in.
+  if (!iAmAuctioneer && !myHandFull && !iAutoPassed) {
     const passBtn = document.createElement('button');
     passBtn.type = 'button';
     passBtn.className = 'modal-btn';
@@ -1400,6 +1415,15 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
     passBtn.disabled = passed || _onlineBusy;
     passBtn.addEventListener('click', () => submitMpAuctionOp({ kind: 'AUCTION_PASS' }));
     host.appendChild(passBtn);
+
+    const autoBtn = document.createElement('button');
+    autoBtn.type = 'button';
+    autoBtn.className = 'modal-btn';
+    autoBtn.textContent = 'Auto-pass (stay out)';
+    autoBtn.title = "Pass for the rest of this lot - you won't be asked again when the bid is raised.";
+    autoBtn.disabled = _onlineBusy;
+    autoBtn.addEventListener('click', () => submitMpAuctionOp({ kind: 'AUCTION_PASS', permanent: true }));
+    host.appendChild(autoBtn);
   }
 
   // --- Close the lot (auctioneer only). Name a top bidder to sell to;
@@ -9604,6 +9628,18 @@ async function moveRocket() {
   if (_rocketAnimating) return false;
   if (!_plannedRoute || !_plannedRoute.length) {
     setStatus('No planned route - tap a site and pick "Plan rocket route" first.');
+    return false;
+  }
+  // Supports must be chained before anything moves. Check this BEFORE the
+  // fuel math (and before the server round-trip) so a broken stack reports
+  // the real reason - a missing reactor / radiator / unmet therm balance -
+  // instead of falling through to a misleading "not enough water" error.
+  const act = isRocketActive();
+  if (!act.active) {
+    const why = (act.missing && act.missing.length)
+      ? act.missing.join('; ')
+      : (act.reason || 'support chain not satisfied');
+    setStatus(`⛓️ Can't move - support chain broken: ${why}`);
     return false;
   }
   // Online: the server owns movement, fuel, and the hazard dice (seeded,
