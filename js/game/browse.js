@@ -229,6 +229,12 @@ let _deckPickerOpen = false;
 // lot so a fresh card always surfaces.
 let _crewDraftMin = false;
 let _auctionMin = false;
+// Rising-edge tracker for auction turn notifications: remembers, per lot,
+// whether it was already "my turn" (bid/pass) or "my close" so a re-render
+// only toasts when the turn newly lands on me - e.g. the auctioneer raises
+// (others get re-prompted) or the last bidder acts (auctioneer prompted to
+// close). Reset when the lot (cardId) changes.
+let _auctionTurnEdge = null;
 
 // Patent decks the auctioneer can put up for auction (one per server
 // deck type). Counts are read live from the snapshot.
@@ -829,6 +835,46 @@ function syncMpTurnBanner(snapshot) {
   banner.hidden = false;
 }
 
+// Whether the lot is currently waiting on ME, from the cached snapshot.
+//   shouldAct   - I'm a bidder (not the auctioneer) still on the clock at
+//                 the current floor (haven't bid/passed since it last
+//                 reopened). A full hand doesn't clear this: I can still
+//                 pass to unblock the table.
+//   shouldClose - I'm the auctioneer and every bidder has acted, so the
+//                 lot is waiting on me to close (or reset for another
+//                 round).
+// Spectators and players not at the table get neither.
+function auctionTurnFlags(auction) {
+  const me = _onlineMe && _onlineMe.id;
+  const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
+  if (!me || !auction || !players.some((p) => p.profileId === me)) {
+    return { shouldAct: false, shouldClose: false };
+  }
+  if (auction.auctioneerId === me) {
+    return { shouldAct: false, shouldClose: auction.awaiting === 'auctioneer' };
+  }
+  const acted = auction.acted || [];
+  return { shouldAct: !acted.includes(me), shouldClose: false };
+}
+
+// Toast the player when the turn NEWLY lands on them for this lot (rising
+// edge only, so a no-op re-render or an unrelated snapshot doesn't nag).
+// Covers both directions the user asked for: an auctioneer raising their
+// bid reopens the floor and re-prompts every bidder; the last bidder
+// acting flips the lot to the auctioneer to close.
+function notifyAuctionTurn(auction) {
+  const flags = auctionTurnFlags(auction);
+  const prev = _auctionTurnEdge;
+  const sameLot = prev && prev.cardId === auction.cardId;
+  if (flags.shouldAct && !(sameLot && prev.shouldAct)) {
+    _onlineToast('Auction: it is your turn - bid or pass.');
+  } else if (flags.shouldClose && !(sameLot && prev.shouldClose)) {
+    _onlineToast('Auction: every bidder has acted - close the lot.');
+  }
+  _auctionTurnEdge = { cardId: auction.cardId, shouldAct: flags.shouldAct, shouldClose: flags.shouldClose };
+  return flags;
+}
+
 // Competitive multiplayer auction overlay. The sandbox's solo auction
 // modal is single-player only and is NOT reused here. Driven straight
 // off state.auction in the snapshot: appears when a lot opens, refreshes
@@ -838,6 +884,7 @@ function renderOnlineAuction(auction) {
   if (!auction || !_online || !gameViewVisible()) {
     if (existing) existing.remove();
     _auctionKey = null;
+    _auctionTurnEdge = null;
     _bidDraft = '';
     _joinDraft = '';
     return;
@@ -1019,14 +1066,24 @@ function renderOnlineAuction(auction) {
     auction, { auctioneer },
   );
 
-  // Minimized chip: keep its summary line live so a glance at the
-  // docked rectangle shows the current high bid, then re-apply the
-  // persisted minimize state.
+  // Notify on the rising edge when the lot lands on me (also returns the
+  // current flags so the chip can echo the call to action when minimized).
+  const turn = notifyAuctionTurn(auction);
+  const actionNeeded = turn.shouldAct || turn.shouldClose;
+
+  // Minimized chip: surface the call to action when the lot is waiting on
+  // me (so a docked overlay still tells me to act), otherwise show the
+  // live high-bid summary. Re-apply the persisted minimize state.
+  const chip = overlay.querySelector('.mp-mini-chip');
   const chipMeta = overlay.querySelector('.mp-mini-chip-meta');
   if (chipMeta) {
-    chipMeta.textContent = auction.highBid > 0
-      ? `high bid ${auction.highBid}` : 'no bids';
+    chipMeta.textContent = turn.shouldAct
+      ? 'your turn - bid or pass'
+      : turn.shouldClose
+        ? 'ready to close'
+        : (auction.highBid > 0 ? `high bid ${auction.highBid}` : 'no bids');
   }
+  if (chip) chip.classList.toggle('needs-action', actionNeeded);
   overlay.classList.toggle('is-minimized', _auctionMin);
 }
 
@@ -1235,6 +1292,16 @@ function noteEl(text) {
   return p;
 }
 
+// Prominent call-to-action banner (accent, not muted) for the player the
+// lot is currently waiting on. Distinct from noteEl so "it's your turn"
+// can't be mistaken for the passive status notes around it.
+function promptEl(text) {
+  const p = document.createElement('p');
+  p.className = 'mp-auction-prompt';
+  p.textContent = text;
+  return p;
+}
+
 // Role + phase aware controls inside the auction modal. Mirrors the
 // engine's state machine (server/game/engine.js auction handlers).
 function buildMpAuctionControls(host, a, { auctioneer } = {}) {
@@ -1248,6 +1315,17 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   const myp = players.find((p) => p.profileId === myId);
   if (!myp) { host.appendChild(noteEl('Spectating this auction.')); return; }
   const iAmAuctioneer = a.auctioneerId === myId;
+  // Call-to-action banner at the top of the controls when the lot is
+  // waiting on me, so a glance says whether I owe an action. A bidder is
+  // "on the clock" until they bid or pass at the current floor; the
+  // auctioneer is prompted once every bidder has acted.
+  const iShouldAct = !iAmAuctioneer && !(a.acted || []).includes(myId);
+  const iShouldClose = iAmAuctioneer && a.awaiting === 'auctioneer';
+  if (iShouldAct) {
+    host.appendChild(promptEl('Your turn - bid or pass below to continue the auction.'));
+  } else if (iShouldClose) {
+    host.appendChild(promptEl('Every bidder has acted - close the lot below.'));
+  }
   const myAqua = myp.aqua | 0;
   const myHandCount = Array.isArray(myp.hand) ? myp.hand.length : 0;
   const bids = a.bids || {};
@@ -1319,7 +1397,7 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
     const lbl = document.createElement('div');
     lbl.className = 'mp-auction-close-label';
     lbl.textContent = canClose
-      ? 'Every bidder has acted - close the lot:'
+      ? 'Close the lot:'
       : 'Waiting on bidders - everyone must bid or pass before you can close:';
     closeWrap.appendChild(lbl);
     if (high <= 0) {
