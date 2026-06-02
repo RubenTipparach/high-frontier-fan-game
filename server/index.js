@@ -2317,17 +2317,13 @@ app.get('/admin', (req, res) => {
 
   const profileRows = profiles.map((r) => {
     const linked = !!r.discord_id;
+    // The Discord link itself is the reassign affordance: click it to move
+    // the link onto an account that has no Discord yet.
     const discordCell = linked
-      ? `🔗 ${esc(r.discord_name || r.discord_id)}`
+      ? `<button class="discord-link btn-reassign-discord" data-pid="${r.id}" data-pname="${esc(r.name)}" data-dname="${esc(r.discord_name || r.discord_id)}" title="Reassign this Discord to an account with no link yet">🔗 ${esc(r.discord_name || r.discord_id)}</button>`
       : '<span class="muted">not linked</span>';
     const unlinkBtn = linked
       ? `<button class="btn-unlink-discord" data-pid="${r.id}" data-pname="${esc(r.name)}">Unlink Discord</button>`
-      : '';
-    // "Reassign Discord" moves this profile's Discord link to a different
-    // game account in one step (freeing it from this one). Only shown where
-    // there is a link to move.
-    const reassignBtn = linked
-      ? `<button class="btn-reassign-discord" data-pid="${r.id}" data-pname="${esc(r.name)}" data-dname="${esc(r.discord_name || r.discord_id)}">Reassign Discord</button>`
       : '';
     return `
     <tr>
@@ -2341,7 +2337,6 @@ app.get('/admin', (req, res) => {
       <td>
         <button class="btn-add-token" data-pid="${r.id}" data-pname="${esc(r.name)}">Issue device code</button>
         ${unlinkBtn}
-        ${reassignBtn}
         <button class="btn-del-profile danger" data-pid="${r.id}" data-pname="${esc(r.name)}">Delete account</button>
       </td>
     </tr>
@@ -2433,6 +2428,9 @@ app.get('/admin', (req, res) => {
   .ws-info{display:inline-block;background:#0c0a16;border:1px solid #1e293b;padding:8px 14px;border-radius:6px;margin-left:auto;font-size:12px;color:#8b90b8}
   .ws-info strong{color:#4ade80;font-weight:600}
   .header-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .discord-link{background:none;border:none;padding:0;margin:0;color:#7dd3fc;cursor:pointer;font:inherit;font-size:13px;text-decoration:underline;text-underline-offset:2px}
+  .discord-link:hover{background:none;border:none;color:#a5e4ff}
+  .reassign-picker select{background:#07060f;color:#e6e9ff;border:1px solid #2a2740;border-radius:4px;padding:3px 6px;font:inherit;font-size:12px}
 </style></head>
 <body>
   <div class="header-row">
@@ -2571,9 +2569,10 @@ app.get('/admin', (req, res) => {
   </table>
 
 <script>
-// The profiles currently shown in the table (id + name), used to populate
-// the "Reassign Discord" destination picker without another round-trip.
-var ADMIN_PROFILES = ${JSON.stringify(profiles.map((p) => ({ id: p.id, name: p.name })))};
+// The profiles currently shown in the table (id + name + whether they
+// already hold a Discord link), used to populate the reassign picker -
+// which offers only accounts with NO link - without another round-trip.
+var ADMIN_PROFILES = ${JSON.stringify(profiles.map((p) => ({ id: p.id, name: p.name, linked: !!p.discord_id })))};
 
 // "Issue device code" - mints a fresh recovery code for the
 // profile and replaces the button cell with the one-shot code so
@@ -2683,11 +2682,11 @@ document.addEventListener('click', function (ev) {
     });
 });
 
-// "Reassign Discord" - moves a profile's Discord link to a different game
-// account. Opens an inline picker of the other accounts; choosing one and
-// confirming frees the Discord from THIS account and links it to the chosen
-// one (and moves the turn-DM target with it). Reloads on success so both the
-// source row (now "not linked") and the destination row update.
+// "Reassign Discord" - clicking a Discord link opens an inline picker of the
+// accounts that have NO Discord link yet; choosing one and confirming frees
+// the Discord from THIS account and links it to the chosen one (and moves the
+// turn-DM target with it). Reloads on success so both the source row (now
+// "not linked") and the destination row update.
 document.addEventListener('click', function (ev) {
   var btn = ev.target.closest('.btn-reassign-discord');
   if (!btn) return;
@@ -2696,11 +2695,11 @@ document.addEventListener('click', function (ev) {
   var dname = btn.getAttribute('data-dname');
   var cell = btn.parentElement;
   if (cell.querySelector('.reassign-picker')) return; // already open
-  var others = ADMIN_PROFILES.filter(function (p) { return String(p.id) !== String(pid); });
-  if (!others.length) { alert('No other account to move the Discord link to.'); return; }
+  var others = ADMIN_PROFILES.filter(function (p) { return String(p.id) !== String(pid) && !p.linked; });
+  if (!others.length) { alert('No account is free to receive this Discord - every account already has one linked. Unlink an account first.'); return; }
   var wrap = document.createElement('span');
   wrap.className = 'reassign-picker';
-  wrap.style.cssText = 'display:inline-flex;gap:4px;align-items:center;margin-left:4px';
+  wrap.style.cssText = 'display:inline-flex;gap:4px;align-items:center';
   var sel = document.createElement('select');
   others.forEach(function (p) {
     var opt = document.createElement('option');
