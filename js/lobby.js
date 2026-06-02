@@ -105,6 +105,34 @@ export function initLobby({ onShowView, onToast }) {
 // immediately (cheap), and the history fetch is deferred until a
 // profile actually arrives via onProfileChange so we don't silently
 // no-op the backfill.
+// Any https:// URL in an announcement becomes a clickable link. We
+// tokenize on URLs in the RAW text (so the regex matches real characters,
+// not HTML entities), then escape each piece for its context: plain text
+// via escapeHtml, the href via escapeAttr. That keeps the output
+// injection-safe even though the admin is the only author. Match is
+// https:// only (per request); a URL run ends at whitespace or an HTML
+// delimiter, and trailing sentence punctuation is left out of the link.
+const ANNOUNCE_URL_RE = /https:\/\/[^\s<>"']+/g;
+function escapeAttr(s) {
+  return escapeHtml(s).replace(/"/g, '&quot;');
+}
+function linkifyAnnouncement(line) {
+  let out = '';
+  let last = 0;
+  for (const m of line.matchAll(ANNOUNCE_URL_RE)) {
+    let url = m[0];
+    // Don't swallow a trailing period/comma/etc. into the link target.
+    const tail = (url.match(/[.,!?;:]+$/) || [''])[0];
+    if (tail) url = url.slice(0, url.length - tail.length);
+    out += escapeHtml(line.slice(last, m.index));
+    out += `<a class="server-announcement-link" href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`;
+    out += escapeHtml(tail);
+    last = m.index + m[0].length;
+  }
+  out += escapeHtml(line.slice(last));
+  return out;
+}
+
 // Server-wide announcement banner (patches / updates), shown atop global
 // chat. One current message that overrides; hidden when empty. Each line
 // renders as its own row so multi-line posts read cleanly.
@@ -116,7 +144,7 @@ async function loadAnnouncement() {
   if (!msg) { box.hidden = true; box.innerHTML = ''; return; }
   const lines = msg.split('\n').map((l) => l.trim()).filter(Boolean);
   box.innerHTML = '<span class="server-announcement-tag">📣 Server update</span>'
-    + lines.map((l) => `<p class="server-announcement-line">${escapeHtml(l)}</p>`).join('');
+    + lines.map((l) => `<p class="server-announcement-line">${linkifyAnnouncement(l)}</p>`).join('');
   box.hidden = false;
 }
 
