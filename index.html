@@ -27,11 +27,15 @@
       .boot-error-box p { color: #8b90b8; line-height: 1.5; }
       .boot-error-box ul { color: #e6e9ff; line-height: 1.7; padding-left: 20px; margin: 10px 0; }
       .boot-error-box button {
-        margin-top: 8px; font: inherit; cursor: pointer;
-        background: #1a1830; color: #e6e9ff; border: 1px solid #2a2740;
-        border-radius: 6px; padding: 8px 14px;
+        margin: 12px 0 4px; font: inherit; font-weight: 600; cursor: pointer;
+        background: #2f6df0; color: #fff; border: 1px solid #2f6df0;
+        border-radius: 6px; padding: 10px 16px; width: 100%;
       }
-      .boot-error-box button:hover { background: #25223e; border-color: #3a3760; }
+      .boot-error-box button:hover { background: #2257c9; border-color: #2257c9; }
+      .boot-error-box .boot-error-tabs {
+        color: #e6e9ff; background: #1a1830; border: 1px solid #2a2740;
+        border-radius: 6px; padding: 10px 12px; margin: 12px 0;
+      }
     </style>
     <!--
       API base URL for the High Frontier companion server. Empty string
@@ -624,13 +628,14 @@
     <div id="boot-error" class="boot-error" hidden role="alert">
       <div class="boot-error-box">
         <strong>This page didn't load fully.</strong>
-        <p>You're probably on a cached older version. A hard refresh fixes it:</p>
+        <p>You're on a cached older version of the game. Get the latest:</p>
+        <button type="button" id="boot-error-reload">Reload the latest version</button>
+        <p class="boot-error-tabs"><b>On a phone or tablet?</b> If the button doesn't fix it, close <b>every</b> tab of this game (you may have several open in the background), then open it again. That is the surest fix on mobile.</p>
+        <p>On a computer you can also hard refresh:</p>
         <ul>
           <li><b>Windows / Linux:</b> Ctrl + Shift + R</li>
           <li><b>Mac:</b> Cmd + Shift + R</li>
-          <li><b>Firefox:</b> Ctrl + Shift + R (Cmd + Shift + R on Mac)</li>
         </ul>
-        <button type="button" id="boot-error-reload">Hard refresh now</button>
       </div>
     </div>
 
@@ -663,13 +668,21 @@
         var reload = document.getElementById('boot-error-reload');
         if (reload) {
           reload.addEventListener('click', function () {
-            // A plain reload often suffices once the module's cache
-            // entry has expired; if the cached copy is still fresh the
-            // user needs the keyboard hard-refresh spelled out above
-            // (JS can't force a subresource refetch without a service
-            // worker). We deliberately don't touch the URL so the room
-            // routing chain (?v= / ?room= / ?invite=) is preserved.
-            window.location.reload();
+            // A plain reload re-serves the cached, half-linked modules -
+            // that's why the old button looked like it did nothing. JS
+            // can't flush the HTTP cache, but a NEW query key is a fresh
+            // cache key: the browser refetches index.html from the network,
+            // and that fresh copy pulls the current ?v=<sha> assets. Use
+            // set() (not append) so repeat clicks don't stack params, and
+            // keep the rest of the URL + hash so room / invite / version
+            // routing survives (404.html forwards the query on deep paths).
+            try {
+              var u = new URL(window.location.href);
+              u.searchParams.set('fresh', Date.now().toString(36));
+              window.location.replace(u.toString());
+            } catch (e) {
+              window.location.reload();
+            }
           });
         }
       })();
