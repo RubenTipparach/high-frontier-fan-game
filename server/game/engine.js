@@ -1400,6 +1400,13 @@ function applyAuctionSell(state, op, ctx) {
   const a = state.auction;
   if (!a) return fail('no_auction');
   if (ctx.profileId !== a.auctioneerId) return fail('not_auctioneer');
+  // The lot can't close until every other player has acted at the
+  // current floor (bid or passed). Bidders are still on the clock until
+  // then, so the auctioneer can't snatch the card - even a free keep
+  // with no bids - out from under someone who hasn't responded yet.
+  // AUCTION_RESET deliberately reopens the clock when the auctioneer
+  // wants another round.
+  if (!allBiddersActed(state)) return fail('bidders_pending');
   const auctioneer = playerByProfile(state, a.auctioneerId);
   const high = a.highBid || 0;
   const buyerId = Number(op.buyerId);

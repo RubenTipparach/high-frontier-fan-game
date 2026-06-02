@@ -205,6 +205,12 @@ let _onlineRoom = null;       // table / lobby name for the multiplayer panel
 let _onlineLobbyId = null;    // lobby id (for chat REST + WS channel)
 let _onlineLeave = null;      // () => void callback wired by the host page
 let _onlineChatOff = null;    // unsubscribe handle for the lobby chat WS
+// In-memory mirror of the table chat. Kept module-level so a second
+// chat surface (the auction overlay's side chat) can backfill from it
+// when it mounts mid-conversation, without re-fetching history. Capped
+// so a long session can't grow it without bound.
+const _chatLog = [];
+const CHAT_LOG_CAP = 200;
 
 // Online auction state (kept module-level so it survives the snapshot
 // re-renders that opponents' bids trigger): _bidDraft / _joinDraft
@@ -867,6 +873,12 @@ function renderOnlineAuction(auction) {
             <div class="mp-auction-controls" id="mp-auction-controls"></div>
             <div class="hud-error" id="mp-auction-error"></div>
           </div>
+          <div class="mp-auction-chat">
+            <div class="mp-detail-label">Table chat</div>
+            <ul id="mp-auction-chat-list" class="mp-chat-list mp-auction-chat-list">
+              <li class="muted mp-chat-empty">No messages yet.</li>
+            </ul>
+          </div>
         </div>
       </div>
       <button type="button" class="mp-mini-chip" aria-label="Restore auction">
@@ -883,6 +895,10 @@ function renderOnlineAuction(auction) {
       _auctionMin = false;
       overlay.classList.remove('is-minimized');
     });
+    // Mount the side chat once: backfill from the in-memory log and wire
+    // its own send form (live messages fan in via appendMpChat).
+    overlay.querySelector('.mp-auction-chat').appendChild(buildChatForm());
+    fillChatList(overlay.querySelector('#mp-auction-chat-list'));
   }
 
   const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
@@ -1296,18 +1312,22 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   if (iAmAuctioneer) {
     const closeWrap = document.createElement('div');
     closeWrap.className = 'mp-auction-close';
+    // The lot can only close once every other player has bid or passed.
+    // Until then the close buttons are disabled (the server enforces the
+    // same rule); the auctioneer can still Reset to start a fresh round.
+    const canClose = a.awaiting === 'auctioneer';
     const lbl = document.createElement('div');
     lbl.className = 'mp-auction-close-label';
-    lbl.textContent = a.awaiting === 'auctioneer'
+    lbl.textContent = canClose
       ? 'Every bidder has acted - close the lot:'
-      : 'Close the lot (or wait for more bids):';
+      : 'Waiting on bidders - everyone must bid or pass before you can close:';
     closeWrap.appendChild(lbl);
     if (high <= 0) {
       const keepBtn = document.createElement('button');
       keepBtn.type = 'button';
       keepBtn.className = 'modal-btn primary';
       keepBtn.textContent = 'Keep (no bids)';
-      keepBtn.disabled = _onlineBusy;
+      keepBtn.disabled = _onlineBusy || !canClose;
       keepBtn.addEventListener('click', () => submitMpAuctionOp({ kind: 'AUCTION_SELL', buyerId: myId }));
       closeWrap.appendChild(keepBtn);
     } else {
@@ -1323,10 +1343,13 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
         } else {
           btn.textContent = `Sell to @${tp ? tp.name : '?'} (${high})`;
         }
-        btn.disabled = _onlineBusy;
+        btn.disabled = _onlineBusy || !canClose;
         btn.addEventListener('click', () => submitMpAuctionOp({ kind: 'AUCTION_SELL', buyerId: tid }));
         closeWrap.appendChild(btn);
       }
+    }
+    if (!canClose) {
+      closeWrap.appendChild(noteEl('Bidders still on the clock - close unlocks once they have all acted.'));
     }
     // Reset: clear the OTHER players' bids so they must re-bid (higher)
     // or pass. Shown when someone else has a standing bid to clear.
@@ -1454,20 +1477,11 @@ function ensureMpPanelStructure() {
 // form posts to the lobby chat REST endpoint; the WS 'chat' broadcast
 // (subscribed in bootstrapOnlineGame) re-renders for everyone including
 // the sender, so we don't append locally on submit.
-function setupMpChat(host) {
-  host.innerHTML = '';
-  const label = document.createElement('div');
-  label.className = 'mp-detail-label';
-  label.textContent = 'Table chat';
-  const list = document.createElement('ul');
-  list.id = 'mp-chat-list';
-  list.className = 'mp-chat-list';
-  const empty = document.createElement('li');
-  empty.className = 'muted mp-chat-empty';
-  empty.textContent = 'No messages yet.';
-  list.appendChild(empty);
+// Build the send form shared by every chat surface. Posts to the lobby
+// chat REST endpoint; the WS 'chat' broadcast re-renders for everyone
+// (sender included), so we never append locally on submit.
+function buildChatForm() {
   const form = document.createElement('form');
-  form.id = 'mp-chat-form';
   form.className = 'mp-chat-form';
   const input = document.createElement('input');
   input.type = 'text';
@@ -1491,20 +1505,35 @@ function setupMpChat(host) {
       input.value = body;
     }
   });
-  host.append(label, list, form);
+  return form;
 }
 
-function appendMpChat(msg, opts = {}) {
-  const list = document.getElementById('mp-chat-list');
-  if (!list || !msg) return;
-  const empty = list.querySelector('.mp-chat-empty');
-  if (empty) empty.remove();
+function setupMpChat(host) {
+  host.innerHTML = '';
+  const label = document.createElement('div');
+  label.className = 'mp-detail-label';
+  label.textContent = 'Table chat';
+  const list = document.createElement('ul');
+  list.id = 'mp-chat-list';
+  list.className = 'mp-chat-list';
+  const empty = document.createElement('li');
+  empty.className = 'muted mp-chat-empty';
+  empty.textContent = 'No messages yet.';
+  list.appendChild(empty);
+  host.append(label, list, buildChatForm());
+  // Backfill from the in-memory log so the pane shows prior messages
+  // even when it mounts after the conversation already started.
+  fillChatList(list);
+}
+
+// Build one chat <li> for a message, tinting the speaker's @name with
+// their seat colour (resolved from the cached snapshot). Shared by every
+// chat surface so they render identically.
+function chatMsgEl(msg) {
   const li = document.createElement('li');
   li.className = 'mp-chat-msg';
   const who = document.createElement('span');
   who.className = 'mp-chat-who player-name';
-  // Resolve the speaker's seat colour from the cached snapshot so
-  // their @name tints to match the rest of the player chrome.
   const speaker = (_onlineSnapshot && _onlineSnapshot.players || [])
     .find((p) => p.profileId === msg.profileId);
   if (speaker && speaker.color) who.style.setProperty('--player-color', speaker.color);
@@ -1513,8 +1542,36 @@ function appendMpChat(msg, opts = {}) {
   body.className = 'mp-chat-body';
   body.textContent = msg.body || '';
   li.append(who, document.createTextNode(' '), body);
-  list.appendChild(li);
+  return li;
+}
+
+// Append a message to a given chat list element (drops the empty-state
+// placeholder, then sticks the scroll to the bottom). No-op if the list
+// isn't mounted.
+function appendChatToList(list, msg) {
+  if (!list || !msg) return;
+  const empty = list.querySelector('.mp-chat-empty');
+  if (empty) empty.remove();
+  list.appendChild(chatMsgEl(msg));
   list.scrollTop = list.scrollHeight;
+}
+
+// Backfill a freshly-mounted chat list from the in-memory log (used by
+// the auction overlay's side chat so it isn't blank when it opens after
+// the conversation has already started).
+function fillChatList(list) {
+  if (!list) return;
+  for (const m of _chatLog) appendChatToList(list, m);
+}
+
+function appendMpChat(msg, opts = {}) {
+  if (!msg) return;
+  _chatLog.push(msg);
+  if (_chatLog.length > CHAT_LOG_CAP) _chatLog.splice(0, _chatLog.length - CHAT_LOG_CAP);
+  // Fan the message out to every chat surface that's currently mounted:
+  // the Multiplayer pane and (when a lot is open) the auction overlay.
+  appendChatToList(document.getElementById('mp-chat-list'), msg);
+  appendChatToList(document.getElementById('mp-auction-chat-list'), msg);
   // Live message from someone else while the MP pane isn't open -> pulse
   // the 🛰 tab so the player notices. (History backfill passes no `live`
   // flag; my own messages don't self-notify.)
@@ -2023,6 +2080,7 @@ function humanizeOnlineOpError(code) {
     deck_empty: 'That deck is empty.',
     no_auction: 'No auction is open.',
     not_bidding_phase: 'Bidding is closed right now.',
+    bidders_pending: 'You can\'t close the lot yet - every other player must bid or pass first.',
     bid_too_low: 'Bid must beat the current high bid.',
     insufficient_aqua: 'Not enough aqua.',
     bad_amount: 'Enter a whole number.',

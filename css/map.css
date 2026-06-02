@@ -6184,7 +6184,7 @@ body:has(#view-browse:not(.hidden)) #main {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 16px 20px 20px;
-  max-width: 700px;
+  max-width: 880px;
   width: 100%;
   max-height: calc(100vh - 48px);
   overflow: auto;
@@ -6301,6 +6301,23 @@ body:has(#view-browse:not(.hidden)) #main {
   flex-direction: column;
   gap: 12px;
   min-width: 220px;
+}
+/* Small table-chat column beside the lot card. Sized so it never grows
+   taller than the lot card itself (.card min-height is 350px): the
+   scrollable list is capped and the column lives between label + list +
+   send form. The list scrolls internally so a long backlog stays put. */
+.mp-auction-chat {
+  flex: 1 1 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 180px;
+  max-width: 280px;
+}
+.mp-auction-chat-list {
+  flex: 1 1 auto;
+  max-height: 264px;
+  margin: 0;
 }
 .mp-auction-bid { font-size: 16px; font-weight: 700; letter-spacing: 0.3px; }
 .mp-auction-phase { font-size: 13px; margin-top: 2px; }
