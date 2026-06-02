@@ -1083,13 +1083,8 @@ function gameReminders(gameId) {
 }
 
 // Manual turn-nudge throttle: at most one reminder per target per game
-// inside this window.
+// inside this window. One 3h window for everything, auctions included.
 const REMIND_COOLDOWN_MS = 3 * 60 * 60 * 1000; // 3 hours
-// A live auction resolves in minutes, so the 3h reminder lockout would make
-// "nudge waiting" useless after a single ping. While a lot is open, throttle
-// on this shorter window instead. The stored timestamp is shared; only the
-// comparison window changes with context.
-const AUCTION_REMIND_COOLDOWN_MS = 2 * 60 * 1000; // 2 minutes
 
 // After an op commits: DM the newly-active player on END_TURN, and the
 // other players when an auction opens. (One event => one DM each, so the
@@ -1650,10 +1645,9 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
 
 // Manual turn nudge ("Remind"). A player who is NOT the one the game is
 // waiting on can ping that player with a turn DM, throttled to one per
-// target per cooldown window (REMIND_COOLDOWN_MS normally, the shorter
-// AUCTION_REMIND_COOLDOWN_MS while a lot is open). Not a game op (no board
-// mutation, no seq bump) - just a DM + a cooldown row the gameView surfaces
-// so every client can show who was nudged and when.
+// target per REMIND_COOLDOWN_MS window (auctions included). Not a game op
+// (no board mutation, no seq bump) - just a DM + a cooldown row the gameView
+// surfaces so every client can show who was nudged and when.
 app.post('/games/:id/remind', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
@@ -1668,8 +1662,7 @@ app.post('/games/:id/remind', requireProfile, (req, res) => {
   const needed = nudgeTargets(state).filter((pid) => pid !== req.profile.id);
   if (!needed.length) return res.status(409).json({ error: 'nobody_to_nudge' });
   const inAuction = !!(state && state.auction);
-  // Shorter throttle while a lot is live so the auctioneer can re-nudge.
-  const cd = inAuction ? AUCTION_REMIND_COOLDOWN_MS : REMIND_COOLDOWN_MS;
+  const cd = REMIND_COOLDOWN_MS;
 
   // Resolve the requested set: one specific player (must be nudgable),
   // everyone (all=true, for auction rounds), or the primary actor by

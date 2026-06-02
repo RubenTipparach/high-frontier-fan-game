@@ -1776,16 +1776,9 @@ function clearMpChatUnread() {
 // Manual turn-nudge cooldown (client mirror of the server's 3h gate).
 // _localNudges optimistically records nudges this client learned about
 // (from the POST response) so a button greys out + shows the timer right
-// away, before the next snapshot carries state.reminders.
+// away, before the next snapshot carries state.reminders. One 3h window
+// for everything, auctions included (no separate auction throttle).
 const NUDGE_COOLDOWN_MS = 3 * 60 * 60 * 1000;
-// A live auction resolves in minutes, so it uses a much shorter nudge
-// throttle than async turn reminders (mirrors the server's
-// AUCTION_REMIND_COOLDOWN_MS). The stored last-nudge timestamp is shared;
-// only the window we compare against changes while a lot is open.
-const AUCTION_NUDGE_COOLDOWN_MS = 2 * 60 * 1000;
-function nudgeCooldownMs(snapshot) {
-  return (snapshot && snapshot.auction) ? AUCTION_NUDGE_COOLDOWN_MS : NUDGE_COOLDOWN_MS;
-}
 // Short "2m" / "45s" label for how long until a cooled-down nudge frees up.
 function fmtNudgeWait(ms) {
   if (ms <= 0) return '';
@@ -1880,7 +1873,7 @@ async function doNudge(opts, btn) {
 // One nudge button. Pass a single targetPlayer for a per-player nudge,
 // or allPlayers (+ targetPlayer null) for a "Nudge all" button.
 function makeNudgeButton(snapshot, targetPlayer, allPlayers) {
-  const cd = nudgeCooldownMs(snapshot);
+  const cd = NUDGE_COOLDOWN_MS;
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'mp-leave mp-nudge';
@@ -1924,7 +1917,7 @@ function makeNudgeButton(snapshot, targetPlayer, allPlayers) {
 // per-player cooldown (the server skips any that are). Reuses doNudge so
 // the toast + optimistic cooldown record match the roster-panel nudges.
 function makeAuctionNudgeButton(snapshot, label, opts, targetIds, title) {
-  const cd = nudgeCooldownMs(snapshot);
+  const cd = NUDGE_COOLDOWN_MS;
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'modal-btn';
