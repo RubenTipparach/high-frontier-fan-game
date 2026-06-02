@@ -121,6 +121,7 @@ import {
 // are inert until mountBrowse({ online:true }) flips _online on; the
 // solo path never touches them.
 import { setOnline, isOnline } from './online-mode.js';
+import { isFeatureEnabled } from './feature-flags.js';
 import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
 } from './net-bridge.js';
@@ -6582,16 +6583,19 @@ function applyEventDieEffect(event) {
   const season = getSeasonForSlot(event.turn);
   const e = getEventForRoll(event.dieRoll, season && season.name);
   if (!e) return;
-  // Inspiration (d6 = 1 or 2): cycle every patent deck - the
-  // topmost card of each goes to the bottom. Auto-applies; the
-  // player doesn't have to manually resolve it. This is the
-  // only event with an automatic mechanical effect today;
-  // others still log as "Would fire" until they get
-  // implementations.
+  // Sunspot events only change the game when the eventEffects feature is
+  // on. With it off the cube is informational: the modal still shows the
+  // roll + rule text but nothing mutates (matches multiplayer with the
+  // flag off). When on, dispatch on the shared effect id.
   let applied = false;
-  if (e.rolls.includes(event.dieRoll) && e.name === 'Inspiration') {
-    cycleAllDecks();
-    applied = true;
+  if (isFeatureEnabled('eventEffects')) {
+    if (e.effect === 'rotate_decks') {
+      // Inspiration: every patent deck's top card recirculates to the bottom.
+      cycleAllDecks();
+      applied = true;
+    }
+    // place_glitch / pad_explosion / anarchy / budget_cuts / solar_flare
+    // are recognised but not yet wired; they log as pending below.
   }
   logAction({
     type: 'event_d6',

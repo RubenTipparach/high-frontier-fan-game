@@ -41,8 +41,10 @@ import { makeRng } from './rng.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
-  currentPlayer, isPlayersTurn,
+  currentPlayer, isPlayersTurn, seasonForSlot,
 } from './state.js';
+import { getEventForRoll } from '../../data/events.js';
+import { isFeatureEnabled } from './feature-flags.js';
 
 function clone(state) {
   return (typeof structuredClone === 'function')
@@ -162,10 +164,36 @@ function maybeAwardGlory(player, site, turn) {
   return chit;
 }
 
-// Advance the Sunspot Cube one slot. Bumps the round on wrap, rolls a
-// d6 on event slots (recorded as lastEvent; effect resolution is a
-// later PR, matching the sandbox which only records the roll today),
-// and pays water income from hydrated factories. Mutates state.
+// Apply a resolved Sunspot event's state change. Keyed on the shared
+// effect id (data/events.js). Returns true when a mechanical change was
+// made, false when the effect is recognised but not yet wired (so the
+// client can log "would fire" vs "fired"). Gated by the eventEffects flag
+// at the call site, so it never runs with the flag off.
+function resolveEvent(state, e) {
+  switch (e && e.effect) {
+    case 'rotate_decks': {
+      // Inspiration: the top card of each patent deck recirculates to the
+      // bottom. (The Colonist queue is Stage 4; rotate the patent decks
+      // that exist today.)
+      let moved = 0;
+      for (const t of DECK_TYPES) {
+        const deck = state.decks[t];
+        if (Array.isArray(deck) && deck.length > 1) { deck.push(deck.shift()); moved += 1; }
+      }
+      return moved > 0;
+    }
+    // place_glitch / pad_explosion / anarchy / budget_cuts / solar_flare
+    // are recognised but not yet wired (each needs a subsystem or an
+    // interactive choice phase); they log as pending until their PR lands.
+    default:
+      return false;
+  }
+}
+
+// Advance the Sunspot Cube one slot. Bumps the round on wrap, rolls a d6
+// on event slots, resolves the event when the eventEffects flag is on
+// (otherwise just records the roll, matching the sandbox with the flag
+// off), and pays water income from hydrated factories. Mutates state.
 function advanceClock(state) {
   state.turn = (state.turn + 1) % SLOTS;
   if (state.turn === NEW_ROUND_SLOT) state.round += 1;
@@ -174,7 +202,15 @@ function advanceClock(state) {
     const gen = makeRng(state.seed, state.rng.cursor);
     const dieRoll = gen.d6();
     state.rng.cursor = gen.cursor;
-    state.lastEvent = { turn: state.turn, round: state.round, dieRoll };
+    const e = getEventForRoll(dieRoll, seasonForSlot(state.turn));
+    const lastEvent = { turn: state.turn, round: state.round, dieRoll };
+    if (e) {
+      lastEvent.effect = e.effect || null;
+      lastEvent.applied = isFeatureEnabled('eventEffects', state.featureFlags)
+        ? resolveEvent(state, e)
+        : false;
+    }
+    state.lastEvent = lastEvent;
   }
 
   // Income: each hydrated factory pays its site's hydration in water to
