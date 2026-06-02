@@ -1203,19 +1203,21 @@ const META = {
 // ----- auction ops (competitive, built fresh server-side) -----
 //
 // The auction is the one mechanic NOT ported from the sandbox (whose
-// auction is a solo "win the deck top immediately" draw). Flow:
+// auction is a solo "win the deck top immediately" draw). Open-bid flow:
 //   AUCTION_START  auctioneer spends 1 op and reserves a deck-top lot.
-//   AUCTION_BID / AUCTION_PASS  the OTHER players bid ascending. A new
-//     high reopens the floor (passes clear) so everyone gets a say.
-//     When every other player has passed, control goes to the
-//     auctioneer.
-//   AUCTION_SELL  auctioneer accepts the high bid: the winner pays the
-//     auctioneer that many aqua and takes the lot.
-//   AUCTION_JOIN  auctioneer bids >= the current high (matching is
-//     allowed). This reopens a fresh round so every other player can
-//     bid again, looping until they all pass. If the auctioneer is the
-//     standing high bid when that happens, they keep the lot and pay
-//     the bank (the aqua leaves play; free if nobody ever bid).
+//   AUCTION_BID    ANY player (the auctioneer included) places or raises
+//     a public standing bid. A bid must at least tie the current high
+//     (>= highBid); ties are allowed. A raise (or any auctioneer bid)
+//     reopens the floor (passes clear) so everyone gets another say; a
+//     player may re-bid (always >= the floor) at any time.
+//   AUCTION_PASS   a non-auctioneer declines to raise further; their
+//     standing bid (if any) stays in the running. When every other
+//     player has passed or sits at the floor, control is the
+//     auctioneer's (the server nudges them to close).
+//   AUCTION_SELL   auctioneer CLOSES by naming a buyer - a top bidder,
+//     which may be themselves on a tie (they win ties). The buyer pays
+//     their bid to the auctioneer, or to the bank if the auctioneer
+//     keeps it (free when nobody bid).
 // The won lot plus one card off the top of each of its support decks
 // (supportBonusDecks, ported from js/game/decks.js) land in the
 // winner's hand.
@@ -1268,44 +1270,39 @@ function bonusNote(bonusIds) {
   return ` Bonus: ${names.join(', ')}.`;
 }
 
-// True once every non-auctioneer player except the current high bidder
-// has passed: nobody left who could raise, so the round is settled.
-function biddersRoundComplete(state) {
+// Recompute the public tallies from the per-player bids: the high bid
+// (the floor every new bid must at least tie), a leading bidder (the
+// auctioneer wins ties, so they lead whenever they sit at the floor),
+// and the "auctioneer may close" hint - true once no non-auctioneer
+// will raise again (all passed or already at the floor). The hint
+// drives the auto-nudge + UI.
+function recomputeAuction(state) {
   const a = state.auction;
-  const toAct = state.players.filter(
-    (p) => p.profileId !== a.auctioneerId && p.profileId !== a.highBidderId
-  );
-  return toAct.every((p) => a.passed.includes(p.profileId));
+  a.bids = a.bids || {};
+  const entries = Object.entries(a.bids);
+  let high = 0;
+  for (const [, amt] of entries) if (amt > high) high = amt;
+  a.highBid = high;
+  let leader = null;
+  if (high > 0) {
+    if ((a.bids[a.auctioneerId] || 0) === high) leader = a.auctioneerId;
+    else { const e = entries.find(([, amt]) => amt === high); leader = e ? Number(e[0]) : null; }
+  }
+  a.highBidderId = leader;
+  a.awaiting = allBiddersActed(state) ? 'auctioneer' : 'bidders';
 }
 
-// Auctioneer wins the lot: pay the high bid to the bank (aqua leaves
-// play; 0 when nobody bid) and award the lot. Closes the auction.
-function resolveKeep(state, log) {
+// Every non-auctioneer has responded to the current floor (bid or
+// passed since it last reopened) - nobody left who will raise, so the
+// auctioneer may close. `acted` resets to just the actor whenever the
+// floor reopens (a raise or any auctioneer bid), which is what makes an
+// auctioneer tie force the others to respond again.
+function allBiddersActed(state) {
   const a = state.auction;
-  const auctioneer = playerByProfile(state, a.auctioneerId);
-  const paid = a.highBid;
-  auctioneer.aqua -= paid;
-  const awarded = awardLot(state, auctioneer);
-  state.auction = null;
-  const name = awarded.card ? awarded.card.name : awarded.cardId;
-  const tail = paid > 0 ? ` and paid ${paid} aqua to the bank` : ' unopposed';
-  return {
-    ok: true, state,
-    log: `${log} ${auctioneer.name} kept ${name}${tail}.${bonusNote(awarded.bonusIds)}`,
-  };
-}
-
-// After a bid or pass, settle the round: auctioneer keeps (they hold
-// the high bid), hand them the sell/join decision, or leave bidding open.
-function settleBidders(state, log) {
-  const a = state.auction;
-  if (!biddersRoundComplete(state)) return { ok: true, state, log };
-  if (a.highBidderId === a.auctioneerId) return resolveKeep(state, log);
-  a.awaiting = 'auctioneer';
-  const tail = a.highBidderId
-    ? ` High bid ${a.highBid} aqua; the auctioneer decides.`
-    : ' No bids; the auctioneer decides.';
-  return { ok: true, state, log: log + tail };
+  const acted = a.acted || [];
+  const others = state.players.filter((p) => p.profileId !== a.auctioneerId);
+  if (!others.length) return false;
+  return others.every((p) => acted.includes(p.profileId));
 }
 
 function applyAuctionStart(state, op, ctx) {
@@ -1325,8 +1322,8 @@ function applyAuctionStart(state, op, ctx) {
   state.auction = {
     deckType, cardId,
     auctioneerId: player.profileId,
-    highBid: 0, highBidderId: null,
-    passed: [], awaiting: 'bidders',
+    bids: {}, passed: [], acted: [],
+    highBid: 0, highBidderId: null, awaiting: 'bidders',
   };
   // Opening commits prior turn actions: undo must not span an auction
   // (it moves other players' aqua / decks / hands, none of which the
@@ -1340,92 +1337,129 @@ function applyAuctionStart(state, op, ctx) {
 function applyAuctionBid(state, op, ctx) {
   const a = state.auction;
   if (!a) return fail('no_auction');
-  if (a.awaiting !== 'bidders') return fail('not_bidding_phase');
+  // ANY player may bid now, the auctioneer included. A bidder can place
+  // or change their standing bid at any time while the lot is open.
   const bidder = playerByProfile(state, ctx.profileId);
   if (!bidder) return fail('not_a_player');
-  if (bidder.profileId === a.auctioneerId) return fail('auctioneer_cannot_bid');
   if ((bidder.hand || []).length >= AUCTION_HAND_LIMIT) return fail('hand_limit');
   const amount = Number(op.amount);
   if (!Number.isInteger(amount) || amount <= 0) return fail('bad_amount');
-  if (amount <= a.highBid) return fail('bid_too_low');
+  // Must at least tie the current high (ties are allowed); only the
+  // floor is enforced, so a player may raise or re-tie freely.
+  const floorBefore = a.highBid || 0;
+  if (amount < floorBefore) return fail('bid_too_low');
   if (amount > bidder.aqua) return fail('insufficient_aqua');
 
-  a.highBid = amount;
-  a.highBidderId = bidder.profileId;
-  a.passed = []; // a new high reopens the floor to the other bidders
-  return settleBidders(state, `${bidder.name} bid ${amount} aqua.`);
+  a.bids = a.bids || {};
+  a.bids[bidder.profileId] = amount;
+  a.passed = (a.passed || []).filter((id) => id !== bidder.profileId);
+  // A raise (or ANY auctioneer bid) reopens the floor: clear the pass
+  // list and reset the responded set to just this bidder, so every
+  // other player must bid or pass again (this is what makes an
+  // auctioneer tie force the others to respond). A plain tie by a
+  // non-auctioneer just adds them to the responded set.
+  const reopen = amount > floorBefore || bidder.profileId === a.auctioneerId;
+  if (reopen) {
+    a.passed = [];
+    a.acted = [bidder.profileId];
+  } else if (!(a.acted || []).includes(bidder.profileId)) {
+    a.acted = [...(a.acted || []), bidder.profileId];
+  }
+  recomputeAuction(state);
+  const tie = amount === floorBefore && floorBefore > 0;
+  return {
+    ok: true, state,
+    log: `${bidder.name} ${tie ? 'tied the bid at' : 'bid'} ${amount} aqua.`,
+  };
 }
 
 function applyAuctionPass(state, op, ctx) {
   const a = state.auction;
   if (!a) return fail('no_auction');
-  if (a.awaiting !== 'bidders') return fail('not_bidding_phase');
+  // The auctioneer closes the lot, they never "pass".
+  if (ctx.profileId === a.auctioneerId) return fail('auctioneer_cannot_pass');
   const passer = playerByProfile(state, ctx.profileId);
   if (!passer) return fail('not_a_player');
-  if (passer.profileId === a.auctioneerId) return fail('auctioneer_cannot_pass');
-  if (passer.profileId === a.highBidderId) return fail('cannot_pass_leading');
+  // Pass = "I won't raise further" - any standing bid stays in the
+  // running (the auctioneer can still sell it to them at that price).
   if (!a.passed.includes(passer.profileId)) a.passed.push(passer.profileId);
-  return settleBidders(state, `${passer.name} passed.`);
+  if (!(a.acted || []).includes(passer.profileId)) {
+    a.acted = [...(a.acted || []), passer.profileId];
+  }
+  recomputeAuction(state);
+  return { ok: true, state, log: `${passer.name} passed.` };
 }
 
-function applyAuctionJoin(state, op, ctx) {
-  const a = state.auction;
-  if (!a) return fail('no_auction');
-  if (a.awaiting !== 'auctioneer') return fail('not_auctioneer_phase');
-  if (ctx.profileId !== a.auctioneerId) return fail('not_auctioneer');
-  const auctioneer = playerByProfile(state, a.auctioneerId);
-  const amount = Number(op.amount);
-  if (!Number.isInteger(amount) || amount < 0) return fail('bad_amount');
-  // Joining the bidding (a raise) is participation, so the hand limit
-  // applies. The unopposed keep (amount 0, no bids) is exempt - it
-  // just finalises the lot the auctioneer already legally started.
-  if (amount > 0 && (auctioneer.hand || []).length >= AUCTION_HAND_LIMIT) {
-    return fail('hand_limit');
-  }
-  if (amount < a.highBid) return fail('must_match_or_raise');
-  if (amount > auctioneer.aqua) return fail('insufficient_aqua');
-
-  // No-bids keep: when no one has bid yet AND the auctioneer joins
-  // at 0, that's "Keep (no bids)" - the lot is theirs unopposed.
-  // Close the auction now instead of reopening a pass-round that
-  // can only resolve the same way. User report 2026-05: "if the
-  // auctioneer clicks keep (no bids) the auction should end.
-  // currently it's treating it as if there is one more round".
-  if (amount === 0 && a.highBid === 0) {
-    a.highBidderId = a.auctioneerId;
-    return resolveKeep(state, `${auctioneer.name} kept the lot unopposed.`);
-  }
-
-  a.highBid = amount;
-  a.highBidderId = a.auctioneerId;
-  a.passed = [];
-  a.awaiting = 'bidders';
-  return {
-    ok: true, state,
-    log: `${auctioneer.name} joined the bidding at ${amount} aqua; another round opens.`,
-  };
-}
-
+// The auctioneer CLOSES the lot by naming a buyer. The buyer must be a
+// top bidder (one of the players tied at the high bid); the auctioneer
+// may name themselves on a tie (they win ties), which keeps the lot and
+// pays the bank. With no bids at all, only the auctioneer can be named
+// (a free keep). The named buyer pays their bid; the lot + bonuses go
+// to them.
 function applyAuctionSell(state, op, ctx) {
   const a = state.auction;
   if (!a) return fail('no_auction');
-  if (a.awaiting !== 'auctioneer') return fail('not_auctioneer_phase');
   if (ctx.profileId !== a.auctioneerId) return fail('not_auctioneer');
-  if (!a.highBidderId || a.highBidderId === a.auctioneerId) return fail('no_bid_to_accept');
   const auctioneer = playerByProfile(state, a.auctioneerId);
-  const winner = playerByProfile(state, a.highBidderId);
-  if (!winner) return fail('winner_gone');
-  const price = a.highBid;
+  const high = a.highBid || 0;
+  const buyerId = Number(op.buyerId);
+  if (!Number.isInteger(buyerId)) return fail('bad_buyer');
+
+  let winner;
+  let price;
+  if (high <= 0) {
+    // No bids: the only legal close is the auctioneer keeping it free.
+    if (buyerId !== a.auctioneerId) return fail('no_bid_to_accept');
+    winner = auctioneer;
+    price = 0;
+  } else {
+    // Sell to a top bidder (possibly the auctioneer themselves).
+    if ((a.bids[buyerId] || 0) !== high) return fail('not_top_bidder');
+    winner = playerByProfile(state, buyerId);
+    if (!winner) return fail('winner_gone');
+    price = high;
+  }
+  if ((winner.hand || []).length >= AUCTION_HAND_LIMIT) return fail('hand_limit');
   if (winner.aqua < price) return fail('winner_cannot_pay');
 
-  winner.aqua -= price;
-  auctioneer.aqua += price;
+  if (winner.profileId === a.auctioneerId) {
+    auctioneer.aqua -= price; // keep: aqua leaves play to the bank
+  } else {
+    winner.aqua -= price;
+    auctioneer.aqua += price;
+  }
   const awarded = awardLot(state, winner);
   state.auction = null;
   const name = awarded.card ? awarded.card.name : awarded.cardId;
+  let log;
+  if (winner.profileId === a.auctioneerId) {
+    const tail = price > 0 ? ` and paid ${price} aqua to the bank` : ' unopposed';
+    log = `${auctioneer.name} kept ${name}${tail}.${bonusNote(awarded.bonusIds)}`;
+  } else {
+    log = `${winner.name} won ${name} for ${price} aqua, paid to ${auctioneer.name}.${bonusNote(awarded.bonusIds)}`;
+  }
+  return { ok: true, state, log };
+}
+
+// Auctioneer resets the bidding: clear every OTHER player's standing
+// bid + pass so they must bid again (or pass), prompting them to go
+// higher. The auctioneer's own bid stays as the floor. If everyone then
+// passes, the auctioneer is the standing top bid and keeps the lot.
+function applyAuctionReset(state, op, ctx) {
+  const a = state.auction;
+  if (!a) return fail('no_auction');
+  if (ctx.profileId !== a.auctioneerId) return fail('not_auctioneer');
+  a.bids = a.bids || {};
+  for (const pid of Object.keys(a.bids)) {
+    if (Number(pid) !== a.auctioneerId) delete a.bids[pid];
+  }
+  a.passed = [];
+  a.acted = [];
+  recomputeAuction(state);
+  const auctioneer = playerByProfile(state, a.auctioneerId);
   return {
     ok: true, state,
-    log: `${winner.name} won ${name} for ${price} aqua, paid to ${auctioneer.name}.${bonusNote(awarded.bonusIds)}`,
+    log: `${auctioneer ? auctioneer.name : 'The auctioneer'} reset the bidding - everyone must bid again or pass.`,
   };
 }
 
@@ -1433,7 +1467,7 @@ const AUCTION = {
   AUCTION_START: applyAuctionStart,
   AUCTION_BID: applyAuctionBid,
   AUCTION_PASS: applyAuctionPass,
-  AUCTION_JOIN: applyAuctionJoin,
+  AUCTION_RESET: applyAuctionReset,
   AUCTION_SELL: applyAuctionSell,
 };
 

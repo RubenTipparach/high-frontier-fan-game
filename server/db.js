@@ -297,6 +297,18 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_game_operations_game
     ON game_operations(game_id, seq);
+
+  -- Turn "nudge" reminders. NOT game state (a nudge changes nothing on
+  -- the board), just a per-(game, target) cooldown record so the UI can
+  -- show when a player was last reminded and the server can enforce the
+  -- throttle. One row per (game, target), upserted on each nudge.
+  CREATE TABLE IF NOT EXISTS turn_reminders (
+    game_id     INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    target_id   INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    sender_id   INTEGER NOT NULL REFERENCES profiles(id),
+    sent_at     INTEGER NOT NULL,
+    PRIMARY KEY (game_id, target_id)
+  );
 `);
 
 // Idempotent column adds for tables that predate a column. better-sqlite3

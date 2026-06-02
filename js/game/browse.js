@@ -125,7 +125,7 @@ import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
 } from './net-bridge.js';
 import { abandonSandboxGame, currentSandboxId } from './sandbox-games.js';
-import { getGame, getGameOps, submitGameOp, fetchChat, sendChat, testNotify } from '../api.js';
+import { getGame, getGameOps, submitGameOp, fetchChat, sendChat, remindTurn } from '../api.js';
 import { ws } from '../ws.js';
 
 // Only one map mode now (planner / "classic"); the old
@@ -887,8 +887,6 @@ function renderOnlineAuction(auction) {
 
   const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
   const auctioneer = players.find((p) => p.profileId === auction.auctioneerId);
-  const highBidder = auction.highBidderId
-    ? players.find((p) => p.profileId === auction.highBidderId) : null;
   const lot = PATENTS_BY_ID[auction.cardId];
 
   const modeEl = overlay.querySelector('.mp-auction-mode');
@@ -904,30 +902,105 @@ function renderOnlineAuction(auction) {
 
   const lotHost = overlay.querySelector('#mp-auction-lot');
   lotHost.innerHTML = '';
+  const lotMain = document.createElement('div');
+  lotMain.className = 'mp-auction-lot-main';
   if (lot) {
-    try { lotHost.appendChild(renderCard(lot, { type: 'patent' })); }
-    catch { lotHost.textContent = lot.name || auction.cardId; }
+    try { lotMain.appendChild(renderCard(lot, { type: 'patent' })); }
+    catch { lotMain.textContent = lot.name || auction.cardId; }
   } else {
-    lotHost.textContent = auction.cardId;
+    lotMain.textContent = auction.cardId;
+  }
+  lotHost.appendChild(lotMain);
+
+  // Support bonus cards that come with the lot: one off the top of each
+  // support deck the card requires (the server awards these to the
+  // winner when the lot resolves). We PEEK the current deck tops - an
+  // open auction freezes every other op, so the tops are exactly what
+  // the winner will draw, and peeking (not drawing) means we never
+  // reveal what sits BEHIND the bonus cards in the deck.
+  const bonusCards = lot
+    ? supportBonusDecks(lot).map((t) => cardById(peekTop(t))).filter(Boolean)
+    : [];
+  // Always render the "Comes with" section while a lot is shown, so the
+  // bonus reveal is visible even for a lot that happens to have no
+  // support requirements (a note explains the empty case rather than
+  // showing nothing, which reads as broken).
+  if (lot) {
+    const sec = document.createElement('div');
+    sec.className = 'mp-auction-bonus';
+    const label = document.createElement('div');
+    label.className = 'mp-auction-bonus-label';
+    label.textContent = bonusCards.length ? `Comes with (${bonusCards.length})` : 'Comes with';
+    sec.appendChild(label);
+    if (bonusCards.length) {
+      const cardsRow = document.createElement('div');
+      cardsRow.className = 'mp-auction-bonus-cards';
+      for (const b of bonusCards) {
+        const w = document.createElement('div');
+        w.className = 'mp-auction-bonus-card';
+        try { w.appendChild(renderCard(b, { type: 'patent' })); }
+        catch { w.textContent = b.name || b.id; }
+        cardsRow.appendChild(w);
+      }
+      sec.appendChild(cardsRow);
+    } else {
+      const none = document.createElement('div');
+      none.className = 'mp-auction-bonus-none muted';
+      none.textContent = 'No bonus cards - this lot has no support requirements.';
+      sec.appendChild(none);
+    }
+    lotHost.appendChild(sec);
   }
 
+  // Every player's standing bid is public now (incl. the auctioneer's),
+  // so render the full table - amount, the top marker, who passed, and
+  // who still has to act - each tinted with its seat colour.
   const bidEl = overlay.querySelector('.mp-auction-bid');
-  bidEl.textContent = auction.highBid > 0
-    ? `High bid: ${auction.highBid} aqua by @${highBidder ? highBidder.name : '?'}`
-    : 'No bids yet.';
-  if (auction.highBid > 0 && highBidder && highBidder.color) {
-    bidEl.classList.add('player-name');
-    bidEl.style.setProperty('--player-color', highBidder.color);
-  } else {
-    bidEl.classList.remove('player-name');
-    bidEl.style.removeProperty('--player-color');
+  bidEl.classList.remove('player-name');
+  bidEl.style.removeProperty('--player-color');
+  bidEl.innerHTML = '';
+  const bids = auction.bids || {};
+  const high = auction.highBid | 0;
+  const acted = auction.acted || [];
+  const list = document.createElement('div');
+  list.className = 'mp-auction-bidlist';
+  for (const p of players) {
+    const line = document.createElement('div');
+    line.className = 'mp-auction-bidline';
+    const nm = document.createElement('span');
+    nm.className = 'player-name mp-auction-bidwho';
+    if (p.color) nm.style.setProperty('--player-color', p.color);
+    nm.textContent = '@' + p.name + (p.profileId === auction.auctioneerId ? ' (auctioneer)' : '');
+    const amt = document.createElement('span');
+    amt.className = 'mp-auction-bidamt';
+    const b = bids[p.profileId];
+    const didPass = Array.isArray(auction.passed) && auction.passed.includes(p.profileId);
+    const isTop = high > 0 && (b | 0) === high;
+    if (b != null) {
+      amt.textContent = `${b} aqua${isTop ? ' ◄ top' : ''}${didPass ? ' · passed' : ''}`;
+    } else if (didPass) {
+      amt.textContent = 'passed';
+    } else {
+      amt.textContent = '-';
+    }
+    if (isTop) line.classList.add('is-top');
+    // A non-auctioneer who has not acted at the current floor is still
+    // on the clock.
+    if (p.profileId !== auction.auctioneerId && !acted.includes(p.profileId)) {
+      line.classList.add('is-waiting');
+    }
+    line.append(nm, amt);
+    list.appendChild(line);
   }
+  bidEl.appendChild(list);
   overlay.querySelector('.mp-auction-phase').textContent =
-    auction.awaiting === 'bidders' ? 'Bidding is open.' : 'The auctioneer is deciding.';
+    auction.awaiting === 'bidders'
+      ? 'Bidding is open - anyone can bid or raise (ties allowed).'
+      : 'All bidders have acted - the auctioneer can close.';
 
   buildMpAuctionControls(
     overlay.querySelector('#mp-auction-controls'),
-    auction, { auctioneer, highBidder },
+    auction, { auctioneer },
   );
 
   // Minimized chip: keep its summary line live so a glance at the
@@ -1148,45 +1221,30 @@ function noteEl(text) {
 
 // Role + phase aware controls inside the auction modal. Mirrors the
 // engine's state machine (server/game/engine.js auction handlers).
-function buildMpAuctionControls(host, a, { auctioneer, highBidder }) {
+function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   host.innerHTML = '';
   if (!_onlineMe || !_onlineSnapshot) {
     host.appendChild(noteEl('Spectating this auction.'));
     return;
   }
   const myId = _onlineMe.id;
-  const myp = (_onlineSnapshot.players || []).find((p) => p.profileId === myId);
+  const players = _onlineSnapshot.players || [];
+  const myp = players.find((p) => p.profileId === myId);
   if (!myp) { host.appendChild(noteEl('Spectating this auction.')); return; }
   const iAmAuctioneer = a.auctioneerId === myId;
   const myAqua = myp.aqua | 0;
+  const myHandCount = Array.isArray(myp.hand) ? myp.hand.length : 0;
+  const bids = a.bids || {};
+  const high = a.highBid | 0;
+  const myBid = bids[myId] | 0;
+  const passed = Array.isArray(a.passed) && a.passed.includes(myId);
 
-  if (a.awaiting === 'bidders') {
-    if (iAmAuctioneer) {
-      host.appendChild(noteEl('Waiting for the other players to bid or pass.'));
-      return;
-    }
-    if (a.highBidderId === myId) {
-      host.appendChild(noteEl('You hold the high bid. Waiting for the others.'));
-      return;
-    }
-    // Academia hand limit: can't bid holding 4+ cards (a win would
-    // overflow). Server enforces this too; surface why the bid row
-    // is gone. Pass is still allowed.
-    const myHandCount = Array.isArray(myp.hand) ? myp.hand.length : 0;
-    if (myHandCount >= AUCTION_HAND_LIMIT) {
-      host.appendChild(noteEl(`Hand full (${myHandCount}/${AUCTION_HAND_LIMIT}) - you can't bid. Build or transfer cards first.`));
-      const passOnly = document.createElement('button');
-      passOnly.type = 'button';
-      passOnly.className = 'modal-btn';
-      const didPass = Array.isArray(a.passed) && a.passed.includes(myId);
-      passOnly.textContent = didPass ? 'Passed' : 'Pass';
-      passOnly.disabled = didPass || _onlineBusy;
-      passOnly.addEventListener('click', () => submitMpAuctionOp({ kind: 'AUCTION_PASS' }));
-      host.appendChild(passOnly);
-      return;
-    }
-    const minBid = (a.highBid | 0) + 1;
-    const passed = Array.isArray(a.passed) && a.passed.includes(myId);
+  // --- Your bid (ANY player, the auctioneer included) ---
+  // Ties are allowed, so the floor is the high bid itself (>=), not +1.
+  const minBid = Math.max(1, high);
+  if (myHandCount >= AUCTION_HAND_LIMIT) {
+    host.appendChild(noteEl(`Hand full (${myHandCount}/${AUCTION_HAND_LIMIT}) - you can't bid. Build or transfer cards first.`));
+  } else {
     const row = document.createElement('div');
     row.className = 'mp-auction-bidrow';
     const input = document.createElement('input');
@@ -1197,19 +1255,13 @@ function buildMpAuctionControls(host, a, { auctioneer, highBidder }) {
     const bidBtn = document.createElement('button');
     bidBtn.type = 'button';
     bidBtn.className = 'modal-btn primary';
-    // Initial text so a render that beats sync() (or a CSS that
-    // accidentally hides the dynamic update) still shows the label.
-    // sync() rewrites this to "Bid <N>" when there's a valid amount.
     bidBtn.textContent = 'Bid';
-    const passBtn = document.createElement('button');
-    passBtn.type = 'button';
-    passBtn.className = 'modal-btn';
-    passBtn.textContent = passed ? 'Passed' : 'Pass';
-    passBtn.disabled = passed || _onlineBusy;
     const sync = () => {
       const v = parseInt(input.value, 10);
       const okAmt = Number.isInteger(v) && v >= minBid && v <= myAqua;
-      bidBtn.textContent = Number.isInteger(v) ? `Bid ${v}` : 'Bid';
+      const tie = Number.isInteger(v) && v === high && high > 0;
+      bidBtn.textContent = Number.isInteger(v)
+        ? `${tie ? 'Tie at' : (myBid ? 'Change to' : 'Bid')} ${v}` : 'Bid';
       bidBtn.disabled = !okAmt || _onlineBusy;
     };
     input.addEventListener('input', () => { _bidDraft = input.value; sync(); });
@@ -1218,74 +1270,79 @@ function buildMpAuctionControls(host, a, { auctioneer, highBidder }) {
       if (!Number.isInteger(amt)) { setMpAuctionError('Enter a whole number.'); return; }
       submitMpAuctionOp({ kind: 'AUCTION_BID', amount: amt });
     });
-    passBtn.addEventListener('click', () => {
-      submitMpAuctionOp({ kind: 'AUCTION_PASS' });
-    });
-    row.append(input, bidBtn, passBtn);
+    row.append(input, bidBtn);
     host.appendChild(row);
-    host.appendChild(noteEl(`You have ${myAqua} aqua. Minimum bid ${minBid}.`));
+    const floor = high > 0
+      ? ` Bids must be ${minBid}+ (ties allowed).`
+      : ' Open the bidding at 1+.';
+    host.appendChild(noteEl(`You have ${myAqua} aqua.${floor}${myBid ? ` Your bid: ${myBid}.` : ''}`));
     sync();
-    return;
   }
 
-  // awaiting === 'auctioneer'
+  // --- Pass (non-auctioneer only) ---
   if (!iAmAuctioneer) {
-    host.appendChild(noteEl(
-      `Waiting for @${auctioneer ? auctioneer.name : 'the auctioneer'} to sell or keep.`
-    ));
-    return;
+    const passBtn = document.createElement('button');
+    passBtn.type = 'button';
+    passBtn.className = 'modal-btn';
+    passBtn.textContent = passed ? "Passed (you won't raise)" : 'Pass';
+    passBtn.disabled = passed || _onlineBusy;
+    passBtn.addEventListener('click', () => submitMpAuctionOp({ kind: 'AUCTION_PASS' }));
+    host.appendChild(passBtn);
   }
-  if ((a.highBid | 0) === 0) {
-    const keepBtn = document.createElement('button');
-    keepBtn.type = 'button';
-    keepBtn.className = 'modal-btn primary';
-    keepBtn.textContent = 'Keep (no bids)';
-    keepBtn.disabled = _onlineBusy;
-    keepBtn.addEventListener('click', () => {
-      submitMpAuctionOp({ kind: 'AUCTION_JOIN', amount: 0 });
-    });
-    host.appendChild(keepBtn);
-    host.appendChild(noteEl('No one bid. Keep it for free - the auction closes immediately.'));
-    return;
-  }
-  const sellBtn = document.createElement('button');
-  sellBtn.type = 'button';
-  sellBtn.className = 'modal-btn primary';
-  sellBtn.textContent = `Sell to @${highBidder ? highBidder.name : '?'} (${a.highBid} aqua)`;
-  sellBtn.disabled = _onlineBusy;
-  sellBtn.addEventListener('click', () => {
-    submitMpAuctionOp({ kind: 'AUCTION_SELL' });
-  });
-  host.appendChild(sellBtn);
 
-  const minJoin = a.highBid | 0;
-  const row = document.createElement('div');
-  row.className = 'mp-auction-bidrow';
-  const input = document.createElement('input');
-  input.type = 'number';
-  input.className = 'mp-auction-input';
-  input.min = String(minJoin);
-  input.value = String(clampAuctionInt(_joinDraft, minJoin));
-  const joinBtn = document.createElement('button');
-  joinBtn.type = 'button';
-  joinBtn.className = 'modal-btn';
-  joinBtn.textContent = 'Join';
-  const sync = () => {
-    const v = parseInt(input.value, 10);
-    const okAmt = Number.isInteger(v) && v >= minJoin && v <= myAqua;
-    joinBtn.textContent = Number.isInteger(v) ? `Join at ${v}` : 'Join';
-    joinBtn.disabled = !okAmt || _onlineBusy;
-  };
-  input.addEventListener('input', () => { _joinDraft = input.value; sync(); });
-  joinBtn.addEventListener('click', () => {
-    submitMpAuctionOp({ kind: 'AUCTION_JOIN', amount: parseInt(input.value, 10) });
-  });
-  row.append(input, joinBtn);
-  host.appendChild(row);
-  host.appendChild(noteEl(
-    `Join at ${minJoin}+ to keep bidding (you pay the bank if you win). You have ${myAqua} aqua.`
-  ));
-  sync();
+  // --- Close the lot (auctioneer only). Name a top bidder to sell to;
+  // the auctioneer may pick themselves on a tie (they win ties), which
+  // keeps the lot and pays the bank. ---
+  if (iAmAuctioneer) {
+    const closeWrap = document.createElement('div');
+    closeWrap.className = 'mp-auction-close';
+    const lbl = document.createElement('div');
+    lbl.className = 'mp-auction-close-label';
+    lbl.textContent = a.awaiting === 'auctioneer'
+      ? 'Every bidder has acted - close the lot:'
+      : 'Close the lot (or wait for more bids):';
+    closeWrap.appendChild(lbl);
+    if (high <= 0) {
+      const keepBtn = document.createElement('button');
+      keepBtn.type = 'button';
+      keepBtn.className = 'modal-btn primary';
+      keepBtn.textContent = 'Keep (no bids)';
+      keepBtn.disabled = _onlineBusy;
+      keepBtn.addEventListener('click', () => submitMpAuctionOp({ kind: 'AUCTION_SELL', buyerId: myId }));
+      closeWrap.appendChild(keepBtn);
+    } else {
+      const topIds = players.filter((p) => (bids[p.profileId] | 0) === high).map((p) => p.profileId);
+      for (const tid of topIds) {
+        const tp = players.find((p) => p.profileId === tid);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'modal-btn primary';
+        if (tid === myId) {
+          btn.textContent = `Keep it yourself (${high})`;
+          btn.title = `You're tied at the top - keep the lot and pay ${high} to the bank.`;
+        } else {
+          btn.textContent = `Sell to @${tp ? tp.name : '?'} (${high})`;
+        }
+        btn.disabled = _onlineBusy;
+        btn.addEventListener('click', () => submitMpAuctionOp({ kind: 'AUCTION_SELL', buyerId: tid }));
+        closeWrap.appendChild(btn);
+      }
+    }
+    // Reset: clear the OTHER players' bids so they must re-bid (higher)
+    // or pass. Shown when someone else has a standing bid to clear.
+    const othersBid = players.some((p) => p.profileId !== myId && bids[p.profileId] != null);
+    if (othersBid) {
+      const resetBtn = document.createElement('button');
+      resetBtn.type = 'button';
+      resetBtn.className = 'modal-btn';
+      resetBtn.textContent = '↺ Reset others’ bids';
+      resetBtn.title = "Clear the other players' bids and prompt them to bid again (higher) or pass. If they all pass, you win the lot.";
+      resetBtn.disabled = _onlineBusy;
+      resetBtn.addEventListener('click', () => submitMpAuctionOp({ kind: 'AUCTION_RESET' }));
+      closeWrap.appendChild(resetBtn);
+    }
+    host.appendChild(closeWrap);
+  }
 }
 
 // Auction op submitter. Bypasses submitOnlineOp's turn-check: BID/PASS
@@ -1478,6 +1535,130 @@ function clearMpChatUnread() {
   if (tab) tab.classList.remove('has-unread');
 }
 
+// Manual turn-nudge cooldown (client mirror of the server's 3h gate).
+// _localNudges optimistically records nudges this client learned about
+// (from the POST response) so a button greys out + shows the timer right
+// away, before the next snapshot carries state.reminders.
+const NUDGE_COOLDOWN_MS = 3 * 60 * 60 * 1000;
+let _localNudges = {}; // `${gameId}:${targetId}` -> sentAt
+function recordLocalNudge(targetId, sentAt) {
+  if (sentAt) _localNudges[`${_onlineGameId}:${targetId}`] = sentAt;
+}
+
+// Everyone the game is waiting on (mirrors the server's actorsNeeded):
+// nobody during the crew draft; the first-player chooser; during an
+// auction the auctioneer (all bidders acted) or every bidder still on
+// the clock; otherwise the active seat. Returns an array of profileIds.
+function actorsNeededClient(snapshot) {
+  if (!snapshot || !Array.isArray(snapshot.players)) return [];
+  const draftDone = snapshot.draftPhase === 'play'
+    || (snapshot.draftPhase == null && snapshot.players.every((p) => !!p.faction));
+  if (!draftDone) return [];
+  if (snapshot.pendingFirstPlayer) {
+    return snapshot.pendingFirstPlayer.chooserId != null ? [snapshot.pendingFirstPlayer.chooserId] : [];
+  }
+  const a = snapshot.auction;
+  if (a) {
+    if (a.awaiting === 'auctioneer') return [a.auctioneerId];
+    const acted = a.acted || [];
+    return snapshot.players
+      .filter((p) => p.profileId !== a.auctioneerId && !acted.includes(p.profileId))
+      .map((p) => p.profileId);
+  }
+  const active = snapshot.players[snapshot.activeIndex];
+  return active ? [active.profileId] : [];
+}
+
+// Who I can manually nudge - mirrors the server's nudgeTargets. Same as
+// actorsNeededClient normally, but during an auction EVERY other player
+// is nudgable (user: "all players are nudgable during auctions"), since
+// the on-the-clock set churns as bids land and you may want to ping the
+// auctioneer or an already-acted bidder to keep things moving.
+function nudgeTargetsClient(snapshot) {
+  if (snapshot && snapshot.auction && Array.isArray(snapshot.players)) {
+    return snapshot.players.map((p) => p.profileId);
+  }
+  return actorsNeededClient(snapshot);
+}
+
+// Effective last-nudge timestamp for a target: the later of the
+// snapshot's reminder record and this client's optimistic local record.
+function lastNudgeAt(snapshot, targetId) {
+  let t = 0;
+  const rem = snapshot && snapshot.reminders && snapshot.reminders[targetId];
+  if (rem && rem.sentAt) t = rem.sentAt;
+  const loc = _localNudges[`${_onlineGameId}:${targetId}`];
+  if (loc && loc > t) t = loc;
+  return t;
+}
+
+// Fire a nudge (one player via { targetId }, or everyone on the clock
+// via { all:true }), then refresh the panel. Always names who got
+// nudged so a mis-target is obvious.
+async function doNudge(opts, btn) {
+  if (!_onlineMe) return;
+  if (btn) btn.disabled = true;
+  const r = await remindTurn(_onlineGameId, _onlineMe.token, opts);
+  if (r && r.ok) {
+    const nudged = r.nudged || [];
+    const skipped = r.skipped || [];
+    for (const n of [...nudged, ...skipped]) recordLocalNudge(n.targetId, n.sentAt);
+    if (nudged.length) {
+      _onlineToast(`👋 Nudged ${nudged.map((n) => '@' + (n.targetName || '?')).join(', ')}.`);
+    } else if (skipped.length) {
+      _onlineToast(`Already nudged recently: ${skipped.map((s) => '@' + (s.targetName || '?')).join(', ')}.`, 'error');
+    } else {
+      _onlineToast('No one to nudge right now.', 'error');
+    }
+  } else {
+    const err = (r && r.error) || 'unknown error';
+    const msg = err === 'nobody_to_nudge' ? 'No one needs nudging right now.'
+      : err === 'not_actionable' ? "That player isn't on the clock."
+      : 'Nudge failed: ' + err + '.';
+    _onlineToast(msg, 'error');
+  }
+  renderMpPanel(_onlineSnapshot);
+}
+
+// One nudge button. Pass a single targetPlayer for a per-player nudge,
+// or allPlayers (+ targetPlayer null) for a "Nudge all" button.
+function makeNudgeButton(snapshot, targetPlayer, allPlayers) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'mp-leave mp-nudge';
+  if (targetPlayer) {
+    const last = lastNudgeAt(snapshot, targetPlayer.profileId);
+    const onCd = last && (Date.now() - last) < NUDGE_COOLDOWN_MS;
+    const who = document.createElement('span');
+    who.className = 'player-name';
+    if (targetPlayer.color) who.style.setProperty('--player-color', targetPlayer.color);
+    who.textContent = '@' + targetPlayer.name;
+    btn.append('👋 Nudge ', who);
+    if (onCd) {
+      btn.disabled = true;
+      btn.title = `Reminded ${relTime(last)} ago. One nudge per player per 3 hours.`;
+      const note = document.createElement('span');
+      note.className = 'mp-nudge-note muted';
+      note.textContent = ` · ${relTime(last)} ago`;
+      btn.appendChild(note);
+    } else {
+      btn.title = `Send @${targetPlayer.name} a turn reminder (Discord DM). One per player per 3h.`;
+      btn.addEventListener('click', () => doNudge({ targetId: targetPlayer.profileId }, btn));
+    }
+  } else {
+    const allOnCd = (allPlayers || []).every((p) => {
+      const l = lastNudgeAt(snapshot, p.profileId);
+      return l && (Date.now() - l) < NUDGE_COOLDOWN_MS;
+    });
+    btn.textContent = `👋 Nudge all (${(allPlayers || []).length})`;
+    btn.disabled = allOnCd;
+    btn.title = allOnCd ? 'Everyone here was nudged recently.'
+      : 'Nudge every listed player (skips anyone on cooldown).';
+    if (!allOnCd) btn.addEventListener('click', () => doNudge({ all: true }, btn));
+  }
+  return btn;
+}
+
 function renderMpPanel(snapshot) {
   const tableEl = ensureMpPanelStructure();
   if (!tableEl) return;
@@ -1558,43 +1739,26 @@ function renderMpPanel(snapshot) {
   }
   tableEl.appendChild(roster);
 
-  // Footer: send myself a test Discord DM without leaving the table, to
-  // confirm notifications reach me. Uses the id I linked from the menu's
-  // Connect Discord; the server falls back to my saved id when none is
-  // passed. A failure (not linked / DMs closed) is surfaced as a toast.
-  const footer = document.createElement('div');
-  footer.className = 'mp-notify-test';
-  const testBtn = document.createElement('button');
-  testBtn.type = 'button';
-  testBtn.className = 'mp-leave';
-  testBtn.textContent = '🔔 Test Discord DM';
-  testBtn.title = 'Send yourself a test Discord notification to confirm it reaches you';
-  testBtn.addEventListener('click', async () => {
-    if (!_onlineMe) return;
-    testBtn.disabled = true;
-    const prev = testBtn.textContent;
-    testBtn.textContent = 'Sending…';
-    const r = await testNotify(undefined, _onlineMe.token, _onlineGameId);
-    testBtn.disabled = false;
-    testBtn.textContent = prev;
-    if (r && r.ok) {
-      _onlineToast('Test DM sent - check your Discord.');
-    } else {
-      _onlineToast('Test DM failed: ' + humanizeNotifyTestError(r && r.error), 'error');
-    }
-  });
-  footer.appendChild(testBtn);
-  tableEl.appendChild(footer);
+  // Footer: turn nudge(s). Ping whoever can be nudged with a turn DM.
+  // Normally that's whoever the table is waiting on; during an auction
+  // it's every other player (user: "all players are nudgable during
+  // auctions"), so each gets a button plus a "Nudge all". Otherwise it's
+  // the single active player / chooser. Always shows WHO is being nudged
+  // (user: "show who you're nudging in case we need to fix it") and the
+  // per-target cooldown timer. I am never a nudge target.
+  const needed = nudgeTargetsClient(snapshot).filter((pid) => pid !== myId);
+  const needP = needed.map((pid) => players.find((p) => p.profileId === pid)).filter(Boolean);
+  if (needP.length) {
+    const footer = document.createElement('div');
+    footer.className = 'mp-notify-test mp-nudge-wrap';
+    // "Nudge all" once more than one player is nudgable (auction rounds,
+    // or several actors on the clock); a single actor just gets a button.
+    if (needP.length > 1) footer.appendChild(makeNudgeButton(snapshot, null, needP));
+    for (const tp of needP) footer.appendChild(makeNudgeButton(snapshot, tp, null));
+    tableEl.appendChild(footer);
+  }
 }
 
-// Friendly text for the in-game test-DM button failures. Mirrors the
-// menu's mapping (js/main.js) but scoped to the codes this path returns.
-function humanizeNotifyTestError(code) {
-  return ({
-    discord_disabled: 'this server has no notification bot configured.',
-    bad_discord_id: 'connect Discord first (menu -> Turn notifications).',
-  })[code] || (code ? `the bot couldn't reach you (${code}).` : 'unknown error.');
-}
 
 function renderMpPlayer(p, isMe, isActive) {
   const wrap = document.createElement('div');
@@ -12062,7 +12226,7 @@ function paintMissionLog() {
 // back to a neutral bullet so a new op kind doesn't disappear.
 const MP_LOG_ICONS = {
   AUCTION_START: '🎯', AUCTION_BID: '💰', AUCTION_PASS: '🚫',
-  AUCTION_JOIN: '🎯', AUCTION_SELL: '✅',
+  AUCTION_RESET: '↺', AUCTION_SELL: '✅',
   PICK_CREW: '🧑‍🚀',
   END_TURN: '⏭', MOVE: '🛸', BURN: '🔥',
   SET_ACTIVE_THRUSTER: '🔥', SET_ACTIVE_PROSPECTOR: '⛏',
@@ -12083,6 +12247,88 @@ function relTime(ms) {
   if (d < 3600_000) return Math.round(d / 60_000) + 'm';
   if (d < 86_400_000) return Math.round(d / 3600_000) + 'h';
   return Math.round(d / 86_400_000) + 'd';
+}
+
+// Lazily-built index of patent card names -> id, plus a single
+// alternation regex (longest names first, so the most specific name
+// wins at a given position). Used to turn card names in the mission
+// log into clickable links.
+let _cardNameIndex = null;
+function cardNameIndex() {
+  if (_cardNameIndex) return _cardNameIndex;
+  const byName = new Map();
+  const add = (nm, id) => { if (nm && id && !byName.has(nm)) byName.set(nm, id); };
+  for (const id of Object.keys(PATENTS_BY_ID)) {
+    const c = PATENTS_BY_ID[id];
+    if (!c) continue;
+    add(c.name, id);
+    if (c.faces) {
+      add(c.faces.primary && c.faces.primary.name, id);
+      add(c.faces.secondary && c.faces.secondary.name, id);
+    }
+  }
+  const names = [...byName.keys()].filter(Boolean).sort((a, b) => b.length - a.length);
+  const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = names.length ? new RegExp(names.map(reEsc).join('|'), 'g') : null;
+  _cardNameIndex = { re, byName };
+  return _cardNameIndex;
+}
+
+// Render log text with any patent card names wrapped in clickable
+// links (data-card-id). Everything else is HTML-escaped as usual; a
+// name embedded inside a larger word is left as plain text.
+function linkifyCardsHtml(raw) {
+  if (!raw) return '';
+  const { re, byName } = cardNameIndex();
+  if (!re) return esc(raw);
+  const wordish = (ch) => /[A-Za-z0-9]/.test(ch || '');
+  let out = '';
+  let last = 0;
+  re.lastIndex = 0;
+  let m;
+  while ((m = re.exec(raw)) !== null) {
+    const name = m[0];
+    const start = m.index;
+    const end = start + name.length;
+    if (wordish(raw[start - 1]) || wordish(raw[end])) continue; // mid-word hit
+    out += esc(raw.slice(last, start));
+    out += `<button type="button" class="mp-log-cardlink" data-card-id="${esc(byName.get(name))}">${esc(name)}</button>`;
+    last = end;
+  }
+  out += esc(raw.slice(last));
+  return out;
+}
+
+// Read-only card detail popup for log links: the full card art (both
+// faces, flippable) with a Close button - none of the hand-management
+// actions of openCardModal (Discard / Sell / Boost / Flip-in-hand),
+// which would be meaningless for inspecting another player's lot.
+function openCardInfoModal(card) {
+  if (!card) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay';
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const panel = document.createElement('div');
+  panel.className = 'card-modal-panel';
+  let cardEl;
+  try { cardEl = renderCard(card, { type: 'patent' }); }
+  catch { cardEl = document.createElement('div'); cardEl.textContent = card.name || card.id; }
+  cardEl.classList.add('card-modal-card');
+  panel.appendChild(cardEl);
+  const actions = document.createElement('div');
+  actions.className = 'card-modal-actions';
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'modal-btn';
+  closeBtn.textContent = 'Close';
+  closeBtn.addEventListener('click', close);
+  actions.appendChild(closeBtn);
+  panel.appendChild(actions);
+  overlay.appendChild(panel);
+  mountOverlay(overlay);
+  document.addEventListener('keydown', onKey);
 }
 
 async function paintOnlineMissionLog(host) {
@@ -12132,12 +12378,17 @@ async function paintOnlineMissionLog(host) {
       const whenTitle = e.createdAt
         ? new Date(e.createdAt).toLocaleString() : '';
       const summary = stripLeadName(e.log, e.profileName);
+      // Auction lines name the lot + its bonus cards; linkify those so
+      // the card names open the read-only detail modal. Other op lines
+      // stay plain escaped text (no card-name guessing in free prose).
+      const summaryHtml = (e.kind && e.kind.indexOf('AUCTION_') === 0)
+        ? linkifyCardsHtml(summary) : esc(summary);
       return `
       <li class="mp-log-row ${kindClass}"${style}>
         <span class="mp-log-icon" aria-hidden="true">${icon}</span>
         <span class="mp-log-body">
           <span class="mp-log-who player-name">@${esc(e.profileName || '?')}</span>
-          <span class="mp-log-summary">${esc(summary)}</span>
+          <span class="mp-log-summary">${summaryHtml}</span>
         </span>
         <span class="mp-log-when" title="${esc(whenTitle)}">${esc(when)}</span>
       </li>`;
@@ -12151,9 +12402,17 @@ async function paintOnlineMissionLog(host) {
       ${rows || '<li class="mp-log-empty muted">No actions yet.</li>'}
     </ul>
   `;
-  if (scrollTop != null) {
-    const newList = host.querySelector('.mp-log-list');
-    if (newList) newList.scrollTop = scrollTop;
+  // Clicking a linkified card name opens its read-only detail modal.
+  // Delegated off the freshly-rendered list (re-bound each paint).
+  const listEl = host.querySelector('.mp-log-list');
+  if (listEl) {
+    listEl.addEventListener('click', (e) => {
+      const btn = e.target.closest && e.target.closest('.mp-log-cardlink');
+      if (!btn) return;
+      const card = cardById(btn.dataset.cardId);
+      if (card) openCardInfoModal(card);
+    });
+    if (scrollTop != null) listEl.scrollTop = scrollTop;
   }
 }
 

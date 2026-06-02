@@ -178,6 +178,14 @@ export async function getGameOps(id, { after } = {}, token) {
   return call('GET', `/games/${id}/ops${qs}`, { token });
 }
 
+// Manual turn nudge. opts: { targetId } to nudge one player on the
+// clock, { all: true } to nudge everyone on the clock (auction rounds),
+// or {} for the primary actor. Server enforces the per-target cooldown
+// and returns { ok, nudged:[{targetId,targetName,sentAt}], skipped:[...] }.
+export async function remindTurn(id, token, opts = {}) {
+  return call('POST', `/games/${id}/remind`, { body: opts, token });
+}
+
 // Read-only board snapshot at a given op seq (history review).
 export async function getGameState(id, seq, token) {
   return call('GET', `/games/${id}/states/${seq}`, { token });

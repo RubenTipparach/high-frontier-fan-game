@@ -906,6 +906,16 @@ body.in-lobby .main-menu-fab { display: none; }
   font-size: 13px;
   line-height: 1.4;
   color: var(--ink, #e5e7eb);
+  word-break: break-word;
+}
+.server-announcement-link {
+  color: #38bdf8;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-weight: 600;
+}
+.server-announcement-link:hover {
+  color: #7dd3fc;
 }
 
 /* Local sandbox games in "Your games", + the abandon block in settings. */
