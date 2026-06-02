@@ -1274,6 +1274,35 @@ function bonusNote(bonusIds) {
   return ` Bonus: ${names.join(', ')}.`;
 }
 
+// No non-auctioneer can place a bid: every one of them is either at the
+// hand limit or has permanently auto-passed. (A plain per-floor pass does
+// NOT count - that player could still bid on a reopen.)
+function noBidderCanAct(state) {
+  const a = state.auction;
+  const auto = a.autoPassed || [];
+  const others = state.players.filter((p) => p.profileId !== a.auctioneerId);
+  if (!others.length) return false;
+  return others.every((p) => biddingBlockedByHand(p) || auto.includes(p.profileId));
+}
+
+// Auto-resolve the degenerate lot where nobody can contest it: there are
+// no bids and every other player is out (full-hand or auto-passed), so the
+// only possible outcome is the auctioneer keeping it for free. Award it and
+// close the lot. Returns a log line when it resolved, else null. (When
+// bids exist the auctioneer still chooses the buyer / may reset, so this
+// stays out of the way.)
+function maybeAutoKeep(state) {
+  const a = state.auction;
+  if (!a || (a.highBid || 0) > 0) return null;
+  if (!noBidderCanAct(state)) return null;
+  const auctioneer = playerByProfile(state, a.auctioneerId);
+  if (!auctioneer || (auctioneer.hand || []).length >= AUCTION_HAND_LIMIT) return null;
+  const awarded = awardLot(state, auctioneer); // no bids -> free keep
+  state.auction = null;
+  const name = awarded.card ? awarded.card.name : awarded.cardId;
+  return `${auctioneer.name} kept ${name} unopposed - no other player could bid.${bonusNote(awarded.bonusIds)}`;
+}
+
 // Recompute the public tallies from the per-player bids: the high bid
 // (the floor every new bid must at least tie), a leading bidder (the
 // auctioneer wins ties, so they lead whenever they sit at the floor),
@@ -1349,8 +1378,16 @@ function applyAuctionStart(state, op, ctx) {
   // undo replay would restore).
   state.turnActions = [];
   state.turnRedo = [];
+  // Compute the phase so `awaiting` reflects full-hand auto-passes right
+  // away (otherwise the auctioneer's close button never enables when every
+  // opponent's hand is full).
+  recomputeAuction(state);
   const card = PATENTS_BY_ID[cardId];
-  return { ok: true, state, log: `${player.name} put ${card ? card.name : cardId} up for auction.` };
+  const base = `${player.name} put ${card ? card.name : cardId} up for auction.`;
+  // If no opponent can bid at all, there's nothing to auction - hand it
+  // straight to the auctioneer for free.
+  const autoLog = maybeAutoKeep(state);
+  return { ok: true, state, log: autoLog ? `${base} ${autoLog}` : base };
 }
 
 function applyAuctionBid(state, op, ctx) {
@@ -1417,10 +1454,11 @@ function applyAuctionPass(state, op, ctx) {
     if (!a.autoPassed.includes(passer.profileId)) a.autoPassed.push(passer.profileId);
   }
   recomputeAuction(state);
-  return {
-    ok: true, state,
-    log: `${passer.name} ${op.permanent ? 'auto-passed (out for this lot)' : 'passed'}.`,
-  };
+  const base = `${passer.name} ${op.permanent ? 'auto-passed (out for this lot)' : 'passed'}.`;
+  // If that was the last player who could bid (and there are no bids), the
+  // lot can't be contested - hand it to the auctioneer for free.
+  const autoLog = maybeAutoKeep(state);
+  return { ok: true, state, log: autoLog ? `${base} ${autoLog}` : base };
 }
 
 // The auctioneer CLOSES the lot by naming a buyer. The buyer must be a
@@ -1497,10 +1535,11 @@ function applyAuctionReset(state, op, ctx) {
   a.acted = [];
   recomputeAuction(state);
   const auctioneer = playerByProfile(state, a.auctioneerId);
-  return {
-    ok: true, state,
-    log: `${auctioneer ? auctioneer.name : 'The auctioneer'} reset the bidding - everyone must bid again or pass.`,
-  };
+  const base = `${auctioneer ? auctioneer.name : 'The auctioneer'} reset the bidding - everyone must bid again or pass.`;
+  // Reset cleared the others' bids; if none of them can bid anyway (all
+  // out), there's nothing left to contest - the auctioneer keeps it free.
+  const autoLog = maybeAutoKeep(state);
+  return { ok: true, state, log: autoLog ? `${base} ${autoLog}` : base };
 }
 
 const AUCTION = {
