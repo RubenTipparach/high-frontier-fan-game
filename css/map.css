@@ -134,6 +134,15 @@
     box-shadow: 0 0 18px 5px color-mix(in srgb, var(--mp-turn-color, #f9b250) 92%, transparent);
   }
 }
+/* An auction is open: End turn is frozen and reads "Auctioning". Dim it +
+   no glow so it's clearly inactive (the auction overlay is the live action),
+   while keeping the seat-colour fill so it still reads as your turn. */
+.map-turn-controls #turn-end.is-auctioning {
+  opacity: 0.6;
+  cursor: not-allowed;
+  animation: none !important;
+  box-shadow: none;
+}
 .map-turn-controls button:not(.turn-tag):hover:not(:disabled) {
   background: var(--accent);
   color: #062136;

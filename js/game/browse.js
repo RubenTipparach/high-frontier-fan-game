@@ -4626,6 +4626,13 @@ function ensureMapShell(host) {
   // lands - it just consumes the per-turn move budget for now so
   // the end-turn confirm reflects the spend.
   host.querySelector('#turn-end').addEventListener('click', async () => {
+    // An open auction freezes the turn: the lot must resolve first. The
+    // button is disabled + reads "Auctioning" in this state, but guard the
+    // click too in case a stale enabled state slips through.
+    if (_onlineSnapshot && _onlineSnapshot.auction) {
+      setStatus('An auction is open - resolve it before ending your turn.');
+      return;
+    }
     // While an operation is still in hand this button IS the ops-menu opener
     // (its label reads "Ops"): use the op first. Only once ops are spent does
     // tapping it end the turn.
@@ -4725,9 +4732,11 @@ function ensureMapShell(host) {
       const spent = moves <= 0;
       // The rocket can only fly with a valid thruster support chain
       // engaged (a thruster whose reactor / generator / heat supports
-      // are all satisfied). Until then the move control is disabled and
-      // dark - no glow - so the player isn't nudged toward a move that
-      // can't happen. (Undo stays available so a spent move can rewind.)
+      // are all satisfied). Until then the move control is dark - no glow -
+      // so the player isn't nudged toward a move that can't happen. It stays
+      // ENABLED (not disabled) in this state so the hover tip + the tap hint
+      // still fire (a disabled button shows neither). (Undo stays available
+      // so a spent move can rewind.)
       let canMove = true;
       try { const ra = isRocketActive(); canMove = !!(ra && ra.active); } catch { canMove = true; }
       const blocked = !spent && !canMove;
@@ -4735,19 +4744,23 @@ function ensureMapShell(host) {
       moveTag.classList.toggle('is-spent', spent);
       moveTag.classList.toggle('is-undo', spent && !lockedByOnline);
       moveTag.classList.toggle('is-locked', lockedByOnline);
-      moveTag.classList.toggle('is-nomove', blocked);
-      moveTag.disabled = lockedByOnline || blocked;
+      moveTag.classList.toggle('is-nomove', blocked && !lockedByOnline);
+      moveTag.disabled = lockedByOnline;
       moveTag.title = lockedByOnline
         ? 'Waiting for your turn.'
         : (blocked
-          ? 'No thruster engaged - add a thruster and its supports to the rocket to move.'
+          ? 'To move, install an operational thruster into the rocket (a thruster with all its supports satisfied).'
           : (spent
             ? 'Move spent - tap to undo this turn\'s move (rewinds the rocket)'
             : 'Move remaining - tap to move the rocket along its route'));
     }
     if (endTurnBtn) {
-      endTurnBtn.disabled = lockedByOnline;
+      // An open auction freezes End turn (the lot must resolve before the
+      // turn can pass), so the button reads "Auctioning" and is disabled
+      // until it closes - the auction overlay is where the action is.
+      endTurnBtn.disabled = lockedByOnline || auctionInProgress;
       endTurnBtn.classList.toggle('is-locked', lockedByOnline);
+      endTurnBtn.classList.toggle('is-auctioning', auctionInProgress && !lockedByOnline);
       // Colour the End turn button (and its glow) with the active player's
       // seat colour - the same colour the turn banner uses - so it reads as
       // "whose turn it is". Solo / no active player falls back to the default.
@@ -4761,18 +4774,22 @@ function ensureMapShell(host) {
         endTurnBtn.style.removeProperty('--mp-turn-color');
         endTurnBtn.style.removeProperty('color');
       }
-      // While an operation is still in hand, the button nudges you to use it:
-      // it reads "Ops" and opens the operations menu (see the click handler).
-      // Only once ops are spent does it become the End turn button (which can
-      // glow when no auction lot is waiting on a bid).
+      // Label priority: an open auction overrides everything (you can't end
+      // the turn yet). Otherwise, an unspent operation reads "Ops" (and opens
+      // the operations menu); only once ops are spent is it the End turn
+      // button, which can glow when no auction lot is waiting on a bid.
       const hasOps = ops > 0;
-      endTurnBtn.textContent = hasOps ? '⚙ Ops' : '⏭ End turn';
-      endTurnBtn.classList.toggle('is-ops', hasOps && !lockedByOnline);
+      endTurnBtn.textContent = auctionInProgress
+        ? '🔨 Auctioning'
+        : (hasOps ? '⚙ Ops' : '⏭ End turn');
+      endTurnBtn.classList.toggle('is-ops', hasOps && !lockedByOnline && !auctionInProgress);
       endTurnBtn.classList.toggle('needs-end',
         ops <= 0 && !auctionInProgress && !lockedByOnline);
       endTurnBtn.title = lockedByOnline
         ? 'Waiting for your turn.'
-        : (hasOps ? 'You still have an operation - tap to use it' : 'End your turn');
+        : (auctionInProgress
+          ? 'An auction is open - resolve it before ending your turn.'
+          : (hasOps ? 'You still have an operation - tap to use it' : 'End your turn'));
     }
   }
   // Stash on the host so applySnapshot can re-trigger after a fresh
@@ -4807,7 +4824,7 @@ function ensureMapShell(host) {
         // support chain means there's nothing to move.
         let canMove = true;
         try { const ra = isRocketActive(); canMove = !!(ra && ra.active); } catch { canMove = true; }
-        if (!canMove) { setStatus('Add a thruster and its supports to the rocket to move.'); return; }
+        if (!canMove) { setStatus('To move, install an operational thruster into the rocket (a thruster with all its supports satisfied).'); return; }
         moveRocket();
       } else undoRocketMove();
     });
