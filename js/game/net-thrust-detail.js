@@ -126,9 +126,34 @@ export function renderDetailTrack(host, { dryMass = 1, wetMass = 1 } = {}) {
     p.push(`<rect x="${x1}" y="${bandTop}" width="${x2 - x1}" height="${BASE_Y + 14 - bandTop}" rx="5" fill="${color}" fill-opacity="0.12" stroke="${color}" stroke-opacity="0.5"/>`);
     p.push(`<text x="${x1 + 4}" y="${bandTop + 13}" font-size="11" font-weight="800" fill="${color}">${esc(id)}</text>`);
   }
-  // burn (black -> light slate on dark), straight
+  // Burn path WET -> DRY: the fuel-step segments the rocket will actually
+  // spend, highlighted blue and numbered by how many fuel steps remain from
+  // that segment down to dry (top segment = total, bottom segment = 1).
+  const pathSeg = new Map();   // "aId>bId" -> steps remaining at that segment
+  const pathLabels = [];
+  {
+    const snap = (mass) => at(mass) || at(Math.max(MIN_DRY, Math.min(MAX_WET, Math.round(mass))));
+    const dryN = snap(dryMass), wetN = snap(wetMass);
+    let remaining = blackStepsBetween(dryMass, wetMass);
+    let cur = wetN, guard = 0;
+    while (cur && dryN && cur.id !== dryN.id && remaining > 0 && guard++ < NODES.length + 5) {
+      const next = BLACK_SUCC.get(cur.id);
+      if (!next) break;
+      pathSeg.set(cur.id + '>' + next.id, remaining);
+      remaining--;
+      cur = next;
+    }
+  }
+  // burn (black -> light slate on dark); WET->DRY path drawn blue on top
   for (const [a, b] of BLACK) {
-    p.push(`<line x1="${xOf(a.mass).toFixed(1)}" y1="${yOf(a).toFixed(1)}" x2="${xOf(b.mass).toFixed(1)}" y2="${yOf(b).toFixed(1)}" stroke="#c3ccd9" stroke-width="1.4" opacity="0.85"/>`);
+    const x1 = xOf(a.mass), y1 = yOf(a), x2 = xOf(b.mass), y2 = yOf(b);
+    const remain = pathSeg.get(a.id + '>' + b.id);
+    if (remain != null) {
+      p.push(`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="#38bdf8" stroke-width="3.2" opacity="0.95" stroke-linecap="round"/>`);
+      pathLabels.push({ mx: (x1 + x2) / 2, my: (y1 + y2) / 2, n: remain });
+    } else {
+      p.push(`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="#c3ccd9" stroke-width="1.4" opacity="0.85"/>`);
+    }
   }
   // refuel (red), curved dashed
   for (const [a, b] of RED) {
@@ -147,6 +172,12 @@ export function renderDetailTrack(host, { dryMass = 1, wetMass = 1 } = {}) {
     const dry = n.mass <= MAX_DRY; const fill = dry ? '#15131f' : '#f1f5f9', tx = dry ? '#f1f5f9' : '#0c0a16';
     let st = '#9fb0c4', sw = 1.1; if ([MIN_DRY, MAX_DRY, MAX_WET].includes(n.N)) { st = '#ec3f87'; sw = 2.4; }
     p.push(`<g><title>${esc(n.label)}</title><ellipse cx="${cx}" cy="${cy}" rx="11" ry="8" fill="${fill}" stroke="${st}" stroke-width="${sw}"/><text x="${cx}" y="${cy + 3}" font-size="9" font-weight="700" text-anchor="middle" fill="${tx}">${n.N}</text></g>`);
+  }
+  // Fuel-steps-remaining number centred on each highlighted burn segment.
+  for (const { mx, my, n } of pathLabels) {
+    p.push(`<g><title>${n} fuel step${n === 1 ? '' : 's'} left to dry from here</title>`
+      + `<circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="6.6" fill="#0b1220" stroke="#38bdf8" stroke-width="1"/>`
+      + `<text x="${mx.toFixed(1)}" y="${(my + 2.4).toFixed(1)}" font-size="7" font-weight="800" text-anchor="middle" fill="#bae6fd">${n}</text></g>`);
   }
   // chits: DRY + WET, snapped to nearest node
   const chit = (mass, fillCol, label) => {
