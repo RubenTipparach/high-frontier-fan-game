@@ -6473,10 +6473,49 @@ function hazardRollModal(hazards) {
 // the bypass bar by 2 so the Sun is harder to dodge.
 const RAD_BYPASS_THRUST     = 6;
 const RAD_BYPASS_THRUST_RED = 8;
+// Highest face of the rad die. The worst a single zone can throw is a 6
+// (plus the red-season bonus), so a card is "at risk" of being lost when
+// its rad-hard plus the active thruster's FINAL thrust can't clear that
+// worst case: radHard + thrust < MAX_RAD_DIE + seasonBonus.
+const MAX_RAD_DIE = 6;
 function radBypassThreshold() {
   let season = null;
   try { season = getSeason(); } catch { season = null; }
   return season && season.name === 'red' ? RAD_BYPASS_THRUST_RED : RAD_BYPASS_THRUST;
+}
+
+// Resolve the current rocket stack into [{id, name, radHardness}] rows for
+// the rad-hardness check - used both by the upfront at-risk preview in the
+// confirm modal and by the per-zone roll modal. Patents read rad-hard off
+// the card; crew read name + rad-hard off the chosen FACE (they live on the
+// face, not the physical card), so a flipped crew row is never blank.
+function radStackCards() {
+  return getRocketStack()
+    .map((slot) => {
+      const patent = PATENTS_BY_ID[slot.id];
+      if (patent) {
+        return { id: slot.id, name: patent.name, radHardness: patent.radHardness != null ? patent.radHardness : 0 };
+      }
+      const crew = CREW_BY_ID[slot.id];
+      if (crew) {
+        const f = crew.faces[slot.face === 'secondary' ? 'secondary' : 'primary'] || crew.faces.primary || {};
+        return { id: slot.id, name: f.name || crew.id, radHardness: f.radHardness != null ? f.radHardness : 0 };
+      }
+      return null;
+    })
+    .filter(Boolean);
+}
+
+// Cards from `stackCards` that could be decommissioned on the worst roll of
+// a single zone (d6 = 6): rad-hard < MAX_RAD_DIE + seasonBonus - thrust.
+// `thrust` is the active thruster's final modified thrust; clamping the
+// worst rad at 0 means a stack that out-thrusts the die returns [].
+function radAtRiskCards(stackCards, thrust, seasonBonus) {
+  const worstRad = Math.max(0, MAX_RAD_DIE + (seasonBonus | 0) - Math.max(0, thrust | 0));
+  if (worstRad <= 0) return [];
+  return (stackCards || [])
+    .filter((c) => (c.radHardness || 0) < worstRad)
+    .sort((a, b) => (a.radHardness || 0) - (b.radHardness || 0));
 }
 
 // Pre-roll confirm dialog for rad zones. Mirrors the
@@ -6487,7 +6526,7 @@ function radBypassThreshold() {
 // Resolves to 'confirm' or 'cancel'. Always shown when the
 // route crosses ≥1 rad zone so the player can back out before
 // the dice roll.
-function radConfirmModal(radHazards, thrust, seasonBonus, bypassThreshold) {
+function radConfirmModal(radHazards, thrust, seasonBonus, bypassThreshold, stackCards) {
   return new Promise((resolve) => {
     document.querySelector('.confirm-modal-overlay')?.remove();
     const overlay = document.createElement('div');
@@ -6532,6 +6571,38 @@ function radConfirmModal(radHazards, thrust, seasonBonus, bypassThreshold) {
           roll.</strong>
          </p>`;
 
+    // Up-front "what could I lose" list. A card is at risk when its
+    // rad-hard plus the final thrust can't clear the worst die (a 6, plus
+    // the red-season bonus). Only meaningful when the stack actually rolls;
+    // a bypassing rocket loses nothing, so the list is skipped there.
+    let atRiskNote = '';
+    if (!willBypass) {
+      const atRisk = radAtRiskCards(stackCards, thrust, seasonBonus);
+      // Right-hand side of the at-risk test: a card is lost when its
+      // rad-hard + thrust can't reach the worst die (6) plus the season bonus.
+      const riskThreshold = MAX_RAD_DIE + (seasonBonus | 0);
+      if (atRisk.length) {
+        const items = atRisk.map((c) =>
+          `<li><span class="rad-atrisk-name">${esc(c.name)}</span>`
+          + `<span class="rad-atrisk-rh">rad-hard ${c.radHardness || 0}</span></li>`
+        ).join('');
+        atRiskNote = `
+          <div class="rad-confirm-atrisk">
+            <p class="rad-confirm-atrisk-head">
+              ⚠ At risk on the worst roll
+              <span class="muted">(rad-hard + thrust ${thrust || 0}
+              &lt; ${riskThreshold})</span>:
+            </p>
+            <ul class="rad-confirm-atrisk-list">${items}</ul>
+          </div>`;
+      } else if (Array.isArray(stackCards) && stackCards.length) {
+        atRiskNote = `
+          <p class="rad-confirm-atrisk-safe">
+            ✓ No cards at risk - every card clears even a ${MAX_RAD_DIE}.
+          </p>`;
+      }
+    }
+
     const panel = document.createElement('div');
     panel.className = 'turn-confirm-panel rad-confirm-panel';
     panel.innerHTML = `
@@ -6545,6 +6616,7 @@ function radConfirmModal(radHazards, thrust, seasonBonus, bypassThreshold) {
         (active thrust ${thrust || 0}, bypass at &gt; ${bypassThreshold}).
       </p>
       ${bypassNote}
+      ${atRiskNote}
       <div class="turn-confirm-actions hazard-actions">
         <button type="button" class="popup-btn primary" data-act="confirm"
           title="${willBypass ? 'Continue - the thrust check skips the roll' : 'Open the rad-hardness roll modal'}">
@@ -10042,7 +10114,11 @@ async function moveRocket() {
     if (radHz.length) {
       const thrStats = getActiveThrusterStats();
       const radThrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 0;
-      const choice = await radConfirmModal(radHz, radThrust, 0, radBypassThreshold());
+      let season = null;
+      try { season = getSeason(); } catch { season = null; }
+      const seasonBonus = season && season.name === 'red' ? 2 : 0;
+      const choice = await radConfirmModal(
+        radHz, radThrust, seasonBonus, radBypassThreshold(), radStackCards());
       if (choice === 'cancel' || choice == null) {
         setStatus('Move cancelled at the rad check.');
         return false;
@@ -10207,13 +10283,18 @@ async function moveRocket() {
   let radThrust = 0;
   let radSeasonBonus = 0;
   if (radHazards.length) {
+    // FINAL thrust after every modifier (reactor thrustMod, weight class,
+    // afterburn, solar zone) - getActiveThrusterStats folds them all in, so
+    // the rad bypass + at-risk math uses the same number the triangle shows,
+    // not the raw card thrust.
     const thrStats = getActiveThrusterStats();
     radThrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 0;
     let season = null;
     try { season = getSeason(); } catch { season = null; }
     radSeasonBonus = season && season.name === 'red' ? 2 : 0;
     const threshold = radBypassThreshold();
-    const radChoice = await radConfirmModal(radHazards, radThrust, radSeasonBonus, threshold);
+    const radChoice = await radConfirmModal(
+      radHazards, radThrust, radSeasonBonus, threshold, radStackCards());
     if (radChoice === 'cancel' || radChoice == null) {
       if (hazardChoice === 'pay') {
         // Generic hazards charged aqua already; refund so the
@@ -10374,24 +10455,8 @@ async function runMoveQueue(ctx, resuming) {
       if (!radWillRoll) {
         // Bypass already logged upfront; just animate past.
       } else {
-        const stackCards = getRocketStack()
-          .map((slot) => {
-            const patent = PATENTS_BY_ID[slot.id];
-            if (patent) {
-              return { id: slot.id, name: patent.name, radHardness: patent.radHardness != null ? patent.radHardness : 0 };
-            }
-            // Crew name + rad-hardness live on the chosen FACE, not
-            // the physical card - resolve it so the row isn't blank.
-            const crew = CREW_BY_ID[slot.id];
-            if (crew) {
-              const f = crew.faces[slot.face === 'secondary' ? 'secondary' : 'primary'] || crew.faces.primary || {};
-              return { id: slot.id, name: f.name || crew.id, radHardness: f.radHardness != null ? f.radHardness : 0 };
-            }
-            return null;
-          })
-          .filter(Boolean);
         const { rolls: radRolls, decommission } = await radHardnessRollModal(
-          [hazard], stackCards, radThrust, radSeasonBonus,
+          [hazard], radStackCards(), radThrust, radSeasonBonus,
         );
         for (const r of radRolls) {
           logAction({

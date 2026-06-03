@@ -1248,6 +1248,43 @@
   font-size: 12px;
   line-height: 1.45;
 }
+/* "What could I lose" preview: every stack card whose rad-hard plus the
+   final thrust can't clear the worst die (a 6, plus any red-season bonus).
+   Amber so it reads as a heads-up tied to the red "Cannot bypass" warning
+   above it, not a separate hazard. */
+.rad-confirm-atrisk {
+  background: rgba(120, 53, 15, 0.32);
+  border: 1px solid #d97706;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+.rad-confirm-atrisk-head { margin: 0 0 6px; font-weight: 700; color: #fbbf24; }
+.rad-confirm-atrisk-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.rad-confirm-atrisk-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 3px 6px;
+  background: rgba(15, 23, 42, 0.4);
+  border-radius: 4px;
+}
+.rad-atrisk-name { font-weight: 600; color: #fde68a; }
+.rad-atrisk-rh {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim, #9fb3cc);
+  white-space: nowrap;
+}
+.rad-confirm-atrisk-safe { margin: 0 0 10px; font-size: 12px; color: #86efac; }
 
 /* Hazard roll modal. One 3D die per hazard, all spinning in
    parallel. Once every die settles the verdict tags light up
