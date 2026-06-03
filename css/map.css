@@ -6419,7 +6419,9 @@ body:has(#view-browse:not(.hidden)) #main {
   font-weight: 700;
   cursor: pointer;
   box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5);
-  animation: modal-fade 0.18s ease-out;
+  /* A shown chip means a live activity (auction / crew) is docked at the turn
+     bar - glow gently so it draws the eye there. needs-action pulses harder. */
+  animation: modal-fade 0.18s ease-out, mp-chip-active 2.2s ease-in-out infinite;
 }
 .mp-mini-chip:hover { border-color: var(--accent); }
 .mp-mini-chip-meta {
@@ -6437,15 +6439,25 @@ body:has(#view-browse:not(.hidden)) #main {
   0%, 100% { box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5); }
   50% { box-shadow: 0 0 0 3px rgba(125, 211, 252, 0.45), 0 8px 26px rgba(0, 0, 0, 0.5); }
 }
+/* Gentle always-on glow for a docked activity (no action owed yet), so the
+   turn-bar cluster reads as "something live is here". */
+@keyframes mp-chip-active {
+  0%, 100% { box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5); }
+  50% { box-shadow: 0 0 12px 2px rgba(125, 211, 252, 0.30), 0 6px 20px rgba(0, 0, 0, 0.5); }
+}
 
 .mp-crew-draft-overlay.is-minimized,
 .mp-auction-overlay.is-minimized {
   background: transparent;
   backdrop-filter: none;
   pointer-events: none;
-  align-items: center;
-  justify-content: flex-start;
-  padding: 14px;
+  /* Dock the minimized chip onto the turn-notification cluster: bottom of the
+     map, centered, just above the turn banner (which sits at
+     bottom: --hand-height). Keeps the priority action (auction / crew) with
+     the "whose turn it is" bar instead of floating loose over the board. */
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 14px calc(var(--hand-height, 320px) + 34px);
 }
 .mp-crew-draft-overlay.is-minimized .mp-crew-draft-panel,
 .mp-auction-overlay.is-minimized .mp-auction-modal { display: none; }
