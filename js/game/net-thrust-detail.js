@@ -190,7 +190,7 @@ export function renderDetailTrack(host, { dryMass = 1, wetMass = 1 } = {}) {
       + `<text x="${cx}" y="${cy - 17}" font-size="8" font-weight="800" text-anchor="middle" fill="#0c0a16">${esc(label)}</text></g>`);
   };
   chit(dryMass, '#94a3b8', 'DRY');
-  chit(wetMass, '#f5c518', 'WET');
+  chit(wetMass, '#7dd3fc', 'WET');   // light blue: lighter than the #38bdf8 burn path so the marker reads apart from the lines
 
   // Fuel-step readout under the WET chit: how many black burn connections
   // separate wet from dry (the rocket's burnable fuel steps). Counted off the

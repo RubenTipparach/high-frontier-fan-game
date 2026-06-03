@@ -956,7 +956,7 @@
 .ntd-legend .ntd-line.refuel { border-top: 2px dashed #ec5a96; }
 .ntd-legend .ntd-chit { display: inline-block; width: 11px; height: 11px; border-radius: 50%; vertical-align: -1px; margin-right: 4px; border: 2px solid; }
 .ntd-legend .ntd-chit.dry { border-color: #94a3b8; }
-.ntd-legend .ntd-chit.wet { border-color: #f5c518; }
+.ntd-legend .ntd-chit.wet { border-color: #7dd3fc; }
 .fuel-strip-band {
   display: flex;
   flex-direction: column;
