@@ -3906,12 +3906,6 @@ body:has(#view-browse:not(.hidden)) #main {
     border: 1px solid rgba(120, 130, 170, 0.7);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.55);
   }
-  /* Bump the engaged stripe thickness so it reads as a clear
-     marching band on a phone instead of a hairline that
-     vanishes against the viewport edge. */
-  .rocket-stack-panel.is-engaged {
-    background-size: 100% 8px, 100% 8px, 8px 100%, 8px 100%, 100% 100%;
-  }
 }
 
 /* Totals row: compact stat cells. Wraps on narrow screens so
@@ -4053,95 +4047,10 @@ body:has(#view-browse:not(.hidden)) #main {
   opacity: 1;
 }
 
-/* Engage button: greyed out when supports are unmet, fiery when
-   ready, and lit up while the rocket is engaged. Sits at the top
-   of the stack body so it's reachable on tall stacks. */
-.rocket-engage {
-  display: block;
-  width: 100%;
-  margin: 4px 0 14px;
-  padding: 10px 14px;
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.6px;
-  background: linear-gradient(180deg, #f97316, #c2410c);
-  color: #2e0f02;
-  border: 1px solid #9a3412;
-  border-radius: 8px;
-  cursor: pointer;
-}
-.rocket-engage:disabled {
-  background: rgba(15, 16, 35, 0.7);
-  color: var(--ink-dim);
-  border-color: var(--border);
-  cursor: not-allowed;
-}
-.rocket-engage.is-engaged {
-  background: linear-gradient(180deg, #fbbf24, #f97316);
-  color: #1f0a02;
-  border-color: #b45309;
-  box-shadow: 0 0 0 2px #f97316, 0 0 22px rgba(251, 191, 36, 0.6);
-}
-
-/* Engaged rocket animation: yellow/orange marching-ants stripe
-   around the active thruster card AND the whole stack body, so
-   the player gets the visual cue that the rocket can move. The
-   border is drawn via a CSS background-gradient stripe with an
-   offset animation, sharper than a dashed border at small sizes
-   and works the same on mobile + desktop. */
-/* Stripe period must EXACTLY equal the animation delta or the
-   pattern visibly jumps every cycle (gaps appear at the loop
-   point). Stripes are 12 + 12 = 24 px per period; the keyframes
-   below shift each edge by exactly 24 px from 0% to 100% so the
-   end frame paints the same pixels as the start frame and the
-   loop is seamless. Both the body border and the active-thruster
-   card use the same period + keyframes for a consistent look -
-   visual speed differences come from the `animation-duration`
-   value, not from differing stripe widths. */
-@keyframes rocket-march {
-  0%   { background-position: 0    0,    0     100%,  0  0,      100%  0;    }
-  100% { background-position: 24px 0,    -24px 100%,  0  -24px,  100%  24px; }
-}
-/* Engaged border lives on the panel (not the scrolling body)
-   so the four stripe edges anchor to the modal's static frame
-   and stay aligned no matter how the body scrolls. */
-.rocket-stack-panel.is-engaged {
-  /* Stripe layers go first so they paint ON TOP of the panel
-     bg layer underneath. The keyframes animate the first four
-     positions (top / bottom / left / right edges); the trailing
-     panel-bg layer stays put at 0 0. */
-  background-image:
-    /* top edge: orange/gold stripes scrolling right */
-    repeating-linear-gradient(90deg,  #f97316 0 12px, #fbbf24 12px 24px),
-    /* bottom edge: scrolling left */
-    repeating-linear-gradient(90deg,  #fbbf24 0 12px, #f97316 12px 24px),
-    /* left edge: scrolling down */
-    repeating-linear-gradient(180deg, #f97316 0 12px, #fbbf24 12px 24px),
-    /* right edge: scrolling up */
-    repeating-linear-gradient(180deg, #fbbf24 0 12px, #f97316 12px 24px),
-    /* panel background underneath so the stripes don't bleed
-       through onto the modal's dark surface */
-    linear-gradient(var(--panel), var(--panel));
-  background-position: 0 0, 0 100%, 0 0, 100% 0, 0 0;
-  background-size: 100% 4px, 100% 4px, 4px 100%, 4px 100%, 100% 100%;
-  background-repeat: no-repeat;
-  animation: rocket-march 0.6s linear infinite;
-  box-shadow: 0 0 24px rgba(249, 115, 22, 0.45);
-  border-color: #f97316;
-}
-.rocket-stack-panel.is-engaged .rocket-slot.is-active-thruster .card {
-  position: relative;
-  background-image:
-    repeating-linear-gradient(90deg,  #f97316 0 12px, #fbbf24 12px 24px),
-    repeating-linear-gradient(90deg,  #fbbf24 0 12px, #f97316 12px 24px),
-    repeating-linear-gradient(180deg, #f97316 0 12px, #fbbf24 12px 24px),
-    repeating-linear-gradient(180deg, #fbbf24 0 12px, #f97316 12px 24px);
-  background-position: 0 0, 0 100%, 0 0, 100% 0;
-  background-size: 100% 3px, 100% 3px, 3px 100%, 3px 100%;
-  background-repeat: no-repeat;
-  animation: rocket-march 0.5s linear infinite;
-  box-shadow: 0 0 0 1px #fbbf24, 0 0 18px rgba(251, 191, 36, 0.7);
-}
+/* (The "Engage rocket" button + its marching-ants engaged-border
+   animation were removed: the button was a cosmetic no-op - it never
+   moved the rocket. The status banner "Active - rocket can move" / the
+   greyed move tag now carry the flyable cue.) */
 
 /* Mobile / touch device adjustments to the hand strip. Hover
    doesn't exist on touch, so we replace the hover-driven

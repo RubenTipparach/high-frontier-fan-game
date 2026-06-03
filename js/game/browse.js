@@ -5508,12 +5508,6 @@ function openRocketStackModal() {
   xBtn.addEventListener('click', close);
   panel.appendChild(xBtn);
 
-  // Engagement is a transient UI flag - the player presses
-  // "Engage" once supports are met to trigger the moving-rocket
-  // animation. Any stack change (add / remove / re-pick active)
-  // resets it so a freshly-flyable stack still needs the user to
-  // confirm "yes, engage" before the animation runs.
-  let engaged = false;
   // Transient selection set for the Transfer section. Cards
   // marked here can be shipped to a colocated stack (LEO if
   // at LEO; outposts at the rocket's current site). Cleared
@@ -5535,10 +5529,6 @@ function openRocketStackModal() {
       const sup = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
       for (const k of sup) supplied.add(k);
     }
-    // Engagement is meaningless when supports aren't satisfied -
-    // clear the flag so the button text + animation don't lie if
-    // the player removes a card mid-flight.
-    if (!r.active) engaged = false;
     const totals = getStackTotals();
     const thrStats = getActiveThrusterStats();
     // Preserve the scroll position across the rebuild so tapping
@@ -5547,9 +5537,6 @@ function openRocketStackModal() {
     const prevBody = panel.querySelector('.rocket-stack-body');
     const prevScroll = prevBody ? prevBody.scrollTop : 0;
     prevBody?.remove();
-    // Engaged-border is painted by the panel (non-scrolling)
-    // so it doesn't fragment when the body's content overflows.
-    panel.classList.toggle('is-engaged', engaged && r.active);
     const body = document.createElement('div');
     body.className = 'rocket-stack-body';
     // Status banner: active + green when all three rules hold,
@@ -5852,23 +5839,6 @@ function openRocketStackModal() {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTank(); }
       });
     }
-
-    // Engage button: greyed out until supports are satisfied; tap
-    // to ignite the moving-rocket animation. Lives in the pinned
-    // header so it stays on screen even on a tall stack.
-    const engageBtn = document.createElement('button');
-    engageBtn.type = 'button';
-    engageBtn.className = 'rocket-engage' + (engaged ? ' is-engaged' : '');
-    engageBtn.disabled = !r.active;
-    engageBtn.textContent = engaged && r.active
-      ? '🔥 Engaged - rocket is moving!'
-      : r.active ? '🔥 Engage rocket' : '🔥 Engage rocket (supports unmet)';
-    engageBtn.addEventListener('click', () => {
-      if (!r.active) return;
-      engaged = !engaged;
-      repaint();
-    });
-    body.querySelector('.rocket-stack-header').appendChild(engageBtn);
 
     const cards = body.querySelector('#rocket-stack-cards');
     const thrustersHost = body.querySelector('#rocket-stack-thrusters');
