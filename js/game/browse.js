@@ -51,7 +51,7 @@ import {
   WEIGHT_CLASSES, weightClassForMass, TRACK_LEGEND,
   MIN_DRY_MASS, MAX_DRY_MASS, MAX_WET_MASS,
 } from '../../data/net-thrust-track.js';
-import { renderDetailTrack, massLabel } from './net-thrust-detail.js';
+import { renderDetailTrack, massLabel, blackStepsBetween } from './net-thrust-detail.js';
 import { MILESTONES } from '../../data/glory.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { ZONE_POLYGONS } from '../../data/zones.js';
@@ -10170,6 +10170,13 @@ async function moveRocket() {
         return false;
       }
     }
+    // Burn debug, printed right before the submit so it sits next to the
+    // [api] log if the server rejects (insufficient_water etc).
+    logMoveBurn(
+      (curSite && curSite.name) || 'LEO',
+      (destSite && destSite.name) || toSiteId,
+      segments.reduce((b, s) => b + (Number(s.burns) || 0), 0),
+    );
     const ok = await submitOnlineOp({ kind: 'MOVE', toSiteId, hazardPay, segments });
     if (ok) {
       // Advance the local plan past this turn so a multi-turn route stays
@@ -10201,6 +10208,13 @@ async function moveRocket() {
   // per-segment `burns` (NOT a per-segment fallback of 1, which
   // wrongly counted every coast hop as a burn).
   const turn1Burns = turn1.reduce((s, x) => s + (Number(x.burns) || 0), 0);
+  {
+    // Burn debug (sandbox), printed before the water gate below.
+    const o = getRocketSite();
+    const dId = turn1.length ? turn1[turn1.length - 1].to : null;
+    const dS = dId && (_activeData.byId?.[dId] || _activeData.sites.find((s) => s.id === dId));
+    logMoveBurn((o && o.name) || 'LEO', (dS && dS.name) || dId || '?', turn1Burns);
+  }
   const _thrFuel = getActiveThrusterStats();
   const fuelCost = (getFuelConsumption() && _thrFuel && Number.isFinite(_thrFuel.fuel))
     ? Math.ceil(_thrFuel.fuel * turn1Burns) : 0;
@@ -11955,6 +11969,37 @@ function logRouteBudget(origin, destSite, result, thrStats, thrust) {
     console.log(`-> enough water (move gate):    ${okWater ? 'YES' : 'NO'}  (need ${water}, tank ${tank})`);
     console.groupEnd();
   } catch { /* logging must never break planning */ }
+}
+
+// Burn breakdown printed AT MOVE TIME (not just plan time), so the console
+// shows the fuel math right next to the move - and right above the [api] log
+// if the server rejects it (insufficient_water etc.). `turnBurns` is the sum
+// of THIS turn's segment burns actually being submitted. Console-only.
+function logMoveBurn(originName, destName, turnBurns) {
+  try {
+    const thr = getActiveThrusterStats();
+    const totals = getStackTotals();
+    const fpb = thr && Number.isFinite(thr.fuel) ? thr.fuel : null;          // fuel steps per burn
+    const dry = thr && Number.isFinite(thr.dryMass) ? thr.dryMass : totals.dryMass;
+    const wet = thr && Number.isFinite(thr.wetMass) ? thr.wetMass : totals.wetMass;
+    const tank = getTankWater();
+    const fuelOn = getFuelConsumption();
+    const ftNeeded = fpb != null ? fpb * turnBurns : 0;                      // fuel steps this turn spends
+    const ftAvail = blackStepsBetween(dry, wet);                            // canonical fuel-step capacity (black connections)
+    const waterCost = (fuelOn && fpb != null) ? Math.ceil(fpb * turnBurns) : 0;  // what the engine charges vs the water tank
+    console.log(`[move] ${originName} → ${destName}`, {
+      thisTurnBurns: turnBurns,
+      fuelPerBurn: fpb,
+      fuelStepsNeeded: ftNeeded,
+      fuelStepsAvailable: ftAvail,        // blackStepsBetween(dry, wet)
+      wetMass: wet, dryMass: dry,
+      engineWaterCost: waterCost,         // ceil(fuelPerBurn * burns) - the gate the server uses
+      tankWater: tank,
+      fuelSpendOn: fuelOn,
+      enoughByFuelSteps: ftAvail >= ftNeeded,
+      enoughByWaterGate: !fuelOn || tank >= waterCost,   // the rule that throws insufficient_water
+    });
+  } catch { /* logging must never break a move */ }
 }
 
 function clearRoute() {
