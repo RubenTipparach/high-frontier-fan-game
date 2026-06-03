@@ -17,6 +17,7 @@ import {
 import { mountBrowse, isBrowseOnline, refreshRoomOverlays } from './game/browse.js';
 import { newSandboxGame, currentSandboxId, activateSandboxGame } from './game/sandbox-games.js';
 import { appBase } from './base.js';
+import { initErudaFromPref } from './debug-console.js';
 
 const VIEWS = [
   'view-signin', 'view-lobby-list', 'view-create-lobby', 'view-lobby',
@@ -788,6 +789,9 @@ async function boot() {
   // missing export breaks linking, main.js never runs, this stays unset,
   // and the watchdog shows the hard-refresh banner.
   window.__hfBooted = true;
+  // Bring the on-device debug console (Eruda) back up if it was left enabled
+  // in Config, so it's ready to capture early logs + failed server calls.
+  initErudaFromPref();
   initSigninForm();
   initAccountMenu();
   initLobby({ onShowView: showView, onToast: toast });

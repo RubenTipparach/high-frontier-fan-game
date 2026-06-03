@@ -2334,6 +2334,7 @@
 }
 .config-panel .dbg-check { font-size: 13px; color: var(--ink); }
 .config-panel .dbg-slider { font-size: 12px; color: var(--ink-dim); margin: 2px 0; }
+.config-panel .config-hint { margin: 4px 0 0; font-size: 11px; line-height: 1.45; }
 .route-options-title {
   margin: 0 0 4px;
   font-size: 16px;

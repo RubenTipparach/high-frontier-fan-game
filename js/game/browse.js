@@ -7,6 +7,7 @@
 
 import { MapRenderer, LEO_ANCHOR } from './render.js';
 import { appBase } from '../base.js';
+import { erudaEnabled, setEruda } from '../debug-console.js';
 import { loadPlannerMap } from './planner-map.js';
 import { planRoute } from './planner-nav.js';
 import {
@@ -11057,6 +11058,11 @@ function openConfigModal() {
         <input type="range" class="cfg-zone-op" min="1" max="100" step="1" value="${op}"></label>
       <button type="button" class="modal-btn cfg-zone-reset">↺ Reset to default</button>
     </div>
+    <div class="config-section">
+      <div class="config-section-title">Developer</div>
+      <label class="dbg-check"><input type="checkbox" class="cfg-eruda" ${erudaEnabled() ? 'checked' : ''}><span>On-screen debug console</span></label>
+      <p class="config-hint muted">Opens a console on the device (logs, network, storage) so you can read failed server calls - each one prints the request sent and the server's response. Loaded from a CDN when on; persists across reloads.</p>
+    </div>
   `;
   overlay.appendChild(panel);
   panel.querySelector('.modal-x').addEventListener('click', close);
@@ -11103,6 +11109,24 @@ function openConfigModal() {
     opEl.value = 10;
     opValEl.textContent = '10%';
   });
+  // On-screen debug console (Eruda). Loads from a CDN on enable; revert the
+  // checkbox + tell the player if the load is blocked (offline / strict net).
+  const erudaCb = panel.querySelector('.cfg-eruda');
+  if (erudaCb) {
+    erudaCb.onchange = async () => {
+      const want = erudaCb.checked;
+      erudaCb.disabled = true;
+      try {
+        await setEruda(want);
+        setStatus(want ? 'Debug console on - failed server calls now print here.' : 'Debug console off.');
+      } catch {
+        erudaCb.checked = false;
+        setStatus('Could not load the debug console (network blocked?).');
+      } finally {
+        erudaCb.disabled = false;
+      }
+    };
+  }
   mountOverlay(overlay);
 }
 
