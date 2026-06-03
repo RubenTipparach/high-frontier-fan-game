@@ -1604,7 +1604,7 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
   // the actor's tank before/after) WITHOUT persisting or broadcasting it.
   // applyOperation works on a clone, so prevState is still the before-state.
   if (body.debug === true) {
-    if (!result.ok) return res.json({ ok: false, debug: true, error: result.error });
+    if (!result.ok) return res.json({ ok: false, debug: true, error: result.error, detail: result.detail });
     const find = (st) => (Array.isArray(st.players) ? st.players.find((p) => p.profileId === req.profile.id) : null);
     const before = find(prevState), after = find(result.state);
     return res.json({
@@ -1614,7 +1614,7 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
       siteAfter:  after  && after.rocket  ? after.rocket.siteId : null,
     });
   }
-  if (!result.ok) return res.status(409).json({ error: result.error });
+  if (!result.ok) return res.status(409).json({ error: result.error, detail: result.detail });
 
   const nextSeq = row.seq + 1;
   const now = nowMs();

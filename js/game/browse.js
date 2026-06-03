@@ -2423,7 +2423,7 @@ async function submitOnlineOp(op) {
     _onlineBusy = false;
   }
   if (!r || !r.ok) {
-    _onlineToast(humanizeOnlineOpError(r && r.error), 'error');
+    _onlineToast(humanizeOnlineOpError(r && r.error, r && r.data && r.data.detail), 'error');
     // Snap the UI back to the authoritative last-known state.
     if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
     return false;
@@ -2434,7 +2434,21 @@ async function submitOnlineOp(op) {
 
 // Op-error code -> human message for server rejections surfaced in the
 // online sandbox.
-function humanizeOnlineOpError(code) {
+function humanizeOnlineOpError(code, detail) {
+  // When the server hands back the calculation behind a movement verdict,
+  // spell it out instead of the generic line, so the player sees WHY (not
+  // just "not enough water").
+  if (detail && code === 'insufficient_water') {
+    return `Not enough water: this turn's move needs ${detail.cost} `
+      + `(${detail.thisTurnBurns} burn${detail.thisTurnBurns === 1 ? '' : 's'} × ${detail.fuelPerBurn} per burn), `
+      + `tank has ${detail.tank} (short ${detail.short}). Refuel at LEO or a factory first.`;
+  }
+  if (detail && code === 'cannot_liftoff') {
+    return `Can't lift off: net thrust ${detail.thrust} must beat the site's size ${detail.siteSize} (or a factory there to assist).`;
+  }
+  if (detail && code === 'cannot_land') {
+    return `Can't land there: net thrust ${detail.thrust} must beat the site's size ${detail.siteSize} (or a factory there to assist).`;
+  }
   return ({
     api_unavailable: 'The game server is unavailable.',
     network: 'Network error - check your connection.',
@@ -11272,12 +11286,18 @@ function openRouteOptionsModal(onClose) {
       try {
         const r = await submitGameOp(
           _onlineGameId, { kind: 'MOVE', toSiteId, segments, debug: true }, _onlineMe.token);
-        if (r && r.ok) {
-          const delta = (r.tankBefore != null && r.tankAfter != null)
-            ? `  (tank ${r.tankBefore} -> ${r.tankAfter})` : '';
-          showRes(`✓ ${r.log || 'Move would succeed.'}${delta}`, 'ok');
+        // The dry-run verdict rides in r.data (the server returns it inside an
+        // HTTP 200, so r.ok only means "the request reached the server"). Read
+        // r.data.ok for the actual would-succeed / would-fail.
+        const sim = (r && r.ok && r.data) ? r.data : null;
+        if (!sim) {
+          showRes(`✗ Could not simulate: ${humanizeOnlineOpError(r && r.error)}`, 'bad');
+        } else if (sim.ok) {
+          const delta = (sim.tankBefore != null && sim.tankAfter != null)
+            ? `  (tank ${sim.tankBefore} -> ${sim.tankAfter})` : '';
+          showRes(`✓ ${sim.log || 'Move would succeed.'}${delta}`, 'ok');
         } else {
-          showRes(`✗ Would fail: ${humanizeOnlineOpError(r && r.error)}`, 'bad');
+          showRes(`✗ Would fail: ${humanizeOnlineOpError(sim.error, sim.detail)}`, 'bad');
         }
       } catch {
         showRes('Simulation failed - server unreachable.', 'bad');

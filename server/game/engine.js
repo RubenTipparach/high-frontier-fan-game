@@ -50,7 +50,7 @@ function clone(state) {
     : JSON.parse(JSON.stringify(state));
 }
 
-function fail(error) { return { ok: false, error }; }
+function fail(error, detail) { return detail ? { ok: false, error, detail } : { ok: false, error }; }
 
 // Base mass of one stack slot, resolved from the shared card data.
 // Patents read their primary-face (or top-level) mass; crew read the
@@ -354,8 +354,20 @@ function applyMove(state, op, player) {
   }
   if (dest === from) return fail('already_here');
 
-  const cost = Math.ceil(thrusterFuelPerBurn(player.rocket) * thisTurnBurns);
-  if (cost > player.rocket.tank) return fail('insufficient_water');
+  const perBurn = thrusterFuelPerBurn(player.rocket);
+  const cost = Math.ceil(perBurn * thisTurnBurns);
+  if (cost > player.rocket.tank) {
+    // Hand back the full calculation so the client can explain the verdict
+    // instead of just flashing "insufficient water" (cost = ceil(fuel-per-burn
+    // x this-turn burns), charged against the water tank).
+    return fail('insufficient_water', {
+      thisTurnBurns,
+      fuelPerBurn: perBurn,
+      cost,
+      tank: player.rocket.tank | 0,
+      short: cost - (player.rocket.tank | 0),
+    });
+  }
 
   // Hazards along the nodes we ARRIVE at this turn, classified the same
   // way the sandbox does. Generic (skull / aerobrake) hazards are
@@ -374,9 +386,9 @@ function applyMove(state, op, player) {
   // Liftoff gates the origin (skipped at LEO, siteId null); landing gates
   // the destination.
   const liftG = from ? maneuverGate(state, from, thrust) : { ok: true, needsRoll: false };
-  if (!liftG.ok) return fail('cannot_liftoff');
+  if (!liftG.ok) return fail('cannot_liftoff', { thrust, siteSize: liftG.size, site: from });
   const landG = maneuverGate(state, dest, thrust);
-  if (!landG.ok) return fail('cannot_land');
+  if (!landG.ok) return fail('cannot_land', { thrust, siteSize: landG.size, site: dest });
   // Ordered roll items: liftoff assist, route generics (skull/aero), then
   // landing assist. Each is aqua-payable (FINAO) or a d6 where a 1 is a
   // critical that destroys the ship.
