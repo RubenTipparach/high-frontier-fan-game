@@ -306,6 +306,16 @@
 .map-turn-controls button.is-locked:hover {
   filter: grayscale(0.6);
 }
+/* No thruster support chain engaged: the rocket can't move, so the move
+   tag is dark + dimmed and never pulses (no glow nudging an impossible
+   move). Distinct from is-locked (not your turn) only by intent + tooltip. */
+.map-turn-budget .turn-tag.is-nomove {
+  opacity: 0.4;
+  cursor: not-allowed;
+  animation: none !important;
+  filter: grayscale(0.65);
+}
+.map-turn-budget .turn-tag.is-nomove:hover { filter: grayscale(0.65); }
 .map-mode-toggle {
   display: inline-flex;
   background: var(--bg-2);

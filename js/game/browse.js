@@ -4723,16 +4723,27 @@ function ensureMapShell(host) {
       // move (the rocket slides back to where it started). With a move
       // still in hand it shows the budget and moves the rocket.
       const spent = moves <= 0;
+      // The rocket can only fly with a valid thruster support chain
+      // engaged (a thruster whose reactor / generator / heat supports
+      // are all satisfied). Until then the move control is disabled and
+      // dark - no glow - so the player isn't nudged toward a move that
+      // can't happen. (Undo stays available so a spent move can rewind.)
+      let canMove = true;
+      try { const ra = isRocketActive(); canMove = !!(ra && ra.active); } catch { canMove = true; }
+      const blocked = !spent && !canMove;
       moveTag.textContent = spent ? '↩ undo move' : `move:${moves}`;
       moveTag.classList.toggle('is-spent', spent);
       moveTag.classList.toggle('is-undo', spent && !lockedByOnline);
       moveTag.classList.toggle('is-locked', lockedByOnline);
-      moveTag.disabled = lockedByOnline;
+      moveTag.classList.toggle('is-nomove', blocked);
+      moveTag.disabled = lockedByOnline || blocked;
       moveTag.title = lockedByOnline
         ? 'Waiting for your turn.'
-        : (spent
-          ? 'Move spent - tap to undo this turn\'s move (rewinds the rocket)'
-          : 'Move remaining - tap to move the rocket along its route');
+        : (blocked
+          ? 'No thruster engaged - add a thruster and its supports to the rocket to move.'
+          : (spent
+            ? 'Move spent - tap to undo this turn\'s move (rewinds the rocket)'
+            : 'Move remaining - tap to move the rocket along its route'));
     }
     if (endTurnBtn) {
       endTurnBtn.disabled = lockedByOnline;
@@ -4770,6 +4781,10 @@ function ensureMapShell(host) {
   host._refreshTurnBudget = refreshTurnBudget;
   refreshTurnBudget();
   onTurnChange(refreshTurnBudget);
+  // Also refresh when the rocket stack changes: adding / removing a
+  // thruster (or its supports) flips whether the rocket can move, which
+  // enables or disables the move tag.
+  onRocketChange(refreshTurnBudget);
   // Robust cross-device tap: some mobile browsers don't deliver a
   // reliable `click` on these toolbar controls, so also handle
   // `touchend` (preventing the ghost click that would double-fire).
@@ -4787,8 +4802,14 @@ function ensureMapShell(host) {
   if (moveTag) {
     moveTag.style.cursor = 'pointer';
     onTap(moveTag, () => {
-      if (getMovesRemaining() > 0) moveRocket();
-      else undoRocketMove();
+      if (getMovesRemaining() > 0) {
+        // Guard the tap too (not just the disabled state): no thruster
+        // support chain means there's nothing to move.
+        let canMove = true;
+        try { const ra = isRocketActive(); canMove = !!(ra && ra.active); } catch { canMove = true; }
+        if (!canMove) { setStatus('Add a thruster and its supports to the rocket to move.'); return; }
+        moveRocket();
+      } else undoRocketMove();
     });
   }
   // Aqua balance chip - live-updates on any spend / income. Tapping
