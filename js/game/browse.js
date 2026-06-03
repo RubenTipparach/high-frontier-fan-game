@@ -3944,12 +3944,15 @@ function openDeckTapModal(card, kind, { allowAuction = false, inspectOnly = fals
   //   - Free Library mode: "✋ Add to hand" + flight.
   const inMarket = getMarketMode() === MARKET_MODE.MARKET;
   if (inspectOnly) {
-    // Crew library: pure reference. Crew enters play only through
-    // the starting-crew wizard at New game, so there's no add /
-    // auction here.
+    // Read-only reference views. Crew enters play only through the
+    // starting-crew wizard at New game; GW thrusters are an upcoming
+    // expansion you can preview (flip to see both faces) but not yet
+    // play. Either way there's no add / auction here.
     const note = document.createElement('p');
     note.className = 'muted card-modal-note';
-    note.textContent = '👥 Crew is chosen at New game via the starting-crew wizard.';
+    note.textContent = card.type === 'gw-thruster'
+      ? '🚧 GW thrusters are an upcoming expansion. Preview only for now - flip to see both faces.'
+      : '👥 Crew is chosen at New game via the starting-crew wizard.';
     actions.append(note);
   } else if (inMarket && allowAuction) {
     const auctionBtn = document.createElement('button');
@@ -12348,16 +12351,21 @@ function renderPatents() {
     if (inHand)   el.classList.add('in-hand');
     if (inRocket) el.classList.add('in-rocket');
     if (inHand || inRocket) return el;   // placeholder - not interactive
-    // Expansion-only cards (GW thrusters today) preview but
-    // can't be played. Mark + return early so the drag /
-    // tap-to-add handlers don't bind. A CSS overlay tells the
-    // player why.
+    // Expansion-only cards (GW thrusters today) can't be played
+    // yet, but they're fully inspectable: tap opens the read-only
+    // card view and the Flip button shows both faces up close. Only
+    // the drag / tap-to-ADD handlers are skipped (the engine refuses
+    // to stack them); a CSS badge signals the "coming soon" intent.
     if (card.type === 'gw-thruster') {
       el.classList.add('is-expansion');
       const badge = document.createElement('div');
       badge.className = 'card-expansion-badge';
       badge.textContent = 'Coming soon';
       el.appendChild(badge);
+      el.addEventListener('click', (ev) => {
+        if (ev.target.closest('.card-flip, .card-rotate')) return;
+        openDeckTapModal(card, asKind, { inspectOnly: true });
+      });
       return el;
     }
 
