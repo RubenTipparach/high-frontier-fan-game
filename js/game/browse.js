@@ -11801,7 +11801,48 @@ function planRocketRouteTo(destSite) {
     + `<strong>${turns}</strong> turn${turns === 1 ? '' : 's'} `
     + `(thrust ${thrust}).${assistNote}`
   );
+  logRouteBudget(origin, destSite, result, thrStats, thrust);
   return true;
+}
+
+// Console breakdown of how a planned route reaches its burn + fuel
+// verdict. Console-only (players never open it): it spells out the gross
+// burns, the flyby credit applied, the net total, and the tank's burn
+// capacity BOTH ways - the FT-step model (TOTAL CAN BURN) and the actual
+// water gate the move charges - so any disagreement between the two is
+// visible at a glance. Wrapped in try/catch: logging must never break a
+// plan.
+function logRouteBudget(origin, destSite, result, thrStats, thrust) {
+  try {
+    const fpb     = thrStats && Number.isFinite(thrStats.fuel) ? thrStats.fuel : null;          // FTs per burn
+    const ftTotal = thrStats && Number.isFinite(thrStats.fuelSteps) ? thrStats.fuelSteps : null;
+    const canBurn = thrStats && Number.isFinite(thrStats.burnsAvailable) ? thrStats.burnsAvailable : null;
+    const wet     = thrStats && Number.isFinite(thrStats.wetMass) ? thrStats.wetMass : null;
+    const dry     = thrStats && Number.isFinite(thrStats.dryMass) ? thrStats.dryMass : null;
+    const tank    = getTankWater();
+    const gross   = Number.isFinite(result.grossBurns) ? result.grossBurns : result.totalBurns;
+    const flyby   = Number.isFinite(result.flybyBonus) ? result.flybyBonus : 0;
+    const net     = result.totalBurns;
+    // Water the move gate would charge for the WHOLE journey (it actually
+    // charges per turn; this is the all-turns figure for the verdict).
+    const fuelOn  = getFuelConsumption();
+    const water   = (fuelOn && fpb != null) ? Math.ceil(fpb * net) : 0;
+    console.group(`[route] ${origin.name} → ${destSite.name} (thrust ${thrust})`);
+    console.log(`BURNS:        ${gross}`);
+    console.log(`FLY BY BONUS: +${flyby}`);
+    console.log(`TOTAL Burns:  ${net}   (over ${result.totalTurns} turn${result.totalTurns === 1 ? '' : 's'})`);
+    console.log(`Fuel (wet mass): ${wet}`);
+    console.log(`dry Mass:        ${dry}`);
+    console.log(`Number of FTs total: ${ftTotal}`);
+    console.log(`FTs per BURN:    ${fpb}`);
+    console.log(`TOTAL CAN BURN:  ${canBurn}`);
+    console.log(`tank water: ${tank}   whole-route water cost: ${water}${fuelOn ? '' : ' (fuel-spend off)'}`);
+    const okFt    = canBurn == null ? null : net <= canBurn;
+    const okWater = !fuelOn ? true : tank >= water;
+    console.log(`-> enough fuel (FT-step model): ${okFt == null ? 'n/a' : (okFt ? 'YES' : 'NO')}  (need ${net}, can burn ${canBurn})`);
+    console.log(`-> enough water (move gate):    ${okWater ? 'YES' : 'NO'}  (need ${water}, tank ${tank})`);
+    console.groupEnd();
+  } catch { /* logging must never break planning */ }
 }
 
 function clearRoute() {
