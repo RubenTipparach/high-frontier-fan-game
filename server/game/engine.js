@@ -288,6 +288,17 @@ function destroyRocket(player) {
 
 // ----- functional ops (undoable) -----
 
+// "Parked at LEO" canonically means siteId == null (the never-launched
+// state), but a rocket that MOVEs home lands on the LEO node's own slug
+// instead. Both are the same spot on the board, so treat them identically -
+// otherwise REFUEL / CASH_WATER / LEO transfers reject a rocket that flew
+// back. MOVE also normalises arrival-at-LEO back to null (see applyMove) so
+// new games keep to the canonical form.
+function rocketAtLeo(player) {
+  const s = player.rocket && player.rocket.siteId;
+  return s == null || s === leoSlug();
+}
+
 function applyMove(state, op, player) {
   if (player.movesRemaining <= 0) return fail('no_moves_left');
   // An empty rocket has no thruster and can't burn, so it can't leave
@@ -459,7 +470,9 @@ function applyMove(state, op, player) {
     };
   }
 
-  player.rocket.siteId = dest;
+  // Arriving back at LEO normalises to the canonical null position (LEO is
+  // "no site"), so the at-LEO ops recognise it without special-casing the slug.
+  player.rocket.siteId = (dest === leoSlug()) ? null : dest;
   // Advance the stored route past this turn. A turn-tagged route drops its
   // turn-1 legs and shifts the rest down (T2 -> T1, ...); a legacy untagged
   // route pops everything up to the node we reached.
@@ -617,7 +630,7 @@ function applyDiscard(state, op, player) {
 // player funds a burn by converting aqua here first. Free (no op
 // cost), turn-gated. op = { amount }.
 function applyRefuel(state, op, player) {
-  if (player.rocket.siteId != null) return fail('rocket_not_at_leo');
+  if (!rocketAtLeo(player)) return fail('rocket_not_at_leo');
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
   const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
@@ -675,7 +688,7 @@ function applyClearRoute(state, _op, player) {
 // Reverse of REFUEL: cash tank water back into the aqua bank 1:1, only
 // at LEO. Clamped by the water on hand. Free, turn-gated. op={amount}.
 function applyCashWater(state, op, player) {
-  if (player.rocket.siteId != null) return fail('rocket_not_at_leo');
+  if (!rocketAtLeo(player)) return fail('rocket_not_at_leo');
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
   const amt = Math.min(want, player.rocket.tank | 0);
@@ -743,7 +756,7 @@ function applyTransfer(state, op, player) {
   const other = from === 'rocket' ? to : from;
   const rocketEmpty = player.rocket.stack.length === 0;
   if (other === 'leo') {
-    if (player.rocket.siteId != null && !rocketEmpty) return fail('rocket_not_at_leo');
+    if (!rocketAtLeo(player) && !rocketEmpty) return fail('rocket_not_at_leo');
   } else if (other.startsWith('outpost')) {
     const opp = player.outposts && player.outposts[other.slice('outpost'.length)];
     if (!opp) return fail('no_outpost');
@@ -842,7 +855,7 @@ const OUTPOST_LETTERS = ['A', 'B', 'C', 'D'];
 function applyConvertOutpost(state, op, player) {
   if (player.rocket.stack.length === 0) return fail('empty_rocket');
   const siteId = player.rocket.siteId;
-  if (siteId == null) return fail('rocket_at_leo');     // use the LEO Stack instead
+  if (rocketAtLeo(player)) return fail('rocket_at_leo');     // use the LEO Stack instead
   const taken = new Set(Object.keys(player.outposts || {}));
   const letter = OUTPOST_LETTERS.find((l) => !taken.has(l));
   if (!letter) return fail('no_outpost_slot');
