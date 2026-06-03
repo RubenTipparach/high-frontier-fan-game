@@ -153,20 +153,35 @@ the WET chit to the DRY chit (`blackStepsBetween`). *Water* and *aqua*
 are 1-to-1 mass units (tank water = wet mass - dry mass; aqua converts
 1:1 to water). Fuel steps map to water only NON-linearly through the
 ladder (a step buys less mass-fraction the heavier the ship: ninths in
-WISP ... whole units in TUG), so "N fuel steps" is never "N water".
-Don't use the old "FT" abbreviation - it read as "fuel tank" and muddied
-this. Burn costs in logs / UI are denominated in fuel steps, not water.
+WISP ... whole units in TUG), so "N fuel steps" is never "N water". Burn
+costs in logs / UI are denominated in fuel steps, not water.
 
-KNOWN INCONSISTENCY (don't silently "fix" without a design pass):
-`data/net-thrust-track.js#fuelStepsBetween` (used by the stack panel's
-fuel readout and `getActiveThrusterStats().burnsAvailable`) returns a
-DIFFERENT count than the detailed graph's black connections
-(`blackStepsBetween`), and the MOVE engine deducts the per-burn cost
-from the water tank 1-to-1 (`ceil(fuel * burns)` vs `tank`). Both treat
-fuel steps and water as interchangeable, which contradicts the above.
-Reconciling (one canonical fuel-step model + a non-linear
-fuel-step<->water conversion at burn time, on client AND server) is a
-tracked follow-up.
+**When the user says "FT", STOP and ask which they mean.** "FT" is
+ambiguous - it can mean AQUA (the bank currency) or fuel steps. Don't
+guess: say it's ambiguous and ask whether they mean aqua or fuel steps
+before acting.
+
+**Fuel economy rules (the target model):**
+- **Burning** walks the BLACK connections (fuel steps). A burn spends
+  the thruster's `fuel` fuel steps; the water that costs is the
+  non-linear mass-drop of those steps, so the tank can end on a
+  fractional position (a sub-1-unit *remainder*).
+- **Fuelling / unfuelling** walks the RED (refuel) connections. Water
+  moved to an outpost or back to the bank moves in WHOLE water units
+  only; any sub-1-unit remainder CANNOT be transferred and stays in the
+  source tank. Show that remainder in the fuel-tank modal.
+- A stack can be **scrapped** when it has no cards AND less than 1 unit
+  of water left.
+
+RECONCILE IN PROGRESS (user chose "full reconcile" 2026-06-03; the
+canonical count is `blackStepsBetween`, the detail graph): until it
+lands, `data/net-thrust-track.js#fuelStepsBetween` (used by the stack
+readout + `getActiveThrusterStats().burnsAvailable`) still returns a
+DIFFERENT count than the detail graph, and MOVE still deducts the
+per-burn cost from the water tank 1-to-1 (`ceil(fuel * burns)` vs
+`tank`). The reconcile moves the detail-graph node model into a shared
+dir (so client AND server share it), switches capacity + burn cost to
+the black/red connections, and makes burns leave a fractional remainder.
 
 NOTE: there is NO `power_req` field. Older drafts had one; it
 was removed because requirements are gated through the kind/
@@ -539,6 +554,13 @@ Server-authoritative engine in `server/game/engine.js`:
   `BUILD_FACTORY`, `BUILD_REFINERY`, `AUCTION_START`, `AUCTION_BID`,
   `AUCTION_PASS`, `BUILD_ROCKET`, `DECOMMISSION`, `BUY_FUTURE`,
   `END_TURN`.
+- **Debug dry-run.** `POST /games/:id/ops` with `debug: true` on the body
+  SIMULATES the op: the engine runs it on a throwaway clone (applyOperation
+  already clones, so the live state is untouched) and returns
+  `{ ok, log, tankBefore, tankAfter, siteAfter }` (or `{ ok:false, error }`)
+  WITHOUT persisting or broadcasting. The route-options modal's "Simulate
+  planned move" button uses it to preview a move's fuel-step cost before the
+  player commits. Read-only; safe to call anytime.
 - Movement uses the delta-v graph; each "burn" consumes 1 tank unit
   scaled by the active thruster's ISP. Aerobrakes and pivots have
   special edges.

@@ -11128,6 +11128,17 @@ function openRouteOptionsModal(onClose) {
         thrust (${thrust}). Tap Move when you're ready to fly.
       </p>
     </div>
+    ${_online ? `
+    <div class="route-options-debug">
+      <button type="button" class="popup-btn route-options-sim-btn">
+        🧪 Simulate planned move (debug)
+      </button>
+      <p class="muted route-options-manual-help">
+        Dry-runs this turn's planned move and reports the fuel-step cost
+        without spending anything. Plan a route first.
+      </p>
+      <p class="route-options-sim-result" hidden></p>
+    </div>` : ''}
     ${(!_online && currentSandboxId()) ? `
     <div class="route-options-danger">
       <button type="button" class="popup-btn danger route-options-abandon-btn">
@@ -11160,6 +11171,41 @@ function openRouteOptionsModal(onClose) {
     if (_renderer) _renderer.setSitePopup(null);
     enterManualMoveMode();
   });
+  const simBtn = panel.querySelector('.route-options-sim-btn');
+  if (simBtn) {
+    const resEl = panel.querySelector('.route-options-sim-result');
+    const showRes = (txt, cls) => {
+      if (!resEl) return;
+      resEl.hidden = false;
+      resEl.textContent = txt;
+      resEl.className = `route-options-sim-result ${cls || 'muted'}`;
+    };
+    simBtn.addEventListener('click', async () => {
+      // Dry-run THIS turn's planned move against the server (debug:true)
+      // so the player can preview the fuel-step cost before committing.
+      const turn1 = (_plannedRoute || []).filter((s) => (s.turn || 1) === 1);
+      if (!turn1.length) { showRes('Plan a route first - no current-turn segments to simulate.'); return; }
+      const toSiteId = _plannedRoute[_plannedRoute.length - 1].to;
+      const segments = turn1.map((s) => ({ from: s.from, to: s.to, burns: s.burns, turn: s.turn }));
+      simBtn.disabled = true;
+      showRes('Simulating…');
+      try {
+        const r = await submitGameOp(
+          _onlineGameId, { kind: 'MOVE', toSiteId, segments, debug: true }, _onlineMe.token);
+        if (r && r.ok) {
+          const delta = (r.tankBefore != null && r.tankAfter != null)
+            ? `  (tank ${r.tankBefore} -> ${r.tankAfter})` : '';
+          showRes(`✓ ${r.log || 'Move would succeed.'}${delta}`, 'ok');
+        } else {
+          showRes(`✗ Would fail: ${humanizeOnlineOpError(r && r.error)}`, 'bad');
+        }
+      } catch {
+        showRes('Simulation failed - server unreachable.', 'bad');
+      } finally {
+        simBtn.disabled = false;
+      }
+    });
+  }
   const abandonBtn = panel.querySelector('.route-options-abandon-btn');
   if (abandonBtn) {
     abandonBtn.addEventListener('click', async () => {

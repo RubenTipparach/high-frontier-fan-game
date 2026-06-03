@@ -1599,6 +1599,21 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
     if (!ctx.turnBaseState) return res.status(409).json({ error: 'no_turn_base' });
   }
   const result = applyOperation(prevState, op, ctx);
+  // Debug dry-run: with debug:true the client previews what an op WOULD do
+  // (the human-readable log carries the fuel-step cost + origin/dest, plus
+  // the actor's tank before/after) WITHOUT persisting or broadcasting it.
+  // applyOperation works on a clone, so prevState is still the before-state.
+  if (body.debug === true) {
+    if (!result.ok) return res.json({ ok: false, debug: true, error: result.error });
+    const find = (st) => (Array.isArray(st.players) ? st.players.find((p) => p.profileId === req.profile.id) : null);
+    const before = find(prevState), after = find(result.state);
+    return res.json({
+      ok: true, debug: true, log: result.log || '',
+      tankBefore: before && before.rocket ? before.rocket.tank : null,
+      tankAfter:  after  && after.rocket  ? after.rocket.tank  : null,
+      siteAfter:  after  && after.rocket  ? after.rocket.siteId : null,
+    });
+  }
   if (!result.ok) return res.status(409).json({ error: result.error });
 
   const nextSeq = row.seq + 1;

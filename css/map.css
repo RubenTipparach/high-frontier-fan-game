@@ -2378,6 +2378,34 @@
   font-size: 11px;
   line-height: 1.45;
 }
+/* Debug "simulate move" block (online only): dry-run preview of a move's
+   fuel-step cost. Shares the dashed-divider treatment of the manual block. */
+.route-options-debug {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+.route-options-debug .route-options-sim-btn {
+  width: 100%;
+  font-size: 13px;
+  padding: 9px 12px;
+  font-weight: 700;
+  background: var(--panel-2, #14233a);
+  color: var(--ink, #e6edf6);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.route-options-debug .route-options-sim-btn:hover:not(:disabled) { filter: brightness(1.15); }
+.route-options-debug .route-options-sim-btn:disabled { opacity: 0.6; cursor: progress; }
+.route-options-sim-result {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+.route-options-sim-result.ok  { color: #4ade80; }
+.route-options-sim-result.bad { color: #f87171; }
 .map-popup .popup-btn {
   font-size: 12px;
   font-weight: 600;
