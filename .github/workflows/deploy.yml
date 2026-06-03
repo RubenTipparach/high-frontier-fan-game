@@ -64,30 +64,29 @@ jobs:
       - name: Validate boot graph
         run: node scripts/check-boot.mjs
 
-      # Bake the commit SHA into every cache-bust query and into
-      # version.json so the runtime check (js/version-check.js) can
-      # force-navigate clients that have a stale index.html cached.
-      # Browsers cache ES module imports by URL, so the only reliable
-      # way to push a new deploy to a kept-open tab is to change the
-      # URLs, which is what these substitutions accomplish.
-      - name: Inject build version
-        run: |
-          SHA=$(git rev-parse --short HEAD)
-          echo "Build SHA: ${SHA}"
-          # Replace ?v=<anything> in index.html with the new SHA.
-          sed -i -E "s/\?v=[A-Za-z0-9]+/?v=${SHA}/g" index.html
-          # Bake the SHA into the version-check script.
-          sed -i "s/__BUILD_SHA__/${SHA}/g" js/version-check.js
-          # Emit a tiny JSON the runtime can poll without cache.
-          printf '{"version":"%s"}\n' "${SHA}" > version.json
+      # Install the build toolchain (esbuild) for the static frontend build.
+      - name: Install build deps
+        run: npm ci
+
+      # Bundle + minify the frontend into dist/ with content-hashed
+      # filenames. The hash IS the cache-bust: a changed module gets a new
+      # URL, so browsers (and kept-open tabs, via version-check.js) always
+      # fetch fresh - the permanent fix for the stale-module problem that
+      # ?v= on the entry alone could not solve. build.mjs also writes
+      # version.json and copies the runtime-fetched assets. The commit SHA
+      # is injected into version-check.js (esbuild --define) so its hash and
+      # version.json track the build.
+      - name: Build frontend
+        run: BUILD_SHA="$(git rev-parse --short HEAD)" node scripts/build.mjs
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
+      # Publish the built site (dist/), NOT the repo root.
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: dist
 
   deploy:
     needs: build
