@@ -1603,15 +1603,18 @@ export class MapRenderer {
   }
 
   _startAnimation() {
-    // The ambient drift (rockets crossing the map, twinkle) only needs a low
-    // frame rate - a leg takes 14-32s. Redrawing the whole scene at the full
-    // refresh rate just to nudge it was a constant repaint that also forced
-    // every backdrop-filter panel over the map to re-blur each frame. Cap the
-    // ambient-driven redraw to ~15fps; the ambient dt is elapsed-time based
-    // (and clamped), so sprite speed is unchanged. Interaction (pan / zoom /
-    // hover) still draws at the full rate through its own _scheduleDraw calls.
+    // The ambient drift (rockets crossing the map, asteroid-belt twinkle) now
+    // targets ~60fps so the motion reads smoothly instead of stepping. The
+    // ambient dt is elapsed-time based (and clamped), so sprite speed is
+    // unchanged - only the redraw cadence went up. Keeping a cap (rather than
+    // an uncapped per-rAF redraw) still bounds the full-scene repaint - and the
+    // backdrop-filter panels re-blurring with it - on 120Hz+ displays.
+    // Interaction (pan / zoom / hover) draws at the full rate through its own
+    // _scheduleDraw calls.
     let lastAmbientDraw = 0;
-    const AMBIENT_INTERVAL = 66;   // ms, ~15fps
+    // A hair under one 60Hz frame (16.67ms) so vsync jitter never skips a
+    // frame on a 60Hz panel; on 120Hz it redraws every other frame (~60fps).
+    const AMBIENT_INTERVAL = 1000 / 60 - 2;   // ~14.7ms, ~60fps
     const tick = (t) => {
       if (!this.canvas || !this.canvas.isConnected) {
         this._animRaf = null;
