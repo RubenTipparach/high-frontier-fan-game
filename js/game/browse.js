@@ -404,6 +404,12 @@ async function bootstrapOnlineGame() {
   // and subscribe to live 'chat' broadcasts on the lobby channel. Both
   // are owned by browse.js so the mp pane stays self-contained.
   if (_onlineLobbyId && _onlineMe) {
+    // New room: drop chat cached from any previously-open room so its
+    // messages can't bleed into this table, and clear the mounted chat
+    // surfaces before this room's history backfills below.
+    _chatLog.length = 0;
+    resetChatList(document.getElementById('mp-chat-list'));
+    resetChatList(document.getElementById('mp-auction-chat-list'));
     const chatChannel = 'lobby:' + _onlineLobbyId;
     ws.subscribe(chatChannel);
     const offChat = ws.on('chat', (msg) => {
@@ -1830,6 +1836,18 @@ function appendChatToList(list, msg) {
   list.scrollTop = list.scrollHeight;
 }
 
+// Reset a chat list back to its empty state. Used when switching rooms so a
+// previous table's messages don't linger in the DOM (the _chatLog cache is
+// cleared alongside it).
+function resetChatList(list) {
+  if (!list) return;
+  list.innerHTML = '';
+  const empty = document.createElement('li');
+  empty.className = 'muted mp-chat-empty';
+  empty.textContent = 'No messages yet.';
+  list.appendChild(empty);
+}
+
 // Backfill a freshly-mounted chat list from the in-memory log (used by
 // the auction overlay's side chat so it isn't blank when it opens after
 // the conversation has already started).
@@ -2472,6 +2490,10 @@ export function unmountBrowseOnline() {
   _onlineMe = null;
   _onlineToast = null;
   if (_onlineChatOff) { try { _onlineChatOff(); } catch { /* ignore */ } _onlineChatOff = null; }
+  // Drop the cached conversation so the next room doesn't inherit it.
+  _chatLog.length = 0;
+  resetChatList(document.getElementById('mp-chat-list'));
+  resetChatList(document.getElementById('mp-auction-chat-list'));
   _onlineMaps = null;
   _onlineSnapshot = null;
   _lastAppliedSeq = -1;
