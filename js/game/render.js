@@ -1603,13 +1603,25 @@ export class MapRenderer {
   }
 
   _startAnimation() {
+    // The ambient drift (rockets crossing the map, twinkle) only needs a low
+    // frame rate - a leg takes 14-32s. Redrawing the whole scene at the full
+    // refresh rate just to nudge it was a constant repaint that also forced
+    // every backdrop-filter panel over the map to re-blur each frame. Cap the
+    // ambient-driven redraw to ~15fps; the ambient dt is elapsed-time based
+    // (and clamped), so sprite speed is unchanged. Interaction (pan / zoom /
+    // hover) still draws at the full rate through its own _scheduleDraw calls.
+    let lastAmbientDraw = 0;
+    const AMBIENT_INTERVAL = 66;   // ms, ~15fps
     const tick = (t) => {
       if (!this.canvas || !this.canvas.isConnected) {
         this._animRaf = null;
         return;
       }
       this._animTime = t;
-      this._scheduleDraw();
+      if (t - lastAmbientDraw >= AMBIENT_INTERVAL) {
+        lastAmbientDraw = t;
+        this._scheduleDraw();
+      }
       this._animRaf = requestAnimationFrame(tick);
     };
     this._animRaf = requestAnimationFrame(tick);
