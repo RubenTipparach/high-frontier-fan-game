@@ -181,6 +181,12 @@ let _onlinePollMs = 0;
 // Tracks the previous snapshot's auction.awaiting so we can detect
 // the bidders -> auctioneer transition and fire one eager fetch.
 let _lastAuctionPhase = null;
+// Signature of the last auction state for which the AUCTIONEER fired a
+// self-heal fetch (see applySnapshot). Lets a stale "can't close yet"
+// view pull fresh server state once per real bidding change, without
+// looping, so the Keep button can't stay greyed after every bidder is
+// out (e.g. all auto-passed on a full hand).
+let _auctionHealSig = null;
 const ONLINE_POLL_MS = 5000;
 // 500 ms while an auction is live. The bidder UI gives a "stuck"
 // feel any slower than that - users expect Sell / Keep to land
@@ -588,6 +594,28 @@ function applySnapshot(snapshot, seq) {
     if (snapshot.auction.auctioneerId !== myId) eagerPoll();
   }
   _lastAuctionPhase = auctionPhase;
+  // Self-heal a stale auctioneer view. If a lot is open, I'm the auctioneer,
+  // and it doesn't look closeable yet, pull the freshest server state once
+  // per real bidding change. This is the case the user hit: every other
+  // player auto-passed (full hand) so the lot IS closeable for 0 aqua, but a
+  // dropped update left the Keep button greyed until a manual refresh. The
+  // signature gate fetches on an actual change and never loops; eagerPoll is
+  // seq-gated so an unchanged server state is a no-op.
+  const myId2 = _onlineMe && _onlineMe.id;
+  if (snapshot.auction && myId2 && snapshot.auction.auctioneerId === myId2) {
+    const a2 = snapshot.auction;
+    const closeable = a2.awaiting === 'auctioneer'
+      || auctionAllBiddersActed(a2, snapshot.players || []);
+    const sig = `${a2.cardId}:${a2.awaiting}:${(a2.acted || []).length}:${(a2.autoPassed || []).length}`;
+    if (!closeable && _auctionHealSig !== sig) {
+      _auctionHealSig = sig;
+      eagerPoll();
+    } else if (closeable) {
+      _auctionHealSig = null;
+    }
+  } else {
+    _auctionHealSig = null;
+  }
   // If I haven't picked my starting crew yet, open the mandatory crew
   // wizard. Driven off the snapshot (player.faction) so it survives
   // reloads / late joins, and so a re-bootstrap won't reopen the
@@ -1585,7 +1613,13 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
     // The lot can only close once every other player has bid or passed.
     // Until then the close buttons are disabled (the server enforces the
     // same rule); the auctioneer can still Reset to start a fresh round.
-    const canClose = auctionAllBiddersActed(a, players);
+    // Trust the server's authoritative phase (awaiting === 'auctioneer',
+    // set by recomputeAuction including full-hand auto-passes) in addition
+    // to the local hand-count derivation, so the close enables whenever the
+    // server says it can - the local derivation stays as a fallback for a
+    // lot whose stored phase predates that logic.
+    const canClose = (a && a.awaiting === 'auctioneer')
+      || auctionAllBiddersActed(a, players);
     const lbl = document.createElement('div');
     lbl.className = 'mp-auction-close-label';
     lbl.textContent = canClose
