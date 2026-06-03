@@ -4494,15 +4494,12 @@ function ensureMapShell(host) {
       <div class="map-turn-controls">
         <button id="turn-end" title="End your turn"
           aria-label="End turn">⏭ End turn</button>
+        <span id="turn-budget" class="map-turn-budget" aria-live="polite">
+          <button type="button" class="turn-tag" id="turn-tag-move" title="Moves remaining this turn">move:1</button>
+        </span>
         <button id="turn-tracker" title="View turn tracker"
           aria-label="View turn tracker">🕐</button>
-        <span id="turn-budget" class="map-turn-budget" aria-live="polite">
-          <button type="button" class="turn-tag" id="turn-tag-op" title="Operations remaining this turn">op:1</button>
-          <span class="move-group">
-            <button type="button" class="turn-tag" id="turn-tag-move" title="Moves remaining this turn">move:1</button>
-            <button type="button" class="turn-tag turn-tag-gear" id="game-settings" title="Game settings" aria-label="Game settings">⚙</button>
-          </span>
-        </span>
+        <button type="button" class="turn-tag turn-tag-gear" id="game-settings" title="Game settings" aria-label="Game settings">⚙</button>
         <span id="aqua-chip" class="map-aqua-chip"
           title="Aqua balance - spend 4 aqua per hazard to bypass rolls, or convert 1:1 to water at LEO">
           💧 <strong id="aqua-chip-balance">${getAqua()}</strong>
@@ -4613,7 +4610,7 @@ function ensureMapShell(host) {
       document.getElementById('main-menu-modal')?.classList.add('hidden');
     });
   }
-  // Global game-settings gear, welded to the move tag. Opens the
+  // Global game-settings gear, a standalone toolbar chip. Opens the
   // same settings modal accessible from per-popup affordances; right
   // now route + fuel options live there but future settings (UI
   // density, accessibility toggles, persistent dev flags) will land
@@ -4690,12 +4687,12 @@ function ensureMapShell(host) {
   // and "↩ Undo move" based on whether the per-turn move budget has
   // been spent. End turn refills the budget, which calls back here
   // via onTurnChange and resets the button to "Move".
-  // Per-turn budget tags op:N / move:N in the toolbar. The move
-  // tag IS the move control now (the old 🛸 button is gone): tap
-  // to move when a move is left, or to undo when it's spent. The
-  // op tag opens the operations menu. Both live-update on any
-  // consume / refund / turn rollover.
-  const opTag = host.querySelector('#turn-tag-op');
+  // Per-turn move:N tag in the toolbar. The move tag IS the move
+  // control now (the old 🛸 button is gone): tap to move when a
+  // move is left, or to undo when it's spent. Operations are driven
+  // from the End turn button (it reads "Ops" while one is unspent),
+  // so there is no separate op tag. Live-updates on any consume /
+  // refund / turn rollover.
   const moveTag = host.querySelector('#turn-tag-move');
   const endTurnBtn = host.querySelector('#turn-end');
   function refreshTurnBudget() {
@@ -4717,13 +4714,6 @@ function ensureMapShell(host) {
     // An open auction is its own call to action (bid / pass / close), so the
     // End turn nudge stays dark while a lot is up - even with operations spent.
     const auctionInProgress = !!(_onlineSnapshot && _onlineSnapshot.auction);
-    if (opTag) {
-      opTag.textContent = `op:${ops}`;
-      opTag.classList.toggle('is-spent', ops <= 0);
-      opTag.classList.toggle('is-locked', lockedByOnline);
-      opTag.disabled = lockedByOnline;
-      if (lockedByOnline) opTag.title = 'Waiting for your turn.';
-    }
     if (moveTag) {
       // Once the move is spent the tag IS the undo control - it reads
       // "↩ undo move" so the player knows tapping rewinds this turn's
@@ -4791,11 +4781,6 @@ function ensureMapShell(host) {
     }, { passive: false });
     el.addEventListener('click', (e) => { if (!touched) fn(e); });
   };
-  if (opTag) {
-    opTag.style.cursor = 'pointer';
-    opTag.title = 'Operations remaining - tap for the operations menu';
-    onTap(opTag, () => openOpsMenu());
-  }
   if (moveTag) {
     moveTag.style.cursor = 'pointer';
     onTap(moveTag, () => {
