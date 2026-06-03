@@ -3862,7 +3862,9 @@ export class MapRenderer {
       const info = this._popupRocketInfo;
       const water = Number.isFinite(site.hydration) ? site.hydration : 0;
       const isru  = info.isru;
-      const hasRig = Number.isFinite(isru) && isru > 0;
+      // A rig is present whenever an ISRU rating is set, including 0 (the best
+      // rig: ISRU 0 clears the gate at every site). null = no active rig.
+      const hasRig = Number.isFinite(isru);
       const passes = hasRig && isru <= water;
       const chip = document.createElement('div');
       chip.className = 't-isru' + (hasRig

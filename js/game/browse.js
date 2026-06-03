@@ -6966,13 +6966,15 @@ function hasRefueledThisTurn(siteId) {
 // requires a built factory at the site.
 function pickRefiningSource(site) {
   const water = Number.isFinite(site.hydration) ? site.hydration : 0;
-  // ISRU rig path: the active prospector with a positive ISRU
-  // value, supports met, and ISRU <= site hydration so the
+  // ISRU rig path: the active prospector with an ISRU rating (0 or
+  // more), supports met, and ISRU <= site hydration so the
   // 1 + hydration - ISRU formula gives at least 1 water.
   const prosp = getActiveProspectorStats();
   if (prosp && prosp.canActivate) {
     const isru = prospectorIsruValue(prosp.card);
-    if (isru > 0 && isru <= water) {
+    // ISRU 0 is a valid rig (gain = 1 + water), so it refuels anywhere the
+    // gate ISRU <= water allows - which for 0 is every site.
+    if (isru >= 0 && isru <= water) {
       return { kind: 'isru', card: prosp.card, rawGain: 1 + water - isru, isru };
     }
   }
