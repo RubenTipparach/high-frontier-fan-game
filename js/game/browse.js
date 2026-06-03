@@ -4626,10 +4626,13 @@ function ensureMapShell(host) {
   // lands - it just consumes the per-turn move budget for now so
   // the end-turn confirm reflects the spend.
   host.querySelector('#turn-end').addEventListener('click', async () => {
+    // While an operation is still in hand this button IS the ops-menu opener
+    // (its label reads "Ops"): use the op first. Only once ops are spent does
+    // tapping it end the turn.
+    if (getOpsRemaining() > 0) { openOpsMenu(); return; }
     // Confirm before ending with budget the player could still use: an
-    // operational rocket (active thruster) plus an unspent move or operation
-    // means there's still something to do this turn. No rocket, or nothing
-    // left to spend -> end straight away.
+    // operational rocket (active thruster) plus an unspent move. (Ops are
+    // always 0 here, since ops > 0 opens the menu above.)
     let hasRocket = false;
     try { const ra = isRocketActive(); hasRocket = !!(ra && ra.active); } catch { hasRocket = false; }
     // Online: the server advances the turn (and resolves any Sunspot
@@ -4754,14 +4757,18 @@ function ensureMapShell(host) {
         endTurnBtn.style.removeProperty('--mp-turn-color');
         endTurnBtn.style.removeProperty('color');
       }
-      // Operations used up, and no auction lot waiting on a bid: glow the End
-      // turn button (like the auction action chip) so it's obvious the turn is
-      // ready to hand off. With an op still to spend or a live auction, stay dark.
+      // While an operation is still in hand, the button nudges you to use it:
+      // it reads "Ops" and opens the operations menu (see the click handler).
+      // Only once ops are spent does it become the End turn button (which can
+      // glow when no auction lot is waiting on a bid).
+      const hasOps = ops > 0;
+      endTurnBtn.textContent = hasOps ? '⚙ Ops' : '⏭ End turn';
+      endTurnBtn.classList.toggle('is-ops', hasOps && !lockedByOnline);
       endTurnBtn.classList.toggle('needs-end',
         ops <= 0 && !auctionInProgress && !lockedByOnline);
       endTurnBtn.title = lockedByOnline
         ? 'Waiting for your turn.'
-        : 'End your turn';
+        : (hasOps ? 'You still have an operation - tap to use it' : 'End your turn');
     }
   }
   // Stash on the host so applySnapshot can re-trigger after a fresh
