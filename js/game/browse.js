@@ -4698,6 +4698,9 @@ function ensureMapShell(host) {
     const onlineFrozen = _online && !!_onlineSnapshot
       && (_onlineSnapshot.pendingFirstPlayer || _onlineSnapshot.status === 'finished');
     const lockedByOnline = _online && (_spectator || !isOnlineMyTurn() || onlineFrozen);
+    // An open auction is its own call to action (bid / pass / close), so the
+    // End turn nudge stays dark while a lot is up - even with operations spent.
+    const auctionInProgress = !!(_onlineSnapshot && _onlineSnapshot.auction);
     if (opTag) {
       opTag.textContent = `op:${ops}`;
       opTag.classList.toggle('is-spent', ops <= 0);
@@ -4725,9 +4728,11 @@ function ensureMapShell(host) {
     if (endTurnBtn) {
       endTurnBtn.disabled = lockedByOnline;
       endTurnBtn.classList.toggle('is-locked', lockedByOnline);
-      // Operations used up: glow the End turn button (like the auction action
-      // chip) so it's obvious the turn is ready to hand off.
-      endTurnBtn.classList.toggle('needs-end', ops <= 0 && !lockedByOnline);
+      // Operations used up, and no auction lot waiting on a bid: glow the End
+      // turn button (like the auction action chip) so it's obvious the turn is
+      // ready to hand off. With an op still to spend or a live auction, stay dark.
+      endTurnBtn.classList.toggle('needs-end',
+        ops <= 0 && !auctionInProgress && !lockedByOnline);
       endTurnBtn.title = lockedByOnline
         ? 'Waiting for your turn.'
         : 'End your turn';
