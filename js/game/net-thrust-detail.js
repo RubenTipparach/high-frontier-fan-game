@@ -60,7 +60,7 @@ export function massLabel(mass) {
 const widthFor = (N) => (N === 1 ? 100 : (N <= 11 ? 50 : 24));
 const X = {}; { let cx = 44; for (let N = 1; N <= 32; N++) { X[N] = cx + widthFor(N) / 2; cx += widthFor(N); } }
 const TRACK_W = (() => { let cx = 44; for (let N = 1; N <= 32; N++) cx += widthFor(N); return cx + 30; })();
-const UNIT_H = 180, LABEL_BAND_H = 42, BASE_Y = LABEL_BAND_H + (8 / 9) * UNIT_H, ZIG = 44, TRACK_H = BASE_Y + 30;
+const UNIT_H = 180, LABEL_BAND_H = 42, BASE_Y = LABEL_BAND_H + (8 / 9) * UNIT_H, ZIG = 44, TRACK_H = BASE_Y + 42;
 const yInt = (N) => (N >= 12 ? (N % 2 === 0 ? BASE_Y - ZIG : BASE_Y) : BASE_Y);
 const xOf = (mass) => X[Math.floor(mass + 1e-9)];
 const yOf = (node) => (node.kind === 'integer' ? yInt(node.N) : BASE_Y - (node.mass - node.N) * UNIT_H);
@@ -84,6 +84,28 @@ const BLACK = (() => {
   seq([32, 30, 28, 26, 24, 23]); seq([31, 29, 27, 25, 23]);
   return out;
 })();
+
+// Fuel-step count = the number of BLACK (burn) connections walked from the
+// WET node down to the DRY node. One black edge == one fuel step, so this is
+// the rocket's burnable fuel-step capacity read straight off this graph. Fuel
+// steps are NOT water/aqua: water + aqua are 1-to-1 mass units, and a fuel
+// step only maps to them non-linearly through this ladder (a step buys less
+// mass-fraction the heavier the ship). Each node has exactly one black
+// successor toward dry, so the walk is deterministic.
+const BLACK_SUCC = new Map(BLACK.map(([a, b]) => [a.id, b]));
+export function blackStepsBetween(dryMass, wetMass) {
+  const snap = (mass) => at(mass) || at(Math.max(MIN_DRY, Math.min(MAX_WET, Math.round(mass))));
+  const dryN = snap(dryMass), wetN = snap(wetMass);
+  if (!dryN || !wetN || wetN.mass <= dryN.mass) return 0;
+  let steps = 0, cur = wetN, guard = 0;
+  while (cur && cur.id !== dryN.id && guard++ < NODES.length + 5) {
+    const next = BLACK_SUCC.get(cur.id);
+    if (!next) break;
+    steps++;
+    cur = next;
+  }
+  return steps;
+}
 
 function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
@@ -138,6 +160,22 @@ export function renderDetailTrack(host, { dryMass = 1, wetMass = 1 } = {}) {
   };
   chit(dryMass, '#94a3b8', 'DRY');
   chit(wetMass, '#f5c518', 'WET');
+
+  // Fuel-step readout under the WET chit: how many black burn connections
+  // separate wet from dry (the rocket's burnable fuel steps). Counted off the
+  // graph above, so it always matches the black line the player can trace.
+  {
+    const wetNode = at(wetMass) || at(Math.max(MIN_DRY, Math.min(MAX_WET, Math.round(wetMass))));
+    if (wetNode) {
+      const wx = xOf(wetNode.mass), wy = yOf(wetNode);
+      const ft = blackStepsBetween(dryMass, wetMass);
+      const label = `${ft} fuel step${ft === 1 ? '' : 's'}`;
+      const bw = 12 + label.length * 5.2;
+      p.push(`<g><title>${esc(label)} from dry to wet (count of black burn connections)</title>`
+        + `<rect x="${(wx - bw / 2).toFixed(1)}" y="${(wy + 19).toFixed(1)}" width="${bw.toFixed(1)}" height="15" rx="4" fill="#f5c518" stroke="#0c0a16" stroke-opacity="0.3"/>`
+        + `<text x="${wx.toFixed(1)}" y="${(wy + 29.6).toFixed(1)}" font-size="8.5" font-weight="800" text-anchor="middle" fill="#0c0a16">${esc(label)}</text></g>`);
+    }
+  }
 
   const svg = `<svg viewBox="0 0 ${TRACK_W} ${TRACK_H}" width="${TRACK_W}" height="${TRACK_H}" class="ntd-svg" role="img" aria-label="Detailed Net Thrust track">`
     + `<defs><marker id="ntd-ar" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0 L7 3.5 L0 7 z" fill="#ec5a96"/></marker></defs>`

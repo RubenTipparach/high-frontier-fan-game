@@ -129,8 +129,9 @@ Thruster-specific fields (carried on whichever face is active):
   thrust circle on the card). Triangle silhouette is fixed-size
   per the published convention; only the number inside the
   pink circle changes per card.
-- `isp` - burns per fuel unit. The card's fuel droplet shows
-  `ceil(thrust / isp)`, the water cost of one burn.
+- `isp` - thrust per fuel step. The card's fuel droplet shows
+  `ceil(thrust / isp)` (= the card's `fuel`), the FUEL STEPS one burn
+  spends - NOT a water cost. See "Fuel steps vs water / aqua" below.
 - `requires` - array of `{ kind, count }`. Stack constraints the
   ship's other cards must collectively satisfy. The card UI
   renders the requirement icons in a row (with an ×N badge for
@@ -141,6 +142,31 @@ Thruster-specific fields (carried on whichever face is active):
   kinds at BUILD time; thrusters consume them.
 - `supports` (string array) is accepted as shorthand and auto-
   expanded into `requires` with count: 1 per entry.
+
+**Fuel steps vs water / aqua - NOT the same unit.** A *fuel step* is
+one black (burn) connection on the detailed fuel graph
+(`js/game/net-thrust-detail.js`, the published net-thrust ladder).
+Entering a burn node spends the thruster's `fuel` fuel steps, walking
+the wet-mass chit that many black connections down toward dry mass. The
+rocket's total burnable capacity is the count of black connections from
+the WET chit to the DRY chit (`blackStepsBetween`). *Water* and *aqua*
+are 1-to-1 mass units (tank water = wet mass - dry mass; aqua converts
+1:1 to water). Fuel steps map to water only NON-linearly through the
+ladder (a step buys less mass-fraction the heavier the ship: ninths in
+WISP ... whole units in TUG), so "N fuel steps" is never "N water".
+Don't use the old "FT" abbreviation - it read as "fuel tank" and muddied
+this. Burn costs in logs / UI are denominated in fuel steps, not water.
+
+KNOWN INCONSISTENCY (don't silently "fix" without a design pass):
+`data/net-thrust-track.js#fuelStepsBetween` (used by the stack panel's
+fuel readout and `getActiveThrusterStats().burnsAvailable`) returns a
+DIFFERENT count than the detailed graph's black connections
+(`blackStepsBetween`), and the MOVE engine deducts the per-burn cost
+from the water tank 1-to-1 (`ceil(fuel * burns)` vs `tank`). Both treat
+fuel steps and water as interchangeable, which contradicts the above.
+Reconciling (one canonical fuel-step model + a non-linear
+fuel-step<->water conversion at burn time, on client AND server) is a
+tracked follow-up.
 
 NOTE: there is NO `power_req` field. Older drafts had one; it
 was removed because requirements are gated through the kind/
@@ -526,8 +552,10 @@ Server-authoritative engine in `server/game/engine.js`:
   on which turn, bounded by thrust burns/turn). MOVE sends the SERVER
   this turn's segments `[{from, to, burns, turn}]`; the server VALIDATES
   structure (node existence, continuity from the rocket's position),
-  charges the real water cost (`ceil(fuel * thisTurnBurns)` from the
-  active thruster face's `fuel`), resolves hazards / factory-assist /
+  charges the fuel-step cost (`ceil(fuel * thisTurnBurns)` from the
+  active thruster face's `fuel`; see the fuel-steps-vs-water note - this
+  cost is currently deducted from the water tank 1-to-1, a known
+  inconsistency), resolves hazards / factory-assist /
   dice authoritatively, and executes only that one turn - but it TRUSTS
   the client's `burns` + `turn` values. The server's own
   `server/game/planner-graph.js` only does a naive burns-Dijkstra used

@@ -466,7 +466,7 @@ function applyMove(state, op, player) {
     destroyRocket(player);
     return {
       ok: true, state,
-      log: `${player.name} burned ${cost} water and was DESTROYED at ${whereName} (rolled a 1).`,
+      log: `${player.name} burned ${cost} fuel steps and was DESTROYED at ${whereName} (rolled a 1).`,
     };
   }
 
@@ -494,7 +494,11 @@ function applyMove(state, op, player) {
   };
 
   const destName = (destSite && destSite.name) || dest;
-  let log = `${player.name} burned ${cost} water to ${destName}.`;
+  // Origin captured before the move (siteId was already advanced to dest).
+  // null == LEO. Fuel steps (not water): a burn spends fuel steps, which
+  // are non-linear with the water/aqua loaded onto the rocket.
+  const originName = from == null ? 'LEO' : ((siteById(from) || {}).name || from);
+  let log = `${player.name} burned ${cost} fuel steps from ${originName} to ${destName}.`;
   const nItems = rollItems.length;
   if (finaoCost > 0) log += ` Paid ${finaoCost} aqua (FINAO) past ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
   else if (nItems) log += ` Rolled through ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
