@@ -1,4 +1,6 @@
 node_modules/
+# Frontend build output (produced by scripts/build.mjs in CI).
+dist/
 *.log
 .DS_Store
 *.local

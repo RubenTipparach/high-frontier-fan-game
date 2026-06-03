@@ -205,20 +205,53 @@ Mirrors the murdoku-companion split:
 ```
 ┌────────────────────────────────┐   HTTPS+CORS   ┌────────────────────────────────┐
 │ GitHub Pages                   │ <------------> │ Fly.io app: high-frontier-fan-game  │
-│ static ES modules, no build    │   WS (wss://)  │  Express + ws + better-sqlite3│
+│ esbuild bundle -> dist/ (hashed)│  WS (wss://)  │  Express + ws + better-sqlite3│
 │ index.html, css/*, js/*        │ <------------> │  volume: /data/hf.db          │
 │ deployed on every branch       │                │  admin at /admin              │
 └────────────────────────────────┘                └────────────────────────────────┘
 ```
 
-- **Frontend**: pure HTML/CSS/ES modules. No bundler, no framework, no build
-  step. Static files under repo root deploy to GH Pages on every push to
-  every branch.
+- **Frontend**: plain HTML/CSS/ES modules, no framework. Local dev is
+  build-free (serve the repo root; `index.html` loads the raw `./js/main.js`
+  as ES modules). PRODUCTION runs one build step: `scripts/build.mjs` bundles
+  + minifies with esbuild into `dist/` using content-hashed filenames, and CI
+  deploys `dist/` to GH Pages on every push to every branch. The hash is the
+  cache-bust: a changed module gets a new URL, so clients can never get stuck
+  on a stale deep module (the failure that `?v=` on the entry alone could not
+  fix - deep imports carried no version). See "Build + cache-busting" below.
 - **Backend**: Node 20 Express server with `better-sqlite3` for persistence
   and the `ws` library for WebSocket gameplay. One SQLite file on a Fly
   volume (`/data/hf.db`). Single-writer; do not horizontally scale.
 - **Deploy**: `.github/workflows/deploy.yml` runs on every push. Pages and
   Fly deploys are independent jobs; Fly job is gated on the canonical repo.
+
+### Build + cache-busting
+
+Production is bundled; local dev is not.
+
+- **Local dev (no build):** serve the repo root (`python3 -m http.server`).
+  `index.html` loads `./js/main.js` as raw ES modules - edit + refresh, no
+  build. Keep the source runnable this way.
+- **Production (`scripts/build.mjs`, esbuild):** bundles + minifies into
+  `dist/` with content-hashed names (`js/main-<hash>.js`, `css/*-<hash>.css`).
+  The build keeps the entry at `dist/js/` depth ON PURPOSE, so `base.js`'s
+  `import.meta.url` `'../'` still resolves to the app root from inside the
+  bundle. It rewrites the dist `index.html` to the hashed names, writes
+  `version.json`, injects the commit SHA into version-check (esbuild
+  `--define`), and copies the runtime-fetched assets (rocket PNGs, planner
+  `data-hf4.json`, `site-flags.json`) to their app-root-relative paths - they
+  are NOT imported, so the bundler never sees them; `base.js#assetUrl`
+  resolves them at runtime.
+- **Why hashing:** ES module imports carried no `?v=`, so a deploy only
+  cache-busted `main.js`, never the modules it imported - clients got stuck on
+  a stale deep module after a deploy. Content hashes make a changed module a
+  new URL (always re-fetched); `version-check.js` still reloads kept-open tabs
+  so they pick up the new `index.html`.
+- **CI gates (both must pass before deploy):** `node scripts/check-boot.mjs`
+  links the source module graph, and the esbuild build itself fails on any
+  parse/link error. The deploy uploads `dist/`, not the repo root.
+- Adding a runtime-fetched asset? Load it via `assetUrl(...)` AND add it to
+  the copy list in `scripts/build.mjs`, or it will not exist in `dist/`.
 
 ## Two play modes - async and realtime
 
@@ -575,7 +608,18 @@ Random-numbered seeds are stored per game so replays are deterministic.
   the data source (server snapshot) and action sink (`submitGameOp`)
   change. See "The multiplayer UI IS the sandbox UI" above. The
   competitive auction is the sole bespoke-MP exception.
-- Don't add a frontend build step. ES modules, plain CSS, plain HTML.
+- Don't break local dev's build-free flow. The SOURCE stays plain ES
+  modules + CSS + HTML: `index.html` references the raw `./js/main.js`, so
+  `python3 -m http.server` runs the app with no build. The esbuild build
+  (`scripts/build.mjs`) is PRODUCTION-only and reads the same source. Don't
+  introduce framework/JSX/TS syntax that only works after a build, or import
+  CSS/assets into JS - keep the source runnable raw. See "Build +
+  cache-busting".
+- Don't recompute the app base or asset paths inline. Import `appBase()` /
+  `assetUrl()` from `js/base.js`. It is the ONLY `import.meta.url`-relative
+  path computation in the app (besides version-check.js's sibling
+  `version.json`); inline `new URL('../', import.meta.url)` breaks under
+  bundling because the bundle collapses every module to one depth.
 - Don't trust client moves. Every game mutation goes through
   `server/game/engine.js#applyOperation`, validated against the
   current `state`. WS clients send operation intents; the server

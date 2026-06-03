@@ -14,10 +14,11 @@
 // makes the browser re-fetch index.html (and therefore re-fetch every
 // asset whose `?v=...` now points at the new SHA).
 //
-// Local dev keeps the literal placeholder so the check is a no-op:
-// nothing fetches, nothing reloads.
-
-const BUILD = '__BUILD_SHA__';
+// The build replaces the __BUILD_SHA__ identifier (esbuild --define) with
+// the commit SHA string. Local dev (no build) leaves it undefined, so BUILD
+// falls back to the placeholder and the check is a no-op: nothing fetches,
+// nothing reloads. (typeof on an undeclared name is safe - no ReferenceError.)
+const BUILD = (typeof __BUILD_SHA__ !== 'undefined') ? __BUILD_SHA__ : ('__BUILD' + '_SHA__');
 const DEV_PLACEHOLDER = '__BUILD' + '_SHA__';
 const POLL_MS = 60_000;
 
