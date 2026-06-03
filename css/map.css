@@ -2504,6 +2504,11 @@ body:has(#view-browse:not(.hidden)) #main {
   letter-spacing: 2px;
   text-transform: uppercase;
   text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
   padding: 6px 12px;
   border-top: 1px solid var(--border);
   border-bottom: 2px solid var(--border);
@@ -2525,6 +2530,34 @@ body:has(#view-browse:not(.hidden)) #main {
   background: #000;
   color: #6cf28a;
   text-shadow: 0 0 12px rgba(108, 242, 138, 0.55), 0 0 2px #000;
+}
+/* Inline priority-action buttons docked in the turn bar (a collapsed auction
+   or crew draft). They sit in the bar so a pending action reads with the turn
+   notification; the gentle mp-chip-active glow says "something live is here",
+   and needs-action pulses harder when it owes you a move. */
+.mp-turn-label { display: inline-flex; align-items: center; }
+.mp-turn-actions { display: inline-flex; align-items: center; gap: 8px; }
+.mp-turn-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-2);
+  background: var(--panel-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.4;
+  cursor: pointer;
+  text-shadow: none;
+  animation: mp-chip-active 2.2s ease-in-out infinite;
+}
+.mp-turn-action:hover { border-color: var(--accent); }
+.mp-turn-action-meta { color: var(--accent-2); font-weight: 700; }
+.mp-turn-action.needs-action {
+  border-color: var(--accent);
+  animation: mp-chip-needs-action 1.4s ease-in-out infinite;
 }
 .browse-sidepanel[data-active=""] ~ .mp-turn-banner { right: 48px; }
 .browse-sidepanel[data-active]:not([data-active=""]) ~ .mp-turn-banner {
@@ -6419,9 +6452,7 @@ body:has(#view-browse:not(.hidden)) #main {
   font-weight: 700;
   cursor: pointer;
   box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5);
-  /* A shown chip means a live activity (auction / crew) is docked at the turn
-     bar - glow gently so it draws the eye there. needs-action pulses harder. */
-  animation: modal-fade 0.18s ease-out, mp-chip-active 2.2s ease-in-out infinite;
+  animation: modal-fade 0.18s ease-out;
 }
 .mp-mini-chip:hover { border-color: var(--accent); }
 .mp-mini-chip-meta {
@@ -6451,20 +6482,14 @@ body:has(#view-browse:not(.hidden)) #main {
   background: transparent;
   backdrop-filter: none;
   pointer-events: none;
-  /* Dock the minimized chip onto the turn-notification cluster: bottom of the
-     map, centered, just above the turn banner (which sits at
-     bottom: --hand-height). Keeps the priority action (auction / crew) with
-     the "whose turn it is" bar instead of floating loose over the board. */
-  align-items: flex-end;
-  justify-content: center;
-  padding: 0 14px calc(var(--hand-height, 320px) + 34px);
 }
 .mp-crew-draft-overlay.is-minimized .mp-crew-draft-panel,
 .mp-auction-overlay.is-minimized .mp-auction-modal { display: none; }
+/* Collapsed activities dock as an inline button in the turn bar
+   (.mp-turn-action), so the old floating mini-chip stays hidden. */
 .mp-crew-draft-overlay.is-minimized .mp-mini-chip,
 .mp-auction-overlay.is-minimized .mp-mini-chip {
-  display: inline-flex;
-  pointer-events: auto;
+  display: none;
 }
 
 /* ----- first-player handoff overlay (round-end) ----- */

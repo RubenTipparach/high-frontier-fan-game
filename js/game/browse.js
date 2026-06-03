@@ -630,6 +630,7 @@ function syncCrewDraftOverlay(snapshot) {
     && gameViewVisible();
   if (!drafting) {
     if (existing) existing.remove();
+    setMpTurnAction('crew', null);
     return;
   }
   const players = snapshot.players || [];
@@ -714,15 +715,25 @@ function syncCrewDraftOverlay(snapshot) {
   // persisted _crewDraftMin flag is re-applied here and the fresh
   // buttons are re-wired each pass.
   overlay.classList.toggle('is-minimized', _crewDraftMin);
+  // Docked representation in the turn bar (the floating chip is hidden via
+  // CSS). Present only while collapsed; the modal shows otherwise.
+  setMpTurnAction('crew', _crewDraftMin ? {
+    label: '🧑‍🚀 Crew',
+    meta: `${picked.length}/${players.length}`,
+    needsAction: !myFaction,
+    onClick: () => { _crewDraftMin = false; syncCrewDraftOverlay(_onlineSnapshot); },
+  } : null);
   const miniBtn = overlay.querySelector('.mp-mini-btn');
   const miniChip = overlay.querySelector('.mp-mini-chip');
   if (miniBtn) miniBtn.addEventListener('click', () => {
     _crewDraftMin = true;
     overlay.classList.add('is-minimized');
+    syncCrewDraftOverlay(_onlineSnapshot);
   });
   if (miniChip) miniChip.addEventListener('click', () => {
     _crewDraftMin = false;
     overlay.classList.remove('is-minimized');
+    setMpTurnAction('crew', null);
   });
   // Suppress the bare waiting overlay while the wizard's own modal
   // is open - the modal already says everything the overlay would.
@@ -777,23 +788,83 @@ async function submitMpCrewOp(op) {
   return true;
 }
 
+// The turn bar holds a centred label plus a slot for inline priority-action
+// buttons. Lazily split #mp-turn-banner into those two parts and return the
+// label span: syncMpTurnBanner writes the "whose turn" text to the label, and
+// the auction / crew syncs own the actions slot (setMpTurnAction), so neither
+// stomps the other when they run in the same snapshot apply.
+function ensureTurnBannerParts(banner) {
+  let label = banner.querySelector('.mp-turn-label');
+  if (!label) {
+    banner.textContent = '';
+    label = document.createElement('span');
+    label.className = 'mp-turn-label';
+    const actions = document.createElement('span');
+    actions.className = 'mp-turn-actions';
+    banner.append(label, actions);
+  }
+  return label;
+}
+
+// Render (or clear) an inline priority-action button in the turn bar. `key`
+// ('auction' | 'crew') lets the two coexist or replace independently; a null
+// `spec` removes that key's button. This is the docked home for a collapsed
+// activity: it lives inside the turn notification, glows while live, and
+// pulses when it owes you an action. Clicking runs spec.onClick (reopen the
+// full modal).
+function setMpTurnAction(key, spec) {
+  const banner = document.getElementById('mp-turn-banner');
+  if (!banner) return;
+  ensureTurnBannerParts(banner);
+  const slot = banner.querySelector('.mp-turn-actions');
+  if (!slot) return;
+  let btn = slot.querySelector(`button[data-turn-action="${key}"]`);
+  if (!spec) { if (btn) btn.remove(); return; }
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.type = 'button';
+    btn.dataset.turnAction = key;
+    btn.className = 'mp-turn-action';
+    slot.appendChild(btn);
+  }
+  btn.classList.toggle('needs-action', !!spec.needsAction);
+  btn.onclick = spec.onClick;
+  btn.textContent = '';
+  const lab = document.createElement('span');
+  lab.className = 'mp-turn-action-label';
+  lab.textContent = spec.label;
+  btn.appendChild(lab);
+  if (spec.meta) {
+    btn.appendChild(document.createTextNode(' '));
+    const meta = document.createElement('span');
+    meta.className = 'mp-turn-action-meta';
+    meta.textContent = spec.meta;
+    btn.appendChild(meta);
+  }
+}
+
 // Big bold "YOUR TURN" / "@<name>'s turn" banner anchored above the
 // hand strip. Visible only in online mode; hidden otherwise so solo
-// play doesn't show a stale label.
+// play doesn't show a stale label. The "whose turn" text writes to the
+// label span; collapsed auction / crew activities dock their own inline
+// buttons into the actions slot via setMpTurnAction.
 function syncMpTurnBanner(snapshot) {
   const banner = document.getElementById('mp-turn-banner');
   if (!banner) return;
+  const label = ensureTurnBannerParts(banner);
   if (!_online || !snapshot || !Array.isArray(snapshot.players)) {
     banner.hidden = true;
     banner.classList.remove('is-your-turn');
     banner.style.removeProperty('--mp-turn-color');
-    banner.textContent = '';
+    label.textContent = '';
+    setMpTurnAction('auction', null);
+    setMpTurnAction('crew', null);
     return;
   }
   const myId = _onlineMe && _onlineMe.id;
   // Game over takes over the banner: no one is "up" any more.
   if (snapshot.status === 'finished') {
-    banner.textContent = '🏁 Game over';
+    label.textContent = '🏁 Game over';
     banner.classList.remove('is-your-turn');
     banner.style.removeProperty('--mp-turn-color');
     banner.hidden = false;
@@ -806,7 +877,7 @@ function syncMpTurnBanner(snapshot) {
     const mine = !!(chooser && chooser.profileId === myId);
     if (chooser && chooser.color) banner.style.setProperty('--mp-turn-color', chooser.color);
     else banner.style.removeProperty('--mp-turn-color');
-    banner.textContent = mine
+    label.textContent = mine
       ? '⭐ Pick the first player'
       : '@' + (chooser ? chooser.name : '?') + ' is picking first player';
     banner.classList.toggle('is-your-turn', mine);
@@ -827,13 +898,13 @@ function syncMpTurnBanner(snapshot) {
   // banner always shows where in the game we are.
   const tn = formatTurnNumber(snapshot.round, snapshot.turn, snapshot.maxRounds);
   if (!active) {
-    banner.textContent = `Waiting… · ${tn}`;
+    label.textContent = `Waiting… · ${tn}`;
     banner.classList.remove('is-your-turn');
   } else if (myTurn) {
-    banner.textContent = `Your turn · ${tn}`;
+    label.textContent = `Your turn · ${tn}`;
     banner.classList.add('is-your-turn');
   } else {
-    banner.textContent = `@${active.name}'s turn · ${tn}`;
+    label.textContent = `@${active.name}'s turn · ${tn}`;
     banner.classList.remove('is-your-turn');
   }
   banner.hidden = false;
@@ -919,6 +990,7 @@ function renderOnlineAuction(auction) {
     _auctionTurnEdge = null;
     _bidDraft = '';
     _joinDraft = '';
+    setMpTurnAction('auction', null);
     return;
   }
   if (_auctionKey !== auction.cardId) {
@@ -969,10 +1041,12 @@ function renderOnlineAuction(auction) {
     overlay.querySelector('.mp-mini-btn').addEventListener('click', () => {
       _auctionMin = true;
       overlay.classList.add('is-minimized');
+      renderOnlineAuction(_onlineSnapshot && _onlineSnapshot.auction);
     });
     overlay.querySelector('.mp-mini-chip').addEventListener('click', () => {
       _auctionMin = false;
       overlay.classList.remove('is-minimized');
+      setMpTurnAction('auction', null);
     });
     // Mount the side chat once: backfill from the in-memory log and wire
     // its own send form (live messages fan in via appendMpChat).
@@ -1116,15 +1190,23 @@ function renderOnlineAuction(auction) {
   // live high-bid summary. Re-apply the persisted minimize state.
   const chip = overlay.querySelector('.mp-mini-chip');
   const chipMeta = overlay.querySelector('.mp-mini-chip-meta');
-  if (chipMeta) {
-    chipMeta.textContent = turn.shouldAct
-      ? 'your turn - bid or pass'
-      : turn.shouldClose
-        ? 'ready to close'
-        : (auction.highBid > 0 ? `high bid ${auction.highBid}` : 'no bids');
-  }
+  const metaText = turn.shouldAct
+    ? 'your turn - bid or pass'
+    : turn.shouldClose
+      ? 'ready to close'
+      : (auction.highBid > 0 ? `high bid ${auction.highBid}` : 'no bids');
+  if (chipMeta) chipMeta.textContent = metaText;
   if (chip) chip.classList.toggle('needs-action', actionNeeded);
   overlay.classList.toggle('is-minimized', _auctionMin);
+  // Docked representation: an inline button in the turn bar (the floating
+  // chip is hidden via CSS). Present only while collapsed; the full modal
+  // shows otherwise.
+  setMpTurnAction('auction', _auctionMin ? {
+    label: '⚖️ Auction',
+    meta: metaText,
+    needsAction: actionNeeded,
+    onClick: () => { _auctionMin = false; renderOnlineAuction(auction); },
+  } : null);
 }
 
 function setMpAuctionError(text) {
