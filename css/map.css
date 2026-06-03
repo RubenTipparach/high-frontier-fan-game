@@ -108,10 +108,17 @@
   color: var(--ink);
 }
 .map-turn-controls #turn-end {
-  background: linear-gradient(180deg, #f97316, #c2410c);
+  /* Seat-colour fill: the active player's colour (--mp-turn-color, set by
+     refreshTurnBudget; falls back to the default orange). The translucent
+     top-light / bottom-shade overlay gives the button depth on any seat colour
+     without needing color-mix. Text colour is set inline (readableInk) so it
+     stays legible on light seats (yellow / cream) and the dark one (magenta). */
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.10), rgba(0, 0, 0, 0.34)),
+    var(--mp-turn-color, #f97316);
   color: #2e0f02;
   font-weight: 700;
-  border-color: #9a3412;
+  border-color: var(--mp-turn-color, #9a3412);
 }
 /* Operations used up: glow + pulse the End turn button (an attention beat,
    like the auction action chip) so the player sees the turn is ready to hand
@@ -121,12 +128,10 @@
 }
 @keyframes turn-end-glow {
   0%, 100% {
-    box-shadow: 0 0 4px 1px rgba(249, 178, 80, 0.45);
-    border-color: #9a3412;
+    box-shadow: 0 0 4px 1px color-mix(in srgb, var(--mp-turn-color, #f9b250) 45%, transparent);
   }
   50% {
-    box-shadow: 0 0 16px 4px rgba(249, 178, 80, 0.95), 0 0 6px 2px rgba(255, 224, 160, 0.75);
-    border-color: #fdba74;
+    box-shadow: 0 0 18px 5px color-mix(in srgb, var(--mp-turn-color, #f9b250) 92%, transparent);
   }
 }
 .map-turn-controls button:not(.turn-tag):hover:not(:disabled) {

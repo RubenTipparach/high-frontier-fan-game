@@ -794,6 +794,19 @@ async function submitMpCrewOp(op) {
   return true;
 }
 
+// Dark or light ink for legible text on a seat-colour fill. Most seat colours
+// are light (yellow / cream / mint), one is dark (magenta), so flip on
+// perceived luminance.
+function readableInk(hex) {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(hex || ''));
+  if (!m) return '#2e0f02';
+  let h = m[1];
+  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.58 ? '#1a1206' : '#fff';
+}
+
 // The turn bar holds a centred label plus a slot for inline priority-action
 // buttons. Lazily split #mp-turn-banner into those two parts and return the
 // label span: syncMpTurnBanner writes the "whose turn" text to the label, and
@@ -4728,6 +4741,19 @@ function ensureMapShell(host) {
     if (endTurnBtn) {
       endTurnBtn.disabled = lockedByOnline;
       endTurnBtn.classList.toggle('is-locked', lockedByOnline);
+      // Colour the End turn button (and its glow) with the active player's
+      // seat colour - the same colour the turn banner uses - so it reads as
+      // "whose turn it is". Solo / no active player falls back to the default.
+      const activePlayer = _onlineSnapshot && Array.isArray(_onlineSnapshot.players)
+        ? _onlineSnapshot.players[_onlineSnapshot.activeIndex] : null;
+      const seat = activePlayer && activePlayer.color;
+      if (seat) {
+        endTurnBtn.style.setProperty('--mp-turn-color', seat);
+        endTurnBtn.style.color = readableInk(seat);
+      } else {
+        endTurnBtn.style.removeProperty('--mp-turn-color');
+        endTurnBtn.style.removeProperty('color');
+      }
       // Operations used up, and no auction lot waiting on a bid: glow the End
       // turn button (like the auction action chip) so it's obvious the turn is
       // ready to hand off. With an op still to spend or a live auction, stay dark.
