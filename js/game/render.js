@@ -1,5 +1,6 @@
 import { getRocketSprite, getRocketSpriteSize } from './rocket-sprite.js';
 import { thrustVisual } from './card-ui.js';
+import { assetUrl } from '../base.js';
 
 // Canvas-based renderer for the delta-v map.
 //
@@ -781,7 +782,7 @@ export class MapRenderer {
       // and a bare 'assets/...' would resolve to /room/assets/... (404).
       // import.meta.url is always /js/game/render.js, so ../../assets
       // lands at the real app-root /assets.
-      img.src = new URL(`../../assets/rockets/${name}.png`, import.meta.url).toString();
+      img.src = assetUrl(`assets/rockets/${name}.png`);
       this._ambientSprites.push(img);
     }
     this._partitionSites();

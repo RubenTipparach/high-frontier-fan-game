@@ -8,6 +8,8 @@
 // modules re-read the restored live keys. Only GAME_KEYS are swapped, so
 // global UI prefs (map / zone / route-priority) stay shared across games.
 
+import { appBase } from '../base.js';
+
 const META_GAMES = 'hf-sb-games';     // registry: [{id, createdAt, lastPlayedAt}]
 const META_ACTIVE = 'hf-sb-active';   // id of the game currently in the live keys
 const SAVE_PREFIX = 'hf-sb-save-';    // per-game snapshot blob
@@ -162,11 +164,7 @@ export function abandonSandboxGame(id) {
   return remaining.length ? remaining[0].id : null;
 }
 
-// App base path (independent of the address bar, which may already be a
-// deep /sandbox/<id>). Mirrors main.js#appBase.
-function appBase() {
-  return new URL('../../', import.meta.url).pathname;
-}
+// appBase() comes from ../base.js (shared, bundling-safe app base).
 // The /sandbox/<id> URL, preserving the ?v=<sha> version pin.
 export function sandboxUrl(id) {
   const base = appBase();

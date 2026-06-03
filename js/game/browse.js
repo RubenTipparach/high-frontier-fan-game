@@ -6,6 +6,7 @@
 // replace with the live game.
 
 import { MapRenderer, LEO_ANCHOR } from './render.js';
+import { appBase } from '../base.js';
 import { loadPlannerMap } from './planner-map.js';
 import { planRoute } from './planner-nav.js';
 import {
@@ -10964,7 +10965,7 @@ function openRouteOptionsModal(onClose) {
       try {
         const cur = new URL(window.location.href);
         const v = cur.searchParams.get('v');
-        const url = new URL('../../lobby', import.meta.url).pathname
+        const url = appBase() + 'lobby'
           + (v ? '?v=' + encodeURIComponent(v) : '');
         window.location.assign(url);
       } catch { window.location.assign('../../lobby'); }

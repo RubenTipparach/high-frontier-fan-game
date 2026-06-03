@@ -16,6 +16,7 @@ import {
 } from './invites.js';
 import { mountBrowse, isBrowseOnline, refreshRoomOverlays } from './game/browse.js';
 import { newSandboxGame, currentSandboxId, activateSandboxGame } from './game/sandbox-games.js';
+import { appBase } from './base.js';
 
 const VIEWS = [
   'view-signin', 'view-lobby-list', 'view-create-lobby', 'view-lobby',
@@ -27,13 +28,8 @@ const VIEWS = [
 // sign-in / lobby-list.
 let _prevView = null;
 
-// Resolve the app base independently of the address bar (the bar can
-// already be a deep /room/<code> or /sandbox path). import.meta.url is
-// always <base>/js/main.js, so '../' off it is the app base no matter
-// what the visible URL says.
-function appBase() {
-  return new URL('../', import.meta.url).pathname;
-}
+// appBase() comes from ./base.js - the single, bundling-safe source of the
+// app base path (the address bar can already be a deep /room or /sandbox).
 
 // Write the URL for the given view. React-router style: switching views
 // rewrites the path so a refresh / shared link / restore lands on the

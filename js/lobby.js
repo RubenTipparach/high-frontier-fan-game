@@ -7,6 +7,7 @@ import {
   startLobby, kickPlayer, claimInviteLink, lookupInviteLink,
   fetchGlobalChat, sendGlobalChat, getAnnouncement,
 } from './api.js';
+import { appBase } from './base.js';
 import { activeProfile, onProfileChange } from './auth.js';
 import { ws } from './ws.js';
 import { saveLastLobbyId } from './storage.js';
@@ -824,7 +825,7 @@ export function exitToLobbyList() {
 // so a later version-check reload keeps the same build.
 function setRoomInUrl(code) {
   try {
-    const base = new URL('../', import.meta.url).pathname;   // /high-frontier-fan-game/
+    const base = appBase();   // /high-frontier-fan-game/
     const cur = new URL(window.location.href);
     const v = cur.searchParams.get('v');
     const search = v ? ('?v=' + encodeURIComponent(v)) : '';
