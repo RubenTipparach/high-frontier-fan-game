@@ -62,8 +62,13 @@ export function confirmEndTurn() {
 // is unspent, otherwise advance immediately. Returns the
 // endTurn() result (turn + event) when the turn actually ends,
 // or null if the player cancelled.
-export async function triggerEndTurn() {
-  const needsConfirm = getMovesRemaining() > 0 || getOpsRemaining() > 0;
+export async function triggerEndTurn(opts = {}) {
+  // Confirm only when the player could still act: an operational rocket
+  // (passed in by the caller, which knows the stack) plus an unspent move or
+  // operation. Defaults to confirming on any leftover budget when the caller
+  // doesn't specify (back-compat).
+  const hasRocket = opts.hasRocket !== false;
+  const needsConfirm = hasRocket && (getMovesRemaining() > 0 || getOpsRemaining() > 0);
   if (needsConfirm) {
     const ok = await confirmEndTurn();
     if (!ok) return null;

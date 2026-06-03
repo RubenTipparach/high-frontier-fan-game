@@ -15,7 +15,7 @@ import {
   getOpsRemaining, consumeOp,
   getDiscardsRemaining, consumeDiscard, formatTurnNumber,
 } from './turn-clock.js';
-import { triggerEndTurn, openTurnClockModal, buildDie, rollDie } from './turn-clock-ui.js';
+import { triggerEndTurn, confirmEndTurn, openTurnClockModal, buildDie, rollDie } from './turn-clock-ui.js';
 import {
   getState as soloState, newGame as soloNewGame, abandonGame as soloAbandon,
   setTarget as soloSetTarget, commitMove as soloCommitMove,
@@ -4613,16 +4613,27 @@ function ensureMapShell(host) {
   // lands - it just consumes the per-turn move budget for now so
   // the end-turn confirm reflects the spend.
   host.querySelector('#turn-end').addEventListener('click', async () => {
+    // Confirm before ending with budget the player could still use: an
+    // operational rocket (active thruster) plus an unspent move or operation
+    // means there's still something to do this turn. No rocket, or nothing
+    // left to spend -> end straight away.
+    let hasRocket = false;
+    try { const ra = isRocketActive(); hasRocket = !!(ra && ra.active); } catch { hasRocket = false; }
     // Online: the server advances the turn (and resolves any Sunspot
     // Cube event), broadcasting the new snapshot. Send END_TURN and let
     // applySnapshot redraw; skip the local clock/event/log flow below.
-    if (_online) { await submitOnlineOp({ kind: 'END_TURN' }); return; }
+    if (_online) {
+      if (hasRocket && (getMovesRemaining() > 0 || getOpsRemaining() > 0)
+        && !(await confirmEndTurn())) return;
+      await submitOnlineOp({ kind: 'END_TURN' });
+      return;
+    }
     // Capture the previous slot BEFORE advancing so the modal can
     // animate the Sunspot Cube sliding from old → new instead of
     // teleporting. If the player cancels the confirm, nothing
     // moved, so we skip the modal entirely.
     const prevTurn = getTurn();
-    const result = await triggerEndTurn();
+    const result = await triggerEndTurn({ hasRocket });
     if (!result) return;
     // Sunspot Cube landed on an event slot - apply the d6 outcome
     // (VP credit / debit + flavour log line) BEFORE we commit the
@@ -4714,6 +4725,9 @@ function ensureMapShell(host) {
     if (endTurnBtn) {
       endTurnBtn.disabled = lockedByOnline;
       endTurnBtn.classList.toggle('is-locked', lockedByOnline);
+      // Operations used up: glow the End turn button (like the auction action
+      // chip) so it's obvious the turn is ready to hand off.
+      endTurnBtn.classList.toggle('needs-end', ops <= 0 && !lockedByOnline);
       endTurnBtn.title = lockedByOnline
         ? 'Waiting for your turn.'
         : 'End your turn';
