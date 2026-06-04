@@ -338,11 +338,15 @@ function applyMove(state, op, player) {
 
   let dest, thisTurnBurns, arrivals;
   if (segs && segs.length) {
-    if (segs[0].from !== here) return fail('route_not_from_here');
-    for (let i = 1; i < segs.length; i++) {
-      if (segs[i].from !== segs[i - 1].to) return fail('route_discontinuous');
-    }
-    for (const s of segs) if (!plannerSiteExists(s.to)) return fail('unknown_site');
+    // The server does NOT verify the route's geometry (continuity from the
+    // rocket, segment-to-segment chaining, node existence). Routing is the
+    // CLIENT's job via the shared mission-planner; re-validating it here means
+    // maintaining a second route model that drifts and spuriously rejects a
+    // route that IS connected (route_not_from_here). The server's job on a
+    // MOVE is to validate + charge the BURNS (the fuel-step cost, below). It
+    // trusts the client's segments for the destination + arrival nodes.
+    // (TODO: real server-side route verification, when added, MUST reuse the
+    // client planner model - see CLAUDE.md "Movement authority".)
     dest = segs[segs.length - 1].to;
     thisTurnBurns = segs.reduce((b, s) => b + s.burns, 0);
     arrivals = segs.map((s) => s.to);
@@ -700,19 +704,12 @@ function applySetRoute(state, op, player) {
     const to = String(s.to || '');
     const burns = Math.max(0, Math.floor(Number(s.burns) || 0));
     const turn = Math.max(1, Math.floor(Number(s.turn) || 1));
-    if (!plannerSiteExists(from) || !plannerSiteExists(to)) return fail('unknown_site');
     norm.push({ from, to, burns, turn });   // turn drives per-turn MOVE execution
   }
-  // Validate continuity: each segment's from must be the previous to,
-  // and the first must start at the rocket's current position
-  // (siteId, null = LEO). Prevents a client from sending a
-  // disconnected path the engine couldn't actually execute.
-  const startsFrom = norm.length ? norm[0].from : null;
-  const here = player.rocket.siteId == null ? leoSlug() : player.rocket.siteId;
-  if (norm.length && startsFrom !== here) return fail('route_not_from_here');
-  for (let i = 1; i < norm.length; i++) {
-    if (norm[i].from !== norm[i - 1].to) return fail('route_discontinuous');
-  }
+  // The server does NOT validate the route's geometry (continuity / node
+  // existence) - routing is the client's planner job; this op just persists
+  // the (secret) plan. MOVE trusts these segments and validates only the
+  // burns. See CLAUDE.md "Movement authority".
   player.rocket.route = norm;
   return { ok: true, state, log: '' };  // empty log: routes are secret
 }

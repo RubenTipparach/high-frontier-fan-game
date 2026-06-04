@@ -574,32 +574,35 @@ Server-authoritative engine in `server/game/engine.js`:
   scaled by the active thruster's ISP. Aerobrakes and pivots have
   special edges.
 
-  **Movement authority - current trust model + eventual TODO.**
-  Routing is split between client and server right now. The CLIENT
+  **Movement authority - server validates FUEL, not ROUTES.** The CLIENT
   (the vendored mission-planner port, `js/game/planner-nav.js` +
-  `planner-dijkstra.js`) is the source of truth for the *hard* routing
-  math: the Hohmann-aware burn counts (free coasting along a transfer =
-  0 burns, pivots cost extra) and the per-turn split (which legs fire
-  on which turn, bounded by thrust burns/turn). MOVE sends the SERVER
-  this turn's segments `[{from, to, burns, turn}]`; the server VALIDATES
-  structure (node existence, continuity from the rocket's position),
-  charges the fuel-step cost (`ceil(fuel * thisTurnBurns)` from the
-  active thruster face's `fuel`; see the fuel-steps-vs-water note - this
-  cost is currently deducted from the water tank 1-to-1, a known
-  inconsistency), resolves hazards / factory-assist /
-  dice authoritatively, and executes only that one turn - but it TRUSTS
-  the client's `burns` + `turn` values. The server's own
-  `server/game/planner-graph.js` only does a naive burns-Dijkstra used
-  for the bare-destination fallback (a tap with no planned route).
-  Consequence: a modified client could send fake burns (e.g. 0) and
-  move for free. Fine for friends, not cheat-hardened.
-  **TODO (eventually): make movement fully server-authoritative.** Port
-  `planner-nav.js` + `planner-dijkstra.js` into a shared module (under
-  `data/` or a shared dir both import), have the engine independently
-  recompute the route `from -> dest` with the same Hohmann/pivot/
-  per-turn semantics, and reject any MOVE whose client-supplied
-  `burns` / `turn` don't match. Until then, treat client routing as
-  trusted input. (User OK'd the trust model 2026-05-29.)
+  `planner-dijkstra.js`) owns routing: the Hohmann-aware burn counts (free
+  coasting along a transfer = 0 burns, pivots cost extra) and the per-turn
+  split (which legs fire on which turn, bounded by thrust burns/turn). MOVE
+  sends the SERVER this turn's segments `[{from, to, burns, turn}]`. The
+  server does NOT verify the route's geometry (continuity from the rocket,
+  segment chaining, node existence) - re-validating it meant maintaining a
+  second route model that drifted and spuriously rejected a route that IS
+  connected (`route_not_from_here`). Instead the server does the SAME fuel
+  calculation the client does, off the shared `data/fuel-graph.js`: capacity =
+  `blackStepsBetween(dry, wet)`, a burn spends `ceil(fuelPerBurn * burns)` fuel
+  STEPS, the move is rejected (`insufficient_water` + a fuel-step `detail`)
+  only when those steps don't fit, and the spend walks the wet chit
+  (`walkBlackDown`) leaving a fractional remainder. It then resolves hazards /
+  factory-assist / dice authoritatively and executes only that one turn. The
+  ids on the wire are SERVER slugs: the client converts planner ids ->
+  slugs in ONE place (`browse.js#buildTurn1MoveOp`, used by the real move AND
+  the debug Simulate, so they're byte-identical).
+  Consequence: a modified client could send fake burns (e.g. 0) and move for
+  free, or send a disconnected route. Fine for friends, not cheat-hardened.
+  **TODO (route verification, later): make movement fully
+  server-authoritative.** Port `planner-nav.js` + `planner-dijkstra.js` into a
+  shared module both import, have the engine independently recompute the route
+  `from -> dest` with the SAME Hohmann/pivot/per-turn semantics as the client,
+  and reject any MOVE whose route/burns don't match. It MUST reuse the client
+  planner model (not a second server-only one) - that drift is exactly what we
+  just removed. Until then, the server trusts the client's route + burns and
+  validates only the fuel. (User: server validates burns not routes, 2026-06-04.)
 - Prospect: roll Nd6 (N = site class size); thresholds defined per
   site type. Success = place prospect marker; site becomes claimable
   by the prospector for industrialization.
