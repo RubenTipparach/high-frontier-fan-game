@@ -8,20 +8,21 @@
 //   generator = orange CIRCLE, white glyph
 //   radiator  = BLUE thermometer(s) on a WHITE rounded badge (×N therms)
 //   robonaut  = BLACK square, PINK glyph
-//   thruster  = DARK square, AMBER rocket-engine bell (chamber + ribbed nozzle)
-//   refinery  = SLATE square, white flask glyph
+//   thruster  = DARK square (amber-outlined), AMBER rocket-engine bell
+//   refinery  = SLATE square, white flask with GREEN bubbling liquid
 // See assets/support-icons/ for the rendered review sheet.
 
 const THERM_BLUE = '#59abeb';
 const ROBO_PINK = '#eec1a8';
 const BELL_AMBER = '#e9aa55';
+const FLASK_GREEN = '#16a34a';
 
 // shape: 'square' | 'circle'. ink: glyph colour. fill/ring: flat coin colours.
 export const SUPPORT_CAT = {
   reactor:   { shape: 'square', fill: '#8b5cf6', ring: '#6d28d9', ink: '#ffffff' },
   generator: { shape: 'circle', fill: '#f97316', ring: '#c2410c', ink: '#ffffff' },
   robonaut:  { shape: 'square', fill: '#0c0a16', ring: '#be185d', ink: ROBO_PINK },
-  thruster:  { shape: 'square', fill: '#222a3d', ring: '#0c0a16', ink: BELL_AMBER },
+  thruster:  { shape: 'square', fill: '#222a3d', ring: BELL_AMBER, ink: BELL_AMBER },
   refinery:  { shape: 'square', fill: '#94a3b8', ring: '#64748b', ink: '#ffffff' },
 };
 
@@ -87,19 +88,27 @@ const GLYPH = {
   'thruster': () => `
     <g transform="translate(16 16) scale(0.8) translate(-16 -16)">
       <path d="M13.5 5 H18.5 Q19.7 5 19.7 6.2 V10.3 Q19.7 11.8 18.7 12.4 L18.5 13
-               C19.2 18, 21.5 23.5, 27.5 27.5 H4.5
-               C10.5 23.5, 12.8 18, 13.5 13 L13.3 12.4 Q12.3 11.8 12.3 10.3 V6.2 Q12.3 5 13.5 5 Z" fill="currentColor"/>
+               C23.5 15, 27 21, 27.5 27.5 H4.5
+               C5 21, 8.5 15, 13.5 13 L13.3 12.4 Q12.3 11.8 12.3 10.3 V6.2 Q12.3 5 13.5 5 Z" fill="currentColor"/>
       <g stroke="__HOLE__" stroke-width="1.3" stroke-linecap="round">
-        <line x1="12" y1="20" x2="20" y2="20"/>
-        <line x1="10.3" y1="23" x2="21.7" y2="23"/>
-        <line x1="7.8" y1="26" x2="24.2" y2="26"/>
+        <line x1="9.3" y1="17" x2="22.7" y2="17"/>
+        <line x1="7.5" y1="20.5" x2="24.5" y2="20.5"/>
+        <line x1="6.3" y1="24" x2="25.7" y2="24"/>
       </g>
     </g>`,
-  // Refinery type: an Erlenmeyer flask with liquid - the local water plant.
+  // Refinery type: an Erlenmeyer flask of green, bubbling liquid - the local
+  // water plant hard at work. Green fill first, white flask outline on top,
+  // white bubbles rising in the liquid.
   'refinery': () => `
+    <path d="M11.2 20.8 L8.6 24 Q8 26.4 10.4 26.4 H21.6 Q24 26.4 23.4 24 L20.8 20.8 Z" fill="${FLASK_GREEN}"/>
     <path d="M12.8 7.8 H19.2 M14 7.8 V13.6 L8.6 24 Q8 26.4 10.4 26.4 H21.6 Q24 26.4 23.4 24 L18 13.6 V7.8"
           fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/>
-    <path d="M11.2 20.8 L8.6 24 Q8 26.4 10.4 26.4 H21.6 Q24 26.4 23.4 24 L20.8 20.8 Z" fill="currentColor"/>`,
+    <g fill="currentColor">
+      <circle cx="13.7" cy="24" r="1"/>
+      <circle cx="16.5" cy="22.5" r="0.85"/>
+      <circle cx="18.5" cy="24.4" r="0.7"/>
+      <circle cx="15.2" cy="25.1" r="0.6"/>
+    </g>`,
   // Generic robonaut (the rare card with no missile / raygun / buggy property):
   // a simple robot head so the type icon never falls back to an emoji.
   'robonaut-generic': () => `
