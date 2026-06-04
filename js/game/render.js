@@ -3067,6 +3067,21 @@ export class MapRenderer {
       ctx.fillText('🚫', sx + w * 0.30, py + badge * 0.55);
     }
     ctx.restore();
+    // Loaded glory chits: a 🏆xN badge above the ship (same cue as rivals),
+    // so you can see your own haul at a glance.
+    if (r.chits > 0) {
+      const cs = Math.max(11, Math.round(h * 0.30));
+      ctx.save();
+      ctx.textBaseline = 'bottom';
+      ctx.font = `${cs}px ${EMOJI_FONT}`;
+      ctx.textAlign = 'right';
+      ctx.fillText('🏆', sx + cs * 0.15, py - 1);
+      ctx.font = `bold ${Math.round(cs * 0.85)}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.fillStyle = '#ffd54a';
+      ctx.textAlign = 'left';
+      ctx.fillText(String(r.chits), sx + cs * 0.2, py - 1);
+      ctx.restore();
+    }
     // Active-prospector badge: emoji clipped to the rocket sprite's
     // bottom-right corner so the player sees their loadout at a
     // glance. Renders even when the rocket can't fly - prospectors

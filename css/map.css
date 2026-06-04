@@ -4658,30 +4658,54 @@ body:has(#view-browse:not(.hidden)) #main {
 /* Card-like glory-chit token for the rocket stack (in transit) and
    the LEO stack (resolved front / back). Sized to sit alongside the
    .rocket-slot cards in the same grid row. */
+/* Glory chit: a round, shiny gold coin. Off-centre radial highlight into a
+   deep rim, a diagonal sheen sweep, and an inset top-light / bottom-shade
+   so it reads as a struck metal token. Text stays dark for legibility. */
 .chit-token {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  width: 72px;
-  min-height: 92px;
-  padding: 8px 6px;
-  border-radius: 8px;
-  border: 2px dashed rgba(248, 113, 113, 0.7);
-  background: rgba(120, 30, 30, 0.28);
-  color: var(--ink);
+  gap: 1px;
+  width: 92px;
+  height: 92px;
+  padding: 8px 7px;
+  border-radius: 50%;
+  border: 2px solid #ffe6a6;
+  background:
+    radial-gradient(circle at 34% 28%,
+      #fff7d6 0%, #ffe488 20%, #f6c945 46%, #d29a26 78%, #a9761b 100%);
+  box-shadow:
+    0 0 0 2px #9c6f17,
+    inset 0 2px 7px rgba(255, 255, 255, 0.6),
+    inset 0 -5px 9px rgba(120, 75, 10, 0.55),
+    0 2px 7px rgba(0, 0, 0, 0.45);
+  color: #4a3206;
   text-align: center;
   font-size: 11px;
+  position: relative;
+  overflow: hidden;
 }
-.chit-token .chit-token-emoji { font-size: 22px; line-height: 1; }
-.chit-token .chit-token-zone { font-weight: 700; font-size: 11px; }
-.chit-token .chit-token-vp { font-variant-numeric: tabular-nums; color: #fca5a5; }
+.chit-token::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(125deg,
+    rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0) 38%);
+  pointer-events: none;
+}
+.chit-token > * { position: relative; z-index: 1; }   /* text above the sheen */
+.chit-token .chit-token-emoji { font-size: 18px; line-height: 1; }
+.chit-token .chit-token-zone { font-weight: 800; font-size: 11px; color: #3a2705; }
+.chit-token .chit-token-vp {
+  font-variant-numeric: tabular-nums; font-weight: 800; color: #6e3f00;
+}
 .chit-token .chit-token-side {
   font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--muted, #94a3b8);
+  color: #7a5512;
 }
 .chit-token .chit-token-owner {
   font-size: 9px;
@@ -4689,23 +4713,25 @@ body:has(#view-browse:not(.hidden)) #main {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #93c5fd;
+  color: #5b3d0a;
 }
-/* Resolved sides: solid border, amber for the valuable back. */
+/* Resolved sides keep the coin but shift its richness: back (home value,
+   the valuable side) = deepest gold; front (colonised / lost, lesser
+   value) = paler, cooler gold. */
 .chit-token.chit-back {
-  border-style: solid;
-  border-color: #f59e0b;
-  background: rgba(180, 83, 9, 0.32);
+  background:
+    radial-gradient(circle at 34% 28%,
+      #fff0c0 0%, #ffd86a 20%, #f0b62e 48%, #b9831c 80%, #8f6414 100%);
 }
-.chit-token.chit-back .chit-token-vp { color: #fcd34d; }
+.chit-token.chit-back .chit-token-vp { color: #5a3300; }
 .chit-token.chit-front {
-  border-style: solid;
-  border-color: var(--border);
-  background: var(--bg-2);
+  background:
+    radial-gradient(circle at 34% 28%,
+      #fff8e8 0%, #f5e7bf 22%, #e3cd92 50%, #b9a166 82%, #93804f 100%);
 }
-.chit-token.chit-front .chit-token-vp { color: #cbd5e1; }
-/* In transit with no crew aboard: dimmed + a warning tint. */
-.chit-token.chit-no-crew { opacity: 0.6; border-color: #b45309; }
+.chit-token.chit-front .chit-token-vp { color: #5b4a1e; }
+/* In transit with no crew aboard: dimmed. */
+.chit-token.chit-no-crew { opacity: 0.6; }
 
 /* ============================================================
    Stage-3 hand-bar stack switcher.

@@ -308,6 +308,9 @@ export function mountBrowse(opts = {}) {
     onRocketChange(syncSandboxRocket);
     onRocketChange(refreshOpenSitePopup);
     onRocketChange(syncFocusedSite);
+    // Loaded glory chits change the 🏆 badge on the rocket; repaint it when
+    // a chit loads (landing) or unloads (undo / cash-in).
+    onGloryChange(syncSandboxRocket);
     // Per-crew chit reconciliation: when a crew leaves the rocket by
     // any path (transfer / decommission / back-to-hand), its carried
     // chits flip face-up to FRONT. Colonise is handled explicitly
@@ -10159,6 +10162,7 @@ function syncSandboxRocket() {
     prospectorName,
     prospectorIsru,
     thruster: thrusterSummary,
+    chits: getChits().length,   // 🏆 loaded-glory-chit badge
   });
 }
 
