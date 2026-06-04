@@ -308,7 +308,9 @@ function rocketAtLeo(player) {
 }
 
 function applyMove(state, op, player) {
-  if (player.movesRemaining <= 0) return fail('no_moves_left');
+  // A dry-run (op.debug) skips the per-turn budget gate so the fuel breakdown
+  // can be previewed any time (even with the move already spent / off-turn).
+  if (!op.debug && player.movesRemaining <= 0) return fail('no_moves_left');
   // An empty rocket has no thruster and can't burn, so it can't leave
   // LEO. Enforcing this keeps the "empty rocket == at LEO" invariant
   // true: the only way off LEO is to build/board a thruster first.
@@ -1797,13 +1799,23 @@ export function applyOperation(prevState, op, ctx) {
 
   const isFunctional = !!FUNCTIONAL[op.kind];
   if (!isFunctional && !META[op.kind]) return fail('unknown_op');
-  // An open auction freezes every other op (MOVE / END_TURN / undo)
-  // until the lot resolves.
-  if (prevState.auction) return fail('auction_in_progress');
-  if (!isPlayersTurn(prevState, ctx.profileId)) return fail('not_your_turn');
+  // A debug dry-run (op.debug) is READ-ONLY - the endpoint computes it on a
+  // clone and never persists or broadcasts - so it skips the turn + auction
+  // gates and runs against the CALLER's OWN player. Lets a player simulate
+  // their own move any time, even off-turn or during an auction (it's
+  // inconsequential).
+  if (!op.debug) {
+    // An open auction freezes every other op (MOVE / END_TURN / undo)
+    // until the lot resolves.
+    if (prevState.auction) return fail('auction_in_progress');
+    if (!isPlayersTurn(prevState, ctx.profileId)) return fail('not_your_turn');
+  }
 
   const state = clone(prevState);
-  const player = currentPlayer(state);
+  const player = op.debug
+    ? (playerByProfile(state, ctx.profileId) || currentPlayer(state))
+    : currentPlayer(state);
+  if (!player) return fail('not_a_player');
 
   if (isFunctional) {
     const cursorBefore = state.rng.cursor;
