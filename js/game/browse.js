@@ -13371,6 +13371,74 @@ function buildChitToken(zone, { side = null, transit = false, crewId = null, pla
   return flip;
 }
 
+// Map of zone -> the seat (name + colour) that has claimed its glory chit,
+// for the all-chits board. Multiplayer reads every player's visited zones
+// from the snapshot (the whole board is shared information; only planned
+// routes are secret); solo reads the local visited set. Unclaimed zones are
+// absent from the map.
+function takenZoneMap() {
+  const map = {};
+  if (_online && _onlineSnapshot && Array.isArray(_onlineSnapshot.players)) {
+    for (const p of _onlineSnapshot.players) {
+      const v = p.glory && p.glory.visited;
+      if (!Array.isArray(v)) continue;
+      const seat = { name: p.name, color: p.color || null, handle: true };
+      for (const z of v) if (!map[z]) map[z] = seat;
+    }
+  } else {
+    const me = localSeat();
+    for (const z of Object.keys(ZONE_CHIT_VPS)) {
+      if (isZoneVisited(z) && !map[z]) map[z] = me;
+    }
+  }
+  return map;
+}
+
+// One zone's coin for the all-chits board. Unclaimed: a vibrant flip-coin
+// (tap toggles between the front and back value). Taken by a player: a
+// dimmed, fixed coin showing both values, the claimer's seat name beneath.
+function buildZoneBoardChit(zone, takenBy = null) {
+  const sides = getChitSides(zone);
+  if (takenBy) {
+    const label = (takenBy.handle && takenBy.name) ? '@' + takenBy.name : (takenBy.name || '');
+    const color = takenBy.color || null;
+    const wrap = document.createElement('div');
+    wrap.className = 'chit-token-wrap';
+    wrap.innerHTML = `
+      <div class="chit-token chit-claimed chit-back chit-zone-taken" title="${esc(zone)} chit taken${label ? ' by ' + esc(label) : ''}">
+        <span class="chit-token-emoji" aria-hidden="true">🎖</span>
+        <span class="chit-token-zone">${esc(zone)}</span>
+        <span class="chit-token-vp">${sides.front} / ${sides.back}</span>
+        <span class="chit-token-side">taken</span>
+      </div>
+      ${label ? `<span class="chit-claim-by player-name"${color ? ` style="--player-color:${esc(color)}"` : ''}>${esc(label)}</span>` : ''}`;
+    return wrap;
+  }
+  const face = (which, vp, variant) => `
+    <div class="chit-token chit-face chit-face-${which} ${variant}">
+      <span class="chit-token-emoji" aria-hidden="true">🎖</span>
+      <span class="chit-token-zone">${esc(zone)}</span>
+      <span class="chit-token-vp">+${vp} VP</span>
+      <span class="chit-token-side">${which}</span>
+    </div>`;
+  const flip = document.createElement('div');
+  flip.className = 'chit-token-flip';
+  flip.setAttribute('role', 'button');
+  flip.setAttribute('tabindex', '0');
+  flip.title = `${zone} glory chit - tap to flip (front ${sides.front} / back ${sides.back} VP)`;
+  flip.innerHTML = `
+    <div class="chit-token-inner">
+      ${face('front', sides.front, 'chit-front')}
+      ${face('back', sides.back, 'chit-back')}
+    </div>`;
+  const toggle = () => flip.classList.toggle('is-flipped');
+  flip.addEventListener('click', toggle);
+  flip.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+  });
+  return flip;
+}
+
 // One-shot confetti burst. Spawns colourful paper falling under gravity
 // with a little spin, then removes its own canvas. Pure DOM/canvas, no
 // library, no leftover state. Honours prefers-reduced-motion by thinning
@@ -13635,10 +13703,6 @@ function paintGlory() {
   const chits = getChits();
   const claimed = getClaimedChits();
 
-  const zoneTableRows = Object.entries(ZONE_CHIT_VPS)
-    .map(([z, v]) => `<li><span>${esc(z)}</span><strong>${v.front} / ${v.back} VP</strong></li>`)
-    .join('');
-
   const scheduleHint = SPECTRAL_DIMINISHING_SCHEDULE
     .map((v, i) => i === SPECTRAL_DIMINISHING_SCHEDULE.length - 1 ? `${i + 1}+ → ${v}` : `${i + 1} → ${v}`)
     .join(', ');
@@ -13669,9 +13733,10 @@ function paintGlory() {
         <span class="muted">Career glory VP</span>
         <strong class="glory-vp">${vps}</strong>
       </div>
-      <h4>Ticker-tape (front / back VP)</h4>
-      <ul class="glory-table glory-ticker">${zoneTableRows}</ul>
-      <div class="glory-chits" id="glory-chits-all"></div>
+      <h4>All glory chits <span class="muted glory-h4-note">(tap to flip front / back; dimmed = taken)</span></h4>
+      <div class="glory-chits glory-coins-sm glory-zone-board" id="glory-zone-board"></div>
+      <h4>Your coins</h4>
+      <div class="glory-chits glory-coins-sm" id="glory-chits-all"></div>
       <p class="muted glory-rules">
         Earn a chit the first time a crew lands in a heliocentric zone.
         Carried coins flip (tap) between their FRONT and BACK value; bring one
@@ -13683,6 +13748,18 @@ function paintGlory() {
   // All of the player's chits as golden coins under the ticker tape: carried
   // ones (vibrant, flippable) first, then claimed ones (fixed + darkened +
   // named). One unified row.
+  // All-chits board: every claimable heliocentric zone as a coin. Available
+  // zones are vibrant flip-coins; a zone any player has claimed is dimmed +
+  // shows the claimer's seat name (Earth is home, so it has no chit).
+  const board = host.querySelector('#glory-zone-board');
+  if (board) {
+    const taken = takenZoneMap();
+    for (const zone of Object.keys(ZONE_CHIT_VPS)) {
+      if (zone === 'Earth') continue;
+      board.appendChild(buildZoneBoardChit(zone, taken[zone] || null));
+    }
+  }
+
   const all = host.querySelector('#glory-chits-all');
   if (all) {
     const seat = localSeat();

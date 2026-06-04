@@ -4825,27 +4825,31 @@ body:has(#view-browse:not(.hidden)) #main {
   color: #cbd5e1;
 }
 
-/* Half-size glory coins in the scoring panel (#glory-chits-all only): the
-   panel just inventories what you hold, so the coins read fine small here.
-   The focal, full-size coin lives in the pick-up / scored-at-home modals,
-   which are NOT scoped by this id, so they stay big. */
-#glory-chits-all { gap: 8px; }
-#glory-chits-all .chit-token-flip,
-#glory-chits-all .chit-token-flip .chit-token.chit-face,
-#glory-chits-all .chit-token {
+/* Half-size glory coins in the scoring panel (the all-chits board + your
+   coins row, both tagged .glory-coins-sm): the panel just inventories
+   chits, so the coins read fine small here. The focal, full-size coin lives
+   in the pick-up / scored-at-home modals, which are NOT tagged, so they
+   stay big. */
+.glory-coins-sm { gap: 8px; }
+.glory-coins-sm .chit-token-flip,
+.glory-coins-sm .chit-token-flip .chit-token.chit-face,
+.glory-coins-sm .chit-token {
   width: 46px;
   height: 46px;
 }
-#glory-chits-all .chit-token {
+.glory-coins-sm .chit-token {
   font-size: 6px;
   padding: 3px 2px;
   gap: 0;
 }
-#glory-chits-all .chit-token .chit-token-emoji { font-size: 10px; line-height: 1; }
-#glory-chits-all .chit-token .chit-token-zone  { font-size: 6.5px; }
-#glory-chits-all .chit-token .chit-token-side  { font-size: 5px; }
-#glory-chits-all .chit-token .chit-token-owner { font-size: 5px; }
-#glory-chits-all .chit-claim-by { font-size: 7px; max-width: 48px; }
+.glory-coins-sm .chit-token .chit-token-emoji { font-size: 10px; line-height: 1; }
+.glory-coins-sm .chit-token .chit-token-zone  { font-size: 6.5px; }
+.glory-coins-sm .chit-token .chit-token-side  { font-size: 5px; }
+.glory-coins-sm .chit-token .chit-token-owner { font-size: 5px; }
+.glory-coins-sm .chit-claim-by { font-size: 7px; max-width: 48px; }
+/* A zone already claimed by a player reads as locked/disabled on the
+   board: the claimed darkening plus a desaturate. */
+.chit-token.chit-zone-taken { filter: grayscale(0.4); }
 
 /* Glory pick-up + scored-at-home modals reuse .turn-confirm-panel; these
    rules just centre the coin(s) and tidy the spacing inside. */
