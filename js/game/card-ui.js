@@ -290,28 +290,29 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   const tbar = face.querySelector('.card-typebar');
   const faceData = (card.faces && card.faces[sideName]) || {};
   const supplies = faceData.supplies || card.supplies || [];
-  const supplyGlyphs = supplies
-    .map((k) => (REQUIREMENT_VIS[k] || {}).glyph || '')
-    .filter(Boolean)
-    .join(' ');
-  // Robonauts ARE their prospector role - show the missile / raygun
-  // / buggy glyph (or stack of glyphs for dual-purpose cards like
-  // Helical Railgun which is both missile + raygun on Tier-2)
-  // instead of the generic 🤖. Crews aren't robonauts, so they
-  // skip this branch and keep their existing icon.
-  const ROBONAUT_KIND_GLYPHS = { missile: '🚀', raygun: '🔫', buggy: '🛺' };
+  // The leading glyph row uses the custom support icons (reactor squares /
+  // generator circles / therm badge / robonaut prospector squares), falling
+  // back to the text glyph or a generic type emoji only where no icon exists.
+  const iconFor = (k) => (k === 'thermostat')
+    ? thermBadgeSvg(1, { size: 15 })
+    : (supportIconSvg(k, { size: 15 }) || `<em>${(REQUIREMENT_VIS[k] || {}).glyph || ''}</em>`);
+  const supplyGlyphs = supplies.map(iconFor).filter(Boolean).join('');
+  // Robonauts ARE their prospector role - show the missile / raygun / buggy
+  // icon(s) (dual-purpose cards stack both) instead of the generic 🤖. Crews
+  // aren't robonauts, so they skip this branch.
   let robonautGlyphs = '';
   if (card.type === 'robonaut') {
     const props = faceData.properties || card.properties || [];
     const active = [];
     for (const key of ['missile', 'raygun', 'buggy']) {
-      if (props.some((p) => p.key === key && p.value)) active.push(ROBONAUT_KIND_GLYPHS[key]);
+      if (props.some((p) => p.key === key && p.value)) active.push(supportIconSvg(key, { size: 15 }));
     }
-    robonautGlyphs = active.join(' ');
+    robonautGlyphs = active.join('');
   }
-  const fallback = robonautGlyphs || TYPE_FALLBACK_ICON[card.type] || '';
+  const fb = TYPE_FALLBACK_ICON[card.type];
+  const fallback = robonautGlyphs || (fb ? `<em>${fb}</em>` : '');
   const lead = supplyGlyphs || fallback;
-  tbar.textContent = `${lead ? lead + '  ' : ''}${card.type.toUpperCase()}`;
+  tbar.innerHTML = `${lead ? `<span class="typebar-icons">${lead}</span>` : ''}${escapeText(card.type.toUpperCase())}`;
   // Card name reads from the active face - the dark side carries
   // its own printed name on every HF4 card.
   const faceName = (card.faces && card.faces[sideName] && card.faces[sideName].name);
@@ -385,7 +386,7 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
         wrap.className = `side-block ${cls}`;
         const therms = block.therms ?? 0;
         const thermRow = therms > 0
-          ? '🌡️'.repeat(Math.min(8, therms))
+          ? thermBadgeSvg(Math.min(8, therms), { size: 16 })
           : '-';
         wrap.innerHTML = `<header>${label}</header>`
           + `<div class="rad-therms">${thermRow}</div>`
@@ -585,7 +586,7 @@ function buildRadiatorFace(card, sideName) {
   const heavy = faceMeta.heavy || {};
   const cardName = faceMeta.name || card.name;
   const ability  = faceMeta.ability || '';
-  const therms = (n) => n > 0 ? '🌡️'.repeat(Math.min(8, n)) : '';
+  const therms = (n) => n > 0 ? thermBadgeSvg(Math.min(8, n), { size: 15 }) : '';
 
   // Name sits directly below the typebar so it reads as a
   // banner-and-title pair (matching the published radiator card
