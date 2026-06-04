@@ -4453,6 +4453,12 @@ let _manualOriginId = null;
 let _manualDir = null;          // direction we entered the tip on
 let _manualPivotsUsed = 0;
 let _manualPirouettes = 0;      // free pivots remaining (bonusPivots)
+// Solo manual travel: each hop slides the rocket sprite forward one segment so
+// the player watches the ship advance one segment at a time as they plot. The
+// state isn't committed until Move (one move per turn), so the commit animation
+// is then snapped (_fastMoveAnim) to avoid re-flying a route already walked.
+let _manualPreviewed = false;
+let _fastMoveAnim = false;
 function manualTipId() {
   if (_plannedRoute && _plannedRoute.length) {
     return _plannedRoute[_plannedRoute.length - 1].to;
@@ -4487,9 +4493,12 @@ function enterManualMoveMode() {
   if (_renderer) {
     _renderer.setRoute(null);
     _renderer.setRouteEndpoints(_manualOriginId, _manualOriginId);
+    // Make route waypoints (hohmann / lagrange / burn) tappable so the player
+    // can plot INTO a Hohmann transfer, not just between landable sites.
+    _renderer.setRoutingHit(true);
   }
   const clearBtn = document.getElementById('route-clear');
-  if (clearBtn) { clearBtn.hidden = false; clearBtn.textContent = '✕ Cancel'; }
+  if (clearBtn) { clearBtn.hidden = false; clearBtn.textContent = '✕ Stop'; }
   manualMoveStatus();
 }
 function exitManualMoveMode() {
@@ -4500,6 +4509,16 @@ function exitManualMoveMode() {
   _manualDir = null;
   _manualPivotsUsed = 0;
   _manualPirouettes = 0;
+  // Per-hop preview may have walked the sprite forward; if the player bailed
+  // without committing a move, snap it back to the real rocket position.
+  // (On a committed move moveRocket has already cleared _manualPreviewed, so
+  // this leaves the ship at its new site.)
+  const previewed = _manualPreviewed;
+  _manualPreviewed = false;
+  if (_renderer) {
+    _renderer.setRoutingHit(false);
+    if (previewed && !_rocketAnimating) syncSandboxRocket();
+  }
   const clearBtn = document.getElementById('route-clear');
   if (clearBtn) clearBtn.textContent = 'Clear route';
 }
@@ -4510,9 +4529,9 @@ function manualMoveStatus() {
     ? ` <em class="muted">(${_manualPirouettes} free pivot${_manualPirouettes === 1 ? '' : 's'} ready)</em>`
     : '';
   if (_manualBudget <= 0) {
-    setStatus(`✋ Manual: <strong>${placed}</strong> hop${placed === 1 ? '' : 's'} plotted, <strong>0</strong>/${_manualBudgetMax} burns left. Tap <strong>🛸 Move</strong> or Cancel.`);
+    setStatus(`✋ Manual: <strong>${placed}</strong> hop${placed === 1 ? '' : 's'} plotted, <strong>0</strong>/${_manualBudgetMax} burns left. Tap <strong>🛸 Move</strong> to fly, or <strong>✕ Stop</strong>.`);
   } else {
-    setStatus(`✋ Manual: <strong>${_manualBudget}</strong>/${_manualBudgetMax} burns left.${pirouetteHint} Tap an adjacent site to extend.`);
+    setStatus(`✋ Manual: <strong>${_manualBudget}</strong>/${_manualBudgetMax} burns left.${pirouetteHint} Tap an adjacent node (a site or a Hohmann dot) to advance one hop. <strong>🛸 Move</strong> to fly, <strong>✕ Stop</strong> to cancel.`);
   }
 }
 // Cost calculator for a single manual hop. Returns:
@@ -4585,6 +4604,15 @@ function manualAppendSegment(toId) {
   if (_renderer) {
     _renderer.setRoute(_plannedRoute);
     _renderer.setRouteEndpoints(_manualOriginId, toId);
+  }
+  // Solo: slide the rocket sprite forward one hop so the player watches it
+  // advance one segment at a time. Nothing commits until Move (one move per
+  // turn); on commit the already-walked route snaps (_fastMoveAnim) instead of
+  // re-flying. Skipped online, where the sprite tracks the authoritative
+  // snapshot after the move resolves.
+  if (!_online && _renderer && !_rocketAnimating) {
+    _manualPreviewed = true;
+    animateRocketAlong([{ from: tipId, to: toId }], 260);
   }
   manualMoveStatus();
   return true;
@@ -9515,6 +9543,9 @@ function persistPlannedRoute() {
 // silently if another animation pre-empts this one. Distance-
 // weighted so longer segments take proportionally more time.
 function animateRocketAlong(segments, totalMs = 700) {
+  // A manual route already walked hop-by-hop during plotting snaps on commit
+  // (the player has already seen the ship travel) instead of re-flying it.
+  if (_fastMoveAnim) totalMs = 0;
   return new Promise((resolve) => {
     if (!_renderer || !_activeData || !segments || !segments.length) {
       resolve(); return;
@@ -9541,6 +9572,13 @@ function animateRocketAlong(segments, totalMs = 700) {
     }
     if (totalLen === 0) { resolve(); return; }
     const r = isRocketActive();
+    // Instant snap (a manual route already walked during plotting): drop the
+    // sprite on the final point and resolve, no per-frame tween.
+    if (totalMs <= 0) {
+      const last = pts[pts.length - 1];
+      _renderer.setSandboxRocket({ x: last.x, y: last.y, colour: myRocketColour(), canFly: r.active });
+      resolve(); return;
+    }
     const t0 = performance.now();
     _rocketAnimating = true;
     const step = (now) => {
@@ -10899,6 +10937,14 @@ async function moveRocket() {
     trail: preMoveTrail,
   };
   persistMoveProgress(ctx);
+  // A solo manual route was already walked hop-by-hop during plotting; snap the
+  // commit (and any hazard animate-tos) instead of re-flying the whole path.
+  if (_manualPreviewed && !_online) {
+    _manualPreviewed = false;
+    _fastMoveAnim = true;
+    try { return await runMoveQueue(ctx, false); }
+    finally { _fastMoveAnim = false; }
+  }
   return runMoveQueue(ctx, false);
 }
 
@@ -11677,8 +11723,9 @@ function openRouteOptionsModal(onClose) {
       </button>
       <p class="muted route-options-manual-help">
         Cancels any auto-planned route and lets you tap adjacent
-        sites one at a time. Capped at the active thruster's
-        thrust (${thrust}). Tap Move when you're ready to fly.
+        nodes one at a time - sites AND Hohmann-transfer dots - to
+        advance the ship one hop at a time. Capped at the active
+        thruster's thrust (${thrust}). Tap Move to fly, or Stop.
       </p>
     </div>
     ${_online ? `

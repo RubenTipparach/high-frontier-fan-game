@@ -3770,8 +3770,15 @@ export class MapRenderer {
     const eff = this.zoom * this.fitScale;
     const sx = this.pan.x + wx * eff;
     const sy = this.pan.y + wy * eff;
-    let best = null;
-    let bestDist = 22 * 22;
+    // Routing/manual mode: route waypoints (hohmann / lagrange / burn) ARE
+    // valid targets, and the first hohmann dot of a transfer sits right next
+    // to its origin site. Normally a real site's generous 22px pick radius
+    // short-circuits and swallows that dot, so you can't tap into a Hohmann
+    // transfer. In routing mode we tighten the site radius and pick whichever
+    // of {closest site, closest waypoint} is genuinely nearer the tap.
+    const routing = !!this.routingHit;
+    let bestSite = null;
+    let bestSiteDist = (routing ? 15 * 15 : 22 * 22);
     for (const s of this._realSites) {
       const vis = TYPE_VIS[s.type] || TYPE_VIS.unknown;
       if (vis.kind === 'sun')   continue;
@@ -3779,12 +3786,13 @@ export class MapRenderer {
       const dx = (this.pan.x + s.x * eff) - sx;
       const dy = (this.pan.y + s.y * eff) - sy;
       const d = dx * dx + dy * dy;
-      if (d < bestDist) { bestDist = d; best = s; }
+      if (d < bestSiteDist) { bestSiteDist = d; bestSite = s; }
     }
-    if (best) return best;
+    if (bestSite && !routing) return bestSite;
     // Waypoints: hit radius can be larger than the visible disc
     // (e.g. hohmann is 2px painted but accepts a 10px click).
-    let bestRad = 0;
+    let bestWp = null;
+    let bestWpDist = Infinity;
     for (const w of this._waypoints) {
       if (w.isDecorative) continue;
       const vis = TYPE_VIS[w.type] || TYPE_VIS.unknown;
@@ -3794,12 +3802,17 @@ export class MapRenderer {
       const dx = (this.pan.x + w.x * eff) - sx;
       const dy = (this.pan.y + w.y * eff) - sy;
       const d = dx * dx + dy * dy;
-      if (d <= hitR * hitR && (best == null || d < bestRad)) {
-        best = w; bestRad = d;
-      }
+      if (d <= hitR * hitR && d < bestWpDist) { bestWp = w; bestWpDist = d; }
     }
-    return best;
+    if (!routing) return bestWp;
+    // Routing: nearest node wins, whether it's a site or a waypoint.
+    if (bestSite && (!bestWp || bestSiteDist <= bestWpDist)) return bestSite;
+    return bestWp || bestSite;
   }
+
+  // Toggle routing/manual hit-testing: when on, route waypoints (hohmann,
+  // lagrange, burn) become tappable even right next to a site.
+  setRoutingHit(on) { this.routingHit = !!on; }
 
   _wireHover() {
     // Mouse hover -> tooltip. Throttled by mousemove cadence which is
