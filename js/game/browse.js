@@ -2440,10 +2440,10 @@ function humanizeOnlineOpError(code, detail) {
   // spell it out instead of the generic line, so the player sees WHY (not
   // just "not enough water").
   if (detail && code === 'insufficient_water') {
-    return `Not enough fuel: this turn's move needs ${detail.fuelStepsNeeded} fuel step`
+    return `Not enough fuel: this move needs ${detail.fuelStepsNeeded} fuel step`
       + `${detail.fuelStepsNeeded === 1 ? '' : 's'} `
-      + `(${detail.thisTurnBurns} burn${detail.thisTurnBurns === 1 ? '' : 's'} × ${detail.fuelPerBurn} per burn), `
-      + `but only ${detail.fuelStepsAvailable} remain from wet to dry. Refuel at LEO or a factory first.`;
+      + `(${detail.burnsNeeded} burn${detail.burnsNeeded === 1 ? '' : 's'} × ${detail.fuelStepsPerBurn} per burn), `
+      + `but the ship holds only ${detail.fuelStepsInShip} (can burn ${detail.canBurn}). Refuel at LEO or a factory first.`;
   }
   if (detail && code === 'cannot_liftoff') {
     return `Can't lift off: net thrust ${detail.thrust} must beat the site's size ${detail.siteSize} (or a factory there to assist).`;
@@ -11346,23 +11346,33 @@ function openRouteOptionsModal(onClose) {
         // HTTP 200, so r.ok only means "the request reached the server"). Read
         // r.data.ok for the actual would-succeed / would-fail.
         const sim = (r && r.ok && r.data) ? r.data : null;
-        // Print exactly how the server decided, to the console (Eruda on
-        // mobile): the request sent + the dry-run response (incl. the
-        // fuel-step `detail` on a would-fail). This is a debug-only call -
-        // the server runs it on a throwaway clone and changes nothing.
+        // The full burn-math breakdown rides in calc (success) / detail
+        // (would-fail) - same shape either way.
+        const calc = sim ? (sim.calc || sim.detail || null) : null;
         const round2 = (n) => (n == null ? n : Math.round(n * 100) / 100);
+        // Print exactly how the server decided, to the console (Eruda on
+        // mobile): the request sent, the raw dry-run response, and the burn
+        // check as its own object. Debug-only call - the server runs it on a
+        // throwaway clone and changes nothing.
         console.log('[simulate] dry-run MOVE', {
           request: { kind: 'MOVE', toSiteId, segments },
           response: sim || (r && r.error) || r,
         });
+        if (calc) console.log('[simulate] burn check', calc);
         if (!sim) {
           showRes(`✗ Could not simulate: ${humanizeOnlineOpError(r && r.error)}`, 'bad');
+        } else if (calc) {
+          const c = calc;
+          const head = sim.ok ? '✓ Would succeed' : '✗ Would fail';
+          showRes(`${head}: thrust ${c.finalThrust} · ${c.fuelStepsPerBurn}/burn · `
+            + `need ${c.fuelStepsNeeded} steps (${c.burnsNeeded} burn${c.burnsNeeded === 1 ? '' : 's'}) · `
+            + `ship has ${c.fuelStepsInShip} (can burn ${c.canBurn})`
+            + (sim.ok && sim.tankBefore != null ? ` · tank ${round2(sim.tankBefore)}→${round2(sim.tankAfter)}` : ''),
+            sim.ok ? 'ok' : 'bad');
         } else if (sim.ok) {
-          const delta = (sim.tankBefore != null && sim.tankAfter != null)
-            ? `  (tank ${round2(sim.tankBefore)} -> ${round2(sim.tankAfter)})` : '';
-          showRes(`✓ ${sim.log || 'Move would succeed.'}${delta}  (see console for the full check)`, 'ok');
+          showRes(`✓ ${sim.log || 'Move would succeed.'}`, 'ok');
         } else {
-          showRes(`✗ Would fail: ${humanizeOnlineOpError(sim.error, sim.detail)}  (see console for the full check)`, 'bad');
+          showRes(`✗ Would fail: ${humanizeOnlineOpError(sim.error, sim.detail)}`, 'bad');
         }
       } catch {
         showRes('Simulation failed - server unreachable.', 'bad');
@@ -12067,23 +12077,28 @@ function logMoveBurn(originName, destName, turnBurns) {
     const fpb = thr && Number.isFinite(thr.fuel) ? thr.fuel : null;          // fuel steps per burn
     const dry = thr && Number.isFinite(thr.dryMass) ? thr.dryMass : totals.dryMass;
     const wet = thr && Number.isFinite(thr.wetMass) ? thr.wetMass : totals.wetMass;
+    const thrust = thr && Number.isFinite(thr.thrust) ? thr.thrust : null;
     const tank = getTankWater();
     const fuelOn = getFuelConsumption();
     const ftNeeded = (fuelOn && fpb != null) ? Math.ceil(fpb * turnBurns) : 0;   // fuel steps this turn spends
-    const ftAvail = blackStepsBetween(dry, wet);                                // capacity = black connections wet->dry
+    const ftInShip = blackStepsBetween(dry, wet);                               // capacity = black connections wet->dry
     const newWet = ftNeeded > 0 ? walkBlackDown(wet, ftNeeded) : wet;
     const waterSpent = Math.round((wet - newWet) * 1e6) / 1e6;                  // non-linear mass drop of those steps
+    // Same field set the server returns (moveCalc) so client + server logs line up.
     console.log(`[move] ${originName} → ${destName}`, {
-      thisTurnBurns: turnBurns,
-      fuelPerBurn: fpb,
+      finalThrust: thrust,
+      fuelStepsPerBurn: fpb,
+      dryMass: dry,
+      wetMass: wet,
+      tank,
+      fuelStepsInShip: ftInShip,          // blackStepsBetween(dry, wet)
+      canBurn: (fpb && fpb > 0) ? Math.floor(ftInShip / fpb) : null,
+      burnsNeeded: turnBurns,
       fuelStepsNeeded: ftNeeded,
-      fuelStepsAvailable: ftAvail,        // blackStepsBetween(dry, wet)
-      wetMass: wet, dryMass: dry,
+      enough: ftInShip >= ftNeeded,       // the rule that throws insufficient_water
       waterSpent,                         // tank goes from `tank` to `tank - waterSpent` (often fractional)
-      tankWater: tank,
       tankAfter: Math.round((tank - waterSpent) * 1e6) / 1e6,
       fuelSpendOn: fuelOn,
-      enoughFuelSteps: ftAvail >= ftNeeded,   // the rule that throws insufficient_water now
     });
   } catch { /* logging must never break a move */ }
 }

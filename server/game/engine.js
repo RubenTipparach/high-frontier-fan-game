@@ -376,17 +376,23 @@ function applyMove(state, op, player) {
   const wetMass = dryMass + (Number(player.rocket.tank) || 0);
   const stepsNeeded = Math.ceil(perBurn * thisTurnBurns);
   const stepsAvail = blackStepsBetween(dryMass, wetMass);
+  // Full burn-math breakdown - returned on a reject (detail) AND on the debug
+  // dry-run (result.calc) so the client can show every intermediate value
+  // instead of just tank before/after.
+  const moveCalc = {
+    finalThrust: activeThrust(player.rocket),
+    fuelStepsPerBurn: perBurn,
+    dryMass,
+    wetMass,
+    tank: round6(player.rocket.tank),
+    fuelStepsInShip: stepsAvail,
+    canBurn: perBurn > 0 ? Math.floor(stepsAvail / perBurn) : null,
+    burnsNeeded: thisTurnBurns,
+    fuelStepsNeeded: stepsNeeded,
+    enough: stepsNeeded <= stepsAvail,
+  };
   if (stepsNeeded > stepsAvail) {
-    // Hand back the full calculation so the client can explain the verdict
-    // instead of just flashing "insufficient water".
-    return fail('insufficient_water', {
-      thisTurnBurns,
-      fuelPerBurn: perBurn,
-      fuelStepsNeeded: stepsNeeded,
-      fuelStepsAvailable: stepsAvail,
-      tank: round6(player.rocket.tank),
-      dryMass, wetMass,
-    });
+    return fail('insufficient_water', moveCalc);
   }
 
   // Hazards along the nodes we ARRIVE at this turn, classified the same
@@ -538,7 +544,7 @@ function applyMove(state, op, player) {
   else if (nItems) log += ` Rolled through ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
   if (decommissioned.length) log += ` Radiation decommissioned ${decommissioned.length} card${decommissioned.length === 1 ? '' : 's'}.`;
   if (chit) log += ` First into the ${chit.zone} zone (+glory chit).`;
-  return { ok: true, state, log };
+  return { ok: true, state, log, calc: moveCalc };
 }
 
 // Monotonic per-move id so the client can tell a fresh move's dice from

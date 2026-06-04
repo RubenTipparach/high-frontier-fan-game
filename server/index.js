@@ -1612,6 +1612,7 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
       tankBefore: before && before.rocket ? before.rocket.tank : null,
       tankAfter:  after  && after.rocket  ? after.rocket.tank  : null,
       siteAfter:  after  && after.rocket  ? after.rocket.siteId : null,
+      calc: result.calc || null,   // full burn-math breakdown
     });
   }
   if (!result.ok) return res.status(409).json({ error: result.error, detail: result.detail });
