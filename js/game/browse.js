@@ -7845,9 +7845,15 @@ function openOpsMenu() {
   }
   // getDiscs() is a { siteId: disc } map, not an array.
   const discs = getDiscs() || {};
+  // Only YOUR successful claims can be industrialized - the server rejects
+  // industrializing another player's claim. In multiplayer that's the local
+  // player (whose turn it is): skip discs other players claimed. Sandbox discs
+  // carry no owner, so they're all yours.
+  const myClaimOwner = _online ? (_onlineMe && _onlineMe.id) : null;
   for (const siteId of Object.keys(discs)) {
     const d = discs[siteId];
     if (!d || d.outcome !== 'success' || seen.has(siteId) || getFactory(siteId)) continue;
+    if (myClaimOwner && d.ownerId && d.ownerId !== myClaimOwner) continue;
     const site = siteById(siteId); if (!site) continue;
     seen.add(siteId);
     opSites.push({ site, hint: '🔭 claimed · industrialize here' });
