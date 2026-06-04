@@ -32,6 +32,12 @@ import { CREW_BY_ID } from '../../data/crew.js';
 // STEPS (black connections), and the water it costs is the non-linear mass
 // drop, leaving a possibly-fractional remainder.
 import { blackStepsBetween, walkBlackDown } from '../../data/fuel-graph.js';
+// Net-thrust band (weight class) + solar-zone modifiers, the same pure
+// tables the client folds into rocket.js#getActiveThrusterStats. The
+// engine reads them so the liftoff/landing gate uses the FINAL net thrust,
+// not the printed base value.
+import { weightClassForMass } from '../../data/net-thrust-track.js';
+import { SOLAR_ZONE_INFO } from '../../data/sites.js';
 // Movement + metadata both come from the planner graph (the vendor
 // mission-planner data the client also uses). siteBySlug layers the
 // curated data/sites.js metadata onto a planner slug, so there is ONE
@@ -114,13 +120,41 @@ function slotFace(slot, card) {
   return (c.faces && (c.faces[key] || c.faces.primary)) || c;
 }
 
-// A slot is a thruster if its card type is thruster or its active face
-// exposes a thrust value (dark-side / robonaut thrusters).
+// The active thruster face of a slot, normalized so patents and crew read
+// the same shape (.thrust / .fuel / .afterburn / .requires / .properties).
+// Crew nest their rocket under face.thruster.{thrust, fuelPerBurn, afterburn}
+// (mirror of rocket.js#synthCrew); a crew face with no rocket (Shimizu)
+// returns {}. Patents pass straight through slotFace.
+function thrusterFaceOf(slot) {
+  if (!slot || !slot.id) return {};
+  const p = PATENTS_BY_ID[slot.id];
+  if (p) return slotFace(slot, p);
+  const crew = CREW_BY_ID[slot.id];
+  if (crew) {
+    const key = slot.face === 'secondary' ? 'secondary' : 'primary';
+    const cf = (crew.faces && (crew.faces[key] || crew.faces.primary)) || {};
+    if (!cf.thruster) return {};
+    return {
+      thrust: cf.thruster.thrust,
+      fuel: cf.thruster.fuelPerBurn,
+      afterburn: cf.thruster.afterburn || 0,
+      requires: [],   // crew thrusters are self-contained (no support chain)
+      properties: cf.prospector ? [{ key: cf.prospector, value: true }] : [],
+    };
+  }
+  return {};
+}
+
+// A slot is a thruster if its card type is thruster, its active face exposes
+// a thrust value (dark-side / robonaut thrusters), or it is a crew member
+// whose chosen face carries a rocket (a crew thruster).
 function isThrusterSlot(slot) {
   const c = PATENTS_BY_ID[slot.id];
-  if (!c) return false;
-  if (c.type === 'thruster') return true;
-  return slotFace(slot, c).thrust != null;
+  if (c) {
+    if (c.type === 'thruster') return true;
+    return slotFace(slot, c).thrust != null;
+  }
+  return thrusterFaceOf(slot).thrust != null;
 }
 
 // Clip the tank down to the wet-mass ceiling after dry mass changes.
@@ -218,15 +252,68 @@ function advanceClock(state) {
 const HAZARD_COST_PER = 4;       // aqua to bypass one generic hazard
 const RAD_BYPASS_THRUST = 6;     // thrust strictly above this skips rad rolls
 
-// Active thruster's thrust value (the number in the pink circle). Drives
-// the rad bypass + factory-assist gate. 0 when no thruster is active.
-function activeThrust(rocket) {
+// Does a (normalized) face carry the solar capability badge? Mirror of
+// rocket.js#faceHasSolar.
+function faceHasSolar(face) {
+  return !!(face && Array.isArray(face.properties)
+    && face.properties.some((p) => p.key === 'solar' && p.value));
+}
+
+// Net thrust of the active thruster after ALL deterministic modifiers
+// (mirror of rocket.js#getActiveThrusterStats's thrust folding): base face
+// thrust + support-chain reactor/generator thrustMod + weight-class band
+// (from wet mass) + solar-zone shift for solar-driven thrusters. This - NOT
+// the printed base thrust - is what the liftoff/landing gate and the rad
+// bypass must use. Afterburn is a client-engaged one-shot the server does
+// not track, so it is intentionally omitted here. 0 when no thruster.
+function activeNetThrust(rocket) {
   const tid = rocket.activeThrusterId;
   if (!tid) return 0;
   const slot = rocket.stack.find((s) => s.id === tid);
   if (!slot) return 0;
-  const f = slotFace(slot);
-  return Number.isFinite(f && f.thrust) ? f.thrust : 0;
+  const f = thrusterFaceOf(slot);
+  let thrust = Number.isFinite(f.thrust) ? f.thrust : null;
+  if (thrust == null) return 0;
+  // Support-chain modifiers: a reactor/generator shifts this thruster's
+  // thrust only when it supplies a kind the thruster requires. A self-powered
+  // or crew thruster requires nothing, so it takes no stack modifiers.
+  const reqKinds = new Set((f.requires || []).map((r) => (r && r.kind) || r));
+  if (reqKinds.size) {
+    for (const s of rocket.stack) {
+      if (s.id === tid) continue;
+      const c = PATENTS_BY_ID[s.id];
+      if (!c) continue;
+      const cSupplies = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
+      if (!cSupplies.some((k) => reqKinds.has(k))) continue;
+      const cf = slotFace(s, c);
+      if (cf.thrustMod != null && cf.thrustMod !== 0) thrust += cf.thrustMod;
+    }
+  }
+  // Weight-class band, keyed off current wet mass (dry + tank).
+  const dry = rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const wet = dry + (Number(rocket.tank) || 0);
+  thrust += weightClassForMass(wet).netThrust;
+  // Solar-driven thrusters shift by the rocket's current zone modifier; a
+  // null-solar zone (Neptune outward) kills solar thrust entirely.
+  let solarDriven = faceHasSolar(f);
+  if (!solarDriven && (f.requires || []).some((r) => (r.kind || r) === 'gen-electric')) {
+    for (const s of rocket.stack) {
+      if (s.id === tid) continue;
+      const c = PATENTS_BY_ID[s.id];
+      if (!c) continue;
+      const cf = slotFace(s, c);
+      if (faceHasSolar(cf) && (cf.supplies || []).includes('gen-electric')) { solarDriven = true; break; }
+    }
+  }
+  if (solarDriven) {
+    const site = rocket.siteId ? siteById(rocket.siteId) : null;
+    const zone = (site && site.solarZone) || 'Earth';
+    const info = SOLAR_ZONE_INFO[zone];
+    const z = info ? info.solar : 0;
+    if (z === null) thrust = 0;
+    else thrust += z;
+  }
+  return thrust < 0 ? 0 : thrust;
 }
 // Water spent per burn = the active thruster face's `fuel` value, scaled
 // by any other card's fuelMod (mirror of rocket.js#getActiveThrusterStats,
@@ -239,7 +326,8 @@ function thrusterFuelPerBurn(rocket) {
   if (!tid) return 1;
   const slot = rocket.stack.find((s) => s.id === tid);
   if (!slot) return 1;
-  const f = slotFace(slot);
+  // Crew-aware: a crew thruster reads fuelPerBurn off its rocket face.
+  const f = thrusterFaceOf(slot);
   const p = PATENTS_BY_ID[tid];
   let fuel = f.fuel != null ? f.fuel : (p && p.fuel);
   if (fuel == null) return 1;
@@ -399,7 +487,7 @@ function applyMove(state, op, player) {
   // dry-run (result.calc) so the client can show every intermediate value
   // instead of just tank before/after.
   const moveCalc = {
-    finalThrust: activeThrust(player.rocket),
+    finalThrust: activeNetThrust(player.rocket),
     fuelStepsPerBurn: perBurn,
     dryMass,
     wetMass,
@@ -424,7 +512,7 @@ function applyMove(state, op, player) {
     if (k === 'rad') rad.push(slug);
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
-  const thrust = activeThrust(player.rocket);
+  const thrust = activeNetThrust(player.rocket);
   // Factory-assist liftoff / landing gate. A maneuver where net thrust
   // <= site size is only legal if a factory carries it (assist), which
   // is a hazard roll unless a colony waives it. No factory => hard block.
