@@ -8,20 +8,20 @@
 //   generator = orange CIRCLE, white glyph
 //   radiator  = BLUE thermometer(s) on a WHITE rounded badge (×N therms)
 //   robonaut  = BLACK square, PINK glyph
-//   thruster  = DARK square, CREAM rocket-engine bell (chamber + ribbed nozzle)
+//   thruster  = DARK square, AMBER rocket-engine bell (chamber + ribbed nozzle)
 //   refinery  = SLATE square, white flask glyph
 // See assets/support-icons/ for the rendered review sheet.
 
 const THERM_BLUE = '#59abeb';
 const ROBO_PINK = '#eec1a8';
-const BELL_CREAM = '#f0e6d2';
+const BELL_AMBER = '#e9aa55';
 
 // shape: 'square' | 'circle'. ink: glyph colour. fill/ring: flat coin colours.
 export const SUPPORT_CAT = {
   reactor:   { shape: 'square', fill: '#8b5cf6', ring: '#6d28d9', ink: '#ffffff' },
   generator: { shape: 'circle', fill: '#f97316', ring: '#c2410c', ink: '#ffffff' },
   robonaut:  { shape: 'square', fill: '#0c0a16', ring: '#be185d', ink: ROBO_PINK },
-  thruster:  { shape: 'square', fill: '#222a3d', ring: '#0c0a16', ink: BELL_CREAM },
+  thruster:  { shape: 'square', fill: '#222a3d', ring: '#0c0a16', ink: BELL_AMBER },
   refinery:  { shape: 'square', fill: '#94a3b8', ring: '#64748b', ink: '#ffffff' },
 };
 
@@ -81,16 +81,19 @@ const GLYPH = {
     <line x1="22.2" y1="13" x2="25.4" y2="7.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
     <circle cx="25.4" cy="7.6" r="1.1" fill="currentColor"/>`,
   // Thruster type: a rocket engine bell - the combustion chamber pinching to a
-  // throat, then flaring into a ribbed nozzle. Bold cream silhouette with the
-  // stiffening rings cut back to the coin colour.
+  // throat, then a curved, ribbed nozzle flaring to a wide exit. Bold amber
+  // silhouette with the stiffening rings cut back to the coin colour. Scaled to
+  // 0.8 so it sits a touch smaller in the coin.
   'thruster': () => `
-    <path d="M13.2 5 H18.8 Q20 5 20 6.2 V10.5 Q20 11.8 19 12.2 L18.5 13
-             C22 18, 24 23, 26.5 27.2 H5.5
-             C8 23, 10 18, 13.5 13 L13 12.2 Q12 11.8 12 10.5 V6.2 Q12 5 13.2 5 Z" fill="currentColor"/>
-    <g stroke="__HOLE__" stroke-width="1.3" stroke-linecap="round">
-      <line x1="11.7" y1="18" x2="20.3" y2="18"/>
-      <line x1="10.2" y1="21.5" x2="21.8" y2="21.5"/>
-      <line x1="8.5" y1="25" x2="23.5" y2="25"/>
+    <g transform="translate(16 16) scale(0.8) translate(-16 -16)">
+      <path d="M13.5 5 H18.5 Q19.7 5 19.7 6.2 V10.3 Q19.7 11.8 18.7 12.4 L18.5 13
+               C19.2 18, 21.5 23.5, 27.5 27.5 H4.5
+               C10.5 23.5, 12.8 18, 13.5 13 L13.3 12.4 Q12.3 11.8 12.3 10.3 V6.2 Q12.3 5 13.5 5 Z" fill="currentColor"/>
+      <g stroke="__HOLE__" stroke-width="1.3" stroke-linecap="round">
+        <line x1="12" y1="20" x2="20" y2="20"/>
+        <line x1="10.3" y1="23" x2="21.7" y2="23"/>
+        <line x1="7.8" y1="26" x2="24.2" y2="26"/>
+      </g>
     </g>`,
   // Refinery type: an Erlenmeyer flask with liquid - the local water plant.
   'refinery': () => `
