@@ -6,5 +6,7 @@
   </radialGradient></defs>
   <circle cx="16" cy="16" r="15" fill="url(#grad-gen-radioisotope)" stroke="#c2410c" stroke-width="1.5"/>
   <path d="M16 2.5 a13.5 13.5 0 0 1 11 5.6" fill="none" stroke="#fff" stroke-opacity="0.4" stroke-width="2" stroke-linecap="round"/>
-  <path d="M 14.40 13.23 L 9.50 4.74 A 13 13 0 0 1 22.50 4.74 L 17.60 13.23 A 3.2 3.2 0 0 0 14.40 13.23 Z" fill="#fff"/><path d="M 19.20 16.00 L 29.00 16.00 A 13 13 0 0 1 22.50 27.26 L 17.60 18.77 A 3.2 3.2 0 0 0 19.20 16.00 Z" fill="#fff"/><path d="M 14.40 18.77 L 9.50 27.26 A 13 13 0 0 1 3.00 16.00 L 12.80 16.00 A 3.2 3.2 0 0 0 14.40 18.77 Z" fill="#fff"/><circle cx="16" cy="16" r="3.2" fill="#fff"/>
+  
+    <text x="16" y="16.6" text-anchor="middle" dominant-baseline="central"
+          fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="21" font-weight="700">⟛</text>
 </svg>
