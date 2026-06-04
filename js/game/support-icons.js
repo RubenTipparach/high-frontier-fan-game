@@ -1,0 +1,124 @@
+// Support / requirement glyph SVGs - ONE source for the rendered card chips
+// (card-ui.js) AND the standalone asset generator (scripts/gen-support-icons.mjs).
+// Pure: no DOM, no node imports; every export returns an inline-SVG string.
+//
+// Category visual language (flat fills, no gradients):
+//   reactor   = purple SQUARE, white glyph
+//   generator = orange CIRCLE, white glyph
+//   radiator  = BLUE thermometer(s) on a WHITE rounded badge (×N therms)
+//   robonaut  = BLACK square, PINK glyph
+// See assets/support-icons/ for the rendered review sheet.
+
+const THERM_BLUE = '#59abeb';
+const ROBO_PINK = '#eec1a8';
+
+// shape: 'square' | 'circle'. ink: glyph colour. fill/ring: flat coin colours.
+export const SUPPORT_CAT = {
+  reactor:   { shape: 'square', fill: '#8b5cf6', ring: '#6d28d9', ink: '#ffffff' },
+  generator: { shape: 'circle', fill: '#f97316', ring: '#c2410c', ink: '#ffffff' },
+  robonaut:  { shape: 'square', fill: '#0c0a16', ring: '#be185d', ink: ROBO_PINK },
+};
+
+// Glyphs use currentColor (set per category) + "__HOLE__" for negative space.
+const GLYPH = {
+  'reactor-fission': () => `
+    <line x1="10.5" y1="10.5" x2="21.5" y2="21.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+    <line x1="21.5" y1="10.5" x2="10.5" y2="21.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+    <circle cx="16" cy="16" r="2.5" fill="currentColor"/>`,
+  'reactor-fusion': () => `
+    <path d="M5.5 16 C 7.7 9.6, 10.3 9.6, 12.5 16 C 14.7 22.4, 17.3 22.4, 19.5 16 C 21.7 9.6, 24.3 9.6, 26.5 16"
+          fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>`,
+  'reactor-antimatter': () => `
+    <g transform="translate(16 16) scale(0.8) translate(-16 -16)">
+      <circle cx="14.5" cy="19" r="7" fill="currentColor"/>
+      <path d="M16.6 12.1 L19.5 9.2 L21.8 11.5 L18.9 14.4 Z" fill="currentColor"/>
+      <path d="M20.7 10.5 Q 24 8.4, 23 4.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+      <g stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+        <line x1="23" y1="4.6" x2="23" y2="2.3"/>
+        <line x1="23" y1="4.6" x2="25" y2="3.5"/>
+        <line x1="23" y1="4.6" x2="21" y2="3.5"/>
+      </g>
+      <circle cx="11.8" cy="16.4" r="1.7" fill="__HOLE__" opacity="0.5"/>
+    </g>`,
+  'gen-radioisotope': () => `
+    <g fill="currentColor">
+      <rect x="13.4" y="10.5" width="2.2" height="11" rx="0.4"/>
+      <rect x="16.4" y="10.5" width="2.2" height="11" rx="0.4"/>
+    </g>
+    <g stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+      <line x1="7" y1="16" x2="13.4" y2="16"/>
+      <line x1="18.6" y1="16" x2="25" y2="16"/>
+    </g>`,
+  'gen-electric': () => `
+    <path d="M 20.8 19.9 A 6 6 0 1 1 21.9 16 L 10.1 16"
+          fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>`,
+  'missile': () => `
+    <g transform="translate(16 16) scale(0.8) translate(-16 -16)">
+      <path d="M16 3.5 L19.3 11 L12.7 11 Z" fill="currentColor"/>
+      <rect x="12.7" y="10.5" width="6.6" height="10.5" rx="0.7" fill="currentColor"/>
+      <path d="M12.7 16 L8.6 22 L12.7 20.2 Z" fill="currentColor"/>
+      <path d="M19.3 16 L23.4 22 L19.3 20.2 Z" fill="currentColor"/>
+      <path d="M14.1 20.8 L16 25.8 L17.9 20.8 Z" fill="currentColor" opacity="0.85"/>
+      <rect x="12.7" y="13.6" width="6.6" height="1.5" fill="__HOLE__"/>
+    </g>`,
+  'raygun': () => `
+    <path d="M7 13 H19 V15.8 H13.6 L11.8 21 H8.6 L10.4 15.8 H7 Z" fill="currentColor"/>
+    <rect x="19" y="13.2" width="3.4" height="2.4" fill="currentColor"/>
+    <g fill="currentColor"><circle cx="24.6" cy="14.4" r="1.05"/><circle cx="27.4" cy="14.4" r="0.8"/></g>`,
+  'buggy': () => `
+    <rect x="8.5" y="13" width="15" height="5" rx="1.6" fill="currentColor"/>
+    <rect x="12" y="10.3" width="6.4" height="3.2" rx="1" fill="currentColor"/>
+    <circle cx="12" cy="20" r="2.7" fill="currentColor"/>
+    <circle cx="20" cy="20" r="2.7" fill="currentColor"/>
+    <circle cx="12" cy="20" r="1.05" fill="__HOLE__"/>
+    <circle cx="20" cy="20" r="1.05" fill="__HOLE__"/>
+    <line x1="22.2" y1="13" x2="25.4" y2="7.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+    <circle cx="25.4" cy="7.6" r="1.1" fill="currentColor"/>`,
+};
+
+export const SUPPORT_KIND_CAT = {
+  'reactor-fission': 'reactor', 'reactor-fusion': 'reactor', 'reactor-antimatter': 'reactor',
+  'gen-radioisotope': 'generator', 'gen-electric': 'generator',
+  'missile': 'robonaut', 'raygun': 'robonaut', 'buggy': 'robonaut',
+};
+
+// True when `kind` has a custom icon (reactor-*/gen-*/missile/raygun/buggy or
+// the radiator thermostat), so the renderer can pick SVG over the text glyph.
+export function hasSupportIcon(kind) {
+  return kind === 'thermostat' || !!SUPPORT_KIND_CAT[kind];
+}
+
+// Inline icon for a reactor / generator / robonaut kind. Square or circle +
+// the glyph. Returns null for kinds without an icon. `cls` lets the card mark
+// it for CSS; the generator passes '' for clean asset files.
+export function supportIconSvg(kind, { size = 18, cls = 'support-icon' } = {}) {
+  const cat = SUPPORT_KIND_CAT[kind];
+  if (!cat) return null;
+  const c = SUPPORT_CAT[cat];
+  const body = c.shape === 'square'
+    ? `<rect x="1.5" y="1.5" width="29" height="29" rx="7" fill="${c.fill}" stroke="${c.ring}" stroke-width="1.5"/>`
+    : `<circle cx="16" cy="16" r="15" fill="${c.fill}" stroke="${c.ring}" stroke-width="1.5"/>`;
+  const glyph = GLYPH[kind]().replaceAll('__HOLE__', c.fill);
+  return `<svg xmlns="http://www.w3.org/2000/svg"${cls ? ` class="${cls}"` : ''} viewBox="0 0 32 32" width="${size}" height="${size}">${body}<g color="${c.ink}">${glyph}</g></svg>`;
+}
+
+// One blue thermometer centred at x (32-tall coords).
+function thermo(cx) {
+  return `<path d="M${cx - 2.2} 9 a2.2 2.2 0 0 1 4.4 0 v8.6 a3.6 3.6 0 1 1 -4.4 0 Z"
+          fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>`
+    + `<circle cx="${cx}" cy="21.6" r="2.4" fill="currentColor"/>`
+    + `<rect x="${cx - 0.8}" y="12.4" width="1.6" height="8.6" rx="0.8" fill="currentColor"/>`;
+}
+
+// Radiator therms: N blue thermometers on a WHITE rounded badge (the readable
+// backing). Variable width (viewBox 0 0 W 32); width scales to keep aspect.
+export function thermBadgeSvg(n = 1, { size = 18, cls = 'support-icon therm-badge' } = {}) {
+  const count = Math.max(1, n | 0);
+  const slot = 13, w = count * slot + 8;
+  let therms = '';
+  for (let i = 0; i < count; i++) therms += thermo(4 + slot * i + slot / 2);
+  const width = (size * w / 32).toFixed(1);
+  return `<svg xmlns="http://www.w3.org/2000/svg"${cls ? ` class="${cls}"` : ''} viewBox="0 0 ${w} 32" width="${width}" height="${size}">`
+    + `<rect x="1" y="3" width="${w - 2}" height="26" rx="9" fill="#ffffff" stroke="${THERM_BLUE}" stroke-width="1.2"/>`
+    + `<g color="${THERM_BLUE}">${therms}</g></svg>`;
+}

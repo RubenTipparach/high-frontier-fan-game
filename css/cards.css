@@ -327,6 +327,16 @@
   color: var(--accent-2);
   font-variant-numeric: tabular-nums;
 }
+/* Custom support-icon glyphs (reactor square / generator circle / radiator
+   therm badge / robonaut). The SVG carries its own coloured shape, so the
+   chip / property badge drops its tinted pill background. */
+.support-icon { display: block; }
+.card-requires .req.has-support-icon,
+.card-properties .card-prop.has-support-icon {
+  background: transparent;
+  border: none;
+  padding: 0 1px;
+}
 /* Support-chip "satisfied" state. Used inside the rocket stack
    modal: the active thruster's requirement chips get a ✓ tag and
    a green wash when another card in the stack supplies that
