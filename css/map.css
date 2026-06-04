@@ -4737,14 +4737,14 @@ body:has(#view-browse:not(.hidden)) #main {
 /* The BACK (returned-home, high value) face is the ornate "glory" side:
    vibrant orange with an engraved sunburst + laurel + beaded rim (the
    .chit-deco SVG layer), distinct from the plain gold FRONT. */
-/* Matte + FLAT: a uniform orange centre (no brightness gradient that could
-   read as a highlight/reflection), darkening only at the very rim for form.
-   The disc reads as flat printed metal, not a polished coin. The engraving
-   (sunburst / laurel / beads) is the only surface detail. */
+/* A CENTRED sun-glow: a lighter yellow-orange core radiating out to deep
+   orange at the rim, like the sun. Centred + symmetric, so it reads as
+   radiance (matching the engraved sunburst rays) rather than an off-centre
+   specular reflection. */
 .chit-token.chit-back {
   background:
     radial-gradient(circle at 50% 50%,
-      #ee6a13 0%, #ee6a13 62%, #c9500a 100%);
+      #ffe98a 0%, #ffc24d 20%, #f9881e 50%, #ea580c 80%, #c2480a 100%);
 }
 .chit-token.chit-back .chit-token-vp   { color: #4a1c06; }
 .chit-token.chit-back .chit-token-zone { color: #4a1e04; }
