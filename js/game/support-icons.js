@@ -4,12 +4,12 @@
 // returns an inline-SVG string.
 //
 // Category visual language (flat fills, no gradients):
-//   reactor   = purple SQUARE, white glyph
-//   generator = orange CIRCLE, white glyph
+//   reactor   = purple SQUARE (white outline), white glyph
+//   generator = orange CIRCLE (white outline), white glyph
 //   radiator  = BLUE thermometer(s) on a WHITE rounded badge (×N therms)
-//   robonaut  = BLACK square, PINK glyph
-//   thruster  = DARK square (amber-outlined), AMBER rocket-engine bell
-//   refinery  = SLATE square, white flask with GREEN bubbling liquid
+//   robonaut  = BLACK square (pink outline), PINK glyph
+//   thruster  = DARK square (amber outline), AMBER rocket-engine bell
+//   refinery  = SLATE square (white outline), white flask + GREEN bubbling liquid
 // See assets/support-icons/ for the rendered review sheet.
 
 const THERM_BLUE = '#59abeb';
@@ -19,11 +19,11 @@ const FLASK_GREEN = '#16a34a';
 
 // shape: 'square' | 'circle'. ink: glyph colour. fill/ring: flat coin colours.
 export const SUPPORT_CAT = {
-  reactor:   { shape: 'square', fill: '#8b5cf6', ring: '#6d28d9', ink: '#ffffff' },
-  generator: { shape: 'circle', fill: '#f97316', ring: '#c2410c', ink: '#ffffff' },
+  reactor:   { shape: 'square', fill: '#8b5cf6', ring: '#ffffff', ink: '#ffffff' },
+  generator: { shape: 'circle', fill: '#f97316', ring: '#ffffff', ink: '#ffffff' },
   robonaut:  { shape: 'square', fill: '#0c0a16', ring: '#be185d', ink: ROBO_PINK },
   thruster:  { shape: 'square', fill: '#222a3d', ring: BELL_AMBER, ink: BELL_AMBER },
-  refinery:  { shape: 'square', fill: '#94a3b8', ring: '#64748b', ink: '#ffffff' },
+  refinery:  { shape: 'square', fill: '#94a3b8', ring: '#ffffff', ink: '#ffffff' },
 };
 
 // Glyphs use currentColor (set per category) + "__HOLE__" for negative space.
