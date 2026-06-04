@@ -829,7 +829,13 @@
   font-weight: 700;
   font-size: 13px;
   letter-spacing: 0.3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
+/* The prospector badge sits inline beside the ISRU number (overrides the
+   global block display so they share a row). */
+.card-face .crew-isru .support-icon { display: inline-block; vertical-align: middle; }
 .card-face .crew-thrust {
   margin-top: auto;
   display: flex;

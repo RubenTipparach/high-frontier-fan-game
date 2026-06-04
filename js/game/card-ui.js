@@ -9,7 +9,7 @@
 // secondaries render rotated 180° so the "stowed" face reads
 // upside-down when installed.
 
-import { supportIconSvg, thermBadgeSvg, hasSupportIcon } from './support-icons.js';
+import { supportIconSvg, thermBadgeSvg, hasSupportIcon, typeIconSvg } from './support-icons.js';
 
 // Spectral type -> { glyph, fill, ink }. Used for the per-card
 // spectral hex. Falls back to 'unknown' for anything unmapped.
@@ -208,13 +208,15 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     face.querySelector('.m').textContent = c.mass != null ? c.mass : '-';
     face.querySelector('.r').textContent = c.radHardness != null ? c.radHardness : '-';
     // Crews have NO spectral type. The third stat cell instead
-    // shows the prospector kind glyph + ISRU rating (e.g.
-    // "🛺 4" / "🔫 4") when the face carries one.
+    // shows the prospector kind icon + ISRU rating (the same
+    // missile / raygun / buggy badge a robonaut uses) when the
+    // face carries one.
     const isruCell = face.querySelector('.crew-isru');
     if (isruCell && c.isru != null) {
-      const glyph = c.prospector === 'raygun' ? '🔫'
-        : (c.prospector === 'missile' ? '🚀' : '🛺');
-      isruCell.textContent = `${glyph} ${c.isru}`;
+      const pk = (c.prospector === 'raygun' || c.prospector === 'missile')
+        ? c.prospector : 'buggy';
+      const icon = supportIconSvg(pk, { size: 14 }) || '';
+      isruCell.innerHTML = `${icon}${escapeText(String(c.isru))}`;
     }
     // Thrust triangle. Crew that double as a thruster carry a
     // { thrust, fuelPerBurn, afterburn, dirt } block; render it
@@ -283,10 +285,7 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   // glyphs this card supplies - so the player can immediately
   // see which chip-slots on a thruster this card satisfies.
   // For cards that don't supply chips (thrusters, refineries,
-  // robonauts) we fall back to a generic type emoji.
-  const TYPE_FALLBACK_ICON = {
-    thruster: '🚀', refinery: '⚗️', robonaut: '🤖',
-  };
+  // robonauts) we fall back to the card-type icon.
   const tbar = face.querySelector('.card-typebar');
   const faceData = (card.faces && card.faces[sideName]) || {};
   const supplies = faceData.supplies || card.supplies || [];
@@ -298,8 +297,8 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     : (supportIconSvg(k, { size: 15 }) || `<em>${(REQUIREMENT_VIS[k] || {}).glyph || ''}</em>`);
   const supplyGlyphs = supplies.map(iconFor).filter(Boolean).join('');
   // Robonauts ARE their prospector role - show the missile / raygun / buggy
-  // icon(s) (dual-purpose cards stack both) instead of the generic 🤖. Crews
-  // aren't robonauts, so they skip this branch.
+  // icon(s) (dual-purpose cards stack both) instead of the generic robonaut
+  // head. Crews aren't robonauts, so they skip this branch.
   let robonautGlyphs = '';
   if (card.type === 'robonaut') {
     const props = faceData.properties || card.properties || [];
@@ -309,8 +308,7 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     }
     robonautGlyphs = active.join('');
   }
-  const fb = TYPE_FALLBACK_ICON[card.type];
-  const fallback = robonautGlyphs || (fb ? `<em>${fb}</em>` : '');
+  const fallback = robonautGlyphs || (typeIconSvg(card.type, { size: 15 }) || '');
   const lead = supplyGlyphs || fallback;
   tbar.innerHTML = `${lead ? `<span class="typebar-icons">${lead}</span>` : ''}${escapeText(card.type.toUpperCase())}`;
   // Card name reads from the active face - the dark side carries
