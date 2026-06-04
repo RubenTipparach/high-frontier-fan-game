@@ -29,7 +29,10 @@ import { assetUrl } from '../base.js';
 const VIEW_W = 1400;
 const VIEW_H = 900;
 const MIN_ZOOM = 1;
-const MAX_ZOOM = 10;
+// At zoom Z the view shows 1/Z of the map, so MAX_ZOOM is the closest zoom-in.
+// Matched to the 1889 train game's tightest zoom (it shows 0.18 of the map
+// width at closest); 1 / 0.18 = 5.56.
+const MAX_ZOOM = 5.56;
 
 // Ray-casting point-in-polygon test (world coords). Used by the
 // debug zone painter to decide which nodes a hand-drawn lasso
@@ -1304,7 +1307,10 @@ export class MapRenderer {
   }
 
   _fitToData() {
-    this.zoom = this.options.initialZoom;
+    // initialZoom is the DESIRED opening zoom; clamp it to the valid range so a
+    // default (or debug-slider value) above MAX_ZOOM can't open the map closer
+    // than the ceiling allows.
+    this.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, this.options.initialZoom));
     const eff = this.zoom * this.fitScale;
     this.pan.x = this._viewCenterX() - (VIEW_W * eff) / 2;
     this.pan.y = this._viewCenterY() - (VIEW_H * eff) / 2;
