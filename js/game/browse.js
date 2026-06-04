@@ -2509,7 +2509,11 @@ function humanizeOnlineOpError(code, detail) {
     not_claimed: 'Prospect and claim this site before you can industrialize it.',
     already_industrialized: 'This site already has a factory.',
     cannot_industrialize: 'Industrialize needs a refinery + a robonaut (with their supports) in the stack.',
-    no_factory: 'You need your own factory here to ET Produce.',
+    no_factory: 'You need your own factory here.',
+    dry_site: 'This site has no water to refine (hydration 0).',
+    already_refueled: 'You\'ve already refined here this turn. End turn to refresh.',
+    no_prospector: 'Activate an ISRU prospector before refining here.',
+    isru_too_high: 'Your ISRU rig is rated higher than this site\'s water.',
     bad_outpost: 'Pick a valid outpost slot (A-D).',
     crew_no_decommission: 'Crew can\'t be decommissioned here - that happens via an event.',
     bad_decommission: 'Pick a card to decommission.',
@@ -7195,6 +7199,14 @@ function doRefuel(site) {
     setStatus(`Refuel blocked: ${chk.reason}`);
     return;
   }
+  // Online: the server refines the site's water into the tank with the
+  // active ISRU rig and spends the op; the snapshot repaints the tank.
+  if (_online) {
+    const sid = toServerId(_onlineMaps, site.id);
+    if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
+    submitOnlineOp({ kind: 'SITE_REFUEL', siteId: sid, mode: 'isru' });
+    return;
+  }
   // Rulebook I5a: ISRU Refuel is an Operation, consumes the
   // per-turn op slot. Factory-Refuel (I5b) will route through
   // this same gate when it lands.
@@ -7478,6 +7490,14 @@ function pickFuelAmount({ title = '💧 Transfer water', max = 1 } = {}) {
 // and tank headroom > 0.
 function doFactoryRefuel(site, gain) {
   if (gain <= 0) return;
+  // Online: the server runs the factory's flat +7 refine and spends the
+  // op (gain is recomputed server-side); the snapshot repaints the tank.
+  if (_online) {
+    const sid = toServerId(_onlineMaps, site.id);
+    if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
+    submitOnlineOp({ kind: 'SITE_REFUEL', siteId: sid, mode: 'factory' });
+    return;
+  }
   if (!requireOp('Factory-Refuel')) return;
   const tankBefore = getTankWater();
   const tmax = getTankMax();

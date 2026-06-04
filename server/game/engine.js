@@ -1191,11 +1191,58 @@ function applyIncome(state, op, player) {
   return { ok: true, state, log: `${player.name} took income (+${INCOME_AQUA} aqua; bank ${player.aqua}).` };
 }
 
+// Site refuel (rulebook I5): refine local water into the tank, one per site
+// per turn, costs an op. Two sources (op.mode), both computed authoritatively:
+//   isru    - the active prospector's rig: 1 + site water - ISRU rating
+//             (gate ISRU <= water, so gain >= 1). Mirrors doRefuel.
+//   factory - your own factory here: a flat +7. Mirrors doFactoryRefuel.
+// Gain is clamped by the tank's wet-mass room; the leftover is lost.
+function applySiteRefuel(state, op, player) {
+  const siteId = String(op.siteId || '');
+  const site = siteById(siteId);
+  if (!site) return fail('unknown_site');
+  if (player.rocket.siteId !== siteId) return fail('not_at_site');
+  const water = Number.isFinite(site.hydration) ? site.hydration : 0;
+  if (water <= 0) return fail('dry_site');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  player.refueledSites = Array.isArray(player.refueledSites) ? player.refueledSites : [];
+  if (player.refueledSites.includes(siteId)) return fail('already_refueled');
+  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const cap = Math.max(0, TANK_MAX - dry);
+  const tank = Number(player.rocket.tank) || 0;
+  if (tank >= cap) return fail('tank_full');
+  let rawGain, label;
+  if (op.mode === 'factory') {
+    const fac = state.factories[siteId];
+    if (!fac || fac.ownerId !== player.profileId) return fail('no_factory');
+    rawGain = 7;
+    label = 'Factory-Refuel';
+  } else {
+    const provId = player.rocket.activeProspectorId;
+    const slot = provId && player.rocket.stack.find((s) => s.id === provId);
+    if (!slot) return fail('no_prospector');
+    const isru = prospectorIsru(slot);
+    if (!(isru >= 0 && isru <= water)) return fail('isru_too_high');
+    rawGain = 1 + water - isru;
+    label = 'ISRU Refuel';
+  }
+  const gain = Math.min(rawGain, cap - tank);
+  if (gain <= 0) return fail('tank_full');
+  player.rocket.tank = round6(tank + gain);
+  player.refueledSites.push(siteId);
+  player.opsRemaining -= 1;
+  return {
+    ok: true, state,
+    log: `${player.name}: ${label} at ${site.name} (+${round6(gain)} water; tank ${round6(player.rocket.tank)}).`,
+  };
+}
+
 // Ops that change the game and ride the per-turn undo stack. Each is a
 // pure (state, op, player) -> { ok, state, log } transform; the
 // dispatcher (not the handler) maintains turnActions / turnRedo.
 const FUNCTIONAL = {
   INCOME: applyIncome,
+  SITE_REFUEL: applySiteRefuel,
   MOVE: applyMove,
   BUILD_ROCKET: applyBuildRocket,
   BOOST: applyBoost,
@@ -1235,6 +1282,9 @@ function pickPayload(op) {
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
     case 'PROSPECT': return { siteId: op.siteId };
     case 'PROSPECT_REROLL': return { siteId: op.siteId };
+    case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode };
+    case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds };
+    case 'ET_PRODUCE': return { siteId: op.siteId, cardId: op.cardId, letter: op.letter, isNewOutpost: !!op.isNewOutpost };
     // Route ops ride the undo stack like every other functional op, so
     // an UNDO/REDO replay (rebuildFromBase) must carry their payload or
     // the replay would re-run SET_ROUTE with no segments and silently
@@ -1297,6 +1347,9 @@ function openTurnFor(state, player) {
   player.opsRemaining = OPS_PER_TURN;
   player.movesRemaining = MOVES_PER_TURN;
   player.discardsRemaining = DISCARDS_PER_TURN;
+  // One refuel per site per turn: clear the per-turn ledger so the
+  // sites this player tapped last turn are refuellable again.
+  player.refueledSites = [];
   state.turnActions = [];
   state.turnRedo = [];
 }
