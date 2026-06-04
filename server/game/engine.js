@@ -250,6 +250,18 @@ function maybeAwardGlory(player, site, turn) {
   return chit;
 }
 
+// Free action: load the still-unclaimed glory chit for the zone the
+// rocket is parked in (a crew must be aboard). The explicit counterpart to
+// declining the on-arrival pick-up; mirrors the client's claimGloryHere.
+// maybeAwardGlory enforces the zone / Earth / already-claimed / crew gates,
+// so a null result means there is nothing here to load.
+function applyLoadGlory(state, _op, player) {
+  const site = player.rocket.siteId ? siteById(player.rocket.siteId) : null;
+  const chit = site ? maybeAwardGlory(player, site, state.turn) : null;
+  if (!chit) return fail('no_chit_to_load');
+  return { ok: true, state, log: `${player.name} loaded the ${chit.zone} glory chit.` };
+}
+
 // Advance the Sunspot Cube one slot. Bumps the round on wrap, rolls a
 // d6 on event slots (recorded as lastEvent; effect resolution is a
 // later PR, matching the sandbox which only records the roll today),
@@ -679,7 +691,11 @@ function applyMove(state, op, player) {
     }
   }
   const destSite = siteById(dest);
-  const chit = destSite ? maybeAwardGlory(player, destSite, state.turn) : null;
+  // Loading the chit is the player's call (pickupChit). Default true so a
+  // client that omits the flag still auto-loads; "Leave it" sends false and
+  // the chit stays on the site for a later LOAD_GLORY (Claim glory chit).
+  const chit = (destSite && op.pickupChit !== false)
+    ? maybeAwardGlory(player, destSite, state.turn) : null;
   player.rocket.lastMove = {
     rolls, destroyed: false, decommissioned,
     at: dest, nonce: nextMoveNonce(player),
@@ -1515,11 +1531,13 @@ const FUNCTIONAL = {
   PROSPECT_REROLL: applyProspectReroll,
   INDUSTRIALIZE: applyIndustrialize,
   ET_PRODUCE: applyEtProduce,
+  LOAD_GLORY: applyLoadGlory,
 };
 
 function pickPayload(op) {
   switch (op.kind) {
-    case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments };
+    case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, pickupChit: op.pickupChit !== false };
+    case 'LOAD_GLORY': return {};
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face };
     case 'BOOST': return { cardIds: op.cardIds };
     case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from, to: op.to };
@@ -1624,13 +1642,9 @@ function applyEndTurn(state, _op, player) {
 
   let log = `${player.name} ended their turn.`;
 
-  // Auto-load safety net: if the ending player is parked at a site whose
-  // zone chit is still unclaimed and a crew is aboard (e.g. they boarded a
-  // crew after landing crewless), load the chit now so it is never missed.
-  // maybeAwardGlory is idempotent - it no-ops if the zone was already claimed.
-  const hereSite = player.rocket.siteId ? siteById(player.rocket.siteId) : null;
-  const lateChit = hereSite ? maybeAwardGlory(player, hereSite, state.turn) : null;
-  if (lateChit) log = `${player.name} loaded the ${lateChit.zone} glory chit, then ended their turn.`;
+  // No auto-load on end turn: picking up a zone's glory chit is now an
+  // explicit choice (the on-arrival prompt, or the LOAD_GLORY op via the
+  // site menu), so a chit the player chose to leave stays on the site.
 
   // Mid-lap: the turn simply passes to the next seat.
   if (!lapDone) {

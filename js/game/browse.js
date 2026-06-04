@@ -10502,7 +10502,18 @@ async function moveRocket() {
       (destSite && destSite.name) || toSiteId,
       segments.reduce((b, s) => b + (Number(s.burns) || 0), 0),
     );
-    const ok = await submitOnlineOp({ kind: 'MOVE', toSiteId, hazardPay, segments });
+    // First crew into a new zone: ask before the chit loads. The choice
+    // rides with the MOVE (pickupChit) so the server awards it or leaves it
+    // on the site for a later Claim. LEO (the home zone) never offers one.
+    let pickupChit = true;
+    const arrZone = destSite && destSite.solarZone;
+    if (arrZone && arrZone !== 'Earth' && !isZoneVisited(arrZone) && stackHasCrew()) {
+      pickupChit = await promptGloryPickup((destSite && destSite.name) || toSiteId, arrZone, firstCrewId());
+    }
+    // Carried chits auto-score the moment the rocket reaches LEO; snapshot
+    // the haul now so we can celebrate it once the server resolves the move.
+    const carriedHome = (destSite && isLeoSite(destSite)) ? getChits() : [];
+    const ok = await submitOnlineOp({ kind: 'MOVE', toSiteId, hazardPay, segments, pickupChit });
     if (ok) {
       // Advance the local plan past this turn so a multi-turn route stays
       // visible for the next move (mirrors the server's route shift); clear
@@ -10516,6 +10527,17 @@ async function moveRocket() {
         if (_renderer) _renderer.setRoute(remaining);
       } else {
         clearRoute();
+      }
+      // Touchdown at home: confetti + the scored coins. The server has
+      // already banked them; this just plays back the haul we snapshotted.
+      if (carriedHome.length) {
+        const broughtHome = stackHasCrew();
+        const sideC = broughtHome ? 'back' : 'front';
+        const vps = carriedHome.reduce((a, c) => {
+          const sd = getChitSides(c.zone);
+          return a + (sideC === 'back' ? sd.back : sd.front);
+        }, 0);
+        celebrateChitsHome({ chits: carriedHome, vps, side: sideC });
       }
     }
     return ok;
@@ -11057,17 +11079,32 @@ async function runMoveQueue(ctx, resuming) {
     data: { siteId: newSiteId, zone: arrivedZone, hazardous: lockUndo },
   });
   if (willAwardChit) {
+    // First crew into a new zone: ask before loading the chit instead of
+    // grabbing it silently. "Leave it" parks the chit on the site to claim
+    // later from its menu (the zone stays unvisited so it's still offered).
     const ownerId = firstCrewId();
-    awardChitForZone(arrivedZone, getTurn(), ownerId);
-    const s = getChitSides(arrivedZone);
-    const owner = crewDisplayName(ownerId);
-    logAction({
-      type: 'glory_award',
-      icon: '🏆',
-      summary: `Glory chit earned - ${arrivedZone} (front ${s.front} / back ${s.back} VP)`
-        + (owner ? `, held by ${owner}` : ''),
-      undoable: false,
-    });
+    const pick = await promptGloryPickup(arrivedName, arrivedZone, ownerId);
+    if (_moveSnapshot) _moveSnapshot.awardedZone = pick ? arrivedZone : null;
+    if (pick) {
+      awardChitForZone(arrivedZone, getTurn(), ownerId);
+      const s = getChitSides(arrivedZone);
+      const owner = crewDisplayName(ownerId);
+      logAction({
+        type: 'glory_award',
+        icon: '🏆',
+        summary: `Glory chit earned - ${arrivedZone} (front ${s.front} / back ${s.back} VP)`
+          + (owner ? `, held by ${owner}` : ''),
+        undoable: false,
+      });
+    } else {
+      logAction({
+        type: 'glory_left',
+        icon: '🎖',
+        summary: `Left the ${arrivedZone} glory chit at ${arrivedName} (claim it later from the site menu)`,
+        undoable: false,
+      });
+      refreshOpenSitePopup();
+    }
   }
   if (willCashIn) {
     // Crew aboard at home -> flip to the BACK value; no crew -> the
@@ -11091,6 +11128,10 @@ async function runMoveQueue(ctx, resuming) {
         : `${n} crewless chit${n === 1 ? '' : 's'} score face-up (front) for ${res.vps} VP`,
       undoable: false,
     });
+    // Touchdown at home: celebrate the haul (confetti + the scored coins).
+    if (res.chits && res.chits.length) {
+      celebrateChitsHome({ chits: res.chits, vps: res.vps, side: broughtHome ? 'back' : 'front' });
+    }
   }
   // Shift remaining segments down a turn (T2→T1, T3→T2, …).
   const remaining = _plannedRoute
@@ -12112,6 +12153,25 @@ function showSitePopupFor(site) {
         },
       });
     }
+  }
+  // Claim glory chit: when the rocket is parked here with a crew aboard
+  // and this site's heliocentric zone still has an unclaimed chit, offer
+  // to load it now (the "I left it on arrival, grab it later" path). Lands
+  // just before Navigate-to so the pure-inspection action stays last.
+  if (rocketSite && site.id === rocketSite.id
+      && site.solarZone && site.solarZone !== 'Earth'
+      && !isZoneVisited(site.solarZone) && stackHasCrew()) {
+    const sds = getChitSides(site.solarZone);
+    actions.push({
+      label: '🎖 Claim glory chit',
+      variant: 'glory',
+      title: `Load the ${site.solarZone}-zone glory chit onto your crew `
+        + `(front ${sds.front} / back ${sds.back} VP). Carry it home to LEO to score it.`,
+      onClick: () => {
+        claimGloryHere(site);
+        _renderer.clearSitePopup();
+      },
+    });
   }
   // Navigate-to ALWAYS sits last (CLAUDE.md style rule). It's a
   // pure inspection affordance - no state mutation - so any new
@@ -13150,19 +13210,47 @@ function reconcileChitOwners() {
   }
 }
 
+// The local player's seat identity (name + colour), used to name the
+// claimed glory coins. Multiplayer: the player's handle + server-assigned
+// seat colour. Solo: the chosen faction's name + its colour band. Falls
+// back to a plain "You" with no tint (inherits currentColor) when neither
+// is known.
+function localSeat() {
+  if (_online) {
+    const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
+    const myp = players.find((p) => p.profileId === (_onlineMe && _onlineMe.id));
+    const name = (_onlineMe && _onlineMe.name) || (myp && myp.name) || 'You';
+    return { name, color: (myp && myp.color) || null, handle: true };
+  }
+  const picked = getPickedCrew();
+  const card = picked && CREW_BY_ID[picked.cardId];
+  if (card) {
+    const faceKey = picked.face === 'secondary' ? 'secondary' : 'primary';
+    const face = card.faces && card.faces[faceKey];
+    return { name: (face && face.name) || card.name || 'You', color: card.color || null, handle: false };
+  }
+  return { name: 'You', color: null, handle: false };
+}
+
 // Golden glory chit. A CARRIED chit (transit) is a vibrant two-sided coin
 // that flips on tap (front value / back value, undecided until it comes home
 // or the crew is lost). A CLAIMED chit is FIXED on its scored side, rendered
-// darkened (it is spent), with the crew that brought it home named beneath.
-function buildChitToken(zone, { side = null, transit = false, crewId = null } = {}) {
+// darkened (it is spent), with the player who banked it named beneath.
+function buildChitToken(zone, { side = null, transit = false, crewId = null, player = null } = {}) {
   const sides = getChitSides(zone);
   const owner = crewId ? crewDisplayName(crewId) : '';
   const ownerHtml = owner
     ? `<span class="chit-token-owner" title="Earned by ${esc(owner)}">${esc(owner)}</span>` : '';
 
-  // Claimed: a fixed, darkened coin (no flip) + the player/crew named below.
+  // Claimed: a fixed, darkened coin (no flip) + the player who banked it
+  // named beneath, tinted to their seat colour (the .player-name +
+  // --player-color convention). Falls back to the carrying crew's name
+  // when no seat is known.
   if (!transit && side) {
     const vp = side === 'back' ? sides.back : sides.front;
+    const seatName  = (player && player.name) ? player.name : owner;
+    const seatLabel = (player && player.handle && seatName) ? '@' + seatName : seatName;
+    const seatColor = (player && player.color) ? player.color : null;
     const wrap = document.createElement('div');
     wrap.className = 'chit-token-wrap';
     wrap.innerHTML = `
@@ -13172,7 +13260,9 @@ function buildChitToken(zone, { side = null, transit = false, crewId = null } = 
         <span class="chit-token-vp">+${vp} VP</span>
         <span class="chit-token-side">${esc(side)}</span>
       </div>
-      ${owner ? `<span class="chit-claim-by" title="Brought home by ${esc(owner)}">${esc(owner)}</span>` : ''}`;
+      ${seatName
+        ? `<span class="chit-claim-by player-name"${seatColor ? ` style="--player-color:${esc(seatColor)}"` : ''} title="Claimed by ${esc(seatLabel)}">${esc(seatLabel)}</span>`
+        : ''}`;
     return wrap;
   }
 
@@ -13201,6 +13291,194 @@ function buildChitToken(zone, { side = null, transit = false, crewId = null } = 
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
   });
   return flip;
+}
+
+// One-shot confetti burst. Spawns colourful paper falling under gravity
+// with a little spin, then removes its own canvas. Pure DOM/canvas, no
+// library, no leftover state. Honours prefers-reduced-motion by thinning
+// the count. Eye candy only - wrapped so a failure never breaks play.
+function burstConfetti({ count = 150, duration = 2600 } = {}) {
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.className = 'confetti-canvas';
+    Object.assign(canvas.style, {
+      position: 'fixed', inset: '0', width: '100%', height: '100%',
+      pointerEvents: 'none', zIndex: '99999',
+    });
+    document.body.appendChild(canvas);
+    const ctx = canvas.getContext('2d');
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.floor(innerWidth * dpr);
+    canvas.height = Math.floor(innerHeight * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const W = innerWidth, H = innerHeight;
+    const COLORS = ['#ffd24a', '#ffc400', '#7dd3fc', '#f9a8d4', '#86efac', '#fb923c', '#fff7d6'];
+    const reduce = typeof matchMedia === 'function'
+      && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const N = reduce ? Math.min(count, 40) : count;
+    const pieces = [];
+    for (let i = 0; i < N; i++) {
+      pieces.push({
+        x: W * (0.18 + Math.random() * 0.64),
+        y: H * 0.3 + (Math.random() * 40 - 20),
+        vx: (Math.random() - 0.5) * 6.5,
+        vy: -4 - Math.random() * 7,
+        g: 0.16 + Math.random() * 0.12,
+        w: 6 + Math.random() * 6,
+        h: 8 + Math.random() * 8,
+        rot: Math.random() * Math.PI,
+        vr: (Math.random() - 0.5) * 0.32,
+        col: COLORS[(Math.random() * COLORS.length) | 0],
+      });
+    }
+    const start = performance.now();
+    let raf = 0;
+    let stopped = false;
+    const cleanup = () => {
+      if (stopped) return; stopped = true;
+      cancelAnimationFrame(raf);
+      if (canvas.isConnected) canvas.remove();
+    };
+    const tick = (now) => {
+      const t = now - start;
+      ctx.clearRect(0, 0, W, H);
+      const fade = t > duration - 700 ? Math.max(0, (duration - t) / 700) : 1;
+      for (const p of pieces) {
+        p.vy += p.g; p.x += p.vx; p.y += p.vy; p.rot += p.vr; p.vx *= 0.992;
+        ctx.save();
+        ctx.globalAlpha = fade;
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        ctx.fillStyle = p.col;
+        ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+        ctx.restore();
+      }
+      if (t < duration) raf = requestAnimationFrame(tick);
+      else cleanup();
+    };
+    raf = requestAnimationFrame(tick);
+    // Safety net if rAF throttles (backgrounded tab): force-clean later.
+    setTimeout(cleanup, duration + 1500);
+  } catch { /* confetti is non-essential eye candy */ }
+}
+
+// Pick-up prompt shown on first arrival into a new heliocentric zone (a
+// crew must be aboard to carry a chit). Resolves true = load it now,
+// false = leave it on the site to claim later from the site menu. The
+// backdrop / Escape default to "leave it" (the non-committal choice).
+function promptGloryPickup(siteName, zone, crewId = null) {
+  return new Promise((resolve) => {
+    document.querySelector('.confirm-modal-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay glory-pickup-overlay';
+    let done = false;
+    const close = (val) => {
+      if (done) return; done = true;
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(val);
+    };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+    const onKey = (e) => { if (e.key === 'Escape') close(false); };
+    document.addEventListener('keydown', onKey);
+
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel glory-pickup-panel';
+    panel.innerHTML = `
+      <h3>🎖 Glory chit at ${esc(siteName)}</h3>
+      <p>Your crew is the first to reach the <strong>${esc(zone)}</strong> zone.
+         Pick up the glory chit to carry it home for victory points?</p>
+      <div class="glory-pickup-coin"></div>
+      <div class="turn-confirm-actions glory-pickup-actions">
+        <button type="button" class="popup-btn primary" data-act="pick">🎖 Pick up chit</button>
+        <button type="button" class="popup-btn" data-act="leave">Leave it</button>
+      </div>
+      <p class="muted glory-pickup-note">Leave it and you can still claim it later from the ${esc(siteName)} site menu.</p>
+    `;
+    const coinHost = panel.querySelector('.glory-pickup-coin');
+    if (coinHost) coinHost.appendChild(buildChitToken(zone, { transit: true, crewId }));
+    for (const b of panel.querySelectorAll('button[data-act]')) {
+      b.addEventListener('click', () => close(b.dataset.act === 'pick'));
+    }
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+  });
+}
+
+// Celebration shown when a rocket returns to LEO and its carried glory
+// chits auto-score at their back (returned-home) value. Confetti + a
+// modal of the flipped coins. Eye candy only; the scoring already
+// happened by the time this runs.
+function celebrateChitsHome({ chits = [], vps = 0, side = 'back' } = {}) {
+  if (!chits.length) return;
+  burstConfetti();
+  document.querySelector('.confirm-modal-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay confirm-modal-overlay glory-home-overlay';
+  let done = false;
+  const close = () => {
+    if (done) return; done = true;
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+  };
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const onKey = (e) => {
+    if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') close();
+  };
+  document.addEventListener('keydown', onKey);
+
+  const n = chits.length;
+  const panel = document.createElement('div');
+  panel.className = 'turn-confirm-panel glory-home-panel';
+  panel.innerHTML = `
+    <h3>🎉 Chits scored at LEO!</h3>
+    <p>Your crew brought <strong>${n}</strong> glory chit${n === 1 ? '' : 's'}
+       home for <strong>+${vps} VP</strong>.</p>
+    <div class="glory-home-coins glory-chits"></div>
+    <div class="turn-confirm-actions">
+      <button type="button" class="popup-btn primary" data-act="ok">Nice!</button>
+    </div>
+  `;
+  const coins = panel.querySelector('.glory-home-coins');
+  if (coins) for (const c of chits) {
+    // Show the vibrant carried coin on its scored side (back = returned
+    // home, the big value; front = crewless face-up, the small value).
+    const coin = buildChitToken(c.zone, { transit: true, crewId: c.crewId });
+    if (side === 'back') coin.classList.add('is-flipped');
+    coins.appendChild(coin);
+  }
+  panel.querySelector('[data-act="ok"]').addEventListener('click', close);
+  overlay.appendChild(panel);
+  mountOverlay(overlay);
+}
+
+// Site-menu "Claim glory chit" handler: load the still-unclaimed chit for
+// the site's zone onto the crew aboard. Solo awards locally + logs;
+// online submits the LOAD_GLORY op (the server awards + logs). Refreshes
+// the popup so the button drops once the chit is loaded.
+async function claimGloryHere(site) {
+  if (!site || !site.solarZone) return false;
+  const zone = site.solarZone;
+  if (_online) {
+    if (!isOnlineMyTurn()) return false;
+    const ok = await submitOnlineOp({ kind: 'LOAD_GLORY' });
+    if (ok) refreshOpenSitePopup();
+    return ok;
+  }
+  if (zone === 'Earth' || isZoneVisited(zone) || !stackHasCrew()) return false;
+  const ownerId = firstCrewId();
+  awardChitForZone(zone, getTurn(), ownerId);
+  const s = getChitSides(zone);
+  const owner = crewDisplayName(ownerId);
+  logAction({
+    type: 'glory_award',
+    icon: '🏆',
+    summary: `Loaded the ${zone} glory chit (front ${s.front} / back ${s.back} VP)`
+      + (owner ? `, held by ${owner}` : ''),
+    undoable: false,
+  });
+  refreshOpenSitePopup();
+  return true;
 }
 
 // Classify a colony's site for VP: submarine (+2) beats astrobiology
@@ -13329,8 +13607,9 @@ function paintGlory() {
   // named). One unified row.
   const all = host.querySelector('#glory-chits-all');
   if (all) {
+    const seat = localSeat();
     for (const c of chits) all.appendChild(buildChitToken(c.zone, { transit: true, crewId: c.crewId }));
-    for (const c of claimed) all.appendChild(buildChitToken(c.zone, { side: c.side, crewId: c.crewId }));
+    for (const c of claimed) all.appendChild(buildChitToken(c.zone, { side: c.side, crewId: c.crewId, player: seat }));
     if (!chits.length && !claimed.length) {
       all.innerHTML = '<p class="muted">No chits yet. Land a crew in a new heliocentric zone to earn one.</p>';
     }
@@ -13454,6 +13733,7 @@ const MP_LOG_ICONS = {
   TRANSFER: '🔀', TRANSFER_FUEL: '💧',
   CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑',
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',
+  LOAD_GLORY: '🎖',
   UNDO: '↩', REDO: '↪',
 };
 
