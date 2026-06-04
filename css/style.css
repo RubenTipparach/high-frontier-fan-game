@@ -201,6 +201,12 @@ code {
   margin-top: 14px;
 }
 .main-menu-section:first-of-type { margin-top: 0; }
+.main-menu-note {
+  margin: 6px 0 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink-mute);
+}
 .main-menu-heading {
   margin: 0 0 8px;
   font-size: 11px;

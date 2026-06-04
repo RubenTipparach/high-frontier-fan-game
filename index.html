@@ -615,11 +615,23 @@
           <button id="btn-new-game-close" class="modal-x" type="button"
             aria-label="Close" title="Close (Esc)">×</button>
         </div>
-        <div class="main-menu-section">
+        <div class="main-menu-section" id="new-game-mode">
           <h2 class="main-menu-heading">Mode</h2>
           <div class="main-menu-row">
             <button id="btn-new-game-mp" class="primary" type="button">🛰 Multiplayer table</button>
-            <button id="btn-new-game-sandbox" type="button">🗺 Sandbox (solo)</button>
+            <button id="btn-new-game-solo" class="primary" type="button">🧪 Solo room</button>
+          </div>
+          <p class="main-menu-note">Solo room is a private 1-player table on the server: the same engine as a full table, so you can try multiplayer features on your own.</p>
+          <div class="main-menu-row">
+            <button id="btn-new-game-sandbox" type="button">🗺 Offline sandbox (legacy)</button>
+          </div>
+        </div>
+        <div class="main-menu-section hidden" id="new-game-legacy-warn">
+          <h2 class="main-menu-heading">Offline sandbox</h2>
+          <p class="main-menu-note">This game is saved only on <strong>this device</strong>. It won't appear on your other devices, and multiplayer features aren't available. Continue?</p>
+          <div class="main-menu-row">
+            <button id="btn-legacy-continue" class="primary" type="button">Continue offline</button>
+            <button id="btn-legacy-back" type="button">Back</button>
           </div>
         </div>
       </div>

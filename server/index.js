@@ -578,7 +578,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
     if (existing) return res.status(200).json({ ok: true, lobby: lobbyRow(existing.id), deduped: true });
   }
   const name = String(body.name || '').trim().slice(0, 60) || `${req.profile.name}'s table`;
-  const maxPlayers = Math.max(2, Math.min(5, Number(body.maxPlayers) || 5));
+  // Min 1 so a "solo room" (a private 1-player table for testing the
+  // multiplayer engine alone) can be created; the normal create form still
+  // asks for 2+. Start only requires >=1 member, so a solo room can begin.
+  const maxPlayers = Math.max(1, Math.min(5, Number(body.maxPlayers) || 5));
   // Game length: 5 (short, default) / 6 (medium) / 7 (extra long).
   const maxRounds = [5, 6, 7].includes(Number(body.maxRounds)) ? Number(body.maxRounds) : 5;
   const joinPolicy = body.joinPolicy === 'invite-only' ? 'invite-only' : 'open';

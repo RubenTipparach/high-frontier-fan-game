@@ -9,7 +9,7 @@ import {
 } from './auth.js';
 import { ws } from './ws.js';
 import {
-  initLobby, refreshLobbyList, openLobby, exitToLobbyList,
+  initLobby, refreshLobbyList, openLobby, exitToLobbyList, createSoloRoom,
 } from './lobby.js';
 import {
   initInvites, refreshInvitesList, subscribeInvitesForProfile,
@@ -407,9 +407,20 @@ function initNewGameModal() {
   const overlay = document.getElementById('new-game-modal');
   const closeBtn = document.getElementById('btn-new-game-close');
   const mpBtn = document.getElementById('btn-new-game-mp');
+  const soloBtn = document.getElementById('btn-new-game-solo');
   const sandboxBtn = document.getElementById('btn-new-game-sandbox');
-  if (!trigger || !overlay || !closeBtn || !mpBtn || !sandboxBtn) return;
+  const modeSection = document.getElementById('new-game-mode');
+  const legacyWarn = document.getElementById('new-game-legacy-warn');
+  const legacyContinue = document.getElementById('btn-legacy-continue');
+  const legacyBack = document.getElementById('btn-legacy-back');
+  if (!trigger || !overlay || !closeBtn || !mpBtn || !soloBtn || !sandboxBtn) return;
+  // Reset to the mode chooser (hide the offline-sandbox warning step).
+  const showMode = () => {
+    if (modeSection) modeSection.classList.remove('hidden');
+    if (legacyWarn) legacyWarn.classList.add('hidden');
+  };
   const open = () => {
+    showMode();
     overlay.classList.remove('hidden');
     document.addEventListener('keydown', onKey);
   };
@@ -425,7 +436,30 @@ function initNewGameModal() {
     close();
     showView('view-create-lobby');
   });
+  // Solo room: a private 1-player table on the server (auto-created + started).
+  soloBtn.addEventListener('click', async () => {
+    soloBtn.disabled = true;
+    const prev = soloBtn.textContent;
+    soloBtn.textContent = 'Creating room…';
+    try {
+      const r = await createSoloRoom();
+      if (r && r.ok) { close(); }
+      else { toast('Could not start a solo room: ' + ((r && r.error) || 'network'), 'error'); }
+    } catch (err) {
+      console.error('solo room:', err);
+      toast('Could not start a solo room.', 'error');
+    } finally {
+      soloBtn.disabled = false;
+      soloBtn.textContent = prev;
+    }
+  });
+  // Offline sandbox is now behind a warning (device-only, no multiplayer).
   sandboxBtn.addEventListener('click', () => {
+    if (modeSection) modeSection.classList.add('hidden');
+    if (legacyWarn) legacyWarn.classList.remove('hidden');
+  });
+  if (legacyBack) legacyBack.addEventListener('click', showMode);
+  if (legacyContinue) legacyContinue.addEventListener('click', () => {
     close();
     // A fresh solo session: register a new sandbox game id (so it shows in
     // "Your games" + routes to /sandbox/<id>), then mount with newGame so
