@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="980" height="520" viewBox="0 0 980 520">
-  <rect width="980" height="520" fill="#0c0a16"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="638" viewBox="0 0 980 638">
+  <rect width="980" height="638" fill="#0c0a16"/>
   <text x="24" y="20" fill="#7dd3fc" font-family="sans-serif" font-size="13">Support / requirement glyphs</text>
   <text x="24" y="42" fill="#cbd5e1" font-family="sans-serif" font-size="16" font-weight="700">Reactor (purple square)</text><g transform="translate(24, 54)"><g transform="scale(1.8125)"><rect x="1.5" y="1.5" width="29" height="29" rx="7" fill="#8b5cf6" stroke="#6d28d9" stroke-width="1.5"/><g color="#ffffff">
     <line x1="10.5" y1="10.5" x2="21.5" y2="21.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
@@ -52,5 +52,14 @@
     <circle cx="12" cy="20" r="1.05" fill="#0c0a16"/>
     <circle cx="20" cy="20" r="1.05" fill="#0c0a16"/>
     <line x1="22.2" y1="13" x2="25.4" y2="7.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-    <circle cx="25.4" cy="7.6" r="1.1" fill="currentColor"/></g></g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Buggy</text></g>
+    <circle cx="25.4" cy="7.6" r="1.1" fill="currentColor"/></g></g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Buggy</text></g><text x="24" y="514" fill="#cbd5e1" font-family="sans-serif" font-size="16" font-weight="700">Card-type header icons (NEW)</text><g transform="translate(24, 526)"><g transform="scale(1.8125)"><path d="M16 3.4 L29 27.4 L3 27.4 Z" fill="#222a3d" stroke="#0c0a16" stroke-width="2.6" stroke-linejoin="round"/><g color="#ff4d97">
+    <circle cx="16" cy="19.6" r="5.3" fill="currentColor"/></g></g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Thruster (triangle + pink circle)</text></g><g transform="translate(274, 526)"><g transform="scale(1.8125)"><rect x="1.5" y="1.5" width="29" height="29" rx="7" fill="#94a3b8" stroke="#64748b" stroke-width="1.5"/><g color="#ffffff">
+    <path d="M12.8 7.8 H19.2 M14 7.8 V13.6 L8.6 24 Q8 26.4 10.4 26.4 H21.6 Q24 26.4 23.4 24 L18 13.6 V7.8"
+          fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/>
+    <path d="M11.2 20.8 L8.6 24 Q8 26.4 10.4 26.4 H21.6 Q24 26.4 23.4 24 L20.8 20.8 Z" fill="currentColor"/></g></g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Refinery (flask)</text></g><g transform="translate(524, 526)"><g transform="scale(1.8125)"><rect x="1.5" y="1.5" width="29" height="29" rx="7" fill="#0c0a16" stroke="#be185d" stroke-width="1.5"/><g color="#eec1a8">
+    <line x1="16" y1="11.4" x2="16" y2="7.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    <circle cx="16" cy="6.8" r="1.5" fill="currentColor"/>
+    <rect x="9.3" y="11.2" width="13.4" height="12" rx="3.2" fill="currentColor"/>
+    <g fill="#0c0a16"><circle cx="13" cy="16.2" r="1.9"/><circle cx="19" cy="16.2" r="1.9"/></g>
+    <rect x="12.8" y="19.4" width="6.4" height="1.7" rx="0.85" fill="#0c0a16"/></g></g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Robonaut (generic head)</text></g>
 </svg>

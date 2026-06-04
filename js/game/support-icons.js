@@ -1,22 +1,29 @@
-// Support / requirement glyph SVGs - ONE source for the rendered card chips
-// (card-ui.js) AND the standalone asset generator (scripts/gen-support-icons.mjs).
-// Pure: no DOM, no node imports; every export returns an inline-SVG string.
+// Support / requirement / card-type glyph SVGs - ONE source for the rendered
+// card chips (card-ui.js) AND the standalone asset generator
+// (scripts/gen-support-icons.mjs). Pure: no DOM, no node imports; every export
+// returns an inline-SVG string.
 //
 // Category visual language (flat fills, no gradients):
 //   reactor   = purple SQUARE, white glyph
 //   generator = orange CIRCLE, white glyph
 //   radiator  = BLUE thermometer(s) on a WHITE rounded badge (×N therms)
 //   robonaut  = BLACK square, PINK glyph
+//   thruster  = DARK triangle (the thrust-triangle silhouette), PINK thrust circle
+//   refinery  = SLATE square, white flask glyph
 // See assets/support-icons/ for the rendered review sheet.
 
 const THERM_BLUE = '#59abeb';
 const ROBO_PINK = '#eec1a8';
+const THRUST_PINK = '#ff4d97';
 
-// shape: 'square' | 'circle'. ink: glyph colour. fill/ring: flat coin colours.
+// shape: 'square' | 'circle' | 'triangle'. ink: glyph colour. fill/ring: flat
+// coin colours.
 export const SUPPORT_CAT = {
-  reactor:   { shape: 'square', fill: '#8b5cf6', ring: '#6d28d9', ink: '#ffffff' },
-  generator: { shape: 'circle', fill: '#f97316', ring: '#c2410c', ink: '#ffffff' },
-  robonaut:  { shape: 'square', fill: '#0c0a16', ring: '#be185d', ink: ROBO_PINK },
+  reactor:   { shape: 'square',   fill: '#8b5cf6', ring: '#6d28d9', ink: '#ffffff' },
+  generator: { shape: 'circle',   fill: '#f97316', ring: '#c2410c', ink: '#ffffff' },
+  robonaut:  { shape: 'square',   fill: '#0c0a16', ring: '#be185d', ink: ROBO_PINK },
+  thruster:  { shape: 'triangle', fill: '#222a3d', ring: '#0c0a16', ink: THRUST_PINK },
+  refinery:  { shape: 'square',   fill: '#94a3b8', ring: '#64748b', ink: '#ffffff' },
 };
 
 // Glyphs use currentColor (set per category) + "__HOLE__" for negative space.
@@ -74,6 +81,24 @@ const GLYPH = {
     <circle cx="20" cy="20" r="1.05" fill="__HOLE__"/>
     <line x1="22.2" y1="13" x2="25.4" y2="7.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
     <circle cx="25.4" cy="7.6" r="1.1" fill="currentColor"/>`,
+  // Thruster type: the pink thrust circle sitting in the thrust triangle (the
+  // dark triangle is the coin body) - the published "thrust triangle + pink
+  // circle" pair.
+  'thruster': () => `
+    <circle cx="16" cy="19.6" r="5.3" fill="currentColor"/>`,
+  // Refinery type: an Erlenmeyer flask with liquid - the local water plant.
+  'refinery': () => `
+    <path d="M12.8 7.8 H19.2 M14 7.8 V13.6 L8.6 24 Q8 26.4 10.4 26.4 H21.6 Q24 26.4 23.4 24 L18 13.6 V7.8"
+          fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/>
+    <path d="M11.2 20.8 L8.6 24 Q8 26.4 10.4 26.4 H21.6 Q24 26.4 23.4 24 L20.8 20.8 Z" fill="currentColor"/>`,
+  // Generic robonaut (the rare card with no missile / raygun / buggy property):
+  // a simple robot head so the type icon never falls back to an emoji.
+  'robonaut-generic': () => `
+    <line x1="16" y1="11.4" x2="16" y2="7.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    <circle cx="16" cy="6.8" r="1.5" fill="currentColor"/>
+    <rect x="9.3" y="11.2" width="13.4" height="12" rx="3.2" fill="currentColor"/>
+    <g fill="__HOLE__"><circle cx="13" cy="16.2" r="1.9"/><circle cx="19" cy="16.2" r="1.9"/></g>
+    <rect x="12.8" y="19.4" width="6.4" height="1.7" rx="0.85" fill="__HOLE__"/>`,
 };
 
 export const SUPPORT_KIND_CAT = {
@@ -82,24 +107,62 @@ export const SUPPORT_KIND_CAT = {
   'missile': 'robonaut', 'raygun': 'robonaut', 'buggy': 'robonaut',
 };
 
+// Card TYPE -> { category, glyph } for the header icon. Reactor / generator /
+// radiator cards already show the chips they SUPPLY, so only the
+// non-supplying types need a type icon here.
+const TYPE_ICON = {
+  thruster: { cat: 'thruster', glyph: 'thruster' },
+  refinery: { cat: 'refinery', glyph: 'refinery' },
+  robonaut: { cat: 'robonaut', glyph: 'robonaut-generic' },
+};
+
 // True when `kind` has a custom icon (reactor-*/gen-*/missile/raygun/buggy or
 // the radiator thermostat), so the renderer can pick SVG over the text glyph.
 export function hasSupportIcon(kind) {
   return kind === 'thermostat' || !!SUPPORT_KIND_CAT[kind];
 }
 
-// Inline icon for a reactor / generator / robonaut kind. Square or circle +
-// the glyph. Returns null for kinds without an icon. `cls` lets the card mark
-// it for CSS; the generator passes '' for clean asset files.
-export function supportIconSvg(kind, { size = 18, cls = 'support-icon' } = {}) {
+// True when `type` has a header type icon (thruster / refinery / robonaut).
+export function hasTypeIcon(type) {
+  return !!TYPE_ICON[type];
+}
+
+// Coin body for a category: square / circle / triangle, filled + ringed.
+function shapeBody(c) {
+  if (c.shape === 'circle') {
+    return `<circle cx="16" cy="16" r="15" fill="${c.fill}" stroke="${c.ring}" stroke-width="1.5"/>`;
+  }
+  if (c.shape === 'triangle') {
+    return `<path d="M16 3.4 L29 27.4 L3 27.4 Z" fill="${c.fill}" stroke="${c.ring}" stroke-width="2.6" stroke-linejoin="round"/>`;
+  }
+  return `<rect x="1.5" y="1.5" width="29" height="29" rx="7" fill="${c.fill}" stroke="${c.ring}" stroke-width="1.5"/>`;
+}
+
+// Render a category coin + glyph. `cat` keys SUPPORT_CAT; `glyphKey` keys GLYPH.
+function coin(cat, glyphKey, { size = 18, cls = 'support-icon' } = {}) {
+  const c = SUPPORT_CAT[cat];
+  if (!c) return null;
+  const glyph = GLYPH[glyphKey] ? GLYPH[glyphKey]().replaceAll('__HOLE__', c.fill) : '';
+  return `<svg xmlns="http://www.w3.org/2000/svg"${cls ? ` class="${cls}"` : ''} viewBox="0 0 32 32" width="${size}" height="${size}">${shapeBody(c)}<g color="${c.ink}">${glyph}</g></svg>`;
+}
+
+// Inline icon for a reactor / generator / robonaut SUPPORT kind. Square /
+// circle / triangle coin + the glyph. Returns null for kinds without an icon.
+// `cls` lets the card mark it for CSS; the generator passes '' for clean asset
+// files.
+export function supportIconSvg(kind, opts = {}) {
   const cat = SUPPORT_KIND_CAT[kind];
   if (!cat) return null;
-  const c = SUPPORT_CAT[cat];
-  const body = c.shape === 'square'
-    ? `<rect x="1.5" y="1.5" width="29" height="29" rx="7" fill="${c.fill}" stroke="${c.ring}" stroke-width="1.5"/>`
-    : `<circle cx="16" cy="16" r="15" fill="${c.fill}" stroke="${c.ring}" stroke-width="1.5"/>`;
-  const glyph = GLYPH[kind]().replaceAll('__HOLE__', c.fill);
-  return `<svg xmlns="http://www.w3.org/2000/svg"${cls ? ` class="${cls}"` : ''} viewBox="0 0 32 32" width="${size}" height="${size}">${body}<g color="${c.ink}">${glyph}</g></svg>`;
+  return coin(cat, kind, opts);
+}
+
+// Inline icon for a card TYPE (thruster / refinery / robonaut) shown next to
+// the card-header label. Returns null for types that render their supplied
+// chips instead.
+export function typeIconSvg(type, opts = {}) {
+  const t = TYPE_ICON[type];
+  if (!t) return null;
+  return coin(t.cat, t.glyph, opts);
 }
 
 // One blue thermometer centred at x (32-tall coords).

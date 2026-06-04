@@ -4,7 +4,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SUPPORT_KIND_CAT, supportIconSvg, thermBadgeSvg } from '../js/game/support-icons.js';
+import { SUPPORT_KIND_CAT, supportIconSvg, thermBadgeSvg, typeIconSvg } from '../js/game/support-icons.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(ROOT, 'assets', 'support-icons');
@@ -14,7 +14,10 @@ const opt = { size: 32, cls: '' };   // clean, classless 32x32 asset files
 const kinds = Object.keys(SUPPORT_KIND_CAT);
 for (const k of kinds) writeFileSync(join(OUT, `${k}.svg`), supportIconSvg(k, opt) + '\n');
 writeFileSync(join(OUT, 'thermostat.svg'), thermBadgeSvg(1, opt) + '\n');
-console.log(`wrote ${kinds.length + 1} svgs to assets/support-icons/`);
+// Card-type header icons (thruster / refinery / generic robonaut).
+const types = ['thruster', 'refinery', 'robonaut'];
+for (const t of types) writeFileSync(join(OUT, `type-${t}.svg`), typeIconSvg(t, opt) + '\n');
+console.log(`wrote ${kinds.length + 1 + types.length} svgs to assets/support-icons/`);
 
 // ---- Contact sheet ----
 const CAT_NAME = {
@@ -26,6 +29,7 @@ const LBL = {
   'reactor-fission': 'Fission (was X)', 'reactor-fusion': 'Fusion (∿)', 'reactor-antimatter': 'Antimatter (bomb)',
   'gen-radioisotope': 'Radioisotope (⟛)', 'gen-electric': 'Electric (e)',
   'missile': 'Missile', 'raygun': 'Raygun', 'buggy': 'Buggy',
+  'thruster': 'Thruster (triangle + pink circle)', 'refinery': 'Refinery (flask)', 'robonaut': 'Robonaut (generic head)',
 };
 const stripSvg = (s) => s.replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '');
 const ICON = 58, ROW_H = 88, PAD = 24, HEAD = 30, COL_W = 250;
@@ -34,6 +38,7 @@ const rows = [
   { name: CAT_NAME.generator, items: ['gen-radioisotope', 'gen-electric'].map((k) => ({ svg: supportIconSvg(k, opt), w: ICON, label: LBL[k] })) },
   { name: 'Radiator (blue therms on white badge)', items: [1, 2, 3].map((n) => ({ svg: thermBadgeSvg(n, opt), w: (n * 13 + 8) * (ICON / 32), label: `${n} therm${n === 1 ? '' : 's'}` })) },
   { name: CAT_NAME.robonaut, items: ['missile', 'raygun', 'buggy'].map((k) => ({ svg: supportIconSvg(k, opt), w: ICON, label: LBL[k] })) },
+  { name: 'Card-type header icons (NEW)', items: ['thruster', 'refinery', 'robonaut'].map((t) => ({ svg: typeIconSvg(t, opt), w: ICON, label: LBL[t] })) },
 ];
 let y = PAD, body = '';
 for (const row of rows) {
