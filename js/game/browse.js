@@ -67,7 +67,7 @@ import {
   commitTurn as commitLogTurn, resetLog, onChange as onLogChange,
 } from './mission-log.js';
 import {
-  awardChitForZone, revokeChitForZone, cashInChits, uncashChits,
+  awardChitForZone, revokeChitForZone, cashInChits, uncashChits, cashHomeArrival,
   resolveChitsFront, resolveChitsForCrew,
   getChits, getClaimedChits, getVps, getChitSides,
   isZoneVisited, resetGlory,
@@ -3450,12 +3450,14 @@ function openUnifiedStackInspector(stackId) {
       if (!op) { close(); return; }
       const factory = getFactory(op.siteId);
       const colony  = getColony(op.siteId);
+      const carriedChits = chitsOnOutpostCount(letter);
       statsHtml = `
         <div class="stack-inspector-stat-row">
           <div class="stack-inspector-stat"><span class="muted">Cards</span><strong>${esc(String(cards.length))}</strong></div>
           <div class="stack-inspector-stat"><span class="muted">Water FT</span><strong class="stat-water">${esc(String(op.tank))} 💧</strong></div>
           <div class="stack-inspector-stat"><span class="muted">Factory</span><strong>${factory ? `🏭 <span class="industrialize-spectral-badge spectral-${esc(factory.spectralType)}">${esc(factory.spectralType)}</span>` : '<span class="muted">none</span>'}</strong></div>
           <div class="stack-inspector-stat"><span class="muted">Colony</span><strong>${colony ? '🌐 dome' : '<span class="muted">none</span>'}</strong></div>
+          ${carriedChits ? `<div class="stack-inspector-stat"><span class="muted">Glory chits</span><strong title="Carried by the crew stationed here; rides home for VP when they return to LEO">🎖 ${carriedChits}</strong></div>` : ''}
         </div>`;
     }
 
@@ -10162,7 +10164,7 @@ function syncSandboxRocket() {
     prospectorName,
     prospectorIsru,
     thruster: thrusterSummary,
-    chits: getChits().length,   // 🏆 loaded-glory-chit badge
+    chits: chitsAboardCount(),   // 🏆 loaded-glory-chit badge (only chits aboard)
   });
 }
 
@@ -11107,30 +11109,32 @@ async function runMoveQueue(ctx, resuming) {
     }
   }
   if (willCashIn) {
-    // Crew aboard at home -> flip to the BACK value; no crew -> the
-    // chits score their FRONT value face-up.
-    const broughtHome = stackHasCrew();
-    const res = broughtHome
-      ? cashInChits(`returned to ${arrivedName}`)
-      : resolveChitsFront(`returned crewless to ${arrivedName}`);
+    // Each carried chit follows its crew. The crew aboard the arriving
+    // rocket are home, so THEIR chits score now (BACK value); chits whose
+    // crew is parked on an outpost stay carried and ride home later with
+    // that crew. A crewless arrival scores only legacy ownerless chits,
+    // face-up at FRONT.
+    const aboard = getRocketStack().filter(isCrewSlot).map((s) => s.id);
+    const res = cashHomeArrival(aboard, `returned to ${arrivedName}`);
+    const broughtHome = res.side === 'back';
     // _moveSnapshot is null on a resumed move (it lives only in memory);
     // undo is locked for hazardous moves anyway, so guard the write.
     if (_moveSnapshot) {
-      _moveSnapshot.cashedChits = chitsToCash;
+      _moveSnapshot.cashedChits = res.chits;
       _moveSnapshot.cashedVps   = res.vps;
     }
-    const n = (chitsToCash || []).length;
-    logAction({
-      type: 'glory_cash',
-      icon: broughtHome ? '💰' : '🎖',
-      summary: broughtHome
-        ? `Flipped ${n} chit${n === 1 ? '' : 's'} (back) for ${res.vps} VP`
-        : `${n} crewless chit${n === 1 ? '' : 's'} score face-up (front) for ${res.vps} VP`,
-      undoable: false,
-    });
-    // Touchdown at home: celebrate the haul (confetti + the scored coins).
-    if (res.chits && res.chits.length) {
-      celebrateChitsHome({ chits: res.chits, vps: res.vps, side: broughtHome ? 'back' : 'front' });
+    const n = res.chits.length;
+    if (n) {
+      logAction({
+        type: 'glory_cash',
+        icon: broughtHome ? '💰' : '🎖',
+        summary: broughtHome
+          ? `Flipped ${n} chit${n === 1 ? '' : 's'} (back) for ${res.vps} VP`
+          : `${n} crewless chit${n === 1 ? '' : 's'} score face-up (front) for ${res.vps} VP`,
+        undoable: false,
+      });
+      // Touchdown at home: celebrate the haul (confetti + the scored coins).
+      celebrateChitsHome({ chits: res.chits, vps: res.vps, side: res.side });
     }
   }
   // Shift remaining segments down a turn (T2→T1, T3→T2, …).
@@ -13152,6 +13156,45 @@ function isCrewSlot(s) {
 function stackHasCrew() {
   return getRocketStack().some(isCrewSlot);
 }
+// A chit follows the crew that picked it up. That crew is "in play" while
+// it sits in ANY stack the player controls - the rocket, an outpost, or
+// the LEO stack - so a crew moving to an outpost carries its chit there
+// rather than dropping it. Only a crew that has left play entirely
+// (decommissioned / colonised) orphans its chit.
+function crewInPlay(crewId) {
+  if (!crewId) return false;
+  if (getRocketStack().some((s) => s.id === crewId && isCrewSlot(s))) return true;
+  const outs = getOutposts() || {};
+  for (const letter of Object.keys(outs)) {
+    if ((outs[letter].cards || []).some((c) => c.id === crewId && isCrewSlot(c))) return true;
+  }
+  if ((getLeoCards() || []).some((c) => c.id === crewId && isCrewSlot(c))) return true;
+  return false;
+}
+function anyCrewInPlay() {
+  if (stackHasCrew()) return true;
+  const outs = getOutposts() || {};
+  for (const letter of Object.keys(outs)) {
+    if ((outs[letter].cards || []).some(isCrewSlot)) return true;
+  }
+  return (getLeoCards() || []).some(isCrewSlot);
+}
+// Count of glory chits riding ON the rocket right now: chits whose owning
+// crew is aboard (plus legacy ownerless chits). A chit whose crew moved to
+// an outpost rides THERE, so it drops off the rocket's 🏆 badge.
+function chitsAboardCount() {
+  const aboard = new Set(getRocketStack().filter(isCrewSlot).map((s) => s.id));
+  return getChits().filter((c) => (c.crewId ? aboard.has(c.crewId) : true)).length;
+}
+// Count of glory chits parked on a given outpost: chits whose owning crew
+// currently sits in that outpost's stack.
+function chitsOnOutpostCount(letter) {
+  const out = (getOutposts() || {})[letter];
+  if (!out) return 0;
+  const here = new Set((out.cards || []).filter(isCrewSlot).map((c) => c.id));
+  if (!here.size) return 0;
+  return getChits().filter((c) => c.crewId && here.has(c.crewId)).length;
+}
 // The crew that retrieves a chit on a first-landing. We assign the
 // chit to the first crew aboard; its fate (returns home vs. leaves)
 // then drives that chit's front/back resolution.
@@ -13168,31 +13211,33 @@ function crewDisplayName(crewId) {
 // the crew then re-adds it on a rollback path; colonize resolves its
 // own crew's chits explicitly after success.
 let _suppressChitReconcile = false;
-// When a chit's owning crew is no longer aboard, flip that chit
-// face-up (FRONT). Ownerless (legacy) chits flip only when no crew
-// is aboard at all. Fires on every rocket-stack change.
+// When a chit's owning crew has LEFT PLAY entirely (decommissioned /
+// colonised - not merely moved to an outpost), flip that chit face-up
+// (FRONT, the 1 VP side). The chit follows its crew everywhere else, so a
+// crew sitting on an outpost keeps carrying its chit. Ownerless (legacy)
+// chits flip only when no crew is in play at all. Fires on every stack
+// change.
 function reconcileChitOwners() {
   if (_suppressChitReconcile) return;
   const carried = getChits();
   if (!carried.length) return;
-  const present = new Set(getRocketStack().filter(isCrewSlot).map((s) => s.id));
-  const anyCrew = present.size > 0;
+  const anyCrew = anyCrewInPlay();
   // Group orphaned chits by owning crew so each resolves with its
   // own log line; ownerless ones resolve as a synthetic group.
   const orphanCrews = new Set();
   let ownerlessOrphan = false;
   for (const c of carried) {
-    if (c.crewId) { if (!present.has(c.crewId)) orphanCrews.add(c.crewId); }
+    if (c.crewId) { if (!crewInPlay(c.crewId)) orphanCrews.add(c.crewId); }
     else if (!anyCrew) ownerlessOrphan = true;
   }
   for (const crewId of orphanCrews) {
-    const res = resolveChitsForCrew(crewId, 'front', 'crew left the rocket');
+    const res = resolveChitsForCrew(crewId, 'front', 'crew left play');
     if (res.vps) {
       logAction({
         type: 'glory_front',
         icon: '🎖',
         summary: `${res.chits.length} glory chit${res.chits.length === 1 ? '' : 's'} flipped face-up `
-          + `for ${res.vps} VP (${crewDisplayName(crewId)} left the rocket)`,
+          + `for ${res.vps} VP (${crewDisplayName(crewId)} left play)`,
         undoable: false,
       });
     }

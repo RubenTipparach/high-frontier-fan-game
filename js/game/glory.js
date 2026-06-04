@@ -206,6 +206,35 @@ function _resolveCarried(side, reason) {
   return { vps: gained, chits: carried, reason, side };
 }
 
+// Resolve chits when a rocket reaches LEO (home). Each chit follows the
+// crew that picked it up, so only the chits whose owning crew is in
+// `homeCrewIds` (the crew aboard the arriving rocket) score now; chits
+// owned by crew parked elsewhere in play (an outpost) stay carried and
+// ride home later with THEIR crew. Legacy ownerless chits resolve too.
+// Crew rode home -> BACK (returned-home) value; a crewless rocket scores
+// only ownerless chits, face-up at FRONT. Returns { vps, chits, side }.
+export function cashHomeArrival(homeCrewIds, reason = 'returned to LEO') {
+  const home = new Set(homeCrewIds || []);
+  const anyHome = home.size > 0;
+  // Ownerless (legacy) chits always match; owned chits match only when
+  // their crew is among those that arrived home.
+  const match = (c) => (c.crewId ? home.has(c.crewId) : true);
+  const matched = _chits.filter(match);
+  const side = anyHome ? 'back' : 'front';
+  if (!matched.length) return { vps: 0, chits: [], reason, side };
+  let gained = 0;
+  for (const c of matched) {
+    const vp = getChitVpValue(c.zone, side);
+    gained += vp;
+    _claimed.push({ zone: c.zone, side, vp, turn: c.earnedTurn ?? null, crewId: c.crewId ?? null });
+  }
+  _chits = _chits.filter((c) => !match(c));
+  _vps += gained;
+  persist();
+  notify();
+  return { vps: gained, chits: matched, reason, side };
+}
+
 // Resolve only the chits owned by one crew (used when that crew
 // leaves the rocket: colonises or dies). Other crews' chits stay
 // carried. Defaults to the FRONT (face-up) value.
