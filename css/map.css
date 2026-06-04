@@ -4830,29 +4830,39 @@ body:has(#view-browse:not(.hidden)) #main {
   gap: 4px;
 }
 .chit-token.chit-claimed { cursor: default; }
-/* Darken the spent coin via an overlay (NOT a filter, which would dim the
-   text too). The text spans sit at z-index 1, above this overlay. */
-.chit-token.chit-claimed::after {
-  content: '';
+/* Claimed at home is NOT darkened or disabled: it stays the SAME vibrant coin
+   as when carried (gold FRONT / sun-glow engraved BACK, on whichever side it
+   scored), marked with a green check badge to show it has been banked. The
+   check lives in a non-clipping holder (the coin itself is overflow:hidden) at
+   the coin's top-right. A RIVAL's claim (the dotted "taken" outline) is handled
+   separately below. */
+.chit-coin-holder { position: relative; display: inline-flex; }
+.chit-scored-check {
   position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: rgba(14, 9, 2, 0.5);
-  pointer-events: none;
+  top: -4px;
+  right: -4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #21c25a;
+  border: 2px solid #eafff1;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+  z-index: 3;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
 }
-.chit-token.chit-claimed .chit-token-zone,
-.chit-token.chit-claimed .chit-token-vp,
-.chit-token.chit-claimed .chit-token-side { color: #f1e2b8; }
-/* Spent coins do NOT glow. The centred sun-glow on .chit-back reads as a
-   LIVE/active coin; a claimed (banked) or taken (rival-banked) chit is spent
-   and fixed, so flatten its back to a uniform dim orange with no bright core.
-   The darkening overlay (and grayscale, for taken) then reads as locked. Only
-   the live flip faces (.chit-face.chit-back: available board coins + carried
-   coins) keep the radiant centre. */
-.chit-token.chit-claimed.chit-back {
-  background:
-    radial-gradient(circle at 50% 50%,
-      #d9620f 0%, #d9620f 60%, #b9480a 100%);
+.glory-coins-sm .chit-scored-check {
+  width: 14px;
+  height: 14px;
+  font-size: 8.5px;
+  top: -3px;
+  right: -3px;
+  border-width: 1.5px;
 }
 .chit-claim-by {
   font-size: 10px;
