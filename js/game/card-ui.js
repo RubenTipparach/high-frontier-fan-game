@@ -689,6 +689,77 @@ function spectralHex(type) {
   return svg;
 }
 
+// Compact "at a glance" summary of a card for list/overview chips (e.g. the
+// All cards view). Reuses the SAME glyph language as the full card: the
+// typebar lead icon (supplied chips / robonaut role icons / type icon), the
+// spectral hex, and the type-specific headline numbers (thrust + fuel for
+// thrusters, therms for radiators, ISRU + role for robonauts, etc.). Reads the
+// ACTIVE face so a flipped (installed / Tier-2) card reports its own stats.
+// Returns plain HTML strings + a stats array so any list UI can lay it out.
+export function cardGlanceSummary(card, faceName = 'primary') {
+  const sideName = (faceName === 'secondary' && card.faces && card.faces.secondary)
+    ? 'secondary' : 'primary';
+  const fdata = (card.faces && card.faces[sideName]) || {};
+  const props = fdata.properties || card.properties || [];
+  const supplies = fdata.supplies || card.supplies || [];
+  const propByKey = (k) => props.find((p) => p && p.key === k);
+  const type = card.type || (fdata.role != null ? 'crew' : 'card');
+  const thr = fdata.thrust ?? card.thrust;
+  const isThruster = type === 'thruster' || thr != null;
+
+  // Icon: the same typebar lead the full card draws.
+  const iconFor = (k) => (k === 'thermostat')
+    ? thermBadgeSvg(1, { size: 14 })
+    : (supportIconSvg(k, { size: 14 }) || `<em>${(REQUIREMENT_VIS[k] || {}).glyph || ''}</em>`);
+  let icon = supplies.map(iconFor).filter(Boolean).join('');
+  if (!icon && type === 'robonaut') {
+    icon = ['missile', 'raygun', 'buggy']
+      .filter((k) => { const p = propByKey(k); return p && p.value; })
+      .map((k) => supportIconSvg(k, { size: 14 })).join('');
+  }
+  if (!icon) icon = typeIconSvg(type, { size: 14 }) || '';
+  // Thrust-bearing cards with no chip / type icon of their own (e.g. GW
+  // thrusters) borrow the thruster icon; crew fall back to a person glyph.
+  if (!icon && isThruster) icon = typeIconSvg('thruster', { size: 14 }) || '';
+  if (!icon && type === 'crew') icon = '👤';
+
+  // Type-specific headline stats, then ISRU, then notable flags.
+  const stats = [];
+  if (isThruster) {
+    const fuel = fdata.fuel ?? card.fuel;
+    const fuelType = fdata.fuelType ?? card.fuelType;
+    const dirt = fuelType && /dirt/i.test(String(fuelType));
+    if (thr != null) stats.push(`thrust ${thr}`);
+    if (fuel != null) stats.push(`${dirt ? '🪨' : '💧'} ${Number.isInteger(fuel) ? fuel : fuel.toFixed(2)}`);
+    if (fdata.afterburn ?? card.afterburn) stats.push('🔥');
+  } else if (type === 'radiator') {
+    const therms = card.therms ?? card.heat_cap ?? fdata.therms
+      ?? (fdata.light && fdata.light.therms) ?? (fdata.heavy && fdata.heavy.therms);
+    if (therms != null) stats.push(`🌡 ${therms} therm${therms === 1 ? '' : 's'}`);
+  } else if (type === 'crew') {
+    if (fdata.role) stats.push(cap(fdata.role));
+    if (fdata.thruster && fdata.thruster.thrust != null) stats.push(`thrust ${fdata.thruster.thrust}`);
+  }
+  const isru = propByKey('isru');
+  if (isru && isru.value != null) stats.push(`ISRU ${isru.value}`);
+  if (type === 'robonaut') {
+    for (const k of ['missile', 'raygun', 'buggy']) {
+      const p = propByKey(k);
+      if (p && p.value) stats.push(p.label || cap(k));
+    }
+    if (card.prospect_bonus != null) stats.push(`+prospect ${card.prospect_bonus}`);
+  }
+  // Reactors / generators carry their meaning in what chip they SUPPLY; if no
+  // numeric headline landed, name the supplied chip(s) so the row isn't blank.
+  if (!stats.length && supplies.length) {
+    for (const k of supplies) stats.push((REQUIREMENT_VIS[k] || {}).label || k);
+  }
+
+  const spectralHtml = (type !== 'crew' && card.spectralType)
+    ? spectralHex(card.spectralType).outerHTML : '';
+  return { icon, stats, spectralHtml, type };
+}
+
 // Hand-drawn sun glyph: filled disc + 8 rays. Returns just the
 // shape elements (no wrapper) so callers can drop it into either
 // a triangle, a chip, or anywhere else and add their own data-tip.

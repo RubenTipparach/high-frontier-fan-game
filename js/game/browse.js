@@ -60,7 +60,7 @@ import { ZONE_POLYGONS } from '../../data/zones.js';
 import {
   renderCard, thrustVisual, attachTipsTo,
   REQUIREMENT_VIS, REQ_SUPPLIER_TYPE,
-  svgSunChip, svgBallerinaChip,
+  svgSunChip, svgBallerinaChip, cardGlanceSummary,
 } from './card-ui.js';
 import {
   logAction, getActions, getHistory, popLastOfType,
@@ -13606,25 +13606,33 @@ function collectOwnedCards() {
   return locs;
 }
 
-// A compact, type-coloured card chip for the overview. Click opens the real
-// card so the player can inspect the full face.
+// A compact card chip for the overview that tells you at a glance what the
+// card IS and DOES: the card's own type / role icon, its name + spectral hex,
+// and the type-specific headline stats (thrust + fuel for thrusters, therms
+// for radiators, role + ISRU for robonauts, etc.) from the shared
+// cardGlanceSummary so the glyph language matches the full card. Click opens
+// the real card.
 function _ownedCardChip(entry) {
   const { id, card, kind, face } = entry;
   const name = kind === 'crew'
     ? ((card.faces && card.faces[face] && card.faces[face].name) || card.name || id)
     : (card.name || id);
-  const typeLabel = kind === 'crew' ? 'crew' : (card.type || 'card');
-  const stat = [];
-  if (Number.isFinite(card.mass)) stat.push('m' + card.mass);
-  if (card.spectralType) stat.push(card.spectralType);
+  const g = cardGlanceSummary(card, face);
+  const statText = g.stats.length ? g.stats.join(' · ') : (kind === 'crew' ? 'crew' : (card.type || 'card'));
+  const massHtml = Number.isFinite(card.mass)
+    ? '<span class="acc-mass" title="Mass">m' + card.mass + '</span>' : '';
   const chip = document.createElement('button');
   chip.type = 'button';
   chip.className = 'all-cards-chip kind-' + kind + (kind === 'patent' ? ' type-' + card.type : '');
   if (kind === 'crew' && card.color) chip.style.setProperty('--chip-color', card.color);
   chip.title = 'Open ' + name;
   chip.innerHTML =
-    '<span class="acc-name">' + esc(name) + '</span>' +
-    '<span class="acc-meta">' + esc(typeLabel) + (stat.length ? ' · ' + esc(stat.join(' · ')) : '') + '</span>';
+    '<div class="acc-top">'
+    + (g.icon ? '<span class="acc-ic">' + g.icon + '</span>' : '')
+    + '<span class="acc-name">' + esc(name) + '</span>'
+    + (g.spectralHtml ? '<span class="acc-spec">' + g.spectralHtml + '</span>' : '')
+    + '</div>'
+    + '<div class="acc-bot"><span class="acc-stat">' + esc(statText) + '</span>' + massHtml + '</div>';
   chip.addEventListener('click', () => openCardModal(card, kind));
   return chip;
 }
