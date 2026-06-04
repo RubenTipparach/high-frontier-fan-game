@@ -4843,6 +4843,17 @@ body:has(#view-browse:not(.hidden)) #main {
 .chit-token.chit-claimed .chit-token-zone,
 .chit-token.chit-claimed .chit-token-vp,
 .chit-token.chit-claimed .chit-token-side { color: #f1e2b8; }
+/* Spent coins do NOT glow. The centred sun-glow on .chit-back reads as a
+   LIVE/active coin; a claimed (banked) or taken (rival-banked) chit is spent
+   and fixed, so flatten its back to a uniform dim orange with no bright core.
+   The darkening overlay (and grayscale, for taken) then reads as locked. Only
+   the live flip faces (.chit-face.chit-back: available board coins + carried
+   coins) keep the radiant centre. */
+.chit-token.chit-claimed.chit-back {
+  background:
+    radial-gradient(circle at 50% 50%,
+      #d9620f 0%, #d9620f 60%, #b9480a 100%);
+}
 .chit-claim-by {
   font-size: 10px;
   font-weight: 700;
@@ -4876,9 +4887,25 @@ body:has(#view-browse:not(.hidden)) #main {
 .glory-coins-sm .chit-token .chit-token-side  { font-size: 5px; }
 .glory-coins-sm .chit-token .chit-token-owner { font-size: 5px; }
 .glory-coins-sm .chit-claim-by { font-size: 7px; max-width: 48px; }
-/* A zone already claimed by a player reads as locked/disabled on the
-   board: the claimed darkening plus a desaturate. */
-.chit-token.chit-zone-taken { filter: grayscale(0.4); }
+/* A zone a rival has banked is shown as the EMPTY SPOT where the coin was
+   lifted off the board: NO coin at all (no fill, sheen, engraving, medal, or
+   shadow), just a dotted circular outline the size of the coin, with the same
+   zone / VP / "taken" text inside and the claimer's name beneath. Reads as
+   "this chit has been taken off," distinct from a live (glowing) coin or your
+   own (darkened) claimed coin. */
+.chit-token.chit-claimed.chit-zone-taken {
+  background: none;
+  box-shadow: none;
+  border: 2px dotted rgba(233, 201, 130, 0.55);
+  filter: none;
+}
+.chit-token.chit-zone-taken::before,
+.chit-token.chit-zone-taken::after { display: none; }
+.chit-token.chit-zone-taken > .chit-deco { display: none; }
+.chit-token.chit-zone-taken .chit-token-emoji { display: none; }
+.chit-token.chit-zone-taken .chit-token-zone,
+.chit-token.chit-zone-taken .chit-token-vp,
+.chit-token.chit-zone-taken .chit-token-side { color: #d8c9a6; }
 
 /* Glory pick-up + scored-at-home modals reuse .turn-confirm-panel; these
    rules just centre the coin(s) and tidy the spacing inside. */
