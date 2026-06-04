@@ -7731,7 +7731,7 @@ function openOpsMenu() {
     <h2 class="ops-menu-title">⚙ Operations this turn</h2>
     <p class="muted ops-menu-sub">You have <strong${opCls}>op:${ops}</strong> and <strong>move:${moves}</strong> left. One operation per turn - pick wisely.</p>
     <div class="ops-menu-list" id="ops-menu-now"></div>
-    <h4 class="ops-menu-head">At a site (1 op) - prospect · refuel · industrialize · ET produce</h4>
+    <h4 class="ops-menu-head">At a site - where you've landed, or your factories &amp; outposts</h4>
     <div class="ops-menu-list" id="ops-menu-sites"></div>
     <h4 class="ops-menu-head">Free actions (no op)</h4>
     <ul class="ops-menu-hints">
@@ -7767,11 +7767,18 @@ function openOpsMenu() {
   const siteById = (id) => (_activeData && (_activeData.byId?.[id] || _activeData.sites.find((s) => s.id === id))) || null;
   const opSites = [];
   const seen = new Set();
+  // The site the rocket has LANDED on (not LEO): prospect / refuel live here.
+  // This is the contextual case the player hits most - park, then act.
+  const landed = _rocketSiteId ? getRocketSite() : null;
+  if (landed && !isLeoSite(landed)) {
+    seen.add(landed.id);
+    opSites.push({ site: landed, hint: '🛸 landed here · prospect / refuel' });
+  }
   for (const f of (allFactories() || [])) {
     if (f.ownerId !== SANDBOX_OWNER_ID || seen.has(f.siteId)) continue;
     const site = siteById(f.siteId); if (!site) continue;
     seen.add(f.siteId);
-    opSites.push({ site, hint: `🏭 factory${getColony(f.siteId) ? ' + 🌐' : ''} · refuel / ET / colonize` });
+    opSites.push({ site, hint: `🏭 factory${getColony(f.siteId) ? ' + 🌐' : ''} · refuel / ET / deliver / colonize` });
   }
   // getDiscs() is a { siteId: disc } map, not an array.
   const discs = getDiscs() || {};
@@ -7782,9 +7789,16 @@ function openOpsMenu() {
     seen.add(siteId);
     opSites.push({ site, hint: '🔭 claimed · industrialize here' });
   }
+  // Outposts: sites where you have a stack parked (deliver / transfer).
+  for (const op of Object.values(getOutposts() || {})) {
+    if (!op || !op.siteId || seen.has(op.siteId)) continue;
+    const site = siteById(op.siteId); if (!site) continue;
+    seen.add(op.siteId);
+    opSites.push({ site, hint: `📦 Outpost ${op.letter || ''} · deliver / transfer` });
+  }
   if (sitesHost) {
     if (!opSites.length) {
-      sitesHost.innerHTML = '<p class="muted ops-menu-emptyhint">No site-ops yet. Prospect (roll) at the rocket\'s site to claim it, then industrialize there. Refuel needs water + a rig/factory.</p>';
+      sitesHost.innerHTML = '<p class="muted ops-menu-emptyhint">No site actions here yet. Land the rocket on a site to prospect / refuel it, or build a factory / outpost to act there. At LEO, use Boost / Income / Auction above.</p>';
     } else {
       for (const { site, hint } of opSites) {
         const b = document.createElement('button');
@@ -9174,14 +9188,10 @@ function doProspect(site, prosp) {
     );
     return;
   }
-  // Raygun is a free, unlimited remote scan (rulebook: the beam
-  // fires through line-of-sight, including lander burn spaces). It
-  // never consumes the per-turn operation, so the player can keep
-  // firing it at every reachable site and still spend their op on
-  // something else, and it never touches the move budget. Missile /
-  // buggy land on the target site and DO cost the op (rulebook I6).
-  const isRaygun = prosp.kind === 'raygun';
-  if (!isRaygun && !requireOp('Prospect')) return;
+  // Prospect IS the turn's operation for EVERY prospector kind. The raygun
+  // only extends the reach to a line-of-sight site; it still spends the op
+  // (it is not a free scan). Missile / buggy land on the target. Rulebook I6.
+  if (!requireOp('Prospect')) return;
   const threshold = siteProspectThreshold(site);
   const roll = 1 + Math.floor(Math.random() * 6);
   const success = roll <= threshold;

@@ -1148,12 +1148,11 @@ function applySetActiveProspector(state, op, player) {
   return { ok: true, state, log: `${player.name} set ${card ? card.name : cardId} as the active prospector.` };
 }
 
-// Prospect the ship's current site: one seeded d6 vs the site-class
-// threshold (success = roll <= threshold), placing a claim/exhausted
-// disc. Mirrors browse.js#doProspect. v1 simplifications: the ship must
-// be AT the site for every prospector kind (raygun line-of-sight is
-// deferred), there is no buggy reroll, and the prospector's support
-// requirements are not yet gated. missile/buggy cost 1 op; raygun is free.
+// Prospect a site: one seeded d6 vs the site-class threshold (success =
+// roll <= threshold), placing a claim/exhausted disc. Mirrors
+// browse.js#doProspect. Prospect IS the turn's operation for EVERY
+// prospector kind (raygun extends the reach to a line-of-sight site, but it
+// still spends the op - it is not free).
 function applyProspect(state, op, player) {
   const toSiteId = String(op.siteId || '');
   const site = siteById(toSiteId);
@@ -1175,8 +1174,8 @@ function applyProspect(state, op, player) {
   }
   if (state.discs[toSiteId]) return fail('already_prospected');
   if (prospectorIsru(provSlot) > (site.hydration | 0)) return fail('isru_too_high');
-  const costsOp = kind !== 'raygun';
-  if (costsOp && player.opsRemaining <= 0) return fail('no_ops_left');
+  // Prospect spends the turn's operation for every prospector kind.
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
 
   const threshold = prospectThreshold(site);
   const gen = makeRng(state.seed, state.rng.cursor);
@@ -1192,7 +1191,7 @@ function applyProspect(state, op, player) {
     // The buggy may re-roll once, this turn, by its owner.
     canReroll: kind === 'buggy',
   };
-  if (costsOp) player.opsRemaining -= 1;
+  player.opsRemaining -= 1;
   const verb = success ? 'struck a claim at' : 'came up dry at';
   return {
     ok: true, state,
