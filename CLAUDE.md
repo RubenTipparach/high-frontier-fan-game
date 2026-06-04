@@ -555,6 +555,56 @@ competitive auction is the lone exception (the sandbox auction is solo),
 so it gets bespoke multiplayer UI layered on top of the shared sandbox
 surface; everything else is sandbox code driven by the multiplayer API.
 
+**Operations and free actions (canonical action economy).** Sourced from
+the Geoff Speare HF4 Player Aid (`reference/HF4-player-aid.pdf`). A turn
+is: move the spacecraft, take any number of free actions, and take
+exactly ONE operation, in any order. This table is the authoritative
+answer to "does X cost the turn's operation, or is it free?" For example
+Site Refuel is the Operation (it spends the op), while topping up dirt /
+water for free at LEO, a Factory, or an anchored Bernal rides the Cargo
+Transfer free action. The Scope column: `core` ships in Standard mode;
+`M0` / `M1` / `M2` rows are module-gated and OUT of current scope (see
+"Variants we target"), listed only so the core / module boundary stays
+legible.
+
+Operations (each one spends the turn's single operation):
+
+| Operation | What it does | Scope |
+|---|---|---|
+| Income | Gain 1 Aqua. | core |
+| Research Auction | Auction the top card of any deck (need fewer than 4 hand cards to start or bid; auctioneer wins ties). | core |
+| Free Market | Sell a Hand card for 3 Aqua, or a Black-Side LEO card for its Exploitation-Track value. | core |
+| Boost | Play White-Side cards from Hand to LEO, paying Mass in Aqua. | core |
+| Site Refuel | Refine local water into the tank. ISRU: 1 + Hydration - ISRU. Factory: a flat 7. | core |
+| Prospect | Evaluate and claim a site: ISRU <= Hydration, then roll 1d6 <= Site Size (Size > 5 auto-succeeds). | core |
+| Industrialize | Build a Factory: decommission a robonaut + refinery (plus supports) at a claimed site. | core |
+| ET Production | Produce a Black-Side card from Hand into a Factory matching the site's Spectral Type. | core |
+| Delivery | Move a Black-Side card from a Factory to LEO. Cost: FT = zones-from-Earth x2 (+1 if Site > 7). | core |
+| Fundraise | Replaces Income: place or move a delegate, gain 1 Aqua, run a vote tally. | M0 |
+| Promotion | Flip a Freighter / GW thruster / Colonist to its Purple-Side at its Promotion Site. | M1/M2 |
+| Nanofacture | Create a Mobile Factory at an anchored non-Home Bernal. | M1+M2 |
+| Anchor | Anchor a Bernal as a space station; gain its ability. | M2 |
+| Homesteading | Build a Colony at a Factory that has none. | M2 |
+| Epic Hazard | Complete a Future or build a Space Elevator (Epic Hazard roll). | M1 |
+
+Free actions (no operation cost; any number per turn):
+
+| Free action | What it does | Scope |
+|---|---|---|
+| Cargo Transfer | Move cards / FTs between colocated stacks; free dirt refuel with any ISRU card at a Factory or Site. | core |
+| Internal Tankage | Convert between FTs and Fuel; decommission cards for dirt fuel. | core |
+| Build Colony | Create a permanent Colony at a Factory (decommission a Crew / Colonist). | core |
+| Claim Jump | Replace an opponent's Claim with yours (Human present, no opposing Factory / Human). Felony. | core |
+| Load Glory Chit | Load a glory chit from a site no Human has visited (Human present). | core |
+| Voluntary Discard | Discard cards / figures (1 Human per turn max). Felony for Humans. | core |
+| Glitch Repair | Remove a Glitch token from a colocated stack (Human present). | core |
+| The Martian | Move a Crew / Colonist along a buggy road (needs an operational buggy). | core |
+| Lobby | Remove a delegate to gain an inactive Law's benefit (once per turn). | M0 |
+| Big Cube Swap | Swap a Freighter cube with a Factory cube. | M1 |
+| Exomigration | Gain the topmost Colonist when below the Colonist limit (mandatory). | M2 |
+| Unanchor | An anchored Bernal becomes mobile again. | M2 |
+| Space Elevator | Move between the ends of a Space Elevator. | M1 |
+
 Server-authoritative engine in `server/game/engine.js`:
 
 - Round structure: **Income → Operations (each player, 4 ops) →
@@ -615,6 +665,38 @@ Server-authoritative engine in `server/game/engine.js`:
 - VPs at game end: factories + refineries + Bernals + glory cards.
 
 Random-numbered seeds are stored per game so replays are deterministic.
+
+### Mission log captures every server mutation
+
+The mission log is the player-visible record of WHAT HAPPENED, and it is
+load-bearing: every operation that changes game state on the server MUST
+produce a log line that lands in it. This is not console logging - a
+`console.log` is invisible to players and does not count. The rule:
+
+- **Every functional/meta/auction/crew op handler returns a non-empty
+  `log` string.** The server persists it to `game_operations.log` on
+  every accepted op (`POST /games/:id/ops`), and the client mission log
+  hydrates from that op log via `GET /games/:id/ops` (online) or the
+  local `logAction` history (solo). If you add an op, it MUST return a
+  gameplay-accurate `log` (talk about the game, not the code, per Style)
+  or it silently vanishes from the record. Income, Site Refuel,
+  Industrialize, and ET Produce each return a log for exactly this
+  reason.
+- **The ONLY intentional exception is the two route ops** (`SET_ROUTE` /
+  `CLEAR_ROUTE`), which return `log: ''` because a planned route is
+  secret between players (the gameView redacts opponents' routes). Do
+  not add other silent ops; if a mutation must stay private, document why
+  here.
+- **Every op kind has an entry in `MP_LOG_ICONS`** (js/game/browse.js).
+  A missing icon falls back to a bare `·`, which reads as "something
+  unlabeled happened" - give each new op a glyph in the published-card
+  language so the log is scannable.
+- **Routing an op online MUST NOT drop it from the log.** When a client
+  handler routes through `submitOnlineOp` and returns early (skipping its
+  solo `logAction`), the op still appears because the server logs it and
+  the online mission log reads the server op log. Never assume "the
+  snapshot will show it" - the snapshot carries state, the op log carries
+  the narrative; both must update.
 
 ## Style
 

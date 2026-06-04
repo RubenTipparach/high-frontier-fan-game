@@ -13214,14 +13214,22 @@ function paintMissionLog() {
 // rerun for the active pane).
 // Per-op-kind glyph for the log icon column. Anything missing falls
 // back to a neutral bullet so a new op kind doesn't disappear.
+// Every server op kind maps to a glyph so the mission log is scannable.
+// CLAUDE.md "Mission log captures every server mutation": a missing entry
+// falls back to a bare '·', so add new ops here when you add them.
 const MP_LOG_ICONS = {
   AUCTION_START: '🎯', AUCTION_BID: '💰', AUCTION_PASS: '🚫',
   AUCTION_RESET: '↺', AUCTION_SELL: '✅',
-  PICK_CREW: '🧑‍🚀',
+  PICK_CREW: '🧑‍🚀', SET_FIRST_PLAYER: '🥇',
   END_TURN: '⏭', MOVE: '🛸', BURN: '🔥',
   SET_ACTIVE_THRUSTER: '🔥', SET_ACTIVE_PROSPECTOR: '⛏',
-  BUILD_ROCKET: '🚀', PROSPECT: '⛏',
+  BUILD_ROCKET: '🚀', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',
   INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧',
+  ET_PRODUCE: '🏭', SITE_REFUEL: '💧',
+  INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
+  REFUEL: '💧', CASH_WATER: '💎', DISCARD: '🗑',
+  TRANSFER: '🔀', TRANSFER_FUEL: '💧',
+  CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑',
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',
   UNDO: '↩', REDO: '↪',
 };
