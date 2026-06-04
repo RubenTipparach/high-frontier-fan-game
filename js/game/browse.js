@@ -10512,9 +10512,6 @@ async function moveRocket() {
     if (arrZone && arrZone !== 'Earth' && !isZoneVisited(arrZone) && stackHasCrew()) {
       pickupChit = await promptGloryPickup((destSite && destSite.name) || toSiteId, arrZone, firstCrewId());
     }
-    // Carried chits auto-score the moment the rocket reaches LEO; snapshot
-    // the haul now so we can celebrate it once the server resolves the move.
-    const carriedHome = (destSite && isLeoSite(destSite)) ? getChits() : [];
     const ok = await submitOnlineOp({ kind: 'MOVE', toSiteId, hazardPay, segments, pickupChit });
     if (ok) {
       // Advance the local plan past this turn so a multi-turn route stays
@@ -10530,17 +10527,10 @@ async function moveRocket() {
       } else {
         clearRoute();
       }
-      // Touchdown at home: confetti + the scored coins. The server has
-      // already banked them; this just plays back the haul we snapshotted.
-      if (carriedHome.length) {
-        const broughtHome = stackHasCrew();
-        const sideC = broughtHome ? 'back' : 'front';
-        const vps = carriedHome.reduce((a, c) => {
-          const sd = getChitSides(c.zone);
-          return a + (sideC === 'back' ? sd.back : sd.front);
-        }, 0);
-        celebrateChitsHome({ chits: carriedHome, vps, side: sideC });
-      }
+      // NOTE: no LEO scored-chits celebration online yet. Scoring carried
+      // chits at home is not modelled server-side (the engine only awards
+      // chits; cashing is Stage 4 endgame scoring), so there is nothing
+      // authoritative to celebrate here. Solo runs it from cashHomeArrival.
     }
     return ok;
   }
