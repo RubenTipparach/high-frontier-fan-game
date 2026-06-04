@@ -7714,6 +7714,32 @@ function doIncomeOp() {
   });
 }
 
+// Pass the turn without taking any other operation. Passing defaults to
+// Income, so the player banks +1 aqua rather than wasting the turn's
+// operation. Online: the server credits the income on the no-op END_TURN
+// (see engine.js#applyEndTurn). Solo: credit it locally, then end the turn
+// through the existing toolbar handler (the op is spent by then, so the
+// button ends the turn instead of reopening the ops menu).
+async function passTurn() {
+  if (_online) {
+    await submitOnlineOp({ kind: 'END_TURN' });
+    return;
+  }
+  if (getOpsRemaining() > 0) {
+    addAqua(INCOME_AQUA);
+    consumeOp();
+    setStatus(`💰 Passed and took income: <strong>+${INCOME_AQUA}</strong> aqua. Bank now <strong>${esc(String(getAqua()))}</strong>.`);
+    logAction({
+      type: 'income',
+      icon: '💰',
+      summary: `Passed and took income: +${INCOME_AQUA} aqua (bank ${getAqua()})`,
+      undoable: false,
+      data: { delta: INCOME_AQUA, bankAfter: getAqua() },
+    });
+  }
+  document.getElementById('turn-end')?.click();
+}
+
 // Operations menu - opened by tapping the toolbar "op:N" tag. The
 // player's main decision aid: it lists what they can spend their
 // one operation on this turn, with the always-available ops as
@@ -7767,6 +7793,12 @@ function openOpsMenu() {
       handN > 0 ? 'Sell a hand card for aqua. Costs one operation.' : 'No hand cards to sell.',
       doFreeMarket, handN > 0);
   }
+  // Pass: take no other operation. Passing banks income (+1 aqua) and ends
+  // the turn in one tap - the default when you don't want to spend the op
+  // on anything else.
+  addOp('⏭ Pass &amp; take income (+1 aqua)',
+    'Take no other operation: bank +1 aqua and end your turn.',
+    passTurn);
 
   // Site-op shortcuts: sites where a site-op is possible (your
   // factories - refuel / ET / colonize; claimed discs without a

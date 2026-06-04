@@ -1642,6 +1642,16 @@ function applyEndTurn(state, _op, player) {
 
   let log = `${player.name} ended their turn.`;
 
+  // Passing without spending the turn's operation defaults to Income: the
+  // player banks +1 aqua rather than wasting the operation. This also
+  // safety-nets a lost Income click - ending the turn always grants the
+  // income if none was taken. (Mirrors the client pass-with-income path.)
+  if (player.opsRemaining >= OPS_PER_TURN) {
+    player.aqua = (player.aqua | 0) + INCOME_AQUA;
+    player.opsRemaining -= 1;
+    log = `${player.name} passed and took income (+${INCOME_AQUA} aqua; bank ${player.aqua}).`;
+  }
+
   // No auto-load on end turn: picking up a zone's glory chit is now an
   // explicit choice (the on-arrival prompt, or the LOAD_GLORY op via the
   // site menu), so a chit the player chose to leave stays on the site.
