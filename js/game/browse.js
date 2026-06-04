@@ -4326,6 +4326,10 @@ const STORAGE_ROCKET_ROUTE = 'hf-sandbox-planned-route';
 // the player with a spent turn. Cleared at every move exit path.
 const STORAGE_PENDING_MOVE = 'hf-sandbox-pending-move';
 const STORAGE_ROUTE_PRIORITY = 'hf-sandbox-route-priority';
+// One-time flag: the default flipped from turns-first to burns-first. On first
+// load after that change we force burns-first for EVERYONE (including users who
+// had the old turns-first saved), then respect whatever they pick afterwards.
+const STORAGE_ROUTE_PRIORITY_BURNS_DEFAULT = 'hf-route-priority-burns-default';
 // Routing metric priority. 'turns' minimizes turn-ends first (the
 // snap-to-adjacent default); 'burns' minimizes water spend first
 // (favours long Hohmann coasts at the cost of more turns). User-
@@ -4333,6 +4337,13 @@ const STORAGE_ROUTE_PRIORITY = 'hf-sandbox-route-priority';
 // pick survives reloads.
 let _routePriority = (() => {
   try {
+    // One-time force to burns-first (overrides an old saved turns-first), then
+    // respect the player's choice on later loads.
+    if (!localStorage.getItem(STORAGE_ROUTE_PRIORITY_BURNS_DEFAULT)) {
+      localStorage.setItem(STORAGE_ROUTE_PRIORITY_BURNS_DEFAULT, '1');
+      localStorage.setItem(STORAGE_ROUTE_PRIORITY, 'burns');
+      return 'burns';
+    }
     const s = localStorage.getItem(STORAGE_ROUTE_PRIORITY);
     return s === 'burns' || s === 'turns' ? s : 'burns';
   } catch { return 'burns'; }
@@ -7541,6 +7552,8 @@ function doResearchAuction() {
 // transaction.
 const INCOME_AQUA = 1;
 function doIncomeOp() {
+  // Online: the server credits the aqua + spends the op; the snapshot repaints.
+  if (_online) { submitOnlineOp({ kind: 'INCOME' }); return; }
   if (!requireOp('Income')) return;
   addAqua(INCOME_AQUA);
   setStatus(`💰 Income: <strong>+${INCOME_AQUA}</strong> aqua. Bank now <strong>${esc(String(getAqua()))}</strong>.`);

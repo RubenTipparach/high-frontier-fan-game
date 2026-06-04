@@ -1181,10 +1181,21 @@ function applyEtProduce(state, op, player) {
   };
 }
 
+// Income (rulebook I1): spend the op to take +1 aqua from the pool into your
+// bank. Mirrors browse.js#doIncomeOp.
+const INCOME_AQUA = 1;
+function applyIncome(state, op, player) {
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  player.aqua = (player.aqua | 0) + INCOME_AQUA;
+  player.opsRemaining -= 1;
+  return { ok: true, state, log: `${player.name} took income (+${INCOME_AQUA} aqua; bank ${player.aqua}).` };
+}
+
 // Ops that change the game and ride the per-turn undo stack. Each is a
 // pure (state, op, player) -> { ok, state, log } transform; the
 // dispatcher (not the handler) maintains turnActions / turnRedo.
 const FUNCTIONAL = {
+  INCOME: applyIncome,
   MOVE: applyMove,
   BUILD_ROCKET: applyBuildRocket,
   BOOST: applyBoost,
