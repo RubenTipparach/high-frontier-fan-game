@@ -28,6 +28,10 @@
 
 import { PATENTS_BY_ID } from '../../data/patents.js';
 import { CREW_BY_ID } from '../../data/crew.js';
+// Shared fuel-strip model (same module the client uses): a burn spends fuel
+// STEPS (black connections), and the water it costs is the non-linear mass
+// drop, leaving a possibly-fractional remainder.
+import { blackStepsBetween, walkBlackDown } from '../../data/fuel-graph.js';
 // Movement + metadata both come from the planner graph (the vendor
 // mission-planner data the client also uses). siteBySlug layers the
 // curated data/sites.js metadata onto a planner slug, so there is ONE
@@ -49,6 +53,10 @@ function clone(state) {
     ? structuredClone(state)
     : JSON.parse(JSON.stringify(state));
 }
+
+// Trim float drift from fractional tank water (a burn can leave a sub-1
+// remainder, so the tank is no longer an integer).
+const round6 = (n) => Math.round((Number(n) || 0) * 1e6) / 1e6;
 
 function fail(error, detail) { return detail ? { ok: false, error, detail } : { ok: false, error }; }
 
@@ -354,18 +362,26 @@ function applyMove(state, op, player) {
   }
   if (dest === from) return fail('already_here');
 
-  const perBurn = thrusterFuelPerBurn(player.rocket);
-  const cost = Math.ceil(perBurn * thisTurnBurns);
-  if (cost > player.rocket.tank) {
+  // Fuel-step model (shared with the client via data/fuel-graph.js): a burn
+  // spends fuel STEPS - black connections on the ladder - NOT water 1-to-1.
+  // The move is affordable iff the wet chit can walk that many black steps
+  // before hitting dry mass. The water it costs is the non-linear mass drop
+  // (applied when the burn commits, below), which can leave a sub-1 remainder.
+  const perBurn = thrusterFuelPerBurn(player.rocket);            // fuel steps per burn
+  const dryMass = player.rocket.stack.reduce((mm, s) => mm + slotMass(s), 0);
+  const wetMass = dryMass + (Number(player.rocket.tank) || 0);
+  const stepsNeeded = Math.ceil(perBurn * thisTurnBurns);
+  const stepsAvail = blackStepsBetween(dryMass, wetMass);
+  if (stepsNeeded > stepsAvail) {
     // Hand back the full calculation so the client can explain the verdict
-    // instead of just flashing "insufficient water" (cost = ceil(fuel-per-burn
-    // x this-turn burns), charged against the water tank).
+    // instead of just flashing "insufficient water".
     return fail('insufficient_water', {
       thisTurnBurns,
       fuelPerBurn: perBurn,
-      cost,
-      tank: player.rocket.tank | 0,
-      short: cost - (player.rocket.tank | 0),
+      fuelStepsNeeded: stepsNeeded,
+      fuelStepsAvailable: stepsAvail,
+      tank: round6(player.rocket.tank),
+      dryMass, wetMass,
     });
   }
 
@@ -406,7 +422,9 @@ function applyMove(state, op, player) {
   // Commit the burn + the FINAO payment, then resolve dice in travel
   // order. rolls[] is recorded on the rocket for the client to play
   // back (server is authoritative for every die).
-  player.rocket.tank -= cost;
+  // Spend the fuel: walk the wet chit down `stepsNeeded` black connections;
+  // the new tank water is whatever mass is left above dry (often fractional).
+  player.rocket.tank = round6(walkBlackDown(wetMass, stepsNeeded) - dryMass);
   if (finaoCost > 0) player.aqua -= finaoCost;
 
   const gen = makeRng(state.seed, state.rng.cursor);
@@ -478,7 +496,7 @@ function applyMove(state, op, player) {
     destroyRocket(player);
     return {
       ok: true, state,
-      log: `${player.name} burned ${cost} fuel steps and was DESTROYED at ${whereName} (rolled a 1).`,
+      log: `${player.name} burned ${stepsNeeded} fuel steps and was DESTROYED at ${whereName} (rolled a 1).`,
     };
   }
 
@@ -510,7 +528,7 @@ function applyMove(state, op, player) {
   // null == LEO. Fuel steps (not water): a burn spends fuel steps, which
   // are non-linear with the water/aqua loaded onto the rocket.
   const originName = from == null ? 'LEO' : ((siteById(from) || {}).name || from);
-  let log = `${player.name} burned ${cost} fuel steps from ${originName} to ${destName}.`;
+  let log = `${player.name} burned ${stepsNeeded} fuel steps from ${originName} to ${destName}.`;
   const nItems = rollItems.length;
   if (finaoCost > 0) log += ` Paid ${finaoCost} aqua (FINAO) past ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
   else if (nItems) log += ` Rolled through ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
@@ -650,15 +668,18 @@ function applyRefuel(state, op, player) {
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
   const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
-  const room = Math.max(0, TANK_MAX - dry - (player.rocket.tank | 0));
+  const tank = Number(player.rocket.tank) || 0;
+  // Whole water units only; any sub-1 remainder left by a burn stays put
+  // (don't floor the tank away when topping up).
+  const room = Math.floor(Math.max(0, TANK_MAX - dry - tank));
   const amt = Math.min(want, player.aqua | 0, room);
   if (amt <= 0) {
     if (room <= 0) return fail('tank_full');
     return fail('insufficient_aqua');
   }
   player.aqua -= amt;
-  player.rocket.tank = (player.rocket.tank | 0) + amt;
-  return { ok: true, state, log: `${player.name} converted ${amt} aqua to water (tank ${player.rocket.tank}).` };
+  player.rocket.tank = round6(tank + amt);
+  return { ok: true, state, log: `${player.name} converted ${amt} aqua to water (tank ${round6(player.rocket.tank)}).` };
 }
 
 // Planned route persistence. Stored as player.rocket.route, an array
@@ -707,9 +728,10 @@ function applyCashWater(state, op, player) {
   if (!rocketAtLeo(player)) return fail('rocket_not_at_leo');
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
-  const amt = Math.min(want, player.rocket.tank | 0);
+  // Whole water units only; the sub-1 remainder can't be cashed and stays.
+  const amt = Math.min(want, Math.floor(Number(player.rocket.tank) || 0));
   if (amt <= 0) return fail('no_water');
-  player.rocket.tank -= amt;
+  player.rocket.tank = round6((Number(player.rocket.tank) || 0) - amt);
   player.aqua = (player.aqua | 0) + amt;
   return { ok: true, state, log: `${player.name} cashed ${amt} water back to aqua (aqua ${player.aqua}).` };
 }

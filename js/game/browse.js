@@ -52,6 +52,7 @@ import {
   MIN_DRY_MASS, MAX_DRY_MASS, MAX_WET_MASS,
 } from '../../data/net-thrust-track.js';
 import { renderDetailTrack, massLabel, blackStepsBetween } from './net-thrust-detail.js';
+import { walkBlackDown } from '../../data/fuel-graph.js';
 import { MILESTONES } from '../../data/glory.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { ZONE_POLYGONS } from '../../data/zones.js';
@@ -2439,9 +2440,10 @@ function humanizeOnlineOpError(code, detail) {
   // spell it out instead of the generic line, so the player sees WHY (not
   // just "not enough water").
   if (detail && code === 'insufficient_water') {
-    return `Not enough water: this turn's move needs ${detail.cost} `
+    return `Not enough fuel: this turn's move needs ${detail.fuelStepsNeeded} fuel step`
+      + `${detail.fuelStepsNeeded === 1 ? '' : 's'} `
       + `(${detail.thisTurnBurns} burn${detail.thisTurnBurns === 1 ? '' : 's'} × ${detail.fuelPerBurn} per burn), `
-      + `tank has ${detail.tank} (short ${detail.short}). Refuel at LEO or a factory first.`;
+      + `but only ${detail.fuelStepsAvailable} remain from wet to dry. Refuel at LEO or a factory first.`;
   }
   if (detail && code === 'cannot_liftoff') {
     return `Can't lift off: net thrust ${detail.thrust} must beat the site's size ${detail.siteSize} (or a factory there to assist).`;
@@ -10229,13 +10231,25 @@ async function moveRocket() {
     const dS = dId && (_activeData.byId?.[dId] || _activeData.sites.find((s) => s.id === dId));
     logMoveBurn((o && o.name) || 'LEO', (dS && dS.name) || dId || '?', turn1Burns);
   }
+  // Fuel-step model (same as the server, via data/fuel-graph.js): a burn
+  // spends fuel STEPS; the move is affordable iff the wet chit can walk that
+  // many black connections before dry. The water it costs is the non-linear
+  // mass drop, so `fuelCost` here is the WATER spent (often fractional) - it
+  // still drives removeFuel + the undo refund below.
   const _thrFuel = getActiveThrusterStats();
-  const fuelCost = (getFuelConsumption() && _thrFuel && Number.isFinite(_thrFuel.fuel))
-    ? Math.ceil(_thrFuel.fuel * turn1Burns) : 0;
-  if (fuelCost > 0 && getTankWater() < fuelCost) {
-    const per = Math.round(_thrFuel.fuel * 100) / 100;
-    setStatus(`⛽ Not enough water: this turn's move needs <strong>${fuelCost}</strong> `
-      + `(${turn1Burns} burn${turn1Burns === 1 ? '' : 's'} this turn × ${per}), tank has <strong>${getTankWater()}</strong>. Refuel at LEO / a factory first.`);
+  const _fuelOn = getFuelConsumption();
+  const _perBurn = (_thrFuel && Number.isFinite(_thrFuel.fuel)) ? _thrFuel.fuel : 0;
+  const _totals = getStackTotals();
+  const _dryM = (_thrFuel && Number.isFinite(_thrFuel.dryMass)) ? _thrFuel.dryMass : _totals.dryMass;
+  const _wetM = (_thrFuel && Number.isFinite(_thrFuel.wetMass)) ? _thrFuel.wetMass : _totals.wetMass;
+  const _stepsNeeded = _fuelOn ? Math.ceil(_perBurn * turn1Burns) : 0;
+  const _stepsAvail = blackStepsBetween(_dryM, _wetM);
+  const _newWet = _stepsNeeded > 0 ? walkBlackDown(_wetM, _stepsNeeded) : _wetM;
+  const fuelCost = _stepsNeeded > 0 ? Math.round((_wetM - _newWet) * 1e6) / 1e6 : 0;  // water spent
+  if (_stepsNeeded > 0 && _stepsNeeded > _stepsAvail) {
+    setStatus(`⛽ Not enough fuel: this turn's move needs <strong>${_stepsNeeded}</strong> fuel step`
+      + `${_stepsNeeded === 1 ? '' : 's'} (${turn1Burns} burn${turn1Burns === 1 ? '' : 's'} × ${_perBurn} per burn), `
+      + `but only <strong>${_stepsAvail}</strong> remain from wet to dry. Refuel at LEO / a factory first.`);
     return false;
   }
   // Hazard pre-flight check. Two flavours along a route:
@@ -11290,14 +11304,23 @@ function openRouteOptionsModal(onClose) {
         // HTTP 200, so r.ok only means "the request reached the server"). Read
         // r.data.ok for the actual would-succeed / would-fail.
         const sim = (r && r.ok && r.data) ? r.data : null;
+        // Print exactly how the server decided, to the console (Eruda on
+        // mobile): the request sent + the dry-run response (incl. the
+        // fuel-step `detail` on a would-fail). This is a debug-only call -
+        // the server runs it on a throwaway clone and changes nothing.
+        const round2 = (n) => (n == null ? n : Math.round(n * 100) / 100);
+        console.log('[simulate] dry-run MOVE', {
+          request: { kind: 'MOVE', toSiteId, segments },
+          response: sim || (r && r.error) || r,
+        });
         if (!sim) {
           showRes(`✗ Could not simulate: ${humanizeOnlineOpError(r && r.error)}`, 'bad');
         } else if (sim.ok) {
           const delta = (sim.tankBefore != null && sim.tankAfter != null)
-            ? `  (tank ${sim.tankBefore} -> ${sim.tankAfter})` : '';
-          showRes(`✓ ${sim.log || 'Move would succeed.'}${delta}`, 'ok');
+            ? `  (tank ${round2(sim.tankBefore)} -> ${round2(sim.tankAfter)})` : '';
+          showRes(`✓ ${sim.log || 'Move would succeed.'}${delta}  (see console for the full check)`, 'ok');
         } else {
-          showRes(`✗ Would fail: ${humanizeOnlineOpError(sim.error, sim.detail)}`, 'bad');
+          showRes(`✗ Would fail: ${humanizeOnlineOpError(sim.error, sim.detail)}  (see console for the full check)`, 'bad');
         }
       } catch {
         showRes('Simulation failed - server unreachable.', 'bad');
@@ -12004,20 +12027,21 @@ function logMoveBurn(originName, destName, turnBurns) {
     const wet = thr && Number.isFinite(thr.wetMass) ? thr.wetMass : totals.wetMass;
     const tank = getTankWater();
     const fuelOn = getFuelConsumption();
-    const ftNeeded = fpb != null ? fpb * turnBurns : 0;                      // fuel steps this turn spends
-    const ftAvail = blackStepsBetween(dry, wet);                            // canonical fuel-step capacity (black connections)
-    const waterCost = (fuelOn && fpb != null) ? Math.ceil(fpb * turnBurns) : 0;  // what the engine charges vs the water tank
+    const ftNeeded = (fuelOn && fpb != null) ? Math.ceil(fpb * turnBurns) : 0;   // fuel steps this turn spends
+    const ftAvail = blackStepsBetween(dry, wet);                                // capacity = black connections wet->dry
+    const newWet = ftNeeded > 0 ? walkBlackDown(wet, ftNeeded) : wet;
+    const waterSpent = Math.round((wet - newWet) * 1e6) / 1e6;                  // non-linear mass drop of those steps
     console.log(`[move] ${originName} → ${destName}`, {
       thisTurnBurns: turnBurns,
       fuelPerBurn: fpb,
       fuelStepsNeeded: ftNeeded,
       fuelStepsAvailable: ftAvail,        // blackStepsBetween(dry, wet)
       wetMass: wet, dryMass: dry,
-      engineWaterCost: waterCost,         // ceil(fuelPerBurn * burns) - the gate the server uses
+      waterSpent,                         // tank goes from `tank` to `tank - waterSpent` (often fractional)
       tankWater: tank,
+      tankAfter: Math.round((tank - waterSpent) * 1e6) / 1e6,
       fuelSpendOn: fuelOn,
-      enoughByFuelSteps: ftAvail >= ftNeeded,
-      enoughByWaterGate: !fuelOn || tank >= waterCost,   // the rule that throws insufficient_water
+      enoughFuelSteps: ftAvail >= ftNeeded,   // the rule that throws insufficient_water now
     });
   } catch { /* logging must never break a move */ }
 }

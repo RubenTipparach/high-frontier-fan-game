@@ -27,7 +27,10 @@
 import { PATENTS_BY_ID, thermsRequired, thermsSupplied } from '../../data/patents.js';
 import { CREW_BY_ID } from '../../data/crew.js';
 import { SOLAR_ZONE_INFO } from '../../data/sites.js';
-import { weightClassForMass, fuelStepsBetween } from '../../data/net-thrust-track.js';
+import { weightClassForMass } from '../../data/net-thrust-track.js';
+// Fuel-step capacity comes from the shared graph (the same module the server
+// uses), so the client readout + the server's move check never disagree.
+import { blackStepsBetween } from '../../data/fuel-graph.js';
 import { isOnline } from './online-mode.js';
 
 // Crew can act as the ship's thruster OR its robonaut
@@ -636,9 +639,11 @@ export function getWaterCap() {
 export function setTankWater(n) {
   // Clamp against the live wet-mass cap so water + dry can
   // never exceed TANK_MAX. Adding cards shrinks this ceiling
-  // automatically through stackDryMass().
+  // automatically through stackDryMass(). The tank is NOT floored: a burn
+  // walks the wet chit down the fuel-step ladder and can leave a sub-1
+  // remainder (fractional water), which we preserve (rounded to kill drift).
   const cap = getWaterCap();
-  const v = Math.max(0, Math.min(cap, Math.floor(Number(n) || 0)));
+  const v = Math.max(0, Math.min(cap, Math.round((Number(n) || 0) * 1e6) / 1e6));
   if (v === _tankWater) return false;
   _tankWater = v;
   persist();
@@ -903,7 +908,7 @@ export function getActiveThrusterStats() {
   // Fuel-strip burns: how many whole burns the current tank affords,
   // counting fuel steps along the net-thrust ladder from wet down to dry
   // (non-linear across weight classes) and dividing by the per-burn cost.
-  const fuelSteps = fuelStepsBetween(totals.dryMass, totals.wetMass);
+  const fuelSteps = blackStepsBetween(totals.dryMass, totals.wetMass);
   const burnsAvail = (fuel != null && fuel > 0) ? Math.floor(fuelSteps / fuel) : null;
   return {
     cardId: id,

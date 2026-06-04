@@ -173,15 +173,24 @@ before acting.
 - A stack can be **scrapped** when it has no cards AND less than 1 unit
   of water left.
 
-RECONCILE IN PROGRESS (user chose "full reconcile" 2026-06-03; the
-canonical count is `blackStepsBetween`, the detail graph): until it
-lands, `data/net-thrust-track.js#fuelStepsBetween` (used by the stack
-readout + `getActiveThrusterStats().burnsAvailable`) still returns a
-DIFFERENT count than the detail graph, and MOVE still deducts the
-per-burn cost from the water tank 1-to-1 (`ceil(fuel * burns)` vs
-`tank`). The reconcile moves the detail-graph node model into a shared
-dir (so client AND server share it), switches capacity + burn cost to
-the black/red connections, and makes burns leave a fractional remainder.
+RECONCILE LANDED (2026-06-04). The fuel-graph node model is now a shared
+pure module `data/fuel-graph.js` (NODES / BLACK / RED + `blackStepsBetween`
++ `walkBlackDown`), imported by BOTH the client (`js/game/rocket.js`,
+`js/game/net-thrust-detail.js` for rendering) AND the server
+(`server/game/engine.js`). Capacity = `blackStepsBetween(dry, wet)` (the
+black-connection count) everywhere - `getActiveThrusterStats().fuelSteps` +
+`burnsAvailable` and the server's MOVE check agree. A burn spends fuel STEPS
+(`ceil(fuelPerBurn * thisTurnBurns)`); MOVE is affordable iff that many black
+steps fit before dry, and the deduction is `walkBlackDown(wet, steps)` so the
+tank lands on the non-linear new mass and can hold a fractional remainder
+(tank water is no longer floored client- or server-side). REFUEL / CASH_WATER
+move WHOLE water units and preserve the remainder. `fuelStepsBetween` in
+`data/net-thrust-track.js` is now UNUSED by the fuel path (kept only if some
+other reader needs it). The `insufficient_water` op error carries a `detail`
+breakdown ({thisTurnBurns, fuelPerBurn, fuelStepsNeeded, fuelStepsAvailable,
+tank, dry/wetMass}); the Simulate dry-run + the `[move]` console log surface it.
+Still TODO: show the fractional remainder explicitly in the fuel-tank modal,
+and the no-cards-and-<1-water scrap rule.
 
 NOTE: there is NO `power_req` field. Older drafts had one; it
 was removed because requirements are gated through the kind/
