@@ -7149,6 +7149,28 @@ function hasRefueledThisTurn(siteId) {
   return log.sites.includes(siteId);
 }
 
+// A crew dirt thruster may take only 1 dirt FT per turn (HF4 rule). Tracked
+// per turn in localStorage for solo; online the server's dirtRefueledThisTurn
+// flag is authoritative (and surfaced on the snapshot's player).
+const STORAGE_DIRT_REFUEL_LOG = 'hf-sandbox-dirt-refuel-turn';   // turn number
+function hasDirtRefueledThisTurn() {
+  try { return Number(localStorage.getItem(STORAGE_DIRT_REFUEL_LOG)) === getTurn(); }
+  catch { return false; }
+}
+function markDirtRefueledThisTurn() {
+  try { localStorage.setItem(STORAGE_DIRT_REFUEL_LOG, String(getTurn())); } catch {}
+}
+// True when the active thruster is a crew dirt thruster that has already
+// taken its 1 dirt FT this turn (online reads the snapshot, solo the log).
+function crewDirtRefuelUsed() {
+  if (!CREW_BY_ID[getActiveThrusterId()]) return false;
+  if (_online) {
+    const me = _onlineSnapshot && (_onlineSnapshot.players || []).find((p) => p.profileId === (_onlineMe && _onlineMe.id));
+    return !!(me && me.dirtRefueledThisTurn);
+  }
+  return hasDirtRefueledThisTurn();
+}
+
 // Pick the best refining source available in the rocket stack.
 // Returns either:
 //   { kind: 'refinery', card, rawGain: 7 }
@@ -7550,9 +7572,15 @@ function doDirtRefuel() {
   const room = getWaterCap() - tank;
   if (room <= 0) { setStatus('Tank is already full.'); return; }
   const isCrew = !!CREW_BY_ID[getActiveThrusterId()];
+  // A crew dirt thruster takes only 1 dirt FT per turn.
+  if (isCrew && hasDirtRefueledThisTurn()) {
+    setStatus('This crew dirt thruster already took its 1 dirt FT this turn.');
+    return;
+  }
   const gain = isCrew ? Math.min(1, room) : room;
   setTankGrade('dirt');
   addFuel(gain);
+  if (isCrew) markDirtRefueledThisTurn();
   setStatus(`🟤 Loaded <strong>+${gain}</strong> dirt FT${gain === 1 ? '' : 's'} (tank now grey).`);
   logAction({
     type: 'dirt_refuel', icon: '🟤',
@@ -7627,6 +7655,7 @@ function doBrowseLocalReset() {
     _renderer.setRocketTrail(null);
   }
   try { localStorage.removeItem(STORAGE_REFUEL_LOG); } catch {}
+  try { localStorage.removeItem(STORAGE_DIRT_REFUEL_LOG); } catch {}
 }
 
 // Full sandbox reset (Reset-sandbox button). Composition of
@@ -11834,18 +11863,22 @@ function showSitePopupFor(site) {
     const tank = getTankWater();
     const room = Math.max(0, getWaterCap() - tank);
     const mixed = tank > 0 && getTankGrade() === 'water';
-    const ok = room > 0 && !mixed;
     const isCrew = !!CREW_BY_ID[getActiveThrusterId()];
+    const crewDone = isCrew && crewDirtRefuelUsed();   // 1 dirt FT per turn for crew
+    const ok = room > 0 && !mixed && !crewDone;
     const gain = isCrew ? Math.min(1, room) : room;
     actions.push({
-      label: mixed ? '🟤 Dirt refuel (empty water first)'
+      label: crewDone ? '🟤 Dirt refuel done (1/turn)'
+        : mixed ? '🟤 Dirt refuel (empty water first)'
         : room <= 0 ? '🟤 Tank full'
         : `🟤 Dirt refuel (+${gain})`,
       variant: ok ? 'rocket' : 'secondary',
       disabled: !ok,
-      title: mixed
-        ? 'Burn the water tank empty before taking on dirt - the two can\'t mix.'
-        : 'Free: a dirt thruster loads grey dirt FTs (a crew dirt thruster takes 1 per turn).',
+      title: crewDone
+        ? 'A crew dirt thruster may take only 1 dirt FT per turn. End turn to refresh.'
+        : mixed
+          ? 'Burn the water tank empty before taking on dirt - the two can\'t mix.'
+          : 'Free: a dirt thruster loads grey dirt FTs (a crew dirt thruster takes 1 per turn).',
       onClick: () => { if (!ok) return; doDirtRefuel(); _renderer.clearSitePopup(); },
     });
   }
