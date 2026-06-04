@@ -308,14 +308,18 @@ export function mountBrowse(opts = {}) {
     onRocketChange(syncSandboxRocket);
     onRocketChange(refreshOpenSitePopup);
     onRocketChange(syncFocusedSite);
-    // Loaded glory chits change the 🏆 badge on the rocket; repaint it when
-    // a chit loads (landing) or unloads (undo / cash-in).
+    // Loaded glory chits change the 🏆 badge on the rocket AND the gold
+    // coin on any outpost whose crew carries one; repaint both when a chit
+    // loads (landing), moves with its crew, or unloads (undo / cash-in).
     onGloryChange(syncSandboxRocket);
-    // Per-crew chit reconciliation: when a crew leaves the rocket by
-    // any path (transfer / decommission / back-to-hand), its carried
-    // chits flip face-up to FRONT. Colonise is handled explicitly
-    // (and suppressed here) so its rollback path stays clean.
+    onGloryChange(syncOutposts);
+    // Per-crew chit reconciliation: when a crew leaves PLAY entirely
+    // (decommission / discard - from the rocket OR an outpost), its carried
+    // chits flip face-up to FRONT. A crew merely moving to an outpost keeps
+    // its chit (crewInPlay covers every stack). Colonise is handled
+    // explicitly (and suppressed here) so its rollback path stays clean.
     onRocketChange(reconcileChitOwners);
+    onOutpostsChange(reconcileChitOwners);
     onDiscsChange(syncDiscs);
     onDiscsChange(refreshOpenSitePopup);
     // Turn-clock changes (end-turn, consumeMove, refundMove)
@@ -10206,7 +10210,14 @@ function syncOutposts() {
   // Tint the local player's outpost cubes with their seat colour (the
   // same colour as their rocket) so a cube reads as "mine" at a glance.
   _renderer.setOutpostColor(myRocketColour());
-  _renderer.setOutposts(getOutposts());
+  // Tag each outpost with whether its stationed crew is carrying a glory
+  // chit, so the renderer can mark it with a gold coin (a chit follows the
+  // crew that picked it up, wherever they station).
+  const outs = getOutposts();
+  for (const letter of Object.keys(outs)) {
+    outs[letter].gloryChits = chitsOnOutpostCount(letter);
+  }
+  _renderer.setOutposts(outs);
 }
 // Translate the focused-stack id ('rocket' | 'outpostA' | ...)
 // into a site id for the renderer's focus ring. LEO focus has

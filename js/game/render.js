@@ -2864,8 +2864,57 @@ export class MapRenderer {
         ctx.font = `${Math.round(chitSize * 0.6)}px ${EMOJI_FONT}`;
         ctx.fillText('💧', sx + half, sy - half);
       }
+      // Gold glory-chit coin: the outpost's stationed crew is carrying a
+      // glory chit (a chit follows the crew that picked it up, wherever they
+      // station). Bottom-right corner so it never collides with the 💧 water
+      // badge (top-right). The struck-gold + medal-star language matches the
+      // chit coins in the scoring panel; the exact count lives in the outpost
+      // inspector, not on the map.
+      if (op.gloryChits > 0) {
+        const bx = sx + half, by = sy + half;
+        const cr = Math.max(4, chitSize * 0.32);
+        ctx.beginPath();
+        ctx.arc(bx, by, cr + 1.2, 0, Math.PI * 2);
+        ctx.fillStyle = '#0c0a16';
+        ctx.fill();
+        const g = ctx.createRadialGradient(bx - cr * 0.34, by - cr * 0.44, cr * 0.1, bx, by, cr);
+        g.addColorStop(0, '#fffbe6');
+        g.addColorStop(0.16, '#ffe24a');
+        g.addColorStop(0.46, '#ffc400');
+        g.addColorStop(0.78, '#f59e0b');
+        g.addColorStop(1, '#b9700a');
+        ctx.beginPath();
+        ctx.arc(bx, by, cr, 0, Math.PI * 2);
+        ctx.fillStyle = g;
+        ctx.fill();
+        ctx.lineWidth = Math.max(0.8, cr * 0.12);
+        ctx.strokeStyle = '#ffe6a6';
+        ctx.stroke();
+        this._tracePentaStar(ctx, bx, by, cr * 0.62, cr * 0.27);
+        ctx.fillStyle = '#b9810f';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(bx - cr * 0.2, by - cr * 0.48, cr * 0.5, cr * 0.24, 0, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.42)';
+        ctx.fill();
+      }
     }
     ctx.restore();
+  }
+
+  // Trace a five-point star path (no fill/stroke). Shared by the glory-chit
+  // coin marker; the caller sets fillStyle and calls fill().
+  _tracePentaStar(ctx, cx, cy, ro, ri, points = 5, rot = -Math.PI / 2) {
+    ctx.beginPath();
+    for (let i = 0; i < points * 2; i++) {
+      const r = (i % 2 === 0) ? ro : ri;
+      const a = rot + (i * Math.PI) / points;
+      const x = cx + r * Math.cos(a);
+      const y = cy + r * Math.sin(a);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
   }
 
   // Stage-3 focused-stack ring. A thin accent-cyan ring around
