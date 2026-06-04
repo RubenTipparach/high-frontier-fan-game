@@ -926,6 +926,10 @@ function applyDissolveOutpost(state, op, player) {
   const outpost = player.outposts && player.outposts[letter];
   if (!outpost) return fail('no_outpost');
   if (outpost.cards && outpost.cards.length > 0) return fail('outpost_not_empty');
+  // Scrap rule: only when there's no usable water left. Whole units (>=1) must
+  // be pumped out first so they aren't lost; a sub-1 remainder can't be
+  // transferred (whole units only), so it's discardable and doesn't block.
+  if ((Number(outpost.tank) || 0) >= 1) return fail('outpost_has_water');
   delete player.outposts[letter];
   return { ok: true, state, log: `${player.name} decommissioned Outpost ${letter}.` };
 }

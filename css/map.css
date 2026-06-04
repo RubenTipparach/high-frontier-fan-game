@@ -701,6 +701,14 @@
   text-transform: uppercase;
   letter-spacing: 1px;
 }
+/* Sub-1 remainder a burn left in the tank (can't be transferred out). */
+.fuel-tank-rem {
+  margin: 2px 0 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: center;
+}
+.fuel-tank-rem strong { color: #fbbf24; }
 /* Rocket-stack totals: framed as a profile card. The
    thrust-triangle ID-photo sits on the LEFT inside its own
    bordered tile with a "MODIFIED THRUST" header above + a

@@ -2504,6 +2504,7 @@ function humanizeOnlineOpError(code, detail) {
     not_colocated: 'Park the rocket at that stack\'s site to transfer.',
     no_outpost: 'That outpost does not exist.',
     outpost_not_empty: 'Empty the outpost first (move its cards out), then decommission it.',
+    outpost_has_water: 'Pump the water out first - only a sub-1 remainder can be scrapped.',
     crew_no_decommission: 'Crew can\'t be decommissioned here - that happens via an event.',
     bad_decommission: 'Pick a card to decommission.',
     nothing_decommissioned: 'Nothing decommissioned (crew can\'t return to the hand).',
@@ -7390,8 +7391,16 @@ function outpostDissolveBtnHtml(stackId) {
   const letter = stackId.slice('outpost'.length);
   const op = getOutpost(letter);
   if (!op || (op.cards && op.cards.length > 0)) return '';
-  const waterNote = (op.tank | 0) > 0 ? ` (forfeits ${op.tank} water)` : '';
-  return `<button type="button" class="modal-btn decommission stack-dissolve-outpost" data-letter="${esc(letter)}" title="Decommission this empty outpost and free the slot${waterNote}">🗑 Decommission outpost</button>`;
+  const water = Number(op.tank) || 0;
+  // Scrap rule: can only decommission with no usable water. Whole units must
+  // be pumped out first (they're not lost); a sub-1 remainder can't be moved,
+  // so it's discardable and doesn't block.
+  if (water >= 1) {
+    const whole = Math.floor(water);
+    return `<button type="button" class="modal-btn decommission" disabled>🗑 Decommission outpost - pump ${whole} water out first</button>`;
+  }
+  const remNote = water > 0 ? ` (discards a ${Math.round(water * 100) / 100} remainder that can't be transferred)` : '';
+  return `<button type="button" class="modal-btn decommission stack-dissolve-outpost" data-letter="${esc(letter)}" title="Decommission this empty outpost and free the slot${remNote}">🗑 Decommission outpost</button>`;
 }
 
 // Minimal amount-picker modal (stepper + "All"). Resolves to a positive
@@ -8249,6 +8258,12 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   // current level immediately, no fill animation. Refuel calls
   // still pass fromWater explicitly to play the fill tween.
   const fromW   = Number.isFinite(fromWater) ? fromWater : tankNow;
+  // Water is no longer integer: a burn walks the wet chit down fuel steps and
+  // can leave a sub-1 remainder. Show the value with up to 2 decimals (no
+  // trailing zeros), and call out the remainder - it can't be transferred out
+  // (water moves in whole units).
+  const fmtWater = (n) => String(Math.round((Number(n) || 0) * 100) / 100);
+  const remOf = (n) => { const v = Number(n) || 0; return Math.round((v - Math.floor(v)) * 100) / 100; };
   const totals  = getStackTotals();
   const thrStats = getActiveThrusterStats();
   // Tank visualisation model: the cylinder always represents the
@@ -8339,11 +8354,14 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         <g class="tank-ticks"></g>
       </svg>
       <div class="fuel-tank-readout">
-        <strong class="tank-now">${fromW}</strong>
+        <strong class="tank-now">${fmtWater(fromW)}</strong>
         <span>/</span>
         <strong class="tank-cap">${cap}</strong>
         <em class="muted">water</em>
       </div>
+      <p class="fuel-tank-rem muted" ${remOf(tankNow) > 0 ? '' : 'hidden'}>includes a
+        <strong>${remOf(tankNow)}</strong> remainder a burn left - can't be transferred
+        out (water moves in whole units)</p>
     </div>
     <div class="fuel-tank-actions">
       <button type="button" class="popup-btn popup-btn-secondary" id="tank-dump"
@@ -8419,6 +8437,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const dryRect   = panel.querySelector('.tank-dry');
   const liftLine  = panel.querySelector('.tank-lift-line');
   const nowReadout = panel.querySelector('.tank-now');
+  const remReadout = panel.querySelector('.fuel-tank-rem');
   const ticksG     = panel.querySelector('.tank-ticks');
 
   // Geometry: 200 svg units span TANK_VIS_MAX wet-mass units.
@@ -8470,7 +8489,15 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     waterRect.setAttribute('height', String(h));
     foamRect.setAttribute('y',  String(waterTopY - 3));
     foamRect.setAttribute('height', String(Math.min(6, h)));
-    nowReadout.textContent = String(Math.round(clamped));
+    nowReadout.textContent = fmtWater(clamped);
+    if (remReadout) {
+      const rem = remOf(clamped);
+      remReadout.hidden = !(rem > 0);
+      if (rem > 0) {
+        remReadout.innerHTML = `includes a <strong>${rem}</strong> remainder a burn left`
+          + ` - can't be transferred out (water moves in whole units)`;
+      }
+    }
   }
 
   // Falling-droplet animation. Spawns teardrop <path>s at the
