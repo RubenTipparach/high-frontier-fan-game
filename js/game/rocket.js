@@ -55,6 +55,7 @@ function synthCrew(crew, faceKey) {
     face.thrust = cf.thruster.thrust;
     face.fuel = cf.thruster.fuelPerBurn;
     face.afterburn = cf.thruster.afterburn || 0;
+    face.dirt = !!cf.thruster.dirt;   // crew dirt thruster (grey fuel)
   }
   const synth = {
     id: crew.id,
@@ -95,6 +96,7 @@ const STORAGE_KEY      = 'hf-sandbox-rocket';
 const ACTIVE_KEY       = 'hf-sandbox-rocket-active-thruster';
 const PROSPECTOR_KEY   = 'hf-sandbox-rocket-active-prospector';
 const TANK_KEY         = 'hf-sandbox-rocket-tank';
+const TANK_GRADE_KEY   = 'hf-sandbox-rocket-tank-grade';
 const AQUA_KEY         = 'hf-sandbox-aqua';
 // Starting aqua balance for a fresh sandbox profile. Aqua is the
 // player's liquid economy unit - spend it to bypass hazard rolls
@@ -152,6 +154,13 @@ let _tankWater = (() => {
   } catch { return 0; }
 })();
 
+// Fuel grade in the tank: 'water' (blue) or 'dirt' (grey). Water and dirt
+// can't mix; a dirt thruster burns dirt, a water thruster burns water.
+let _tankGrade = (() => {
+  try { return localStorage.getItem(TANK_GRADE_KEY) === 'dirt' ? 'dirt' : 'water'; }
+  catch { return 'water'; }
+})();
+
 // Aqua balance is a non-negative integer; persisted independently
 // of the rest of the rocket state so a fresh sandbox profile (no
 // stored key yet) seeds with the default starting amount rather
@@ -181,6 +190,7 @@ function persist() {
     else                     localStorage.removeItem(PROSPECTOR_KEY);
     localStorage.setItem(AFTERBURN_KEY, _afterburnEngaged ? '1' : '0');
     localStorage.setItem(TANK_KEY, String(_tankWater));
+    localStorage.setItem(TANK_GRADE_KEY, _tankGrade === 'dirt' ? 'dirt' : 'water');
   } catch { /* private mode */ }
 }
 
@@ -214,12 +224,14 @@ export function hydrateRocket({
   activeThrusterId = null,
   activeProspectorId = null,
   tank = 0,
+  tankGrade = 'water',
   afterburnEngaged = false,
 } = {}) {
   _stack = Array.isArray(stack) ? _clone(stack) : [];
   _activeThrusterId = activeThrusterId;
   _activeProspectorId = activeProspectorId;
   _tankWater = tank;
+  _tankGrade = tankGrade === 'dirt' ? 'dirt' : 'water';
   _afterburnEngaged = !!afterburnEngaged;
   notify();
 }
@@ -659,6 +671,31 @@ export function removeFuel(delta = 1) {
   return setTankWater(_tankWater - (Number(delta) || 1));
 }
 
+// --------- Fuel grade (water blue / dirt grey) ---------
+
+export function getTankGrade() { return _tankGrade === 'dirt' ? 'dirt' : 'water'; }
+export function setTankGrade(grade) {
+  const g = grade === 'dirt' ? 'dirt' : 'water';
+  if (g === _tankGrade) return false;
+  _tankGrade = g;
+  persist();
+  notify();
+  return true;
+}
+
+// A thruster face burns DIRT (grey) when its card fuelType is Dirt or its
+// crew rocket is flagged dirt (mirror of engine.js#faceBurnsDirt).
+export function faceBurnsDirt(face) {
+  return !!(face && (face.fuelType === 'Dirt' || face.dirt === true));
+}
+
+// The fuel grade the active thruster needs ('dirt' or 'water'); 'water' when
+// there is no active thruster. Drives the tank-grade gate + grey UI.
+export function getActiveFuelGrade() {
+  const stats = getActiveThrusterStats();
+  return stats && stats.isDirt ? 'dirt' : 'water';
+}
+
 // --------- Aqua (sandbox currency) ---------
 //
 // Aqua is the player's liquid economy unit. Two sinks today:
@@ -918,6 +955,7 @@ export function getActiveThrusterStats() {
     thrust,
     fuel,
     isp,
+    isDirt: faceBurnsDirt(f),   // burns grey dirt fuel, not blue water
     fuelSteps,
     burnsAvailable: burnsAvail,
     modifiers,

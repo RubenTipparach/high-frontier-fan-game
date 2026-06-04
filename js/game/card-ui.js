@@ -9,6 +9,8 @@
 // secondaries render rotated 180° so the "stowed" face reads
 // upside-down when installed.
 
+import { supportIconSvg, thermBadgeSvg, hasSupportIcon, typeIconSvg } from './support-icons.js';
+
 // Spectral type -> { glyph, fill, ink }. Used for the per-card
 // spectral hex. Falls back to 'unknown' for anything unmapped.
 const SPECTRAL_STYLE = {
@@ -206,13 +208,15 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     face.querySelector('.m').textContent = c.mass != null ? c.mass : '-';
     face.querySelector('.r').textContent = c.radHardness != null ? c.radHardness : '-';
     // Crews have NO spectral type. The third stat cell instead
-    // shows the prospector kind glyph + ISRU rating (e.g.
-    // "🛺 4" / "🔫 4") when the face carries one.
+    // shows the prospector kind icon + ISRU rating (the same
+    // missile / raygun / buggy badge a robonaut uses) when the
+    // face carries one.
     const isruCell = face.querySelector('.crew-isru');
     if (isruCell && c.isru != null) {
-      const glyph = c.prospector === 'raygun' ? '🔫'
-        : (c.prospector === 'missile' ? '🚀' : '🛺');
-      isruCell.textContent = `${glyph} ${c.isru}`;
+      const pk = (c.prospector === 'raygun' || c.prospector === 'missile')
+        ? c.prospector : 'buggy';
+      const icon = supportIconSvg(pk, { size: 14 }) || '';
+      isruCell.innerHTML = `${icon}${escapeText(String(c.isru))}`;
     }
     // Thrust triangle. Crew that double as a thruster carry a
     // { thrust, fuelPerBurn, afterburn, dirt } block; render it
@@ -281,35 +285,32 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   // glyphs this card supplies - so the player can immediately
   // see which chip-slots on a thruster this card satisfies.
   // For cards that don't supply chips (thrusters, refineries,
-  // robonauts) we fall back to a generic type emoji.
-  const TYPE_FALLBACK_ICON = {
-    thruster: '🚀', refinery: '⚗️', robonaut: '🤖',
-  };
+  // robonauts) we fall back to the card-type icon.
   const tbar = face.querySelector('.card-typebar');
   const faceData = (card.faces && card.faces[sideName]) || {};
   const supplies = faceData.supplies || card.supplies || [];
-  const supplyGlyphs = supplies
-    .map((k) => (REQUIREMENT_VIS[k] || {}).glyph || '')
-    .filter(Boolean)
-    .join(' ');
-  // Robonauts ARE their prospector role - show the missile / raygun
-  // / buggy glyph (or stack of glyphs for dual-purpose cards like
-  // Helical Railgun which is both missile + raygun on Tier-2)
-  // instead of the generic 🤖. Crews aren't robonauts, so they
-  // skip this branch and keep their existing icon.
-  const ROBONAUT_KIND_GLYPHS = { missile: '🚀', raygun: '🔫', buggy: '🛺' };
+  // The leading glyph row uses the custom support icons (reactor squares /
+  // generator circles / therm badge / robonaut prospector squares), falling
+  // back to the text glyph or a generic type emoji only where no icon exists.
+  const iconFor = (k) => (k === 'thermostat')
+    ? thermBadgeSvg(1, { size: 15 })
+    : (supportIconSvg(k, { size: 15 }) || `<em>${(REQUIREMENT_VIS[k] || {}).glyph || ''}</em>`);
+  const supplyGlyphs = supplies.map(iconFor).filter(Boolean).join('');
+  // Robonauts ARE their prospector role - show the missile / raygun / buggy
+  // icon(s) (dual-purpose cards stack both) instead of the generic robonaut
+  // head. Crews aren't robonauts, so they skip this branch.
   let robonautGlyphs = '';
   if (card.type === 'robonaut') {
     const props = faceData.properties || card.properties || [];
     const active = [];
     for (const key of ['missile', 'raygun', 'buggy']) {
-      if (props.some((p) => p.key === key && p.value)) active.push(ROBONAUT_KIND_GLYPHS[key]);
+      if (props.some((p) => p.key === key && p.value)) active.push(supportIconSvg(key, { size: 15 }));
     }
-    robonautGlyphs = active.join(' ');
+    robonautGlyphs = active.join('');
   }
-  const fallback = robonautGlyphs || TYPE_FALLBACK_ICON[card.type] || '';
+  const fallback = robonautGlyphs || (typeIconSvg(card.type, { size: 15 }) || '');
   const lead = supplyGlyphs || fallback;
-  tbar.textContent = `${lead ? lead + '  ' : ''}${card.type.toUpperCase()}`;
+  tbar.innerHTML = `${lead ? `<span class="typebar-icons">${lead}</span>` : ''}${escapeText(card.type.toUpperCase())}`;
   // Card name reads from the active face - the dark side carries
   // its own printed name on every HF4 card.
   const faceName = (card.faces && card.faces[sideName] && card.faces[sideName].name);
@@ -383,7 +384,7 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
         wrap.className = `side-block ${cls}`;
         const therms = block.therms ?? 0;
         const thermRow = therms > 0
-          ? '🌡️'.repeat(Math.min(8, therms))
+          ? thermBadgeSvg(Math.min(8, therms), { size: 16 })
           : '-';
         wrap.innerHTML = `<header>${label}</header>`
           + `<div class="rad-therms">${thermRow}</div>`
@@ -443,7 +444,11 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
       || (p.value === true ? p.label : `${p.label}: ${p.value}`));
     const count = (typeof p.value === 'number' && p.value > 1)
       ? `<b>×${p.value}</b>` : '';
-    b.innerHTML = `<em>${p.glyph}</em>${count}`;
+    // Robonaut prospector types (missile / raygun / buggy) get the custom
+    // support-icon glyph; everything else keeps its emoji.
+    const propIcon = supportIconSvg(p.key, { size: 18 });
+    if (propIcon) { b.classList.add('has-support-icon'); b.innerHTML = `${propIcon}${count}`; }
+    else b.innerHTML = `<em>${p.glyph}</em>${count}`;
     propHost.appendChild(b);
   }
 
@@ -485,6 +490,18 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   // OR-groups (e.g. a reactor chip stamped X/∿/💣) carry all
   // member kinds so the library can filter to any-of-the-above.
   const onSupportClick = opts && opts.onSupportClick;
+  // A requirement's visual: the custom support icon (reactor / generator /
+  // robonaut), the ×N therm badge for the radiator thermostat, else the text
+  // glyph. The count rides as ×N except for therms (the N thermometers ARE
+  // the count).
+  const reqGlyphHtml = (kind, count) => {
+    if (kind === 'thermostat') return thermBadgeSvg(count, { size: 18 });
+    const icon = supportIconSvg(kind, { size: 18 });
+    const cnt = count > 1 ? `<b>×${count}</b>` : '';
+    if (icon) return `${icon}${cnt}`;
+    const vis = REQUIREMENT_VIS[kind] || { glyph: '◇' };
+    return `<em>${vis.glyph}</em>${cnt}`;
+  };
   const makeChip = (visGlyphs, supplier, tip, satisfied, kinds) => {
     const span = document.createElement('span');
     span.className = 'req';
@@ -492,6 +509,9 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     if (supplier) span.dataset.supplier = supplier;
     if (satisfied) span.classList.add('is-satisfied');
     if (kinds && kinds.length) span.dataset.kinds = kinds.join(',');
+    // Chips that hold a custom icon drop the supplier-tinted pill background -
+    // the icon carries its own colour.
+    if (visGlyphs.includes('support-icon')) span.classList.add('has-support-icon');
     span.innerHTML = visGlyphs;
     if (onSupportClick && kinds && kinds.length) {
       span.classList.add('is-clickable');
@@ -512,11 +532,7 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     reqHost.appendChild(span);
   };
   for (const [supplier, group] of groups) {
-    const parts = group.map((r) => {
-      const vis = REQUIREMENT_VIS[r.kind] || { glyph: '◇', label: r.kind };
-      const count = r.count > 1 ? `<b>×${r.count}</b>` : '';
-      return `<em>${vis.glyph}</em>${count}`;
-    });
+    const parts = group.map((r) => reqGlyphHtml(r.kind, r.count));
     const labelParts = group.map((r) =>
       (REQUIREMENT_VIS[r.kind] || { label: r.kind }).label);
     const tip = group.length > 1
@@ -529,13 +545,13 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   }
   for (const r of loose) {
     const vis = REQUIREMENT_VIS[r.kind] || { glyph: '◇', label: r.kind };
-    let iconHtml;
-    if (r.kind === 'beam-receiver')  iconHtml = svgSunChip(16);
-    else if (r.kind === 'spin-grav') iconHtml = svgBallerinaChip(16);
-    else                             iconHtml = `<em>${vis.glyph}</em>`;
-    const count = r.count > 1 ? `<b>×${r.count}</b>` : '';
+    let chipHtml;
+    if (r.kind === 'beam-receiver')  chipHtml = svgSunChip(16) + (r.count > 1 ? `<b>×${r.count}</b>` : '');
+    else if (r.kind === 'spin-grav') chipHtml = svgBallerinaChip(16) + (r.count > 1 ? `<b>×${r.count}</b>` : '');
+    else if (hasSupportIcon(r.kind)) chipHtml = reqGlyphHtml(r.kind, r.count);
+    else                             chipHtml = `<em>${vis.glyph}</em>${r.count > 1 ? `<b>×${r.count}</b>` : ''}`;
     const satisfied = !!supplied && supplied.has(r.kind);
-    makeChip(`${iconHtml}${count}`, null,
+    makeChip(chipHtml, null,
       r.count > 1 ? `${vis.label} ×${r.count}` : vis.label,
       satisfied, [r.kind]);
   }
@@ -568,7 +584,7 @@ function buildRadiatorFace(card, sideName) {
   const heavy = faceMeta.heavy || {};
   const cardName = faceMeta.name || card.name;
   const ability  = faceMeta.ability || '';
-  const therms = (n) => n > 0 ? '🌡️'.repeat(Math.min(8, n)) : '';
+  const therms = (n) => n > 0 ? thermBadgeSvg(Math.min(8, n), { size: 15 }) : '';
 
   // Name sits directly below the typebar so it reads as a
   // banner-and-title pair (matching the published radiator card

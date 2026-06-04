@@ -32,6 +32,12 @@ import { CREW_BY_ID } from '../../data/crew.js';
 // STEPS (black connections), and the water it costs is the non-linear mass
 // drop, leaving a possibly-fractional remainder.
 import { blackStepsBetween, walkBlackDown } from '../../data/fuel-graph.js';
+// Net-thrust band (weight class) + solar-zone modifiers, the same pure
+// tables the client folds into rocket.js#getActiveThrusterStats. The
+// engine reads them so the liftoff/landing gate uses the FINAL net thrust,
+// not the printed base value.
+import { weightClassForMass } from '../../data/net-thrust-track.js';
+import { SOLAR_ZONE_INFO } from '../../data/sites.js';
 // Movement + metadata both come from the planner graph (the vendor
 // mission-planner data the client also uses). siteBySlug layers the
 // curated data/sites.js metadata onto a planner slug, so there is ONE
@@ -114,13 +120,73 @@ function slotFace(slot, card) {
   return (c.faces && (c.faces[key] || c.faces.primary)) || c;
 }
 
-// A slot is a thruster if its card type is thruster or its active face
-// exposes a thrust value (dark-side / robonaut thrusters).
+// The active thruster face of a slot, normalized so patents and crew read
+// the same shape (.thrust / .fuel / .afterburn / .requires / .properties).
+// Crew nest their rocket under face.thruster.{thrust, fuelPerBurn, afterburn}
+// (mirror of rocket.js#synthCrew); a crew face with no rocket (Shimizu)
+// returns {}. Patents pass straight through slotFace.
+function thrusterFaceOf(slot) {
+  if (!slot || !slot.id) return {};
+  const p = PATENTS_BY_ID[slot.id];
+  if (p) return slotFace(slot, p);
+  const crew = CREW_BY_ID[slot.id];
+  if (crew) {
+    const key = slot.face === 'secondary' ? 'secondary' : 'primary';
+    const cf = (crew.faces && (crew.faces[key] || crew.faces.primary)) || {};
+    if (!cf.thruster) return {};
+    return {
+      thrust: cf.thruster.thrust,
+      fuel: cf.thruster.fuelPerBurn,
+      afterburn: cf.thruster.afterburn || 0,
+      dirt: !!cf.thruster.dirt,   // a crew dirt thruster (grey fuel)
+      requires: [],   // crew thrusters are self-contained (no support chain)
+      properties: cf.prospector ? [{ key: cf.prospector, value: true }] : [],
+    };
+  }
+  return {};
+}
+
+// A thruster face burns DIRT (grey) fuel rather than WATER (blue) when its
+// fuelType is Dirt (patents / robonauts, from the card sheet) or its crew
+// rocket is flagged dirt. Everything else burns water.
+function faceBurnsDirt(face) {
+  return !!(face && (face.fuelType === 'Dirt' || face.dirt === true));
+}
+
+// The fuel grade the active thruster needs: 'dirt' for a dirt thruster, else
+// 'water'. 'water' when there is no active thruster.
+function activeFuelGrade(rocket) {
+  const tid = rocket.activeThrusterId;
+  if (!tid) return 'water';
+  const slot = rocket.stack.find((s) => s.id === tid);
+  if (!slot) return 'water';
+  return faceBurnsDirt(thrusterFaceOf(slot)) ? 'dirt' : 'water';
+}
+
+// The grade currently in the tank ('water' default; meaningless at tank 0).
+function tankGradeOf(rocket) {
+  return rocket.tankGrade === 'dirt' ? 'dirt' : 'water';
+}
+
+// Heliocentric-zone distance from Earth (Delivery cost driver). Earth = 0,
+// Mars/Venus = 1, Ceres = 2, ... Neptune = 6. Unknown zone = 0.
+const ZONE_ORDER = ['Mercury', 'Venus', 'Earth', 'Mars', 'Ceres', 'Jupiter', 'Saturn', 'Uranus', 'Neptune'];
+function zonesFromEarth(zone) {
+  const i = ZONE_ORDER.indexOf(zone);
+  if (i < 0) return 0;
+  return Math.abs(i - ZONE_ORDER.indexOf('Earth'));
+}
+
+// A slot is a thruster if its card type is thruster, its active face exposes
+// a thrust value (dark-side / robonaut thrusters), or it is a crew member
+// whose chosen face carries a rocket (a crew thruster).
 function isThrusterSlot(slot) {
   const c = PATENTS_BY_ID[slot.id];
-  if (!c) return false;
-  if (c.type === 'thruster') return true;
-  return slotFace(slot, c).thrust != null;
+  if (c) {
+    if (c.type === 'thruster') return true;
+    return slotFace(slot, c).thrust != null;
+  }
+  return thrusterFaceOf(slot).thrust != null;
 }
 
 // Clip the tank down to the wet-mass ceiling after dry mass changes.
@@ -173,6 +239,11 @@ function isProspectorSlot(slot) {
 function maybeAwardGlory(player, site, turn) {
   if (!site || !site.solarZone || site.solarZone === 'Earth') return null;
   if (player.glory.visited.includes(site.solarZone)) return null;
+  // A glory chit is loaded by a Human: only claim it (and only mark the
+  // zone visited) when a crew is aboard. Mirror of the client's
+  // willAwardChit `crewAboard` gate - a crewless rocket leaves the chit on
+  // the site for a later, crewed visit to load.
+  if (!player.rocket.stack.some(isCrewSlot)) return null;
   player.glory.visited.push(site.solarZone);
   const chit = { zone: site.solarZone, earnedTurn: turn };
   player.glory.chits.push(chit);
@@ -218,15 +289,68 @@ function advanceClock(state) {
 const HAZARD_COST_PER = 4;       // aqua to bypass one generic hazard
 const RAD_BYPASS_THRUST = 6;     // thrust strictly above this skips rad rolls
 
-// Active thruster's thrust value (the number in the pink circle). Drives
-// the rad bypass + factory-assist gate. 0 when no thruster is active.
-function activeThrust(rocket) {
+// Does a (normalized) face carry the solar capability badge? Mirror of
+// rocket.js#faceHasSolar.
+function faceHasSolar(face) {
+  return !!(face && Array.isArray(face.properties)
+    && face.properties.some((p) => p.key === 'solar' && p.value));
+}
+
+// Net thrust of the active thruster after ALL deterministic modifiers
+// (mirror of rocket.js#getActiveThrusterStats's thrust folding): base face
+// thrust + support-chain reactor/generator thrustMod + weight-class band
+// (from wet mass) + solar-zone shift for solar-driven thrusters. This - NOT
+// the printed base thrust - is what the liftoff/landing gate and the rad
+// bypass must use. Afterburn is a client-engaged one-shot the server does
+// not track, so it is intentionally omitted here. 0 when no thruster.
+function activeNetThrust(rocket) {
   const tid = rocket.activeThrusterId;
   if (!tid) return 0;
   const slot = rocket.stack.find((s) => s.id === tid);
   if (!slot) return 0;
-  const f = slotFace(slot);
-  return Number.isFinite(f && f.thrust) ? f.thrust : 0;
+  const f = thrusterFaceOf(slot);
+  let thrust = Number.isFinite(f.thrust) ? f.thrust : null;
+  if (thrust == null) return 0;
+  // Support-chain modifiers: a reactor/generator shifts this thruster's
+  // thrust only when it supplies a kind the thruster requires. A self-powered
+  // or crew thruster requires nothing, so it takes no stack modifiers.
+  const reqKinds = new Set((f.requires || []).map((r) => (r && r.kind) || r));
+  if (reqKinds.size) {
+    for (const s of rocket.stack) {
+      if (s.id === tid) continue;
+      const c = PATENTS_BY_ID[s.id];
+      if (!c) continue;
+      const cSupplies = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
+      if (!cSupplies.some((k) => reqKinds.has(k))) continue;
+      const cf = slotFace(s, c);
+      if (cf.thrustMod != null && cf.thrustMod !== 0) thrust += cf.thrustMod;
+    }
+  }
+  // Weight-class band, keyed off current wet mass (dry + tank).
+  const dry = rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const wet = dry + (Number(rocket.tank) || 0);
+  thrust += weightClassForMass(wet).netThrust;
+  // Solar-driven thrusters shift by the rocket's current zone modifier; a
+  // null-solar zone (Neptune outward) kills solar thrust entirely.
+  let solarDriven = faceHasSolar(f);
+  if (!solarDriven && (f.requires || []).some((r) => (r.kind || r) === 'gen-electric')) {
+    for (const s of rocket.stack) {
+      if (s.id === tid) continue;
+      const c = PATENTS_BY_ID[s.id];
+      if (!c) continue;
+      const cf = slotFace(s, c);
+      if (faceHasSolar(cf) && (cf.supplies || []).includes('gen-electric')) { solarDriven = true; break; }
+    }
+  }
+  if (solarDriven) {
+    const site = rocket.siteId ? siteById(rocket.siteId) : null;
+    const zone = (site && site.solarZone) || 'Earth';
+    const info = SOLAR_ZONE_INFO[zone];
+    const z = info ? info.solar : 0;
+    if (z === null) thrust = 0;
+    else thrust += z;
+  }
+  return thrust < 0 ? 0 : thrust;
 }
 // Water spent per burn = the active thruster face's `fuel` value, scaled
 // by any other card's fuelMod (mirror of rocket.js#getActiveThrusterStats,
@@ -239,7 +363,8 @@ function thrusterFuelPerBurn(rocket) {
   if (!tid) return 1;
   const slot = rocket.stack.find((s) => s.id === tid);
   if (!slot) return 1;
-  const f = slotFace(slot);
+  // Crew-aware: a crew thruster reads fuelPerBurn off its rocket face.
+  const f = thrusterFaceOf(slot);
   const p = PATENTS_BY_ID[tid];
   let fuel = f.fuel != null ? f.fuel : (p && p.fuel);
   if (fuel == null) return 1;
@@ -399,7 +524,7 @@ function applyMove(state, op, player) {
   // dry-run (result.calc) so the client can show every intermediate value
   // instead of just tank before/after.
   const moveCalc = {
-    finalThrust: activeThrust(player.rocket),
+    finalThrust: activeNetThrust(player.rocket),
     fuelStepsPerBurn: perBurn,
     dryMass,
     wetMass,
@@ -410,6 +535,14 @@ function applyMove(state, op, player) {
     fuelStepsNeeded: stepsNeeded,
     enough: stepsNeeded <= stepsAvail,
   };
+  // Fuel-grade gate: a dirt thruster burns only dirt, a water thruster only
+  // water. If the tank holds fuel of the wrong grade, the burn can't draw on
+  // it (clearer than "insufficient" - the fuel is there, just incompatible).
+  if (stepsNeeded > 0 && (Number(player.rocket.tank) || 0) > 0) {
+    const need = activeFuelGrade(player.rocket);
+    const have = tankGradeOf(player.rocket);
+    if (need !== have) return fail('wrong_fuel_grade', { need, have });
+  }
   if (stepsNeeded > stepsAvail) {
     return fail('insufficient_water', moveCalc);
   }
@@ -424,7 +557,7 @@ function applyMove(state, op, player) {
     if (k === 'rad') rad.push(slug);
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
-  const thrust = activeThrust(player.rocket);
+  const thrust = activeNetThrust(player.rocket);
   // Factory-assist liftoff / landing gate. A maneuver where net thrust
   // <= site size is only legal if a factory carries it (assist), which
   // is a hazard roll unless a colony waives it. No factory => hard block.
@@ -696,8 +829,11 @@ function applyRefuel(state, op, player) {
   if (!rocketAtLeo(player)) return fail('rocket_not_at_leo');
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
-  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
   const tank = Number(player.rocket.tank) || 0;
+  // Water and dirt can't mix: refuse to pour water onto a dirt tank. Empty
+  // the dirt first (burn it off) before taking on water.
+  if (tank > 0 && tankGradeOf(player.rocket) === 'dirt') return fail('cannot_mix_fuel');
+  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
   // Whole water units only; any sub-1 remainder left by a burn stays put
   // (don't floor the tank away when topping up).
   const room = Math.floor(Math.max(0, TANK_MAX - dry - tank));
@@ -708,6 +844,7 @@ function applyRefuel(state, op, player) {
   }
   player.aqua -= amt;
   player.rocket.tank = round6(tank + amt);
+  player.rocket.tankGrade = 'water';
   return { ok: true, state, log: `${player.name} converted ${amt} aqua to water (tank ${round6(player.rocket.tank)}).` };
 }
 
@@ -748,6 +885,11 @@ function applyClearRoute(state, _op, player) {
 // at LEO. Clamped by the water on hand. Free, turn-gated. op={amount}.
 function applyCashWater(state, op, player) {
   if (!rocketAtLeo(player)) return fail('rocket_not_at_leo');
+  // Only water is worth aqua; dirt is free field propellant with no cash
+  // value. Burn dirt off to empty the tank, then it can take water again.
+  if (tankGradeOf(player.rocket) === 'dirt' && (Number(player.rocket.tank) || 0) > 0) {
+    return fail('not_water_fuel');
+  }
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
   // Whole water units only; the sub-1 remainder can't be cashed and stays.
@@ -1011,12 +1153,11 @@ function applySetActiveProspector(state, op, player) {
   return { ok: true, state, log: `${player.name} set ${card ? card.name : cardId} as the active prospector.` };
 }
 
-// Prospect the ship's current site: one seeded d6 vs the site-class
-// threshold (success = roll <= threshold), placing a claim/exhausted
-// disc. Mirrors browse.js#doProspect. v1 simplifications: the ship must
-// be AT the site for every prospector kind (raygun line-of-sight is
-// deferred), there is no buggy reroll, and the prospector's support
-// requirements are not yet gated. missile/buggy cost 1 op; raygun is free.
+// Prospect a site: one seeded d6 vs the site-class threshold (success =
+// roll <= threshold), placing a claim/exhausted disc. Mirrors
+// browse.js#doProspect. Prospect IS the turn's operation for EVERY
+// prospector kind (raygun extends the reach to a line-of-sight site, but it
+// still spends the op - it is not free).
 function applyProspect(state, op, player) {
   const toSiteId = String(op.siteId || '');
   const site = siteById(toSiteId);
@@ -1038,8 +1179,8 @@ function applyProspect(state, op, player) {
   }
   if (state.discs[toSiteId]) return fail('already_prospected');
   if (prospectorIsru(provSlot) > (site.hydration | 0)) return fail('isru_too_high');
-  const costsOp = kind !== 'raygun';
-  if (costsOp && player.opsRemaining <= 0) return fail('no_ops_left');
+  // Prospect spends the turn's operation for every prospector kind.
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
 
   const threshold = prospectThreshold(site);
   const gen = makeRng(state.seed, state.rng.cursor);
@@ -1055,7 +1196,7 @@ function applyProspect(state, op, player) {
     // The buggy may re-roll once, this turn, by its owner.
     canReroll: kind === 'buggy',
   };
-  if (costsOp) player.opsRemaining -= 1;
+  player.opsRemaining -= 1;
   const verb = success ? 'struck a claim at' : 'came up dry at';
   return {
     ok: true, state,
@@ -1211,6 +1352,8 @@ function applySiteRefuel(state, op, player) {
   const cap = Math.max(0, TANK_MAX - dry);
   const tank = Number(player.rocket.tank) || 0;
   if (tank >= cap) return fail('tank_full');
+  // Site refuel makes WATER; it can't top up a dirt tank (no mixing).
+  if (tank > 0 && tankGradeOf(player.rocket) === 'dirt') return fail('cannot_mix_fuel');
   let rawGain, label;
   if (op.mode === 'factory') {
     const fac = state.factories[siteId];
@@ -1229,11 +1372,117 @@ function applySiteRefuel(state, op, player) {
   const gain = Math.min(rawGain, cap - tank);
   if (gain <= 0) return fail('tank_full');
   player.rocket.tank = round6(tank + gain);
+  player.rocket.tankGrade = 'water';
   player.refueledSites.push(siteId);
   player.opsRemaining -= 1;
   return {
     ok: true, state,
     log: `${player.name}: ${label} at ${site.name} (+${round6(gain)} water; tank ${round6(player.rocket.tank)}).`,
+  };
+}
+
+// Free dirt refuel (Cargo Transfer free action / crew bonus): top the tank
+// with grey dirt FTs. Only a DIRT thruster can take dirt, and dirt can't mix
+// with water (empty the tank first). A non-crew dirt thruster fills to the
+// wet-mass cap; a crew dirt thruster takes 1 FT, once per turn. Costs NO
+// operation (free action). op = {} (acts on the active thruster).
+function applyDirtRefuel(state, _op, player) {
+  const tid = player.rocket.activeThrusterId;
+  const slot = tid && player.rocket.stack.find((s) => s.id === tid);
+  if (!slot) return fail('no_thruster');
+  const face = thrusterFaceOf(slot);
+  if (!faceBurnsDirt(face)) return fail('not_dirt_thruster');
+  const tank = Number(player.rocket.tank) || 0;
+  if (tank > 0 && tankGradeOf(player.rocket) === 'water') return fail('cannot_mix_fuel');
+  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const cap = Math.max(0, TANK_MAX - dry);
+  if (tank >= cap) return fail('tank_full');
+  const isCrew = isCrewSlot(slot);
+  // Crew dirt thruster: 1 FT max per turn. Non-crew: fill to the cap.
+  if (isCrew) {
+    player.dirtRefueledThisTurn = !!player.dirtRefueledThisTurn;
+    if (player.dirtRefueledThisTurn) return fail('already_dirt_refueled');
+  }
+  const gain = isCrew ? Math.min(1, cap - tank) : (cap - tank);
+  if (gain <= 0) return fail('tank_full');
+  player.rocket.tank = round6(tank + gain);
+  player.rocket.tankGrade = 'dirt';
+  if (isCrew) player.dirtRefueledThisTurn = true;
+  return {
+    ok: true, state,
+    log: `${player.name} loaded +${round6(gain)} dirt FT${gain === 1 ? '' : 's'} (tank ${round6(player.rocket.tank)} dirt).`,
+  };
+}
+
+// Delivery (rulebook): ship a Black-Side card from one of your Factories'
+// outposts back to LEO. Costs FT (water) FROM THAT OUTPOST'S tank, not the
+// bank: zones-from-Earth x2, +1 if the site number is over 7. Spends the
+// turn's operation. op = { siteId, letter, cardId }.
+function applyDelivery(state, op, player) {
+  const siteId = String(op.siteId || '');
+  const letter = String(op.letter || '');
+  const cardId = String(op.cardId || '');
+  const site = siteById(siteId);
+  if (!site) return fail('unknown_site');
+  const fac = state.factories[siteId];
+  if (!fac || fac.ownerId !== player.profileId) return fail('no_factory');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  const outpost = player.outposts && player.outposts[letter];
+  if (!outpost || outpost.siteId !== siteId) return fail('no_outpost');
+  const idx = (outpost.cards || []).findIndex((c) => c.id === cardId);
+  if (idx < 0) return fail('not_in_outpost');
+  const slot = outpost.cards[idx];
+  if (slot.face !== 'secondary') return fail('not_black_side');
+  const zones = zonesFromEarth(site.solarZone);
+  const cost = zones * 2 + (nodeSizeNumber(siteId) > 7 ? 1 : 0);
+  const have = Number(outpost.tank) || 0;
+  if (have < cost) return fail('insufficient_outpost_water', { cost, have });
+  outpost.tank = round6(have - cost);
+  outpost.cards.splice(idx, 1);
+  player.leo = player.leo || [];
+  player.leo.push({ id: slot.id, kind: slot.kind || 'patent', face: 'secondary' });
+  player.opsRemaining -= 1;
+  const card = PATENTS_BY_ID[cardId];
+  return {
+    ok: true, state,
+    log: `${player.name} delivered ${card ? card.name : cardId} from ${site.name} to LEO (cost ${cost} water from Outpost ${letter}).`,
+  };
+}
+
+// Build Colony (free action): consume a Crew that is colocated with your
+// Factory to found a permanent Colony there. The Colony waives the
+// factory-assist hazard roll for everyone landing/lifting there and scores
+// at game end. The crew is spent (it settles), not returned to hand. Costs
+// NO operation. op = { cardId } (the crew to settle; defaults to the first
+// crew in the stack).
+function applyBuildColony(state, op, player) {
+  const siteId = player.rocket.siteId;
+  if (!siteId) return fail('not_at_site');
+  const site = siteById(siteId);
+  if (!site) return fail('unknown_site');
+  const fac = state.factories[siteId];
+  if (!fac || fac.ownerId !== player.profileId) return fail('no_factory');
+  if (state.colonies[siteId]) return fail('already_colony');
+  let cardId = String(op.cardId || '');
+  let slot = cardId && player.rocket.stack.find((s) => s.id === cardId && isCrewSlot(s));
+  if (!slot) slot = player.rocket.stack.find((s) => isCrewSlot(s));   // default: first crew
+  if (!slot) return fail('no_crew');
+  cardId = slot.id;
+  // The colonising crew leaves the rocket and re-spawns in the LEO Stack
+  // (the same variant rule destroyRocket + the sandbox doColonize use:
+  // crew is never lost, it returns to LEO).
+  player.rocket.stack = player.rocket.stack.filter((s) => s.id !== cardId);
+  if (player.rocket.activeThrusterId === cardId) player.rocket.activeThrusterId = null;
+  if (player.rocket.activeProspectorId === cardId) player.rocket.activeProspectorId = null;
+  clipTank(player.rocket);
+  player.leo = player.leo || [];
+  player.leo.push({ id: cardId, kind: 'crew', face: slot.face === 'secondary' ? 'secondary' : 'primary' });
+  state.colonies[siteId] = { ownerId: player.profileId };
+  const crew = CREW_BY_ID[cardId];
+  const crewName = crew ? ((crew.faces && crew.faces[slot.face === 'secondary' ? 'secondary' : 'primary'] || {}).name || crew.id) : cardId;
+  return {
+    ok: true, state,
+    log: `${player.name} founded a Colony at ${site.name} (settled ${crewName}).`,
   };
 }
 
@@ -1243,6 +1492,9 @@ function applySiteRefuel(state, op, player) {
 const FUNCTIONAL = {
   INCOME: applyIncome,
   SITE_REFUEL: applySiteRefuel,
+  DIRT_REFUEL: applyDirtRefuel,
+  DELIVERY: applyDelivery,
+  BUILD_COLONY: applyBuildColony,
   MOVE: applyMove,
   BUILD_ROCKET: applyBuildRocket,
   BOOST: applyBoost,
@@ -1283,6 +1535,9 @@ function pickPayload(op) {
     case 'PROSPECT': return { siteId: op.siteId };
     case 'PROSPECT_REROLL': return { siteId: op.siteId };
     case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode };
+    case 'DIRT_REFUEL': return {};
+    case 'DELIVERY': return { siteId: op.siteId, letter: op.letter, cardId: op.cardId };
+    case 'BUILD_COLONY': return { cardId: op.cardId };
     case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds };
     case 'ET_PRODUCE': return { siteId: op.siteId, cardId: op.cardId, letter: op.letter, isNewOutpost: !!op.isNewOutpost };
     // Route ops ride the undo stack like every other functional op, so
@@ -1350,6 +1605,8 @@ function openTurnFor(state, player) {
   // One refuel per site per turn: clear the per-turn ledger so the
   // sites this player tapped last turn are refuellable again.
   player.refueledSites = [];
+  // Crew dirt thrusters take 1 dirt FT per turn; reset the per-turn flag.
+  player.dirtRefueledThisTurn = false;
   state.turnActions = [];
   state.turnRedo = [];
 }
@@ -1366,6 +1623,14 @@ function applyEndTurn(state, _op, player) {
   const lapDone = nextIndex === firstIdx;
 
   let log = `${player.name} ended their turn.`;
+
+  // Auto-load safety net: if the ending player is parked at a site whose
+  // zone chit is still unclaimed and a crew is aboard (e.g. they boarded a
+  // crew after landing crewless), load the chit now so it is never missed.
+  // maybeAwardGlory is idempotent - it no-ops if the zone was already claimed.
+  const hereSite = player.rocket.siteId ? siteById(player.rocket.siteId) : null;
+  const lateChit = hereSite ? maybeAwardGlory(player, hereSite, state.turn) : null;
+  if (lateChit) log = `${player.name} loaded the ${lateChit.zone} glory chit, then ended their turn.`;
 
   // Mid-lap: the turn simply passes to the next seat.
   if (!lapDone) {

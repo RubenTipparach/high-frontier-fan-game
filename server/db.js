@@ -324,6 +324,13 @@ function ensureColumn(table, column, ddl) {
 // Lobbies created before game-length was configurable get the default
 // (5 rounds). New rows already carry it from the CREATE TABLE above.
 ensureColumn('lobbies', 'max_rounds', 'max_rounds INTEGER NOT NULL DEFAULT 5');
+// Idempotency key for room creation: a client retry / double-submit carries
+// the same key so the server returns the lobby it already made instead of a
+// duplicate. Nullable (legacy rows + non-idempotent callers); the partial
+// UNIQUE index enforces one lobby per key while letting NULLs coexist.
+ensureColumn('lobbies', 'idempotency_key', 'idempotency_key TEXT');
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_lobbies_idem
+  ON lobbies(idempotency_key) WHERE idempotency_key IS NOT NULL;`);
 
 export function nowMs() {
   return Date.now();

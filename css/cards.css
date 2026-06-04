@@ -158,10 +158,19 @@
   color: #0c0a16;
   background: var(--ink-mute);
   text-transform: uppercase;
-  /* Supply glyphs (X, ∿, 💣, ⟛, e, 🌡) sit at the leading edge
-     of the label. Slight bump in size + bold weight so the
-     symbols read cleanly against the saturated typebar fill. */
 }
+/* Supply / prospector icons sit at the leading edge of the label as small
+   inline support-icon badges (reactor square, generator circle, therm badge,
+   robonaut square), replacing the old emoji glyphs. */
+.card-typebar .typebar-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  vertical-align: middle;
+  margin-right: 5px;
+}
+.card-typebar .support-icon { display: inline-block; vertical-align: middle; }
+.card-typebar .typebar-icons em { font-style: normal; }
 .card.type-thruster  .card-typebar { background: var(--card-thruster); }
 .card.type-reactor   .card-typebar { background: var(--card-reactor); }
 .card.type-radiator  .card-typebar { background: var(--card-radiator); }
@@ -327,6 +336,16 @@
   color: var(--accent-2);
   font-variant-numeric: tabular-nums;
 }
+/* Custom support-icon glyphs (reactor square / generator circle / radiator
+   therm badge / robonaut). The SVG carries its own coloured shape, so the
+   property badge drops its dashed box. The requirement-chip override lives
+   AFTER the [data-supplier] background rules below so it beats them. */
+.support-icon { display: block; }
+.card-properties .card-prop.has-support-icon {
+  background: transparent;
+  border: none;
+  padding: 0 1px;
+}
 /* Support-chip "satisfied" state. Used inside the rocket stack
    modal: the active thruster's requirement chips get a ✓ tag and
    a green wash when another card in the stack supplies that
@@ -432,6 +451,18 @@
 .card-requires .req[data-supplier="refinery"]  { background: #94a3b8; color: #0f172a; border-color: #334155; }
 .card-requires .req[data-supplier="robonaut"]  { background: #f9a8d4; color: #500724; border-color: #be185d; }
 .card-requires .req[data-supplier="generator"] { background: #f97316; color: #2e0f02; border-color: #9a3412; }
+
+/* Icon support chips carry their own coloured shape - no pill box, even with
+   a [data-supplier] tint or the satisfied wash above. Placed AFTER the
+   supplier rules so it wins on source order. */
+.card-requires .req.has-support-icon,
+.card-requires .req.has-support-icon[data-supplier],
+.card-requires .req.has-support-icon.is-satisfied {
+  background: transparent;
+  border-color: transparent;
+  padding: 0 1px;
+}
+.card-requires .req.has-support-icon.is-satisfied { padding-right: 14px; }
 
 /* Card-properties row: small badges for per-face capabilities
    (Push, Solar, Air-Eater, ISRU, Afterburn, Bonus Pivots,
@@ -798,7 +829,13 @@
   font-weight: 700;
   font-size: 13px;
   letter-spacing: 0.3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
+/* The prospector badge sits inline beside the ISRU number (overrides the
+   global block display so they share a row). */
+.card-face .crew-isru .support-icon { display: inline-block; vertical-align: middle; }
 .card-face .crew-thrust {
   margin-top: auto;
   display: flex;

@@ -34,7 +34,8 @@ import {
   removeFromStack as rocketRemoveCard, clearStack as rocketClearStack,
   onRocketChange, isRocketActive,
   getActiveThrusterId, setActiveThruster,
-  getTankWater, setTankWater, addFuel, removeFuel, getTankMax,
+  getTankWater, setTankWater, addFuel, removeFuel, getTankMax, getWaterCap,
+  getTankGrade, setTankGrade, getActiveFuelGrade,
   getStackTotals, getActiveThrusterStats, setSolarZone,
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats,
@@ -307,6 +308,9 @@ export function mountBrowse(opts = {}) {
     onRocketChange(syncSandboxRocket);
     onRocketChange(refreshOpenSitePopup);
     onRocketChange(syncFocusedSite);
+    // Loaded glory chits change the 🏆 badge on the rocket; repaint it when
+    // a chit loads (landing) or unloads (undo / cash-in).
+    onGloryChange(syncSandboxRocket);
     // Per-crew chit reconciliation: when a crew leaves the rocket by
     // any path (transfer / decommission / back-to-hand), its carried
     // chits flip face-up to FRONT. Colonise is handled explicitly
@@ -2510,6 +2514,18 @@ function humanizeOnlineOpError(code, detail) {
     already_industrialized: 'This site already has a factory.',
     cannot_industrialize: 'Industrialize needs a refinery + a robonaut (with their supports) in the stack.',
     no_factory: 'You need your own factory here.',
+    cannot_mix_fuel: 'Water and dirt can\'t mix - burn the tank empty before switching fuel.',
+    wrong_fuel_grade: 'Wrong fuel: a dirt thruster burns dirt, a water thruster burns water. Refuel the matching grade.',
+    not_dirt_thruster: 'Only a dirt thruster can take on dirt fuel.',
+    not_water_fuel: 'Dirt has no cash value - only water converts back to aqua.',
+    no_thruster: 'Activate a thruster first.',
+    already_dirt_refueled: 'This crew dirt thruster already took its 1 dirt FT this turn.',
+    no_outpost: 'No outpost there to deliver from.',
+    not_in_outpost: 'That card is not in the outpost.',
+    not_black_side: 'Only a Black-Side (installed) card can be delivered.',
+    insufficient_outpost_water: 'The outpost doesn\'t have enough water to pay the delivery cost.',
+    already_colony: 'This site already has a colony.',
+    no_crew: 'You need a crew here to found a colony.',
     dry_site: 'This site has no water to refine (hydration 0).',
     already_refueled: 'You\'ve already refined here this turn. End turn to refresh.',
     no_prospector: 'Activate an ISRU prospector before refining here.',
@@ -7136,6 +7152,28 @@ function hasRefueledThisTurn(siteId) {
   return log.sites.includes(siteId);
 }
 
+// A crew dirt thruster may take only 1 dirt FT per turn (HF4 rule). Tracked
+// per turn in localStorage for solo; online the server's dirtRefueledThisTurn
+// flag is authoritative (and surfaced on the snapshot's player).
+const STORAGE_DIRT_REFUEL_LOG = 'hf-sandbox-dirt-refuel-turn';   // turn number
+function hasDirtRefueledThisTurn() {
+  try { return Number(localStorage.getItem(STORAGE_DIRT_REFUEL_LOG)) === getTurn(); }
+  catch { return false; }
+}
+function markDirtRefueledThisTurn() {
+  try { localStorage.setItem(STORAGE_DIRT_REFUEL_LOG, String(getTurn())); } catch {}
+}
+// True when the active thruster is a crew dirt thruster that has already
+// taken its 1 dirt FT this turn (online reads the snapshot, solo the log).
+function crewDirtRefuelUsed() {
+  if (!CREW_BY_ID[getActiveThrusterId()]) return false;
+  if (_online) {
+    const me = _onlineSnapshot && (_onlineSnapshot.players || []).find((p) => p.profileId === (_onlineMe && _onlineMe.id));
+    return !!(me && me.dirtRefueledThisTurn);
+  }
+  return hasDirtRefueledThisTurn();
+}
+
 // Pick the best refining source available in the rocket stack.
 // Returns either:
 //   { kind: 'refinery', card, rawGain: 7 }
@@ -7518,6 +7556,89 @@ function doFactoryRefuel(site, gain) {
   openFuelTankModal({ fromWater: tankBefore, toWater: tankBefore + gain });
 }
 
+// Free dirt refuel (Cargo Transfer free action). Only a dirt thruster can
+// take dirt, and dirt can't mix with water. A non-crew dirt thruster fills
+// to the cap; a crew dirt thruster takes 1 FT. No operation is spent.
+function doDirtRefuel() {
+  // Online: the server validates the dirt thruster + grade and fills the
+  // tank; the snapshot repaints the (grey) tank.
+  if (_online) { submitOnlineOp({ kind: 'DIRT_REFUEL' }); return; }
+  if (getActiveFuelGrade() !== 'dirt') {
+    setStatus('Dirt refuel needs an active dirt thruster.');
+    return;
+  }
+  const tank = getTankWater();
+  if (tank > 0 && getTankGrade() === 'water') {
+    setStatus('Water and dirt can\'t mix - burn the tank empty first.');
+    return;
+  }
+  const room = getWaterCap() - tank;
+  if (room <= 0) { setStatus('Tank is already full.'); return; }
+  const isCrew = !!CREW_BY_ID[getActiveThrusterId()];
+  // A crew dirt thruster takes only 1 dirt FT per turn.
+  if (isCrew && hasDirtRefueledThisTurn()) {
+    setStatus('This crew dirt thruster already took its 1 dirt FT this turn.');
+    return;
+  }
+  const gain = isCrew ? Math.min(1, room) : room;
+  setTankGrade('dirt');
+  addFuel(gain);
+  if (isCrew) markDirtRefueledThisTurn();
+  setStatus(`🟤 Loaded <strong>+${gain}</strong> dirt FT${gain === 1 ? '' : 's'} (tank now grey).`);
+  logAction({
+    type: 'dirt_refuel', icon: '🟤',
+    summary: `Dirt refuel +${gain} (tank ${getTankWater()} dirt)`,
+    undoable: false,
+  });
+}
+
+// Delivery (rulebook): ship a Black-Side card from an outpost at one of your
+// Factories back to LEO. Cost: zones-from-Earth x2 (+1 if site number > 7)
+// water, paid FROM THE OUTPOST'S tank. Spends the turn's operation.
+function deliveryCost(site) {
+  const zones = zonesFromEarthClient(site && site.solarZone);
+  return zones * 2 + (siteSizeNumber(site) > 7 ? 1 : 0);
+}
+function doDelivery(site, letter, cardId) {
+  // Online: the server moves the card + spends the outpost water; snapshot
+  // repaints the LEO stack + outpost.
+  if (_online) {
+    const sid = toServerId(_onlineMaps, site.id);
+    if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
+    submitOnlineOp({ kind: 'DELIVERY', siteId: sid, letter, cardId });
+    return;
+  }
+  if (!requireOp('Delivery')) return;
+  const outpost = getOutpost(letter);
+  if (!outpost || outpost.siteId !== site.id) { setStatus('No outpost there to deliver from.'); return; }
+  const idx = (outpost.cards || []).findIndex((c) => c.id === cardId);
+  if (idx < 0) { setStatus('That card is not in the outpost.'); return; }
+  if (outpost.cards[idx].face !== 'secondary') { setStatus('Only a Black-Side card can be delivered.'); return; }
+  const cost = deliveryCost(site);
+  if ((Number(outpost.tank) || 0) < cost) {
+    setStatus(`Outpost ${esc(letter)} needs ${cost} water to deliver; it has ${outpost.tank | 0}.`);
+    return;
+  }
+  outpost.tank = (Number(outpost.tank) || 0) - cost;
+  removeCardFromOutpost(letter, idx);
+  addCardToLeo({ id: cardId, kind: 'patent', face: 'secondary' });
+  const card = PATENTS_BY_ID[cardId];
+  setStatus(`📦 Delivered <strong>${esc(card ? card.name : cardId)}</strong> to LEO (cost ${cost} water from Outpost ${esc(letter)}).`);
+  logAction({
+    type: 'delivery', icon: '📦',
+    summary: `Delivered ${card ? card.name : cardId} from ${site.name} to LEO (cost ${cost} water)`,
+    undoable: false,
+    data: { siteId: site.id, letter, cardId, cost },
+  });
+}
+
+// Heliocentric-zone distance from Earth (mirror of engine.js#zonesFromEarth).
+const ZONE_ORDER_CLIENT = ['Mercury', 'Venus', 'Earth', 'Mars', 'Ceres', 'Jupiter', 'Saturn', 'Uranus', 'Neptune'];
+function zonesFromEarthClient(zone) {
+  const i = ZONE_ORDER_CLIENT.indexOf(zone);
+  return i < 0 ? 0 : Math.abs(i - ZONE_ORDER_CLIENT.indexOf('Earth'));
+}
+
 // Wipe browse.js module-local state that the global resets in
 // card-market.js#resetSandboxEconomy can't reach: the rocket
 // position, planned route, trail, the undo snapshot, the
@@ -7537,6 +7658,7 @@ function doBrowseLocalReset() {
     _renderer.setRocketTrail(null);
   }
   try { localStorage.removeItem(STORAGE_REFUEL_LOG); } catch {}
+  try { localStorage.removeItem(STORAGE_DIRT_REFUEL_LOG); } catch {}
 }
 
 // Full sandbox reset (Reset-sandbox button). Composition of
@@ -7612,7 +7734,7 @@ function openOpsMenu() {
     <h2 class="ops-menu-title">⚙ Operations this turn</h2>
     <p class="muted ops-menu-sub">You have <strong${opCls}>op:${ops}</strong> and <strong>move:${moves}</strong> left. One operation per turn - pick wisely.</p>
     <div class="ops-menu-list" id="ops-menu-now"></div>
-    <h4 class="ops-menu-head">At a site (1 op) - prospect · refuel · industrialize · ET produce</h4>
+    <h4 class="ops-menu-head">At a site - where you've landed, or your factories &amp; outposts</h4>
     <div class="ops-menu-list" id="ops-menu-sites"></div>
     <h4 class="ops-menu-head">Free actions (no op)</h4>
     <ul class="ops-menu-hints">
@@ -7648,11 +7770,18 @@ function openOpsMenu() {
   const siteById = (id) => (_activeData && (_activeData.byId?.[id] || _activeData.sites.find((s) => s.id === id))) || null;
   const opSites = [];
   const seen = new Set();
+  // The site the rocket has LANDED on (not LEO): prospect / refuel live here.
+  // This is the contextual case the player hits most - park, then act.
+  const landed = _rocketSiteId ? getRocketSite() : null;
+  if (landed && !isLeoSite(landed)) {
+    seen.add(landed.id);
+    opSites.push({ site: landed, hint: '🛸 landed here · prospect / refuel' });
+  }
   for (const f of (allFactories() || [])) {
     if (f.ownerId !== SANDBOX_OWNER_ID || seen.has(f.siteId)) continue;
     const site = siteById(f.siteId); if (!site) continue;
     seen.add(f.siteId);
-    opSites.push({ site, hint: `🏭 factory${getColony(f.siteId) ? ' + 🌐' : ''} · refuel / ET / colonize` });
+    opSites.push({ site, hint: `🏭 factory${getColony(f.siteId) ? ' + 🌐' : ''} · refuel / ET / deliver / colonize` });
   }
   // getDiscs() is a { siteId: disc } map, not an array.
   const discs = getDiscs() || {};
@@ -7663,9 +7792,16 @@ function openOpsMenu() {
     seen.add(siteId);
     opSites.push({ site, hint: '🔭 claimed · industrialize here' });
   }
+  // Outposts: sites where you have a stack parked (deliver / transfer).
+  for (const op of Object.values(getOutposts() || {})) {
+    if (!op || !op.siteId || seen.has(op.siteId)) continue;
+    const site = siteById(op.siteId); if (!site) continue;
+    seen.add(op.siteId);
+    opSites.push({ site, hint: `📦 Outpost ${op.letter || ''} · deliver / transfer` });
+  }
   if (sitesHost) {
     if (!opSites.length) {
-      sitesHost.innerHTML = '<p class="muted ops-menu-emptyhint">No site-ops yet. Prospect (roll) at the rocket\'s site to claim it, then industrialize there. Refuel needs water + a rig/factory.</p>';
+      sitesHost.innerHTML = '<p class="muted ops-menu-emptyhint">No site actions here yet. Land the rocket on a site to prospect / refuel it, or build a factory / outpost to act there. At LEO, use Boost / Income / Auction above.</p>';
     } else {
       for (const { site, hint } of opSites) {
         const b = document.createElement('button');
@@ -7941,6 +8077,13 @@ function doColonize(site, stack, options) {
     options,
     onCommit: (pick) => {
       if (!pick) return;
+      // Online: the server settles the crew (returns it to LEO) and places
+      // the colony; the snapshot repaints the colony ring. Build Colony is a
+      // FREE action server-side, so no op is spent.
+      if (_online) {
+        submitOnlineOp({ kind: 'BUILD_COLONY', cardId: pick.id });
+        return;
+      }
       // Re-find by id at commit time - splices may have shifted
       // indices since the modal opened, though in practice
       // nothing else mutates the stack during the modal's
@@ -8183,6 +8326,8 @@ function openDumpWaterModal(maxWater) {
 // strip is read-only for now.
 function buildFuelStrip(host, totals) {
   host.innerHTML = '';
+  // Grey the strip when the tank holds dirt instead of blue water.
+  host.classList.toggle('is-dirt-fuel', getTankGrade() === 'dirt');
   const wm = Math.max(0, totals.wetMass | 0);
   const dm = Math.max(0, totals.dryMass | 0);
 
@@ -8372,10 +8517,11 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const fracLadder = wcNow.fractions.length ? wcNow.fractions.join(' ') : 'whole steps';
 
   const panel = document.createElement('div');
-  panel.className = 'fuel-tank-panel';
+  const isDirt = getTankGrade() === 'dirt';
+  panel.className = 'fuel-tank-panel' + (isDirt ? ' is-dirt-fuel' : '');
   panel.innerHTML = `
     <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
-    <h2 class="fuel-tank-title">💧 Water tank</h2>
+    <h2 class="fuel-tank-title">${isDirt ? '🟤 Dirt tank' : '💧 Water tank'}</h2>
     <p class="muted fuel-tank-sub">Tap outside or press Esc to close</p>
     <div class="fuel-tank-stage">
       <svg viewBox="0 0 120 220" class="fuel-tank-svg" preserveAspectRatio="xMidYMid meet">
@@ -9045,14 +9191,10 @@ function doProspect(site, prosp) {
     );
     return;
   }
-  // Raygun is a free, unlimited remote scan (rulebook: the beam
-  // fires through line-of-sight, including lander burn spaces). It
-  // never consumes the per-turn operation, so the player can keep
-  // firing it at every reachable site and still spend their op on
-  // something else, and it never touches the move budget. Missile /
-  // buggy land on the target site and DO cost the op (rulebook I6).
-  const isRaygun = prosp.kind === 'raygun';
-  if (!isRaygun && !requireOp('Prospect')) return;
+  // Prospect IS the turn's operation for EVERY prospector kind. The raygun
+  // only extends the reach to a line-of-sight site; it still spends the op
+  // (it is not a free scan). Missile / buggy land on the target. Rulebook I6.
+  if (!requireOp('Prospect')) return;
   const threshold = siteProspectThreshold(site);
   const roll = 1 + Math.floor(Math.random() * 6);
   const success = roll <= threshold;
@@ -9458,6 +9600,8 @@ function computeMpRockets(snapshot) {
       colour: p.color || 'white',
       name: p.name,
       inactive: !(p.rocket && p.rocket.activeThrusterId),
+      // Loaded glory chits this ship is carrying home (shown as a 🏆 badge).
+      chits: (p.glory && Array.isArray(p.glory.chits)) ? p.glory.chits.length : 0,
       isLocal: p.profileId === myId,
     });
   }
@@ -9473,7 +9617,7 @@ function computeMpRockets(snapshot) {
       } else {
         opponents.push({
           profileId: r.profileId, x: r.x, y: r.y, offsetX,
-          colour: r.colour, name: r.name, inactive: r.inactive,
+          colour: r.colour, name: r.name, inactive: r.inactive, chits: r.chits,
         });
       }
     });
@@ -10018,6 +10162,7 @@ function syncSandboxRocket() {
     prospectorName,
     prospectorIsru,
     thruster: thrusterSummary,
+    chits: getChits().length,   // 🏆 loaded-glory-chit badge
   });
 }
 
@@ -11726,6 +11871,33 @@ function showSitePopupFor(site) {
       });
     }
   }
+  // Dirt refuel (Cargo Transfer free action). Shown when the active
+  // thruster is a dirt thruster and the rocket is parked here (or at LEO).
+  // Fills the tank with grey dirt FTs (crew dirt thruster: 1 FT). Water and
+  // dirt can't mix. No operation cost.
+  if (rocketSite && site.id === rocketSite.id && getActiveFuelGrade() === 'dirt') {
+    const tank = getTankWater();
+    const room = Math.max(0, getWaterCap() - tank);
+    const mixed = tank > 0 && getTankGrade() === 'water';
+    const isCrew = !!CREW_BY_ID[getActiveThrusterId()];
+    const crewDone = isCrew && crewDirtRefuelUsed();   // 1 dirt FT per turn for crew
+    const ok = room > 0 && !mixed && !crewDone;
+    const gain = isCrew ? Math.min(1, room) : room;
+    actions.push({
+      label: crewDone ? '🟤 Dirt refuel done (1/turn)'
+        : mixed ? '🟤 Dirt refuel (empty water first)'
+        : room <= 0 ? '🟤 Tank full'
+        : `🟤 Dirt refuel (+${gain})`,
+      variant: ok ? 'rocket' : 'secondary',
+      disabled: !ok,
+      title: crewDone
+        ? 'A crew dirt thruster may take only 1 dirt FT per turn. End turn to refresh.'
+        : mixed
+          ? 'Burn the water tank empty before taking on dirt - the two can\'t mix.'
+          : 'Free: a dirt thruster loads grey dirt FTs (a crew dirt thruster takes 1 per turn).',
+      onClick: () => { if (!ok) return; doDirtRefuel(); _renderer.clearSitePopup(); },
+    });
+  }
   // Industrialize action (rulebook I7). Shown only at sites where
   // the rocket is parked AND a successful claim disc exists. The
   // button gates on whether the stack has a valid refinery +
@@ -11802,6 +11974,33 @@ function showSitePopupFor(site) {
         title: `Colony already established at this site.`,
         onClick: () => {},
       });
+    }
+  }
+  // Delivery action (rulebook). Ship a Black-Side card from an outpost at
+  // your factory back to LEO. Cost: zones-from-Earth x2 (+1 if site
+  // number > 7) water, paid from the outpost's tank. One button per
+  // deliverable card. Costs the turn's operation.
+  {
+    const factory = getFactory(site.id);
+    if (factory && factory.ownerId === SANDBOX_OWNER_ID) {
+      const cost = deliveryCost(site);
+      for (const op of Object.values(getOutposts())) {
+        if (op.siteId !== site.id) continue;
+        for (const c of (op.cards || [])) {
+          if (c.face !== 'secondary') continue;
+          const card = PATENTS_BY_ID[c.id];
+          const afford = (Number(op.tank) || 0) >= cost;
+          actions.push({
+            label: `📦 Deliver ${card ? card.name : c.id} (-${cost} water)`,
+            variant: afford ? 'rocket' : 'secondary',
+            disabled: !afford,
+            title: afford
+              ? `Ship this Black-Side card to LEO for ${cost} water from Outpost ${op.letter}.`
+              : `Outpost ${op.letter} needs ${cost} water to deliver (has ${op.tank | 0}).`,
+            onClick: () => { if (!afford) return; doDelivery(site, op.letter, c.id); _renderer.clearSitePopup(); },
+          });
+        }
+      }
     }
   }
   // ET Production action (rulebook I8). Shown whenever the player
@@ -12951,25 +13150,57 @@ function reconcileChitOwners() {
   }
 }
 
-// Card-like DOM token for a glory chit. Used in the rocket stack
-// (transit = in-transit, two-sided, needs a crew to bring home) and
-// in the LEO stack (resolved to its front/back side).
+// Golden glory chit. A CARRIED chit (transit) is a vibrant two-sided coin
+// that flips on tap (front value / back value, undecided until it comes home
+// or the crew is lost). A CLAIMED chit is FIXED on its scored side, rendered
+// darkened (it is spent), with the crew that brought it home named beneath.
 function buildChitToken(zone, { side = null, transit = false, crewId = null } = {}) {
   const sides = getChitSides(zone);
-  const el = document.createElement('div');
-  el.className = 'chit-token' + (transit ? ' chit-transit' : ` chit-${side}`);
-  const vp = transit
-    ? `${sides.front} / ${sides.back}`
-    : `+${side === 'back' ? sides.back : sides.front}`;
-  const sideLabel = transit ? 'in transit' : side;
   const owner = crewId ? crewDisplayName(crewId) : '';
-  el.innerHTML = `
-    <span class="chit-token-emoji" aria-hidden="true">🎖</span>
-    <span class="chit-token-zone">${esc(zone)}</span>
-    <span class="chit-token-vp">${esc(vp)} VP</span>
-    <span class="chit-token-side">${esc(sideLabel)}</span>
-    ${owner ? `<span class="chit-token-owner" title="Earned by ${esc(owner)}">${esc(owner)}</span>` : ''}`;
-  return el;
+  const ownerHtml = owner
+    ? `<span class="chit-token-owner" title="Earned by ${esc(owner)}">${esc(owner)}</span>` : '';
+
+  // Claimed: a fixed, darkened coin (no flip) + the player/crew named below.
+  if (!transit && side) {
+    const vp = side === 'back' ? sides.back : sides.front;
+    const wrap = document.createElement('div');
+    wrap.className = 'chit-token-wrap';
+    wrap.innerHTML = `
+      <div class="chit-token chit-claimed chit-${esc(side)}" title="Claimed - ${esc(side)} value (fixed)">
+        <span class="chit-token-emoji" aria-hidden="true">🎖</span>
+        <span class="chit-token-zone">${esc(zone)}</span>
+        <span class="chit-token-vp">+${vp} VP</span>
+        <span class="chit-token-side">${esc(side)}</span>
+      </div>
+      ${owner ? `<span class="chit-claim-by" title="Brought home by ${esc(owner)}">${esc(owner)}</span>` : ''}`;
+    return wrap;
+  }
+
+  // Carried (in transit): a vibrant two-sided flip coin.
+  const face = (which, vp, variant) => `
+    <div class="chit-token chit-face chit-face-${which} ${variant}">
+      <span class="chit-token-emoji" aria-hidden="true">🎖</span>
+      <span class="chit-token-zone">${esc(zone)}</span>
+      <span class="chit-token-vp">+${vp} VP</span>
+      <span class="chit-token-side">${which}</span>
+      ${ownerHtml}
+    </div>`;
+  const flip = document.createElement('div');
+  flip.className = 'chit-token-flip' + (transit && !crewId ? ' chit-no-crew' : '');
+  flip.setAttribute('role', 'button');
+  flip.setAttribute('tabindex', '0');
+  flip.title = 'Tap to flip (front / back value)';
+  flip.innerHTML = `
+    <div class="chit-token-inner">
+      ${face('front', sides.front, 'chit-front')}
+      ${face('back', sides.back, 'chit-back')}
+    </div>`;
+  const toggle = () => flip.classList.toggle('is-flipped');
+  flip.addEventListener('click', toggle);
+  flip.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+  });
+  return flip;
 }
 
 // Classify a colony's site for VP: submarine (+2) beats astrobiology
@@ -13043,28 +13274,10 @@ function paintGlory() {
        <ul class="glory-table">${colonyRows}</ul>`
     : '';
 
-  // --- Glory chits: carried + claimed + ticker tape -----------------
+  // --- Glory chits: ticker tape, then the player's actual coins -----
+  // (picked-up + parade) appended as flippable golden tokens below.
   const chits = getChits();
-  const carried = chits.length
-    ? chits.map((c) => {
-        const s = getChitSides(c.zone);
-        return `<span class="glory-chit" data-zone="${esc(c.zone)}">
-          <strong>${esc(c.zone)}</strong>
-          <em>${s.front} / ${s.back} VP</em>
-        </span>`;
-      }).join('')
-    : '<p class="muted">No chits carried. Land a crew in a new heliocentric zone to earn one.</p>';
-
   const claimed = getClaimedChits();
-  const claimedTable = claimed.length
-    ? `<ul class="glory-table glory-claimed">${
-        claimed.map((c) =>
-          `<li>
-            <span><span class="chit-side chit-${esc(c.side)}">${esc(c.side)}</span> ${esc(c.zone)}</span>
-            <strong>+${c.vp} VP</strong>
-          </li>`).join('')
-      }</ul>`
-    : '<p class="muted">No chits claimed yet.</p>';
 
   const zoneTableRows = Object.entries(ZONE_CHIT_VPS)
     .map(([z, v]) => `<li><span>${esc(z)}</span><strong>${v.front} / ${v.back} VP</strong></li>`)
@@ -13100,19 +13313,28 @@ function paintGlory() {
         <span class="muted">Career glory VP</span>
         <strong class="glory-vp">${vps}</strong>
       </div>
-      <h4>Carried (in hand)</h4>
-      <div class="glory-chits">${carried}</div>
-      <h4>Claimed</h4>
-      ${claimedTable}
       <h4>Ticker-tape (front / back VP)</h4>
       <ul class="glory-table glory-ticker">${zoneTableRows}</ul>
+      <div class="glory-chits" id="glory-chits-all"></div>
       <p class="muted glory-rules">
         Earn a chit the first time a crew lands in a heliocentric zone.
-        Bring it home alive to flip it for the BACK value; if the crew
-        colonises or dies, it scores the FRONT value.
+        Carried coins flip (tap) between their FRONT and BACK value; bring one
+        home to LEO to claim its side - claimed coins are fixed and darkened.
       </p>
     </section>
   `;
+
+  // All of the player's chits as golden coins under the ticker tape: carried
+  // ones (vibrant, flippable) first, then claimed ones (fixed + darkened +
+  // named). One unified row.
+  const all = host.querySelector('#glory-chits-all');
+  if (all) {
+    for (const c of chits) all.appendChild(buildChitToken(c.zone, { transit: true, crewId: c.crewId }));
+    for (const c of claimed) all.appendChild(buildChitToken(c.zone, { side: c.side, crewId: c.crewId }));
+    if (!chits.length && !claimed.length) {
+      all.innerHTML = '<p class="muted">No chits yet. Land a crew in a new heliocentric zone to earn one.</p>';
+    }
+  }
 }
 
 // Mission log pane: every action the player took this turn, plus
@@ -13227,6 +13449,7 @@ const MP_LOG_ICONS = {
   INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧',
   ET_PRODUCE: '🏭', SITE_REFUEL: '💧',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
+  DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🏠',
   REFUEL: '💧', CASH_WATER: '💎', DISCARD: '🗑',
   TRANSFER: '🔀', TRANSFER_FUEL: '💧',
   CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑',

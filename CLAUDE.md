@@ -29,6 +29,17 @@ Concretely:
   player recognise this without a tutorial?" If no, redesign.
 - Mechanics-only changes (engine, scoring, balance tuning) are
   fine to invent; visual language is not.
+- **Generating an SVG? Show a rendered screenshot first.**
+  Whenever you are asked to generate or hand-author an SVG (a card
+  glyph, an icon, a map marker, a badge), render it to an image and
+  show the user that screenshot for review BEFORE applying or using
+  the SVG anywhere in code (wiring it into the UI, committing it as
+  the applied asset, etc.). The visual is the user's call, not the
+  agent's. The established workflow: write the SVG, render it (e.g.
+  `rsvg-convert` to PNG), `SendUserFile` the preview, and wait for
+  sign-off before wiring it in. Storing the raw SVG in the branch so
+  the user can see it is fine; using it in the running app is what
+  waits for approval.
 
 - Core rules PDF (publisher-hosted):
   https://gamers-hq.de/media/pdf/c5/f2/cf/HF4-Core-Rules.pdf

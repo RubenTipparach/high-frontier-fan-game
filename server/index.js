@@ -183,7 +183,7 @@ app.get('/announcement', (_req, res) => {
 
 const ADMIN_COOKIE = 'hf_admin';
 const ADMIN_COOKIE_PATH = '/admin';
-const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12h
+const ADMIN_SESSION_TTL_MS = 48 * 60 * 60 * 1000; // 48h, slides on use
 
 // Seed the allowlist from the ADMIN_DISCORD_ID(S) secret on every boot,
 // so adding the secret on Fly + redeploy materialises it DB-side and
@@ -234,7 +234,13 @@ function createAdminSession(discordId) {
 // unexpired AND its Discord id still on the allowlist, so dropping an id
 // from the secret + redeploy revokes any live session. Returns the
 // Discord id or null; prunes the row when it has expired.
-function adminFromRequest(req) {
+//
+// SLIDING SESSION: when `res` is supplied (every gated request has one), a
+// valid session is renewed in place - its expiry is pushed out to
+// now + TTL and the cookie's maxAge is refreshed - so active use never
+// expires. The 48h clock only runs out after a full window of inactivity,
+// which preserves the allowlist-revoke-on-redeploy property.
+function adminFromRequest(req, res = null) {
   const token = readCookie(req, ADMIN_COOKIE);
   if (!token) return null;
   const hash = hashToken(token);
@@ -245,6 +251,12 @@ function adminFromRequest(req) {
     return null;
   }
   if (!isAdminDiscordId(row.discord_id)) return null;
+  if (res) {
+    // Slide the window: extend the DB expiry and re-stamp the cookie.
+    db.prepare('UPDATE admin_sessions SET expires_at = ? WHERE token_hash = ?')
+      .run(nowMs() + ADMIN_SESSION_TTL_MS, hash);
+    setAdminCookie(req, res, token);
+  }
   return row.discord_id;
 }
 
@@ -264,8 +276,9 @@ function clearAdminSession(req, res) {
 }
 
 // Middleware for admin action routes: 403 unless a valid admin session.
+// Passing res slides the session (renews expiry + cookie) on each action.
 function requireAdmin(req, res, next) {
-  if (adminFromRequest(req)) return next();
+  if (adminFromRequest(req, res)) return next();
   return res.status(403).json({ error: 'admin_auth_required' });
 }
 
@@ -553,6 +566,17 @@ function cancelInviteFor(profileId, lobbyId) {
 // `code` is a 6-char short code so the host can read it over voice.
 app.post('/lobbies', requireProfile, (req, res) => {
   const body = req.body || {};
+  // Idempotency key: a retry / double-submit of the SAME create intent
+  // carries the same key, so a slow or lost response never spawns a
+  // duplicate room. Optional; absent = legacy behaviour (always create).
+  const idemKey = (typeof body.idempotencyKey === 'string' && body.idempotencyKey.trim())
+    ? body.idempotencyKey.trim().slice(0, 64) : null;
+  if (idemKey) {
+    const existing = db
+      .prepare('SELECT id FROM lobbies WHERE idempotency_key = ? AND host_id = ?')
+      .get(idemKey, req.profile.id);
+    if (existing) return res.status(200).json({ ok: true, lobby: lobbyRow(existing.id), deduped: true });
+  }
   const name = String(body.name || '').trim().slice(0, 60) || `${req.profile.name}'s table`;
   const maxPlayers = Math.max(2, Math.min(5, Number(body.maxPlayers) || 5));
   // Game length: 5 (short, default) / 6 (medium) / 7 (extra long).
@@ -565,13 +589,24 @@ app.post('/lobbies', requireProfile, (req, res) => {
     try {
       info = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key)
+           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?)`
         )
-        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now);
+        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey);
       break;
     } catch (err) {
-      if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') continue;
+      if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+        // The clash is either the random code (retry with a fresh one) or
+        // the idempotency key (a concurrent request with the same key won
+        // the race - return ITS lobby so both callers see one room).
+        if (idemKey) {
+          const raced = db
+            .prepare('SELECT id FROM lobbies WHERE idempotency_key = ? AND host_id = ?')
+            .get(idemKey, req.profile.id);
+          if (raced) return res.status(200).json({ ok: true, lobby: lobbyRow(raced.id), deduped: true });
+        }
+        continue;
+      }
       throw err;
     }
   }
@@ -2251,8 +2286,9 @@ setInterval(() => {
 
 app.get('/admin', (req, res) => {
   // Gated behind Discord OAuth: unauthenticated visitors get the
-  // sign-in screen instead of the dashboard.
-  if (!adminFromRequest(req)) {
+  // sign-in screen instead of the dashboard. Loading the dashboard slides
+  // the session, so an admin who keeps the tab active never gets bounced.
+  if (!adminFromRequest(req, res)) {
     return res.type('html').send(adminLoginPage());
   }
   const kpi = db
