@@ -36,15 +36,17 @@ const GLYPH = {
     <path d="M5.5 16 C 7.7 9.6, 10.3 9.6, 12.5 16 C 14.7 22.4, 17.3 22.4, 19.5 16 C 21.7 9.6, 24.3 9.6, 26.5 16"
           fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>`,
   'reactor-antimatter': () => `
-    <circle cx="14.5" cy="19" r="7" fill="currentColor"/>
-    <path d="M16.6 12.1 L19.5 9.2 L21.8 11.5 L18.9 14.4 Z" fill="currentColor"/>
-    <path d="M20.7 10.5 Q 24 8.4, 23 4.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-    <g stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-      <line x1="23" y1="4.6" x2="23" y2="2.3"/>
-      <line x1="23" y1="4.6" x2="25" y2="3.5"/>
-      <line x1="23" y1="4.6" x2="21" y2="3.5"/>
-    </g>
-    <circle cx="11.8" cy="16.4" r="1.7" fill="__HOLE__" opacity="0.5"/>`,
+    <g transform="translate(16 16) scale(0.8) translate(-16 -16)">
+      <circle cx="14.5" cy="19" r="7" fill="currentColor"/>
+      <path d="M16.6 12.1 L19.5 9.2 L21.8 11.5 L18.9 14.4 Z" fill="currentColor"/>
+      <path d="M20.7 10.5 Q 24 8.4, 23 4.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+      <g stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+        <line x1="23" y1="4.6" x2="23" y2="2.3"/>
+        <line x1="23" y1="4.6" x2="25" y2="3.5"/>
+        <line x1="23" y1="4.6" x2="21" y2="3.5"/>
+      </g>
+      <circle cx="11.8" cy="16.4" r="1.7" fill="__HOLE__" opacity="0.5"/>
+    </g>`,
   'gen-radioisotope': () => `
     <g fill="currentColor">
       <rect x="13.4" y="10.5" width="2.2" height="11" rx="0.4"/>
