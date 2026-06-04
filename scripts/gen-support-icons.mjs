@@ -29,7 +29,7 @@ const LBL = {
   'reactor-fission': 'Fission (was X)', 'reactor-fusion': 'Fusion (∿)', 'reactor-antimatter': 'Antimatter (bomb)',
   'gen-radioisotope': 'Radioisotope (⟛)', 'gen-electric': 'Electric (e)',
   'missile': 'Missile', 'raygun': 'Raygun', 'buggy': 'Buggy',
-  'thruster': 'Thruster (triangle + pink circle)', 'refinery': 'Refinery (flask)', 'robonaut': 'Robonaut (generic head)',
+  'thruster': 'Thruster (rocket bell)', 'refinery': 'Refinery (flask)', 'robonaut': 'Robonaut (generic head)',
 };
 const stripSvg = (s) => s.replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '');
 const ICON = 58, ROW_H = 88, PAD = 24, HEAD = 30, COL_W = 250;

@@ -8,22 +8,21 @@
 //   generator = orange CIRCLE, white glyph
 //   radiator  = BLUE thermometer(s) on a WHITE rounded badge (×N therms)
 //   robonaut  = BLACK square, PINK glyph
-//   thruster  = DARK triangle (the thrust-triangle silhouette), PINK thrust circle
+//   thruster  = DARK square, CREAM rocket-engine bell (chamber + ribbed nozzle)
 //   refinery  = SLATE square, white flask glyph
 // See assets/support-icons/ for the rendered review sheet.
 
 const THERM_BLUE = '#59abeb';
 const ROBO_PINK = '#eec1a8';
-const THRUST_PINK = '#ff4d97';
+const BELL_CREAM = '#f0e6d2';
 
-// shape: 'square' | 'circle' | 'triangle'. ink: glyph colour. fill/ring: flat
-// coin colours.
+// shape: 'square' | 'circle'. ink: glyph colour. fill/ring: flat coin colours.
 export const SUPPORT_CAT = {
-  reactor:   { shape: 'square',   fill: '#8b5cf6', ring: '#6d28d9', ink: '#ffffff' },
-  generator: { shape: 'circle',   fill: '#f97316', ring: '#c2410c', ink: '#ffffff' },
-  robonaut:  { shape: 'square',   fill: '#0c0a16', ring: '#be185d', ink: ROBO_PINK },
-  thruster:  { shape: 'triangle', fill: '#222a3d', ring: '#0c0a16', ink: THRUST_PINK },
-  refinery:  { shape: 'square',   fill: '#94a3b8', ring: '#64748b', ink: '#ffffff' },
+  reactor:   { shape: 'square', fill: '#8b5cf6', ring: '#6d28d9', ink: '#ffffff' },
+  generator: { shape: 'circle', fill: '#f97316', ring: '#c2410c', ink: '#ffffff' },
+  robonaut:  { shape: 'square', fill: '#0c0a16', ring: '#be185d', ink: ROBO_PINK },
+  thruster:  { shape: 'square', fill: '#222a3d', ring: '#0c0a16', ink: BELL_CREAM },
+  refinery:  { shape: 'square', fill: '#94a3b8', ring: '#64748b', ink: '#ffffff' },
 };
 
 // Glyphs use currentColor (set per category) + "__HOLE__" for negative space.
@@ -81,11 +80,18 @@ const GLYPH = {
     <circle cx="20" cy="20" r="1.05" fill="__HOLE__"/>
     <line x1="22.2" y1="13" x2="25.4" y2="7.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
     <circle cx="25.4" cy="7.6" r="1.1" fill="currentColor"/>`,
-  // Thruster type: the pink thrust circle sitting in the thrust triangle (the
-  // dark triangle is the coin body) - the published "thrust triangle + pink
-  // circle" pair.
+  // Thruster type: a rocket engine bell - the combustion chamber pinching to a
+  // throat, then flaring into a ribbed nozzle. Bold cream silhouette with the
+  // stiffening rings cut back to the coin colour.
   'thruster': () => `
-    <circle cx="16" cy="19.6" r="5.3" fill="currentColor"/>`,
+    <path d="M13.2 5 H18.8 Q20 5 20 6.2 V10.5 Q20 11.8 19 12.2 L18.5 13
+             C22 18, 24 23, 26.5 27.2 H5.5
+             C8 23, 10 18, 13.5 13 L13 12.2 Q12 11.8 12 10.5 V6.2 Q12 5 13.2 5 Z" fill="currentColor"/>
+    <g stroke="__HOLE__" stroke-width="1.3" stroke-linecap="round">
+      <line x1="11.7" y1="18" x2="20.3" y2="18"/>
+      <line x1="10.2" y1="21.5" x2="21.8" y2="21.5"/>
+      <line x1="8.5" y1="25" x2="23.5" y2="25"/>
+    </g>`,
   // Refinery type: an Erlenmeyer flask with liquid - the local water plant.
   'refinery': () => `
     <path d="M12.8 7.8 H19.2 M14 7.8 V13.6 L8.6 24 Q8 26.4 10.4 26.4 H21.6 Q24 26.4 23.4 24 L18 13.6 V7.8"
@@ -127,13 +133,10 @@ export function hasTypeIcon(type) {
   return !!TYPE_ICON[type];
 }
 
-// Coin body for a category: square / circle / triangle, filled + ringed.
+// Coin body for a category: square or circle, filled + ringed.
 function shapeBody(c) {
   if (c.shape === 'circle') {
     return `<circle cx="16" cy="16" r="15" fill="${c.fill}" stroke="${c.ring}" stroke-width="1.5"/>`;
-  }
-  if (c.shape === 'triangle') {
-    return `<path d="M16 3.4 L29 27.4 L3 27.4 Z" fill="${c.fill}" stroke="${c.ring}" stroke-width="2.6" stroke-linejoin="round"/>`;
   }
   return `<rect x="1.5" y="1.5" width="29" height="29" rx="7" fill="${c.fill}" stroke="${c.ring}" stroke-width="1.5"/>`;
 }
