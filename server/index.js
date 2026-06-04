@@ -566,6 +566,17 @@ function cancelInviteFor(profileId, lobbyId) {
 // `code` is a 6-char short code so the host can read it over voice.
 app.post('/lobbies', requireProfile, (req, res) => {
   const body = req.body || {};
+  // Idempotency key: a retry / double-submit of the SAME create intent
+  // carries the same key, so a slow or lost response never spawns a
+  // duplicate room. Optional; absent = legacy behaviour (always create).
+  const idemKey = (typeof body.idempotencyKey === 'string' && body.idempotencyKey.trim())
+    ? body.idempotencyKey.trim().slice(0, 64) : null;
+  if (idemKey) {
+    const existing = db
+      .prepare('SELECT id FROM lobbies WHERE idempotency_key = ? AND host_id = ?')
+      .get(idemKey, req.profile.id);
+    if (existing) return res.status(200).json({ ok: true, lobby: lobbyRow(existing.id), deduped: true });
+  }
   const name = String(body.name || '').trim().slice(0, 60) || `${req.profile.name}'s table`;
   const maxPlayers = Math.max(2, Math.min(5, Number(body.maxPlayers) || 5));
   // Game length: 5 (short, default) / 6 (medium) / 7 (extra long).
@@ -578,13 +589,24 @@ app.post('/lobbies', requireProfile, (req, res) => {
     try {
       info = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key)
+           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?)`
         )
-        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now);
+        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey);
       break;
     } catch (err) {
-      if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') continue;
+      if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+        // The clash is either the random code (retry with a fresh one) or
+        // the idempotency key (a concurrent request with the same key won
+        // the race - return ITS lobby so both callers see one room).
+        if (idemKey) {
+          const raced = db
+            .prepare('SELECT id FROM lobbies WHERE idempotency_key = ? AND host_id = ?')
+            .get(idemKey, req.profile.id);
+          if (raced) return res.status(200).json({ ok: true, lobby: lobbyRow(raced.id), deduped: true });
+        }
+        continue;
+      }
       throw err;
     }
   }

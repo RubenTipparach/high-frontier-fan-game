@@ -557,8 +557,22 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
   }
 }
 
+// Stable idempotency key for the in-progress create-room intent. Generated
+// lazily on the first submit and cleared on success, so a retry / double-
+// submit (e.g. the player re-clicks Create when the server is slow) reuses
+// the SAME key and the server returns the room it already made instead of
+// spawning a duplicate.
+let _createIdemKey = null;
+let _creatingLobby = false;
+function newIdemKey() {
+  try { if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID(); }
+  catch { /* fall through */ }
+  return 'idem-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12);
+}
+
 async function onCreateSubmit(ev) {
   ev.preventDefault();
+  if (_creatingLobby) return;   // a submit is already in flight; ignore re-clicks
   const errEl = document.getElementById('create-error');
   errEl.textContent = '';
   const name = document.getElementById('create-name').value.trim();
@@ -567,9 +581,21 @@ async function onCreateSubmit(ev) {
   const joinPolicy = document.querySelector('input[name=policy]:checked').value;
   const me = activeProfile();
   if (!me) return;
-  const r = await createLobby({ name, maxPlayers, maxRounds, joinPolicy }, me.token);
-  if (!r.ok) { errEl.textContent = humanizeError(r.error); return; }
-  await enterLobby(r.data.lobby);
+  if (!_createIdemKey) _createIdemKey = newIdemKey();   // stable across retries of this intent
+  const submitBtn = ev.target.querySelector('button[type="submit"]');
+  _creatingLobby = true;
+  if (submitBtn) submitBtn.disabled = true;
+  try {
+    const r = await createLobby(
+      { name, maxPlayers, maxRounds, joinPolicy, idempotencyKey: _createIdemKey }, me.token
+    );
+    if (!r.ok) { errEl.textContent = humanizeError(r.error); return; }   // keep the key so a retry dedupes
+    _createIdemKey = null;   // success: the next room starts a fresh intent
+    await enterLobby(r.data.lobby);
+  } finally {
+    _creatingLobby = false;
+    if (submitBtn) submitBtn.disabled = false;
+  }
 }
 
 async function onClaimLinkSubmit(ev) {
