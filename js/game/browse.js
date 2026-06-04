@@ -5752,6 +5752,11 @@ function openRocketStackModal() {
         </div>
         ${totalsHtml}
         <div id="rocket-fuel-strip" class="rocket-fuel-strip"></div>
+        ${_online ? `<div class="rocket-sim-move">
+          <button type="button" class="popup-btn popup-btn-secondary rocket-sim-btn"
+            title="Dry-run this turn's planned move on the server (changes nothing) and show the fuel-step cost">🧪 Simulate planned move</button>
+          <p class="rocket-sim-result" hidden></p>
+        </div>` : ''}
         ${status}
       </div>
       <div id="rocket-stack-cards">
@@ -5788,6 +5793,9 @@ function openRocketStackModal() {
     // to relocate chits + react to factory refuel patterns.
     const stripHost = body.querySelector('#rocket-fuel-strip');
     if (stripHost) buildFuelStrip(stripHost, totals);
+    // Simulate the planned move right here under the fuel strip (online): a
+    // read-only server dry-run that prints the fuel-step breakdown.
+    wireSimulate(body.querySelector('.rocket-sim-btn'), body.querySelector('.rocket-sim-result'));
 
     // Afterburn toggle. Confirms before engaging (spends fuel up
     // front per the rulebook's "Afterburn (+ thrust for 2 fuel
@@ -10136,6 +10144,65 @@ function buildTurn1MoveOp() {
   return { toSiteId, segments, turn1Segs, destPlannerId };
 }
 
+// Dry-run THIS turn's planned move against the server (debug:true) and return
+// a one-line summary + 'ok'/'bad'. Read-only: the server runs it on a throwaway
+// clone and changes nothing. Also console.logs the request + the server's full
+// burn-math breakdown. Shared by every Simulate button so they never drift.
+async function runPlannedMoveSimulation() {
+  if (!_online) return { summary: 'Simulate is for online games.', cls: 'bad' };
+  const built = buildTurn1MoveOp();
+  if (built.error) return { summary: built.error, cls: 'bad' };
+  const { toSiteId, segments } = built;
+  let r;
+  try {
+    r = await submitGameOp(_onlineGameId, { kind: 'MOVE', toSiteId, segments, debug: true }, _onlineMe.token);
+  } catch { return { summary: 'Server unreachable - try again.', cls: 'bad' }; }
+  const sim = (r && r.ok && r.data) ? r.data : null;
+  const calc = sim ? (sim.calc || sim.detail || null) : null;
+  const round2 = (n) => (n == null ? n : Math.round(n * 100) / 100);
+  console.log('[simulate] dry-run MOVE', {
+    request: { kind: 'MOVE', toSiteId, segments },
+    response: sim || (r && r.error) || r,
+  });
+  if (calc) console.log('[simulate] burn check', calc);
+  if (!sim) return { summary: `Could not simulate: ${humanizeOnlineOpError(r && r.error)}`, cls: 'bad' };
+  if (calc) {
+    const c = calc;
+    const head = sim.ok ? '✓ Would succeed' : '✗ Would fail';
+    return {
+      summary: `${head}: thrust ${c.finalThrust} · ${c.fuelStepsPerBurn}/burn · `
+        + `need ${c.fuelStepsNeeded} steps (${c.burnsNeeded} burn${c.burnsNeeded === 1 ? '' : 's'}) · `
+        + `ship has ${c.fuelStepsInShip} (can burn ${c.canBurn})`
+        + (sim.ok && sim.tankBefore != null ? ` · tank ${round2(sim.tankBefore)}→${round2(sim.tankAfter)}` : ''),
+      cls: sim.ok ? 'ok' : 'bad',
+    };
+  }
+  if (sim.ok) return { summary: `✓ ${sim.log || 'Move would succeed.'}`, cls: 'ok' };
+  return { summary: `✗ Would fail: ${humanizeOnlineOpError(sim.error, sim.detail)}`, cls: 'bad' };
+}
+
+// Wire a Simulate button + result paragraph to runPlannedMoveSimulation. Colour
+// is set inline (green ok / red bad) so it needs no per-modal CSS.
+function wireSimulate(btn, resEl) {
+  if (!btn) return;
+  let busy = false;
+  const show = (txt, ok) => {
+    if (!resEl) return;
+    resEl.hidden = false;
+    resEl.textContent = txt;
+    resEl.style.color = ok == null ? '' : (ok ? '#4ade80' : '#f87171');
+  };
+  btn.addEventListener('click', async () => {
+    if (busy) return;
+    busy = true; btn.disabled = true;
+    show('Simulating…', null);
+    try {
+      const res = await runPlannedMoveSimulation();
+      show(res.summary, res.cls === 'ok');
+    } finally { busy = false; btn.disabled = false; }
+  });
+}
+
 // Step the rocket through its planned route's "turn 1" segments
 // (one move per turn, capped at BURNS_PER_TURN burns of cumulative
 // dv). The remaining segments shift down a turn so the next move
@@ -11320,67 +11387,8 @@ function openRouteOptionsModal(onClose) {
     if (_renderer) _renderer.setSitePopup(null);
     enterManualMoveMode();
   });
-  const simBtn = panel.querySelector('.route-options-sim-btn');
-  if (simBtn) {
-    const resEl = panel.querySelector('.route-options-sim-result');
-    const showRes = (txt, cls) => {
-      if (!resEl) return;
-      resEl.hidden = false;
-      resEl.textContent = txt;
-      resEl.className = `route-options-sim-result ${cls || 'muted'}`;
-    };
-    simBtn.addEventListener('click', async () => {
-      // Dry-run THIS turn's planned move against the server (debug:true) so
-      // the player can preview the fuel-step cost before committing. Build the
-      // op through the SAME converter the real move uses, so the ids match
-      // (no spurious route_not_from_here from a raw planner id).
-      const built = buildTurn1MoveOp();
-      if (built.error) { showRes(`✗ ${built.error}`, 'bad'); return; }
-      const { toSiteId, segments } = built;
-      simBtn.disabled = true;
-      showRes('Simulating…');
-      try {
-        const r = await submitGameOp(
-          _onlineGameId, { kind: 'MOVE', toSiteId, segments, debug: true }, _onlineMe.token);
-        // The dry-run verdict rides in r.data (the server returns it inside an
-        // HTTP 200, so r.ok only means "the request reached the server"). Read
-        // r.data.ok for the actual would-succeed / would-fail.
-        const sim = (r && r.ok && r.data) ? r.data : null;
-        // The full burn-math breakdown rides in calc (success) / detail
-        // (would-fail) - same shape either way.
-        const calc = sim ? (sim.calc || sim.detail || null) : null;
-        const round2 = (n) => (n == null ? n : Math.round(n * 100) / 100);
-        // Print exactly how the server decided, to the console (Eruda on
-        // mobile): the request sent, the raw dry-run response, and the burn
-        // check as its own object. Debug-only call - the server runs it on a
-        // throwaway clone and changes nothing.
-        console.log('[simulate] dry-run MOVE', {
-          request: { kind: 'MOVE', toSiteId, segments },
-          response: sim || (r && r.error) || r,
-        });
-        if (calc) console.log('[simulate] burn check', calc);
-        if (!sim) {
-          showRes(`✗ Could not simulate: ${humanizeOnlineOpError(r && r.error)}`, 'bad');
-        } else if (calc) {
-          const c = calc;
-          const head = sim.ok ? '✓ Would succeed' : '✗ Would fail';
-          showRes(`${head}: thrust ${c.finalThrust} · ${c.fuelStepsPerBurn}/burn · `
-            + `need ${c.fuelStepsNeeded} steps (${c.burnsNeeded} burn${c.burnsNeeded === 1 ? '' : 's'}) · `
-            + `ship has ${c.fuelStepsInShip} (can burn ${c.canBurn})`
-            + (sim.ok && sim.tankBefore != null ? ` · tank ${round2(sim.tankBefore)}→${round2(sim.tankAfter)}` : ''),
-            sim.ok ? 'ok' : 'bad');
-        } else if (sim.ok) {
-          showRes(`✓ ${sim.log || 'Move would succeed.'}`, 'ok');
-        } else {
-          showRes(`✗ Would fail: ${humanizeOnlineOpError(sim.error, sim.detail)}`, 'bad');
-        }
-      } catch {
-        showRes('Simulation failed - server unreachable.', 'bad');
-      } finally {
-        simBtn.disabled = false;
-      }
-    });
-  }
+  wireSimulate(panel.querySelector('.route-options-sim-btn'),
+    panel.querySelector('.route-options-sim-result'));
   const abandonBtn = panel.querySelector('.route-options-abandon-btn');
   if (abandonBtn) {
     abandonBtn.addEventListener('click', async () => {

@@ -851,6 +851,16 @@
 .rocket-fuel-strip {
   margin: 12px 0 0;
 }
+/* Simulate-planned-move control under the fuel strip (online): a read-only
+   server dry-run that prints the fuel-step breakdown. */
+.rocket-sim-move { margin: 8px 0 0; }
+.rocket-sim-move .rocket-sim-btn { width: 100%; font-size: 12px; }
+.rocket-sim-result {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
 .rocket-fuel-strip-label {
   font-size: 10px;
   text-transform: uppercase;
