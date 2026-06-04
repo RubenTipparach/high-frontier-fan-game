@@ -183,7 +183,7 @@ app.get('/announcement', (_req, res) => {
 
 const ADMIN_COOKIE = 'hf_admin';
 const ADMIN_COOKIE_PATH = '/admin';
-const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12h
+const ADMIN_SESSION_TTL_MS = 48 * 60 * 60 * 1000; // 48h, slides on use
 
 // Seed the allowlist from the ADMIN_DISCORD_ID(S) secret on every boot,
 // so adding the secret on Fly + redeploy materialises it DB-side and
@@ -234,7 +234,13 @@ function createAdminSession(discordId) {
 // unexpired AND its Discord id still on the allowlist, so dropping an id
 // from the secret + redeploy revokes any live session. Returns the
 // Discord id or null; prunes the row when it has expired.
-function adminFromRequest(req) {
+//
+// SLIDING SESSION: when `res` is supplied (every gated request has one), a
+// valid session is renewed in place - its expiry is pushed out to
+// now + TTL and the cookie's maxAge is refreshed - so active use never
+// expires. The 48h clock only runs out after a full window of inactivity,
+// which preserves the allowlist-revoke-on-redeploy property.
+function adminFromRequest(req, res = null) {
   const token = readCookie(req, ADMIN_COOKIE);
   if (!token) return null;
   const hash = hashToken(token);
@@ -245,6 +251,12 @@ function adminFromRequest(req) {
     return null;
   }
   if (!isAdminDiscordId(row.discord_id)) return null;
+  if (res) {
+    // Slide the window: extend the DB expiry and re-stamp the cookie.
+    db.prepare('UPDATE admin_sessions SET expires_at = ? WHERE token_hash = ?')
+      .run(nowMs() + ADMIN_SESSION_TTL_MS, hash);
+    setAdminCookie(req, res, token);
+  }
   return row.discord_id;
 }
 
@@ -264,8 +276,9 @@ function clearAdminSession(req, res) {
 }
 
 // Middleware for admin action routes: 403 unless a valid admin session.
+// Passing res slides the session (renews expiry + cookie) on each action.
 function requireAdmin(req, res, next) {
-  if (adminFromRequest(req)) return next();
+  if (adminFromRequest(req, res)) return next();
   return res.status(403).json({ error: 'admin_auth_required' });
 }
 
@@ -2251,8 +2264,9 @@ setInterval(() => {
 
 app.get('/admin', (req, res) => {
   // Gated behind Discord OAuth: unauthenticated visitors get the
-  // sign-in screen instead of the dashboard.
-  if (!adminFromRequest(req)) {
+  // sign-in screen instead of the dashboard. Loading the dashboard slides
+  // the session, so an admin who keeps the tab active never gets bounced.
+  if (!adminFromRequest(req, res)) {
     return res.type('html').send(adminLoginPage());
   }
   const kpi = db
