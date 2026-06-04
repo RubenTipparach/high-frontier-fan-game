@@ -13432,18 +13432,17 @@ function takenZoneMap() {
     const sides = getChitSides(zone);
     const vp = (banked && Number.isFinite(banked.vp))
       ? banked.vp : (side === 'back' ? sides.back : sides.front);
-    map[zone] = { ...seat, side, vp, scored: !!banked };
+    map[zone] = { ...seat, side, vp };
   };
   if (_online && _onlineSnapshot && Array.isArray(_onlineSnapshot.players)) {
-    const myId = _onlineMe && _onlineMe.id;
     for (const p of _onlineSnapshot.players) {
       const g = p.glory;
       if (!g || !Array.isArray(g.visited)) continue;
-      const seat = { name: p.name, color: p.color || null, handle: true, isMe: p.profileId === myId };
+      const seat = { name: p.name, color: p.color || null, handle: true };
       for (const z of g.visited) resolve(z, g, seat);
     }
   } else {
-    const me = { ...localSeat(), isMe: true };
+    const me = localSeat();
     const g = { claimed: getClaimedChits() };
     for (const z of Object.keys(ZONE_CHIT_VPS)) {
       if (isZoneVisited(z)) resolve(z, g, me);
@@ -13453,22 +13452,13 @@ function takenZoneMap() {
 }
 
 // One zone's coin for the all-chits board. Unclaimed: a flip-coin (tap
-// toggles gold front / sun-glow back). Banked at home BY ME: the same vibrant
-// coin on its scored side with a green check. Taken by a RIVAL: an empty
-// dotted outline (the coin lifted off the board), with the claimer's seat name
-// beneath.
+// toggles gold front / sun-glow back). Claimed by ANY player (you or a rival):
+// an empty dotted outline (the coin lifted off the board) with the claimer's
+// seat name beneath. Your own banked coins live in the "Your coins" row below,
+// so the board does not re-show them as full coins (that would be redundant).
 function buildZoneBoardChit(zone, takenBy = null) {
   const sides = getChitSides(zone);
   if (takenBy) {
-    // A zone I have banked at home reads as a win, not a loss: the same vibrant
-    // coin + green check (reuse the claimed-coin builder), never the rival
-    // "taken" outline.
-    if (takenBy.isMe && takenBy.scored) {
-      return buildChitToken(zone, {
-        side: takenBy.side === 'back' ? 'back' : 'front',
-        player: { name: takenBy.name, color: takenBy.color, handle: takenBy.handle },
-      });
-    }
     const label = (takenBy.handle && takenBy.name) ? '@' + takenBy.name : (takenBy.name || '');
     const color = takenBy.color || null;
     const side = takenBy.side === 'back' ? 'back' : 'front';
