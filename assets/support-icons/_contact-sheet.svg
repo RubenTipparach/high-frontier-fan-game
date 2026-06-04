@@ -1,34 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="798" height="512" viewBox="0 0 798 512">
-  <rect width="798" height="512" fill="#0c0a16"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="520" viewBox="0 0 980 520">
+  <rect width="980" height="520" fill="#0c0a16"/>
   <text x="24" y="20" fill="#7dd3fc" font-family="sans-serif" font-size="13">Support / requirement glyphs - REVIEW (not yet applied)</text>
   <text x="24" y="42" fill="#cbd5e1" font-family="sans-serif" font-size="16" font-weight="700">Reactor (purple square)</text><g transform="translate(24, 54)"><g transform="scale(1.8125)">
-  <defs><radialGradient id="grad-reactor-fission" cx="36%" cy="30%" r="72%">
-    <stop offset="0%" stop-color="#8b5cf6"/>
-    <stop offset="70%" stop-color="#8b5cf6"/>
-    <stop offset="100%" stop-color="#6d28d9"/>
-  </radialGradient></defs>
-  <rect x="1.5" y="1.5" width="29" height="29" rx="7" fill="url(#grad-reactor-fission)" stroke="#6d28d9" stroke-width="1.5"/>
+  <rect x="1.5" y="1.5" width="29" height="29" rx="7" fill="#8b5cf6" stroke="#6d28d9" stroke-width="1.5"/>
   <g color="#ffffff">
     <line x1="10.5" y1="10.5" x2="21.5" y2="21.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
     <line x1="21.5" y1="10.5" x2="10.5" y2="21.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
     <circle cx="16" cy="16" r="2.5" fill="currentColor"/></g>
-</g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Fission  (was X)</text></g><g transform="translate(274, 54)"><g transform="scale(1.8125)">
-  <defs><radialGradient id="grad-reactor-fusion" cx="36%" cy="30%" r="72%">
-    <stop offset="0%" stop-color="#8b5cf6"/>
-    <stop offset="70%" stop-color="#8b5cf6"/>
-    <stop offset="100%" stop-color="#6d28d9"/>
-  </radialGradient></defs>
-  <rect x="1.5" y="1.5" width="29" height="29" rx="7" fill="url(#grad-reactor-fusion)" stroke="#6d28d9" stroke-width="1.5"/>
+</g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Fission (was X)</text></g><g transform="translate(274, 54)"><g transform="scale(1.8125)">
+  <rect x="1.5" y="1.5" width="29" height="29" rx="7" fill="#8b5cf6" stroke="#6d28d9" stroke-width="1.5"/>
   <g color="#ffffff">
     <path d="M5.5 16 C 7.7 9.6, 10.3 9.6, 12.5 16 C 14.7 22.4, 17.3 22.4, 19.5 16 C 21.7 9.6, 24.3 9.6, 26.5 16"
           fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></g>
-</g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Fusion  (∿)</text></g><g transform="translate(524, 54)"><g transform="scale(1.8125)">
-  <defs><radialGradient id="grad-reactor-antimatter" cx="36%" cy="30%" r="72%">
-    <stop offset="0%" stop-color="#8b5cf6"/>
-    <stop offset="70%" stop-color="#8b5cf6"/>
-    <stop offset="100%" stop-color="#6d28d9"/>
-  </radialGradient></defs>
-  <rect x="1.5" y="1.5" width="29" height="29" rx="7" fill="url(#grad-reactor-antimatter)" stroke="#6d28d9" stroke-width="1.5"/>
+</g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Fusion (∿)</text></g><g transform="translate(524, 54)"><g transform="scale(1.8125)">
+  <rect x="1.5" y="1.5" width="29" height="29" rx="7" fill="#8b5cf6" stroke="#6d28d9" stroke-width="1.5"/>
   <g color="#ffffff">
     <g stroke="currentColor" stroke-width="2.1" stroke-linecap="round">
       <line x1="16" y1="6.5" x2="16" y2="25.5"/>
@@ -38,23 +23,13 @@
     </g>
     <circle cx="16" cy="16" r="3.2" fill="#8b5cf6"/>
     <circle cx="16" cy="16" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/></g>
-</g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Antimatter  (was 💣)</text></g><text x="24" y="158" fill="#cbd5e1" font-family="sans-serif" font-size="16" font-weight="700">Generator (orange circle)</text><g transform="translate(24, 170)"><g transform="scale(1.8125)">
-  <defs><radialGradient id="grad-gen-radioisotope" cx="36%" cy="30%" r="72%">
-    <stop offset="0%" stop-color="#f97316"/>
-    <stop offset="70%" stop-color="#f97316"/>
-    <stop offset="100%" stop-color="#c2410c"/>
-  </radialGradient></defs>
-  <circle cx="16" cy="16" r="15" fill="url(#grad-gen-radioisotope)" stroke="#c2410c" stroke-width="1.5"/>
+</g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Antimatter (was 💣)</text></g><text x="24" y="160" fill="#cbd5e1" font-family="sans-serif" font-size="16" font-weight="700">Generator (orange circle)</text><g transform="translate(24, 172)"><g transform="scale(1.8125)">
+  <circle cx="16" cy="16" r="15" fill="#f97316" stroke="#c2410c" stroke-width="1.5"/>
   <g color="#ffffff">
     <text x="18.5" y="22" text-anchor="middle"
           fill="currentColor" font-family="DejaVu Sans, sans-serif" font-size="21" font-weight="700">⟛</text></g>
-</g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Radioisotope  (⟛)</text></g><g transform="translate(274, 170)"><g transform="scale(1.8125)">
-  <defs><radialGradient id="grad-gen-electric" cx="36%" cy="30%" r="72%">
-    <stop offset="0%" stop-color="#f97316"/>
-    <stop offset="70%" stop-color="#f97316"/>
-    <stop offset="100%" stop-color="#c2410c"/>
-  </radialGradient></defs>
-  <circle cx="16" cy="16" r="15" fill="url(#grad-gen-electric)" stroke="#c2410c" stroke-width="1.5"/>
+</g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Radioisotope (⟛)</text></g><g transform="translate(274, 172)"><g transform="scale(1.8125)">
+  <circle cx="16" cy="16" r="15" fill="#f97316" stroke="#c2410c" stroke-width="1.5"/>
   <g color="#ffffff">
     <g fill="currentColor">
       <rect x="11" y="8.5" width="2.6" height="15" rx="0.6"/>
@@ -62,57 +37,63 @@
       <rect x="11" y="14.7" width="7.6" height="2.4" rx="0.6"/>
       <rect x="11" y="20.9" width="9.6" height="2.6" rx="0.6"/>
     </g></g>
-</g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Electric  (E)</text></g><text x="24" y="274" fill="#cbd5e1" font-family="sans-serif" font-size="16" font-weight="700">Radiator (white + blue therms)</text><g transform="translate(24, 286)"><g transform="scale(1.8125)">
-  <defs><radialGradient id="grad-thermostat" cx="36%" cy="30%" r="72%">
-    <stop offset="0%" stop-color="#ffffff"/>
-    <stop offset="70%" stop-color="#ffffff"/>
-    <stop offset="100%" stop-color="#3b82f6"/>
-  </radialGradient></defs>
-  <circle cx="16" cy="16" r="15" fill="url(#grad-thermostat)" stroke="#3b82f6" stroke-width="1.5"/>
+</g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Electric (E)</text></g><text x="24" y="278" fill="#cbd5e1" font-family="sans-serif" font-size="16" font-weight="700">Radiator (blue therms on white badge)</text><g transform="translate(24, 290)"><g transform="scale(1.8125)">
+  <rect x="1" y="3" width="19" height="26" rx="9" fill="#ffffff" stroke="#2563eb" stroke-width="1.2"/>
   <g color="#2563eb">
-    <path d="M13.6 7.2 a2.4 2.4 0 0 1 4.8 0 v9.8 a4 4 0 1 1 -4.8 0 Z"
-          fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-    <circle cx="16" cy="21.4" r="2.7" fill="currentColor"/>
-    <rect x="15.1" y="11" width="1.8" height="9.5" rx="0.9" fill="currentColor"/></g>
-</g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Radiator therms  (×N on cards)</text></g><text x="24" y="390" fill="#cbd5e1" font-family="sans-serif" font-size="16" font-weight="700">Robonaut (game pink)</text><g transform="translate(24, 402)"><g transform="scale(1.8125)">
-  <defs><radialGradient id="grad-missile" cx="36%" cy="30%" r="72%">
-    <stop offset="0%" stop-color="#f9a8d4"/>
-    <stop offset="70%" stop-color="#f9a8d4"/>
-    <stop offset="100%" stop-color="#be185d"/>
-  </radialGradient></defs>
-  <circle cx="16" cy="16" r="15" fill="url(#grad-missile)" stroke="#be185d" stroke-width="1.5"/>
-  <g color="#500724">
+    <path d="M8.3 9 a2.2 2.2 0 0 1 4.4 0 v8.6 a3.6 3.6 0 1 1 -4.4 0 Z"
+          fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+    <circle cx="10.5" cy="21.6" r="2.4" fill="currentColor"/>
+    <rect x="9.7" y="12.4" width="1.6" height="8.6" rx="0.8" fill="currentColor"/></g>
+</g><text x="50.0625" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">1 therm</text></g><g transform="translate(274, 290)"><g transform="scale(1.8125)">
+  <rect x="1" y="3" width="32" height="26" rx="9" fill="#ffffff" stroke="#2563eb" stroke-width="1.2"/>
+  <g color="#2563eb">
+    <path d="M8.3 9 a2.2 2.2 0 0 1 4.4 0 v8.6 a3.6 3.6 0 1 1 -4.4 0 Z"
+          fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+    <circle cx="10.5" cy="21.6" r="2.4" fill="currentColor"/>
+    <rect x="9.7" y="12.4" width="1.6" height="8.6" rx="0.8" fill="currentColor"/>
+    <path d="M21.3 9 a2.2 2.2 0 0 1 4.4 0 v8.6 a3.6 3.6 0 1 1 -4.4 0 Z"
+          fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+    <circle cx="23.5" cy="21.6" r="2.4" fill="currentColor"/>
+    <rect x="22.7" y="12.4" width="1.6" height="8.6" rx="0.8" fill="currentColor"/></g>
+</g><text x="73.625" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">2 therms</text></g><g transform="translate(524, 290)"><g transform="scale(1.8125)">
+  <rect x="1" y="3" width="45" height="26" rx="9" fill="#ffffff" stroke="#2563eb" stroke-width="1.2"/>
+  <g color="#2563eb">
+    <path d="M8.3 9 a2.2 2.2 0 0 1 4.4 0 v8.6 a3.6 3.6 0 1 1 -4.4 0 Z"
+          fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+    <circle cx="10.5" cy="21.6" r="2.4" fill="currentColor"/>
+    <rect x="9.7" y="12.4" width="1.6" height="8.6" rx="0.8" fill="currentColor"/>
+    <path d="M21.3 9 a2.2 2.2 0 0 1 4.4 0 v8.6 a3.6 3.6 0 1 1 -4.4 0 Z"
+          fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+    <circle cx="23.5" cy="21.6" r="2.4" fill="currentColor"/>
+    <rect x="22.7" y="12.4" width="1.6" height="8.6" rx="0.8" fill="currentColor"/>
+    <path d="M34.3 9 a2.2 2.2 0 0 1 4.4 0 v8.6 a3.6 3.6 0 1 1 -4.4 0 Z"
+          fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+    <circle cx="36.5" cy="21.6" r="2.4" fill="currentColor"/>
+    <rect x="35.7" y="12.4" width="1.6" height="8.6" rx="0.8" fill="currentColor"/></g>
+</g><text x="97.1875" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">3 therms</text></g><text x="24" y="396" fill="#cbd5e1" font-family="sans-serif" font-size="16" font-weight="700">Robonaut (black + pink)</text><g transform="translate(24, 408)"><g transform="scale(1.8125)">
+  <circle cx="16" cy="16" r="15" fill="#0c0a16" stroke="#be185d" stroke-width="1.5"/>
+  <g color="#f9a8d4">
     <path d="M16 4.8 C 19.2 9, 19.2 14, 16 18 C 12.8 14, 12.8 9, 16 4.8 Z" fill="currentColor"/>
     <path d="M13.4 14.5 L10.6 19 L13.4 17.3 Z" fill="currentColor"/>
     <path d="M18.6 14.5 L21.4 19 L18.6 17.3 Z" fill="currentColor"/>
-    <circle cx="16" cy="10.5" r="1.5" fill="#f9a8d4"/>
+    <circle cx="16" cy="10.5" r="1.5" fill="#0c0a16"/>
     <path d="M14.7 18 L16 23.5 L17.3 18 Z" fill="currentColor" opacity="0.9"/></g>
-</g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Missile  (was 🚀)</text></g><g transform="translate(274, 402)"><g transform="scale(1.8125)">
-  <defs><radialGradient id="grad-raygun" cx="36%" cy="30%" r="72%">
-    <stop offset="0%" stop-color="#f9a8d4"/>
-    <stop offset="70%" stop-color="#f9a8d4"/>
-    <stop offset="100%" stop-color="#be185d"/>
-  </radialGradient></defs>
-  <circle cx="16" cy="16" r="15" fill="url(#grad-raygun)" stroke="#be185d" stroke-width="1.5"/>
-  <g color="#500724">
+</g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Missile</text></g><g transform="translate(274, 408)"><g transform="scale(1.8125)">
+  <circle cx="16" cy="16" r="15" fill="#0c0a16" stroke="#be185d" stroke-width="1.5"/>
+  <g color="#f9a8d4">
     <path d="M7 13 H19 V15.8 H13.6 L11.8 21 H8.6 L10.4 15.8 H7 Z" fill="currentColor"/>
     <rect x="19" y="13.2" width="3.4" height="2.4" fill="currentColor"/>
     <g fill="currentColor"><circle cx="24.6" cy="14.4" r="1.05"/><circle cx="27.4" cy="14.4" r="0.8"/></g></g>
-</g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Raygun  (was 🔫)</text></g><g transform="translate(524, 402)"><g transform="scale(1.8125)">
-  <defs><radialGradient id="grad-buggy" cx="36%" cy="30%" r="72%">
-    <stop offset="0%" stop-color="#f9a8d4"/>
-    <stop offset="70%" stop-color="#f9a8d4"/>
-    <stop offset="100%" stop-color="#be185d"/>
-  </radialGradient></defs>
-  <circle cx="16" cy="16" r="15" fill="url(#grad-buggy)" stroke="#be185d" stroke-width="1.5"/>
-  <g color="#500724">
+</g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Raygun</text></g><g transform="translate(524, 408)"><g transform="scale(1.8125)">
+  <circle cx="16" cy="16" r="15" fill="#0c0a16" stroke="#be185d" stroke-width="1.5"/>
+  <g color="#f9a8d4">
     <rect x="8.5" y="13" width="15" height="5" rx="1.6" fill="currentColor"/>
     <rect x="12" y="10.3" width="6.4" height="3.2" rx="1" fill="currentColor"/>
     <circle cx="12" cy="20" r="2.7" fill="currentColor"/>
     <circle cx="20" cy="20" r="2.7" fill="currentColor"/>
-    <circle cx="12" cy="20" r="1.05" fill="#f9a8d4"/>
-    <circle cx="20" cy="20" r="1.05" fill="#f9a8d4"/>
+    <circle cx="12" cy="20" r="1.05" fill="#0c0a16"/>
+    <circle cx="20" cy="20" r="1.05" fill="#0c0a16"/>
     <line x1="22.2" y1="13" x2="25.4" y2="7.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
     <circle cx="25.4" cy="7.6" r="1.1" fill="currentColor"/></g>
-</g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Buggy  (was 🛺)</text></g>
+</g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Buggy</text></g>
 </svg>

@@ -1,10 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
-  <defs><radialGradient id="grad-reactor-fusion" cx="36%" cy="30%" r="72%">
-    <stop offset="0%" stop-color="#8b5cf6"/>
-    <stop offset="70%" stop-color="#8b5cf6"/>
-    <stop offset="100%" stop-color="#6d28d9"/>
-  </radialGradient></defs>
-  <rect x="1.5" y="1.5" width="29" height="29" rx="7" fill="url(#grad-reactor-fusion)" stroke="#6d28d9" stroke-width="1.5"/>
+  <rect x="1.5" y="1.5" width="29" height="29" rx="7" fill="#8b5cf6" stroke="#6d28d9" stroke-width="1.5"/>
   <g color="#ffffff">
     <path d="M5.5 16 C 7.7 9.6, 10.3 9.6, 12.5 16 C 14.7 22.4, 17.3 22.4, 19.5 16 C 21.7 9.6, 24.3 9.6, 26.5 16"
           fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></g>
