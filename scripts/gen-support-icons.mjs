@@ -16,8 +16,8 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(ROOT, 'assets', 'support-icons');
 mkdirSync(OUT, { recursive: true });
 
-const THERM_BLUE = '#2563eb';
-const ROBO_PINK = '#f9a8d4';
+const THERM_BLUE = '#59abeb';
+const ROBO_PINK = '#eec1a8';
 
 // shape: 'square' | 'circle'. ink: glyph colour. fill/ring: flat coin colours.
 const CAT = {

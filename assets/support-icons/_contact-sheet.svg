@@ -41,15 +41,15 @@
     <path d="M 20.8 19.9 A 6 6 0 1 1 21.9 16 L 10.1 16"
           fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></g>
 </g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Electric (e)</text></g><text x="24" y="278" fill="#cbd5e1" font-family="sans-serif" font-size="16" font-weight="700">Radiator (blue therms on white badge)</text><g transform="translate(24, 290)"><g transform="scale(1.8125)">
-  <rect x="1" y="3" width="19" height="26" rx="9" fill="#ffffff" stroke="#2563eb" stroke-width="1.2"/>
-  <g color="#2563eb">
+  <rect x="1" y="3" width="19" height="26" rx="9" fill="#ffffff" stroke="#59abeb" stroke-width="1.2"/>
+  <g color="#59abeb">
     <path d="M8.3 9 a2.2 2.2 0 0 1 4.4 0 v8.6 a3.6 3.6 0 1 1 -4.4 0 Z"
           fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
     <circle cx="10.5" cy="21.6" r="2.4" fill="currentColor"/>
     <rect x="9.7" y="12.4" width="1.6" height="8.6" rx="0.8" fill="currentColor"/></g>
 </g><text x="50.0625" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">1 therm</text></g><g transform="translate(274, 290)"><g transform="scale(1.8125)">
-  <rect x="1" y="3" width="32" height="26" rx="9" fill="#ffffff" stroke="#2563eb" stroke-width="1.2"/>
-  <g color="#2563eb">
+  <rect x="1" y="3" width="32" height="26" rx="9" fill="#ffffff" stroke="#59abeb" stroke-width="1.2"/>
+  <g color="#59abeb">
     <path d="M8.3 9 a2.2 2.2 0 0 1 4.4 0 v8.6 a3.6 3.6 0 1 1 -4.4 0 Z"
           fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
     <circle cx="10.5" cy="21.6" r="2.4" fill="currentColor"/>
@@ -59,8 +59,8 @@
     <circle cx="23.5" cy="21.6" r="2.4" fill="currentColor"/>
     <rect x="22.7" y="12.4" width="1.6" height="8.6" rx="0.8" fill="currentColor"/></g>
 </g><text x="73.625" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">2 therms</text></g><g transform="translate(524, 290)"><g transform="scale(1.8125)">
-  <rect x="1" y="3" width="45" height="26" rx="9" fill="#ffffff" stroke="#2563eb" stroke-width="1.2"/>
-  <g color="#2563eb">
+  <rect x="1" y="3" width="45" height="26" rx="9" fill="#ffffff" stroke="#59abeb" stroke-width="1.2"/>
+  <g color="#59abeb">
     <path d="M8.3 9 a2.2 2.2 0 0 1 4.4 0 v8.6 a3.6 3.6 0 1 1 -4.4 0 Z"
           fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
     <circle cx="10.5" cy="21.6" r="2.4" fill="currentColor"/>
@@ -75,7 +75,7 @@
     <rect x="35.7" y="12.4" width="1.6" height="8.6" rx="0.8" fill="currentColor"/></g>
 </g><text x="97.1875" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">3 therms</text></g><text x="24" y="396" fill="#cbd5e1" font-family="sans-serif" font-size="16" font-weight="700">Robonaut (black + pink square)</text><g transform="translate(24, 408)"><g transform="scale(1.8125)">
   <rect x="1.5" y="1.5" width="29" height="29" rx="7" fill="#0c0a16" stroke="#be185d" stroke-width="1.5"/>
-  <g color="#f9a8d4">
+  <g color="#eec1a8">
     <path d="M16 3.5 L19.3 11 L12.7 11 Z" fill="currentColor"/>
     <rect x="12.7" y="10.5" width="6.6" height="10.5" rx="0.7" fill="currentColor"/>
     <path d="M12.7 16 L8.6 22 L12.7 20.2 Z" fill="currentColor"/>
@@ -84,13 +84,13 @@
     <rect x="12.7" y="13.6" width="6.6" height="1.5" fill="#0c0a16"/></g>
 </g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Missile</text></g><g transform="translate(274, 408)"><g transform="scale(1.8125)">
   <rect x="1.5" y="1.5" width="29" height="29" rx="7" fill="#0c0a16" stroke="#be185d" stroke-width="1.5"/>
-  <g color="#f9a8d4">
+  <g color="#eec1a8">
     <path d="M7 13 H19 V15.8 H13.6 L11.8 21 H8.6 L10.4 15.8 H7 Z" fill="currentColor"/>
     <rect x="19" y="13.2" width="3.4" height="2.4" fill="currentColor"/>
     <g fill="currentColor"><circle cx="24.6" cy="14.4" r="1.05"/><circle cx="27.4" cy="14.4" r="0.8"/></g></g>
 </g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Raygun</text></g><g transform="translate(524, 408)"><g transform="scale(1.8125)">
   <rect x="1.5" y="1.5" width="29" height="29" rx="7" fill="#0c0a16" stroke="#be185d" stroke-width="1.5"/>
-  <g color="#f9a8d4">
+  <g color="#eec1a8">
     <rect x="8.5" y="13" width="15" height="5" rx="1.6" fill="currentColor"/>
     <rect x="12" y="10.3" width="6.4" height="3.2" rx="1" fill="currentColor"/>
     <circle cx="12" cy="20" r="2.7" fill="currentColor"/>
