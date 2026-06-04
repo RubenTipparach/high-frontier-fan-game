@@ -3017,6 +3017,20 @@ export class MapRenderer {
         ctx.textBaseline = 'middle';
         ctx.fillText('🚫', sx + w * 0.30, py + badge * 0.55);
       }
+      // Loaded glory chits: a 🏆×N badge above the ship so an opponent's
+      // haul is visible at a glance (chits ride home for VP).
+      if (r.chits > 0) {
+        ctx.globalAlpha = 1;
+        const cs = Math.max(11, Math.round(h * 0.30));
+        ctx.textBaseline = 'bottom';
+        ctx.font = `${cs}px ${EMOJI_FONT}`;
+        ctx.textAlign = 'right';
+        ctx.fillText('🏆', sx + cs * 0.15, py - 1);
+        ctx.font = `bold ${Math.round(cs * 0.85)}px ui-sans-serif, system-ui, sans-serif`;
+        ctx.fillStyle = '#ffd54a';
+        ctx.textAlign = 'left';
+        ctx.fillText(String(r.chits), sx + cs * 0.2, py - 1);
+      }
       ctx.restore();
     }
   }

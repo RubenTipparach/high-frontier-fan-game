@@ -9597,6 +9597,8 @@ function computeMpRockets(snapshot) {
       colour: p.color || 'white',
       name: p.name,
       inactive: !(p.rocket && p.rocket.activeThrusterId),
+      // Loaded glory chits this ship is carrying home (shown as a 🏆 badge).
+      chits: (p.glory && Array.isArray(p.glory.chits)) ? p.glory.chits.length : 0,
       isLocal: p.profileId === myId,
     });
   }
@@ -9612,7 +9614,7 @@ function computeMpRockets(snapshot) {
       } else {
         opponents.push({
           profileId: r.profileId, x: r.x, y: r.y, offsetX,
-          colour: r.colour, name: r.name, inactive: r.inactive,
+          colour: r.colour, name: r.name, inactive: r.inactive, chits: r.chits,
         });
       }
     });

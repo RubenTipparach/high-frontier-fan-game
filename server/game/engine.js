@@ -239,6 +239,11 @@ function isProspectorSlot(slot) {
 function maybeAwardGlory(player, site, turn) {
   if (!site || !site.solarZone || site.solarZone === 'Earth') return null;
   if (player.glory.visited.includes(site.solarZone)) return null;
+  // A glory chit is loaded by a Human: only claim it (and only mark the
+  // zone visited) when a crew is aboard. Mirror of the client's
+  // willAwardChit `crewAboard` gate - a crewless rocket leaves the chit on
+  // the site for a later, crewed visit to load.
+  if (!player.rocket.stack.some(isCrewSlot)) return null;
   player.glory.visited.push(site.solarZone);
   const chit = { zone: site.solarZone, earnedTurn: turn };
   player.glory.chits.push(chit);
@@ -1618,6 +1623,14 @@ function applyEndTurn(state, _op, player) {
   const lapDone = nextIndex === firstIdx;
 
   let log = `${player.name} ended their turn.`;
+
+  // Auto-load safety net: if the ending player is parked at a site whose
+  // zone chit is still unclaimed and a crew is aboard (e.g. they boarded a
+  // crew after landing crewless), load the chit now so it is never missed.
+  // maybeAwardGlory is idempotent - it no-ops if the zone was already claimed.
+  const hereSite = player.rocket.siteId ? siteById(player.rocket.siteId) : null;
+  const lateChit = hereSite ? maybeAwardGlory(player, hereSite, state.turn) : null;
+  if (lateChit) log = `${player.name} loaded the ${lateChit.zone} glory chit, then ended their turn.`;
 
   // Mid-lap: the turn simply passes to the next seat.
   if (!lapDone) {
