@@ -689,13 +689,28 @@ function spectralHex(type) {
   return svg;
 }
 
+// Small inline glyphs that echo the card's thrust triangle: the pink thrust
+// circle (number inside) and the fuel water-droplet (number on the droplet,
+// 🪨 for dirt). Used in the at-a-glance chips so a thruster reads like its card.
+function thrustCircleGlyph(value) {
+  return '<svg class="gl-thrust" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">'
+    + '<circle cx="12" cy="12" r="10" fill="#ec4899" stroke="#fbcfe8" stroke-width="1.6"/>'
+    + `<text x="12" y="16.3" text-anchor="middle" font-size="12.5" font-weight="700" fill="#fff">${escapeText(String(value))}</text>`
+    + '</svg>';
+}
+function fuelDropletGlyph(value, dirt) {
+  return `<span class="gl-fuel${dirt ? ' is-dirt' : ''}" aria-hidden="true">`
+    + `<span class="gl-fuel-ico">${dirt ? '🪨' : '💧'}</span>`
+    + `<span class="gl-fuel-n">${escapeText(String(value))}</span></span>`;
+}
+
 // Compact "at a glance" summary of a card for list/overview chips (e.g. the
 // All cards view). Reuses the SAME glyph language as the full card: the
 // typebar lead icon (supplied chips / robonaut role icons / type icon), the
-// spectral hex, and the type-specific headline numbers (thrust + fuel for
-// thrusters, therms for radiators, ISRU + role for robonauts, etc.). Reads the
-// ACTIVE face so a flipped (installed / Tier-2) card reports its own stats.
-// Returns plain HTML strings + a stats array so any list UI can lay it out.
+// spectral hex, and the type-specific headline numbers (the pink thrust circle
+// + fuel droplet for thrusters, therms for radiators, ISRU + role for
+// robonauts, etc.). Reads the ACTIVE face so a flipped (installed / Tier-2)
+// card reports its own stats. Returns ready-to-inject HTML (statsHtml).
 export function cardGlanceSummary(card, faceName = 'primary') {
   const sideName = (faceName === 'secondary' && card.faces && card.faces.secondary)
     ? 'secondary' : 'primary';
@@ -723,41 +738,49 @@ export function cardGlanceSummary(card, faceName = 'primary') {
   if (!icon && isThruster) icon = typeIconSvg('thruster', { size: 14 }) || '';
   if (!icon && type === 'crew') icon = '👤';
 
-  // Type-specific headline stats, then ISRU, then notable flags.
+  // Type-specific headline stats, then ISRU, then notable flags. Each entry is
+  // HTML: thrust / fuel use the card's glyphs, text entries are escaped.
   const stats = [];
+  const txt = (s) => escapeText(String(s));
   if (isThruster) {
     const fuel = fdata.fuel ?? card.fuel;
     const fuelType = fdata.fuelType ?? card.fuelType;
-    const dirt = fuelType && /dirt/i.test(String(fuelType));
-    if (thr != null) stats.push(`thrust ${thr}`);
-    if (fuel != null) stats.push(`${dirt ? '🪨' : '💧'} ${Number.isInteger(fuel) ? fuel : fuel.toFixed(2)}`);
+    const dirt = !!(fuelType && /dirt/i.test(String(fuelType)));
+    if (thr != null) stats.push(thrustCircleGlyph(thr));
+    if (fuel != null) stats.push(fuelDropletGlyph(Number.isInteger(fuel) ? fuel : fuel.toFixed(2), dirt));
     if (fdata.afterburn ?? card.afterburn) stats.push('🔥');
   } else if (type === 'radiator') {
     const therms = card.therms ?? card.heat_cap ?? fdata.therms
       ?? (fdata.light && fdata.light.therms) ?? (fdata.heavy && fdata.heavy.therms);
-    if (therms != null) stats.push(`🌡 ${therms} therm${therms === 1 ? '' : 's'}`);
+    if (therms != null) stats.push(`🌡 ${txt(therms)} therm${therms === 1 ? '' : 's'}`);
   } else if (type === 'crew') {
-    if (fdata.role) stats.push(cap(fdata.role));
-    if (fdata.thruster && fdata.thruster.thrust != null) stats.push(`thrust ${fdata.thruster.thrust}`);
+    if (fdata.role) stats.push(txt(cap(fdata.role)));
+    if (fdata.thruster && fdata.thruster.thrust != null) stats.push(thrustCircleGlyph(fdata.thruster.thrust));
   }
   const isru = propByKey('isru');
-  if (isru && isru.value != null) stats.push(`ISRU ${isru.value}`);
+  if (isru && isru.value != null) stats.push(`ISRU ${txt(isru.value)}`);
   if (type === 'robonaut') {
     for (const k of ['missile', 'raygun', 'buggy']) {
       const p = propByKey(k);
-      if (p && p.value) stats.push(p.label || cap(k));
+      if (p && p.value) stats.push(txt(p.label || cap(k)));
     }
-    if (card.prospect_bonus != null) stats.push(`+prospect ${card.prospect_bonus}`);
+    if (card.prospect_bonus != null) stats.push(`+prospect ${txt(card.prospect_bonus)}`);
   }
   // Reactors / generators carry their meaning in what chip they SUPPLY; if no
   // numeric headline landed, name the supplied chip(s) so the row isn't blank.
   if (!stats.length && supplies.length) {
-    for (const k of supplies) stats.push((REQUIREMENT_VIS[k] || {}).label || k);
+    for (const k of supplies) stats.push(txt((REQUIREMENT_VIS[k] || {}).label || k));
   }
 
   const spectralHtml = (type !== 'crew' && card.spectralType)
     ? spectralHex(card.spectralType).outerHTML : '';
-  return { icon, stats, spectralHtml, type };
+  return {
+    icon,
+    statsHtml: stats.join('<span class="acc-sep"> · </span>'),
+    hasStats: stats.length > 0,
+    spectralHtml,
+    type,
+  };
 }
 
 // Hand-drawn sun glyph: filled disc + 8 rays. Returns just the

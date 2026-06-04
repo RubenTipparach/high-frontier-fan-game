@@ -6129,6 +6129,20 @@ body:has(#view-browse:not(.hidden)) #main {
   outline: 1px solid rgba(56, 189, 248, 0.5);
   border-color: rgba(56, 189, 248, 0.5);
 }
+/* Roster row: the expand-toggle head (flex) + a per-player All cards button. */
+.mp-player-headrow { display: flex; align-items: stretch; }
+.mp-player-headrow .mp-player-head { flex: 1 1 auto; min-width: 0; }
+.mp-player-cards {
+  flex: 0 0 auto;
+  border: 0;
+  border-left: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink-mute);
+  font-size: 14px;
+  padding: 0 11px;
+  cursor: pointer;
+}
+.mp-player-cards:hover { background: rgba(255, 255, 255, 0.06); color: var(--ink); }
 .mp-player-head {
   display: flex;
   align-items: center;
@@ -6983,8 +6997,41 @@ body:has(#view-browse:not(.hidden)) #main {
 .all-cards-chip .acc-spec { flex: 0 0 auto; display: inline-flex; }
 .all-cards-chip .acc-spec svg.spectral-hex { width: 19px; height: 16px; display: block; }
 .all-cards-chip .acc-bot { display: flex; align-items: center; gap: 6px; }
-.all-cards-chip .acc-stat { font-size: 10.5px; color: #aeb6d6; line-height: 1.25; }
+.all-cards-chip .acc-stat {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  font-size: 10.5px;
+  color: #aeb6d6;
+  line-height: 1.3;
+}
 .all-cards-chip .acc-mass { margin-left: auto; font-size: 10px; color: #6f7396; flex: 0 0 auto; }
+.acc-sep { color: #4d5478; }
+/* Thrust pink circle + fuel water-droplet glyphs, echoing the card. */
+.gl-thrust { display: inline-block; vertical-align: middle; }
+.gl-fuel {
+  position: relative;
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+}
+.gl-fuel-ico { font-size: 14px; line-height: 1; }
+.gl-fuel-n {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8.5px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 0 2px #0b3a52, 0 0 2px #0b3a52, 0 0 1px #0b3a52;
+}
+.gl-fuel.is-dirt .gl-fuel-n { text-shadow: 0 0 2px #44403c, 0 0 2px #44403c; }
 .all-cards-chip.type-thruster  { border-left-color: var(--card-thruster); }
 .all-cards-chip.type-reactor   { border-left-color: var(--card-reactor); }
 .all-cards-chip.type-radiator  { border-left-color: var(--card-radiator); }
@@ -6994,4 +7041,13 @@ body:has(#view-browse:not(.hidden)) #main {
 .all-cards-chip.kind-crew      { border-left-color: var(--chip-color, #d9b25a); }
 
 .all-cards-empty { color: #5a6080; font-size: 12px; padding: 2px 0 4px; }
+.all-cards-hidden {
+  color: #8b90b8;
+  font-style: italic;
+  background: repeating-linear-gradient(45deg, #161d33, #161d33 6px, #1a2138 6px, #1a2138 12px);
+  border: 1px dashed #2c3658;
+  border-radius: 7px;
+  padding: 8px 10px;
+  display: inline-block;
+}
 .all-cards-coins { margin-top: 8px; }

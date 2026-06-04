@@ -2147,14 +2147,6 @@ function renderMpPanel(snapshot) {
   room.className = 'mp-room';
   room.textContent = _onlineRoom || 'Multiplayer table';
   row.appendChild(room);
-  // Same "All cards" overview as the hand panel: your own cards by location.
-  const mpAllBtn = document.createElement('button');
-  mpAllBtn.type = 'button';
-  mpAllBtn.className = 'mp-leave mp-all-cards';
-  mpAllBtn.textContent = '📚 All cards';
-  mpAllBtn.title = 'Show every card you own, grouped by location';
-  mpAllBtn.addEventListener('click', openAllCardsView);
-  row.appendChild(mpAllBtn);
   if (_onlineLeave) {
     const leave = document.createElement('button');
     leave.type = 'button';
@@ -2250,6 +2242,25 @@ function renderMpPlayer(p, isMe, isActive) {
   // everywhere.
   stats.textContent = `📍${onlineSiteLabel(rkt.siteId)} · 💧${p.aqua || 0} · ${vp}vp`;
   head.append(dot, name, stats);
+  // Per-player "All cards" overview button, headed by this player's name +
+  // seat colour. Their hand stays secret (shown as a count); LEO / Rocket /
+  // Outpost cards are open information, same as the per-stack inspector below.
+  const cardsBtn = document.createElement('button');
+  cardsBtn.type = 'button';
+  cardsBtn.className = 'mp-player-cards';
+  cardsBtn.textContent = '📚';
+  cardsBtn.title = `Show all of @${p.name}'s cards`;
+  cardsBtn.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    openAllCardsView({
+      title: '@' + p.name,
+      titleColor: p.color || null,
+      locs: collectOwnedCardsFromPlayer(p, isMe),
+    });
+  });
+  const headRow = document.createElement('div');
+  headRow.className = 'mp-player-headrow';
+  headRow.append(head, cardsBtn);
   const detail = document.createElement('div');
   detail.className = 'mp-player-detail';
   detail.hidden = true;
@@ -2260,7 +2271,7 @@ function renderMpPlayer(p, isMe, isActive) {
       detail.dataset.built = '1';
     }
   });
-  wrap.append(head, detail);
+  wrap.append(headRow, detail);
   return wrap;
 }
 
@@ -2928,7 +2939,16 @@ function wireHandStrip() {
     allBtn.className = 'hand-all-cards';
     allBtn.textContent = '📚 All cards';
     allBtn.title = 'Show every card you own, grouped by location';
-    allBtn.addEventListener('click', openAllCardsView);
+    allBtn.addEventListener('click', () => {
+      // Online: tint the header with my own seat colour + name.
+      const me = (_online && _onlineMe && _onlineSnapshot)
+        ? (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id) : null;
+      openAllCardsView({
+        title: me ? '@' + me.name : 'All cards',
+        titleColor: me ? me.color : null,
+        locs: collectOwnedCardsLocal(),
+      });
+    });
     handHeader.appendChild(allBtn);
   }
 
@@ -13573,53 +13593,98 @@ function _resolveOwnedSlot(slot) {
 }
 
 // Ordered list of owned-card locations for the All cards view.
-function collectOwnedCards() {
-  // Where each crew member currently sits (rocket, or an outpost letter), so a
-  // carried chit can be shown at its crew's location.
+// Assemble the ordered location list (Hand, LEO, Rocket, built Outposts) from a
+// normalized source, so the SAME layout serves the local player (read live from
+// the state modules) and any other player (read from a server snapshot). Chits
+// route to wherever their crew currently sits.
+function _buildOwnedLocations(src) {
   const crewLoc = {};
-  for (const s of getRocketStack()) if (s && CREW_BY_ID[s.id]) crewLoc[s.id] = 'rocket';
-  const outposts = getOutposts();
-  for (const [letter, op] of Object.entries(outposts)) {
-    for (const s of (op.cards || [])) if (s && CREW_BY_ID[s.id]) crewLoc[s.id] = letter;
+  for (const s of (src.rocketStack || [])) if (s && CREW_BY_ID[s.id]) crewLoc[s.id] = 'rocket';
+  for (const op of (src.outposts || [])) {
+    for (const s of (op.cards || [])) if (s && CREW_BY_ID[s.id]) crewLoc[s.id] = op.letter;
   }
   const carriedByLoc = {};
-  for (const ch of getChits()) {
+  for (const ch of (src.carriedChits || [])) {
     const where = (ch.crewId && crewLoc[ch.crewId]) || 'rocket';
     (carriedByLoc[where] = carriedByLoc[where] || []).push(ch);
   }
 
-  const rocketSite = getRocketSite();
   const locs = [];
-  locs.push({
-    key: 'hand', icon: '🃏', name: 'Hand', sub: '',
-    cards: getHandSlots().map(_resolveOwnedSlot).filter(Boolean),
-    water: null, chits: [], chitMode: null,
-  });
+  // Hand: secret for other players, so shown as a count instead of cards.
+  locs.push(src.hideHandCards
+    ? { key: 'hand', icon: '🃏', name: 'Hand', sub: '', cards: [],
+        hiddenCount: (src.handIds || []).length, water: null, chits: [], chitMode: null }
+    : { key: 'hand', icon: '🃏', name: 'Hand', sub: '',
+        cards: (src.handIds || []).map(_resolveOwnedSlot).filter(Boolean),
+        water: null, chits: [], chitMode: null });
   locs.push({
     key: 'leo', icon: '🌍', name: 'LEO', sub: '',
-    cards: getLeoCards().map(_resolveOwnedSlot).filter(Boolean),
-    water: { kind: 'aqua', value: getAqua() },
-    chits: getClaimedChits(), chitMode: 'scored',
+    cards: (src.leoSlots || []).map(_resolveOwnedSlot).filter(Boolean),
+    water: { kind: 'aqua', value: src.aqua | 0 },
+    chits: src.claimedChits || [], chitMode: 'scored',
   });
   locs.push({
     key: 'rocket', icon: '🚀', name: 'Rocket',
-    sub: rocketSite ? ('at ' + rocketSite.name) : 'at LEO',
-    cards: getRocketStack().map(_resolveOwnedSlot).filter(Boolean),
-    water: { kind: 'water', value: getTankWater(), fractional: true },
+    sub: src.rocketSiteName ? ('at ' + src.rocketSiteName) : 'at LEO',
+    cards: (src.rocketStack || []).map(_resolveOwnedSlot).filter(Boolean),
+    water: { kind: 'water', value: src.rocketTank, fractional: true },
     chits: carriedByLoc.rocket || [], chitMode: 'carried',
   });
-  for (const letter of ['A', 'B', 'C', 'D']) {
-    const op = outposts[letter];
-    if (!op) continue;
+  for (const op of (src.outposts || [])) {
     locs.push({
-      key: 'outpost' + letter, icon: '🏛', name: 'Outpost ' + letter,
-      sub: _siteNameFor(op.siteId),
+      key: 'outpost' + op.letter, icon: '🏛', name: 'Outpost ' + op.letter,
+      sub: op.siteName || '',
       cards: (op.cards || []).map(_resolveOwnedSlot).filter(Boolean),
       water: { kind: 'water', value: op.tank | 0 },
-      chits: carriedByLoc[letter] || [], chitMode: 'carried',
+      chits: carriedByLoc[op.letter] || [], chitMode: 'carried',
     });
   }
   return locs;
+}
+
+// The local player's cards, read live from the state modules (the solo sandbox,
+// or my own seat online).
+function collectOwnedCardsLocal() {
+  const rocketSite = getRocketSite();
+  const outposts = Object.entries(getOutposts()).map(([letter, op]) => ({
+    letter, siteName: _siteNameFor(op.siteId), cards: op.cards || [], tank: op.tank | 0,
+  }));
+  return _buildOwnedLocations({
+    handIds: getHandSlots(),
+    leoSlots: getLeoCards(),
+    aqua: getAqua(),
+    claimedChits: getClaimedChits(),
+    rocketStack: getRocketStack(),
+    rocketTank: getTankWater(),
+    rocketSiteName: rocketSite ? rocketSite.name : '',
+    outposts,
+    carriedChits: getChits(),
+    hideHandCards: false,
+  });
+}
+
+// Any player's cards, read from a server snapshot player object. Other players'
+// HANDS stay secret (shown as a count); their LEO / Rocket / Outpost cards are
+// open information, the same as the roster's per-stack inspector.
+function collectOwnedCardsFromPlayer(player, isLocal) {
+  const p = player || {};
+  const rkt = p.rocket || {};
+  const glory = p.glory || {};
+  const outposts = Object.entries(p.outposts || {}).map(([letter, op]) => ({
+    letter, siteName: onlineSiteLabel(op.siteId), cards: op.cards || [], tank: op.tank | 0,
+  }));
+  return _buildOwnedLocations({
+    handIds: p.hand || [],
+    leoSlots: p.leo || [],
+    aqua: p.aqua | 0,
+    claimedChits: glory.claimed || [],
+    rocketStack: rkt.stack || [],
+    rocketTank: rkt.tank,
+    rocketSiteName: rkt.siteId ? onlineSiteLabel(rkt.siteId) : '',
+    outposts,
+    carriedChits: glory.chits || [],
+    hideHandCards: !isLocal,
+  });
 }
 
 // A compact card chip for the overview that tells you at a glance what the
@@ -13634,7 +13699,7 @@ function _ownedCardChip(entry) {
     ? ((card.faces && card.faces[face] && card.faces[face].name) || card.name || id)
     : (card.name || id);
   const g = cardGlanceSummary(card, face);
-  const statText = g.stats.length ? g.stats.join(' · ') : (kind === 'crew' ? 'crew' : (card.type || 'card'));
+  const statHtml = g.hasStats ? g.statsHtml : esc(kind === 'crew' ? 'crew' : (card.type || 'card'));
   const massHtml = Number.isFinite(card.mass)
     ? '<span class="acc-mass" title="Mass">m' + card.mass + '</span>' : '';
   const chip = document.createElement('button');
@@ -13648,14 +13713,16 @@ function _ownedCardChip(entry) {
     + '<span class="acc-name">' + esc(name) + '</span>'
     + (g.spectralHtml ? '<span class="acc-spec">' + g.spectralHtml + '</span>' : '')
     + '</div>'
-    + '<div class="acc-bot"><span class="acc-stat">' + esc(statText) + '</span>' + massHtml + '</div>';
+    + '<div class="acc-bot"><span class="acc-stat">' + statHtml + '</span>' + massHtml + '</div>';
   chip.addEventListener('click', () => openCardModal(card, kind));
   return chip;
 }
 
-// Open the All cards modal: one section per location, each with its cards,
-// liquid (water / aqua), and glory chits.
-function openAllCardsView() {
+// Open the All cards modal for one player: one section per location, each with
+// its cards, liquid (water / aqua), and glory chits. `title` + `titleColor`
+// head the modal with that player's name in their seat colour; `locs` comes
+// from collectOwnedCardsLocal() (me) or collectOwnedCardsFromPlayer() (anyone).
+function openAllCardsView({ title = 'All cards', titleColor = null, locs = [] } = {}) {
   document.querySelector('.all-cards-overlay')?.remove();
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay all-cards-overlay';
@@ -13668,14 +13735,16 @@ function openAllCardsView() {
   dialog.className = 'all-cards-modal';
   overlay.appendChild(dialog);
 
-  const locs = collectOwnedCards();
-  const totalCards = locs.reduce((n, l) => n + l.cards.length, 0);
+  const totalShown = locs.reduce((n, l) => n + (l.hiddenCount != null ? l.hiddenCount : l.cards.length), 0);
+  const titleHtml = titleColor
+    ? '<span class="player-name" style="--player-color:' + esc(titleColor) + '">' + esc(title) + '</span>'
+    : esc(title);
 
   const head = document.createElement('div');
   head.className = 'all-cards-head';
   head.innerHTML =
-    '<h3>📚 All cards <span class="muted">' + totalCards + ' owned</span></h3>' +
-    '<button type="button" class="all-cards-close" title="Close (Esc)" aria-label="Close">×</button>';
+    '<h3>📚 ' + titleHtml + ' <span class="muted">' + totalShown + ' cards</span></h3>'
+    + '<button type="button" class="all-cards-close" title="Close (Esc)" aria-label="Close">×</button>';
   head.querySelector('.all-cards-close').addEventListener('click', close);
   dialog.appendChild(head);
 
@@ -13694,16 +13763,24 @@ function openAllCardsView() {
     }
     const chitCount = (loc.chits || []).length;
     if (chitCount) meta.push('<span class="acl-chits">🎖 ' + chitCount + '</span>');
+    const shown = loc.hiddenCount != null ? loc.hiddenCount : loc.cards.length;
     const h = document.createElement('header');
     h.className = 'all-cards-loc-head';
     h.innerHTML =
       '<span class="acl-name">' + esc(loc.icon) + ' ' + esc(loc.name) + '</span>'
       + (loc.sub ? '<span class="acl-sub">' + esc(loc.sub) + '</span>' : '')
-      + '<span class="acl-count">' + loc.cards.length + ' card' + (loc.cards.length === 1 ? '' : 's') + '</span>'
+      + '<span class="acl-count">' + shown + ' card' + (shown === 1 ? '' : 's') + '</span>'
       + '<span class="acl-meta">' + meta.join('') + '</span>';
     sec.appendChild(h);
 
-    if (loc.cards.length) {
+    if (loc.hiddenCount != null) {
+      const hid = document.createElement('div');
+      hid.className = 'all-cards-empty all-cards-hidden';
+      hid.textContent = loc.hiddenCount
+        ? loc.hiddenCount + ' card' + (loc.hiddenCount === 1 ? '' : 's') + ' (hidden)'
+        : 'No cards';
+      sec.appendChild(hid);
+    } else if (loc.cards.length) {
       const grid = document.createElement('div');
       grid.className = 'all-cards-chips';
       for (const e of loc.cards) grid.appendChild(_ownedCardChip(e));
