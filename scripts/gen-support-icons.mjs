@@ -44,9 +44,8 @@ const GLYPH = {
     <line x1="21.5" y1="10.5" x2="10.5" y2="21.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
     <circle cx="16" cy="16" r="2.5" fill="#fff"/>`,
   'reactor-fusion': () => `
-    <circle cx="11.2" cy="16" r="3" fill="none" stroke="#fff" stroke-width="1.9"/>
-    <circle cx="20.8" cy="16" r="3" fill="none" stroke="#fff" stroke-width="1.9"/>
-    <path d="M16 11.6 L17 15 L20.4 16 L17 17 L16 20.4 L15 17 L11.6 16 L15 15 Z" fill="#fff"/>`,
+    <path d="M5.5 16 C 7.7 9.6, 10.3 9.6, 12.5 16 C 14.7 22.4, 17.3 22.4, 19.5 16 C 21.7 9.6, 24.3 9.6, 26.5 16"
+          fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>`,
   'reactor-antimatter': () => `
     <g stroke="#fff" stroke-width="2.1" stroke-linecap="round">
       <line x1="16" y1="6.5" x2="16" y2="25.5"/>
@@ -58,7 +57,7 @@ const GLYPH = {
     <circle cx="16" cy="16" r="3.2" fill="none" stroke="#fff" stroke-width="1.8"/>`,
   // ---- Generator (orange) ----  (published markers: ⟛ and E)
   'gen-radioisotope': () => `
-    <text x="16" y="16.6" text-anchor="middle" dominant-baseline="central"
+    <text x="18.5" y="22" text-anchor="middle"
           fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="21" font-weight="700">⟛</text>`,
   'gen-electric': () => `
     <g fill="#fff">
