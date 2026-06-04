@@ -13310,10 +13310,47 @@ function localSeat() {
   return { name: 'You', color: null, handle: false };
 }
 
-// Golden glory chit. A CARRIED chit (transit) is a vibrant two-sided coin
-// that flips on tap (front value / back value, undecided until it comes home
-// or the crew is lost). A CLAIMED chit is FIXED on its scored side, rendered
-// darkened (it is spent), with the player who banked it named beneath.
+// Engraved decoration for the BACK (returned-home) coin face: a sunburst of
+// rays, a laurel wreath, and a beaded rim, drawn in darker / lighter orange
+// so the orange gradient reads as a struck, ornate "glory" medal. The number
+// (an HTML span) sits on top. Memoised - it's identical for every back face,
+// scaled to the coin by the SVG viewBox.
+let _chitBackDeco = null;
+function chitBackDeco() {
+  if (_chitBackDeco) return _chitBackDeco;
+  const cx = 50, cy = 50, parts = [];
+  // Sunburst rays from the centre out toward the rim.
+  for (let i = 0; i < 24; i++) {
+    const a = (2 * Math.PI * i) / 24;
+    const x0 = cx + 11 * Math.cos(a), y0 = cy + 11 * Math.sin(a);
+    const x1 = cx + 41 * Math.cos(a), y1 = cy + 41 * Math.sin(a);
+    parts.push(`<line x1="${x0.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${x1.toFixed(1)}" y2="${y1.toFixed(1)}" stroke="#9a3a06" stroke-width="0.7" opacity="0.42"/>`);
+  }
+  // Laurel wreath: leaves arcing up both sides, open at the top.
+  const leaf = (bx, by, ang) => {
+    const c = Math.cos(ang), s = Math.sin(ang), L = 7, W = 2.6;
+    const tx = bx + L * c, ty = by + L * s;
+    const px = bx + W * -s, py = by + W * c, qx = bx - W * -s, qy = by - W * c;
+    return `<path d="M ${bx.toFixed(1)},${by.toFixed(1)} Q ${px.toFixed(1)},${py.toFixed(1)} ${tx.toFixed(1)},${ty.toFixed(1)} Q ${qx.toFixed(1)},${qy.toFixed(1)} ${bx.toFixed(1)},${by.toFixed(1)} Z" fill="#c69a3e"/>`;
+  };
+  const Rw = 31;
+  for (const deg of [120, 140, 160, 180, 200]) { const a = (deg * Math.PI) / 180; parts.push(leaf(cx + Rw * Math.cos(a), cy + Rw * Math.sin(a), a + 0.35)); }
+  for (const deg of [60, 40, 20, 0, -20]) { const a = (deg * Math.PI) / 180; parts.push(leaf(cx + Rw * Math.cos(a), cy + Rw * Math.sin(a), a - 0.35)); }
+  // Beaded rim: dark beads with a light top-edge highlight.
+  for (let i = 0; i < 24; i++) {
+    const a = (2 * Math.PI * i) / 24;
+    const x = cx + 43 * Math.cos(a), y = cy + 43 * Math.sin(a);
+    parts.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.1" fill="#8a4408" opacity="0.85"/>`);
+    parts.push(`<circle cx="${x.toFixed(1)}" cy="${(y - 0.5).toFixed(1)}" r="0.9" fill="#e8b878" opacity="0.28"/>`);
+  }
+  _chitBackDeco = `<svg class="chit-deco" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" aria-hidden="true">${parts.join('')}</svg>`;
+  return _chitBackDeco;
+}
+
+// Golden glory chit. A CARRIED chit (transit) is a two-sided coin that flips
+// on tap: a gold FRONT (low value) and an ornate orange BACK (returned-home,
+// high value). A CLAIMED chit is FIXED on its scored side, rendered darkened
+// (it is spent), with the player who banked it named beneath.
 function buildChitToken(zone, { side = null, transit = false, crewId = null, player = null } = {}) {
   const sides = getChitSides(zone);
   const owner = crewId ? crewDisplayName(crewId) : '';
@@ -13333,6 +13370,7 @@ function buildChitToken(zone, { side = null, transit = false, crewId = null, pla
     wrap.className = 'chit-token-wrap';
     wrap.innerHTML = `
       <div class="chit-token chit-claimed chit-${esc(side)}" title="Claimed - ${esc(side)} value (fixed)">
+        ${side === 'back' ? chitBackDeco() : ''}
         <span class="chit-token-emoji" aria-hidden="true">🎖</span>
         <span class="chit-token-zone">${esc(zone)}</span>
         <span class="chit-token-vp">+${vp} VP</span>
@@ -13344,9 +13382,10 @@ function buildChitToken(zone, { side = null, transit = false, crewId = null, pla
     return wrap;
   }
 
-  // Carried (in transit): a vibrant two-sided flip coin.
+  // Carried (in transit): a two-sided flip coin (gold front, orange back).
   const face = (which, vp, variant) => `
     <div class="chit-token chit-face chit-face-${which} ${variant}">
+      ${which === 'back' ? chitBackDeco() : ''}
       <span class="chit-token-emoji" aria-hidden="true">🎖</span>
       <span class="chit-token-zone">${esc(zone)}</span>
       <span class="chit-token-vp">+${vp} VP</span>
@@ -13371,44 +13410,62 @@ function buildChitToken(zone, { side = null, transit = false, crewId = null, pla
   return flip;
 }
 
-// Map of zone -> the seat (name + colour) that has claimed its glory chit,
-// for the all-chits board. Multiplayer reads every player's visited zones
-// from the snapshot (the whole board is shared information; only planned
-// routes are secret); solo reads the local visited set. Unclaimed zones are
-// absent from the map.
+// Map of zone -> { name, color, handle, side, vp }: who has claimed each
+// zone's chit and the value it has resolved to. The resolved value follows
+// the crew's fate: a chit banked home scores its BACK value; one still being
+// carried, or scored after the crew died / colonised, takes the FRONT value
+// (the default, 1). Multiplayer reads every player's glory from the shared
+// snapshot (only routes are secret); solo reads the local glory. Unclaimed
+// zones are absent.
 function takenZoneMap() {
   const map = {};
+  const resolve = (zone, glory, seat) => {
+    if (map[zone]) return;
+    const banked = (glory.claimed || []).find((c) => c.zone === zone);
+    // Banked back = brought home; banked front, or still carried = the 1 VP
+    // front default.
+    const side = (banked && banked.side === 'back') ? 'back' : 'front';
+    const sides = getChitSides(zone);
+    const vp = (banked && Number.isFinite(banked.vp))
+      ? banked.vp : (side === 'back' ? sides.back : sides.front);
+    map[zone] = { ...seat, side, vp };
+  };
   if (_online && _onlineSnapshot && Array.isArray(_onlineSnapshot.players)) {
     for (const p of _onlineSnapshot.players) {
-      const v = p.glory && p.glory.visited;
-      if (!Array.isArray(v)) continue;
+      const g = p.glory;
+      if (!g || !Array.isArray(g.visited)) continue;
       const seat = { name: p.name, color: p.color || null, handle: true };
-      for (const z of v) if (!map[z]) map[z] = seat;
+      for (const z of g.visited) resolve(z, g, seat);
     }
   } else {
     const me = localSeat();
+    const g = { claimed: getClaimedChits() };
     for (const z of Object.keys(ZONE_CHIT_VPS)) {
-      if (isZoneVisited(z) && !map[z]) map[z] = me;
+      if (isZoneVisited(z)) resolve(z, g, me);
     }
   }
   return map;
 }
 
-// One zone's coin for the all-chits board. Unclaimed: a vibrant flip-coin
-// (tap toggles between the front and back value). Taken by a player: a
-// dimmed, fixed coin showing both values, the claimer's seat name beneath.
+// One zone's coin for the all-chits board. Unclaimed: a flip-coin (tap
+// toggles gold front / orange back). Taken by a player: a dimmed, fixed coin
+// showing the SINGLE resolved value (back if brought home, else the 1 VP
+// front default), with the claimer's seat name beneath.
 function buildZoneBoardChit(zone, takenBy = null) {
   const sides = getChitSides(zone);
   if (takenBy) {
     const label = (takenBy.handle && takenBy.name) ? '@' + takenBy.name : (takenBy.name || '');
     const color = takenBy.color || null;
+    const side = takenBy.side === 'back' ? 'back' : 'front';
+    const vp = Number.isFinite(takenBy.vp) ? takenBy.vp : (side === 'back' ? sides.back : sides.front);
     const wrap = document.createElement('div');
     wrap.className = 'chit-token-wrap';
     wrap.innerHTML = `
-      <div class="chit-token chit-claimed chit-back chit-zone-taken" title="${esc(zone)} chit taken${label ? ' by ' + esc(label) : ''}">
+      <div class="chit-token chit-claimed chit-${side} chit-zone-taken" title="${esc(zone)} chit taken${label ? ' by ' + esc(label) : ''} (${vp} VP)">
+        ${side === 'back' ? chitBackDeco() : ''}
         <span class="chit-token-emoji" aria-hidden="true">🎖</span>
         <span class="chit-token-zone">${esc(zone)}</span>
-        <span class="chit-token-vp">${sides.front} / ${sides.back}</span>
+        <span class="chit-token-vp">${vp} VP</span>
         <span class="chit-token-side">taken</span>
       </div>
       ${label ? `<span class="chit-claim-by player-name"${color ? ` style="--player-color:${esc(color)}"` : ''}>${esc(label)}</span>` : ''}`;
@@ -13416,6 +13473,7 @@ function buildZoneBoardChit(zone, takenBy = null) {
   }
   const face = (which, vp, variant) => `
     <div class="chit-token chit-face chit-face-${which} ${variant}">
+      ${which === 'back' ? chitBackDeco() : ''}
       <span class="chit-token-emoji" aria-hidden="true">🎖</span>
       <span class="chit-token-zone">${esc(zone)}</span>
       <span class="chit-token-vp">+${vp} VP</span>
