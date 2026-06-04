@@ -99,6 +99,7 @@ export function hydrateFromSnapshot(snapshot, myId, maps) {
     activeThrusterId: r.activeThrusterId || null,
     activeProspectorId: r.activeProspectorId || null,
     tank: r.tank | 0,
+    tankGrade: r.tankGrade === 'dirt' ? 'dirt' : 'water',
     afterburnEngaged: !!r.afterburnEngaged,
   });
   setAqua(me ? (me.aqua | 0) : 0);

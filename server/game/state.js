@@ -136,6 +136,11 @@ function freshPlayer({ profileId, name, seat, color }) {
       activeThrusterId: null,
       activeProspectorId: null,
       tank: STARTING_WATER,
+      // Fuel grade in the tank: 'water' (blue) or 'dirt' (grey). Water and
+      // dirt cannot mix - a refuel of the other grade is blocked until the
+      // tank empties. A dirt thruster burns dirt; a water thruster burns
+      // water. Default water; meaningless while tank is 0.
+      tankGrade: 'water',
       afterburnEngaged: false,
     },
     // LEO Stack: a per-player parking lot of cards staged at LEO.

@@ -138,11 +138,43 @@ function thrusterFaceOf(slot) {
       thrust: cf.thruster.thrust,
       fuel: cf.thruster.fuelPerBurn,
       afterburn: cf.thruster.afterburn || 0,
+      dirt: !!cf.thruster.dirt,   // a crew dirt thruster (grey fuel)
       requires: [],   // crew thrusters are self-contained (no support chain)
       properties: cf.prospector ? [{ key: cf.prospector, value: true }] : [],
     };
   }
   return {};
+}
+
+// A thruster face burns DIRT (grey) fuel rather than WATER (blue) when its
+// fuelType is Dirt (patents / robonauts, from the card sheet) or its crew
+// rocket is flagged dirt. Everything else burns water.
+function faceBurnsDirt(face) {
+  return !!(face && (face.fuelType === 'Dirt' || face.dirt === true));
+}
+
+// The fuel grade the active thruster needs: 'dirt' for a dirt thruster, else
+// 'water'. 'water' when there is no active thruster.
+function activeFuelGrade(rocket) {
+  const tid = rocket.activeThrusterId;
+  if (!tid) return 'water';
+  const slot = rocket.stack.find((s) => s.id === tid);
+  if (!slot) return 'water';
+  return faceBurnsDirt(thrusterFaceOf(slot)) ? 'dirt' : 'water';
+}
+
+// The grade currently in the tank ('water' default; meaningless at tank 0).
+function tankGradeOf(rocket) {
+  return rocket.tankGrade === 'dirt' ? 'dirt' : 'water';
+}
+
+// Heliocentric-zone distance from Earth (Delivery cost driver). Earth = 0,
+// Mars/Venus = 1, Ceres = 2, ... Neptune = 6. Unknown zone = 0.
+const ZONE_ORDER = ['Mercury', 'Venus', 'Earth', 'Mars', 'Ceres', 'Jupiter', 'Saturn', 'Uranus', 'Neptune'];
+function zonesFromEarth(zone) {
+  const i = ZONE_ORDER.indexOf(zone);
+  if (i < 0) return 0;
+  return Math.abs(i - ZONE_ORDER.indexOf('Earth'));
 }
 
 // A slot is a thruster if its card type is thruster, its active face exposes
@@ -498,6 +530,14 @@ function applyMove(state, op, player) {
     fuelStepsNeeded: stepsNeeded,
     enough: stepsNeeded <= stepsAvail,
   };
+  // Fuel-grade gate: a dirt thruster burns only dirt, a water thruster only
+  // water. If the tank holds fuel of the wrong grade, the burn can't draw on
+  // it (clearer than "insufficient" - the fuel is there, just incompatible).
+  if (stepsNeeded > 0 && (Number(player.rocket.tank) || 0) > 0) {
+    const need = activeFuelGrade(player.rocket);
+    const have = tankGradeOf(player.rocket);
+    if (need !== have) return fail('wrong_fuel_grade', { need, have });
+  }
   if (stepsNeeded > stepsAvail) {
     return fail('insufficient_water', moveCalc);
   }
@@ -784,8 +824,11 @@ function applyRefuel(state, op, player) {
   if (!rocketAtLeo(player)) return fail('rocket_not_at_leo');
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
-  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
   const tank = Number(player.rocket.tank) || 0;
+  // Water and dirt can't mix: refuse to pour water onto a dirt tank. Empty
+  // the dirt first (burn it off) before taking on water.
+  if (tank > 0 && tankGradeOf(player.rocket) === 'dirt') return fail('cannot_mix_fuel');
+  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
   // Whole water units only; any sub-1 remainder left by a burn stays put
   // (don't floor the tank away when topping up).
   const room = Math.floor(Math.max(0, TANK_MAX - dry - tank));
@@ -796,6 +839,7 @@ function applyRefuel(state, op, player) {
   }
   player.aqua -= amt;
   player.rocket.tank = round6(tank + amt);
+  player.rocket.tankGrade = 'water';
   return { ok: true, state, log: `${player.name} converted ${amt} aqua to water (tank ${round6(player.rocket.tank)}).` };
 }
 
@@ -836,6 +880,11 @@ function applyClearRoute(state, _op, player) {
 // at LEO. Clamped by the water on hand. Free, turn-gated. op={amount}.
 function applyCashWater(state, op, player) {
   if (!rocketAtLeo(player)) return fail('rocket_not_at_leo');
+  // Only water is worth aqua; dirt is free field propellant with no cash
+  // value. Burn dirt off to empty the tank, then it can take water again.
+  if (tankGradeOf(player.rocket) === 'dirt' && (Number(player.rocket.tank) || 0) > 0) {
+    return fail('not_water_fuel');
+  }
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
   // Whole water units only; the sub-1 remainder can't be cashed and stays.
@@ -1299,6 +1348,8 @@ function applySiteRefuel(state, op, player) {
   const cap = Math.max(0, TANK_MAX - dry);
   const tank = Number(player.rocket.tank) || 0;
   if (tank >= cap) return fail('tank_full');
+  // Site refuel makes WATER; it can't top up a dirt tank (no mixing).
+  if (tank > 0 && tankGradeOf(player.rocket) === 'dirt') return fail('cannot_mix_fuel');
   let rawGain, label;
   if (op.mode === 'factory') {
     const fac = state.factories[siteId];
@@ -1317,11 +1368,117 @@ function applySiteRefuel(state, op, player) {
   const gain = Math.min(rawGain, cap - tank);
   if (gain <= 0) return fail('tank_full');
   player.rocket.tank = round6(tank + gain);
+  player.rocket.tankGrade = 'water';
   player.refueledSites.push(siteId);
   player.opsRemaining -= 1;
   return {
     ok: true, state,
     log: `${player.name}: ${label} at ${site.name} (+${round6(gain)} water; tank ${round6(player.rocket.tank)}).`,
+  };
+}
+
+// Free dirt refuel (Cargo Transfer free action / crew bonus): top the tank
+// with grey dirt FTs. Only a DIRT thruster can take dirt, and dirt can't mix
+// with water (empty the tank first). A non-crew dirt thruster fills to the
+// wet-mass cap; a crew dirt thruster takes 1 FT, once per turn. Costs NO
+// operation (free action). op = {} (acts on the active thruster).
+function applyDirtRefuel(state, _op, player) {
+  const tid = player.rocket.activeThrusterId;
+  const slot = tid && player.rocket.stack.find((s) => s.id === tid);
+  if (!slot) return fail('no_thruster');
+  const face = thrusterFaceOf(slot);
+  if (!faceBurnsDirt(face)) return fail('not_dirt_thruster');
+  const tank = Number(player.rocket.tank) || 0;
+  if (tank > 0 && tankGradeOf(player.rocket) === 'water') return fail('cannot_mix_fuel');
+  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const cap = Math.max(0, TANK_MAX - dry);
+  if (tank >= cap) return fail('tank_full');
+  const isCrew = isCrewSlot(slot);
+  // Crew dirt thruster: 1 FT max per turn. Non-crew: fill to the cap.
+  if (isCrew) {
+    player.dirtRefueledThisTurn = !!player.dirtRefueledThisTurn;
+    if (player.dirtRefueledThisTurn) return fail('already_dirt_refueled');
+  }
+  const gain = isCrew ? Math.min(1, cap - tank) : (cap - tank);
+  if (gain <= 0) return fail('tank_full');
+  player.rocket.tank = round6(tank + gain);
+  player.rocket.tankGrade = 'dirt';
+  if (isCrew) player.dirtRefueledThisTurn = true;
+  return {
+    ok: true, state,
+    log: `${player.name} loaded +${round6(gain)} dirt FT${gain === 1 ? '' : 's'} (tank ${round6(player.rocket.tank)} dirt).`,
+  };
+}
+
+// Delivery (rulebook): ship a Black-Side card from one of your Factories'
+// outposts back to LEO. Costs FT (water) FROM THAT OUTPOST'S tank, not the
+// bank: zones-from-Earth x2, +1 if the site number is over 7. Spends the
+// turn's operation. op = { siteId, letter, cardId }.
+function applyDelivery(state, op, player) {
+  const siteId = String(op.siteId || '');
+  const letter = String(op.letter || '');
+  const cardId = String(op.cardId || '');
+  const site = siteById(siteId);
+  if (!site) return fail('unknown_site');
+  const fac = state.factories[siteId];
+  if (!fac || fac.ownerId !== player.profileId) return fail('no_factory');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  const outpost = player.outposts && player.outposts[letter];
+  if (!outpost || outpost.siteId !== siteId) return fail('no_outpost');
+  const idx = (outpost.cards || []).findIndex((c) => c.id === cardId);
+  if (idx < 0) return fail('not_in_outpost');
+  const slot = outpost.cards[idx];
+  if (slot.face !== 'secondary') return fail('not_black_side');
+  const zones = zonesFromEarth(site.solarZone);
+  const cost = zones * 2 + (nodeSizeNumber(siteId) > 7 ? 1 : 0);
+  const have = Number(outpost.tank) || 0;
+  if (have < cost) return fail('insufficient_outpost_water', { cost, have });
+  outpost.tank = round6(have - cost);
+  outpost.cards.splice(idx, 1);
+  player.leo = player.leo || [];
+  player.leo.push({ id: slot.id, kind: slot.kind || 'patent', face: 'secondary' });
+  player.opsRemaining -= 1;
+  const card = PATENTS_BY_ID[cardId];
+  return {
+    ok: true, state,
+    log: `${player.name} delivered ${card ? card.name : cardId} from ${site.name} to LEO (cost ${cost} water from Outpost ${letter}).`,
+  };
+}
+
+// Build Colony (free action): consume a Crew that is colocated with your
+// Factory to found a permanent Colony there. The Colony waives the
+// factory-assist hazard roll for everyone landing/lifting there and scores
+// at game end. The crew is spent (it settles), not returned to hand. Costs
+// NO operation. op = { cardId } (the crew to settle; defaults to the first
+// crew in the stack).
+function applyBuildColony(state, op, player) {
+  const siteId = player.rocket.siteId;
+  if (!siteId) return fail('not_at_site');
+  const site = siteById(siteId);
+  if (!site) return fail('unknown_site');
+  const fac = state.factories[siteId];
+  if (!fac || fac.ownerId !== player.profileId) return fail('no_factory');
+  if (state.colonies[siteId]) return fail('already_colony');
+  let cardId = String(op.cardId || '');
+  let slot = cardId && player.rocket.stack.find((s) => s.id === cardId && isCrewSlot(s));
+  if (!slot) slot = player.rocket.stack.find((s) => isCrewSlot(s));   // default: first crew
+  if (!slot) return fail('no_crew');
+  cardId = slot.id;
+  // The colonising crew leaves the rocket and re-spawns in the LEO Stack
+  // (the same variant rule destroyRocket + the sandbox doColonize use:
+  // crew is never lost, it returns to LEO).
+  player.rocket.stack = player.rocket.stack.filter((s) => s.id !== cardId);
+  if (player.rocket.activeThrusterId === cardId) player.rocket.activeThrusterId = null;
+  if (player.rocket.activeProspectorId === cardId) player.rocket.activeProspectorId = null;
+  clipTank(player.rocket);
+  player.leo = player.leo || [];
+  player.leo.push({ id: cardId, kind: 'crew', face: slot.face === 'secondary' ? 'secondary' : 'primary' });
+  state.colonies[siteId] = { ownerId: player.profileId };
+  const crew = CREW_BY_ID[cardId];
+  const crewName = crew ? ((crew.faces && crew.faces[slot.face === 'secondary' ? 'secondary' : 'primary'] || {}).name || crew.id) : cardId;
+  return {
+    ok: true, state,
+    log: `${player.name} founded a Colony at ${site.name} (settled ${crewName}).`,
   };
 }
 
@@ -1331,6 +1488,9 @@ function applySiteRefuel(state, op, player) {
 const FUNCTIONAL = {
   INCOME: applyIncome,
   SITE_REFUEL: applySiteRefuel,
+  DIRT_REFUEL: applyDirtRefuel,
+  DELIVERY: applyDelivery,
+  BUILD_COLONY: applyBuildColony,
   MOVE: applyMove,
   BUILD_ROCKET: applyBuildRocket,
   BOOST: applyBoost,
@@ -1371,6 +1531,9 @@ function pickPayload(op) {
     case 'PROSPECT': return { siteId: op.siteId };
     case 'PROSPECT_REROLL': return { siteId: op.siteId };
     case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode };
+    case 'DIRT_REFUEL': return {};
+    case 'DELIVERY': return { siteId: op.siteId, letter: op.letter, cardId: op.cardId };
+    case 'BUILD_COLONY': return { cardId: op.cardId };
     case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds };
     case 'ET_PRODUCE': return { siteId: op.siteId, cardId: op.cardId, letter: op.letter, isNewOutpost: !!op.isNewOutpost };
     // Route ops ride the undo stack like every other functional op, so
@@ -1438,6 +1601,8 @@ function openTurnFor(state, player) {
   // One refuel per site per turn: clear the per-turn ledger so the
   // sites this player tapped last turn are refuellable again.
   player.refueledSites = [];
+  // Crew dirt thrusters take 1 dirt FT per turn; reset the per-turn flag.
+  player.dirtRefueledThisTurn = false;
   state.turnActions = [];
   state.turnRedo = [];
 }

@@ -34,7 +34,8 @@ import {
   removeFromStack as rocketRemoveCard, clearStack as rocketClearStack,
   onRocketChange, isRocketActive,
   getActiveThrusterId, setActiveThruster,
-  getTankWater, setTankWater, addFuel, removeFuel, getTankMax,
+  getTankWater, setTankWater, addFuel, removeFuel, getTankMax, getWaterCap,
+  getTankGrade, setTankGrade, getActiveFuelGrade,
   getStackTotals, getActiveThrusterStats, setSolarZone,
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats,
@@ -2510,6 +2511,18 @@ function humanizeOnlineOpError(code, detail) {
     already_industrialized: 'This site already has a factory.',
     cannot_industrialize: 'Industrialize needs a refinery + a robonaut (with their supports) in the stack.',
     no_factory: 'You need your own factory here.',
+    cannot_mix_fuel: 'Water and dirt can\'t mix - burn the tank empty before switching fuel.',
+    wrong_fuel_grade: 'Wrong fuel: a dirt thruster burns dirt, a water thruster burns water. Refuel the matching grade.',
+    not_dirt_thruster: 'Only a dirt thruster can take on dirt fuel.',
+    not_water_fuel: 'Dirt has no cash value - only water converts back to aqua.',
+    no_thruster: 'Activate a thruster first.',
+    already_dirt_refueled: 'This crew dirt thruster already took its 1 dirt FT this turn.',
+    no_outpost: 'No outpost there to deliver from.',
+    not_in_outpost: 'That card is not in the outpost.',
+    not_black_side: 'Only a Black-Side (installed) card can be delivered.',
+    insufficient_outpost_water: 'The outpost doesn\'t have enough water to pay the delivery cost.',
+    already_colony: 'This site already has a colony.',
+    no_crew: 'You need a crew here to found a colony.',
     dry_site: 'This site has no water to refine (hydration 0).',
     already_refueled: 'You\'ve already refined here this turn. End turn to refresh.',
     no_prospector: 'Activate an ISRU prospector before refining here.',
@@ -7518,6 +7531,83 @@ function doFactoryRefuel(site, gain) {
   openFuelTankModal({ fromWater: tankBefore, toWater: tankBefore + gain });
 }
 
+// Free dirt refuel (Cargo Transfer free action). Only a dirt thruster can
+// take dirt, and dirt can't mix with water. A non-crew dirt thruster fills
+// to the cap; a crew dirt thruster takes 1 FT. No operation is spent.
+function doDirtRefuel() {
+  // Online: the server validates the dirt thruster + grade and fills the
+  // tank; the snapshot repaints the (grey) tank.
+  if (_online) { submitOnlineOp({ kind: 'DIRT_REFUEL' }); return; }
+  if (getActiveFuelGrade() !== 'dirt') {
+    setStatus('Dirt refuel needs an active dirt thruster.');
+    return;
+  }
+  const tank = getTankWater();
+  if (tank > 0 && getTankGrade() === 'water') {
+    setStatus('Water and dirt can\'t mix - burn the tank empty first.');
+    return;
+  }
+  const room = getWaterCap() - tank;
+  if (room <= 0) { setStatus('Tank is already full.'); return; }
+  const isCrew = !!CREW_BY_ID[getActiveThrusterId()];
+  const gain = isCrew ? Math.min(1, room) : room;
+  setTankGrade('dirt');
+  addFuel(gain);
+  setStatus(`🟤 Loaded <strong>+${gain}</strong> dirt FT${gain === 1 ? '' : 's'} (tank now grey).`);
+  logAction({
+    type: 'dirt_refuel', icon: '🟤',
+    summary: `Dirt refuel +${gain} (tank ${getTankWater()} dirt)`,
+    undoable: false,
+  });
+}
+
+// Delivery (rulebook): ship a Black-Side card from an outpost at one of your
+// Factories back to LEO. Cost: zones-from-Earth x2 (+1 if site number > 7)
+// water, paid FROM THE OUTPOST'S tank. Spends the turn's operation.
+function deliveryCost(site) {
+  const zones = zonesFromEarthClient(site && site.solarZone);
+  return zones * 2 + (siteSizeNumber(site) > 7 ? 1 : 0);
+}
+function doDelivery(site, letter, cardId) {
+  // Online: the server moves the card + spends the outpost water; snapshot
+  // repaints the LEO stack + outpost.
+  if (_online) {
+    const sid = toServerId(_onlineMaps, site.id);
+    if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
+    submitOnlineOp({ kind: 'DELIVERY', siteId: sid, letter, cardId });
+    return;
+  }
+  if (!requireOp('Delivery')) return;
+  const outpost = getOutpost(letter);
+  if (!outpost || outpost.siteId !== site.id) { setStatus('No outpost there to deliver from.'); return; }
+  const idx = (outpost.cards || []).findIndex((c) => c.id === cardId);
+  if (idx < 0) { setStatus('That card is not in the outpost.'); return; }
+  if (outpost.cards[idx].face !== 'secondary') { setStatus('Only a Black-Side card can be delivered.'); return; }
+  const cost = deliveryCost(site);
+  if ((Number(outpost.tank) || 0) < cost) {
+    setStatus(`Outpost ${esc(letter)} needs ${cost} water to deliver; it has ${outpost.tank | 0}.`);
+    return;
+  }
+  outpost.tank = (Number(outpost.tank) || 0) - cost;
+  removeCardFromOutpost(letter, idx);
+  addCardToLeo({ id: cardId, kind: 'patent', face: 'secondary' });
+  const card = PATENTS_BY_ID[cardId];
+  setStatus(`📦 Delivered <strong>${esc(card ? card.name : cardId)}</strong> to LEO (cost ${cost} water from Outpost ${esc(letter)}).`);
+  logAction({
+    type: 'delivery', icon: '📦',
+    summary: `Delivered ${card ? card.name : cardId} from ${site.name} to LEO (cost ${cost} water)`,
+    undoable: false,
+    data: { siteId: site.id, letter, cardId, cost },
+  });
+}
+
+// Heliocentric-zone distance from Earth (mirror of engine.js#zonesFromEarth).
+const ZONE_ORDER_CLIENT = ['Mercury', 'Venus', 'Earth', 'Mars', 'Ceres', 'Jupiter', 'Saturn', 'Uranus', 'Neptune'];
+function zonesFromEarthClient(zone) {
+  const i = ZONE_ORDER_CLIENT.indexOf(zone);
+  return i < 0 ? 0 : Math.abs(i - ZONE_ORDER_CLIENT.indexOf('Earth'));
+}
+
 // Wipe browse.js module-local state that the global resets in
 // card-market.js#resetSandboxEconomy can't reach: the rocket
 // position, planned route, trail, the undo snapshot, the
@@ -7941,6 +8031,13 @@ function doColonize(site, stack, options) {
     options,
     onCommit: (pick) => {
       if (!pick) return;
+      // Online: the server settles the crew (returns it to LEO) and places
+      // the colony; the snapshot repaints the colony ring. Build Colony is a
+      // FREE action server-side, so no op is spent.
+      if (_online) {
+        submitOnlineOp({ kind: 'BUILD_COLONY', cardId: pick.id });
+        return;
+      }
       // Re-find by id at commit time - splices may have shifted
       // indices since the modal opened, though in practice
       // nothing else mutates the stack during the modal's
@@ -8183,6 +8280,8 @@ function openDumpWaterModal(maxWater) {
 // strip is read-only for now.
 function buildFuelStrip(host, totals) {
   host.innerHTML = '';
+  // Grey the strip when the tank holds dirt instead of blue water.
+  host.classList.toggle('is-dirt-fuel', getTankGrade() === 'dirt');
   const wm = Math.max(0, totals.wetMass | 0);
   const dm = Math.max(0, totals.dryMass | 0);
 
@@ -8372,10 +8471,11 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const fracLadder = wcNow.fractions.length ? wcNow.fractions.join(' ') : 'whole steps';
 
   const panel = document.createElement('div');
-  panel.className = 'fuel-tank-panel';
+  const isDirt = getTankGrade() === 'dirt';
+  panel.className = 'fuel-tank-panel' + (isDirt ? ' is-dirt-fuel' : '');
   panel.innerHTML = `
     <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
-    <h2 class="fuel-tank-title">💧 Water tank</h2>
+    <h2 class="fuel-tank-title">${isDirt ? '🟤 Dirt tank' : '💧 Water tank'}</h2>
     <p class="muted fuel-tank-sub">Tap outside or press Esc to close</p>
     <div class="fuel-tank-stage">
       <svg viewBox="0 0 120 220" class="fuel-tank-svg" preserveAspectRatio="xMidYMid meet">
@@ -11726,6 +11826,29 @@ function showSitePopupFor(site) {
       });
     }
   }
+  // Dirt refuel (Cargo Transfer free action). Shown when the active
+  // thruster is a dirt thruster and the rocket is parked here (or at LEO).
+  // Fills the tank with grey dirt FTs (crew dirt thruster: 1 FT). Water and
+  // dirt can't mix. No operation cost.
+  if (rocketSite && site.id === rocketSite.id && getActiveFuelGrade() === 'dirt') {
+    const tank = getTankWater();
+    const room = Math.max(0, getWaterCap() - tank);
+    const mixed = tank > 0 && getTankGrade() === 'water';
+    const ok = room > 0 && !mixed;
+    const isCrew = !!CREW_BY_ID[getActiveThrusterId()];
+    const gain = isCrew ? Math.min(1, room) : room;
+    actions.push({
+      label: mixed ? '🟤 Dirt refuel (empty water first)'
+        : room <= 0 ? '🟤 Tank full'
+        : `🟤 Dirt refuel (+${gain})`,
+      variant: ok ? 'rocket' : 'secondary',
+      disabled: !ok,
+      title: mixed
+        ? 'Burn the water tank empty before taking on dirt - the two can\'t mix.'
+        : 'Free: a dirt thruster loads grey dirt FTs (a crew dirt thruster takes 1 per turn).',
+      onClick: () => { if (!ok) return; doDirtRefuel(); _renderer.clearSitePopup(); },
+    });
+  }
   // Industrialize action (rulebook I7). Shown only at sites where
   // the rocket is parked AND a successful claim disc exists. The
   // button gates on whether the stack has a valid refinery +
@@ -11802,6 +11925,33 @@ function showSitePopupFor(site) {
         title: `Colony already established at this site.`,
         onClick: () => {},
       });
+    }
+  }
+  // Delivery action (rulebook). Ship a Black-Side card from an outpost at
+  // your factory back to LEO. Cost: zones-from-Earth x2 (+1 if site
+  // number > 7) water, paid from the outpost's tank. One button per
+  // deliverable card. Costs the turn's operation.
+  {
+    const factory = getFactory(site.id);
+    if (factory && factory.ownerId === SANDBOX_OWNER_ID) {
+      const cost = deliveryCost(site);
+      for (const op of Object.values(getOutposts())) {
+        if (op.siteId !== site.id) continue;
+        for (const c of (op.cards || [])) {
+          if (c.face !== 'secondary') continue;
+          const card = PATENTS_BY_ID[c.id];
+          const afford = (Number(op.tank) || 0) >= cost;
+          actions.push({
+            label: `📦 Deliver ${card ? card.name : c.id} (-${cost} water)`,
+            variant: afford ? 'rocket' : 'secondary',
+            disabled: !afford,
+            title: afford
+              ? `Ship this Black-Side card to LEO for ${cost} water from Outpost ${op.letter}.`
+              : `Outpost ${op.letter} needs ${cost} water to deliver (has ${op.tank | 0}).`,
+            onClick: () => { if (!afford) return; doDelivery(site, op.letter, c.id); _renderer.clearSitePopup(); },
+          });
+        }
+      }
     }
   }
   // ET Production action (rulebook I8). Shown whenever the player
@@ -13227,6 +13377,7 @@ const MP_LOG_ICONS = {
   INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧',
   ET_PRODUCE: '🏭', SITE_REFUEL: '💧',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
+  DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🏠',
   REFUEL: '💧', CASH_WATER: '💎', DISCARD: '🗑',
   TRANSFER: '🔀', TRANSFER_FUEL: '💧',
   CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑',

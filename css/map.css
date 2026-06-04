@@ -661,6 +661,9 @@
 .tank-water-foam {
   fill: rgba(125, 211, 252, 0.55);
 }
+/* Dirt fuel: grey/brown column instead of blue water. */
+.fuel-tank-panel.is-dirt-fuel .tank-water { fill: #8a7f6c; }
+.fuel-tank-panel.is-dirt-fuel .tank-water-foam { fill: rgba(168, 154, 130, 0.6); }
 /* Dry-mass block: a hatched grey rectangle anchored to the
    bottom of the tank, representing the wet-mass capacity
    already claimed by the rocket's cards. Water floats above
@@ -905,6 +908,15 @@
 .fuel-strip-cell.is-co-chit {
   outline: 2px solid #facc15;
   outline-offset: -1px;
+}
+/* Dirt fuel (grey): the tank holds grey dirt FTs, not blue water. The band
+   colours are inline (weight-class blues), so desaturate + brown-cast the
+   whole band block, and recolour the wet chit to dirt-grey. */
+.rocket-fuel-strip.is-dirt-fuel .fuel-strip-bands {
+  filter: grayscale(0.92) sepia(0.28) brightness(0.9);
+}
+.rocket-fuel-strip.is-dirt-fuel .fuel-strip-cell.is-wet-chit::after {
+  background: #8a7f6c;
 }
 .rocket-fuel-strip-legend {
   display: flex;
