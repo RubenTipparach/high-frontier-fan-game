@@ -23,7 +23,7 @@ const ROBO_PINK = '#f9a8d4';
 const CAT = {
   reactor:   { shape: 'square', fill: '#8b5cf6', ring: '#6d28d9', ink: '#ffffff', name: 'Reactor (purple square)' },
   generator: { shape: 'circle', fill: '#f97316', ring: '#c2410c', ink: '#ffffff', name: 'Generator (orange circle)' },
-  robonaut:  { shape: 'circle', fill: '#0c0a16', ring: '#be185d', ink: ROBO_PINK, name: 'Robonaut (black + pink)' },
+  robonaut:  { shape: 'square', fill: '#0c0a16', ring: '#be185d', ink: ROBO_PINK, name: 'Robonaut (black + pink square)' },
 };
 
 // Glyphs use currentColor (set per category) + "__HOLE__" for negative space.
@@ -45,21 +45,24 @@ const GLYPH = {
     <circle cx="16" cy="16" r="3.2" fill="__HOLE__"/>
     <circle cx="16" cy="16" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/>`,
   'gen-radioisotope': () => `
-    <text x="18.5" y="22" text-anchor="middle"
-          fill="currentColor" font-family="DejaVu Sans, sans-serif" font-size="21" font-weight="700">⟛</text>`,
-  'gen-electric': () => `
     <g fill="currentColor">
-      <rect x="11" y="8.5" width="2.6" height="15" rx="0.6"/>
-      <rect x="11" y="8.5" width="9.6" height="2.6" rx="0.6"/>
-      <rect x="11" y="14.7" width="7.6" height="2.4" rx="0.6"/>
-      <rect x="11" y="20.9" width="9.6" height="2.6" rx="0.6"/>
+      <rect x="13.4" y="10.5" width="2.2" height="11" rx="0.4"/>
+      <rect x="16.4" y="10.5" width="2.2" height="11" rx="0.4"/>
+    </g>
+    <g stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+      <line x1="7" y1="16" x2="13.4" y2="16"/>
+      <line x1="18.6" y1="16" x2="25" y2="16"/>
     </g>`,
+  'gen-electric': () => `
+    <text x="16" y="16" text-anchor="middle" dominant-baseline="central"
+          fill="currentColor" font-family="DejaVu Sans, sans-serif" font-size="22" font-weight="700">e</text>`,
   'missile': () => `
-    <path d="M16 4.8 C 19.2 9, 19.2 14, 16 18 C 12.8 14, 12.8 9, 16 4.8 Z" fill="currentColor"/>
-    <path d="M13.4 14.5 L10.6 19 L13.4 17.3 Z" fill="currentColor"/>
-    <path d="M18.6 14.5 L21.4 19 L18.6 17.3 Z" fill="currentColor"/>
-    <circle cx="16" cy="10.5" r="1.5" fill="__HOLE__"/>
-    <path d="M14.7 18 L16 23.5 L17.3 18 Z" fill="currentColor" opacity="0.9"/>`,
+    <path d="M16 3.5 L19.3 11 L12.7 11 Z" fill="currentColor"/>
+    <rect x="12.7" y="10.5" width="6.6" height="10.5" rx="0.7" fill="currentColor"/>
+    <path d="M12.7 16 L8.6 22 L12.7 20.2 Z" fill="currentColor"/>
+    <path d="M19.3 16 L23.4 22 L19.3 20.2 Z" fill="currentColor"/>
+    <path d="M14.1 20.8 L16 25.8 L17.9 20.8 Z" fill="currentColor" opacity="0.85"/>
+    <rect x="12.7" y="13.6" width="6.6" height="1.5" fill="__HOLE__"/>`,
   'raygun': () => `
     <path d="M7 13 H19 V15.8 H13.6 L11.8 21 H8.6 L10.4 15.8 H7 Z" fill="currentColor"/>
     <rect x="19" y="13.2" width="3.4" height="2.4" fill="currentColor"/>
@@ -133,7 +136,7 @@ const rows = [
 function LBL(k) {
   return ({
     'reactor-fission': 'Fission (was X)', 'reactor-fusion': 'Fusion (∿)', 'reactor-antimatter': 'Antimatter (was 💣)',
-    'gen-radioisotope': 'Radioisotope (⟛)', 'gen-electric': 'Electric (E)',
+    'gen-radioisotope': 'Radioisotope (⟛)', 'gen-electric': 'Electric (e)',
     'missile': 'Missile', 'raygun': 'Raygun', 'buggy': 'Buggy',
   })[k];
 }
