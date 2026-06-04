@@ -15,14 +15,15 @@
 </g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Fusion (∿)</text></g><g transform="translate(524, 54)"><g transform="scale(1.8125)">
   <rect x="1.5" y="1.5" width="29" height="29" rx="7" fill="#8b5cf6" stroke="#6d28d9" stroke-width="1.5"/>
   <g color="#ffffff">
-    <g stroke="currentColor" stroke-width="2.1" stroke-linecap="round">
-      <line x1="16" y1="6.5" x2="16" y2="25.5"/>
-      <line x1="6.5" y1="16" x2="25.5" y2="16"/>
-      <line x1="9.4" y1="9.4" x2="22.6" y2="22.6"/>
-      <line x1="22.6" y1="9.4" x2="9.4" y2="22.6"/>
+    <circle cx="14.5" cy="19" r="7" fill="currentColor"/>
+    <path d="M16.6 12.1 L19.5 9.2 L21.8 11.5 L18.9 14.4 Z" fill="currentColor"/>
+    <path d="M20.7 10.5 Q 24 8.4, 23 4.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+    <g stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+      <line x1="23" y1="4.6" x2="23" y2="2.3"/>
+      <line x1="23" y1="4.6" x2="25" y2="3.5"/>
+      <line x1="23" y1="4.6" x2="21" y2="3.5"/>
     </g>
-    <circle cx="16" cy="16" r="3.2" fill="#8b5cf6"/>
-    <circle cx="16" cy="16" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/></g>
+    <circle cx="11.8" cy="16.4" r="1.7" fill="#8b5cf6" opacity="0.5"/></g>
 </g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Antimatter (was 💣)</text></g><text x="24" y="160" fill="#cbd5e1" font-family="sans-serif" font-size="16" font-weight="700">Generator (orange circle)</text><g transform="translate(24, 172)"><g transform="scale(1.8125)">
   <circle cx="16" cy="16" r="15" fill="#f97316" stroke="#c2410c" stroke-width="1.5"/>
   <g color="#ffffff">
@@ -37,8 +38,8 @@
 </g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Radioisotope (⟛)</text></g><g transform="translate(274, 172)"><g transform="scale(1.8125)">
   <circle cx="16" cy="16" r="15" fill="#f97316" stroke="#c2410c" stroke-width="1.5"/>
   <g color="#ffffff">
-    <text x="16" y="16" text-anchor="middle" dominant-baseline="central"
-          fill="currentColor" font-family="DejaVu Sans, sans-serif" font-size="22" font-weight="700">e</text></g>
+    <path d="M 20.8 19.9 A 6 6 0 1 1 21.9 16 L 10.1 16"
+          fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></g>
 </g><text x="70" y="34" fill="#e6e9ff" font-family="sans-serif" font-size="14">Electric (e)</text></g><text x="24" y="278" fill="#cbd5e1" font-family="sans-serif" font-size="16" font-weight="700">Radiator (blue therms on white badge)</text><g transform="translate(24, 290)"><g transform="scale(1.8125)">
   <rect x="1" y="3" width="19" height="26" rx="9" fill="#ffffff" stroke="#2563eb" stroke-width="1.2"/>
   <g color="#2563eb">
