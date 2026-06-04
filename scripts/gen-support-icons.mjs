@@ -60,12 +60,14 @@ const GLYPH = {
     <path d="M 20.8 19.9 A 6 6 0 1 1 21.9 16 L 10.1 16"
           fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>`,
   'missile': () => `
-    <path d="M16 3.5 L19.3 11 L12.7 11 Z" fill="currentColor"/>
-    <rect x="12.7" y="10.5" width="6.6" height="10.5" rx="0.7" fill="currentColor"/>
-    <path d="M12.7 16 L8.6 22 L12.7 20.2 Z" fill="currentColor"/>
-    <path d="M19.3 16 L23.4 22 L19.3 20.2 Z" fill="currentColor"/>
-    <path d="M14.1 20.8 L16 25.8 L17.9 20.8 Z" fill="currentColor" opacity="0.85"/>
-    <rect x="12.7" y="13.6" width="6.6" height="1.5" fill="__HOLE__"/>`,
+    <g transform="translate(16 16) scale(0.8) translate(-16 -16)">
+      <path d="M16 3.5 L19.3 11 L12.7 11 Z" fill="currentColor"/>
+      <rect x="12.7" y="10.5" width="6.6" height="10.5" rx="0.7" fill="currentColor"/>
+      <path d="M12.7 16 L8.6 22 L12.7 20.2 Z" fill="currentColor"/>
+      <path d="M19.3 16 L23.4 22 L19.3 20.2 Z" fill="currentColor"/>
+      <path d="M14.1 20.8 L16 25.8 L17.9 20.8 Z" fill="currentColor" opacity="0.85"/>
+      <rect x="12.7" y="13.6" width="6.6" height="1.5" fill="__HOLE__"/>
+    </g>`,
   'raygun': () => `
     <path d="M7 13 H19 V15.8 H13.6 L11.8 21 H8.6 L10.4 15.8 H7 Z" fill="currentColor"/>
     <rect x="19" y="13.2" width="3.4" height="2.4" fill="currentColor"/>
