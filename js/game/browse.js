@@ -10086,6 +10086,29 @@ async function explodeRocket(siteId) {
   });
 }
 
+// Build THIS turn's MOVE op in SERVER ids from the planned route. This is the
+// ONE place the planner-id -> server-slug conversion lives, so the real move
+// and the debug Simulate send byte-identical segments (a planner id like
+// "0.72..." maps to a server slug like "hoh-qxrxi"; sending the raw planner id
+// makes the server reject with route_not_from_here even though the route IS
+// connected). Returns { toSiteId, segments, turn1Segs, destPlannerId } or
+// { error } with a player-facing reason.
+function buildTurn1MoveOp() {
+  const turn1Segs = (_plannedRoute || []).filter((s) => (s.turn || 1) === 1);
+  if (!turn1Segs.length) return { error: 'Planned route has no current-turn segments.' };
+  const destPlannerId = turn1Segs[turn1Segs.length - 1].to;
+  const toSiteId = toServerId(_onlineMaps, destPlannerId);
+  if (!toSiteId) return { error: 'That destination is not on the map.' };
+  const segments = [];
+  for (const s of turn1Segs) {
+    const f = plannerIdToSlug(s.from);
+    const t = plannerIdToSlug(s.to);
+    if (!f || !t) return { error: 'That route is not on the map.' };
+    segments.push({ from: f, to: t, burns: Number(s.burns) || 0, turn: 1 });
+  }
+  return { toSiteId, segments, turn1Segs, destPlannerId };
+}
+
 // Step the rocket through its planned route's "turn 1" segments
 // (one move per turn, capped at BURNS_PER_TURN burns of cumulative
 // dv). The remaining segments shift down a turn so the next move
@@ -10120,18 +10143,9 @@ async function moveRocket() {
     // Execute ONLY this turn's segments - a multi-turn Hohmann transfer's
     // later legs are NOT charged now. The server is sent these segments
     // (with the planner's Hohmann-aware burns) and charges just them.
-    const turn1Segs = _plannedRoute.filter((s) => (s.turn || 1) === 1);
-    if (!turn1Segs.length) { setStatus('Planned route has no current-turn segments.'); return false; }
-    const destPlannerId = turn1Segs[turn1Segs.length - 1].to;
-    const toSiteId = toServerId(_onlineMaps, destPlannerId);
-    if (!toSiteId) { _onlineToast('That destination is not on the map.', 'error'); return false; }
-    const segments = [];
-    for (const s of turn1Segs) {
-      const f = plannerIdToSlug(s.from);
-      const t = plannerIdToSlug(s.to);
-      if (!f || !t) { _onlineToast('That route is not on the map.', 'error'); return false; }
-      segments.push({ from: f, to: t, burns: Number(s.burns) || 0, turn: 1 });
-    }
+    const built = buildTurn1MoveOp();
+    if (built.error) { _onlineToast(built.error, 'error'); return false; }
+    const { toSiteId, segments, turn1Segs, destPlannerId } = built;
     // Hazards along THIS turn's segments only.
     const hz = routeHazards(turn1Segs);
     const radHz = hz.filter((h) => h.site.type === 'radhaz');
@@ -11289,12 +11303,13 @@ function openRouteOptionsModal(onClose) {
       resEl.className = `route-options-sim-result ${cls || 'muted'}`;
     };
     simBtn.addEventListener('click', async () => {
-      // Dry-run THIS turn's planned move against the server (debug:true)
-      // so the player can preview the fuel-step cost before committing.
-      const turn1 = (_plannedRoute || []).filter((s) => (s.turn || 1) === 1);
-      if (!turn1.length) { showRes('Plan a route first - no current-turn segments to simulate.'); return; }
-      const toSiteId = _plannedRoute[_plannedRoute.length - 1].to;
-      const segments = turn1.map((s) => ({ from: s.from, to: s.to, burns: s.burns, turn: s.turn }));
+      // Dry-run THIS turn's planned move against the server (debug:true) so
+      // the player can preview the fuel-step cost before committing. Build the
+      // op through the SAME converter the real move uses, so the ids match
+      // (no spurious route_not_from_here from a raw planner id).
+      const built = buildTurn1MoveOp();
+      if (built.error) { showRes(`✗ ${built.error}`, 'bad'); return; }
+      const { toSiteId, segments } = built;
       simBtn.disabled = true;
       showRes('Simulating…');
       try {
