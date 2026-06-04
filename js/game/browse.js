@@ -4216,7 +4216,7 @@ function openCardModal(card, kind, slotIdx) {
   const cardSpectral = card.spectralType || 'C';
   const exoSite = (kind !== 'crew') ? getRocketSite() : null;
   const exoFactory = exoSite ? getFactory(exoSite.id) : null;
-  const exoOwned = exoFactory && exoFactory.ownerId === SANDBOX_OWNER_ID;
+  const exoOwned = exoFactory && exoFactory.ownerId === myOwnerId();
   const exoSpectralOk = exoOwned && exoFactory.spectralType === cardSpectral;
   const exoOutposts = exoSite
     ? Object.values(getOutposts()).filter((o) => o.siteId === exoSite.id) : [];
@@ -7838,7 +7838,7 @@ function openOpsMenu() {
     opSites.push({ site: landed, hint: '🛸 landed here · prospect / refuel' });
   }
   for (const f of (allFactories() || [])) {
-    if (f.ownerId !== SANDBOX_OWNER_ID || seen.has(f.siteId)) continue;
+    if (f.ownerId !== myOwnerId() || seen.has(f.siteId)) continue;
     const site = siteById(f.siteId); if (!site) continue;
     seen.add(f.siteId);
     opSites.push({ site, hint: `🏭 factory${getColony(f.siteId) ? ' + 🌐' : ''} · refuel / ET / deliver / colonize` });
@@ -8030,6 +8030,16 @@ function doEtProduce(site, factory, options, outpostsAtSite, freeSlots) {
 // not a runtime lookup.
 const SANDBOX_OWNER_ID = 'sandbox-player';
 
+// The owner id that marks "my" map tokens (factories, colonies, claimed
+// discs). Online it's the local player's profile id (the SAME id the server
+// stamps on the records it sends back); in the solo sandbox there's a single
+// owner, the sandbox player. Every "is this mine?" check goes through here so
+// the same UI code works in both modes instead of assuming the sandbox owner
+// (which silently hid your own factories / ops online).
+function myOwnerId() {
+  return _online ? (_onlineMe && _onlineMe.id) : SANDBOX_OWNER_ID;
+}
+
 // Industrialize handler (rulebook I7). The caller has already
 // validated that the rocket is parked at a claimed site with no
 // existing factory AND that findIndustrializeOptions(stack)
@@ -8085,7 +8095,7 @@ function doIndustrialize(site, stack, options) {
         }
       }
       const spectral = site.spectralType || 'C';
-      const built = createFactory(site.id, SANDBOX_OWNER_ID, spectral);
+      const built = createFactory(site.id, myOwnerId(), spectral);
       const refName = opt.refinery.card.name;
       const robName = opt.robonaut.card.name;
       const orphanNote = opt.orphans.length
@@ -8186,7 +8196,7 @@ function doColonize(site, stack, options) {
         setStatus(`Colonize aborted - crew couldn't return to the LEO stack.`);
         return;
       }
-      const created = createColony(site.id, SANDBOX_OWNER_ID);
+      const created = createColony(site.id, myOwnerId());
       if (!created) {
         // Cap or duplicate. Roll back: pull crew back out of
         // the LEO stack, drop it back on the rocket stack.
@@ -8199,13 +8209,13 @@ function doColonize(site, stack, options) {
       setStatus(
         `🌐 Built colony at <strong>${esc(site.name)}</strong>. `
         + `<em>${esc(crewName)}</em> returns to your LEO Stack. `
-        + `Colonies: <strong>${countColoniesByOwner(SANDBOX_OWNER_ID)}</strong>/${COLONY_CAP_PER_PLAYER}.`
+        + `Colonies: <strong>${countColoniesByOwner(myOwnerId())}</strong>/${COLONY_CAP_PER_PLAYER}.`
       );
       logAction({
         type: 'colonize',
         icon: '🌐',
         summary: `Built colony at ${site.name} (crew ${crewName} returned to LEO stack); `
-          + `${countColoniesByOwner(SANDBOX_OWNER_ID)}/${COLONY_CAP_PER_PLAYER} colonies`,
+          + `${countColoniesByOwner(myOwnerId())}/${COLONY_CAP_PER_PLAYER} colonies`,
         undoable: false,
         data: { siteId: site.id, crewId: pick.id },
       });
@@ -11922,7 +11932,7 @@ function showSitePopupFor(site) {
       // supersedes the site refuel. Without a factory, fall back to
       // the site refuel, which follows the robonaut/ISRU rules.
       const pf = getFactory(site.id);
-      const hasPlayerFactory = pf && pf.ownerId === SANDBOX_OWNER_ID;
+      const hasPlayerFactory = pf && pf.ownerId === myOwnerId();
       if (!hasPlayerFactory) {
         const refuelChk = canRefuelAt(site);
         actions.push({
@@ -11951,7 +11961,7 @@ function showSitePopupFor(site) {
   // one op per turn anyway.
   if (rocketSite && site.id === rocketSite.id) {
     const factory = getFactory(site.id);
-    if (factory && factory.ownerId === SANDBOX_OWNER_ID) {
+    if (factory && factory.ownerId === myOwnerId()) {
       const factoryGain = 7;
       const tank = getTankWater();
       const tmax = getTankMax();
@@ -12049,8 +12059,8 @@ function showSitePopupFor(site) {
   if (rocketSite && site.id === rocketSite.id) {
     const factory = getFactory(site.id);
     const colony = getColony(site.id);
-    if (factory && factory.ownerId === SANDBOX_OWNER_ID && !colony) {
-      const colonized = countColoniesByOwner(SANDBOX_OWNER_ID);
+    if (factory && factory.ownerId === myOwnerId() && !colony) {
+      const colonized = countColoniesByOwner(myOwnerId());
       const capReached = colonized >= COLONY_CAP_PER_PLAYER;
       const stack = getRocketStack();
       const colonizeOptions = findColonizeOptions(stack);
@@ -12088,7 +12098,7 @@ function showSitePopupFor(site) {
   // deliverable card. Costs the turn's operation.
   {
     const factory = getFactory(site.id);
-    if (factory && factory.ownerId === SANDBOX_OWNER_ID) {
+    if (factory && factory.ownerId === myOwnerId()) {
       const cost = deliveryCost(site);
       for (const op of Object.values(getOutposts())) {
         if (op.siteId !== site.id) continue;
@@ -12117,7 +12127,7 @@ function showSitePopupFor(site) {
   // fresh outpost the player creates inline).
   {
     const factory = getFactory(site.id);
-    if (factory && factory.ownerId === SANDBOX_OWNER_ID) {
+    if (factory && factory.ownerId === myOwnerId()) {
       const handIds = getHandSlots();
       const etOptions = findEtProduceOptions(handIds, cardById, factory.spectralType);
       const outpostsAtSite = Object.values(getOutposts()).filter((o) => o.siteId === site.id);
@@ -13930,7 +13940,7 @@ function paintGlory() {
   if (!host) return;
   const vps   = getVps();
   const score = computeEndgameScore({
-    ownerId: SANDBOX_OWNER_ID,
+    ownerId: myOwnerId(),
     colonyTypeOf: colonyTypeOfSite,
   });
 
