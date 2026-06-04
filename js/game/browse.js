@@ -13150,25 +13150,41 @@ function reconcileChitOwners() {
   }
 }
 
-// Card-like DOM token for a glory chit. Used in the rocket stack
-// (transit = in-transit, two-sided, needs a crew to bring home) and
-// in the LEO stack (resolved to its front/back side).
+// Two-sided golden glory chit that flips on click/tap. The FRONT face shows
+// the guaranteed front value (crew colonised or died), the BACK shows the
+// richer home value (brought to LEO alive). A chit resolved on its back
+// starts back-up. Used in the rocket stack (carried, in transit) and in the
+// glory pane (picked-up + ticker-tape-parade rows).
 function buildChitToken(zone, { side = null, transit = false, crewId = null } = {}) {
   const sides = getChitSides(zone);
-  const el = document.createElement('div');
-  el.className = 'chit-token' + (transit ? ' chit-transit' : ` chit-${side}`);
-  const vp = transit
-    ? `${sides.front} / ${sides.back}`
-    : `+${side === 'back' ? sides.back : sides.front}`;
-  const sideLabel = transit ? 'in transit' : side;
   const owner = crewId ? crewDisplayName(crewId) : '';
-  el.innerHTML = `
-    <span class="chit-token-emoji" aria-hidden="true">🎖</span>
-    <span class="chit-token-zone">${esc(zone)}</span>
-    <span class="chit-token-vp">${esc(vp)} VP</span>
-    <span class="chit-token-side">${esc(sideLabel)}</span>
-    ${owner ? `<span class="chit-token-owner" title="Earned by ${esc(owner)}">${esc(owner)}</span>` : ''}`;
-  return el;
+  const ownerHtml = owner
+    ? `<span class="chit-token-owner" title="Earned by ${esc(owner)}">${esc(owner)}</span>` : '';
+  const face = (which, vp, variant) => `
+    <div class="chit-token chit-face chit-face-${which} ${variant}">
+      <span class="chit-token-emoji" aria-hidden="true">🎖</span>
+      <span class="chit-token-zone">${esc(zone)}</span>
+      <span class="chit-token-vp">+${vp} VP</span>
+      <span class="chit-token-side">${which}</span>
+      ${ownerHtml}
+    </div>`;
+  const flip = document.createElement('div');
+  flip.className = 'chit-token-flip' + (transit && !crewId ? ' chit-no-crew' : '');
+  flip.setAttribute('role', 'button');
+  flip.setAttribute('tabindex', '0');
+  flip.title = 'Tap to flip (front / back value)';
+  flip.innerHTML = `
+    <div class="chit-token-inner">
+      ${face('front', sides.front, 'chit-front')}
+      ${face('back', sides.back, 'chit-back')}
+    </div>`;
+  if (side === 'back') flip.classList.add('is-flipped');   // home value scored: show it
+  const toggle = () => flip.classList.toggle('is-flipped');
+  flip.addEventListener('click', toggle);
+  flip.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+  });
+  return flip;
 }
 
 // Classify a colony's site for VP: submarine (+2) beats astrobiology
@@ -13242,28 +13258,10 @@ function paintGlory() {
        <ul class="glory-table">${colonyRows}</ul>`
     : '';
 
-  // --- Glory chits: carried + claimed + ticker tape -----------------
+  // --- Glory chits: ticker tape, then the player's actual coins -----
+  // (picked-up + parade) appended as flippable golden tokens below.
   const chits = getChits();
-  const carried = chits.length
-    ? chits.map((c) => {
-        const s = getChitSides(c.zone);
-        return `<span class="glory-chit" data-zone="${esc(c.zone)}">
-          <strong>${esc(c.zone)}</strong>
-          <em>${s.front} / ${s.back} VP</em>
-        </span>`;
-      }).join('')
-    : '<p class="muted">No chits carried. Land a crew in a new heliocentric zone to earn one.</p>';
-
   const claimed = getClaimedChits();
-  const claimedTable = claimed.length
-    ? `<ul class="glory-table glory-claimed">${
-        claimed.map((c) =>
-          `<li>
-            <span><span class="chit-side chit-${esc(c.side)}">${esc(c.side)}</span> ${esc(c.zone)}</span>
-            <strong>+${c.vp} VP</strong>
-          </li>`).join('')
-      }</ul>`
-    : '<p class="muted">No chits claimed yet.</p>';
 
   const zoneTableRows = Object.entries(ZONE_CHIT_VPS)
     .map(([z, v]) => `<li><span>${esc(z)}</span><strong>${v.front} / ${v.back} VP</strong></li>`)
@@ -13299,12 +13297,12 @@ function paintGlory() {
         <span class="muted">Career glory VP</span>
         <strong class="glory-vp">${vps}</strong>
       </div>
-      <h4>Carried (in hand)</h4>
-      <div class="glory-chits">${carried}</div>
-      <h4>Claimed</h4>
-      ${claimedTable}
       <h4>Ticker-tape (front / back VP)</h4>
       <ul class="glory-table glory-ticker">${zoneTableRows}</ul>
+      <h4>Picked up <span class="muted glory-h4-note">(carried - tap a coin to flip)</span></h4>
+      <div class="glory-chits" id="glory-pickedup"></div>
+      <h4>Ticker-tape parade <span class="muted glory-h4-note">(brought home to LEO)</span></h4>
+      <div class="glory-chits" id="glory-parade"></div>
       <p class="muted glory-rules">
         Earn a chit the first time a crew lands in a heliocentric zone.
         Bring it home alive to flip it for the BACK value; if the crew
@@ -13312,6 +13310,25 @@ function paintGlory() {
       </p>
     </section>
   `;
+
+  // Render the player's actual chits as flippable golden coins under the
+  // ticker tape: picked-up (carried) and the parade (cashed home to LEO).
+  const pickedUp = host.querySelector('#glory-pickedup');
+  if (pickedUp) {
+    if (chits.length) {
+      for (const c of chits) pickedUp.appendChild(buildChitToken(c.zone, { transit: true, crewId: c.crewId }));
+    } else {
+      pickedUp.innerHTML = '<p class="muted">No chits carried. Land a crew in a new heliocentric zone to earn one.</p>';
+    }
+  }
+  const parade = host.querySelector('#glory-parade');
+  if (parade) {
+    if (claimed.length) {
+      for (const c of claimed) parade.appendChild(buildChitToken(c.zone, { side: c.side, crewId: c.crewId }));
+    } else {
+      parade.innerHTML = '<p class="muted">No chits brought home yet.</p>';
+    }
+  }
 }
 
 // Mission log pane: every action the player took this turn, plus

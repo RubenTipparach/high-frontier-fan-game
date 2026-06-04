@@ -4733,6 +4733,40 @@ body:has(#view-browse:not(.hidden)) #main {
 /* In transit with no crew aboard: dimmed. */
 .chit-token.chit-no-crew { opacity: 0.6; }
 
+/* Flip card: the coin spins to its other face on click / tap. Two golden
+   faces (front value / back value) share a 3D-rotated inner. */
+.chit-token-flip {
+  width: 92px;
+  height: 92px;
+  perspective: 640px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.chit-token-flip.chit-no-crew { opacity: 0.6; }
+.chit-token-flip:focus-visible {
+  outline: 2px solid #ffd54a;
+  outline-offset: 3px;
+  border-radius: 50%;
+}
+.chit-token-flip .chit-token-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform 0.55s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+.chit-token-flip.is-flipped .chit-token-inner { transform: rotateY(180deg); }
+.chit-token-flip .chit-token.chit-face {
+  position: absolute;
+  inset: 0;
+  width: 92px;
+  height: 92px;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.chit-token-flip .chit-token.chit-face-back { transform: rotateY(180deg); }
+.glory-h4-note { font-size: 11px; font-weight: 400; }
+
 /* ============================================================
    Stage-3 hand-bar stack switcher.
 
