@@ -13150,16 +13150,33 @@ function reconcileChitOwners() {
   }
 }
 
-// Two-sided golden glory chit that flips on click/tap. The FRONT face shows
-// the guaranteed front value (crew colonised or died), the BACK shows the
-// richer home value (brought to LEO alive). A chit resolved on its back
-// starts back-up. Used in the rocket stack (carried, in transit) and in the
-// glory pane (picked-up + ticker-tape-parade rows).
+// Golden glory chit. A CARRIED chit (transit) is a vibrant two-sided coin
+// that flips on tap (front value / back value, undecided until it comes home
+// or the crew is lost). A CLAIMED chit is FIXED on its scored side, rendered
+// darkened (it is spent), with the crew that brought it home named beneath.
 function buildChitToken(zone, { side = null, transit = false, crewId = null } = {}) {
   const sides = getChitSides(zone);
   const owner = crewId ? crewDisplayName(crewId) : '';
   const ownerHtml = owner
     ? `<span class="chit-token-owner" title="Earned by ${esc(owner)}">${esc(owner)}</span>` : '';
+
+  // Claimed: a fixed, darkened coin (no flip) + the player/crew named below.
+  if (!transit && side) {
+    const vp = side === 'back' ? sides.back : sides.front;
+    const wrap = document.createElement('div');
+    wrap.className = 'chit-token-wrap';
+    wrap.innerHTML = `
+      <div class="chit-token chit-claimed chit-${esc(side)}" title="Claimed - ${esc(side)} value (fixed)">
+        <span class="chit-token-emoji" aria-hidden="true">🎖</span>
+        <span class="chit-token-zone">${esc(zone)}</span>
+        <span class="chit-token-vp">+${vp} VP</span>
+        <span class="chit-token-side">${esc(side)}</span>
+      </div>
+      ${owner ? `<span class="chit-claim-by" title="Brought home by ${esc(owner)}">${esc(owner)}</span>` : ''}`;
+    return wrap;
+  }
+
+  // Carried (in transit): a vibrant two-sided flip coin.
   const face = (which, vp, variant) => `
     <div class="chit-token chit-face chit-face-${which} ${variant}">
       <span class="chit-token-emoji" aria-hidden="true">🎖</span>
@@ -13178,7 +13195,6 @@ function buildChitToken(zone, { side = null, transit = false, crewId = null } = 
       ${face('front', sides.front, 'chit-front')}
       ${face('back', sides.back, 'chit-back')}
     </div>`;
-  if (side === 'back') flip.classList.add('is-flipped');   // home value scored: show it
   const toggle = () => flip.classList.toggle('is-flipped');
   flip.addEventListener('click', toggle);
   flip.addEventListener('keydown', (e) => {
@@ -13299,34 +13315,24 @@ function paintGlory() {
       </div>
       <h4>Ticker-tape (front / back VP)</h4>
       <ul class="glory-table glory-ticker">${zoneTableRows}</ul>
-      <h4>Picked up <span class="muted glory-h4-note">(carried - tap a coin to flip)</span></h4>
-      <div class="glory-chits" id="glory-pickedup"></div>
-      <h4>Ticker-tape parade <span class="muted glory-h4-note">(brought home to LEO)</span></h4>
-      <div class="glory-chits" id="glory-parade"></div>
+      <div class="glory-chits" id="glory-chits-all"></div>
       <p class="muted glory-rules">
         Earn a chit the first time a crew lands in a heliocentric zone.
-        Bring it home alive to flip it for the BACK value; if the crew
-        colonises or dies, it scores the FRONT value.
+        Carried coins flip (tap) between their FRONT and BACK value; bring one
+        home to LEO to claim its side - claimed coins are fixed and darkened.
       </p>
     </section>
   `;
 
-  // Render the player's actual chits as flippable golden coins under the
-  // ticker tape: picked-up (carried) and the parade (cashed home to LEO).
-  const pickedUp = host.querySelector('#glory-pickedup');
-  if (pickedUp) {
-    if (chits.length) {
-      for (const c of chits) pickedUp.appendChild(buildChitToken(c.zone, { transit: true, crewId: c.crewId }));
-    } else {
-      pickedUp.innerHTML = '<p class="muted">No chits carried. Land a crew in a new heliocentric zone to earn one.</p>';
-    }
-  }
-  const parade = host.querySelector('#glory-parade');
-  if (parade) {
-    if (claimed.length) {
-      for (const c of claimed) parade.appendChild(buildChitToken(c.zone, { side: c.side, crewId: c.crewId }));
-    } else {
-      parade.innerHTML = '<p class="muted">No chits brought home yet.</p>';
+  // All of the player's chits as golden coins under the ticker tape: carried
+  // ones (vibrant, flippable) first, then claimed ones (fixed + darkened +
+  // named). One unified row.
+  const all = host.querySelector('#glory-chits-all');
+  if (all) {
+    for (const c of chits) all.appendChild(buildChitToken(c.zone, { transit: true, crewId: c.crewId }));
+    for (const c of claimed) all.appendChild(buildChitToken(c.zone, { side: c.side, crewId: c.crewId }));
+    if (!chits.length && !claimed.length) {
+      all.innerHTML = '<p class="muted">No chits yet. Land a crew in a new heliocentric zone to earn one.</p>';
     }
   }
 }

@@ -4673,13 +4673,13 @@ body:has(#view-browse:not(.hidden)) #main {
   border-radius: 50%;
   border: 2px solid #ffe6a6;
   background:
-    radial-gradient(circle at 34% 28%,
-      #fff7d6 0%, #ffe488 20%, #f6c945 46%, #d29a26 78%, #a9761b 100%);
+    radial-gradient(circle at 33% 26%,
+      #fffae0 0%, #ffe75a 16%, #ffce1f 42%, #f0a90c 72%, #c4830f 100%);
   box-shadow:
-    0 0 0 2px #9c6f17,
-    inset 0 2px 7px rgba(255, 255, 255, 0.6),
-    inset 0 -5px 9px rgba(120, 75, 10, 0.55),
-    0 2px 7px rgba(0, 0, 0, 0.45);
+    0 0 0 2px #b07e12,
+    inset 0 2px 8px rgba(255, 255, 255, 0.7),
+    inset 0 -5px 10px rgba(150, 90, 8, 0.55),
+    0 2px 8px rgba(0, 0, 0, 0.45);
   color: #4a3206;
   text-align: center;
   font-size: 11px;
@@ -4720,14 +4720,14 @@ body:has(#view-browse:not(.hidden)) #main {
    value) = paler, cooler gold. */
 .chit-token.chit-back {
   background:
-    radial-gradient(circle at 34% 28%,
-      #fff0c0 0%, #ffd86a 20%, #f0b62e 48%, #b9831c 80%, #8f6414 100%);
+    radial-gradient(circle at 33% 26%,
+      #fff4bc 0%, #ffdc4e 18%, #ffbe14 46%, #d4920c 80%, #a06b0e 100%);
 }
 .chit-token.chit-back .chit-token-vp { color: #5a3300; }
 .chit-token.chit-front {
   background:
-    radial-gradient(circle at 34% 28%,
-      #fff8e8 0%, #f5e7bf 22%, #e3cd92 50%, #b9a166 82%, #93804f 100%);
+    radial-gradient(circle at 33% 26%,
+      #fffbe6 0%, #ffeda0 22%, #ecd061 50%, #c2a63e 82%, #8f7a37 100%);
 }
 .chit-token.chit-front .chit-token-vp { color: #5b4a1e; }
 /* In transit with no crew aboard: dimmed. */
@@ -4766,6 +4766,39 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .chit-token-flip .chit-token.chit-face-back { transform: rotateY(180deg); }
 .glory-h4-note { font-size: 11px; font-weight: 400; }
+
+/* Claimed chit: a fixed (non-flipping) coin, darkened because it is spent,
+   with the crew that brought it home named beneath. */
+.chit-token-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.chit-token.chit-claimed { cursor: default; }
+/* Darken the spent coin via an overlay (NOT a filter, which would dim the
+   text too). The text spans sit at z-index 1, above this overlay. */
+.chit-token.chit-claimed::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: rgba(14, 9, 2, 0.5);
+  pointer-events: none;
+}
+.chit-token.chit-claimed .chit-token-zone,
+.chit-token.chit-claimed .chit-token-vp,
+.chit-token.chit-claimed .chit-token-side { color: #f1e2b8; }
+.chit-claim-by {
+  font-size: 10px;
+  font-weight: 700;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  color: #cbd5e1;
+}
 
 /* ============================================================
    Stage-3 hand-bar stack switcher.
