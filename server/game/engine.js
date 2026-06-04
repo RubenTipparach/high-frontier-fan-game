@@ -135,7 +135,16 @@ function clipTank(rocket) {
 // a single d6 roll AT OR BELOW the threshold, so a higher class is easier.
 const PROSPECT_CLASS_THRESHOLD = { A: 3, B: 5, C: 7, D: 9 };
 function prospectThreshold(site) {
-  return PROSPECT_CLASS_THRESHOLD[String(site.class || '').toUpperCase()] || 4;
+  // Mirror the client (browse.js#siteProspectThreshold): the planner siteSize
+  // encodes difficulty as "<n><spectral>" (e.g. "1M", "9H"); the leading digit
+  // IS the threshold. Only fall back to the class letter when there's no
+  // siteSize, so the server roll matches the difficulty the popup shows.
+  const ss = site && site.siteSize;
+  if (typeof ss === 'string') {
+    const m = ss.match(/^(\d+)/);
+    if (m) return Math.max(1, Math.min(11, parseInt(m[1], 10)));
+  }
+  return PROSPECT_CLASS_THRESHOLD[String((site && site.class) || '').toUpperCase()] || 4;
 }
 function faceProps(slot) {
   const f = slotFace(slot);
