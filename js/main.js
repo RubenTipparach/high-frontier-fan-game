@@ -16,6 +16,8 @@ import {
 } from './invites.js';
 import { mountBrowse, isBrowseOnline, refreshRoomOverlays } from './game/browse.js';
 import { newSandboxGame, currentSandboxId, activateSandboxGame } from './game/sandbox-games.js';
+import { appBase } from './base.js';
+import { initErudaFromPref } from './debug-console.js';
 
 const VIEWS = [
   'view-signin', 'view-lobby-list', 'view-create-lobby', 'view-lobby',
@@ -27,13 +29,8 @@ const VIEWS = [
 // sign-in / lobby-list.
 let _prevView = null;
 
-// Resolve the app base independently of the address bar (the bar can
-// already be a deep /room/<code> or /sandbox path). import.meta.url is
-// always <base>/js/main.js, so '../' off it is the app base no matter
-// what the visible URL says.
-function appBase() {
-  return new URL('../', import.meta.url).pathname;
-}
+// appBase() comes from ./base.js - the single, bundling-safe source of the
+// app base path (the address bar can already be a deep /room or /sandbox).
 
 // Write the URL for the given view. React-router style: switching views
 // rewrites the path so a refresh / shared link / restore lands on the
@@ -792,6 +789,9 @@ async function boot() {
   // missing export breaks linking, main.js never runs, this stays unset,
   // and the watchdog shows the hard-refresh banner.
   window.__hfBooted = true;
+  // Bring the on-device debug console (Eruda) back up if it was left enabled
+  // in Config, so it's ready to capture early logs + failed server calls.
+  initErudaFromPref();
   initSigninForm();
   initAccountMenu();
   initLobby({ onShowView: showView, onToast: toast });

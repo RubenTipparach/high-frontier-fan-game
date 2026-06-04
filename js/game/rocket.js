@@ -27,6 +27,10 @@
 import { PATENTS_BY_ID, thermsRequired, thermsSupplied } from '../../data/patents.js';
 import { CREW_BY_ID } from '../../data/crew.js';
 import { SOLAR_ZONE_INFO } from '../../data/sites.js';
+import { weightClassForMass } from '../../data/net-thrust-track.js';
+// Fuel-step capacity comes from the shared graph (the same module the server
+// uses), so the client readout + the server's move check never disagree.
+import { blackStepsBetween } from '../../data/fuel-graph.js';
 import { isOnline } from './online-mode.js';
 
 // Crew can act as the ship's thruster OR its robonaut
@@ -635,9 +639,11 @@ export function getWaterCap() {
 export function setTankWater(n) {
   // Clamp against the live wet-mass cap so water + dry can
   // never exceed TANK_MAX. Adding cards shrinks this ceiling
-  // automatically through stackDryMass().
+  // automatically through stackDryMass(). The tank is NOT floored: a burn
+  // walks the wet chit down the fuel-step ladder and can leave a sub-1
+  // remainder (fractional water), which we preserve (rounded to kill drift).
   const cap = getWaterCap();
-  const v = Math.max(0, Math.min(cap, Math.floor(Number(n) || 0)));
+  const v = Math.max(0, Math.min(cap, Math.round((Number(n) || 0) * 1e6) / 1e6));
   if (v === _tankWater) return false;
   _tankWater = v;
   persist();
@@ -813,11 +819,22 @@ export function getActiveThrusterStats() {
   let baseThrust = thrust;
   let baseFuel = fuel;
   const modifiers = [];
+  // A reactor/generator's thrust + fuel modifiers only count when it
+  // actually powers THIS thruster, i.e. it supplies a kind the active
+  // thruster requires (it sits in the thruster's support chain). A power
+  // source wired to some other card (say a generator feeding a robonaut's
+  // gen-electric) must not shift the thruster's stats, and a self-powered
+  // thruster (a solar moth, which requires nothing) takes no stack thrust
+  // modifiers at all. Same supply/require match isRocketActive() gates
+  // activation on, so "modified" stats and "can it fly" stay consistent.
+  const reqKinds = new Set((f.requires || []).map((r) => (r && r.kind) || r));
   for (const slot of _stack) {
     if (slot.id === id) continue;
     const c = cardForSlot(slot);
     if (!c) continue;
     const cf = installedFace(slot);
+    const cSupplies = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
+    if (!cSupplies.some((k) => reqKinds.has(k))) continue;
     const tMod = cf.thrustMod;
     const fMod = cf.fuelMod;
     if (tMod != null && tMod !== 0) {
@@ -830,22 +847,15 @@ export function getActiveThrusterStats() {
     }
   }
   const totals = getStackTotals();
-  // Weight-class modifier from the published Net Thrust track:
-  //   wet < 2     -> +2  (WISP)
-  //   wet < 4 2/3 -> +1  (PROBE)
-  //   wet < 6 1/2 ->  0  (SCOUT)
-  //   wet < 17    -> -1  (TRANSPORT)
-  //   wet <= 32   -> -2  (TUG)
-  // The chit on the Net Thrust track sits at the rocket's wet
-  // mass; its row marks the modifier this row applies.
+  // Weight-class modifier from the published Net Thrust track, keyed off
+  // wet mass. weightClassForMass (data/net-thrust-track.js) is the single
+  // source of truth the fuel-strip renderer also reads, so the thrust
+  // triangle and the strip can never disagree on the band (WISP +2 / PROBE
+  // +1 / SCOUT 0 / TRANSPORT -1 / TUG -2, in doubling mass brackets).
   const wm = totals.wetMass;
-  let wcMod = 0;
-  let wcClass = 'TUG';
-  if      (wm < 2)        { wcMod = +2; wcClass = 'WISP';      }
-  else if (wm < 14 / 3)   { wcMod = +1; wcClass = 'PROBE';     }   // 4 2/3
-  else if (wm < 6.5)      { wcMod =  0; wcClass = 'SCOUT';     }
-  else if (wm < 17)       { wcMod = -1; wcClass = 'TRANSPORT'; }
-  else                    { wcMod = -2; wcClass = 'TUG';       }
+  const wc = weightClassForMass(wm);
+  const wcMod = wc.netThrust;
+  const wcClass = wc.id;
   if (wcMod !== 0) {
     thrust += wcMod;
     modifiers.push({ from: `${wcClass} weight class`, kind: 'thrust', delta: wcMod });
@@ -895,6 +905,11 @@ export function getActiveThrusterStats() {
     }
   }
   if (thrust < 0) thrust = 0;
+  // Fuel-strip burns: how many whole burns the current tank affords,
+  // counting fuel steps along the net-thrust ladder from wet down to dry
+  // (non-linear across weight classes) and dividing by the per-burn cost.
+  const fuelSteps = blackStepsBetween(totals.dryMass, totals.wetMass);
+  const burnsAvail = (fuel != null && fuel > 0) ? Math.floor(fuelSteps / fuel) : null;
   return {
     cardId: id,
     name: card.name,
@@ -903,6 +918,8 @@ export function getActiveThrusterStats() {
     thrust,
     fuel,
     isp,
+    fuelSteps,
+    burnsAvailable: burnsAvail,
     modifiers,
     weightClass:   wcClass,
     weightClassMod: wcMod,

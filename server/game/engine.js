@@ -28,6 +28,10 @@
 
 import { PATENTS_BY_ID } from '../../data/patents.js';
 import { CREW_BY_ID } from '../../data/crew.js';
+// Shared fuel-strip model (same module the client uses): a burn spends fuel
+// STEPS (black connections), and the water it costs is the non-linear mass
+// drop, leaving a possibly-fractional remainder.
+import { blackStepsBetween, walkBlackDown } from '../../data/fuel-graph.js';
 // Movement + metadata both come from the planner graph (the vendor
 // mission-planner data the client also uses). siteBySlug layers the
 // curated data/sites.js metadata onto a planner slug, so there is ONE
@@ -50,7 +54,11 @@ function clone(state) {
     : JSON.parse(JSON.stringify(state));
 }
 
-function fail(error) { return { ok: false, error }; }
+// Trim float drift from fractional tank water (a burn can leave a sub-1
+// remainder, so the tank is no longer an integer).
+const round6 = (n) => Math.round((Number(n) || 0) * 1e6) / 1e6;
+
+function fail(error, detail) { return detail ? { ok: false, error, detail } : { ok: false, error }; }
 
 // Base mass of one stack slot, resolved from the shared card data.
 // Patents read their primary-face (or top-level) mass; crew read the
@@ -127,7 +135,16 @@ function clipTank(rocket) {
 // a single d6 roll AT OR BELOW the threshold, so a higher class is easier.
 const PROSPECT_CLASS_THRESHOLD = { A: 3, B: 5, C: 7, D: 9 };
 function prospectThreshold(site) {
-  return PROSPECT_CLASS_THRESHOLD[String(site.class || '').toUpperCase()] || 4;
+  // Mirror the client (browse.js#siteProspectThreshold): the planner siteSize
+  // encodes difficulty as "<n><spectral>" (e.g. "1M", "9H"); the leading digit
+  // IS the threshold. Only fall back to the class letter when there's no
+  // siteSize, so the server roll matches the difficulty the popup shows.
+  const ss = site && site.siteSize;
+  if (typeof ss === 'string') {
+    const m = ss.match(/^(\d+)/);
+    if (m) return Math.max(1, Math.min(11, parseInt(m[1], 10)));
+  }
+  return PROSPECT_CLASS_THRESHOLD[String((site && site.class) || '').toUpperCase()] || 4;
 }
 function faceProps(slot) {
   const f = slotFace(slot);
@@ -177,15 +194,23 @@ function advanceClock(state) {
     state.lastEvent = { turn: state.turn, round: state.round, dieRoll };
   }
 
-  // Income: each hydrated factory pays its site's hydration in water to
-  // its owner. No factories exist until INDUSTRIALIZE lands, so this is
-  // a no-op today, but it keeps the round boundary correct.
+  // Income: each hydrated factory pays its site's hydration in water to its
+  // owner's tank, clamped to the wet-mass cap (excess is lost). Returns a
+  // per-owner summary so END_TURN can surface it in the log.
+  const income = [];
   for (const [siteId, fac] of Object.entries(state.factories)) {
     const site = siteById(siteId);
     if (!site || !site.hydration) continue;
     const owner = state.players.find((p) => p.profileId === fac.ownerId);
-    if (owner) owner.rocket.tank += site.hydration;
+    if (!owner) continue;
+    const dry = owner.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+    const cap = Math.max(0, TANK_MAX - dry);
+    const before = Number(owner.rocket.tank) || 0;
+    const after = round6(Math.min(cap, before + site.hydration));
+    owner.rocket.tank = after;
+    if (after > before) income.push(`${owner.name} +${round6(after - before)} water`);
   }
+  return { income };
 }
 
 // ----- hazard resolution (mirror of the sandbox move queue) -----
@@ -218,8 +243,18 @@ function thrusterFuelPerBurn(rocket) {
   const p = PATENTS_BY_ID[tid];
   let fuel = f.fuel != null ? f.fuel : (p && p.fuel);
   if (fuel == null) return 1;
+  // Only a power source in THIS thruster's support chain scales its fuel
+  // (mirror of rocket.js#getActiveThrusterStats): a card's fuelMod counts
+  // only when it supplies a kind the active thruster requires. A generator
+  // wired to some other card (or a self-powered thruster that requires
+  // nothing) leaves the fuel-per-burn untouched.
+  const reqKinds = new Set((f.requires || []).map((r) => (r && r.kind) || r));
   for (const s of rocket.stack) {
     if (s.id === tid) continue;
+    const c = PATENTS_BY_ID[s.id];
+    if (!c) continue;
+    const cSupplies = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
+    if (!cSupplies.some((k) => reqKinds.has(k))) continue;
     const cf = slotFace(s);
     if (cf.fuelMod != null && cf.fuelMod !== 1) fuel *= cf.fuelMod;
   }
@@ -278,8 +313,21 @@ function destroyRocket(player) {
 
 // ----- functional ops (undoable) -----
 
+// "Parked at LEO" canonically means siteId == null (the never-launched
+// state), but a rocket that MOVEs home lands on the LEO node's own slug
+// instead. Both are the same spot on the board, so treat them identically -
+// otherwise REFUEL / CASH_WATER / LEO transfers reject a rocket that flew
+// back. MOVE also normalises arrival-at-LEO back to null (see applyMove) so
+// new games keep to the canonical form.
+function rocketAtLeo(player) {
+  const s = player.rocket && player.rocket.siteId;
+  return s == null || s === leoSlug();
+}
+
 function applyMove(state, op, player) {
-  if (player.movesRemaining <= 0) return fail('no_moves_left');
+  // A dry-run (op.debug) skips the per-turn budget gate so the fuel breakdown
+  // can be previewed any time (even with the move already spent / off-turn).
+  if (!op.debug && player.movesRemaining <= 0) return fail('no_moves_left');
   // An empty rocket has no thruster and can't burn, so it can't leave
   // LEO. Enforcing this keeps the "empty rocket == at LEO" invariant
   // true: the only way off LEO is to build/board a thruster first.
@@ -309,11 +357,15 @@ function applyMove(state, op, player) {
 
   let dest, thisTurnBurns, arrivals;
   if (segs && segs.length) {
-    if (segs[0].from !== here) return fail('route_not_from_here');
-    for (let i = 1; i < segs.length; i++) {
-      if (segs[i].from !== segs[i - 1].to) return fail('route_discontinuous');
-    }
-    for (const s of segs) if (!plannerSiteExists(s.to)) return fail('unknown_site');
+    // The server does NOT verify the route's geometry (continuity from the
+    // rocket, segment-to-segment chaining, node existence). Routing is the
+    // CLIENT's job via the shared mission-planner; re-validating it here means
+    // maintaining a second route model that drifts and spuriously rejects a
+    // route that IS connected (route_not_from_here). The server's job on a
+    // MOVE is to validate + charge the BURNS (the fuel-step cost, below). It
+    // trusts the client's segments for the destination + arrival nodes.
+    // (TODO: real server-side route verification, when added, MUST reuse the
+    // client planner model - see CLAUDE.md "Movement authority".)
     dest = segs[segs.length - 1].to;
     thisTurnBurns = segs.reduce((b, s) => b + s.burns, 0);
     arrivals = segs.map((s) => s.to);
@@ -333,8 +385,34 @@ function applyMove(state, op, player) {
   }
   if (dest === from) return fail('already_here');
 
-  const cost = Math.ceil(thrusterFuelPerBurn(player.rocket) * thisTurnBurns);
-  if (cost > player.rocket.tank) return fail('insufficient_water');
+  // Fuel-step model (shared with the client via data/fuel-graph.js): a burn
+  // spends fuel STEPS - black connections on the ladder - NOT water 1-to-1.
+  // The move is affordable iff the wet chit can walk that many black steps
+  // before hitting dry mass. The water it costs is the non-linear mass drop
+  // (applied when the burn commits, below), which can leave a sub-1 remainder.
+  const perBurn = thrusterFuelPerBurn(player.rocket);            // fuel steps per burn
+  const dryMass = player.rocket.stack.reduce((mm, s) => mm + slotMass(s), 0);
+  const wetMass = dryMass + (Number(player.rocket.tank) || 0);
+  const stepsNeeded = Math.ceil(perBurn * thisTurnBurns);
+  const stepsAvail = blackStepsBetween(dryMass, wetMass);
+  // Full burn-math breakdown - returned on a reject (detail) AND on the debug
+  // dry-run (result.calc) so the client can show every intermediate value
+  // instead of just tank before/after.
+  const moveCalc = {
+    finalThrust: activeThrust(player.rocket),
+    fuelStepsPerBurn: perBurn,
+    dryMass,
+    wetMass,
+    tank: round6(player.rocket.tank),
+    fuelStepsInShip: stepsAvail,
+    canBurn: perBurn > 0 ? Math.floor(stepsAvail / perBurn) : null,
+    burnsNeeded: thisTurnBurns,
+    fuelStepsNeeded: stepsNeeded,
+    enough: stepsNeeded <= stepsAvail,
+  };
+  if (stepsNeeded > stepsAvail) {
+    return fail('insufficient_water', moveCalc);
+  }
 
   // Hazards along the nodes we ARRIVE at this turn, classified the same
   // way the sandbox does. Generic (skull / aerobrake) hazards are
@@ -353,9 +431,9 @@ function applyMove(state, op, player) {
   // Liftoff gates the origin (skipped at LEO, siteId null); landing gates
   // the destination.
   const liftG = from ? maneuverGate(state, from, thrust) : { ok: true, needsRoll: false };
-  if (!liftG.ok) return fail('cannot_liftoff');
+  if (!liftG.ok) return fail('cannot_liftoff', { thrust, siteSize: liftG.size, site: from });
   const landG = maneuverGate(state, dest, thrust);
-  if (!landG.ok) return fail('cannot_land');
+  if (!landG.ok) return fail('cannot_land', { thrust, siteSize: landG.size, site: dest });
   // Ordered roll items: liftoff assist, route generics (skull/aero), then
   // landing assist. Each is aqua-payable (FINAO) or a d6 where a 1 is a
   // critical that destroys the ship.
@@ -373,7 +451,9 @@ function applyMove(state, op, player) {
   // Commit the burn + the FINAO payment, then resolve dice in travel
   // order. rolls[] is recorded on the rocket for the client to play
   // back (server is authoritative for every die).
-  player.rocket.tank -= cost;
+  // Spend the fuel: walk the wet chit down `stepsNeeded` black connections;
+  // the new tank water is whatever mass is left above dry (often fractional).
+  player.rocket.tank = round6(walkBlackDown(wetMass, stepsNeeded) - dryMass);
   if (finaoCost > 0) player.aqua -= finaoCost;
 
   const gen = makeRng(state.seed, state.rng.cursor);
@@ -445,11 +525,13 @@ function applyMove(state, op, player) {
     destroyRocket(player);
     return {
       ok: true, state,
-      log: `${player.name} burned ${cost} water and was DESTROYED at ${whereName} (rolled a 1).`,
+      log: `${player.name} burned ${stepsNeeded} fuel steps and was DESTROYED at ${whereName} (rolled a 1).`,
     };
   }
 
-  player.rocket.siteId = dest;
+  // Arriving back at LEO normalises to the canonical null position (LEO is
+  // "no site"), so the at-LEO ops recognise it without special-casing the slug.
+  player.rocket.siteId = (dest === leoSlug()) ? null : dest;
   // Advance the stored route past this turn. A turn-tagged route drops its
   // turn-1 legs and shifts the rest down (T2 -> T1, ...); a legacy untagged
   // route pops everything up to the node we reached.
@@ -471,13 +553,17 @@ function applyMove(state, op, player) {
   };
 
   const destName = (destSite && destSite.name) || dest;
-  let log = `${player.name} burned ${cost} water to ${destName}.`;
+  // Origin captured before the move (siteId was already advanced to dest).
+  // null == LEO. Fuel steps (not water): a burn spends fuel steps, which
+  // are non-linear with the water/aqua loaded onto the rocket.
+  const originName = from == null ? 'LEO' : ((siteById(from) || {}).name || from);
+  let log = `${player.name} burned ${stepsNeeded} fuel steps from ${originName} to ${destName}.`;
   const nItems = rollItems.length;
   if (finaoCost > 0) log += ` Paid ${finaoCost} aqua (FINAO) past ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
   else if (nItems) log += ` Rolled through ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
   if (decommissioned.length) log += ` Radiation decommissioned ${decommissioned.length} card${decommissioned.length === 1 ? '' : 's'}.`;
   if (chit) log += ` First into the ${chit.zone} zone (+glory chit).`;
-  return { ok: true, state, log };
+  return { ok: true, state, log, calc: moveCalc };
 }
 
 // Monotonic per-move id so the client can tell a fresh move's dice from
@@ -607,19 +693,22 @@ function applyDiscard(state, op, player) {
 // player funds a burn by converting aqua here first. Free (no op
 // cost), turn-gated. op = { amount }.
 function applyRefuel(state, op, player) {
-  if (player.rocket.siteId != null) return fail('rocket_not_at_leo');
+  if (!rocketAtLeo(player)) return fail('rocket_not_at_leo');
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
   const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
-  const room = Math.max(0, TANK_MAX - dry - (player.rocket.tank | 0));
+  const tank = Number(player.rocket.tank) || 0;
+  // Whole water units only; any sub-1 remainder left by a burn stays put
+  // (don't floor the tank away when topping up).
+  const room = Math.floor(Math.max(0, TANK_MAX - dry - tank));
   const amt = Math.min(want, player.aqua | 0, room);
   if (amt <= 0) {
     if (room <= 0) return fail('tank_full');
     return fail('insufficient_aqua');
   }
   player.aqua -= amt;
-  player.rocket.tank = (player.rocket.tank | 0) + amt;
-  return { ok: true, state, log: `${player.name} converted ${amt} aqua to water (tank ${player.rocket.tank}).` };
+  player.rocket.tank = round6(tank + amt);
+  return { ok: true, state, log: `${player.name} converted ${amt} aqua to water (tank ${round6(player.rocket.tank)}).` };
 }
 
 // Planned route persistence. Stored as player.rocket.route, an array
@@ -640,19 +729,12 @@ function applySetRoute(state, op, player) {
     const to = String(s.to || '');
     const burns = Math.max(0, Math.floor(Number(s.burns) || 0));
     const turn = Math.max(1, Math.floor(Number(s.turn) || 1));
-    if (!plannerSiteExists(from) || !plannerSiteExists(to)) return fail('unknown_site');
     norm.push({ from, to, burns, turn });   // turn drives per-turn MOVE execution
   }
-  // Validate continuity: each segment's from must be the previous to,
-  // and the first must start at the rocket's current position
-  // (siteId, null = LEO). Prevents a client from sending a
-  // disconnected path the engine couldn't actually execute.
-  const startsFrom = norm.length ? norm[0].from : null;
-  const here = player.rocket.siteId == null ? leoSlug() : player.rocket.siteId;
-  if (norm.length && startsFrom !== here) return fail('route_not_from_here');
-  for (let i = 1; i < norm.length; i++) {
-    if (norm[i].from !== norm[i - 1].to) return fail('route_discontinuous');
-  }
+  // The server does NOT validate the route's geometry (continuity / node
+  // existence) - routing is the client's planner job; this op just persists
+  // the (secret) plan. MOVE trusts these segments and validates only the
+  // burns. See CLAUDE.md "Movement authority".
   player.rocket.route = norm;
   return { ok: true, state, log: '' };  // empty log: routes are secret
 }
@@ -665,12 +747,13 @@ function applyClearRoute(state, _op, player) {
 // Reverse of REFUEL: cash tank water back into the aqua bank 1:1, only
 // at LEO. Clamped by the water on hand. Free, turn-gated. op={amount}.
 function applyCashWater(state, op, player) {
-  if (player.rocket.siteId != null) return fail('rocket_not_at_leo');
+  if (!rocketAtLeo(player)) return fail('rocket_not_at_leo');
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
-  const amt = Math.min(want, player.rocket.tank | 0);
+  // Whole water units only; the sub-1 remainder can't be cashed and stays.
+  const amt = Math.min(want, Math.floor(Number(player.rocket.tank) || 0));
   if (amt <= 0) return fail('no_water');
-  player.rocket.tank -= amt;
+  player.rocket.tank = round6((Number(player.rocket.tank) || 0) - amt);
   player.aqua = (player.aqua | 0) + amt;
   return { ok: true, state, log: `${player.name} cashed ${amt} water back to aqua (aqua ${player.aqua}).` };
 }
@@ -733,7 +816,7 @@ function applyTransfer(state, op, player) {
   const other = from === 'rocket' ? to : from;
   const rocketEmpty = player.rocket.stack.length === 0;
   if (other === 'leo') {
-    if (player.rocket.siteId != null && !rocketEmpty) return fail('rocket_not_at_leo');
+    if (!rocketAtLeo(player) && !rocketEmpty) return fail('rocket_not_at_leo');
   } else if (other.startsWith('outpost')) {
     const opp = player.outposts && player.outposts[other.slice('outpost'.length)];
     if (!opp) return fail('no_outpost');
@@ -832,7 +915,7 @@ const OUTPOST_LETTERS = ['A', 'B', 'C', 'D'];
 function applyConvertOutpost(state, op, player) {
   if (player.rocket.stack.length === 0) return fail('empty_rocket');
   const siteId = player.rocket.siteId;
-  if (siteId == null) return fail('rocket_at_leo');     // use the LEO Stack instead
+  if (rocketAtLeo(player)) return fail('rocket_at_leo');     // use the LEO Stack instead
   const taken = new Set(Object.keys(player.outposts || {}));
   const letter = OUTPOST_LETTERS.find((l) => !taken.has(l));
   if (!letter) return fail('no_outpost_slot');
@@ -868,6 +951,10 @@ function applyDissolveOutpost(state, op, player) {
   const outpost = player.outposts && player.outposts[letter];
   if (!outpost) return fail('no_outpost');
   if (outpost.cards && outpost.cards.length > 0) return fail('outpost_not_empty');
+  // Scrap rule: only when there's no usable water left. Whole units (>=1) must
+  // be pumped out first so they aren't lost; a sub-1 remainder can't be
+  // transferred (whole units only), so it's discardable and doesn't block.
+  if ((Number(outpost.tank) || 0) >= 1) return fail('outpost_has_water');
   delete player.outposts[letter];
   return { ok: true, state, log: `${player.name} decommissioned Outpost ${letter}.` };
 }
@@ -1007,10 +1094,155 @@ function applyProspectReroll(state, op, player) {
   };
 }
 
+// Industrialize (rulebook I7). Flip the player's claim at the parked site
+// into a factory. The client (industrialize.js#findIndustrializeOptions) is the
+// source of truth for the valid refinery + robonaut + support chain; the server
+// trusts the chosen `cardIds` (like it trusts routes) and validates the
+// essentials: parked at the site, owns the claim, no factory yet, an op to
+// spend, and the chain is actually in the stack and includes a refinery + a
+// robonaut. The chain is decommissioned back to the player's HAND (variant
+// rule, industrialize.md). The factory inherits the site's spectral type.
+function applyIndustrialize(state, op, player) {
+  const siteId = String(op.siteId || '');
+  const site = siteById(siteId);
+  if (!site) return fail('unknown_site');
+  if (player.rocket.siteId !== siteId) return fail('not_at_site');
+  const disc = state.discs[siteId];
+  if (!disc || disc.outcome !== 'success' || disc.ownerId !== player.profileId) return fail('not_claimed');
+  if (state.factories[siteId]) return fail('already_industrialized');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];
+  // Every id must be a non-crew card in the stack; the set must include a
+  // refinery + a robonaut (the build needs both).
+  let hasRefinery = false, hasRobonaut = false;
+  for (const id of ids) {
+    const slot = player.rocket.stack.find((s) => s.id === id && s.kind !== 'crew');
+    if (!slot) return fail('not_in_stack');
+    const c = PATENTS_BY_ID[id];
+    if (c && c.type === 'refinery') hasRefinery = true;
+    if (c && c.type === 'robonaut') hasRobonaut = true;
+  }
+  if (!hasRefinery || !hasRobonaut) return fail('cannot_industrialize');
+  // Decommission the chain to the hand.
+  for (const id of ids) {
+    const idx = player.rocket.stack.findIndex((s) => s.id === id);
+    if (idx >= 0) {
+      player.rocket.stack.splice(idx, 1);
+      player.hand.push(id);
+    }
+  }
+  if (player.rocket.activeThrusterId && !player.rocket.stack.some((s) => s.id === player.rocket.activeThrusterId)) {
+    player.rocket.activeThrusterId = null;
+  }
+  if (player.rocket.activeProspectorId && !player.rocket.stack.some((s) => s.id === player.rocket.activeProspectorId)) {
+    player.rocket.activeProspectorId = null;
+  }
+  const spectral = site.spectralType || 'C';
+  state.factories[siteId] = { ownerId: player.profileId, spectralType: spectral };
+  player.opsRemaining -= 1;
+  return {
+    ok: true, state,
+    log: `${player.name} industrialized ${site.name} (spectral ${spectral}); decommissioned ${ids.length} card${ids.length === 1 ? '' : 's'} to hand.`,
+  };
+}
+
+// ET Produce (rulebook): a factory turns a hand card into an installed
+// (Black-Side-up) card at a colocated Outpost. op = { siteId, cardId, letter,
+// isNewOutpost }. Mirrors browse.js#doEtProduce: parked at the player's own
+// factory, the card leaves the hand and lands face='secondary' in the outpost
+// (created at the site if new). Costs an op.
+function applyEtProduce(state, op, player) {
+  const siteId = String(op.siteId || '');
+  const site = siteById(siteId);
+  if (!site) return fail('unknown_site');
+  if (player.rocket.siteId !== siteId) return fail('not_at_site');
+  const fac = state.factories[siteId];
+  if (!fac || fac.ownerId !== player.profileId) return fail('no_factory');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  const cardId = String(op.cardId || '');
+  const hIdx = player.hand.indexOf(cardId);
+  if (hIdx < 0) return fail('not_in_hand');
+  const letter = String(op.letter || '');
+  if (!OUTPOST_LETTERS.includes(letter)) return fail('bad_outpost');
+  player.outposts = player.outposts || {};
+  let outpost = player.outposts[letter];
+  if (!outpost) {
+    outpost = player.outposts[letter] = { letter, siteId, cards: [], tank: 0 };
+  } else if (outpost.siteId !== siteId) {
+    return fail('not_colocated');
+  }
+  player.hand.splice(hIdx, 1);
+  outpost.cards.push({ id: cardId, kind: 'patent', face: 'secondary' });
+  player.opsRemaining -= 1;
+  const card = PATENTS_BY_ID[cardId];
+  return {
+    ok: true, state,
+    log: `${player.name} ET-produced ${card ? card.name : cardId} (Black-Side) at ${site.name} into Outpost ${letter}.`,
+  };
+}
+
+// Income (rulebook I1): spend the op to take +1 aqua from the pool into your
+// bank. Mirrors browse.js#doIncomeOp.
+const INCOME_AQUA = 1;
+function applyIncome(state, op, player) {
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  player.aqua = (player.aqua | 0) + INCOME_AQUA;
+  player.opsRemaining -= 1;
+  return { ok: true, state, log: `${player.name} took income (+${INCOME_AQUA} aqua; bank ${player.aqua}).` };
+}
+
+// Site refuel (rulebook I5): refine local water into the tank, one per site
+// per turn, costs an op. Two sources (op.mode), both computed authoritatively:
+//   isru    - the active prospector's rig: 1 + site water - ISRU rating
+//             (gate ISRU <= water, so gain >= 1). Mirrors doRefuel.
+//   factory - your own factory here: a flat +7. Mirrors doFactoryRefuel.
+// Gain is clamped by the tank's wet-mass room; the leftover is lost.
+function applySiteRefuel(state, op, player) {
+  const siteId = String(op.siteId || '');
+  const site = siteById(siteId);
+  if (!site) return fail('unknown_site');
+  if (player.rocket.siteId !== siteId) return fail('not_at_site');
+  const water = Number.isFinite(site.hydration) ? site.hydration : 0;
+  if (water <= 0) return fail('dry_site');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  player.refueledSites = Array.isArray(player.refueledSites) ? player.refueledSites : [];
+  if (player.refueledSites.includes(siteId)) return fail('already_refueled');
+  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const cap = Math.max(0, TANK_MAX - dry);
+  const tank = Number(player.rocket.tank) || 0;
+  if (tank >= cap) return fail('tank_full');
+  let rawGain, label;
+  if (op.mode === 'factory') {
+    const fac = state.factories[siteId];
+    if (!fac || fac.ownerId !== player.profileId) return fail('no_factory');
+    rawGain = 7;
+    label = 'Factory-Refuel';
+  } else {
+    const provId = player.rocket.activeProspectorId;
+    const slot = provId && player.rocket.stack.find((s) => s.id === provId);
+    if (!slot) return fail('no_prospector');
+    const isru = prospectorIsru(slot);
+    if (!(isru >= 0 && isru <= water)) return fail('isru_too_high');
+    rawGain = 1 + water - isru;
+    label = 'ISRU Refuel';
+  }
+  const gain = Math.min(rawGain, cap - tank);
+  if (gain <= 0) return fail('tank_full');
+  player.rocket.tank = round6(tank + gain);
+  player.refueledSites.push(siteId);
+  player.opsRemaining -= 1;
+  return {
+    ok: true, state,
+    log: `${player.name}: ${label} at ${site.name} (+${round6(gain)} water; tank ${round6(player.rocket.tank)}).`,
+  };
+}
+
 // Ops that change the game and ride the per-turn undo stack. Each is a
 // pure (state, op, player) -> { ok, state, log } transform; the
 // dispatcher (not the handler) maintains turnActions / turnRedo.
 const FUNCTIONAL = {
+  INCOME: applyIncome,
+  SITE_REFUEL: applySiteRefuel,
   MOVE: applyMove,
   BUILD_ROCKET: applyBuildRocket,
   BOOST: applyBoost,
@@ -1029,6 +1261,8 @@ const FUNCTIONAL = {
   SET_ACTIVE_PROSPECTOR: applySetActiveProspector,
   PROSPECT: applyProspect,
   PROSPECT_REROLL: applyProspectReroll,
+  INDUSTRIALIZE: applyIndustrialize,
+  ET_PRODUCE: applyEtProduce,
 };
 
 function pickPayload(op) {
@@ -1048,6 +1282,9 @@ function pickPayload(op) {
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
     case 'PROSPECT': return { siteId: op.siteId };
     case 'PROSPECT_REROLL': return { siteId: op.siteId };
+    case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode };
+    case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds };
+    case 'ET_PRODUCE': return { siteId: op.siteId, cardId: op.cardId, letter: op.letter, isNewOutpost: !!op.isNewOutpost };
     // Route ops ride the undo stack like every other functional op, so
     // an UNDO/REDO replay (rebuildFromBase) must carry their payload or
     // the replay would re-run SET_ROUTE with no segments and silently
@@ -1110,6 +1347,9 @@ function openTurnFor(state, player) {
   player.opsRemaining = OPS_PER_TURN;
   player.movesRemaining = MOVES_PER_TURN;
   player.discardsRemaining = DISCARDS_PER_TURN;
+  // One refuel per site per turn: clear the per-turn ledger so the
+  // sites this player tapped last turn are refuellable again.
+  player.refueledSites = [];
   state.turnActions = [];
   state.turnRedo = [];
 }
@@ -1138,8 +1378,11 @@ function applyEndTurn(state, _op, player) {
   // Lap complete: advance the Sunspot Cube one slot (income + event
   // roll, and the round counter ticks on a full 12-slot cycle).
   const prevRound = state.round;
-  advanceClock(state);
+  const clk = advanceClock(state);
+  const incomeNote = (clk && clk.income && clk.income.length)
+    ? ` Factory income: ${clk.income.join(', ')}.` : '';
   const roundEnded = state.round > prevRound;
+  log += incomeNote;
 
   if (!roundEnded) {
     // Still inside the round: the cube moved a slot, next lap reopens
@@ -1355,6 +1598,18 @@ function allBiddersActed(state) {
     acted.includes(p.profileId) || auto.includes(p.profileId) || biddingBlockedByHand(p));
 }
 
+// Highest standing bid that is NOT this player's own. The auctioneer wins
+// ties, so this is the least they must match to lead - and therefore the
+// floor they may walk an overbid back down to.
+function highestOtherBid(state, profileId) {
+  const bids = (state.auction && state.auction.bids) || {};
+  let hi = 0;
+  for (const [pid, amt] of Object.entries(bids)) {
+    if (Number(pid) !== profileId) hi = Math.max(hi, amt | 0);
+  }
+  return hi;
+}
+
 function applyAuctionStart(state, op, ctx) {
   if (state.auction) return fail('auction_in_progress');
   const player = currentPlayer(state);
@@ -1401,35 +1656,60 @@ function applyAuctionBid(state, op, ctx) {
   const amount = Number(op.amount);
   // Bids can be 0 (claim it free); only negatives are invalid.
   if (!Number.isInteger(amount) || amount < 0) return fail('bad_amount');
-  // Must at least tie the current high (ties are allowed); only the
-  // floor is enforced, so a player may raise or re-tie freely.
-  const floorBefore = a.highBid || 0;
+
+  a.bids = a.bids || {};
+  const isAuctioneer = bidder.profileId === a.auctioneerId;
+  const prevBid = (bidder.profileId in a.bids) ? a.bids[bidder.profileId] : null;
+  // Floor: a non-auctioneer must at least tie the current high (ties are
+  // allowed). The auctioneer wins ties, so their floor excludes their own
+  // bid - they only need to match the top RIVAL bid to lead. That lets them
+  // walk an accidental overbid back down to the real competition instead of
+  // being trapped above it.
+  const rivalHigh = highestOtherBid(state, bidder.profileId);
+  const floorBefore = isAuctioneer ? rivalHigh : (a.highBid || 0);
   if (amount < floorBefore) return fail('bid_too_low');
   if (amount > bidder.aqua) return fail('insufficient_aqua');
 
-  a.bids = a.bids || {};
   a.bids[bidder.profileId] = amount;
   a.passed = (a.passed || []).filter((id) => id !== bidder.profileId);
   // Placing a bid opts the bidder back in - it cancels both a plain pass
   // and a permanent auto-pass.
   a.autoPassed = (a.autoPassed || []).filter((id) => id !== bidder.profileId);
-  // A raise (or ANY auctioneer bid) reopens the floor: clear the pass
-  // list and reset the responded set to just this bidder, so every
-  // other player must bid or pass again (this is what makes an
-  // auctioneer tie force the others to respond). A plain tie by a
-  // non-auctioneer just adds them to the responded set.
-  const reopen = amount > floorBefore || bidder.profileId === a.auctioneerId;
-  if (reopen) {
-    a.passed = [];
-    a.acted = [bidder.profileId];
-  } else if (!(a.acted || []).includes(bidder.profileId)) {
-    a.acted = [...(a.acted || []), bidder.profileId];
+
+  // A LOWER by the auctioneer (reducing a standing overbid toward the top
+  // rival) only drops the price-to-beat, so it puts nobody new on the clock:
+  // everyone who already took a position goes back to acknowledged and the
+  // lot stays closeable. Anyone who never responded stays pending.
+  const isLower = isAuctioneer && prevBid != null && amount < prevBid;
+  if (isLower) {
+    const acked = state.players
+      .filter((p) => p.profileId !== a.auctioneerId)
+      .filter((p) => (p.profileId in a.bids)
+        || (a.passed || []).includes(p.profileId)
+        || (a.autoPassed || []).includes(p.profileId)
+        || biddingBlockedByHand(p))
+      .map((p) => p.profileId);
+    a.acted = [a.auctioneerId, ...acked];
+  } else {
+    // A raise (or ANY fresh/equal auctioneer bid) reopens the floor: clear
+    // the pass list and reset the responded set to just this bidder, so
+    // every other player must bid or pass again (this is what makes an
+    // auctioneer tie force the others to respond). A plain tie by a
+    // non-auctioneer just adds them to the responded set.
+    const reopen = amount > floorBefore || isAuctioneer;
+    if (reopen) {
+      a.passed = [];
+      a.acted = [bidder.profileId];
+    } else if (!(a.acted || []).includes(bidder.profileId)) {
+      a.acted = [...(a.acted || []), bidder.profileId];
+    }
   }
   recomputeAuction(state);
-  const tie = amount === floorBefore && floorBefore > 0;
+  const tie = !isLower && amount === floorBefore && floorBefore > 0;
+  const verb = isLower ? 'lowered the bid to' : tie ? 'tied the bid at' : 'bid';
   return {
     ok: true, state,
-    log: `${bidder.name} ${tie ? 'tied the bid at' : 'bid'} ${amount} aqua.`,
+    log: `${bidder.name} ${verb} ${amount} aqua.`,
   };
 }
 
@@ -1692,13 +1972,23 @@ export function applyOperation(prevState, op, ctx) {
 
   const isFunctional = !!FUNCTIONAL[op.kind];
   if (!isFunctional && !META[op.kind]) return fail('unknown_op');
-  // An open auction freezes every other op (MOVE / END_TURN / undo)
-  // until the lot resolves.
-  if (prevState.auction) return fail('auction_in_progress');
-  if (!isPlayersTurn(prevState, ctx.profileId)) return fail('not_your_turn');
+  // A debug dry-run (op.debug) is READ-ONLY - the endpoint computes it on a
+  // clone and never persists or broadcasts - so it skips the turn + auction
+  // gates and runs against the CALLER's OWN player. Lets a player simulate
+  // their own move any time, even off-turn or during an auction (it's
+  // inconsequential).
+  if (!op.debug) {
+    // An open auction freezes every other op (MOVE / END_TURN / undo)
+    // until the lot resolves.
+    if (prevState.auction) return fail('auction_in_progress');
+    if (!isPlayersTurn(prevState, ctx.profileId)) return fail('not_your_turn');
+  }
 
   const state = clone(prevState);
-  const player = currentPlayer(state);
+  const player = op.debug
+    ? (playerByProfile(state, ctx.profileId) || currentPlayer(state))
+    : currentPlayer(state);
+  if (!player) return fail('not_a_player');
 
   if (isFunctional) {
     const cursorBefore = state.rng.cursor;

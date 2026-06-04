@@ -53,17 +53,23 @@ export const NET_THRUST_READOUT = ['<1', 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 
 
 // Weight classes, low mass -> high mass. `fractions` is the band's
 // fuel-step ladder (steepest descent, read top-to-bottom on the
-// board). `color` mirrors the blue band shades on the Rocket copy.
+// board). `fuelStepsPerUnit` is how many fuel steps it takes to burn
+// ONE whole mass unit while the wet chit sits in that band - the
+// ladder's denominator (ninths in WISP ... whole steps in TUG). It is
+// NOT linear with mass: a lighter ship squeezes more burns out of the
+// same water, so counting burns across a span means summing this
+// per-band, not dividing. `color` mirrors the blue band shades on the
+// Rocket copy.
 export const WEIGHT_CLASSES = [
-  { id: 'WISP',      label: 'WISP',      netThrust: +2, massMin: 1,  massMax: 1,  color: '#bfe6f7',
+  { id: 'WISP',      label: 'WISP',      netThrust: +2, massMin: 1,  massMax: 1,  color: '#bfe6f7', fuelStepsPerUnit: 9,
     fractions: ['8/9', '7/9', '2/3', '5/9', '4/9', '1/3', '2/9', '1/9'] },
-  { id: 'PROBE',     label: 'PROBE',     netThrust: +1, massMin: 2,  massMax: 4,  color: '#9fd8f2',
+  { id: 'PROBE',     label: 'PROBE',     netThrust: +1, massMin: 2,  massMax: 4,  color: '#9fd8f2', fuelStepsPerUnit: 6,
     fractions: ['5/6', '3/4', '2/3', '1/2', '1/3', '1/4', '1/6'] },
-  { id: 'SCOUT',     label: 'SCOUT',     netThrust:  0, massMin: 5,  massMax: 8,  color: '#7dcdee',
+  { id: 'SCOUT',     label: 'SCOUT',     netThrust:  0, massMin: 5,  massMax: 8,  color: '#7dcdee', fuelStepsPerUnit: 3,
     fractions: ['2/3', '1/2', '1/3'] },
-  { id: 'TRANSPORT', label: 'TRANSPORT', netThrust: -1, massMin: 9,  massMax: 16, color: '#54bfe8',
+  { id: 'TRANSPORT', label: 'TRANSPORT', netThrust: -1, massMin: 9,  massMax: 16, color: '#54bfe8', fuelStepsPerUnit: 2,
     fractions: ['1/2'] },
-  { id: 'TUG',       label: 'TUG',       netThrust: -2, massMin: 17, massMax: 32, color: '#2fb3e6',
+  { id: 'TUG',       label: 'TUG',       netThrust: -2, massMin: 17, massMax: 32, color: '#2fb3e6', fuelStepsPerUnit: 1,
     fractions: [] },
 ];
 
@@ -80,6 +86,27 @@ export function weightClassForMass(mass) {
     if (m >= wc.massMin && m <= wc.massMax) return wc;
   }
   return WEIGHT_CLASSES[WEIGHT_CLASSES.length - 1];
+}
+
+// Total fuel steps the wet chit walks from wetMass down to dryMass: one
+// whole mass unit at a time, each costing that unit's band's
+// fuelStepsPerUnit. Non-linear, since the chit can pass through several
+// bands (e.g. SCOUT 3 + PROBE 6). This is the "graph distance" a tank's
+// worth of water can be burned over; burns = floor(steps / fuelPerBurn).
+export function fuelStepsBetween(dryMass, wetMass) {
+  const lo = Math.max(1, Math.round(dryMass || 0));
+  const hi = Math.max(lo, Math.round(wetMass || 0));
+  let steps = 0;
+  for (let m = lo + 1; m <= hi; m++) steps += weightClassForMass(m).fuelStepsPerUnit;
+  return steps;
+}
+
+// Whole burns a tank affords: fuel steps available divided by the
+// fuel-per-burn cost, rounded DOWN (leftover steps can't finish a burn).
+export function burnsAvailable(dryMass, wetMass, fuelPerBurn) {
+  const per = Number(fuelPerBurn);
+  if (!(per > 0)) return 0;
+  return Math.floor(fuelStepsBetween(dryMass, wetMass) / per);
 }
 
 // Flat list of the 32 mass nodes, each tagged with its band, the

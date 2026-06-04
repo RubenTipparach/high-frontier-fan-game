@@ -13,25 +13,44 @@
       minimal and dependency-free for the same reason.
     -->
     <style>
+      /* Non-blocking warning banner pinned to the top - NOT a full-screen
+         hard stop. A false positive (a slow boot that finishes late) must
+         never lock the player out of a working game, so this only warns and
+         is dismissible. */
       .boot-error {
-        position: fixed; inset: 0; z-index: 99999;
-        display: flex; align-items: center; justify-content: center;
-        background: rgba(7, 6, 15, 0.88); padding: 24px;
-        font: 15px ui-sans-serif, system-ui, -apple-system, sans-serif;
+        position: fixed; top: 0; left: 0; right: 0; z-index: 99999;
+        background: #2a1518; border-bottom: 1px solid #5b2330; color: #e6e9ff;
+        padding: 9px 14px; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+        font: 14px ui-sans-serif, system-ui, -apple-system, sans-serif;
       }
       .boot-error-box {
-        max-width: 440px; background: #11101e; color: #e6e9ff;
-        border: 1px solid #2a2740; border-radius: 10px; padding: 20px 22px;
+        max-width: 960px; margin: 0 auto;
+        display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
       }
-      .boot-error-box strong { color: #f87171; font-size: 16px; }
-      .boot-error-box p { color: #8b90b8; line-height: 1.5; }
-      .boot-error-box ul { color: #e6e9ff; line-height: 1.7; padding-left: 20px; margin: 10px 0; }
+      .boot-error-msg { flex: 1 1 240px; min-width: 0; line-height: 1.4; }
+      .boot-error-box strong { color: #f87171; }
+      .boot-error-box .boot-error-hint {
+        display: block; margin-top: 2px; color: #9aa0c8; font-size: 12.5px;
+      }
       .boot-error-box button {
-        margin-top: 8px; font: inherit; cursor: pointer;
-        background: #1a1830; color: #e6e9ff; border: 1px solid #2a2740;
-        border-radius: 6px; padding: 8px 14px;
+        font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap;
+        background: #2f6df0; color: #fff; border: 1px solid #2f6df0;
+        border-radius: 6px; padding: 7px 14px;
       }
-      .boot-error-box button:hover { background: #25223e; border-color: #3a3760; }
+      .boot-error-box button:hover { background: #2257c9; border-color: #2257c9; }
+      .boot-error-box button.boot-error-dismiss {
+        background: transparent; border-color: transparent;
+        color: #9aa0c8; font-weight: 400; padding: 7px 9px;
+      }
+      .boot-error-box button.boot-error-dismiss:hover {
+        background: rgba(255, 255, 255, 0.06); border-color: transparent; color: #e6e9ff;
+      }
+      .boot-error-detail {
+        display: block; margin-top: 6px; padding: 6px 8px;
+        background: #160d10; border: 1px solid #5b2330; border-radius: 5px;
+        color: #f3b0b0; font: 11.5px ui-monospace, SFMono-Regular, Menlo, monospace;
+        white-space: pre-wrap; word-break: break-word; user-select: text;
+      }
     </style>
     <!--
       API base URL for the High Frontier companion server. Empty string
@@ -623,14 +642,14 @@
     -->
     <div id="boot-error" class="boot-error" hidden role="alert">
       <div class="boot-error-box">
-        <strong>This page didn't load fully.</strong>
-        <p>You're probably on a cached older version. A hard refresh fixes it:</p>
-        <ul>
-          <li><b>Windows / Linux:</b> Ctrl + Shift + R</li>
-          <li><b>Mac:</b> Cmd + Shift + R</li>
-          <li><b>Firefox:</b> Ctrl + Shift + R (Cmd + Shift + R on Mac)</li>
-        </ul>
-        <button type="button" id="boot-error-reload">Hard refresh now</button>
+        <div class="boot-error-msg">
+          <strong>This page may not have loaded fully.</strong>
+          You may be on a cached older version, or the build itself may be broken.
+          <span class="boot-error-hint">Still stuck after reloading? On a phone or tablet, close every tab of the game and open it again. On a computer, hard refresh (Ctrl / Cmd + Shift + R).</span>
+          <code id="boot-error-detail" class="boot-error-detail" hidden></code>
+        </div>
+        <button type="button" id="boot-error-reload">Reload the latest version</button>
+        <button type="button" id="boot-error-dismiss" class="boot-error-dismiss">Dismiss</button>
       </div>
     </div>
 
@@ -639,38 +658,80 @@
     <!--
       Boot watchdog (inline, non-module so it always runs even if the
       module graph is broken). main.js sets window.__hfBooted = true at
-      the top of boot(). If that flag is still unset a few seconds after
-      load, the app didn't start - show the hard-refresh banner.
+      the top of boot(). If that flag is still unset a while after load,
+      the app didn't start - show a NON-blocking warning banner (never a
+      hard stop: a slow-but-fine boot must not lock the player out). The
+      banner surfaces the actual error so a broken build can be reported,
+      auto-clears if boot finishes late, and is dismissible.
     -->
     <script>
       (function () {
-        function showBootError() {
-          if (window.__hfBooted) return;
+        var dismissed = false;   // user closed it
+        var shouldWarn = false;  // a failure signal fired
+        var firstError = '';     // captured error text for the banner
+
+        function sync() {
           var el = document.getElementById('boot-error');
-          if (el) el.hidden = false;
+          if (!el) return;
+          // Booted (even if late), dismissed, or no failure yet: stay hidden.
+          el.hidden = (window.__hfBooted === true) || dismissed || !shouldWarn;
+          if (!el.hidden && firstError) {
+            var d = document.getElementById('boot-error-detail');
+            if (d) { d.textContent = firstError; d.hidden = false; }
+          }
         }
-        // Catch the module link/parse error as soon as it fires (faster
-        // than the timeout) - but only treat it as a boot failure if the
-        // app still hasn't started.
-        window.addEventListener('error', function () {
-          setTimeout(showBootError, 1500);
+        function warn() { shouldWarn = true; sync(); }
+        function capture(msg) {
+          if (!firstError && msg) firstError = String(msg).slice(0, 600);
+        }
+
+        // A module parse/link error (the classic stale-cache or bad-build
+        // failure) fires a window 'error' event. Capture its message +
+        // source file:line so the banner can show what actually broke.
+        window.addEventListener('error', function (e) {
+          var where = (e && e.filename)
+            ? ' (' + String(e.filename).split('/').pop() + (e.lineno ? ':' + e.lineno : '') + ')'
+            : '';
+          var msg = (e && (e.message || (e.error && e.error.message))) || 'A script failed to load.';
+          capture(msg + where);
+          setTimeout(warn, 2500);
+        }, true);
+        window.addEventListener('unhandledrejection', function (e) {
+          var r = e && e.reason;
+          capture('Unhandled: ' + ((r && (r.message || r.stack)) || r || 'unknown'));
+          setTimeout(warn, 2500);
         });
-        // Fallback: even a silent failure (no error event) is caught by
-        // checking the flag a few seconds after the page settles.
-        window.addEventListener('load', function () {
-          setTimeout(showBootError, 4000);
-        });
+        // Silent failure (no error event): warn well after load - generous,
+        // so a slow mobile boot isn't flagged as a failure.
+        window.addEventListener('load', function () { setTimeout(warn, 8000); });
+        // If boot finishes late (slow network), clear any shown banner.
+        var poll = setInterval(function () {
+          if (window.__hfBooted) { sync(); clearInterval(poll); }
+        }, 1000);
+
         var reload = document.getElementById('boot-error-reload');
         if (reload) {
           reload.addEventListener('click', function () {
-            // A plain reload often suffices once the module's cache
-            // entry has expired; if the cached copy is still fresh the
-            // user needs the keyboard hard-refresh spelled out above
-            // (JS can't force a subresource refetch without a service
-            // worker). We deliberately don't touch the URL so the room
-            // routing chain (?v= / ?room= / ?invite=) is preserved.
-            window.location.reload();
+            // A plain reload re-serves the cached, half-linked modules -
+            // that's why the old button looked like it did nothing. JS
+            // can't flush the HTTP cache, but a NEW query key is a fresh
+            // cache key: the browser refetches index.html from the network,
+            // and that fresh copy pulls the current ?v=<sha> assets. Use
+            // set() (not append) so repeat clicks don't stack params, and
+            // keep the rest of the URL + hash so room / invite / version
+            // routing survives (404.html forwards the query on deep paths).
+            try {
+              var u = new URL(window.location.href);
+              u.searchParams.set('fresh', Date.now().toString(36));
+              window.location.replace(u.toString());
+            } catch (e) {
+              window.location.reload();
+            }
           });
+        }
+        var dismiss = document.getElementById('boot-error-dismiss');
+        if (dismiss) {
+          dismiss.addEventListener('click', function () { dismissed = true; sync(); });
         }
       })();
     </script>

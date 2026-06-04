@@ -1,8 +1,9 @@
 # Reference materials
 
-These are **publisher-authored** reference materials for *High Frontier 4: All*
-(Sierra Madre Games, Phil Eklund). They're checked in here strictly as
-development reference for this fan implementation — they're not part of the
+These are reference materials for *High Frontier 4: All*
+(Sierra Madre Games, Phil Eklund), both publisher-authored and
+community-authored. They're checked in here strictly as
+development reference for this fan implementation - they're not part of the
 shipped product and the static GH Pages site does not link to them.
 
 | File | What it covers |
@@ -12,6 +13,7 @@ shipped product and the static GH Pages site does not link to them.
 | `HF4-site-list.xlsx` | Structured site list with one row per site: name, size, spectral type, hydration, group, solar zone, sol-clock position, burns-from-LEO, and a few capability flags. This is the authoritative input the `scripts/generate-sites.js` tool reads to keep `data/sites.js` in sync. |
 | `HF4-branching-manuals-v0.3.zip` | Branching rulebooks (Core, QS, M0…M4, Futures, Sirens, AgeOfPiracy, Exodus, Panspermia). Reference for the rule details the engine will need in Stage 3+. |
 | `HF4-victory-point-tracker.pdf` | Published end-of-game Victory Point tracker / scoring mat. Source for the scoring tab: the per-spectral exploitation track (factories built per spectral, marker steps 8 / 5 / 4), the glory-chit ticker tape (earn on first landing in a zone, flip for more on return home), and the VP category list. Expansion-module rows are out of scope. |
+| `HF4-player-aid.pdf` | Community player aid by Geoff Speare (2019-04-29 revision), the single-sheet action reference. Canonical breakdown of the turn structure (move, any free actions, one operation), every Operation vs Free Action, felonies, the thrust / movement steps, map-space rules, threats, events, scoring, and the module summaries. Source for the "Operations & free actions" table in `CLAUDE.md` and the op-vs-free-action line the engine enforces. |
 
 ## External reference links
 

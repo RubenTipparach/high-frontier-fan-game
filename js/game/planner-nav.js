@@ -187,7 +187,13 @@ export function buildPlanner(graph, {
             ? edgeLabels[node][otherNode]
             : null;
           if (directionChangeCost <= burnsRemaining) {
-            ns.push({ node: otherNode, dir: newDir, bonus: bonusAfter, burnsRemaining: brAfter });
+            // _gross / _flyby are inert accounting fields (pathId +
+            // weight ignore them, so the search is unchanged): _gross is
+            // the burns this step would cost with no flyby help, _flyby
+            // is the flyby bonus actually applied to it. planRoute sums
+            // them so the UI can show "BURNS - FLY BY = TOTAL".
+            ns.push({ node: otherNode, dir: newDir, bonus: bonusAfter, burnsRemaining: brAfter,
+              _gross: directionChangeCost, _flyby: bonusUsed });
           }
         }
       }
@@ -221,7 +227,10 @@ export function buildPlanner(graph, {
       const bonusUsed = otherPoint.landing ? 0 : Math.min(bonus, entryCost);
       const bonusAfter = Math.max(bonus - bonusUsed + flybyBoost, 0);
       if (burnsRemaining >= entryCost - bonusUsed) {
-        ns.push({ node: other, dir: newDir, bonus: bonusAfter, burnsRemaining: burnsRemaining - (entryCost - bonusUsed) });
+        // _gross = entry cost before flyby help, _flyby = bonus applied
+        // to it (see the dir-change branch above). Inert for the search.
+        ns.push({ node: other, dir: newDir, bonus: bonusAfter, burnsRemaining: burnsRemaining - (entryCost - bonusUsed),
+          _gross: entryCost, _flyby: bonusUsed });
       }
     }
     return ns;
@@ -314,9 +323,16 @@ export function planRoute(graph, fromId, toId, config = {}) {
   if (!path) return null;
   const segments = [];
   let turn = 1;
+  // Gross burns (before flyby help) + flyby bonus actually applied,
+  // summed from the inert per-step accounting fields. By construction
+  // grossBurns - flybyBonus === totalBurns (the net the search costs).
+  let grossBurns = 0;
+  let flybyBonus = 0;
   for (let i = 1; i < path.length; i++) {
     const u = path[i - 1];
     const v = path[i];
+    grossBurns += v._gross || 0;
+    flybyBonus += v._flyby || 0;
     if (v.wait) { turn += 1; continue; }
     if (v.done) continue;
     if (v.node === u.node) continue;
@@ -336,5 +352,7 @@ export function planRoute(graph, fromId, toId, config = {}) {
     segments,
     totalBurns: weight.burns,
     totalTurns: weight.turns + 1,    // +1 for the implicit first turn
+    grossBurns,
+    flybyBonus,
   };
 }

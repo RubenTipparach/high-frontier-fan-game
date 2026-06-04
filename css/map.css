@@ -108,10 +108,40 @@
   color: var(--ink);
 }
 .map-turn-controls #turn-end {
-  background: linear-gradient(180deg, #f97316, #c2410c);
+  /* Seat-colour fill: the active player's colour (--mp-turn-color, set by
+     refreshTurnBudget; falls back to the default orange). The translucent
+     top-light / bottom-shade overlay gives the button depth on any seat colour
+     without needing color-mix. Text colour is set inline (readableInk) so it
+     stays legible on light seats (yellow / cream) and the dark one (magenta). */
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.10), rgba(0, 0, 0, 0.34)),
+    var(--mp-turn-color, #f97316);
   color: #2e0f02;
   font-weight: 700;
-  border-color: #9a3412;
+  border-color: var(--mp-turn-color, #9a3412);
+}
+/* Operations used up: glow + pulse the End turn button (an attention beat,
+   like the auction action chip) so the player sees the turn is ready to hand
+   off. Toggled by refreshTurnBudget when ops hit 0 and it's the player's turn. */
+.map-turn-controls #turn-end.needs-end {
+  animation: turn-end-glow 1.4s ease-in-out infinite;
+}
+@keyframes turn-end-glow {
+  0%, 100% {
+    box-shadow: 0 0 4px 1px color-mix(in srgb, var(--mp-turn-color, #f9b250) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 18px 5px color-mix(in srgb, var(--mp-turn-color, #f9b250) 92%, transparent);
+  }
+}
+/* An auction is open: End turn is frozen and reads "Auctioning". Dim it +
+   no glow so it's clearly inactive (the auction overlay is the live action),
+   while keeping the seat-colour fill so it still reads as your turn. */
+.map-turn-controls #turn-end.is-auctioning {
+  opacity: 0.6;
+  cursor: not-allowed;
+  animation: none !important;
+  box-shadow: none;
 }
 .map-turn-controls button:not(.turn-tag):hover:not(:disabled) {
   background: var(--accent);
@@ -168,8 +198,8 @@
   .map-aqua-chip.aqua-gain { animation: none; }
   .aqua-gain-float { animation: none; opacity: 0; }
 }
-/* Per-turn budget tags: [op:N] [move:N]. Monospace-ish brackets
-   so they read as compact status chips next to the turn clock. */
+/* Per-turn budget tag: [move:N]. A compact status chip that sits
+   right next to the End turn / Ops button. */
 .map-turn-budget {
   display: inline-flex;
   align-items: center;
@@ -189,37 +219,41 @@
   appearance: none;
   touch-action: manipulation;
 }
-#turn-tag-op   { border-color: #d4a72c; color: #f4d27a; }
-#turn-tag-move { border-color: #38bdf8; color: #bae6fd; }
-#turn-tag-op:hover, #turn-tag-move:hover { filter: brightness(1.25); }
+/* The move tag is a solid sky-blue chip (the same filled, depth-shaded
+   language as the End turn / Ops button it now sits beside) so the two
+   primary turn controls read as a matched pair. */
+#turn-tag-move {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(0, 0, 0, 0.30)),
+    #0ea5e9;
+  color: #f0f9ff;
+  border-color: #7dd3fc;
+}
+#turn-tag-move:hover { filter: brightness(1.1); }
 /* Once the move is spent the move tag becomes the "↩ undo move" control
-   - amber so it reads as a distinct (reversible) action, not a budget. */
+   - solid amber so it reads as a distinct (reversible) action, not a budget. */
 #turn-tag-move.is-undo {
-  border-color: #d4a72c;
-  color: #f4d27a;
-  background: #2a2410;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(0, 0, 0, 0.30)),
+    #d4a72c;
+  color: #2e1c02;
+  border-color: #f0c455;
 }
-/* The ⚙ gear is welded to the move tag as a single segmented
-   control: shared height, butted edges, one rounded outer profile.
-   Settings (route + fuel options) read as "part of move". */
-.move-group { display: inline-flex; align-items: stretch; }
-.move-group #turn-tag-move {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
-.move-group .turn-tag-gear {
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-  border-left-width: 0;
-  padding-left: 8px;
-  padding-right: 8px;
+/* Game-settings gear: a standalone toolbar chip (route + fuel options).
+   No longer welded to the move tag, so it carries its own rounded
+   profile, border, and sizing. It is not a budget point, so it never
+   pulses or fades. */
+.map-turn-controls .turn-tag-gear {
+  background: var(--bg-2, #14233a);
   color: var(--ink-dim, #9fb3cc);
   border-color: #38bdf8;
   font-size: 13px;
+  font-weight: 700;
+  -webkit-appearance: none;
+  appearance: none;
+  touch-action: manipulation;
 }
-.move-group .turn-tag-gear:hover { filter: brightness(1.25); }
-/* The gear isn't a budget point, so it never pulses or fades. */
-.move-group .turn-tag-gear { animation: none !important; opacity: 1 !important; }
+.map-turn-controls .turn-tag-gear:hover { filter: brightness(1.25); }
 /* Pulse the budget tags while their action is still available
    (op / move not yet spent) so the player's eye is drawn to them.
    Spent tags (faded) don't pulse. */
@@ -281,6 +315,16 @@
 .map-turn-controls button.is-locked:hover {
   filter: grayscale(0.6);
 }
+/* No thruster support chain engaged: the rocket can't move, so the move
+   tag is dark + dimmed and never pulses (no glow nudging an impossible
+   move). Distinct from is-locked (not your turn) only by intent + tooltip. */
+.map-turn-budget .turn-tag.is-nomove {
+  opacity: 0.4;
+  cursor: not-allowed;
+  animation: none !important;
+  filter: grayscale(0.65);
+}
+.map-turn-budget .turn-tag.is-nomove:hover { filter: grayscale(0.65); }
 .map-mode-toggle {
   display: inline-flex;
   background: var(--bg-2);
@@ -657,6 +701,14 @@
   text-transform: uppercase;
   letter-spacing: 1px;
 }
+/* Sub-1 remainder a burn left in the tank (can't be transferred out). */
+.fuel-tank-rem {
+  margin: 2px 0 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: center;
+}
+.fuel-tank-rem strong { color: #fbbf24; }
 /* Rocket-stack totals: framed as a profile card. The
    thrust-triangle ID-photo sits on the LEFT inside its own
    bordered tile with a "MODIFIED THRUST" header above + a
@@ -799,6 +851,16 @@
 .rocket-fuel-strip {
   margin: 12px 0 0;
 }
+/* Simulate-planned-move control under the fuel strip (online): a read-only
+   server dry-run that prints the fuel-step breakdown. */
+.rocket-sim-move { margin: 8px 0 0; }
+.rocket-sim-move .rocket-sim-btn { width: 100%; font-size: 12px; }
+.rocket-sim-result {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
 .rocket-fuel-strip-label {
   font-size: 10px;
   text-transform: uppercase;
@@ -912,7 +974,7 @@
 .ntd-legend .ntd-line.refuel { border-top: 2px dashed #ec5a96; }
 .ntd-legend .ntd-chit { display: inline-block; width: 11px; height: 11px; border-radius: 50%; vertical-align: -1px; margin-right: 4px; border: 2px solid; }
 .ntd-legend .ntd-chit.dry { border-color: #94a3b8; }
-.ntd-legend .ntd-chit.wet { border-color: #f5c518; }
+.ntd-legend .ntd-chit.wet { border-color: #7dd3fc; }
 .fuel-strip-band {
   display: flex;
   flex-direction: column;
@@ -1223,6 +1285,43 @@
   font-size: 12px;
   line-height: 1.45;
 }
+/* "What could I lose" preview: every stack card whose rad-hard plus the
+   final thrust can't clear the worst die (a 6, plus any red-season bonus).
+   Amber so it reads as a heads-up tied to the red "Cannot bypass" warning
+   above it, not a separate hazard. */
+.rad-confirm-atrisk {
+  background: rgba(120, 53, 15, 0.32);
+  border: 1px solid #d97706;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+.rad-confirm-atrisk-head { margin: 0 0 6px; font-weight: 700; color: #fbbf24; }
+.rad-confirm-atrisk-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.rad-confirm-atrisk-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 3px 6px;
+  background: rgba(15, 23, 42, 0.4);
+  border-radius: 4px;
+}
+.rad-atrisk-name { font-weight: 600; color: #fde68a; }
+.rad-atrisk-rh {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim, #9fb3cc);
+  white-space: nowrap;
+}
+.rad-confirm-atrisk-safe { margin: 0 0 10px; font-size: 12px; color: #86efac; }
 
 /* Hazard roll modal. One 3D die per hazard, all spinning in
    parallel. Once every die settles the verdict tags light up
@@ -2253,6 +2352,7 @@
 }
 .config-panel .dbg-check { font-size: 13px; color: var(--ink); }
 .config-panel .dbg-slider { font-size: 12px; color: var(--ink-dim); margin: 2px 0; }
+.config-panel .config-hint { margin: 4px 0 0; font-size: 11px; line-height: 1.45; }
 .route-options-title {
   margin: 0 0 4px;
   font-size: 16px;
@@ -2316,6 +2416,34 @@
   font-size: 11px;
   line-height: 1.45;
 }
+/* Debug "simulate move" block (online only): dry-run preview of a move's
+   fuel-step cost. Shares the dashed-divider treatment of the manual block. */
+.route-options-debug {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+.route-options-debug .route-options-sim-btn {
+  width: 100%;
+  font-size: 13px;
+  padding: 9px 12px;
+  font-weight: 700;
+  background: var(--panel-2, #14233a);
+  color: var(--ink, #e6edf6);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.route-options-debug .route-options-sim-btn:hover:not(:disabled) { filter: brightness(1.15); }
+.route-options-debug .route-options-sim-btn:disabled { opacity: 0.6; cursor: progress; }
+.route-options-sim-result {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+.route-options-sim-result.ok  { color: #4ade80; }
+.route-options-sim-result.bad { color: #f87171; }
 .map-popup .popup-btn {
   font-size: 12px;
   font-weight: 600;
@@ -2504,6 +2632,11 @@ body:has(#view-browse:not(.hidden)) #main {
   letter-spacing: 2px;
   text-transform: uppercase;
   text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
   padding: 6px 12px;
   border-top: 1px solid var(--border);
   border-bottom: 2px solid var(--border);
@@ -2525,6 +2658,34 @@ body:has(#view-browse:not(.hidden)) #main {
   background: #000;
   color: #6cf28a;
   text-shadow: 0 0 12px rgba(108, 242, 138, 0.55), 0 0 2px #000;
+}
+/* Inline priority-action buttons docked in the turn bar (a collapsed auction
+   or crew draft). They sit in the bar so a pending action reads with the turn
+   notification; the gentle mp-chip-active glow says "something live is here",
+   and needs-action pulses harder when it owes you a move. */
+.mp-turn-label { display: inline-flex; align-items: center; }
+.mp-turn-actions { display: inline-flex; align-items: center; gap: 8px; }
+.mp-turn-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-2);
+  background: var(--panel-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.4;
+  cursor: pointer;
+  text-shadow: none;
+  animation: mp-chip-active 1.8s ease-in-out infinite;
+}
+.mp-turn-action:hover { border-color: var(--accent); }
+.mp-turn-action-meta { color: var(--accent-2); font-weight: 700; }
+.mp-turn-action.needs-action {
+  border-color: var(--accent);
+  animation: mp-chip-needs-action 1.4s ease-in-out infinite;
 }
 .browse-sidepanel[data-active=""] ~ .mp-turn-banner { right: 48px; }
 .browse-sidepanel[data-active]:not([data-active=""]) ~ .mp-turn-banner {
@@ -3764,12 +3925,6 @@ body:has(#view-browse:not(.hidden)) #main {
     border: 1px solid rgba(120, 130, 170, 0.7);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.55);
   }
-  /* Bump the engaged stripe thickness so it reads as a clear
-     marching band on a phone instead of a hairline that
-     vanishes against the viewport edge. */
-  .rocket-stack-panel.is-engaged {
-    background-size: 100% 8px, 100% 8px, 8px 100%, 8px 100%, 100% 100%;
-  }
 }
 
 /* Totals row: compact stat cells. Wraps on narrow screens so
@@ -3911,95 +4066,10 @@ body:has(#view-browse:not(.hidden)) #main {
   opacity: 1;
 }
 
-/* Engage button: greyed out when supports are unmet, fiery when
-   ready, and lit up while the rocket is engaged. Sits at the top
-   of the stack body so it's reachable on tall stacks. */
-.rocket-engage {
-  display: block;
-  width: 100%;
-  margin: 4px 0 14px;
-  padding: 10px 14px;
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.6px;
-  background: linear-gradient(180deg, #f97316, #c2410c);
-  color: #2e0f02;
-  border: 1px solid #9a3412;
-  border-radius: 8px;
-  cursor: pointer;
-}
-.rocket-engage:disabled {
-  background: rgba(15, 16, 35, 0.7);
-  color: var(--ink-dim);
-  border-color: var(--border);
-  cursor: not-allowed;
-}
-.rocket-engage.is-engaged {
-  background: linear-gradient(180deg, #fbbf24, #f97316);
-  color: #1f0a02;
-  border-color: #b45309;
-  box-shadow: 0 0 0 2px #f97316, 0 0 22px rgba(251, 191, 36, 0.6);
-}
-
-/* Engaged rocket animation: yellow/orange marching-ants stripe
-   around the active thruster card AND the whole stack body, so
-   the player gets the visual cue that the rocket can move. The
-   border is drawn via a CSS background-gradient stripe with an
-   offset animation, sharper than a dashed border at small sizes
-   and works the same on mobile + desktop. */
-/* Stripe period must EXACTLY equal the animation delta or the
-   pattern visibly jumps every cycle (gaps appear at the loop
-   point). Stripes are 12 + 12 = 24 px per period; the keyframes
-   below shift each edge by exactly 24 px from 0% to 100% so the
-   end frame paints the same pixels as the start frame and the
-   loop is seamless. Both the body border and the active-thruster
-   card use the same period + keyframes for a consistent look -
-   visual speed differences come from the `animation-duration`
-   value, not from differing stripe widths. */
-@keyframes rocket-march {
-  0%   { background-position: 0    0,    0     100%,  0  0,      100%  0;    }
-  100% { background-position: 24px 0,    -24px 100%,  0  -24px,  100%  24px; }
-}
-/* Engaged border lives on the panel (not the scrolling body)
-   so the four stripe edges anchor to the modal's static frame
-   and stay aligned no matter how the body scrolls. */
-.rocket-stack-panel.is-engaged {
-  /* Stripe layers go first so they paint ON TOP of the panel
-     bg layer underneath. The keyframes animate the first four
-     positions (top / bottom / left / right edges); the trailing
-     panel-bg layer stays put at 0 0. */
-  background-image:
-    /* top edge: orange/gold stripes scrolling right */
-    repeating-linear-gradient(90deg,  #f97316 0 12px, #fbbf24 12px 24px),
-    /* bottom edge: scrolling left */
-    repeating-linear-gradient(90deg,  #fbbf24 0 12px, #f97316 12px 24px),
-    /* left edge: scrolling down */
-    repeating-linear-gradient(180deg, #f97316 0 12px, #fbbf24 12px 24px),
-    /* right edge: scrolling up */
-    repeating-linear-gradient(180deg, #fbbf24 0 12px, #f97316 12px 24px),
-    /* panel background underneath so the stripes don't bleed
-       through onto the modal's dark surface */
-    linear-gradient(var(--panel), var(--panel));
-  background-position: 0 0, 0 100%, 0 0, 100% 0, 0 0;
-  background-size: 100% 4px, 100% 4px, 4px 100%, 4px 100%, 100% 100%;
-  background-repeat: no-repeat;
-  animation: rocket-march 0.6s linear infinite;
-  box-shadow: 0 0 24px rgba(249, 115, 22, 0.45);
-  border-color: #f97316;
-}
-.rocket-stack-panel.is-engaged .rocket-slot.is-active-thruster .card {
-  position: relative;
-  background-image:
-    repeating-linear-gradient(90deg,  #f97316 0 12px, #fbbf24 12px 24px),
-    repeating-linear-gradient(90deg,  #fbbf24 0 12px, #f97316 12px 24px),
-    repeating-linear-gradient(180deg, #f97316 0 12px, #fbbf24 12px 24px),
-    repeating-linear-gradient(180deg, #fbbf24 0 12px, #f97316 12px 24px);
-  background-position: 0 0, 0 100%, 0 0, 100% 0;
-  background-size: 100% 3px, 100% 3px, 3px 100%, 3px 100%;
-  background-repeat: no-repeat;
-  animation: rocket-march 0.5s linear infinite;
-  box-shadow: 0 0 0 1px #fbbf24, 0 0 18px rgba(251, 191, 36, 0.7);
-}
+/* (The "Engage rocket" button + its marching-ants engaged-border
+   animation were removed: the button was a cosmetic no-op - it never
+   moved the rocket. The status banner "Active - rocket can move" / the
+   greyed move tag now carry the flyable cue.) */
 
 /* Mobile / touch device adjustments to the hand strip. Hover
    doesn't exist on touch, so we replace the hover-driven
@@ -6434,8 +6504,26 @@ body:has(#view-browse:not(.hidden)) #main {
   animation: mp-chip-needs-action 1.4s ease-in-out infinite;
 }
 @keyframes mp-chip-needs-action {
-  0%, 100% { box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5); }
-  50% { box-shadow: 0 0 0 3px rgba(125, 211, 252, 0.45), 0 8px 26px rgba(0, 0, 0, 0.5); }
+  0%, 100% {
+    border-color: var(--accent);
+    box-shadow: 0 0 6px 1px rgba(108, 242, 138, 0.45);
+  }
+  50% {
+    border-color: #6cf28a;
+    box-shadow: 0 0 18px 5px rgba(108, 242, 138, 0.85);
+  }
+}
+/* Gentle always-on glow for a docked activity (no action owed yet), so the
+   turn-bar cluster reads as "something live is here". */
+@keyframes mp-chip-active {
+  0%, 100% {
+    border-color: var(--accent-2);
+    box-shadow: 0 0 5px 1px rgba(125, 211, 252, 0.40);
+  }
+  50% {
+    border-color: var(--accent);
+    box-shadow: 0 0 16px 4px rgba(125, 211, 252, 0.80);
+  }
 }
 
 .mp-crew-draft-overlay.is-minimized,
@@ -6443,16 +6531,14 @@ body:has(#view-browse:not(.hidden)) #main {
   background: transparent;
   backdrop-filter: none;
   pointer-events: none;
-  align-items: center;
-  justify-content: flex-start;
-  padding: 14px;
 }
 .mp-crew-draft-overlay.is-minimized .mp-crew-draft-panel,
 .mp-auction-overlay.is-minimized .mp-auction-modal { display: none; }
+/* Collapsed activities dock as an inline button in the turn bar
+   (.mp-turn-action), so the old floating mini-chip stays hidden. */
 .mp-crew-draft-overlay.is-minimized .mp-mini-chip,
 .mp-auction-overlay.is-minimized .mp-mini-chip {
-  display: inline-flex;
-  pointer-events: auto;
+  display: none;
 }
 
 /* ----- first-player handoff overlay (round-end) ----- */

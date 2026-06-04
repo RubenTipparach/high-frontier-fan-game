@@ -1083,7 +1083,7 @@ function gameReminders(gameId) {
 }
 
 // Manual turn-nudge throttle: at most one reminder per target per game
-// inside this window.
+// inside this window. One 3h window for everything, auctions included.
 const REMIND_COOLDOWN_MS = 3 * 60 * 60 * 1000; // 3 hours
 
 // After an op commits: DM the newly-active player on END_TURN, and the
@@ -1599,7 +1599,23 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
     if (!ctx.turnBaseState) return res.status(409).json({ error: 'no_turn_base' });
   }
   const result = applyOperation(prevState, op, ctx);
-  if (!result.ok) return res.status(409).json({ error: result.error });
+  // Debug dry-run: with debug:true the client previews what an op WOULD do
+  // (the human-readable log carries the fuel-step cost + origin/dest, plus
+  // the actor's tank before/after) WITHOUT persisting or broadcasting it.
+  // applyOperation works on a clone, so prevState is still the before-state.
+  if (body.debug === true) {
+    if (!result.ok) return res.json({ ok: false, debug: true, error: result.error, detail: result.detail });
+    const find = (st) => (Array.isArray(st.players) ? st.players.find((p) => p.profileId === req.profile.id) : null);
+    const before = find(prevState), after = find(result.state);
+    return res.json({
+      ok: true, debug: true, log: result.log || '',
+      tankBefore: before && before.rocket ? before.rocket.tank : null,
+      tankAfter:  after  && after.rocket  ? after.rocket.tank  : null,
+      siteAfter:  after  && after.rocket  ? after.rocket.siteId : null,
+      calc: result.calc || null,   // full burn-math breakdown
+    });
+  }
+  if (!result.ok) return res.status(409).json({ error: result.error, detail: result.detail });
 
   const nextSeq = row.seq + 1;
   const now = nowMs();
@@ -1645,9 +1661,9 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
 
 // Manual turn nudge ("Remind"). A player who is NOT the one the game is
 // waiting on can ping that player with a turn DM, throttled to one per
-// target per REMIND_COOLDOWN_MS. Not a game op (no board mutation, no
-// seq bump) - just a DM + a cooldown row the gameView surfaces so every
-// client can show who was nudged and when.
+// target per REMIND_COOLDOWN_MS window (auctions included). Not a game op
+// (no board mutation, no seq bump) - just a DM + a cooldown row the gameView
+// surfaces so every client can show who was nudged and when.
 app.post('/games/:id/remind', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
@@ -1662,6 +1678,7 @@ app.post('/games/:id/remind', requireProfile, (req, res) => {
   const needed = nudgeTargets(state).filter((pid) => pid !== req.profile.id);
   if (!needed.length) return res.status(409).json({ error: 'nobody_to_nudge' });
   const inAuction = !!(state && state.auction);
+  const cd = REMIND_COOLDOWN_MS;
 
   // Resolve the requested set: one specific player (must be nudgable),
   // everyone (all=true, for auction rounds), or the primary actor by
@@ -1670,6 +1687,21 @@ app.post('/games/:id/remind', requireProfile, (req, res) => {
   let targets;
   if (body.all) {
     targets = needed;
+  } else if (body.waiting) {
+    // Only the players the round is genuinely waiting on. During an
+    // auction that's the bidders who have not bid, passed, or auto-passed
+    // this lot (a.acted holds everyone who has responded; autoPassed
+    // survives a floor reopen). Off-auction it's just the active seat.
+    // Always a subset of `needed`.
+    const a = state.auction;
+    if (a) {
+      const acted = a.acted || [];
+      const auto = a.autoPassed || [];
+      targets = needed.filter((pid) =>
+        pid !== a.auctioneerId && !acted.includes(pid) && !auto.includes(pid));
+    } else {
+      targets = [needed[0]];
+    }
   } else if (body.targetId != null) {
     const tid = Number(body.targetId);
     if (!needed.includes(tid)) return res.status(409).json({ error: 'not_actionable' });
@@ -1695,8 +1727,8 @@ app.post('/games/:id/remind', requireProfile, (req, res) => {
     const target = state.players.find((p) => p.profileId === tid);
     const tname = target ? target.name : null;
     const prev = getPrev.get(id, tid);
-    if (prev && now - prev.sentAt < REMIND_COOLDOWN_MS) {
-      skipped.push({ targetId: tid, targetName: tname, sentAt: prev.sentAt, retryAfterMs: REMIND_COOLDOWN_MS - (now - prev.sentAt) });
+    if (prev && now - prev.sentAt < cd) {
+      skipped.push({ targetId: tid, targetName: tname, sentAt: prev.sentAt, retryAfterMs: cd - (now - prev.sentAt) });
       continue;
     }
     ins.run(id, tid, req.profile.id, now);
@@ -1708,7 +1740,7 @@ app.post('/games/:id/remind', requireProfile, (req, res) => {
     const names = nudged.map((n) => n.targetName || 'a player').join(', ');
     notifyWebhook(`👋 ${req.profile.name} nudged ${names} in **${nm}**.${jump}`);
   }
-  res.json({ ok: true, nudged, skipped, cooldownMs: REMIND_COOLDOWN_MS });
+  res.json({ ok: true, nudged, skipped, cooldownMs: cd });
 });
 
 // Operation log, optionally only the ops after a given seq (catch-up

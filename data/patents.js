@@ -103,7 +103,7 @@ const PROPERTY_COLUMNS_NUM = {
     desc: 'Afterburn: optional high-thrust mode that spends extra fuel for more thrust on a burn.' },
   'Bonus Pivots':   { key: 'bonusPivots',    glyph: '↺',  label: 'Bonus pivots',
     desc: 'Bonus pivots: extra free direction changes per turn that do not cost a burn.' },
-  'ISRU':           { key: 'isru',           glyph: '🛢', label: 'ISRU rig' },
+  'ISRU':           { key: 'isru',           glyph: '🛢', label: 'ISRU rig', zeroMeaningful: true },
 };
 
 // Build a `requires` array from the face's "Support
@@ -179,8 +179,13 @@ function propertiesFromFace(face) {
   for (const [col, def] of Object.entries(PROPERTY_COLUMNS_BOOL)) {
     if (face[col]) out.push({ ...def, value: true });
   }
-  for (const [col, def] of Object.entries(PROPERTY_COLUMNS_NUM)) {
-    if (face[col]) out.push({ ...def, value: face[col] });
+  for (const [col, { zeroMeaningful, ...def }] of Object.entries(PROPERTY_COLUMNS_NUM)) {
+    const v = face[col];
+    // ISRU 0 is a real rating (the lowest = the best rig - it prospects /
+    // refuels any site), so keep it. Afterburn / bonus-pivots of 0 mean
+    // "none", so those still drop on falsiness.
+    const present = zeroMeaningful ? (v != null && v !== '') : !!v;
+    if (present) out.push({ ...def, value: v });
   }
   return out;
 }

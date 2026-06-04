@@ -124,7 +124,12 @@ export function nodeBySlug(slug) {
 // glory, prospect thresholds, and factory income all resolve through it.
 export function siteBySlug(slug) {
   const n = NODES_BY_SLUG.get(String(slug));
-  return (n && n.site) || null;
+  if (!n || !n.site) return null;
+  // Attach the planner siteSize (e.g. "1M") so the engine reads the SAME
+  // difficulty the client shows. It lives on the node, not the curated
+  // data/sites.js entry; without it the prospect threshold falls back to the
+  // class letter and disagrees with the popup (Oljato "1M" -> need a 1, not 3).
+  return n.siteSize != null ? { ...n.site, siteSize: n.siteSize } : n.site;
 }
 
 // Numeric site size (the published "site number"), parsed from the

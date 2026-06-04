@@ -1,5 +1,6 @@
 import { getRocketSprite, getRocketSpriteSize } from './rocket-sprite.js';
 import { thrustVisual } from './card-ui.js';
+import { assetUrl } from '../base.js';
 
 // Canvas-based renderer for the delta-v map.
 //
@@ -781,7 +782,7 @@ export class MapRenderer {
       // and a bare 'assets/...' would resolve to /room/assets/... (404).
       // import.meta.url is always /js/game/render.js, so ../../assets
       // lands at the real app-root /assets.
-      img.src = new URL(`../../assets/rockets/${name}.png`, import.meta.url).toString();
+      img.src = assetUrl(`assets/rockets/${name}.png`);
       this._ambientSprites.push(img);
     }
     this._partitionSites();
@@ -1602,13 +1603,28 @@ export class MapRenderer {
   }
 
   _startAnimation() {
+    // The ambient drift (rockets crossing the map, asteroid-belt twinkle) now
+    // targets ~60fps so the motion reads smoothly instead of stepping. The
+    // ambient dt is elapsed-time based (and clamped), so sprite speed is
+    // unchanged - only the redraw cadence went up. Keeping a cap (rather than
+    // an uncapped per-rAF redraw) still bounds the full-scene repaint - and the
+    // backdrop-filter panels re-blurring with it - on 120Hz+ displays.
+    // Interaction (pan / zoom / hover) draws at the full rate through its own
+    // _scheduleDraw calls.
+    let lastAmbientDraw = 0;
+    // A hair under one 60Hz frame (16.67ms) so vsync jitter never skips a
+    // frame on a 60Hz panel; on 120Hz it redraws every other frame (~60fps).
+    const AMBIENT_INTERVAL = 1000 / 60 - 2;   // ~14.7ms, ~60fps
     const tick = (t) => {
       if (!this.canvas || !this.canvas.isConnected) {
         this._animRaf = null;
         return;
       }
       this._animTime = t;
-      this._scheduleDraw();
+      if (t - lastAmbientDraw >= AMBIENT_INTERVAL) {
+        lastAmbientDraw = t;
+        this._scheduleDraw();
+      }
       this._animRaf = requestAnimationFrame(tick);
     };
     this._animRaf = requestAnimationFrame(tick);
@@ -3849,7 +3865,9 @@ export class MapRenderer {
       const info = this._popupRocketInfo;
       const water = Number.isFinite(site.hydration) ? site.hydration : 0;
       const isru  = info.isru;
-      const hasRig = Number.isFinite(isru) && isru > 0;
+      // A rig is present whenever an ISRU rating is set, including 0 (the best
+      // rig: ISRU 0 clears the gate at every site). null = no active rig.
+      const hasRig = Number.isFinite(isru);
       const passes = hasRig && isru <= water;
       const chip = document.createElement('div');
       chip.className = 't-isru' + (hasRig

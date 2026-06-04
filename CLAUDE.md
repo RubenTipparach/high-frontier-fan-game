@@ -129,8 +129,9 @@ Thruster-specific fields (carried on whichever face is active):
   thrust circle on the card). Triangle silhouette is fixed-size
   per the published convention; only the number inside the
   pink circle changes per card.
-- `isp` - burns per fuel unit. The card's fuel droplet shows
-  `ceil(thrust / isp)`, the water cost of one burn.
+- `isp` - thrust per fuel step. The card's fuel droplet shows
+  `ceil(thrust / isp)` (= the card's `fuel`), the FUEL STEPS one burn
+  spends - NOT a water cost. See "Fuel steps vs water / aqua" below.
 - `requires` - array of `{ kind, count }`. Stack constraints the
   ship's other cards must collectively satisfy. The card UI
   renders the requirement icons in a row (with an ×N badge for
@@ -141,6 +142,55 @@ Thruster-specific fields (carried on whichever face is active):
   kinds at BUILD time; thrusters consume them.
 - `supports` (string array) is accepted as shorthand and auto-
   expanded into `requires` with count: 1 per entry.
+
+**Fuel steps vs water / aqua - NOT the same unit.** A *fuel step* is
+one black (burn) connection on the detailed fuel graph
+(`js/game/net-thrust-detail.js`, the published net-thrust ladder).
+Entering a burn node spends the thruster's `fuel` fuel steps, walking
+the wet-mass chit that many black connections down toward dry mass. The
+rocket's total burnable capacity is the count of black connections from
+the WET chit to the DRY chit (`blackStepsBetween`). *Water* and *aqua*
+are 1-to-1 mass units (tank water = wet mass - dry mass; aqua converts
+1:1 to water). Fuel steps map to water only NON-linearly through the
+ladder (a step buys less mass-fraction the heavier the ship: ninths in
+WISP ... whole units in TUG), so "N fuel steps" is never "N water". Burn
+costs in logs / UI are denominated in fuel steps, not water.
+
+**When the user says "FT", STOP and ask which they mean.** "FT" is
+ambiguous - it can mean AQUA (the bank currency) or fuel steps. Don't
+guess: say it's ambiguous and ask whether they mean aqua or fuel steps
+before acting.
+
+**Fuel economy rules (the target model):**
+- **Burning** walks the BLACK connections (fuel steps). A burn spends
+  the thruster's `fuel` fuel steps; the water that costs is the
+  non-linear mass-drop of those steps, so the tank can end on a
+  fractional position (a sub-1-unit *remainder*).
+- **Fuelling / unfuelling** walks the RED (refuel) connections. Water
+  moved to an outpost or back to the bank moves in WHOLE water units
+  only; any sub-1-unit remainder CANNOT be transferred and stays in the
+  source tank. Show that remainder in the fuel-tank modal.
+- A stack can be **scrapped** when it has no cards AND less than 1 unit
+  of water left.
+
+RECONCILE LANDED (2026-06-04). The fuel-graph node model is now a shared
+pure module `data/fuel-graph.js` (NODES / BLACK / RED + `blackStepsBetween`
++ `walkBlackDown`), imported by BOTH the client (`js/game/rocket.js`,
+`js/game/net-thrust-detail.js` for rendering) AND the server
+(`server/game/engine.js`). Capacity = `blackStepsBetween(dry, wet)` (the
+black-connection count) everywhere - `getActiveThrusterStats().fuelSteps` +
+`burnsAvailable` and the server's MOVE check agree. A burn spends fuel STEPS
+(`ceil(fuelPerBurn * thisTurnBurns)`); MOVE is affordable iff that many black
+steps fit before dry, and the deduction is `walkBlackDown(wet, steps)` so the
+tank lands on the non-linear new mass and can hold a fractional remainder
+(tank water is no longer floored client- or server-side). REFUEL / CASH_WATER
+move WHOLE water units and preserve the remainder. `fuelStepsBetween` in
+`data/net-thrust-track.js` is now UNUSED by the fuel path (kept only if some
+other reader needs it). The `insufficient_water` op error carries a `detail`
+breakdown ({thisTurnBurns, fuelPerBurn, fuelStepsNeeded, fuelStepsAvailable,
+tank, dry/wetMass}); the Simulate dry-run + the `[move]` console log surface it.
+Still TODO: show the fractional remainder explicitly in the fuel-tank modal,
+and the no-cards-and-<1-water scrap rule.
 
 NOTE: there is NO `power_req` field. Older drafts had one; it
 was removed because requirements are gated through the kind/
@@ -205,20 +255,53 @@ Mirrors the murdoku-companion split:
 ```
 ┌────────────────────────────────┐   HTTPS+CORS   ┌────────────────────────────────┐
 │ GitHub Pages                   │ <------------> │ Fly.io app: high-frontier-fan-game  │
-│ static ES modules, no build    │   WS (wss://)  │  Express + ws + better-sqlite3│
+│ esbuild bundle -> dist/ (hashed)│  WS (wss://)  │  Express + ws + better-sqlite3│
 │ index.html, css/*, js/*        │ <------------> │  volume: /data/hf.db          │
 │ deployed on every branch       │                │  admin at /admin              │
 └────────────────────────────────┘                └────────────────────────────────┘
 ```
 
-- **Frontend**: pure HTML/CSS/ES modules. No bundler, no framework, no build
-  step. Static files under repo root deploy to GH Pages on every push to
-  every branch.
+- **Frontend**: plain HTML/CSS/ES modules, no framework. Local dev is
+  build-free (serve the repo root; `index.html` loads the raw `./js/main.js`
+  as ES modules). PRODUCTION runs one build step: `scripts/build.mjs` bundles
+  + minifies with esbuild into `dist/` using content-hashed filenames, and CI
+  deploys `dist/` to GH Pages on every push to every branch. The hash is the
+  cache-bust: a changed module gets a new URL, so clients can never get stuck
+  on a stale deep module (the failure that `?v=` on the entry alone could not
+  fix - deep imports carried no version). See "Build + cache-busting" below.
 - **Backend**: Node 20 Express server with `better-sqlite3` for persistence
   and the `ws` library for WebSocket gameplay. One SQLite file on a Fly
   volume (`/data/hf.db`). Single-writer; do not horizontally scale.
 - **Deploy**: `.github/workflows/deploy.yml` runs on every push. Pages and
   Fly deploys are independent jobs; Fly job is gated on the canonical repo.
+
+### Build + cache-busting
+
+Production is bundled; local dev is not.
+
+- **Local dev (no build):** serve the repo root (`python3 -m http.server`).
+  `index.html` loads `./js/main.js` as raw ES modules - edit + refresh, no
+  build. Keep the source runnable this way.
+- **Production (`scripts/build.mjs`, esbuild):** bundles + minifies into
+  `dist/` with content-hashed names (`js/main-<hash>.js`, `css/*-<hash>.css`).
+  The build keeps the entry at `dist/js/` depth ON PURPOSE, so `base.js`'s
+  `import.meta.url` `'../'` still resolves to the app root from inside the
+  bundle. It rewrites the dist `index.html` to the hashed names, writes
+  `version.json`, injects the commit SHA into version-check (esbuild
+  `--define`), and copies the runtime-fetched assets (rocket PNGs, planner
+  `data-hf4.json`, `site-flags.json`) to their app-root-relative paths - they
+  are NOT imported, so the bundler never sees them; `base.js#assetUrl`
+  resolves them at runtime.
+- **Why hashing:** ES module imports carried no `?v=`, so a deploy only
+  cache-busted `main.js`, never the modules it imported - clients got stuck on
+  a stale deep module after a deploy. Content hashes make a changed module a
+  new URL (always re-fetched); `version-check.js` still reloads kept-open tabs
+  so they pick up the new `index.html`.
+- **CI gates (both must pass before deploy):** `node scripts/check-boot.mjs`
+  links the source module graph, and the esbuild build itself fails on any
+  parse/link error. The deploy uploads `dist/`, not the repo root.
+- Adding a runtime-fetched asset? Load it via `assetUrl(...)` AND add it to
+  the copy list in `scripts/build.mjs`, or it will not exist in `dist/`.
 
 ## Two play modes - async and realtime
 
@@ -472,6 +555,56 @@ competitive auction is the lone exception (the sandbox auction is solo),
 so it gets bespoke multiplayer UI layered on top of the shared sandbox
 surface; everything else is sandbox code driven by the multiplayer API.
 
+**Operations and free actions (canonical action economy).** Sourced from
+the Geoff Speare HF4 Player Aid (`reference/HF4-player-aid.pdf`). A turn
+is: move the spacecraft, take any number of free actions, and take
+exactly ONE operation, in any order. This table is the authoritative
+answer to "does X cost the turn's operation, or is it free?" For example
+Site Refuel is the Operation (it spends the op), while topping up dirt /
+water for free at LEO, a Factory, or an anchored Bernal rides the Cargo
+Transfer free action. The Scope column: `core` ships in Standard mode;
+`M0` / `M1` / `M2` rows are module-gated and OUT of current scope (see
+"Variants we target"), listed only so the core / module boundary stays
+legible.
+
+Operations (each one spends the turn's single operation):
+
+| Operation | What it does | Scope |
+|---|---|---|
+| Income | Gain 1 Aqua. | core |
+| Research Auction | Auction the top card of any deck (need fewer than 4 hand cards to start or bid; auctioneer wins ties). | core |
+| Free Market | Sell a Hand card for 3 Aqua, or a Black-Side LEO card for its Exploitation-Track value. | core |
+| Boost | Play White-Side cards from Hand to LEO, paying Mass in Aqua. | core |
+| Site Refuel | Refine local water into the tank. ISRU: 1 + Hydration - ISRU. Factory: a flat 7. | core |
+| Prospect | Evaluate and claim a site: ISRU <= Hydration, then roll 1d6 <= Site Size (Size > 5 auto-succeeds). | core |
+| Industrialize | Build a Factory: decommission a robonaut + refinery (plus supports) at a claimed site. | core |
+| ET Production | Produce a Black-Side card from Hand into a Factory matching the site's Spectral Type. | core |
+| Delivery | Move a Black-Side card from a Factory to LEO. Cost: FT = zones-from-Earth x2 (+1 if Site > 7). | core |
+| Fundraise | Replaces Income: place or move a delegate, gain 1 Aqua, run a vote tally. | M0 |
+| Promotion | Flip a Freighter / GW thruster / Colonist to its Purple-Side at its Promotion Site. | M1/M2 |
+| Nanofacture | Create a Mobile Factory at an anchored non-Home Bernal. | M1+M2 |
+| Anchor | Anchor a Bernal as a space station; gain its ability. | M2 |
+| Homesteading | Build a Colony at a Factory that has none. | M2 |
+| Epic Hazard | Complete a Future or build a Space Elevator (Epic Hazard roll). | M1 |
+
+Free actions (no operation cost; any number per turn):
+
+| Free action | What it does | Scope |
+|---|---|---|
+| Cargo Transfer | Move cards / FTs between colocated stacks; free dirt refuel with any ISRU card at a Factory or Site. | core |
+| Internal Tankage | Convert between FTs and Fuel; decommission cards for dirt fuel. | core |
+| Build Colony | Create a permanent Colony at a Factory (decommission a Crew / Colonist). | core |
+| Claim Jump | Replace an opponent's Claim with yours (Human present, no opposing Factory / Human). Felony. | core |
+| Load Glory Chit | Load a glory chit from a site no Human has visited (Human present). | core |
+| Voluntary Discard | Discard cards / figures (1 Human per turn max). Felony for Humans. | core |
+| Glitch Repair | Remove a Glitch token from a colocated stack (Human present). | core |
+| The Martian | Move a Crew / Colonist along a buggy road (needs an operational buggy). | core |
+| Lobby | Remove a delegate to gain an inactive Law's benefit (once per turn). | M0 |
+| Big Cube Swap | Swap a Freighter cube with a Factory cube. | M1 |
+| Exomigration | Gain the topmost Colonist when below the Colonist limit (mandatory). | M2 |
+| Unanchor | An anchored Bernal becomes mobile again. | M2 |
+| Space Elevator | Move between the ends of a Space Elevator. | M1 |
+
 Server-authoritative engine in `server/game/engine.js`:
 
 - Round structure: **Income → Operations (each player, 4 ops) →
@@ -480,34 +613,46 @@ Server-authoritative engine in `server/game/engine.js`:
   `BUILD_FACTORY`, `BUILD_REFINERY`, `AUCTION_START`, `AUCTION_BID`,
   `AUCTION_PASS`, `BUILD_ROCKET`, `DECOMMISSION`, `BUY_FUTURE`,
   `END_TURN`.
+- **Debug dry-run.** `POST /games/:id/ops` with `debug: true` on the body
+  SIMULATES the op: the engine runs it on a throwaway clone (applyOperation
+  already clones, so the live state is untouched) and returns
+  `{ ok, log, tankBefore, tankAfter, siteAfter }` (or `{ ok:false, error }`)
+  WITHOUT persisting or broadcasting. The route-options modal's "Simulate
+  planned move" button uses it to preview a move's fuel-step cost before the
+  player commits. Read-only; safe to call anytime.
 - Movement uses the delta-v graph; each "burn" consumes 1 tank unit
   scaled by the active thruster's ISP. Aerobrakes and pivots have
   special edges.
 
-  **Movement authority - current trust model + eventual TODO.**
-  Routing is split between client and server right now. The CLIENT
+  **Movement authority - server validates FUEL, not ROUTES.** The CLIENT
   (the vendored mission-planner port, `js/game/planner-nav.js` +
-  `planner-dijkstra.js`) is the source of truth for the *hard* routing
-  math: the Hohmann-aware burn counts (free coasting along a transfer =
-  0 burns, pivots cost extra) and the per-turn split (which legs fire
-  on which turn, bounded by thrust burns/turn). MOVE sends the SERVER
-  this turn's segments `[{from, to, burns, turn}]`; the server VALIDATES
-  structure (node existence, continuity from the rocket's position),
-  charges the real water cost (`ceil(fuel * thisTurnBurns)` from the
-  active thruster face's `fuel`), resolves hazards / factory-assist /
-  dice authoritatively, and executes only that one turn - but it TRUSTS
-  the client's `burns` + `turn` values. The server's own
-  `server/game/planner-graph.js` only does a naive burns-Dijkstra used
-  for the bare-destination fallback (a tap with no planned route).
-  Consequence: a modified client could send fake burns (e.g. 0) and
-  move for free. Fine for friends, not cheat-hardened.
-  **TODO (eventually): make movement fully server-authoritative.** Port
-  `planner-nav.js` + `planner-dijkstra.js` into a shared module (under
-  `data/` or a shared dir both import), have the engine independently
-  recompute the route `from -> dest` with the same Hohmann/pivot/
-  per-turn semantics, and reject any MOVE whose client-supplied
-  `burns` / `turn` don't match. Until then, treat client routing as
-  trusted input. (User OK'd the trust model 2026-05-29.)
+  `planner-dijkstra.js`) owns routing: the Hohmann-aware burn counts (free
+  coasting along a transfer = 0 burns, pivots cost extra) and the per-turn
+  split (which legs fire on which turn, bounded by thrust burns/turn). MOVE
+  sends the SERVER this turn's segments `[{from, to, burns, turn}]`. The
+  server does NOT verify the route's geometry (continuity from the rocket,
+  segment chaining, node existence) - re-validating it meant maintaining a
+  second route model that drifted and spuriously rejected a route that IS
+  connected (`route_not_from_here`). Instead the server does the SAME fuel
+  calculation the client does, off the shared `data/fuel-graph.js`: capacity =
+  `blackStepsBetween(dry, wet)`, a burn spends `ceil(fuelPerBurn * burns)` fuel
+  STEPS, the move is rejected (`insufficient_water` + a fuel-step `detail`)
+  only when those steps don't fit, and the spend walks the wet chit
+  (`walkBlackDown`) leaving a fractional remainder. It then resolves hazards /
+  factory-assist / dice authoritatively and executes only that one turn. The
+  ids on the wire are SERVER slugs: the client converts planner ids ->
+  slugs in ONE place (`browse.js#buildTurn1MoveOp`, used by the real move AND
+  the debug Simulate, so they're byte-identical).
+  Consequence: a modified client could send fake burns (e.g. 0) and move for
+  free, or send a disconnected route. Fine for friends, not cheat-hardened.
+  **TODO (route verification, later): make movement fully
+  server-authoritative.** Port `planner-nav.js` + `planner-dijkstra.js` into a
+  shared module both import, have the engine independently recompute the route
+  `from -> dest` with the SAME Hohmann/pivot/per-turn semantics as the client,
+  and reject any MOVE whose route/burns don't match. It MUST reuse the client
+  planner model (not a second server-only one) - that drift is exactly what we
+  just removed. Until then, the server trusts the client's route + burns and
+  validates only the fuel. (User: server validates burns not routes, 2026-06-04.)
 - Prospect: roll Nd6 (N = site class size); thresholds defined per
   site type. Success = place prospect marker; site becomes claimable
   by the prospector for industrialization.
@@ -520,6 +665,38 @@ Server-authoritative engine in `server/game/engine.js`:
 - VPs at game end: factories + refineries + Bernals + glory cards.
 
 Random-numbered seeds are stored per game so replays are deterministic.
+
+### Mission log captures every server mutation
+
+The mission log is the player-visible record of WHAT HAPPENED, and it is
+load-bearing: every operation that changes game state on the server MUST
+produce a log line that lands in it. This is not console logging - a
+`console.log` is invisible to players and does not count. The rule:
+
+- **Every functional/meta/auction/crew op handler returns a non-empty
+  `log` string.** The server persists it to `game_operations.log` on
+  every accepted op (`POST /games/:id/ops`), and the client mission log
+  hydrates from that op log via `GET /games/:id/ops` (online) or the
+  local `logAction` history (solo). If you add an op, it MUST return a
+  gameplay-accurate `log` (talk about the game, not the code, per Style)
+  or it silently vanishes from the record. Income, Site Refuel,
+  Industrialize, and ET Produce each return a log for exactly this
+  reason.
+- **The ONLY intentional exception is the two route ops** (`SET_ROUTE` /
+  `CLEAR_ROUTE`), which return `log: ''` because a planned route is
+  secret between players (the gameView redacts opponents' routes). Do
+  not add other silent ops; if a mutation must stay private, document why
+  here.
+- **Every op kind has an entry in `MP_LOG_ICONS`** (js/game/browse.js).
+  A missing icon falls back to a bare `·`, which reads as "something
+  unlabeled happened" - give each new op a glyph in the published-card
+  language so the log is scannable.
+- **Routing an op online MUST NOT drop it from the log.** When a client
+  handler routes through `submitOnlineOp` and returns early (skipping its
+  solo `logAction`), the op still appears because the server logs it and
+  the online mission log reads the server op log. Never assume "the
+  snapshot will show it" - the snapshot carries state, the op log carries
+  the narrative; both must update.
 
 ## Style
 
@@ -575,7 +752,18 @@ Random-numbered seeds are stored per game so replays are deterministic.
   the data source (server snapshot) and action sink (`submitGameOp`)
   change. See "The multiplayer UI IS the sandbox UI" above. The
   competitive auction is the sole bespoke-MP exception.
-- Don't add a frontend build step. ES modules, plain CSS, plain HTML.
+- Don't break local dev's build-free flow. The SOURCE stays plain ES
+  modules + CSS + HTML: `index.html` references the raw `./js/main.js`, so
+  `python3 -m http.server` runs the app with no build. The esbuild build
+  (`scripts/build.mjs`) is PRODUCTION-only and reads the same source. Don't
+  introduce framework/JSX/TS syntax that only works after a build, or import
+  CSS/assets into JS - keep the source runnable raw. See "Build +
+  cache-busting".
+- Don't recompute the app base or asset paths inline. Import `appBase()` /
+  `assetUrl()` from `js/base.js`. It is the ONLY `import.meta.url`-relative
+  path computation in the app (besides version-check.js's sibling
+  `version.json`); inline `new URL('../', import.meta.url)` breaks under
+  bundling because the bundle collapses every module to one depth.
 - Don't trust client moves. Every game mutation goes through
   `server/game/engine.js#applyOperation`, validated against the
   current `state`. WS clients send operation intents; the server

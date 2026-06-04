@@ -716,15 +716,15 @@
 .card.in-rocket::after { content: "🛸"; }
 
 /* Expansion-only cards (GW thrusters today). Render in the
-   library so the player can browse, but greyed out and with a
-   "Coming soon" badge across the corner. No drag handlers,
-   no tap-to-add - the engine refuses anyway, this just signals
-   that intent up front. */
+   library so the player can browse, greyed out with a "Coming
+   soon" badge across the corner. They stay tappable (tap to
+   inspect, Flip to see both faces) - only drag / tap-to-add are
+   withheld, so pointer events stay ON. */
 .card.is-expansion {
-  opacity: 0.6;
-  filter: grayscale(0.4);
-  pointer-events: none;
+  opacity: 0.7;
+  filter: grayscale(0.25);
   position: relative;
+  cursor: pointer;
 }
 .card.is-expansion .card-expansion-badge {
   position: absolute;
@@ -743,6 +743,14 @@
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
   z-index: 11;
   pointer-events: none;
+}
+
+/* GW thrusters burn isotope (ISO) fuel; the published cards mark that
+   class in gold. Outline both faces in gold so the ISO-fuel thruster
+   reads at a glance, front and back. */
+.card.type-gw-thruster .card-face {
+  border-color: #d4af37;
+  border-width: 2px;
 }
 
 /* Radiator Light/Heavy toggle row under the name. Replaces

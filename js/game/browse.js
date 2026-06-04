@@ -6,6 +6,8 @@
 // replace with the live game.
 
 import { MapRenderer, LEO_ANCHOR } from './render.js';
+import { appBase } from '../base.js';
+import { erudaEnabled, setEruda } from '../debug-console.js';
 import { loadPlannerMap } from './planner-map.js';
 import { planRoute } from './planner-nav.js';
 import {
@@ -14,7 +16,7 @@ import {
   getOpsRemaining, consumeOp,
   getDiscardsRemaining, consumeDiscard, formatTurnNumber,
 } from './turn-clock.js';
-import { triggerEndTurn, openTurnClockModal, buildDie, rollDie } from './turn-clock-ui.js';
+import { triggerEndTurn, confirmEndTurn, openTurnClockModal, buildDie, rollDie } from './turn-clock-ui.js';
 import {
   getState as soloState, newGame as soloNewGame, abandonGame as soloAbandon,
   setTarget as soloSetTarget, commitMove as soloCommitMove,
@@ -49,7 +51,8 @@ import {
   WEIGHT_CLASSES, weightClassForMass, TRACK_LEGEND,
   MIN_DRY_MASS, MAX_DRY_MASS, MAX_WET_MASS,
 } from '../../data/net-thrust-track.js';
-import { renderDetailTrack, massLabel } from './net-thrust-detail.js';
+import { renderDetailTrack, massLabel, blackStepsBetween } from './net-thrust-detail.js';
+import { walkBlackDown } from '../../data/fuel-graph.js';
 import { MILESTONES } from '../../data/glory.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { ZONE_POLYGONS } from '../../data/zones.js';
@@ -180,6 +183,12 @@ let _onlinePollMs = 0;
 // Tracks the previous snapshot's auction.awaiting so we can detect
 // the bidders -> auctioneer transition and fire one eager fetch.
 let _lastAuctionPhase = null;
+// Signature of the last auction state for which the AUCTIONEER fired a
+// self-heal fetch (see applySnapshot). Lets a stale "can't close yet"
+// view pull fresh server state once per real bidding change, without
+// looping, so the Keep button can't stay greyed after every bidder is
+// out (e.g. all auto-passed on a full hand).
+let _auctionHealSig = null;
 const ONLINE_POLL_MS = 5000;
 // 500 ms while an auction is live. The bidder UI gives a "stuck"
 // feel any slower than that - users expect Sell / Keep to land
@@ -403,6 +412,12 @@ async function bootstrapOnlineGame() {
   // and subscribe to live 'chat' broadcasts on the lobby channel. Both
   // are owned by browse.js so the mp pane stays self-contained.
   if (_onlineLobbyId && _onlineMe) {
+    // New room: drop chat cached from any previously-open room so its
+    // messages can't bleed into this table, and clear the mounted chat
+    // surfaces before this room's history backfills below.
+    _chatLog.length = 0;
+    resetChatList(document.getElementById('mp-chat-list'));
+    resetChatList(document.getElementById('mp-auction-chat-list'));
     const chatChannel = 'lobby:' + _onlineLobbyId;
     ws.subscribe(chatChannel);
     const offChat = ws.on('chat', (msg) => {
@@ -581,6 +596,28 @@ function applySnapshot(snapshot, seq) {
     if (snapshot.auction.auctioneerId !== myId) eagerPoll();
   }
   _lastAuctionPhase = auctionPhase;
+  // Self-heal a stale auctioneer view. If a lot is open, I'm the auctioneer,
+  // and it doesn't look closeable yet, pull the freshest server state once
+  // per real bidding change. This is the case the user hit: every other
+  // player auto-passed (full hand) so the lot IS closeable for 0 aqua, but a
+  // dropped update left the Keep button greyed until a manual refresh. The
+  // signature gate fetches on an actual change and never loops; eagerPoll is
+  // seq-gated so an unchanged server state is a no-op.
+  const myId2 = _onlineMe && _onlineMe.id;
+  if (snapshot.auction && myId2 && snapshot.auction.auctioneerId === myId2) {
+    const a2 = snapshot.auction;
+    const closeable = a2.awaiting === 'auctioneer'
+      || auctionAllBiddersActed(a2, snapshot.players || []);
+    const sig = `${a2.cardId}:${a2.awaiting}:${(a2.acted || []).length}:${(a2.autoPassed || []).length}`;
+    if (!closeable && _auctionHealSig !== sig) {
+      _auctionHealSig = sig;
+      eagerPoll();
+    } else if (closeable) {
+      _auctionHealSig = null;
+    }
+  } else {
+    _auctionHealSig = null;
+  }
   // If I haven't picked my starting crew yet, open the mandatory crew
   // wizard. Driven off the snapshot (player.faction) so it survives
   // reloads / late joins, and so a re-bootstrap won't reopen the
@@ -629,6 +666,7 @@ function syncCrewDraftOverlay(snapshot) {
     && gameViewVisible();
   if (!drafting) {
     if (existing) existing.remove();
+    setMpTurnAction('crew', null);
     return;
   }
   const players = snapshot.players || [];
@@ -713,15 +751,25 @@ function syncCrewDraftOverlay(snapshot) {
   // persisted _crewDraftMin flag is re-applied here and the fresh
   // buttons are re-wired each pass.
   overlay.classList.toggle('is-minimized', _crewDraftMin);
+  // Docked representation in the turn bar (the floating chip is hidden via
+  // CSS). Present only while collapsed; the modal shows otherwise.
+  setMpTurnAction('crew', _crewDraftMin ? {
+    label: '🧑‍🚀 Crew',
+    meta: `${picked.length}/${players.length}`,
+    needsAction: !myFaction,
+    onClick: () => { _crewDraftMin = false; syncCrewDraftOverlay(_onlineSnapshot); },
+  } : null);
   const miniBtn = overlay.querySelector('.mp-mini-btn');
   const miniChip = overlay.querySelector('.mp-mini-chip');
   if (miniBtn) miniBtn.addEventListener('click', () => {
     _crewDraftMin = true;
     overlay.classList.add('is-minimized');
+    syncCrewDraftOverlay(_onlineSnapshot);
   });
   if (miniChip) miniChip.addEventListener('click', () => {
     _crewDraftMin = false;
     overlay.classList.remove('is-minimized');
+    setMpTurnAction('crew', null);
   });
   // Suppress the bare waiting overlay while the wizard's own modal
   // is open - the modal already says everything the overlay would.
@@ -776,23 +824,96 @@ async function submitMpCrewOp(op) {
   return true;
 }
 
+// Dark or light ink for legible text on a seat-colour fill. Most seat colours
+// are light (yellow / cream / mint), one is dark (magenta), so flip on
+// perceived luminance.
+function readableInk(hex) {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(hex || ''));
+  if (!m) return '#2e0f02';
+  let h = m[1];
+  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.58 ? '#1a1206' : '#fff';
+}
+
+// The turn bar holds a centred label plus a slot for inline priority-action
+// buttons. Lazily split #mp-turn-banner into those two parts and return the
+// label span: syncMpTurnBanner writes the "whose turn" text to the label, and
+// the auction / crew syncs own the actions slot (setMpTurnAction), so neither
+// stomps the other when they run in the same snapshot apply.
+function ensureTurnBannerParts(banner) {
+  let label = banner.querySelector('.mp-turn-label');
+  if (!label) {
+    banner.textContent = '';
+    label = document.createElement('span');
+    label.className = 'mp-turn-label';
+    const actions = document.createElement('span');
+    actions.className = 'mp-turn-actions';
+    banner.append(label, actions);
+  }
+  return label;
+}
+
+// Render (or clear) an inline priority-action button in the turn bar. `key`
+// ('auction' | 'crew') lets the two coexist or replace independently; a null
+// `spec` removes that key's button. This is the docked home for a collapsed
+// activity: it lives inside the turn notification, glows while live, and
+// pulses when it owes you an action. Clicking runs spec.onClick (reopen the
+// full modal).
+function setMpTurnAction(key, spec) {
+  const banner = document.getElementById('mp-turn-banner');
+  if (!banner) return;
+  ensureTurnBannerParts(banner);
+  const slot = banner.querySelector('.mp-turn-actions');
+  if (!slot) return;
+  let btn = slot.querySelector(`button[data-turn-action="${key}"]`);
+  if (!spec) { if (btn) btn.remove(); return; }
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.type = 'button';
+    btn.dataset.turnAction = key;
+    btn.className = 'mp-turn-action';
+    slot.appendChild(btn);
+  }
+  btn.classList.toggle('needs-action', !!spec.needsAction);
+  btn.onclick = spec.onClick;
+  btn.textContent = '';
+  const lab = document.createElement('span');
+  lab.className = 'mp-turn-action-label';
+  lab.textContent = spec.label;
+  btn.appendChild(lab);
+  if (spec.meta) {
+    btn.appendChild(document.createTextNode(' '));
+    const meta = document.createElement('span');
+    meta.className = 'mp-turn-action-meta';
+    meta.textContent = spec.meta;
+    btn.appendChild(meta);
+  }
+}
+
 // Big bold "YOUR TURN" / "@<name>'s turn" banner anchored above the
 // hand strip. Visible only in online mode; hidden otherwise so solo
-// play doesn't show a stale label.
+// play doesn't show a stale label. The "whose turn" text writes to the
+// label span; collapsed auction / crew activities dock their own inline
+// buttons into the actions slot via setMpTurnAction.
 function syncMpTurnBanner(snapshot) {
   const banner = document.getElementById('mp-turn-banner');
   if (!banner) return;
+  const label = ensureTurnBannerParts(banner);
   if (!_online || !snapshot || !Array.isArray(snapshot.players)) {
     banner.hidden = true;
     banner.classList.remove('is-your-turn');
     banner.style.removeProperty('--mp-turn-color');
-    banner.textContent = '';
+    label.textContent = '';
+    setMpTurnAction('auction', null);
+    setMpTurnAction('crew', null);
     return;
   }
   const myId = _onlineMe && _onlineMe.id;
   // Game over takes over the banner: no one is "up" any more.
   if (snapshot.status === 'finished') {
-    banner.textContent = '🏁 Game over';
+    label.textContent = '🏁 Game over';
     banner.classList.remove('is-your-turn');
     banner.style.removeProperty('--mp-turn-color');
     banner.hidden = false;
@@ -805,7 +926,7 @@ function syncMpTurnBanner(snapshot) {
     const mine = !!(chooser && chooser.profileId === myId);
     if (chooser && chooser.color) banner.style.setProperty('--mp-turn-color', chooser.color);
     else banner.style.removeProperty('--mp-turn-color');
-    banner.textContent = mine
+    label.textContent = mine
       ? '⭐ Pick the first player'
       : '@' + (chooser ? chooser.name : '?') + ' is picking first player';
     banner.classList.toggle('is-your-turn', mine);
@@ -826,13 +947,13 @@ function syncMpTurnBanner(snapshot) {
   // banner always shows where in the game we are.
   const tn = formatTurnNumber(snapshot.round, snapshot.turn, snapshot.maxRounds);
   if (!active) {
-    banner.textContent = `Waiting… · ${tn}`;
+    label.textContent = `Waiting… · ${tn}`;
     banner.classList.remove('is-your-turn');
   } else if (myTurn) {
-    banner.textContent = `Your turn · ${tn}`;
+    label.textContent = `Your turn · ${tn}`;
     banner.classList.add('is-your-turn');
   } else {
-    banner.textContent = `@${active.name}'s turn · ${tn}`;
+    label.textContent = `@${active.name}'s turn · ${tn}`;
     banner.classList.remove('is-your-turn');
   }
   banner.hidden = false;
@@ -918,6 +1039,7 @@ function renderOnlineAuction(auction) {
     _auctionTurnEdge = null;
     _bidDraft = '';
     _joinDraft = '';
+    setMpTurnAction('auction', null);
     return;
   }
   if (_auctionKey !== auction.cardId) {
@@ -968,10 +1090,12 @@ function renderOnlineAuction(auction) {
     overlay.querySelector('.mp-mini-btn').addEventListener('click', () => {
       _auctionMin = true;
       overlay.classList.add('is-minimized');
+      renderOnlineAuction(_onlineSnapshot && _onlineSnapshot.auction);
     });
     overlay.querySelector('.mp-mini-chip').addEventListener('click', () => {
       _auctionMin = false;
       overlay.classList.remove('is-minimized');
+      setMpTurnAction('auction', null);
     });
     // Mount the side chat once: backfill from the in-memory log and wire
     // its own send form (live messages fan in via appendMpChat).
@@ -1115,15 +1239,23 @@ function renderOnlineAuction(auction) {
   // live high-bid summary. Re-apply the persisted minimize state.
   const chip = overlay.querySelector('.mp-mini-chip');
   const chipMeta = overlay.querySelector('.mp-mini-chip-meta');
-  if (chipMeta) {
-    chipMeta.textContent = turn.shouldAct
-      ? 'your turn - bid or pass'
-      : turn.shouldClose
-        ? 'ready to close'
-        : (auction.highBid > 0 ? `high bid ${auction.highBid}` : 'no bids');
-  }
+  const metaText = turn.shouldAct
+    ? 'your turn - bid or pass'
+    : turn.shouldClose
+      ? 'ready to close'
+      : (auction.highBid > 0 ? `high bid ${auction.highBid}` : 'no bids');
+  if (chipMeta) chipMeta.textContent = metaText;
   if (chip) chip.classList.toggle('needs-action', actionNeeded);
   overlay.classList.toggle('is-minimized', _auctionMin);
+  // Docked representation: an inline button in the turn bar (the floating
+  // chip is hidden via CSS). Present only while collapsed; the full modal
+  // shows otherwise.
+  setMpTurnAction('auction', _auctionMin ? {
+    label: '⚖️ Auction',
+    meta: metaText,
+    needsAction: actionNeeded,
+    onClick: () => { _auctionMin = false; renderOnlineAuction(auction); },
+  } : null);
 }
 
 function setMpAuctionError(text) {
@@ -1377,12 +1509,21 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   const bids = a.bids || {};
   const high = a.highBid | 0;
   const myBid = bids[myId] | 0;
+  // Distinguish "haven't bid yet" from a real standing bid of 0, so an
+  // opening 0-bid still goes through while re-affirming an existing bid
+  // is treated as no change.
+  const hasBid = (myId in bids);
   const passed = Array.isArray(a.passed) && a.passed.includes(myId);
 
   // --- Your bid (ANY player, the auctioneer included) ---
   // Ties are allowed, so the floor is the high bid itself (>=), not +1.
-  // Bids can be 0 (claim it free), so the floor is never below 0.
-  const minBid = Math.max(0, high);
+  // Bids can be 0 (claim it free), so the floor is never below 0. The
+  // auctioneer is the exception: they win ties, so their floor is the top
+  // RIVAL bid, letting them walk an overbid back down to it and still take
+  // the lot. (iAmAuctioneer is already computed above.)
+  const rivalHigh = Object.entries(bids).reduce(
+    (hi, [pid, amt]) => (Number(pid) !== myId ? Math.max(hi, amt | 0) : hi), 0);
+  const minBid = iAmAuctioneer ? rivalHigh : Math.max(0, high);
   if (iAutoPassed) {
     // Out for the lot - the banner above says so; offer no bid/pass
     // controls (a fresh lot resets this).
@@ -1403,22 +1544,38 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
     const sync = () => {
       const v = parseInt(input.value, 10);
       const okAmt = Number.isInteger(v) && v >= minBid && v <= myAqua;
-      const tie = Number.isInteger(v) && v === high && high > 0;
-      bidBtn.textContent = Number.isInteger(v)
-        ? `${tie ? 'Tie at' : (myBid ? 'Change to' : 'Bid')} ${v}` : 'Bid';
-      bidBtn.disabled = !okAmt || _onlineBusy;
+      // Same as your standing bid: there's nothing to send. Re-placing the
+      // identical amount would only reopen the floor and make everyone bid
+      // again (an auctioneer's bid always reopens it), so block it here.
+      const unchanged = hasBid && Number.isInteger(v) && v === myBid;
+      const lowering = iAmAuctioneer && hasBid && Number.isInteger(v) && v < myBid;
+      const tie = !lowering && Number.isInteger(v) && v === high && high > 0;
+      bidBtn.textContent = !Number.isInteger(v) ? 'Bid'
+        : unchanged ? `Your bid: ${v}`
+        : lowering ? `Lower to ${v}`
+        : tie ? `Tie at ${v}`
+        : myBid ? `Change to ${v}`
+        : `Bid ${v}`;
+      bidBtn.disabled = !okAmt || unchanged || _onlineBusy;
     };
     input.addEventListener('input', () => { _bidDraft = input.value; sync(); });
     bidBtn.addEventListener('click', () => {
       const amt = parseInt(input.value, 10);
       if (!Number.isInteger(amt)) { setMpAuctionError('Enter a whole number.'); return; }
+      // No change from your standing bid: do nothing, so an accidental
+      // re-click can't reset the lot. To clear the others' bids on
+      // purpose, use the Reset others' bids button below.
+      if (hasBid && amt === myBid) return;
       submitMpAuctionOp({ kind: 'AUCTION_BID', amount: amt });
     });
     row.append(input, bidBtn);
     host.appendChild(row);
-    const floor = high > 0
-      ? ` Bids must be ${minBid}+ (ties allowed).`
-      : ' Open the bidding at 0+ (bid 0 to claim it free).';
+    const canLower = iAmAuctioneer && hasBid && myBid > minBid;
+    const floor = canLower
+      ? ` You can lower your bid to ${minBid} (the top rival bid) and still take the lot.`
+      : high > 0
+        ? ` Bids must be ${minBid}+ (ties allowed).`
+        : ' Open the bidding at 0+ (bid 0 to claim it free).';
     const mine = (myId in bids) ? ` Your bid: ${bids[myId]}.` : '';
     host.appendChild(noteEl(`You have ${myAqua} aqua.${floor}${mine}`));
     sync();
@@ -1458,7 +1615,13 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
     // The lot can only close once every other player has bid or passed.
     // Until then the close buttons are disabled (the server enforces the
     // same rule); the auctioneer can still Reset to start a fresh round.
-    const canClose = auctionAllBiddersActed(a, players);
+    // Trust the server's authoritative phase (awaiting === 'auctioneer',
+    // set by recomputeAuction including full-hand auto-passes) in addition
+    // to the local hand-count derivation, so the close enables whenever the
+    // server says it can - the local derivation stays as a fallback for a
+    // lot whose stored phase predates that logic.
+    const canClose = (a && a.awaiting === 'auctioneer')
+      || auctionAllBiddersActed(a, players);
     const lbl = document.createElement('div');
     lbl.className = 'mp-auction-close-label';
     lbl.textContent = canClose
@@ -1510,6 +1673,27 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
       closeWrap.appendChild(resetBtn);
     }
     host.appendChild(closeWrap);
+    // Nudge for a response (auctioneer): ping the bidders still on the
+    // clock, or everyone else at the table, to keep the lot moving. The
+    // waiting set is the bidders who have not bid or passed yet; nudge-all
+    // covers every other seat. Per-player cooldown is enforced server-side.
+    const allOthers = players.map((p) => p.profileId).filter((pid) => pid !== myId);
+    if (allOthers.length) {
+      const waiting = actorsNeededClient(_onlineSnapshot).filter((pid) => pid !== myId);
+      const nudgeWrap = document.createElement('div');
+      nudgeWrap.className = 'mp-auction-close';
+      const nlbl = document.createElement('div');
+      nlbl.className = 'mp-auction-close-label';
+      nlbl.textContent = 'Nudge for a response:';
+      nudgeWrap.appendChild(nlbl);
+      nudgeWrap.appendChild(makeAuctionNudgeButton(
+        _onlineSnapshot, '👋 Nudge waiting', { waiting: true }, waiting,
+        'Remind the bidders who have not bid or passed yet.'));
+      nudgeWrap.appendChild(makeAuctionNudgeButton(
+        _onlineSnapshot, '👋 Nudge all', { all: true }, allOthers,
+        'Remind every other player at the table.'));
+      host.appendChild(nudgeWrap);
+    }
   }
 }
 
@@ -1701,6 +1885,18 @@ function appendChatToList(list, msg) {
   list.scrollTop = list.scrollHeight;
 }
 
+// Reset a chat list back to its empty state. Used when switching rooms so a
+// previous table's messages don't linger in the DOM (the _chatLog cache is
+// cleared alongside it).
+function resetChatList(list) {
+  if (!list) return;
+  list.innerHTML = '';
+  const empty = document.createElement('li');
+  empty.className = 'muted mp-chat-empty';
+  empty.textContent = 'No messages yet.';
+  list.appendChild(empty);
+}
+
 // Backfill a freshly-mounted chat list from the in-memory log (used by
 // the auction overlay's side chat so it isn't blank when it opens after
 // the conversation has already started).
@@ -1740,8 +1936,14 @@ function clearMpChatUnread() {
 // Manual turn-nudge cooldown (client mirror of the server's 3h gate).
 // _localNudges optimistically records nudges this client learned about
 // (from the POST response) so a button greys out + shows the timer right
-// away, before the next snapshot carries state.reminders.
+// away, before the next snapshot carries state.reminders. One 3h window
+// for everything, auctions included (no separate auction throttle).
 const NUDGE_COOLDOWN_MS = 3 * 60 * 60 * 1000;
+// Short "2m" / "45s" label for how long until a cooled-down nudge frees up.
+function fmtNudgeWait(ms) {
+  if (ms <= 0) return '';
+  return ms < 60000 ? `${Math.ceil(ms / 1000)}s` : `${Math.ceil(ms / 60000)}m`;
+}
 let _localNudges = {}; // `${gameId}:${targetId}` -> sentAt
 function recordLocalNudge(targetId, sentAt) {
   if (sentAt) _localNudges[`${_onlineGameId}:${targetId}`] = sentAt;
@@ -1822,17 +2024,22 @@ async function doNudge(opts, btn) {
     _onlineToast(msg, 'error');
   }
   renderMpPanel(_onlineSnapshot);
+  // If a lot is open, refresh the auction overlay too so its nudge buttons
+  // reflect the new cooldown right away (render is idempotent; the
+  // turn-edge notify is guarded, so this won't re-toast).
+  if (_onlineSnapshot && _onlineSnapshot.auction) renderOnlineAuction(_onlineSnapshot.auction);
 }
 
 // One nudge button. Pass a single targetPlayer for a per-player nudge,
 // or allPlayers (+ targetPlayer null) for a "Nudge all" button.
 function makeNudgeButton(snapshot, targetPlayer, allPlayers) {
+  const cd = NUDGE_COOLDOWN_MS;
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'mp-leave mp-nudge';
   if (targetPlayer) {
     const last = lastNudgeAt(snapshot, targetPlayer.profileId);
-    const onCd = last && (Date.now() - last) < NUDGE_COOLDOWN_MS;
+    const onCd = last && (Date.now() - last) < cd;
     const who = document.createElement('span');
     who.className = 'player-name';
     if (targetPlayer.color) who.style.setProperty('--player-color', targetPlayer.color);
@@ -1840,19 +2047,19 @@ function makeNudgeButton(snapshot, targetPlayer, allPlayers) {
     btn.append('👋 Nudge ', who);
     if (onCd) {
       btn.disabled = true;
-      btn.title = `Reminded ${relTime(last)} ago. One nudge per player per 3 hours.`;
+      btn.title = `Reminded ${relTime(last)} ago. Available again in ${fmtNudgeWait(cd - (Date.now() - last))}.`;
       const note = document.createElement('span');
       note.className = 'mp-nudge-note muted';
       note.textContent = ` · ${relTime(last)} ago`;
       btn.appendChild(note);
     } else {
-      btn.title = `Send @${targetPlayer.name} a turn reminder (Discord DM). One per player per 3h.`;
+      btn.title = `Send @${targetPlayer.name} a turn reminder (Discord DM).`;
       btn.addEventListener('click', () => doNudge({ targetId: targetPlayer.profileId }, btn));
     }
   } else {
-    const allOnCd = (allPlayers || []).every((p) => {
+    const allOnCd = (allPlayers || []).length > 0 && (allPlayers || []).every((p) => {
       const l = lastNudgeAt(snapshot, p.profileId);
-      return l && (Date.now() - l) < NUDGE_COOLDOWN_MS;
+      return l && (Date.now() - l) < cd;
     });
     btn.textContent = `👋 Nudge all (${(allPlayers || []).length})`;
     btn.disabled = allOnCd;
@@ -1860,6 +2067,46 @@ function makeNudgeButton(snapshot, targetPlayer, allPlayers) {
       : 'Nudge every listed player (skips anyone on cooldown).';
     if (!allOnCd) btn.addEventListener('click', () => doNudge({ all: true }, btn));
   }
+  return btn;
+}
+
+// Multi-target auction nudge button for the auctioneer: "Nudge waiting"
+// (the bidders still owing a response) or "Nudge all" (every other seat).
+// targetIds is the set this would ping - the button shows the count and
+// greys out when that set is empty or every target is still inside the
+// per-player cooldown (the server skips any that are). Reuses doNudge so
+// the toast + optimistic cooldown record match the roster-panel nudges.
+function makeAuctionNudgeButton(snapshot, label, opts, targetIds, title) {
+  const cd = NUDGE_COOLDOWN_MS;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'modal-btn';
+  // Soonest any target frees up (0 = at least one is nudgable right now).
+  let soonest = Infinity;
+  for (const pid of targetIds) {
+    const l = lastNudgeAt(snapshot, pid);
+    const left = l ? cd - (Date.now() - l) : 0;
+    if (left <= 0) { soonest = 0; break; }
+    soonest = Math.min(soonest, left);
+  }
+  const onCd = targetIds.length > 0 && soonest > 0;
+  btn.textContent = `${label} (${targetIds.length})`;
+  btn.disabled = _onlineBusy || targetIds.length === 0 || onCd;
+  if (onCd) {
+    // Surface WHY it's greyed right on the button - the hover tooltip is
+    // invisible on touch: everyone in this set was nudged within the
+    // cooldown, and here's when another nudge frees up.
+    const note = document.createElement('span');
+    note.className = 'mp-nudge-note muted';
+    note.textContent = ` · ready in ${fmtNudgeWait(soonest)}`;
+    btn.appendChild(note);
+    btn.title = `Everyone here was nudged recently. Another nudge frees up in ${fmtNudgeWait(soonest)}.`;
+  } else {
+    btn.title = targetIds.length === 0
+      ? 'No one is waiting on a response right now.'
+      : title;
+  }
+  if (!btn.disabled) btn.addEventListener('click', () => doNudge(opts, btn));
   return btn;
 }
 
@@ -2177,7 +2424,7 @@ async function submitOnlineOp(op) {
     _onlineBusy = false;
   }
   if (!r || !r.ok) {
-    _onlineToast(humanizeOnlineOpError(r && r.error), 'error');
+    _onlineToast(humanizeOnlineOpError(r && r.error, r && r.data && r.data.detail), 'error');
     // Snap the UI back to the authoritative last-known state.
     if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
     return false;
@@ -2188,7 +2435,22 @@ async function submitOnlineOp(op) {
 
 // Op-error code -> human message for server rejections surfaced in the
 // online sandbox.
-function humanizeOnlineOpError(code) {
+function humanizeOnlineOpError(code, detail) {
+  // When the server hands back the calculation behind a movement verdict,
+  // spell it out instead of the generic line, so the player sees WHY (not
+  // just "not enough water").
+  if (detail && code === 'insufficient_water') {
+    return `Not enough fuel: this move needs ${detail.fuelStepsNeeded} fuel step`
+      + `${detail.fuelStepsNeeded === 1 ? '' : 's'} `
+      + `(${detail.burnsNeeded} burn${detail.burnsNeeded === 1 ? '' : 's'} × ${detail.fuelStepsPerBurn} per burn), `
+      + `but the ship holds only ${detail.fuelStepsInShip} (can burn ${detail.canBurn}). Refuel at LEO or a factory first.`;
+  }
+  if (detail && code === 'cannot_liftoff') {
+    return `Can't lift off: net thrust ${detail.thrust} must beat the site's size ${detail.siteSize} (or a factory there to assist).`;
+  }
+  if (detail && code === 'cannot_land') {
+    return `Can't land there: net thrust ${detail.thrust} must beat the site's size ${detail.siteSize} (or a factory there to assist).`;
+  }
   return ({
     api_unavailable: 'The game server is unavailable.',
     network: 'Network error - check your connection.',
@@ -2242,6 +2504,17 @@ function humanizeOnlineOpError(code) {
     not_colocated: 'Park the rocket at that stack\'s site to transfer.',
     no_outpost: 'That outpost does not exist.',
     outpost_not_empty: 'Empty the outpost first (move its cards out), then decommission it.',
+    outpost_has_water: 'Pump the water out first - only a sub-1 remainder can be scrapped.',
+    not_at_site: 'Park the rocket at the site first.',
+    not_claimed: 'Prospect and claim this site before you can industrialize it.',
+    already_industrialized: 'This site already has a factory.',
+    cannot_industrialize: 'Industrialize needs a refinery + a robonaut (with their supports) in the stack.',
+    no_factory: 'You need your own factory here.',
+    dry_site: 'This site has no water to refine (hydration 0).',
+    already_refueled: 'You\'ve already refined here this turn. End turn to refresh.',
+    no_prospector: 'Activate an ISRU prospector before refining here.',
+    isru_too_high: 'Your ISRU rig is rated higher than this site\'s water.',
+    bad_outpost: 'Pick a valid outpost slot (A-D).',
     crew_no_decommission: 'Crew can\'t be decommissioned here - that happens via an event.',
     bad_decommission: 'Pick a card to decommission.',
     nothing_decommissioned: 'Nothing decommissioned (crew can\'t return to the hand).',
@@ -2292,6 +2565,10 @@ export function unmountBrowseOnline() {
   _onlineMe = null;
   _onlineToast = null;
   if (_onlineChatOff) { try { _onlineChatOff(); } catch { /* ignore */ } _onlineChatOff = null; }
+  // Drop the cached conversation so the next room doesn't inherit it.
+  _chatLog.length = 0;
+  resetChatList(document.getElementById('mp-chat-list'));
+  resetChatList(document.getElementById('mp-auction-chat-list'));
   _onlineMaps = null;
   _onlineSnapshot = null;
   _lastAppliedSeq = -1;
@@ -3729,12 +4006,15 @@ function openDeckTapModal(card, kind, { allowAuction = false, inspectOnly = fals
   //   - Free Library mode: "✋ Add to hand" + flight.
   const inMarket = getMarketMode() === MARKET_MODE.MARKET;
   if (inspectOnly) {
-    // Crew library: pure reference. Crew enters play only through
-    // the starting-crew wizard at New game, so there's no add /
-    // auction here.
+    // Read-only reference views. Crew enters play only through the
+    // starting-crew wizard at New game; GW thrusters are an upcoming
+    // expansion you can preview (flip to see both faces) but not yet
+    // play. Either way there's no add / auction here.
     const note = document.createElement('p');
     note.className = 'muted card-modal-note';
-    note.textContent = '👥 Crew is chosen at New game via the starting-crew wizard.';
+    note.textContent = card.type === 'gw-thruster'
+      ? '🚧 GW thrusters are an upcoming expansion. Preview only for now - flip to see both faces.'
+      : '👥 Crew is chosen at New game via the starting-crew wizard.';
     actions.append(note);
   } else if (inMarket && allowAuction) {
     const auctionBtn = document.createElement('button');
@@ -4050,6 +4330,10 @@ const STORAGE_ROCKET_ROUTE = 'hf-sandbox-planned-route';
 // the player with a spent turn. Cleared at every move exit path.
 const STORAGE_PENDING_MOVE = 'hf-sandbox-pending-move';
 const STORAGE_ROUTE_PRIORITY = 'hf-sandbox-route-priority';
+// One-time flag: the default flipped from turns-first to burns-first. On first
+// load after that change we force burns-first for EVERYONE (including users who
+// had the old turns-first saved), then respect whatever they pick afterwards.
+const STORAGE_ROUTE_PRIORITY_BURNS_DEFAULT = 'hf-route-priority-burns-default';
 // Routing metric priority. 'turns' minimizes turn-ends first (the
 // snap-to-adjacent default); 'burns' minimizes water spend first
 // (favours long Hohmann coasts at the cost of more turns). User-
@@ -4057,9 +4341,16 @@ const STORAGE_ROUTE_PRIORITY = 'hf-sandbox-route-priority';
 // pick survives reloads.
 let _routePriority = (() => {
   try {
+    // One-time force to burns-first (overrides an old saved turns-first), then
+    // respect the player's choice on later loads.
+    if (!localStorage.getItem(STORAGE_ROUTE_PRIORITY_BURNS_DEFAULT)) {
+      localStorage.setItem(STORAGE_ROUTE_PRIORITY_BURNS_DEFAULT, '1');
+      localStorage.setItem(STORAGE_ROUTE_PRIORITY, 'burns');
+      return 'burns';
+    }
     const s = localStorage.getItem(STORAGE_ROUTE_PRIORITY);
-    return s === 'burns' || s === 'turns' ? s : 'turns';
-  } catch { return 'turns'; }
+    return s === 'burns' || s === 'turns' ? s : 'burns';
+  } catch { return 'burns'; }
 })();
 function setRoutePriority(mode) {
   if (mode !== 'turns' && mode !== 'burns') return;
@@ -4279,15 +4570,12 @@ function ensureMapShell(host) {
       <div class="map-turn-controls">
         <button id="turn-end" title="End your turn"
           aria-label="End turn">⏭ End turn</button>
+        <span id="turn-budget" class="map-turn-budget" aria-live="polite">
+          <button type="button" class="turn-tag" id="turn-tag-move" title="Moves remaining this turn">move:1</button>
+        </span>
         <button id="turn-tracker" title="View turn tracker"
           aria-label="View turn tracker">🕐</button>
-        <span id="turn-budget" class="map-turn-budget" aria-live="polite">
-          <button type="button" class="turn-tag" id="turn-tag-op" title="Operations remaining this turn">op:1</button>
-          <span class="move-group">
-            <button type="button" class="turn-tag" id="turn-tag-move" title="Moves remaining this turn">move:1</button>
-            <button type="button" class="turn-tag turn-tag-gear" id="game-settings" title="Game settings" aria-label="Game settings">⚙</button>
-          </span>
-        </span>
+        <button type="button" class="turn-tag turn-tag-gear" id="game-settings" title="Game settings" aria-label="Game settings">⚙</button>
         <span id="aqua-chip" class="map-aqua-chip"
           title="Aqua balance - spend 4 aqua per hazard to bypass rolls, or convert 1:1 to water at LEO">
           💧 <strong id="aqua-chip-balance">${getAqua()}</strong>
@@ -4398,7 +4686,7 @@ function ensureMapShell(host) {
       document.getElementById('main-menu-modal')?.classList.add('hidden');
     });
   }
-  // Global game-settings gear, welded to the move tag. Opens the
+  // Global game-settings gear, a standalone toolbar chip. Opens the
   // same settings modal accessible from per-popup affordances; right
   // now route + fuel options live there but future settings (UI
   // density, accessibility toggles, persistent dev flags) will land
@@ -4411,16 +4699,37 @@ function ensureMapShell(host) {
   // lands - it just consumes the per-turn move budget for now so
   // the end-turn confirm reflects the spend.
   host.querySelector('#turn-end').addEventListener('click', async () => {
+    // An open auction freezes the turn: the lot must resolve first. The
+    // button is disabled + reads "Auctioning" in this state, but guard the
+    // click too in case a stale enabled state slips through.
+    if (_onlineSnapshot && _onlineSnapshot.auction) {
+      setStatus('An auction is open - resolve it before ending your turn.');
+      return;
+    }
+    // While an operation is still in hand this button IS the ops-menu opener
+    // (its label reads "Ops"): use the op first. Only once ops are spent does
+    // tapping it end the turn.
+    if (getOpsRemaining() > 0) { openOpsMenu(); return; }
+    // Confirm before ending with budget the player could still use: an
+    // operational rocket (active thruster) plus an unspent move. (Ops are
+    // always 0 here, since ops > 0 opens the menu above.)
+    let hasRocket = false;
+    try { const ra = isRocketActive(); hasRocket = !!(ra && ra.active); } catch { hasRocket = false; }
     // Online: the server advances the turn (and resolves any Sunspot
     // Cube event), broadcasting the new snapshot. Send END_TURN and let
     // applySnapshot redraw; skip the local clock/event/log flow below.
-    if (_online) { await submitOnlineOp({ kind: 'END_TURN' }); return; }
+    if (_online) {
+      if (hasRocket && (getMovesRemaining() > 0 || getOpsRemaining() > 0)
+        && !(await confirmEndTurn())) return;
+      await submitOnlineOp({ kind: 'END_TURN' });
+      return;
+    }
     // Capture the previous slot BEFORE advancing so the modal can
     // animate the Sunspot Cube sliding from old → new instead of
     // teleporting. If the player cancels the confirm, nothing
     // moved, so we skip the modal entirely.
     const prevTurn = getTurn();
-    const result = await triggerEndTurn();
+    const result = await triggerEndTurn({ hasRocket });
     if (!result) return;
     // Sunspot Cube landed on an event slot - apply the d6 outcome
     // (VP credit / debit + flavour log line) BEFORE we commit the
@@ -4461,12 +4770,12 @@ function ensureMapShell(host) {
   // and "↩ Undo move" based on whether the per-turn move budget has
   // been spent. End turn refills the budget, which calls back here
   // via onTurnChange and resets the button to "Move".
-  // Per-turn budget tags op:N / move:N in the toolbar. The move
-  // tag IS the move control now (the old 🛸 button is gone): tap
-  // to move when a move is left, or to undo when it's spent. The
-  // op tag opens the operations menu. Both live-update on any
-  // consume / refund / turn rollover.
-  const opTag = host.querySelector('#turn-tag-op');
+  // Per-turn move:N tag in the toolbar. The move tag IS the move
+  // control now (the old 🛸 button is gone): tap to move when a
+  // move is left, or to undo when it's spent. Operations are driven
+  // from the End turn button (it reads "Ops" while one is unspent),
+  // so there is no separate op tag. Live-updates on any consume /
+  // refund / turn rollover.
   const moveTag = host.querySelector('#turn-tag-move');
   const endTurnBtn = host.querySelector('#turn-end');
   function refreshTurnBudget() {
@@ -4485,36 +4794,75 @@ function ensureMapShell(host) {
     const onlineFrozen = _online && !!_onlineSnapshot
       && (_onlineSnapshot.pendingFirstPlayer || _onlineSnapshot.status === 'finished');
     const lockedByOnline = _online && (_spectator || !isOnlineMyTurn() || onlineFrozen);
-    if (opTag) {
-      opTag.textContent = `op:${ops}`;
-      opTag.classList.toggle('is-spent', ops <= 0);
-      opTag.classList.toggle('is-locked', lockedByOnline);
-      opTag.disabled = lockedByOnline;
-      if (lockedByOnline) opTag.title = 'Waiting for your turn.';
-    }
+    // An open auction is its own call to action (bid / pass / close), so the
+    // End turn nudge stays dark while a lot is up - even with operations spent.
+    const auctionInProgress = !!(_onlineSnapshot && _onlineSnapshot.auction);
     if (moveTag) {
       // Once the move is spent the tag IS the undo control - it reads
       // "↩ undo move" so the player knows tapping rewinds this turn's
       // move (the rocket slides back to where it started). With a move
       // still in hand it shows the budget and moves the rocket.
       const spent = moves <= 0;
+      // The rocket can only fly with a valid thruster support chain
+      // engaged (a thruster whose reactor / generator / heat supports
+      // are all satisfied). Until then the move control is dark - no glow -
+      // so the player isn't nudged toward a move that can't happen. It stays
+      // ENABLED (not disabled) in this state so the hover tip + the tap hint
+      // still fire (a disabled button shows neither). (Undo stays available
+      // so a spent move can rewind.)
+      let canMove = true;
+      try { const ra = isRocketActive(); canMove = !!(ra && ra.active); } catch { canMove = true; }
+      const blocked = !spent && !canMove;
       moveTag.textContent = spent ? '↩ undo move' : `move:${moves}`;
       moveTag.classList.toggle('is-spent', spent);
       moveTag.classList.toggle('is-undo', spent && !lockedByOnline);
       moveTag.classList.toggle('is-locked', lockedByOnline);
+      moveTag.classList.toggle('is-nomove', blocked && !lockedByOnline);
       moveTag.disabled = lockedByOnline;
       moveTag.title = lockedByOnline
         ? 'Waiting for your turn.'
-        : (spent
-          ? 'Move spent - tap to undo this turn\'s move (rewinds the rocket)'
-          : 'Move remaining - tap to move the rocket along its route');
+        : (blocked
+          ? 'To move, install an operational thruster into the rocket (a thruster with all its supports satisfied).'
+          : (spent
+            ? 'Move spent - tap to undo this turn\'s move (rewinds the rocket)'
+            : 'Move remaining - tap to move the rocket along its route'));
     }
     if (endTurnBtn) {
-      endTurnBtn.disabled = lockedByOnline;
+      // An open auction freezes End turn (the lot must resolve before the
+      // turn can pass), so the button reads "Auctioning" and is disabled
+      // until it closes - the auction overlay is where the action is.
+      endTurnBtn.disabled = lockedByOnline || auctionInProgress;
       endTurnBtn.classList.toggle('is-locked', lockedByOnline);
+      endTurnBtn.classList.toggle('is-auctioning', auctionInProgress && !lockedByOnline);
+      // Colour the End turn button (and its glow) with the active player's
+      // seat colour - the same colour the turn banner uses - so it reads as
+      // "whose turn it is". Solo / no active player falls back to the default.
+      const activePlayer = _onlineSnapshot && Array.isArray(_onlineSnapshot.players)
+        ? _onlineSnapshot.players[_onlineSnapshot.activeIndex] : null;
+      const seat = activePlayer && activePlayer.color;
+      if (seat) {
+        endTurnBtn.style.setProperty('--mp-turn-color', seat);
+        endTurnBtn.style.color = readableInk(seat);
+      } else {
+        endTurnBtn.style.removeProperty('--mp-turn-color');
+        endTurnBtn.style.removeProperty('color');
+      }
+      // Label priority: an open auction overrides everything (you can't end
+      // the turn yet). Otherwise, an unspent operation reads "Ops" (and opens
+      // the operations menu); only once ops are spent is it the End turn
+      // button, which can glow when no auction lot is waiting on a bid.
+      const hasOps = ops > 0;
+      endTurnBtn.textContent = auctionInProgress
+        ? '🔨 Auctioning'
+        : (hasOps ? '⚙ Ops' : '⏭ End turn');
+      endTurnBtn.classList.toggle('is-ops', hasOps && !lockedByOnline && !auctionInProgress);
+      endTurnBtn.classList.toggle('needs-end',
+        ops <= 0 && !auctionInProgress && !lockedByOnline);
       endTurnBtn.title = lockedByOnline
         ? 'Waiting for your turn.'
-        : 'End your turn';
+        : (auctionInProgress
+          ? 'An auction is open - resolve it before ending your turn.'
+          : (hasOps ? 'You still have an operation - tap to use it' : 'End your turn'));
     }
   }
   // Stash on the host so applySnapshot can re-trigger after a fresh
@@ -4523,6 +4871,10 @@ function ensureMapShell(host) {
   host._refreshTurnBudget = refreshTurnBudget;
   refreshTurnBudget();
   onTurnChange(refreshTurnBudget);
+  // Also refresh when the rocket stack changes: adding / removing a
+  // thruster (or its supports) flips whether the rocket can move, which
+  // enables or disables the move tag.
+  onRocketChange(refreshTurnBudget);
   // Robust cross-device tap: some mobile browsers don't deliver a
   // reliable `click` on these toolbar controls, so also handle
   // `touchend` (preventing the ghost click that would double-fire).
@@ -4537,16 +4889,17 @@ function ensureMapShell(host) {
     }, { passive: false });
     el.addEventListener('click', (e) => { if (!touched) fn(e); });
   };
-  if (opTag) {
-    opTag.style.cursor = 'pointer';
-    opTag.title = 'Operations remaining - tap for the operations menu';
-    onTap(opTag, () => openOpsMenu());
-  }
   if (moveTag) {
     moveTag.style.cursor = 'pointer';
     onTap(moveTag, () => {
-      if (getMovesRemaining() > 0) moveRocket();
-      else undoRocketMove();
+      if (getMovesRemaining() > 0) {
+        // Guard the tap too (not just the disabled state): no thruster
+        // support chain means there's nothing to move.
+        let canMove = true;
+        try { const ra = isRocketActive(); canMove = !!(ra && ra.active); } catch { canMove = true; }
+        if (!canMove) { setStatus('To move, install an operational thruster into the rocket (a thruster with all its supports satisfied).'); return; }
+        moveRocket();
+      } else undoRocketMove();
     });
   }
   // Aqua balance chip - live-updates on any spend / income. Tapping
@@ -5228,12 +5581,6 @@ function openRocketStackModal() {
   xBtn.addEventListener('click', close);
   panel.appendChild(xBtn);
 
-  // Engagement is a transient UI flag - the player presses
-  // "Engage" once supports are met to trigger the moving-rocket
-  // animation. Any stack change (add / remove / re-pick active)
-  // resets it so a freshly-flyable stack still needs the user to
-  // confirm "yes, engage" before the animation runs.
-  let engaged = false;
   // Transient selection set for the Transfer section. Cards
   // marked here can be shipped to a colocated stack (LEO if
   // at LEO; outposts at the rocket's current site). Cleared
@@ -5255,10 +5602,6 @@ function openRocketStackModal() {
       const sup = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
       for (const k of sup) supplied.add(k);
     }
-    // Engagement is meaningless when supports aren't satisfied -
-    // clear the flag so the button text + animation don't lie if
-    // the player removes a card mid-flight.
-    if (!r.active) engaged = false;
     const totals = getStackTotals();
     const thrStats = getActiveThrusterStats();
     // Preserve the scroll position across the rebuild so tapping
@@ -5267,9 +5610,6 @@ function openRocketStackModal() {
     const prevBody = panel.querySelector('.rocket-stack-body');
     const prevScroll = prevBody ? prevBody.scrollTop : 0;
     prevBody?.remove();
-    // Engaged-border is painted by the panel (non-scrolling)
-    // so it doesn't fragment when the body's content overflows.
-    panel.classList.toggle('is-engaged', engaged && r.active);
     const body = document.createElement('div');
     body.className = 'rocket-stack-body';
     // Status banner: active + green when all three rules hold,
@@ -5319,6 +5659,22 @@ function openRocketStackModal() {
     const fuelEqn = (thrStats && thrStats.fuel != null && thrStats.fuel !== thrStats.baseFuel)
       ? `base ${fmt(thrStats.baseFuel)} → ${fmt(thrStats.fuel)} water/move`
       : (thrStats && thrStats.fuel != null ? 'water per move' : '');
+    // Fuel/burn cell shows "N FT (B burns)" with the fuel-strip math
+    // underneath. B is counted along the net-thrust ladder (fuel steps
+    // from wet to dry / fuel-per-burn), NOT tank ÷ fuel - a lighter ship
+    // squeezes more burns out of the same water.
+    const hasBurns = !!(thrStats && thrStats.fuel != null && thrStats.burnsAvailable != null);
+    const burnsLabel = hasBurns
+      ? `${thrStats.burnsAvailable} burn${thrStats.burnsAvailable === 1 ? '' : 's'}` : '';
+    const fuelValHtml = (thrStats && thrStats.fuel != null)
+      ? `${fmt(thrStats.fuel)} FT${hasBurns ? ` <span class="muted">(${burnsLabel})</span>` : ''}`
+      : '-';
+    const fuelStepEqn = hasBurns
+      ? `${thrStats.fuelSteps}/${fmt(thrStats.fuel)} FT steps = ${burnsLabel}`
+      : fuelEqn;
+    const fuelTip = hasBurns
+      ? `Each burn spends ${fmt(thrStats.fuel)} fuel steps; from wet ${totals.wetMass} to dry ${totals.dryMass} the strip has ${thrStats.fuelSteps} steps, so ${burnsLabel} (leftover steps can't finish another).`
+      : (thrStats && thrStats.fuel != null ? `Fuel per burn = ${fmt(thrStats.fuel)} water per move.` : '');
     const thrustHtml = thrStats
       ? `<div class="rocket-totals-cell"
               data-tip="Thrust = base ${fmt(thrStats.baseThrust)} ${modifierLines ? '+ ' + modifierLines : ''}. Net thrust must be ≥ wet mass to lift."
@@ -5328,11 +5684,11 @@ function openRocketStackModal() {
            <small class="cell-eqn">${esc(thrustEqn)}</small>
          </div>
          <div class="rocket-totals-cell"
-              data-tip="Fuel per burn = ${fmt(thrStats.fuel)} water per move."
+              data-tip="${esc(fuelTip)}"
               title="Fuel per burn">
            <span class="lbl">Fuel / burn</span>
-           <strong>${thrStats.fuel != null ? fmt(thrStats.fuel) : '-'}</strong>
-           <small class="cell-eqn">${esc(fuelEqn)}</small>
+           <strong>${fuelValHtml}</strong>
+           <small class="cell-eqn">${esc(fuelStepEqn)}</small>
          </div>`
       : '';
     // Afterburn toggle - only shown when the active thruster has
@@ -5417,6 +5773,11 @@ function openRocketStackModal() {
         </div>
         ${totalsHtml}
         <div id="rocket-fuel-strip" class="rocket-fuel-strip"></div>
+        ${_online ? `<div class="rocket-sim-move">
+          <button type="button" class="popup-btn popup-btn-secondary rocket-sim-btn"
+            title="Dry-run this turn's planned move on the server (changes nothing) and show the fuel-step cost">🧪 Simulate planned move</button>
+          <p class="rocket-sim-result" hidden></p>
+        </div>` : ''}
         ${status}
       </div>
       <div id="rocket-stack-cards">
@@ -5453,6 +5814,9 @@ function openRocketStackModal() {
     // to relocate chits + react to factory refuel patterns.
     const stripHost = body.querySelector('#rocket-fuel-strip');
     if (stripHost) buildFuelStrip(stripHost, totals);
+    // Simulate the planned move right here under the fuel strip (online): a
+    // read-only server dry-run that prints the fuel-step breakdown.
+    wireSimulate(body.querySelector('.rocket-sim-btn'), body.querySelector('.rocket-sim-result'));
 
     // Afterburn toggle. Confirms before engaging (spends fuel up
     // front per the rulebook's "Afterburn (+ thrust for 2 fuel
@@ -5556,23 +5920,6 @@ function openRocketStackModal() {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTank(); }
       });
     }
-
-    // Engage button: greyed out until supports are satisfied; tap
-    // to ignite the moving-rocket animation. Lives in the pinned
-    // header so it stays on screen even on a tall stack.
-    const engageBtn = document.createElement('button');
-    engageBtn.type = 'button';
-    engageBtn.className = 'rocket-engage' + (engaged ? ' is-engaged' : '');
-    engageBtn.disabled = !r.active;
-    engageBtn.textContent = engaged && r.active
-      ? '🔥 Engaged - rocket is moving!'
-      : r.active ? '🔥 Engage rocket' : '🔥 Engage rocket (supports unmet)';
-    engageBtn.addEventListener('click', () => {
-      if (!r.active) return;
-      engaged = !engaged;
-      repaint();
-    });
-    body.querySelector('.rocket-stack-header').appendChild(engageBtn);
 
     const cards = body.querySelector('#rocket-stack-cards');
     const thrustersHost = body.querySelector('#rocket-stack-thrusters');
@@ -6218,10 +6565,49 @@ function hazardRollModal(hazards) {
 // the bypass bar by 2 so the Sun is harder to dodge.
 const RAD_BYPASS_THRUST     = 6;
 const RAD_BYPASS_THRUST_RED = 8;
+// Highest face of the rad die. The worst a single zone can throw is a 6
+// (plus the red-season bonus), so a card is "at risk" of being lost when
+// its rad-hard plus the active thruster's FINAL thrust can't clear that
+// worst case: radHard + thrust < MAX_RAD_DIE + seasonBonus.
+const MAX_RAD_DIE = 6;
 function radBypassThreshold() {
   let season = null;
   try { season = getSeason(); } catch { season = null; }
   return season && season.name === 'red' ? RAD_BYPASS_THRUST_RED : RAD_BYPASS_THRUST;
+}
+
+// Resolve the current rocket stack into [{id, name, radHardness}] rows for
+// the rad-hardness check - used both by the upfront at-risk preview in the
+// confirm modal and by the per-zone roll modal. Patents read rad-hard off
+// the card; crew read name + rad-hard off the chosen FACE (they live on the
+// face, not the physical card), so a flipped crew row is never blank.
+function radStackCards() {
+  return getRocketStack()
+    .map((slot) => {
+      const patent = PATENTS_BY_ID[slot.id];
+      if (patent) {
+        return { id: slot.id, name: patent.name, radHardness: patent.radHardness != null ? patent.radHardness : 0 };
+      }
+      const crew = CREW_BY_ID[slot.id];
+      if (crew) {
+        const f = crew.faces[slot.face === 'secondary' ? 'secondary' : 'primary'] || crew.faces.primary || {};
+        return { id: slot.id, name: f.name || crew.id, radHardness: f.radHardness != null ? f.radHardness : 0 };
+      }
+      return null;
+    })
+    .filter(Boolean);
+}
+
+// Cards from `stackCards` that could be decommissioned on the worst roll of
+// a single zone (d6 = 6): rad-hard < MAX_RAD_DIE + seasonBonus - thrust.
+// `thrust` is the active thruster's final modified thrust; clamping the
+// worst rad at 0 means a stack that out-thrusts the die returns [].
+function radAtRiskCards(stackCards, thrust, seasonBonus) {
+  const worstRad = Math.max(0, MAX_RAD_DIE + (seasonBonus | 0) - Math.max(0, thrust | 0));
+  if (worstRad <= 0) return [];
+  return (stackCards || [])
+    .filter((c) => (c.radHardness || 0) < worstRad)
+    .sort((a, b) => (a.radHardness || 0) - (b.radHardness || 0));
 }
 
 // Pre-roll confirm dialog for rad zones. Mirrors the
@@ -6232,7 +6618,7 @@ function radBypassThreshold() {
 // Resolves to 'confirm' or 'cancel'. Always shown when the
 // route crosses ≥1 rad zone so the player can back out before
 // the dice roll.
-function radConfirmModal(radHazards, thrust, seasonBonus, bypassThreshold) {
+function radConfirmModal(radHazards, thrust, seasonBonus, bypassThreshold, stackCards) {
   return new Promise((resolve) => {
     document.querySelector('.confirm-modal-overlay')?.remove();
     const overlay = document.createElement('div');
@@ -6277,6 +6663,38 @@ function radConfirmModal(radHazards, thrust, seasonBonus, bypassThreshold) {
           roll.</strong>
          </p>`;
 
+    // Up-front "what could I lose" list. A card is at risk when its
+    // rad-hard plus the final thrust can't clear the worst die (a 6, plus
+    // the red-season bonus). Only meaningful when the stack actually rolls;
+    // a bypassing rocket loses nothing, so the list is skipped there.
+    let atRiskNote = '';
+    if (!willBypass) {
+      const atRisk = radAtRiskCards(stackCards, thrust, seasonBonus);
+      // Right-hand side of the at-risk test: a card is lost when its
+      // rad-hard + thrust can't reach the worst die (6) plus the season bonus.
+      const riskThreshold = MAX_RAD_DIE + (seasonBonus | 0);
+      if (atRisk.length) {
+        const items = atRisk.map((c) =>
+          `<li><span class="rad-atrisk-name">${esc(c.name)}</span>`
+          + `<span class="rad-atrisk-rh">rad-hard ${c.radHardness || 0}</span></li>`
+        ).join('');
+        atRiskNote = `
+          <div class="rad-confirm-atrisk">
+            <p class="rad-confirm-atrisk-head">
+              ⚠ At risk on the worst roll
+              <span class="muted">(rad-hard + thrust ${thrust || 0}
+              &lt; ${riskThreshold})</span>:
+            </p>
+            <ul class="rad-confirm-atrisk-list">${items}</ul>
+          </div>`;
+      } else if (Array.isArray(stackCards) && stackCards.length) {
+        atRiskNote = `
+          <p class="rad-confirm-atrisk-safe">
+            ✓ No cards at risk - every card clears even a ${MAX_RAD_DIE}.
+          </p>`;
+      }
+    }
+
     const panel = document.createElement('div');
     panel.className = 'turn-confirm-panel rad-confirm-panel';
     panel.innerHTML = `
@@ -6290,6 +6708,7 @@ function radConfirmModal(radHazards, thrust, seasonBonus, bypassThreshold) {
         (active thrust ${thrust || 0}, bypass at &gt; ${bypassThreshold}).
       </p>
       ${bypassNote}
+      ${atRiskNote}
       <div class="turn-confirm-actions hazard-actions">
         <button type="button" class="popup-btn primary" data-act="confirm"
           title="${willBypass ? 'Continue - the thrust check skips the roll' : 'Open the rad-hardness roll modal'}">
@@ -6734,13 +7153,15 @@ function hasRefueledThisTurn(siteId) {
 // requires a built factory at the site.
 function pickRefiningSource(site) {
   const water = Number.isFinite(site.hydration) ? site.hydration : 0;
-  // ISRU rig path: the active prospector with a positive ISRU
-  // value, supports met, and ISRU <= site hydration so the
+  // ISRU rig path: the active prospector with an ISRU rating (0 or
+  // more), supports met, and ISRU <= site hydration so the
   // 1 + hydration - ISRU formula gives at least 1 water.
   const prosp = getActiveProspectorStats();
   if (prosp && prosp.canActivate) {
     const isru = prospectorIsruValue(prosp.card);
-    if (isru > 0 && isru <= water) {
+    // ISRU 0 is a valid rig (gain = 1 + water), so it refuels anywhere the
+    // gate ISRU <= water allows - which for 0 is every site.
+    if (isru >= 0 && isru <= water) {
       return { kind: 'isru', card: prosp.card, rawGain: 1 + water - isru, isru };
     }
   }
@@ -6776,6 +7197,14 @@ function doRefuel(site) {
   const chk = canRefuelAt(site);
   if (!chk.ok) {
     setStatus(`Refuel blocked: ${chk.reason}`);
+    return;
+  }
+  // Online: the server refines the site's water into the tank with the
+  // active ISRU rig and spends the op; the snapshot repaints the tank.
+  if (_online) {
+    const sid = toServerId(_onlineMaps, site.id);
+    if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
+    submitOnlineOp({ kind: 'SITE_REFUEL', siteId: sid, mode: 'isru' });
     return;
   }
   // Rulebook I5a: ISRU Refuel is an Operation, consumes the
@@ -6999,8 +7428,16 @@ function outpostDissolveBtnHtml(stackId) {
   const letter = stackId.slice('outpost'.length);
   const op = getOutpost(letter);
   if (!op || (op.cards && op.cards.length > 0)) return '';
-  const waterNote = (op.tank | 0) > 0 ? ` (forfeits ${op.tank} water)` : '';
-  return `<button type="button" class="modal-btn decommission stack-dissolve-outpost" data-letter="${esc(letter)}" title="Decommission this empty outpost and free the slot${waterNote}">🗑 Decommission outpost</button>`;
+  const water = Number(op.tank) || 0;
+  // Scrap rule: can only decommission with no usable water. Whole units must
+  // be pumped out first (they're not lost); a sub-1 remainder can't be moved,
+  // so it's discardable and doesn't block.
+  if (water >= 1) {
+    const whole = Math.floor(water);
+    return `<button type="button" class="modal-btn decommission" disabled>🗑 Decommission outpost - pump ${whole} water out first</button>`;
+  }
+  const remNote = water > 0 ? ` (discards a ${Math.round(water * 100) / 100} remainder that can't be transferred)` : '';
+  return `<button type="button" class="modal-btn decommission stack-dissolve-outpost" data-letter="${esc(letter)}" title="Decommission this empty outpost and free the slot${remNote}">🗑 Decommission outpost</button>`;
 }
 
 // Minimal amount-picker modal (stepper + "All"). Resolves to a positive
@@ -7053,6 +7490,14 @@ function pickFuelAmount({ title = '💧 Transfer water', max = 1 } = {}) {
 // and tank headroom > 0.
 function doFactoryRefuel(site, gain) {
   if (gain <= 0) return;
+  // Online: the server runs the factory's flat +7 refine and spends the
+  // op (gain is recomputed server-side); the snapshot repaints the tank.
+  if (_online) {
+    const sid = toServerId(_onlineMaps, site.id);
+    if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
+    submitOnlineOp({ kind: 'SITE_REFUEL', siteId: sid, mode: 'factory' });
+    return;
+  }
   if (!requireOp('Factory-Refuel')) return;
   const tankBefore = getTankWater();
   const tmax = getTankMax();
@@ -7127,6 +7572,8 @@ function doResearchAuction() {
 // transaction.
 const INCOME_AQUA = 1;
 function doIncomeOp() {
+  // Online: the server credits the aqua + spends the op; the snapshot repaints.
+  if (_online) { submitOnlineOp({ kind: 'INCOME' }); return; }
   if (!requireOp('Income')) return;
   addAqua(INCOME_AQUA);
   setStatus(`💰 Income: <strong>+${INCOME_AQUA}</strong> aqua. Bank now <strong>${esc(String(getAqua()))}</strong>.`);
@@ -7314,6 +7761,14 @@ function doEtProduce(site, factory, options, outpostsAtSite, freeSlots) {
     freeSlots,
     onCommit: ({ cardId, letter, isNewOutpost }) => {
       if (!cardId || !letter) return;
+      // Online: the server moves the hand card into the (maybe-new) outpost
+      // Black-Side-up; the snapshot repaints.
+      if (_online) {
+        const sid = toServerId(_onlineMaps, site.id);
+        if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
+        submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, letter, isNewOutpost });
+        return;
+      }
       if (!requireOp('ET Production')) return;
       // If we need to create the outpost first, do that BEFORE
       // moving cards - otherwise addCardToOutpost will reject.
@@ -7392,6 +7847,15 @@ function doIndustrialize(site, stack, options) {
     options,
     onCommit: (opt) => {
       if (!opt) return;
+      // Online: the server flips the claim to a factory + decommissions the
+      // chain to hand; the snapshot repaints. Send the chosen chain ids.
+      if (_online) {
+        const sid = toServerId(_onlineMaps, site.id);
+        if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
+        const cardIds = opt.chainIndices.map((idx) => stack[idx] && stack[idx].id).filter(Boolean);
+        submitOnlineOp({ kind: 'INDUSTRIALIZE', siteId: sid, cardIds });
+        return;
+      }
       if (!requireOp('Industrialize')) return;
       // Remove chain cards in reverse index order so earlier
       // indices stay valid as we splice. Radiators were already
@@ -7858,6 +8322,12 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   // current level immediately, no fill animation. Refuel calls
   // still pass fromWater explicitly to play the fill tween.
   const fromW   = Number.isFinite(fromWater) ? fromWater : tankNow;
+  // Water is no longer integer: a burn walks the wet chit down fuel steps and
+  // can leave a sub-1 remainder. Show the value with up to 2 decimals (no
+  // trailing zeros), and call out the remainder - it can't be transferred out
+  // (water moves in whole units).
+  const fmtWater = (n) => String(Math.round((Number(n) || 0) * 100) / 100);
+  const remOf = (n) => { const v = Number(n) || 0; return Math.round((v - Math.floor(v)) * 100) / 100; };
   const totals  = getStackTotals();
   const thrStats = getActiveThrusterStats();
   // Tank visualisation model: the cylinder always represents the
@@ -7948,11 +8418,14 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         <g class="tank-ticks"></g>
       </svg>
       <div class="fuel-tank-readout">
-        <strong class="tank-now">${fromW}</strong>
+        <strong class="tank-now">${fmtWater(fromW)}</strong>
         <span>/</span>
         <strong class="tank-cap">${cap}</strong>
         <em class="muted">water</em>
       </div>
+      <p class="fuel-tank-rem muted" ${remOf(tankNow) > 0 ? '' : 'hidden'}>includes a
+        <strong>${remOf(tankNow)}</strong> remainder a burn left - can't be transferred
+        out (water moves in whole units)</p>
     </div>
     <div class="fuel-tank-actions">
       <button type="button" class="popup-btn popup-btn-secondary" id="tank-dump"
@@ -8028,6 +8501,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const dryRect   = panel.querySelector('.tank-dry');
   const liftLine  = panel.querySelector('.tank-lift-line');
   const nowReadout = panel.querySelector('.tank-now');
+  const remReadout = panel.querySelector('.fuel-tank-rem');
   const ticksG     = panel.querySelector('.tank-ticks');
 
   // Geometry: 200 svg units span TANK_VIS_MAX wet-mass units.
@@ -8079,7 +8553,15 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     waterRect.setAttribute('height', String(h));
     foamRect.setAttribute('y',  String(waterTopY - 3));
     foamRect.setAttribute('height', String(Math.min(6, h)));
-    nowReadout.textContent = String(Math.round(clamped));
+    nowReadout.textContent = fmtWater(clamped);
+    if (remReadout) {
+      const rem = remOf(clamped);
+      remReadout.hidden = !(rem > 0);
+      if (rem > 0) {
+        remReadout.innerHTML = `includes a <strong>${rem}</strong> remainder a burn left`
+          + ` - can't be transferred out (water moves in whole units)`;
+      }
+    }
   }
 
   // Falling-droplet animation. Spawns teardrop <path>s at the
@@ -9695,6 +10177,88 @@ async function explodeRocket(siteId) {
   });
 }
 
+// Build THIS turn's MOVE op in SERVER ids from the planned route. This is the
+// ONE place the planner-id -> server-slug conversion lives, so the real move
+// and the debug Simulate send byte-identical segments (a planner id like
+// "0.72..." maps to a server slug like "hoh-qxrxi"; sending the raw planner id
+// makes the server reject with route_not_from_here even though the route IS
+// connected). Returns { toSiteId, segments, turn1Segs, destPlannerId } or
+// { error } with a player-facing reason.
+function buildTurn1MoveOp() {
+  const turn1Segs = (_plannedRoute || []).filter((s) => (s.turn || 1) === 1);
+  if (!turn1Segs.length) return { error: 'Planned route has no current-turn segments.' };
+  const destPlannerId = turn1Segs[turn1Segs.length - 1].to;
+  const toSiteId = toServerId(_onlineMaps, destPlannerId);
+  if (!toSiteId) return { error: 'That destination is not on the map.' };
+  const segments = [];
+  for (const s of turn1Segs) {
+    const f = plannerIdToSlug(s.from);
+    const t = plannerIdToSlug(s.to);
+    if (!f || !t) return { error: 'That route is not on the map.' };
+    segments.push({ from: f, to: t, burns: Number(s.burns) || 0, turn: 1 });
+  }
+  return { toSiteId, segments, turn1Segs, destPlannerId };
+}
+
+// Dry-run THIS turn's planned move against the server (debug:true) and return
+// a one-line summary + 'ok'/'bad'. Read-only: the server runs it on a throwaway
+// clone and changes nothing. Also console.logs the request + the server's full
+// burn-math breakdown. Shared by every Simulate button so they never drift.
+async function runPlannedMoveSimulation() {
+  if (!_online) return { summary: 'Simulate is for online games.', cls: 'bad' };
+  const built = buildTurn1MoveOp();
+  if (built.error) return { summary: built.error, cls: 'bad' };
+  const { toSiteId, segments } = built;
+  let r;
+  try {
+    r = await submitGameOp(_onlineGameId, { kind: 'MOVE', toSiteId, segments, debug: true }, _onlineMe.token);
+  } catch { return { summary: 'Server unreachable - try again.', cls: 'bad' }; }
+  const sim = (r && r.ok && r.data) ? r.data : null;
+  const calc = sim ? (sim.calc || sim.detail || null) : null;
+  const round2 = (n) => (n == null ? n : Math.round(n * 100) / 100);
+  console.log('[simulate] dry-run MOVE', {
+    request: { kind: 'MOVE', toSiteId, segments },
+    response: sim || (r && r.error) || r,
+  });
+  if (calc) console.log('[simulate] burn check', calc);
+  if (!sim) return { summary: `Could not simulate: ${humanizeOnlineOpError(r && r.error)}`, cls: 'bad' };
+  if (calc) {
+    const c = calc;
+    const head = sim.ok ? '✓ Would succeed' : '✗ Would fail';
+    return {
+      summary: `${head}: thrust ${c.finalThrust} · ${c.fuelStepsPerBurn}/burn · `
+        + `need ${c.fuelStepsNeeded} steps (${c.burnsNeeded} burn${c.burnsNeeded === 1 ? '' : 's'}) · `
+        + `ship has ${c.fuelStepsInShip} (can burn ${c.canBurn})`
+        + (sim.ok && sim.tankBefore != null ? ` · tank ${round2(sim.tankBefore)}→${round2(sim.tankAfter)}` : ''),
+      cls: sim.ok ? 'ok' : 'bad',
+    };
+  }
+  if (sim.ok) return { summary: `✓ ${sim.log || 'Move would succeed.'}`, cls: 'ok' };
+  return { summary: `✗ Would fail: ${humanizeOnlineOpError(sim.error, sim.detail)}`, cls: 'bad' };
+}
+
+// Wire a Simulate button + result paragraph to runPlannedMoveSimulation. Colour
+// is set inline (green ok / red bad) so it needs no per-modal CSS.
+function wireSimulate(btn, resEl) {
+  if (!btn) return;
+  let busy = false;
+  const show = (txt, ok) => {
+    if (!resEl) return;
+    resEl.hidden = false;
+    resEl.textContent = txt;
+    resEl.style.color = ok == null ? '' : (ok ? '#4ade80' : '#f87171');
+  };
+  btn.addEventListener('click', async () => {
+    if (busy) return;
+    busy = true; btn.disabled = true;
+    show('Simulating…', null);
+    try {
+      const res = await runPlannedMoveSimulation();
+      show(res.summary, res.cls === 'ok');
+    } finally { busy = false; btn.disabled = false; }
+  });
+}
+
 // Step the rocket through its planned route's "turn 1" segments
 // (one move per turn, capped at BURNS_PER_TURN burns of cumulative
 // dv). The remaining segments shift down a turn so the next move
@@ -9729,18 +10293,9 @@ async function moveRocket() {
     // Execute ONLY this turn's segments - a multi-turn Hohmann transfer's
     // later legs are NOT charged now. The server is sent these segments
     // (with the planner's Hohmann-aware burns) and charges just them.
-    const turn1Segs = _plannedRoute.filter((s) => (s.turn || 1) === 1);
-    if (!turn1Segs.length) { setStatus('Planned route has no current-turn segments.'); return false; }
-    const destPlannerId = turn1Segs[turn1Segs.length - 1].to;
-    const toSiteId = toServerId(_onlineMaps, destPlannerId);
-    if (!toSiteId) { _onlineToast('That destination is not on the map.', 'error'); return false; }
-    const segments = [];
-    for (const s of turn1Segs) {
-      const f = plannerIdToSlug(s.from);
-      const t = plannerIdToSlug(s.to);
-      if (!f || !t) { _onlineToast('That route is not on the map.', 'error'); return false; }
-      segments.push({ from: f, to: t, burns: Number(s.burns) || 0, turn: 1 });
-    }
+    const built = buildTurn1MoveOp();
+    if (built.error) { _onlineToast(built.error, 'error'); return false; }
+    const { toSiteId, segments, turn1Segs, destPlannerId } = built;
     // Hazards along THIS turn's segments only.
     const hz = routeHazards(turn1Segs);
     const radHz = hz.filter((h) => h.site.type === 'radhaz');
@@ -9785,12 +10340,23 @@ async function moveRocket() {
     if (radHz.length) {
       const thrStats = getActiveThrusterStats();
       const radThrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 0;
-      const choice = await radConfirmModal(radHz, radThrust, 0, radBypassThreshold());
+      let season = null;
+      try { season = getSeason(); } catch { season = null; }
+      const seasonBonus = season && season.name === 'red' ? 2 : 0;
+      const choice = await radConfirmModal(
+        radHz, radThrust, seasonBonus, radBypassThreshold(), radStackCards());
       if (choice === 'cancel' || choice == null) {
         setStatus('Move cancelled at the rad check.');
         return false;
       }
     }
+    // Burn debug, printed right before the submit so it sits next to the
+    // [api] log if the server rejects (insufficient_water etc).
+    logMoveBurn(
+      (curSite && curSite.name) || 'LEO',
+      (destSite && destSite.name) || toSiteId,
+      segments.reduce((b, s) => b + (Number(s.burns) || 0), 0),
+    );
     const ok = await submitOnlineOp({ kind: 'MOVE', toSiteId, hazardPay, segments });
     if (ok) {
       // Advance the local plan past this turn so a multi-turn route stays
@@ -9822,13 +10388,32 @@ async function moveRocket() {
   // per-segment `burns` (NOT a per-segment fallback of 1, which
   // wrongly counted every coast hop as a burn).
   const turn1Burns = turn1.reduce((s, x) => s + (Number(x.burns) || 0), 0);
+  {
+    // Burn debug (sandbox), printed before the water gate below.
+    const o = getRocketSite();
+    const dId = turn1.length ? turn1[turn1.length - 1].to : null;
+    const dS = dId && (_activeData.byId?.[dId] || _activeData.sites.find((s) => s.id === dId));
+    logMoveBurn((o && o.name) || 'LEO', (dS && dS.name) || dId || '?', turn1Burns);
+  }
+  // Fuel-step model (same as the server, via data/fuel-graph.js): a burn
+  // spends fuel STEPS; the move is affordable iff the wet chit can walk that
+  // many black connections before dry. The water it costs is the non-linear
+  // mass drop, so `fuelCost` here is the WATER spent (often fractional) - it
+  // still drives removeFuel + the undo refund below.
   const _thrFuel = getActiveThrusterStats();
-  const fuelCost = (getFuelConsumption() && _thrFuel && Number.isFinite(_thrFuel.fuel))
-    ? Math.ceil(_thrFuel.fuel * turn1Burns) : 0;
-  if (fuelCost > 0 && getTankWater() < fuelCost) {
-    const per = Math.round(_thrFuel.fuel * 100) / 100;
-    setStatus(`⛽ Not enough water: this turn's move needs <strong>${fuelCost}</strong> `
-      + `(${turn1Burns} burn${turn1Burns === 1 ? '' : 's'} this turn × ${per}), tank has <strong>${getTankWater()}</strong>. Refuel at LEO / a factory first.`);
+  const _fuelOn = getFuelConsumption();
+  const _perBurn = (_thrFuel && Number.isFinite(_thrFuel.fuel)) ? _thrFuel.fuel : 0;
+  const _totals = getStackTotals();
+  const _dryM = (_thrFuel && Number.isFinite(_thrFuel.dryMass)) ? _thrFuel.dryMass : _totals.dryMass;
+  const _wetM = (_thrFuel && Number.isFinite(_thrFuel.wetMass)) ? _thrFuel.wetMass : _totals.wetMass;
+  const _stepsNeeded = _fuelOn ? Math.ceil(_perBurn * turn1Burns) : 0;
+  const _stepsAvail = blackStepsBetween(_dryM, _wetM);
+  const _newWet = _stepsNeeded > 0 ? walkBlackDown(_wetM, _stepsNeeded) : _wetM;
+  const fuelCost = _stepsNeeded > 0 ? Math.round((_wetM - _newWet) * 1e6) / 1e6 : 0;  // water spent
+  if (_stepsNeeded > 0 && _stepsNeeded > _stepsAvail) {
+    setStatus(`⛽ Not enough fuel: this turn's move needs <strong>${_stepsNeeded}</strong> fuel step`
+      + `${_stepsNeeded === 1 ? '' : 's'} (${turn1Burns} burn${turn1Burns === 1 ? '' : 's'} × ${_perBurn} per burn), `
+      + `but only <strong>${_stepsAvail}</strong> remain from wet to dry. Refuel at LEO / a factory first.`);
     return false;
   }
   // Hazard pre-flight check. Two flavours along a route:
@@ -9950,13 +10535,18 @@ async function moveRocket() {
   let radThrust = 0;
   let radSeasonBonus = 0;
   if (radHazards.length) {
+    // FINAL thrust after every modifier (reactor thrustMod, weight class,
+    // afterburn, solar zone) - getActiveThrusterStats folds them all in, so
+    // the rad bypass + at-risk math uses the same number the triangle shows,
+    // not the raw card thrust.
     const thrStats = getActiveThrusterStats();
     radThrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 0;
     let season = null;
     try { season = getSeason(); } catch { season = null; }
     radSeasonBonus = season && season.name === 'red' ? 2 : 0;
     const threshold = radBypassThreshold();
-    const radChoice = await radConfirmModal(radHazards, radThrust, radSeasonBonus, threshold);
+    const radChoice = await radConfirmModal(
+      radHazards, radThrust, radSeasonBonus, threshold, radStackCards());
     if (radChoice === 'cancel' || radChoice == null) {
       if (hazardChoice === 'pay') {
         // Generic hazards charged aqua already; refund so the
@@ -10117,24 +10707,8 @@ async function runMoveQueue(ctx, resuming) {
       if (!radWillRoll) {
         // Bypass already logged upfront; just animate past.
       } else {
-        const stackCards = getRocketStack()
-          .map((slot) => {
-            const patent = PATENTS_BY_ID[slot.id];
-            if (patent) {
-              return { id: slot.id, name: patent.name, radHardness: patent.radHardness != null ? patent.radHardness : 0 };
-            }
-            // Crew name + rad-hardness live on the chosen FACE, not
-            // the physical card - resolve it so the row isn't blank.
-            const crew = CREW_BY_ID[slot.id];
-            if (crew) {
-              const f = crew.faces[slot.face === 'secondary' ? 'secondary' : 'primary'] || crew.faces.primary || {};
-              return { id: slot.id, name: f.name || crew.id, radHardness: f.radHardness != null ? f.radHardness : 0 };
-            }
-            return null;
-          })
-          .filter(Boolean);
         const { rolls: radRolls, decommission } = await radHardnessRollModal(
-          [hazard], stackCards, radThrust, radSeasonBonus,
+          [hazard], radStackCards(), radThrust, radSeasonBonus,
         );
         for (const r of radRolls) {
           logAction({
@@ -10690,6 +11264,11 @@ function openConfigModal() {
         <input type="range" class="cfg-zone-op" min="1" max="100" step="1" value="${op}"></label>
       <button type="button" class="modal-btn cfg-zone-reset">↺ Reset to default</button>
     </div>
+    <div class="config-section">
+      <div class="config-section-title">Developer</div>
+      <label class="dbg-check"><input type="checkbox" class="cfg-eruda" ${erudaEnabled() ? 'checked' : ''}><span>On-screen debug console</span></label>
+      <p class="config-hint muted">Opens a console on the device (logs, network, storage) so you can read failed server calls - each one prints the request sent and the server's response. Loaded from a CDN when on; persists across reloads.</p>
+    </div>
   `;
   overlay.appendChild(panel);
   panel.querySelector('.modal-x').addEventListener('click', close);
@@ -10736,6 +11315,24 @@ function openConfigModal() {
     opEl.value = 10;
     opValEl.textContent = '10%';
   });
+  // On-screen debug console (Eruda). Loads from a CDN on enable; revert the
+  // checkbox + tell the player if the load is blocked (offline / strict net).
+  const erudaCb = panel.querySelector('.cfg-eruda');
+  if (erudaCb) {
+    erudaCb.onchange = async () => {
+      const want = erudaCb.checked;
+      erudaCb.disabled = true;
+      try {
+        await setEruda(want);
+        setStatus(want ? 'Debug console on - failed server calls now print here.' : 'Debug console off.');
+      } catch {
+        erudaCb.checked = false;
+        setStatus('Could not load the debug console (network blocked?).');
+      } finally {
+        erudaCb.disabled = false;
+      }
+    };
+  }
   mountOverlay(overlay);
 }
 
@@ -10779,7 +11376,7 @@ function openRouteOptionsModal(onClose) {
           ${_routePriority === 'turns' ? 'checked' : ''}>
         <div>
           <strong>Fewer turns first</strong>
-          <em>Default. Adjacent nodes go in 1 hop even when a longer
+          <em>Adjacent nodes go in 1 hop even when a longer
           Hohmann path would be free in burns.</em>
         </div>
       </label>
@@ -10788,8 +11385,8 @@ function openRouteOptionsModal(onClose) {
           ${_routePriority === 'burns' ? 'checked' : ''}>
         <div>
           <strong>Fewer burns first</strong>
-          <em>Save water by riding free Hohmann transfers, even if it
-          costs extra turn-ends to coast.</em>
+          <em>Default. Save water by riding free Hohmann transfers, even
+          if it costs extra turn-ends to coast.</em>
         </div>
       </label>
     </div>
@@ -10803,6 +11400,17 @@ function openRouteOptionsModal(onClose) {
         thrust (${thrust}). Tap Move when you're ready to fly.
       </p>
     </div>
+    ${_online ? `
+    <div class="route-options-debug">
+      <button type="button" class="popup-btn route-options-sim-btn">
+        🧪 Simulate planned move (debug)
+      </button>
+      <p class="muted route-options-manual-help">
+        Dry-runs this turn's planned move and reports the fuel-step cost
+        without spending anything. Plan a route first.
+      </p>
+      <p class="route-options-sim-result" hidden></p>
+    </div>` : ''}
     ${(!_online && currentSandboxId()) ? `
     <div class="route-options-danger">
       <button type="button" class="popup-btn danger route-options-abandon-btn">
@@ -10835,6 +11443,8 @@ function openRouteOptionsModal(onClose) {
     if (_renderer) _renderer.setSitePopup(null);
     enterManualMoveMode();
   });
+  wireSimulate(panel.querySelector('.route-options-sim-btn'),
+    panel.querySelector('.route-options-sim-result'));
   const abandonBtn = panel.querySelector('.route-options-abandon-btn');
   if (abandonBtn) {
     abandonBtn.addEventListener('click', async () => {
@@ -10851,7 +11461,7 @@ function openRouteOptionsModal(onClose) {
       try {
         const cur = new URL(window.location.href);
         const v = cur.searchParams.get('v');
-        const url = new URL('../../lobby', import.meta.url).pathname
+        const url = appBase() + 'lobby'
           + (v ? '?v=' + encodeURIComponent(v) : '');
         window.location.assign(url);
       } catch { window.location.assign('../../lobby'); }
@@ -11415,15 +12025,46 @@ function planRocketRouteTo(destSite) {
   const assistNote = (liftGate.assist || landGate.assist)
     ? ` <em class="muted">(🏭 factory assist${(liftGate.needsRoll || landGate.needsRoll) ? ' - hazard roll on the move' : ' - free, colony present'})</em>`
     : '';
+  const metricPriority = routeMetricPriority();
   const result = planRoute(_activeData, origin.id, destSite.id, {
     thrust,
-    metricPriority: routeMetricPriority(),
+    metricPriority,
   });
   if (!result || !result.segments.length) {
-    setStatus(
-      `No rocket route from <strong>${esc(origin.name)}</strong> to `
-      + `<strong>${esc(destSite.name)}</strong>.`
-    );
+    // Every map location is reachable from LEO (the route graph has no
+    // disjoint nodes), so a genuine "no path" is almost impossible.
+    // When the planner still comes back empty it's nearly always that
+    // one endpoint isn't a recognised graph node (a stale board, or a
+    // rocket position that didn't resync from the server). Dump the
+    // specifics to the console so the failure is explainable, then give
+    // the player the actual reason instead of a blanket "no route".
+    const g = _activeData;
+    const inGraph = (id) => !!(g && g.byId && g.byId[id]);
+    const degree = (id) =>
+      (g && g.neighbors && g.neighbors.get(id)) ? g.neighbors.get(id).size : 0;
+    const diag = {
+      origin: { id: origin.id, name: origin.name, inGraph: inGraph(origin.id), neighbors: degree(origin.id) },
+      dest: { id: destSite.id, name: destSite.name, inGraph: inGraph(destSite.id), neighbors: degree(destSite.id) },
+      thrust,
+      metricPriority,
+      resultNull: !result,
+      segments: result ? result.segments.length : 0,
+      online: _online,
+      graph: g
+        ? { sites: Array.isArray(g.sites) ? g.sites.length : null, hasNeighbors: !!g.neighbors, hasEdgeLabels: !!g.edgeLabels }
+        : null,
+    };
+    console.warn('[route] planRoute returned no path', diag);
+    let msg;
+    if (!diag.origin.inGraph) {
+      msg = `🚀 The rocket's position isn't on the map right now. Reload the page, then plan the route again.`;
+    } else if (!diag.dest.inGraph) {
+      msg = `🛸 Couldn't find <strong>${esc(destSite.name)}</strong> on the map. Reload the page, then try again.`;
+    } else {
+      msg = `No route found from <strong>${esc(origin.name)}</strong> to `
+        + `<strong>${esc(destSite.name)}</strong> at thrust <strong>${thrust}</strong>.`;
+    }
+    setStatus(msg);
     _renderer.setRoute(null);
     _renderer.setRouteEndpoints(origin.id, destSite.id);
     return false;
@@ -11445,7 +12086,85 @@ function planRocketRouteTo(destSite) {
     + `<strong>${turns}</strong> turn${turns === 1 ? '' : 's'} `
     + `(thrust ${thrust}).${assistNote}`
   );
+  logRouteBudget(origin, destSite, result, thrStats, thrust);
   return true;
+}
+
+// Console breakdown of how a planned route reaches its burn + fuel
+// verdict. Console-only (players never open it): it spells out the gross
+// burns, the flyby credit applied, the net total, and the tank's burn
+// capacity BOTH ways - the FT-step model (TOTAL CAN BURN) and the actual
+// water gate the move charges - so any disagreement between the two is
+// visible at a glance. Wrapped in try/catch: logging must never break a
+// plan.
+function logRouteBudget(origin, destSite, result, thrStats, thrust) {
+  try {
+    const fpb     = thrStats && Number.isFinite(thrStats.fuel) ? thrStats.fuel : null;          // FTs per burn
+    const ftTotal = thrStats && Number.isFinite(thrStats.fuelSteps) ? thrStats.fuelSteps : null;
+    const canBurn = thrStats && Number.isFinite(thrStats.burnsAvailable) ? thrStats.burnsAvailable : null;
+    const wet     = thrStats && Number.isFinite(thrStats.wetMass) ? thrStats.wetMass : null;
+    const dry     = thrStats && Number.isFinite(thrStats.dryMass) ? thrStats.dryMass : null;
+    const tank    = getTankWater();
+    const gross   = Number.isFinite(result.grossBurns) ? result.grossBurns : result.totalBurns;
+    const flyby   = Number.isFinite(result.flybyBonus) ? result.flybyBonus : 0;
+    const net     = result.totalBurns;
+    // Water the move gate would charge for the WHOLE journey (it actually
+    // charges per turn; this is the all-turns figure for the verdict).
+    const fuelOn  = getFuelConsumption();
+    const water   = (fuelOn && fpb != null) ? Math.ceil(fpb * net) : 0;
+    console.group(`[route] ${origin.name} → ${destSite.name} (thrust ${thrust})`);
+    console.log(`BURNS:        ${gross}`);
+    console.log(`FLY BY BONUS: +${flyby}`);
+    console.log(`TOTAL Burns:  ${net}   (over ${result.totalTurns} turn${result.totalTurns === 1 ? '' : 's'})`);
+    console.log(`Fuel (wet mass): ${wet}`);
+    console.log(`dry Mass:        ${dry}`);
+    console.log(`Number of FTs total: ${ftTotal}`);
+    console.log(`FTs per BURN:    ${fpb}`);
+    console.log(`TOTAL CAN BURN:  ${canBurn}`);
+    console.log(`tank water: ${tank}   whole-route water cost: ${water}${fuelOn ? '' : ' (fuel-spend off)'}`);
+    const okFt    = canBurn == null ? null : net <= canBurn;
+    const okWater = !fuelOn ? true : tank >= water;
+    console.log(`-> enough fuel (FT-step model): ${okFt == null ? 'n/a' : (okFt ? 'YES' : 'NO')}  (need ${net}, can burn ${canBurn})`);
+    console.log(`-> enough water (move gate):    ${okWater ? 'YES' : 'NO'}  (need ${water}, tank ${tank})`);
+    console.groupEnd();
+  } catch { /* logging must never break planning */ }
+}
+
+// Burn breakdown printed AT MOVE TIME (not just plan time), so the console
+// shows the fuel math right next to the move - and right above the [api] log
+// if the server rejects it (insufficient_water etc.). `turnBurns` is the sum
+// of THIS turn's segment burns actually being submitted. Console-only.
+function logMoveBurn(originName, destName, turnBurns) {
+  try {
+    const thr = getActiveThrusterStats();
+    const totals = getStackTotals();
+    const fpb = thr && Number.isFinite(thr.fuel) ? thr.fuel : null;          // fuel steps per burn
+    const dry = thr && Number.isFinite(thr.dryMass) ? thr.dryMass : totals.dryMass;
+    const wet = thr && Number.isFinite(thr.wetMass) ? thr.wetMass : totals.wetMass;
+    const thrust = thr && Number.isFinite(thr.thrust) ? thr.thrust : null;
+    const tank = getTankWater();
+    const fuelOn = getFuelConsumption();
+    const ftNeeded = (fuelOn && fpb != null) ? Math.ceil(fpb * turnBurns) : 0;   // fuel steps this turn spends
+    const ftInShip = blackStepsBetween(dry, wet);                               // capacity = black connections wet->dry
+    const newWet = ftNeeded > 0 ? walkBlackDown(wet, ftNeeded) : wet;
+    const waterSpent = Math.round((wet - newWet) * 1e6) / 1e6;                  // non-linear mass drop of those steps
+    // Same field set the server returns (moveCalc) so client + server logs line up.
+    console.log(`[move] ${originName} → ${destName}`, {
+      finalThrust: thrust,
+      fuelStepsPerBurn: fpb,
+      dryMass: dry,
+      wetMass: wet,
+      tank,
+      fuelStepsInShip: ftInShip,          // blackStepsBetween(dry, wet)
+      canBurn: (fpb && fpb > 0) ? Math.floor(ftInShip / fpb) : null,
+      burnsNeeded: turnBurns,
+      fuelStepsNeeded: ftNeeded,
+      enough: ftInShip >= ftNeeded,       // the rule that throws insufficient_water
+      waterSpent,                         // tank goes from `tank` to `tank - waterSpent` (often fractional)
+      tankAfter: Math.round((tank - waterSpent) * 1e6) / 1e6,
+      fuelSpendOn: fuelOn,
+    });
+  } catch { /* logging must never break a move */ }
 }
 
 function clearRoute() {
@@ -11995,16 +12714,21 @@ function renderPatents() {
     if (inHand)   el.classList.add('in-hand');
     if (inRocket) el.classList.add('in-rocket');
     if (inHand || inRocket) return el;   // placeholder - not interactive
-    // Expansion-only cards (GW thrusters today) preview but
-    // can't be played. Mark + return early so the drag /
-    // tap-to-add handlers don't bind. A CSS overlay tells the
-    // player why.
+    // Expansion-only cards (GW thrusters today) can't be played
+    // yet, but they're fully inspectable: tap opens the read-only
+    // card view and the Flip button shows both faces up close. Only
+    // the drag / tap-to-ADD handlers are skipped (the engine refuses
+    // to stack them); a CSS badge signals the "coming soon" intent.
     if (card.type === 'gw-thruster') {
       el.classList.add('is-expansion');
       const badge = document.createElement('div');
       badge.className = 'card-expansion-badge';
       badge.textContent = 'Coming soon';
       el.appendChild(badge);
+      el.addEventListener('click', (ev) => {
+        if (ev.target.closest('.card-flip, .card-rotate')) return;
+        openDeckTapModal(card, asKind, { inspectOnly: true });
+      });
       return el;
     }
 
@@ -12490,14 +13214,22 @@ function paintMissionLog() {
 // rerun for the active pane).
 // Per-op-kind glyph for the log icon column. Anything missing falls
 // back to a neutral bullet so a new op kind doesn't disappear.
+// Every server op kind maps to a glyph so the mission log is scannable.
+// CLAUDE.md "Mission log captures every server mutation": a missing entry
+// falls back to a bare '·', so add new ops here when you add them.
 const MP_LOG_ICONS = {
   AUCTION_START: '🎯', AUCTION_BID: '💰', AUCTION_PASS: '🚫',
   AUCTION_RESET: '↺', AUCTION_SELL: '✅',
-  PICK_CREW: '🧑‍🚀',
+  PICK_CREW: '🧑‍🚀', SET_FIRST_PLAYER: '🥇',
   END_TURN: '⏭', MOVE: '🛸', BURN: '🔥',
   SET_ACTIVE_THRUSTER: '🔥', SET_ACTIVE_PROSPECTOR: '⛏',
-  BUILD_ROCKET: '🚀', PROSPECT: '⛏',
+  BUILD_ROCKET: '🚀', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',
   INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧',
+  ET_PRODUCE: '🏭', SITE_REFUEL: '💧',
+  INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
+  REFUEL: '💧', CASH_WATER: '💎', DISCARD: '🗑',
+  TRANSFER: '🔀', TRANSFER_FUEL: '💧',
+  CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑',
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',
   UNDO: '↩', REDO: '↪',
 };

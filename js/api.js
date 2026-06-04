@@ -41,9 +41,25 @@ async function call(method, path, { body, token, signal } = {}) {
   let data = null;
   try { data = await res.json(); } catch { /* empty body is fine */ }
   if (!res.ok) {
-    return { ok: false, error: (data && data.error) || 'http_' + res.status, status: res.status, data };
+    const error = (data && data.error) || 'http_' + res.status;
+    logApiError(method, path, body, res.status, data, error);
+    return { ok: false, error, status: res.status, data };
   }
   return { ok: true, data, status: res.status };
+}
+
+// Surface a failed server call (403 / 409 / any 4xx-5xx) to the console so a
+// dev - or the on-device Eruda console (Config -> Developer) - can read the
+// request that was sent and the server's response. The auth token rides in
+// the header, never the body, so logging the body leaks nothing. Wrapped so
+// a missing console never breaks the call.
+function logApiError(method, path, body, status, data, error) {
+  try {
+    console.warn(
+      `[api] ${method} ${path} -> ${status} (${error})`,
+      { request: body == null ? null : body, status, response: data == null ? null : data },
+    );
+  } catch { /* no console available */ }
 }
 
 // ----- Health + profile -----
@@ -192,8 +208,10 @@ export async function getGameOps(id, { after } = {}, token) {
 
 // Manual turn nudge. opts: { targetId } to nudge one player on the
 // clock, { all: true } to nudge everyone on the clock (auction rounds),
-// or {} for the primary actor. Server enforces the per-target cooldown
-// and returns { ok, nudged:[{targetId,targetName,sentAt}], skipped:[...] }.
+// { waiting: true } to nudge only the players still owing a response
+// (in an auction: the bidders who have not bid/passed yet), or {} for
+// the primary actor. Server enforces the per-target cooldown and returns
+// { ok, nudged:[{targetId,targetName,sentAt}], skipped:[...] }.
 export async function remindTurn(id, token, opts = {}) {
   return call('POST', `/games/${id}/remind`, { body: opts, token });
 }

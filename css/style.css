@@ -135,7 +135,10 @@ code {
   font-size: 17px;
   line-height: 1;
   cursor: pointer;
-  backdrop-filter: blur(4px);
+  /* No backdrop-filter here: the FAB is fixed over the scrolling lobby (and
+     the game), so a blur re-computes every scroll frame - that is the lobby
+     scroll-lag cause. The solid --panel-2 background + border + shadow define
+     the button fine without it. */
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
   transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
@@ -805,7 +808,8 @@ body.in-lobby .main-menu-fab { display: none; }
   .map-search-backdrop,
   .card-modal-overlay,
   .game-auction,
-  .mp-auction-overlay {
+  .mp-auction-overlay,
+  .sandbox-hand {
     backdrop-filter: none;
   }
 }
