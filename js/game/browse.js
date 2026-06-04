@@ -4334,8 +4334,8 @@ const STORAGE_ROUTE_PRIORITY = 'hf-sandbox-route-priority';
 let _routePriority = (() => {
   try {
     const s = localStorage.getItem(STORAGE_ROUTE_PRIORITY);
-    return s === 'burns' || s === 'turns' ? s : 'turns';
-  } catch { return 'turns'; }
+    return s === 'burns' || s === 'turns' ? s : 'burns';
+  } catch { return 'burns'; }
 })();
 function setRoutePriority(mode) {
   if (mode !== 'turns' && mode !== 'burns') return;
@@ -11343,7 +11343,7 @@ function openRouteOptionsModal(onClose) {
           ${_routePriority === 'turns' ? 'checked' : ''}>
         <div>
           <strong>Fewer turns first</strong>
-          <em>Default. Adjacent nodes go in 1 hop even when a longer
+          <em>Adjacent nodes go in 1 hop even when a longer
           Hohmann path would be free in burns.</em>
         </div>
       </label>
@@ -11352,8 +11352,8 @@ function openRouteOptionsModal(onClose) {
           ${_routePriority === 'burns' ? 'checked' : ''}>
         <div>
           <strong>Fewer burns first</strong>
-          <em>Save water by riding free Hohmann transfers, even if it
-          costs extra turn-ends to coast.</em>
+          <em>Default. Save water by riding free Hohmann transfers, even
+          if it costs extra turn-ends to coast.</em>
         </div>
       </label>
     </div>
