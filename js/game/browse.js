@@ -2505,6 +2505,12 @@ function humanizeOnlineOpError(code, detail) {
     no_outpost: 'That outpost does not exist.',
     outpost_not_empty: 'Empty the outpost first (move its cards out), then decommission it.',
     outpost_has_water: 'Pump the water out first - only a sub-1 remainder can be scrapped.',
+    not_at_site: 'Park the rocket at the site first.',
+    not_claimed: 'Prospect and claim this site before you can industrialize it.',
+    already_industrialized: 'This site already has a factory.',
+    cannot_industrialize: 'Industrialize needs a refinery + a robonaut (with their supports) in the stack.',
+    no_factory: 'You need your own factory here to ET Produce.',
+    bad_outpost: 'Pick a valid outpost slot (A-D).',
     crew_no_decommission: 'Crew can\'t be decommissioned here - that happens via an event.',
     bad_decommission: 'Pick a card to decommission.',
     nothing_decommissioned: 'Nothing decommissioned (crew can\'t return to the hand).',
@@ -7722,6 +7728,14 @@ function doEtProduce(site, factory, options, outpostsAtSite, freeSlots) {
     freeSlots,
     onCommit: ({ cardId, letter, isNewOutpost }) => {
       if (!cardId || !letter) return;
+      // Online: the server moves the hand card into the (maybe-new) outpost
+      // Black-Side-up; the snapshot repaints.
+      if (_online) {
+        const sid = toServerId(_onlineMaps, site.id);
+        if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
+        submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, letter, isNewOutpost });
+        return;
+      }
       if (!requireOp('ET Production')) return;
       // If we need to create the outpost first, do that BEFORE
       // moving cards - otherwise addCardToOutpost will reject.
@@ -7800,6 +7814,15 @@ function doIndustrialize(site, stack, options) {
     options,
     onCommit: (opt) => {
       if (!opt) return;
+      // Online: the server flips the claim to a factory + decommissions the
+      // chain to hand; the snapshot repaints. Send the chosen chain ids.
+      if (_online) {
+        const sid = toServerId(_onlineMaps, site.id);
+        if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
+        const cardIds = opt.chainIndices.map((idx) => stack[idx] && stack[idx].id).filter(Boolean);
+        submitOnlineOp({ kind: 'INDUSTRIALIZE', siteId: sid, cardIds });
+        return;
+      }
       if (!requireOp('Industrialize')) return;
       // Remove chain cards in reverse index order so earlier
       // indices stay valid as we splice. Radiators were already

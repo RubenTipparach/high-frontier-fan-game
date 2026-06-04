@@ -194,15 +194,23 @@ function advanceClock(state) {
     state.lastEvent = { turn: state.turn, round: state.round, dieRoll };
   }
 
-  // Income: each hydrated factory pays its site's hydration in water to
-  // its owner. No factories exist until INDUSTRIALIZE lands, so this is
-  // a no-op today, but it keeps the round boundary correct.
+  // Income: each hydrated factory pays its site's hydration in water to its
+  // owner's tank, clamped to the wet-mass cap (excess is lost). Returns a
+  // per-owner summary so END_TURN can surface it in the log.
+  const income = [];
   for (const [siteId, fac] of Object.entries(state.factories)) {
     const site = siteById(siteId);
     if (!site || !site.hydration) continue;
     const owner = state.players.find((p) => p.profileId === fac.ownerId);
-    if (owner) owner.rocket.tank += site.hydration;
+    if (!owner) continue;
+    const dry = owner.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+    const cap = Math.max(0, TANK_MAX - dry);
+    const before = Number(owner.rocket.tank) || 0;
+    const after = round6(Math.min(cap, before + site.hydration));
+    owner.rocket.tank = after;
+    if (after > before) income.push(`${owner.name} +${round6(after - before)} water`);
   }
+  return { income };
 }
 
 // ----- hazard resolution (mirror of the sandbox move queue) -----
@@ -1086,6 +1094,93 @@ function applyProspectReroll(state, op, player) {
   };
 }
 
+// Industrialize (rulebook I7). Flip the player's claim at the parked site
+// into a factory. The client (industrialize.js#findIndustrializeOptions) is the
+// source of truth for the valid refinery + robonaut + support chain; the server
+// trusts the chosen `cardIds` (like it trusts routes) and validates the
+// essentials: parked at the site, owns the claim, no factory yet, an op to
+// spend, and the chain is actually in the stack and includes a refinery + a
+// robonaut. The chain is decommissioned back to the player's HAND (variant
+// rule, industrialize.md). The factory inherits the site's spectral type.
+function applyIndustrialize(state, op, player) {
+  const siteId = String(op.siteId || '');
+  const site = siteById(siteId);
+  if (!site) return fail('unknown_site');
+  if (player.rocket.siteId !== siteId) return fail('not_at_site');
+  const disc = state.discs[siteId];
+  if (!disc || disc.outcome !== 'success' || disc.ownerId !== player.profileId) return fail('not_claimed');
+  if (state.factories[siteId]) return fail('already_industrialized');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];
+  // Every id must be a non-crew card in the stack; the set must include a
+  // refinery + a robonaut (the build needs both).
+  let hasRefinery = false, hasRobonaut = false;
+  for (const id of ids) {
+    const slot = player.rocket.stack.find((s) => s.id === id && s.kind !== 'crew');
+    if (!slot) return fail('not_in_stack');
+    const c = PATENTS_BY_ID[id];
+    if (c && c.type === 'refinery') hasRefinery = true;
+    if (c && c.type === 'robonaut') hasRobonaut = true;
+  }
+  if (!hasRefinery || !hasRobonaut) return fail('cannot_industrialize');
+  // Decommission the chain to the hand.
+  for (const id of ids) {
+    const idx = player.rocket.stack.findIndex((s) => s.id === id);
+    if (idx >= 0) {
+      player.rocket.stack.splice(idx, 1);
+      player.hand.push(id);
+    }
+  }
+  if (player.rocket.activeThrusterId && !player.rocket.stack.some((s) => s.id === player.rocket.activeThrusterId)) {
+    player.rocket.activeThrusterId = null;
+  }
+  if (player.rocket.activeProspectorId && !player.rocket.stack.some((s) => s.id === player.rocket.activeProspectorId)) {
+    player.rocket.activeProspectorId = null;
+  }
+  const spectral = site.spectralType || 'C';
+  state.factories[siteId] = { ownerId: player.profileId, spectralType: spectral };
+  player.opsRemaining -= 1;
+  return {
+    ok: true, state,
+    log: `${player.name} industrialized ${site.name} (spectral ${spectral}); decommissioned ${ids.length} card${ids.length === 1 ? '' : 's'} to hand.`,
+  };
+}
+
+// ET Produce (rulebook): a factory turns a hand card into an installed
+// (Black-Side-up) card at a colocated Outpost. op = { siteId, cardId, letter,
+// isNewOutpost }. Mirrors browse.js#doEtProduce: parked at the player's own
+// factory, the card leaves the hand and lands face='secondary' in the outpost
+// (created at the site if new). Costs an op.
+function applyEtProduce(state, op, player) {
+  const siteId = String(op.siteId || '');
+  const site = siteById(siteId);
+  if (!site) return fail('unknown_site');
+  if (player.rocket.siteId !== siteId) return fail('not_at_site');
+  const fac = state.factories[siteId];
+  if (!fac || fac.ownerId !== player.profileId) return fail('no_factory');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  const cardId = String(op.cardId || '');
+  const hIdx = player.hand.indexOf(cardId);
+  if (hIdx < 0) return fail('not_in_hand');
+  const letter = String(op.letter || '');
+  if (!OUTPOST_LETTERS.includes(letter)) return fail('bad_outpost');
+  player.outposts = player.outposts || {};
+  let outpost = player.outposts[letter];
+  if (!outpost) {
+    outpost = player.outposts[letter] = { letter, siteId, cards: [], tank: 0 };
+  } else if (outpost.siteId !== siteId) {
+    return fail('not_colocated');
+  }
+  player.hand.splice(hIdx, 1);
+  outpost.cards.push({ id: cardId, kind: 'patent', face: 'secondary' });
+  player.opsRemaining -= 1;
+  const card = PATENTS_BY_ID[cardId];
+  return {
+    ok: true, state,
+    log: `${player.name} ET-produced ${card ? card.name : cardId} (Black-Side) at ${site.name} into Outpost ${letter}.`,
+  };
+}
+
 // Ops that change the game and ride the per-turn undo stack. Each is a
 // pure (state, op, player) -> { ok, state, log } transform; the
 // dispatcher (not the handler) maintains turnActions / turnRedo.
@@ -1108,6 +1203,8 @@ const FUNCTIONAL = {
   SET_ACTIVE_PROSPECTOR: applySetActiveProspector,
   PROSPECT: applyProspect,
   PROSPECT_REROLL: applyProspectReroll,
+  INDUSTRIALIZE: applyIndustrialize,
+  ET_PRODUCE: applyEtProduce,
 };
 
 function pickPayload(op) {
@@ -1217,8 +1314,11 @@ function applyEndTurn(state, _op, player) {
   // Lap complete: advance the Sunspot Cube one slot (income + event
   // roll, and the round counter ticks on a full 12-slot cycle).
   const prevRound = state.round;
-  advanceClock(state);
+  const clk = advanceClock(state);
+  const incomeNote = (clk && clk.income && clk.income.length)
+    ? ` Factory income: ${clk.income.join(', ')}.` : '';
   const roundEnded = state.round > prevRound;
+  log += incomeNote;
 
   if (!roundEnded) {
     // Still inside the round: the cube moved a slot, next lap reopens
