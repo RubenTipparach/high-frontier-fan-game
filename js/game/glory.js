@@ -36,28 +36,16 @@
 //   onChange(cb)                        - unsubscribe
 
 import { isOnline } from './online-mode.js';
+import { ZONE_CHIT_VPS } from '../../data/zone-chits.js';
 
 const STORAGE_CHITS   = 'hf-glory-chits';
 const STORAGE_CLAIMED = 'hf-glory-claimed';
 const STORAGE_VISITED = 'hf-glory-visited';
 const STORAGE_VPS     = 'hf-glory-vps';
 
-// Two-sided VP value of each zone's chit, mirroring the published
-// HF4 Victory Point Tracker ("GLORY & HEROISM CHITS"). front =
-// crew turned into a colony OR died; back = crew returned home
-// alive (the chit is flipped for the bigger payout). Inner zones
-// pay little; the outer system (Uranus / Neptune) pays the most.
-export const ZONE_CHIT_VPS = {
-  'Mercury': { front: 1, back: 3 },
-  'Venus':   { front: 1, back: 2 },
-  'Earth':   { front: 1, back: 2 },
-  'Mars':    { front: 1, back: 2 },
-  'Ceres':   { front: 1, back: 3 },
-  'Jupiter': { front: 1, back: 3 },
-  'Saturn':  { front: 1, back: 4 },
-  'Uranus':  { front: 1, back: 5 },
-  'Neptune': { front: 1, back: 6 },
-};
+// Two-sided VP value of each zone's chit now lives in the shared data table
+// (data/zone-chits.js) so the server scores chits with the same numbers.
+export { ZONE_CHIT_VPS };
 
 let _chits = (() => {
   try {

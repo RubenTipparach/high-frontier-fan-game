@@ -38,6 +38,7 @@ import { blackStepsBetween, walkBlackDown } from '../../data/fuel-graph.js';
 // not the printed base value.
 import { weightClassForMass } from '../../data/net-thrust-track.js';
 import { SOLAR_ZONE_INFO } from '../../data/sites.js';
+import { ZONE_CHIT_VPS } from '../../data/zone-chits.js';
 // Movement + metadata both come from the planner graph (the vendor
 // mission-planner data the client also uses). siteBySlug layers the
 // curated data/sites.js metadata onto a planner slug, so there is ONE
@@ -696,6 +697,27 @@ function applyMove(state, op, player) {
   // the chit stays on the site for a later LOAD_GLORY (Claim glory chit).
   const chit = (destSite && op.pickupChit !== false)
     ? maybeAwardGlory(player, destSite, state.turn) : null;
+  // Arriving home (LEO == null siteId): a crew hauls its carried glory chits
+  // back to score them. The server doesn't track which crew carried which chit,
+  // so all carried chits score together - BACK (flipped, the big value) when a
+  // crew is aboard to have brought them home alive, FRONT otherwise. Resolved
+  // chits move to glory.claimed and add to glory.vps. Mirrors the sandbox
+  // cashHomeArrival; until now MP never scored chits at home.
+  let homeScored = 0;
+  let homeVps = 0;
+  let homeSide = null;
+  if (player.rocket.siteId === null && (player.glory.chits || []).length) {
+    homeSide = player.rocket.stack.some(isCrewSlot) ? 'back' : 'front';
+    player.glory.claimed = player.glory.claimed || [];
+    for (const c of player.glory.chits) {
+      const vp = ((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[homeSide]) | 0;
+      player.glory.claimed.push({ zone: c.zone, side: homeSide, vp, turn: state.turn });
+      player.glory.vps = (player.glory.vps | 0) + vp;
+      homeScored += 1;
+      homeVps += vp;
+    }
+    player.glory.chits = [];
+  }
   player.rocket.lastMove = {
     rolls, destroyed: false, decommissioned,
     at: dest, nonce: nextMoveNonce(player),
@@ -712,6 +734,10 @@ function applyMove(state, op, player) {
   else if (nItems) log += ` Rolled through ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
   if (decommissioned.length) log += ` Radiation decommissioned ${decommissioned.length} card${decommissioned.length === 1 ? '' : 's'}.`;
   if (chit) log += ` First into the ${chit.zone} zone (+glory chit).`;
+  if (homeScored) {
+    log += ` Scored ${homeScored} glory chit${homeScored === 1 ? '' : 's'}`
+      + ` ${homeSide === 'back' ? 'brought home (back)' : '(front)'} for ${homeVps} VP.`;
+  }
   return { ok: true, state, log, calc: moveCalc };
 }
 

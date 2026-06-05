@@ -10659,7 +10659,12 @@ async function moveRocket() {
     // on the site for a later Claim. LEO (the home zone) never offers one.
     let pickupChit = true;
     const arrZone = destSite && destSite.solarZone;
-    if (arrZone && arrZone !== 'Earth' && !isZoneVisited(arrZone) && stackHasCrew()) {
+    // Offer the zone's glory chit only when the rocket actually LANDS at a real
+    // site (not a coasting waypoint) WITH a crew aboard, and isn't already
+    // carrying that zone's chit (so re-landing in the zone doesn't re-prompt).
+    const landingHere = destSite && !destSite.isWaypoint && destSite.isLandable !== false;
+    if (landingHere && arrZone && arrZone !== 'Earth' && !isZoneVisited(arrZone)
+        && !getChits().some((c) => c.zone === arrZone) && stackHasCrew()) {
       pickupChit = await promptGloryPickup((destSite && destSite.name) || toSiteId, arrZone, firstCrewId());
     }
     const ok = await submitOnlineOp({ kind: 'MOVE', toSiteId, hazardPay, segments, pickupChit });
@@ -10915,7 +10920,12 @@ async function moveRocket() {
   // return to LEO any carried chits resolve: BACK (flipped) if a crew
   // brought them home, FRONT (face-up) if no crew is aboard.
   const crewAboard = stackHasCrew();
-  const willAwardChit = arrivedZone && arrivedZone !== 'Earth' && !isZoneVisited(arrivedZone) && crewAboard;
+  // Pick up the zone's glory chit only when the rocket LANDS at a real site
+  // (not a coasting waypoint) with a crew aboard, and isn't already carrying
+  // that zone's chit (so coasting through / re-landing doesn't re-prompt).
+  const landedHere = arrived && !arrived.isWaypoint && arrived.isLandable !== false;
+  const willAwardChit = landedHere && arrivedZone && arrivedZone !== 'Earth'
+    && !isZoneVisited(arrivedZone) && !getChits().some((c) => c.zone === arrivedZone) && crewAboard;
   const willCashIn = isLeoSite(arrived) && getChits().length > 0;
   const chitsToCash = willCashIn ? getChits() : [];
   _moveSnapshot = {
