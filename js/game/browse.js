@@ -2502,6 +2502,11 @@ function humanizeOnlineOpError(code, detail) {
     tank_full: 'The rocket tank is full.',
     no_water: 'No water in the tank to cash out.',
     unknown_card: 'That card does not exist.',
+    already_in_hand: 'That card is already in your hand.',
+    on_rocket: 'That card is on your rocket - pull it back first.',
+    crew_card: 'Crew is chosen at New game, not taken from the library.',
+    expansion_card: 'That is an expansion card (coming soon).',
+    cannot_pay: 'Not enough aqua for that card.',
     crew_already_picked: 'You have already picked your starting crew.',
     crew_draft_closed: 'Crew picks are locked - the game has started.',
     awaiting_crew_picks: 'Waiting for every player to pick a starting crew.',
@@ -2750,6 +2755,18 @@ function wireHandStrip() {
       host.classList.add('flash-error');
       setTimeout(() => host.classList.remove('flash-error'), 700);
       setStatus('🃏 Card Market mode: drag-to-hand is disabled. Open the 🛒 Cart tab or use Research Auction at LEO.');
+      return;
+    }
+    // Online (solo, Free Library): the server owns the hand, so route the pick
+    // through BUY_CARD (free action, 0 cost) instead of a local-only add that
+    // the next snapshot would wipe. The snapshot hydrates the hand.
+    if (_online) {
+      if (isInHand(card.id)) {
+        host.classList.add('flash-error');
+        setTimeout(() => host.classList.remove('flash-error'), 700);
+        return;
+      }
+      submitOnlineOp({ kind: 'BUY_CARD', cardId: card.id, free: true });
       return;
     }
     const r = addToHand(card);
@@ -8838,12 +8855,13 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     foamRect.setAttribute('y',  String(waterTopY - 3));
     foamRect.setAttribute('height', String(Math.min(6, h)));
     nowReadout.textContent = fmtWater(clamped);
-    // Keep the TANK a fixed size: shrink the NUMBER's font for long (fractional)
-    // values instead of letting a wide readout push the tank narrower.
+    // Shrink the font so the number always stays CONTAINED in the fixed-width
+    // readout box. The box never resizes, so the font changing never moves the
+    // tank; longer (fractional) values just get a smaller font.
     const len = nowReadout.textContent.length;
-    nowReadout.style.fontSize = len >= 5 ? '24px' : len >= 4 ? '30px' : '38px';
+    nowReadout.style.fontSize = len >= 6 ? '20px' : len >= 5 ? '24px' : len >= 4 ? '30px' : '38px';
   }
-  // Size the initial readout too (the HTML render uses the full 38px).
+  // Seed the initial water level (the static HTML only renders the number).
   setLevel(fromW);
 
   // Falling-droplet animation. Spawns teardrop <path>s at the

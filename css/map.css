@@ -685,11 +685,20 @@
   flex-direction: column;
   align-items: flex-start;
   font-variant-numeric: tabular-nums;
+  /* Fixed footprint: the readout never changes width as the water number
+     grows/shrinks, so the centered stage (and the tank) never shift. The
+     number's font scales down (JS) to stay inside this box. */
+  flex: 0 0 116px;
+  overflow: hidden;
 }
 .fuel-tank-readout strong.tank-now {
+  /* The number's font may scale freely (JS shrinks long values) - it lives in
+     the fixed-width readout box, so changing it NEVER moves the tank. */
   font-size: 38px;
   line-height: 1;
   color: #7dd3fc;
+  white-space: nowrap;
+  max-width: 100%;
 }
 .fuel-tank-readout span {
   font-size: 18px;
