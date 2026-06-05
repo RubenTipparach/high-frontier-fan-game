@@ -1879,7 +1879,10 @@ function allBiddersActed(state) {
   const acted = a.acted || [];
   const auto = a.autoPassed || [];
   const others = state.players.filter((p) => p.profileId !== a.auctioneerId);
-  if (!others.length) return false;
+  // Solo game: no rival bidders, so the (zero) bidders have all trivially
+  // acted and the auctioneer may keep the lot unopposed right away. In any
+  // 2+ player game there is always at least one other, so this never fires.
+  if (!others.length) return true;
   // Auto-passed players have opted out for the rest of the lot, and
   // full-hand players can't take it - both count as already acted so
   // they never hold up the close, even after a reopen resets `acted`.
@@ -1903,7 +1906,9 @@ function applyAuctionStart(state, op, ctx) {
   if (state.auction) return fail('auction_in_progress');
   const player = currentPlayer(state);
   if (!player || player.profileId !== ctx.profileId) return fail('not_your_turn');
-  if (state.players.length < 2) return fail('need_opponent');
+  // A solo game CAN auction: with no rival bidders the auctioneer keeps the lot
+  // unopposed for free (see applyAuctionSell's no-bids path). Multiplayer always
+  // has 2+ players, so this once-required opponent check is no longer needed.
   if (player.opsRemaining <= 0) return fail('no_ops_left');
   if ((player.hand || []).length >= AUCTION_HAND_LIMIT) return fail('hand_limit');
   const deckType = String(op.deckType || '');

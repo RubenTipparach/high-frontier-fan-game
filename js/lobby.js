@@ -602,12 +602,13 @@ async function onCreateSubmit(ev) {
 // you in it, started right away. It runs the same server-backed engine as a
 // full table, so it's the way to exercise multiplayer features alone. Needs
 // the server to allow maxPlayers=1 (it does); start only needs >=1 member.
-export async function createSoloRoom() {
+export async function createSoloRoom({ startingAqua = 100, economy = 'library' } = {}) {
   const me = activeProfile();
   if (!me) return { ok: false, error: 'no_profile' };
   const create = await createLobby(
     { name: `${me.name}'s solo room`, maxPlayers: 1, maxRounds: 5,
-      joinPolicy: 'invite-only', idempotencyKey: newIdemKey() },
+      joinPolicy: 'invite-only', idempotencyKey: newIdemKey(),
+      startingAqua, economy },
     me.token,
   );
   if (!create.ok) return create;

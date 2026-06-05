@@ -119,8 +119,8 @@ export async function getLobbyByCode(code) {
   return call('GET', '/lobbies/by-code/' + encodeURIComponent(code));
 }
 
-export async function createLobby({ name, maxPlayers, maxRounds, joinPolicy, idempotencyKey }, token) {
-  return call('POST', '/lobbies', { body: { name, maxPlayers, maxRounds, joinPolicy, idempotencyKey }, token });
+export async function createLobby({ name, maxPlayers, maxRounds, joinPolicy, idempotencyKey, startingAqua, economy }, token) {
+  return call('POST', '/lobbies', { body: { name, maxPlayers, maxRounds, joinPolicy, idempotencyKey, startingAqua, economy }, token });
 }
 
 export async function joinLobby(id, token) {

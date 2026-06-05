@@ -207,6 +207,33 @@ code {
   line-height: 1.4;
   color: var(--ink-mute);
 }
+/* Solo-room setup option groups (starting aqua, card economy). */
+.solo-opt-group { margin: 12px 0; }
+.solo-opt-label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--ink-mute);
+  margin-bottom: 6px;
+}
+.solo-opt {
+  flex: 1 1 auto;
+  min-width: 120px;
+  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ink);
+  cursor: pointer;
+}
+.solo-opt:hover { background: rgba(255, 255, 255, 0.07); }
+.solo-opt.is-active {
+  border-color: var(--accent);
+  background: rgba(125, 211, 252, 0.14);
+  font-weight: 600;
+}
 .main-menu-heading {
   margin: 0 0 8px;
   font-size: 11px;

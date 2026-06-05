@@ -585,6 +585,14 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // Game length: 5 (short, default) / 6 (medium) / 7 (extra long).
   const maxRounds = [5, 6, 7].includes(Number(body.maxRounds)) ? Number(body.maxRounds) : 5;
   const joinPolicy = body.joinPolicy === 'invite-only' ? 'invite-only' : 'open';
+  // Solo-game setup options. Stored on the lobby and honoured at start ONLY for
+  // 1-player rooms (multiplayer is always market + the standard bank). Null when
+  // unset, so the start path falls back to defaults.
+  //   startingAqua: 0..100 free-play bank (e.g. 100 sandbox-style vs 6 standard)
+  //   economy:      'library' (free draws) or 'market' (auctioned)
+  const startingAqua = Number.isFinite(Number(body.startingAqua))
+    ? Math.max(0, Math.min(100, Math.floor(Number(body.startingAqua)))) : null;
+  const economy = (body.economy === 'library' || body.economy === 'market') ? body.economy : null;
   const now = nowMs();
   let code, info;
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -592,10 +600,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
     try {
       info = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key)
-           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy)
+           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?)`
         )
-        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey);
+        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy);
       break;
     } catch (err) {
       if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -832,7 +840,7 @@ app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
 app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, max_rounds FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -856,7 +864,13 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   }));
   // Lobbies predating the column come back null; default to 5.
   const maxRounds = [5, 6, 7].includes(lobby.max_rounds) ? lobby.max_rounds : 5;
-  const state = createInitialState({ players, seed, maxRounds });
+  // Solo-game setup options are honoured only for a 1-player game; multiplayer
+  // is always market + the standard starting bank. Unset (or non-solo) leaves
+  // them undefined so createInitialState uses its defaults.
+  const solo = players.length === 1;
+  const startingAqua = solo && Number.isFinite(lobby.starting_aqua) ? lobby.starting_aqua : undefined;
+  const economy = solo && (lobby.economy === 'library' || lobby.economy === 'market') ? lobby.economy : undefined;
+  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy });
 
   const now = nowMs();
   const gameId = db.transaction(() => {
