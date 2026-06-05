@@ -4145,7 +4145,7 @@ function openDeckTapModal(card, kind, { allowAuction = false, inspectOnly = fals
 // actions - Discard (pop back to the deck), Exo produce (will
 // need a factory location once Stage-3 builds them), and Add to
 // stack (push onto the LEO rocket).
-function openCardModal(card, kind, slotIdx) {
+function openCardModal(card, kind, slotIdx, { readOnly = false } = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay';
   const close = () => overlay.remove();
@@ -4163,6 +4163,17 @@ function openCardModal(card, kind, slotIdx) {
   });
   cardEl.classList.add('card-modal-card');
   panel.appendChild(cardEl);
+
+  // Read-only inspection (e.g. the All cards overview): show the card and its
+  // Flip, but NONE of the act-on-card buttons (Discard / Free Market / Exo /
+  // Boost). Mirrors the crew path's mount + Esc handling.
+  if (readOnly) {
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+    const onKeyRO = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKeyRO); } };
+    document.addEventListener('keydown', onKeyRO);
+    return;
+  }
 
   const actions = document.createElement('div');
   actions.className = 'card-modal-actions';
@@ -13761,7 +13772,9 @@ function _ownedCardChip(entry) {
     + (g.spectralHtml ? '<span class="acc-spec">' + g.spectralHtml + '</span>' : '')
     + '</div>'
     + '<div class="acc-bot"><span class="acc-stat">' + statHtml + '</span>' + massHtml + '</div>';
-  chip.addEventListener('click', () => openCardModal(card, kind));
+  // The All cards view is inspection-only: open the card read-only (card +
+  // Flip, no Discard / Free Market / Exo / Boost actions).
+  chip.addEventListener('click', () => openCardModal(card, kind, null, { readOnly: true }));
   return chip;
 }
 
