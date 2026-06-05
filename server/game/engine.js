@@ -27,6 +27,7 @@
 //     nested snapshots inside the state blob.
 
 import { PATENTS_BY_ID } from '../../data/patents.js';
+import { resolveSupportChain } from '../../data/support-chain.js';
 import { CREW_BY_ID } from '../../data/crew.js';
 // Shared fuel-strip model (same module the client uses): a burn spends fuel
 // STEPS (black connections), and the water it costs is the non-linear mass
@@ -309,6 +310,29 @@ function faceHasSolar(face) {
     && face.properties.some((p) => p.key === 'solar' && p.value));
 }
 
+// Normalise a rocket's stack into the support-chain resolver's card shape
+// (mirror of rocket.js#chainCardsFromStack). `supplies` off the PRIMARY face,
+// `requires` / `thrustMod` / `fuelMod` off the INSTALLED face. Crew aren't power
+// sources (no requires), so they pull no chain. `therms` is unused server-side
+// (the server does not gate cooling), so it stays 0.
+function chainCardsFromRocket(rocket) {
+  return rocket.stack.map((s) => {
+    const c = PATENTS_BY_ID[s.id];
+    const f = c ? slotFace(s, c) : {};
+    const type = c ? c.type : (s.kind || 'crew');
+    const prim = (c && c.faces && c.faces.primary) || c || {};
+    return {
+      id: s.id,
+      type,
+      supplies: prim.supplies || (c && c.supplies) || [],
+      requires: (f && f.requires) || (c && c.requires) || [],
+      thrustMod: f ? f.thrustMod : undefined,
+      fuelMod: f ? f.fuelMod : undefined,
+      therms: 0,
+    };
+  });
+}
+
 // Net thrust of the active thruster after ALL deterministic modifiers
 // (mirror of rocket.js#getActiveThrusterStats's thrust folding): base face
 // thrust + support-chain reactor/generator thrustMod + weight-class band
@@ -324,20 +348,18 @@ function activeNetThrust(rocket) {
   const f = thrusterFaceOf(slot);
   let thrust = Number.isFinite(f.thrust) ? f.thrust : null;
   if (thrust == null) return 0;
-  // Support-chain modifiers: a reactor/generator shifts this thruster's
-  // thrust only when it supplies a kind the thruster requires. A self-powered
-  // or crew thruster requires nothing, so it takes no stack modifiers.
-  const reqKinds = new Set((f.requires || []).map((r) => (r && r.kind) || r));
-  if (reqKinds.size) {
-    for (const s of rocket.stack) {
-      if (s.id === tid) continue;
-      const c = PATENTS_BY_ID[s.id];
-      if (!c) continue;
-      const cSupplies = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
-      if (!cSupplies.some((k) => reqKinds.has(k))) continue;
-      const cf = slotFace(s, c);
-      if (cf.thrustMod != null && cf.thrustMod !== 0) thrust += cf.thrustMod;
-    }
+  // Support-chain thrust modifiers (rules 1+2, data/support-chain.js): mirror of
+  // rocket.js#getActiveThrusterStats. Walk the full chain that powers this
+  // thruster and add the thrustMod of the modifier path only (generators before
+  // the first reactor + that first reactor, including reactors multiple hops
+  // back). Must match the client exactly so a move it allows isn't rejected.
+  const chain = resolveSupportChain({ cards: chainCardsFromRocket(rocket), activeId: tid });
+  for (const cid of chain.modifierChain) {
+    const s = rocket.stack.find((x) => x.id === cid);
+    const c = s && PATENTS_BY_ID[s.id];
+    if (!c) continue;
+    const cf = slotFace(s, c);
+    if (cf.thrustMod != null && cf.thrustMod !== 0) thrust += cf.thrustMod;
   }
   // Weight-class band, keyed off current wet mass (dry + tank).
   const dry = rocket.stack.reduce((m, s) => m + slotMass(s), 0);
@@ -381,19 +403,17 @@ function thrusterFuelPerBurn(rocket) {
   const p = PATENTS_BY_ID[tid];
   let fuel = f.fuel != null ? f.fuel : (p && p.fuel);
   if (fuel == null) return 1;
-  // Only a power source in THIS thruster's support chain scales its fuel
-  // (mirror of rocket.js#getActiveThrusterStats): a card's fuelMod counts
-  // only when it supplies a kind the active thruster requires. A generator
-  // wired to some other card (or a self-powered thruster that requires
-  // nothing) leaves the fuel-per-burn untouched.
-  const reqKinds = new Set((f.requires || []).map((r) => (r && r.kind) || r));
-  for (const s of rocket.stack) {
-    if (s.id === tid) continue;
-    const c = PATENTS_BY_ID[s.id];
+  // Support-chain fuel modifiers (rules 1+2, data/support-chain.js): mirror of
+  // rocket.js#getActiveThrusterStats. Scale fuel-per-burn by the fuelMod of the
+  // modifier path only (generators before the first reactor + that first
+  // reactor), folded in chain order so the client + server agree to the bit. A
+  // self-powered thruster (requiring nothing) pulls no chain and is untouched.
+  const chain = resolveSupportChain({ cards: chainCardsFromRocket(rocket), activeId: tid });
+  for (const cid of chain.modifierChain) {
+    const s = rocket.stack.find((x) => x.id === cid);
+    const c = s && PATENTS_BY_ID[s.id];
     if (!c) continue;
-    const cSupplies = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
-    if (!cSupplies.some((k) => reqKinds.has(k))) continue;
-    const cf = slotFace(s);
+    const cf = slotFace(s, c);
     if (cf.fuelMod != null && cf.fuelMod !== 1) fuel *= cf.fuelMod;
   }
   return fuel;

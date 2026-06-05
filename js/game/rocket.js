@@ -25,6 +25,7 @@
 //   onRocketChange(cb)                → unsubscribe
 
 import { PATENTS_BY_ID, thermsRequired, thermsSupplied } from '../../data/patents.js';
+import { resolveSupportChain } from '../../data/support-chain.js';
 import { CREW_BY_ID } from '../../data/crew.js';
 import { SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { weightClassForMass } from '../../data/net-thrust-track.js';
@@ -827,6 +828,30 @@ export function getStackTotals() {
   };
 }
 
+// Normalise the current stack into the support-chain resolver's card shape
+// (data/support-chain.js). `supplies` reads off the PRIMARY face (what the card
+// provides to the stack, same as the old supplier scan + the server); the rest
+// (requires / thrustMod / fuelMod / therms) reads the INSTALLED face so a
+// flipped dark-side card reports its own stats. `therms` is the cooling a
+// radiator SUPPLIES, otherwise the heat the card GENERATES.
+function chainCardsFromStack() {
+  return _stack.map((slot) => {
+    const card = cardForSlot(slot);
+    const f = installedFace(slot);
+    const type = card ? card.type : slot.kind;
+    const prim = (card && card.faces && card.faces.primary) || card || {};
+    return {
+      id: slot.id,
+      type,
+      supplies: prim.supplies || (card && card.supplies) || [],
+      requires: (f && f.requires) || (card && card.requires) || [],
+      thrustMod: f ? f.thrustMod : undefined,
+      fuelMod: f ? f.fuelMod : undefined,
+      therms: type === 'radiator' ? thermsSupplied(card, f) : thermsRequired(f),
+    };
+  });
+}
+
 // Compute the active thruster's "final" stats after applying every
 // other stack card's thrustMod (additive) + fuelMod (multiplicative).
 // Returns null if there is no active thruster.
@@ -856,22 +881,22 @@ export function getActiveThrusterStats() {
   let baseThrust = thrust;
   let baseFuel = fuel;
   const modifiers = [];
-  // A reactor/generator's thrust + fuel modifiers only count when it
-  // actually powers THIS thruster, i.e. it supplies a kind the active
-  // thruster requires (it sits in the thruster's support chain). A power
-  // source wired to some other card (say a generator feeding a robonaut's
-  // gen-electric) must not shift the thruster's stats, and a self-powered
-  // thruster (a solar moth, which requires nothing) takes no stack thrust
-  // modifiers at all. Same supply/require match isRocketActive() gates
-  // activation on, so "modified" stats and "can it fly" stay consistent.
-  const reqKinds = new Set((f.requires || []).map((r) => (r && r.kind) || r));
-  for (const slot of _stack) {
-    if (slot.id === id) continue;
-    const c = cardForSlot(slot);
+  // Support-chain modifiers (rules 1+2, data/support-chain.js). Walk the FULL
+  // chain that powers this thruster and apply only the modifier path: every
+  // generator before the first reactor, plus that first reactor. A reactor two
+  // hops back (THRUSTER -> GENERATOR -> REACTOR) still modifies; a second reactor
+  // deeper does not. This replaces the old one-hop "does it DIRECTLY supply the
+  // thruster" scan, which missed multi-hop reactors and could double-count a
+  // spare reactor. A self-powered thruster (a solar moth, requiring nothing)
+  // pulls no chain, so it takes no stack modifiers. The server mirrors this
+  // exactly (engine.js) so a move the client allows is never rejected for a
+  // different thrust/fuel number.
+  const chain = resolveSupportChain({ cards: chainCardsFromStack(), activeId: id });
+  for (const cid of chain.modifierChain) {
+    const cslot = _stack.find((s) => s.id === cid);
+    const c = cslot ? cardForSlot(cslot) : cardById(cid);
     if (!c) continue;
-    const cf = installedFace(slot);
-    const cSupplies = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
-    if (!cSupplies.some((k) => reqKinds.has(k))) continue;
+    const cf = cslot ? installedFace(cslot) : activeFace(c);
     const tMod = cf.thrustMod;
     const fMod = cf.fuelMod;
     if (tMod != null && tMod !== 0) {

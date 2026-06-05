@@ -1,7 +1,11 @@
 // Support-chain resolver. PURE (no DOM, no stateful imports) so it drives BOTH
-// the rocket engine (modifier + cooling rules) AND the chain visualizer, and
-// can later be shared with the server. Everything reads off plain card
-// descriptors, so callers normalise their own stack into this shape:
+// the rocket engine (modifier + cooling rules) AND the chain visualizer, and is
+// shared by the client (js/game/rocket.js) and the server (server/game/engine.js)
+// - the single source of truth for the support-chain rules. Lives in data/ for
+// the same reason data/fuel-graph.js does: both runtimes import it.
+//
+// Everything reads off plain card descriptors, so callers normalise their own
+// stack into this shape (reading the INSTALLED face for each slot):
 //
 //   card = {
 //     id,                       // stable id
@@ -9,17 +13,18 @@
 //     supplies:  [kind],        // support kinds this card PROVIDES
 //     requires:  [{kind}|kind], // support kinds this card NEEDS
 //     thrustMod, fuelMod,       // power-source modifier (additive / multiplicative)
-//     therms,                   // heat GENERATED (reactor/gen) or cooling SUPPLIED (radiator)
+//     therms,                   // heat GENERATED (reactor/gen/thruster) OR, for a
+//                               //   radiator, the cooling it SUPPLIES
 //   }
 //
 // resolveSupportChain({ cards, activeId, wiring }) walks the chain that powers
-// the active thruster. Each consumer's requires are matched to a supplier -
-// the player's wiring wins, otherwise the first matching card (deterministic).
-// It returns the ordered chain, the edges, any cycles (each card is VISITED
-// ONCE so a cycle never double-counts or breaks the walk), the modifier path
-// (generators before the first reactor + the first reactor: rules 1+2 - only
-// those modify the thruster), and the per-reactor DEDICATED cooling check
-// (rule 3 - a radiator's therms reserved to one reactor can't cover another).
+// the active thruster. Each consumer's requires are matched to a supplier - the
+// player's wiring wins, otherwise the first matching card (deterministic). It
+// returns the ordered chain, the edges, any cycles (each card is VISITED ONCE so
+// a cycle never double-counts or breaks the walk), the modifier path (generators
+// before the first reactor + the first reactor: rules 1+2 - only those modify
+// the thruster), and the cooling verdict (rule 3 - each reactor reserves its OWN
+// dedicated radiator therms; non-reactor heat draws the shared remainder).
 
 export function resolveSupportChain({ cards = [], activeId = null, wiring = {} } = {}) {
   const byId = new Map(cards.map((c) => [c.id, c]));
@@ -99,12 +104,13 @@ export function resolveSupportChain({ cards = [], activeId = null, wiring = {} }
 
   // Rule 3: each reactor in the chain needs DEDICATED radiator cooling for its
   // therms - a radiator's therms reserved to one reactor can't cover another.
-  // Greedy: walk reactors in chain order, reserve from the shared radiator
-  // therm supply. (Reactors only; generator/thruster therms aren't modelled
-  // here.) Reactors are assumed pre-sorted to reserve for the hottest first so
-  // a tight budget fails predictably.
+  // Greedy: walk reactors hottest-first, reserve from the shared radiator therm
+  // supply (all radiators in the stack contribute). Whatever radiator capacity
+  // is left after the reactors covers the NON-reactor heat (the thruster plus
+  // any generators in the chain), which draws the shared remainder.
   const radiators = cards.filter((c) => c.type === 'radiator');
-  let radiatorPool = radiators.reduce((s, c) => s + (Number(c.therms) || 0), 0);
+  const radiatorTotal = radiators.reduce((s, c) => s + (Number(c.therms) || 0), 0);
+  let radiatorPool = radiatorTotal;
   const reactorIds = order.filter((id) => { const c = byId.get(id); return c && c.type === 'reactor'; });
   reactorIds.sort((a, b) => (Number(byId.get(b).therms) || 0) - (Number(byId.get(a).therms) || 0));
   const reactorCooling = [];
@@ -115,6 +121,14 @@ export function resolveSupportChain({ cards = [], activeId = null, wiring = {} }
     reactorCooling.push({ reactorId: id, demand, ok });
   }
   const reactorsCooled = reactorCooling.every((r) => r.ok);
+  // Non-reactor heat = every heat-generating chain card that is NOT a reactor
+  // (the thruster + generators). Radiators supply cooling, so they're excluded.
+  const nonReactorHeat = order
+    .map((id) => byId.get(id))
+    .filter((c) => c && c.type !== 'reactor' && c.type !== 'radiator')
+    .reduce((s, c) => s + (Number(c.therms) || 0), 0);
+  const nonReactorCooled = nonReactorHeat <= radiatorPool;
+  const coolingOk = reactorsCooled && nonReactorCooled;
 
   return {
     order,
@@ -125,7 +139,10 @@ export function resolveSupportChain({ cards = [], activeId = null, wiring = {} }
     modifiers: { thrustDelta, fuelMult },
     reactorCooling,
     reactorsCooled,
-    radiatorTotal: radiators.reduce((s, c) => s + (Number(c.therms) || 0), 0),
+    nonReactorHeat,
+    nonReactorCooled,
+    coolingOk,
+    radiatorTotal,
     radiatorRemaining: radiatorPool,
   };
 }
