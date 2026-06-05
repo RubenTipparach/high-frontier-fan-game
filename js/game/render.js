@@ -134,6 +134,32 @@ const SPECTRAL_INK = {
   V: '#fef2f2', D: '#dbeafe', H: '#f0f9ff',
 };
 
+// Stage-3 factory sprites (baked by scripts/gen-factory-sprites.mjs). The base
+// art is one PNG per seat colour; the dome is a separate PNG baked at the SAME
+// canvas + origin, so it composites onto the install pad just by drawing at the
+// same destination rect. ANCHOR_F* is the baked ground-centre as a fraction of
+// the sprite (pinned to the site); LABEL_FY is where the player-coloured
+// {size}{spectral} | {outpost} label sits.
+const FACTORY_SPRITE_W = 184, FACTORY_SPRITE_H = 214;
+const FACTORY_ANCHOR_FX = 0.5753, FACTORY_ANCHOR_FY = 0.7196;
+const FACTORY_LABEL_FY = 0.7664;
+const FACTORY_SPRITE_K = 4.2;   // on-screen sprite width = r * K (tune for scale)
+
+// Darken a #rrggbb colour toward black (f < 1); returns rgb() so canvas reads it.
+function shadeHex(c, f) {
+  if (typeof c !== 'string' || c[0] !== '#' || c.length < 7) return c;
+  const r = Math.round(parseInt(c.slice(1, 3), 16) * f);
+  const g = Math.round(parseInt(c.slice(3, 5), 16) * f);
+  const b = Math.round(parseInt(c.slice(5, 7), 16) * f);
+  return `rgb(${r},${g},${b})`;
+}
+// Pick a legible ink (dark on light seat colours, white on dark ones).
+function inkOn(c) {
+  if (typeof c !== 'string' || c[0] !== '#' || c.length < 7) return '#ffffff';
+  const r = parseInt(c.slice(1, 3), 16), g = parseInt(c.slice(3, 5), 16), b = parseInt(c.slice(5, 7), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.55 ? '#15120f' : '#ffffff';
+}
+
 const TYPE_VIS = {
   site:           { kind: 'hex',    r: HEX_R, haloR: 20 },
   'gas-giant':    { kind: 'hex',    r: HEX_R, haloR: 48 },
@@ -785,6 +811,22 @@ export class MapRenderer {
       img.src = assetUrl(`assets/rockets/${name}.png`);
       this._ambientSprites.push(img);
     }
+    // Stage-3 factory sprites: one player-tinted base per seat colour + the
+    // colony dome, keyed by lowercase seat-colour hex. Baked at a shared origin
+    // so the dome composites on the base's install pad (same draw rect).
+    this._factorySprites = {};
+    const FACTORY_FILES = {
+      '#fccc00': 'gold', '#c09cc0': 'mauve', '#e3e0d4': 'bone',
+      '#a8d8c0': 'mint', '#b40054': 'magenta', '#9c9c9c': 'gray',
+    };
+    for (const [hex, name] of Object.entries(FACTORY_FILES)) {
+      const img = new Image();
+      img.src = assetUrl(`assets/factory/factory-base-${name}.png`);
+      this._factorySprites[hex] = img;
+    }
+    this._factorySprites._default = this._factorySprites['#9c9c9c'];
+    this._domeSprite = new Image();
+    this._domeSprite.src = assetUrl('assets/factory/colony-dome.png');
     this._partitionSites();
     this._buildStars();
     this._buildAsteroidBelt();
@@ -2743,103 +2785,81 @@ export class MapRenderer {
     ctx.restore();
   }
 
-  // Stage-3 factory chits + colony rings. Factories paint as
-  // rounded squares offset BELOW the site center (so the claim
-  // disc above stays unobstructed). The chit is tinted by
-  // spectral type using the same palette as the Industrialize
-  // modal badge - C/S/M/V/D/H colours map identically across
-  // the popup chips and the map chits so the player builds one
-  // visual vocabulary.
-  //
-  // When a colony exists at the same site, a thin ring is drawn
-  // OVER the factory chit (the 🌐 = global ring idiom; see
-  // industrialize.md "UX defaults"). One chit per site - the
-  // model caps factories at 1 per site.
+  // Stage-3 factory sprites. Each factory paints as a baked isometric base
+  // tinted by the OWNER's seat colour, anchored just below the site. A colony
+  // adds the dome sprite on the install pad (composited at the same rect), and
+  // a player-coloured label reads {size}{spectral} | {outpost}. One per site.
   _drawFactoriesScreen(ctx) {
     if (!this._factories) return;
     const eff = this.zoom * this.fitScale;
-    // Match the disc-radius math so chit scales with zoom in
-    // the same way; size derived from the disc radius keeps the
-    // two chits visually paired.
     const r = Math.max(7, Math.min(18, 10 * Math.sqrt(this.zoom)));
-    const chitSize = r * 1.4;
-    const chitOffset = r * 2.2;
+    // Sprite footprint: the baked base sits at ANCHOR_F* inside the sprite; we
+    // pin that ground-centre just below the site (where the old chit sat) and
+    // size the whole sprite from r. dw/dh + offset are the tuning knobs.
+    const dw = r * FACTORY_SPRITE_K;
+    const dh = dw * (FACTORY_SPRITE_H / FACTORY_SPRITE_W);
+    const offset = r * 1.4;
     ctx.save();
     for (const id in this._factories) {
       const site = this.data.byId[id];
       if (!site) continue;
-      const sx = this.pan.x + site.x * eff;
-      const sy = this.pan.y + site.y * eff + chitOffset;
-      if (sx < -40 || sx > this.hostW + 40 || sy < -40 || sy > this.hostH + 40) continue;
-      const spec = this._factories[id].spectralType || 'C';
-      const fill = SPECTRAL_FILL[spec] || '#475569';
-      const ink  = SPECTRAL_INK[spec]  || '#f8fafc';
-      const half = chitSize / 2;
-      // Rounded square chit; the rim picks up the spectral tint.
-      ctx.beginPath();
-      if (typeof ctx.roundRect === 'function') {
-        ctx.roundRect(sx - half, sy - half, chitSize, chitSize, 3);
-      } else {
-        ctx.rect(sx - half, sy - half, chitSize, chitSize);
+      const f = this._factories[id];
+      const anchorX = this.pan.x + site.x * eff;
+      const anchorY = this.pan.y + site.y * eff + offset;
+      const dx = anchorX - dw * FACTORY_ANCHOR_FX;
+      const dy = anchorY - dh * FACTORY_ANCHOR_FY;
+      if (dx > this.hostW + 60 || dx + dw < -60 || dy > this.hostH + 60 || dy + dh < -60) continue;
+      // Base tinted by the OWNER's seat colour (fall back to gray).
+      const base = this._factorySprites[(f.color || '').toLowerCase()] || this._factorySprites._default;
+      if (base && base.complete && base.naturalWidth) ctx.drawImage(base, dx, dy, dw, dh);
+      // Colony dome composites at the SAME rect, landing on the install pad.
+      if (this._colonies && this._colonies[id]
+          && this._domeSprite && this._domeSprite.complete && this._domeSprite.naturalWidth) {
+        ctx.drawImage(this._domeSprite, dx, dy, dw, dh);
       }
-      ctx.fillStyle = fill;
-      ctx.globalAlpha = 0.92;
-      ctx.fill();
-      ctx.globalAlpha = 1;
-      ctx.lineWidth = 1.4;
-      ctx.strokeStyle = '#0c0a16';
-      ctx.stroke();
-      // 🏭 glyph centered in the chit (use the spectral-ink colour
-      // so the glyph reads on the tinted fill).
-      ctx.fillStyle = ink;
-      ctx.font = `700 ${Math.round(chitSize * 0.85)}px ui-sans-serif, system-ui, sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('🏭', sx, sy + 1);
-      // Colony biodome sits ON the factory chit (its base on the chit's top
-      // edge). Drawn from INSIDE the factory loop so there is exactly ONE dome
-      // per factory: an earlier separate pass keyed off this._colonies could
-      // paint a stray second dome when an optimistic local colony and the
-      // snapshot colony briefly disagreed on the site key.
-      if (this._colonies && this._colonies[id]) {
-        this._drawColonyDome(ctx, sx, sy - half + 1, chitSize * 1.1, chitSize * 0.66);
-      }
+      // Player-coloured label: {size}{spectral}, plus " | {outpost}" when an
+      // outpost is stationed here.
+      const size = site.siteSize != null ? site.siteSize : '';
+      let text = `${size}${f.spectralType || ''}`;
+      const letter = this._outpostLetterAt(id);
+      if (letter) text += ` | ${letter}`;
+      if (text) this._drawFactoryLabel(ctx, anchorX, dy + dh * FACTORY_LABEL_FY, text, f.color || '#9c9c9c', r);
     }
     ctx.restore();
   }
 
-  // A colony biodome: a teal half-dome on a short platform with a faint
-  // geodesic lattice, drawn sitting on the factory chit. baseY is the ground
-  // line the dome rises from; the dome bulges upward from there.
-  _drawColonyDome(ctx, cx, baseY, w, h) {
-    const left = cx - w / 2, right = cx + w / 2;
-    // platform slab under the dome
-    const slabH = Math.max(2, h * 0.18);
+  // The outpost letter (A/B/C/D) stationed at a site, or '' if none. Used to
+  // append " | {outpost}" to the factory label.
+  _outpostLetterAt(siteId) {
+    if (!this._outposts) return '';
+    for (const L of ['A', 'B', 'C', 'D']) {
+      const op = this._outposts[L];
+      if (op && op.siteId === siteId) return L;
+    }
+    return '';
+  }
+
+  // Player-coloured pill label drawn flat (horizontal, legible) under the
+  // stacks: {size}{spectral} with " | {outpost}" appended when one is here.
+  _drawFactoryLabel(ctx, cx, cy, text, color, r) {
+    const fontPx = Math.max(9, Math.min(15, r * 0.95));
+    ctx.font = `800 ${fontPx}px ui-sans-serif, system-ui, sans-serif`;
+    const tw = ctx.measureText(text).width;
+    const h = fontPx + 7;
+    const w = Math.max(h * 1.5, tw + fontPx);
+    const x = cx - w / 2, y = cy - h / 2;
     ctx.beginPath();
-    if (typeof ctx.roundRect === 'function') ctx.roundRect(left, baseY - slabH * 0.4, w, slabH, 1.5);
-    else ctx.rect(left, baseY - slabH * 0.4, w, slabH);
-    ctx.fillStyle = '#334155';
+    if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, w, h, h / 2);
+    else ctx.rect(x, y, w, h);
+    ctx.fillStyle = color;
     ctx.fill();
-    // dome body: top half-ellipse (left -> over the top -> right)
-    ctx.beginPath();
-    ctx.ellipse(cx, baseY, w / 2, h, 0, Math.PI, Math.PI * 2);
-    ctx.closePath();
-    ctx.fillStyle = '#0e7490';
-    ctx.globalAlpha = 0.95;
-    ctx.fill();
-    ctx.globalAlpha = 1;
-    ctx.lineWidth = 1.4;
-    ctx.strokeStyle = '#0c0a16';
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = shadeHex(color, 0.55);
     ctx.stroke();
-    // geodesic lattice: meridian + spring line + two side meridians.
-    ctx.strokeStyle = 'rgba(186,230,253,0.5)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(cx, baseY); ctx.lineTo(cx, baseY - h);
-    ctx.moveTo(left + 1.5, baseY); ctx.lineTo(right - 1.5, baseY);
-    ctx.moveTo(cx - w * 0.26, baseY); ctx.quadraticCurveTo(cx - w * 0.16, baseY - h * 0.72, cx, baseY - h);
-    ctx.moveTo(cx + w * 0.26, baseY); ctx.quadraticCurveTo(cx + w * 0.16, baseY - h * 0.72, cx, baseY - h);
-    ctx.stroke();
+    ctx.fillStyle = inkOn(color);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, cx, cy + 0.5);
   }
 
   // Stage-3 outpost chits. Drawn as small rounded squares with a

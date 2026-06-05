@@ -10381,6 +10381,18 @@ function syncDiscs() {
   _renderer.setDiscs(getDiscs());
 }
 
+// Resolve a factory owner's seat colour. Online, read it off the snapshot
+// roster; solo, every factory is the local player's, so use their rocket
+// colour. Falls back to gray for an unknown owner (e.g. a spectator view).
+function factoryOwnerColor(ownerId) {
+  if (_online) {
+    const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
+    const p = players.find((pl) => pl.profileId === ownerId);
+    return (p && p.color) || '#9c9c9c';
+  }
+  return myRocketColour() || '#9c9c9c';
+}
+
 // Stage-3 sync helpers: push factory / colony / outpost / focus
 // state to the renderer so the chit layers repaint. Each is a
 // thin wrapper around the corresponding all-state getter and
@@ -10389,7 +10401,12 @@ function syncFactories() {
   if (!_renderer) return;
   const list = allFactories();
   const map = {};
-  for (const f of list) map[f.siteId] = f;
+  for (const f of list) {
+    // Tint each factory by its OWNER's seat colour so the map reads who owns
+    // what at a glance; the renderer selects the matching base sprite.
+    f.color = factoryOwnerColor(f.ownerId);
+    map[f.siteId] = f;
+  }
   _renderer.setFactories(map);
   syncAmbientRockets(list.length);
 }
