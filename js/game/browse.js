@@ -8711,9 +8711,6 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         <strong class="tank-cap">${cap}</strong>
         <em class="muted">water</em>
       </div>
-      <p class="fuel-tank-rem muted" ${remOf(tankNow) > 0 ? '' : 'hidden'}>includes a
-        <strong>${remOf(tankNow)}</strong> remainder a burn left - can't be transferred
-        out (water moves in whole units)</p>
     </div>
     <div class="fuel-tank-actions">
       <button type="button" class="popup-btn popup-btn-secondary" id="tank-dump"
@@ -8789,7 +8786,6 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const dryRect   = panel.querySelector('.tank-dry');
   const liftLine  = panel.querySelector('.tank-lift-line');
   const nowReadout = panel.querySelector('.tank-now');
-  const remReadout = panel.querySelector('.fuel-tank-rem');
   const ticksG     = panel.querySelector('.tank-ticks');
 
   // Geometry: 200 svg units span TANK_VIS_MAX wet-mass units.
@@ -8842,15 +8838,13 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     foamRect.setAttribute('y',  String(waterTopY - 3));
     foamRect.setAttribute('height', String(Math.min(6, h)));
     nowReadout.textContent = fmtWater(clamped);
-    if (remReadout) {
-      const rem = remOf(clamped);
-      remReadout.hidden = !(rem > 0);
-      if (rem > 0) {
-        remReadout.innerHTML = `includes a <strong>${rem}</strong> remainder a burn left`
-          + ` - can't be transferred out (water moves in whole units)`;
-      }
-    }
+    // Keep the TANK a fixed size: shrink the NUMBER's font for long (fractional)
+    // values instead of letting a wide readout push the tank narrower.
+    const len = nowReadout.textContent.length;
+    nowReadout.style.fontSize = len >= 5 ? '24px' : len >= 4 ? '30px' : '38px';
   }
+  // Size the initial readout too (the HTML render uses the full 38px).
+  setLevel(fromW);
 
   // Falling-droplet animation. Spawns teardrop <path>s at the
   // top of the tank and lets gravity drop them onto the water
