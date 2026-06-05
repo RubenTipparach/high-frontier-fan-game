@@ -703,6 +703,15 @@ function fuelDropletGlyph(value, dirt) {
     + `<span class="gl-fuel-ico">${dirt ? '🪨' : '💧'}</span>`
     + `<span class="gl-fuel-n">${escapeText(String(value))}</span></span>`;
 }
+// Reactor / generator thrust MODIFIER: the dark-pink circle from the card's
+// wrench triangle, showing how much thrust it adds to the thruster it powers.
+function modThrustGlyph(value) {
+  const txt = (value > 0 ? '+' : '') + value;
+  return '<svg class="gl-thrust gl-thrust-mod" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">'
+    + '<circle cx="12" cy="12" r="10" fill="#831843" stroke="#fbcfe8" stroke-width="1.6"/>'
+    + `<text x="12" y="16.3" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">${escapeText(txt)}</text>`
+    + '</svg>';
+}
 
 // Compact "at a glance" summary of a card for list/overview chips (e.g. the
 // All cards view). Reuses the SAME glyph language as the full card: the
@@ -775,6 +784,15 @@ export function cardGlanceSummary(card, faceName = 'primary') {
       if (p && p.value) stats.push(txt(p.label || cap(k)));
     }
     if (card.prospect_bonus != null) stats.push(`+prospect ${txt(card.prospect_bonus)}`);
+  }
+  // Reactor / generator thrust + fuel MODIFIER (the card's wrench triangle):
+  // how much it boosts / throttles whatever thruster it powers in the chain.
+  // Shown as the dark-pink mod circle + a ×fuel multiplier.
+  const tMod = fdata.thrustMod ?? card.thrustMod;
+  const fMod = fdata.fuelMod ?? card.fuelMod;
+  if (tMod != null && tMod !== 0) stats.push(modThrustGlyph(tMod));
+  if (fMod != null && fMod !== 1) {
+    stats.push('🔧×' + txt(Number.isInteger(fMod) ? fMod : fMod.toFixed(2)));
   }
   // Reactors / generators carry their meaning in what chip they SUPPLY; if no
   // numeric headline landed, name the supplied chip(s) so the row isn't blank.
