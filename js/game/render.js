@@ -2823,7 +2823,9 @@ export class MapRenderer {
       // 12). {size}{spectral}, plus " | {outpost}" when an outpost is stationed
       // here; the colocated outpost's water / glory ride on the label.
       const op = this._outpostAt(id);
-      const size = site.siteSize != null ? site.siteSize : '';
+      // siteSize is a tag like "4C" (size + prospect class), so take only its
+      // numeric part and append the spectral once -> "4C", not "4CC".
+      const size = String(site.siteSize || '').replace(/[^0-9]/g, '');
       let text = `${size}${f.spectralType || ''}`;
       if (op && op.letter) text += ` | ${op.letter}`;
       if (text) this._drawFactoryLabel(ctx, cxs, cys + HEX_R + 30, text, f.color || '#9c9c9c', r, op);

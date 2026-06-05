@@ -11961,10 +11961,12 @@ function showSitePopupFor(site) {
   // (vs. silently dropping the button).
   const prosp = getActiveProspectorStats();
   const rocketSite = getRocketSite();
-  if (prosp) {
+  // Hidden once the site has a disc: a claim disc (success) or a failed-
+  // prospect disc both mean it's already been prospected, so the action is
+  // omitted rather than shown disabled.
+  if (prosp && !getDisc(site.id)) {
     const check = canProspect(_activeData, rocketSite?.id, site.id, prosp.kind);
     const supportsOk = prosp.canActivate;
-    const existingDisc = getDisc(site.id);
     // ISRU rule: the rig's ISRU must be <= the site's water
     // (hydration). ISRU 0 / missing clears the gate. This is the
     // "rig sensitivity" gate - a low-ISRU rig handles even dry
@@ -11975,15 +11977,13 @@ function showSitePopupFor(site) {
     const prospIsru   = prospectorIsruValue(prosp.card);
     const siteWater   = Number.isFinite(site.hydration) ? site.hydration : 0;
     const isruOk      = prospIsru <= siteWater;
-    const ok = check.ok && supportsOk && !existingDisc && isruOk;
+    const ok = check.ok && supportsOk && isruOk;
     const kindGlyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prosp.kind] || '🔬';
-    const reason = existingDisc
-      ? `This site already has a ${existingDisc.outcome === 'success' ? 'claim' : 'failed-prospect'} disc.`
-      : !supportsOk
-        ? `Prospector needs ${(prosp.missingSuppliers || []).join(' + ')} support.`
-        : !isruOk
-          ? `Rig ISRU ${prospIsru} > site water ${siteWater}. Need a rig with ISRU ≤ water.`
-          : check.reason;
+    const reason = !supportsOk
+      ? `Prospector needs ${(prosp.missingSuppliers || []).join(' + ')} support.`
+      : !isruOk
+        ? `Rig ISRU ${prospIsru} > site water ${siteWater}. Need a rig with ISRU ≤ water.`
+        : check.reason;
     actions.push({
       label: `${kindGlyph} Prospect (${prosp.kind})`,
       // Blue rocket variant when the action is actually
@@ -12140,9 +12140,11 @@ function showSitePopupFor(site) {
         ? 'Already refueled at this site this turn.'
         : (gain <= 0 ? `Tank full (${tank}/${tmax}).` : null);
       actions.push({
+        // Always show the factory's flat rate (7); the transfer itself still
+        // clamps to tank headroom, but the factory's output is a fixed 7.
         label: refueledThisTurn
           ? `🏭 Factory-Refuel done`
-          : `🏭 Factory-Refuel (+${gain} water)`,
+          : (gain <= 0 ? `🏭 Tank full (${tank}/${tmax})` : `🏭 Factory-Refuel (+${factoryGain} water)`),
         variant: ok ? 'rocket' : 'secondary',
         disabled: !ok,
         title: reason || `Factory produces ${factoryGain} blue water FTs (clamped by tank cap).`,
@@ -12208,15 +12210,9 @@ function showSitePopupFor(site) {
           _renderer.clearSitePopup();
         },
       });
-    } else if (existingFactory) {
-      actions.push({
-        label: '🏭 Already industrialized',
-        variant: 'secondary',
-        disabled: true,
-        title: `A factory already exists at this site (spectral ${existingFactory.spectralType}).`,
-        onClick: () => {},
-      });
     }
+    // When a factory already exists the build option is simply omitted (no
+    // disabled "Already industrialized" row) - the factory art on the map says so.
   }
   // Colonize action (rulebook G3, free action). Shown when the
   // rocket is parked at a site with a player-owned factory and
@@ -12249,15 +12245,9 @@ function showSitePopupFor(site) {
           _renderer.clearSitePopup();
         },
       });
-    } else if (colony) {
-      actions.push({
-        label: '🌐 Colonized',
-        variant: 'secondary',
-        disabled: true,
-        title: `Colony already established at this site.`,
-        onClick: () => {},
-      });
     }
+    // A colony already here -> the colonize option is omitted (no disabled
+    // "Colonized" row); the dome on the factory shows the colony.
   }
   // Delivery action (rulebook). Ship a Black-Side card from an outpost at
   // your factory back to LEO. Cost: zones-from-Earth x2 (+1 if site
