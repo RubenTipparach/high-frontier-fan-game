@@ -2548,7 +2548,6 @@ function humanizeOnlineOpError(code, detail) {
     not_water_fuel: 'Dirt has no cash value - only water converts back to aqua.',
     no_thruster: 'Activate a thruster first.',
     already_dirt_refueled: 'This crew dirt thruster already took its 1 dirt FT this turn.',
-    no_outpost: 'No outpost there to deliver from.',
     not_in_outpost: 'That card is not in the outpost.',
     not_black_side: 'Only a Black-Side (installed) card can be delivered.',
     insufficient_outpost_water: 'The outpost doesn\'t have enough water to pay the delivery cost.',
