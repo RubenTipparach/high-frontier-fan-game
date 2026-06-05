@@ -10251,7 +10251,36 @@ function animateOnlineTransitions(prev, snapshot) {
   try { animateSnapshotMoves(prev, snapshot); } catch { /* non-fatal */ }
   try { animateSnapshotProspects(prev, snapshot); } catch { /* non-fatal */ }
   try { animateSnapshotCardDrift(prev, snapshot); } catch { /* non-fatal */ }
+  try { animateSnapshotChitsHome(prev, snapshot); } catch { /* non-fatal */ }
   try { animateSnapshotClock(prev, snapshot); } catch { /* non-fatal */ }
+}
+
+// My crew just hauled glory chits home: on a LEO arrival the server scored the
+// carried chits, so MY claimed pile grew in this snapshot. Celebrate it the way
+// the sandbox does (confetti + the scored coins), once the rocket has visibly
+// slid home. Local player only - opponents' hauls don't pop a modal on me. Only
+// runs on a live transition (animateOnlineTransitions bails when prev is null,
+// so a refresh-resume never re-celebrates already-scored chits).
+function animateSnapshotChitsHome(prev, snapshot) {
+  if (!_onlineMe) return;
+  const myId = _onlineMe.id;
+  const pPrev = (prev.players || []).find((p) => p.profileId === myId);
+  const pNew  = (snapshot.players || []).find((p) => p.profileId === myId);
+  if (!pPrev || !pNew) return;
+  const prevClaimed = (pPrev.glory && pPrev.glory.claimed) || [];
+  const newClaimed  = (pNew.glory && pNew.glory.claimed) || [];
+  if (newClaimed.length <= prevClaimed.length) return;
+  const scored = newClaimed.slice(prevClaimed.length);
+  if (!scored.length) return;
+  const vps  = scored.reduce((s, c) => s + (c.vp | 0), 0);
+  const side = scored[0].side || 'back';
+  const chits = scored.map((c) => ({ zone: c.zone, crewId: c.crewId }));
+  // Let the rocket finish sliding home (tweenMpRocketAlong is 700ms) before the
+  // confetti so the haul reads as "arrived, then scored", not a teleport.
+  setTimeout(() => {
+    try { celebrateChitsHome({ chits, vps, side }); }
+    catch (e) { console.error('chit home celebrate:', e); }
+  }, 820);
 }
 
 function syncSandboxRocket() {
@@ -10682,10 +10711,10 @@ async function moveRocket() {
       } else {
         clearRoute();
       }
-      // NOTE: no LEO scored-chits celebration online yet. Scoring carried
-      // chits at home is not modelled server-side (the engine only awards
-      // chits; cashing is Stage 4 endgame scoring), so there is nothing
-      // authoritative to celebrate here. Solo runs it from cashHomeArrival.
+      // Scoring carried chits at home IS modelled server-side now (applyMove
+      // scores them BACK/FRONT on a LEO arrival). The confetti + scored coins
+      // fire from the snapshot diff in animateSnapshotChitsHome, not here, so
+      // the haul celebrates after the rocket has visibly slid home.
     }
     return ok;
   }
