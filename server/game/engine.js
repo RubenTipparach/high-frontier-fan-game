@@ -1529,6 +1529,36 @@ function applyBuildColony(state, op, player) {
 }
 
 // Ops that change the game and ride the per-turn undo stack. Each is a
+// Take a card from the library into the hand. Free Library / solo: a FREE
+// action at no aqua cost (op.free defaults true, op.cost defaults 0). M1's "Buy
+// Card" reuses this as the turn's OPERATION - send free:false to spend one op,
+// and op.cost to charge a price. Mirrors the sandbox addToHand guards (no crew,
+// no expansion card, no duplicates, not currently on the rocket) and also pulls
+// the card out of its shuffled deck so the library stays consistent.
+function applyBuyCard(state, op, player) {
+  const cardId = String(op.cardId || '');
+  const card = PATENTS_BY_ID[cardId];
+  if (!card) return fail('unknown_card');
+  if (card.type === 'gw-thruster') return fail('expansion_card');
+  if (CREW_BY_ID[cardId]) return fail('crew_card');
+  if ((player.hand || []).includes(cardId)) return fail('already_in_hand');
+  if ((player.rocket.stack || []).some((s) => s.id === cardId)) return fail('on_rocket');
+  const free = op.free !== false;             // default: free action (no op spent)
+  const cost = Math.max(0, Number(op.cost) | 0);  // default: 0 aqua
+  if (!free && player.opsRemaining <= 0) return fail('no_ops_left');
+  if (cost > 0 && (player.aqua | 0) < cost) return fail('cannot_pay');
+  // Pull it out of its deck if present (keeps the shuffled library consistent;
+  // a no-op in pure Free Library, where the deck is never drawn from).
+  const deck = state.decks[card.type];
+  if (deck) { const i = deck.indexOf(cardId); if (i >= 0) deck.splice(i, 1); }
+  player.hand.push(cardId);
+  if (cost > 0) player.aqua = (player.aqua | 0) - cost;
+  if (!free) player.opsRemaining -= 1;
+  const aquaTail = cost > 0 ? ` for ${cost} aqua` : '';
+  const opTail = free ? '' : ' (operation)';
+  return { ok: true, state, log: `${player.name} took ${card.name} from the library${aquaTail}${opTail}.` };
+}
+
 // pure (state, op, player) -> { ok, state, log } transform; the
 // dispatcher (not the handler) maintains turnActions / turnRedo.
 const FUNCTIONAL = {
@@ -1539,6 +1569,7 @@ const FUNCTIONAL = {
   BUILD_COLONY: applyBuildColony,
   MOVE: applyMove,
   BUILD_ROCKET: applyBuildRocket,
+  BUY_CARD: applyBuyCard,
   BOOST: applyBoost,
   TRANSFER: applyTransfer,
   TRANSFER_FUEL: applyTransferFuel,
@@ -1565,6 +1596,7 @@ function pickPayload(op) {
     case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, pickupChit: op.pickupChit !== false };
     case 'LOAD_GLORY': return {};
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face };
+    case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };
     case 'BOOST': return { cardIds: op.cardIds };
     case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from, to: op.to };
     case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount };

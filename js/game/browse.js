@@ -4118,8 +4118,15 @@ function openDeckTapModal(card, kind, { allowAuction = false, inspectOnly = fals
       const srcEl = cardEl;
       overlay.classList.add('is-flying');
       flyCardToHand(srcEl, card, () => {
-        const r = addToHand(card);
-        if (!r.ok) setStatus(`Can't add: ${r.reason}.`);
+        // Online (solo room, Free Library): the server owns the hand, so route
+        // through BUY_CARD - a free action at 0 cost here. The snapshot then
+        // hydrates the hand. Solo sandbox stays a local add.
+        if (_online) {
+          submitOnlineOp({ kind: 'BUY_CARD', cardId: card.id, free: true });
+        } else {
+          const r = addToHand(card);
+          if (!r.ok) setStatus(`Can't add: ${r.reason}.`);
+        }
       });
       // Fade the modal itself out in parallel with the flight so
       // the player's eye follows the card to the strip rather than
@@ -14350,7 +14357,7 @@ const MP_LOG_ICONS = {
   PICK_CREW: '🧑‍🚀', SET_FIRST_PLAYER: '🥇',
   END_TURN: '⏭', MOVE: '🛸', BURN: '🔥',
   SET_ACTIVE_THRUSTER: '🔥', SET_ACTIVE_PROSPECTOR: '⛏',
-  BUILD_ROCKET: '🚀', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',
+  BUILD_ROCKET: '🚀', BUY_CARD: '📚', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',
   INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧',
   ET_PRODUCE: '🏭', SITE_REFUEL: '💧',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
