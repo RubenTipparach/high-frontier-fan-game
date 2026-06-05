@@ -77,7 +77,7 @@ function slotMass(slot) {
   if (!slot || !slot.id) return 0;
   const p = PATENTS_BY_ID[slot.id];
   if (p) {
-    const f = (p.faces && p.faces.primary) || p;
+    const f = slotFace(slot, p);
     return (f.mass != null ? f.mass : p.mass) | 0;
   }
   const crew = CREW_BY_ID[slot.id];
@@ -311,20 +311,20 @@ function faceHasSolar(face) {
 }
 
 // Normalise a rocket's stack into the support-chain resolver's card shape
-// (mirror of rocket.js#chainCardsFromStack). `supplies` off the PRIMARY face,
-// `requires` / `thrustMod` / `fuelMod` off the INSTALLED face. Crew aren't power
-// sources (no requires), so they pull no chain. `therms` is unused server-side
-// (the server does not gate cooling), so it stays 0.
+// (mirror of rocket.js#chainCardsFromStack). Everything (supplies / requires /
+// thrustMod / fuelMod) reads the INSTALLED face, so a flipped dark-side card's
+// own stats drive the chain. Crew aren't power sources (no requires), so they
+// pull no chain. `therms` is unused server-side (the server does not gate
+// cooling), so it stays 0.
 function chainCardsFromRocket(rocket) {
   return rocket.stack.map((s) => {
     const c = PATENTS_BY_ID[s.id];
     const f = c ? slotFace(s, c) : {};
     const type = c ? c.type : (s.kind || 'crew');
-    const prim = (c && c.faces && c.faces.primary) || c || {};
     return {
       id: s.id,
       type,
-      supplies: prim.supplies || (c && c.supplies) || [],
+      supplies: (f && f.supplies) || (c && c.supplies) || [],
       requires: (f && f.requires) || (c && c.requires) || [],
       thrustMod: f ? f.thrustMod : undefined,
       fuelMod: f ? f.fuelMod : undefined,
@@ -422,7 +422,7 @@ function thrusterFuelPerBurn(rocket) {
 function slotRadHardness(slot) {
   const p = PATENTS_BY_ID[slot.id];
   if (p) {
-    const f = (p.faces && p.faces.primary) || p;
+    const f = slotFace(slot, p);
     return (f.radHardness != null ? f.radHardness : p.radHardness) | 0;
   }
   const crew = CREW_BY_ID[slot.id];

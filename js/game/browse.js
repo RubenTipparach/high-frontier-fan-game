@@ -5730,7 +5730,11 @@ function openRocketStackModal() {
       if (s.id === activeId) continue;
       const c = lookup(s.id);
       if (!c) continue;
-      const sup = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
+      // Read the INSTALLED face so a flipped (black-side) card's real supplies
+      // mark the support chips, matching isRocketActive().
+      const cf = (c.faces && c.faces[s.face === 'secondary' ? 'secondary' : 'primary'])
+        || (c.faces && c.faces.primary) || c;
+      const sup = (cf && cf.supplies) || c.supplies || [];
       for (const k of sup) supplied.add(k);
     }
     const totals = getStackTotals();
