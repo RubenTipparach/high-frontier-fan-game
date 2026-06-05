@@ -1209,9 +1209,29 @@ function applyProspect(state, op, player) {
   if (!provSlot) return fail('no_prospector');
   const kind = prospectorKind(provSlot);
   if (!kind) return fail('no_prospector');
-  // Raygun fires through line-of-sight: it can prospect the rocket's
-  // current site OR any site one edge away (and is free + unlimited).
-  // Missile / buggy must be AT the target.
+
+  // The op carries the turn it was planned for. A relayed or re-fired request
+  // that lands a turn late must not apply to a different board, so reject it
+  // as stale when the posted turn no longer matches the live one. (Older
+  // clients that omit it simply skip the guard.)
+  const curTurn = state.turn | 0;
+  const curRound = state.round | 0;
+  if (op.turn != null && Number(op.turn) !== curTurn) return fail('stale_turn');
+
+  // Idempotent retry: the SAME player scanning the SAME site on the SAME turn
+  // is a duplicate (a relayed or double-fired request). The claim is already
+  // on the board, so return it as valid instead of erroring, and never roll a
+  // second time. Empty log: the original scan already wrote the record.
+  const existing = state.discs[toSiteId];
+  if (existing
+      && existing.ownerId === player.profileId
+      && existing.turn === curTurn
+      && existing.round === curRound) {
+    return { ok: true, state, log: '' };
+  }
+
+  // Raygun fires through line of sight: it scans the rocket's own site or any
+  // site the beam reaches. Missile / buggy must be parked on the target.
   if (kind === 'raygun') {
     const here = player.rocket.siteId;
     const reachable = toSiteId === here || lineOfSightSites(here).has(toSiteId);
@@ -1219,10 +1239,14 @@ function applyProspect(state, op, player) {
   } else if (player.rocket.siteId !== toSiteId) {
     return fail('not_at_site');
   }
-  if (state.discs[toSiteId]) return fail('already_prospected');
+  if (existing) return fail('already_prospected');
   if (prospectorIsru(provSlot) > (site.hydration | 0)) return fail('isru_too_high');
-  // Prospect spends the turn's operation for every prospector kind.
-  if (player.opsRemaining <= 0) return fail('no_ops_left');
+
+  // The raygun's line-of-sight scan is a FREE action: it does NOT spend the
+  // turn's operation and can fire at any number of in-sight sites. Missile /
+  // buggy prospects ARE the turn's operation, so they still spend it.
+  const costsOp = kind !== 'raygun';
+  if (costsOp && player.opsRemaining <= 0) return fail('no_ops_left');
 
   const threshold = prospectThreshold(site);
   const gen = makeRng(state.seed, state.rng.cursor);
@@ -1234,15 +1258,17 @@ function applyProspect(state, op, player) {
     roll, threshold, kind,
     by: player.name,
     ownerId: player.profileId,
-    turn: state.turn,
+    turn: curTurn,
+    round: curRound,
     // The buggy may re-roll once, this turn, by its owner.
     canReroll: kind === 'buggy',
   };
-  player.opsRemaining -= 1;
+  if (costsOp) player.opsRemaining -= 1;
   const verb = success ? 'struck a claim at' : 'came up dry at';
+  const tail = costsOp ? '' : ' with a free raygun scan';
   return {
     ok: true, state,
-    log: `${player.name} rolled ${roll} vs ${threshold} and ${verb} ${site.name}.`,
+    log: `${player.name} rolled ${roll} vs ${threshold} and ${verb} ${site.name}${tail}.`,
   };
 }
 
@@ -1608,7 +1634,7 @@ function pickPayload(op) {
     case 'DISCARD': return { cardId: op.cardId };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
-    case 'PROSPECT': return { siteId: op.siteId };
+    case 'PROSPECT': return { siteId: op.siteId, turn: op.turn, round: op.round };
     case 'PROSPECT_REROLL': return { siteId: op.siteId };
     case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode };
     case 'DIRT_REFUEL': return {};

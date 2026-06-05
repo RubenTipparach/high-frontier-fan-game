@@ -2565,6 +2565,7 @@ function humanizeOnlineOpError(code, detail) {
     cannot_liftoff: 'Not enough thrust to lift off (and no factory here to assist).',
     cannot_land: 'Not enough thrust to land there (and no factory to assist).',
     raygun_out_of_range: 'The raygun has no line of sight to that site from here.',
+    stale_turn: 'That action was from a previous turn - the board has moved on.',
     no_disc: 'There is no prospect disc to re-roll.',
     not_buggy: 'Only a buggy prospector can re-roll.',
     already_rerolled: 'The buggy has already re-rolled this claim.',
@@ -9329,7 +9330,11 @@ function doProspect(site, prosp) {
   if (_online) {
     const siteId = toServerId(_onlineMaps, site.id);
     if (!siteId) { _onlineToast('That site is not on the map.', 'error'); return; }
-    submitOnlineOp({ kind: 'PROSPECT', siteId });
+    // Stamp the turn the scan was fired on so a relayed / re-fired raygun
+    // request for the same site this turn resolves as the same valid scan
+    // instead of bouncing. The raygun scan is a free action (no operation).
+    const snap = _onlineSnapshot || {};
+    submitOnlineOp({ kind: 'PROSPECT', siteId, turn: snap.turn, round: snap.round });
     return;
   }
   // Already-prospected sites are off-limits in the sandbox; the UI
