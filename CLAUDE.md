@@ -225,6 +225,55 @@ another card's stats while attached. The engine handles this via
 a `modifier` block on the modifying card; see
 `server/game/engine.js` (Stage 3+) for how those compose.
 
+## Support chains - modifier + cooling rules
+
+Cards power each other through a multi-hop **support chain**, not a
+single hop. A thruster names a power requirement (a `reactor-*`
+OR-group, or `gen-electric`); the card that supplies it may itself
+require a further power source, so the real chain runs e.g.
+THRUSTER -> GENERATOR -> REACTOR -> radiator. The reactor two hops
+back still belongs to the thruster's chain, so a one-hop "does this
+card directly supply the thruster" scan is WRONG: walk the whole chain.
+
+Three rules govern how the chain feeds the active thruster:
+
+1. **First reactor only.** The FIRST reactor encountered walking out
+   from the thruster is the ONLY reactor that modifies the thruster
+   (`thrustMod` / `fuelMod`). Reactors deeper in the chain power their
+   part of the chain but do NOT shift the thruster's stats.
+2. **Generators before that reactor modify.** Every generator in the
+   chain BEFORE the first reactor also modifies the thruster. A
+   generator AFTER the first reactor does not.
+3. **Dedicated reactor cooling.** The therms a reactor consumes cannot
+   be shared with any other therm requirement in the chain. Each
+   reactor reserves its own radiator cooling; a radiator's therms
+   counted toward one reactor can't also cover another. Dedicated
+   cooling is a REACTOR-only rule; non-reactor heat draws the shared
+   remainder.
+
+Circular dependencies are REAL in the card set (e.g. a generator that
+supplies `gen-radioisotope` feeding a reactor that requires it and
+supplies the `reactor-*` the generator needs). The chain walk must
+visit each card ONCE, so a cycle is detected and flagged but never
+breaks the walk or double-counts: a chain with a cycle is still valid.
+
+The resolver foundation is pure + shared (intended for both
+`js/game/rocket.js` and `server/game/engine.js`). It is the single
+source of truth for these rules: the chain work replaces the current
+one-hop modifier scan in `getActiveThrusterStats` and mirrors it on
+the server, rather than re-deriving the logic inline in either place.
+
+**TODO (next session): support-chain visualizer.** Still to build: the
+visualizer tool (graph view, the modifier path highlighted, cycles
+flagged), the engine integration of rules 1-3 above, plus two more
+visualizer-facing rules the user added: (4) show every support
+satisfied at all levels with check marks (all supports and all cards in
+the chain read as valid); (5) robonauts can run PARALLEL chains, and a
+thruster/missile robonaut serves both roles with ONE chain. The chain
+is player-wired (the visualizer assigns supplier -> consumer; the
+resolver accepts a wiring map). Build the engine rules and the
+visualizer together.
+
 ## Stages - build incrementally
 
 Verify each stage before starting the next. Don't conflate stages in a
