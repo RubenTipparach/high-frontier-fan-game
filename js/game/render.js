@@ -2796,33 +2796,21 @@ export class MapRenderer {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('🏭', sx, sy + 1);
-    }
-    // Colony biodomes. A colony sits BESIDE its factory (to the right) as a
-    // distinct teal geodesic-dome token, never overlapping the 🏭 chit. Drawn
-    // in its own pass off this._colonies so a colony also shows at the rare
-    // site that has a colony but no factory (the dome lands where the factory
-    // chit would be).
-    if (this._colonies) {
-      const factHalf = chitSize / 2;
-      const domeW = chitSize * 1.04;
-      const domeH = chitSize * 0.6;
-      for (const id in this._colonies) {
-        const site = this.data.byId[id];
-        if (!site) continue;
-        const fx = this.pan.x + site.x * eff;
-        const fy = this.pan.y + site.y * eff + chitOffset;
-        const cx = fx + factHalf + r * 0.55 + domeW / 2;
-        const baseY = fy + factHalf;
-        if (cx < -40 || cx > this.hostW + 40 || baseY < -40 || baseY > this.hostH + 40) continue;
-        this._drawColonyDome(ctx, cx, baseY, domeW, domeH);
+      // Colony biodome sits ON the factory chit (its base on the chit's top
+      // edge). Drawn from INSIDE the factory loop so there is exactly ONE dome
+      // per factory: an earlier separate pass keyed off this._colonies could
+      // paint a stray second dome when an optimistic local colony and the
+      // snapshot colony briefly disagreed on the site key.
+      if (this._colonies && this._colonies[id]) {
+        this._drawColonyDome(ctx, sx, sy - half + 1, chitSize * 1.1, chitSize * 0.66);
       }
     }
     ctx.restore();
   }
 
   // A colony biodome: a teal half-dome on a short platform with a faint
-  // geodesic lattice, drawn beside the factory chit. baseY is the ground
-  // line (level with the factory chit's bottom); the dome rises above it.
+  // geodesic lattice, drawn sitting on the factory chit. baseY is the ground
+  // line the dome rises from; the dome bulges upward from there.
   _drawColonyDome(ctx, cx, baseY, w, h) {
     const left = cx - w / 2, right = cx + w / 2;
     // platform slab under the dome
