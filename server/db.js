@@ -331,6 +331,10 @@ ensureColumn('lobbies', 'max_rounds', 'max_rounds INTEGER NOT NULL DEFAULT 5');
 //   economy:       'library' (free draws) or 'market' (auctioned)
 ensureColumn('lobbies', 'starting_aqua', 'starting_aqua INTEGER');
 ensureColumn('lobbies', 'economy', 'economy TEXT');
+// When a lobby was cancelled (admin "Cancel"), so the admin panel can list
+// cancelled rooms newest-cancelled-first. Nullable: only set on cancel,
+// cleared on restore; legacy cancelled rows fall back to created_at for sort.
+ensureColumn('lobbies', 'cancelled_at', 'cancelled_at INTEGER');
 // Idempotency key for room creation: a client retry / double-submit carries
 // the same key so the server returns the lobby it already made instead of a
 // duplicate. Nullable (legacy rows + non-idempotent callers); the partial
