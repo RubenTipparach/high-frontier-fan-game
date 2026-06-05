@@ -2566,7 +2566,6 @@ function humanizeOnlineOpError(code, detail) {
     cannot_land: 'Not enough thrust to land there (and no factory to assist).',
     raygun_out_of_range: 'The raygun has no line of sight to that site from here.',
     stale_turn: 'That action was from a previous turn - the board has moved on.',
-    move_after_prospect: 'You have prospected this turn - the ship is done moving until next turn.',
     no_disc: 'There is no prospect disc to re-roll.',
     not_buggy: 'Only a buggy prospector can re-roll.',
     already_rerolled: 'The buggy has already re-rolled this claim.',

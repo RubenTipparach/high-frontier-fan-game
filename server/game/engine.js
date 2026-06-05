@@ -465,11 +465,14 @@ function rocketAtLeo(player) {
 function applyMove(state, op, player) {
   // A dry-run (op.debug) skips the per-turn budget gate so the fuel breakdown
   // can be previewed any time (even with the move already spent / off-turn).
+  // One move per turn: spending it (movesRemaining -> 0) is the ONLY thing
+  // that blocks a second move - prospecting does NOT forfeit a move you have
+  // not taken yet. If you moved BEFORE a raygun scan, that move is spent and
+  // further movement is blocked (no_moves_left); if you scanned WITHOUT moving
+  // first, you may still take your one move afterward. (A move taken before a
+  // prospect also can't be undone once the prospect rolls - that's the roll
+  // barrier in applyUndo, not a move-after-prospect gate.)
   if (!op.debug && player.movesRemaining <= 0) return fail('no_moves_left');
-  // Prospecting ends your movement for the turn: once you have begun
-  // prospecting, all further movement is blocked (and the prior move can no
-  // longer be undone, since the prospect rolled). A dry-run still previews.
-  if (!op.debug && hasProspectedThisTurn(state)) return fail('move_after_prospect');
   // An empty rocket has no thruster and can't burn, so it can't leave
   // LEO. Enforcing this keeps the "empty rocket == at LEO" invariant
   // true: the only way off LEO is to build/board a thruster first.
@@ -1259,8 +1262,9 @@ function applyProspect(state, op, player) {
   // Prospecting is one operation to BEGIN: the first prospect of the turn
   // (any kind) spends the operation. Once begun, a raygun's line-of-sight
   // scan is free and unlimited - keep scanning in-sight sites at no cost.
-  // Missile / buggy must land on the target, and movement is locked after the
-  // first prospect, so they can never fire a free additional scan.
+  // Only the raygun scans for free; a missile / buggy prospect always costs
+  // the operation (it IS the operation), so once the turn's op is spent they
+  // can never fire a free additional scan.
   const begun = hasProspectedThisTurn(state);
   const free = begun && kind === 'raygun';
   if (!free && player.opsRemaining <= 0) return fail('no_ops_left');

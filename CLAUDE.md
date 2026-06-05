@@ -721,14 +721,19 @@ Server-authoritative engine in `server/game/engine.js`:
     operation to BEGIN prospecting. Once begun, a raygun's line-of-sight
     scan is FREE and UNLIMITED: a player keeps scanning in-sight sites at
     no extra operation. Missile / buggy still spend the operation (they
-    ARE the operation) and can't fire a free extra scan. Movement is
-    LOCKED once prospecting has begun (`move_after_prospect`), and the
-    prior move can no longer be undone (the prospect rolled). "Has begun"
-    reads off this turn's undo stack (a PROSPECT entry, reset each turn).
-    The PROSPECT op carries `turn` + `round`; a same-site, same-turn
-    re-submit is idempotent (no second roll), a stale turn is rejected.
-    (User decision 2026-06-05. The old engine comment calling the raygun
-    "free + unlimited" with no begin-cost was wrong; this is the rule.)
+    ARE the operation) and can't fire a free extra scan. Movement is the
+    normal one-move-per-turn resource and prospecting does NOT forfeit it:
+    if you have NOT moved yet you may still take your one move AFTER a
+    raygun scan; if you HAD already moved, that move is spent
+    (`no_moves_left`) so there is no further move, and it can no longer be
+    undone once the prospect rolls (the roll barrier in `applyUndo`, NOT a
+    move-after-prospect gate - that gate was removed). "Has begun" reads
+    off this turn's undo stack (a PROSPECT entry, reset each turn). The
+    PROSPECT op carries `turn` + `round`; a same-site, same-turn re-submit
+    is idempotent (no second roll), a stale turn is rejected. (User
+    decisions 2026-06-05: raygun is 1 op to activate then unlimited free
+    scans; movement is blocked only when already moved this turn, otherwise
+    still allowed after a scan.)
 - Industrialize: deliver a robonaut or crew + reactor to the site;
   flip prospect to factory (1 VP, generates patent income).
 - Refinery upgrade: deliver a refinery; factory becomes hydrated
