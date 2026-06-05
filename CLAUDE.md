@@ -131,6 +131,18 @@ for the common stats:
   / installed face**. Faces can carry their own stats so a
   flipped card behaves differently (e.g. a radiator opened vs
   stowed, or a thruster with a mode change).
+  - **ALWAYS read the INSTALLED face for functional logic** (not
+    `faces.primary`). A flipped card's mass, requires, supplies,
+    thrustMod / fuelMod, therms, and prospector kind are the
+    secondary face's, and 62 of 84 two-faced cards even differ in
+    mass. Use `installedFace(slot)` (client, rocket.js) /
+    `slotFace(slot, card)` (server, engine.js) keyed off
+    `slot.face`; both must agree so a flipped card's weight-class
+    band + fuel capacity match. Reading `faces.primary` for
+    supports / thrust / prospecting / industrialize was a recurring
+    bug (a black-side stack was checked against its white-side
+    requirements); don't reintroduce it. Display-only reads (the
+    card name, the Browse catalog grids) may stay on primary.
 - `flipOrientation` - `'standard'` (default) or `'rotated180'`.
   Radiators are typically `'rotated180'`: their secondary face is
   drawn upside-down, matching the published cards.
