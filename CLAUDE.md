@@ -734,6 +734,15 @@ Server-authoritative engine in `server/game/engine.js`:
     decisions 2026-06-05: raygun is 1 op to activate then unlimited free
     scans; movement is blocked only when already moved this turn, otherwise
     still allowed after a scan.)
+    Canonical move/prospect cases the engine is verified against (one move
+    per turn; a raygun scan never blocks a move you have not yet taken):
+    - Raygun scan first, NOT yet moved: the one move is still allowed
+      after the scan.
+    - Moved, THEN raygun scan: no further move (`no_moves_left`), and that
+      move can no longer be undone once the prospect rolled.
+    - No prospect, not yet moved: the move runs normally.
+    - Moved, no prospect: no further move (`no_moves_left`) - one move per
+      turn holds with or without a scan.
 - Industrialize: deliver a robonaut or crew + reactor to the site;
   flip prospect to factory (1 VP, generates patent income).
 - Refinery upgrade: deliver a refinery; factory becomes hydrated
