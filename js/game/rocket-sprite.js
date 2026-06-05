@@ -1,19 +1,17 @@
-// Pre-rendered rocket sprite. The peaked-silhouette path is
-// drawn once into an offscreen <canvas> per colour and the
-// resulting bitmap is reused as a single drawImage on the map.
-// Far cheaper than rebuilding the path each frame; the bitmap
-// is also resolution-independent (drawn at 2x DPR + downscaled
-// on draw, so it stays crisp).
-//
-// Five paint colours so each sandbox player can be visually
-// distinct. Yellow / mint / white / pink / purple were chosen
-// to match the card-type palette idiom (warm thruster peach,
-// reactor purple, refinery slate, robonaut pink, etc.).
+// Pre-rendered rocket sprite. A small CPU 3D model (a surface-of-revolution
+// core + four Soyuz-style strap-on boosters) is lit from real surface normals,
+// depth-sorted, and drawn as shaded polygons into an offscreen <canvas> ONCE
+// per colour, then reused as a single drawImage on the map. The bitmap is
+// drawn at 2x DPR and downscaled on draw so it stays crisp. The rocket tints
+// from the player's seat hex (no per-colour assets). View: "lean toward
+// camera" (matches the option signed off in the design pass). No windows.
 
 const SPRITE_W = 64;
 const SPRITE_H = 96;
 const DPR = 2;
 
+// Named palettes kept for any caller that still passes a colour name; the 3D
+// render only needs the base colour (it derives its own shading).
 export const ROCKET_COLOURS = {
   yellow: { base: '#facc15', light: '#fde68a', dark: '#a16207' },
   mint:   { base: '#86efac', light: '#d1fae5', dark: '#15803d' },
@@ -22,11 +20,6 @@ export const ROCKET_COLOURS = {
   purple: { base: '#a78bfa', light: '#ddd6fe', dark: '#5b21b6' },
 };
 
-// Lighten / darken a #rrggbb toward white / black by `amt` (0..1).
-// Used to synthesise a {base, light, dark} palette from an arbitrary
-// seat colour (the six crew-card hexes don't map to the named
-// palettes above, so a multiplayer rocket paints straight from its
-// player's assigned hex).
 function _clamp(n) { return Math.max(0, Math.min(255, Math.round(n))); }
 function _shade(hex, amt) {
   const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
@@ -35,91 +28,108 @@ function _shade(hex, amt) {
   let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
   if (amt >= 0) { r += (255 - r) * amt; g += (255 - g) * amt; b += (255 - b) * amt; }
   else { const k = 1 + amt; r *= k; g *= k; b *= k; }
-  return '#' + [_clamp(r), _clamp(g), _clamp(b)]
-    .map((v) => v.toString(16).padStart(2, '0')).join('');
+  return '#' + [_clamp(r), _clamp(g), _clamp(b)].map((v) => v.toString(16).padStart(2, '0')).join('');
 }
+function resolveBase(colour) {
+  if (colour && ROCKET_COLOURS[colour]) return ROCKET_COLOURS[colour].base;
+  if (/^#?[0-9a-f]{6}$/i.test(String(colour || '').trim())) return colour[0] === '#' ? colour : '#' + colour;
+  return ROCKET_COLOURS.white.base;
+}
+function hexRgb(hex) { const m = /([0-9a-f]{6})/i.exec(hex); const n = m ? parseInt(m[1], 16) : 0xffffff; return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
 
-// Resolve a colour token to a {base, light, dark} palette. Accepts a
-// named palette key OR a raw #rrggbb (synthesised). Falls back to
-// white when neither matches.
-function resolvePalette(colour) {
-  if (colour && ROCKET_COLOURS[colour]) return ROCKET_COLOURS[colour];
-  if (/^#?[0-9a-f]{6}$/i.test(String(colour || '').trim())) {
-    const base = colour[0] === '#' ? colour : '#' + colour;
-    return { base, light: _shade(base, 0.45), dark: _shade(base, -0.45) };
+// ---- vec3 + geometry (CPU 3D model: surface-of-revolution core + 4 booster cones) ----
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const scl = (a, s) => [a[0] * s, a[1] * s, a[2] * s];
+const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const norm = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+const rotZ = (p, a) => { const c = Math.cos(a), s = Math.sin(a); return [p[0] * c - p[1] * s, p[0] * s + p[1] * c, p[2]]; };
+const rotX = (p, a) => { const c = Math.cos(a), s = Math.sin(a); return [p[0], p[1] * c - p[2] * s, p[1] * s + p[2] * c]; };
+
+const RH = 150, RMAX = 23;
+function coreRadius(z) {                       // z in [0,1]; NO mid-bulge
+  if (z <= 0.5) return RMAX * (1 - 0.08 * (z / 0.5));
+  const t = (z - 0.5) / 0.5; return RMAX * 0.92 * Math.pow(1 - t, 0.82);
+}
+function coreFaces(nz = 26, nt = 36) {
+  const f = [];
+  for (let i = 0; i < nz; i++) {
+    const z0 = i / nz, z1 = (i + 1) / nz, r0 = coreRadius(z0), r1 = coreRadius(z1);
+    for (let j = 0; j < nt; j++) {
+      const a0 = 2 * Math.PI * j / nt, a1 = 2 * Math.PI * (j + 1) / nt;
+      f.push([[r0 * Math.cos(a0), r0 * Math.sin(a0), z0 * RH], [r0 * Math.cos(a1), r0 * Math.sin(a1), z0 * RH],
+              [r1 * Math.cos(a1), r1 * Math.sin(a1), z1 * RH], [r1 * Math.cos(a0), r1 * Math.sin(a0), z1 * RH]]);
+    }
   }
-  return ROCKET_COLOURS.white;
+  return f;
+}
+function coneFaces(apex, baseC, baseR, nseg = 18) {
+  const d = norm(sub(baseC, apex)); const up = Math.abs(d[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+  const u = norm(cross(d, up)), v = cross(d, u); const ring = [];
+  for (let i = 0; i < nseg; i++) { const a = 2 * Math.PI * i / nseg; ring.push(add(baseC, add(scl(u, baseR * Math.cos(a)), scl(v, baseR * Math.sin(a))))); }
+  const f = [];
+  for (let i = 0; i < nseg; i++) f.push([apex, ring[i], ring[(i + 1) % nseg]]);
+  const cap = []; for (let i = nseg - 1; i >= 0; i--) cap.push(ring[i]); f.push(cap);
+  return f;
+}
+function rocketFaces() {
+  let f = coreFaces();
+  const apex0 = [RMAX * 0.82, 0, 0.46 * RH], baseC0 = [RMAX * 1.48, 0, 0], baseR = RMAX * 0.62;
+  for (const phi of [Math.PI * 0.25, Math.PI * 0.75, Math.PI * 1.25, Math.PI * 1.75]) {
+    f = f.concat(coneFaces(rotZ(apex0, phi), rotZ(baseC0, phi), baseR));
+  }
+  return f;
 }
 
-const _cache = new Map();   // colourName -> HTMLCanvasElement
+const L = norm([-0.5, -0.5, 0.62]);            // light: upper-left, toward viewer
+const AZ = 0.5, EL = 0.42;                      // "lean toward camera"
+const view = (p) => rotX(rotZ(p, AZ), EL);
 
-function paintRocket(ctx, w, h, palette) {
-  // All coordinates relative to a [0..w, 0..h] box. Body is a
-  // tapered silhouette (narrow at the top, slightly wider at
-  // the base) with side fins flaring out near the bottom.
-  const cx = w / 2;
-  const noseY = h * 0.04;
-  const shoulderY = h * 0.22;
-  const finTopY = h * 0.72;
-  const baseY = h * 0.92;
-  const bodyTopHalf = w * 0.18;     // half-width at the shoulder
-  const bodyBaseHalf = w * 0.22;
-  const finHalf = w * 0.42;
+const _cache = new Map();   // colour token -> HTMLCanvasElement
 
-  // Body (base fill)
-  ctx.fillStyle = palette.base;
-  ctx.strokeStyle = palette.dark;
-  ctx.lineWidth = w * 0.04;
-  ctx.lineJoin = 'round';
-  ctx.beginPath();
-  ctx.moveTo(cx, noseY);
-  ctx.lineTo(cx + bodyTopHalf, shoulderY);
-  ctx.lineTo(cx + bodyBaseHalf, finTopY);
-  ctx.lineTo(cx + finHalf, baseY);
-  ctx.lineTo(cx - finHalf, baseY);
-  ctx.lineTo(cx - bodyBaseHalf, finTopY);
-  ctx.lineTo(cx - bodyTopHalf, shoulderY);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-
-  // Highlight strip on the left side of the body - sells the
-  // "lit from one direction" 3D feel without raster lighting.
-  ctx.fillStyle = palette.light;
-  ctx.beginPath();
-  ctx.moveTo(cx - bodyTopHalf * 0.55, shoulderY + (noseY - shoulderY) * 0.45);
-  ctx.lineTo(cx - bodyTopHalf * 0.15, shoulderY * 0.45 + noseY * 0.55);
-  ctx.lineTo(cx - bodyBaseHalf * 0.20, finTopY);
-  ctx.lineTo(cx - bodyBaseHalf * 0.60, finTopY);
-  ctx.closePath();
-  ctx.fill();
-
-  // Window porthole near the shoulder.
-  ctx.fillStyle = palette.dark;
-  ctx.beginPath();
-  ctx.arc(cx, shoulderY + (finTopY - shoulderY) * 0.18, w * 0.07, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = palette.light;
-  ctx.beginPath();
-  ctx.arc(cx - w * 0.018, shoulderY + (finTopY - shoulderY) * 0.18 - w * 0.018,
-          w * 0.034, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Engine bell (darker base patch at the bottom centre)
-  ctx.fillStyle = palette.dark;
-  const bellW = w * 0.18;
-  ctx.fillRect(cx - bellW / 2, baseY - h * 0.04, bellW, h * 0.04);
+function paintRocket(ctx, w, h, base) {
+  const rgb = hexRgb(base);
+  const faces = rocketFaces().map((f) => f.map(view));
+  let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
+  for (const vp of faces) for (const p of vp) {
+    const x = p[0], y = -p[2];
+    if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y;
+  }
+  const s = Math.min((w * 0.92) / (maxX - minX), (h * 0.94) / (maxY - minY));
+  const ox = w / 2 - ((minX + maxX) / 2) * s;
+  const oy = h * 0.97 - maxY * s;               // base near the bottom of the box
+  const drawn = [];
+  for (const vp of faces) {
+    let N = norm(cross(sub(vp[1], vp[0]), sub(vp[2], vp[0])));
+    if (N[1] > 0) N = scl(N, -1);               // orient toward camera (-y)
+    const diff = Math.max(0, dot(N, L));
+    const rd = sub(scl(N, 2 * dot(N, L)), L); const spec = Math.pow(Math.max(0, dot(rd, [0, -1, 0])), 18);
+    const I = 0.42 + 0.72 * diff, sp = 0.5 * spec * 255;
+    const col = `rgb(${_clamp(rgb[0] * I + sp)},${_clamp(rgb[1] * I + sp)},${_clamp(rgb[2] * I + sp)})`;
+    const depth = vp.reduce((a, p) => a + p[1], 0) / vp.length;
+    const pts = vp.map((p) => [ox + p[0] * s, oy + (-p[2]) * s]);
+    drawn.push({ depth, pts, col });
+  }
+  drawn.sort((a, b) => b.depth - a.depth);       // painter's: far first
+  for (const d of drawn) {
+    ctx.beginPath();
+    ctx.moveTo(d.pts[0][0], d.pts[0][1]);
+    for (let i = 1; i < d.pts.length; i++) ctx.lineTo(d.pts[i][0], d.pts[i][1]);
+    ctx.closePath();
+    ctx.fillStyle = d.col; ctx.fill();
+    ctx.strokeStyle = d.col; ctx.lineWidth = 0.6; ctx.stroke();   // seal facet seams
+  }
 }
 
 export function getRocketSprite(colourName) {
   if (_cache.has(colourName)) return _cache.get(colourName);
-  const palette = resolvePalette(colourName);
   const cv = document.createElement('canvas');
-  cv.width  = SPRITE_W * DPR;
+  cv.width = SPRITE_W * DPR;
   cv.height = SPRITE_H * DPR;
   const ctx = cv.getContext('2d');
   ctx.scale(DPR, DPR);
-  paintRocket(ctx, SPRITE_W, SPRITE_H, palette);
+  paintRocket(ctx, SPRITE_W, SPRITE_H, resolveBase(colourName));
   _cache.set(colourName, cv);
   return cv;
 }
