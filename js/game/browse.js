@@ -86,6 +86,7 @@ import {
 import {
   findColonizeOptions, openColonizePicker,
 } from './colonize.js';
+import { openDeliveryPicker } from './delivery.js';
 import {
   getOutpost, getOutposts, getAvailableOutpostSlots,
   createOutpost, dissolveOutpost,
@@ -12249,30 +12250,47 @@ function showSitePopupFor(site) {
     // A colony already here -> the colonize option is omitted (no disabled
     // "Colonized" row); the dome on the factory shows the colony.
   }
-  // Delivery action (rulebook). Ship a Black-Side card from an outpost at
-  // your factory back to LEO. Cost: zones-from-Earth x2 (+1 if site
-  // number > 7) water, paid from the outpost's tank. One button per
-  // deliverable card. Costs the turn's operation.
+  // Delivery action (rulebook). Ship a Black-Side card from an outpost at your
+  // factory back to LEO. Cost: zones-from-Earth x2 (+1 if site number > 7)
+  // water, paid from the outpost's tank. Costs the turn's operation. ONE
+  // "Deliver..." button opens a picker listing every deliverable card.
   {
     const factory = getFactory(site.id);
     if (factory && factory.ownerId === myOwnerId()) {
       const cost = deliveryCost(site);
+      const items = [];
       for (const op of Object.values(getOutposts())) {
         if (op.siteId !== site.id) continue;
         for (const c of (op.cards || [])) {
           if (c.face !== 'secondary') continue;
           const card = PATENTS_BY_ID[c.id];
           const afford = (Number(op.tank) || 0) >= cost;
-          actions.push({
-            label: `📦 Deliver ${card ? card.name : c.id} (-${cost} water)`,
-            variant: afford ? 'rocket' : 'secondary',
+          items.push({
+            letter: op.letter, cardId: c.id, name: card ? card.name : c.id,
+            note: afford ? `Outpost ${op.letter} · -${cost} water`
+              : `Outpost ${op.letter} needs ${cost} water (has ${op.tank | 0})`,
             disabled: !afford,
-            title: afford
-              ? `Ship this Black-Side card to LEO for ${cost} water from Outpost ${op.letter}.`
-              : `Outpost ${op.letter} needs ${cost} water to deliver (has ${op.tank | 0}).`,
-            onClick: () => { if (!afford) return; doDelivery(site, op.letter, c.id); _renderer.clearSitePopup(); },
           });
         }
+      }
+      if (items.length) {
+        const anyAfford = items.some((it) => !it.disabled);
+        actions.push({
+          label: `📦 Deliver… (${items.length})`,
+          variant: anyAfford ? 'rocket' : 'secondary',
+          disabled: !anyAfford,
+          title: anyAfford
+            ? `Pick a Black-Side card to ship to LEO (${cost} water from its outpost).`
+            : `No outpost here has the ${cost} water to deliver.`,
+          onClick: () => {
+            if (!anyAfford) return;
+            _renderer.clearSitePopup();
+            openDeliveryPicker({
+              siteName: site.name, items,
+              onCommit: (it) => doDelivery(site, it.letter, it.cardId),
+            });
+          },
+        });
       }
     }
   }
