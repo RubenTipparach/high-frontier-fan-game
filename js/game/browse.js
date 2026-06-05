@@ -8727,9 +8727,11 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         <g class="tank-ticks"></g>
       </svg>
       <div class="fuel-tank-readout">
-        <strong class="tank-now">${fmtWater(fromW)}</strong>
-        <span>/</span>
-        <strong class="tank-cap">${cap}</strong>
+        <div class="fuel-tank-amount">
+          <strong class="tank-now">${fmtWater(fromW)}</strong>
+          <span class="tank-sep">/</span>
+          <strong class="tank-cap">${cap}</strong>
+        </div>
         <em class="muted">water</em>
       </div>
     </div>

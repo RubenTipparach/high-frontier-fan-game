@@ -683,13 +683,21 @@
 .fuel-tank-readout {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   font-variant-numeric: tabular-nums;
   /* Fixed footprint: the readout never changes width as the water number
      grows/shrinks, so the centered stage (and the tank) never shift. The
      number's font scales down (JS) to stay inside this box. */
-  flex: 0 0 116px;
+  flex: 0 0 132px;
   overflow: hidden;
+}
+/* "5 / 31" on ONE line (current / cap), with the WATER label beneath. */
+.fuel-tank-amount {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  max-width: 100%;
+  white-space: nowrap;
 }
 .fuel-tank-readout strong.tank-now {
   /* The number's font may scale freely (JS shrinks long values) - it lives in
@@ -698,12 +706,11 @@
   line-height: 1;
   color: #7dd3fc;
   white-space: nowrap;
-  max-width: 100%;
 }
-.fuel-tank-readout span {
-  font-size: 18px;
+.fuel-tank-readout .tank-sep {
+  font-size: 20px;
   color: var(--ink-dim);
-  margin: 4px 0;
+  margin: 0;
 }
 .fuel-tank-readout strong.tank-cap {
   font-size: 22px;

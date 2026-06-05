@@ -755,7 +755,17 @@ export function cardGlanceSummary(card, faceName = 'primary') {
     if (therms != null) stats.push(`🌡 ${txt(therms)} therm${therms === 1 ? '' : 's'}`);
   } else if (type === 'crew') {
     if (fdata.role) stats.push(txt(cap(fdata.role)));
-    if (fdata.thruster && fdata.thruster.thrust != null) stats.push(thrustCircleGlyph(fdata.thruster.thrust));
+    // Crew that doubles as a thruster reads like a thruster: pink thrust
+    // circle + fuel droplet (rock for a dirt thruster) + afterburn.
+    const t = fdata.thruster;
+    if (t && t.thrust != null) {
+      stats.push(thrustCircleGlyph(t.thrust));
+      const fuel = t.fuelPerBurn ?? t.fuel;
+      if (fuel != null) {
+        stats.push(fuelDropletGlyph(Number.isInteger(fuel) ? fuel : fuel.toFixed(2), !!t.dirt));
+      }
+      if (t.afterburn) stats.push('🔥');
+    }
   }
   const isru = propByKey('isru');
   if (isru && isru.value != null) stats.push(`ISRU ${txt(isru.value)}`);
