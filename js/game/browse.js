@@ -60,14 +60,14 @@ import { ZONE_POLYGONS } from '../../data/zones.js';
 import {
   renderCard, thrustVisual, attachTipsTo,
   REQUIREMENT_VIS, REQ_SUPPLIER_TYPE,
-  svgSunChip, svgBallerinaChip,
+  svgSunChip, svgBallerinaChip, cardGlanceSummary,
 } from './card-ui.js';
 import {
   logAction, getActions, getHistory, popLastOfType,
   commitTurn as commitLogTurn, resetLog, onChange as onLogChange,
 } from './mission-log.js';
 import {
-  awardChitForZone, revokeChitForZone, cashInChits, uncashChits,
+  awardChitForZone, revokeChitForZone, cashInChits, uncashChits, cashHomeArrival,
   resolveChitsFront, resolveChitsForCrew,
   getChits, getClaimedChits, getVps, getChitSides,
   isZoneVisited, resetGlory,
@@ -86,6 +86,7 @@ import {
 import {
   findColonizeOptions, openColonizePicker,
 } from './colonize.js';
+import { openDeliveryPicker } from './delivery.js';
 import {
   getOutpost, getOutposts, getAvailableOutpostSlots,
   createOutpost, dissolveOutpost,
@@ -308,14 +309,18 @@ export function mountBrowse(opts = {}) {
     onRocketChange(syncSandboxRocket);
     onRocketChange(refreshOpenSitePopup);
     onRocketChange(syncFocusedSite);
-    // Loaded glory chits change the 🏆 badge on the rocket; repaint it when
-    // a chit loads (landing) or unloads (undo / cash-in).
+    // Loaded glory chits change the 🏆 badge on the rocket AND the gold
+    // coin on any outpost whose crew carries one; repaint both when a chit
+    // loads (landing), moves with its crew, or unloads (undo / cash-in).
     onGloryChange(syncSandboxRocket);
-    // Per-crew chit reconciliation: when a crew leaves the rocket by
-    // any path (transfer / decommission / back-to-hand), its carried
-    // chits flip face-up to FRONT. Colonise is handled explicitly
-    // (and suppressed here) so its rollback path stays clean.
+    onGloryChange(syncOutposts);
+    // Per-crew chit reconciliation: when a crew leaves PLAY entirely
+    // (decommission / discard - from the rocket OR an outpost), its carried
+    // chits flip face-up to FRONT. A crew merely moving to an outpost keeps
+    // its chit (crewInPlay covers every stack). Colonise is handled
+    // explicitly (and suppressed here) so its rollback path stays clean.
     onRocketChange(reconcileChitOwners);
+    onOutpostsChange(reconcileChitOwners);
     onDiscsChange(syncDiscs);
     onDiscsChange(refreshOpenSitePopup);
     // Turn-clock changes (end-turn, consumeMove, refundMove)
@@ -2238,6 +2243,25 @@ function renderMpPlayer(p, isMe, isActive) {
   // everywhere.
   stats.textContent = `📍${onlineSiteLabel(rkt.siteId)} · 💧${p.aqua || 0} · ${vp}vp`;
   head.append(dot, name, stats);
+  // Per-player "All cards" overview button, headed by this player's name +
+  // seat colour. Their hand stays secret (shown as a count); LEO / Rocket /
+  // Outpost cards are open information, same as the per-stack inspector below.
+  const cardsBtn = document.createElement('button');
+  cardsBtn.type = 'button';
+  cardsBtn.className = 'mp-player-cards';
+  cardsBtn.textContent = '📚';
+  cardsBtn.title = `Show all of @${p.name}'s cards`;
+  cardsBtn.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    openAllCardsView({
+      title: '@' + p.name,
+      titleColor: p.color || null,
+      locs: collectOwnedCardsFromPlayer(p, isMe),
+    });
+  });
+  const headRow = document.createElement('div');
+  headRow.className = 'mp-player-headrow';
+  headRow.append(head, cardsBtn);
   const detail = document.createElement('div');
   detail.className = 'mp-player-detail';
   detail.hidden = true;
@@ -2248,7 +2272,7 @@ function renderMpPlayer(p, isMe, isActive) {
       detail.dataset.built = '1';
     }
   });
-  wrap.append(head, detail);
+  wrap.append(headRow, detail);
   return wrap;
 }
 
@@ -2479,6 +2503,11 @@ function humanizeOnlineOpError(code, detail) {
     tank_full: 'The rocket tank is full.',
     no_water: 'No water in the tank to cash out.',
     unknown_card: 'That card does not exist.',
+    already_in_hand: 'That card is already in your hand.',
+    on_rocket: 'That card is on your rocket - pull it back first.',
+    crew_card: 'Crew is chosen at New game, not taken from the library.',
+    expansion_card: 'That is an expansion card (coming soon).',
+    cannot_pay: 'Not enough aqua for that card.',
     crew_already_picked: 'You have already picked your starting crew.',
     crew_draft_closed: 'Crew picks are locked - the game has started.',
     awaiting_crew_picks: 'Waiting for every player to pick a starting crew.',
@@ -2520,7 +2549,6 @@ function humanizeOnlineOpError(code, detail) {
     not_water_fuel: 'Dirt has no cash value - only water converts back to aqua.',
     no_thruster: 'Activate a thruster first.',
     already_dirt_refueled: 'This crew dirt thruster already took its 1 dirt FT this turn.',
-    no_outpost: 'No outpost there to deliver from.',
     not_in_outpost: 'That card is not in the outpost.',
     not_black_side: 'Only a Black-Side (installed) card can be delivered.',
     insufficient_outpost_water: 'The outpost doesn\'t have enough water to pay the delivery cost.',
@@ -2536,7 +2564,8 @@ function humanizeOnlineOpError(code, detail) {
     nothing_decommissioned: 'Nothing decommissioned (crew can\'t return to the hand).',
     cannot_liftoff: 'Not enough thrust to lift off (and no factory here to assist).',
     cannot_land: 'Not enough thrust to land there (and no factory to assist).',
-    raygun_out_of_range: 'The raygun can only scan your site or one adjacent to it.',
+    raygun_out_of_range: 'The raygun has no line of sight to that site from here.',
+    stale_turn: 'That action was from a previous turn - the board has moved on.',
     no_disc: 'There is no prospect disc to re-roll.',
     not_buggy: 'Only a buggy prospector can re-roll.',
     already_rerolled: 'The buggy has already re-rolled this claim.',
@@ -2729,6 +2758,19 @@ function wireHandStrip() {
       setStatus('🃏 Card Market mode: drag-to-hand is disabled. Open the 🛒 Cart tab or use Research Auction at LEO.');
       return;
     }
+    // Online (solo, Free Library): the server owns the hand, so route the pick
+    // through BUY_CARD (free action, 0 cost) instead of a local-only add that
+    // the next snapshot would wipe. The snapshot hydrates the hand.
+    if (_online) {
+      if (isInHand(card.id)) {
+        host.classList.add('flash-error');
+        setTimeout(() => host.classList.remove('flash-error'), 700);
+        return;
+      }
+      addToHand(card);   // optimistic; BUY_CARD makes it authoritative
+      submitOnlineOp({ kind: 'BUY_CARD', cardId: card.id, free: true });
+      return;
+    }
     const r = addToHand(card);
     if (!r.ok) {
       host.classList.add('flash-error');
@@ -2905,6 +2947,29 @@ function wireHandStrip() {
   };
   const commitBtn = document.getElementById('hand-boost-commit');
   if (commitBtn) commitBtn.addEventListener('click', commitBoost);
+
+  // "All cards" overview button in the hand header: a read-only audit of every
+  // card the player owns, grouped by location (Hand / LEO / Rocket / Outposts)
+  // with each location's water and glory chits.
+  const handHeader = strip.querySelector('.hand-header');
+  if (handHeader && !handHeader.querySelector('.hand-all-cards')) {
+    const allBtn = document.createElement('button');
+    allBtn.type = 'button';
+    allBtn.className = 'hand-all-cards';
+    allBtn.textContent = '📚 All cards';
+    allBtn.title = 'Show every card you own, grouped by location';
+    allBtn.addEventListener('click', () => {
+      // Online: tint the header with my own seat colour + name.
+      const me = (_online && _onlineMe && _onlineSnapshot)
+        ? (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id) : null;
+      openAllCardsView({
+        title: me ? '@' + me.name : 'All cards',
+        titleColor: me ? me.color : null,
+        locs: collectOwnedCardsLocal(),
+      });
+    });
+    handHeader.appendChild(allBtn);
+  }
 
   // The old #hand-stack-open and #hand-stack-locate top-level
   // buttons folded into the per-stack chips that the new
@@ -3450,12 +3515,14 @@ function openUnifiedStackInspector(stackId) {
       if (!op) { close(); return; }
       const factory = getFactory(op.siteId);
       const colony  = getColony(op.siteId);
+      const carriedChits = chitsOnOutpostCount(letter);
       statsHtml = `
         <div class="stack-inspector-stat-row">
           <div class="stack-inspector-stat"><span class="muted">Cards</span><strong>${esc(String(cards.length))}</strong></div>
           <div class="stack-inspector-stat"><span class="muted">Water FT</span><strong class="stat-water">${esc(String(op.tank))} 💧</strong></div>
           <div class="stack-inspector-stat"><span class="muted">Factory</span><strong>${factory ? `🏭 <span class="industrialize-spectral-badge spectral-${esc(factory.spectralType)}">${esc(factory.spectralType)}</span>` : '<span class="muted">none</span>'}</strong></div>
           <div class="stack-inspector-stat"><span class="muted">Colony</span><strong>${colony ? '🌐 dome' : '<span class="muted">none</span>'}</strong></div>
+          ${carriedChits ? `<div class="stack-inspector-stat"><span class="muted">Glory chits</span><strong title="Carried by the crew stationed here; rides home for VP when they return to LEO">🎖 ${carriedChits}</strong></div>` : ''}
         </div>`;
     }
 
@@ -4069,10 +4136,20 @@ function openDeckTapModal(card, kind, { allowAuction = false, inspectOnly = fals
       // ghost survives the close.
       const srcEl = cardEl;
       overlay.classList.add('is-flying');
-      flyCardToHand(srcEl, card, () => {
-        const r = addToHand(card);
-        if (!r.ok) setStatus(`Can't add: ${r.reason}.`);
-      });
+      if (_online) {
+        // Land it in the hand NOW (optimistic) and fire BUY_CARD immediately -
+        // not from the flight callback - so the op always sends and the card
+        // doesn't wait on a round-trip. BUY_CARD is a free action at 0 cost in
+        // Free Library; the snapshot reconciles (and reverts + toasts on error).
+        addToHand(card);
+        submitOnlineOp({ kind: 'BUY_CARD', cardId: card.id, free: true });
+        flyCardToHand(srcEl, card, () => {});
+      } else {
+        flyCardToHand(srcEl, card, () => {
+          const r = addToHand(card);
+          if (!r.ok) setStatus(`Can't add: ${r.reason}.`);
+        });
+      }
       // Fade the modal itself out in parallel with the flight so
       // the player's eye follows the card to the strip rather than
       // getting stuck on a still-open dialog.
@@ -4097,7 +4174,7 @@ function openDeckTapModal(card, kind, { allowAuction = false, inspectOnly = fals
 // actions - Discard (pop back to the deck), Exo produce (will
 // need a factory location once Stage-3 builds them), and Add to
 // stack (push onto the LEO rocket).
-function openCardModal(card, kind, slotIdx) {
+function openCardModal(card, kind, slotIdx, { readOnly = false } = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay';
   const close = () => overlay.remove();
@@ -4115,6 +4192,17 @@ function openCardModal(card, kind, slotIdx) {
   });
   cardEl.classList.add('card-modal-card');
   panel.appendChild(cardEl);
+
+  // Read-only inspection (e.g. the All cards overview): show the card and its
+  // Flip, but NONE of the act-on-card buttons (Discard / Free Market / Exo /
+  // Boost). Mirrors the crew path's mount + Esc handling.
+  if (readOnly) {
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+    const onKeyRO = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKeyRO); } };
+    document.addEventListener('keydown', onKeyRO);
+    return;
+  }
 
   const actions = document.createElement('div');
   actions.className = 'card-modal-actions';
@@ -4188,7 +4276,7 @@ function openCardModal(card, kind, slotIdx) {
   const cardSpectral = card.spectralType || 'C';
   const exoSite = (kind !== 'crew') ? getRocketSite() : null;
   const exoFactory = exoSite ? getFactory(exoSite.id) : null;
-  const exoOwned = exoFactory && exoFactory.ownerId === SANDBOX_OWNER_ID;
+  const exoOwned = exoFactory && exoFactory.ownerId === myOwnerId();
   const exoSpectralOk = exoOwned && exoFactory.spectralType === cardSpectral;
   const exoOutposts = exoSite
     ? Object.values(getOutposts()).filter((o) => o.siteId === exoSite.id) : [];
@@ -4405,6 +4493,12 @@ let _manualOriginId = null;
 let _manualDir = null;          // direction we entered the tip on
 let _manualPivotsUsed = 0;
 let _manualPirouettes = 0;      // free pivots remaining (bonusPivots)
+// Solo manual travel: each hop slides the rocket sprite forward one segment so
+// the player watches the ship advance one segment at a time as they plot. The
+// state isn't committed until Move (one move per turn), so the commit animation
+// is then snapped (_fastMoveAnim) to avoid re-flying a route already walked.
+let _manualPreviewed = false;
+let _fastMoveAnim = false;
 function manualTipId() {
   if (_plannedRoute && _plannedRoute.length) {
     return _plannedRoute[_plannedRoute.length - 1].to;
@@ -4439,9 +4533,12 @@ function enterManualMoveMode() {
   if (_renderer) {
     _renderer.setRoute(null);
     _renderer.setRouteEndpoints(_manualOriginId, _manualOriginId);
+    // Make route waypoints (hohmann / lagrange / burn) tappable so the player
+    // can plot INTO a Hohmann transfer, not just between landable sites.
+    _renderer.setRoutingHit(true);
   }
   const clearBtn = document.getElementById('route-clear');
-  if (clearBtn) { clearBtn.hidden = false; clearBtn.textContent = '✕ Cancel'; }
+  if (clearBtn) { clearBtn.hidden = false; clearBtn.textContent = '✕ Stop'; }
   manualMoveStatus();
 }
 function exitManualMoveMode() {
@@ -4452,6 +4549,16 @@ function exitManualMoveMode() {
   _manualDir = null;
   _manualPivotsUsed = 0;
   _manualPirouettes = 0;
+  // Per-hop preview may have walked the sprite forward; if the player bailed
+  // without committing a move, snap it back to the real rocket position.
+  // (On a committed move moveRocket has already cleared _manualPreviewed, so
+  // this leaves the ship at its new site.)
+  const previewed = _manualPreviewed;
+  _manualPreviewed = false;
+  if (_renderer) {
+    _renderer.setRoutingHit(false);
+    if (previewed && !_rocketAnimating) syncSandboxRocket();
+  }
   const clearBtn = document.getElementById('route-clear');
   if (clearBtn) clearBtn.textContent = 'Clear route';
 }
@@ -4462,9 +4569,9 @@ function manualMoveStatus() {
     ? ` <em class="muted">(${_manualPirouettes} free pivot${_manualPirouettes === 1 ? '' : 's'} ready)</em>`
     : '';
   if (_manualBudget <= 0) {
-    setStatus(`✋ Manual: <strong>${placed}</strong> hop${placed === 1 ? '' : 's'} plotted, <strong>0</strong>/${_manualBudgetMax} burns left. Tap <strong>🛸 Move</strong> or Cancel.`);
+    setStatus(`✋ Manual: <strong>${placed}</strong> hop${placed === 1 ? '' : 's'} plotted, <strong>0</strong>/${_manualBudgetMax} burns left. Tap <strong>🛸 Move</strong> to fly, or <strong>✕ Stop</strong>.`);
   } else {
-    setStatus(`✋ Manual: <strong>${_manualBudget}</strong>/${_manualBudgetMax} burns left.${pirouetteHint} Tap an adjacent site to extend.`);
+    setStatus(`✋ Manual: <strong>${_manualBudget}</strong>/${_manualBudgetMax} burns left.${pirouetteHint} Tap an adjacent node (a site or a Hohmann dot) to advance one hop. <strong>🛸 Move</strong> to fly, <strong>✕ Stop</strong> to cancel.`);
   }
 }
 // Cost calculator for a single manual hop. Returns:
@@ -4537,6 +4644,15 @@ function manualAppendSegment(toId) {
   if (_renderer) {
     _renderer.setRoute(_plannedRoute);
     _renderer.setRouteEndpoints(_manualOriginId, toId);
+  }
+  // Solo: slide the rocket sprite forward one hop so the player watches it
+  // advance one segment at a time. Nothing commits until Move (one move per
+  // turn); on commit the already-walked route snaps (_fastMoveAnim) instead of
+  // re-flying. Skipped online, where the sprite tracks the authoritative
+  // snapshot after the move resolves.
+  if (!_online && _renderer && !_rocketAnimating) {
+    _manualPreviewed = true;
+    animateRocketAlong([{ from: tipId, to: toId }], 260);
   }
   manualMoveStatus();
   return true;
@@ -5615,7 +5731,11 @@ function openRocketStackModal() {
       if (s.id === activeId) continue;
       const c = lookup(s.id);
       if (!c) continue;
-      const sup = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
+      // Read the INSTALLED face so a flipped (black-side) card's real supplies
+      // mark the support chips, matching isRocketActive().
+      const cf = (c.faces && c.faces[s.face === 'secondary' ? 'secondary' : 'primary'])
+        || (c.faces && c.faces.primary) || c;
+      const sup = (cf && cf.supplies) || c.supplies || [];
       for (const k of sup) supplied.add(k);
     }
     const totals = getStackTotals();
@@ -7708,6 +7828,32 @@ function doIncomeOp() {
   });
 }
 
+// Pass the turn without taking any other operation. Passing defaults to
+// Income, so the player banks +1 aqua rather than wasting the turn's
+// operation. Online: the server credits the income on the no-op END_TURN
+// (see engine.js#applyEndTurn). Solo: credit it locally, then end the turn
+// through the existing toolbar handler (the op is spent by then, so the
+// button ends the turn instead of reopening the ops menu).
+async function passTurn() {
+  if (_online) {
+    await submitOnlineOp({ kind: 'END_TURN' });
+    return;
+  }
+  if (getOpsRemaining() > 0) {
+    addAqua(INCOME_AQUA);
+    consumeOp();
+    setStatus(`💰 Passed and took income: <strong>+${INCOME_AQUA}</strong> aqua. Bank now <strong>${esc(String(getAqua()))}</strong>.`);
+    logAction({
+      type: 'income',
+      icon: '💰',
+      summary: `Passed and took income: +${INCOME_AQUA} aqua (bank ${getAqua()})`,
+      undoable: false,
+      data: { delta: INCOME_AQUA, bankAfter: getAqua() },
+    });
+  }
+  document.getElementById('turn-end')?.click();
+}
+
 // Operations menu - opened by tapping the toolbar "op:N" tag. The
 // player's main decision aid: it lists what they can spend their
 // one operation on this turn, with the always-available ops as
@@ -7761,6 +7907,12 @@ function openOpsMenu() {
       handN > 0 ? 'Sell a hand card for aqua. Costs one operation.' : 'No hand cards to sell.',
       doFreeMarket, handN > 0);
   }
+  // Pass: take no other operation. Passing banks income (+1 aqua) and ends
+  // the turn in one tap - the default when you don't want to spend the op
+  // on anything else.
+  addOp('⏭ Pass &amp; take income (+1 aqua)',
+    'Take no other operation: bank +1 aqua and end your turn.',
+    passTurn);
 
   // Site-op shortcuts: sites where a site-op is possible (your
   // factories - refuel / ET / colonize; claimed discs without a
@@ -7778,16 +7930,22 @@ function openOpsMenu() {
     opSites.push({ site: landed, hint: '🛸 landed here · prospect / refuel' });
   }
   for (const f of (allFactories() || [])) {
-    if (f.ownerId !== SANDBOX_OWNER_ID || seen.has(f.siteId)) continue;
+    if (f.ownerId !== myOwnerId() || seen.has(f.siteId)) continue;
     const site = siteById(f.siteId); if (!site) continue;
     seen.add(f.siteId);
     opSites.push({ site, hint: `🏭 factory${getColony(f.siteId) ? ' + 🌐' : ''} · refuel / ET / deliver / colonize` });
   }
   // getDiscs() is a { siteId: disc } map, not an array.
   const discs = getDiscs() || {};
+  // Only YOUR successful claims can be industrialized - the server rejects
+  // industrializing another player's claim. In multiplayer that's the local
+  // player (whose turn it is): skip discs other players claimed. Sandbox discs
+  // carry no owner, so they're all yours.
+  const myClaimOwner = _online ? (_onlineMe && _onlineMe.id) : null;
   for (const siteId of Object.keys(discs)) {
     const d = discs[siteId];
     if (!d || d.outcome !== 'success' || seen.has(siteId) || getFactory(siteId)) continue;
+    if (myClaimOwner && d.ownerId && d.ownerId !== myClaimOwner) continue;
     const site = siteById(siteId); if (!site) continue;
     seen.add(siteId);
     opSites.push({ site, hint: '🔭 claimed · industrialize here' });
@@ -7964,6 +8122,16 @@ function doEtProduce(site, factory, options, outpostsAtSite, freeSlots) {
 // not a runtime lookup.
 const SANDBOX_OWNER_ID = 'sandbox-player';
 
+// The owner id that marks "my" map tokens (factories, colonies, claimed
+// discs). Online it's the local player's profile id (the SAME id the server
+// stamps on the records it sends back); in the solo sandbox there's a single
+// owner, the sandbox player. Every "is this mine?" check goes through here so
+// the same UI code works in both modes instead of assuming the sandbox owner
+// (which silently hid your own factories / ops online).
+function myOwnerId() {
+  return _online ? (_onlineMe && _onlineMe.id) : SANDBOX_OWNER_ID;
+}
+
 // Industrialize handler (rulebook I7). The caller has already
 // validated that the rocket is parked at a claimed site with no
 // existing factory AND that findIndustrializeOptions(stack)
@@ -8019,7 +8187,7 @@ function doIndustrialize(site, stack, options) {
         }
       }
       const spectral = site.spectralType || 'C';
-      const built = createFactory(site.id, SANDBOX_OWNER_ID, spectral);
+      const built = createFactory(site.id, myOwnerId(), spectral);
       const refName = opt.refinery.card.name;
       const robName = opt.robonaut.card.name;
       const orphanNote = opt.orphans.length
@@ -8120,7 +8288,7 @@ function doColonize(site, stack, options) {
         setStatus(`Colonize aborted - crew couldn't return to the LEO stack.`);
         return;
       }
-      const created = createColony(site.id, SANDBOX_OWNER_ID);
+      const created = createColony(site.id, myOwnerId());
       if (!created) {
         // Cap or duplicate. Roll back: pull crew back out of
         // the LEO stack, drop it back on the rocket stack.
@@ -8133,13 +8301,13 @@ function doColonize(site, stack, options) {
       setStatus(
         `🌐 Built colony at <strong>${esc(site.name)}</strong>. `
         + `<em>${esc(crewName)}</em> returns to your LEO Stack. `
-        + `Colonies: <strong>${countColoniesByOwner(SANDBOX_OWNER_ID)}</strong>/${COLONY_CAP_PER_PLAYER}.`
+        + `Colonies: <strong>${countColoniesByOwner(myOwnerId())}</strong>/${COLONY_CAP_PER_PLAYER}.`
       );
       logAction({
         type: 'colonize',
         icon: '🌐',
         summary: `Built colony at ${site.name} (crew ${crewName} returned to LEO stack); `
-          + `${countColoniesByOwner(SANDBOX_OWNER_ID)}/${COLONY_CAP_PER_PLAYER} colonies`,
+          + `${countColoniesByOwner(myOwnerId())}/${COLONY_CAP_PER_PLAYER} colonies`,
         undoable: false,
         data: { siteId: site.id, crewId: pick.id },
       });
@@ -8564,14 +8732,13 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         <g class="tank-ticks"></g>
       </svg>
       <div class="fuel-tank-readout">
-        <strong class="tank-now">${fmtWater(fromW)}</strong>
-        <span>/</span>
-        <strong class="tank-cap">${cap}</strong>
+        <div class="fuel-tank-amount">
+          <strong class="tank-now">${fmtWater(fromW)}</strong>
+          <span class="tank-sep">/</span>
+          <strong class="tank-cap">${cap}</strong>
+        </div>
         <em class="muted">water</em>
       </div>
-      <p class="fuel-tank-rem muted" ${remOf(tankNow) > 0 ? '' : 'hidden'}>includes a
-        <strong>${remOf(tankNow)}</strong> remainder a burn left - can't be transferred
-        out (water moves in whole units)</p>
     </div>
     <div class="fuel-tank-actions">
       <button type="button" class="popup-btn popup-btn-secondary" id="tank-dump"
@@ -8647,7 +8814,6 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const dryRect   = panel.querySelector('.tank-dry');
   const liftLine  = panel.querySelector('.tank-lift-line');
   const nowReadout = panel.querySelector('.tank-now');
-  const remReadout = panel.querySelector('.fuel-tank-rem');
   const ticksG     = panel.querySelector('.tank-ticks');
 
   // Geometry: 200 svg units span TANK_VIS_MAX wet-mass units.
@@ -8700,15 +8866,14 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     foamRect.setAttribute('y',  String(waterTopY - 3));
     foamRect.setAttribute('height', String(Math.min(6, h)));
     nowReadout.textContent = fmtWater(clamped);
-    if (remReadout) {
-      const rem = remOf(clamped);
-      remReadout.hidden = !(rem > 0);
-      if (rem > 0) {
-        remReadout.innerHTML = `includes a <strong>${rem}</strong> remainder a burn left`
-          + ` - can't be transferred out (water moves in whole units)`;
-      }
-    }
+    // Shrink the font so the number always stays CONTAINED in the fixed-width
+    // readout box. The box never resizes, so the font changing never moves the
+    // tank; longer (fractional) values just get a smaller font.
+    const len = nowReadout.textContent.length;
+    nowReadout.style.fontSize = len >= 6 ? '20px' : len >= 5 ? '24px' : len >= 4 ? '30px' : '38px';
   }
+  // Seed the initial water level (the static HTML only renders the number).
+  setLevel(fromW);
 
   // Falling-droplet animation. Spawns teardrop <path>s at the
   // top of the tank and lets gravity drop them onto the water
@@ -9169,7 +9334,11 @@ function doProspect(site, prosp) {
   if (_online) {
     const siteId = toServerId(_onlineMaps, site.id);
     if (!siteId) { _onlineToast('That site is not on the map.', 'error'); return; }
-    submitOnlineOp({ kind: 'PROSPECT', siteId });
+    // Stamp the turn the scan was fired on so a relayed / re-fired raygun
+    // request for the same site this turn resolves as the same valid scan
+    // instead of bouncing. The raygun scan is a free action (no operation).
+    const snap = _onlineSnapshot || {};
+    submitOnlineOp({ kind: 'PROSPECT', siteId, turn: snap.turn, round: snap.round });
     return;
   }
   // Already-prospected sites are off-limits in the sandbox; the UI
@@ -9419,6 +9588,9 @@ function persistPlannedRoute() {
 // silently if another animation pre-empts this one. Distance-
 // weighted so longer segments take proportionally more time.
 function animateRocketAlong(segments, totalMs = 700) {
+  // A manual route already walked hop-by-hop during plotting snaps on commit
+  // (the player has already seen the ship travel) instead of re-flying it.
+  if (_fastMoveAnim) totalMs = 0;
   return new Promise((resolve) => {
     if (!_renderer || !_activeData || !segments || !segments.length) {
       resolve(); return;
@@ -9445,6 +9617,13 @@ function animateRocketAlong(segments, totalMs = 700) {
     }
     if (totalLen === 0) { resolve(); return; }
     const r = isRocketActive();
+    // Instant snap (a manual route already walked during plotting): drop the
+    // sprite on the final point and resolve, no per-frame tween.
+    if (totalMs <= 0) {
+      const last = pts[pts.length - 1];
+      _renderer.setSandboxRocket({ x: last.x, y: last.y, colour: myRocketColour(), canFly: r.active });
+      resolve(); return;
+    }
     const t0 = performance.now();
     _rocketAnimating = true;
     const step = (now) => {
@@ -10106,7 +10285,36 @@ function animateOnlineTransitions(prev, snapshot) {
   try { animateSnapshotMoves(prev, snapshot); } catch { /* non-fatal */ }
   try { animateSnapshotProspects(prev, snapshot); } catch { /* non-fatal */ }
   try { animateSnapshotCardDrift(prev, snapshot); } catch { /* non-fatal */ }
+  try { animateSnapshotChitsHome(prev, snapshot); } catch { /* non-fatal */ }
   try { animateSnapshotClock(prev, snapshot); } catch { /* non-fatal */ }
+}
+
+// My crew just hauled glory chits home: on a LEO arrival the server scored the
+// carried chits, so MY claimed pile grew in this snapshot. Celebrate it the way
+// the sandbox does (confetti + the scored coins), once the rocket has visibly
+// slid home. Local player only - opponents' hauls don't pop a modal on me. Only
+// runs on a live transition (animateOnlineTransitions bails when prev is null,
+// so a refresh-resume never re-celebrates already-scored chits).
+function animateSnapshotChitsHome(prev, snapshot) {
+  if (!_onlineMe) return;
+  const myId = _onlineMe.id;
+  const pPrev = (prev.players || []).find((p) => p.profileId === myId);
+  const pNew  = (snapshot.players || []).find((p) => p.profileId === myId);
+  if (!pPrev || !pNew) return;
+  const prevClaimed = (pPrev.glory && pPrev.glory.claimed) || [];
+  const newClaimed  = (pNew.glory && pNew.glory.claimed) || [];
+  if (newClaimed.length <= prevClaimed.length) return;
+  const scored = newClaimed.slice(prevClaimed.length);
+  if (!scored.length) return;
+  const vps  = scored.reduce((s, c) => s + (c.vp | 0), 0);
+  const side = scored[0].side || 'back';
+  const chits = scored.map((c) => ({ zone: c.zone, crewId: c.crewId }));
+  // Let the rocket finish sliding home (tweenMpRocketAlong is 700ms) before the
+  // confetti so the haul reads as "arrived, then scored", not a teleport.
+  setTimeout(() => {
+    try { celebrateChitsHome({ chits, vps, side }); }
+    catch (e) { console.error('chit home celebrate:', e); }
+  }, 820);
 }
 
 function syncSandboxRocket() {
@@ -10162,7 +10370,7 @@ function syncSandboxRocket() {
     prospectorName,
     prospectorIsru,
     thruster: thrusterSummary,
-    chits: getChits().length,   // 🏆 loaded-glory-chit badge
+    chits: chitsAboardCount(),   // 🏆 loaded-glory-chit badge (only chits aboard)
   });
 }
 
@@ -10174,6 +10382,18 @@ function syncDiscs() {
   _renderer.setDiscs(getDiscs());
 }
 
+// Resolve a factory owner's seat colour. Online, read it off the snapshot
+// roster; solo, every factory is the local player's, so use their rocket
+// colour. Falls back to gray for an unknown owner (e.g. a spectator view).
+function factoryOwnerColor(ownerId) {
+  if (_online) {
+    const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
+    const p = players.find((pl) => pl.profileId === ownerId);
+    return (p && p.color) || '#9c9c9c';
+  }
+  return myRocketColour() || '#9c9c9c';
+}
+
 // Stage-3 sync helpers: push factory / colony / outpost / focus
 // state to the renderer so the chit layers repaint. Each is a
 // thin wrapper around the corresponding all-state getter and
@@ -10182,7 +10402,12 @@ function syncFactories() {
   if (!_renderer) return;
   const list = allFactories();
   const map = {};
-  for (const f of list) map[f.siteId] = f;
+  for (const f of list) {
+    // Tint each factory by its OWNER's seat colour so the map reads who owns
+    // what at a glance; the renderer selects the matching base sprite.
+    f.color = factoryOwnerColor(f.ownerId);
+    map[f.siteId] = f;
+  }
   _renderer.setFactories(map);
   syncAmbientRockets(list.length);
 }
@@ -10204,7 +10429,14 @@ function syncOutposts() {
   // Tint the local player's outpost cubes with their seat colour (the
   // same colour as their rocket) so a cube reads as "mine" at a glance.
   _renderer.setOutpostColor(myRocketColour());
-  _renderer.setOutposts(getOutposts());
+  // Tag each outpost with whether its stationed crew is carrying a glory
+  // chit, so the renderer can mark it with a gold coin (a chit follows the
+  // crew that picked it up, wherever they station).
+  const outs = getOutposts();
+  for (const letter of Object.keys(outs)) {
+    outs[letter].gloryChits = chitsOnOutpostCount(letter);
+  }
+  _renderer.setOutposts(outs);
 }
 // Translate the focused-stack id ('rocket' | 'outpostA' | ...)
 // into a site id for the renderer's focus ring. LEO focus has
@@ -10502,7 +10734,20 @@ async function moveRocket() {
       (destSite && destSite.name) || toSiteId,
       segments.reduce((b, s) => b + (Number(s.burns) || 0), 0),
     );
-    const ok = await submitOnlineOp({ kind: 'MOVE', toSiteId, hazardPay, segments });
+    // First crew into a new zone: ask before the chit loads. The choice
+    // rides with the MOVE (pickupChit) so the server awards it or leaves it
+    // on the site for a later Claim. LEO (the home zone) never offers one.
+    let pickupChit = true;
+    const arrZone = destSite && destSite.solarZone;
+    // Offer the zone's glory chit only when the rocket actually LANDS at a real
+    // site (not a coasting waypoint) WITH a crew aboard, and isn't already
+    // carrying that zone's chit (so re-landing in the zone doesn't re-prompt).
+    const landingHere = destSite && !destSite.isWaypoint && destSite.isLandable !== false;
+    if (landingHere && arrZone && arrZone !== 'Earth' && !isZoneVisited(arrZone)
+        && !getChits().some((c) => c.zone === arrZone) && stackHasCrew()) {
+      pickupChit = await promptGloryPickup((destSite && destSite.name) || toSiteId, arrZone, firstCrewId());
+    }
+    const ok = await submitOnlineOp({ kind: 'MOVE', toSiteId, hazardPay, segments, pickupChit });
     if (ok) {
       // Advance the local plan past this turn so a multi-turn route stays
       // visible for the next move (mirrors the server's route shift); clear
@@ -10517,6 +10762,10 @@ async function moveRocket() {
       } else {
         clearRoute();
       }
+      // Scoring carried chits at home IS modelled server-side now (applyMove
+      // scores them BACK/FRONT on a LEO arrival). The confetti + scored coins
+      // fire from the snapshot diff in animateSnapshotChitsHome, not here, so
+      // the haul celebrates after the rocket has visibly slid home.
     }
     return ok;
   }
@@ -10751,7 +11000,12 @@ async function moveRocket() {
   // return to LEO any carried chits resolve: BACK (flipped) if a crew
   // brought them home, FRONT (face-up) if no crew is aboard.
   const crewAboard = stackHasCrew();
-  const willAwardChit = arrivedZone && arrivedZone !== 'Earth' && !isZoneVisited(arrivedZone) && crewAboard;
+  // Pick up the zone's glory chit only when the rocket LANDS at a real site
+  // (not a coasting waypoint) with a crew aboard, and isn't already carrying
+  // that zone's chit (so coasting through / re-landing doesn't re-prompt).
+  const landedHere = arrived && !arrived.isWaypoint && arrived.isLandable !== false;
+  const willAwardChit = landedHere && arrivedZone && arrivedZone !== 'Earth'
+    && !isZoneVisited(arrivedZone) && !getChits().some((c) => c.zone === arrivedZone) && crewAboard;
   const willCashIn = isLeoSite(arrived) && getChits().length > 0;
   const chitsToCash = willCashIn ? getChits() : [];
   _moveSnapshot = {
@@ -10784,6 +11038,14 @@ async function moveRocket() {
     trail: preMoveTrail,
   };
   persistMoveProgress(ctx);
+  // A solo manual route was already walked hop-by-hop during plotting; snap the
+  // commit (and any hazard animate-tos) instead of re-flying the whole path.
+  if (_manualPreviewed && !_online) {
+    _manualPreviewed = false;
+    _fastMoveAnim = true;
+    try { return await runMoveQueue(ctx, false); }
+    finally { _fastMoveAnim = false; }
+  }
   return runMoveQueue(ctx, false);
 }
 
@@ -11057,40 +11319,61 @@ async function runMoveQueue(ctx, resuming) {
     data: { siteId: newSiteId, zone: arrivedZone, hazardous: lockUndo },
   });
   if (willAwardChit) {
+    // First crew into a new zone: ask before loading the chit instead of
+    // grabbing it silently. "Leave it" parks the chit on the site to claim
+    // later from its menu (the zone stays unvisited so it's still offered).
     const ownerId = firstCrewId();
-    awardChitForZone(arrivedZone, getTurn(), ownerId);
-    const s = getChitSides(arrivedZone);
-    const owner = crewDisplayName(ownerId);
-    logAction({
-      type: 'glory_award',
-      icon: '🏆',
-      summary: `Glory chit earned - ${arrivedZone} (front ${s.front} / back ${s.back} VP)`
-        + (owner ? `, held by ${owner}` : ''),
-      undoable: false,
-    });
+    const pick = await promptGloryPickup(arrivedName, arrivedZone, ownerId);
+    if (_moveSnapshot) _moveSnapshot.awardedZone = pick ? arrivedZone : null;
+    if (pick) {
+      awardChitForZone(arrivedZone, getTurn(), ownerId);
+      const s = getChitSides(arrivedZone);
+      const owner = crewDisplayName(ownerId);
+      logAction({
+        type: 'glory_award',
+        icon: '🏆',
+        summary: `Glory chit earned - ${arrivedZone} (front ${s.front} / back ${s.back} VP)`
+          + (owner ? `, held by ${owner}` : ''),
+        undoable: false,
+      });
+    } else {
+      logAction({
+        type: 'glory_left',
+        icon: '🎖',
+        summary: `Left the ${arrivedZone} glory chit at ${arrivedName} (claim it later from the site menu)`,
+        undoable: false,
+      });
+      refreshOpenSitePopup();
+    }
   }
   if (willCashIn) {
-    // Crew aboard at home -> flip to the BACK value; no crew -> the
-    // chits score their FRONT value face-up.
-    const broughtHome = stackHasCrew();
-    const res = broughtHome
-      ? cashInChits(`returned to ${arrivedName}`)
-      : resolveChitsFront(`returned crewless to ${arrivedName}`);
+    // Each carried chit follows its crew. The crew aboard the arriving
+    // rocket are home, so THEIR chits score now (BACK value); chits whose
+    // crew is parked on an outpost stay carried and ride home later with
+    // that crew. A crewless arrival scores only legacy ownerless chits,
+    // face-up at FRONT.
+    const aboard = getRocketStack().filter(isCrewSlot).map((s) => s.id);
+    const res = cashHomeArrival(aboard, `returned to ${arrivedName}`);
+    const broughtHome = res.side === 'back';
     // _moveSnapshot is null on a resumed move (it lives only in memory);
     // undo is locked for hazardous moves anyway, so guard the write.
     if (_moveSnapshot) {
-      _moveSnapshot.cashedChits = chitsToCash;
+      _moveSnapshot.cashedChits = res.chits;
       _moveSnapshot.cashedVps   = res.vps;
     }
-    const n = (chitsToCash || []).length;
-    logAction({
-      type: 'glory_cash',
-      icon: broughtHome ? '💰' : '🎖',
-      summary: broughtHome
-        ? `Flipped ${n} chit${n === 1 ? '' : 's'} (back) for ${res.vps} VP`
-        : `${n} crewless chit${n === 1 ? '' : 's'} score face-up (front) for ${res.vps} VP`,
-      undoable: false,
-    });
+    const n = res.chits.length;
+    if (n) {
+      logAction({
+        type: 'glory_cash',
+        icon: broughtHome ? '💰' : '🎖',
+        summary: broughtHome
+          ? `Flipped ${n} chit${n === 1 ? '' : 's'} (back) for ${res.vps} VP`
+          : `${n} crewless chit${n === 1 ? '' : 's'} score face-up (front) for ${res.vps} VP`,
+        undoable: false,
+      });
+      // Touchdown at home: celebrate the haul (confetti + the scored coins).
+      celebrateChitsHome({ chits: res.chits, vps: res.vps, side: res.side });
+    }
   }
   // Shift remaining segments down a turn (T2→T1, T3→T2, …).
   const remaining = _plannedRoute
@@ -11541,8 +11824,9 @@ function openRouteOptionsModal(onClose) {
       </button>
       <p class="muted route-options-manual-help">
         Cancels any auto-planned route and lets you tap adjacent
-        sites one at a time. Capped at the active thruster's
-        thrust (${thrust}). Tap Move when you're ready to fly.
+        nodes one at a time - sites AND Hohmann-transfer dots - to
+        advance the ship one hop at a time. Capped at the active
+        thruster's thrust (${thrust}). Tap Move to fly, or Stop.
       </p>
     </div>
     ${_online ? `
@@ -11678,10 +11962,12 @@ function showSitePopupFor(site) {
   // (vs. silently dropping the button).
   const prosp = getActiveProspectorStats();
   const rocketSite = getRocketSite();
-  if (prosp) {
+  // Hidden once the site has a disc: a claim disc (success) or a failed-
+  // prospect disc both mean it's already been prospected, so the action is
+  // omitted rather than shown disabled.
+  if (prosp && !getDisc(site.id)) {
     const check = canProspect(_activeData, rocketSite?.id, site.id, prosp.kind);
     const supportsOk = prosp.canActivate;
-    const existingDisc = getDisc(site.id);
     // ISRU rule: the rig's ISRU must be <= the site's water
     // (hydration). ISRU 0 / missing clears the gate. This is the
     // "rig sensitivity" gate - a low-ISRU rig handles even dry
@@ -11692,15 +11978,13 @@ function showSitePopupFor(site) {
     const prospIsru   = prospectorIsruValue(prosp.card);
     const siteWater   = Number.isFinite(site.hydration) ? site.hydration : 0;
     const isruOk      = prospIsru <= siteWater;
-    const ok = check.ok && supportsOk && !existingDisc && isruOk;
+    const ok = check.ok && supportsOk && isruOk;
     const kindGlyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prosp.kind] || '🔬';
-    const reason = existingDisc
-      ? `This site already has a ${existingDisc.outcome === 'success' ? 'claim' : 'failed-prospect'} disc.`
-      : !supportsOk
-        ? `Prospector needs ${(prosp.missingSuppliers || []).join(' + ')} support.`
-        : !isruOk
-          ? `Rig ISRU ${prospIsru} > site water ${siteWater}. Need a rig with ISRU ≤ water.`
-          : check.reason;
+    const reason = !supportsOk
+      ? `Prospector needs ${(prosp.missingSuppliers || []).join(' + ')} support.`
+      : !isruOk
+        ? `Rig ISRU ${prospIsru} > site water ${siteWater}. Need a rig with ISRU ≤ water.`
+        : check.reason;
     actions.push({
       label: `${kindGlyph} Prospect (${prosp.kind})`,
       // Blue rocket variant when the action is actually
@@ -11816,7 +12100,7 @@ function showSitePopupFor(site) {
       // supersedes the site refuel. Without a factory, fall back to
       // the site refuel, which follows the robonaut/ISRU rules.
       const pf = getFactory(site.id);
-      const hasPlayerFactory = pf && pf.ownerId === SANDBOX_OWNER_ID;
+      const hasPlayerFactory = pf && pf.ownerId === myOwnerId();
       if (!hasPlayerFactory) {
         const refuelChk = canRefuelAt(site);
         actions.push({
@@ -11845,7 +12129,7 @@ function showSitePopupFor(site) {
   // one op per turn anyway.
   if (rocketSite && site.id === rocketSite.id) {
     const factory = getFactory(site.id);
-    if (factory && factory.ownerId === SANDBOX_OWNER_ID) {
+    if (factory && factory.ownerId === myOwnerId()) {
       const factoryGain = 7;
       const tank = getTankWater();
       const tmax = getTankMax();
@@ -11857,9 +12141,11 @@ function showSitePopupFor(site) {
         ? 'Already refueled at this site this turn.'
         : (gain <= 0 ? `Tank full (${tank}/${tmax}).` : null);
       actions.push({
+        // Always show the factory's flat rate (7); the transfer itself still
+        // clamps to tank headroom, but the factory's output is a fixed 7.
         label: refueledThisTurn
           ? `🏭 Factory-Refuel done`
-          : `🏭 Factory-Refuel (+${gain} water)`,
+          : (gain <= 0 ? `🏭 Tank full (${tank}/${tmax})` : `🏭 Factory-Refuel (+${factoryGain} water)`),
         variant: ok ? 'rocket' : 'secondary',
         disabled: !ok,
         title: reason || `Factory produces ${factoryGain} blue water FTs (clamped by tank cap).`,
@@ -11925,15 +12211,9 @@ function showSitePopupFor(site) {
           _renderer.clearSitePopup();
         },
       });
-    } else if (existingFactory) {
-      actions.push({
-        label: '🏭 Already industrialized',
-        variant: 'secondary',
-        disabled: true,
-        title: `A factory already exists at this site (spectral ${existingFactory.spectralType}).`,
-        onClick: () => {},
-      });
     }
+    // When a factory already exists the build option is simply omitted (no
+    // disabled "Already industrialized" row) - the factory art on the map says so.
   }
   // Colonize action (rulebook G3, free action). Shown when the
   // rocket is parked at a site with a player-owned factory and
@@ -11943,8 +12223,8 @@ function showSitePopupFor(site) {
   if (rocketSite && site.id === rocketSite.id) {
     const factory = getFactory(site.id);
     const colony = getColony(site.id);
-    if (factory && factory.ownerId === SANDBOX_OWNER_ID && !colony) {
-      const colonized = countColoniesByOwner(SANDBOX_OWNER_ID);
+    if (factory && factory.ownerId === myOwnerId() && !colony) {
+      const colonized = countColoniesByOwner(myOwnerId());
       const capReached = colonized >= COLONY_CAP_PER_PLAYER;
       const stack = getRocketStack();
       const colonizeOptions = findColonizeOptions(stack);
@@ -11966,40 +12246,51 @@ function showSitePopupFor(site) {
           _renderer.clearSitePopup();
         },
       });
-    } else if (colony) {
-      actions.push({
-        label: '🌐 Colonized',
-        variant: 'secondary',
-        disabled: true,
-        title: `Colony already established at this site.`,
-        onClick: () => {},
-      });
     }
+    // A colony already here -> the colonize option is omitted (no disabled
+    // "Colonized" row); the dome on the factory shows the colony.
   }
-  // Delivery action (rulebook). Ship a Black-Side card from an outpost at
-  // your factory back to LEO. Cost: zones-from-Earth x2 (+1 if site
-  // number > 7) water, paid from the outpost's tank. One button per
-  // deliverable card. Costs the turn's operation.
+  // Delivery action (rulebook). Ship a Black-Side card from an outpost at your
+  // factory back to LEO. Cost: zones-from-Earth x2 (+1 if site number > 7)
+  // water, paid from the outpost's tank. Costs the turn's operation. ONE
+  // "Deliver..." button opens a picker listing every deliverable card.
   {
     const factory = getFactory(site.id);
-    if (factory && factory.ownerId === SANDBOX_OWNER_ID) {
+    if (factory && factory.ownerId === myOwnerId()) {
       const cost = deliveryCost(site);
+      const items = [];
       for (const op of Object.values(getOutposts())) {
         if (op.siteId !== site.id) continue;
         for (const c of (op.cards || [])) {
           if (c.face !== 'secondary') continue;
           const card = PATENTS_BY_ID[c.id];
           const afford = (Number(op.tank) || 0) >= cost;
-          actions.push({
-            label: `📦 Deliver ${card ? card.name : c.id} (-${cost} water)`,
-            variant: afford ? 'rocket' : 'secondary',
+          items.push({
+            letter: op.letter, cardId: c.id, name: card ? card.name : c.id,
+            note: afford ? `Outpost ${op.letter} · -${cost} water`
+              : `Outpost ${op.letter} needs ${cost} water (has ${op.tank | 0})`,
             disabled: !afford,
-            title: afford
-              ? `Ship this Black-Side card to LEO for ${cost} water from Outpost ${op.letter}.`
-              : `Outpost ${op.letter} needs ${cost} water to deliver (has ${op.tank | 0}).`,
-            onClick: () => { if (!afford) return; doDelivery(site, op.letter, c.id); _renderer.clearSitePopup(); },
           });
         }
+      }
+      if (items.length) {
+        const anyAfford = items.some((it) => !it.disabled);
+        actions.push({
+          label: `📦 Deliver… (${items.length})`,
+          variant: anyAfford ? 'rocket' : 'secondary',
+          disabled: !anyAfford,
+          title: anyAfford
+            ? `Pick a Black-Side card to ship to LEO (${cost} water from its outpost).`
+            : `No outpost here has the ${cost} water to deliver.`,
+          onClick: () => {
+            if (!anyAfford) return;
+            _renderer.clearSitePopup();
+            openDeliveryPicker({
+              siteName: site.name, items,
+              onCommit: (it) => doDelivery(site, it.letter, it.cardId),
+            });
+          },
+        });
       }
     }
   }
@@ -12011,7 +12302,7 @@ function showSitePopupFor(site) {
   // fresh outpost the player creates inline).
   {
     const factory = getFactory(site.id);
-    if (factory && factory.ownerId === SANDBOX_OWNER_ID) {
+    if (factory && factory.ownerId === myOwnerId()) {
       const handIds = getHandSlots();
       const etOptions = findEtProduceOptions(handIds, cardById, factory.spectralType);
       const outpostsAtSite = Object.values(getOutposts()).filter((o) => o.siteId === site.id);
@@ -12112,6 +12403,25 @@ function showSitePopupFor(site) {
         },
       });
     }
+  }
+  // Claim glory chit: when the rocket is parked here with a crew aboard
+  // and this site's heliocentric zone still has an unclaimed chit, offer
+  // to load it now (the "I left it on arrival, grab it later" path). Lands
+  // just before Navigate-to so the pure-inspection action stays last.
+  if (rocketSite && site.id === rocketSite.id
+      && site.solarZone && site.solarZone !== 'Earth'
+      && !isZoneVisited(site.solarZone) && stackHasCrew()) {
+    const sds = getChitSides(site.solarZone);
+    actions.push({
+      label: '🎖 Claim glory chit',
+      variant: 'glory',
+      title: `Load the ${site.solarZone}-zone glory chit onto your crew `
+        + `(front ${sds.front} / back ${sds.back} VP). Carry it home to LEO to score it.`,
+      onClick: () => {
+        claimGloryHere(site);
+        _renderer.clearSitePopup();
+      },
+    });
   }
   // Navigate-to ALWAYS sits last (CLAUDE.md style rule). It's a
   // pure inspection affordance - no state mutation - so any new
@@ -13092,6 +13402,45 @@ function isCrewSlot(s) {
 function stackHasCrew() {
   return getRocketStack().some(isCrewSlot);
 }
+// A chit follows the crew that picked it up. That crew is "in play" while
+// it sits in ANY stack the player controls - the rocket, an outpost, or
+// the LEO stack - so a crew moving to an outpost carries its chit there
+// rather than dropping it. Only a crew that has left play entirely
+// (decommissioned / colonised) orphans its chit.
+function crewInPlay(crewId) {
+  if (!crewId) return false;
+  if (getRocketStack().some((s) => s.id === crewId && isCrewSlot(s))) return true;
+  const outs = getOutposts() || {};
+  for (const letter of Object.keys(outs)) {
+    if ((outs[letter].cards || []).some((c) => c.id === crewId && isCrewSlot(c))) return true;
+  }
+  if ((getLeoCards() || []).some((c) => c.id === crewId && isCrewSlot(c))) return true;
+  return false;
+}
+function anyCrewInPlay() {
+  if (stackHasCrew()) return true;
+  const outs = getOutposts() || {};
+  for (const letter of Object.keys(outs)) {
+    if ((outs[letter].cards || []).some(isCrewSlot)) return true;
+  }
+  return (getLeoCards() || []).some(isCrewSlot);
+}
+// Count of glory chits riding ON the rocket right now: chits whose owning
+// crew is aboard (plus legacy ownerless chits). A chit whose crew moved to
+// an outpost rides THERE, so it drops off the rocket's 🏆 badge.
+function chitsAboardCount() {
+  const aboard = new Set(getRocketStack().filter(isCrewSlot).map((s) => s.id));
+  return getChits().filter((c) => (c.crewId ? aboard.has(c.crewId) : true)).length;
+}
+// Count of glory chits parked on a given outpost: chits whose owning crew
+// currently sits in that outpost's stack.
+function chitsOnOutpostCount(letter) {
+  const out = (getOutposts() || {})[letter];
+  if (!out) return 0;
+  const here = new Set((out.cards || []).filter(isCrewSlot).map((c) => c.id));
+  if (!here.size) return 0;
+  return getChits().filter((c) => c.crewId && here.has(c.crewId)).length;
+}
 // The crew that retrieves a chit on a first-landing. We assign the
 // chit to the first crew aboard; its fate (returns home vs. leaves)
 // then drives that chit's front/back resolution.
@@ -13108,31 +13457,33 @@ function crewDisplayName(crewId) {
 // the crew then re-adds it on a rollback path; colonize resolves its
 // own crew's chits explicitly after success.
 let _suppressChitReconcile = false;
-// When a chit's owning crew is no longer aboard, flip that chit
-// face-up (FRONT). Ownerless (legacy) chits flip only when no crew
-// is aboard at all. Fires on every rocket-stack change.
+// When a chit's owning crew has LEFT PLAY entirely (decommissioned /
+// colonised - not merely moved to an outpost), flip that chit face-up
+// (FRONT, the 1 VP side). The chit follows its crew everywhere else, so a
+// crew sitting on an outpost keeps carrying its chit. Ownerless (legacy)
+// chits flip only when no crew is in play at all. Fires on every stack
+// change.
 function reconcileChitOwners() {
   if (_suppressChitReconcile) return;
   const carried = getChits();
   if (!carried.length) return;
-  const present = new Set(getRocketStack().filter(isCrewSlot).map((s) => s.id));
-  const anyCrew = present.size > 0;
+  const anyCrew = anyCrewInPlay();
   // Group orphaned chits by owning crew so each resolves with its
   // own log line; ownerless ones resolve as a synthetic group.
   const orphanCrews = new Set();
   let ownerlessOrphan = false;
   for (const c of carried) {
-    if (c.crewId) { if (!present.has(c.crewId)) orphanCrews.add(c.crewId); }
+    if (c.crewId) { if (!crewInPlay(c.crewId)) orphanCrews.add(c.crewId); }
     else if (!anyCrew) ownerlessOrphan = true;
   }
   for (const crewId of orphanCrews) {
-    const res = resolveChitsForCrew(crewId, 'front', 'crew left the rocket');
+    const res = resolveChitsForCrew(crewId, 'front', 'crew left play');
     if (res.vps) {
       logAction({
         type: 'glory_front',
         icon: '🎖',
         summary: `${res.chits.length} glory chit${res.chits.length === 1 ? '' : 's'} flipped face-up `
-          + `for ${res.vps} VP (${crewDisplayName(crewId)} left the rocket)`,
+          + `for ${res.vps} VP (${crewDisplayName(crewId)} left play)`,
         undoable: false,
       });
     }
@@ -13150,35 +13501,108 @@ function reconcileChitOwners() {
   }
 }
 
-// Golden glory chit. A CARRIED chit (transit) is a vibrant two-sided coin
-// that flips on tap (front value / back value, undecided until it comes home
-// or the crew is lost). A CLAIMED chit is FIXED on its scored side, rendered
-// darkened (it is spent), with the crew that brought it home named beneath.
-function buildChitToken(zone, { side = null, transit = false, crewId = null } = {}) {
+// The local player's seat identity (name + colour), used to name the
+// claimed glory coins. Multiplayer: the player's handle + server-assigned
+// seat colour. Solo: the chosen faction's name + its colour band. Falls
+// back to a plain "You" with no tint (inherits currentColor) when neither
+// is known.
+function localSeat() {
+  if (_online) {
+    const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
+    const myp = players.find((p) => p.profileId === (_onlineMe && _onlineMe.id));
+    const name = (_onlineMe && _onlineMe.name) || (myp && myp.name) || 'You';
+    return { name, color: (myp && myp.color) || null, handle: true };
+  }
+  const picked = getPickedCrew();
+  const card = picked && CREW_BY_ID[picked.cardId];
+  if (card) {
+    const faceKey = picked.face === 'secondary' ? 'secondary' : 'primary';
+    const face = card.faces && card.faces[faceKey];
+    return { name: (face && face.name) || card.name || 'You', color: card.color || null, handle: false };
+  }
+  return { name: 'You', color: null, handle: false };
+}
+
+// Engraved decoration for the BACK (returned-home) coin face: a sunburst of
+// rays, a laurel wreath, and a beaded rim, drawn in darker / lighter orange
+// so the orange gradient reads as a struck, ornate "glory" medal. The number
+// (an HTML span) sits on top. Memoised - it's identical for every back face,
+// scaled to the coin by the SVG viewBox.
+let _chitBackDeco = null;
+function chitBackDeco() {
+  if (_chitBackDeco) return _chitBackDeco;
+  const cx = 50, cy = 50, parts = [];
+  // Sunburst rays from the centre out toward the rim.
+  for (let i = 0; i < 24; i++) {
+    const a = (2 * Math.PI * i) / 24;
+    const x0 = cx + 11 * Math.cos(a), y0 = cy + 11 * Math.sin(a);
+    const x1 = cx + 41 * Math.cos(a), y1 = cy + 41 * Math.sin(a);
+    parts.push(`<line x1="${x0.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${x1.toFixed(1)}" y2="${y1.toFixed(1)}" stroke="#9a3a06" stroke-width="0.7" opacity="0.42"/>`);
+  }
+  // Laurel wreath: leaves arcing up both sides, open at the top.
+  const leaf = (bx, by, ang) => {
+    const c = Math.cos(ang), s = Math.sin(ang), L = 7, W = 2.6;
+    const tx = bx + L * c, ty = by + L * s;
+    const px = bx + W * -s, py = by + W * c, qx = bx - W * -s, qy = by - W * c;
+    return `<path d="M ${bx.toFixed(1)},${by.toFixed(1)} Q ${px.toFixed(1)},${py.toFixed(1)} ${tx.toFixed(1)},${ty.toFixed(1)} Q ${qx.toFixed(1)},${qy.toFixed(1)} ${bx.toFixed(1)},${by.toFixed(1)} Z" fill="#c69a3e"/>`;
+  };
+  const Rw = 31;
+  for (const deg of [120, 140, 160, 180, 200]) { const a = (deg * Math.PI) / 180; parts.push(leaf(cx + Rw * Math.cos(a), cy + Rw * Math.sin(a), a + 0.35)); }
+  for (const deg of [60, 40, 20, 0, -20]) { const a = (deg * Math.PI) / 180; parts.push(leaf(cx + Rw * Math.cos(a), cy + Rw * Math.sin(a), a - 0.35)); }
+  // Beaded rim: dark beads with a light top-edge highlight.
+  for (let i = 0; i < 24; i++) {
+    const a = (2 * Math.PI * i) / 24;
+    const x = cx + 43 * Math.cos(a), y = cy + 43 * Math.sin(a);
+    parts.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.1" fill="#8a4408" opacity="0.85"/>`);
+    parts.push(`<circle cx="${x.toFixed(1)}" cy="${(y - 0.5).toFixed(1)}" r="0.9" fill="#e8b878" opacity="0.28"/>`);
+  }
+  _chitBackDeco = `<svg class="chit-deco" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" aria-hidden="true">${parts.join('')}</svg>`;
+  return _chitBackDeco;
+}
+
+// Golden glory chit. A CARRIED chit (transit) is a two-sided coin that flips
+// on tap: a gold FRONT (low value) and an ornate orange BACK (returned-home,
+// high value). A CLAIMED chit is FIXED on its scored side and stays the SAME
+// vibrant coin, marked with a green check badge (banked at home), with the
+// player who banked it named beneath.
+function buildChitToken(zone, { side = null, transit = false, crewId = null, player = null } = {}) {
   const sides = getChitSides(zone);
   const owner = crewId ? crewDisplayName(crewId) : '';
   const ownerHtml = owner
     ? `<span class="chit-token-owner" title="Earned by ${esc(owner)}">${esc(owner)}</span>` : '';
 
-  // Claimed: a fixed, darkened coin (no flip) + the player/crew named below.
+  // Claimed: a fixed (no flip) vibrant coin with a green check, plus the player
+  // who banked it named beneath, tinted to their seat colour (the .player-name
+  // + --player-color convention). Falls back to the carrying crew's name when
+  // no seat is known.
   if (!transit && side) {
     const vp = side === 'back' ? sides.back : sides.front;
+    const seatName  = (player && player.name) ? player.name : owner;
+    const seatLabel = (player && player.handle && seatName) ? '@' + seatName : seatName;
+    const seatColor = (player && player.color) ? player.color : null;
     const wrap = document.createElement('div');
     wrap.className = 'chit-token-wrap';
     wrap.innerHTML = `
-      <div class="chit-token chit-claimed chit-${esc(side)}" title="Claimed - ${esc(side)} value (fixed)">
-        <span class="chit-token-emoji" aria-hidden="true">🎖</span>
-        <span class="chit-token-zone">${esc(zone)}</span>
-        <span class="chit-token-vp">+${vp} VP</span>
-        <span class="chit-token-side">${esc(side)}</span>
+      <div class="chit-coin-holder">
+        <div class="chit-token chit-claimed chit-${esc(side)}" title="Banked at home - ${esc(side)} value">
+          ${side === 'back' ? chitBackDeco() : ''}
+          <span class="chit-token-emoji" aria-hidden="true">🎖</span>
+          <span class="chit-token-zone">${esc(zone)}</span>
+          <span class="chit-token-vp">+${vp} VP</span>
+          <span class="chit-token-side">${esc(side)}</span>
+        </div>
+        <span class="chit-scored-check" title="Banked at home" aria-hidden="true">✓</span>
       </div>
-      ${owner ? `<span class="chit-claim-by" title="Brought home by ${esc(owner)}">${esc(owner)}</span>` : ''}`;
+      ${seatName
+        ? `<span class="chit-claim-by player-name"${seatColor ? ` style="--player-color:${esc(seatColor)}"` : ''} title="Banked by ${esc(seatLabel)}">${esc(seatLabel)}</span>`
+        : ''}`;
     return wrap;
   }
 
-  // Carried (in transit): a vibrant two-sided flip coin.
+  // Carried (in transit): a two-sided flip coin (gold front, orange back).
   const face = (which, vp, variant) => `
     <div class="chit-token chit-face chit-face-${which} ${variant}">
+      ${which === 'back' ? chitBackDeco() : ''}
       <span class="chit-token-emoji" aria-hidden="true">🎖</span>
       <span class="chit-token-zone">${esc(zone)}</span>
       <span class="chit-token-vp">+${vp} VP</span>
@@ -13203,6 +13627,535 @@ function buildChitToken(zone, { side = null, transit = false, crewId = null } = 
   return flip;
 }
 
+// Map of zone -> { name, color, handle, side, vp }: who has claimed each
+// zone's chit and the value it has resolved to. The resolved value follows
+// the crew's fate: a chit banked home scores its BACK value; one still being
+// carried, or scored after the crew died / colonised, takes the FRONT value
+// (the default, 1). Multiplayer reads every player's glory from the shared
+// snapshot (only routes are secret); solo reads the local glory. Unclaimed
+// zones are absent.
+function takenZoneMap() {
+  const map = {};
+  const resolve = (zone, glory, seat) => {
+    if (map[zone]) return;
+    const banked = (glory.claimed || []).find((c) => c.zone === zone);
+    // Banked back = brought home; banked front, or still carried = the 1 VP
+    // front default.
+    const side = (banked && banked.side === 'back') ? 'back' : 'front';
+    const sides = getChitSides(zone);
+    const vp = (banked && Number.isFinite(banked.vp))
+      ? banked.vp : (side === 'back' ? sides.back : sides.front);
+    map[zone] = { ...seat, side, vp };
+  };
+  if (_online && _onlineSnapshot && Array.isArray(_onlineSnapshot.players)) {
+    for (const p of _onlineSnapshot.players) {
+      const g = p.glory;
+      if (!g || !Array.isArray(g.visited)) continue;
+      const seat = { name: p.name, color: p.color || null, handle: true };
+      for (const z of g.visited) resolve(z, g, seat);
+    }
+  } else {
+    const me = localSeat();
+    const g = { claimed: getClaimedChits() };
+    for (const z of Object.keys(ZONE_CHIT_VPS)) {
+      if (isZoneVisited(z)) resolve(z, g, me);
+    }
+  }
+  return map;
+}
+
+// One zone's coin for the all-chits board. Unclaimed: a flip-coin (tap
+// toggles gold front / sun-glow back). Claimed by ANY player (you or a rival):
+// an empty dotted outline (the coin lifted off the board) with the claimer's
+// seat name beneath. Your own banked coins live in the "Your coins" row below,
+// so the board does not re-show them as full coins (that would be redundant).
+function buildZoneBoardChit(zone, takenBy = null) {
+  const sides = getChitSides(zone);
+  if (takenBy) {
+    const label = (takenBy.handle && takenBy.name) ? '@' + takenBy.name : (takenBy.name || '');
+    const color = takenBy.color || null;
+    const side = takenBy.side === 'back' ? 'back' : 'front';
+    const vp = Number.isFinite(takenBy.vp) ? takenBy.vp : (side === 'back' ? sides.back : sides.front);
+    const wrap = document.createElement('div');
+    wrap.className = 'chit-token-wrap';
+    wrap.innerHTML = `
+      <div class="chit-token chit-claimed chit-${side} chit-zone-taken" title="${esc(zone)} chit taken${label ? ' by ' + esc(label) : ''} (${vp} VP)">
+        ${side === 'back' ? chitBackDeco() : ''}
+        <span class="chit-token-emoji" aria-hidden="true">🎖</span>
+        <span class="chit-token-zone">${esc(zone)}</span>
+        <span class="chit-token-vp">${vp} VP</span>
+        <span class="chit-token-side">taken</span>
+      </div>
+      ${label ? `<span class="chit-claim-by player-name"${color ? ` style="--player-color:${esc(color)}"` : ''}>${esc(label)}</span>` : ''}`;
+    return wrap;
+  }
+  const face = (which, vp, variant) => `
+    <div class="chit-token chit-face chit-face-${which} ${variant}">
+      ${which === 'back' ? chitBackDeco() : ''}
+      <span class="chit-token-emoji" aria-hidden="true">🎖</span>
+      <span class="chit-token-zone">${esc(zone)}</span>
+      <span class="chit-token-vp">+${vp} VP</span>
+      <span class="chit-token-side">${which}</span>
+    </div>`;
+  const flip = document.createElement('div');
+  flip.className = 'chit-token-flip';
+  flip.setAttribute('role', 'button');
+  flip.setAttribute('tabindex', '0');
+  flip.title = `${zone} glory chit - tap to flip (front ${sides.front} / back ${sides.back} VP)`;
+  flip.innerHTML = `
+    <div class="chit-token-inner">
+      ${face('front', sides.front, 'chit-front')}
+      ${face('back', sides.back, 'chit-back')}
+    </div>`;
+  const toggle = () => flip.classList.toggle('is-flipped');
+  flip.addEventListener('click', toggle);
+  flip.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+  });
+  return flip;
+}
+
+// ---------------------------------------------------------------------------
+// "All cards" overview: every card the local player owns, grouped by WHERE it
+// sits (Hand, LEO, Rocket, each built Outpost), with that location's liquid
+// (tank water - fractional on the rocket - or the LEO aqua bank) and its glory
+// chits (carried chits routed to wherever their crew sits; LEO shows SCORED
+// chits). Solo and online both read these same modules - online hydrates them
+// from the snapshot - so this always shows the LOCAL player's own cards.
+// ---------------------------------------------------------------------------
+
+function _siteNameFor(siteId) {
+  return (siteId && _activeData && _activeData.byId && _activeData.byId[siteId]
+    && _activeData.byId[siteId].name) || siteId || '';
+}
+
+// Format a (possibly fractional) water amount: integers plain, otherwise up to
+// 3 decimals trimmed, so the rocket's sub-1 remainder stays visible.
+function _fmtWater(v) {
+  const n = Number(v) || 0;
+  return Number.isInteger(n) ? String(n) : String(Math.round(n * 1000) / 1000);
+}
+
+// Resolve a stack slot (or a bare id) to { id, card, kind, face }.
+function _resolveOwnedSlot(slot) {
+  const id = typeof slot === 'string' ? slot : (slot && slot.id);
+  if (!id) return null;
+  const card = cardById(id);
+  if (!card) return null;
+  const kind = (slot && slot.kind) || (CREW_BY_ID[id] ? 'crew' : 'patent');
+  const face = (slot && slot.face === 'secondary') ? 'secondary' : 'primary';
+  return { id, card, kind, face };
+}
+
+// Ordered list of owned-card locations for the All cards view.
+// Assemble the ordered location list (Hand, LEO, Rocket, built Outposts) from a
+// normalized source, so the SAME layout serves the local player (read live from
+// the state modules) and any other player (read from a server snapshot). Chits
+// route to wherever their crew currently sits.
+function _buildOwnedLocations(src) {
+  const crewLoc = {};
+  for (const s of (src.rocketStack || [])) if (s && CREW_BY_ID[s.id]) crewLoc[s.id] = 'rocket';
+  for (const op of (src.outposts || [])) {
+    for (const s of (op.cards || [])) if (s && CREW_BY_ID[s.id]) crewLoc[s.id] = op.letter;
+  }
+  const carriedByLoc = {};
+  for (const ch of (src.carriedChits || [])) {
+    const where = (ch.crewId && crewLoc[ch.crewId]) || 'rocket';
+    (carriedByLoc[where] = carriedByLoc[where] || []).push(ch);
+  }
+
+  const locs = [];
+  // Hand: secret for other players, so shown as a count instead of cards.
+  locs.push(src.hideHandCards
+    ? { key: 'hand', icon: '🃏', name: 'Hand', sub: '', cards: [],
+        hiddenCount: (src.handIds || []).length, water: null, chits: [], chitMode: null }
+    : { key: 'hand', icon: '🃏', name: 'Hand', sub: '',
+        cards: (src.handIds || []).map(_resolveOwnedSlot).filter(Boolean),
+        water: null, chits: [], chitMode: null });
+  locs.push({
+    key: 'leo', icon: '🌍', name: 'LEO', sub: '',
+    cards: (src.leoSlots || []).map(_resolveOwnedSlot).filter(Boolean),
+    water: { kind: 'aqua', value: src.aqua | 0 },
+    chits: src.claimedChits || [], chitMode: 'scored',
+  });
+  locs.push({
+    key: 'rocket', icon: '🚀', name: 'Rocket',
+    sub: src.rocketSiteName ? ('at ' + src.rocketSiteName) : 'at LEO',
+    cards: (src.rocketStack || []).map(_resolveOwnedSlot).filter(Boolean),
+    water: { kind: 'water', value: src.rocketTank, fractional: true },
+    chits: carriedByLoc.rocket || [], chitMode: 'carried',
+  });
+  for (const op of (src.outposts || [])) {
+    locs.push({
+      key: 'outpost' + op.letter, icon: '🏛', name: 'Outpost ' + op.letter,
+      sub: op.siteName || '',
+      cards: (op.cards || []).map(_resolveOwnedSlot).filter(Boolean),
+      water: { kind: 'water', value: op.tank | 0 },
+      chits: carriedByLoc[op.letter] || [], chitMode: 'carried',
+    });
+  }
+  return locs;
+}
+
+// The local player's cards, read live from the state modules (the solo sandbox,
+// or my own seat online).
+function collectOwnedCardsLocal() {
+  const rocketSite = getRocketSite();
+  const outposts = Object.entries(getOutposts()).map(([letter, op]) => ({
+    letter, siteName: _siteNameFor(op.siteId), cards: op.cards || [], tank: op.tank | 0,
+  }));
+  return _buildOwnedLocations({
+    handIds: getHandSlots(),
+    leoSlots: getLeoCards(),
+    aqua: getAqua(),
+    claimedChits: getClaimedChits(),
+    rocketStack: getRocketStack(),
+    rocketTank: getTankWater(),
+    rocketSiteName: rocketSite ? rocketSite.name : '',
+    outposts,
+    carriedChits: getChits(),
+    hideHandCards: false,
+  });
+}
+
+// Any player's cards, read from a server snapshot player object. Other players'
+// HANDS stay secret (shown as a count); their LEO / Rocket / Outpost cards are
+// open information, the same as the roster's per-stack inspector.
+function collectOwnedCardsFromPlayer(player, isLocal) {
+  const p = player || {};
+  const rkt = p.rocket || {};
+  const glory = p.glory || {};
+  const outposts = Object.entries(p.outposts || {}).map(([letter, op]) => ({
+    letter, siteName: onlineSiteLabel(op.siteId), cards: op.cards || [], tank: op.tank | 0,
+  }));
+  return _buildOwnedLocations({
+    handIds: p.hand || [],
+    leoSlots: p.leo || [],
+    aqua: p.aqua | 0,
+    claimedChits: glory.claimed || [],
+    rocketStack: rkt.stack || [],
+    rocketTank: rkt.tank,
+    rocketSiteName: rkt.siteId ? onlineSiteLabel(rkt.siteId) : '',
+    outposts,
+    carriedChits: glory.chits || [],
+    hideHandCards: !isLocal,
+  });
+}
+
+// A compact card chip for the overview that tells you at a glance what the
+// card IS and DOES: the card's own type / role icon, its name + spectral hex,
+// and the type-specific headline stats (thrust + fuel for thrusters, therms
+// for radiators, role + ISRU for robonauts, etc.) from the shared
+// cardGlanceSummary so the glyph language matches the full card. Click opens
+// the real card.
+function _ownedCardChip(entry) {
+  const { id, card, kind, face } = entry;
+  const name = kind === 'crew'
+    ? ((card.faces && card.faces[face] && card.faces[face].name) || card.name || id)
+    : (card.name || id);
+  const g = cardGlanceSummary(card, face);
+  const statHtml = g.hasStats ? g.statsHtml : esc(kind === 'crew' ? 'crew' : (card.type || 'card'));
+  const massHtml = Number.isFinite(card.mass)
+    ? '<span class="acc-mass" title="Mass">m' + card.mass + '</span>' : '';
+  const chip = document.createElement('button');
+  chip.type = 'button';
+  chip.className = 'all-cards-chip kind-' + kind + (kind === 'patent' ? ' type-' + card.type : '');
+  if (kind === 'crew' && card.color) chip.style.setProperty('--chip-color', card.color);
+  chip.title = 'Open ' + name;
+  chip.innerHTML =
+    '<div class="acc-top">'
+    + (g.icon ? '<span class="acc-ic">' + g.icon + '</span>' : '')
+    + '<span class="acc-name">' + esc(name) + '</span>'
+    + (g.spectralHtml ? '<span class="acc-spec">' + g.spectralHtml + '</span>' : '')
+    + '</div>'
+    + '<div class="acc-bot"><span class="acc-stat">' + statHtml + '</span>' + massHtml + '</div>';
+  // The All cards view is inspection-only: open the card read-only (card +
+  // Flip, no Discard / Free Market / Exo / Boost actions).
+  chip.addEventListener('click', () => openCardModal(card, kind, null, { readOnly: true }));
+  return chip;
+}
+
+// Open the All cards modal for one player: one section per location, each with
+// its cards, liquid (water / aqua), and glory chits. `title` + `titleColor`
+// head the modal with that player's name in their seat colour; `locs` comes
+// from collectOwnedCardsLocal() (me) or collectOwnedCardsFromPlayer() (anyone).
+function openAllCardsView({ title = 'All cards', titleColor = null, locs = [] } = {}) {
+  document.querySelector('.all-cards-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay all-cards-overlay';
+  overlay.tabIndex = -1;
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  const dialog = document.createElement('div');
+  dialog.className = 'all-cards-modal';
+  overlay.appendChild(dialog);
+
+  const totalShown = locs.reduce((n, l) => n + (l.hiddenCount != null ? l.hiddenCount : l.cards.length), 0);
+  const titleHtml = titleColor
+    ? '<span class="player-name" style="--player-color:' + esc(titleColor) + '">' + esc(title) + '</span>'
+    : esc(title);
+
+  const head = document.createElement('div');
+  head.className = 'all-cards-head';
+  head.innerHTML =
+    '<h3>📚 ' + titleHtml + ' <span class="muted">' + totalShown + ' cards</span></h3>'
+    + '<button type="button" class="all-cards-close" title="Close (Esc)" aria-label="Close">×</button>';
+  head.querySelector('.all-cards-close').addEventListener('click', close);
+  dialog.appendChild(head);
+
+  const body = document.createElement('div');
+  body.className = 'all-cards-body';
+  dialog.appendChild(body);
+
+  for (const loc of locs) {
+    const sec = document.createElement('section');
+    sec.className = 'all-cards-loc';
+    const meta = [];
+    if (loc.water) {
+      const wv = loc.water.kind === 'aqua' ? String(loc.water.value | 0) : _fmtWater(loc.water.value);
+      meta.push('<span class="acl-water acl-' + loc.water.kind + '">💧 ' + esc(wv)
+        + ' ' + (loc.water.kind === 'aqua' ? 'aqua' : 'water') + '</span>');
+    }
+    const chitCount = (loc.chits || []).length;
+    if (chitCount) meta.push('<span class="acl-chits">🎖 ' + chitCount + '</span>');
+    const shown = loc.hiddenCount != null ? loc.hiddenCount : loc.cards.length;
+    const h = document.createElement('header');
+    h.className = 'all-cards-loc-head';
+    h.innerHTML =
+      '<span class="acl-name">' + esc(loc.icon) + ' ' + esc(loc.name) + '</span>'
+      + (loc.sub ? '<span class="acl-sub">' + esc(loc.sub) + '</span>' : '')
+      + '<span class="acl-count">' + shown + ' card' + (shown === 1 ? '' : 's') + '</span>'
+      + '<span class="acl-meta">' + meta.join('') + '</span>';
+    sec.appendChild(h);
+
+    if (loc.hiddenCount != null) {
+      const hid = document.createElement('div');
+      hid.className = 'all-cards-empty all-cards-hidden';
+      hid.textContent = loc.hiddenCount
+        ? loc.hiddenCount + ' card' + (loc.hiddenCount === 1 ? '' : 's') + ' (hidden)'
+        : 'No cards';
+      sec.appendChild(hid);
+    } else if (loc.cards.length) {
+      const grid = document.createElement('div');
+      grid.className = 'all-cards-chips';
+      for (const e of loc.cards) grid.appendChild(_ownedCardChip(e));
+      sec.appendChild(grid);
+    } else {
+      const empty = document.createElement('div');
+      empty.className = 'all-cards-empty';
+      empty.textContent = '—';
+      sec.appendChild(empty);
+    }
+
+    if (chitCount) {
+      const coins = document.createElement('div');
+      coins.className = 'all-cards-coins glory-coins-sm glory-chits';
+      const seat = localSeat();
+      for (const ch of loc.chits) {
+        coins.appendChild(loc.chitMode === 'scored'
+          ? buildChitToken(ch.zone, { side: ch.side, crewId: ch.crewId, player: seat })
+          : buildChitToken(ch.zone, { transit: true, crewId: ch.crewId }));
+      }
+      sec.appendChild(coins);
+    }
+    body.appendChild(sec);
+  }
+
+  document.body.appendChild(overlay);
+  document.addEventListener('keydown', onKey);
+  overlay.focus();
+}
+
+// One-shot confetti burst. Spawns colourful paper falling under gravity
+// with a little spin, then removes its own canvas. Pure DOM/canvas, no
+// library, no leftover state. Honours prefers-reduced-motion by thinning
+// the count. Eye candy only - wrapped so a failure never breaks play.
+function burstConfetti({ count = 150, duration = 2600 } = {}) {
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.className = 'confetti-canvas';
+    Object.assign(canvas.style, {
+      position: 'fixed', inset: '0', width: '100%', height: '100%',
+      pointerEvents: 'none', zIndex: '99999',
+    });
+    document.body.appendChild(canvas);
+    const ctx = canvas.getContext('2d');
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.floor(innerWidth * dpr);
+    canvas.height = Math.floor(innerHeight * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const W = innerWidth, H = innerHeight;
+    const COLORS = ['#ffd24a', '#ffc400', '#7dd3fc', '#f9a8d4', '#86efac', '#fb923c', '#fff7d6'];
+    const reduce = typeof matchMedia === 'function'
+      && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const N = reduce ? Math.min(count, 40) : count;
+    const pieces = [];
+    for (let i = 0; i < N; i++) {
+      pieces.push({
+        x: W * (0.18 + Math.random() * 0.64),
+        y: H * 0.3 + (Math.random() * 40 - 20),
+        vx: (Math.random() - 0.5) * 6.5,
+        vy: -4 - Math.random() * 7,
+        g: 0.16 + Math.random() * 0.12,
+        w: 6 + Math.random() * 6,
+        h: 8 + Math.random() * 8,
+        rot: Math.random() * Math.PI,
+        vr: (Math.random() - 0.5) * 0.32,
+        col: COLORS[(Math.random() * COLORS.length) | 0],
+      });
+    }
+    const start = performance.now();
+    let raf = 0;
+    let stopped = false;
+    const cleanup = () => {
+      if (stopped) return; stopped = true;
+      cancelAnimationFrame(raf);
+      if (canvas.isConnected) canvas.remove();
+    };
+    const tick = (now) => {
+      const t = now - start;
+      ctx.clearRect(0, 0, W, H);
+      const fade = t > duration - 700 ? Math.max(0, (duration - t) / 700) : 1;
+      for (const p of pieces) {
+        p.vy += p.g; p.x += p.vx; p.y += p.vy; p.rot += p.vr; p.vx *= 0.992;
+        ctx.save();
+        ctx.globalAlpha = fade;
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        ctx.fillStyle = p.col;
+        ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+        ctx.restore();
+      }
+      if (t < duration) raf = requestAnimationFrame(tick);
+      else cleanup();
+    };
+    raf = requestAnimationFrame(tick);
+    // Safety net if rAF throttles (backgrounded tab): force-clean later.
+    setTimeout(cleanup, duration + 1500);
+  } catch { /* confetti is non-essential eye candy */ }
+}
+
+// Pick-up prompt shown on first arrival into a new heliocentric zone (a
+// crew must be aboard to carry a chit). Resolves true = load it now,
+// false = leave it on the site to claim later from the site menu. The
+// backdrop / Escape default to "leave it" (the non-committal choice).
+function promptGloryPickup(siteName, zone, crewId = null) {
+  return new Promise((resolve) => {
+    document.querySelector('.confirm-modal-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay glory-pickup-overlay';
+    let done = false;
+    const close = (val) => {
+      if (done) return; done = true;
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(val);
+    };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+    const onKey = (e) => { if (e.key === 'Escape') close(false); };
+    document.addEventListener('keydown', onKey);
+
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel glory-pickup-panel';
+    panel.innerHTML = `
+      <h3>🎖 Glory chit at ${esc(siteName)}</h3>
+      <p>Your crew is the first to reach the <strong>${esc(zone)}</strong> zone.
+         Pick up the glory chit to carry it home for victory points?</p>
+      <div class="glory-pickup-coin"></div>
+      <div class="turn-confirm-actions glory-pickup-actions">
+        <button type="button" class="popup-btn primary" data-act="pick">🎖 Pick up chit</button>
+        <button type="button" class="popup-btn" data-act="leave">Leave it</button>
+      </div>
+      <p class="muted glory-pickup-note">Leave it and you can still claim it later from the ${esc(siteName)} site menu.</p>
+    `;
+    const coinHost = panel.querySelector('.glory-pickup-coin');
+    if (coinHost) coinHost.appendChild(buildChitToken(zone, { transit: true, crewId }));
+    for (const b of panel.querySelectorAll('button[data-act]')) {
+      b.addEventListener('click', () => close(b.dataset.act === 'pick'));
+    }
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+  });
+}
+
+// Celebration shown when a rocket returns to LEO and its carried glory
+// chits auto-score at their back (returned-home) value. Confetti + a
+// modal of the flipped coins. Eye candy only; the scoring already
+// happened by the time this runs.
+function celebrateChitsHome({ chits = [], vps = 0, side = 'back' } = {}) {
+  if (!chits.length) return;
+  burstConfetti();
+  document.querySelector('.confirm-modal-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay confirm-modal-overlay glory-home-overlay';
+  let done = false;
+  const close = () => {
+    if (done) return; done = true;
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+  };
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const onKey = (e) => {
+    if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') close();
+  };
+  document.addEventListener('keydown', onKey);
+
+  const n = chits.length;
+  const panel = document.createElement('div');
+  panel.className = 'turn-confirm-panel glory-home-panel';
+  panel.innerHTML = `
+    <h3>🎉 Chits scored at LEO!</h3>
+    <p>Your crew brought <strong>${n}</strong> glory chit${n === 1 ? '' : 's'}
+       home for <strong>+${vps} VP</strong>.</p>
+    <div class="glory-home-coins glory-chits"></div>
+    <div class="turn-confirm-actions">
+      <button type="button" class="popup-btn primary" data-act="ok">Nice!</button>
+    </div>
+  `;
+  const coins = panel.querySelector('.glory-home-coins');
+  if (coins) for (const c of chits) {
+    // Show the vibrant carried coin on its scored side (back = returned
+    // home, the big value; front = crewless face-up, the small value).
+    const coin = buildChitToken(c.zone, { transit: true, crewId: c.crewId });
+    if (side === 'back') coin.classList.add('is-flipped');
+    coins.appendChild(coin);
+  }
+  panel.querySelector('[data-act="ok"]').addEventListener('click', close);
+  overlay.appendChild(panel);
+  mountOverlay(overlay);
+}
+
+// Site-menu "Claim glory chit" handler: load the still-unclaimed chit for
+// the site's zone onto the crew aboard. Solo awards locally + logs;
+// online submits the LOAD_GLORY op (the server awards + logs). Refreshes
+// the popup so the button drops once the chit is loaded.
+async function claimGloryHere(site) {
+  if (!site || !site.solarZone) return false;
+  const zone = site.solarZone;
+  if (_online) {
+    if (!isOnlineMyTurn()) return false;
+    const ok = await submitOnlineOp({ kind: 'LOAD_GLORY' });
+    if (ok) refreshOpenSitePopup();
+    return ok;
+  }
+  if (zone === 'Earth' || isZoneVisited(zone) || !stackHasCrew()) return false;
+  const ownerId = firstCrewId();
+  awardChitForZone(zone, getTurn(), ownerId);
+  const s = getChitSides(zone);
+  const owner = crewDisplayName(ownerId);
+  logAction({
+    type: 'glory_award',
+    icon: '🏆',
+    summary: `Loaded the ${zone} glory chit (front ${s.front} / back ${s.back} VP)`
+      + (owner ? `, held by ${owner}` : ''),
+    undoable: false,
+  });
+  refreshOpenSitePopup();
+  return true;
+}
+
 // Classify a colony's site for VP: submarine (+2) beats astrobiology
 // (+1) when a site is both (e.g. Europa). Bernal isn't a flag yet, so
 // it falls through to the default rate. Flags live on the runtime-
@@ -13221,7 +14174,7 @@ function paintGlory() {
   if (!host) return;
   const vps   = getVps();
   const score = computeEndgameScore({
-    ownerId: SANDBOX_OWNER_ID,
+    ownerId: myOwnerId(),
     colonyTypeOf: colonyTypeOfSite,
   });
 
@@ -13279,10 +14232,6 @@ function paintGlory() {
   const chits = getChits();
   const claimed = getClaimedChits();
 
-  const zoneTableRows = Object.entries(ZONE_CHIT_VPS)
-    .map(([z, v]) => `<li><span>${esc(z)}</span><strong>${v.front} / ${v.back} VP</strong></li>`)
-    .join('');
-
   const scheduleHint = SPECTRAL_DIMINISHING_SCHEDULE
     .map((v, i) => i === SPECTRAL_DIMINISHING_SCHEDULE.length - 1 ? `${i + 1}+ → ${v}` : `${i + 1} → ${v}`)
     .join(', ');
@@ -13313,9 +14262,10 @@ function paintGlory() {
         <span class="muted">Career glory VP</span>
         <strong class="glory-vp">${vps}</strong>
       </div>
-      <h4>Ticker-tape (front / back VP)</h4>
-      <ul class="glory-table glory-ticker">${zoneTableRows}</ul>
-      <div class="glory-chits" id="glory-chits-all"></div>
+      <h4>All glory chits <span class="muted glory-h4-note">(tap to flip front / back; dimmed = taken)</span></h4>
+      <div class="glory-chits glory-coins-sm glory-zone-board" id="glory-zone-board"></div>
+      <h4>Your coins</h4>
+      <div class="glory-chits glory-coins-sm" id="glory-chits-all"></div>
       <p class="muted glory-rules">
         Earn a chit the first time a crew lands in a heliocentric zone.
         Carried coins flip (tap) between their FRONT and BACK value; bring one
@@ -13327,10 +14277,23 @@ function paintGlory() {
   // All of the player's chits as golden coins under the ticker tape: carried
   // ones (vibrant, flippable) first, then claimed ones (fixed + darkened +
   // named). One unified row.
+  // All-chits board: every claimable heliocentric zone as a coin. Available
+  // zones are vibrant flip-coins; a zone any player has claimed is dimmed +
+  // shows the claimer's seat name (Earth is home, so it has no chit).
+  const board = host.querySelector('#glory-zone-board');
+  if (board) {
+    const taken = takenZoneMap();
+    for (const zone of Object.keys(ZONE_CHIT_VPS)) {
+      if (zone === 'Earth') continue;
+      board.appendChild(buildZoneBoardChit(zone, taken[zone] || null));
+    }
+  }
+
   const all = host.querySelector('#glory-chits-all');
   if (all) {
+    const seat = localSeat();
     for (const c of chits) all.appendChild(buildChitToken(c.zone, { transit: true, crewId: c.crewId }));
-    for (const c of claimed) all.appendChild(buildChitToken(c.zone, { side: c.side, crewId: c.crewId }));
+    for (const c of claimed) all.appendChild(buildChitToken(c.zone, { side: c.side, crewId: c.crewId, player: seat }));
     if (!chits.length && !claimed.length) {
       all.innerHTML = '<p class="muted">No chits yet. Land a crew in a new heliocentric zone to earn one.</p>';
     }
@@ -13445,7 +14408,7 @@ const MP_LOG_ICONS = {
   PICK_CREW: '🧑‍🚀', SET_FIRST_PLAYER: '🥇',
   END_TURN: '⏭', MOVE: '🛸', BURN: '🔥',
   SET_ACTIVE_THRUSTER: '🔥', SET_ACTIVE_PROSPECTOR: '⛏',
-  BUILD_ROCKET: '🚀', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',
+  BUILD_ROCKET: '🚀', BUY_CARD: '📚', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',
   INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧',
   ET_PRODUCE: '🏭', SITE_REFUEL: '💧',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
@@ -13454,6 +14417,7 @@ const MP_LOG_ICONS = {
   TRANSFER: '🔀', TRANSFER_FUEL: '💧',
   CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑',
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',
+  LOAD_GLORY: '🎖',
   UNDO: '↩', REDO: '↪',
 };
 

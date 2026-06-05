@@ -132,7 +132,14 @@ export function getFactory(siteId) {
 }
 
 export function allFactories() {
-  return Object.values(_factories).map((r) => ({ ...r }));
+  // Derive siteId from the KEY, never the record body. An online snapshot's
+  // factory value is { ownerId, spectralType } with NO siteId field (the server
+  // keys state.factories by site, so the id lives only in the key). Map
+  // consumers key off f.siteId (browse.js#syncFactories -> the renderer chit
+  // layer); without this every factory would collapse to map[undefined] and no
+  // 🏭 chit would draw online. Solo's createFactory writes siteId into the value
+  // too, so the key stays authoritative either way.
+  return Object.entries(_factories).map(([siteId, r]) => ({ ...r, siteId }));
 }
 
 export function createFactory(siteId, ownerId, spectralType) {
@@ -178,7 +185,10 @@ export function getColony(siteId) {
 }
 
 export function allColonies() {
-  return Object.values(_colonies).map((r) => ({ ...r }));
+  // Same as allFactories: an online colony value is { ownerId } with no siteId
+  // field, so derive siteId from the key or the colony-ring layer collapses to
+  // map[undefined] and never draws.
+  return Object.entries(_colonies).map(([siteId, r]) => ({ ...r, siteId }));
 }
 
 export function countColoniesByOwner(ownerId) {

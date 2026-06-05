@@ -39,18 +39,27 @@ import { PATENTS_BY_ID, thermsRequired, thermsSupplied } from '../../data/patent
 
 // ---------- Pure-logic helpers ----------
 
-function activeFace(card) {
-  return (card && card.faces && card.faces.primary) || card || {};
+// The face a stack slot is INSTALLED on (Tier-2 secondary when flipped, else
+// primary). Mirrors rocket.js#installedFace so a flipped (black-side) refinery /
+// robonaut / support card contributes its REAL stats to the build - its
+// black-side requires + supplies + heat, not the white-side ones. A refinery's
+// or robonaut's TYPE never changes between faces, so the pair detection still
+// keys off card.type; only the requires / supplies / heat are face-specific.
+function slotFace(slot) {
+  const c = slot && PATENTS_BY_ID[slot.id];
+  if (!c || !c.faces) return c || {};
+  const key = (slot.face === 'secondary' && c.faces.secondary) ? 'secondary' : 'primary';
+  return c.faces[key] || c.faces.primary || c;
 }
 
-function requiresOf(card) {
-  const f = activeFace(card);
-  return Array.isArray(f.requires) ? f.requires : (card?.requires || []);
+function requiresOf(slot) {
+  const f = slotFace(slot);
+  return Array.isArray(f.requires) ? f.requires : [];
 }
 
-function suppliesOf(card) {
-  const f = activeFace(card);
-  return Array.isArray(f.supplies) ? f.supplies : (card?.supplies || []);
+function suppliesOf(slot) {
+  const f = slotFace(slot);
+  return Array.isArray(f.supplies) ? f.supplies : [];
 }
 
 // Group a requires array by supplier prefix (reactor-* / gen-* /
@@ -88,7 +97,7 @@ function suppliedSet(stack, excludeIndices) {
     if (excl.has(i)) continue;
     const c = PATENTS_BY_ID[stack[i].id];
     if (!c) continue;
-    for (const k of suppliesOf(c)) out.add(k);
+    for (const k of suppliesOf(stack[i])) out.add(k);
   }
   return out;
 }
@@ -108,7 +117,7 @@ function walkChain(stack, rootIndices) {
     const idx = queue.shift();
     const card = PATENTS_BY_ID[stack[idx].id];
     if (!card) continue;
-    const reqs = requiresOf(card);
+    const reqs = requiresOf(stack[idx]);
     const groups = groupRequires(reqs);
     for (const [, kinds] of groups) {
       // For this requirement group, find the first stack card
@@ -118,7 +127,7 @@ function walkChain(stack, rootIndices) {
         if (chain.has(i)) continue;
         const c = PATENTS_BY_ID[stack[i].id];
         if (!c) continue;
-        const supplies = suppliesOf(c);
+        const supplies = suppliesOf(stack[i]);
         if (kinds.some((k) => supplies.includes(k))) {
           picked = i;
           break;
@@ -145,7 +154,7 @@ function findOrphans(stack, chainIndices) {
     if (chain.has(i)) continue;
     const card = PATENTS_BY_ID[stack[i].id];
     if (!card) continue;
-    const reqs = requiresOf(card);
+    const reqs = requiresOf(stack[i]);
     if (!reqs.length) continue;
     if (reqsSatisfied(reqs, afterSupplies)) continue;
     // Build a human-readable list of missing groups.
@@ -175,13 +184,13 @@ function chainThermBalanced(stack, chain) {
   let demand = 0;
   for (const idx of chain) {
     const c = PATENTS_BY_ID[stack[idx].id];
-    if (c) demand += thermsRequired(activeFace(c));
+    if (c) demand += thermsRequired(slotFace(stack[idx]));
   }
   if (demand <= 0) return true;
   let supply = 0;
   for (let i = 0; i < stack.length; i++) {
     const c = PATENTS_BY_ID[stack[i].id];
-    if (c && c.type === 'radiator') supply += thermsSupplied(c, activeFace(c));
+    if (c && c.type === 'radiator') supply += thermsSupplied(c, slotFace(stack[i]));
   }
   return demand <= supply;
 }
@@ -217,9 +226,9 @@ export function findIndustrializeOptions(stack) {
   const stackSupplies = suppliedSet(stack, []);
   const options = [];
   for (const ref of refineries) {
-    if (!reqsSatisfied(requiresOf(ref.card), stackSupplies)) continue;
+    if (!reqsSatisfied(requiresOf(stack[ref.index]), stackSupplies)) continue;
     for (const rob of robonauts) {
-      if (!reqsSatisfied(requiresOf(rob.card), stackSupplies)) continue;
+      if (!reqsSatisfied(requiresOf(stack[rob.index]), stackSupplies)) continue;
       const chain = walkChain(stack, [ref.index, rob.index]);
       // Heat the chain generates must be cooled by the stack's
       // radiators, else the build can't run.

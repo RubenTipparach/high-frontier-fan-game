@@ -689,6 +689,128 @@ function spectralHex(type) {
   return svg;
 }
 
+// Small inline glyphs that echo the card's thrust triangle: the pink thrust
+// circle (number inside) and the fuel water-droplet (number on the droplet,
+// 🪨 for dirt). Used in the at-a-glance chips so a thruster reads like its card.
+function thrustCircleGlyph(value) {
+  return '<svg class="gl-thrust" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">'
+    + '<circle cx="12" cy="12" r="10" fill="#ec4899" stroke="#fbcfe8" stroke-width="1.6"/>'
+    + `<text x="12" y="16.3" text-anchor="middle" font-size="12.5" font-weight="700" fill="#fff">${escapeText(String(value))}</text>`
+    + '</svg>';
+}
+function fuelDropletGlyph(value, dirt) {
+  return `<span class="gl-fuel${dirt ? ' is-dirt' : ''}" aria-hidden="true">`
+    + `<span class="gl-fuel-ico">${dirt ? '🪨' : '💧'}</span>`
+    + `<span class="gl-fuel-n">${escapeText(String(value))}</span></span>`;
+}
+// Reactor / generator thrust MODIFIER: the dark-pink circle from the card's
+// wrench triangle, showing how much thrust it adds to the thruster it powers.
+function modThrustGlyph(value) {
+  const txt = (value > 0 ? '+' : '') + value;
+  return '<svg class="gl-thrust gl-thrust-mod" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">'
+    + '<circle cx="12" cy="12" r="10" fill="#831843" stroke="#fbcfe8" stroke-width="1.6"/>'
+    + `<text x="12" y="16.3" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">${escapeText(txt)}</text>`
+    + '</svg>';
+}
+
+// Compact "at a glance" summary of a card for list/overview chips (e.g. the
+// All cards view). Reuses the SAME glyph language as the full card: the
+// typebar lead icon (supplied chips / robonaut role icons / type icon), the
+// spectral hex, and the type-specific headline numbers (the pink thrust circle
+// + fuel droplet for thrusters, therms for radiators, ISRU + role for
+// robonauts, etc.). Reads the ACTIVE face so a flipped (installed / Tier-2)
+// card reports its own stats. Returns ready-to-inject HTML (statsHtml).
+export function cardGlanceSummary(card, faceName = 'primary') {
+  const sideName = (faceName === 'secondary' && card.faces && card.faces.secondary)
+    ? 'secondary' : 'primary';
+  const fdata = (card.faces && card.faces[sideName]) || {};
+  const props = fdata.properties || card.properties || [];
+  const supplies = fdata.supplies || card.supplies || [];
+  const propByKey = (k) => props.find((p) => p && p.key === k);
+  const type = card.type || (fdata.role != null ? 'crew' : 'card');
+  const thr = fdata.thrust ?? card.thrust;
+  const isThruster = type === 'thruster' || thr != null;
+
+  // Icon: the same typebar lead the full card draws.
+  const iconFor = (k) => (k === 'thermostat')
+    ? thermBadgeSvg(1, { size: 14 })
+    : (supportIconSvg(k, { size: 14 }) || `<em>${(REQUIREMENT_VIS[k] || {}).glyph || ''}</em>`);
+  let icon = supplies.map(iconFor).filter(Boolean).join('');
+  if (!icon && type === 'robonaut') {
+    icon = ['missile', 'raygun', 'buggy']
+      .filter((k) => { const p = propByKey(k); return p && p.value; })
+      .map((k) => supportIconSvg(k, { size: 14 })).join('');
+  }
+  if (!icon) icon = typeIconSvg(type, { size: 14 }) || '';
+  // Thrust-bearing cards with no chip / type icon of their own (e.g. GW
+  // thrusters) borrow the thruster icon; crew fall back to a person glyph.
+  if (!icon && isThruster) icon = typeIconSvg('thruster', { size: 14 }) || '';
+  if (!icon && type === 'crew') icon = '👤';
+
+  // Type-specific headline stats, then ISRU, then notable flags. Each entry is
+  // HTML: thrust / fuel use the card's glyphs, text entries are escaped.
+  const stats = [];
+  const txt = (s) => escapeText(String(s));
+  if (isThruster) {
+    const fuel = fdata.fuel ?? card.fuel;
+    const fuelType = fdata.fuelType ?? card.fuelType;
+    const dirt = !!(fuelType && /dirt/i.test(String(fuelType)));
+    if (thr != null) stats.push(thrustCircleGlyph(thr));
+    if (fuel != null) stats.push(fuelDropletGlyph(Number.isInteger(fuel) ? fuel : fuel.toFixed(2), dirt));
+    if (fdata.afterburn ?? card.afterburn) stats.push('🔥');
+  } else if (type === 'radiator') {
+    const therms = card.therms ?? card.heat_cap ?? fdata.therms
+      ?? (fdata.light && fdata.light.therms) ?? (fdata.heavy && fdata.heavy.therms);
+    if (therms != null) stats.push(`🌡 ${txt(therms)} therm${therms === 1 ? '' : 's'}`);
+  } else if (type === 'crew') {
+    if (fdata.role) stats.push(txt(cap(fdata.role)));
+    // Crew that doubles as a thruster reads like a thruster: pink thrust
+    // circle + fuel droplet (rock for a dirt thruster) + afterburn.
+    const t = fdata.thruster;
+    if (t && t.thrust != null) {
+      stats.push(thrustCircleGlyph(t.thrust));
+      const fuel = t.fuelPerBurn ?? t.fuel;
+      if (fuel != null) {
+        stats.push(fuelDropletGlyph(Number.isInteger(fuel) ? fuel : fuel.toFixed(2), !!t.dirt));
+      }
+      if (t.afterburn) stats.push('🔥');
+    }
+  }
+  const isru = propByKey('isru');
+  if (isru && isru.value != null) stats.push(`ISRU ${txt(isru.value)}`);
+  if (type === 'robonaut') {
+    for (const k of ['missile', 'raygun', 'buggy']) {
+      const p = propByKey(k);
+      if (p && p.value) stats.push(txt(p.label || cap(k)));
+    }
+    if (card.prospect_bonus != null) stats.push(`+prospect ${txt(card.prospect_bonus)}`);
+  }
+  // Reactor / generator thrust + fuel MODIFIER (the card's wrench triangle):
+  // how much it boosts / throttles whatever thruster it powers in the chain.
+  // Shown as the dark-pink mod circle + a ×fuel multiplier.
+  const tMod = fdata.thrustMod ?? card.thrustMod;
+  const fMod = fdata.fuelMod ?? card.fuelMod;
+  if (tMod != null && tMod !== 0) stats.push(modThrustGlyph(tMod));
+  if (fMod != null && fMod !== 1) {
+    stats.push('🔧×' + txt(Number.isInteger(fMod) ? fMod : fMod.toFixed(2)));
+  }
+  // Reactors / generators carry their meaning in what chip they SUPPLY; if no
+  // numeric headline landed, name the supplied chip(s) so the row isn't blank.
+  if (!stats.length && supplies.length) {
+    for (const k of supplies) stats.push(txt((REQUIREMENT_VIS[k] || {}).label || k));
+  }
+
+  const spectralHtml = (type !== 'crew' && card.spectralType)
+    ? spectralHex(card.spectralType).outerHTML : '';
+  return {
+    icon,
+    statsHtml: stats.join('<span class="acc-sep"> · </span>'),
+    hasStats: stats.length > 0,
+    spectralHtml,
+    type,
+  };
+}
+
 // Hand-drawn sun glyph: filled disc + 8 rays. Returns just the
 // shape elements (no wrapper) so callers can drop it into either
 // a triangle, a chip, or anywhere else and add their own data-tip.

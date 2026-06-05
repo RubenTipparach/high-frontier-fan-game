@@ -134,6 +134,33 @@ const SPECTRAL_INK = {
   V: '#fef2f2', D: '#dbeafe', H: '#f0f9ff',
 };
 
+// Stage-3 factory sprites (baked by scripts/gen-factory-sprites.mjs). The base
+// art is one PNG per seat colour; the dome is a separate PNG baked at the SAME
+// canvas + origin, so it composites onto the install pad just by drawing at the
+// same destination rect. ANCHOR_F* is the baked ground-centre as a fraction of
+// the sprite (pinned to the site); LABEL_FY is where the player-coloured
+// {size}{spectral} | {outpost} label sits.
+const FACTORY_SPRITE_W = 184, FACTORY_SPRITE_H = 214;
+const FACTORY_ANCHOR_FX = 0.5753, FACTORY_ANCHOR_FY = 0.7196;
+const FACTORY_CENTER_FY = 0.62;   // building's visual centre (for centring on a site)
+const FACTORY_LABEL_FY = 0.7664;
+const FACTORY_SPRITE_K = 4.2;   // on-screen sprite width = r * K (tune for scale)
+
+// Darken a #rrggbb colour toward black (f < 1); returns rgb() so canvas reads it.
+function shadeHex(c, f) {
+  if (typeof c !== 'string' || c[0] !== '#' || c.length < 7) return c;
+  const r = Math.round(parseInt(c.slice(1, 3), 16) * f);
+  const g = Math.round(parseInt(c.slice(3, 5), 16) * f);
+  const b = Math.round(parseInt(c.slice(5, 7), 16) * f);
+  return `rgb(${r},${g},${b})`;
+}
+// Pick a legible ink (dark on light seat colours, white on dark ones).
+function inkOn(c) {
+  if (typeof c !== 'string' || c[0] !== '#' || c.length < 7) return '#ffffff';
+  const r = parseInt(c.slice(1, 3), 16), g = parseInt(c.slice(3, 5), 16), b = parseInt(c.slice(5, 7), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.55 ? '#15120f' : '#ffffff';
+}
+
 const TYPE_VIS = {
   site:           { kind: 'hex',    r: HEX_R, haloR: 20 },
   'gas-giant':    { kind: 'hex',    r: HEX_R, haloR: 48 },
@@ -785,6 +812,22 @@ export class MapRenderer {
       img.src = assetUrl(`assets/rockets/${name}.png`);
       this._ambientSprites.push(img);
     }
+    // Stage-3 factory sprites: one player-tinted base per seat colour + the
+    // colony dome, keyed by lowercase seat-colour hex. Baked at a shared origin
+    // so the dome composites on the base's install pad (same draw rect).
+    this._factorySprites = {};
+    const FACTORY_FILES = {
+      '#fccc00': 'gold', '#c09cc0': 'mauve', '#e3e0d4': 'bone',
+      '#a8d8c0': 'mint', '#b40054': 'magenta', '#9c9c9c': 'gray',
+    };
+    for (const [hex, name] of Object.entries(FACTORY_FILES)) {
+      const img = new Image();
+      img.src = assetUrl(`assets/factory/factory-base-${name}.png`);
+      this._factorySprites[hex] = img;
+    }
+    this._factorySprites._default = this._factorySprites['#9c9c9c'];
+    this._domeSprite = new Image();
+    this._domeSprite.src = assetUrl('assets/factory/colony-dome.png');
     this._partitionSites();
     this._buildStars();
     this._buildAsteroidBelt();
@@ -2743,72 +2786,122 @@ export class MapRenderer {
     ctx.restore();
   }
 
-  // Stage-3 factory chits + colony rings. Factories paint as
-  // rounded squares offset BELOW the site center (so the claim
-  // disc above stays unobstructed). The chit is tinted by
-  // spectral type using the same palette as the Industrialize
-  // modal badge - C/S/M/V/D/H colours map identically across
-  // the popup chips and the map chits so the player builds one
-  // visual vocabulary.
-  //
-  // When a colony exists at the same site, a thin ring is drawn
-  // OVER the factory chit (the 🌐 = global ring idiom; see
-  // industrialize.md "UX defaults"). One chit per site - the
-  // model caps factories at 1 per site.
+  // Stage-3 factory sprites. Each factory paints as a baked isometric base
+  // tinted by the OWNER's seat colour, anchored just below the site. A colony
+  // adds the dome sprite on the install pad (composited at the same rect), and
+  // a player-coloured label reads {size}{spectral} | {outpost}. One per site.
   _drawFactoriesScreen(ctx) {
     if (!this._factories) return;
     const eff = this.zoom * this.fitScale;
-    // Match the disc-radius math so chit scales with zoom in
-    // the same way; size derived from the disc radius keeps the
-    // two chits visually paired.
     const r = Math.max(7, Math.min(18, 10 * Math.sqrt(this.zoom)));
-    const chitSize = r * 1.4;
-    const chitOffset = r * 2.2;
+    // Sprite footprint: the baked base sits at ANCHOR_F* inside the sprite; we
+    // pin that ground-centre just below the site (where the old chit sat) and
+    // size the whole sprite from r. dw/dh + offset are the tuning knobs.
+    const dw = r * FACTORY_SPRITE_K;
+    const dh = dw * (FACTORY_SPRITE_H / FACTORY_SPRITE_W);
     ctx.save();
     for (const id in this._factories) {
       const site = this.data.byId[id];
       if (!site) continue;
-      const sx = this.pan.x + site.x * eff;
-      const sy = this.pan.y + site.y * eff + chitOffset;
-      if (sx < -40 || sx > this.hostW + 40 || sy < -40 || sy > this.hostH + 40) continue;
-      const spec = this._factories[id].spectralType || 'C';
-      const fill = SPECTRAL_FILL[spec] || '#475569';
-      const ink  = SPECTRAL_INK[spec]  || '#f8fafc';
-      const half = chitSize / 2;
-      // Rounded square chit; the rim picks up the spectral tint.
-      ctx.beginPath();
-      if (typeof ctx.roundRect === 'function') {
-        ctx.roundRect(sx - half, sy - half, chitSize, chitSize, 3);
-      } else {
-        ctx.rect(sx - half, sy - half, chitSize, chitSize);
+      const f = this._factories[id];
+      // Centre the factory ART on the site: the building's horizontal centre
+      // (ANCHOR_FX) and visual centre (CENTER_FY) sit on the site marker.
+      const cxs = this.pan.x + site.x * eff;
+      const cys = this.pan.y + site.y * eff;
+      const dx = cxs - dw * FACTORY_ANCHOR_FX;
+      const dy = cys - dh * FACTORY_CENTER_FY;
+      if (dx > this.hostW + 60 || dx + dw < -60 || dy > this.hostH + 60 || dy + dh < -60) continue;
+      // Base tinted by the OWNER's seat colour (fall back to gray).
+      const base = this._factorySprites[(f.color || '').toLowerCase()] || this._factorySprites._default;
+      if (base && base.complete && base.naturalWidth) ctx.drawImage(base, dx, dy, dw, dh);
+      // Colony dome composites at the SAME rect, landing on the install pad.
+      if (this._colonies && this._colonies[id]
+          && this._domeSprite && this._domeSprite.complete && this._domeSprite.naturalWidth) {
+        ctx.drawImage(this._domeSprite, dx, dy, dw, dh);
       }
-      ctx.fillStyle = fill;
-      ctx.globalAlpha = 0.92;
-      ctx.fill();
-      ctx.globalAlpha = 1;
-      ctx.lineWidth = 1.4;
-      ctx.strokeStyle = '#0c0a16';
-      ctx.stroke();
-      // 🏭 glyph centered in the chit (use the spectral-ink colour
-      // so the glyph reads on the tinted fill).
-      ctx.fillStyle = ink;
-      ctx.font = `700 ${Math.round(chitSize * 0.85)}px ui-sans-serif, system-ui, sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('🏭', sx, sy + 1);
-      // Colony ring overlay (a thin accent-cyan ring around the
-      // factory chit). Drawn when the site has a colony record.
-      if (this._colonies && this._colonies[id]) {
-        ctx.beginPath();
-        ctx.arc(sx, sy, half + 3, 0, Math.PI * 2);
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = '#7dd3fc';
-        ctx.globalAlpha = 0.95;
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-      }
+      // Player-coloured label sits BELOW the site name (drawn at sy + HEX_R +
+      // 12). {size}{spectral}, plus " | {outpost}" when an outpost is stationed
+      // here; the colocated outpost's water / glory ride on the label.
+      const op = this._outpostAt(id);
+      // siteSize is a tag like "4C" (size + prospect class), so take only its
+      // numeric part and append the spectral once -> "4C", not "4CC".
+      const size = String(site.siteSize || '').replace(/[^0-9]/g, '');
+      let text = `${size}${f.spectralType || ''}`;
+      if (op && op.letter) text += ` | ${op.letter}`;
+      if (text) this._drawFactoryLabel(ctx, cxs, cys + HEX_R + 30, text, f.color || '#9c9c9c', r, op);
     }
     ctx.restore();
+  }
+
+  // The outpost stationed at a site (letter + water + glory), or null. Drives
+  // the " | {outpost}" suffix and the 💧 / 🏆 badges on the factory label.
+  _outpostAt(siteId) {
+    if (!this._outposts) return null;
+    for (const L of ['A', 'B', 'C', 'D']) {
+      const op = this._outposts[L];
+      if (op && op.siteId === siteId) return { letter: L, tank: op.tank | 0, gloryChits: op.gloryChits | 0 };
+    }
+    return null;
+  }
+
+  // Player-coloured pill label below the site name: {size}{spectral} with
+  // " | {outpost}" when one is here. The colocated outpost's 💧 water and
+  // 🏆 glory badges flank the pill (they used to ride the now-removed square).
+  _drawFactoryLabel(ctx, cx, cy, text, color, r, op) {
+    const fontPx = Math.max(9, Math.min(15, r * 0.95));
+    ctx.font = `800 ${fontPx}px ui-sans-serif, system-ui, sans-serif`;
+    const tw = ctx.measureText(text).width;
+    const h = fontPx + 7;
+    const w = Math.max(h * 1.5, tw + fontPx);
+    const x = cx - w / 2, y = cy - h / 2;
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, w, h, h / 2);
+    else ctx.rect(x, y, w, h);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = shadeHex(color, 0.55);
+    ctx.stroke();
+    ctx.fillStyle = inkOn(color);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, cx, cy + 0.5);
+    // Water + glory badges flank the pill, fed by the colocated outpost.
+    if (op) {
+      const bs = Math.max(11, Math.round(fontPx * 1.2));
+      ctx.textBaseline = 'middle';
+      if (op.tank > 0) {
+        ctx.font = `${bs}px ${EMOJI_FONT}`;
+        ctx.textAlign = 'right';
+        ctx.fillText('💧', x - 3, cy);
+      }
+      if (op.gloryChits > 0) {
+        ctx.font = `${bs}px ${EMOJI_FONT}`;
+        ctx.textAlign = 'left';
+        ctx.fillText('🏆', x + w + 3, cy);
+        if (op.gloryChits > 1) {
+          ctx.font = `bold ${Math.round(bs * 0.8)}px ui-sans-serif, system-ui, sans-serif`;
+          ctx.fillStyle = '#ffd54a';
+          ctx.fillText(String(op.gloryChits), x + w + 3 + bs, cy);
+        }
+      }
+    }
+  }
+
+  // Park a rocket beside the factory: when a ship sits at a site that has a
+  // factory, shift it left of the centred factory art so the two don't overlap
+  // (w = rocket on-screen width). Returns 0 when there's no factory at these
+  // site coords, so a ship in flight (interpolated coords) is unaffected.
+  _factoryParkShift(worldX, worldY, w) {
+    if (!this._factories) return 0;
+    for (const id in this._factories) {
+      const site = this.data.byId[id];
+      if (site && Math.abs(site.x - worldX) < 0.5 && Math.abs(site.y - worldY) < 0.5) {
+        const rr = Math.max(7, Math.min(18, 10 * Math.sqrt(this.zoom)));
+        return -(rr * FACTORY_SPRITE_K * 0.34 + w / 2 + 5);
+      }
+    }
+    return 0;
   }
 
   // Stage-3 outpost chits. Drawn as small rounded squares with a
@@ -2827,6 +2920,10 @@ export class MapRenderer {
       if (!op || !op.siteId) continue;
       const site = this.data.byId[op.siteId];
       if (!site) continue;
+      // A factory at this site already shows the outpost letter in its label,
+      // so skip the redundant lettered square here (the standalone chit still
+      // marks outposts at sites without a factory).
+      if (this._factories && this._factories[op.siteId]) continue;
       // Stagger by letter index so multiple outposts at the same
       // site don't overlap (rare, but possible). Each outpost is
       // pushed right by an extra chitSize per letter index.
@@ -2864,8 +2961,57 @@ export class MapRenderer {
         ctx.font = `${Math.round(chitSize * 0.6)}px ${EMOJI_FONT}`;
         ctx.fillText('💧', sx + half, sy - half);
       }
+      // Gold glory-chit coin: the outpost's stationed crew is carrying a
+      // glory chit (a chit follows the crew that picked it up, wherever they
+      // station). Bottom-right corner so it never collides with the 💧 water
+      // badge (top-right). The struck-gold + medal-star language matches the
+      // chit coins in the scoring panel; the exact count lives in the outpost
+      // inspector, not on the map.
+      if (op.gloryChits > 0) {
+        const bx = sx + half, by = sy + half;
+        const cr = Math.max(4, chitSize * 0.32);
+        ctx.beginPath();
+        ctx.arc(bx, by, cr + 1.2, 0, Math.PI * 2);
+        ctx.fillStyle = '#0c0a16';
+        ctx.fill();
+        const g = ctx.createRadialGradient(bx - cr * 0.34, by - cr * 0.44, cr * 0.1, bx, by, cr);
+        g.addColorStop(0, '#fffbe6');
+        g.addColorStop(0.16, '#ffe24a');
+        g.addColorStop(0.46, '#ffc400');
+        g.addColorStop(0.78, '#f59e0b');
+        g.addColorStop(1, '#b9700a');
+        ctx.beginPath();
+        ctx.arc(bx, by, cr, 0, Math.PI * 2);
+        ctx.fillStyle = g;
+        ctx.fill();
+        ctx.lineWidth = Math.max(0.8, cr * 0.12);
+        ctx.strokeStyle = '#ffe6a6';
+        ctx.stroke();
+        this._tracePentaStar(ctx, bx, by, cr * 0.62, cr * 0.27);
+        ctx.fillStyle = '#b9810f';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(bx - cr * 0.2, by - cr * 0.48, cr * 0.5, cr * 0.24, 0, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.42)';
+        ctx.fill();
+      }
     }
     ctx.restore();
+  }
+
+  // Trace a five-point star path (no fill/stroke). Shared by the glory-chit
+  // coin marker; the caller sets fillStyle and calls fill().
+  _tracePentaStar(ctx, cx, cy, ro, ri, points = 5, rot = -Math.PI / 2) {
+    ctx.beginPath();
+    for (let i = 0; i < points * 2; i++) {
+      const r = (i % 2 === 0) ? ro : ri;
+      const a = rot + (i * Math.PI) / points;
+      const x = cx + r * Math.cos(a);
+      const y = cy + r * Math.sin(a);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
   }
 
   // Stage-3 focused-stack ring. A thin accent-cyan ring around
@@ -3001,7 +3147,7 @@ export class MapRenderer {
     // syncMpRockets lays out all ships at a site in a centred row, so
     // colocated ships line up side-by-side instead of stacking).
     for (const r of list) {
-      const sx = this.pan.x + r.x * eff + (r.offsetX || 0);
+      const sx = this.pan.x + r.x * eff + (r.offsetX || 0) + this._factoryParkShift(r.x, r.y, w);
       const sy = this.pan.y + r.y * eff;
       const px = sx - w / 2;
       const py = sy - h - 2;
@@ -3039,15 +3185,14 @@ export class MapRenderer {
     const r = this._sandboxRocket;
     if (!r) return;
     const eff = this.zoom * this.fitScale;
-    // offsetX shifts the local rocket sideways so it takes its slot in
-    // the colocation row (set by browse.js syncMpRockets when other
-    // players share this site). 0 in solo / when alone.
-    const sx = this.pan.x + r.x * eff + (r.offsetX || 0);
-    const sy = this.pan.y + r.y * eff;
     const { width: spriteW, height: spriteH } = getRocketSpriteSize();
     const scale = 0.55;     // map-scale; 35×53 px on screen.
     const w = spriteW * scale;
     const h = spriteH * scale;
+    // offsetX shifts the local rocket sideways for the colocation row (set by
+    // browse.js syncMpRockets); the park shift stands it next to a factory.
+    const sx = this.pan.x + r.x * eff + (r.offsetX || 0) + this._factoryParkShift(r.x, r.y, w);
+    const sy = this.pan.y + r.y * eff;
     const px = sx - w / 2;
     const py = sy - h - 2;  // foot of rocket above the anchor
     ctx.save();
@@ -3721,8 +3866,15 @@ export class MapRenderer {
     const eff = this.zoom * this.fitScale;
     const sx = this.pan.x + wx * eff;
     const sy = this.pan.y + wy * eff;
-    let best = null;
-    let bestDist = 22 * 22;
+    // Routing/manual mode: route waypoints (hohmann / lagrange / burn) ARE
+    // valid targets, and the first hohmann dot of a transfer sits right next
+    // to its origin site. Normally a real site's generous 22px pick radius
+    // short-circuits and swallows that dot, so you can't tap into a Hohmann
+    // transfer. In routing mode we tighten the site radius and pick whichever
+    // of {closest site, closest waypoint} is genuinely nearer the tap.
+    const routing = !!this.routingHit;
+    let bestSite = null;
+    let bestSiteDist = (routing ? 15 * 15 : 22 * 22);
     for (const s of this._realSites) {
       const vis = TYPE_VIS[s.type] || TYPE_VIS.unknown;
       if (vis.kind === 'sun')   continue;
@@ -3730,12 +3882,13 @@ export class MapRenderer {
       const dx = (this.pan.x + s.x * eff) - sx;
       const dy = (this.pan.y + s.y * eff) - sy;
       const d = dx * dx + dy * dy;
-      if (d < bestDist) { bestDist = d; best = s; }
+      if (d < bestSiteDist) { bestSiteDist = d; bestSite = s; }
     }
-    if (best) return best;
+    if (bestSite && !routing) return bestSite;
     // Waypoints: hit radius can be larger than the visible disc
     // (e.g. hohmann is 2px painted but accepts a 10px click).
-    let bestRad = 0;
+    let bestWp = null;
+    let bestWpDist = Infinity;
     for (const w of this._waypoints) {
       if (w.isDecorative) continue;
       const vis = TYPE_VIS[w.type] || TYPE_VIS.unknown;
@@ -3745,12 +3898,17 @@ export class MapRenderer {
       const dx = (this.pan.x + w.x * eff) - sx;
       const dy = (this.pan.y + w.y * eff) - sy;
       const d = dx * dx + dy * dy;
-      if (d <= hitR * hitR && (best == null || d < bestRad)) {
-        best = w; bestRad = d;
-      }
+      if (d <= hitR * hitR && d < bestWpDist) { bestWp = w; bestWpDist = d; }
     }
-    return best;
+    if (!routing) return bestWp;
+    // Routing: nearest node wins, whether it's a site or a waypoint.
+    if (bestSite && (!bestWp || bestSiteDist <= bestWpDist)) return bestSite;
+    return bestWp || bestSite;
   }
+
+  // Toggle routing/manual hit-testing: when on, route waypoints (hohmann,
+  // lagrange, burn) become tappable even right next to a site.
+  setRoutingHit(on) { this.routingHit = !!on; }
 
   _wireHover() {
     // Mouse hover -> tooltip. Throttled by mousemove cadence which is

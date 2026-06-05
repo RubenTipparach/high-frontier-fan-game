@@ -578,10 +578,21 @@ app.post('/lobbies', requireProfile, (req, res) => {
     if (existing) return res.status(200).json({ ok: true, lobby: lobbyRow(existing.id), deduped: true });
   }
   const name = String(body.name || '').trim().slice(0, 60) || `${req.profile.name}'s table`;
-  const maxPlayers = Math.max(2, Math.min(5, Number(body.maxPlayers) || 5));
+  // Min 1 so a "solo room" (a private 1-player table for testing the
+  // multiplayer engine alone) can be created; the normal create form still
+  // asks for 2+. Start only requires >=1 member, so a solo room can begin.
+  const maxPlayers = Math.max(1, Math.min(5, Number(body.maxPlayers) || 5));
   // Game length: 5 (short, default) / 6 (medium) / 7 (extra long).
   const maxRounds = [5, 6, 7].includes(Number(body.maxRounds)) ? Number(body.maxRounds) : 5;
   const joinPolicy = body.joinPolicy === 'invite-only' ? 'invite-only' : 'open';
+  // Solo-game setup options. Stored on the lobby and honoured at start ONLY for
+  // 1-player rooms (multiplayer is always market + the standard bank). Null when
+  // unset, so the start path falls back to defaults.
+  //   startingAqua: 0..100 free-play bank (e.g. 100 sandbox-style vs 6 standard)
+  //   economy:      'library' (free draws) or 'market' (auctioned)
+  const startingAqua = Number.isFinite(Number(body.startingAqua))
+    ? Math.max(0, Math.min(100, Math.floor(Number(body.startingAqua)))) : null;
+  const economy = (body.economy === 'library' || body.economy === 'market') ? body.economy : null;
   const now = nowMs();
   let code, info;
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -589,10 +600,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
     try {
       info = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key)
-           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy)
+           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?)`
         )
-        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey);
+        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy);
       break;
     } catch (err) {
       if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -829,7 +840,7 @@ app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
 app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, max_rounds FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -853,7 +864,13 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   }));
   // Lobbies predating the column come back null; default to 5.
   const maxRounds = [5, 6, 7].includes(lobby.max_rounds) ? lobby.max_rounds : 5;
-  const state = createInitialState({ players, seed, maxRounds });
+  // Solo-game setup options are honoured only for a 1-player game; multiplayer
+  // is always market + the standard starting bank. Unset (or non-solo) leaves
+  // them undefined so createInitialState uses its defaults.
+  const solo = players.length === 1;
+  const startingAqua = solo && Number.isFinite(lobby.starting_aqua) ? lobby.starting_aqua : undefined;
+  const economy = solo && (lobby.economy === 'library' || lobby.economy === 'market') ? lobby.economy : undefined;
+  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy });
 
   const now = nowMs();
   const gameId = db.transaction(() => {
@@ -2321,6 +2338,7 @@ app.get('/admin', (req, res) => {
     )
     .all();
 
+  // Active rooms only - cancelled ones live in their own modal (below).
   const lobbies = db
     .prepare(
       `SELECT l.id, l.code, l.name, l.status, l.join_policy, l.max_players,
@@ -2329,8 +2347,24 @@ app.get('/admin', (req, res) => {
               (SELECT COUNT(*) FROM lobby_members lm WHERE lm.lobby_id = l.id) AS members
        FROM lobbies l
        JOIN profiles p ON p.id = l.host_id
+       WHERE l.status != 'cancelled'
        ORDER BY l.created_at DESC
        LIMIT 50`
+    )
+    .all();
+
+  // Cancelled rooms, newest-cancelled first (legacy rows with no cancel stamp
+  // fall back to created_at). Shown in a popup modal, not the main list.
+  const cancelledLobbies = db
+    .prepare(
+      `SELECT l.id, l.code, l.name, l.max_players,
+              datetime(COALESCE(l.cancelled_at, l.created_at) / 1000, 'unixepoch') AS cancelled_when,
+              p.name AS host_name
+       FROM lobbies l
+       JOIN profiles p ON p.id = l.host_id
+       WHERE l.status = 'cancelled'
+       ORDER BY COALESCE(l.cancelled_at, l.created_at) DESC
+       LIMIT 200`
     )
     .all();
 
@@ -2344,7 +2378,7 @@ app.get('/admin', (req, res) => {
        JOIN profiles p ON p.id = cm.profile_id
        LEFT JOIN lobbies l ON l.id = cm.lobby_id
        ORDER BY cm.created_at DESC
-       LIMIT 30`
+       LIMIT 20`
     )
     .all();
 
@@ -2412,7 +2446,7 @@ app.get('/admin', (req, res) => {
   }).join('') || '<tr><td colspan=8><em>No profiles yet.</em></td></tr>';
 
   const lobbyRows = lobbies.map((r) => `
-    <tr>
+    <tr data-name="${esc(String(r.name || '').toLowerCase())}">
       <td><code>${esc(r.code)}</code></td>
       <td>${esc(r.name)}</td>
       <td>@${esc(r.host_name)}</td>
@@ -2420,13 +2454,20 @@ app.get('/admin', (req, res) => {
       <td>${esc(r.join_policy)}</td>
       <td class="num">${r.members} / ${r.max_players}</td>
       <td>${esc(r.created)}</td>
-      <td>
-        ${r.status === 'cancelled'
-          ? `<button class="btn-restore-lobby" data-lid="${r.id}" data-lname="${esc(r.name)}">Restore</button>`
-          : `<button class="btn-del-lobby danger" data-lid="${r.id}" data-lname="${esc(r.name)}">Cancel</button>`}
-      </td>
+      <td><button class="btn-del-lobby danger" data-lid="${r.id}" data-lname="${esc(r.name)}">Cancel</button></td>
     </tr>
-  `).join('') || '<tr><td colspan=8><em>No lobbies yet.</em></td></tr>';
+  `).join('') || '<tr class="empty-row"><td colspan=8><em>No active rooms.</em></td></tr>';
+
+  const cancelledRows = cancelledLobbies.map((r) => `
+    <tr>
+      <td><code>${esc(r.code)}</code></td>
+      <td>${esc(r.name)}</td>
+      <td>@${esc(r.host_name)}</td>
+      <td class="num">${r.max_players}</td>
+      <td>${esc(r.cancelled_when)}</td>
+      <td><button class="btn-restore-lobby" data-lid="${r.id}" data-lname="${esc(r.name)}">Restore</button></td>
+    </tr>
+  `).join('') || '<tr><td colspan=6><em>No cancelled rooms.</em></td></tr>';
 
   const chatRows = chats.map((r) => `
     <tr>
@@ -2499,6 +2540,18 @@ app.get('/admin', (req, res) => {
   .discord-link{background:none;border:none;padding:0;margin:0;color:#7dd3fc;cursor:pointer;font:inherit;font-size:13px;text-decoration:underline;text-underline-offset:2px}
   .discord-link:hover{background:none;border:none;color:#a5e4ff}
   .reassign-picker select{background:#07060f;color:#e6e9ff;border:1px solid #2a2740;border-radius:4px;padding:3px 6px;font:inherit;font-size:12px}
+  .rooms-toolbar{display:flex;align-items:center;gap:10px;margin:6px 0 10px;flex-wrap:wrap}
+  #room-search{flex:1 1 240px;max-width:340px;background:#07060f;color:#e6e9ff;border:1px solid #2a2740;border-radius:6px;padding:6px 10px;font:inherit}
+  #show-cancelled{background:#1a1430;color:#cdd7f0;border:1px solid #3a2740;border-radius:6px;padding:6px 12px;font:inherit;cursor:pointer}
+  #show-cancelled:hover{background:#26193f}
+  .modal-overlay{position:fixed;inset:0;background:rgba(3,2,10,.72);display:flex;align-items:center;justify-content:center;padding:24px;z-index:50}
+  .modal-overlay[hidden]{display:none}
+  .modal-box{background:#0c0a16;border:1px solid #2a2740;border-radius:12px;width:min(820px,94vw);max-height:86vh;display:flex;flex-direction:column;overflow:hidden}
+  .modal-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #1e1b2e}
+  .modal-head h3{margin:0;font-size:16px}
+  .modal-x{background:none;border:none;color:#9aa0c4;font-size:22px;line-height:1;cursor:pointer;padding:0 4px}
+  .modal-x:hover{color:#fff}
+  .modal-body{overflow:auto;padding:8px 16px 16px}
 </style></head>
 <body>
   <div class="header-row">
@@ -2602,14 +2655,35 @@ app.get('/admin', (req, res) => {
     <tbody>${profileRows}</tbody>
   </table>
 
-  <h2>Lobbies</h2>
+  <h2>Rooms</h2>
+  <div class="rooms-toolbar">
+    <input id="room-search" type="search" placeholder="Search room name…" autocomplete="off" />
+    <button id="show-cancelled" type="button">🗑 Canceled rooms (${cancelledLobbies.length})</button>
+  </div>
   <table>
     <thead><tr>
       <th>Code</th><th>Name</th><th>Host</th>
       <th>Status</th><th>Policy</th><th class="num">Players</th><th>Created</th><th>Manage</th>
     </tr></thead>
-    <tbody>${lobbyRows}</tbody>
+    <tbody id="lobby-tbody">${lobbyRows}</tbody>
   </table>
+
+  <div id="cancelled-modal" class="modal-overlay" hidden>
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3>🗑 Canceled rooms</h3>
+        <button id="cancelled-close" type="button" class="modal-x" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <table>
+          <thead><tr>
+            <th>Code</th><th>Name</th><th>Host</th><th class="num">Players</th><th>Canceled</th><th>Manage</th>
+          </tr></thead>
+          <tbody>${cancelledRows}</tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 
   <h2>Recent chat</h2>
   <table>
@@ -2882,6 +2956,39 @@ document.addEventListener('click', function (ev) {
       alert('Network error.');
     });
 });
+
+// Room-name search: filter the active-rooms table by the row's data-name.
+(function () {
+  var search = document.getElementById('room-search');
+  var tbody = document.getElementById('lobby-tbody');
+  if (!search || !tbody) return;
+  search.addEventListener('input', function () {
+    var q = search.value.trim().toLowerCase();
+    var rows = tbody.querySelectorAll('tr');
+    for (var i = 0; i < rows.length; i++) {
+      var tr = rows[i];
+      if (tr.classList.contains('empty-row')) continue;
+      var name = tr.getAttribute('data-name') || '';
+      tr.style.display = (!q || name.indexOf(q) !== -1) ? '' : 'none';
+    }
+  });
+})();
+
+// Canceled-rooms modal: open / close. Restore buttons inside it are handled by
+// the existing .btn-restore-lobby click delegation (it reloads on success).
+(function () {
+  var openBtn = document.getElementById('show-cancelled');
+  var modal = document.getElementById('cancelled-modal');
+  var closeBtn = document.getElementById('cancelled-close');
+  if (!modal) return;
+  function close() { modal.hidden = true; }
+  if (openBtn) openBtn.addEventListener('click', function () { modal.hidden = false; });
+  if (closeBtn) closeBtn.addEventListener('click', close);
+  modal.addEventListener('click', function (ev) { if (ev.target === modal) close(); });
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape' && !modal.hidden) close();
+  });
+})();
 </script>
 </body></html>`);
 });
@@ -3002,8 +3109,8 @@ app.post('/admin/lobbies/:id/delete', requireAdmin, (req, res) => {
   db.transaction(() => {
     cancelLobbyInvites(id);
     db.prepare(
-      "UPDATE lobbies SET status = 'cancelled' WHERE id = ? AND status != 'cancelled'"
-    ).run(id);
+      "UPDATE lobbies SET status = 'cancelled', cancelled_at = ? WHERE id = ? AND status != 'cancelled'"
+    ).run(now, id);
     db.prepare(
       "UPDATE games SET status = 'cancelled', finished_at = COALESCE(finished_at, ?) WHERE lobby_id = ? AND status != 'cancelled'"
     ).run(now, id);
@@ -3034,9 +3141,9 @@ app.post('/admin/lobbies/:id/restore', requireAdmin, (req, res) => {
       db.prepare(
         "UPDATE games SET status = 'active', finished_at = NULL WHERE lobby_id = ? AND status = 'cancelled'"
       ).run(id);
-      db.prepare("UPDATE lobbies SET status = 'started' WHERE id = ?").run(id);
+      db.prepare("UPDATE lobbies SET status = 'started', cancelled_at = NULL WHERE id = ?").run(id);
     } else {
-      db.prepare("UPDATE lobbies SET status = 'waiting' WHERE id = ?").run(id);
+      db.prepare("UPDATE lobbies SET status = 'waiting', cancelled_at = NULL WHERE id = ?").run(id);
     }
   })();
   res.json({ ok: true });

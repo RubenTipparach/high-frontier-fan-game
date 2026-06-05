@@ -19,6 +19,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeRefId, normalizeSiteName } from '../../data/planner-ids.js';
 import { SITES } from '../../data/sites.js';
+import { raygunReachable } from '../../data/raygun-los.js';
 
 // The mission-planner data (vendor JSON) is the single source of truth
 // for the movement graph - the SAME file the client renders from - and a
@@ -83,6 +84,10 @@ function loadPlanner() {
       siteSize: p.siteSize || null,
       site,           // curated data/sites.js metadata, or null
       hazard: !!p.hazard,   // raw planner skull flag
+      // Numeric landing rating off the raw planner point. A burnspace with
+      // landing > 0 is itself a site, so the raygun beam passes through it
+      // (see data/raygun-los.js); waypoints without one leave this null.
+      landing: typeof p.landing === 'number' ? p.landing : null,
     });
   }
 
@@ -152,34 +157,18 @@ export function neighborSlugs(slug) {
   return (ADJ.get(String(slug)) || []).map((e) => e.to);
 }
 
-// Sites in the raygun's line of sight from `fromSlug`: real sites
-// reachable by travelling ONLY through waypoints (burn / lagrange /
-// hohmann), no intervening site, within maxHops waypoint steps. The hop
-// cap keeps "line of sight" to the local neighbourhood - the waypoint web
-// is so connected that an uncapped beam would reach almost every site.
+// Sites in the raygun's line of sight from `fromSlug`. Delegates to the
+// SHARED beam walk (data/raygun-los.js) so the server accepts EXACTLY the
+// raygun prospects the client offers - the beam traces transparent
+// waypoints only and stops at the first real site, no divergent hop cap.
 // Returns a Set of site slugs (excludes the origin).
-const RAYGUN_MAX_HOPS = 3;
-export function lineOfSightSites(fromSlug, maxHops = RAYGUN_MAX_HOPS) {
+export function lineOfSightSites(fromSlug) {
   const start = fromSlug == null ? leoSlug() : String(fromSlug);
-  const out = new Set();
-  if (!ADJ.has(start)) return out;
-  const seen = new Set([start]);
-  const queue = [[start, 0]];
-  while (queue.length) {
-    const [cur, depth] = queue.shift();
-    if (depth > maxHops) continue;
-    for (const { to } of ADJ.get(cur) || []) {
-      if (seen.has(to)) continue;
-      seen.add(to);
-      const node = NODES_BY_SLUG.get(to);
-      if (node && node.site) {
-        out.add(to);          // a site: in range, but don't see past it
-      } else {
-        queue.push([to, depth + 1]);   // waypoint: keep tracing the beam
-      }
-    }
-  }
-  return out;
+  if (!ADJ.has(start)) return new Set();
+  return raygunReachable(start, {
+    neighbors: (slug) => neighborSlugs(slug),
+    nodeOf: (slug) => NODES_BY_SLUG.get(slug) || null,
+  });
 }
 
 // Hazard class of a planner node (mirror of browse.js#classifyHazard so

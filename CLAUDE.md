@@ -131,6 +131,18 @@ for the common stats:
   / installed face**. Faces can carry their own stats so a
   flipped card behaves differently (e.g. a radiator opened vs
   stowed, or a thruster with a mode change).
+  - **ALWAYS read the INSTALLED face for functional logic** (not
+    `faces.primary`). A flipped card's mass, requires, supplies,
+    thrustMod / fuelMod, therms, and prospector kind are the
+    secondary face's, and 62 of 84 two-faced cards even differ in
+    mass. Use `installedFace(slot)` (client, rocket.js) /
+    `slotFace(slot, card)` (server, engine.js) keyed off
+    `slot.face`; both must agree so a flipped card's weight-class
+    band + fuel capacity match. Reading `faces.primary` for
+    supports / thrust / prospecting / industrialize was a recurring
+    bug (a black-side stack was checked against its white-side
+    requirements); don't reintroduce it. Display-only reads (the
+    card name, the Browse catalog grids) may stay on primary.
 - `flipOrientation` - `'standard'` (default) or `'rotated180'`.
   Radiators are typically `'rotated180'`: their secondary face is
   drawn upside-down, matching the published cards.
@@ -224,6 +236,72 @@ Some cards (boosters, augments, certain robonauts) **modify**
 another card's stats while attached. The engine handles this via
 a `modifier` block on the modifying card; see
 `server/game/engine.js` (Stage 3+) for how those compose.
+
+## Support chains - modifier + cooling rules
+
+Cards power each other through a multi-hop **support chain**, not a
+single hop. A thruster names a power requirement (a `reactor-*`
+OR-group, or `gen-electric`); the card that supplies it may itself
+require a further power source, so the real chain runs e.g.
+THRUSTER -> GENERATOR -> REACTOR -> radiator. The reactor two hops
+back still belongs to the thruster's chain, so a one-hop "does this
+card directly supply the thruster" scan is WRONG: walk the whole chain.
+
+Three rules govern how the chain feeds the active thruster:
+
+1. **First reactor only.** The FIRST reactor encountered walking out
+   from the thruster is the ONLY reactor that modifies the thruster
+   (`thrustMod` / `fuelMod`). Reactors deeper in the chain power their
+   part of the chain but do NOT shift the thruster's stats.
+2. **Generators before that reactor modify.** Every generator in the
+   chain BEFORE the first reactor also modifies the thruster. A
+   generator AFTER the first reactor does not.
+3. **Dedicated reactor cooling.** The therms a reactor consumes cannot
+   be shared with any other therm requirement in the chain. Each
+   reactor reserves its own radiator cooling; a radiator's therms
+   counted toward one reactor can't also cover another. Dedicated
+   cooling is a REACTOR-only rule; non-reactor heat draws the shared
+   remainder.
+
+Circular dependencies are REAL in the card set (e.g. a generator that
+supplies `gen-radioisotope` feeding a reactor that requires it and
+supplies the `reactor-*` the generator needs). The chain walk must
+visit each card ONCE, so a cycle is detected and flagged but never
+breaks the walk or double-counts: a chain with a cycle is still valid.
+
+The resolver is pure + shared: `data/support-chain.js` (it lives in `data/`
+so BOTH `js/game/rocket.js` and `server/game/engine.js` import it, the same
+reason `data/fuel-graph.js` does). It is the single source of truth for these
+rules.
+
+INTEGRATION LANDED (2026-06-05). The resolver now drives the engine; the
+one-hop modifier scan is gone. Rules 1+2 (the modifier path) fold into thrust
++ fuel on BOTH the client (`rocket.js#getActiveThrusterStats`) and the server
+(`engine.js#activeNetThrust` + `thrusterFuelPerBurn`): each normalises the
+stack into the resolver's card shape (supplies off the primary face; requires
+/ thrustMod / fuelMod off the installed face) and folds the same
+`modifierChain` in the same order, so a multi-hop reactor (THRUSTER ->
+GENERATOR -> REACTOR) now modifies and the two sides stay byte-identical (a
+move the client allows is never rejected for a different number). Rule 3
+(dedicated reactor cooling) drives the client's `isRocketActive` cooling gate
+via the resolver's `coolingOk` (each reactor reserves its own radiator therms;
+the thruster + generators draw the remainder; the common single-reactor stack
+is the same verdict as before). The SERVER does NOT gate cooling at all (it
+trusts the client, like routes), so rule 3 is client-only. NOTE: the active
+PROSPECTOR's cooling still uses the older `chainThermBalance` shared-pool
+helper (`getActiveProspectorStats`); unifying it onto the resolver is a
+follow-up.
+
+**TODO: support-chain visualizer (+ rules 4-5).** Still to build: the
+visualizer tool (graph view, the modifier path highlighted, cycles flagged),
+plus the two visualizer-facing rules: (4) show every support satisfied at all
+levels with check marks (all supports and all cards in the chain read as
+valid); (5) robonauts can run PARALLEL chains, and a thruster/missile robonaut
+serves both roles with ONE chain. The resolver currently walks a SINGLE chain
+from one `activeId`, so rule 5 needs a resolver extension. The chain is meant
+to be player-wired: the resolver already accepts a `wiring` map but nothing
+produces one yet (the visualizer assigns supplier -> consumer). Build the
+visualizer + wiring UI together.
 
 ## Stages - build incrementally
 
@@ -667,6 +745,33 @@ Server-authoritative engine in `server/game/engine.js`:
 - Prospect: roll Nd6 (N = site class size); thresholds defined per
   site type. Success = place prospect marker; site becomes claimable
   by the prospector for industrialization.
+  - **Prospect economy (engine rule, do NOT revert to one-op-per-scan).**
+    The FIRST prospect of the turn (any kind) spends the turn's single
+    operation to BEGIN prospecting. Once begun, a raygun's line-of-sight
+    scan is FREE and UNLIMITED: a player keeps scanning in-sight sites at
+    no extra operation. Missile / buggy still spend the operation (they
+    ARE the operation) and can't fire a free extra scan. Movement is the
+    normal one-move-per-turn resource and prospecting does NOT forfeit it:
+    if you have NOT moved yet you may still take your one move AFTER a
+    raygun scan; if you HAD already moved, that move is spent
+    (`no_moves_left`) so there is no further move, and it can no longer be
+    undone once the prospect rolls (the roll barrier in `applyUndo`, NOT a
+    move-after-prospect gate - that gate was removed). "Has begun" reads
+    off this turn's undo stack (a PROSPECT entry, reset each turn). The
+    PROSPECT op carries `turn` + `round`; a same-site, same-turn re-submit
+    is idempotent (no second roll), a stale turn is rejected. (User
+    decisions 2026-06-05: raygun is 1 op to activate then unlimited free
+    scans; movement is blocked only when already moved this turn, otherwise
+    still allowed after a scan.)
+    Canonical move/prospect cases the engine is verified against (one move
+    per turn; a raygun scan never blocks a move you have not yet taken):
+    - Raygun scan first, NOT yet moved: the one move is still allowed
+      after the scan.
+    - Moved, THEN raygun scan: no further move (`no_moves_left`), and that
+      move can no longer be undone once the prospect rolled.
+    - No prospect, not yet moved: the move runs normally.
+    - Moved, no prospect: no further move (`no_moves_left`) - one move per
+      turn holds with or without a scan.
 - Industrialize: deliver a robonaut or crew + reactor to the site;
   flip prospect to factory (1 VP, generates patent income).
 - Refinery upgrade: deliver a refinery; factory becomes hydrated

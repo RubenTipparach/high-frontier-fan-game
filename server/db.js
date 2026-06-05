@@ -324,6 +324,17 @@ function ensureColumn(table, column, ddl) {
 // Lobbies created before game-length was configurable get the default
 // (5 rounds). New rows already carry it from the CREATE TABLE above.
 ensureColumn('lobbies', 'max_rounds', 'max_rounds INTEGER NOT NULL DEFAULT 5');
+// Solo-game setup options (honoured only for 1-player rooms; multiplayer is
+// always market + the standard starting bank). Nullable: legacy rows and
+// normal multiplayer rooms leave them unset and the start path uses defaults.
+//   starting_aqua: the bank each player opens with (e.g. 100 free-play vs 6)
+//   economy:       'library' (free draws) or 'market' (auctioned)
+ensureColumn('lobbies', 'starting_aqua', 'starting_aqua INTEGER');
+ensureColumn('lobbies', 'economy', 'economy TEXT');
+// When a lobby was cancelled (admin "Cancel"), so the admin panel can list
+// cancelled rooms newest-cancelled-first. Nullable: only set on cancel,
+// cleared on restore; legacy cancelled rows fall back to created_at for sort.
+ensureColumn('lobbies', 'cancelled_at', 'cancelled_at INTEGER');
 // Idempotency key for room creation: a client retry / double-submit carries
 // the same key so the server returns the lobby it already made instead of a
 // duplicate. Nullable (legacy rows + non-idempotent callers); the partial

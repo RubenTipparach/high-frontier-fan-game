@@ -108,7 +108,7 @@ function buildShuffledDecks(gen) {
   return decks;
 }
 
-function freshPlayer({ profileId, name, seat, color }) {
+function freshPlayer({ profileId, name, seat, color, aqua }) {
   return {
     profileId,
     name,
@@ -162,7 +162,9 @@ function freshPlayer({ profileId, name, seat, color }) {
     outposts: {},
     hand: [],
     boostMarks: [],
-    aqua: AQUA_DEFAULT,
+    // Starting bank. Defaults to the standard AQUA_DEFAULT; a solo game may
+    // seed a bigger free-play bank (createInitialState passes startingAqua).
+    aqua: Number.isFinite(aqua) ? aqua : AQUA_DEFAULT,
     glory: { chits: [], claimed: [], visited: [], vps: 0 },
     opsRemaining: OPS_PER_TURN,
     movesRemaining: MOVES_PER_TURN,
@@ -172,7 +174,7 @@ function freshPlayer({ profileId, name, seat, color }) {
 
 // players: [{ profileId, name, seat }] (seat 1-based, any order).
 // maxRounds: game length (rounds = Sunspot Cube cycles); default 5.
-export function createInitialState({ players, seed, maxRounds = 5 }) {
+export function createInitialState({ players, seed, maxRounds = 5, startingAqua, economy } = {}) {
   // Sort by the incoming (lobby) seat first so the shuffle has a
   // deterministic base regardless of how the caller ordered the array,
   // then randomise the turn order with the seeded RNG. Turn order IS
@@ -191,6 +193,12 @@ export function createInitialState({ players, seed, maxRounds = 5 }) {
   const palette = shuffle(gen, PLAYER_COLORS);
   const decks = buildShuffledDecks(gen);
   const rounds = [5, 6, 7].includes(maxRounds) ? maxRounds : 5;
+  // Card economy + starting bank. Standard multiplayer is always 'market' +
+  // AQUA_DEFAULT (the caller enforces that for 2+ player games); a solo game
+  // may pick Free Library and a free-play bank. Anything unrecognised falls
+  // back to the standard values.
+  const econ = economy === 'library' ? 'library' : 'market';
+  const startAqua = Number.isFinite(startingAqua) ? Math.max(0, Math.floor(startingAqua)) : AQUA_DEFAULT;
   return {
     version: 2,
     seed,
@@ -203,13 +211,13 @@ export function createInitialState({ players, seed, maxRounds = 5 }) {
     // the regular gameplay ops (MOVE / BURN / AUCTION_* / END_TURN
     // / etc.) start being accepted.
     draftPhase: 'crew',
-    // Card economy. Multiplayer is always 'market' (Card Market
-    // mode is mandatory in MP - patents are auctioned, not free
-    // draws, and the Free Market sell op is available). Server-
-    // owned so the client can't fall back to Free Library by
-    // wiping localStorage; net-bridge reads it on every snapshot
-    // and pins the client's MARKET_MODE.
-    economy: 'market',
+    // Card economy. Multiplayer is always 'market' (Card Market mode is
+    // mandatory in MP - patents are auctioned, not free draws, and the Free
+    // Market sell op is available); a solo game may choose 'library'. Server-
+    // owned so the client can't fall back to Free Library by wiping
+    // localStorage; net-bridge reads it on every snapshot and pins the
+    // client's MARKET_MODE.
+    economy: econ,
     turn: 0,
     round: 1,
     // Game length. The game finishes once `round` passes maxRounds
@@ -247,6 +255,7 @@ export function createInitialState({ players, seed, maxRounds = 5 }) {
         name: p.name,
         seat: i + 1,
         color: palette[i % palette.length],
+        aqua: startAqua,
       })
     ),
     startedAt: Date.now(),

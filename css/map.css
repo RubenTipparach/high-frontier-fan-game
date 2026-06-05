@@ -646,7 +646,10 @@
   gap: 18px;
   margin: 4px 0 8px;
 }
-.fuel-tank-svg { width: 130px; height: 240px; }
+/* The tank keeps its size no matter how wide the readout gets - a long
+   fractional water value shrinks the NUMBER's font (set in JS), never the
+   tank. flex-shrink:0 stops the flex row from squeezing the cylinder. */
+.fuel-tank-svg { width: 130px; height: 240px; flex: 0 0 130px; }
 .tank-shell {
   fill: rgba(15, 23, 42, 0.55);
   stroke: rgba(125, 211, 252, 0.65);
@@ -680,18 +683,34 @@
 .fuel-tank-readout {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   font-variant-numeric: tabular-nums;
+  /* Fixed footprint: the readout never changes width as the water number
+     grows/shrinks, so the centered stage (and the tank) never shift. The
+     number's font scales down (JS) to stay inside this box. */
+  flex: 0 0 132px;
+  overflow: hidden;
+}
+/* "5 / 31" on ONE line (current / cap), with the WATER label beneath. */
+.fuel-tank-amount {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  max-width: 100%;
+  white-space: nowrap;
 }
 .fuel-tank-readout strong.tank-now {
+  /* The number's font may scale freely (JS shrinks long values) - it lives in
+     the fixed-width readout box, so changing it NEVER moves the tank. */
   font-size: 38px;
   line-height: 1;
   color: #7dd3fc;
+  white-space: nowrap;
 }
-.fuel-tank-readout span {
-  font-size: 18px;
+.fuel-tank-readout .tank-sep {
+  font-size: 20px;
   color: var(--ink-dim);
-  margin: 4px 0;
+  margin: 0;
 }
 .fuel-tank-readout strong.tank-cap {
   font-size: 22px;
@@ -2525,6 +2544,22 @@
   background: var(--panel);
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* Claim-glory action: a gold button matching the glory-chit coin so
+   "load the chit" reads in the same colour language as the token. */
+.map-popup .popup-btn-glory {
+  background: linear-gradient(180deg, #ffd860, #f0a90c);
+  border-color: #b07e12;
+  color: #3a2705;
+  font-weight: 700;
+  box-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.35),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.3);
+}
+.map-popup .popup-btn-glory:hover:not(:disabled) {
+  background: linear-gradient(180deg, #ffe487, #ffbe2e);
+  border-color: #d99a12;
 }
 .map-popup .popup-close {
   position: absolute;
@@ -4673,8 +4708,8 @@ body:has(#view-browse:not(.hidden)) #main {
   border-radius: 50%;
   border: 2px solid #ffe6a6;
   background:
-    radial-gradient(circle at 33% 26%,
-      #fffae0 0%, #ffe75a 16%, #ffce1f 42%, #f0a90c 72%, #c4830f 100%);
+    radial-gradient(circle at 34% 24%,
+      #fffbe6 0%, #ffe24a 14%, #ffc400 40%, #f59e0b 70%, #b9700a 100%);
   box-shadow:
     0 0 0 2px #b07e12,
     inset 0 2px 8px rgba(255, 255, 255, 0.7),
@@ -4718,16 +4753,45 @@ body:has(#view-browse:not(.hidden)) #main {
 /* Resolved sides keep the coin but shift its richness: back (home value,
    the valuable side) = deepest gold; front (colonised / lost, lesser
    value) = paler, cooler gold. */
+/* The BACK (returned-home, high value) face is the ornate "glory" side:
+   vibrant orange with an engraved sunburst + laurel + beaded rim (the
+   .chit-deco SVG layer), distinct from the plain gold FRONT. */
+/* A CENTRED sun-glow: a lighter yellow-orange core radiating out to deep
+   orange at the rim, like the sun. Centred + symmetric, so it reads as
+   radiance (matching the engraved sunburst rays) rather than an off-centre
+   specular reflection. */
 .chit-token.chit-back {
   background:
-    radial-gradient(circle at 33% 26%,
-      #fff4bc 0%, #ffdc4e 18%, #ffbe14 46%, #d4920c 80%, #a06b0e 100%);
+    radial-gradient(circle at 50% 50%,
+      #ffe98a 0%, #ffc24d 20%, #f9881e 50%, #ea580c 80%, #c2480a 100%);
 }
-.chit-token.chit-back .chit-token-vp { color: #5a3300; }
+.chit-token.chit-back .chit-token-vp   { color: #4a1c06; }
+.chit-token.chit-back .chit-token-zone { color: #4a1e04; }
+.chit-token.chit-back .chit-token-side { color: #6a3210; }
+/* No gloss sweep, no inset top-light, no outer glow - fully matte. Keep only
+   a thin rim + a soft drop shadow so the coin still separates from the
+   panel. Both the flip back face and the fixed (claimed / taken) back. */
+.chit-token.chit-back::before { display: none; }
+.chit-token.chit-back,
+.chit-token-flip .chit-token.chit-face.chit-back {
+  box-shadow:
+    0 0 0 2px #a8730f,
+    0 2px 7px rgba(0, 0, 0, 0.5);
+}
+/* Engraved decoration layer: sits below the text (z-index 1) but above the
+   gradient. Clipped to the coin by .chit-token's overflow:hidden. */
+.chit-token > .chit-deco {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+}
 .chit-token.chit-front {
   background:
-    radial-gradient(circle at 33% 26%,
-      #fffbe6 0%, #ffeda0 22%, #ecd061 50%, #c2a63e 82%, #8f7a37 100%);
+    radial-gradient(circle at 34% 24%,
+      #fffdf0 0%, #ffe98c 18%, #ffd23a 46%, #e0a82a 78%, #a07d1f 100%);
 }
 .chit-token.chit-front .chit-token-vp { color: #5b4a1e; }
 /* In transit with no crew aboard: dimmed. */
@@ -4763,6 +4827,15 @@ body:has(#view-browse:not(.hidden)) #main {
   height: 92px;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
+  /* Carried coins are live inventory: add a warm gold halo on top of the
+     struck-metal shadow so they read brighter / more alive than the spent
+     (darkened, no-glow) claimed coins. */
+  box-shadow:
+    0 0 0 2px #b07e12,
+    inset 0 2px 8px rgba(255, 255, 255, 0.7),
+    inset 0 -5px 10px rgba(150, 90, 8, 0.55),
+    0 2px 8px rgba(0, 0, 0, 0.45),
+    0 0 14px 2px rgba(255, 206, 64, 0.55);
 }
 .chit-token-flip .chit-token.chit-face-back { transform: rotateY(180deg); }
 .glory-h4-note { font-size: 11px; font-weight: 400; }
@@ -4776,19 +4849,40 @@ body:has(#view-browse:not(.hidden)) #main {
   gap: 4px;
 }
 .chit-token.chit-claimed { cursor: default; }
-/* Darken the spent coin via an overlay (NOT a filter, which would dim the
-   text too). The text spans sit at z-index 1, above this overlay. */
-.chit-token.chit-claimed::after {
-  content: '';
+/* Claimed at home is NOT darkened or disabled: it stays the SAME vibrant coin
+   as when carried (gold FRONT / sun-glow engraved BACK, on whichever side it
+   scored), marked with a green check badge to show it has been banked. The
+   check lives in a non-clipping holder (the coin itself is overflow:hidden) at
+   the coin's top-right. A RIVAL's claim (the dotted "taken" outline) is handled
+   separately below. */
+.chit-coin-holder { position: relative; display: inline-flex; }
+.chit-scored-check {
   position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: rgba(14, 9, 2, 0.5);
-  pointer-events: none;
+  top: -4px;
+  right: -4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #21c25a;
+  border: 2px solid #eafff1;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+  z-index: 3;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
 }
-.chit-token.chit-claimed .chit-token-zone,
-.chit-token.chit-claimed .chit-token-vp,
-.chit-token.chit-claimed .chit-token-side { color: #f1e2b8; }
+.glory-coins-sm .chit-scored-check {
+  width: 14px;
+  height: 14px;
+  font-size: 8.5px;
+  top: -3px;
+  right: -3px;
+  border-width: 1.5px;
+}
 .chit-claim-by {
   font-size: 10px;
   font-weight: 700;
@@ -4799,6 +4893,63 @@ body:has(#view-browse:not(.hidden)) #main {
   text-align: center;
   color: #cbd5e1;
 }
+
+/* Half-size glory coins in the scoring panel (the all-chits board + your
+   coins row, both tagged .glory-coins-sm): the panel just inventories
+   chits, so the coins read fine small here. The focal, full-size coin lives
+   in the pick-up / scored-at-home modals, which are NOT tagged, so they
+   stay big. */
+.glory-coins-sm { gap: 8px; }
+.glory-coins-sm .chit-token-flip,
+.glory-coins-sm .chit-token-flip .chit-token.chit-face,
+.glory-coins-sm .chit-token {
+  width: 46px;
+  height: 46px;
+}
+.glory-coins-sm .chit-token {
+  font-size: 6px;
+  padding: 3px 2px;
+  gap: 0;
+}
+.glory-coins-sm .chit-token .chit-token-emoji { font-size: 10px; line-height: 1; }
+.glory-coins-sm .chit-token .chit-token-zone  { font-size: 6.5px; }
+.glory-coins-sm .chit-token .chit-token-side  { font-size: 5px; }
+.glory-coins-sm .chit-token .chit-token-owner { font-size: 5px; }
+.glory-coins-sm .chit-claim-by { font-size: 7px; max-width: 48px; }
+/* A zone a rival has banked is shown as the EMPTY SPOT where the coin was
+   lifted off the board: NO coin at all (no fill, sheen, engraving, medal, or
+   shadow), just a dotted circular outline the size of the coin, with the same
+   zone / VP / "taken" text inside and the claimer's name beneath. Reads as
+   "this chit has been taken off," distinct from a live (glowing) coin or your
+   own (darkened) claimed coin. */
+.chit-token.chit-claimed.chit-zone-taken {
+  background: none;
+  box-shadow: none;
+  border: 2px dotted rgba(233, 201, 130, 0.55);
+  filter: none;
+}
+.chit-token.chit-zone-taken::before,
+.chit-token.chit-zone-taken::after { display: none; }
+.chit-token.chit-zone-taken > .chit-deco { display: none; }
+.chit-token.chit-zone-taken .chit-token-emoji { display: none; }
+.chit-token.chit-zone-taken .chit-token-zone,
+.chit-token.chit-zone-taken .chit-token-vp,
+.chit-token.chit-zone-taken .chit-token-side { color: #d8c9a6; }
+
+/* Glory pick-up + scored-at-home modals reuse .turn-confirm-panel; these
+   rules just centre the coin(s) and tidy the spacing inside. */
+.glory-pickup-coin {
+  display: flex;
+  justify-content: center;
+  margin: 12px 0 6px;
+}
+.glory-pickup-actions { justify-content: center; }
+.glory-pickup-note { margin-top: 10px; }
+.glory-home-coins {
+  justify-content: center;
+  margin: 14px 0 6px;
+}
+.glory-home-panel h3 { color: #ffd24a; }
 
 /* ============================================================
    Stage-3 hand-bar stack switcher.
@@ -5997,6 +6148,20 @@ body:has(#view-browse:not(.hidden)) #main {
   outline: 1px solid rgba(56, 189, 248, 0.5);
   border-color: rgba(56, 189, 248, 0.5);
 }
+/* Roster row: the expand-toggle head (flex) + a per-player All cards button. */
+.mp-player-headrow { display: flex; align-items: stretch; }
+.mp-player-headrow .mp-player-head { flex: 1 1 auto; min-width: 0; }
+.mp-player-cards {
+  flex: 0 0 auto;
+  border: 0;
+  border-left: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink-mute);
+  font-size: 14px;
+  padding: 0 11px;
+  cursor: pointer;
+}
+.mp-player-cards:hover { background: rgba(255, 255, 255, 0.06); color: var(--ink); }
 .mp-player-head {
   display: flex;
   align-items: center;
@@ -6750,3 +6915,158 @@ body:has(#view-browse:not(.hidden)) #main {
 .mp-go-total { grid-area: total; font-size: 16px; font-weight: 800; white-space: nowrap; }
 .mp-go-break { grid-area: break; font-size: 12px; }
 .mp-game-over-note { margin: 14px 0 0; font-size: 12px; }
+
+/* ===== All cards overview (hand panel + MP panel "📚 All cards") =====
+   A read-only audit of every card the local player owns, grouped by where it
+   sits, with each location's liquid (tank water / LEO aqua bank) and chits. */
+.hand-all-cards {
+  margin-left: auto;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 9px;
+  border-radius: 7px;
+  border: 1px solid #3a4668;
+  background: #1b2440;
+  color: #cdd7f0;
+  cursor: pointer;
+}
+.hand-all-cards:hover { background: #243056; }
+
+.all-cards-modal {
+  width: min(760px, 94vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  background: #0f1424;
+  border: 1px solid #2a3456;
+  border-radius: 14px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+.all-cards-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #222c4a;
+}
+.all-cards-head h3 { margin: 0; font-size: 16px; color: #e6e9ff; }
+.all-cards-head .muted { font-size: 12px; font-weight: 400; color: #8b90b8; margin-left: 6px; }
+.all-cards-close {
+  background: none;
+  border: none;
+  color: #9aa0c4;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.all-cards-close:hover { color: #fff; }
+.all-cards-body { overflow-y: auto; padding: 6px 16px 16px; }
+
+.all-cards-loc { padding: 10px 0; border-bottom: 1px solid #1c2440; }
+.all-cards-loc:last-child { border-bottom: none; }
+.all-cards-loc-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.acl-name { font-weight: 700; color: #e9c46a; font-size: 13px; }
+.acl-sub { color: #8b90b8; font-size: 11px; }
+.acl-count { color: #6f7396; font-size: 11px; }
+.acl-meta { margin-left: auto; display: flex; gap: 12px; align-items: center; }
+.acl-water { font-size: 12px; font-weight: 700; color: #7dd3fc; }
+.acl-aqua { color: #67e8f9; }
+.acl-chits { font-size: 12px; color: #ffd24a; font-weight: 700; }
+
+.all-cards-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.all-cards-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 168px;
+  max-width: 232px;
+  padding: 6px 9px 6px 11px;
+  border: 1px solid #2c3658;
+  border-left: 4px solid #5b6b8a;
+  border-radius: 7px;
+  background: #161d33;
+  color: #dbe2f5;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.all-cards-chip:hover { background: #1e2744; border-color: #3a4668; }
+.all-cards-chip .acc-top { display: flex; align-items: center; gap: 6px; }
+.all-cards-chip .acc-ic { display: inline-flex; align-items: center; flex: 0 0 auto; }
+.all-cards-chip .acc-ic svg { width: 15px; height: 15px; display: block; }
+.all-cards-chip .acc-ic em { font-style: normal; font-size: 13px; }
+.all-cards-chip .acc-name {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.all-cards-chip .acc-spec { flex: 0 0 auto; display: inline-flex; }
+.all-cards-chip .acc-spec svg.spectral-hex { width: 19px; height: 16px; display: block; }
+.all-cards-chip .acc-bot { display: flex; align-items: center; gap: 6px; }
+.all-cards-chip .acc-stat {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  font-size: 10.5px;
+  color: #aeb6d6;
+  line-height: 1.3;
+}
+.all-cards-chip .acc-mass { margin-left: auto; font-size: 10px; color: #6f7396; flex: 0 0 auto; }
+.acc-sep { color: #4d5478; }
+/* Thrust pink circle + fuel water-droplet glyphs, echoing the card. */
+.gl-thrust { display: inline-block; vertical-align: middle; }
+.gl-fuel {
+  position: relative;
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+}
+.gl-fuel-ico { font-size: 14px; line-height: 1; }
+.gl-fuel-n {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8.5px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 0 2px #0b3a52, 0 0 2px #0b3a52, 0 0 1px #0b3a52;
+}
+.gl-fuel.is-dirt .gl-fuel-n { text-shadow: 0 0 2px #44403c, 0 0 2px #44403c; }
+.all-cards-chip.type-thruster  { border-left-color: var(--card-thruster); }
+.all-cards-chip.type-reactor   { border-left-color: var(--card-reactor); }
+.all-cards-chip.type-radiator  { border-left-color: var(--card-radiator); }
+.all-cards-chip.type-refinery  { border-left-color: var(--card-refinery); }
+.all-cards-chip.type-robonaut  { border-left-color: var(--card-robonaut); }
+.all-cards-chip.type-generator { border-left-color: var(--card-generator); }
+.all-cards-chip.kind-crew      { border-left-color: var(--chip-color, #d9b25a); }
+
+.all-cards-empty { color: #5a6080; font-size: 12px; padding: 2px 0 4px; }
+.all-cards-hidden {
+  color: #8b90b8;
+  font-style: italic;
+  background: repeating-linear-gradient(45deg, #161d33, #161d33 6px, #1a2138 6px, #1a2138 12px);
+  border: 1px dashed #2c3658;
+  border-radius: 7px;
+  padding: 8px 10px;
+  display: inline-block;
+}
+.all-cards-coins { margin-top: 8px; }

@@ -9,7 +9,7 @@ import {
 } from './auth.js';
 import { ws } from './ws.js';
 import {
-  initLobby, refreshLobbyList, openLobby, exitToLobbyList,
+  initLobby, refreshLobbyList, openLobby, exitToLobbyList, createSoloRoom,
 } from './lobby.js';
 import {
   initInvites, refreshInvitesList, subscribeInvitesForProfile,
@@ -407,9 +407,24 @@ function initNewGameModal() {
   const overlay = document.getElementById('new-game-modal');
   const closeBtn = document.getElementById('btn-new-game-close');
   const mpBtn = document.getElementById('btn-new-game-mp');
+  const soloBtn = document.getElementById('btn-new-game-solo');
   const sandboxBtn = document.getElementById('btn-new-game-sandbox');
-  if (!trigger || !overlay || !closeBtn || !mpBtn || !sandboxBtn) return;
+  const modeSection = document.getElementById('new-game-mode');
+  const legacyWarn = document.getElementById('new-game-legacy-warn');
+  const legacyContinue = document.getElementById('btn-legacy-continue');
+  const legacyBack = document.getElementById('btn-legacy-back');
+  const soloOpts = document.getElementById('new-game-solo-opts');
+  const soloCreate = document.getElementById('btn-solo-create');
+  const soloBack = document.getElementById('btn-solo-back');
+  if (!trigger || !overlay || !closeBtn || !mpBtn || !soloBtn || !sandboxBtn) return;
+  // Reset to the mode chooser (hide the sub-steps).
+  const showMode = () => {
+    if (modeSection) modeSection.classList.remove('hidden');
+    if (legacyWarn) legacyWarn.classList.add('hidden');
+    if (soloOpts) soloOpts.classList.add('hidden');
+  };
   const open = () => {
+    showMode();
     overlay.classList.remove('hidden');
     document.addEventListener('keydown', onKey);
   };
@@ -425,7 +440,51 @@ function initNewGameModal() {
     close();
     showView('view-create-lobby');
   });
+  // Solo room: pick the sandbox-style options first (starting bank + card
+  // economy), then create + start a private 1-player server game.
+  soloBtn.addEventListener('click', () => {
+    if (modeSection) modeSection.classList.add('hidden');
+    if (soloOpts) soloOpts.classList.remove('hidden');
+  });
+  // Option toggles: activating one button in a group deactivates its siblings.
+  if (soloOpts) {
+    soloOpts.querySelectorAll('.solo-opt-group').forEach((group) => {
+      group.querySelectorAll('.solo-opt').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          group.querySelectorAll('.solo-opt').forEach((b) => b.classList.remove('is-active'));
+          btn.classList.add('is-active');
+        });
+      });
+    });
+  }
+  if (soloBack) soloBack.addEventListener('click', showMode);
+  if (soloCreate) soloCreate.addEventListener('click', async () => {
+    const aquaBtn = soloOpts && soloOpts.querySelector('.solo-opt.is-active[data-aqua]');
+    const econBtn = soloOpts && soloOpts.querySelector('.solo-opt.is-active[data-econ]');
+    const startingAqua = aquaBtn ? Number(aquaBtn.dataset.aqua) : 100;
+    const economy = econBtn ? econBtn.dataset.econ : 'library';
+    soloCreate.disabled = true;
+    const prev = soloCreate.textContent;
+    soloCreate.textContent = 'Creating room…';
+    try {
+      const r = await createSoloRoom({ startingAqua, economy });
+      if (r && r.ok) { close(); }
+      else { toast('Could not start a solo room: ' + ((r && r.error) || 'network'), 'error'); }
+    } catch (err) {
+      console.error('solo room:', err);
+      toast('Could not start a solo room.', 'error');
+    } finally {
+      soloCreate.disabled = false;
+      soloCreate.textContent = prev;
+    }
+  });
+  // Offline sandbox is now behind a warning (device-only, no multiplayer).
   sandboxBtn.addEventListener('click', () => {
+    if (modeSection) modeSection.classList.add('hidden');
+    if (legacyWarn) legacyWarn.classList.remove('hidden');
+  });
+  if (legacyBack) legacyBack.addEventListener('click', showMode);
+  if (legacyContinue) legacyContinue.addEventListener('click', () => {
     close();
     // A fresh solo session: register a new sandbox game id (so it shows in
     // "Your games" + routes to /sandbox/<id>), then mount with newGame so

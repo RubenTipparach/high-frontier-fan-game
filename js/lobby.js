@@ -598,6 +598,33 @@ async function onCreateSubmit(ev) {
   }
 }
 
+// Create a private 1-player "solo room": a real multiplayer table with just
+// you in it, started right away. It runs the same server-backed engine as a
+// full table, so it's the way to exercise multiplayer features alone. Needs
+// the server to allow maxPlayers=1 (it does); start only needs >=1 member.
+export async function createSoloRoom({ startingAqua = 100, economy = 'library' } = {}) {
+  const me = activeProfile();
+  if (!me) return { ok: false, error: 'no_profile' };
+  const create = await createLobby(
+    { name: `${me.name}'s solo room`, maxPlayers: 1, maxRounds: 5,
+      joinPolicy: 'invite-only', idempotencyKey: newIdemKey(),
+      startingAqua, economy },
+    me.token,
+  );
+  if (!create.ok) return create;
+  const lobby = create.data.lobby;
+  const started = await startLobby(lobby.id, me.token);
+  if (!started.ok) {
+    // Couldn't auto-start: still drop the player into the waiting room so they
+    // can hit Start manually.
+    await enterLobby(lobby);
+    return started;
+  }
+  // Re-fetch (now 'started') and mount the game, same path as a normal table.
+  await openLobby(lobby.id, { join: false });
+  return { ok: true, data: { lobby } };
+}
+
 async function onClaimLinkSubmit(ev) {
   ev.preventDefault();
   const input = document.getElementById('claim-link-code');

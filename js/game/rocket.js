@@ -25,6 +25,7 @@
 //   onRocketChange(cb)                → unsubscribe
 
 import { PATENTS_BY_ID, thermsRequired, thermsSupplied } from '../../data/patents.js';
+import { resolveSupportChain } from '../../data/support-chain.js';
 import { CREW_BY_ID } from '../../data/crew.js';
 import { SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { weightClassForMass } from '../../data/net-thrust-track.js';
@@ -287,7 +288,7 @@ function stackDryMass() {
   for (const slot of _stack) {
     const c = cardForSlot(slot);
     if (!c) continue;
-    const f = (c.faces && c.faces.primary) || c;
+    const f = installedFace(slot);
     mass += ((f.mass != null ? f.mass : c.mass) | 0);
   }
   return mass;
@@ -355,9 +356,12 @@ export function setActiveThruster(id) {
 // capability columns. Returns the kind ('missile'|'raygun'|'buggy')
 // or null. Cards can declare more than one kind; we pick the
 // first match in this priority order.
-export function getProspectorKind(card) {
+// `face` is the INSTALLED face to read the prospector columns off; pass it for
+// any stack slot so a flipped (black-side) card reports its real prospector
+// kind. Defaults to the primary face for a bare card with no slot context.
+export function getProspectorKind(card, face) {
   if (!card) return null;
-  const f = activeFace(card);
+  const f = face || activeFace(card);
   const props = f.properties || [];
   for (const key of ['raygun', 'missile', 'buggy']) {
     if (props.some((p) => p.key === key && p.value)) return key;
@@ -365,14 +369,16 @@ export function getProspectorKind(card) {
   return null;
 }
 function isProspectorCardId(id) {
-  return !!getProspectorKind(cardById(id));
+  const slot = _stack.find((s) => s.id === id);
+  const card = slot ? cardForSlot(slot) : cardById(id);
+  return !!getProspectorKind(card, slot ? installedFace(slot) : undefined);
 }
 
 export function getProspectorCards() {
   const out = [];
   for (const slot of _stack) {
     const card = cardForSlot(slot);
-    const kind = getProspectorKind(card);
+    const kind = getProspectorKind(card, installedFace(slot));
     if (kind) out.push({ id: slot.id, card, kind });
   }
   return out;
@@ -406,11 +412,12 @@ export function clearActiveProspector() {
 export function getActiveProspectorStats() {
   const id = _activeProspectorId;
   if (!id) return null;
-  const card = cardById(id);
+  const slot = _stack.find((s) => s.id === id);
+  const card = slot ? cardForSlot(slot) : cardById(id);
   if (!card) return null;
-  const kind = getProspectorKind(card);
+  const f = slot ? installedFace(slot) : activeFace(card);
+  const kind = getProspectorKind(card, f);
   if (!kind) return null;
-  const f = activeFace(card);
   const supplied = collectSupplied(id);
   const requires = Array.isArray(f.requires) ? f.requires : [];
   const groups = new Map();
@@ -424,9 +431,9 @@ export function getActiveProspectorStats() {
     if (!kinds.some((k) => supplied.has(k))) missing.push(supplier);
   }
   // The prospector's operating chain (itself + the reactor/generator it
-  // needs) must be cooled too, same as the thruster chain.
-  const slot = _stack.find((s) => s.id === id);
-  const therm = chainThermBalance(id, installedFace(slot));
+  // needs) must be cooled too, same as the thruster chain. `f` is the
+  // installed face resolved at the top.
+  const therm = chainThermBalance(id, f);
   if (!therm.ok) missing.push('thermostat');
   return {
     id,
@@ -447,9 +454,8 @@ function collectSupplied(excludeId) {
   const supplied = new Set();
   for (const slot of _stack) {
     if (slot.id === excludeId) continue;
-    const c = cardForSlot(slot);
-    if (!c) continue;
-    const supplies = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
+    const f = installedFace(slot);
+    const supplies = (f && f.supplies) || [];
     for (const k of supplies) supplied.add(k);
   }
   return supplied;
@@ -538,17 +544,21 @@ export function isRocketActive() {
   const others = _stack.filter((s) => s.id !== _activeThrusterId);
   const supplied = new Set();
   for (const s of others) {
-    const c = cardForSlot(s);
-    if (!c) continue;
-    const supplies = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
+    const f = installedFace(s);
+    const supplies = (f && f.supplies) || [];
     for (const k of supplies) supplied.add(k);
   }
 
   // Group the active thruster's requires by supplier prefix
   // (reactor-* / gen-* / etc.) so same-supplier kinds read as
   // OR-alternatives - a thruster listing X / ∿ / 💣 reactor
-  // is satisfied by ANY reactor that supplies one of those.
-  const reqs = (active.faces && active.faces.primary && active.faces.primary.requires) || active.requires || [];
+  // is satisfied by ANY reactor that supplies one of those. Read the
+  // INSTALLED face so a thruster flipped to its black side asks for that
+  // face's supports (e.g. Pulsed Inductive's gen-radioisotope vs the
+  // Dual-Stage 4-Grid black side's gen-electric).
+  const activeSlot = _stack.find((s) => s.id === _activeThrusterId);
+  const af = installedFace(activeSlot);
+  const reqs = (af && af.requires) || active.requires || [];
   const missing = [];
   if (reqs.length) {
     const groups = new Map();
@@ -564,13 +574,20 @@ export function isRocketActive() {
     }
   }
 
-  // Thermal balance: the active thruster's heat plus the heat of the
-  // reactor/generator powering it must be dissipated by the stack's
-  // radiators, the same hard gate as the reactor-type support above.
-  const activeSlot = _stack.find((s) => s.id === _activeThrusterId);
-  const therm = chainThermBalance(_activeThrusterId, installedFace(activeSlot));
-  if (!therm.ok) {
-    missing.push(`${active.name} runs ${therm.demand}🌡️ but radiators supply ${therm.supply}🌡️`);
+  // Cooling (rule 3, data/support-chain.js): each reactor in the chain reserves
+  // its OWN dedicated radiator therms; the thruster plus any generators draw the
+  // shared remainder. Stricter than a single shared pool (two reactors can't
+  // split one radiator), matching the published dedicated-cooling rule. For the
+  // common single-reactor stack this is the same verdict as before.
+  const cool = resolveSupportChain({ cards: chainCardsFromStack(), activeId: _activeThrusterId });
+  if (!cool.coolingOk) {
+    const hot = cool.reactorCooling.find((r) => !r.ok);
+    if (hot) {
+      const rc = cardById(hot.reactorId);
+      missing.push(`${rc ? rc.name : 'A reactor'} needs ${hot.demand}🌡️ of its own radiator cooling`);
+    } else {
+      missing.push(`${active.name} and its generators run ${cool.nonReactorHeat}🌡️ but only ${cool.radiatorRemaining}🌡️ of radiator is free after the reactors`);
+    }
   }
 
   return {
@@ -615,7 +632,7 @@ export function findFunctionalThrusters(stack) {
       if (j === i) continue;
       const o = cardForSlot(stack[j]);
       if (!o) continue;
-      const of = (o.faces && o.faces.primary) || o;
+      const of = installedFace(stack[j]);
       const sup = Array.isArray(of.supplies) ? of.supplies : (o.supplies || []);
       for (const k of sup) supplied.add(k);
     }
@@ -811,7 +828,7 @@ export function getStackTotals() {
   for (const slot of _stack) {
     const card = cardForSlot(slot);
     if (!card) continue;
-    const f = activeFace(card);
+    const f = installedFace(slot);
     const m = (f.mass != null ? f.mass : card.mass) | 0;
     const r = (f.radHardness != null ? f.radHardness : card.radHardness);
     mass += m;
@@ -825,6 +842,29 @@ export function getStackTotals() {
     wetMass: mass + _tankWater,
     minRadHard: minRad,
   };
+}
+
+// Normalise the current stack into the support-chain resolver's card shape
+// (data/support-chain.js). Everything (supplies / requires / thrustMod /
+// fuelMod / therms) reads the INSTALLED face, so a flipped dark-side card
+// reports its own stats - its black-side supplies AND requires drive the chain,
+// not the white-side ones. `therms` is the cooling a radiator SUPPLIES,
+// otherwise the heat the card GENERATES.
+function chainCardsFromStack() {
+  return _stack.map((slot) => {
+    const card = cardForSlot(slot);
+    const f = installedFace(slot);
+    const type = card ? card.type : slot.kind;
+    return {
+      id: slot.id,
+      type,
+      supplies: (f && f.supplies) || (card && card.supplies) || [],
+      requires: (f && f.requires) || (card && card.requires) || [],
+      thrustMod: f ? f.thrustMod : undefined,
+      fuelMod: f ? f.fuelMod : undefined,
+      therms: type === 'radiator' ? thermsSupplied(card, f) : thermsRequired(f),
+    };
+  });
 }
 
 // Compute the active thruster's "final" stats after applying every
@@ -856,22 +896,22 @@ export function getActiveThrusterStats() {
   let baseThrust = thrust;
   let baseFuel = fuel;
   const modifiers = [];
-  // A reactor/generator's thrust + fuel modifiers only count when it
-  // actually powers THIS thruster, i.e. it supplies a kind the active
-  // thruster requires (it sits in the thruster's support chain). A power
-  // source wired to some other card (say a generator feeding a robonaut's
-  // gen-electric) must not shift the thruster's stats, and a self-powered
-  // thruster (a solar moth, which requires nothing) takes no stack thrust
-  // modifiers at all. Same supply/require match isRocketActive() gates
-  // activation on, so "modified" stats and "can it fly" stay consistent.
-  const reqKinds = new Set((f.requires || []).map((r) => (r && r.kind) || r));
-  for (const slot of _stack) {
-    if (slot.id === id) continue;
-    const c = cardForSlot(slot);
+  // Support-chain modifiers (rules 1+2, data/support-chain.js). Walk the FULL
+  // chain that powers this thruster and apply only the modifier path: every
+  // generator before the first reactor, plus that first reactor. A reactor two
+  // hops back (THRUSTER -> GENERATOR -> REACTOR) still modifies; a second reactor
+  // deeper does not. This replaces the old one-hop "does it DIRECTLY supply the
+  // thruster" scan, which missed multi-hop reactors and could double-count a
+  // spare reactor. A self-powered thruster (a solar moth, requiring nothing)
+  // pulls no chain, so it takes no stack modifiers. The server mirrors this
+  // exactly (engine.js) so a move the client allows is never rejected for a
+  // different thrust/fuel number.
+  const chain = resolveSupportChain({ cards: chainCardsFromStack(), activeId: id });
+  for (const cid of chain.modifierChain) {
+    const cslot = _stack.find((s) => s.id === cid);
+    const c = cslot ? cardForSlot(cslot) : cardById(cid);
     if (!c) continue;
-    const cf = installedFace(slot);
-    const cSupplies = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
-    if (!cSupplies.some((k) => reqKinds.has(k))) continue;
+    const cf = cslot ? installedFace(cslot) : activeFace(c);
     const tMod = cf.thrustMod;
     const fMod = cf.fuelMod;
     if (tMod != null && tMod !== 0) {

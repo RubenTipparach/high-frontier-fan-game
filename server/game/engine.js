@@ -27,6 +27,7 @@
 //     nested snapshots inside the state blob.
 
 import { PATENTS_BY_ID } from '../../data/patents.js';
+import { resolveSupportChain } from '../../data/support-chain.js';
 import { CREW_BY_ID } from '../../data/crew.js';
 // Shared fuel-strip model (same module the client uses): a burn spends fuel
 // STEPS (black connections), and the water it costs is the non-linear mass
@@ -38,6 +39,7 @@ import { blackStepsBetween, walkBlackDown } from '../../data/fuel-graph.js';
 // not the printed base value.
 import { weightClassForMass } from '../../data/net-thrust-track.js';
 import { SOLAR_ZONE_INFO } from '../../data/sites.js';
+import { ZONE_CHIT_VPS } from '../../data/zone-chits.js';
 // Movement + metadata both come from the planner graph (the vendor
 // mission-planner data the client also uses). siteBySlug layers the
 // curated data/sites.js metadata onto a planner slug, so there is ONE
@@ -75,7 +77,7 @@ function slotMass(slot) {
   if (!slot || !slot.id) return 0;
   const p = PATENTS_BY_ID[slot.id];
   if (p) {
-    const f = (p.faces && p.faces.primary) || p;
+    const f = slotFace(slot, p);
     return (f.mass != null ? f.mass : p.mass) | 0;
   }
   const crew = CREW_BY_ID[slot.id];
@@ -250,6 +252,18 @@ function maybeAwardGlory(player, site, turn) {
   return chit;
 }
 
+// Free action: load the still-unclaimed glory chit for the zone the
+// rocket is parked in (a crew must be aboard). The explicit counterpart to
+// declining the on-arrival pick-up; mirrors the client's claimGloryHere.
+// maybeAwardGlory enforces the zone / Earth / already-claimed / crew gates,
+// so a null result means there is nothing here to load.
+function applyLoadGlory(state, _op, player) {
+  const site = player.rocket.siteId ? siteById(player.rocket.siteId) : null;
+  const chit = site ? maybeAwardGlory(player, site, state.turn) : null;
+  if (!chit) return fail('no_chit_to_load');
+  return { ok: true, state, log: `${player.name} loaded the ${chit.zone} glory chit.` };
+}
+
 // Advance the Sunspot Cube one slot. Bumps the round on wrap, rolls a
 // d6 on event slots (recorded as lastEvent; effect resolution is a
 // later PR, matching the sandbox which only records the roll today),
@@ -296,6 +310,29 @@ function faceHasSolar(face) {
     && face.properties.some((p) => p.key === 'solar' && p.value));
 }
 
+// Normalise a rocket's stack into the support-chain resolver's card shape
+// (mirror of rocket.js#chainCardsFromStack). Everything (supplies / requires /
+// thrustMod / fuelMod) reads the INSTALLED face, so a flipped dark-side card's
+// own stats drive the chain. Crew aren't power sources (no requires), so they
+// pull no chain. `therms` is unused server-side (the server does not gate
+// cooling), so it stays 0.
+function chainCardsFromRocket(rocket) {
+  return rocket.stack.map((s) => {
+    const c = PATENTS_BY_ID[s.id];
+    const f = c ? slotFace(s, c) : {};
+    const type = c ? c.type : (s.kind || 'crew');
+    return {
+      id: s.id,
+      type,
+      supplies: (f && f.supplies) || (c && c.supplies) || [],
+      requires: (f && f.requires) || (c && c.requires) || [],
+      thrustMod: f ? f.thrustMod : undefined,
+      fuelMod: f ? f.fuelMod : undefined,
+      therms: 0,
+    };
+  });
+}
+
 // Net thrust of the active thruster after ALL deterministic modifiers
 // (mirror of rocket.js#getActiveThrusterStats's thrust folding): base face
 // thrust + support-chain reactor/generator thrustMod + weight-class band
@@ -311,20 +348,18 @@ function activeNetThrust(rocket) {
   const f = thrusterFaceOf(slot);
   let thrust = Number.isFinite(f.thrust) ? f.thrust : null;
   if (thrust == null) return 0;
-  // Support-chain modifiers: a reactor/generator shifts this thruster's
-  // thrust only when it supplies a kind the thruster requires. A self-powered
-  // or crew thruster requires nothing, so it takes no stack modifiers.
-  const reqKinds = new Set((f.requires || []).map((r) => (r && r.kind) || r));
-  if (reqKinds.size) {
-    for (const s of rocket.stack) {
-      if (s.id === tid) continue;
-      const c = PATENTS_BY_ID[s.id];
-      if (!c) continue;
-      const cSupplies = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
-      if (!cSupplies.some((k) => reqKinds.has(k))) continue;
-      const cf = slotFace(s, c);
-      if (cf.thrustMod != null && cf.thrustMod !== 0) thrust += cf.thrustMod;
-    }
+  // Support-chain thrust modifiers (rules 1+2, data/support-chain.js): mirror of
+  // rocket.js#getActiveThrusterStats. Walk the full chain that powers this
+  // thruster and add the thrustMod of the modifier path only (generators before
+  // the first reactor + that first reactor, including reactors multiple hops
+  // back). Must match the client exactly so a move it allows isn't rejected.
+  const chain = resolveSupportChain({ cards: chainCardsFromRocket(rocket), activeId: tid });
+  for (const cid of chain.modifierChain) {
+    const s = rocket.stack.find((x) => x.id === cid);
+    const c = s && PATENTS_BY_ID[s.id];
+    if (!c) continue;
+    const cf = slotFace(s, c);
+    if (cf.thrustMod != null && cf.thrustMod !== 0) thrust += cf.thrustMod;
   }
   // Weight-class band, keyed off current wet mass (dry + tank).
   const dry = rocket.stack.reduce((m, s) => m + slotMass(s), 0);
@@ -368,19 +403,17 @@ function thrusterFuelPerBurn(rocket) {
   const p = PATENTS_BY_ID[tid];
   let fuel = f.fuel != null ? f.fuel : (p && p.fuel);
   if (fuel == null) return 1;
-  // Only a power source in THIS thruster's support chain scales its fuel
-  // (mirror of rocket.js#getActiveThrusterStats): a card's fuelMod counts
-  // only when it supplies a kind the active thruster requires. A generator
-  // wired to some other card (or a self-powered thruster that requires
-  // nothing) leaves the fuel-per-burn untouched.
-  const reqKinds = new Set((f.requires || []).map((r) => (r && r.kind) || r));
-  for (const s of rocket.stack) {
-    if (s.id === tid) continue;
-    const c = PATENTS_BY_ID[s.id];
+  // Support-chain fuel modifiers (rules 1+2, data/support-chain.js): mirror of
+  // rocket.js#getActiveThrusterStats. Scale fuel-per-burn by the fuelMod of the
+  // modifier path only (generators before the first reactor + that first
+  // reactor), folded in chain order so the client + server agree to the bit. A
+  // self-powered thruster (requiring nothing) pulls no chain and is untouched.
+  const chain = resolveSupportChain({ cards: chainCardsFromRocket(rocket), activeId: tid });
+  for (const cid of chain.modifierChain) {
+    const s = rocket.stack.find((x) => x.id === cid);
+    const c = s && PATENTS_BY_ID[s.id];
     if (!c) continue;
-    const cSupplies = (c.faces && c.faces.primary && c.faces.primary.supplies) || c.supplies || [];
-    if (!cSupplies.some((k) => reqKinds.has(k))) continue;
-    const cf = slotFace(s);
+    const cf = slotFace(s, c);
     if (cf.fuelMod != null && cf.fuelMod !== 1) fuel *= cf.fuelMod;
   }
   return fuel;
@@ -389,7 +422,7 @@ function thrusterFuelPerBurn(rocket) {
 function slotRadHardness(slot) {
   const p = PATENTS_BY_ID[slot.id];
   if (p) {
-    const f = (p.faces && p.faces.primary) || p;
+    const f = slotFace(slot, p);
     return (f.radHardness != null ? f.radHardness : p.radHardness) | 0;
   }
   const crew = CREW_BY_ID[slot.id];
@@ -452,6 +485,13 @@ function rocketAtLeo(player) {
 function applyMove(state, op, player) {
   // A dry-run (op.debug) skips the per-turn budget gate so the fuel breakdown
   // can be previewed any time (even with the move already spent / off-turn).
+  // One move per turn: spending it (movesRemaining -> 0) is the ONLY thing
+  // that blocks a second move - prospecting does NOT forfeit a move you have
+  // not taken yet. If you moved BEFORE a raygun scan, that move is spent and
+  // further movement is blocked (no_moves_left); if you scanned WITHOUT moving
+  // first, you may still take your one move afterward. (A move taken before a
+  // prospect also can't be undone once the prospect rolls - that's the roll
+  // barrier in applyUndo, not a move-after-prospect gate.)
   if (!op.debug && player.movesRemaining <= 0) return fail('no_moves_left');
   // An empty rocket has no thruster and can't burn, so it can't leave
   // LEO. Enforcing this keeps the "empty rocket == at LEO" invariant
@@ -679,7 +719,32 @@ function applyMove(state, op, player) {
     }
   }
   const destSite = siteById(dest);
-  const chit = destSite ? maybeAwardGlory(player, destSite, state.turn) : null;
+  // Loading the chit is the player's call (pickupChit). Default true so a
+  // client that omits the flag still auto-loads; "Leave it" sends false and
+  // the chit stays on the site for a later LOAD_GLORY (Claim glory chit).
+  const chit = (destSite && op.pickupChit !== false)
+    ? maybeAwardGlory(player, destSite, state.turn) : null;
+  // Arriving home (LEO == null siteId): a crew hauls its carried glory chits
+  // back to score them. The server doesn't track which crew carried which chit,
+  // so all carried chits score together - BACK (flipped, the big value) when a
+  // crew is aboard to have brought them home alive, FRONT otherwise. Resolved
+  // chits move to glory.claimed and add to glory.vps. Mirrors the sandbox
+  // cashHomeArrival; until now MP never scored chits at home.
+  let homeScored = 0;
+  let homeVps = 0;
+  let homeSide = null;
+  if (player.rocket.siteId === null && (player.glory.chits || []).length) {
+    homeSide = player.rocket.stack.some(isCrewSlot) ? 'back' : 'front';
+    player.glory.claimed = player.glory.claimed || [];
+    for (const c of player.glory.chits) {
+      const vp = ((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[homeSide]) | 0;
+      player.glory.claimed.push({ zone: c.zone, side: homeSide, vp, turn: state.turn });
+      player.glory.vps = (player.glory.vps | 0) + vp;
+      homeScored += 1;
+      homeVps += vp;
+    }
+    player.glory.chits = [];
+  }
   player.rocket.lastMove = {
     rolls, destroyed: false, decommissioned,
     at: dest, nonce: nextMoveNonce(player),
@@ -696,6 +761,10 @@ function applyMove(state, op, player) {
   else if (nItems) log += ` Rolled through ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
   if (decommissioned.length) log += ` Radiation decommissioned ${decommissioned.length} card${decommissioned.length === 1 ? '' : 's'}.`;
   if (chit) log += ` First into the ${chit.zone} zone (+glory chit).`;
+  if (homeScored) {
+    log += ` Scored ${homeScored} glory chit${homeScored === 1 ? '' : 's'}`
+      + ` ${homeSide === 'back' ? 'brought home (back)' : '(front)'} for ${homeVps} VP.`;
+  }
   return { ok: true, state, log, calc: moveCalc };
 }
 
@@ -1158,6 +1227,16 @@ function applySetActiveProspector(state, op, player) {
 // browse.js#doProspect. Prospect IS the turn's operation for EVERY
 // prospector kind (raygun extends the reach to a line-of-sight site, but it
 // still spends the op - it is not free).
+// Has the active player already prospected this turn? The undo stack holds
+// this turn's functional ops (reset every turn) and a PROSPECT can't be
+// undone (it rolled), so a PROSPECT entry means prospecting has begun. The
+// dispatcher records the CURRENT op only after its handler returns, so this
+// reads PRIOR prospects, not the one in flight.
+function hasProspectedThisTurn(state) {
+  return Array.isArray(state.turnActions)
+    && state.turnActions.some((a) => a && a.kind === 'PROSPECT');
+}
+
 function applyProspect(state, op, player) {
   const toSiteId = String(op.siteId || '');
   const site = siteById(toSiteId);
@@ -1167,9 +1246,29 @@ function applyProspect(state, op, player) {
   if (!provSlot) return fail('no_prospector');
   const kind = prospectorKind(provSlot);
   if (!kind) return fail('no_prospector');
-  // Raygun fires through line-of-sight: it can prospect the rocket's
-  // current site OR any site one edge away (and is free + unlimited).
-  // Missile / buggy must be AT the target.
+
+  // The op carries the turn it was planned for. A relayed or re-fired request
+  // that lands a turn late must not apply to a different board, so reject it
+  // as stale when the posted turn no longer matches the live one. (Older
+  // clients that omit it simply skip the guard.)
+  const curTurn = state.turn | 0;
+  const curRound = state.round | 0;
+  if (op.turn != null && Number(op.turn) !== curTurn) return fail('stale_turn');
+
+  // Idempotent retry: the SAME player scanning the SAME site on the SAME turn
+  // is a duplicate (a relayed or double-fired request). The claim is already
+  // on the board, so return it as valid instead of erroring, and never roll a
+  // second time. Empty log: the original scan already wrote the record.
+  const existing = state.discs[toSiteId];
+  if (existing
+      && existing.ownerId === player.profileId
+      && existing.turn === curTurn
+      && existing.round === curRound) {
+    return { ok: true, state, log: '' };
+  }
+
+  // Raygun fires through line of sight: it scans the rocket's own site or any
+  // site the beam reaches. Missile / buggy must be parked on the target.
   if (kind === 'raygun') {
     const here = player.rocket.siteId;
     const reachable = toSiteId === here || lineOfSightSites(here).has(toSiteId);
@@ -1177,10 +1276,18 @@ function applyProspect(state, op, player) {
   } else if (player.rocket.siteId !== toSiteId) {
     return fail('not_at_site');
   }
-  if (state.discs[toSiteId]) return fail('already_prospected');
+  if (existing) return fail('already_prospected');
   if (prospectorIsru(provSlot) > (site.hydration | 0)) return fail('isru_too_high');
-  // Prospect spends the turn's operation for every prospector kind.
-  if (player.opsRemaining <= 0) return fail('no_ops_left');
+
+  // Prospecting is one operation to BEGIN: the first prospect of the turn
+  // (any kind) spends the operation. Once begun, a raygun's line-of-sight
+  // scan is free and unlimited - keep scanning in-sight sites at no cost.
+  // Only the raygun scans for free; a missile / buggy prospect always costs
+  // the operation (it IS the operation), so once the turn's op is spent they
+  // can never fire a free additional scan.
+  const begun = hasProspectedThisTurn(state);
+  const free = begun && kind === 'raygun';
+  if (!free && player.opsRemaining <= 0) return fail('no_ops_left');
 
   const threshold = prospectThreshold(site);
   const gen = makeRng(state.seed, state.rng.cursor);
@@ -1192,15 +1299,17 @@ function applyProspect(state, op, player) {
     roll, threshold, kind,
     by: player.name,
     ownerId: player.profileId,
-    turn: state.turn,
+    turn: curTurn,
+    round: curRound,
     // The buggy may re-roll once, this turn, by its owner.
     canReroll: kind === 'buggy',
   };
-  player.opsRemaining -= 1;
+  if (!free) player.opsRemaining -= 1;
   const verb = success ? 'struck a claim at' : 'came up dry at';
+  const tail = free ? ' with a free raygun scan' : '';
   return {
     ok: true, state,
-    log: `${player.name} rolled ${roll} vs ${threshold} and ${verb} ${site.name}.`,
+    log: `${player.name} rolled ${roll} vs ${threshold} and ${verb} ${site.name}${tail}.`,
   };
 }
 
@@ -1487,6 +1596,36 @@ function applyBuildColony(state, op, player) {
 }
 
 // Ops that change the game and ride the per-turn undo stack. Each is a
+// Take a card from the library into the hand. Free Library / solo: a FREE
+// action at no aqua cost (op.free defaults true, op.cost defaults 0). M1's "Buy
+// Card" reuses this as the turn's OPERATION - send free:false to spend one op,
+// and op.cost to charge a price. Mirrors the sandbox addToHand guards (no crew,
+// no expansion card, no duplicates, not currently on the rocket) and also pulls
+// the card out of its shuffled deck so the library stays consistent.
+function applyBuyCard(state, op, player) {
+  const cardId = String(op.cardId || '');
+  const card = PATENTS_BY_ID[cardId];
+  if (!card) return fail('unknown_card');
+  if (card.type === 'gw-thruster') return fail('expansion_card');
+  if (CREW_BY_ID[cardId]) return fail('crew_card');
+  if ((player.hand || []).includes(cardId)) return fail('already_in_hand');
+  if ((player.rocket.stack || []).some((s) => s.id === cardId)) return fail('on_rocket');
+  const free = op.free !== false;             // default: free action (no op spent)
+  const cost = Math.max(0, Number(op.cost) | 0);  // default: 0 aqua
+  if (!free && player.opsRemaining <= 0) return fail('no_ops_left');
+  if (cost > 0 && (player.aqua | 0) < cost) return fail('cannot_pay');
+  // Pull it out of its deck if present (keeps the shuffled library consistent;
+  // a no-op in pure Free Library, where the deck is never drawn from).
+  const deck = state.decks[card.type];
+  if (deck) { const i = deck.indexOf(cardId); if (i >= 0) deck.splice(i, 1); }
+  player.hand.push(cardId);
+  if (cost > 0) player.aqua = (player.aqua | 0) - cost;
+  if (!free) player.opsRemaining -= 1;
+  const aquaTail = cost > 0 ? ` for ${cost} aqua` : '';
+  const opTail = free ? '' : ' (operation)';
+  return { ok: true, state, log: `${player.name} took ${card.name} from the library${aquaTail}${opTail}.` };
+}
+
 // pure (state, op, player) -> { ok, state, log } transform; the
 // dispatcher (not the handler) maintains turnActions / turnRedo.
 const FUNCTIONAL = {
@@ -1497,6 +1636,7 @@ const FUNCTIONAL = {
   BUILD_COLONY: applyBuildColony,
   MOVE: applyMove,
   BUILD_ROCKET: applyBuildRocket,
+  BUY_CARD: applyBuyCard,
   BOOST: applyBoost,
   TRANSFER: applyTransfer,
   TRANSFER_FUEL: applyTransferFuel,
@@ -1515,12 +1655,15 @@ const FUNCTIONAL = {
   PROSPECT_REROLL: applyProspectReroll,
   INDUSTRIALIZE: applyIndustrialize,
   ET_PRODUCE: applyEtProduce,
+  LOAD_GLORY: applyLoadGlory,
 };
 
 function pickPayload(op) {
   switch (op.kind) {
-    case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments };
+    case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, pickupChit: op.pickupChit !== false };
+    case 'LOAD_GLORY': return {};
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face };
+    case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };
     case 'BOOST': return { cardIds: op.cardIds };
     case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from, to: op.to };
     case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount };
@@ -1532,7 +1675,7 @@ function pickPayload(op) {
     case 'DISCARD': return { cardId: op.cardId };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
-    case 'PROSPECT': return { siteId: op.siteId };
+    case 'PROSPECT': return { siteId: op.siteId, turn: op.turn, round: op.round };
     case 'PROSPECT_REROLL': return { siteId: op.siteId };
     case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode };
     case 'DIRT_REFUEL': return {};
@@ -1624,13 +1767,19 @@ function applyEndTurn(state, _op, player) {
 
   let log = `${player.name} ended their turn.`;
 
-  // Auto-load safety net: if the ending player is parked at a site whose
-  // zone chit is still unclaimed and a crew is aboard (e.g. they boarded a
-  // crew after landing crewless), load the chit now so it is never missed.
-  // maybeAwardGlory is idempotent - it no-ops if the zone was already claimed.
-  const hereSite = player.rocket.siteId ? siteById(player.rocket.siteId) : null;
-  const lateChit = hereSite ? maybeAwardGlory(player, hereSite, state.turn) : null;
-  if (lateChit) log = `${player.name} loaded the ${lateChit.zone} glory chit, then ended their turn.`;
+  // Passing without spending the turn's operation defaults to Income: the
+  // player banks +1 aqua rather than wasting the operation. This also
+  // safety-nets a lost Income click - ending the turn always grants the
+  // income if none was taken. (Mirrors the client pass-with-income path.)
+  if (player.opsRemaining >= OPS_PER_TURN) {
+    player.aqua = (player.aqua | 0) + INCOME_AQUA;
+    player.opsRemaining -= 1;
+    log = `${player.name} passed and took income (+${INCOME_AQUA} aqua; bank ${player.aqua}).`;
+  }
+
+  // No auto-load on end turn: picking up a zone's glory chit is now an
+  // explicit choice (the on-arrival prompt, or the LOAD_GLORY op via the
+  // site menu), so a chit the player chose to leave stays on the site.
 
   // Mid-lap: the turn simply passes to the next seat.
   if (!lapDone) {
@@ -1855,7 +2004,10 @@ function allBiddersActed(state) {
   const acted = a.acted || [];
   const auto = a.autoPassed || [];
   const others = state.players.filter((p) => p.profileId !== a.auctioneerId);
-  if (!others.length) return false;
+  // Solo game: no rival bidders, so the (zero) bidders have all trivially
+  // acted and the auctioneer may keep the lot unopposed right away. In any
+  // 2+ player game there is always at least one other, so this never fires.
+  if (!others.length) return true;
   // Auto-passed players have opted out for the rest of the lot, and
   // full-hand players can't take it - both count as already acted so
   // they never hold up the close, even after a reopen resets `acted`.
@@ -1879,7 +2031,9 @@ function applyAuctionStart(state, op, ctx) {
   if (state.auction) return fail('auction_in_progress');
   const player = currentPlayer(state);
   if (!player || player.profileId !== ctx.profileId) return fail('not_your_turn');
-  if (state.players.length < 2) return fail('need_opponent');
+  // A solo game CAN auction: with no rival bidders the auctioneer keeps the lot
+  // unopposed for free (see applyAuctionSell's no-bids path). Multiplayer always
+  // has 2+ players, so this once-required opponent check is no longer needed.
   if (player.opsRemaining <= 0) return fail('no_ops_left');
   if ((player.hand || []).length >= AUCTION_HAND_LIMIT) return fail('hand_limit');
   const deckType = String(op.deckType || '');
