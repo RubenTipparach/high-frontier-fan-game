@@ -142,6 +142,7 @@ const SPECTRAL_INK = {
 // {size}{spectral} | {outpost} label sits.
 const FACTORY_SPRITE_W = 184, FACTORY_SPRITE_H = 214;
 const FACTORY_ANCHOR_FX = 0.5753, FACTORY_ANCHOR_FY = 0.7196;
+const FACTORY_CENTER_FY = 0.62;   // building's visual centre (for centring on a site)
 const FACTORY_LABEL_FY = 0.7664;
 const FACTORY_SPRITE_K = 4.2;   // on-screen sprite width = r * K (tune for scale)
 
@@ -2798,16 +2799,17 @@ export class MapRenderer {
     // size the whole sprite from r. dw/dh + offset are the tuning knobs.
     const dw = r * FACTORY_SPRITE_K;
     const dh = dw * (FACTORY_SPRITE_H / FACTORY_SPRITE_W);
-    const offset = r * 1.4;
     ctx.save();
     for (const id in this._factories) {
       const site = this.data.byId[id];
       if (!site) continue;
       const f = this._factories[id];
-      const anchorX = this.pan.x + site.x * eff;
-      const anchorY = this.pan.y + site.y * eff + offset;
-      const dx = anchorX - dw * FACTORY_ANCHOR_FX;
-      const dy = anchorY - dh * FACTORY_ANCHOR_FY;
+      // Centre the factory ART on the site: the building's horizontal centre
+      // (ANCHOR_FX) and visual centre (CENTER_FY) sit on the site marker.
+      const cxs = this.pan.x + site.x * eff;
+      const cys = this.pan.y + site.y * eff;
+      const dx = cxs - dw * FACTORY_ANCHOR_FX;
+      const dy = cys - dh * FACTORY_CENTER_FY;
       if (dx > this.hostW + 60 || dx + dw < -60 || dy > this.hostH + 60 || dy + dh < -60) continue;
       // Base tinted by the OWNER's seat colour (fall back to gray).
       const base = this._factorySprites[(f.color || '').toLowerCase()] || this._factorySprites._default;
@@ -2823,7 +2825,7 @@ export class MapRenderer {
       let text = `${size}${f.spectralType || ''}`;
       const letter = this._outpostLetterAt(id);
       if (letter) text += ` | ${letter}`;
-      if (text) this._drawFactoryLabel(ctx, anchorX, dy + dh * FACTORY_LABEL_FY, text, f.color || '#9c9c9c', r);
+      if (text) this._drawFactoryLabel(ctx, cxs, dy + dh * FACTORY_LABEL_FY, text, f.color || '#9c9c9c', r);
     }
     ctx.restore();
   }
@@ -2862,6 +2864,22 @@ export class MapRenderer {
     ctx.fillText(text, cx, cy + 0.5);
   }
 
+  // Park a rocket beside the factory: when a ship sits at a site that has a
+  // factory, shift it left of the centred factory art so the two don't overlap
+  // (w = rocket on-screen width). Returns 0 when there's no factory at these
+  // site coords, so a ship in flight (interpolated coords) is unaffected.
+  _factoryParkShift(worldX, worldY, w) {
+    if (!this._factories) return 0;
+    for (const id in this._factories) {
+      const site = this.data.byId[id];
+      if (site && Math.abs(site.x - worldX) < 0.5 && Math.abs(site.y - worldY) < 0.5) {
+        const rr = Math.max(7, Math.min(18, 10 * Math.sqrt(this.zoom)));
+        return -(rr * FACTORY_SPRITE_K * 0.34 + w / 2 + 5);
+      }
+    }
+    return 0;
+  }
+
   // Stage-3 outpost chits. Drawn as small rounded squares with a
   // big letter (A/B/C/D) in them, offset to the upper-right of
   // the site center. When a factory is also present at the same
@@ -2878,6 +2896,10 @@ export class MapRenderer {
       if (!op || !op.siteId) continue;
       const site = this.data.byId[op.siteId];
       if (!site) continue;
+      // A factory at this site already shows the outpost letter in its label,
+      // so skip the redundant lettered square here (the standalone chit still
+      // marks outposts at sites without a factory).
+      if (this._factories && this._factories[op.siteId]) continue;
       // Stagger by letter index so multiple outposts at the same
       // site don't overlap (rare, but possible). Each outpost is
       // pushed right by an extra chitSize per letter index.
@@ -3101,7 +3123,7 @@ export class MapRenderer {
     // syncMpRockets lays out all ships at a site in a centred row, so
     // colocated ships line up side-by-side instead of stacking).
     for (const r of list) {
-      const sx = this.pan.x + r.x * eff + (r.offsetX || 0);
+      const sx = this.pan.x + r.x * eff + (r.offsetX || 0) + this._factoryParkShift(r.x, r.y, w);
       const sy = this.pan.y + r.y * eff;
       const px = sx - w / 2;
       const py = sy - h - 2;
@@ -3139,15 +3161,14 @@ export class MapRenderer {
     const r = this._sandboxRocket;
     if (!r) return;
     const eff = this.zoom * this.fitScale;
-    // offsetX shifts the local rocket sideways so it takes its slot in
-    // the colocation row (set by browse.js syncMpRockets when other
-    // players share this site). 0 in solo / when alone.
-    const sx = this.pan.x + r.x * eff + (r.offsetX || 0);
-    const sy = this.pan.y + r.y * eff;
     const { width: spriteW, height: spriteH } = getRocketSpriteSize();
     const scale = 0.55;     // map-scale; 35×53 px on screen.
     const w = spriteW * scale;
     const h = spriteH * scale;
+    // offsetX shifts the local rocket sideways for the colocation row (set by
+    // browse.js syncMpRockets); the park shift stands it next to a factory.
+    const sx = this.pan.x + r.x * eff + (r.offsetX || 0) + this._factoryParkShift(r.x, r.y, w);
+    const sy = this.pan.y + r.y * eff;
     const px = sx - w / 2;
     const py = sy - h - 2;  // foot of rocket above the anchor
     ctx.save();
