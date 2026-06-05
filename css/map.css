@@ -7070,3 +7070,73 @@ body:has(#view-browse:not(.hidden)) #main {
   display: inline-block;
 }
 .all-cards-coins { margin-top: 8px; }
+
+/* ---- Support-chain visualizer (rocket stack modal) ---- */
+#rocket-stack-chains:empty { display: none; }
+.chain-viz { margin: 6px 0 2px; }
+.chain-viz-empty {
+  margin: 8px 0 2px;
+  padding: 9px 11px;
+  border: 1px dashed #2c3658;
+  border-radius: 7px;
+  background: #131a2e;
+  color: #8b90b8;
+  font-size: 12px;
+}
+.chain-viz-head { display: flex; align-items: baseline; gap: 8px; margin: 2px 0 6px; }
+.chain-viz-head h4 { margin: 0; font-size: 13px; color: #cdd5f0; }
+.chain-viz-head .muted { font-size: 11px; color: #6f7396; }
+.chain-root { margin: 0 0 12px; }
+.chain-root-head { display: flex; align-items: baseline; gap: 8px; margin: 0 0 4px; }
+.chain-root-label { font-size: 12.5px; font-weight: 700; }
+.chain-root-thruster   .chain-root-label { color: var(--card-thruster); }
+.chain-root-prospector .chain-root-label { color: var(--card-robonaut); }
+.chain-root-sub { font-size: 10.5px; color: #8b90b8; }
+
+/* Nested folder tree: a left guide per level, an elbow per node. The vertical
+   guide stops at the elbow on the last child so the tail does not overrun. */
+.chain-tree, .chain-tree ul { list-style: none; margin: 0; padding: 0; }
+.chain-tree ul { margin-left: 13px; }
+.chain-node { position: relative; padding: 4px 0; display: flex; flex-wrap: wrap; align-items: center; }
+.chain-node > ul { flex: 1 1 100%; }
+.chain-tree ul > .chain-node { padding-left: 18px; }
+.chain-tree ul > .chain-node::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+  border-left: 1.4px solid #3a4668;
+}
+.chain-tree ul > .chain-node:last-child::before { bottom: auto; height: 26px; }
+.chain-tree ul > .chain-node::after {
+  content: ''; position: absolute; left: 0; top: 26px; width: 13px;
+  border-top: 1.4px solid #3a4668;
+}
+.chain-node.in-cycle > .chain-chip { box-shadow: 0 0 0 1px #fbbf2455; }
+
+/* Chip variants for the tree (built on .all-cards-chip). */
+.chain-chip { position: relative; max-width: 260px; }
+.chain-ring-active { box-shadow: 0 0 0 2px var(--card-thruster); }
+.chain-root-prospector .chain-ring-active { box-shadow: 0 0 0 2px var(--card-robonaut); }
+.chain-ring-support { box-shadow: 0 0 0 1.5px #22c55e88; }
+.chain-chip .chain-pill {
+  margin-left: auto; flex: 0 0 auto; width: 15px; height: 15px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; font-size: 10px; font-weight: 700; line-height: 1;
+}
+.chain-chip .chain-pill.ok  { background: #16361f; color: #34d399; }
+.chain-chip .chain-pill.bad { background: #3a1620; color: #f87171; }
+
+/* Side annotations next to a node. */
+.chain-notes { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 8px; }
+.chain-note {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 10px; line-height: 1.5; padding: 1px 6px;
+  border-radius: 999px; background: #1a2138; color: #aeb6d6;
+  white-space: nowrap;
+}
+.chain-note svg { width: 12px; height: 12px; display: block; }
+.chain-note .chain-kind-glyph { font-style: normal; font-size: 11px; }
+.chain-note-ok     { color: #6ee7b7; background: #122a20; }
+.chain-note-bad    { color: #f87171; background: #2c1620; }
+.chain-note-mod    { color: #fbcfe8; background: #2a1626; }
+.chain-note-cycle  { color: #fbbf24; background: #2a2410; }
+.chain-note-accent { color: #fdba74; background: #2a1d10; }
+.chain-note-muted  { color: #8b90b8; background: #1a2138; }

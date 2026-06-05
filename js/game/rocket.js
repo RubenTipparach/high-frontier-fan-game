@@ -867,6 +867,70 @@ function chainCardsFromStack() {
   });
 }
 
+// Read-only support-chain view for the visualizer. Resolves the chain that
+// powers the active thruster AND, independently, the chain that powers the
+// active prospector (two roots; a card that feeds both shows up in each, the
+// read-only stand-in for the parallel-chain rule until the resolver grows a
+// multi-root walk). Returns, per root, the resolver output (order / edges /
+// cycles / modifierChain / firstReactorId / reactorCooling / coolingOk) plus a
+// per-node read of which of that node's own requirement GROUPS are satisfied
+// (rule 4: a support is met iff the resolver drew an edge for it). PURE READ -
+// resolves off a clone-free snapshot and mutates nothing, so the visualizer can
+// call it on every repaint.
+export function getSupportChainView() {
+  const cards = chainCardsFromStack();
+  const byId = new Map(cards.map((c) => [c.id, c]));
+  const reqKindsOf = (c) => (c.requires || [])
+    .map((r) => (r && typeof r === 'object') ? r.kind : r)
+    .filter(Boolean);
+
+  const buildRoot = (kind, activeId) => {
+    if (!activeId || !byId.has(activeId)) return null;
+    const chain = resolveSupportChain({ cards, activeId });
+    // Edge lookup: which (consumer, kind) pairs the resolver satisfied.
+    const satByConsumer = new Map();
+    for (const e of chain.edges) {
+      if (!satByConsumer.has(e.from)) satByConsumer.set(e.from, new Map());
+      satByConsumer.get(e.from).set(e.kind, e.to);
+    }
+    // Per node: its requirement groups (same supplier-prefix OR grouping the
+    // engine uses) flagged satisfied / missing, so the visualizer can tick
+    // each card and flag the one with an unmet support.
+    const nodeReqs = {};
+    for (const id of chain.order) {
+      const c = byId.get(id);
+      if (!c) continue;
+      const groups = new Map();
+      for (const k of reqKindsOf(c)) {
+        const supplier = String(k).split('-')[0];
+        if (!groups.has(supplier)) groups.set(supplier, []);
+        groups.get(supplier).push(k);
+      }
+      const edgeKinds = satByConsumer.get(id) || new Map();
+      const reqGroups = [];
+      for (const [supplier, kinds] of groups) {
+        const hitKind = kinds.find((k) => edgeKinds.has(k));
+        reqGroups.push({
+          supplier,
+          kinds,
+          satisfied: !!hitKind,
+          supplierId: hitKind ? edgeKinds.get(hitKind) : null,
+          kind: hitKind || kinds[0],
+        });
+      }
+      nodeReqs[id] = reqGroups;
+    }
+    return { kind, activeId, chain, nodeReqs };
+  };
+
+  const roots = [];
+  const t = buildRoot('thruster', _activeThrusterId);
+  if (t) roots.push(t);
+  const p = buildRoot('prospector', _activeProspectorId);
+  if (p) roots.push(p);
+  return { cards, byId, roots };
+}
+
 // Compute the active thruster's "final" stats after applying every
 // other stack card's thrustMod (additive) + fuelMod (multiplicative).
 // Returns null if there is no active thruster.

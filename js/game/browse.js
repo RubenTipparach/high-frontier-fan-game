@@ -38,7 +38,7 @@ import {
   getTankGrade, setTankGrade, getActiveFuelGrade,
   getStackTotals, getActiveThrusterStats, setSolarZone,
   getProspectorCards, getActiveProspectorId, setActiveProspector,
-  clearActiveProspector, getActiveProspectorStats,
+  clearActiveProspector, getActiveProspectorStats, getSupportChainView,
   isAfterburnEngaged, setAfterburn,
   getAqua, spendAqua, addAqua, onAquaChange, resetAqua,
 } from './rocket.js';
@@ -62,6 +62,7 @@ import {
   REQUIREMENT_VIS, REQ_SUPPLIER_TYPE,
   svgSunChip, svgBallerinaChip, cardGlanceSummary,
 } from './card-ui.js';
+import { supportIconSvg } from './support-icons.js';
 import {
   logAction, getActions, getHistory, popLastOfType,
   commitTurn as commitLogTurn, resetLog, onChange as onLogChange,
@@ -5684,6 +5685,201 @@ async function mountMapFor() {
 // now - multiplayer Stage 3 will pick from the 5-colour palette
 // per player. canFly is recomputed from rocket.js on every
 // rocket-state change.
+// Small inline support-kind glyph (the real card icon) for the chain edges
+// and missing-support flags; falls back to the requirement glyph text.
+function chainKindIcon(kind, size = 13) {
+  return supportIconSvg(kind, { size })
+    || `<em class="chain-kind-glyph">${esc((REQUIREMENT_VIS[kind] || {}).glyph || '◇')}</em>`;
+}
+
+// One chip in the support-chain tree: the abbreviated card (same glyph
+// language as the All cards view, via cardGlanceSummary) with a chain ring
+// (orange = the active root card, green = a card supporting it) and a ✓ / ✗
+// validity pill (rule 4). Clicking opens the card read-only.
+function chainChip(card, face, kind, { ring, valid } = {}) {
+  const name = kind === 'crew'
+    ? ((card.faces && card.faces[face] && card.faces[face].name) || card.name || card.id)
+    : (card.name || card.id);
+  const g = cardGlanceSummary(card, face);
+  const statHtml = g.hasStats ? g.statsHtml : esc(kind === 'crew' ? 'crew' : (card.type || 'card'));
+  const massHtml = Number.isFinite(card.mass) ? '<span class="acc-mass">m' + card.mass + '</span>' : '';
+  const chip = document.createElement('button');
+  chip.type = 'button';
+  chip.className = 'all-cards-chip chain-chip kind-' + kind
+    + (kind === 'patent' ? ' type-' + card.type : '');
+  if (ring) chip.classList.add('chain-ring-' + ring);
+  if (kind === 'crew' && card.color) chip.style.setProperty('--chip-color', card.color);
+  const pill = valid == null ? ''
+    : (valid
+      ? '<span class="chain-pill ok" title="Supports satisfied">✓</span>'
+      : '<span class="chain-pill bad" title="A support is missing">✗</span>');
+  chip.innerHTML =
+    '<div class="acc-top">'
+    + (g.icon ? '<span class="acc-ic">' + g.icon + '</span>' : '')
+    + '<span class="acc-name">' + esc(name) + '</span>'
+    + pill
+    + (g.spectralHtml ? '<span class="acc-spec">' + g.spectralHtml + '</span>' : '')
+    + '</div>'
+    + '<div class="acc-bot"><span class="acc-stat">' + statHtml + '</span>' + massHtml + '</div>';
+  chip.title = 'Open ' + name;
+  chip.addEventListener('click', () => openCardModal(card, kind, null, { readOnly: true }));
+  return chip;
+}
+
+// Render the support-chain visualizer into `host`: one folder tree per active
+// card (the active thruster, then the active prospector). Each tree walks OUT
+// from the active card to the cards that power it (thruster -> generator ->
+// reactor -> radiator), drawn as a nested list with folder connectors. A card
+// reached a second time (a cycle back-edge, or a supplier shared within the
+// tree) renders as a reference leaf and is NOT re-expanded, mirroring the
+// resolver's visit-once walk. Read-only: rebuilt from getSupportChainView() on
+// every repaint.
+function buildSupportChainViz(host, lookup) {
+  host.innerHTML = '';
+  let view;
+  try { view = getSupportChainView(); } catch (_) { return; }
+  if (!view || !view.roots.length) {
+    const empty = document.createElement('div');
+    empty.className = 'chain-viz-empty';
+    empty.textContent = 'Pick an active thruster (and a prospector) to trace its support chain.';
+    host.appendChild(empty);
+    return;
+  }
+
+  const wrap = document.createElement('div');
+  wrap.className = 'chain-viz';
+  const header = document.createElement('div');
+  header.className = 'chain-viz-head';
+  header.innerHTML = '<h4>🔗 Support chains</h4>'
+    + '<span class="muted">the cards powering each active card</span>';
+  wrap.appendChild(header);
+
+  const stack = getRocketStack();
+  const slotOf = (id) => stack.find((x) => x.id === id) || null;
+
+  // Ids already shown in an earlier root so a card feeding both chains can be
+  // flagged "shared" in the later tree (read-only parallel-chain hint).
+  const shownInEarlierRoot = new Set();
+
+  for (const root of view.roots) {
+    const sec = document.createElement('section');
+    sec.className = 'chain-root chain-root-' + root.kind;
+
+    const activeCard = lookup(root.activeId);
+    const activeName = activeCard ? activeCard.name : root.activeId;
+    const allValid = root.chain.order.every((id) =>
+      (root.nodeReqs[id] || []).every((r) => r.satisfied)) && root.chain.coolingOk;
+    const subBits = [esc(activeName), allValid ? 'all supports satisfied' : 'support missing'];
+    if (root.chain.cycles.length) subBits.push('cycle present');
+
+    const head = document.createElement('div');
+    head.className = 'chain-root-head';
+    head.innerHTML =
+      '<span class="chain-root-label">'
+      + (root.kind === 'thruster' ? '⚡ Thruster chain' : '🔭 Prospector chain') + '</span>'
+      + '<span class="chain-root-sub">' + subBits.join(' · ') + '</span>';
+    sec.appendChild(head);
+
+    const treeRoot = document.createElement('ul');
+    treeRoot.className = 'chain-tree';
+    sec.appendChild(treeRoot);
+
+    // Supplier children, keyed off the resolver edges (consumer -> supplier).
+    const childrenOf = new Map();
+    for (const e of root.chain.edges) {
+      if (!childrenOf.has(e.from)) childrenOf.set(e.from, []);
+      childrenOf.get(e.from).push({ id: e.to, kind: e.kind });
+    }
+    const cycleIds = new Set();
+    for (const ring of root.chain.cycles) for (const id of ring) cycleIds.add(id);
+    const reactorCool = new Map((root.chain.reactorCooling || []).map((r) => [r.reactorId, r]));
+    const placedInTree = new Set();
+
+    const renderNode = (id, parentUl, path, viaKind) => {
+      const li = document.createElement('li');
+      li.className = 'chain-node';
+      const onPath = path.has(id);
+      const already = placedInTree.has(id);
+      const isRef = onPath || already;   // back-edge or shared supplier: don't recurse
+      const isActive = id === root.activeId;
+      const reqs = root.nodeReqs[id] || [];
+      const valid = reqs.every((r) => r.satisfied);
+      const slot = slotOf(id);
+      const card = lookup(id);
+      const kind = slot && slot.kind === 'crew' ? 'crew' : 'patent';
+
+      if (cycleIds.has(id)) li.classList.add('in-cycle');
+      if (isRef) li.classList.add('is-ref');
+
+      if (card) {
+        const ring = isActive ? 'active' : 'support';
+        li.appendChild(chainChip(card, slot ? slot.face : 'primary', kind,
+          { ring, valid: isRef ? null : valid }));
+      } else {
+        const ph = document.createElement('div');
+        ph.className = 'all-cards-chip chain-chip';
+        ph.textContent = id;
+        li.appendChild(ph);
+      }
+
+      // Notes: what this card supplies up the chain, its modifier / cooling
+      // role, any missing support, and cycle / shared flags.
+      const notes = [];
+      if (viaKind) notes.push({ t: 'supplies', icon: viaKind, c: 'ok' });
+      if (isActive) {
+        notes.push({ t: root.kind === 'thruster' ? 'active thruster' : 'active prospector', c: 'accent' });
+      }
+      if (!isRef && root.chain.modifierChain.includes(id)) {
+        notes.push({ t: id === root.chain.firstReactorId ? 'first reactor · modifies thrust' : 'modifies thrust', c: 'mod' });
+      }
+      const rc = !isRef && reactorCool.get(id);
+      if (rc) {
+        notes.push(rc.ok
+          ? { t: 'reserves ' + rc.demand + ' dedicated cooling', c: 'muted' }
+          : { t: 'needs ' + rc.demand + ' cooling, short', c: 'bad' });
+      }
+      if (!isRef) {
+        for (const r of reqs) {
+          if (!r.satisfied) {
+            notes.push({ t: 'missing ' + ((REQUIREMENT_VIS[r.kind] || {}).label || r.kind), c: 'bad', icon: r.kind });
+          }
+        }
+      }
+      if (isRef && cycleIds.has(id)) notes.push({ t: 'cycle ↻', c: 'cycle' });
+      else if (isRef) notes.push({ t: 'shown above ↑', c: 'muted' });
+      if (!isRef && !isActive && shownInEarlierRoot.has(id)) {
+        notes.push({ t: 'shared with other chain', c: 'muted' });
+      }
+      if (notes.length) {
+        const nc = document.createElement('span');
+        nc.className = 'chain-notes';
+        nc.innerHTML = notes.map((n) =>
+          '<span class="chain-note chain-note-' + (n.c || 'muted') + '">'
+          + (n.icon ? chainKindIcon(n.icon) + ' ' : '') + esc(n.t) + '</span>').join('');
+        li.appendChild(nc);
+      }
+
+      parentUl.appendChild(li);
+      placedInTree.add(id);
+      if (isRef) return;
+
+      const kids = childrenOf.get(id) || [];
+      if (kids.length) {
+        const ul = document.createElement('ul');
+        const nextPath = new Set(path); nextPath.add(id);
+        for (const k of kids) renderNode(k.id, ul, nextPath, k.kind);
+        li.appendChild(ul);
+      }
+    };
+
+    renderNode(root.activeId, treeRoot, new Set(), null);
+    for (const id of root.chain.order) shownInEarlierRoot.add(id);
+    wrap.appendChild(sec);
+  }
+
+  host.appendChild(wrap);
+}
+
 // Centered modal that shows the rocket's stack - replaces the
 // old sidepanel "rocket" pane. Same data, same actions (pull a
 // card back to the hand), just opens in the middle of the map
@@ -5920,6 +6116,9 @@ function openRocketStackModal() {
         <div class="rocket-stack-row thrusters" id="rocket-stack-thrusters"></div>
         <div class="rocket-stack-row others" id="rocket-stack-others"></div>
       </div>
+      <!-- Support-chain visualizer: a folder tree of the cards powering the
+           active thruster and the active prospector. Populated each repaint. -->
+      <div id="rocket-stack-chains"></div>
       <!-- Transfer section: shown when colocated stacks exist
            (LEO at LEO, outposts at the same site). Populated by
            the rocket-modal repaint loop. -->
@@ -6233,6 +6432,12 @@ function openRocketStackModal() {
     // grid space between sections.
     if (!thrustersHost.children.length) thrustersHost.style.display = 'none';
     if (!othersHost.children.length)    othersHost.style.display    = 'none';
+
+    // Support-chain visualizer: trace the cards powering the active thruster
+    // (and the active prospector) as a folder tree, the same abbreviated-chip
+    // language as the All cards view.
+    const chainHost = body.querySelector('#rocket-stack-chains');
+    if (chainHost) buildSupportChainViz(chainHost, lookup);
 
     // Prune selections whose cards have left the stack (transfer,
     // back-to-hand, etc) so stale ids don't carry over.
