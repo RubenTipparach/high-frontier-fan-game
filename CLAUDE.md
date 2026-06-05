@@ -716,6 +716,19 @@ Server-authoritative engine in `server/game/engine.js`:
 - Prospect: roll Nd6 (N = site class size); thresholds defined per
   site type. Success = place prospect marker; site becomes claimable
   by the prospector for industrialization.
+  - **Prospect economy (engine rule, do NOT revert to one-op-per-scan).**
+    The FIRST prospect of the turn (any kind) spends the turn's single
+    operation to BEGIN prospecting. Once begun, a raygun's line-of-sight
+    scan is FREE and UNLIMITED: a player keeps scanning in-sight sites at
+    no extra operation. Missile / buggy still spend the operation (they
+    ARE the operation) and can't fire a free extra scan. Movement is
+    LOCKED once prospecting has begun (`move_after_prospect`), and the
+    prior move can no longer be undone (the prospect rolled). "Has begun"
+    reads off this turn's undo stack (a PROSPECT entry, reset each turn).
+    The PROSPECT op carries `turn` + `round`; a same-site, same-turn
+    re-submit is idempotent (no second roll), a stale turn is rejected.
+    (User decision 2026-06-05. The old engine comment calling the raygun
+    "free + unlimited" with no begin-cost was wrong; this is the rule.)
 - Industrialize: deliver a robonaut or crew + reactor to the site;
   flip prospect to factory (1 VP, generates patent income).
 - Refinery upgrade: deliver a refinery; factory becomes hydrated
