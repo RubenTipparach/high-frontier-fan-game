@@ -2796,19 +2796,62 @@ export class MapRenderer {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('🏭', sx, sy + 1);
-      // Colony ring overlay (a thin accent-cyan ring around the
-      // factory chit). Drawn when the site has a colony record.
-      if (this._colonies && this._colonies[id]) {
-        ctx.beginPath();
-        ctx.arc(sx, sy, half + 3, 0, Math.PI * 2);
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = '#7dd3fc';
-        ctx.globalAlpha = 0.95;
-        ctx.stroke();
-        ctx.globalAlpha = 1;
+    }
+    // Colony biodomes. A colony sits BESIDE its factory (to the right) as a
+    // distinct teal geodesic-dome token, never overlapping the 🏭 chit. Drawn
+    // in its own pass off this._colonies so a colony also shows at the rare
+    // site that has a colony but no factory (the dome lands where the factory
+    // chit would be).
+    if (this._colonies) {
+      const factHalf = chitSize / 2;
+      const domeW = chitSize * 1.04;
+      const domeH = chitSize * 0.6;
+      for (const id in this._colonies) {
+        const site = this.data.byId[id];
+        if (!site) continue;
+        const fx = this.pan.x + site.x * eff;
+        const fy = this.pan.y + site.y * eff + chitOffset;
+        const cx = fx + factHalf + r * 0.55 + domeW / 2;
+        const baseY = fy + factHalf;
+        if (cx < -40 || cx > this.hostW + 40 || baseY < -40 || baseY > this.hostH + 40) continue;
+        this._drawColonyDome(ctx, cx, baseY, domeW, domeH);
       }
     }
     ctx.restore();
+  }
+
+  // A colony biodome: a teal half-dome on a short platform with a faint
+  // geodesic lattice, drawn beside the factory chit. baseY is the ground
+  // line (level with the factory chit's bottom); the dome rises above it.
+  _drawColonyDome(ctx, cx, baseY, w, h) {
+    const left = cx - w / 2, right = cx + w / 2;
+    // platform slab under the dome
+    const slabH = Math.max(2, h * 0.18);
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') ctx.roundRect(left, baseY - slabH * 0.4, w, slabH, 1.5);
+    else ctx.rect(left, baseY - slabH * 0.4, w, slabH);
+    ctx.fillStyle = '#334155';
+    ctx.fill();
+    // dome body: top half-ellipse (left -> over the top -> right)
+    ctx.beginPath();
+    ctx.ellipse(cx, baseY, w / 2, h, 0, Math.PI, Math.PI * 2);
+    ctx.closePath();
+    ctx.fillStyle = '#0e7490';
+    ctx.globalAlpha = 0.95;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 1.4;
+    ctx.strokeStyle = '#0c0a16';
+    ctx.stroke();
+    // geodesic lattice: meridian + spring line + two side meridians.
+    ctx.strokeStyle = 'rgba(186,230,253,0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx, baseY); ctx.lineTo(cx, baseY - h);
+    ctx.moveTo(left + 1.5, baseY); ctx.lineTo(right - 1.5, baseY);
+    ctx.moveTo(cx - w * 0.26, baseY); ctx.quadraticCurveTo(cx - w * 0.16, baseY - h * 0.72, cx, baseY - h);
+    ctx.moveTo(cx + w * 0.26, baseY); ctx.quadraticCurveTo(cx + w * 0.16, baseY - h * 0.72, cx, baseY - h);
+    ctx.stroke();
   }
 
   // Stage-3 outpost chits. Drawn as small rounded squares with a
