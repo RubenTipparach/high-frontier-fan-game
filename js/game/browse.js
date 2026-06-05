@@ -4539,6 +4539,7 @@ function enterManualMoveMode() {
   }
   const clearBtn = document.getElementById('route-clear');
   if (clearBtn) { clearBtn.hidden = false; clearBtn.textContent = '✕ Stop'; }
+  updateManualGlow();
   manualMoveStatus();
 }
 function exitManualMoveMode() {
@@ -4557,26 +4558,76 @@ function exitManualMoveMode() {
   _manualPreviewed = false;
   if (_renderer) {
     _renderer.setRoutingHit(false);
+    _renderer.setMoveTargets(null);
     if (previewed && !_rocketAnimating) syncSandboxRocket();
   }
+  setManualBurnBadge(null);
   const clearBtn = document.getElementById('route-clear');
   if (clearBtn) clearBtn.textContent = 'Clear route';
 }
 function manualMoveStatus() {
   if (!_manualMode) return;
-  const placed = _plannedRoute ? _plannedRoute.length : 0;
+  let planned = 0;
+  if (_plannedRoute) for (const s of _plannedRoute) planned += (s.burns || 0);
   const pirouetteHint = _manualPirouettes > 0
     ? ` <em class="muted">(${_manualPirouettes} free pivot${_manualPirouettes === 1 ? '' : 's'} ready)</em>`
     : '';
+  const burnTag = `<strong>${planned}</strong> burn${planned === 1 ? '' : 's'} plotted`;
   if (_manualBudget <= 0) {
-    setStatus(`✋ Manual: <strong>${placed}</strong> hop${placed === 1 ? '' : 's'} plotted, <strong>0</strong>/${_manualBudgetMax} burns left. Tap <strong>🛸 Move</strong> to fly, or <strong>✕ Stop</strong>.`);
+    setStatus(`✋ Manual: ${burnTag}, <strong>0</strong>/${_manualBudgetMax} burns left. Tap <strong>🛸 Move</strong> to fly, or <strong>✕ Stop</strong>.`);
   } else {
-    setStatus(`✋ Manual: <strong>${_manualBudget}</strong>/${_manualBudgetMax} burns left.${pirouetteHint} Tap an adjacent node (a site or a Hohmann dot) to advance one hop. <strong>🛸 Move</strong> to fly, <strong>✕ Stop</strong> to cancel.`);
+    setStatus(`✋ Manual: ${burnTag}, <strong>${_manualBudget}</strong>/${_manualBudgetMax} burns left.${pirouetteHint} Tap a glowing node to advance one hop. <strong>🛸 Move</strong> to fly, <strong>✕ Stop</strong> to cancel.`);
   }
 }
+// Contracted "tap target" adjacency. The planner graph threads degree-2
+// DECORATIVE bend nodes between the real nodes (a Hohmann dot connects to
+// the next site only THROUGH a chain of invisible decoratives). Decoratives
+// are excluded from the click hit-test, so a plain direct-neighbour check
+// reported a visually-adjacent node as "not adjacent". This walks outward
+// from `tipId` THROUGH decorative nodes only and returns the first real
+// (non-decorative) node reached on each branch, along with the underlying
+// path so the hop can render + animate along the curve. Memoised per tip
+// since the map graph is static for the session.
+let _meaningfulNbrCache = null;   // Map<tipId, Array<{ id, path }>>
+function meaningfulNeighbors(tipId) {
+  if (!_activeData || !tipId) return [];
+  if (!_meaningfulNbrCache) _meaningfulNbrCache = new Map();
+  if (_meaningfulNbrCache.has(tipId)) return _meaningfulNbrCache.get(tipId);
+  const points = _activeData.byId || {};
+  const neighbors = _activeData.neighbors;
+  const isDeco = (id) => {
+    const p = points[id];
+    return !!p && (p.isDecorative || p.type === 'decorative');
+  };
+  const out = [];
+  const found = new Set();
+  const visitedDeco = new Set();
+  const stack = [];
+  for (const n of (neighbors && neighbors.get(tipId)) || []) {
+    stack.push({ node: n, path: [tipId, n] });
+  }
+  while (stack.length) {
+    const { node, path } = stack.pop();
+    if (!points[node]) continue;
+    if (isDeco(node)) {
+      if (visitedDeco.has(node)) continue;
+      visitedDeco.add(node);
+      for (const nn of (neighbors && neighbors.get(node)) || []) {
+        if (nn === tipId || path.includes(nn)) continue;
+        stack.push({ node: nn, path: [...path, nn] });
+      }
+    } else if (!found.has(node)) {
+      found.add(node);
+      out.push({ id: node, path });
+    }
+  }
+  _meaningfulNbrCache.set(tipId, out);
+  return out;
+}
+
 // Cost calculator for a single manual hop. Returns:
 //   { ok: false, reason } when the hop isn't allowed
-//   { ok: true, cost, isPivot, freePivot, newDir } when it is
+//   { ok: true, cost, isPivot, freePivot, newDir, path } when it is
 function manualHopCost(tipId, toId) {
   if (!_activeData) return { ok: false, reason: 'no map data' };
   const points = _activeData.byId || {};
@@ -4585,18 +4636,29 @@ function manualHopCost(tipId, toId) {
   const toNode   = points[toId];
   if (!fromNode || !toNode) return { ok: false, reason: 'unknown site' };
   if (tipId === toId) return { ok: false, reason: 'already there' };
-  const nbrs = _activeData.neighbors && _activeData.neighbors.get(tipId);
-  if (!nbrs || !nbrs.has(toId)) {
+  if (toNode.isLandable === false) {
+    return { ok: false, reason: `can't land on ${esc(toNode.name || toId)}` };
+  }
+  // Adjacency runs over the contracted graph (decorative bends collapsed).
+  const entry = meaningfulNeighbors(tipId).find((e) => e.id === toId);
+  if (!entry) {
     return { ok: false, reason: `not adjacent to ${esc(fromNode.name || tipId)}` };
   }
-  const newDir = (edgeLabels[tipId] && edgeLabels[tipId][toId]) || null;
+  const path = entry.path;
+  const firstStep = path[1];                     // node we leave the tip toward
+  const lastStep  = path[path.length - 2];       // node we enter `to` from
+  // Direction we'd leave the tip on (for the pivot test) and the direction
+  // we arrive at `to` on (stored as the next hop's entry direction). For a
+  // direct edge these collapse to the same value the old one-hop code used.
+  const leaveDir  = (edgeLabels[tipId] && edgeLabels[tipId][firstStep]) || null;
+  const arriveDir = (edgeLabels[toId] && edgeLabels[toId][lastStep]) || leaveDir;
   let cost = 0;
   let isPivot = false;
   let freePivot = false;
   // Pivot: leaving a Hohmann (labelled edges) in a different
   // direction than the one we entered on.
   const tipHasLabels = !!edgeLabels[tipId];
-  if (tipHasLabels && _manualDir != null && newDir != null && newDir !== _manualDir) {
+  if (tipHasLabels && _manualDir != null && leaveDir != null && leaveDir !== _manualDir) {
     isPivot = true;
     if (_manualPirouettes - _manualPivotsUsed > 0) {
       freePivot = true;
@@ -4610,7 +4672,7 @@ function manualHopCost(tipId, toId) {
   if (toNode.type === 'burn') {
     cost += toNode.landing != null ? toNode.landing : 1;
   }
-  return { ok: true, cost, isPivot, freePivot, newDir };
+  return { ok: true, cost, isPivot, freePivot, newDir: arriveDir, path };
 }
 function manualAppendSegment(toId) {
   if (!_manualMode || !_activeData) return false;
@@ -4627,14 +4689,23 @@ function manualAppendSegment(toId) {
     return false;
   }
   _plannedRoute = _plannedRoute || [];
-  _plannedRoute.push({
-    from: tipId, to: toId,
-    turn: 1,
-    burns: r.cost,
-    dv: r.cost,
-    isPivot: r.isPivot,
-    freePivot: r.freePivot,
-  });
+  // Emit one segment per underlying graph edge (the hop may thread several
+  // decorative bend nodes), mirroring the auto-planner's segment shape so the
+  // route renders + animates along the curve. The hop's burn cost lands on the
+  // final segment (the one that actually enters `toId`); the decorative
+  // in-between segments are 0-burn coasting.
+  const path = (r.path && r.path.length >= 2) ? r.path : [tipId, toId];
+  for (let i = 1; i < path.length; i++) {
+    const last = i === path.length - 1;
+    _plannedRoute.push({
+      from: path[i - 1], to: path[i],
+      turn: 1,
+      burns: last ? r.cost : 0,
+      dv: last ? r.cost : 0,
+      isPivot: last ? r.isPivot : false,
+      freePivot: last ? r.freePivot : false,
+    });
+  }
   _manualBudget -= r.cost;
   if (r.isPivot) _manualPivotsUsed += 1;
   _manualDir = r.newDir;
@@ -4652,10 +4723,70 @@ function manualAppendSegment(toId) {
   // snapshot after the move resolves.
   if (!_online && _renderer && !_rocketAnimating) {
     _manualPreviewed = true;
-    animateRocketAlong([{ from: tipId, to: toId }], 260);
+    const hops = [];
+    for (let i = 1; i < path.length; i++) hops.push({ from: path[i - 1], to: path[i] });
+    animateRocketAlong(hops, 260);
   }
+  updateManualGlow();
   manualMoveStatus();
   return true;
+}
+
+// Light up the nodes one hop out from the current route tip: green for a
+// hop affordable with this turn's remaining burns, red for an adjacent node
+// that's over budget. Also refreshes the planned-path burn badge.
+function updateManualGlow() {
+  if (!_renderer) return;
+  if (!_manualMode) { _renderer.setMoveTargets(null); updateManualBurnBadge(); return; }
+  const tipId = manualTipId();
+  const targets = {};
+  for (const entry of meaningfulNeighbors(tipId)) {
+    const r = manualHopCost(tipId, entry.id);
+    if (!r.ok) continue;
+    targets[entry.id] = r.cost <= _manualBudget ? 'ok' : 'blocked';
+  }
+  _renderer.setMoveTargets(targets);
+  updateManualBurnBadge();
+}
+
+// Total burns the hand-plotted path spends, shown in the turn banner's
+// action slot (same home the auction label docks into). Green when the
+// rocket can actually fly that many burns this turn (capped by both the
+// per-turn thrust budget and the fuel in the tank), red when it can't.
+function setManualBurnBadge(spec) {
+  const banner = document.getElementById('mp-turn-banner');
+  if (!banner) return;
+  ensureTurnBannerParts(banner);
+  const slot = banner.querySelector('.mp-turn-actions');
+  if (!slot) return;
+  let el = slot.querySelector('.mp-manual-burns');
+  if (!spec) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('span');
+    el.className = 'mp-manual-burns';
+    slot.appendChild(el);
+  }
+  el.classList.toggle('is-ok', spec.affordable);
+  el.classList.toggle('is-over', !spec.affordable);
+  el.textContent = `🔥 ${spec.total} burn${spec.total === 1 ? '' : 's'}`;
+  el.title = spec.affordable
+    ? 'Your rocket can make this many burns this turn.'
+    : 'More burns than your rocket can make this turn.';
+}
+function updateManualBurnBadge() {
+  if (!_manualMode) { setManualBurnBadge(null); return; }
+  let total = 0;
+  if (_plannedRoute) for (const s of _plannedRoute) total += (s.burns || 0);
+  // Per-turn cap = the thruster's thrust (the manual budget's max). Fuel cap =
+  // whole burns the current tank affords. Affordable only if within both.
+  let affordable = total <= _manualBudgetMax;
+  try {
+    const stats = getActiveThrusterStats();
+    if (stats && stats.burnsAvailable != null && total > stats.burnsAvailable) {
+      affordable = false;
+    }
+  } catch { /* no active thruster - leave the thrust-cap verdict */ }
+  setManualBurnBadge({ total, affordable });
 }
 let _rocketSiteId = (() => {
   try { return localStorage.getItem(STORAGE_ROCKET_SITE) || null; }
@@ -5569,6 +5700,7 @@ async function mountMapFor() {
   updateRouteStatus();
   try {
     _activeData = await loadMap();
+    _meaningfulNbrCache = null;
     soloBindData(_activeData);
     // A move that was mid-hazard-resolution when the tab closed gets
     // resumed (per-roll) if its saved state still resolves, else
