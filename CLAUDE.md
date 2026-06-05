@@ -257,22 +257,39 @@ supplies the `reactor-*` the generator needs). The chain walk must
 visit each card ONCE, so a cycle is detected and flagged but never
 breaks the walk or double-counts: a chain with a cycle is still valid.
 
-The resolver foundation is pure + shared (intended for both
-`js/game/rocket.js` and `server/game/engine.js`). It is the single
-source of truth for these rules: the chain work replaces the current
-one-hop modifier scan in `getActiveThrusterStats` and mirrors it on
-the server, rather than re-deriving the logic inline in either place.
+The resolver is pure + shared: `data/support-chain.js` (it lives in `data/`
+so BOTH `js/game/rocket.js` and `server/game/engine.js` import it, the same
+reason `data/fuel-graph.js` does). It is the single source of truth for these
+rules.
 
-**TODO (next session): support-chain visualizer.** Still to build: the
-visualizer tool (graph view, the modifier path highlighted, cycles
-flagged), the engine integration of rules 1-3 above, plus two more
-visualizer-facing rules the user added: (4) show every support
-satisfied at all levels with check marks (all supports and all cards in
-the chain read as valid); (5) robonauts can run PARALLEL chains, and a
-thruster/missile robonaut serves both roles with ONE chain. The chain
-is player-wired (the visualizer assigns supplier -> consumer; the
-resolver accepts a wiring map). Build the engine rules and the
-visualizer together.
+INTEGRATION LANDED (2026-06-05). The resolver now drives the engine; the
+one-hop modifier scan is gone. Rules 1+2 (the modifier path) fold into thrust
++ fuel on BOTH the client (`rocket.js#getActiveThrusterStats`) and the server
+(`engine.js#activeNetThrust` + `thrusterFuelPerBurn`): each normalises the
+stack into the resolver's card shape (supplies off the primary face; requires
+/ thrustMod / fuelMod off the installed face) and folds the same
+`modifierChain` in the same order, so a multi-hop reactor (THRUSTER ->
+GENERATOR -> REACTOR) now modifies and the two sides stay byte-identical (a
+move the client allows is never rejected for a different number). Rule 3
+(dedicated reactor cooling) drives the client's `isRocketActive` cooling gate
+via the resolver's `coolingOk` (each reactor reserves its own radiator therms;
+the thruster + generators draw the remainder; the common single-reactor stack
+is the same verdict as before). The SERVER does NOT gate cooling at all (it
+trusts the client, like routes), so rule 3 is client-only. NOTE: the active
+PROSPECTOR's cooling still uses the older `chainThermBalance` shared-pool
+helper (`getActiveProspectorStats`); unifying it onto the resolver is a
+follow-up.
+
+**TODO: support-chain visualizer (+ rules 4-5).** Still to build: the
+visualizer tool (graph view, the modifier path highlighted, cycles flagged),
+plus the two visualizer-facing rules: (4) show every support satisfied at all
+levels with check marks (all supports and all cards in the chain read as
+valid); (5) robonauts can run PARALLEL chains, and a thruster/missile robonaut
+serves both roles with ONE chain. The resolver currently walks a SINGLE chain
+from one `activeId`, so rule 5 needs a resolver extension. The chain is meant
+to be player-wired: the resolver already accepts a `wiring` map but nothing
+produces one yet (the visualizer assigns supplier -> consumer). Build the
+visualizer + wiring UI together.
 
 ## Stages - build incrementally
 

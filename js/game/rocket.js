@@ -565,13 +565,20 @@ export function isRocketActive() {
     }
   }
 
-  // Thermal balance: the active thruster's heat plus the heat of the
-  // reactor/generator powering it must be dissipated by the stack's
-  // radiators, the same hard gate as the reactor-type support above.
-  const activeSlot = _stack.find((s) => s.id === _activeThrusterId);
-  const therm = chainThermBalance(_activeThrusterId, installedFace(activeSlot));
-  if (!therm.ok) {
-    missing.push(`${active.name} runs ${therm.demand}🌡️ but radiators supply ${therm.supply}🌡️`);
+  // Cooling (rule 3, data/support-chain.js): each reactor in the chain reserves
+  // its OWN dedicated radiator therms; the thruster plus any generators draw the
+  // shared remainder. Stricter than a single shared pool (two reactors can't
+  // split one radiator), matching the published dedicated-cooling rule. For the
+  // common single-reactor stack this is the same verdict as before.
+  const cool = resolveSupportChain({ cards: chainCardsFromStack(), activeId: _activeThrusterId });
+  if (!cool.coolingOk) {
+    const hot = cool.reactorCooling.find((r) => !r.ok);
+    if (hot) {
+      const rc = cardById(hot.reactorId);
+      missing.push(`${rc ? rc.name : 'A reactor'} needs ${hot.demand}🌡️ of its own radiator cooling`);
+    } else {
+      missing.push(`${active.name} and its generators run ${cool.nonReactorHeat}🌡️ but only ${cool.radiatorRemaining}🌡️ of radiator is free after the reactors`);
+    }
   }
 
   return {
