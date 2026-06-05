@@ -2819,31 +2819,33 @@ export class MapRenderer {
           && this._domeSprite && this._domeSprite.complete && this._domeSprite.naturalWidth) {
         ctx.drawImage(this._domeSprite, dx, dy, dw, dh);
       }
-      // Player-coloured label: {size}{spectral}, plus " | {outpost}" when an
-      // outpost is stationed here.
+      // Player-coloured label sits BELOW the site name (drawn at sy + HEX_R +
+      // 12). {size}{spectral}, plus " | {outpost}" when an outpost is stationed
+      // here; the colocated outpost's water / glory ride on the label.
+      const op = this._outpostAt(id);
       const size = site.siteSize != null ? site.siteSize : '';
       let text = `${size}${f.spectralType || ''}`;
-      const letter = this._outpostLetterAt(id);
-      if (letter) text += ` | ${letter}`;
-      if (text) this._drawFactoryLabel(ctx, cxs, dy + dh * FACTORY_LABEL_FY, text, f.color || '#9c9c9c', r);
+      if (op && op.letter) text += ` | ${op.letter}`;
+      if (text) this._drawFactoryLabel(ctx, cxs, cys + HEX_R + 30, text, f.color || '#9c9c9c', r, op);
     }
     ctx.restore();
   }
 
-  // The outpost letter (A/B/C/D) stationed at a site, or '' if none. Used to
-  // append " | {outpost}" to the factory label.
-  _outpostLetterAt(siteId) {
-    if (!this._outposts) return '';
+  // The outpost stationed at a site (letter + water + glory), or null. Drives
+  // the " | {outpost}" suffix and the 💧 / 🏆 badges on the factory label.
+  _outpostAt(siteId) {
+    if (!this._outposts) return null;
     for (const L of ['A', 'B', 'C', 'D']) {
       const op = this._outposts[L];
-      if (op && op.siteId === siteId) return L;
+      if (op && op.siteId === siteId) return { letter: L, tank: op.tank | 0, gloryChits: op.gloryChits | 0 };
     }
-    return '';
+    return null;
   }
 
-  // Player-coloured pill label drawn flat (horizontal, legible) under the
-  // stacks: {size}{spectral} with " | {outpost}" appended when one is here.
-  _drawFactoryLabel(ctx, cx, cy, text, color, r) {
+  // Player-coloured pill label below the site name: {size}{spectral} with
+  // " | {outpost}" when one is here. The colocated outpost's 💧 water and
+  // 🏆 glory badges flank the pill (they used to ride the now-removed square).
+  _drawFactoryLabel(ctx, cx, cy, text, color, r, op) {
     const fontPx = Math.max(9, Math.min(15, r * 0.95));
     ctx.font = `800 ${fontPx}px ui-sans-serif, system-ui, sans-serif`;
     const tw = ctx.measureText(text).width;
@@ -2862,6 +2864,26 @@ export class MapRenderer {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(text, cx, cy + 0.5);
+    // Water + glory badges flank the pill, fed by the colocated outpost.
+    if (op) {
+      const bs = Math.max(11, Math.round(fontPx * 1.2));
+      ctx.textBaseline = 'middle';
+      if (op.tank > 0) {
+        ctx.font = `${bs}px ${EMOJI_FONT}`;
+        ctx.textAlign = 'right';
+        ctx.fillText('💧', x - 3, cy);
+      }
+      if (op.gloryChits > 0) {
+        ctx.font = `${bs}px ${EMOJI_FONT}`;
+        ctx.textAlign = 'left';
+        ctx.fillText('🏆', x + w + 3, cy);
+        if (op.gloryChits > 1) {
+          ctx.font = `bold ${Math.round(bs * 0.8)}px ui-sans-serif, system-ui, sans-serif`;
+          ctx.fillStyle = '#ffd54a';
+          ctx.fillText(String(op.gloryChits), x + w + 3 + bs, cy);
+        }
+      }
+    }
   }
 
   // Park a rocket beside the factory: when a ship sits at a site that has a
