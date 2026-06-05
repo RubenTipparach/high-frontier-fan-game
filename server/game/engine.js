@@ -466,6 +466,10 @@ function applyMove(state, op, player) {
   // A dry-run (op.debug) skips the per-turn budget gate so the fuel breakdown
   // can be previewed any time (even with the move already spent / off-turn).
   if (!op.debug && player.movesRemaining <= 0) return fail('no_moves_left');
+  // Prospecting ends your movement for the turn: once you have begun
+  // prospecting, all further movement is blocked (and the prior move can no
+  // longer be undone, since the prospect rolled). A dry-run still previews.
+  if (!op.debug && hasProspectedThisTurn(state)) return fail('move_after_prospect');
   // An empty rocket has no thruster and can't burn, so it can't leave
   // LEO. Enforcing this keeps the "empty rocket == at LEO" invariant
   // true: the only way off LEO is to build/board a thruster first.
@@ -1200,6 +1204,16 @@ function applySetActiveProspector(state, op, player) {
 // browse.js#doProspect. Prospect IS the turn's operation for EVERY
 // prospector kind (raygun extends the reach to a line-of-sight site, but it
 // still spends the op - it is not free).
+// Has the active player already prospected this turn? The undo stack holds
+// this turn's functional ops (reset every turn) and a PROSPECT can't be
+// undone (it rolled), so a PROSPECT entry means prospecting has begun. The
+// dispatcher records the CURRENT op only after its handler returns, so this
+// reads PRIOR prospects, not the one in flight.
+function hasProspectedThisTurn(state) {
+  return Array.isArray(state.turnActions)
+    && state.turnActions.some((a) => a && a.kind === 'PROSPECT');
+}
+
 function applyProspect(state, op, player) {
   const toSiteId = String(op.siteId || '');
   const site = siteById(toSiteId);
@@ -1242,11 +1256,14 @@ function applyProspect(state, op, player) {
   if (existing) return fail('already_prospected');
   if (prospectorIsru(provSlot) > (site.hydration | 0)) return fail('isru_too_high');
 
-  // The raygun's line-of-sight scan is a FREE action: it does NOT spend the
-  // turn's operation and can fire at any number of in-sight sites. Missile /
-  // buggy prospects ARE the turn's operation, so they still spend it.
-  const costsOp = kind !== 'raygun';
-  if (costsOp && player.opsRemaining <= 0) return fail('no_ops_left');
+  // Prospecting is one operation to BEGIN: the first prospect of the turn
+  // (any kind) spends the operation. Once begun, a raygun's line-of-sight
+  // scan is free and unlimited - keep scanning in-sight sites at no cost.
+  // Missile / buggy must land on the target, and movement is locked after the
+  // first prospect, so they can never fire a free additional scan.
+  const begun = hasProspectedThisTurn(state);
+  const free = begun && kind === 'raygun';
+  if (!free && player.opsRemaining <= 0) return fail('no_ops_left');
 
   const threshold = prospectThreshold(site);
   const gen = makeRng(state.seed, state.rng.cursor);
@@ -1263,9 +1280,9 @@ function applyProspect(state, op, player) {
     // The buggy may re-roll once, this turn, by its owner.
     canReroll: kind === 'buggy',
   };
-  if (costsOp) player.opsRemaining -= 1;
+  if (!free) player.opsRemaining -= 1;
   const verb = success ? 'struck a claim at' : 'came up dry at';
-  const tail = costsOp ? '' : ' with a free raygun scan';
+  const tail = free ? ' with a free raygun scan' : '';
   return {
     ok: true, state,
     log: `${player.name} rolled ${roll} vs ${threshold} and ${verb} ${site.name}${tail}.`,
