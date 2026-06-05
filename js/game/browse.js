@@ -2766,6 +2766,7 @@ function wireHandStrip() {
         setTimeout(() => host.classList.remove('flash-error'), 700);
         return;
       }
+      addToHand(card);   // optimistic; BUY_CARD makes it authoritative
       submitOnlineOp({ kind: 'BUY_CARD', cardId: card.id, free: true });
       return;
     }
@@ -4134,17 +4135,20 @@ function openDeckTapModal(card, kind, { allowAuction = false, inspectOnly = fals
       // ghost survives the close.
       const srcEl = cardEl;
       overlay.classList.add('is-flying');
-      flyCardToHand(srcEl, card, () => {
-        // Online (solo room, Free Library): the server owns the hand, so route
-        // through BUY_CARD - a free action at 0 cost here. The snapshot then
-        // hydrates the hand. Solo sandbox stays a local add.
-        if (_online) {
-          submitOnlineOp({ kind: 'BUY_CARD', cardId: card.id, free: true });
-        } else {
+      if (_online) {
+        // Land it in the hand NOW (optimistic) and fire BUY_CARD immediately -
+        // not from the flight callback - so the op always sends and the card
+        // doesn't wait on a round-trip. BUY_CARD is a free action at 0 cost in
+        // Free Library; the snapshot reconciles (and reverts + toasts on error).
+        addToHand(card);
+        submitOnlineOp({ kind: 'BUY_CARD', cardId: card.id, free: true });
+        flyCardToHand(srcEl, card, () => {});
+      } else {
+        flyCardToHand(srcEl, card, () => {
           const r = addToHand(card);
           if (!r.ok) setStatus(`Can't add: ${r.reason}.`);
-        }
-      });
+        });
+      }
       // Fade the modal itself out in parallel with the flight so
       // the player's eye follows the card to the strip rather than
       // getting stuck on a still-open dialog.
