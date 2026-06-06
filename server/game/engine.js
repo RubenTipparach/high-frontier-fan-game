@@ -235,12 +235,30 @@ function isProspectorSlot(slot) {
   return prospectorKind(slot) != null;
 }
 
+// True when this zone's glory chit has already been retrieved by ANY player
+// at this table. Only one player may ever claim a given zone's chit, so once
+// anyone has picked it up (it lands in their glory.visited list) the chit is
+// gone for everyone else. Reading it off live player state means undo / replay
+// (rebuildFromBase) reconstructs it for free, with no extra state field.
+function zoneChitTaken(state, zone) {
+  if (!zone) return false;
+  return (state.players || []).some(
+    (p) => p.glory && Array.isArray(p.glory.visited) && p.glory.visited.includes(zone)
+  );
+}
+
 // First entry into a non-Earth heliocentric zone earns a glory chit
 // (mirror of js/game/glory.js#awardChitForZone). Earth is home and
 // never awards. Mutates the player's glory record in place.
-function maybeAwardGlory(player, site, turn) {
+function maybeAwardGlory(state, player, site, turn) {
   if (!site || !site.solarZone || site.solarZone === 'Earth') return null;
   if (player.glory.visited.includes(site.solarZone)) return null;
+  // Game-wide single-claim rule: if any player already retrieved this zone's
+  // chit there is nothing left here to pick up. Without this gate two rockets
+  // that both reach a new zone each award themselves the same chit (the
+  // reported bug); the per-player visited check above only stops a player from
+  // re-claiming their own.
+  if (zoneChitTaken(state, site.solarZone)) return null;
   // A glory chit is loaded by a Human: only claim it (and only mark the
   // zone visited) when a crew is aboard. Mirror of the client's
   // willAwardChit `crewAboard` gate - a crewless rocket leaves the chit on
@@ -259,7 +277,7 @@ function maybeAwardGlory(player, site, turn) {
 // so a null result means there is nothing here to load.
 function applyLoadGlory(state, _op, player) {
   const site = player.rocket.siteId ? siteById(player.rocket.siteId) : null;
-  const chit = site ? maybeAwardGlory(player, site, state.turn) : null;
+  const chit = site ? maybeAwardGlory(state, player, site, state.turn) : null;
   if (!chit) return fail('no_chit_to_load');
   return { ok: true, state, log: `${player.name} loaded the ${chit.zone} glory chit.` };
 }
@@ -723,7 +741,7 @@ function applyMove(state, op, player) {
   // client that omits the flag still auto-loads; "Leave it" sends false and
   // the chit stays on the site for a later LOAD_GLORY (Claim glory chit).
   const chit = (destSite && op.pickupChit !== false)
-    ? maybeAwardGlory(player, destSite, state.turn) : null;
+    ? maybeAwardGlory(state, player, destSite, state.turn) : null;
   // Arriving home (LEO == null siteId): a crew hauls its carried glory chits
   // back to score them. The server doesn't track which crew carried which chit,
   // so all carried chits score together - BACK (flipped, the big value) when a
