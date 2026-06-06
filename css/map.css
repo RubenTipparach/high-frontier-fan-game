@@ -7084,15 +7084,6 @@ body:has(#view-browse:not(.hidden)) #main {
 .all-cards-chip.kind-crew      { border-left-color: var(--chip-color, #d9b25a); }
 
 .all-cards-empty { color: #5a6080; font-size: 12px; padding: 2px 0 4px; }
-.all-cards-hidden {
-  color: #8b90b8;
-  font-style: italic;
-  background: repeating-linear-gradient(45deg, #161d33, #161d33 6px, #1a2138 6px, #1a2138 12px);
-  border: 1px dashed #2c3658;
-  border-radius: 7px;
-  padding: 8px 10px;
-  display: inline-block;
-}
 .all-cards-coins { margin-top: 8px; }
 
 /* ---- Support-chain visualizer (rocket stack modal) ---- */

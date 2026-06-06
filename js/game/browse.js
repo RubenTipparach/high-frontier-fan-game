@@ -1791,8 +1791,9 @@ function mpCardName(id) {
 
 // Render the multiplayer table panel from the latest snapshot: room,
 // whose turn, the clock, and a roster where each player expands to show
-// their rocket / outposts / resources. Opponent hands stay hidden
-// (count only). Re-rendered on every snapshot (applySnapshot).
+// their rocket / outposts / resources. Hands are open information (never
+// hidden), inspectable like any other stack. Re-rendered on every snapshot
+// (applySnapshot).
 // One-time skeleton inside #mp-panel: a #mp-table region (room / turn /
 // roster) which renderMpPanel rewrites on every snapshot, and a
 // persistent #mp-chat (history + input) so the chat survives the
@@ -2246,8 +2247,8 @@ function renderMpPlayer(p, isMe, isActive) {
   stats.textContent = `📍${onlineSiteLabel(rkt.siteId)} · 💧${p.aqua || 0} · ${vp}vp`;
   head.append(dot, name, stats);
   // Per-player "All cards" overview button, headed by this player's name +
-  // seat colour. Their hand stays secret (shown as a count); LEO / Rocket /
-  // Outpost cards are open information, same as the per-stack inspector below.
+  // seat colour. Every stack - hand included - is open information, same as the
+  // per-stack inspector below.
   const cardsBtn = document.createElement('button');
   cardsBtn.type = 'button';
   cardsBtn.className = 'mp-player-cards';
@@ -2258,7 +2259,7 @@ function renderMpPlayer(p, isMe, isActive) {
     openAllCardsView({
       title: '@' + p.name,
       titleColor: p.color || null,
-      locs: collectOwnedCardsFromPlayer(p, isMe),
+      locs: collectOwnedCardsFromPlayer(p),
     });
   });
   const headRow = document.createElement('div');
@@ -14171,13 +14172,11 @@ function _buildOwnedLocations(src) {
   }
 
   const locs = [];
-  // Hand: secret for other players, so shown as a count instead of cards.
-  locs.push(src.hideHandCards
-    ? { key: 'hand', icon: '🃏', name: 'Hand', sub: '', cards: [],
-        hiddenCount: (src.handIds || []).length, water: null, chits: [], chitMode: null }
-    : { key: 'hand', icon: '🃏', name: 'Hand', sub: '',
-        cards: (src.handIds || []).map(_resolveOwnedSlot).filter(Boolean),
-        water: null, chits: [], chitMode: null });
+  // Hand is OPEN information (hand cards are never hidden in High Frontier),
+  // so it renders the same as any other stack for every player.
+  locs.push({ key: 'hand', icon: '🃏', name: 'Hand', sub: '',
+    cards: (src.handIds || []).map(_resolveOwnedSlot).filter(Boolean),
+    water: null, chits: [], chitMode: null });
   locs.push({
     key: 'leo', icon: '🌍', name: 'LEO', sub: '',
     cards: (src.leoSlots || []).map(_resolveOwnedSlot).filter(Boolean),
@@ -14220,14 +14219,13 @@ function collectOwnedCardsLocal() {
     rocketSiteName: rocketSite ? rocketSite.name : '',
     outposts,
     carriedChits: getChits(),
-    hideHandCards: false,
   });
 }
 
-// Any player's cards, read from a server snapshot player object. Other players'
-// HANDS stay secret (shown as a count); their LEO / Rocket / Outpost cards are
-// open information, the same as the roster's per-stack inspector.
-function collectOwnedCardsFromPlayer(player, isLocal) {
+// Any player's cards, read from a server snapshot player object. Every stack -
+// hand included - is open information (hand cards are never hidden in High
+// Frontier), the same as the roster's per-stack inspector.
+function collectOwnedCardsFromPlayer(player) {
   const p = player || {};
   const rkt = p.rocket || {};
   const glory = p.glory || {};
@@ -14244,7 +14242,6 @@ function collectOwnedCardsFromPlayer(player, isLocal) {
     rocketSiteName: rkt.siteId ? onlineSiteLabel(rkt.siteId) : '',
     outposts,
     carriedChits: glory.chits || [],
-    hideHandCards: !isLocal,
   });
 }
 
@@ -14298,7 +14295,7 @@ function openAllCardsView({ title = 'All cards', titleColor = null, locs = [] } 
   dialog.className = 'all-cards-modal';
   overlay.appendChild(dialog);
 
-  const totalShown = locs.reduce((n, l) => n + (l.hiddenCount != null ? l.hiddenCount : l.cards.length), 0);
+  const totalShown = locs.reduce((n, l) => n + l.cards.length, 0);
   const titleHtml = titleColor
     ? '<span class="player-name" style="--player-color:' + esc(titleColor) + '">' + esc(title) + '</span>'
     : esc(title);
@@ -14326,7 +14323,7 @@ function openAllCardsView({ title = 'All cards', titleColor = null, locs = [] } 
     }
     const chitCount = (loc.chits || []).length;
     if (chitCount) meta.push('<span class="acl-chits">🎖 ' + chitCount + '</span>');
-    const shown = loc.hiddenCount != null ? loc.hiddenCount : loc.cards.length;
+    const shown = loc.cards.length;
     const h = document.createElement('header');
     h.className = 'all-cards-loc-head';
     h.innerHTML =
@@ -14336,14 +14333,7 @@ function openAllCardsView({ title = 'All cards', titleColor = null, locs = [] } 
       + '<span class="acl-meta">' + meta.join('') + '</span>';
     sec.appendChild(h);
 
-    if (loc.hiddenCount != null) {
-      const hid = document.createElement('div');
-      hid.className = 'all-cards-empty all-cards-hidden';
-      hid.textContent = loc.hiddenCount
-        ? loc.hiddenCount + ' card' + (loc.hiddenCount === 1 ? '' : 's') + ' (hidden)'
-        : 'No cards';
-      sec.appendChild(hid);
-    } else if (loc.cards.length) {
+    if (loc.cards.length) {
       const grid = document.createElement('div');
       grid.className = 'all-cards-chips';
       for (const e of loc.cards) grid.appendChild(_ownedCardChip(e));
