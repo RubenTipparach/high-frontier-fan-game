@@ -11134,7 +11134,7 @@ async function moveRocket() {
     // site (not a coasting waypoint) WITH a crew aboard, and isn't already
     // carrying that zone's chit (so re-landing in the zone doesn't re-prompt).
     const landingHere = destSite && !destSite.isWaypoint && destSite.isLandable !== false;
-    if (landingHere && arrZone && arrZone !== 'Earth' && !isZoneVisited(arrZone)
+    if (landingHere && arrZone && arrZone !== 'Earth' && !zoneChitTaken(arrZone)
         && !getChits().some((c) => c.zone === arrZone) && stackHasCrew()) {
       pickupChit = await promptGloryPickup((destSite && destSite.name) || toSiteId, arrZone, firstCrewId());
     }
@@ -11396,7 +11396,7 @@ async function moveRocket() {
   // that zone's chit (so coasting through / re-landing doesn't re-prompt).
   const landedHere = arrived && !arrived.isWaypoint && arrived.isLandable !== false;
   const willAwardChit = landedHere && arrivedZone && arrivedZone !== 'Earth'
-    && !isZoneVisited(arrivedZone) && !getChits().some((c) => c.zone === arrivedZone) && crewAboard;
+    && !zoneChitTaken(arrivedZone) && !getChits().some((c) => c.zone === arrivedZone) && crewAboard;
   const willCashIn = isLeoSite(arrived) && getChits().length > 0;
   const chitsToCash = willCashIn ? getChits() : [];
   _moveSnapshot = {
@@ -12801,7 +12801,7 @@ function showSitePopupFor(site) {
   // just before Navigate-to so the pure-inspection action stays last.
   if (rocketSite && site.id === rocketSite.id
       && site.solarZone && site.solarZone !== 'Earth'
-      && !isZoneVisited(site.solarZone) && stackHasCrew()) {
+      && !zoneChitTaken(site.solarZone) && stackHasCrew()) {
     const sds = getChitSides(site.solarZone);
     actions.push({
       label: '🎖 Claim glory chit',
@@ -14025,6 +14025,21 @@ function buildChitToken(zone, { side = null, transit = false, crewId = null, pla
 // (the default, 1). Multiplayer reads every player's glory from the shared
 // snapshot (only routes are secret); solo reads the local glory. Unclaimed
 // zones are absent.
+// True when this zone's glory chit has already been retrieved by ANY player
+// (only one player may ever claim a given zone's chit). Online reads every
+// seat's visited list from the latest snapshot; solo falls back to the local
+// player's visited set. Used to stop the pickup prompt / Claim button from
+// offering a chit a rival already grabbed (the server enforces it too).
+function zoneChitTaken(zone) {
+  if (!zone) return false;
+  if (_online && _onlineSnapshot && Array.isArray(_onlineSnapshot.players)) {
+    return _onlineSnapshot.players.some(
+      (p) => p.glory && Array.isArray(p.glory.visited) && p.glory.visited.includes(zone)
+    );
+  }
+  return isZoneVisited(zone);
+}
+
 function takenZoneMap() {
   const map = {};
   const resolve = (zone, glory, seat) => {
@@ -14531,7 +14546,7 @@ async function claimGloryHere(site) {
     if (ok) refreshOpenSitePopup();
     return ok;
   }
-  if (zone === 'Earth' || isZoneVisited(zone) || !stackHasCrew()) return false;
+  if (zone === 'Earth' || zoneChitTaken(zone) || !stackHasCrew()) return false;
   const ownerId = firstCrewId();
   awardChitForZone(zone, getTurn(), ownerId);
   const s = getChitSides(zone);
