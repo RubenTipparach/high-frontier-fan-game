@@ -1386,14 +1386,24 @@ function computeSnapshotScore(snapshot, profileId) {
     const d = discs[id];
     if (d && d.outcome === 'success' && d.ownerId === profileId) claims += 1;
   }
-  const facs = Object.values(snapshot.factories || {}).filter((f) => f.ownerId === profileId);
+  const allFacs = Object.values(snapshot.factories || {});
+  const facs = allFacs.filter((f) => f.ownerId === profileId);
   const cols = Object.values(snapshot.colonies || {}).filter((c) => c.ownerId === profileId);
   const rocket = player && player.rocket && (player.rocket.stack || []).length > 0 ? 1 : 0;
   const outposts = player && player.outposts ? Object.keys(player.outposts).length : 0;
-  const byType = {};
-  for (const f of facs) { const t = f.spectralType || 'C'; byType[t] = (byType[t] || 0) + 1; }
+  // Exploitation track is GLOBAL: the market price per spectral comes from ALL
+  // players' factories of that spectral; the player scores it for each of their
+  // own. (Mirrors scoring.js#computeEndgameScore so the live panel and the
+  // final standings agree.)
+  const globalBySpec = {};
+  for (const f of allFacs) { const t = f.spectralType || 'C'; globalBySpec[t] = (globalBySpec[t] || 0) + 1; }
+  const lastRate = SPECTRAL_DIMINISHING_SCHEDULE[SPECTRAL_DIMINISHING_SCHEDULE.length - 1];
+  const priceFor = (n) => (n <= 0 ? 0
+    : (SPECTRAL_DIMINISHING_SCHEDULE[n - 1] != null ? SPECTRAL_DIMINISHING_SCHEDULE[n - 1] : lastRate));
+  const ownBySpec = {};
+  for (const f of facs) { const t = f.spectralType || 'C'; ownBySpec[t] = (ownBySpec[t] || 0) + 1; }
   let spectralBonus = 0;
-  for (const t in byType) spectralBonus += spectralVpForCount(byType[t]);
+  for (const t in ownBySpec) spectralBonus += ownBySpec[t] * priceFor(globalBySpec[t] || 0);
   let colonyVp = 0;
   for (const c of cols) colonyVp += (COLONY_VP[c.type] || COLONY_VP.other);
   const tokens = rocket + claims + facs.length + outposts;
