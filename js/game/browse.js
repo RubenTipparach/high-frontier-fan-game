@@ -14611,8 +14611,9 @@ function paintGlory() {
 
   // --- Spectrum exploitation track ----------------------------------
   // One column per spectral; a translucent red disc sits on the cell
-  // matching the factory count (1 -> 8, 2 -> 5, 3+ -> 4). 0 factories
-  // -> no disc. Steps down as more factories of that spectral land.
+  // matching the GLOBAL factory count for that spectral (every player's,
+  // 1 -> 8, 2 -> 5, 3+ -> 4). 0 factories anywhere -> no disc. Steps down
+  // as more factories of that spectral land, whoever builds them.
   const SPECTRALS = ['C', 'S', 'M', 'V', 'D', 'H'];
   const spectrumCols = SPECTRALS.map((spec) => {
     const n  = score.spectralBonus.perSpectralCount?.[spec] || 0;
@@ -14678,8 +14679,10 @@ function paintGlory() {
       <h4>Spectrum exploitation track</h4>
       <div class="spectrum-tracker">${spectrumCols}</div>
       <p class="muted glory-rules glory-schedule-hint">
-        Factories per spectral. The disc steps down the track:
-        ${esc(scheduleHint)} VP. Spectral total +${score.spectralBonus.total} VP (rulebook M2b).
+        Every player's factories of each spectral - the whole game's, not just
+        yours - step the shared disc down the track: ${esc(scheduleHint)} VP per
+        factory at that market price. You score it for your own factories:
+        spectral total +${score.spectralBonus.total} VP (rulebook M2b).
       </p>
 
       <h4>Tokens on the map (+1 each)</h4>
