@@ -23,14 +23,14 @@ import {
   prospect as soloProspect, endRound as soloEndRound,
   bindData as soloBindData, onChange as soloOnChange, SOLO_CONFIG,
 } from './solo.js';
-import { PATENTS, PATENTS_BY_ID, PATENT_TYPES, patentsByType } from '../../data/patents.js';
+import { PATENTS, PATENTS_BY_ID, PATENT_TYPES, patentsByType, radiatorRadHardness } from '../../data/patents.js';
 import {
   getHandSlots, isInHand, addToHand, removeFromHandAt, removeFromHand,
   clearHand, onHandChange,
   isBoostMarked, getBoostMarked, toggleBoostMark, clearBoostMarks,
 } from './hand.js';
 import {
-  getRocketStack, isInRocket, addToStack as rocketAddCard,
+  getRocketStack, isInRocket, addToStack as rocketAddCard, setRadiatorSide,
   removeFromStack as rocketRemoveCard, clearStack as rocketClearStack,
   onRocketChange, isRocketActive,
   getActiveThrusterId, setActiveThruster,
@@ -2915,21 +2915,15 @@ function wireHandStrip() {
       });
       return;
     }
-    const ok = await confirmModal({
-      title: '🛰 Boost to LEO',
-      body: `Boost <strong>${n}</strong> card${n === 1 ? '' : 's'} from your Hand to the LEO Stack `
-        + `for <strong>${cost}</strong> Aqua (total mass ${cost})? `
-        + `Bank: <strong>${have}</strong> → <strong>${have - cost}</strong>. Costs one operation.`,
-      yes: `🛰 Boost (${cost} aqua)`,
-      no: 'Cancel',
-    });
-    if (!ok) return;
-    // Online: the BOOST is a server op. Submit the marked ids; the
-    // server moves Hand -> LEO, charges aqua, spends the op, and
-    // broadcasts. Skip the local mutation below - the snapshot
-    // re-hydrate is the source of truth (and other players see it).
+    const res = await openBoostModal({ cards, cost, have });
+    if (!res.ok) return;
+    const radSides = res.radSides || {};
+    // Online: the BOOST is a server op. Submit the marked ids + each radiator's
+    // chosen deployed side; the server moves Hand -> LEO, charges aqua, spends
+    // the op, locks the side, and broadcasts. Skip the local mutation below -
+    // the snapshot re-hydrate is the source of truth (and other players see it).
     if (_online) {
-      const sent = await submitOnlineOp({ kind: 'BOOST', cardIds: marked });
+      const sent = await submitOnlineOp({ kind: 'BOOST', cardIds: marked, radSides });
       if (sent) clearBoostMarks();
       return;
     }
@@ -2948,7 +2942,9 @@ function wireHandStrip() {
     for (const id of marked) {
       const card = lookup(id);
       if (!card) continue;
-      addCardToLeo({ id, kind: kindOf(id) });
+      // Lock the radiator's chosen deployed side into the LEO slot at boost.
+      const radSide = card.type === 'radiator' ? (radSides[id] || 'heavy') : undefined;
+      addCardToLeo({ id, kind: kindOf(id), radSide });
       removeFromHand(id);
     }
     clearBoostMarks();
@@ -3351,7 +3347,7 @@ function transferOneCard(sourceId, destId, cardId) {
       _rocketSiteId = sourceSiteId;
       persistRocketSite();
     }
-    added = rocketAddCard(slot.id, slot.kind, slot.face) !== -1;
+    added = rocketAddCard(slot.id, slot.kind, slot.face, slot.radSide) !== -1;
     if (!added && formingRocket) {
       _rocketSiteId = prevRocketSiteId;
       persistRocketSite();
@@ -3363,7 +3359,7 @@ function transferOneCard(sourceId, destId, cardId) {
   if (!added) {
     // Roll back to source on failure.
     if (sourceId === 'leo') addCardToLeo(slot);
-    else if (sourceId === 'rocket') rocketAddCard(slot.id, slot.kind, slot.face);
+    else if (sourceId === 'rocket') rocketAddCard(slot.id, slot.kind, slot.face, slot.radSide);
     else if (sourceId.startsWith('outpost')) {
       addCardToOutpost(sourceId.slice('outpost'.length), slot);
     }
@@ -3411,7 +3407,7 @@ function pullSlotFromStack(stackId, id) {
 // the hand).
 function readdSlotToStack(stackId, slot) {
   if (stackId === 'leo') addCardToLeo(slot);
-  else if (stackId === 'rocket') rocketAddCard(slot.id, slot.kind, slot.face);
+  else if (stackId === 'rocket') rocketAddCard(slot.id, slot.kind, slot.face, slot.radSide);
   else if (stackId.startsWith('outpost')) {
     addCardToOutpost(stackId.slice('outpost'.length), slot);
   }
@@ -7149,6 +7145,16 @@ function radStackCards() {
     .map((slot) => {
       const patent = PATENTS_BY_ID[slot.id];
       if (patent) {
+        // A radiator's rad-hardness is its DEPLOYED side's (heavy is more
+        // fragile); a heavy one degrades to light instead of being lost.
+        if (patent.type === 'radiator') {
+          const rf = (slot.face === 'secondary' && patent.faces && patent.faces.secondary)
+            ? patent.faces.secondary : ((patent.faces && patent.faces.primary) || patent);
+          return {
+            id: slot.id, name: patent.name, type: 'radiator', radSide: slot.radSide || 'heavy',
+            radHardness: radiatorRadHardness(rf, slot.radSide),
+          };
+        }
         return { id: slot.id, name: patent.name, radHardness: patent.radHardness != null ? patent.radHardness : 0 };
       }
       const crew = CREW_BY_ID[slot.id];
@@ -8804,6 +8810,74 @@ function confirmModal({ title, body, yes = 'OK', no = 'Cancel' }) {
     panel.querySelector('[data-act="yes"]').addEventListener('click', () => close(true));
     const noEl = panel.querySelector('[data-act="no"]');
     if (noEl) noEl.addEventListener('click', () => close(false));
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+  });
+}
+
+// Boost confirm modal. Confirms the Aqua spend AND, for every radiator in the
+// batch, lets the player pick its deployed light/heavy side - the choice LOCKS
+// at construction (only radiation damage flips heavy -> light afterward), so
+// this popup is the one chance to set it. Resolves { ok, radSides } where
+// radSides maps each radiator id to 'light' | 'heavy' (default 'heavy', the
+// max-cooling side). Cancel resolves { ok: false }.
+function openBoostModal({ cards, cost, have }) {
+  return new Promise((resolve) => {
+    document.querySelector('.confirm-modal-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay';
+    const radiators = (cards || []).filter((c) => c && c.type === 'radiator');
+    const sides = {};
+    for (const c of radiators) sides[c.id] = 'heavy';
+    const close = (ok) => {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(ok ? { ok: true, radSides: sides } : { ok: false });
+    };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+    const onKey = (e) => {
+      if (e.key === 'Escape') close(false);
+      else if (e.key === 'Enter') close(true);
+    };
+    document.addEventListener('keydown', onKey);
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel';
+    const n = (cards || []).length;
+    const sideTherms = (c, which) => {
+      const f = (c.faces && c.faces.primary) || c;
+      const blk = f[which];
+      return (blk && blk.therms != null) ? blk.therms : 0;
+    };
+    const radRows = radiators.map((c) => `
+      <div class="boost-rad-row" data-id="${esc(c.id)}">
+        <span class="boost-rad-name">${esc(c.name)}</span>
+        <div class="boost-rad-toggle">
+          <button type="button" class="boost-rad-side" data-side="light">Light (${sideTherms(c, 'light')}🌡)</button>
+          <button type="button" class="boost-rad-side is-active" data-side="heavy">Heavy (${sideTherms(c, 'heavy')}🌡)</button>
+        </div>
+      </div>`).join('');
+    panel.innerHTML = `
+      <h3>🛰 Boost to LEO</h3>
+      <p>Boost <strong>${n}</strong> card${n === 1 ? '' : 's'} from your Hand to the LEO Stack
+        for <strong>${cost}</strong> Aqua (total mass ${cost}).
+        Bank: <strong>${have}</strong> → <strong>${have - cost}</strong>. Costs one operation.</p>
+      ${radiators.length ? `<p class="muted boost-rad-help">Pick each radiator's deployed side - it locks once boosted (only radiation damage can flip heavy to light afterward):</p>
+      <div class="boost-rad-list">${radRows}</div>` : ''}
+      <div class="turn-confirm-actions">
+        <button type="button" class="popup-btn primary" data-act="yes">🛰 Boost (${cost} aqua)</button>
+        <button type="button" class="popup-btn" data-act="no">Cancel</button>
+      </div>`;
+    panel.querySelectorAll('.boost-rad-row').forEach((row) => {
+      const id = row.dataset.id;
+      row.querySelectorAll('.boost-rad-side').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          sides[id] = btn.dataset.side === 'light' ? 'light' : 'heavy';
+          row.querySelectorAll('.boost-rad-side').forEach((b) => b.classList.toggle('is-active', b === btn));
+        });
+      });
+    });
+    panel.querySelector('[data-act="yes"]').addEventListener('click', () => close(true));
+    panel.querySelector('[data-act="no"]').addEventListener('click', () => close(false));
     overlay.appendChild(panel);
     mountOverlay(overlay);
   });
@@ -11559,11 +11633,20 @@ async function runMoveQueue(ctx, resuming) {
         if (decommission && decommission.length) {
           let lost = 0;
           let crewToLeo = 0;
+          let degraded = 0;
           for (const cardId of decommission) {
             const stack = getRocketStack();
             const ridx = stack.findIndex((s) => s.id === cardId);
             if (ridx < 0) continue;
             const slot = stack[ridx];
+            // A heavy-side radiator degrades to its light side instead of being
+            // lost (the one exception to the construction-time side lock).
+            const radCard = PATENTS_BY_ID[cardId];
+            if (radCard && radCard.type === 'radiator' && slot.radSide !== 'light') {
+              setRadiatorSide(cardId, 'light');
+              degraded++;
+              continue;
+            }
             const isCrew = slot.kind === 'crew' || CREW.some((c) => c.id === cardId);
             rocketRemoveCard(ridx);
             if (isCrew) {
@@ -11580,9 +11663,10 @@ async function runMoveQueue(ctx, resuming) {
             type: 'rad_decommission',
             icon: '☢',
             summary: `☢ ${esc(hazard.site.name)}: ${lost} card${lost === 1 ? '' : 's'} decommissioned to hand`
-              + (crewToLeo ? `, ${crewToLeo} crew to LEO stack` : ''),
+              + (crewToLeo ? `, ${crewToLeo} crew to LEO stack` : '')
+              + (degraded ? `, ${degraded} radiator${degraded === 1 ? '' : 's'} degraded to light` : ''),
             undoable: false,
-            data: { siteId: hazard.site.id, decommission, count: lost, crewToLeo },
+            data: { siteId: hazard.site.id, decommission, count: lost, crewToLeo, degraded },
           });
         }
       }

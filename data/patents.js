@@ -320,13 +320,40 @@ export function thermsRequired(face) {
   return r ? (Number(r.count) || 0) : 0;
 }
 
-// Therms a radiator SUPPLIES: its cooling capacity. Light/Heavy flip is
-// not yet tracked as stack state, so we credit the radiator's larger
-// (deployed) side - a radiator in a flying stack is assumed deployed to
-// cool. Non-radiators supply 0.
-export function thermsSupplied(card, face) {
+// Resolve a radiator face's DEPLOYED-side stats ({ mass, radHardness, therms }).
+// `radSide` is 'light' | 'heavy'. Default 'heavy' - the bigger, max-cooling
+// deployed side - so a legacy caller with no side gets the same value the old
+// max() behaviour did (heavy therms >= light therms for every radiator). A
+// radiator deploys on ONE side; the side is locked at construction (Boost) and
+// only radiation damage (heavy -> light) flips it afterwards.
+export function radiatorSide(face, radSide) {
+  if (!face) return null;
+  const light = face.light || null;
+  const heavy = face.heavy || null;
+  if (!light && !heavy) {
+    return { mass: face.mass, radHardness: face.radHardness, therms: face.therms };
+  }
+  return radSide === 'light' ? (light || heavy) : (heavy || light);
+}
+
+// Rad-hardness of a radiator's deployed side (heavy by default). The heavy side
+// is typically more radiation-fragile than the light side, which is what makes
+// the heavy -> light radiation degrade meaningful.
+export function radiatorRadHardness(face, radSide) {
+  const side = radiatorSide(face, radSide);
+  if (side && side.radHardness != null) return Number(side.radHardness) || 0;
+  return Number(face && face.radHardness) || 0;
+}
+
+// Therms a radiator SUPPLIES: its cooling capacity on its DEPLOYED side. Pass
+// the slot's `radSide` ('light' | 'heavy'); omitted defaults to the heavier
+// (max-cooling) side, matching the legacy max() behaviour. Non-radiators
+// supply 0.
+export function thermsSupplied(card, face, radSide) {
   if (!card || card.type !== 'radiator') return 0;
   const f = face || (card.faces && card.faces.primary) || card;
+  const side = radiatorSide(f, radSide);
+  if (side && side.therms != null) return Number(side.therms) || 0;
   const light = Number(f.light && f.light.therms) || 0;
   const heavy = Number(f.heavy && f.heavy.therms) || 0;
   return Math.max(light, heavy, Number(f.therms) || 0);

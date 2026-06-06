@@ -26,7 +26,7 @@
 //     ctx.turnBaseState. This keeps the engine pure and avoids storing
 //     nested snapshots inside the state blob.
 
-import { PATENTS_BY_ID } from '../../data/patents.js';
+import { PATENTS_BY_ID, radiatorRadHardness } from '../../data/patents.js';
 import { resolveSupportChain } from '../../data/support-chain.js';
 import { CREW_BY_ID } from '../../data/crew.js';
 // Shared fuel-strip model (same module the client uses): a burn spends fuel
@@ -441,6 +441,8 @@ function slotRadHardness(slot) {
   const p = PATENTS_BY_ID[slot.id];
   if (p) {
     const f = slotFace(slot, p);
+    // A radiator's rad-hardness is its DEPLOYED side's (heavy is more fragile).
+    if (p.type === 'radiator') return radiatorRadHardness(f, slot.radSide) | 0;
     return (f.radHardness != null ? f.radHardness : p.radHardness) | 0;
   }
   const crew = CREW_BY_ID[slot.id];
@@ -667,6 +669,7 @@ function applyMove(state, op, player) {
   // each zone rolls and the worst (d6 - thrust) decommissions any stack
   // card whose rad-hardness is below it.
   let decommissioned = [];
+  const degradedRadiators = [];
   if (!destroyed && rad.length) {
     if (thrust > RAD_BYPASS_THRUST) {
       for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, thrust });
@@ -682,6 +685,17 @@ function applyMove(state, op, player) {
         const survivors = [];
         for (const slot of player.rocket.stack) {
           if (slotRadHardness(slot) < worst) {
+            // A heavy-side radiator DEGRADES to its light side instead of being
+            // destroyed - the one exception to the no-flip-after-construction
+            // rule. It survives (reduced cooling); a radiator already on light
+            // is destroyed normally.
+            const c = PATENTS_BY_ID[slot.id];
+            if (c && c.type === 'radiator' && slot.radSide !== 'light') {
+              slot.radSide = 'light';
+              degradedRadiators.push(slot.id);
+              survivors.push(slot);
+              continue;
+            }
             decommissioned.push(slot.id);
             if (isCrewSlot(slot)) {
               (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
@@ -778,6 +792,7 @@ function applyMove(state, op, player) {
   if (finaoCost > 0) log += ` Paid ${finaoCost} aqua (FINAO) past ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
   else if (nItems) log += ` Rolled through ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
   if (decommissioned.length) log += ` Radiation decommissioned ${decommissioned.length} card${decommissioned.length === 1 ? '' : 's'}.`;
+  if (degradedRadiators.length) log += ` Radiation degraded ${degradedRadiators.length} radiator${degradedRadiators.length === 1 ? '' : 's'} to its light side.`;
   if (chit) log += ` First into the ${chit.zone} zone (+glory chit).`;
   if (homeScored) {
     log += ` Scored ${homeScored} glory chit${homeScored === 1 ? '' : 's'}`
@@ -810,6 +825,9 @@ function applyBuildRocket(state, op, player) {
   player.hand.splice(idx, 1);
   const slot = { id: cardId, kind: 'patent' };
   if (op.face === 'secondary' && card.faces && card.faces.secondary) slot.face = 'secondary';
+  // A radiator built straight onto the rocket locks its deployed side here too
+  // (default heavy / max cooling).
+  if (card.type === 'radiator') slot.radSide = op.radSide === 'light' ? 'light' : 'heavy';
   player.rocket.stack.push(slot);
   if (!player.rocket.activeThrusterId && isThrusterSlot(slot)) {
     player.rocket.activeThrusterId = cardId;
@@ -841,11 +859,19 @@ function applyBoost(state, op, player) {
   let cost = 0;
   for (const id of ids) cost += slotMass({ id });
   if (cost > player.aqua) return fail('insufficient_aqua');
-  // Move them hand -> LEO.
+  // Move them hand -> LEO. A radiator locks its deployed light/heavy side here
+  // (op.radSides[id]); default heavy (max cooling). Only radiation damage flips
+  // it afterward.
+  const radSides = (op.radSides && typeof op.radSides === 'object') ? op.radSides : {};
   for (const id of ids) {
     const idx = player.hand.indexOf(id);
     if (idx >= 0) player.hand.splice(idx, 1);
-    player.leo.push({ id, kind: 'patent' });
+    const slot = { id, kind: 'patent' };
+    const card = PATENTS_BY_ID[id];
+    if (card && card.type === 'radiator') {
+      slot.radSide = radSides[id] === 'light' ? 'light' : 'heavy';
+    }
+    player.leo.push(slot);
   }
   player.aqua -= cost;
   player.opsRemaining -= 1;
@@ -1183,7 +1209,7 @@ function applyConvertOutpost(state, op, player) {
   player.outposts[letter] = {
     letter,
     siteId,
-    cards: player.rocket.stack.map((s) => ({ id: s.id, kind: s.kind, ...(s.face ? { face: s.face } : {}) })),
+    cards: player.rocket.stack.map((s) => ({ id: s.id, kind: s.kind, ...(s.face ? { face: s.face } : {}), ...(s.radSide ? { radSide: s.radSide } : {}) })),
     tank: player.rocket.tank | 0,
   };
   const n = player.rocket.stack.length;
@@ -1712,9 +1738,9 @@ function pickPayload(op) {
   switch (op.kind) {
     case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, pickupChit: op.pickupChit !== false };
     case 'LOAD_GLORY': return {};
-    case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face };
+    case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face, radSide: op.radSide };
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };
-    case 'BOOST': return { cardIds: op.cardIds };
+    case 'BOOST': return { cardIds: op.cardIds, radSides: op.radSides || {} };
     case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from, to: op.to };
     case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount };
     case 'DISSOLVE_OUTPOST': return { letter: op.letter };

@@ -588,6 +588,38 @@
   justify-content: flex-end;
 }
 
+/* Boost popup: per-radiator deployed-side picker (light/heavy). The chosen
+   side locks at construction, so this segmented toggle is the one place to set
+   it. Active side is the filled cyan half; the other reads as a ghost button. */
+.boost-rad-help { margin: 4px 0 8px; font-size: 12px; }
+.boost-rad-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.boost-rad-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.boost-rad-name { font-size: 13px; font-weight: 600; color: var(--ink); }
+.boost-rad-toggle { display: inline-flex; }
+.boost-rad-side {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--ink-dim, #9fb3cc);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.boost-rad-side:first-child { border-radius: 7px 0 0 7px; }
+.boost-rad-side:last-child { border-radius: 0 7px 7px 0; border-left: none; }
+.boost-rad-side.is-active {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(0, 0, 0, 0.28)), #0ea5e9;
+  color: #f0f9ff;
+  border-color: #7dd3fc;
+}
+
 /* Dump-water stepper modal. Sits above the fuel-tank modal that
    spawns it. The player dials an amount with +/-, types directly,
    or jumps to the full tank with All. */
