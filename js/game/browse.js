@@ -11,7 +11,7 @@ import { erudaEnabled, setEruda } from '../debug-console.js';
 import { loadPlannerMap } from './planner-map.js';
 import { planRoute } from './planner-nav.js';
 import {
-  consumeMove, refundMove, getTurn, getMovesRemaining, onTurnChange,
+  consumeMove, refundMove, getTurn, getRound, getMovesRemaining, onTurnChange,
   getEventForRoll, getSeasonForSlot, getSeason, resetClock,
   getOpsRemaining, consumeOp,
   getDiscardsRemaining, consumeDiscard, formatTurnNumber,
@@ -5129,6 +5129,31 @@ function ensureMapShell(host) {
         : (auctionInProgress
           ? 'An auction is open - resolve it before ending your turn.'
           : (hasOps ? 'You still have an operation - tap to use it' : 'End your turn'));
+    }
+    // Calendar chip: the bare clock glyph hid the season, so show the
+    // current season + round next to a clock face whose hand points at this
+    // turn's slot on the dial (slot 0 = top = 12 o'clock), tinted the season
+    // colour. Reads "🕔 Yellow 4" = yellow season, round 4.
+    const trackerBtn = host.querySelector('#turn-tracker');
+    if (trackerBtn) {
+      let season = null;
+      try { season = getSeason(); } catch { season = null; }
+      const slot = getTurn() | 0;
+      const round = getRound();
+      const CLOCK_FACES = ['🕛', '🕐', '🕑', '🕒', '🕓', '🕔', '🕕', '🕖', '🕗', '🕘', '🕙', '🕚'];
+      const clk = CLOCK_FACES[((slot % 12) + 12) % 12];
+      if (season) {
+        const sName = season.name.charAt(0).toUpperCase() + season.name.slice(1);
+        trackerBtn.textContent = `${clk} ${sName} ${round}`;
+        trackerBtn.classList.add('has-season');
+        trackerBtn.style.setProperty('--season-color', season.color);
+        trackerBtn.title = `${season.label}, round ${round} - tap for the turn tracker`;
+      } else {
+        trackerBtn.textContent = clk;
+        trackerBtn.classList.remove('has-season');
+        trackerBtn.style.removeProperty('--season-color');
+        trackerBtn.title = 'View turn tracker';
+      }
     }
   }
   // Stash on the host so applySnapshot can re-trigger after a fresh

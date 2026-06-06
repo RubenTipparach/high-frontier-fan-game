@@ -107,6 +107,15 @@
   background: var(--panel-2);
   color: var(--ink);
 }
+/* Calendar chip: season name + round beside a clock face, tinted the season
+   colour (set inline by refreshTurnBudget) so the calendar season reads at a
+   glance instead of hiding behind a bare clock glyph. */
+.map-turn-controls #turn-tracker.has-season {
+  background: color-mix(in srgb, var(--season-color, #888) 18%, var(--panel-2));
+  border-color: color-mix(in srgb, var(--season-color, #888) 60%, var(--border));
+  font-weight: 600;
+  white-space: nowrap;
+}
 .map-turn-controls #turn-end {
   /* Seat-colour fill: the active player's colour (--mp-turn-color, set by
      refreshTurnBudget; falls back to the default orange). The translucent
