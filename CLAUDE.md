@@ -322,12 +322,21 @@ a stack opponents can already see), so `SET_WIRING` returns a real log line and
 is not redacted. The resolver auto-falls-back to first-match for any wiring entry
 whose supplier left the stack, so a stale map never breaks a chain.
 
-**TODO: rule 5 (parallel robonaut chains).** Still open: (5) robonauts can run
-PARALLEL chains, and a thruster/missile robonaut serves both roles with ONE
-chain. `resolveSupportChain` still walks a SINGLE chain from one `activeId`
-(the visualizer renders the thruster + prospector roots independently, an
-approximation), so true parallel chains need a resolver multi-root extension.
-Independent of the wiring work above.
+RULE 5 LANDED (2026-06-06, "may share" semantics). Parallel robonaut chains:
+the thruster chain and the prospector (robonaut) chain run in PARALLEL and MAY
+SHARE supplier cards freely - one reactor can power both at once with no
+contention (user decision 2026-06-06). Because sharing is free, resolving each
+root independently is already correct: a card reached by both is flagged
+"shared with other chain" in the visualizer, not contended, so NO dedicated-pool
+multi-root resolver was needed (that would only matter for a "dedicated per
+chain" rule, which we did NOT adopt). The one real case rule 5 adds: a card that
+is BOTH the active thruster AND the active prospector (a missile robonaut that
+carries thrust) serves both roles with ONE chain - `getSupportChainView` detects
+`_activeProspectorId === _activeThrusterId` and tags the single thruster root
+`alsoProspector` instead of rooting a second identical tree; the visualizer
+labels it "Thruster + prospector chain". Display-only: no move / activation /
+fuel change (sharing means no new constraint to gate). `resolveSupportChain`
+still walks a single chain per `activeId`, which is the right primitive here.
 
 ## Stages - build incrementally
 

@@ -995,8 +995,19 @@ export function getSupportChainView() {
   const roots = [];
   const t = buildRoot('thruster', _activeThrusterId);
   if (t) roots.push(t);
-  const p = buildRoot('prospector', _activeProspectorId);
-  if (p) roots.push(p);
+  // Rule 5: a card that is BOTH the active thruster AND the active prospector
+  // (a missile robonaut that carries thrust) serves both roles with ONE chain,
+  // so don't root a second identical tree - tag the thruster root as also the
+  // prospector. Only when it's a DIFFERENT card does the prospector get its own
+  // root; the two chains may share suppliers freely (a card reached by both is
+  // flagged "shared", not contended), so independent resolution is correct.
+  if (_activeProspectorId && _activeProspectorId === _activeThrusterId) {
+    if (t) t.alsoProspector = true;
+    else { const p = buildRoot('prospector', _activeProspectorId); if (p) roots.push(p); }
+  } else if (_activeProspectorId) {
+    const p = buildRoot('prospector', _activeProspectorId);
+    if (p) roots.push(p);
+  }
   return { cards, byId, roots };
 }
 

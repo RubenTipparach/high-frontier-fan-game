@@ -5917,11 +5917,15 @@ function buildSupportChainViz(host, lookup) {
     const subBits = [esc(activeName), allValid ? 'all supports satisfied' : 'support missing'];
     if (root.chain.cycles.length) subBits.push('cycle present');
 
+    // Rule 5: a dual-role card (active thruster AND active prospector) is one
+    // chain serving both roles, so label it as both.
+    const rootLabel = root.alsoProspector
+      ? '⚡🔭 Thruster + prospector chain'
+      : (root.kind === 'thruster' ? '⚡ Thruster chain' : '🔭 Prospector chain');
     const head = document.createElement('div');
     head.className = 'chain-root-head';
     head.innerHTML =
-      '<span class="chain-root-label">'
-      + (root.kind === 'thruster' ? '⚡ Thruster chain' : '🔭 Prospector chain') + '</span>'
+      '<span class="chain-root-label">' + rootLabel + '</span>'
       + '<span class="chain-root-sub">' + subBits.join(' · ') + '</span>';
     sec.appendChild(head);
 
@@ -5972,7 +5976,10 @@ function buildSupportChainViz(host, lookup) {
       const notes = [];
       if (viaKind) notes.push({ t: 'supplies', icon: viaKind, c: 'ok' });
       if (isActive) {
-        notes.push({ t: root.kind === 'thruster' ? 'active thruster' : 'active prospector', c: 'accent' });
+        const activeLabel = root.alsoProspector
+          ? 'active thruster + prospector'
+          : (root.kind === 'thruster' ? 'active thruster' : 'active prospector');
+        notes.push({ t: activeLabel, c: 'accent' });
       }
       if (!isRef && root.chain.modifierChain.includes(id)) {
         notes.push({ t: id === root.chain.firstReactorId ? 'first reactor · modifies thrust' : 'modifies thrust', c: 'mod' });
