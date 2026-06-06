@@ -4840,8 +4840,8 @@ function ensureMapShell(host) {
           aria-label="End turn">⏭ End turn</button>
         <span id="turn-budget" class="map-turn-budget" aria-live="polite">
           <button type="button" class="turn-tag" id="turn-tag-move" title="Moves remaining this turn">move:1</button>
+          <button type="button" class="turn-tag turn-tag-gear" id="game-settings" title="Route options" aria-label="Route options">⚙</button>
         </span>
-        <button type="button" class="turn-tag turn-tag-gear" id="game-settings" title="Route options" aria-label="Route options">⚙</button>
         <span id="aqua-chip" class="map-aqua-chip"
           title="Aqua balance - spend 4 aqua per hazard to bypass rolls, or convert 1:1 to water at LEO">
           💧 <strong id="aqua-chip-balance">${getAqua()}</strong>

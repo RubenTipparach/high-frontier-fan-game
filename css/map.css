@@ -208,11 +208,14 @@
   .aqua-gain-float { animation: none; opacity: 0; }
 }
 /* Per-turn budget tag: [move:N]. A compact status chip that sits
-   right next to the End turn / Ops button. */
+   right next to the End turn / Ops button. The move tag and its
+   route-options gear are WELDED into one segmented rectangle (gap 0,
+   flat inner corners, shared seam), so they read as a single "move +
+   its settings" control rather than two loose chips. */
 .map-turn-budget {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 0;
 }
 .map-turn-budget .turn-tag {
   font: inherit;
@@ -239,6 +242,12 @@
   border-color: #7dd3fc;
 }
 #turn-tag-move:hover { filter: brightness(1.1); }
+/* Weld: the move tag keeps its left corners rounded and flattens its right
+   edge into the seam shared with the gear. */
+.map-turn-budget #turn-tag-move {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
 /* Once the move is spent the move tag becomes the "↩ undo move" control
    - solid amber so it reads as a distinct (reversible) action, not a budget. */
 #turn-tag-move.is-undo {
@@ -248,10 +257,10 @@
   color: #2e1c02;
   border-color: #f0c455;
 }
-/* Game-settings gear: a standalone toolbar chip (route + fuel options).
-   No longer welded to the move tag, so it carries its own rounded
-   profile, border, and sizing. It is not a budget point, so it never
-   pulses or fades. */
+/* Route-options gear: the right half of the welded move control (route +
+   fuel options for the move beside it). It shares the move tag's right edge
+   as the seam (no left border, flat left corners) so the pair reads as one
+   rectangle. It is not a budget point, so it never pulses or fades. */
 .map-turn-controls .turn-tag-gear {
   background: var(--bg-2, #14233a);
   color: var(--ink-dim, #9fb3cc);
@@ -261,6 +270,11 @@
   -webkit-appearance: none;
   appearance: none;
   touch-action: manipulation;
+}
+.map-turn-budget .turn-tag-gear {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: none;
 }
 .map-turn-controls .turn-tag-gear:hover { filter: brightness(1.25); }
 /* Pulse the budget tags while their action is still available
