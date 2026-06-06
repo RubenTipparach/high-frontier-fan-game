@@ -7164,3 +7164,21 @@ body:has(#view-browse:not(.hidden)) #main {
 .chain-note-cycle  { color: #fbbf24; background: #2a2410; }
 .chain-note-accent { color: #fdba74; background: #2a1d10; }
 .chain-note-muted  { color: #8b90b8; background: #1a2138; }
+
+/* Wiring pickers: choose which supplier powers a consumer when there is more
+   than one candidate. */
+.chain-pickers { display: inline-flex; flex-wrap: wrap; gap: 5px; margin-left: 8px; }
+.chain-picker {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 6px 1px 5px; border-radius: 999px;
+  background: #16203a; border: 1px solid #2c3658;
+}
+.chain-picker-ic { display: inline-flex; align-items: center; }
+.chain-picker-ic svg { width: 12px; height: 12px; display: block; }
+.chain-picker select {
+  font: inherit; font-size: 10.5px; color: #dbe2f5;
+  background: #0f1528; border: 1px solid #2c3658; border-radius: 5px;
+  padding: 1px 4px; max-width: 150px; cursor: pointer;
+}
+.chain-picker select:disabled { opacity: 0.5; cursor: not-allowed; }
+.chain-picker select:hover:not(:disabled) { border-color: #3a4668; }

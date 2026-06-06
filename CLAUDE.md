@@ -292,16 +292,42 @@ PROSPECTOR's cooling still uses the older `chainThermBalance` shared-pool
 helper (`getActiveProspectorStats`); unifying it onto the resolver is a
 follow-up.
 
-**TODO: support-chain visualizer (+ rules 4-5).** Still to build: the
-visualizer tool (graph view, the modifier path highlighted, cycles flagged),
-plus the two visualizer-facing rules: (4) show every support satisfied at all
-levels with check marks (all supports and all cards in the chain read as
-valid); (5) robonauts can run PARALLEL chains, and a thruster/missile robonaut
-serves both roles with ONE chain. The resolver currently walks a SINGLE chain
-from one `activeId`, so rule 5 needs a resolver extension. The chain is meant
-to be player-wired: the resolver already accepts a `wiring` map but nothing
-produces one yet (the visualizer assigns supplier -> consumer). Build the
-visualizer + wiring UI together.
+VISUALIZER + WIRING LANDED (2026-06-06). The support-chain visualizer is a
+folder tree inside the rocket stack modal (`js/game/browse.js#buildSupportChainViz`),
+one root per active card (the active thruster, then the active prospector),
+drawn in the All-cards abbreviated-chip language. It walks OUT from the active
+card to the cards that power it; a card reached a second time (a cycle back-edge
+or a supplier shared within the tree) renders as a non-recursing reference leaf,
+mirroring the resolver's visit-once walk, and cycles are flagged amber (never
+broken). Rule 4 lands: every node shows a check / cross validity pill and notes
+the modifier path (rules 1+2), dedicated reactor cooling (rule 3), and any
+missing support. The read it drives off is the pure `rocket.js#getSupportChainView()`
+(resolves both roots + per-node requirement-group satisfaction + the wirable
+candidate suppliers).
+
+PLAYER WIRING is now server-authoritative. The chain is player-wired through a
+`wiring` map (`{ consumerId: { kind: supplierId } }`) that the resolver already
+consumed; the visualizer now PRODUCES one. A consumer with more than one
+candidate supplier for a kind gets a picker; choosing one updates the map. The
+map persists per-player on the server (`player.rocket.wiring`, state.js) via the
+turn-gated `SET_WIRING` op (engine.js, mirrors `SET_ROUTE`), and the client store
+lives in `rocket.js` (`getWiring` / `setWiring`, localStorage solo, snapshot
+hydrate online via net-bridge). CRITICAL: wiring picks which reactor is "first",
+so it shifts thrust / fuel (rules 1+2) and therefore the MOVE cost. Both the
+client (`rocket.js` getActiveThrusterStats + isRocketActive) AND the server
+(engine.js activeNetThrust + thrusterFuelPerBurn) resolve with the SAME wiring,
+so a move the client allows is never rejected for a different number, the same
+byte-parity contract the modifier path already holds. Wiring is PUBLIC (it tunes
+a stack opponents can already see), so `SET_WIRING` returns a real log line and
+is not redacted. The resolver auto-falls-back to first-match for any wiring entry
+whose supplier left the stack, so a stale map never breaks a chain.
+
+**TODO: rule 5 (parallel robonaut chains).** Still open: (5) robonauts can run
+PARALLEL chains, and a thruster/missile robonaut serves both roles with ONE
+chain. `resolveSupportChain` still walks a SINGLE chain from one `activeId`
+(the visualizer renders the thruster + prospector roots independently, an
+approximation), so true parallel chains need a resolver multi-root extension.
+Independent of the wiring work above.
 
 ## Stages - build incrementally
 

@@ -353,7 +353,7 @@ function activeNetThrust(rocket) {
   // thruster and add the thrustMod of the modifier path only (generators before
   // the first reactor + that first reactor, including reactors multiple hops
   // back). Must match the client exactly so a move it allows isn't rejected.
-  const chain = resolveSupportChain({ cards: chainCardsFromRocket(rocket), activeId: tid });
+  const chain = resolveSupportChain({ cards: chainCardsFromRocket(rocket), activeId: tid, wiring: rocket.wiring || {} });
   for (const cid of chain.modifierChain) {
     const s = rocket.stack.find((x) => x.id === cid);
     const c = s && PATENTS_BY_ID[s.id];
@@ -408,7 +408,7 @@ function thrusterFuelPerBurn(rocket) {
   // modifier path only (generators before the first reactor + that first
   // reactor), folded in chain order so the client + server agree to the bit. A
   // self-powered thruster (requiring nothing) pulls no chain and is untouched.
-  const chain = resolveSupportChain({ cards: chainCardsFromRocket(rocket), activeId: tid });
+  const chain = resolveSupportChain({ cards: chainCardsFromRocket(rocket), activeId: tid, wiring: rocket.wiring || {} });
   for (const cid of chain.modifierChain) {
     const s = rocket.stack.find((x) => x.id === cid);
     const c = s && PATENTS_BY_ID[s.id];
@@ -948,6 +948,37 @@ function applySetRoute(state, op, player) {
 function applyClearRoute(state, _op, player) {
   player.rocket.route = [];
   return { ok: true, state, log: '' };
+}
+
+// Player support-chain wiring persistence. Stored as player.rocket.wiring, a
+// map { consumerId: { kind: supplierId } } that names which supplier card the
+// player chose to power each consumer for each support kind. Like SET_ROUTE
+// this just persists the client's choice; the resolver (data/support-chain.js)
+// already auto-falls-back to the first matching supplier for any entry whose
+// supplier is no longer in the stack, so a stale wiring never breaks a chain.
+// Wiring tunes a stack opponents can already see, so it is NOT secret and
+// returns a real log line. op = { wiring: { consumerId: { kind: supplierId } } }.
+function applySetWiring(state, op, player) {
+  const raw = (op && op.wiring && typeof op.wiring === 'object') ? op.wiring : {};
+  const stackIds = new Set((player.rocket.stack || []).map((s) => s.id));
+  const norm = {};
+  for (const consumerId of Object.keys(raw)) {
+    if (!stackIds.has(consumerId)) continue;            // consumer must be aboard
+    const byKind = raw[consumerId];
+    if (!byKind || typeof byKind !== 'object') continue;
+    const clean = {};
+    for (const kind of Object.keys(byKind)) {
+      const supplierId = String(byKind[kind] || '');
+      // The supplier must be a real other card in the stack; a self-wire or a
+      // ghost id is dropped (the resolver would ignore it anyway).
+      if (supplierId && supplierId !== consumerId && stackIds.has(supplierId)) {
+        clean[String(kind)] = supplierId;
+      }
+    }
+    if (Object.keys(clean).length) norm[consumerId] = clean;
+  }
+  player.rocket.wiring = norm;
+  return { ok: true, state, log: `${player.name} rewired the rocket support chain.` };
 }
 
 // Reverse of REFUEL: cash tank water back into the aqua bank 1:1, only
@@ -1649,6 +1680,7 @@ const FUNCTIONAL = {
   DISCARD: applyDiscard,
   SET_ROUTE: applySetRoute,
   CLEAR_ROUTE: applyClearRoute,
+  SET_WIRING: applySetWiring,
   SET_ACTIVE_THRUSTER: applySetActiveThruster,
   SET_ACTIVE_PROSPECTOR: applySetActiveProspector,
   PROSPECT: applyProspect,
@@ -1688,6 +1720,7 @@ function pickPayload(op) {
     // the replay would re-run SET_ROUTE with no segments and silently
     // wipe a route the player still has planned.
     case 'SET_ROUTE': return { segments: op.segments };
+    case 'SET_WIRING': return { wiring: op.wiring };
     case 'CLEAR_ROUTE': return {};
     default: return {};
   }

@@ -39,6 +39,7 @@ import {
   getStackTotals, getActiveThrusterStats, setSolarZone,
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats, getSupportChainView,
+  getWiring, setWiring,
   isAfterburnEngaged, setAfterburn,
   getAqua, spendAqua, addAqua, onAquaChange, resetAqua,
 } from './rocket.js';
@@ -5889,6 +5890,18 @@ function buildSupportChainViz(host, lookup) {
   const stack = getRocketStack();
   const slotOf = (id) => stack.find((x) => x.id === id) || null;
 
+  // Apply a wiring choice: point `consumerId`'s `kind` support at `supplierId`.
+  // Updates the local map first (instant re-resolve of the tree + the rocket's
+  // thrust/fuel via onRocketChange), then online submits SET_WIRING so the
+  // server stores the same map and the move math agrees on both sides.
+  const applyWiringChoice = (consumerId, kind, supplierId) => {
+    if (_online && !isOnlineMyTurn()) { _onlineToast('Not your turn.', 'error'); return; }
+    const next = getWiring();
+    next[consumerId] = { ...(next[consumerId] || {}), [kind]: supplierId };
+    setWiring(next);                       // optimistic; fires onRocketChange -> repaint
+    if (_online) submitOnlineOp({ kind: 'SET_WIRING', wiring: getWiring() });
+  };
+
   // Ids already shown in an earlier root so a card feeding both chains can be
   // flagged "shared" in the later tree (read-only parallel-chain hint).
   const shownInEarlierRoot = new Set();
@@ -5989,6 +6002,39 @@ function buildSupportChainViz(host, lookup) {
           '<span class="chain-note chain-note-' + (n.c || 'muted') + '">'
           + (n.icon ? chainKindIcon(n.icon) + ' ' : '') + esc(n.t) + '</span>').join('');
         li.appendChild(nc);
+      }
+
+      // Wiring pickers: when this consumer has MORE THAN ONE candidate supplier
+      // for a support kind, let the player choose which card powers it. The
+      // single-candidate case is forced (nothing to choose) and shown as a
+      // plain "supplies" note above instead. Disabled online when it is not the
+      // player's turn (wiring is a turn-gated op, like a planned route).
+      const wirable = (!isRef && root.wirable[id]) ? root.wirable[id] : [];
+      const pickable = wirable.filter((w) => w.candidates.length > 1);
+      if (pickable.length) {
+        const canWire = !_online || isOnlineMyTurn();
+        const pc = document.createElement('span');
+        pc.className = 'chain-pickers';
+        for (const w of pickable) {
+          const row = document.createElement('label');
+          row.className = 'chain-picker';
+          row.title = 'Choose which card powers ' + ((REQUIREMENT_VIS[w.kind] || {}).label || w.kind);
+          row.innerHTML = '<span class="chain-picker-ic">' + chainKindIcon(w.kind) + '</span>';
+          const sel = document.createElement('select');
+          sel.disabled = !canWire;
+          for (const candId of w.candidates) {
+            const cc = lookup(candId);
+            const opt = document.createElement('option');
+            opt.value = candId;
+            opt.textContent = cc ? cc.name : candId;
+            if (candId === w.chosen) opt.selected = true;
+            sel.appendChild(opt);
+          }
+          sel.addEventListener('change', () => applyWiringChoice(id, w.kind, sel.value));
+          row.appendChild(sel);
+          pc.appendChild(row);
+        }
+        li.appendChild(pc);
       }
 
       parentUl.appendChild(li);
@@ -14755,6 +14801,7 @@ const MP_LOG_ICONS = {
   CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑',
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',
   LOAD_GLORY: '🎖',
+  SET_WIRING: '🔗',
   UNDO: '↩', REDO: '↪',
 };
 

@@ -142,6 +142,13 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
       // water. Default water; meaningless while tank is 0.
       tankGrade: 'water',
       afterburnEngaged: false,
+      // Player support-chain wiring: which supplier card powers each consumer
+      // for each support kind. Shape: { consumerId: { kind: supplierId } }.
+      // Empty = the resolver picks the first matching supplier (the default
+      // for the common single-supplier stack); a player only wires when a
+      // consumer has more than one candidate. data/support-chain.js auto-falls
+      // back to first-match for any entry whose supplier left the stack.
+      wiring: {},
     },
     // LEO Stack: a per-player parking lot of cards staged at LEO.
     // Always at LEO by construction (no siteId field needed - LEO

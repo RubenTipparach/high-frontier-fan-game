@@ -98,6 +98,7 @@ const ACTIVE_KEY       = 'hf-sandbox-rocket-active-thruster';
 const PROSPECTOR_KEY   = 'hf-sandbox-rocket-active-prospector';
 const TANK_KEY         = 'hf-sandbox-rocket-tank';
 const TANK_GRADE_KEY   = 'hf-sandbox-rocket-tank-grade';
+const WIRING_KEY       = 'hf-sandbox-rocket-wiring';
 const AQUA_KEY         = 'hf-sandbox-aqua';
 // Starting aqua balance for a fresh sandbox profile. Aqua is the
 // player's liquid economy unit - spend it to bypass hazard rolls
@@ -148,6 +149,20 @@ let _afterburnEngaged = (() => {
   catch { return false; }
 })();
 
+// Player support-chain wiring: { consumerId: { kind: supplierId } }. Names
+// which supplier card powers each consumer for each support kind, the single
+// source the resolver (data/support-chain.js) reads on BOTH the thrust/fuel
+// path and the visualizer. Empty by default (first-match); a player only wires
+// when a consumer has more than one candidate supplier. Online it is hydrated
+// from the server snapshot; solo it persists to localStorage.
+let _wiring = (() => {
+  try {
+    const raw = localStorage.getItem(WIRING_KEY);
+    const o = raw ? JSON.parse(raw) : {};
+    return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {};
+  } catch { return {}; }
+})();
+
 let _tankWater = (() => {
   try {
     const n = parseInt(localStorage.getItem(TANK_KEY) || '0', 10);
@@ -192,6 +207,7 @@ function persist() {
     localStorage.setItem(AFTERBURN_KEY, _afterburnEngaged ? '1' : '0');
     localStorage.setItem(TANK_KEY, String(_tankWater));
     localStorage.setItem(TANK_GRADE_KEY, _tankGrade === 'dirt' ? 'dirt' : 'water');
+    localStorage.setItem(WIRING_KEY, JSON.stringify(_wiring || {}));
   } catch { /* private mode */ }
 }
 
@@ -227,6 +243,7 @@ export function hydrateRocket({
   tank = 0,
   tankGrade = 'water',
   afterburnEngaged = false,
+  wiring = {},
 } = {}) {
   _stack = Array.isArray(stack) ? _clone(stack) : [];
   _activeThrusterId = activeThrusterId;
@@ -234,7 +251,36 @@ export function hydrateRocket({
   _tankWater = tank;
   _tankGrade = tankGrade === 'dirt' ? 'dirt' : 'water';
   _afterburnEngaged = !!afterburnEngaged;
+  _wiring = (wiring && typeof wiring === 'object' && !Array.isArray(wiring)) ? _clone(wiring) : {};
   notify();
+}
+
+// Player support-chain wiring accessors. getWiring returns a copy; setWiring
+// replaces the map, pruning any entry whose consumer or supplier is no longer
+// in the stack (the resolver would ignore those anyway, but a tidy map keeps
+// the submitted op and the visualizer honest), then persists + notifies so the
+// rocket stats and the chain visualizer re-resolve against the new wiring.
+export function getWiring() { return _clone(_wiring || {}); }
+
+export function setWiring(map) {
+  const raw = (map && typeof map === 'object' && !Array.isArray(map)) ? map : {};
+  const ids = new Set(_stack.map((s) => s.id));
+  const norm = {};
+  for (const consumerId of Object.keys(raw)) {
+    if (!ids.has(consumerId)) continue;
+    const byKind = raw[consumerId];
+    if (!byKind || typeof byKind !== 'object') continue;
+    const clean = {};
+    for (const kind of Object.keys(byKind)) {
+      const supplierId = String(byKind[kind] || '');
+      if (supplierId && supplierId !== consumerId && ids.has(supplierId)) clean[String(kind)] = supplierId;
+    }
+    if (Object.keys(clean).length) norm[consumerId] = clean;
+  }
+  _wiring = norm;
+  persist();
+  notify();
+  return _clone(_wiring);
 }
 
 export function getRocketStack() {
@@ -579,7 +625,7 @@ export function isRocketActive() {
   // shared remainder. Stricter than a single shared pool (two reactors can't
   // split one radiator), matching the published dedicated-cooling rule. For the
   // common single-reactor stack this is the same verdict as before.
-  const cool = resolveSupportChain({ cards: chainCardsFromStack(), activeId: _activeThrusterId });
+  const cool = resolveSupportChain({ cards: chainCardsFromStack(), activeId: _activeThrusterId, wiring: _wiring });
   if (!cool.coolingOk) {
     const hot = cool.reactorCooling.find((r) => !r.ok);
     if (hot) {
@@ -884,9 +930,15 @@ export function getSupportChainView() {
     .map((r) => (r && typeof r === 'object') ? r.kind : r)
     .filter(Boolean);
 
+  // Every OTHER card that supplies `kind` (the resolver's candidate set): the
+  // choices a player can wire a consumer's support to.
+  const candidatesFor = (consumerId, kind) => cards
+    .filter((c) => c.id !== consumerId && Array.isArray(c.supplies) && c.supplies.includes(kind))
+    .map((c) => c.id);
+
   const buildRoot = (kind, activeId) => {
     if (!activeId || !byId.has(activeId)) return null;
-    const chain = resolveSupportChain({ cards, activeId });
+    const chain = resolveSupportChain({ cards, activeId, wiring: _wiring });
     // Edge lookup: which (consumer, kind) pairs the resolver satisfied.
     const satByConsumer = new Map();
     for (const e of chain.edges) {
@@ -920,7 +972,24 @@ export function getSupportChainView() {
       }
       nodeReqs[id] = reqGroups;
     }
-    return { kind, activeId, chain, nodeReqs };
+    // Per node: the wirable supports, one entry PER KIND that has at least one
+    // candidate supplier in the stack, with the full candidate list and the
+    // currently-chosen supplier (the resolver's edge, which honors the player's
+    // wiring). The visualizer renders a picker only where candidates.length > 1
+    // (the single-candidate case is forced, nothing to choose).
+    const wirable = {};
+    for (const id of chain.order) {
+      const c = byId.get(id);
+      if (!c) continue;
+      const edgeKinds = satByConsumer.get(id) || new Map();
+      const entries = [];
+      for (const k of reqKindsOf(c)) {
+        const cands = candidatesFor(id, k);
+        if (cands.length) entries.push({ kind: k, candidates: cands, chosen: edgeKinds.get(k) || null });
+      }
+      if (entries.length) wirable[id] = entries;
+    }
+    return { kind, activeId, chain, nodeReqs, wirable };
   };
 
   const roots = [];
@@ -970,7 +1039,7 @@ export function getActiveThrusterStats() {
   // pulls no chain, so it takes no stack modifiers. The server mirrors this
   // exactly (engine.js) so a move the client allows is never rejected for a
   // different thrust/fuel number.
-  const chain = resolveSupportChain({ cards: chainCardsFromStack(), activeId: id });
+  const chain = resolveSupportChain({ cards: chainCardsFromStack(), activeId: id, wiring: _wiring });
   for (const cid of chain.modifierChain) {
     const cslot = _stack.find((s) => s.id === cid);
     const c = cslot ? cardForSlot(cslot) : cardById(cid);

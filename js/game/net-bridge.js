@@ -101,6 +101,7 @@ export function hydrateFromSnapshot(snapshot, myId, maps) {
     tank: r.tank | 0,
     tankGrade: r.tankGrade === 'dirt' ? 'dirt' : 'water',
     afterburnEngaged: !!r.afterburnEngaged,
+    wiring: (r.wiring && typeof r.wiring === 'object') ? r.wiring : {},
   });
   setAqua(me ? (me.aqua | 0) : 0);
   hydrateHand((me && me.hand) || []);
