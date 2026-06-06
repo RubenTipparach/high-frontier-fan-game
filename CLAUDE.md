@@ -287,21 +287,73 @@ move the client allows is never rejected for a different number). Rule 3
 via the resolver's `coolingOk` (each reactor reserves its own radiator therms;
 the thruster + generators draw the remainder; the common single-reactor stack
 is the same verdict as before). The SERVER does NOT gate cooling at all (it
-trusts the client, like routes), so rule 3 is client-only. NOTE: the active
-PROSPECTOR's cooling still uses the older `chainThermBalance` shared-pool
-helper (`getActiveProspectorStats`); unifying it onto the resolver is a
-follow-up.
+trusts the client, like routes), so rule 3 is client-only.
 
-**TODO: support-chain visualizer (+ rules 4-5).** Still to build: the
-visualizer tool (graph view, the modifier path highlighted, cycles flagged),
-plus the two visualizer-facing rules: (4) show every support satisfied at all
-levels with check marks (all supports and all cards in the chain read as
-valid); (5) robonauts can run PARALLEL chains, and a thruster/missile robonaut
-serves both roles with ONE chain. The resolver currently walks a SINGLE chain
-from one `activeId`, so rule 5 needs a resolver extension. The chain is meant
-to be player-wired: the resolver already accepts a `wiring` map but nothing
-produces one yet (the visualizer assigns supplier -> consumer). Build the
-visualizer + wiring UI together.
+COOLING NOW SPANS BOTH CHAINS (2026-06-06). The active thruster chain and the
+active prospector (robonaut) chain share ONE stack-wide radiator pool, and
+dedicated reactor cooling holds ACROSS them: a reactor in the prospector chain
+cannot reuse therms a thruster-chain reactor already reserved. The pure
+`data/support-chain.js#resolveCoolingAcross({cards, orders})` resolves cooling
+over chains in PRIORITY order - the active thruster gets first claim (user
+decision: prioritize thruster); the prospector reserves its reactor's dedicated
+therms from the remainder and its active card reads INACTIVE (not the thruster)
+if it can't. A reactor that powers BOTH chains is cooled ONCE (the higher-
+priority chain reserves it; the other reads it shared). `resolveSupportChain`'s
+own cooling is now just the one-chain case of this helper, so the single-chain
+`isRocketActive` verdict is byte-identical to before. `getActiveProspectorStats`
+reads the prospector's per-chain verdict off `coolingAllocation()` (replacing
+the old `chainThermBalance` shared-pool helper, now deleted), and
+`getSupportChainView` re-resolves the prospector root against the post-thruster
+remainder so the visualizer pills match the gate. ONLY the active thruster and
+active prospector are ever support-checked: inactive thrusters, inactive
+robonauts, and refinery cards are never roots, so their supports are never
+checked here (a refinery's supports are checked only at BUILD_FACTORY).
+
+VISUALIZER + WIRING LANDED (2026-06-06). The support-chain visualizer is a
+folder tree inside the rocket stack modal (`js/game/browse.js#buildSupportChainViz`),
+one root per active card (the active thruster, then the active prospector),
+drawn in the All-cards abbreviated-chip language. It walks OUT from the active
+card to the cards that power it; a card reached a second time (a cycle back-edge
+or a supplier shared within the tree) renders as a non-recursing reference leaf,
+mirroring the resolver's visit-once walk, and cycles are flagged amber (never
+broken). Rule 4 lands: every node shows a check / cross validity pill and notes
+the modifier path (rules 1+2), dedicated reactor cooling (rule 3), and any
+missing support. The read it drives off is the pure `rocket.js#getSupportChainView()`
+(resolves both roots + per-node requirement-group satisfaction + the wirable
+candidate suppliers).
+
+PLAYER WIRING is now server-authoritative. The chain is player-wired through a
+`wiring` map (`{ consumerId: { kind: supplierId } }`) that the resolver already
+consumed; the visualizer now PRODUCES one. A consumer with more than one
+candidate supplier for a kind gets a picker; choosing one updates the map. The
+map persists per-player on the server (`player.rocket.wiring`, state.js) via the
+turn-gated `SET_WIRING` op (engine.js, mirrors `SET_ROUTE`), and the client store
+lives in `rocket.js` (`getWiring` / `setWiring`, localStorage solo, snapshot
+hydrate online via net-bridge). CRITICAL: wiring picks which reactor is "first",
+so it shifts thrust / fuel (rules 1+2) and therefore the MOVE cost. Both the
+client (`rocket.js` getActiveThrusterStats + isRocketActive) AND the server
+(engine.js activeNetThrust + thrusterFuelPerBurn) resolve with the SAME wiring,
+so a move the client allows is never rejected for a different number, the same
+byte-parity contract the modifier path already holds. Wiring is PUBLIC (it tunes
+a stack opponents can already see), so `SET_WIRING` returns a real log line and
+is not redacted. The resolver auto-falls-back to first-match for any wiring entry
+whose supplier left the stack, so a stale map never breaks a chain.
+
+RULE 5 LANDED (2026-06-06, "may share" semantics). Parallel robonaut chains:
+the thruster chain and the prospector (robonaut) chain run in PARALLEL and MAY
+SHARE supplier cards freely - one reactor can power both at once with no
+contention (user decision 2026-06-06). Because sharing is free, resolving each
+root independently is already correct: a card reached by both is flagged
+"shared with other chain" in the visualizer, not contended, so NO dedicated-pool
+multi-root resolver was needed (that would only matter for a "dedicated per
+chain" rule, which we did NOT adopt). The one real case rule 5 adds: a card that
+is BOTH the active thruster AND the active prospector (a missile robonaut that
+carries thrust) serves both roles with ONE chain - `getSupportChainView` detects
+`_activeProspectorId === _activeThrusterId` and tags the single thruster root
+`alsoProspector` instead of rooting a second identical tree; the visualizer
+labels it "Thruster + prospector chain". Display-only: no move / activation /
+fuel change (sharing means no new constraint to gate). `resolveSupportChain`
+still walks a single chain per `activeId`, which is the right primitive here.
 
 ## Stages - build incrementally
 

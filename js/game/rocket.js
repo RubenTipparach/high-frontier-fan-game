@@ -25,7 +25,7 @@
 //   onRocketChange(cb)                → unsubscribe
 
 import { PATENTS_BY_ID, thermsRequired, thermsSupplied } from '../../data/patents.js';
-import { resolveSupportChain } from '../../data/support-chain.js';
+import { resolveSupportChain, resolveCoolingAcross } from '../../data/support-chain.js';
 import { CREW_BY_ID } from '../../data/crew.js';
 import { SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { weightClassForMass } from '../../data/net-thrust-track.js';
@@ -98,6 +98,7 @@ const ACTIVE_KEY       = 'hf-sandbox-rocket-active-thruster';
 const PROSPECTOR_KEY   = 'hf-sandbox-rocket-active-prospector';
 const TANK_KEY         = 'hf-sandbox-rocket-tank';
 const TANK_GRADE_KEY   = 'hf-sandbox-rocket-tank-grade';
+const WIRING_KEY       = 'hf-sandbox-rocket-wiring';
 const AQUA_KEY         = 'hf-sandbox-aqua';
 // Starting aqua balance for a fresh sandbox profile. Aqua is the
 // player's liquid economy unit - spend it to bypass hazard rolls
@@ -148,6 +149,20 @@ let _afterburnEngaged = (() => {
   catch { return false; }
 })();
 
+// Player support-chain wiring: { consumerId: { kind: supplierId } }. Names
+// which supplier card powers each consumer for each support kind, the single
+// source the resolver (data/support-chain.js) reads on BOTH the thrust/fuel
+// path and the visualizer. Empty by default (first-match); a player only wires
+// when a consumer has more than one candidate supplier. Online it is hydrated
+// from the server snapshot; solo it persists to localStorage.
+let _wiring = (() => {
+  try {
+    const raw = localStorage.getItem(WIRING_KEY);
+    const o = raw ? JSON.parse(raw) : {};
+    return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {};
+  } catch { return {}; }
+})();
+
 let _tankWater = (() => {
   try {
     const n = parseInt(localStorage.getItem(TANK_KEY) || '0', 10);
@@ -192,6 +207,7 @@ function persist() {
     localStorage.setItem(AFTERBURN_KEY, _afterburnEngaged ? '1' : '0');
     localStorage.setItem(TANK_KEY, String(_tankWater));
     localStorage.setItem(TANK_GRADE_KEY, _tankGrade === 'dirt' ? 'dirt' : 'water');
+    localStorage.setItem(WIRING_KEY, JSON.stringify(_wiring || {}));
   } catch { /* private mode */ }
 }
 
@@ -227,6 +243,7 @@ export function hydrateRocket({
   tank = 0,
   tankGrade = 'water',
   afterburnEngaged = false,
+  wiring = {},
 } = {}) {
   _stack = Array.isArray(stack) ? _clone(stack) : [];
   _activeThrusterId = activeThrusterId;
@@ -234,7 +251,36 @@ export function hydrateRocket({
   _tankWater = tank;
   _tankGrade = tankGrade === 'dirt' ? 'dirt' : 'water';
   _afterburnEngaged = !!afterburnEngaged;
+  _wiring = (wiring && typeof wiring === 'object' && !Array.isArray(wiring)) ? _clone(wiring) : {};
   notify();
+}
+
+// Player support-chain wiring accessors. getWiring returns a copy; setWiring
+// replaces the map, pruning any entry whose consumer or supplier is no longer
+// in the stack (the resolver would ignore those anyway, but a tidy map keeps
+// the submitted op and the visualizer honest), then persists + notifies so the
+// rocket stats and the chain visualizer re-resolve against the new wiring.
+export function getWiring() { return _clone(_wiring || {}); }
+
+export function setWiring(map) {
+  const raw = (map && typeof map === 'object' && !Array.isArray(map)) ? map : {};
+  const ids = new Set(_stack.map((s) => s.id));
+  const norm = {};
+  for (const consumerId of Object.keys(raw)) {
+    if (!ids.has(consumerId)) continue;
+    const byKind = raw[consumerId];
+    if (!byKind || typeof byKind !== 'object') continue;
+    const clean = {};
+    for (const kind of Object.keys(byKind)) {
+      const supplierId = String(byKind[kind] || '');
+      if (supplierId && supplierId !== consumerId && ids.has(supplierId)) clean[String(kind)] = supplierId;
+    }
+    if (Object.keys(clean).length) norm[consumerId] = clean;
+  }
+  _wiring = norm;
+  persist();
+  notify();
+  return _clone(_wiring);
 }
 
 export function getRocketStack() {
@@ -431,9 +477,15 @@ export function getActiveProspectorStats() {
     if (!kinds.some((k) => supplied.has(k))) missing.push(supplier);
   }
   // The prospector's operating chain (itself + the reactor/generator it
-  // needs) must be cooled too, same as the thruster chain. `f` is the
-  // installed face resolved at the top.
-  const therm = chainThermBalance(id, f);
+  // needs) must be cooled too, but the active THRUSTER has first claim on the
+  // radiators: the prospector reserves its reactor's dedicated cooling from
+  // whatever the thruster chain leaves, and reads inactive if it can't. A
+  // reactor shared with the thruster chain is cooled once.
+  const { cool, idx } = coolingAllocation();
+  const pc = idx.prospector >= 0 ? cool.perChain[idx.prospector] : null;
+  const therm = pc
+    ? { ok: pc.coolingOk, demand: pc.reactorDemand + pc.nonReactorHeat, supply: cool.radiatorTotal }
+    : { ok: true, demand: 0, supply: cool.radiatorTotal };
   if (!therm.ok) missing.push('thermostat');
   return {
     id,
@@ -466,56 +518,32 @@ export function onRocketChange(cb) {
   return () => { _listeners = _listeners.filter((x) => x !== cb); };
 }
 
-// Therms the stack's radiators can dissipate (active/installed face of
-// each radiator). The shared cooling pool every operating chain draws on.
-function radiatorThermSupply() {
-  let supply = 0;
-  for (const slot of _stack) {
-    const c = cardForSlot(slot);
-    if (!c || c.type !== 'radiator') continue;
-    supply += thermsSupplied(c, installedFace(slot));
+// Dedicated reactor cooling across the active thruster chain AND the active
+// prospector chain, sharing the one stack-wide radiator pool. The active
+// thruster has FIRST claim (user decision: prioritize thruster); the prospector
+// reserves its reactor's dedicated therms from the remainder and goes inactive
+// if it can't. A reactor that powers both chains is cooled once. Returns the
+// resolveCoolingAcross output plus the per-chain index of each active root, so
+// the cooling gate and the visualizer read the SAME allocation. Inactive
+// thrusters / inactive robonauts / refineries are never roots here, so their
+// supports are never checked - only the two active cards are.
+function coolingAllocation() {
+  const cards = chainCardsFromStack();
+  const orders = [];
+  const idx = { thruster: -1, prospector: -1 };
+  if (_activeThrusterId && cards.some((c) => c.id === _activeThrusterId)) {
+    idx.thruster = orders.length;
+    orders.push(resolveSupportChain({ cards, activeId: _activeThrusterId, wiring: _wiring }).order);
   }
-  return supply;
-}
-
-// Therm demand of operating `consumer` (its own heat) PLUS the heat of
-// the reactor/generator chain that powers it. Active-chain only: only the
-// power sources the consumer actually needs are counted, and within an
-// OR-group (e.g. X / ∿ / 💣 reactor) the lowest-heat matching supplier is
-// assumed in use, so a spare hot reactor sitting idle doesn't block.
-// Supports that aren't power sources (sail, beam, aerobrake) carry no heat.
-function chainThermDemand(consumerId, consumerFace) {
-  let demand = thermsRequired(consumerFace);
-  const groups = new Map(); // supplier prefix -> Set(kinds)
-  for (const r of (consumerFace.requires || [])) {
-    const pre = String(r.kind).split('-')[0];
-    if (pre !== 'reactor' && pre !== 'gen') continue;
-    if (!groups.has(pre)) groups.set(pre, new Set());
-    groups.get(pre).add(r.kind);
-  }
-  for (const [, kinds] of groups) {
-    let best = null;
-    for (const slot of _stack) {
-      if (slot.id === consumerId) continue;
-      const c = cardForSlot(slot);
-      if (!c) continue;
-      const f = installedFace(slot);
-      const sup = (f && f.supplies) || c.supplies || [];
-      if (!sup.some((k) => kinds.has(k))) continue;
-      const t = thermsRequired(f);
-      if (best === null || t < best) best = t;
+  if (_activeProspectorId && cards.some((c) => c.id === _activeProspectorId)) {
+    if (_activeProspectorId === _activeThrusterId) {
+      idx.prospector = idx.thruster; // dual-role: one chain serves both
+    } else {
+      idx.prospector = orders.length;
+      orders.push(resolveSupportChain({ cards, activeId: _activeProspectorId, wiring: _wiring }).order);
     }
-    if (best !== null) demand += best;
   }
-  return demand;
-}
-
-// Is `consumerId`'s operating chain thermally balanced (radiators cover
-// the chain's heat)? Returns { ok, demand, supply }.
-function chainThermBalance(consumerId, consumerFace) {
-  const demand = chainThermDemand(consumerId, consumerFace);
-  const supply = radiatorThermSupply();
-  return { ok: demand <= supply, demand, supply };
+  return { cool: resolveCoolingAcross({ cards, orders }), idx };
 }
 
 // Activation check. Returns { active, reason, missing } where:
@@ -579,7 +607,7 @@ export function isRocketActive() {
   // shared remainder. Stricter than a single shared pool (two reactors can't
   // split one radiator), matching the published dedicated-cooling rule. For the
   // common single-reactor stack this is the same verdict as before.
-  const cool = resolveSupportChain({ cards: chainCardsFromStack(), activeId: _activeThrusterId });
+  const cool = resolveSupportChain({ cards: chainCardsFromStack(), activeId: _activeThrusterId, wiring: _wiring });
   if (!cool.coolingOk) {
     const hot = cool.reactorCooling.find((r) => !r.ok);
     if (hot) {
@@ -867,6 +895,127 @@ function chainCardsFromStack() {
   });
 }
 
+// Read-only support-chain view for the visualizer. Resolves the chain that
+// powers the active thruster AND the chain that powers the active prospector
+// (two roots; a card that feeds both shows up in each). The two chains may
+// share supplier cards freely, EXCEPT radiator cooling: the active thruster has
+// first claim on the radiator pool, so the prospector root's cooling is
+// re-resolved against the post-thruster remainder (a reactor the thruster
+// reserved reads "cooled in thruster chain"; one it starved reads short).
+// Returns, per root, the resolver output (order / edges /
+// cycles / modifierChain / firstReactorId / reactorCooling / coolingOk) plus a
+// per-node read of which of that node's own requirement GROUPS are satisfied
+// (rule 4: a support is met iff the resolver drew an edge for it). PURE READ -
+// resolves off a clone-free snapshot and mutates nothing, so the visualizer can
+// call it on every repaint.
+export function getSupportChainView() {
+  const cards = chainCardsFromStack();
+  const byId = new Map(cards.map((c) => [c.id, c]));
+  const reqKindsOf = (c) => (c.requires || [])
+    .map((r) => (r && typeof r === 'object') ? r.kind : r)
+    .filter(Boolean);
+
+  // Every OTHER card that supplies `kind` (the resolver's candidate set): the
+  // choices a player can wire a consumer's support to.
+  const candidatesFor = (consumerId, kind) => cards
+    .filter((c) => c.id !== consumerId && Array.isArray(c.supplies) && c.supplies.includes(kind))
+    .map((c) => c.id);
+
+  const buildRoot = (kind, activeId) => {
+    if (!activeId || !byId.has(activeId)) return null;
+    const chain = resolveSupportChain({ cards, activeId, wiring: _wiring });
+    // Edge lookup: which (consumer, kind) pairs the resolver satisfied.
+    const satByConsumer = new Map();
+    for (const e of chain.edges) {
+      if (!satByConsumer.has(e.from)) satByConsumer.set(e.from, new Map());
+      satByConsumer.get(e.from).set(e.kind, e.to);
+    }
+    // Per node: its requirement groups (same supplier-prefix OR grouping the
+    // engine uses) flagged satisfied / missing, so the visualizer can tick
+    // each card and flag the one with an unmet support.
+    const nodeReqs = {};
+    for (const id of chain.order) {
+      const c = byId.get(id);
+      if (!c) continue;
+      const groups = new Map();
+      for (const k of reqKindsOf(c)) {
+        const supplier = String(k).split('-')[0];
+        if (!groups.has(supplier)) groups.set(supplier, []);
+        groups.get(supplier).push(k);
+      }
+      const edgeKinds = satByConsumer.get(id) || new Map();
+      const reqGroups = [];
+      for (const [supplier, kinds] of groups) {
+        const hitKind = kinds.find((k) => edgeKinds.has(k));
+        reqGroups.push({
+          supplier,
+          kinds,
+          satisfied: !!hitKind,
+          supplierId: hitKind ? edgeKinds.get(hitKind) : null,
+          kind: hitKind || kinds[0],
+        });
+      }
+      nodeReqs[id] = reqGroups;
+    }
+    // Per node: the wirable supports, one entry PER KIND that has at least one
+    // candidate supplier in the stack, with the full candidate list and the
+    // currently-chosen supplier (the resolver's edge, which honors the player's
+    // wiring). The visualizer renders a picker only where candidates.length > 1
+    // (the single-candidate case is forced, nothing to choose).
+    const wirable = {};
+    for (const id of chain.order) {
+      const c = byId.get(id);
+      if (!c) continue;
+      const edgeKinds = satByConsumer.get(id) || new Map();
+      const entries = [];
+      for (const k of reqKindsOf(c)) {
+        const cands = candidatesFor(id, k);
+        if (cands.length) entries.push({ kind: k, candidates: cands, chosen: edgeKinds.get(k) || null });
+      }
+      if (entries.length) wirable[id] = entries;
+    }
+    return { kind, activeId, chain, nodeReqs, wirable };
+  };
+
+  const roots = [];
+  const t = buildRoot('thruster', _activeThrusterId);
+  if (t) roots.push(t);
+  // Rule 5: a card that is BOTH the active thruster AND the active prospector
+  // (a missile robonaut that carries thrust) serves both roles with ONE chain,
+  // so don't root a second identical tree - tag the thruster root as also the
+  // prospector. Only when it's a DIFFERENT card does the prospector get its own
+  // root; the two chains may share suppliers freely (a card reached by both is
+  // flagged "shared", not contended), so independent resolution is correct.
+  if (_activeProspectorId && _activeProspectorId === _activeThrusterId) {
+    if (t) t.alsoProspector = true;
+    else { const p = buildRoot('prospector', _activeProspectorId); if (p) roots.push(p); }
+  } else if (_activeProspectorId) {
+    const p = buildRoot('prospector', _activeProspectorId);
+    if (p) {
+      roots.push(p);
+      // The active thruster has first claim on the radiator pool, so the
+      // prospector's dedicated reactor cooling is whatever the thruster chain
+      // leaves. Re-resolve cooling across both (thruster first) and override the
+      // prospector root's verdict, so its pills match the gate in
+      // getActiveProspectorStats (a reactor the thruster reserved reads short).
+      if (t) {
+        const cool = resolveCoolingAcross({ cards, orders: [t.chain.order, p.chain.order] });
+        const pc = cool.perChain[1];
+        if (pc) {
+          p.chain.reactorCooling = pc.reactorCooling;
+          p.chain.reactorsCooled = pc.reactorsCooled;
+          p.chain.nonReactorHeat = pc.nonReactorHeat;
+          p.chain.nonReactorCooled = pc.nonReactorCooled;
+          p.chain.coolingOk = pc.coolingOk;
+          p.chain.radiatorRemaining = cool.radiatorRemaining;
+          p.coolingAfterThruster = true;
+        }
+      }
+    }
+  }
+  return { cards, byId, roots };
+}
+
 // Compute the active thruster's "final" stats after applying every
 // other stack card's thrustMod (additive) + fuelMod (multiplicative).
 // Returns null if there is no active thruster.
@@ -906,7 +1055,7 @@ export function getActiveThrusterStats() {
   // pulls no chain, so it takes no stack modifiers. The server mirrors this
   // exactly (engine.js) so a move the client allows is never rejected for a
   // different thrust/fuel number.
-  const chain = resolveSupportChain({ cards: chainCardsFromStack(), activeId: id });
+  const chain = resolveSupportChain({ cards: chainCardsFromStack(), activeId: id, wiring: _wiring });
   for (const cid of chain.modifierChain) {
     const cslot = _stack.find((s) => s.id === cid);
     const c = cslot ? cardForSlot(cslot) : cardById(cid);
