@@ -25,7 +25,7 @@
 //   onRocketChange(cb)                → unsubscribe
 
 import { PATENTS_BY_ID, thermsRequired, thermsSupplied } from '../../data/patents.js';
-import { resolveSupportChain } from '../../data/support-chain.js';
+import { resolveSupportChain, resolveCoolingAcross } from '../../data/support-chain.js';
 import { CREW_BY_ID } from '../../data/crew.js';
 import { SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { weightClassForMass } from '../../data/net-thrust-track.js';
@@ -477,9 +477,15 @@ export function getActiveProspectorStats() {
     if (!kinds.some((k) => supplied.has(k))) missing.push(supplier);
   }
   // The prospector's operating chain (itself + the reactor/generator it
-  // needs) must be cooled too, same as the thruster chain. `f` is the
-  // installed face resolved at the top.
-  const therm = chainThermBalance(id, f);
+  // needs) must be cooled too, but the active THRUSTER has first claim on the
+  // radiators: the prospector reserves its reactor's dedicated cooling from
+  // whatever the thruster chain leaves, and reads inactive if it can't. A
+  // reactor shared with the thruster chain is cooled once.
+  const { cool, idx } = coolingAllocation();
+  const pc = idx.prospector >= 0 ? cool.perChain[idx.prospector] : null;
+  const therm = pc
+    ? { ok: pc.coolingOk, demand: pc.reactorDemand + pc.nonReactorHeat, supply: cool.radiatorTotal }
+    : { ok: true, demand: 0, supply: cool.radiatorTotal };
   if (!therm.ok) missing.push('thermostat');
   return {
     id,
@@ -512,56 +518,32 @@ export function onRocketChange(cb) {
   return () => { _listeners = _listeners.filter((x) => x !== cb); };
 }
 
-// Therms the stack's radiators can dissipate (active/installed face of
-// each radiator). The shared cooling pool every operating chain draws on.
-function radiatorThermSupply() {
-  let supply = 0;
-  for (const slot of _stack) {
-    const c = cardForSlot(slot);
-    if (!c || c.type !== 'radiator') continue;
-    supply += thermsSupplied(c, installedFace(slot));
+// Dedicated reactor cooling across the active thruster chain AND the active
+// prospector chain, sharing the one stack-wide radiator pool. The active
+// thruster has FIRST claim (user decision: prioritize thruster); the prospector
+// reserves its reactor's dedicated therms from the remainder and goes inactive
+// if it can't. A reactor that powers both chains is cooled once. Returns the
+// resolveCoolingAcross output plus the per-chain index of each active root, so
+// the cooling gate and the visualizer read the SAME allocation. Inactive
+// thrusters / inactive robonauts / refineries are never roots here, so their
+// supports are never checked - only the two active cards are.
+function coolingAllocation() {
+  const cards = chainCardsFromStack();
+  const orders = [];
+  const idx = { thruster: -1, prospector: -1 };
+  if (_activeThrusterId && cards.some((c) => c.id === _activeThrusterId)) {
+    idx.thruster = orders.length;
+    orders.push(resolveSupportChain({ cards, activeId: _activeThrusterId, wiring: _wiring }).order);
   }
-  return supply;
-}
-
-// Therm demand of operating `consumer` (its own heat) PLUS the heat of
-// the reactor/generator chain that powers it. Active-chain only: only the
-// power sources the consumer actually needs are counted, and within an
-// OR-group (e.g. X / ∿ / 💣 reactor) the lowest-heat matching supplier is
-// assumed in use, so a spare hot reactor sitting idle doesn't block.
-// Supports that aren't power sources (sail, beam, aerobrake) carry no heat.
-function chainThermDemand(consumerId, consumerFace) {
-  let demand = thermsRequired(consumerFace);
-  const groups = new Map(); // supplier prefix -> Set(kinds)
-  for (const r of (consumerFace.requires || [])) {
-    const pre = String(r.kind).split('-')[0];
-    if (pre !== 'reactor' && pre !== 'gen') continue;
-    if (!groups.has(pre)) groups.set(pre, new Set());
-    groups.get(pre).add(r.kind);
-  }
-  for (const [, kinds] of groups) {
-    let best = null;
-    for (const slot of _stack) {
-      if (slot.id === consumerId) continue;
-      const c = cardForSlot(slot);
-      if (!c) continue;
-      const f = installedFace(slot);
-      const sup = (f && f.supplies) || c.supplies || [];
-      if (!sup.some((k) => kinds.has(k))) continue;
-      const t = thermsRequired(f);
-      if (best === null || t < best) best = t;
+  if (_activeProspectorId && cards.some((c) => c.id === _activeProspectorId)) {
+    if (_activeProspectorId === _activeThrusterId) {
+      idx.prospector = idx.thruster; // dual-role: one chain serves both
+    } else {
+      idx.prospector = orders.length;
+      orders.push(resolveSupportChain({ cards, activeId: _activeProspectorId, wiring: _wiring }).order);
     }
-    if (best !== null) demand += best;
   }
-  return demand;
-}
-
-// Is `consumerId`'s operating chain thermally balanced (radiators cover
-// the chain's heat)? Returns { ok, demand, supply }.
-function chainThermBalance(consumerId, consumerFace) {
-  const demand = chainThermDemand(consumerId, consumerFace);
-  const supply = radiatorThermSupply();
-  return { ok: demand <= supply, demand, supply };
+  return { cool: resolveCoolingAcross({ cards, orders }), idx };
 }
 
 // Activation check. Returns { active, reason, missing } where:
@@ -914,10 +896,13 @@ function chainCardsFromStack() {
 }
 
 // Read-only support-chain view for the visualizer. Resolves the chain that
-// powers the active thruster AND, independently, the chain that powers the
-// active prospector (two roots; a card that feeds both shows up in each, the
-// read-only stand-in for the parallel-chain rule until the resolver grows a
-// multi-root walk). Returns, per root, the resolver output (order / edges /
+// powers the active thruster AND the chain that powers the active prospector
+// (two roots; a card that feeds both shows up in each). The two chains may
+// share supplier cards freely, EXCEPT radiator cooling: the active thruster has
+// first claim on the radiator pool, so the prospector root's cooling is
+// re-resolved against the post-thruster remainder (a reactor the thruster
+// reserved reads "cooled in thruster chain"; one it starved reads short).
+// Returns, per root, the resolver output (order / edges /
 // cycles / modifierChain / firstReactorId / reactorCooling / coolingOk) plus a
 // per-node read of which of that node's own requirement GROUPS are satisfied
 // (rule 4: a support is met iff the resolver drew an edge for it). PURE READ -
@@ -1006,7 +991,27 @@ export function getSupportChainView() {
     else { const p = buildRoot('prospector', _activeProspectorId); if (p) roots.push(p); }
   } else if (_activeProspectorId) {
     const p = buildRoot('prospector', _activeProspectorId);
-    if (p) roots.push(p);
+    if (p) {
+      roots.push(p);
+      // The active thruster has first claim on the radiator pool, so the
+      // prospector's dedicated reactor cooling is whatever the thruster chain
+      // leaves. Re-resolve cooling across both (thruster first) and override the
+      // prospector root's verdict, so its pills match the gate in
+      // getActiveProspectorStats (a reactor the thruster reserved reads short).
+      if (t) {
+        const cool = resolveCoolingAcross({ cards, orders: [t.chain.order, p.chain.order] });
+        const pc = cool.perChain[1];
+        if (pc) {
+          p.chain.reactorCooling = pc.reactorCooling;
+          p.chain.reactorsCooled = pc.reactorsCooled;
+          p.chain.nonReactorHeat = pc.nonReactorHeat;
+          p.chain.nonReactorCooled = pc.nonReactorCooled;
+          p.chain.coolingOk = pc.coolingOk;
+          p.chain.radiatorRemaining = cool.radiatorRemaining;
+          p.coolingAfterThruster = true;
+        }
+      }
+    }
   }
   return { cards, byId, roots };
 }

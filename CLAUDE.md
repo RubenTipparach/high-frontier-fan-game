@@ -287,10 +287,27 @@ move the client allows is never rejected for a different number). Rule 3
 via the resolver's `coolingOk` (each reactor reserves its own radiator therms;
 the thruster + generators draw the remainder; the common single-reactor stack
 is the same verdict as before). The SERVER does NOT gate cooling at all (it
-trusts the client, like routes), so rule 3 is client-only. NOTE: the active
-PROSPECTOR's cooling still uses the older `chainThermBalance` shared-pool
-helper (`getActiveProspectorStats`); unifying it onto the resolver is a
-follow-up.
+trusts the client, like routes), so rule 3 is client-only.
+
+COOLING NOW SPANS BOTH CHAINS (2026-06-06). The active thruster chain and the
+active prospector (robonaut) chain share ONE stack-wide radiator pool, and
+dedicated reactor cooling holds ACROSS them: a reactor in the prospector chain
+cannot reuse therms a thruster-chain reactor already reserved. The pure
+`data/support-chain.js#resolveCoolingAcross({cards, orders})` resolves cooling
+over chains in PRIORITY order - the active thruster gets first claim (user
+decision: prioritize thruster); the prospector reserves its reactor's dedicated
+therms from the remainder and its active card reads INACTIVE (not the thruster)
+if it can't. A reactor that powers BOTH chains is cooled ONCE (the higher-
+priority chain reserves it; the other reads it shared). `resolveSupportChain`'s
+own cooling is now just the one-chain case of this helper, so the single-chain
+`isRocketActive` verdict is byte-identical to before. `getActiveProspectorStats`
+reads the prospector's per-chain verdict off `coolingAllocation()` (replacing
+the old `chainThermBalance` shared-pool helper, now deleted), and
+`getSupportChainView` re-resolves the prospector root against the post-thruster
+remainder so the visualizer pills match the gate. ONLY the active thruster and
+active prospector are ever support-checked: inactive thrusters, inactive
+robonauts, and refinery cards are never roots, so their supports are never
+checked here (a refinery's supports are checked only at BUILD_FACTORY).
 
 VISUALIZER + WIRING LANDED (2026-06-06). The support-chain visualizer is a
 folder tree inside the rocket stack modal (`js/game/browse.js#buildSupportChainViz`),

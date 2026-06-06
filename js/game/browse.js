@@ -5986,7 +5986,8 @@ function buildSupportChainViz(host, lookup) {
       }
       const rc = !isRef && reactorCool.get(id);
       if (rc) {
-        notes.push(rc.ok
+        if (rc.shared) notes.push({ t: 'cooled in thruster chain', c: 'muted' });
+        else notes.push(rc.ok
           ? { t: 'reserves ' + rc.demand + ' dedicated cooling', c: 'muted' }
           : { t: 'needs ' + rc.demand + ' cooling, short', c: 'bad' });
       }

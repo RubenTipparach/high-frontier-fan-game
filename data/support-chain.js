@@ -103,32 +103,14 @@ export function resolveSupportChain({ cards = [], activeId = null, wiring = {} }
   }
 
   // Rule 3: each reactor in the chain needs DEDICATED radiator cooling for its
-  // therms - a radiator's therms reserved to one reactor can't cover another.
-  // Greedy: walk reactors hottest-first, reserve from the shared radiator therm
-  // supply (all radiators in the stack contribute). Whatever radiator capacity
-  // is left after the reactors covers the NON-reactor heat (the thruster plus
-  // any generators in the chain), which draws the shared remainder.
-  const radiators = cards.filter((c) => c.type === 'radiator');
-  const radiatorTotal = radiators.reduce((s, c) => s + (Number(c.therms) || 0), 0);
-  let radiatorPool = radiatorTotal;
-  const reactorIds = order.filter((id) => { const c = byId.get(id); return c && c.type === 'reactor'; });
-  reactorIds.sort((a, b) => (Number(byId.get(b).therms) || 0) - (Number(byId.get(a).therms) || 0));
-  const reactorCooling = [];
-  for (const id of reactorIds) {
-    const demand = Number(byId.get(id).therms) || 0;
-    const ok = radiatorPool >= demand;
-    if (ok) radiatorPool -= demand;
-    reactorCooling.push({ reactorId: id, demand, ok });
-  }
-  const reactorsCooled = reactorCooling.every((r) => r.ok);
-  // Non-reactor heat = every heat-generating chain card that is NOT a reactor
-  // (the thruster + generators). Radiators supply cooling, so they're excluded.
-  const nonReactorHeat = order
-    .map((id) => byId.get(id))
-    .filter((c) => c && c.type !== 'reactor' && c.type !== 'radiator')
-    .reduce((s, c) => s + (Number(c.therms) || 0), 0);
-  const nonReactorCooled = nonReactorHeat <= radiatorPool;
-  const coolingOk = reactorsCooled && nonReactorCooled;
+  // therms. Resolved through the shared `resolveCoolingAcross` pass (a single
+  // chain is just the one-element case), so the dedicated-cooling math is
+  // identical whether one chain or two parallel chains draw the pool.
+  const cool = resolveCoolingAcross({ cards, orders: [order] });
+  const pc = cool.perChain[0] || {
+    reactorCooling: [], reactorsCooled: true, nonReactorHeat: 0,
+    nonReactorCooled: true, coolingOk: true,
+  };
 
   return {
     order,
@@ -137,12 +119,67 @@ export function resolveSupportChain({ cards = [], activeId = null, wiring = {} }
     firstReactorId,
     modifierChain,
     modifiers: { thrustDelta, fuelMult },
-    reactorCooling,
-    reactorsCooled,
-    nonReactorHeat,
-    nonReactorCooled,
-    coolingOk,
-    radiatorTotal,
-    radiatorRemaining: radiatorPool,
+    reactorCooling: pc.reactorCooling,
+    reactorsCooled: pc.reactorsCooled,
+    nonReactorHeat: pc.nonReactorHeat,
+    nonReactorCooled: pc.nonReactorCooled,
+    coolingOk: pc.coolingOk,
+    radiatorTotal: cool.radiatorTotal,
+    radiatorRemaining: cool.radiatorRemaining,
   };
+}
+
+// Dedicated reactor cooling across one or more chains that share ONE stack-wide
+// radiator pool. `orders` is a list of chain `order` arrays in PRIORITY order
+// (the active thruster's chain first, then the active prospector's): the active
+// thruster gets first claim on the radiators (user decision: prioritize
+// thruster), and a lower-priority chain reserves its reactors' dedicated therms
+// from whatever remains. A reactor shared by two chains is cooled ONCE - the
+// higher-priority chain reserves it and the other reads it as already cooled
+// (the "may share a reactor" case). Non-reactor heat (thruster + generators)
+// draws the shared remainder. A chain whose reactor can't secure dedicated
+// cooling reads `coolingOk: false`, which makes that active card inactive
+// WITHOUT dragging down a higher-priority chain that was already cooled.
+export function resolveCoolingAcross({ cards = [], orders = [] } = {}) {
+  const byId = new Map(cards.map((c) => [c.id, c]));
+  const radiatorTotal = cards
+    .filter((c) => c.type === 'radiator')
+    .reduce((s, c) => s + (Number(c.therms) || 0), 0);
+  let pool = radiatorTotal;
+  const reserved = new Set(); // reactor ids a higher-priority chain already cooled
+
+  const perChain = orders.map((order) => {
+    const reactorIds = order.filter((id) => {
+      const c = byId.get(id); return c && c.type === 'reactor';
+    });
+    const reactorCooling = [];
+    // Reactors a higher-priority chain already reserved: shared, already cooled.
+    for (const id of reactorIds) {
+      if (reserved.has(id)) {
+        reactorCooling.push({ reactorId: id, demand: Number(byId.get(id).therms) || 0, ok: true, shared: true });
+      }
+    }
+    // This chain's own reactors, hottest-first, reserve from the remaining pool.
+    const own = reactorIds.filter((id) => !reserved.has(id))
+      .sort((a, b) => (Number(byId.get(b).therms) || 0) - (Number(byId.get(a).therms) || 0));
+    for (const id of own) {
+      const demand = Number(byId.get(id).therms) || 0;
+      const ok = pool >= demand;
+      if (ok) { pool -= demand; reserved.add(id); }
+      reactorCooling.push({ reactorId: id, demand, ok });
+    }
+    const reactorsCooled = reactorCooling.every((r) => r.ok);
+    const reactorDemand = reactorIds.reduce((s, id) => s + (Number(byId.get(id).therms) || 0), 0);
+    // Non-reactor heat = every heat-generating chain card that is NOT a reactor
+    // (the thruster + generators). Radiators supply cooling, so they're excluded.
+    const nonReactorHeat = order
+      .map((id) => byId.get(id))
+      .filter((c) => c && c.type !== 'reactor' && c.type !== 'radiator')
+      .reduce((s, c) => s + (Number(c.therms) || 0), 0);
+    const nonReactorCooled = nonReactorHeat <= pool;
+    const coolingOk = reactorsCooled && nonReactorCooled;
+    return { reactorCooling, reactorsCooled, reactorDemand, nonReactorHeat, nonReactorCooled, coolingOk };
+  });
+
+  return { perChain, radiatorTotal, radiatorRemaining: pool };
 }
