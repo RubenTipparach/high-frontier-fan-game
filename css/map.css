@@ -2734,6 +2734,30 @@ body:has(#view-browse:not(.hidden)) #main {
   border-color: var(--accent);
   animation: mp-chip-needs-action 1.4s ease-in-out infinite;
 }
+/* Manual-route burn tally, docked in the turn bar's action slot. Green
+   while the rocket can fly the plotted burns this turn, red when it can't. */
+.mp-manual-burns {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.mp-manual-burns.is-ok {
+  color: #34d399;
+  background: color-mix(in srgb, #34d399 16%, transparent);
+}
+.mp-manual-burns.is-over {
+  color: #f87171;
+  background: color-mix(in srgb, #f87171 18%, transparent);
+}
 .browse-sidepanel[data-active=""] ~ .mp-turn-banner { right: 48px; }
 .browse-sidepanel[data-active]:not([data-active=""]) ~ .mp-turn-banner {
   right: 380px;

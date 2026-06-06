@@ -681,6 +681,11 @@ export class MapRenderer {
     this._route = null;             // [{from,to,dv}]
     this._routeFromId = null;
     this._routeToId = null;
+    // Manual-move candidate glow: Map<nodeId, 'ok' | 'blocked'>. Set while
+    // the player is plotting a route by hand so the nodes one hop out from
+    // the current tip light up green (a hop they can afford) or red (an
+    // adjacent node that's over this turn's burn budget).
+    this._moveTargets = null;
     this._rocketTrail = null;       // [{from,to}] history of segments
                                     // the rocket has actually traversed,
                                     // drawn under the planned route as
@@ -857,6 +862,16 @@ export class MapRenderer {
   setRouteEndpoints(fromId, toId) {
     this._routeFromId = fromId || null;
     this._routeToId = toId || null;
+    this._scheduleDraw();
+  }
+
+  // Manual-move candidate nodes. `targets` is a plain object keyed by node
+  // id whose value is 'ok' (a hop the player can afford this turn → green
+  // glow) or 'blocked' (an adjacent node over the turn's burn budget → red
+  // glow). Pass null / empty to clear the glow.
+  setMoveTargets(targets) {
+    const has = targets && Object.keys(targets).length;
+    this._moveTargets = has ? targets : null;
     this._scheduleDraw();
   }
 
@@ -1858,6 +1873,7 @@ export class MapRenderer {
     // profiler step so the breakdown total reconciles with the sum.
     this._step('overlays', () => {
       this._drawHazardPulseScreen(ctx);
+      this._drawMoveTargetsScreen(ctx);
       this._drawProspectDiscsScreen(ctx);
       this._drawFactoriesScreen(ctx);
       this._drawOutpostsScreen(ctx);
@@ -2741,16 +2757,49 @@ export class MapRenderer {
     }
   }
 
-  // "LEO" letters anchoring the sandbox rocket's home position
-  // so the player can find the launch site at a glance. Lives
-  // in world space (so it pans / zooms with the map) but uses a
-  // Prospect discs. Draw a coloured disc centred on each site
-  // that's been prospected: blue = success (claim placed), red =
-  // fail (site exhausted). Rendered AFTER site labels so the disc
-  // sits on top of the hex without losing the site name behind it
-  // (the label is offset above; the disc tucks under the hex). At
-  // very low zoom the discs collapse to a tiny dot so they stay
-  // legible as a "this site is taken" cue.
+  // Manual-move candidate glow. While the player plots a route by hand,
+  // every node one hop out from the current tip pulses: green if they can
+  // afford the hop with this turn's remaining burns, red if it's adjacent
+  // but over budget. Same world-position math as the selection ring, drawn
+  // for sites AND waypoints (the contracted neighbours can be either).
+  _drawMoveTargetsScreen(ctx) {
+    if (!this._moveTargets || !this.data) return;
+    const eff = this.zoom * this.fitScale;
+    const { hostW, hostH } = this;
+    const hexS = this._hexScale();
+    // Pulse off the shared anim clock (no self-scheduling; the ambient
+    // loop already redraws on its cadence, same as the selection ring).
+    const t = (this._animTime || 0) / 1000;
+    const pulse = (Math.sin(t * Math.PI * 1.6) + 1) * 0.5;
+    ctx.save();
+    ctx.lineWidth = 2.5;
+    for (const id in this._moveTargets) {
+      const node = this.data.byId[id];
+      if (!node) continue;
+      const sx = this.pan.x + node.x * eff;
+      const sy = this.pan.y + node.y * eff;
+      if (sx < -30 || sx > hostW + 30 || sy < -30 || sy > hostH + 30) continue;
+      const vis = TYPE_VIS[node.type] || TYPE_VIS.unknown;
+      let baseR = vis.r != null ? vis.r : 8;
+      if (vis.kind === 'hex') baseR *= hexS;
+      if (isLeoWaypoint(node)) baseR *= 2;
+      const ringR = Math.max(baseR + 6, 11) + pulse * 3;
+      const ok = this._moveTargets[id] === 'ok';
+      const col = ok ? '52, 211, 153' : '248, 113, 113';   // emerald / red
+      ctx.shadowBlur = 9 + pulse * 7;
+      ctx.shadowColor = `rgba(${col}, 0.9)`;
+      ctx.strokeStyle = `rgba(${col}, ${0.7 + pulse * 0.3})`;
+      ctx.beginPath();
+      ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // Prospect discs. Draw a coloured disc centred on each site that's
+  // been prospected: player colour = success (claim placed), red = fail
+  // (site exhausted). Rendered AFTER site labels so the disc sits on top
+  // of the hex without losing the site name behind it.
   _drawProspectDiscsScreen(ctx) {
     if (!this._discs) return;
     const eff = this.zoom * this.fitScale;
