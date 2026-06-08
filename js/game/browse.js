@@ -4502,6 +4502,7 @@ let _manualOriginId = null;
 let _manualDir = null;          // direction we entered the tip on
 let _manualPivotsUsed = 0;
 let _manualPirouettes = 0;      // free pivots remaining (bonusPivots)
+let _manualBonus = 0;           // banked gravity-assist / slingshot credit
 // Solo manual travel: each hop slides the rocket sprite forward one segment so
 // the player watches the ship advance one segment at a time as they plot. The
 // state isn't committed until Move (one move per turn), so the commit animation
@@ -4535,6 +4536,7 @@ function enterManualMoveMode() {
   _manualDir = null;
   _manualPivotsUsed = 0;
   _manualPirouettes = activeThrusterBonusPivots();
+  _manualBonus = 0;
   const here = getRocketSite();
   _manualOriginId = here ? here.id : null;
   _plannedRoute = [];
@@ -4559,6 +4561,7 @@ function exitManualMoveMode() {
   _manualDir = null;
   _manualPivotsUsed = 0;
   _manualPirouettes = 0;
+  _manualBonus = 0;
   // Per-hop preview may have walked the sprite forward; if the player bailed
   // without committing a move, snap it back to the real rocket position.
   // (On a committed move moveRocket has already cleared _manualPreviewed, so
@@ -4581,11 +4584,14 @@ function manualMoveStatus() {
   const pirouetteHint = _manualPirouettes > 0
     ? ` <em class="muted">(${_manualPirouettes} free pivot${_manualPirouettes === 1 ? '' : 's'} ready)</em>`
     : '';
+  const flybyHint = _manualBonus > 0
+    ? ` <em class="muted">(+${_manualBonus} swing-by credit banked)</em>`
+    : '';
   const burnTag = `<strong>${planned}</strong> burn${planned === 1 ? '' : 's'} plotted`;
   if (_manualBudget <= 0) {
-    setStatus(`✋ Manual: ${burnTag}, <strong>0</strong>/${_manualBudgetMax} burns left. Tap <strong>🛸 Move</strong> to fly, or <strong>✕ Stop</strong>.`);
+    setStatus(`✋ Manual: ${burnTag}, <strong>0</strong>/${_manualBudgetMax} burns left.${flybyHint} Tap <strong>🛸 Move</strong> to fly, or <strong>✕ Stop</strong>.`);
   } else {
-    setStatus(`✋ Manual: ${burnTag}, <strong>${_manualBudget}</strong>/${_manualBudgetMax} burns left.${pirouetteHint} Tap a glowing node to advance one hop. <strong>🛸 Move</strong> to fly, <strong>✕ Stop</strong> to cancel.`);
+    setStatus(`✋ Manual: ${burnTag}, <strong>${_manualBudget}</strong>/${_manualBudgetMax} burns left.${pirouetteHint}${flybyHint} Tap a glowing node to advance one hop. <strong>🛸 Move</strong> to fly, <strong>✕ Stop</strong> to cancel.`);
   }
 }
 // Contracted "tap target" adjacency. The planner graph threads degree-2
@@ -4634,9 +4640,33 @@ function meaningfulNeighbors(tipId) {
   return out;
 }
 
+// Gravity-assist / slingshot credit a node grants when entered. Mirror of the
+// auto-planner's flybyBoost handling (planner-nav.js#getNeighbors): a Lagrange
+// swing-by (and, seasonally, a Venus flyby) banks a bonus that offsets later
+// burn + pivot costs. 'thrust' resolves to the active thruster's thrust. Venus
+// is gated OFF here to match the auto-planner, which builds with the default
+// 'red' season; the Lagrange rings always credit.
+function nodeFlybyBoost(node) {
+  if (!node) return 0;
+  const venusFlybyAvailable = false; // auto-planner default season is 'red'
+  const raw = (node.type === 'venus' && !venusFlybyAvailable) ? 0 : (node.flybyBoost ?? 0);
+  return raw === 'thrust' ? (_manualBudgetMax || 0) : (Number(raw) || 0);
+}
+// Total flyby credit banked by entering every node along a hop's path (its
+// destination plus any decorative bends it threads). The tip (path[0]) was
+// already entered on a prior hop, so it's excluded.
+function manualFlybyGain(path) {
+  if (!Array.isArray(path) || path.length < 2) return 0;
+  const points = (_activeData && _activeData.byId) || {};
+  let gain = 0;
+  for (let i = 1; i < path.length; i++) gain += nodeFlybyBoost(points[path[i]]);
+  return gain;
+}
 // Cost calculator for a single manual hop. Returns:
 //   { ok: false, reason } when the hop isn't allowed
-//   { ok: true, cost, isPivot, freePivot, newDir, path } when it is
+//   { ok: true, cost, gross, bonusSpent, flybyGained, bonusAfter, isPivot,
+//     freePivot, newDir, path } when it is. `cost` is the NET burns after the
+//   banked swing-by credit; `bonusAfter` is the credit carried to the next hop.
 function manualHopCost(tipId, toId) {
   if (!_activeData) return { ok: false, reason: 'no map data' };
   const points = _activeData.byId || {};
@@ -4678,10 +4708,29 @@ function manualHopCost(tipId, toId) {
   // Burn nodes carry an entry cost. Default 1; half-landers
   // print 2 on their second face. Everything else (Hohmann,
   // lagrange, regular site, radhaz, venus, decorative) is 0.
+  // An explicit landing touchdown is "protected": banked swing-by credit can't
+  // pay for it (mirror of planner-nav.js, where landing burns ignore the bonus).
+  // A default transit burn (landing == null) is offsettable like a pivot.
+  let protectedCost = 0;
   if (toNode.type === 'burn') {
-    cost += toNode.landing != null ? toNode.landing : 1;
+    if (toNode.landing != null) protectedCost += toNode.landing;
+    else cost += 1;
   }
-  return { ok: true, cost, isPivot, freePivot, newDir: arriveDir, path };
+  // Gravity-assist credit banked from earlier swing-bys offsets this hop's pivot
+  // + transit-burn cost (not the protected touchdown); whatever's left carries
+  // forward, plus any new boost this hop banks (credited to the NEXT hop,
+  // mirroring the auto-planner's bonus carry).
+  const offsettable = cost;
+  const gross = offsettable + protectedCost;
+  const bonusIn = _manualBonus || 0;
+  const bonusSpent = Math.min(bonusIn, offsettable);
+  const net = gross - bonusSpent;
+  const flybyGained = manualFlybyGain(path);
+  return {
+    ok: true, cost: net, gross, bonusSpent, flybyGained,
+    bonusAfter: bonusIn - bonusSpent + flybyGained,
+    isPivot, freePivot, newDir: arriveDir, path,
+  };
 }
 function manualAppendSegment(toId) {
   if (!_manualMode || !_activeData) return false;
@@ -4718,6 +4767,8 @@ function manualAppendSegment(toId) {
   _manualBudget -= r.cost;
   if (r.isPivot) _manualPivotsUsed += 1;
   _manualDir = r.newDir;
+  // Spend the credit this hop drew on and bank what the swing-by granted.
+  _manualBonus = r.bonusAfter;
   persistPlannedRoute();
   // Keep the server's copy of the plan in step with each manual hop.
   submitSetRouteOnline();
