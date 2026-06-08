@@ -4470,10 +4470,27 @@ function setRoutePriority(mode) {
   _routePriority = mode;
   try { localStorage.setItem(STORAGE_ROUTE_PRIORITY, mode); } catch {}
 }
+// Avoid-hazards planner toggle. When ON, the planner treats BOTH hazard burns
+// and radiation hazards as the dominant cost, routing around them even at the
+// price of extra burns / turns. Persisted per device.
+const STORAGE_ROUTE_AVOID_HAZARDS = 'hf-sandbox-route-avoid-hazards';
+let _routeAvoidHazards = (() => {
+  try { return localStorage.getItem(STORAGE_ROUTE_AVOID_HAZARDS) === '1'; }
+  catch { return false; }
+})();
+function setRouteAvoidHazards(on) {
+  _routeAvoidHazards = !!on;
+  try { localStorage.setItem(STORAGE_ROUTE_AVOID_HAZARDS, on ? '1' : '0'); } catch {}
+}
 function routeMetricPriority() {
-  return _routePriority === 'burns'
-    ? ['burns', 'turns', 'hazards', 'radHazards']
-    : ['turns', 'burns', 'hazards', 'radHazards'];
+  const base = _routePriority === 'burns' ? ['burns', 'turns'] : ['turns', 'burns'];
+  // The planner compares these metrics lexicographically, so the FIRST entry is
+  // the one it minimizes hardest. Avoid-hazards leads with hazards + radHazards
+  // (every hazard / rad-hazard node crossed outweighs any number of burns or
+  // turns); off, they stay the final tiebreaker, the old behaviour.
+  return _routeAvoidHazards
+    ? ['hazards', 'radHazards', ...base]
+    : [...base, 'hazards', 'radHazards'];
 }
 
 // Manual move mode. Alternative to the auto-planner: the player
@@ -12380,6 +12397,15 @@ function openRouteOptionsModal(onClose) {
         </div>
       </label>
     </div>
+    <label class="route-options-choice route-options-avoid ${_routeAvoidHazards ? 'is-active' : ''}">
+      <input type="checkbox" name="route-avoid-hazards"
+        ${_routeAvoidHazards ? 'checked' : ''}>
+      <div>
+        <strong>☢ Avoid hazards</strong>
+        <em>Route around radiation belts and hazard burns wherever a path
+        exists, even when the detour costs extra burns or turns.</em>
+      </div>
+    </label>
     <div class="route-options-manual">
       <button type="button" class="popup-btn route-options-manual-btn">
         ✋ Manual move - plot ${thrust} hops by hand
@@ -12418,14 +12444,23 @@ function openRouteOptionsModal(onClose) {
     el.addEventListener('change', () => {
       if (el.checked) {
         setRoutePriority(el.value);
-        // Repaint highlight state on the labels.
-        panel.querySelectorAll('.route-options-choice').forEach((c) => {
+        // Repaint highlight state on the radio labels only.
+        panel.querySelectorAll('.route-options-choice:not(.route-options-avoid)').forEach((c) => {
           c.classList.toggle('is-active',
             c.querySelector('input').value === _routePriority);
         });
+        replanCurrentRoute();
       }
     });
   });
+  const avoidEl = panel.querySelector('input[name="route-avoid-hazards"]');
+  if (avoidEl) {
+    avoidEl.addEventListener('change', () => {
+      setRouteAvoidHazards(avoidEl.checked);
+      avoidEl.closest('.route-options-avoid').classList.toggle('is-active', avoidEl.checked);
+      replanCurrentRoute();
+    });
+  }
   panel.querySelector('.route-options-manual-btn').addEventListener('click', () => {
     close();
     // Close the underlying site popup too - manual mode plots
@@ -13043,6 +13078,14 @@ function canPlanRocketRoute() {
 // old nav.js was a flat Dijkstra over dv values and got all of
 // those wrong. Per-turn burn budget = the active thruster's
 // thrust value (defaults to 4 when no thruster is active).
+// Re-plan the route currently on screen (if any) after a planner setting
+// changes - priority or avoid-hazards - so the toggle takes effect at once
+// instead of waiting for the next destination pick. No-op in manual mode or
+// when no auto route is plotted.
+function replanCurrentRoute() {
+  if (_manualMode || !_routeTo) return;
+  try { planRocketRouteTo(_routeTo); } catch (e) { console.error('replan route:', e); }
+}
 function planRocketRouteTo(destSite) {
   if (!_renderer || !_activeData) return false;
   // Origin = wherever the rocket currently is (default LEO). Once

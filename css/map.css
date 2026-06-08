@@ -2478,6 +2478,13 @@
   font-size: 11px;
   line-height: 1.45;
 }
+/* Avoid-hazards checkbox sits below the two priority radios; amber active tint
+   marks it as a hazard control rather than a priority pick. */
+.route-options-avoid { margin-top: 8px; }
+.route-options-avoid.is-active {
+  border-color: rgba(251, 191, 36, 0.7);
+  background: rgba(251, 191, 36, 0.12);
+}
 .route-options-manual {
   margin-top: 14px;
   padding-top: 12px;
