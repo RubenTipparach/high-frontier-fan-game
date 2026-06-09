@@ -239,6 +239,21 @@
   color: #2e1c02;
   border-color: #f0c455;
 }
+/* Dedicated ↩ undo tag (server games): take back this turn's last action.
+   Same amber "reversible action" language as the move tag's undo face. Hidden
+   until there's something to undo (set in refreshTurnBudget). */
+#turn-tag-undo {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(0, 0, 0, 0.30)),
+    #d4a72c;
+  color: #2e1c02;
+  border-color: #f0c455;
+  /* Secondary, optional action - don't pulse for attention like the move
+     budget tag does (the pulse rule keys off .turn-tag:not(.is-spent)). */
+  animation: none;
+}
+#turn-tag-undo:hover { filter: brightness(1.1); }
+#turn-tag-undo:disabled { opacity: 0.5; cursor: default; }
 /* Game-settings gear: a standalone toolbar chip (route + fuel options).
    No longer welded to the move tag, so it carries its own rounded
    profile, border, and sizing. It is not a budget point, so it never

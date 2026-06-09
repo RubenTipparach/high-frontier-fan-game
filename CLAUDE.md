@@ -824,6 +824,30 @@ Server-authoritative engine in `server/game/engine.js`:
     - No prospect, not yet moved: the move runs normally.
     - Moved, no prospect: no further move (`no_moves_left`) - one move per
       turn holds with or without a scan.
+- **Boost economy (engine rule, do NOT revert to one-op-per-boost).**
+  Boost mirrors the raygun: the FIRST boost of the turn spends the turn's
+  single operation; every later boost THIS SAME turn rides up FREE (no
+  operation), so a player can keep boosting once begun. "Has begun" reads off
+  this turn's undo stack (`hasBoostedThisTurn`, a BOOST entry, reset each
+  turn), exactly like `hasProspectedThisTurn`. Aqua (= total mass) is charged
+  on every boost, free or not. Client (`browse.js#commitBoost`) labels the
+  confirm + the BOOST button accordingly online; the solo sandbox still treats
+  every boost as the operation (the free-after-first rule is server-backed).
+  (User decision 2026-06-09.)
+- **Undo doctrine.** Functional ops ride a per-turn `turnActions` stack and the
+  `UNDO` op rebuilds the turn from `turnBaseState` minus the last action
+  (`applyUndo` + `rebuildFromBase`). So BOOST / INDUSTRIALIZE (factory) /
+  ET_PRODUCE / MOVE undo, but a dice roll is a hard barrier (`last.rolled` ->
+  `roll_blocks_undo`): PROSPECT and a hazardous MOVE can't be taken back.
+  Auctions never sit on the stack and advance `committed_seq`, so they can't be
+  undone either (user: auctions involve multiple people). `rebuildFromBase`
+  re-records each replayed action onto `turnActions` AS it replays, so the
+  free-after-first economy (BOOST + raygun PROSPECT) re-accounts correctly on
+  undo instead of demanding an already-spent operation. The client exposes undo
+  online via the toolbar `#turn-tag-undo` tag + the mission-log undo button
+  (`describeTurnAction` names what will be taken back); the solo move tag keeps
+  its own move-only rewind. (User decision 2026-06-09: boost/factory/ET-produce
+  undo, prospect/auction do not.)
 - Industrialize: deliver a robonaut or crew + reactor to the site;
   flip prospect to factory (1 VP, generates patent income).
 - Refinery upgrade: deliver a refinery; factory becomes hydrated

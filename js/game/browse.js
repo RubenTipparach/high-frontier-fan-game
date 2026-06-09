@@ -2905,11 +2905,23 @@ function wireHandStrip() {
       });
       return;
     }
+    // Boost rides the raygun economy: the first boost of the turn spends the
+    // operation, then any further boost this turn is free. Online reads the
+    // turn's action history from the cached snapshot to label the cost. The
+    // free-after-first rule is enforced server-side, so it applies to server
+    // games; the solo sandbox still treats every boost as the operation.
+    const continuedBoost = _online
+      && _onlineSnapshot
+      && Array.isArray(_onlineSnapshot.turnActions)
+      && _onlineSnapshot.turnActions.some((a) => a && a.kind === 'BOOST');
+    const opNote = continuedBoost
+      ? 'You already boosted this turn, so this rides up free (no operation).'
+      : 'The first boost spends your operation; keep boosting free for the rest of the turn.';
     const ok = await confirmModal({
       title: '🛰 Boost to LEO',
       body: `Boost <strong>${n}</strong> card${n === 1 ? '' : 's'} from your Hand to the LEO Stack `
         + `for <strong>${cost}</strong> Aqua (total mass ${cost})? `
-        + `Bank: <strong>${have}</strong> → <strong>${have - cost}</strong>. Costs one operation.`,
+        + `Bank: <strong>${have}</strong> → <strong>${have - cost}</strong>. ${opNote}`,
       yes: `🛰 Boost (${cost} aqua)`,
       no: 'Cancel',
     });
@@ -4838,6 +4850,7 @@ function ensureMapShell(host) {
           aria-label="End turn">⏭ End turn</button>
         <span id="turn-budget" class="map-turn-budget" aria-live="polite">
           <button type="button" class="turn-tag" id="turn-tag-move" title="Moves remaining this turn">move:1</button>
+          <button type="button" class="turn-tag turn-tag-undo" id="turn-tag-undo" title="Undo your last action this turn" hidden>↩ undo</button>
         </span>
         <button id="turn-tracker" title="View turn tracker"
           aria-label="View turn tracker">🕐</button>
@@ -5043,6 +5056,7 @@ function ensureMapShell(host) {
   // so there is no separate op tag. Live-updates on any consume /
   // refund / turn rollover.
   const moveTag = host.querySelector('#turn-tag-move');
+  const undoTag = host.querySelector('#turn-tag-undo');
   const endTurnBtn = host.querySelector('#turn-end');
   function refreshTurnBudget() {
     const ops = getOpsRemaining();
@@ -5064,11 +5078,12 @@ function ensureMapShell(host) {
     // End turn nudge stays dark while a lot is up - even with operations spent.
     const auctionInProgress = !!(_onlineSnapshot && _onlineSnapshot.auction);
     if (moveTag) {
-      // Once the move is spent the tag IS the undo control - it reads
-      // "↩ undo move" so the player knows tapping rewinds this turn's
-      // move (the rocket slides back to where it started). With a move
-      // still in hand it shows the budget and moves the rocket.
+      // Once the move is spent the SOLO tag becomes the "↩ undo move" control
+      // (the rocket slides back to where it started). Online, undo lives on the
+      // dedicated ↩ undo tag below (it can take back ANY of this turn's actions,
+      // not just a move), so the spent move tag is a passive status there.
       const spent = moves <= 0;
+      const soloUndoFace = spent && !_online;
       // The rocket can only fly with a valid thruster support chain
       // engaged (a thruster whose reactor / generator / heat supports
       // are all satisfied). Until then the move control is dark - no glow -
@@ -5079,9 +5094,9 @@ function ensureMapShell(host) {
       let canMove = true;
       try { const ra = isRocketActive(); canMove = !!(ra && ra.active); } catch { canMove = true; }
       const blocked = !spent && !canMove;
-      moveTag.textContent = spent ? '↩ undo move' : `move:${moves}`;
+      moveTag.textContent = !spent ? `move:${moves}` : (soloUndoFace ? '↩ undo move' : 'move spent');
       moveTag.classList.toggle('is-spent', spent);
-      moveTag.classList.toggle('is-undo', spent && !lockedByOnline);
+      moveTag.classList.toggle('is-undo', soloUndoFace && !lockedByOnline);
       moveTag.classList.toggle('is-locked', lockedByOnline);
       moveTag.classList.toggle('is-nomove', blocked && !lockedByOnline);
       moveTag.disabled = lockedByOnline;
@@ -5089,9 +5104,35 @@ function ensureMapShell(host) {
         ? 'Waiting for your turn.'
         : (blocked
           ? 'To move, install an operational thruster into the rocket (a thruster with all its supports satisfied).'
-          : (spent
-            ? 'Move spent - tap to undo this turn\'s move (rewinds the rocket)'
-            : 'Move remaining - tap to move the rocket along its route'));
+          : (!spent
+            ? 'Move remaining - tap to move the rocket along its route'
+            : (soloUndoFace
+              ? 'Move spent - tap to undo this turn\'s move (rewinds the rocket)'
+              : 'Move spent this turn. Use ↩ undo to take back your last action.')));
+    }
+    if (undoTag) {
+      // Dedicated undo control for server games: unwinds your most recent
+      // action this turn (boost, factory, ET-produce, move, ...). A dice roll
+      // is a hard barrier - prospect and hazard rolls can't be taken back -
+      // and auctions never sit on the undo stack, so this matches the rule
+      // that boost / factory / ET-produce undo but prospect / auction do not.
+      // Shown only when there's something to undo, so the toolbar stays clean.
+      let canUndo = false;
+      let undoTip = 'Nothing to undo yet.';
+      if (_online && !lockedByOnline && !auctionInProgress && isOnlineMyTurn()) {
+        const acts = (_onlineSnapshot && Array.isArray(_onlineSnapshot.turnActions))
+          ? _onlineSnapshot.turnActions : [];
+        const last = acts.length ? acts[acts.length - 1] : null;
+        if (last && !last.rolled) {
+          canUndo = true;
+          undoTip = `Take back your ${describeTurnAction(last)} (your most recent action this turn).`;
+        } else if (last && last.rolled) {
+          undoTip = 'Your last action rolled the dice - it can\'t be undone.';
+        }
+      }
+      undoTag.hidden = !canUndo;
+      undoTag.disabled = !canUndo;
+      undoTag.title = undoTip;
     }
     if (endTurnBtn) {
       // An open auction freezes End turn (the lot must resolve before the
@@ -5165,7 +5206,18 @@ function ensureMapShell(host) {
         try { const ra = isRocketActive(); canMove = !!(ra && ra.active); } catch { canMove = true; }
         if (!canMove) { setStatus('To move, install an operational thruster into the rocket (a thruster with all its supports satisfied).'); return; }
         moveRocket();
-      } else undoRocketMove();
+      } else if (!_online) {
+        // Solo: the spent move tag rewinds the move. Online undo lives on the
+        // dedicated ↩ undo tag (it can take back any action, not just a move).
+        undoRocketMove();
+      }
+    });
+  }
+  if (undoTag) {
+    undoTag.style.cursor = 'pointer';
+    onTap(undoTag, () => {
+      if (undoTag.disabled || undoTag.hidden) return;
+      undoLastAction();
     });
   }
   // Aqua balance chip - live-updates on any spend / income. Tapping
@@ -10077,7 +10129,7 @@ function repaintBoostCommit() {
   btn.disabled = n === 0;
   btn.textContent = n > 0 ? `🛰 BOOST → LEO 💧${cost}` : '🛰 BOOST → LEO';
   btn.title = n > 0
-    ? `Boost ${n} marked card${n === 1 ? '' : 's'} from your hand into the LEO Stack for ${cost} aqua (total mass). Costs one operation. Use the Transfer action at LEO to move them onto the rocket.`
+    ? `Boost ${n} marked card${n === 1 ? '' : 's'} from your hand into the LEO Stack for ${cost} aqua (total mass). The first boost each turn costs one operation; keep boosting free afterward. Use the Transfer action at LEO to move them onto the rocket.`
     : 'Mark cards in your hand, then press BOOST to ship them up to your LEO Stack.';
 }
 
@@ -11884,6 +11936,52 @@ async function undoRocketMove() {
   refreshOpenSitePopup();
   setStatus('🛸 Rocket move undone.');
   return true;
+}
+
+// Human label for one entry on the server's per-turn undo stack
+// ({ kind, payload, rolled }). Used by the ↩ undo affordances to name what
+// will be taken back ("Take back your boost"). Short + gameplay-worded.
+function describeTurnAction(a) {
+  if (!a || !a.kind) return 'last action';
+  return ({
+    MOVE: 'move',
+    BOOST: 'boost',
+    BUILD_ROCKET: 'card build',
+    BUY_CARD: 'card draw',
+    INDUSTRIALIZE: 'factory build',
+    BUILD_FACTORY: 'factory build',
+    ET_PRODUCE: 'ET production',
+    INCOME: 'income',
+    SITE_REFUEL: 'refuel',
+    DIRT_REFUEL: 'dirt refuel',
+    DELIVERY: 'delivery',
+    BUILD_COLONY: 'colony build',
+    TRANSFER: 'transfer',
+    TRANSFER_FUEL: 'fuel transfer',
+    DISSOLVE_OUTPOST: 'outpost scrap',
+    DECOMMISSION: 'decommission',
+    CONVERT_OUTPOST: 'outpost conversion',
+    REFUEL: 'refuel',
+    CASH_WATER: 'water cash-out',
+    FREE_MARKET: 'sale',
+    DISCARD: 'discard',
+    LOAD_GLORY: 'glory load',
+    SET_ACTIVE_THRUSTER: 'thruster swap',
+    SET_ACTIVE_PROSPECTOR: 'prospector swap',
+    SET_WIRING: 'rewire',
+  })[a.kind] || 'last action';
+}
+
+// Take back this turn's most recent action (server games only). The server
+// UNDO op rebuilds the turn from its start minus the last action; the snapshot
+// re-hydrate (applySnapshot) animates the rewind. The server refuses to undo
+// past a dice roll (prospect / hazard) and is frozen during auctions and
+// first-player handoffs - exactly the actions that can't be reversed - so the
+// boost / factory / ET-produce can come back while prospect / auction cannot.
+async function undoLastAction() {
+  if (!_online) return false;
+  if (!isOnlineMyTurn()) return false;
+  return await submitOnlineOp({ kind: 'UNDO' });
 }
 
 // Solo state change -> refresh the panel + the ship marker on the
@@ -14975,15 +15073,38 @@ async function paintOnlineMissionLog(host) {
         <span class="mp-log-when" title="${esc(whenTitle)}">${esc(when)}</span>
       </li>`;
     }).join('');
+  // Undo affordance: same gate as the toolbar ↩ undo tag. Server games only;
+  // unwinds this turn's most recent action unless it rolled the dice (prospect
+  // / hazard) or an auction / first-player handoff is open. Names what will be
+  // taken back so the player knows before tapping.
+  const acts = (_onlineSnapshot && Array.isArray(_onlineSnapshot.turnActions))
+    ? _onlineSnapshot.turnActions : [];
+  const lastAct = acts.length ? acts[acts.length - 1] : null;
+  const auctionOpen = !!(_onlineSnapshot && _onlineSnapshot.auction);
+  const handoffOpen = !!(_onlineSnapshot
+    && (_onlineSnapshot.pendingFirstPlayer || _onlineSnapshot.status === 'finished'));
+  const canUndo = !!lastAct && !lastAct.rolled && isOnlineMyTurn() && !auctionOpen && !handoffOpen;
+  const undoLabel = canUndo
+    ? `↩ Undo ${esc(describeTurnAction(lastAct))}`
+    : '↩ Undo last action';
+  const undoTip = (lastAct && lastAct.rolled)
+    ? 'A dice roll (prospect or hazard) can\'t be undone.'
+    : (auctionOpen ? 'You can\'t undo while an auction is open.'
+      : 'Take back your most recent action this turn.');
   host.innerHTML = `
     <div class="mp-log-head">
       <h3>📋 Mission log</h3>
       <p class="muted">Live from the server. Newest first.</p>
+      <div class="log-actions-bar">
+        <button class="popup-btn primary" id="mp-log-undo"
+          title="${esc(undoTip)}" ${canUndo ? '' : 'disabled'}>${undoLabel}</button>
+      </div>
     </div>
     <ul class="mp-log-list">
       ${rows || '<li class="mp-log-empty muted">No actions yet.</li>'}
     </ul>
   `;
+  host.querySelector('#mp-log-undo')?.addEventListener('click', () => { undoLastAction(); });
   // Clicking a linkified card name opens its read-only detail modal.
   // Delegated off the freshly-rendered list (re-bound each paint).
   const listEl = host.querySelector('.mp-log-list');

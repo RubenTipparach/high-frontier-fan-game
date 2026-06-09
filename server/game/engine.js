@@ -822,17 +822,32 @@ function applyBuildRocket(state, op, player) {
   return { ok: true, state, log: `${player.name} built ${card.name} onto the rocket.` };
 }
 
+// Has the active player already boosted this turn? Reads this turn's action
+// history (reset every turn, like the raygun-scan check) so the first boost
+// spends the operation and the rest ride free. The dispatcher records the
+// CURRENT op only after its handler returns, so this sees PRIOR boosts, not
+// the one in flight (mirrors hasProspectedThisTurn).
+function hasBoostedThisTurn(state) {
+  return Array.isArray(state.turnActions)
+    && state.turnActions.some((a) => a && a.kind === 'BOOST');
+}
+
 // Boost: move marked HAND cards up to the LEO Stack (rulebook I4,
-// the sandbox commitBoost flow). Costs 1 op + aqua equal to the total
-// mass of the boosted cards. The cards land in player.leo; from there
-// TRANSFER boards them onto the rocket while it's at LEO. This is the
-// op the sandbox BOOST button fires in online mode - without it the
-// boost was a purely local mutation the server never saw.
+// the sandbox commitBoost flow). Costs aqua equal to the total mass of the
+// boosted cards. Like the raygun scan, the FIRST boost of the turn spends the
+// turn's single operation to "open the launch window"; every later boost this
+// same turn rides up FREE (no operation), so a player can keep boosting once
+// they have begun. The cards land in player.leo; from there TRANSFER boards
+// them onto the rocket while it's at LEO. This is the op the sandbox BOOST
+// button fires in online mode - without it the boost was a purely local
+// mutation the server never saw.
 // op = { cardIds: [id, ...] }.
 function applyBoost(state, op, player) {
-  if (player.opsRemaining <= 0) return fail('no_ops_left');
   const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];
   if (!ids.length) return fail('nothing_to_boost');
+  // Free once the turn's boosting has begun (same economy as the raygun).
+  const free = hasBoostedThisTurn(state);
+  if (!free && player.opsRemaining <= 0) return fail('no_ops_left');
   // Every id must currently be in the hand.
   for (const id of ids) {
     if (player.hand.indexOf(id) < 0) return fail('not_in_hand');
@@ -848,11 +863,12 @@ function applyBoost(state, op, player) {
     player.leo.push({ id, kind: 'patent' });
   }
   player.aqua -= cost;
-  player.opsRemaining -= 1;
+  if (!free) player.opsRemaining -= 1;
   const n = ids.length;
+  const tail = free ? ' (continued boost, no operation)' : '';
   return {
     ok: true, state,
-    log: `${player.name} boosted ${n} card${n === 1 ? '' : 's'} to LEO for ${cost} aqua.`,
+    log: `${player.name} boosted ${n} card${n === 1 ? '' : 's'} to LEO for ${cost} aqua${tail}.`,
   };
 }
 
@@ -1774,14 +1790,24 @@ function describeAction(a) {
 // within a turn (END_TURN is never a turn action), so currentPlayer is
 // stable across the replay.
 function rebuildFromBase(baseState, actions) {
-  const s = clone(baseState);
+  let s = clone(baseState);
   s.turnActions = [];
   s.turnRedo = [];
   for (const a of actions) {
     const handler = FUNCTIONAL[a.kind];
     if (!handler) return null;
+    const cursorBefore = s.rng.cursor;
     const res = handler(s, { kind: a.kind, ...a.payload }, currentPlayer(s));
     if (!res.ok) return null;
+    s = res.state;
+    // Re-record each replayed action onto the turn history AS we go, exactly
+    // like the dispatcher does, so handlers that read turnActions during the
+    // replay see the same prior actions they saw the first time. This is what
+    // makes the "free after the first" economy (BOOST + the raygun PROSPECT
+    // scan) replay correctly: without it every replayed boost/scan would look
+    // like the turn's first and demand an operation that was already spent,
+    // failing the rebuild. The caller overwrites turnActions afterward.
+    s.turnActions.push({ kind: a.kind, payload: a.payload, rolled: s.rng.cursor !== cursorBefore });
   }
   return s;
 }
