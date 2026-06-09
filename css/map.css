@@ -4299,6 +4299,52 @@ body:has(#view-browse:not(.hidden)) #main {
   color: var(--accent);
 }
 
+/* Support wiring: one row per requirement group with more than one
+   candidate supplier. The player picks which card powers the support;
+   the chosen card joins the decommission list (radiators excepted). */
+.industrialize-wiring {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.industrialize-wire-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.industrialize-wire-row .wire-consumer { font-weight: 700; color: var(--ink); }
+.industrialize-wire-row .wire-needs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted, #94a3b8);
+  font-size: 12px;
+}
+.industrialize-wire-row .chain-picker-ic { font-style: normal; }
+.industrialize-wire-select {
+  margin-left: auto;
+  background: var(--bg-1, #0f1424);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+.industrialize-wire-select:hover { border-color: #3a4668; }
+
+.industrialize-warn.industrialize-invalid {
+  background: rgba(185, 28, 28, 0.14);
+  border-color: rgba(185, 28, 28, 0.5);
+  color: #fecaca;
+  font-size: 13px;
+}
+
 .industrialize-decom {
   list-style: none;
   margin: 0;
