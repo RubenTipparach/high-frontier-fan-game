@@ -11,7 +11,7 @@ import { erudaEnabled, setEruda } from '../debug-console.js';
 import { loadPlannerMap } from './planner-map.js';
 import { planRoute } from './planner-nav.js';
 import {
-  consumeMove, refundMove, getTurn, getMovesRemaining, onTurnChange,
+  consumeMove, refundMove, getTurn, getRound, getMovesRemaining, onTurnChange,
   getEventForRoll, getSeasonForSlot, getSeason, resetClock,
   getOpsRemaining, consumeOp,
   getDiscardsRemaining, consumeDiscard, formatTurnNumber,
@@ -23,14 +23,14 @@ import {
   prospect as soloProspect, endRound as soloEndRound,
   bindData as soloBindData, onChange as soloOnChange, SOLO_CONFIG,
 } from './solo.js';
-import { PATENTS, PATENTS_BY_ID, PATENT_TYPES, patentsByType } from '../../data/patents.js';
+import { PATENTS, PATENTS_BY_ID, PATENT_TYPES, patentsByType, radiatorRadHardness } from '../../data/patents.js';
 import {
   getHandSlots, isInHand, addToHand, removeFromHandAt, removeFromHand,
   clearHand, onHandChange,
   isBoostMarked, getBoostMarked, toggleBoostMark, clearBoostMarks,
 } from './hand.js';
 import {
-  getRocketStack, isInRocket, addToStack as rocketAddCard,
+  getRocketStack, isInRocket, addToStack as rocketAddCard, setRadiatorSide,
   removeFromStack as rocketRemoveCard, clearStack as rocketClearStack,
   onRocketChange, isRocketActive,
   getActiveThrusterId, setActiveThruster,
@@ -1386,14 +1386,24 @@ function computeSnapshotScore(snapshot, profileId) {
     const d = discs[id];
     if (d && d.outcome === 'success' && d.ownerId === profileId) claims += 1;
   }
-  const facs = Object.values(snapshot.factories || {}).filter((f) => f.ownerId === profileId);
+  const allFacs = Object.values(snapshot.factories || {});
+  const facs = allFacs.filter((f) => f.ownerId === profileId);
   const cols = Object.values(snapshot.colonies || {}).filter((c) => c.ownerId === profileId);
   const rocket = player && player.rocket && (player.rocket.stack || []).length > 0 ? 1 : 0;
   const outposts = player && player.outposts ? Object.keys(player.outposts).length : 0;
-  const byType = {};
-  for (const f of facs) { const t = f.spectralType || 'C'; byType[t] = (byType[t] || 0) + 1; }
+  // Exploitation track is GLOBAL: the market price per spectral comes from ALL
+  // players' factories of that spectral; the player scores it for each of their
+  // own. (Mirrors scoring.js#computeEndgameScore so the live panel and the
+  // final standings agree.)
+  const globalBySpec = {};
+  for (const f of allFacs) { const t = f.spectralType || 'C'; globalBySpec[t] = (globalBySpec[t] || 0) + 1; }
+  const lastRate = SPECTRAL_DIMINISHING_SCHEDULE[SPECTRAL_DIMINISHING_SCHEDULE.length - 1];
+  const priceFor = (n) => (n <= 0 ? 0
+    : (SPECTRAL_DIMINISHING_SCHEDULE[n - 1] != null ? SPECTRAL_DIMINISHING_SCHEDULE[n - 1] : lastRate));
+  const ownBySpec = {};
+  for (const f of facs) { const t = f.spectralType || 'C'; ownBySpec[t] = (ownBySpec[t] || 0) + 1; }
   let spectralBonus = 0;
-  for (const t in byType) spectralBonus += spectralVpForCount(byType[t]);
+  for (const t in ownBySpec) spectralBonus += ownBySpec[t] * priceFor(globalBySpec[t] || 0);
   let colonyVp = 0;
   for (const c of cols) colonyVp += (COLONY_VP[c.type] || COLONY_VP.other);
   const tokens = rocket + claims + facs.length + outposts;
@@ -2917,21 +2927,15 @@ function wireHandStrip() {
     const opNote = continuedBoost
       ? 'You already boosted this turn, so this rides up free (no operation).'
       : 'The first boost spends your operation; keep boosting free for the rest of the turn.';
-    const ok = await confirmModal({
-      title: '🛰 Boost to LEO',
-      body: `Boost <strong>${n}</strong> card${n === 1 ? '' : 's'} from your Hand to the LEO Stack `
-        + `for <strong>${cost}</strong> Aqua (total mass ${cost})? `
-        + `Bank: <strong>${have}</strong> → <strong>${have - cost}</strong>. ${opNote}`,
-      yes: `🛰 Boost (${cost} aqua)`,
-      no: 'Cancel',
-    });
-    if (!ok) return;
-    // Online: the BOOST is a server op. Submit the marked ids; the
-    // server moves Hand -> LEO, charges aqua, spends the op, and
-    // broadcasts. Skip the local mutation below - the snapshot
-    // re-hydrate is the source of truth (and other players see it).
+    const res = await openBoostModal({ cards, cost, have, opNote });
+    if (!res.ok) return;
+    const radSides = res.radSides || {};
+    // Online: the BOOST is a server op. Submit the marked ids + each radiator's
+    // chosen deployed side; the server moves Hand -> LEO, charges aqua, spends
+    // the op, locks the side, and broadcasts. Skip the local mutation below -
+    // the snapshot re-hydrate is the source of truth (and other players see it).
     if (_online) {
-      const sent = await submitOnlineOp({ kind: 'BOOST', cardIds: marked });
+      const sent = await submitOnlineOp({ kind: 'BOOST', cardIds: marked, radSides });
       if (sent) clearBoostMarks();
       return;
     }
@@ -2950,7 +2954,9 @@ function wireHandStrip() {
     for (const id of marked) {
       const card = lookup(id);
       if (!card) continue;
-      addCardToLeo({ id, kind: kindOf(id) });
+      // Lock the radiator's chosen deployed side into the LEO slot at boost.
+      const radSide = card.type === 'radiator' ? (radSides[id] || 'heavy') : undefined;
+      addCardToLeo({ id, kind: kindOf(id), radSide });
       removeFromHand(id);
     }
     clearBoostMarks();
@@ -3353,7 +3359,7 @@ function transferOneCard(sourceId, destId, cardId) {
       _rocketSiteId = sourceSiteId;
       persistRocketSite();
     }
-    added = rocketAddCard(slot.id, slot.kind, slot.face) !== -1;
+    added = rocketAddCard(slot.id, slot.kind, slot.face, slot.radSide) !== -1;
     if (!added && formingRocket) {
       _rocketSiteId = prevRocketSiteId;
       persistRocketSite();
@@ -3365,7 +3371,7 @@ function transferOneCard(sourceId, destId, cardId) {
   if (!added) {
     // Roll back to source on failure.
     if (sourceId === 'leo') addCardToLeo(slot);
-    else if (sourceId === 'rocket') rocketAddCard(slot.id, slot.kind, slot.face);
+    else if (sourceId === 'rocket') rocketAddCard(slot.id, slot.kind, slot.face, slot.radSide);
     else if (sourceId.startsWith('outpost')) {
       addCardToOutpost(sourceId.slice('outpost'.length), slot);
     }
@@ -3413,7 +3419,7 @@ function pullSlotFromStack(stackId, id) {
 // the hand).
 function readdSlotToStack(stackId, slot) {
   if (stackId === 'leo') addCardToLeo(slot);
-  else if (stackId === 'rocket') rocketAddCard(slot.id, slot.kind, slot.face);
+  else if (stackId === 'rocket') rocketAddCard(slot.id, slot.kind, slot.face, slot.radSide);
   else if (stackId.startsWith('outpost')) {
     addCardToOutpost(stackId.slice('outpost'.length), slot);
   }
@@ -4476,10 +4482,27 @@ function setRoutePriority(mode) {
   _routePriority = mode;
   try { localStorage.setItem(STORAGE_ROUTE_PRIORITY, mode); } catch {}
 }
+// Avoid-hazards planner toggle. When ON, the planner treats BOTH hazard burns
+// and radiation hazards as the dominant cost, routing around them even at the
+// price of extra burns / turns. Persisted per device.
+const STORAGE_ROUTE_AVOID_HAZARDS = 'hf-sandbox-route-avoid-hazards';
+let _routeAvoidHazards = (() => {
+  try { return localStorage.getItem(STORAGE_ROUTE_AVOID_HAZARDS) === '1'; }
+  catch { return false; }
+})();
+function setRouteAvoidHazards(on) {
+  _routeAvoidHazards = !!on;
+  try { localStorage.setItem(STORAGE_ROUTE_AVOID_HAZARDS, on ? '1' : '0'); } catch {}
+}
 function routeMetricPriority() {
-  return _routePriority === 'burns'
-    ? ['burns', 'turns', 'hazards', 'radHazards']
-    : ['turns', 'burns', 'hazards', 'radHazards'];
+  const base = _routePriority === 'burns' ? ['burns', 'turns'] : ['turns', 'burns'];
+  // The planner compares these metrics lexicographically, so the FIRST entry is
+  // the one it minimizes hardest. Avoid-hazards leads with hazards + radHazards
+  // (every hazard / rad-hazard node crossed outweighs any number of burns or
+  // turns); off, they stay the final tiebreaker, the old behaviour.
+  return _routeAvoidHazards
+    ? ['hazards', 'radHazards', ...base]
+    : [...base, 'hazards', 'radHazards'];
 }
 
 // Manual move mode. Alternative to the auto-planner: the player
@@ -4508,6 +4531,7 @@ let _manualOriginId = null;
 let _manualDir = null;          // direction we entered the tip on
 let _manualPivotsUsed = 0;
 let _manualPirouettes = 0;      // free pivots remaining (bonusPivots)
+let _manualBonus = 0;           // banked gravity-assist / slingshot credit
 // Solo manual travel: each hop slides the rocket sprite forward one segment so
 // the player watches the ship advance one segment at a time as they plot. The
 // state isn't committed until Move (one move per turn), so the commit animation
@@ -4541,6 +4565,7 @@ function enterManualMoveMode() {
   _manualDir = null;
   _manualPivotsUsed = 0;
   _manualPirouettes = activeThrusterBonusPivots();
+  _manualBonus = 0;
   const here = getRocketSite();
   _manualOriginId = here ? here.id : null;
   _plannedRoute = [];
@@ -4565,6 +4590,7 @@ function exitManualMoveMode() {
   _manualDir = null;
   _manualPivotsUsed = 0;
   _manualPirouettes = 0;
+  _manualBonus = 0;
   // Per-hop preview may have walked the sprite forward; if the player bailed
   // without committing a move, snap it back to the real rocket position.
   // (On a committed move moveRocket has already cleared _manualPreviewed, so
@@ -4587,11 +4613,14 @@ function manualMoveStatus() {
   const pirouetteHint = _manualPirouettes > 0
     ? ` <em class="muted">(${_manualPirouettes} free pivot${_manualPirouettes === 1 ? '' : 's'} ready)</em>`
     : '';
+  const flybyHint = _manualBonus > 0
+    ? ` <em class="muted">(+${_manualBonus} swing-by credit banked)</em>`
+    : '';
   const burnTag = `<strong>${planned}</strong> burn${planned === 1 ? '' : 's'} plotted`;
   if (_manualBudget <= 0) {
-    setStatus(`✋ Manual: ${burnTag}, <strong>0</strong>/${_manualBudgetMax} burns left. Tap <strong>🛸 Move</strong> to fly, or <strong>✕ Stop</strong>.`);
+    setStatus(`✋ Manual: ${burnTag}, <strong>0</strong>/${_manualBudgetMax} burns left.${flybyHint} Tap <strong>🛸 Move</strong> to fly, or <strong>✕ Stop</strong>.`);
   } else {
-    setStatus(`✋ Manual: ${burnTag}, <strong>${_manualBudget}</strong>/${_manualBudgetMax} burns left.${pirouetteHint} Tap a glowing node to advance one hop. <strong>🛸 Move</strong> to fly, <strong>✕ Stop</strong> to cancel.`);
+    setStatus(`✋ Manual: ${burnTag}, <strong>${_manualBudget}</strong>/${_manualBudgetMax} burns left.${pirouetteHint}${flybyHint} Tap a glowing node to advance one hop. <strong>🛸 Move</strong> to fly, <strong>✕ Stop</strong> to cancel.`);
   }
 }
 // Contracted "tap target" adjacency. The planner graph threads degree-2
@@ -4640,9 +4669,33 @@ function meaningfulNeighbors(tipId) {
   return out;
 }
 
+// Gravity-assist / slingshot credit a node grants when entered. Mirror of the
+// auto-planner's flybyBoost handling (planner-nav.js#getNeighbors): a Lagrange
+// swing-by (and, seasonally, a Venus flyby) banks a bonus that offsets later
+// burn + pivot costs. 'thrust' resolves to the active thruster's thrust. Venus
+// is gated OFF here to match the auto-planner, which builds with the default
+// 'red' season; the Lagrange rings always credit.
+function nodeFlybyBoost(node) {
+  if (!node) return 0;
+  const venusFlybyAvailable = false; // auto-planner default season is 'red'
+  const raw = (node.type === 'venus' && !venusFlybyAvailable) ? 0 : (node.flybyBoost ?? 0);
+  return raw === 'thrust' ? (_manualBudgetMax || 0) : (Number(raw) || 0);
+}
+// Total flyby credit banked by entering every node along a hop's path (its
+// destination plus any decorative bends it threads). The tip (path[0]) was
+// already entered on a prior hop, so it's excluded.
+function manualFlybyGain(path) {
+  if (!Array.isArray(path) || path.length < 2) return 0;
+  const points = (_activeData && _activeData.byId) || {};
+  let gain = 0;
+  for (let i = 1; i < path.length; i++) gain += nodeFlybyBoost(points[path[i]]);
+  return gain;
+}
 // Cost calculator for a single manual hop. Returns:
 //   { ok: false, reason } when the hop isn't allowed
-//   { ok: true, cost, isPivot, freePivot, newDir, path } when it is
+//   { ok: true, cost, gross, bonusSpent, flybyGained, bonusAfter, isPivot,
+//     freePivot, newDir, path } when it is. `cost` is the NET burns after the
+//   banked swing-by credit; `bonusAfter` is the credit carried to the next hop.
 function manualHopCost(tipId, toId) {
   if (!_activeData) return { ok: false, reason: 'no map data' };
   const points = _activeData.byId || {};
@@ -4684,10 +4737,29 @@ function manualHopCost(tipId, toId) {
   // Burn nodes carry an entry cost. Default 1; half-landers
   // print 2 on their second face. Everything else (Hohmann,
   // lagrange, regular site, radhaz, venus, decorative) is 0.
+  // An explicit landing touchdown is "protected": banked swing-by credit can't
+  // pay for it (mirror of planner-nav.js, where landing burns ignore the bonus).
+  // A default transit burn (landing == null) is offsettable like a pivot.
+  let protectedCost = 0;
   if (toNode.type === 'burn') {
-    cost += toNode.landing != null ? toNode.landing : 1;
+    if (toNode.landing != null) protectedCost += toNode.landing;
+    else cost += 1;
   }
-  return { ok: true, cost, isPivot, freePivot, newDir: arriveDir, path };
+  // Gravity-assist credit banked from earlier swing-bys offsets this hop's pivot
+  // + transit-burn cost (not the protected touchdown); whatever's left carries
+  // forward, plus any new boost this hop banks (credited to the NEXT hop,
+  // mirroring the auto-planner's bonus carry).
+  const offsettable = cost;
+  const gross = offsettable + protectedCost;
+  const bonusIn = _manualBonus || 0;
+  const bonusSpent = Math.min(bonusIn, offsettable);
+  const net = gross - bonusSpent;
+  const flybyGained = manualFlybyGain(path);
+  return {
+    ok: true, cost: net, gross, bonusSpent, flybyGained,
+    bonusAfter: bonusIn - bonusSpent + flybyGained,
+    isPivot, freePivot, newDir: arriveDir, path,
+  };
 }
 function manualAppendSegment(toId) {
   if (!_manualMode || !_activeData) return false;
@@ -4724,6 +4796,8 @@ function manualAppendSegment(toId) {
   _manualBudget -= r.cost;
   if (r.isPivot) _manualPivotsUsed += 1;
   _manualDir = r.newDir;
+  // Spend the credit this hop drew on and bank what the swing-by granted.
+  _manualBonus = r.bonusAfter;
   persistPlannedRoute();
   // Keep the server's copy of the plan in step with each manual hop.
   submitSetRouteOnline();
@@ -4846,15 +4920,15 @@ function ensureMapShell(host) {
   host.innerHTML = `
     <div class="map-toolbar">
       <div class="map-turn-controls">
+        <button id="turn-tracker" title="View turn tracker"
+          aria-label="View turn tracker">🕐</button>
         <button id="turn-end" title="End your turn"
           aria-label="End turn">⏭ End turn</button>
         <span id="turn-budget" class="map-turn-budget" aria-live="polite">
           <button type="button" class="turn-tag" id="turn-tag-move" title="Moves remaining this turn">move:1</button>
+          <button type="button" class="turn-tag turn-tag-gear" id="game-settings" title="Route options" aria-label="Route options">⚙</button>
           <button type="button" class="turn-tag turn-tag-undo" id="turn-tag-undo" title="Undo your last action this turn" hidden>↩ undo</button>
         </span>
-        <button id="turn-tracker" title="View turn tracker"
-          aria-label="View turn tracker">🕐</button>
-        <button type="button" class="turn-tag turn-tag-gear" id="game-settings" title="Game settings" aria-label="Game settings">⚙</button>
         <span id="aqua-chip" class="map-aqua-chip"
           title="Aqua balance - spend 4 aqua per hazard to bypass rolls, or convert 1:1 to water at LEO">
           💧 <strong id="aqua-chip-balance">${getAqua()}</strong>
@@ -5170,6 +5244,31 @@ function ensureMapShell(host) {
         : (auctionInProgress
           ? 'An auction is open - resolve it before ending your turn.'
           : (hasOps ? 'You still have an operation - tap to use it' : 'End your turn'));
+    }
+    // Calendar chip: the bare clock glyph hid the season, so show the
+    // current season + round next to a clock face whose hand points at this
+    // turn's slot on the dial (slot 0 = top = 12 o'clock), tinted the season
+    // colour. Reads "🕔 Yellow 4" = yellow season, round 4.
+    const trackerBtn = host.querySelector('#turn-tracker');
+    if (trackerBtn) {
+      let season = null;
+      try { season = getSeason(); } catch { season = null; }
+      const slot = getTurn() | 0;
+      const round = getRound();
+      const CLOCK_FACES = ['🕛', '🕐', '🕑', '🕒', '🕓', '🕔', '🕕', '🕖', '🕗', '🕘', '🕙', '🕚'];
+      const clk = CLOCK_FACES[((slot % 12) + 12) % 12];
+      if (season) {
+        const sName = season.name.charAt(0).toUpperCase() + season.name.slice(1);
+        trackerBtn.textContent = `${clk} ${sName} ${round}`;
+        trackerBtn.classList.add('has-season');
+        trackerBtn.style.setProperty('--season-color', season.color);
+        trackerBtn.title = `${season.label}, round ${round} - tap for the turn tracker`;
+      } else {
+        trackerBtn.textContent = clk;
+        trackerBtn.classList.remove('has-season');
+        trackerBtn.style.removeProperty('--season-color');
+        trackerBtn.title = 'View turn tracker';
+      }
     }
   }
   // Stash on the host so applySnapshot can re-trigger after a fresh
@@ -7166,6 +7265,16 @@ function radStackCards() {
     .map((slot) => {
       const patent = PATENTS_BY_ID[slot.id];
       if (patent) {
+        // A radiator's rad-hardness is its DEPLOYED side's (heavy is more
+        // fragile); a heavy one degrades to light instead of being lost.
+        if (patent.type === 'radiator') {
+          const rf = (slot.face === 'secondary' && patent.faces && patent.faces.secondary)
+            ? patent.faces.secondary : ((patent.faces && patent.faces.primary) || patent);
+          return {
+            id: slot.id, name: patent.name, type: 'radiator', radSide: slot.radSide || 'heavy',
+            radHardness: radiatorRadHardness(rf, slot.radSide),
+          };
+        }
         return { id: slot.id, name: patent.name, radHardness: patent.radHardness != null ? patent.radHardness : 0 };
       }
       const crew = CREW_BY_ID[slot.id];
@@ -8821,6 +8930,74 @@ function confirmModal({ title, body, yes = 'OK', no = 'Cancel' }) {
     panel.querySelector('[data-act="yes"]').addEventListener('click', () => close(true));
     const noEl = panel.querySelector('[data-act="no"]');
     if (noEl) noEl.addEventListener('click', () => close(false));
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+  });
+}
+
+// Boost confirm modal. Confirms the Aqua spend AND, for every radiator in the
+// batch, lets the player pick its deployed light/heavy side - the choice LOCKS
+// at construction (only radiation damage flips heavy -> light afterward), so
+// this popup is the one chance to set it. Resolves { ok, radSides } where
+// radSides maps each radiator id to 'light' | 'heavy' (default 'heavy', the
+// max-cooling side). Cancel resolves { ok: false }.
+function openBoostModal({ cards, cost, have, opNote }) {
+  return new Promise((resolve) => {
+    document.querySelector('.confirm-modal-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay';
+    const radiators = (cards || []).filter((c) => c && c.type === 'radiator');
+    const sides = {};
+    for (const c of radiators) sides[c.id] = 'heavy';
+    const close = (ok) => {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(ok ? { ok: true, radSides: sides } : { ok: false });
+    };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+    const onKey = (e) => {
+      if (e.key === 'Escape') close(false);
+      else if (e.key === 'Enter') close(true);
+    };
+    document.addEventListener('keydown', onKey);
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel';
+    const n = (cards || []).length;
+    const sideTherms = (c, which) => {
+      const f = (c.faces && c.faces.primary) || c;
+      const blk = f[which];
+      return (blk && blk.therms != null) ? blk.therms : 0;
+    };
+    const radRows = radiators.map((c) => `
+      <div class="boost-rad-row" data-id="${esc(c.id)}">
+        <span class="boost-rad-name">${esc(c.name)}</span>
+        <div class="boost-rad-toggle">
+          <button type="button" class="boost-rad-side" data-side="light">Light (${sideTherms(c, 'light')}🌡)</button>
+          <button type="button" class="boost-rad-side is-active" data-side="heavy">Heavy (${sideTherms(c, 'heavy')}🌡)</button>
+        </div>
+      </div>`).join('');
+    panel.innerHTML = `
+      <h3>🛰 Boost to LEO</h3>
+      <p>Boost <strong>${n}</strong> card${n === 1 ? '' : 's'} from your Hand to the LEO Stack
+        for <strong>${cost}</strong> Aqua (total mass ${cost}).
+        Bank: <strong>${have}</strong> → <strong>${have - cost}</strong>. ${opNote || 'The first boost spends your operation; keep boosting free for the rest of the turn.'}</p>
+      ${radiators.length ? `<p class="muted boost-rad-help">Pick each radiator's deployed side - it locks once boosted (only radiation damage can flip heavy to light afterward):</p>
+      <div class="boost-rad-list">${radRows}</div>` : ''}
+      <div class="turn-confirm-actions">
+        <button type="button" class="popup-btn primary" data-act="yes">🛰 Boost (${cost} aqua)</button>
+        <button type="button" class="popup-btn" data-act="no">Cancel</button>
+      </div>`;
+    panel.querySelectorAll('.boost-rad-row').forEach((row) => {
+      const id = row.dataset.id;
+      row.querySelectorAll('.boost-rad-side').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          sides[id] = btn.dataset.side === 'light' ? 'light' : 'heavy';
+          row.querySelectorAll('.boost-rad-side').forEach((b) => b.classList.toggle('is-active', b === btn));
+        });
+      });
+    });
+    panel.querySelector('[data-act="yes"]').addEventListener('click', () => close(true));
+    panel.querySelector('[data-act="no"]').addEventListener('click', () => close(false));
     overlay.appendChild(panel);
     mountOverlay(overlay);
   });
@@ -11576,11 +11753,20 @@ async function runMoveQueue(ctx, resuming) {
         if (decommission && decommission.length) {
           let lost = 0;
           let crewToLeo = 0;
+          let degraded = 0;
           for (const cardId of decommission) {
             const stack = getRocketStack();
             const ridx = stack.findIndex((s) => s.id === cardId);
             if (ridx < 0) continue;
             const slot = stack[ridx];
+            // A heavy-side radiator degrades to its light side instead of being
+            // lost (the one exception to the construction-time side lock).
+            const radCard = PATENTS_BY_ID[cardId];
+            if (radCard && radCard.type === 'radiator' && slot.radSide !== 'light') {
+              setRadiatorSide(cardId, 'light');
+              degraded++;
+              continue;
+            }
             const isCrew = slot.kind === 'crew' || CREW.some((c) => c.id === cardId);
             rocketRemoveCard(ridx);
             if (isCrew) {
@@ -11597,9 +11783,10 @@ async function runMoveQueue(ctx, resuming) {
             type: 'rad_decommission',
             icon: '☢',
             summary: `☢ ${esc(hazard.site.name)}: ${lost} card${lost === 1 ? '' : 's'} decommissioned to hand`
-              + (crewToLeo ? `, ${crewToLeo} crew to LEO stack` : ''),
+              + (crewToLeo ? `, ${crewToLeo} crew to LEO stack` : '')
+              + (degraded ? `, ${degraded} radiator${degraded === 1 ? '' : 's'} degraded to light` : ''),
             undoable: false,
-            data: { siteId: hazard.site.id, decommission, count: lost, crewToLeo },
+            data: { siteId: hazard.site.id, decommission, count: lost, crewToLeo, degraded },
           });
         }
       }
@@ -12308,6 +12495,15 @@ function openRouteOptionsModal(onClose) {
         </div>
       </label>
     </div>
+    <label class="route-options-choice route-options-avoid ${_routeAvoidHazards ? 'is-active' : ''}">
+      <input type="checkbox" name="route-avoid-hazards"
+        ${_routeAvoidHazards ? 'checked' : ''}>
+      <div>
+        <strong>☢ Avoid hazards</strong>
+        <em>Route around radiation belts and hazard burns wherever a path
+        exists, even when the detour costs extra burns or turns.</em>
+      </div>
+    </label>
     <div class="route-options-manual">
       <button type="button" class="popup-btn route-options-manual-btn">
         ✋ Manual move - plot ${thrust} hops by hand
@@ -12346,14 +12542,23 @@ function openRouteOptionsModal(onClose) {
     el.addEventListener('change', () => {
       if (el.checked) {
         setRoutePriority(el.value);
-        // Repaint highlight state on the labels.
-        panel.querySelectorAll('.route-options-choice').forEach((c) => {
+        // Repaint highlight state on the radio labels only.
+        panel.querySelectorAll('.route-options-choice:not(.route-options-avoid)').forEach((c) => {
           c.classList.toggle('is-active',
             c.querySelector('input').value === _routePriority);
         });
+        replanCurrentRoute();
       }
     });
   });
+  const avoidEl = panel.querySelector('input[name="route-avoid-hazards"]');
+  if (avoidEl) {
+    avoidEl.addEventListener('change', () => {
+      setRouteAvoidHazards(avoidEl.checked);
+      avoidEl.closest('.route-options-avoid').classList.toggle('is-active', avoidEl.checked);
+      replanCurrentRoute();
+    });
+  }
   panel.querySelector('.route-options-manual-btn').addEventListener('click', () => {
     close();
     // Close the underlying site popup too - manual mode plots
@@ -12971,6 +13176,14 @@ function canPlanRocketRoute() {
 // old nav.js was a flat Dijkstra over dv values and got all of
 // those wrong. Per-turn burn budget = the active thruster's
 // thrust value (defaults to 4 when no thruster is active).
+// Re-plan the route currently on screen (if any) after a planner setting
+// changes - priority or avoid-hazards - so the toggle takes effect at once
+// instead of waiting for the next destination pick. No-op in manual mode or
+// when no auto route is plotted.
+function replanCurrentRoute() {
+  if (_manualMode || !_routeTo) return;
+  try { planRocketRouteTo(_routeTo); } catch (e) { console.error('replan route:', e); }
+}
 function planRocketRouteTo(destSite) {
   if (!_renderer || !_activeData) return false;
   // Origin = wherever the rocket currently is (default LEO). Once
@@ -14674,8 +14887,9 @@ function paintGlory() {
 
   // --- Spectrum exploitation track ----------------------------------
   // One column per spectral; a translucent red disc sits on the cell
-  // matching the factory count (1 -> 8, 2 -> 5, 3+ -> 4). 0 factories
-  // -> no disc. Steps down as more factories of that spectral land.
+  // matching the GLOBAL factory count for that spectral (every player's,
+  // 1 -> 8, 2 -> 5, 3+ -> 4). 0 factories anywhere -> no disc. Steps down
+  // as more factories of that spectral land, whoever builds them.
   const SPECTRALS = ['C', 'S', 'M', 'V', 'D', 'H'];
   const spectrumCols = SPECTRALS.map((spec) => {
     const n  = score.spectralBonus.perSpectralCount?.[spec] || 0;
@@ -14741,8 +14955,10 @@ function paintGlory() {
       <h4>Spectrum exploitation track</h4>
       <div class="spectrum-tracker">${spectrumCols}</div>
       <p class="muted glory-rules glory-schedule-hint">
-        Factories per spectral. The disc steps down the track:
-        ${esc(scheduleHint)} VP. Spectral total +${score.spectralBonus.total} VP (rulebook M2b).
+        Every player's factories of each spectral - the whole game's, not just
+        yours - step the shared disc down the track: ${esc(scheduleHint)} VP per
+        factory at that market price. You score it for your own factories:
+        spectral total +${score.spectralBonus.total} VP (rulebook M2b).
       </p>
 
       <h4>Tokens on the map (+1 each)</h4>

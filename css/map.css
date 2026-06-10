@@ -107,6 +107,15 @@
   background: var(--panel-2);
   color: var(--ink);
 }
+/* Calendar chip: season name + round beside a clock face, tinted the season
+   colour (set inline by refreshTurnBudget) so the calendar season reads at a
+   glance instead of hiding behind a bare clock glyph. */
+.map-turn-controls #turn-tracker.has-season {
+  background: color-mix(in srgb, var(--season-color, #888) 18%, var(--panel-2));
+  border-color: color-mix(in srgb, var(--season-color, #888) 60%, var(--border));
+  font-weight: 600;
+  white-space: nowrap;
+}
 .map-turn-controls #turn-end {
   /* Seat-colour fill: the active player's colour (--mp-turn-color, set by
      refreshTurnBudget; falls back to the default orange). The translucent
@@ -199,11 +208,14 @@
   .aqua-gain-float { animation: none; opacity: 0; }
 }
 /* Per-turn budget tag: [move:N]. A compact status chip that sits
-   right next to the End turn / Ops button. */
+   right next to the End turn / Ops button. The move tag and its
+   route-options gear are WELDED into one segmented rectangle (gap 0,
+   flat inner corners, shared seam), so they read as a single "move +
+   its settings" control rather than two loose chips. */
 .map-turn-budget {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 0;
 }
 .map-turn-budget .turn-tag {
   font: inherit;
@@ -230,6 +242,12 @@
   border-color: #7dd3fc;
 }
 #turn-tag-move:hover { filter: brightness(1.1); }
+/* Weld: the move tag keeps its left corners rounded and flattens its right
+   edge into the seam shared with the gear. */
+.map-turn-budget #turn-tag-move {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
 /* Once the move is spent the move tag becomes the "↩ undo move" control
    - solid amber so it reads as a distinct (reversible) action, not a budget. */
 #turn-tag-move.is-undo {
@@ -254,10 +272,10 @@
 }
 #turn-tag-undo:hover { filter: brightness(1.1); }
 #turn-tag-undo:disabled { opacity: 0.5; cursor: default; }
-/* Game-settings gear: a standalone toolbar chip (route + fuel options).
-   No longer welded to the move tag, so it carries its own rounded
-   profile, border, and sizing. It is not a budget point, so it never
-   pulses or fades. */
+/* Route-options gear: the right half of the welded move control (route +
+   fuel options for the move beside it). It shares the move tag's right edge
+   as the seam (no left border, flat left corners) so the pair reads as one
+   rectangle. It is not a budget point, so it never pulses or fades. */
 .map-turn-controls .turn-tag-gear {
   background: var(--bg-2, #14233a);
   color: var(--ink-dim, #9fb3cc);
@@ -267,6 +285,11 @@
   -webkit-appearance: none;
   appearance: none;
   touch-action: manipulation;
+}
+.map-turn-budget .turn-tag-gear {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: none;
 }
 .map-turn-controls .turn-tag-gear:hover { filter: brightness(1.25); }
 /* Pulse the budget tags while their action is still available
@@ -578,6 +601,38 @@
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+/* Boost popup: per-radiator deployed-side picker (light/heavy). The chosen
+   side locks at construction, so this segmented toggle is the one place to set
+   it. Active side is the filled cyan half; the other reads as a ghost button. */
+.boost-rad-help { margin: 4px 0 8px; font-size: 12px; }
+.boost-rad-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.boost-rad-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.boost-rad-name { font-size: 13px; font-weight: 600; color: var(--ink); }
+.boost-rad-toggle { display: inline-flex; }
+.boost-rad-side {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--ink-dim, #9fb3cc);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.boost-rad-side:first-child { border-radius: 7px 0 0 7px; }
+.boost-rad-side:last-child { border-radius: 0 7px 7px 0; border-left: none; }
+.boost-rad-side.is-active {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(0, 0, 0, 0.28)), #0ea5e9;
+  color: #f0f9ff;
+  border-color: #7dd3fc;
 }
 
 /* Dump-water stepper modal. Sits above the fuel-tank modal that
@@ -2437,6 +2492,13 @@
   color: var(--ink-dim);
   font-size: 11px;
   line-height: 1.45;
+}
+/* Avoid-hazards checkbox sits below the two priority radios; amber active tint
+   marks it as a hazard control rather than a priority pick. */
+.route-options-avoid { margin-top: 8px; }
+.route-options-avoid.is-active {
+  border-color: rgba(251, 191, 36, 0.7);
+  background: rgba(251, 191, 36, 0.12);
 }
 .route-options-manual {
   margin-top: 14px;

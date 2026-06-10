@@ -253,11 +253,16 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     return face;
   }
 
-  // Show the thrust triangle on any card that carries a thrust
-  // value - that includes Missile-type robonauts (the spreadsheet
-  // gives them their own Thrust / Fuel / Afterburn under the
-  // "Thruster" banner), GW Thrusters, etc.
-  const isThruster = card.type === 'thruster' || card.thrust != null;
+  // Show the thrust triangle on any card whose CURRENT face carries a thrust
+  // value - that includes Missile-type robonauts (the spreadsheet gives them
+  // their own Thrust / Fuel / Afterburn under the "Thruster" banner), GW
+  // Thrusters, and cards that only gain thrust on their BLACK side (Rock
+  // Splitter flips to MagBeam, thrust 4). Read the per-FACE thrust, not the
+  // card-level (primary) value, so a black-side-only thruster still draws its
+  // triangle on the face that actually has the thrust.
+  const faceData = (card.faces && card.faces[sideName]) || {};
+  const faceThrust = faceData.thrust != null ? faceData.thrust : card.thrust;
+  const isThruster = card.type === 'thruster' || faceThrust != null;
   face.innerHTML = `
     <div class="card-typebar"></div>
     <div class="card-name-row"><span class="card-name"></span></div>
@@ -287,7 +292,6 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   // For cards that don't supply chips (thrusters, refineries,
   // robonauts) we fall back to the card-type icon.
   const tbar = face.querySelector('.card-typebar');
-  const faceData = (card.faces && card.faces[sideName]) || {};
   const supplies = faceData.supplies || card.supplies || [];
   // The leading glyph row uses the custom support icons (reactor squares /
   // generator circles / therm badge / robonaut prospector squares), falling

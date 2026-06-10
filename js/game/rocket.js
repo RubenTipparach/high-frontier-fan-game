@@ -291,7 +291,7 @@ export function isInRocket(id) {
   return _stack.some((s) => s.id === id);
 }
 
-export function addToStack(cardId, kind, face) {
+export function addToStack(cardId, kind, face, radSide) {
   if (!cardId) return -1;
   // Expansion cards (currently GW thrusters) are previewable in
   // the library but cannot be flown until the expansion ships.
@@ -304,6 +304,11 @@ export function addToStack(cardId, kind, face) {
   // Crew carries its picked faction face; preserve it so the
   // right face's thruster / prospector is in play.
   if (face === 'secondary') slot.face = 'secondary';
+  // Radiators deploy on a locked light/heavy side, chosen at construction.
+  // Default to heavy (max cooling) when the caller didn't pass one.
+  if (card && card.type === 'radiator') {
+    slot.radSide = radSide === 'light' ? 'light' : 'heavy';
+  }
   _stack.push(slot);
   // First thruster added auto-selects as the active thruster
   // so the rocket has a sensible default. The player can
@@ -326,6 +331,24 @@ export function addToStack(cardId, kind, face) {
   notify();
   return _stack.length - 1;
 }
+
+// Flip a radiator slot's deployed light/heavy side. Normal play LOCKS the side
+// at construction; this is the ONE exception - radiation damage degrades a
+// heavy radiator down to its light side instead of destroying it. Returns true
+// when a radiator slot actually changed side.
+export function setRadiatorSide(id, side) {
+  const slot = _stack.find((s) => s.id === id);
+  if (!slot) return false;
+  const card = cardById(id);
+  if (!card || card.type !== 'radiator') return false;
+  const next = side === 'light' ? 'light' : 'heavy';
+  if (slot.radSide === next) return false;
+  slot.radSide = next;
+  persist();
+  notify();
+  return true;
+}
+
 // Compute dry mass from the current stack. Mirrors the math in
 // getStackTotals() but kept tight + non-allocating so the
 // addToStack safety clip stays cheap.
@@ -890,7 +913,7 @@ function chainCardsFromStack() {
       requires: (f && f.requires) || (card && card.requires) || [],
       thrustMod: f ? f.thrustMod : undefined,
       fuelMod: f ? f.fuelMod : undefined,
-      therms: type === 'radiator' ? thermsSupplied(card, f) : thermsRequired(f),
+      therms: type === 'radiator' ? thermsSupplied(card, f, slot.radSide) : thermsRequired(f),
     };
   });
 }

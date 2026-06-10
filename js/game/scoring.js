@@ -3,14 +3,17 @@
 // Computes the player's "if the game ended now" VP breakdown.
 // Per the variant spec (industrialize.md "VP timing"):
 //   - +1 VP per owned token on the map: rocket (if built),
-//     successful claims (discs), factories, colony domes, and
-//     outposts.
-//   - Spectral-based stock-price bonus per factory (rulebook M2b
-//     Exploitation Track). Each spectral has its own diminishing
-//     schedule: the 1st factory of spectral X pays 8 VP, the
-//     2nd pays 5 VP, the 3rd and every subsequent factory pay
-//     4 VP each. Schedule is the same for all six spectrals
-//     (C / S / M / V / D / H).
+//     your successful claims (discs), your factories, colony
+//     domes, and outposts.
+//   - Spectral-based stock-price bonus (rulebook M2b Exploitation
+//     Track). The track is GLOBAL: every player's factory of a
+//     spectral advances that spectral's shared disc and lowers its
+//     price. Each spectral's diminishing schedule is 8 / 5 / 4 (the
+//     market price once 1 / 2 / 3+ factories of that spectral exist
+//     ANYWHERE). The player scores that price for each of THEIR OWN
+//     factories of the spectral, so a rival building a factory of
+//     your spectral moves your track and trims your payout. Schedule
+//     is the same for all six spectrals (C / S / M / V / D / H).
 //   - Career glory VP (the live glory.js counter) is added on
 //     top so the panel shows a single grand total.
 //
@@ -25,7 +28,9 @@
 //                                    of one spectral
 //   computeEndgameScore({ ownerId }) -> {
 //     tokens: { rocket, claims, factories, colonies, outposts, total },
-//     spectralBonus: { byType: { C, S, M, V, D, H }, perSpectralCount, total },
+//     spectralBonus: { byType, perSpectralCount (GLOBAL, drives the track
+//                      disc), ownPerSpectralCount (this player's holdings),
+//                      total },
 //     glory,
 //     grandTotal,
 //   }
@@ -65,25 +70,28 @@ export const COLONY_VP = { astrobiology: 1, submarine: 2, bernal: 2, other: 1 };
 
 export function computeEndgameScore({ ownerId, colonyTypeOf } = {}) {
   // Tokens: rocket counts if the player has any cards in it.
-  // Claims count every success disc on the map (sandbox: all
-  // discs belong to the local player; multi-player will gate on
-  // disc.ownerId once that's modelled).
   const rocketCount = getRocketStack().length > 0 ? 1 : 0;
 
+  // Claims: each success disc scores +1 for ITS owner. Solo discs carry no
+  // ownerId (every disc is the local player's), so a missing ownerId counts;
+  // in multiplayer only the local player's success discs count as their claims.
   const discs = getDiscs() || {};
   let claimCount = 0;
   for (const id in discs) {
-    if (discs[id]?.outcome === 'success') claimCount++;
+    const d = discs[id];
+    if (d && d.outcome === 'success'
+        && (!ownerId || d.ownerId == null || d.ownerId === ownerId)) claimCount++;
   }
 
   const factories = allFactories();
   const colonies  = allColonies();
   const outpostsMap = getOutposts();
 
-  // Owner filtering. If ownerId is omitted we count every
-  // record (handy for stats); when provided we restrict to
-  // that owner.
-  const factoryRecs  = ownerId ? factories.filter((f) => f.ownerId === ownerId) : factories;
+  // Owner filtering for the player's OWN tokens (+1 each). The exploitation
+  // track, though, is a GLOBAL market: every player's factory of a spectral
+  // pushes the same track, so its disc position + per-factory price are read
+  // from ALL factories on the map, not just this player's.
+  const ownFactories = ownerId ? factories.filter((f) => f.ownerId === ownerId) : factories;
   const colonyRecs   = ownerId ? colonies.filter((c)  => c.ownerId === ownerId) : colonies;
   const outpostList  = Object.values(outpostsMap);
 
@@ -101,25 +109,36 @@ export function computeEndgameScore({ ownerId, colonyTypeOf } = {}) {
   let colonyVp = 0;
   for (const [t, n] of Object.entries(colonyByType)) colonyVp += n * (COLONY_VP[t] || 1);
 
-  // Token total: +1 per rocket / claim / factory / outpost.
+  // Token total: +1 per rocket / claim / OWN factory / outpost.
   // Colonies are scored separately (by location type) below.
   const tokensTotal =
-    rocketCount + claimCount + factoryRecs.length + outpostList.length;
+    rocketCount + claimCount + ownFactories.length + outpostList.length;
 
-  // Group factories by spectral, then apply the diminishing
-  // schedule per group. Total per spectral and grand total are
-  // both surfaced; the panel uses both (per-spectral row for
-  // the breakdown, grand total for the headline number).
-  const perSpectralCount = { C: 0, S: 0, M: 0, V: 0, D: 0, H: 0 };
-  for (const f of factoryRecs) {
-    if (perSpectralCount[f.spectralType] != null) {
-      perSpectralCount[f.spectralType]++;
-    }
+  // Exploitation track (GLOBAL): the disc for each spectral sits at the total
+  // count of that spectral's factories across ALL players, and the per-factory
+  // market price is the diminishing schedule clamped to that count (more
+  // factories of a spectral anywhere => a lower price). The player then scores
+  // that price for each of THEIR OWN factories of the spectral, so an opponent
+  // building a factory of your spectral moves your track and trims your price.
+  const SPECS = ['C', 'S', 'M', 'V', 'D', 'H'];
+  const globalPerSpectral = { C: 0, S: 0, M: 0, V: 0, D: 0, H: 0 };
+  for (const f of factories) {
+    if (globalPerSpectral[f.spectralType] != null) globalPerSpectral[f.spectralType]++;
   }
+  const ownPerSpectral = { C: 0, S: 0, M: 0, V: 0, D: 0, H: 0 };
+  for (const f of ownFactories) {
+    if (ownPerSpectral[f.spectralType] != null) ownPerSpectral[f.spectralType]++;
+  }
+  const lastRate = SPECTRAL_DIMINISHING_SCHEDULE[SPECTRAL_DIMINISHING_SCHEDULE.length - 1];
+  const priceFor = (globalCount) => {
+    if (globalCount <= 0) return 0;
+    return SPECTRAL_DIMINISHING_SCHEDULE[globalCount - 1] != null
+      ? SPECTRAL_DIMINISHING_SCHEDULE[globalCount - 1] : lastRate;
+  };
   const byType = { C: 0, S: 0, M: 0, V: 0, D: 0, H: 0 };
   let spectralTotal = 0;
-  for (const [spec, n] of Object.entries(perSpectralCount)) {
-    const vp = spectralVpForCount(n);
+  for (const spec of SPECS) {
+    const vp = ownPerSpectral[spec] * priceFor(globalPerSpectral[spec]);
     byType[spec] = vp;
     spectralTotal += vp;
   }
@@ -131,7 +150,7 @@ export function computeEndgameScore({ ownerId, colonyTypeOf } = {}) {
     tokens: {
       rocket: rocketCount,
       claims: claimCount,
-      factories: factoryRecs.length,
+      factories: ownFactories.length,
       outposts: outpostList.length,
       total: tokensTotal,
     },
@@ -141,8 +160,9 @@ export function computeEndgameScore({ ownerId, colonyTypeOf } = {}) {
       vp: colonyVp,
     },
     spectralBonus: {
-      byType,
-      perSpectralCount,
+      byType,                              // the player's VP per spectral (own holdings @ market price)
+      perSpectralCount: globalPerSpectral, // GLOBAL count - drives the track disc
+      ownPerSpectralCount: ownPerSpectral, // the player's own holdings per spectral
       total: spectralTotal,
     },
     glory,

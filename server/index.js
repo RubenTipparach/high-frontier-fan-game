@@ -914,17 +914,20 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   // Out-of-band "the game started, pick your crew" DM to every seat
   // (opt-in, inert without a bot). The game opens in the crew-draft
   // phase, so the first thing each player owes the table is a faction
-  // pick - notify them the same way a turn handoff does.
+  // pick - notify them the same way a turn handoff does. Skipped for a
+  // solo table (no one else to tell; you're already here).
   try {
-    const nm = gameDisplayName(gameId);
-    const url = gameRoomUrl(gameId);
-    const jump = url ? `\n▶ Play now: ${url}` : '';
-    if (discordEnabled()) {
-      for (const p of state.players) {
-        notifyProfile(p.profileId, 'turn', `🧑‍🚀 ${nm} is starting - pick your crew.${jump}`);
+    if (!isSoloGame(state)) {
+      const nm = gameDisplayName(gameId);
+      const url = gameRoomUrl(gameId);
+      const jump = url ? `\n▶ Play now: ${url}` : '';
+      if (discordEnabled()) {
+        for (const p of state.players) {
+          notifyProfile(p.profileId, 'turn', `🧑‍🚀 ${nm} is starting - pick your crew.${jump}`);
+        }
       }
+      notifyWebhook(`🧑‍🚀 **${nm}** has started - crew draft is open.${jump}`);
     }
-    notifyWebhook(`🧑‍🚀 **${nm}** has started - crew draft is open.${jump}`);
   } catch (e) {
     console.warn('[notify] crew-draft dispatch error', e && e.message);
   }
@@ -1138,6 +1141,13 @@ function gameReminders(gameId) {
 // inside this window. One 3h window for everything, auctions included.
 const REMIND_COOLDOWN_MS = 3 * 60 * 60 * 1000; // 3 hours
 
+// A single-seat game has no one else to hand off to, so turn / auction / start
+// notifications would only ping the player about their own game. Suppress every
+// out-of-band notification (DM + webhook) when the table is solo.
+function isSoloGame(state) {
+  return !state || !Array.isArray(state.players) || state.players.length <= 1;
+}
+
 // After an op commits: DM the newly-active player on END_TURN, and the
 // other players when an auction opens. (One event => one DM each, so the
 // natural cadence is the throttle.) A configured channel webhook also
@@ -1146,6 +1156,7 @@ const REMIND_COOLDOWN_MS = 3 * 60 * 60 * 1000; // 3 hours
 function dispatchTurnNotifications(gameId, kind, state) {
   try {
     if (!state || !Array.isArray(state.players)) return;
+    if (isSoloGame(state)) return;
     const dmOn = discordEnabled();
     const name = gameDisplayName(gameId);
     const url = gameRoomUrl(gameId);
