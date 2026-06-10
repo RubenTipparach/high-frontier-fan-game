@@ -15227,22 +15227,70 @@ function openCardInfoModal(card) {
   document.addEventListener('keydown', onKey);
 }
 
+// Mission-log page cache. The server hands out pages of the 100 most recent
+// ops; older pages stream in on demand as the player scrolls down (the list is
+// newest-first, so history grows at the BOTTOM). The cache survives the 5s
+// poll repaint - a poll merges only the newest page, so older pages the player
+// already scrolled in are never thrown away. Reset whenever the game changes.
+let _mpLogCache = { gameId: null, bySeq: new Map(), hasOlder: false, loadingOlder: false };
+
 async function paintOnlineMissionLog(host) {
   if (!_online || !_onlineGameId || !_onlineMe) {
     host.innerHTML = '<p class="muted">Mission log will appear once the game starts.</p>';
     return;
   }
-  // Preserve any previous render's scroll position so the user
-  // doesn't get yanked to the top on every poll tick.
-  const list = host.querySelector('.mp-log-list');
-  const scrollTop = list ? list.scrollTop : null;
+  if (_mpLogCache.gameId !== _onlineGameId) {
+    _mpLogCache = { gameId: _onlineGameId, bySeq: new Map(), hasOlder: false, loadingOlder: false };
+  }
+  const firstLoad = _mpLogCache.bySeq.size === 0;
   const r = await getGameOps(_onlineGameId, {}, _onlineMe.token);
   if (!_online) return; // unmounted mid-fetch
   if (!r || !r.ok) {
-    host.innerHTML = '<p class="muted">Could not load mission log.</p>';
+    // Keep showing the cached log on a failed poll; only an empty cache
+    // (nothing to show at all) surfaces the load error.
+    if (firstLoad) host.innerHTML = '<p class="muted">Could not load mission log.</p>';
     return;
   }
-  const entries = (r.data && r.data.entries) || [];
+  for (const e of (r.data && r.data.entries) || []) _mpLogCache.bySeq.set(e.seq, e);
+  // hasOlder tracks the OLDEST end of the cache. The first page defines it;
+  // later polls return the same newest window, which says nothing about
+  // history below pages already loaded, so only the older-page fetches
+  // (loadOlderMissionLog) move it after this.
+  if (firstLoad) _mpLogCache.hasOlder = !!(r.data && r.data.hasMore);
+  renderOnlineMissionLog(host);
+}
+
+// Fetch the next page DOWN (the 100 ops below the oldest already loaded).
+// Triggered by the infinite-scroll handler when the player nears the bottom.
+async function loadOlderMissionLog(host) {
+  if (!_online || !_onlineGameId || !_onlineMe) return;
+  if (_mpLogCache.loadingOlder || !_mpLogCache.hasOlder || !_mpLogCache.bySeq.size) return;
+  const oldest = Math.min(..._mpLogCache.bySeq.keys());
+  _mpLogCache.loadingOlder = true;
+  renderOnlineMissionLog(host);   // shows the "loading older" footer row
+  try {
+    const r = await getGameOps(_onlineGameId, { before: oldest }, _onlineMe.token);
+    if (!_online) return;
+    if (r && r.ok) {
+      const got = (r.data && r.data.entries) || [];
+      for (const e of got) _mpLogCache.bySeq.set(e.seq, e);
+      _mpLogCache.hasOlder = !!(r.data && r.data.hasMore) && got.length > 0;
+    }
+    // On a failed fetch hasOlder stays true - the next scroll retries.
+  } finally {
+    _mpLogCache.loadingOlder = false;
+  }
+  renderOnlineMissionLog(host);
+}
+
+// Pure render of the cached entries (no fetch). Newest first; older history
+// continues below, ending in a "mission start" marker once fully loaded.
+function renderOnlineMissionLog(host) {
+  // Preserve the previous render's scroll position so the user isn't yanked
+  // to the top on every poll tick. Appending older entries below doesn't
+  // shift the rows above them, so the saved offset stays valid.
+  const list = host.querySelector('.mp-log-list');
+  const scrollTop = list ? list.scrollTop : null;
   // Resolve a profileId -> seat colour map so each @name in the log
   // can render in that player's seat colour (CLAUDE.md doctrine:
   // "Player names track the player's seat colour"). Falls back to
@@ -15261,10 +15309,10 @@ async function paintOnlineMissionLog(host) {
     if (line.indexOf(name) !== 0) return line;
     return line.slice(name.length).replace(/^\s+/, '');
   };
-  // Server returns ops in seq ASC order. Render newest-first.
-  const rows = entries
+  // Render the merged cache newest-first.
+  const rows = [..._mpLogCache.bySeq.values()]
     .filter((e) => e.kind !== 'START' && e.log)
-    .reverse()
+    .sort((a, b) => b.seq - a.seq)
     .map((e) => {
       const col = colourFor.get(e.profileId);
       const style = col ? ` style="--player-color:${esc(col)}"` : '';
@@ -15289,6 +15337,13 @@ async function paintOnlineMissionLog(host) {
         <span class="mp-log-when" title="${esc(whenTitle)}">${esc(when)}</span>
       </li>`;
     }).join('');
+  // Footer: a loading row while an older page streams in, or the
+  // mission-start marker once the whole history is on screen.
+  const footer = _mpLogCache.loadingOlder
+    ? '<li class="mp-log-more muted">Loading older entries…</li>'
+    : (!_mpLogCache.hasOlder && rows)
+      ? '<li class="mp-log-end muted">🚀 Mission start</li>'
+      : '';
   // Undo affordance: same gate as the toolbar ↩ undo tag. Server games only;
   // unwinds this turn's most recent action unless it rolled the dice (prospect
   // / hazard) or an auction / first-player handoff is open. Names what will be
@@ -15310,7 +15365,7 @@ async function paintOnlineMissionLog(host) {
   host.innerHTML = `
     <div class="mp-log-head">
       <h3>📋 Mission log</h3>
-      <p class="muted">Live from the server. Newest first.</p>
+      <p class="muted">Live from the server. Newest first - scroll down for history.</p>
       <div class="log-actions-bar">
         <button class="popup-btn primary" id="mp-log-undo"
           title="${esc(undoTip)}" ${canUndo ? '' : 'disabled'}>${undoLabel}</button>
@@ -15318,6 +15373,7 @@ async function paintOnlineMissionLog(host) {
     </div>
     <ul class="mp-log-list">
       ${rows || '<li class="mp-log-empty muted">No actions yet.</li>'}
+      ${footer}
     </ul>
   `;
   host.querySelector('#mp-log-undo')?.addEventListener('click', () => { undoLastAction(); });
@@ -15331,7 +15387,22 @@ async function paintOnlineMissionLog(host) {
       const card = cardById(btn.dataset.cardId);
       if (card) openCardInfoModal(card);
     });
+    // Infinite scroll: nearing the bottom (where history continues) pulls
+    // the next older page in.
+    listEl.addEventListener('scroll', () => {
+      if (!_mpLogCache.hasOlder || _mpLogCache.loadingOlder) return;
+      if (listEl.scrollTop + listEl.clientHeight < listEl.scrollHeight - 140) return;
+      loadOlderMissionLog(host);
+    }, { passive: true });
     if (scrollTop != null) listEl.scrollTop = scrollTop;
+    // A page can render too short to scroll when most of its ops carry no
+    // log line (planned-route changes are silent). With no scrollbar the
+    // scroll trigger can never fire, so top the list up from history until
+    // it can scroll or the log bottoms out.
+    if (_mpLogCache.hasOlder && !_mpLogCache.loadingOlder
+        && listEl.scrollHeight <= listEl.clientHeight) {
+      loadOlderMissionLog(host);
+    }
   }
 }
 

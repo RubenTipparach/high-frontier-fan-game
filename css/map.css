@@ -6635,6 +6635,15 @@ body:has(#view-browse:not(.hidden)) #main {
   align-self: center;
 }
 .mp-log-empty { padding: 12px; text-align: center; }
+/* Infinite-scroll footer rows: the transient "loading older" indicator and
+   the mission-start marker that caps the list once all history is loaded. */
+.mp-log-more { padding: 10px; text-align: center; font-style: italic; }
+.mp-log-end {
+  padding: 10px;
+  text-align: center;
+  border-top: 1px dashed rgba(148, 163, 184, 0.3);
+  letter-spacing: 0.4px;
+}
 
 /* Kind-specific accents on top of the player-colour left border.
    Subtle background washes keep the row readable while letting

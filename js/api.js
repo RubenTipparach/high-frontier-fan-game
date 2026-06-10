@@ -201,8 +201,15 @@ export async function submitGameOp(id, op, token, { timeoutMs = 15000 } = {}) {
   }
 }
 
-export async function getGameOps(id, { after } = {}, token) {
-  const qs = (after != null) ? '?after=' + after : '';
+// One page = the 100 most recent ops. No cursor = the newest page;
+// { before: seq } pages DOWN into history (infinite scroll);
+// { after: seq } catches up FORWARD from a known seq. The response
+// carries { entries, hasMore } - hasMore = older history exists below
+// the returned window.
+export async function getGameOps(id, { after, before } = {}, token) {
+  const qs = (after != null) ? '?after=' + after
+    : (before != null) ? '?before=' + before
+    : '';
   return call('GET', `/games/${id}/ops${qs}`, { token });
 }
 

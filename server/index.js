@@ -1812,25 +1812,46 @@ app.get('/games/:id/ops', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
   if (!isGamePlayer(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+  // One page = the 100 most recent ops. Three reads:
+  //   (none)    - the newest page (the mission log's first load / poll).
+  //   ?before=N - the next page DOWN: the newest 100 ops with seq < N
+  //               (drives the mission log's infinite scroll into history).
+  //   ?after=N  - catch-up: the oldest 100 ops with seq > N, ascending
+  //               (for a client resuming from a known seq; unused today).
+  // The old query was ORDER BY seq ASC LIMIT - in a long game (> one page)
+  // that returned only the FIRST ops ever, so the mission log froze on
+  // early-game entries and recent activity never loaded.
+  const PAGE = 100;
   const after = Number(req.query.after) || 0;
-  // Return the most RECENT ops (not the oldest). The query was ORDER BY seq ASC
-  // LIMIT 200, which in a long game (>200 ops) returned only the first 200 -
-  // so the mission log got stuck on early-game entries and the last days of
-  // activity never loaded. Take the newest 200 (seq DESC LIMIT) then flip back
-  // to ASC so the client's "reverse to newest-first" render is unchanged.
-  const rows = db
-    .prepare(
-      `SELECT go.seq, go.kind, go.payload, go.log, go.created_at AS createdAt,
-              go.profile_id AS profileId, p.name AS profileName
-       FROM game_operations go
-       JOIN profiles p ON p.id = go.profile_id
-       WHERE go.game_id = ? AND go.seq > ?
-       ORDER BY go.seq DESC
-       LIMIT 200`
-    )
-    .all(id, after);
-  rows.reverse();   // oldest-of-window first (ASC), matching the prior contract
+  const before = Number(req.query.before) || 0;
+  const SELECT = `SELECT go.seq, go.kind, go.payload, go.log, go.created_at AS createdAt,
+            go.profile_id AS profileId, p.name AS profileName
+     FROM game_operations go
+     JOIN profiles p ON p.id = go.profile_id`;
+  let rows;
+  if (after > 0) {
+    rows = db
+      .prepare(`${SELECT} WHERE go.game_id = ? AND go.seq > ? ORDER BY go.seq ASC LIMIT ${PAGE}`)
+      .all(id, after);
+  } else if (before > 0) {
+    rows = db
+      .prepare(`${SELECT} WHERE go.game_id = ? AND go.seq < ? ORDER BY go.seq DESC LIMIT ${PAGE}`)
+      .all(id, before);
+    rows.reverse();   // back to ASC - entries are always oldest-first on the wire
+  } else {
+    rows = db
+      .prepare(`${SELECT} WHERE go.game_id = ? ORDER BY go.seq DESC LIMIT ${PAGE}`)
+      .all(id);
+    rows.reverse();
+  }
+  // Does history continue below this window? Drives the client's
+  // infinite scroll ("load older" stops when the log bottoms out).
+  const oldestSeq = rows.length ? rows[0].seq : null;
+  const hasMore = oldestSeq != null && !!db
+    .prepare('SELECT 1 FROM game_operations WHERE game_id = ? AND seq < ? LIMIT 1')
+    .get(id, oldestSeq);
   res.json({
+    hasMore,
     entries: rows.map((r) => ({
       seq: r.seq,
       kind: r.kind,
