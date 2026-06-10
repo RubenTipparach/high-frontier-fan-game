@@ -47,8 +47,9 @@ import { ZONE_CHIT_VPS } from '../../data/zone-chits.js';
 import {
   siteExists as plannerSiteExists, findPath as plannerFindPath,
   leoSlug, siteBySlug as siteById, hazardKind,
-  nodeSizeNumber, lineOfSightSites,
+  nodeSizeNumber, lineOfSightSites, siteBodyOf, buggyRoamSites,
 } from './planner-graph.js';
+import { isBuggyRoamBody } from '../../data/buggy-roam.js';
 import { makeRng } from './rng.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES,
@@ -1369,12 +1370,20 @@ function applyProspect(state, op, player) {
     return { ok: true, state, log: '' };
   }
 
-  // Raygun fires through line of sight: it scans the rocket's own site or any
-  // site the beam reaches. Missile / buggy must be parked on the target.
+  // Reach by prospector kind. Raygun fires through line of sight (the rocket's
+  // own site or any site the beam reaches). A buggy on a connected body (Mars /
+  // Luna / Io / Callisto / Ganymede / Europa) roads to any same-body land site,
+  // acting as a raygun there. Every other missile / buggy must park on the
+  // target. Both reach checks delegate to the SAME shared modules the client
+  // gates on, so the server never rejects a prospect the client offered.
+  const here = player.rocket.siteId;
+  const buggyRoams = kind === 'buggy' && isBuggyRoamBody(siteBodyOf(here));
   if (kind === 'raygun') {
-    const here = player.rocket.siteId;
     const reachable = toSiteId === here || lineOfSightSites(here).has(toSiteId);
     if (!reachable) return fail('raygun_out_of_range');
+  } else if (buggyRoams) {
+    const reachable = toSiteId === here || buggyRoamSites(here).has(toSiteId);
+    if (!reachable) return fail('buggy_out_of_range');
   } else if (player.rocket.siteId !== toSiteId) {
     return fail('not_at_site');
   }
@@ -1382,13 +1391,13 @@ function applyProspect(state, op, player) {
   if (prospectorIsru(provSlot) > (site.hydration | 0)) return fail('isru_too_high');
 
   // Prospecting is one operation to BEGIN: the first prospect of the turn
-  // (any kind) spends the operation. Once begun, a raygun's line-of-sight
-  // scan is free and unlimited - keep scanning in-sight sites at no cost.
-  // Only the raygun scans for free; a missile / buggy prospect always costs
-  // the operation (it IS the operation), so once the turn's op is spent they
-  // can never fire a free additional scan.
+  // (any kind) spends the operation. Once begun, a raygun's line-of-sight scan
+  // is free and unlimited - and a roaming buggy (on a connected body) scans the
+  // same body for free too, since it acts as a raygun there. A missile, or a
+  // buggy NOT on a roam body, always costs the operation (it IS the operation),
+  // so once the turn's op is spent it can never fire a free additional scan.
   const begun = hasProspectedThisTurn(state);
-  const free = begun && kind === 'raygun';
+  const free = begun && (kind === 'raygun' || buggyRoams);
   if (!free && player.opsRemaining <= 0) return fail('no_ops_left');
 
   const threshold = prospectThreshold(site);
@@ -1408,7 +1417,7 @@ function applyProspect(state, op, player) {
   };
   if (!free) player.opsRemaining -= 1;
   const verb = success ? 'struck a claim at' : 'came up dry at';
-  const tail = free ? ' with a free raygun scan' : '';
+  const tail = free ? (buggyRoams ? ' with a free buggy road scan' : ' with a free raygun scan') : '';
   return {
     ok: true, state,
     log: `${player.name} rolled ${roll} vs ${threshold} and ${verb} ${site.name}${tail}.`,

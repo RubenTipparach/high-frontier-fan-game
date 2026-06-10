@@ -2578,6 +2578,7 @@ function humanizeOnlineOpError(code, detail) {
     cannot_liftoff: 'Not enough thrust to lift off (and no factory here to assist).',
     cannot_land: 'Not enough thrust to land there (and no factory to assist).',
     raygun_out_of_range: 'The raygun has no line of sight to that site from here.',
+    buggy_out_of_range: 'The buggy can only road to sites on the same connected body (Mars, the Moon, Io, Callisto, Ganymede, Europa).',
     stale_turn: 'That action was from a previous turn - the board has moved on.',
     no_disc: 'There is no prospect disc to re-roll.',
     not_buggy: 'Only a buggy prospector can re-roll.',
