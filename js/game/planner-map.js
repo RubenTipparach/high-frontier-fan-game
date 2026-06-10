@@ -123,6 +123,10 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
       siteSize: p.siteSize || null,
       siteSynodic: synodic,
       solarZone,
+      // Spectral type drives what a factory built here inherits (and the
+      // ET-produce match). The planner JSON doesn't carry it, so pull it
+      // from the hand-curated table; waypoints never match and stay null.
+      spectralType: local ? (local.spectralType || null) : null,
       hydration: parseHydration(p.siteWater),
       hazard: !!p.hazard,
       // Comets are always landing sites in HF4 - you touch down
