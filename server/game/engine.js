@@ -218,18 +218,40 @@ function faceProps(slot) {
   const f = slotFace(slot);
   return (f && Array.isArray(f.properties)) ? f.properties : [];
 }
+// Normalized prospector face for a slot, for BOTH patents and crew. Patents
+// carry raygun / missile / buggy + isru in the installed face's `properties`;
+// crew nest them on the face directly (face.prospector + face.isru), exactly
+// like thrusterFaceOf / the client's synthCrew. slotFace() resolves PATENTS
+// only, so without this crew branch a crew prospector reads as "not a
+// prospector" - the server rejected SET_ACTIVE_PROSPECTOR / PROSPECT for a
+// crew buggy/raygun that the client correctly offered (the not_a_prospector
+// bug on crew_nasa_isro's ISRO Glavcosmonauts buggy face).
+function prospectorFace(slot) {
+  if (!slot || !slot.id) return { properties: [], isru: 0 };
+  const crew = CREW_BY_ID[slot.id];
+  if (crew) {
+    const key = slot.face === 'secondary' ? 'secondary' : 'primary';
+    const cf = (crew.faces && (crew.faces[key] || crew.faces.primary)) || {};
+    return {
+      properties: cf.prospector ? [{ key: cf.prospector, value: true }] : [],
+      isru: Number(cf.isru) | 0,
+    };
+  }
+  const props = faceProps(slot);
+  const isruP = props.find((x) => x.key === 'isru');
+  return { properties: props, isru: isruP ? (Number(isruP.value) | 0) : 0 };
+}
 // Prospector kind from a slot's active face (mirror of
 // rocket.js#getProspectorKind): first of raygun / missile / buggy present.
 function prospectorKind(slot) {
-  const props = faceProps(slot);
+  const props = prospectorFace(slot).properties;
   for (const key of ['raygun', 'missile', 'buggy']) {
     if (props.some((p) => p.key === key && p.value)) return key;
   }
   return null;
 }
 function prospectorIsru(slot) {
-  const p = faceProps(slot).find((x) => x.key === 'isru');
-  return p ? (Number(p.value) | 0) : 0;
+  return prospectorFace(slot).isru;
 }
 function isProspectorSlot(slot) {
   return prospectorKind(slot) != null;
