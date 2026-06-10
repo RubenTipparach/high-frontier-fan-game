@@ -74,8 +74,13 @@ implementation right now:
 - **CEO Solitaire** - the published one-player variant. Drives
   the solo mode (`js/game/solo.js`); a single player runs one
   ship against a round clock with no AI opponent. Engine is
-  original; only the structural concept (manage water, prospect,
-  claim, end-of-round income) is taken from the variant's design.
+  original; only the structural concept (manage a FIXED water
+  budget, prospect, claim, race the round clock) is taken from
+  the variant's design. There is NO passive income (no end-of-
+  round water, no per-lap aqua) anywhere in the base game OR the
+  solo variant - water is a fixed budget plus what you actively
+  refine, and aqua comes only from the active Income / Free
+  Market operations. Do not add passive income.
 
 Other variants (campaign, scenarios) are explicitly out of scope
 for now. Don't pull them in without a discussion first.
@@ -850,16 +855,17 @@ Server-authoritative engine in `server/game/engine.js`:
   undo, prospect/auction do not.)
 - Industrialize: deliver a robonaut or crew + reactor to the site;
   flip prospect to factory (1 VP).
-- **NO passive "factory income" (removed 2026-06-10, do NOT reintroduce).**
-  An early Stage-3 draft had `advanceClock` pay every hydrated factory's
-  hydration in water straight into the owner's tank each lap. That has no basis
-  in the HF4 rules (water comes from the Site Refuel / Factory Refuel
-  OPERATIONS, which cost an op) and it was a free-water-then-cash money fountain
-  (the "ghost water" players reported). A factory's water is harvested by
-  PARKING there and spending the Site Refuel / Factory Refuel op, not handed out
-  automatically. (The CEO Solitaire variant in `js/game/solo.js` has its own
-  end-of-round water income; that is the published variant's design and is
-  unrelated to the standard game's engine.)
+- **NO passive income ANYWHERE (removed 2026-06-10, do NOT reintroduce).**
+  Two invented passive-income mechanics were removed: (1) `advanceClock` paid
+  every hydrated factory's hydration in water straight into the owner's tank
+  each lap (server engine), and (2) `solo.js#endRound` added each claimed site's
+  hydration as "water from refineries" each round (CEO Solitaire). Neither has
+  any basis in the HF4 rules and the factory one was a free-water-then-cash
+  money fountain (the "ghost water" players reported). The base game has NO
+  passive income: a factory's water is harvested by PARKING there and spending
+  the Site Refuel / Factory Refuel OPERATION (costs an op), and aqua comes only
+  from the active Income / Free Market operations. Solo runs on a FIXED water
+  budget. Do not hand out water or aqua at a round / lap boundary.
 - Bernal station: 5 factories on the same body collapse into a
   Bernal (5 VP + colonist promotion).
 - VPs at game end: factories + refineries + Bernals + glory cards.
