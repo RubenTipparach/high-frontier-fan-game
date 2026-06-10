@@ -1813,6 +1813,11 @@ app.get('/games/:id/ops', requireProfile, (req, res) => {
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
   if (!isGamePlayer(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
   const after = Number(req.query.after) || 0;
+  // Return the most RECENT ops (not the oldest). The query was ORDER BY seq ASC
+  // LIMIT 200, which in a long game (>200 ops) returned only the first 200 -
+  // so the mission log got stuck on early-game entries and the last days of
+  // activity never loaded. Take the newest 200 (seq DESC LIMIT) then flip back
+  // to ASC so the client's "reverse to newest-first" render is unchanged.
   const rows = db
     .prepare(
       `SELECT go.seq, go.kind, go.payload, go.log, go.created_at AS createdAt,
@@ -1820,10 +1825,11 @@ app.get('/games/:id/ops', requireProfile, (req, res) => {
        FROM game_operations go
        JOIN profiles p ON p.id = go.profile_id
        WHERE go.game_id = ? AND go.seq > ?
-       ORDER BY go.seq ASC
+       ORDER BY go.seq DESC
        LIMIT 200`
     )
     .all(id, after);
+  rows.reverse();   // oldest-of-window first (ASC), matching the prior contract
   res.json({
     entries: rows.map((r) => ({
       seq: r.seq,
