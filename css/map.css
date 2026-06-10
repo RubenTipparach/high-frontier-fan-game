@@ -4455,6 +4455,71 @@ body:has(#view-browse:not(.hidden)) #main {
   font-size: 11px;
 }
 
+/* Full support-chain tree in the Industrialize modal: a folder-style walk from
+   the refinery + robonaut roots out to every supplier, so the player sees WHY
+   each card is decommissioned (to hand). ◐ radiators are kept to cool the
+   build; a card shown a second time (shared / cycle) is a muted reference. */
+.industrialize-chain-tree {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  font-size: 13px;
+}
+.industrialize-chain-tree .chain-children {
+  list-style: none;
+  margin: 2px 0 2px 9px;
+  padding-left: 12px;
+  border-left: 1px dashed rgba(148, 163, 184, 0.35);
+}
+.industrialize-chain-tree .chain-li { margin: 3px 0; }
+.industrialize-chain-tree .chain-node {
+  background: rgba(127, 29, 29, 0.18);
+  border-left: 3px solid #b91c1c;
+  padding: 5px 8px;
+  border-radius: 4px;
+}
+.industrialize-chain-tree .chain-node:has(.decom-kept) {
+  background: rgba(20, 83, 45, 0.18);
+  border-left-color: #166534;
+}
+.industrialize-chain-tree .chain-node.chain-ref {
+  background: rgba(148, 163, 184, 0.1);
+  border-left-color: rgba(148, 163, 184, 0.5);
+  opacity: 0.75;
+  font-style: italic;
+}
+.industrialize-chain-tree .decom-icon {
+  display: inline-block;
+  width: 16px;
+  color: #fca5a5;
+  font-weight: 800;
+}
+.industrialize-chain-tree .decom-icon.decom-kept { color: #86efac; }
+.industrialize-chain-tree .decom-type {
+  color: var(--muted, #94a3b8);
+  font-size: 11px;
+}
+.industrialize-chain-tree .chain-role {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--ink-dim, #9fb3cc);
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-left: 4px;
+}
+.industrialize-chain-tree .chain-edge {
+  font-size: 11px;
+  color: var(--muted, #94a3b8);
+  margin: 3px 0 1px;
+}
+.industrialize-chain-tree .chain-edge-missing {
+  color: #fbbf24;
+  font-weight: 600;
+}
+.industrialize-chain-tree .chain-picker-ic { font-style: normal; }
+
 .industrialize-warn {
   background: rgba(202, 138, 4, 0.12);
   border: 1px solid rgba(202, 138, 4, 0.4);

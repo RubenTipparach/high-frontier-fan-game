@@ -8,11 +8,11 @@
 // Variant rules locked in industrialize.md:
 //   - One Op per turn. Industrialize consumes that op (caller
 //     enforces via requireOp).
-//   - Decommission destination: bottom of patent deck (rulebook
-//     G6). In this sandbox there is no ordered deck, so this
-//     reduces to "card returns to the library pool" - i.e. we
-//     just remove from the stack and don't route to hand. The
-//     player can re-draw later if they want.
+//   - Decommission destination: the player's HAND (variant rule,
+//     user 2026-05-24). The refinery + robonaut + their support
+//     chain you spent are re-collectable, not consumed - they
+//     return to hand (server applyIndustrialize pushes to hand;
+//     the solo path calls addToHand), so the modal says "to hand".
 //   - Radiators in the chain are KEPT (flipped semantics in HF4;
 //     in our sandbox we simply skip them when decommissioning).
 //     They are still REQUIRED to complete the op: a build whose
@@ -341,6 +341,62 @@ function groupGlyph(kinds) {
   return (REQUIREMENT_VIS[kinds[0]] || {}).glyph || '◇';
 }
 
+// Build a nested support-chain tree rooted at the refinery + robonaut so the
+// player SEES the WHOLE walk, not just the immediate suppliers: each card pulls
+// in the supplier that powers it, that supplier pulls in its own, down to the
+// radiators. This is the "why" behind the decommission list - every node here
+// leaves the stack (to hand) EXCEPT kept radiators (◐), which stay to cool the
+// build. A card reached a second time (a shared supplier, or a support cycle,
+// which is real in the card data) renders once and then as a muted reference
+// leaf, mirroring the visit-once walk in walkChain so the tree always
+// terminates. An unmet requirement group shows as an amber "no supplier" edge.
+function buildChainTree(stack, opt) {
+  const edges = opt.edges || [];
+  const keptSet = new Set((opt.keptRadiators || []).map((r) => r.index));
+  const byConsumer = new Map();
+  for (const e of edges) {
+    if (!byConsumer.has(e.consumerIndex)) byConsumer.set(e.consumerIndex, []);
+    byConsumer.get(e.consumerIndex).push(e);
+  }
+  const expanded = new Set();
+  const nodeLabel = (idx, roleLabel) => {
+    const card = PATENTS_BY_ID[stack[idx].id];
+    const kept = keptSet.has(idx);
+    const icon = kept
+      ? '<span class="decom-icon decom-kept">◐</span>'
+      : '<span class="decom-icon">✕</span>';
+    const typeLabel = kept ? `${card?.type || 'radiator'}, KEPT` : (card?.type || '');
+    const role = roleLabel
+      ? ` <span class="chain-role">${escapeHtml(roleLabel)}</span>` : '';
+    return `${icon} <strong>${escapeHtml(card?.name || stack[idx].id)}</strong>`
+      + ` <span class="decom-type">(${escapeHtml(typeLabel)})</span>${role}`;
+  };
+  const renderNode = (idx, edgeHtml, roleLabel) => {
+    const edgeBlock = edgeHtml ? `<div class="chain-edge">${edgeHtml}</div>` : '';
+    if (expanded.has(idx)) {
+      return `<li class="chain-li">${edgeBlock}`
+        + `<div class="chain-node chain-ref">${nodeLabel(idx, 'shown above')}</div></li>`;
+    }
+    expanded.add(idx);
+    const childLis = (byConsumer.get(idx) || []).map((e) => {
+      const glyph = `<em class="chain-picker-ic">${escapeHtml(groupGlyph(e.kinds))}</em>`;
+      const label = escapeHtml(groupLabel(e.groupKey, e.kinds));
+      if (e.supplierIndex === -1) {
+        return `<li class="chain-li"><div class="chain-edge chain-edge-missing">`
+          + `⚠ needs ${glyph} ${label} - no supplier in the stack</div></li>`;
+      }
+      return renderNode(e.supplierIndex, `needs ${glyph} ${label}`, null);
+    }).join('');
+    const childUl = childLis ? `<ul class="chain-children">${childLis}</ul>` : '';
+    return `<li class="chain-li">${edgeBlock}`
+      + `<div class="chain-node${roleLabel ? ' chain-node-root' : ''}">${nodeLabel(idx, roleLabel)}</div>`
+      + `${childUl}</li>`;
+  };
+  const roots = renderNode(opt.refinery.index, '', 'refinery')
+    + renderNode(opt.robonaut.index, '', 'robonaut');
+  return `<ul class="industrialize-chain-tree">${roots}</ul>`;
+}
+
 // Render the modal for the given site + stack + options. `onCommit`
 // is called with the resolved Option (under the player's current wiring)
 // when the player confirms. `siteName` is just for the title. Closes itself
@@ -422,15 +478,10 @@ export function openIndustrializeModal({ siteName, spectralType, stack, options,
          <div class="industrialize-wiring">${wireRows}</div>`
       : '';
 
-    const chainHtml = opt.chainIndices.map((idx) => {
-      const card = PATENTS_BY_ID[stack[idx].id];
-      return `<li><span class="decom-icon">✕</span> <strong>${escapeHtml(card?.name || stack[idx].id)}</strong> <span class="decom-type">(${escapeHtml(card?.type || '')})</span></li>`;
-    }).join('');
-    const keptHtml = opt.keptRadiators.length
-      ? opt.keptRadiators.map((r) =>
-          `<li><span class="decom-icon decom-kept">◐</span> <strong>${escapeHtml(r.card.name)}</strong> <span class="decom-type">(radiator, KEPT)</span></li>`
-        ).join('')
-      : '';
+    // Full support-chain tree (rooted at the refinery + robonaut) so the player
+    // can trace why every card is pulled in, not just the immediate supplier.
+    const chainTreeHtml = buildChainTree(stack, opt);
+    const decomCount = opt.chainIndices.length;
     const orphansHtml = opt.orphans.length
       ? `<div class="industrialize-warn">
            <div class="industrialize-section-label">⚠ Side effect: these cards lose support</div>
@@ -462,8 +513,8 @@ export function openIndustrializeModal({ siteName, spectralType, stack, options,
         </div>
         ${pickerHtml}
         ${wiringHtml}
-        <div class="industrialize-section-label">Cards to decommission (back to deck):</div>
-        <ul class="industrialize-decom">${chainHtml}${keptHtml}</ul>
+        <div class="industrialize-section-label">Support chain - the ${decomCount} card${decomCount === 1 ? '' : 's'} below go back to your hand (◐ radiators are kept to cool the build):</div>
+        ${chainTreeHtml}
         ${orphansHtml}
         ${invalidHtml}
       </div>
