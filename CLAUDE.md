@@ -849,9 +849,17 @@ Server-authoritative engine in `server/game/engine.js`:
   its own move-only rewind. (User decision 2026-06-09: boost/factory/ET-produce
   undo, prospect/auction do not.)
 - Industrialize: deliver a robonaut or crew + reactor to the site;
-  flip prospect to factory (1 VP, generates patent income).
-- Refinery upgrade: deliver a refinery; factory becomes hydrated
-  source of water (income each Income phase).
+  flip prospect to factory (1 VP).
+- **NO passive "factory income" (removed 2026-06-10, do NOT reintroduce).**
+  An early Stage-3 draft had `advanceClock` pay every hydrated factory's
+  hydration in water straight into the owner's tank each lap. That has no basis
+  in the HF4 rules (water comes from the Site Refuel / Factory Refuel
+  OPERATIONS, which cost an op) and it was a free-water-then-cash money fountain
+  (the "ghost water" players reported). A factory's water is harvested by
+  PARKING there and spending the Site Refuel / Factory Refuel op, not handed out
+  automatically. (The CEO Solitaire variant in `js/game/solo.js` has its own
+  end-of-round water income; that is the published variant's design and is
+  unrelated to the standard game's engine.)
 - Bernal station: 5 factories on the same body collapse into a
   Bernal (5 VP + colonist promotion).
 - VPs at game end: factories + refineries + Bernals + glory cards.

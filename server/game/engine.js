@@ -282,10 +282,9 @@ function applyLoadGlory(state, _op, player) {
   return { ok: true, state, log: `${player.name} loaded the ${chit.zone} glory chit.` };
 }
 
-// Advance the Sunspot Cube one slot. Bumps the round on wrap, rolls a
-// d6 on event slots (recorded as lastEvent; effect resolution is a
-// later PR, matching the sandbox which only records the roll today),
-// and pays water income from hydrated factories. Mutates state.
+// Advance the Sunspot Cube one slot. Bumps the round on wrap and rolls a
+// d6 on event slots (recorded as lastEvent; effect resolution is a later PR,
+// matching the sandbox which only records the roll today). Mutates state.
 function advanceClock(state) {
   state.turn = (state.turn + 1) % SLOTS;
   if (state.turn === NEW_ROUND_SLOT) state.round += 1;
@@ -297,23 +296,13 @@ function advanceClock(state) {
     state.lastEvent = { turn: state.turn, round: state.round, dieRoll };
   }
 
-  // Income: each hydrated factory pays its site's hydration in water to its
-  // owner's tank, clamped to the wet-mass cap (excess is lost). Returns a
-  // per-owner summary so END_TURN can surface it in the log.
-  const income = [];
-  for (const [siteId, fac] of Object.entries(state.factories)) {
-    const site = siteById(siteId);
-    if (!site || !site.hydration) continue;
-    const owner = state.players.find((p) => p.profileId === fac.ownerId);
-    if (!owner) continue;
-    const dry = owner.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
-    const cap = Math.max(0, TANK_MAX - dry);
-    const before = Number(owner.rocket.tank) || 0;
-    const after = round6(Math.min(cap, before + site.hydration));
-    owner.rocket.tank = after;
-    if (after > before) income.push(`${owner.name} +${round6(after - before)} water`);
-  }
-  return { income };
+  // NOTE: there is deliberately NO passive "factory income" here. An earlier
+  // draft paid every hydrated factory's hydration in water straight into the
+  // owner's tank each lap; that had no basis in the HF4 rules (water comes from
+  // the Site Refuel / Factory Refuel OPERATIONS, which cost an op) and turned
+  // factories into a free-water-then-cash money fountain. Removed per user
+  // decision (it was the "ghost water" source). Do not reintroduce it.
+  return {};
 }
 
 // ----- hazard resolution (mirror of the sandbox move queue) -----
@@ -1892,14 +1881,11 @@ function applyEndTurn(state, _op, player) {
     return { ok: true, state, log };
   }
 
-  // Lap complete: advance the Sunspot Cube one slot (income + event
-  // roll, and the round counter ticks on a full 12-slot cycle).
+  // Lap complete: advance the Sunspot Cube one slot (event roll, and the
+  // round counter ticks on a full 12-slot cycle). No passive factory income.
   const prevRound = state.round;
-  const clk = advanceClock(state);
-  const incomeNote = (clk && clk.income && clk.income.length)
-    ? ` Factory income: ${clk.income.join(', ')}.` : '';
+  advanceClock(state);
   const roundEnded = state.round > prevRound;
-  log += incomeNote;
 
   if (!roundEnded) {
     // Still inside the round: the cube moved a slot, next lap reopens
