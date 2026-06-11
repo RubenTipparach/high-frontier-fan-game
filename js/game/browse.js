@@ -10501,7 +10501,9 @@ function routeSegmentsForServer() {
 }
 function submitSetRouteOnline() {
   if (!_online || _spectator || !_onlineGameId || !_onlineMe) return;
-  if (!isOnlineMyTurn()) return;
+  // Route planning is allowed OFF your turn now: the server runs SET_ROUTE /
+  // CLEAR_ROUTE against the caller (not the active player) when it isn't your
+  // turn, so a plan persists while you wait. Spectators still can't.
   const segments = routeSegmentsForServer();
   if (!segments || !segments.length) return;
   submitGameOp(_onlineGameId, { kind: 'SET_ROUTE', segments }, _onlineMe.token)
@@ -10515,7 +10517,8 @@ function submitSetRouteOnline() {
 }
 function submitClearRouteOnline() {
   if (!_online || _spectator || !_onlineGameId || !_onlineMe) return;
-  if (!isOnlineMyTurn()) return;
+  // Allowed off-turn too (see submitSetRouteOnline) - the server clears the
+  // caller's own secret route whether or not it's their turn.
   submitGameOp(_onlineGameId, { kind: 'CLEAR_ROUTE' }, _onlineMe.token)
     .then((r) => {
       if (r && r.ok && r.data && r.data.game) noteQuietSnapshot(r.data.game.state, r.data.game.seq);

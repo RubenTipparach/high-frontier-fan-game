@@ -892,7 +892,15 @@ produce a log line that lands in it. This is not console logging - a
   `CLEAR_ROUTE`), which return `log: ''` because a planned route is
   secret between players (the gameView redacts opponents' routes). Do
   not add other silent ops; if a mutation must stay private, document why
-  here.
+  here. These two are also the ONLY ops a player may submit OFF their turn:
+  a planned route is private + inert (only the owner's own MOVE executes it),
+  so `applyOperation` runs them against the CALLER (not the active player) and
+  skips the turn guard + per-turn undo stack when it isn't the caller's turn
+  (on their own turn they ride the functional/undo path as before). The active
+  player's undo/redo (`carryOffTurnRoutes`) carries every OTHER player's current
+  route across the rebuild so an in-turn undo never wipes a waiting player's
+  plan. Client syncs them via `submitGameOp` (not the turn-gated
+  `submitOnlineOp`), so the off-turn sync is allowed. (User decision 2026-06-10.)
 - **Every op kind has an entry in `MP_LOG_ICONS`** (js/game/browse.js).
   A missing icon falls back to a bare `·`, which reads as "something
   unlabeled happened" - give each new op a glyph in the published-card

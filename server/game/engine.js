@@ -1970,6 +1970,25 @@ function applyEndTurn(state, _op, player) {
   return { ok: true, state, log };
 }
 
+// A rebuild (undo/redo) reverts the WHOLE state to the active player's turn
+// base, which predates any route a DIFFERENT player planned off-turn during
+// this turn - so the rebuild would silently wipe those private plans. Carry
+// each non-active player's CURRENT route across from the live state. The active
+// player's own route is rebuilt from their turnActions (their on-turn
+// SET_ROUTE), so it is left exactly as the replay produced it.
+function carryOffTurnRoutes(rebuilt, live) {
+  if (!rebuilt || !live || !Array.isArray(rebuilt.players)) return rebuilt;
+  const activeIdx = rebuilt.activeIndex;
+  for (let i = 0; i < rebuilt.players.length; i++) {
+    if (i === activeIdx) continue;
+    const lp = live.players && live.players[i];
+    if (lp && lp.rocket && rebuilt.players[i] && rebuilt.players[i].rocket) {
+      rebuilt.players[i].rocket.route = lp.rocket.route;
+    }
+  }
+  return rebuilt;
+}
+
 function applyUndo(state, _op, player, ctx) {
   if (!ctx || !ctx.turnBaseState) return fail('no_base');
   if (!state.turnActions.length) return fail('nothing_to_undo');
@@ -1981,6 +2000,7 @@ function applyUndo(state, _op, player, ctx) {
   const survivors = state.turnActions.slice(0, -1);
   const rebuilt = rebuildFromBase(ctx.turnBaseState, survivors);
   if (!rebuilt) return fail('undo_replay_failed');
+  carryOffTurnRoutes(rebuilt, state);
   rebuilt.turnActions = survivors;
   rebuilt.turnRedo = [last, ...state.turnRedo];
   return { ok: true, state: rebuilt, log: `${player.name} undid ${describeAction(last)}.` };
@@ -1993,6 +2013,7 @@ function applyRedo(state, _op, player, ctx) {
   const actions = [...state.turnActions, next];
   const rebuilt = rebuildFromBase(ctx.turnBaseState, actions);
   if (!rebuilt) return fail('redo_replay_failed');
+  carryOffTurnRoutes(rebuilt, state);
   rebuilt.turnActions = actions;
   rebuilt.turnRedo = state.turnRedo.slice(1);
   return { ok: true, state: rebuilt, log: `${player.name} redid ${describeAction(next)}.` };
@@ -2508,6 +2529,25 @@ export function applyOperation(prevState, op, ctx) {
   // by non-active players, and each handler validates its own caller
   // against the auction roles.
   if (AUCTION[op.kind]) return AUCTION[op.kind](clone(prevState), op, ctx);
+
+  // Off-turn route planning. A planned route is PRIVATE (redacted from
+  // opponents) and INERT (only the owner's own MOVE ever executes it), so a
+  // player may set / clear THEIR OWN route while waiting for their turn. When
+  // it is NOT the caller's turn, SET_ROUTE / CLEAR_ROUTE run against the CALLER
+  // and skip the turn guard + the per-turn undo stack. On the caller's OWN turn
+  // they fall through to the functional path below (recorded on turnActions, so
+  // an in-turn undo still restores the route). An open auction still freezes
+  // them, like every other op; applyUndo / applyRedo carry other players'
+  // off-turn routes across a rebuild so the active player's undo never wipes
+  // them.
+  if ((op.kind === 'SET_ROUTE' || op.kind === 'CLEAR_ROUTE')
+      && !op.debug && !isPlayersTurn(prevState, ctx.profileId)) {
+    if (prevState.auction) return fail('auction_in_progress');
+    const st = clone(prevState);
+    const caller = playerByProfile(st, ctx.profileId);
+    if (!caller) return fail('not_a_player');
+    return FUNCTIONAL[op.kind](st, op, caller);
+  }
 
   const isFunctional = !!FUNCTIONAL[op.kind];
   if (!isFunctional && !META[op.kind]) return fail('unknown_op');
