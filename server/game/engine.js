@@ -939,12 +939,12 @@ function applyFreeMarket(state, op, player) {
   };
 }
 
-// Discard one Hand card to the BOTTOM of its deck. A FREE action (no op
-// cost) capped at DISCARDS_PER_TURN per turn (mirrors the sandbox's
-// turn-clock budget). Was client-only before, so in MP the discard never
-// persisted and the next snapshot reverted it.
+// Discard one Hand card to the BOTTOM of its deck. A FREE action (no op cost)
+// and UNLIMITED per turn: voluntary card discard is a "any number per turn"
+// free action (only discarding a Human/crew figure is capped, and crew aren't
+// discarded from the hand here). Was client-only before, so in MP the discard
+// never persisted and the next snapshot reverted it.
 function applyDiscard(state, op, player) {
-  if ((player.discardsRemaining | 0) <= 0) return fail('no_discards_left');
   const cardId = String(op.cardId || '');
   const idx = player.hand.indexOf(cardId);
   if (idx < 0) return fail('not_in_hand');
@@ -956,7 +956,6 @@ function applyDiscard(state, op, player) {
     const deck = state.decks[card.type];
     if (Array.isArray(deck)) deck.push(cardId);
   }
-  player.discardsRemaining -= 1;
   const name = card ? card.name : cardId;
   return {
     ok: true, state,

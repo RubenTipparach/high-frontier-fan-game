@@ -14,7 +14,7 @@ import {
   consumeMove, refundMove, getTurn, getRound, getMovesRemaining, onTurnChange,
   getEventForRoll, getSeasonForSlot, getSeason, resetClock,
   getOpsRemaining, consumeOp,
-  getDiscardsRemaining, consumeDiscard, formatTurnNumber,
+  consumeDiscard, formatTurnNumber,
 } from './turn-clock.js';
 import { triggerEndTurn, confirmEndTurn, openTurnClockModal, buildDie, rollDie } from './turn-clock-ui.js';
 import {
@@ -2699,7 +2699,6 @@ function humanizeOnlineOpError(code, detail) {
     no_auction: 'No auction is open.',
     not_bidding_phase: 'Bidding is closed right now.',
     bidders_pending: 'You can\'t close the lot yet - every other player must bid or pass first.',
-    no_discards_left: 'You\'ve already discarded this turn (1 per turn).',
     bid_too_low: 'Bid must beat the current high bid.',
     insufficient_aqua: 'Not enough aqua.',
     bad_amount: 'Enter a whole number.',
@@ -2999,9 +2998,8 @@ function wireHandStrip() {
         return b;
       };
       const discardQ = qBtn('q-discard', '🗑',
-        getDiscardsRemaining() > 0 ? 'Discard (free, 1 per turn)' : 'Discard already used this turn',
+        'Discard (free, any number per turn)',
         () => discardHandCard(card, idx));
-      discardQ.disabled = getDiscardsRemaining() <= 0;
       quick.append(
         discardQ,
         // Free Market: effectively sells the card for +$3 (to the
@@ -4464,14 +4462,8 @@ function openCardModal(card, kind, slotIdx, { readOnly = false } = {}) {
   const discardBtn = document.createElement('button');
   discardBtn.type = 'button';
   discardBtn.className = 'modal-btn discard';
-  const discardsLeft = getDiscardsRemaining();
-  discardBtn.textContent = discardsLeft > 0
-    ? '🗑 Discard'
-    : '🗑 Discard (used this turn)';
-  discardBtn.title = discardsLeft > 0
-    ? `Send this card to the bottom of the ${card.type || 'corresponding'} deck. Free action, 1 per turn.`
-    : `Discard already used this turn (1 per turn). End the turn to refresh.`;
-  discardBtn.disabled = discardsLeft <= 0;
+  discardBtn.textContent = '🗑 Discard';
+  discardBtn.title = `Send this card to the bottom of the ${card.type || 'corresponding'} deck. Free action, any number per turn.`;
   // Shared discard path (online routes the DISCARD server op so it
   // persists; solo mutates locally). Same helper the hand quick-action
   // trash icon uses, so the two can't drift.
@@ -8730,7 +8722,7 @@ function openOpsMenu() {
     <h4 class="ops-menu-head">Free actions (no op)</h4>
     <ul class="ops-menu-hints">
       <li>🌐 Colonize a factory (consumes a colocated crew)</li>
-      <li>🗑 Discard 1 hand card per turn · 🔄 Transfer · ♻ Decommission to hand</li>
+      <li>🗑 Discard hand cards (any number) · 🔄 Transfer · ♻ Decommission to hand</li>
       <li>🛸 Move the rocket (uses the move budget, not an op)</li>
     </ul>
   `;
@@ -10157,26 +10149,19 @@ function prospectorIsruValue(card) {
 // Free-market a single already-chosen Hand card. Same cost + payout
 // as the Free Market operation (1 op, +FREE_MARKET_AQUA aqua, card to
 // the bottom of its deck), but skips the picker and goes straight to
-// Discard one hand card to the bottom of its deck (free action, 1 per
-// turn). Online routes the DISCARD server op so the discard persists and
-// is validated/budgeted server-side; solo mutates locally. Shared by the
-// hand quick-action trash icon and the card modal's Discard button so the
-// two behave identically. afterFn runs once the discard fires (e.g. to
-// close the card popup).
+// Discard one hand card to the bottom of its deck (free action, unlimited per
+// turn). Online routes the DISCARD server op so the discard persists and is
+// validated server-side; solo mutates locally. Shared by the hand quick-action
+// trash icon and the card modal's Discard button so the two behave identically.
+// afterFn runs once the discard fires (e.g. to close the card popup).
 async function discardHandCard(card, idx, afterFn) {
   if (!card) return;
-  // Locally we know the budget up front, so don't even prompt when the
-  // turn's discard is already spent. (Online the server is authoritative.)
-  if (!_online && getDiscardsRemaining() <= 0) {
-    setStatus('Discard already used this turn (1 per turn).');
-    return;
-  }
   const dest = PATENTS_BY_ID[card.id]
     ? `the bottom of the ${card.type || 'patent'} deck`
     : 'out of play';
   const ok = await confirmModal({
     title: '🗑 Discard card',
-    body: `Discard <strong>${esc(card.name)}</strong> to ${dest}? This uses your one discard for the turn.`,
+    body: `Discard <strong>${esc(card.name)}</strong> to ${dest}? Discarding is a free action you can take any number of times this turn.`,
     yes: '🗑 Discard', no: 'Cancel',
   });
   if (!ok) return;
@@ -10185,10 +10170,7 @@ async function discardHandCard(card, idx, afterFn) {
     if (afterFn) afterFn();
     return;
   }
-  if (getDiscardsRemaining() <= 0 || !consumeDiscard()) {
-    setStatus('Discard already used this turn (1 per turn).');
-    return;
-  }
+  consumeDiscard();
   removeFromHandAt(idx);
   // Patents return to the bottom of their type's deck; crew just leave.
   if (PATENTS_BY_ID[card.id]) addToBottom(card.id);
