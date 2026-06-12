@@ -1668,9 +1668,13 @@ export class MapRenderer {
       // core - whose length flickers on two unsynced sine waves with a
       // per-ship phase, drawn BEFORE the sprite so the hull covers the
       // flame root and the exhaust reads as coming from the engines.
+      // The sprite boxes carry a few px of bell-depth padding under the
+      // hull (the hull bottoms sit at ~0.29-0.40 of s below center, varying
+      // per ship), so the flame roots at 0.26 s - safely INSIDE every hull -
+      // and only its tip shows past the engines.
       const ft = now * 0.018 + r.flick;
-      const len = s * (0.30 + 0.10 * Math.sin(ft) + 0.07 * Math.sin(ft * 2.63));
-      const fy = s * 0.46;
+      const len = s * (0.42 + 0.12 * Math.sin(ft) + 0.08 * Math.sin(ft * 2.63));
+      const fy = s * 0.26;
       const flame = (halfW, l, color) => {
         ctx.beginPath();
         ctx.moveTo(-halfW, fy);
