@@ -1863,6 +1863,20 @@
   margin-bottom: 6px;
 }
 .turn-clock-event-card .ev-icon { font-size: 18px; }
+/* Resolved event outcomes: one sentence per effect the event applied. */
+.turn-clock-event-card .ev-notes {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.turn-clock-event-card .ev-notes li { margin-bottom: 3px; }
+/* Sunspot event chooser: the first-player overlay chrome, widened so the
+   card pick-grid (et-cards, shared with ET Produce) fits comfortably. */
+.mp-event-modal { max-width: 560px; width: min(560px, 92vw); }
+.mp-event-modal .card-modal-actions { justify-content: flex-end; }
+.mp-event-modal .hud-error:empty { display: none; }
 .turn-clock-event-card strong { color: var(--ink); font-size: 14px; flex: 1; }
 .turn-clock-event-card .ev-season {
   font-size: 10px;
@@ -4763,6 +4777,7 @@ body:has(#view-browse:not(.hidden)) #main {
   transform-origin: top left;
   pointer-events: none;  /* the wrapper owns the click; no flip / tooltip capture */
 }
+.et-card-pick .card-flip { display: none; }  /* picker is a preview, not a flipper */
 .et-card-pick:hover { transform: translateY(-2px); }
 .et-card-pick.is-selected {
   border-color: var(--accent);

@@ -423,6 +423,14 @@ export function openTurnClockModal({ rolling = null, animateFrom = null } = {}) 
     if (lastEvent) {
       const eventSeason = getSeasonForSlot(lastEvent.turn);
       const ev = getEventForRoll(lastEvent.dieRoll, eventSeason && eventSeason.name);
+      // Resolved outcomes (what the event actually DID) ride along on the
+      // event record as plain gameplay sentences; render them in place of
+      // the old "resolve at the table" note when present.
+      const escNote = (t) => String(t)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const notesHtml = Array.isArray(lastEvent.notes) && lastEvent.notes.length
+        ? `<ul class="ev-notes">${lastEvent.notes.map((n) => `<li>${escNote(n)}</li>`).join('')}</ul>`
+        : '';
       const evBlock = ev
         ? `<div class="turn-clock-event-card" data-season="${ev.season || 'any'}">
              <header>
@@ -431,11 +439,11 @@ export function openTurnClockModal({ rolling = null, animateFrom = null } = {}) 
                ${ev.season ? `<em class="ev-season ev-season-${ev.season}">Season ${ev.season}</em>` : ''}
              </header>
              <p class="ev-text">${ev.text}</p>
-             <p class="ev-sandbox-note">
+             ${notesHtml || `<p class="ev-sandbox-note">
                <span class="ev-sandbox-badge">Sandbox preview</span>
                Not applied automatically - resolve at the table if
                you're using the cube as a play-along clock.
-             </p>
+             </p>`}
            </div>`
         : '';
       eventHost.innerHTML = `

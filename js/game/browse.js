@@ -600,12 +600,16 @@ function applySnapshot(snapshot, seq) {
   // driven straight off the snapshot and idempotent, so they appear /
   // clear as the server state flips.
   renderFirstPlayerChooser(snapshot.pendingFirstPlayer);
+  // Open Sunspot event (Budget Cuts discard / Pad Explosion tie-break):
+  // same idempotent snapshot-driven overlay treatment as the first-player
+  // handoff; appears for waiting players, shows progress to everyone else.
+  renderEventChooser(snapshot);
   renderGameOver(snapshot);
   // Speed the snapshot poll up while an interactive freeze is open (an
   // auction, or a first-player handoff) so the waiting players see it
   // resolve in near-realtime even if the WS broadcast was dropped. Drop
   // back to the normal cadence otherwise.
-  const fastPoll = snapshot.auction || snapshot.pendingFirstPlayer;
+  const fastPoll = snapshot.auction || snapshot.pendingFirstPlayer || snapshot.pendingEvent;
   setPollCadence(fastPoll ? ONLINE_POLL_AUCTION_MS : ONLINE_POLL_MS);
   // Eager one-shot fetch the moment the auctioneer's phase opens
   // (awaiting === 'auctioneer'). The accept can land within ms of
@@ -1571,6 +1575,121 @@ function computeSnapshotScore(snapshot, profileId) {
     rocket, outposts, spectralBonus, colonyVp, tokens,
     total: tokens + spectralBonus + colonyVp + glory,
   };
+}
+
+// Open Sunspot event chooser. Driven straight off the snapshot like the
+// first-player handoff: while state.pendingEvent is open, waiting players
+// pick a card (Budget Cuts: any hand card; Pad Explosion: one of the tied
+// LEO cards) and everyone else watches the remaining names. Card options
+// render as real cards via the same pick-grid the ET Produce modal uses.
+function renderEventChooser(snapshot) {
+  const existing = document.getElementById('mp-event-overlay');
+  const pending = snapshot && snapshot.pendingEvent;
+  if (!pending || !_online || !gameViewVisible()) {
+    if (existing) existing.remove();
+    return;
+  }
+  const players = (snapshot.players || []);
+  const myId = _onlineMe && _onlineMe.id;
+  const me = players.find((p) => p.profileId === myId);
+  const amWaiting = !!myId && pending.waiting.includes(myId) && !_spectator;
+
+  const isCuts = pending.kind === 'budget_cuts';
+  const title = isCuts ? '\u2702\uFE0F Budget Cuts' : '\u{1F9E8} Pad Explosion';
+  const ask = isCuts
+    ? 'Funding dries up: pick a Hand card to send to the bottom of its deck.'
+    : 'Debris rains on LEO: your heaviest cards are tied - pick which one is lost.';
+
+  let overlay = existing;
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'mp-event-overlay';
+    overlay.className = 'mp-first-player-overlay';
+    overlay.innerHTML = `
+      <div class="mp-first-player-modal mp-event-modal" role="dialog" aria-label="Sunspot event">
+        <h3 class="mp-first-player-title"></h3>
+        <p class="mp-first-player-sub"></p>
+        <div class="et-cards" id="mp-event-cards"></div>
+        <div class="card-modal-actions" id="mp-event-actions"></div>
+        <div class="hud-error" id="mp-event-error"></div>
+      </div>`;
+    document.body.appendChild(overlay);
+  }
+  overlay.querySelector('.mp-first-player-title').textContent = title;
+  const sub = overlay.querySelector('.mp-first-player-sub');
+  const cardsHost = overlay.querySelector('#mp-event-cards');
+  const actions = overlay.querySelector('#mp-event-actions');
+  cardsHost.innerHTML = '';
+  actions.innerHTML = '';
+
+  if (!amWaiting) {
+    const names = pending.waiting
+      .map((id) => (players.find((p) => p.profileId === id) || {}).name || '?')
+      .join(', ');
+    sub.textContent = `Waiting for ${names} to choose.`;
+    return;
+  }
+
+  sub.textContent = ask;
+  const optionIds = isCuts
+    ? ((me && me.hand) || [])
+    : ((pending.options && pending.options[myId]) || []);
+  const lookup = (id) => PATENTS_BY_ID[id] || null;
+  let selected = optionIds[0] || null;
+
+  const confirm = document.createElement('button');
+  confirm.type = 'button';
+  confirm.className = 'modal-btn primary';
+  confirm.textContent = isCuts ? '\u2702\uFE0F Discard it' : '\u{1F9E8} Lose it';
+  confirm.disabled = !selected;
+  confirm.addEventListener('click', () => {
+    if (!selected) return;
+    confirm.disabled = true;
+    submitEventChoice(selected);
+  });
+  actions.appendChild(confirm);
+
+  const repaint = () => {
+    cardsHost.innerHTML = '';
+    for (const id of optionIds) {
+      const card = lookup(id);
+      const pick = document.createElement('button');
+      pick.type = 'button';
+      pick.className = 'et-card-pick' + (id === selected ? ' is-selected' : '');
+      if (card) {
+        try { pick.appendChild(renderCard(card, { type: card.type })); }
+        catch { pick.textContent = card.name || id; }
+      } else {
+        pick.textContent = id;
+      }
+      const tick = document.createElement('span');
+      tick.className = 'et-pick-tick';
+      tick.textContent = '\u2713';
+      pick.appendChild(tick);
+      pick.addEventListener('click', () => { selected = id; confirm.disabled = false; repaint(); });
+      cardsHost.appendChild(pick);
+    }
+  };
+  repaint();
+}
+
+async function submitEventChoice(cardId) {
+  if (!_online || _onlineBusy) return false;
+  _onlineBusy = true;
+  let r;
+  try {
+    r = await submitGameOp(_onlineGameId, { kind: 'EVENT_CHOICE', cardId }, _onlineMe.token);
+  } finally {
+    _onlineBusy = false;
+  }
+  const errEl = document.getElementById('mp-event-error');
+  if (!r || !r.ok) {
+    if (errEl) errEl.textContent = humanizeOnlineOpError(r && r.error);
+    if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
+    return false;
+  }
+  applySnapshot(r.data.game.state, r.data.game.seq);
+  return true;
 }
 
 function renderGameOver(snapshot) {
@@ -2671,6 +2790,11 @@ function humanizeOnlineOpError(code, detail) {
     api_unavailable: 'The game server is unavailable.',
     network: 'Network error - check your connection.',
     not_your_turn: 'It is not your turn.',
+    awaiting_event_choice: 'A Sunspot event is waiting on player choices.',
+    stack_glitched: 'That stack is glitched - it cannot act until humans reach it.',
+    not_waiting_on_you: 'The event is not waiting on you.',
+    card_not_in_hand: 'That card is not in your hand.',
+    not_a_tied_card: 'Pick one of the tied cards.',
     no_moves_left: 'No moves left this turn. End your turn.',
     insufficient_water: 'Not enough water for that burn.',
     no_route: 'No route to that site.',
@@ -15414,7 +15538,7 @@ const MP_LOG_ICONS = {
   SET_ACTIVE_THRUSTER: '🔥', SET_ACTIVE_PROSPECTOR: '⛏',
   BUILD_ROCKET: '🚀', BUY_CARD: '📚', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',
   INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧',
-  ET_PRODUCE: '🏭', SITE_REFUEL: '💧',
+  ET_PRODUCE: '🏭', SITE_REFUEL: '💧', EVENT_CHOICE: '☄️',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
   DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🏠',
   REFUEL: '💧', CASH_WATER: '💎', DISCARD: '🗑',
