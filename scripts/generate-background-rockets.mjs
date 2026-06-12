@@ -596,6 +596,81 @@ function chibiGemini() {
   return emit('cgm', 'GEMINI', 10.1, c);
 }
 
+function chibiShuttle() {
+  // Space Shuttle orbiter, in-space config (no tank / SRBs): nose-up side
+  // profile, black belly + nose cap, delta wing one side, tail fin the other
+  const c = makeCtx('csh', 11.5, 13.5);
+  const WHITE = '#eaeef4', TPS = '#23272f', GRAY = '#9aa2af';
+  // SSME cluster + OMS pods
+  c.bell(0, 1.6, 1.7, 0.9, 1.5);
+  c.bell(-0.85, 1.7, 1.4, 0.7, 1.1);
+  c.bell(0.85, 1.7, 1.4, 0.7, 1.1);
+  // delta wing (belly side) with a black leading edge
+  c.poly([[-1.4, 1.8], [-4.6, 1.6], [-1.4, 7.6]], WHITE);
+  c.add(`<path d="M${c.X(-1.4).toFixed(1)} ${c.Y(7.6).toFixed(1)} L${c.X(-4.6).toFixed(1)} ${c.Y(1.6).toFixed(1)} L${c.X(-2.9).toFixed(1)} ${c.Y(1.6).toFixed(1)} L${c.X(-1.4).toFixed(1)} ${c.Y(6.2).toFixed(1)} Z" fill="${TPS}"/>`);
+  // vertical tail (spine side) with dark rudder edge
+  c.poly([[1.4, 1.7], [4.1, 1.2], [4.1, 2.6], [1.4, 5.4]], WHITE);
+  c.add(`<path d="M${c.X(4.1).toFixed(1)} ${c.Y(1.2).toFixed(1)} L${c.X(4.1).toFixed(1)} ${c.Y(2.6).toFixed(1)} L${c.X(3.3).toFixed(1)} ${c.Y(2.85).toFixed(1)} L${c.X(3.3).toFixed(1)} ${c.Y(1.35).toFixed(1)} Z" fill="#4a4f5a"/>`);
+  // OMS pod bump
+  c.cyl(1.9, 2.4, 1.4, GRAY, { cxM: 1.1, rx: 4 });
+  // fuselage with payload-bay door line + black belly strip
+  c.cyl(1.5, 10.2, 3.0, WHITE, { rx: 5 });
+  c.decal(1.7, 9.6, 0.5, TPS, { cxM: -1.22, op: 0.95 });
+  c.add(`<line x1="${c.X(0.15).toFixed(1)}" y1="${c.Y(3.2).toFixed(1)}" x2="${c.X(0.15).toFixed(1)}" y2="${c.Y(10.2).toFixed(1)}" stroke="#aeb6c2" stroke-width="1.2"/>`);
+  c.flag(0.7, 5.2, 1.3);
+  // black nose cap + cockpit panes
+  c.nose(11.3, 1.9, 3.0, 0.9, TPS, { bow: 0.55 });
+  winPoly(c, -0.5, 10.7, [[-0.3, 0.26], [0.3, 0.26], [0.42, -0.26], [-0.42, -0.26]], -12);
+  winPoly(c, 0.5, 10.7, [[-0.3, 0.26], [0.3, 0.26], [0.42, -0.26], [-0.42, -0.26]], 12);
+  return emit('csh', 'SPACE SHUTTLE', 13.2, c);
+}
+
+function chibiShenzhou() {
+  // Shenzhou: Soyuz-like train but with a CYLINDRICAL orbital module that
+  // carries its own little solar wings (the classic two-wing-pair look)
+  const c = makeCtx('czn', 14.0, 12.5);
+  const PEARL = '#e6e4da', GRAY = '#aab0a8', BRONZE = '#9d8468';
+  c.bell(0, 1.2, 1.6, 0.8, 1.8);
+  // service module + main wings
+  for (const dir of [-1, 1]) wing(c, dir * 1.7, 3.0, dir * -5, 4.4, 1.6, dir);
+  c.cyl(1.2, 4.2, 3.4, PEARL);
+  c.decal(1.4, 0.6, 3.4, '#646d7c');
+  c.seam(5.4, 3.4);
+  // descent module: headlight bell
+  c.trap(5.4, 0.6, 3.4, 3.0, BRONZE);
+  c.nose(6.0, 2.3, 3.0, 2.1, BRONZE, { bow: 0.72 });
+  win(c, 0, 7.0, 0.42);
+  // orbital module: cylinder with its own smaller wing pair
+  for (const dir of [-1, 1]) wing(c, dir * 1.3, 9.6, dir * -3, 3.0, 1.1, dir);
+  c.cyl(8.3, 2.8, 2.6, GRAY, { rx: 6 });
+  win(c, 0, 9.7, 0.36);
+  // docking ring
+  c.cyl(11.1, 0.7, 1.5, '#9aa2af');
+  c.nose(11.8, 0.6, 1.1, 0.3, '#646d7c', { bow: 0.5 });
+  return emit('czn', 'SHENZHOU', 12.4, c);
+}
+
+function chibiMengzhou() {
+  // Mengzhou next-gen crew spacecraft: tall sleek cone over a stubby service
+  // module, white with blue trim, flat solar wing pair
+  const c = makeCtx('cmz', 13.5, 12.0);
+  const WHITE = '#eef1f6', BLUE = '#2b5ea8', GRAY = '#9aa2af';
+  c.bell(0, 1.5, 2.0, 1.1, 2.2);
+  for (const dir of [-1, 1]) wing(c, dir * 2.0, 3.5, dir * -4, 4.2, 1.5, dir);
+  c.cyl(1.5, 4.2, 4.4, WHITE);
+  c.decal(1.8, 0.8, 4.4, BLUE);
+  c.seam(5.7, 4.4);
+  // crew capsule: taller, smoother cone than Orion's
+  c.decal(5.75, 0.5, 4.5, '#454b55');
+  c.nose(5.7, 5.0, 4.6, 1.5, WHITE, { bow: 0.5 });
+  c.add(`<path d="M${c.X(-1.55).toFixed(1)} ${c.Y(7.6).toFixed(1)} Q${c.X(0).toFixed(1)} ${c.Y(8.05).toFixed(1)} ${c.X(1.55).toFixed(1)} ${c.Y(7.6).toFixed(1)}" fill="none" stroke="${BLUE}" stroke-width="2"/>`);
+  win(c, -0.75, 8.4, 0.38);
+  win(c, 0.75, 8.4, 0.38);
+  c.cyl(10.7, 0.8, 1.4, GRAY);
+  c.nose(11.5, 0.5, 1.0, 0.3, '#646d7c', { bow: 0.5 });
+  return emit('cmz', 'MENGZHOU', 12.0, c);
+}
+
 function chibiOrionPulse() {
   const c = makeCtx('cop', 10.5, 14.5, 1);
   const STEEL = '#8a93a3', DKSTEEL = '#646d7c', COPPER = '#b4713d', RUBBER = '#4a4e57';
@@ -899,7 +974,8 @@ function mediaIonCruiser() {
 
 // ---------------- output ----------------
 const rockets = [saturnV(), slsArtemis(), falcon9(), soyuz(), projectOrion(), geminiTitan()];
-const chibis = [chibiApolloCsm(), chibiOrionMpcv(), chibiCrewDragon(), chibiSoyuz(), chibiSkylab(), chibiGemini(), chibiOrionPulse()];
+const chibis = [chibiApolloCsm(), chibiOrionMpcv(), chibiCrewDragon(), chibiShuttle(),
+  chibiSoyuz(), chibiShenzhou(), chibiMengzhou(), chibiSkylab(), chibiGemini(), chibiOrionPulse()];
 const futures = [futDiscovery2(), futUmbrella(), futMedusa(), futVista()];
 const medias = [mediaShieldShip(), mediaRingShip(), mediaIonCruiser(), mediaDeepSpaceStack(), mediaCorvette()];
 const MEDIA_AFTER = {
@@ -923,6 +999,9 @@ const FILE_NAMES = {
   cgm: 'chibi-gemini.svg',
   cop: 'chibi-orion-pulse-ship.svg',
   csk: 'chibi-skylab.svg',
+  csh: 'chibi-space-shuttle.svg',
+  czn: 'chibi-shenzhou.svg',
+  cmz: 'chibi-mengzhou.svg',
   fd2: 'future-concepts/future-discovery-2.svg',
   fvs: 'future-concepts/future-vista.svg',
   fum: 'future-concepts/future-umbrella-ship.svg',

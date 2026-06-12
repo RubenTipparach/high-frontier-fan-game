@@ -48,6 +48,9 @@ traffic; if you add a ship here, add its file name to that list too.
 | `chibi-orion.svg` | Orion spacecraft (crew module + ESM with X-wing solar arrays) |
 | `chibi-crew-dragon.svg` | Crew Dragon (capsule + trunk) |
 | `chibi-soyuz.svg` | Soyuz spacecraft (orbital module + descent module + service module) |
+| `chibi-space-shuttle.svg` | Space Shuttle orbiter (in-space config: black belly + nose cap, delta wing, tail fin, OMS pod) |
+| `chibi-shenzhou.svg` | Shenzhou (cylindrical orbital module, two solar wing pairs) |
+| `chibi-mengzhou.svg` | Mengzhou next-gen crew spacecraft (tall cone, blue trim) |
 | `chibi-skylab.svg` | Skylab (gold parasol, surviving solar wing, ATM windmill) |
 | `chibi-gemini.svg` | Gemini spacecraft (re-entry module + adapter) |
 | `chibi-orion-pulse-ship.svg` | Project Orion pulse ship (it IS its own interplanetary vehicle) |

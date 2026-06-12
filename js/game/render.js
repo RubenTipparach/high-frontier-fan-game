@@ -810,7 +810,8 @@ export class MapRenderer {
     this._ambientLastT = 0;
     this._ambientSprites = [];
     for (const name of ['chibi-apollo-csm', 'chibi-orion', 'chibi-crew-dragon',
-      'chibi-soyuz', 'chibi-skylab', 'chibi-gemini', 'chibi-orion-pulse-ship']) {
+      'chibi-space-shuttle', 'chibi-soyuz', 'chibi-shenzhou', 'chibi-mengzhou',
+      'chibi-skylab', 'chibi-gemini', 'chibi-orion-pulse-ship']) {
       const img = new Image();
       // Resolve against THIS module's URL, not the address bar. With
       // room routing the visible URL can be a deep /room/<CODE> path,
