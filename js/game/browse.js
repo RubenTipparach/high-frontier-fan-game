@@ -6590,9 +6590,9 @@ function openRocketStackModal() {
       ? `<button type="button" class="rocket-afterburn-btn ${thrStats.afterburnEngaged ? 'is-engaged' : ''}"
            id="rocket-afterburn"
            title="${thrStats.afterburnEngaged
-             ? 'Afterburn engaged this turn (+1 net thrust + 1 Therm cooling). Clears next turn.'
-             : `Engage afterburn: spend ${thrStats.afterburnSteps} fuel step${thrStats.afterburnSteps === 1 ? '' : 's'} for +1 net thrust + 1 Therm of Open-Cycle cooling this turn`}">
-           🔥 Afterburn ${thrStats.afterburnEngaged ? 'ENGAGED' : `(${thrStats.afterburnSteps}🔥→+1)`}
+             ? `Afterburn engaged this turn: +1 net thrust + 1 Therm cooling, paid with ${thrStats.afterburnSteps} fuel step${thrStats.afterburnSteps === 1 ? '' : 's'}. Clears next turn.`
+             : `Engage afterburn: spend ${thrStats.afterburnSteps} fuel step${thrStats.afterburnSteps === 1 ? '' : 's'} for +1 net thrust + 1 Therm of Open-Cycle cooling this turn. The number on the button is the fuel steps spent to perform afterburn, not a water or aqua cost.`}">
+           🔥 Afterburn ${thrStats.afterburnEngaged ? 'ENGAGED' : `(${thrStats.afterburnSteps} fuel step${thrStats.afterburnSteps === 1 ? '' : 's'} → +1)`}
          </button>` : '';
     // Wet mass equation - "dry + tank" so the player sees how
     // the wet number was built. Caps the tank value at the
