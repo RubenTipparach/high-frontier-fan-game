@@ -6222,9 +6222,11 @@ function chainKindIcon(kind, size = 13) {
 // (orange = the active root card, green = a card supporting it) and a ✓ / ✗
 // validity pill (rule 4). Clicking opens the card read-only.
 function chainChip(card, face, kind, { ring, valid } = {}) {
-  const name = kind === 'crew'
-    ? ((card.faces && card.faces[face] && card.faces[face].name) || card.name || card.id)
-    : (card.name || card.id);
+  // Patents read the INSTALLED face's name too: a flipped card is a different
+  // tech (Flywheel Tractor's black side is Electrophoretic Sandworm), and the
+  // chip must match the card the modal shows.
+  const name = (card.faces && card.faces[face] && card.faces[face].name)
+    || card.name || card.id;
   const g = cardGlanceSummary(card, face);
   const statHtml = g.hasStats ? g.statsHtml : esc(kind === 'crew' ? 'crew' : (card.type || 'card'));
   const massHtml = Number.isFinite(card.mass) ? '<span class="acc-mass">m' + card.mass + '</span>' : '';
@@ -6303,7 +6305,10 @@ function buildSupportChainViz(host, lookup) {
     sec.className = 'chain-root chain-root-' + root.kind;
 
     const activeCard = lookup(root.activeId);
-    const activeName = activeCard ? activeCard.name : root.activeId;
+    const activeSlot = slotOf(root.activeId);
+    const activeFaceKey = activeSlot && activeSlot.face === 'secondary' ? 'secondary' : 'primary';
+    const activeName = (activeCard && activeCard.faces && activeCard.faces[activeFaceKey]
+      && activeCard.faces[activeFaceKey].name) || (activeCard ? activeCard.name : root.activeId);
     const allValid = root.chain.order.every((id) =>
       (root.nodeReqs[id] || []).every((r) => r.satisfied)) && root.chain.coolingOk;
     const subBits = [esc(activeName), allValid ? 'all supports satisfied' : 'support missing'];
@@ -8153,11 +8158,11 @@ function pickRefiningSource(site) {
   // 1 + hydration - ISRU formula gives at least 1 water.
   const prosp = getActiveProspectorStats();
   if (prosp && prosp.canActivate) {
-    const isru = prospectorIsruValue(prosp.card);
+    const isru = prosp.isru;
     // ISRU 0 is a valid rig (gain = 1 + water), so it refuels anywhere the
     // gate ISRU <= water allows - which for 0 is every site.
     if (isru >= 0 && isru <= water) {
-      return { kind: 'isru', card: prosp.card, rawGain: 1 + water - isru, isru };
+      return { kind: 'isru', card: prosp.card, name: prosp.name, rawGain: 1 + water - isru, isru };
     }
   }
   return null;
@@ -8213,7 +8218,7 @@ function doRefuel(site) {
   if (gain <= 0) return;
   addFuel(gain);
   markRefueledThisTurn(site.id);
-  const sourceName = source.card?.name || source.kind;
+  const sourceName = source.name || source.card?.name || source.kind;
   const water = Number.isFinite(site.hydration) ? site.hydration : 0;
   const detail = `1 + water ${water} - ISRU ${source.isru} = ${source.rawGain} via <em>${esc(sourceName)}</em>`;
   setStatus(
@@ -10136,15 +10141,11 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
 // Read the prospector's ISRU rating off the active face's
 // properties. ISRU is a numeric property (1..N); missing /
 // zero means "no water requirement". Returns the integer.
-function prospectorIsruValue(card) {
-  if (!card) return 0;
-  const f = (card.faces && card.faces.primary) || card;
-  const props = f.properties || card.properties || [];
-  const e = props.find((p) => p.key === 'isru');
-  if (!e) return 0;
-  const v = typeof e.value === 'number' ? e.value : parseInt(e.value, 10);
-  return Number.isFinite(v) ? v : 0;
-}
+// NOTE: the active prospector's ISRU + name come from
+// getActiveProspectorStats() (prosp.isru / prosp.name), which reads the
+// INSTALLED face. Don't re-derive them from card.faces.primary: the black
+// side is a different tech with a different ISRU rating, and a primary-face
+// read mis-gates prospect / refuel for a flipped card (the Flora buggy bug).
 
 // Free-market a single already-chosen Hand card. Same cost + payout
 // as the Free Market operation (1 op, +FREE_MARKET_AQUA aqua, card to
@@ -10246,11 +10247,11 @@ function doProspect(site, prosp) {
   // ISRU rule re-validated against hydration (the "water" gate).
   // Defence-in-depth in case the popup button somehow ends up
   // enabled with a stale read.
-  const prospIsru = prospectorIsruValue(prosp.card);
+  const prospIsru = prosp.isru;
   const siteWater = Number.isFinite(site.hydration) ? site.hydration : 0;
   if (prospIsru > siteWater) {
     setStatus(
-      `Prospect blocked: <em>${esc(prosp.card?.name || '')}</em> needs site water ≥ `
+      `Prospect blocked: <em>${esc(prosp.name || '')}</em> needs site water ≥ `
       + `${prospIsru}, site has ${siteWater}.`
     );
     return;
@@ -11245,8 +11246,8 @@ function syncSandboxRocket() {
   // Card name + ISRU travel with the sprite so the renderer's
   // badge-hover tooltip can show them without having to import
   // rocket state itself.
-  const prospectorName = prosp && prosp.card ? prosp.card.name : null;
-  const prospectorIsru = prosp ? prospectorIsruValue(prosp.card) : null;
+  const prospectorName = prosp ? prosp.name : null;
+  const prospectorIsru = prosp ? prosp.isru : null;
   // Active thruster summary for the rocket-hover tooltip
   // (modifier-baked thrust + fuel-per-burn so the player sees
   // the "final" numbers, not the printed ones).
@@ -12947,7 +12948,7 @@ function showSitePopupFor(site) {
     // site's "number" (siteSize leading digit) is a DIFFERENT
     // value used for the prospect-roll threshold + the refining-
     // yield formula; don't confuse them.
-    const prospIsru   = prospectorIsruValue(prosp.card);
+    const prospIsru   = prosp.isru;
     const siteWater   = Number.isFinite(site.hydration) ? site.hydration : 0;
     const isruOk      = prospIsru <= siteWater;
     const ok = check.ok && supportsOk && isruOk;
@@ -13424,7 +13425,7 @@ function showSitePopupFor(site) {
   // the ISRU chip ("Your ISRU 2 vs 4 water ✓") without the
   // renderer needing to import rocket state directly.
   _renderer.setPopupRocketInfo(prosp
-    ? { isru: prospectorIsruValue(prosp.card), kind: prosp.kind }
+    ? { isru: prosp.isru, kind: prosp.kind }
     : null);
   _renderer.setSitePopup(site, actions);
   _renderer.onPopupClose(() => {

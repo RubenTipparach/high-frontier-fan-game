@@ -564,10 +564,22 @@ export function getActiveProspectorStats() {
     ? { ok: pc.coolingOk, demand: pc.reactorDemand + pc.nonReactorHeat, supply: cool.radiatorTotal }
     : { ok: true, demand: 0, supply: cool.radiatorTotal };
   if (!therm.ok) missing.push('thermostat');
+  // ISRU + display name come off the INSTALLED face. The white and black
+  // sides are different techs with different ISRU ratings (e.g. Flywheel
+  // Tractor ISRU 3 flips to Electrophoretic Sandworm ISRU 1), so reading
+  // faces.primary here mis-gated prospect / refuel for a flipped card.
+  // Patents carry ISRU in face.properties; crew carry it on the face itself
+  // (same split the server's prospectorFace handles).
+  const isruProp = (f.properties || []).find((p) => p && p.key === 'isru');
+  const isruRaw = isruProp
+    ? (typeof isruProp.value === 'number' ? isruProp.value : parseInt(isruProp.value, 10))
+    : Number(f && f.isru);
   return {
     id,
     kind,
     card,
+    name: (f && f.name) || card.name || id,
+    isru: Number.isFinite(isruRaw) ? isruRaw : 0,
     requires,
     suppliedKinds: [...supplied],
     missingSuppliers: missing,
