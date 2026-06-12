@@ -1877,6 +1877,49 @@
 .mp-event-modal { max-width: 560px; width: min(560px, 92vw); }
 .mp-event-modal .card-modal-actions { justify-content: flex-end; }
 .mp-event-modal .hud-error:empty { display: none; }
+/* Galactic news: toolbar broadcast button badge + feed modal. */
+#news-feed { position: relative; }
+.news-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: #b3322e;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 15px;
+  text-align: center;
+}
+.news-modal { max-width: 540px; }
+.news-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 50vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.news-list li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.news-list .news-ic { flex: 0 0 auto; }
+.news-list .news-when { flex: 0 0 auto; color: var(--muted, #94a3b8); font-size: 11px; }
+.news-list .news-text { flex: 1; }
+.news-list .news-empty { color: var(--muted, #94a3b8); justify-content: center; }
 .turn-clock-event-card strong { color: var(--ink); font-size: 14px; flex: 1; }
 .turn-clock-event-card .ev-season {
   font-size: 10px;

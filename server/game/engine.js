@@ -349,9 +349,10 @@ function clockEventLog(state) {
   }
   const ev = state.lastEvent;
   if (ev && ev.turn === state.turn && Array.isArray(ev.notes)) {
-    log += ` Event roll: ${ev.dieRoll}.`;
-    if (ev.notes.length) log += ' ' + ev.notes.join(' ');
-    if (state.pendingEvent) log += ' Play pauses until every choice is in.';
+    // Headline only - the blow-by-blow goes out on the news feed
+    // (state.news), which the toolbar broadcast button surfaces.
+    log += ` Event roll: ${ev.dieRoll} - ${EVENT_HEADLINES[ev.kind] || ev.kind}.`;
+    if (state.pendingEvent) log += ' Affected players choose on their turns.';
   }
   return log;
 }
@@ -424,8 +425,34 @@ function autoFixGlitches(state) {
   return notes;
 }
 
+const EVENT_HEADLINES = {
+  inspiration: 'Inspiration (market decks cycled)',
+  glitch: 'Glitch',
+  pad_explosion: 'Pad Explosion',
+  anarchy: 'Anarchy',
+  budget_cuts: 'Budget Cuts',
+  solar_flare: 'Solar Flare',
+};
+const NEWS_CAP = 40;
+// Galactic news broadcast: a shared, capped feed of "what just
+// happened" items every player sees via the toolbar news button.
+function pushNews(state, icon, text) {
+  state.news = state.news || [];
+  state.news.push({ round: state.round, turn: state.turn, icon, text });
+  if (state.news.length > NEWS_CAP) state.news.splice(0, state.news.length - NEWS_CAP);
+}
+const EVENT_ICONS = {
+  inspiration: '\u{1F4A1}', glitch: '\u26A0\uFE0F', pad_explosion: '\u{1F9E8}',
+  anarchy: '\u{1F5FD}', budget_cuts: '\u2702\uFE0F', solar_flare: '\u2600\uFE0F',
+};
+
 function resolveSunspotEvent(state, kind) {
-  const notes = state.lastEvent.notes;
+  const rawNotes = state.lastEvent.notes;
+  // Every detail line lands in BOTH the event record (clock modal) and
+  // the news feed (toolbar broadcast).
+  const notes = {
+    push: (t) => { rawNotes.push(t); pushNews(state, EVENT_ICONS[kind] || '\u2604\uFE0F', t); },
+  };
 
   if (kind === 'inspiration') {
     // Cycle every market deck: topmost card to the bottom. Record what
@@ -588,6 +615,29 @@ function resolveSunspotEvent(state, kind) {
 // Pad Explosion tie-break). Validates its own caller, so it runs ahead of
 // the turn guard - every affected player answers regardless of whose turn
 // it is, like auction bids.
+// Does this player still owe the open event a choice?
+function eventDebtFor(state, profileId) {
+  const pe = state.pendingEvent;
+  return !!(pe && pe.waiting.includes(profileId));
+}
+// Drop a debt whose options no longer exist (Budget Cuts with an empty
+// hand, a Pad Explosion tie whose cards already left LEO some other way).
+// Returns true when the debt was cleared; mutates state.
+function clearStaleEventDebt(state, profileId) {
+  const pe = state.pendingEvent;
+  if (!pe || !pe.waiting.includes(profileId)) return false;
+  const player = state.players.find((p) => p.profileId === profileId);
+  if (!player) return false;
+  const valid = pe.kind === 'budget_cuts'
+    ? (player.hand || []).length > 0
+    : ((pe.options && pe.options[profileId]) || []).some((id) => (player.leo || []).some((s) => s.id === id));
+  if (valid) return false;
+  pe.waiting = pe.waiting.filter((id) => id !== profileId);
+  if (pe.options) delete pe.options[profileId];
+  if (!pe.waiting.length) state.pendingEvent = null;
+  return true;
+}
+
 function applyEventChoice(state, op, ctx) {
   const pending = state.pendingEvent;
   if (!pending) return fail('no_event_pending');
@@ -617,8 +667,9 @@ function applyEventChoice(state, op, ctx) {
   if (pending.options) delete pending.options[player.profileId];
   if (!pending.waiting.length) {
     state.pendingEvent = null;
-    log += ' The event is resolved; play continues.';
+    log += ' The event is resolved.';
   }
+  pushNews(state, EVENT_ICONS[pending.kind] || '\u2604\uFE0F', log);
   return { ok: true, state, log };
 }
 
@@ -2967,13 +3018,25 @@ export function applyOperation(prevState, op, ctx) {
   // frozen, mirroring the auction freeze below.
   if (LIFECYCLE[op.kind]) return LIFECYCLE[op.kind](clone(prevState), op, ctx);
 
-  // Open Sunspot event: every affected player answers via EVENT_CHOICE
-  // (validates its own caller, off-turn like an auction bid); everything
-  // else freezes until the event resolves. Dispatched BEFORE the
-  // first-player gate so a round-closing event can be answered while the
-  // first-player handoff is also pending.
+  // Open Sunspot event: affected players answer via EVENT_CHOICE
+  // (validates its own caller; answering EARLY, off-turn, is welcome).
+  // The table is NOT frozen (user decision 2026-06-12): only a player
+  // who still owes a choice is blocked, and only ON THEIR OWN TURN -
+  // they must settle the event before doing anything else (END_TURN
+  // included, so the debt can't be dodged). A debt whose options
+  // vanished (hand emptied, tied card already gone) clears itself.
   if (op.kind === 'EVENT_CHOICE') return applyEventChoice(clone(prevState), op, ctx);
-  if (prevState.pendingEvent) return fail('awaiting_event_choice');
+  if (prevState.pendingEvent && !op.debug
+      && isPlayersTurn(prevState, ctx.profileId)
+      && eventDebtFor(prevState, ctx.profileId)) {
+    const st0 = clone(prevState);
+    if (clearStaleEventDebt(st0, ctx.profileId)) {
+      // Debt evaporated (no valid options remain): let the op proceed
+      // against the cleaned state.
+      return applyOperation(st0, op, ctx);
+    }
+    return fail('awaiting_event_choice');
+  }
 
   if (prevState.pendingFirstPlayer) return fail('awaiting_first_player');
 

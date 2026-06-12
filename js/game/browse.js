@@ -604,6 +604,7 @@ function applySnapshot(snapshot, seq) {
   // same idempotent snapshot-driven overlay treatment as the first-player
   // handoff; appears for waiting players, shows progress to everyone else.
   renderEventChooser(snapshot);
+  refreshNewsBadge();
   renderGameOver(snapshot);
   // Speed the snapshot poll up while an interactive freeze is open (an
   // auction, or a first-player handoff) so the waiting players see it
@@ -1577,6 +1578,48 @@ function computeSnapshotScore(snapshot, profileId) {
   };
 }
 
+// Galactic news broadcast: a shared feed of what just happened at the
+// table (event outcomes, who lost what, glitch fixes). The toolbar
+// news button opens it; an unread badge counts items since last read.
+function gameNews() {
+  return (_online && _onlineSnapshot && Array.isArray(_onlineSnapshot.news))
+    ? _onlineSnapshot.news : [];
+}
+function newsSeenKey() { return 'hf-news-seen-' + (_onlineGameId || 'solo'); }
+function refreshNewsBadge() {
+  const badge = document.getElementById('news-badge');
+  if (!badge) return;
+  const total = gameNews().length;
+  let seen = 0;
+  try { seen = parseInt(localStorage.getItem(newsSeenKey()) || '0', 10) || 0; } catch { seen = 0; }
+  const unread = Math.max(0, total - seen);
+  badge.hidden = unread <= 0;
+  badge.textContent = unread > 9 ? '9+' : String(unread);
+}
+function openNewsModal() {
+  document.querySelector('.news-overlay')?.remove();
+  const items = gameNews();
+  try { localStorage.setItem(newsSeenKey(), String(items.length)); } catch { /* private mode */ }
+  refreshNewsBadge();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay news-overlay';
+  const rows = items.length
+    ? [...items].reverse().map((n) =>
+        `<li><span class="news-ic">${esc(n.icon || '\u{1F4F0}')}</span>` +
+        `<span class="news-when">R${esc(String(n.round))}.${esc(String((n.turn | 0) + 1))}</span>` +
+        `<span class="news-text">${esc(n.text || '')}</span></li>`).join('')
+    : '<li class="news-empty">No broadcasts yet - the wire is quiet.</li>';
+  overlay.innerHTML = `
+    <div class="et-produce-modal news-modal" role="dialog" aria-label="Galactic news">
+      <div class="et-produce-head"><h3>\u{1F4F0} Galactic news</h3></div>
+      <ul class="news-list">${rows}</ul>
+      <div class="card-modal-actions"><button type="button" class="modal-btn news-close">Close</button></div>
+    </div>`;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  overlay.querySelector('.news-close').addEventListener('click', () => overlay.remove());
+  document.body.appendChild(overlay);
+}
+
 // Open Sunspot event chooser. Driven straight off the snapshot like the
 // first-player handoff: while state.pendingEvent is open, waiting players
 // pick a card (Budget Cuts: any hand card; Pad Explosion: one of the tied
@@ -1623,10 +1666,9 @@ function renderEventChooser(snapshot) {
   actions.innerHTML = '';
 
   if (!amWaiting) {
-    const names = pending.waiting
-      .map((id) => (players.find((p) => p.profileId === id) || {}).name || '?')
-      .join(', ');
-    sub.textContent = `Waiting for ${names} to choose.`;
+    // Per user decision the table is NOT frozen: players who owe nothing
+    // play on with no blocker. (The debt-holder settles on their turn.)
+    overlay.remove();
     return;
   }
 
@@ -5270,6 +5312,8 @@ function ensureMapShell(host) {
       <div class="map-turn-controls">
         <button id="turn-tracker" title="View turn tracker"
           aria-label="View turn tracker">🕐</button>
+        <button id="news-feed" title="Galactic news - what just happened"
+          aria-label="Galactic news">📰<span id="news-badge" class="news-badge" hidden></span></button>
         <button id="turn-end" title="End your turn"
           aria-label="End turn">⏭ End turn</button>
         <span id="turn-budget" class="map-turn-budget" aria-live="polite">
@@ -5470,6 +5514,9 @@ function ensureMapShell(host) {
   });
   host.querySelector('#turn-tracker').addEventListener('click', () => {
     openTurnClockModal();
+  });
+  host.querySelector('#news-feed').addEventListener('click', () => {
+    openNewsModal();
   });
   // HF4: a turn is "operation, then move" OR "move, then operation"
   // - never split around the move. So the move stays reversible right
