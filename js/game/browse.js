@@ -1724,7 +1724,7 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
         : tie ? `Tie at ${v}`
         : myBid ? `Change to ${v}`
         : `Bid ${v}`;
-      bidBtn.disabled = !okAmt || unchanged || _onlineBusy;
+      bidBtn.disabled = !okAmt || unchanged;
     };
     input.addEventListener('input', () => { _bidDraft = input.value; sync(); });
     bidBtn.addEventListener('click', () => {
@@ -1760,7 +1760,7 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
     passBtn.type = 'button';
     passBtn.className = 'modal-btn';
     passBtn.textContent = passed ? "Passed (you won't raise)" : 'Pass';
-    passBtn.disabled = passed || _onlineBusy;
+    passBtn.disabled = passed;
     passBtn.addEventListener('click', () => submitMpAuctionOp({ kind: 'AUCTION_PASS' }));
     host.appendChild(passBtn);
 
@@ -1769,7 +1769,6 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
     autoBtn.className = 'modal-btn';
     autoBtn.textContent = 'Auto-pass (stay out)';
     autoBtn.title = "Pass for the rest of this lot - you won't be asked again when the bid is raised.";
-    autoBtn.disabled = _onlineBusy;
     autoBtn.addEventListener('click', () => submitMpAuctionOp({ kind: 'AUCTION_PASS', permanent: true }));
     host.appendChild(autoBtn);
   }
@@ -1780,8 +1779,16 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   if (iAmAuctioneer) {
     const closeWrap = document.createElement('div');
     closeWrap.className = 'mp-auction-close';
-    // The lot can only close once every other player has bid or passed.
-    // Until then the close buttons are disabled (the server enforces the
+    // Button enablement here is a PURE function of the snapshot (canClose,
+    // hasBid, etc.), never the transient _onlineBusy in-flight flag. Folding
+    // _onlineBusy into `disabled` caused a stuck-greyed bug: a 500ms auction
+    // poll could re-render the overlay WHILE a submit was in flight (busy=true),
+    // disabling the buttons, and because that poll advanced _lastAppliedSeq the
+    // submit's own re-apply was seq-gated out. With every bidder auto-passed
+    // (full hand) no further op advances the seq, so nothing re-rendered and the
+    // buttons stayed greyed until a manual refresh. Double-submit is already
+    // guarded inside submitMpAuctionOp / submitOnlineOp, so the flag is not
+    // needed on the controls.
     // same rule); the auctioneer can still Reset to start a fresh round.
     // Trust the server's authoritative phase (awaiting === 'auctioneer',
     // set by recomputeAuction including full-hand auto-passes) in addition
@@ -1803,7 +1810,7 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
       keepBtn.type = 'button';
       keepBtn.className = 'modal-btn primary';
       keepBtn.textContent = 'Keep (no bids)';
-      keepBtn.disabled = _onlineBusy || !canClose;
+      keepBtn.disabled = !canClose;
       keepBtn.addEventListener('click', () => submitMpAuctionOp({ kind: 'AUCTION_SELL', buyerId: myId }));
       closeWrap.appendChild(keepBtn);
     } else {
@@ -1819,7 +1826,7 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
         } else {
           btn.textContent = `Sell to @${tp ? tp.name : '?'} (${high})`;
         }
-        btn.disabled = _onlineBusy || !canClose;
+        btn.disabled = !canClose;
         btn.addEventListener('click', () => submitMpAuctionOp({ kind: 'AUCTION_SELL', buyerId: tid }));
         closeWrap.appendChild(btn);
       }
@@ -1836,7 +1843,6 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
       resetBtn.className = 'modal-btn';
       resetBtn.textContent = '↺ Reset others’ bids';
       resetBtn.title = "Clear the other players' bids and prompt them to bid again (higher) or pass. If they all pass, you win the lot.";
-      resetBtn.disabled = _onlineBusy;
       resetBtn.addEventListener('click', () => submitMpAuctionOp({ kind: 'AUCTION_RESET' }));
       closeWrap.appendChild(resetBtn);
     }
