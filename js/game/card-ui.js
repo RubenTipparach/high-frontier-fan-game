@@ -86,7 +86,7 @@ function readableInk(hex) {
   return lum > 0.6 ? '#0c0a16' : '#ffffff';
 }
 
-export function renderCard(card, { type, supplied, onSupportClick, face } = {}) {
+export function renderCard(card, { type, supplied, onSupportClick, face, radSide } = {}) {
   const kind = type || (card.faces && card.faces.primary && card.faces.primary.role ? 'crew' : 'patent');
   const el = document.createElement('div');
   el.className = `card kind-${kind}` + (kind === 'patent' ? ` type-${card.type}` : '');
@@ -157,7 +157,13 @@ export function renderCard(card, { type, supplied, onSupportClick, face } = {}) 
   // still works. The dedicated rotate (↻) button was removed -
   // the Light(N) / Heavy(N) labels under each half's name now
   // act as the side toggle (see buildRadiatorFace).
-  if (card.rotatable) el.dataset.rotated = '0';
+  // Open the radiator on its DEPLOYED side: data-rotated='1' brings the heavy
+  // side upright (active), '0' the light side. Callers rendering a STACK slot
+  // pass radSide (default heavy = max cooling, matching the boost + the server);
+  // a bare catalog/auction preview passes nothing and keeps the light-up
+  // default. Without this a heavy-deployed radiator rendered light-side-up
+  // everywhere (LEO / rocket stack / outpost).
+  if (card.rotatable) el.dataset.rotated = (radSide === 'heavy') ? '1' : '0';
 
   attachTipsTo(el);
   return el;

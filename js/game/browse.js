@@ -2564,6 +2564,7 @@ function openMpStackModal(title, slots) {
     // { id, kind, face } slot objects. Normalise so both render.
     const id = (typeof slot === 'string') ? slot : (slot && slot.id);
     const face = (slot && typeof slot === 'object') ? slot.face : undefined;
+    const radSide = (slot && typeof slot === 'object') ? (slot.radSide || 'heavy') : undefined;
     const card = PATENTS_BY_ID[id] || CREW_BY_ID[id];
     if (!card) {
       const t = document.createElement('div');
@@ -2575,7 +2576,7 @@ function openMpStackModal(title, slots) {
     const kind = CREW_BY_ID[id] ? 'crew' : 'patent';
     const wrap = document.createElement('div');
     wrap.className = 'mp-stack-modal-card';
-    try { wrap.appendChild(renderCard(card, { type: kind, face })); }
+    try { wrap.appendChild(renderCard(card, { type: kind, face, radSide })); }
     catch { wrap.textContent = card.name || id; }
     body.appendChild(wrap);
   }
@@ -3767,7 +3768,7 @@ function openUnifiedStackInspector(stackId) {
         const wrap = document.createElement('div');
         wrap.className = 'rocket-slot';
         if (selected.has(slot.id)) wrap.classList.add('is-selected');
-        wrap.appendChild(renderCard(card, { type: slot.kind || 'patent', face: slot.face }));
+        wrap.appendChild(renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy' }));
         const actions = document.createElement('div');
         actions.className = 'rocket-slot-actions';
         const selBtn = document.createElement('button');
@@ -6827,7 +6828,7 @@ function openRocketStackModal() {
       // from "this thruster needs X" to the library view of every
       // card that supplies X. We close the rocket-stack modal
       // first so the patents pane comes up on a clean surface.
-      const cardOpts = { type: slot.kind || 'patent', face: slot.face };
+      const cardOpts = { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy' };
       if (isThruster && slot.id === activeId) cardOpts.supplied = supplied;
       cardOpts.onSupportClick = (kinds) => {
         close();
