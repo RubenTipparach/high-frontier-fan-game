@@ -59,7 +59,7 @@ import { MILESTONES } from '../../data/glory.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { ZONE_POLYGONS } from '../../data/zones.js';
 import {
-  renderCard, thrustVisual, attachTipsTo,
+  renderCard, thrustVisual, thrustModVisual, attachTipsTo,
   REQUIREMENT_VIS, REQ_SUPPLIER_TYPE,
   svgSunChip, svgBallerinaChip, cardGlanceSummary,
 } from './card-ui.js';
@@ -7002,10 +7002,16 @@ function openRocketStackModal() {
             <span><strong>10</strong> RAD</span>
             <span><strong>1</strong> 🌡</span>
           </div>
+          <div class="afterburn-temp-mod"></div>
           <div class="card-body">
             <p class="card-bonus">Afterburn by-product: <strong>+1 net thrust</strong> for the whole rocket and <strong>+1 Therm</strong> of cooling (any chain). Temporary - lasts this turn.</p>
           </div>
         </div>`;
+      // The +1 net thrust reads as the published thrust-MODIFIER triangle (the
+      // same slate wrench triangle every reactor / generator uses for its
+      // pairing bonus), so the card shows WHY the rocket gained a thrust point.
+      const modHost = temp.querySelector('.afterburn-temp-mod');
+      if (modHost) modHost.appendChild(thrustModVisual({ thrustMod: 1 }));
       othersHost.appendChild(temp);
     }
     // Carried glory chits ride in the stack like cards. They're

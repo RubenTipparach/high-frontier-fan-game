@@ -373,7 +373,18 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     const f = fdata.fuel ?? card.fuel;
     add('Fuel', f != null && !Number.isInteger(f) ? f.toFixed(2) : f);
     add('Thrust', fdata.thrust ?? card.thrust);
-    if (fdata.afterburn ?? card.afterburn) add('Afterburn', '🔥');
+    const afterVal = fdata.afterburn ?? card.afterburn;
+    if (afterVal) {
+      // Afterburn stat line: the number is the FUEL STEPS spent to engage
+      // afterburn (the +1 net thrust gain is always +1). Carry that on the
+      // tooltip so the digit next to the flame is never read as a water cost.
+      const n = Number(afterVal);
+      const tip = `Afterburn: spend ${n} fuel step${n === 1 ? '' : 's'} to add +1 net thrust this turn. `
+        + `This number is the fuel steps spent to perform afterburn, not a water or aqua cost.`;
+      const li = document.createElement('li');
+      li.innerHTML = `<span>Afterburn</span><strong data-tip="${escapeText(tip)}">🔥 ${escapeText(String(n))}</strong>`;
+      stats.appendChild(li);
+    }
   } else if (card.type === 'reactor') {
     add('Power', card.power);
     add('Heat',  card.heat);
@@ -927,7 +938,14 @@ export function thrustVisual(card, face, opts = {}) {
   // off the spreadsheet's "Fuel Type" column on each face.
   const ftype = (face && face.fuelType) || card.fuelType;
   const fuelEmoji = ftype === 'Dirt' ? '🪨' : '💧';
-  const showAfter = (face && face.afterburn) || (!face && card.afterburn);
+  // Afterburn value = the FUEL STEPS spent to engage afterburn (the thrust gain
+  // is always +1). Shown as a digit beside the flame so the cost reads off the
+  // card itself, not just the rocket modal.
+  const afterVal = (face && face.afterburn != null) ? face.afterburn : (card ? card.afterburn : null);
+  const afterN = Number(afterVal) || 0;
+  const showAfter = afterN > 0;
+  const afterTip = `Afterburn: spend ${afterN} fuel step${afterN === 1 ? '' : 's'} to add +1 net thrust this turn. `
+    + `This number is the fuel steps spent to perform afterburn, not a water or aqua cost.`;
 
   // Rounded-triangle path. Apex at (70,12); base (18,86)–(122,86).
   // Each corner is curved with a small quadratic; tangent points
@@ -953,8 +971,11 @@ export function thrustVisual(card, face, opts = {}) {
       <path d="${trianglePath}"
         fill="rgba(96,165,250,0.35)" stroke="#60a5fa" stroke-width="2.5"
         stroke-linejoin="round"/>
-      ${showAfter ? `<text x="70" y="42" text-anchor="middle"
-        font-size="22" data-tip="${escapeText(opts.breakdown?.afterburn || 'Afterburn')}">🔥</text>` : ''}
+      ${showAfter ? `<g data-tip="${escapeText(opts.breakdown?.afterburn || afterTip)}">
+        <text x="62" y="46" text-anchor="middle" font-size="18">🔥</text>
+        <text x="83" y="46" text-anchor="middle" font-size="13" font-weight="700"
+          fill="#0c1d34" stroke="#ffffff" stroke-width="2.4" paint-order="stroke">${escapeText(String(afterN))}</text>
+      </g>` : ''}
       <line x1="63" y1="72" x2="76" y2="72"
         stroke="currentColor" stroke-width="1.6"
         marker-end="url(#thrust-arrow)"/>
@@ -982,7 +1003,7 @@ export function thrustVisual(card, face, opts = {}) {
 // my own thrust." Thrust mod (+N / -N) sits in a darker
 // pink-circle clone; fuel mod (×N or fraction) sits next to
 // a 💧 droplet just like the regular triangle.
-function thrustModVisual(face) {
+export function thrustModVisual(face) {
   const wrap = document.createElement('div');
   wrap.className = 'thrust-visual is-modifier';
   const tm = face.thrustMod;
