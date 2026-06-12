@@ -37,20 +37,36 @@ scenes where a first stage would be nonsense. Not to a shared scale.
 | `chibi-gemini.svg` | Gemini spacecraft (re-entry module + adapter) |
 | `chibi-orion-pulse-ship.svg` | Project Orion pulse ship (it IS its own interplanetary vehicle) |
 
-## Future concepts
+## Media homages
+
+Original designs INSPIRED BY popular sci-fi vehicles (fan homages,
+not replicas). Shared scale 3.5 px per meter; `_media-sheet.svg` /
+`_media-preview.png` line them up against a 150 m scale bar.
+
+| File | Vehicle | Inspiration | Length |
+|---|---|---|---|
+| `media-shield-ship.svg` | Shield ship: gold sun shield leading a module spine with a glowing greenhouse | Sunshine | 174 m |
+| `media-ring-ship.svg` | Ring ship: liner-turned-Mars-ship, rotating hotel ring on a central spine | For All Mankind | 126 m |
+| `media-ion-cruiser.svg` | Ion cruiser: truss spine, rotating hab ring, solar wings, blue-glow ion drives | The Martian | 130 m |
+| `media-deep-space-stack.svg` | Deep space stack: slender utilitarian stack with a conical crew cabin | Ad Astra | 64 m |
+| `media-torch-corvette.svg` | Torch corvette: tail-lander military hull with hazard-orange accents | The Expanse | 46 m |
+
+## Future concepts (TABLED for now)
 
 Crewed interplanetary concepts from the Atomic Rockets "Realistic
 Designs" catalogue (https://projectrho.com/public_html/rocket/).
-These ships run hundreds of meters, so they share their own scale
-(2.5 px per meter); `_futures-sheet.svg` / `_futures-preview.png`
-line them up against a 200 m scale bar.
+Tabled by design review 2026-06-12 (they read more interstellar than
+this game's solar-system setting); kept in `future-concepts/` as
+reference docs, NOT candidates for the app right now. Shared scale
+2.5 px per meter; `future-concepts/_futures-sheet.svg` lines them up
+against a 200 m scale bar.
 
 | File | Vehicle | Length |
 |---|---|---|
-| `future-discovery-2.svg` | Discovery II (NASA GRC He3-D fusion, centrifuge hab sphere + tank spine + radiator petals) | 236 m |
-| `future-umbrella-ship.svg` | Stuhlinger ion "umbrella ship" (nuclear-electric, radiator dish + hanging crew pod) | 149 m |
-| `future-medusa.svg` | Medusa (nuclear pulse charges tow the ship by a giant sail; compact survey size) | 166 m |
-| `future-vista.svg` | VISTA (LLNL laser inertial-confinement fusion cone, crew ring at the rim) | 97 m |
+| `future-concepts/future-discovery-2.svg` | Discovery II (NASA GRC He3-D fusion, centrifuge hab sphere + tank spine + radiator petals) | 236 m |
+| `future-concepts/future-umbrella-ship.svg` | Stuhlinger ion "umbrella ship" (nuclear-electric, radiator dish + hanging crew pod) | 149 m |
+| `future-concepts/future-medusa.svg` | Medusa (nuclear pulse charges tow the ship by a giant sail; compact survey size) | 166 m |
+| `future-concepts/future-vista.svg` | VISTA (LLNL laser inertial-confinement fusion cone, crew ring at the rim) | 97 m |
 
 The SVGs are emitted by `scripts/generate-background-rockets.mjs`
 (geometry, shading gradients, and roll-pattern markings are all

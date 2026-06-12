@@ -744,10 +744,171 @@ function futMedusa() {
   return emit('fmd', 'MEDUSA · PULSE SAIL', 166, c);
 }
 
+// ================= media homages =================
+// Original designs INSPIRED BY popular sci-fi vehicles (fan homages, not
+// replicas): The Expanse, Ad Astra, For All Mankind, Sunshine, The Martian.
+// Shared scale MS px per meter.
+const MS = 3.5;
+
+function mediaCorvette() {
+  // after The Expanse: a tail-lander torch corvette, stacked decks over one
+  // fusion drive, dark military hull with hazard-orange accents
+  const c = makeCtx('mcv', 18, 47, 5, MS);
+  const HULL = '#4d5360', DK = '#363b45', ACC = '#c96a2a';
+  c.bell(0, 1.4, 4.6, 3.0, 6.0, '#2b2f38');
+  // drive + engineering decks
+  c.trap(1.4, 6.0, 9.0, 11.4, DK);
+  c.trap(7.4, 10.0, 11.4, 12.6, HULL);
+  c.decal(7.6, 1.1, 12.0, ACC);
+  c.seam(7.4, 11.4); c.seam(17.4, 12.4);
+  // mid hull: PDC turret bumps + airlock
+  c.trap(17.4, 14.0, 12.6, 10.8, HULL);
+  for (const sgn of [-1, 1]) {
+    c.add(`<rect x="${(c.X(sgn * 5.7) - 3.5).toFixed(1)}" y="${c.Y(27).toFixed(1)}" width="7" height="9" rx="3" fill="#2b2f38"/>`);
+    c.add(`<rect x="${(c.X(sgn * 5.9) - 3).toFixed(1)}" y="${c.Y(20.5).toFixed(1)}" width="6" height="8" rx="3" fill="#2b2f38"/>`);
+  }
+  c.add(`<rect x="${(c.X(0) - 4).toFixed(1)}" y="${c.Y(24).toFixed(1)}" width="8" height="11" rx="2" fill="#3a3f49" stroke="#262a32" stroke-width="1"/>`);
+  c.decal(30.0, 0.9, 10.9, ACC);
+  // ops deck + cockpit with lit canopy band
+  c.trap(31.4, 9.0, 10.8, 7.8, HULL);
+  c.seam(31.4, 10.8);
+  c.trap(40.4, 4.0, 7.8, 4.6, DK);
+  c.decal(41.5, 1.1, 5.6, '#9fd3e8', { op: 0.95 });
+  c.nose(44.4, 2.0, 4.6, 2.0, HULL, { bow: 0.45 });
+  // comm array fin
+  c.poly([[5.2, 33], [8.6, 35.5], [8.6, 37.5], [5.0, 37]], DK);
+  dish(c, -4.8, 36, -7.6, 38.6);
+  return emit('mcv', 'TORCH CORVETTE', 46.4, c);
+}
+
+function mediaDeepSpaceStack() {
+  // after Ad Astra: a slender utilitarian deep-space stack with a conical
+  // crew cabin, radiator collars, and folded landing legs
+  const c = makeCtx('mds', 12, 65, 4, MS);
+  const WHITE = '#e3e7ee', GRAY = '#9aa2af', DK = '#37404e';
+  for (const x of [-1.4, 0, 1.4]) c.bell(x, 0.4, 2.2, 1.0, 1.8);
+  for (const sgn of [-1, 1]) {
+    c.add(`<path d="M${c.X(sgn * 2.4).toFixed(1)} ${c.Y(7).toFixed(1)} L${c.X(sgn * 4.6).toFixed(1)} ${c.Y(0.4).toFixed(1)} L${c.X(sgn * 5.2).toFixed(1)} ${c.Y(0.4).toFixed(1)}" fill="none" stroke="#4a4f5a" stroke-width="2.5"/>`);
+  }
+  c.cyl(0.4, 17.6, 5.4, WHITE);
+  c.seam(9.0, 5.4, { op: 0.18 });
+  c.cyl(18.0, 3.0, 5.6, DK);
+  c.cyl(21.0, 23.0, 5.4, WHITE);
+  for (const y of [27, 33, 39]) c.seam(y, 5.2, { op: 0.14 });
+  for (const y of [24, 26, 28]) win(c, -1.6, y, 0.34);
+  c.decal(36.0, 5.0, 0.5, GRAY, { cxM: 2.0 });
+  c.cyl(44.0, 2.0, 5.8, GRAY);
+  // crew cone
+  c.trap(46.0, 12.0, 5.4, 2.6, WHITE);
+  win(c, -0.9, 51, 0.42);
+  win(c, 0.9, 51, 0.42);
+  c.cyl(58.0, 2.4, 2.6, GRAY);
+  dish(c, 1.6, 59.5, 3.6, 61.5);
+  c.nose(60.4, 3.2, 2.6, 0.5, WHITE, { bow: 0.5 });
+  return emit('mds', 'DEEP SPACE STACK', 63.6, c);
+}
+
+function mediaRingShip() {
+  // after For All Mankind: a liner-turned-Mars-ship, central spine with a
+  // rotating hotel ring, gold accents, nuclear engine cluster aft
+  const c = makeCtx('mrs', 96, 128, 5, MS);
+  const WHITE = '#e9edf3', GRAY = '#9aa2af', DK = '#3a3f49', GOLD = '#c9a23f';
+  for (const x of [-2.6, 0, 2.6]) c.bell(x, 0.6, 3.0, 1.6, 2.6);
+  c.trap(0.6, 7.4, 9.0, 7.6, DK);
+  // tank cluster
+  for (const sgn of [-1, 1]) c.cyl(9.5, 17, 4.4, GRAY, { cxM: sgn * 4.6, rx: 6 });
+  c.cyl(8.0, 103.0, 6.2, WHITE);
+  for (let y = 14; y < 106; y += 11) c.seam(y, 6.0, { op: 0.14 });
+  // rotating ring, edge-on, with spokes
+  c.cyl(60.0, 9.0, 92.0, WHITE, { rx: c.px(4.5) });
+  c.decal(60.6, 1.2, 90.0, GOLD);
+  for (const x of [-38, -28, -18, 18, 28, 38]) win(c, x, 65, 0.75);
+  for (const sgn of [-1, 1]) {
+    c.add(`<path d="M${c.X(sgn * 3).toFixed(1)} ${c.Y(76).toFixed(1)} L${c.X(sgn * 34).toFixed(1)} ${c.Y(68).toFixed(1)} M${c.X(sgn * 3).toFixed(1)} ${c.Y(53).toFixed(1)} L${c.X(sgn * 34).toFixed(1)} ${c.Y(61).toFixed(1)}" stroke="#646d7c" stroke-width="2.5"/>`);
+  }
+  c.seam(69.0, 12, { op: 0.2 });
+  // command head
+  c.cyl(111.0, 9.0, 9.6, WHITE);
+  c.decal(117.4, 1.0, 9.4, GOLD);
+  for (const x of [-2.6, 0, 2.6]) win(c, x, 114.5, 0.6);
+  dish(c, 5.4, 118, 8.4, 121.5);
+  c.nose(120.0, 4.0, 9.6, 3.0, GRAY, { bow: 0.45 });
+  c.cyl(124.0, 2.4, 3.0, GRAY);
+  return emit('mrs', 'RING SHIP', 126.4, c);
+}
+
+function mediaShieldShip() {
+  // after Sunshine: a huge gold sun shield leading a long spine of crew
+  // modules, with a glowing greenhouse band
+  const c = makeCtx('msh', 120, 176, 5, MS);
+  const STEEL = '#8a93a3', DK = '#3a3f49', GOLD = '#c9a23f';
+  for (const x of [-2.2, 0, 2.2]) c.bell(x, 0.5, 2.6, 1.4, 2.2);
+  c.trap(0.5, 9.5, 8.4, 7.0, DK);
+  // spine with module pods
+  c.cyl(10, 122, 6.4, STEEL);
+  for (let y = 16; y < 130; y += 10) c.seam(y, 6.2, { op: 0.14 });
+  for (const [yy, hh, sgn] of [[28, 16, -1], [50, 13, 1], [70, 15, -1]]) {
+    c.cyl(yy, hh, 4.6, '#aeb6c2', { cxM: sgn * 5.0, rx: 5 });
+    win(c, sgn * 5.0, yy + hh / 2, 0.6);
+  }
+  // greenhouse: lit green band
+  c.cyl(92, 12, 8.6, '#5d6a64', { rx: 6 });
+  for (const x of [-2.6, 0, 2.6]) c.decal(94.5, 6.5, 1.5, '#7ef0c0', { cxM: x, op: 0.85 });
+  dish(c, -4.4, 116, -8.0, 119);
+  // strut cone up to the shield
+  c.trap(132, 12, 7.0, 22.0, DK);
+  // the shield: shallow gold dome facing the sun
+  c.add(`<path d="M${c.X(-57).toFixed(1)} ${c.Y(150).toFixed(1)} Q${c.X(0).toFixed(1)} ${c.Y(183).toFixed(1)} ${c.X(57).toFixed(1)} ${c.Y(150).toFixed(1)} Q${c.X(0).toFixed(1)} ${c.Y(140).toFixed(1)} ${c.X(-57).toFixed(1)} ${c.Y(150).toFixed(1)} Z" fill="url(#msh-g${GOLD.slice(1)})" stroke="#7a5a1e" stroke-width="1.2"/>`);
+  c.add(`<path d="M${c.X(-57).toFixed(1)} ${c.Y(150).toFixed(1)} Q${c.X(0).toFixed(1)} ${c.Y(140).toFixed(1)} ${c.X(57).toFixed(1)} ${c.Y(150).toFixed(1)}" fill="none" stroke="#8a6a24" stroke-width="2"/>`);
+  c.cyl(150, 1, 2, GOLD); // ensure gold gradient exists
+  return emit('msh', 'SHIELD SHIP', 174, c);
+}
+
+function mediaIonCruiser() {
+  // after The Martian: a long-haul ion cruiser, truss spine, rotating hab
+  // ring, big solar wings, blue-glow ion drives
+  const c = makeCtx('mic', 62, 136, 5, MS);
+  const WHITE = '#e9edf3', STEEL = '#8a93a3', DK = '#3a3f49', RAD = '#8a3a3a';
+  for (const x of [-1.6, 0, 1.6]) {
+    c.bell(x, 0.5, 1.8, 0.9, 1.5, '#2b2f38');
+    c.add(`<ellipse cx="${c.X(x).toFixed(1)}" cy="${c.Y(-1.4).toFixed(1)}" rx="${c.px(0.65).toFixed(1)}" ry="${c.px(0.3).toFixed(1)}" fill="#7cc7ff" opacity="0.8"/>`);
+  }
+  c.trap(0.5, 9.5, 7.0, 6.0, DK);
+  for (const sgn of [-1, 1]) c.poly([[sgn * 1.5, 12], [sgn * 9, 15], [sgn * 9, 26], [sgn * 1.5, 29]], RAD);
+  // truss spine
+  c.cyl(10, 97, 4.2, STEEL);
+  for (let y = 15; y < 105; y += 7) c.seam(y, 4.0, { op: 0.16 });
+  // solar wings
+  for (const dir of [-1, 1]) wing(c, dir * 2.0, 84, dir * -5, 24, 5.5, dir);
+  // rotating hab ring, edge-on
+  c.cyl(46, 7.5, 44.0, WHITE, { rx: c.px(3.75) });
+  for (const x of [-16, -9, 9, 16]) win(c, x, 50, 0.65);
+  for (const sgn of [-1, 1]) {
+    c.add(`<path d="M${c.X(sgn * 2).toFixed(1)} ${c.Y(58).toFixed(1)} L${c.X(sgn * 16).toFixed(1)} ${c.Y(52.5).toFixed(1)} M${c.X(sgn * 2).toFixed(1)} ${c.Y(41.5).toFixed(1)} L${c.X(sgn * 16).toFixed(1)} ${c.Y(47).toFixed(1)}" stroke="#646d7c" stroke-width="2"/>`);
+  }
+  // forward lab + docking node
+  c.cyl(107, 14, 7.6, WHITE);
+  for (const y of [110, 113, 116]) win(c, -2.2, y, 0.42);
+  c.seam(107, 7.6);
+  dish(c, 4.4, 118, 7.6, 121);
+  c.trap(121, 4, 7.6, 3.2, STEEL);
+  c.cyl(125, 3, 3.2, '#9aa2af');
+  c.nose(128, 2.4, 3.2, 1.0, DK, { bow: 0.5 });
+  return emit('mic', 'ION CRUISER', 130.4, c);
+}
+
 // ---------------- output ----------------
 const rockets = [saturnV(), slsArtemis(), falcon9(), soyuz(), projectOrion(), geminiTitan()];
 const chibis = [chibiApolloCsm(), chibiOrionMpcv(), chibiCrewDragon(), chibiSoyuz(), chibiSkylab(), chibiGemini(), chibiOrionPulse()];
 const futures = [futDiscovery2(), futUmbrella(), futMedusa(), futVista()];
+const medias = [mediaShieldShip(), mediaRingShip(), mediaIonCruiser(), mediaDeepSpaceStack(), mediaCorvette()];
+const MEDIA_AFTER = {
+  msh: 'after Sunshine',
+  mrs: 'after For All Mankind',
+  mic: 'after The Martian',
+  mds: 'after Ad Astra',
+  mcv: 'after The Expanse',
+};
 const FILE_NAMES = {
   satv: 'saturn-v-apollo.svg',
   sls: 'sls-block-1-artemis.svg',
@@ -762,14 +923,20 @@ const FILE_NAMES = {
   cgm: 'chibi-gemini.svg',
   cop: 'chibi-orion-pulse-ship.svg',
   csk: 'chibi-skylab.svg',
-  fd2: 'future-discovery-2.svg',
-  fvs: 'future-vista.svg',
-  fum: 'future-umbrella-ship.svg',
-  fmd: 'future-medusa.svg',
+  fd2: 'future-concepts/future-discovery-2.svg',
+  fvs: 'future-concepts/future-vista.svg',
+  fum: 'future-concepts/future-umbrella-ship.svg',
+  fmd: 'future-concepts/future-medusa.svg',
+  mcv: 'media-torch-corvette.svg',
+  mds: 'media-deep-space-stack.svg',
+  mrs: 'media-ring-ship.svg',
+  msh: 'media-shield-ship.svg',
+  mic: 'media-ion-cruiser.svg',
 };
 
 mkdirSync(OUT_DIR, { recursive: true });
-for (const r of [...rockets, ...chibis, ...futures]) {
+mkdirSync(join(OUT_DIR, 'future-concepts'), { recursive: true });
+for (const r of [...rockets, ...chibis, ...futures, ...medias]) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${r.W} ${r.H}" width="${r.W}" height="${r.H}">\n<defs>${r.defs}</defs>\n  ${r.inner}\n</svg>\n`;
   writeFileSync(join(OUT_DIR, FILE_NAMES[r.prefix]), svg);
 }
@@ -882,6 +1049,47 @@ for (const r of [...rockets, ...chibis, ...futures]) {
     body += `<text x="${cxCol.toFixed(1)}" y="${sheetGround + 46}" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#666f86" text-anchor="middle">${r.heightM} m</text>`;
   }
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">\n<defs>${defsAll.join('')}</defs>\n${body}\n</svg>\n`;
-  writeFileSync(join(OUT_DIR, '_futures-sheet.svg'), svg);
+  writeFileSync(join(OUT_DIR, 'future-concepts', '_futures-sheet.svg'), svg);
+}
+
+// media sheet: fan homages at their own shared scale (MS px/m)
+{
+  const GAP = 46, PADL = 120, PADR = 40, PADT = 60, PADB = 96;
+  const maxH = Math.max(...medias.map(r => r.H));
+  const sheetGround = PADT + maxH - 8;
+  let x = PADL, placed = [], defsAll = [];
+  for (const r of medias) {
+    const labelW = Math.max(r.label.length, MEDIA_AFTER[r.prefix].length) * 8.4;
+    const stride = Math.max(r.W, labelW);
+    placed.push({ r, tx: x + stride / 2 - r.W / 2, cxCol: x + stride / 2, ty: sheetGround - r.groundY });
+    defsAll.push(r.defs);
+    x += stride + GAP;
+  }
+  const W = x - GAP + PADR, H = sheetGround + PADB;
+  let stars = '';
+  let seed = 23;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  for (let i = 0; i < 110; i++) {
+    stars += `<circle cx="${(rnd() * W).toFixed(1)}" cy="${(rnd() * H).toFixed(1)}" r="${(rnd() * 1.1 + 0.3).toFixed(2)}" fill="#aab4d0" opacity="${(rnd() * 0.5 + 0.15).toFixed(2)}"/>`;
+  }
+  let body = `<rect width="${W}" height="${H}" fill="#0c0a16"/>${stars}`;
+  // 150 m scale bar with 50 m ticks
+  const sbX = 52, sbY1 = sheetGround, sbY0 = sheetGround - 150 * MS;
+  body += `<line x1="${sbX}" y1="${sbY0}" x2="${sbX}" y2="${sbY1}" stroke="#5a567e" stroke-width="2"/>`;
+  for (let m = 0; m <= 150; m += 50) {
+    const yy = sheetGround - m * MS;
+    body += `<line x1="${sbX - 6}" y1="${yy}" x2="${sbX + 6}" y2="${yy}" stroke="#5a567e" stroke-width="2"/>`;
+    body += `<text x="${sbX - 11}" y="${yy + 4}" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#8b93a8" text-anchor="end">${m}</text>`;
+  }
+  body += `<text x="${sbX}" y="${sbY0 - 14}" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#8b93a8" text-anchor="middle">meters</text>`;
+  for (const { r, tx, cxCol, ty } of placed) {
+    body += `<g transform="translate(${tx.toFixed(1)},${ty.toFixed(1)})">${r.inner}</g>`;
+    body += `<text x="${cxCol.toFixed(1)}" y="${sheetGround + 28}" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="600" letter-spacing="1" fill="#aab4d0" text-anchor="middle">${r.label}</text>`;
+    body += `<text x="${cxCol.toFixed(1)}" y="${sheetGround + 46}" font-family="Helvetica, Arial, sans-serif" font-size="11" font-style="italic" fill="#666f86" text-anchor="middle">${MEDIA_AFTER[r.prefix]}</text>`;
+    body += `<text x="${cxCol.toFixed(1)}" y="${sheetGround + 62}" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#666f86" text-anchor="middle">${r.heightM} m</text>`;
+  }
+  body += `<text x="${W - 12}" y="${H - 10}" font-family="Helvetica, Arial, sans-serif" font-size="10" fill="#666f86" text-anchor="end">fan homages, original designs inspired by the films/shows</text>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">\n<defs>${defsAll.join('')}</defs>\n${body}\n</svg>\n`;
+  writeFileSync(join(OUT_DIR, '_media-sheet.svg'), svg);
 }
 console.log(`wrote ${rockets.length} rockets + contact sheet to ${OUT_DIR}`);
