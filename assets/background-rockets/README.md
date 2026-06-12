@@ -1,9 +1,22 @@
-# Background rockets - CONCEPT ART, not yet in the app
+# Background rockets
 
 Side-profile illustrations of historical and concept crewed launch
-vehicles, intended as decorative background vehicles for the game.
-Nothing in the running app loads these yet: per the project's SVG
-workflow they stay concept-only until the art gets explicit sign-off.
+vehicles, used as decorative background vehicles for the game.
+
+Status (art sign-off 2026-06-12):
+
+- **Chibi spacecraft: IN THE APP.** The chibi in-space set (the real
+  world spacecraft, plus Project Orion) is the ambient-traffic fleet:
+  `js/game/render.js` loads the `chibi-*.svg` files for the cosmetic
+  rockets drifting between sites on the map.
+- **Media homages: Module 1 rockets.** Approved as the background
+  fleet for the Module 1 era, wired in when M1 content lands (M1 is
+  out of current gameplay scope, see CLAUDE.md "Variants we target").
+- **Launch stacks: approved concepts, not yet placed.** Full launch
+  configurations only make sense in near-Earth / pad scenes; no map
+  surface uses them yet.
+- **Future concepts: TABLED.** Reference docs only, in
+  `future-concepts/`.
 
 All six vehicles share one scale (7 px per meter), so they can sit in
 the same scene with true relative sizes. `_contact-sheet.svg` lines
@@ -19,13 +32,15 @@ its render.
 | `project-orion.svg` | Project Orion nuclear-pulse concept (pusher plate + shock absorbers) | 41.2 m |
 | `titan-2-gemini.svg` | Titan II GLV with Gemini spacecraft | 33.2 m |
 
-## Chibi spacecraft
+## Chibi spacecraft (IN THE APP: ambient map traffic)
 
 Super-deformed in-space configurations: squat proportions, fat noses,
 oversized windows. These carry NO launch boosters - they are the
 vehicles as they cruise between worlds, so they fit interplanetary
 scenes where a first stage would be nonsense. Not to a shared scale.
-`_chibi-sheet.svg` / `_chibi-preview.png` show the set.
+`_chibi-sheet.svg` / `_chibi-preview.png` show the set. Loaded by
+`js/game/render.js` (`_ambientSprites`) as the cosmetic background
+traffic; if you add a ship here, add its file name to that list too.
 
 | File | Vehicle |
 |---|---|
@@ -37,11 +52,15 @@ scenes where a first stage would be nonsense. Not to a shared scale.
 | `chibi-gemini.svg` | Gemini spacecraft (re-entry module + adapter) |
 | `chibi-orion-pulse-ship.svg` | Project Orion pulse ship (it IS its own interplanetary vehicle) |
 
-## Media homages
+## Media homages (designated MODULE 1 rockets)
 
 Original designs INSPIRED BY popular sci-fi vehicles (fan homages,
-not replicas). Shared scale 3.5 px per meter; `_media-sheet.svg` /
-`_media-preview.png` line them up against a 150 m scale bar.
+not replicas). Approved 2026-06-12 as the background fleet for the
+Module 1 era: when M1 content ships, these join (or replace) the
+ambient traffic the same way the chibi set does today. Until then
+they stay assets-only. Shared scale 3.5 px per meter;
+`_media-sheet.svg` / `_media-preview.png` line them up against a
+150 m scale bar.
 
 | File | Vehicle | Inspiration | Length |
 |---|---|---|---|

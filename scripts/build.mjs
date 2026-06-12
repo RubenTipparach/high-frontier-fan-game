@@ -99,6 +99,7 @@ const mustExist = [
   href(main, 'js/main.js').slice(2), href(vcheck, 'js/version-check.js').slice(2),
   href(css, 'css/style.css').slice(2), href(css, 'css/map.css').slice(2), href(css, 'css/cards.css').slice(2),
   'assets/rockets/rocket-blue.png', 'data/site-flags.json',
+  'assets/background-rockets/chibi-apollo-csm.svg',          // ambient traffic (render.js#assetUrl)
   'assets/factory/factory-base-gray.png', 'assets/factory/colony-dome.png',
   'vendor/hf-mission-planner/assets/data-hf4.json',
 ];

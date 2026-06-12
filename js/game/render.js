@@ -803,18 +803,21 @@ export class MapRenderer {
     // random sites in the background. Count is driven externally
     // (setAmbientRocketCount) - 10 + 5 per factory built. Purely
     // visual; they ignore the delta-v graph and just lerp between
-    // random site coords.
+    // random site coords. The fleet is the chibi real-world spacecraft
+    // set (assets/background-rockets, in-space configs, no boosters),
+    // Project Orion included.
     this._ambientRockets = [];
     this._ambientLastT = 0;
     this._ambientSprites = [];
-    for (const name of ['rocket-red', 'rocket-blue', 'rocket-green', 'rocket-orange', 'rocket-silver']) {
+    for (const name of ['chibi-apollo-csm', 'chibi-orion', 'chibi-crew-dragon',
+      'chibi-soyuz', 'chibi-skylab', 'chibi-gemini', 'chibi-orion-pulse-ship']) {
       const img = new Image();
       // Resolve against THIS module's URL, not the address bar. With
       // room routing the visible URL can be a deep /room/<CODE> path,
       // and a bare 'assets/...' would resolve to /room/assets/... (404).
       // import.meta.url is always /js/game/render.js, so ../../assets
       // lands at the real app-root /assets.
-      img.src = assetUrl(`assets/rockets/${name}.png`);
+      img.src = assetUrl(`assets/background-rockets/${name}.svg`);
       this._ambientSprites.push(img);
     }
     // Stage-3 factory sprites: one player-tinted base per seat colour + the
@@ -1654,8 +1657,11 @@ export class MapRenderer {
       ctx.globalAlpha = 0.4;
       ctx.translate(x, y);
       ctx.rotate(ang);
+      // Aspect-correct: the chibi spacecraft are taller than wide, so
+      // size is the height and the width follows the sprite's ratio.
       const s = r.size;
-      ctx.drawImage(img, -s / 2, -s / 2, s, s);
+      const w = s * (img.naturalWidth / img.naturalHeight || 1);
+      ctx.drawImage(img, -w / 2, -s / 2, w, s);
       ctx.restore();
     }
   }

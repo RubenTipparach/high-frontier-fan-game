@@ -4,8 +4,8 @@
 // Emits assets/background-rockets/*.svg plus a _contact-sheet.svg that lines
 // every vehicle up baseline-aligned against a meter scale bar.
 // Run: node scripts/generate-background-rockets.mjs
-// CONCEPTS ONLY for now: nothing in the app loads these yet (pending art
-// sign-off, see assets/background-rockets/README.md).
+// The chibi set is LIVE in the app (render.js ambient traffic); the other
+// sets are staged per assets/background-rockets/README.md.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
