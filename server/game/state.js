@@ -181,7 +181,7 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
 
 // players: [{ profileId, name, seat }] (seat 1-based, any order).
 // maxRounds: game length (rounds = Sunspot Cube cycles); default 5.
-export function createInitialState({ players, seed, maxRounds = 5, startingAqua, economy } = {}) {
+export function createInitialState({ players, seed, maxRounds = 5, startingAqua, economy, draftStart } = {}) {
   // Sort by the incoming (lobby) seat first so the shuffle has a
   // deterministic base regardless of how the caller ordered the array,
   // then randomise the turn order with the seeded RNG. Turn order IS
@@ -205,12 +205,21 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
   // may pick Free Library and a free-play bank. Anything unrecognised falls
   // back to the standard values.
   const econ = economy === 'library' ? 'library' : 'market';
-  const startAqua = Number.isFinite(startingAqua) ? Math.max(0, Math.floor(startingAqua)) : AQUA_DEFAULT;
+  // Draft-start mode: the whole opening is a card draft (each player takes the
+  // top of a market deck for free until everyone holds DRAFT_HAND_SIZE cards),
+  // then banks are set to 6 and normal play begins. During the draft players
+  // hold 0 aqua (picks are free), so the starting bank is withheld here.
+  const draft = !!draftStart;
+  const startAqua = draft ? 0
+    : (Number.isFinite(startingAqua) ? Math.max(0, Math.floor(startingAqua)) : AQUA_DEFAULT);
   return {
     version: 2,
     seed,
     rng: { cursor: gen.cursor },
     status: 'active',
+    // Draft-start mode flag (see startAqua above). applyPickCrew flips the
+    // phase to 'draft' instead of 'play' when this is set.
+    draftStart: draft,
     // Draft phase. Every game opens in 'crew' - all players pick a
     // faction and may re-pick freely until everyone has chosen. The
     // engine's applyPickCrew flips this to 'play' the moment the

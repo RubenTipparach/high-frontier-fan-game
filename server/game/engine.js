@@ -1970,6 +1970,66 @@ function applyEndTurn(state, _op, player) {
   return { ok: true, state, log };
 }
 
+// ----- draft-start mode -----
+
+// The opening "draft round": each player, on their turn, takes the TOP card of
+// one market deck for FREE into their hand, then the turn passes (the Sunspot
+// Cube advances on a completed lap, like a normal turn minus income). The draft
+// ends the instant EVERY player holds DRAFT_HAND_SIZE cards - all banks are set
+// to DRAFT_END_AQUA and normal play begins from the first player. (User mode,
+// 2026-06-10.)
+const DRAFT_HAND_SIZE = 12;
+const DRAFT_END_AQUA = 6;
+function applyDraftPick(state, op, player) {
+  const deckType = String(op.deckType || '');
+  const deck = state.decks[deckType];
+  if (!Array.isArray(deck)) return fail('bad_deck');
+  if (!deck.length) return fail('deck_empty');
+  if ((player.hand || []).length >= DRAFT_HAND_SIZE) return fail('draft_hand_full');
+  // Take the top of the chosen deck (free) into the caller's hand.
+  const cardId = deck.shift();
+  player.hand = player.hand || [];
+  player.hand.push(cardId);
+  const card = PATENTS_BY_ID[cardId];
+  const cardName = card ? card.name : cardId;
+
+  // Draft over the moment EVERYONE holds a full hand: set banks, reset the
+  // Sunspot Cube so normal play gets the full game length (the draft only used
+  // the tracker cosmetically), and open the first player's normal turn.
+  if (state.players.every((p) => (p.hand || []).length >= DRAFT_HAND_SIZE)) {
+    state.draftPhase = 'play';
+    for (const p of state.players) p.aqua = DRAFT_END_AQUA;
+    state.turn = 0;
+    state.round = 1;
+    state.lastEvent = null;
+    state.activeIndex = state.firstPlayerIndex || 0;
+    openTurnFor(state, state.players[state.activeIndex]);
+    return {
+      ok: true, state,
+      log: `${player.name} drafted ${cardName}. Draft complete - everyone holds ${DRAFT_HAND_SIZE} cards and banks open at ${DRAFT_END_AQUA} aqua. Play begins.`,
+    };
+  }
+
+  // Otherwise pass the turn (cube advances on a completed lap), like END_TURN
+  // minus income / first-player handoff / game-end.
+  const n = state.players.length;
+  const firstIdx = state.firstPlayerIndex || 0;
+  const nextIndex = (state.activeIndex + 1) % n;
+  let tail = '';
+  if (nextIndex === firstIdx) {
+    advanceClock(state);
+    state.activeIndex = firstIdx;
+    tail = ` Sunspot Cube advances to slot ${state.turn}.`;
+  } else {
+    state.activeIndex = nextIndex;
+  }
+  openTurnFor(state, state.players[state.activeIndex]);
+  return {
+    ok: true, state,
+    log: `${player.name} drafted ${cardName}.${tail} ${state.players[state.activeIndex].name} is up.`,
+  };
+}
+
 // A rebuild (undo/redo) reverts the WHOLE state to the active player's turn
 // base, which predates any route a DIFFERENT player planned off-turn during
 // this turn - so the rebuild would silently wipe those private plans. Carry
@@ -2433,11 +2493,18 @@ function applyPickCrew(state, op, ctx) {
   // the stack. First-time pickers just get one push.
   player.leo = (player.leo || []).filter((s) => s.kind !== 'crew');
   player.leo.push({ id: cardId, kind: 'crew', face });
-  // Transition to 'play' the moment every player has a faction.
-  // Server-side, not derived client-side, so spectators + future
-  // joiners agree on the phase.
+  // The moment every player has a faction the crew draft is done. In a
+  // draft-start game the card draft comes next ('draft'); otherwise play
+  // begins ('play'). Server-side, not derived client-side, so spectators +
+  // future joiners agree on the phase.
   if (state.players.every((p) => !!p.faction)) {
-    state.draftPhase = 'play';
+    if (state.draftStart) {
+      state.draftPhase = 'draft';
+      state.activeIndex = state.firstPlayerIndex || 0;
+      openTurnFor(state, state.players[state.activeIndex]);
+    } else {
+      state.draftPhase = 'play';
+    }
   }
   const verb = switching ? 'switched to' : 'picked';
   return {
@@ -2515,7 +2582,19 @@ export function applyOperation(prevState, op, ctx) {
   const draftDone = prevState.draftPhase === 'play'
     || (prevState.draftPhase == null
         && prevState.players.every((p) => !!p.faction));
-  if (!draftDone) return fail('awaiting_crew_picks');
+  if (!draftDone) {
+    // Card-draft phase (draft-start mode): the ONLY allowed action is a free
+    // deck-top pick, taken by the active player on their turn. Everything else
+    // is blocked - no moves, no other ops, no turn passing (the pick passes the
+    // turn itself).
+    if (prevState.draftPhase === 'draft') {
+      if (op.kind !== 'DRAFT_PICK') return fail('draft_in_progress');
+      if (!isPlayersTurn(prevState, ctx.profileId)) return fail('not_your_turn');
+      const st = clone(prevState);
+      return applyDraftPick(st, op, currentPlayer(st));
+    }
+    return fail('awaiting_crew_picks');
+  }
 
   // First-player handoff: when a round closes the chooser must name the
   // next first player before anyone acts. SET_FIRST_PLAYER validates
@@ -2585,10 +2664,12 @@ export function applyOperation(prevState, op, ctx) {
   return META[op.kind](state, op, player, ctx);
 }
 
-// Ops accepted over the wire. Functional + meta + auction + lifecycle.
+// Ops accepted over the wire. Functional + meta + auction + lifecycle + the
+// draft-start pick (dispatched specially in applyOperation, so it's listed
+// explicitly rather than via a group).
 export const SUPPORTED_OPS = [
   ...Object.keys(FUNCTIONAL), ...Object.keys(META), ...Object.keys(AUCTION),
-  ...Object.keys(CREW), ...Object.keys(LIFECYCLE),
+  ...Object.keys(CREW), ...Object.keys(LIFECYCLE), 'DRAFT_PICK',
 ];
 // Ops that require the caller to supply ctx.turnBaseState.
 export const NEEDS_TURN_BASE = new Set(['UNDO', 'REDO']);

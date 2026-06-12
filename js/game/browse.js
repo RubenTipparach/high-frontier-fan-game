@@ -278,6 +278,7 @@ function gameViewVisible() {
 // (back in-room, still drafting/auctioning) from the cached snapshot.
 export function refreshRoomOverlays() {
   syncCrewDraftOverlay(_online ? _onlineSnapshot : null);
+  syncCardDraftOverlay(_online ? _onlineSnapshot : null);
   renderOnlineAuction(_online && _onlineSnapshot ? _onlineSnapshot.auction : null);
 }
 
@@ -635,12 +636,16 @@ function applySnapshot(snapshot, seq) {
   // wizard once the pick is committed server-side.
   maybePromptCrewPick(snapshot);
   syncCrewDraftOverlay(snapshot);
+  syncCardDraftOverlay(snapshot);
 }
 
 // One-at-a-time guard so a flurry of snapshots (e.g. another player's
 // PICK_CREW echoes) doesn't stack multiple wizard overlays. Cleared
 // when the modal closes or when we unmount the online session.
 let _crewWizardOpen = false;
+// Auto-open the draft market once per the local player's draft turn (keyed by
+// round:slot:activeIndex), so a flurry of snapshots doesn't keep re-popping it.
+let _draftAutoOpenKey = null;
 
 function maybePromptCrewPick(snapshot) {
   if (!_online || _spectator || _crewWizardOpen || !snapshot || !_onlineMe) return;
@@ -785,6 +790,147 @@ function syncCrewDraftOverlay(snapshot) {
   // Suppress the bare waiting overlay while the wizard's own modal
   // is open - the modal already says everything the overlay would.
   overlay.classList.toggle('is-behind-wizard', _crewWizardOpen);
+}
+
+// Card-draft (draft-start mode) waiting overlay. Visible while the snapshot
+// says draftPhase === 'draft'. Shows each player's hand count toward the 12-card
+// target, and on the local player's turn surfaces a "Pick a card" button (and
+// auto-opens the deck market once). Mirrors syncCrewDraftOverlay.
+const DRAFT_HAND_TARGET = 12;
+const DRAFT_DECK_TYPES = ['thruster', 'reactor', 'radiator', 'refinery', 'robonaut', 'generator'];
+const DRAFT_DECK_GLYPH = {
+  thruster: '🚀', reactor: '☢', radiator: '♨', refinery: '⚗', robonaut: '🤖', generator: '⚡',
+};
+function syncCardDraftOverlay(snapshot) {
+  const existing = document.getElementById('mp-card-draft-overlay');
+  const drafting = !!(snapshot && snapshot.draftPhase === 'draft') && !_spectator
+    && gameViewVisible();
+  if (!drafting) {
+    if (existing) existing.remove();
+    _draftAutoOpenKey = null;
+    document.querySelector('.draft-market-overlay')?.remove();
+    return;
+  }
+  const players = snapshot.players || [];
+  const myId = _onlineMe && _onlineMe.id;
+  const active = players[snapshot.activeIndex];
+  const myTurn = !!(active && active.profileId === myId);
+  let overlay = existing;
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'mp-card-draft-overlay';
+    overlay.className = 'mp-crew-draft-overlay';   // reuse crew-draft styling
+    document.body.appendChild(overlay);
+  }
+  overlay.innerHTML = `
+    <div class="mp-crew-draft-panel" role="dialog" aria-label="Card draft">
+      <div class="mp-modal-titlebar"><h3>🃏 Card draft</h3></div>
+      <p class="muted">Take the top of a market deck for free until everyone holds
+        <strong>${DRAFT_HAND_TARGET}</strong> cards. Then every bank opens at 6 and play begins.</p>
+      <ul class="mp-crew-draft-roster"></ul>
+      ${myTurn
+        ? `<p class="mp-crew-draft-me">Your draft pick - choose a deck.</p>
+           <button type="button" class="modal-btn primary mp-card-draft-open">🃏 Pick a card</button>`
+        : `<p class="mp-crew-draft-me">Waiting for <span class="player-name"${active && active.color ? ` style="--player-color:${esc(active.color)}"` : ''}>@${esc((active && active.name) || '?')}</span> to draft…</p>`}
+    </div>`;
+  const roster = overlay.querySelector('.mp-crew-draft-roster');
+  for (const p of players) {
+    const li = document.createElement('li');
+    const dot = document.createElement('span');
+    dot.className = 'mp-crew-draft-dot';
+    dot.style.background = p.color || '#888';
+    const name = document.createElement('span');
+    name.className = 'mp-crew-draft-name player-name';
+    if (p.color) name.style.setProperty('--player-color', p.color);
+    name.textContent = '@' + p.name + (p.profileId === myId ? ' (you)' : '');
+    const status = document.createElement('span');
+    status.className = 'mp-crew-draft-status';
+    const n = Math.min((p.hand || []).length, DRAFT_HAND_TARGET);
+    status.textContent = `${n}/${DRAFT_HAND_TARGET}` + (active && p.profileId === active.profileId ? ' ⬅' : '');
+    if (n >= DRAFT_HAND_TARGET) li.classList.add('is-picked');
+    li.append(dot, name, status);
+    roster.appendChild(li);
+  }
+  const openBtn = overlay.querySelector('.mp-card-draft-open');
+  if (openBtn) openBtn.addEventListener('click', () => openDraftMarketModal());
+  // Auto-open the market once per local draft turn so the player is prompted.
+  const key = `${snapshot.round}:${snapshot.turn}:${snapshot.activeIndex}`;
+  if (myTurn && !document.querySelector('.draft-market-overlay') && _draftAutoOpenKey !== key) {
+    _draftAutoOpenKey = key;
+    openDraftMarketModal();
+  }
+}
+
+// The deck market for the draft: one column per market deck showing its
+// face-up top card; tapping a deck takes that card (DRAFT_PICK). Only the
+// active player can take; everyone else sees it read-only.
+function openDraftMarketModal() {
+  if (!_online || !_onlineSnapshot) return;
+  document.querySelector('.draft-market-overlay')?.remove();
+  const snap = _onlineSnapshot;
+  const myTurn = isOnlineMyTurn();
+  const decks = snap.decks || {};
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay draft-market-overlay';
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const panel = document.createElement('div');
+  panel.className = 'draft-market-panel';
+  const head = document.createElement('div');
+  head.className = 'draft-market-head';
+  head.innerHTML = `<h2>🃏 Draft a card</h2>
+    <p class="muted">${myTurn
+      ? 'Take the top card of any deck (free) into your hand.'
+      : 'Not your turn - this is a preview of the deck tops.'}</p>`;
+  panel.appendChild(head);
+  const grid = document.createElement('div');
+  grid.className = 'draft-market-grid';
+  for (const dt of DRAFT_DECK_TYPES) {
+    const deck = Array.isArray(decks[dt]) ? decks[dt] : [];
+    const topId = deck[0];
+    const card = topId ? PATENTS_BY_ID[topId] : null;
+    const col = document.createElement('div');
+    col.className = 'draft-market-col';
+    const label = document.createElement('div');
+    label.className = 'draft-market-deck-label';
+    label.innerHTML = `${DRAFT_DECK_GLYPH[dt] || '🃏'} <strong>${esc(dt)}</strong> <span class="muted">(${deck.length} left)</span>`;
+    col.appendChild(label);
+    const cardWrap = document.createElement('div');
+    cardWrap.className = 'draft-market-card';
+    if (card) {
+      try { cardWrap.appendChild(renderCard(card, { type: dt })); }
+      catch { cardWrap.textContent = card.name || topId; }
+    } else {
+      cardWrap.innerHTML = '<p class="muted draft-market-empty">Deck empty</p>';
+    }
+    col.appendChild(cardWrap);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'modal-btn primary draft-market-take';
+    btn.textContent = '🃏 Take';
+    btn.disabled = !myTurn || !card;
+    if (!myTurn) btn.title = 'Wait for your turn.';
+    else if (!card) btn.title = 'This deck is empty - pick another.';
+    btn.addEventListener('click', async () => {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      const ok = await submitOnlineOp({ kind: 'DRAFT_PICK', deckType: dt });
+      if (ok) close();              // snapshot re-hydrates; overlay updates / turn passes
+      else btn.disabled = false;
+    });
+    col.appendChild(btn);
+    grid.appendChild(col);
+  }
+  panel.appendChild(grid);
+  const foot = document.createElement('div');
+  foot.className = 'draft-market-foot';
+  foot.innerHTML = '<button type="button" class="modal-btn draft-market-close">Close</button>';
+  foot.querySelector('.draft-market-close').addEventListener('click', close);
+  panel.appendChild(foot);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
 }
 
 // Open the wizard even when the player already has a faction. Used
@@ -5053,6 +5199,12 @@ function ensureMapShell(host) {
   // lands - it just consumes the per-turn move budget for now so
   // the end-turn confirm reflects the spend.
   host.querySelector('#turn-end').addEventListener('click', async () => {
+    // Card-draft mode: there's no operation or turn-end - the button just opens
+    // the deck market so the player drafts a card (which passes the turn).
+    if (_online && _onlineSnapshot && _onlineSnapshot.draftPhase === 'draft') {
+      if (isOnlineMyTurn()) openDraftMarketModal();
+      return;
+    }
     // An open auction freezes the turn: the lot must resolve first. The
     // button is disabled + reads "Auctioning" in this state, but guard the
     // click too in case a stale enabled state slips through.
@@ -5146,8 +5298,12 @@ function ensureMapShell(host) {
     // A first-player handoff or a finished game freezes the normal
     // action toolbar even for the player the active pointer rests on
     // (the chooser acts through the handoff overlay, not these buttons).
+    // The card draft also freezes the normal toolbar: the only action is the
+    // deck-market pick (the End-turn button opens it; the move tag is dark).
+    const inCardDraft = !!(_onlineSnapshot && _onlineSnapshot.draftPhase === 'draft');
     const onlineFrozen = _online && !!_onlineSnapshot
-      && (_onlineSnapshot.pendingFirstPlayer || _onlineSnapshot.status === 'finished');
+      && (_onlineSnapshot.pendingFirstPlayer || _onlineSnapshot.status === 'finished'
+        || inCardDraft);
     const lockedByOnline = _online && (_spectator || !isOnlineMyTurn() || onlineFrozen);
     // An open auction is its own call to action (bid / pass / close), so the
     // End turn nudge stays dark while a lot is up - even with operations spent.
@@ -5210,6 +5366,23 @@ function ensureMapShell(host) {
       undoTag.title = undoTip;
     }
     if (endTurnBtn) {
+      // Card draft: the button is the deck-market opener on the drafter's turn,
+      // a passive "Waiting" otherwise. It overrides the normal ops/end-turn
+      // labelling below (handled here so it stays enabled on my draft turn even
+      // though the draft freezes the rest of the toolbar).
+      const myDraftTurn = inCardDraft && isOnlineMyTurn() && !_spectator;
+      if (inCardDraft) {
+        endTurnBtn.disabled = !myDraftTurn;
+        endTurnBtn.classList.toggle('is-locked', !myDraftTurn);
+        endTurnBtn.classList.remove('is-auctioning', 'is-ops');
+        endTurnBtn.classList.toggle('needs-end', myDraftTurn);
+        endTurnBtn.textContent = myDraftTurn ? '🃏 Draft a card' : '🃏 Drafting…';
+        endTurnBtn.title = myDraftTurn
+          ? 'Open the market and take a card into your hand.'
+          : 'Waiting for the other players to draft.';
+        const ap = _onlineSnapshot.players && _onlineSnapshot.players[_onlineSnapshot.activeIndex];
+        if (ap && ap.color) { endTurnBtn.style.setProperty('--mp-turn-color', ap.color); endTurnBtn.style.color = readableInk(ap.color); }
+      } else {
       // An open auction freezes End turn (the lot must resolve before the
       // turn can pass), so the button reads "Auctioning" and is disabled
       // until it closes - the auction overlay is where the action is.
@@ -5245,6 +5418,7 @@ function ensureMapShell(host) {
         : (auctionInProgress
           ? 'An auction is open - resolve it before ending your turn.'
           : (hasOps ? 'You still have an operation - tap to use it' : 'End your turn'));
+      }
     }
     // Calendar chip: the bare clock glyph hid the season, so show the
     // current season + round next to a clock face whose hand points at this
