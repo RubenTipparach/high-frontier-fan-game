@@ -8119,12 +8119,13 @@ function applyEventDieEffect(event) {
   const season = getSeasonForSlot(event.turn);
   const e = getEventForRoll(event.dieRoll, season && season.name);
   if (!e) return;
-  // Inspiration (d6 = 1 or 2): cycle every patent deck - the
-  // topmost card of each goes to the bottom. Auto-applies; the
-  // player doesn't have to manually resolve it. This is the
-  // only event with an automatic mechanical effect today;
-  // others still log as "Would fire" until they get
-  // implementations.
+  // SOLO event effects. Inspiration (d6 = 1 or 2) cycles every
+  // patent deck (topmost card to the bottom) automatically; the
+  // remaining events still log as "Would fire" table reminders in
+  // the sandbox. ONLINE every event resolves server-side
+  // (engine resolveSunspotEvent) - this function never runs there,
+  // since the clock hydrates from the snapshot. Solo parity for the
+  // other five is the open follow-up.
   let applied = false;
   if (e.rolls.includes(event.dieRoll) && e.name === 'Inspiration') {
     cycleAllDecks();
