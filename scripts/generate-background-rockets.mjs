@@ -300,8 +300,8 @@ function projectOrion() {
   c.nose(33.0, 5.0, 3.9, 1.4, STEEL, { bow: 0.5 });
   c.trap(38.0, 2.2, 1.4, 0.6, '#cfd4dd');
   c.nose(40.2, 1.0, 0.6, 0.1, DKSTEEL);
-  // antenna boom
-  c.add(`<path d="M${c.X(2.0)} ${c.Y(31.5)} L${c.X(3.6)} ${c.Y(34.5)}" stroke="#aeb6c2" stroke-width="1.4"/><circle cx="${c.X(3.6)}" cy="${c.Y(34.5)}" r="2.6" fill="none" stroke="#aeb6c2" stroke-width="1.2"/>`);
+  // high-gain antenna boom + dish
+  dish(c, 2.0, 31.5, 3.6, 34.5);
   return emit('orion', 'PROJECT ORION · NUCLEAR PULSE', 41.2, c);
 }
 
@@ -405,6 +405,37 @@ function win(c, xM, yM, rM = 0.42) {
     `<circle cx="${(c.X(xM) - c.px(rM) * 0.32).toFixed(1)}" cy="${(c.Y(yM) - c.px(rM) * 0.32).toFixed(1)}" r="${(c.px(rM) * 0.28).toFixed(1)}" fill="#bfe9f5" opacity="0.9"/>`);
 }
 
+// high-gain antenna: boom from (x0,y0) to (x1,y1) with a small parabolic
+// dish at the tip, bowl opening outward along the boom
+function dish(c, x0M, y0M, x1M, y1M) {
+  const x0 = c.X(x0M), y0 = c.Y(y0M), x1 = c.X(x1M), y1 = c.Y(y1M);
+  const ang = Math.atan2(y1 - y0, x1 - x0) * 180 / Math.PI + 90;
+  c.add(`<path d="M${x0.toFixed(1)} ${y0.toFixed(1)} L${x1.toFixed(1)} ${y1.toFixed(1)}" stroke="#aeb6c2" stroke-width="1.4"/>` +
+    `<g transform="translate(${x1.toFixed(1)},${y1.toFixed(1)}) rotate(${ang.toFixed(1)})">` +
+    `<path d="M-5 0 Q0 -4.4 5 0 Q0 -1.5 -5 0 Z" fill="#cfd4dd" stroke="#646d7c" stroke-width="0.8"/>` +
+    `<line x1="0" y1="-3.2" x2="0" y2="-0.6" stroke="#646d7c" stroke-width="0.9"/>` +
+    `<circle cx="0" cy="-3.4" r="1" fill="#646d7c"/></g>`);
+}
+
+// polygon window (meter offsets around xM,yM), optional rotation: trapezoid
+// and wedge panes so each craft keeps its real window shapes
+function winPoly(c, xM, yM, pts, rotDeg = 0) {
+  const cxp = c.X(xM), cyp = c.Y(yM);
+  const d = pts.map((p, i) => `${i ? 'L' : 'M'}${(cxp + c.px(p[0])).toFixed(1)} ${(cyp - c.px(p[1])).toFixed(1)}`).join(' ') + ' Z';
+  c.add(`<g transform="rotate(${rotDeg} ${cxp.toFixed(1)} ${cyp.toFixed(1)})">` +
+    `<path d="${d}" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/>` +
+    `<circle cx="${(cxp - c.px(0.1)).toFixed(1)}" cy="${(cyp - c.px(0.1)).toFixed(1)}" r="1.5" fill="#bfe9f5" opacity="0.9"/></g>`);
+}
+function winOval(c, xM, yM, rxM, ryM) {
+  const x = c.X(xM).toFixed(1), y = c.Y(yM).toFixed(1);
+  c.add(`<ellipse cx="${x}" cy="${y}" rx="${c.px(rxM).toFixed(1)}" ry="${c.px(ryM).toFixed(1)}" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/>` +
+    `<circle cx="${(c.X(xM) - c.px(rxM) * 0.3).toFixed(1)}" cy="${(c.Y(yM) - c.px(ryM) * 0.3).toFixed(1)}" r="1.5" fill="#bfe9f5" opacity="0.9"/>`);
+}
+function winSquare(c, xM, yM, wM, rotDeg = 0) {
+  const h = wM / 2;
+  winPoly(c, xM, yM, [[-h, -h], [h, -h], [h, h], [-h, h]], rotDeg);
+}
+
 // solar-array wing attached at (xM, yM), rotated angleDeg, dir +1 right / -1 left
 function wing(c, xM, yM, angleDeg, lenM, widM, dir) {
   const x = c.X(xM), y = c.Y(yM);
@@ -432,10 +463,12 @@ function chibiApolloCsm() {
     c.decal(4.2, 1.3, 0.32, '#3a4250', { cxM: sgn * 1.85 });
   }
   c.decal(2.4, 0.5, 4.8, shade(SILVER, -0.25));
-  // command module: fat cone
+  // command module: fat cone. Apollo windows: small square side + rendezvous
+  // panes plus the square hatch pane, not big round portholes
   c.nose(7.5, 4.3, 4.8, 1.5, BRIGHT, { bow: 0.4 });
-  win(c, -0.85, 8.8, 0.46);
-  win(c, 0.85, 8.8, 0.46);
+  winSquare(c, -1.0, 8.6, 0.6, -14);
+  winSquare(c, 1.0, 8.6, 0.6, 14);
+  winSquare(c, 0, 8.85, 0.5);
   // docking probe
   c.cyl(11.8, 0.6, 1.2, '#9aa2af');
   c.nose(12.4, 0.6, 0.8, 0.2, '#646d7c');
@@ -457,8 +490,10 @@ function chibiOrionMpcv() {
   // crew module
   c.nose(6.3, 4.4, 4.8, 1.7, HULL, { bow: 0.42 });
   c.decal(6.35, 0.5, 4.7, '#8d6b4a'); // heatshield lip
-  win(c, -0.85, 7.9, 0.44);
-  win(c, 0.85, 7.9, 0.44);
+  // Orion windows: trapezoidal forward panes, wider at the base
+  for (const sgn of [-1, 1]) {
+    winPoly(c, sgn * 0.85, 7.9, [[-0.28, 0.34], [0.28, 0.34], [0.44, -0.34], [-0.44, -0.34]], sgn * 10);
+  }
   c.cyl(10.7, 0.7, 1.3, '#9aa2af');
   c.nose(11.4, 0.5, 1.0, 0.3, '#646d7c');
   return emit('cor', 'ORION', 12.0, c);
@@ -479,8 +514,10 @@ function chibiCrewDragon() {
   c.decal(4.65, 0.55, 4.7, '#454b55');
   c.nose(4.6, 4.7, 4.8, 1.9, WHITE, { bow: 0.5 });
   for (const sgn of [-1, 1]) c.decal(5.6, 1.0, 0.75, '#454b55', { cxM: sgn * 1.85 });
-  win(c, -0.8, 6.9, 0.44);
-  win(c, 0.8, 6.9, 0.44);
+  // Dragon windows: tall oval panes plus the round hatch pane
+  winOval(c, -0.85, 7.0, 0.3, 0.5);
+  winOval(c, 0.85, 7.0, 0.3, 0.5);
+  win(c, 0, 6.2, 0.3);
   // rounded nose cap
   c.nose(9.3, 1.3, 1.9, 0.9, '#cfd4dd', { bow: 0.75 });
   return emit('cdr', 'CREW DRAGON', 10.6, c);
@@ -503,10 +540,40 @@ function chibiSoyuz() {
   c.cyl(9.2, 3.7, 3.7, GRAYG, { rx: 12 });
   c.seam(9.25, 2.6, { op: 0.2 });
   win(c, 0, 11.0, 0.4);
-  // rendezvous antenna boom + dish
-  c.add(`<path d="M${c.X(1.6).toFixed(1)} ${c.Y(12.2).toFixed(1)} L${c.X(2.6).toFixed(1)} ${c.Y(13.2).toFixed(1)}" stroke="#aeb6c2" stroke-width="1.4"/>` +
-    `<circle cx="${c.X(2.6).toFixed(1)}" cy="${c.Y(13.2).toFixed(1)}" r="3" fill="none" stroke="#aeb6c2" stroke-width="1.2"/>`);
+  // Kurs rendezvous antenna boom + dish
+  dish(c, 1.6, 12.2, 2.6, 13.2);
   return emit('csz', 'SOYUZ', 12.9, c);
+}
+
+function chibiSkylab() {
+  const c = makeCtx('csk', 17.0, 15.0, 1);
+  const WHITE = '#e9edf3', GOLD = '#c99a3f', GRAY = '#9aa2af';
+  // aft skirt (it WAS an S-IVB) with radiator band
+  c.trap(0, 1.3, 3.6, 4.6, GRAY);
+  c.decal(0.2, 0.7, 3.2, '#646d7c');
+  // orbital workshop with the gold parasol sun shade
+  c.cyl(1.3, 6.4, 4.6, WHITE);
+  c.cyl(1.9, 5.4, 3.7, GOLD, { rx: 5 });
+  // wardroom porthole (the one round window)
+  win(c, -0.9, 4.3, 0.42);
+  // the surviving solar wing, plus the torn-off stub on the other side
+  wing(c, 2.2, 4.6, -4, 5.2, 1.8, 1);
+  c.decal(4.2, 0.9, 0.55, '#646d7c', { cxM: -2.5 });
+  // airlock module + docking adapter
+  c.trap(7.7, 1.0, 4.6, 2.6, WHITE);
+  c.cyl(8.7, 2.1, 2.6, GRAY);
+  c.cyl(10.8, 1.9, 2.2, WHITE);
+  c.nose(12.7, 0.8, 2.2, 0.9, GRAY, { bow: 0.5 });
+  // Apollo Telescope Mount: offset truss + windmill solar arrays
+  const hx = c.X(-3.2), hy = c.Y(11.6);
+  c.add(`<path d="M${c.X(-1.1).toFixed(1)} ${c.Y(10.4).toFixed(1)} L${hx.toFixed(1)} ${hy.toFixed(1)}" stroke="#8a93a3" stroke-width="2"/>`);
+  for (const a of [45, 135, 225, 315]) {
+    c.add(`<g transform="rotate(${a} ${hx.toFixed(1)} ${hy.toFixed(1)})">` +
+      `<rect x="${(hx + 4).toFixed(1)}" y="${(hy - 4).toFixed(1)}" width="${c.px(2.3).toFixed(1)}" height="8" rx="2.5" fill="#24386b" stroke="#0f1830" stroke-width="1"/>` +
+      `<line x1="${(hx + 4 + c.px(1.15)).toFixed(1)}" y1="${(hy - 4).toFixed(1)}" x2="${(hx + 4 + c.px(1.15)).toFixed(1)}" y2="${(hy + 4).toFixed(1)}" stroke="#c9a86a" stroke-width="1"/></g>`);
+  }
+  c.add(`<circle cx="${hx.toFixed(1)}" cy="${hy.toFixed(1)}" r="5" fill="#8a93a3" stroke="#4a4f5a" stroke-width="1.2"/>`);
+  return emit('csk', 'SKYLAB', 13.5, c);
 }
 
 function chibiGemini() {
@@ -518,10 +585,12 @@ function chibiGemini() {
   c.seam(2.9, 3.8);
   c.trap(2.9, 1.3, 3.8, 3.4, '#cfd4dd');
   c.seam(4.2, 3.4);
-  // re-entry module: charcoal fat cone with big windows
+  // re-entry module: charcoal fat cone with Gemini's wedge windows,
+  // long axis slanted along the cone
   c.nose(4.2, 4.0, 3.4, 1.5, CHAR, { bow: 0.38 });
-  win(c, -0.72, 5.6, 0.46);
-  win(c, 0.72, 5.6, 0.46);
+  for (const sgn of [-1, 1]) {
+    winPoly(c, sgn * 0.7, 5.7, [[-0.24, 0.42], [0.24, 0.42], [0.38, -0.42], [-0.38, -0.42]], sgn * 16);
+  }
   c.cyl(8.2, 1.0, 1.5, '#8a93a3');
   c.nose(9.2, 0.9, 1.5, 0.5, '#646d7c', { bow: 0.6 });
   return emit('cgm', 'GEMINI', 10.1, c);
@@ -548,14 +617,13 @@ function chibiOrionPulse() {
   win(c, 1.1, 10.6, 0.42);
   c.nose(12.4, 1.7, 4.0, 1.1, STEEL, { bow: 0.5 });
   c.nose(14.1, 0.6, 1.1, 0.2, DKSTEEL);
-  c.add(`<path d="M${c.X(1.6).toFixed(1)} ${c.Y(12.6).toFixed(1)} L${c.X(2.9).toFixed(1)} ${c.Y(13.8).toFixed(1)}" stroke="#aeb6c2" stroke-width="1.4"/>` +
-    `<circle cx="${c.X(2.9).toFixed(1)}" cy="${c.Y(13.8).toFixed(1)}" r="2.6" fill="none" stroke="#aeb6c2" stroke-width="1.2"/>`);
+  dish(c, 1.6, 12.6, 2.9, 13.8);
   return emit('cop', 'ORION PULSE SHIP', 14.7, c);
 }
 
 // ---------------- output ----------------
 const rockets = [saturnV(), slsArtemis(), falcon9(), soyuz(), projectOrion(), geminiTitan()];
-const chibis = [chibiApolloCsm(), chibiOrionMpcv(), chibiCrewDragon(), chibiSoyuz(), chibiGemini(), chibiOrionPulse()];
+const chibis = [chibiApolloCsm(), chibiOrionMpcv(), chibiCrewDragon(), chibiSoyuz(), chibiSkylab(), chibiGemini(), chibiOrionPulse()];
 const FILE_NAMES = {
   satv: 'saturn-v-apollo.svg',
   sls: 'sls-block-1-artemis.svg',
@@ -569,6 +637,7 @@ const FILE_NAMES = {
   csz: 'chibi-soyuz.svg',
   cgm: 'chibi-gemini.svg',
   cop: 'chibi-orion-pulse-ship.svg',
+  csk: 'chibi-skylab.svg',
 };
 
 mkdirSync(OUT_DIR, { recursive: true });

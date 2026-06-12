@@ -35,5 +35,5 @@
   <path d="M31.9 63.5 Q31.9 46.0 40.6 28.5 L50.4 28.5 Q59.1 46.0 59.1 63.5 Z" fill="url(#orion-g8a93a3)"/>
   <path d="M43.4 13.1 L47.6 13.1 L50.4 28.5 L40.6 28.5 Z" fill="url(#orion-gcfd4dd)"/>
   <path d="M43.4 13.1 Q43.4 9.2 45.1 6.1 L45.9 6.1 Q47.6 9.2 47.6 13.1 Z" fill="url(#orion-g646d7c)"/>
-  <path d="M59.5 74 L70.7 53" stroke="#aeb6c2" stroke-width="1.4"/><circle cx="70.7" cy="53" r="2.6" fill="none" stroke="#aeb6c2" stroke-width="1.2"/>
+  <path d="M59.5 74.0 L70.7 53.0" stroke="#aeb6c2" stroke-width="1.4"/><g transform="translate(70.7,53.0) rotate(28.1)"><path d="M-5 0 Q0 -4.4 5 0 Q0 -1.5 -5 0 Z" fill="#cfd4dd" stroke="#646d7c" stroke-width="0.8"/><line x1="0" y1="-3.2" x2="0" y2="-0.6" stroke="#646d7c" stroke-width="0.9"/><circle cx="0" cy="-3.4" r="1" fill="#646d7c"/></g>
 </svg>

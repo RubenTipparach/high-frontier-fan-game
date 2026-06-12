@@ -18,5 +18,5 @@
   <circle cx="49.7" cy="31.3" r="2.9" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/><circle cx="48.8" cy="30.4" r="0.8" fill="#bfe9f5" opacity="0.9"/>
   <path d="M28.0 18.7 Q28.0 12.8 38.1 6.8 L45.9 6.8 Q56.0 12.8 56.0 18.7 Z" fill="url(#cop-g8a93a3)"/>
   <path d="M38.1 6.8 Q38.1 4.5 41.3 2.6 L42.7 2.6 Q45.9 4.5 45.9 6.8 Z" fill="url(#cop-g646d7c)"/>
-  <path d="M53.2 17.3 L62.3 8.9" stroke="#aeb6c2" stroke-width="1.4"/><circle cx="62.3" cy="8.9" r="2.6" fill="none" stroke="#aeb6c2" stroke-width="1.2"/>
+  <path d="M53.2 17.3 L62.3 8.9" stroke="#aeb6c2" stroke-width="1.4"/><g transform="translate(62.3,8.9) rotate(47.3)"><path d="M-5 0 Q0 -4.4 5 0 Q0 -1.5 -5 0 Z" fill="#cfd4dd" stroke="#646d7c" stroke-width="0.8"/><line x1="0" y1="-3.2" x2="0" y2="-0.6" stroke="#646d7c" stroke-width="0.9"/><circle cx="0" cy="-3.4" r="1" fill="#646d7c"/></g>
 </svg>

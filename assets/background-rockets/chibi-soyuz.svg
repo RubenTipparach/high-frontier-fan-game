@@ -13,5 +13,5 @@
   <rect x="43.0" y="8.2" width="25.9" height="25.9" rx="12" fill="url(#csz-ga9b1a0)"/>
   <rect x="46.9" y="33.0" width="18.2" height="1.6" fill="#000" opacity="0.2"/>
   <circle cx="56.0" cy="21.5" r="2.8" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/><circle cx="55.1" cy="20.6" r="0.8" fill="#bfe9f5" opacity="0.9"/>
-  <path d="M67.2 13.1 L74.2 6.1" stroke="#aeb6c2" stroke-width="1.4"/><circle cx="74.2" cy="6.1" r="3" fill="none" stroke="#aeb6c2" stroke-width="1.2"/>
+  <path d="M67.2 13.1 L74.2 6.1" stroke="#aeb6c2" stroke-width="1.4"/><g transform="translate(74.2,6.1) rotate(45.0)"><path d="M-5 0 Q0 -4.4 5 0 Q0 -1.5 -5 0 Z" fill="#cfd4dd" stroke="#646d7c" stroke-width="0.8"/><line x1="0" y1="-3.2" x2="0" y2="-0.6" stroke="#646d7c" stroke-width="0.9"/><circle cx="0" cy="-3.4" r="1" fill="#646d7c"/></g>
 </svg>

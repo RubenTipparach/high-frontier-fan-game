@@ -33,6 +33,7 @@ scenes where a first stage would be nonsense. Not to a shared scale.
 | `chibi-orion.svg` | Orion spacecraft (crew module + ESM with X-wing solar arrays) |
 | `chibi-crew-dragon.svg` | Crew Dragon (capsule + trunk) |
 | `chibi-soyuz.svg` | Soyuz spacecraft (orbital module + descent module + service module) |
+| `chibi-skylab.svg` | Skylab (gold parasol, surviving solar wing, ATM windmill) |
 | `chibi-gemini.svg` | Gemini spacecraft (re-entry module + adapter) |
 | `chibi-orion-pulse-ship.svg` | Project Orion pulse ship (it IS its own interplanetary vehicle) |
 

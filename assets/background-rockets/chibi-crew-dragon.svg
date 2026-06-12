@@ -11,7 +11,8 @@
   <path d="M12.7 59.3 Q12.7 42.8 22.9 26.4 L36.1 26.4 Q46.3 42.8 46.3 59.3 Z" fill="url(#cdr-geaeef4)"/>
   <rect x="13.9" y="45.3" width="5.3" height="7.0" fill="#454b55" opacity="1"/>
   <rect x="39.8" y="45.3" width="5.3" height="7.0" fill="#454b55" opacity="1"/>
-  <circle cx="23.9" cy="43.2" r="3.1" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/><circle cx="22.9" cy="42.2" r="0.9" fill="#bfe9f5" opacity="0.9"/>
-  <circle cx="35.1" cy="43.2" r="3.1" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/><circle cx="34.1" cy="42.2" r="0.9" fill="#bfe9f5" opacity="0.9"/>
+  <ellipse cx="23.6" cy="42.5" rx="2.1" ry="3.5" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/><circle cx="22.9" cy="41.5" r="1.5" fill="#bfe9f5" opacity="0.9"/>
+  <ellipse cx="35.5" cy="42.5" rx="2.1" ry="3.5" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/><circle cx="34.8" cy="41.5" r="1.5" fill="#bfe9f5" opacity="0.9"/>
+  <circle cx="29.5" cy="48.1" r="2.1" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/><circle cx="28.8" cy="47.4" r="0.6" fill="#bfe9f5" opacity="0.9"/>
   <path d="M22.9 26.4 Q22.9 19.6 26.4 17.3 L32.6 17.3 Q36.1 19.6 36.1 26.4 Z" fill="url(#cdr-gcfd4dd)"/>
 </svg>
