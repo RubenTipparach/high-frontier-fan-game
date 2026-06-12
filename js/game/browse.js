@@ -93,12 +93,13 @@ import {
   getOutpost, getOutposts, getAvailableOutpostSlots,
   createOutpost, dissolveOutpost,
   addCardToOutpost, removeCardFromOutpost, setOutpostTank,
+  setOutpostCardRadiatorSide,
   getFocusedStackId, setFocusedStackId,
   onFocusChange, onOutpostsChange,
   OUTPOST_LETTERS, resetStacks,
 } from './stacks.js';
 import {
-  getLeoCards, addCardToLeo, removeCardFromLeoById,
+  getLeoCards, addCardToLeo, removeCardFromLeoById, setLeoRadiatorSide,
   onLeoChange, resetLeoStack,
 } from './leo-stack.js';
 import {
@@ -2726,6 +2727,8 @@ function humanizeOnlineOpError(code, detail) {
     cannot_land: 'Not enough thrust to land there (and no factory to assist).',
     raygun_out_of_range: 'The raygun has no line of sight to that site from here.',
     buggy_out_of_range: 'The buggy can only road to sites on the same connected body (Mars, the Moon, Io, Callisto, Ganymede, Europa).',
+    not_a_radiator: 'That card is not a radiator.',
+    already_light: 'That radiator is already on its light side.',
     stale_turn: 'That action was from a previous turn - the board has moved on.',
     no_disc: 'There is no prospect disc to re-roll.',
     not_buggy: 'Only a buggy prospector can re-roll.',
@@ -3623,6 +3626,23 @@ async function decommissionSelectedToHand(stackId, ids, onDone) {
 // op cost. Subscribes to onLeoChange / onRocketChange /
 // onOutpostsChange so the modal re-renders live as state
 // shifts.
+// Fold a deployed radiator down to its light side (heavy -> light): hardier but
+// less cooling, one-way. Online it's the SET_RADIATOR_SIDE op (the server finds
+// the card in any of your stacks); solo mirrors it on the right state module.
+// stackId is 'rocket' | 'leo' | 'outpost<L>'.
+async function convertRadiatorToLight(stackId, cardId) {
+  if (_online) {
+    await submitOnlineOp({ kind: 'SET_RADIATOR_SIDE', cardId });
+    return;
+  }
+  if (stackId === 'rocket') setRadiatorSide(cardId, 'light');
+  else if (stackId === 'leo') setLeoRadiatorSide(cardId, 'light');
+  else if (stackId && stackId.startsWith('outpost')) {
+    setOutpostCardRadiatorSide(stackId.slice('outpost'.length), cardId, 'light');
+  }
+  setStatus('♨ Folded the radiator down to its light side (hardier, less cooling).');
+}
+
 function openLeoStackModal() {
   openUnifiedStackInspector('leo');
 }
@@ -3786,6 +3806,24 @@ function openUnifiedStackInspector(stackId) {
           refreshFooter();
         });
         actions.appendChild(selBtn);
+        // A deployed radiator on its heavy side can be folded down to light
+        // (hardier, less cooling) - one-way, mirroring the rad-damage flip.
+        if (card.type === 'radiator' && (slot.radSide || 'heavy') !== 'light') {
+          const foldBtn = document.createElement('button');
+          foldBtn.type = 'button';
+          foldBtn.className = 'rocket-select rad-fold-light';
+          foldBtn.textContent = '♨ Fold to light';
+          const lockedOnline = _online && !isOnlineMyTurn();
+          foldBtn.disabled = lockedOnline;
+          foldBtn.title = lockedOnline ? 'Wait for your turn.'
+            : 'Fold this radiator to its light side: hardier (survives radiation) but less cooling. One-way.';
+          foldBtn.addEventListener('click', async () => {
+            if (foldBtn.disabled) return;
+            foldBtn.disabled = true;
+            await convertRadiatorToLight(stackId, slot.id);
+          });
+          actions.appendChild(foldBtn);
+        }
         wrap.appendChild(actions);
         row.appendChild(wrap);
       }
@@ -6898,6 +6936,25 @@ function openRocketStackModal() {
         repaint();
       });
       actions.appendChild(selBtn);
+
+      // A deployed radiator on heavy can be folded down to light (hardier,
+      // less cooling) - one-way, mirroring the rad-damage flip.
+      if (card.type === 'radiator' && (slot.radSide || 'heavy') !== 'light') {
+        const foldBtn = document.createElement('button');
+        foldBtn.type = 'button';
+        foldBtn.className = 'rocket-activate rad-fold-light';
+        foldBtn.textContent = '♨ Fold to light';
+        const lockedOnline = _online && !isOnlineMyTurn();
+        foldBtn.disabled = lockedOnline;
+        foldBtn.title = lockedOnline ? 'Wait for your turn.'
+          : 'Fold this radiator to its light side: hardier (survives radiation) but less cooling. One-way.';
+        foldBtn.addEventListener('click', async () => {
+          if (foldBtn.disabled) return;
+          foldBtn.disabled = true;
+          await convertRadiatorToLight('rocket', slot.id);
+        });
+        actions.appendChild(foldBtn);
+      }
 
       // Crew never returns to the hand - it can only move stack-
       // to-stack (use Select + Transfer below). Non-crew cards get
@@ -15308,6 +15365,7 @@ const MP_LOG_ICONS = {
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',
   LOAD_GLORY: '🎖',
   SET_WIRING: '🔗',
+  SET_RADIATOR_SIDE: '♨',
   UNDO: '↩', REDO: '↪',
 };
 

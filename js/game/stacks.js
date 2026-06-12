@@ -223,6 +223,21 @@ export function setOutpostTank(letter, n) {
   return true;
 }
 
+// Set an outpost radiator card's deployed side (the "fold to light" action's
+// solo mirror; online the server is authoritative). Returns true on a change.
+export function setOutpostCardRadiatorSide(letter, id, side) {
+  const rec = _outposts[letter];
+  if (!rec || !Array.isArray(rec.cards)) return false;
+  const slot = rec.cards.find((c) => c.id === id);
+  if (!slot) return false;
+  const next = side === 'light' ? 'light' : 'heavy';
+  if (slot.radSide === next) return false;
+  slot.radSide = next;
+  persistOutposts();
+  notifyOutposts();
+  return true;
+}
+
 export function addOutpostFuel(letter, delta = 1) {
   const rec = _outposts[letter];
   if (!rec) return false;

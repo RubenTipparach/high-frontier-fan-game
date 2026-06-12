@@ -90,6 +90,20 @@ export function addCardToLeo(slot) {
   return true;
 }
 
+// Set a LEO radiator slot's deployed side (used by the "fold to light" action;
+// online the server is authoritative, this is the solo mirror). Returns true
+// when it actually changed.
+export function setLeoRadiatorSide(id, side) {
+  const entry = _cards.find((c) => c.id === id);
+  if (!entry) return false;
+  const next = side === 'light' ? 'light' : 'heavy';
+  if (entry.radSide === next) return false;
+  entry.radSide = next;
+  persist();
+  notify();
+  return true;
+}
+
 export function removeCardFromLeo(index) {
   if (index < 0 || index >= _cards.length) return null;
   const removed = _cards.splice(index, 1)[0] || null;

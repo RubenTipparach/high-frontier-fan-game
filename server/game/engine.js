@@ -1325,6 +1325,31 @@ function applySetActiveProspector(state, op, player) {
   return { ok: true, state, log: `${player.name} set ${card ? card.name : cardId} as the active prospector.` };
 }
 
+// Voluntarily fold a deployed radiator down to its LIGHT side (heavy -> light):
+// less cooling, but hardier - light is the more rad-resistant side, so it can
+// shrug off radiation that would degrade a heavy one. The deployed side
+// otherwise LOCKS at construction; this is the one player-initiated exception
+// (rad damage also flips heavy -> light, never back). One-way: a radiator
+// already on light stays light. Finds the card in the player's rocket stack,
+// LEO Stack, or any outpost. Free reconfiguration, turn-gated. op = { cardId }.
+function applySetRadiatorSide(state, op, player) {
+  const cardId = String(op.cardId || '');
+  const card = PATENTS_BY_ID[cardId];
+  if (!card || card.type !== 'radiator') return fail('not_a_radiator');
+  let slot = (player.rocket.stack || []).find((s) => s.id === cardId)
+    || (player.leo || []).find((s) => s.id === cardId);
+  if (!slot && player.outposts) {
+    for (const o of Object.values(player.outposts)) {
+      const s = (o.cards || []).find((x) => x.id === cardId);
+      if (s) { slot = s; break; }
+    }
+  }
+  if (!slot) return fail('not_in_stack');
+  if (slot.radSide === 'light') return fail('already_light');
+  slot.radSide = 'light';
+  return { ok: true, state, log: `${player.name} folded ${card.name} down to its light side.` };
+}
+
 // Prospect a site: one seeded d6 vs the site-class threshold (success =
 // roll <= threshold), placing a claim/exhausted disc. Mirrors
 // browse.js#doProspect. Prospect IS the turn's operation for EVERY
@@ -1763,6 +1788,7 @@ const FUNCTIONAL = {
   SET_WIRING: applySetWiring,
   SET_ACTIVE_THRUSTER: applySetActiveThruster,
   SET_ACTIVE_PROSPECTOR: applySetActiveProspector,
+  SET_RADIATOR_SIDE: applySetRadiatorSide,
   PROSPECT: applyProspect,
   PROSPECT_REROLL: applyProspectReroll,
   INDUSTRIALIZE: applyIndustrialize,
@@ -1787,6 +1813,7 @@ function pickPayload(op) {
     case 'DISCARD': return { cardId: op.cardId };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
+    case 'SET_RADIATOR_SIDE': return { cardId: op.cardId };
     case 'PROSPECT': return { siteId: op.siteId, turn: op.turn, round: op.round };
     case 'PROSPECT_REROLL': return { siteId: op.siteId };
     case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode };

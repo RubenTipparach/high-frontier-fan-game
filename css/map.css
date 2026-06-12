@@ -7412,3 +7412,12 @@ body:has(#view-browse:not(.hidden)) #main {
 .draft-market-take { width: 100%; }
 .draft-market-take:disabled { opacity: 0.45; cursor: default; }
 .draft-market-foot { margin-top: 14px; display: flex; justify-content: flex-end; }
+
+/* "Fold to light" action on a deployed heavy radiator (heat/amber tint to read
+   as a radiator action, distinct from Select / Set-active). */
+.rad-fold-light {
+  border-color: #d4a72c !important;
+  color: #f0c455 !important;
+}
+.rad-fold-light:hover:not(:disabled) { filter: brightness(1.15); }
+.rad-fold-light:disabled { opacity: 0.5; cursor: default; }
