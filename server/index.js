@@ -929,7 +929,7 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
       const jump = url ? `\n▶ Play now: ${url}` : '';
       if (discordEnabled()) {
         for (const p of state.players) {
-          notifyProfile(p.profileId, 'turn', `🧑‍🚀 ${nm} is starting - pick your crew.${jump}`);
+          notifyProfile(p.profileId, 'turn', `🧑‍🚀 **${nm}** is starting - pick your crew.${jump}`);
         }
       }
       notifyWebhook(`🧑‍🚀 **${nm}** has started - crew draft is open.${jump}`);
@@ -1172,7 +1172,7 @@ function dispatchTurnNotifications(gameId, kind, state) {
     const jump = url ? `\n▶ Play now: ${url}` : '';
     // Game over: one note to everyone, regardless of which op tripped it.
     if (state.status === 'finished') {
-      if (dmOn) for (const p of state.players) notifyProfile(p.profileId, 'turn', `🏁 The game in ${name} is over.`);
+      if (dmOn) for (const p of state.players) notifyProfile(p.profileId, 'turn', `🏁 The game in **${name}** is over.`);
       notifyWebhook(`🏁 **${name}** has ended - final standings are in.`);
       return;
     }
@@ -1180,7 +1180,7 @@ function dispatchTurnNotifications(gameId, kind, state) {
     if (state.pendingFirstPlayer) {
       const chooser = state.players.find((p) => p.profileId === state.pendingFirstPlayer.chooserId);
       if (chooser) {
-        if (dmOn) notifyProfile(chooser.profileId, 'turn', `⭐ Pick the next first player in ${name}.${jump}`);
+        if (dmOn) notifyProfile(chooser.profileId, 'turn', `⭐ Pick the next first player in **${name}**.${jump}`);
         notifyWebhook(`⭐ ${chooser.name || 'A player'} is choosing the next first player in **${name}**.${jump}`);
       }
       return;
@@ -1189,7 +1189,7 @@ function dispatchTurnNotifications(gameId, kind, state) {
     if (kind === 'END_TURN' || kind === 'SET_FIRST_PLAYER') {
       const active = state.players[state.activeIndex];
       if (active) {
-        if (dmOn) notifyProfile(active.profileId, 'turn', `🛸 It's your turn in ${name}.${jump}`);
+        if (dmOn) notifyProfile(active.profileId, 'turn', `🛸 It's your turn in **${name}**.${jump}`);
         notifyWebhook(`🛸 ${active.name || 'A player'}'s turn in **${name}**.${jump}`);
       }
     } else if (kind === 'AUCTION_START') {
@@ -1197,7 +1197,7 @@ function dispatchTurnNotifications(gameId, kind, state) {
       if (dmOn) {
         for (const p of state.players) {
           if (p.profileId === auctioneer) continue;
-          notifyProfile(p.profileId, 'auction', `🔨 An auction just opened in ${name} - place your bid.${jump}`);
+          notifyProfile(p.profileId, 'auction', `🔨 An auction just opened in **${name}** - place your bid.${jump}`);
         }
       }
       notifyWebhook(`🔨 An auction just opened in **${name}** - bidding is live.${jump}`);
@@ -1212,7 +1212,7 @@ function dispatchTurnNotifications(gameId, kind, state) {
         // auctioneer to go").
         const auctioneer = state.players.find((p) => p.profileId === a.auctioneerId);
         if (auctioneer) {
-          if (dmOn) notifyProfile(auctioneer.profileId, 'auction', `🔨 Every bidder has acted in ${name} - close the lot (sell to a bidder or keep it).${jump}`);
+          if (dmOn) notifyProfile(auctioneer.profileId, 'auction', `🔨 Every bidder has acted in **${name}** - close the lot (sell to a bidder or keep it).${jump}`);
           notifyWebhook(`🔨 ${auctioneer.name || 'The auctioneer'} can close the lot in **${name}**.${jump}`);
         }
       } else if (a && a.awaiting === 'bidders' && (kind === 'AUCTION_BID' || kind === 'AUCTION_RESET')) {
@@ -1222,8 +1222,8 @@ function dispatchTurnNotifications(gameId, kind, state) {
         const acted = a.acted || [];
         const isReset = kind === 'AUCTION_RESET';
         const msg = isReset
-          ? `🔨 The auctioneer reset the bidding in ${name} - bid again (higher) or pass.`
-          : `🔨 The bid in ${name} moved - bid again or pass.`;
+          ? `🔨 The auctioneer reset the bidding in **${name}** - bid again (higher) or pass.`
+          : `🔨 The bid in **${name}** moved - bid again or pass.`;
         if (dmOn) {
           for (const p of state.players) {
             if (p.profileId === a.auctioneerId) continue;
@@ -1801,7 +1801,7 @@ app.post('/games/:id/remind', requireProfile, (req, res) => {
       continue;
     }
     ins.run(id, tid, req.profile.id, now);
-    const why = inAuction ? `the auction is waiting on you in ${nm}` : `it's your turn in ${nm}`;
+    const why = inAuction ? `the auction is waiting on you in **${nm}**` : `it's your turn in **${nm}**`;
     notifyProfile(tid, 'turn', `👋 ${req.profile.name} nudged you - ${why}.${jump}`);
     nudged.push({ targetId: tid, targetName: tname, sentAt: now });
   }
