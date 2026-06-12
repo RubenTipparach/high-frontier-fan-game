@@ -972,8 +972,8 @@ export function thrustVisual(card, face, opts = {}) {
         fill="rgba(96,165,250,0.35)" stroke="#60a5fa" stroke-width="2.5"
         stroke-linejoin="round"/>
       ${showAfter ? `<g data-tip="${escapeText(opts.breakdown?.afterburn || afterTip)}">
-        <text x="62" y="46" text-anchor="middle" font-size="18">🔥</text>
-        <text x="83" y="46" text-anchor="middle" font-size="13" font-weight="700"
+        <text x="70" y="45" text-anchor="middle" font-size="20">🔥</text>
+        <text x="70" y="41" text-anchor="middle" font-size="11" font-weight="700"
           fill="#0c1d34" stroke="#ffffff" stroke-width="2.4" paint-order="stroke">${escapeText(String(afterN))}</text>
       </g>` : ''}
       <line x1="63" y1="72" x2="76" y2="72"
