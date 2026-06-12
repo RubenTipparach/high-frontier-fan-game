@@ -87,6 +87,9 @@ function isLeoWaypoint(w) {
 }
 const DEFAULT_ZOOM        = 6;
 const MOBILE_DEFAULT_ZOOM = 5;
+// Remembered viewport (world-center + zoom), saved on every user pan / zoom
+// so reopening the page lands where the player left off.
+const LS_CAMERA = 'hf.mapCamera';
 // Mobile viewports (≤720 px) open the map slightly farther
 // out than desktop - the canvas is denser per pixel + a closer
 // initial zoom hides too much of the system at a glance.
@@ -809,6 +812,10 @@ export class MapRenderer {
     this._ambientRockets = [];
     this._ambientLastT = 0;
     this._ambientSprites = [];
+    // Camera persistence state: set by _restoreCamera / _noteUserCamera /
+    // the first rocket placement, so the initial view resolves exactly once.
+    this._initialViewDone = false;
+    this._camSaveTimer = null;
     for (const name of ['chibi-apollo-csm', 'chibi-orion', 'chibi-crew-dragon',
       'chibi-space-shuttle', 'chibi-soyuz', 'chibi-shenzhou', 'chibi-mengzhou',
       'chibi-skylab', 'chibi-gemini', 'chibi-orion-pulse-ship']) {
@@ -902,6 +909,15 @@ export class MapRenderer {
   // js/game/rocket.js's canRocketFly().
   setSandboxRocket(opts) {
     this._sandboxRocket = opts || null;
+    // First placement with no remembered viewport: open centered on the
+    // player's rocket instead of the whole-map fit. _initialViewDone is
+    // set by a restored camera or any user pan / zoom, so this never
+    // yanks the view away from a player who is already looking around.
+    if (!this._initialViewDone && opts
+        && Number.isFinite(opts.x) && Number.isFinite(opts.y)) {
+      this._initialViewDone = true;
+      this.flyTo({ x: opts.x, y: opts.y }, 5, { ms: 0 });
+    }
     this._scheduleDraw();
   }
 
@@ -1001,7 +1017,44 @@ export class MapRenderer {
 
   reset() {
     this._fitToData();
+    // Reset means "start clean": forget the remembered viewport too, so
+    // the next open re-centers on the rocket instead of the stale pose.
+    try { localStorage.removeItem(LS_CAMERA); } catch { /* storage unavailable */ }
+    clearTimeout(this._camSaveTimer);
     this._scheduleDraw();
+  }
+
+  // ---- camera persistence ----
+  // The map opens where the player left it: every user pan / zoom saves the
+  // visible world-center + zoom (debounced) to localStorage, and _mount
+  // restores it. With no remembered viewport, the view centers on the
+  // player's rocket the first time its position arrives (setSandboxRocket);
+  // only when neither exists does the whole-map fit show.
+  _noteUserCamera() {
+    this._initialViewDone = true;  // never recenter out from under the player
+    clearTimeout(this._camSaveTimer);
+    this._camSaveTimer = setTimeout(() => this._saveCamera(), 500);
+  }
+  _saveCamera() {
+    if (!(this.fitScale > 0) || !(this.hostW > 0)) return;
+    const eff = this.zoom * this.fitScale;
+    const cam = {
+      x: (this._viewCenterX() - this.pan.x) / eff,
+      y: (this._viewCenterY() - this.pan.y) / eff,
+      zoom: this.zoom,
+    };
+    try { localStorage.setItem(LS_CAMERA, JSON.stringify(cam)); } catch { /* storage unavailable */ }
+  }
+  _restoreCamera() {
+    let cam = null;
+    try { cam = JSON.parse(localStorage.getItem(LS_CAMERA) || 'null'); } catch { cam = null; }
+    if (!cam || !Number.isFinite(cam.x) || !Number.isFinite(cam.y) || !Number.isFinite(cam.zoom)) return false;
+    this.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, cam.zoom));
+    const eff = this.zoom * this.fitScale;
+    this.pan.x = this._viewCenterX() - cam.x * eff;
+    this.pan.y = this._viewCenterY() - cam.y * eff;
+    this._initialViewDone = true;
+    return true;
   }
 
   // Horizontal / vertical centre of the visible (uninsetted) region
@@ -1322,6 +1375,7 @@ export class MapRenderer {
 
     this._resize();
     this._fitToData();
+    this._restoreCamera();
     this._scheduleDraw();
   }
 
@@ -3597,6 +3651,7 @@ export class MapRenderer {
       if (Math.abs(dx) + Math.abs(dy) > 3) this._dragStart.moved = true;
       this.pan.x = this._dragStart.panX + dx;
       this.pan.y = this._dragStart.panY + dy;
+      if (this._dragStart.moved) this._noteUserCamera();
       this._scheduleDraw();
     });
     window.addEventListener('mouseup', () => {
@@ -3676,6 +3731,7 @@ export class MapRenderer {
         if (Math.abs(dx) + Math.abs(dy) > 10) this._gesture.moved = true;
         this.pan.x = this._gesture.pan.x + dx;
         this.pan.y = this._gesture.pan.y + dy;
+        if (this._gesture.moved) this._noteUserCamera();
         this._scheduleDraw();
       } else if (points.length >= 2 && this._gesture.touches.length >= 2) {
         this._gesture.moved = true;
@@ -3697,6 +3753,7 @@ export class MapRenderer {
         this.pan.x = (midX - rect.left) - wx * eff1;
         this.pan.y = (midY - rect.top) - wy * eff1;
         this.zoom = targetZoom;
+        this._noteUserCamera();
         this._scheduleDraw();
       }
     }, { passive: false });
@@ -3745,6 +3802,7 @@ export class MapRenderer {
     this.pan.x = sx - wx * eff1;
     this.pan.y = sy - wy * eff1;
     this.zoom = next;
+    this._noteUserCamera();
     this._scheduleDraw();
   }
 
