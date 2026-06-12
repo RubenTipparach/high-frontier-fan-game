@@ -15118,7 +15118,7 @@ function openAllCardsView({ title = 'All cards', titleColor = null, locs = [] } 
     } else {
       const empty = document.createElement('div');
       empty.className = 'all-cards-empty';
-      empty.textContent = '—';
+      empty.textContent = '-';
       sec.appendChild(empty);
     }
 
