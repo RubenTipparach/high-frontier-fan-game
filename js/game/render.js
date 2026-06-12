@@ -916,7 +916,8 @@ export class MapRenderer {
     if (!this._initialViewDone && opts
         && Number.isFinite(opts.x) && Number.isFinite(opts.y)) {
       this._initialViewDone = true;
-      this.flyTo({ x: opts.x, y: opts.y }, 5, { ms: 0 });
+      this.flyTo({ x: opts.x, y: opts.y }, this._focusRocketZoom || 5, { ms: this._focusRocketMs || 0 });
+      this._focusRocketMs = 0;
     }
     this._scheduleDraw();
   }
@@ -1055,6 +1056,24 @@ export class MapRenderer {
     this.pan.y = this._viewCenterY() - cam.y * eff;
     this._initialViewDone = true;
     return true;
+  }
+
+  // One-shot: focus the player's rocket as soon as its position is known
+  // (immediately if it already is). Used by link-driven room entry - a
+  // player following a notification / invite link lands looking at their
+  // ship, overriding any remembered viewport. A later user pan / zoom
+  // still wins: the pending focus only fires through setSandboxRocket's
+  // first-placement path, which _noteUserCamera disarms.
+  focusRocketWhenKnown({ zoom = 5, ms = 420 } = {}) {
+    const r = this._sandboxRocket;
+    this._focusRocketZoom = zoom;
+    if (r && Number.isFinite(r.x) && Number.isFinite(r.y)) {
+      this._initialViewDone = true;
+      this.flyTo({ x: r.x, y: r.y }, zoom, { ms });
+      return;
+    }
+    this._initialViewDone = false;
+    this._focusRocketMs = ms;
   }
 
   // Horizontal / vertical centre of the visible (uninsetted) region

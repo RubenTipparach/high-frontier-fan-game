@@ -14,7 +14,7 @@ import {
 import {
   initInvites, refreshInvitesList, subscribeInvitesForProfile,
 } from './invites.js';
-import { mountBrowse, isBrowseOnline, refreshRoomOverlays } from './game/browse.js';
+import { mountBrowse, isBrowseOnline, refreshRoomOverlays, requestRocketFocus } from './game/browse.js';
 import { newSandboxGame, currentSandboxId, activateSandboxGame } from './game/sandbox-games.js';
 import { appBase } from './base.js';
 import { initErudaFromPref } from './debug-console.js';
@@ -796,6 +796,9 @@ async function maybeResumeRoomFromUrl() {
     // openLobby calls setRoomInUrl on success, which rewrites the
     // address bar to /room/<CODE> (it was the app root after the
     // 404 redirect).
+    // Arriving by room link: open the map looking at the player's
+    // rocket (wins over the remembered viewport).
+    requestRocketFocus();
     await openLobby(r.data.id, { join: false });
     return true;
   } catch (err) {
@@ -824,6 +827,8 @@ async function maybeClaimInviteFromUrl() {
   const r = await claimInviteLink(code, me.token);
   if (!r.ok) { toast('Couldn\'t claim invite: ' + r.error, 'error'); return false; }
   toast(`Joined "${peek.data.lobbyName}".`, 'success');
+  // Invite-link entry behaves like a room link: land on the rocket.
+  requestRocketFocus();
   await openLobby(r.data.lobbyId, { join: false });
   return true;
 }

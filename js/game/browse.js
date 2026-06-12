@@ -259,6 +259,18 @@ const MP_AUCTION_DECKS = [
 
 export function isBrowseOnline() { return _online; }
 
+// Arm a one-shot "open looking at my rocket" for the next map mount (or
+// apply immediately if the map is already up). Link-driven room entry
+// (a notification / invite link) calls this so the player lands on their
+// ship instead of the remembered viewport.
+let _pendingRocketFocus = false;
+export function requestRocketFocus() {
+  if (_renderer) {
+    try { _renderer.focusRocketWhenKnown(); return; } catch { /* renderer mid-teardown */ }
+  }
+  _pendingRocketFocus = true;
+}
+
 // True only while the game-room view is the on-screen view. The
 // crew-draft / auction overlays attach to document.body, so without
 // this gate a snapshot poll that arrives after the player walked back
@@ -6112,6 +6124,10 @@ async function mountMapFor() {
       data: _activeData,
       onSelect: onSiteSelect,
     });
+    if (_pendingRocketFocus) {
+      _pendingRocketFocus = false;
+      _renderer.focusRocketWhenKnown();
+    }
     _renderer.onSandboxRocketClick = () => openRocketStackModal();
     wireDebugPanel(_renderer);
     wireMapInsets(_renderer);
