@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 91 306" width="91" height="306">
+<defs><linearGradient id="orion-gb4713d" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#684223"/><stop offset="0.17" stop-color="#c0885c"/><stop offset="0.33" stop-color="#dbbba2"/><stop offset="0.62" stop-color="#b4713d"/><stop offset="1" stop-color="#51331b"/></linearGradient><linearGradient id="orion-g4a4e57" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2b2d32"/><stop offset="0.17" stop-color="#676a72"/><stop offset="0.33" stop-color="#a8aaae"/><stop offset="0.62" stop-color="#4a4e57"/><stop offset="1" stop-color="#212327"/></linearGradient><linearGradient id="orion-gaeb6c2" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#656a71"/><stop offset="0.17" stop-color="#bbc2cc"/><stop offset="0.33" stop-color="#d8dce2"/><stop offset="0.62" stop-color="#aeb6c2"/><stop offset="1" stop-color="#4e5257"/></linearGradient><linearGradient id="orion-g646d7c" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3a3f48"/><stop offset="0.17" stop-color="#7d8491"/><stop offset="0.33" stop-color="#b5b9c0"/><stop offset="0.62" stop-color="#646d7c"/><stop offset="1" stop-color="#2d3138"/></linearGradient><linearGradient id="orion-g8a93a3" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#50555f"/><stop offset="0.17" stop-color="#9da4b2"/><stop offset="0.33" stop-color="#c7cbd3"/><stop offset="0.62" stop-color="#8a93a3"/><stop offset="1" stop-color="#3e4249"/></linearGradient><linearGradient id="orion-gcfd4dd" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#787b80"/><stop offset="0.17" stop-color="#d7dbe2"/><stop offset="0.33" stop-color="#e8eaef"/><stop offset="0.62" stop-color="#cfd4dd"/><stop offset="1" stop-color="#5d5f63"/></linearGradient></defs>
+  <path d="M10.5 284 Q45.5 298.7 80.5 284 L78.4 281.9 L12.600000000000001 281.9 Z" fill="url(#orion-gb4713d)"/>
+  <rect x="10.5" y="284.0" width="70.0" height="10.5" rx="3" fill="url(#orion-gb4713d)"/>
+  <rect x="11.9" y="283.2" width="67.2" height="1.6" fill="#000" opacity="0.35"/>
+  <rect x="16.8" y="273.1" width="57.4" height="8.8" rx="5" fill="url(#orion-g4a4e57)"/>
+  <rect x="18.6" y="263.7" width="53.9" height="8.8" rx="5" fill="url(#orion-g4a4e57)"/>
+  <rect x="23.7" y="242.0" width="2.9" height="21.7" fill="url(#orion-gaeb6c2)"/>
+  <rect x="23.0" y="253.2" width="4.3" height="10.5" fill="url(#orion-g646d7c)"/>
+  <rect x="37.0" y="242.0" width="2.9" height="21.7" fill="url(#orion-gaeb6c2)"/>
+  <rect x="36.3" y="253.2" width="4.3" height="10.5" fill="url(#orion-g646d7c)"/>
+  <rect x="51.0" y="242.0" width="2.9" height="21.7" fill="url(#orion-gaeb6c2)"/>
+  <rect x="50.3" y="253.2" width="4.3" height="10.5" fill="url(#orion-g646d7c)"/>
+  <rect x="64.3" y="242.0" width="2.9" height="21.7" fill="url(#orion-gaeb6c2)"/>
+  <rect x="63.6" y="253.2" width="4.3" height="10.5" fill="url(#orion-g646d7c)"/>
+  <path d="M21.3 186.0 L69.7 186.0 L75.9 242.0 L15.1 242.0 Z" fill="url(#orion-g8a93a3)"/>
+  <rect x="15.8" y="241.2" width="59.5" height="1.6" fill="#000" opacity="0.32"/>
+  <rect x="17.8" y="227.9" width="55.3" height="1.6" fill="#000" opacity="0.2"/>
+  <rect x="17.8" y="214.6" width="55.3" height="1.6" fill="#000" opacity="0.2"/>
+  <rect x="17.8" y="201.3" width="55.3" height="1.6" fill="#000" opacity="0.2"/>
+  <rect x="25.2" y="228.7" width="7.0" height="7.7" fill="#3c424e" opacity="1"/>
+  <rect x="58.8" y="228.7" width="7.0" height="7.7" fill="#3c424e" opacity="1"/>
+  <path d="M25.6 112.5 L65.5 112.5 L69.7 186.0 L21.3 186.0 Z" fill="url(#orion-g8a93a3)"/>
+  <rect x="21.3" y="185.2" width="48.3" height="1.6" fill="#000" opacity="0.25"/>
+  <rect x="23.4" y="162.1" width="44.1" height="1.6" fill="#000" opacity="0.16"/>
+  <rect x="23.4" y="136.9" width="44.1" height="1.6" fill="#000" opacity="0.16"/>
+  <rect x="60.2" y="120.2" width="2.8" height="58.8" fill="#5e646f" opacity="1"/>
+  <path d="M31.9 63.5 L59.1 63.5 L65.5 112.5 L25.6 112.5 Z" fill="url(#orion-g646d7c)"/>
+  <rect x="25.6" y="111.7" width="39.9" height="1.6" fill="#000" opacity="0.25"/>
+  <rect x="33.5" y="83.8" width="2.9" height="3.5" fill="#bfe9f5" opacity="1"/>
+  <rect x="38.8" y="83.8" width="2.9" height="3.5" fill="#bfe9f5" opacity="1"/>
+  <rect x="44.0" y="83.8" width="2.9" height="3.5" fill="#bfe9f5" opacity="1"/>
+  <rect x="49.3" y="83.8" width="2.9" height="3.5" fill="#bfe9f5" opacity="1"/>
+  <rect x="54.5" y="83.8" width="2.9" height="3.5" fill="#bfe9f5" opacity="1"/>
+  <path d="M31.9 63.5 Q31.9 46.0 40.6 28.5 L50.4 28.5 Q59.1 46.0 59.1 63.5 Z" fill="url(#orion-g8a93a3)"/>
+  <path d="M43.4 13.1 L47.6 13.1 L50.4 28.5 L40.6 28.5 Z" fill="url(#orion-gcfd4dd)"/>
+  <path d="M43.4 13.1 Q43.4 9.2 45.1 6.1 L45.9 6.1 Q47.6 9.2 47.6 13.1 Z" fill="url(#orion-g646d7c)"/>
+  <path d="M59.5 74 L70.7 53" stroke="#aeb6c2" stroke-width="1.4"/><circle cx="70.7" cy="53" r="2.6" fill="none" stroke="#aeb6c2" stroke-width="1.2"/>
+</svg>

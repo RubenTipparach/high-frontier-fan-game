@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 77 379" width="77" height="379">
+<defs><linearGradient id="soyuz-g4a4f5a" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2b2e34"/><stop offset="0.17" stop-color="#676b74"/><stop offset="0.33" stop-color="#a8abb0"/><stop offset="0.62" stop-color="#4a4f5a"/><stop offset="1" stop-color="#212428"/></linearGradient><linearGradient id="soyuz-ga9b1a0" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#62675d"/><stop offset="0.17" stop-color="#b7bdaf"/><stop offset="0.33" stop-color="#d6dad1"/><stop offset="0.62" stop-color="#a9b1a0"/><stop offset="1" stop-color="#4c5048"/></linearGradient><linearGradient id="soyuz-g959c8d" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#565a52"/><stop offset="0.17" stop-color="#a6ac9f"/><stop offset="0.33" stop-color="#cccfc8"/><stop offset="0.62" stop-color="#959c8d"/><stop offset="1" stop-color="#43463f"/></linearGradient><linearGradient id="soyuz-ge9edf3" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#87898d"/><stop offset="0.17" stop-color="#edf0f5"/><stop offset="0.33" stop-color="#f4f6f9"/><stop offset="0.62" stop-color="#e9edf3"/><stop offset="1" stop-color="#696b6d"/></linearGradient><linearGradient id="soyuz-g3c424e" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#23262d"/><stop offset="0.17" stop-color="#5b606a"/><stop offset="0.33" stop-color="#a1a4aa"/><stop offset="0.62" stop-color="#3c424e"/><stop offset="1" stop-color="#1b1e23"/></linearGradient><linearGradient id="soyuz-g7d8576" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#494d44"/><stop offset="0.17" stop-color="#92998c"/><stop offset="0.33" stop-color="#c1c4bd"/><stop offset="0.62" stop-color="#7d8576"/><stop offset="1" stop-color="#383c35"/></linearGradient></defs>
+  <path d="M31.9 351.2 L35.4 351.2 Q35.4 355.0 36.6 359.6 L30.6 359.6 Q31.9 355.0 31.9 351.2 Z" fill="url(#soyuz-g4a4f5a)"/>
+  <ellipse cx="33.6" cy="359.6" rx="3.0" ry="0.6" fill="#14161c"/>
+  <path d="M41.6 351.2 L45.1 351.2 Q45.1 355.0 46.4 359.6 L40.4 359.6 Q41.6 355.0 41.6 351.2 Z" fill="url(#soyuz-g4a4f5a)"/>
+  <ellipse cx="43.4" cy="359.6" rx="3.0" ry="0.6" fill="#14161c"/>
+  <path d="M29.2 159.4 L47.8 159.4 L48.8 351.2 L28.2 351.2 Z" fill="url(#soyuz-ga9b1a0)"/>
+  <rect x="28.7" y="283.2" width="19.6" height="1.6" fill="#000" opacity="0.15"/>
+  <rect x="29.0" y="213.2" width="18.9" height="1.6" fill="#000" opacity="0.15"/>
+  <path d="M15.2 351.6 L19.1 351.6 Q19.1 355.0 20.3 359.3 L14.0 359.3 Q15.2 355.0 15.2 351.6 Z" fill="url(#soyuz-g4a4f5a)"/>
+  <ellipse cx="17.2" cy="359.3" rx="3.1" ry="0.6" fill="#14161c"/>
+  <path d="M22.6 351.6 L26.4 351.6 Q26.4 355.0 27.6 359.3 L21.3 359.3 Q22.6 355.0 22.6 351.6 Z" fill="url(#soyuz-g4a4f5a)"/>
+  <ellipse cx="24.5" cy="359.3" rx="3.1" ry="0.6" fill="#14161c"/>
+  <path d="M27.9 351.6 L10.8 351.6 L24.5 216.8 L28.4 216.8 Z" fill="url(#soyuz-ga9b1a0)"/>
+  <path d="M28.35 216.79999999999998 L24.5 216.79999999999998 Q26.25 207.70000000000002 28 204.9 Z" fill="#91978b"/>
+  <rect x="17.2" y="262.2" width="9.8" height="1.6" fill="#000" opacity="0.16"/>
+  <rect x="13.3" y="311.2" width="13.3" height="1.6" fill="#000" opacity="0.16"/>
+  <path d="M57.9 351.6 L61.8 351.6 Q61.8 355.0 63.0 359.3 L56.7 359.3 Q57.9 355.0 57.9 351.6 Z" fill="url(#soyuz-g4a4f5a)"/>
+  <ellipse cx="59.8" cy="359.3" rx="3.1" ry="0.6" fill="#14161c"/>
+  <path d="M50.6 351.6 L54.4 351.6 Q54.4 355.0 55.7 359.3 L49.4 359.3 Q50.6 355.0 50.6 351.6 Z" fill="url(#soyuz-g4a4f5a)"/>
+  <ellipse cx="52.5" cy="359.3" rx="3.1" ry="0.6" fill="#14161c"/>
+  <path d="M49.1 351.6 L66.2 351.6 L52.5 216.8 L48.6 216.8 Z" fill="url(#soyuz-g959c8d)"/>
+  <path d="M48.65 216.79999999999998 L52.5 216.79999999999998 Q50.75 207.70000000000002 49 204.9 Z" fill="#71786a"/>
+  <rect x="50.0" y="262.2" width="9.8" height="1.6" fill="#000" opacity="0.16"/>
+  <rect x="50.4" y="311.2" width="13.3" height="1.6" fill="#000" opacity="0.16"/>
+  <path d="M29.259999999999998 159.4 L32.34 144 M32.34 159.4 L29.259999999999998 144 M32.34 159.4 L35.42 144 M35.42 159.4 L32.34 144 M35.42 159.4 L38.5 144 M38.5 159.4 L35.42 144 M38.5 159.4 L41.58 144 M41.58 159.4 L38.5 144 M41.58 159.4 L44.66 144 M44.66 159.4 L41.58 144 M44.66 159.4 L47.74 144 M47.74 159.4 L44.66 144 " stroke="#a98358" stroke-width="1.6" fill="none"/>
+  <path d="M29.189999999999998 159.4 L47.81 159.4 M29.189999999999998 144 L47.81 144" stroke="#7f6242" stroke-width="2"/>
+  <rect x="29.2" y="97.1" width="18.6" height="46.9" fill="url(#soyuz-ga9b1a0)"/>
+  <rect x="29.2" y="96.3" width="18.6" height="1.6" fill="#000" opacity="0.28"/>
+  <path d="M28.0 88.7 L49.0 88.7 L47.8 97.1 L29.2 97.1 Z" fill="url(#soyuz-ge9edf3)"/>
+  <rect x="28.0" y="56.5" width="21.0" height="32.2" fill="url(#soyuz-ge9edf3)"/>
+  <path d="M28.0 56.5 Q28.0 46.0 35.0 35.5 L42.0 35.5 Q49.0 46.0 49.0 56.5 Z" fill="url(#soyuz-ge9edf3)"/>
+  <rect x="28.0" y="70.4" width="21.0" height="1.6" fill="#000" opacity="0.16"/>
+  <rect x="35.0" y="27.8" width="7.0" height="7.7" fill="url(#soyuz-ge9edf3)"/>
+  <path d="M34.5 22.2 L36.6 22.2 Q36.6 24.7 37.7 27.8 L33.5 27.8 Q34.5 24.7 34.5 22.2 Z" fill="url(#soyuz-g3c424e)"/>
+  <ellipse cx="35.6" cy="27.8" rx="2.1" ry="0.4" fill="#14161c"/>
+  <path d="M40.4 22.2 L42.5 22.2 Q42.5 24.7 43.5 27.8 L39.3 27.8 Q40.4 24.7 40.4 22.2 Z" fill="url(#soyuz-g3c424e)"/>
+  <ellipse cx="41.4" cy="27.8" rx="2.1" ry="0.4" fill="#14161c"/>
+  <path d="M36.3 16.6 L40.7 16.6 L42.0 27.8 L35.0 27.8 Z" fill="url(#soyuz-ge9edf3)"/>
+  <rect x="36.3" y="10.3" width="4.3" height="6.3" fill="url(#soyuz-ge9edf3)"/>
+  <path d="M36.3 10.3 Q36.3 8.0 38.1 6.1 L38.9 6.1 Q40.7 8.0 40.7 10.3 Z" fill="url(#soyuz-g7d8576)"/>
+</svg>

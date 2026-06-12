@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 267" width="56" height="267">
+<defs><linearGradient id="gt-g4a4f5a" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2b2e34"/><stop offset="0.17" stop-color="#676b74"/><stop offset="0.33" stop-color="#a8abb0"/><stop offset="0.62" stop-color="#4a4f5a"/><stop offset="1" stop-color="#212428"/></linearGradient><linearGradient id="gt-geaeef4" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#888a8e"/><stop offset="0.17" stop-color="#edf1f6"/><stop offset="0.33" stop-color="#f5f7fa"/><stop offset="0.62" stop-color="#eaeef4"/><stop offset="1" stop-color="#696b6e"/></linearGradient><linearGradient id="gt-g34383f" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1e2025"/><stop offset="0.17" stop-color="#54585e"/><stop offset="0.33" stop-color="#9e9fa3"/><stop offset="0.62" stop-color="#34383f"/><stop offset="1" stop-color="#17191c"/></linearGradient><linearGradient id="gt-g5a6068" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#34383c"/><stop offset="0.17" stop-color="#747980"/><stop offset="0.33" stop-color="#b0b3b7"/><stop offset="0.62" stop-color="#5a6068"/><stop offset="1" stop-color="#282b2f"/></linearGradient></defs>
+  <path d="M19.3 238.5 L25.6 238.5 Q25.6 245.1 27.5 253.2 L17.3 253.2 Q19.3 245.1 19.3 238.5 Z" fill="url(#gt-g4a4f5a)"/>
+  <ellipse cx="22.4" cy="253.2" rx="5.1" ry="1.0" fill="#14161c"/>
+  <path d="M30.4 238.5 L36.8 238.5 Q36.8 245.1 38.7 253.2 L28.5 253.2 Q30.4 245.1 30.4 238.5 Z" fill="url(#gt-g4a4f5a)"/>
+  <ellipse cx="33.6" cy="253.2" rx="5.1" ry="1.0" fill="#14161c"/>
+  <rect x="17.3" y="92.2" width="21.3" height="149.8" fill="url(#gt-geaeef4)"/>
+  <rect x="19.4" y="197.2" width="3.9" height="37.8" fill="#23272f" opacity="1"/>
+  <rect x="32.7" y="197.2" width="3.9" height="37.8" fill="#23272f" opacity="1"/>
+  <text x="31.9" y="154.5" transform="rotate(90 31.9 154.5)" font-family="Helvetica, Arial, sans-serif" font-size="9" font-weight="700" letter-spacing="1.5" fill="#1c2230" text-anchor="middle">UNITED STATES</text>
+  <g><rect x="17.9" y="110.1" width="10.5" height="1.3" fill="#b3322e"/><rect x="17.9" y="111.3" width="10.5" height="1.3" fill="#e7ebf2"/><rect x="17.9" y="112.6" width="10.5" height="1.3" fill="#b3322e"/><rect x="17.9" y="113.8" width="10.5" height="1.3" fill="#e7ebf2"/><rect x="17.9" y="115.1" width="10.5" height="1.3" fill="#b3322e"/><rect x="17.9" y="110.1" width="4.4" height="3.1" fill="#26356b"/></g>
+  <rect x="17.3" y="94.3" width="21.3" height="3.5" fill="#23272f" opacity="1"/>
+  <rect x="17.3" y="91.4" width="21.3" height="1.6" fill="#000" opacity="0.28"/>
+  <rect x="17.3" y="50.9" width="21.3" height="41.3" fill="url(#gt-geaeef4)"/>
+  <rect x="19.3" y="62.8" width="3.5" height="25.2" fill="#23272f" opacity="1"/>
+  <rect x="17.3" y="50.1" width="21.3" height="1.6" fill="#000" opacity="0.28"/>
+  <path d="M19.9 34.8 L36.1 34.8 L38.7 50.9 L17.3 50.9 Z" fill="url(#gt-geaeef4)"/>
+  <rect x="19.3" y="38.2" width="17.5" height="1.6" fill="#000" opacity="0.2"/>
+  <path d="M24.6 18.7 L31.4 18.7 L36.1 34.8 L19.9 34.8 Z" fill="url(#gt-g34383f)"/>
+  <rect x="24.6" y="12.8" width="6.9" height="6.0" fill="url(#gt-g34383f)"/>
+  <path d="M24.6 12.8 Q24.6 10.6 26.1 8.9 L29.9 8.9 Q31.4 10.6 31.4 12.8 Z" fill="url(#gt-g5a6068)"/>
+  <rect x="24.1" y="23.5" width="1.8" height="2.2" fill="#9fd3e8" opacity="1"/>
+  <rect x="30.0" y="23.5" width="1.8" height="2.2" fill="#9fd3e8" opacity="1"/>
+</svg>
