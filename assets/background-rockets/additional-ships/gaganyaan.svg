@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 49 71" width="49" height="71">
+<defs><linearGradient id="agg-g4a4f5a" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2b2e34"/><stop offset="0.17" stop-color="#676b74"/><stop offset="0.33" stop-color="#a8abb0"/><stop offset="0.62" stop-color="#4a4f5a"/><stop offset="1" stop-color="#212428"/></linearGradient><linearGradient id="agg-geef1f6" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#8a8c8f"/><stop offset="0.17" stop-color="#f1f3f7"/><stop offset="0.33" stop-color="#f7f8fb"/><stop offset="0.62" stop-color="#eef1f6"/><stop offset="1" stop-color="#6b6c6f"/></linearGradient><linearGradient id="agg-gb87333" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#6b431e"/><stop offset="0.17" stop-color="#c38954"/><stop offset="0.33" stop-color="#ddbc9d"/><stop offset="0.62" stop-color="#b87333"/><stop offset="1" stop-color="#533417"/></linearGradient><linearGradient id="agg-g9aa2af" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#595e66"/><stop offset="0.17" stop-color="#aab1bc"/><stop offset="0.33" stop-color="#cfd2d9"/><stop offset="0.62" stop-color="#9aa2af"/><stop offset="1" stop-color="#45494f"/></linearGradient><linearGradient id="agg-g646d7c" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3a3f48"/><stop offset="0.17" stop-color="#7d8491"/><stop offset="0.33" stop-color="#b5b9c0"/><stop offset="0.62" stop-color="#646d7c"/><stop offset="1" stop-color="#2d3138"/></linearGradient></defs>
+  <path d="M21.4 47.4 L27.6 47.4 Q27.6 52.4 30.4 58.6 L18.6 58.6 Q21.4 52.4 21.4 47.4 Z" fill="url(#agg-g4a4f5a)"/>
+  <ellipse cx="24.5" cy="58.6" rx="6.0" ry="1.2" fill="#14161c"/>
+  <rect x="11.9" y="30.6" width="25.2" height="16.8" fill="url(#agg-geef1f6)"/>
+  <rect x="11.9" y="41.1" width="25.2" height="3.5" fill="#e08214" opacity="1"/>
+  <rect x="11.9" y="32.7" width="25.2" height="2.8" fill="#2f7d32" opacity="1"/>
+  <rect x="11.2" y="27.1" width="26.6" height="3.5" fill="#454b55" opacity="1"/>
+  <path d="M10.5 30.6 Q10.5 18.8 19.3 11.0 L29.8 11.0 Q38.5 18.8 38.5 30.6 Z" fill="url(#agg-gb87333)"/>
+  <circle cx="24.5" cy="21.5" r="2.8" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/><circle cx="23.6" cy="20.6" r="0.8" fill="#bfe9f5" opacity="0.9"/>
+  <rect x="19.6" y="6.8" width="9.8" height="4.2" fill="url(#agg-g9aa2af)"/>
+  <path d="M21.0 6.8 Q21.0 5.4 23.1 4.0 L25.9 4.0 Q28.0 5.4 28.0 6.8 Z" fill="url(#agg-g646d7c)"/>
+</svg>

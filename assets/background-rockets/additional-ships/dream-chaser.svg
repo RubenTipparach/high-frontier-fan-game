@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 66 76" width="66" height="76">
+<defs><linearGradient id="adc-g4a4f5a" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2b2e34"/><stop offset="0.17" stop-color="#676b74"/><stop offset="0.33" stop-color="#a8abb0"/><stop offset="0.62" stop-color="#4a4f5a"/><stop offset="1" stop-color="#212428"/></linearGradient><linearGradient id="adc-geaeef4" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#888a8e"/><stop offset="0.17" stop-color="#edf1f6"/><stop offset="0.33" stop-color="#f5f7fa"/><stop offset="0.62" stop-color="#eaeef4"/><stop offset="1" stop-color="#696b6e"/></linearGradient><linearGradient id="adc-g23272f" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#14171b"/><stop offset="0.17" stop-color="#464a50"/><stop offset="0.33" stop-color="#95979b"/><stop offset="0.62" stop-color="#23272f"/><stop offset="1" stop-color="#101215"/></linearGradient></defs>
+  <path d="M26.4 52.3 L29.9 52.3 Q29.9 55.4 30.9 59.3 L25.3 59.3 Q26.4 55.4 26.4 52.3 Z" fill="url(#adc-g4a4f5a)"/>
+  <ellipse cx="28.1" cy="59.3" rx="2.8" ry="0.6" fill="#14161c"/>
+  <path d="M36.1 52.3 L39.6 52.3 Q39.6 55.4 40.7 59.3 L35.1 59.3 Q36.1 55.4 36.1 52.3 Z" fill="url(#adc-g4a4f5a)"/>
+  <ellipse cx="37.9" cy="59.3" rx="2.8" ry="0.6" fill="#14161c"/>
+  <path d="M19.7 52.3 L7.8 43.9 L9.2 38.3 L19.7 37.6 Z" fill="url(#adc-g4a4f5a)"/>
+  <path d="M7.8 43.9 L9.2 38.3 L12.0 39.7 Z" fill="#23272f"/>
+  <path d="M46.3 52.3 L58.2 43.9 L56.8 38.3 L46.3 37.6 Z" fill="url(#adc-g4a4f5a)"/>
+  <path d="M58.2 43.9 L56.8 38.3 L54.0 39.7 Z" fill="#23272f"/>
+  <path d="M24.3 17.3 L41.8 17.3 L47.7 52.3 L18.3 52.3 Z" fill="url(#adc-geaeef4)"/>
+  <path d="M24.3 17.3 Q24.3 10.8 29.9 5.4 L36.1 5.4 Q41.8 10.8 41.8 17.3 Z" fill="url(#adc-geaeef4)"/>
+  <rect x="18.6" y="18.7" width="2.8" height="32.2" fill="#23272f" opacity="0.8"/>
+  <rect x="44.5" y="18.7" width="2.8" height="32.2" fill="#23272f" opacity="0.8"/>
+  <path d="M28.8 9.6 Q28.8 7.5 31.3 5.4 L34.8 5.4 Q37.2 7.5 37.2 9.6 Z" fill="url(#adc-g23272f)"/>
+  <g transform="rotate(-12 29.5 17.3)"><path d="M27.8 15.8 L31.2 15.8 L31.9 18.8 L27.1 18.8 Z" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/><circle cx="28.8" cy="16.6" r="1.5" fill="#bfe9f5" opacity="0.9"/></g>
+  <g transform="rotate(12 36.5 17.3)"><path d="M34.8 15.8 L38.2 15.8 L38.9 18.8 L34.1 18.8 Z" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/><circle cx="35.8" cy="16.6" r="1.5" fill="#bfe9f5" opacity="0.9"/></g>
+</svg>

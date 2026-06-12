@@ -678,6 +678,218 @@ function chibiMengzhou() {
   return emit('cmz', 'MENGZHOU', 12.0, c);
 }
 
+// ---- additional ships: documented + rendered, NOT wired into the app ----
+
+function addMercury() {
+  // Mercury: the bell-with-a-stovepipe, corrugated shingle cone + retro pack
+  const c = makeCtx('amc', 4.5, 7.0, 1.5);
+  const CHAR = '#3a3e45', GRAY = '#9aa2af';
+  c.cyl(0.1, 0.7, 1.7, '#23272f', { rx: 3 });   // strapped retro pack
+  c.trap(0.7, 3.3, 3.0, 1.4, CHAR);
+  for (const yy of [1.6, 2.5, 3.4]) c.seam(yy, 2.6 - (yy - 1.6) * 0.5, { op: 0.3 });
+  for (const sgn of [-1, 1]) c.add(`<path d="M${c.X(0).toFixed(1)} ${c.Y(0.4).toFixed(1)} L${c.X(sgn * 1.3).toFixed(1)} ${c.Y(1.3).toFixed(1)}" stroke="#14161c" stroke-width="1.4"/>`);
+  win(c, 0.45, 3.1, 0.32);
+  c.cyl(4.0, 1.0, 1.5, GRAY);
+  c.cyl(5.0, 1.6, 1.0, CHAR);                    // antenna canister
+  c.nose(6.6, 0.5, 1.0, 0.4, GRAY, { bow: 0.5 });
+  return emit('amc', 'MERCURY', 7.0, c);
+}
+
+function addVostokLike(prefix, label, withBackupRetro) {
+  // Vostok / Voskhod: the ball-on-a-cone; Voskhod straps a backup solid
+  // retro pack on top of the ball
+  const c = makeCtx(prefix, 5.5, withBackupRetro ? 9.4 : 8.6, 2);
+  const SILVER = '#b9bec8', BRONZE = '#a07a52';
+  c.bell(0, 0.6, 1.4, 0.8, 1.5);
+  c.trap(0.6, 2.8, 2.2, 3.3, SILVER);
+  for (const x of [-1.1, -0.55, 0, 0.55, 1.1]) c.add(`<circle cx="${c.X(x).toFixed(1)}" cy="${c.Y(3.0).toFixed(1)}" r="2" fill="#646d7c"/>`);
+  c.cyl(3.5, 3.4, 3.4, BRONZE, { rx: c.px(1.7) });
+  win(c, 0, 4.8, 0.4);
+  if (withBackupRetro) { c.cyl(6.9, 0.9, 1.7, '#3a3e45', { rx: 3 }); c.nose(7.8, 0.5, 1.2, 0.5, '#646d7c', { bow: 0.5 }); }
+  for (const sgn of [-1, 1]) c.add(`<path d="M${c.X(sgn * 0.9).toFixed(1)} ${c.Y(6.6).toFixed(1)} L${c.X(sgn * 1.7).toFixed(1)} ${c.Y(8.3).toFixed(1)}" stroke="#9aa2af" stroke-width="1.2"/>`);
+  return emit(prefix, label, withBackupRetro ? 8.7 : 8.6, c);
+}
+
+function addApolloLm() {
+  // Apollo Lunar Module: gold-foil descent box on legs, bug-head ascent
+  // stage with the two triangular windows
+  const c = makeCtx('alm', 8.0, 7.6, 1.5);
+  const GOLD = '#c9952f', GRAY = '#aab0ba';
+  c.bell(0, 1.6, 1.2, 0.9, 1.4);
+  // legs + footpads
+  for (const sgn of [-1, 1]) {
+    c.add(`<path d="M${c.X(sgn * 2.2).toFixed(1)} ${c.Y(2.6).toFixed(1)} L${c.X(sgn * 3.3).toFixed(1)} ${c.Y(0.2).toFixed(1)} M${c.X(sgn * 2.4).toFixed(1)} ${c.Y(1.6).toFixed(1)} L${c.X(sgn * 3.0).toFixed(1)} ${c.Y(0.5).toFixed(1)}" stroke="#8a6a1e" stroke-width="2"/>`);
+    c.add(`<ellipse cx="${c.X(sgn * 3.35).toFixed(1)}" cy="${c.Y(0.15).toFixed(1)}" rx="4.5" ry="1.8" fill="#8a8f99"/>`);
+  }
+  // descent stage: gold foil with darker patches
+  c.cyl(1.6, 2.6, 5.0, GOLD);
+  c.decal(1.9, 1.0, 1.2, '#8a6a1e', { cxM: -1.4 });
+  c.decal(2.9, 0.9, 1.5, '#e0b13f', { cxM: 0.9 });
+  c.decal(1.8, 0.7, 1.0, '#6f5418', { cxM: 1.9 });
+  c.add(`<path d="M${c.X(-0.6).toFixed(1)} ${c.Y(1.6).toFixed(1)} L${c.X(-1.6).toFixed(1)} ${c.Y(0.2).toFixed(1)}" stroke="#8a8f99" stroke-width="1.6"/>`); // ladder
+  // ascent stage: the bug head
+  c.cyl(4.2, 2.4, 3.6, GRAY, { rx: 5 });
+  c.cyl(6.6, 0.7, 1.5, '#8a8f99');
+  winPoly(c, -0.85, 5.5, [[-0.4, 0.32], [0.28, 0.32], [0.4, -0.32], [-0.4, -0.32]], -8);
+  winPoly(c, 0.85, 5.5, [[-0.28, 0.32], [0.4, 0.32], [0.4, -0.32], [-0.4, -0.32]], 8);
+  for (const sgn of [-1, 1]) c.decal(5.7, 0.7, 0.5, '#3a3e45', { cxM: sgn * 1.95 });
+  dish(c, 1.3, 6.6, 2.5, 7.4);
+  return emit('alm', 'APOLLO LM', 7.4, c);
+}
+
+function addStarliner() {
+  // Starliner CST-100: stubby gumdrop over a service module with doghouse pods
+  const c = makeCtx('asl', 6.0, 7.4, 2);
+  const WHITE = '#eef1f6', BLUE = '#3d6db5', GRAY = '#9aa2af';
+  for (const x of [-1.1, 1.1]) c.bell(x, 0.7, 1.2, 0.6, 1.0);
+  c.cyl(0.7, 2.6, 4.0, WHITE);
+  for (const sgn of [-1, 1]) c.cyl(1.1, 1.7, 0.9, '#454b55', { cxM: sgn * 1.7, rx: 3 });
+  c.decal(3.3, 0.5, 4.2, '#454b55');
+  c.nose(3.3, 3.0, 4.4, 1.9, WHITE, { bow: 0.68 });
+  c.add(`<path d="M${c.X(-1.7).toFixed(1)} ${c.Y(4.3).toFixed(1)} Q${c.X(0).toFixed(1)} ${c.Y(4.75).toFixed(1)} ${c.X(1.7).toFixed(1)} ${c.Y(4.3).toFixed(1)}" fill="none" stroke="${BLUE}" stroke-width="2"/>`);
+  win(c, -0.6, 5.1, 0.35);
+  win(c, 0.6, 5.1, 0.35);
+  c.cyl(6.3, 0.6, 1.6, GRAY);
+  c.nose(6.9, 0.4, 1.2, 0.5, '#646d7c', { bow: 0.5 });
+  return emit('asl', 'STARLINER', 7.3, c);
+}
+
+function addNewShepard() {
+  // New Shepard crew capsule: the gumdrop with the huge windows
+  const c = makeCtx('ans', 5.0, 5.0, 1);
+  const WHITE = '#eef1f6';
+  c.cyl(0, 0.6, 3.9, '#9aa2af');
+  c.nose(0.6, 3.6, 3.8, 1.6, WHITE, { bow: 0.7 });
+  winOval(c, -0.95, 2.3, 0.42, 0.85);
+  winOval(c, 0.95, 2.3, 0.42, 0.85);
+  winOval(c, 0, 2.5, 0.45, 0.9);
+  c.nose(4.2, 0.7, 1.6, 0.7, '#cfd4dd', { bow: 0.7 });
+  return emit('ans', 'NEW SHEPARD', 4.9, c);
+}
+
+function addBuran() {
+  // Buran: the Soviet orbiter, top-down plan view like the Shuttle but
+  // engine-less at the tail (no SSMEs) with its own markings
+  const c = makeCtx('abr', 10.5, 13.5);
+  const WHITE = '#eaeef4', TPS = '#23272f', GRAY = '#9aa2af';
+  c.bell(-0.8, 1.6, 1.1, 0.6, 0.9);
+  c.bell(0.8, 1.6, 1.1, 0.6, 0.9);
+  c.cyl(1.2, 0.8, 2.6, GRAY);
+  for (const sgn of [-1, 1]) {
+    const m = v => sgn * v;
+    c.poly([[m(1.5), 1.9], [m(4.7), 1.9], [m(4.7), 2.8], [m(2.6), 6.2], [m(1.5), 8.7]], WHITE);
+    c.add(`<path d="M${c.X(m(1.5)).toFixed(1)} ${c.Y(8.7).toFixed(1)} L${c.X(m(2.6)).toFixed(1)} ${c.Y(6.2).toFixed(1)} L${c.X(m(4.7)).toFixed(1)} ${c.Y(2.8).toFixed(1)} L${c.X(m(4.3)).toFixed(1)} ${c.Y(2.5).toFixed(1)} L${c.X(m(2.3)).toFixed(1)} ${c.Y(5.75).toFixed(1)} L${c.X(m(1.5)).toFixed(1)} ${c.Y(7.9).toFixed(1)} Z" fill="${TPS}"/>`);
+  }
+  c.decal(2.6, 0.5, 1.6, '#b3322e', { cxM: -3.0 });
+  c.cyl(1.7, 2.3, 1.2, GRAY, { cxM: -1.15, rx: 4 });
+  c.cyl(1.7, 2.3, 1.2, GRAY, { cxM: 1.15, rx: 4 });
+  c.cyl(1.7, 9.6, 3.0, WHITE, { rx: 5 });
+  c.decal(3.3, 6.1, 2.3, '#d6dbe4');
+  c.add(`<line x1="${c.X(0).toFixed(1)}" y1="${c.Y(3.3).toFixed(1)}" x2="${c.X(0).toFixed(1)}" y2="${c.Y(9.4).toFixed(1)}" stroke="#9aa2af" stroke-width="1.4"/>`);
+  c.add(`<rect x="${(c.X(0) - 1.8).toFixed(1)}" y="${c.Y(3.2).toFixed(1)}" width="3.6" height="${c.px(1.9).toFixed(1)}" rx="1.8" fill="#4a4f5a"/>`);
+  c.nose(11.3, 1.9, 3.0, 0.8, TPS, { bow: 0.55 });
+  winPoly(c, -0.55, 10.8, [[-0.28, 0.26], [0.28, 0.26], [0.4, -0.26], [-0.4, -0.26]], -14);
+  winPoly(c, 0.55, 10.8, [[-0.28, 0.26], [0.28, 0.26], [0.4, -0.26], [-0.4, -0.26]], 14);
+  return emit('abr', 'BURAN', 13.2, c);
+}
+
+function addStarship() {
+  // Starship: the chrome grain silo, fore + aft flap pairs edge-on
+  const c = makeCtx('ast', 7.5, 13.0, 2);
+  const STEEL = '#b9bec8';
+  for (const x of [-0.9, 0, 0.9]) c.bell(x, 1.2, 1.5, 0.7, 1.2);
+  for (const sgn of [-1, 1]) {
+    c.poly([[sgn * 1.7, 1.2], [sgn * 3.2, 1.6], [sgn * 3.2, 3.0], [sgn * 1.7, 3.8]], '#8a8f99');
+    c.poly([[sgn * 1.7, 8.9], [sgn * 2.7, 9.3], [sgn * 2.7, 10.2], [sgn * 1.7, 10.7]], '#8a8f99');
+  }
+  c.cyl(1.2, 9.2, 3.4, STEEL);
+  for (const yy of [3.5, 5.8, 8.1]) c.seam(yy, 3.3, { op: 0.12 });
+  c.decal(1.4, 8.8, 0.55, '#23272f', { cxM: -1.4, op: 0.85 });
+  c.nose(10.4, 2.5, 3.4, 0.7, STEEL, { bow: 0.5 });
+  win(c, 0.5, 9.9, 0.3);
+  win(c, -0.4, 9.5, 0.3);
+  return emit('ast', 'STARSHIP', 12.9, c);
+}
+
+function addGaganyaan() {
+  // Gaganyaan: copper-toned capsule over a white service module with
+  // tricolor trim
+  const c = makeCtx('agg', 5.5, 7.0, 2);
+  const COPPER = '#b87333', WHITE = '#eef1f6';
+  c.bell(0, 0.8, 1.6, 0.9, 1.7);
+  c.cyl(0.8, 2.4, 3.6, WHITE);
+  c.decal(1.2, 0.5, 3.6, '#e08214');
+  c.decal(2.5, 0.4, 3.6, '#2f7d32');
+  c.decal(3.2, 0.5, 3.8, '#454b55');
+  c.nose(3.2, 2.8, 4.0, 1.5, COPPER, { bow: 0.6 });
+  win(c, 0, 4.5, 0.4);
+  c.cyl(6.0, 0.6, 1.4, '#9aa2af');
+  c.nose(6.6, 0.4, 1.0, 0.4, '#646d7c', { bow: 0.5 });
+  return emit('agg', 'GAGANYAAN', 7.0, c);
+}
+
+function addDreamChaser() {
+  // Dream Chaser: the mini lifting body, top-down plan view with upswept
+  // winglets
+  const c = makeCtx('adc', 8.0, 8.2, 1.5);
+  const WHITE = '#eaeef4', TPS = '#23272f';
+  c.bell(-0.7, 1.3, 1.0, 0.5, 0.8);
+  c.bell(0.7, 1.3, 1.0, 0.5, 0.8);
+  for (const sgn of [-1, 1]) {
+    c.poly([[sgn * 1.9, 1.3], [sgn * 3.6, 2.5], [sgn * 3.4, 3.3], [sgn * 1.9, 3.4]], '#4a4f5a');
+    c.add(`<path d="M${c.X(sgn * 3.6).toFixed(1)} ${c.Y(2.5).toFixed(1)} L${c.X(sgn * 3.4).toFixed(1)} ${c.Y(3.3).toFixed(1)} L${c.X(sgn * 3.0).toFixed(1)} ${c.Y(3.1).toFixed(1)} Z" fill="${TPS}"/>`);
+  }
+  c.trap(1.3, 5.0, 4.2, 2.5, WHITE);
+  c.nose(6.3, 1.7, 2.5, 0.9, WHITE, { bow: 0.55 });
+  c.decal(1.5, 4.6, 0.4, TPS, { cxM: -1.85, op: 0.8 });
+  c.decal(1.5, 4.6, 0.4, TPS, { cxM: 1.85, op: 0.8 });
+  c.nose(7.4, 0.6, 1.2, 0.5, TPS, { bow: 0.5 });
+  winPoly(c, -0.5, 6.3, [[-0.24, 0.22], [0.24, 0.22], [0.34, -0.22], [-0.34, -0.22]], -12);
+  winPoly(c, 0.5, 6.3, [[-0.24, 0.22], [0.24, 0.22], [0.34, -0.22], [-0.34, -0.22]], 12);
+  return emit('adc', 'DREAM CHASER', 8.0, c);
+}
+
+function addMir() {
+  // Mir: stacked core + node ball with side-module stubs, three wing pairs
+  const c = makeCtx('amr', 12.5, 11.6, 2);
+  const GRAYG = '#a9b1a0', GRAY = '#9aa2af';
+  c.bell(0, 0.7, 1.2, 0.7, 1.3);
+  for (const dir of [-1, 1]) wing(c, dir * 1.3, 2.8, dir * -4, 4.4, 1.5, dir);
+  for (const dir of [-1, 1]) wing(c, dir * 1.3, 6.2, dir * 6, 3.6, 1.3, dir);
+  c.cyl(0.7, 4.4, 2.5, GRAYG);
+  c.seam(3.0, 2.5, { op: 0.2 });
+  c.cyl(5.1, 3.6, 2.9, GRAYG, { rx: 5 });
+  win(c, 0, 7.2, 0.36);
+  // docking node ball + side module stubs
+  c.cyl(8.7, 2.0, 2.2, GRAY, { rx: c.px(1.0) });
+  for (const sgn of [-1, 1]) {
+    c.cyl(9.2, 1.0, 2.2, GRAYG, { cxM: sgn * 2.1, rx: 4 });
+    c.add(`<rect x="${(c.X(sgn * 2.1) - 2).toFixed(1)}" y="${c.Y(11.4).toFixed(1)}" width="4" height="${c.px(1.1).toFixed(1)}" rx="2" fill="#24386b" stroke="#0f1830" stroke-width="0.8"/>`);
+  }
+  c.nose(10.7, 0.7, 1.4, 0.5, GRAY, { bow: 0.5 });
+  return emit('amr', 'MIR', 11.4, c);
+}
+
+function addTiangong() {
+  // Tiangong: Tianhe core with the two lab modules at the node, big wings
+  const c = makeCtx('atg', 15.5, 11.8, 2);
+  const PEARL = '#e6e4da', GRAY = '#9aa2af';
+  c.bell(0, 0.8, 1.2, 0.7, 1.3);
+  for (const dir of [-1, 1]) wing(c, dir * 1.4, 2.6, dir * -3, 4.6, 1.5, dir);
+  c.cyl(0.8, 5.4, 2.7, PEARL);
+  c.seam(3.4, 2.7, { op: 0.18 });
+  c.cyl(6.2, 2.6, 3.1, PEARL, { rx: 5 });
+  win(c, 0, 7.2, 0.36);
+  // node + lab modules with their own big wings
+  c.cyl(8.8, 1.8, 2.4, GRAY, { rx: 5 });
+  for (const sgn of [-1, 1]) {
+    c.cyl(9.0, 1.4, 3.4, PEARL, { cxM: sgn * 2.6, rx: 4 });
+    wing(c, sgn * 4.3, 9.7, 0, 3.0, 1.2, sgn);
+  }
+  c.nose(10.6, 0.9, 1.5, 0.5, GRAY, { bow: 0.5 });
+  return emit('atg', 'TIANGONG', 11.5, c);
+}
+
 function chibiOrionPulse() {
   const c = makeCtx('cop', 10.5, 14.5, 1);
   const STEEL = '#8a93a3', DKSTEEL = '#646d7c', COPPER = '#b4713d', RUBBER = '#4a4e57';
@@ -985,6 +1197,14 @@ const chibis = [chibiApolloCsm(), chibiOrionMpcv(), chibiCrewDragon(), chibiShut
   chibiSoyuz(), chibiShenzhou(), chibiMengzhou(), chibiSkylab(), chibiGemini(), chibiOrionPulse()];
 const futures = [futDiscovery2(), futUmbrella(), futMedusa(), futVista()];
 const medias = [mediaShieldShip(), mediaRingShip(), mediaIonCruiser(), mediaDeepSpaceStack(), mediaCorvette()];
+const additionals = [addMercury(), addVostokLike('avk', 'VOSTOK', false), addVostokLike('avd', 'VOSKHOD', true),
+  addApolloLm(), addStarliner(), addNewShepard(), addBuran(), addStarship(), addGaganyaan(),
+  addDreamChaser(), addMir(), addTiangong()];
+const ADD_NOTE = {
+  amc: 'flew crew', avk: 'flew crew', avd: 'flew crew', alm: 'flew crew', asl: 'flew crew',
+  ans: 'flew crew, suborbital', abr: 'crew-rated, never crewed', ast: 'crew planned',
+  agg: 'crew planned', adc: 'crewed variant shelved', amr: 'station', atg: 'station',
+};
 const MEDIA_AFTER = {
   msh: 'after Sunshine',
   mrs: 'after For All Mankind',
@@ -1013,6 +1233,18 @@ const FILE_NAMES = {
   fvs: 'future-concepts/future-vista.svg',
   fum: 'future-concepts/future-umbrella-ship.svg',
   fmd: 'future-concepts/future-medusa.svg',
+  amc: 'additional-ships/mercury.svg',
+  avk: 'additional-ships/vostok.svg',
+  avd: 'additional-ships/voskhod.svg',
+  alm: 'additional-ships/apollo-lm.svg',
+  asl: 'additional-ships/starliner.svg',
+  ans: 'additional-ships/new-shepard.svg',
+  abr: 'additional-ships/buran.svg',
+  ast: 'additional-ships/starship.svg',
+  agg: 'additional-ships/gaganyaan.svg',
+  adc: 'additional-ships/dream-chaser.svg',
+  amr: 'additional-ships/mir.svg',
+  atg: 'additional-ships/tiangong.svg',
   mcv: 'media-torch-corvette.svg',
   mds: 'media-deep-space-stack.svg',
   mrs: 'media-ring-ship.svg',
@@ -1022,7 +1254,8 @@ const FILE_NAMES = {
 
 mkdirSync(OUT_DIR, { recursive: true });
 mkdirSync(join(OUT_DIR, 'future-concepts'), { recursive: true });
-for (const r of [...rockets, ...chibis, ...futures, ...medias]) {
+mkdirSync(join(OUT_DIR, 'additional-ships'), { recursive: true });
+for (const r of [...rockets, ...chibis, ...futures, ...medias, ...additionals]) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${r.W} ${r.H}" width="${r.W}" height="${r.H}">\n<defs>${r.defs}</defs>\n  ${r.inner}\n</svg>\n`;
   writeFileSync(join(OUT_DIR, FILE_NAMES[r.prefix]), svg);
 }
@@ -1136,6 +1369,37 @@ for (const r of [...rockets, ...chibis, ...futures, ...medias]) {
   }
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">\n<defs>${defsAll.join('')}</defs>\n${body}\n</svg>\n`;
   writeFileSync(join(OUT_DIR, 'future-concepts', '_futures-sheet.svg'), svg);
+}
+
+// additional-ships sheet: documented chibi candidates, NOT wired into the app
+{
+  const GAP = 30, PADL = 44, PADR = 44, PADT = 50, PADB = 84;
+  const maxH = Math.max(...additionals.map(r => r.H));
+  const sheetGround = PADT + maxH - 8;
+  let x = PADL, placed = [], defsAll = [];
+  for (const r of additionals) {
+    const labelW = Math.max(r.label.length, ADD_NOTE[r.prefix].length) * 7.6;
+    const stride = Math.max(r.W, labelW);
+    placed.push({ r, tx: x + stride / 2 - r.W / 2, cxCol: x + stride / 2, ty: sheetGround - r.groundY });
+    defsAll.push(r.defs);
+    x += stride + GAP;
+  }
+  const W = x - GAP + PADR, H = sheetGround + PADB;
+  let stars = '';
+  let seed = 31;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  for (let i = 0; i < 90; i++) {
+    stars += `<circle cx="${(rnd() * W).toFixed(1)}" cy="${(rnd() * H).toFixed(1)}" r="${(rnd() * 1.1 + 0.3).toFixed(2)}" fill="#aab4d0" opacity="${(rnd() * 0.5 + 0.15).toFixed(2)}"/>`;
+  }
+  let body = `<rect width="${W}" height="${H}" fill="#0c0a16"/>${stars}`;
+  for (const { r, tx, cxCol, ty } of placed) {
+    body += `<g transform="translate(${tx.toFixed(1)},${ty.toFixed(1)})">${r.inner}</g>`;
+    body += `<text x="${cxCol.toFixed(1)}" y="${sheetGround + 26}" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="600" letter-spacing="1" fill="#aab4d0" text-anchor="middle">${r.label}</text>`;
+    body += `<text x="${cxCol.toFixed(1)}" y="${sheetGround + 43}" font-family="Helvetica, Arial, sans-serif" font-size="10" font-style="italic" fill="#666f86" text-anchor="middle">${ADD_NOTE[r.prefix]}</text>`;
+  }
+  body += `<text x="${W - 12}" y="${H - 10}" font-family="Helvetica, Arial, sans-serif" font-size="10" fill="#666f86" text-anchor="end">additional chibi candidates, documented only, not in the app</text>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">\n<defs>${defsAll.join('')}</defs>\n${body}\n</svg>\n`;
+  writeFileSync(join(OUT_DIR, 'additional-ships', '_additional-sheet.svg'), svg);
 }
 
 // media sheet: fan homages at their own shared scale (MS px/m)

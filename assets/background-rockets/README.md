@@ -55,6 +55,30 @@ traffic; if you add a ship here, add its file name to that list too.
 | `chibi-gemini.svg` | Gemini spacecraft (re-entry module + adapter) |
 | `chibi-orion-pulse-ship.svg` | Project Orion pulse ship (it IS its own interplanetary vehicle) |
 
+## Additional ships (documented only, NOT in the app)
+
+Candidate chibi spacecraft drawn and parked in `additional-ships/`,
+awaiting a call on which join the ambient fleet. None are loaded by
+the app; to promote one, add its file name to the render.js
+`_ambientSprites` list (and move its row up to the chibi table).
+`additional-ships/_additional-sheet.svg` / `_additional-preview.png`
+show the set.
+
+| File | Vehicle | Status |
+|---|---|---|
+| `additional-ships/mercury.svg` | Mercury (shingle cone, retro pack, stovepipe antenna) | flew crew |
+| `additional-ships/vostok.svg` | Vostok (ball-on-a-cone, air-bottle ring) | flew crew |
+| `additional-ships/voskhod.svg` | Voskhod (Vostok + backup retro pack on the ball) | flew crew |
+| `additional-ships/apollo-lm.svg` | Apollo Lunar Module (gold descent box, bug-head ascent stage) | flew crew |
+| `additional-ships/starliner.svg` | Starliner CST-100 (gumdrop, doghouse pods, blue trim) | flew crew |
+| `additional-ships/new-shepard.svg` | New Shepard capsule (the huge windows) | flew crew, suborbital |
+| `additional-ships/buran.svg` | Buran (top-down plan view, engine-less tail) | crew-rated, never crewed |
+| `additional-ships/starship.svg` | Starship (chrome silo, fore + aft flaps, TPS stripe) | crew planned |
+| `additional-ships/gaganyaan.svg` | Gaganyaan (copper capsule, tricolor trim) | crew planned |
+| `additional-ships/dream-chaser.svg` | Dream Chaser (lifting body, upswept winglets, top-down) | crewed variant shelved |
+| `additional-ships/mir.svg` | Mir (core stack, node ball with side modules, three wing pairs) | station |
+| `additional-ships/tiangong.svg` | Tiangong (Tianhe core + lab modules with big wings) | station |
+
 ## Media homages (designated MODULE 1 rockets)
 
 Original designs INSPIRED BY popular sci-fi vehicles (fan homages,
