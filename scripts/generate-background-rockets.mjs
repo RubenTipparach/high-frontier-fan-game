@@ -597,31 +597,38 @@ function chibiGemini() {
 }
 
 function chibiShuttle() {
-  // Space Shuttle orbiter, in-space config (no tank / SRBs): nose-up side
-  // profile, black belly + nose cap, delta wing one side, tail fin the other
-  const c = makeCtx('csh', 11.5, 13.5);
+  // Space Shuttle orbiter, in-space config (no tank / SRBs), TOP-DOWN plan
+  // view so the map camera angle reads right: symmetric double-delta wings,
+  // payload-bay doors down the spine, OMS pods flanking the tail
+  const c = makeCtx('csh', 10.5, 13.5);
   const WHITE = '#eaeef4', TPS = '#23272f', GRAY = '#9aa2af';
-  // SSME cluster + OMS pods
-  c.bell(0, 1.6, 1.7, 0.9, 1.5);
-  c.bell(-0.85, 1.7, 1.4, 0.7, 1.1);
-  c.bell(0.85, 1.7, 1.4, 0.7, 1.1);
-  // delta wing (belly side) with a black leading edge
-  c.poly([[-1.4, 1.8], [-4.6, 1.6], [-1.4, 7.6]], WHITE);
-  c.add(`<path d="M${c.X(-1.4).toFixed(1)} ${c.Y(7.6).toFixed(1)} L${c.X(-4.6).toFixed(1)} ${c.Y(1.6).toFixed(1)} L${c.X(-2.9).toFixed(1)} ${c.Y(1.6).toFixed(1)} L${c.X(-1.4).toFixed(1)} ${c.Y(6.2).toFixed(1)} Z" fill="${TPS}"/>`);
-  // vertical tail (spine side) with dark rudder edge
-  c.poly([[1.4, 1.7], [4.1, 1.2], [4.1, 2.6], [1.4, 5.4]], WHITE);
-  c.add(`<path d="M${c.X(4.1).toFixed(1)} ${c.Y(1.2).toFixed(1)} L${c.X(4.1).toFixed(1)} ${c.Y(2.6).toFixed(1)} L${c.X(3.3).toFixed(1)} ${c.Y(2.85).toFixed(1)} L${c.X(3.3).toFixed(1)} ${c.Y(1.35).toFixed(1)} Z" fill="#4a4f5a"/>`);
-  // OMS pod bump
-  c.cyl(1.9, 2.4, 1.4, GRAY, { cxM: 1.1, rx: 4 });
-  // fuselage with payload-bay door line + black belly strip
-  c.cyl(1.5, 10.2, 3.0, WHITE, { rx: 5 });
-  c.decal(1.7, 9.6, 0.5, TPS, { cxM: -1.22, op: 0.95 });
-  c.add(`<line x1="${c.X(0.15).toFixed(1)}" y1="${c.Y(3.2).toFixed(1)}" x2="${c.X(0.15).toFixed(1)}" y2="${c.Y(10.2).toFixed(1)}" stroke="#aeb6c2" stroke-width="1.2"/>`);
-  c.flag(0.7, 5.2, 1.3);
-  // black nose cap + cockpit panes
-  c.nose(11.3, 1.9, 3.0, 0.9, TPS, { bow: 0.55 });
-  winPoly(c, -0.5, 10.7, [[-0.3, 0.26], [0.3, 0.26], [0.42, -0.26], [-0.42, -0.26]], -12);
-  winPoly(c, 0.5, 10.7, [[-0.3, 0.26], [0.3, 0.26], [0.42, -0.26], [-0.42, -0.26]], 12);
+  // SSME cluster peeking past the body flap
+  c.bell(0, 1.7, 1.6, 0.9, 1.5);
+  c.bell(-1.0, 1.8, 1.3, 0.7, 1.1);
+  c.bell(1.0, 1.8, 1.3, 0.7, 1.1);
+  c.cyl(1.3, 0.8, 2.6, GRAY); // body flap
+  // double-delta wings, symmetric, black RCC leading edges + elevon seams
+  for (const sgn of [-1, 1]) {
+    const m = v => sgn * v;
+    c.poly([[m(1.5), 2.0], [m(4.7), 2.0], [m(4.7), 2.9], [m(2.6), 6.3], [m(1.5), 8.8]], WHITE);
+    c.add(`<path d="M${c.X(m(1.5)).toFixed(1)} ${c.Y(8.8).toFixed(1)} L${c.X(m(2.6)).toFixed(1)} ${c.Y(6.3).toFixed(1)} L${c.X(m(4.7)).toFixed(1)} ${c.Y(2.9).toFixed(1)} L${c.X(m(4.25)).toFixed(1)} ${c.Y(2.55).toFixed(1)} L${c.X(m(2.3)).toFixed(1)} ${c.Y(5.85).toFixed(1)} L${c.X(m(1.5)).toFixed(1)} ${c.Y(8.0).toFixed(1)} Z" fill="${TPS}"/>`);
+    c.add(`<line x1="${c.X(m(1.5)).toFixed(1)}" y1="${c.Y(2.75).toFixed(1)}" x2="${c.X(m(4.55)).toFixed(1)}" y2="${c.Y(2.75).toFixed(1)}" stroke="#aeb6c2" stroke-width="1"/>`);
+  }
+  c.flag(-3.1, 3.5, 1.2);
+  // OMS pods flanking the tail root
+  c.cyl(1.9, 2.3, 1.2, GRAY, { cxM: -1.15, rx: 4 });
+  c.cyl(1.9, 2.3, 1.2, GRAY, { cxM: 1.15, rx: 4 });
+  // fuselage + payload-bay doors with the center split line
+  c.cyl(1.8, 9.5, 3.0, WHITE, { rx: 5 });
+  c.decal(3.4, 6.0, 2.3, '#d6dbe4');
+  c.seam(3.4, 2.3, { op: 0.18 }); c.seam(9.4, 2.3, { op: 0.18 });
+  c.add(`<line x1="${c.X(0).toFixed(1)}" y1="${c.Y(3.4).toFixed(1)}" x2="${c.X(0).toFixed(1)}" y2="${c.Y(9.4).toFixed(1)}" stroke="#9aa2af" stroke-width="1.4"/>`);
+  // vertical tail seen end-on: a thin dark spine over the aft fuselage
+  c.add(`<rect x="${(c.X(0) - 1.8).toFixed(1)}" y="${c.Y(3.3).toFixed(1)}" width="3.6" height="${c.px(1.9).toFixed(1)}" rx="1.8" fill="#4a4f5a"/>`);
+  // black nose cap + windshield panes
+  c.nose(11.3, 1.9, 3.0, 0.8, TPS, { bow: 0.55 });
+  winPoly(c, -0.55, 10.8, [[-0.28, 0.26], [0.28, 0.26], [0.4, -0.26], [-0.4, -0.26]], -14);
+  winPoly(c, 0.55, 10.8, [[-0.28, 0.26], [0.28, 0.26], [0.4, -0.26], [-0.4, -0.26]], 14);
   return emit('csh', 'SPACE SHUTTLE', 13.2, c);
 }
 
