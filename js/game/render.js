@@ -909,14 +909,16 @@ export class MapRenderer {
   // js/game/rocket.js's canRocketFly().
   setSandboxRocket(opts) {
     this._sandboxRocket = opts || null;
-    // First placement with no remembered viewport: open centered on the
-    // player's rocket instead of the whole-map fit. _initialViewDone is
-    // set by a restored camera or any user pan / zoom, so this never
-    // yanks the view away from a player who is already looking around.
+    // First placement: fly to the player's rocket. This is the DEFAULT
+    // opening view on every mount (page load, room entry, sandbox); the
+    // restored viewport / whole-map fit is just the starting pose. Only a
+    // user pan / zoom that already happened (_noteUserCamera set
+    // _initialViewDone) suppresses it, so the camera is never yanked away
+    // from a player who is already looking around.
     if (!this._initialViewDone && opts
         && Number.isFinite(opts.x) && Number.isFinite(opts.y)) {
       this._initialViewDone = true;
-      this.flyTo({ x: opts.x, y: opts.y }, this._focusRocketZoom || 5, { ms: this._focusRocketMs || 0 });
+      this.flyTo({ x: opts.x, y: opts.y }, this._focusRocketZoom || 5, { ms: this._focusRocketMs || 420 });
       this._focusRocketMs = 0;
     }
     this._scheduleDraw();
@@ -1026,11 +1028,14 @@ export class MapRenderer {
   }
 
   // ---- camera persistence ----
-  // The map opens where the player left it: every user pan / zoom saves the
-  // visible world-center + zoom (debounced) to localStorage, and _mount
-  // restores it. With no remembered viewport, the view centers on the
-  // player's rocket the first time its position arrives (setSandboxRocket);
-  // only when neither exists does the whole-map fit show.
+  // DEFAULT VIEW IS THE ROCKET: whenever a map mounts and the player's
+  // rocket position arrives (setSandboxRocket's first placement), the
+  // camera flies to it - on every page load, room entry, or sandbox
+  // mount. The remembered viewport (saved below on every user pan /
+  // zoom) is only the pre-focus backdrop and the fallback when no
+  // rocket ever appears (map browsing with no game). A user gesture
+  // before the rocket lands disarms the fly so the camera is never
+  // stolen mid-look.
   _noteUserCamera() {
     this._initialViewDone = true;  // never recenter out from under the player
     clearTimeout(this._camSaveTimer);
@@ -1054,7 +1059,9 @@ export class MapRenderer {
     const eff = this.zoom * this.fitScale;
     this.pan.x = this._viewCenterX() - cam.x * eff;
     this.pan.y = this._viewCenterY() - cam.y * eff;
-    this._initialViewDone = true;
+    // Deliberately NOT marking _initialViewDone: the restored pose is the
+    // backdrop the rocket-focus fly starts from, not the final view. Only
+    // a user gesture or the fly itself claims the initial view.
     return true;
   }
 
