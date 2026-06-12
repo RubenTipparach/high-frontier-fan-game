@@ -566,7 +566,9 @@ function coolingAllocation() {
       orders.push(resolveSupportChain({ cards, activeId: _activeProspectorId, wiring: _wiring }).order);
     }
   }
-  return { cool: resolveCoolingAcross({ cards, orders }), idx };
+  // Afterburn's Open-Cycle cooling: +1 rocket-wide Therm while engaged.
+  const bonusTherms = _afterburnEngaged ? 1 : 0;
+  return { cool: resolveCoolingAcross({ cards, orders, bonusTherms }), idx };
 }
 
 // Activation check. Returns { active, reason, missing } where:
@@ -1109,12 +1111,13 @@ export function getActiveThrusterStats() {
     thrust += wcMod;
     modifiers.push({ from: `${wcClass} weight class`, kind: 'thrust', delta: wcMod });
   }
-  // Afterburn engaged: applies the active face's afterburn bonus
-  // (numeric in the spreadsheet). One-shot per turn; UI confirms
-  // before engaging because it spends fuel up front.
-  if (_afterburnEngaged && Number.isFinite(f.afterburn) && f.afterburn) {
-    thrust += f.afterburn;
-    modifiers.push({ from: 'Afterburn', kind: 'thrust', delta: f.afterburn });
+  // Afterburn engaged: +1 net thrust for the whole rocket this turn (rulebook
+  // MW Afterburn - the gain is always +1, no matter how many fuel steps were
+  // spent; the card's `afterburn` number is the fuel-step COST, paid at engage).
+  // One-shot per turn.
+  if (_afterburnEngaged && f.afterburn > 0) {
+    thrust += 1;
+    modifiers.push({ from: 'Afterburn (Open-Cycle)', kind: 'thrust', delta: 1 });
   }
   // Solar-power modifier (Net Thrust track: "modified by ... solar
   // power"). A thruster is solar-driven when its active face is solar
@@ -1174,6 +1177,7 @@ export function getActiveThrusterStats() {
     weightClass:   wcClass,
     weightClassMod: wcMod,
     afterburnAvailable: Number.isFinite(f.afterburn) && f.afterburn > 0,
+    afterburnSteps:     Number(f.afterburn) || 0,   // fuel steps spent to engage (gain is always +1)
     afterburnEngaged:   _afterburnEngaged,
     solarDriven,
     solarSource,

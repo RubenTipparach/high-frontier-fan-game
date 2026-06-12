@@ -2729,6 +2729,9 @@ function humanizeOnlineOpError(code, detail) {
     buggy_out_of_range: 'The buggy can only road to sites on the same connected body (Mars, the Moon, Io, Callisto, Ganymede, Europa).',
     not_a_radiator: 'That card is not a radiator.',
     already_light: 'That radiator is already on its light side.',
+    already_afterburned: 'Afterburn is already engaged this turn.',
+    no_afterburn: 'The active thruster has no afterburn.',
+    no_thruster: 'No active thruster to afterburn.',
     stale_turn: 'That action was from a previous turn - the board has moved on.',
     no_disc: 'There is no prospect disc to re-roll.',
     not_buggy: 'Only a buggy prospector can re-roll.',
@@ -6582,9 +6585,9 @@ function openRocketStackModal() {
       ? `<button type="button" class="rocket-afterburn-btn ${thrStats.afterburnEngaged ? 'is-engaged' : ''}"
            id="rocket-afterburn"
            title="${thrStats.afterburnEngaged
-             ? 'Afterburn engaged this turn - tap to disengage'
-             : 'Engage afterburn: spends fuel for bonus thrust this turn'}">
-           🔥 Afterburn ${thrStats.afterburnEngaged ? 'ON' : 'OFF'}
+             ? 'Afterburn engaged this turn (+1 net thrust + 1 Therm cooling). Clears next turn.'
+             : `Engage afterburn: spend ${thrStats.afterburnSteps} fuel step${thrStats.afterburnSteps === 1 ? '' : 's'} for +1 net thrust + 1 Therm of Open-Cycle cooling this turn`}">
+           🔥 Afterburn ${thrStats.afterburnEngaged ? 'ENGAGED' : `(${thrStats.afterburnSteps}🔥→+1)`}
          </button>` : '';
     // Wet mass equation - "dry + tank" so the player sees how
     // the wet number was built. Caps the tank value at the
@@ -6705,41 +6708,38 @@ function openRocketStackModal() {
     // read-only server dry-run that prints the fuel-step breakdown.
     wireSimulate(body.querySelector('.rocket-sim-btn'), body.querySelector('.rocket-sim-result'));
 
-    // Afterburn toggle. Confirms before engaging (spends fuel up
-    // front per the rulebook's "Afterburn (+ thrust for 2 fuel
-    // steps shown)" cost). Disengaging is free.
+    // Afterburn (rulebook MW Afterburn): spend the thruster's afterburn-count
+    // FUEL STEPS for +1 net thrust + 1 Therm of Open-Cycle cooling, rocket-wide,
+    // this turn. One-shot - it clears at turn end (no manual disengage; the fuel
+    // is already spent). Online routes through the server AFTERBURN op for
+    // client/server parity.
     const abBtn = body.querySelector('#rocket-afterburn');
     if (abBtn && thrStats) {
       abBtn.addEventListener('click', async () => {
         if (thrStats.afterburnEngaged) {
-          setAfterburn(false);
-          logAction({ type: 'afterburn', icon: '🔥', summary: 'Afterburn disengaged', undoable: false });
+          setStatus('🔥 Afterburn is engaged this turn - it clears next turn.');
           return;
         }
-        // Confirm. Default afterburn cost = 2 water tanks (the
-        // "2 fuel steps shown" wording in the rulebook). Bail
-        // when the tank can't cover it.
-        const cost = 2;
-        if (getTankWater() < cost) {
-          setStatus(`Afterburn needs ${cost} water; tank has ${getTankWater()}.`);
-          return;
-        }
+        const steps = Number(thrStats.afterburnSteps || 0);
+        if (steps <= 0) { setStatus('This thruster has no afterburn.'); return; }
         const ok = await confirmModal({
           title: '🔥 Engage afterburn?',
-          body: `Spends ${cost} water now for a +${(thrStats.card?.faces?.primary?.afterburn) || 1} `
-            + `thrust boost this turn. Disengage manually next turn.`,
-          yes: 'Engage',
-          no: 'Cancel',
+          body: `Spend <strong>${steps}</strong> fuel step${steps === 1 ? '' : 's'} now for `
+            + `<strong>+1</strong> net thrust for the whole rocket this turn, plus `
+            + `<strong>+1</strong> Therm of Open-Cycle cooling. One-shot - it clears next turn.`,
+          yes: '🔥 Engage', no: 'Cancel',
         });
         if (!ok) return;
-        removeFuel(cost);
+        if (_online) { await submitOnlineOp({ kind: 'AFTERBURN' }); return; }
+        // Solo: walk the tank down `steps` fuel steps (same ladder as a burn).
+        const totals = getStackTotals();
+        const dry = Math.max(0, totals.dryMass || 0);
+        const wet = dry + getTankWater();
+        const avail = blackStepsBetween(dry, wet);
+        if (steps > avail) { setStatus(`Afterburn needs ${steps} fuel steps; the tank has ${avail}.`); return; }
+        setTankWater(walkBlackDown(wet, steps) - dry);
         setAfterburn(true);
-        logAction({
-          type: 'afterburn',
-          icon: '🔥',
-          summary: `Afterburn engaged (-${cost} water)`,
-          undoable: false,
-        });
+        logAction({ type: 'afterburn', icon: '🔥', summary: `Afterburn engaged (-${steps} fuel steps; +1 thrust + Open-Cycle cooling)`, undoable: false });
       });
     }
 
@@ -6782,8 +6782,8 @@ function openRocketStackModal() {
       const abVal = baseFace.afterburn;
       if (Number.isFinite(abVal) && abVal > 0) {
         breakdown.afterburn = thrStats.afterburnEngaged
-          ? `🔥 Afterburn ENGAGED - +${abVal} thrust this turn (cost 2 water already spent)`
-          : `🔥 Afterburn: spend 2 water for +${abVal} thrust this turn`;
+          ? `🔥 Afterburn ENGAGED - +1 net thrust + 1 Therm Open-Cycle cooling this turn (${abVal} fuel step${abVal === 1 ? '' : 's'} already spent)`
+          : `🔥 Afterburn: spend ${abVal} fuel step${abVal === 1 ? '' : 's'} for +1 net thrust + 1 Therm cooling this turn`;
       }
       const tv = thrustVisual(card || {}, syntheticFace, { breakdown });
       // Wrap-level tip too, for tapping the triangle outside any
@@ -6982,6 +6982,27 @@ function openRocketStackModal() {
       // through to the lower row.
       (isThruster ? thrustersHost : othersHost).appendChild(wrap);
     });
+    // Open-Cycle Cooling: while afterburn is engaged, a temporary radiator
+    // rides the rocket (0 mass, 10 rad-hardness, 1 Therm) - the visible "card"
+    // behind the +1 net thrust and the +1 rocket-wide Therm this turn. It clears
+    // when afterburn does (next turn).
+    if (thrStats && thrStats.afterburnEngaged) {
+      const temp = document.createElement('div');
+      temp.className = 'rocket-slot afterburn-temp-slot';
+      temp.innerHTML = `
+        <div class="card kind-patent type-radiator afterburn-temp-card">
+          <div class="card-typebar">🔥 OPEN-CYCLE COOLING</div>
+          <div class="card-statbox">
+            <span><strong>0</strong> MASS</span>
+            <span><strong>10</strong> RAD</span>
+            <span><strong>1</strong> 🌡</span>
+          </div>
+          <div class="card-body">
+            <p class="card-bonus">Afterburn by-product: <strong>+1 net thrust</strong> for the whole rocket and <strong>+1 Therm</strong> of cooling (any chain). Temporary - lasts this turn.</p>
+          </div>
+        </div>`;
+      othersHost.appendChild(temp);
+    }
     // Carried glory chits ride in the stack like cards. They're
     // two-sided in transit: a crew aboard flips them to the BACK
     // value at home; if the last crew leaves they flip face-up to
@@ -15366,6 +15387,7 @@ const MP_LOG_ICONS = {
   LOAD_GLORY: '🎖',
   SET_WIRING: '🔗',
   SET_RADIATOR_SIDE: '♨',
+  AFTERBURN: '🔥',
   UNDO: '↩', REDO: '↪',
 };
 

@@ -7421,3 +7421,12 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .rad-fold-light:hover:not(:disabled) { filter: brightness(1.15); }
 .rad-fold-light:disabled { opacity: 0.5; cursor: default; }
+
+/* Afterburn's temporary Open-Cycle Cooling "card" (a fiery, dashed-edge radiator
+   shown on the rocket while afterburn is engaged - it isn't a real stack slot). */
+.afterburn-temp-card {
+  border: 2px dashed #f0a35a;
+  box-shadow: 0 0 10px rgba(240, 120, 40, 0.35);
+}
+.afterburn-temp-card .card-typebar { background: linear-gradient(180deg, #d4612c, #a8401a); color: #fff; }
+.afterburn-temp-card .card-bonus { font-size: 11px; }

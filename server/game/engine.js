@@ -415,6 +415,10 @@ function activeNetThrust(rocket) {
     if (z === null) thrust = 0;
     else thrust += z;
   }
+  // Afterburn engaged this turn: +1 net thrust for the whole rocket (rulebook
+  // MW Afterburn; the gain is always +1). Mirror of rocket.js. The fuel-step
+  // cost was paid at engage (applyAfterburn).
+  if (rocket.afterburnEngaged && f.afterburn > 0) thrust += 1;
   return thrust < 0 ? 0 : thrust;
 }
 // Water spent per burn = the active thruster face's `fuel` value, scaled
@@ -1350,6 +1354,38 @@ function applySetRadiatorSide(state, op, player) {
   return { ok: true, state, log: `${player.name} folded ${card.name} down to its light side.` };
 }
 
+// Engage afterburn (rulebook MW Afterburn). The active thruster, if it carries
+// the afterburn icon, may expend its afterburn-count FUEL STEPS to gain +1 net
+// thrust for the whole rocket this turn (always +1, regardless of the count),
+// plus 1 Therm of rocket-wide Open-Cycle cooling (applied client-side, where
+// cooling is gated). Once per turn - it lasts the turn and clears when the
+// player's next turn opens (openTurnFor). Free action (no operation), turn-
+// gated. op = {}.
+function applyAfterburn(state, _op, player) {
+  if (player.rocket.afterburnEngaged) return fail('already_afterburned');
+  const tid = player.rocket.activeThrusterId;
+  const slot = tid && player.rocket.stack.find((s) => s.id === tid);
+  if (!slot) return fail('no_thruster');
+  const f = thrusterFaceOf(slot);
+  const steps = Number(f.afterburn) || 0;
+  if (steps <= 0) return fail('no_afterburn');
+  // Cost: walk the wet chit `steps` black connections down the fuel ladder
+  // (same fuel-step model as a burn), leaving a fractional remainder.
+  const dryMass = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const wetMass = dryMass + (Number(player.rocket.tank) || 0);
+  const stepsAvail = blackStepsBetween(dryMass, wetMass);
+  if (steps > stepsAvail) {
+    return fail('insufficient_water', { fuelStepsNeeded: steps, fuelStepsAvailable: stepsAvail });
+  }
+  player.rocket.tank = round6(walkBlackDown(wetMass, steps) - dryMass);
+  player.rocket.afterburnEngaged = true;
+  const card = PATENTS_BY_ID[tid];
+  return {
+    ok: true, state,
+    log: `${player.name} engaged afterburn on ${card ? card.name : tid} (spent ${steps} fuel step${steps === 1 ? '' : 's'} for +1 net thrust + Open-Cycle cooling this turn).`,
+  };
+}
+
 // Prospect a site: one seeded d6 vs the site-class threshold (success =
 // roll <= threshold), placing a claim/exhausted disc. Mirrors
 // browse.js#doProspect. Prospect IS the turn's operation for EVERY
@@ -1789,6 +1825,7 @@ const FUNCTIONAL = {
   SET_ACTIVE_THRUSTER: applySetActiveThruster,
   SET_ACTIVE_PROSPECTOR: applySetActiveProspector,
   SET_RADIATOR_SIDE: applySetRadiatorSide,
+  AFTERBURN: applyAfterburn,
   PROSPECT: applyProspect,
   PROSPECT_REROLL: applyProspectReroll,
   INDUSTRIALIZE: applyIndustrialize,
@@ -1814,6 +1851,7 @@ function pickPayload(op) {
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
     case 'SET_RADIATOR_SIDE': return { cardId: op.cardId };
+    case 'AFTERBURN': return {};
     case 'PROSPECT': return { siteId: op.siteId, turn: op.turn, round: op.round };
     case 'PROSPECT_REROLL': return { siteId: op.siteId };
     case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode };
@@ -1900,6 +1938,8 @@ function openTurnFor(state, player) {
   player.refueledSites = [];
   // Crew dirt thrusters take 1 dirt FT per turn; reset the per-turn flag.
   player.dirtRefueledThisTurn = false;
+  // Afterburn lasts one turn: clear it as the player's next turn opens.
+  if (player.rocket) player.rocket.afterburnEngaged = false;
   state.turnActions = [];
   state.turnRedo = [];
 }

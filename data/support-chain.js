@@ -140,11 +140,15 @@ export function resolveSupportChain({ cards = [], activeId = null, wiring = {} }
 // draws the shared remainder. A chain whose reactor can't secure dedicated
 // cooling reads `coolingOk: false`, which makes that active card inactive
 // WITHOUT dragging down a higher-priority chain that was already cooled.
-export function resolveCoolingAcross({ cards = [], orders = [] } = {}) {
+// `bonusTherms` adds a rocket-wide therm to the radiator pool with no card
+// behind it - used for afterburn's Open-Cycle cooling (+1 Therm for the turn,
+// regardless of the support chain).
+export function resolveCoolingAcross({ cards = [], orders = [], bonusTherms = 0 } = {}) {
   const byId = new Map(cards.map((c) => [c.id, c]));
   const radiatorTotal = cards
     .filter((c) => c.type === 'radiator')
-    .reduce((s, c) => s + (Number(c.therms) || 0), 0);
+    .reduce((s, c) => s + (Number(c.therms) || 0), 0)
+    + (Number(bonusTherms) || 0);
   let pool = radiatorTotal;
   const reserved = new Set(); // reactor ids a higher-priority chain already cooled
 

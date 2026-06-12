@@ -241,7 +241,11 @@ function buildFace(label, tier, type) {
     base.thrust      = tier.Thrust;
     base.fuel        = tier['Fuel Consumption'];
     base.fuelType    = tier['Fuel Type'];
-    base.afterburn   = !!tier.Afterburn;
+    // Afterburn is the NUMBER of fuel steps you may expend to gain +1 net
+    // thrust (rulebook MW Afterburn); 0 / blank = no afterburn. Keep it numeric
+    // (it used to be flattened to a boolean, which dropped the cost and broke
+    // the +1 thrust gate). The thrust gain is always +1, never this value.
+    base.afterburn   = Number(tier.Afterburn) || 0;
     base.bonusPivots = tier['Bonus Pivots'] || 0;
     base.therms      = tier.Therms;
     // Reactors / generators that PAIR with a thruster have a
