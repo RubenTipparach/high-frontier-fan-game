@@ -1631,12 +1631,14 @@ export class MapRenderer {
       t: Math.random(),                      // random start phase
       dur: 14000 + Math.random() * 18000,    // ms per leg (~50% slower)
       size: 8 + Math.random() * 6,           // world units (~50% smaller)
+      flick: Math.random() * 1000,           // engine-flame flicker phase
     };
   }
 
   // Advance + draw the ambient rockets (world space). dt in ms.
   _drawAmbientRockets(ctx, dt) {
     if (!this._ambientRockets.length) return;
+    const now = performance.now();
     const sites = this._ambientSites();
     for (const r of this._ambientRockets) {
       r.t += dt / r.dur;
@@ -1661,6 +1663,26 @@ export class MapRenderer {
       // size is the height and the width follows the sprite's ratio.
       const s = r.size;
       const w = s * (img.naturalWidth / img.naturalHeight || 1);
+      // Little engine flame at the tail (+y is behind the nose after the
+      // rotate above). Three nested teardrops - amber, gold, white-hot
+      // core - whose length flickers on two unsynced sine waves with a
+      // per-ship phase, drawn BEFORE the sprite so the hull covers the
+      // flame root and the exhaust reads as coming from the engines.
+      const ft = now * 0.018 + r.flick;
+      const len = s * (0.30 + 0.10 * Math.sin(ft) + 0.07 * Math.sin(ft * 2.63));
+      const fy = s * 0.46;
+      const flame = (halfW, l, color) => {
+        ctx.beginPath();
+        ctx.moveTo(-halfW, fy);
+        ctx.quadraticCurveTo(-halfW * 0.55, fy + l * 0.55, 0, fy + l);
+        ctx.quadraticCurveTo(halfW * 0.55, fy + l * 0.55, halfW, fy);
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.fill();
+      };
+      flame(s * 0.13,  len,        'rgba(255,140,58,0.70)');
+      flame(s * 0.085, len * 0.62, 'rgba(255,217,102,0.85)');
+      flame(s * 0.05,  len * 0.34, 'rgba(255,247,224,0.95)');
       ctx.drawImage(img, -w / 2, -s / 2, w, s);
       ctx.restore();
     }
