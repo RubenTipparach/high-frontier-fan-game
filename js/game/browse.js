@@ -8171,8 +8171,10 @@ function applyEventDieEffect(event) {
   // remaining events still log as "Would fire" table reminders in
   // the sandbox. ONLINE every event resolves server-side
   // (engine resolveSunspotEvent) - this function never runs there,
-  // since the clock hydrates from the snapshot. Solo parity for the
-  // other five is the open follow-up.
+  // since the clock hydrates from the snapshot. No parity work for
+  // the other five is planned: the sandbox is being replaced by a
+  // server-backed solo mode that runs the same engine resolution
+  // (user decision 2026-06-12).
   let applied = false;
   if (e.rolls.includes(event.dieRoll) && e.name === 'Inspiration') {
     cycleAllDecks();

@@ -8,7 +8,9 @@
 // mechanically (server/game/engine.js#resolveSunspotEvent) and the
 // outcome notes ride lastEvent.notes into the clock modal; the SOLO
 // sandbox auto-applies Inspiration only and reports the rest as
-// table reminders (solo parity is the open follow-up).
+// table reminders. No solo parity is planned: the sandbox is being
+// replaced by a server-backed solo mode, which gets the full engine
+// event resolution for free (user decision 2026-06-12).
 //
 // Public surface:
 //   getTurn()                  → 0..11
