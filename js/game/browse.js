@@ -2462,18 +2462,18 @@ function buildMpPlayerDetail(host, p, isMe) {
   for (const letter of ['A', 'B', 'C', 'D']) {
     const op = outposts[letter];
     if (op) {
-      // Keep the chip label short ("Outpost A") so the 📍 find button always
-      // fits; the site + water ride along as a hover hint instead of crowding
-      // the label off the right edge.
+      // Label is just the 🏛 glyph + letter so it never clips in the narrow
+      // two-column track ("Outpost A" was still too wide). The full "Outpost A
+      // at <site>, <n> water" rides along as a hover hint.
       const waterHint = op.tank ? `, ${op.tank} water` : '';
-      grid.appendChild(mpStackChip(`🏛 Outpost ${letter}`, op.cards || [], {
+      grid.appendChild(mpStackChip(`🏛 ${letter}`, op.cards || [], {
         who: p.name, hasLocation: true, findServerSite: op.siteId,
         hint: `Outpost ${letter} at ${onlineSiteLabel(op.siteId)}${waterHint}`,
       }));
     } else {
       // Not built -> no location, so the find button is disabled.
-      grid.appendChild(mpStackChip(`🏛 Outpost ${letter}: none`, [], {
-        who: p.name, hasLocation: false,
+      grid.appendChild(mpStackChip(`🏛 ${letter}`, [], {
+        who: p.name, hasLocation: false, hint: `Outpost ${letter}: not built yet`,
       }));
     }
   }
@@ -2513,7 +2513,11 @@ function mpStackChip(title, slots, { who, hasLocation, findServerSite, hint } = 
     chip.classList.add('is-empty');
     chip.disabled = true;
   } else {
-    chip.addEventListener('click', () => openMpStackModal(`${who ? '@' + who + ' - ' : ''}${title}`, arr));
+    // The chip label is compact (e.g. "🏛 A"); the inspector header uses the
+    // richer hint ("Outpost A at <site>, <n> water") when present so the modal
+    // still reads in full.
+    const modalTitle = hint || title;
+    chip.addEventListener('click', () => openMpStackModal(`${who ? '@' + who + ' - ' : ''}${modalTitle}`, arr));
   }
   cell.appendChild(chip);
 
