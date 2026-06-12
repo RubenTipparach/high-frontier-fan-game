@@ -21,6 +21,8 @@
 //   openEtProduceModal({ siteName, factorySpectral, options,
 //                        existingOutpost, freeSlots, onCommit })
 
+import { renderCard } from './card-ui.js';
+
 function escapeHtml(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -101,14 +103,6 @@ export function openEtProduceModal({
   overlay.appendChild(dialog);
 
   const render = () => {
-    const cardsHtml = options.map((opt, i) => {
-      const chk = i === selectedCard ? '⦿' : '◯';
-      return `<button type="button" data-card="${i}" class="et-card ${i === selectedCard ? 'is-selected' : ''}">
-        <span class="et-radio">${chk}</span>
-        <strong>${escapeHtml(opt.name)}</strong>
-        <span class="et-type">(${escapeHtml(opt.card.type || '')})</span>
-      </button>`;
-    }).join('');
     const slotHtml = needsSlotPick
       ? `<div class="et-slot-block">
            <div class="et-section-label">No outpost here yet - pick a slot for the new one:</div>
@@ -130,7 +124,7 @@ export function openEtProduceModal({
           Card lands Black-Side-up in the outpost.
         </div>
         <div class="et-section-label">Pick a Hand card to produce:</div>
-        <div class="et-cards">${cardsHtml}</div>
+        <div class="et-cards"></div>
         ${slotHtml}
       </div>
       <div class="card-modal-actions">
@@ -138,11 +132,30 @@ export function openEtProduceModal({
         <button type="button" class="modal-btn primary et-commit" ${selectedSlot ? '' : 'disabled'}>🏭 Produce</button>
       </div>
     `;
-    dialog.querySelectorAll('.et-card').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        selectedCard = parseInt(btn.getAttribute('data-card'), 10) || 0;
+    // Real card visuals, Black-Side-up (the face the card lands on). Each
+    // option is a selectable button wrapping a scaled-down renderCard; the
+    // card's own pointer events are off so the wrapper owns the click.
+    const cardsHost = dialog.querySelector('.et-cards');
+    options.forEach((opt, i) => {
+      const pick = document.createElement('button');
+      pick.type = 'button';
+      pick.className = 'et-card-pick' + (i === selectedCard ? ' is-selected' : '');
+      pick.dataset.card = String(i);
+      pick.setAttribute('aria-pressed', i === selectedCard ? 'true' : 'false');
+      try {
+        pick.appendChild(renderCard(opt.card, { type: opt.card.type, face: 'secondary' }));
+      } catch {
+        pick.textContent = opt.name;
+      }
+      const tick = document.createElement('span');
+      tick.className = 'et-pick-tick';
+      tick.textContent = '✓';
+      pick.appendChild(tick);
+      pick.addEventListener('click', () => {
+        selectedCard = i;
         render();
       });
+      cardsHost.appendChild(pick);
     });
     dialog.querySelectorAll('.et-slot-btn').forEach((btn) => {
       btn.addEventListener('click', () => {

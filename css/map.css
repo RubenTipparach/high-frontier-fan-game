@@ -4734,27 +4734,57 @@ body:has(#view-browse:not(.hidden)) #main {
   text-transform: uppercase;
   color: var(--muted, #94a3b8);
 }
-.et-cards { display: flex; flex-direction: column; gap: 4px; max-height: 280px; overflow-y: auto; }
-.et-card {
-  text-align: left;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 10px;
-  color: var(--ink);
-  cursor: pointer;
-  font-size: 13px;
+/* Card picker: real card visuals (Black-Side-up), a selectable button per
+   option. The card is scaled down with transform; the wrapper carries the
+   scaled footprint so the flex layout stays correct. */
+.et-cards {
   display: flex;
-  gap: 6px;
-  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+  max-height: 330px;
+  overflow-y: auto;
+  padding: 6px 2px 2px;
 }
-.et-card:hover { background: var(--panel-2); }
-.et-card.is-selected {
-  background: rgba(125, 211, 252, 0.12);
+.et-card-pick {
+  position: relative;
+  flex: 0 0 auto;
+  width: 147px;          /* 220px card * 0.667 */
+  height: 234px;         /* 350px card * 0.667 */
+  padding: 0;
+  background: none;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 0.12s, box-shadow 0.12s, transform 0.12s;
+}
+.et-card-pick .card {
+  transform: scale(0.667);
+  transform-origin: top left;
+  pointer-events: none;  /* the wrapper owns the click; no flip / tooltip capture */
+}
+.et-card-pick:hover { transform: translateY(-2px); }
+.et-card-pick.is-selected {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(125, 211, 252, 0.25);
 }
-.et-card .et-radio { display: inline-block; width: 16px; color: var(--accent); flex: 0 0 16px; }
-.et-card .et-type { color: var(--muted, #94a3b8); font-size: 11px; }
+.et-card-pick .et-pick-tick {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 24px;
+  height: 24px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: #06212f;
+  font-weight: 900;
+  font-size: 14px;
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+}
+.et-card-pick.is-selected .et-pick-tick { display: flex; }
 
 .et-slot-block { display: flex; flex-direction: column; gap: 6px; }
 .et-slot-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
