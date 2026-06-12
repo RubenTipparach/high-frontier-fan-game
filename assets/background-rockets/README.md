@@ -19,6 +19,23 @@ its render.
 | `project-orion.svg` | Project Orion nuclear-pulse concept (pusher plate + shock absorbers) | 41.2 m |
 | `titan-2-gemini.svg` | Titan II GLV with Gemini spacecraft | 33.2 m |
 
+## Chibi spacecraft
+
+Super-deformed in-space configurations: squat proportions, fat noses,
+oversized windows. These carry NO launch boosters - they are the
+vehicles as they cruise between worlds, so they fit interplanetary
+scenes where a first stage would be nonsense. Not to a shared scale.
+`_chibi-sheet.svg` / `_chibi-preview.png` show the set.
+
+| File | Vehicle |
+|---|---|
+| `chibi-apollo-csm.svg` | Apollo command + service module |
+| `chibi-orion.svg` | Orion spacecraft (crew module + ESM with X-wing solar arrays) |
+| `chibi-crew-dragon.svg` | Crew Dragon (capsule + trunk) |
+| `chibi-soyuz.svg` | Soyuz spacecraft (orbital module + descent module + service module) |
+| `chibi-gemini.svg` | Gemini spacecraft (re-entry module + adapter) |
+| `chibi-orion-pulse-ship.svg` | Project Orion pulse ship (it IS its own interplanetary vehicle) |
+
 The SVGs are emitted by `scripts/generate-background-rockets.mjs`
 (geometry, shading gradients, and roll-pattern markings are all
 parametric there). Edit the script and re-run it rather than hand

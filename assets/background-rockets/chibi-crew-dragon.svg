@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 59 117" width="59" height="117">
+<defs><linearGradient id="cdr-geaeef4" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#888a8e"/><stop offset="0.17" stop-color="#edf1f6"/><stop offset="0.33" stop-color="#f5f7fa"/><stop offset="0.62" stop-color="#eaeef4"/><stop offset="1" stop-color="#696b6e"/></linearGradient><linearGradient id="cdr-gcfd4dd" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#787b80"/><stop offset="0.17" stop-color="#d7dbe2"/><stop offset="0.33" stop-color="#e8eaef"/><stop offset="0.62" stop-color="#cfd4dd"/><stop offset="1" stop-color="#5d5f63"/></linearGradient></defs>
+  <path d="M13.4 88.7 L7.8 91.5 L13.4 73.3 Z" fill="#cfd4dd" stroke="#646d7c" stroke-width="1"/>
+  <path d="M45.6 88.7 L51.2 91.5 L45.6 73.3 Z" fill="#cfd4dd" stroke="#646d7c" stroke-width="1"/>
+  <rect x="13.4" y="59.3" width="32.2" height="32.2" fill="url(#cdr-geaeef4)"/>
+  <rect x="14.2" y="61.8" width="14.0" height="27.3" rx="3" fill="#1b2540" stroke="#0f1830" stroke-width="1"/>
+  <line x1="14.2" y1="80.0" x2="28.2" y2="80.0" stroke="#c9a86a" stroke-width="1"/>
+  <line x1="14.2" y1="70.8" x2="28.2" y2="70.8" stroke="#c9a86a" stroke-width="1"/>
+  <rect x="13.4" y="58.5" width="32.2" height="1.6" fill="#000" opacity="0.28"/>
+  <rect x="13.1" y="55.1" width="32.9" height="3.9" fill="#454b55" opacity="1"/>
+  <path d="M12.7 59.3 Q12.7 42.8 22.9 26.4 L36.1 26.4 Q46.3 42.8 46.3 59.3 Z" fill="url(#cdr-geaeef4)"/>
+  <rect x="13.9" y="45.3" width="5.3" height="7.0" fill="#454b55" opacity="1"/>
+  <rect x="39.8" y="45.3" width="5.3" height="7.0" fill="#454b55" opacity="1"/>
+  <circle cx="23.9" cy="43.2" r="3.1" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/><circle cx="22.9" cy="42.2" r="0.9" fill="#bfe9f5" opacity="0.9"/>
+  <circle cx="35.1" cy="43.2" r="3.1" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/><circle cx="34.1" cy="42.2" r="0.9" fill="#bfe9f5" opacity="0.9"/>
+  <path d="M22.9 26.4 Q22.9 19.6 26.4 17.3 L32.6 17.3 Q36.1 19.6 36.1 26.4 Z" fill="url(#cdr-gcfd4dd)"/>
+</svg>

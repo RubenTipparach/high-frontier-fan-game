@@ -393,8 +393,169 @@ function falcon9() {
   return emit('f9', 'FALCON 9 · CREW DRAGON', 69.5, c);
 }
 
+// ================= chibi spacecraft =================
+// Super-deformed in-space configurations: no launch boosters (those stay on
+// the pad; these are the vehicles as they cruise between worlds). Not to
+// scale with each other on purpose: chibi proportions are squat + chunky,
+// with fat noses and oversized windows.
+
+function win(c, xM, yM, rM = 0.42) {
+  const x = c.X(xM).toFixed(1), y = c.Y(yM).toFixed(1), r = c.px(rM).toFixed(1);
+  c.add(`<circle cx="${x}" cy="${y}" r="${r}" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/>` +
+    `<circle cx="${(c.X(xM) - c.px(rM) * 0.32).toFixed(1)}" cy="${(c.Y(yM) - c.px(rM) * 0.32).toFixed(1)}" r="${(c.px(rM) * 0.28).toFixed(1)}" fill="#bfe9f5" opacity="0.9"/>`);
+}
+
+// solar-array wing attached at (xM, yM), rotated angleDeg, dir +1 right / -1 left
+function wing(c, xM, yM, angleDeg, lenM, widM, dir) {
+  const x = c.X(xM), y = c.Y(yM);
+  const L = c.px(lenM) * dir, Wd = c.px(widM);
+  const x0 = Math.min(x, x + L).toFixed(1), w = Math.abs(L).toFixed(1);
+  let segs = '';
+  for (let i = 1; i < 3; i++) {
+    const sx = (x + L * i / 3).toFixed(1);
+    segs += `<line x1="${sx}" y1="${(y - Wd / 2).toFixed(1)}" x2="${sx}" y2="${(y + Wd / 2).toFixed(1)}" stroke="#c9a86a" stroke-width="1.2"/>`;
+  }
+  c.add(`<g transform="rotate(${angleDeg} ${x.toFixed(1)} ${y.toFixed(1)})">` +
+    `<rect x="${x0}" y="${(y - Wd / 2).toFixed(1)}" width="${w}" height="${Wd.toFixed(1)}" rx="3" fill="#24386b" stroke="#0f1830" stroke-width="1.2"/>${segs}` +
+    `<rect x="${x0}" y="${(y - Wd / 2).toFixed(1)}" width="${w}" height="${(Wd * 0.3).toFixed(1)}" rx="2" fill="#fff" opacity="0.14"/></g>`);
+}
+
+function chibiApolloCsm() {
+  const c = makeCtx('cap', 6.5, 13.0);
+  const SILVER = '#c7cdd8', BRIGHT = '#dde3ec';
+  c.bell(0, 1.9, 2.4, 1.3, 2.9);
+  c.cyl(1.9, 5.6, 4.8, SILVER);
+  c.seam(7.5, 4.8);
+  // RCS quads
+  for (const sgn of [-1, 1]) {
+    c.decal(4.6, 0.5, 0.9, '#3a4250', { cxM: sgn * 1.85 });
+    c.decal(4.2, 1.3, 0.32, '#3a4250', { cxM: sgn * 1.85 });
+  }
+  c.decal(2.4, 0.5, 4.8, shade(SILVER, -0.25));
+  // command module: fat cone
+  c.nose(7.5, 4.3, 4.8, 1.5, BRIGHT, { bow: 0.4 });
+  win(c, -0.85, 8.8, 0.46);
+  win(c, 0.85, 8.8, 0.46);
+  // docking probe
+  c.cyl(11.8, 0.6, 1.2, '#9aa2af');
+  c.nose(12.4, 0.6, 0.8, 0.2, '#646d7c');
+  return emit('cap', 'APOLLO CSM', 13.0, c);
+}
+
+function chibiOrionMpcv() {
+  const c = makeCtx('cor', 14.5, 12.5);
+  const WHITE = '#e9edf3', HULL = '#b9c2cf';
+  c.bell(0, 1.7, 2.2, 1.1, 2.5);
+  // X-wing solar arrays behind the ESM
+  for (const dir of [-1, 1]) {
+    wing(c, dir * 2.0, 4.6, dir * -24, 4.9, 1.5, dir);
+    wing(c, dir * 2.0, 3.4, dir * 14, 4.6, 1.4, dir);
+  }
+  c.cyl(1.7, 4.6, 4.6, WHITE);
+  for (const yy of [2.7, 3.7, 4.7]) c.seam(yy, 4.4, { op: 0.12 });
+  c.seam(6.3, 4.6);
+  // crew module
+  c.nose(6.3, 4.4, 4.8, 1.7, HULL, { bow: 0.42 });
+  c.decal(6.35, 0.5, 4.7, '#8d6b4a'); // heatshield lip
+  win(c, -0.85, 7.9, 0.44);
+  win(c, 0.85, 7.9, 0.44);
+  c.cyl(10.7, 0.7, 1.3, '#9aa2af');
+  c.nose(11.4, 0.5, 1.0, 0.3, '#646d7c');
+  return emit('cor', 'ORION', 12.0, c);
+}
+
+function chibiCrewDragon() {
+  const c = makeCtx('cdr', 7.0, 12.5);
+  const WHITE = '#eaeef4';
+  // trunk with solar skin + fins
+  for (const dir of [-1, 1]) {
+    c.add(`<path d="M${c.X(dir * 2.3).toFixed(1)} ${c.Y(0.4).toFixed(1)} L${c.X(dir * 3.1).toFixed(1)} ${c.Y(0.0).toFixed(1)} L${c.X(dir * 2.3).toFixed(1)} ${c.Y(2.6).toFixed(1)} Z" fill="#cfd4dd" stroke="#646d7c" stroke-width="1"/>`);
+  }
+  c.cyl(0, 4.6, 4.6, WHITE);
+  c.add(`<rect x="${c.X(-2.18).toFixed(1)}" y="${c.Y(4.25).toFixed(1)}" width="${c.px(2.0).toFixed(1)}" height="${c.px(3.9).toFixed(1)}" rx="3" fill="#1b2540" stroke="#0f1830" stroke-width="1"/>`);
+  for (const yy of [1.65, 2.95]) c.add(`<line x1="${c.X(-2.18).toFixed(1)}" y1="${c.Y(yy).toFixed(1)}" x2="${c.X(-0.18).toFixed(1)}" y2="${c.Y(yy).toFixed(1)}" stroke="#c9a86a" stroke-width="1"/>`);
+  c.seam(4.6, 4.6);
+  // capsule with heatshield band + SuperDraco pods
+  c.decal(4.65, 0.55, 4.7, '#454b55');
+  c.nose(4.6, 4.7, 4.8, 1.9, WHITE, { bow: 0.5 });
+  for (const sgn of [-1, 1]) c.decal(5.6, 1.0, 0.75, '#454b55', { cxM: sgn * 1.85 });
+  win(c, -0.8, 6.9, 0.44);
+  win(c, 0.8, 6.9, 0.44);
+  // rounded nose cap
+  c.nose(9.3, 1.3, 1.9, 0.9, '#cfd4dd', { bow: 0.75 });
+  return emit('cdr', 'CREW DRAGON', 10.6, c);
+}
+
+function chibiSoyuz() {
+  const c = makeCtx('csz', 14.5, 13.5);
+  const GRAYG = '#a9b1a0', BRONZE = '#9d8468';
+  c.bell(0, 1.4, 2.0, 1.0, 2.3);
+  for (const dir of [-1, 1]) wing(c, dir * 2.0, 3.6, dir * -6, 4.9, 1.7, dir);
+  // service module
+  c.cyl(1.4, 4.4, 4.2, GRAYG);
+  c.decal(1.7, 0.6, 4.2, shade(GRAYG, -0.28));
+  c.seam(5.8, 4.2);
+  // descent module: headlight shape
+  c.trap(5.8, 0.7, 4.2, 3.7, BRONZE);
+  c.nose(6.5, 2.7, 3.7, 2.5, BRONZE, { bow: 0.72 });
+  win(c, 0, 7.6, 0.45);
+  // orbital module: sphere
+  c.cyl(9.2, 3.7, 3.7, GRAYG, { rx: 12 });
+  c.seam(9.25, 2.6, { op: 0.2 });
+  win(c, 0, 11.0, 0.4);
+  // rendezvous antenna boom + dish
+  c.add(`<path d="M${c.X(1.6).toFixed(1)} ${c.Y(12.2).toFixed(1)} L${c.X(2.6).toFixed(1)} ${c.Y(13.2).toFixed(1)}" stroke="#aeb6c2" stroke-width="1.4"/>` +
+    `<circle cx="${c.X(2.6).toFixed(1)}" cy="${c.Y(13.2).toFixed(1)}" r="3" fill="none" stroke="#aeb6c2" stroke-width="1.2"/>`);
+  return emit('csz', 'SOYUZ', 12.9, c);
+}
+
+function chibiGemini() {
+  const c = makeCtx('cgm', 5.5, 10.5);
+  const WHITE = '#eaeef4', CHAR = '#34383f';
+  // equipment adapter with retro thruster dots
+  c.trap(0, 2.9, 4.5, 3.8, WHITE);
+  for (const x of [-1.2, 0, 1.2]) c.decal(0.25, 0.5, 0.5, '#3a4250', { cxM: x });
+  c.seam(2.9, 3.8);
+  c.trap(2.9, 1.3, 3.8, 3.4, '#cfd4dd');
+  c.seam(4.2, 3.4);
+  // re-entry module: charcoal fat cone with big windows
+  c.nose(4.2, 4.0, 3.4, 1.5, CHAR, { bow: 0.38 });
+  win(c, -0.72, 5.6, 0.46);
+  win(c, 0.72, 5.6, 0.46);
+  c.cyl(8.2, 1.0, 1.5, '#8a93a3');
+  c.nose(9.2, 0.9, 1.5, 0.5, '#646d7c', { bow: 0.6 });
+  return emit('cgm', 'GEMINI', 10.1, c);
+}
+
+function chibiOrionPulse() {
+  const c = makeCtx('cop', 10.5, 14.5, 1);
+  const STEEL = '#8a93a3', DKSTEEL = '#646d7c', COPPER = '#b4713d', RUBBER = '#4a4e57';
+  // chunky copper pusher plate
+  c.add(`<path d="M${c.X(-4.6).toFixed(1)} ${c.Y(1.4).toFixed(1)} Q${c.X(0).toFixed(1)} ${c.Y(-0.7).toFixed(1)} ${c.X(4.6).toFixed(1)} ${c.Y(1.4).toFixed(1)} Z" fill="url(#cop-g${COPPER.slice(1)})"/>`);
+  c.cyl(0, 1.4, 9.2, COPPER, { rx: 4 });
+  c.seam(1.4, 8.8, { op: 0.35 });
+  // shock absorbers: fat tori + stubby pistons
+  c.cyl(1.6, 1.2, 7.6, RUBBER, { rx: 6 });
+  c.cyl(2.8, 1.2, 7.0, RUBBER, { rx: 6 });
+  for (const x of [-2.0, 0, 2.0]) c.cyl(4.0, 1.4, 0.7, '#aeb6c2', { cxM: x });
+  // squat hull
+  c.trap(5.4, 4.2, 7.2, 5.4, STEEL);
+  c.seam(5.4, 7.0, { op: 0.3 });
+  for (const yy of [6.7, 8.1]) c.seam(yy, 6.4, { op: 0.16 });
+  c.trap(9.6, 2.8, 5.4, 4.0, DKSTEEL);
+  win(c, -1.1, 10.6, 0.42);
+  win(c, 0, 10.7, 0.42);
+  win(c, 1.1, 10.6, 0.42);
+  c.nose(12.4, 1.7, 4.0, 1.1, STEEL, { bow: 0.5 });
+  c.nose(14.1, 0.6, 1.1, 0.2, DKSTEEL);
+  c.add(`<path d="M${c.X(1.6).toFixed(1)} ${c.Y(12.6).toFixed(1)} L${c.X(2.9).toFixed(1)} ${c.Y(13.8).toFixed(1)}" stroke="#aeb6c2" stroke-width="1.4"/>` +
+    `<circle cx="${c.X(2.9).toFixed(1)}" cy="${c.Y(13.8).toFixed(1)}" r="2.6" fill="none" stroke="#aeb6c2" stroke-width="1.2"/>`);
+  return emit('cop', 'ORION PULSE SHIP', 14.7, c);
+}
+
 // ---------------- output ----------------
 const rockets = [saturnV(), slsArtemis(), falcon9(), soyuz(), projectOrion(), geminiTitan()];
+const chibis = [chibiApolloCsm(), chibiOrionMpcv(), chibiCrewDragon(), chibiSoyuz(), chibiGemini(), chibiOrionPulse()];
 const FILE_NAMES = {
   satv: 'saturn-v-apollo.svg',
   sls: 'sls-block-1-artemis.svg',
@@ -402,12 +563,48 @@ const FILE_NAMES = {
   soyuz: 'soyuz.svg',
   orion: 'project-orion.svg',
   gt: 'titan-2-gemini.svg',
+  cap: 'chibi-apollo-csm.svg',
+  cor: 'chibi-orion.svg',
+  cdr: 'chibi-crew-dragon.svg',
+  csz: 'chibi-soyuz.svg',
+  cgm: 'chibi-gemini.svg',
+  cop: 'chibi-orion-pulse-ship.svg',
 };
 
 mkdirSync(OUT_DIR, { recursive: true });
-for (const r of rockets) {
+for (const r of [...rockets, ...chibis]) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${r.W} ${r.H}" width="${r.W}" height="${r.H}">\n<defs>${r.defs}</defs>\n  ${r.inner}\n</svg>\n`;
   writeFileSync(join(OUT_DIR, FILE_NAMES[r.prefix]), svg);
+}
+
+// chibi sheet: in-space spacecraft, baseline-aligned (not to a shared scale)
+{
+  const GAP = 36, PADL = 50, PADR = 50, PADT = 56, PADB = 64;
+  const maxH = Math.max(...chibis.map(r => r.H));
+  const sheetGround = PADT + maxH - 8;
+  let x = PADL, placed = [], defsAll = [];
+  for (const r of chibis) {
+    const labelW = r.label.length * 8.4;
+    const stride = Math.max(r.W, labelW);
+    placed.push({ r, tx: x + stride / 2 - r.W / 2, cxCol: x + stride / 2, ty: sheetGround - (4 + r.heightM * S) });
+    defsAll.push(r.defs);
+    x += stride + GAP;
+  }
+  const W = x - GAP + PADR, H = sheetGround + PADB;
+  let stars = '';
+  let seed = 7;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  for (let i = 0; i < 70; i++) {
+    stars += `<circle cx="${(rnd() * W).toFixed(1)}" cy="${(rnd() * H).toFixed(1)}" r="${(rnd() * 1.1 + 0.3).toFixed(2)}" fill="#aab4d0" opacity="${(rnd() * 0.5 + 0.15).toFixed(2)}"/>`;
+  }
+  let body = `<rect width="${W}" height="${H}" fill="#0c0a16"/>${stars}`;
+  for (const { r, tx, cxCol, ty } of placed) {
+    body += `<g transform="translate(${tx.toFixed(1)},${ty.toFixed(1)})">${r.inner}</g>`;
+    body += `<text x="${cxCol.toFixed(1)}" y="${sheetGround + 28}" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="600" letter-spacing="1" fill="#aab4d0" text-anchor="middle">${r.label}</text>`;
+  }
+  body += `<text x="${W - 12}" y="${H - 10}" font-family="Helvetica, Arial, sans-serif" font-size="10" fill="#666f86" text-anchor="end">chibi in-space configs, not to scale</text>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">\n<defs>${defsAll.join('')}</defs>\n${body}\n</svg>\n`;
+  writeFileSync(join(OUT_DIR, '_chibi-sheet.svg'), svg);
 }
 
 // contact sheet on the game's dark theme, baseline-aligned, with scale bar
