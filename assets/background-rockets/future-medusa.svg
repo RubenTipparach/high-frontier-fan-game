@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 335 433" width="335" height="433">
+<defs><linearGradient id="fmd-g8a93a3" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#50555f"/><stop offset="0.17" stop-color="#9da4b2"/><stop offset="0.33" stop-color="#c7cbd3"/><stop offset="0.62" stop-color="#8a93a3"/><stop offset="1" stop-color="#3e4249"/></linearGradient><linearGradient id="fmd-g646d7c" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3a3f48"/><stop offset="0.17" stop-color="#7d8491"/><stop offset="0.33" stop-color="#b5b9c0"/><stop offset="0.62" stop-color="#646d7c"/><stop offset="1" stop-color="#2d3138"/></linearGradient></defs>
+  <path d="M22.5 154.0 Q167.5 -26.0 312.5 154.0 Q167.5 109.0 22.5 154.0 Z" fill="#aab4d0" opacity="0.16" stroke="#aab4d0" stroke-width="1.6"/>
+  <path d="M116.8 76.6 Q167.5 64.4 218.3 76.6" fill="none" stroke="#aab4d0" stroke-width="0.9" opacity="0.5"/>
+  <path d="M66.0 118.3 Q167.5 93.8 269.0 118.3" fill="none" stroke="#aab4d0" stroke-width="0.9" opacity="0.5"/>
+  <line x1="22.5" y1="154.0" x2="167.5" y2="349.0" stroke="#8b93a8" stroke-width="0.8" opacity="0.75"/>
+  <line x1="71.8" y1="139.0" x2="167.5" y2="349.0" stroke="#8b93a8" stroke-width="0.8" opacity="0.75"/>
+  <line x1="119.7" y1="139.0" x2="167.5" y2="349.0" stroke="#8b93a8" stroke-width="0.8" opacity="0.75"/>
+  <line x1="215.3" y1="139.0" x2="167.5" y2="349.0" stroke="#8b93a8" stroke-width="0.8" opacity="0.75"/>
+  <line x1="263.2" y1="139.0" x2="167.5" y2="349.0" stroke="#8b93a8" stroke-width="0.8" opacity="0.75"/>
+  <line x1="312.5" y1="154.0" x2="167.5" y2="349.0" stroke="#8b93a8" stroke-width="0.8" opacity="0.75"/>
+  <rect x="161.3" y="349.0" width="12.5" height="20.0" rx="3" fill="url(#fmd-g8a93a3)"/>
+  <path d="M161.3 369.0 L173.8 369.0 L176.3 389.0 L158.8 389.0 Z" fill="url(#fmd-g646d7c)"/>
+  <circle cx="164.0" cy="379.0" r="2.1" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/><circle cx="163.3" cy="378.3" r="0.6" fill="#bfe9f5" opacity="0.9"/>
+  <circle cx="171.0" cy="379.0" r="2.1" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/><circle cx="170.3" cy="378.3" r="0.6" fill="#bfe9f5" opacity="0.9"/>
+  <rect x="158.1" y="389.0" width="18.8" height="15.0" fill="url(#fmd-g8a93a3)"/>
+  <path d="M158.1 404.0 L176.9 404.0 L173.8 414.0 L161.3 414.0 Z" fill="url(#fmd-g646d7c)"/>
+  <ellipse cx="167.5" cy="416.5" rx="6.5" ry="2.0" fill="#14161c"/>
+</svg>

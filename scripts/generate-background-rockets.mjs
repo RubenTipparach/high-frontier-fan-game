@@ -36,15 +36,15 @@ function cylGrad(id, base) {
     `</linearGradient>`;
 }
 
-function makeCtx(prefix, widthM, heightM, depthM = 3) {
+function makeCtx(prefix, widthM, heightM, depthM = 3, scale = S) {
   // depthM: how far below the ground line content may extend (engine bells)
-  const W = Math.ceil(widthM * S) + 10;
-  const H = Math.ceil((heightM + depthM) * S) + 8;
+  const W = Math.ceil(widthM * scale) + 10;
+  const H = Math.ceil((heightM + depthM) * scale) + 8;
   const cx = W / 2;
-  const gy = 4 + heightM * S; // ground line y px
-  const X = m => cx + m * S;
-  const Y = m => gy - m * S;
-  const px = m => m * S;
+  const gy = 4 + heightM * scale; // ground line y px
+  const X = m => cx + m * scale;
+  const Y = m => gy - m * scale;
+  const px = m => m * scale;
   const defs = new Map();
   const parts = [];
   function fillRef(base) {
@@ -119,7 +119,7 @@ function makeCtx(prefix, widthM, heightM, depthM = 3) {
 function emit(prefix, label, heightM, ctx) {
   const defs = [...ctx.defs.values()].join('');
   const inner = ctx.parts.join('\n  ');
-  return { prefix, label, heightM, W: ctx.W, H: ctx.H, defs, inner };
+  return { prefix, label, heightM, W: ctx.W, H: ctx.H, defs, inner, groundY: ctx.Y(0) };
 }
 
 // ---------------- Saturn V (Apollo) ----------------
@@ -621,9 +621,133 @@ function chibiOrionPulse() {
   return emit('cop', 'ORION PULSE SHIP', 14.7, c);
 }
 
+// ================= future concepts =================
+// Crewed interplanetary concepts from the Atomic Rockets "Realistic Designs"
+// catalogue (projectrho.com). These ships are hundreds of meters long, so
+// they share their own smaller scale.
+const FS = 2.5; // px per meter for the futures set
+
+function futDiscovery2() {
+  // NASA GRC Discovery II (2005): He3-D fusion, spherical hab forward,
+  // long spine with cryo tanks, triangular radiators aft, magnetic nozzle
+  const c = makeCtx('fd2', 76, 240, 8, FS);
+  const STEEL = '#8a93a3', DKSTEEL = '#646d7c', WHITE = '#e9edf3', RAD = '#8a3a3a';
+  // magnetic nozzle: open coil cone
+  c.bell(0, 6, 7.5, 5, 17, '#4a4f5a');
+  c.add(`<ellipse cx="${c.X(0).toFixed(1)}" cy="${c.Y(2).toFixed(1)}" rx="${c.px(7.2).toFixed(1)}" ry="${c.px(1.4).toFixed(1)}" fill="none" stroke="#aeb6c2" stroke-width="2"/>`);
+  // reactor + shield block
+  c.trap(6, 16, 9, 12, DKSTEEL);
+  c.cyl(22, 10, 13, STEEL);
+  // main radiators: long thin triangular petals
+  for (const sgn of [-1, 1]) {
+    c.poly([[sgn * 1.8, 26], [sgn * 30, 32], [sgn * 1.8, 58]], shade(RAD, -0.25));
+    c.poly([[sgn * 1.8, 24], [sgn * 36, 29], [sgn * 1.8, 50]], RAD);
+  }
+  // spine truss
+  c.cyl(32, 160, 3.4, STEEL);
+  for (let y = 36; y < 188; y += 9) c.seam(y, 3.2, { op: 0.18 });
+  // spherical slush-hydrogen tanks
+  for (const y of [96, 122, 148]) c.cyl(y, 22, 22, WHITE, { rx: c.px(11) });
+  // forward hab sphere (centrifuge) + command module + dish
+  c.cyl(196, 26, 26, WHITE, { rx: c.px(13) });
+  for (const x of [-4, 0, 4]) c.decal(208, 1.2, 1.6, '#bfe9f5', { cxM: x });
+  c.seam(196, 18, { op: 0.12 });
+  c.trap(222, 8, 10, 4, STEEL);
+  c.nose(230, 6, 4, 1.2, DKSTEEL, { bow: 0.5 });
+  dish(c, 8, 218, 16, 226);
+  return emit('fd2', 'DISCOVERY II · FUSION', 236, c);
+}
+
+function futVista() {
+  // LLNL VISTA: spinning cone of radiator/propellant panels, crew ring at
+  // the rim, laser-fusion detonations off the apex magnet coil
+  const c = makeCtx('fvs', 120, 100, 10, FS);
+  const STEEL = '#8a93a3', DKSTEEL = '#646d7c', WHITE = '#e9edf3';
+  // apex magnet coil + target injector
+  c.add(`<ellipse cx="${c.X(0).toFixed(1)}" cy="${c.Y(8).toFixed(1)}" rx="${c.px(9).toFixed(1)}" ry="${c.px(2.2).toFixed(1)}" fill="none" stroke="#aeb6c2" stroke-width="3"/>`);
+  c.trap(10, 4, 5, 8, DKSTEEL);
+  // the cone: alternating radiator gores
+  c.trap(14, 58, 10, 108, STEEL);
+  for (const [x0, x1] of [[-46, -30], [-16, -2], [12, 26], [38, 50]]) {
+    c.add(`<path d="M${c.X(x0 * 0.12).toFixed(1)} ${c.Y(15).toFixed(1)} L${c.X(x1 * 0.12).toFixed(1)} ${c.Y(15).toFixed(1)} L${c.X(x1).toFixed(1)} ${c.Y(71).toFixed(1)} L${c.X(x0).toFixed(1)} ${c.Y(71).toFixed(1)} Z" fill="#646d7c" opacity="0.55"/>`);
+  }
+  // crew + payload ring at the rim
+  c.cyl(72, 9, 114, WHITE, { rx: c.px(4.5) });
+  for (const x of [-40, -20, 0, 20, 40]) win(c, x, 76.5, 1.1);
+  // top deck: docking hub + dish
+  c.trap(81, 6, 22, 12, DKSTEEL);
+  c.cyl(87, 6, 8, STEEL);
+  c.nose(93, 4, 8, 3, WHITE, { bow: 0.5 });
+  dish(c, 10, 86, 20, 92);
+  return emit('fvs', 'VISTA · LASER FUSION', 97, c);
+}
+
+function futUmbrella() {
+  // Stuhlinger ion "umbrella ship" (1957 Disney/von Braun era Mars fleet):
+  // giant radiator dish up top, crew pod at the hub, reactor at the boom tip
+  const c = makeCtx('fum', 84, 150, 4, FS);
+  const STEEL = '#8a93a3', DKSTEEL = '#646d7c', WHITE = '#e9edf3';
+  // reactor bulb + ion thruster at the bottom of the boom
+  c.bell(0, 2.5, 4, 2.5, 5, '#4a4f5a');
+  c.cyl(2.5, 10, 7, DKSTEEL, { rx: c.px(3.2) });
+  // boom with small fin radiators
+  c.cyl(12.5, 102, 2.2, STEEL);
+  for (const sgn of [-1, 1]) {
+    c.poly([[sgn * 0.9, 26], [sgn * 6, 31], [sgn * 6, 50], [sgn * 0.9, 55]], shade('#8a3a3a', -0.1));
+    c.poly([[sgn * 0.9, 60], [sgn * 4.5, 64], [sgn * 4.5, 78], [sgn * 0.9, 82]], shade('#8a3a3a', -0.3));
+  }
+  for (let y = 18; y < 112; y += 8) c.seam(y, 2.0, { op: 0.18 });
+  // crew pod hanging under the dish hub
+  c.cyl(114, 13, 11, WHITE, { rx: c.px(4) });
+  win(c, -2.2, 120, 0.9);
+  win(c, 2.2, 120, 0.9);
+  // the umbrella: shallow radiator dish with ribs
+  const dy = 132, rimY = c.Y(dy + 6), midY = c.Y(dy + 13.5);
+  c.add(`<path d="M${c.X(-40).toFixed(1)} ${rimY.toFixed(1)} Q${c.X(0).toFixed(1)} ${midY.toFixed(1)} ${c.X(40).toFixed(1)} ${rimY.toFixed(1)} L${c.X(38.4).toFixed(1)} ${(rimY + c.px(1.6)).toFixed(1)} Q${c.X(0).toFixed(1)} ${(midY + c.px(1.8)).toFixed(1)} ${c.X(-38.4).toFixed(1)} ${(rimY + c.px(1.6)).toFixed(1)} Z" fill="url(#fum-g8a93a3)" stroke="#4a4f5a" stroke-width="1"/>`);
+  // umbrella ribs: spokes from the hub to points sampled along the canopy
+  const hubX = c.X(0), hubY = c.Y(dy + 1);
+  for (const x of [-40, -28, -16, 16, 28, 40]) {
+    const t = (x / 40 + 1) / 2; // exact for this symmetric quadratic
+    const yy = (1 - t) * (1 - t) * rimY + 2 * t * (1 - t) * midY + t * t * rimY;
+    c.add(`<line x1="${hubX.toFixed(1)}" y1="${hubY.toFixed(1)}" x2="${c.X(x).toFixed(1)}" y2="${(yy + c.px(1.6)).toFixed(1)}" stroke="#4a4f5a" stroke-width="1" opacity="0.55"/>`);
+  }
+  c.trap(127, 7, 5, 3, STEEL);
+  c.nose(145.5, 3.5, 3, 1, DKSTEEL, { bow: 0.5 });
+  return emit('fum', 'UMBRELLA SHIP · ION', 149, c);
+}
+
+function futMedusa() {
+  // Solem's Medusa: pulse charges detonate between the payload and a huge
+  // tow sail; the canopy is drawn at its compact survey size
+  const c = makeCtx('fmd', 130, 168, 2, FS);
+  const STEEL = '#8a93a3', DKSTEEL = '#646d7c';
+  const rim = 58, rimYm = 108, topYm = 164;
+  // canopy: translucent dome with mesh ribs
+  const rimL = [c.X(-rim), c.Y(rimYm)], rimR = [c.X(rim), c.Y(rimYm)];
+  c.add(`<path d="M${rimL[0].toFixed(1)} ${rimL[1].toFixed(1)} Q${c.X(0).toFixed(1)} ${(c.Y(topYm) - c.px(16)).toFixed(1)} ${rimR[0].toFixed(1)} ${rimR[1].toFixed(1)} Q${c.X(0).toFixed(1)} ${c.Y(126).toFixed(1)} ${rimL[0].toFixed(1)} ${rimL[1].toFixed(1)} Z" fill="#aab4d0" opacity="0.16" stroke="#aab4d0" stroke-width="1.6"/>`);
+  for (const f of [0.35, 0.7]) {
+    c.add(`<path d="M${c.X(-rim * f).toFixed(1)} ${c.Y(rimYm + (topYm - rimYm) * (1 - f) * 0.85).toFixed(1)} Q${c.X(0).toFixed(1)} ${c.Y(rimYm + (topYm - rimYm) * (1 - f) * 0.85 + 14 * f).toFixed(1)} ${c.X(rim * f).toFixed(1)} ${c.Y(rimYm + (topYm - rimYm) * (1 - f) * 0.85).toFixed(1)}" fill="none" stroke="#aab4d0" stroke-width="0.9" opacity="0.5"/>`);
+  }
+  // shroud lines from the rim down to the winch pod
+  for (const x of [-rim, -rim * 0.66, -rim * 0.33, rim * 0.33, rim * 0.66, rim]) {
+    const yy = x === -rim || x === rim ? rimYm : rimYm + 6;
+    c.add(`<line x1="${c.X(x).toFixed(1)}" y1="${c.Y(yy).toFixed(1)}" x2="${c.X(0).toFixed(1)}" y2="${c.Y(30).toFixed(1)}" stroke="#8b93a8" stroke-width="0.8" opacity="0.75"/>`);
+  }
+  // payload spacecraft: winch + crew pod, riding far below the blasts
+  c.cyl(22, 8, 5, STEEL, { rx: 3 });
+  c.trap(14, 8, 7, 5, DKSTEEL);
+  win(c, -1.4, 18, 0.85);
+  win(c, 1.4, 18, 0.85);
+  c.cyl(8, 6, 7.5, STEEL);
+  c.trap(4, 4, 5, 7.5, DKSTEEL);
+  c.add(`<ellipse cx="${c.X(0).toFixed(1)}" cy="${c.Y(3).toFixed(1)}" rx="${c.px(2.6).toFixed(1)}" ry="${c.px(0.8).toFixed(1)}" fill="#14161c"/>`);
+  return emit('fmd', 'MEDUSA · PULSE SAIL', 166, c);
+}
+
 // ---------------- output ----------------
 const rockets = [saturnV(), slsArtemis(), falcon9(), soyuz(), projectOrion(), geminiTitan()];
 const chibis = [chibiApolloCsm(), chibiOrionMpcv(), chibiCrewDragon(), chibiSoyuz(), chibiSkylab(), chibiGemini(), chibiOrionPulse()];
+const futures = [futDiscovery2(), futUmbrella(), futMedusa(), futVista()];
 const FILE_NAMES = {
   satv: 'saturn-v-apollo.svg',
   sls: 'sls-block-1-artemis.svg',
@@ -638,10 +762,14 @@ const FILE_NAMES = {
   cgm: 'chibi-gemini.svg',
   cop: 'chibi-orion-pulse-ship.svg',
   csk: 'chibi-skylab.svg',
+  fd2: 'future-discovery-2.svg',
+  fvs: 'future-vista.svg',
+  fum: 'future-umbrella-ship.svg',
+  fmd: 'future-medusa.svg',
 };
 
 mkdirSync(OUT_DIR, { recursive: true });
-for (const r of [...rockets, ...chibis]) {
+for (const r of [...rockets, ...chibis, ...futures]) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${r.W} ${r.H}" width="${r.W}" height="${r.H}">\n<defs>${r.defs}</defs>\n  ${r.inner}\n</svg>\n`;
   writeFileSync(join(OUT_DIR, FILE_NAMES[r.prefix]), svg);
 }
@@ -655,7 +783,7 @@ for (const r of [...rockets, ...chibis]) {
   for (const r of chibis) {
     const labelW = r.label.length * 8.4;
     const stride = Math.max(r.W, labelW);
-    placed.push({ r, tx: x + stride / 2 - r.W / 2, cxCol: x + stride / 2, ty: sheetGround - (4 + r.heightM * S) });
+    placed.push({ r, tx: x + stride / 2 - r.W / 2, cxCol: x + stride / 2, ty: sheetGround - r.groundY });
     defsAll.push(r.defs);
     x += stride + GAP;
   }
@@ -686,7 +814,7 @@ for (const r of [...rockets, ...chibis]) {
     const labelW = r.label.length * 8.4; // keep label columns from colliding
     const stride = Math.max(r.W, labelW);
     const cxCol = x + stride / 2;
-    const ty = sheetGround - (4 + r.heightM * S); // local ground = 4 + heightM*S
+    const ty = sheetGround - r.groundY;
     placed.push({ r, tx: cxCol - r.W / 2, cxCol, ty });
     defsAll.push(r.defs);
     x += stride + GAP;
@@ -716,5 +844,44 @@ for (const r of [...rockets, ...chibis]) {
   }
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">\n<defs>${defsAll.join('')}</defs>\n${body}\n</svg>\n`;
   writeFileSync(join(OUT_DIR, '_contact-sheet.svg'), svg);
+}
+
+// futures sheet: interplanetary concepts at their own shared scale (FS px/m)
+{
+  const GAP = 44, PADL = 120, PADR = 40, PADT = 60, PADB = 64;
+  const maxH = Math.max(...futures.map(r => r.H));
+  const sheetGround = PADT + maxH - 8;
+  let x = PADL, placed = [], defsAll = [];
+  for (const r of futures) {
+    const labelW = r.label.length * 8.4;
+    const stride = Math.max(r.W, labelW);
+    placed.push({ r, tx: x + stride / 2 - r.W / 2, cxCol: x + stride / 2, ty: sheetGround - r.groundY });
+    defsAll.push(r.defs);
+    x += stride + GAP;
+  }
+  const W = x - GAP + PADR, H = sheetGround + PADB;
+  let stars = '';
+  let seed = 99;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  for (let i = 0; i < 110; i++) {
+    stars += `<circle cx="${(rnd() * W).toFixed(1)}" cy="${(rnd() * H).toFixed(1)}" r="${(rnd() * 1.1 + 0.3).toFixed(2)}" fill="#aab4d0" opacity="${(rnd() * 0.5 + 0.15).toFixed(2)}"/>`;
+  }
+  let body = `<rect width="${W}" height="${H}" fill="#0c0a16"/>${stars}`;
+  // 200 m scale bar with 50 m ticks
+  const sbX = 52, sbY1 = sheetGround, sbY0 = sheetGround - 200 * FS;
+  body += `<line x1="${sbX}" y1="${sbY0}" x2="${sbX}" y2="${sbY1}" stroke="#5a567e" stroke-width="2"/>`;
+  for (let m = 0; m <= 200; m += 50) {
+    const yy = sheetGround - m * FS;
+    body += `<line x1="${sbX - 6}" y1="${yy}" x2="${sbX + 6}" y2="${yy}" stroke="#5a567e" stroke-width="2"/>`;
+    body += `<text x="${sbX - 11}" y="${yy + 4}" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#8b93a8" text-anchor="end">${m}</text>`;
+  }
+  body += `<text x="${sbX}" y="${sbY0 - 14}" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#8b93a8" text-anchor="middle">meters</text>`;
+  for (const { r, tx, cxCol, ty } of placed) {
+    body += `<g transform="translate(${tx.toFixed(1)},${ty.toFixed(1)})">${r.inner}</g>`;
+    body += `<text x="${cxCol.toFixed(1)}" y="${sheetGround + 28}" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="600" letter-spacing="1" fill="#aab4d0" text-anchor="middle">${r.label}</text>`;
+    body += `<text x="${cxCol.toFixed(1)}" y="${sheetGround + 46}" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#666f86" text-anchor="middle">${r.heightM} m</text>`;
+  }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">\n<defs>${defsAll.join('')}</defs>\n${body}\n</svg>\n`;
+  writeFileSync(join(OUT_DIR, '_futures-sheet.svg'), svg);
 }
 console.log(`wrote ${rockets.length} rockets + contact sheet to ${OUT_DIR}`);

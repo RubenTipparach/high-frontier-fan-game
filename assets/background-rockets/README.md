@@ -37,6 +37,21 @@ scenes where a first stage would be nonsense. Not to a shared scale.
 | `chibi-gemini.svg` | Gemini spacecraft (re-entry module + adapter) |
 | `chibi-orion-pulse-ship.svg` | Project Orion pulse ship (it IS its own interplanetary vehicle) |
 
+## Future concepts
+
+Crewed interplanetary concepts from the Atomic Rockets "Realistic
+Designs" catalogue (https://projectrho.com/public_html/rocket/).
+These ships run hundreds of meters, so they share their own scale
+(2.5 px per meter); `_futures-sheet.svg` / `_futures-preview.png`
+line them up against a 200 m scale bar.
+
+| File | Vehicle | Length |
+|---|---|---|
+| `future-discovery-2.svg` | Discovery II (NASA GRC He3-D fusion, centrifuge hab sphere + tank spine + radiator petals) | 236 m |
+| `future-umbrella-ship.svg` | Stuhlinger ion "umbrella ship" (nuclear-electric, radiator dish + hanging crew pod) | 149 m |
+| `future-medusa.svg` | Medusa (nuclear pulse charges tow the ship by a giant sail; compact survey size) | 166 m |
+| `future-vista.svg` | VISTA (LLNL laser inertial-confinement fusion cone, crew ring at the rim) | 97 m |
+
 The SVGs are emitted by `scripts/generate-background-rockets.mjs`
 (geometry, shading gradients, and roll-pattern markings are all
 parametric there). Edit the script and re-run it rather than hand
