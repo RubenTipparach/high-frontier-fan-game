@@ -1570,14 +1570,14 @@ function applyIndustrialize(state, op, player) {
 
 // ET Produce (rulebook): a factory turns a hand card into an installed
 // (Black-Side-up) card at a colocated Outpost. op = { siteId, cardId, letter,
-// isNewOutpost }. Mirrors browse.js#doEtProduce: parked at the player's own
-// factory, the card leaves the hand and lands face='secondary' in the outpost
-// (created at the site if new). Costs an op.
+// isNewOutpost }. Mirrors browse.js#doEtProduce: the FACTORY does the producing,
+// so the rocket need NOT be parked here (owning the factory is the presence).
+// The card leaves the hand and lands face='secondary' in the outpost at the
+// site (created there if new). Costs an op.
 function applyEtProduce(state, op, player) {
   const siteId = String(op.siteId || '');
   const site = siteById(siteId);
   if (!site) return fail('unknown_site');
-  if (player.rocket.siteId !== siteId) return fail('not_at_site');
   const fac = state.factories[siteId];
   if (!fac || fac.ownerId !== player.profileId) return fail('no_factory');
   if (player.opsRemaining <= 0) return fail('no_ops_left');

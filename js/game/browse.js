@@ -4499,26 +4499,42 @@ function openCardModal(card, kind, slotIdx, { readOnly = false } = {}) {
   // player-owned factory with outpost room; greyed-out + explained
   // otherwise.
   const cardSpectral = card.spectralType || 'C';
-  const exoSite = (kind !== 'crew') ? getRocketSite() : null;
-  const exoFactory = exoSite ? getFactory(exoSite.id) : null;
-  const exoOwned = exoFactory && exoFactory.ownerId === myOwnerId();
-  const exoSpectralOk = exoOwned && exoFactory.spectralType === cardSpectral;
-  const exoOutposts = exoSite
-    ? Object.values(getOutposts()).filter((o) => o.siteId === exoSite.id) : [];
   const exoFreeSlots = getAvailableOutpostSlots();
-  const exoRoom = exoOutposts.length > 0 || exoFreeSlots.length > 0;
-  const canExo = !!(exoSpectralOk && exoRoom);
+  // ET / Exo produce targets a factory the player OWNS whose spectral matches
+  // this card - the rocket need NOT be parked there (the factory does the
+  // producing). Candidate sites: where the rocket sits, plus every site that
+  // already holds one of the player's outposts. The first one with a matching
+  // owned factory (and outpost room) wins; a site's own ET Produce button stays
+  // the way to pick a specific site or open a fresh outpost from nothing.
+  let exoSite = null, exoFactory = null, exoOutposts = [];
+  if (kind !== 'crew') {
+    const seen = new Set();
+    const candidates = [];
+    const rocketSite = getRocketSite();
+    if (rocketSite) { candidates.push(rocketSite); seen.add(rocketSite.id); }
+    for (const o of Object.values(getOutposts())) {
+      if (o.siteId && !seen.has(o.siteId)) {
+        seen.add(o.siteId);
+        const s = SITES_BY_ID[o.siteId];
+        if (s) candidates.push(s);
+      }
+    }
+    for (const s of candidates) {
+      const f = getFactory(s.id);
+      if (!f || f.ownerId !== myOwnerId() || f.spectralType !== cardSpectral) continue;
+      const outpostsHere = Object.values(getOutposts()).filter((o) => o.siteId === s.id);
+      if (outpostsHere.length > 0 || exoFreeSlots.length > 0) {
+        exoSite = s; exoFactory = f; exoOutposts = outpostsHere;
+        break;
+      }
+    }
+  }
+  const canExo = !!(exoSite && exoFactory);
   produceBtn.textContent = `🏭 Exo produce (${cardSpectral})`;
   produceBtn.disabled = !canExo;
-  produceBtn.title = !exoSite
-    ? 'Park the rocket at a site with your factory to ET Produce.'
-    : !exoOwned
-      ? `No factory you own at ${exoSite.name}. Industrialize a site first.`
-      : !exoSpectralOk
-        ? `Factory at ${exoSite.name} is spectral ${exoFactory.spectralType}; this card is ${cardSpectral}.`
-        : !exoRoom
-          ? 'No colocated outpost and all 4 outpost slots are in use.'
-          : `Produce this card Black-Side-up into the outpost at ${exoSite.name}.`;
+  produceBtn.title = canExo
+    ? `Produce this card Black-Side-up into a factory at ${exoSite.name} (spectral ${cardSpectral}).`
+    : `Need a factory you own with spectral ${cardSpectral} plus an outpost there (or a free outpost slot). Use a site's ET Produce to pick the spot, or industrialize one first.`;
   produceBtn.addEventListener('click', () => {
     if (!canExo) return;
     close();
