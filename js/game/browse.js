@@ -2462,10 +2462,14 @@ function buildMpPlayerDetail(host, p, isMe) {
   for (const letter of ['A', 'B', 'C', 'D']) {
     const op = outposts[letter];
     if (op) {
-      grid.appendChild(mpStackChip(
-        `🏛 Outpost ${letter} · ${onlineSiteLabel(op.siteId)}${op.tank ? ` (💧${op.tank})` : ''}`,
-        op.cards || [], { who: p.name, hasLocation: true, findServerSite: op.siteId },
-      ));
+      // Keep the chip label short ("Outpost A") so the 📍 find button always
+      // fits; the site + water ride along as a hover hint instead of crowding
+      // the label off the right edge.
+      const waterHint = op.tank ? `, ${op.tank} water` : '';
+      grid.appendChild(mpStackChip(`🏛 Outpost ${letter}`, op.cards || [], {
+        who: p.name, hasLocation: true, findServerSite: op.siteId,
+        hint: `Outpost ${letter} at ${onlineSiteLabel(op.siteId)}${waterHint}`,
+      }));
     } else {
       // Not built -> no location, so the find button is disabled.
       grid.appendChild(mpStackChip(`🏛 Outpost ${letter}: none`, [], {
@@ -2489,7 +2493,7 @@ function buildMpPlayerDetail(host, p, isMe) {
 // the stack's location. findServerSite is the server siteId (null =
 // LEO); hasLocation=false (e.g. an unbuilt outpost, or the hand)
 // renders the find button disabled. Returns the wrapper cell.
-function mpStackChip(title, slots, { who, hasLocation, findServerSite } = {}) {
+function mpStackChip(title, slots, { who, hasLocation, findServerSite, hint } = {}) {
   const arr = Array.isArray(slots) ? slots : [];
   const cell = document.createElement('div');
   cell.className = 'mp-stack-cell';
@@ -2497,6 +2501,7 @@ function mpStackChip(title, slots, { who, hasLocation, findServerSite } = {}) {
   const chip = document.createElement('button');
   chip.type = 'button';
   chip.className = 'mp-stack-chip';
+  if (hint) chip.title = hint;
   const label = document.createElement('span');
   label.className = 'mp-stack-chip-label';
   label.textContent = title;

@@ -6432,8 +6432,9 @@ body:has(#view-browse:not(.hidden)) #main {
   gap: 4px;
   margin: 4px 0;
 }
-/* A cell pairs the inspect chip with its 📍 find button. */
-.mp-stack-cell { display: flex; gap: 3px; align-items: stretch; }
+/* A cell pairs the inspect chip with its 📍 find button. min-width:0 lets the
+   grid item shrink below its content so the find button is never clipped. */
+.mp-stack-cell { display: flex; gap: 3px; align-items: stretch; min-width: 0; }
 .mp-stack-cell .mp-stack-chip { flex: 1; min-width: 0; }
 .mp-stack-find {
   flex: 0 0 auto;
@@ -6470,7 +6471,10 @@ body:has(#view-browse:not(.hidden)) #main {
   background: rgba(125, 211, 252, 0.10);
   border-color: var(--accent-2);
 }
-.mp-stack-chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* min-width:0 makes the ellipsis actually engage: without it a flex child
+   refuses to shrink below its text width, blowing the chip (and the find pin)
+   past the panel edge. */
+.mp-stack-chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mp-stack-chip-count {
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
