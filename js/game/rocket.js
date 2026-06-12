@@ -149,6 +149,60 @@ let _afterburnEngaged = (() => {
   catch { return false; }
 })();
 
+// Afterburn's Open-Cycle Cooling is a TEMPORARY radiator card the engaged
+// thruster vents through for the turn (0 mass, 10 rad-hardness, 1 Therm). It
+// behaves like any other radiator: it SUPPLIES the thermostat support chip AND
+// adds its 1 Therm to the rocket-wide cooling pool, so a card whose only cooling
+// is the open-cycle vent can pick it up as a support. It lives only in the
+// support-chain view (never in the real _stack), so it adds no mass / weight
+// class and is cleaned up when afterburn disengages at end of turn.
+export const OPEN_CYCLE_CARD_ID = 'afterburn-open-cycle';
+export const OPEN_CYCLE_CARD = {
+  id: OPEN_CYCLE_CARD_ID,
+  name: 'Open-Cycle Cooling',
+  type: 'radiator',
+  mass: 0,
+  radHardness: 10,
+  spectralType: 'C',
+  therms: 1,
+  supplies: ['thermostat'],
+  requires: [],
+  synthetic: true,
+  faces: {
+    primary: {
+      name: 'Open-Cycle Cooling',
+      type: 'radiator',
+      supplies: ['thermostat'],
+      requires: [],
+      therms: 1,
+      Therms: 1,
+      properties: [],
+    },
+  },
+};
+// Resolver-shaped descriptor (the chainCardsFromStack() card shape).
+function openCycleChainCard() {
+  return {
+    id: OPEN_CYCLE_CARD_ID,
+    type: 'radiator',
+    supplies: ['thermostat'],
+    requires: [],
+    thrustMod: undefined,
+    fuelMod: undefined,
+    therms: 1,
+  };
+}
+// The Open-Cycle vent exists only while afterburn is engaged on a thruster that
+// actually has an afterburn rating - the exact same gate as the +1 net thrust,
+// so the temporary radiator and the thrust gain appear and vanish together.
+function afterburnContributes() {
+  if (!_afterburnEngaged || !_activeThrusterId) return false;
+  const slot = _stack.find((s) => s.id === _activeThrusterId);
+  if (!slot) return false;
+  const f = installedFace(slot);
+  return !!(f && Number(f.afterburn) > 0);
+}
+
 // Player support-chain wiring: { consumerId: { kind: supplierId } }. Names
 // which supplier card powers each consumer for each support kind, the single
 // source the resolver (data/support-chain.js) reads on BOTH the thrust/fuel
@@ -291,7 +345,7 @@ export function isInRocket(id) {
   return _stack.some((s) => s.id === id);
 }
 
-export function addToStack(cardId, kind, face) {
+export function addToStack(cardId, kind, face, radSide) {
   if (!cardId) return -1;
   // Expansion cards (currently GW thrusters) are previewable in
   // the library but cannot be flown until the expansion ships.
@@ -304,6 +358,11 @@ export function addToStack(cardId, kind, face) {
   // Crew carries its picked faction face; preserve it so the
   // right face's thruster / prospector is in play.
   if (face === 'secondary') slot.face = 'secondary';
+  // Radiators deploy on a locked light/heavy side, chosen at construction.
+  // Default to heavy (max cooling) when the caller didn't pass one.
+  if (card && card.type === 'radiator') {
+    slot.radSide = radSide === 'light' ? 'light' : 'heavy';
+  }
   _stack.push(slot);
   // First thruster added auto-selects as the active thruster
   // so the rocket has a sensible default. The player can
@@ -326,6 +385,24 @@ export function addToStack(cardId, kind, face) {
   notify();
   return _stack.length - 1;
 }
+
+// Flip a radiator slot's deployed light/heavy side. Normal play LOCKS the side
+// at construction; this is the ONE exception - radiation damage degrades a
+// heavy radiator down to its light side instead of destroying it. Returns true
+// when a radiator slot actually changed side.
+export function setRadiatorSide(id, side) {
+  const slot = _stack.find((s) => s.id === id);
+  if (!slot) return false;
+  const card = cardById(id);
+  if (!card || card.type !== 'radiator') return false;
+  const next = side === 'light' ? 'light' : 'heavy';
+  if (slot.radSide === next) return false;
+  slot.radSide = next;
+  persist();
+  notify();
+  return true;
+}
+
 // Compute dry mass from the current stack. Mirrors the math in
 // getStackTotals() but kept tight + non-allocating so the
 // addToStack safety clip stays cheap.
@@ -510,6 +587,8 @@ function collectSupplied(excludeId) {
     const supplies = (f && f.supplies) || [];
     for (const k of supplies) supplied.add(k);
   }
+  // Afterburn's Open-Cycle Cooling supplies the thermostat chip for the turn.
+  if (afterburnContributes()) supplied.add('thermostat');
   return supplied;
 }
 
@@ -543,6 +622,8 @@ function coolingAllocation() {
       orders.push(resolveSupportChain({ cards, activeId: _activeProspectorId, wiring: _wiring }).order);
     }
   }
+  // Afterburn's Open-Cycle cooling rides in as a temporary radiator card (its
+  // +1 Therm is already in `cards`, so radiatorTotal picks it up automatically).
   return { cool: resolveCoolingAcross({ cards, orders }), idx };
 }
 
@@ -576,6 +657,8 @@ export function isRocketActive() {
     const supplies = (f && f.supplies) || [];
     for (const k of supplies) supplied.add(k);
   }
+  // Afterburn's Open-Cycle Cooling supplies the thermostat chip for the turn.
+  if (afterburnContributes()) supplied.add('thermostat');
 
   // Group the active thruster's requires by supplier prefix
   // (reactor-* / gen-* / etc.) so same-supplier kinds read as
@@ -879,7 +962,7 @@ export function getStackTotals() {
 // not the white-side ones. `therms` is the cooling a radiator SUPPLIES,
 // otherwise the heat the card GENERATES.
 function chainCardsFromStack() {
-  return _stack.map((slot) => {
+  const cards = _stack.map((slot) => {
     const card = cardForSlot(slot);
     const f = installedFace(slot);
     const type = card ? card.type : slot.kind;
@@ -890,9 +973,14 @@ function chainCardsFromStack() {
       requires: (f && f.requires) || (card && card.requires) || [],
       thrustMod: f ? f.thrustMod : undefined,
       fuelMod: f ? f.fuelMod : undefined,
-      therms: type === 'radiator' ? thermsSupplied(card, f) : thermsRequired(f),
+      therms: type === 'radiator' ? thermsSupplied(card, f, slot.radSide) : thermsRequired(f),
     };
   });
+  // Afterburn's Open-Cycle Cooling adds a temporary radiator (1 Therm) to the
+  // stack for the turn. Appended LAST so a real radiator still wins first-match
+  // as a thermostat supplier; this card is only chosen when nothing else cools.
+  if (afterburnContributes()) cards.push(openCycleChainCard());
+  return cards;
 }
 
 // Read-only support-chain view for the visualizer. Resolves the chain that
@@ -1086,12 +1174,13 @@ export function getActiveThrusterStats() {
     thrust += wcMod;
     modifiers.push({ from: `${wcClass} weight class`, kind: 'thrust', delta: wcMod });
   }
-  // Afterburn engaged: applies the active face's afterburn bonus
-  // (numeric in the spreadsheet). One-shot per turn; UI confirms
-  // before engaging because it spends fuel up front.
-  if (_afterburnEngaged && Number.isFinite(f.afterburn) && f.afterburn) {
-    thrust += f.afterburn;
-    modifiers.push({ from: 'Afterburn', kind: 'thrust', delta: f.afterburn });
+  // Afterburn engaged: +1 net thrust for the whole rocket this turn (rulebook
+  // MW Afterburn - the gain is always +1, no matter how many fuel steps were
+  // spent; the card's `afterburn` number is the fuel-step COST, paid at engage).
+  // One-shot per turn.
+  if (_afterburnEngaged && f.afterburn > 0) {
+    thrust += 1;
+    modifiers.push({ from: 'Afterburn (Open-Cycle)', kind: 'thrust', delta: 1 });
   }
   // Solar-power modifier (Net Thrust track: "modified by ... solar
   // power"). A thruster is solar-driven when its active face is solar
@@ -1151,6 +1240,7 @@ export function getActiveThrusterStats() {
     weightClass:   wcClass,
     weightClassMod: wcMod,
     afterburnAvailable: Number.isFinite(f.afterburn) && f.afterburn > 0,
+    afterburnSteps:     Number(f.afterburn) || 0,   // fuel steps spent to engage (gain is always +1)
     afterburnEngaged:   _afterburnEngaged,
     solarDriven,
     solarSource,

@@ -163,20 +163,15 @@ export function prospect() {
   return { ok: false, roll, threshold, reason: 'rolled_low' };
 }
 
-// End the round: collect water income from claimed hydrated sites,
-// reset the per-round op counter, advance the round, and check
-// for win/lose conditions.
+// End the round: reset the per-round op counter, advance the round, and
+// check for win/lose conditions. There is deliberately NO end-of-round water
+// income: an early draft added each claimed site's hydration as "water from
+// refineries", but the CEO Solitaire variant has no such passive income.
+// Removed 2026-06-10 (user); do not reintroduce.
 export function endRound() {
   if (!_state || _state.gameOver) return;
-  let income = 0;
-  for (const id of _state.claimed) {
-    const s = _data?.byId[id];
-    if (s && s.hydration) income += s.hydration;
-  }
-  _state.water += income;
   _state.round += 1;
   _state.turn = 0;
-  if (income) _state.log.unshift(`Round end -- +${income} water from refineries.`);
   if (_state.score >= TARGET_VP) {
     _state.gameOver = true;
     _state.finishedAt = Date.now();

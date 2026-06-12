@@ -86,7 +86,7 @@ function readableInk(hex) {
   return lum > 0.6 ? '#0c0a16' : '#ffffff';
 }
 
-export function renderCard(card, { type, supplied, onSupportClick, face } = {}) {
+export function renderCard(card, { type, supplied, onSupportClick, face, radSide } = {}) {
   const kind = type || (card.faces && card.faces.primary && card.faces.primary.role ? 'crew' : 'patent');
   const el = document.createElement('div');
   el.className = `card kind-${kind}` + (kind === 'patent' ? ` type-${card.type}` : '');
@@ -157,7 +157,13 @@ export function renderCard(card, { type, supplied, onSupportClick, face } = {}) 
   // still works. The dedicated rotate (↻) button was removed -
   // the Light(N) / Heavy(N) labels under each half's name now
   // act as the side toggle (see buildRadiatorFace).
-  if (card.rotatable) el.dataset.rotated = '0';
+  // Open the radiator on its DEPLOYED side: data-rotated='1' brings the heavy
+  // side upright (active), '0' the light side. Callers rendering a STACK slot
+  // pass radSide (default heavy = max cooling, matching the boost + the server);
+  // a bare catalog/auction preview passes nothing and keeps the light-up
+  // default. Without this a heavy-deployed radiator rendered light-side-up
+  // everywhere (LEO / rocket stack / outpost).
+  if (card.rotatable) el.dataset.rotated = (radSide === 'heavy') ? '1' : '0';
 
   attachTipsTo(el);
   return el;
@@ -253,11 +259,16 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     return face;
   }
 
-  // Show the thrust triangle on any card that carries a thrust
-  // value - that includes Missile-type robonauts (the spreadsheet
-  // gives them their own Thrust / Fuel / Afterburn under the
-  // "Thruster" banner), GW Thrusters, etc.
-  const isThruster = card.type === 'thruster' || card.thrust != null;
+  // Show the thrust triangle on any card whose CURRENT face carries a thrust
+  // value - that includes Missile-type robonauts (the spreadsheet gives them
+  // their own Thrust / Fuel / Afterburn under the "Thruster" banner), GW
+  // Thrusters, and cards that only gain thrust on their BLACK side (Rock
+  // Splitter flips to MagBeam, thrust 4). Read the per-FACE thrust, not the
+  // card-level (primary) value, so a black-side-only thruster still draws its
+  // triangle on the face that actually has the thrust.
+  const faceData = (card.faces && card.faces[sideName]) || {};
+  const faceThrust = faceData.thrust != null ? faceData.thrust : card.thrust;
+  const isThruster = card.type === 'thruster' || faceThrust != null;
   face.innerHTML = `
     <div class="card-typebar"></div>
     <div class="card-name-row"><span class="card-name"></span></div>
@@ -287,7 +298,6 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   // For cards that don't supply chips (thrusters, refineries,
   // robonauts) we fall back to the card-type icon.
   const tbar = face.querySelector('.card-typebar');
-  const faceData = (card.faces && card.faces[sideName]) || {};
   const supplies = faceData.supplies || card.supplies || [];
   // The leading glyph row uses the custom support icons (reactor squares /
   // generator circles / therm badge / robonaut prospector squares), falling
@@ -363,7 +373,18 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     const f = fdata.fuel ?? card.fuel;
     add('Fuel', f != null && !Number.isInteger(f) ? f.toFixed(2) : f);
     add('Thrust', fdata.thrust ?? card.thrust);
-    if (fdata.afterburn ?? card.afterburn) add('Afterburn', '🔥');
+    const afterVal = fdata.afterburn ?? card.afterburn;
+    if (afterVal) {
+      // Afterburn stat line: the number is the FUEL STEPS spent to engage
+      // afterburn (the +1 net thrust gain is always +1). Carry that on the
+      // tooltip so the digit next to the flame is never read as a water cost.
+      const n = Number(afterVal);
+      const tip = `Afterburn: spend ${n} fuel step${n === 1 ? '' : 's'} to add +1 net thrust this turn. `
+        + `This number is the fuel steps spent to perform afterburn, not a water or aqua cost.`;
+      const li = document.createElement('li');
+      li.innerHTML = `<span>Afterburn</span><strong data-tip="${escapeText(tip)}">🔥 ${escapeText(String(n))}</strong>`;
+      stats.appendChild(li);
+    }
   } else if (card.type === 'reactor') {
     add('Power', card.power);
     add('Heat',  card.heat);
@@ -917,7 +938,14 @@ export function thrustVisual(card, face, opts = {}) {
   // off the spreadsheet's "Fuel Type" column on each face.
   const ftype = (face && face.fuelType) || card.fuelType;
   const fuelEmoji = ftype === 'Dirt' ? '🪨' : '💧';
-  const showAfter = (face && face.afterburn) || (!face && card.afterburn);
+  // Afterburn value = the FUEL STEPS spent to engage afterburn (the thrust gain
+  // is always +1). Shown as a digit beside the flame so the cost reads off the
+  // card itself, not just the rocket modal.
+  const afterVal = (face && face.afterburn != null) ? face.afterburn : (card ? card.afterburn : null);
+  const afterN = Number(afterVal) || 0;
+  const showAfter = afterN > 0;
+  const afterTip = `Afterburn: spend ${afterN} fuel step${afterN === 1 ? '' : 's'} to add +1 net thrust this turn. `
+    + `This number is the fuel steps spent to perform afterburn, not a water or aqua cost.`;
 
   // Rounded-triangle path. Apex at (70,12); base (18,86)–(122,86).
   // Each corner is curved with a small quadratic; tangent points
@@ -943,8 +971,11 @@ export function thrustVisual(card, face, opts = {}) {
       <path d="${trianglePath}"
         fill="rgba(96,165,250,0.35)" stroke="#60a5fa" stroke-width="2.5"
         stroke-linejoin="round"/>
-      ${showAfter ? `<text x="70" y="42" text-anchor="middle"
-        font-size="22" data-tip="${escapeText(opts.breakdown?.afterburn || 'Afterburn')}">🔥</text>` : ''}
+      ${showAfter ? `<g data-tip="${escapeText(opts.breakdown?.afterburn || afterTip)}">
+        <text x="70" y="45" text-anchor="middle" font-size="20">🔥</text>
+        <text x="70" y="41" text-anchor="middle" font-size="11" font-weight="700"
+          fill="#0c1d34" stroke="#ffffff" stroke-width="2.4" paint-order="stroke">${escapeText(String(afterN))}</text>
+      </g>` : ''}
       <line x1="63" y1="72" x2="76" y2="72"
         stroke="currentColor" stroke-width="1.6"
         marker-end="url(#thrust-arrow)"/>
@@ -972,7 +1003,7 @@ export function thrustVisual(card, face, opts = {}) {
 // my own thrust." Thrust mod (+N / -N) sits in a darker
 // pink-circle clone; fuel mod (×N or fraction) sits next to
 // a 💧 droplet just like the regular triangle.
-function thrustModVisual(face) {
+export function thrustModVisual(face) {
   const wrap = document.createElement('div');
   wrap.className = 'thrust-visual is-modifier';
   const tm = face.thrustMod;

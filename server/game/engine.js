@@ -26,7 +26,7 @@
 //     ctx.turnBaseState. This keeps the engine pure and avoids storing
 //     nested snapshots inside the state blob.
 
-import { PATENTS_BY_ID } from '../../data/patents.js';
+import { PATENTS_BY_ID, radiatorRadHardness } from '../../data/patents.js';
 import { resolveSupportChain } from '../../data/support-chain.js';
 import { CREW_BY_ID } from '../../data/crew.js';
 // Shared fuel-strip model (same module the client uses): a burn spends fuel
@@ -47,8 +47,9 @@ import { ZONE_CHIT_VPS } from '../../data/zone-chits.js';
 import {
   siteExists as plannerSiteExists, findPath as plannerFindPath,
   leoSlug, siteBySlug as siteById, hazardKind,
-  nodeSizeNumber, lineOfSightSites,
+  nodeSizeNumber, lineOfSightSites, siteBodyOf, buggyRoamSites,
 } from './planner-graph.js';
+import { isBuggyRoamBody } from '../../data/buggy-roam.js';
 import { makeRng } from './rng.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES,
@@ -218,18 +219,40 @@ function faceProps(slot) {
   const f = slotFace(slot);
   return (f && Array.isArray(f.properties)) ? f.properties : [];
 }
+// Normalized prospector face for a slot, for BOTH patents and crew. Patents
+// carry raygun / missile / buggy + isru in the installed face's `properties`;
+// crew nest them on the face directly (face.prospector + face.isru), exactly
+// like thrusterFaceOf / the client's synthCrew. slotFace() resolves PATENTS
+// only, so without this crew branch a crew prospector reads as "not a
+// prospector" - the server rejected SET_ACTIVE_PROSPECTOR / PROSPECT for a
+// crew buggy/raygun that the client correctly offered (the not_a_prospector
+// bug on crew_nasa_isro's ISRO Glavcosmonauts buggy face).
+function prospectorFace(slot) {
+  if (!slot || !slot.id) return { properties: [], isru: 0 };
+  const crew = CREW_BY_ID[slot.id];
+  if (crew) {
+    const key = slot.face === 'secondary' ? 'secondary' : 'primary';
+    const cf = (crew.faces && (crew.faces[key] || crew.faces.primary)) || {};
+    return {
+      properties: cf.prospector ? [{ key: cf.prospector, value: true }] : [],
+      isru: Number(cf.isru) | 0,
+    };
+  }
+  const props = faceProps(slot);
+  const isruP = props.find((x) => x.key === 'isru');
+  return { properties: props, isru: isruP ? (Number(isruP.value) | 0) : 0 };
+}
 // Prospector kind from a slot's active face (mirror of
 // rocket.js#getProspectorKind): first of raygun / missile / buggy present.
 function prospectorKind(slot) {
-  const props = faceProps(slot);
+  const props = prospectorFace(slot).properties;
   for (const key of ['raygun', 'missile', 'buggy']) {
     if (props.some((p) => p.key === key && p.value)) return key;
   }
   return null;
 }
 function prospectorIsru(slot) {
-  const p = faceProps(slot).find((x) => x.key === 'isru');
-  return p ? (Number(p.value) | 0) : 0;
+  return prospectorFace(slot).isru;
 }
 function isProspectorSlot(slot) {
   return prospectorKind(slot) != null;
@@ -282,10 +305,9 @@ function applyLoadGlory(state, _op, player) {
   return { ok: true, state, log: `${player.name} loaded the ${chit.zone} glory chit.` };
 }
 
-// Advance the Sunspot Cube one slot. Bumps the round on wrap, rolls a
-// d6 on event slots (recorded as lastEvent; effect resolution is a
-// later PR, matching the sandbox which only records the roll today),
-// and pays water income from hydrated factories. Mutates state.
+// Advance the Sunspot Cube one slot. Bumps the round on wrap and rolls a
+// d6 on event slots (recorded as lastEvent; effect resolution is a later PR,
+// matching the sandbox which only records the roll today). Mutates state.
 function advanceClock(state) {
   state.turn = (state.turn + 1) % SLOTS;
   if (state.turn === NEW_ROUND_SLOT) state.round += 1;
@@ -297,23 +319,13 @@ function advanceClock(state) {
     state.lastEvent = { turn: state.turn, round: state.round, dieRoll };
   }
 
-  // Income: each hydrated factory pays its site's hydration in water to its
-  // owner's tank, clamped to the wet-mass cap (excess is lost). Returns a
-  // per-owner summary so END_TURN can surface it in the log.
-  const income = [];
-  for (const [siteId, fac] of Object.entries(state.factories)) {
-    const site = siteById(siteId);
-    if (!site || !site.hydration) continue;
-    const owner = state.players.find((p) => p.profileId === fac.ownerId);
-    if (!owner) continue;
-    const dry = owner.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
-    const cap = Math.max(0, TANK_MAX - dry);
-    const before = Number(owner.rocket.tank) || 0;
-    const after = round6(Math.min(cap, before + site.hydration));
-    owner.rocket.tank = after;
-    if (after > before) income.push(`${owner.name} +${round6(after - before)} water`);
-  }
-  return { income };
+  // NOTE: there is deliberately NO passive "factory income" here. An earlier
+  // draft paid every hydrated factory's hydration in water straight into the
+  // owner's tank each lap; that had no basis in the HF4 rules (water comes from
+  // the Site Refuel / Factory Refuel OPERATIONS, which cost an op) and turned
+  // factories into a free-water-then-cash money fountain. Removed per user
+  // decision (it was the "ghost water" source). Do not reintroduce it.
+  return {};
 }
 
 // ----- hazard resolution (mirror of the sandbox move queue) -----
@@ -403,6 +415,10 @@ function activeNetThrust(rocket) {
     if (z === null) thrust = 0;
     else thrust += z;
   }
+  // Afterburn engaged this turn: +1 net thrust for the whole rocket (rulebook
+  // MW Afterburn; the gain is always +1). Mirror of rocket.js. The fuel-step
+  // cost was paid at engage (applyAfterburn).
+  if (rocket.afterburnEngaged && f.afterburn > 0) thrust += 1;
   return thrust < 0 ? 0 : thrust;
 }
 // Water spent per burn = the active thruster face's `fuel` value, scaled
@@ -441,6 +457,8 @@ function slotRadHardness(slot) {
   const p = PATENTS_BY_ID[slot.id];
   if (p) {
     const f = slotFace(slot, p);
+    // A radiator's rad-hardness is its DEPLOYED side's (heavy is more fragile).
+    if (p.type === 'radiator') return radiatorRadHardness(f, slot.radSide) | 0;
     return (f.radHardness != null ? f.radHardness : p.radHardness) | 0;
   }
   const crew = CREW_BY_ID[slot.id];
@@ -667,6 +685,7 @@ function applyMove(state, op, player) {
   // each zone rolls and the worst (d6 - thrust) decommissions any stack
   // card whose rad-hardness is below it.
   let decommissioned = [];
+  const degradedRadiators = [];
   if (!destroyed && rad.length) {
     if (thrust > RAD_BYPASS_THRUST) {
       for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, thrust });
@@ -682,6 +701,17 @@ function applyMove(state, op, player) {
         const survivors = [];
         for (const slot of player.rocket.stack) {
           if (slotRadHardness(slot) < worst) {
+            // A heavy-side radiator DEGRADES to its light side instead of being
+            // destroyed - the one exception to the no-flip-after-construction
+            // rule. It survives (reduced cooling); a radiator already on light
+            // is destroyed normally.
+            const c = PATENTS_BY_ID[slot.id];
+            if (c && c.type === 'radiator' && slot.radSide !== 'light') {
+              slot.radSide = 'light';
+              degradedRadiators.push(slot.id);
+              survivors.push(slot);
+              continue;
+            }
             decommissioned.push(slot.id);
             if (isCrewSlot(slot)) {
               (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
@@ -778,6 +808,7 @@ function applyMove(state, op, player) {
   if (finaoCost > 0) log += ` Paid ${finaoCost} aqua (FINAO) past ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
   else if (nItems) log += ` Rolled through ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
   if (decommissioned.length) log += ` Radiation decommissioned ${decommissioned.length} card${decommissioned.length === 1 ? '' : 's'}.`;
+  if (degradedRadiators.length) log += ` Radiation degraded ${degradedRadiators.length} radiator${degradedRadiators.length === 1 ? '' : 's'} to its light side.`;
   if (chit) log += ` First into the ${chit.zone} zone (+glory chit).`;
   if (homeScored) {
     log += ` Scored ${homeScored} glory chit${homeScored === 1 ? '' : 's'}`
@@ -810,6 +841,9 @@ function applyBuildRocket(state, op, player) {
   player.hand.splice(idx, 1);
   const slot = { id: cardId, kind: 'patent' };
   if (op.face === 'secondary' && card.faces && card.faces.secondary) slot.face = 'secondary';
+  // A radiator built straight onto the rocket locks its deployed side here too
+  // (default heavy / max cooling).
+  if (card.type === 'radiator') slot.radSide = op.radSide === 'light' ? 'light' : 'heavy';
   player.rocket.stack.push(slot);
   if (!player.rocket.activeThrusterId && isThrusterSlot(slot)) {
     player.rocket.activeThrusterId = cardId;
@@ -822,17 +856,32 @@ function applyBuildRocket(state, op, player) {
   return { ok: true, state, log: `${player.name} built ${card.name} onto the rocket.` };
 }
 
+// Has the active player already boosted this turn? Reads this turn's action
+// history (reset every turn, like the raygun-scan check) so the first boost
+// spends the operation and the rest ride free. The dispatcher records the
+// CURRENT op only after its handler returns, so this sees PRIOR boosts, not
+// the one in flight (mirrors hasProspectedThisTurn).
+function hasBoostedThisTurn(state) {
+  return Array.isArray(state.turnActions)
+    && state.turnActions.some((a) => a && a.kind === 'BOOST');
+}
+
 // Boost: move marked HAND cards up to the LEO Stack (rulebook I4,
-// the sandbox commitBoost flow). Costs 1 op + aqua equal to the total
-// mass of the boosted cards. The cards land in player.leo; from there
-// TRANSFER boards them onto the rocket while it's at LEO. This is the
-// op the sandbox BOOST button fires in online mode - without it the
-// boost was a purely local mutation the server never saw.
+// the sandbox commitBoost flow). Costs aqua equal to the total mass of the
+// boosted cards. Like the raygun scan, the FIRST boost of the turn spends the
+// turn's single operation to "open the launch window"; every later boost this
+// same turn rides up FREE (no operation), so a player can keep boosting once
+// they have begun. The cards land in player.leo; from there TRANSFER boards
+// them onto the rocket while it's at LEO. This is the op the sandbox BOOST
+// button fires in online mode - without it the boost was a purely local
+// mutation the server never saw.
 // op = { cardIds: [id, ...] }.
 function applyBoost(state, op, player) {
-  if (player.opsRemaining <= 0) return fail('no_ops_left');
   const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];
   if (!ids.length) return fail('nothing_to_boost');
+  // Free once the turn's boosting has begun (same economy as the raygun).
+  const free = hasBoostedThisTurn(state);
+  if (!free && player.opsRemaining <= 0) return fail('no_ops_left');
   // Every id must currently be in the hand.
   for (const id of ids) {
     if (player.hand.indexOf(id) < 0) return fail('not_in_hand');
@@ -841,18 +890,27 @@ function applyBoost(state, op, player) {
   let cost = 0;
   for (const id of ids) cost += slotMass({ id });
   if (cost > player.aqua) return fail('insufficient_aqua');
-  // Move them hand -> LEO.
+  // Move them hand -> LEO. A radiator locks its deployed light/heavy side here
+  // (op.radSides[id]); default heavy (max cooling). Only radiation damage flips
+  // it afterward.
+  const radSides = (op.radSides && typeof op.radSides === 'object') ? op.radSides : {};
   for (const id of ids) {
     const idx = player.hand.indexOf(id);
     if (idx >= 0) player.hand.splice(idx, 1);
-    player.leo.push({ id, kind: 'patent' });
+    const slot = { id, kind: 'patent' };
+    const card = PATENTS_BY_ID[id];
+    if (card && card.type === 'radiator') {
+      slot.radSide = radSides[id] === 'light' ? 'light' : 'heavy';
+    }
+    player.leo.push(slot);
   }
   player.aqua -= cost;
-  player.opsRemaining -= 1;
+  if (!free) player.opsRemaining -= 1;
   const n = ids.length;
+  const tail = free ? ' (continued boost, no operation)' : '';
   return {
     ok: true, state,
-    log: `${player.name} boosted ${n} card${n === 1 ? '' : 's'} to LEO for ${cost} aqua.`,
+    log: `${player.name} boosted ${n} card${n === 1 ? '' : 's'} to LEO for ${cost} aqua${tail}.`,
   };
 }
 
@@ -881,12 +939,12 @@ function applyFreeMarket(state, op, player) {
   };
 }
 
-// Discard one Hand card to the BOTTOM of its deck. A FREE action (no op
-// cost) capped at DISCARDS_PER_TURN per turn (mirrors the sandbox's
-// turn-clock budget). Was client-only before, so in MP the discard never
-// persisted and the next snapshot reverted it.
+// Discard one Hand card to the BOTTOM of its deck. A FREE action (no op cost)
+// and UNLIMITED per turn: voluntary card discard is a "any number per turn"
+// free action (only discarding a Human/crew figure is capped, and crew aren't
+// discarded from the hand here). Was client-only before, so in MP the discard
+// never persisted and the next snapshot reverted it.
 function applyDiscard(state, op, player) {
-  if ((player.discardsRemaining | 0) <= 0) return fail('no_discards_left');
   const cardId = String(op.cardId || '');
   const idx = player.hand.indexOf(cardId);
   if (idx < 0) return fail('not_in_hand');
@@ -898,7 +956,6 @@ function applyDiscard(state, op, player) {
     const deck = state.decks[card.type];
     if (Array.isArray(deck)) deck.push(cardId);
   }
-  player.discardsRemaining -= 1;
   const name = card ? card.name : cardId;
   return {
     ok: true, state,
@@ -1183,7 +1240,7 @@ function applyConvertOutpost(state, op, player) {
   player.outposts[letter] = {
     letter,
     siteId,
-    cards: player.rocket.stack.map((s) => ({ id: s.id, kind: s.kind, ...(s.face ? { face: s.face } : {}) })),
+    cards: player.rocket.stack.map((s) => ({ id: s.id, kind: s.kind, ...(s.face ? { face: s.face } : {}), ...(s.radSide ? { radSide: s.radSide } : {}) })),
     tank: player.rocket.tank | 0,
   };
   const n = player.rocket.stack.length;
@@ -1271,6 +1328,63 @@ function applySetActiveProspector(state, op, player) {
   return { ok: true, state, log: `${player.name} set ${card ? card.name : cardId} as the active prospector.` };
 }
 
+// Voluntarily fold a deployed radiator down to its LIGHT side (heavy -> light):
+// less cooling, but hardier - light is the more rad-resistant side, so it can
+// shrug off radiation that would degrade a heavy one. The deployed side
+// otherwise LOCKS at construction; this is the one player-initiated exception
+// (rad damage also flips heavy -> light, never back). One-way: a radiator
+// already on light stays light. Finds the card in the player's rocket stack,
+// LEO Stack, or any outpost. Free reconfiguration, turn-gated. op = { cardId }.
+function applySetRadiatorSide(state, op, player) {
+  const cardId = String(op.cardId || '');
+  const card = PATENTS_BY_ID[cardId];
+  if (!card || card.type !== 'radiator') return fail('not_a_radiator');
+  let slot = (player.rocket.stack || []).find((s) => s.id === cardId)
+    || (player.leo || []).find((s) => s.id === cardId);
+  if (!slot && player.outposts) {
+    for (const o of Object.values(player.outposts)) {
+      const s = (o.cards || []).find((x) => x.id === cardId);
+      if (s) { slot = s; break; }
+    }
+  }
+  if (!slot) return fail('not_in_stack');
+  if (slot.radSide === 'light') return fail('already_light');
+  slot.radSide = 'light';
+  return { ok: true, state, log: `${player.name} folded ${card.name} down to its light side.` };
+}
+
+// Engage afterburn (rulebook MW Afterburn). The active thruster, if it carries
+// the afterburn icon, may expend its afterburn-count FUEL STEPS to gain +1 net
+// thrust for the whole rocket this turn (always +1, regardless of the count),
+// plus 1 Therm of rocket-wide Open-Cycle cooling (applied client-side, where
+// cooling is gated). Once per turn - it lasts the turn and clears when the
+// player's next turn opens (openTurnFor). Free action (no operation), turn-
+// gated. op = {}.
+function applyAfterburn(state, _op, player) {
+  if (player.rocket.afterburnEngaged) return fail('already_afterburned');
+  const tid = player.rocket.activeThrusterId;
+  const slot = tid && player.rocket.stack.find((s) => s.id === tid);
+  if (!slot) return fail('no_thruster');
+  const f = thrusterFaceOf(slot);
+  const steps = Number(f.afterburn) || 0;
+  if (steps <= 0) return fail('no_afterburn');
+  // Cost: walk the wet chit `steps` black connections down the fuel ladder
+  // (same fuel-step model as a burn), leaving a fractional remainder.
+  const dryMass = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const wetMass = dryMass + (Number(player.rocket.tank) || 0);
+  const stepsAvail = blackStepsBetween(dryMass, wetMass);
+  if (steps > stepsAvail) {
+    return fail('insufficient_water', { fuelStepsNeeded: steps, fuelStepsAvailable: stepsAvail });
+  }
+  player.rocket.tank = round6(walkBlackDown(wetMass, steps) - dryMass);
+  player.rocket.afterburnEngaged = true;
+  const card = PATENTS_BY_ID[tid];
+  return {
+    ok: true, state,
+    log: `${player.name} engaged afterburn on ${card ? card.name : tid} (spent ${steps} fuel step${steps === 1 ? '' : 's'} for +1 net thrust + Open-Cycle cooling this turn).`,
+  };
+}
+
 // Prospect a site: one seeded d6 vs the site-class threshold (success =
 // roll <= threshold), placing a claim/exhausted disc. Mirrors
 // browse.js#doProspect. Prospect IS the turn's operation for EVERY
@@ -1316,12 +1430,20 @@ function applyProspect(state, op, player) {
     return { ok: true, state, log: '' };
   }
 
-  // Raygun fires through line of sight: it scans the rocket's own site or any
-  // site the beam reaches. Missile / buggy must be parked on the target.
+  // Reach by prospector kind. Raygun fires through line of sight (the rocket's
+  // own site or any site the beam reaches). A buggy on a connected body (Mars /
+  // Luna / Io / Callisto / Ganymede / Europa) roads to any same-body land site,
+  // acting as a raygun there. Every other missile / buggy must park on the
+  // target. Both reach checks delegate to the SAME shared modules the client
+  // gates on, so the server never rejects a prospect the client offered.
+  const here = player.rocket.siteId;
+  const buggyRoams = kind === 'buggy' && isBuggyRoamBody(siteBodyOf(here));
   if (kind === 'raygun') {
-    const here = player.rocket.siteId;
     const reachable = toSiteId === here || lineOfSightSites(here).has(toSiteId);
     if (!reachable) return fail('raygun_out_of_range');
+  } else if (buggyRoams) {
+    const reachable = toSiteId === here || buggyRoamSites(here).has(toSiteId);
+    if (!reachable) return fail('buggy_out_of_range');
   } else if (player.rocket.siteId !== toSiteId) {
     return fail('not_at_site');
   }
@@ -1329,13 +1451,13 @@ function applyProspect(state, op, player) {
   if (prospectorIsru(provSlot) > (site.hydration | 0)) return fail('isru_too_high');
 
   // Prospecting is one operation to BEGIN: the first prospect of the turn
-  // (any kind) spends the operation. Once begun, a raygun's line-of-sight
-  // scan is free and unlimited - keep scanning in-sight sites at no cost.
-  // Only the raygun scans for free; a missile / buggy prospect always costs
-  // the operation (it IS the operation), so once the turn's op is spent they
-  // can never fire a free additional scan.
+  // (any kind) spends the operation. Once begun, a raygun's line-of-sight scan
+  // is free and unlimited - and a roaming buggy (on a connected body) scans the
+  // same body for free too, since it acts as a raygun there. A missile, or a
+  // buggy NOT on a roam body, always costs the operation (it IS the operation),
+  // so once the turn's op is spent it can never fire a free additional scan.
   const begun = hasProspectedThisTurn(state);
-  const free = begun && kind === 'raygun';
+  const free = begun && (kind === 'raygun' || buggyRoams);
   if (!free && player.opsRemaining <= 0) return fail('no_ops_left');
 
   const threshold = prospectThreshold(site);
@@ -1355,7 +1477,7 @@ function applyProspect(state, op, player) {
   };
   if (!free) player.opsRemaining -= 1;
   const verb = success ? 'struck a claim at' : 'came up dry at';
-  const tail = free ? ' with a free raygun scan' : '';
+  const tail = free ? (buggyRoams ? ' with a free buggy road scan' : ' with a free raygun scan') : '';
   return {
     ok: true, state,
     log: `${player.name} rolled ${roll} vs ${threshold} and ${verb} ${site.name}${tail}.`,
@@ -1447,14 +1569,14 @@ function applyIndustrialize(state, op, player) {
 
 // ET Produce (rulebook): a factory turns a hand card into an installed
 // (Black-Side-up) card at a colocated Outpost. op = { siteId, cardId, letter,
-// isNewOutpost }. Mirrors browse.js#doEtProduce: parked at the player's own
-// factory, the card leaves the hand and lands face='secondary' in the outpost
-// (created at the site if new). Costs an op.
+// isNewOutpost }. Mirrors browse.js#doEtProduce: the FACTORY does the producing,
+// so the rocket need NOT be parked here (owning the factory is the presence).
+// The card leaves the hand and lands face='secondary' in the outpost at the
+// site (created there if new). Costs an op.
 function applyEtProduce(state, op, player) {
   const siteId = String(op.siteId || '');
   const site = siteById(siteId);
   if (!site) return fail('unknown_site');
-  if (player.rocket.siteId !== siteId) return fail('not_at_site');
   const fac = state.factories[siteId];
   if (!fac || fac.ownerId !== player.profileId) return fail('no_factory');
   if (player.opsRemaining <= 0) return fail('no_ops_left');
@@ -1701,6 +1823,8 @@ const FUNCTIONAL = {
   SET_WIRING: applySetWiring,
   SET_ACTIVE_THRUSTER: applySetActiveThruster,
   SET_ACTIVE_PROSPECTOR: applySetActiveProspector,
+  SET_RADIATOR_SIDE: applySetRadiatorSide,
+  AFTERBURN: applyAfterburn,
   PROSPECT: applyProspect,
   PROSPECT_REROLL: applyProspectReroll,
   INDUSTRIALIZE: applyIndustrialize,
@@ -1712,9 +1836,9 @@ function pickPayload(op) {
   switch (op.kind) {
     case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, pickupChit: op.pickupChit !== false };
     case 'LOAD_GLORY': return {};
-    case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face };
+    case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face, radSide: op.radSide };
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };
-    case 'BOOST': return { cardIds: op.cardIds };
+    case 'BOOST': return { cardIds: op.cardIds, radSides: op.radSides || {} };
     case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from, to: op.to };
     case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount };
     case 'DISSOLVE_OUTPOST': return { letter: op.letter };
@@ -1725,6 +1849,8 @@ function pickPayload(op) {
     case 'DISCARD': return { cardId: op.cardId };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
+    case 'SET_RADIATOR_SIDE': return { cardId: op.cardId };
+    case 'AFTERBURN': return {};
     case 'PROSPECT': return { siteId: op.siteId, turn: op.turn, round: op.round };
     case 'PROSPECT_REROLL': return { siteId: op.siteId };
     case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode };
@@ -1774,14 +1900,24 @@ function describeAction(a) {
 // within a turn (END_TURN is never a turn action), so currentPlayer is
 // stable across the replay.
 function rebuildFromBase(baseState, actions) {
-  const s = clone(baseState);
+  let s = clone(baseState);
   s.turnActions = [];
   s.turnRedo = [];
   for (const a of actions) {
     const handler = FUNCTIONAL[a.kind];
     if (!handler) return null;
+    const cursorBefore = s.rng.cursor;
     const res = handler(s, { kind: a.kind, ...a.payload }, currentPlayer(s));
     if (!res.ok) return null;
+    s = res.state;
+    // Re-record each replayed action onto the turn history AS we go, exactly
+    // like the dispatcher does, so handlers that read turnActions during the
+    // replay see the same prior actions they saw the first time. This is what
+    // makes the "free after the first" economy (BOOST + the raygun PROSPECT
+    // scan) replay correctly: without it every replayed boost/scan would look
+    // like the turn's first and demand an operation that was already spent,
+    // failing the rebuild. The caller overwrites turnActions afterward.
+    s.turnActions.push({ kind: a.kind, payload: a.payload, rolled: s.rng.cursor !== cursorBefore });
   }
   return s;
 }
@@ -1801,6 +1937,8 @@ function openTurnFor(state, player) {
   player.refueledSites = [];
   // Crew dirt thrusters take 1 dirt FT per turn; reset the per-turn flag.
   player.dirtRefueledThisTurn = false;
+  // Afterburn lasts one turn: clear it as the player's next turn opens.
+  if (player.rocket) player.rocket.afterburnEngaged = false;
   state.turnActions = [];
   state.turnRedo = [];
 }
@@ -1840,14 +1978,11 @@ function applyEndTurn(state, _op, player) {
     return { ok: true, state, log };
   }
 
-  // Lap complete: advance the Sunspot Cube one slot (income + event
-  // roll, and the round counter ticks on a full 12-slot cycle).
+  // Lap complete: advance the Sunspot Cube one slot (event roll, and the
+  // round counter ticks on a full 12-slot cycle). No passive factory income.
   const prevRound = state.round;
-  const clk = advanceClock(state);
-  const incomeNote = (clk && clk.income && clk.income.length)
-    ? ` Factory income: ${clk.income.join(', ')}.` : '';
+  advanceClock(state);
   const roundEnded = state.round > prevRound;
-  log += incomeNote;
 
   if (!roundEnded) {
     // Still inside the round: the cube moved a slot, next lap reopens
@@ -1901,6 +2036,85 @@ function applyEndTurn(state, _op, player) {
   return { ok: true, state, log };
 }
 
+// ----- draft-start mode -----
+
+// The opening "draft round": each player, on their turn, takes the TOP card of
+// one market deck for FREE into their hand, then the turn passes (the Sunspot
+// Cube advances on a completed lap, like a normal turn minus income). The draft
+// ends the instant EVERY player holds DRAFT_HAND_SIZE cards - all banks are set
+// to DRAFT_END_AQUA and normal play begins from the first player. (User mode,
+// 2026-06-10.)
+const DRAFT_HAND_SIZE = 12;
+const DRAFT_END_AQUA = 6;
+function applyDraftPick(state, op, player) {
+  const deckType = String(op.deckType || '');
+  const deck = state.decks[deckType];
+  if (!Array.isArray(deck)) return fail('bad_deck');
+  if (!deck.length) return fail('deck_empty');
+  if ((player.hand || []).length >= DRAFT_HAND_SIZE) return fail('draft_hand_full');
+  // Take the top of the chosen deck (free) into the caller's hand.
+  const cardId = deck.shift();
+  player.hand = player.hand || [];
+  player.hand.push(cardId);
+  const card = PATENTS_BY_ID[cardId];
+  const cardName = card ? card.name : cardId;
+
+  // Draft over the moment EVERYONE holds a full hand: set banks, reset the
+  // Sunspot Cube so normal play gets the full game length (the draft only used
+  // the tracker cosmetically), and open the first player's normal turn.
+  if (state.players.every((p) => (p.hand || []).length >= DRAFT_HAND_SIZE)) {
+    state.draftPhase = 'play';
+    for (const p of state.players) p.aqua = DRAFT_END_AQUA;
+    state.turn = 0;
+    state.round = 1;
+    state.lastEvent = null;
+    state.activeIndex = state.firstPlayerIndex || 0;
+    openTurnFor(state, state.players[state.activeIndex]);
+    return {
+      ok: true, state,
+      log: `${player.name} drafted ${cardName}. Draft complete - everyone holds ${DRAFT_HAND_SIZE} cards and banks open at ${DRAFT_END_AQUA} aqua. Play begins.`,
+    };
+  }
+
+  // Otherwise pass the turn (cube advances on a completed lap), like END_TURN
+  // minus income / first-player handoff / game-end.
+  const n = state.players.length;
+  const firstIdx = state.firstPlayerIndex || 0;
+  const nextIndex = (state.activeIndex + 1) % n;
+  let tail = '';
+  if (nextIndex === firstIdx) {
+    advanceClock(state);
+    state.activeIndex = firstIdx;
+    tail = ` Sunspot Cube advances to slot ${state.turn}.`;
+  } else {
+    state.activeIndex = nextIndex;
+  }
+  openTurnFor(state, state.players[state.activeIndex]);
+  return {
+    ok: true, state,
+    log: `${player.name} drafted ${cardName}.${tail} ${state.players[state.activeIndex].name} is up.`,
+  };
+}
+
+// A rebuild (undo/redo) reverts the WHOLE state to the active player's turn
+// base, which predates any route a DIFFERENT player planned off-turn during
+// this turn - so the rebuild would silently wipe those private plans. Carry
+// each non-active player's CURRENT route across from the live state. The active
+// player's own route is rebuilt from their turnActions (their on-turn
+// SET_ROUTE), so it is left exactly as the replay produced it.
+function carryOffTurnRoutes(rebuilt, live) {
+  if (!rebuilt || !live || !Array.isArray(rebuilt.players)) return rebuilt;
+  const activeIdx = rebuilt.activeIndex;
+  for (let i = 0; i < rebuilt.players.length; i++) {
+    if (i === activeIdx) continue;
+    const lp = live.players && live.players[i];
+    if (lp && lp.rocket && rebuilt.players[i] && rebuilt.players[i].rocket) {
+      rebuilt.players[i].rocket.route = lp.rocket.route;
+    }
+  }
+  return rebuilt;
+}
+
 function applyUndo(state, _op, player, ctx) {
   if (!ctx || !ctx.turnBaseState) return fail('no_base');
   if (!state.turnActions.length) return fail('nothing_to_undo');
@@ -1912,6 +2126,7 @@ function applyUndo(state, _op, player, ctx) {
   const survivors = state.turnActions.slice(0, -1);
   const rebuilt = rebuildFromBase(ctx.turnBaseState, survivors);
   if (!rebuilt) return fail('undo_replay_failed');
+  carryOffTurnRoutes(rebuilt, state);
   rebuilt.turnActions = survivors;
   rebuilt.turnRedo = [last, ...state.turnRedo];
   return { ok: true, state: rebuilt, log: `${player.name} undid ${describeAction(last)}.` };
@@ -1924,6 +2139,7 @@ function applyRedo(state, _op, player, ctx) {
   const actions = [...state.turnActions, next];
   const rebuilt = rebuildFromBase(ctx.turnBaseState, actions);
   if (!rebuilt) return fail('redo_replay_failed');
+  carryOffTurnRoutes(rebuilt, state);
   rebuilt.turnActions = actions;
   rebuilt.turnRedo = state.turnRedo.slice(1);
   return { ok: true, state: rebuilt, log: `${player.name} redid ${describeAction(next)}.` };
@@ -2343,11 +2559,18 @@ function applyPickCrew(state, op, ctx) {
   // the stack. First-time pickers just get one push.
   player.leo = (player.leo || []).filter((s) => s.kind !== 'crew');
   player.leo.push({ id: cardId, kind: 'crew', face });
-  // Transition to 'play' the moment every player has a faction.
-  // Server-side, not derived client-side, so spectators + future
-  // joiners agree on the phase.
+  // The moment every player has a faction the crew draft is done. In a
+  // draft-start game the card draft comes next ('draft'); otherwise play
+  // begins ('play'). Server-side, not derived client-side, so spectators +
+  // future joiners agree on the phase.
   if (state.players.every((p) => !!p.faction)) {
-    state.draftPhase = 'play';
+    if (state.draftStart) {
+      state.draftPhase = 'draft';
+      state.activeIndex = state.firstPlayerIndex || 0;
+      openTurnFor(state, state.players[state.activeIndex]);
+    } else {
+      state.draftPhase = 'play';
+    }
   }
   const verb = switching ? 'switched to' : 'picked';
   return {
@@ -2425,7 +2648,19 @@ export function applyOperation(prevState, op, ctx) {
   const draftDone = prevState.draftPhase === 'play'
     || (prevState.draftPhase == null
         && prevState.players.every((p) => !!p.faction));
-  if (!draftDone) return fail('awaiting_crew_picks');
+  if (!draftDone) {
+    // Card-draft phase (draft-start mode): the ONLY allowed action is a free
+    // deck-top pick, taken by the active player on their turn. Everything else
+    // is blocked - no moves, no other ops, no turn passing (the pick passes the
+    // turn itself).
+    if (prevState.draftPhase === 'draft') {
+      if (op.kind !== 'DRAFT_PICK') return fail('draft_in_progress');
+      if (!isPlayersTurn(prevState, ctx.profileId)) return fail('not_your_turn');
+      const st = clone(prevState);
+      return applyDraftPick(st, op, currentPlayer(st));
+    }
+    return fail('awaiting_crew_picks');
+  }
 
   // First-player handoff: when a round closes the chooser must name the
   // next first player before anyone acts. SET_FIRST_PLAYER validates
@@ -2439,6 +2674,25 @@ export function applyOperation(prevState, op, ctx) {
   // by non-active players, and each handler validates its own caller
   // against the auction roles.
   if (AUCTION[op.kind]) return AUCTION[op.kind](clone(prevState), op, ctx);
+
+  // Off-turn route planning. A planned route is PRIVATE (redacted from
+  // opponents) and INERT (only the owner's own MOVE ever executes it), so a
+  // player may set / clear THEIR OWN route while waiting for their turn. When
+  // it is NOT the caller's turn, SET_ROUTE / CLEAR_ROUTE run against the CALLER
+  // and skip the turn guard + the per-turn undo stack. On the caller's OWN turn
+  // they fall through to the functional path below (recorded on turnActions, so
+  // an in-turn undo still restores the route). An open auction still freezes
+  // them, like every other op; applyUndo / applyRedo carry other players'
+  // off-turn routes across a rebuild so the active player's undo never wipes
+  // them.
+  if ((op.kind === 'SET_ROUTE' || op.kind === 'CLEAR_ROUTE')
+      && !op.debug && !isPlayersTurn(prevState, ctx.profileId)) {
+    if (prevState.auction) return fail('auction_in_progress');
+    const st = clone(prevState);
+    const caller = playerByProfile(st, ctx.profileId);
+    if (!caller) return fail('not_a_player');
+    return FUNCTIONAL[op.kind](st, op, caller);
+  }
 
   const isFunctional = !!FUNCTIONAL[op.kind];
   if (!isFunctional && !META[op.kind]) return fail('unknown_op');
@@ -2476,10 +2730,12 @@ export function applyOperation(prevState, op, ctx) {
   return META[op.kind](state, op, player, ctx);
 }
 
-// Ops accepted over the wire. Functional + meta + auction + lifecycle.
+// Ops accepted over the wire. Functional + meta + auction + lifecycle + the
+// draft-start pick (dispatched specially in applyOperation, so it's listed
+// explicitly rather than via a group).
 export const SUPPORTED_OPS = [
   ...Object.keys(FUNCTIONAL), ...Object.keys(META), ...Object.keys(AUCTION),
-  ...Object.keys(CREW), ...Object.keys(LIFECYCLE),
+  ...Object.keys(CREW), ...Object.keys(LIFECYCLE), 'DRAFT_PICK',
 ];
 // Ops that require the caller to supply ctx.turnBaseState.
 export const NEEDS_TURN_BASE = new Set(['UNDO', 'REDO']);

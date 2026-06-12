@@ -149,9 +149,11 @@ export function getEventForRoll(dieRoll, seasonName) {
 // everything you had?" - both default to 1.
 export const OPS_PER_TURN      = 1;
 export const MOVES_PER_TURN    = 1;
-// Discards: voluntary free action, 1 per turn. Cards go to
-// the bottom of their corresponding deck (variant rule, user
-// 2026-05-24).
+// Discards: voluntary free action, UNLIMITED per turn (the HF4 "any number per
+// turn" free action; only a Human/crew figure is capped, and crew aren't
+// discarded from the hand). Cards go to the bottom of their corresponding deck.
+// This stays a non-zero "discard available" sentinel - it is no longer spent,
+// so the discard never runs out.
 export const DISCARDS_PER_TURN = 1;
 
 let _turn = (() => {
@@ -285,18 +287,11 @@ export function consumeMove() {
   return true;
 }
 
-// Voluntary free-action discard. Player can dump 1 Hand card
-// per turn to the bottom of the corresponding deck. The card
-// itself is moved by the caller; this just tracks the per-
-// turn budget.
+// Voluntary free-action discard. Card discard is UNLIMITED per turn, so this no
+// longer spends a per-turn budget: it stays a hook callers can use uniformly and
+// always succeeds. getDiscardsRemaining stays > 0 so the discard UI never greys.
 export function getDiscardsRemaining() { return _discardsRemaining; }
-export function consumeDiscard() {
-  if (_discardsRemaining <= 0) return false;
-  _discardsRemaining -= 1;
-  persist();
-  notify();
-  return true;
-}
+export function consumeDiscard() { return true; }
 
 // Refund a previously-consumed move. Used by the toolbar's
 // 🛸 / ↩ toggle so the player can take it back before they end

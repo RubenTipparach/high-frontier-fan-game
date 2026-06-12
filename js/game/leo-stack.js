@@ -40,6 +40,7 @@ let _cards = (() => {
     return arr.filter((c) => c && c.id).map((c) => {
       const out = { id: String(c.id), kind: c.kind || 'patent' };
       if (c.face === 'secondary') out.face = 'secondary';
+      if (c.radSide === 'light' || c.radSide === 'heavy') out.radSide = c.radSide;
       return out;
     });
   } catch { return []; }
@@ -80,7 +81,24 @@ export function addCardToLeo(slot) {
   if (!slot || !slot.id) return false;
   const entry = { id: String(slot.id), kind: slot.kind || 'patent' };
   if (slot.face === 'secondary') entry.face = 'secondary';
+  // Radiators carry their locked deployed side (light/heavy) so it survives the
+  // hand -> LEO -> rocket journey.
+  if (slot.radSide === 'light' || slot.radSide === 'heavy') entry.radSide = slot.radSide;
   _cards.push(entry);
+  persist();
+  notify();
+  return true;
+}
+
+// Set a LEO radiator slot's deployed side (used by the "fold to light" action;
+// online the server is authoritative, this is the solo mirror). Returns true
+// when it actually changed.
+export function setLeoRadiatorSide(id, side) {
+  const entry = _cards.find((c) => c.id === id);
+  if (!entry) return false;
+  const next = side === 'light' ? 'light' : 'heavy';
+  if (entry.radSide === next) return false;
+  entry.radSide = next;
   persist();
   notify();
   return true;

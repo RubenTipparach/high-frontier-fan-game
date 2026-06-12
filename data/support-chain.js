@@ -140,6 +140,9 @@ export function resolveSupportChain({ cards = [], activeId = null, wiring = {} }
 // draws the shared remainder. A chain whose reactor can't secure dedicated
 // cooling reads `coolingOk: false`, which makes that active card inactive
 // WITHOUT dragging down a higher-priority chain that was already cooled.
+// Afterburn's Open-Cycle cooling rides in as a normal radiator card (1 Therm)
+// that the caller appends to `cards` for the turn, so no special bonus-pool
+// path is needed here: it counts toward radiatorTotal like any other radiator.
 export function resolveCoolingAcross({ cards = [], orders = [] } = {}) {
   const byId = new Map(cards.map((c) => [c.id, c]));
   const radiatorTotal = cards

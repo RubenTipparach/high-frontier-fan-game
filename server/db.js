@@ -331,6 +331,10 @@ ensureColumn('lobbies', 'max_rounds', 'max_rounds INTEGER NOT NULL DEFAULT 5');
 //   economy:       'library' (free draws) or 'market' (auctioned)
 ensureColumn('lobbies', 'starting_aqua', 'starting_aqua INTEGER');
 ensureColumn('lobbies', 'economy', 'economy TEXT');
+// draft_start: opt-in "draft round" opening - everyone takes free deck-top
+// picks until they hold 12 cards, then banks open at 6 and play begins.
+// 0 = off (the default for every legacy + normal room).
+ensureColumn('lobbies', 'draft_start', 'draft_start INTEGER NOT NULL DEFAULT 0');
 // When a lobby was cancelled (admin "Cancel"), so the admin panel can list
 // cancelled rooms newest-cancelled-first. Nullable: only set on cancel,
 // cleared on restore; legacy cancelled rows fall back to created_at for sort.

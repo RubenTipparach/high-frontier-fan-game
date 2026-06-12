@@ -74,8 +74,13 @@ implementation right now:
 - **CEO Solitaire** - the published one-player variant. Drives
   the solo mode (`js/game/solo.js`); a single player runs one
   ship against a round clock with no AI opponent. Engine is
-  original; only the structural concept (manage water, prospect,
-  claim, end-of-round income) is taken from the variant's design.
+  original; only the structural concept (manage a FIXED water
+  budget, prospect, claim, race the round clock) is taken from
+  the variant's design. There is NO passive income (no end-of-
+  round water, no per-lap aqua) anywhere in the base game OR the
+  solo variant - water is a fixed budget plus what you actively
+  refine, and aqua comes only from the active Income / Free
+  Market operations. Do not add passive income.
 
 Other variants (campaign, scenarios) are explicitly out of scope
 for now. Don't pull them in without a discussion first.
@@ -824,10 +829,43 @@ Server-authoritative engine in `server/game/engine.js`:
     - No prospect, not yet moved: the move runs normally.
     - Moved, no prospect: no further move (`no_moves_left`) - one move per
       turn holds with or without a scan.
+- **Boost economy (engine rule, do NOT revert to one-op-per-boost).**
+  Boost mirrors the raygun: the FIRST boost of the turn spends the turn's
+  single operation; every later boost THIS SAME turn rides up FREE (no
+  operation), so a player can keep boosting once begun. "Has begun" reads off
+  this turn's undo stack (`hasBoostedThisTurn`, a BOOST entry, reset each
+  turn), exactly like `hasProspectedThisTurn`. Aqua (= total mass) is charged
+  on every boost, free or not. Client (`browse.js#commitBoost`) labels the
+  confirm + the BOOST button accordingly online; the solo sandbox still treats
+  every boost as the operation (the free-after-first rule is server-backed).
+  (User decision 2026-06-09.)
+- **Undo doctrine.** Functional ops ride a per-turn `turnActions` stack and the
+  `UNDO` op rebuilds the turn from `turnBaseState` minus the last action
+  (`applyUndo` + `rebuildFromBase`). So BOOST / INDUSTRIALIZE (factory) /
+  ET_PRODUCE / MOVE undo, but a dice roll is a hard barrier (`last.rolled` ->
+  `roll_blocks_undo`): PROSPECT and a hazardous MOVE can't be taken back.
+  Auctions never sit on the stack and advance `committed_seq`, so they can't be
+  undone either (user: auctions involve multiple people). `rebuildFromBase`
+  re-records each replayed action onto `turnActions` AS it replays, so the
+  free-after-first economy (BOOST + raygun PROSPECT) re-accounts correctly on
+  undo instead of demanding an already-spent operation. The client exposes undo
+  online via the toolbar `#turn-tag-undo` tag + the mission-log undo button
+  (`describeTurnAction` names what will be taken back); the solo move tag keeps
+  its own move-only rewind. (User decision 2026-06-09: boost/factory/ET-produce
+  undo, prospect/auction do not.)
 - Industrialize: deliver a robonaut or crew + reactor to the site;
-  flip prospect to factory (1 VP, generates patent income).
-- Refinery upgrade: deliver a refinery; factory becomes hydrated
-  source of water (income each Income phase).
+  flip prospect to factory (1 VP).
+- **NO passive income ANYWHERE (removed 2026-06-10, do NOT reintroduce).**
+  Two invented passive-income mechanics were removed: (1) `advanceClock` paid
+  every hydrated factory's hydration in water straight into the owner's tank
+  each lap (server engine), and (2) `solo.js#endRound` added each claimed site's
+  hydration as "water from refineries" each round (CEO Solitaire). Neither has
+  any basis in the HF4 rules and the factory one was a free-water-then-cash
+  money fountain (the "ghost water" players reported). The base game has NO
+  passive income: a factory's water is harvested by PARKING there and spending
+  the Site Refuel / Factory Refuel OPERATION (costs an op), and aqua comes only
+  from the active Income / Free Market operations. Solo runs on a FIXED water
+  budget. Do not hand out water or aqua at a round / lap boundary.
 - Bernal station: 5 factories on the same body collapse into a
   Bernal (5 VP + colonist promotion).
 - VPs at game end: factories + refineries + Bernals + glory cards.
@@ -854,7 +892,15 @@ produce a log line that lands in it. This is not console logging - a
   `CLEAR_ROUTE`), which return `log: ''` because a planned route is
   secret between players (the gameView redacts opponents' routes). Do
   not add other silent ops; if a mutation must stay private, document why
-  here.
+  here. These two are also the ONLY ops a player may submit OFF their turn:
+  a planned route is private + inert (only the owner's own MOVE executes it),
+  so `applyOperation` runs them against the CALLER (not the active player) and
+  skips the turn guard + per-turn undo stack when it isn't the caller's turn
+  (on their own turn they ride the functional/undo path as before). The active
+  player's undo/redo (`carryOffTurnRoutes`) carries every OTHER player's current
+  route across the rebuild so an in-turn undo never wipes a waiting player's
+  plan. Client syncs them via `submitGameOp` (not the turn-gated
+  `submitOnlineOp`), so the off-turn sync is allowed. (User decision 2026-06-10.)
 - **Every op kind has an entry in `MP_LOG_ICONS`** (js/game/browse.js).
   A missing icon falls back to a bare `·`, which reads as "something
   unlabeled happened" - give each new op a glyph in the published-card

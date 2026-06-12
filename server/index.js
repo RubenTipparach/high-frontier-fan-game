@@ -593,6 +593,9 @@ app.post('/lobbies', requireProfile, (req, res) => {
   const startingAqua = Number.isFinite(Number(body.startingAqua))
     ? Math.max(0, Math.min(100, Math.floor(Number(body.startingAqua)))) : null;
   const economy = (body.economy === 'library' || body.economy === 'market') ? body.economy : null;
+  // Opt-in draft-round opening (any player count). Stored on the lobby, applied
+  // at start.
+  const draftStart = body.draftStart ? 1 : 0;
   const now = nowMs();
   let code, info;
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -600,10 +603,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
     try {
       info = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy)
-           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start)
+           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?)`
         )
-        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy);
+        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart);
       break;
     } catch (err) {
       if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -840,7 +843,7 @@ app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
 app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -870,7 +873,10 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const solo = players.length === 1;
   const startingAqua = solo && Number.isFinite(lobby.starting_aqua) ? lobby.starting_aqua : undefined;
   const economy = solo && (lobby.economy === 'library' || lobby.economy === 'market') ? lobby.economy : undefined;
-  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy });
+  // Draft-start mode applies at any player count (it's a setup-flow choice, not
+  // a solo-only one like the bank / economy above).
+  const draftStart = !!lobby.draft_start;
+  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart });
 
   const now = nowMs();
   const gameId = db.transaction(() => {
@@ -914,17 +920,20 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   // Out-of-band "the game started, pick your crew" DM to every seat
   // (opt-in, inert without a bot). The game opens in the crew-draft
   // phase, so the first thing each player owes the table is a faction
-  // pick - notify them the same way a turn handoff does.
+  // pick - notify them the same way a turn handoff does. Skipped for a
+  // solo table (no one else to tell; you're already here).
   try {
-    const nm = gameDisplayName(gameId);
-    const url = gameRoomUrl(gameId);
-    const jump = url ? `\n▶ Play now: ${url}` : '';
-    if (discordEnabled()) {
-      for (const p of state.players) {
-        notifyProfile(p.profileId, 'turn', `🧑‍🚀 ${nm} is starting - pick your crew.${jump}`);
+    if (!isSoloGame(state)) {
+      const nm = gameDisplayName(gameId);
+      const url = gameRoomUrl(gameId);
+      const jump = url ? `\n▶ Play now: ${url}` : '';
+      if (discordEnabled()) {
+        for (const p of state.players) {
+          notifyProfile(p.profileId, 'turn', `🧑‍🚀 ${nm} is starting - pick your crew.${jump}`);
+        }
       }
+      notifyWebhook(`🧑‍🚀 **${nm}** has started - crew draft is open.${jump}`);
     }
-    notifyWebhook(`🧑‍🚀 **${nm}** has started - crew draft is open.${jump}`);
   } catch (e) {
     console.warn('[notify] crew-draft dispatch error', e && e.message);
   }
@@ -1138,6 +1147,13 @@ function gameReminders(gameId) {
 // inside this window. One 3h window for everything, auctions included.
 const REMIND_COOLDOWN_MS = 3 * 60 * 60 * 1000; // 3 hours
 
+// A single-seat game has no one else to hand off to, so turn / auction / start
+// notifications would only ping the player about their own game. Suppress every
+// out-of-band notification (DM + webhook) when the table is solo.
+function isSoloGame(state) {
+  return !state || !Array.isArray(state.players) || state.players.length <= 1;
+}
+
 // After an op commits: DM the newly-active player on END_TURN, and the
 // other players when an auction opens. (One event => one DM each, so the
 // natural cadence is the throttle.) A configured channel webhook also
@@ -1146,6 +1162,7 @@ const REMIND_COOLDOWN_MS = 3 * 60 * 60 * 1000; // 3 hours
 function dispatchTurnNotifications(gameId, kind, state) {
   try {
     if (!state || !Array.isArray(state.players)) return;
+    if (isSoloGame(state)) return;
     const dmOn = discordEnabled();
     const name = gameDisplayName(gameId);
     const url = gameRoomUrl(gameId);
@@ -1801,19 +1818,46 @@ app.get('/games/:id/ops', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
   if (!isGamePlayer(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+  // One page = the 100 most recent ops. Three reads:
+  //   (none)    - the newest page (the mission log's first load / poll).
+  //   ?before=N - the next page DOWN: the newest 100 ops with seq < N
+  //               (drives the mission log's infinite scroll into history).
+  //   ?after=N  - catch-up: the oldest 100 ops with seq > N, ascending
+  //               (for a client resuming from a known seq; unused today).
+  // The old query was ORDER BY seq ASC LIMIT - in a long game (> one page)
+  // that returned only the FIRST ops ever, so the mission log froze on
+  // early-game entries and recent activity never loaded.
+  const PAGE = 100;
   const after = Number(req.query.after) || 0;
-  const rows = db
-    .prepare(
-      `SELECT go.seq, go.kind, go.payload, go.log, go.created_at AS createdAt,
-              go.profile_id AS profileId, p.name AS profileName
-       FROM game_operations go
-       JOIN profiles p ON p.id = go.profile_id
-       WHERE go.game_id = ? AND go.seq > ?
-       ORDER BY go.seq ASC
-       LIMIT 200`
-    )
-    .all(id, after);
+  const before = Number(req.query.before) || 0;
+  const SELECT = `SELECT go.seq, go.kind, go.payload, go.log, go.created_at AS createdAt,
+            go.profile_id AS profileId, p.name AS profileName
+     FROM game_operations go
+     JOIN profiles p ON p.id = go.profile_id`;
+  let rows;
+  if (after > 0) {
+    rows = db
+      .prepare(`${SELECT} WHERE go.game_id = ? AND go.seq > ? ORDER BY go.seq ASC LIMIT ${PAGE}`)
+      .all(id, after);
+  } else if (before > 0) {
+    rows = db
+      .prepare(`${SELECT} WHERE go.game_id = ? AND go.seq < ? ORDER BY go.seq DESC LIMIT ${PAGE}`)
+      .all(id, before);
+    rows.reverse();   // back to ASC - entries are always oldest-first on the wire
+  } else {
+    rows = db
+      .prepare(`${SELECT} WHERE go.game_id = ? ORDER BY go.seq DESC LIMIT ${PAGE}`)
+      .all(id);
+    rows.reverse();
+  }
+  // Does history continue below this window? Drives the client's
+  // infinite scroll ("load older" stops when the log bottoms out).
+  const oldestSeq = rows.length ? rows[0].seq : null;
+  const hasMore = oldestSeq != null && !!db
+    .prepare('SELECT 1 FROM game_operations WHERE game_id = ? AND seq < ? LIMIT 1')
+    .get(id, oldestSeq);
   res.json({
+    hasMore,
     entries: rows.map((r) => ({
       seq: r.seq,
       kind: r.kind,

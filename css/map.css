@@ -107,6 +107,15 @@
   background: var(--panel-2);
   color: var(--ink);
 }
+/* Calendar chip: season name + round beside a clock face, tinted the season
+   colour (set inline by refreshTurnBudget) so the calendar season reads at a
+   glance instead of hiding behind a bare clock glyph. */
+.map-turn-controls #turn-tracker.has-season {
+  background: color-mix(in srgb, var(--season-color, #888) 18%, var(--panel-2));
+  border-color: color-mix(in srgb, var(--season-color, #888) 60%, var(--border));
+  font-weight: 600;
+  white-space: nowrap;
+}
 .map-turn-controls #turn-end {
   /* Seat-colour fill: the active player's colour (--mp-turn-color, set by
      refreshTurnBudget; falls back to the default orange). The translucent
@@ -199,11 +208,14 @@
   .aqua-gain-float { animation: none; opacity: 0; }
 }
 /* Per-turn budget tag: [move:N]. A compact status chip that sits
-   right next to the End turn / Ops button. */
+   right next to the End turn / Ops button. The move tag and its
+   route-options gear are WELDED into one segmented rectangle (gap 0,
+   flat inner corners, shared seam), so they read as a single "move +
+   its settings" control rather than two loose chips. */
 .map-turn-budget {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 0;
 }
 .map-turn-budget .turn-tag {
   font: inherit;
@@ -230,6 +242,12 @@
   border-color: #7dd3fc;
 }
 #turn-tag-move:hover { filter: brightness(1.1); }
+/* Weld: the move tag keeps its left corners rounded and flattens its right
+   edge into the seam shared with the gear. */
+.map-turn-budget #turn-tag-move {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
 /* Once the move is spent the move tag becomes the "↩ undo move" control
    - solid amber so it reads as a distinct (reversible) action, not a budget. */
 #turn-tag-move.is-undo {
@@ -239,10 +257,25 @@
   color: #2e1c02;
   border-color: #f0c455;
 }
-/* Game-settings gear: a standalone toolbar chip (route + fuel options).
-   No longer welded to the move tag, so it carries its own rounded
-   profile, border, and sizing. It is not a budget point, so it never
-   pulses or fades. */
+/* Dedicated ↩ undo tag (server games): take back this turn's last action.
+   Same amber "reversible action" language as the move tag's undo face. Hidden
+   until there's something to undo (set in refreshTurnBudget). */
+#turn-tag-undo {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(0, 0, 0, 0.30)),
+    #d4a72c;
+  color: #2e1c02;
+  border-color: #f0c455;
+  /* Secondary, optional action - don't pulse for attention like the move
+     budget tag does (the pulse rule keys off .turn-tag:not(.is-spent)). */
+  animation: none;
+}
+#turn-tag-undo:hover { filter: brightness(1.1); }
+#turn-tag-undo:disabled { opacity: 0.5; cursor: default; }
+/* Route-options gear: the right half of the welded move control (route +
+   fuel options for the move beside it). It shares the move tag's right edge
+   as the seam (no left border, flat left corners) so the pair reads as one
+   rectangle. It is not a budget point, so it never pulses or fades. */
 .map-turn-controls .turn-tag-gear {
   background: var(--bg-2, #14233a);
   color: var(--ink-dim, #9fb3cc);
@@ -252,6 +285,11 @@
   -webkit-appearance: none;
   appearance: none;
   touch-action: manipulation;
+}
+.map-turn-budget .turn-tag-gear {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: none;
 }
 .map-turn-controls .turn-tag-gear:hover { filter: brightness(1.25); }
 /* Pulse the budget tags while their action is still available
@@ -563,6 +601,38 @@
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+/* Boost popup: per-radiator deployed-side picker (light/heavy). The chosen
+   side locks at construction, so this segmented toggle is the one place to set
+   it. Active side is the filled cyan half; the other reads as a ghost button. */
+.boost-rad-help { margin: 4px 0 8px; font-size: 12px; }
+.boost-rad-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.boost-rad-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.boost-rad-name { font-size: 13px; font-weight: 600; color: var(--ink); }
+.boost-rad-toggle { display: inline-flex; }
+.boost-rad-side {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--ink-dim, #9fb3cc);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.boost-rad-side:first-child { border-radius: 7px 0 0 7px; }
+.boost-rad-side:last-child { border-radius: 0 7px 7px 0; border-left: none; }
+.boost-rad-side.is-active {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(0, 0, 0, 0.28)), #0ea5e9;
+  color: #f0f9ff;
+  border-color: #7dd3fc;
 }
 
 /* Dump-water stepper modal. Sits above the fuel-tank modal that
@@ -2422,6 +2492,13 @@
   color: var(--ink-dim);
   font-size: 11px;
   line-height: 1.45;
+}
+/* Avoid-hazards checkbox sits below the two priority radios; amber active tint
+   marks it as a hazard control rather than a priority pick. */
+.route-options-avoid { margin-top: 8px; }
+.route-options-avoid.is-active {
+  border-color: rgba(251, 191, 36, 0.7);
+  background: rgba(251, 191, 36, 0.12);
 }
 .route-options-manual {
   margin-top: 14px;
@@ -4299,6 +4376,52 @@ body:has(#view-browse:not(.hidden)) #main {
   color: var(--accent);
 }
 
+/* Support wiring: one row per requirement group with more than one
+   candidate supplier. The player picks which card powers the support;
+   the chosen card joins the decommission list (radiators excepted). */
+.industrialize-wiring {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.industrialize-wire-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.industrialize-wire-row .wire-consumer { font-weight: 700; color: var(--ink); }
+.industrialize-wire-row .wire-needs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted, #94a3b8);
+  font-size: 12px;
+}
+.industrialize-wire-row .chain-picker-ic { font-style: normal; }
+.industrialize-wire-select {
+  margin-left: auto;
+  background: var(--bg-1, #0f1424);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+.industrialize-wire-select:hover { border-color: #3a4668; }
+
+.industrialize-warn.industrialize-invalid {
+  background: rgba(185, 28, 28, 0.14);
+  border-color: rgba(185, 28, 28, 0.5);
+  color: #fecaca;
+  font-size: 13px;
+}
+
 .industrialize-decom {
   list-style: none;
   margin: 0;
@@ -4331,6 +4454,71 @@ body:has(#view-browse:not(.hidden)) #main {
   color: var(--muted, #94a3b8);
   font-size: 11px;
 }
+
+/* Full support-chain tree in the Industrialize modal: a folder-style walk from
+   the refinery + robonaut roots out to every supplier, so the player sees WHY
+   each card is decommissioned (to hand). ◐ radiators are kept to cool the
+   build; a card shown a second time (shared / cycle) is a muted reference. */
+.industrialize-chain-tree {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  font-size: 13px;
+}
+.industrialize-chain-tree .chain-children {
+  list-style: none;
+  margin: 2px 0 2px 9px;
+  padding-left: 12px;
+  border-left: 1px dashed rgba(148, 163, 184, 0.35);
+}
+.industrialize-chain-tree .chain-li { margin: 3px 0; }
+.industrialize-chain-tree .chain-node {
+  background: rgba(127, 29, 29, 0.18);
+  border-left: 3px solid #b91c1c;
+  padding: 5px 8px;
+  border-radius: 4px;
+}
+.industrialize-chain-tree .chain-node:has(.decom-kept) {
+  background: rgba(20, 83, 45, 0.18);
+  border-left-color: #166534;
+}
+.industrialize-chain-tree .chain-node.chain-ref {
+  background: rgba(148, 163, 184, 0.1);
+  border-left-color: rgba(148, 163, 184, 0.5);
+  opacity: 0.75;
+  font-style: italic;
+}
+.industrialize-chain-tree .decom-icon {
+  display: inline-block;
+  width: 16px;
+  color: #fca5a5;
+  font-weight: 800;
+}
+.industrialize-chain-tree .decom-icon.decom-kept { color: #86efac; }
+.industrialize-chain-tree .decom-type {
+  color: var(--muted, #94a3b8);
+  font-size: 11px;
+}
+.industrialize-chain-tree .chain-role {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--ink-dim, #9fb3cc);
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-left: 4px;
+}
+.industrialize-chain-tree .chain-edge {
+  font-size: 11px;
+  color: var(--muted, #94a3b8);
+  margin: 3px 0 1px;
+}
+.industrialize-chain-tree .chain-edge-missing {
+  color: #fbbf24;
+  font-weight: 600;
+}
+.industrialize-chain-tree .chain-picker-ic { font-style: normal; }
 
 .industrialize-warn {
   background: rgba(202, 138, 4, 0.12);
@@ -6244,8 +6432,9 @@ body:has(#view-browse:not(.hidden)) #main {
   gap: 4px;
   margin: 4px 0;
 }
-/* A cell pairs the inspect chip with its 📍 find button. */
-.mp-stack-cell { display: flex; gap: 3px; align-items: stretch; }
+/* A cell pairs the inspect chip with its 📍 find button. min-width:0 lets the
+   grid item shrink below its content so the find button is never clipped. */
+.mp-stack-cell { display: flex; gap: 3px; align-items: stretch; min-width: 0; }
 .mp-stack-cell .mp-stack-chip { flex: 1; min-width: 0; }
 .mp-stack-find {
   flex: 0 0 auto;
@@ -6282,7 +6471,10 @@ body:has(#view-browse:not(.hidden)) #main {
   background: rgba(125, 211, 252, 0.10);
   border-color: var(--accent-2);
 }
-.mp-stack-chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* min-width:0 makes the ellipsis actually engage: without it a flex child
+   refuses to shrink below its text width, blowing the chip (and the find pin)
+   past the panel edge. */
+.mp-stack-chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mp-stack-chip-count {
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
@@ -6447,6 +6639,15 @@ body:has(#view-browse:not(.hidden)) #main {
   align-self: center;
 }
 .mp-log-empty { padding: 12px; text-align: center; }
+/* Infinite-scroll footer rows: the transient "loading older" indicator and
+   the mission-start marker that caps the list once all history is loaded. */
+.mp-log-more { padding: 10px; text-align: center; font-style: italic; }
+.mp-log-end {
+  padding: 10px;
+  text-align: center;
+  border-top: 1px dashed rgba(148, 163, 184, 0.3);
+  letter-spacing: 0.4px;
+}
 
 /* Kind-specific accents on top of the player-colour left border.
    Subtle background washes keep the row readable while letting
@@ -7173,3 +7374,71 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .chain-picker select:disabled { opacity: 0.5; cursor: not-allowed; }
 .chain-picker select:hover:not(:disabled) { border-color: #3a4668; }
+
+/* ----- Draft-start mode: the deck market modal ----- */
+.draft-market-panel {
+  background: var(--panel, #0f1b2e);
+  border: 1px solid var(--border, #26405f);
+  border-radius: 14px;
+  padding: 18px 20px;
+  max-width: min(96vw, 1040px);
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
+  color: var(--ink, #e6eefc);
+}
+.draft-market-head h2 { margin: 0 0 4px; font-size: 20px; }
+.draft-market-head p { margin: 0 0 12px; }
+.draft-market-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+.draft-market-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  background: rgba(148, 163, 184, 0.06);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 10px;
+  padding: 10px 8px;
+}
+.draft-market-deck-label {
+  font-size: 12px;
+  text-transform: capitalize;
+  letter-spacing: 0.3px;
+  text-align: center;
+}
+.draft-market-card { min-height: 120px; display: flex; align-items: center; justify-content: center; }
+.draft-market-empty { font-style: italic; }
+.draft-market-take { width: 100%; }
+.draft-market-take:disabled { opacity: 0.45; cursor: default; }
+.draft-market-foot { margin-top: 14px; display: flex; justify-content: flex-end; }
+
+/* "Fold to light" action on a deployed heavy radiator (heat/amber tint to read
+   as a radiator action, distinct from Select / Set-active). */
+.rad-fold-light {
+  border-color: #d4a72c !important;
+  color: #f0c455 !important;
+}
+.rad-fold-light:hover:not(:disabled) { filter: brightness(1.15); }
+.rad-fold-light:disabled { opacity: 0.5; cursor: default; }
+
+/* Afterburn's temporary Open-Cycle Cooling "card" (a fiery, dashed-edge radiator
+   shown on the rocket while afterburn is engaged - it isn't a real stack slot). */
+.afterburn-temp-card {
+  border: 2px dashed #f0a35a;
+  box-shadow: 0 0 10px rgba(240, 120, 40, 0.35);
+}
+.afterburn-temp-card .card-typebar { background: linear-gradient(180deg, #d4612c, #a8401a); color: #fff; }
+.afterburn-temp-card .card-bonus { font-size: 11px; }
+/* The +1 thrust modifier triangle: centered + capped like a real card's
+   .card-thrust so it reads as the same glyph, not a stretched banner. */
+.afterburn-temp-mod {
+  align-self: center;
+  width: 100%;
+  max-width: 120px;
+  margin: 4px auto 0;
+}

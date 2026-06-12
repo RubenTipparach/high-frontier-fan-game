@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { makeRefId, normalizeSiteName } from '../../data/planner-ids.js';
 import { SITES } from '../../data/sites.js';
 import { raygunReachable } from '../../data/raygun-los.js';
+import { buggyRoamReachable } from '../../data/buggy-roam.js';
 
 // The mission-planner data (vendor JSON) is the single source of truth
 // for the movement graph - the SAME file the client renders from - and a
@@ -168,6 +169,32 @@ export function lineOfSightSites(fromSlug) {
   return raygunReachable(start, {
     neighbors: (slug) => neighborSlugs(slug),
     nodeOf: (slug) => NODES_BY_SLUG.get(slug) || null,
+  });
+}
+
+// Curated body of a site slug (data/sites.js `body`, e.g. "Mars"), or null for
+// a waypoint. Feeds the buggy-roam reach.
+export function siteBodyOf(slug) {
+  const s = siteBySlug(slug);
+  return s ? (s.body || s.name || null) : null;
+}
+
+// Every real-site slug (waypoints excluded). Feeds the buggy-roam reach scan.
+export function allSiteSlugs() {
+  const out = [];
+  for (const [slug, n] of NODES_BY_SLUG) if (n && n.site) out.push(slug);
+  return out;
+}
+
+// Sites a buggy can road to from `fromSlug` on a connected body (Mars / Luna /
+// Io / Callisto / Ganymede / Europa). Delegates to the SHARED body-based reach
+// (data/buggy-roam.js) so the server accepts EXACTLY the buggy prospects the
+// client offers. Returns a Set of site slugs (excludes the origin); empty
+// unless the buggy sits on a roam body.
+export function buggyRoamSites(fromSlug) {
+  return buggyRoamReachable(fromSlug == null ? null : String(fromSlug), {
+    bodyOf: (slug) => siteBodyOf(slug),
+    siteIds: () => allSiteSlugs(),
   });
 }
 
