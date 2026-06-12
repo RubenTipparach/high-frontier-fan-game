@@ -42,7 +42,12 @@ const shared = {
 };
 
 // ESM app bundle. Entry lands at dist/js/main-<hash>.js (js/ depth preserved).
-const main = await esbuild.build({ ...shared, entryPoints: [abs('js/main.js')], format: 'esm' });
+// The SHA define feeds base.js#assetUrl's ?v= pin so runtime-fetched assets
+// (sprites, planner data) cache-bust on every deploy like the bundles do.
+const main = await esbuild.build({
+  ...shared, entryPoints: [abs('js/main.js')], format: 'esm',
+  define: { __BUILD_SHA__: JSON.stringify(SHA) },
+});
 // version-check is a CLASSIC script (uses document.currentScript, not a
 // module), so bundle it as an IIFE. Inject the SHA as a define so the output
 // hash reflects the build (a new SHA => new content => new filename).
