@@ -149,6 +149,60 @@ let _afterburnEngaged = (() => {
   catch { return false; }
 })();
 
+// Afterburn's Open-Cycle Cooling is a TEMPORARY radiator card the engaged
+// thruster vents through for the turn (0 mass, 10 rad-hardness, 1 Therm). It
+// behaves like any other radiator: it SUPPLIES the thermostat support chip AND
+// adds its 1 Therm to the rocket-wide cooling pool, so a card whose only cooling
+// is the open-cycle vent can pick it up as a support. It lives only in the
+// support-chain view (never in the real _stack), so it adds no mass / weight
+// class and is cleaned up when afterburn disengages at end of turn.
+export const OPEN_CYCLE_CARD_ID = 'afterburn-open-cycle';
+export const OPEN_CYCLE_CARD = {
+  id: OPEN_CYCLE_CARD_ID,
+  name: 'Open-Cycle Cooling',
+  type: 'radiator',
+  mass: 0,
+  radHardness: 10,
+  spectralType: 'C',
+  therms: 1,
+  supplies: ['thermostat'],
+  requires: [],
+  synthetic: true,
+  faces: {
+    primary: {
+      name: 'Open-Cycle Cooling',
+      type: 'radiator',
+      supplies: ['thermostat'],
+      requires: [],
+      therms: 1,
+      Therms: 1,
+      properties: [],
+    },
+  },
+};
+// Resolver-shaped descriptor (the chainCardsFromStack() card shape).
+function openCycleChainCard() {
+  return {
+    id: OPEN_CYCLE_CARD_ID,
+    type: 'radiator',
+    supplies: ['thermostat'],
+    requires: [],
+    thrustMod: undefined,
+    fuelMod: undefined,
+    therms: 1,
+  };
+}
+// The Open-Cycle vent exists only while afterburn is engaged on a thruster that
+// actually has an afterburn rating - the exact same gate as the +1 net thrust,
+// so the temporary radiator and the thrust gain appear and vanish together.
+function afterburnContributes() {
+  if (!_afterburnEngaged || !_activeThrusterId) return false;
+  const slot = _stack.find((s) => s.id === _activeThrusterId);
+  if (!slot) return false;
+  const f = installedFace(slot);
+  return !!(f && Number(f.afterburn) > 0);
+}
+
 // Player support-chain wiring: { consumerId: { kind: supplierId } }. Names
 // which supplier card powers each consumer for each support kind, the single
 // source the resolver (data/support-chain.js) reads on BOTH the thrust/fuel
@@ -533,6 +587,8 @@ function collectSupplied(excludeId) {
     const supplies = (f && f.supplies) || [];
     for (const k of supplies) supplied.add(k);
   }
+  // Afterburn's Open-Cycle Cooling supplies the thermostat chip for the turn.
+  if (afterburnContributes()) supplied.add('thermostat');
   return supplied;
 }
 
@@ -566,9 +622,9 @@ function coolingAllocation() {
       orders.push(resolveSupportChain({ cards, activeId: _activeProspectorId, wiring: _wiring }).order);
     }
   }
-  // Afterburn's Open-Cycle cooling: +1 rocket-wide Therm while engaged.
-  const bonusTherms = _afterburnEngaged ? 1 : 0;
-  return { cool: resolveCoolingAcross({ cards, orders, bonusTherms }), idx };
+  // Afterburn's Open-Cycle cooling rides in as a temporary radiator card (its
+  // +1 Therm is already in `cards`, so radiatorTotal picks it up automatically).
+  return { cool: resolveCoolingAcross({ cards, orders }), idx };
 }
 
 // Activation check. Returns { active, reason, missing } where:
@@ -601,6 +657,8 @@ export function isRocketActive() {
     const supplies = (f && f.supplies) || [];
     for (const k of supplies) supplied.add(k);
   }
+  // Afterburn's Open-Cycle Cooling supplies the thermostat chip for the turn.
+  if (afterburnContributes()) supplied.add('thermostat');
 
   // Group the active thruster's requires by supplier prefix
   // (reactor-* / gen-* / etc.) so same-supplier kinds read as
@@ -904,7 +962,7 @@ export function getStackTotals() {
 // not the white-side ones. `therms` is the cooling a radiator SUPPLIES,
 // otherwise the heat the card GENERATES.
 function chainCardsFromStack() {
-  return _stack.map((slot) => {
+  const cards = _stack.map((slot) => {
     const card = cardForSlot(slot);
     const f = installedFace(slot);
     const type = card ? card.type : slot.kind;
@@ -918,6 +976,11 @@ function chainCardsFromStack() {
       therms: type === 'radiator' ? thermsSupplied(card, f, slot.radSide) : thermsRequired(f),
     };
   });
+  // Afterburn's Open-Cycle Cooling adds a temporary radiator (1 Therm) to the
+  // stack for the turn. Appended LAST so a real radiator still wins first-match
+  // as a thermostat supplier; this card is only chosen when nothing else cools.
+  if (afterburnContributes()) cards.push(openCycleChainCard());
+  return cards;
 }
 
 // Read-only support-chain view for the visualizer. Resolves the chain that

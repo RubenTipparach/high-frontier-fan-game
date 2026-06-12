@@ -40,7 +40,7 @@ import {
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats, getSupportChainView,
   getWiring, setWiring,
-  isAfterburnEngaged, setAfterburn,
+  isAfterburnEngaged, setAfterburn, OPEN_CYCLE_CARD, OPEN_CYCLE_CARD_ID,
   getAqua, spendAqua, addAqua, onAquaChange, resetAqua,
 } from './rocket.js';
 import { canProspect, computeRaygunTargets } from './scan.js';
@@ -6986,7 +6986,7 @@ function openRocketStackModal() {
     // rides the rocket (0 mass, 10 rad-hardness, 1 Therm) - the visible "card"
     // behind the +1 net thrust and the +1 rocket-wide Therm this turn. It clears
     // when afterburn does (next turn).
-    if (thrStats && thrStats.afterburnEngaged) {
+    if (thrStats && thrStats.afterburnEngaged && thrStats.afterburnSteps > 0) {
       const temp = document.createElement('div');
       temp.className = 'rocket-slot afterburn-temp-slot';
       temp.innerHTML = `
@@ -7129,7 +7129,8 @@ function openRocketStackModal() {
     body.scrollTop = prevScroll;
   };
   const lookup = (id) => PATENTS_BY_ID[id]
-    || CREW.find((c) => c.id === id) || null;
+    || CREW.find((c) => c.id === id)
+    || (id === OPEN_CYCLE_CARD_ID ? OPEN_CYCLE_CARD : null);
   repaint();
   // Re-render the rocket modal on any state change that affects
   // its display or the colocated-destination list. Stack changes
