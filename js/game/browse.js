@@ -10206,6 +10206,15 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     // Re-clamp in case the tank changed while the picker was open.
     const drain = Math.min(amount, getTankWater());
     if (drain <= 0) return;
+    // Online: jettisoning is the server DUMP op; await it so the snapshot
+    // lowers the tank first, then drain-animate to the new level.
+    if (_online) {
+      const ok = await submitOnlineOp({ kind: 'DUMP', amount: drain });
+      if (!ok) return;
+      const leftOnline = getTankWater();
+      drainTo(leftOnline, leftOnline <= 0 ? 600 : 250);
+      return;
+    }
     removeFuel(drain);
     const left = getTankWater();
     drainTo(left, left <= 0 ? 600 : 250);
@@ -10425,11 +10434,21 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   // Dump dirt: same inline +1 / +5 / Dump-all UX as the scoop row (no
   // separate Dump-dirt button / amount-picker modal). Jettisons grey
   // propellant; destroyed for now (the dump note explains the Stage 3+ plan).
-  const dumpDirt = (amount, e) => {
+  const dumpDirt = async (amount, e) => {
     e?.stopPropagation();
     const cur = getTankWater();
     const drain = Math.min(amount, cur);
     if (drain <= 0) { refreshDirtButtons(); return; }
+    // Online: jettisoning is the server DUMP op; await it so the snapshot
+    // lowers the tank first, then drain-animate to the new level.
+    if (_online) {
+      const ok = await submitOnlineOp({ kind: 'DUMP', amount: drain });
+      if (!ok) { refreshDirtButtons(); return; }
+      const left = getTankWater();
+      drainTo(left, left <= 0 ? 600 : 250);
+      refreshDirtButtons();
+      return;
+    }
     removeFuel(drain);
     const left = getTankWater();
     drainTo(left, left <= 0 ? 600 : 250);
@@ -15700,7 +15719,7 @@ const MP_LOG_ICONS = {
   ET_PRODUCE: '🏭', SITE_REFUEL: '💧', EVENT_CHOICE: '☄️',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
   DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🏠',
-  REFUEL: '💧', CASH_WATER: '💎', DISCARD: '🗑',
+  REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑',
   TRANSFER: '🔀', TRANSFER_FUEL: '💧',
   CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑',
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',

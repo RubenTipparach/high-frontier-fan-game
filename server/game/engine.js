@@ -1434,6 +1434,21 @@ function applyCashWater(state, op, player) {
   return { ok: true, state, log: `${player.name} cashed ${amt} water back to aqua (aqua ${player.aqua}).` };
 }
 
+// Jettison fuel from the tank (Internal Tankage free action - destroyed for
+// now; Stage 3+ drops it as an outpost stack). Grade-agnostic: dumps water
+// OR dirt, no aqua credit. No op cost; turn-gated like the other tank ops.
+// op = { amount? }: a specific amount jettisons that much (clamped to the
+// tank); omitted / >= tank clears the whole tank, sub-1 remainder included.
+function applyDump(state, op, player) {
+  const tank = Number(player.rocket.tank) || 0;
+  if (tank <= 0) return fail('no_fuel');
+  const want = Number(op && op.amount);
+  const amt = (!Number.isFinite(want) || want <= 0 || want >= tank) ? tank : want;
+  player.rocket.tank = round6(tank - amt);
+  const word = tankGradeOf(player.rocket) === 'dirt' ? 'dirt' : 'water';
+  return { ok: true, state, log: `${player.name} dumped ${round6(amt)} ${word} (tank ${round6(player.rocket.tank)}).` };
+}
+
 // Display name for a stack slot (patent or crew face). Used in
 // TRANSFER log lines.
 function slotName(slot) {
@@ -2192,6 +2207,7 @@ const FUNCTIONAL = {
   CONVERT_OUTPOST: applyConvertOutpost,
   REFUEL: applyRefuel,
   CASH_WATER: applyCashWater,
+  DUMP: applyDump,
   FREE_MARKET: applyFreeMarket,
   DISCARD: applyDiscard,
   SET_ROUTE: applySetRoute,
@@ -2221,6 +2237,7 @@ function pickPayload(op) {
     case 'DECOMMISSION': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from };
     case 'REFUEL': return { amount: op.amount };
     case 'CASH_WATER': return { amount: op.amount };
+    case 'DUMP': return { amount: op.amount };
     case 'FREE_MARKET': return { cardId: op.cardId };
     case 'DISCARD': return { cardId: op.cardId };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
@@ -2230,7 +2247,7 @@ function pickPayload(op) {
     case 'PROSPECT': return { siteId: op.siteId, turn: op.turn, round: op.round };
     case 'PROSPECT_REROLL': return { siteId: op.siteId };
     case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode };
-    case 'DIRT_REFUEL': return {};
+    case 'DIRT_REFUEL': return { amount: op.amount };
     case 'DELIVERY': return { siteId: op.siteId, letter: op.letter, cardId: op.cardId };
     case 'BUILD_COLONY': return { cardId: op.cardId };
     case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds };
