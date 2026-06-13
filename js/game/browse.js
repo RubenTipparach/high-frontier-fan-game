@@ -1625,7 +1625,8 @@ function confirmGlitchTrigger(kind) {
       <h3><span class="glitch-disc" aria-hidden="true"></span> Glitch trigger</h3>
       <p>Your stack is <strong>glitched</strong>. Performing <strong>${esc(label)}</strong>
       forces a <strong>Glitch Roll</strong>: roll 1d6, and every card aboard whose
-      rad-hardness equals the roll is decommissioned (rad-hardness 7+ is safe).</p>
+      rad-hardness equals the roll is decommissioned back to your hand
+      (rad-hardness 7+ is safe).</p>
       <p class="muted">Bring a Human alongside to clear the disc first if you'd rather not risk it.</p>
       <div class="turn-confirm-actions">
         <button type="button" class="modal-btn glitch-cancel">Cancel</button>
@@ -6932,8 +6933,8 @@ function openRocketStackModal() {
            <span>This stack is <strong>glitched</strong>. It still moves and acts
            freely, but a <strong>Glitch Trigger</strong> (Prospect, Site Refuel,
            or Industrialize) forces a Glitch Roll: 1d6, and every card aboard
-           whose rad-hardness equals the roll is lost. A colocated Human clears
-           the disc.</span>
+           whose rad-hardness equals the roll is decommissioned back to your
+           hand. A colocated Human clears the disc.</span>
          </div>`
       : '';
 

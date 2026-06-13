@@ -437,10 +437,13 @@ function resolveGlitchTrigger(state, profileId) {
   const survivors = [];
   for (const slot of player.rocket.stack) {
     if (slotRadHardness(slot) === roll) {
+      // Decommission returns the card to its owner's HAND (HF4 decommission
+      // is "back to hand", not destroyed to the deck), so it can be re-boosted
+      // later. Crew aren't hand cards, so they evacuate to LEO instead.
       if (isCrewSlot(slot)) {
         (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
       } else {
-        destroyToDeckBottom(state, slot.id);
+        (player.hand = player.hand || []).push(slot.id);
       }
       lost.push(cardNameOf(slot.id));
     } else {
@@ -454,7 +457,7 @@ function resolveGlitchTrigger(state, profileId) {
     clipTank(player.rocket);
   }
   const log = lost.length
-    ? `Glitch roll ${roll}: lost ${lost.join(', ')} (rad-hardness ${roll}).`
+    ? `Glitch roll ${roll}: ${lost.join(', ')} decommissioned to hand (rad-hardness ${roll}).`
     : `Glitch roll ${roll}: nothing aboard matched - the stack got lucky.`;
   pushNews(state, EVENT_ICONS.glitch || '⚠️', `${player.name} (glitched stack): ${log}`);
   return { roll, lost, log };
