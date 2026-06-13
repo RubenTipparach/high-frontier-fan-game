@@ -2934,6 +2934,11 @@ body:has(#view-browse:not(.hidden)) #main {
     border-color 0.18s ease;
 }
 .mp-turn-banner[hidden] { display: none !important; }
+/* Anarchy: red warning stripe so the felonies-legal state is unmistakable. */
+.mp-turn-banner.is-anarchy {
+  --mp-turn-color: #dc2626;
+  box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.55), 0 6px 18px rgba(220, 38, 38, 0.3);
+}
 .mp-turn-banner.is-your-turn {
   /* Distinct glow when it's the local player's turn so it
      reads instantly even from a phone-arm's-length away. */

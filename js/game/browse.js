@@ -1141,6 +1141,14 @@ function syncMpTurnBanner(snapshot) {
     label.textContent = `@${active.name}'s turn · ${tn}`;
     banner.classList.remove('is-your-turn');
   }
+  // Anarchy: flag that felonies (claim jump, factory hijack, decommission
+  // crew) are legal until the Sunspot Cube exits season blue.
+  if (snapshot.anarchy) {
+    label.textContent += ' · 🗽 Anarchy: felonies legal';
+    banner.classList.add('is-anarchy');
+  } else {
+    banner.classList.remove('is-anarchy');
+  }
   banner.hidden = false;
 }
 
