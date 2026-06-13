@@ -9880,9 +9880,9 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         <span class="aqua-direction-label">🟤 Tank → ⤓ Dump</span>
         <div class="aqua-actions">
           <button type="button" class="popup-btn popup-btn-secondary" id="dirt-dump-1"
-            title="Jettison 1 dirt FT">+1</button>
+            title="Jettison 1 dirt FT">-1</button>
           <button type="button" class="popup-btn popup-btn-secondary" id="dirt-dump-5"
-            title="Jettison 5 dirt FTs">+5</button>
+            title="Jettison 5 dirt FTs">-5</button>
           <button type="button" class="popup-btn" id="dirt-dump-all"
             title="Jettison all dirt from the tank">Dump all</button>
         </div>
