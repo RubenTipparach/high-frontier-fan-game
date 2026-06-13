@@ -1237,6 +1237,7 @@ export const CARD_DATA = {
         "Thrust Modifier": 3,
         "Fuel Consumption Modifier": 1.0,
         "Air Eater": false,
+        "Solar": false,
         "⟛ Generator": false,
         "X Reactor": false
       },
@@ -1250,6 +1251,7 @@ export const CARD_DATA = {
         "Thrust Modifier": 0,
         "Fuel Consumption Modifier": 0.25,
         "Air Eater": false,
+        "Solar": false,
         "⟛ Generator": false,
         "X Reactor": false,
         "Therms": 5
@@ -1268,6 +1270,7 @@ export const CARD_DATA = {
         "Thrust Modifier": 2,
         "Fuel Consumption Modifier": 1.0,
         "Air Eater": false,
+        "Solar": true,
         "⟛ Generator": false,
         "X Reactor": false
       },
@@ -1281,6 +1284,7 @@ export const CARD_DATA = {
         "Thrust Modifier": 4,
         "Fuel Consumption Modifier": 0.5,
         "Air Eater": false,
+        "Solar": false,
         "⟛ Generator": false,
         "X Reactor": false,
         "Therms": 3
@@ -1299,6 +1303,7 @@ export const CARD_DATA = {
         "Thrust Modifier": 3,
         "Fuel Consumption Modifier": 0.5,
         "Air Eater": false,
+        "Solar": false,
         "⟛ Generator": false,
         "X Reactor": false,
         "Therms": 2
@@ -1313,6 +1318,7 @@ export const CARD_DATA = {
         "Thrust Modifier": 0,
         "Fuel Consumption Modifier": 0.25,
         "Air Eater": false,
+        "Solar": false,
         "⟛ Generator": false,
         "X Reactor": false,
         "Therms": 3
@@ -1331,6 +1337,7 @@ export const CARD_DATA = {
         "Thrust Modifier": 1,
         "Fuel Consumption Modifier": 0.25,
         "Air Eater": false,
+        "Solar": false,
         "⟛ Generator": true,
         "X Reactor": false
       },
@@ -1344,6 +1351,7 @@ export const CARD_DATA = {
         "Thrust Modifier": 0,
         "Fuel Consumption Modifier": 0.1,
         "Air Eater": false,
+        "Solar": false,
         "⟛ Generator": true,
         "X Reactor": false
       }
@@ -1361,6 +1369,7 @@ export const CARD_DATA = {
         "Thrust Modifier": -2,
         "Fuel Consumption Modifier": 1.0,
         "Air Eater": false,
+        "Solar": false,
         "⟛ Generator": false,
         "X Reactor": false
       },
@@ -1374,6 +1383,7 @@ export const CARD_DATA = {
         "Thrust Modifier": 0,
         "Fuel Consumption Modifier": 0.5,
         "Air Eater": false,
+        "Solar": false,
         "⟛ Generator": false,
         "X Reactor": false,
         "Therms": 1
@@ -1392,6 +1402,7 @@ export const CARD_DATA = {
         "Thrust Modifier": 4,
         "Fuel Consumption Modifier": 1.0,
         "Air Eater": false,
+        "Solar": false,
         "⟛ Generator": false,
         "X Reactor": false,
         "Therms": 2
@@ -1406,6 +1417,7 @@ export const CARD_DATA = {
         "Thrust Modifier": 7,
         "Fuel Consumption Modifier": 1.0,
         "Air Eater": false,
+        "Solar": false,
         "⟛ Generator": false,
         "X Reactor": false,
         "Therms": 2
@@ -1424,6 +1436,7 @@ export const CARD_DATA = {
         "Thrust Modifier": -3,
         "Fuel Consumption Modifier": 1.0,
         "Air Eater": true,
+        "Solar": false,
         "⟛ Generator": false,
         "X Reactor": false,
         "Ability": "SCOOP: -2 ISRU for Colocated ISRU platforms at Aerostat Sites."
@@ -1436,6 +1449,7 @@ export const CARD_DATA = {
         "∿": false,
         "💣": true,
         "Air Eater": false,
+        "Solar": false,
         "⟛ Generator": false,
         "X Reactor": false,
         "Ability": "SCOOP: -2 ISRU for Colocated ISRU platforms at Aerostat Sites."
@@ -1454,6 +1468,7 @@ export const CARD_DATA = {
         "Thrust Modifier": 4,
         "Fuel Consumption Modifier": 1.0,
         "Air Eater": false,
+        "Solar": false,
         "⟛ Generator": false,
         "X Reactor": false,
         "Therms": 1
@@ -1468,6 +1483,7 @@ export const CARD_DATA = {
         "Thrust Modifier": 2,
         "Fuel Consumption Modifier": 0.5,
         "Air Eater": false,
+        "Solar": false,
         "⟛ Generator": false,
         "X Reactor": false,
         "Therms": 1
@@ -1484,6 +1500,7 @@ export const CARD_DATA = {
         "∿": false,
         "💣": true,
         "Air Eater": false,
+        "Solar": false,
         "⟛ Generator": false,
         "X Reactor": false
       },
@@ -1497,6 +1514,7 @@ export const CARD_DATA = {
         "Thrust Modifier": 0,
         "Fuel Consumption Modifier": 0.25,
         "Air Eater": false,
+        "Solar": false,
         "⟛ Generator": false,
         "X Reactor": false,
         "Therms": 1
@@ -1515,6 +1533,7 @@ export const CARD_DATA = {
         "Thrust Modifier": 7,
         "Fuel Consumption Modifier": 1.0,
         "Air Eater": false,
+        "Solar": false,
         "⟛ Generator": false,
         "X Reactor": false,
         "Therms": 1
@@ -1529,6 +1548,7 @@ export const CARD_DATA = {
         "Thrust Modifier": 8,
         "Fuel Consumption Modifier": 0.25,
         "Air Eater": false,
+        "Solar": false,
         "⟛ Generator": false,
         "X Reactor": true,
         "Therms": 3,
@@ -1548,6 +1568,7 @@ export const CARD_DATA = {
         "Thrust Modifier": 0,
         "Fuel Consumption Modifier": 0.5,
         "Air Eater": false,
+        "Solar": false,
         "⟛ Generator": false,
         "X Reactor": false,
         "Therms": 1
@@ -1562,6 +1583,7 @@ export const CARD_DATA = {
         "Thrust Modifier": 0,
         "Fuel Consumption Modifier": 0.5,
         "Air Eater": false,
+        "Solar": false,
         "⟛ Generator": false,
         "X Reactor": false,
         "Therms": 1
@@ -1580,6 +1602,7 @@ export const CARD_DATA = {
         "Thrust Modifier": 3,
         "Fuel Consumption Modifier": 1.0,
         "Air Eater": false,
+        "Solar": false,
         "⟛ Generator": false,
         "X Reactor": false,
         "Therms": 2
@@ -1594,6 +1617,7 @@ export const CARD_DATA = {
         "Thrust Modifier": 2,
         "Fuel Consumption Modifier": 1.0,
         "Air Eater": false,
+        "Solar": false,
         "⟛ Generator": false,
         "X Reactor": false
       }
@@ -3154,11 +3178,11 @@ export const CARD_DATA = {
   "Colonists": [
     {
       "Name": "Babbage Halbonauts",
-      "Spectral Type": "H",
       "Ideology": "n/a",
+      "Specialty": "Engineer",
+      "Spectral Type": "H",
       "Type": "Robot",
       "Promotion Colony": "D",
-      "Specialty": "Engineer",
       "tier1": {
         "Name": "Babbage Halbonauts",
         "Mass": 2,
@@ -3194,11 +3218,11 @@ export const CARD_DATA = {
     },
     {
       "Name": "Biomechs",
-      "Spectral Type": "n/a",
       "Ideology": "Yellow",
+      "Specialty": "Miner",
+      "Spectral Type": "n/a",
       "Type": "Human",
       "Promotion Colony": "H",
-      "Specialty": "Miner",
       "tier1": {
         "Name": "Biomechs",
         "Mass": 2,
@@ -3234,11 +3258,11 @@ export const CARD_DATA = {
     },
     {
       "Name": "Botany Bay Convicts",
-      "Spectral Type": "n/a",
       "Ideology": "Purple",
+      "Specialty": "Miner",
+      "Spectral Type": "n/a",
       "Type": "Human",
       "Promotion Colony": "H",
-      "Specialty": "Miner",
       "tier1": {
         "Name": "Botany Bay Convicts",
         "Mass": 2,
@@ -3274,11 +3298,11 @@ export const CARD_DATA = {
     },
     {
       "Name": "Boyle Engineering Collective",
-      "Spectral Type": "n/a",
       "Ideology": "Yellow",
+      "Specialty": "Prospector",
+      "Spectral Type": "n/a",
       "Type": "Human",
       "Promotion Colony": "Atmospheric",
-      "Specialty": "Prospector",
       "tier1": {
         "Name": "Boyle Engineering Collective",
         "Mass": 3,
@@ -3314,11 +3338,11 @@ export const CARD_DATA = {
     },
     {
       "Name": "Calypso 2 Seed Sail",
-      "Spectral Type": "n/a",
       "Ideology": "Green",
+      "Specialty": "Prospector",
+      "Spectral Type": "n/a",
       "Type": "Human",
       "Promotion Colony": "Astrobiology",
-      "Specialty": "Prospector",
       "tier1": {
         "Name": "Calypso 2 Seed Sail",
         "Mass": 1,
@@ -3363,11 +3387,11 @@ export const CARD_DATA = {
     },
     {
       "Name": "Heavy Water Survivalists",
-      "Spectral Type": "n/a",
       "Ideology": "Red",
+      "Specialty": "Engineer",
+      "Spectral Type": "n/a",
       "Type": "Human",
       "Promotion Colony": "Submarine",
-      "Specialty": "Engineer",
       "tier1": {
         "Name": "Heavy Water Survivalists",
         "Mass": 2,
@@ -3403,11 +3427,11 @@ export const CARD_DATA = {
     },
     {
       "Name": "House of Saud",
-      "Spectral Type": "n/a",
       "Ideology": "Purple",
+      "Specialty": "Miner",
+      "Spectral Type": "n/a",
       "Type": "Human",
       "Promotion Colony": "H",
-      "Specialty": "Miner",
       "tier1": {
         "Name": "House of Saud",
         "Mass": 2,
@@ -3443,11 +3467,11 @@ export const CARD_DATA = {
     },
     {
       "Name": "Juiced Cosmonauts",
-      "Spectral Type": "n/a",
       "Ideology": "Purple",
+      "Specialty": "Prospector",
+      "Spectral Type": "n/a",
       "Type": "Human",
       "Promotion Colony": "H",
-      "Specialty": "Prospector",
       "tier1": {
         "Name": "Juiced Cosmonauts",
         "Mass": 1,
@@ -3491,11 +3515,11 @@ export const CARD_DATA = {
     },
     {
       "Name": "Lloyd's Salvage Co.",
-      "Spectral Type": "n/a",
       "Ideology": "Grey",
+      "Specialty": "Industrialist",
+      "Spectral Type": "n/a",
       "Type": "Human",
       "Promotion Colony": "Astrobiology",
-      "Specialty": "Industrialist",
       "tier1": {
         "Name": "Lloyd's Salvage Co.",
         "Mass": 1,
@@ -3529,11 +3553,11 @@ export const CARD_DATA = {
     },
     {
       "Name": "Malcolm",
-      "Spectral Type": "n/a",
       "Ideology": "Red",
+      "Specialty": "Industrialist",
+      "Spectral Type": "n/a",
       "Type": "Human",
       "Promotion Colony": "H",
-      "Specialty": "Industrialist",
       "tier1": {
         "Name": "Malcolm",
         "Mass": 1,
@@ -3567,11 +3591,11 @@ export const CARD_DATA = {
     },
     {
       "Name": "Microgravity Pantrophists",
-      "Spectral Type": "n/a",
       "Ideology": "Grey",
+      "Specialty": "Engineer",
+      "Spectral Type": "n/a",
       "Type": "Human",
       "Promotion Colony": "H",
-      "Specialty": "Engineer",
       "tier1": {
         "Name": "Microgravity Pantrophists",
         "Mass": 3,
@@ -3605,11 +3629,11 @@ export const CARD_DATA = {
     },
     {
       "Name": "Programmable Matter",
-      "Spectral Type": "D",
       "Ideology": "n/a",
+      "Specialty": "Prospector",
+      "Spectral Type": "D",
       "Type": "Robot",
       "Promotion Colony": "D",
-      "Specialty": "Prospector",
       "tier1": {
         "Name": "Programmable Matter",
         "Mass": 1,
@@ -3653,11 +3677,11 @@ export const CARD_DATA = {
     },
     {
       "Name": "Rock Rats Miners' Union",
-      "Spectral Type": "n/a",
       "Ideology": "Green",
+      "Specialty": "Miner",
+      "Spectral Type": "n/a",
       "Type": "Human",
       "Promotion Colony": "H",
-      "Specialty": "Miner",
       "tier1": {
         "Name": "Rock Rats Miners' Union",
         "Mass": 3,
@@ -3693,11 +3717,11 @@ export const CARD_DATA = {
     },
     {
       "Name": "Security System",
-      "Spectral Type": "D",
       "Ideology": "n/a",
+      "Specialty": "Industrialist",
+      "Spectral Type": "D",
       "Type": "Robot",
       "Promotion Colony": "D",
-      "Specialty": "Industrialist",
       "tier1": {
         "Name": "Security System",
         "Mass": 1,
@@ -3731,11 +3755,11 @@ export const CARD_DATA = {
     },
     {
       "Name": "Siren Cybernautics Inc.",
-      "Spectral Type": "n/a",
       "Ideology": "Green",
+      "Specialty": "Engineer",
+      "Spectral Type": "n/a",
       "Type": "Human",
       "Promotion Colony": "Submarine",
-      "Specialty": "Engineer",
       "tier1": {
         "Name": "Siren Cybernautics Inc.",
         "Mass": 3,
@@ -3769,11 +3793,11 @@ export const CARD_DATA = {
     },
     {
       "Name": "Smart Pets",
-      "Spectral Type": "D",
       "Ideology": "n/a",
+      "Specialty": "Miner",
+      "Spectral Type": "D",
       "Type": "Robot",
       "Promotion Colony": "D",
-      "Specialty": "Miner",
       "tier1": {
         "Name": "Smart Pets",
         "Mass": 0,
@@ -3809,11 +3833,11 @@ export const CARD_DATA = {
     },
     {
       "Name": "Transorbital Railworkers",
-      "Spectral Type": "n/a",
       "Ideology": "White",
+      "Specialty": "Engineer",
+      "Spectral Type": "n/a",
       "Type": "Human",
       "Promotion Colony": "H",
-      "Specialty": "Engineer",
       "tier1": {
         "Name": "Transorbital Railworkers",
         "Mass": 2,
@@ -3847,11 +3871,11 @@ export const CARD_DATA = {
     },
     {
       "Name": "Vatican Observers",
-      "Spectral Type": "n/a",
       "Ideology": "White",
+      "Specialty": "Industrialist",
+      "Spectral Type": "n/a",
       "Type": "Human",
       "Promotion Colony": "Astrobiology",
-      "Specialty": "Industrialist",
       "tier1": {
         "Name": "Vatican Observers",
         "Mass": 1,
