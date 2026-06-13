@@ -9856,9 +9856,9 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         <span class="aqua-direction-label">💧 Tank → 🏦 Bank</span>
         <div class="aqua-actions">
           <button type="button" class="popup-btn popup-btn-secondary" id="aqua-cash-1"
-            title="Drain 1 water from the tank back into your aqua bank">+1</button>
+            title="Drain 1 water from the tank back into your aqua bank">-1</button>
           <button type="button" class="popup-btn popup-btn-secondary" id="aqua-cash-5"
-            title="Drain 5 water from the tank back into your aqua bank">+5</button>
+            title="Drain 5 water from the tank back into your aqua bank">-5</button>
           <button type="button" class="popup-btn" id="aqua-cash-all"
             title="Empty the tank back into your aqua bank">Cash out</button>
         </div>
