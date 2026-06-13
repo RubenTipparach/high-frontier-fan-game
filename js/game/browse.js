@@ -7052,8 +7052,14 @@ function openRocketStackModal() {
     const requiredKinds = new Set();
     if (thrStats) {
       const active = lookup(thrStats.cardId);
-      const f = (active && active.faces && active.faces.primary) || active || {};
-      const reqs = f.requires || (active && active.requires) || [];
+      // Read the active thruster's INSTALLED face: a black-side robonaut
+      // thruster (e.g. Wakefield e-Beam) carries its requires on the
+      // secondary face, not primary.
+      const activeSlot = stack.find((s) => s.id === thrStats.cardId);
+      const af = (active && active.faces)
+        ? (active.faces[activeSlot && activeSlot.face === 'secondary' ? 'secondary' : 'primary'] || active.faces.primary)
+        : active;
+      const reqs = (af && af.requires) || (active && active.requires) || [];
       for (const r of reqs) if (r && r.kind) requiredKinds.add(r.kind);
     }
 
@@ -7092,8 +7098,10 @@ function openRocketStackModal() {
       // their active thruster, not just see the ✓ chips on the
       // thruster card.
       if (!isThruster && requiredKinds.size) {
-        const cf = (card.faces && card.faces.primary) || card;
-        const supplies = cf.supplies || card.supplies || [];
+        // A supporter card supplies what its INSTALLED face supplies (a
+        // flipped robonaut/generator's black side can supply a different
+        // kind than its white side), so read patentFace, not faces.primary.
+        const supplies = (patentFace && patentFace.supplies) || card.supplies || [];
         if (supplies.some((k) => requiredKinds.has(k))) {
           wrap.classList.add('is-supporting');
         }
