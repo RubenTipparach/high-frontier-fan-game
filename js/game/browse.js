@@ -1595,6 +1595,19 @@ function gameNews() {
   return (_online && _onlineSnapshot && Array.isArray(_onlineSnapshot.news))
     ? _onlineSnapshot.news : [];
 }
+// Anarchy active? During Anarchy every player gains the Felonious privilege,
+// so felonies (claim jump, factory hijack, decommission crew) become legal.
+// Read off the snapshot; solo has no Anarchy.
+function isAnarchy() {
+  return !!(_online && _onlineSnapshot && _onlineSnapshot.anarchy);
+}
+// Owner of the success claim (prospect disc) at a site, from the snapshot, or
+// null. Lets the client offer Claim Jump on an opponent's claim.
+function onlineClaimOwner(siteId) {
+  const d = _onlineSnapshot && _onlineSnapshot.discs && _onlineSnapshot.discs[siteId];
+  return (d && d.outcome === 'success') ? (d.ownerId || null) : null;
+}
+
 // Is my rocket stack carrying a Glitch disc (Sunspot Glitch event)? Read off
 // the snapshot; solo never glitches, so it's always false there.
 function isMyRocketGlitched() {
@@ -3068,6 +3081,13 @@ function humanizeOnlineOpError(code, detail) {
     not_your_turn: 'It is not your turn.',
     awaiting_event_choice: 'A Sunspot event is waiting on player choices.',
     stack_glitched: 'That stack is glitched - it cannot act until humans reach it.',
+    felonies_not_allowed: 'Felonies are only legal during Anarchy.',
+    felony_needs_human: 'A felony needs one of your Humans at the site.',
+    factory_defended: 'That factory is defended by an opposing Human or colony.',
+    claim_defended: 'That claim is defended by an opposing Human or colony.',
+    claim_has_factory: 'A claim with a factory cannot be jumped.',
+    no_claim_here: 'There is no opposing claim to jump here.',
+    already_your_claim: 'That claim is already yours.',
     not_waiting_on_you: 'The event is not waiting on you.',
     card_not_in_hand: 'That card is not in your hand.',
     not_a_tied_card: 'Pick one of the tied cards.',
@@ -13795,6 +13815,31 @@ function showSitePopupFor(site) {
     // When a factory already exists the build option is simply omitted (no
     // disabled "Already industrialized" row) - the factory art on the map says so.
   }
+  // Claim Jump (Felony, G4). Only during Anarchy: replace an opponent's claim
+  // here with your own. Shown when the rocket is parked here, there's an
+  // opposing success claim, and no factory holds it. The server re-checks the
+  // full felony rules (your Human present, no opposing Human/colony).
+  if (_online && isAnarchy() && rocketSite && site.id === rocketSite.id) {
+    const claimOwner = onlineClaimOwner(site.id);
+    const mine = myOwnerId();
+    if (claimOwner && claimOwner !== mine && !getFactory(site.id)) {
+      const haveHuman = getRocketStack().some((s) => CREW_BY_ID[s.id]);
+      const ok = haveHuman;
+      actions.push({
+        label: '🗽 Claim jump (Felony)',
+        variant: ok ? 'rocket' : 'secondary',
+        disabled: !ok,
+        title: ok
+          ? 'Anarchy: seize this opponent\'s claim. Blocked if an opposing Human or colony defends it.'
+          : 'Claim jump needs one of your Humans (crew) at this site.',
+        onClick: () => {
+          if (!ok) return;
+          submitOnlineOp({ kind: 'CLAIM_JUMP', siteId: site.id });
+          _renderer.clearSitePopup();
+        },
+      });
+    }
+  }
   // Colonize action (rulebook G3, free action). Shown when the
   // rocket is parked at a site with a player-owned factory and
   // no existing colony. Picker surfaces when 2+ crews are in
@@ -16011,7 +16056,7 @@ const MP_LOG_ICONS = {
   ET_PRODUCE: '🏭', SITE_REFUEL: '💧', EVENT_CHOICE: '☄️',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
   DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🏠',
-  REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑',
+  REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',
   TRANSFER: '🔀', TRANSFER_FUEL: '💧',
   CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑',
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',
