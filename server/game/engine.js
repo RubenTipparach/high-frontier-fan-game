@@ -509,6 +509,91 @@ const EVENT_ICONS = {
   anarchy: '\u{1F5FD}', budget_cuts: '\u2702\uFE0F', solar_flare: '\u2600\uFE0F',
 };
 
+// ---- deferred destructive-event helpers ----
+// Destructive Sunspot events (Glitch / Pad Explosion / Solar Flare) are
+// MANDATORY EVENT ACTIONS: the effect commits only when the affected player
+// confirms it on their turn (applyEventChoice), never silently at clock time.
+// The affected player is blocked from acting until they confirm, so their own
+// stacks don't change between the roll and the confirmation - which lets the
+// effect be (re)computed at confirm time from the same state.
+
+// The biggest human-less stack that would take a glitch disc, or null.
+function glitchTargetFor(state, p) {
+  const candidates = [];
+  if (p.rocket.stack.length && !p.rocket.glitch
+      && !stackHasCrew(p.rocket.stack) && !humansAtSite(state, p.rocket.siteId)) {
+    candidates.push({ count: p.rocket.stack.length, apply: () => { p.rocket.glitch = true; }, label: `${p.name}'s rocket` });
+  }
+  for (const o of Object.values(p.outposts || {})) {
+    if (o && (o.cards || []).length && !o.glitch
+        && !stackHasCrew(o.cards) && !humansAtSite(state, o.siteId)) {
+      candidates.push({ count: o.cards.length, apply: () => { o.glitch = true; }, label: `${p.name}'s Outpost ${o.letter}` });
+    }
+  }
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => b.count - a.count);
+  return candidates[0];
+}
+
+// Exposed (vulnerable) LEO cards: not crew, not flipped Black-Side.
+function exposedLeo(p) {
+  return (p.leo || []).filter((s) => !isCrewSlot(s) && s.face !== 'secondary');
+}
+
+// Apply the solar flare's toll to one player's non-LEO stacks (rocket +
+// outposts) at the given flare roll. Pushes gameplay sentences to notesArr.
+// Returns the number of cards affected. (Mirror of the old inline sweep.)
+function applyFlareToPlayer(state, p, flare, notesArr) {
+  let touched = 0;
+  const sweep = (slots, siteId, where) => {
+    const site = siteId ? siteById(siteId) : null;
+    const zone = (site && site.solarZone) || 'Earth';
+    const info = SOLAR_ZONE_INFO[zone];
+    const mod = info ? info.solar : 0;
+    if (mod === null) return slots;
+    const hit = flare + mod;
+    if (hit <= 0) return slots;
+    const survivors = [];
+    for (const slot of slots) {
+      if (slotRadHardness(slot) >= hit) { survivors.push(slot); continue; }
+      const c = PATENTS_BY_ID[slot.id];
+      if (c && c.type === 'radiator' && slot.radSide !== 'light') {
+        slot.radSide = 'light'; survivors.push(slot); touched++;
+        notesArr.push(`${cardNameOf(slot.id)} ${where} degraded to its light side.`);
+        continue;
+      }
+      touched++;
+      if (isCrewSlot(slot)) {
+        (p.leo = p.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+        notesArr.push(`${cardNameOf(slot.id)} ${where} was overcome and evacuated to LEO.`);
+      } else {
+        (p.hand = p.hand || []).push(slot.id);   // Decommission -> back to hand
+        notesArr.push(`${cardNameOf(slot.id)} ${where} decommissioned to hand (rad ${slotRadHardness(slot)} vs ${hit}).`);
+      }
+    }
+    return survivors;
+  };
+  if (p.rocket.siteId) {
+    const before = p.rocket.stack.length;
+    p.rocket.stack = sweep(p.rocket.stack, p.rocket.siteId, 'aboard the rocket');
+    if (p.rocket.stack.length !== before) {
+      if (!p.rocket.stack.some((s) => s.id === p.rocket.activeThrusterId)) p.rocket.activeThrusterId = null;
+      if (!p.rocket.stack.some((s) => s.id === p.rocket.activeProspectorId)) p.rocket.activeProspectorId = null;
+      clipTank(p.rocket);
+      recallIfEmpty(p);
+    }
+  }
+  for (const o of Object.values(p.outposts || {})) {
+    if (o) o.cards = sweep(o.cards || [], o.siteId, `at Outpost ${o.letter}`);
+  }
+  return touched;
+}
+// Would the flare touch this player at all? Dry run on a clone so we only
+// block players who actually have something at stake.
+function flareWouldAffect(state, p, flare) {
+  return applyFlareToPlayer(state, clone(p), flare, []) > 0;
+}
+
 function resolveSunspotEvent(state, kind) {
   const rawNotes = state.lastEvent.notes;
   // Every detail line lands in BOTH the event record (clock modal) and
@@ -536,54 +621,43 @@ function resolveSunspotEvent(state, kind) {
   }
 
   if (kind === 'glitch') {
-    // Each player's biggest human-less stack takes a glitch token. LEO is
-    // never a target (humans are right there); stacks with crew aboard or
-    // a colony at the site can't hold a glitch either (auto-fixed).
+    // Each affected player's biggest human-less stack will take a glitch disc,
+    // but it's a mandatory event action: the disc lands only when the player
+    // confirms it on their turn (applyEventChoice). Mark who's affected.
+    const waiting = [];
     for (const p of state.players) {
-      const candidates = [];
-      if (p.rocket.stack.length && !p.rocket.glitch
-          && !stackHasCrew(p.rocket.stack) && !humansAtSite(state, p.rocket.siteId)) {
-        candidates.push({ count: p.rocket.stack.length, apply: () => { p.rocket.glitch = true; }, label: `${p.name}'s rocket` });
-      }
-      for (const o of Object.values(p.outposts || {})) {
-        if (o && (o.cards || []).length && !o.glitch
-            && !stackHasCrew(o.cards) && !humansAtSite(state, o.siteId)) {
-          candidates.push({ count: o.cards.length, apply: () => { o.glitch = true; }, label: `${p.name}'s Outpost ${o.letter}` });
-        }
-      }
-      if (!candidates.length) {
+      if (glitchTargetFor(state, p)) {
+        waiting.push(p.profileId);
+        notes.push(`Glitch: ${p.name} must confirm the glitch disc.`);
+      } else {
         notes.push(`Glitch: ${p.name} had no uncrewed stack to glitch.`);
-        continue;
       }
-      candidates.sort((a, b) => b.count - a.count);
-      candidates[0].apply();
-      notes.push(`Glitch: a glitch token lands on ${candidates[0].label} (${candidates[0].count} cards). It can't move or operate until humans reach it.`);
     }
+    if (waiting.length) state.pendingEvent = { kind: 'glitch', waiting, options: {} };
     return;
   }
 
   if (kind === 'pad_explosion') {
-    // Highest-mass card in each player's LEO stack is destroyed. Crew and
-    // Black-Side cards are immune. A tie pauses for that player's pick.
+    // Each player decommissions their highest-mass exposed LEO card (crew and
+    // Black-Side cards immune). Mandatory event action: it commits only on
+    // the player's confirmation. A tie carries the tied ids so they pick;
+    // a single highest card is just acknowledged.
     const waiting = [];
     const options = {};
     for (const p of state.players) {
-      const exposed = (p.leo || []).filter((s) => !isCrewSlot(s) && s.face !== 'secondary');
+      const exposed = exposedLeo(p);
       if (!exposed.length) {
         notes.push(`Pad Explosion: nothing exposed in ${p.name}'s LEO stack.`);
         continue;
       }
       const maxMass = Math.max(...exposed.map((s) => slotMass(s)));
       const atMax = exposed.filter((s) => slotMass(s) === maxMass);
-      if (atMax.length === 1) {
-        const id = atMax[0].id;
-        p.leo = p.leo.filter((s) => s.id !== id);
-        (p.hand = p.hand || []).push(id);   // Decommission -> back to hand
-        notes.push(`Pad Explosion: ${p.name} decommissioned ${cardNameOf(id)} (mass ${maxMass}) from LEO to hand.`, [id]);
-      } else {
-        waiting.push(p.profileId);
+      waiting.push(p.profileId);
+      if (atMax.length > 1) {
         options[p.profileId] = atMax.map((s) => s.id);
         notes.push(`Pad Explosion: ${p.name} must choose which mass-${maxMass} card to lose from LEO.`);
+      } else {
+        notes.push(`Pad Explosion: ${p.name} must confirm losing their mass-${maxMass} LEO card.`);
       }
     }
     if (waiting.length) state.pendingEvent = { kind: 'pad_explosion', waiting, options };
@@ -614,62 +688,25 @@ function resolveSunspotEvent(state, kind) {
   }
 
   if (kind === 'solar_flare') {
-    // One flare roll, applied to every card in every non-LEO stack,
-    // shifted by the stack's heliocentric-zone modifier (the same number
-    // solar thrusters read; flares fade with distance, so a null modifier
-    // beyond Uranus means no effect). Cards whose rad-hardness can't take
-    // the modified roll are destroyed; a heavy-side radiator degrades to
-    // its light side instead (same exception as travel radiation). Crew
-    // who perish evacuate home to LEO. No shielding mechanic exists yet,
-    // so every non-LEO stack counts as unshielded.
+    // One flare roll, applied to every card in every non-LEO stack, shifted by
+    // the stack's heliocentric-zone modifier. Mandatory event action: the toll
+    // commits only when each affected player confirms on their turn
+    // (applyFlareToPlayer in applyEventChoice). Only players the flare would
+    // actually touch are made to wait. The roll is fixed now (state.lastEvent
+    // .flareRoll) so every player resolves against the same flare.
     const gen = makeRng(state.seed, state.rng.cursor);
     const flare = gen.d6();
     state.rng.cursor = gen.cursor;
     state.lastEvent.flareRoll = flare;
     notes.push(`Solar Flare: flare roll ${flare}.`);
-    const sweep = (p, slots, siteId, where) => {
-      const site = siteId ? siteById(siteId) : null;
-      const zone = (site && site.solarZone) || 'Earth';
-      const info = SOLAR_ZONE_INFO[zone];
-      const mod = info ? info.solar : 0;
-      if (mod === null) return slots; // beyond the flare's reach
-      const hit = flare + mod;
-      if (hit <= 0) return slots;
-      const survivors = [];
-      for (const slot of slots) {
-        if (slotRadHardness(slot) >= hit) { survivors.push(slot); continue; }
-        const c = PATENTS_BY_ID[slot.id];
-        if (c && c.type === 'radiator' && slot.radSide !== 'light') {
-          slot.radSide = 'light';
-          survivors.push(slot);
-          notes.push(`Solar Flare: ${p.name}'s ${cardNameOf(slot.id)} ${where} degraded to its light side.`, [slot.id]);
-          continue;
-        }
-        if (isCrewSlot(slot)) {
-          (p.leo = p.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
-          notes.push(`Solar Flare: ${p.name}'s ${cardNameOf(slot.id)} ${where} was overcome and evacuated to LEO.`, [slot.id]);
-        } else {
-          (p.hand = p.hand || []).push(slot.id);   // Decommission -> back to hand
-          notes.push(`Solar Flare: ${p.name}'s ${cardNameOf(slot.id)} ${where} decommissioned to hand (rad ${slotRadHardness(slot)} vs ${hit}).`, [slot.id]);
-        }
-      }
-      return survivors;
-    };
+    const waiting = [];
     for (const p of state.players) {
-      if (p.rocket.siteId) {
-        const before = p.rocket.stack.length;
-        p.rocket.stack = sweep(p, p.rocket.stack, p.rocket.siteId, 'aboard the rocket');
-        if (p.rocket.stack.length !== before) {
-          if (!p.rocket.stack.some((s) => s.id === p.rocket.activeThrusterId)) p.rocket.activeThrusterId = null;
-          if (!p.rocket.stack.some((s) => s.id === p.rocket.activeProspectorId)) p.rocket.activeProspectorId = null;
-          clipTank(p.rocket);
-          recallIfEmpty(p);
-        }
-      }
-      for (const o of Object.values(p.outposts || {})) {
-        if (o) o.cards = sweep(p, o.cards || [], o.siteId, `at Outpost ${o.letter}`);
+      if (flareWouldAffect(state, p, flare)) {
+        waiting.push(p.profileId);
+        notes.push(`Solar Flare: ${p.name} must confirm the flare's toll on their stacks.`);
       }
     }
+    if (waiting.length) state.pendingEvent = { kind: 'solar_flare', waiting, options: {}, flareRoll: flare };
     return;
   }
 }
@@ -683,17 +720,25 @@ function eventDebtFor(state, profileId) {
   const pe = state.pendingEvent;
   return !!(pe && pe.waiting.includes(profileId));
 }
-// Drop a debt whose options no longer exist (Budget Cuts with an empty
-// hand, a Pad Explosion tie whose cards already left LEO some other way).
-// Returns true when the debt was cleared; mutates state.
+// Drop a debt whose action no longer has anything to do (Budget Cuts with an
+// empty hand, a Pad Explosion target that already left LEO). Acknowledge-only
+// events (glitch / flare / pad-single) re-derive their own validity. Returns
+// true when the debt was cleared; mutates state.
 function clearStaleEventDebt(state, profileId) {
   const pe = state.pendingEvent;
   if (!pe || !pe.waiting.includes(profileId)) return false;
   const player = state.players.find((p) => p.profileId === profileId);
   if (!player) return false;
-  const valid = pe.kind === 'budget_cuts'
-    ? (player.hand || []).length > 0
-    : ((pe.options && pe.options[profileId]) || []).some((id) => (player.leo || []).some((s) => s.id === id));
+  const opts = pe.options && pe.options[profileId];
+  let valid;
+  if (pe.kind === 'budget_cuts') valid = (player.hand || []).length > 0;
+  else if (pe.kind === 'pad_explosion') {
+    valid = opts && opts.length
+      ? opts.some((id) => (player.leo || []).some((s) => s.id === id))   // tie: a tied card still in LEO
+      : exposedLeo(player).length > 0;                                   // single: something still exposed
+  } else if (pe.kind === 'glitch') valid = !!glitchTargetFor(state, player);
+  else if (pe.kind === 'solar_flare') valid = flareWouldAffect(state, player, pe.flareRoll);
+  else valid = true;
   if (valid) return false;
   pe.waiting = pe.waiting.filter((id) => id !== profileId);
   if (pe.options) delete pe.options[profileId];
@@ -709,6 +754,7 @@ function applyEventChoice(state, op, ctx) {
   if (!pending.waiting.includes(player.profileId)) return fail('not_waiting_on_you');
   const cardId = String(op.cardId || '');
   let log = '';
+  const newsCards = [];
 
   if (pending.kind === 'budget_cuts') {
     const idx = (player.hand || []).indexOf(cardId);
@@ -716,12 +762,40 @@ function applyEventChoice(state, op, ctx) {
     player.hand.splice(idx, 1);
     destroyToDeckBottom(state, cardId);
     log = `${player.name} sent ${cardNameOf(cardId)} to the bottom of its deck (Budget Cuts).`;
+    newsCards.push(cardId);
   } else if (pending.kind === 'pad_explosion') {
-    const opts = (pending.options && pending.options[player.profileId]) || [];
-    if (!opts.includes(cardId)) return fail('not_a_tied_card');
-    player.leo = (player.leo || []).filter((s) => s.id !== cardId);
-    (player.hand = player.hand || []).push(cardId);   // Decommission -> back to hand
-    log = `${player.name} decommissioned ${cardNameOf(cardId)} from LEO to hand (Pad Explosion).`;
+    const opts = (pending.options && pending.options[player.profileId]) || null;
+    let lose;
+    if (opts && opts.length) {
+      // Tie: the player picks which of the tied cards to lose.
+      if (!opts.includes(cardId)) return fail('not_a_tied_card');
+      lose = cardId;
+    } else {
+      // Single: re-derive the highest-mass exposed LEO card (acknowledge).
+      const exposed = exposedLeo(player);
+      if (exposed.length) {
+        const mm = Math.max(...exposed.map((s) => slotMass(s)));
+        lose = (exposed.find((s) => slotMass(s) === mm) || {}).id;
+      }
+    }
+    if (lose) {
+      player.leo = (player.leo || []).filter((s) => s.id !== lose);
+      (player.hand = player.hand || []).push(lose);   // Decommission -> back to hand
+      log = `${player.name} decommissioned ${cardNameOf(lose)} from LEO to hand (Pad Explosion).`;
+      newsCards.push(lose);
+    } else {
+      log = `${player.name} had nothing exposed to the Pad Explosion.`;
+    }
+  } else if (pending.kind === 'glitch') {
+    const tgt = glitchTargetFor(state, player);
+    if (tgt) { tgt.apply(); log = `${player.name}: a glitch disc lands on ${tgt.label} (${tgt.count} cards).`; }
+    else log = `${player.name}: nothing left to glitch.`;
+  } else if (pending.kind === 'solar_flare') {
+    const arr = [];
+    applyFlareToPlayer(state, player, pending.flareRoll, arr);
+    log = arr.length
+      ? `${player.name} (Solar Flare): ${arr.join(' ')}`
+      : `${player.name}: the Solar Flare passed harmlessly.`;
   } else {
     return fail('unknown_event');
   }
@@ -732,7 +806,7 @@ function applyEventChoice(state, op, ctx) {
     state.pendingEvent = null;
     log += ' The event is resolved.';
   }
-  pushNews(state, EVENT_ICONS[pending.kind] || '\u2604\uFE0F', log, [cardId]);
+  pushNews(state, EVENT_ICONS[pending.kind] || '\u2604\uFE0F', log, newsCards);
   return { ok: true, state, log };
 }
 
