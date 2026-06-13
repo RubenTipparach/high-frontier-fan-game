@@ -578,8 +578,8 @@ function resolveSunspotEvent(state, kind) {
       if (atMax.length === 1) {
         const id = atMax[0].id;
         p.leo = p.leo.filter((s) => s.id !== id);
-        destroyToDeckBottom(state, id);
-        notes.push(`Pad Explosion: ${p.name} lost ${cardNameOf(id)} (mass ${maxMass}) from LEO.`, [id]);
+        (p.hand = p.hand || []).push(id);   // Decommission -> back to hand
+        notes.push(`Pad Explosion: ${p.name} decommissioned ${cardNameOf(id)} (mass ${maxMass}) from LEO to hand.`, [id]);
       } else {
         waiting.push(p.profileId);
         options[p.profileId] = atMax.map((s) => s.id);
@@ -649,8 +649,8 @@ function resolveSunspotEvent(state, kind) {
           (p.leo = p.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
           notes.push(`Solar Flare: ${p.name}'s ${cardNameOf(slot.id)} ${where} was overcome and evacuated to LEO.`, [slot.id]);
         } else {
-          destroyToDeckBottom(state, slot.id);
-          notes.push(`Solar Flare: ${p.name} lost ${cardNameOf(slot.id)} ${where} (rad ${slotRadHardness(slot)} vs ${hit}).`, [slot.id]);
+          (p.hand = p.hand || []).push(slot.id);   // Decommission -> back to hand
+          notes.push(`Solar Flare: ${p.name}'s ${cardNameOf(slot.id)} ${where} decommissioned to hand (rad ${slotRadHardness(slot)} vs ${hit}).`, [slot.id]);
         }
       }
       return survivors;
@@ -720,8 +720,8 @@ function applyEventChoice(state, op, ctx) {
     const opts = (pending.options && pending.options[player.profileId]) || [];
     if (!opts.includes(cardId)) return fail('not_a_tied_card');
     player.leo = (player.leo || []).filter((s) => s.id !== cardId);
-    destroyToDeckBottom(state, cardId);
-    log = `${player.name} chose to lose ${cardNameOf(cardId)} from LEO (Pad Explosion).`;
+    (player.hand = player.hand || []).push(cardId);   // Decommission -> back to hand
+    log = `${player.name} decommissioned ${cardNameOf(cardId)} from LEO to hand (Pad Explosion).`;
   } else {
     return fail('unknown_event');
   }
