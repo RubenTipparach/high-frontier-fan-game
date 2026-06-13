@@ -13,6 +13,81 @@ import {
   SLOTS, SEASONS, NEW_ROUND_SLOT, EVENT_SLOTS,
   getEventForRoll, getSeasonForSlot, EVENT_TABLE,
 } from './turn-clock.js';
+import { PATENTS_BY_ID } from '../../data/patents.js';
+import { renderCard } from './card-ui.js';
+
+// Small attr/text escapers shared by the event-outcome chips.
+function escTc(t) {
+  return String(t == null ? '' : t)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// Deck glyphs for the Inspiration outcome (which patent deck cycled).
+const DECK_GLYPHS = {
+  thruster: '🔥', reactor: '☢️', radiator: '♨️',
+  refinery: '💧', robonaut: '⛏', generator: '⚡',
+};
+
+// Inspiration outcome, rendered VISUAL: per cycled deck, the card that sank
+// to the bottom and the card now on top, each an abbreviated, CLICKABLE chip
+// (tap to see the full card) instead of a wall of sentences. Driven off
+// lastEvent.cycled = [{ deck, out, in }] (card ids). Falls back to the text
+// notes when cycled isn't present (older events / solo).
+function inspirationVisualHtml(cycled) {
+  const chip = (id, cls, arrow) => {
+    const c = PATENTS_BY_ID[id];
+    const name = c ? c.name : id;
+    return `<button type="button" class="tc-card-chip ${cls}" data-card-id="${escTc(id)}"
+      title="${escTc(name)} - tap to view the card">
+      <span class="tc-chip-name">${escTc(name)}</span><span class="tc-chip-arrow">${arrow}</span></button>`;
+  };
+  const rows = cycled.map((c) => `
+    <li class="tc-insp-row">
+      <span class="tc-insp-deck" title="${escTc(c.deck)} deck">${DECK_GLYPHS[c.deck] || '🃏'}</span>
+      ${chip(c.out, 'is-sank', '↓')}
+      <span class="tc-insp-to">→</span>
+      ${chip(c.in, 'is-top', '↑')}
+    </li>`).join('');
+  return `<div class="tc-insp">
+    <div class="tc-insp-legend"><span>↓ sank to bottom</span><span>↑ new top</span></div>
+    <ul class="tc-insp-list">${rows}</ul>
+  </div>`;
+}
+
+// Lightweight read-only card preview, layered over the turn-clock modal.
+// Esc / click-away / Close dismiss only the preview.
+function openCardPreview(cardId) {
+  const card = PATENTS_BY_ID[cardId];
+  if (!card) return;
+  document.querySelector('.tc-card-preview-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay tc-card-preview-overlay';
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey, true);
+  };
+  const onKey = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+  };
+  document.addEventListener('keydown', onKey, true);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const panel = document.createElement('div');
+  panel.className = 'card-modal-panel';
+  try {
+    const el = renderCard(card, { type: card.type });
+    el.classList.add('card-modal-card');
+    panel.appendChild(el);
+  } catch { panel.textContent = card.name || cardId; }
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'modal-btn';
+  btn.textContent = 'Close';
+  btn.addEventListener('click', close);
+  panel.appendChild(btn);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+}
 
 // --------- Confirm end-turn dialog ---------
 
@@ -433,9 +508,16 @@ export function openTurnClockModal({ rolling = null, animateFrom = null } = {}) 
       // the old "resolve at the table" note when present.
       const escNote = (t) => String(t)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      const notesHtml = Array.isArray(lastEvent.notes) && lastEvent.notes.length
-        ? `<ul class="ev-notes">${lastEvent.notes.map((n) => `<li>${escNote(n)}</li>`).join('')}</ul>`
+      // Inspiration cycles every deck; show it VISUAL (clickable card chips)
+      // off the structured cycled list. Other events keep their text notes.
+      const inspVisual = (ev && ev.name === 'Inspiration'
+        && Array.isArray(lastEvent.cycled) && lastEvent.cycled.length)
+        ? inspirationVisualHtml(lastEvent.cycled)
         : '';
+      const notesHtml = inspVisual
+        || (Array.isArray(lastEvent.notes) && lastEvent.notes.length
+          ? `<ul class="ev-notes">${lastEvent.notes.map((n) => `<li>${escNote(n)}</li>`).join('')}</ul>`
+          : '');
       const evBlock = ev
         ? `<div class="turn-clock-event-card" data-season="${ev.season || 'any'}">
              <header>
@@ -459,6 +541,13 @@ export function openTurnClockModal({ rolling = null, animateFrom = null } = {}) 
         </p>
         ${evBlock}
       `;
+      // Card chips in the Inspiration outcome open a read-only preview.
+      eventHost.querySelectorAll('.tc-card-chip[data-card-id]').forEach((b) => {
+        b.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openCardPreview(b.getAttribute('data-card-id'));
+        });
+      });
     } else {
       eventHost.innerHTML = `
         <p class="turn-clock-event-line muted">
