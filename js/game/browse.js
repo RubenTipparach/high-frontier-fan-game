@@ -1595,6 +1595,13 @@ function gameNews() {
   return (_online && _onlineSnapshot && Array.isArray(_onlineSnapshot.news))
     ? _onlineSnapshot.news : [];
 }
+// Is my rocket stack carrying a Glitch disc (Sunspot Glitch event)? Read off
+// the snapshot; solo never glitches, so it's always false there.
+function isMyRocketGlitched() {
+  if (!_online || !_onlineSnapshot || !Array.isArray(_onlineSnapshot.players) || !_onlineMe) return false;
+  const me = _onlineSnapshot.players.find((p) => p.profileId === _onlineMe.id);
+  return !!(me && me.rocket && me.rocket.glitch);
+}
 function newsSeenKey() { return 'hf-news-seen-' + (_onlineGameId || 'solo'); }
 function refreshNewsBadge() {
   const badge = document.getElementById('news-badge');
@@ -6872,6 +6879,19 @@ function openRocketStackModal() {
            ? `<ul class="rocket-issues">${r.missing.map((m) => `<li>${esc(m)}</li>`).join('')}</ul>`
            : ''}`;
 
+    // Glitch: a red disc landed on this stack (Sunspot Glitch event). It
+    // can't move or operate until a colocated Human clears it. Red outline +
+    // banner mirror the physical red glitch disc.
+    const glitched = isMyRocketGlitched();
+    panel.classList.toggle('is-glitched', glitched);
+    const glitchBanner = glitched
+      ? `<div class="rocket-glitch-banner" role="status">
+           <span class="glitch-disc" aria-hidden="true"></span>
+           <span>This stack is <strong>glitched</strong> - it can't move or operate
+           until a colocated Human reaches it to clear the disc.</span>
+         </div>`
+      : '';
+
     // Totals row. Reorganized to surface the modified-thrust
     // triangle on the LEFT as the headline visual (the player
     // reads thrust-vs-wet-mass off it at a glance), with the
@@ -7010,6 +7030,7 @@ function openRocketStackModal() {
     const hereLabel = hereIsSite ? 'Select site' : 'Select node';
     const hereDisabled = !here ? 'disabled' : '';
     body.innerHTML = `
+      ${glitchBanner}
       <div class="rocket-stack-header">
         <div class="rocket-stack-title-row">
           <h2 class="rocket-stack-title">🚀 LEO Rocket</h2>
@@ -11788,6 +11809,7 @@ function syncSandboxRocket() {
     x, y,
     colour: myRocketColour(),
     canFly: r.active,       // drives the 🚫 + transparency overlay
+    glitch: isMyRocketGlitched(),   // red glitch disc on the sprite
     prospectorKind,
     prospectorName,
     prospectorIsru,

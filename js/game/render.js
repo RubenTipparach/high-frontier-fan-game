@@ -3463,6 +3463,30 @@ export class MapRenderer {
     } else {
       this._prospectorBadgeBox = null;
     }
+    // Glitch disc: a bold red token sitting ON the stack (Sunspot Glitch
+    // event), mirroring the physical red glitch disc. Drawn last so it reads
+    // as placed on top of the ship; the stack can't act until a Human clears
+    // it (the stack modal carries the explanatory banner).
+    if (r.glitch) {
+      const gr = Math.max(7, Math.round(w * 0.42));
+      const gx = sx;
+      const gy = py + h * 0.42;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(gx, gy, gr, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(220, 38, 38, 0.94)';
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#7f1d1d';
+      ctx.stroke();
+      // Inner highlight ring so it reads as a raised disc, not a flat dot.
+      ctx.beginPath();
+      ctx.arc(gx, gy, gr * 0.6, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(254, 202, 202, 0.85)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      ctx.restore();
+    }
     // Stash the screen-space bounding box for hit-testing. The
     // active-thruster summary rides along for the rocket-hover
     // tooltip (browse.js fills r.thruster from
