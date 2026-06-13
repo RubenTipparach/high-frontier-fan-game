@@ -1182,7 +1182,8 @@
    when the rocket is parked at LEO - converts aqua 1:1 into water
    up to the tank cap. Same dashed border idiom as the dump-fuel
    row so it reads as a peer section, not a separate modal. */
-.fuel-tank-aqua {
+.fuel-tank-aqua,
+.fuel-tank-dirt {
   margin: 8px 0 0;
   padding: 8px 10px;
   background: rgba(15, 23, 42, 0.55);
@@ -1190,6 +1191,13 @@
   border-radius: 6px;
   font-size: 12px;
 }
+/* Dirt panel borrows the aqua panel's layout (it reuses the .aqua-*
+   inner classes) but reads in grey-brown dirt tones, not blue. */
+.fuel-tank-dirt {
+  border-color: #a8997f;
+}
+.fuel-tank-dirt .aqua-direction-label { color: #d6c7a8; }
+.fuel-tank-dirt .aqua-help { margin: 6px 0 0; font-size: 10px; }
 .fuel-tank-aqua .aqua-row {
   display: flex;
   justify-content: space-between;
@@ -1204,13 +1212,13 @@
   margin: 4px 0 6px;
   font-size: 10px;
 }
-.fuel-tank-aqua .aqua-actions {
+:is(.fuel-tank-aqua, .fuel-tank-dirt) .aqua-actions {
   display: flex;
   gap: 6px;
   justify-content: center;
   flex-wrap: wrap;
 }
-.fuel-tank-aqua .aqua-actions .popup-btn {
+:is(.fuel-tank-aqua, .fuel-tank-dirt) .aqua-actions .popup-btn {
   font-size: 11px;
   padding: 5px 9px;
   min-width: 56px;
@@ -1219,7 +1227,7 @@
    modes as clearly distinct: tank-fill on top, cash-out
    below with a dashed divider between. The direction label
    on each row spells out which way the water flows. */
-.fuel-tank-aqua .aqua-direction {
+:is(.fuel-tank-aqua, .fuel-tank-dirt) .aqua-direction {
   margin-top: 8px;
   display: flex;
   flex-direction: column;
@@ -1229,7 +1237,7 @@
   padding-top: 8px;
   border-top: 1px dashed rgba(56, 189, 248, 0.30);
 }
-.fuel-tank-aqua .aqua-direction-label {
+:is(.fuel-tank-aqua, .fuel-tank-dirt) .aqua-direction-label {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 1px;

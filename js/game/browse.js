@@ -8720,46 +8720,9 @@ function doFactoryRefuel(site, gain) {
   openFuelTankModal({ fromWater: tankBefore, toWater: tankBefore + gain });
 }
 
-// Free dirt refuel (Cargo Transfer free action). Only a dirt thruster can
-// take dirt, and dirt can't mix with water. A non-crew dirt thruster fills
-// to the cap; a crew dirt thruster takes 1 FT. No operation is spent.
-function doDirtRefuel() {
-  // Online: the server validates the dirt thruster + grade and fills the
-  // tank; the snapshot repaints the (grey) tank.
-  if (_online) { submitOnlineOp({ kind: 'DIRT_REFUEL' }); return; }
-  const dcap = getDirtCapability();
-  if (!dcap.burner) {
-    setStatus('Dirt refuel needs a dirt-burning thruster aboard.');
-    return;
-  }
-  if (!isLeoSite(getRocketSite()) && !dcap.hasIsru) {
-    setStatus('Dirt refuel needs an ISRU-rated card aboard at a site.');
-    return;
-  }
-  const tank = getTankWater();
-  if (tank > 0 && getTankGrade() === 'water') {
-    setStatus('Water and dirt can\'t mix - burn the tank empty first.');
-    return;
-  }
-  const room = getWaterCap() - tank;
-  if (room <= 0) { setStatus('Tank is already full.'); return; }
-  const isCrew = dcap.burner === 'crew';
-  // A crew dirt thruster takes only 1 dirt FT per turn.
-  if (isCrew && hasDirtRefueledThisTurn()) {
-    setStatus('This crew dirt thruster already took its 1 dirt FT this turn.');
-    return;
-  }
-  const gain = isCrew ? Math.min(1, room) : room;
-  setTankGrade('dirt');
-  addFuel(gain);
-  if (isCrew) markDirtRefueledThisTurn();
-  setStatus(`🟤 Loaded <strong>+${gain}</strong> dirt FT${gain === 1 ? '' : 's'} (tank now grey).`);
-  logAction({
-    type: 'dirt_refuel', icon: '🟤',
-    summary: `Dirt refuel +${gain} (tank ${getTankWater()} dirt)`,
-    undoable: false,
-  });
-}
+// Dirt refuel lives in the fuel-tank modal (openFuelTankModal's dirt
+// section), gated on the ACTIVE engine being a dirt thruster - it's fueling
+// that engine, so it sits with the water controls, not in the site popup.
 
 // Delivery (rulebook): ship a Black-Side card from an outpost at one of your
 // Factories back to LEO. Cost: zones-from-Earth x2 (+1 if site number > 7)
@@ -9802,7 +9765,14 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const fracLadder = wcNow.fractions.length ? wcNow.fractions.join(' ') : 'whole steps';
 
   const panel = document.createElement('div');
-  const isDirt = getTankGrade() === 'dirt';
+  // The active engine drives the fuel grade: a dirt thruster takes dirt, a
+  // water thruster takes water, and the two never mix in the tank. The
+  // LIQUID colour follows what's actually LOADED (water already aboard stays
+  // blue even under a dirt engine); an empty tank styles by the active
+  // engine, since that's the grade you'd load next.
+  const activeDirt = getActiveFuelGrade() === 'dirt';
+  const isDirt = (getTankWater() > 0) ? (getTankGrade() === 'dirt') : activeDirt;
+  const fuelWord = isDirt ? 'dirt' : 'water';
   panel.className = 'fuel-tank-panel' + (isDirt ? ' is-dirt-fuel' : '');
   panel.innerHTML = `
     <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
@@ -9854,13 +9824,13 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
           <span class="tank-sep">/</span>
           <strong class="tank-cap">${cap}</strong>
         </div>
-        <em class="muted">water</em>
+        <em class="muted">${fuelWord}</em>
       </div>
     </div>
     <div class="fuel-tank-actions">
       <button type="button" class="popup-btn popup-btn-secondary" id="tank-dump"
-        title="Drain a chosen amount of water from the tank">💧⤓ Dump water</button>
-      ${fuelTankPumpBtns()}
+        title="Drain a chosen amount of ${fuelWord} from the tank">${isDirt ? '🟤⤓ Dump dirt' : '💧⤓ Dump water'}</button>
+      ${activeDirt ? '' : fuelTankPumpBtns()}
     </div>
 <div class="fuel-tank-aqua" id="tank-aqua-section" hidden>
       <div class="aqua-row">
@@ -9894,8 +9864,26 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         </div>
       </div>
     </div>
+    <div class="fuel-tank-dirt" id="tank-dirt-section" hidden>
+      <div class="aqua-direction">
+        <span class="aqua-direction-label">⛏ Scoop → 🟤 Tank</span>
+        <div class="aqua-actions">
+          <button type="button" class="popup-btn popup-btn-secondary" id="dirt-fill-1"
+            title="Scoop 1 dirt FT into the tank">+1</button>
+          <button type="button" class="popup-btn popup-btn-secondary" id="dirt-fill-5"
+            title="Scoop 5 dirt FTs into the tank">+5</button>
+          <button type="button" class="popup-btn" id="dirt-fill-max"
+            title="Fill the tank to its cap with dirt">Max fill</button>
+        </div>
+      </div>
+      <p class="muted aqua-help" id="dirt-help">
+        A dirt thruster scoops grey propellant from the ground for free (a
+        crew dirt thruster takes 1 per turn). Dirt has no aqua value and
+        can't mix with water.
+      </p>
+    </div>
     <p class="muted fuel-tank-dump-note">
-      Dumped water is destroyed for now. Stage 3+ turns this into
+      Dumped ${fuelWord} is destroyed for now. Stage 3+ turns this into
       an outpost-stack drop once factories land.
     </p>
     <div class="fuel-tank-foot muted">
@@ -10234,7 +10222,11 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const aquaCash5Btn  = panel.querySelector('#aqua-cash-5');
   const aquaCashAllBtn = panel.querySelector('#aqua-cash-all');
   const atLeo = isLeoSite(getRocketSite());
-  if (atLeo && aquaSection) aquaSection.hidden = false;
+  // Aqua <-> water is WATER-ONLY: dirt has no aqua value, and water can't be
+  // poured onto a dirt tank (the grades can't mix). So the bank panel only
+  // shows when the tank is in water mode (isDirt covers both a dirt engine
+  // and dirt already loaded).
+  if (atLeo && !isDirt && aquaSection) aquaSection.hidden = false;
   const refreshAquaButtons = () => {
     if (!aquaSection || aquaSection.hidden) return;
     const bal = getAqua();
@@ -10269,7 +10261,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     tween = {
       from: fromLevel, to: toLevel,
       t0: performance.now(), dur: 400,
-      onDone: () => { refreshAquaButtons(); refreshDumpButtons(); },
+      onDone: () => { refreshAquaButtons(); refreshDumpButtons(); refreshDirtButtons(); },
     };
   };
   const fillFromAqua = async (amount, e) => {
@@ -10333,8 +10325,78 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   aquaCash1Btn?.addEventListener('click',   (e) => cashOutToAqua(1, e));
   aquaCash5Btn?.addEventListener('click',   (e) => cashOutToAqua(5, e));
   aquaCashAllBtn?.addEventListener('click', (e) => cashOutToAqua(getTankWater(), e));
+
+  // Dirt refuel section: shown when the ACTIVE engine is a dirt thruster.
+  // Loading dirt is fueling that engine, so it lives here next to the water
+  // controls (never the site popup). Dirt scoops free from the ground at a
+  // site with an ISRU card aboard, or from LEO; it can't mix with water, and
+  // a crew dirt thruster takes only 1 FT per turn. Same fill granularity as
+  // the water bank panel (+1 / +5 / Max); no cash-out, since dirt has no
+  // aqua value.
+  const dirtSection = panel.querySelector('#tank-dirt-section');
+  const dirtFill1   = panel.querySelector('#dirt-fill-1');
+  const dirtFill5   = panel.querySelector('#dirt-fill-5');
+  const dirtFillMax = panel.querySelector('#dirt-fill-max');
+  const dirtHelp    = panel.querySelector('#dirt-help');
+  const isCrewDirt  = !!CREW_BY_ID[getActiveThrusterId()];
+  const canScoopDirt = atLeo || (!!getRocketSite() && !atLeo && getDirtCapability().hasIsru);
+  if (activeDirt && dirtSection) dirtSection.hidden = false;
+  function refreshDirtButtons() {
+    if (!dirtSection || dirtSection.hidden) return;
+    const cur = getTankWater();
+    const room = Math.max(0, cap - cur);
+    const mixed = cur > 0 && getTankGrade() === 'water';
+    const crewDone = isCrewDirt && crewDirtRefuelUsed();
+    const blocked = mixed || crewDone || room < 1 || !canScoopDirt;
+    if (dirtFill1)   dirtFill1.disabled   = blocked;
+    // A crew dirt thruster takes 1 FT per turn, so +5 / Max collapse to the
+    // lone +1; a dirt-burning CARD scoops freely up to the cap.
+    if (dirtFill5)   dirtFill5.disabled   = blocked || isCrewDirt;
+    if (dirtFillMax) dirtFillMax.disabled = blocked || isCrewDirt;
+    if (dirtHelp) {
+      dirtHelp.textContent = !canScoopDirt
+        ? 'Park at a site with an ISRU card aboard (or at LEO) to scoop dirt.'
+        : mixed
+          ? 'Burn the water tank empty first - dirt and water can\'t mix.'
+          : crewDone
+            ? 'This crew dirt thruster already took its 1 dirt FT this turn.'
+            : 'A dirt thruster scoops grey propellant from the ground for free (a crew dirt thruster takes 1 per turn). Dirt has no aqua value.';
+    }
+  }
+  refreshDirtButtons();
+  const fillDirt = async (amount, e) => {
+    e?.stopPropagation();
+    if (!activeDirt || !canScoopDirt) return;
+    const cur = getTankWater();
+    if (cur > 0 && getTankGrade() === 'water') { refreshDirtButtons(); return; }
+    const room = Math.max(0, cap - cur);
+    if (room < 1) { refreshDirtButtons(); return; }
+    if (isCrewDirt && crewDirtRefuelUsed()) { refreshDirtButtons(); return; }
+    const want = isCrewDirt ? 1 : (amount > 0 ? Math.min(amount, room) : room);
+    // Online: the server validates the active dirt thruster + grade + scoop
+    // location and fills; the snapshot repaints the grey tank.
+    if (_online) {
+      const ok = await submitOnlineOp({ kind: 'DIRT_REFUEL', amount: want });
+      if (!ok) { refreshDirtButtons(); return; }
+      animateTankLevel();
+      return;
+    }
+    setTankGrade('dirt');
+    addFuel(Math.min(want, room));
+    if (isCrewDirt) markDirtRefueledThisTurn();
+    animateTankLevel();
+    logAction({
+      type: 'dirt_refuel', icon: '🟤',
+      summary: `Dirt refuel +${Math.min(want, room)} (tank ${getTankWater()} dirt)`,
+      undoable: false,
+    });
+  };
+  dirtFill1?.addEventListener('click',   (e) => fillDirt(1, e));
+  dirtFill5?.addEventListener('click',   (e) => fillDirt(5, e));
+  dirtFillMax?.addEventListener('click', (e) => fillDirt(Infinity, e));
+
   const unsubAqua = onAquaChange(refreshAquaButtons);
-  const unsubRocket = onRocketChange(refreshAquaButtons);
+  const unsubRocket = onRocketChange(() => { refreshAquaButtons(); refreshDirtButtons(); });
   // Cleanup: detach listeners when the overlay tears down so a
   // closed modal doesn't keep responding to balance changes.
   const origRemove = overlay.remove.bind(overlay);
@@ -13337,36 +13399,12 @@ function showSitePopupFor(site) {
       });
     }
   }
-  // Dirt refuel (Cargo Transfer free action). Shown when the rocket is
-  // parked here with a dirt-burning thruster aboard, and either this is
-  // LEO (free top-up) or an ISRU-rated card rides along (the player-aid
-  // loader). The ACTIVE thruster doesn't matter for loading - only for
-  // burning. Fills the tank with grey dirt FTs (crew dirt rocket: 1 FT).
-  // Water and dirt can't mix. No operation cost.
-  const dirtCap = (rocketSite && site.id === rocketSite.id) ? getDirtCapability() : null;
-  if (dirtCap && dirtCap.burner && (isLeoSite(site) || dirtCap.hasIsru)) {
-    const tank = getTankWater();
-    const room = Math.max(0, getWaterCap() - tank);
-    const mixed = tank > 0 && getTankGrade() === 'water';
-    const isCrew = dirtCap.burner === 'crew';
-    const crewDone = isCrew && crewDirtRefuelUsed();   // 1 dirt FT per turn for crew
-    const ok = room > 0 && !mixed && !crewDone;
-    const gain = isCrew ? Math.min(1, room) : room;
-    actions.push({
-      label: crewDone ? '🟤 Dirt refuel done (1/turn)'
-        : mixed ? '🟤 Dirt refuel (empty water first)'
-        : room <= 0 ? '🟤 Tank full'
-        : `🟤 Dirt refuel (+${gain})`,
-      variant: ok ? 'rocket' : 'secondary',
-      disabled: !ok,
-      title: crewDone
-        ? 'A crew dirt thruster may take only 1 dirt FT per turn. End turn to refresh.'
-        : mixed
-          ? 'Burn the water tank empty before taking on dirt - the two can\'t mix.'
-          : 'Free: a dirt thruster loads grey dirt FTs (a crew dirt thruster takes 1 per turn).',
-      onClick: () => { if (!ok) return; doDirtRefuel(); _renderer.clearSitePopup(); },
-    });
-  }
+  // Dirt refuel is NOT a site-popup action: it lives in the rocket fuel
+  // tank modal, shown only when the ACTIVE engine is a dirt thruster (open
+  // the tank from the rocket-stack wet-mass cell or the LEO dock). Loading
+  // dirt is fueling the active engine, so it belongs with the tank, next to
+  // the water controls. Water and dirt can't mix, and a water thruster can't
+  // burn dirt, so the grade is driven entirely by the active engine.
   // Industrialize action (rulebook I7). Shown only at sites where
   // the rocket is parked AND a successful claim disc exists. The
   // button gates on whether the stack has a valid refinery +

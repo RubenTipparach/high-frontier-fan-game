@@ -2025,41 +2025,41 @@ function applySiteRefuel(state, op, player) {
 }
 
 // Free dirt refuel (Cargo Transfer free action / crew bonus): top the tank
-// with grey dirt FTs. Only a DIRT thruster can take dirt, and dirt can't mix
-// with water (empty the tank first). A non-crew dirt thruster fills to the
-// wet-mass cap; a crew dirt thruster takes 1 FT, once per turn. Costs NO
-// operation (free action). op = {} (acts on the active thruster).
-function applyDirtRefuel(state, _op, player) {
-  // Loading dirt is gated by the PLAYER AID rule ("free dirt refuel with
-  // any ISRU card at a Factory or Site"; LEO tops up freely), NOT by the
-  // active thruster - the active-thruster check belongs to BURN time (the
-  // fuel-grade gate on MOVE). Any dirt-capable thruster face aboard
-  // qualifies the stack (loading dirt no thruster can burn would just
-  // brick the tank, so a burner must ride along).
-  const stack = player.rocket.stack;
-  const dirtSlots = stack.filter((s) => faceBurnsDirt(thrusterFaceOf(s)));
-  if (!dirtSlots.length) return fail('not_dirt_thruster');
-  // siteId null IS LEO (canonical form, see rocketAtLeo): free top-up,
-  // no ISRU needed. Elsewhere the slug must resolve to a real SITE (a
-  // waypoint in deep space has no ground to scoop) and an ISRU-rated
-  // card must ride along.
+// with grey dirt FTs. Loading dirt is FUELING THE ACTIVE ENGINE, so it's
+// gated on the ACTIVE thruster being a dirt thruster (a water thruster can't
+// burn dirt - the same grade rule the MOVE fuel-grade gate enforces). Dirt
+// can't mix with water (empty the tank first). A dirt-burning CARD scoops
+// the requested amount (or fills to the wet-mass cap when none is given); a
+// crew dirt thruster takes 1 FT, once per turn. Costs NO operation (free
+// action). op = { amount? }.
+function applyDirtRefuel(state, op, player) {
+  const tid = player.rocket.activeThrusterId;
+  const slot = tid && player.rocket.stack.find((s) => s.id === tid);
+  if (!slot) return fail('no_thruster');
+  if (!faceBurnsDirt(thrusterFaceOf(slot))) return fail('not_dirt_thruster');
+  // Dirt is scooped from the ground: siteId null IS LEO (canonical form,
+  // see rocketAtLeo) and tops up free; elsewhere the slug must resolve to a
+  // real SITE (a deep-space waypoint has no ground) with an ISRU-rated card
+  // aboard.
   if (!rocketAtLeo(player)) {
     if (!siteById(player.rocket.siteId)) return fail('not_at_site');
-    if (!stack.some(slotHasIsruRig)) return fail('no_isru_for_dirt');
+    if (!player.rocket.stack.some(slotHasIsruRig)) return fail('no_isru_for_dirt');
   }
   const tank = Number(player.rocket.tank) || 0;
   if (tank > 0 && tankGradeOf(player.rocket) === 'water') return fail('cannot_mix_fuel');
   const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
   const cap = Math.max(0, TANK_MAX - dry);
-  if (tank >= cap) return fail('tank_full');
-  // 1 FT max per turn when the only dirt burner aboard is a crew rocket;
-  // a dirt-burning CARD fills to the cap.
-  const isCrew = dirtSlots.every((sl) => isCrewSlot(sl));
+  const room = cap - tank;
+  if (room <= 0) return fail('tank_full');
+  const isCrew = isCrewSlot(slot);
   if (isCrew) {
     player.dirtRefueledThisTurn = !!player.dirtRefueledThisTurn;
     if (player.dirtRefueledThisTurn) return fail('already_dirt_refueled');
   }
-  const gain = isCrew ? Math.min(1, cap - tank) : (cap - tank);
+  const want = Number(op && op.amount);
+  const gain = isCrew
+    ? Math.min(1, room)
+    : (Number.isFinite(want) && want > 0 ? Math.min(want, room) : room);
   if (gain <= 0) return fail('tank_full');
   player.rocket.tank = round6(tank + gain);
   player.rocket.tankGrade = 'dirt';
