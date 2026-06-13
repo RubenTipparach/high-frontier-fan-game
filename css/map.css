@@ -1233,9 +1233,13 @@
   flex-direction: column;
   gap: 4px;
 }
-.fuel-tank-aqua .aqua-direction-reverse {
+:is(.fuel-tank-aqua, .fuel-tank-dirt) .aqua-direction-reverse {
   padding-top: 8px;
   border-top: 1px dashed rgba(56, 189, 248, 0.30);
+}
+/* The dirt panel's dump divider reads in grey-brown, not aqua blue. */
+.fuel-tank-dirt .aqua-direction-reverse {
+  border-top-color: rgba(168, 154, 130, 0.35);
 }
 :is(.fuel-tank-aqua, .fuel-tank-dirt) .aqua-direction-label {
   font-size: 10px;
@@ -1245,7 +1249,7 @@
   color: var(--accent);
   text-align: center;
 }
-.fuel-tank-aqua .aqua-direction-reverse .aqua-direction-label {
+:is(.fuel-tank-aqua, .fuel-tank-dirt) .aqua-direction-reverse .aqua-direction-label {
   color: #fbbf24;
 }
 

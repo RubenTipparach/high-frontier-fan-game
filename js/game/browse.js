@@ -9828,9 +9828,9 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
       </div>
     </div>
     <div class="fuel-tank-actions">
-      <button type="button" class="popup-btn popup-btn-secondary" id="tank-dump"
-        title="Drain a chosen amount of ${fuelWord} from the tank">${isDirt ? '🟤⤓ Dump dirt' : '💧⤓ Dump water'}</button>
-      ${activeDirt ? '' : fuelTankPumpBtns()}
+      ${isDirt ? '' : `<button type="button" class="popup-btn popup-btn-secondary" id="tank-dump"
+        title="Drain a chosen amount of water from the tank">💧⤓ Dump water</button>`}
+      ${isDirt ? '' : fuelTankPumpBtns()}
     </div>
 <div class="fuel-tank-aqua" id="tank-aqua-section" hidden>
       <div class="aqua-row">
@@ -9874,6 +9874,17 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
             title="Scoop 5 dirt FTs into the tank">+5</button>
           <button type="button" class="popup-btn" id="dirt-fill-max"
             title="Fill the tank to its cap with dirt">Max fill</button>
+        </div>
+      </div>
+      <div class="aqua-direction aqua-direction-reverse">
+        <span class="aqua-direction-label">🟤 Tank → ⤓ Dump</span>
+        <div class="aqua-actions">
+          <button type="button" class="popup-btn popup-btn-secondary" id="dirt-dump-1"
+            title="Jettison 1 dirt FT">+1</button>
+          <button type="button" class="popup-btn popup-btn-secondary" id="dirt-dump-5"
+            title="Jettison 5 dirt FTs">+5</button>
+          <button type="button" class="popup-btn" id="dirt-dump-all"
+            title="Jettison all dirt from the tank">Dump all</button>
         </div>
       </div>
       <p class="muted aqua-help" id="dirt-help">
@@ -10337,6 +10348,9 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const dirtFill1   = panel.querySelector('#dirt-fill-1');
   const dirtFill5   = panel.querySelector('#dirt-fill-5');
   const dirtFillMax = panel.querySelector('#dirt-fill-max');
+  const dirtDump1   = panel.querySelector('#dirt-dump-1');
+  const dirtDump5   = panel.querySelector('#dirt-dump-5');
+  const dirtDumpAll = panel.querySelector('#dirt-dump-all');
   const dirtHelp    = panel.querySelector('#dirt-help');
   const isCrewDirt  = !!CREW_BY_ID[getActiveThrusterId()];
   const canScoopDirt = atLeo || (!!getRocketSite() && !atLeo && getDirtCapability().hasIsru);
@@ -10360,6 +10374,11 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     // lone +1; a dirt-burning CARD scoops freely up to the cap.
     if (dirtFill5)   dirtFill5.disabled   = blocked || isCrewDirt;
     if (dirtFillMax) dirtFillMax.disabled = blocked || isCrewDirt;
+    // Dump (jettison) needs no engine: you can always vent loaded dirt, so
+    // the only gate is "is there dirt to dump?".
+    if (dirtDump1)   dirtDump1.disabled   = cur < 1;
+    if (dirtDump5)   dirtDump5.disabled   = cur < 5;
+    if (dirtDumpAll) dirtDumpAll.disabled = cur < 1;
     if (dirtHelp) {
       dirtHelp.textContent = !activeDirt
         ? 'Make your dirt thruster the active engine to scoop dirt (a water engine can\'t burn it).'
@@ -10403,6 +10422,29 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   dirtFill1?.addEventListener('click',   (e) => fillDirt(1, e));
   dirtFill5?.addEventListener('click',   (e) => fillDirt(5, e));
   dirtFillMax?.addEventListener('click', (e) => fillDirt(Infinity, e));
+  // Dump dirt: same inline +1 / +5 / Dump-all UX as the scoop row (no
+  // separate Dump-dirt button / amount-picker modal). Jettisons grey
+  // propellant; destroyed for now (the dump note explains the Stage 3+ plan).
+  const dumpDirt = (amount, e) => {
+    e?.stopPropagation();
+    const cur = getTankWater();
+    const drain = Math.min(amount, cur);
+    if (drain <= 0) { refreshDirtButtons(); return; }
+    removeFuel(drain);
+    const left = getTankWater();
+    drainTo(left, left <= 0 ? 600 : 250);
+    logAction({
+      type: 'dump', icon: '🟤⤓',
+      summary: left <= 0
+        ? `Dumped ${drain} dirt (tank empty)`
+        : `Dumped ${drain} dirt (tank ${left}/${getTankMax()})`,
+      undoable: false,
+    });
+    refreshDirtButtons();
+  };
+  dirtDump1?.addEventListener('click',   (e) => dumpDirt(1, e));
+  dirtDump5?.addEventListener('click',   (e) => dumpDirt(5, e));
+  dirtDumpAll?.addEventListener('click', (e) => dumpDirt(getTankWater(), e));
 
   const unsubAqua = onAquaChange(refreshAquaButtons);
   const unsubRocket = onRocketChange(() => { refreshAquaButtons(); refreshDirtButtons(); });
