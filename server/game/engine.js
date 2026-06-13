@@ -417,6 +417,49 @@ function humansAtSite(state, siteId) {
 // Co-located humans fix glitches automatically (user rule 2026-06-12):
 // crew in the stack itself, a colony dome at the site, or any human
 // stack parked at the same site clears the token - no repair op needed.
+// Operations that are GLITCH TRIGGERS (HF4 core): performing one with a
+// glitched stack forces a Glitch Roll. Movement, Boost, Income, ET Produce,
+// Delivery etc. are NOT triggers - a glitched stack does those freely.
+const GLITCH_TRIGGER_OPS = new Set(['PROSPECT', 'SITE_REFUEL', 'INDUSTRIALIZE']);
+
+// Glitch Roll: a glitched stack that performs a trigger op rolls 1d6, and
+// every colocated card whose rad-hardness EXACTLY EQUALS the roll is
+// decommissioned (crew evacuate to LEO; patents go to their deck bottom).
+// The glitch disc persists until a Human clears it (G7), so each trigger
+// re-rolls. Mutates state; returns { roll, lost } or null when not glitched.
+function resolveGlitchTrigger(state, profileId) {
+  const player = state.players.find((p) => p.profileId === profileId);
+  if (!player || !player.rocket || !player.rocket.glitch) return null;
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const roll = gen.d6();
+  state.rng.cursor = gen.cursor;
+  const lost = [];
+  const survivors = [];
+  for (const slot of player.rocket.stack) {
+    if (slotRadHardness(slot) === roll) {
+      if (isCrewSlot(slot)) {
+        (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+      } else {
+        destroyToDeckBottom(state, slot.id);
+      }
+      lost.push(cardNameOf(slot.id));
+    } else {
+      survivors.push(slot);
+    }
+  }
+  player.rocket.stack = survivors;
+  if (lost.length) {
+    if (!survivors.some((s) => s.id === player.rocket.activeThrusterId)) player.rocket.activeThrusterId = null;
+    if (!survivors.some((s) => s.id === player.rocket.activeProspectorId)) player.rocket.activeProspectorId = null;
+    clipTank(player.rocket);
+  }
+  const log = lost.length
+    ? `Glitch roll ${roll}: lost ${lost.join(', ')} (rad-hardness ${roll}).`
+    : `Glitch roll ${roll}: nothing aboard matched - the stack got lucky.`;
+  pushNews(state, EVENT_ICONS.glitch || '⚠️', `${player.name} (glitched stack): ${log}`);
+  return { roll, lost, log };
+}
+
 // Runs after every functional op and after event resolution; returns
 // gameplay notes for the log.
 function autoFixGlitches(state) {
@@ -895,7 +938,6 @@ function applyMove(state, op, player) {
   // LEO. Enforcing this keeps the "empty rocket == at LEO" invariant
   // true: the only way off LEO is to build/board a thruster first.
   if (player.rocket.stack.length === 0) return fail('empty_rocket');
-  if (player.rocket.glitch && !op.debug) return fail('stack_glitched');
   const from = player.rocket.siteId;       // null = LEO
   const here = from == null ? leoSlug() : from;
 
@@ -1779,7 +1821,6 @@ function hasProspectedThisTurn(state) {
 }
 
 function applyProspect(state, op, player) {
-  if (player.rocket.glitch) return fail('stack_glitched');
   const toSiteId = String(op.siteId || '');
   const site = siteById(toSiteId);
   if (!site) return fail('unknown_site');
@@ -1903,7 +1944,6 @@ function applyProspectReroll(state, op, player) {
 // robonaut. The chain is decommissioned back to the player's HAND (variant
 // rule, industrialize.md). The factory inherits the site's spectral type.
 function applyIndustrialize(state, op, player) {
-  if (player.rocket.glitch) return fail('stack_glitched');
   const siteId = String(op.siteId || '');
   const site = siteById(siteId);
   if (!site) return fail('unknown_site');
@@ -1972,7 +2012,6 @@ function applyEtProduce(state, op, player) {
   } else if (outpost.siteId !== siteId) {
     return fail('not_colocated');
   }
-  if (outpost.glitch) return fail('stack_glitched');
   player.hand.splice(hIdx, 1);
   outpost.cards.push({ id: cardId, kind: 'patent', face: 'secondary' });
   player.opsRemaining -= 1;
@@ -2000,7 +2039,6 @@ function applyIncome(state, op, player) {
 //   factory - your own factory here: a flat +7. Mirrors doFactoryRefuel.
 // Gain is clamped by the tank's wet-mass room; the leftover is lost.
 function applySiteRefuel(state, op, player) {
-  if (player.rocket.glitch) return fail('stack_glitched');
   const siteId = String(op.siteId || '');
   const site = siteById(siteId);
   if (!site) return fail('unknown_site');
@@ -3152,6 +3190,14 @@ export function applyOperation(prevState, op, ctx) {
     const cursorBefore = state.rng.cursor;
     const res = FUNCTIONAL[op.kind](state, op, player);
     if (!res.ok) return res;
+    // Glitch trigger: if this op is a trigger and the stack is glitched, roll
+    // 1d6 and decommission every colocated card whose rad-hardness matches.
+    // Done BEFORE autoFixGlitches so a human arriving on this same op doesn't
+    // pre-empt the roll the trigger already incurred.
+    if (GLITCH_TRIGGER_OPS.has(op.kind)) {
+      const gl = resolveGlitchTrigger(res.state, player.profileId);
+      if (gl) res.log = (res.log ? res.log + ' ' : '') + gl.log;
+    }
     // Co-located humans fix glitches: any op that moved cards or ships
     // may have put a crew next to a glitched stack, so sweep after every
     // functional op and narrate any fix in the same log line.
