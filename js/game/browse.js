@@ -10340,27 +10340,36 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const dirtHelp    = panel.querySelector('#dirt-help');
   const isCrewDirt  = !!CREW_BY_ID[getActiveThrusterId()];
   const canScoopDirt = atLeo || (!!getRocketSite() && !atLeo && getDirtCapability().hasIsru);
-  if (activeDirt && dirtSection) dirtSection.hidden = false;
+  // Show the scoop panel whenever the tank is in DIRT MODE (dirt loaded, or
+  // an empty tank under a dirt engine) so the player always sees the dirt
+  // controls, not just when the dirt thruster happens to be the active
+  // engine. The fill buttons stay disabled (with a reason) until the dirt
+  // thruster IS the active engine - loading dirt fuels the active engine, and
+  // a water engine can't burn it. (A missile robonaut like Wakefield e-Beam
+  // can be both the active prospector AND the active thruster; it must be the
+  // active THRUSTER to scoop.)
+  if (isDirt && dirtSection) dirtSection.hidden = false;
   function refreshDirtButtons() {
     if (!dirtSection || dirtSection.hidden) return;
     const cur = getTankWater();
     const room = Math.max(0, cap - cur);
-    const mixed = cur > 0 && getTankGrade() === 'water';
     const crewDone = isCrewDirt && crewDirtRefuelUsed();
-    const blocked = mixed || crewDone || room < 1 || !canScoopDirt;
+    const blocked = !activeDirt || !canScoopDirt || crewDone || room < 1;
     if (dirtFill1)   dirtFill1.disabled   = blocked;
     // A crew dirt thruster takes 1 FT per turn, so +5 / Max collapse to the
     // lone +1; a dirt-burning CARD scoops freely up to the cap.
     if (dirtFill5)   dirtFill5.disabled   = blocked || isCrewDirt;
     if (dirtFillMax) dirtFillMax.disabled = blocked || isCrewDirt;
     if (dirtHelp) {
-      dirtHelp.textContent = !canScoopDirt
-        ? 'Park at a site with an ISRU card aboard (or at LEO) to scoop dirt.'
-        : mixed
-          ? 'Burn the water tank empty first - dirt and water can\'t mix.'
-          : crewDone
-            ? 'This crew dirt thruster already took its 1 dirt FT this turn.'
-            : 'A dirt thruster scoops grey propellant from the ground for free (a crew dirt thruster takes 1 per turn). Dirt has no aqua value.';
+      dirtHelp.textContent = !activeDirt
+        ? 'Make your dirt thruster the active engine to scoop dirt (a water engine can\'t burn it).'
+        : !canScoopDirt
+          ? 'Park at a site with an ISRU card aboard (or at LEO) to scoop dirt.'
+          : room < 1
+            ? 'Tank is full.'
+            : crewDone
+              ? 'This crew dirt thruster already took its 1 dirt FT this turn.'
+              : 'A dirt thruster scoops grey propellant from the ground for free (a crew dirt thruster takes 1 per turn). Dirt has no aqua value.';
     }
   }
   refreshDirtButtons();
