@@ -829,6 +829,29 @@ export function faceBurnsDirt(face) {
   return !!(face && (face.fuelType === 'Dirt' || face.dirt === true));
 }
 
+// Dirt-load capability of the WHOLE stack (mirror of the server's
+// applyDirtRefuel gates). Loading dirt rides the player-aid rule: "any
+// ISRU card at a Factory or Site" (LEO tops up freely) - NOT the active
+// thruster; activating the dirt burner matters only when BURNING. Returns
+// { burner, hasIsru }: burner is 'card' (fills to cap) when any dirt-
+// burning patent face is aboard, 'crew' (1 FT per turn) when only a crew
+// dirt rocket is, null when none; hasIsru is true when any installed face
+// carries an ISRU rating (rating 0 counts - the rig exists).
+export function getDirtCapability() {
+  let burner = null;
+  let hasIsru = false;
+  for (const slot of _stack) {
+    const f = installedFace(slot);
+    if (faceBurnsDirt(f)) {
+      if (!CREW_BY_ID[slot.id]) burner = 'card';
+      else if (!burner) burner = 'crew';
+    }
+    if ((f.properties || []).some((pr) => pr && pr.key === 'isru')
+        || (f.isru != null && Number.isFinite(Number(f.isru)))) hasIsru = true;
+  }
+  return { burner, hasIsru };
+}
+
 // The fuel grade the active thruster needs ('dirt' or 'water'); 'water' when
 // there is no active thruster. Drives the tank-grade gate + grey UI.
 export function getActiveFuelGrade() {

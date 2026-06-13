@@ -35,7 +35,7 @@ import {
   onRocketChange, isRocketActive,
   getActiveThrusterId, setActiveThruster,
   getTankWater, setTankWater, addFuel, removeFuel, getTankMax, getWaterCap,
-  getTankGrade, setTankGrade, getActiveFuelGrade,
+  getTankGrade, setTankGrade, getActiveFuelGrade, getDirtCapability,
   getStackTotals, getActiveThrusterStats, setSolarZone,
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats, getSupportChainView,
@@ -2898,7 +2898,9 @@ function humanizeOnlineOpError(code, detail) {
     no_factory: 'You need your own factory here.',
     cannot_mix_fuel: 'Water and dirt can\'t mix - burn the tank empty before switching fuel.',
     wrong_fuel_grade: 'Wrong fuel: a dirt thruster burns dirt, a water thruster burns water. Refuel the matching grade.',
-    not_dirt_thruster: 'Only a dirt thruster can take on dirt fuel.',
+    not_dirt_thruster: 'Dirt refuel needs a dirt-burning thruster aboard.',
+    not_at_site: 'Park at a site first - dirt comes from the ground.',
+    no_isru_for_dirt: 'Dirt refuel needs an ISRU-rated card aboard (LEO tops up freely).',
     not_water_fuel: 'Dirt has no cash value - only water converts back to aqua.',
     no_thruster: 'Activate a thruster first.',
     already_dirt_refueled: 'This crew dirt thruster already took its 1 dirt FT this turn.',
@@ -8715,8 +8717,13 @@ function doDirtRefuel() {
   // Online: the server validates the dirt thruster + grade and fills the
   // tank; the snapshot repaints the (grey) tank.
   if (_online) { submitOnlineOp({ kind: 'DIRT_REFUEL' }); return; }
-  if (getActiveFuelGrade() !== 'dirt') {
-    setStatus('Dirt refuel needs an active dirt thruster.');
+  const dcap = getDirtCapability();
+  if (!dcap.burner) {
+    setStatus('Dirt refuel needs a dirt-burning thruster aboard.');
+    return;
+  }
+  if (!isLeoSite(getRocketSite()) && !dcap.hasIsru) {
+    setStatus('Dirt refuel needs an ISRU-rated card aboard at a site.');
     return;
   }
   const tank = getTankWater();
@@ -8726,7 +8733,7 @@ function doDirtRefuel() {
   }
   const room = getWaterCap() - tank;
   if (room <= 0) { setStatus('Tank is already full.'); return; }
-  const isCrew = !!CREW_BY_ID[getActiveThrusterId()];
+  const isCrew = dcap.burner === 'crew';
   // A crew dirt thruster takes only 1 dirt FT per turn.
   if (isCrew && hasDirtRefueledThisTurn()) {
     setStatus('This crew dirt thruster already took its 1 dirt FT this turn.');
@@ -13320,15 +13327,18 @@ function showSitePopupFor(site) {
       });
     }
   }
-  // Dirt refuel (Cargo Transfer free action). Shown when the active
-  // thruster is a dirt thruster and the rocket is parked here (or at LEO).
-  // Fills the tank with grey dirt FTs (crew dirt thruster: 1 FT). Water and
-  // dirt can't mix. No operation cost.
-  if (rocketSite && site.id === rocketSite.id && getActiveFuelGrade() === 'dirt') {
+  // Dirt refuel (Cargo Transfer free action). Shown when the rocket is
+  // parked here with a dirt-burning thruster aboard, and either this is
+  // LEO (free top-up) or an ISRU-rated card rides along (the player-aid
+  // loader). The ACTIVE thruster doesn't matter for loading - only for
+  // burning. Fills the tank with grey dirt FTs (crew dirt rocket: 1 FT).
+  // Water and dirt can't mix. No operation cost.
+  const dirtCap = (rocketSite && site.id === rocketSite.id) ? getDirtCapability() : null;
+  if (dirtCap && dirtCap.burner && (isLeoSite(site) || dirtCap.hasIsru)) {
     const tank = getTankWater();
     const room = Math.max(0, getWaterCap() - tank);
     const mixed = tank > 0 && getTankGrade() === 'water';
-    const isCrew = !!CREW_BY_ID[getActiveThrusterId()];
+    const isCrew = dirtCap.burner === 'crew';
     const crewDone = isCrew && crewDirtRefuelUsed();   // 1 dirt FT per turn for crew
     const ok = room > 0 && !mixed && !crewDone;
     const gain = isCrew ? Math.min(1, room) : room;

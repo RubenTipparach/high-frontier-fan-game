@@ -255,6 +255,19 @@ function prospectorKind(slot) {
 function prospectorIsru(slot) {
   return prospectorFace(slot).isru;
 }
+// Does this slot's installed face carry an ISRU rating at all? Rating 0
+// COUNTS (it's the best rig) - presence of the rating is what matters,
+// so this can't read prospectorIsru (0 also means "no rig" there).
+function slotHasIsruRig(slot) {
+  if (!slot || !slot.id) return false;
+  const crew = CREW_BY_ID[slot.id];
+  if (crew) {
+    const key = slot.face === 'secondary' ? 'secondary' : 'primary';
+    const cf = (crew.faces && (crew.faces[key] || crew.faces.primary)) || {};
+    return cf.isru != null && Number.isFinite(Number(cf.isru));
+  }
+  return faceProps(slot).some((x) => x && x.key === 'isru');
+}
 function isProspectorSlot(slot) {
   return prospectorKind(slot) != null;
 }
@@ -2017,18 +2030,31 @@ function applySiteRefuel(state, op, player) {
 // wet-mass cap; a crew dirt thruster takes 1 FT, once per turn. Costs NO
 // operation (free action). op = {} (acts on the active thruster).
 function applyDirtRefuel(state, _op, player) {
-  const tid = player.rocket.activeThrusterId;
-  const slot = tid && player.rocket.stack.find((s) => s.id === tid);
-  if (!slot) return fail('no_thruster');
-  const face = thrusterFaceOf(slot);
-  if (!faceBurnsDirt(face)) return fail('not_dirt_thruster');
+  // Loading dirt is gated by the PLAYER AID rule ("free dirt refuel with
+  // any ISRU card at a Factory or Site"; LEO tops up freely), NOT by the
+  // active thruster - the active-thruster check belongs to BURN time (the
+  // fuel-grade gate on MOVE). Any dirt-capable thruster face aboard
+  // qualifies the stack (loading dirt no thruster can burn would just
+  // brick the tank, so a burner must ride along).
+  const stack = player.rocket.stack;
+  const dirtSlots = stack.filter((s) => faceBurnsDirt(thrusterFaceOf(s)));
+  if (!dirtSlots.length) return fail('not_dirt_thruster');
+  // siteId null IS LEO (canonical form, see rocketAtLeo): free top-up,
+  // no ISRU needed. Elsewhere the slug must resolve to a real SITE (a
+  // waypoint in deep space has no ground to scoop) and an ISRU-rated
+  // card must ride along.
+  if (!rocketAtLeo(player)) {
+    if (!siteById(player.rocket.siteId)) return fail('not_at_site');
+    if (!stack.some(slotHasIsruRig)) return fail('no_isru_for_dirt');
+  }
   const tank = Number(player.rocket.tank) || 0;
   if (tank > 0 && tankGradeOf(player.rocket) === 'water') return fail('cannot_mix_fuel');
   const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
   const cap = Math.max(0, TANK_MAX - dry);
   if (tank >= cap) return fail('tank_full');
-  const isCrew = isCrewSlot(slot);
-  // Crew dirt thruster: 1 FT max per turn. Non-crew: fill to the cap.
+  // 1 FT max per turn when the only dirt burner aboard is a crew rocket;
+  // a dirt-burning CARD fills to the cap.
+  const isCrew = dirtSlots.every((sl) => isCrewSlot(sl));
   if (isCrew) {
     player.dirtRefueledThisTurn = !!player.dirtRefueledThisTurn;
     if (player.dirtRefueledThisTurn) return fail('already_dirt_refueled');
