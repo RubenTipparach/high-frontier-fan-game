@@ -7067,7 +7067,19 @@ function openRocketStackModal() {
       const crewFace = (slot.kind === 'crew' || CREW.some((c) => c.id === slot.id))
         ? (card.faces && card.faces[slot.face === 'secondary' ? 'secondary' : 'primary'])
         : null;
+      // Read the INSTALLED face for functional logic. A robonaut's black
+      // side (e.g. Wakefield e-Beam, the Free Electron Laser's Tier-2) carries
+      // its OWN thrust + prospector kind, distinct from its white side, and
+      // the engine keys off the installed face (slotFace / isThrusterSlot), so
+      // the UI must too. Reading top-level card.thrust / faces.primary hid the
+      // "Set as active thruster" button on a thrust-carrying robonaut and
+      // mislabeled its prospector kind. (crewFace already resolves the chosen
+      // crew face above.)
+      const patentFace = card.faces
+        ? (card.faces[slot.face === 'secondary' ? 'secondary' : 'primary'] || card.faces.primary)
+        : card;
       const isThruster = card.type === 'thruster' || card.thrust != null
+        || !!(patentFace && patentFace.thrust != null)
         || !!(crewFace && crewFace.thruster);
 
       const wrap = document.createElement('div');
@@ -7125,8 +7137,7 @@ function openRocketStackModal() {
       // active prospector for the turn.
       const prospKind = (() => {
         if (crewFace) return crewFace.prospector || null;
-        const f = (card.faces && card.faces.primary) || card;
-        const props = f.properties || [];
+        const props = (patentFace && patentFace.properties) || [];
         for (const k of ['raygun', 'missile', 'buggy']) {
           if (props.some((p) => p.key === k && p.value)) return k;
         }
