@@ -2003,6 +2003,12 @@
   cursor: pointer;
 }
 .news-card-chip:hover { background: rgba(56, 189, 248, 0.28); }
+/* Inspiration row carries the per-deck cycle-tracker visual (a block), so
+   align the row to the top and let the text column hold the visual below the
+   lead line. */
+.news-list li.news-insp { align-items: flex-start; }
+.news-list li.news-insp .news-text { display: block; }
+.news-list li.news-insp .tc-insp { margin-top: 6px; }
 /* Card preview opened from a news chip sits above the news modal. */
 .news-card-preview-overlay { z-index: 130; }
 .turn-clock-event-card strong { color: var(--ink); font-size: 14px; flex: 1; }

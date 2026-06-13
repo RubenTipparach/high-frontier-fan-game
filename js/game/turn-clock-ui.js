@@ -34,7 +34,7 @@ const DECK_GLYPHS = {
 // (tap to see the full card) instead of a wall of sentences. Driven off
 // lastEvent.cycled = [{ deck, out, in }] (card ids). Falls back to the text
 // notes when cycled isn't present (older events / solo).
-function inspirationVisualHtml(cycled) {
+export function inspirationVisualHtml(cycled) {
   const chip = (id, cls, arrow) => {
     const c = PATENTS_BY_ID[id];
     const name = c ? c.name : id;

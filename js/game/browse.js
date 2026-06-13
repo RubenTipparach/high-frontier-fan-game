@@ -16,7 +16,7 @@ import {
   getOpsRemaining, consumeOp,
   consumeDiscard, formatTurnNumber,
 } from './turn-clock.js';
-import { triggerEndTurn, confirmEndTurn, openTurnClockModal, buildDie, rollDie } from './turn-clock-ui.js';
+import { triggerEndTurn, confirmEndTurn, openTurnClockModal, buildDie, rollDie, inspirationVisualHtml } from './turn-clock-ui.js';
 import {
   getState as soloState, newGame as soloNewGame, abandonGame as soloAbandon,
   setTarget as soloSetTarget, commitMove as soloCommitMove,
@@ -1628,6 +1628,38 @@ function buildNewsCardIndex() {
   const names = [...map.keys()].filter(Boolean).sort((a, b) => b.length - a.length).map(escRe);
   _newsNameRe = names.length ? new RegExp('(' + names.join('|') + ')', 'g') : false;
 }
+// Unique card ids (with display name) referenced in a news text, in order.
+function cardIdsInText(text) {
+  buildNewsCardIndex();
+  const t = String(text || '');
+  const out = [];
+  const seen = new Set();
+  if (!_newsNameRe) return out;
+  _newsNameRe.lastIndex = 0;
+  let m;
+  while ((m = _newsNameRe.exec(t)) !== null) {
+    const id = _newsNameToId.get(m[0]);
+    if (id && !seen.has(id)) { seen.add(id); out.push({ id, name: m[0] }); }
+    if (m.index === _newsNameRe.lastIndex) _newsNameRe.lastIndex++;
+  }
+  return out;
+}
+// Reconstruct the per-deck cycled list ({ deck, out, in }) from a run of
+// Inspiration news texts ("X sank to the bottom of the <deck> deck; Y is the
+// new top."), so the news panel can reuse the cycle-tracker's Inspiration
+// visual (inspirationVisualHtml) verbatim.
+function inspirationCycledFromTexts(texts) {
+  const cycled = [];
+  for (const t of texts) {
+    const deckM = /the (\w+) deck/.exec(t || '');
+    const cards = cardIdsInText(t);
+    if (cards.length >= 2) {
+      cycled.push({ deck: deckM ? deckM[1] : '', out: cards[0].id, in: cards[1].id });
+    }
+  }
+  return cycled;
+}
+
 // Escape the news text for HTML, wrapping any recognised card name in a
 // clickable chip that opens a read-only preview. Pure client-side, so it
 // works regardless of whether the server tagged the item with card ids.
@@ -1657,15 +1689,35 @@ function openNewsModal() {
   refreshNewsBadge();
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay news-overlay';
-  // Card names that appear in the news text are linkified into clickable
-  // chips client-side (linkifyCardNames) - that works against any server
-  // version, since the names are already in the text. The optional n.cards
-  // ids (newer server) aren't needed for this.
-  const rows = items.length
-    ? [...items].reverse().map((n) =>
-        `<li><span class="news-ic">${esc(n.icon || '\u203C\uFE0F')}</span>` +
-        `<span class="news-when">R${esc(String(n.round))}.${esc(String((n.turn | 0) + 1))}</span>` +
-        `<span class="news-text">${linkifyCardNames(n.text || '')}</span></li>`).join('')
+  // The server sends Inspiration as six per-deck lines. Collapse each run
+  // into ONE row that reuses the cycle-tracker's per-deck visual (deck glyph,
+  // sank-card chip down, new-top chip up). Other events: linkify card names
+  // in the text into clickable chips. Both work against any server version.
+  const display = [];
+  for (const n of items) {
+    const isInsp = /^Inspiration\b/.test(n.text || '') && /the \w+ deck/.test(n.text || '');
+    const prev = display[display.length - 1];
+    if (isInsp && prev && prev._insp && prev.round === n.round && prev.turn === n.turn) {
+      prev._texts.push(n.text || '');
+    } else if (isInsp) {
+      display.push({ round: n.round, turn: n.turn, icon: n.icon, _insp: true, _texts: [n.text || ''] });
+    } else {
+      display.push(n);
+    }
+  }
+  const rows = display.length
+    ? [...display].reverse().map((n) => {
+        if (n._insp) {
+          const cycled = inspirationCycledFromTexts(n._texts);
+          const visual = cycled.length ? inspirationVisualHtml(cycled) : '';
+          return `<li class="news-insp"><span class="news-ic">${esc(n.icon || '\u{1F4A1}')}</span>` +
+            `<span class="news-when">R${esc(String(n.round))}.${esc(String((n.turn | 0) + 1))}</span>` +
+            `<span class="news-text"><strong>Inspiration</strong> - every patent deck cycled top \u2192 bottom.${visual}</span></li>`;
+        }
+        return `<li><span class="news-ic">${esc(n.icon || '\u203C\uFE0F')}</span>` +
+          `<span class="news-when">R${esc(String(n.round))}.${esc(String((n.turn | 0) + 1))}</span>` +
+          `<span class="news-text">${linkifyCardNames(n.text || '')}</span></li>`;
+      }).join('')
     : '<li class="news-empty">No broadcasts yet - the wire is quiet.</li>';
   overlay.innerHTML = `
     <div class="et-produce-modal news-modal" role="dialog" aria-label="Galactic news">
@@ -1675,7 +1727,9 @@ function openNewsModal() {
     </div>`;
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
   overlay.querySelector('.news-close').addEventListener('click', () => overlay.remove());
-  overlay.querySelectorAll('.news-card-chip[data-card-id]').forEach((b) => {
+  // Chips from both paths: linkified (.news-card-chip) and the reused
+  // cycle-tracker visual (.tc-card-chip).
+  overlay.querySelectorAll('.news-card-chip[data-card-id], .tc-card-chip[data-card-id]').forEach((b) => {
     b.addEventListener('click', (e) => {
       e.stopPropagation();
       openNewsCardPreview(b.getAttribute('data-card-id'));
