@@ -540,24 +540,35 @@ function drawComet(ctx, cx, cy, r, site) {
 // else; the halo extends well past the visible disc so it reads
 // as "this is the star" rather than just another body. No hex
 // marker -- the Sun isn't a destination.
-function drawSun(ctx, cx, cy, r) {
+//
+// The two radial gradients are built once (buildSunGrads) and reused
+// every frame: they're defined in WORLD coordinates, which never change,
+// and the canvas applies the live pan/zoom transform at fill time - so a
+// cached gradient lands in the right place at any camera pose. That keeps
+// drawSun off the per-frame createRadialGradient + addColorStop path
+// (this draws 60x/s under the ambient animation loop) with zero change to
+// the pixels. Sized/capped exactly like the old per-frame version.
+function buildSunGrads(ctx, cx, cy, r) {
   // Corona haze, wide and faint.
   const corona = ctx.createRadialGradient(cx, cy, r * 0.4, cx, cy, r * 3.5);
   corona.addColorStop(0,    'rgba(254, 215, 100, 0.45)');
   corona.addColorStop(0.45, 'rgba(254, 180,  60, 0.12)');
   corona.addColorStop(1,    'rgba(254, 180,  60, 0)');
-  ctx.fillStyle = corona;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r * 3.5, 0, Math.PI * 2);
-  ctx.fill();
-
   // Disc with hot core in the centre.
   const disc = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
   disc.addColorStop(0,    '#ffffff');
   disc.addColorStop(0.25, '#fff3a0');
   disc.addColorStop(0.7,  '#fbbf24');
   disc.addColorStop(1,    '#d97706');
-  ctx.fillStyle = disc;
+  return { corona, disc, cx, cy, r };
+}
+function drawSun(ctx, cx, cy, r, grads) {
+  ctx.fillStyle = grads.corona;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 3.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = grads.disc;
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.fill();
@@ -802,6 +813,10 @@ export class MapRenderer {
     // crisp; a body zoomed in past its sprite resolution triggers a
     // one-off re-render at a larger reference radius.
     this._spriteCache = new Map();
+    // The Sun's two radial gradients, built once (buildSunGrads) and reused
+    // every frame. World-space coords never change, so the cached gradient
+    // stays correct under any pan/zoom (the CTM is applied at fill time).
+    this._sunGrad = null;
     // Ambient decorative rockets: cosmetic sprites zipping between
     // random sites in the background. Count is driven externally
     // (setAmbientRocketCount) - 10 + 5 per factory built. Purely
@@ -2779,7 +2794,16 @@ export class MapRenderer {
     for (const site of this._realSites) {
       if (this._mergedSites.has(site.id)) continue;
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
-      if (vis.kind === 'sun')   { if (!offscreen(site.x, site.y, vis.r)) drawSun(ctx, site.x, site.y, vis.r); continue; }
+      if (vis.kind === 'sun') {
+        if (!offscreen(site.x, site.y, vis.r)) {
+          let g = this._sunGrad;
+          if (!g || g.cx !== site.x || g.cy !== site.y || g.r !== vis.r) {
+            g = this._sunGrad = buildSunGrads(ctx, site.x, site.y, vis.r);
+          }
+          drawSun(ctx, site.x, site.y, vis.r, g);
+        }
+        continue;
+      }
       if (vis.kind === 'comet') { if (!offscreen(site.x, site.y, vis.r)) drawComet(ctx, site.x, site.y, vis.r, site); }
     }
   }
