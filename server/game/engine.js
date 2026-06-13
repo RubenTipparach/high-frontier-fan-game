@@ -414,9 +414,32 @@ function humansAtSite(state, siteId) {
   return false;
 }
 
-// Co-located humans fix glitches automatically (user rule 2026-06-12):
-// crew in the stack itself, a colony dome at the site, or any human
-// stack parked at the same site clears the token - no repair op needed.
+// ---- Felony helpers (Felonious privilege; active during Anarchy / War) ----
+// A felony requires the actor to have a Human present; the target is defended
+// by a colocated OPPOSING Human (crew or colony dome) or a Factory.
+function actorCrewAtSite(state, siteId, actorId) {
+  const p = state.players.find((x) => x.profileId === actorId);
+  if (!p) return false;
+  if (p.rocket.siteId === siteId && stackHasCrew(p.rocket.stack)) return true;
+  for (const o of Object.values(p.outposts || {})) {
+    if (o && o.siteId === siteId && stackHasCrew(o.cards)) return true;
+  }
+  return false;
+}
+function opposingHumanAtSite(state, siteId, actorId) {
+  const col = state.colonies[siteId];
+  if (col && col.ownerId !== actorId) return true;
+  for (const p of state.players) {
+    if (p.profileId === actorId) continue;
+    if (p.rocket.siteId === siteId && stackHasCrew(p.rocket.stack)) return true;
+    for (const o of Object.values(p.outposts || {})) {
+      if (o && o.siteId === siteId && stackHasCrew(o.cards)) return true;
+    }
+  }
+  return false;
+}
+
+
 // Operations that are GLITCH TRIGGERS (HF4 core): performing one with a
 // glitched stack forces a Glitch Roll. Movement, Boost, Income, ET Produce,
 // Delivery etc. are NOT triggers - a glitched stack does those freely.
@@ -1697,26 +1720,58 @@ function applyDecommission(state, op, player) {
   if (!ids.length) return fail('bad_decommission');
   const src = from === 'leo' ? (player.leo || []) : player.rocket.stack;
   let returned = 0;
+  let crewToLeo = 0;
   let blocked = 0;
   for (const id of ids) {
     const idx = src.findIndex((s) => s.id === id);
     if (idx < 0) continue;
     const slot = src[idx];
-    // Crew can NOT be voluntarily decommissioned to the hand. Removing a
-    // crew member is a special action that resolves during an event
-    // (TODO: implement the event-driven crew-removal flow later); for now
-    // crew in a decommission selection is skipped, never returned.
-    if (isCrewSlot(slot)) { blocked++; continue; }
+    // Decommissioning a Crew (a Human) is a FELONY. Normally blocked; during
+    // Anarchy it's allowed (Felonious privilege, G6) and the crew returns to
+    // the LEO Stack rather than the patent hand (crew aren't hand cards).
+    if (isCrewSlot(slot)) {
+      if (!state.anarchy || from === 'leo') { blocked++; continue; }
+      src.splice(idx, 1);
+      (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face === 'secondary' ? 'secondary' : 'primary' });
+      if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
+      if (player.rocket.activeProspectorId === id) player.rocket.activeProspectorId = null;
+      crewToLeo++;
+      continue;
+    }
     src.splice(idx, 1);
     player.hand.push(id);
     if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
     if (player.rocket.activeProspectorId === id) player.rocket.activeProspectorId = null;
     returned++;
   }
-  if (!returned) return fail('nothing_decommissioned');
+  if (!returned && !crewToLeo) return fail('nothing_decommissioned');
   if (from === 'rocket') { clipTank(player.rocket); recallIfEmpty(player); }
-  let log = `${player.name} decommissioned ${returned} card${returned === 1 ? '' : 's'} to hand.`;
-  if (blocked) log += ` (${blocked} crew stayed.)`;
+  const parts = [];
+  if (returned) parts.push(`${returned} card${returned === 1 ? '' : 's'} to hand`);
+  if (crewToLeo) parts.push(`${crewToLeo} crew to LEO (Felony)`);
+  let log = `${player.name} decommissioned ${parts.join(' and ')}.`;
+  if (blocked) log += ` (${blocked} crew stayed - decommissioning a Human needs Anarchy.)`;
+  return { ok: true, state, log };
+}
+
+// Claim Jump (Felony, G4). During Anarchy, replace an opponent's Claim (a
+// success disc with no Factory) with your own, provided you have a Human at
+// the Site and no OPPOSING Human/colony defends it. Free action (no op).
+function applyClaimJump(state, op, player) {
+  const siteId = String(op.siteId || '');
+  const site = siteById(siteId);
+  if (!site) return fail('unknown_site');
+  if (!state.anarchy) return fail('felonies_not_allowed');
+  const disc = state.discs[siteId];
+  if (!disc || disc.outcome !== 'success') return fail('no_claim_here');
+  if (disc.ownerId === player.profileId) return fail('already_your_claim');
+  if (state.factories[siteId]) return fail('claim_has_factory');
+  if (!actorCrewAtSite(state, siteId, player.profileId)) return fail('felony_needs_human');
+  if (opposingHumanAtSite(state, siteId, player.profileId)) return fail('claim_defended');
+  const prev = state.players.find((p) => p.profileId === disc.ownerId);
+  disc.ownerId = player.profileId;
+  const log = `${player.name} claim-jumped ${site.name}${prev ? ` from ${prev.name}` : ''} (Felony, Anarchy).`;
+  pushNews(state, '\u{1F5FD}', log);
   return { ok: true, state, log };
 }
 
@@ -2075,7 +2130,15 @@ function applyEtProduce(state, op, player) {
   const site = siteById(siteId);
   if (!site) return fail('unknown_site');
   const fac = state.factories[siteId];
-  if (!fac || fac.ownerId !== player.profileId) return fail('no_factory');
+  if (!fac) return fail('no_factory');
+  if (fac.ownerId !== player.profileId) {
+    // Factory Hijack (Felony, N6a): ET-produce at an opponent's Factory during
+    // Anarchy, with your own Human colocated, unless an opposing Human or
+    // colony defends it. The product still lands in YOUR outpost here.
+    if (!state.anarchy) return fail('not_your_factory');
+    if (!actorCrewAtSite(state, siteId, player.profileId)) return fail('felony_needs_human');
+    if (opposingHumanAtSite(state, siteId, player.profileId)) return fail('factory_defended');
+  }
   if (player.opsRemaining <= 0) return fail('no_ops_left');
   const cardId = String(op.cardId || '');
   const hIdx = player.hand.indexOf(cardId);
@@ -2340,6 +2403,7 @@ const FUNCTIONAL = {
   TRANSFER_FUEL: applyTransferFuel,
   DISSOLVE_OUTPOST: applyDissolveOutpost,
   DECOMMISSION: applyDecommission,
+  CLAIM_JUMP: applyClaimJump,
   CONVERT_OUTPOST: applyConvertOutpost,
   REFUEL: applyRefuel,
   CASH_WATER: applyCashWater,
@@ -2371,6 +2435,7 @@ function pickPayload(op) {
     case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount };
     case 'DISSOLVE_OUTPOST': return { letter: op.letter };
     case 'DECOMMISSION': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from };
+    case 'CLAIM_JUMP': return { siteId: op.siteId };
     case 'REFUEL': return { amount: op.amount };
     case 'CASH_WATER': return { amount: op.amount };
     case 'DUMP': return { amount: op.amount };
