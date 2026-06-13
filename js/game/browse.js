@@ -7132,9 +7132,9 @@ function openRocketStackModal() {
         activate.type = 'button';
         activate.className = 'rocket-activate'
           + (slot.id === activeId ? ' is-active' : '');
-        activate.textContent = slot.id === activeId
-          ? '⚡ Active thruster'
-          : 'Set as active';
+        // Same label whichever state - the is-active orange wash shows which
+        // thruster is live; tap a dark one to switch.
+        activate.textContent = '⚡ Active thruster';
         activate.disabled = slot.id === activeId;
         activate.addEventListener('click', () => onSetActiveThrusterClick(slot.id));
         actions.appendChild(activate);
@@ -7159,9 +7159,9 @@ function openRocketStackModal() {
         btn.type = 'button';
         btn.className = 'rocket-activate'
           + (isActiveProsp ? ' is-active' : '');
-        btn.textContent = isActiveProsp
-          ? `${glyph} Active prospector`
-          : `Set as ${prospKind} prospector`;
+        // Glyph (🚀 / 🔫 / 🛺) carries the prospector kind; same label active
+        // or not, like the thruster button.
+        btn.textContent = `${glyph} Active prospector`;
         btn.disabled = isActiveProsp;
         btn.addEventListener('click', () => onSetActiveProspectorClick(slot.id));
         actions.appendChild(btn);

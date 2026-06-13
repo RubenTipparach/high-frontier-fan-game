@@ -4236,15 +4236,21 @@ body:has(#view-browse:not(.hidden)) #main {
    the rocket stack modal. Holds the "Set as active" thruster
    picker (thrusters only) + the "Back to hand" affordance. */
 .rocket-slot-actions {
-  display: flex;
+  /* Two columns so each action button is wide enough for its full label
+     ("⚡ Active thruster", "🚀 Active prospector") instead of squeezing 4
+     buttons into one row where the text wrapped and clipped. */
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 6px;
   margin-top: 8px;
-  flex-wrap: wrap;
 }
 .rocket-slot-actions button {
-  flex: 1;
   font-size: 11px;
-  padding: 5px 8px;
+  padding: 6px 8px;
+  text-align: center;
+  line-height: 1.2;
+  white-space: normal;
+  min-width: 0;
 }
 
 /* Active-thruster highlight: the chosen thruster's card gets
