@@ -449,9 +449,13 @@ const EVENT_HEADLINES = {
 const NEWS_CAP = 40;
 // Galactic news broadcast: a shared, capped feed of "what just
 // happened" items every player sees via the toolbar news button.
-function pushNews(state, icon, text) {
+function pushNews(state, icon, text, cards) {
   state.news = state.news || [];
-  state.news.push({ round: state.round, turn: state.turn, icon, text });
+  const item = { round: state.round, turn: state.turn, icon, text };
+  // Card ids the item is about (the card that sank / was lost / was chosen),
+  // so the news modal can render clickable chips to view them.
+  if (Array.isArray(cards) && cards.length) item.cards = cards.filter(Boolean);
+  state.news.push(item);
   if (state.news.length > NEWS_CAP) state.news.splice(0, state.news.length - NEWS_CAP);
 }
 const EVENT_ICONS = {
@@ -464,7 +468,7 @@ function resolveSunspotEvent(state, kind) {
   // Every detail line lands in BOTH the event record (clock modal) and
   // the news feed (toolbar broadcast).
   const notes = {
-    push: (t) => { rawNotes.push(t); pushNews(state, EVENT_ICONS[kind] || '\u2604\uFE0F', t); },
+    push: (t, cards) => { rawNotes.push(t); pushNews(state, EVENT_ICONS[kind] || '\u2604\uFE0F', t, cards); },
   };
 
   if (kind === 'inspiration') {
@@ -478,7 +482,7 @@ function resolveSunspotEvent(state, kind) {
       const out = deck.shift();
       deck.push(out);
       cycled.push({ deck: t, out, in: deck[0] });
-      notes.push(`Inspiration: ${cardNameOf(out)} sank to the bottom of the ${t} deck; ${cardNameOf(deck[0])} is the new top.`);
+      notes.push(`Inspiration: ${cardNameOf(out)} sank to the bottom of the ${t} deck; ${cardNameOf(deck[0])} is the new top.`, [out, deck[0]]);
     }
     state.lastEvent.cycled = cycled;
     if (!cycled.length) notes.push('Inspiration: the market decks were too thin to cycle.');
@@ -529,7 +533,7 @@ function resolveSunspotEvent(state, kind) {
         const id = atMax[0].id;
         p.leo = p.leo.filter((s) => s.id !== id);
         destroyToDeckBottom(state, id);
-        notes.push(`Pad Explosion: ${p.name} lost ${cardNameOf(id)} (mass ${maxMass}) from LEO.`);
+        notes.push(`Pad Explosion: ${p.name} lost ${cardNameOf(id)} (mass ${maxMass}) from LEO.`, [id]);
       } else {
         waiting.push(p.profileId);
         options[p.profileId] = atMax.map((s) => s.id);
@@ -592,15 +596,15 @@ function resolveSunspotEvent(state, kind) {
         if (c && c.type === 'radiator' && slot.radSide !== 'light') {
           slot.radSide = 'light';
           survivors.push(slot);
-          notes.push(`Solar Flare: ${p.name}'s ${cardNameOf(slot.id)} ${where} degraded to its light side.`);
+          notes.push(`Solar Flare: ${p.name}'s ${cardNameOf(slot.id)} ${where} degraded to its light side.`, [slot.id]);
           continue;
         }
         if (isCrewSlot(slot)) {
           (p.leo = p.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
-          notes.push(`Solar Flare: ${p.name}'s ${cardNameOf(slot.id)} ${where} was overcome and evacuated to LEO.`);
+          notes.push(`Solar Flare: ${p.name}'s ${cardNameOf(slot.id)} ${where} was overcome and evacuated to LEO.`, [slot.id]);
         } else {
           destroyToDeckBottom(state, slot.id);
-          notes.push(`Solar Flare: ${p.name} lost ${cardNameOf(slot.id)} ${where} (rad ${slotRadHardness(slot)} vs ${hit}).`);
+          notes.push(`Solar Flare: ${p.name} lost ${cardNameOf(slot.id)} ${where} (rad ${slotRadHardness(slot)} vs ${hit}).`, [slot.id]);
         }
       }
       return survivors;
@@ -682,7 +686,7 @@ function applyEventChoice(state, op, ctx) {
     state.pendingEvent = null;
     log += ' The event is resolved.';
   }
-  pushNews(state, EVENT_ICONS[pending.kind] || '\u2604\uFE0F', log);
+  pushNews(state, EVENT_ICONS[pending.kind] || '\u2604\uFE0F', log, [cardId]);
   return { ok: true, state, log };
 }
 

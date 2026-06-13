@@ -1984,6 +1984,27 @@
 .news-list .news-when { flex: 0 0 auto; color: var(--muted, #94a3b8); font-size: 11px; }
 .news-list .news-text { flex: 1; }
 .news-list .news-empty { color: var(--muted, #94a3b8); justify-content: center; }
+/* Clickable card chips appended to a news item (the cards it's about). */
+.news-cards {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.news-card-chip {
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--accent);
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.3;
+  cursor: pointer;
+}
+.news-card-chip:hover { background: rgba(56, 189, 248, 0.28); }
+/* Card preview opened from a news chip sits above the news modal. */
+.news-card-preview-overlay { z-index: 130; }
 .turn-clock-event-card strong { color: var(--ink); font-size: 14px; flex: 1; }
 .turn-clock-event-card .ev-season {
   font-size: 10px;

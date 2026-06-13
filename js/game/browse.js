@@ -1613,20 +1613,65 @@ function openNewsModal() {
   refreshNewsBadge();
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay news-overlay';
+  // A news item may carry the ids of the cards it's about; render each as a
+  // clickable chip that opens a read-only card preview.
+  const chip = (id) => {
+    const c = PATENTS_BY_ID[id] || CREW_BY_ID[id];
+    const nm = c ? (c.name || (c.faces && c.faces.primary && c.faces.primary.name) || id) : id;
+    return `<button type="button" class="news-card-chip" data-card-id="${esc(id)}" title="${esc(nm)} - tap to view">${esc(nm)}</button>`;
+  };
   const rows = items.length
-    ? [...items].reverse().map((n) =>
-        `<li><span class="news-ic">${esc(n.icon || '\u{1F4F0}')}</span>` +
-        `<span class="news-when">R${esc(String(n.round))}.${esc(String((n.turn | 0) + 1))}</span>` +
-        `<span class="news-text">${esc(n.text || '')}</span></li>`).join('')
+    ? [...items].reverse().map((n) => {
+        const cards = Array.isArray(n.cards) && n.cards.length
+          ? `<span class="news-cards">${n.cards.map(chip).join('')}</span>` : '';
+        return `<li><span class="news-ic">${esc(n.icon || '\u203C\uFE0F')}</span>` +
+          `<span class="news-when">R${esc(String(n.round))}.${esc(String((n.turn | 0) + 1))}</span>` +
+          `<span class="news-text">${esc(n.text || '')}${cards}</span></li>`;
+      }).join('')
     : '<li class="news-empty">No broadcasts yet - the wire is quiet.</li>';
   overlay.innerHTML = `
     <div class="et-produce-modal news-modal" role="dialog" aria-label="Galactic news">
-      <div class="et-produce-head"><h3>\u{1F4F0} Galactic news</h3></div>
+      <div class="et-produce-head"><h3>\u203C\uFE0F Galactic news</h3></div>
       <ul class="news-list">${rows}</ul>
       <div class="card-modal-actions"><button type="button" class="modal-btn news-close">Close</button></div>
     </div>`;
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
   overlay.querySelector('.news-close').addEventListener('click', () => overlay.remove());
+  overlay.querySelectorAll('.news-card-chip[data-card-id]').forEach((b) => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openNewsCardPreview(b.getAttribute('data-card-id'));
+    });
+  });
+  document.body.appendChild(overlay);
+}
+
+// Read-only card preview opened from a news chip. Resolves a patent OR crew
+// id and layers the rendered card over the news modal.
+function openNewsCardPreview(cardId) {
+  const card = PATENTS_BY_ID[cardId] || CREW_BY_ID[cardId];
+  if (!card) return;
+  document.querySelector('.news-card-preview-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay news-card-preview-overlay';
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey, true); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } };
+  document.addEventListener('keydown', onKey, true);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const panel = document.createElement('div');
+  panel.className = 'card-modal-panel';
+  try {
+    const el = renderCard(card, { type: card.type || (CREW_BY_ID[cardId] ? 'crew' : 'patent') });
+    el.classList.add('card-modal-card');
+    panel.appendChild(el);
+  } catch { panel.textContent = card.name || cardId; }
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'modal-btn';
+  btn.textContent = 'Close';
+  btn.addEventListener('click', close);
+  panel.appendChild(btn);
+  overlay.appendChild(panel);
   document.body.appendChild(overlay);
 }
 
@@ -5325,7 +5370,7 @@ function ensureMapShell(host) {
         <button id="turn-tracker" title="View turn tracker"
           aria-label="View turn tracker">🕐</button>
         <button id="news-feed" title="Galactic news - what just happened"
-          aria-label="Galactic news">📰<span id="news-badge" class="news-badge" hidden></span></button>
+          aria-label="Galactic news">‼️<span id="news-badge" class="news-badge" hidden></span></button>
         <button id="turn-end" title="End your turn"
           aria-label="End turn">⏭ End turn</button>
         <span id="turn-budget" class="map-turn-budget" aria-live="polite">
