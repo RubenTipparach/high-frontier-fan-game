@@ -1827,11 +1827,34 @@ function renderEventChooser(snapshot) {
   const me = players.find((p) => p.profileId === myId);
   const amWaiting = !!myId && pending.waiting.includes(myId) && !_spectator;
 
-  const isCuts = pending.kind === 'budget_cuts';
-  const title = isCuts ? '\u2702\uFE0F Budget Cuts' : '\u{1F9E8} Pad Explosion';
+  // Per-event copy. Budget Cuts (pick a Hand card) and a Pad Explosion TIE
+  // (pick a tied LEO card) are PICK modes; Glitch, Solar Flare, and a
+  // single-card Pad Explosion are ACKNOWLEDGE modes (no pick - just confirm
+  // the mandatory effect). The flag drives whether the card grid shows.
+  const kind = pending.kind;
+  const myOpts = (pending.options && pending.options[myId]) || null;
+  const isCuts = kind === 'budget_cuts';
+  const isPad = kind === 'pad_explosion';
+  const isGlitch = kind === 'glitch';
+  const isFlare = kind === 'solar_flare';
+  const pickMode = isCuts || (isPad && myOpts && myOpts.length);
+  const flareRoll = pending.flareRoll;
+  const EV_TITLE = {
+    budget_cuts: '\u2702\uFE0F Budget Cuts', pad_explosion: '\uD83E\uDDE8 Pad Explosion',
+    glitch: '\u26A0\uFE0F Glitch', solar_flare: '\u2600\uFE0F Solar Flare',
+  };
+  const title = EV_TITLE[kind] || '\u2604\uFE0F Sunspot event';
   const ask = isCuts
     ? 'Funding dries up: pick a Hand card to send to the bottom of its deck.'
-    : 'Debris rains on LEO: your heaviest cards are tied - pick which one is lost.';
+    : (isPad && pickMode)
+      ? 'Debris rains on LEO: your heaviest cards are tied - pick which one is lost.'
+    : isPad
+      ? 'Debris rains on LEO: your heaviest exposed card is decommissioned back to your hand. Confirm to resolve.'
+    : isGlitch
+      ? 'A glitch disc is about to land on your largest crewless stack. Trigger ops on it will then risk a glitch roll until a Human clears it. Confirm to resolve.'
+    : isFlare
+      ? `A solar flare (roll ${esc(String(flareRoll || '?'))}) sweeps your stacks: cards whose rad-hardness cannot take it are decommissioned back to your hand. Confirm to resolve.`
+    : 'Confirm to resolve.';
 
   let overlay = existing;
   if (!overlay) {
@@ -1863,9 +1886,23 @@ function renderEventChooser(snapshot) {
   }
 
   sub.textContent = ask;
+  // ACKNOWLEDGE mode (glitch / flare / pad single): no card grid, just a
+  // mandatory Confirm that submits an empty EVENT_CHOICE - the server commits
+  // the effect.
+  if (!pickMode) {
+    const ack = document.createElement('button');
+    ack.type = 'button';
+    ack.className = 'modal-btn primary';
+    ack.textContent = isGlitch ? '\u26A0\uFE0F Take the glitch'
+      : isFlare ? '\u2600\uFE0F Face the flare'
+      : '\uD83E\uDDE8 Take the hit';
+    ack.addEventListener('click', () => { ack.disabled = true; submitEventChoice(''); });
+    actions.appendChild(ack);
+    return;
+  }
   const optionIds = isCuts
     ? ((me && me.hand) || [])
-    : ((pending.options && pending.options[myId]) || []);
+    : (myOpts || []);
   const lookup = (id) => PATENTS_BY_ID[id] || null;
   let selected = optionIds[0] || null;
 
