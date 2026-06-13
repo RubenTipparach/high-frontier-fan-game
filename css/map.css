@@ -4843,6 +4843,37 @@ body:has(#view-browse:not(.hidden)) #main {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
 }
 .et-card-pick.is-selected .et-pick-tick { display: flex; }
+/* Magnifier on each producible card: opens the enlarged read-only view.
+   Sibling of the pick button inside the wrapper, never nested in it. */
+.et-card-wrap { position: relative; flex: 0 0 auto; }
+.et-card-wrap .et-card-zoom {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(10, 14, 22, 0.85);
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+.et-card-wrap .et-card-zoom:hover { background: rgba(30, 41, 59, 0.95); }
+.et-zoom-overlay { z-index: 1200; }  /* above the produce modal */
+.et-zoom-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 18px;
+}
+.et-zoom-panel .et-zoom-close { margin-top: 40px; }
 
 .et-slot-block { display: flex; flex-direction: column; gap: 6px; }
 .et-slot-buttons { display: flex; gap: 6px; flex-wrap: wrap; }

@@ -63,6 +63,42 @@ export function findEtProduceOptions(handIds, lookupCard, factorySpectral) {
 // onCommit is called with the picked card id + the destination
 // letter; isNewOutpost is true when the modal is creating a new
 // outpost (the caller must run createOutpost first).
+// Enlarged read-only view of one card, stacked over the produce
+// modal. Esc / click-away / the close button dismiss only the zoom;
+// the picker underneath keeps its state.
+function openCardZoom(card) {
+  document.querySelector('.et-zoom-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay et-zoom-overlay';
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+  };
+  const onKey = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+  };
+  // Capture phase so the zoom's Esc wins over the produce modal's.
+  document.addEventListener('keydown', onKey, true);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const panel = document.createElement('div');
+  panel.className = 'card-modal-panel et-zoom-panel';
+  try {
+    const el = renderCard(card, { type: card.type, face: 'secondary' });
+    el.classList.add('card-modal-card');
+    panel.appendChild(el);
+  } catch {
+    panel.textContent = card.name || '';
+  }
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'modal-btn et-zoom-close';
+  btn.textContent = 'Close';
+  btn.addEventListener('click', close);
+  panel.appendChild(btn);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+}
+
 export function openEtProduceModal({
   siteName, factorySpectral, options,
   existingOutpost, freeSlots, onCommit,
@@ -155,7 +191,22 @@ export function openEtProduceModal({
         selectedCard = i;
         render();
       });
-      cardsHost.appendChild(pick);
+      // Magnifier: enlarged read-only look at the card, Black-Side-up
+      // (the face it lands on). A SIBLING of the pick button inside a
+      // positioning wrapper (nested buttons are invalid HTML), so
+      // zooming never changes the selection.
+      const wrap = document.createElement('div');
+      wrap.className = 'et-card-wrap';
+      wrap.appendChild(pick);
+      const zoom = document.createElement('button');
+      zoom.type = 'button';
+      zoom.className = 'et-card-zoom';
+      zoom.title = 'Examine card';
+      zoom.setAttribute('aria-label', `Examine ${opt.name}`);
+      zoom.textContent = '🔍';
+      zoom.addEventListener('click', () => openCardZoom(opt.card));
+      wrap.appendChild(zoom);
+      cardsHost.appendChild(wrap);
     });
     dialog.querySelectorAll('.et-slot-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
