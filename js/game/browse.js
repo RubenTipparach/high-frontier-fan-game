@@ -404,6 +404,16 @@ async function bootstrapOnlineGame() {
     return;
   }
   applySnapshot(r.data.game.state, r.data.game.seq);
+  // The mount painted the rocket at a stale LEO placeholder (online never
+  // persists the solo rocket site, so it wasn't known until this first
+  // snapshot), and that placement already claimed the initial view. Now
+  // that we know the rocket's REAL site, re-focus the camera on it - the
+  // renderer skips this if the player already grabbed the camera in the
+  // brief mount -> snapshot window. Snap (ms 0): the player just arrived,
+  // a long pan from LEO would just be noise.
+  if (_renderer && typeof _renderer.focusRocketWhenKnown === 'function') {
+    _renderer.focusRocketWhenKnown({ zoom: _renderer.options.initialZoom, ms: 0 });
+  }
   // Open the multiplayer panel so the player lands on the table (room,
   // turn, roster) rather than the solo game-mode pane.
   showPane('mp');

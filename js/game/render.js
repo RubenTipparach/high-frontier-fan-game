@@ -815,6 +815,14 @@ export class MapRenderer {
     // Camera persistence state: set by _restoreCamera / _noteUserCamera /
     // the first rocket placement, so the initial view resolves exactly once.
     this._initialViewDone = false;
+    // Distinct from _initialViewDone: true ONLY once the player has manually
+    // panned / zoomed. The first rocket placement also sets _initialViewDone
+    // (an AUTO view), so that flag alone can't tell "we painted something" from
+    // "the player took the wheel". focusRocketWhenKnown reads THIS flag so a
+    // late re-focus (online: the real rocket site arrives after the mount
+    // painted a stale LEO placeholder) can still land on the ship, while a
+    // player who already grabbed the camera is never yanked.
+    this._userAdjustedCamera = false;
     this._camSaveTimer = null;
     for (const name of ['chibi-apollo-csm', 'chibi-orion', 'chibi-crew-dragon',
       'chibi-space-shuttle', 'chibi-soyuz', 'chibi-shenzhou', 'chibi-mengzhou',
@@ -1038,6 +1046,7 @@ export class MapRenderer {
   // stolen mid-look.
   _noteUserCamera() {
     this._initialViewDone = true;  // never recenter out from under the player
+    this._userAdjustedCamera = true;  // the player now owns the camera
     clearTimeout(this._camSaveTimer);
     this._camSaveTimer = setTimeout(() => this._saveCamera(), 500);
   }
@@ -1072,6 +1081,11 @@ export class MapRenderer {
   // still wins: the pending focus only fires through setSandboxRocket's
   // first-placement path, which _noteUserCamera disarms.
   focusRocketWhenKnown({ zoom = 5, ms = 420 } = {}) {
+    // The player has the wheel: never yank the camera, even if the rocket's
+    // real position only just became known. (A mount-time placement that set
+    // _initialViewDone does NOT count as the player taking control, which is
+    // why this reads _userAdjustedCamera, not _initialViewDone.)
+    if (this._userAdjustedCamera) return;
     const r = this._sandboxRocket;
     this._focusRocketZoom = zoom;
     if (r && Number.isFinite(r.x) && Number.isFinite(r.y)) {
