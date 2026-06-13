@@ -94,8 +94,13 @@ const WHEEL_RING_W = 56;           // band thickness for the slots
 // the season wedges + event markers + new round marker, then
 // pin a "you are here" pointer to the active slot.
 function slotAngle(slot, offset = 0) {
-  // 0 → -90° (top), advance clockwise.
-  const deg = (slot + offset) * (360 / SLOTS) - 90;
+  // 0 → top, advancing clockwise. The half-slot (+15° at 12 slots) rotation
+  // lands the slot-0 event boundary (slotAngle(-0.5)) straight up, so the
+  // first event line reads vertical instead of tilted ~15° to the left. The
+  // whole dial - numbers, season wedges, all six event lines, the pointer -
+  // flows through here, so they rotate together.
+  const HALF_SLOT = (360 / SLOTS) / 2;
+  const deg = (slot + offset) * (360 / SLOTS) - 90 + HALF_SLOT;
   return (deg * Math.PI) / 180;
 }
 function pointOnRing(slot, radius, offset = 0) {
