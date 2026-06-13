@@ -1606,6 +1606,50 @@ function refreshNewsBadge() {
   badge.hidden = unread <= 0;
   badge.textContent = unread > 9 ? '9+' : String(unread);
 }
+// Card-name -> id index for linkifying news text. Built once from the deck
+// (patents + crew, including both face names), longest name first so a longer
+// name wins over any shorter name it contains.
+let _newsNameRe = null;
+let _newsNameToId = null;
+function buildNewsCardIndex() {
+  if (_newsNameRe !== null) return;
+  const map = new Map();
+  const add = (name, id) => { if (name && id && !map.has(name)) map.set(name, id); };
+  for (const p of PATENTS) {
+    add(p.name, p.id);
+    if (p.faces) { add(p.faces.primary && p.faces.primary.name, p.id); add(p.faces.secondary && p.faces.secondary.name, p.id); }
+  }
+  for (const c of CREW) {
+    add(c.name, c.id);
+    if (c.faces) { add(c.faces.primary && c.faces.primary.name, c.id); add(c.faces.secondary && c.faces.secondary.name, c.id); }
+  }
+  _newsNameToId = map;
+  const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const names = [...map.keys()].filter(Boolean).sort((a, b) => b.length - a.length).map(escRe);
+  _newsNameRe = names.length ? new RegExp('(' + names.join('|') + ')', 'g') : false;
+}
+// Escape the news text for HTML, wrapping any recognised card name in a
+// clickable chip that opens a read-only preview. Pure client-side, so it
+// works regardless of whether the server tagged the item with card ids.
+function linkifyCardNames(text) {
+  buildNewsCardIndex();
+  const t = String(text || '');
+  if (!_newsNameRe) return esc(t);
+  let out = '';
+  let last = 0;
+  let m;
+  _newsNameRe.lastIndex = 0;
+  while ((m = _newsNameRe.exec(t)) !== null) {
+    out += esc(t.slice(last, m.index));
+    const id = _newsNameToId.get(m[0]);
+    out += `<button type="button" class="news-card-chip" data-card-id="${esc(id)}" title="${esc(m[0])} - tap to view">${esc(m[0])}</button>`;
+    last = m.index + m[0].length;
+    if (m.index === _newsNameRe.lastIndex) _newsNameRe.lastIndex++;  // guard against zero-length
+  }
+  out += esc(t.slice(last));
+  return out;
+}
+
 function openNewsModal() {
   document.querySelector('.news-overlay')?.remove();
   const items = gameNews();
@@ -1613,21 +1657,15 @@ function openNewsModal() {
   refreshNewsBadge();
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay news-overlay';
-  // A news item may carry the ids of the cards it's about; render each as a
-  // clickable chip that opens a read-only card preview.
-  const chip = (id) => {
-    const c = PATENTS_BY_ID[id] || CREW_BY_ID[id];
-    const nm = c ? (c.name || (c.faces && c.faces.primary && c.faces.primary.name) || id) : id;
-    return `<button type="button" class="news-card-chip" data-card-id="${esc(id)}" title="${esc(nm)} - tap to view">${esc(nm)}</button>`;
-  };
+  // Card names that appear in the news text are linkified into clickable
+  // chips client-side (linkifyCardNames) - that works against any server
+  // version, since the names are already in the text. The optional n.cards
+  // ids (newer server) aren't needed for this.
   const rows = items.length
-    ? [...items].reverse().map((n) => {
-        const cards = Array.isArray(n.cards) && n.cards.length
-          ? `<span class="news-cards">${n.cards.map(chip).join('')}</span>` : '';
-        return `<li><span class="news-ic">${esc(n.icon || '\u203C\uFE0F')}</span>` +
-          `<span class="news-when">R${esc(String(n.round))}.${esc(String((n.turn | 0) + 1))}</span>` +
-          `<span class="news-text">${esc(n.text || '')}${cards}</span></li>`;
-      }).join('')
+    ? [...items].reverse().map((n) =>
+        `<li><span class="news-ic">${esc(n.icon || '\u203C\uFE0F')}</span>` +
+        `<span class="news-when">R${esc(String(n.round))}.${esc(String((n.turn | 0) + 1))}</span>` +
+        `<span class="news-text">${linkifyCardNames(n.text || '')}</span></li>`).join('')
     : '<li class="news-empty">No broadcasts yet - the wire is quiet.</li>';
   overlay.innerHTML = `
     <div class="et-produce-modal news-modal" role="dialog" aria-label="Galactic news">
