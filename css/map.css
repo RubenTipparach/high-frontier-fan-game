@@ -2011,6 +2011,16 @@
 .news-list li.news-insp .tc-insp { margin-top: 6px; }
 /* Card preview opened from a news chip sits above the news modal. */
 .news-card-preview-overlay { z-index: 130; }
+/* Glitch-trigger confirm: red-accented warning before a glitch roll. */
+.glitch-confirm-overlay { z-index: 140; }
+.glitch-confirm-panel { border-color: #dc2626; }
+.glitch-confirm-panel h3 { color: #fca5a5; display: flex; align-items: center; gap: 8px; }
+.glitch-confirm-panel h3 .glitch-disc {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #dc2626; border: 2px solid #7f1d1d;
+  box-shadow: inset 0 0 0 2px rgba(254, 202, 202, 0.7);
+}
+.glitch-confirm-panel .glitch-go { background: #dc2626; border-color: #7f1d1d; color: #fff; }
 .turn-clock-event-card strong { color: var(--ink); font-size: 14px; flex: 1; }
 .turn-clock-event-card .ev-season {
   font-size: 10px;

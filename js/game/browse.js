@@ -1602,6 +1602,41 @@ function isMyRocketGlitched() {
   const me = _onlineSnapshot.players.find((p) => p.profileId === _onlineMe.id);
   return !!(me && me.rocket && me.rocket.glitch);
 }
+// Operations that are Glitch Triggers (mirror of the engine set): doing one
+// with a glitched stack forces a Glitch Roll.
+const GLITCH_TRIGGER_KINDS = new Set(['PROSPECT', 'SITE_REFUEL', 'INDUSTRIALIZE']);
+const GLITCH_TRIGGER_LABELS = { PROSPECT: 'Prospect', SITE_REFUEL: 'Site Refuel', INDUSTRIALIZE: 'Industrialize' };
+// Warn before committing a trigger op on a glitched stack. Resolves true to
+// proceed, false to cancel. Resolves true immediately when not glitched.
+function confirmGlitchTrigger(kind) {
+  if (!isMyRocketGlitched()) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const label = GLITCH_TRIGGER_LABELS[kind] || 'This action';
+    document.querySelector('.glitch-confirm-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay glitch-confirm-overlay';
+    const done = (ans) => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(ans); };
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); done(false); } };
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) done(false); });
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel glitch-confirm-panel';
+    panel.innerHTML = `
+      <h3><span class="glitch-disc" aria-hidden="true"></span> Glitch trigger</h3>
+      <p>Your stack is <strong>glitched</strong>. Performing <strong>${esc(label)}</strong>
+      forces a <strong>Glitch Roll</strong>: roll 1d6, and every card aboard whose
+      rad-hardness equals the roll is decommissioned (rad-hardness 7+ is safe).</p>
+      <p class="muted">Bring a Human alongside to clear the disc first if you'd rather not risk it.</p>
+      <div class="turn-confirm-actions">
+        <button type="button" class="modal-btn glitch-cancel">Cancel</button>
+        <button type="button" class="modal-btn primary glitch-go">${esc(label)} anyway</button>
+      </div>`;
+    panel.querySelector('.glitch-cancel').addEventListener('click', () => done(false));
+    panel.querySelector('.glitch-go').addEventListener('click', () => done(true));
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+  });
+}
 function newsSeenKey() { return 'hf-news-seen-' + (_onlineGameId || 'solo'); }
 function refreshNewsBadge() {
   const badge = document.getElementById('news-badge');
@@ -2946,6 +2981,13 @@ async function submitOnlineOp(op) {
   if (!_online) return false;
   if (_spectator) { _onlineToast('Spectator - view only.', 'error'); return false; }
   if (!isOnlineMyTurn()) { _onlineToast('Not your turn.', 'error'); return false; }
+  // Glitch trigger warning: prospect / site refuel / industrialize on a
+  // glitched stack forces a Glitch Roll. Warn (and let the player back out)
+  // before committing.
+  if (GLITCH_TRIGGER_KINDS.has(op && op.kind)) {
+    const go = await confirmGlitchTrigger(op.kind);
+    if (!go) return false;
+  }
   if (_onlineBusy) return false;
   _onlineBusy = true;
   let r;
@@ -6887,8 +6929,11 @@ function openRocketStackModal() {
     const glitchBanner = glitched
       ? `<div class="rocket-glitch-banner" role="status">
            <span class="glitch-disc" aria-hidden="true"></span>
-           <span>This stack is <strong>glitched</strong> - it can't move or operate
-           until a colocated Human reaches it to clear the disc.</span>
+           <span>This stack is <strong>glitched</strong>. It still moves and acts
+           freely, but a <strong>Glitch Trigger</strong> (Prospect, Site Refuel,
+           or Industrialize) forces a Glitch Roll: 1d6, and every card aboard
+           whose rad-hardness equals the roll is lost. A colocated Human clears
+           the disc.</span>
          </div>`
       : '';
 
