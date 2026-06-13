@@ -9283,48 +9283,76 @@ function doColonize(site, stack, options) {
         submitOnlineOp({ kind: 'BUILD_COLONY', cardId: pick.id });
         return;
       }
-      // Re-find by id at commit time - splices may have shifted
-      // indices since the modal opened, though in practice
-      // nothing else mutates the stack during the modal's
-      // lifetime. Defence-in-depth.
-      const currentStack = getRocketStack();
-      const idx = currentStack.findIndex((s) => s.id === pick.id && s.kind === 'crew');
-      if (idx === -1) {
-        setStatus(`Colonize aborted - crew ${esc(pick.id)} is no longer in the stack.`);
-        return;
-      }
-      const crewFace = currentStack[idx].face;
       const crewCard = CREW_BY_ID[pick.id];
       if (!crewCard) {
         setStatus(`Colonize aborted - unknown crew id ${esc(pick.id)}.`);
         return;
+      }
+      // Re-find by id at commit time in the SOURCE the picker tagged (rocket
+      // or a colocated outpost) - splices may have shifted indices since the
+      // modal opened. removeCrew() pulls it and returns a restore() that puts
+      // it back in the same place if a later step fails.
+      const src = pick.source || 'rocket';
+      let crewFace = null;
+      let restore = null;
+      if (src === 'rocket') {
+        const cur = getRocketStack();
+        const idx = cur.findIndex((s) => s.id === pick.id);
+        if (idx === -1) {
+          setStatus(`Colonize aborted - crew ${esc(pick.id)} is no longer in the stack.`);
+          return;
+        }
+        crewFace = cur[idx].face;
+      } else {
+        const letter = src.outpost;
+        const o = getOutpost(letter);
+        const idx = (o && o.cards || []).findIndex((s) => s.id === pick.id);
+        if (idx === -1) {
+          setStatus(`Colonize aborted - crew ${esc(pick.id)} is no longer in Outpost ${esc(letter)}.`);
+          return;
+        }
+        crewFace = o.cards[idx].face;
       }
       // Suppress per-crew reconciliation across the mutation dance:
       // we remove the crew, and roll it back on failure. Colonise
       // resolves the crew's own chits explicitly on success below.
       _suppressChitReconcile = true;
       try {
-      const removed = rocketRemoveCard(idx);
-      if (!removed) {
-        setStatus(`Colonize aborted - could not remove crew from stack.`);
-        return;
+      if (src === 'rocket') {
+        const cur = getRocketStack();
+        const idx = cur.findIndex((s) => s.id === pick.id);
+        if (idx === -1 || !rocketRemoveCard(idx)) {
+          setStatus(`Colonize aborted - could not remove crew from stack.`);
+          return;
+        }
+        restore = () => rocketAddCard(pick.id, 'crew', crewFace);
+      } else {
+        const letter = src.outpost;
+        const o = getOutpost(letter);
+        const idx = (o && o.cards || []).findIndex((s) => s.id === pick.id);
+        if (idx === -1) {
+          setStatus(`Colonize aborted - could not remove crew from Outpost ${esc(letter)}.`);
+          return;
+        }
+        removeCardFromOutpost(letter, idx);
+        restore = () => addCardToOutpost(letter, { id: pick.id, kind: 'crew', face: crewFace });
       }
       // Crew always re-spawns in the LEO Stack (variant rule,
       // user 2026-05). crewCard kept for naming only.
       void crewCard;
       const leoOk = addCardToLeo({ id: pick.id, kind: 'crew', face: crewFace });
       if (!leoOk) {
-        // Roll back the stack removal so the crew isn't lost.
-        rocketAddCard(pick.id, 'crew', crewFace);
+        // Roll back the removal so the crew isn't lost.
+        restore();
         setStatus(`Colonize aborted - crew couldn't return to the LEO stack.`);
         return;
       }
       const created = createColony(site.id, myOwnerId());
       if (!created) {
         // Cap or duplicate. Roll back: pull crew back out of
-        // the LEO stack, drop it back on the rocket stack.
+        // the LEO stack, drop it back where it came from.
         removeCardFromLeoById(pick.id);
-        rocketAddCard(pick.id, 'crew', crewFace);
+        restore();
         setStatus(`Colonize failed at <strong>${esc(site.name)}</strong> - cap or duplicate.`);
         return;
       }
@@ -13537,13 +13565,16 @@ function showSitePopupFor(site) {
       const colonized = countColoniesByOwner(myOwnerId());
       const capReached = colonized >= COLONY_CAP_PER_PLAYER;
       const stack = getRocketStack();
-      const colonizeOptions = findColonizeOptions(stack);
+      // A crew colocated with the factory may sit aboard the rocket OR in an
+      // outpost stack at this site - either counts (rulebook G3).
+      const outpostsHere = Object.values(getOutposts()).filter((o) => o.siteId === site.id);
+      const colonizeOptions = findColonizeOptions(stack, outpostsHere);
       const hasCrew = colonizeOptions.crews.length > 0;
       const ok = hasCrew && !capReached;
       const reason = capReached
         ? `Colony cap reached (${COLONY_CAP_PER_PLAYER}).`
         : !hasCrew
-          ? 'Need a Crew card colocated in the stack.'
+          ? 'Need a Crew card here - aboard the rocket or in a colocated outpost.'
           : null;
       actions.push({
         label: '🌐 Colonize',

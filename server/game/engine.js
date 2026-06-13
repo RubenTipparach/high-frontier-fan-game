@@ -2134,18 +2134,35 @@ function applyBuildColony(state, op, player) {
   const fac = state.factories[siteId];
   if (!fac || fac.ownerId !== player.profileId) return fail('no_factory');
   if (state.colonies[siteId]) return fail('already_colony');
-  let cardId = String(op.cardId || '');
-  let slot = cardId && player.rocket.stack.find((s) => s.id === cardId && isCrewSlot(s));
-  if (!slot) slot = player.rocket.stack.find((s) => isCrewSlot(s));   // default: first crew
+  const cardId0 = String(op.cardId || '');
+  // The colonising crew is colocated with the factory whether it's ABOARD the
+  // rocket OR in an OUTPOST stack at this site (a crew cargo-transferred to
+  // the outpost still counts, rulebook G3). Search the rocket first, then any
+  // outpost here, honouring the requested cardId when given.
+  const match = (s) => cardId0 ? (s.id === cardId0 && isCrewSlot(s)) : isCrewSlot(s);
+  let slot = player.rocket.stack.find(match);
+  let fromOutpost = null;
+  if (!slot) {
+    for (const [letter, o] of Object.entries(player.outposts || {})) {
+      if (!o || o.siteId !== siteId) continue;
+      const s = (o.cards || []).find(match);
+      if (s) { slot = s; fromOutpost = letter; break; }
+    }
+  }
   if (!slot) return fail('no_crew');
-  cardId = slot.id;
-  // The colonising crew leaves the rocket and re-spawns in the LEO Stack
-  // (the same variant rule destroyRocket + the sandbox doColonize use:
-  // crew is never lost, it returns to LEO).
-  player.rocket.stack = player.rocket.stack.filter((s) => s.id !== cardId);
-  if (player.rocket.activeThrusterId === cardId) player.rocket.activeThrusterId = null;
-  if (player.rocket.activeProspectorId === cardId) player.rocket.activeProspectorId = null;
-  clipTank(player.rocket);
+  const cardId = slot.id;
+  // The colonising crew leaves its stack and re-spawns in the LEO Stack (the
+  // same variant rule destroyRocket + the sandbox doColonize use: crew is
+  // never lost, it returns to LEO).
+  if (fromOutpost) {
+    const o = player.outposts[fromOutpost];
+    o.cards = (o.cards || []).filter((s) => s.id !== cardId);
+  } else {
+    player.rocket.stack = player.rocket.stack.filter((s) => s.id !== cardId);
+    if (player.rocket.activeThrusterId === cardId) player.rocket.activeThrusterId = null;
+    if (player.rocket.activeProspectorId === cardId) player.rocket.activeProspectorId = null;
+    clipTank(player.rocket);
+  }
   player.leo = player.leo || [];
   player.leo.push({ id: cardId, kind: 'crew', face: slot.face === 'secondary' ? 'secondary' : 'primary' });
   state.colonies[siteId] = { ownerId: player.profileId };
