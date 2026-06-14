@@ -1038,6 +1038,7 @@ function chainCardsFromRocket(rocket) {
     const c = PATENTS_BY_ID[s.id];
     const f = c ? slotFace(s, c) : {};
     const type = c ? c.type : (s.kind || 'crew');
+    const pw = powerOfSlot(s);
     return {
       id: s.id,
       type,
@@ -1046,6 +1047,9 @@ function chainCardsFromRocket(rocket) {
       thrustMod: f ? f.thrustMod : undefined,
       fuelMod: f ? f.fuelMod : undefined,
       therms: 0,
+      // Magnetocaloric Refrigerator: cools its own supports (subsystem 7).
+      // (Cooling is client-gated; this keeps the descriptor parallel.)
+      coolsOwnSupports: !!(pw && pw.coolsOwnSupports),
     };
   });
 }

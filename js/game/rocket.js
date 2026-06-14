@@ -1060,6 +1060,7 @@ function chainCardsFromStack() {
     const card = cardForSlot(slot);
     const f = installedFace(slot);
     const type = card ? card.type : slot.kind;
+    const pw = slotPower(slot);
     return {
       id: slot.id,
       type,
@@ -1068,6 +1069,8 @@ function chainCardsFromStack() {
       thrustMod: f ? f.thrustMod : undefined,
       fuelMod: f ? f.fuelMod : undefined,
       therms: type === 'radiator' ? thermsSupplied(card, f, slot.radSide) : thermsRequired(f),
+      // Magnetocaloric Refrigerator: cools its own supports (subsystem 7).
+      coolsOwnSupports: !!(pw && pw.coolsOwnSupports),
     };
   });
   // Afterburn's Open-Cycle Cooling adds a temporary radiator (1 Therm) to the
