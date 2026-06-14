@@ -16,7 +16,7 @@ import {
   getOpsRemaining, consumeOp,
   consumeDiscard, formatTurnNumber,
 } from './turn-clock.js';
-import { triggerEndTurn, confirmEndTurn, openTurnClockModal, buildDie, rollDie } from './turn-clock-ui.js';
+import { triggerEndTurn, confirmEndTurn, openTurnClockModal, buildDie, rollDie, inspirationVisualHtml } from './turn-clock-ui.js';
 import {
   getState as soloState, newGame as soloNewGame, abandonGame as soloAbandon,
   setTarget as soloSetTarget, commitMove as soloCommitMove,
@@ -33,12 +33,13 @@ import {
   getRocketStack, isInRocket, addToStack as rocketAddCard, setRadiatorSide,
   removeFromStack as rocketRemoveCard, clearStack as rocketClearStack,
   onRocketChange, isRocketActive,
-  getActiveThrusterId, setActiveThruster,
+  getActiveThrusterId, setActiveThruster, stackHasMoonCable,
   getTankWater, setTankWater, addFuel, removeFuel, getTankMax, getWaterCap,
   getTankGrade, setTankGrade, getActiveFuelGrade,
-  getStackTotals, getActiveThrusterStats, setSolarZone,
+  getStackTotals, getActiveThrusterStats, setSolarZone, setHasPowersat,
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats, getSupportChainView,
+  colocatedIsruMod, stackHasPower,
   getWiring, setWiring,
   isAfterburnEngaged, setAfterburn, OPEN_CYCLE_CARD, OPEN_CYCLE_CARD_ID,
   getAqua, spendAqua, addAqua, onAquaChange, resetAqua,
@@ -259,6 +260,18 @@ const MP_AUCTION_DECKS = [
 
 export function isBrowseOnline() { return _online; }
 
+// Arm a one-shot "open looking at my rocket" for the next map mount (or
+// apply immediately if the map is already up). Link-driven room entry
+// (a notification / invite link) calls this so the player lands on their
+// ship instead of the remembered viewport.
+let _pendingRocketFocus = false;
+export function requestRocketFocus() {
+  if (_renderer) {
+    try { _renderer.focusRocketWhenKnown(); return; } catch { /* renderer mid-teardown */ }
+  }
+  _pendingRocketFocus = true;
+}
+
 // True only while the game-room view is the on-screen view. The
 // crew-draft / auction overlays attach to document.body, so without
 // this gate a snapshot poll that arrives after the player walked back
@@ -392,6 +405,16 @@ async function bootstrapOnlineGame() {
     return;
   }
   applySnapshot(r.data.game.state, r.data.game.seq);
+  // The mount painted the rocket at a stale LEO placeholder (online never
+  // persists the solo rocket site, so it wasn't known until this first
+  // snapshot), and that placement already claimed the initial view. Now
+  // that we know the rocket's REAL site, re-focus the camera on it - the
+  // renderer skips this if the player already grabbed the camera in the
+  // brief mount -> snapshot window. Snap (ms 0): the player just arrived,
+  // a long pan from LEO would just be noise.
+  if (_renderer && typeof _renderer.focusRocketWhenKnown === 'function') {
+    _renderer.focusRocketWhenKnown({ zoom: _renderer.options.initialZoom, ms: 0 });
+  }
   // Open the multiplayer panel so the player lands on the table (room,
   // turn, roster) rather than the solo game-mode pane.
   showPane('mp');
@@ -588,12 +611,17 @@ function applySnapshot(snapshot, seq) {
   // driven straight off the snapshot and idempotent, so they appear /
   // clear as the server state flips.
   renderFirstPlayerChooser(snapshot.pendingFirstPlayer);
+  // Open Sunspot event (Budget Cuts discard / Pad Explosion tie-break):
+  // same idempotent snapshot-driven overlay treatment as the first-player
+  // handoff; appears for waiting players, shows progress to everyone else.
+  renderEventChooser(snapshot);
+  refreshNewsBadge();
   renderGameOver(snapshot);
   // Speed the snapshot poll up while an interactive freeze is open (an
   // auction, or a first-player handoff) so the waiting players see it
   // resolve in near-realtime even if the WS broadcast was dropped. Drop
   // back to the normal cadence otherwise.
-  const fastPoll = snapshot.auction || snapshot.pendingFirstPlayer;
+  const fastPoll = snapshot.auction || snapshot.pendingFirstPlayer || snapshot.pendingEvent;
   setPollCadence(fastPoll ? ONLINE_POLL_AUCTION_MS : ONLINE_POLL_MS);
   // Eager one-shot fetch the moment the auctioneer's phase opens
   // (awaiting === 'auctioneer'). The accept can land within ms of
@@ -654,21 +682,25 @@ function maybePromptCrewPick(snapshot) {
   const myp = (snapshot.players || []).find((p) => p.profileId === myId);
   if (!myp || myp.faction) return;
   _crewWizardOpen = true;
-  // Server assigns each player one of the six crew-card colours at
-  // game create. The wizard filters down to the two faces of the
-  // crew card matching that colour - both faces are legal picks
-  // (it's a single double-sided card), everything else is locked.
-  const desc = myp.color
-    ? 'Your faction colour is locked in by the server. Pick one of the two faces of your crew card.'
-    : 'Pick your starting faction. Every player chooses one before play; your pick is permanent for this session.';
+  // Every crew card is on offer. Pick any one that another player hasn't
+  // already claimed; your seat colour is then set to that crew's colour.
   openCrewWizard({
-    description: desc,
-    restrictToColor: myp.color || null,
+    description: 'Pick your starting faction from any available crew. Your pick sets your colour and is permanent for this session.',
+    takenCardIds: crewCardsTakenByOthers(snapshot, myId),
     onCommit: ({ cardId, face }) => {
       submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
     },
     onDone: () => { _crewWizardOpen = false; },
   });
+}
+
+// Crew cards already claimed by OTHER players (each physical crew card is one
+// player's faction, so a card someone else holds is off the board). Excludes
+// the local player so they can still switch faces of their own pick.
+function crewCardsTakenByOthers(snapshot, myId) {
+  return (snapshot && snapshot.players || [])
+    .filter((p) => p.profileId !== myId && p.faction && p.faction.cardId)
+    .map((p) => p.faction.cardId);
 }
 
 // Crew-draft waiting overlay. Visible whenever the snapshot says
@@ -944,11 +976,11 @@ function maybePromptCrewPickForced(snapshot) {
   if (!myp) return;
   _crewWizardOpen = true;
   const desc = myp.faction
-    ? 'Switch to the other face of your crew card. You can change as long as other players are still picking.'
-    : 'Pick one of the two faces of your crew card.';
+    ? 'Switch crews or flip to the other face. You can change as long as other players are still picking.'
+    : 'Pick your starting faction from any available crew.';
   openCrewWizard({
     description: desc,
-    restrictToColor: myp.color || null,
+    takenCardIds: crewCardsTakenByOthers(snapshot, myId),
     onCommit: ({ cardId, face }) => {
       submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
     },
@@ -1113,6 +1145,14 @@ function syncMpTurnBanner(snapshot) {
   } else {
     label.textContent = `@${active.name}'s turn · ${tn}`;
     banner.classList.remove('is-your-turn');
+  }
+  // Anarchy: flag that felonies (claim jump, factory hijack, decommission
+  // crew) are legal until the Sunspot Cube exits season blue.
+  if (snapshot.anarchy) {
+    label.textContent += ' · 🗽 Anarchy: felonies legal';
+    banner.classList.add('is-anarchy');
+  } else {
+    banner.classList.remove('is-anarchy');
   }
   banner.hidden = false;
 }
@@ -1559,6 +1599,417 @@ function computeSnapshotScore(snapshot, profileId) {
     rocket, outposts, spectralBonus, colonyVp, tokens,
     total: tokens + spectralBonus + colonyVp + glory,
   };
+}
+
+// Galactic news broadcast: a shared feed of what just happened at the
+// table (event outcomes, who lost what, glitch fixes). The toolbar
+// news button opens it; an unread badge counts items since last read.
+function gameNews() {
+  return (_online && _onlineSnapshot && Array.isArray(_onlineSnapshot.news))
+    ? _onlineSnapshot.news : [];
+}
+// Anarchy active? During Anarchy every player gains the Felonious privilege,
+// so felonies (claim jump, factory hijack, decommission crew) become legal.
+// Read off the snapshot; solo has no Anarchy.
+function isAnarchy() {
+  return !!(_online && _onlineSnapshot && _onlineSnapshot.anarchy);
+}
+// Owner of the success claim (prospect disc) at a site, from the snapshot, or
+// null. Lets the client offer Claim Jump on an opponent's claim.
+function onlineClaimOwner(siteId) {
+  const d = _onlineSnapshot && _onlineSnapshot.discs && _onlineSnapshot.discs[siteId];
+  return (d && d.outcome === 'success') ? (d.ownerId || null) : null;
+}
+// My chosen faction's privilege key (upper-snake), from the snapshot, or null.
+function myFactionPrivilege() {
+  if (!_online || !_onlineSnapshot || !_onlineMe) return null;
+  const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
+  const f = me && me.faction;
+  const card = f && CREW_BY_ID[f.cardId];
+  const face = card && card.faces && card.faces[f.face];
+  return face ? String(face.bonus || '').trim().toUpperCase().replace(/\s+/g, '_') : null;
+}
+// May I commit a felony? During Anarchy (all players) or with the Felonious
+// privilege (Taikonauts). Mirrors the engine's mayCommitFelony.
+function canCommitFelony() {
+  return isAnarchy() || myFactionPrivilege() === 'FELONIOUS';
+}
+// Do I have the Powersat global +1-thrust modifier? Either my faction grants it
+// (suspended during Anarchy, like all faction privileges) OR I PERMANENTLY
+// gained it from a card power (POWER GIRDLE / IONOSAT - not anarchy-suspended).
+// Mirrors the server's hasPrivilege(POWERSAT).
+function myHasPowersat() {
+  if (!_online || !_onlineSnapshot || !_onlineMe) return false;
+  const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
+  if (me && Array.isArray(me.grantedPrivileges) && me.grantedPrivileges.includes('POWERSAT')) return true;
+  return !isAnarchy() && myFactionPrivilege() === 'POWERSAT';
+}
+
+// Is my rocket stack carrying a Glitch disc (Sunspot Glitch event)? Read off
+// the snapshot; solo never glitches, so it's always false there.
+function isMyRocketGlitched() {
+  if (!_online || !_onlineSnapshot || !Array.isArray(_onlineSnapshot.players) || !_onlineMe) return false;
+  const me = _onlineSnapshot.players.find((p) => p.profileId === _onlineMe.id);
+  return !!(me && me.rocket && me.rocket.glitch);
+}
+// Operations that are Glitch Triggers (mirror of the engine set): doing one
+// with a glitched stack forces a Glitch Roll.
+const GLITCH_TRIGGER_KINDS = new Set(['PROSPECT', 'SITE_REFUEL', 'INDUSTRIALIZE']);
+const GLITCH_TRIGGER_LABELS = { PROSPECT: 'Prospect', SITE_REFUEL: 'Site Refuel', INDUSTRIALIZE: 'Industrialize' };
+// Warn before committing a trigger op on a glitched stack. Resolves true to
+// proceed, false to cancel. Resolves true immediately when not glitched.
+function confirmGlitchTrigger(kind) {
+  if (!isMyRocketGlitched()) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const label = GLITCH_TRIGGER_LABELS[kind] || 'This action';
+    document.querySelector('.glitch-confirm-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay glitch-confirm-overlay';
+    const done = (ans) => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(ans); };
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); done(false); } };
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) done(false); });
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel glitch-confirm-panel';
+    panel.innerHTML = `
+      <h3><span class="glitch-disc" aria-hidden="true"></span> Glitch trigger</h3>
+      <p>Your stack is <strong>glitched</strong>. Performing <strong>${esc(label)}</strong>
+      forces a <strong>Glitch Roll</strong>: roll 1d6, and every card aboard whose
+      rad-hardness equals the roll is decommissioned back to your hand
+      (rad-hardness 7+ is safe). A heavy radiator is never lost - it folds to its
+      light side instead.</p>
+      <p class="muted">Bring a Human alongside to clear the disc first if you'd rather not risk it.</p>
+      <div class="turn-confirm-actions">
+        <button type="button" class="modal-btn glitch-cancel">Cancel</button>
+        <button type="button" class="modal-btn primary glitch-go">${esc(label)} anyway</button>
+      </div>`;
+    panel.querySelector('.glitch-cancel').addEventListener('click', () => done(false));
+    panel.querySelector('.glitch-go').addEventListener('click', () => done(true));
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+  });
+}
+function newsSeenKey() { return 'hf-news-seen-' + (_onlineGameId || 'solo'); }
+function refreshNewsBadge() {
+  const badge = document.getElementById('news-badge');
+  if (!badge) return;
+  const total = gameNews().length;
+  let seen = 0;
+  try { seen = parseInt(localStorage.getItem(newsSeenKey()) || '0', 10) || 0; } catch { seen = 0; }
+  const unread = Math.max(0, total - seen);
+  badge.hidden = unread <= 0;
+  badge.textContent = unread > 9 ? '9+' : String(unread);
+}
+// Card-name -> id index for linkifying news text. Built once from the deck
+// (patents + crew, including both face names), longest name first so a longer
+// name wins over any shorter name it contains.
+let _newsNameRe = null;
+let _newsNameToId = null;
+function buildNewsCardIndex() {
+  if (_newsNameRe !== null) return;
+  const map = new Map();
+  const add = (name, id) => { if (name && id && !map.has(name)) map.set(name, id); };
+  for (const p of PATENTS) {
+    add(p.name, p.id);
+    if (p.faces) { add(p.faces.primary && p.faces.primary.name, p.id); add(p.faces.secondary && p.faces.secondary.name, p.id); }
+  }
+  for (const c of CREW) {
+    add(c.name, c.id);
+    if (c.faces) { add(c.faces.primary && c.faces.primary.name, c.id); add(c.faces.secondary && c.faces.secondary.name, c.id); }
+  }
+  _newsNameToId = map;
+  const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const names = [...map.keys()].filter(Boolean).sort((a, b) => b.length - a.length).map(escRe);
+  _newsNameRe = names.length ? new RegExp('(' + names.join('|') + ')', 'g') : false;
+}
+// Unique card ids (with display name) referenced in a news text, in order.
+function cardIdsInText(text) {
+  buildNewsCardIndex();
+  const t = String(text || '');
+  const out = [];
+  const seen = new Set();
+  if (!_newsNameRe) return out;
+  _newsNameRe.lastIndex = 0;
+  let m;
+  while ((m = _newsNameRe.exec(t)) !== null) {
+    const id = _newsNameToId.get(m[0]);
+    if (id && !seen.has(id)) { seen.add(id); out.push({ id, name: m[0] }); }
+    if (m.index === _newsNameRe.lastIndex) _newsNameRe.lastIndex++;
+  }
+  return out;
+}
+// Reconstruct the per-deck cycled list ({ deck, out, in }) from a run of
+// Inspiration news texts ("X sank to the bottom of the <deck> deck; Y is the
+// new top."), so the news panel can reuse the cycle-tracker's Inspiration
+// visual (inspirationVisualHtml) verbatim.
+function inspirationCycledFromTexts(texts) {
+  const cycled = [];
+  for (const t of texts) {
+    const deckM = /the (\w+) deck/.exec(t || '');
+    const cards = cardIdsInText(t);
+    if (cards.length >= 2) {
+      cycled.push({ deck: deckM ? deckM[1] : '', out: cards[0].id, in: cards[1].id });
+    }
+  }
+  return cycled;
+}
+
+// Escape the news text for HTML, wrapping any recognised card name in a
+// clickable chip that opens a read-only preview. Pure client-side, so it
+// works regardless of whether the server tagged the item with card ids.
+function linkifyCardNames(text) {
+  buildNewsCardIndex();
+  const t = String(text || '');
+  if (!_newsNameRe) return esc(t);
+  let out = '';
+  let last = 0;
+  let m;
+  _newsNameRe.lastIndex = 0;
+  while ((m = _newsNameRe.exec(t)) !== null) {
+    out += esc(t.slice(last, m.index));
+    const id = _newsNameToId.get(m[0]);
+    out += `<button type="button" class="news-card-chip" data-card-id="${esc(id)}" title="${esc(m[0])} - tap to view">${esc(m[0])}</button>`;
+    last = m.index + m[0].length;
+    if (m.index === _newsNameRe.lastIndex) _newsNameRe.lastIndex++;  // guard against zero-length
+  }
+  out += esc(t.slice(last));
+  return out;
+}
+
+function openNewsModal() {
+  document.querySelector('.news-overlay')?.remove();
+  const items = gameNews();
+  try { localStorage.setItem(newsSeenKey(), String(items.length)); } catch { /* private mode */ }
+  refreshNewsBadge();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay news-overlay';
+  // The server sends Inspiration as six per-deck lines. Collapse each run
+  // into ONE row that reuses the cycle-tracker's per-deck visual (deck glyph,
+  // sank-card chip down, new-top chip up). Other events: linkify card names
+  // in the text into clickable chips. Both work against any server version.
+  const display = [];
+  for (const n of items) {
+    const isInsp = /^Inspiration\b/.test(n.text || '') && /the \w+ deck/.test(n.text || '');
+    const prev = display[display.length - 1];
+    if (isInsp && prev && prev._insp && prev.round === n.round && prev.turn === n.turn) {
+      prev._texts.push(n.text || '');
+    } else if (isInsp) {
+      display.push({ round: n.round, turn: n.turn, icon: n.icon, _insp: true, _texts: [n.text || ''] });
+    } else {
+      display.push(n);
+    }
+  }
+  const rows = display.length
+    ? [...display].reverse().map((n) => {
+        if (n._insp) {
+          const cycled = inspirationCycledFromTexts(n._texts);
+          const visual = cycled.length ? inspirationVisualHtml(cycled) : '';
+          return `<li class="news-insp"><span class="news-ic">${esc(n.icon || '\u{1F4A1}')}</span>` +
+            `<span class="news-when">R${esc(String(n.round))}.${esc(String((n.turn | 0) + 1))}</span>` +
+            `<span class="news-text"><strong>Inspiration</strong> - every patent deck cycled top \u2192 bottom.${visual}</span></li>`;
+        }
+        return `<li><span class="news-ic">${esc(n.icon || '\u203C\uFE0F')}</span>` +
+          `<span class="news-when">R${esc(String(n.round))}.${esc(String((n.turn | 0) + 1))}</span>` +
+          `<span class="news-text">${linkifyCardNames(n.text || '')}</span></li>`;
+      }).join('')
+    : '<li class="news-empty">No broadcasts yet - the wire is quiet.</li>';
+  overlay.innerHTML = `
+    <div class="et-produce-modal news-modal" role="dialog" aria-label="Galactic news">
+      <div class="et-produce-head"><h3>\u203C\uFE0F Galactic news</h3></div>
+      <ul class="news-list">${rows}</ul>
+      <div class="card-modal-actions"><button type="button" class="modal-btn news-close">Close</button></div>
+    </div>`;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  overlay.querySelector('.news-close').addEventListener('click', () => overlay.remove());
+  // Chips from both paths: linkified (.news-card-chip) and the reused
+  // cycle-tracker visual (.tc-card-chip).
+  overlay.querySelectorAll('.news-card-chip[data-card-id], .tc-card-chip[data-card-id]').forEach((b) => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openNewsCardPreview(b.getAttribute('data-card-id'));
+    });
+  });
+  document.body.appendChild(overlay);
+}
+
+// Read-only card preview opened from a news chip. Resolves a patent OR crew
+// id and layers the rendered card over the news modal.
+function openNewsCardPreview(cardId) {
+  const card = PATENTS_BY_ID[cardId] || CREW_BY_ID[cardId];
+  if (!card) return;
+  document.querySelector('.news-card-preview-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay news-card-preview-overlay';
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey, true); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } };
+  document.addEventListener('keydown', onKey, true);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const panel = document.createElement('div');
+  panel.className = 'card-modal-panel';
+  try {
+    const el = renderCard(card, { type: card.type || (CREW_BY_ID[cardId] ? 'crew' : 'patent') });
+    el.classList.add('card-modal-card');
+    panel.appendChild(el);
+  } catch { panel.textContent = card.name || cardId; }
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'modal-btn';
+  btn.textContent = 'Close';
+  btn.addEventListener('click', close);
+  panel.appendChild(btn);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+}
+
+// Open Sunspot event chooser. Driven straight off the snapshot like the
+// first-player handoff: while state.pendingEvent is open, waiting players
+// pick a card (Budget Cuts: any hand card; Pad Explosion: one of the tied
+// LEO cards) and everyone else watches the remaining names. Card options
+// render as real cards via the same pick-grid the ET Produce modal uses.
+function renderEventChooser(snapshot) {
+  const existing = document.getElementById('mp-event-overlay');
+  const pending = snapshot && snapshot.pendingEvent;
+  if (!pending || !_online || !gameViewVisible()) {
+    if (existing) existing.remove();
+    return;
+  }
+  const players = (snapshot.players || []);
+  const myId = _onlineMe && _onlineMe.id;
+  const me = players.find((p) => p.profileId === myId);
+  const amWaiting = !!myId && pending.waiting.includes(myId) && !_spectator;
+
+  // Per-event copy. Budget Cuts (pick a Hand card) and a Pad Explosion TIE
+  // (pick a tied LEO card) are PICK modes; Glitch, Solar Flare, and a
+  // single-card Pad Explosion are ACKNOWLEDGE modes (no pick - just confirm
+  // the mandatory effect). The flag drives whether the card grid shows.
+  const kind = pending.kind;
+  const myOpts = (pending.options && pending.options[myId]) || null;
+  const isCuts = kind === 'budget_cuts';
+  const isPad = kind === 'pad_explosion';
+  const isGlitch = kind === 'glitch';
+  const isFlare = kind === 'solar_flare';
+  const pickMode = isCuts || (isPad && myOpts && myOpts.length);
+  const flareRoll = pending.flareRoll;
+  const EV_TITLE = {
+    budget_cuts: '\u2702\uFE0F Budget Cuts', pad_explosion: '\uD83E\uDDE8 Pad Explosion',
+    glitch: '\u26A0\uFE0F Glitch', solar_flare: '\u2600\uFE0F Solar Flare',
+  };
+  const title = EV_TITLE[kind] || '\u2604\uFE0F Sunspot event';
+  const ask = isCuts
+    ? 'Funding dries up: pick a Hand card to send to the bottom of its deck.'
+    : (isPad && pickMode)
+      ? 'Debris rains on LEO: your heaviest cards are tied - pick which one is lost.'
+    : isPad
+      ? 'Debris rains on LEO: your heaviest exposed card is decommissioned back to your hand. Confirm to resolve.'
+    : isGlitch
+      ? 'A glitch disc is about to land on your largest crewless stack. Trigger ops on it will then risk a glitch roll until a Human clears it. Confirm to resolve.'
+    : isFlare
+      ? `A solar flare (roll ${esc(String(flareRoll || '?'))}) sweeps your stacks: cards whose rad-hardness cannot take it are decommissioned back to your hand. Confirm to resolve.`
+    : 'Confirm to resolve.';
+
+  let overlay = existing;
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'mp-event-overlay';
+    overlay.className = 'mp-first-player-overlay';
+    overlay.innerHTML = `
+      <div class="mp-first-player-modal mp-event-modal" role="dialog" aria-label="Sunspot event">
+        <h3 class="mp-first-player-title"></h3>
+        <p class="mp-first-player-sub"></p>
+        <div class="et-cards" id="mp-event-cards"></div>
+        <div class="card-modal-actions" id="mp-event-actions"></div>
+        <div class="hud-error" id="mp-event-error"></div>
+      </div>`;
+    document.body.appendChild(overlay);
+  }
+  overlay.querySelector('.mp-first-player-title').textContent = title;
+  const sub = overlay.querySelector('.mp-first-player-sub');
+  const cardsHost = overlay.querySelector('#mp-event-cards');
+  const actions = overlay.querySelector('#mp-event-actions');
+  cardsHost.innerHTML = '';
+  actions.innerHTML = '';
+
+  if (!amWaiting) {
+    // Per user decision the table is NOT frozen: players who owe nothing
+    // play on with no blocker. (The debt-holder settles on their turn.)
+    overlay.remove();
+    return;
+  }
+
+  sub.textContent = ask;
+  // ACKNOWLEDGE mode (glitch / flare / pad single): no card grid, just a
+  // mandatory Confirm that submits an empty EVENT_CHOICE - the server commits
+  // the effect.
+  if (!pickMode) {
+    const ack = document.createElement('button');
+    ack.type = 'button';
+    ack.className = 'modal-btn primary';
+    ack.textContent = isGlitch ? '\u26A0\uFE0F Take the glitch'
+      : isFlare ? '\u2600\uFE0F Face the flare'
+      : '\uD83E\uDDE8 Take the hit';
+    ack.addEventListener('click', () => { ack.disabled = true; submitEventChoice(''); });
+    actions.appendChild(ack);
+    return;
+  }
+  const optionIds = isCuts
+    ? ((me && me.hand) || [])
+    : (myOpts || []);
+  const lookup = (id) => PATENTS_BY_ID[id] || null;
+  let selected = optionIds[0] || null;
+
+  const confirm = document.createElement('button');
+  confirm.type = 'button';
+  confirm.className = 'modal-btn primary';
+  confirm.textContent = isCuts ? '\u2702\uFE0F Discard it' : '\u{1F9E8} Lose it';
+  confirm.disabled = !selected;
+  confirm.addEventListener('click', () => {
+    if (!selected) return;
+    confirm.disabled = true;
+    submitEventChoice(selected);
+  });
+  actions.appendChild(confirm);
+
+  const repaint = () => {
+    cardsHost.innerHTML = '';
+    for (const id of optionIds) {
+      const card = lookup(id);
+      const pick = document.createElement('button');
+      pick.type = 'button';
+      pick.className = 'et-card-pick' + (id === selected ? ' is-selected' : '');
+      if (card) {
+        try { pick.appendChild(renderCard(card, { type: card.type })); }
+        catch { pick.textContent = card.name || id; }
+      } else {
+        pick.textContent = id;
+      }
+      const tick = document.createElement('span');
+      tick.className = 'et-pick-tick';
+      tick.textContent = '\u2713';
+      pick.appendChild(tick);
+      pick.addEventListener('click', () => { selected = id; confirm.disabled = false; repaint(); });
+      cardsHost.appendChild(pick);
+    }
+  };
+  repaint();
+}
+
+async function submitEventChoice(cardId) {
+  if (!_online || _onlineBusy) return false;
+  _onlineBusy = true;
+  let r;
+  try {
+    r = await submitGameOp(_onlineGameId, { kind: 'EVENT_CHOICE', cardId }, _onlineMe.token);
+  } finally {
+    _onlineBusy = false;
+  }
+  const errEl = document.getElementById('mp-event-error');
+  if (!r || !r.ok) {
+    if (errEl) errEl.textContent = humanizeOnlineOpError(r && r.error);
+    if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
+    return false;
+  }
+  applySnapshot(r.data.game.state, r.data.game.seq);
+  return true;
 }
 
 function renderGameOver(snapshot) {
@@ -2619,6 +3070,13 @@ async function submitOnlineOp(op) {
   if (!_online) return false;
   if (_spectator) { _onlineToast('Spectator - view only.', 'error'); return false; }
   if (!isOnlineMyTurn()) { _onlineToast('Not your turn.', 'error'); return false; }
+  // Glitch trigger warning: prospect / site refuel / industrialize on a
+  // glitched stack forces a Glitch Roll. Warn (and let the player back out)
+  // before committing.
+  if (GLITCH_TRIGGER_KINDS.has(op && op.kind)) {
+    const go = await confirmGlitchTrigger(op.kind);
+    if (!go) return false;
+  }
   if (_onlineBusy) return false;
   _onlineBusy = true;
   let r;
@@ -2659,6 +3117,18 @@ function humanizeOnlineOpError(code, detail) {
     api_unavailable: 'The game server is unavailable.',
     network: 'Network error - check your connection.',
     not_your_turn: 'It is not your turn.',
+    awaiting_event_choice: 'A Sunspot event is waiting on player choices.',
+    stack_glitched: 'That stack is glitched - it cannot act until humans reach it.',
+    felonies_not_allowed: 'Felonies are only legal during Anarchy.',
+    felony_needs_human: 'A felony needs one of your Humans at the site.',
+    factory_defended: 'That factory is defended by an opposing Human or colony.',
+    claim_defended: 'That claim is defended by an opposing Human or colony.',
+    claim_has_factory: 'A claim with a factory cannot be jumped.',
+    no_claim_here: 'There is no opposing claim to jump here.',
+    already_your_claim: 'That claim is already yours.',
+    not_waiting_on_you: 'The event is not waiting on you.',
+    card_not_in_hand: 'That card is not in your hand.',
+    not_a_tied_card: 'Pick one of the tied cards.',
     no_moves_left: 'No moves left this turn. End your turn.',
     insufficient_water: 'Not enough water for that burn.',
     no_route: 'No route to that site.',
@@ -2689,7 +3159,7 @@ function humanizeOnlineOpError(code, detail) {
     awaiting_crew_picks: 'Waiting for every player to pick a starting crew.',
     unknown_crew: 'That crew card does not exist.',
     unknown_crew_face: 'Pick the primary or secondary face.',
-    wrong_crew_colour: 'That crew card is not your assigned colour.',
+    crew_taken: 'Another player already claimed that crew. Pick a different one.',
     auction_in_progress: 'An auction is already underway.',
     need_opponent: 'Need another player to hold an auction.',
     hand_limit: 'Hand limit reached (4) - you cannot start or join an auction. Build or transfer cards first.',
@@ -2717,13 +3187,18 @@ function humanizeOnlineOpError(code, detail) {
     not_claimed: 'Prospect and claim this site before you can industrialize it.',
     already_industrialized: 'This site already has a factory.',
     cannot_industrialize: 'Industrialize needs a refinery + a robonaut (with their supports) in the stack.',
+    no_mine_revival: 'Mine Revival needs a Termite Nest aboard.',
+    no_busted_disc: 'Mine Revival needs a busted (failed) claim here to revive.',
+    site_too_small: 'Mine Revival only works on a site of size 2 or more.',
     no_factory: 'You need your own factory here.',
     cannot_mix_fuel: 'Water and dirt can\'t mix - burn the tank empty before switching fuel.',
-    wrong_fuel_grade: 'Wrong fuel: a dirt thruster burns dirt, a water thruster burns water. Refuel the matching grade.',
-    not_dirt_thruster: 'Only a dirt thruster can take on dirt fuel.',
+    wrong_fuel_grade: 'Wrong fuel: a water thruster can only burn water, and the tank holds dirt. Dump the dirt and refuel with water.',
+    not_dirt_thruster: 'Dirt refuel needs a dirt-burning thruster aboard.',
+    not_at_site: 'Park at a site first - dirt comes from the ground.',
+    dirt_needs_mooncable: 'Taking on dirt at LEO needs the moon cable (a NASRDA crew card aboard). Scoop at a site instead.',
     not_water_fuel: 'Dirt has no cash value - only water converts back to aqua.',
     no_thruster: 'Activate a thruster first.',
-    already_dirt_refueled: 'This crew dirt thruster already took its 1 dirt FT this turn.',
+    already_dirt_refueled: 'That dirt triangle has taken its dirt allotment this turn (7 via the moon cable, else 1).',
     not_in_outpost: 'That card is not in the outpost.',
     not_black_side: 'Only a Black-Side (installed) card can be delivered.',
     insufficient_outpost_water: 'The outpost doesn\'t have enough water to pay the delivery cost.',
@@ -2750,6 +3225,7 @@ function humanizeOnlineOpError(code, detail) {
     no_disc: 'There is no prospect disc to re-roll.',
     not_buggy: 'Only a buggy prospector can re-roll.',
     already_rerolled: 'The buggy has already re-rolled this claim.',
+    cannot_reroll: 'No re-roll available for this claim.',
     reroll_window_closed: 'The buggy re-roll is only available the turn you prospect.',
   })[code] || (code ? String(code) : 'Something went wrong.');
 }
@@ -5134,6 +5610,8 @@ function ensureMapShell(host) {
       <div class="map-turn-controls">
         <button id="turn-tracker" title="View turn tracker"
           aria-label="View turn tracker">🕐</button>
+        <button id="news-feed" title="Galactic news - what just happened"
+          aria-label="Galactic news">‼️<span id="news-badge" class="news-badge" hidden></span></button>
         <button id="turn-end" title="End your turn"
           aria-label="End turn">⏭ End turn</button>
         <span id="turn-budget" class="map-turn-budget" aria-live="polite">
@@ -5334,6 +5812,9 @@ function ensureMapShell(host) {
   });
   host.querySelector('#turn-tracker').addEventListener('click', () => {
     openTurnClockModal();
+  });
+  host.querySelector('#news-feed').addEventListener('click', () => {
+    openNewsModal();
   });
   // HF4: a turn is "operation, then move" OR "move, then operation"
   // - never split around the move. So the move stays reversible right
@@ -6112,6 +6593,10 @@ async function mountMapFor() {
       data: _activeData,
       onSelect: onSiteSelect,
     });
+    if (_pendingRocketFocus) {
+      _pendingRocketFocus = false;
+      _renderer.focusRocketWhenKnown();
+    }
     _renderer.onSandboxRocketClick = () => openRocketStackModal();
     wireDebugPanel(_renderer);
     wireMapInsets(_renderer);
@@ -6222,9 +6707,11 @@ function chainKindIcon(kind, size = 13) {
 // (orange = the active root card, green = a card supporting it) and a ✓ / ✗
 // validity pill (rule 4). Clicking opens the card read-only.
 function chainChip(card, face, kind, { ring, valid } = {}) {
-  const name = kind === 'crew'
-    ? ((card.faces && card.faces[face] && card.faces[face].name) || card.name || card.id)
-    : (card.name || card.id);
+  // Patents read the INSTALLED face's name too: a flipped card is a different
+  // tech (Flywheel Tractor's black side is Electrophoretic Sandworm), and the
+  // chip must match the card the modal shows.
+  const name = (card.faces && card.faces[face] && card.faces[face].name)
+    || card.name || card.id;
   const g = cardGlanceSummary(card, face);
   const statHtml = g.hasStats ? g.statsHtml : esc(kind === 'crew' ? 'crew' : (card.type || 'card'));
   const massHtml = Number.isFinite(card.mass) ? '<span class="acc-mass">m' + card.mass + '</span>' : '';
@@ -6303,7 +6790,10 @@ function buildSupportChainViz(host, lookup) {
     sec.className = 'chain-root chain-root-' + root.kind;
 
     const activeCard = lookup(root.activeId);
-    const activeName = activeCard ? activeCard.name : root.activeId;
+    const activeSlot = slotOf(root.activeId);
+    const activeFaceKey = activeSlot && activeSlot.face === 'secondary' ? 'secondary' : 'primary';
+    const activeName = (activeCard && activeCard.faces && activeCard.faces[activeFaceKey]
+      && activeCard.faces[activeFaceKey].name) || (activeCard ? activeCard.name : root.activeId);
     const allValid = root.chain.order.every((id) =>
       (root.nodeReqs[id] || []).every((r) => r.satisfied)) && root.chain.coolingOk;
     const subBits = [esc(activeName), allValid ? 'all supports satisfied' : 'support missing'];
@@ -6531,6 +7021,22 @@ function openRocketStackModal() {
            ? `<ul class="rocket-issues">${r.missing.map((m) => `<li>${esc(m)}</li>`).join('')}</ul>`
            : ''}`;
 
+    // Glitch: a red disc landed on this stack (Sunspot Glitch event). It
+    // can't move or operate until a colocated Human clears it. Red outline +
+    // banner mirror the physical red glitch disc.
+    const glitched = isMyRocketGlitched();
+    panel.classList.toggle('is-glitched', glitched);
+    const glitchBanner = glitched
+      ? `<div class="rocket-glitch-banner" role="status">
+           <span class="glitch-disc" aria-hidden="true"></span>
+           <span>This stack is <strong>glitched</strong>. It still moves and acts
+           freely, but a <strong>Glitch Trigger</strong> (Prospect, Site Refuel,
+           or Industrialize) forces a Glitch Roll: 1d6, and every card aboard
+           whose rad-hardness equals the roll is decommissioned back to your
+           hand. A colocated Human clears the disc.</span>
+         </div>`
+      : '';
+
     // Totals row. Reorganized to surface the modified-thrust
     // triangle on the LEFT as the headline visual (the player
     // reads thrust-vs-wet-mass off it at a glance), with the
@@ -6669,6 +7175,7 @@ function openRocketStackModal() {
     const hereLabel = hereIsSite ? 'Select site' : 'Select node';
     const hereDisabled = !here ? 'disabled' : '';
     body.innerHTML = `
+      ${glitchBanner}
       <div class="rocket-stack-header">
         <div class="rocket-stack-title-row">
           <h2 class="rocket-stack-title">🚀 LEO Rocket</h2>
@@ -6848,8 +7355,14 @@ function openRocketStackModal() {
     const requiredKinds = new Set();
     if (thrStats) {
       const active = lookup(thrStats.cardId);
-      const f = (active && active.faces && active.faces.primary) || active || {};
-      const reqs = f.requires || (active && active.requires) || [];
+      // Read the active thruster's INSTALLED face: a black-side robonaut
+      // thruster (e.g. Wakefield e-Beam) carries its requires on the
+      // secondary face, not primary.
+      const activeSlot = stack.find((s) => s.id === thrStats.cardId);
+      const af = (active && active.faces)
+        ? (active.faces[activeSlot && activeSlot.face === 'secondary' ? 'secondary' : 'primary'] || active.faces.primary)
+        : active;
+      const reqs = (af && af.requires) || (active && active.requires) || [];
       for (const r of reqs) if (r && r.kind) requiredKinds.add(r.kind);
     }
 
@@ -6863,7 +7376,19 @@ function openRocketStackModal() {
       const crewFace = (slot.kind === 'crew' || CREW.some((c) => c.id === slot.id))
         ? (card.faces && card.faces[slot.face === 'secondary' ? 'secondary' : 'primary'])
         : null;
+      // Read the INSTALLED face for functional logic. A robonaut's black
+      // side (e.g. Wakefield e-Beam, the Free Electron Laser's Tier-2) carries
+      // its OWN thrust + prospector kind, distinct from its white side, and
+      // the engine keys off the installed face (slotFace / isThrusterSlot), so
+      // the UI must too. Reading top-level card.thrust / faces.primary hid the
+      // "Set as active thruster" button on a thrust-carrying robonaut and
+      // mislabeled its prospector kind. (crewFace already resolves the chosen
+      // crew face above.)
+      const patentFace = card.faces
+        ? (card.faces[slot.face === 'secondary' ? 'secondary' : 'primary'] || card.faces.primary)
+        : card;
       const isThruster = card.type === 'thruster' || card.thrust != null
+        || !!(patentFace && patentFace.thrust != null)
         || !!(crewFace && crewFace.thruster);
 
       const wrap = document.createElement('div');
@@ -6876,8 +7401,10 @@ function openRocketStackModal() {
       // their active thruster, not just see the ✓ chips on the
       // thruster card.
       if (!isThruster && requiredKinds.size) {
-        const cf = (card.faces && card.faces.primary) || card;
-        const supplies = cf.supplies || card.supplies || [];
+        // A supporter card supplies what its INSTALLED face supplies (a
+        // flipped robonaut/generator's black side can supply a different
+        // kind than its white side), so read patentFace, not faces.primary.
+        const supplies = (patentFace && patentFace.supplies) || card.supplies || [];
         if (supplies.some((k) => requiredKinds.has(k))) {
           wrap.classList.add('is-supporting');
         }
@@ -6908,9 +7435,9 @@ function openRocketStackModal() {
         activate.type = 'button';
         activate.className = 'rocket-activate'
           + (slot.id === activeId ? ' is-active' : '');
-        activate.textContent = slot.id === activeId
-          ? '⚡ Active thruster'
-          : 'Set as active';
+        // Same label whichever state - the is-active orange wash shows which
+        // thruster is live; tap a dark one to switch.
+        activate.textContent = '⚡ Active thruster';
         activate.disabled = slot.id === activeId;
         activate.addEventListener('click', () => onSetActiveThrusterClick(slot.id));
         actions.appendChild(activate);
@@ -6921,8 +7448,7 @@ function openRocketStackModal() {
       // active prospector for the turn.
       const prospKind = (() => {
         if (crewFace) return crewFace.prospector || null;
-        const f = (card.faces && card.faces.primary) || card;
-        const props = f.properties || [];
+        const props = (patentFace && patentFace.properties) || [];
         for (const k of ['raygun', 'missile', 'buggy']) {
           if (props.some((p) => p.key === k && p.value)) return k;
         }
@@ -6936,9 +7462,9 @@ function openRocketStackModal() {
         btn.type = 'button';
         btn.className = 'rocket-activate'
           + (isActiveProsp ? ' is-active' : '');
-        btn.textContent = isActiveProsp
-          ? `${glyph} Active prospector`
-          : `Set as ${prospKind} prospector`;
+        // Glyph (🚀 / 🔫 / 🛺) carries the prospector kind; same label active
+        // or not, like the thruster button.
+        btn.textContent = `${glyph} Active prospector`;
         btn.disabled = isActiveProsp;
         btn.addEventListener('click', () => onSetActiveProspectorClick(slot.id));
         actions.appendChild(btn);
@@ -7974,12 +8500,15 @@ function applyEventDieEffect(event) {
   const season = getSeasonForSlot(event.turn);
   const e = getEventForRoll(event.dieRoll, season && season.name);
   if (!e) return;
-  // Inspiration (d6 = 1 or 2): cycle every patent deck - the
-  // topmost card of each goes to the bottom. Auto-applies; the
-  // player doesn't have to manually resolve it. This is the
-  // only event with an automatic mechanical effect today;
-  // others still log as "Would fire" until they get
-  // implementations.
+  // SOLO event effects. Inspiration (d6 = 1 or 2) cycles every
+  // patent deck (topmost card to the bottom) automatically; the
+  // remaining events still log as "Would fire" table reminders in
+  // the sandbox. ONLINE every event resolves server-side
+  // (engine resolveSunspotEvent) - this function never runs there,
+  // since the clock hydrates from the snapshot. No parity work for
+  // the other five is planned: the sandbox is being replaced by a
+  // server-backed solo mode that runs the same engine resolution
+  // (user decision 2026-06-12).
   let applied = false;
   if (e.rolls.includes(event.dieRoll) && e.name === 'Inspiration') {
     cycleAllDecks();
@@ -8109,9 +8638,10 @@ function hasRefueledThisTurn(siteId) {
   return log.sites.includes(siteId);
 }
 
-// A crew dirt thruster may take only 1 dirt FT per turn (HF4 rule). Tracked
-// per turn in localStorage for solo; online the server's dirtRefueledThisTurn
-// flag is authoritative (and surfaced on the snapshot's player).
+// Dirt refuel is capped per turn (HF4 MOONCABLE: 7 tanks via the moon cable
+// for a non-crew dirt triangle at LEO, else 1). Tracked cumulatively on the
+// server (player.dirtTanksThisTurn, surfaced on the snapshot); the solo path
+// (frozen legacy) only records "loaded this turn" coarsely in localStorage.
 const STORAGE_DIRT_REFUEL_LOG = 'hf-sandbox-dirt-refuel-turn';   // turn number
 function hasDirtRefueledThisTurn() {
   try { return Number(localStorage.getItem(STORAGE_DIRT_REFUEL_LOG)) === getTurn(); }
@@ -8120,15 +8650,14 @@ function hasDirtRefueledThisTurn() {
 function markDirtRefueledThisTurn() {
   try { localStorage.setItem(STORAGE_DIRT_REFUEL_LOG, String(getTurn())); } catch {}
 }
-// True when the active thruster is a crew dirt thruster that has already
-// taken its 1 dirt FT this turn (online reads the snapshot, solo the log).
-function crewDirtRefuelUsed() {
-  if (!CREW_BY_ID[getActiveThrusterId()]) return false;
+// How many dirt tanks the active stack has loaded so far this turn (online
+// reads the snapshot tally; solo is coarse - 1 once it has refuelled at all).
+function dirtTanksLoadedThisTurn() {
   if (_online) {
     const me = _onlineSnapshot && (_onlineSnapshot.players || []).find((p) => p.profileId === (_onlineMe && _onlineMe.id));
-    return !!(me && me.dirtRefueledThisTurn);
+    return Number(me && me.dirtTanksThisTurn) || 0;
   }
-  return hasDirtRefueledThisTurn();
+  return hasDirtRefueledThisTurn() ? 1 : 0;
 }
 
 // Pick the best refining source available in the rocket stack.
@@ -8147,17 +8676,25 @@ function crewDirtRefuelUsed() {
 // a refuel source. The flat +7 refuel is Factory-only (I5b), and
 // requires a built factory at the site.
 function pickRefiningSource(site) {
-  const water = Number.isFinite(site.hydration) ? site.hydration : 0;
+  // Atmospheric Scoop (subsystem 5): an aerostat site you're parked at (refuel
+  // is always colocated) counts as hydration 2. Adjacency is server-side only.
+  const isAerostat = /aerostat/i.test(String(site.id || ''));
+  const baseWater = Number.isFinite(site.hydration) ? site.hydration : 0;
+  const water = (isAerostat && stackHasPower('aerostatHydration2')) ? Math.max(baseWater, 2) : baseWater;
+  // SCAVENGING (Femtochemistry): a colocated card doubles refuel FTs.
+  const scavenge = stackHasPower('doubleSiteRefuel') ? 2 : 1;
   // ISRU rig path: the active prospector with an ISRU rating (0 or
   // more), supports met, and ISRU <= site hydration so the
   // 1 + hydration - ISRU formula gives at least 1 water.
   const prosp = getActiveProspectorStats();
   if (prosp && prosp.canActivate) {
-    const isru = prospectorIsruValue(prosp.card);
+    // Colocated ISRU modifier (subsystem 3): lower the rig's effective ISRU
+    // (floored at 0), matching the server refuel yield.
+    const isru = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat }));
     // ISRU 0 is a valid rig (gain = 1 + water), so it refuels anywhere the
     // gate ISRU <= water allows - which for 0 is every site.
     if (isru >= 0 && isru <= water) {
-      return { kind: 'isru', card: prosp.card, rawGain: 1 + water - isru, isru };
+      return { kind: 'isru', card: prosp.card, name: prosp.name, rawGain: (1 + water - isru) * scavenge, isru };
     }
   }
   return null;
@@ -8213,7 +8750,7 @@ function doRefuel(site) {
   if (gain <= 0) return;
   addFuel(gain);
   markRefueledThisTurn(site.id);
-  const sourceName = source.card?.name || source.kind;
+  const sourceName = source.name || source.card?.name || source.kind;
   const water = Number.isFinite(site.hydration) ? site.hydration : 0;
   const detail = `1 + water ${water} - ISRU ${source.isru} = ${source.rawGain} via <em>${esc(sourceName)}</em>`;
   setStatus(
@@ -8513,41 +9050,9 @@ function doFactoryRefuel(site, gain) {
   openFuelTankModal({ fromWater: tankBefore, toWater: tankBefore + gain });
 }
 
-// Free dirt refuel (Cargo Transfer free action). Only a dirt thruster can
-// take dirt, and dirt can't mix with water. A non-crew dirt thruster fills
-// to the cap; a crew dirt thruster takes 1 FT. No operation is spent.
-function doDirtRefuel() {
-  // Online: the server validates the dirt thruster + grade and fills the
-  // tank; the snapshot repaints the (grey) tank.
-  if (_online) { submitOnlineOp({ kind: 'DIRT_REFUEL' }); return; }
-  if (getActiveFuelGrade() !== 'dirt') {
-    setStatus('Dirt refuel needs an active dirt thruster.');
-    return;
-  }
-  const tank = getTankWater();
-  if (tank > 0 && getTankGrade() === 'water') {
-    setStatus('Water and dirt can\'t mix - burn the tank empty first.');
-    return;
-  }
-  const room = getWaterCap() - tank;
-  if (room <= 0) { setStatus('Tank is already full.'); return; }
-  const isCrew = !!CREW_BY_ID[getActiveThrusterId()];
-  // A crew dirt thruster takes only 1 dirt FT per turn.
-  if (isCrew && hasDirtRefueledThisTurn()) {
-    setStatus('This crew dirt thruster already took its 1 dirt FT this turn.');
-    return;
-  }
-  const gain = isCrew ? Math.min(1, room) : room;
-  setTankGrade('dirt');
-  addFuel(gain);
-  if (isCrew) markDirtRefueledThisTurn();
-  setStatus(`🟤 Loaded <strong>+${gain}</strong> dirt FT${gain === 1 ? '' : 's'} (tank now grey).`);
-  logAction({
-    type: 'dirt_refuel', icon: '🟤',
-    summary: `Dirt refuel +${gain} (tank ${getTankWater()} dirt)`,
-    undoable: false,
-  });
-}
+// Dirt refuel lives in the fuel-tank modal (openFuelTankModal's dirt
+// section), gated on the ACTIVE engine being a dirt thruster - it's fueling
+// that engine, so it sits with the water controls, not in the site popup.
 
 // Delivery (rulebook): ship a Black-Side card from an outpost at one of your
 // Factories back to LEO. Cost: zones-from-Earth x2 (+1 if site number > 7)
@@ -9089,48 +9594,76 @@ function doColonize(site, stack, options) {
         submitOnlineOp({ kind: 'BUILD_COLONY', cardId: pick.id });
         return;
       }
-      // Re-find by id at commit time - splices may have shifted
-      // indices since the modal opened, though in practice
-      // nothing else mutates the stack during the modal's
-      // lifetime. Defence-in-depth.
-      const currentStack = getRocketStack();
-      const idx = currentStack.findIndex((s) => s.id === pick.id && s.kind === 'crew');
-      if (idx === -1) {
-        setStatus(`Colonize aborted - crew ${esc(pick.id)} is no longer in the stack.`);
-        return;
-      }
-      const crewFace = currentStack[idx].face;
       const crewCard = CREW_BY_ID[pick.id];
       if (!crewCard) {
         setStatus(`Colonize aborted - unknown crew id ${esc(pick.id)}.`);
         return;
+      }
+      // Re-find by id at commit time in the SOURCE the picker tagged (rocket
+      // or a colocated outpost) - splices may have shifted indices since the
+      // modal opened. removeCrew() pulls it and returns a restore() that puts
+      // it back in the same place if a later step fails.
+      const src = pick.source || 'rocket';
+      let crewFace = null;
+      let restore = null;
+      if (src === 'rocket') {
+        const cur = getRocketStack();
+        const idx = cur.findIndex((s) => s.id === pick.id);
+        if (idx === -1) {
+          setStatus(`Colonize aborted - crew ${esc(pick.id)} is no longer in the stack.`);
+          return;
+        }
+        crewFace = cur[idx].face;
+      } else {
+        const letter = src.outpost;
+        const o = getOutpost(letter);
+        const idx = (o && o.cards || []).findIndex((s) => s.id === pick.id);
+        if (idx === -1) {
+          setStatus(`Colonize aborted - crew ${esc(pick.id)} is no longer in Outpost ${esc(letter)}.`);
+          return;
+        }
+        crewFace = o.cards[idx].face;
       }
       // Suppress per-crew reconciliation across the mutation dance:
       // we remove the crew, and roll it back on failure. Colonise
       // resolves the crew's own chits explicitly on success below.
       _suppressChitReconcile = true;
       try {
-      const removed = rocketRemoveCard(idx);
-      if (!removed) {
-        setStatus(`Colonize aborted - could not remove crew from stack.`);
-        return;
+      if (src === 'rocket') {
+        const cur = getRocketStack();
+        const idx = cur.findIndex((s) => s.id === pick.id);
+        if (idx === -1 || !rocketRemoveCard(idx)) {
+          setStatus(`Colonize aborted - could not remove crew from stack.`);
+          return;
+        }
+        restore = () => rocketAddCard(pick.id, 'crew', crewFace);
+      } else {
+        const letter = src.outpost;
+        const o = getOutpost(letter);
+        const idx = (o && o.cards || []).findIndex((s) => s.id === pick.id);
+        if (idx === -1) {
+          setStatus(`Colonize aborted - could not remove crew from Outpost ${esc(letter)}.`);
+          return;
+        }
+        removeCardFromOutpost(letter, idx);
+        restore = () => addCardToOutpost(letter, { id: pick.id, kind: 'crew', face: crewFace });
       }
       // Crew always re-spawns in the LEO Stack (variant rule,
       // user 2026-05). crewCard kept for naming only.
       void crewCard;
       const leoOk = addCardToLeo({ id: pick.id, kind: 'crew', face: crewFace });
       if (!leoOk) {
-        // Roll back the stack removal so the crew isn't lost.
-        rocketAddCard(pick.id, 'crew', crewFace);
+        // Roll back the removal so the crew isn't lost.
+        restore();
         setStatus(`Colonize aborted - crew couldn't return to the LEO stack.`);
         return;
       }
       const created = createColony(site.id, myOwnerId());
       if (!created) {
         // Cap or duplicate. Roll back: pull crew back out of
-        // the LEO stack, drop it back on the rocket stack.
+        // the LEO stack, drop it back where it came from.
         removeCardFromLeoById(pick.id);
-        rocketAddCard(pick.id, 'crew', crewFace);
+        restore();
         setStatus(`Colonize failed at <strong>${esc(site.name)}</strong> - cap or duplicate.`);
         return;
       }
@@ -9590,7 +10123,19 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const fracLadder = wcNow.fractions.length ? wcNow.fractions.join(' ') : 'whole steps';
 
   const panel = document.createElement('div');
-  const isDirt = getTankGrade() === 'dirt';
+  // The active engine drives the fuel grade: a dirt thruster takes dirt, a
+  // water thruster takes water, and the two never mix in the tank. The
+  // LIQUID colour follows what's actually LOADED (water already aboard stays
+  // blue even under a dirt engine); an empty tank styles by the active
+  // engine, since that's the grade you'd load next.
+  const activeDirt = getActiveFuelGrade() === 'dirt';
+  const isDirt = (getTankWater() > 0) ? (getTankGrade() === 'dirt') : activeDirt;
+  // Does the tank PHYSICALLY hold dirt right now? Water controls (dump / pump /
+  // aqua fill) stay available unless dirt is actually loaded, because every
+  // thruster can burn water: a water thruster burns ONLY water, a dirt thruster
+  // burns water OR dirt. So an empty dirt-engine tank can still take on water.
+  const tankDirt = getTankWater() > 0 && getTankGrade() === 'dirt';
+  const fuelWord = isDirt ? 'dirt' : 'water';
   panel.className = 'fuel-tank-panel' + (isDirt ? ' is-dirt-fuel' : '');
   panel.innerHTML = `
     <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
@@ -9642,13 +10187,13 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
           <span class="tank-sep">/</span>
           <strong class="tank-cap">${cap}</strong>
         </div>
-        <em class="muted">water</em>
+        <em class="muted">${fuelWord}</em>
       </div>
     </div>
     <div class="fuel-tank-actions">
-      <button type="button" class="popup-btn popup-btn-secondary" id="tank-dump"
-        title="Drain a chosen amount of water from the tank">💧⤓ Dump water</button>
-      ${fuelTankPumpBtns()}
+      ${tankDirt ? '' : `<button type="button" class="popup-btn popup-btn-secondary" id="tank-dump"
+        title="Drain a chosen amount of water from the tank">💧⤓ Dump water</button>`}
+      ${tankDirt ? '' : fuelTankPumpBtns()}
     </div>
 <div class="fuel-tank-aqua" id="tank-aqua-section" hidden>
       <div class="aqua-row">
@@ -9674,16 +10219,45 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         <span class="aqua-direction-label">💧 Tank → 🏦 Bank</span>
         <div class="aqua-actions">
           <button type="button" class="popup-btn popup-btn-secondary" id="aqua-cash-1"
-            title="Drain 1 water from the tank back into your aqua bank">+1</button>
+            title="Drain 1 water from the tank back into your aqua bank">-1</button>
           <button type="button" class="popup-btn popup-btn-secondary" id="aqua-cash-5"
-            title="Drain 5 water from the tank back into your aqua bank">+5</button>
+            title="Drain 5 water from the tank back into your aqua bank">-5</button>
           <button type="button" class="popup-btn" id="aqua-cash-all"
             title="Empty the tank back into your aqua bank">Cash out</button>
         </div>
       </div>
     </div>
+    <div class="fuel-tank-dirt" id="tank-dirt-section" hidden>
+      <div class="aqua-direction">
+        <span class="aqua-direction-label">⛏ Scoop → 🟤 Tank</span>
+        <div class="aqua-actions">
+          <button type="button" class="popup-btn popup-btn-secondary" id="dirt-fill-1"
+            title="Scoop 1 dirt FT into the tank">+1</button>
+          <button type="button" class="popup-btn popup-btn-secondary" id="dirt-fill-5"
+            title="Scoop 5 dirt FTs into the tank">+5</button>
+          <button type="button" class="popup-btn" id="dirt-fill-max"
+            title="Fill the tank to its cap with dirt">Max fill</button>
+        </div>
+      </div>
+      <div class="aqua-direction aqua-direction-reverse">
+        <span class="aqua-direction-label">🟤 Tank → ⤓ Dump</span>
+        <div class="aqua-actions">
+          <button type="button" class="popup-btn popup-btn-secondary" id="dirt-dump-1"
+            title="Jettison 1 dirt FT">-1</button>
+          <button type="button" class="popup-btn popup-btn-secondary" id="dirt-dump-5"
+            title="Jettison 5 dirt FTs">-5</button>
+          <button type="button" class="popup-btn" id="dirt-dump-all"
+            title="Jettison all dirt from the tank">Dump all</button>
+        </div>
+      </div>
+      <p class="muted aqua-help" id="dirt-help">
+        A dirt thruster scoops grey propellant from the ground for free (a
+        crew dirt thruster takes 1 per turn). Dirt has no aqua value and
+        can't mix with water.
+      </p>
+    </div>
     <p class="muted fuel-tank-dump-note">
-      Dumped water is destroyed for now. Stage 3+ turns this into
+      Dumped ${fuelWord} is destroyed for now. Stage 3+ turns this into
       an outpost-stack drop once factories land.
     </p>
     <div class="fuel-tank-foot muted">
@@ -9995,6 +10569,15 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     // Re-clamp in case the tank changed while the picker was open.
     const drain = Math.min(amount, getTankWater());
     if (drain <= 0) return;
+    // Online: jettisoning is the server DUMP op; await it so the snapshot
+    // lowers the tank first, then drain-animate to the new level.
+    if (_online) {
+      const ok = await submitOnlineOp({ kind: 'DUMP', amount: drain });
+      if (!ok) return;
+      const leftOnline = getTankWater();
+      drainTo(leftOnline, leftOnline <= 0 ? 600 : 250);
+      return;
+    }
     removeFuel(drain);
     const left = getTankWater();
     drainTo(left, left <= 0 ? 600 : 250);
@@ -10022,7 +10605,11 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const aquaCash5Btn  = panel.querySelector('#aqua-cash-5');
   const aquaCashAllBtn = panel.querySelector('#aqua-cash-all');
   const atLeo = isLeoSite(getRocketSite());
-  if (atLeo && aquaSection) aquaSection.hidden = false;
+  // Aqua <-> water is WATER-ONLY: dirt has no aqua value, and water can't be
+  // poured onto a dirt tank (the grades can't mix). The bank panel shows
+  // whenever the tank ISN'T already holding dirt, so a dirt-engine rocket with
+  // an empty tank can still take on water (a dirt thruster burns water too).
+  if (atLeo && !tankDirt && aquaSection) aquaSection.hidden = false;
   const refreshAquaButtons = () => {
     if (!aquaSection || aquaSection.hidden) return;
     const bal = getAqua();
@@ -10057,7 +10644,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     tween = {
       from: fromLevel, to: toLevel,
       t0: performance.now(), dur: 400,
-      onDone: () => { refreshAquaButtons(); refreshDumpButtons(); },
+      onDone: () => { refreshAquaButtons(); refreshDumpButtons(); refreshDirtButtons(); },
     };
   };
   const fillFromAqua = async (amount, e) => {
@@ -10078,6 +10665,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
       return;
     }
     if (!spendAqua(want)) { refreshAquaButtons(); return; }
+    setTankGrade('water');   // aqua converts to WATER (never dirt)
     addFuel(want);
     animateTankLevel();
     logAction({
@@ -10121,8 +10709,144 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   aquaCash1Btn?.addEventListener('click',   (e) => cashOutToAqua(1, e));
   aquaCash5Btn?.addEventListener('click',   (e) => cashOutToAqua(5, e));
   aquaCashAllBtn?.addEventListener('click', (e) => cashOutToAqua(getTankWater(), e));
+
+  // Dirt refuel section: shown when the ACTIVE engine is a dirt thruster.
+  // Loading dirt is fueling that engine, so it lives here next to the water
+  // controls (never the site popup). Dirt scoops free from the ground at a
+  // site with an ISRU card aboard, or from LEO; it can't mix with water, and
+  // a crew dirt thruster takes only 1 FT per turn. Same fill granularity as
+  // the water bank panel (+1 / +5 / Max); no cash-out, since dirt has no
+  // aqua value.
+  const dirtSection = panel.querySelector('#tank-dirt-section');
+  const dirtFill1   = panel.querySelector('#dirt-fill-1');
+  const dirtFill5   = panel.querySelector('#dirt-fill-5');
+  const dirtFillMax = panel.querySelector('#dirt-fill-max');
+  const dirtDump1   = panel.querySelector('#dirt-dump-1');
+  const dirtDump5   = panel.querySelector('#dirt-dump-5');
+  const dirtDumpAll = panel.querySelector('#dirt-dump-all');
+  const dirtHelp    = panel.querySelector('#dirt-help');
+  const isCrewDirt  = !!CREW_BY_ID[getActiveThrusterId()];
+  // Dirt needs NO ISRU rig. At LEO it takes the MOON CABLE (a NASRDA crew card
+  // aboard - need NOT be the active thruster) to pipe dirt up; at a real site
+  // any active dirt thruster scoops from the ground. Keyed off the CARD, not
+  // the suspendable Mooncable faction privilege.
+  const hasMooncable = stackHasMoonCable();
+  const canScoopDirt = (atLeo && hasMooncable) || (!!getRocketSite() && !atLeo);
+  // Per-turn dirt allotment (cumulative): 7 tanks via the moon cable for a
+  // non-crew triangle at LEO, otherwise 1 (a crew triangle at LEO, or any
+  // dirt thruster scooping at a site).
+  const dirtPerTurnMax = atLeo ? (isCrewDirt ? 1 : 7) : 1;
+  // Show the scoop panel whenever the tank is in DIRT MODE (dirt loaded, or
+  // an empty tank under a dirt engine) so the player always sees the dirt
+  // controls, not just when the dirt thruster happens to be the active
+  // engine. The fill buttons stay disabled (with a reason) until the dirt
+  // thruster IS the active engine - loading dirt fuels the active engine, and
+  // a water engine can't burn it. (A missile robonaut like Wakefield e-Beam
+  // can be both the active prospector AND the active thruster; it must be the
+  // active THRUSTER to scoop.)
+  if (isDirt && dirtSection) dirtSection.hidden = false;
+  function refreshDirtButtons() {
+    if (!dirtSection || dirtSection.hidden) return;
+    const cur = getTankWater();
+    const room = Math.max(0, cap - cur);
+    const remaining = Math.max(0, dirtPerTurnMax - dirtTanksLoadedThisTurn());
+    const fillable = Math.min(remaining, room);   // tanks that can still go in
+    const allotDone = remaining < 1;
+    const blocked = !activeDirt || !canScoopDirt || fillable < 1;
+    if (dirtFill1)   dirtFill1.disabled   = blocked;
+    // +5 / Max are bounded by the per-turn allotment (7 via moon cable, else 1).
+    if (dirtFill5)   dirtFill5.disabled   = blocked || fillable < 5;
+    if (dirtFillMax) dirtFillMax.disabled = blocked;
+    // Dump (jettison) needs no engine: you can always vent loaded dirt, so
+    // the only gate is "is there dirt to dump?".
+    if (dirtDump1)   dirtDump1.disabled   = cur < 1;
+    if (dirtDump5)   dirtDump5.disabled   = cur < 5;
+    if (dirtDumpAll) dirtDumpAll.disabled = cur < 1;
+    if (dirtHelp) {
+      dirtHelp.textContent = !activeDirt
+        ? 'Make your dirt thruster the active engine to scoop dirt (a water engine can\'t burn it).'
+        : !canScoopDirt
+          ? (atLeo
+              ? 'Carry the moon cable (a NASRDA crew card) to take on dirt at LEO, or park at a site to scoop from the ground.'
+              : 'Park at a site to scoop dirt.')
+          : room < 1
+            ? 'Tank is full.'
+            : allotDone
+              ? (atLeo && !isCrewDirt
+                  ? 'This dirt triangle has taken its 7 dirt tanks via the moon cable this turn.'
+                  : 'This dirt thruster already took its 1 dirt tank this turn.')
+              : (atLeo && !isCrewDirt
+                  ? 'The moon cable pipes up to 7 dirt tanks this turn. No aqua value, no ISRU needed; dirt can\'t mix with water or be transferred.'
+                  : 'A dirt thruster takes 1 dirt tank per turn. No aqua value, no ISRU needed; dirt can\'t mix with water or be transferred.');
+    }
+  }
+  refreshDirtButtons();
+  const fillDirt = async (amount, e) => {
+    e?.stopPropagation();
+    if (!activeDirt || !canScoopDirt) return;
+    const cur = getTankWater();
+    if (cur > 0 && getTankGrade() === 'water') { refreshDirtButtons(); return; }
+    const room = Math.max(0, cap - cur);
+    const fillable = Math.min(Math.max(0, dirtPerTurnMax - dirtTanksLoadedThisTurn()), room);
+    if (fillable < 1) { refreshDirtButtons(); return; }
+    const want = amount > 0 ? Math.min(amount, fillable) : fillable;
+    // Online: the server validates the active dirt thruster + grade + scoop
+    // location and fills; the snapshot repaints the grey tank.
+    if (_online) {
+      const ok = await submitOnlineOp({ kind: 'DIRT_REFUEL', amount: want });
+      if (!ok) { refreshDirtButtons(); return; }
+      animateTankLevel();
+      return;
+    }
+    setTankGrade('dirt');
+    addFuel(want);
+    markDirtRefueledThisTurn();
+    animateTankLevel();
+    logAction({
+      type: 'dirt_refuel', icon: '🟤',
+      summary: `Dirt refuel +${want} (tank ${getTankWater()} dirt)`,
+      undoable: false,
+    });
+  };
+  dirtFill1?.addEventListener('click',   (e) => fillDirt(1, e));
+  dirtFill5?.addEventListener('click',   (e) => fillDirt(5, e));
+  dirtFillMax?.addEventListener('click', (e) => fillDirt(Infinity, e));
+  // Dump dirt: same inline +1 / +5 / Dump-all UX as the scoop row (no
+  // separate Dump-dirt button / amount-picker modal). Jettisons grey
+  // propellant; destroyed for now (the dump note explains the Stage 3+ plan).
+  const dumpDirt = async (amount, e) => {
+    e?.stopPropagation();
+    const cur = getTankWater();
+    const drain = Math.min(amount, cur);
+    if (drain <= 0) { refreshDirtButtons(); return; }
+    // Online: jettisoning is the server DUMP op; await it so the snapshot
+    // lowers the tank first, then drain-animate to the new level.
+    if (_online) {
+      const ok = await submitOnlineOp({ kind: 'DUMP', amount: drain });
+      if (!ok) { refreshDirtButtons(); return; }
+      const left = getTankWater();
+      drainTo(left, left <= 0 ? 600 : 250);
+      refreshDirtButtons();
+      return;
+    }
+    removeFuel(drain);
+    const left = getTankWater();
+    drainTo(left, left <= 0 ? 600 : 250);
+    logAction({
+      type: 'dump', icon: '🟤⤓',
+      summary: left <= 0
+        ? `Dumped ${drain} dirt (tank empty)`
+        : `Dumped ${drain} dirt (tank ${left}/${getTankMax()})`,
+      undoable: false,
+    });
+    refreshDirtButtons();
+  };
+  dirtDump1?.addEventListener('click',   (e) => dumpDirt(1, e));
+  dirtDump5?.addEventListener('click',   (e) => dumpDirt(5, e));
+  dirtDumpAll?.addEventListener('click', (e) => dumpDirt(getTankWater(), e));
+
   const unsubAqua = onAquaChange(refreshAquaButtons);
-  const unsubRocket = onRocketChange(refreshAquaButtons);
+  const unsubRocket = onRocketChange(() => { refreshAquaButtons(); refreshDirtButtons(); });
   // Cleanup: detach listeners when the overlay tears down so a
   // closed modal doesn't keep responding to balance changes.
   const origRemove = overlay.remove.bind(overlay);
@@ -10136,15 +10860,11 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
 // Read the prospector's ISRU rating off the active face's
 // properties. ISRU is a numeric property (1..N); missing /
 // zero means "no water requirement". Returns the integer.
-function prospectorIsruValue(card) {
-  if (!card) return 0;
-  const f = (card.faces && card.faces.primary) || card;
-  const props = f.properties || card.properties || [];
-  const e = props.find((p) => p.key === 'isru');
-  if (!e) return 0;
-  const v = typeof e.value === 'number' ? e.value : parseInt(e.value, 10);
-  return Number.isFinite(v) ? v : 0;
-}
+// NOTE: the active prospector's ISRU + name come from
+// getActiveProspectorStats() (prosp.isru / prosp.name), which reads the
+// INSTALLED face. Don't re-derive them from card.faces.primary: the black
+// side is a different tech with a different ISRU rating, and a primary-face
+// read mis-gates prospect / refuel for a flipped card (the Flora buggy bug).
 
 // Free-market a single already-chosen Hand card. Same cost + payout
 // as the Free Market operation (1 op, +FREE_MARKET_AQUA aqua, card to
@@ -10245,12 +10965,16 @@ function doProspect(site, prosp) {
   }
   // ISRU rule re-validated against hydration (the "water" gate).
   // Defence-in-depth in case the popup button somehow ends up
-  // enabled with a stale read.
-  const prospIsru = prospectorIsruValue(prosp.card);
-  const siteWater = Number.isFinite(site.hydration) ? site.hydration : 0;
+  // enabled with a stale read. Includes the colocated ISRU modifier.
+  const isAerostatSiteHere = /aerostat/i.test(String(site.id || ''));
+  const prospIsru = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat: isAerostatSiteHere }));
+  const rSite = getRocketSite();
+  const colocScoopHere = isAerostatSiteHere && rSite && rSite.id === site.id && stackHasPower('aerostatHydration2');
+  const baseWaterHere = Number.isFinite(site.hydration) ? site.hydration : 0;
+  const siteWater = colocScoopHere ? Math.max(baseWaterHere, 2) : baseWaterHere;
   if (prospIsru > siteWater) {
     setStatus(
-      `Prospect blocked: <em>${esc(prosp.card?.name || '')}</em> needs site water ≥ `
+      `Prospect blocked: <em>${esc(prosp.name || '')}</em> needs site water ≥ `
       + `${prospIsru}, site has ${siteWater}.`
     );
     return;
@@ -11040,11 +11764,12 @@ function animateSnapshotProspects(prev, snapshot) {
   const pid = toPlannerId(_onlineMaps, serverSiteId);
   const site = pid && (_activeData.byId?.[pid] || _activeData.sites.find((x) => x.id === pid));
   if (!site) return;
-  // Offer the buggy re-roll only to the disc's owner while it's still
-  // available (server tracks canReroll, this turn, once).
+  // Offer the re-roll only to the disc's owner while it's still available. The
+  // server's canReroll already encodes every source (buggy, Blink Telescope
+  // raygun, colocated NANITES on a fail), so trust it rather than re-gating on
+  // kind here.
   const myId = _onlineMe && _onlineMe.id;
-  const canReroll = !!disc.canReroll && disc.kind === 'buggy'
-    && disc.ownerId === myId && isOnlineMyTurn();
+  const canReroll = !!disc.canReroll && disc.ownerId === myId && isOnlineMyTurn();
   playRemoteProspectRoll(site, disc, { serverSiteId, canReroll });
 }
 
@@ -11071,7 +11796,7 @@ function playRemoteProspectRoll(site, disc, opts = {}) {
     </div>
     <p class="prospect-roll-result muted">Rolling…</p>
     <div class="prospect-roll-actions">
-      ${opts.canReroll ? '<button type="button" class="popup-btn prospect-reroll-btn" disabled>🎲 Re-roll (buggy)</button>' : ''}
+      ${opts.canReroll ? '<button type="button" class="popup-btn prospect-reroll-btn" disabled>🎲 Re-roll</button>' : ''}
       ${opts.canReroll ? '<button type="button" class="popup-btn primary prospect-keep-btn" disabled>Keep</button>' : ''}
     </div>
   `;
@@ -11234,6 +11959,9 @@ function syncSandboxRocket() {
   // Tell the rocket engine which heliocentric zone it's in so solar-
   // driven thrusters get the zone's solar-power thrust modifier.
   setSolarZone(site && site.solarZone ? site.solarZone : null);
+  // Powersat (ESA): my faction grants +1 thrust to a push-icon thruster.
+  // Mirror the engine so the client's thrust/fuel math stays byte-identical.
+  setHasPowersat(myHasPowersat());
   const x = site && typeof site.x === 'number' ? site.x : LEO_ANCHOR.x;
   const y = site && typeof site.y === 'number' ? site.y : LEO_ANCHOR.y;
   // Active prospector kind is forwarded to the renderer so it can
@@ -11245,8 +11973,8 @@ function syncSandboxRocket() {
   // Card name + ISRU travel with the sprite so the renderer's
   // badge-hover tooltip can show them without having to import
   // rocket state itself.
-  const prospectorName = prosp && prosp.card ? prosp.card.name : null;
-  const prospectorIsru = prosp ? prospectorIsruValue(prosp.card) : null;
+  const prospectorName = prosp ? prosp.name : null;
+  const prospectorIsru = prosp ? prosp.isru : null;
   // Active thruster summary for the rocket-hover tooltip
   // (modifier-baked thrust + fuel-per-burn so the player sees
   // the "final" numbers, not the printed ones).
@@ -11264,6 +11992,7 @@ function syncSandboxRocket() {
     x, y,
     colour: myRocketColour(),
     canFly: r.active,       // drives the 🚫 + transparency overlay
+    glitch: isMyRocketGlitched(),   // red glitch disc on the sprite
     prospectorKind,
     prospectorName,
     prospectorIsru,
@@ -12947,8 +13676,16 @@ function showSitePopupFor(site) {
     // site's "number" (siteSize leading digit) is a DIFFERENT
     // value used for the prospect-roll threshold + the refining-
     // yield formula; don't confuse them.
-    const prospIsru   = prospectorIsruValue(prosp.card);
-    const siteWater   = Number.isFinite(site.hydration) ? site.hydration : 0;
+    // Colocated ISRU modifier (subsystem 3): lowers the rig's effective ISRU
+    // (floored at 0), matching the server gate so a prospect the popup offers
+    // is never rejected.
+    const isAerostat  = /aerostat/i.test(String(site.id || ''));
+    const prospIsru   = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat }));
+    // Atmospheric Scoop (subsystem 5): an aerostat site you're parked at counts
+    // as hydration 2 (colocated; adjacency is server-side only).
+    const colocScoop  = isAerostat && rocketSite && rocketSite.id === site.id && stackHasPower('aerostatHydration2');
+    const baseWater   = Number.isFinite(site.hydration) ? site.hydration : 0;
+    const siteWater   = colocScoop ? Math.max(baseWater, 2) : baseWater;
     const isruOk      = prospIsru <= siteWater;
     const ok = check.ok && supportsOk && isruOk;
     const kindGlyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prosp.kind] || '🔬';
@@ -12971,6 +13708,30 @@ function showSitePopupFor(site) {
         _renderer.clearSitePopup();
       },
     });
+  }
+  // Mine Revival (Termite Nest, MINE REVIVAL): clear a busted (failed) claim
+  // here and place your own. Online op; needs a Termite Nest aboard, the rocket
+  // parked here, a busted disc, and site size 2+.
+  if (_online && rocketSite && site.id === rocketSite.id && stackHasPower('mineRevival')) {
+    const disc = getDisc(site.id);
+    const busted = disc && disc.outcome === 'fail';
+    const size = siteProspectThreshold(site);
+    if (busted && size >= 2 && !getFactory(site.id)) {
+      const okMR = isOnlineMyTurn();
+      actions.push({
+        label: '⛏ Mine Revival (revive claim)',
+        variant: okMR ? 'rocket' : 'secondary',
+        disabled: !okMR,
+        title: okMR ? 'Clear the busted claim and place your own (Termite Nest)' : 'Wait for your turn.',
+        onClick: () => {
+          if (!okMR) return;
+          const sid = toServerId(_onlineMaps, site.id);
+          if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
+          submitOnlineOp({ kind: 'MINE_REVIVAL', siteId: sid });
+          _renderer.clearSitePopup();
+        },
+      });
+    }
   }
   // Refuel action. The rocket can pull water from a hydrated site
   // when it's parked on it AND the site's water rating meets the
@@ -13129,33 +13890,12 @@ function showSitePopupFor(site) {
       });
     }
   }
-  // Dirt refuel (Cargo Transfer free action). Shown when the active
-  // thruster is a dirt thruster and the rocket is parked here (or at LEO).
-  // Fills the tank with grey dirt FTs (crew dirt thruster: 1 FT). Water and
-  // dirt can't mix. No operation cost.
-  if (rocketSite && site.id === rocketSite.id && getActiveFuelGrade() === 'dirt') {
-    const tank = getTankWater();
-    const room = Math.max(0, getWaterCap() - tank);
-    const mixed = tank > 0 && getTankGrade() === 'water';
-    const isCrew = !!CREW_BY_ID[getActiveThrusterId()];
-    const crewDone = isCrew && crewDirtRefuelUsed();   // 1 dirt FT per turn for crew
-    const ok = room > 0 && !mixed && !crewDone;
-    const gain = isCrew ? Math.min(1, room) : room;
-    actions.push({
-      label: crewDone ? '🟤 Dirt refuel done (1/turn)'
-        : mixed ? '🟤 Dirt refuel (empty water first)'
-        : room <= 0 ? '🟤 Tank full'
-        : `🟤 Dirt refuel (+${gain})`,
-      variant: ok ? 'rocket' : 'secondary',
-      disabled: !ok,
-      title: crewDone
-        ? 'A crew dirt thruster may take only 1 dirt FT per turn. End turn to refresh.'
-        : mixed
-          ? 'Burn the water tank empty before taking on dirt - the two can\'t mix.'
-          : 'Free: a dirt thruster loads grey dirt FTs (a crew dirt thruster takes 1 per turn).',
-      onClick: () => { if (!ok) return; doDirtRefuel(); _renderer.clearSitePopup(); },
-    });
-  }
+  // Dirt refuel is NOT a site-popup action: it lives in the rocket fuel
+  // tank modal, shown only when the ACTIVE engine is a dirt thruster (open
+  // the tank from the rocket-stack wet-mass cell or the LEO dock). Loading
+  // dirt is fueling the active engine, so it belongs with the tank, next to
+  // the water controls. Water and dirt can't mix, and a water thruster can't
+  // burn dirt, so the grade is driven entirely by the active engine.
   // Industrialize action (rulebook I7). Shown only at sites where
   // the rocket is parked AND a successful claim disc exists. The
   // button gates on whether the stack has a valid refinery +
@@ -13187,6 +13927,31 @@ function showSitePopupFor(site) {
     // When a factory already exists the build option is simply omitted (no
     // disabled "Already industrialized" row) - the factory art on the map says so.
   }
+  // Claim Jump (Felony, G4). Only during Anarchy: replace an opponent's claim
+  // here with your own. Shown when the rocket is parked here, there's an
+  // opposing success claim, and no factory holds it. The server re-checks the
+  // full felony rules (your Human present, no opposing Human/colony).
+  if (_online && canCommitFelony() && rocketSite && site.id === rocketSite.id) {
+    const claimOwner = onlineClaimOwner(site.id);
+    const mine = myOwnerId();
+    if (claimOwner && claimOwner !== mine && !getFactory(site.id)) {
+      const haveHuman = getRocketStack().some((s) => CREW_BY_ID[s.id]);
+      const ok = haveHuman;
+      actions.push({
+        label: '🗽 Claim jump (Felony)',
+        variant: ok ? 'rocket' : 'secondary',
+        disabled: !ok,
+        title: ok
+          ? 'Anarchy: seize this opponent\'s claim. Blocked if an opposing Human or colony defends it.'
+          : 'Claim jump needs one of your Humans (crew) at this site.',
+        onClick: () => {
+          if (!ok) return;
+          submitOnlineOp({ kind: 'CLAIM_JUMP', siteId: site.id });
+          _renderer.clearSitePopup();
+        },
+      });
+    }
+  }
   // Colonize action (rulebook G3, free action). Shown when the
   // rocket is parked at a site with a player-owned factory and
   // no existing colony. Picker surfaces when 2+ crews are in
@@ -13199,13 +13964,16 @@ function showSitePopupFor(site) {
       const colonized = countColoniesByOwner(myOwnerId());
       const capReached = colonized >= COLONY_CAP_PER_PLAYER;
       const stack = getRocketStack();
-      const colonizeOptions = findColonizeOptions(stack);
+      // A crew colocated with the factory may sit aboard the rocket OR in an
+      // outpost stack at this site - either counts (rulebook G3).
+      const outpostsHere = Object.values(getOutposts()).filter((o) => o.siteId === site.id);
+      const colonizeOptions = findColonizeOptions(stack, outpostsHere);
       const hasCrew = colonizeOptions.crews.length > 0;
       const ok = hasCrew && !capReached;
       const reason = capReached
         ? `Colony cap reached (${COLONY_CAP_PER_PLAYER}).`
         : !hasCrew
-          ? 'Need a Crew card colocated in the stack.'
+          ? 'Need a Crew card here - aboard the rocket or in a colocated outpost.'
           : null;
       actions.push({
         label: '🌐 Colonize',
@@ -13424,7 +14192,7 @@ function showSitePopupFor(site) {
   // the ISRU chip ("Your ISRU 2 vs 4 water ✓") without the
   // renderer needing to import rocket state directly.
   _renderer.setPopupRocketInfo(prosp
-    ? { isru: prospectorIsruValue(prosp.card), kind: prosp.kind }
+    ? { isru: prosp.isru, kind: prosp.kind }
     : null);
   _renderer.setSitePopup(site, actions);
   _renderer.onPopupClose(() => {
@@ -14929,7 +15697,7 @@ function openAllCardsView({ title = 'All cards', titleColor = null, locs = [] } 
     } else {
       const empty = document.createElement('div');
       empty.className = 'all-cards-empty';
-      empty.textContent = '—';
+      empty.textContent = '-';
       sec.appendChild(empty);
     }
 
@@ -15396,11 +16164,11 @@ const MP_LOG_ICONS = {
   END_TURN: '⏭', MOVE: '🛸', BURN: '🔥',
   SET_ACTIVE_THRUSTER: '🔥', SET_ACTIVE_PROSPECTOR: '⛏',
   BUILD_ROCKET: '🚀', BUY_CARD: '📚', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',
-  INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧',
-  ET_PRODUCE: '🏭', SITE_REFUEL: '💧',
+  INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧', MINE_REVIVAL: '⛏',
+  ET_PRODUCE: '🏭', SITE_REFUEL: '💧', EVENT_CHOICE: '☄️',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
   DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🏠',
-  REFUEL: '💧', CASH_WATER: '💎', DISCARD: '🗑',
+  REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',
   TRANSFER: '🔀', TRANSFER_FUEL: '💧',
   CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑',
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',
@@ -15887,7 +16655,8 @@ function openCrewWizard(arg, maybeOnDone) {
   // Back-compat: openCrewWizard(onDoneFn) keeps working.
   const opts = typeof arg === 'function' ? { onDone: arg } : (arg || {});
   if (maybeOnDone) opts.onDone = maybeOnDone;
-  const { onDone, onCommit, description, restrictToColor } = opts;
+  const { onDone, onCommit, description, restrictToColor, takenCardIds } = opts;
+  const takenSet = new Set(takenCardIds || []);
 
   document.querySelector('.crew-wizard-overlay')?.remove();
   let selected = null; // { cardId, face }
@@ -15950,27 +16719,33 @@ function openCrewWizard(arg, maybeOnDone) {
         <button type="button" class="modal-btn primary crew-confirm" ${selected ? '' : 'disabled'}>🚀 Start with ${selName}</button>
       </div>
     `;
-    // Show the actual crew cards (the 12 single-face faction
-    // faces), each a selectable tile. In multiplayer the server
-    // assigns each player one of the six PLAYER_COLORS (which
-    // map 1:1 to the six crew cards), and the player can only
-    // pick from the two faces of the card matching their colour
-    // (restrictToColor). Solo mode passes no restriction and
-    // sees every face.
+    // Show the actual crew cards (the 12 single-face faction faces), each a
+    // selectable tile. Every crew is on offer; a card another player has
+    // already claimed (takenCardIds - both its faces) is shown locked. Solo
+    // mode passes neither restriction and sees every face. The legacy
+    // restrictToColor filter is still honoured if a caller passes it.
     const grid = dialog.querySelector('.crew-faction-grid');
     const faces = restrictToColor
       ? CREW_FACES.filter((c) => c.color === restrictToColor)
       : CREW_FACES;
     for (const c of faces) {
       const isSel = selected && selected.cardId === c.srcId && selected.face === c.face;
+      const taken = takenSet.has(c.srcId);
       const tile = document.createElement('div');
-      tile.className = 'crew-faction-card' + (isSel ? ' is-selected' : '');
+      tile.className = 'crew-faction-card' + (isSel ? ' is-selected' : '') + (taken ? ' is-taken' : '');
       tile.setAttribute('role', 'button');
-      tile.tabIndex = 0;
+      tile.tabIndex = taken ? -1 : 0;
       tile.dataset.card = c.srcId;
       tile.dataset.face = c.face;
+      if (taken) { tile.setAttribute('aria-disabled', 'true'); tile.title = 'Another player has this crew.'; }
       tile.appendChild(renderCard(c, { type: 'crew' }));
-      const pick = () => { selected = { cardId: c.srcId, face: c.face }; render(); };
+      if (taken) {
+        const badge = document.createElement('span');
+        badge.className = 'crew-faction-taken';
+        badge.textContent = 'Taken';
+        tile.appendChild(badge);
+      }
+      const pick = () => { if (taken) return; selected = { cardId: c.srcId, face: c.face }; render(); };
       tile.addEventListener('click', pick);
       tile.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); }

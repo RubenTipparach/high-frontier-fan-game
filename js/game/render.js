@@ -87,6 +87,9 @@ function isLeoWaypoint(w) {
 }
 const DEFAULT_ZOOM        = 6;
 const MOBILE_DEFAULT_ZOOM = 5;
+// Remembered viewport (world-center + zoom), saved on every user pan / zoom
+// so reopening the page lands where the player left off.
+const LS_CAMERA = 'hf.mapCamera';
 // Mobile viewports (≤720 px) open the map slightly farther
 // out than desktop - the canvas is denser per pixel + a closer
 // initial zoom hides too much of the system at a glance.
@@ -537,24 +540,35 @@ function drawComet(ctx, cx, cy, r, site) {
 // else; the halo extends well past the visible disc so it reads
 // as "this is the star" rather than just another body. No hex
 // marker -- the Sun isn't a destination.
-function drawSun(ctx, cx, cy, r) {
+//
+// The two radial gradients are built once (buildSunGrads) and reused
+// every frame: they're defined in WORLD coordinates, which never change,
+// and the canvas applies the live pan/zoom transform at fill time - so a
+// cached gradient lands in the right place at any camera pose. That keeps
+// drawSun off the per-frame createRadialGradient + addColorStop path
+// (this draws 60x/s under the ambient animation loop) with zero change to
+// the pixels. Sized/capped exactly like the old per-frame version.
+function buildSunGrads(ctx, cx, cy, r) {
   // Corona haze, wide and faint.
   const corona = ctx.createRadialGradient(cx, cy, r * 0.4, cx, cy, r * 3.5);
   corona.addColorStop(0,    'rgba(254, 215, 100, 0.45)');
   corona.addColorStop(0.45, 'rgba(254, 180,  60, 0.12)');
   corona.addColorStop(1,    'rgba(254, 180,  60, 0)');
-  ctx.fillStyle = corona;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r * 3.5, 0, Math.PI * 2);
-  ctx.fill();
-
   // Disc with hot core in the centre.
   const disc = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
   disc.addColorStop(0,    '#ffffff');
   disc.addColorStop(0.25, '#fff3a0');
   disc.addColorStop(0.7,  '#fbbf24');
   disc.addColorStop(1,    '#d97706');
-  ctx.fillStyle = disc;
+  return { corona, disc, cx, cy, r };
+}
+function drawSun(ctx, cx, cy, r, grads) {
+  ctx.fillStyle = grads.corona;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 3.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = grads.disc;
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.fill();
@@ -799,22 +813,42 @@ export class MapRenderer {
     // crisp; a body zoomed in past its sprite resolution triggers a
     // one-off re-render at a larger reference radius.
     this._spriteCache = new Map();
+    // The Sun's two radial gradients, built once (buildSunGrads) and reused
+    // every frame. World-space coords never change, so the cached gradient
+    // stays correct under any pan/zoom (the CTM is applied at fill time).
+    this._sunGrad = null;
     // Ambient decorative rockets: cosmetic sprites zipping between
     // random sites in the background. Count is driven externally
     // (setAmbientRocketCount) - 10 + 5 per factory built. Purely
     // visual; they ignore the delta-v graph and just lerp between
-    // random site coords.
+    // random site coords. The fleet is the chibi real-world spacecraft
+    // set (assets/background-rockets, in-space configs, no boosters),
+    // Project Orion included.
     this._ambientRockets = [];
     this._ambientLastT = 0;
     this._ambientSprites = [];
-    for (const name of ['rocket-red', 'rocket-blue', 'rocket-green', 'rocket-orange', 'rocket-silver']) {
+    // Camera persistence state: set by _restoreCamera / _noteUserCamera /
+    // the first rocket placement, so the initial view resolves exactly once.
+    this._initialViewDone = false;
+    // Distinct from _initialViewDone: true ONLY once the player has manually
+    // panned / zoomed. The first rocket placement also sets _initialViewDone
+    // (an AUTO view), so that flag alone can't tell "we painted something" from
+    // "the player took the wheel". focusRocketWhenKnown reads THIS flag so a
+    // late re-focus (online: the real rocket site arrives after the mount
+    // painted a stale LEO placeholder) can still land on the ship, while a
+    // player who already grabbed the camera is never yanked.
+    this._userAdjustedCamera = false;
+    this._camSaveTimer = null;
+    for (const name of ['chibi-apollo-csm', 'chibi-orion', 'chibi-crew-dragon',
+      'chibi-space-shuttle', 'chibi-soyuz', 'chibi-shenzhou', 'chibi-mengzhou',
+      'chibi-skylab', 'chibi-gemini', 'chibi-orion-pulse-ship']) {
       const img = new Image();
       // Resolve against THIS module's URL, not the address bar. With
       // room routing the visible URL can be a deep /room/<CODE> path,
       // and a bare 'assets/...' would resolve to /room/assets/... (404).
       // import.meta.url is always /js/game/render.js, so ../../assets
       // lands at the real app-root /assets.
-      img.src = assetUrl(`assets/rockets/${name}.png`);
+      img.src = assetUrl(`assets/background-rockets/${name}.svg`);
       this._ambientSprites.push(img);
     }
     // Stage-3 factory sprites: one player-tinted base per seat colour + the
@@ -898,6 +932,18 @@ export class MapRenderer {
   // js/game/rocket.js's canRocketFly().
   setSandboxRocket(opts) {
     this._sandboxRocket = opts || null;
+    // First placement: fly to the player's rocket. This is the DEFAULT
+    // opening view on every mount (page load, room entry, sandbox); the
+    // restored viewport / whole-map fit is just the starting pose. Only a
+    // user pan / zoom that already happened (_noteUserCamera set
+    // _initialViewDone) suppresses it, so the camera is never yanked away
+    // from a player who is already looking around.
+    if (!this._initialViewDone && opts
+        && Number.isFinite(opts.x) && Number.isFinite(opts.y)) {
+      this._initialViewDone = true;
+      this.flyTo({ x: opts.x, y: opts.y }, this._focusRocketZoom || 5, { ms: this._focusRocketMs || 420 });
+      this._focusRocketMs = 0;
+    }
     this._scheduleDraw();
   }
 
@@ -997,7 +1043,73 @@ export class MapRenderer {
 
   reset() {
     this._fitToData();
+    // Reset means "start clean": forget the remembered viewport too, so
+    // the next open re-centers on the rocket instead of the stale pose.
+    try { localStorage.removeItem(LS_CAMERA); } catch { /* storage unavailable */ }
+    clearTimeout(this._camSaveTimer);
     this._scheduleDraw();
+  }
+
+  // ---- camera persistence ----
+  // DEFAULT VIEW IS THE ROCKET: whenever a map mounts and the player's
+  // rocket position arrives (setSandboxRocket's first placement), the
+  // camera flies to it - on every page load, room entry, or sandbox
+  // mount. The remembered viewport (saved below on every user pan /
+  // zoom) is only the pre-focus backdrop and the fallback when no
+  // rocket ever appears (map browsing with no game). A user gesture
+  // before the rocket lands disarms the fly so the camera is never
+  // stolen mid-look.
+  _noteUserCamera() {
+    this._initialViewDone = true;  // never recenter out from under the player
+    this._userAdjustedCamera = true;  // the player now owns the camera
+    clearTimeout(this._camSaveTimer);
+    this._camSaveTimer = setTimeout(() => this._saveCamera(), 500);
+  }
+  _saveCamera() {
+    if (!(this.fitScale > 0) || !(this.hostW > 0)) return;
+    const eff = this.zoom * this.fitScale;
+    const cam = {
+      x: (this._viewCenterX() - this.pan.x) / eff,
+      y: (this._viewCenterY() - this.pan.y) / eff,
+      zoom: this.zoom,
+    };
+    try { localStorage.setItem(LS_CAMERA, JSON.stringify(cam)); } catch { /* storage unavailable */ }
+  }
+  _restoreCamera() {
+    let cam = null;
+    try { cam = JSON.parse(localStorage.getItem(LS_CAMERA) || 'null'); } catch { cam = null; }
+    if (!cam || !Number.isFinite(cam.x) || !Number.isFinite(cam.y) || !Number.isFinite(cam.zoom)) return false;
+    this.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, cam.zoom));
+    const eff = this.zoom * this.fitScale;
+    this.pan.x = this._viewCenterX() - cam.x * eff;
+    this.pan.y = this._viewCenterY() - cam.y * eff;
+    // Deliberately NOT marking _initialViewDone: the restored pose is the
+    // backdrop the rocket-focus fly starts from, not the final view. Only
+    // a user gesture or the fly itself claims the initial view.
+    return true;
+  }
+
+  // One-shot: focus the player's rocket as soon as its position is known
+  // (immediately if it already is). Used by link-driven room entry - a
+  // player following a notification / invite link lands looking at their
+  // ship, overriding any remembered viewport. A later user pan / zoom
+  // still wins: the pending focus only fires through setSandboxRocket's
+  // first-placement path, which _noteUserCamera disarms.
+  focusRocketWhenKnown({ zoom = 5, ms = 420 } = {}) {
+    // The player has the wheel: never yank the camera, even if the rocket's
+    // real position only just became known. (A mount-time placement that set
+    // _initialViewDone does NOT count as the player taking control, which is
+    // why this reads _userAdjustedCamera, not _initialViewDone.)
+    if (this._userAdjustedCamera) return;
+    const r = this._sandboxRocket;
+    this._focusRocketZoom = zoom;
+    if (r && Number.isFinite(r.x) && Number.isFinite(r.y)) {
+      this._initialViewDone = true;
+      this.flyTo({ x: r.x, y: r.y }, zoom, { ms });
+      return;
+    }
+    this._initialViewDone = false;
+    this._focusRocketMs = ms;
   }
 
   // Horizontal / vertical centre of the visible (uninsetted) region
@@ -1318,6 +1430,7 @@ export class MapRenderer {
 
     this._resize();
     this._fitToData();
+    this._restoreCamera();
     this._scheduleDraw();
   }
 
@@ -1628,12 +1741,14 @@ export class MapRenderer {
       t: Math.random(),                      // random start phase
       dur: 14000 + Math.random() * 18000,    // ms per leg (~50% slower)
       size: 8 + Math.random() * 6,           // world units (~50% smaller)
+      flick: Math.random() * 1000,           // engine-flame flicker phase
     };
   }
 
   // Advance + draw the ambient rockets (world space). dt in ms.
   _drawAmbientRockets(ctx, dt) {
     if (!this._ambientRockets.length) return;
+    const now = performance.now();
     const sites = this._ambientSites();
     for (const r of this._ambientRockets) {
       r.t += dt / r.dur;
@@ -1654,8 +1769,35 @@ export class MapRenderer {
       ctx.globalAlpha = 0.4;
       ctx.translate(x, y);
       ctx.rotate(ang);
+      // Aspect-correct: the chibi spacecraft are taller than wide, so
+      // size is the height and the width follows the sprite's ratio.
       const s = r.size;
-      ctx.drawImage(img, -s / 2, -s / 2, s, s);
+      const w = s * (img.naturalWidth / img.naturalHeight || 1);
+      // Little engine flame at the tail (+y is behind the nose after the
+      // rotate above). Three nested teardrops - amber, gold, white-hot
+      // core - whose length flickers on two unsynced sine waves with a
+      // per-ship phase, drawn BEFORE the sprite so the hull covers the
+      // flame root and the exhaust reads as coming from the engines.
+      // The sprite boxes carry a few px of bell-depth padding under the
+      // hull (the hull bottoms sit at ~0.29-0.40 of s below center, varying
+      // per ship), so the flame roots at 0.26 s - safely INSIDE every hull -
+      // and only its tip shows past the engines.
+      const ft = now * 0.018 + r.flick;
+      const len = s * (0.42 + 0.12 * Math.sin(ft) + 0.08 * Math.sin(ft * 2.63));
+      const fy = s * 0.26;
+      const flame = (halfW, l, color) => {
+        ctx.beginPath();
+        ctx.moveTo(-halfW, fy);
+        ctx.quadraticCurveTo(-halfW * 0.55, fy + l * 0.55, 0, fy + l);
+        ctx.quadraticCurveTo(halfW * 0.55, fy + l * 0.55, halfW, fy);
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.fill();
+      };
+      flame(s * 0.13,  len,        'rgba(255,140,58,0.70)');
+      flame(s * 0.085, len * 0.62, 'rgba(255,217,102,0.85)');
+      flame(s * 0.05,  len * 0.34, 'rgba(255,247,224,0.95)');
+      ctx.drawImage(img, -w / 2, -s / 2, w, s);
       ctx.restore();
     }
   }
@@ -2652,7 +2794,16 @@ export class MapRenderer {
     for (const site of this._realSites) {
       if (this._mergedSites.has(site.id)) continue;
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
-      if (vis.kind === 'sun')   { if (!offscreen(site.x, site.y, vis.r)) drawSun(ctx, site.x, site.y, vis.r); continue; }
+      if (vis.kind === 'sun') {
+        if (!offscreen(site.x, site.y, vis.r)) {
+          let g = this._sunGrad;
+          if (!g || g.cx !== site.x || g.cy !== site.y || g.r !== vis.r) {
+            g = this._sunGrad = buildSunGrads(ctx, site.x, site.y, vis.r);
+          }
+          drawSun(ctx, site.x, site.y, vis.r, g);
+        }
+        continue;
+      }
       if (vis.kind === 'comet') { if (!offscreen(site.x, site.y, vis.r)) drawComet(ctx, site.x, site.y, vis.r, site); }
     }
   }
@@ -3312,6 +3463,30 @@ export class MapRenderer {
     } else {
       this._prospectorBadgeBox = null;
     }
+    // Glitch disc: a bold red token sitting ON the stack (Sunspot Glitch
+    // event), mirroring the physical red glitch disc. Drawn last so it reads
+    // as placed on top of the ship; the stack can't act until a Human clears
+    // it (the stack modal carries the explanatory banner).
+    if (r.glitch) {
+      const gr = Math.max(7, Math.round(w * 0.42));
+      const gx = sx;
+      const gy = py + h * 0.42;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(gx, gy, gr, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(220, 38, 38, 0.94)';
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#7f1d1d';
+      ctx.stroke();
+      // Inner highlight ring so it reads as a raised disc, not a flat dot.
+      ctx.beginPath();
+      ctx.arc(gx, gy, gr * 0.6, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(254, 202, 202, 0.85)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      ctx.restore();
+    }
     // Stash the screen-space bounding box for hit-testing. The
     // active-thruster summary rides along for the rocket-hover
     // tooltip (browse.js fills r.thruster from
@@ -3564,6 +3739,7 @@ export class MapRenderer {
       if (Math.abs(dx) + Math.abs(dy) > 3) this._dragStart.moved = true;
       this.pan.x = this._dragStart.panX + dx;
       this.pan.y = this._dragStart.panY + dy;
+      if (this._dragStart.moved) this._noteUserCamera();
       this._scheduleDraw();
     });
     window.addEventListener('mouseup', () => {
@@ -3643,6 +3819,7 @@ export class MapRenderer {
         if (Math.abs(dx) + Math.abs(dy) > 10) this._gesture.moved = true;
         this.pan.x = this._gesture.pan.x + dx;
         this.pan.y = this._gesture.pan.y + dy;
+        if (this._gesture.moved) this._noteUserCamera();
         this._scheduleDraw();
       } else if (points.length >= 2 && this._gesture.touches.length >= 2) {
         this._gesture.moved = true;
@@ -3664,6 +3841,7 @@ export class MapRenderer {
         this.pan.x = (midX - rect.left) - wx * eff1;
         this.pan.y = (midY - rect.top) - wy * eff1;
         this.zoom = targetZoom;
+        this._noteUserCamera();
         this._scheduleDraw();
       }
     }, { passive: false });
@@ -3712,6 +3890,7 @@ export class MapRenderer {
     this.pan.x = sx - wx * eff1;
     this.pan.y = sy - wy * eff1;
     this.zoom = next;
+    this._noteUserCamera();
     this._scheduleDraw();
   }
 

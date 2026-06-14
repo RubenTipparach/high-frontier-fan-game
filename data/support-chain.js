@@ -155,6 +155,28 @@ export function resolveCoolingAcross({ cards = [], orders = [] } = {}) {
     const reactorIds = order.filter((id) => {
       const c = byId.get(id); return c && c.type === 'reactor';
     });
+    // Generators self-cooled by a `coolsOwnSupports` radiator in this chain
+    // (Magnetocaloric Refrigerator): a generator supplying a kind that radiator
+    // requires is cooled by the radiator itself, so its heat does NOT draw the
+    // shared pool. Matched by first-match supply in chain order, like the
+    // resolver's default supplier choice.
+    const selfCooled = new Set();
+    for (const id of order) {
+      const c = byId.get(id);
+      if (!c || c.type !== 'radiator' || !c.coolsOwnSupports) continue;
+      const reqKinds = (c.requires || [])
+        .map((r) => (r && typeof r === 'object') ? r.kind : r).filter(Boolean);
+      for (const kind of reqKinds) {
+        for (const sid of order) {
+          if (sid === id || selfCooled.has(sid)) continue;
+          const s = byId.get(sid);
+          if (s && s.type === 'generator' && Array.isArray(s.supplies) && s.supplies.includes(kind)) {
+            selfCooled.add(sid);
+            break;
+          }
+        }
+      }
+    }
     const reactorCooling = [];
     // Reactors a higher-priority chain already reserved: shared, already cooled.
     for (const id of reactorIds) {
@@ -174,10 +196,11 @@ export function resolveCoolingAcross({ cards = [], orders = [] } = {}) {
     const reactorsCooled = reactorCooling.every((r) => r.ok);
     const reactorDemand = reactorIds.reduce((s, id) => s + (Number(byId.get(id).therms) || 0), 0);
     // Non-reactor heat = every heat-generating chain card that is NOT a reactor
-    // (the thruster + generators). Radiators supply cooling, so they're excluded.
+    // (the thruster + generators). Radiators supply cooling, so they're excluded;
+    // so is any generator a coolsOwnSupports radiator self-cools.
     const nonReactorHeat = order
       .map((id) => byId.get(id))
-      .filter((c) => c && c.type !== 'reactor' && c.type !== 'radiator')
+      .filter((c) => c && c.type !== 'reactor' && c.type !== 'radiator' && !selfCooled.has(c.id))
       .reduce((s, c) => s + (Number(c.therms) || 0), 0);
     const nonReactorCooled = nonReactorHeat <= pool;
     const coolingOk = reactorsCooled && nonReactorCooled;

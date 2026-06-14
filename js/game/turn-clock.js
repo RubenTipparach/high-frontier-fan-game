@@ -4,10 +4,13 @@
 // Cube advances one slot per "End turn". When it crosses the new-
 // round marker the round counter ticks up; when it lands on an
 // event slot we roll a d6 and surface the result so the player can
-// (eventually) act on it. Right now we just report the roll -
-// translating each Inspiration / Glitch / Pad Explosion / Solar
-// Flare / Budget Cuts outcome into engine effects belongs in
-// Stage 3.
+// act on it. ONLINE the server engine resolves every event
+// mechanically (server/game/engine.js#resolveSunspotEvent) and the
+// outcome notes ride lastEvent.notes into the clock modal; the SOLO
+// sandbox auto-applies Inspiration only and reports the rest as
+// table reminders. No solo parity is planned: the sandbox is being
+// replaced by a server-backed solo mode, which gets the full engine
+// event resolution for free (user decision 2026-06-12).
 //
 // Public surface:
 //   getTurn()                  → 0..11

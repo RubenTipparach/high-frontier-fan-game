@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 250" width="52" height="250">
+<defs><linearGradient id="mds-g4a4f5a" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2b2e34"/><stop offset="0.17" stop-color="#676b74"/><stop offset="0.33" stop-color="#a8abb0"/><stop offset="0.62" stop-color="#4a4f5a"/><stop offset="1" stop-color="#212428"/></linearGradient><linearGradient id="mds-ge3e7ee" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#84868a"/><stop offset="0.17" stop-color="#e7ebf1"/><stop offset="0.33" stop-color="#f2f3f7"/><stop offset="0.62" stop-color="#e3e7ee"/><stop offset="1" stop-color="#66686b"/></linearGradient><linearGradient id="mds-g37404e" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#20252d"/><stop offset="0.17" stop-color="#575f6a"/><stop offset="0.33" stop-color="#9fa3aa"/><stop offset="0.62" stop-color="#37404e"/><stop offset="1" stop-color="#191d23"/></linearGradient><linearGradient id="mds-g9aa2af" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#595e66"/><stop offset="0.17" stop-color="#aab1bc"/><stop offset="0.33" stop-color="#cfd2d9"/><stop offset="0.62" stop-color="#9aa2af"/><stop offset="1" stop-color="#45494f"/></linearGradient></defs>
+  <path d="M19.4 230.1 L22.9 230.1 Q22.9 233.6 24.3 237.8 L18.0 237.8 Q19.4 233.6 19.4 230.1 Z" fill="url(#mds-g4a4f5a)"/>
+  <ellipse cx="21.1" cy="237.8" rx="3.1" ry="0.6" fill="#14161c"/>
+  <path d="M24.3 230.1 L27.8 230.1 Q27.8 233.6 29.1 237.8 L22.9 237.8 Q24.3 233.6 24.3 230.1 Z" fill="url(#mds-g4a4f5a)"/>
+  <ellipse cx="26.0" cy="237.8" rx="3.1" ry="0.6" fill="#14161c"/>
+  <path d="M29.1 230.1 L32.6 230.1 Q32.6 233.6 34.0 237.8 L27.8 237.8 Q29.1 233.6 29.1 230.1 Z" fill="url(#mds-g4a4f5a)"/>
+  <ellipse cx="30.9" cy="237.8" rx="3.1" ry="0.6" fill="#14161c"/>
+  <path d="M17.6 207.0 L9.9 230.1 L7.8 230.1" fill="none" stroke="#4a4f5a" stroke-width="2.5"/>
+  <path d="M34.4 207.0 L42.1 230.1 L44.2 230.1" fill="none" stroke="#4a4f5a" stroke-width="2.5"/>
+  <rect x="16.5" y="168.5" width="18.9" height="61.6" fill="url(#mds-ge3e7ee)"/>
+  <rect x="16.5" y="199.2" width="18.9" height="1.6" fill="#000" opacity="0.18"/>
+  <rect x="16.2" y="158.0" width="19.6" height="10.5" fill="url(#mds-g37404e)"/>
+  <rect x="16.5" y="77.5" width="18.9" height="80.5" fill="url(#mds-ge3e7ee)"/>
+  <rect x="16.9" y="136.2" width="18.2" height="1.6" fill="#000" opacity="0.14"/>
+  <rect x="16.9" y="115.2" width="18.2" height="1.6" fill="#000" opacity="0.14"/>
+  <rect x="16.9" y="94.2" width="18.2" height="1.6" fill="#000" opacity="0.14"/>
+  <circle cx="20.4" cy="147.5" r="1.2" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/><circle cx="20.0" cy="147.1" r="0.3" fill="#bfe9f5" opacity="0.9"/>
+  <circle cx="20.4" cy="140.5" r="1.2" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/><circle cx="20.0" cy="140.1" r="0.3" fill="#bfe9f5" opacity="0.9"/>
+  <circle cx="20.4" cy="133.5" r="1.2" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/><circle cx="20.0" cy="133.1" r="0.3" fill="#bfe9f5" opacity="0.9"/>
+  <rect x="32.1" y="88.0" width="1.8" height="17.5" fill="#9aa2af" opacity="1"/>
+  <rect x="15.8" y="70.5" width="20.3" height="7.0" fill="url(#mds-g9aa2af)"/>
+  <path d="M21.4 28.5 L30.6 28.5 L35.5 70.5 L16.5 70.5 Z" fill="url(#mds-ge3e7ee)"/>
+  <circle cx="22.9" cy="53.0" r="1.5" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/><circle cx="22.4" cy="52.5" r="0.4" fill="#bfe9f5" opacity="0.9"/>
+  <circle cx="29.1" cy="53.0" r="1.5" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/><circle cx="28.7" cy="52.5" r="0.4" fill="#bfe9f5" opacity="0.9"/>
+  <rect x="21.4" y="20.1" width="9.1" height="8.4" fill="url(#mds-g9aa2af)"/>
+  <path d="M31.6 23.3 L38.6 16.3" stroke="#aeb6c2" stroke-width="1.4"/><g transform="translate(38.6,16.3) rotate(45.0)"><path d="M-5 0 Q0 -4.4 5 0 Q0 -1.5 -5 0 Z" fill="#cfd4dd" stroke="#646d7c" stroke-width="0.8"/><line x1="0" y1="-3.2" x2="0" y2="-0.6" stroke="#646d7c" stroke-width="0.9"/><circle cx="0" cy="-3.4" r="1" fill="#646d7c"/></g>
+  <path d="M21.4 20.1 Q21.4 14.5 25.1 8.9 L26.9 8.9 Q30.6 14.5 30.6 20.1 Z" fill="url(#mds-ge3e7ee)"/>
+</svg>

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 119 105" width="119" height="105">
+<defs><linearGradient id="atg-g4a4f5a" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2b2e34"/><stop offset="0.17" stop-color="#676b74"/><stop offset="0.33" stop-color="#a8abb0"/><stop offset="0.62" stop-color="#4a4f5a"/><stop offset="1" stop-color="#212428"/></linearGradient><linearGradient id="atg-ge6e4da" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#85847e"/><stop offset="0.17" stop-color="#eae8e0"/><stop offset="0.33" stop-color="#f3f2ed"/><stop offset="0.62" stop-color="#e6e4da"/><stop offset="1" stop-color="#676762"/></linearGradient><linearGradient id="atg-g9aa2af" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#595e66"/><stop offset="0.17" stop-color="#aab1bc"/><stop offset="0.33" stop-color="#cfd2d9"/><stop offset="0.62" stop-color="#9aa2af"/><stop offset="1" stop-color="#45494f"/></linearGradient></defs>
+  <path d="M57.0 81.0 L62.0 81.0 Q62.0 84.8 64.0 89.4 L55.0 89.4 Q57.0 84.8 57.0 81.0 Z" fill="url(#atg-g4a4f5a)"/>
+  <ellipse cx="59.5" cy="89.4" rx="4.5" ry="0.9" fill="#14161c"/>
+  <g transform="rotate(3 49.7 68.4)"><rect x="17.5" y="63.2" width="32.2" height="10.5" rx="3" fill="#24386b" stroke="#0f1830" stroke-width="1.2"/><line x1="39.0" y1="63.2" x2="39.0" y2="73.7" stroke="#c9a86a" stroke-width="1.2"/><line x1="28.2" y1="63.2" x2="28.2" y2="73.7" stroke="#c9a86a" stroke-width="1.2"/><rect x="17.5" y="63.2" width="32.2" height="3.1" rx="2" fill="#fff" opacity="0.14"/></g>
+  <g transform="rotate(-3 69.3 68.4)"><rect x="69.3" y="63.2" width="32.2" height="10.5" rx="3" fill="#24386b" stroke="#0f1830" stroke-width="1.2"/><line x1="80.0" y1="63.2" x2="80.0" y2="73.7" stroke="#c9a86a" stroke-width="1.2"/><line x1="90.8" y1="63.2" x2="90.8" y2="73.7" stroke="#c9a86a" stroke-width="1.2"/><rect x="69.3" y="63.2" width="32.2" height="3.1" rx="2" fill="#fff" opacity="0.14"/></g>
+  <rect x="50.0" y="43.2" width="18.9" height="37.8" fill="url(#atg-ge6e4da)"/>
+  <rect x="50.0" y="62.0" width="18.9" height="1.6" fill="#000" opacity="0.18"/>
+  <rect x="48.6" y="25.0" width="21.7" height="18.2" rx="5" fill="url(#atg-ge6e4da)"/>
+  <circle cx="59.5" cy="36.2" r="2.5" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/><circle cx="58.7" cy="35.4" r="0.7" fill="#bfe9f5" opacity="0.9"/>
+  <rect x="51.1" y="12.4" width="16.8" height="12.6" rx="5" fill="url(#atg-g9aa2af)"/>
+  <rect x="29.4" y="13.8" width="23.8" height="9.8" rx="4" fill="url(#atg-ge6e4da)"/>
+  <g transform="rotate(0 29.4 18.7)"><rect x="8.4" y="14.5" width="21.0" height="8.4" rx="3" fill="#24386b" stroke="#0f1830" stroke-width="1.2"/><line x1="22.4" y1="14.5" x2="22.4" y2="22.9" stroke="#c9a86a" stroke-width="1.2"/><line x1="15.4" y1="14.5" x2="15.4" y2="22.9" stroke="#c9a86a" stroke-width="1.2"/><rect x="8.4" y="14.5" width="21.0" height="2.5" rx="2" fill="#fff" opacity="0.14"/></g>
+  <rect x="65.8" y="13.8" width="23.8" height="9.8" rx="4" fill="url(#atg-ge6e4da)"/>
+  <g transform="rotate(0 89.6 18.7)"><rect x="89.6" y="14.5" width="21.0" height="8.4" rx="3" fill="#24386b" stroke="#0f1830" stroke-width="1.2"/><line x1="96.6" y1="14.5" x2="96.6" y2="22.9" stroke="#c9a86a" stroke-width="1.2"/><line x1="103.6" y1="14.5" x2="103.6" y2="22.9" stroke="#c9a86a" stroke-width="1.2"/><rect x="89.6" y="14.5" width="21.0" height="2.5" rx="2" fill="#fff" opacity="0.14"/></g>
+  <path d="M54.3 12.4 Q54.3 9.3 57.8 6.1 L61.3 6.1 Q64.8 9.3 64.8 12.4 Z" fill="url(#atg-g9aa2af)"/>
+</svg>

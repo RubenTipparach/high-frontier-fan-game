@@ -41,6 +41,28 @@ Concretely:
   the user can see it is fine; using it in the running app is what
   waits for approval.
 
+- **You CAN render the app - use it.** This environment has headless
+  Chromium (Playwright) wired up via `scripts/screenshot.mjs`, so there
+  is NO excuse for "I can't see the web page." Use it to PREVIEW any
+  UI / client change for the user (`SendUserFile` the PNG) AND to
+  VALIDATE that a bug is actually fixed by observing the rendered
+  result, not just the code. Typical loop:
+  ```
+  python3 -m http.server 8137            # serve the app (build-free)
+  node scripts/screenshot.mjs http://localhost:8137/index.html /tmp/x.png --wait=1500
+  # or render a card / component in isolation via a small HTML harness
+  # that imports js/game/card-ui.js renderCard(...) from the served app
+  ```
+  Notes baked into the helper: Playwright is installed GLOBALLY, the
+  browser binaries live at `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`
+  (not `~/.cache/ms-playwright`), and the package is CommonJS (default
+  import). If the browser binary is missing, run `npx playwright install
+  chromium` to COMPLETION - never pipe it through `head`/`tail`, a closed
+  pipe SIGPIPE-kills the download. The local build talks to the prod API,
+  so `ERR_CERT_AUTHORITY_INVALID` console errors are expected and
+  harmless for rendering. Default to showing a screenshot for any visual
+  change instead of describing it.
+
 - Core rules PDF (publisher-hosted):
   https://gamers-hq.de/media/pdf/c5/f2/cf/HF4-Core-Rules.pdf
 - Variants & scenarios appendix:
@@ -71,16 +93,32 @@ implementation right now:
 
 - **Standard** - the base multiplayer game described in the core
   rulebook. Drives the lobby / multiplayer engine.
-- **CEO Solitaire** - the published one-player variant. Drives
-  the solo mode (`js/game/solo.js`); a single player runs one
-  ship against a round clock with no AI opponent. Engine is
-  original; only the structural concept (manage a FIXED water
-  budget, prospect, claim, race the round clock) is taken from
-  the variant's design. There is NO passive income (no end-of-
-  round water, no per-lap aqua) anywhere in the base game OR the
-  solo variant - water is a fixed budget plus what you actively
-  refine, and aqua comes only from the active Income / Free
-  Market operations. Do not add passive income.
+- **CEO Solitaire** - the published one-player variant. A single
+  player runs one ship against a round clock with no AI opponent.
+  Only the structural concept (manage a FIXED water budget,
+  prospect, claim, race the round clock) is taken from the
+  variant's design; the engine is original. There is NO passive
+  income (no end-of-round water, no per-lap aqua) anywhere in the
+  base game OR the solo variant - water is a fixed budget plus what
+  you actively refine, and aqua comes only from the active Income /
+  Free Market operations. Do not add passive income.
+
+  **Solo now runs as a single-player SERVER game ("solo online
+  mode"): the same server-authoritative engine and the same shared
+  front-end multiplayer uses, just with one seat.**
+
+  **The OFFLINE hot-seat solo (`js/game/solo.js`, the browser-only
+  localStorage path) is FROZEN LEGACY. Do NOT touch it ever again.**
+  It still exists and still appears in the menu, but it is no longer
+  maintained: never update it, never bring it back into engine /
+  rule / card parity, never "fix" it to match a new mechanic, and
+  never consider it when weighing a change. When a feature needs a
+  solo path, add it to the server engine (like multiplayer) - the
+  offline `solo.js` is dead weight we keep only so old saves load.
+  NOTE: this freeze is ONLY the offline `solo.js` orchestration. The
+  shared sandbox FRONT-END (`js/game/browse.js`, `rocket.js`,
+  `stacks.js`, `render.js`, etc.) is the live multiplayer UI and is
+  very much maintained - see "The multiplayer UI IS the sandbox UI".
 
 Other variants (campaign, scenarios) are explicitly out of scope
 for now. Don't pull them in without a discussion first.
@@ -1057,4 +1095,6 @@ DATABASE_PATH=./hf-dev.db npm run dev
 
 Frontend points at the API via `<meta name="hf-api-base">` in
 `index.html`. Empty value = local-only mode (no lobby, no multiplayer,
-but the solo "hot-seat" game still runs entirely in the browser).
+but the solo "hot-seat" game still runs entirely in the browser). That
+offline hot-seat path (`js/game/solo.js`) is FROZEN LEGACY - see "CEO
+Solitaire" under "Variants we target": do not maintain or update it.

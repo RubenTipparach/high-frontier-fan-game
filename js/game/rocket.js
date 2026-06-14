@@ -27,6 +27,9 @@
 import { PATENTS_BY_ID, thermsRequired, thermsSupplied } from '../../data/patents.js';
 import { resolveSupportChain, resolveCoolingAcross } from '../../data/support-chain.js';
 import { CREW_BY_ID } from '../../data/crew.js';
+// Structured patent card POWERS (shared with the server) for the colocated
+// ISRU modifier - the client must match the server's prospect / refuel gate.
+import { facePower, sumColocatedIsruMod } from '../../data/card-abilities.js';
 import { SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { weightClassForMass } from '../../data/net-thrust-track.js';
 // Fuel-step capacity comes from the shared graph (the same module the server
@@ -225,7 +228,7 @@ let _tankWater = (() => {
 })();
 
 // Fuel grade in the tank: 'water' (blue) or 'dirt' (grey). Water and dirt
-// can't mix; a dirt thruster burns dirt, a water thruster burns water.
+// can't mix; a water thruster burns only water, a dirt thruster burns either.
 let _tankGrade = (() => {
   try { return localStorage.getItem(TANK_GRADE_KEY) === 'dirt' ? 'dirt' : 'water'; }
   catch { return 'water'; }
@@ -460,6 +463,24 @@ export function getActiveThrusterId() {
   return _activeThrusterId;
 }
 
+// Does the stack carry the moon cable (a NASRDA crew card on its Mooncable
+// face)? The cable is what lets dirt be piped up at LEO / Home Bernal; it need
+// NOT be the active thruster, it just has to be aboard, and it refuels
+// whichever dirt thrust triangle is active (a separate non-crew dirt card
+// included). Keyed off the CARD's installed crew face printing the Mooncable
+// bonus, NOT the player's chosen faction privilege (which is negotiable /
+// suspendable). Mirrors engine.js#stackHasMoonCable.
+function slotIsMooncable(slot) {
+  const crew = slot && CREW_BY_ID[slot.id];
+  if (!crew || !crew.faces) return false;
+  const key = (slot.face === 'secondary' && crew.faces.secondary) ? 'secondary' : 'primary';
+  const face = crew.faces[key] || crew.faces.primary;
+  return !!face && String(face.bonus || '').trim().toUpperCase().replace(/\s+/g, '_') === 'MOONCABLE';
+}
+export function stackHasMoonCable() {
+  return _stack.some(slotIsMooncable);
+}
+
 export function setActiveThruster(id) {
   // Only allow picking a thruster that's actually in the stack
   // and is genuinely a thruster (or a missile-class robonaut
@@ -564,16 +585,50 @@ export function getActiveProspectorStats() {
     ? { ok: pc.coolingOk, demand: pc.reactorDemand + pc.nonReactorHeat, supply: cool.radiatorTotal }
     : { ok: true, demand: 0, supply: cool.radiatorTotal };
   if (!therm.ok) missing.push('thermostat');
+  // ISRU + display name come off the INSTALLED face. The white and black
+  // sides are different techs with different ISRU ratings (e.g. Flywheel
+  // Tractor ISRU 3 flips to Electrophoretic Sandworm ISRU 1), so reading
+  // faces.primary here mis-gated prospect / refuel for a flipped card.
+  // Patents carry ISRU in face.properties; crew carry it on the face itself
+  // (same split the server's prospectorFace handles).
+  const isruProp = (f.properties || []).find((p) => p && p.key === 'isru');
+  const isruRaw = isruProp
+    ? (typeof isruProp.value === 'number' ? isruProp.value : parseInt(isruProp.value, 10))
+    : Number(f && f.isru);
   return {
     id,
     kind,
     card,
+    name: (f && f.name) || card.name || id,
+    isru: Number.isFinite(isruRaw) ? isruRaw : 0,
     requires,
     suppliedKinds: [...supplied],
     missingSuppliers: missing,
     therm,
     canActivate: missing.length === 0,
   };
+}
+
+// Structured power of a stack slot's INSTALLED face (null for crew / no power).
+// Mirror of engine.js#powerOfSlot. Crew carry no patent powers.
+function slotPower(slot) {
+  const c = slot && cardForSlot(slot);
+  if (!c || !c.faces) return null;
+  return facePower(installedFace(slot).name);
+}
+
+// Colocated ISRU modifier from the rocket stack (subsystem 3), keyed to the
+// target site's aerostat-ness. Mirrors the server so the client's prospect /
+// refuel ISRU gate matches the authoritative one. isruMod is <= 0 (easier).
+export function colocatedIsruMod({ isAerostat = false } = {}) {
+  return sumColocatedIsruMod(_stack.map(slotPower), { isAerostat });
+}
+
+// Does the rocket stack carry a card with the given POWER flag on its installed
+// face? (e.g. 'mineRevival' for Termite Nest, 'industrializeFreeAction' for
+// Solid Flame.) Mirrors the engine's stack scans.
+export function stackHasPower(flag) {
+  return _stack.some((s) => { const p = slotPower(s); return !!(p && p[flag]); });
 }
 
 // Build the set of support-kinds the rest of the stack supplies
@@ -817,6 +872,29 @@ export function faceBurnsDirt(face) {
   return !!(face && (face.fuelType === 'Dirt' || face.dirt === true));
 }
 
+// Dirt-load capability of the WHOLE stack (mirror of the server's
+// applyDirtRefuel gates). Loading dirt rides the player-aid rule: "any
+// ISRU card at a Factory or Site" (LEO tops up freely) - NOT the active
+// thruster; activating the dirt burner matters only when BURNING. Returns
+// { burner, hasIsru }: burner is 'card' (fills to cap) when any dirt-
+// burning patent face is aboard, 'crew' (1 FT per turn) when only a crew
+// dirt rocket is, null when none; hasIsru is true when any installed face
+// carries an ISRU rating (rating 0 counts - the rig exists).
+export function getDirtCapability() {
+  let burner = null;
+  let hasIsru = false;
+  for (const slot of _stack) {
+    const f = installedFace(slot);
+    if (faceBurnsDirt(f)) {
+      if (!CREW_BY_ID[slot.id]) burner = 'card';
+      else if (!burner) burner = 'crew';
+    }
+    if ((f.properties || []).some((pr) => pr && pr.key === 'isru')
+        || (f.isru != null && Number.isFinite(Number(f.isru)))) hasIsru = true;
+  }
+  return { burner, hasIsru };
+}
+
 // The fuel grade the active thruster needs ('dirt' or 'water'); 'water' when
 // there is no active thruster. Drives the tank-grade gate + grey UI.
 export function getActiveFuelGrade() {
@@ -916,6 +994,22 @@ function faceHasSolar(face) {
   return !!(face && Array.isArray(face.properties)
     && face.properties.some((p) => p.key === 'solar' && p.value));
 }
+function faceHasPush(face) {
+  return !!(face && Array.isArray(face.properties)
+    && face.properties.some((p) => p.key === 'push' && p.value));
+}
+
+// Powersat (ESA faction privilege): when set, the local player gives +1
+// thrust to a push-icon thruster. Pushed in from browse.js off my faction so
+// getActiveThrusterStats matches the server's activeNetThrust (byte-parity:
+// a move the client allows must not be rejected for a different thrust).
+let _hasPowersat = false;
+export function setHasPowersat(on) {
+  const v = !!on;
+  if (v === _hasPowersat) return;
+  _hasPowersat = v;
+  notify();
+}
 
 // The rocket's current heliocentric zone, pushed in from browse.js
 // whenever the ship moves. Drives the solar-power thrust modifier on
@@ -966,6 +1060,7 @@ function chainCardsFromStack() {
     const card = cardForSlot(slot);
     const f = installedFace(slot);
     const type = card ? card.type : slot.kind;
+    const pw = slotPower(slot);
     return {
       id: slot.id,
       type,
@@ -974,6 +1069,8 @@ function chainCardsFromStack() {
       thrustMod: f ? f.thrustMod : undefined,
       fuelMod: f ? f.fuelMod : undefined,
       therms: type === 'radiator' ? thermsSupplied(card, f, slot.radSide) : thermsRequired(f),
+      // Magnetocaloric Refrigerator: cools its own supports (subsystem 7).
+      coolsOwnSupports: !!(pw && pw.coolsOwnSupports),
     };
   });
   // Afterburn's Open-Cycle Cooling adds a temporary radiator (1 Therm) to the
@@ -1133,6 +1230,13 @@ export function getActiveThrusterStats() {
   let baseThrust = thrust;
   let baseFuel = fuel;
   const modifiers = [];
+  // Powersat (ESA faction privilege): +1 thrust to a push-icon thruster for
+  // the local Powersat holder. Mirrors the server's activeNetThrust so the
+  // client's thrust matches (byte-parity contract).
+  if (_hasPowersat && faceHasPush(f)) {
+    thrust += 1;
+    modifiers.push({ from: 'Powersat', kind: 'thrust', delta: 1 });
+  }
   // Support-chain modifiers (rules 1+2, data/support-chain.js). Walk the FULL
   // chain that powers this thruster and apply only the modifier path: every
   // generator before the first reactor, plus that first reactor. A reactor two

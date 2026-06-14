@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 98 104" width="98" height="104">
+<defs><linearGradient id="amr-g4a4f5a" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2b2e34"/><stop offset="0.17" stop-color="#676b74"/><stop offset="0.33" stop-color="#a8abb0"/><stop offset="0.62" stop-color="#4a4f5a"/><stop offset="1" stop-color="#212428"/></linearGradient><linearGradient id="amr-ga9b1a0" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#62675d"/><stop offset="0.17" stop-color="#b7bdaf"/><stop offset="0.33" stop-color="#d6dad1"/><stop offset="0.62" stop-color="#a9b1a0"/><stop offset="1" stop-color="#4c5048"/></linearGradient><linearGradient id="amr-g9aa2af" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#595e66"/><stop offset="0.17" stop-color="#aab1bc"/><stop offset="0.33" stop-color="#cfd2d9"/><stop offset="0.62" stop-color="#9aa2af"/><stop offset="1" stop-color="#45494f"/></linearGradient></defs>
+  <path d="M46.5 80.3 L51.5 80.3 Q51.5 84.1 53.5 88.7 L44.5 88.7 Q46.5 84.1 46.5 80.3 Z" fill="url(#amr-g4a4f5a)"/>
+  <ellipse cx="49.0" cy="88.7" rx="4.5" ry="0.9" fill="#14161c"/>
+  <g transform="rotate(4 39.9 65.6)"><rect x="9.1" y="60.4" width="30.8" height="10.5" rx="3" fill="#24386b" stroke="#0f1830" stroke-width="1.2"/><line x1="29.6" y1="60.4" x2="29.6" y2="70.9" stroke="#c9a86a" stroke-width="1.2"/><line x1="19.4" y1="60.4" x2="19.4" y2="70.9" stroke="#c9a86a" stroke-width="1.2"/><rect x="9.1" y="60.4" width="30.8" height="3.1" rx="2" fill="#fff" opacity="0.14"/></g>
+  <g transform="rotate(-4 58.1 65.6)"><rect x="58.1" y="60.4" width="30.8" height="10.5" rx="3" fill="#24386b" stroke="#0f1830" stroke-width="1.2"/><line x1="68.4" y1="60.4" x2="68.4" y2="70.9" stroke="#c9a86a" stroke-width="1.2"/><line x1="78.6" y1="60.4" x2="78.6" y2="70.9" stroke="#c9a86a" stroke-width="1.2"/><rect x="58.1" y="60.4" width="30.8" height="3.1" rx="2" fill="#fff" opacity="0.14"/></g>
+  <g transform="rotate(-6 39.9 41.8)"><rect x="14.7" y="37.3" width="25.2" height="9.1" rx="3" fill="#24386b" stroke="#0f1830" stroke-width="1.2"/><line x1="31.5" y1="37.3" x2="31.5" y2="46.4" stroke="#c9a86a" stroke-width="1.2"/><line x1="23.1" y1="37.3" x2="23.1" y2="46.4" stroke="#c9a86a" stroke-width="1.2"/><rect x="14.7" y="37.3" width="25.2" height="2.7" rx="2" fill="#fff" opacity="0.14"/></g>
+  <g transform="rotate(6 58.1 41.8)"><rect x="58.1" y="37.3" width="25.2" height="9.1" rx="3" fill="#24386b" stroke="#0f1830" stroke-width="1.2"/><line x1="66.5" y1="37.3" x2="66.5" y2="46.4" stroke="#c9a86a" stroke-width="1.2"/><line x1="74.9" y1="37.3" x2="74.9" y2="46.4" stroke="#c9a86a" stroke-width="1.2"/><rect x="58.1" y="37.3" width="25.2" height="2.7" rx="2" fill="#fff" opacity="0.14"/></g>
+  <rect x="40.3" y="49.5" width="17.5" height="30.8" fill="url(#amr-ga9b1a0)"/>
+  <rect x="40.3" y="63.4" width="17.5" height="1.6" fill="#000" opacity="0.2"/>
+  <rect x="38.9" y="24.3" width="20.3" height="25.2" rx="5" fill="url(#amr-ga9b1a0)"/>
+  <circle cx="49.0" cy="34.8" r="2.5" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/><circle cx="48.2" cy="34.0" r="0.7" fill="#bfe9f5" opacity="0.9"/>
+  <rect x="41.3" y="10.3" width="15.4" height="14.0" rx="7" fill="url(#amr-g9aa2af)"/>
+  <rect x="26.6" y="13.8" width="15.4" height="7.0" rx="4" fill="url(#amr-ga9b1a0)"/>
+  <rect x="32.3" y="5.4" width="4" height="7.7" rx="2" fill="#24386b" stroke="#0f1830" stroke-width="0.8"/>
+  <rect x="56.0" y="13.8" width="15.4" height="7.0" rx="4" fill="url(#amr-ga9b1a0)"/>
+  <rect x="61.7" y="5.4" width="4" height="7.7" rx="2" fill="#24386b" stroke="#0f1830" stroke-width="0.8"/>
+  <path d="M44.1 10.3 Q44.1 7.9 47.3 5.4 L50.8 5.4 Q53.9 7.9 53.9 10.3 Z" fill="url(#amr-g9aa2af)"/>
+</svg>

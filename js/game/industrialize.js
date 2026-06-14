@@ -482,16 +482,11 @@ export function openIndustrializeModal({ siteName, spectralType, stack, options,
     // can trace why every card is pulled in, not just the immediate supplier.
     const chainTreeHtml = buildChainTree(stack, opt);
     const decomCount = opt.chainIndices.length;
-    const orphansHtml = opt.orphans.length
-      ? `<div class="industrialize-warn">
-           <div class="industrialize-section-label">⚠ Side effect: these cards lose support</div>
-           <ul class="industrialize-orphans">
-             ${opt.orphans.map((o) =>
-               `<li><strong>${escapeHtml(o.card.name)}</strong> will become <em>inactive</em> (needs ${escapeHtml(o.missing.join(' + '))})</li>`
-             ).join('')}
-           </ul>
-         </div>`
-      : '';
+    // The "these cards lose support" side-effect warning was misleading at
+    // industrialize time (it flagged cards as going inactive that aren't
+    // actually affected by decommissioning the refinery+robonaut chain), so
+    // it's suppressed. (opt.orphans stays computed for any other reader.)
+    const orphansHtml = '';
     // Validity banner: a wiring choice that leaves a support unmet (or that
     // can't be cooled) blocks the build.
     const invalidHtml = opt.valid

@@ -37,22 +37,33 @@ function escapeHtml(s) {
 // primary + faces.secondary); we surface both names for the
 // picker so the player can read which physical card they are
 // consuming.
-export function findColonizeOptions(stack) {
-  if (!Array.isArray(stack)) return { crews: [] };
+export function findColonizeOptions(stack, outposts = []) {
   const crews = [];
-  for (let i = 0; i < stack.length; i++) {
-    const slot = stack[i];
-    if (!slot || slot.kind !== 'crew') continue;
-    const card = CREW_BY_ID[slot.id];
-    if (!card) continue;
-    crews.push({
-      id: slot.id,
-      index: i,
-      card,
-      primary: card.faces?.primary || null,
-      secondary: card.faces?.secondary || null,
-    });
-  }
+  // A crew is colocated with the factory whether it's ABOARD the rocket OR
+  // sitting in a colocated OUTPOST stack at the same site (a crew cargo-
+  // transferred to the outpost still counts per the rulebook). Tag each crew
+  // with its source so the caller removes it from the right stack. The crew
+  // test is "the id is a Crew card" (CREW_BY_ID), not slot.kind, since an
+  // outpost slot may not carry the kind tag.
+  const scan = (cards, source) => {
+    if (!Array.isArray(cards)) return;
+    for (let i = 0; i < cards.length; i++) {
+      const slot = cards[i];
+      if (!slot) continue;
+      const card = CREW_BY_ID[slot.id];
+      if (!card) continue;
+      crews.push({
+        id: slot.id,
+        index: i,
+        source,
+        card,
+        primary: card.faces?.primary || null,
+        secondary: card.faces?.secondary || null,
+      });
+    }
+  };
+  scan(stack, 'rocket');
+  for (const o of (outposts || [])) scan(o && o.cards, { outpost: o.letter });
   return { crews };
 }
 

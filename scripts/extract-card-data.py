@@ -51,7 +51,7 @@ def extract_pairs(ws):
     the column headers on row 2, then data rows from row 3
     onward, two per card.
 
-    Some sheets — notably Radiators — repeat the same column
+    Some sheets - notably Radiators - repeat the same column
     headers under different banners (Light Side: Mass / Rad-Hard
     / Therms then Heavy Side: Mass / Rad-Hard / Therms). We
     fold the banner into the column name when there's a clash,
@@ -75,7 +75,7 @@ def extract_pairs(ws):
     # Find headers that appear more than once and qualify them
     # with their banner. Skip qualifying when the banner is a
     # generic grouping like 'Support Requirements' or 'Thruster'
-    # — those don't add meaning and the clash is incidental.
+    # - those don't add meaning and the clash is incidental.
     GENERIC_BANNERS = {'Support Requirements', 'Support Provided',
                        'Thruster', 'Type', 'ISRU'}
     counts = {h: raw.count(h) for h in raw if h}
@@ -112,7 +112,7 @@ def row_to_dict(headers, row):
 def split_card(headers, primary, secondary):
     """Split a card into shared metadata + two face stat-blocks.
     The card-identity Name still surfaces at the top level
-    (taken from the primary row, used for ids / lookups) — but
+    (taken from the primary row, used for ids / lookups) - but
     each face also carries its OWN Name field, since the dark
     side of every published HF4 card is a different technology
     with a different printed name (Ablative Plate flips to

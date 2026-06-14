@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 126 722" width="126" height="722">
+<defs><linearGradient id="sls-g4a4f5a" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2b2e34"/><stop offset="0.17" stop-color="#676b74"/><stop offset="0.33" stop-color="#a8abb0"/><stop offset="0.62" stop-color="#4a4f5a"/><stop offset="1" stop-color="#212428"/></linearGradient><linearGradient id="sls-g3a3f49" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#22252a"/><stop offset="0.17" stop-color="#5a5e66"/><stop offset="0.33" stop-color="#a0a3a8"/><stop offset="0.62" stop-color="#3a3f49"/><stop offset="1" stop-color="#1a1c21"/></linearGradient><linearGradient id="sls-ge9edf3" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#87898d"/><stop offset="0.17" stop-color="#edf0f5"/><stop offset="0.33" stop-color="#f4f6f9"/><stop offset="0.62" stop-color="#e9edf3"/><stop offset="1" stop-color="#696b6d"/></linearGradient><linearGradient id="sls-g9d4a1a" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#5b2b0f"/><stop offset="0.17" stop-color="#ad673f"/><stop offset="0.33" stop-color="#d0a891"/><stop offset="0.62" stop-color="#9d4a1a"/><stop offset="1" stop-color="#47210c"/></linearGradient><linearGradient id="sls-gc05a20" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#6f3413"/><stop offset="0.17" stop-color="#ca7444"/><stop offset="0.33" stop-color="#e1b094"/><stop offset="0.62" stop-color="#c05a20"/><stop offset="1" stop-color="#56280e"/></linearGradient><linearGradient id="sls-ge6e3d5" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#85847c"/><stop offset="0.17" stop-color="#eae7dc"/><stop offset="0.33" stop-color="#f3f2eb"/><stop offset="0.62" stop-color="#e6e3d5"/><stop offset="1" stop-color="#676660"/></linearGradient><linearGradient id="sls-g3c424e" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#23262d"/><stop offset="0.17" stop-color="#5b606a"/><stop offset="0.33" stop-color="#a1a4aa"/><stop offset="0.62" stop-color="#3c424e"/><stop offset="1" stop-color="#1b1e23"/></linearGradient><linearGradient id="sls-gcfd4dd" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#787b80"/><stop offset="0.17" stop-color="#d7dbe2"/><stop offset="0.33" stop-color="#e8eaef"/><stop offset="0.62" stop-color="#cfd4dd"/><stop offset="1" stop-color="#5d5f63"/></linearGradient><linearGradient id="sls-g262a32" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#16181d"/><stop offset="0.17" stop-color="#494c53"/><stop offset="0.33" stop-color="#97999d"/><stop offset="0.62" stop-color="#262a32"/><stop offset="1" stop-color="#111316"/></linearGradient></defs>
+  <path d="M15.0 695.6 L26.2 695.6 Q26.2 700.6 29.7 706.8 L11.5 706.8 Q15.0 700.6 15.0 695.6 Z" fill="url(#sls-g4a4f5a)"/>
+  <ellipse cx="20.6" cy="706.8" rx="9.1" ry="1.8" fill="#14161c"/>
+  <path d="M7.6 674.6 L33.6 674.6 L36.0 695.6 L5.2 695.6 Z" fill="url(#sls-g3a3f49)"/>
+  <rect x="7.6" y="380.6" width="26.0" height="294.0" fill="url(#sls-ge9edf3)"/>
+  <rect x="7.6" y="616.4" width="26.0" height="1.6" fill="#000" opacity="0.22"/>
+  <rect x="7.6" y="559.0" width="26.0" height="1.6" fill="#000" opacity="0.22"/>
+  <rect x="7.6" y="501.6" width="26.0" height="1.6" fill="#000" opacity="0.22"/>
+  <rect x="7.6" y="444.2" width="26.0" height="1.6" fill="#000" opacity="0.22"/>
+  <path d="M15.2 341.4 L26.0 341.4 L33.6 380.6 L7.6 380.6 Z" fill="url(#sls-ge9edf3)"/>
+  <path d="M15.2 341.4 Q15.2 329.1 19.9 319.0 L21.3 319.0 Q26.0 329.1 26.0 341.4 Z" fill="url(#sls-ge9edf3)"/>
+  <rect x="7.6" y="379.8" width="26.0" height="1.6" fill="#000" opacity="0.28"/>
+  <path d="M99.8 695.6 L111.0 695.6 Q111.0 700.6 114.5 706.8 L96.3 706.8 Q99.8 700.6 99.8 695.6 Z" fill="url(#sls-g4a4f5a)"/>
+  <ellipse cx="105.4" cy="706.8" rx="9.1" ry="1.8" fill="#14161c"/>
+  <path d="M92.4 674.6 L118.4 674.6 L120.8 695.6 L90.0 695.6 Z" fill="url(#sls-g3a3f49)"/>
+  <rect x="92.4" y="380.6" width="26.0" height="294.0" fill="url(#sls-ge9edf3)"/>
+  <rect x="92.4" y="616.4" width="26.0" height="1.6" fill="#000" opacity="0.22"/>
+  <rect x="92.4" y="559.0" width="26.0" height="1.6" fill="#000" opacity="0.22"/>
+  <rect x="92.4" y="501.6" width="26.0" height="1.6" fill="#000" opacity="0.22"/>
+  <rect x="92.4" y="444.2" width="26.0" height="1.6" fill="#000" opacity="0.22"/>
+  <path d="M100.0 341.4 L110.8 341.4 L118.4 380.6 L92.4 380.6 Z" fill="url(#sls-ge9edf3)"/>
+  <path d="M100.0 341.4 Q100.0 329.1 104.7 319.0 L106.1 319.0 Q110.8 329.1 110.8 341.4 Z" fill="url(#sls-ge9edf3)"/>
+  <rect x="92.4" y="379.8" width="26.0" height="1.6" fill="#000" opacity="0.28"/>
+  <path d="M47.3 685.8 L56.4 685.8 Q56.4 694.0 59.9 704.0 L43.8 704.0 Q47.3 694.0 47.3 685.8 Z" fill="url(#sls-g4a4f5a)"/>
+  <ellipse cx="51.8" cy="704.0" rx="8.0" ry="1.6" fill="#14161c"/>
+  <path d="M69.7 685.8 L78.8 685.8 Q78.8 694.0 82.3 704.0 L66.2 704.0 Q69.7 694.0 69.7 685.8 Z" fill="url(#sls-g4a4f5a)"/>
+  <ellipse cx="74.2" cy="704.0" rx="8.0" ry="1.6" fill="#14161c"/>
+  <path d="M58.5 686.5 L67.5 686.5 Q67.5 694.4 71.0 704.0 L55.0 704.0 Q58.5 694.4 58.5 686.5 Z" fill="url(#sls-g4a4f5a)"/>
+  <ellipse cx="63.0" cy="704.0" rx="8.0" ry="1.6" fill="#14161c"/>
+  <path d="M33.6 658.5 L92.4 658.5 L86.1 686.5 L39.9 686.5 Z" fill="url(#sls-g9d4a1a)"/>
+  <rect x="33.6" y="242.0" width="58.8" height="416.5" fill="url(#sls-gc05a20)"/>
+  <rect x="33.6" y="657.7" width="58.8" height="1.6" fill="#000" opacity="0.2"/>
+  <rect x="33.6" y="491.2" width="58.8" height="23.8" fill="#a54d1c" opacity="1"/>
+  <rect x="33.6" y="514.2" width="58.8" height="1.6" fill="#000" opacity="0.18"/>
+  <rect x="33.6" y="490.4" width="58.8" height="1.6" fill="#000" opacity="0.18"/>
+  <g><rect x="36.4" y="362.1" width="19.6" height="2.4" fill="#b3322e"/><rect x="36.4" y="364.5" width="19.6" height="2.4" fill="#e7ebf2"/><rect x="36.4" y="366.8" width="19.6" height="2.4" fill="#b3322e"/><rect x="36.4" y="369.2" width="19.6" height="2.4" fill="#e7ebf2"/><rect x="36.4" y="371.5" width="19.6" height="2.4" fill="#b3322e"/><rect x="36.4" y="362.1" width="8.2" height="5.9" fill="#26356b"/></g>
+  <rect x="86.3" y="284.0" width="3.9" height="392.0" fill="#863f16" opacity="1"/>
+  <path d="M45.2 189.5 L80.8 189.5 L92.4 242.0 L33.6 242.0 Z" fill="url(#sls-ge9edf3)"/>
+  <rect x="33.6" y="241.2" width="58.8" height="1.6" fill="#000" opacity="0.28"/>
+  <rect x="45.2" y="120.9" width="35.7" height="68.6" fill="url(#sls-ge6e3d5)"/>
+  <rect x="45.2" y="120.1" width="35.7" height="1.6" fill="#000" opacity="0.28"/>
+  <path d="M46.2 110.4 L79.8 110.4 L80.8 120.9 L45.2 120.9 Z" fill="url(#sls-ge9edf3)"/>
+  <rect x="46.2" y="77.5" width="33.6" height="32.9" fill="url(#sls-ge9edf3)"/>
+  <rect x="46.2" y="109.6" width="33.6" height="1.6" fill="#000" opacity="0.2"/>
+  <rect x="54.2" y="78.9" width="0.8" height="30.1" fill="#9aa2af" opacity="1"/>
+  <rect x="71.0" y="78.9" width="0.8" height="30.1" fill="#9aa2af" opacity="1"/>
+  <path d="M46.2 77.5 Q46.2 61.1 59.5 41.1 L66.5 41.1 Q79.8 61.1 79.8 77.5 Z" fill="url(#sls-ge9edf3)"/>
+  <path d="M57.3 39.7 L60.1 39.7 Q60.1 42.8 61.6 46.7 L55.7 46.7 Q57.3 42.8 57.3 39.7 Z" fill="url(#sls-g3c424e)"/>
+  <ellipse cx="58.7" cy="46.7" rx="3.0" ry="0.6" fill="#14161c"/>
+  <path d="M65.9 39.7 L68.7 39.7 Q68.7 42.8 70.3 46.7 L64.4 46.7 Q65.9 42.8 65.9 39.7 Z" fill="url(#sls-g3c424e)"/>
+  <ellipse cx="67.3" cy="46.7" rx="3.0" ry="0.6" fill="#14161c"/>
+  <rect x="59.5" y="18.0" width="7.0" height="24.5" fill="url(#sls-gcfd4dd)"/>
+  <path d="M59.5 18.0 Q59.5 13.8 62.4 10.3 L63.6 10.3 Q66.5 13.8 66.5 18.0 Z" fill="url(#sls-g262a32)"/>
+</svg>

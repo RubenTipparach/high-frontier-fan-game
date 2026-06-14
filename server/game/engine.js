@@ -29,6 +29,12 @@
 import { PATENTS_BY_ID, radiatorRadHardness } from '../../data/patents.js';
 import { resolveSupportChain } from '../../data/support-chain.js';
 import { CREW_BY_ID } from '../../data/crew.js';
+// Structured patent card POWERS behind each face's free-text Ability (the
+// sheet carries the text; this maps it to engine flags). Shared with the
+// client, same as fuel-graph / support-chain.
+import {
+  facePower, sumColocatedSizeRollMod, sumColocatedIsruMod, anyColocatedNanitesReroll,
+} from '../../data/card-abilities.js';
 // Shared fuel-strip model (same module the client uses): a burn spends fuel
 // STEPS (black connections), and the water it costs is the non-linear mass
 // drop, leaving a possibly-fractional remainder.
@@ -38,7 +44,7 @@ import { blackStepsBetween, walkBlackDown } from '../../data/fuel-graph.js';
 // engine reads them so the liftoff/landing gate uses the FINAL net thrust,
 // not the printed base value.
 import { weightClassForMass } from '../../data/net-thrust-track.js';
-import { SOLAR_ZONE_INFO } from '../../data/sites.js';
+import { SOLAR_ZONE_INFO, adjacentSites } from '../../data/sites.js';
 import { ZONE_CHIT_VPS } from '../../data/zone-chits.js';
 // Movement + metadata both come from the planner graph (the vendor
 // mission-planner data the client also uses). siteBySlug layers the
@@ -55,6 +61,7 @@ import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
   currentPlayer, isPlayersTurn,
+  seasonForSlot, eventKindForRoll,
 } from './state.js';
 
 function clone(state) {
@@ -156,6 +163,75 @@ function faceBurnsDirt(face) {
   return !!(face && (face.fuelType === 'Dirt' || face.dirt === true));
 }
 
+// Is this slot the NASRDA moon-cable crew thruster (the only card that can take
+// on dirt at LEO)? Keyed off the CARD's installed crew face printing the
+// Mooncable bonus, NOT off the player holding the Mooncable PRIVILEGE: the
+// privilege is suspendable / negotiable, but the card's own moon-cable ability
+// rides with the card wherever it sits in the stack.
+function isMooncableThruster(slot) {
+  const crew = slot && CREW_BY_ID[slot.id];
+  if (!crew || !crew.faces) return false;
+  const key = slot.face === 'secondary' ? 'secondary' : 'primary';
+  const face = crew.faces[key] || crew.faces.primary;
+  return !!face && privKey(face.bonus) === 'MOONCABLE';
+}
+
+// The structured POWER of a slot's INSTALLED face (null for crew / no power /
+// a face with no Ability). Keyed off the installed face's name so a flipped
+// card grants the right side's power.
+function powerOfSlot(slot) {
+  const c = slot && PATENTS_BY_ID[slot.id];
+  if (!c) return null;
+  return facePower(slotFace(slot, c).name);
+}
+
+// Is this an aerostat site (a floating atmospheric city)? Identified by the
+// 'aerostat' marker in the site id - the 5 aerostat sites (Venus / Titan /
+// Saturn / Uranus / Neptune) all carry it. Drives SCOOP aerostat-only powers.
+function isAerostatSite(site) {
+  return !!(site && /aerostat/i.test(String(site.id || '')));
+}
+
+// Does this player carry an Atmospheric Scoop (SCOOP power)? Carried in the
+// rocket stack.
+function playerHasAtmoScoop(player) {
+  return !!(player && player.rocket && (player.rocket.stack || []).some((s) => {
+    const pw = powerOfSlot(s);
+    return pw && pw.aerostatHydration2;
+  }));
+}
+
+// Effective hydration of a site for a player's prospect / refuel (subsystem 5).
+// Atmospheric Scoop (SCOOP) makes an aerostat site COLOCATED with or ADJACENT
+// to the scoop count as hydration 2. The scoop rides the rocket, so colocated =
+// the rocket parked at the site, adjacent = parked one map edge away.
+function effectiveHydration(site, player) {
+  const base = Number.isFinite(site && site.hydration) ? site.hydration : 0;
+  if (!isAerostatSite(site) || !playerHasAtmoScoop(player)) return base;
+  const here = player.rocket.siteId;
+  const near = here === site.id || adjacentSites(here).has(site.id);
+  return near ? Math.max(base, 2) : base;
+}
+
+// Does this rocket carry the moon cable (a NASRDA crew card on its Mooncable
+// face)? The cable is what lets dirt be piped up at LEO / Home Bernal; it need
+// NOT be the active thruster - it just has to be aboard, and it refuels
+// WHICHEVER dirt thrust triangle is activated (a separate non-crew dirt card
+// included). Mirrors the client's stackHasMoonCable.
+function stackHasMoonCable(rocket) {
+  return !!(rocket && (rocket.stack || []).some(isMooncableThruster));
+}
+
+// Does the stack carry an OPERATIONAL safe-aerobrake card (a parachute
+// generator: Magnetoshell Plasma Parachute / Granular Rainbow Corral)? Such a
+// card lets the whole stack ride out aerobrake hazards with no roll.
+function stackSafeAerobrake(rocket) {
+  return !!(rocket && (rocket.stack || []).some((s) => {
+    const pw = powerOfSlot(s);
+    return pw && pw.safeAerobrake;
+  }));
+}
+
 // The fuel grade the active thruster needs: 'dirt' for a dirt thruster, else
 // 'water'. 'water' when there is no active thruster.
 function activeFuelGrade(rocket) {
@@ -254,6 +330,19 @@ function prospectorKind(slot) {
 function prospectorIsru(slot) {
   return prospectorFace(slot).isru;
 }
+// Does this slot's installed face carry an ISRU rating at all? Rating 0
+// COUNTS (it's the best rig) - presence of the rating is what matters,
+// so this can't read prospectorIsru (0 also means "no rig" there).
+function slotHasIsruRig(slot) {
+  if (!slot || !slot.id) return false;
+  const crew = CREW_BY_ID[slot.id];
+  if (crew) {
+    const key = slot.face === 'secondary' ? 'secondary' : 'primary';
+    const cf = (crew.faces && (crew.faces[key] || crew.faces.primary)) || {};
+    return cf.isru != null && Number.isFinite(Number(cf.isru));
+  }
+  return faceProps(slot).some((x) => x && x.key === 'isru');
+}
 function isProspectorSlot(slot) {
   return prospectorKind(slot) != null;
 }
@@ -312,11 +401,20 @@ function advanceClock(state) {
   state.turn = (state.turn + 1) % SLOTS;
   if (state.turn === NEW_ROUND_SLOT) state.round += 1;
 
+  // Anarchy lapses the moment the cube exits season blue.
+  if (state.anarchy && seasonForSlot(state.turn) !== 'blue') {
+    state.anarchy = false;
+    state.anarchyLifted = true; // one-shot note for the END_TURN log
+  }
+
   if (EVENT_SLOTS.includes(state.turn)) {
     const gen = makeRng(state.seed, state.rng.cursor);
     const dieRoll = gen.d6();
     state.rng.cursor = gen.cursor;
-    state.lastEvent = { turn: state.turn, round: state.round, dieRoll };
+    const season = seasonForSlot(state.turn);
+    const kind = eventKindForRoll(dieRoll, season);
+    state.lastEvent = { turn: state.turn, round: state.round, dieRoll, kind, notes: [] };
+    resolveSunspotEvent(state, kind);
   }
 
   // NOTE: there is deliberately NO passive "factory income" here. An earlier
@@ -326,6 +424,591 @@ function advanceClock(state) {
   // factories into a free-water-then-cash money fountain. Removed per user
   // decision (it was the "ghost water" source). Do not reintroduce it.
   return {};
+}
+
+// The clock tick's contribution to the END_TURN log: the event roll, what
+// it did (lastEvent.notes), whether play is paused on player choices, and
+// the one-shot "anarchy lifted" notice when the cube exits season blue.
+function clockEventLog(state) {
+  let log = '';
+  if (state.anarchyLifted) {
+    delete state.anarchyLifted;
+    log += ' The cube left season blue; faction privileges resume.';
+  }
+  const ev = state.lastEvent;
+  if (ev && ev.turn === state.turn && Array.isArray(ev.notes)) {
+    // Headline only - the blow-by-blow goes out on the news feed
+    // (state.news), which the toolbar broadcast button surfaces.
+    log += ` Event roll: ${ev.dieRoll} - ${EVENT_HEADLINES[ev.kind] || ev.kind}.`;
+    if (state.pendingEvent) log += ' Affected players choose on their turns.';
+  }
+  return log;
+}
+
+// ----- Sunspot event resolution -----
+//
+// Each event's mechanical effect, applied the moment the cube lands on an
+// event slot (inside END_TURN's advanceClock). Outcomes append to
+// state.lastEvent.notes (gameplay text the END_TURN log + the turn-clock
+// modal both surface). Two events pause for player input via
+// state.pendingEvent (Budget Cuts' discard pick; Pad Explosion when the
+// highest-mass tie needs a choice); everything else resolves instantly.
+
+function cardNameOf(id) {
+  const p = PATENTS_BY_ID[id];
+  if (p) return p.name || id;
+  const c = CREW_BY_ID[id];
+  if (c) return (c.faces && c.faces.primary && c.faces.primary.name) || id;
+  return id;
+}
+
+// True decommission: the card leaves play to the BOTTOM of its patent
+// deck (unlike the voluntary DECOMMISSION free action, which returns the
+// card to the hand for dirt-fuel bookkeeping). Crew never route here.
+function destroyToDeckBottom(state, cardId) {
+  const p = PATENTS_BY_ID[cardId];
+  const deck = p && state.decks[p.type];
+  if (deck) deck.push(cardId);
+}
+
+function stackHasCrew(slots) {
+  return (slots || []).some((s) => isCrewSlot(s));
+}
+
+// Humans co-located with a site: a colony dome, any player's rocket
+// parked there with crew aboard, or any outpost there holding crew.
+function humansAtSite(state, siteId) {
+  if (!siteId) return true; // LEO: mission control is right there
+  if (state.colonies[siteId]) return true;
+  for (const p of state.players) {
+    if (p.rocket.siteId === siteId && stackHasCrew(p.rocket.stack)) return true;
+    for (const o of Object.values(p.outposts || {})) {
+      if (o && o.siteId === siteId && stackHasCrew(o.cards)) return true;
+    }
+  }
+  return false;
+}
+
+// ---- Felony helpers (Felonious privilege; active during Anarchy / War) ----
+// A felony requires the actor to have a Human present; the target is defended
+// by a colocated OPPOSING Human (crew or colony dome) or a Factory.
+function actorCrewAtSite(state, siteId, actorId) {
+  const p = state.players.find((x) => x.profileId === actorId);
+  if (!p) return false;
+  if (p.rocket.siteId === siteId && stackHasCrew(p.rocket.stack)) return true;
+  for (const o of Object.values(p.outposts || {})) {
+    if (o && o.siteId === siteId && stackHasCrew(o.cards)) return true;
+  }
+  return false;
+}
+function opposingHumanAtSite(state, siteId, actorId) {
+  const col = state.colonies[siteId];
+  if (col && col.ownerId !== actorId) return true;
+  for (const p of state.players) {
+    if (p.profileId === actorId) continue;
+    if (p.rocket.siteId === siteId && stackHasCrew(p.rocket.stack)) return true;
+    for (const o of Object.values(p.outposts || {})) {
+      if (o && o.siteId === siteId && stackHasCrew(o.cards)) return true;
+    }
+  }
+  return false;
+}
+
+// ---- Faction privileges (the crew bonus) ----
+// The player's chosen faction face carries one privilege. privilegeOf returns
+// its KEY (e.g. 'TAXES'), or null - and null DURING ANARCHY, when every
+// faction privilege is suspended (replaced by the universal Felonious ability,
+// K2e). Keys are the printed bonus title upper-snake-cased.
+function privKey(bonus) {
+  return String(bonus || '').trim().toUpperCase().replace(/\s+/g, '_');
+}
+function privilegeOf(state, player) {
+  if (!player || !player.faction) return null;
+  if (state && state.anarchy) return null;
+  const card = CREW_BY_ID[player.faction.cardId];
+  const face = card && card.faces && card.faces[player.faction.face];
+  return face ? privKey(face.bonus) : null;
+}
+// Privileges a player has PERMANENTLY gained from a card power (POWER GIRDLE /
+// IONOSAT grant Powersat). Unlike faction privileges these are NOT suspended by
+// Anarchy - they're a permanent property of the player, not the crew face.
+function hasGrantedPrivilege(player, key) {
+  return !!(player && Array.isArray(player.grantedPrivileges) && player.grantedPrivileges.includes(key));
+}
+function grantPrivilege(player, key) {
+  player.grantedPrivileges = Array.isArray(player.grantedPrivileges) ? player.grantedPrivileges : [];
+  if (!player.grantedPrivileges.includes(key)) player.grantedPrivileges.push(key);
+}
+function hasPrivilege(state, player, key) {
+  return privilegeOf(state, player) === key || hasGrantedPrivilege(player, key);
+}
+function playersWithPrivilege(state, key) {
+  return (state.players || []).filter((p) => privilegeOf(state, p) === key || hasGrantedPrivilege(p, key));
+}
+// May this player commit a Felony? Yes during Anarchy (everyone gains
+// Felonious, K2e), OR if they hold the Felonious privilege (Taikonauts) the
+// rest of the time. (Anarchy suspends privilegeOf, but state.anarchy covers
+// that case directly.)
+function mayCommitFelony(state, player) {
+  return !!state.anarchy || hasPrivilege(state, player, 'FELONIOUS');
+}
+// "+1 Aqua to every holder of <key>" passive-income trigger (Taxes on a claim,
+// Launch Fees on a boost). Returns gameplay notes for the op log.
+function creditPrivilegeIncome(state, key, label) {
+  const notes = [];
+  for (const p of playersWithPrivilege(state, key)) {
+    p.aqua = (p.aqua | 0) + 1;
+    notes.push(`${p.name} collected +1 aqua (${label}).`);
+  }
+  return notes;
+}
+
+
+// Operations that are GLITCH TRIGGERS (HF4 core): performing one with a
+// glitched stack forces a Glitch Roll. Movement, Boost, Income, ET Produce,
+// Delivery etc. are NOT triggers - a glitched stack does those freely.
+const GLITCH_TRIGGER_OPS = new Set(['PROSPECT', 'SITE_REFUEL', 'INDUSTRIALIZE']);
+
+// Glitch Roll: a glitched stack that performs a trigger op rolls 1d6, and
+// every colocated card whose rad-hardness EXACTLY EQUALS the roll is
+// decommissioned (crew evacuate to LEO; patents go to their deck bottom).
+// The glitch disc persists until a Human clears it (G7), so each trigger
+// re-rolls. Mutates state; returns { roll, lost } or null when not glitched.
+function resolveGlitchTrigger(state, profileId) {
+  const player = state.players.find((p) => p.profileId === profileId);
+  if (!player || !player.rocket || !player.rocket.glitch) return null;
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const roll = gen.d6();
+  state.rng.cursor = gen.cursor;
+  const lost = [];
+  const degraded = [];
+  const survivors = [];
+  for (const slot of player.rocket.stack) {
+    if (slotRadHardness(slot) === roll) {
+      // A heavy-side radiator DEGRADES to its light side instead of being
+      // destroyed - radiation NEVER destroys a radiator, it just folds it to
+      // the lighter orientation (same exception the radiation-belt and solar-
+      // flare sweeps already make). It survives with reduced cooling.
+      const c = PATENTS_BY_ID[slot.id];
+      if (c && c.type === 'radiator' && slot.radSide !== 'light') {
+        slot.radSide = 'light';
+        degraded.push(cardNameOf(slot.id));
+        survivors.push(slot);
+        continue;
+      }
+      // Decommission returns the card to its owner's HAND (HF4 decommission
+      // is "back to hand", not destroyed to the deck), so it can be re-boosted
+      // later. Crew aren't hand cards, so they evacuate to LEO instead.
+      if (isCrewSlot(slot)) {
+        (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+      } else {
+        (player.hand = player.hand || []).push(slot.id);
+      }
+      lost.push(cardNameOf(slot.id));
+    } else {
+      survivors.push(slot);
+    }
+  }
+  player.rocket.stack = survivors;
+  if (lost.length) {
+    if (!survivors.some((s) => s.id === player.rocket.activeThrusterId)) player.rocket.activeThrusterId = null;
+    if (!survivors.some((s) => s.id === player.rocket.activeProspectorId)) player.rocket.activeProspectorId = null;
+    clipTank(player.rocket);
+  }
+  const parts = [];
+  if (lost.length) parts.push(`${lost.join(', ')} decommissioned to hand`);
+  if (degraded.length) parts.push(`${degraded.join(', ')} degraded to its light side`);
+  const log = parts.length
+    ? `Glitch roll ${roll}: ${parts.join('; ')} (rad-hardness ${roll}).`
+    : `Glitch roll ${roll}: nothing aboard matched - the stack got lucky.`;
+  pushNews(state, EVENT_ICONS.glitch || '⚠️', `${player.name} (glitched stack): ${log}`);
+  return { roll, lost, log };
+}
+
+// Runs after every functional op and after event resolution; returns
+// gameplay notes for the log.
+function autoFixGlitches(state) {
+  const notes = [];
+  for (const p of state.players) {
+    // Scrum Troubleshooters (Norse): repair Glitches anywhere, even with no
+    // Human present.
+    const scrum = hasPrivilege(state, p, 'SCRUM_TROUBLESHOOTERS');
+    const fixWord = scrum ? 'cleared remotely (Scrum Troubleshooters)' : 'fixed by nearby humans';
+    if (p.rocket.glitch
+        && (scrum || stackHasCrew(p.rocket.stack) || humansAtSite(state, p.rocket.siteId))) {
+      p.rocket.glitch = false;
+      notes.push(`${p.name}'s rocket glitch was ${fixWord}.`);
+    }
+    for (const o of Object.values(p.outposts || {})) {
+      if (o && o.glitch
+          && (scrum || stackHasCrew(o.cards) || humansAtSite(state, o.siteId))) {
+        o.glitch = false;
+        notes.push(`${p.name}'s Outpost ${o.letter} glitch was ${fixWord}.`);
+      }
+    }
+  }
+  return notes;
+}
+
+// A glory chit must be carried by a CREWED stack. If a rocket holds chits but
+// has no crew aboard (the crew left, died, colonised, or was decommissioned),
+// the chits can no longer be carried: they return home to LEO at FRONT (low /
+// "1") value, exactly as if returned without a crew. Runs after every
+// functional op and after event resolution, so it also RETROACTIVELY rescues
+// chits already stuck on a crewless rocket the next time any op is applied.
+function homeOrphanedGloryChits(state) {
+  const notes = [];
+  for (const p of state.players) {
+    if (!p.glory || !Array.isArray(p.glory.chits) || !p.glory.chits.length) continue;
+    if (p.rocket.stack.some(isCrewSlot)) continue;   // a crew is aboard to carry them
+    p.glory.claimed = p.glory.claimed || [];
+    let vps = 0;
+    const zones = [];
+    for (const c of p.glory.chits) {
+      const vp = ((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 }).front) | 0;
+      p.glory.claimed.push({ zone: c.zone, side: 'front', vp, turn: state.turn });
+      vps += vp;
+      zones.push(c.zone);
+    }
+    p.glory.vps = (p.glory.vps | 0) + vps;
+    p.glory.chits = [];
+    const note = `${p.name}'s glory chit${zones.length === 1 ? '' : 's'} (${zones.join(', ')}) returned to LEO at front value (+${vps} VP) - no crew aboard to carry it.`;
+    notes.push(note);
+    pushNews(state, '🎖', note);
+  }
+  return notes;
+}
+
+const EVENT_HEADLINES = {
+  inspiration: 'Inspiration (market decks cycled)',
+  glitch: 'Glitch',
+  pad_explosion: 'Pad Explosion',
+  anarchy: 'Anarchy',
+  budget_cuts: 'Budget Cuts',
+  solar_flare: 'Solar Flare',
+};
+const NEWS_CAP = 40;
+// Galactic news broadcast: a shared, capped feed of "what just
+// happened" items every player sees via the toolbar news button.
+function pushNews(state, icon, text, cards) {
+  state.news = state.news || [];
+  const item = { round: state.round, turn: state.turn, icon, text };
+  // Card ids the item is about (the card that sank / was lost / was chosen),
+  // so the news modal can render clickable chips to view them.
+  if (Array.isArray(cards) && cards.length) item.cards = cards.filter(Boolean);
+  state.news.push(item);
+  if (state.news.length > NEWS_CAP) state.news.splice(0, state.news.length - NEWS_CAP);
+}
+const EVENT_ICONS = {
+  inspiration: '\u{1F4A1}', glitch: '\u26A0\uFE0F', pad_explosion: '\u{1F9E8}',
+  anarchy: '\u{1F5FD}', budget_cuts: '\u2702\uFE0F', solar_flare: '\u2600\uFE0F',
+};
+
+// ---- deferred destructive-event helpers ----
+// Destructive Sunspot events (Glitch / Pad Explosion / Solar Flare) are
+// MANDATORY EVENT ACTIONS: the effect commits only when the affected player
+// confirms it on their turn (applyEventChoice), never silently at clock time.
+// The affected player is blocked from acting until they confirm, so their own
+// stacks don't change between the roll and the confirmation - which lets the
+// effect be (re)computed at confirm time from the same state.
+
+// The biggest human-less stack that would take a glitch disc, or null.
+function glitchTargetFor(state, p) {
+  const candidates = [];
+  if (p.rocket.stack.length && !p.rocket.glitch
+      && !stackHasCrew(p.rocket.stack) && !humansAtSite(state, p.rocket.siteId)) {
+    candidates.push({ count: p.rocket.stack.length, apply: () => { p.rocket.glitch = true; }, label: `${p.name}'s rocket` });
+  }
+  for (const o of Object.values(p.outposts || {})) {
+    if (o && (o.cards || []).length && !o.glitch
+        && !stackHasCrew(o.cards) && !humansAtSite(state, o.siteId)) {
+      candidates.push({ count: o.cards.length, apply: () => { o.glitch = true; }, label: `${p.name}'s Outpost ${o.letter}` });
+    }
+  }
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => b.count - a.count);
+  return candidates[0];
+}
+
+// Exposed (vulnerable) LEO cards: not crew, not flipped Black-Side.
+function exposedLeo(p) {
+  return (p.leo || []).filter((s) => !isCrewSlot(s) && s.face !== 'secondary');
+}
+
+// Apply the solar flare's toll to one player's non-LEO stacks (rocket +
+// outposts) at the given flare roll. Pushes gameplay sentences to notesArr.
+// Returns the number of cards affected. (Mirror of the old inline sweep.)
+function applyFlareToPlayer(state, p, flare, notesArr) {
+  let touched = 0;
+  const sweep = (slots, siteId, where) => {
+    const site = siteId ? siteById(siteId) : null;
+    const zone = (site && site.solarZone) || 'Earth';
+    const info = SOLAR_ZONE_INFO[zone];
+    const mod = info ? info.solar : 0;
+    if (mod === null) return slots;
+    const hit = flare + mod;
+    if (hit <= 0) return slots;
+    const survivors = [];
+    for (const slot of slots) {
+      if (slotRadHardness(slot) >= hit) { survivors.push(slot); continue; }
+      // Sails (Photon Heliogyro / Electric Sail / Photon Kite Sail) are immune
+      // to Flare Rolls - they ride out the flare untouched.
+      if (powerOfSlot(slot) && powerOfSlot(slot).immuneFlare) { survivors.push(slot); continue; }
+      const c = PATENTS_BY_ID[slot.id];
+      if (c && c.type === 'radiator' && slot.radSide !== 'light') {
+        slot.radSide = 'light'; survivors.push(slot); touched++;
+        notesArr.push(`${cardNameOf(slot.id)} ${where} degraded to its light side.`);
+        continue;
+      }
+      touched++;
+      if (isCrewSlot(slot)) {
+        (p.leo = p.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+        notesArr.push(`${cardNameOf(slot.id)} ${where} was overcome and evacuated to LEO.`);
+      } else {
+        (p.hand = p.hand || []).push(slot.id);   // Decommission -> back to hand
+        notesArr.push(`${cardNameOf(slot.id)} ${where} decommissioned to hand (rad ${slotRadHardness(slot)} vs ${hit}).`);
+      }
+    }
+    return survivors;
+  };
+  if (p.rocket.siteId) {
+    const before = p.rocket.stack.length;
+    p.rocket.stack = sweep(p.rocket.stack, p.rocket.siteId, 'aboard the rocket');
+    if (p.rocket.stack.length !== before) {
+      if (!p.rocket.stack.some((s) => s.id === p.rocket.activeThrusterId)) p.rocket.activeThrusterId = null;
+      if (!p.rocket.stack.some((s) => s.id === p.rocket.activeProspectorId)) p.rocket.activeProspectorId = null;
+      clipTank(p.rocket);
+      recallIfEmpty(p);
+    }
+  }
+  for (const o of Object.values(p.outposts || {})) {
+    if (o) o.cards = sweep(o.cards || [], o.siteId, `at Outpost ${o.letter}`);
+  }
+  return touched;
+}
+// Would the flare touch this player at all? Dry run on a clone so we only
+// block players who actually have something at stake.
+function flareWouldAffect(state, p, flare) {
+  return applyFlareToPlayer(state, clone(p), flare, []) > 0;
+}
+
+function resolveSunspotEvent(state, kind) {
+  const rawNotes = state.lastEvent.notes;
+  // Every detail line lands in BOTH the event record (clock modal) and
+  // the news feed (toolbar broadcast).
+  const notes = {
+    push: (t, cards) => { rawNotes.push(t); pushNews(state, EVENT_ICONS[kind] || '\u2604\uFE0F', t, cards); },
+  };
+
+  if (kind === 'inspiration') {
+    // Cycle every market deck: topmost card to the bottom. Record what
+    // left and what surfaced so a player opening their turn during the
+    // event round sees exactly which cards rotated.
+    const cycled = [];
+    for (const t of DECK_TYPES) {
+      const deck = state.decks[t];
+      if (!deck || deck.length < 2) continue;
+      const out = deck.shift();
+      deck.push(out);
+      cycled.push({ deck: t, out, in: deck[0] });
+      notes.push(`Inspiration: ${cardNameOf(out)} sank to the bottom of the ${t} deck; ${cardNameOf(deck[0])} is the new top.`, [out, deck[0]]);
+    }
+    state.lastEvent.cycled = cycled;
+    if (!cycled.length) notes.push('Inspiration: the market decks were too thin to cycle.');
+    return;
+  }
+
+  if (kind === 'glitch') {
+    // Each affected player's biggest human-less stack will take a glitch disc,
+    // but it's a mandatory event action: the disc lands only when the player
+    // confirms it on their turn (applyEventChoice). Mark who's affected.
+    const waiting = [];
+    for (const p of state.players) {
+      if (glitchTargetFor(state, p)) {
+        waiting.push(p.profileId);
+        notes.push(`Glitch: ${p.name} must confirm the glitch disc.`);
+      } else {
+        notes.push(`Glitch: ${p.name} had no uncrewed stack to glitch.`);
+      }
+    }
+    if (waiting.length) state.pendingEvent = { kind: 'glitch', waiting, options: {} };
+    return;
+  }
+
+  if (kind === 'pad_explosion') {
+    // Each player decommissions their highest-mass exposed LEO card (crew and
+    // Black-Side cards immune). Mandatory event action: it commits only on
+    // the player's confirmation. A tie carries the tied ids so they pick;
+    // a single highest card is just acknowledged.
+    const waiting = [];
+    const options = {};
+    for (const p of state.players) {
+      const exposed = exposedLeo(p);
+      if (!exposed.length) {
+        notes.push(`Pad Explosion: nothing exposed in ${p.name}'s LEO stack.`);
+        continue;
+      }
+      const maxMass = Math.max(...exposed.map((s) => slotMass(s)));
+      const atMax = exposed.filter((s) => slotMass(s) === maxMass);
+      waiting.push(p.profileId);
+      if (atMax.length > 1) {
+        options[p.profileId] = atMax.map((s) => s.id);
+        notes.push(`Pad Explosion: ${p.name} must choose which mass-${maxMass} card to lose from LEO.`);
+      } else {
+        notes.push(`Pad Explosion: ${p.name} must confirm losing their mass-${maxMass} LEO card.`);
+      }
+    }
+    if (waiting.length) state.pendingEvent = { kind: 'pad_explosion', waiting, options };
+    return;
+  }
+
+  if (kind === 'anarchy') {
+    state.anarchy = true;
+    notes.push('Anarchy: faction privileges are suspended until the Sunspot Cube exits season blue.');
+    return;
+  }
+
+  if (kind === 'budget_cuts') {
+    // Every player with hand cards picks one to send to the bottom of its
+    // deck. Pauses until all picks land; empty hands are spared.
+    const waiting = state.players
+      .filter((p) => (p.hand || []).length > 0)
+      .map((p) => p.profileId);
+    if (!waiting.length) {
+      notes.push('Budget Cuts: every hand was already empty.');
+      return;
+    }
+    state.pendingEvent = { kind: 'budget_cuts', waiting };
+    for (const p of state.players) {
+      if (waiting.includes(p.profileId)) notes.push(`Budget Cuts: ${p.name} must discard a hand card.`);
+    }
+    return;
+  }
+
+  if (kind === 'solar_flare') {
+    // One flare roll, applied to every card in every non-LEO stack, shifted by
+    // the stack's heliocentric-zone modifier. Mandatory event action: the toll
+    // commits only when each affected player confirms on their turn
+    // (applyFlareToPlayer in applyEventChoice). Only players the flare would
+    // actually touch are made to wait. The roll is fixed now (state.lastEvent
+    // .flareRoll) so every player resolves against the same flare.
+    const gen = makeRng(state.seed, state.rng.cursor);
+    const flare = gen.d6();
+    state.rng.cursor = gen.cursor;
+    state.lastEvent.flareRoll = flare;
+    notes.push(`Solar Flare: flare roll ${flare}.`);
+    const waiting = [];
+    for (const p of state.players) {
+      if (flareWouldAffect(state, p, flare)) {
+        waiting.push(p.profileId);
+        notes.push(`Solar Flare: ${p.name} must confirm the flare's toll on their stacks.`);
+      }
+    }
+    if (waiting.length) state.pendingEvent = { kind: 'solar_flare', waiting, options: {}, flareRoll: flare };
+    return;
+  }
+}
+
+// A waiting player answers an open Sunspot event (Budget Cuts discard or
+// Pad Explosion tie-break). Validates its own caller, so it runs ahead of
+// the turn guard - every affected player answers regardless of whose turn
+// it is, like auction bids.
+// Does this player still owe the open event a choice?
+function eventDebtFor(state, profileId) {
+  const pe = state.pendingEvent;
+  return !!(pe && pe.waiting.includes(profileId));
+}
+// Drop a debt whose action no longer has anything to do (Budget Cuts with an
+// empty hand, a Pad Explosion target that already left LEO). Acknowledge-only
+// events (glitch / flare / pad-single) re-derive their own validity. Returns
+// true when the debt was cleared; mutates state.
+function clearStaleEventDebt(state, profileId) {
+  const pe = state.pendingEvent;
+  if (!pe || !pe.waiting.includes(profileId)) return false;
+  const player = state.players.find((p) => p.profileId === profileId);
+  if (!player) return false;
+  const opts = pe.options && pe.options[profileId];
+  let valid;
+  if (pe.kind === 'budget_cuts') valid = (player.hand || []).length > 0;
+  else if (pe.kind === 'pad_explosion') {
+    valid = opts && opts.length
+      ? opts.some((id) => (player.leo || []).some((s) => s.id === id))   // tie: a tied card still in LEO
+      : exposedLeo(player).length > 0;                                   // single: something still exposed
+  } else if (pe.kind === 'glitch') valid = !!glitchTargetFor(state, player);
+  else if (pe.kind === 'solar_flare') valid = flareWouldAffect(state, player, pe.flareRoll);
+  else valid = true;
+  if (valid) return false;
+  pe.waiting = pe.waiting.filter((id) => id !== profileId);
+  if (pe.options) delete pe.options[profileId];
+  if (!pe.waiting.length) state.pendingEvent = null;
+  return true;
+}
+
+function applyEventChoice(state, op, ctx) {
+  const pending = state.pendingEvent;
+  if (!pending) return fail('no_event_pending');
+  const player = state.players.find((p) => p.profileId === ctx.profileId);
+  if (!player) return fail('not_a_player');
+  if (!pending.waiting.includes(player.profileId)) return fail('not_waiting_on_you');
+  const cardId = String(op.cardId || '');
+  let log = '';
+  const newsCards = [];
+
+  if (pending.kind === 'budget_cuts') {
+    const idx = (player.hand || []).indexOf(cardId);
+    if (idx < 0) return fail('card_not_in_hand');
+    player.hand.splice(idx, 1);
+    destroyToDeckBottom(state, cardId);
+    log = `${player.name} sent ${cardNameOf(cardId)} to the bottom of its deck (Budget Cuts).`;
+    newsCards.push(cardId);
+  } else if (pending.kind === 'pad_explosion') {
+    const opts = (pending.options && pending.options[player.profileId]) || null;
+    let lose;
+    if (opts && opts.length) {
+      // Tie: the player picks which of the tied cards to lose.
+      if (!opts.includes(cardId)) return fail('not_a_tied_card');
+      lose = cardId;
+    } else {
+      // Single: re-derive the highest-mass exposed LEO card (acknowledge).
+      const exposed = exposedLeo(player);
+      if (exposed.length) {
+        const mm = Math.max(...exposed.map((s) => slotMass(s)));
+        lose = (exposed.find((s) => slotMass(s) === mm) || {}).id;
+      }
+    }
+    if (lose) {
+      player.leo = (player.leo || []).filter((s) => s.id !== lose);
+      (player.hand = player.hand || []).push(lose);   // Decommission -> back to hand
+      log = `${player.name} decommissioned ${cardNameOf(lose)} from LEO to hand (Pad Explosion).`;
+      newsCards.push(lose);
+    } else {
+      log = `${player.name} had nothing exposed to the Pad Explosion.`;
+    }
+  } else if (pending.kind === 'glitch') {
+    const tgt = glitchTargetFor(state, player);
+    if (tgt) { tgt.apply(); log = `${player.name}: a glitch disc lands on ${tgt.label} (${tgt.count} cards).`; }
+    else log = `${player.name}: nothing left to glitch.`;
+  } else if (pending.kind === 'solar_flare') {
+    const arr = [];
+    applyFlareToPlayer(state, player, pending.flareRoll, arr);
+    log = arr.length
+      ? `${player.name} (Solar Flare): ${arr.join(' ')}`
+      : `${player.name}: the Solar Flare passed harmlessly.`;
+  } else {
+    return fail('unknown_event');
+  }
+
+  pending.waiting = pending.waiting.filter((id) => id !== player.profileId);
+  if (pending.options) delete pending.options[player.profileId];
+  if (!pending.waiting.length) {
+    state.pendingEvent = null;
+    log += ' The event is resolved.';
+  }
+  pushNews(state, EVENT_ICONS[pending.kind] || '\u2604\uFE0F', log, newsCards);
+  // A flare that evacuated this player's last crew can orphan their chits.
+  const homed = homeOrphanedGloryChits(state);
+  if (homed.length) log += ' ' + homed.join(' ');
+  return { ok: true, state, log };
 }
 
 // ----- hazard resolution (mirror of the sandbox move queue) -----
@@ -339,6 +1022,10 @@ function faceHasSolar(face) {
   return !!(face && Array.isArray(face.properties)
     && face.properties.some((p) => p.key === 'solar' && p.value));
 }
+function faceHasPush(face) {
+  return !!(face && Array.isArray(face.properties)
+    && face.properties.some((p) => p.key === 'push' && p.value));
+}
 
 // Normalise a rocket's stack into the support-chain resolver's card shape
 // (mirror of rocket.js#chainCardsFromStack). Everything (supplies / requires /
@@ -351,6 +1038,7 @@ function chainCardsFromRocket(rocket) {
     const c = PATENTS_BY_ID[s.id];
     const f = c ? slotFace(s, c) : {};
     const type = c ? c.type : (s.kind || 'crew');
+    const pw = powerOfSlot(s);
     return {
       id: s.id,
       type,
@@ -359,6 +1047,9 @@ function chainCardsFromRocket(rocket) {
       thrustMod: f ? f.thrustMod : undefined,
       fuelMod: f ? f.fuelMod : undefined,
       therms: 0,
+      // Magnetocaloric Refrigerator: cools its own supports (subsystem 7).
+      // (Cooling is client-gated; this keeps the descriptor parallel.)
+      coolsOwnSupports: !!(pw && pw.coolsOwnSupports),
     };
   });
 }
@@ -370,7 +1061,7 @@ function chainCardsFromRocket(rocket) {
 // the printed base thrust - is what the liftoff/landing gate and the rad
 // bypass must use. Afterburn is a client-engaged one-shot the server does
 // not track, so it is intentionally omitted here. 0 when no thruster.
-function activeNetThrust(rocket) {
+function activeNetThrust(rocket, powersat = false) {
   const tid = rocket.activeThrusterId;
   if (!tid) return 0;
   const slot = rocket.stack.find((s) => s.id === tid);
@@ -378,6 +1069,8 @@ function activeNetThrust(rocket) {
   const f = thrusterFaceOf(slot);
   let thrust = Number.isFinite(f.thrust) ? f.thrust : null;
   if (thrust == null) return 0;
+  // Powersat (ESA): +1 thrust to a push-icon thruster for the privilege holder.
+  if (powersat && faceHasPush(f)) thrust += 1;
   // Support-chain thrust modifiers (rules 1+2, data/support-chain.js): mirror of
   // rocket.js#getActiveThrusterStats. Walk the full chain that powers this
   // thruster and add the thrustMod of the modifier path only (generators before
@@ -594,13 +1287,24 @@ function applyMove(state, op, player) {
   const perBurn = thrusterFuelPerBurn(player.rocket);            // fuel steps per burn
   const dryMass = player.rocket.stack.reduce((mm, s) => mm + slotMass(s), 0);
   const wetMass = dryMass + (Number(player.rocket.tank) || 0);
-  const stepsNeeded = Math.ceil(perBurn * thisTurnBurns);
+  // Mag Sail bonus burns: each Radiation Belt entered this turn is a FREE burn
+  // (the sail rides the belt's field for thrust, like a flyby bonus spot), so
+  // it cancels one burn's fuel cost. Only when the ACTIVE thruster is the Mag
+  // Sail. Applied server-side (authoritative); charging fewer steps than the
+  // client computed can never cause a false rejection. NOTE: the client planner
+  // does not yet offer the extended bonus range - follow-up.
+  const activeThrusterSlot = player.rocket.stack.find((s) => s.id === player.rocket.activeThrusterId);
+  const activePower = activeThrusterSlot ? powerOfSlot(activeThrusterSlot) : null;
+  const beltsEntered = arrivals.filter((a) => hazardKind(a) === 'rad').length;
+  const bonusBurns = (activePower && activePower.bonusBurnPerBelt) ? beltsEntered : 0;
+  const paidBurns = Math.max(0, thisTurnBurns - bonusBurns);
+  const stepsNeeded = Math.ceil(perBurn * paidBurns);
   const stepsAvail = blackStepsBetween(dryMass, wetMass);
   // Full burn-math breakdown - returned on a reject (detail) AND on the debug
   // dry-run (result.calc) so the client can show every intermediate value
   // instead of just tank before/after.
   const moveCalc = {
-    finalThrust: activeNetThrust(player.rocket),
+    finalThrust: activeNetThrust(player.rocket, hasPrivilege(state, player, 'POWERSAT')),
     fuelStepsPerBurn: perBurn,
     dryMass,
     wetMass,
@@ -608,16 +1312,18 @@ function applyMove(state, op, player) {
     fuelStepsInShip: stepsAvail,
     canBurn: perBurn > 0 ? Math.floor(stepsAvail / perBurn) : null,
     burnsNeeded: thisTurnBurns,
+    ...(bonusBurns ? { bonusBurns, paidBurns } : {}),
     fuelStepsNeeded: stepsNeeded,
     enough: stepsNeeded <= stepsAvail,
   };
-  // Fuel-grade gate: a dirt thruster burns only dirt, a water thruster only
-  // water. If the tank holds fuel of the wrong grade, the burn can't draw on
-  // it (clearer than "insufficient" - the fuel is there, just incompatible).
+  // Fuel-grade gate: a dirt thruster can burn EITHER grade (dirt or water); a
+  // water thruster can burn ONLY water. So the lone incompatible case is a
+  // water engine drawing on a dirt tank (clearer than "insufficient" - the
+  // fuel is there, just incompatible). Tank still never mixes the two grades.
   if (stepsNeeded > 0 && (Number(player.rocket.tank) || 0) > 0) {
     const need = activeFuelGrade(player.rocket);
     const have = tankGradeOf(player.rocket);
-    if (need !== have) return fail('wrong_fuel_grade', { need, have });
+    if (need === 'water' && have === 'dirt') return fail('wrong_fuel_grade', { need, have });
   }
   if (stepsNeeded > stepsAvail) {
     return fail('insufficient_water', moveCalc);
@@ -633,7 +1339,7 @@ function applyMove(state, op, player) {
     if (k === 'rad') rad.push(slug);
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
-  const thrust = activeNetThrust(player.rocket);
+  const thrust = activeNetThrust(player.rocket, hasPrivilege(state, player, 'POWERSAT'));
   // Factory-assist liftoff / landing gate. A maneuver where net thrust
   // <= site size is only legal if a factory carries it (assist), which
   // is a hazard roll unless a colony waives it. No factory => hard block.
@@ -647,14 +1353,24 @@ function applyMove(state, op, player) {
   // landing assist. Each is aqua-payable (FINAO) or a d6 where a 1 is a
   // critical that destroys the ship.
   const rollItems = [];
+  const safeAero = stackSafeAerobrake(player.rocket);
+  const safeAeroSlugs = [];   // aero hazards the parachute waived (for playback)
   if (liftG.needsRoll) rollItems.push({ slug: from, kind: 'assist', phase: 'liftoff' });
-  for (const slug of generic) rollItems.push({ slug, kind: hazardKind(slug) });
+  for (const slug of generic) {
+    const k = hazardKind(slug);
+    // A safe-aerobrake card (parachute generator) carries the stack through
+    // aerobrake hazards with no roll; skull hazards still roll.
+    if (k === 'aero' && safeAero) { safeAeroSlugs.push(slug); continue; }
+    rollItems.push({ slug, kind: k });
+  }
   if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
 
   const wantPay = !!op.hazardPay;
   // FINAO: pay aqua up front to skip the generic + assist rolls. Validated
-  // before anything mutates so a short balance rejects the move cleanly.
-  const finaoCost = wantPay ? rollItems.length * HAZARD_COST_PER : 0;
+  // before anything mutates so a short balance rejects the move cleanly. Open
+  // Source FINAO (Anonymous P2P) discounts the per-hazard cost to 3.
+  const finaoPer = hasPrivilege(state, player, 'OPEN_SOURCE_FINAO') ? 3 : HAZARD_COST_PER;
+  const finaoCost = wantPay ? rollItems.length * finaoPer : 0;
   if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
 
   // Commit the burn + the FINAO payment, then resolve dice in travel
@@ -669,6 +1385,10 @@ function applyMove(state, op, player) {
   const rolls = [];
   let destroyed = false;
   let haltSlug = dest;            // where the rocket actually ends up
+
+  // Aerobrakes the parachute waived: recorded as safely passed (no roll) so
+  // the client plays them back as a clean pass rather than a missing node.
+  for (const slug of safeAeroSlugs) rolls.push({ slug, kind: 'aero', safe: true });
 
   // Generic + assist rolls: a rolled 1 is a critical that destroys the
   // ship at that node (unless paid past via FINAO).
@@ -700,6 +1420,10 @@ function applyMove(state, op, player) {
       if (worst > 0) {
         const survivors = [];
         for (const slot of player.rocket.stack) {
+          // Sails (Photon Heliogyro / Electric Sail / Photon Kite Sail) are
+          // immune to Belt Rolls - the belt never decommissions them.
+          const pw = powerOfSlot(slot);
+          if (pw && pw.immuneBelt) { survivors.push(slot); continue; }
           if (slotRadHardness(slot) < worst) {
             // A heavy-side radiator DEGRADES to its light side instead of being
             // destroyed - the one exception to the no-flip-after-construction
@@ -736,6 +1460,72 @@ function applyMove(state, op, player) {
   }
   state.rng.cursor = gen.cursor;
   player.movesRemaining -= 1;
+
+  // Sail aerobrake decommission: a sail (Photon Heliogyro / Electric Sail /
+  // Photon Kite Sail / Mag Sail) burns off if the stack passes ANY aerobrake
+  // hazard on this move. Decommissioned back to hand. (Skipped if the ship was
+  // destroyed - the whole stack is already gone.)
+  const sailDecommissioned = [];
+  if (!destroyed && generic.some((s) => hazardKind(s) === 'aero')) {
+    const kept = [];
+    for (const slot of player.rocket.stack) {
+      const pw = powerOfSlot(slot);
+      if (pw && pw.aerobrakeDecommission) {
+        sailDecommissioned.push(cardNameOf(slot.id));
+        player.hand.push(slot.id);   // sails are patents -> back to hand
+      } else {
+        kept.push(slot);
+      }
+    }
+    if (sailDecommissioned.length) {
+      player.rocket.stack = kept;
+      if (player.rocket.activeThrusterId && !kept.some((s) => s.id === player.rocket.activeThrusterId)) player.rocket.activeThrusterId = null;
+      if (player.rocket.activeProspectorId && !kept.some((s) => s.id === player.rocket.activeProspectorId)) player.rocket.activeProspectorId = null;
+      clipTank(player.rocket);
+    }
+  }
+
+  // Project Valkyrie purge (subsystem 6): firing a thruster powered by a
+  // Valkyrie reactor irradiates the stack - decommission colocated cards with
+  // rad-hardness below its threshold. Fires on the burn (this move) only when
+  // Valkyrie is actually in the active thruster's support chain. Self-limiting:
+  // once the low-rad cards are gone, later moves find nothing.
+  const valkyriePurged = [];
+  if (!destroyed && player.rocket.activeThrusterId) {
+    const vchain = resolveSupportChain({
+      cards: chainCardsFromRocket(player.rocket),
+      activeId: player.rocket.activeThrusterId,
+      wiring: player.rocket.wiring || {},
+    });
+    let purgeBelow = 0;
+    for (const cid of vchain.order) {
+      const s = player.rocket.stack.find((x) => x.id === cid);
+      const pw = s && powerOfSlot(s);
+      if (pw && pw.purgeOnActivateRadHardBelow) purgeBelow = Math.max(purgeBelow, pw.purgeOnActivateRadHardBelow);
+      // Li / Thermochemical Heatsink Fountain (subsystem 7): a heavy heatsink
+      // radiator that COOLED the chain this burn switches to its light side
+      // after its first use.
+      if (pw && pw.switchToLightAfterUse && s && s.radSide !== 'light') s.radSide = 'light';
+    }
+    if (purgeBelow > 0) {
+      const kept = [];
+      for (const slot of player.rocket.stack) {
+        if (slotRadHardness(slot) < purgeBelow) {
+          valkyriePurged.push(cardNameOf(slot.id));
+          if (isCrewSlot(slot)) (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+          else player.hand.push(slot.id);
+        } else {
+          kept.push(slot);
+        }
+      }
+      if (valkyriePurged.length) {
+        player.rocket.stack = kept;
+        if (player.rocket.activeThrusterId && !kept.some((s) => s.id === player.rocket.activeThrusterId)) player.rocket.activeThrusterId = null;
+        if (player.rocket.activeProspectorId && !kept.some((s) => s.id === player.rocket.activeProspectorId)) player.rocket.activeProspectorId = null;
+        clipTank(player.rocket);
+      }
+    }
+  }
 
   if (destroyed) {
     // The ship is lost at haltSlug; cards scatter, rocket recalls to LEO.
@@ -809,6 +1599,9 @@ function applyMove(state, op, player) {
   else if (nItems) log += ` Rolled through ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
   if (decommissioned.length) log += ` Radiation decommissioned ${decommissioned.length} card${decommissioned.length === 1 ? '' : 's'}.`;
   if (degradedRadiators.length) log += ` Radiation degraded ${degradedRadiators.length} radiator${degradedRadiators.length === 1 ? '' : 's'} to its light side.`;
+  if (sailDecommissioned.length) log += ` Aerobraking burned off ${sailDecommissioned.join(', ')} (decommissioned to hand).`;
+  if (valkyriePurged.length) log += ` Project Valkyrie irradiated the stack: ${valkyriePurged.join(', ')} decommissioned (rad-hard < 4).`;
+  if (bonusBurns) log += ` Mag Sail rode ${bonusBurns} radiation belt${bonusBurns === 1 ? '' : 's'} for a free burn each.`;
   if (chit) log += ` First into the ${chit.zone} zone (+glory chit).`;
   if (homeScored) {
     log += ` Scored ${homeScored} glory chit${homeScored === 1 ? '' : 's'}`
@@ -908,10 +1701,11 @@ function applyBoost(state, op, player) {
   if (!free) player.opsRemaining -= 1;
   const n = ids.length;
   const tail = free ? ' (continued boost, no operation)' : '';
-  return {
-    ok: true, state,
-    log: `${player.name} boosted ${n} card${n === 1 ? '' : 's'} to LEO for ${cost} aqua${tail}.`,
-  };
+  let log = `${player.name} boosted ${n} card${n === 1 ? '' : 's'} to LEO for ${cost} aqua${tail}.`;
+  // Launch Fees: a boost pays every Launch Fees holder +1 aqua from the pool.
+  const fees = creditPrivilegeIncome(state, 'LAUNCH_FEES', 'Launch Fees');
+  if (fees.length) log += ' ' + fees.join(' ');
+  return { ok: true, state, log };
 }
 
 // Free Market sell (rulebook I3): drop a HAND card to the bottom of
@@ -1075,6 +1869,21 @@ function applyCashWater(state, op, player) {
   return { ok: true, state, log: `${player.name} cashed ${amt} water back to aqua (aqua ${player.aqua}).` };
 }
 
+// Jettison fuel from the tank (Internal Tankage free action - destroyed for
+// now; Stage 3+ drops it as an outpost stack). Grade-agnostic: dumps water
+// OR dirt, no aqua credit. No op cost; turn-gated like the other tank ops.
+// op = { amount? }: a specific amount jettisons that much (clamped to the
+// tank); omitted / >= tank clears the whole tank, sub-1 remainder included.
+function applyDump(state, op, player) {
+  const tank = Number(player.rocket.tank) || 0;
+  if (tank <= 0) return fail('no_fuel');
+  const want = Number(op && op.amount);
+  const amt = (!Number.isFinite(want) || want <= 0 || want >= tank) ? tank : want;
+  player.rocket.tank = round6(tank - amt);
+  const word = tankGradeOf(player.rocket) === 'dirt' ? 'dirt' : 'water';
+  return { ok: true, state, log: `${player.name} dumped ${round6(amt)} ${word} (tank ${round6(player.rocket.tank)}).` };
+}
+
 // Display name for a stack slot (patent or crew face). Used in
 // TRANSFER log lines.
 function slotName(slot) {
@@ -1200,26 +2009,58 @@ function applyDecommission(state, op, player) {
   if (!ids.length) return fail('bad_decommission');
   const src = from === 'leo' ? (player.leo || []) : player.rocket.stack;
   let returned = 0;
+  let crewToLeo = 0;
   let blocked = 0;
   for (const id of ids) {
     const idx = src.findIndex((s) => s.id === id);
     if (idx < 0) continue;
     const slot = src[idx];
-    // Crew can NOT be voluntarily decommissioned to the hand. Removing a
-    // crew member is a special action that resolves during an event
-    // (TODO: implement the event-driven crew-removal flow later); for now
-    // crew in a decommission selection is skipped, never returned.
-    if (isCrewSlot(slot)) { blocked++; continue; }
+    // Decommissioning a Crew (a Human) is a FELONY. Normally blocked; during
+    // Anarchy it's allowed (Felonious privilege, G6) and the crew returns to
+    // the LEO Stack rather than the patent hand (crew aren't hand cards).
+    if (isCrewSlot(slot)) {
+      if (!mayCommitFelony(state, player) || from === 'leo') { blocked++; continue; }
+      src.splice(idx, 1);
+      (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face === 'secondary' ? 'secondary' : 'primary' });
+      if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
+      if (player.rocket.activeProspectorId === id) player.rocket.activeProspectorId = null;
+      crewToLeo++;
+      continue;
+    }
     src.splice(idx, 1);
     player.hand.push(id);
     if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
     if (player.rocket.activeProspectorId === id) player.rocket.activeProspectorId = null;
     returned++;
   }
-  if (!returned) return fail('nothing_decommissioned');
+  if (!returned && !crewToLeo) return fail('nothing_decommissioned');
   if (from === 'rocket') { clipTank(player.rocket); recallIfEmpty(player); }
-  let log = `${player.name} decommissioned ${returned} card${returned === 1 ? '' : 's'} to hand.`;
-  if (blocked) log += ` (${blocked} crew stayed.)`;
+  const parts = [];
+  if (returned) parts.push(`${returned} card${returned === 1 ? '' : 's'} to hand`);
+  if (crewToLeo) parts.push(`${crewToLeo} crew to LEO (Felony)`);
+  let log = `${player.name} decommissioned ${parts.join(' and ')}.`;
+  if (blocked) log += ` (${blocked} crew stayed - decommissioning a Human needs Anarchy.)`;
+  return { ok: true, state, log };
+}
+
+// Claim Jump (Felony, G4). During Anarchy, replace an opponent's Claim (a
+// success disc with no Factory) with your own, provided you have a Human at
+// the Site and no OPPOSING Human/colony defends it. Free action (no op).
+function applyClaimJump(state, op, player) {
+  const siteId = String(op.siteId || '');
+  const site = siteById(siteId);
+  if (!site) return fail('unknown_site');
+  if (!mayCommitFelony(state, player)) return fail('felonies_not_allowed');
+  const disc = state.discs[siteId];
+  if (!disc || disc.outcome !== 'success') return fail('no_claim_here');
+  if (disc.ownerId === player.profileId) return fail('already_your_claim');
+  if (state.factories[siteId]) return fail('claim_has_factory');
+  if (!actorCrewAtSite(state, siteId, player.profileId)) return fail('felony_needs_human');
+  if (opposingHumanAtSite(state, siteId, player.profileId)) return fail('claim_defended');
+  const prev = state.players.find((p) => p.profileId === disc.ownerId);
+  disc.ownerId = player.profileId;
+  const log = `${player.name} claim-jumped ${site.name}${prev ? ` from ${prev.name}` : ''} (Felony).`;
+  pushNews(state, '\u{1F5FD}', log);
   return { ok: true, state, log };
 }
 
@@ -1237,27 +2078,32 @@ function applyConvertOutpost(state, op, player) {
   const letter = OUTPOST_LETTERS.find((l) => !taken.has(l));
   if (!letter) return fail('no_outpost_slot');
   player.outposts = player.outposts || {};
+  // Outposts can't store dirt fuel: a dirt tank is DESTROYED on conversion;
+  // only water carries over.
+  const isDirt = tankGradeOf(player.rocket) === 'dirt' && (player.rocket.tank | 0) > 0;
+  const carried = isDirt ? 0 : (player.rocket.tank | 0);
+  const dirtLost = isDirt ? (player.rocket.tank | 0) : 0;
   player.outposts[letter] = {
     letter,
     siteId,
     cards: player.rocket.stack.map((s) => ({ id: s.id, kind: s.kind, ...(s.face ? { face: s.face } : {}), ...(s.radSide ? { radSide: s.radSide } : {}) })),
-    tank: player.rocket.tank | 0,
+    tank: carried,
   };
   const n = player.rocket.stack.length;
-  const water = player.rocket.tank | 0;
+  const water = carried;
   // Empty the rocket back to LEO (same wipe as a recall).
   player.rocket.stack = [];
   player.rocket.tank = 0;
+  player.rocket.tankGrade = 'water';
   player.rocket.siteId = null;
   player.rocket.activeThrusterId = null;
   player.rocket.activeProspectorId = null;
   player.rocket.route = [];
   const where = siteById(siteId);
   const whereName = (where && where.name) || siteId;
-  return {
-    ok: true, state,
-    log: `${player.name} converted the rocket to Outpost ${letter} at ${whereName} (${n} card${n === 1 ? '' : 's'}, ${water} water).`,
-  };
+  let log = `${player.name} converted the rocket to Outpost ${letter} at ${whereName} (${n} card${n === 1 ? '' : 's'}, ${water} water).`;
+  if (dirtLost) log += ` ${dirtLost} dirt fuel was destroyed (outposts can't store dirt).`;
+  return { ok: true, state, log };
 }
 
 // Decommission (dissolve) an EMPTY outpost - frees the slot. Requires the
@@ -1289,6 +2135,9 @@ function applyTransferFuel(state, op, player) {
   }
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
+  // Outposts only hold water; pumping it into a dirt rocket tank would mix
+  // the grades, which is never allowed.
+  if ((player.rocket.tank | 0) > 0 && tankGradeOf(player.rocket) === 'dirt') return fail('cannot_mix_fuel');
   const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
   const room = Math.max(0, TANK_MAX - dry - (player.rocket.tank | 0));
   const amt = Math.min(want, outpost.tank | 0, room);
@@ -1298,6 +2147,7 @@ function applyTransferFuel(state, op, player) {
   }
   outpost.tank = (outpost.tank | 0) - amt;
   player.rocket.tank = (player.rocket.tank | 0) + amt;
+  player.rocket.tankGrade = 'water';
   return {
     ok: true, state,
     log: `${player.name} pumped ${amt} water from Outpost ${letter} into the rocket (tank ${player.rocket.tank}).`,
@@ -1448,7 +2298,12 @@ function applyProspect(state, op, player) {
     return fail('not_at_site');
   }
   if (existing) return fail('already_prospected');
-  if (prospectorIsru(provSlot) > (site.hydration | 0)) return fail('isru_too_high');
+  // Colocated modifier cards (subsystems 2 + 3): scan the prospector's stack.
+  const colocatedPowers = player.rocket.stack.map(powerOfSlot);
+  const isruMod = sumColocatedIsruMod(colocatedPowers, { isAerostat: isAerostatSite(site) });
+  const effIsru = Math.max(0, prospectorIsru(provSlot) + isruMod);   // isruMod <= 0 (easier), floored at 0
+  // Atmospheric Scoop (subsystem 5) can raise an aerostat site to hydration 2.
+  if (effIsru > (effectiveHydration(site, player) | 0)) return fail('isru_too_high');
 
   // Prospecting is one operation to BEGIN: the first prospect of the turn
   // (any kind) spends the operation. Once begun, a raygun's line-of-sight scan
@@ -1461,27 +2316,44 @@ function applyProspect(state, op, player) {
   if (!free && player.opsRemaining <= 0) return fail('no_ops_left');
 
   const threshold = prospectThreshold(site);
+  // Size-roll modifier (subsystem 2): colocated cards subtract from the d6
+  // (negative = easier), conditioned on the site's spectral type / prospector
+  // kind. THORIUM BREEDER (-3 on S), COMET LICHEN (-2 on D), FOAMED NICKEL (-1),
+  // SUPERLENS (-1 raygun).
+  const sizeMod = sumColocatedSizeRollMod(colocatedPowers, { spectral: site.spectralType, prospectorKind: kind });
   const gen = makeRng(state.seed, state.rng.cursor);
   const roll = gen.d6();
   state.rng.cursor = gen.cursor;
-  const success = roll <= threshold;
+  const effRoll = roll + sizeMod;            // sizeMod is <= 0
+  const success = effRoll <= threshold;
+  // NANITES (Lorentz-Propelled Microprobe): one re-roll if the size roll fails.
+  const nanites = anyColocatedNanitesReroll(colocatedPowers);
   state.discs[toSiteId] = {
     outcome: success ? 'success' : 'fail',
     roll, threshold, kind,
+    ...(sizeMod ? { sizeMod, effRoll } : {}),
     by: player.name,
     ownerId: player.profileId,
     turn: curTurn,
     round: curRound,
     // The buggy may re-roll once, this turn, by its owner.
-    canReroll: kind === 'buggy',
+    // Buggy may re-roll once; Blink Telescope (B612) grants a raygun the same;
+    // NANITES grants any prospector one re-roll on a failed size roll.
+    canReroll: kind === 'buggy'
+      || (kind === 'raygun' && hasPrivilege(state, player, 'BLINK_TELESCOPE'))
+      || (!success && nanites),
   };
   if (!free) player.opsRemaining -= 1;
   const verb = success ? 'struck a claim at' : 'came up dry at';
   const tail = free ? (buggyRoams ? ' with a free buggy road scan' : ' with a free raygun scan') : '';
-  return {
-    ok: true, state,
-    log: `${player.name} rolled ${roll} vs ${threshold} and ${verb} ${site.name}${tail}.`,
-  };
+  const rollText = sizeMod ? `${roll}${sizeMod > 0 ? '+' : ''}${sizeMod} = ${effRoll}` : `${roll}`;
+  let log = `${player.name} rolled ${rollText} vs ${threshold} and ${verb} ${site.name}${tail}.`;
+  // Taxes: a placed Claim pays every Taxes holder +1 aqua from the pool.
+  if (success) {
+    const tax = creditPrivilegeIncome(state, 'TAXES', 'Taxes');
+    if (tax.length) log += ' ' + tax.join(' ');
+  }
+  return { ok: true, state, log };
 }
 
 // Buggy re-roll (rulebook: the buggy may re-roll its prospect once). The
@@ -1491,28 +2363,38 @@ function applyProspectReroll(state, op, player) {
   const disc = state.discs[toSiteId];
   if (!disc) return fail('no_disc');
   if (disc.ownerId !== player.profileId) return fail('not_owner');
-  if (disc.kind !== 'buggy') return fail('not_buggy');
-  if (!disc.canReroll) return fail('already_rerolled');
+  // Eligibility is encoded in disc.canReroll at prospect time: buggy (always),
+  // raygun with Blink Telescope, or any kind with a colocated NANITES card on a
+  // failed size roll. False here means "not eligible OR already re-rolled".
+  if (!disc.canReroll) return fail('cannot_reroll');
   if (disc.turn !== state.turn) return fail('reroll_window_closed');
   const site = siteById(toSiteId);
   const threshold = disc.threshold;
+  const sizeMod = disc.sizeMod || 0;
   const gen = makeRng(state.seed, state.rng.cursor);
   const roll = gen.d6();
   state.rng.cursor = gen.cursor;
-  const success = roll <= threshold;
+  const effRoll = roll + sizeMod;
+  const success = effRoll <= threshold;
   state.discs[toSiteId] = {
     ...disc,
     outcome: success ? 'success' : 'fail',
     roll,
+    ...(sizeMod ? { effRoll } : {}),
     canReroll: false,
     rerolled: true,
   };
   const verb = success ? 'struck a claim at' : 'came up dry at';
   const where = (site && site.name) || toSiteId;
-  return {
-    ok: true, state,
-    log: `${player.name} re-rolled the buggy: ${roll} vs ${threshold} and ${verb} ${where}.`,
-  };
+  const how = disc.kind === 'buggy' ? 'the buggy' : 'the scan';
+  const rollText = sizeMod ? `${roll}${sizeMod > 0 ? '+' : ''}${sizeMod} = ${effRoll}` : `${roll}`;
+  let log = `${player.name} re-rolled ${how}: ${rollText} vs ${threshold} and ${verb} ${where}.`;
+  // Taxes fire only if the re-roll newly placed a Claim (fail -> success).
+  if (success && disc.outcome !== 'success') {
+    const tax = creditPrivilegeIncome(state, 'TAXES', 'Taxes');
+    if (tax.length) log += ' ' + tax.join(' ');
+  }
+  return { ok: true, state, log };
 }
 
 // Industrialize (rulebook I7). Flip the player's claim at the parked site
@@ -1531,19 +2413,38 @@ function applyIndustrialize(state, op, player) {
   const disc = state.discs[siteId];
   if (!disc || disc.outcome !== 'success' || disc.ownerId !== player.profileId) return fail('not_claimed');
   if (state.factories[siteId]) return fail('already_industrialized');
-  if (player.opsRemaining <= 0) return fail('no_ops_left');
   const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];
   // Every id must be a non-crew card in the stack; the set must include a
-  // refinery + a robonaut (the build needs both).
-  let hasRefinery = false, hasRobonaut = false;
+  // refinery + a robonaut (the build needs both) - unless ARCOLOGY waives the
+  // robonaut. Scan the build set's powers along the way.
+  let hasRefinery = false, hasRobonaut = false, arcology = false, powersatGrant = false;
+  const atmo = isAerostatSite(site);
+  const size = prospectThreshold(site);
   for (const id of ids) {
     const slot = player.rocket.stack.find((s) => s.id === id && s.kind !== 'crew');
     if (!slot) return fail('not_in_stack');
     const c = PATENTS_BY_ID[id];
     if (c && c.type === 'refinery') hasRefinery = true;
     if (c && c.type === 'robonaut') hasRobonaut = true;
+    const pw = powerOfSlot(slot);   // capture now (the slot is decommissioned below)
+    if (!pw) continue;
+    // ARCOLOGY (Solar Carbotherm): no robonaut decommission needed in the
+    // listed inner-system zones.
+    if (Array.isArray(pw.noRobonautDecommissionZones)
+        && pw.noRobonautDecommissionZones.includes(site.solarZone)) arcology = true;
+    // POWER GIRDLE (Ilmenite, non-atmo size 8+) / IONOSAT (Ionosphere Lasing,
+    // atmospheric): permanently grant Powersat on this industrialize.
+    if (pw.gainPowersatOnIndustrialize === 'atmospheric' && atmo) powersatGrant = true;
+    if (pw.gainPowersatOnIndustrialize === 'nonAtmoSize8' && !atmo && size >= 8) powersatGrant = true;
   }
-  if (!hasRefinery || !hasRobonaut) return fail('cannot_industrialize');
+  if (!hasRefinery || (!hasRobonaut && !arcology)) return fail('cannot_industrialize');
+  // JELLYBOTS (Solid Flame): a colocated card makes industrialization a FREE
+  // action (no operation spent). Colocated = anywhere in the stack.
+  const freeAction = player.rocket.stack.some((s) => {
+    const pw = powerOfSlot(s);
+    return pw && pw.industrializeFreeAction;
+  });
+  if (!freeAction && player.opsRemaining <= 0) return fail('no_ops_left');
   // Decommission the chain to the hand.
   for (const id of ids) {
     const idx = player.rocket.stack.findIndex((s) => s.id === id);
@@ -1560,11 +2461,51 @@ function applyIndustrialize(state, op, player) {
   }
   const spectral = site.spectralType || 'C';
   state.factories[siteId] = { ownerId: player.profileId, spectralType: spectral };
-  player.opsRemaining -= 1;
-  return {
-    ok: true, state,
-    log: `${player.name} industrialized ${site.name} (spectral ${spectral}); decommissioned ${ids.length} card${ids.length === 1 ? '' : 's'} to hand.`,
+  if (!freeAction) player.opsRemaining -= 1;
+  let log = `${player.name} industrialized ${site.name} (spectral ${spectral}); decommissioned ${ids.length} card${ids.length === 1 ? '' : 's'} to hand.`;
+  if (arcology && !hasRobonaut) log += ' (Arcology: no robonaut needed.)';
+  if (freeAction) log += ' (Jellybots: free action.)';
+  // POWER GIRDLE (Ilmenite) / IONOSAT (Ionosphere Lasing): permanently grant
+  // Powersat (captured above from the build set + site conditions).
+  if (powersatGrant && !hasGrantedPrivilege(player, 'POWERSAT')) {
+    grantPrivilege(player, 'POWERSAT');
+    log += ` ${player.name} permanently gained the Powersat privilege.`;
+  }
+  // Taxes: industrializing a Claim also pays every Taxes holder +1 aqua.
+  const tax = creditPrivilegeIncome(state, 'TAXES', 'Taxes');
+  if (tax.length) log += ' ' + tax.join(' ');
+  return { ok: true, state, log };
+}
+
+// Mine Revival (MINE REVIVAL, Termite Nest): as an operation, clear a BUSTED
+// (failed) prospect disc at a colocated site of size 2+ and place your own
+// Claim there. Needs a Termite Nest aboard. op = { siteId }.
+function applyMineRevival(state, op, player) {
+  const siteId = String(op.siteId || '');
+  const site = siteById(siteId);
+  if (!site) return fail('unknown_site');
+  if (player.rocket.siteId !== siteId) return fail('not_at_site');
+  const hasTermite = player.rocket.stack.some((s) => {
+    const pw = powerOfSlot(s);
+    return pw && pw.mineRevival;
+  });
+  if (!hasTermite) return fail('no_mine_revival');
+  if (state.factories[siteId]) return fail('already_industrialized');
+  const disc = state.discs[siteId];
+  if (!disc || disc.outcome !== 'fail') return fail('no_busted_disc');
+  if (prospectThreshold(site) < 2) return fail('site_too_small');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  state.discs[siteId] = {
+    outcome: 'success', roll: 0, threshold: prospectThreshold(site), kind: 'mine-revival',
+    by: player.name, ownerId: player.profileId,
+    turn: state.turn | 0, round: state.round | 0,
+    canReroll: false, revived: true,
   };
+  player.opsRemaining -= 1;
+  let log = `${player.name} revived the busted claim at ${site.name} (Mine Revival).`;
+  const tax = creditPrivilegeIncome(state, 'TAXES', 'Taxes');
+  if (tax.length) log += ' ' + tax.join(' ');
+  return { ok: true, state, log };
 }
 
 // ET Produce (rulebook): a factory turns a hand card into an installed
@@ -1578,7 +2519,15 @@ function applyEtProduce(state, op, player) {
   const site = siteById(siteId);
   if (!site) return fail('unknown_site');
   const fac = state.factories[siteId];
-  if (!fac || fac.ownerId !== player.profileId) return fail('no_factory');
+  if (!fac) return fail('no_factory');
+  if (fac.ownerId !== player.profileId) {
+    // Factory Hijack (Felony, N6a): ET-produce at an opponent's Factory during
+    // Anarchy, with your own Human colocated, unless an opposing Human or
+    // colony defends it. The product still lands in YOUR outpost here.
+    if (!mayCommitFelony(state, player)) return fail('not_your_factory');
+    if (!actorCrewAtSite(state, siteId, player.profileId)) return fail('felony_needs_human');
+    if (opposingHumanAtSite(state, siteId, player.profileId)) return fail('factory_defended');
+  }
   if (player.opsRemaining <= 0) return fail('no_ops_left');
   const cardId = String(op.cardId || '');
   const hIdx = player.hand.indexOf(cardId);
@@ -1623,7 +2572,8 @@ function applySiteRefuel(state, op, player) {
   const site = siteById(siteId);
   if (!site) return fail('unknown_site');
   if (player.rocket.siteId !== siteId) return fail('not_at_site');
-  const water = Number.isFinite(site.hydration) ? site.hydration : 0;
+  // Atmospheric Scoop (subsystem 5) can raise an aerostat site to hydration 2.
+  const water = effectiveHydration(site, player);
   if (water <= 0) return fail('dry_site');
   if (player.opsRemaining <= 0) return fail('no_ops_left');
   player.refueledSites = Array.isArray(player.refueledSites) ? player.refueledSites : [];
@@ -1644,10 +2594,26 @@ function applySiteRefuel(state, op, player) {
     const provId = player.rocket.activeProspectorId;
     const slot = provId && player.rocket.stack.find((s) => s.id === provId);
     if (!slot) return fail('no_prospector');
-    const isru = prospectorIsru(slot);
+    // Colocated ISRU modifier (subsystem 3): a colocated card lowers the
+    // platform's effective ISRU (DIVINING NUBOTS -1, SCOOP -2 at aerostats),
+    // floored at 0 (the best rating). Lower ISRU = more water from the formula.
+    const isruMod = sumColocatedIsruMod(player.rocket.stack.map(powerOfSlot), { isAerostat: isAerostatSite(site) });
+    const isru = Math.max(0, prospectorIsru(slot) + isruMod);
     if (!(isru >= 0 && isru <= water)) return fail('isru_too_high');
     rawGain = 1 + water - isru;
     label = 'ISRU Refuel';
+  }
+  // Dharma Refuel (ISRO): while you carry a glory chit, a colocated site
+  // refuel yields double.
+  if (hasPrivilege(state, player, 'DHARMA_REFUEL') && (player.glory && (player.glory.chits || []).length)) {
+    rawGain *= 2;
+    label += ' (Dharma x2)';
+  }
+  // SCAVENGING (Femtochemistry): a colocated card doubles FTs during site
+  // refuel.
+  if (player.rocket.stack.some((s) => { const pw = powerOfSlot(s); return pw && pw.doubleSiteRefuel; })) {
+    rawGain *= 2;
+    label += ' (Scavenging x2)';
   }
   const gain = Math.min(rawGain, cap - tank);
   if (gain <= 0) return fail('tank_full');
@@ -1661,33 +2627,53 @@ function applySiteRefuel(state, op, player) {
   };
 }
 
-// Free dirt refuel (Cargo Transfer free action / crew bonus): top the tank
-// with grey dirt FTs. Only a DIRT thruster can take dirt, and dirt can't mix
-// with water (empty the tank first). A non-crew dirt thruster fills to the
-// wet-mass cap; a crew dirt thruster takes 1 FT, once per turn. Costs NO
-// operation (free action). op = {} (acts on the active thruster).
-function applyDirtRefuel(state, _op, player) {
+// Free dirt refuel (Cargo Transfer free action / moon-cable crew bonus): top
+// the tank with grey dirt FTs. Loading dirt fuels the ACTIVE engine, so it's
+// gated on the active thruster being a dirt thruster (a water thruster can't
+// burn dirt - the same grade rule the MOVE fuel-grade gate enforces). Dirt
+// can't mix with water (empty the tank first). Dirt needs NO ISRU rig.
+//
+// WHERE and HOW MUCH (HF4 MOONCABLE card):
+//   - At a real SITE: any activated dirt thruster scoops from the ground,
+//     1 tank max per turn (the general "1 tank of dirt max per Turn" throttle).
+//   - At LEO / Home Bernal: there's no ground, so it takes the MOON CABLE (a
+//     NASRDA crew card aboard - negotiable) to pipe dirt up. A non-crew dirt
+//     thrust triangle takes up to 7 tanks this turn; the crew dirt triangle
+//     (NASRDA's own) takes 1. The cable need NOT be the active thruster - it
+//     just has to be in the stack, and it refuels whichever triangle is active.
+// The per-turn allotment is cumulative (load it in any increments up to the
+// cap) and resets each turn. Costs NO operation. op = { amount? }.
+function applyDirtRefuel(state, op, player) {
   const tid = player.rocket.activeThrusterId;
   const slot = tid && player.rocket.stack.find((s) => s.id === tid);
   if (!slot) return fail('no_thruster');
-  const face = thrusterFaceOf(slot);
-  if (!faceBurnsDirt(face)) return fail('not_dirt_thruster');
+  if (!faceBurnsDirt(thrusterFaceOf(slot))) return fail('not_dirt_thruster');
+  const isCrew = isCrewSlot(slot);
+  let perTurnMax;
+  if (rocketAtLeo(player)) {
+    if (!stackHasMoonCable(player.rocket)) return fail('dirt_needs_mooncable');
+    perTurnMax = isCrew ? 1 : 7;
+  } else {
+    if (!siteById(player.rocket.siteId)) return fail('not_at_site');
+    perTurnMax = 1;
+  }
   const tank = Number(player.rocket.tank) || 0;
   if (tank > 0 && tankGradeOf(player.rocket) === 'water') return fail('cannot_mix_fuel');
+  const loaded = Number(player.dirtTanksThisTurn) || 0;
+  const allow = perTurnMax - loaded;
+  if (allow <= 0) return fail('already_dirt_refueled');
   const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
   const cap = Math.max(0, TANK_MAX - dry);
-  if (tank >= cap) return fail('tank_full');
-  const isCrew = isCrewSlot(slot);
-  // Crew dirt thruster: 1 FT max per turn. Non-crew: fill to the cap.
-  if (isCrew) {
-    player.dirtRefueledThisTurn = !!player.dirtRefueledThisTurn;
-    if (player.dirtRefueledThisTurn) return fail('already_dirt_refueled');
-  }
-  const gain = isCrew ? Math.min(1, cap - tank) : (cap - tank);
+  const room = cap - tank;
+  if (room <= 0) return fail('tank_full');
+  const want = Number(op && op.amount);
+  const gain = Number.isFinite(want) && want > 0
+    ? Math.min(want, allow, room)
+    : Math.min(allow, room);
   if (gain <= 0) return fail('tank_full');
   player.rocket.tank = round6(tank + gain);
   player.rocket.tankGrade = 'dirt';
-  if (isCrew) player.dirtRefueledThisTurn = true;
+  player.dirtTanksThisTurn = loaded + gain;
   return {
     ok: true, state,
     log: `${player.name} loaded +${round6(gain)} dirt FT${gain === 1 ? '' : 's'} (tank ${round6(player.rocket.tank)} dirt).`,
@@ -1743,18 +2729,35 @@ function applyBuildColony(state, op, player) {
   const fac = state.factories[siteId];
   if (!fac || fac.ownerId !== player.profileId) return fail('no_factory');
   if (state.colonies[siteId]) return fail('already_colony');
-  let cardId = String(op.cardId || '');
-  let slot = cardId && player.rocket.stack.find((s) => s.id === cardId && isCrewSlot(s));
-  if (!slot) slot = player.rocket.stack.find((s) => isCrewSlot(s));   // default: first crew
+  const cardId0 = String(op.cardId || '');
+  // The colonising crew is colocated with the factory whether it's ABOARD the
+  // rocket OR in an OUTPOST stack at this site (a crew cargo-transferred to
+  // the outpost still counts, rulebook G3). Search the rocket first, then any
+  // outpost here, honouring the requested cardId when given.
+  const match = (s) => cardId0 ? (s.id === cardId0 && isCrewSlot(s)) : isCrewSlot(s);
+  let slot = player.rocket.stack.find(match);
+  let fromOutpost = null;
+  if (!slot) {
+    for (const [letter, o] of Object.entries(player.outposts || {})) {
+      if (!o || o.siteId !== siteId) continue;
+      const s = (o.cards || []).find(match);
+      if (s) { slot = s; fromOutpost = letter; break; }
+    }
+  }
   if (!slot) return fail('no_crew');
-  cardId = slot.id;
-  // The colonising crew leaves the rocket and re-spawns in the LEO Stack
-  // (the same variant rule destroyRocket + the sandbox doColonize use:
-  // crew is never lost, it returns to LEO).
-  player.rocket.stack = player.rocket.stack.filter((s) => s.id !== cardId);
-  if (player.rocket.activeThrusterId === cardId) player.rocket.activeThrusterId = null;
-  if (player.rocket.activeProspectorId === cardId) player.rocket.activeProspectorId = null;
-  clipTank(player.rocket);
+  const cardId = slot.id;
+  // The colonising crew leaves its stack and re-spawns in the LEO Stack (the
+  // same variant rule destroyRocket + the sandbox doColonize use: crew is
+  // never lost, it returns to LEO).
+  if (fromOutpost) {
+    const o = player.outposts[fromOutpost];
+    o.cards = (o.cards || []).filter((s) => s.id !== cardId);
+  } else {
+    player.rocket.stack = player.rocket.stack.filter((s) => s.id !== cardId);
+    if (player.rocket.activeThrusterId === cardId) player.rocket.activeThrusterId = null;
+    if (player.rocket.activeProspectorId === cardId) player.rocket.activeProspectorId = null;
+    clipTank(player.rocket);
+  }
   player.leo = player.leo || [];
   player.leo.push({ id: cardId, kind: 'crew', face: slot.face === 'secondary' ? 'secondary' : 'primary' });
   state.colonies[siteId] = { ownerId: player.profileId };
@@ -1813,9 +2816,11 @@ const FUNCTIONAL = {
   TRANSFER_FUEL: applyTransferFuel,
   DISSOLVE_OUTPOST: applyDissolveOutpost,
   DECOMMISSION: applyDecommission,
+  CLAIM_JUMP: applyClaimJump,
   CONVERT_OUTPOST: applyConvertOutpost,
   REFUEL: applyRefuel,
   CASH_WATER: applyCashWater,
+  DUMP: applyDump,
   FREE_MARKET: applyFreeMarket,
   DISCARD: applyDiscard,
   SET_ROUTE: applySetRoute,
@@ -1828,6 +2833,7 @@ const FUNCTIONAL = {
   PROSPECT: applyProspect,
   PROSPECT_REROLL: applyProspectReroll,
   INDUSTRIALIZE: applyIndustrialize,
+  MINE_REVIVAL: applyMineRevival,
   ET_PRODUCE: applyEtProduce,
   LOAD_GLORY: applyLoadGlory,
 };
@@ -1843,8 +2849,10 @@ function pickPayload(op) {
     case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount };
     case 'DISSOLVE_OUTPOST': return { letter: op.letter };
     case 'DECOMMISSION': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from };
+    case 'CLAIM_JUMP': return { siteId: op.siteId };
     case 'REFUEL': return { amount: op.amount };
     case 'CASH_WATER': return { amount: op.amount };
+    case 'DUMP': return { amount: op.amount };
     case 'FREE_MARKET': return { cardId: op.cardId };
     case 'DISCARD': return { cardId: op.cardId };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
@@ -1854,10 +2862,11 @@ function pickPayload(op) {
     case 'PROSPECT': return { siteId: op.siteId, turn: op.turn, round: op.round };
     case 'PROSPECT_REROLL': return { siteId: op.siteId };
     case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode };
-    case 'DIRT_REFUEL': return {};
+    case 'DIRT_REFUEL': return { amount: op.amount };
     case 'DELIVERY': return { siteId: op.siteId, letter: op.letter, cardId: op.cardId };
     case 'BUILD_COLONY': return { cardId: op.cardId };
     case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds };
+    case 'MINE_REVIVAL': return { siteId: op.siteId };
     case 'ET_PRODUCE': return { siteId: op.siteId, cardId: op.cardId, letter: op.letter, isNewOutpost: !!op.isNewOutpost };
     // Route ops ride the undo stack like every other functional op, so
     // an UNDO/REDO replay (rebuildFromBase) must carry their payload or
@@ -1935,8 +2944,9 @@ function openTurnFor(state, player) {
   // One refuel per site per turn: clear the per-turn ledger so the
   // sites this player tapped last turn are refuellable again.
   player.refueledSites = [];
-  // Crew dirt thrusters take 1 dirt FT per turn; reset the per-turn flag.
-  player.dirtRefueledThisTurn = false;
+  // Dirt refuel is capped per turn (7 tanks via the moon cable for a non-crew
+  // triangle, else 1); reset the per-turn tally.
+  player.dirtTanksThisTurn = 0;
   // Afterburn lasts one turn: clear it as the player's next turn opens.
   if (player.rocket) player.rocket.afterburnEngaged = false;
   state.turnActions = [];
@@ -1988,15 +2998,14 @@ function applyEndTurn(state, _op, player) {
     // Still inside the round: the cube moved a slot, next lap reopens
     // from the same first player.
     log += ` Sunspot Cube advances to slot ${state.turn}.`;
-    if (state.lastEvent && state.lastEvent.turn === state.turn) {
-      log += ` Event roll: ${state.lastEvent.dieRoll}.`;
-    }
+    log += clockEventLog(state);
     state.activeIndex = firstIdx;
     openTurnFor(state, state.players[firstIdx]);
     return { ok: true, state, log };
   }
 
   // A full round (Sunspot cycle) just closed.
+  log += clockEventLog(state);
   log += ` Round ${prevRound} complete.`;
 
   // Game-length cap: finish once the configured number of rounds has
@@ -2243,8 +3252,14 @@ function recomputeAuction(state) {
   // computed whenever ANY bid exists (not just when high > 0).
   let leader = null;
   if (entries.length) {
+    // Marketeer (SpaceX) wins ties even over the auctioneer: a top-bid holder
+    // of the privilege takes the lead. Else the auctioneer wins ties; else the
+    // first bidder at the floor.
+    const mktE = entries.find(([k, amt]) =>
+      amt === high && hasPrivilege(state, playerByProfile(state, Number(k)), 'MARKETEER'));
     const aucBid = a.bids[a.auctioneerId];
-    if (aucBid != null && aucBid === high) leader = a.auctioneerId;
+    if (mktE) leader = Number(mktE[0]);
+    else if (aucBid != null && aucBid === high) leader = a.auctioneerId;
     else { const e = entries.find(([, amt]) => amt === high); leader = e ? Number(e[0]) : null; }
   }
   a.highBidderId = leader;
@@ -2256,7 +3271,8 @@ function recomputeAuction(state) {
 // hold up the auctioneer and don't need to act. Their hand can't change
 // mid-auction (an open lot freezes every other op), so this is stable
 // for the life of the lot.
-function biddingBlockedByHand(player) {
+function biddingBlockedByHand(state, player) {
+  if (hasPrivilege(state, player, 'SKUNKWORKS')) return false;   // ignores the limit
   return ((player.hand || []).length >= AUCTION_HAND_LIMIT);
 }
 
@@ -2279,7 +3295,7 @@ function allBiddersActed(state) {
   // full-hand players can't take it - both count as already acted so
   // they never hold up the close, even after a reopen resets `acted`.
   return others.every((p) =>
-    acted.includes(p.profileId) || auto.includes(p.profileId) || biddingBlockedByHand(p));
+    acted.includes(p.profileId) || auto.includes(p.profileId) || biddingBlockedByHand(state, p));
 }
 
 // Highest standing bid that is NOT this player's own. The auctioneer wins
@@ -2302,7 +3318,8 @@ function applyAuctionStart(state, op, ctx) {
   // unopposed for free (see applyAuctionSell's no-bids path). Multiplayer always
   // has 2+ players, so this once-required opponent check is no longer needed.
   if (player.opsRemaining <= 0) return fail('no_ops_left');
-  if ((player.hand || []).length >= AUCTION_HAND_LIMIT) return fail('hand_limit');
+  // Skunkworks (Shimizu) ignores the academia hand limit when starting.
+  if ((player.hand || []).length >= AUCTION_HAND_LIMIT && !hasPrivilege(state, player, 'SKUNKWORKS')) return fail('hand_limit');
   const deckType = String(op.deckType || '');
   if (!DECK_TYPES.includes(deckType)) return fail('bad_deck');
   const deck = state.decks[deckType];
@@ -2338,7 +3355,8 @@ function applyAuctionBid(state, op, ctx) {
   // or change their standing bid at any time while the lot is open.
   const bidder = playerByProfile(state, ctx.profileId);
   if (!bidder) return fail('not_a_player');
-  if ((bidder.hand || []).length >= AUCTION_HAND_LIMIT) return fail('hand_limit');
+  // Skunkworks (Shimizu) ignores the academia hand limit when bidding.
+  if ((bidder.hand || []).length >= AUCTION_HAND_LIMIT && !hasPrivilege(state, bidder, 'SKUNKWORKS')) return fail('hand_limit');
   const amount = Number(op.amount);
   // Bids can be 0 (claim it free); only negatives are invalid.
   if (!Number.isInteger(amount) || amount < 0) return fail('bad_amount');
@@ -2373,7 +3391,7 @@ function applyAuctionBid(state, op, ctx) {
       .filter((p) => (p.profileId in a.bids)
         || (a.passed || []).includes(p.profileId)
         || (a.autoPassed || []).includes(p.profileId)
-        || biddingBlockedByHand(p))
+        || biddingBlockedByHand(state, p))
       .map((p) => p.profileId);
     a.acted = [a.auctioneerId, ...acked];
   } else {
@@ -2544,16 +3562,21 @@ function applyPickCrew(state, op, ctx) {
   if (!card) return fail('unknown_crew');
   const faceData = card.faces && card.faces[face];
   if (!faceData) return fail('unknown_crew_face');
-  // Each crew card carries one of the six PLAYER_COLORS (the
-  // faction band colour). The player's assigned seat colour pins
-  // them to that card - both faces of that card are valid picks,
-  // every other card is forbidden. Reject mismatches so a client
-  // bug can't bypass the colour gate.
-  if (card.color && player.color && card.color !== player.color) {
-    return fail('wrong_crew_colour');
+  // Any crew card is a legal pick as long as no OTHER player has already
+  // claimed it: each physical crew card is one player's faction, so a card
+  // taken by someone else is off the board. Both faces of an unclaimed card
+  // are valid (it's a single double-sided card); the player chooses which
+  // face is their faction.
+  if (state.players.some((p) => p !== player && p.faction && p.faction.cardId === cardId)) {
+    return fail('crew_taken');
   }
   const switching = !!player.faction;
   player.faction = { cardId, face };
+  // The picked crew card carries one of the six faction-band colours; that is
+  // now the player's seat colour (the colour follows the crew, not the other
+  // way round). Since each card is claimed by one player, seat colours stay
+  // unique.
+  if (card.color) player.color = card.color;
   // Replace any previous crew slot in LEO with the new pick so a
   // re-pick during the draft doesn't leave a stale crew sitting in
   // the stack. First-time pickers just get one push.
@@ -2564,6 +3587,11 @@ function applyPickCrew(state, op, ctx) {
   // begins ('play'). Server-side, not derived client-side, so spectators +
   // future joiners agree on the phase.
   if (state.players.every((p) => !!p.faction)) {
+    // Secretary General: start the game with +2 Aqua. Applied once, the moment
+    // the crew draft closes (re-picks during the draft don't double it).
+    for (const sg of playersWithPrivilege(state, 'SECRETARY_GENERAL')) {
+      sg.aqua = (sg.aqua | 0) + 2;
+    }
     if (state.draftStart) {
       state.draftPhase = 'draft';
       state.activeIndex = state.firstPlayerIndex || 0;
@@ -2668,6 +3696,27 @@ export function applyOperation(prevState, op, ctx) {
   // the turn guard; while the handoff is pending every other op is
   // frozen, mirroring the auction freeze below.
   if (LIFECYCLE[op.kind]) return LIFECYCLE[op.kind](clone(prevState), op, ctx);
+
+  // Open Sunspot event: affected players answer via EVENT_CHOICE
+  // (validates its own caller; answering EARLY, off-turn, is welcome).
+  // The table is NOT frozen (user decision 2026-06-12): only a player
+  // who still owes a choice is blocked, and only ON THEIR OWN TURN -
+  // they must settle the event before doing anything else (END_TURN
+  // included, so the debt can't be dodged). A debt whose options
+  // vanished (hand emptied, tied card already gone) clears itself.
+  if (op.kind === 'EVENT_CHOICE') return applyEventChoice(clone(prevState), op, ctx);
+  if (prevState.pendingEvent && !op.debug
+      && isPlayersTurn(prevState, ctx.profileId)
+      && eventDebtFor(prevState, ctx.profileId)) {
+    const st0 = clone(prevState);
+    if (clearStaleEventDebt(st0, ctx.profileId)) {
+      // Debt evaporated (no valid options remain): let the op proceed
+      // against the cleaned state.
+      return applyOperation(st0, op, ctx);
+    }
+    return fail('awaiting_event_choice');
+  }
+
   if (prevState.pendingFirstPlayer) return fail('awaiting_first_player');
 
   // Auction ops bypass the turn guard below - bids/passes are sent
@@ -2718,6 +3767,25 @@ export function applyOperation(prevState, op, ctx) {
     const cursorBefore = state.rng.cursor;
     const res = FUNCTIONAL[op.kind](state, op, player);
     if (!res.ok) return res;
+    // Glitch trigger: if this op is a trigger and the stack is glitched, roll
+    // 1d6 and decommission every colocated card whose rad-hardness matches.
+    // Done BEFORE autoFixGlitches so a human arriving on this same op doesn't
+    // pre-empt the roll the trigger already incurred.
+    if (GLITCH_TRIGGER_OPS.has(op.kind)) {
+      const gl = resolveGlitchTrigger(res.state, player.profileId);
+      if (gl) res.log = (res.log ? res.log + ' ' : '') + gl.log;
+    }
+    // Co-located humans fix glitches: any op that moved cards or ships
+    // may have put a crew next to a glitched stack, so sweep after every
+    // functional op and narrate any fix in the same log line.
+    const fixed = autoFixGlitches(res.state);
+    if (fixed.length && res.log) res.log += ' ' + fixed.join(' ');
+    // A glory chit can't ride a crewless rocket: any op that left the rocket
+    // without crew (decommission, colonise, a flare/glitch loss) sends its
+    // carried chits home to LEO at front value. Also rescues already-stuck
+    // chits retroactively on the next op.
+    const homed = homeOrphanedGloryChits(res.state);
+    if (homed.length && res.log) res.log += ' ' + homed.join(' ');
     // Record the action on the undo stack (a new action invalidates
     // any pending redo), tagging whether it consumed a die roll.
     res.state.turnActions = [
@@ -2735,7 +3803,7 @@ export function applyOperation(prevState, op, ctx) {
 // explicitly rather than via a group).
 export const SUPPORTED_OPS = [
   ...Object.keys(FUNCTIONAL), ...Object.keys(META), ...Object.keys(AUCTION),
-  ...Object.keys(CREW), ...Object.keys(LIFECYCLE), 'DRAFT_PICK',
+  ...Object.keys(CREW), ...Object.keys(LIFECYCLE), 'DRAFT_PICK', 'EVENT_CHOICE',
 ];
 // Ops that require the caller to supply ctx.turnBaseState.
 export const NEEDS_TURN_BASE = new Set(['UNDO', 'REDO']);

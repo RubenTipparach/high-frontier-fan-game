@@ -7,7 +7,7 @@ Output: data/waypoint-seasons.json
         { "<waypoint id>": "red" | "yellow" | "blue", ... }
 
 Why static: the planner JSON ships 15 seasonal sites (5 red, 5
-yellow, 5 blue — comets plus Icarus / Phaethon / Pholus / Hermes
+yellow, 5 blue - comets plus Icarus / Phaethon / Pholus / Hermes
 A/B / Bee-Zed / Asbolus / Kreutz Sungrazer) but only flags the
 destination hex with siteSynodic. The lagrange + burn waypoints
 along each approach corridor share the apparition window, so on
@@ -19,7 +19,7 @@ page load.
 Rules:
   - From each seasonal site (non-waypoint with siteSynodic), walk
     out through waypoints. Real destination sites act as
-    boundaries — a waypoint between Earth and a comet picks up
+    boundaries - a waypoint between Earth and a comet picks up
     the comet's season, but propagation stops at Earth itself.
   - The waypoint graph is one giant connected mesh through the
     decorative chain-bend nodes, so naive BFS would mark every
@@ -114,7 +114,7 @@ def main():
     with open(OUT_PATH, 'w') as f:
         json.dump(out, f, indent=2, sort_keys=True)
 
-    # Friendly stats — useful when re-running the extractor after a
+    # Friendly stats - useful when re-running the extractor after a
     # planner-data update.
     by_season = defaultdict(int)
     for season in out.values():

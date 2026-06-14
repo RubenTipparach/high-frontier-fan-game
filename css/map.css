@@ -1182,7 +1182,8 @@
    when the rocket is parked at LEO - converts aqua 1:1 into water
    up to the tank cap. Same dashed border idiom as the dump-fuel
    row so it reads as a peer section, not a separate modal. */
-.fuel-tank-aqua {
+.fuel-tank-aqua,
+.fuel-tank-dirt {
   margin: 8px 0 0;
   padding: 8px 10px;
   background: rgba(15, 23, 42, 0.55);
@@ -1190,6 +1191,13 @@
   border-radius: 6px;
   font-size: 12px;
 }
+/* Dirt panel borrows the aqua panel's layout (it reuses the .aqua-*
+   inner classes) but reads in grey-brown dirt tones, not blue. */
+.fuel-tank-dirt {
+  border-color: #a8997f;
+}
+.fuel-tank-dirt .aqua-direction-label { color: #d6c7a8; }
+.fuel-tank-dirt .aqua-help { margin: 6px 0 0; font-size: 10px; }
 .fuel-tank-aqua .aqua-row {
   display: flex;
   justify-content: space-between;
@@ -1204,13 +1212,13 @@
   margin: 4px 0 6px;
   font-size: 10px;
 }
-.fuel-tank-aqua .aqua-actions {
+:is(.fuel-tank-aqua, .fuel-tank-dirt) .aqua-actions {
   display: flex;
   gap: 6px;
   justify-content: center;
   flex-wrap: wrap;
 }
-.fuel-tank-aqua .aqua-actions .popup-btn {
+:is(.fuel-tank-aqua, .fuel-tank-dirt) .aqua-actions .popup-btn {
   font-size: 11px;
   padding: 5px 9px;
   min-width: 56px;
@@ -1219,17 +1227,21 @@
    modes as clearly distinct: tank-fill on top, cash-out
    below with a dashed divider between. The direction label
    on each row spells out which way the water flows. */
-.fuel-tank-aqua .aqua-direction {
+:is(.fuel-tank-aqua, .fuel-tank-dirt) .aqua-direction {
   margin-top: 8px;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
-.fuel-tank-aqua .aqua-direction-reverse {
+:is(.fuel-tank-aqua, .fuel-tank-dirt) .aqua-direction-reverse {
   padding-top: 8px;
   border-top: 1px dashed rgba(56, 189, 248, 0.30);
 }
-.fuel-tank-aqua .aqua-direction-label {
+/* The dirt panel's dump divider reads in grey-brown, not aqua blue. */
+.fuel-tank-dirt .aqua-direction-reverse {
+  border-top-color: rgba(168, 154, 130, 0.35);
+}
+:is(.fuel-tank-aqua, .fuel-tank-dirt) .aqua-direction-label {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 1px;
@@ -1237,7 +1249,7 @@
   color: var(--accent);
   text-align: center;
 }
-.fuel-tank-aqua .aqua-direction-reverse .aqua-direction-label {
+:is(.fuel-tank-aqua, .fuel-tank-dirt) .aqua-direction-reverse .aqua-direction-label {
   color: #fbbf24;
 }
 
@@ -1863,6 +1875,152 @@
   margin-bottom: 6px;
 }
 .turn-clock-event-card .ev-icon { font-size: 18px; }
+/* Resolved event outcomes: one sentence per effect the event applied. */
+.turn-clock-event-card .ev-notes {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.turn-clock-event-card .ev-notes li { margin-bottom: 3px; }
+/* Inspiration outcome: per-deck "sank -> new top" rows with clickable card
+   chips, in place of the old sentence list. */
+.tc-insp { margin-top: 8px; }
+.tc-insp-legend {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--muted, #94a3b8);
+  margin-bottom: 6px;
+  padding: 0 2px;
+}
+.tc-insp-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.tc-insp-row {
+  display: grid;
+  grid-template-columns: 20px 1fr 14px 1fr;
+  align-items: center;
+  gap: 6px;
+}
+.tc-insp-deck { font-size: 15px; text-align: center; }
+.tc-insp-to { color: var(--muted, #94a3b8); text-align: center; font-size: 12px; }
+.tc-card-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  min-width: 0;
+  padding: 4px 7px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg-2, rgba(15, 23, 42, 0.6));
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.2;
+  cursor: pointer;
+  text-align: left;
+}
+.tc-card-chip:hover { border-color: var(--accent); background: rgba(56, 189, 248, 0.12); }
+.tc-card-chip .tc-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-card-chip .tc-chip-arrow { flex: 0 0 auto; font-size: 10px; opacity: 0.8; }
+.tc-card-chip.is-sank { opacity: 0.72; }
+.tc-card-chip.is-sank .tc-chip-arrow { color: #f87171; }
+.tc-card-chip.is-top { border-color: rgba(74, 222, 128, 0.5); }
+.tc-card-chip.is-top .tc-chip-arrow { color: #4ade80; }
+/* Card preview opened from a chip sits above the turn-clock modal. */
+.tc-card-preview-overlay { z-index: 120; }
+/* Sunspot event chooser: the first-player overlay chrome, widened so the
+   card pick-grid (et-cards, shared with ET Produce) fits comfortably. */
+.mp-event-modal { max-width: 560px; width: min(560px, 92vw); }
+.mp-event-modal .card-modal-actions { justify-content: flex-end; }
+.mp-event-modal .hud-error:empty { display: none; }
+/* Galactic news: toolbar broadcast button badge + feed modal. */
+#news-feed { position: relative; }
+.news-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: #b3322e;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 15px;
+  text-align: center;
+}
+.news-modal { max-width: 540px; }
+.news-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 50vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.news-list li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.news-list .news-ic { flex: 0 0 auto; }
+.news-list .news-when { flex: 0 0 auto; color: var(--muted, #94a3b8); font-size: 11px; }
+.news-list .news-text { flex: 1; }
+.news-list .news-empty { color: var(--muted, #94a3b8); justify-content: center; }
+/* Clickable card chips appended to a news item (the cards it's about). */
+.news-cards {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.news-card-chip {
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--accent);
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.3;
+  cursor: pointer;
+}
+.news-card-chip:hover { background: rgba(56, 189, 248, 0.28); }
+/* Inspiration row carries the per-deck cycle-tracker visual (a block), so
+   align the row to the top and let the text column hold the visual below the
+   lead line. */
+.news-list li.news-insp { align-items: flex-start; }
+.news-list li.news-insp .news-text { display: block; }
+.news-list li.news-insp .tc-insp { margin-top: 6px; }
+/* Card preview opened from a news chip sits above the news modal. */
+.news-card-preview-overlay { z-index: 130; }
+/* Glitch-trigger confirm: red-accented warning before a glitch roll. */
+.glitch-confirm-overlay { z-index: 140; }
+.glitch-confirm-panel { border-color: #dc2626; }
+.glitch-confirm-panel h3 { color: #fca5a5; display: flex; align-items: center; gap: 8px; }
+.glitch-confirm-panel h3 .glitch-disc {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #dc2626; border: 2px solid #7f1d1d;
+  box-shadow: inset 0 0 0 2px rgba(254, 202, 202, 0.7);
+}
+.glitch-confirm-panel .glitch-go { background: #dc2626; border-color: #7f1d1d; color: #fff; }
 .turn-clock-event-card strong { color: var(--ink); font-size: 14px; flex: 1; }
 .turn-clock-event-card .ev-season {
   font-size: 10px;
@@ -2776,6 +2934,11 @@ body:has(#view-browse:not(.hidden)) #main {
     border-color 0.18s ease;
 }
 .mp-turn-banner[hidden] { display: none !important; }
+/* Anarchy: red warning stripe so the felonies-legal state is unmistakable. */
+.mp-turn-banner.is-anarchy {
+  --mp-turn-color: #dc2626;
+  box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.55), 0 6px 18px rgba(220, 38, 38, 0.3);
+}
 .mp-turn-banner.is-your-turn {
   /* Distinct glow when it's the local player's turn so it
      reads instantly even from a phone-arm's-length away. */
@@ -3973,6 +4136,34 @@ body:has(#view-browse:not(.hidden)) #main {
   display: flex;
   flex-direction: column;
 }
+/* Glitched stack: red outline + glow, plus the banner below. */
+.rocket-stack-panel.is-glitched {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.55), 0 24px 48px rgba(0, 0, 0, 0.55);
+}
+.rocket-glitch-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 9px 12px;
+  background: rgba(220, 38, 38, 0.16);
+  border: 1px solid #dc2626;
+  border-radius: 8px;
+  color: #fca5a5;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.rocket-glitch-banner strong { color: #fee2e2; }
+.rocket-glitch-banner .glitch-disc {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #dc2626;
+  border: 2px solid #7f1d1d;
+  box-shadow: inset 0 0 0 2px rgba(254, 202, 202, 0.7);
+}
 .rocket-stack-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -4167,15 +4358,21 @@ body:has(#view-browse:not(.hidden)) #main {
    the rocket stack modal. Holds the "Set as active" thruster
    picker (thrusters only) + the "Back to hand" affordance. */
 .rocket-slot-actions {
-  display: flex;
+  /* Two columns so each action button is wide enough for its full label
+     ("⚡ Active thruster", "🚀 Active prospector") instead of squeezing 4
+     buttons into one row where the text wrapped and clipped. */
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 6px;
   margin-top: 8px;
-  flex-wrap: wrap;
 }
 .rocket-slot-actions button {
-  flex: 1;
   font-size: 11px;
-  padding: 5px 8px;
+  padding: 6px 8px;
+  text-align: center;
+  line-height: 1.2;
+  white-space: normal;
+  min-width: 0;
 }
 
 /* Active-thruster highlight: the chosen thruster's card gets
@@ -4711,7 +4908,7 @@ body:has(#view-browse:not(.hidden)) #main {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 18px 20px;
-  max-width: 480px;
+  max-width: 760px;
   width: 100%;
   color: var(--ink);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
@@ -4734,27 +4931,86 @@ body:has(#view-browse:not(.hidden)) #main {
   text-transform: uppercase;
   color: var(--muted, #94a3b8);
 }
-.et-cards { display: flex; flex-direction: column; gap: 4px; max-height: 280px; overflow-y: auto; }
-.et-card {
-  text-align: left;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 10px;
-  color: var(--ink);
-  cursor: pointer;
-  font-size: 13px;
+/* Card picker: real card visuals at FULL SIZE (Black-Side-up), a selectable
+   button per option. Wraps in a scrollable grid so several full cards fit. */
+.et-cards {
   display: flex;
-  gap: 6px;
-  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: center;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 6px 2px 2px;
 }
-.et-card:hover { background: var(--panel-2); }
-.et-card.is-selected {
-  background: rgba(125, 211, 252, 0.12);
+.et-card-pick {
+  position: relative;
+  flex: 0 0 auto;
+  width: 220px;          /* full-size card */
+  height: 350px;
+  padding: 0;
+  background: none;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 0.12s, box-shadow 0.12s, transform 0.12s;
+}
+.et-card-pick .card {
+  pointer-events: none;  /* the wrapper owns the click; no flip / tooltip capture */
+}
+.et-card-pick .card-flip { display: none; }  /* picker is a preview, not a flipper */
+.et-card-pick:hover { transform: translateY(-2px); }
+.et-card-pick.is-selected {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(125, 211, 252, 0.25);
 }
-.et-card .et-radio { display: inline-block; width: 16px; color: var(--accent); flex: 0 0 16px; }
-.et-card .et-type { color: var(--muted, #94a3b8); font-size: 11px; }
+.et-card-pick .et-pick-tick {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 24px;
+  height: 24px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: #06212f;
+  font-weight: 900;
+  font-size: 14px;
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+}
+.et-card-pick.is-selected .et-pick-tick { display: flex; }
+/* Magnifier on each producible card: opens the enlarged read-only view.
+   Sibling of the pick button inside the wrapper, never nested in it. */
+.et-card-wrap { position: relative; flex: 0 0 auto; }
+.et-card-wrap .et-card-zoom {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(10, 14, 22, 0.85);
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+.et-card-wrap .et-card-zoom:hover { background: rgba(30, 41, 59, 0.95); }
+.et-zoom-overlay { z-index: 1200; }  /* above the produce modal */
+.et-zoom-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 18px;
+}
+.et-zoom-panel .et-zoom-close { margin-top: 40px; }
 
 .et-slot-block { display: flex; flex-direction: column; gap: 6px; }
 .et-slot-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -6335,6 +6591,28 @@ body:has(#view-browse:not(.hidden)) #main {
 .crew-faction-card.is-selected {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(125, 211, 252, 0.45), 0 8px 20px rgba(0, 0, 0, 0.5);
+}
+/* A crew another player already claimed: locked, dimmed, with a TAKEN ribbon. */
+.crew-faction-card.is-taken {
+  cursor: not-allowed;
+  position: relative;
+  filter: grayscale(0.7) brightness(0.6);
+}
+.crew-faction-card.is-taken:hover { transform: none; }
+.crew-faction-card .crew-faction-taken {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%) rotate(-12deg);
+  padding: 3px 12px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #fee2e2;
+  background: rgba(127, 29, 29, 0.92);
+  border: 1px solid #fca5a5;
+  border-radius: 6px;
+  pointer-events: none;
 }
 .crew-wizard-modal .card-modal-actions { flex: 0 0 auto; justify-content: flex-end; }
 .crew-wizard-modal .modal-btn.primary {

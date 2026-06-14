@@ -21,6 +21,8 @@
 //   openEtProduceModal({ siteName, factorySpectral, options,
 //                        existingOutpost, freeSlots, onCommit })
 
+import { renderCard } from './card-ui.js';
+
 function escapeHtml(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -61,6 +63,42 @@ export function findEtProduceOptions(handIds, lookupCard, factorySpectral) {
 // onCommit is called with the picked card id + the destination
 // letter; isNewOutpost is true when the modal is creating a new
 // outpost (the caller must run createOutpost first).
+// Enlarged read-only view of one card, stacked over the produce
+// modal. Esc / click-away / the close button dismiss only the zoom;
+// the picker underneath keeps its state.
+function openCardZoom(card) {
+  document.querySelector('.et-zoom-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay et-zoom-overlay';
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+  };
+  const onKey = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+  };
+  // Capture phase so the zoom's Esc wins over the produce modal's.
+  document.addEventListener('keydown', onKey, true);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const panel = document.createElement('div');
+  panel.className = 'card-modal-panel et-zoom-panel';
+  try {
+    const el = renderCard(card, { type: card.type, face: 'secondary' });
+    el.classList.add('card-modal-card');
+    panel.appendChild(el);
+  } catch {
+    panel.textContent = card.name || '';
+  }
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'modal-btn et-zoom-close';
+  btn.textContent = 'Close';
+  btn.addEventListener('click', close);
+  panel.appendChild(btn);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+}
+
 export function openEtProduceModal({
   siteName, factorySpectral, options,
   existingOutpost, freeSlots, onCommit,
@@ -101,14 +139,6 @@ export function openEtProduceModal({
   overlay.appendChild(dialog);
 
   const render = () => {
-    const cardsHtml = options.map((opt, i) => {
-      const chk = i === selectedCard ? '⦿' : '◯';
-      return `<button type="button" data-card="${i}" class="et-card ${i === selectedCard ? 'is-selected' : ''}">
-        <span class="et-radio">${chk}</span>
-        <strong>${escapeHtml(opt.name)}</strong>
-        <span class="et-type">(${escapeHtml(opt.card.type || '')})</span>
-      </button>`;
-    }).join('');
     const slotHtml = needsSlotPick
       ? `<div class="et-slot-block">
            <div class="et-section-label">No outpost here yet - pick a slot for the new one:</div>
@@ -130,7 +160,7 @@ export function openEtProduceModal({
           Card lands Black-Side-up in the outpost.
         </div>
         <div class="et-section-label">Pick a Hand card to produce:</div>
-        <div class="et-cards">${cardsHtml}</div>
+        <div class="et-cards"></div>
         ${slotHtml}
       </div>
       <div class="card-modal-actions">
@@ -138,11 +168,45 @@ export function openEtProduceModal({
         <button type="button" class="modal-btn primary et-commit" ${selectedSlot ? '' : 'disabled'}>🏭 Produce</button>
       </div>
     `;
-    dialog.querySelectorAll('.et-card').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        selectedCard = parseInt(btn.getAttribute('data-card'), 10) || 0;
+    // Real card visuals, Black-Side-up (the face the card lands on). Each
+    // option is a selectable button wrapping a scaled-down renderCard; the
+    // card's own pointer events are off so the wrapper owns the click.
+    const cardsHost = dialog.querySelector('.et-cards');
+    options.forEach((opt, i) => {
+      const pick = document.createElement('button');
+      pick.type = 'button';
+      pick.className = 'et-card-pick' + (i === selectedCard ? ' is-selected' : '');
+      pick.dataset.card = String(i);
+      pick.setAttribute('aria-pressed', i === selectedCard ? 'true' : 'false');
+      try {
+        pick.appendChild(renderCard(opt.card, { type: opt.card.type, face: 'secondary' }));
+      } catch {
+        pick.textContent = opt.name;
+      }
+      const tick = document.createElement('span');
+      tick.className = 'et-pick-tick';
+      tick.textContent = '✓';
+      pick.appendChild(tick);
+      pick.addEventListener('click', () => {
+        selectedCard = i;
         render();
       });
+      // Magnifier: enlarged read-only look at the card, Black-Side-up
+      // (the face it lands on). A SIBLING of the pick button inside a
+      // positioning wrapper (nested buttons are invalid HTML), so
+      // zooming never changes the selection.
+      const wrap = document.createElement('div');
+      wrap.className = 'et-card-wrap';
+      wrap.appendChild(pick);
+      const zoom = document.createElement('button');
+      zoom.type = 'button';
+      zoom.className = 'et-card-zoom';
+      zoom.title = 'Examine card';
+      zoom.setAttribute('aria-label', `Examine ${opt.name}`);
+      zoom.textContent = '🔍';
+      zoom.addEventListener('click', () => openCardZoom(opt.card));
+      wrap.appendChild(zoom);
+      cardsHost.appendChild(wrap);
     });
     dialog.querySelectorAll('.et-slot-btn').forEach((btn) => {
       btn.addEventListener('click', () => {

@@ -13,6 +13,81 @@ import {
   SLOTS, SEASONS, NEW_ROUND_SLOT, EVENT_SLOTS,
   getEventForRoll, getSeasonForSlot, EVENT_TABLE,
 } from './turn-clock.js';
+import { PATENTS_BY_ID } from '../../data/patents.js';
+import { renderCard } from './card-ui.js';
+
+// Small attr/text escapers shared by the event-outcome chips.
+function escTc(t) {
+  return String(t == null ? '' : t)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// Deck glyphs for the Inspiration outcome (which patent deck cycled).
+const DECK_GLYPHS = {
+  thruster: '🔥', reactor: '☢️', radiator: '♨️',
+  refinery: '💧', robonaut: '⛏', generator: '⚡',
+};
+
+// Inspiration outcome, rendered VISUAL: per cycled deck, the card that sank
+// to the bottom and the card now on top, each an abbreviated, CLICKABLE chip
+// (tap to see the full card) instead of a wall of sentences. Driven off
+// lastEvent.cycled = [{ deck, out, in }] (card ids). Falls back to the text
+// notes when cycled isn't present (older events / solo).
+export function inspirationVisualHtml(cycled) {
+  const chip = (id, cls, arrow) => {
+    const c = PATENTS_BY_ID[id];
+    const name = c ? c.name : id;
+    return `<button type="button" class="tc-card-chip ${cls}" data-card-id="${escTc(id)}"
+      title="${escTc(name)} - tap to view the card">
+      <span class="tc-chip-name">${escTc(name)}</span><span class="tc-chip-arrow">${arrow}</span></button>`;
+  };
+  const rows = cycled.map((c) => `
+    <li class="tc-insp-row">
+      <span class="tc-insp-deck" title="${escTc(c.deck)} deck">${DECK_GLYPHS[c.deck] || '🃏'}</span>
+      ${chip(c.out, 'is-sank', '↓')}
+      <span class="tc-insp-to">→</span>
+      ${chip(c.in, 'is-top', '↑')}
+    </li>`).join('');
+  return `<div class="tc-insp">
+    <div class="tc-insp-legend"><span>↓ sank to bottom</span><span>↑ new top</span></div>
+    <ul class="tc-insp-list">${rows}</ul>
+  </div>`;
+}
+
+// Lightweight read-only card preview, layered over the turn-clock modal.
+// Esc / click-away / Close dismiss only the preview.
+function openCardPreview(cardId) {
+  const card = PATENTS_BY_ID[cardId];
+  if (!card) return;
+  document.querySelector('.tc-card-preview-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay tc-card-preview-overlay';
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey, true);
+  };
+  const onKey = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+  };
+  document.addEventListener('keydown', onKey, true);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const panel = document.createElement('div');
+  panel.className = 'card-modal-panel';
+  try {
+    const el = renderCard(card, { type: card.type });
+    el.classList.add('card-modal-card');
+    panel.appendChild(el);
+  } catch { panel.textContent = card.name || cardId; }
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'modal-btn';
+  btn.textContent = 'Close';
+  btn.addEventListener('click', close);
+  panel.appendChild(btn);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+}
 
 // --------- Confirm end-turn dialog ---------
 
@@ -94,8 +169,13 @@ const WHEEL_RING_W = 56;           // band thickness for the slots
 // the season wedges + event markers + new round marker, then
 // pin a "you are here" pointer to the active slot.
 function slotAngle(slot, offset = 0) {
-  // 0 → -90° (top), advance clockwise.
-  const deg = (slot + offset) * (360 / SLOTS) - 90;
+  // 0 → top, advancing clockwise. The half-slot (+15° at 12 slots) rotation
+  // lands the slot-0 event boundary (slotAngle(-0.5)) straight up, so the
+  // first event line reads vertical instead of tilted ~15° to the left. The
+  // whole dial - numbers, season wedges, all six event lines, the pointer -
+  // flows through here, so they rotate together.
+  const HALF_SLOT = (360 / SLOTS) / 2;
+  const deg = (slot + offset) * (360 / SLOTS) - 90 + HALF_SLOT;
   return (deg * Math.PI) / 180;
 }
 function pointOnRing(slot, radius, offset = 0) {
@@ -423,6 +503,21 @@ export function openTurnClockModal({ rolling = null, animateFrom = null } = {}) 
     if (lastEvent) {
       const eventSeason = getSeasonForSlot(lastEvent.turn);
       const ev = getEventForRoll(lastEvent.dieRoll, eventSeason && eventSeason.name);
+      // Resolved outcomes (what the event actually DID) ride along on the
+      // event record as plain gameplay sentences; render them in place of
+      // the old "resolve at the table" note when present.
+      const escNote = (t) => String(t)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      // Inspiration cycles every deck; show it VISUAL (clickable card chips)
+      // off the structured cycled list. Other events keep their text notes.
+      const inspVisual = (ev && ev.name === 'Inspiration'
+        && Array.isArray(lastEvent.cycled) && lastEvent.cycled.length)
+        ? inspirationVisualHtml(lastEvent.cycled)
+        : '';
+      const notesHtml = inspVisual
+        || (Array.isArray(lastEvent.notes) && lastEvent.notes.length
+          ? `<ul class="ev-notes">${lastEvent.notes.map((n) => `<li>${escNote(n)}</li>`).join('')}</ul>`
+          : '');
       const evBlock = ev
         ? `<div class="turn-clock-event-card" data-season="${ev.season || 'any'}">
              <header>
@@ -431,11 +526,11 @@ export function openTurnClockModal({ rolling = null, animateFrom = null } = {}) 
                ${ev.season ? `<em class="ev-season ev-season-${ev.season}">Season ${ev.season}</em>` : ''}
              </header>
              <p class="ev-text">${ev.text}</p>
-             <p class="ev-sandbox-note">
+             ${notesHtml || `<p class="ev-sandbox-note">
                <span class="ev-sandbox-badge">Sandbox preview</span>
                Not applied automatically - resolve at the table if
                you're using the cube as a play-along clock.
-             </p>
+             </p>`}
            </div>`
         : '';
       eventHost.innerHTML = `
@@ -446,6 +541,13 @@ export function openTurnClockModal({ rolling = null, animateFrom = null } = {}) 
         </p>
         ${evBlock}
       `;
+      // Card chips in the Inspiration outcome open a read-only preview.
+      eventHost.querySelectorAll('.tc-card-chip[data-card-id]').forEach((b) => {
+        b.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openCardPreview(b.getAttribute('data-card-id'));
+        });
+      });
     } else {
       eventHost.innerHTML = `
         <p class="turn-clock-event-line muted">

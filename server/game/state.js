@@ -64,6 +64,18 @@ function slotInSeason(slot, s) {
 export function seasonForSlot(slot) {
   return (SEASONS.find((s) => slotInSeason(slot, s)) || SEASONS[0]).name;
 }
+// Sunspot event kind for a d6 roll in a season. Rolls 1-4 are universal;
+// 5-6 depend on the season the cube lands in. Mirror of the client's
+// EVENT_TABLE rolls in js/game/turn-clock.js (which carries the display
+// text + icons); keep the two in sync.
+export function eventKindForRoll(d6, seasonName) {
+  if (d6 <= 2) return 'inspiration';
+  if (d6 === 3) return 'glitch';
+  if (d6 === 4) return 'pad_explosion';
+  if (seasonName === 'blue') return 'anarchy';
+  if (seasonName === 'yellow') return 'budget_cuts';
+  return 'solar_flare';
+}
 
 // --- Per-turn budgets (mirror turn-clock placeholders) ---
 // The rulebook grants 4 ops/turn; the sandbox still runs the Stage-2
@@ -121,6 +133,9 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
     // any player whose faction is null on snapshot. Once committed
     // it is final - PICK_CREW rejects re-picks.
     faction: null,
+    // Privileges permanently gained from a card power (POWER GIRDLE / IONOSAT
+    // grant Powersat). NOT a faction privilege, so Anarchy does not suspend it.
+    grantedPrivileges: [],
     rocket: {
       // siteId null = parked at LEO (the launch anchor). There is no
       // explicit LEO node in SITES, so null is the canonical "at LEO"
@@ -138,8 +153,8 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
       tank: STARTING_WATER,
       // Fuel grade in the tank: 'water' (blue) or 'dirt' (grey). Water and
       // dirt cannot mix - a refuel of the other grade is blocked until the
-      // tank empties. A dirt thruster burns dirt; a water thruster burns
-      // water. Default water; meaningless while tank is 0.
+      // tank empties. A water thruster burns ONLY water; a dirt thruster burns
+      // EITHER grade (water or dirt). Default water; meaningless while tank is 0.
       tankGrade: 'water',
       afterburnEngaged: false,
       // Player support-chain wiring: which supplier card powers each consumer
@@ -253,6 +268,17 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
     firstPlayerIndex: 0,
     firstPlayerRotation: true,
     pendingFirstPlayer: null,
+    // Open Sunspot-event choice, when an event needs input from one or
+    // more players (Budget Cuts discard pick, Pad Explosion tie-break).
+    // { kind, waiting: [profileId...], options?: { [profileId]: [cardId...] } }
+    // Freezes every other op (except EVENT_CHOICE) until all answers land,
+    // the way an open auction does. Cleared when `waiting` empties.
+    pendingEvent: null,
+    // Anarchy event flag: set when the cube rolls Anarchy in season blue,
+    // cleared by the engine when the cube exits blue. Flavor-level for now
+    // (faction privileges are Module 0, out of current scope); surfaced in
+    // logs + UI so the table knows the event is live.
+    anarchy: false,
     // Per-turn functional-op stacks for undo/redo. Only the active
     // player has an in-progress turn, so these live at the top level
     // and reset every time a turn passes (see engine END_TURN). They

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 129 120" width="129" height="120">
+<defs><linearGradient id="csk-g9aa2af" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#595e66"/><stop offset="0.17" stop-color="#aab1bc"/><stop offset="0.33" stop-color="#cfd2d9"/><stop offset="0.62" stop-color="#9aa2af"/><stop offset="1" stop-color="#45494f"/></linearGradient><linearGradient id="csk-ge9edf3" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#87898d"/><stop offset="0.17" stop-color="#edf0f5"/><stop offset="0.33" stop-color="#f4f6f9"/><stop offset="0.62" stop-color="#e9edf3"/><stop offset="1" stop-color="#696b6d"/></linearGradient><linearGradient id="csk-gc99a3f" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#755925"/><stop offset="0.17" stop-color="#d2aa5e"/><stop offset="0.33" stop-color="#e5cfa3"/><stop offset="0.62" stop-color="#c99a3f"/><stop offset="1" stop-color="#5a451c"/></linearGradient></defs>
+  <path d="M48.4 99.9 L80.6 99.9 L77.1 109.0 L51.9 109.0 Z" fill="url(#csk-g9aa2af)"/>
+  <rect x="53.3" y="102.7" width="22.4" height="4.9" fill="#646d7c" opacity="1"/>
+  <rect x="48.4" y="55.1" width="32.2" height="44.8" fill="url(#csk-ge9edf3)"/>
+  <rect x="51.5" y="57.9" width="25.9" height="37.8" rx="5" fill="url(#csk-gc99a3f)"/>
+  <circle cx="58.2" cy="78.9" r="2.9" fill="#0e1726" stroke="#5b6270" stroke-width="1.2"/><circle cx="57.3" cy="78.0" r="0.8" fill="#bfe9f5" opacity="0.9"/>
+  <g transform="rotate(-4 79.9 76.8)"><rect x="79.9" y="70.5" width="36.4" height="12.6" rx="3" fill="#24386b" stroke="#0f1830" stroke-width="1.2"/><line x1="92.0" y1="70.5" x2="92.0" y2="83.1" stroke="#c9a86a" stroke-width="1.2"/><line x1="104.2" y1="70.5" x2="104.2" y2="83.1" stroke="#c9a86a" stroke-width="1.2"/><rect x="79.9" y="70.5" width="36.4" height="3.8" rx="2" fill="#fff" opacity="0.14"/></g>
+  <rect x="45.1" y="73.3" width="3.9" height="6.3" fill="#646d7c" opacity="1"/>
+  <path d="M55.4 48.1 L73.6 48.1 L80.6 55.1 L48.4 55.1 Z" fill="url(#csk-ge9edf3)"/>
+  <rect x="55.4" y="33.4" width="18.2" height="14.7" fill="url(#csk-g9aa2af)"/>
+  <rect x="56.8" y="20.1" width="15.4" height="13.3" fill="url(#csk-ge9edf3)"/>
+  <path d="M56.8 20.1 Q56.8 17.3 61.4 14.5 L67.7 14.5 Q72.2 17.3 72.2 20.1 Z" fill="url(#csk-g9aa2af)"/>
+  <path d="M56.8 36.2 L42.1 27.8" stroke="#8a93a3" stroke-width="2"/>
+  <g transform="rotate(45 42.1 27.8)"><rect x="46.1" y="23.8" width="16.1" height="8" rx="2.5" fill="#24386b" stroke="#0f1830" stroke-width="1"/><line x1="54.1" y1="23.8" x2="54.1" y2="31.8" stroke="#c9a86a" stroke-width="1"/></g>
+  <g transform="rotate(135 42.1 27.8)"><rect x="46.1" y="23.8" width="16.1" height="8" rx="2.5" fill="#24386b" stroke="#0f1830" stroke-width="1"/><line x1="54.1" y1="23.8" x2="54.1" y2="31.8" stroke="#c9a86a" stroke-width="1"/></g>
+  <g transform="rotate(225 42.1 27.8)"><rect x="46.1" y="23.8" width="16.1" height="8" rx="2.5" fill="#24386b" stroke="#0f1830" stroke-width="1"/><line x1="54.1" y1="23.8" x2="54.1" y2="31.8" stroke="#c9a86a" stroke-width="1"/></g>
+  <g transform="rotate(315 42.1 27.8)"><rect x="46.1" y="23.8" width="16.1" height="8" rx="2.5" fill="#24386b" stroke="#0f1830" stroke-width="1"/><line x1="54.1" y1="23.8" x2="54.1" y2="31.8" stroke="#c9a86a" stroke-width="1"/></g>
+  <circle cx="42.1" cy="27.8" r="5" fill="#8a93a3" stroke="#4a4f5a" stroke-width="1.2"/>
+</svg>

@@ -769,6 +769,20 @@ export const EDGES = [
 
 export const SITES_BY_ID = Object.fromEntries(SITES.map((s) => [s.id, s]));
 
+// Undirected adjacency from EDGES, by site id. Built once.
+export const ADJACENCY = (() => {
+  const m = {};
+  for (const [a, b] of EDGES) {
+    (m[a] = m[a] || new Set()).add(b);
+    (m[b] = m[b] || new Set()).add(a);
+  }
+  return m;
+})();
+// Site ids directly adjacent (one map edge) to the given site.
+export function adjacentSites(siteId) {
+  return ADJACENCY[siteId] || new Set();
+}
+
 export function sitesByBody(bodyId) {
   return SITES.filter((s) => s.body === bodyId);
 }

@@ -22,10 +22,22 @@ export function appBase() {
   return new URL('../', import.meta.url).pathname;
 }
 
+// Build stamp for cache-busting runtime assets. Production bundles inject
+// __BUILD_SHA__ via esbuild define (scripts/build.mjs); local dev runs the
+// raw module where the identifier is undefined, so the typeof guard skips
+// the pin. Why: runtime-fetched assets keep their app-root path across
+// deploys (only JS/CSS get content-hashed names), so when an asset's
+// CONTENT changes - a redrawn sprite - browsers and the Pages CDN keep
+// serving the stale copy for their max-age even after version-check reloads
+// the app. Pinning ?v= to the build SHA makes every deploy a fresh URL.
+const ASSET_VERSION = typeof __BUILD_SHA__ !== 'undefined' ? __BUILD_SHA__ : '';
+
 // Full URL for a static runtime asset addressed from the app root, e.g.
 // assetUrl('assets/rockets/foo.png') or assetUrl('data/site-flags.json').
 // These are loaded/fetched at runtime (not bundled), so the build copies
 // them into the deploy at the same app-root-relative paths.
 export function assetUrl(pathFromRoot) {
-  return new URL('../' + String(pathFromRoot).replace(/^\/+/, ''), import.meta.url).toString();
+  const u = new URL('../' + String(pathFromRoot).replace(/^\/+/, ''), import.meta.url);
+  if (ASSET_VERSION) u.searchParams.set('v', ASSET_VERSION);
+  return u.toString();
 }
