@@ -1873,27 +1873,32 @@ function applyConvertOutpost(state, op, player) {
   const letter = OUTPOST_LETTERS.find((l) => !taken.has(l));
   if (!letter) return fail('no_outpost_slot');
   player.outposts = player.outposts || {};
+  // Outposts can't store dirt fuel: a dirt tank is DESTROYED on conversion;
+  // only water carries over.
+  const isDirt = tankGradeOf(player.rocket) === 'dirt' && (player.rocket.tank | 0) > 0;
+  const carried = isDirt ? 0 : (player.rocket.tank | 0);
+  const dirtLost = isDirt ? (player.rocket.tank | 0) : 0;
   player.outposts[letter] = {
     letter,
     siteId,
     cards: player.rocket.stack.map((s) => ({ id: s.id, kind: s.kind, ...(s.face ? { face: s.face } : {}), ...(s.radSide ? { radSide: s.radSide } : {}) })),
-    tank: player.rocket.tank | 0,
+    tank: carried,
   };
   const n = player.rocket.stack.length;
-  const water = player.rocket.tank | 0;
+  const water = carried;
   // Empty the rocket back to LEO (same wipe as a recall).
   player.rocket.stack = [];
   player.rocket.tank = 0;
+  player.rocket.tankGrade = 'water';
   player.rocket.siteId = null;
   player.rocket.activeThrusterId = null;
   player.rocket.activeProspectorId = null;
   player.rocket.route = [];
   const where = siteById(siteId);
   const whereName = (where && where.name) || siteId;
-  return {
-    ok: true, state,
-    log: `${player.name} converted the rocket to Outpost ${letter} at ${whereName} (${n} card${n === 1 ? '' : 's'}, ${water} water).`,
-  };
+  let log = `${player.name} converted the rocket to Outpost ${letter} at ${whereName} (${n} card${n === 1 ? '' : 's'}, ${water} water).`;
+  if (dirtLost) log += ` ${dirtLost} dirt fuel was destroyed (outposts can't store dirt).`;
+  return { ok: true, state, log };
 }
 
 // Decommission (dissolve) an EMPTY outpost - frees the slot. Requires the
@@ -1925,6 +1930,9 @@ function applyTransferFuel(state, op, player) {
   }
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
+  // Outposts only hold water; pumping it into a dirt rocket tank would mix
+  // the grades, which is never allowed.
+  if ((player.rocket.tank | 0) > 0 && tankGradeOf(player.rocket) === 'dirt') return fail('cannot_mix_fuel');
   const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
   const room = Math.max(0, TANK_MAX - dry - (player.rocket.tank | 0));
   const amt = Math.min(want, outpost.tank | 0, room);
@@ -1934,6 +1942,7 @@ function applyTransferFuel(state, op, player) {
   }
   outpost.tank = (outpost.tank | 0) - amt;
   player.rocket.tank = (player.rocket.tank | 0) + amt;
+  player.rocket.tankGrade = 'water';
   return {
     ok: true, state,
     log: `${player.name} pumped ${amt} water from Outpost ${letter} into the rocket (tank ${player.rocket.tank}).`,
@@ -2333,13 +2342,14 @@ function applyDirtRefuel(state, op, player) {
   const slot = tid && player.rocket.stack.find((s) => s.id === tid);
   if (!slot) return fail('no_thruster');
   if (!faceBurnsDirt(thrusterFaceOf(slot))) return fail('not_dirt_thruster');
-  // Dirt is scooped from the ground: siteId null IS LEO (canonical form,
-  // see rocketAtLeo) and tops up free; elsewhere the slug must resolve to a
-  // real SITE (a deep-space waypoint has no ground) with an ISRU-rated card
-  // aboard.
-  if (!rocketAtLeo(player)) {
+  // Refueling dirt needs NO ISRU rig. LEO dirt refuel is the Mooncable
+  // privilege (NASRDA): only that card can take on dirt at LEO. Anywhere else,
+  // any active dirt thruster scoops at a real SITE (a deep-space waypoint has
+  // no ground).
+  if (rocketAtLeo(player)) {
+    if (!hasPrivilege(state, player, 'MOONCABLE')) return fail('dirt_needs_mooncable');
+  } else {
     if (!siteById(player.rocket.siteId)) return fail('not_at_site');
-    if (!player.rocket.stack.some(slotHasIsruRig)) return fail('no_isru_for_dirt');
   }
   const tank = Number(player.rocket.tank) || 0;
   if (tank > 0 && tankGradeOf(player.rocket) === 'water') return fail('cannot_mix_fuel');

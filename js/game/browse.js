@@ -35,7 +35,7 @@ import {
   onRocketChange, isRocketActive,
   getActiveThrusterId, setActiveThruster,
   getTankWater, setTankWater, addFuel, removeFuel, getTankMax, getWaterCap,
-  getTankGrade, setTankGrade, getActiveFuelGrade, getDirtCapability,
+  getTankGrade, setTankGrade, getActiveFuelGrade,
   getStackTotals, getActiveThrusterStats, setSolarZone, setHasPowersat,
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats, getSupportChainView,
@@ -3176,7 +3176,7 @@ function humanizeOnlineOpError(code, detail) {
     wrong_fuel_grade: 'Wrong fuel: a dirt thruster burns dirt, a water thruster burns water. Refuel the matching grade.',
     not_dirt_thruster: 'Dirt refuel needs a dirt-burning thruster aboard.',
     not_at_site: 'Park at a site first - dirt comes from the ground.',
-    no_isru_for_dirt: 'Dirt refuel needs an ISRU-rated card aboard (LEO tops up freely).',
+    dirt_needs_mooncable: 'Only the Mooncable privilege (NASRDA) can take on dirt at LEO. Scoop at a site instead.',
     not_water_fuel: 'Dirt has no cash value - only water converts back to aqua.',
     no_thruster: 'Activate a thruster first.',
     already_dirt_refueled: 'This crew dirt thruster already took its 1 dirt FT this turn.',
@@ -10692,7 +10692,10 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const dirtDumpAll = panel.querySelector('#dirt-dump-all');
   const dirtHelp    = panel.querySelector('#dirt-help');
   const isCrewDirt  = !!CREW_BY_ID[getActiveThrusterId()];
-  const canScoopDirt = atLeo || (!!getRocketSite() && !atLeo && getDirtCapability().hasIsru);
+  // Dirt needs NO ISRU rig. At LEO only the Mooncable privilege (NASRDA) can
+  // take on dirt; at a real site any active dirt thruster scoops.
+  const hasMooncable = myFactionPrivilege() === 'MOONCABLE';
+  const canScoopDirt = (atLeo && hasMooncable) || (!!getRocketSite() && !atLeo);
   // Show the scoop panel whenever the tank is in DIRT MODE (dirt loaded, or
   // an empty tank under a dirt engine) so the player always sees the dirt
   // controls, not just when the dirt thruster happens to be the active
@@ -10722,12 +10725,14 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
       dirtHelp.textContent = !activeDirt
         ? 'Make your dirt thruster the active engine to scoop dirt (a water engine can\'t burn it).'
         : !canScoopDirt
-          ? 'Park at a site with an ISRU card aboard (or at LEO) to scoop dirt.'
+          ? (atLeo
+              ? 'Only the Mooncable privilege (NASRDA) can take on dirt at LEO. Park at a site to scoop.'
+              : 'Park at a site to scoop dirt.')
           : room < 1
             ? 'Tank is full.'
             : crewDone
               ? 'This crew dirt thruster already took its 1 dirt FT this turn.'
-              : 'A dirt thruster scoops grey propellant from the ground for free (a crew dirt thruster takes 1 per turn). Dirt has no aqua value.';
+              : 'A dirt thruster scoops grey propellant from the ground (a crew dirt thruster takes 1 per turn). No aqua value, no ISRU needed; it can\'t mix with water or be transferred.';
     }
   }
   refreshDirtButtons();
