@@ -192,6 +192,16 @@ function stackHasMoonCable(rocket) {
   return !!(rocket && (rocket.stack || []).some(isMooncableThruster));
 }
 
+// Does the stack carry an OPERATIONAL safe-aerobrake card (a parachute
+// generator: Magnetoshell Plasma Parachute / Granular Rainbow Corral)? Such a
+// card lets the whole stack ride out aerobrake hazards with no roll.
+function stackSafeAerobrake(rocket) {
+  return !!(rocket && (rocket.stack || []).some((s) => {
+    const pw = powerOfSlot(s);
+    return pw && pw.safeAerobrake;
+  }));
+}
+
 // The fuel grade the active thruster needs: 'dirt' for a dirt thruster, else
 // 'water'. 'water' when there is no active thruster.
 function activeFuelGrade(rocket) {
@@ -1287,8 +1297,16 @@ function applyMove(state, op, player) {
   // landing assist. Each is aqua-payable (FINAO) or a d6 where a 1 is a
   // critical that destroys the ship.
   const rollItems = [];
+  const safeAero = stackSafeAerobrake(player.rocket);
+  const safeAeroSlugs = [];   // aero hazards the parachute waived (for playback)
   if (liftG.needsRoll) rollItems.push({ slug: from, kind: 'assist', phase: 'liftoff' });
-  for (const slug of generic) rollItems.push({ slug, kind: hazardKind(slug) });
+  for (const slug of generic) {
+    const k = hazardKind(slug);
+    // A safe-aerobrake card (parachute generator) carries the stack through
+    // aerobrake hazards with no roll; skull hazards still roll.
+    if (k === 'aero' && safeAero) { safeAeroSlugs.push(slug); continue; }
+    rollItems.push({ slug, kind: k });
+  }
   if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
 
   const wantPay = !!op.hazardPay;
@@ -1311,6 +1329,10 @@ function applyMove(state, op, player) {
   const rolls = [];
   let destroyed = false;
   let haltSlug = dest;            // where the rocket actually ends up
+
+  // Aerobrakes the parachute waived: recorded as safely passed (no roll) so
+  // the client plays them back as a clean pass rather than a missing node.
+  for (const slug of safeAeroSlugs) rolls.push({ slug, kind: 'aero', safe: true });
 
   // Generic + assist rolls: a rolled 1 is a critical that destroys the
   // ship at that node (unless paid past via FINAO).
