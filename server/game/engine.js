@@ -29,6 +29,10 @@
 import { PATENTS_BY_ID, radiatorRadHardness } from '../../data/patents.js';
 import { resolveSupportChain } from '../../data/support-chain.js';
 import { CREW_BY_ID } from '../../data/crew.js';
+// Structured patent card POWERS behind each face's free-text Ability (the
+// sheet carries the text; this maps it to engine flags). Shared with the
+// client, same as fuel-graph / support-chain.
+import { facePower } from '../../data/card-abilities.js';
 // Shared fuel-strip model (same module the client uses): a burn spends fuel
 // STEPS (black connections), and the water it costs is the non-linear mass
 // drop, leaving a possibly-fractional remainder.
@@ -168,6 +172,15 @@ function isMooncableThruster(slot) {
   const key = slot.face === 'secondary' ? 'secondary' : 'primary';
   const face = crew.faces[key] || crew.faces.primary;
   return !!face && privKey(face.bonus) === 'MOONCABLE';
+}
+
+// The structured POWER of a slot's INSTALLED face (null for crew / no power /
+// a face with no Ability). Keyed off the installed face's name so a flipped
+// card grants the right side's power.
+function powerOfSlot(slot) {
+  const c = slot && PATENTS_BY_ID[slot.id];
+  if (!c) return null;
+  return facePower(slotFace(slot, c).name);
 }
 
 // Does this rocket carry the moon cable (a NASRDA crew card on its Mooncable
@@ -688,6 +701,9 @@ function applyFlareToPlayer(state, p, flare, notesArr) {
     const survivors = [];
     for (const slot of slots) {
       if (slotRadHardness(slot) >= hit) { survivors.push(slot); continue; }
+      // Sails (Photon Heliogyro / Electric Sail / Photon Kite Sail) are immune
+      // to Flare Rolls - they ride out the flare untouched.
+      if (powerOfSlot(slot) && powerOfSlot(slot).immuneFlare) { survivors.push(slot); continue; }
       const c = PATENTS_BY_ID[slot.id];
       if (c && c.type === 'radiator' && slot.radSide !== 'light') {
         slot.radSide = 'light'; survivors.push(slot); touched++;
@@ -1326,6 +1342,10 @@ function applyMove(state, op, player) {
       if (worst > 0) {
         const survivors = [];
         for (const slot of player.rocket.stack) {
+          // Sails (Photon Heliogyro / Electric Sail / Photon Kite Sail) are
+          // immune to Belt Rolls - the belt never decommissions them.
+          const pw = powerOfSlot(slot);
+          if (pw && pw.immuneBelt) { survivors.push(slot); continue; }
           if (slotRadHardness(slot) < worst) {
             // A heavy-side radiator DEGRADES to its light side instead of being
             // destroyed - the one exception to the no-flip-after-construction
