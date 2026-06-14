@@ -1572,13 +1572,19 @@ function buildTradeColumn(title, owner, context) {
   h.textContent = title;
   col.appendChild(h);
 
-  // Aqua - the only currency, available wherever a trade is struck.
+  // Aqua - the only currency, available wherever a trade is struck. At a LEO
+  // meeting the tank water folds into aqua (1:1 at the bank), so it adds to the
+  // spendable max.
+  const atLeoRocket = owner.rocket && owner.rocket.siteId == null && owner.rocket.tankGrade !== 'dirt';
+  const leoWater = (!atSite && atLeoRocket) ? Math.floor(owner.rocket.tank || 0) : 0;
+  const aquaMax = (owner.aqua || 0) + leoWater;
   const aquaRow = document.createElement('label');
   aquaRow.className = 'mp-trade-field';
-  aquaRow.innerHTML = '<span>💧 Aqua</span>';
+  aquaRow.innerHTML = `<span>💧 Aqua${leoWater ? ` (${owner.aqua || 0} + ${leoWater} fuel)` : ''}</span>`;
   const aquaIn = document.createElement('input');
   aquaIn.type = 'number'; aquaIn.min = '0'; aquaIn.value = '0';
-  aquaIn.max = String(owner.aqua || 0);
+  aquaIn.max = String(aquaMax);
+  if (leoWater) aquaIn.title = 'At LEO, fuel in your tank counts as aqua (1:1 at the bank).';
   aquaRow.appendChild(aquaIn);
   col.appendChild(aquaRow);
 

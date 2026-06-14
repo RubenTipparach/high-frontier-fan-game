@@ -3631,11 +3631,22 @@ function sideIsEmpty(side) {
     && !side.cargoCardIds.length && !side.abilities.length;
 }
 
+// Aqua a player can spend in a trade: their bank, plus - when parked at LEO -
+// the water in their tank, which is 1:1 with aqua at the LEO bank (so at LEO
+// fuel just IS aqua, for simplicity). Dirt has no cash value, so it never
+// counts.
+function spendableAqua(player) {
+  let a = player.aqua | 0;
+  const r = player.rocket;
+  if (r && r.siteId == null && r.tankGrade !== 'dirt') a += Math.floor(r.tank || 0);
+  return a;
+}
+
 // Validate that `owner` can currently deliver everything in `side`. Returns an
 // error key, or null when the side is satisfiable. Re-run at accept time, since
 // the board may have moved since the offer was made.
 function validateTradeSide(state, owner, side) {
-  if ((owner.aqua | 0) < side.aqua) return 'insufficient_aqua';
+  if (spendableAqua(owner) < side.aqua) return 'insufficient_aqua';
   for (const id of side.handCardIds) {
     if (!(owner.hand || []).includes(id)) return 'card_not_in_hand';
   }
@@ -3682,7 +3693,16 @@ function reconcileRocketAfterTrade(player) {
 
 // Move one side's items from `giver` to `receiver`. Mutates both players.
 function executeTradeSide(giver, receiver, side) {
-  if (side.aqua) { giver.aqua = (giver.aqua | 0) - side.aqua; receiver.aqua = (receiver.aqua | 0) + side.aqua; }
+  if (side.aqua) {
+    // Pay aqua from the bank first; at LEO any shortfall comes from tank water
+    // (1:1 at the bank). The receiver always banks it as aqua.
+    let need = side.aqua;
+    const fromBank = Math.min(giver.aqua | 0, need);
+    giver.aqua = (giver.aqua | 0) - fromBank;
+    need -= fromBank;
+    if (need > 0) giver.rocket.tank = (giver.rocket.tank || 0) - need;  // LEO water-as-aqua
+    receiver.aqua = (receiver.aqua | 0) + side.aqua;
+  }
   for (const id of side.handCardIds) {
     const i = (giver.hand || []).indexOf(id);
     if (i >= 0) { giver.hand.splice(i, 1); receiver.hand.push(id); }
