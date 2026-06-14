@@ -6,6 +6,7 @@ import {
   listLobbies, listMyGames, listPublicGames, getLobby, createLobby, joinLobby, leaveLobby,
   startLobby, kickPlayer, claimInviteLink, lookupInviteLink,
   fetchGlobalChat, sendGlobalChat, getAnnouncement,
+  closeLobby, restoreLobby,
 } from './api.js';
 import { appBase } from './base.js';
 import { activeProfile, onProfileChange } from './auth.js';
@@ -542,16 +543,54 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
       turnMeta.hidden = false;
     }
     const btn = li.querySelector('button');
+    // Solo rooms (single seat) can be closed + restored by their host. The
+    // server enforces host-only + solo; the buttons only show for maxPlayers 1.
+    const isSolo = g.maxPlayers === 1;
+    const actions = li.querySelector('.row-actions');
     if (cancelled) {
       li.querySelector('.tag-cancelled').hidden = false;
-      // No recoverable terminal state for a cancelled lobby - the
-      // lobby/game rows still exist for audit but the player can't
-      // resume or review the board.
-      btn.textContent = 'Cancelled';
-      btn.disabled = true;
+      if (isSolo) {
+        // A closed solo room can be brought back.
+        btn.textContent = '♻ Restore';
+        btn.addEventListener('click', async () => {
+          const me = activeProfile();
+          if (!me) return;
+          btn.disabled = true;
+          const r = await restoreLobby(g.id, me.token);
+          if (r.ok) refreshMyGames();
+          else { btn.disabled = false; btn.textContent = 'Restore failed'; }
+        });
+      } else {
+        // Multiplayer cancelled rooms stay an audit-only terminal state.
+        btn.textContent = 'Cancelled';
+        btn.disabled = true;
+      }
     } else {
       btn.textContent = actionLabel;
       btn.addEventListener('click', () => openLobby(g.id, { join: false }));
+      if (isSolo) {
+        // Host-only delete (soft close, restorable) for solo rooms.
+        const del = document.createElement('button');
+        del.className = 'ghost danger';
+        del.title = 'Delete this solo room (you can restore it from Ended games)';
+        del.textContent = '🗑';
+        del.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const ok = await confirmDialog({
+            title: '🗑 Delete solo room',
+            body: 'Close this solo room? It moves to your Ended games, where you can Restore it later.',
+            yes: '🗑 Delete', no: 'Cancel',
+          });
+          if (!ok) return;
+          const me = activeProfile();
+          if (!me) return;
+          del.disabled = true;
+          const r = await closeLobby(g.id, me.token);
+          if (r.ok) refreshMyGames();
+          else { del.disabled = false; }
+        });
+        actions.appendChild(del);
+      }
     }
     listEl.appendChild(li);
   }

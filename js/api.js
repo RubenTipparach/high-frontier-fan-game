@@ -144,6 +144,17 @@ export async function startLobby(id, token) {
   return call('POST', `/lobbies/${id}/start`, { token });
 }
 
+// Host-only: close (soft-delete) a solo room. Marks it cancelled server-side;
+// restorable via restoreLobby. Moves the room to the player's "ended" list.
+export async function closeLobby(id, token) {
+  return call('POST', `/lobbies/${id}/close`, { token });
+}
+
+// Host-only: restore a room you previously closed (un-cancels it).
+export async function restoreLobby(id, token) {
+  return call('POST', `/lobbies/${id}/restore`, { token });
+}
+
 // ----- Invites -----
 
 export async function createInviteLink(lobbyId, { singleUse, ttlMs }, token) {

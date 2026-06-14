@@ -793,6 +793,52 @@ app.post('/lobbies/:id/leave', requireProfile, (req, res) => {
   res.json({ ok: true });
 });
 
+// Player-facing close (soft delete) of a room you host. Mirrors the admin
+// cancel: marks the lobby + its game 'cancelled' (kept for audit / restore),
+// never a hard delete. Restricted to SOLO rooms (a single member) so a host
+// can't disband a live multiplayer table from the normal UI - that stays an
+// admin action. The room moves to the player's "ended" list, restorable below.
+app.post('/lobbies/:id/close', requireProfile, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  const lobby = db.prepare('SELECT id, host_id FROM lobbies WHERE id = ?').get(id);
+  if (!lobby) return res.status(404).json({ error: 'not_found' });
+  if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
+  const members = db.prepare('SELECT COUNT(*) AS n FROM lobby_members WHERE lobby_id = ?').get(id).n;
+  if (members > 1) return res.status(409).json({ error: 'not_solo' });
+  const now = nowMs();
+  db.transaction(() => {
+    cancelLobbyInvites(id);
+    db.prepare("UPDATE lobbies SET status = 'cancelled', cancelled_at = ? WHERE id = ? AND status != 'cancelled'").run(now, id);
+    db.prepare("UPDATE games SET status = 'cancelled', finished_at = COALESCE(finished_at, ?) WHERE lobby_id = ? AND status != 'cancelled'").run(now, id);
+  })();
+  broadcast(`lobby:${id}`, { type: 'lobby_disbanded', lobbyId: id });
+  res.json({ ok: true });
+});
+
+// Player-facing restore of a room you host that was closed. Un-cancels the
+// lobby + its game so the room reappears in your active list (a cancelled game
+// row means it had started -> lobby 'started' + game 'active'; otherwise the
+// lobby goes back to 'waiting'). Mirrors the admin restore.
+app.post('/lobbies/:id/restore', requireProfile, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  const lobby = db.prepare('SELECT id, host_id, status FROM lobbies WHERE id = ?').get(id);
+  if (!lobby) return res.status(404).json({ error: 'not_found' });
+  if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
+  if (lobby.status !== 'cancelled') return res.status(409).json({ error: 'not_cancelled' });
+  db.transaction(() => {
+    const game = db.prepare("SELECT id FROM games WHERE lobby_id = ? AND status = 'cancelled'").get(id);
+    if (game) {
+      db.prepare("UPDATE games SET status = 'active', finished_at = NULL WHERE lobby_id = ? AND status = 'cancelled'").run(id);
+      db.prepare("UPDATE lobbies SET status = 'started', cancelled_at = NULL WHERE id = ?").run(id);
+    } else {
+      db.prepare("UPDATE lobbies SET status = 'waiting', cancelled_at = NULL WHERE id = ?").run(id);
+    }
+  })();
+  res.json({ ok: true });
+});
+
 // Host-only. Remove another player from the lobby while it's still
 // waiting. The kick deletes the target's membership row and re-
 // publishes the lobby, so every client (including the kicked player,
