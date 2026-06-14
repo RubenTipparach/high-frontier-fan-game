@@ -33,7 +33,7 @@ import {
   getRocketStack, isInRocket, addToStack as rocketAddCard, setRadiatorSide,
   removeFromStack as rocketRemoveCard, clearStack as rocketClearStack,
   onRocketChange, isRocketActive,
-  getActiveThrusterId, setActiveThruster, activeThrusterIsMooncable,
+  getActiveThrusterId, setActiveThruster, stackHasMoonCable,
   getTankWater, setTankWater, addFuel, removeFuel, getTankMax, getWaterCap,
   getTankGrade, setTankGrade, getActiveFuelGrade,
   getStackTotals, getActiveThrusterStats, setSolarZone, setHasPowersat,
@@ -3181,10 +3181,10 @@ function humanizeOnlineOpError(code, detail) {
     wrong_fuel_grade: 'Wrong fuel: a water thruster can only burn water, and the tank holds dirt. Dump the dirt and refuel with water.',
     not_dirt_thruster: 'Dirt refuel needs a dirt-burning thruster aboard.',
     not_at_site: 'Park at a site first - dirt comes from the ground.',
-    dirt_needs_mooncable: 'Only the NASRDA moon-cable thruster can take on dirt at LEO. Scoop at a site instead.',
+    dirt_needs_mooncable: 'Taking on dirt at LEO needs the moon cable (a NASRDA crew card aboard). Scoop at a site instead.',
     not_water_fuel: 'Dirt has no cash value - only water converts back to aqua.',
     no_thruster: 'Activate a thruster first.',
-    already_dirt_refueled: 'This crew dirt thruster already took its 1 dirt FT this turn.',
+    already_dirt_refueled: 'That dirt triangle has taken its dirt allotment this turn (7 via the moon cable, else 1).',
     not_in_outpost: 'That card is not in the outpost.',
     not_black_side: 'Only a Black-Side (installed) card can be delivered.',
     insufficient_outpost_water: 'The outpost doesn\'t have enough water to pay the delivery cost.',
@@ -8623,9 +8623,10 @@ function hasRefueledThisTurn(siteId) {
   return log.sites.includes(siteId);
 }
 
-// A crew dirt thruster may take only 1 dirt FT per turn (HF4 rule). Tracked
-// per turn in localStorage for solo; online the server's dirtRefueledThisTurn
-// flag is authoritative (and surfaced on the snapshot's player).
+// Dirt refuel is capped per turn (HF4 MOONCABLE: 7 tanks via the moon cable
+// for a non-crew dirt triangle at LEO, else 1). Tracked cumulatively on the
+// server (player.dirtTanksThisTurn, surfaced on the snapshot); the solo path
+// (frozen legacy) only records "loaded this turn" coarsely in localStorage.
 const STORAGE_DIRT_REFUEL_LOG = 'hf-sandbox-dirt-refuel-turn';   // turn number
 function hasDirtRefueledThisTurn() {
   try { return Number(localStorage.getItem(STORAGE_DIRT_REFUEL_LOG)) === getTurn(); }
@@ -8634,15 +8635,14 @@ function hasDirtRefueledThisTurn() {
 function markDirtRefueledThisTurn() {
   try { localStorage.setItem(STORAGE_DIRT_REFUEL_LOG, String(getTurn())); } catch {}
 }
-// True when the active thruster is a crew dirt thruster that has already
-// taken its 1 dirt FT this turn (online reads the snapshot, solo the log).
-function crewDirtRefuelUsed() {
-  if (!CREW_BY_ID[getActiveThrusterId()]) return false;
+// How many dirt tanks the active stack has loaded so far this turn (online
+// reads the snapshot tally; solo is coarse - 1 once it has refuelled at all).
+function dirtTanksLoadedThisTurn() {
   if (_online) {
     const me = _onlineSnapshot && (_onlineSnapshot.players || []).find((p) => p.profileId === (_onlineMe && _onlineMe.id));
-    return !!(me && me.dirtRefueledThisTurn);
+    return Number(me && me.dirtTanksThisTurn) || 0;
   }
-  return hasDirtRefueledThisTurn();
+  return hasDirtRefueledThisTurn() ? 1 : 0;
 }
 
 // Pick the best refining source available in the rocket stack.
@@ -10703,11 +10703,16 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const dirtDumpAll = panel.querySelector('#dirt-dump-all');
   const dirtHelp    = panel.querySelector('#dirt-help');
   const isCrewDirt  = !!CREW_BY_ID[getActiveThrusterId()];
-  // Dirt needs NO ISRU rig. At LEO only the NASRDA moon-cable card (the active
-  // thruster itself) can take on dirt; at a real site any active dirt thruster
-  // scoops. Keyed off the CARD, not the suspendable Mooncable privilege.
-  const hasMooncable = activeThrusterIsMooncable();
+  // Dirt needs NO ISRU rig. At LEO it takes the MOON CABLE (a NASRDA crew card
+  // aboard - need NOT be the active thruster) to pipe dirt up; at a real site
+  // any active dirt thruster scoops from the ground. Keyed off the CARD, not
+  // the suspendable Mooncable faction privilege.
+  const hasMooncable = stackHasMoonCable();
   const canScoopDirt = (atLeo && hasMooncable) || (!!getRocketSite() && !atLeo);
+  // Per-turn dirt allotment (cumulative): 7 tanks via the moon cable for a
+  // non-crew triangle at LEO, otherwise 1 (a crew triangle at LEO, or any
+  // dirt thruster scooping at a site).
+  const dirtPerTurnMax = atLeo ? (isCrewDirt ? 1 : 7) : 1;
   // Show the scoop panel whenever the tank is in DIRT MODE (dirt loaded, or
   // an empty tank under a dirt engine) so the player always sees the dirt
   // controls, not just when the dirt thruster happens to be the active
@@ -10721,13 +10726,14 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     if (!dirtSection || dirtSection.hidden) return;
     const cur = getTankWater();
     const room = Math.max(0, cap - cur);
-    const crewDone = isCrewDirt && crewDirtRefuelUsed();
-    const blocked = !activeDirt || !canScoopDirt || crewDone || room < 1;
+    const remaining = Math.max(0, dirtPerTurnMax - dirtTanksLoadedThisTurn());
+    const fillable = Math.min(remaining, room);   // tanks that can still go in
+    const allotDone = remaining < 1;
+    const blocked = !activeDirt || !canScoopDirt || fillable < 1;
     if (dirtFill1)   dirtFill1.disabled   = blocked;
-    // A crew dirt thruster takes 1 FT per turn, so +5 / Max collapse to the
-    // lone +1; a dirt-burning CARD scoops freely up to the cap.
-    if (dirtFill5)   dirtFill5.disabled   = blocked || isCrewDirt;
-    if (dirtFillMax) dirtFillMax.disabled = blocked || isCrewDirt;
+    // +5 / Max are bounded by the per-turn allotment (7 via moon cable, else 1).
+    if (dirtFill5)   dirtFill5.disabled   = blocked || fillable < 5;
+    if (dirtFillMax) dirtFillMax.disabled = blocked;
     // Dump (jettison) needs no engine: you can always vent loaded dirt, so
     // the only gate is "is there dirt to dump?".
     if (dirtDump1)   dirtDump1.disabled   = cur < 1;
@@ -10738,13 +10744,17 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         ? 'Make your dirt thruster the active engine to scoop dirt (a water engine can\'t burn it).'
         : !canScoopDirt
           ? (atLeo
-              ? 'Only the Mooncable privilege (NASRDA) can take on dirt at LEO. Park at a site to scoop.'
+              ? 'Carry the moon cable (a NASRDA crew card) to take on dirt at LEO, or park at a site to scoop from the ground.'
               : 'Park at a site to scoop dirt.')
           : room < 1
             ? 'Tank is full.'
-            : crewDone
-              ? 'This crew dirt thruster already took its 1 dirt FT this turn.'
-              : 'A dirt thruster scoops grey propellant from the ground (a crew dirt thruster takes 1 per turn). No aqua value, no ISRU needed; it can\'t mix with water or be transferred.';
+            : allotDone
+              ? (atLeo && !isCrewDirt
+                  ? 'This dirt triangle has taken its 7 dirt tanks via the moon cable this turn.'
+                  : 'This dirt thruster already took its 1 dirt tank this turn.')
+              : (atLeo && !isCrewDirt
+                  ? 'The moon cable pipes up to 7 dirt tanks this turn. No aqua value, no ISRU needed; dirt can\'t mix with water or be transferred.'
+                  : 'A dirt thruster takes 1 dirt tank per turn. No aqua value, no ISRU needed; dirt can\'t mix with water or be transferred.');
     }
   }
   refreshDirtButtons();
@@ -10754,9 +10764,9 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     const cur = getTankWater();
     if (cur > 0 && getTankGrade() === 'water') { refreshDirtButtons(); return; }
     const room = Math.max(0, cap - cur);
-    if (room < 1) { refreshDirtButtons(); return; }
-    if (isCrewDirt && crewDirtRefuelUsed()) { refreshDirtButtons(); return; }
-    const want = isCrewDirt ? 1 : (amount > 0 ? Math.min(amount, room) : room);
+    const fillable = Math.min(Math.max(0, dirtPerTurnMax - dirtTanksLoadedThisTurn()), room);
+    if (fillable < 1) { refreshDirtButtons(); return; }
+    const want = amount > 0 ? Math.min(amount, fillable) : fillable;
     // Online: the server validates the active dirt thruster + grade + scoop
     // location and fills; the snapshot repaints the grey tank.
     if (_online) {
@@ -10766,12 +10776,12 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
       return;
     }
     setTankGrade('dirt');
-    addFuel(Math.min(want, room));
-    if (isCrewDirt) markDirtRefueledThisTurn();
+    addFuel(want);
+    markDirtRefueledThisTurn();
     animateTankLevel();
     logAction({
       type: 'dirt_refuel', icon: '🟤',
-      summary: `Dirt refuel +${Math.min(want, room)} (tank ${getTankWater()} dirt)`,
+      summary: `Dirt refuel +${want} (tank ${getTankWater()} dirt)`,
       undoable: false,
     });
   };

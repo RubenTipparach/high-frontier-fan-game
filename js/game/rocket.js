@@ -460,19 +460,22 @@ export function getActiveThrusterId() {
   return _activeThrusterId;
 }
 
-// Is the ACTIVE thruster the NASRDA moon-cable crew card? Only that card can
-// take on dirt at LEO. Keyed off the CARD's installed crew face printing the
-// Mooncable bonus, NOT off the player holding the Mooncable PRIVILEGE: the
-// privilege is suspendable / negotiable, but the card's own moon-cable ability
-// rides with the card. Mirrors engine.js#isMooncableThruster.
-export function activeThrusterIsMooncable() {
-  const slot = _stack.find((s) => s.id === _activeThrusterId);
-  if (!slot) return false;
-  const crew = CREW_BY_ID[slot.id];
+// Does the stack carry the moon cable (a NASRDA crew card on its Mooncable
+// face)? The cable is what lets dirt be piped up at LEO / Home Bernal; it need
+// NOT be the active thruster, it just has to be aboard, and it refuels
+// whichever dirt thrust triangle is active (a separate non-crew dirt card
+// included). Keyed off the CARD's installed crew face printing the Mooncable
+// bonus, NOT the player's chosen faction privilege (which is negotiable /
+// suspendable). Mirrors engine.js#stackHasMoonCable.
+function slotIsMooncable(slot) {
+  const crew = slot && CREW_BY_ID[slot.id];
   if (!crew || !crew.faces) return false;
   const key = (slot.face === 'secondary' && crew.faces.secondary) ? 'secondary' : 'primary';
   const face = crew.faces[key] || crew.faces.primary;
   return !!face && String(face.bonus || '').trim().toUpperCase().replace(/\s+/g, '_') === 'MOONCABLE';
+}
+export function stackHasMoonCable() {
+  return _stack.some(slotIsMooncable);
 }
 
 export function setActiveThruster(id) {
