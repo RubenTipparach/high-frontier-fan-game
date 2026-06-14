@@ -439,6 +439,38 @@ function opposingHumanAtSite(state, siteId, actorId) {
   return false;
 }
 
+// ---- Faction privileges (the crew bonus) ----
+// The player's chosen faction face carries one privilege. privilegeOf returns
+// its KEY (e.g. 'TAXES'), or null - and null DURING ANARCHY, when every
+// faction privilege is suspended (replaced by the universal Felonious ability,
+// K2e). Keys are the printed bonus title upper-snake-cased.
+function privKey(bonus) {
+  return String(bonus || '').trim().toUpperCase().replace(/\s+/g, '_');
+}
+function privilegeOf(state, player) {
+  if (!player || !player.faction) return null;
+  if (state && state.anarchy) return null;
+  const card = CREW_BY_ID[player.faction.cardId];
+  const face = card && card.faces && card.faces[player.faction.face];
+  return face ? privKey(face.bonus) : null;
+}
+function hasPrivilege(state, player, key) {
+  return privilegeOf(state, player) === key;
+}
+function playersWithPrivilege(state, key) {
+  return (state.players || []).filter((p) => privilegeOf(state, p) === key);
+}
+// "+1 Aqua to every holder of <key>" passive-income trigger (Taxes on a claim,
+// Launch Fees on a boost). Returns gameplay notes for the op log.
+function creditPrivilegeIncome(state, key, label) {
+  const notes = [];
+  for (const p of playersWithPrivilege(state, key)) {
+    p.aqua = (p.aqua | 0) + 1;
+    notes.push(`${p.name} collected +1 aqua (${label}).`);
+  }
+  return notes;
+}
+
 
 // Operations that are GLITCH TRIGGERS (HF4 core): performing one with a
 // glitched stack forces a Glitch Roll. Movement, Boost, Income, ET Produce,
@@ -1190,8 +1222,10 @@ function applyMove(state, op, player) {
 
   const wantPay = !!op.hazardPay;
   // FINAO: pay aqua up front to skip the generic + assist rolls. Validated
-  // before anything mutates so a short balance rejects the move cleanly.
-  const finaoCost = wantPay ? rollItems.length * HAZARD_COST_PER : 0;
+  // before anything mutates so a short balance rejects the move cleanly. Open
+  // Source FINAO (Anonymous P2P) discounts the per-hazard cost to 3.
+  const finaoPer = hasPrivilege(state, player, 'OPEN_SOURCE_FINAO') ? 3 : HAZARD_COST_PER;
+  const finaoCost = wantPay ? rollItems.length * finaoPer : 0;
   if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
 
   // Commit the burn + the FINAO payment, then resolve dice in travel
@@ -1445,10 +1479,11 @@ function applyBoost(state, op, player) {
   if (!free) player.opsRemaining -= 1;
   const n = ids.length;
   const tail = free ? ' (continued boost, no operation)' : '';
-  return {
-    ok: true, state,
-    log: `${player.name} boosted ${n} card${n === 1 ? '' : 's'} to LEO for ${cost} aqua${tail}.`,
-  };
+  let log = `${player.name} boosted ${n} card${n === 1 ? '' : 's'} to LEO for ${cost} aqua${tail}.`;
+  // Launch Fees: a boost pays every Launch Fees holder +1 aqua from the pool.
+  const fees = creditPrivilegeIncome(state, 'LAUNCH_FEES', 'Launch Fees');
+  if (fees.length) log += ' ' + fees.join(' ');
+  return { ok: true, state, log };
 }
 
 // Free Market sell (rulebook I3): drop a HAND card to the bottom of
@@ -2062,10 +2097,13 @@ function applyProspect(state, op, player) {
   if (!free) player.opsRemaining -= 1;
   const verb = success ? 'struck a claim at' : 'came up dry at';
   const tail = free ? (buggyRoams ? ' with a free buggy road scan' : ' with a free raygun scan') : '';
-  return {
-    ok: true, state,
-    log: `${player.name} rolled ${roll} vs ${threshold} and ${verb} ${site.name}${tail}.`,
-  };
+  let log = `${player.name} rolled ${roll} vs ${threshold} and ${verb} ${site.name}${tail}.`;
+  // Taxes: a placed Claim pays every Taxes holder +1 aqua from the pool.
+  if (success) {
+    const tax = creditPrivilegeIncome(state, 'TAXES', 'Taxes');
+    if (tax.length) log += ' ' + tax.join(' ');
+  }
+  return { ok: true, state, log };
 }
 
 // Buggy re-roll (rulebook: the buggy may re-roll its prospect once). The
@@ -2093,10 +2131,13 @@ function applyProspectReroll(state, op, player) {
   };
   const verb = success ? 'struck a claim at' : 'came up dry at';
   const where = (site && site.name) || toSiteId;
-  return {
-    ok: true, state,
-    log: `${player.name} re-rolled the buggy: ${roll} vs ${threshold} and ${verb} ${where}.`,
-  };
+  let log = `${player.name} re-rolled the buggy: ${roll} vs ${threshold} and ${verb} ${where}.`;
+  // Taxes fire only if the re-roll newly placed a Claim (fail -> success).
+  if (success && disc.outcome !== 'success') {
+    const tax = creditPrivilegeIncome(state, 'TAXES', 'Taxes');
+    if (tax.length) log += ' ' + tax.join(' ');
+  }
+  return { ok: true, state, log };
 }
 
 // Industrialize (rulebook I7). Flip the player's claim at the parked site
@@ -2145,10 +2186,11 @@ function applyIndustrialize(state, op, player) {
   const spectral = site.spectralType || 'C';
   state.factories[siteId] = { ownerId: player.profileId, spectralType: spectral };
   player.opsRemaining -= 1;
-  return {
-    ok: true, state,
-    log: `${player.name} industrialized ${site.name} (spectral ${spectral}); decommissioned ${ids.length} card${ids.length === 1 ? '' : 's'} to hand.`,
-  };
+  let log = `${player.name} industrialized ${site.name} (spectral ${spectral}); decommissioned ${ids.length} card${ids.length === 1 ? '' : 's'} to hand.`;
+  // Taxes: industrializing a Claim also pays every Taxes holder +1 aqua.
+  const tax = creditPrivilegeIncome(state, 'TAXES', 'Taxes');
+  if (tax.length) log += ' ' + tax.join(' ');
+  return { ok: true, state, log };
 }
 
 // ET Produce (rulebook): a factory turns a hand card into an installed
@@ -3189,6 +3231,11 @@ function applyPickCrew(state, op, ctx) {
   // begins ('play'). Server-side, not derived client-side, so spectators +
   // future joiners agree on the phase.
   if (state.players.every((p) => !!p.faction)) {
+    // Secretary General: start the game with +2 Aqua. Applied once, the moment
+    // the crew draft closes (re-picks during the draft don't double it).
+    for (const sg of playersWithPrivilege(state, 'SECRETARY_GENERAL')) {
+      sg.aqua = (sg.aqua | 0) + 2;
+    }
     if (state.draftStart) {
       state.draftPhase = 'draft';
       state.activeIndex = state.firstPlayerIndex || 0;
