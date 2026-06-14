@@ -1615,6 +1615,20 @@ function onlineClaimOwner(siteId) {
   const d = _onlineSnapshot && _onlineSnapshot.discs && _onlineSnapshot.discs[siteId];
   return (d && d.outcome === 'success') ? (d.ownerId || null) : null;
 }
+// My chosen faction's privilege key (upper-snake), from the snapshot, or null.
+function myFactionPrivilege() {
+  if (!_online || !_onlineSnapshot || !_onlineMe) return null;
+  const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
+  const f = me && me.faction;
+  const card = f && CREW_BY_ID[f.cardId];
+  const face = card && card.faces && card.faces[f.face];
+  return face ? String(face.bonus || '').trim().toUpperCase().replace(/\s+/g, '_') : null;
+}
+// May I commit a felony? During Anarchy (all players) or with the Felonious
+// privilege (Taikonauts). Mirrors the engine's mayCommitFelony.
+function canCommitFelony() {
+  return isAnarchy() || myFactionPrivilege() === 'FELONIOUS';
+}
 
 // Is my rocket stack carrying a Glitch disc (Sunspot Glitch event)? Read off
 // the snapshot; solo never glitches, so it's always false there.
@@ -13827,7 +13841,7 @@ function showSitePopupFor(site) {
   // here with your own. Shown when the rocket is parked here, there's an
   // opposing success claim, and no factory holds it. The server re-checks the
   // full felony rules (your Human present, no opposing Human/colony).
-  if (_online && isAnarchy() && rocketSite && site.id === rocketSite.id) {
+  if (_online && canCommitFelony() && rocketSite && site.id === rocketSite.id) {
     const claimOwner = onlineClaimOwner(site.id);
     const mine = myOwnerId();
     if (claimOwner && claimOwner !== mine && !getFactory(site.id)) {

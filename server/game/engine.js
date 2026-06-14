@@ -2103,7 +2103,8 @@ function applyProspect(state, op, player) {
     turn: curTurn,
     round: curRound,
     // The buggy may re-roll once, this turn, by its owner.
-    canReroll: kind === 'buggy',
+    // Buggy may re-roll once; Blink Telescope (B612) grants a raygun the same.
+    canReroll: kind === 'buggy' || (kind === 'raygun' && hasPrivilege(state, player, 'BLINK_TELESCOPE')),
   };
   if (!free) player.opsRemaining -= 1;
   const verb = success ? 'struck a claim at' : 'came up dry at';
@@ -2124,7 +2125,8 @@ function applyProspectReroll(state, op, player) {
   const disc = state.discs[toSiteId];
   if (!disc) return fail('no_disc');
   if (disc.ownerId !== player.profileId) return fail('not_owner');
-  if (disc.kind !== 'buggy') return fail('not_buggy');
+  // Buggy re-rolls; a raygun re-rolls only with Blink Telescope (B612).
+  if (disc.kind !== 'buggy' && !(disc.kind === 'raygun' && hasPrivilege(state, player, 'BLINK_TELESCOPE'))) return fail('not_buggy');
   if (!disc.canReroll) return fail('already_rerolled');
   if (disc.turn !== state.turn) return fail('reroll_window_closed');
   const site = siteById(toSiteId);
@@ -2293,6 +2295,12 @@ function applySiteRefuel(state, op, player) {
     if (!(isru >= 0 && isru <= water)) return fail('isru_too_high');
     rawGain = 1 + water - isru;
     label = 'ISRU Refuel';
+  }
+  // Dharma Refuel (ISRO): while you carry a glory chit, a colocated site
+  // refuel yields double.
+  if (hasPrivilege(state, player, 'DHARMA_REFUEL') && (player.glory && (player.glory.chits || []).length)) {
+    rawGain *= 2;
+    label += ' (Dharma x2)';
   }
   const gain = Math.min(rawGain, cap - tank);
   if (gain <= 0) return fail('tank_full');
