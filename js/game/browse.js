@@ -1795,58 +1795,73 @@ function tradeSideText(side) {
   return parts.length ? parts.join(' + ') : 'nothing';
 }
 
-// Snapshot-driven pending-trade overlay. Shows a docked card to the two
-// parties; non-parties are not interrupted (the deal shows in the log).
-function renderOnlineTrade(trade) {
-  const existing = document.getElementById('mp-trade-overlay');
-  const myId = _onlineMe && _onlineMe.id;
-  const amParty = trade && (trade.initiatorId === myId || trade.partnerId === myId);
-  if (!trade || !_online || !gameViewVisible() || !amParty) {
-    if (existing) existing.remove();
-    // A trade that closed (accepted/declined) drops a stale builder too.
-    if (!trade) closeTradeBuilder();
-    return;
+// One side of a deal as DOM, with each card name a button that previews the
+// full card. Aqua / fuel / abilities render as plain text chips.
+function tradeSideEl(side) {
+  const el = document.createElement('span');
+  el.className = 'mp-trade-side';
+  const nodes = [];
+  if (side.aqua) nodes.push(document.createTextNode(`${side.aqua} aqua`));
+  if (side.water) nodes.push(document.createTextNode(`${side.water} fuel`));
+  for (const id of (side.handCardIds || []).concat(side.cargoCardIds || [])) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'mp-trade-cardname'; b.textContent = cardLabel(id);
+    b.title = 'View the full card';
+    b.addEventListener('click', () => openCardPreview(id));
+    nodes.push(b);
   }
-  const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
+  for (const g of (side.abilities || [])) {
+    nodes.push(document.createTextNode(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`));
+  }
+  if (!nodes.length) { el.appendChild(document.createTextNode('nothing')); return el; }
+  nodes.forEach((n, i) => { if (i) el.appendChild(document.createTextNode(' + ')); el.appendChild(n); });
+  return el;
+}
+
+// The in-panel trade negotiation view (rendered by renderMpPanel when a trade
+// involves me). Shows the deal + accept / counter / decline; the table chat
+// below the panel doubles as the negotiation channel.
+function renderMpTradeBlock(snapshot, host) {
+  const trade = snapshot.trade;
+  const myId = _onlineMe && _onlineMe.id;
   const myRole = trade.initiatorId === myId ? 'initiator' : 'partner';
   const otherId = myRole === 'initiator' ? trade.partnerId : trade.initiatorId;
-  const other = players.find((p) => p.profileId === otherId);
+  const other = (snapshot.players || []).find((p) => p.profileId === otherId);
   // Stored give/receive are initiator-perspective; flip for the partner.
   const myGive = myRole === 'initiator' ? trade.give : trade.receive;
   const myReceive = myRole === 'initiator' ? trade.receive : trade.give;
   const myMove = trade.awaiting === myRole;
 
-  let overlay = existing;
-  if (!overlay) {
-    overlay = document.createElement('div');
-    overlay.id = 'mp-trade-overlay';
-    overlay.className = 'mp-trade-overlay';
-    document.body.appendChild(overlay);
-  }
-  overlay.innerHTML = '';
-  const card = document.createElement('div');
-  card.className = 'mp-trade-card';
+  const block = document.createElement('div');
+  block.className = 'mp-trade-block';
   const h = document.createElement('div');
-  h.className = 'mp-trade-card-head';
+  h.className = 'mp-trade-block-head';
   const who = document.createElement('span');
   who.className = 'player-name';
   if (other && other.color) who.style.setProperty('--player-color', other.color);
   who.textContent = other ? '@' + other.name : 'the other player';
   h.append(document.createTextNode('🤝 Trade with '), who);
-  card.appendChild(h);
+  block.appendChild(h);
 
-  const body = document.createElement('div');
-  body.className = 'mp-trade-card-body';
-  body.innerHTML =
-    `<div><b>You give:</b> ${tradeSideText(myGive)}</div>`
-    + `<div><b>You receive:</b> ${tradeSideText(myReceive)}</div>`;
-  card.appendChild(body);
+  const deal = document.createElement('div');
+  deal.className = 'mp-trade-deal';
+  const mkRow = (label, side) => {
+    const row = document.createElement('div');
+    row.className = 'mp-trade-deal-row';
+    const l = document.createElement('span');
+    l.className = 'mp-trade-deal-label';
+    l.textContent = label;
+    row.append(l, tradeSideEl(side));
+    return row;
+  };
+  deal.append(mkRow('You give', myGive), mkRow('You receive', myReceive));
+  block.appendChild(deal);
 
   const status = document.createElement('div');
   status.className = 'muted mp-trade-status';
   status.textContent = myMove ? 'Your move - accept, counter, or decline.'
     : `Waiting for ${other ? '@' + other.name : 'the other player'}…`;
-  card.appendChild(status);
+  block.appendChild(status);
 
   const btns = document.createElement('div');
   btns.className = 'mp-trade-btns';
@@ -1867,8 +1882,40 @@ function renderOnlineTrade(trade) {
     withdraw.addEventListener('click', () => submitMpTradeOp({ kind: 'TRADE_DECLINE' }));
     btns.append(withdraw);
   }
-  card.appendChild(btns);
-  overlay.appendChild(card);
+  block.appendChild(btns);
+
+  const hint = document.createElement('div');
+  hint.className = 'muted mp-trade-chat-hint';
+  hint.textContent = '💬 Negotiate in the table chat below.';
+  block.appendChild(hint);
+
+  host.appendChild(block);
+}
+
+// Snapshot-driven trade reachability. The negotiation view itself lives in the
+// Multiplayer panel (renderMpPanel). This just keeps a turn-bar shortcut so a
+// player on another pane can jump to the open trade, and cleans up a stale
+// builder when the deal closes. No auto pane switch (the shortcut is a click).
+function renderOnlineTrade(trade) {
+  const old = document.getElementById('mp-trade-overlay');
+  if (old) old.remove();
+  const myId = _onlineMe && _onlineMe.id;
+  const amParty = trade && (trade.initiatorId === myId || trade.partnerId === myId);
+  if (!trade || !_online || !gameViewVisible() || !amParty) {
+    setMpTurnAction('trade', null);
+    if (!trade) closeTradeBuilder();
+    return;
+  }
+  const myRole = trade.initiatorId === myId ? 'initiator' : 'partner';
+  const myMove = trade.awaiting === myRole;
+  const panel = document.getElementById('browse-sidepanel');
+  const onMpPane = panel && panel.dataset.active === 'mp';
+  setMpTurnAction('trade', onMpPane ? null : {
+    label: '🤝 Trade',
+    meta: myMove ? 'your move' : 'awaiting reply',
+    needsAction: myMove,
+    onClick: () => showPane('mp'),
+  });
 }
 
 // ----- first-player handoff overlay (round-end) -----
@@ -3198,20 +3245,6 @@ function renderMpPanel(snapshot) {
     });
     row.appendChild(startBtn);
   }
-  // Trade: a free, both-consent deal you can open at any point (on or off your
-  // turn). Enabled whenever there is a partner and no auction / open trade.
-  if (!_spectator && players.length > 1) {
-    const tradeBtn = document.createElement('button');
-    tradeBtn.type = 'button';
-    tradeBtn.className = 'mp-leave mp-trade-open';
-    tradeBtn.textContent = '🤝 Trade';
-    tradeBtn.disabled = !!snapshot.auction || !!snapshot.trade;
-    tradeBtn.title = snapshot.auction ? 'Finish the auction first'
-      : snapshot.trade ? 'A trade is already open'
-      : 'Propose a deal with another player (free, needs both players to agree)';
-    tradeBtn.addEventListener('click', () => openTradeBuilder());
-    row.appendChild(tradeBtn);
-  }
   const myTurn = !!(active && active.profileId === myId);
   const turn = document.createElement('div');
   turn.className = 'mp-turn' + (myTurn ? ' mp-your-turn' : '');
@@ -3223,6 +3256,15 @@ function renderMpPanel(snapshot) {
   clock.textContent = `Turn ${formatTurnNumber(snapshot.round, snapshot.turn, snapshot.maxRounds)} · slot ${(snapshot.turn | 0) + 1}/12`;
   head.append(row, turn, clock);
   tableEl.appendChild(head);
+
+  // An open trade I'm part of takes over the panel: the deal + accept /
+  // counter / decline lands here (the table chat below doubles as the
+  // negotiation channel), instead of the roster.
+  if (snapshot.trade
+      && (snapshot.trade.initiatorId === myId || snapshot.trade.partnerId === myId)) {
+    renderMpTradeBlock(snapshot, tableEl);
+    return;
+  }
 
   if (_deckPickerOpen && canStartAuction) {
     const picker = document.createElement('div');
@@ -3303,6 +3345,24 @@ function renderMpPlayer(p, isMe, isActive) {
   const headRow = document.createElement('div');
   headRow.className = 'mp-player-headrow';
   headRow.append(head, cardsBtn);
+  // Per-player Trade button: propose a deal directly with this player. Hidden
+  // for myself + spectators; disabled while an auction or another trade is open.
+  if (!isMe && !_spectator) {
+    const snap = _onlineSnapshot;
+    const tradeBtn = document.createElement('button');
+    tradeBtn.type = 'button';
+    tradeBtn.className = 'mp-player-trade';
+    tradeBtn.textContent = '🤝';
+    tradeBtn.disabled = !!(snap && (snap.auction || snap.trade));
+    tradeBtn.title = (snap && snap.auction) ? 'Finish the auction first'
+      : (snap && snap.trade) ? 'A trade is already open'
+      : `Propose a trade with @${p.name}`;
+    tradeBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      openTradeBuilder({ partnerId: p.profileId });
+    });
+    headRow.append(tradeBtn);
+  }
   // Crew-ability badges: this player's own faction power plus any borrowed
   // through a trade (timed grants show a turn counter, permanent ones a lock).
   const badges = renderAbilityBadges(p);

@@ -1238,6 +1238,23 @@ function dispatchTurnNotifications(gameId, kind, state) {
         if (dmOn) notifyProfile(active.profileId, 'turn', `🛸 It's your turn in **${name}**.${jump}`);
         notifyWebhook(`🛸 ${active.name || 'A player'}'s turn in **${name}**.${jump}`);
       }
+    } else if (kind === 'TRADE_OFFER' || kind === 'TRADE_COUNTER') {
+      // A trade offer / counter just landed: ping the player now on the clock
+      // (the awaiting party) so they can accept, counter, or decline. DM under
+      // the 'turn' pref (it's a "your move" nudge), plus a channel post.
+      const t = state.trade;
+      if (t) {
+        const awaitingId = t.awaiting === 'initiator' ? t.initiatorId : t.partnerId;
+        const fromId = t.awaiting === 'initiator' ? t.partnerId : t.initiatorId;
+        const awaiting = state.players.find((p) => p.profileId === awaitingId);
+        const from = state.players.find((p) => p.profileId === fromId);
+        const verb = kind === 'TRADE_OFFER' ? 'offered you a trade' : 'sent a counteroffer';
+        const cverb = kind === 'TRADE_OFFER' ? 'offered a trade' : 'sent a counteroffer';
+        if (awaiting) {
+          if (dmOn) notifyProfile(awaiting.profileId, 'turn', `🤝 ${from ? from.name : 'A player'} ${verb} in **${name}**.${jump}`);
+          notifyWebhook(`🤝 ${from ? from.name : 'A player'} ${cverb} to ${awaiting.name || 'a player'} in **${name}**.${jump}`);
+        }
+      }
     } else if (kind === 'AUCTION_START') {
       const auctioneer = state.auction && state.auction.auctioneerId;
       if (dmOn) {

@@ -7829,3 +7829,40 @@ body:has(#view-browse:not(.hidden)) #main {
   transform: scale(1.2);
   filter: drop-shadow(0 18px 50px rgba(0, 0, 0, 0.6));
 }
+
+/* Per-player Trade button (sits next to the 📚 cards button in the roster). */
+.mp-player-trade {
+  flex: 0 0 auto;
+  border: 0;
+  border-left: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink-mute);
+  font-size: 14px;
+  padding: 0 11px;
+  cursor: pointer;
+}
+.mp-player-trade:hover:not(:disabled) { background: rgba(255, 255, 255, 0.06); color: var(--ink); }
+.mp-player-trade:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* In-panel trade negotiation block (shown in the Multiplayer panel when a
+   trade involves me, in place of the roster). */
+.mp-trade-block {
+  border: 1px solid #2f6f5c;
+  background: rgba(80, 200, 160, 0.08);
+  border-radius: 10px;
+  padding: 12px;
+  margin: 8px 0;
+}
+.mp-trade-block-head { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+.mp-trade-deal { display: flex; flex-direction: column; gap: 6px; }
+.mp-trade-deal-row { font-size: 13px; line-height: 1.5; }
+.mp-trade-deal-label {
+  display: inline-block;
+  min-width: 86px;
+  color: var(--ink-dim, #8b90b8);
+  font-weight: 600;
+}
+.mp-trade-side .mp-trade-cardname { font-size: 13px; }
+.mp-trade-status { font-size: 12px; margin: 8px 0; }
+.mp-trade-chat-hint { font-size: 11px; margin-top: 6px; }
+.mp-trade-block .mp-trade-btns { justify-content: flex-start; margin-top: 8px; }

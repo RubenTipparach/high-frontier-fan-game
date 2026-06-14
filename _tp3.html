@@ -1,0 +1,64 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="/css/style.css">
+<link rel="stylesheet" href="/css/map.css">
+<style> body{ background:#0a0913; margin:0; padding:20px; font-family:sans-serif;} .stage{display:flex; gap:24px; align-items:flex-start;} .col{width:300px;} .label{color:#8b90b8; font:12px sans-serif; margin:8px 0;} #mp-panel{ background:#0d0c18; border:1px solid #2a2740; border-radius:12px; padding:12px;}</style>
+</head><body>
+<div class="stage">
+  <div class="col">
+    <div class="label">Roster: per-player 🤝 Trade button</div>
+    <div id="mp-panel">
+      <div id="mp-table">
+        <div class="mp-head"><div class="mp-head-row"><div class="mp-room">heckin-frontier</div></div><div class="mp-turn mp-your-turn">Your turn</div><div class="muted mp-clock">Turn 4.6/5 · slot 6/12</div></div>
+        <div class="mp-roster">
+          <div class="mp-player mp-active">
+            <div class="mp-player-headrow">
+              <button class="mp-player-head"><span class="dot" style="background:#fccc00"></span><span class="mp-name player-name" style="--player-color:#fccc00">@ruben (you)</span><span class="mp-stats">📍LEO · 💧6 · 1vp</span></button>
+              <button class="mp-player-cards">📚</button>
+            </div>
+            <div class="mp-ability-badges"><span class="mp-ability own">Felonious</span></div>
+          </div>
+          <div class="mp-player">
+            <div class="mp-player-headrow">
+              <button class="mp-player-head"><span class="dot" style="background:#88c0d0"></span><span class="mp-name player-name" style="--player-color:#88c0d0">@Lawton</span><span class="mp-stats">📍Dione · 💧9 · 4vp</span></button>
+              <button class="mp-player-cards">📚</button>
+              <button class="mp-player-trade" title="Propose a trade with @Lawton">🤝</button>
+            </div>
+            <div class="mp-ability-badges"><span class="mp-ability own">Mooncable</span><span class="mp-ability borrowed">Dharma Refuel ·2t</span></div>
+          </div>
+          <div class="mp-player">
+            <div class="mp-player-headrow">
+              <button class="mp-player-head"><span class="dot" style="background:#bf616a"></span><span class="mp-name player-name" style="--player-color:#bf616a">@avatar8481</span><span class="mp-stats">📍Badenia · 💧5 · 3vp</span></button>
+              <button class="mp-player-cards">📚</button>
+              <button class="mp-player-trade" title="Propose a trade with @avatar8481">🤝</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="label">Incoming trade shown in the panel</div>
+    <div id="mp-panel">
+      <div id="mp-table">
+        <div class="mp-head"><div class="mp-head-row"><div class="mp-room">heckin-frontier</div></div><div class="mp-turn">@Lawton's turn</div><div class="muted mp-clock">Turn 4.6/5 · slot 6/12</div></div>
+        <div class="mp-trade-block">
+          <div class="mp-trade-block-head">🤝 Trade with <span class="player-name" style="--player-color:#88c0d0">@Lawton</span></div>
+          <div class="mp-trade-deal">
+            <div class="mp-trade-deal-row"><span class="mp-trade-deal-label">You give</span><span class="mp-trade-side">3 aqua + <button class="mp-trade-cardname">Brayton Turbine</button></span></div>
+            <div class="mp-trade-deal-row"><span class="mp-trade-deal-label">You receive</span><span class="mp-trade-side"><button class="mp-trade-cardname">Ion Drive</button> + Dharma Refuel (3 turns)</span></div>
+          </div>
+          <div class="muted mp-trade-status">Your move - accept, counter, or decline.</div>
+          <div class="mp-trade-btns"><button class="modal-btn primary">✅ Accept</button><button class="modal-btn">↔ Counter</button><button class="modal-btn">🚫 Decline</button></div>
+          <div class="muted mp-trade-chat-hint">💬 Negotiate in the table chat below.</div>
+        </div>
+      </div>
+      <div id="mp-chat" style="margin-top:8px;border-top:1px solid #2a2740;padding-top:8px;">
+        <div class="mp-detail-label">Table chat</div>
+        <ul class="mp-chat-list"><li class="mp-chat-msg"><span class="mp-chat-who player-name" style="--player-color:#88c0d0">@Lawton</span> <span class="mp-chat-body">give me the ion drive and it's a deal</span></li></ul>
+      </div>
+    </div>
+  </div>
+</div>
+</body></html>
