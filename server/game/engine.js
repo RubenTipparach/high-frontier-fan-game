@@ -44,7 +44,7 @@ import { blackStepsBetween, walkBlackDown } from '../../data/fuel-graph.js';
 // engine reads them so the liftoff/landing gate uses the FINAL net thrust,
 // not the printed base value.
 import { weightClassForMass } from '../../data/net-thrust-track.js';
-import { SOLAR_ZONE_INFO } from '../../data/sites.js';
+import { SOLAR_ZONE_INFO, adjacentSites } from '../../data/sites.js';
 import { ZONE_CHIT_VPS } from '../../data/zone-chits.js';
 // Movement + metadata both come from the planner graph (the vendor
 // mission-planner data the client also uses). siteBySlug layers the
@@ -190,6 +190,27 @@ function powerOfSlot(slot) {
 // Saturn / Uranus / Neptune) all carry it. Drives SCOOP aerostat-only powers.
 function isAerostatSite(site) {
   return !!(site && /aerostat/i.test(String(site.id || '')));
+}
+
+// Does this player carry an Atmospheric Scoop (SCOOP power)? Carried in the
+// rocket stack.
+function playerHasAtmoScoop(player) {
+  return !!(player && player.rocket && (player.rocket.stack || []).some((s) => {
+    const pw = powerOfSlot(s);
+    return pw && pw.aerostatHydration2;
+  }));
+}
+
+// Effective hydration of a site for a player's prospect / refuel (subsystem 5).
+// Atmospheric Scoop (SCOOP) makes an aerostat site COLOCATED with or ADJACENT
+// to the scoop count as hydration 2. The scoop rides the rocket, so colocated =
+// the rocket parked at the site, adjacent = parked one map edge away.
+function effectiveHydration(site, player) {
+  const base = Number.isFinite(site && site.hydration) ? site.hydration : 0;
+  if (!isAerostatSite(site) || !playerHasAtmoScoop(player)) return base;
+  const here = player.rocket.siteId;
+  const near = here === site.id || adjacentSites(here).has(site.id);
+  return near ? Math.max(base, 2) : base;
 }
 
 // Does this rocket carry the moon cable (a NASRDA crew card on its Mooncable
@@ -1460,6 +1481,48 @@ function applyMove(state, op, player) {
     }
   }
 
+  // Project Valkyrie purge (subsystem 6): firing a thruster powered by a
+  // Valkyrie reactor irradiates the stack - decommission colocated cards with
+  // rad-hardness below its threshold. Fires on the burn (this move) only when
+  // Valkyrie is actually in the active thruster's support chain. Self-limiting:
+  // once the low-rad cards are gone, later moves find nothing.
+  const valkyriePurged = [];
+  if (!destroyed && player.rocket.activeThrusterId) {
+    const vchain = resolveSupportChain({
+      cards: chainCardsFromRocket(player.rocket),
+      activeId: player.rocket.activeThrusterId,
+      wiring: player.rocket.wiring || {},
+    });
+    let purgeBelow = 0;
+    for (const cid of vchain.order) {
+      const s = player.rocket.stack.find((x) => x.id === cid);
+      const pw = s && powerOfSlot(s);
+      if (pw && pw.purgeOnActivateRadHardBelow) purgeBelow = Math.max(purgeBelow, pw.purgeOnActivateRadHardBelow);
+      // Li / Thermochemical Heatsink Fountain (subsystem 7): a heavy heatsink
+      // radiator that COOLED the chain this burn switches to its light side
+      // after its first use.
+      if (pw && pw.switchToLightAfterUse && s && s.radSide !== 'light') s.radSide = 'light';
+    }
+    if (purgeBelow > 0) {
+      const kept = [];
+      for (const slot of player.rocket.stack) {
+        if (slotRadHardness(slot) < purgeBelow) {
+          valkyriePurged.push(cardNameOf(slot.id));
+          if (isCrewSlot(slot)) (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+          else player.hand.push(slot.id);
+        } else {
+          kept.push(slot);
+        }
+      }
+      if (valkyriePurged.length) {
+        player.rocket.stack = kept;
+        if (player.rocket.activeThrusterId && !kept.some((s) => s.id === player.rocket.activeThrusterId)) player.rocket.activeThrusterId = null;
+        if (player.rocket.activeProspectorId && !kept.some((s) => s.id === player.rocket.activeProspectorId)) player.rocket.activeProspectorId = null;
+        clipTank(player.rocket);
+      }
+    }
+  }
+
   if (destroyed) {
     // The ship is lost at haltSlug; cards scatter, rocket recalls to LEO.
     const where = siteById(haltSlug);
@@ -1533,6 +1596,7 @@ function applyMove(state, op, player) {
   if (decommissioned.length) log += ` Radiation decommissioned ${decommissioned.length} card${decommissioned.length === 1 ? '' : 's'}.`;
   if (degradedRadiators.length) log += ` Radiation degraded ${degradedRadiators.length} radiator${degradedRadiators.length === 1 ? '' : 's'} to its light side.`;
   if (sailDecommissioned.length) log += ` Aerobraking burned off ${sailDecommissioned.join(', ')} (decommissioned to hand).`;
+  if (valkyriePurged.length) log += ` Project Valkyrie irradiated the stack: ${valkyriePurged.join(', ')} decommissioned (rad-hard < 4).`;
   if (bonusBurns) log += ` Mag Sail rode ${bonusBurns} radiation belt${bonusBurns === 1 ? '' : 's'} for a free burn each.`;
   if (chit) log += ` First into the ${chit.zone} zone (+glory chit).`;
   if (homeScored) {
@@ -2234,7 +2298,8 @@ function applyProspect(state, op, player) {
   const colocatedPowers = player.rocket.stack.map(powerOfSlot);
   const isruMod = sumColocatedIsruMod(colocatedPowers, { isAerostat: isAerostatSite(site) });
   const effIsru = Math.max(0, prospectorIsru(provSlot) + isruMod);   // isruMod <= 0 (easier), floored at 0
-  if (effIsru > (site.hydration | 0)) return fail('isru_too_high');
+  // Atmospheric Scoop (subsystem 5) can raise an aerostat site to hydration 2.
+  if (effIsru > (effectiveHydration(site, player) | 0)) return fail('isru_too_high');
 
   // Prospecting is one operation to BEGIN: the first prospect of the turn
   // (any kind) spends the operation. Once begun, a raygun's line-of-sight scan
@@ -2503,7 +2568,8 @@ function applySiteRefuel(state, op, player) {
   const site = siteById(siteId);
   if (!site) return fail('unknown_site');
   if (player.rocket.siteId !== siteId) return fail('not_at_site');
-  const water = Number.isFinite(site.hydration) ? site.hydration : 0;
+  // Atmospheric Scoop (subsystem 5) can raise an aerostat site to hydration 2.
+  const water = effectiveHydration(site, player);
   if (water <= 0) return fail('dry_site');
   if (player.opsRemaining <= 0) return fail('no_ops_left');
   player.refueledSites = Array.isArray(player.refueledSites) ? player.refueledSites : [];
@@ -2538,6 +2604,12 @@ function applySiteRefuel(state, op, player) {
   if (hasPrivilege(state, player, 'DHARMA_REFUEL') && (player.glory && (player.glory.chits || []).length)) {
     rawGain *= 2;
     label += ' (Dharma x2)';
+  }
+  // SCAVENGING (Femtochemistry): a colocated card doubles FTs during site
+  // refuel.
+  if (player.rocket.stack.some((s) => { const pw = powerOfSlot(s); return pw && pw.doubleSiteRefuel; })) {
+    rawGain *= 2;
+    label += ' (Scavenging x2)';
   }
   const gain = Math.min(rawGain, cap - tank);
   if (gain <= 0) return fail('tank_full');

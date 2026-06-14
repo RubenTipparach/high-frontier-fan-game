@@ -8676,7 +8676,13 @@ function dirtTanksLoadedThisTurn() {
 // a refuel source. The flat +7 refuel is Factory-only (I5b), and
 // requires a built factory at the site.
 function pickRefiningSource(site) {
-  const water = Number.isFinite(site.hydration) ? site.hydration : 0;
+  // Atmospheric Scoop (subsystem 5): an aerostat site you're parked at (refuel
+  // is always colocated) counts as hydration 2. Adjacency is server-side only.
+  const isAerostat = /aerostat/i.test(String(site.id || ''));
+  const baseWater = Number.isFinite(site.hydration) ? site.hydration : 0;
+  const water = (isAerostat && stackHasPower('aerostatHydration2')) ? Math.max(baseWater, 2) : baseWater;
+  // SCAVENGING (Femtochemistry): a colocated card doubles refuel FTs.
+  const scavenge = stackHasPower('doubleSiteRefuel') ? 2 : 1;
   // ISRU rig path: the active prospector with an ISRU rating (0 or
   // more), supports met, and ISRU <= site hydration so the
   // 1 + hydration - ISRU formula gives at least 1 water.
@@ -8684,12 +8690,11 @@ function pickRefiningSource(site) {
   if (prosp && prosp.canActivate) {
     // Colocated ISRU modifier (subsystem 3): lower the rig's effective ISRU
     // (floored at 0), matching the server refuel yield.
-    const isAerostat = /aerostat/i.test(String(site.id || ''));
     const isru = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat }));
     // ISRU 0 is a valid rig (gain = 1 + water), so it refuels anywhere the
     // gate ISRU <= water allows - which for 0 is every site.
     if (isru >= 0 && isru <= water) {
-      return { kind: 'isru', card: prosp.card, name: prosp.name, rawGain: 1 + water - isru, isru };
+      return { kind: 'isru', card: prosp.card, name: prosp.name, rawGain: (1 + water - isru) * scavenge, isru };
     }
   }
   return null;
@@ -10963,7 +10968,10 @@ function doProspect(site, prosp) {
   // enabled with a stale read. Includes the colocated ISRU modifier.
   const isAerostatSiteHere = /aerostat/i.test(String(site.id || ''));
   const prospIsru = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat: isAerostatSiteHere }));
-  const siteWater = Number.isFinite(site.hydration) ? site.hydration : 0;
+  const rSite = getRocketSite();
+  const colocScoopHere = isAerostatSiteHere && rSite && rSite.id === site.id && stackHasPower('aerostatHydration2');
+  const baseWaterHere = Number.isFinite(site.hydration) ? site.hydration : 0;
+  const siteWater = colocScoopHere ? Math.max(baseWaterHere, 2) : baseWaterHere;
   if (prospIsru > siteWater) {
     setStatus(
       `Prospect blocked: <em>${esc(prosp.name || '')}</em> needs site water ≥ `
@@ -13673,7 +13681,11 @@ function showSitePopupFor(site) {
     // is never rejected.
     const isAerostat  = /aerostat/i.test(String(site.id || ''));
     const prospIsru   = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat }));
-    const siteWater   = Number.isFinite(site.hydration) ? site.hydration : 0;
+    // Atmospheric Scoop (subsystem 5): an aerostat site you're parked at counts
+    // as hydration 2 (colocated; adjacency is server-side only).
+    const colocScoop  = isAerostat && rocketSite && rocketSite.id === site.id && stackHasPower('aerostatHydration2');
+    const baseWater   = Number.isFinite(site.hydration) ? site.hydration : 0;
+    const siteWater   = colocScoop ? Math.max(baseWater, 2) : baseWater;
     const isruOk      = prospIsru <= siteWater;
     const ok = check.ok && supportsOk && isruOk;
     const kindGlyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prosp.kind] || '🔬';
