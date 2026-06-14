@@ -460,6 +460,13 @@ function hasPrivilege(state, player, key) {
 function playersWithPrivilege(state, key) {
   return (state.players || []).filter((p) => privilegeOf(state, p) === key);
 }
+// May this player commit a Felony? Yes during Anarchy (everyone gains
+// Felonious, K2e), OR if they hold the Felonious privilege (Taikonauts) the
+// rest of the time. (Anarchy suspends privilegeOf, but state.anarchy covers
+// that case directly.)
+function mayCommitFelony(state, player) {
+  return !!state.anarchy || hasPrivilege(state, player, 'FELONIOUS');
+}
 // "+1 Aqua to every holder of <key>" passive-income trigger (Taxes on a claim,
 // Launch Fees on a boost). Returns gameplay notes for the op log.
 function creditPrivilegeIncome(state, key, label) {
@@ -523,16 +530,20 @@ function resolveGlitchTrigger(state, profileId) {
 function autoFixGlitches(state) {
   const notes = [];
   for (const p of state.players) {
+    // Scrum Troubleshooters (Norse): repair Glitches anywhere, even with no
+    // Human present.
+    const scrum = hasPrivilege(state, p, 'SCRUM_TROUBLESHOOTERS');
+    const fixWord = scrum ? 'cleared remotely (Scrum Troubleshooters)' : 'fixed by nearby humans';
     if (p.rocket.glitch
-        && (stackHasCrew(p.rocket.stack) || humansAtSite(state, p.rocket.siteId))) {
+        && (scrum || stackHasCrew(p.rocket.stack) || humansAtSite(state, p.rocket.siteId))) {
       p.rocket.glitch = false;
-      notes.push(`${p.name}'s rocket glitch was fixed by nearby humans.`);
+      notes.push(`${p.name}'s rocket glitch was ${fixWord}.`);
     }
     for (const o of Object.values(p.outposts || {})) {
       if (o && o.glitch
-          && (stackHasCrew(o.cards) || humansAtSite(state, o.siteId))) {
+          && (scrum || stackHasCrew(o.cards) || humansAtSite(state, o.siteId))) {
         o.glitch = false;
-        notes.push(`${p.name}'s Outpost ${o.letter} glitch was fixed by nearby humans.`);
+        notes.push(`${p.name}'s Outpost ${o.letter} glitch was ${fixWord}.`);
       }
     }
   }
@@ -1797,7 +1808,7 @@ function applyDecommission(state, op, player) {
     // Anarchy it's allowed (Felonious privilege, G6) and the crew returns to
     // the LEO Stack rather than the patent hand (crew aren't hand cards).
     if (isCrewSlot(slot)) {
-      if (!state.anarchy || from === 'leo') { blocked++; continue; }
+      if (!mayCommitFelony(state, player) || from === 'leo') { blocked++; continue; }
       src.splice(idx, 1);
       (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face === 'secondary' ? 'secondary' : 'primary' });
       if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
@@ -1828,7 +1839,7 @@ function applyClaimJump(state, op, player) {
   const siteId = String(op.siteId || '');
   const site = siteById(siteId);
   if (!site) return fail('unknown_site');
-  if (!state.anarchy) return fail('felonies_not_allowed');
+  if (!mayCommitFelony(state, player)) return fail('felonies_not_allowed');
   const disc = state.discs[siteId];
   if (!disc || disc.outcome !== 'success') return fail('no_claim_here');
   if (disc.ownerId === player.profileId) return fail('already_your_claim');
@@ -1837,7 +1848,7 @@ function applyClaimJump(state, op, player) {
   if (opposingHumanAtSite(state, siteId, player.profileId)) return fail('claim_defended');
   const prev = state.players.find((p) => p.profileId === disc.ownerId);
   disc.ownerId = player.profileId;
-  const log = `${player.name} claim-jumped ${site.name}${prev ? ` from ${prev.name}` : ''} (Felony, Anarchy).`;
+  const log = `${player.name} claim-jumped ${site.name}${prev ? ` from ${prev.name}` : ''} (Felony).`;
   pushNews(state, '\u{1F5FD}', log);
   return { ok: true, state, log };
 }
@@ -2209,7 +2220,7 @@ function applyEtProduce(state, op, player) {
     // Factory Hijack (Felony, N6a): ET-produce at an opponent's Factory during
     // Anarchy, with your own Human colocated, unless an opposing Human or
     // colony defends it. The product still lands in YOUR outpost here.
-    if (!state.anarchy) return fail('not_your_factory');
+    if (!mayCommitFelony(state, player)) return fail('not_your_factory');
     if (!actorCrewAtSite(state, siteId, player.profileId)) return fail('felony_needs_human');
     if (opposingHumanAtSite(state, siteId, player.profileId)) return fail('factory_defended');
   }
