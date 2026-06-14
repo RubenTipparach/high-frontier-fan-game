@@ -1405,6 +1405,30 @@ function applyMove(state, op, player) {
   state.rng.cursor = gen.cursor;
   player.movesRemaining -= 1;
 
+  // Sail aerobrake decommission: a sail (Photon Heliogyro / Electric Sail /
+  // Photon Kite Sail / Mag Sail) burns off if the stack passes ANY aerobrake
+  // hazard on this move. Decommissioned back to hand. (Skipped if the ship was
+  // destroyed - the whole stack is already gone.)
+  const sailDecommissioned = [];
+  if (!destroyed && generic.some((s) => hazardKind(s) === 'aero')) {
+    const kept = [];
+    for (const slot of player.rocket.stack) {
+      const pw = powerOfSlot(slot);
+      if (pw && pw.aerobrakeDecommission) {
+        sailDecommissioned.push(cardNameOf(slot.id));
+        player.hand.push(slot.id);   // sails are patents -> back to hand
+      } else {
+        kept.push(slot);
+      }
+    }
+    if (sailDecommissioned.length) {
+      player.rocket.stack = kept;
+      if (player.rocket.activeThrusterId && !kept.some((s) => s.id === player.rocket.activeThrusterId)) player.rocket.activeThrusterId = null;
+      if (player.rocket.activeProspectorId && !kept.some((s) => s.id === player.rocket.activeProspectorId)) player.rocket.activeProspectorId = null;
+      clipTank(player.rocket);
+    }
+  }
+
   if (destroyed) {
     // The ship is lost at haltSlug; cards scatter, rocket recalls to LEO.
     const where = siteById(haltSlug);
@@ -1477,6 +1501,7 @@ function applyMove(state, op, player) {
   else if (nItems) log += ` Rolled through ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
   if (decommissioned.length) log += ` Radiation decommissioned ${decommissioned.length} card${decommissioned.length === 1 ? '' : 's'}.`;
   if (degradedRadiators.length) log += ` Radiation degraded ${degradedRadiators.length} radiator${degradedRadiators.length === 1 ? '' : 's'} to its light side.`;
+  if (sailDecommissioned.length) log += ` Aerobraking burned off ${sailDecommissioned.join(', ')} (decommissioned to hand).`;
   if (chit) log += ` First into the ${chit.zone} zone (+glory chit).`;
   if (homeScored) {
     log += ` Scored ${homeScored} glory chit${homeScored === 1 ? '' : 's'}`
