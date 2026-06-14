@@ -4908,7 +4908,7 @@ body:has(#view-browse:not(.hidden)) #main {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 18px 20px;
-  max-width: 480px;
+  max-width: 760px;
   width: 100%;
   color: var(--ink);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
@@ -4931,23 +4931,22 @@ body:has(#view-browse:not(.hidden)) #main {
   text-transform: uppercase;
   color: var(--muted, #94a3b8);
 }
-/* Card picker: real card visuals (Black-Side-up), a selectable button per
-   option. The card is scaled down with transform; the wrapper carries the
-   scaled footprint so the flex layout stays correct. */
+/* Card picker: real card visuals at FULL SIZE (Black-Side-up), a selectable
+   button per option. Wraps in a scrollable grid so several full cards fit. */
 .et-cards {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 16px;
   justify-content: center;
-  max-height: 330px;
+  max-height: 60vh;
   overflow-y: auto;
   padding: 6px 2px 2px;
 }
 .et-card-pick {
   position: relative;
   flex: 0 0 auto;
-  width: 147px;          /* 220px card * 0.667 */
-  height: 234px;         /* 350px card * 0.667 */
+  width: 220px;          /* full-size card */
+  height: 350px;
   padding: 0;
   background: none;
   border: 2px solid transparent;
@@ -4956,8 +4955,6 @@ body:has(#view-browse:not(.hidden)) #main {
   transition: border-color 0.12s, box-shadow 0.12s, transform 0.12s;
 }
 .et-card-pick .card {
-  transform: scale(0.667);
-  transform-origin: top left;
   pointer-events: none;  /* the wrapper owns the click; no flip / tooltip capture */
 }
 .et-card-pick .card-flip { display: none; }  /* picker is a preview, not a flipper */
