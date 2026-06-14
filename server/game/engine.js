@@ -507,6 +507,35 @@ function autoFixGlitches(state) {
   return notes;
 }
 
+// A glory chit must be carried by a CREWED stack. If a rocket holds chits but
+// has no crew aboard (the crew left, died, colonised, or was decommissioned),
+// the chits can no longer be carried: they return home to LEO at FRONT (low /
+// "1") value, exactly as if returned without a crew. Runs after every
+// functional op and after event resolution, so it also RETROACTIVELY rescues
+// chits already stuck on a crewless rocket the next time any op is applied.
+function homeOrphanedGloryChits(state) {
+  const notes = [];
+  for (const p of state.players) {
+    if (!p.glory || !Array.isArray(p.glory.chits) || !p.glory.chits.length) continue;
+    if (p.rocket.stack.some(isCrewSlot)) continue;   // a crew is aboard to carry them
+    p.glory.claimed = p.glory.claimed || [];
+    let vps = 0;
+    const zones = [];
+    for (const c of p.glory.chits) {
+      const vp = ((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 }).front) | 0;
+      p.glory.claimed.push({ zone: c.zone, side: 'front', vp, turn: state.turn });
+      vps += vp;
+      zones.push(c.zone);
+    }
+    p.glory.vps = (p.glory.vps | 0) + vps;
+    p.glory.chits = [];
+    const note = `${p.name}'s glory chit${zones.length === 1 ? '' : 's'} (${zones.join(', ')}) returned to LEO at front value (+${vps} VP) - no crew aboard to carry it.`;
+    notes.push(note);
+    pushNews(state, '🎖', note);
+  }
+  return notes;
+}
+
 const EVENT_HEADLINES = {
   inspiration: 'Inspiration (market decks cycled)',
   glitch: 'Glitch',
@@ -830,6 +859,9 @@ function applyEventChoice(state, op, ctx) {
     log += ' The event is resolved.';
   }
   pushNews(state, EVENT_ICONS[pending.kind] || '\u2604\uFE0F', log, newsCards);
+  // A flare that evacuated this player's last crew can orphan their chits.
+  const homed = homeOrphanedGloryChits(state);
+  if (homed.length) log += ' ' + homed.join(' ');
   return { ok: true, state, log };
 }
 
@@ -3345,6 +3377,12 @@ export function applyOperation(prevState, op, ctx) {
     // functional op and narrate any fix in the same log line.
     const fixed = autoFixGlitches(res.state);
     if (fixed.length && res.log) res.log += ' ' + fixed.join(' ');
+    // A glory chit can't ride a crewless rocket: any op that left the rocket
+    // without crew (decommission, colonise, a flare/glitch loss) sends its
+    // carried chits home to LEO at front value. Also rescues already-stuck
+    // chits retroactively on the next op.
+    const homed = homeOrphanedGloryChits(res.state);
+    if (homed.length && res.log) res.log += ' ' + homed.join(' ');
     // Record the action on the undo stack (a new action invalidates
     // any pending redo), tagging whether it consumed a die roll.
     res.state.turnActions = [
