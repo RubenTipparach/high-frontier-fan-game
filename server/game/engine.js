@@ -32,7 +32,9 @@ import { CREW_BY_ID } from '../../data/crew.js';
 // Structured patent card POWERS behind each face's free-text Ability (the
 // sheet carries the text; this maps it to engine flags). Shared with the
 // client, same as fuel-graph / support-chain.
-import { facePower } from '../../data/card-abilities.js';
+import {
+  facePower, sumColocatedSizeRollMod, sumColocatedIsruMod, anyColocatedNanitesReroll,
+} from '../../data/card-abilities.js';
 // Shared fuel-strip model (same module the client uses): a burn spends fuel
 // STEPS (black connections), and the water it costs is the non-linear mass
 // drop, leaving a possibly-fractional remainder.
@@ -181,6 +183,13 @@ function powerOfSlot(slot) {
   const c = slot && PATENTS_BY_ID[slot.id];
   if (!c) return null;
   return facePower(slotFace(slot, c).name);
+}
+
+// Is this an aerostat site (a floating atmospheric city)? Identified by the
+// 'aerostat' marker in the site id - the 5 aerostat sites (Venus / Titan /
+// Saturn / Uranus / Neptune) all carry it. Drives SCOOP aerostat-only powers.
+function isAerostatSite(site) {
+  return !!(site && /aerostat/i.test(String(site.id || '')));
 }
 
 // Does this rocket carry the moon cable (a NASRDA crew card on its Mooncable
@@ -2211,7 +2220,11 @@ function applyProspect(state, op, player) {
     return fail('not_at_site');
   }
   if (existing) return fail('already_prospected');
-  if (prospectorIsru(provSlot) > (site.hydration | 0)) return fail('isru_too_high');
+  // Colocated modifier cards (subsystems 2 + 3): scan the prospector's stack.
+  const colocatedPowers = player.rocket.stack.map(powerOfSlot);
+  const isruMod = sumColocatedIsruMod(colocatedPowers, { isAerostat: isAerostatSite(site) });
+  const effIsru = Math.max(0, prospectorIsru(provSlot) + isruMod);   // isruMod <= 0 (easier), floored at 0
+  if (effIsru > (site.hydration | 0)) return fail('isru_too_high');
 
   // Prospecting is one operation to BEGIN: the first prospect of the turn
   // (any kind) spends the operation. Once begun, a raygun's line-of-sight scan
@@ -2224,25 +2237,38 @@ function applyProspect(state, op, player) {
   if (!free && player.opsRemaining <= 0) return fail('no_ops_left');
 
   const threshold = prospectThreshold(site);
+  // Size-roll modifier (subsystem 2): colocated cards subtract from the d6
+  // (negative = easier), conditioned on the site's spectral type / prospector
+  // kind. THORIUM BREEDER (-3 on S), COMET LICHEN (-2 on D), FOAMED NICKEL (-1),
+  // SUPERLENS (-1 raygun).
+  const sizeMod = sumColocatedSizeRollMod(colocatedPowers, { spectral: site.spectralType, prospectorKind: kind });
   const gen = makeRng(state.seed, state.rng.cursor);
   const roll = gen.d6();
   state.rng.cursor = gen.cursor;
-  const success = roll <= threshold;
+  const effRoll = roll + sizeMod;            // sizeMod is <= 0
+  const success = effRoll <= threshold;
+  // NANITES (Lorentz-Propelled Microprobe): one re-roll if the size roll fails.
+  const nanites = anyColocatedNanitesReroll(colocatedPowers);
   state.discs[toSiteId] = {
     outcome: success ? 'success' : 'fail',
     roll, threshold, kind,
+    ...(sizeMod ? { sizeMod, effRoll } : {}),
     by: player.name,
     ownerId: player.profileId,
     turn: curTurn,
     round: curRound,
     // The buggy may re-roll once, this turn, by its owner.
-    // Buggy may re-roll once; Blink Telescope (B612) grants a raygun the same.
-    canReroll: kind === 'buggy' || (kind === 'raygun' && hasPrivilege(state, player, 'BLINK_TELESCOPE')),
+    // Buggy may re-roll once; Blink Telescope (B612) grants a raygun the same;
+    // NANITES grants any prospector one re-roll on a failed size roll.
+    canReroll: kind === 'buggy'
+      || (kind === 'raygun' && hasPrivilege(state, player, 'BLINK_TELESCOPE'))
+      || (!success && nanites),
   };
   if (!free) player.opsRemaining -= 1;
   const verb = success ? 'struck a claim at' : 'came up dry at';
   const tail = free ? (buggyRoams ? ' with a free buggy road scan' : ' with a free raygun scan') : '';
-  let log = `${player.name} rolled ${roll} vs ${threshold} and ${verb} ${site.name}${tail}.`;
+  const rollText = sizeMod ? `${roll}${sizeMod > 0 ? '+' : ''}${sizeMod} = ${effRoll}` : `${roll}`;
+  let log = `${player.name} rolled ${rollText} vs ${threshold} and ${verb} ${site.name}${tail}.`;
   // Taxes: a placed Claim pays every Taxes holder +1 aqua from the pool.
   if (success) {
     const tax = creditPrivilegeIncome(state, 'TAXES', 'Taxes');
@@ -2258,26 +2284,32 @@ function applyProspectReroll(state, op, player) {
   const disc = state.discs[toSiteId];
   if (!disc) return fail('no_disc');
   if (disc.ownerId !== player.profileId) return fail('not_owner');
-  // Buggy re-rolls; a raygun re-rolls only with Blink Telescope (B612).
-  if (disc.kind !== 'buggy' && !(disc.kind === 'raygun' && hasPrivilege(state, player, 'BLINK_TELESCOPE'))) return fail('not_buggy');
-  if (!disc.canReroll) return fail('already_rerolled');
+  // Eligibility is encoded in disc.canReroll at prospect time: buggy (always),
+  // raygun with Blink Telescope, or any kind with a colocated NANITES card on a
+  // failed size roll. False here means "not eligible OR already re-rolled".
+  if (!disc.canReroll) return fail('cannot_reroll');
   if (disc.turn !== state.turn) return fail('reroll_window_closed');
   const site = siteById(toSiteId);
   const threshold = disc.threshold;
+  const sizeMod = disc.sizeMod || 0;
   const gen = makeRng(state.seed, state.rng.cursor);
   const roll = gen.d6();
   state.rng.cursor = gen.cursor;
-  const success = roll <= threshold;
+  const effRoll = roll + sizeMod;
+  const success = effRoll <= threshold;
   state.discs[toSiteId] = {
     ...disc,
     outcome: success ? 'success' : 'fail',
     roll,
+    ...(sizeMod ? { effRoll } : {}),
     canReroll: false,
     rerolled: true,
   };
   const verb = success ? 'struck a claim at' : 'came up dry at';
   const where = (site && site.name) || toSiteId;
-  let log = `${player.name} re-rolled the buggy: ${roll} vs ${threshold} and ${verb} ${where}.`;
+  const how = disc.kind === 'buggy' ? 'the buggy' : 'the scan';
+  const rollText = sizeMod ? `${roll}${sizeMod > 0 ? '+' : ''}${sizeMod} = ${effRoll}` : `${roll}`;
+  let log = `${player.name} re-rolled ${how}: ${rollText} vs ${threshold} and ${verb} ${where}.`;
   // Taxes fire only if the re-roll newly placed a Claim (fail -> success).
   if (success && disc.outcome !== 'success') {
     const tax = creditPrivilegeIncome(state, 'TAXES', 'Taxes');
@@ -2424,7 +2456,11 @@ function applySiteRefuel(state, op, player) {
     const provId = player.rocket.activeProspectorId;
     const slot = provId && player.rocket.stack.find((s) => s.id === provId);
     if (!slot) return fail('no_prospector');
-    const isru = prospectorIsru(slot);
+    // Colocated ISRU modifier (subsystem 3): a colocated card lowers the
+    // platform's effective ISRU (DIVINING NUBOTS -1, SCOOP -2 at aerostats),
+    // floored at 0 (the best rating). Lower ISRU = more water from the formula.
+    const isruMod = sumColocatedIsruMod(player.rocket.stack.map(powerOfSlot), { isAerostat: isAerostatSite(site) });
+    const isru = Math.max(0, prospectorIsru(slot) + isruMod);
     if (!(isru >= 0 && isru <= water)) return fail('isru_too_high');
     rawGain = 1 + water - isru;
     label = 'ISRU Refuel';

@@ -27,6 +27,9 @@
 import { PATENTS_BY_ID, thermsRequired, thermsSupplied } from '../../data/patents.js';
 import { resolveSupportChain, resolveCoolingAcross } from '../../data/support-chain.js';
 import { CREW_BY_ID } from '../../data/crew.js';
+// Structured patent card POWERS (shared with the server) for the colocated
+// ISRU modifier - the client must match the server's prospect / refuel gate.
+import { facePower, sumColocatedIsruMod } from '../../data/card-abilities.js';
 import { SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { weightClassForMass } from '../../data/net-thrust-track.js';
 // Fuel-step capacity comes from the shared graph (the same module the server
@@ -604,6 +607,21 @@ export function getActiveProspectorStats() {
     therm,
     canActivate: missing.length === 0,
   };
+}
+
+// Structured power of a stack slot's INSTALLED face (null for crew / no power).
+// Mirror of engine.js#powerOfSlot. Crew carry no patent powers.
+function slotPower(slot) {
+  const c = slot && cardForSlot(slot);
+  if (!c || !c.faces) return null;
+  return facePower(installedFace(slot).name);
+}
+
+// Colocated ISRU modifier from the rocket stack (subsystem 3), keyed to the
+// target site's aerostat-ness. Mirrors the server so the client's prospect /
+// refuel ISRU gate matches the authoritative one. isruMod is <= 0 (easier).
+export function colocatedIsruMod({ isAerostat = false } = {}) {
+  return sumColocatedIsruMod(_stack.map(slotPower), { isAerostat });
 }
 
 // Build the set of support-kinds the rest of the stack supplies

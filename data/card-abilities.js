@@ -68,3 +68,44 @@ export const CARD_POWERS = {
 export function facePower(faceName) {
   return (faceName && CARD_POWERS[faceName]) || null;
 }
+
+// ---- Colocated modifier scans (subsystems 2 + 3) ----
+//
+// Each takes a list of POWER objects (facePower() of each colocated card's
+// INSTALLED face; nulls are ignored) and the relevant site context, and folds
+// the matching modifiers. "Colocated" = in the same stack as the active
+// prospector / ISRU platform. Pure, shared by client + server so the gate they
+// compute is identical.
+
+// Sum of size-roll modifiers (subsystem 2): added to the prospect d6 (negative
+// = easier, since success is roll <= threshold). Conditioned per power on the
+// site's spectral type and/or the prospector kind.
+export function sumColocatedSizeRollMod(powers, { spectral, prospectorKind } = {}) {
+  let mod = 0;
+  for (const p of powers) {
+    if (!p || p.sizeRollMod == null) continue;
+    if (p.sizeRollSpectral && p.sizeRollSpectral !== spectral) continue;
+    if (p.sizeRollProspector && p.sizeRollProspector !== prospectorKind) continue;
+    mod += p.sizeRollMod;
+  }
+  return mod;
+}
+
+// Sum of ISRU modifiers (subsystem 3): added to the colocated ISRU platform's
+// rating (negative = lower ISRU, which helps both the prospect ISRU gate and
+// the site-refuel yield). SCOOP variants apply only at aerostat sites.
+export function sumColocatedIsruMod(powers, { isAerostat } = {}) {
+  let mod = 0;
+  for (const p of powers) {
+    if (!p || p.isruMod == null) continue;
+    if (p.isruAerostatOnly && !isAerostat) continue;
+    mod += p.isruMod;
+  }
+  return mod;
+}
+
+// Does any colocated card grant a NANITES prospect re-roll (subsystem 2)?
+export function anyColocatedNanitesReroll(powers) {
+  return powers.some((p) => p && p.nanitesReroll);
+}
+

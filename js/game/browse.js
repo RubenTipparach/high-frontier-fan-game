@@ -39,6 +39,7 @@ import {
   getStackTotals, getActiveThrusterStats, setSolarZone, setHasPowersat,
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats, getSupportChainView,
+  colocatedIsruMod,
   getWiring, setWiring,
   isAfterburnEngaged, setAfterburn, OPEN_CYCLE_CARD, OPEN_CYCLE_CARD_ID,
   getAqua, spendAqua, addAqua, onAquaChange, resetAqua,
@@ -3211,6 +3212,7 @@ function humanizeOnlineOpError(code, detail) {
     no_disc: 'There is no prospect disc to re-roll.',
     not_buggy: 'Only a buggy prospector can re-roll.',
     already_rerolled: 'The buggy has already re-rolled this claim.',
+    cannot_reroll: 'No re-roll available for this claim.',
     reroll_window_closed: 'The buggy re-roll is only available the turn you prospect.',
   })[code] || (code ? String(code) : 'Something went wrong.');
 }
@@ -8667,7 +8669,10 @@ function pickRefiningSource(site) {
   // 1 + hydration - ISRU formula gives at least 1 water.
   const prosp = getActiveProspectorStats();
   if (prosp && prosp.canActivate) {
-    const isru = prosp.isru;
+    // Colocated ISRU modifier (subsystem 3): lower the rig's effective ISRU
+    // (floored at 0), matching the server refuel yield.
+    const isAerostat = /aerostat/i.test(String(site.id || ''));
+    const isru = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat }));
     // ISRU 0 is a valid rig (gain = 1 + water), so it refuels anywhere the
     // gate ISRU <= water allows - which for 0 is every site.
     if (isru >= 0 && isru <= water) {
@@ -10942,8 +10947,9 @@ function doProspect(site, prosp) {
   }
   // ISRU rule re-validated against hydration (the "water" gate).
   // Defence-in-depth in case the popup button somehow ends up
-  // enabled with a stale read.
-  const prospIsru = prosp.isru;
+  // enabled with a stale read. Includes the colocated ISRU modifier.
+  const isAerostatSiteHere = /aerostat/i.test(String(site.id || ''));
+  const prospIsru = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat: isAerostatSiteHere }));
   const siteWater = Number.isFinite(site.hydration) ? site.hydration : 0;
   if (prospIsru > siteWater) {
     setStatus(
@@ -11737,11 +11743,12 @@ function animateSnapshotProspects(prev, snapshot) {
   const pid = toPlannerId(_onlineMaps, serverSiteId);
   const site = pid && (_activeData.byId?.[pid] || _activeData.sites.find((x) => x.id === pid));
   if (!site) return;
-  // Offer the buggy re-roll only to the disc's owner while it's still
-  // available (server tracks canReroll, this turn, once).
+  // Offer the re-roll only to the disc's owner while it's still available. The
+  // server's canReroll already encodes every source (buggy, Blink Telescope
+  // raygun, colocated NANITES on a fail), so trust it rather than re-gating on
+  // kind here.
   const myId = _onlineMe && _onlineMe.id;
-  const canReroll = !!disc.canReroll && disc.kind === 'buggy'
-    && disc.ownerId === myId && isOnlineMyTurn();
+  const canReroll = !!disc.canReroll && disc.ownerId === myId && isOnlineMyTurn();
   playRemoteProspectRoll(site, disc, { serverSiteId, canReroll });
 }
 
@@ -11768,7 +11775,7 @@ function playRemoteProspectRoll(site, disc, opts = {}) {
     </div>
     <p class="prospect-roll-result muted">Rolling…</p>
     <div class="prospect-roll-actions">
-      ${opts.canReroll ? '<button type="button" class="popup-btn prospect-reroll-btn" disabled>🎲 Re-roll (buggy)</button>' : ''}
+      ${opts.canReroll ? '<button type="button" class="popup-btn prospect-reroll-btn" disabled>🎲 Re-roll</button>' : ''}
       ${opts.canReroll ? '<button type="button" class="popup-btn primary prospect-keep-btn" disabled>Keep</button>' : ''}
     </div>
   `;
@@ -13648,7 +13655,11 @@ function showSitePopupFor(site) {
     // site's "number" (siteSize leading digit) is a DIFFERENT
     // value used for the prospect-roll threshold + the refining-
     // yield formula; don't confuse them.
-    const prospIsru   = prosp.isru;
+    // Colocated ISRU modifier (subsystem 3): lowers the rig's effective ISRU
+    // (floored at 0), matching the server gate so a prospect the popup offers
+    // is never rejected.
+    const isAerostat  = /aerostat/i.test(String(site.id || ''));
+    const prospIsru   = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat }));
     const siteWater   = Number.isFinite(site.hydration) ? site.hydration : 0;
     const isruOk      = prospIsru <= siteWater;
     const ok = check.ok && supportsOk && isruOk;
