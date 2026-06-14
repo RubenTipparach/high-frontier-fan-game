@@ -136,6 +136,14 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
     // Privileges permanently gained from a card power (POWER GIRDLE / IONOSAT
     // grant Powersat). NOT a faction privilege, so Anarchy does not suspend it.
     grantedPrivileges: [],
+    // Crew abilities borrowed from another player through a trade. Each entry is
+    // { ability, fromPlayerId, turnsRemaining } where turnsRemaining === null
+    // means a PERMANENT (irreversible) grant. Timed grants are decremented at
+    // the holder's END_TURN and dropped at 0 (engine.js). Privilege resolution
+    // unions these with the player's own abilities, so a borrowed power works
+    // exactly like an owned one for its term. A grant is SHARED, not surrendered:
+    // the lender keeps their ability while the borrower also holds it.
+    borrowedAbilities: [],
     rocket: {
       // siteId null = parked at LEO (the launch anchor). There is no
       // explicit LEO node in SITES, so null is the canonical "at LEO"
@@ -291,6 +299,14 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
     factories: {},
     colonies: {},
     auction: null,
+    // Open player-to-player trade negotiation, or null. A side-channel deal that
+    // both parties must consent to (offer / counter / accept handshake); it does
+    // NOT cost the turn's operation and may be opened at any point, on or off
+    // turn. One open trade at a time (v1). See engine.js TRADE ops + the shape
+    // they write: { initiatorId, partnerId, awaiting, version, give, receive,
+    // location }. give/receive are always written from the initiator's
+    // perspective. Not redacted (a negotiation is open info, like hands in MP).
+    trade: null,
     players: ordered.map((p, i) =>
       freshPlayer({
         profileId: p.profileId,

@@ -294,6 +294,7 @@ export function refreshRoomOverlays() {
   syncCrewDraftOverlay(_online ? _onlineSnapshot : null);
   syncCardDraftOverlay(_online ? _onlineSnapshot : null);
   renderOnlineAuction(_online && _onlineSnapshot ? _onlineSnapshot.auction : null);
+  renderOnlineTrade(_online && _onlineSnapshot ? _onlineSnapshot.trade : null);
 }
 
 export function mountBrowse(opts = {}) {
@@ -607,6 +608,10 @@ function applySnapshot(snapshot, seq) {
   }
   // Competitive auction overlay is wired separately (see the TODO hook).
   renderOnlineAuction(snapshot.auction);
+  // Pending player-to-player trade: a docked, snapshot-driven card the two
+  // parties act on. Idempotent - appears when a deal opens, clears when it
+  // resolves or is declined.
+  renderOnlineTrade(snapshot.trade);
   // Round-end first-player handoff + end-of-game standings. Both are
   // driven straight off the snapshot and idempotent, so they appear /
   // clear as the server state flips.
@@ -621,7 +626,8 @@ function applySnapshot(snapshot, seq) {
   // auction, or a first-player handoff) so the waiting players see it
   // resolve in near-realtime even if the WS broadcast was dropped. Drop
   // back to the normal cadence otherwise.
-  const fastPoll = snapshot.auction || snapshot.pendingFirstPlayer || snapshot.pendingEvent;
+  const fastPoll = snapshot.auction || snapshot.pendingFirstPlayer || snapshot.pendingEvent
+    || snapshot.trade;
   setPollCadence(fastPoll ? ONLINE_POLL_AUCTION_MS : ONLINE_POLL_MS);
   // Eager one-shot fetch the moment the auctioneer's phase opens
   // (awaiting === 'auctioneer'). The accept can land within ms of
@@ -1459,6 +1465,357 @@ function renderOnlineAuction(auction) {
 function setMpAuctionError(text) {
   const el = document.getElementById('mp-auction-error');
   if (el) el.textContent = text || '';
+}
+
+// ===== player-to-player trading =====
+//
+// A trade is a free, off-turn, both-party-consent deal (see the server's TRADE
+// ops). The Trade button in the MP panel opens the builder; the pending deal
+// shows as a docked card both parties can act on. Submit bypasses the turn
+// guard (like auction ops), so it uses its own helper, not submitOnlineOp.
+
+async function submitMpTradeOp(op) {
+  if (!_online || _onlineBusy) return false;
+  if (_spectator) { _onlineToast('Spectator - view only.', 'error'); return false; }
+  _onlineBusy = true;
+  let r;
+  try {
+    r = await submitGameOp(_onlineGameId, op, _onlineMe.token);
+  } finally {
+    _onlineBusy = false;
+  }
+  if (!r || !r.ok) {
+    _onlineToast(humanizeOnlineOpError(r && r.error), 'error');
+    if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
+    return false;
+  }
+  applySnapshot(r.data.game.state, r.data.game.seq);
+  return true;
+}
+
+// Title-case a privilege key ("SECRETARY_GENERAL" -> "Secretary General").
+function abilityLabel(key) {
+  return String(key || '').toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+// The crew ability a player's current faction face grants (the one they own and
+// can lend), or null.
+function factionAbilityOf(player) {
+  const card = player && player.faction && CREW_BY_ID[player.faction.cardId];
+  const face = card && card.faces && card.faces[player.faction.face];
+  return face ? String(face.bonus || '').trim().toUpperCase().replace(/\s+/g, '_') : null;
+}
+// All ability keys a player could grant: their faction power plus any permanent
+// grants they hold.
+function grantableAbilitiesOf(player) {
+  const out = [];
+  const fk = factionAbilityOf(player);
+  if (fk) out.push(fk);
+  for (const g of (player.grantedPrivileges || [])) if (!out.includes(g)) out.push(g);
+  return out;
+}
+// Two rockets share a location (both at LEO, or parked at the same site).
+function tradeSharedLocation(a, b) {
+  const sa = a && a.rocket ? a.rocket.siteId : undefined;
+  const sb = b && b.rocket ? b.rocket.siteId : undefined;
+  if (sa == null && sb == null) return 'leo';
+  if (sa != null && sa === sb) return sa;
+  return null;
+}
+function cardLabel(id) {
+  const c = PATENTS_BY_ID[id] || CREW_BY_ID[id];
+  return c ? c.name : id;
+}
+
+// Build one give/receive column of the trade builder for `owner`. Returns
+// { el, read } where read() collects the side object from the inputs.
+function buildTradeColumn(title, owner, colocated) {
+  const col = document.createElement('div');
+  col.className = 'mp-trade-col';
+  const h = document.createElement('div');
+  h.className = 'mp-detail-label';
+  h.textContent = title;
+  col.appendChild(h);
+
+  // Aqua
+  const aquaRow = document.createElement('label');
+  aquaRow.className = 'mp-trade-field';
+  aquaRow.innerHTML = '<span>💧 Aqua</span>';
+  const aquaIn = document.createElement('input');
+  aquaIn.type = 'number'; aquaIn.min = '0'; aquaIn.value = '0';
+  aquaIn.max = String(owner.aqua || 0);
+  aquaRow.appendChild(aquaIn);
+  col.appendChild(aquaRow);
+
+  // Water (in-space; needs colocation)
+  const tank = Math.floor((owner.rocket && owner.rocket.tank) || 0);
+  const waterRow = document.createElement('label');
+  waterRow.className = 'mp-trade-field';
+  waterRow.innerHTML = `<span>🚰 Water (${tank})</span>`;
+  const waterIn = document.createElement('input');
+  waterIn.type = 'number'; waterIn.min = '0'; waterIn.value = '0'; waterIn.max = String(tank);
+  waterIn.disabled = !colocated;
+  waterRow.appendChild(waterIn);
+  col.appendChild(waterRow);
+
+  // Hand patents (abstract; no colocation)
+  const handIds = (owner.hand || []).filter((id) => PATENTS_BY_ID[id]);
+  const handChecks = [];
+  if (handIds.length) {
+    const lbl = document.createElement('div');
+    lbl.className = 'mp-trade-sub';
+    lbl.textContent = 'Hand patents';
+    col.appendChild(lbl);
+    for (const id of handIds) {
+      const w = document.createElement('label');
+      w.className = 'mp-trade-check';
+      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = id;
+      w.append(cb, document.createTextNode(' ' + cardLabel(id)));
+      col.appendChild(w);
+      handChecks.push(cb);
+    }
+  }
+
+  // Cargo aboard the rocket (in-space; needs colocation). Patents only.
+  const cargoIds = ((owner.rocket && owner.rocket.stack) || [])
+    .filter((s) => s && PATENTS_BY_ID[s.id]).map((s) => s.id);
+  const cargoChecks = [];
+  if (cargoIds.length) {
+    const lbl = document.createElement('div');
+    lbl.className = 'mp-trade-sub';
+    lbl.textContent = 'Cargo aboard' + (colocated ? '' : ' (needs colocation)');
+    col.appendChild(lbl);
+    for (const id of cargoIds) {
+      const w = document.createElement('label');
+      w.className = 'mp-trade-check';
+      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = id; cb.disabled = !colocated;
+      w.append(cb, document.createTextNode(' ' + cardLabel(id)));
+      col.appendChild(w);
+      cargoChecks.push(cb);
+    }
+  }
+
+  // Crew ability grant (abstract). Pick one ability + a term.
+  const abilities = grantableAbilitiesOf(owner);
+  let abSel = null; let termIn = null;
+  if (abilities.length) {
+    const lbl = document.createElement('div');
+    lbl.className = 'mp-trade-sub';
+    lbl.textContent = 'Crew ability';
+    col.appendChild(lbl);
+    const row = document.createElement('div');
+    row.className = 'mp-trade-ability-row';
+    abSel = document.createElement('select');
+    abSel.innerHTML = '<option value="">— none —</option>'
+      + abilities.map((k) => `<option value="${k}">${abilityLabel(k)}</option>`).join('');
+    termIn = document.createElement('input');
+    termIn.type = 'number'; termIn.min = '0'; termIn.placeholder = 'turns';
+    termIn.title = 'Number of turns; leave blank or 0 for a PERMANENT (irreversible) grant';
+    termIn.className = 'mp-trade-term';
+    row.append(abSel, termIn);
+    col.appendChild(row);
+  }
+
+  function read() {
+    const intv = (el) => { const v = Math.floor(Number(el.value)); return Number.isFinite(v) && v > 0 ? v : 0; };
+    const side = {
+      aqua: intv(aquaIn),
+      water: colocated ? intv(waterIn) : 0,
+      handCardIds: handChecks.filter((c) => c.checked).map((c) => c.value),
+      cargoCardIds: colocated ? cargoChecks.filter((c) => c.checked).map((c) => c.value) : [],
+      abilities: [],
+    };
+    if (abSel && abSel.value) {
+      const t = termIn && termIn.value !== '' ? Math.floor(Number(termIn.value)) : 0;
+      side.abilities.push({ ability: abSel.value, turns: (Number.isFinite(t) && t > 0) ? t : null });
+    }
+    return side;
+  }
+  return { el: col, read };
+}
+
+// Open the trade builder modal. opts: { partnerId?, isCounter? }. On send it
+// fires TRADE_OFFER (new) or TRADE_COUNTER (responding to an open trade), with
+// give/receive built from MY perspective.
+function openTradeBuilder(opts = {}) {
+  if (!_online || !_onlineSnapshot || _spectator) return;
+  closeTradeBuilder();
+  const snap = _onlineSnapshot;
+  const myId = _onlineMe && _onlineMe.id;
+  const me = (snap.players || []).find((p) => p.profileId === myId);
+  const others = (snap.players || []).filter((p) => p.profileId !== myId);
+  if (!me || !others.length) { _onlineToast('No one to trade with.', 'error'); return; }
+
+  const back = document.createElement('div');
+  back.id = 'mp-trade-builder';
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal';
+  back.appendChild(modal);
+
+  let partnerId = opts.partnerId != null ? Number(opts.partnerId)
+    : (others[0] && others[0].profileId);
+
+  function rebuild() {
+    modal.innerHTML = '';
+    const partner = others.find((p) => p.profileId === partnerId) || others[0];
+    partnerId = partner.profileId;
+    const colocated = !!tradeSharedLocation(me, partner);
+
+    const head = document.createElement('div');
+    head.className = 'mp-trade-head';
+    head.innerHTML = `<h3>${opts.isCounter ? 'Counter offer' : 'Propose a trade'}</h3>`;
+    modal.appendChild(head);
+
+    // Partner picker (locked when countering an open trade).
+    const pwrap = document.createElement('label');
+    pwrap.className = 'mp-trade-field';
+    pwrap.innerHTML = '<span>Partner</span>';
+    const psel = document.createElement('select');
+    psel.innerHTML = others.map((p) =>
+      `<option value="${p.profileId}"${p.profileId === partnerId ? ' selected' : ''}>@${p.name}</option>`).join('');
+    psel.disabled = !!opts.isCounter;
+    psel.addEventListener('change', () => { partnerId = Number(psel.value); rebuild(); });
+    pwrap.appendChild(psel);
+    modal.appendChild(pwrap);
+
+    const colo = document.createElement('div');
+    colo.className = 'mp-trade-colo ' + (colocated ? 'is-colo' : 'no-colo');
+    colo.textContent = colocated
+      ? `You and @${partner.name} are colocated - cargo and water can trade.`
+      : `Not colocated - aqua, hand patents, and abilities only.`;
+    modal.appendChild(colo);
+
+    const cols = document.createElement('div');
+    cols.className = 'mp-trade-cols';
+    const giveCol = buildTradeColumn('You give', me, colocated);
+    const recvCol = buildTradeColumn('You receive', partner, colocated);
+    cols.append(giveCol.el, recvCol.el);
+    modal.appendChild(cols);
+
+    const err = document.createElement('div');
+    err.className = 'hud-error';
+    modal.appendChild(err);
+
+    const btns = document.createElement('div');
+    btns.className = 'mp-trade-btns';
+    const cancel = document.createElement('button');
+    cancel.type = 'button'; cancel.className = 'modal-btn'; cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', closeTradeBuilder);
+    const send = document.createElement('button');
+    send.type = 'button'; send.className = 'modal-btn primary';
+    send.textContent = opts.isCounter ? 'Send counter' : 'Send offer';
+    send.addEventListener('click', async () => {
+      const give = giveCol.read();
+      const receive = recvCol.read();
+      const empty = (s) => !s.aqua && !s.water && !s.handCardIds.length && !s.cargoCardIds.length && !s.abilities.length;
+      if (empty(give) && empty(receive)) { err.textContent = 'Put at least one item on the table.'; return; }
+      send.disabled = true;
+      const op = opts.isCounter
+        ? { kind: 'TRADE_COUNTER', give, receive }
+        : { kind: 'TRADE_OFFER', partnerId, give, receive };
+      const ok = await submitMpTradeOp(op);
+      if (ok) closeTradeBuilder();
+      else send.disabled = false;
+    });
+    btns.append(cancel, send);
+    modal.appendChild(btns);
+  }
+  rebuild();
+  back.addEventListener('click', (ev) => { if (ev.target === back) closeTradeBuilder(); });
+  document.body.appendChild(back);
+}
+function closeTradeBuilder() {
+  const b = document.getElementById('mp-trade-builder');
+  if (b) b.remove();
+}
+
+// One-line summary of a side from the giver's voice ("2 aqua + Tug").
+function tradeSideText(side) {
+  const parts = [];
+  if (side.aqua) parts.push(`${side.aqua} aqua`);
+  if (side.water) parts.push(`${side.water} water`);
+  for (const id of (side.handCardIds || [])) parts.push(cardLabel(id));
+  for (const id of (side.cargoCardIds || [])) parts.push(cardLabel(id));
+  for (const g of (side.abilities || [])) {
+    parts.push(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`);
+  }
+  return parts.length ? parts.join(' + ') : 'nothing';
+}
+
+// Snapshot-driven pending-trade overlay. Shows a docked card to the two
+// parties; non-parties are not interrupted (the deal shows in the log).
+function renderOnlineTrade(trade) {
+  const existing = document.getElementById('mp-trade-overlay');
+  const myId = _onlineMe && _onlineMe.id;
+  const amParty = trade && (trade.initiatorId === myId || trade.partnerId === myId);
+  if (!trade || !_online || !gameViewVisible() || !amParty) {
+    if (existing) existing.remove();
+    // A trade that closed (accepted/declined) drops a stale builder too.
+    if (!trade) closeTradeBuilder();
+    return;
+  }
+  const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
+  const myRole = trade.initiatorId === myId ? 'initiator' : 'partner';
+  const otherId = myRole === 'initiator' ? trade.partnerId : trade.initiatorId;
+  const other = players.find((p) => p.profileId === otherId);
+  // Stored give/receive are initiator-perspective; flip for the partner.
+  const myGive = myRole === 'initiator' ? trade.give : trade.receive;
+  const myReceive = myRole === 'initiator' ? trade.receive : trade.give;
+  const myMove = trade.awaiting === myRole;
+
+  let overlay = existing;
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'mp-trade-overlay';
+    overlay.className = 'mp-trade-overlay';
+    document.body.appendChild(overlay);
+  }
+  overlay.innerHTML = '';
+  const card = document.createElement('div');
+  card.className = 'mp-trade-card';
+  const h = document.createElement('div');
+  h.className = 'mp-trade-card-head';
+  const who = document.createElement('span');
+  who.className = 'player-name';
+  if (other && other.color) who.style.setProperty('--player-color', other.color);
+  who.textContent = other ? '@' + other.name : 'the other player';
+  h.append(document.createTextNode('🤝 Trade with '), who);
+  card.appendChild(h);
+
+  const body = document.createElement('div');
+  body.className = 'mp-trade-card-body';
+  body.innerHTML =
+    `<div><b>You give:</b> ${tradeSideText(myGive)}</div>`
+    + `<div><b>You receive:</b> ${tradeSideText(myReceive)}</div>`;
+  card.appendChild(body);
+
+  const status = document.createElement('div');
+  status.className = 'muted mp-trade-status';
+  status.textContent = myMove ? 'Your move - accept, counter, or decline.'
+    : `Waiting for ${other ? '@' + other.name : 'the other player'}…`;
+  card.appendChild(status);
+
+  const btns = document.createElement('div');
+  btns.className = 'mp-trade-btns';
+  if (myMove) {
+    const accept = document.createElement('button');
+    accept.type = 'button'; accept.className = 'modal-btn primary'; accept.textContent = '✅ Accept';
+    accept.addEventListener('click', () => submitMpTradeOp({ kind: 'TRADE_ACCEPT', version: trade.version }));
+    const counter = document.createElement('button');
+    counter.type = 'button'; counter.className = 'modal-btn'; counter.textContent = '↔ Counter';
+    counter.addEventListener('click', () => openTradeBuilder({ partnerId: otherId, isCounter: true }));
+    const decline = document.createElement('button');
+    decline.type = 'button'; decline.className = 'modal-btn'; decline.textContent = '🚫 Decline';
+    decline.addEventListener('click', () => submitMpTradeOp({ kind: 'TRADE_DECLINE' }));
+    btns.append(accept, counter, decline);
+  } else {
+    const withdraw = document.createElement('button');
+    withdraw.type = 'button'; withdraw.className = 'modal-btn'; withdraw.textContent = 'Withdraw';
+    withdraw.addEventListener('click', () => submitMpTradeOp({ kind: 'TRADE_DECLINE' }));
+    btns.append(withdraw);
+  }
+  card.appendChild(btns);
+  overlay.appendChild(card);
 }
 
 // ----- first-player handoff overlay (round-end) -----
@@ -2788,6 +3145,20 @@ function renderMpPanel(snapshot) {
     });
     row.appendChild(startBtn);
   }
+  // Trade: a free, both-consent deal you can open at any point (on or off your
+  // turn). Enabled whenever there is a partner and no auction / open trade.
+  if (!_spectator && players.length > 1) {
+    const tradeBtn = document.createElement('button');
+    tradeBtn.type = 'button';
+    tradeBtn.className = 'mp-leave mp-trade-open';
+    tradeBtn.textContent = '🤝 Trade';
+    tradeBtn.disabled = !!snapshot.auction || !!snapshot.trade;
+    tradeBtn.title = snapshot.auction ? 'Finish the auction first'
+      : snapshot.trade ? 'A trade is already open'
+      : 'Propose a deal with another player (free, needs both players to agree)';
+    tradeBtn.addEventListener('click', () => openTradeBuilder());
+    row.appendChild(tradeBtn);
+  }
   const myTurn = !!(active && active.profileId === myId);
   const turn = document.createElement('div');
   turn.className = 'mp-turn' + (myTurn ? ' mp-your-turn' : '');
@@ -2879,6 +3250,9 @@ function renderMpPlayer(p, isMe, isActive) {
   const headRow = document.createElement('div');
   headRow.className = 'mp-player-headrow';
   headRow.append(head, cardsBtn);
+  // Crew-ability badges: this player's own faction power plus any borrowed
+  // through a trade (timed grants show a turn counter, permanent ones a lock).
+  const badges = renderAbilityBadges(p);
   const detail = document.createElement('div');
   detail.className = 'mp-player-detail';
   detail.hidden = true;
@@ -2889,8 +3263,39 @@ function renderMpPlayer(p, isMe, isActive) {
       detail.dataset.built = '1';
     }
   });
-  wrap.append(headRow, detail);
+  if (badges) wrap.append(headRow, badges, detail);
+  else wrap.append(headRow, detail);
   return wrap;
+}
+
+// A row of ability badges for a player: their own crew power (if any) plus any
+// abilities borrowed through a trade. Borrowed timed grants show "·Nt" turns
+// left; permanent ones a 🔒. Returns null when there is nothing to show.
+function renderAbilityBadges(p) {
+  const own = factionAbilityOf(p);
+  const borrowed = Array.isArray(p.borrowedAbilities) ? p.borrowedAbilities : [];
+  if (!own && !borrowed.length) return null;
+  const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
+  const row = document.createElement('div');
+  row.className = 'mp-ability-badges';
+  if (own) {
+    const b = document.createElement('span');
+    b.className = 'mp-ability own';
+    b.textContent = abilityLabel(own);
+    b.title = `${abilityLabel(own)} - this player's crew ability`;
+    row.appendChild(b);
+  }
+  for (const g of borrowed) {
+    const from = players.find((pp) => pp.profileId === g.fromPlayerId);
+    const perm = g.turnsRemaining == null;
+    const b = document.createElement('span');
+    b.className = 'mp-ability borrowed' + (perm ? ' permanent' : '');
+    b.textContent = abilityLabel(g.ability) + ' ' + (perm ? '🔒' : `·${g.turnsRemaining}t`);
+    b.title = `${abilityLabel(g.ability)} - borrowed from ${from ? '@' + from.name : 'another player'}`
+      + (perm ? ' (permanent, irreversible)' : `, ${g.turnsRemaining} turn(s) left`);
+    row.appendChild(b);
+  }
+  return row;
 }
 
 function buildMpPlayerDetail(host, p, isMe) {
@@ -3227,6 +3632,19 @@ function humanizeOnlineOpError(code, detail) {
     already_rerolled: 'The buggy has already re-rolled this claim.',
     cannot_reroll: 'No re-roll available for this claim.',
     reroll_window_closed: 'The buggy re-roll is only available the turn you prospect.',
+    // --- trading ---
+    trade_in_progress: 'A trade is already open. Finish or call it off first.',
+    no_trade: 'There is no open trade.',
+    not_in_trade: 'You are not part of this trade.',
+    not_awaiting_you: 'It is the other player\'s move in this trade.',
+    bad_partner: 'Pick a valid trading partner.',
+    empty_trade: 'A trade needs at least one item on the table.',
+    trade_stale: 'The terms changed - review the new offer before accepting.',
+    card_not_aboard: 'That card is no longer aboard the rocket.',
+    cannot_trade_dirt: 'Dirt fuel can\'t be traded - only water.',
+    ability_not_held: 'That ability is no longer available to grant.',
+    tank_grade_mismatch: 'The receiving tank holds dirt - water can\'t mix in.',
+    hand_full: 'That would overflow a hand (limit 4).',
   })[code] || (code ? String(code) : 'Something went wrong.');
 }
 
@@ -16176,6 +16594,7 @@ const MP_LOG_ICONS = {
   SET_WIRING: '🔗',
   SET_RADIATOR_SIDE: '♨',
   AFTERBURN: '🔥',
+  TRADE_OFFER: '🤝', TRADE_COUNTER: '↔', TRADE_ACCEPT: '✅', TRADE_DECLINE: '🚫',
   UNDO: '↩', REDO: '↪',
 };
 

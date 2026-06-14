@@ -7720,3 +7720,90 @@ body:has(#view-browse:not(.hidden)) #main {
   max-width: 120px;
   margin: 4px auto 0;
 }
+
+/* ===== player-to-player trading ===== */
+
+/* Trade button in the MP panel header (reuses the .mp-leave chip shape). */
+.mp-trade-open:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Crew-ability badges under each roster name. */
+.mp-ability-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 2px 0 4px 22px;
+}
+.mp-ability {
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.mp-ability.own { background: rgba(120, 140, 220, 0.18); color: var(--ink); }
+.mp-ability.borrowed { background: rgba(80, 200, 160, 0.16); color: #bff3df; border-color: #2f6f5c; }
+.mp-ability.borrowed.permanent { background: rgba(220, 180, 80, 0.18); color: #f4e2b0; border-color: #7a6326; }
+
+/* Builder modal: a focused, backdropped dialog. */
+.mp-modal-back {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(3, 2, 10, 0.78);
+  backdrop-filter: blur(4px);
+  animation: modal-fade 0.18s ease-out;
+}
+.mp-trade-builder-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 20px 20px;
+  max-width: 640px;
+  width: 100%;
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  color: var(--ink);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+}
+.mp-trade-head h3 { margin: 0 0 10px; font-size: 18px; letter-spacing: 0.5px; }
+.mp-trade-field { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 6px 0; }
+.mp-trade-field span { font-size: 13px; color: var(--ink-dim, #8b90b8); }
+.mp-trade-field input, .mp-trade-field select { width: 140px; }
+.mp-trade-colo { font-size: 12px; margin: 6px 0 10px; padding: 6px 10px; border-radius: 8px; }
+.mp-trade-colo.is-colo { background: rgba(80, 200, 160, 0.14); color: #bff3df; }
+.mp-trade-colo.no-colo { background: rgba(200, 160, 80, 0.14); color: #f0d9a8; }
+.mp-trade-cols { display: flex; gap: 18px; align-items: flex-start; }
+.mp-trade-col { flex: 1 1 0; min-width: 0; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.mp-trade-sub { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--ink-dim, #8b90b8); margin: 10px 0 4px; }
+.mp-trade-check { display: flex; align-items: center; gap: 4px; font-size: 12px; margin: 2px 0; }
+.mp-trade-ability-row { display: flex; gap: 6px; }
+.mp-trade-ability-row select { flex: 1 1 auto; min-width: 0; }
+.mp-trade-term { width: 64px; }
+.mp-trade-btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; flex-wrap: wrap; }
+
+/* Pending-trade card: docked bottom-right, non-blocking so play continues. */
+.mp-trade-overlay {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 118;
+  max-width: 340px;
+  animation: modal-fade 0.18s ease-out;
+}
+.mp-trade-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  color: var(--ink);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+}
+.mp-trade-card-head { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+.mp-trade-card-body { font-size: 13px; line-height: 1.5; }
+.mp-trade-card-body b { color: var(--ink-dim, #8b90b8); font-weight: 600; }
+.mp-trade-status { font-size: 12px; margin: 8px 0; }

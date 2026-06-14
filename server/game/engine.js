@@ -539,11 +539,30 @@ function grantPrivilege(player, key) {
   player.grantedPrivileges = Array.isArray(player.grantedPrivileges) ? player.grantedPrivileges : [];
   if (!player.grantedPrivileges.includes(key)) player.grantedPrivileges.push(key);
 }
+// Crew abilities borrowed through a trade behave like an owned privilege for
+// their term. Like grantedPrivileges they are NOT suspended by Anarchy (they
+// are a property of the player, not the live crew face).
+function hasBorrowedAbility(player, key) {
+  return !!(player && Array.isArray(player.borrowedAbilities)
+    && player.borrowedAbilities.some((g) => g && g.ability === key));
+}
+// Does this player actually HOLD an ability they could grant? Their faction
+// face's printed power (regardless of Anarchy - they still own the crew, it is
+// only suspended for their own use) plus any permanent grants they hold.
+function playerOwnsAbility(player, key) {
+  if (!player || !key) return false;
+  const card = player.faction && CREW_BY_ID[player.faction.cardId];
+  const face = card && card.faces && card.faces[player.faction.face];
+  const factionKey = face ? privKey(face.bonus) : null;
+  return factionKey === key || hasGrantedPrivilege(player, key);
+}
 function hasPrivilege(state, player, key) {
-  return privilegeOf(state, player) === key || hasGrantedPrivilege(player, key);
+  return privilegeOf(state, player) === key || hasGrantedPrivilege(player, key)
+    || hasBorrowedAbility(player, key);
 }
 function playersWithPrivilege(state, key) {
-  return (state.players || []).filter((p) => privilegeOf(state, p) === key || hasGrantedPrivilege(p, key));
+  return (state.players || []).filter((p) => privilegeOf(state, p) === key
+    || hasGrantedPrivilege(p, key) || hasBorrowedAbility(p, key));
 }
 // May this player commit a Felony? Yes during Anarchy (everyone gains
 // Felonious, K2e), OR if they hold the Felonious privilege (Taikonauts) the
@@ -2966,6 +2985,12 @@ function applyEndTurn(state, _op, player) {
 
   let log = `${player.name} ended their turn.`;
 
+  // Borrowed crew abilities run down on the holder's own END_TURN: each timed
+  // grant loses a turn and drops at 0. Permanent grants (turnsRemaining null)
+  // never expire. The lender's own ability is unaffected (a grant is shared).
+  const expired = expireBorrowedAbilities(state, player);
+  if (expired.length) log += ' ' + expired.join(' ');
+
   // Passing without spending the turn's operation defaults to Income: the
   // player banks +1 aqua rather than wasting the operation. This also
   // safety-nets a lost Income click - ending the turn always grants the
@@ -3535,6 +3560,312 @@ const AUCTION = {
   AUCTION_SELL: applyAuctionSell,
 };
 
+// ----- player-to-player trading (off-turn, both-party consent) -----
+//
+// A trade is a side-channel negotiation that both parties must consent to. It
+// is FREE (never spends an operation) and can be opened AT ANY POINT, on or off
+// turn, so like auction ops the TRADE handlers bypass the turn guard and
+// validate their own caller. One open trade at a time (v1).
+//
+// Consent is an offer / counter / accept handshake: an OFFER or COUNTER is the
+// sender's consent to those exact terms; an ACCEPT is the awaiting party's
+// consent to the same terms - so one accept always means both sides agreed to
+// identical (versioned) terms. A counter is a decline-and-re-offer that flips
+// who is "awaiting". Either party may decline at any time.
+//
+// state.trade.give / .receive are stored from the INITIATOR's perspective:
+//   give    = items the initiator hands to the partner
+//   receive = items the partner hands to the initiator
+// Each side has the shape:
+//   { aqua, water, handCardIds:[], cargoCardIds:[], abilities:[{ability,turns}] }
+// where water + cargoCardIds are IN-SPACE items that need the two rockets
+// colocated; aqua, handCardIds, abilities are abstract and trade anywhere.
+
+const TRADE_MAX_TERM = 99;   // sanity cap on a timed ability grant
+
+// Both rockets share a location when both sit at LEO (siteId null) or at the
+// same site. Returns 'leo' | <siteId> | null.
+function sharedRocketLocation(a, b) {
+  const sa = a.rocket ? a.rocket.siteId : undefined;
+  const sb = b.rocket ? b.rocket.siteId : undefined;
+  if (sa == null && sb == null) return 'leo';
+  if (sa != null && sa === sb) return sa;
+  return null;
+}
+
+function tankRoom(rocket) {
+  const dry = rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  return Math.max(0, (TANK_MAX - dry) - (rocket.tank || 0));
+}
+
+// Normalise one side of a deal off the wire into the canonical shape, dropping
+// anything malformed. Caller-supplied, so be defensive.
+function normTradeSide(raw) {
+  raw = raw || {};
+  const ints = (n) => { const v = Math.floor(Number(n)); return Number.isFinite(v) && v > 0 ? v : 0; };
+  const ids = (arr) => (Array.isArray(arr) ? arr.map(String) : []);
+  const abilities = (Array.isArray(raw.abilities) ? raw.abilities : [])
+    .map((g) => {
+      const ability = String((g && g.ability) || '');
+      if (!ability) return null;
+      // turns null/0/absent => permanent; otherwise a positive integer term.
+      const t = g && g.turns != null ? Math.floor(Number(g.turns)) : null;
+      const turns = Number.isFinite(t) && t > 0 ? Math.min(t, TRADE_MAX_TERM) : null;
+      return { ability, turns };
+    })
+    .filter(Boolean);
+  return {
+    aqua: ints(raw.aqua),
+    water: ints(raw.water),
+    handCardIds: ids(raw.handCardIds),
+    cargoCardIds: ids(raw.cargoCardIds),
+    abilities,
+  };
+}
+
+function sideHasInSpace(side) {
+  return side.water > 0 || side.cargoCardIds.length > 0;
+}
+function sideIsEmpty(side) {
+  return !side.aqua && !side.water && !side.handCardIds.length
+    && !side.cargoCardIds.length && !side.abilities.length;
+}
+
+// Validate that `owner` can currently deliver everything in `side`. Returns an
+// error key, or null when the side is satisfiable. Re-run at accept time, since
+// the board may have moved since the offer was made.
+function validateTradeSide(state, owner, side) {
+  if ((owner.aqua | 0) < side.aqua) return 'insufficient_aqua';
+  for (const id of side.handCardIds) {
+    if (!(owner.hand || []).includes(id)) return 'card_not_in_hand';
+  }
+  for (const id of side.cargoCardIds) {
+    if (!(owner.rocket.stack || []).some((s) => s.id === id)) return 'card_not_aboard';
+  }
+  if (side.water > 0) {
+    if (owner.rocket.tankGrade === 'dirt' && owner.rocket.tank > 0) return 'cannot_trade_dirt';
+    if (Math.floor(owner.rocket.tank || 0) < side.water) return 'insufficient_water';
+  }
+  for (const g of side.abilities) {
+    if (!playerOwnsAbility(owner, g.ability)) return 'ability_not_held';
+  }
+  return null;
+}
+
+// Will `receiver` have room for everything `side` brings them? (Hand limit +
+// tank room for water; in-space cargo lands in the rocket and is unbounded.)
+function validateTradeReceipt(receiver, side) {
+  const incomingHand = side.handCardIds.length;
+  if (((receiver.hand || []).length + incomingHand) > AUCTION_HAND_LIMIT) return 'hand_full';
+  if (side.water > 0) {
+    if (receiver.rocket.tankGrade === 'dirt' && receiver.rocket.tank > 0) return 'tank_grade_mismatch';
+    if (tankRoom(receiver.rocket) < side.water) return 'tank_full';
+  }
+  return null;
+}
+
+// An empty rocket sits at LEO with no active cards; re-pick actives that left
+// and clip the tank after a swap moved cards / water.
+function reconcileRocketAfterTrade(player) {
+  const stack = player.rocket.stack;
+  if (!stack.some((s) => s.id === player.rocket.activeThrusterId)) {
+    const t = stack.find(isThrusterSlot);
+    player.rocket.activeThrusterId = t ? t.id : null;
+  }
+  if (!stack.some((s) => s.id === player.rocket.activeProspectorId)) {
+    const p = stack.find(isProspectorSlot);
+    player.rocket.activeProspectorId = p ? p.id : null;
+  }
+  clipTank(player.rocket);
+  recallIfEmpty(player);
+}
+
+// Move one side's items from `giver` to `receiver`. Mutates both players.
+function executeTradeSide(giver, receiver, side) {
+  if (side.aqua) { giver.aqua = (giver.aqua | 0) - side.aqua; receiver.aqua = (receiver.aqua | 0) + side.aqua; }
+  for (const id of side.handCardIds) {
+    const i = (giver.hand || []).indexOf(id);
+    if (i >= 0) { giver.hand.splice(i, 1); receiver.hand.push(id); }
+  }
+  for (const id of side.cargoCardIds) {
+    const i = giver.rocket.stack.findIndex((s) => s.id === id);
+    if (i >= 0) { const [slot] = giver.rocket.stack.splice(i, 1); receiver.rocket.stack.push(slot); }
+  }
+  if (side.water > 0) {
+    giver.rocket.tank = (giver.rocket.tank || 0) - side.water;
+    receiver.rocket.tank = (receiver.rocket.tank || 0) + side.water;
+    receiver.rocket.tankGrade = 'water';
+  }
+  for (const g of side.abilities) {
+    receiver.borrowedAbilities = Array.isArray(receiver.borrowedAbilities) ? receiver.borrowedAbilities : [];
+    receiver.borrowedAbilities.push({ ability: g.ability, fromPlayerId: giver.profileId, turnsRemaining: g.turns });
+  }
+}
+
+// Decrement timed borrowed abilities on the holder's END_TURN; drop at 0.
+// Returns gameplay notes for the log.
+function expireBorrowedAbilities(state, player) {
+  const notes = [];
+  if (!Array.isArray(player.borrowedAbilities) || !player.borrowedAbilities.length) return notes;
+  const keep = [];
+  for (const g of player.borrowedAbilities) {
+    if (g.turnsRemaining == null) { keep.push(g); continue; }   // permanent
+    const left = g.turnsRemaining - 1;
+    if (left > 0) { keep.push({ ...g, turnsRemaining: left }); }
+    else notes.push(`${player.name}'s borrowed ${abilityLabel(g.ability)} expired.`);
+  }
+  player.borrowedAbilities = keep;
+  return notes;
+}
+
+// Human label for a privilege key (TITLE_CASE -> "Title Case").
+function abilityLabel(key) {
+  return String(key || '').toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// One-line gameplay summary of a side, from the giver's voice ("2 aqua, Tug").
+function tradeSideSummary(state, side) {
+  const parts = [];
+  if (side.aqua) parts.push(`${side.aqua} aqua`);
+  if (side.water) parts.push(`${side.water} water`);
+  for (const id of side.handCardIds) { const c = PATENTS_BY_ID[id]; parts.push(c ? c.name : id); }
+  for (const id of side.cargoCardIds) { const c = PATENTS_BY_ID[id]; parts.push(c ? c.name : id); }
+  for (const g of side.abilities) {
+    parts.push(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`);
+  }
+  return parts.length ? parts.join(' + ') : 'nothing';
+}
+
+function applyTradeOffer(state, op, ctx) {
+  if (state.auction) return fail('auction_in_progress');
+  if (state.trade) return fail('trade_in_progress');
+  const initiator = playerByProfile(state, ctx.profileId);
+  if (!initiator) return fail('not_a_player');
+  const partnerId = Number(op.partnerId);
+  if (!Number.isInteger(partnerId) || partnerId === initiator.profileId) return fail('bad_partner');
+  const partner = playerByProfile(state, partnerId);
+  if (!partner) return fail('bad_partner');
+
+  // Terms arrive from the OFFERER's (initiator's) perspective.
+  const give = normTradeSide(op.give);
+  const receive = normTradeSide(op.receive);
+  if (sideIsEmpty(give) && sideIsEmpty(receive)) return fail('empty_trade');
+
+  // In-space items (water / cargo) on EITHER side need the rockets colocated.
+  const needsColo = sideHasInSpace(give) || sideHasInSpace(receive);
+  const location = needsColo ? sharedRocketLocation(initiator, partner) : null;
+  if (needsColo && !location) return fail('not_colocated');
+
+  // Light pre-validation so a malformed offer is rejected up front; accept
+  // re-validates against the live board.
+  let err = validateTradeSide(state, initiator, give) || validateTradeSide(state, partner, receive);
+  if (err) return fail(err);
+
+  state.trade = {
+    initiatorId: initiator.profileId,
+    partnerId: partner.profileId,
+    awaiting: 'partner',
+    version: 1,
+    give, receive, location,
+  };
+  return {
+    ok: true, state,
+    log: `${initiator.name} offered ${partner.name} a trade: gives ${tradeSideSummary(state, give)} for ${tradeSideSummary(state, receive)}.`,
+  };
+}
+
+function applyTradeCounter(state, op, ctx) {
+  const t = state.trade;
+  if (!t) return fail('no_trade');
+  const caller = playerByProfile(state, ctx.profileId);
+  if (!caller) return fail('not_a_player');
+  if (caller.profileId !== t.initiatorId && caller.profileId !== t.partnerId) return fail('not_in_trade');
+  const callerRole = caller.profileId === t.initiatorId ? 'initiator' : 'partner';
+  // Only the party currently on the clock may counter (the one who received
+  // the last offer); the sender is already waiting on a reply.
+  if (t.awaiting !== callerRole) return fail('not_awaiting_you');
+
+  // Counter terms arrive from the CALLER's perspective; store from the
+  // initiator's. If the partner is countering, swap the sides.
+  let give = normTradeSide(op.give);
+  let receive = normTradeSide(op.receive);
+  if (callerRole === 'partner') { const tmp = give; give = receive; receive = tmp; }
+  if (sideIsEmpty(give) && sideIsEmpty(receive)) return fail('empty_trade');
+
+  const initiator = playerByProfile(state, t.initiatorId);
+  const partner = playerByProfile(state, t.partnerId);
+  const needsColo = sideHasInSpace(give) || sideHasInSpace(receive);
+  const location = needsColo ? sharedRocketLocation(initiator, partner) : null;
+  if (needsColo && !location) return fail('not_colocated');
+  let err = validateTradeSide(state, initiator, give) || validateTradeSide(state, partner, receive);
+  if (err) return fail(err);
+
+  t.give = give; t.receive = receive; t.location = location;
+  t.version = (t.version || 1) + 1;
+  t.awaiting = callerRole === 'initiator' ? 'partner' : 'initiator';
+  return { ok: true, state, log: `${caller.name} countered the trade.` };
+}
+
+function applyTradeAccept(state, op, ctx) {
+  const t = state.trade;
+  if (!t) return fail('no_trade');
+  const caller = playerByProfile(state, ctx.profileId);
+  if (!caller) return fail('not_a_player');
+  if (caller.profileId !== t.initiatorId && caller.profileId !== t.partnerId) return fail('not_in_trade');
+  const callerRole = caller.profileId === t.initiatorId ? 'initiator' : 'partner';
+  // Only the party who received the latest terms accepts; that one accept is
+  // the second consent (the sender already consented by offering).
+  if (t.awaiting !== callerRole) return fail('not_awaiting_you');
+  // Accept must land on the terms currently on the table.
+  if (op.version != null && Number(op.version) !== t.version) return fail('trade_stale');
+
+  const initiator = playerByProfile(state, t.initiatorId);
+  const partner = playerByProfile(state, t.partnerId);
+  if (!initiator || !partner) return fail('not_in_trade');
+
+  // Re-validate against the live board (someone may have moved or spent).
+  const needsColo = sideHasInSpace(t.give) || sideHasInSpace(t.receive);
+  if (needsColo && sharedRocketLocation(initiator, partner) !== t.location) return fail('not_colocated');
+  let err = validateTradeSide(state, initiator, t.give) || validateTradeSide(state, partner, t.receive)
+    || validateTradeReceipt(partner, t.give) || validateTradeReceipt(initiator, t.receive);
+  if (err) return fail(err);
+
+  // Atomic swap. Both sides resolved off the same pre-swap balances above.
+  executeTradeSide(initiator, partner, t.give);
+  executeTradeSide(partner, initiator, t.receive);
+  reconcileRocketAfterTrade(initiator);
+  reconcileRocketAfterTrade(partner);
+
+  const giveSum = tradeSideSummary(state, t.give);
+  const recvSum = tradeSideSummary(state, t.receive);
+  state.trade = null;
+  return {
+    ok: true, state,
+    log: `${initiator.name} traded ${giveSum} to ${partner.name} for ${recvSum}.`,
+  };
+}
+
+function applyTradeDecline(state, op, ctx) {
+  const t = state.trade;
+  if (!t) return fail('no_trade');
+  const caller = playerByProfile(state, ctx.profileId);
+  if (!caller) return fail('not_a_player');
+  if (caller.profileId !== t.initiatorId && caller.profileId !== t.partnerId) return fail('not_in_trade');
+  const other = playerByProfile(state, caller.profileId === t.initiatorId ? t.partnerId : t.initiatorId);
+  state.trade = null;
+  return {
+    ok: true, state,
+    log: `${caller.name} called off the trade with ${other ? other.name : 'the other player'}.`,
+  };
+}
+
+const TRADE = {
+  TRADE_OFFER: applyTradeOffer,
+  TRADE_COUNTER: applyTradeCounter,
+  TRADE_ACCEPT: applyTradeAccept,
+  TRADE_DECLINE: applyTradeDecline,
+};
+
 // ----- starting-crew pick (pre-game; any player, any time) -----
 //
 // Each player picks one of the 12 faction faces at session open. The
@@ -3724,6 +4055,13 @@ export function applyOperation(prevState, op, ctx) {
   // against the auction roles.
   if (AUCTION[op.kind]) return AUCTION[op.kind](clone(prevState), op, ctx);
 
+  // Trade ops are a side-channel deal: free, both-party consent, allowed at any
+  // point on or off turn. Like auction ops they bypass the turn guard and
+  // validate their own caller. They do NOT freeze the table - other players keep
+  // playing - but they refuse to open while an auction is up (the handlers check
+  // state.auction) to avoid two competing multi-party surfaces.
+  if (TRADE[op.kind]) return TRADE[op.kind](clone(prevState), op, ctx);
+
   // Off-turn route planning. A planned route is PRIVATE (redacted from
   // opponents) and INERT (only the owner's own MOVE ever executes it), so a
   // player may set / clear THEIR OWN route while waiting for their turn. When
@@ -3803,6 +4141,7 @@ export function applyOperation(prevState, op, ctx) {
 // explicitly rather than via a group).
 export const SUPPORTED_OPS = [
   ...Object.keys(FUNCTIONAL), ...Object.keys(META), ...Object.keys(AUCTION),
+  ...Object.keys(TRADE),
   ...Object.keys(CREW), ...Object.keys(LIFECYCLE), 'DRAFT_PICK', 'EVENT_CHOICE',
 ];
 // Ops that require the caller to supply ctx.turnBaseState.

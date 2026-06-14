@@ -1749,11 +1749,13 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
     // player can never unwind into the turn that just ended). Auction
     // ops advance the floor too: an auction moves aqua / decks / hands
     // that are not on the per-turn undo stack, so letting undo replay
-    // across one would silently drop those effects. PICK_CREW is also
+    // across one would silently drop those effects. TRADE ops are the
+    // same - a finalized trade moves two players' aqua / cards / water /
+    // abilities off the active player's undo stack. PICK_CREW is also
     // permanent (session-setup), and SET_FIRST_PLAYER opens a fresh
     // round-leader turn, so both commit the same way.
     if (kind === 'END_TURN' || kind === 'PICK_CREW' || kind === 'SET_FIRST_PLAYER'
-        || kind.startsWith('AUCTION_')) {
+        || kind.startsWith('AUCTION_') || kind.startsWith('TRADE_')) {
       db.prepare('UPDATE games SET committed_seq = ? WHERE id = ?').run(nextSeq, id);
     }
     if (result.state.status === 'finished') {
