@@ -3727,7 +3727,7 @@ function abilityLabel(key) {
 function tradeSideSummary(state, side) {
   const parts = [];
   if (side.aqua) parts.push(`${side.aqua} aqua`);
-  if (side.water) parts.push(`${side.water} water`);
+  if (side.water) parts.push(`${side.water} fuel`);
   for (const id of side.handCardIds) { const c = PATENTS_BY_ID[id]; parts.push(c ? c.name : id); }
   for (const id of side.cargoCardIds) { const c = PATENTS_BY_ID[id]; parts.push(c ? c.name : id); }
   for (const g of side.abilities) {
@@ -3751,10 +3751,12 @@ function applyTradeOffer(state, op, ctx) {
   const receive = normTradeSide(op.receive);
   if (sideIsEmpty(give) && sideIsEmpty(receive)) return fail('empty_trade');
 
-  // In-space items (water / cargo) on EITHER side need the rockets colocated.
+  // In-space items (fuel / cargo) on EITHER side need the rockets colocated at
+  // a SITE. At LEO fuel is just aqua (1:1 at the bank), so fuel/cargo can only
+  // change hands when both ships are parked together out at a site/node.
   const needsColo = sideHasInSpace(give) || sideHasInSpace(receive);
   const location = needsColo ? sharedRocketLocation(initiator, partner) : null;
-  if (needsColo && !location) return fail('not_colocated');
+  if (needsColo && (!location || location === 'leo')) return fail('fuel_needs_site');
 
   // Light pre-validation so a malformed offer is rejected up front; accept
   // re-validates against the live board.
@@ -3796,7 +3798,7 @@ function applyTradeCounter(state, op, ctx) {
   const partner = playerByProfile(state, t.partnerId);
   const needsColo = sideHasInSpace(give) || sideHasInSpace(receive);
   const location = needsColo ? sharedRocketLocation(initiator, partner) : null;
-  if (needsColo && !location) return fail('not_colocated');
+  if (needsColo && (!location || location === 'leo')) return fail('fuel_needs_site');
   let err = validateTradeSide(state, initiator, give) || validateTradeSide(state, partner, receive);
   if (err) return fail(err);
 

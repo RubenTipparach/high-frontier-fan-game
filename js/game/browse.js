@@ -1526,9 +1526,45 @@ function cardLabel(id) {
   return c ? c.name : id;
 }
 
-// Build one give/receive column of the trade builder for `owner`. Returns
-// { el, read } where read() collects the side object from the inputs.
-function buildTradeColumn(title, owner, colocated) {
+// Pop the full card so a player can assess it before trading. Click anywhere to
+// close. Layered above the builder modal.
+function openCardPreview(id) {
+  const card = PATENTS_BY_ID[id] || CREW_BY_ID[id];
+  if (!card) return;
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back mp-card-preview-back';
+  const box = document.createElement('div');
+  box.className = 'mp-card-preview';
+  try { box.appendChild(renderCard(card, { type: CREW_BY_ID[id] ? 'crew' : 'patent' })); }
+  catch { box.textContent = card.name || id; }
+  back.appendChild(box);
+  back.addEventListener('click', () => back.remove());
+  document.body.appendChild(back);
+}
+
+// One selectable card row: a checkbox plus the card NAME as a button that opens
+// the full card preview (assess before trading). Returns the checkbox.
+function tradeCardRow(col, id) {
+  const w = document.createElement('div');
+  w.className = 'mp-trade-check';
+  const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = id; cb.id = 'tc_' + id + '_' + Math.random().toString(36).slice(2, 7);
+  const nameBtn = document.createElement('button');
+  nameBtn.type = 'button'; nameBtn.className = 'mp-trade-cardname';
+  nameBtn.textContent = cardLabel(id);
+  nameBtn.title = 'View the full card';
+  nameBtn.addEventListener('click', () => openCardPreview(id));
+  const lbl = document.createElement('label'); lbl.setAttribute('for', cb.id); lbl.className = 'mp-trade-checkbox-only'; lbl.appendChild(cb);
+  w.append(lbl, nameBtn);
+  col.appendChild(w);
+  return cb;
+}
+
+// Build one give/receive column for `owner`, scoped to a trade CONTEXT:
+//   { kind: 'leo' }            -> Aqua + Hand patents + Crew ability (the bank)
+//   { kind: 'site', siteId }   -> Aqua + Fuel + Cargo aboard + Crew ability
+// Returns { el, read } where read() collects the side object from the inputs.
+function buildTradeColumn(title, owner, context) {
+  const atSite = context.kind === 'site';
   const col = document.createElement('div');
   col.className = 'mp-trade-col';
   const h = document.createElement('div');
@@ -1536,7 +1572,7 @@ function buildTradeColumn(title, owner, colocated) {
   h.textContent = title;
   col.appendChild(h);
 
-  // Aqua
+  // Aqua - the only currency, available wherever a trade is struck.
   const aquaRow = document.createElement('label');
   aquaRow.className = 'mp-trade-field';
   aquaRow.innerHTML = '<span>💧 Aqua</span>';
@@ -1546,62 +1582,47 @@ function buildTradeColumn(title, owner, colocated) {
   aquaRow.appendChild(aquaIn);
   col.appendChild(aquaRow);
 
-  // Water (in-space; needs colocation)
-  const tank = Math.floor((owner.rocket && owner.rocket.tank) || 0);
-  const waterRow = document.createElement('label');
-  waterRow.className = 'mp-trade-field';
-  waterRow.innerHTML = `<span>🚰 Water (${tank})</span>`;
-  const waterIn = document.createElement('input');
-  waterIn.type = 'number'; waterIn.min = '0'; waterIn.value = '0'; waterIn.max = String(tank);
-  waterIn.disabled = !colocated;
-  waterRow.appendChild(waterIn);
-  col.appendChild(waterRow);
-
-  // Hand patents (abstract; no colocation)
-  const handIds = (owner.hand || []).filter((id) => PATENTS_BY_ID[id]);
-  const handChecks = [];
-  if (handIds.length) {
-    const lbl = document.createElement('div');
-    lbl.className = 'mp-trade-sub';
-    lbl.textContent = 'Hand patents';
-    col.appendChild(lbl);
-    for (const id of handIds) {
-      const w = document.createElement('label');
-      w.className = 'mp-trade-check';
-      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = id;
-      w.append(cb, document.createTextNode(' ' + cardLabel(id)));
-      col.appendChild(w);
-      handChecks.push(cb);
-    }
+  // Fuel (tank water) - only when meeting at a colocated site (out at LEO,
+  // fuel is just aqua, so it isn't a separate thing to trade there).
+  let waterIn = null;
+  if (atSite) {
+    const tank = Math.floor((owner.rocket && owner.rocket.tank) || 0);
+    const waterRow = document.createElement('label');
+    waterRow.className = 'mp-trade-field';
+    waterRow.innerHTML = `<span>⛽ Fuel (${tank})</span>`;
+    waterIn = document.createElement('input');
+    waterIn.type = 'number'; waterIn.min = '0'; waterIn.value = '0'; waterIn.max = String(tank);
+    waterRow.appendChild(waterIn);
+    col.appendChild(waterRow);
   }
 
-  // Cargo aboard the rocket (in-space; needs colocation). Patents only.
-  const cargoIds = ((owner.rocket && owner.rocket.stack) || [])
-    .filter((s) => s && PATENTS_BY_ID[s.id]).map((s) => s.id);
-  const cargoChecks = [];
-  if (cargoIds.length) {
-    const lbl = document.createElement('div');
-    lbl.className = 'mp-trade-sub';
-    lbl.textContent = 'Cargo aboard' + (colocated ? '' : ' (needs colocation)');
-    col.appendChild(lbl);
-    for (const id of cargoIds) {
-      const w = document.createElement('label');
-      w.className = 'mp-trade-check';
-      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = id; cb.disabled = !colocated;
-      w.append(cb, document.createTextNode(' ' + cardLabel(id)));
-      col.appendChild(w);
-      cargoChecks.push(cb);
-    }
+  // Cards: hand patents at the LEO meeting; cargo aboard the rocket at a site.
+  const field = atSite ? 'cargo' : 'hand';
+  const ids = atSite
+    ? ((owner.rocket && owner.rocket.stack) || []).filter((s) => s && PATENTS_BY_ID[s.id]).map((s) => s.id)
+    : (owner.hand || []).filter((id) => PATENTS_BY_ID[id]);
+  const cardChecks = [];
+  const lbl = document.createElement('div');
+  lbl.className = 'mp-trade-sub';
+  lbl.textContent = atSite ? 'Cargo aboard' : 'Hand patents';
+  col.appendChild(lbl);
+  if (ids.length) {
+    for (const id of ids) cardChecks.push(tradeCardRow(col, id));
+  } else {
+    const none = document.createElement('div');
+    none.className = 'muted mp-trade-none';
+    none.textContent = atSite ? 'No cargo aboard.' : 'No hand patents.';
+    col.appendChild(none);
   }
 
   // Crew ability grant (abstract). Pick one ability + a term.
   const abilities = grantableAbilitiesOf(owner);
   let abSel = null; let termIn = null;
   if (abilities.length) {
-    const lbl = document.createElement('div');
-    lbl.className = 'mp-trade-sub';
-    lbl.textContent = 'Crew ability';
-    col.appendChild(lbl);
+    const albl = document.createElement('div');
+    albl.className = 'mp-trade-sub';
+    albl.textContent = 'Crew ability';
+    col.appendChild(albl);
     const row = document.createElement('div');
     row.className = 'mp-trade-ability-row';
     abSel = document.createElement('select');
@@ -1619,9 +1640,9 @@ function buildTradeColumn(title, owner, colocated) {
     const intv = (el) => { const v = Math.floor(Number(el.value)); return Number.isFinite(v) && v > 0 ? v : 0; };
     const side = {
       aqua: intv(aquaIn),
-      water: colocated ? intv(waterIn) : 0,
-      handCardIds: handChecks.filter((c) => c.checked).map((c) => c.value),
-      cargoCardIds: colocated ? cargoChecks.filter((c) => c.checked).map((c) => c.value) : [],
+      water: waterIn ? intv(waterIn) : 0,
+      handCardIds: field === 'hand' ? cardChecks.filter((c) => c.checked).map((c) => c.value) : [],
+      cargoCardIds: field === 'cargo' ? cardChecks.filter((c) => c.checked).map((c) => c.value) : [],
       abilities: [],
     };
     if (abSel && abSel.value) {
@@ -1654,12 +1675,20 @@ function openTradeBuilder(opts = {}) {
 
   let partnerId = opts.partnerId != null ? Number(opts.partnerId)
     : (others[0] && others[0].profileId);
+  // Selected meeting place: 'leo' (bank + hand) or a colocated siteId (fuel +
+  // cargo). Defaults to LEO; reset when the partner changes.
+  let place = 'leo';
 
   function rebuild() {
     modal.innerHTML = '';
     const partner = others.find((p) => p.profileId === partnerId) || others[0];
     partnerId = partner.profileId;
-    const colocated = !!tradeSharedLocation(me, partner);
+    // The site both rockets share (non-LEO), if any. LEO is always a valid
+    // meeting place; a shared site is an extra option (usually none).
+    const shared = tradeSharedLocation(me, partner);
+    const sharedSite = (shared && shared !== 'leo') ? shared : null;
+    if (place !== 'leo' && place !== sharedSite) place = 'leo';
+    const context = place === 'leo' ? { kind: 'leo' } : { kind: 'site', siteId: place };
 
     const head = document.createElement('div');
     head.className = 'mp-trade-head';
@@ -1674,21 +1703,39 @@ function openTradeBuilder(opts = {}) {
     psel.innerHTML = others.map((p) =>
       `<option value="${p.profileId}"${p.profileId === partnerId ? ' selected' : ''}>@${p.name}</option>`).join('');
     psel.disabled = !!opts.isCounter;
-    psel.addEventListener('change', () => { partnerId = Number(psel.value); rebuild(); });
+    psel.addEventListener('change', () => { partnerId = Number(psel.value); place = 'leo'; rebuild(); });
     pwrap.appendChild(psel);
     modal.appendChild(pwrap);
 
+    // Meeting-place picker. LEO is always available (the bank + hand); a
+    // colocated site unlocks fuel + cargo aboard. A trade is struck at exactly
+    // one place.
+    const mwrap = document.createElement('label');
+    mwrap.className = 'mp-trade-field';
+    mwrap.innerHTML = '<span>Meeting place</span>';
+    const msel = document.createElement('select');
+    let opts2 = `<option value="leo"${place === 'leo' ? ' selected' : ''}>LEO · bank & hand</option>`;
+    if (sharedSite) {
+      opts2 += `<option value="${sharedSite}"${place === sharedSite ? ' selected' : ''}>${onlineSiteLabel(sharedSite)} · colocated</option>`;
+    }
+    msel.innerHTML = opts2;
+    msel.addEventListener('change', () => { place = msel.value; rebuild(); });
+    mwrap.appendChild(msel);
+    modal.appendChild(mwrap);
+
     const colo = document.createElement('div');
-    colo.className = 'mp-trade-colo ' + (colocated ? 'is-colo' : 'no-colo');
-    colo.textContent = colocated
-      ? `You and @${partner.name} are colocated - cargo and water can trade.`
-      : `Not colocated - aqua, hand patents, and abilities only.`;
+    colo.className = 'mp-trade-colo ' + (context.kind === 'site' ? 'is-colo' : 'no-colo');
+    colo.textContent = context.kind === 'site'
+      ? `Meeting at ${onlineSiteLabel(place)} - fuel and cargo aboard can change hands.`
+      : sharedSite
+        ? `LEO meeting: aqua, hand patents, and abilities. (Switch to ${onlineSiteLabel(sharedSite)} for fuel & cargo.)`
+        : `LEO meeting: aqua, hand patents, and abilities. Park together at a site to trade fuel & cargo.`;
     modal.appendChild(colo);
 
     const cols = document.createElement('div');
     cols.className = 'mp-trade-cols';
-    const giveCol = buildTradeColumn('You give', me, colocated);
-    const recvCol = buildTradeColumn('You receive', partner, colocated);
+    const giveCol = buildTradeColumn('You give', me, context);
+    const recvCol = buildTradeColumn('You receive', partner, context);
     cols.append(giveCol.el, recvCol.el);
     modal.appendChild(cols);
 
@@ -1733,7 +1780,7 @@ function closeTradeBuilder() {
 function tradeSideText(side) {
   const parts = [];
   if (side.aqua) parts.push(`${side.aqua} aqua`);
-  if (side.water) parts.push(`${side.water} water`);
+  if (side.water) parts.push(`${side.water} fuel`);
   for (const id of (side.handCardIds || [])) parts.push(cardLabel(id));
   for (const id of (side.cargoCardIds || [])) parts.push(cardLabel(id));
   for (const g of (side.abilities || [])) {
@@ -3640,6 +3687,7 @@ function humanizeOnlineOpError(code, detail) {
     bad_partner: 'Pick a valid trading partner.',
     empty_trade: 'A trade needs at least one item on the table.',
     trade_stale: 'The terms changed - review the new offer before accepting.',
+    fuel_needs_site: 'Fuel and cargo trade only when both ships are parked together at a site. At LEO, trade aqua instead.',
     card_not_aboard: 'That card is no longer aboard the rocket.',
     cannot_trade_dirt: 'Dirt fuel can\'t be traded - only water.',
     ability_not_held: 'That ability is no longer available to grant.',

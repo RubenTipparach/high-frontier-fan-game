@@ -7807,3 +7807,25 @@ body:has(#view-browse:not(.hidden)) #main {
 .mp-trade-card-body { font-size: 13px; line-height: 1.5; }
 .mp-trade-card-body b { color: var(--ink-dim, #8b90b8); font-weight: 600; }
 .mp-trade-status { font-size: 12px; margin: 8px 0; }
+
+/* Clickable card name in the trade builder (opens the full card preview). */
+.mp-trade-check { gap: 6px; }
+.mp-trade-checkbox-only { display: inline-flex; align-items: center; margin: 0; }
+.mp-trade-cardname {
+  background: none;
+  border: none;
+  color: var(--accent, #7dd3fc);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+  text-align: left;
+}
+.mp-trade-cardname:hover { color: var(--ink); }
+.mp-trade-none { font-size: 11px; margin: 2px 0 4px; }
+.mp-card-preview-back { z-index: 145; cursor: zoom-out; }
+.mp-card-preview {
+  transform: scale(1.2);
+  filter: drop-shadow(0 18px 50px rgba(0, 0, 0, 0.6));
+}

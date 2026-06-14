@@ -1,0 +1,72 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="/css/style.css">
+<link rel="stylesheet" href="/css/map.css">
+<style> body{ background:#0a0913; margin:0; padding:20px; } .stage{ display:flex; gap:24px; align-items:flex-start; flex-wrap:wrap; } .label{ color:#8b90b8; font:12px sans-serif; margin:8px 0; } .mp-modal-back{ position:static !important; inset:auto !important; background:transparent !important; backdrop-filter:none !important; padding:0 !important; }</style>
+</head><body>
+<div class="stage">
+  <div>
+    <div class="label">Meeting place: LEO (bank &amp; hand) — default</div>
+    <div class="mp-modal-back"><div class="mp-trade-builder-modal" style="max-width:560px">
+      <div class="mp-trade-head"><h3>Propose a trade</h3></div>
+      <label class="mp-trade-field"><span>Partner</span><select><option>@Lawton</option></select></label>
+      <label class="mp-trade-field"><span>Meeting place</span><select><option>LEO · bank &amp; hand</option><option>Ceres · colocated</option></select></label>
+      <div class="mp-trade-colo no-colo">LEO meeting: aqua, hand patents, and abilities. (Switch to Ceres for fuel &amp; cargo.)</div>
+      <div class="mp-trade-cols">
+        <div class="mp-trade-col">
+          <div class="mp-detail-label">You give</div>
+          <label class="mp-trade-field"><span>💧 Aqua</span><input type="number" value="2"></label>
+          <div class="mp-trade-sub">Hand patents</div>
+          <div class="mp-trade-check"><label class="mp-trade-checkbox-only"><input type="checkbox" checked></label><button class="mp-trade-cardname">Rankine Solar Dynamic</button></div>
+          <div class="mp-trade-check"><label class="mp-trade-checkbox-only"><input type="checkbox"></label><button class="mp-trade-cardname">Pulsed Inductive</button></div>
+          <div class="mp-trade-sub">Crew ability</div>
+          <div class="mp-trade-ability-row"><select><option>Secretary General</option></select><input class="mp-trade-term" type="number" placeholder="turns" value="3"></div>
+        </div>
+        <div class="mp-trade-col">
+          <div class="mp-detail-label">You receive</div>
+          <label class="mp-trade-field"><span>💧 Aqua</span><input type="number" value="0"></label>
+          <div class="mp-trade-sub">Hand patents</div>
+          <div class="mp-trade-check"><label class="mp-trade-checkbox-only"><input type="checkbox" checked></label><button class="mp-trade-cardname">Brayton Turbine</button></div>
+          <div class="mp-trade-check"><label class="mp-trade-checkbox-only"><input type="checkbox"></label><button class="mp-trade-cardname">Tungsten Resistojet</button></div>
+          <div class="mp-trade-sub">Crew ability</div>
+          <div class="mp-trade-ability-row"><select><option>— none —</option></select><input class="mp-trade-term" type="number" placeholder="turns"></div>
+        </div>
+      </div>
+      <div class="hud-error"></div>
+      <div class="mp-trade-btns"><button class="modal-btn">Cancel</button><button class="modal-btn primary">Send offer</button></div>
+    </div></div>
+  </div>
+
+  <div>
+    <div class="label">Meeting place: colocated site (fuel &amp; cargo)</div>
+    <div class="mp-modal-back"><div class="mp-trade-builder-modal" style="max-width:560px">
+      <div class="mp-trade-head"><h3>Propose a trade</h3></div>
+      <label class="mp-trade-field"><span>Partner</span><select><option>@Lawton</option></select></label>
+      <label class="mp-trade-field"><span>Meeting place</span><select><option selected>Ceres · colocated</option></select></label>
+      <div class="mp-trade-colo is-colo">Meeting at Ceres - fuel and cargo aboard can change hands.</div>
+      <div class="mp-trade-cols">
+        <div class="mp-trade-col">
+          <div class="mp-detail-label">You give</div>
+          <label class="mp-trade-field"><span>💧 Aqua</span><input type="number" value="0"></label>
+          <label class="mp-trade-field"><span>⛽ Fuel (3)</span><input type="number" value="2"></label>
+          <div class="mp-trade-sub">Cargo aboard</div>
+          <div class="mp-trade-check"><label class="mp-trade-checkbox-only"><input type="checkbox" checked></label><button class="mp-trade-cardname">Free Electron Laser</button></div>
+          <div class="mp-trade-sub">Crew ability</div>
+          <div class="mp-trade-ability-row"><select><option>— none —</option></select><input class="mp-trade-term" type="number" placeholder="turns"></div>
+        </div>
+        <div class="mp-trade-col">
+          <div class="mp-detail-label">You receive</div>
+          <label class="mp-trade-field"><span>💧 Aqua</span><input type="number" value="0"></label>
+          <label class="mp-trade-field"><span>⛽ Fuel (0)</span><input type="number" value="0"></label>
+          <div class="mp-trade-sub">Cargo aboard</div>
+          <div class="mp-trade-check"><label class="mp-trade-checkbox-only"><input type="checkbox" checked></label><button class="mp-trade-cardname">D-T Gun Fusion</button></div>
+          <div class="mp-trade-sub">Crew ability</div>
+          <div class="mp-trade-ability-row"><select><option>— none —</option></select><input class="mp-trade-term" type="number" placeholder="turns"></div>
+        </div>
+      </div>
+      <div class="hud-error"></div>
+      <div class="mp-trade-btns"><button class="modal-btn">Cancel</button><button class="modal-btn primary">Send offer</button></div>
+    </div></div>
+  </div>
+</div>
+</body></html>
