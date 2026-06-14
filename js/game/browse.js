@@ -36,7 +36,7 @@ import {
   getActiveThrusterId, setActiveThruster,
   getTankWater, setTankWater, addFuel, removeFuel, getTankMax, getWaterCap,
   getTankGrade, setTankGrade, getActiveFuelGrade, getDirtCapability,
-  getStackTotals, getActiveThrusterStats, setSolarZone,
+  getStackTotals, getActiveThrusterStats, setSolarZone, setHasPowersat,
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats, getSupportChainView,
   getWiring, setWiring,
@@ -11904,6 +11904,9 @@ function syncSandboxRocket() {
   // Tell the rocket engine which heliocentric zone it's in so solar-
   // driven thrusters get the zone's solar-power thrust modifier.
   setSolarZone(site && site.solarZone ? site.solarZone : null);
+  // Powersat (ESA): my faction grants +1 thrust to a push-icon thruster.
+  // Mirror the engine so the client's thrust/fuel math stays byte-identical.
+  setHasPowersat(myFactionPrivilege() === 'POWERSAT');
   const x = site && typeof site.x === 'number' ? site.x : LEO_ANCHOR.x;
   const y = site && typeof site.y === 'number' ? site.y : LEO_ANCHOR.y;
   // Active prospector kind is forwarded to the renderer so it can

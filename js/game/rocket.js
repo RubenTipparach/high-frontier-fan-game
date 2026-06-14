@@ -951,6 +951,22 @@ function faceHasSolar(face) {
   return !!(face && Array.isArray(face.properties)
     && face.properties.some((p) => p.key === 'solar' && p.value));
 }
+function faceHasPush(face) {
+  return !!(face && Array.isArray(face.properties)
+    && face.properties.some((p) => p.key === 'push' && p.value));
+}
+
+// Powersat (ESA faction privilege): when set, the local player gives +1
+// thrust to a push-icon thruster. Pushed in from browse.js off my faction so
+// getActiveThrusterStats matches the server's activeNetThrust (byte-parity:
+// a move the client allows must not be rejected for a different thrust).
+let _hasPowersat = false;
+export function setHasPowersat(on) {
+  const v = !!on;
+  if (v === _hasPowersat) return;
+  _hasPowersat = v;
+  notify();
+}
 
 // The rocket's current heliocentric zone, pushed in from browse.js
 // whenever the ship moves. Drives the solar-power thrust modifier on
@@ -1168,6 +1184,13 @@ export function getActiveThrusterStats() {
   let baseThrust = thrust;
   let baseFuel = fuel;
   const modifiers = [];
+  // Powersat (ESA faction privilege): +1 thrust to a push-icon thruster for
+  // the local Powersat holder. Mirrors the server's activeNetThrust so the
+  // client's thrust matches (byte-parity contract).
+  if (_hasPowersat && faceHasPush(f)) {
+    thrust += 1;
+    modifiers.push({ from: 'Powersat', kind: 'thrust', delta: 1 });
+  }
   // Support-chain modifiers (rules 1+2, data/support-chain.js). Walk the FULL
   // chain that powers this thruster and apply only the modifier path: every
   // generator before the first reactor, plus that first reactor. A reactor two

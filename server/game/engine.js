@@ -919,6 +919,10 @@ function faceHasSolar(face) {
   return !!(face && Array.isArray(face.properties)
     && face.properties.some((p) => p.key === 'solar' && p.value));
 }
+function faceHasPush(face) {
+  return !!(face && Array.isArray(face.properties)
+    && face.properties.some((p) => p.key === 'push' && p.value));
+}
 
 // Normalise a rocket's stack into the support-chain resolver's card shape
 // (mirror of rocket.js#chainCardsFromStack). Everything (supplies / requires /
@@ -950,7 +954,7 @@ function chainCardsFromRocket(rocket) {
 // the printed base thrust - is what the liftoff/landing gate and the rad
 // bypass must use. Afterburn is a client-engaged one-shot the server does
 // not track, so it is intentionally omitted here. 0 when no thruster.
-function activeNetThrust(rocket) {
+function activeNetThrust(rocket, powersat = false) {
   const tid = rocket.activeThrusterId;
   if (!tid) return 0;
   const slot = rocket.stack.find((s) => s.id === tid);
@@ -958,6 +962,8 @@ function activeNetThrust(rocket) {
   const f = thrusterFaceOf(slot);
   let thrust = Number.isFinite(f.thrust) ? f.thrust : null;
   if (thrust == null) return 0;
+  // Powersat (ESA): +1 thrust to a push-icon thruster for the privilege holder.
+  if (powersat && faceHasPush(f)) thrust += 1;
   // Support-chain thrust modifiers (rules 1+2, data/support-chain.js): mirror of
   // rocket.js#getActiveThrusterStats. Walk the full chain that powers this
   // thruster and add the thrustMod of the modifier path only (generators before
@@ -1180,7 +1186,7 @@ function applyMove(state, op, player) {
   // dry-run (result.calc) so the client can show every intermediate value
   // instead of just tank before/after.
   const moveCalc = {
-    finalThrust: activeNetThrust(player.rocket),
+    finalThrust: activeNetThrust(player.rocket, hasPrivilege(state, player, 'POWERSAT')),
     fuelStepsPerBurn: perBurn,
     dryMass,
     wetMass,
@@ -1213,7 +1219,7 @@ function applyMove(state, op, player) {
     if (k === 'rad') rad.push(slug);
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
-  const thrust = activeNetThrust(player.rocket);
+  const thrust = activeNetThrust(player.rocket, hasPrivilege(state, player, 'POWERSAT'));
   // Factory-assist liftoff / landing gate. A maneuver where net thrust
   // <= site size is only legal if a factory carries it (assist), which
   // is a hazard roll unless a colony waives it. No factory => hard block.
