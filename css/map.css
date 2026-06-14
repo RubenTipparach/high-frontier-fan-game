@@ -6595,6 +6595,28 @@ body:has(#view-browse:not(.hidden)) #main {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(125, 211, 252, 0.45), 0 8px 20px rgba(0, 0, 0, 0.5);
 }
+/* A crew another player already claimed: locked, dimmed, with a TAKEN ribbon. */
+.crew-faction-card.is-taken {
+  cursor: not-allowed;
+  position: relative;
+  filter: grayscale(0.7) brightness(0.6);
+}
+.crew-faction-card.is-taken:hover { transform: none; }
+.crew-faction-card .crew-faction-taken {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%) rotate(-12deg);
+  padding: 3px 12px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #fee2e2;
+  background: rgba(127, 29, 29, 0.92);
+  border: 1px solid #fca5a5;
+  border-radius: 6px;
+  pointer-events: none;
+}
 .crew-wizard-modal .card-modal-actions { flex: 0 0 auto; justify-content: flex-end; }
 .crew-wizard-modal .modal-btn.primary {
   background: #14532d; color: #d1fae5; border-color: #166534;

@@ -681,21 +681,25 @@ function maybePromptCrewPick(snapshot) {
   const myp = (snapshot.players || []).find((p) => p.profileId === myId);
   if (!myp || myp.faction) return;
   _crewWizardOpen = true;
-  // Server assigns each player one of the six crew-card colours at
-  // game create. The wizard filters down to the two faces of the
-  // crew card matching that colour - both faces are legal picks
-  // (it's a single double-sided card), everything else is locked.
-  const desc = myp.color
-    ? 'Your faction colour is locked in by the server. Pick one of the two faces of your crew card.'
-    : 'Pick your starting faction. Every player chooses one before play; your pick is permanent for this session.';
+  // Every crew card is on offer. Pick any one that another player hasn't
+  // already claimed; your seat colour is then set to that crew's colour.
   openCrewWizard({
-    description: desc,
-    restrictToColor: myp.color || null,
+    description: 'Pick your starting faction from any available crew. Your pick sets your colour and is permanent for this session.',
+    takenCardIds: crewCardsTakenByOthers(snapshot, myId),
     onCommit: ({ cardId, face }) => {
       submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
     },
     onDone: () => { _crewWizardOpen = false; },
   });
+}
+
+// Crew cards already claimed by OTHER players (each physical crew card is one
+// player's faction, so a card someone else holds is off the board). Excludes
+// the local player so they can still switch faces of their own pick.
+function crewCardsTakenByOthers(snapshot, myId) {
+  return (snapshot && snapshot.players || [])
+    .filter((p) => p.profileId !== myId && p.faction && p.faction.cardId)
+    .map((p) => p.faction.cardId);
 }
 
 // Crew-draft waiting overlay. Visible whenever the snapshot says
@@ -971,11 +975,11 @@ function maybePromptCrewPickForced(snapshot) {
   if (!myp) return;
   _crewWizardOpen = true;
   const desc = myp.faction
-    ? 'Switch to the other face of your crew card. You can change as long as other players are still picking.'
-    : 'Pick one of the two faces of your crew card.';
+    ? 'Switch crews or flip to the other face. You can change as long as other players are still picking.'
+    : 'Pick your starting faction from any available crew.';
   openCrewWizard({
     description: desc,
-    restrictToColor: myp.color || null,
+    takenCardIds: crewCardsTakenByOthers(snapshot, myId),
     onCommit: ({ cardId, face }) => {
       submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
     },
@@ -3144,7 +3148,7 @@ function humanizeOnlineOpError(code, detail) {
     awaiting_crew_picks: 'Waiting for every player to pick a starting crew.',
     unknown_crew: 'That crew card does not exist.',
     unknown_crew_face: 'Pick the primary or secondary face.',
-    wrong_crew_colour: 'That crew card is not your assigned colour.',
+    crew_taken: 'Another player already claimed that crew. Pick a different one.',
     auction_in_progress: 'An auction is already underway.',
     need_opponent: 'Need another player to hold an auction.',
     hand_limit: 'Hand limit reached (4) - you cannot start or join an auction. Build or transfer cards first.',
@@ -16581,7 +16585,8 @@ function openCrewWizard(arg, maybeOnDone) {
   // Back-compat: openCrewWizard(onDoneFn) keeps working.
   const opts = typeof arg === 'function' ? { onDone: arg } : (arg || {});
   if (maybeOnDone) opts.onDone = maybeOnDone;
-  const { onDone, onCommit, description, restrictToColor } = opts;
+  const { onDone, onCommit, description, restrictToColor, takenCardIds } = opts;
+  const takenSet = new Set(takenCardIds || []);
 
   document.querySelector('.crew-wizard-overlay')?.remove();
   let selected = null; // { cardId, face }
@@ -16644,27 +16649,33 @@ function openCrewWizard(arg, maybeOnDone) {
         <button type="button" class="modal-btn primary crew-confirm" ${selected ? '' : 'disabled'}>🚀 Start with ${selName}</button>
       </div>
     `;
-    // Show the actual crew cards (the 12 single-face faction
-    // faces), each a selectable tile. In multiplayer the server
-    // assigns each player one of the six PLAYER_COLORS (which
-    // map 1:1 to the six crew cards), and the player can only
-    // pick from the two faces of the card matching their colour
-    // (restrictToColor). Solo mode passes no restriction and
-    // sees every face.
+    // Show the actual crew cards (the 12 single-face faction faces), each a
+    // selectable tile. Every crew is on offer; a card another player has
+    // already claimed (takenCardIds - both its faces) is shown locked. Solo
+    // mode passes neither restriction and sees every face. The legacy
+    // restrictToColor filter is still honoured if a caller passes it.
     const grid = dialog.querySelector('.crew-faction-grid');
     const faces = restrictToColor
       ? CREW_FACES.filter((c) => c.color === restrictToColor)
       : CREW_FACES;
     for (const c of faces) {
       const isSel = selected && selected.cardId === c.srcId && selected.face === c.face;
+      const taken = takenSet.has(c.srcId);
       const tile = document.createElement('div');
-      tile.className = 'crew-faction-card' + (isSel ? ' is-selected' : '');
+      tile.className = 'crew-faction-card' + (isSel ? ' is-selected' : '') + (taken ? ' is-taken' : '');
       tile.setAttribute('role', 'button');
-      tile.tabIndex = 0;
+      tile.tabIndex = taken ? -1 : 0;
       tile.dataset.card = c.srcId;
       tile.dataset.face = c.face;
+      if (taken) { tile.setAttribute('aria-disabled', 'true'); tile.title = 'Another player has this crew.'; }
       tile.appendChild(renderCard(c, { type: 'crew' }));
-      const pick = () => { selected = { cardId: c.srcId, face: c.face }; render(); };
+      if (taken) {
+        const badge = document.createElement('span');
+        badge.className = 'crew-faction-taken';
+        badge.textContent = 'Taken';
+        tile.appendChild(badge);
+      }
+      const pick = () => { if (taken) return; selected = { cardId: c.srcId, face: c.face }; render(); };
       tile.addEventListener('click', pick);
       tile.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); }

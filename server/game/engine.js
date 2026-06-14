@@ -3285,16 +3285,21 @@ function applyPickCrew(state, op, ctx) {
   if (!card) return fail('unknown_crew');
   const faceData = card.faces && card.faces[face];
   if (!faceData) return fail('unknown_crew_face');
-  // Each crew card carries one of the six PLAYER_COLORS (the
-  // faction band colour). The player's assigned seat colour pins
-  // them to that card - both faces of that card are valid picks,
-  // every other card is forbidden. Reject mismatches so a client
-  // bug can't bypass the colour gate.
-  if (card.color && player.color && card.color !== player.color) {
-    return fail('wrong_crew_colour');
+  // Any crew card is a legal pick as long as no OTHER player has already
+  // claimed it: each physical crew card is one player's faction, so a card
+  // taken by someone else is off the board. Both faces of an unclaimed card
+  // are valid (it's a single double-sided card); the player chooses which
+  // face is their faction.
+  if (state.players.some((p) => p !== player && p.faction && p.faction.cardId === cardId)) {
+    return fail('crew_taken');
   }
   const switching = !!player.faction;
   player.faction = { cardId, face };
+  // The picked crew card carries one of the six faction-band colours; that is
+  // now the player's seat colour (the colour follows the crew, not the other
+  // way round). Since each card is claimed by one player, seat colours stay
+  // unique.
+  if (card.color) player.color = card.color;
   // Replace any previous crew slot in LEO with the new pick so a
   // re-pick during the draft doesn't leave a stale crew sitting in
   // the stack. First-time pickers just get one push.
