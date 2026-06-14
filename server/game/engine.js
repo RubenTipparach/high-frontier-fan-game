@@ -508,11 +508,21 @@ function privilegeOf(state, player) {
   const face = card && card.faces && card.faces[player.faction.face];
   return face ? privKey(face.bonus) : null;
 }
+// Privileges a player has PERMANENTLY gained from a card power (POWER GIRDLE /
+// IONOSAT grant Powersat). Unlike faction privileges these are NOT suspended by
+// Anarchy - they're a permanent property of the player, not the crew face.
+function hasGrantedPrivilege(player, key) {
+  return !!(player && Array.isArray(player.grantedPrivileges) && player.grantedPrivileges.includes(key));
+}
+function grantPrivilege(player, key) {
+  player.grantedPrivileges = Array.isArray(player.grantedPrivileges) ? player.grantedPrivileges : [];
+  if (!player.grantedPrivileges.includes(key)) player.grantedPrivileges.push(key);
+}
 function hasPrivilege(state, player, key) {
-  return privilegeOf(state, player) === key;
+  return privilegeOf(state, player) === key || hasGrantedPrivilege(player, key);
 }
 function playersWithPrivilege(state, key) {
-  return (state.players || []).filter((p) => privilegeOf(state, p) === key);
+  return (state.players || []).filter((p) => privilegeOf(state, p) === key || hasGrantedPrivilege(p, key));
 }
 // May this player commit a Felony? Yes during Anarchy (everyone gains
 // Felonious, K2e), OR if they hold the Felonious privilege (Taikonauts) the
@@ -2334,19 +2344,38 @@ function applyIndustrialize(state, op, player) {
   const disc = state.discs[siteId];
   if (!disc || disc.outcome !== 'success' || disc.ownerId !== player.profileId) return fail('not_claimed');
   if (state.factories[siteId]) return fail('already_industrialized');
-  if (player.opsRemaining <= 0) return fail('no_ops_left');
   const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];
   // Every id must be a non-crew card in the stack; the set must include a
-  // refinery + a robonaut (the build needs both).
-  let hasRefinery = false, hasRobonaut = false;
+  // refinery + a robonaut (the build needs both) - unless ARCOLOGY waives the
+  // robonaut. Scan the build set's powers along the way.
+  let hasRefinery = false, hasRobonaut = false, arcology = false, powersatGrant = false;
+  const atmo = isAerostatSite(site);
+  const size = prospectThreshold(site);
   for (const id of ids) {
     const slot = player.rocket.stack.find((s) => s.id === id && s.kind !== 'crew');
     if (!slot) return fail('not_in_stack');
     const c = PATENTS_BY_ID[id];
     if (c && c.type === 'refinery') hasRefinery = true;
     if (c && c.type === 'robonaut') hasRobonaut = true;
+    const pw = powerOfSlot(slot);   // capture now (the slot is decommissioned below)
+    if (!pw) continue;
+    // ARCOLOGY (Solar Carbotherm): no robonaut decommission needed in the
+    // listed inner-system zones.
+    if (Array.isArray(pw.noRobonautDecommissionZones)
+        && pw.noRobonautDecommissionZones.includes(site.solarZone)) arcology = true;
+    // POWER GIRDLE (Ilmenite, non-atmo size 8+) / IONOSAT (Ionosphere Lasing,
+    // atmospheric): permanently grant Powersat on this industrialize.
+    if (pw.gainPowersatOnIndustrialize === 'atmospheric' && atmo) powersatGrant = true;
+    if (pw.gainPowersatOnIndustrialize === 'nonAtmoSize8' && !atmo && size >= 8) powersatGrant = true;
   }
-  if (!hasRefinery || !hasRobonaut) return fail('cannot_industrialize');
+  if (!hasRefinery || (!hasRobonaut && !arcology)) return fail('cannot_industrialize');
+  // JELLYBOTS (Solid Flame): a colocated card makes industrialization a FREE
+  // action (no operation spent). Colocated = anywhere in the stack.
+  const freeAction = player.rocket.stack.some((s) => {
+    const pw = powerOfSlot(s);
+    return pw && pw.industrializeFreeAction;
+  });
+  if (!freeAction && player.opsRemaining <= 0) return fail('no_ops_left');
   // Decommission the chain to the hand.
   for (const id of ids) {
     const idx = player.rocket.stack.findIndex((s) => s.id === id);
@@ -2363,9 +2392,48 @@ function applyIndustrialize(state, op, player) {
   }
   const spectral = site.spectralType || 'C';
   state.factories[siteId] = { ownerId: player.profileId, spectralType: spectral };
-  player.opsRemaining -= 1;
+  if (!freeAction) player.opsRemaining -= 1;
   let log = `${player.name} industrialized ${site.name} (spectral ${spectral}); decommissioned ${ids.length} card${ids.length === 1 ? '' : 's'} to hand.`;
+  if (arcology && !hasRobonaut) log += ' (Arcology: no robonaut needed.)';
+  if (freeAction) log += ' (Jellybots: free action.)';
+  // POWER GIRDLE (Ilmenite) / IONOSAT (Ionosphere Lasing): permanently grant
+  // Powersat (captured above from the build set + site conditions).
+  if (powersatGrant && !hasGrantedPrivilege(player, 'POWERSAT')) {
+    grantPrivilege(player, 'POWERSAT');
+    log += ` ${player.name} permanently gained the Powersat privilege.`;
+  }
   // Taxes: industrializing a Claim also pays every Taxes holder +1 aqua.
+  const tax = creditPrivilegeIncome(state, 'TAXES', 'Taxes');
+  if (tax.length) log += ' ' + tax.join(' ');
+  return { ok: true, state, log };
+}
+
+// Mine Revival (MINE REVIVAL, Termite Nest): as an operation, clear a BUSTED
+// (failed) prospect disc at a colocated site of size 2+ and place your own
+// Claim there. Needs a Termite Nest aboard. op = { siteId }.
+function applyMineRevival(state, op, player) {
+  const siteId = String(op.siteId || '');
+  const site = siteById(siteId);
+  if (!site) return fail('unknown_site');
+  if (player.rocket.siteId !== siteId) return fail('not_at_site');
+  const hasTermite = player.rocket.stack.some((s) => {
+    const pw = powerOfSlot(s);
+    return pw && pw.mineRevival;
+  });
+  if (!hasTermite) return fail('no_mine_revival');
+  if (state.factories[siteId]) return fail('already_industrialized');
+  const disc = state.discs[siteId];
+  if (!disc || disc.outcome !== 'fail') return fail('no_busted_disc');
+  if (prospectThreshold(site) < 2) return fail('site_too_small');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  state.discs[siteId] = {
+    outcome: 'success', roll: 0, threshold: prospectThreshold(site), kind: 'mine-revival',
+    by: player.name, ownerId: player.profileId,
+    turn: state.turn | 0, round: state.round | 0,
+    canReroll: false, revived: true,
+  };
+  player.opsRemaining -= 1;
+  let log = `${player.name} revived the busted claim at ${site.name} (Mine Revival).`;
   const tax = creditPrivilegeIncome(state, 'TAXES', 'Taxes');
   if (tax.length) log += ' ' + tax.join(' ');
   return { ok: true, state, log };
@@ -2689,6 +2757,7 @@ const FUNCTIONAL = {
   PROSPECT: applyProspect,
   PROSPECT_REROLL: applyProspectReroll,
   INDUSTRIALIZE: applyIndustrialize,
+  MINE_REVIVAL: applyMineRevival,
   ET_PRODUCE: applyEtProduce,
   LOAD_GLORY: applyLoadGlory,
 };
@@ -2721,6 +2790,7 @@ function pickPayload(op) {
     case 'DELIVERY': return { siteId: op.siteId, letter: op.letter, cardId: op.cardId };
     case 'BUILD_COLONY': return { cardId: op.cardId };
     case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds };
+    case 'MINE_REVIVAL': return { siteId: op.siteId };
     case 'ET_PRODUCE': return { siteId: op.siteId, cardId: op.cardId, letter: op.letter, isNewOutpost: !!op.isNewOutpost };
     // Route ops ride the undo stack like every other functional op, so
     // an UNDO/REDO replay (rebuildFromBase) must carry their payload or

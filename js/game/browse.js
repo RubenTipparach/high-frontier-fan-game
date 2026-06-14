@@ -39,7 +39,7 @@ import {
   getStackTotals, getActiveThrusterStats, setSolarZone, setHasPowersat,
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats, getSupportChainView,
-  colocatedIsruMod,
+  colocatedIsruMod, stackHasPower,
   getWiring, setWiring,
   isAfterburnEngaged, setAfterburn, OPEN_CYCLE_CARD, OPEN_CYCLE_CARD_ID,
   getAqua, spendAqua, addAqua, onAquaChange, resetAqua,
@@ -1634,6 +1634,16 @@ function myFactionPrivilege() {
 function canCommitFelony() {
   return isAnarchy() || myFactionPrivilege() === 'FELONIOUS';
 }
+// Do I have the Powersat global +1-thrust modifier? Either my faction grants it
+// (suspended during Anarchy, like all faction privileges) OR I PERMANENTLY
+// gained it from a card power (POWER GIRDLE / IONOSAT - not anarchy-suspended).
+// Mirrors the server's hasPrivilege(POWERSAT).
+function myHasPowersat() {
+  if (!_online || !_onlineSnapshot || !_onlineMe) return false;
+  const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
+  if (me && Array.isArray(me.grantedPrivileges) && me.grantedPrivileges.includes('POWERSAT')) return true;
+  return !isAnarchy() && myFactionPrivilege() === 'POWERSAT';
+}
 
 // Is my rocket stack carrying a Glitch disc (Sunspot Glitch event)? Read off
 // the snapshot; solo never glitches, so it's always false there.
@@ -3177,6 +3187,9 @@ function humanizeOnlineOpError(code, detail) {
     not_claimed: 'Prospect and claim this site before you can industrialize it.',
     already_industrialized: 'This site already has a factory.',
     cannot_industrialize: 'Industrialize needs a refinery + a robonaut (with their supports) in the stack.',
+    no_mine_revival: 'Mine Revival needs a Termite Nest aboard.',
+    no_busted_disc: 'Mine Revival needs a busted (failed) claim here to revive.',
+    site_too_small: 'Mine Revival only works on a site of size 2 or more.',
     no_factory: 'You need your own factory here.',
     cannot_mix_fuel: 'Water and dirt can\'t mix - burn the tank empty before switching fuel.',
     wrong_fuel_grade: 'Wrong fuel: a water thruster can only burn water, and the tank holds dirt. Dump the dirt and refuel with water.',
@@ -11940,7 +11953,7 @@ function syncSandboxRocket() {
   setSolarZone(site && site.solarZone ? site.solarZone : null);
   // Powersat (ESA): my faction grants +1 thrust to a push-icon thruster.
   // Mirror the engine so the client's thrust/fuel math stays byte-identical.
-  setHasPowersat(myFactionPrivilege() === 'POWERSAT');
+  setHasPowersat(myHasPowersat());
   const x = site && typeof site.x === 'number' ? site.x : LEO_ANCHOR.x;
   const y = site && typeof site.y === 'number' ? site.y : LEO_ANCHOR.y;
   // Active prospector kind is forwarded to the renderer so it can
@@ -13683,6 +13696,30 @@ function showSitePopupFor(site) {
         _renderer.clearSitePopup();
       },
     });
+  }
+  // Mine Revival (Termite Nest, MINE REVIVAL): clear a busted (failed) claim
+  // here and place your own. Online op; needs a Termite Nest aboard, the rocket
+  // parked here, a busted disc, and site size 2+.
+  if (_online && rocketSite && site.id === rocketSite.id && stackHasPower('mineRevival')) {
+    const disc = getDisc(site.id);
+    const busted = disc && disc.outcome === 'fail';
+    const size = siteProspectThreshold(site);
+    if (busted && size >= 2 && !getFactory(site.id)) {
+      const okMR = isOnlineMyTurn();
+      actions.push({
+        label: '⛏ Mine Revival (revive claim)',
+        variant: okMR ? 'rocket' : 'secondary',
+        disabled: !okMR,
+        title: okMR ? 'Clear the busted claim and place your own (Termite Nest)' : 'Wait for your turn.',
+        onClick: () => {
+          if (!okMR) return;
+          const sid = toServerId(_onlineMaps, site.id);
+          if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
+          submitOnlineOp({ kind: 'MINE_REVIVAL', siteId: sid });
+          _renderer.clearSitePopup();
+        },
+      });
+    }
   }
   // Refuel action. The rocket can pull water from a hydrated site
   // when it's parked on it AND the site's water rating meets the
@@ -16115,7 +16152,7 @@ const MP_LOG_ICONS = {
   END_TURN: '⏭', MOVE: '🛸', BURN: '🔥',
   SET_ACTIVE_THRUSTER: '🔥', SET_ACTIVE_PROSPECTOR: '⛏',
   BUILD_ROCKET: '🚀', BUY_CARD: '📚', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',
-  INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧',
+  INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧', MINE_REVIVAL: '⛏',
   ET_PRODUCE: '🏭', SITE_REFUEL: '💧', EVENT_CHOICE: '☄️',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
   DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🏠',

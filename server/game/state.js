@@ -133,6 +133,9 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
     // any player whose faction is null on snapshot. Once committed
     // it is final - PICK_CREW rejects re-picks.
     faction: null,
+    // Privileges permanently gained from a card power (POWER GIRDLE / IONOSAT
+    // grant Powersat). NOT a faction privilege, so Anarchy does not suspend it.
+    grantedPrivileges: [],
     rocket: {
       // siteId null = parked at LEO (the launch anchor). There is no
       // explicit LEO node in SITES, so null is the canonical "at LEO"

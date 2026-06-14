@@ -624,6 +624,13 @@ export function colocatedIsruMod({ isAerostat = false } = {}) {
   return sumColocatedIsruMod(_stack.map(slotPower), { isAerostat });
 }
 
+// Does the rocket stack carry a card with the given POWER flag on its installed
+// face? (e.g. 'mineRevival' for Termite Nest, 'industrializeFreeAction' for
+// Solid Flame.) Mirrors the engine's stack scans.
+export function stackHasPower(flag) {
+  return _stack.some((s) => { const p = slotPower(s); return !!(p && p[flag]); });
+}
+
 // Build the set of support-kinds the rest of the stack supplies
 // to the active card. Same logic as isRocketActive()'s supplier
 // scan but scoped to a single excluded card.
