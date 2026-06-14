@@ -225,7 +225,7 @@ let _tankWater = (() => {
 })();
 
 // Fuel grade in the tank: 'water' (blue) or 'dirt' (grey). Water and dirt
-// can't mix; a dirt thruster burns dirt, a water thruster burns water.
+// can't mix; a water thruster burns only water, a dirt thruster burns either.
 let _tankGrade = (() => {
   try { return localStorage.getItem(TANK_GRADE_KEY) === 'dirt' ? 'dirt' : 'water'; }
   catch { return 'water'; }

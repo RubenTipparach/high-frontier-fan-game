@@ -1225,13 +1225,14 @@ function applyMove(state, op, player) {
     fuelStepsNeeded: stepsNeeded,
     enough: stepsNeeded <= stepsAvail,
   };
-  // Fuel-grade gate: a dirt thruster burns only dirt, a water thruster only
-  // water. If the tank holds fuel of the wrong grade, the burn can't draw on
-  // it (clearer than "insufficient" - the fuel is there, just incompatible).
+  // Fuel-grade gate: a dirt thruster can burn EITHER grade (dirt or water); a
+  // water thruster can burn ONLY water. So the lone incompatible case is a
+  // water engine drawing on a dirt tank (clearer than "insufficient" - the
+  // fuel is there, just incompatible). Tank still never mixes the two grades.
   if (stepsNeeded > 0 && (Number(player.rocket.tank) || 0) > 0) {
     const need = activeFuelGrade(player.rocket);
     const have = tankGradeOf(player.rocket);
-    if (need !== have) return fail('wrong_fuel_grade', { need, have });
+    if (need === 'water' && have === 'dirt') return fail('wrong_fuel_grade', { need, have });
   }
   if (stepsNeeded > stepsAvail) {
     return fail('insufficient_water', moveCalc);

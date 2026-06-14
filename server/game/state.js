@@ -150,8 +150,8 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
       tank: STARTING_WATER,
       // Fuel grade in the tank: 'water' (blue) or 'dirt' (grey). Water and
       // dirt cannot mix - a refuel of the other grade is blocked until the
-      // tank empties. A dirt thruster burns dirt; a water thruster burns
-      // water. Default water; meaningless while tank is 0.
+      // tank empties. A water thruster burns ONLY water; a dirt thruster burns
+      // EITHER grade (water or dirt). Default water; meaningless while tank is 0.
       tankGrade: 'water',
       afterburnEngaged: false,
       // Player support-chain wiring: which supplier card powers each consumer

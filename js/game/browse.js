@@ -3174,7 +3174,7 @@ function humanizeOnlineOpError(code, detail) {
     cannot_industrialize: 'Industrialize needs a refinery + a robonaut (with their supports) in the stack.',
     no_factory: 'You need your own factory here.',
     cannot_mix_fuel: 'Water and dirt can\'t mix - burn the tank empty before switching fuel.',
-    wrong_fuel_grade: 'Wrong fuel: a dirt thruster burns dirt, a water thruster burns water. Refuel the matching grade.',
+    wrong_fuel_grade: 'Wrong fuel: a water thruster can only burn water, and the tank holds dirt. Dump the dirt and refuel with water.',
     not_dirt_thruster: 'Dirt refuel needs a dirt-burning thruster aboard.',
     not_at_site: 'Park at a site first - dirt comes from the ground.',
     dirt_needs_mooncable: 'Only the NASRDA moon-cable thruster can take on dirt at LEO. Scoop at a site instead.',
@@ -10103,6 +10103,11 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   // engine, since that's the grade you'd load next.
   const activeDirt = getActiveFuelGrade() === 'dirt';
   const isDirt = (getTankWater() > 0) ? (getTankGrade() === 'dirt') : activeDirt;
+  // Does the tank PHYSICALLY hold dirt right now? Water controls (dump / pump /
+  // aqua fill) stay available unless dirt is actually loaded, because every
+  // thruster can burn water: a water thruster burns ONLY water, a dirt thruster
+  // burns water OR dirt. So an empty dirt-engine tank can still take on water.
+  const tankDirt = getTankWater() > 0 && getTankGrade() === 'dirt';
   const fuelWord = isDirt ? 'dirt' : 'water';
   panel.className = 'fuel-tank-panel' + (isDirt ? ' is-dirt-fuel' : '');
   panel.innerHTML = `
@@ -10159,9 +10164,9 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
       </div>
     </div>
     <div class="fuel-tank-actions">
-      ${isDirt ? '' : `<button type="button" class="popup-btn popup-btn-secondary" id="tank-dump"
+      ${tankDirt ? '' : `<button type="button" class="popup-btn popup-btn-secondary" id="tank-dump"
         title="Drain a chosen amount of water from the tank">💧⤓ Dump water</button>`}
-      ${isDirt ? '' : fuelTankPumpBtns()}
+      ${tankDirt ? '' : fuelTankPumpBtns()}
     </div>
 <div class="fuel-tank-aqua" id="tank-aqua-section" hidden>
       <div class="aqua-row">
@@ -10574,10 +10579,10 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const aquaCashAllBtn = panel.querySelector('#aqua-cash-all');
   const atLeo = isLeoSite(getRocketSite());
   // Aqua <-> water is WATER-ONLY: dirt has no aqua value, and water can't be
-  // poured onto a dirt tank (the grades can't mix). So the bank panel only
-  // shows when the tank is in water mode (isDirt covers both a dirt engine
-  // and dirt already loaded).
-  if (atLeo && !isDirt && aquaSection) aquaSection.hidden = false;
+  // poured onto a dirt tank (the grades can't mix). The bank panel shows
+  // whenever the tank ISN'T already holding dirt, so a dirt-engine rocket with
+  // an empty tank can still take on water (a dirt thruster burns water too).
+  if (atLeo && !tankDirt && aquaSection) aquaSection.hidden = false;
   const refreshAquaButtons = () => {
     if (!aquaSection || aquaSection.hidden) return;
     const bal = getAqua();
@@ -10633,6 +10638,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
       return;
     }
     if (!spendAqua(want)) { refreshAquaButtons(); return; }
+    setTankGrade('water');   // aqua converts to WATER (never dirt)
     addFuel(want);
     animateTankLevel();
     logAction({
