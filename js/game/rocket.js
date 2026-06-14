@@ -460,6 +460,21 @@ export function getActiveThrusterId() {
   return _activeThrusterId;
 }
 
+// Is the ACTIVE thruster the NASRDA moon-cable crew card? Only that card can
+// take on dirt at LEO. Keyed off the CARD's installed crew face printing the
+// Mooncable bonus, NOT off the player holding the Mooncable PRIVILEGE: the
+// privilege is suspendable / negotiable, but the card's own moon-cable ability
+// rides with the card. Mirrors engine.js#isMooncableThruster.
+export function activeThrusterIsMooncable() {
+  const slot = _stack.find((s) => s.id === _activeThrusterId);
+  if (!slot) return false;
+  const crew = CREW_BY_ID[slot.id];
+  if (!crew || !crew.faces) return false;
+  const key = (slot.face === 'secondary' && crew.faces.secondary) ? 'secondary' : 'primary';
+  const face = crew.faces[key] || crew.faces.primary;
+  return !!face && String(face.bonus || '').trim().toUpperCase().replace(/\s+/g, '_') === 'MOONCABLE';
+}
+
 export function setActiveThruster(id) {
   // Only allow picking a thruster that's actually in the stack
   // and is genuinely a thruster (or a missile-class robonaut

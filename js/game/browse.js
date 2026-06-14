@@ -33,7 +33,7 @@ import {
   getRocketStack, isInRocket, addToStack as rocketAddCard, setRadiatorSide,
   removeFromStack as rocketRemoveCard, clearStack as rocketClearStack,
   onRocketChange, isRocketActive,
-  getActiveThrusterId, setActiveThruster,
+  getActiveThrusterId, setActiveThruster, activeThrusterIsMooncable,
   getTankWater, setTankWater, addFuel, removeFuel, getTankMax, getWaterCap,
   getTankGrade, setTankGrade, getActiveFuelGrade,
   getStackTotals, getActiveThrusterStats, setSolarZone, setHasPowersat,
@@ -1661,7 +1661,8 @@ function confirmGlitchTrigger(kind) {
       <p>Your stack is <strong>glitched</strong>. Performing <strong>${esc(label)}</strong>
       forces a <strong>Glitch Roll</strong>: roll 1d6, and every card aboard whose
       rad-hardness equals the roll is decommissioned back to your hand
-      (rad-hardness 7+ is safe).</p>
+      (rad-hardness 7+ is safe). A heavy radiator is never lost - it folds to its
+      light side instead.</p>
       <p class="muted">Bring a Human alongside to clear the disc first if you'd rather not risk it.</p>
       <div class="turn-confirm-actions">
         <button type="button" class="modal-btn glitch-cancel">Cancel</button>
@@ -3176,7 +3177,7 @@ function humanizeOnlineOpError(code, detail) {
     wrong_fuel_grade: 'Wrong fuel: a dirt thruster burns dirt, a water thruster burns water. Refuel the matching grade.',
     not_dirt_thruster: 'Dirt refuel needs a dirt-burning thruster aboard.',
     not_at_site: 'Park at a site first - dirt comes from the ground.',
-    dirt_needs_mooncable: 'Only the Mooncable privilege (NASRDA) can take on dirt at LEO. Scoop at a site instead.',
+    dirt_needs_mooncable: 'Only the NASRDA moon-cable thruster can take on dirt at LEO. Scoop at a site instead.',
     not_water_fuel: 'Dirt has no cash value - only water converts back to aqua.',
     no_thruster: 'Activate a thruster first.',
     already_dirt_refueled: 'This crew dirt thruster already took its 1 dirt FT this turn.',
@@ -10692,9 +10693,10 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const dirtDumpAll = panel.querySelector('#dirt-dump-all');
   const dirtHelp    = panel.querySelector('#dirt-help');
   const isCrewDirt  = !!CREW_BY_ID[getActiveThrusterId()];
-  // Dirt needs NO ISRU rig. At LEO only the Mooncable privilege (NASRDA) can
-  // take on dirt; at a real site any active dirt thruster scoops.
-  const hasMooncable = myFactionPrivilege() === 'MOONCABLE';
+  // Dirt needs NO ISRU rig. At LEO only the NASRDA moon-cable card (the active
+  // thruster itself) can take on dirt; at a real site any active dirt thruster
+  // scoops. Keyed off the CARD, not the suspendable Mooncable privilege.
+  const hasMooncable = activeThrusterIsMooncable();
   const canScoopDirt = (atLeo && hasMooncable) || (!!getRocketSite() && !atLeo);
   // Show the scoop panel whenever the tank is in DIRT MODE (dirt loaded, or
   // an empty tank under a dirt engine) so the player always sees the dirt

@@ -157,6 +157,19 @@ function faceBurnsDirt(face) {
   return !!(face && (face.fuelType === 'Dirt' || face.dirt === true));
 }
 
+// Is this slot the NASRDA moon-cable crew thruster (the only card that can take
+// on dirt at LEO)? Keyed off the CARD's installed crew face printing the
+// Mooncable bonus, NOT off the player holding the Mooncable PRIVILEGE: the
+// privilege is suspendable / negotiable, but the card's own moon-cable ability
+// rides with the card wherever it sits in the stack.
+function isMooncableThruster(slot) {
+  const crew = slot && CREW_BY_ID[slot.id];
+  if (!crew || !crew.faces) return false;
+  const key = slot.face === 'secondary' ? 'secondary' : 'primary';
+  const face = crew.faces[key] || crew.faces.primary;
+  return !!face && privKey(face.bonus) === 'MOONCABLE';
+}
+
 // The fuel grade the active thruster needs: 'dirt' for a dirt thruster, else
 // 'water'. 'water' when there is no active thruster.
 function activeFuelGrade(rocket) {
@@ -496,9 +509,21 @@ function resolveGlitchTrigger(state, profileId) {
   const roll = gen.d6();
   state.rng.cursor = gen.cursor;
   const lost = [];
+  const degraded = [];
   const survivors = [];
   for (const slot of player.rocket.stack) {
     if (slotRadHardness(slot) === roll) {
+      // A heavy-side radiator DEGRADES to its light side instead of being
+      // destroyed - radiation NEVER destroys a radiator, it just folds it to
+      // the lighter orientation (same exception the radiation-belt and solar-
+      // flare sweeps already make). It survives with reduced cooling.
+      const c = PATENTS_BY_ID[slot.id];
+      if (c && c.type === 'radiator' && slot.radSide !== 'light') {
+        slot.radSide = 'light';
+        degraded.push(cardNameOf(slot.id));
+        survivors.push(slot);
+        continue;
+      }
       // Decommission returns the card to its owner's HAND (HF4 decommission
       // is "back to hand", not destroyed to the deck), so it can be re-boosted
       // later. Crew aren't hand cards, so they evacuate to LEO instead.
@@ -518,8 +543,11 @@ function resolveGlitchTrigger(state, profileId) {
     if (!survivors.some((s) => s.id === player.rocket.activeProspectorId)) player.rocket.activeProspectorId = null;
     clipTank(player.rocket);
   }
-  const log = lost.length
-    ? `Glitch roll ${roll}: ${lost.join(', ')} decommissioned to hand (rad-hardness ${roll}).`
+  const parts = [];
+  if (lost.length) parts.push(`${lost.join(', ')} decommissioned to hand`);
+  if (degraded.length) parts.push(`${degraded.join(', ')} degraded to its light side`);
+  const log = parts.length
+    ? `Glitch roll ${roll}: ${parts.join('; ')} (rad-hardness ${roll}).`
     : `Glitch roll ${roll}: nothing aboard matched - the stack got lucky.`;
   pushNews(state, EVENT_ICONS.glitch || '⚠️', `${player.name} (glitched stack): ${log}`);
   return { roll, lost, log };
@@ -2342,12 +2370,13 @@ function applyDirtRefuel(state, op, player) {
   const slot = tid && player.rocket.stack.find((s) => s.id === tid);
   if (!slot) return fail('no_thruster');
   if (!faceBurnsDirt(thrusterFaceOf(slot))) return fail('not_dirt_thruster');
-  // Refueling dirt needs NO ISRU rig. LEO dirt refuel is the Mooncable
-  // privilege (NASRDA): only that card can take on dirt at LEO. Anywhere else,
-  // any active dirt thruster scoops at a real SITE (a deep-space waypoint has
-  // no ground).
+  // Refueling dirt needs NO ISRU rig. Only the NASRDA card (the moon cable)
+  // can take on dirt at LEO - that's the CARD itself, NOT the suspendable /
+  // negotiable Mooncable privilege, so it's keyed off the active thruster
+  // being NASRDA. Anywhere else, any active dirt thruster scoops at a real
+  // SITE (a deep-space waypoint has no ground).
   if (rocketAtLeo(player)) {
-    if (!hasPrivilege(state, player, 'MOONCABLE')) return fail('dirt_needs_mooncable');
+    if (!isMooncableThruster(slot)) return fail('dirt_needs_mooncable');
   } else {
     if (!siteById(player.rocket.siteId)) return fail('not_at_site');
   }
