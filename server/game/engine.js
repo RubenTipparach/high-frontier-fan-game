@@ -2910,8 +2910,14 @@ function recomputeAuction(state) {
   // computed whenever ANY bid exists (not just when high > 0).
   let leader = null;
   if (entries.length) {
+    // Marketeer (SpaceX) wins ties even over the auctioneer: a top-bid holder
+    // of the privilege takes the lead. Else the auctioneer wins ties; else the
+    // first bidder at the floor.
+    const mktE = entries.find(([k, amt]) =>
+      amt === high && hasPrivilege(state, playerByProfile(state, Number(k)), 'MARKETEER'));
     const aucBid = a.bids[a.auctioneerId];
-    if (aucBid != null && aucBid === high) leader = a.auctioneerId;
+    if (mktE) leader = Number(mktE[0]);
+    else if (aucBid != null && aucBid === high) leader = a.auctioneerId;
     else { const e = entries.find(([, amt]) => amt === high); leader = e ? Number(e[0]) : null; }
   }
   a.highBidderId = leader;
@@ -2923,7 +2929,8 @@ function recomputeAuction(state) {
 // hold up the auctioneer and don't need to act. Their hand can't change
 // mid-auction (an open lot freezes every other op), so this is stable
 // for the life of the lot.
-function biddingBlockedByHand(player) {
+function biddingBlockedByHand(state, player) {
+  if (hasPrivilege(state, player, 'SKUNKWORKS')) return false;   // ignores the limit
   return ((player.hand || []).length >= AUCTION_HAND_LIMIT);
 }
 
@@ -2946,7 +2953,7 @@ function allBiddersActed(state) {
   // full-hand players can't take it - both count as already acted so
   // they never hold up the close, even after a reopen resets `acted`.
   return others.every((p) =>
-    acted.includes(p.profileId) || auto.includes(p.profileId) || biddingBlockedByHand(p));
+    acted.includes(p.profileId) || auto.includes(p.profileId) || biddingBlockedByHand(state, p));
 }
 
 // Highest standing bid that is NOT this player's own. The auctioneer wins
@@ -2969,7 +2976,8 @@ function applyAuctionStart(state, op, ctx) {
   // unopposed for free (see applyAuctionSell's no-bids path). Multiplayer always
   // has 2+ players, so this once-required opponent check is no longer needed.
   if (player.opsRemaining <= 0) return fail('no_ops_left');
-  if ((player.hand || []).length >= AUCTION_HAND_LIMIT) return fail('hand_limit');
+  // Skunkworks (Shimizu) ignores the academia hand limit when starting.
+  if ((player.hand || []).length >= AUCTION_HAND_LIMIT && !hasPrivilege(state, player, 'SKUNKWORKS')) return fail('hand_limit');
   const deckType = String(op.deckType || '');
   if (!DECK_TYPES.includes(deckType)) return fail('bad_deck');
   const deck = state.decks[deckType];
@@ -3005,7 +3013,8 @@ function applyAuctionBid(state, op, ctx) {
   // or change their standing bid at any time while the lot is open.
   const bidder = playerByProfile(state, ctx.profileId);
   if (!bidder) return fail('not_a_player');
-  if ((bidder.hand || []).length >= AUCTION_HAND_LIMIT) return fail('hand_limit');
+  // Skunkworks (Shimizu) ignores the academia hand limit when bidding.
+  if ((bidder.hand || []).length >= AUCTION_HAND_LIMIT && !hasPrivilege(state, bidder, 'SKUNKWORKS')) return fail('hand_limit');
   const amount = Number(op.amount);
   // Bids can be 0 (claim it free); only negatives are invalid.
   if (!Number.isInteger(amount) || amount < 0) return fail('bad_amount');
@@ -3040,7 +3049,7 @@ function applyAuctionBid(state, op, ctx) {
       .filter((p) => (p.profileId in a.bids)
         || (a.passed || []).includes(p.profileId)
         || (a.autoPassed || []).includes(p.profileId)
-        || biddingBlockedByHand(p))
+        || biddingBlockedByHand(state, p))
       .map((p) => p.profileId);
     a.acted = [a.auctioneerId, ...acked];
   } else {
