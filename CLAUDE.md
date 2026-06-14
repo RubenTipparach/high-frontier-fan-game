@@ -41,6 +41,28 @@ Concretely:
   the user can see it is fine; using it in the running app is what
   waits for approval.
 
+- **You CAN render the app - use it.** This environment has headless
+  Chromium (Playwright) wired up via `scripts/screenshot.mjs`, so there
+  is NO excuse for "I can't see the web page." Use it to PREVIEW any
+  UI / client change for the user (`SendUserFile` the PNG) AND to
+  VALIDATE that a bug is actually fixed by observing the rendered
+  result, not just the code. Typical loop:
+  ```
+  python3 -m http.server 8137            # serve the app (build-free)
+  node scripts/screenshot.mjs http://localhost:8137/index.html /tmp/x.png --wait=1500
+  # or render a card / component in isolation via a small HTML harness
+  # that imports js/game/card-ui.js renderCard(...) from the served app
+  ```
+  Notes baked into the helper: Playwright is installed GLOBALLY, the
+  browser binaries live at `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`
+  (not `~/.cache/ms-playwright`), and the package is CommonJS (default
+  import). If the browser binary is missing, run `npx playwright install
+  chromium` to COMPLETION - never pipe it through `head`/`tail`, a closed
+  pipe SIGPIPE-kills the download. The local build talks to the prod API,
+  so `ERR_CERT_AUTHORITY_INVALID` console errors are expected and
+  harmless for rendering. Default to showing a screenshot for any visual
+  change instead of describing it.
+
 - Core rules PDF (publisher-hosted):
   https://gamers-hq.de/media/pdf/c5/f2/cf/HF4-Core-Rules.pdf
 - Variants & scenarios appendix:
