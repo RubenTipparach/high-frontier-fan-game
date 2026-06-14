@@ -1243,7 +1243,18 @@ function applyMove(state, op, player) {
   const perBurn = thrusterFuelPerBurn(player.rocket);            // fuel steps per burn
   const dryMass = player.rocket.stack.reduce((mm, s) => mm + slotMass(s), 0);
   const wetMass = dryMass + (Number(player.rocket.tank) || 0);
-  const stepsNeeded = Math.ceil(perBurn * thisTurnBurns);
+  // Mag Sail bonus burns: each Radiation Belt entered this turn is a FREE burn
+  // (the sail rides the belt's field for thrust, like a flyby bonus spot), so
+  // it cancels one burn's fuel cost. Only when the ACTIVE thruster is the Mag
+  // Sail. Applied server-side (authoritative); charging fewer steps than the
+  // client computed can never cause a false rejection. NOTE: the client planner
+  // does not yet offer the extended bonus range - follow-up.
+  const activeThrusterSlot = player.rocket.stack.find((s) => s.id === player.rocket.activeThrusterId);
+  const activePower = activeThrusterSlot ? powerOfSlot(activeThrusterSlot) : null;
+  const beltsEntered = arrivals.filter((a) => hazardKind(a) === 'rad').length;
+  const bonusBurns = (activePower && activePower.bonusBurnPerBelt) ? beltsEntered : 0;
+  const paidBurns = Math.max(0, thisTurnBurns - bonusBurns);
+  const stepsNeeded = Math.ceil(perBurn * paidBurns);
   const stepsAvail = blackStepsBetween(dryMass, wetMass);
   // Full burn-math breakdown - returned on a reject (detail) AND on the debug
   // dry-run (result.calc) so the client can show every intermediate value
@@ -1257,6 +1268,7 @@ function applyMove(state, op, player) {
     fuelStepsInShip: stepsAvail,
     canBurn: perBurn > 0 ? Math.floor(stepsAvail / perBurn) : null,
     burnsNeeded: thisTurnBurns,
+    ...(bonusBurns ? { bonusBurns, paidBurns } : {}),
     fuelStepsNeeded: stepsNeeded,
     enough: stepsNeeded <= stepsAvail,
   };
@@ -1502,6 +1514,7 @@ function applyMove(state, op, player) {
   if (decommissioned.length) log += ` Radiation decommissioned ${decommissioned.length} card${decommissioned.length === 1 ? '' : 's'}.`;
   if (degradedRadiators.length) log += ` Radiation degraded ${degradedRadiators.length} radiator${degradedRadiators.length === 1 ? '' : 's'} to its light side.`;
   if (sailDecommissioned.length) log += ` Aerobraking burned off ${sailDecommissioned.join(', ')} (decommissioned to hand).`;
+  if (bonusBurns) log += ` Mag Sail rode ${bonusBurns} radiation belt${bonusBurns === 1 ? '' : 's'} for a free burn each.`;
   if (chit) log += ` First into the ${chit.zone} zone (+glory chit).`;
   if (homeScored) {
     log += ` Scored ${homeScored} glory chit${homeScored === 1 ? '' : 's'}`
