@@ -71,16 +71,32 @@ implementation right now:
 
 - **Standard** - the base multiplayer game described in the core
   rulebook. Drives the lobby / multiplayer engine.
-- **CEO Solitaire** - the published one-player variant. Drives
-  the solo mode (`js/game/solo.js`); a single player runs one
-  ship against a round clock with no AI opponent. Engine is
-  original; only the structural concept (manage a FIXED water
-  budget, prospect, claim, race the round clock) is taken from
-  the variant's design. There is NO passive income (no end-of-
-  round water, no per-lap aqua) anywhere in the base game OR the
-  solo variant - water is a fixed budget plus what you actively
-  refine, and aqua comes only from the active Income / Free
-  Market operations. Do not add passive income.
+- **CEO Solitaire** - the published one-player variant. A single
+  player runs one ship against a round clock with no AI opponent.
+  Only the structural concept (manage a FIXED water budget,
+  prospect, claim, race the round clock) is taken from the
+  variant's design; the engine is original. There is NO passive
+  income (no end-of-round water, no per-lap aqua) anywhere in the
+  base game OR the solo variant - water is a fixed budget plus what
+  you actively refine, and aqua comes only from the active Income /
+  Free Market operations. Do not add passive income.
+
+  **Solo now runs as a single-player SERVER game ("solo online
+  mode"): the same server-authoritative engine and the same shared
+  front-end multiplayer uses, just with one seat.**
+
+  **The OFFLINE hot-seat solo (`js/game/solo.js`, the browser-only
+  localStorage path) is FROZEN LEGACY. Do NOT touch it ever again.**
+  It still exists and still appears in the menu, but it is no longer
+  maintained: never update it, never bring it back into engine /
+  rule / card parity, never "fix" it to match a new mechanic, and
+  never consider it when weighing a change. When a feature needs a
+  solo path, add it to the server engine (like multiplayer) - the
+  offline `solo.js` is dead weight we keep only so old saves load.
+  NOTE: this freeze is ONLY the offline `solo.js` orchestration. The
+  shared sandbox FRONT-END (`js/game/browse.js`, `rocket.js`,
+  `stacks.js`, `render.js`, etc.) is the live multiplayer UI and is
+  very much maintained - see "The multiplayer UI IS the sandbox UI".
 
 Other variants (campaign, scenarios) are explicitly out of scope
 for now. Don't pull them in without a discussion first.
@@ -1057,4 +1073,6 @@ DATABASE_PATH=./hf-dev.db npm run dev
 
 Frontend points at the API via `<meta name="hf-api-base">` in
 `index.html`. Empty value = local-only mode (no lobby, no multiplayer,
-but the solo "hot-seat" game still runs entirely in the browser).
+but the solo "hot-seat" game still runs entirely in the browser). That
+offline hot-seat path (`js/game/solo.js`) is FROZEN LEGACY - see "CEO
+Solitaire" under "Variants we target": do not maintain or update it.
