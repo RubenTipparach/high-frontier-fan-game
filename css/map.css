@@ -7866,3 +7866,11 @@ body:has(#view-browse:not(.hidden)) #main {
 .mp-trade-status { font-size: 12px; margin: 8px 0; }
 .mp-trade-chat-hint { font-size: 11px; margin-top: 6px; }
 .mp-trade-block .mp-trade-btns { justify-content: flex-start; margin-top: 8px; }
+
+/* Highlight the roster row of the player I'm mid-trade with. */
+.mp-player.mp-trade-with {
+  border: 1px solid #2f6f5c;
+  border-radius: 10px;
+  background: rgba(80, 200, 160, 0.06);
+}
+.mp-player.mp-trade-with .mp-trade-block { margin: 8px; border: 0; background: transparent; padding: 0; }

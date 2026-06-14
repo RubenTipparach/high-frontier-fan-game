@@ -1818,10 +1818,11 @@ function tradeSideEl(side) {
   return el;
 }
 
-// The in-panel trade negotiation view (rendered by renderMpPanel when a trade
-// involves me). Shows the deal + accept / counter / decline; the table chat
+// The trade negotiation view. Docked onto the trade-partner's roster row
+// (embedded: true, so the "Trade with @Name" head is dropped - the row already
+// names them). Shows the deal + accept / counter / decline; the table chat
 // below the panel doubles as the negotiation channel.
-function renderMpTradeBlock(snapshot, host) {
+function renderMpTradeBlock(snapshot, host, { embedded = false } = {}) {
   const trade = snapshot.trade;
   const myId = _onlineMe && _onlineMe.id;
   const myRole = trade.initiatorId === myId ? 'initiator' : 'partner';
@@ -1834,14 +1835,16 @@ function renderMpTradeBlock(snapshot, host) {
 
   const block = document.createElement('div');
   block.className = 'mp-trade-block';
-  const h = document.createElement('div');
-  h.className = 'mp-trade-block-head';
-  const who = document.createElement('span');
-  who.className = 'player-name';
-  if (other && other.color) who.style.setProperty('--player-color', other.color);
-  who.textContent = other ? '@' + other.name : 'the other player';
-  h.append(document.createTextNode('🤝 Trade with '), who);
-  block.appendChild(h);
+  if (!embedded) {
+    const h = document.createElement('div');
+    h.className = 'mp-trade-block-head';
+    const who = document.createElement('span');
+    who.className = 'player-name';
+    if (other && other.color) who.style.setProperty('--player-color', other.color);
+    who.textContent = other ? '@' + other.name : 'the other player';
+    h.append(document.createTextNode('🤝 Trade with '), who);
+    block.appendChild(h);
+  }
 
   const deal = document.createElement('div');
   deal.className = 'mp-trade-deal';
@@ -1908,10 +1911,13 @@ function renderOnlineTrade(trade) {
   }
   const myRole = trade.initiatorId === myId ? 'initiator' : 'partner';
   const myMove = trade.awaiting === myRole;
-  const panel = document.getElementById('browse-sidepanel');
-  const onMpPane = panel && panel.dataset.active === 'mp';
-  setMpTurnAction('trade', onMpPane ? null : {
-    label: '🤝 Trade',
+  const otherId = myRole === 'initiator' ? trade.partnerId : trade.initiatorId;
+  const other = (_onlineSnapshot && _onlineSnapshot.players || []).find((p) => p.profileId === otherId);
+  // Always surface a 🤝 chip in the same turn-bar area auctions dock to, so an
+  // open trade is obvious from any pane. Clicking jumps to the Multiplayer pane
+  // where the deal is docked on the partner's row.
+  setMpTurnAction('trade', {
+    label: other ? `🤝 ${other.name}` : '🤝 Trade',
     meta: myMove ? 'your move' : 'awaiting reply',
     needsAction: myMove,
     onClick: () => showPane('mp'),
@@ -3257,15 +3263,6 @@ function renderMpPanel(snapshot) {
   head.append(row, turn, clock);
   tableEl.appendChild(head);
 
-  // An open trade I'm part of takes over the panel: the deal + accept /
-  // counter / decline lands here (the table chat below doubles as the
-  // negotiation channel), instead of the roster.
-  if (snapshot.trade
-      && (snapshot.trade.initiatorId === myId || snapshot.trade.partnerId === myId)) {
-    renderMpTradeBlock(snapshot, tableEl);
-    return;
-  }
-
   if (_deckPickerOpen && canStartAuction) {
     const picker = document.createElement('div');
     picker.className = 'mp-deck-picker';
@@ -3345,10 +3342,18 @@ function renderMpPlayer(p, isMe, isActive) {
   const headRow = document.createElement('div');
   headRow.className = 'mp-player-headrow';
   headRow.append(head, cardsBtn);
+  // Is there an open trade between me and this player? If so the deal docks
+  // onto this row (below); otherwise this player gets a propose-trade button.
+  const snap = _onlineSnapshot;
+  const trade = snap && snap.trade;
+  const myId = _onlineMe && _onlineMe.id;
+  const amInTrade = trade && (trade.initiatorId === myId || trade.partnerId === myId);
+  const tradeOtherId = amInTrade
+    ? (trade.initiatorId === myId ? trade.partnerId : trade.initiatorId) : null;
+  const isTradePartner = !isMe && amInTrade && p.profileId === tradeOtherId;
   // Per-player Trade button: propose a deal directly with this player. Hidden
   // for myself + spectators; disabled while an auction or another trade is open.
-  if (!isMe && !_spectator) {
-    const snap = _onlineSnapshot;
+  if (!isMe && !_spectator && !isTradePartner) {
     const tradeBtn = document.createElement('button');
     tradeBtn.type = 'button';
     tradeBtn.className = 'mp-player-trade';
@@ -3363,6 +3368,7 @@ function renderMpPlayer(p, isMe, isActive) {
     });
     headRow.append(tradeBtn);
   }
+  if (isTradePartner) wrap.classList.add('mp-trade-with');
   // Crew-ability badges: this player's own faction power plus any borrowed
   // through a trade (timed grants show a turn counter, permanent ones a lock).
   const badges = renderAbilityBadges(p);
@@ -3378,6 +3384,9 @@ function renderMpPlayer(p, isMe, isActive) {
   });
   if (badges) wrap.append(headRow, badges, detail);
   else wrap.append(headRow, detail);
+  // Dock the open trade onto this player's row so it's tied to who it's with,
+  // while the rest of the roster + table info stays visible.
+  if (isTradePartner) renderMpTradeBlock(snap, wrap, { embedded: true });
   return wrap;
 }
 
