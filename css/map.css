@@ -7917,6 +7917,10 @@ body:has(#view-browse:not(.hidden)) #main {
   align-items: center;
 }
 .mp-comp-group { display: inline-flex; align-items: center; gap: 4px; }
+.mp-comp-click { cursor: pointer; border-radius: 5px; padding: 1px 3px; }
+.mp-comp-click:hover { background: rgba(255,255,255,0.07); outline: 1px solid var(--border, #2a2740); }
+.mp-cube-row { display: flex; align-items: center; gap: 8px; padding: 5px 4px; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 13px; }
+.mp-cube-ic { width: 18px; text-align: center; }
 .mp-comp-label { font-size: 10px; color: var(--ink-dim, #8b90b8); }
 .mp-comp-pips { display: inline-flex; gap: 2px; }
 .mp-pip {

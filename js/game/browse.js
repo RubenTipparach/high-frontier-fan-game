@@ -3973,17 +3973,91 @@ function renderMpPlayer(p, isMe, isActive) {
 // as a row of pips (filled = in play, in the player's seat colour) so the
 // remaining bits are obvious at a glance. The build ops enforce the same cap.
 function renderComponentRow(p, snapshot) {
+  // The 7 cubes are ONE pool: built factories + assembly delegates + the
+  // first-player Sunspot cube. The factory pip row shows the whole pool used,
+  // and clicking it breaks down where each cube sits.
   const facUsed = ownedSiteCount(snapshot.factories, p.profileId);
+  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
+  const delegateUsed = ASSEMBLY_PLACES.reduce((s, pl) => s + ((dmap[pl] || {})[p.profileId] | 0), 0);
+  const players = snapshot.players || [];
+  const fp = players[snapshot.firstPlayerIndex || 0];
+  const sunspotUsed = (fp && fp.profileId === p.profileId) ? 1 : 0;
+  const cubesUsed = facUsed + delegateUsed + sunspotUsed;
   const colUsed = ownedSiteCount(snapshot.colonies, p.profileId);
   const claimUsed = ownedClaimCount(snapshot.discs, p.profileId);
   const row = document.createElement('div');
   row.className = 'mp-components';
+  const facGroup = componentGroup('🏭', cubesUsed, FACTORY_CUBES, p.color, 'cube', 'cube');
+  facGroup.classList.add('mp-comp-click');
+  facGroup.title = 'Cubes in play (factories + delegates + sunspot). Tap to see where.';
+  facGroup.addEventListener('click', () => openCubeBreakdownModal(p, snapshot));
   row.append(
-    componentGroup('🏭', facUsed, FACTORY_CUBES, p.color, 'cube', 'factory cube'),
+    facGroup,
     componentGroup('🏠', colUsed, COLONY_DOMES, p.color, 'dome', 'colony dome'),
     componentGroup('🔘', claimUsed, CLAIM_DISCS, p.color, 'disc', 'claim disc'),
   );
   return row;
+}
+
+// Where a player's 7 cubes are: the first-player Sunspot cube, assembly
+// delegates (politics map), and built factories (on sites). Opened by tapping
+// the factory/cube pip row.
+function openCubeBreakdownModal(p, snapshot) {
+  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
+  const players = snapshot.players || [];
+  const fp = players[snapshot.firstPlayerIndex || 0];
+  const isFirst = !!(fp && fp.profileId === p.profileId);
+  const items = [];
+  if (isFirst) items.push({ icon: '🌞', text: 'First-player marker (Sunspot cube)' });
+  for (const place of ASSEMBLY_PLACES) {
+    const n = (dmap[place] || {})[p.profileId] | 0;
+    const name = place === 'centrist' ? 'Centrist (center)' : (ASSEMBLY_IDEOLOGY_BY_KEY[place] || {}).name || place;
+    for (let i = 0; i < n; i += 1) items.push({ icon: '🏛', text: `Delegate on ${name}` });
+  }
+  for (const sid in (snapshot.factories || {})) {
+    if (snapshot.factories[sid] && snapshot.factories[sid].ownerId === p.profileId) {
+      items.push({ icon: '🏭', text: `Factory at ${onlineSiteLabel(sid)}` });
+    }
+  }
+  const used = items.length;
+  const free = Math.max(0, FACTORY_CUBES - used);
+
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal';
+  modal.style.maxWidth = '420px';
+  const close = () => back.remove();
+  const head = document.createElement('div');
+  head.className = 'mp-trade-head';
+  head.innerHTML = `<h3>🧊 ${esc(p.name)}'s cubes - ${used}/${FACTORY_CUBES} in play (${free} free)</h3>`;
+  modal.appendChild(head);
+  const list = document.createElement('div');
+  list.className = 'mp-relocate-list';
+  if (!items.length) {
+    const e = document.createElement('div');
+    e.className = 'mp-trade-colo no-colo';
+    e.textContent = 'No cubes in play yet.';
+    list.appendChild(e);
+  } else {
+    for (const it of items) {
+      const r = document.createElement('div');
+      r.className = 'mp-cube-row';
+      r.innerHTML = `<span class="mp-cube-ic">${it.icon}</span> ${esc(it.text)}`;
+      list.appendChild(r);
+    }
+  }
+  modal.appendChild(list);
+  const btns = document.createElement('div');
+  btns.className = 'mp-trade-btns';
+  const ok = document.createElement('button');
+  ok.type = 'button'; ok.className = 'modal-btn'; ok.textContent = 'Close';
+  ok.addEventListener('click', close);
+  btns.appendChild(ok);
+  modal.appendChild(btns);
+  back.appendChild(modal);
+  back.addEventListener('click', (e) => { if (e.target === back) close(); });
+  document.body.appendChild(back);
 }
 function componentGroup(glyph, used, total, color, shape, label) {
   const g = document.createElement('span');
