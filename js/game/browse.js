@@ -13676,9 +13676,11 @@ async function runPlannedMoveSimulation() {
   const built = buildTurn1MoveOp();
   if (built.error) return { summary: built.error, cls: 'bad' };
   const { toSiteId, segments } = built;
+  const simStats = getActiveThrusterStats();
+  const netThrust = simStats && Number.isFinite(simStats.thrust) ? simStats.thrust : 0;
   let r;
   try {
-    r = await submitGameOp(_onlineGameId, { kind: 'MOVE', toSiteId, segments, debug: true }, _onlineMe.token);
+    r = await submitGameOp(_onlineGameId, { kind: 'MOVE', toSiteId, segments, netThrust, debug: true }, _onlineMe.token);
   } catch { return { summary: 'Server unreachable - try again.', cls: 'bad' }; }
   const sim = (r && r.ok && r.data) ? r.data : null;
   const calc = sim ? (sim.calc || sim.detail || null) : null;
@@ -13837,7 +13839,7 @@ async function moveRocket() {
         && !getChits().some((c) => c.zone === arrZone) && stackHasCrew()) {
       pickupChit = await promptGloryPickup((destSite && destSite.name) || toSiteId, arrZone, firstCrewId());
     }
-    const ok = await submitOnlineOp({ kind: 'MOVE', toSiteId, hazardPay, segments, pickupChit });
+    const ok = await submitOnlineOp({ kind: 'MOVE', toSiteId, hazardPay, segments, pickupChit, netThrust });
     if (ok) {
       // Advance the local plan past this turn so a multi-turn route stays
       // visible for the next move (mirrors the server's route shift); clear

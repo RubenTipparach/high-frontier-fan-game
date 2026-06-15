@@ -1426,7 +1426,14 @@ function applyMove(state, op, player) {
     if (k === 'rad') rad.push(slug);
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
-  const thrust = activeNetThrust(player.rocket, hasPrivilege(state, player, 'POWERSAT'));
+  // Net thrust for the maneuver gate + rad bypass. The CLIENT owns routing
+  // (the thrust budget included), so we TRUST the net thrust it computed and
+  // sent with the move, falling back to our own activeNetThrust for older
+  // clients. This keeps the client's land/liftoff verdict from being overturned
+  // by a client/server net-thrust parity drift (the same "trust the client's
+  // route + burns" model: fine for friends, not cheat-hardened).
+  const serverThrust = activeNetThrust(player.rocket, hasPrivilege(state, player, 'POWERSAT'));
+  const thrust = Number.isFinite(op.netThrust) ? op.netThrust : serverThrust;
   // Factory-assist liftoff / landing gate. A maneuver where net thrust
   // <= site size is only legal if a factory carries it (assist), which
   // is a hazard roll unless a colony waives it. No factory => hard block.
@@ -3160,7 +3167,7 @@ const FUNCTIONAL = {
 
 function pickPayload(op) {
   switch (op.kind) {
-    case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, pickupChit: op.pickupChit !== false };
+    case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, pickupChit: op.pickupChit !== false, netThrust: op.netThrust };
     case 'LOAD_GLORY': return {};
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face, radSide: op.radSide };
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };
