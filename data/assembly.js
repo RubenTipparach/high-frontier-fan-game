@@ -144,6 +144,21 @@ export function activeLaws(assembly) {
   return { active, lobbyingDisabled };
 }
 
+// The single ideology whose law is "in power" - the strict delegate plurality
+// leader. A tie or an empty board has no leader, so the active-law marker sits
+// at the Centrist center (its starting position). Returns a place key.
+export function lawLeader(assembly) {
+  let leader = null;
+  let best = 0;
+  let tie = false;
+  for (const key of IDEOLOGY_ORDER) {
+    const n = delegatesInPlace(assembly, key);
+    if (n > best) { best = n; leader = key; tie = false; }
+    else if (n === best && n > 0) tie = true;
+  }
+  return (leader && !tie && best > 0) ? leader : 'centrist';
+}
+
 // End-game political vote. For each IDEOLOGY space (Centrist is not in the
 // running), votes = every player's delegate cubes there + neutral seniority
 // discs there. The winner is the space with the most votes; a tie is broken by

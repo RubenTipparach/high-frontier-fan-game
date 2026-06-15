@@ -7956,10 +7956,16 @@ body:has(#view-browse:not(.hidden)) #main {
 .assembly-modal .assembly-panel-compact .assembly-board { max-width: 100%; }
 /* Interactive cells (Fundraise / lobby clicks). */
 .assembly-cell-click { cursor: pointer; }
-.assembly-cell-click:hover .assembly-wedge { filter: brightness(1.3); }
-.assembly-cell-hi .assembly-wedge { filter: brightness(1.5); stroke: var(--accent, #fbbf24); stroke-width: 4; }
-.assembly-cell-sel .assembly-wedge { stroke: #fff; stroke-width: 4; }
-.assembly-cell-hi .assembly-center, .assembly-cell-sel .assembly-center { stroke: var(--accent, #fbbf24); stroke-width: 4; }
+/* Highlights only appear during a Fundraise (.assembly-interactive). The
+   highlighted / selected cell gets a blue glowy border. */
+.assembly-interactive .assembly-cell-click:hover .assembly-wedge,
+.assembly-interactive .assembly-cell-click:hover .assembly-center { filter: brightness(1.2); }
+.assembly-cell-hi .assembly-wedge, .assembly-cell-sel .assembly-wedge,
+.assembly-cell-hi .assembly-center, .assembly-cell-sel .assembly-center {
+  stroke: #38bdf8; stroke-width: 5; filter: drop-shadow(0 0 7px #38bdf8);
+}
+/* Active-law star: gold, sits on the in-power ideology (center at start). */
+.assembly-star { fill: #fde047; font-size: 26px; paint-order: stroke; stroke: rgba(0,0,0,0.65); stroke-width: 3px; }
 /* Fundraise guided flow. */
 .assembly-fr-prompt { background: rgba(120,140,220,0.14); border: 1px solid #3a4a7a; border-radius: 8px;
   padding: 8px 10px; font-size: 13px; margin: 4px 0 6px; }
@@ -7990,10 +7996,11 @@ body:has(#view-browse:not(.hidden)) #main {
    the cubes / name (count toward the end-game vote). */
 .assembly-disc { fill: rgba(214, 40, 40, 0.4); stroke: #000; stroke-width: 1.2; }
 /* Hover: light up the whole cell (wedge or center) when hovered. */
-.assembly-cell { cursor: pointer; }
 .assembly-cell .assembly-wedge, .assembly-cell .assembly-center { transition: filter 0.12s ease; }
-.assembly-cell:hover .assembly-wedge { filter: brightness(1.35); }
-.assembly-cell:hover .assembly-center { filter: brightness(1.08); }
+/* Hover brightening only while interacting (during a Fundraise). */
+.assembly-interactive .assembly-cell { cursor: pointer; }
+.assembly-interactive .assembly-cell:hover .assembly-wedge { filter: brightness(1.35); }
+.assembly-interactive .assembly-cell:hover .assembly-center { filter: brightness(1.08); }
 .assembly-wedge-label { fill: #fff; font: 700 11px ui-sans-serif, system-ui, sans-serif; letter-spacing: 0.3px; paint-order: stroke; stroke: rgba(0,0,0,0.35); stroke-width: 2px; }
 .assembly-slot { fill: rgba(0,0,0,0.32); stroke: rgba(255,255,255,0.55); stroke-width: 1.5; }
 .assembly-center { fill: #f3f4fa; stroke: #0b0a14; stroke-width: 2; }

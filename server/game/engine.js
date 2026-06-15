@@ -2743,13 +2743,17 @@ function canUseFactoryNonVictory(state, player, fac) {
   if (fac.ownerId === player.profileId) return true;
   return playerCanUseLaw(state, player, 'individuality');
 }
-// A player's 7 wooden cubes are ONE shared pool: each factory AND each assembly
-// delegate is a cube. cubesInPlay counts both; FACTORY_CUBES (7) caps the sum.
-// Running out for a factory is freed by removing a delegate (INDUSTRIALIZE
-// freeDelegate); placing a delegate is blocked when the pool is full.
+// A player's 7 wooden cubes are ONE shared pool: each factory, each assembly
+// delegate, AND the first player's Sunspot (first-player) marker is a cube.
+// cubesInPlay counts all three; FACTORY_CUBES (7) caps the sum. Running out for
+// a factory is freed by removing a delegate (INDUSTRIALIZE freeDelegate);
+// placing a delegate is blocked when the pool is full.
 function cubesInPlay(state, profileId) {
-  return ownedSiteCount(state.factories, profileId)
+  let n = ownedSiteCount(state.factories, profileId)
     + playerDelegatesPlaced(assemblyOf(state), profileId);
+  const fp = state.players[state.firstPlayerIndex || 0];
+  if (fp && fp.profileId === profileId) n += 1;   // the Sunspot / first-player cube
+  return n;
 }
 
 // Fundraise (M0 operation, replaces Income): OPTIONALLY place a new delegate

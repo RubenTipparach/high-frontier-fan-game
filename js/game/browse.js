@@ -54,7 +54,7 @@ import { renderAssemblyPanel } from './assembly.js';
 import {
   activeLaws as assemblyActiveLaws, ASSEMBLY_PLACES, IDEOLOGY_ORDER as ASSEMBLY_IDEOLOGY_ORDER,
   IDEOLOGY_BY_KEY as ASSEMBLY_IDEOLOGY_BY_KEY, DELEGATES_PER_PLAYER,
-  adjacentPlaces as ASSEMBLY_ADJACENT,
+  adjacentPlaces as ASSEMBLY_ADJACENT, lawLeader as assemblyLawLeader,
 } from '../../data/assembly.js';
 import {
   WEIGHT_CLASSES, weightClassForMass, TRACK_LEGEND,
@@ -3225,7 +3225,12 @@ function assemblyDelegatesView(snapshot, variant = 'compact') {
     for (const [pid, n] of Object.entries(m)) for (let i = 0; i < (n | 0); i += 1) arr.push(colorOf(Number(pid)));
     delegates[place] = arr;
   }
-  return { delegates, seniority: (snapshot.assembly && snapshot.assembly.seniority) || {}, variant };
+  return {
+    delegates,
+    seniority: (snapshot.assembly && snapshot.assembly.seniority) || {},
+    variant,
+    activeStar: assemblyLawLeader(snapshot.assembly),
+  };
 }
 
 // Cubes a player has free: the 7-cube pool minus factories built minus delegates
@@ -3235,7 +3240,11 @@ function myCubesFree(snapshot) {
   const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
   const delegates = ASSEMBLY_PLACES.reduce((s, p) => s + ((dmap[p] || {})[myId] | 0), 0);
   const facs = Object.values(snapshot.factories || {}).filter((f) => f.ownerId === myId).length;
-  return Math.max(0, FACTORY_CUBES - delegates - facs);
+  // The first player's Sunspot marker is also one of their cubes.
+  const players = snapshot.players || [];
+  const fp = players[snapshot.firstPlayerIndex || 0];
+  const sunspot = (fp && fp.profileId === myId) ? 1 : 0;
+  return Math.max(0, FACTORY_CUBES - delegates - facs - sunspot);
 }
 // Glance read-out: active laws + how many cubes I still have free. Shown in both
 // the sidebar and the modal.
@@ -3384,6 +3393,7 @@ function renderAssemblyFundraise(body, snapshot) {
 
   // Board with the interaction wired for the current step.
   const view = assemblyDelegatesView(snapshot, 'compact');
+  view.interactive = true;   // cell highlights/glow only show during a Fundraise
   const adj = (_fr.moveFrom ? ASSEMBLY_ADJACENT(_fr.moveFrom) : []);
   view.highlight = step === 'move' && _fr.moveFrom ? new Set(adj) : null;
   view.selected = step === 'place' ? _fr.place : _fr.moveFrom;

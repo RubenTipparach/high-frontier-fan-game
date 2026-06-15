@@ -88,9 +88,10 @@ function callout(root, box, ide, slot) {
 export function renderAssemblyPanel({
   delegates = null, seniority = null, variant = 'compact',
   onCellClick = null, highlight = null, selected = null,
+  activeStar = null, interactive = false,
 } = {}) {
   const root = document.createElement('div');
-  root.className = 'assembly-panel assembly-panel-' + variant;
+  root.className = 'assembly-panel assembly-panel-' + variant + (interactive ? ' assembly-interactive' : '');
   const hi = highlight && highlight.has ? highlight : new Set(Array.isArray(highlight) ? highlight : []);
   // Make a cell (ideology wedge or the center) clickable / highlightable for the
   // interactive modal (Fundraise placement / move, click-to-lobby).
@@ -149,6 +150,13 @@ export function renderAssemblyPanel({
     }
   };
 
+  // Active-law star: the marker that sits on the in-power ideology (or the
+  // Centrist center when there's no clear leader, its starting spot).
+  const drawStar = (parent, pt) => {
+    const t = svg('text', { x: pt.x, y: pt.y, class: 'assembly-star', 'text-anchor': 'middle', 'dominant-baseline': 'middle' }, parent);
+    t.textContent = '★';
+  };
+
   // Each ideology is one hoverable cell: wedge + label + delegate space, grouped
   // so hovering anywhere on the cell lights the whole wedge.
   IDEOLOGY_ORDER.forEach((key) => {
@@ -168,6 +176,7 @@ export function renderAssemblyPanel({
     const slot = polar(C.x, C.y, R - 34, cA);
     slots[key] = slot;
     drawCubes(cell, slot, delegates && delegates[key]);
+    if (activeStar === key) drawStar(cell, { x: lab.x, y: lab.y - 17 });
     wireCell(cell, key);
   });
 
@@ -182,6 +191,7 @@ export function renderAssemblyPanel({
   ct = svg('text', { x: C.x, y: C.y + 7, class: 'assembly-center-sub', 'text-anchor': 'middle' }, centerCell);
   ct.textContent = CENTRIST.law.name;
   drawCubes(centerCell, { x: C.x, y: C.y + 30 }, delegates && delegates.centrist);
+  if (activeStar === 'centrist' || !activeStar) drawStar(centerCell, { x: C.x, y: C.y - 28 });
   wireCell(centerCell, 'centrist');
 
   // Callout boxes around the wheel, each arrow -> its space. Compact (sidebar
