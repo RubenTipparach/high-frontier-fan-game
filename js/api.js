@@ -144,6 +144,12 @@ export async function startLobby(id, token) {
   return call('POST', `/lobbies/${id}/start`, { token });
 }
 
+// Host-only: edit room config (maxRounds / draftStart / m0 / joinPolicy) while
+// the lobby is still waiting. Returns the updated lobby row.
+export async function updateLobbySettings(id, settings, token) {
+  return call('POST', `/lobbies/${id}/settings`, { token, body: settings });
+}
+
 // Host-only: close (soft-delete) a solo room. Marks it cancelled server-side;
 // restorable via restoreLobby. Moves the room to the player's "ended" list.
 export async function closeLobby(id, token) {

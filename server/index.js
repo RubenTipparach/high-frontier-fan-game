@@ -500,6 +500,8 @@ function lobbyRow(lobbyId) {
     maxPlayers: row.max_players,
     maxRounds: row.max_rounds,
     joinPolicy: row.join_policy,
+    draftStart: !!row.draft_start,
+    m0: !!row.m0,
     status: row.status,
     createdAt: row.created_at,
     startedAt: row.started_at,
@@ -875,6 +877,35 @@ app.post('/lobbies/:id/kick', requireProfile, (req, res) => {
     .run(id, targetId);
   publishLobby(id);
   publishToProfile(targetId, { type: 'lobby_kicked', lobbyId: id });
+  res.json({ ok: true, lobby: lobbyRow(id) });
+});
+
+// Host edits the room config while WAITING (before start): game length,
+// draft-start, M0, and visibility. Lets the host fix settings (e.g. turn on
+// M0) without recreating the room. Host-only; rejected once started.
+app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  const lobby = db.prepare('SELECT host_id, status FROM lobbies WHERE id = ?').get(id);
+  if (!lobby) return res.status(404).json({ error: 'not_found' });
+  if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
+  if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
+  const body = req.body || {};
+  const sets = [];
+  const args = [];
+  if (body.maxRounds !== undefined) {
+    const mr = [4, 5, 6, 7].includes(Number(body.maxRounds)) ? Number(body.maxRounds) : 5;
+    sets.push('max_rounds = ?'); args.push(mr);
+  }
+  if (body.draftStart !== undefined) { sets.push('draft_start = ?'); args.push(body.draftStart ? 1 : 0); }
+  if (body.m0 !== undefined) { sets.push('m0 = ?'); args.push(body.m0 ? 1 : 0); }
+  if (body.joinPolicy !== undefined) {
+    sets.push('join_policy = ?'); args.push(body.joinPolicy === 'invite-only' ? 'invite-only' : 'open');
+  }
+  if (!sets.length) return res.json({ ok: true, lobby: lobbyRow(id) });
+  args.push(id);
+  db.prepare(`UPDATE lobbies SET ${sets.join(', ')} WHERE id = ?`).run(...args);
+  publishLobby(id);
   res.json({ ok: true, lobby: lobbyRow(id) });
 });
 
