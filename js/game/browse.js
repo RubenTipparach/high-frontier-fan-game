@@ -7870,7 +7870,7 @@ function chainChip(card, face, kind, { ring, valid, radSide } = {}) {
   // chip must match the card the modal shows.
   const name = (card.faces && card.faces[face] && card.faces[face].name)
     || card.name || card.id;
-  const g = cardGlanceSummary(card, face);
+  const g = cardGlanceSummary(card, face, radSide);
   const statHtml = g.hasStats ? g.statsHtml : esc(kind === 'crew' ? 'crew' : (card.type || 'card'));
   // A radiator's mass is its DEPLOYED side's mass (light vs heavy), not the
   // fixed card.mass; show the side that's actually in the stack.

@@ -758,7 +758,7 @@ function modThrustGlyph(value) {
 // + fuel droplet for thrusters, therms for radiators, ISRU + role for
 // robonauts, etc.). Reads the ACTIVE face so a flipped (installed / Tier-2)
 // card reports its own stats. Returns ready-to-inject HTML (statsHtml).
-export function cardGlanceSummary(card, faceName = 'primary') {
+export function cardGlanceSummary(card, faceName = 'primary', radSide = null) {
   const sideName = (faceName === 'secondary' && card.faces && card.faces.secondary)
     ? 'secondary' : 'primary';
   const fdata = (card.faces && card.faces[sideName]) || {};
@@ -797,8 +797,12 @@ export function cardGlanceSummary(card, faceName = 'primary') {
     if (fuel != null) stats.push(fuelDropletGlyph(Number.isInteger(fuel) ? fuel : fuel.toFixed(2), dirt));
     if (fdata.afterburn ?? card.afterburn) stats.push('🔥');
   } else if (type === 'radiator') {
-    const therms = card.therms ?? card.heat_cap ?? fdata.therms
-      ?? (fdata.light && fdata.light.therms) ?? (fdata.heavy && fdata.heavy.therms);
+    // A radiator cools by the side it's deployed on (light vs heavy therms).
+    // Prefer the radSide block when the caller knows which side is in play.
+    const sideBlk = (radSide === 'light' || radSide === 'heavy') ? fdata[radSide] : null;
+    const therms = (sideBlk && sideBlk.therms != null) ? sideBlk.therms
+      : (card.therms ?? card.heat_cap ?? fdata.therms
+        ?? (fdata.light && fdata.light.therms) ?? (fdata.heavy && fdata.heavy.therms));
     if (therms != null) stats.push(`🌡 ${txt(therms)} therm${therms === 1 ? '' : 's'}`);
   } else if (type === 'crew') {
     if (fdata.role) stats.push(txt(cap(fdata.role)));
