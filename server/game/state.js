@@ -240,10 +240,16 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
   // assigned by turn-order position around the hex (seat 1 -> first ideology, and
   // so on, wrapping past 6). Leaves DELEGATES_PER_PLAYER-1 in hand.
   const assembly = m0 ? freshAssembly() : null;
+  // Each player's HOME ideology - where their starting delegate sits and the one
+  // space a new delegate may always be placed on (Fundraise rule). Multiplayer
+  // assigns it randomly by shuffled seat order; SOLO overrides it to the picked
+  // faction's colour-ideology in applyPickCrew. Keyed by profileId.
+  const homeIdeology = {};
   if (assembly) {
     ordered.forEach((p, i) => {
       const ide = IDEOLOGY_ORDER[i % IDEOLOGY_ORDER.length];
       assembly.delegates[ide][p.profileId] = 1;
+      homeIdeology[p.profileId] = ide;
     });
   }
   return {
@@ -320,6 +326,7 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
     // `assembly` holds delegate placements + drives the active-law resolver.
     m0: !!m0,
     assembly,
+    homeIdeology,
     auction: null,
     // Open player-to-player trade negotiation, or null. A side-channel deal that
     // both parties must consent to (offer / counter / accept handshake); it does

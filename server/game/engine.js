@@ -2778,9 +2778,14 @@ function applyFundraise(state, op, player) {
   const asm = assemblyOf(state);
   const pid = player.profileId;
   const placeName = (p) => (p === 'centrist' ? 'Centrist' : ((IDEOLOGY_BY_KEY[p] || {}).name || p));
-  // Optional: place a NEW delegate from hand.
+  // Optional: place a NEW delegate from hand. It may only go on your HOME
+  // ideology or a space where you already hold a delegate.
   const place = op.place ? String(op.place) : null;
   if (place && !ASSEMBLY_PLACES.includes(place)) return fail('bad_place');
+  if (place) {
+    const home = (state.homeIdeology || {})[pid];
+    if (place !== home && placeCount(asm, place, pid) <= 0) return fail('bad_place_target');
+  }
   // Optional: move one of MY delegates one ADJACENT space.
   const moveFrom = op.moveFrom ? String(op.moveFrom) : null;
   const moveTo = op.moveTo ? String(op.moveTo) : null;
@@ -4418,6 +4423,8 @@ function applyPickCrew(state, op, ctx) {
         }
       }
       setPlaceCount(asm, ide, player.profileId, 1);
+      state.homeIdeology = state.homeIdeology || {};
+      state.homeIdeology[player.profileId] = ide;
     }
   }
   // Replace any previous crew slot in LEO with the new pick so a

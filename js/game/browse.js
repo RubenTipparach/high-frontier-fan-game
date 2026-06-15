@@ -3375,10 +3375,41 @@ function tryLobbyAt(snapshot, place) {
     yes: '🗳 Lobby (1 aqua)', no: 'Cancel',
   }).then((ok) => { if (ok) submitOnlineOp({ kind: 'LOBBY', ideology: place }); });
 }
+// Places where the player currently holds a delegate (counting a placement made
+// earlier in this same Fundraise).
+function fundraiseMyPlaces(snapshot) {
+  const myId = _onlineMe && _onlineMe.id;
+  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
+  const set = new Set();
+  for (const p of ASSEMBLY_PLACES) {
+    let n = (dmap[p] || {})[myId] | 0;
+    if (_fr && _fr.place === p) n += 1;
+    if (n > 0) set.add(p);
+  }
+  return set;
+}
+// The cells the player MAY act on this Fundraise step (the dark-blue
+// "available" set; hovering one lights it bright blue):
+//   place step  - your HOME ideology + every space you already hold a delegate.
+//   move (pick) - every space you hold a delegate.
+//   move (dest) - the spaces adjacent to the cube you picked up.
+function fundraiseAvailable(snapshot) {
+  const myId = _onlineMe && _onlineMe.id;
+  const home = (snapshot.homeIdeology || {})[myId] || null;
+  if (_fr.step === 'place') {
+    if (myCubesFree(snapshot) <= 0) return new Set();   // nothing to place
+    const set = fundraiseMyPlaces(snapshot);
+    if (home) set.add(home);
+    return set;
+  }
+  if (!_fr.moveFrom) return fundraiseMyPlaces(snapshot);
+  return new Set(ASSEMBLY_ADJACENT(_fr.moveFrom));
+}
 // Fundraise guided flow: place (optional) then move one space (optional).
 function renderAssemblyFundraise(body, snapshot) {
   const inHand = myCubesFree(snapshot);
   const step = _fr.step;
+  const available = fundraiseAvailable(snapshot);
 
   // Prompt bar.
   const prompt = document.createElement('div');
@@ -3386,12 +3417,12 @@ function renderAssemblyFundraise(body, snapshot) {
   let promptText;
   if (step === 'place') {
     promptText = inHand > 0
-      ? 'Step 1 - Place a delegate: click a space to drop a new delegate, or skip.'
-      : 'Step 1 - No delegates left in hand. Skip to the move step.';
+      ? 'Step 1 - Place a delegate on a highlighted space (your home ideology or where you already have a delegate), or skip.'
+      : 'Step 1 - No cubes left in hand. Skip to the move step.';
   } else if (_fr.moveFrom) {
-    promptText = `Step 2 - Move: click an adjacent space to move your ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.moveFrom] || {}).name || _fr.moveFrom)} delegate, or skip.`;
+    promptText = `Step 2 - Move: click a highlighted adjacent space to move your ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.moveFrom] || {}).name || _fr.moveFrom)} delegate, or skip.`;
   } else {
-    promptText = 'Step 2 - Move one space: click one of your delegates to pick it up, or skip & finish.';
+    promptText = 'Step 2 - Move one space: click one of your own delegates (highlighted) to pick it up, or skip & finish.';
   }
   prompt.innerHTML = `<strong>Fundraise</strong> &middot; <span>${promptText}</span>`
     + (_fr.place ? `<div class="assembly-fr-chosen">Placing on ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.place] || {}).name || _fr.place)}.</div>` : '');
@@ -3400,10 +3431,9 @@ function renderAssemblyFundraise(body, snapshot) {
   // Board with the interaction wired for the current step.
   const view = assemblyDelegatesView(snapshot, assemblyModalVariant());
   view.interactive = true;   // cell highlights/glow only show during a Fundraise
-  const adj = (_fr.moveFrom ? ASSEMBLY_ADJACENT(_fr.moveFrom) : []);
-  view.highlight = step === 'move' && _fr.moveFrom ? new Set(adj) : null;
-  view.selected = step === 'place' ? _fr.place : _fr.moveFrom;
-  view.onCellClick = (place) => onFundraiseCell(snapshot, place);
+  view.highlight = available;                                  // dark-blue "available"
+  view.selected = step === 'place' ? _fr.place : _fr.moveFrom; // bright-blue "picked"
+  view.onCellClick = (place) => onFundraiseCell(snapshot, place, available);
   body.appendChild(renderAssemblyPanel(view));
 
   // Step buttons.
@@ -3428,28 +3458,27 @@ function mkBtn(label, cls, fn) {
   b.addEventListener('click', fn);
   return b;
 }
-function onFundraiseCell(snapshot, place) {
-  const myId = _onlineMe && _onlineMe.id;
-  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
-  const inHand = myCubesFree(snapshot);
+function onFundraiseCell(snapshot, place, available) {
   if (_fr.step === 'place') {
-    if (inHand <= 0) { _onlineToast('No delegates left in hand.', 'error'); return; }
-    _fr.place = (_fr.place === place) ? null : place;   // toggle
+    if (myCubesFree(snapshot) <= 0) { _onlineToast('No cubes left in hand.', 'error'); return; }
+    if (place === _fr.place) { _fr.place = null; refreshAssemblyModal(); return; }   // unselect
+    if (!available.has(place)) {
+      _onlineToast('Place on your home ideology or a space where you already have a delegate.', 'error');
+      return;
+    }
+    _fr.place = place;
     refreshAssemblyModal();
     return;
   }
-  // move step
+  // move step: pick up your own cube, then choose an adjacent destination.
   if (!_fr.moveFrom) {
-    // Pick up one of MY delegates (counting a same-space placement this op).
-    const have = ((dmap[place] || {})[myId] | 0) + (_fr.place === place ? 1 : 0);
-    if (have <= 0) { _onlineToast('Pick one of your own delegates.', 'error'); return; }
+    if (!available.has(place)) { _onlineToast('Pick one of your own delegates.', 'error'); return; }
     _fr.moveFrom = place;
     refreshAssemblyModal();
     return;
   }
-  // Choose the adjacent destination.
-  if (place === _fr.moveFrom) { _fr.moveFrom = null; refreshAssemblyModal(); return; }
-  if (!ASSEMBLY_ADJACENT(_fr.moveFrom).includes(place)) { _onlineToast('Only an adjacent space.', 'error'); return; }
+  if (place === _fr.moveFrom) { _fr.moveFrom = null; refreshAssemblyModal(); return; }   // put it back
+  if (!available.has(place)) { _onlineToast('Move only to an adjacent space.', 'error'); return; }
   commitFundraise(place);
 }
 function commitFundraise(moveTo) {
