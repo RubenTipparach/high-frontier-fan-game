@@ -145,8 +145,19 @@ export function resolveSupportChain({ cards = [], activeId = null, wiring = {} }
 // path is needed here: it counts toward radiatorTotal like any other radiator.
 export function resolveCoolingAcross({ cards = [], orders = [] } = {}) {
   const byId = new Map(cards.map((c) => [c.id, c]));
+  // A radiator only COOLS if it can run: its own support requirements (e.g. an
+  // active refrigerator's e-generator) must be suppliable somewhere in the
+  // stack. An unpowered radiator contributes 0 therms, so the reactor it was
+  // meant to cool stays hot and the active card reads inactive - matching the
+  // chain visualizer's "needs a generator - no supplier" flag.
+  const supplierExists = (kind) =>
+    cards.some((c) => Array.isArray(c.supplies) && c.supplies.includes(kind));
+  const radiatorPowered = (c) => (c.requires || [])
+    .map((r) => (r && typeof r === 'object') ? r.kind : r)
+    .filter(Boolean)
+    .every((kind) => supplierExists(kind));
   const radiatorTotal = cards
-    .filter((c) => c.type === 'radiator')
+    .filter((c) => c.type === 'radiator' && radiatorPowered(c))
     .reduce((s, c) => s + (Number(c.therms) || 0), 0);
   let pool = radiatorTotal;
   const reserved = new Set(); // reactor ids a higher-priority chain already cooled

@@ -615,6 +615,22 @@ function buildRadiatorFace(card, sideName) {
   const lightT = light.therms || 0;
   const heavyT = heavy.therms || 0;
 
+  // Power-source requirements (e.g. an active refrigerator's e-generator) DO
+  // apply to radiators - render them as a supports-required row so the card
+  // shows what the support chain enforces. Therms are SUPPLIED by a radiator,
+  // never required, so they're not here (the typebar therm badge is the supply).
+  const reqs = Array.isArray(faceMeta.requires) ? faceMeta.requires : [];
+  const reqChip = (r) => {
+    const icon = supportIconSvg(r.kind, { size: 15 })
+      || `<em>${(REQUIREMENT_VIS[r.kind] || { glyph: '◇' }).glyph}</em>`;
+    const cnt = (r.count > 1) ? `<b>×${r.count}</b>` : '';
+    return `<span class="req has-support-icon">${icon}${cnt}</span>`;
+  };
+  const reqHtml = reqs.length
+    ? `<div class="card-supports"><div class="card-supports-label">Supports required</div>`
+      + `<div class="card-requires">${reqs.map(reqChip).join('')}</div></div>`
+    : '';
+
   // Per-half toggle row: "Light (N) | Heavy (M)" with the
   // currently-active side bolded via CSS rule on the .card
   // root (which carries data-rotated). Tapping either label
@@ -639,6 +655,7 @@ function buildRadiatorFace(card, sideName) {
         <span><strong>${block.radHardness ?? '-'}</strong> RAD</span>
         ${showSpectral ? '<span class="card-spectral"></span>' : '<span></span>'}
       </div>
+      ${reqHtml}
       <p class="card-blurb">${escapeText(ability)}</p>
     </div>`;
 
