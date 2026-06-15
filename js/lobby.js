@@ -308,6 +308,8 @@ function lobbyListItem(lobby, actionLabel = 'Join') {
   li.querySelector('.host').textContent = lobby.hostName;
   li.querySelector('.count').textContent = lobby.memberCount;
   li.querySelector('code').textContent = lobby.code;
+  const roster = mkRoster(lobby.memberNames);
+  if (roster) li.querySelector('div').appendChild(roster);
   const btn = li.querySelector('button');
   btn.textContent = actionLabel;
   btn.addEventListener('click', async () => { await openLobby(lobby.id, { join: true }); });
@@ -471,6 +473,8 @@ export async function refreshPublicGames() {
     li.querySelector('.host').textContent = g.hostName;
     li.querySelector('.count').textContent = g.playerCount;
     li.querySelector('code').textContent = g.lobbyCode;
+    const watchRoster = mkRoster(g.playerNames);
+    if (watchRoster) li.querySelector('div').appendChild(watchRoster);
     li.querySelector('button').addEventListener('click', () => {
       watchGame(g);
     });
@@ -522,6 +526,22 @@ function mkPlayerName(text, color) {
   return span;
 }
 
+// A muted roster line of @names for a lobby / game row, so the list shows
+// who is sitting at each table at a glance. `namesCsv` is the server's
+// comma-joined member list (join order). Seat colours aren't known in the
+// list view, so the names fall back to currentColor.
+function mkRoster(namesCsv) {
+  const names = String(namesCsv || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (!names.length) return null;
+  const wrap = document.createElement('span');
+  wrap.className = 'meta lobby-roster';
+  names.forEach((n, i) => {
+    if (i) wrap.append(', ');
+    wrap.appendChild(mkPlayerName('@' + n, null));
+  });
+  return wrap;
+}
+
 function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
   listEl.innerHTML = '';
   for (const li of prependRows) listEl.appendChild(li);
@@ -556,6 +576,8 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
     li.querySelector('.host').textContent = g.hostName;
     li.querySelector('.count').textContent = g.memberCount;
     li.querySelector('code').textContent = g.code;
+    const myRoster = mkRoster(g.memberNames);
+    if (myRoster) li.querySelector('div').appendChild(myRoster);
     // In-progress games show whose turn it is, the round, and how long
     // ago the last turn ended (from /lobbies/mine). The active player's
     // name is tinted with their seat colour, matching the in-game UI.

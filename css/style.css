@@ -424,6 +424,9 @@ label.checkbox input { accent-color: var(--accent-2); }
   font-weight: 600;
   color: var(--ink);
 }
+/* Roster line: who is sitting at the table, one muted @name list per row. */
+.lobby-list .lobby-roster { display: block; margin-top: 2px; }
+.lobby-list .lobby-roster .player-name { font-weight: 500; }
 .lobby-list .turn-meta[hidden] { display: none; }
 .lobby-list li.is-your-turn {
   border-left: 3px solid var(--accent, #fbbf24);

@@ -651,7 +651,12 @@ app.get('/lobbies', (_req, res) => {
               l.m0          AS m0,
               l.created_at  AS createdAt,
               p.name        AS hostName,
-              (SELECT COUNT(*) FROM lobby_members lm WHERE lm.lobby_id = l.id) AS memberCount
+              (SELECT COUNT(*) FROM lobby_members lm WHERE lm.lobby_id = l.id) AS memberCount,
+              (SELECT group_concat(nm) FROM (
+                 SELECT p2.name AS nm FROM lobby_members lmx
+                 JOIN profiles p2 ON p2.id = lmx.profile_id
+                 WHERE lmx.lobby_id = l.id
+                 ORDER BY lmx.joined_at ASC)) AS memberNames
        FROM lobbies l
        JOIN profiles p ON p.id = l.host_id
        WHERE l.join_policy = 'open' AND l.status = 'waiting'
@@ -678,6 +683,11 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
               l.created_at  AS createdAt,
               p.name        AS hostName,
               (SELECT COUNT(*) FROM lobby_members lm2 WHERE lm2.lobby_id = l.id) AS memberCount,
+              (SELECT group_concat(nm) FROM (
+                 SELECT p2.name AS nm FROM lobby_members lmx
+                 JOIN profiles p2 ON p2.id = lmx.profile_id
+                 WHERE lmx.lobby_id = l.id
+                 ORDER BY lmx.joined_at ASC)) AS memberNames,
               g.id     AS gameId,
               g.status AS gameStatus,
               gs.updated_at AS lastActionAt
@@ -1716,7 +1726,12 @@ app.get('/games/public', requireProfile, (req, res) => {
               l.name        AS lobbyName,
               l.code        AS lobbyCode,
               p.name        AS hostName,
-              (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) AS playerCount
+              (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) AS playerCount,
+              (SELECT group_concat(nm) FROM (
+                 SELECT p2.name AS nm FROM game_players gpx
+                 JOIN profiles p2 ON p2.id = gpx.profile_id
+                 WHERE gpx.game_id = g.id
+                 ORDER BY gpx.seat ASC)) AS playerNames
        FROM games g
        JOIN lobbies l ON l.id = g.lobby_id
        JOIN profiles p ON p.id = l.host_id
