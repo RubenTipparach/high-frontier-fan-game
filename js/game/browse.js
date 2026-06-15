@@ -2424,7 +2424,7 @@ function openNewsCardPreview(cardId) {
   const panel = document.createElement('div');
   panel.className = 'card-modal-panel';
   try {
-    const el = renderCard(card, { type: card.type || (CREW_BY_ID[cardId] ? 'crew' : 'patent') });
+    const el = renderCard(card, { type: CREW_BY_ID[cardId] ? 'crew' : 'patent' });
     el.classList.add('card-modal-card');
     panel.appendChild(el);
   } catch { panel.textContent = card.name || cardId; }
@@ -2554,7 +2554,7 @@ function renderEventChooser(snapshot) {
       pick.type = 'button';
       pick.className = 'et-card-pick' + (id === selected ? ' is-selected' : '');
       if (card) {
-        try { pick.appendChild(renderCard(card, { type: card.type })); }
+        try { pick.appendChild(renderCard(card, { type: CREW_BY_ID[card.id] ? 'crew' : 'patent' })); }
         catch { pick.textContent = card.name || id; }
       } else {
         pick.textContent = id;
