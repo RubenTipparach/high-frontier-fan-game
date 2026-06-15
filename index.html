@@ -661,6 +661,23 @@
             </div>
           </div>
           <p class="main-menu-note">Free Library: patents are free draws. Card Market: cards are auctioned, but solo you have no rival bidders, so you win them unopposed.</p>
+          <div class="solo-opt-group" data-opt="rounds">
+            <span class="solo-opt-label">Game length</span>
+            <div class="main-menu-row">
+              <button class="solo-opt is-active" data-rounds="5" type="button">Short - 5</button>
+              <button class="solo-opt" data-rounds="6" type="button">Medium - 6</button>
+              <button class="solo-opt" data-rounds="7" type="button">Extra long - 7</button>
+            </div>
+          </div>
+          <label class="check-row">
+            <input type="checkbox" id="solo-draft" />
+            <span>Draft start - open with a card draft (take free deck-top picks until you hold 12 cards, then your bank opens at 6)</span>
+          </label>
+          <label class="check-row">
+            <input type="checkbox" id="solo-m0" />
+            <span>Module 0: Politics - adds the Sol Political Assembly</span>
+          </label>
+          <p class="main-menu-note">A solo room is always private (just you).</p>
           <div class="main-menu-row">
             <button id="btn-solo-create" class="primary" type="button">🧪 Create solo room</button>
             <button id="btn-solo-back" type="button">Back</button>

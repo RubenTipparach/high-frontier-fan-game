@@ -664,6 +664,8 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
     .prepare(
       `SELECT l.id, l.code, l.name, l.status,
               l.max_players AS maxPlayers,
+              l.join_policy AS joinPolicy,
+              l.host_id     AS hostId,
               l.created_at  AS createdAt,
               p.name        AS hostName,
               (SELECT COUNT(*) FROM lobby_members lm2 WHERE lm2.lobby_id = l.id) AS memberCount,

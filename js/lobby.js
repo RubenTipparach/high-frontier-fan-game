@@ -279,6 +279,31 @@ function mountGlobalChat() {
   });
 }
 
+// One open-tables row for a waiting lobby. `actionLabel` is Join (public) or
+// Enter (a private table I'm already in).
+function lobbyListItem(lobby, actionLabel = 'Join') {
+  const li = document.createElement('li');
+  li.innerHTML = `
+    <div>
+      <span class="name"></span>
+      <span class="meta">hosted by @<span class="host"></span>
+        · <span class="count"></span>/${lobby.maxPlayers}
+        · <code></code></span>
+    </div>
+    <div class="row-actions">
+      <button class="primary"></button>
+    </div>
+  `;
+  li.querySelector('.name').textContent = lobby.name;
+  li.querySelector('.host').textContent = lobby.hostName;
+  li.querySelector('.count').textContent = lobby.memberCount;
+  li.querySelector('code').textContent = lobby.code;
+  const btn = li.querySelector('button');
+  btn.textContent = actionLabel;
+  btn.addEventListener('click', async () => { await openLobby(lobby.id, { join: true }); });
+  return li;
+}
+
 export async function refreshLobbyList() {
   refreshMyGames();
   refreshPublicGames();
@@ -289,33 +314,34 @@ export async function refreshLobbyList() {
     list.innerHTML = `<li class="empty">Failed to load (${r.error}).</li>`;
     return;
   }
+  list.innerHTML = '';
+  // Private section: invite-only tables I made or joined that haven't started
+  // yet (they never appear in the public open list). Shown above the open ones.
+  const me = activeProfile();
+  if (me) {
+    const mine = await listMyGames(me.token);
+    const priv = (mine.ok ? (mine.data.entries || []) : []).filter((l) =>
+      l.status === 'waiting' && l.joinPolicy === 'invite-only' && !l.gameId);
+    if (priv.length) {
+      const head = document.createElement('li');
+      head.className = 'lobby-list-group';
+      head.textContent = '🔒 Private (invite-only)';
+      list.appendChild(head);
+      for (const lobby of priv) list.appendChild(lobbyListItem(lobby, 'Enter'));
+      const head2 = document.createElement('li');
+      head2.className = 'lobby-list-group';
+      head2.textContent = '🌐 Open tables';
+      list.appendChild(head2);
+    }
+  }
   if (!r.data.entries.length) {
-    list.innerHTML = '<li class="empty">No open tables. Create one!</li>';
+    const empty = document.createElement('li');
+    empty.className = 'empty';
+    empty.textContent = list.children.length ? 'No open tables right now.' : 'No open tables. Create one!';
+    list.appendChild(empty);
     return;
   }
-  list.innerHTML = '';
-  for (const lobby of r.data.entries) {
-    const li = document.createElement('li');
-    li.innerHTML = `
-      <div>
-        <span class="name"></span>
-        <span class="meta">hosted by @<span class="host"></span>
-          · <span class="count"></span>/${lobby.maxPlayers}
-          · <code></code></span>
-      </div>
-      <div class="row-actions">
-        <button class="primary">Join</button>
-      </div>
-    `;
-    li.querySelector('.name').textContent = lobby.name;
-    li.querySelector('.host').textContent = lobby.hostName;
-    li.querySelector('.count').textContent = lobby.memberCount;
-    li.querySelector('code').textContent = lobby.code;
-    li.querySelector('button').addEventListener('click', async () => {
-      await openLobby(lobby.id, { join: true });
-    });
-    list.appendChild(li);
-  }
+  for (const lobby of r.data.entries) list.appendChild(lobbyListItem(lobby, 'Join'));
 }
 
 // "Your games" (in progress) + "Ended games": the tables the player is
@@ -640,13 +666,14 @@ async function onCreateSubmit(ev) {
 // you in it, started right away. It runs the same server-backed engine as a
 // full table, so it's the way to exercise multiplayer features alone. Needs
 // the server to allow maxPlayers=1 (it does); start only needs >=1 member.
-export async function createSoloRoom({ startingAqua = 100, economy = 'library' } = {}) {
+export async function createSoloRoom({ startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, m0 = false } = {}) {
   const me = activeProfile();
   if (!me) return { ok: false, error: 'no_profile' };
   const create = await createLobby(
-    { name: `${me.name}'s solo room`, maxPlayers: 1, maxRounds: 5,
+    { name: `${me.name}'s solo room`, maxPlayers: 1,
+      maxRounds: [5, 6, 7].includes(Number(maxRounds)) ? Number(maxRounds) : 5,
       joinPolicy: 'invite-only', idempotencyKey: newIdemKey(),
-      startingAqua, economy },
+      startingAqua, economy, draftStart, m0 },
     me.token,
   );
   if (!create.ok) return create;

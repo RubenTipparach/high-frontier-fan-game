@@ -1009,3 +1009,15 @@ body.in-lobby .main-menu-fab { display: none; }
 /* Breathing room above the notify Save / Test DM buttons so they don't
    crowd the event checkboxes. */
 #notify-section .notify-actions { margin-top: 14px; }
+
+/* Open-tables section headers (Private / Open groups). */
+.lobby-list-group {
+  list-style: none;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--ink-dim);
+  padding: 10px 4px 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}

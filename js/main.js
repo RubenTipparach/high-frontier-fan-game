@@ -461,13 +461,17 @@ function initNewGameModal() {
   if (soloCreate) soloCreate.addEventListener('click', async () => {
     const aquaBtn = soloOpts && soloOpts.querySelector('.solo-opt.is-active[data-aqua]');
     const econBtn = soloOpts && soloOpts.querySelector('.solo-opt.is-active[data-econ]');
+    const roundsBtn = soloOpts && soloOpts.querySelector('.solo-opt.is-active[data-rounds]');
     const startingAqua = aquaBtn ? Number(aquaBtn.dataset.aqua) : 100;
     const economy = econBtn ? econBtn.dataset.econ : 'library';
+    const maxRounds = roundsBtn ? Number(roundsBtn.dataset.rounds) : 5;
+    const draftStart = !!document.getElementById('solo-draft')?.checked;
+    const m0 = !!document.getElementById('solo-m0')?.checked;
     soloCreate.disabled = true;
     const prev = soloCreate.textContent;
     soloCreate.textContent = 'Creating room…';
     try {
-      const r = await createSoloRoom({ startingAqua, economy });
+      const r = await createSoloRoom({ startingAqua, economy, maxRounds, draftStart, m0 });
       if (r && r.ok) { close(); }
       else { toast('Could not start a solo room: ' + ((r && r.error) || 'network'), 'error'); }
     } catch (err) {
