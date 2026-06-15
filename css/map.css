@@ -7910,6 +7910,11 @@ body:has(#view-browse:not(.hidden)) #main {
 .assembly-sub { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--ink-dim, #8b90b8); }
 .assembly-board { display: block; width: 100%; max-width: 720px; margin: 8px auto 0; }
 .assembly-wedge { stroke: #0b0a14; stroke-width: 2; }
+/* Hover: light up the whole cell (wedge or center) when hovered. */
+.assembly-cell { cursor: pointer; }
+.assembly-cell .assembly-wedge, .assembly-cell .assembly-center { transition: filter 0.12s ease; }
+.assembly-cell:hover .assembly-wedge { filter: brightness(1.35); }
+.assembly-cell:hover .assembly-center { filter: brightness(1.08); }
 .assembly-wedge-label { fill: #fff; font: 700 11px ui-sans-serif, system-ui, sans-serif; letter-spacing: 0.3px; paint-order: stroke; stroke: rgba(0,0,0,0.35); stroke-width: 2px; }
 .assembly-slot { fill: rgba(0,0,0,0.32); stroke: rgba(255,255,255,0.55); stroke-width: 1.5; }
 .assembly-center { fill: #f3f4fa; stroke: #0b0a14; stroke-width: 2; }

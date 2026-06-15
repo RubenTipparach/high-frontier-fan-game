@@ -91,8 +91,8 @@ export function renderAssemblyPanel({ delegates = null } = {}) {
   root.innerHTML = `
     <div class="assembly-head"><h2>Sol Political Assembly</h2><span class="assembly-sub">Module 0</span></div>`;
 
-  const VB = { w: 980, h: 660 };
-  const C = { x: 490, y: 318 };
+  const VB = { w: 900, h: 600 };
+  const C = { x: 450, y: 300 };
   const R = 150, r = 62;
   const board = svg('svg', { viewBox: `0 0 ${VB.w} ${VB.h}`, class: 'assembly-board', role: 'img', 'aria-label': 'Sol Political Assembly' });
 
@@ -103,69 +103,62 @@ export function renderAssemblyPanel({ delegates = null } = {}) {
 
   const centers = { freedom: -90, honor: -30, unity: 30, authority: 90, equality: 150, individuality: 210 };
   const slots = {};
-  // Wedges + labels + slots.
+
+  // Delegate cubes live anywhere on the cell (no fixed slot): drop the iso-cubes
+  // near `pt` in seat colours; nothing when empty.
+  const drawCubes = (parent, pt, list) => {
+    const cubes = Array.isArray(list) ? list : [];
+    if (!cubes.length) return;
+    cubes.slice(0, 6).forEach((col, i) => {
+      const ox = pt.x - 10 + (i % 3) * 10;
+      const oy = pt.y - 4 + Math.floor(i / 3) * 11;
+      isoCube(parent, ox, oy, 6, col, false);
+    });
+  };
+
+  // Each ideology is one hoverable cell: wedge + label + delegate space, grouped
+  // so hovering anywhere on the cell lights the whole wedge.
   IDEOLOGY_ORDER.forEach((key) => {
     const ide = IDEOLOGY_BY_KEY[key];
     const cA = centers[key];
+    const cell = svg('g', { class: 'assembly-cell', 'data-key': key }, board);
     const pIL = polar(C.x, C.y, r, cA - 30);
     const pOL = polar(C.x, C.y, R, cA - 30);
     const pOR = polar(C.x, C.y, R, cA + 30);
     const pIR = polar(C.x, C.y, r, cA + 30);
-    svg('polygon', { points: pts([pIL, pOL, pOR, pIR]), fill: ide.color, class: 'assembly-wedge' }, board);
+    svg('polygon', { points: pts([pIL, pOL, pOR, pIR]), fill: ide.color, class: 'assembly-wedge' }, cell);
     const lab = polar(C.x, C.y, (r + R) / 2 - 16, cA);
-    const t = svg('text', { x: lab.x, y: lab.y, class: 'assembly-wedge-label', 'text-anchor': 'middle', 'dominant-baseline': 'middle' }, board);
+    const t = svg('text', { x: lab.x, y: lab.y, class: 'assembly-wedge-label', 'text-anchor': 'middle', 'dominant-baseline': 'middle' }, cell);
     t.textContent = ide.name.toUpperCase();
     const slot = polar(C.x, C.y, R - 30, cA);
     slots[key] = slot;
+    drawCubes(cell, slot, delegates && delegates[key]);
   });
 
-  // Center hex (Centrist).
+  // Center (Centrist) is its own hoverable cell.
+  const centerCell = svg('g', { class: 'assembly-cell', 'data-key': 'centrist' }, board);
   const innerCorners = [-60, 0, 60, 120, 180, 240].map((a) => polar(C.x, C.y, r, a));
-  svg('polygon', { points: pts(innerCorners), class: 'assembly-center' }, board);
-  let ct = svg('text', { x: C.x, y: C.y - 10, class: 'assembly-center-label', 'text-anchor': 'middle' }, board);
+  svg('polygon', { points: pts(innerCorners), class: 'assembly-center' }, centerCell);
+  let ct = svg('text', { x: C.x, y: C.y - 10, class: 'assembly-center-label', 'text-anchor': 'middle' }, centerCell);
   ct.textContent = 'CENTRIST';
-  ct = svg('text', { x: C.x, y: C.y + 7, class: 'assembly-center-sub', 'text-anchor': 'middle' }, board);
+  ct = svg('text', { x: C.x, y: C.y + 7, class: 'assembly-center-sub', 'text-anchor': 'middle' }, centerCell);
   ct.textContent = CENTRIST.law.name;
-
-  // Delegate spaces: a faint iso-cube outline, filled iso-cubes for placed ones.
-  const drawSpace = (pt, list) => {
-    svg('circle', { cx: pt.x, cy: pt.y, r: 16, class: 'assembly-slot' }, board);
-    const cubes = Array.isArray(list) ? list : [];
-    if (!cubes.length) { isoCube(board, pt.x, pt.y + 2, 7, '#ffffff', true); return; }
-    cubes.slice(0, 4).forEach((col, i) => {
-      const ox = pt.x - 8 + (i % 2) * 14;
-      const oy = pt.y - 3 + Math.floor(i / 2) * 11 + 2;
-      isoCube(board, ox, oy, 6, col, false);
-    });
-  };
-  IDEOLOGY_ORDER.forEach((key) => drawSpace(slots[key], delegates && delegates[key]));
-  const centerSlot = { x: C.x, y: C.y + 26 };
-  drawSpace(centerSlot, delegates && delegates.centrist);
+  drawCubes(centerCell, { x: C.x, y: C.y + 24 }, delegates && delegates.centrist);
 
   // Callout boxes around the wheel, each arrow -> its space.
   const boxes = {
-    freedom:       { x: 384, y: 10,  w: 212, h: 92 },
-    honor:         { x: 752, y: 110, w: 220, h: 110 },
-    unity:         { x: 752, y: 322, w: 220, h: 122 },
-    authority:     { x: 384, y: 566, w: 212, h: 92 },
-    equality:      { x: 8,   y: 322, w: 220, h: 122 },
-    individuality: { x: 8,   y: 110, w: 220, h: 120 },
+    freedom:       { x: 344, y: 44,  w: 212, h: 84 },
+    honor:         { x: 636, y: 150, w: 210, h: 104 },
+    unity:         { x: 636, y: 326, w: 210, h: 118 },
+    authority:     { x: 344, y: 474, w: 212, h: 84 },
+    equality:      { x: 54,  y: 326, w: 210, h: 118 },
+    individuality: { x: 54,  y: 150, w: 210, h: 122 },
   };
   IDEOLOGY_ORDER.forEach((key) => callout(board, boxes[key], IDEOLOGY_BY_KEY[key], slots[key]));
 
   // Centrist / Pad Insurance: a side box (top-right, mirroring Lobby top-left),
-  // accented white to match the white center hex, with an arrow into the center.
-  const cBox = { x: 740, y: 8, w: 232, h: 82 };
-  const cTarget = polar(C.x, C.y, r, -32);   // top-right edge of the center hex
-  const cStart = edgePoint(cBox, cTarget);
-  const cdx = cTarget.x - cStart.x, cdy = cTarget.y - cStart.y;
-  const cLen = Math.hypot(cdx, cdy) || 1;
-  svg('line', {
-    x1: cStart.x, y1: cStart.y,
-    x2: cTarget.x - (cdx / cLen) * 16, y2: cTarget.y - (cdy / cLen) * 16,
-    class: 'assembly-arrow', 'marker-end': 'url(#assembly-arrowhead)',
-  }, board);
-  const cFo = svg('foreignObject', { x: cBox.x, y: cBox.y, width: cBox.w, height: cBox.h }, board);
+  // accented white to match the white center hex. No arrow (it's the center).
+  const cFo = svg('foreignObject', { x: 662, y: 8, width: 230, height: 80 }, board);
   const cDiv = document.createElementNS(XHTML, 'div');
   cDiv.setAttribute('class', 'assembly-callout assembly-callout-center');
   cDiv.innerHTML = `
@@ -173,7 +166,7 @@ export function renderAssemblyPanel({ delegates = null } = {}) {
     <div class="assembly-law-text">${CENTRIST.law.text}</div>`;
   cFo.appendChild(cDiv);
 
-  const lFo = svg('foreignObject', { x: 8, y: 8, width: 240, height: 96 }, board);
+  const lFo = svg('foreignObject', { x: 8, y: 8, width: 230, height: 86 }, board);
   const lDiv = document.createElementNS(XHTML, 'div');
   lDiv.setAttribute('class', 'assembly-callout assembly-callout-lobby');
   lDiv.innerHTML = `<div class="assembly-law-head"><span class="assembly-law-name">Lobby (free action)</span></div><div class="assembly-law-text">${LOBBY_RULE}</div>`;
