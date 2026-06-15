@@ -153,15 +153,25 @@ export function renderAssemblyPanel({ delegates = null } = {}) {
   };
   IDEOLOGY_ORDER.forEach((key) => callout(board, boxes[key], IDEOLOGY_BY_KEY[key], slots[key]));
 
-  // Centrist + Lobby note boxes (no arrows; Centrist points at the center).
-  const cFo = svg('foreignObject', { x: 372, y: 470, width: 236, height: 78 }, board);
+  // Centrist / Pad Insurance: a side box (top-right, mirroring Lobby top-left),
+  // accented white to match the white center hex, with an arrow into the center.
+  const cBox = { x: 740, y: 8, w: 232, h: 82 };
+  const cTarget = polar(C.x, C.y, r, -32);   // top-right edge of the center hex
+  const cStart = edgePoint(cBox, cTarget);
+  const cdx = cTarget.x - cStart.x, cdy = cTarget.y - cStart.y;
+  const cLen = Math.hypot(cdx, cdy) || 1;
+  svg('line', {
+    x1: cStart.x, y1: cStart.y,
+    x2: cTarget.x - (cdx / cLen) * 16, y2: cTarget.y - (cdy / cLen) * 16,
+    class: 'assembly-arrow', 'marker-end': 'url(#assembly-arrowhead)',
+  }, board);
+  const cFo = svg('foreignObject', { x: cBox.x, y: cBox.y, width: cBox.w, height: cBox.h }, board);
   const cDiv = document.createElementNS(XHTML, 'div');
   cDiv.setAttribute('class', 'assembly-callout assembly-callout-center');
   cDiv.innerHTML = `
     <div class="assembly-law-head"><span class="assembly-law-ide">${CENTRIST.name}</span><span class="assembly-law-name">${CENTRIST.law.name}</span></div>
     <div class="assembly-law-text">${CENTRIST.law.text}</div>`;
   cFo.appendChild(cDiv);
-  svg('line', { x1: 490, y1: 470, x2: 490, y2: C.y + 40, class: 'assembly-arrow', 'marker-end': 'url(#assembly-arrowhead)' }, board);
 
   const lFo = svg('foreignObject', { x: 8, y: 8, width: 240, height: 96 }, board);
   const lDiv = document.createElementNS(XHTML, 'div');

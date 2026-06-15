@@ -7931,7 +7931,8 @@ body:has(#view-browse:not(.hidden)) #main {
   background: rgba(13, 12, 24, 0.92);
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
-.assembly-callout-center { border-left-color: #c9ccd8; }
+.assembly-callout-center { border-left-color: #f3f4fa; border-top: 1px solid rgba(243,244,250,0.35); }
+.assembly-callout-center .assembly-law-ide { color: #f3f4fa; }
 .assembly-callout-lobby { border-left-color: var(--accent, #7dd3fc); }
 .assembly-law-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
 .assembly-law-ide { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--ide-color, var(--ink-dim)); font-weight: 700; }
