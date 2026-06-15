@@ -4178,15 +4178,15 @@ const CREW = {
 function applySetFirstPlayer(state, op, ctx) {
   const pending = state.pendingFirstPlayer;
   if (!pending) return fail('no_first_player_choice');
-  if (pending.chooserId !== ctx.profileId) return fail('not_first_player_chooser');
-  // profileId is numeric in state; the op carries a number too. Comparing a
-  // String()'d id against the numeric p.profileId never matched, so every pick
-  // bounced with unknown_player ("I can't select the first player").
-  const targetId = Number(op.profileId);
-  const targetIdx = state.players.findIndex((p) => p.profileId === targetId);
+  // Compare ids type-agnostically (string-vs-number mismatches between the op
+  // payload, the state, and the chooser id were making every pick bounce with
+  // unknown_player - "I can't select the first player").
+  const sameId = (a, b) => String(a) === String(b);
+  if (!sameId(pending.chooserId, ctx.profileId)) return fail('not_first_player_chooser');
+  const targetIdx = state.players.findIndex((p) => sameId(p.profileId, op.profileId));
   if (targetIdx < 0) return fail('unknown_player');
   // "another player": the first-player token must move off the chooser.
-  if (state.players[targetIdx].profileId === pending.chooserId) {
+  if (sameId(state.players[targetIdx].profileId, pending.chooserId)) {
     return fail('must_choose_another');
   }
   const chooser = playerByProfile(state, pending.chooserId);
