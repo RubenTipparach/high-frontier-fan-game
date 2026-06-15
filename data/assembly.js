@@ -54,6 +54,24 @@ export const CENTRIST = {
 // Lobby free action: activate an inactive ideology's Law for a price.
 export const LOBBY_RULE = 'Pay 1 aqua and discard a delegate in an inactive ideology to use its Law.';
 
+// Faction colour -> ideology. A faction's seat-band colour IS its ideology
+// (the two palettes pair by hue, even though the hex values differ slightly:
+// crew #b40054 vs ideology #c01f6e, etc.). Used in SOLO to seat the starting
+// delegate in the picked faction's ideology; this colour=ideology theme recurs
+// in later modules. Keyed by the crew/faction colour (lowercased).
+export const IDEOLOGY_BY_FACTION_COLOR = {
+  '#b40054': 'freedom',        // magenta
+  '#e3e0d4': 'honor',          // cream / silver
+  '#fccc00': 'unity',          // gold
+  '#c09cc0': 'authority',      // mauve / purple
+  '#a8d8c0': 'equality',       // mint / green
+  '#9c9c9c': 'individuality',  // grey
+};
+export function ideologyForFactionColor(color) {
+  if (!color) return null;
+  return IDEOLOGY_BY_FACTION_COLOR[String(color).toLowerCase()] || null;
+}
+
 // Clockwise from the top, matching the mat's seating, for the hex wheel layout.
 export const IDEOLOGY_ORDER = ['freedom', 'honor', 'unity', 'authority', 'equality', 'individuality'];
 export const IDEOLOGY_BY_KEY = Object.fromEntries(IDEOLOGIES.map((i) => [i.key, i]));
