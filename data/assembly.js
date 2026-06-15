@@ -63,6 +63,16 @@ export const IDEOLOGY_BY_KEY = Object.fromEntries(IDEOLOGIES.map((i) => [i.key, 
 // Every place a delegate can sit: the six ideologies + the Centrist center.
 export const ASSEMBLY_PLACES = [...IDEOLOGY_ORDER, 'centrist'];
 
+// Hex adjacency for Fundraise's "move one space": each ideology touches its two
+// ring neighbours and the Centrist center; the center touches every ideology.
+export function adjacentPlaces(place) {
+  if (place === 'centrist') return [...IDEOLOGY_ORDER];
+  const i = IDEOLOGY_ORDER.indexOf(place);
+  if (i < 0) return [];
+  const n = IDEOLOGY_ORDER.length;
+  return [IDEOLOGY_ORDER[(i + n - 1) % n], IDEOLOGY_ORDER[(i + 1) % n], 'centrist'];
+}
+
 // Delegates a player gets. TUNABLE default - confirm against the M0 rules.
 export const DELEGATES_PER_PLAYER = 5;
 

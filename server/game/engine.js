@@ -49,7 +49,7 @@ import { ZONE_CHIT_VPS } from '../../data/zone-chits.js';
 import {
   activeLaws, freshAssembly, ASSEMBLY_PLACES, IDEOLOGY_ORDER,
   delegatesRemaining, playerDelegatesInPlace, playerDelegatesPlaced,
-  seniorityInPlace, finalVote, IDEOLOGY_BY_KEY,
+  seniorityInPlace, finalVote, IDEOLOGY_BY_KEY, adjacentPlaces,
 } from '../../data/assembly.js';
 // Movement + metadata both come from the planner graph (the vendor
 // mission-planner data the client also uses). siteBySlug layers the
@@ -2734,25 +2734,41 @@ function canUseFactoryNonVictory(state, player, fac) {
   return playerCanUseLaw(state, player, 'individuality');
 }
 
-// Fundraise (M0 operation, replaces Income): place a new delegate (or move one
-// of yours), gain aqua, run the vote tally (implicit - activeLaws is recomputed
-// on every read). Honor (Paleoconservative) makes the aqua gained equal your
-// glory-chit count; Authority (Martial Law) may discard an opponent's delegate.
+// Fundraise (M0 operation, replaces Income): OPTIONALLY place a new delegate
+// from hand AND OPTIONALLY move one of YOUR delegates one ADJACENT space, then
+// gain aqua (the vote tally is implicit - activeLaws is recomputed on read).
+// Either sub-action may be skipped (skipping both just banks the income). Honor
+// (Paleoconservative) makes the aqua gained equal your glory-chit count;
+// Authority (Martial Law) may also discard an opponent's delegate.
 function applyFundraise(state, op, player) {
   if (!state.m0) return fail('not_m0');
   if (player.opsRemaining <= 0) return fail('no_ops_left');
   const asm = assemblyOf(state);
-  const place = String(op.place || '');
-  if (!ASSEMBLY_PLACES.includes(place)) return fail('bad_place');
-  const from = op.from ? String(op.from) : null;
-  if (from) {
-    if (!ASSEMBLY_PLACES.includes(from)) return fail('bad_place');
-    if (placeCount(asm, from, player.profileId) <= 0) return fail('no_delegate_there');
-    setPlaceCount(asm, from, player.profileId, placeCount(asm, from, player.profileId) - 1);
-    setPlaceCount(asm, place, player.profileId, placeCount(asm, place, player.profileId) + 1);
-  } else {
-    if (delegatesRemaining(asm, player.profileId) <= 0) return fail('no_delegates_left');
-    setPlaceCount(asm, place, player.profileId, placeCount(asm, place, player.profileId) + 1);
+  const pid = player.profileId;
+  const placeName = (p) => (p === 'centrist' ? 'Centrist' : ((IDEOLOGY_BY_KEY[p] || {}).name || p));
+  // Optional: place a NEW delegate from hand.
+  const place = op.place ? String(op.place) : null;
+  if (place && !ASSEMBLY_PLACES.includes(place)) return fail('bad_place');
+  // Optional: move one of MY delegates one ADJACENT space.
+  const moveFrom = op.moveFrom ? String(op.moveFrom) : null;
+  const moveTo = op.moveTo ? String(op.moveTo) : null;
+  if ((moveFrom && !moveTo) || (!moveFrom && moveTo)) return fail('bad_move');
+  if (moveFrom) {
+    if (!ASSEMBLY_PLACES.includes(moveFrom) || !ASSEMBLY_PLACES.includes(moveTo)) return fail('bad_place');
+    if (!adjacentPlaces(moveFrom).includes(moveTo)) return fail('not_adjacent');
+  }
+  if (place && delegatesRemaining(asm, pid) <= 0) return fail('no_delegates_left');
+  if (moveFrom) {
+    // The move source must hold one of MY delegates (a same-space placement this
+    // op seeds one, so place-then-move from the new space is allowed).
+    let have = placeCount(asm, moveFrom, pid);
+    if (place === moveFrom) have += 1;
+    if (have <= 0) return fail('no_delegate_there');
+  }
+  if (place) setPlaceCount(asm, place, pid, placeCount(asm, place, pid) + 1);
+  if (moveFrom) {
+    setPlaceCount(asm, moveFrom, pid, placeCount(asm, moveFrom, pid) - 1);
+    setPlaceCount(asm, moveTo, pid, placeCount(asm, moveTo, pid) + 1);
   }
   // Authority (Martial Law): may discard an opponent's delegate.
   let martial = '';
@@ -2771,9 +2787,13 @@ function applyFundraise(state, op, player) {
   const gain = honor ? ((player.glory && player.glory.chits || []).length) : INCOME_AQUA;
   player.aqua = (player.aqua | 0) + gain;
   player.opsRemaining -= 1;
+  const parts = [];
+  if (place) parts.push(`placed a delegate on ${placeName(place)}`);
+  if (moveFrom) parts.push(`moved a delegate ${placeName(moveFrom)} -> ${placeName(moveTo)}`);
+  const did = parts.length ? parts.join(' and ') : 'took income';
   return {
     ok: true, state,
-    log: `${player.name} fundraised - delegate to ${place}, +${gain} aqua${honor ? ' (Honor: per glory chit)' : ''}.${martial}`,
+    log: `${player.name} fundraised - ${did}, +${gain} aqua${honor ? ' (Honor: per glory chit)' : ''}.${martial}`,
   };
 }
 
@@ -3103,7 +3123,7 @@ function pickPayload(op) {
     case 'CASH_WATER': return { amount: op.amount };
     case 'DUMP': return { amount: op.amount };
     case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds };
-    case 'FUNDRAISE': return { place: op.place, from: op.from, discard: op.discard };
+    case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, discard: op.discard };
     case 'LOBBY': return { ideology: op.ideology };
     case 'DISCARD': return { cardId: op.cardId };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
