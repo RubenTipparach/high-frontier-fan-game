@@ -7942,12 +7942,26 @@ body:has(#view-browse:not(.hidden)) #main {
 .assembly-clickable { cursor: pointer; border-radius: 10px; transition: filter 0.12s ease, outline-color 0.12s ease; outline: 1px solid transparent; }
 .assembly-clickable:hover, .assembly-clickable:focus-visible { filter: brightness(1.08); outline-color: var(--accent, #fbbf24); }
 .assembly-open-btn { width: 100%; margin-top: 8px; }
-/* The big interactive modal version. */
-.assembly-modal-overlay { align-items: flex-start; }
+/* The big interactive modal version (collapsible like the auction overlay). */
+.assembly-modal-overlay { position: fixed; inset: 0; z-index: 122; display: flex; align-items: flex-start;
+  justify-content: center; padding: 24px; background: rgba(3, 2, 10, 0.78); backdrop-filter: blur(4px); }
+.assembly-modal-overlay.is-minimized { background: transparent; backdrop-filter: none; pointer-events: none; }
+.assembly-modal-overlay.is-minimized .assembly-modal { display: none; }
+.assembly-modal-overlay.is-minimized .mp-mini-chip { display: none; }
 .assembly-modal { position: relative; background: var(--panel, #0c0a16); border: 1px solid var(--border, #2a2740);
-  border-radius: 14px; width: min(720px, 96vw); max-height: 92vh; overflow: auto; margin: 4vh auto; padding: 16px 18px 20px; }
-.assembly-modal .modal-x { position: absolute; top: 8px; right: 10px; background: none; border: none; color: #9aa0c4; font-size: 24px; line-height: 1; cursor: pointer; }
-.assembly-modal .modal-x:hover { color: #fff; }
+  border-radius: 14px; width: min(720px, 96vw); max-height: 92vh; overflow: auto; margin: 2vh auto; padding: 8px 18px 18px; }
+.assembly-modal-title { margin: 0; font-size: 16px; }
+/* Interactive cells (Fundraise / lobby clicks). */
+.assembly-cell-click { cursor: pointer; }
+.assembly-cell-click:hover .assembly-wedge { filter: brightness(1.3); }
+.assembly-cell-hi .assembly-wedge { filter: brightness(1.5); stroke: var(--accent, #fbbf24); stroke-width: 4; }
+.assembly-cell-sel .assembly-wedge { stroke: #fff; stroke-width: 4; }
+.assembly-cell-hi .assembly-center, .assembly-cell-sel .assembly-center { stroke: var(--accent, #fbbf24); stroke-width: 4; }
+/* Fundraise guided flow. */
+.assembly-fr-prompt { background: rgba(120,140,220,0.14); border: 1px solid #3a4a7a; border-radius: 8px;
+  padding: 8px 10px; font-size: 13px; margin: 4px 0 6px; }
+.assembly-fr-chosen { font-size: 12px; color: var(--accent, #fbbf24); margin-top: 4px; }
+.assembly-fr-btns { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 10px 0 4px; }
 /* Simple variant (sidebar glance): just the cropped wheel, filling the panel. */
 .assembly-panel-simple { max-width: 100%; width: 100%; }
 .assembly-panel-simple .assembly-board { width: 100%; max-width: 100%; margin: 4px auto 0; }
@@ -7969,8 +7983,9 @@ body:has(#view-browse:not(.hidden)) #main {
 .assembly-sub { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--ink-dim, #8b90b8); }
 .assembly-board { display: block; width: 100%; max-width: 720px; margin: 8px auto 0; }
 .assembly-wedge { stroke: #0b0a14; stroke-width: 2; }
-/* Neutral seniority discs dropped on a space (count toward the end-game vote). */
-.assembly-disc { fill: #d8dbe6; stroke: #2a2740; stroke-width: 1; }
+/* Seniority discs: red translucent pucks with a black outline, sitting behind
+   the cubes / name (count toward the end-game vote). */
+.assembly-disc { fill: rgba(214, 40, 40, 0.4); stroke: #000; stroke-width: 1.2; }
 /* Hover: light up the whole cell (wedge or center) when hovered. */
 .assembly-cell { cursor: pointer; }
 .assembly-cell .assembly-wedge, .assembly-cell .assembly-center { transition: filter 0.12s ease; }

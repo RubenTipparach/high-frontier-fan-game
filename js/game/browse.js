@@ -54,6 +54,7 @@ import { renderAssemblyPanel } from './assembly.js';
 import {
   activeLaws as assemblyActiveLaws, ASSEMBLY_PLACES, IDEOLOGY_ORDER as ASSEMBLY_IDEOLOGY_ORDER,
   IDEOLOGY_BY_KEY as ASSEMBLY_IDEOLOGY_BY_KEY, DELEGATES_PER_PLAYER,
+  adjacentPlaces as ASSEMBLY_ADJACENT,
 } from '../../data/assembly.js';
 import {
   WEIGHT_CLASSES, weightClassForMass, TRACK_LEGEND,
@@ -3209,7 +3210,7 @@ function renderAssemblyTab(snapshot) {
   hint.addEventListener('click', () => openAssemblyModal());
   host.appendChild(hint);
   // Keep an already-open modal in sync with each new snapshot.
-  if (_assemblyModalOpen) renderAssemblyModalContents(snapshot);
+  if (_assemblyModalOpen) refreshAssemblyModal();
 }
 
 // Delegate cubes (seat-coloured) + seniority discs, shaped for renderAssemblyPanel.
@@ -3245,101 +3246,201 @@ function assemblyStatusEl(snapshot) {
   return status;
 }
 
-// Append the INTERACTIVE controls (Fundraise + Lobby) to a host. Lives in the
-// modal only (the sidebar is glance-only). Submitting routes through the server
-// op; applySnapshot then re-renders both the sidebar and (if open) the modal.
-function appendAssemblyActions(host, snapshot) {
-  if (_spectator) return;
-  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
-  const myId = _onlineMe && _onlineMe.id;
-  const laws = assemblyActiveLaws(snapshot.assembly);
-  const placedByMe = ASSEMBLY_PLACES.reduce((s, p) => s + ((dmap[p] || {})[myId] | 0), 0);
-  const left = Math.max(0, DELEGATES_PER_PLAYER - placedByMe);
-  const myTurn = isOnlineMyTurn();
-  const placeOpt = (p) => `<option value="${p}">${p === 'centrist' ? 'Centrist (center)' : (ASSEMBLY_IDEOLOGY_BY_KEY[p] || {}).name || p}</option>`;
-
-  // Fundraise: place a delegate (or move one of yours) + gain aqua. Spends the op.
-  const fr = document.createElement('div');
-  fr.className = 'assembly-action';
-  const myPlaces = ASSEMBLY_PLACES.filter((p) => ((dmap[p] || {})[myId] | 0) > 0);
-  fr.innerHTML = '<div class="mp-detail-label">Fundraise (operation)</div>'
-    + `<label class="mp-trade-field"><span>Move from</span><select class="asm-fr-from"><option value="">(new delegate)</option>${myPlaces.map(placeOpt).join('')}</select></label>`
-    + `<label class="mp-trade-field"><span>Into</span><select class="asm-fr-place">${ASSEMBLY_PLACES.map(placeOpt).join('')}</select></label>`;
-  const frBtn = document.createElement('button');
-  frBtn.type = 'button'; frBtn.className = 'modal-btn primary'; frBtn.textContent = '🏛 Fundraise';
-  const noNew = left <= 0;
-  frBtn.disabled = !myTurn;
-  frBtn.title = !myTurn ? 'Wait for your turn.' : 'Place / move a delegate and gain aqua (spends your operation).';
-  frBtn.addEventListener('click', () => {
-    const from = fr.querySelector('.asm-fr-from').value || undefined;
-    const place = fr.querySelector('.asm-fr-place').value;
-    if (!from && noNew) { _onlineToast('No delegates left in hand - move one instead.', 'error'); return; }
-    submitOnlineOp({ kind: 'FUNDRAISE', place, from });
-  });
-  fr.appendChild(frBtn);
-  host.appendChild(fr);
-
-  // Lobby: activate an inactive ideology you hold a delegate in (free, once/turn).
-  const lobbyable = ASSEMBLY_IDEOLOGY_ORDER.filter((k) => !laws.active.has(k) && ((dmap[k] || {})[myId] | 0) > 0);
-  if (!laws.lobbyingDisabled && lobbyable.length) {
-    const lb = document.createElement('div');
-    lb.className = 'assembly-action';
-    lb.innerHTML = '<div class="mp-detail-label">Lobby (free, once per turn)</div>'
-      + `<label class="mp-trade-field"><span>Activate</span><select class="asm-lobby-key">${lobbyable.map(placeOpt).join('')}</select></label>`;
-    const lbBtn = document.createElement('button');
-    lbBtn.type = 'button'; lbBtn.className = 'modal-btn'; lbBtn.textContent = '🗳 Lobby (1 aqua)';
-    lbBtn.disabled = !myTurn;
-    lbBtn.title = myTurn ? 'Pay 1 aqua + discard a delegate there to use its law this turn.' : 'Wait for your turn.';
-    lbBtn.addEventListener('click', () => {
-      submitOnlineOp({ kind: 'LOBBY', ideology: lb.querySelector('.asm-lobby-key').value });
-    });
-    lb.appendChild(lbBtn);
-    host.appendChild(lb);
-  }
-}
-
 // The big, INTERACTIVE assembly modal (desktop). Opened by tapping the sidebar
-// glance. Shows the large board (laws in rows below) + the Fundraise / Lobby
-// controls. Snapshot-driven: applySnapshot refreshes it while it's open.
+// glance ('view' mode) or by the Fundraise op ('fundraise' guided mode).
+// Collapsible like the auction overlay. Snapshot-driven while open.
+//   view:      click one of YOUR delegates to Lobby it (1 aqua + discard).
+//   fundraise: step 1 place a delegate (optional), step 2 move one of your
+//              delegates one ADJACENT space (optional), then submit.
 let _assemblyModalOpen = false;
-function openAssemblyModal() {
+let _assemblyMin = false;
+let _assemblyMode = 'view';
+let _fr = null;   // fundraise draft { step:'place'|'move', place, moveFrom }
+
+function openAssemblyModal(mode = 'view') {
   if (!_online || !_onlineSnapshot || !_onlineSnapshot.m0) return;
   _assemblyModalOpen = true;
+  _assemblyMode = mode;
+  if (mode === 'fundraise') { _fr = { step: 'place', place: null, moveFrom: null }; _assemblyMin = false; }
   let overlay = document.getElementById('assembly-modal-overlay');
   if (!overlay) {
     overlay = document.createElement('div');
     overlay.id = 'assembly-modal-overlay';
-    overlay.className = 'card-modal-overlay assembly-modal-overlay';
+    overlay.className = 'assembly-modal-overlay';
     overlay.innerHTML = `
       <div class="assembly-modal" role="dialog" aria-label="Sol Political Assembly">
-        <button type="button" class="modal-x" aria-label="Close" title="Close">&times;</button>
+        <div class="mp-modal-titlebar">
+          <h3 class="assembly-modal-title">🏛 Sol Political Assembly</h3>
+          <button type="button" class="mp-mini-btn" title="Minimize" aria-label="Minimize">&minus;</button>
+        </div>
         <div class="assembly-modal-body"></div>
-      </div>`;
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeAssemblyModal(); });
-    overlay.querySelector('.modal-x').addEventListener('click', closeAssemblyModal);
+      </div>
+      <button type="button" class="mp-mini-chip" aria-label="Restore assembly">
+        🏛 Assembly <span class="mp-mini-chip-meta"></span>
+      </button>`;
+    overlay.querySelector('.mp-mini-btn').addEventListener('click', () => { _assemblyMin = true; refreshAssemblyModal(); });
+    overlay.querySelector('.mp-mini-chip').addEventListener('click', () => { _assemblyMin = false; setMpTurnAction('assembly', null); refreshAssemblyModal(); });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay && _assemblyMode === 'view') closeAssemblyModal(); });
     document.addEventListener('keydown', assemblyModalKey);
     document.body.appendChild(overlay);
   }
-  renderAssemblyModalContents(_onlineSnapshot);
+  refreshAssemblyModal();
 }
 function assemblyModalKey(e) {
-  if (e.key === 'Escape' && _assemblyModalOpen) closeAssemblyModal();
+  if (e.key === 'Escape' && _assemblyModalOpen && _assemblyMode === 'view') closeAssemblyModal();
 }
 function closeAssemblyModal() {
   _assemblyModalOpen = false;
+  _assemblyMin = false;
+  _assemblyMode = 'view';
+  _fr = null;
+  setMpTurnAction('assembly', null);
   document.removeEventListener('keydown', assemblyModalKey);
   const overlay = document.getElementById('assembly-modal-overlay');
   if (overlay) overlay.remove();
 }
-function renderAssemblyModalContents(snapshot) {
+// Re-draw the modal from the current snapshot + interaction state. Called on
+// open, on every step, and on each snapshot while open.
+function refreshAssemblyModal() {
   const overlay = document.getElementById('assembly-modal-overlay');
   if (!overlay) return;
-  if (!snapshot || !snapshot.m0 || !snapshot.assembly) { closeAssemblyModal(); return; }
+  const snap = _onlineSnapshot;
+  if (!snap || !snap.m0 || !snap.assembly) { closeAssemblyModal(); return; }
+  overlay.classList.toggle('is-minimized', _assemblyMin);
+  setMpTurnAction('assembly', _assemblyMin ? {
+    label: '🏛 Assembly',
+    meta: _assemblyMode === 'fundraise' ? 'fundraising' : 'open',
+    needsAction: _assemblyMode === 'fundraise',
+    onClick: () => { _assemblyMin = false; refreshAssemblyModal(); },
+  } : null);
+  if (_assemblyMin) return;
   const body = overlay.querySelector('.assembly-modal-body');
   body.innerHTML = '';
-  body.appendChild(renderAssemblyPanel(assemblyDelegatesView(snapshot, 'large')));
+  if (_assemblyMode === 'fundraise') renderAssemblyFundraise(body, snap);
+  else renderAssemblyView(body, snap);
+}
+// View mode: the large board (click your delegate to Lobby) + the law list.
+function renderAssemblyView(body, snapshot) {
+  const view = assemblyDelegatesView(snapshot, 'large');
+  view.onCellClick = (place) => tryLobbyAt(snapshot, place);
+  body.appendChild(renderAssemblyPanel(view));
   body.appendChild(assemblyStatusEl(snapshot));
-  appendAssemblyActions(body, snapshot);
+  const hint = document.createElement('p');
+  hint.className = 'assembly-status muted';
+  hint.textContent = _spectator ? 'Spectating.' : 'Click one of your delegates to lobby its law (1 aqua, discards the delegate).';
+  body.appendChild(hint);
+  const close = document.createElement('button');
+  close.type = 'button'; close.className = 'modal-btn assembly-open-btn'; close.textContent = 'Close';
+  close.addEventListener('click', closeAssemblyModal);
+  body.appendChild(close);
+}
+// Click a delegate to Lobby that ideology (server LOBBY: 1 aqua + discard, only
+// an inactive ideology, not while Unity disables lobbying).
+function tryLobbyAt(snapshot, place) {
+  if (_spectator || place === 'centrist') return;
+  const myId = _onlineMe && _onlineMe.id;
+  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
+  if (((dmap[place] || {})[myId] | 0) <= 0) return;   // not your delegate
+  const laws = assemblyActiveLaws(snapshot.assembly);
+  if (laws.lobbyingDisabled) { _onlineToast('Unity disabled lobbying this round.', 'error'); return; }
+  if (laws.active.has(place)) { _onlineToast('That law is already in power.', 'error'); return; }
+  if (!isOnlineMyTurn()) { _onlineToast('Wait for your turn.', 'error'); return; }
+  const name = (ASSEMBLY_IDEOLOGY_BY_KEY[place] || {}).name || place;
+  confirmModal({
+    title: '🗳 Lobby',
+    body: `Lobby <strong>${esc(name)}</strong>? Pay 1 aqua and discard your delegate there to use its law this turn.`,
+    yes: '🗳 Lobby (1 aqua)', no: 'Cancel',
+  }).then((ok) => { if (ok) submitOnlineOp({ kind: 'LOBBY', ideology: place }); });
+}
+// Fundraise guided flow: place (optional) then move one space (optional).
+function renderAssemblyFundraise(body, snapshot) {
+  const myId = _onlineMe && _onlineMe.id;
+  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
+  const placedByMe = ASSEMBLY_PLACES.reduce((s, p) => s + ((dmap[p] || {})[myId] | 0), 0);
+  const inHand = Math.max(0, DELEGATES_PER_PLAYER - placedByMe);
+  const step = _fr.step;
+
+  // Prompt bar.
+  const prompt = document.createElement('div');
+  prompt.className = 'assembly-fr-prompt';
+  let promptText;
+  if (step === 'place') {
+    promptText = inHand > 0
+      ? 'Step 1 - Place a delegate: click a space to drop a new delegate, or skip.'
+      : 'Step 1 - No delegates left in hand. Skip to the move step.';
+  } else if (_fr.moveFrom) {
+    promptText = `Step 2 - Move: click an adjacent space to move your ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.moveFrom] || {}).name || _fr.moveFrom)} delegate, or skip.`;
+  } else {
+    promptText = 'Step 2 - Move one space: click one of your delegates to pick it up, or skip & finish.';
+  }
+  prompt.innerHTML = `<strong>Fundraise</strong> &middot; <span>${promptText}</span>`
+    + (_fr.place ? `<div class="assembly-fr-chosen">Placing on ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.place] || {}).name || _fr.place)}.</div>` : '');
+  body.appendChild(prompt);
+
+  // Board with the interaction wired for the current step.
+  const view = assemblyDelegatesView(snapshot, 'large');
+  const adj = (_fr.moveFrom ? ASSEMBLY_ADJACENT(_fr.moveFrom) : []);
+  view.highlight = step === 'move' && _fr.moveFrom ? new Set(adj) : null;
+  view.selected = step === 'place' ? _fr.place : _fr.moveFrom;
+  view.onCellClick = (place) => onFundraiseCell(snapshot, place);
+  body.appendChild(renderAssemblyPanel(view));
+
+  // Step buttons.
+  const btns = document.createElement('div');
+  btns.className = 'assembly-fr-btns';
+  if (step === 'place') {
+    const skip = mkBtn('Skip placement', 'modal-btn', () => { _fr.step = 'move'; refreshAssemblyModal(); });
+    const next = mkBtn(_fr.place ? 'Next: move →' : 'Next →', 'modal-btn primary', () => { _fr.step = 'move'; refreshAssemblyModal(); });
+    btns.append(skip, next);
+  } else {
+    if (_fr.moveFrom) btns.append(mkBtn('↩ Pick a different delegate', 'modal-btn', () => { _fr.moveFrom = null; refreshAssemblyModal(); }));
+    btns.append(mkBtn('Skip move & finish', 'modal-btn', () => commitFundraise()));
+  }
+  body.appendChild(btns);
+
+  const status = assemblyStatusEl(snapshot);
+  body.appendChild(status);
+}
+function mkBtn(label, cls, fn) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = cls; b.textContent = label;
+  b.addEventListener('click', fn);
+  return b;
+}
+function onFundraiseCell(snapshot, place) {
+  const myId = _onlineMe && _onlineMe.id;
+  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
+  const placedByMe = ASSEMBLY_PLACES.reduce((s, p) => s + ((dmap[p] || {})[myId] | 0), 0);
+  const inHand = Math.max(0, DELEGATES_PER_PLAYER - placedByMe);
+  if (_fr.step === 'place') {
+    if (inHand <= 0) { _onlineToast('No delegates left in hand.', 'error'); return; }
+    _fr.place = (_fr.place === place) ? null : place;   // toggle
+    refreshAssemblyModal();
+    return;
+  }
+  // move step
+  if (!_fr.moveFrom) {
+    // Pick up one of MY delegates (counting a same-space placement this op).
+    const have = ((dmap[place] || {})[myId] | 0) + (_fr.place === place ? 1 : 0);
+    if (have <= 0) { _onlineToast('Pick one of your own delegates.', 'error'); return; }
+    _fr.moveFrom = place;
+    refreshAssemblyModal();
+    return;
+  }
+  // Choose the adjacent destination.
+  if (place === _fr.moveFrom) { _fr.moveFrom = null; refreshAssemblyModal(); return; }
+  if (!ASSEMBLY_ADJACENT(_fr.moveFrom).includes(place)) { _onlineToast('Only an adjacent space.', 'error'); return; }
+  commitFundraise(place);
+}
+function commitFundraise(moveTo) {
+  const op = { kind: 'FUNDRAISE' };
+  if (_fr.place) op.place = _fr.place;
+  if (_fr.moveFrom && moveTo) { op.moveFrom = _fr.moveFrom; op.moveTo = moveTo; }
+  _assemblyMode = 'view';
+  _fr = null;
+  submitOnlineOp(op);
+  // The snapshot apply will refresh the modal in view mode (or it can be closed).
+  closeAssemblyModal();
 }
 
 // Server site id (data/sites.js slug) -> display name. LEO / unknown
@@ -10284,19 +10385,29 @@ function openOpsMenu() {
     b.addEventListener('click', () => { close(); fn(); });
     now.appendChild(b);
   };
-  addOp('💰 Income (+1 aqua)', 'Take 1 Aqua from the Pool into your Bank. Costs one operation.', doIncomeOp);
+  const m0On = !!(_onlineSnapshot && _onlineSnapshot.m0);
+  // M0 replaces Income with Fundraise (opens the assembly window to act). Off M0
+  // it's the plain Income op.
+  if (m0On) {
+    addOp('🏛 Fundraise', 'Open the assembly: place / move a delegate and gain aqua. Costs one operation.',
+      () => openAssemblyModal('fundraise'));
+  } else {
+    addOp('💰 Income (+1 aqua)', 'Take 1 Aqua from the Pool into your Bank. Costs one operation.', doIncomeOp);
+  }
   addOp('🎯 Research Auction', 'Open the card market / auction. Costs one operation.', doResearchAuction);
   if (market) {
     addOp(`💱 Free Market (+${FREE_MARKET_AQUA} aqua)`,
       handN > 0 ? 'Sell a hand card for aqua. Costs one operation.' : 'No hand cards to sell.',
       doFreeMarket, handN > 0);
   }
-  // Pass: take no other operation. Passing banks income (+1 aqua) and ends
-  // the turn in one tap - the default when you don't want to spend the op
-  // on anything else.
-  addOp('⏭ Pass &amp; take income (+1 aqua)',
-    'Take no other operation: bank +1 aqua and end your turn.',
-    passTurn);
+  // Pass: take no other operation. Passing banks income (+1 aqua) and ends the
+  // turn in one tap. Removed under M0 (income is the Fundraise operation there,
+  // so there is no plain pass-for-income).
+  if (!m0On) {
+    addOp('⏭ Pass &amp; take income (+1 aqua)',
+      'Take no other operation: bank +1 aqua and end your turn.',
+      passTurn);
+  }
 
   // Site-op shortcuts: sites where a site-op is possible (your
   // factories - refuel / ET / colonize; claimed discs without a

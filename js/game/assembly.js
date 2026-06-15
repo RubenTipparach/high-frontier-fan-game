@@ -85,9 +85,23 @@ function callout(root, box, ide, slot) {
   fo.appendChild(div);
 }
 
-export function renderAssemblyPanel({ delegates = null, seniority = null, variant = 'compact' } = {}) {
+export function renderAssemblyPanel({
+  delegates = null, seniority = null, variant = 'compact',
+  onCellClick = null, highlight = null, selected = null,
+} = {}) {
   const root = document.createElement('div');
   root.className = 'assembly-panel assembly-panel-' + variant;
+  const hi = highlight && highlight.has ? highlight : new Set(Array.isArray(highlight) ? highlight : []);
+  // Make a cell (ideology wedge or the center) clickable / highlightable for the
+  // interactive modal (Fundraise placement / move, click-to-lobby).
+  const wireCell = (cell, key) => {
+    if (hi.has(key)) cell.classList.add('assembly-cell-hi');
+    if (selected === key) cell.classList.add('assembly-cell-sel');
+    if (onCellClick) {
+      cell.classList.add('assembly-cell-click');
+      cell.addEventListener('click', (e) => { e.stopPropagation(); onCellClick(key); });
+    }
+  };
   root.innerHTML = `
     <div class="assembly-head"><h2>Sol Political Assembly</h2><span class="assembly-sub">Module 0</span></div>`;
 
@@ -111,26 +125,27 @@ export function renderAssemblyPanel({ delegates = null, seniority = null, varian
   const slots = {};
 
   // Delegate cubes live anywhere on the cell (no fixed slot): drop the iso-cubes
-  // near `pt` in seat colours; nothing when empty.
+  // near `pt` in seat colours; nothing when empty. Drawn at 2x size.
   const drawCubes = (parent, pt, list) => {
     const cubes = Array.isArray(list) ? list : [];
     if (!cubes.length) return;
     cubes.slice(0, 6).forEach((col, i) => {
-      const ox = pt.x - 10 + (i % 3) * 10;
-      const oy = pt.y - 4 + Math.floor(i / 3) * 11;
-      isoCube(parent, ox, oy, 6, col, false);
+      const ox = pt.x - 20 + (i % 3) * 20;
+      const oy = pt.y - 8 + Math.floor(i / 3) * 22;
+      isoCube(parent, ox, oy, 12, col, false);
     });
   };
 
-  // Neutral seniority discs: small grey pucks dropped below the cube cluster.
+  // Seniority discs: red translucent pucks with a black outline that sit BEHIND
+  // the cubes / labels (drawn before them), clustered under the ideology name.
   // They count toward the end-game vote (and break its ties).
   const drawDiscs = (parent, pt, count) => {
     const n = count | 0;
     if (n <= 0) return;
     for (let i = 0; i < Math.min(n, 8); i += 1) {
-      const ox = pt.x - 12 + (i % 4) * 8;
-      const oy = pt.y + 18 + Math.floor(i / 4) * 8;
-      svg('circle', { cx: ox, cy: oy, r: 3.2, class: 'assembly-disc' }, parent);
+      const ox = pt.x - 13 + (i % 4) * 9;
+      const oy = pt.y + 2 + Math.floor(i / 4) * 9;
+      svg('circle', { cx: ox, cy: oy, r: 5, class: 'assembly-disc' }, parent);
     }
   };
 
@@ -146,24 +161,28 @@ export function renderAssemblyPanel({ delegates = null, seniority = null, varian
     const pIR = polar(C.x, C.y, r, cA + 30);
     svg('polygon', { points: pts([pIL, pOL, pOR, pIR]), fill: ide.color, class: 'assembly-wedge' }, cell);
     const lab = polar(C.x, C.y, (r + R) / 2 - 16, cA);
+    // Discs first (behind), clustered just under where the name sits.
+    drawDiscs(cell, { x: lab.x, y: lab.y + 6 }, seniority && seniority[key]);
     const t = svg('text', { x: lab.x, y: lab.y, class: 'assembly-wedge-label', 'text-anchor': 'middle', 'dominant-baseline': 'middle' }, cell);
     t.textContent = ide.name.toUpperCase();
-    const slot = polar(C.x, C.y, R - 30, cA);
+    const slot = polar(C.x, C.y, R - 34, cA);
     slots[key] = slot;
     drawCubes(cell, slot, delegates && delegates[key]);
-    drawDiscs(cell, slot, seniority && seniority[key]);
+    wireCell(cell, key);
   });
 
   // Center (Centrist) is its own hoverable cell.
   const centerCell = svg('g', { class: 'assembly-cell', 'data-key': 'centrist' }, board);
   const innerCorners = [-60, 0, 60, 120, 180, 240].map((a) => polar(C.x, C.y, r, a));
   svg('polygon', { points: pts(innerCorners), class: 'assembly-center' }, centerCell);
+  // Discs behind, under the CENTRIST name.
+  drawDiscs(centerCell, { x: C.x, y: C.y - 2 }, seniority && seniority.centrist);
   let ct = svg('text', { x: C.x, y: C.y - 10, class: 'assembly-center-label', 'text-anchor': 'middle' }, centerCell);
   ct.textContent = 'CENTRIST';
   ct = svg('text', { x: C.x, y: C.y + 7, class: 'assembly-center-sub', 'text-anchor': 'middle' }, centerCell);
   ct.textContent = CENTRIST.law.name;
-  drawCubes(centerCell, { x: C.x, y: C.y + 24 }, delegates && delegates.centrist);
-  drawDiscs(centerCell, { x: C.x, y: C.y + 24 }, seniority && seniority.centrist);
+  drawCubes(centerCell, { x: C.x, y: C.y + 30 }, delegates && delegates.centrist);
+  wireCell(centerCell, 'centrist');
 
   // Callout boxes around the wheel, each arrow -> its space. Compact (sidebar
   // glance) variant only; the large (modal) variant lists the laws in rows
