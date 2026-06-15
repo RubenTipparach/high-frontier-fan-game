@@ -250,6 +250,9 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
     // the regular gameplay ops (MOVE / BURN / AUCTION_* / END_TURN
     // / etc.) start being accepted.
     draftPhase: 'crew',
+    // Draft-start only: tracks whether the active player has used their one
+    // per-turn deck cycle yet (reset each draft turn). Inert outside the draft.
+    draftCycledThisTurn: false,
     // Card economy. Multiplayer is always 'market' (Card Market mode is
     // mandatory in MP - patents are auctioned, not free draws, and the Free
     // Market sell op is available); a solo game may choose 'library'. Server-

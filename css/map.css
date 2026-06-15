@@ -7659,7 +7659,7 @@ body:has(#view-browse:not(.hidden)) #main {
   border: 1px solid var(--border, #26405f);
   border-radius: 14px;
   padding: 18px 20px;
-  max-width: min(96vw, 1040px);
+  max-width: min(96vw, 640px);
   width: 100%;
   max-height: 90vh;
   overflow-y: auto;
@@ -7668,32 +7668,37 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .draft-market-head h2 { margin: 0 0 4px; font-size: 20px; }
 .draft-market-head p { margin: 0 0 12px; }
-.draft-market-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px;
-}
-.draft-market-col {
+/* One row per deck (like the card market): colour-coded tag + top card + actions. */
+.draft-market-list { display: flex; flex-direction: column; gap: 8px; }
+.draft-market-row {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   background: rgba(148, 163, 184, 0.06);
   border: 1px solid rgba(148, 163, 184, 0.18);
+  border-left: 4px solid var(--deck-color, #888);
   border-radius: 10px;
-  padding: 10px 8px;
+  padding: 8px 10px;
 }
-.draft-market-deck-label {
-  font-size: 12px;
-  text-transform: capitalize;
-  letter-spacing: 0.3px;
-  text-align: center;
+.draft-market-tag {
+  flex: 0 0 110px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
-.draft-market-card { min-height: 120px; display: flex; align-items: center; justify-content: center; }
+.draft-market-glyph { font-size: 20px; }
+.draft-market-deckname { font-size: 13px; font-weight: 700; text-transform: capitalize; color: var(--deck-color, var(--ink)); }
+.draft-market-count { font-size: 11px; color: var(--ink-dim, #8b90b8); }
+.draft-market-card { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; justify-content: center; min-height: 132px; }
 .draft-market-empty { font-style: italic; }
-.draft-market-take { width: 100%; }
-.draft-market-take:disabled { opacity: 0.45; cursor: default; }
+.draft-market-actions { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; min-width: 96px; }
+.draft-market-actions .modal-btn { width: 100%; }
+.draft-market-take:disabled, .draft-market-cycle:disabled { opacity: 0.4; cursor: not-allowed; }
 .draft-market-foot { margin-top: 14px; display: flex; justify-content: flex-end; }
+@media (max-width: 540px) {
+  .draft-market-row { flex-wrap: wrap; }
+  .draft-market-tag { flex-basis: 100%; flex-direction: row; align-items: baseline; gap: 8px; }
+}
 
 /* "Fold to light" action on a deployed heavy radiator (heat/amber tint to read
    as a radiator action, distinct from Select / Set-active). */

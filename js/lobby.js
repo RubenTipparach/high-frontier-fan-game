@@ -349,13 +349,10 @@ export async function refreshMyGames() {
   const lastActiveAt = (g) => g.lastActionAt || g.lastTurnEndedAt || g.createdAt || 0;
   started.sort((a, b) => lastActiveAt(b) - lastActiveAt(a));
   ended.sort((a, b) => lastActiveAt(b) - lastActiveAt(a));
-  // Local solo sandbox games live alongside the server games in
-  // "Your games", ALWAYS on top, and themselves sorted most-recent first.
-  const sandboxRows = listSandboxGames()
-    .slice()
-    .sort((a, b) => (b.lastPlayedAt || b.createdAt || 0) - (a.lastPlayedAt || a.createdAt || 0))
-    .map(sandboxGameRow);
-  renderMyGames(startedEl, started, 'Resume', 'No games in progress.', sandboxRows);
+  // Sandbox mode is deprecated: local offline sandbox games are no longer
+  // surfaced in "Your games". (Old saves still exist in localStorage so nothing
+  // is destroyed, they're just hidden.) Solo now runs as a 1-player server room.
+  renderMyGames(startedEl, started, 'Resume', 'No games in progress.');
   renderMyGames(endedEl, ended, 'Review', 'No finished games.');
 }
 

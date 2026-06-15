@@ -265,6 +265,7 @@ let _deckPickerOpen = false;
 // state across re-renders. The auction resets to expanded on each new
 // lot so a fresh card always surfaces.
 let _crewDraftMin = false;
+let _cardDraftMin = false;
 let _auctionMin = false;
 // Rising-edge tracker for auction turn notifications: remembers, per lot,
 // whether it was already "my turn" (bid/pass) or "my close" so a re-render
@@ -873,6 +874,11 @@ const DRAFT_DECK_TYPES = ['thruster', 'reactor', 'radiator', 'refinery', 'robona
 const DRAFT_DECK_GLYPH = {
   thruster: '🚀', reactor: '☢', radiator: '♨', refinery: '⚗', robonaut: '🤖', generator: '⚡',
 };
+// Per-deck-type accent colours so the draft rows aren't all one grey band.
+const DRAFT_DECK_COLOR = {
+  thruster: '#c0506a', reactor: '#7e57c2', radiator: '#3a8fb7',
+  refinery: '#3f9e6b', robonaut: '#c08a2e', generator: '#caa61e',
+};
 function syncCardDraftOverlay(snapshot) {
   const existing = document.getElementById('mp-card-draft-overlay');
   const drafting = !!(snapshot && snapshot.draftPhase === 'draft') && !_spectator
@@ -894,9 +900,13 @@ function syncCardDraftOverlay(snapshot) {
     overlay.className = 'mp-crew-draft-overlay';   // reuse crew-draft styling
     document.body.appendChild(overlay);
   }
+  const done = players.filter((p) => (p.hand || []).length >= DRAFT_HAND_TARGET).length;
   overlay.innerHTML = `
     <div class="mp-crew-draft-panel" role="dialog" aria-label="Card draft">
-      <div class="mp-modal-titlebar"><h3>🃏 Card draft</h3></div>
+      <div class="mp-modal-titlebar">
+        <h3>🃏 Card draft</h3>
+        <button type="button" class="mp-mini-btn" title="Minimize" aria-label="Minimize">&minus;</button>
+      </div>
       <p class="muted">Take the top of a market deck for free until everyone holds
         <strong>${DRAFT_HAND_TARGET}</strong> cards. Then every bank opens at 6 and play begins.</p>
       <ul class="mp-crew-draft-roster"></ul>
@@ -904,7 +914,11 @@ function syncCardDraftOverlay(snapshot) {
         ? `<p class="mp-crew-draft-me">Your draft pick - choose a deck.</p>
            <button type="button" class="modal-btn primary mp-card-draft-open">🃏 Pick a card</button>`
         : `<p class="mp-crew-draft-me">Waiting for <span class="player-name"${active && active.color ? ` style="--player-color:${esc(active.color)}"` : ''}>@${esc((active && active.name) || '?')}</span> to draft…</p>`}
-    </div>`;
+    </div>
+    <button type="button" class="mp-mini-chip" aria-label="Restore card draft">
+      🃏 Drafting in progress
+      <span class="mp-mini-chip-meta">${done}/${players.length} done</span>
+    </button>`;
   const roster = overlay.querySelector('.mp-crew-draft-roster');
   for (const p of players) {
     const li = document.createElement('li');
@@ -925,23 +939,55 @@ function syncCardDraftOverlay(snapshot) {
   }
   const openBtn = overlay.querySelector('.mp-card-draft-open');
   if (openBtn) openBtn.addEventListener('click', () => openDraftMarketModal());
-  // Auto-open the market once per local draft turn so the player is prompted.
+
+  // Minimize / restore, mirroring the crew + auction overlays. Collapsed, it
+  // docks a "Drafting" chip in the turn bar that pings (needs-action) when it
+  // is the local player's pick.
+  overlay.classList.toggle('is-minimized', _cardDraftMin);
+  setMpTurnAction('draft', _cardDraftMin ? {
+    label: '🃏 Drafting',
+    meta: myTurn ? 'your pick' : 'in progress',
+    needsAction: myTurn,
+    onClick: () => {
+      _cardDraftMin = false;
+      syncCardDraftOverlay(_onlineSnapshot);
+      if (isOnlineMyTurn()) openDraftMarketModal();
+    },
+  } : null);
+  const miniBtn = overlay.querySelector('.mp-mini-btn');
+  const miniChip = overlay.querySelector('.mp-mini-chip');
+  if (miniBtn) miniBtn.addEventListener('click', () => {
+    _cardDraftMin = true;
+    document.querySelector('.draft-market-overlay')?.remove();
+    overlay.classList.add('is-minimized');
+    syncCardDraftOverlay(_onlineSnapshot);
+  });
+  if (miniChip) miniChip.addEventListener('click', () => {
+    _cardDraftMin = false;
+    overlay.classList.remove('is-minimized');
+    setMpTurnAction('draft', null);
+    if (isOnlineMyTurn()) openDraftMarketModal();
+  });
+  // Auto-open the market once per local draft turn so the player is prompted -
+  // but not while the overlay is minimized (the player chose to tuck it away).
   const key = `${snapshot.round}:${snapshot.turn}:${snapshot.activeIndex}`;
-  if (myTurn && !document.querySelector('.draft-market-overlay') && _draftAutoOpenKey !== key) {
+  if (myTurn && !_cardDraftMin && !document.querySelector('.draft-market-overlay') && _draftAutoOpenKey !== key) {
     _draftAutoOpenKey = key;
     openDraftMarketModal();
   }
 }
 
-// The deck market for the draft: one column per market deck showing its
-// face-up top card; tapping a deck takes that card (DRAFT_PICK). Only the
-// active player can take; everyone else sees it read-only.
+// The deck market for the draft: a vertical list, ONE ROW PER DECK (like the
+// card market), each row a colour-coded deck tag + its face-up top card + Take.
+// The active player may also CYCLE one deck of their choice once per turn (top
+// card to the bottom, revealing the next) before taking. Others see it read-only.
 function openDraftMarketModal() {
   if (!_online || !_onlineSnapshot) return;
   document.querySelector('.draft-market-overlay')?.remove();
   const snap = _onlineSnapshot;
   const myTurn = isOnlineMyTurn();
   const decks = snap.decks || {};
+  const cycled = !!snap.draftCycledThisTurn;
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay draft-market-overlay';
   const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
@@ -954,21 +1000,28 @@ function openDraftMarketModal() {
   head.className = 'draft-market-head';
   head.innerHTML = `<h2>🃏 Draft a card</h2>
     <p class="muted">${myTurn
-      ? 'Take the top card of any deck (free) into your hand.'
+      ? (cycled
+          ? 'Take the top card of any deck (free). You\'ve used your cycle this turn.'
+          : 'Take the top card of any deck (free), or cycle one deck once to reveal its next card.')
       : 'Not your turn - this is a preview of the deck tops.'}</p>`;
   panel.appendChild(head);
-  const grid = document.createElement('div');
-  grid.className = 'draft-market-grid';
+  const list = document.createElement('div');
+  list.className = 'draft-market-list';
   for (const dt of DRAFT_DECK_TYPES) {
     const deck = Array.isArray(decks[dt]) ? decks[dt] : [];
     const topId = deck[0];
     const card = topId ? PATENTS_BY_ID[topId] : null;
-    const col = document.createElement('div');
-    col.className = 'draft-market-col';
-    const label = document.createElement('div');
-    label.className = 'draft-market-deck-label';
-    label.innerHTML = `${DRAFT_DECK_GLYPH[dt] || '🃏'} <strong>${esc(dt)}</strong> <span class="muted">(${deck.length} left)</span>`;
-    col.appendChild(label);
+    const row = document.createElement('div');
+    row.className = 'draft-market-row';
+    row.style.setProperty('--deck-color', DRAFT_DECK_COLOR[dt] || '#888');
+
+    const tag = document.createElement('div');
+    tag.className = 'draft-market-tag';
+    tag.innerHTML = `<span class="draft-market-glyph">${DRAFT_DECK_GLYPH[dt] || '🃏'}</span>`
+      + `<span class="draft-market-deckname">${esc(dt)}</span>`
+      + `<span class="draft-market-count">${deck.length} left</span>`;
+    row.appendChild(tag);
+
     const cardWrap = document.createElement('div');
     cardWrap.className = 'draft-market-card';
     if (card) {
@@ -977,25 +1030,48 @@ function openDraftMarketModal() {
     } else {
       cardWrap.innerHTML = '<p class="muted draft-market-empty">Deck empty</p>';
     }
-    col.appendChild(cardWrap);
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'modal-btn primary draft-market-take';
-    btn.textContent = '🃏 Take';
-    btn.disabled = !myTurn || !card;
-    if (!myTurn) btn.title = 'Wait for your turn.';
-    else if (!card) btn.title = 'This deck is empty - pick another.';
-    btn.addEventListener('click', async () => {
-      if (btn.disabled) return;
-      btn.disabled = true;
+    row.appendChild(cardWrap);
+
+    const actions = document.createElement('div');
+    actions.className = 'draft-market-actions';
+    const take = document.createElement('button');
+    take.type = 'button';
+    take.className = 'modal-btn primary draft-market-take';
+    take.textContent = '🃏 Take';
+    take.disabled = !myTurn || !card;
+    if (!myTurn) take.title = 'Wait for your turn.';
+    else if (!card) take.title = 'This deck is empty - pick another.';
+    take.addEventListener('click', async () => {
+      if (take.disabled) return;
+      take.disabled = true;
       const ok = await submitOnlineOp({ kind: 'DRAFT_PICK', deckType: dt });
       if (ok) close();              // snapshot re-hydrates; overlay updates / turn passes
-      else btn.disabled = false;
+      else take.disabled = false;
     });
-    col.appendChild(btn);
-    grid.appendChild(col);
+    actions.appendChild(take);
+
+    const cyc = document.createElement('button');
+    cyc.type = 'button';
+    cyc.className = 'modal-btn draft-market-cycle';
+    cyc.textContent = '♻ Cycle';
+    cyc.disabled = !myTurn || cycled || deck.length < 2;
+    cyc.title = !myTurn ? 'Wait for your turn.'
+      : cycled ? 'You\'ve already cycled a deck this turn.'
+      : deck.length < 2 ? 'Nothing new to cycle to.'
+      : 'Send this deck\'s top card to the bottom and reveal the next (once per turn).';
+    cyc.addEventListener('click', async () => {
+      if (cyc.disabled) return;
+      cyc.disabled = true;
+      const ok = await submitOnlineOp({ kind: 'DRAFT_CYCLE', deckType: dt });
+      if (ok) openDraftMarketModal();   // refresh with the new top + cycle spent
+      else cyc.disabled = false;
+    });
+    actions.appendChild(cyc);
+    row.appendChild(actions);
+
+    list.appendChild(row);
   }
-  panel.appendChild(grid);
+  panel.appendChild(list);
   const foot = document.createElement('div');
   foot.className = 'draft-market-foot';
   foot.innerHTML = '<button type="button" class="modal-btn draft-market-close">Close</button>';
@@ -3763,6 +3839,9 @@ function humanizeOnlineOpError(code, detail) {
     unknown_crew_face: 'Pick the primary or secondary face.',
     crew_taken: 'Another player already claimed that crew. Pick a different one.',
     wrong_crew_color: 'Pick one of the two crew on your own colour card.',
+    already_cycled: 'You\'ve already cycled a deck this turn - now take a card.',
+    cannot_cycle: 'That deck has nothing new to cycle to.',
+    draft_in_progress: 'The card draft is still going.',
     auction_in_progress: 'An auction is already underway.',
     need_opponent: 'Need another player to hold an auction.',
     hand_limit: 'Hand limit reached (4) - you cannot start or join an auction. Build or transfer cards first.',
@@ -16886,6 +16965,7 @@ const MP_LOG_ICONS = {
   SET_RADIATOR_SIDE: '♨',
   AFTERBURN: '🔥',
   TRADE_OFFER: '🤝', TRADE_COUNTER: '↔', TRADE_ACCEPT: '✅', TRADE_DECLINE: '🚫',
+  DRAFT_PICK: '🃏', DRAFT_CYCLE: '♻',
   UNDO: '↩', REDO: '↪',
 };
 

@@ -3164,23 +3164,38 @@ function applyDraftPick(state, op, player) {
     };
   }
 
-  // Otherwise pass the turn (cube advances on a completed lap), like END_TURN
-  // minus income / first-player handoff / game-end.
+  // Otherwise just pass the turn to the next seat. NO Sunspot Cube advance and
+  // NO events during the draft (the cube is reset to slot 0 / round 1 when the
+  // draft completes), so a draft round never fires Inspiration / Glitch / Pad
+  // Explosion / etc. A new draft turn also clears the per-turn cycle.
   const n = state.players.length;
-  const firstIdx = state.firstPlayerIndex || 0;
   const nextIndex = (state.activeIndex + 1) % n;
-  let tail = '';
-  if (nextIndex === firstIdx) {
-    advanceClock(state);
-    state.activeIndex = firstIdx;
-    tail = ` Sunspot Cube advances to slot ${state.turn}.`;
-  } else {
-    state.activeIndex = nextIndex;
-  }
+  const tail = '';
+  state.activeIndex = nextIndex;
+  state.draftCycledThisTurn = false;
   openTurnFor(state, state.players[state.activeIndex]);
   return {
     ok: true, state,
     log: `${player.name} drafted ${cardName}.${tail} ${state.players[state.activeIndex].name} is up.`,
+  };
+}
+
+// Draft cycle: once per draft turn, the active player may CYCLE one deck of
+// their choice - the current top card goes to the bottom, revealing the next -
+// before they pick. Free (it doesn't take their pick), once per turn.
+function applyDraftCycle(state, op, player) {
+  if (state.draftCycledThisTurn) return fail('already_cycled');
+  const deckType = String(op.deckType || '');
+  const deck = state.decks[deckType];
+  if (!Array.isArray(deck)) return fail('bad_deck');
+  if (deck.length < 2) return fail('cannot_cycle');   // nothing new to reveal
+  const top = deck.shift();
+  deck.push(top);
+  state.draftCycledThisTurn = true;
+  const card = PATENTS_BY_ID[top];
+  return {
+    ok: true, state,
+    log: `${player.name} cycled the ${deckType} deck (${card ? card.name : top} to the bottom).`,
   };
 }
 
@@ -4007,6 +4022,7 @@ function applyPickCrew(state, op, ctx) {
     }
     if (state.draftStart) {
       state.draftPhase = 'draft';
+      state.draftCycledThisTurn = false;
       state.activeIndex = state.firstPlayerIndex || 0;
       openTurnFor(state, state.players[state.activeIndex]);
     } else {
@@ -4095,9 +4111,10 @@ export function applyOperation(prevState, op, ctx) {
     // is blocked - no moves, no other ops, no turn passing (the pick passes the
     // turn itself).
     if (prevState.draftPhase === 'draft') {
-      if (op.kind !== 'DRAFT_PICK') return fail('draft_in_progress');
+      if (op.kind !== 'DRAFT_PICK' && op.kind !== 'DRAFT_CYCLE') return fail('draft_in_progress');
       if (!isPlayersTurn(prevState, ctx.profileId)) return fail('not_your_turn');
       const st = clone(prevState);
+      if (op.kind === 'DRAFT_CYCLE') return applyDraftCycle(st, op, currentPlayer(st));
       return applyDraftPick(st, op, currentPlayer(st));
     }
     return fail('awaiting_crew_picks');
@@ -4224,7 +4241,7 @@ export function applyOperation(prevState, op, ctx) {
 export const SUPPORTED_OPS = [
   ...Object.keys(FUNCTIONAL), ...Object.keys(META), ...Object.keys(AUCTION),
   ...Object.keys(TRADE),
-  ...Object.keys(CREW), ...Object.keys(LIFECYCLE), 'DRAFT_PICK', 'EVENT_CHOICE',
+  ...Object.keys(CREW), ...Object.keys(LIFECYCLE), 'DRAFT_PICK', 'DRAFT_CYCLE', 'EVENT_CHOICE',
 ];
 // Ops that require the caller to supply ctx.turnBaseState.
 export const NEEDS_TURN_BASE = new Set(['UNDO', 'REDO']);
