@@ -4185,7 +4185,7 @@ function wireHandStrip() {
     // the snapshot re-hydrate is the source of truth (and other players see it).
     if (_online) {
       const sent = await submitOnlineOp({ kind: 'BOOST', cardIds: marked, radSides });
-      if (sent) clearBoostMarks();
+      if (sent) { clearBoostMarks(); await offerBoostTransfer(marked); }
       return;
     }
     // Charge the Aqua first (affordability pre-checked above;
@@ -10318,6 +10318,33 @@ function doColonize(site, stack, options) {
 // resolves true on the "yes" path, false on cancel / Esc /
 // backdrop tap. Used for the afterburn engage prompt; future
 // destructive actions can reuse it.
+// After a successful online boost, the boosted cards sit in the LEO Stack and
+// it's easy to forget to move them onto the rocket. If the rocket is at LEO
+// (colocated with the LEO Stack), offer to transfer them now. `ids` are the
+// just-boosted card ids; only those that actually landed in LEO are offered.
+async function offerBoostTransfer(ids) {
+  if (!_online || !_onlineSnapshot || !_onlineMe) return;
+  const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
+  if (!me || !me.rocket) return;
+  // LEO -> rocket transfer needs the rocket at LEO (or empty, which forms there).
+  const atLeo = me.rocket.siteId == null;
+  const rocketEmpty = !((me.rocket.stack || []).length);
+  if (!atLeo && !rocketEmpty) return;
+  const inLeo = new Set((me.leo || []).map((s) => s.id));
+  const moveIds = (ids || []).filter((id) => inLeo.has(id));
+  if (!moveIds.length) return;
+  const n = moveIds.length;
+  const names = moveIds.map((id) => cardLabel(id)).join(', ');
+  const ok = await confirmModal({
+    title: '🚀 Move boosted cards to your rocket?',
+    body: `You boosted ${n} card${n === 1 ? '' : 's'} to your LEO Stack (${esc(names)}). `
+      + `Your rocket is at LEO - load ${n === 1 ? 'it' : 'them'} onto the rocket now?`,
+    yes: 'Transfer to rocket', no: 'Leave in LEO',
+  });
+  if (!ok) return;
+  await submitOnlineOp({ kind: 'TRANSFER', cardIds: moveIds, from: 'leo', to: 'rocket' });
+}
+
 function confirmModal({ title, body, yes = 'OK', no = 'Cancel' }) {
   return new Promise((resolve) => {
     document.querySelector('.confirm-modal-overlay')?.remove();
