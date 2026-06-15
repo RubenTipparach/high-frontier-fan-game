@@ -137,6 +137,17 @@ function ownedSiteCount(map, profileId) {
   for (const k in (map || {})) if (map[k] && map[k].ownerId === profileId) n += 1;
   return n;
 }
+// Claim discs in play for a player = their SUCCESSFUL claims only. A busted
+// prospect does not tie up a disc (the disc is spent on the roll, not parked),
+// so failed discs never count toward the 9-disc supply.
+function ownedClaimCount(discs, profileId) {
+  let n = 0;
+  for (const k in (discs || {})) {
+    const d = discs[k];
+    if (d && d.ownerId === profileId && d.outcome === 'success') n += 1;
+  }
+  return n;
+}
 
 // The active face of a stack slot: secondary when installed
 // black-side-up, else primary. Mirror of rocket.js#installedFace.
@@ -2357,10 +2368,13 @@ function applyProspect(state, op, player) {
   // prospect is blocked (claim_limit) so the client can prompt for one. The
   // disc commits to the new site whatever the roll, exactly like placing it.
   let relocatedName = null;
-  if (ownedSiteCount(state.discs, player.profileId) >= CLAIM_DISCS) {
+  if (ownedClaimCount(state.discs, player.profileId) >= CLAIM_DISCS) {
     const relo = String(op.relocateFrom || '');
     const reloDisc = relo && state.discs[relo];
-    if (!reloDisc || reloDisc.ownerId !== player.profileId || relo === toSiteId) return fail('claim_limit');
+    // Only an active (successful) claim occupies a disc, so only one of those
+    // can be moved to free a slot; a busted disc isn't holding a disc at all.
+    if (!reloDisc || reloDisc.ownerId !== player.profileId || reloDisc.outcome !== 'success'
+        || relo === toSiteId) return fail('claim_limit');
     // A disc with a factory built on it is locked in place - it can't be moved.
     if (state.factories[relo]) return fail('disc_has_factory');
     const reloSite = siteById(relo);

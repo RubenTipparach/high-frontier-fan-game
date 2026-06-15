@@ -217,6 +217,16 @@ function ownedSiteCount(map, profileId) {
   for (const k in (map || {})) if (map[k] && map[k].ownerId === profileId) n += 1;
   return n;
 }
+// Claim discs in play = SUCCESSFUL claims only (a busted prospect spends the
+// roll, not a disc, so failed discs never count toward the 9-disc supply).
+function ownedClaimCount(discs, profileId) {
+  let n = 0;
+  for (const k in (discs || {})) {
+    const d = discs[k];
+    if (d && d.ownerId === profileId && d.outcome === 'success') n += 1;
+  }
+  return n;
+}
 let _onlineToast = null;      // (msg, level) => void, from the caller
 let _onlineMaps = null;       // { serverToPlanner, plannerToServer }
 let _onlineSnapshot = null;   // latest server snapshot (for turn checks)
@@ -3412,7 +3422,7 @@ function renderMpPlayer(p, isMe, isActive) {
 function renderComponentRow(p, snapshot) {
   const facUsed = ownedSiteCount(snapshot.factories, p.profileId);
   const colUsed = ownedSiteCount(snapshot.colonies, p.profileId);
-  const claimUsed = ownedSiteCount(snapshot.discs, p.profileId);
+  const claimUsed = ownedClaimCount(snapshot.discs, p.profileId);
   const row = document.createElement('div');
   row.className = 'mp-components';
   row.append(
@@ -11560,8 +11570,7 @@ function openClaimRelocatePicker(discs, onPick) {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'modal-btn mp-relocate-item';
-    const busted = e.disc && e.disc.outcome === 'fail';
-    b.textContent = `${busted ? '✗ busted' : '✓ claim'} · ${onlineSiteLabel(e.siteId)}`;
+    b.textContent = `✓ claim · ${onlineSiteLabel(e.siteId)}`;
     b.addEventListener('click', () => { close(); onPick(e.siteId); });
     list.appendChild(b);
   }
@@ -11593,9 +11602,10 @@ function doProspect(site, prosp) {
     // Claim disc supply: at the cap (9 placed), the player must MOVE an existing
     // disc to this new spot. Prompt for which one, then send it as relocateFrom.
     const myId = _onlineMe && _onlineMe.id;
-    if (ownedSiteCount(snap.discs, myId) >= CLAIM_DISCS) {
+    if (ownedClaimCount(snap.discs, myId) >= CLAIM_DISCS) {
       const mine = Object.keys(snap.discs || {})
-        .filter((k) => snap.discs[k] && snap.discs[k].ownerId === myId)
+        .filter((k) => snap.discs[k] && snap.discs[k].ownerId === myId
+          && snap.discs[k].outcome === 'success')   // only active claims occupy a disc
         .map((k) => ({ siteId: k, disc: snap.discs[k] }))
         // A disc with a factory built on it is locked - it can't be moved.
         .filter((e) => e.siteId !== siteId && !(snap.factories && snap.factories[e.siteId]));
