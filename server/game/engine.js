@@ -124,9 +124,12 @@ const AUCTION_HAND_LIMIT = 4;
 // Physical component supply per player (HF4 wooden bits): 7 cubes = the factory
 // limit, 7 domes = the colony limit. A player can never have more than this many
 // of each in play at once. (Claim discs are NOT capped - they can exceed 9.)
-// Mirrored client-side in browse.js (FACTORY_CUBES / COLONY_DOMES); keep synced.
+// Mirrored client-side in browse.js (FACTORY_CUBES / COLONY_DOMES /
+// CLAIM_DISCS); keep synced. Claim discs ARE capped (9), but at the cap a
+// player may MOVE an existing disc to the new spot instead of being blocked.
 const FACTORY_CUBES = 7;
 const COLONY_DOMES = 7;
+const CLAIM_DISCS = 9;
 // Count a player's in-play factories / colonies (entries in the site-keyed map
 // owned by them), for the component-supply limit.
 function ownedSiteCount(map, profileId) {
@@ -2348,6 +2351,21 @@ function applyProspect(state, op, player) {
   const free = begun && (kind === 'raygun' || buggyRoams);
   if (!free && player.opsRemaining <= 0) return fail('no_ops_left');
 
+  // Claim disc supply: 9 per player. At the cap a player may MOVE one of their
+  // existing discs to this new spot (op.relocateFrom names it); the disc is
+  // freed BEFORE the roll so the count stays 9. Without a valid relocation the
+  // prospect is blocked (claim_limit) so the client can prompt for one. The
+  // disc commits to the new site whatever the roll, exactly like placing it.
+  let relocatedName = null;
+  if (ownedSiteCount(state.discs, player.profileId) >= CLAIM_DISCS) {
+    const relo = String(op.relocateFrom || '');
+    const reloDisc = relo && state.discs[relo];
+    if (!reloDisc || reloDisc.ownerId !== player.profileId || relo === toSiteId) return fail('claim_limit');
+    const reloSite = siteById(relo);
+    relocatedName = reloSite ? reloSite.name : relo;
+    delete state.discs[relo];
+  }
+
   const threshold = prospectThreshold(site);
   // Size-roll modifier (subsystem 2): colocated cards subtract from the d6
   // (negative = easier), conditioned on the site's spectral type / prospector
@@ -2381,6 +2399,7 @@ function applyProspect(state, op, player) {
   const tail = free ? (buggyRoams ? ' with a free buggy road scan' : ' with a free raygun scan') : '';
   const rollText = sizeMod ? `${roll}${sizeMod > 0 ? '+' : ''}${sizeMod} = ${effRoll}` : `${roll}`;
   let log = `${player.name} rolled ${rollText} vs ${threshold} and ${verb} ${site.name}${tail}.`;
+  if (relocatedName) log += ` (Moved a claim disc from ${relocatedName} - all 9 were placed.)`;
   // Taxes: a placed Claim pays every Taxes holder +1 aqua from the pool.
   if (success) {
     const tax = creditPrivilegeIncome(state, 'TAXES', 'Taxes');
@@ -2896,7 +2915,7 @@ function pickPayload(op) {
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
     case 'SET_RADIATOR_SIDE': return { cardId: op.cardId };
     case 'AFTERBURN': return {};
-    case 'PROSPECT': return { siteId: op.siteId, turn: op.turn, round: op.round };
+    case 'PROSPECT': return { siteId: op.siteId, turn: op.turn, round: op.round, relocateFrom: op.relocateFrom };
     case 'PROSPECT_REROLL': return { siteId: op.siteId };
     case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode };
     case 'DIRT_REFUEL': return { amount: op.amount };

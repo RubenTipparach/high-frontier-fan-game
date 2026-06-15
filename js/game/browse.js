@@ -209,7 +209,9 @@ const AUCTION_HAND_LIMIT = 4;
 // wooden cubes = the factory limit, 7 wooden domes = the colony limit.
 const FACTORY_CUBES = 7;
 const COLONY_DOMES = 7;
-// Count a player's in-play factories / colonies from a site-keyed snapshot map.
+const CLAIM_DISCS = 9;
+// Count a player's in-play factories / colonies / claim discs from a site-keyed
+// snapshot map (factories, colonies, or discs).
 function ownedSiteCount(map, profileId) {
   let n = 0;
   for (const k in (map || {})) if (map[k] && map[k].ownerId === profileId) n += 1;
@@ -3410,11 +3412,13 @@ function renderMpPlayer(p, isMe, isActive) {
 function renderComponentRow(p, snapshot) {
   const facUsed = ownedSiteCount(snapshot.factories, p.profileId);
   const colUsed = ownedSiteCount(snapshot.colonies, p.profileId);
+  const claimUsed = ownedSiteCount(snapshot.discs, p.profileId);
   const row = document.createElement('div');
   row.className = 'mp-components';
   row.append(
     componentGroup('🏭', facUsed, FACTORY_CUBES, p.color, 'cube', 'factory cube'),
     componentGroup('🏠', colUsed, COLONY_DOMES, p.color, 'dome', 'colony dome'),
+    componentGroup('🔘', claimUsed, CLAIM_DISCS, p.color, 'disc', 'claim disc'),
   );
   return row;
 }
@@ -3762,6 +3766,7 @@ function humanizeOnlineOpError(code, detail) {
     already_industrialized: 'This site already has a factory.',
     no_factory_cubes: 'All 7 of your factory cubes are in play - you can\'t build another factory.',
     no_colony_domes: 'All 7 of your colony domes are in play - you can\'t found another colony.',
+    claim_limit: 'All 9 of your claim discs are placed - move one to this spot to prospect here.',
     cannot_industrialize: 'Industrialize needs a refinery + a robonaut (with their supports) in the stack.',
     no_mine_revival: 'Mine Revival needs a Termite Nest aboard.',
     no_busted_disc: 'Mine Revival needs a busted (failed) claim here to revive.',
@@ -11531,6 +11536,47 @@ function freeMarketSellFromHand(card, afterFn) {
   });
 }
 
+// At the 9-claim cap: pick one of my placed discs to move to the new spot.
+// `discs` is [{ siteId, disc }]; onPick(siteId) fires the relocating prospect.
+function openClaimRelocatePicker(discs, onPick) {
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal';
+  modal.style.maxWidth = '420px';
+  const close = () => back.remove();
+  const h = document.createElement('div');
+  h.className = 'mp-trade-head';
+  h.innerHTML = '<h3>All 9 claim discs are placed</h3>';
+  modal.appendChild(h);
+  const note = document.createElement('div');
+  note.className = 'mp-trade-colo no-colo';
+  note.textContent = 'Move one of your existing claims to this new spot, or cancel.';
+  modal.appendChild(note);
+  const list = document.createElement('div');
+  list.className = 'mp-relocate-list';
+  for (const e of discs) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'modal-btn mp-relocate-item';
+    const busted = e.disc && e.disc.outcome === 'fail';
+    b.textContent = `${busted ? '✗ busted' : '✓ claim'} · ${onlineSiteLabel(e.siteId)}`;
+    b.addEventListener('click', () => { close(); onPick(e.siteId); });
+    list.appendChild(b);
+  }
+  modal.appendChild(list);
+  const btns = document.createElement('div');
+  btns.className = 'mp-trade-btns';
+  const cancel = document.createElement('button');
+  cancel.type = 'button'; cancel.className = 'modal-btn'; cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', close);
+  btns.appendChild(cancel);
+  modal.appendChild(btns);
+  back.appendChild(modal);
+  back.addEventListener('click', (ev) => { if (ev.target === back) close(); });
+  document.body.appendChild(back);
+}
+
 function doProspect(site, prosp) {
   if (!prosp) return;
   // Online: the server rolls the prospect die and resolves the disc.
@@ -11543,6 +11589,19 @@ function doProspect(site, prosp) {
     // request for the same site this turn resolves as the same valid scan
     // instead of bouncing. The raygun scan is a free action (no operation).
     const snap = _onlineSnapshot || {};
+    // Claim disc supply: at the cap (9 placed), the player must MOVE an existing
+    // disc to this new spot. Prompt for which one, then send it as relocateFrom.
+    const myId = _onlineMe && _onlineMe.id;
+    if (ownedSiteCount(snap.discs, myId) >= CLAIM_DISCS) {
+      const mine = Object.keys(snap.discs || {})
+        .filter((k) => snap.discs[k] && snap.discs[k].ownerId === myId)
+        .map((k) => ({ siteId: k, disc: snap.discs[k] }))
+        .filter((e) => e.siteId !== siteId);
+      openClaimRelocatePicker(mine, (fromSiteId) => {
+        submitOnlineOp({ kind: 'PROSPECT', siteId, turn: snap.turn, round: snap.round, relocateFrom: fromSiteId });
+      });
+      return;
+    }
     submitOnlineOp({ kind: 'PROSPECT', siteId, turn: snap.turn, round: snap.round });
     return;
   }

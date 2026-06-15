@@ -7896,3 +7896,9 @@ body:has(#view-browse:not(.hidden)) #main {
 .mp-pip-cube { border-radius: 1px; }            /* factory cube = square */
 .mp-pip-dome { border-radius: 5px 5px 1px 1px; } /* colony dome = rounded top */
 .mp-pip.filled { border-color: transparent; }
+
+/* Claim-disc pip = circle (vs square cube / rounded dome). */
+.mp-pip-disc { border-radius: 50%; }
+/* Claim relocation picker list. */
+.mp-relocate-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; max-height: 320px; overflow: auto; }
+.mp-relocate-item { text-align: left; }
