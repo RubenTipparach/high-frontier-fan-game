@@ -46,6 +46,10 @@ import { blackStepsBetween, walkBlackDown } from '../../data/fuel-graph.js';
 import { weightClassForMass } from '../../data/net-thrust-track.js';
 import { SOLAR_ZONE_INFO, adjacentSites } from '../../data/sites.js';
 import { ZONE_CHIT_VPS } from '../../data/zone-chits.js';
+import {
+  activeLaws, freshAssembly, ASSEMBLY_PLACES, IDEOLOGY_ORDER,
+  delegatesRemaining, playerDelegatesInPlace,
+} from '../../data/assembly.js';
 // Movement + metadata both come from the planner graph (the vendor
 // mission-planner data the client also uses). siteBySlug layers the
 // curated data/sites.js metadata onto a planner slug, so there is ONE
@@ -2647,6 +2651,104 @@ function applyIncome(state, op, player) {
   return { ok: true, state, log: `${player.name} took income (+${INCOME_AQUA} aqua; bank ${player.aqua}).` };
 }
 
+// ===== Module 0: Sol Political Assembly =====
+//
+// Mechanics implemented from the published mat (our own functional wording, no
+// rulebook text reproduced). Delegate placements live in state.assembly; the
+// active-law resolver is the shared pure data/assembly.js#activeLaws. Some
+// per-law EFFECTS that hook other ops are wired where their host op exists; the
+// rest are flagged in docs/politics-m0-plan.md.
+function assemblyOf(state) {
+  if (!state.assembly) state.assembly = freshAssembly();
+  return state.assembly;
+}
+function placeCount(asm, place, profileId) {
+  return playerDelegatesInPlace(asm, place, profileId);
+}
+function setPlaceCount(asm, place, profileId, count) {
+  const m = asm.delegates[place] || (asm.delegates[place] = {});
+  if (count > 0) m[profileId] = count; else delete m[profileId];
+}
+// Is ideology `key`'s law in force right now (resolver verdict)?
+function lawInForce(state, key) {
+  return activeLaws(assemblyOf(state)).active.has(key);
+}
+// May `player` benefit from ideology `key`'s law this turn? It's in force and
+// they hold a delegate there, OR they spent a Lobby free action on it this turn.
+function playerCanUseLaw(state, player, key) {
+  const asm = assemblyOf(state);
+  if (lawInForce(state, key) && placeCount(asm, key, player.profileId) > 0) return true;
+  return Array.isArray(player.lobbiedLaws) && player.lobbiedLaws.includes(key);
+}
+
+// Fundraise (M0 operation, replaces Income): place a new delegate (or move one
+// of yours), gain aqua, run the vote tally (implicit - activeLaws is recomputed
+// on every read). Honor (Paleoconservative) makes the aqua gained equal your
+// glory-chit count; Authority (Martial Law) may discard an opponent's delegate.
+function applyFundraise(state, op, player) {
+  if (!state.m0) return fail('not_m0');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  const asm = assemblyOf(state);
+  const place = String(op.place || '');
+  if (!ASSEMBLY_PLACES.includes(place)) return fail('bad_place');
+  const from = op.from ? String(op.from) : null;
+  if (from) {
+    if (!ASSEMBLY_PLACES.includes(from)) return fail('bad_place');
+    if (placeCount(asm, from, player.profileId) <= 0) return fail('no_delegate_there');
+    setPlaceCount(asm, from, player.profileId, placeCount(asm, from, player.profileId) - 1);
+    setPlaceCount(asm, place, player.profileId, placeCount(asm, place, player.profileId) + 1);
+  } else {
+    if (delegatesRemaining(asm, player.profileId) <= 0) return fail('no_delegates_left');
+    setPlaceCount(asm, place, player.profileId, placeCount(asm, place, player.profileId) + 1);
+  }
+  // Authority (Martial Law): may discard an opponent's delegate.
+  let martial = '';
+  if (op.discard && playerCanUseLaw(state, player, 'authority')) {
+    const oppId = Number(op.discard.profileId);
+    const dplace = String(op.discard.place || '');
+    if (ASSEMBLY_PLACES.includes(dplace) && oppId !== player.profileId
+        && placeCount(asm, dplace, oppId) > 0) {
+      setPlaceCount(asm, dplace, oppId, placeCount(asm, dplace, oppId) - 1);
+      const opp = playerByProfile(state, oppId);
+      martial = ` Martial Law discarded ${opp ? opp.name : 'an opponent'}'s delegate from ${dplace}.`;
+    }
+  }
+  // Honor (Paleoconservative): aqua gained = your glory-chit count, else +1.
+  const honor = playerCanUseLaw(state, player, 'honor');
+  const gain = honor ? ((player.glory && player.glory.chits || []).length) : INCOME_AQUA;
+  player.aqua = (player.aqua | 0) + gain;
+  player.opsRemaining -= 1;
+  return {
+    ok: true, state,
+    log: `${player.name} fundraised - delegate to ${place}, +${gain} aqua${honor ? ' (Honor: per glory chit)' : ''}.${martial}`,
+  };
+}
+
+// Lobby (M0 free action, once per turn): pay 1 aqua and discard a delegate in an
+// INACTIVE ideology to use its Law this turn. Disabled while Unity's UN General
+// Assembly law is in force.
+function applyLobby(state, op, player) {
+  if (!state.m0) return fail('not_m0');
+  const asm = assemblyOf(state);
+  const laws = activeLaws(asm);
+  if (laws.lobbyingDisabled) return fail('lobbying_disabled');
+  if (player.lobbiedThisTurn) return fail('already_lobbied');
+  const key = String(op.ideology || '');
+  if (!IDEOLOGY_ORDER.includes(key)) return fail('bad_ideology');
+  if (laws.active.has(key)) return fail('law_already_active');
+  if (placeCount(asm, key, player.profileId) <= 0) return fail('no_delegate_there');
+  if ((player.aqua | 0) < 1) return fail('insufficient_aqua');
+  player.aqua -= 1;
+  setPlaceCount(asm, key, player.profileId, placeCount(asm, key, player.profileId) - 1);
+  player.lobbiedLaws = Array.isArray(player.lobbiedLaws) ? player.lobbiedLaws : [];
+  if (!player.lobbiedLaws.includes(key)) player.lobbiedLaws.push(key);
+  player.lobbiedThisTurn = true;
+  return {
+    ok: true, state,
+    log: `${player.name} lobbied ${key} - paid 1 aqua and discarded a delegate to use its Law this turn.`,
+  };
+}
+
 // Site refuel (rulebook I5): refine local water into the tank, one per site
 // per turn, costs an op. Two sources (op.mode), both computed authoritatively:
 //   isru    - the active prospector's rig: 1 + site water - ISRU rating
@@ -2892,6 +2994,8 @@ function applyBuyCard(state, op, player) {
 // dispatcher (not the handler) maintains turnActions / turnRedo.
 const FUNCTIONAL = {
   INCOME: applyIncome,
+  FUNDRAISE: applyFundraise,
+  LOBBY: applyLobby,
   SITE_REFUEL: applySiteRefuel,
   DIRT_REFUEL: applyDirtRefuel,
   DELIVERY: applyDelivery,
@@ -2942,6 +3046,8 @@ function pickPayload(op) {
     case 'CASH_WATER': return { amount: op.amount };
     case 'DUMP': return { amount: op.amount };
     case 'FREE_MARKET': return { cardId: op.cardId };
+    case 'FUNDRAISE': return { place: op.place, from: op.from, discard: op.discard };
+    case 'LOBBY': return { ideology: op.ideology };
     case 'DISCARD': return { cardId: op.cardId };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
@@ -3037,6 +3143,9 @@ function openTurnFor(state, player) {
   player.dirtTanksThisTurn = 0;
   // Afterburn lasts one turn: clear it as the player's next turn opens.
   if (player.rocket) player.rocket.afterburnEngaged = false;
+  // M0 Lobby is once per turn and its law-use lasts only this turn.
+  player.lobbiedThisTurn = false;
+  player.lobbiedLaws = [];
   state.turnActions = [];
   state.turnRedo = [];
 }

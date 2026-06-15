@@ -59,3 +59,67 @@ export const LOBBY_RULE = 'Pay 1 aqua and discard a delegate in an inactive ideo
 // Clockwise from the top, matching the mat's seating, for the hex wheel layout.
 export const IDEOLOGY_ORDER = ['freedom', 'honor', 'unity', 'authority', 'equality', 'individuality'];
 export const IDEOLOGY_BY_KEY = Object.fromEntries(IDEOLOGIES.map((i) => [i.key, i]));
+
+// Every place a delegate can sit: the six ideologies + the Centrist center.
+export const ASSEMBLY_PLACES = [...IDEOLOGY_ORDER, 'centrist'];
+
+// Delegates a player gets. TUNABLE default - confirm against the M0 rules.
+export const DELEGATES_PER_PLAYER = 5;
+
+// Empty assembly: delegate placements keyed by place, then profileId -> count.
+// { [place]: { [profileId]: count } }.
+export function freshAssembly() {
+  const delegates = {};
+  for (const place of ASSEMBLY_PLACES) delegates[place] = {};
+  return { delegates };
+}
+
+// Total delegates sitting in a place (across all players).
+export function delegatesInPlace(assembly, place) {
+  const m = (assembly && assembly.delegates && assembly.delegates[place]) || {};
+  return Object.values(m).reduce((s, n) => s + (n | 0), 0);
+}
+// A player's delegates in a place.
+export function playerDelegatesInPlace(assembly, place, profileId) {
+  const m = (assembly && assembly.delegates && assembly.delegates[place]) || {};
+  return (m[profileId] | 0);
+}
+// A player's total placed delegates (all places).
+export function playerDelegatesPlaced(assembly, profileId) {
+  return ASSEMBLY_PLACES.reduce((s, p) => s + playerDelegatesInPlace(assembly, p, profileId), 0);
+}
+// Delegates a player still has in hand.
+export function delegatesRemaining(assembly, profileId) {
+  return Math.max(0, DELEGATES_PER_PLAYER - playerDelegatesPlaced(assembly, profileId));
+}
+
+// Which ideology Laws are in force, plus whether lobbying is disabled.
+//
+// RULE MODEL (mechanics; tune to the M0 rulebook):
+//  - Base: the ideology(ies) holding the MOST delegates are in power. Ties put
+//    every tied ideology in power. Zero delegates = not in power.
+//  - Unity override: when Unity is in power, EVERY ideology with 2+ delegates is
+//    also in power and lobbying is disabled (the printed UN General Assembly law).
+//  - The Centrist center is not an ideology law; its pad insurance is keyed off
+//    a delegate sitting there, handled separately.
+//
+// Returns { active: Set<ideologyKey>, lobbyingDisabled: boolean }.
+export function activeLaws(assembly) {
+  const totals = {};
+  let max = 0;
+  for (const key of IDEOLOGY_ORDER) {
+    const n = delegatesInPlace(assembly, key);
+    totals[key] = n;
+    if (n > max) max = n;
+  }
+  const active = new Set();
+  if (max > 0) {
+    for (const key of IDEOLOGY_ORDER) if (totals[key] === max) active.add(key);
+  }
+  let lobbyingDisabled = false;
+  if (active.has('unity')) {
+    lobbyingDisabled = true;
+    for (const key of IDEOLOGY_ORDER) if (totals[key] >= 2) active.add(key);
+  }
+  return { active, lobbyingDisabled };
+}
