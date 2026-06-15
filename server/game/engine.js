@@ -2361,6 +2361,8 @@ function applyProspect(state, op, player) {
     const relo = String(op.relocateFrom || '');
     const reloDisc = relo && state.discs[relo];
     if (!reloDisc || reloDisc.ownerId !== player.profileId || relo === toSiteId) return fail('claim_limit');
+    // A disc with a factory built on it is locked in place - it can't be moved.
+    if (state.factories[relo]) return fail('disc_has_factory');
     const reloSite = siteById(relo);
     relocatedName = reloSite ? reloSite.name : relo;
     delete state.discs[relo];

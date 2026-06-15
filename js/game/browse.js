@@ -3767,6 +3767,7 @@ function humanizeOnlineOpError(code, detail) {
     no_factory_cubes: 'All 7 of your factory cubes are in play - you can\'t build another factory.',
     no_colony_domes: 'All 7 of your colony domes are in play - you can\'t found another colony.',
     claim_limit: 'All 9 of your claim discs are placed - move one to this spot to prospect here.',
+    disc_has_factory: 'That claim has a factory on it - it can\'t be moved.',
     cannot_industrialize: 'Industrialize needs a refinery + a robonaut (with their supports) in the stack.',
     no_mine_revival: 'Mine Revival needs a Termite Nest aboard.',
     no_busted_disc: 'Mine Revival needs a busted (failed) claim here to revive.',
@@ -11596,7 +11597,12 @@ function doProspect(site, prosp) {
       const mine = Object.keys(snap.discs || {})
         .filter((k) => snap.discs[k] && snap.discs[k].ownerId === myId)
         .map((k) => ({ siteId: k, disc: snap.discs[k] }))
-        .filter((e) => e.siteId !== siteId);
+        // A disc with a factory built on it is locked - it can't be moved.
+        .filter((e) => e.siteId !== siteId && !(snap.factories && snap.factories[e.siteId]));
+      if (!mine.length) {
+        _onlineToast('All 9 claim discs are placed, and every movable one has a factory on it.', 'error');
+        return;
+      }
       openClaimRelocatePicker(mine, (fromSiteId) => {
         submitOnlineOp({ kind: 'PROSPECT', siteId, turn: snap.turn, round: snap.round, relocateFrom: fromSiteId });
       });
