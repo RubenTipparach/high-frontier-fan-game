@@ -3999,6 +3999,19 @@ function renderComponentRow(p, snapshot) {
   return row;
 }
 
+// Close the assembly + cube modals and fly the map to a server site (used by the
+// cube breakdown's factory rows).
+function flyToServerSite(serverSiteId) {
+  closeAssemblyModal();
+  document.querySelectorAll('.mp-modal-back').forEach((el) => el.remove());
+  if (!_renderer || !_activeData || !_onlineMaps) return;
+  const pid = toPlannerId(_onlineMaps, serverSiteId);
+  const site = pid && _activeData.byId ? _activeData.byId[pid] : null;
+  if (site && Number.isFinite(site.x) && Number.isFinite(site.y)) {
+    _renderer.flyTo(site, locateZoom(4));
+  }
+}
+
 // Where a player's 7 cubes are: the first-player Sunspot cube, assembly
 // delegates (politics map), and built factories (on sites). Opened by tapping
 // the factory/cube pip row.
@@ -4008,15 +4021,15 @@ function openCubeBreakdownModal(p, snapshot) {
   const fp = players[snapshot.firstPlayerIndex || 0];
   const isFirst = !!(fp && fp.profileId === p.profileId);
   const items = [];
-  if (isFirst) items.push({ icon: '🌞', text: 'First-player marker (Sunspot cube)' });
+  if (isFirst) items.push({ icon: '🌞', text: 'First-player marker (Sunspot cube)', kind: 'sunspot' });
   for (const place of ASSEMBLY_PLACES) {
     const n = (dmap[place] || {})[p.profileId] | 0;
     const name = place === 'centrist' ? 'Centrist (center)' : (ASSEMBLY_IDEOLOGY_BY_KEY[place] || {}).name || place;
-    for (let i = 0; i < n; i += 1) items.push({ icon: '🏛', text: `Delegate on ${name}` });
+    for (let i = 0; i < n; i += 1) items.push({ icon: '🏛', text: `Delegate on ${name}`, kind: 'delegate' });
   }
   for (const sid in (snapshot.factories || {})) {
     if (snapshot.factories[sid] && snapshot.factories[sid].ownerId === p.profileId) {
-      items.push({ icon: '🏭', text: `Factory at ${onlineSiteLabel(sid)}` });
+      items.push({ icon: '🏭', text: `Factory at ${onlineSiteLabel(sid)}`, kind: 'factory', siteId: sid });
     }
   }
   const used = items.length;
@@ -4028,6 +4041,15 @@ function openCubeBreakdownModal(p, snapshot) {
   modal.className = 'mp-trade-builder-modal';
   modal.style.maxWidth = '420px';
   const close = () => back.remove();
+  // Each cube row jumps to where it lives: the Sunspot cube opens the cycle, a
+  // delegate opens the assembly, a factory closes the modals and flies the map
+  // to its site.
+  const actionFor = (it) => {
+    if (it.kind === 'sunspot') return () => { close(); openTurnClockModal(); };
+    if (it.kind === 'delegate') return () => { close(); openAssemblyModal(); };
+    if (it.kind === 'factory') return () => { close(); flyToServerSite(it.siteId); };
+    return null;
+  };
   const head = document.createElement('div');
   head.className = 'mp-trade-head';
   head.innerHTML = `<h3>🧊 ${esc(p.name)}'s cubes - ${used}/${FACTORY_CUBES} in play (${free} free)</h3>`;
@@ -4041,9 +4063,14 @@ function openCubeBreakdownModal(p, snapshot) {
     list.appendChild(e);
   } else {
     for (const it of items) {
-      const r = document.createElement('div');
-      r.className = 'mp-cube-row';
-      r.innerHTML = `<span class="mp-cube-ic">${it.icon}</span> ${esc(it.text)}`;
+      const fn = actionFor(it);
+      const r = document.createElement('button');
+      r.type = 'button';
+      r.className = 'modal-btn mp-relocate-item mp-cube-row';
+      r.innerHTML = `<span class="mp-cube-ic">${it.icon}</span> ${esc(it.text)}`
+        + (fn ? '<span class="mp-cube-go">›</span>' : '');
+      if (fn) r.addEventListener('click', fn);
+      else r.disabled = true;
       list.appendChild(r);
     }
   }
