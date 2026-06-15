@@ -279,6 +279,15 @@ function mountGlobalChat() {
   });
 }
 
+// The modules / house-rules a lobby runs, as small tag chips (HTML string).
+// Shown on lobby + game rows so players can see what's in play at a glance.
+export function moduleTagsHtml(lobby) {
+  const tags = [];
+  if (lobby && lobby.m0) tags.push('<span class="module-tag tag-m0">🏛 M0 Politics</span>');
+  if (lobby && lobby.draftStart) tags.push('<span class="module-tag tag-draft">🃏 Draft start</span>');
+  return tags.length ? `<span class="module-tags">${tags.join('')}</span>` : '';
+}
+
 // One open-tables row for a waiting lobby. `actionLabel` is Join (public) or
 // Enter (a private table I'm already in).
 function lobbyListItem(lobby, actionLabel = 'Join') {
@@ -289,6 +298,7 @@ function lobbyListItem(lobby, actionLabel = 'Join') {
       <span class="meta">hosted by @<span class="host"></span>
         · <span class="count"></span>/${lobby.maxPlayers}
         · <code></code></span>
+      ${moduleTagsHtml(lobby)}
     </div>
     <div class="row-actions">
       <button class="primary"></button>
@@ -535,6 +545,7 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
           · <span class="count"></span>/${g.maxPlayers}
           · <code></code>
           <span class="tag-cancelled" hidden>· cancelled</span></span>
+        ${moduleTagsHtml(g)}
         <span class="meta turn-meta" hidden></span>
       </div>
       <div class="row-actions">

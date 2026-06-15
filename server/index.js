@@ -645,6 +645,8 @@ app.get('/lobbies', (_req, res) => {
       `SELECT l.id, l.code, l.name,
               l.max_players AS maxPlayers,
               l.status,
+              l.draft_start AS draftStart,
+              l.m0          AS m0,
               l.created_at  AS createdAt,
               p.name        AS hostName,
               (SELECT COUNT(*) FROM lobby_members lm WHERE lm.lobby_id = l.id) AS memberCount
@@ -669,6 +671,8 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
               l.max_players AS maxPlayers,
               l.join_policy AS joinPolicy,
               l.host_id     AS hostId,
+              l.draft_start AS draftStart,
+              l.m0          AS m0,
               l.created_at  AS createdAt,
               p.name        AS hostName,
               (SELECT COUNT(*) FROM lobby_members lm2 WHERE lm2.lobby_id = l.id) AS memberCount,

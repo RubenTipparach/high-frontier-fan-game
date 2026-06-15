@@ -1037,3 +1037,16 @@ body.in-lobby .main-menu-fab { display: none; }
   border-bottom: 1px solid var(--border);
   margin-bottom: 4px;
 }
+
+/* Module / house-rule tag chips on lobby + game rows. */
+.module-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.module-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+.module-tag.tag-m0 { background: rgba(120,140,220,0.16); color: #cdd6ff; border-color: #3a4a7a; }
+.module-tag.tag-draft { background: rgba(200,160,80,0.16); color: #f0d9a8; border-color: #7a6326; }
