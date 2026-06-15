@@ -7874,3 +7874,25 @@ body:has(#view-browse:not(.hidden)) #main {
   background: rgba(80, 200, 160, 0.06);
 }
 .mp-player.mp-trade-with .mp-trade-block { margin: 8px; border: 0; background: transparent; padding: 0; }
+
+/* Component supply pips under each roster name: factory cubes (squares) +
+   colony domes (rounded). Filled = in play (player colour); empty = remaining. */
+.mp-components {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 3px 0 4px 22px;
+  align-items: center;
+}
+.mp-comp-group { display: inline-flex; align-items: center; gap: 4px; }
+.mp-comp-label { font-size: 10px; color: var(--ink-dim, #8b90b8); }
+.mp-comp-pips { display: inline-flex; gap: 2px; }
+.mp-pip {
+  width: 7px;
+  height: 7px;
+  background: transparent;
+  border: 1px solid var(--border);
+}
+.mp-pip-cube { border-radius: 1px; }            /* factory cube = square */
+.mp-pip-dome { border-radius: 5px 5px 1px 1px; } /* colony dome = rounded top */
+.mp-pip.filled { border-color: transparent; }

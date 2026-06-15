@@ -121,6 +121,20 @@ const TANK_MAX = 32; // wet-mass cap (mirror of rocket.js#TANK_MAX)
 // more (winning a lot would overflow the hand). User 2026-05-29.
 const AUCTION_HAND_LIMIT = 4;
 
+// Physical component supply per player (HF4 wooden bits): 7 cubes = the factory
+// limit, 7 domes = the colony limit. A player can never have more than this many
+// of each in play at once. (Claim discs are NOT capped - they can exceed 9.)
+// Mirrored client-side in browse.js (FACTORY_CUBES / COLONY_DOMES); keep synced.
+const FACTORY_CUBES = 7;
+const COLONY_DOMES = 7;
+// Count a player's in-play factories / colonies (entries in the site-keyed map
+// owned by them), for the component-supply limit.
+function ownedSiteCount(map, profileId) {
+  let n = 0;
+  for (const k in (map || {})) if (map[k] && map[k].ownerId === profileId) n += 1;
+  return n;
+}
+
 // The active face of a stack slot: secondary when installed
 // black-side-up, else primary. Mirror of rocket.js#installedFace.
 function slotFace(slot, card) {
@@ -2432,6 +2446,8 @@ function applyIndustrialize(state, op, player) {
   const disc = state.discs[siteId];
   if (!disc || disc.outcome !== 'success' || disc.ownerId !== player.profileId) return fail('not_claimed');
   if (state.factories[siteId]) return fail('already_industrialized');
+  // Factory cube supply: a player has only 7 cubes, so 7 factories max.
+  if (ownedSiteCount(state.factories, player.profileId) >= FACTORY_CUBES) return fail('no_factory_cubes');
   const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];
   // Every id must be a non-crew card in the stack; the set must include a
   // refinery + a robonaut (the build needs both) - unless ARCOLOGY waives the
@@ -2748,6 +2764,8 @@ function applyBuildColony(state, op, player) {
   const fac = state.factories[siteId];
   if (!fac || fac.ownerId !== player.profileId) return fail('no_factory');
   if (state.colonies[siteId]) return fail('already_colony');
+  // Colony dome supply: a player has only 7 domes, so 7 colonies max.
+  if (ownedSiteCount(state.colonies, player.profileId) >= COLONY_DOMES) return fail('no_colony_domes');
   const cardId0 = String(op.cardId || '');
   // The colonising crew is colocated with the factory whether it's ABOARD the
   // rocket OR in an OUTPOST stack at this site (a crew cargo-transferred to

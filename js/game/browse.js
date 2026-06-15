@@ -205,6 +205,16 @@ const ONLINE_POLL_AUCTION_MS = 500;
 // Academia hand limit for auction participation (mirror of the server
 // constant): can't start / bid / join an auction holding 4+ cards.
 const AUCTION_HAND_LIMIT = 4;
+// Physical component supply per player (mirror of the server constants): 7
+// wooden cubes = the factory limit, 7 wooden domes = the colony limit.
+const FACTORY_CUBES = 7;
+const COLONY_DOMES = 7;
+// Count a player's in-play factories / colonies from a site-keyed snapshot map.
+function ownedSiteCount(map, profileId) {
+  let n = 0;
+  for (const k in (map || {})) if (map[k] && map[k].ownerId === profileId) n += 1;
+  return n;
+}
 let _onlineToast = null;      // (msg, level) => void, from the caller
 let _onlineMaps = null;       // { serverToPlanner, plannerToServer }
 let _onlineSnapshot = null;   // latest server snapshot (for turn checks)
@@ -3382,12 +3392,49 @@ function renderMpPlayer(p, isMe, isActive) {
       detail.dataset.built = '1';
     }
   });
-  if (badges) wrap.append(headRow, badges, detail);
-  else wrap.append(headRow, detail);
+  if (badges) wrap.append(headRow, badges);
+  else wrap.append(headRow);
+  // Component supply: this player's factory cubes + colony domes (used / total),
+  // shown as pips in their seat colour so the dwindling bits are visible.
+  if (snap) wrap.append(renderComponentRow(p, snap));
+  wrap.append(detail);
   // Dock the open trade onto this player's row so it's tied to who it's with,
   // while the rest of the roster + table info stays visible.
   if (isTradePartner) renderMpTradeBlock(snap, wrap, { embedded: true });
   return wrap;
+}
+
+// A player's physical component supply: 7 factory cubes + 7 colony domes, drawn
+// as a row of pips (filled = in play, in the player's seat colour) so the
+// remaining bits are obvious at a glance. The build ops enforce the same cap.
+function renderComponentRow(p, snapshot) {
+  const facUsed = ownedSiteCount(snapshot.factories, p.profileId);
+  const colUsed = ownedSiteCount(snapshot.colonies, p.profileId);
+  const row = document.createElement('div');
+  row.className = 'mp-components';
+  row.append(
+    componentGroup('🏭', facUsed, FACTORY_CUBES, p.color, 'cube', 'factory cube'),
+    componentGroup('🏠', colUsed, COLONY_DOMES, p.color, 'dome', 'colony dome'),
+  );
+  return row;
+}
+function componentGroup(glyph, used, total, color, shape, label) {
+  const g = document.createElement('span');
+  g.className = 'mp-comp-group';
+  g.title = `${used} of ${total} ${label}s in play (${total - used} left)`;
+  const lab = document.createElement('span');
+  lab.className = 'mp-comp-label';
+  lab.textContent = `${glyph} ${used}/${total}`;
+  const pips = document.createElement('span');
+  pips.className = 'mp-comp-pips';
+  for (let i = 0; i < total; i += 1) {
+    const pip = document.createElement('span');
+    pip.className = 'mp-pip mp-pip-' + shape + (i < used ? ' filled' : '');
+    if (i < used && color) pip.style.background = color;
+    pips.appendChild(pip);
+  }
+  g.append(lab, pips);
+  return g;
 }
 
 // A row of ability badges for a player: their own crew power (if any) plus any
@@ -3713,6 +3760,8 @@ function humanizeOnlineOpError(code, detail) {
     not_at_site: 'Park the rocket at the site first.',
     not_claimed: 'Prospect and claim this site before you can industrialize it.',
     already_industrialized: 'This site already has a factory.',
+    no_factory_cubes: 'All 7 of your factory cubes are in play - you can\'t build another factory.',
+    no_colony_domes: 'All 7 of your colony domes are in play - you can\'t found another colony.',
     cannot_industrialize: 'Industrialize needs a refinery + a robonaut (with their supports) in the stack.',
     no_mine_revival: 'Mine Revival needs a Termite Nest aboard.',
     no_busted_disc: 'Mine Revival needs a busted (failed) claim here to revive.',
