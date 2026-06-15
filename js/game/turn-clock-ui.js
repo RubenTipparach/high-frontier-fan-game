@@ -500,6 +500,10 @@ export function openTurnClockModal({ rolling = null, animateFrom = null } = {}) 
     const dieValue = (lastEvent && lastEvent.dieRoll) || 1;
     const die = buildDie(dieValue);
     dieHost.appendChild(die);
+    // The Solar Flare's second (strength) die, if any. Built static here; it
+    // only animates AFTER the event die settles (see the rollContext block).
+    let flareDieEl = null;
+    let flareDieVal = null;
     if (lastEvent) {
       const eventSeason = getSeasonForSlot(lastEvent.turn);
       const ev = getEventForRoll(lastEvent.dieRoll, eventSeason && eventSeason.name);
@@ -555,14 +559,15 @@ export function openTurnClockModal({ rolling = null, animateFrom = null } = {}) 
         ${flareLineHtml}
         ${evBlock}
       `;
-      // Mount + animate the flare-strength die in its own slot.
+      // Mount the flare-strength die (shows the result statically). It rolls
+      // only after the event die finishes its tumble - wired below where the
+      // event die's own roll is scheduled.
       if (flareRoll) {
         const flareHost = eventHost.querySelector('.flare-die-host');
         if (flareHost) {
-          const flareDie = buildDie(flareRoll);
-          flareDie.classList.add('die-3d-sm');
-          flareHost.appendChild(flareDie);
-          setTimeout(() => rollDie(flareDie, flareRoll), 520);
+          flareDieEl = buildDie(flareRoll);
+          flareDieVal = flareRoll;
+          flareHost.appendChild(flareDieEl);
         }
       }
       // Card chips in the Inspiration outcome open a read-only preview.
@@ -595,7 +600,12 @@ export function openTurnClockModal({ rolling = null, animateFrom = null } = {}) 
       // Slight delay so the pointer animation kicks off first and
       // the cube-arriving-on-event reads as the cause of the roll.
       const delay = startSlot !== null ? 400 : 0;
-      setTimeout(() => rollDie(die, rollContext.value), delay);
+      setTimeout(() => {
+        rollDie(die, rollContext.value).then(() => {
+          // The flare-strength die tumbles only once the event die has settled.
+          if (flareDieEl) rollDie(flareDieEl, flareDieVal);
+        });
+      }, delay);
     }
   };
   repaint(rolling, animateFrom);

@@ -1817,16 +1817,17 @@
   font-weight: 600;
   color: #fbbf24;
 }
+/* inline-block (NOT flex) so the die is never flex-shrunk into a rectangle;
+   a uniform transform scales the whole 3D cube down without distorting it. */
 .turn-clock-flare-line .flare-die-host {
-  display: inline-flex;
+  display: inline-block;
   width: 30px;
   height: 30px;
-  align-items: center;
-  justify-content: center;
+  flex: none;
 }
-.turn-clock-flare-line .die-3d-sm {
-  transform: scale(0.66);
-  transform-origin: center;
+.turn-clock-flare-line .flare-die-host .die-3d {
+  transform: scale(0.68);
+  transform-origin: top left;
 }
 .turn-clock-panel {
   position: relative;
