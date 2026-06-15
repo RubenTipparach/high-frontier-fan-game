@@ -1978,6 +1978,7 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
     // permanent (session-setup), and SET_FIRST_PLAYER opens a fresh
     // round-leader turn, so both commit the same way.
     if (kind === 'END_TURN' || kind === 'PICK_CREW' || kind === 'SET_FIRST_PLAYER'
+        || kind === 'PLACE_SENIORITY'
         || kind.startsWith('AUCTION_') || kind.startsWith('TRADE_')) {
       db.prepare('UPDATE games SET committed_seq = ? WHERE id = ?').run(nextSeq, id);
     }

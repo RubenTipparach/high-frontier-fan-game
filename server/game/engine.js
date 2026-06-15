@@ -48,7 +48,8 @@ import { SOLAR_ZONE_INFO, adjacentSites } from '../../data/sites.js';
 import { ZONE_CHIT_VPS } from '../../data/zone-chits.js';
 import {
   activeLaws, freshAssembly, ASSEMBLY_PLACES, IDEOLOGY_ORDER,
-  delegatesRemaining, playerDelegatesInPlace,
+  delegatesRemaining, playerDelegatesInPlace, playerDelegatesPlaced,
+  seniorityInPlace, finalVote, IDEOLOGY_BY_KEY,
 } from '../../data/assembly.js';
 // Movement + metadata both come from the planner graph (the vendor
 // mission-planner data the client also uses). siteBySlug layers the
@@ -3267,27 +3268,48 @@ function applyEndTurn(state, _op, player) {
   log += clockEventLog(state);
   log += ` Round ${prevRound} complete.`;
 
-  // Game-length cap: finish once the configured number of rounds has
-  // been played. Legacy games get maxRounds backfilled (default 5);
-  // a game with no cap at all just keeps going.
+  // M0: the round's FIRST player drops one permanent seniority disc on the
+  // assembly before the round resolves (game finish + score, or first-player
+  // handoff). Freeze the table on that pick (like the handoff). PLACE_SENIORITY
+  // resolves it and then calls resolveRoundClose. Non-M0 games skip straight to
+  // the resolve.
+  if (state.m0) {
+    const chooser = state.players[firstIdx];
+    state.activeIndex = firstIdx;
+    state.pendingSeniority = { chooserId: chooser.profileId };
+    state.turnActions = [];
+    state.turnRedo = [];
+    log += ` ${chooser.name} places a seniority disc on the assembly.`;
+    return { ok: true, state, log };
+  }
+  return resolveRoundClose(state, log);
+}
+
+// Finish the round once any M0 seniority placement is done: end the game (with
+// scoring) once the round cap is passed, otherwise open the next round (the
+// first-player handoff for rotation games, or the same leader again).
+function resolveRoundClose(state, log) {
+  const n = state.players.length;
+  const firstIdx = state.firstPlayerIndex || 0;
+
+  // Game-length cap: finish once the configured number of rounds has been
+  // played. Legacy games get maxRounds backfilled (default 5).
   if (state.maxRounds && state.round > state.maxRounds) {
     state.status = 'finished';
     state.finishedAt = Date.now();
     state.pendingFirstPlayer = null;
     state.turnActions = [];
     state.turnRedo = [];
-    log += ` Game over after ${state.maxRounds} rounds.`;
+    computeFinalScores(state);
+    log += ` Game over after ${state.maxRounds} rounds.` + finalScoreLog(state);
     return { ok: true, state, log };
   }
 
   log += ` Round ${state.round} begins.`;
 
-  // First-player rotation (rotation-enabled games, 2+ players): the
-  // player who led the round just finished names the next first
-  // player. Freeze the table on that choice - the active pointer rests
-  // on the chooser and budgets are NOT refilled until the pick lands
-  // (SET_FIRST_PLAYER opens the new leader's turn). Mirrors the auction
-  // freeze: every other op is rejected while pendingFirstPlayer is set.
+  // First-player rotation (rotation-enabled games, 2+ players): the player who
+  // led the round just finished names the next first player. Freeze the table on
+  // that choice; SET_FIRST_PLAYER opens the new leader's turn.
   if (state.firstPlayerRotation && n >= 2) {
     const chooser = state.players[firstIdx];
     state.activeIndex = firstIdx;
@@ -3302,6 +3324,89 @@ function applyEndTurn(state, _op, player) {
   state.activeIndex = firstIdx;
   openTurnFor(state, state.players[firstIdx]);
   return { ok: true, state, log };
+}
+
+// ----- end-game scoring -----
+
+// Entries in an { [siteId]: { ownerId, ... } } map owned by a player.
+function countOwnedBy(map, profileId) {
+  let n = 0;
+  for (const k in (map || {})) if (map[k] && map[k].ownerId === profileId) n += 1;
+  return n;
+}
+// A player's SUCCESSFUL claim discs (busted scans don't count).
+function countSuccessfulClaims(state, profileId) {
+  let n = 0;
+  for (const k in (state.discs || {})) {
+    const d = state.discs[k];
+    if (d && d.ownerId === profileId && d.outcome === 'success') n += 1;
+  }
+  return n;
+}
+// Total glory chits a player has earned (still aboard + already brought home).
+function gloryChitCount(player) {
+  const g = player.glory || {};
+  return ((g.chits || []).length) + ((g.claimed || []).length);
+}
+// The winning ideology's end-game award, scored from THIS player's own holdings.
+// Individuality's site-type award is unconfirmed (the mat icons are unreadable),
+// so it scores 0 for now with a note in the breakdown.
+function ideologyAwardVp(state, player, key) {
+  const pid = player.profileId;
+  const asm = assemblyOf(state);
+  switch (key) {
+    case 'freedom': return countOwnedBy(state.factories, pid);                 // +1 / factory cube
+    case 'authority': return countSuccessfulClaims(state, pid);               // +1 / claim disc
+    case 'equality': return countOwnedBy(state.colonies, pid);                // +1 / colony dome
+    case 'honor': return gloryChitCount(player);                              // +1 / glory chit
+    case 'unity':                                                             // +1 / ideology you sit in
+      return IDEOLOGY_ORDER.reduce((s, k) => s + (playerDelegatesInPlace(asm, k, pid) > 0 ? 1 : 0), 0);
+    case 'individuality': return 0;                                           // site types TBD
+    default: return 0;
+  }
+}
+// Compute + stash the end-game breakdown on state.finalScores and the assembly
+// vote result on state.finalVote. M0 adds the per-cube VP and the winning-
+// ideology award; the factory / colony / glory lines score in any game (an
+// empty assembly just contributes 0). Ranking: total desc, ties by aqua.
+function computeFinalScores(state) {
+  const asm = assemblyOf(state);
+  const vote = finalVote(asm);
+  const winnerKey = vote.winner;
+  const winnerName = winnerKey ? ((IDEOLOGY_BY_KEY[winnerKey] || {}).name || winnerKey) : null;
+  const m0 = !!state.m0;
+  const scores = state.players.map((p) => {
+    const cubeVp = m0 ? playerDelegatesPlaced(asm, p.profileId) : 0;
+    const awardVp = (m0 && winnerKey) ? ideologyAwardVp(state, p, winnerKey) : 0;
+    const factoryVp = countOwnedBy(state.factories, p.profileId);
+    const colonyVp = countOwnedBy(state.colonies, p.profileId);
+    const gloryVp = (p.glory && p.glory.vps) | 0;
+    const total = cubeVp + awardVp + factoryVp + colonyVp + gloryVp;
+    return {
+      profileId: p.profileId, name: p.name, color: p.color || null,
+      cubeVp, awardVp, factoryVp, colonyVp, gloryVp, total, aqua: p.aqua | 0,
+    };
+  });
+  const ranked = [...scores].sort((a, b) => b.total - a.total || b.aqua - a.aqua);
+  ranked.forEach((s, i) => { s.rank = i + 1; });
+  state.finalScores = scores;
+  state.finalVote = {
+    winner: winnerKey,
+    winnerName,
+    award: winnerKey ? (((IDEOLOGY_BY_KEY[winnerKey] || {}).award || {}).text || null) : null,
+    awardTBD: winnerKey === 'individuality',
+    totals: vote.totals,
+    tied: vote.tied,
+  };
+}
+// One-line game-over summary for the op log + galactic news.
+function finalScoreLog(state) {
+  const fs = state.finalScores || [];
+  if (!fs.length) return '';
+  const top = [...fs].sort((a, b) => b.total - a.total || b.aqua - a.aqua)[0];
+  const fv = state.finalVote || {};
+  const voteStr = fv.winnerName ? ` ${fv.winnerName} carried the assembly vote.` : '';
+  return `${voteStr}${top ? ` ${top.name} wins with ${top.total} VP.` : ''}`;
 }
 
 // ----- draft-start mode -----
@@ -4273,8 +4378,34 @@ function applySetFirstPlayer(state, op, ctx) {
   };
 }
 
+// ----- seniority disc (M0 round-end) -----
+//
+// When an M0 round closes, END_TURN sets pendingSeniority and freezes the
+// table; the player who led that round drops ONE permanent neutral seniority
+// disc on an assembly space of their choice (these count toward the end-game
+// vote and break its ties). Like SET_FIRST_PLAYER it validates its own caller
+// and runs while the table is frozen, then hands off to resolveRoundClose
+// (which finishes + scores the game, or opens the first-player handoff).
+function applyPlaceSeniority(state, op, ctx) {
+  const pending = state.pendingSeniority;
+  if (!pending) return fail('no_seniority_pending');
+  const sameId = (a, b) => String(a) === String(b);
+  if (!sameId(pending.chooserId, ctx.profileId)) return fail('not_seniority_chooser');
+  const place = String(op.place || '');
+  if (!ASSEMBLY_PLACES.includes(place)) return fail('bad_place');
+  const asm = assemblyOf(state);
+  asm.seniority = asm.seniority || {};
+  asm.seniority[place] = (asm.seniority[place] | 0) + 1;
+  state.pendingSeniority = null;
+  const chooser = playerByProfile(state, pending.chooserId);
+  const placeName = place === 'centrist' ? 'Centrist' : ((IDEOLOGY_BY_KEY[place] || {}).name || place);
+  const log = `${chooser ? chooser.name : 'The first player'} placed a seniority disc on ${placeName}.`;
+  return resolveRoundClose(state, log);
+}
+
 const LIFECYCLE = {
   SET_FIRST_PLAYER: applySetFirstPlayer,
+  PLACE_SENIORITY: applyPlaceSeniority,
 };
 
 // Validate + apply one operation. ctx = { profileId, turnBaseState? }.
@@ -4345,6 +4476,7 @@ export function applyOperation(prevState, op, ctx) {
     return fail('awaiting_event_choice');
   }
 
+  if (prevState.pendingSeniority) return fail('awaiting_seniority');
   if (prevState.pendingFirstPlayer) return fail('awaiting_first_player');
 
   // Auction ops bypass the turn guard below - bids/passes are sent

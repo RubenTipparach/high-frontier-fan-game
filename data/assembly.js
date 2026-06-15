@@ -66,12 +66,19 @@ export const ASSEMBLY_PLACES = [...IDEOLOGY_ORDER, 'centrist'];
 // Delegates a player gets. TUNABLE default - confirm against the M0 rules.
 export const DELEGATES_PER_PLAYER = 5;
 
-// Empty assembly: delegate placements keyed by place, then profileId -> count.
-// { [place]: { [profileId]: count } }.
+// Empty assembly: delegate placements keyed by place, then profileId -> count;
+// plus a neutral seniority-disc count per place. The round's first player drops
+// one permanent seniority disc each round end (data/assembly.js stays pure: the
+// engine mutates these). { delegates:{[place]:{[pid]:n}}, seniority:{[place]:n} }.
 export function freshAssembly() {
   const delegates = {};
-  for (const place of ASSEMBLY_PLACES) delegates[place] = {};
-  return { delegates };
+  const seniority = {};
+  for (const place of ASSEMBLY_PLACES) { delegates[place] = {}; seniority[place] = 0; }
+  return { delegates, seniority };
+}
+// Seniority discs sitting in a place (neutral; not owned by any player).
+export function seniorityInPlace(assembly, place) {
+  return ((assembly && assembly.seniority && assembly.seniority[place]) | 0);
 }
 
 // Total delegates sitting in a place (across all players).
@@ -122,4 +129,37 @@ export function activeLaws(assembly) {
     for (const key of IDEOLOGY_ORDER) if (totals[key] >= 2) active.add(key);
   }
   return { active, lobbyingDisabled };
+}
+
+// End-game political vote. For each IDEOLOGY space (Centrist is not in the
+// running), votes = every player's delegate cubes there + neutral seniority
+// discs there. The winner is the space with the most votes; a tie is broken by
+// the most seniority discs; any remaining tie falls to IDEOLOGY_ORDER. The
+// winning ideology's end-game award is then applied (by the engine, which holds
+// the holdings the award counts). Returns:
+//   { winner: key|null, totals: { [key]: { cubes, discs, votes } }, tied: [keys] }
+export function finalVote(assembly) {
+  const totals = {};
+  for (const key of IDEOLOGY_ORDER) {
+    const cubes = delegatesInPlace(assembly, key);
+    const discs = seniorityInPlace(assembly, key);
+    totals[key] = { cubes, discs, votes: cubes + discs };
+  }
+  let winner = null;
+  let bestVotes = 0;
+  let bestDiscs = -1;
+  for (const key of IDEOLOGY_ORDER) {
+    const t = totals[key];
+    if (t.votes <= 0) continue;
+    if (t.votes > bestVotes
+        || (t.votes === bestVotes && t.discs > bestDiscs)) {
+      winner = key; bestVotes = t.votes; bestDiscs = t.discs;
+    }
+  }
+  // Report any spaces still tied with the winner on BOTH votes and discs (the
+  // engine can surface "tie broken by seat order" in the breakdown).
+  const tied = winner
+    ? IDEOLOGY_ORDER.filter((k) => totals[k].votes === bestVotes && totals[k].discs === bestDiscs)
+    : [];
+  return { winner, totals, tied };
 }

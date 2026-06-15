@@ -280,6 +280,9 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
     firstPlayerIndex: 0,
     firstPlayerRotation: true,
     pendingFirstPlayer: null,
+    // M0: while set, the round's first player owes a seniority-disc placement
+    // before the round resolves. { chooserId }. Null otherwise.
+    pendingSeniority: null,
     // Open Sunspot-event choice, when an event needs input from one or
     // more players (Budget Cuts discard pick, Pad Explosion tie-break).
     // { kind, waiting: [profileId...], options?: { [profileId]: [cardId...] } }
