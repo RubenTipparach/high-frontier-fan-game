@@ -15345,6 +15345,30 @@ function showSitePopupFor(site) {
       });
     }
   }
+  // Outpost Factory-Refuel: store +7 water in one of YOUR outposts at a usable
+  // factory here - no rocket needs to be present (the outpost holds its own
+  // fuel). Online only (server op); shares the one-per-site-per-turn lock.
+  if (_online) {
+    const factory = getFactory(site.id);
+    if (iCanUseFactory(factory)) {
+      const refueledThisTurn = hasRefueledThisTurn(site.id);
+      for (const o of Object.values(getOutposts()).filter((op) => op.siteId === site.id)) {
+        actions.push({
+          label: refueledThisTurn ? `🏭 Outpost ${o.letter} refuel done` : `🏭 Factory-Refuel Outpost ${o.letter} (+7)`,
+          variant: refueledThisTurn ? 'secondary' : 'rocket',
+          disabled: refueledThisTurn,
+          title: refueledThisTurn ? 'Already refueled at this site this turn.' : 'Store +7 water in this outpost (no rocket needed). Costs your operation.',
+          onClick: () => {
+            if (refueledThisTurn) return;
+            const sid = toServerId(_onlineMaps, site.id);
+            if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
+            submitOnlineOp({ kind: 'SITE_REFUEL', siteId: sid, outpost: o.letter });
+            _renderer.clearSitePopup();
+          },
+        });
+      }
+    }
+  }
   // Dirt refuel is NOT a site-popup action: it lives in the rocket fuel
   // tank modal, shown only when the ACTIVE engine is a dirt thruster (open
   // the tank from the rocket-stack wet-mass cell or the LEO dock). Loading
