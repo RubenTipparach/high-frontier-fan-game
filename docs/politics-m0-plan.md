@@ -91,6 +91,32 @@ when wiring the resolver.
 4. End-game ideology VP: who scores each award.
 5. Whether placing vs moving a delegate on Fundraise is a choice or forced.
 
+## Implementation status (2026-06-15)
+
+DONE (server + client):
+- Room creation M0 checkbox wired end to end: lobby column -> start ->
+  `state.m0` + `state.assembly`. Games in flight default to m0=false.
+- `data/assembly.js`: `freshAssembly`, delegate-count helpers,
+  `DELEGATES_PER_PLAYER` (default 5, TUNABLE), and the pure `activeLaws`
+  resolver (plurality in power; Unity override activates every 2+ ideology and
+  disables lobbying).
+- Engine ops `FUNDRAISE` (place/move a delegate, gain aqua; Honor pays per
+  glory chit; Authority may discard an opponent's delegate) and `LOBBY` (free,
+  once/turn: pay 1 + discard a delegate in an inactive ideology to use its law
+  this turn; blocked while Unity is in force). Both ride the undo stack.
+- Client 🏛 Politics tab: the hex board with delegates in seat colour, the
+  active-law read-out, delegates-in-hand, and Fundraise / Lobby controls.
+
+REMAINING (law EFFECTS that hook other ops, + scoring):
+- Freedom (Free Trade Act): Free Market sells 2 cards for 5 aqua.
+- Equality (Research Grants): Research Auction start pays 1, no support draws.
+- Centrist (Pad Insurance): a pad-explosion repays the lost card's boost cost.
+- Individuality (Freedom to Roam): use an opponent's Factory/Bernal for
+  non-victory purposes.
+- End-game ideology VP awards (the +1-per-X scoring). BLOCKED on a general
+  end-game scoring framework (factory/colony/Bernal VP), which is Stage 4 and
+  not built yet - the per-ideology awards slot in once that exists.
+
 ## Build order (proposed)
 1. `data/assembly.js`: ideology/law/award table + `activeLaws()` + `lawActive()`
    pure resolvers (shared client/server, like `data/support-chain.js`).
