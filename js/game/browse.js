@@ -13296,7 +13296,9 @@ async function moveRocket() {
   // (not a coasting waypoint) with a crew aboard, and isn't already carrying
   // that zone's chit (so coasting through / re-landing doesn't re-prompt).
   const landedHere = arrived && !arrived.isWaypoint && arrived.isLandable !== false;
-  const willAwardChit = landedHere && arrivedZone && arrivedZone !== 'Earth'
+  // LEO (home) never carries a chit, but the rest of the Earth zone (Luna,
+  // near-Earth asteroids) does - so gate on LEO, not the whole Earth zone.
+  const willAwardChit = landedHere && arrivedZone && !isLeoSite(arrived)
     && !zoneChitTaken(arrivedZone) && !getChits().some((c) => c.zone === arrivedZone) && crewAboard;
   const willCashIn = isLeoSite(arrived) && getChits().length > 0;
   const chitsToCash = willCashIn ? getChits() : [];
@@ -14814,7 +14816,7 @@ function showSitePopupFor(site) {
   // to load it now (the "I left it on arrival, grab it later" path). Lands
   // just before Navigate-to so the pure-inspection action stays last.
   if (rocketSite && site.id === rocketSite.id
-      && site.solarZone && site.solarZone !== 'Earth'
+      && site.solarZone && !isLeoSite(site)
       && !zoneChitTaken(site.solarZone) && stackHasCrew()) {
     const sds = getChitSides(site.solarZone);
     actions.push({
@@ -16557,7 +16559,7 @@ async function claimGloryHere(site) {
     if (ok) refreshOpenSitePopup();
     return ok;
   }
-  if (zone === 'Earth' || zoneChitTaken(zone) || !stackHasCrew()) return false;
+  if (isLeoSite(site) || zoneChitTaken(zone) || !stackHasCrew()) return false;
   const ownerId = firstCrewId();
   awardChitForZone(zone, getTurn(), ownerId);
   const s = getChitSides(zone);
