@@ -7443,6 +7443,8 @@ body:has(#view-browse:not(.hidden)) #main {
 .mp-go-total { grid-area: total; font-size: 16px; font-weight: 800; white-space: nowrap; }
 .mp-go-break { grid-area: break; font-size: 12px; }
 .mp-game-over-note { margin: 14px 0 0; font-size: 12px; }
+.mp-game-over-vote { margin: 0 0 12px; font-size: 13px; color: #cdd6ff;
+  background: rgba(120,140,220,0.14); border: 1px solid #3a4a7a; border-radius: 8px; padding: 7px 10px; }
 
 /* ===== All cards overview (hand panel + MP panel "📚 All cards") =====
    A read-only audit of every card the local player owns, grouped by where it
@@ -7941,6 +7943,8 @@ body:has(#view-browse:not(.hidden)) #main {
 .assembly-sub { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--ink-dim, #8b90b8); }
 .assembly-board { display: block; width: 100%; max-width: 720px; margin: 8px auto 0; }
 .assembly-wedge { stroke: #0b0a14; stroke-width: 2; }
+/* Neutral seniority discs dropped on a space (count toward the end-game vote). */
+.assembly-disc { fill: #d8dbe6; stroke: #2a2740; stroke-width: 1; }
 /* Hover: light up the whole cell (wedge or center) when hovered. */
 .assembly-cell { cursor: pointer; }
 .assembly-cell .assembly-wedge, .assembly-cell .assembly-center { transition: filter 0.12s ease; }

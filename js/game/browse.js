@@ -647,6 +647,8 @@ function applySnapshot(snapshot, seq) {
   // driven straight off the snapshot and idempotent, so they appear /
   // clear as the server state flips.
   renderFirstPlayerChooser(snapshot.pendingFirstPlayer);
+  // M0 round-end seniority-disc placement (same idempotent overlay treatment).
+  renderSeniorityChooser(snapshot.pendingSeniority);
   // Open Sunspot event (Budget Cuts discard / Pad Explosion tie-break):
   // same idempotent snapshot-driven overlay treatment as the first-player
   // handoff; appears for waiting players, shows progress to everyone else.
@@ -658,7 +660,7 @@ function applySnapshot(snapshot, seq) {
   // resolve in near-realtime even if the WS broadcast was dropped. Drop
   // back to the normal cadence otherwise.
   const fastPoll = snapshot.auction || snapshot.pendingFirstPlayer || snapshot.pendingEvent
-    || snapshot.trade;
+    || snapshot.pendingSeniority || snapshot.trade;
   setPollCadence(fastPoll ? ONLINE_POLL_AUCTION_MS : ONLINE_POLL_MS);
   // Eager one-shot fetch the moment the auctioneer's phase opens
   // (awaiting === 'auctioneer'). The accept can land within ms of
@@ -2173,6 +2175,122 @@ function renderFirstPlayerChooser(pending) {
   } : null);
 }
 
+// ----- M0 seniority-disc placement (round-end) -----
+//
+// When an M0 round closes the server sets snapshot.pendingSeniority = { chooserId }
+// and freezes the table; the round's first player drops one permanent neutral
+// disc on an assembly space. Mirrors the first-player handoff overlay (collapsible,
+// snapshot-driven). PLACE_SENIORITY bypasses the turn guard server-side.
+let _seniorityMin = false;
+function setSeniorityError(text) {
+  const el = document.getElementById('mp-seniority-error');
+  if (el) el.textContent = text || '';
+}
+async function submitPlaceSeniority(place) {
+  if (!_online || _onlineBusy) return false;
+  if (_spectator) { _onlineToast('Spectator - view only.', 'error'); return false; }
+  _onlineBusy = true;
+  setSeniorityError('');
+  let r;
+  try {
+    r = await submitGameOp(_onlineGameId, { kind: 'PLACE_SENIORITY', place }, _onlineMe.token);
+  } finally {
+    _onlineBusy = false;
+  }
+  if (!r || !r.ok) {
+    setSeniorityError(humanizeOnlineOpError(r && r.error));
+    if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
+    return false;
+  }
+  applySnapshot(r.data.game.state, r.data.game.seq);
+  return true;
+}
+function renderSeniorityChooser(pending) {
+  const existing = document.getElementById('mp-seniority-overlay');
+  if (!pending || !_online || !gameViewVisible()) {
+    if (existing) existing.remove();
+    setMpTurnAction('seniority', null);
+    _seniorityMin = false;
+    return;
+  }
+  const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
+  const chooser = players.find((p) => p.profileId === pending.chooserId);
+  const myId = _onlineMe && _onlineMe.id;
+  const amChooser = !!myId && pending.chooserId === myId;
+
+  let overlay = existing;
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'mp-seniority-overlay';
+    overlay.className = 'mp-first-player-overlay';
+    overlay.innerHTML = `
+      <div class="mp-first-player-modal" role="dialog" aria-label="Seniority disc">
+        <div class="mp-modal-titlebar">
+          <h3 class="mp-first-player-title">🏛 Seniority disc</h3>
+          <button type="button" class="mp-mini-btn" title="Minimize" aria-label="Minimize">&minus;</button>
+        </div>
+        <p class="mp-first-player-sub"></p>
+        <div class="mp-first-player-choices" id="mp-seniority-choices"></div>
+        <div class="hud-error" id="mp-seniority-error"></div>
+      </div>
+      <button type="button" class="mp-mini-chip" aria-label="Restore seniority placement">
+        🏛 Seniority disc
+        <span class="mp-mini-chip-meta"></span>
+      </button>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('.mp-mini-btn').addEventListener('click', () => {
+      _seniorityMin = true;
+      overlay.classList.add('is-minimized');
+      renderSeniorityChooser(_onlineSnapshot && _onlineSnapshot.pendingSeniority);
+    });
+    overlay.querySelector('.mp-mini-chip').addEventListener('click', () => {
+      _seniorityMin = false;
+      overlay.classList.remove('is-minimized');
+      setMpTurnAction('seniority', null);
+    });
+  }
+
+  const sub = overlay.querySelector('.mp-first-player-sub');
+  const choices = overlay.querySelector('#mp-seniority-choices');
+  choices.innerHTML = '';
+
+  if (amChooser) {
+    sub.textContent = 'You led the round. Drop a permanent seniority disc on an assembly space (it counts toward the end-game vote and breaks its ties).';
+    for (const place of ASSEMBLY_PLACES) {
+      const info = ASSEMBLY_IDEOLOGY_BY_KEY[place];
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'mp-first-player-pick';
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      dot.style.background = (info && info.color) || '#9aa0c4';
+      const label = document.createElement('span');
+      label.textContent = place === 'centrist' ? 'Centrist (center)' : (info ? info.name : place);
+      btn.append(dot, label);
+      btn.addEventListener('click', () => submitPlaceSeniority(place));
+      choices.appendChild(btn);
+    }
+  } else {
+    sub.textContent = 'Waiting for ';
+    const nm = document.createElement('span');
+    nm.className = 'player-name';
+    if (chooser && chooser.color) nm.style.setProperty('--player-color', chooser.color);
+    nm.textContent = '@' + (chooser ? chooser.name : '?');
+    sub.append(nm, document.createTextNode(' to place a seniority disc.'));
+  }
+
+  overlay.classList.toggle('is-minimized', _seniorityMin);
+  setMpTurnAction('seniority', _seniorityMin ? {
+    label: '🏛 Seniority disc',
+    meta: amChooser ? 'your placement' : 'in progress',
+    needsAction: amChooser,
+    onClick: () => {
+      _seniorityMin = false;
+      renderSeniorityChooser(_onlineSnapshot && _onlineSnapshot.pendingSeniority);
+    },
+  } : null);
+}
+
 // ----- end-of-game standings -----
 //
 // The server marks the state finished once the round cap is reached.
@@ -2639,9 +2757,22 @@ function renderGameOver(snapshot) {
     return;
   }
   const myId = _onlineMe && _onlineMe.id;
-  const scored = (snapshot.players || [])
-    .map((p) => ({ p, s: computeSnapshotScore(snapshot, p.profileId) }))
-    .sort((a, b) => b.s.total - a.s.total);
+  const players = snapshot.players || [];
+  const fv = snapshot.finalVote || null;
+  // Prefer the server's authoritative final scores (M0 cube VP + the winning
+  // ideology's award + factory / colony / glory). Fall back to the client tally
+  // for non-M0 or older snapshots that carry no finalScores.
+  const serverScores = Array.isArray(snapshot.finalScores) ? snapshot.finalScores : null;
+  let rows;
+  if (serverScores && serverScores.length) {
+    rows = serverScores
+      .map((s) => ({ s, p: players.find((pp) => pp.profileId === s.profileId) || { name: s.name, color: s.color } }))
+      .sort((a, b) => b.s.total - a.s.total || (b.s.aqua || 0) - (a.s.aqua || 0));
+  } else {
+    rows = players
+      .map((p) => ({ p, s: computeSnapshotScore(snapshot, p.profileId) }))
+      .sort((a, b) => b.s.total - a.s.total);
+  }
 
   let overlay = existing;
   if (!overlay) {
@@ -2650,16 +2781,24 @@ function renderGameOver(snapshot) {
     overlay.className = 'mp-game-over-overlay';
     document.body.appendChild(overlay);
   }
+  const voteBanner = (fv && fv.winnerName)
+    ? `<p class="mp-game-over-vote">🏛 <strong>${esc(fv.winnerName)}</strong> carried the assembly vote: ${esc(fv.award || '')}${fv.awardTBD ? ' <em>(award TBD)</em>' : ''}</p>`
+    : '';
+  const note = serverScores
+    ? 'Final score: delegate cubes + the winning ideology award + factory / colony / glory VP.'
+    : 'Provisional tally - full end-game scoring lands in a later update.';
   overlay.innerHTML = `
     <div class="mp-game-over-modal" role="dialog" aria-label="Final standings">
       <button type="button" class="modal-x" aria-label="Close" title="Close">&times;</button>
       <h2 class="mp-game-over-title">🏁 Game over</h2>
       <p class="muted mp-game-over-sub">Final standings after ${snapshot.maxRounds || ''} rounds, ranked by victory points.</p>
+      ${voteBanner}
       <ol class="mp-game-over-list"></ol>
-      <p class="muted mp-game-over-note">Provisional tally - full end-game scoring lands in a later update.</p>
+      <p class="muted mp-game-over-note">${note}</p>
     </div>`;
   const list = overlay.querySelector('.mp-game-over-list');
-  scored.forEach(({ p, s }, i) => {
+  const winnerName = fv && fv.winnerName ? fv.winnerName : 'ideology';
+  rows.forEach(({ p, s }, i) => {
     const li = document.createElement('li');
     li.className = 'mp-go-row' + (i === 0 ? ' is-winner' : '');
     const rank = document.createElement('span');
@@ -2674,7 +2813,9 @@ function renderGameOver(snapshot) {
     total.textContent = `${s.total} VP`;
     const brk = document.createElement('span');
     brk.className = 'mp-go-break muted';
-    brk.textContent = `glory ${s.glory} · factories ${s.factories} · colonies ${s.colonies} · claims ${s.claims}`;
+    brk.textContent = serverScores
+      ? `cubes ${s.cubeVp} · ${winnerName} award ${s.awardVp} · factories ${s.factoryVp} · colonies ${s.colonyVp} · glory ${s.gloryVp}`
+      : `glory ${s.glory} · factories ${s.factories} · colonies ${s.colonies} · claims ${s.claims}`;
     li.append(rank, name, total, brk);
     list.appendChild(li);
   });
@@ -3060,9 +3201,10 @@ function renderAssemblyTab(snapshot) {
     for (const [pid, n] of Object.entries(m)) for (let i = 0; i < (n | 0); i += 1) arr.push(colorOf(Number(pid)));
     delegates[place] = arr;
   }
+  const seniority = snapshot.assembly.seniority || {};
   const laws = assemblyActiveLaws(snapshot.assembly);
   host.innerHTML = '';
-  host.appendChild(renderAssemblyPanel({ delegates }));
+  host.appendChild(renderAssemblyPanel({ delegates, seniority }));
 
   const placedByMe = ASSEMBLY_PLACES.reduce((s, p) => s + ((dmap[p] || {})[myId] | 0), 0);
   const left = Math.max(0, DELEGATES_PER_PLAYER - placedByMe);

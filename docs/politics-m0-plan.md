@@ -138,10 +138,26 @@ DONE (client surfacing - 2026-06-15):
   too, labelled "Freedom to Roam"); Homesteading stays owner-only.
 - Centrist needs no client trigger - it fires automatically server-side.
 
+DONE (end-game scoring + seniority discs - 2026-06-15):
+- Seniority discs: at every M0 round close the round's FIRST player drops one
+  permanent neutral disc on an assembly space (server PLACE_SENIORITY lifecycle
+  op + pendingSeniority freeze; client placement overlay mirrors the first-player
+  handoff; discs render on the assembly board).
+- Final political vote (data/assembly.js finalVote): per ideology, votes =
+  delegate cubes + seniority discs; winner by votes, then disc count, then seat
+  order.
+- End-game scoring (server computeFinalScores, shown in the game-over screen):
+  each player scores +1 VP per delegate cube, the WINNING ideology's award from
+  their own holdings (all players, own holdings), plus factory / colony / glory
+  VP. Ranked by total then aqua. The game-over overlay shows the winning ideology
+  banner + per-player breakdown.
+
 REMAINING:
-- End-game ideology VP awards (the +1-per-X scoring). BLOCKED on a general
-  end-game scoring framework (factory/colony/Bernal VP), which is Stage 4 and
-  not built yet - the per-ideology awards slot in once that exists.
+- Individuality's end-game award counts "tokens on certain sites" - the two site
+  icons on the mat are unreadable, so it scores 0 for now (flagged "award TBD" in
+  the game-over screen). Confirm the site types from the M0 rules to finish it.
+- A fuller end-game tally (Exploitation Track spectral pricing, Bernals) is the
+  broader Stage-4 scoring; the M0 contributions already fold into the total.
 
 ## Build order (proposed)
 1. `data/assembly.js`: ideology/law/award table + `activeLaws()` + `lawActive()`

@@ -85,7 +85,7 @@ function callout(root, box, ide, slot) {
   fo.appendChild(div);
 }
 
-export function renderAssemblyPanel({ delegates = null } = {}) {
+export function renderAssemblyPanel({ delegates = null, seniority = null } = {}) {
   const root = document.createElement('div');
   root.className = 'assembly-panel';
   root.innerHTML = `
@@ -116,6 +116,18 @@ export function renderAssemblyPanel({ delegates = null } = {}) {
     });
   };
 
+  // Neutral seniority discs: small grey pucks dropped below the cube cluster.
+  // They count toward the end-game vote (and break its ties).
+  const drawDiscs = (parent, pt, count) => {
+    const n = count | 0;
+    if (n <= 0) return;
+    for (let i = 0; i < Math.min(n, 8); i += 1) {
+      const ox = pt.x - 12 + (i % 4) * 8;
+      const oy = pt.y + 18 + Math.floor(i / 4) * 8;
+      svg('circle', { cx: ox, cy: oy, r: 3.2, class: 'assembly-disc' }, parent);
+    }
+  };
+
   // Each ideology is one hoverable cell: wedge + label + delegate space, grouped
   // so hovering anywhere on the cell lights the whole wedge.
   IDEOLOGY_ORDER.forEach((key) => {
@@ -133,6 +145,7 @@ export function renderAssemblyPanel({ delegates = null } = {}) {
     const slot = polar(C.x, C.y, R - 30, cA);
     slots[key] = slot;
     drawCubes(cell, slot, delegates && delegates[key]);
+    drawDiscs(cell, slot, seniority && seniority[key]);
   });
 
   // Center (Centrist) is its own hoverable cell.
@@ -144,6 +157,7 @@ export function renderAssemblyPanel({ delegates = null } = {}) {
   ct = svg('text', { x: C.x, y: C.y + 7, class: 'assembly-center-sub', 'text-anchor': 'middle' }, centerCell);
   ct.textContent = CENTRIST.law.name;
   drawCubes(centerCell, { x: C.x, y: C.y + 24 }, delegates && delegates.centrist);
+  drawDiscs(centerCell, { x: C.x, y: C.y + 24 }, seniority && seniority.centrist);
 
   // Callout boxes around the wheel, each arrow -> its space.
   const boxes = {
