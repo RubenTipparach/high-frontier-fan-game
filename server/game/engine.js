@@ -57,7 +57,7 @@ import {
 // id space across client + server. (data/graph.js is no longer used.)
 import {
   siteExists as plannerSiteExists, findPath as plannerFindPath,
-  leoSlug, siteBySlug as siteById, hazardKind,
+  leoSlug, siteBySlug as siteById, hazardKind, nodeBySlug,
   nodeSizeNumber, lineOfSightSites, siteBodyOf, buggyRoamSites,
   isSiteNode, zoneOfSlug,
 } from './planner-graph.js';
@@ -3419,9 +3419,12 @@ function gloryChitCount(player) {
   const g = player.glory || {};
   return ((g.chits || []).length) + ((g.claimed || []).length);
 }
+// Does a site have a hazardous lander burn (the planner's landing skull)?
+function siteHasHazardLanding(siteId) {
+  const n = nodeBySlug(siteId);
+  return !!(n && n.hazard);
+}
 // The winning ideology's end-game award, scored from THIS player's own holdings.
-// Individuality's site-type award is unconfirmed (the mat icons are unreadable),
-// so it scores 0 for now with a note in the breakdown.
 function ideologyAwardVp(state, player, key) {
   const pid = player.profileId;
   const asm = assemblyOf(state);
@@ -3432,7 +3435,22 @@ function ideologyAwardVp(state, player, key) {
     case 'honor': return gloryChitCount(player);                              // +1 / glory chit
     case 'unity':                                                             // +1 / ideology you sit in
       return IDEOLOGY_ORDER.reduce((s, k) => s + (playerDelegatesInPlace(asm, k, pid) > 0 ? 1 : 0), 0);
-    case 'individuality': return 0;                                           // site types TBD
+    case 'individuality': {
+      // +1 per wood/plastic token (claim disc / factory cube / colony dome) on a
+      // Site with a hazardous lander burn. Outpost stacks do NOT count.
+      let n = 0;
+      for (const sid in (state.discs || {})) {
+        const d = state.discs[sid];
+        if (d && d.ownerId === pid && d.outcome === 'success' && siteHasHazardLanding(sid)) n += 1;
+      }
+      for (const sid in (state.factories || {})) {
+        if (state.factories[sid] && state.factories[sid].ownerId === pid && siteHasHazardLanding(sid)) n += 1;
+      }
+      for (const sid in (state.colonies || {})) {
+        if (state.colonies[sid] && state.colonies[sid].ownerId === pid && siteHasHazardLanding(sid)) n += 1;
+      }
+      return n;
+    }
     default: return 0;
   }
 }
@@ -3465,7 +3483,7 @@ function computeFinalScores(state) {
     winner: winnerKey,
     winnerName,
     award: winnerKey ? (((IDEOLOGY_BY_KEY[winnerKey] || {}).award || {}).text || null) : null,
-    awardTBD: winnerKey === 'individuality',
+    awardTBD: false,
     totals: vote.totals,
     tied: vote.tied,
   };

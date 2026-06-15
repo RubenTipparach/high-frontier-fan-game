@@ -39,9 +39,7 @@ export const IDEOLOGIES = [
   {
     key: 'individuality', name: 'Individuality', color: '#6b7280',
     law: { name: 'Freedom to Roam Treaty', text: 'Treat an opponent’s Factory or Bernal as your own for non-victory purposes.' },
-    // The two site icons on the mat are unreadable in the scan - confirm from
-    // the M0 rules which site types these tokens sit on.
-    award: { text: '+1 VP per token on certain sites (TBD)' },
+    award: { text: '+1 VP per token on a Site with hazardous lander burns' },
   },
 ];
 
