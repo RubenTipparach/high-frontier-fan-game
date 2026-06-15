@@ -2832,6 +2832,35 @@ function applySiteRefuel(state, op, player) {
   const siteId = String(op.siteId || '');
   const site = siteById(siteId);
   if (!site) return fail('unknown_site');
+
+  // Outpost Factory-Refuel: a flat +7 water into an OUTPOST's own tank at a
+  // usable factory here. The rocket need NOT be present - the outpost stores its
+  // own fuel. Outposts can only FACTORY-refuel (ISRU refuel needs the rocket's
+  // prospector). Still costs the operation + the one-per-site-per-turn lock.
+  if (op.outpost) {
+    const letter = String(op.outpost);
+    const outpost = player.outposts && player.outposts[letter];
+    if (!outpost || outpost.siteId !== siteId) return fail('no_outpost');
+    const fac = state.factories[siteId];
+    if (!canUseFactoryNonVictory(state, player, fac)) return fail('no_factory');
+    if (player.opsRemaining <= 0) return fail('no_ops_left');
+    player.refueledSites = Array.isArray(player.refueledSites) ? player.refueledSites : [];
+    if (player.refueledSites.includes(siteId)) return fail('already_refueled');
+    const odry = (outpost.cards || []).reduce((m, s) => m + slotMass(s), 0);
+    const ocap = Math.max(0, TANK_MAX - odry);
+    const otank = Number(outpost.tank) || 0;
+    if (otank >= ocap) return fail('tank_full');
+    const gain = Math.min(7, ocap - otank);
+    if (gain <= 0) return fail('tank_full');
+    outpost.tank = round6(otank + gain);
+    player.refueledSites.push(siteId);
+    player.opsRemaining -= 1;
+    return {
+      ok: true, state,
+      log: `${player.name}: Factory-Refuel at ${site.name} (+${round6(gain)} water into Outpost ${letter}; tank ${round6(outpost.tank)}).`,
+    };
+  }
+
   if (player.rocket.siteId !== siteId) return fail('not_at_site');
   // Atmospheric Scoop (subsystem 5) can raise an aerostat site to hydration 2.
   const water = effectiveHydration(site, player);
@@ -3132,7 +3161,7 @@ function pickPayload(op) {
     case 'AFTERBURN': return {};
     case 'PROSPECT': return { siteId: op.siteId, turn: op.turn, round: op.round, relocateFrom: op.relocateFrom };
     case 'PROSPECT_REROLL': return { siteId: op.siteId };
-    case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode };
+    case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode, outpost: op.outpost };
     case 'DIRT_REFUEL': return { amount: op.amount };
     case 'DELIVERY': return { siteId: op.siteId, letter: op.letter, cardId: op.cardId };
     case 'BUILD_COLONY': return { cardId: op.cardId };
