@@ -1025,7 +1025,9 @@ function openDraftMarketModal() {
     const cardWrap = document.createElement('div');
     cardWrap.className = 'draft-market-card';
     if (card) {
-      try { cardWrap.appendChild(renderCard(card, { type: dt })); }
+      // 'patent' is the RENDER KIND (not the deck type) - passing the deck type
+      // here suppressed the type-<type> class, leaving every typebar grey.
+      try { cardWrap.appendChild(renderCard(card, { type: 'patent' })); }
       catch { cardWrap.textContent = card.name || topId; }
     } else {
       cardWrap.innerHTML = '<p class="muted draft-market-empty">Deck empty</p>';
