@@ -122,13 +122,18 @@ const PROPERTY_COLUMNS_NUM = {
 function requiresFromFace(face, type) {
   const reqs = [];
   if (!face) return reqs;
+  // Radiators SUPPLY cooling; they never sit in the support chain as a power
+  // consumer, so the power-source matrix booleans (reactor / generator types,
+  // e.g. "e Generator" on the Magnetocaloric Refrigerator) are card properties
+  // for a radiator, NOT requirements - mapping them to `requires` made the
+  // chain demand a generator the card itself doesn't show. Skip them, the same
+  // way the therm requirement below is radiator-skipped (radiators supply therms).
+  if (type === 'radiator') return reqs;
   for (const [col, kind] of Object.entries(BOOLEAN_TO_REQ)) {
     if (face[col]) reqs.push({ kind, count: 1 });
   }
-  if (type !== 'radiator') {
-    const therms = Number(face.Therms) || 0;
-    if (therms > 0) reqs.push({ kind: 'thermostat', count: therms });
-  }
+  const therms = Number(face.Therms) || 0;
+  if (therms > 0) reqs.push({ kind: 'thermostat', count: therms });
   return reqs;
 }
 
