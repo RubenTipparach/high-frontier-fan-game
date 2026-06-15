@@ -3319,9 +3319,10 @@ function refreshAssemblyModal() {
   if (_assemblyMode === 'fundraise') renderAssemblyFundraise(body, snap);
   else renderAssemblyView(body, snap);
 }
-// View mode: the large board (click your delegate to Lobby) + the law list.
+// View mode: the original board (callout panels ringing the wheel; click your
+// delegate to Lobby).
 function renderAssemblyView(body, snapshot) {
-  const view = assemblyDelegatesView(snapshot, 'large');
+  const view = assemblyDelegatesView(snapshot, 'compact');
   view.onCellClick = (place) => tryLobbyAt(snapshot, place);
   body.appendChild(renderAssemblyPanel(view));
   body.appendChild(assemblyStatusEl(snapshot));
@@ -3378,7 +3379,7 @@ function renderAssemblyFundraise(body, snapshot) {
   body.appendChild(prompt);
 
   // Board with the interaction wired for the current step.
-  const view = assemblyDelegatesView(snapshot, 'large');
+  const view = assemblyDelegatesView(snapshot, 'compact');
   const adj = (_fr.moveFrom ? ASSEMBLY_ADJACENT(_fr.moveFrom) : []);
   view.highlight = step === 'move' && _fr.moveFrom ? new Set(adj) : null;
   view.selected = step === 'place' ? _fr.place : _fr.moveFrom;

@@ -7949,8 +7949,11 @@ body:has(#view-browse:not(.hidden)) #main {
 .assembly-modal-overlay.is-minimized .assembly-modal { display: none; }
 .assembly-modal-overlay.is-minimized .mp-mini-chip { display: none; }
 .assembly-modal { position: relative; background: var(--panel, #0c0a16); border: 1px solid var(--border, #2a2740);
-  border-radius: 14px; width: min(720px, 96vw); max-height: 92vh; overflow: auto; margin: 2vh auto; padding: 8px 18px 18px; }
+  border-radius: 14px; width: min(900px, 96vw); max-height: 92vh; overflow: auto; margin: 2vh auto; padding: 8px 18px 18px; }
 .assembly-modal-title { margin: 0; font-size: 16px; }
+/* In the modal the board fills the (wide) panel, callouts and all. */
+.assembly-modal .assembly-panel { max-width: 100%; }
+.assembly-modal .assembly-panel-compact .assembly-board { max-width: 100%; }
 /* Interactive cells (Fundraise / lobby clicks). */
 .assembly-cell-click { cursor: pointer; }
 .assembly-cell-click:hover .assembly-wedge { filter: brightness(1.3); }
