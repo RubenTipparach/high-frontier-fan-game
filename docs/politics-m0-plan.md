@@ -107,12 +107,32 @@ DONE (server + client):
 - Client 🏛 Politics tab: the hex board with delegates in seat colour, the
   active-law read-out, delegates-in-hand, and Fundraise / Lobby controls.
 
-REMAINING (law EFFECTS that hook other ops, + scoring):
-- Freedom (Free Trade Act): Free Market sells 2 cards for 5 aqua.
-- Equality (Research Grants): Research Auction start pays 1, no support draws.
-- Centrist (Pad Insurance): a pad-explosion repays the lost card's boost cost.
-- Individuality (Freedom to Roam): use an opponent's Factory/Bernal for
-  non-victory purposes.
+DONE (law EFFECTS, server engine - 2026-06-15):
+- Freedom (Free Trade Act): `applyFreeMarket` accepts `cardIds` and, when the
+  player can use the law, sells 2 cards for 5 aqua (base stays 1 for 3). Guards:
+  2 cards without the law -> `needs_freedom_law`; >2 -> `too_many_cards`.
+- Equality (Research Grants): `applyAuctionStart` takes `useEquality`; with the
+  law it skips the auction, pays 1 aqua, and takes the deck-top card straight to
+  hand (commits the turn like an auction would).
+- Centrist (Pad Insurance): the `pad_explosion` EVENT_CHOICE repays the lost
+  card's boost cost (radiator side aware) when a delegate sits in the center.
+  FULLY PLAYABLE now (automatic, no client trigger needed).
+- Individuality (Freedom to Roam): `canUseFactoryNonVictory` lets a player use an
+  opponent's Factory for the non-victory ops (Site Refuel, ET Produce, Delivery)
+  when the law is in force. Homesteading (Build Colony) stays owner-only.
+All four verified against the real engine (server/game/engine.js) via a crafted
+m0 state (FREE_MARKET 2-for-5 + guard, AUCTION_START grant + guard, pad-explosion
+refund + no-refund).
+
+REMAINING (client surfacing + scoring):
+- Client triggers so the non-automatic effects are reachable online:
+  - Freedom: a 2-card select in the Free Market UI sending `cardIds`.
+  - Equality: a "Take for 1 (Research Grants)" option in the deck-tap auction
+    flow sending `useEquality: true`.
+  - Individuality: include an opponent's eligible factories in the Site Refuel /
+    ET Produce / Delivery pickers when the law is active (the client currently
+    filters to `ownerId === myOwnerId()`).
+  (Centrist needs nothing - it fires automatically server-side.)
 - End-game ideology VP awards (the +1-per-X scoring). BLOCKED on a general
   end-game scoring framework (factory/colony/Bernal VP), which is Stage 4 and
   not built yet - the per-ideology awards slot in once that exists.

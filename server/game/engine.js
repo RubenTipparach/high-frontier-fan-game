@@ -1053,9 +1053,19 @@ function applyEventChoice(state, op, ctx) {
       }
     }
     if (lose) {
+      // Centrist (Pad Insurance): a delegate in the center repays the boost cost
+      // of the card lost to the explosion. Read the cost off the slot (radiator
+      // side matters) BEFORE it leaves LEO.
+      const lostSlot = (player.leo || []).find((s) => s.id === lose);
+      const insured = placeCount(assemblyOf(state), 'centrist', player.profileId) > 0;
+      const refund = insured ? boostMass(lose, lostSlot && lostSlot.radSide) : 0;
       player.leo = (player.leo || []).filter((s) => s.id !== lose);
       (player.hand = player.hand || []).push(lose);   // Decommission -> back to hand
       log = `${player.name} decommissioned ${cardNameOf(lose)} from LEO to hand (Pad Explosion).`;
+      if (refund > 0) {
+        player.aqua += refund;
+        log += ` Pad Insurance repaid ${refund} aqua.`;
+      }
       newsCards.push(lose);
     } else {
       log = `${player.name} had nothing exposed to the Pad Explosion.`;
@@ -1791,22 +1801,43 @@ function applyBoost(state, op, player) {
 // was never credited (user 2026-05-29: "the sell didnt write to
 // server" -> a later REFUEL failed insufficient_aqua).
 const FREE_MARKET_AQUA = 3;  // mirror of card-market.js
+const FREE_TRADE_AQUA = 5;   // Freedom (Free Trade Act): 2 cards for 5
 function applyFreeMarket(state, op, player) {
   if (player.opsRemaining <= 0) return fail('no_ops_left');
-  const cardId = String(op.cardId || '');
-  const idx = player.hand.indexOf(cardId);
-  if (idx < 0) return fail('not_in_hand');
-  const card = PATENTS_BY_ID[cardId];
-  if (!card) return fail('unknown_card');
-  player.hand.splice(idx, 1);
-  // Card returns to the BOTTOM of its deck so it can re-circulate.
-  const deck = state.decks[card.type];
-  if (Array.isArray(deck)) deck.push(cardId);
-  player.aqua += FREE_MARKET_AQUA;
+  // Base: sell ONE hand card for FREE_MARKET_AQUA. Freedom (Free Trade Act): a
+  // player who can use the law may sell TWO cards for FREE_TRADE_AQUA total.
+  const ids = (Array.isArray(op.cardIds) && op.cardIds.length)
+    ? op.cardIds.map(String)
+    : (op.cardId ? [String(op.cardId)] : []);
+  if (!ids.length) return fail('no_card');
+  if (ids.length > 2) return fail('too_many_cards');
+  if (ids.length === 2 && !playerCanUseLaw(state, player, 'freedom')) return fail('needs_freedom_law');
+  // Validate every card is present (handling a duplicate id twice) before any
+  // mutation, so a bad second card can't half-apply the sale.
+  const remaining = [...player.hand];
+  const cards = [];
+  for (const id of ids) {
+    const i = remaining.indexOf(id);
+    if (i < 0) return fail('not_in_hand');
+    remaining.splice(i, 1);
+    const card = PATENTS_BY_ID[id];
+    if (!card) return fail('unknown_card');
+    cards.push(card);
+  }
+  for (const id of ids) {
+    player.hand.splice(player.hand.indexOf(id), 1);
+    const card = PATENTS_BY_ID[id];
+    const deck = state.decks[card.type];
+    if (Array.isArray(deck)) deck.push(id);   // back to the BOTTOM of its deck
+  }
+  const gain = (ids.length === 2) ? FREE_TRADE_AQUA : FREE_MARKET_AQUA;
+  player.aqua += gain;
   player.opsRemaining -= 1;
+  const names = cards.map((c) => c.name).join(' + ');
+  const tag = (ids.length === 2) ? ', Free Trade Act' : '';
   return {
     ok: true, state,
-    log: `${player.name} sold ${card.name} for +${FREE_MARKET_AQUA} aqua (Free Market).`,
+    log: `${player.name} sold ${names} for +${gain} aqua (Free Market${tag}).`,
   };
 }
 
@@ -2620,7 +2651,9 @@ function applyEtProduce(state, op, player) {
   if (!site) return fail('unknown_site');
   const fac = state.factories[siteId];
   if (!fac) return fail('no_factory');
-  if (fac.ownerId !== player.profileId) {
+  // Individuality (Freedom to Roam) lets a player ET-produce at an opponent's
+  // factory legitimately (a non-victory use), skipping the felony path.
+  if (fac.ownerId !== player.profileId && !playerCanUseLaw(state, player, 'individuality')) {
     // Factory Hijack (Felony, N6a): ET-produce at an opponent's Factory during
     // Anarchy, with your own Human colocated, unless an opposing Human or
     // colony defends it. The product still lands in YOUR outpost here.
@@ -2689,6 +2722,15 @@ function playerCanUseLaw(state, player, key) {
   const asm = assemblyOf(state);
   if (lawInForce(state, key) && placeCount(asm, key, player.profileId) > 0) return true;
   return Array.isArray(player.lobbiedLaws) && player.lobbiedLaws.includes(key);
+}
+// May `player` operate at this factory for a NON-VICTORY purpose (site refuel,
+// ET production, delivery)? Their own always; an opponent's only when
+// Individuality (Freedom to Roam) lets them treat it as their own. Victory
+// builds (Homesteading a colony) do NOT get this and stay owner-only.
+function canUseFactoryNonVictory(state, player, fac) {
+  if (!fac) return false;
+  if (fac.ownerId === player.profileId) return true;
+  return playerCanUseLaw(state, player, 'individuality');
 }
 
 // Fundraise (M0 operation, replaces Income): place a new delegate (or move one
@@ -2785,7 +2827,9 @@ function applySiteRefuel(state, op, player) {
   let rawGain, label;
   if (op.mode === 'factory') {
     const fac = state.factories[siteId];
-    if (!fac || fac.ownerId !== player.profileId) return fail('no_factory');
+    // Individuality (Freedom to Roam): an opponent's factory may be used to
+    // refuel (a non-victory purpose).
+    if (!canUseFactoryNonVictory(state, player, fac)) return fail('no_factory');
     rawGain = 7;
     label = 'Factory-Refuel';
   } else {
@@ -2889,7 +2933,9 @@ function applyDelivery(state, op, player) {
   const site = siteById(siteId);
   if (!site) return fail('unknown_site');
   const fac = state.factories[siteId];
-  if (!fac || fac.ownerId !== player.profileId) return fail('no_factory');
+  // Individuality (Freedom to Roam): deliver from an opponent's factory (a
+  // non-victory use). The delivered card is still read from YOUR own outpost.
+  if (!canUseFactoryNonVictory(state, player, fac)) return fail('no_factory');
   if (player.opsRemaining <= 0) return fail('no_ops_left');
   const outpost = player.outposts && player.outposts[letter];
   if (!outpost || outpost.siteId !== siteId) return fail('no_outpost');
@@ -3055,7 +3101,7 @@ function pickPayload(op) {
     case 'REFUEL': return { amount: op.amount };
     case 'CASH_WATER': return { amount: op.amount };
     case 'DUMP': return { amount: op.amount };
-    case 'FREE_MARKET': return { cardId: op.cardId };
+    case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds };
     case 'FUNDRAISE': return { place: op.place, from: op.from, discard: op.discard };
     case 'LOBBY': return { ideology: op.ideology };
     case 'DISCARD': return { cardId: op.cardId };
@@ -3552,6 +3598,21 @@ function applyAuctionStart(state, op, ctx) {
   if (!DECK_TYPES.includes(deckType)) return fail('bad_deck');
   const deck = state.decks[deckType];
   if (!deck || !deck.length) return fail('deck_empty');
+
+  // Equality (Research Grants): instead of opening an auction, pay 1 aqua and
+  // take the deck-top card straight into hand (no bidding, no support draw).
+  if (op.useEquality && playerCanUseLaw(state, player, 'equality')) {
+    if (player.aqua < 1) return fail('insufficient_aqua');
+    const grantId = deck.shift();
+    player.aqua -= 1;
+    (player.hand = player.hand || []).push(grantId);
+    player.opsRemaining -= 1;
+    // A research op commits the turn (it moves a deck + hand), like an auction.
+    state.turnActions = [];
+    state.turnRedo = [];
+    const gc = PATENTS_BY_ID[grantId];
+    return { ok: true, state, log: `${player.name} claimed ${gc ? gc.name : grantId} from the ${deckType} deck for 1 aqua (Research Grants).` };
+  }
 
   const cardId = deck.shift();
   player.opsRemaining -= 1;
