@@ -17,6 +17,8 @@ import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
 import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE } from './game/engine.js';
 import { randomSeed } from './game/rng.js';
+import { siteBySlug } from './game/planner-graph.js';
+import { PATENTS_BY_ID } from '../data/patents.js';
 import {
   sendDM, discordEnabled,
   sendWebhook, webhookEnabled, isWebhookUrl, defaultWebhookUrl,
@@ -1119,6 +1121,154 @@ function gameView(gameId, viewerId = null) {
     players: gamePlayers(gameId),
     state: viewState,
   };
+}
+
+// ----- Admin game-state editor helpers -----
+//
+// Powers the per-room "Manage state" modal in /admin: a flattened, fully
+// un-redacted view of every player's card locations + aqua + tank, plus the
+// mutations the admin can apply (move / give / remove a card, set aqua / fuel).
+// Every mutation persists through the SAME seq + op-log + broadcast path the
+// engine uses (persistAdminEdit), so clients re-hydrate exactly as they do for
+// a normal op - no second state model.
+
+function cardLabel(id) {
+  const c = PATENTS_BY_ID[id];
+  return (c && c.name) || String(id);
+}
+function slotInfo(slot) {
+  return {
+    id: slot.id,
+    name: cardLabel(slot.id),
+    face: slot.face || 'primary',
+    kind: slot.kind || 'patent',
+  };
+}
+function siteNameOf(slug) {
+  if (!slug) return 'LEO';
+  const s = siteBySlug(slug);
+  return (s && s.name) || String(slug);
+}
+function locLabel(loc) {
+  if (loc === 'hand') return 'Hand';
+  if (loc === 'leo') return 'LEO';
+  if (loc === 'rocket') return 'Rocket';
+  const m = /^outpost:(.+)$/.exec(loc || '');
+  return m ? `Outpost ${m[1]}` : String(loc);
+}
+
+// The card list for a location, by reference, so a push/splice mutates state.
+// hand is an array of ids; every other location is an array of slot objects.
+function listFor(player, loc) {
+  if (loc === 'leo') return (player.leo = player.leo || []);
+  if (loc === 'rocket') {
+    player.rocket = player.rocket || {};
+    return (player.rocket.stack = player.rocket.stack || []);
+  }
+  const m = /^outpost:(.+)$/.exec(loc || '');
+  if (m) {
+    const o = (player.outposts || {})[m[1]];
+    return o ? (o.cards = o.cards || []) : null;
+  }
+  return null;
+}
+// Remove ONE card matching cardId from a location; returns a normalized slot
+// {id, kind, face} or null when not present.
+function takeCardFrom(player, loc, cardId) {
+  if (loc === 'hand') {
+    const i = (player.hand || []).indexOf(cardId);
+    if (i < 0) return null;
+    player.hand.splice(i, 1);
+    return { id: cardId, kind: 'patent', face: 'primary' };
+  }
+  const arr = listFor(player, loc);
+  if (!arr) return null;
+  const i = arr.findIndex((s) => s.id === cardId);
+  if (i < 0) return null;
+  const [slot] = arr.splice(i, 1);
+  return { id: slot.id, kind: slot.kind || 'patent', face: slot.face || 'primary' };
+}
+function addCardTo(player, loc, entry) {
+  if (loc === 'hand') { (player.hand = player.hand || []).push(entry.id); return true; }
+  const arr = listFor(player, loc);
+  if (!arr) return false;
+  arr.push({ id: entry.id, kind: entry.kind || 'patent', face: entry.face || 'primary' });
+  return true;
+}
+// After a card leaves the rocket, drop any active-slot pointer that no longer
+// resolves so the engine doesn't reference a card that isn't there.
+function fixupRocketPointers(player) {
+  const r = player.rocket;
+  if (!r || !Array.isArray(r.stack)) return;
+  if (r.activeThrusterId && !r.stack.some((s) => s.id === r.activeThrusterId)) r.activeThrusterId = null;
+  if (r.activeProspectorId && !r.stack.some((s) => s.id === r.activeProspectorId)) r.activeProspectorId = null;
+}
+
+// Flatten one game's state for the admin modal: every player's locations with
+// resolved card names, plus aqua + rocket tank. Un-redacted (admin only).
+function adminGameStateView(gameId) {
+  const st = db.prepare('SELECT state, seq FROM game_states WHERE game_id = ?').get(gameId);
+  if (!st) return null;
+  const state = JSON.parse(st.state);
+  const players = (state.players || []).map((p) => {
+    const r = p.rocket || {};
+    return {
+      profileId: p.profileId,
+      name: p.name,
+      color: p.color || null,
+      aqua: p.aqua || 0,
+      rocket: {
+        siteId: r.siteId || null,
+        siteName: siteNameOf(r.siteId),
+        tank: r.tank || 0,
+        tankGrade: r.tankGrade || 'water',
+        stack: (r.stack || []).map(slotInfo),
+      },
+      leo: (p.leo || []).map(slotInfo),
+      outposts: Object.fromEntries(
+        Object.entries(p.outposts || {}).map(([k, o]) => [k, {
+          letter: o.letter || k,
+          siteName: siteNameOf(o.siteId),
+          tank: o.tank || 0,
+          cards: (o.cards || []).map(slotInfo),
+        }])
+      ),
+      hand: (p.hand || []).map((id) => ({ id, name: cardLabel(id) })),
+    };
+  });
+  return { seq: st.seq, round: state.round, status: state.status, players };
+}
+// Sorted catalog of every patent id for the "give arbitrary card" picker.
+function cardCatalog() {
+  return Object.values(PATENTS_BY_ID)
+    .map((c) => ({ id: c.id, name: c.name || c.id, type: c.type || '' }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+// Persist an admin edit through the engine's own seq + op-log + broadcast path
+// so every client re-hydrates the change like any other op. The op is attributed
+// to the affected player (game_operations.profile_id is NOT NULL); ADMIN_EDIT
+// carries a player-facing "Correction:" log line.
+function persistAdminEdit(gameId, state, log, actorProfileId) {
+  const row = db.prepare('SELECT seq FROM game_states WHERE game_id = ?').get(gameId);
+  const nextSeq = (row ? row.seq : 0) + 1;
+  const now = nowMs();
+  const stateJson = JSON.stringify(state);
+  db.transaction(() => {
+    db.prepare('UPDATE game_states SET state = ?, seq = ?, updated_at = ? WHERE game_id = ?')
+      .run(stateJson, nextSeq, now, gameId);
+    db.prepare(
+      `INSERT INTO game_operations (game_id, seq, profile_id, kind, payload, log, state_after, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(gameId, nextSeq, actorProfileId, 'ADMIN_EDIT', '{}', log, stateJson, now);
+  })();
+  publishGame(gameId, (viewerId) => ({
+    type: 'game_update',
+    gameId,
+    seq: nextSeq,
+    op: { seq: nextSeq, kind: 'ADMIN_EDIT', log },
+    game: gameView(gameId, viewerId),
+  }));
+  return nextSeq;
 }
 
 // ----- out-of-band turn notifications (opt-in Discord DM) -----
@@ -2509,7 +2659,9 @@ app.get('/admin', (req, res) => {
       `SELECT l.id, l.code, l.name, l.status, l.join_policy, l.max_players,
               datetime(l.created_at / 1000, 'unixepoch') AS created,
               p.name AS host_name,
-              (SELECT COUNT(*) FROM lobby_members lm WHERE lm.lobby_id = l.id) AS members
+              (SELECT COUNT(*) FROM lobby_members lm WHERE lm.lobby_id = l.id) AS members,
+              (SELECT g.id FROM games g WHERE g.lobby_id = l.id AND g.status = 'active'
+               ORDER BY g.created_at DESC LIMIT 1) AS game_id
        FROM lobbies l
        JOIN profiles p ON p.id = l.host_id
        WHERE l.status != 'cancelled'
@@ -2619,7 +2771,10 @@ app.get('/admin', (req, res) => {
       <td>${esc(r.join_policy)}</td>
       <td class="num">${r.members} / ${r.max_players}</td>
       <td>${esc(r.created)}</td>
-      <td><button class="btn-del-lobby danger" data-lid="${r.id}" data-lname="${esc(r.name)}">Cancel</button></td>
+      <td>
+        ${r.game_id ? `<button class="btn-manage-game" data-gid="${r.game_id}" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}">Manage state</button>` : ''}
+        <button class="btn-del-lobby danger" data-lid="${r.id}" data-lname="${esc(r.name)}">Cancel</button>
+      </td>
     </tr>
   `).join('') || '<tr class="empty-row"><td colspan=8><em>No active rooms.</em></td></tr>';
 
@@ -2717,6 +2872,24 @@ app.get('/admin', (req, res) => {
   .modal-x{background:none;border:none;color:#9aa0c4;font-size:22px;line-height:1;cursor:pointer;padding:0 4px}
   .modal-x:hover{color:#fff}
   .modal-body{overflow:auto;padding:8px 16px 16px}
+  .ge-player{border:1px solid #26233c;border-radius:10px;padding:10px 12px;margin:0 0 12px}
+  .ge-player>h4{margin:0 0 8px;font-size:14px;display:flex;align-items:center;gap:8px}
+  .ge-dot{width:10px;height:10px;border-radius:50%;display:inline-block;border:1px solid #00000055}
+  .ge-stats{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 10px;font-size:12px}
+  .ge-stats input{width:64px;background:#0a0814;border:1px solid #2a2740;color:#e6e9ff;border-radius:6px;padding:3px 6px}
+  .ge-stats select{background:#0a0814;border:1px solid #2a2740;color:#e6e9ff;border-radius:6px;padding:3px 6px}
+  .ge-loc{margin:6px 0}
+  .ge-loc>.ge-loc-h{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#7dd3fc;margin:0 0 3px}
+  .ge-card{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:3px 0;border-bottom:1px solid #16142400}
+  .ge-card .ge-name{flex:1 1 180px;min-width:120px}
+  .ge-card select{background:#0a0814;border:1px solid #2a2740;color:#e6e9ff;border-radius:6px;padding:2px 5px;font-size:12px}
+  .ge-empty{color:#6b7194;font-size:12px;font-style:italic}
+  .ge-give{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px;padding-top:8px;border-top:1px dashed #2a2740}
+  .ge-give select{flex:1 1 200px;background:#0a0814;border:1px solid #2a2740;color:#e6e9ff;border-radius:6px;padding:3px 6px}
+  #game-edit-body button{font-size:12px;padding:3px 8px}
+  .ge-msg{font-size:12px;margin:0 0 8px;min-height:14px}
+  .ge-msg.ok{color:#86efac}
+  .ge-msg.err{color:#fda4af}
 </style></head>
 <body>
   <div class="header-row">
@@ -2846,6 +3019,18 @@ app.get('/admin', (req, res) => {
           </tr></thead>
           <tbody>${cancelledRows}</tbody>
         </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="game-edit-modal" class="modal-overlay" hidden>
+    <div class="modal-box" style="width:min(960px,96vw)">
+      <div class="modal-head">
+        <h3 id="game-edit-title">Manage game state</h3>
+        <button id="game-edit-close" type="button" class="modal-x" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body" id="game-edit-body">
+        <p><em>Loading…</em></p>
       </div>
     </div>
   </div>
@@ -3154,6 +3339,150 @@ document.addEventListener('click', function (ev) {
     if (ev.key === 'Escape' && !modal.hidden) close();
   });
 })();
+
+// Game-state editor modal: per-room view of every player's card locations,
+// aqua and tank, with move / give / remove / set actions. All mutations POST
+// to /admin/games/:id/edit and re-render from the server's response.
+(function () {
+  var modal = document.getElementById('game-edit-modal');
+  if (!modal) return;
+  var body = document.getElementById('game-edit-body');
+  var title = document.getElementById('game-edit-title');
+  var closeBtn = document.getElementById('game-edit-close');
+  var current = { gid: null, state: null, catalog: [] };
+
+  function close() { modal.hidden = true; }
+  closeBtn.addEventListener('click', close);
+  modal.addEventListener('click', function (ev) { if (ev.target === modal) close(); });
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape' && !modal.hidden) close();
+  });
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function locsFor(p) {
+    var arr = ['hand', 'leo', 'rocket'];
+    Object.keys(p.outposts || {}).forEach(function (k) { arr.push('outpost:' + k); });
+    return arr;
+  }
+  function locLabel(loc, p) {
+    if (loc === 'hand') return 'Hand';
+    if (loc === 'leo') return 'LEO';
+    if (loc === 'rocket') return 'Rocket' + (p && p.rocket ? ' (' + esc(p.rocket.siteName) + ')' : '');
+    var m = /^outpost:(.+)$/.exec(loc);
+    if (m) {
+      var o = p && p.outposts ? p.outposts[m[1]] : null;
+      return 'Outpost ' + m[1] + (o ? ' (' + esc(o.siteName) + ')' : '');
+    }
+    return loc;
+  }
+  function cardsAt(p, loc) {
+    if (loc === 'hand') return p.hand || [];
+    if (loc === 'leo') return p.leo || [];
+    if (loc === 'rocket') return (p.rocket && p.rocket.stack) || [];
+    var m = /^outpost:(.+)$/.exec(loc);
+    if (m) { var o = (p.outposts || {})[m[1]]; return o ? (o.cards || []) : []; }
+    return [];
+  }
+  function moveOptions(locs, cur, p) {
+    return locs.filter(function (l) { return l !== cur; }).map(function (l) {
+      return '<option value="' + l + '">' + esc(locLabel(l, p)) + '</option>';
+    }).join('');
+  }
+  function render() {
+    var st = current.state;
+    var html = '<p class="ge-msg" id="ge-msg"></p>';
+    (st.players || []).forEach(function (p) {
+      var locs = locsFor(p);
+      html += '<div class="ge-player" data-pid="' + p.profileId + '">';
+      html += '<h4><span class="ge-dot" style="background:' + esc(p.color || '#888') + '"></span> @' + esc(p.name) + '</h4>';
+      html += '<div class="ge-stats">Aqua <input type="number" class="ge-aqua" min="0" value="' + (p.aqua || 0) + '">'
+        + '<button data-act="set_aqua">Set</button>'
+        + ' &middot; Tank <input type="number" class="ge-water" min="0" step="0.001" value="' + (p.rocket ? p.rocket.tank : 0) + '">'
+        + '<select class="ge-grade"><option value="water"' + (p.rocket && p.rocket.tankGrade === 'water' ? ' selected' : '') + '>water</option>'
+        + '<option value="dirt"' + (p.rocket && p.rocket.tankGrade === 'dirt' ? ' selected' : '') + '>dirt</option></select>'
+        + '<button data-act="set_water">Set</button></div>';
+      locs.forEach(function (loc) {
+        var cards = cardsAt(p, loc);
+        html += '<div class="ge-loc"><div class="ge-loc-h">' + esc(locLabel(loc, p)) + ' (' + cards.length + ')</div>';
+        if (!cards.length) { html += '<div class="ge-empty">empty</div>'; }
+        else cards.forEach(function (c) {
+          html += '<div class="ge-card" data-cid="' + esc(c.id) + '" data-loc="' + loc + '">'
+            + '<span class="ge-name">' + esc(c.name || c.id) + '</span>'
+            + '<select class="ge-move">' + moveOptions(locs, loc, p) + '</select>'
+            + '<button data-act="move">Move</button>'
+            + '<button data-act="remove" class="danger">&times;</button></div>';
+        });
+        html += '</div>';
+      });
+      var opts = current.catalog.map(function (c) {
+        return '<option value="' + esc(c.id) + '">' + esc(c.name) + (c.type ? (' (' + esc(c.type) + ')') : '') + '</option>';
+      }).join('');
+      var locOpts = locs.map(function (l) { return '<option value="' + l + '">' + esc(locLabel(l, p)) + '</option>'; }).join('');
+      html += '<div class="ge-give">Give <select class="ge-give-card">' + opts + '</select> to <select class="ge-give-loc">' + locOpts + '</select><button data-act="give">Give</button></div>';
+      html += '</div>';
+    });
+    body.innerHTML = html;
+  }
+  function msg(text, ok) {
+    var el = document.getElementById('ge-msg');
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'ge-msg ' + (ok ? 'ok' : 'err');
+  }
+  function reload(after) {
+    fetch('/admin/games/' + current.gid + '/state').then(function (r) { return r.json(); }).then(function (d) {
+      if (d.ok) { current.state = d.state; current.catalog = d.catalog || current.catalog; render(); if (after) after(); }
+    });
+  }
+  function load(gid, label) {
+    current.gid = gid;
+    title.textContent = 'Manage state: ' + label;
+    body.innerHTML = '<p><em>Loading…</em></p>';
+    modal.hidden = false;
+    fetch('/admin/games/' + gid + '/state').then(function (r) { return r.json(); }).then(function (d) {
+      if (!d.ok) { body.innerHTML = '<p class="ge-msg err">Failed: ' + esc(d.error || 'error') + '</p>'; return; }
+      current.state = d.state; current.catalog = d.catalog || [];
+      render();
+    }).catch(function () { body.innerHTML = '<p class="ge-msg err">Network error.</p>'; });
+  }
+  function postEdit(payload, okText) {
+    fetch('/admin/games/' + current.gid + '/edit', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.ok) { reload(function () { msg(okText || 'Applied.', true); }); }
+      else msg('Failed: ' + (d.error || 'error'), false);
+    }).catch(function () { msg('Network error.', false); });
+  }
+  body.addEventListener('click', function (ev) {
+    var btn = ev.target.closest('button[data-act]');
+    if (!btn) return;
+    var act = btn.getAttribute('data-act');
+    var pEl = btn.closest('.ge-player');
+    if (!pEl) return;
+    var pid = Number(pEl.getAttribute('data-pid'));
+    if (act === 'set_aqua') {
+      postEdit({ action: 'set_aqua', profileId: pid, value: Number(pEl.querySelector('.ge-aqua').value) }, 'Aqua set.');
+    } else if (act === 'set_water') {
+      postEdit({ action: 'set_water', profileId: pid, value: Number(pEl.querySelector('.ge-water').value), grade: pEl.querySelector('.ge-grade').value }, 'Tank set.');
+    } else if (act === 'give') {
+      postEdit({ action: 'give_card', profileId: pid, cardId: pEl.querySelector('.ge-give-card').value, to: pEl.querySelector('.ge-give-loc').value }, 'Card granted.');
+    } else if (act === 'move' || act === 'remove') {
+      var cardEl = btn.closest('.ge-card');
+      if (!cardEl) return;
+      var cid = cardEl.getAttribute('data-cid');
+      var from = cardEl.getAttribute('data-loc');
+      if (act === 'move') postEdit({ action: 'move_card', profileId: pid, cardId: cid, from: from, to: cardEl.querySelector('.ge-move').value }, 'Card moved.');
+      else postEdit({ action: 'remove_card', profileId: pid, cardId: cid, from: from }, 'Card removed.');
+    }
+  });
+  document.addEventListener('click', function (ev) {
+    var b = ev.target.closest('.btn-manage-game');
+    if (!b) return;
+    load(b.getAttribute('data-gid'), b.getAttribute('data-lname') + ' (' + b.getAttribute('data-lcode') + ')');
+  });
+})();
 </script>
 </body></html>`);
 });
@@ -3312,6 +3641,70 @@ app.post('/admin/lobbies/:id/restore', requireAdmin, (req, res) => {
     }
   })();
   res.json({ ok: true });
+});
+
+// Admin game-state editor: read the flattened state for a room's active game.
+app.get('/admin/games/:gameId/state', requireAdmin, (req, res) => {
+  const gameId = Number(req.params.gameId);
+  if (!Number.isFinite(gameId)) return res.status(400).json({ error: 'bad_id' });
+  const view = adminGameStateView(gameId);
+  if (!view) return res.status(404).json({ error: 'no_game_state' });
+  res.json({ ok: true, gameId, state: view, catalog: cardCatalog() });
+});
+
+// Admin game-state editor: apply one mutation to a player's state. Actions:
+//   move_card   { profileId, cardId, from, to }
+//   give_card   { profileId, cardId, to }
+//   remove_card { profileId, cardId, from }
+//   set_aqua    { profileId, value }
+//   set_water   { profileId, value, grade? }
+// `from` / `to` are 'hand' | 'leo' | 'rocket' | 'outpost:<letter>'.
+app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
+  const gameId = Number(req.params.gameId);
+  if (!Number.isFinite(gameId)) return res.status(400).json({ error: 'bad_id' });
+  const body = req.body || {};
+  const st = db.prepare('SELECT state FROM game_states WHERE game_id = ?').get(gameId);
+  if (!st) return res.status(404).json({ error: 'no_game_state' });
+  const state = JSON.parse(st.state);
+  const player = (state.players || []).find((p) => p.profileId === Number(body.profileId));
+  if (!player) return res.status(400).json({ error: 'no_player' });
+  const name = player.name;
+  let log = '';
+
+  if (body.action === 'move_card') {
+    const entry = takeCardFrom(player, body.from, body.cardId);
+    if (!entry) return res.status(400).json({ error: 'card_not_in_from' });
+    if (!addCardTo(player, body.to, entry)) {
+      addCardTo(player, body.from, entry);   // restore on a bad target
+      return res.status(400).json({ error: 'bad_to' });
+    }
+    fixupRocketPointers(player);
+    log = `Correction: ${name}'s ${cardLabel(body.cardId)} moved from ${locLabel(body.from)} to ${locLabel(body.to)}.`;
+  } else if (body.action === 'give_card') {
+    if (!PATENTS_BY_ID[body.cardId]) return res.status(400).json({ error: 'unknown_card' });
+    if (!addCardTo(player, body.to, { id: body.cardId })) return res.status(400).json({ error: 'bad_to' });
+    log = `Correction: ${name} was granted ${cardLabel(body.cardId)} into ${locLabel(body.to)}.`;
+  } else if (body.action === 'remove_card') {
+    const entry = takeCardFrom(player, body.from, body.cardId);
+    if (!entry) return res.status(400).json({ error: 'card_not_in_from' });
+    fixupRocketPointers(player);
+    log = `Correction: ${name}'s ${cardLabel(body.cardId)} was removed from ${locLabel(body.from)}.`;
+  } else if (body.action === 'set_aqua') {
+    const v = Math.max(0, Math.floor(Number(body.value) || 0));
+    player.aqua = v;
+    log = `Correction: ${name}'s aqua set to ${v}.`;
+  } else if (body.action === 'set_water') {
+    const v = Math.max(0, Number(body.value) || 0);
+    player.rocket = player.rocket || {};
+    player.rocket.tank = v;
+    if (body.grade === 'water' || body.grade === 'dirt') player.rocket.tankGrade = body.grade;
+    log = `Correction: ${name}'s rocket tank set to ${v} ${player.rocket.tankGrade || 'water'}.`;
+  } else {
+    return res.status(400).json({ error: 'bad_action' });
+  }
+
+  const seq = persistAdminEdit(gameId, state, log, player.profileId);
+  res.json({ ok: true, seq, log });
 });
 
 function esc(s) {

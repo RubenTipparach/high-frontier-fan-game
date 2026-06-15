@@ -17102,7 +17102,7 @@ const MP_LOG_ICONS = {
   DRAFT_PICK: '🃏', DRAFT_CYCLE: '♻',
   UNDO: '↩', REDO: '↪',
   FUNDRAISE: '🗳', LOBBY: '📜',
-  ADMIN_REPAIR: '🔧',
+  ADMIN_REPAIR: '🔧', ADMIN_EDIT: '🔧',
 };
 
 // Short relative-time string for the log row. Cap at days so the
