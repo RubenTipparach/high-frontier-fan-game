@@ -17101,6 +17101,8 @@ const MP_LOG_ICONS = {
   TRADE_OFFER: '🤝', TRADE_COUNTER: '↔', TRADE_ACCEPT: '✅', TRADE_DECLINE: '🚫',
   DRAFT_PICK: '🃏', DRAFT_CYCLE: '♻',
   UNDO: '↩', REDO: '↪',
+  FUNDRAISE: '🗳', LOBBY: '📜',
+  ADMIN_REPAIR: '🔧',
 };
 
 // Short relative-time string for the log row. Cap at days so the

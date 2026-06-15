@@ -533,14 +533,38 @@ export function openTurnClockModal({ rolling = null, animateFrom = null } = {}) 
              </p>`}
            </div>`
         : '';
+      // Solar Flare carries a SECOND roll (the flare-strength d6) separate from
+      // the event-roll die. Surface it as its own rolling die + face value so a
+      // player sees how hard the flare hit, not just that one happened.
+      const isFlare = !!(ev && ev.name === 'Solar Flare');
+      const flareRoll = (isFlare && typeof lastEvent.flareRoll === 'number')
+        ? lastEvent.flareRoll : null;
+      const flareLineHtml = flareRoll
+        ? `<p class="turn-clock-flare-line">
+             ☀️ Flare strength:
+             <span class="flare-die-host"></span>
+             <strong class="big">${flareRoll}</strong>
+           </p>`
+        : '';
       eventHost.innerHTML = `
         <p class="turn-clock-event-line">
           Last event (round <strong>${lastEvent.round}</strong>,
           turn <strong>${lastEvent.turn}</strong>):
           d6 rolled <strong class="big">${lastEvent.dieRoll}</strong>.
         </p>
+        ${flareLineHtml}
         ${evBlock}
       `;
+      // Mount + animate the flare-strength die in its own slot.
+      if (flareRoll) {
+        const flareHost = eventHost.querySelector('.flare-die-host');
+        if (flareHost) {
+          const flareDie = buildDie(flareRoll);
+          flareDie.classList.add('die-3d-sm');
+          flareHost.appendChild(flareDie);
+          setTimeout(() => rollDie(flareDie, flareRoll), 520);
+        }
+      }
       // Card chips in the Inspiration outcome open a read-only preview.
       eventHost.querySelectorAll('.tc-card-chip[data-card-id]').forEach((b) => {
         b.addEventListener('click', (e) => {

@@ -58,6 +58,7 @@ import {
   siteExists as plannerSiteExists, findPath as plannerFindPath,
   leoSlug, siteBySlug as siteById, hazardKind,
   nodeSizeNumber, lineOfSightSites, siteBodyOf, buggyRoamSites,
+  isSiteNode, zoneOfSlug,
 } from './planner-graph.js';
 import { isBuggyRoamBody } from '../../data/buggy-roam.js';
 import { makeRng } from './rng.js';
@@ -801,14 +802,21 @@ function exposedLeo(p) {
   return (p.leo || []).filter((s) => !isCrewSlot(s) && s.face !== 'secondary');
 }
 
-// Apply the solar flare's toll to one player's non-LEO stacks (rocket +
-// outposts) at the given flare roll. Pushes gameplay sentences to notesArr.
-// Returns the number of cards affected. (Mirror of the old inline sweep.)
+// Apply the solar flare's toll to one player's EXPOSED stacks at the given
+// flare roll. Per the Solar Flare rule, a flare hits cards in non-LEO stacks
+// UNLESS shielded, and three shieldings make most stacks immune:
+//   - Van Allen Shielding: cards at LEO (rocket.siteId == null) are immune.
+//   - Bunker Shielding: cards on a Site are immune. That covers every outpost
+//     (always built on a site) AND a rocket parked / landed at a site.
+// So the ONLY thing a flare can reach in this engine is a rocket caught in deep
+// space at a transit waypoint (a lagrange / burn / hohmann node, isSiteNode ==
+// false). Each affected card adds its heliocentric-zone modifier before the
+// rad-hardness check. Pushes gameplay sentences to notesArr; returns the number
+// of cards affected.
 function applyFlareToPlayer(state, p, flare, notesArr) {
   let touched = 0;
-  const sweep = (slots, siteId, where) => {
-    const site = siteId ? siteById(siteId) : null;
-    const zone = (site && site.solarZone) || 'Earth';
+  const sweep = (slots, slug, where) => {
+    const zone = zoneOfSlug(slug) || 'Earth';
     const info = SOLAR_ZONE_INFO[zone];
     const mod = info ? info.solar : 0;
     if (mod === null) return slots;
@@ -837,7 +845,10 @@ function applyFlareToPlayer(state, p, flare, notesArr) {
     }
     return survivors;
   };
-  if (p.rocket.siteId) {
+  // Rocket: hit ONLY when caught in deep space (a transit waypoint that is not
+  // a Site and not LEO). A rocket parked at a Site rides out the flare (Bunker
+  // Shielding); a rocket at LEO is immune (Van Allen).
+  if (p.rocket.siteId && !isSiteNode(p.rocket.siteId)) {
     const before = p.rocket.stack.length;
     p.rocket.stack = sweep(p.rocket.stack, p.rocket.siteId, 'aboard the rocket');
     if (p.rocket.stack.length !== before) {
@@ -847,9 +858,8 @@ function applyFlareToPlayer(state, p, flare, notesArr) {
       recallIfEmpty(p);
     }
   }
-  for (const o of Object.values(p.outposts || {})) {
-    if (o) o.cards = sweep(o.cards || [], o.siteId, `at Outpost ${o.letter}`);
-  }
+  // Outposts are always built on a Site, so Bunker Shielding makes every
+  // outpost stack immune. No sweep.
   return touched;
 }
 // Would the flare touch this player at all? Dry run on a clone so we only

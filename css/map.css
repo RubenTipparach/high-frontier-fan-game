@@ -1807,6 +1807,27 @@
 .turn-clock-die-host .die-3d:hover {
   transform: scale(1.06);
 }
+/* Solar Flare strength: a second, smaller rolling die inline in the event
+   readout (separate from the event-roll die in the wheel). */
+.turn-clock-flare-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 2px;
+  font-weight: 600;
+  color: #fbbf24;
+}
+.turn-clock-flare-line .flare-die-host {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+}
+.turn-clock-flare-line .die-3d-sm {
+  transform: scale(0.66);
+  transform-origin: center;
+}
 .turn-clock-panel {
   position: relative;
   background: var(--panel);

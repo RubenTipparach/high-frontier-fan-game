@@ -186,6 +186,45 @@ export function allSiteSlugs() {
   return out;
 }
 
+// Is this planner node a real Site (a landable body / surface), as opposed to
+// a deep-space waypoint (lagrange / burn / hohmann transfer)? Used by the
+// Solar Flare sweep for Bunker Shielding: cards on a Site are immune. Reads the
+// node TYPE (not just curated metadata) so a site-type node that didn't match a
+// data/sites.js name still counts as a site, and a burnspace that is itself a
+// landing site (landing > 0) does too.
+export function isSiteNode(slug) {
+  const n = NODES_BY_SLUG.get(String(slug));
+  if (!n) return false;
+  return n.type === 'site' || (typeof n.landing === 'number' && n.landing > 0);
+}
+
+// Heliocentric solar zone for ANY planner node. A real site returns its curated
+// solarZone; a deep-space waypoint inherits the zone of the nearest real site by
+// map position, so an in-transit stack still reads a heliocentric-zone modifier
+// for the Solar Flare sweep. Null only when the graph has no zoned sites.
+let _zonedSites = null;
+export function zoneOfSlug(slug) {
+  const n = NODES_BY_SLUG.get(String(slug));
+  if (!n) return null;
+  if (n.site && n.site.solarZone) return n.site.solarZone;
+  if (!_zonedSites) {
+    _zonedSites = [];
+    for (const node of NODES_BY_SLUG.values()) {
+      if (node.site && node.site.solarZone && typeof node.x === 'number' && typeof node.y === 'number') {
+        _zonedSites.push(node);
+      }
+    }
+  }
+  if (typeof n.x !== 'number' || typeof n.y !== 'number') return null;
+  let best = null, bestD = Infinity;
+  for (const s of _zonedSites) {
+    const dx = s.x - n.x, dy = s.y - n.y;
+    const d = dx * dx + dy * dy;
+    if (d < bestD) { bestD = d; best = s; }
+  }
+  return best ? best.site.solarZone : null;
+}
+
 // Sites a buggy can road to from `fromSlug` on a connected body (Mars / Luna /
 // Io / Callisto / Ganymede / Europa). Delegates to the SHARED body-based reach
 // (data/buggy-roam.js) so the server accepts EXACTLY the buggy prospects the
