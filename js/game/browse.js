@@ -50,6 +50,11 @@ import {
   onChange as onDiscsChange,
 } from './discs.js';
 import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
+import { renderAssemblyPanel } from './assembly.js';
+import {
+  activeLaws as assemblyActiveLaws, ASSEMBLY_PLACES, IDEOLOGY_ORDER as ASSEMBLY_IDEOLOGY_ORDER,
+  IDEOLOGY_BY_KEY as ASSEMBLY_IDEOLOGY_BY_KEY, DELEGATES_PER_PLAYER,
+} from '../../data/assembly.js';
 import {
   WEIGHT_CLASSES, weightClassForMass, TRACK_LEGEND,
   MIN_DRY_MASS, MAX_DRY_MASS, MAX_WET_MASS,
@@ -610,6 +615,8 @@ function applySnapshot(snapshot, seq) {
   // Refresh the multiplayer table panel (room / turn / roster) from the
   // same snapshot so opponents' positions + resources stay live.
   renderMpPanel(snapshot);
+  // Sol Political Assembly (M0) tab + board, gated on snapshot.m0.
+  renderAssemblyTab(snapshot);
   // Big black turn banner above the hand. Mirrors the same source-of-
   // truth (snapshot.activeIndex) the panel uses so the two never drift.
   syncMpTurnBanner(snapshot);
@@ -2965,6 +2972,91 @@ function syncMpTabVisibility() {
   if (!panel) return;
   if (_online && panel.dataset.active === 'solo') showPane('mp');
   if (!_online && panel.dataset.active === 'mp') showPane(null);
+}
+
+// Render the Sol Political Assembly (M0) tab from the snapshot: the hex board
+// with each player's delegates (in seat colour), the active-law read-out, and
+// Fundraise / Lobby controls. Shows the 🏛 tab only when the game has m0 on.
+function renderAssemblyTab(snapshot) {
+  const host = document.getElementById('assembly-panel');
+  const tab = document.getElementById('sidepanel-tab-assembly');
+  const on = !!(_online && snapshot && snapshot.m0 && snapshot.assembly);
+  if (tab) tab.hidden = !on;
+  const panel = document.getElementById('browse-sidepanel');
+  if (!on) {
+    if (host) host.innerHTML = '<p class="muted">Politics (Module 0) is off in this game.</p>';
+    if (panel && panel.dataset.active === 'assembly') showPane(null);
+    return;
+  }
+  if (!host) return;
+  const players = snapshot.players || [];
+  const myId = _onlineMe && _onlineMe.id;
+  const colorOf = (pid) => (players.find((p) => p.profileId === pid) || {}).color || '#888';
+  const dmap = snapshot.assembly.delegates || {};
+  const delegates = {};
+  for (const place of ASSEMBLY_PLACES) {
+    const m = dmap[place] || {};
+    const arr = [];
+    for (const [pid, n] of Object.entries(m)) for (let i = 0; i < (n | 0); i += 1) arr.push(colorOf(Number(pid)));
+    delegates[place] = arr;
+  }
+  const laws = assemblyActiveLaws(snapshot.assembly);
+  host.innerHTML = '';
+  host.appendChild(renderAssemblyPanel({ delegates }));
+
+  const placedByMe = ASSEMBLY_PLACES.reduce((s, p) => s + ((dmap[p] || {})[myId] | 0), 0);
+  const left = Math.max(0, DELEGATES_PER_PLAYER - placedByMe);
+  const myTurn = isOnlineMyTurn();
+  const activeNames = [...laws.active].map((k) => (ASSEMBLY_IDEOLOGY_BY_KEY[k] || {}).name || k);
+
+  const status = document.createElement('div');
+  status.className = 'assembly-controls';
+  status.innerHTML = `<div class="assembly-status"><strong>Active laws:</strong> `
+    + `${activeNames.length ? esc(activeNames.join(', ')) : 'none yet'}`
+    + `${laws.lobbyingDisabled ? ' · lobbying disabled' : ''}</div>`
+    + `<div class="assembly-status">Your delegates: <strong>${left}</strong> / ${DELEGATES_PER_PLAYER} in hand</div>`;
+  host.appendChild(status);
+  if (_spectator) return;
+
+  // Fundraise: place a delegate (or move one of yours) + gain aqua. Spends the op.
+  const fr = document.createElement('div');
+  fr.className = 'assembly-action';
+  const placeOpt = (p) => `<option value="${p}">${p === 'centrist' ? 'Centrist (center)' : (ASSEMBLY_IDEOLOGY_BY_KEY[p] || {}).name || p}</option>`;
+  const myPlaces = ASSEMBLY_PLACES.filter((p) => ((dmap[p] || {})[myId] | 0) > 0);
+  fr.innerHTML = `<div class="mp-detail-label">Fundraise (operation)</div>`
+    + `<label class="mp-trade-field"><span>Move from</span><select class="asm-fr-from"><option value="">(new delegate)</option>${myPlaces.map(placeOpt).join('')}</select></label>`
+    + `<label class="mp-trade-field"><span>Into</span><select class="asm-fr-place">${ASSEMBLY_PLACES.map(placeOpt).join('')}</select></label>`;
+  const frBtn = document.createElement('button');
+  frBtn.type = 'button'; frBtn.className = 'modal-btn primary'; frBtn.textContent = '🏛 Fundraise';
+  const noNew = left <= 0;
+  frBtn.disabled = !myTurn;
+  frBtn.title = !myTurn ? 'Wait for your turn.' : 'Place / move a delegate and gain aqua (spends your operation).';
+  frBtn.addEventListener('click', () => {
+    const from = fr.querySelector('.asm-fr-from').value || undefined;
+    const place = fr.querySelector('.asm-fr-place').value;
+    if (!from && noNew) { _onlineToast('No delegates left in hand - move one instead.', 'error'); return; }
+    submitOnlineOp({ kind: 'FUNDRAISE', place, from });
+  });
+  fr.appendChild(frBtn);
+  host.appendChild(fr);
+
+  // Lobby: activate an inactive ideology you hold a delegate in (free, once/turn).
+  const lobbyable = ASSEMBLY_IDEOLOGY_ORDER.filter((k) => !laws.active.has(k) && ((dmap[k] || {})[myId] | 0) > 0);
+  if (!laws.lobbyingDisabled && lobbyable.length) {
+    const lb = document.createElement('div');
+    lb.className = 'assembly-action';
+    lb.innerHTML = `<div class="mp-detail-label">Lobby (free, once per turn)</div>`
+      + `<label class="mp-trade-field"><span>Activate</span><select class="asm-lobby-key">${lobbyable.map(placeOpt).join('')}</select></label>`;
+    const lbBtn = document.createElement('button');
+    lbBtn.type = 'button'; lbBtn.className = 'modal-btn'; lbBtn.textContent = '🗳 Lobby (1 aqua)';
+    lbBtn.disabled = !myTurn;
+    lbBtn.title = myTurn ? 'Pay 1 aqua + discard a delegate there to use its law this turn.' : 'Wait for your turn.';
+    lbBtn.addEventListener('click', () => {
+      submitOnlineOp({ kind: 'LOBBY', ideology: lb.querySelector('.asm-lobby-key').value });
+    });
+    lb.appendChild(lbBtn);
+    host.appendChild(lb);
+  }
 }
 
 // Server site id (data/sites.js slug) -> display name. LEO / unknown

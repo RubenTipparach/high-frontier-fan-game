@@ -7953,3 +7953,16 @@ body:has(#view-browse:not(.hidden)) #main {
   background: var(--ide-color, #333); color: #0b0a14;
   padding: 1px 7px; border-radius: 999px;
 }
+
+/* Sol Political Assembly (M0) tab controls below the hex board. */
+.assembly-controls { margin: 10px 0; }
+.assembly-status { font-size: 12px; color: var(--ink-dim, #8b90b8); margin: 3px 0; }
+.assembly-status strong { color: var(--ink); }
+.assembly-action {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin: 8px 0;
+}
+.assembly-action .mp-detail-label { margin-bottom: 4px; }
+.assembly-action .modal-btn { margin-top: 6px; }
