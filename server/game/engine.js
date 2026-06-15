@@ -91,6 +91,15 @@ function slotMass(slot) {
   if (!slot || !slot.id) return 0;
   const p = PATENTS_BY_ID[slot.id];
   if (p) {
+    // A radiator's mass depends on the side it deployed on (light vs heavy),
+    // stored at faces.primary.{light,heavy}.mass - NOT the fixed faces.primary
+    // .mass. Read it by slot.radSide so the dry/wet mass (and weight class)
+    // match the radiator's actual side. Mirror of boostMass + rocket.js.
+    if (p.type === 'radiator') {
+      const pf = p.faces && p.faces.primary;
+      const blk = pf && pf[slot.radSide === 'light' ? 'light' : 'heavy'];
+      if (blk && blk.mass != null) return blk.mass | 0;
+    }
     const f = slotFace(slot, p);
     return (f.mass != null ? f.mass : p.mass) | 0;
   }
@@ -1426,14 +1435,7 @@ function applyMove(state, op, player) {
     if (k === 'rad') rad.push(slug);
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
-  // Net thrust for the maneuver gate + rad bypass. The CLIENT owns routing
-  // (the thrust budget included), so we TRUST the net thrust it computed and
-  // sent with the move, falling back to our own activeNetThrust for older
-  // clients. This keeps the client's land/liftoff verdict from being overturned
-  // by a client/server net-thrust parity drift (the same "trust the client's
-  // route + burns" model: fine for friends, not cheat-hardened).
-  const serverThrust = activeNetThrust(player.rocket, hasPrivilege(state, player, 'POWERSAT'));
-  const thrust = Number.isFinite(op.netThrust) ? op.netThrust : serverThrust;
+  const thrust = activeNetThrust(player.rocket, hasPrivilege(state, player, 'POWERSAT'));
   // Factory-assist liftoff / landing gate. A maneuver where net thrust
   // <= site size is only legal if a factory carries it (assist), which
   // is a hazard roll unless a colony waives it. No factory => hard block.
@@ -3167,7 +3169,7 @@ const FUNCTIONAL = {
 
 function pickPayload(op) {
   switch (op.kind) {
-    case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, pickupChit: op.pickupChit !== false, netThrust: op.netThrust };
+    case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, pickupChit: op.pickupChit !== false };
     case 'LOAD_GLORY': return {};
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face, radSide: op.radSide };
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };

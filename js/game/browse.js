@@ -7864,7 +7864,7 @@ function chainKindIcon(kind, size = 13) {
 // language as the All cards view, via cardGlanceSummary) with a chain ring
 // (orange = the active root card, green = a card supporting it) and a ✓ / ✗
 // validity pill (rule 4). Clicking opens the card read-only.
-function chainChip(card, face, kind, { ring, valid } = {}) {
+function chainChip(card, face, kind, { ring, valid, radSide } = {}) {
   // Patents read the INSTALLED face's name too: a flipped card is a different
   // tech (Flywheel Tractor's black side is Electrophoretic Sandworm), and the
   // chip must match the card the modal shows.
@@ -7872,7 +7872,14 @@ function chainChip(card, face, kind, { ring, valid } = {}) {
     || card.name || card.id;
   const g = cardGlanceSummary(card, face);
   const statHtml = g.hasStats ? g.statsHtml : esc(kind === 'crew' ? 'crew' : (card.type || 'card'));
-  const massHtml = Number.isFinite(card.mass) ? '<span class="acc-mass">m' + card.mass + '</span>' : '';
+  // A radiator's mass is its DEPLOYED side's mass (light vs heavy), not the
+  // fixed card.mass; show the side that's actually in the stack.
+  let massVal = card.mass;
+  if (card.type === 'radiator' && card.faces && card.faces.primary) {
+    const blk = card.faces.primary[radSide === 'light' ? 'light' : 'heavy'];
+    if (blk && blk.mass != null) massVal = blk.mass;
+  }
+  const massHtml = Number.isFinite(massVal) ? '<span class="acc-mass">m' + massVal + '</span>' : '';
   const chip = document.createElement('button');
   chip.type = 'button';
   chip.className = 'all-cards-chip chain-chip kind-' + kind
@@ -8003,7 +8010,7 @@ function buildSupportChainViz(host, lookup) {
       if (card) {
         const ring = isActive ? 'active' : 'support';
         li.appendChild(chainChip(card, slot ? slot.face : 'primary', kind,
-          { ring, valid: isRef ? null : valid }));
+          { ring, valid: isRef ? null : valid, radSide: slot ? slot.radSide : undefined }));
       } else {
         const ph = document.createElement('div');
         ph.className = 'all-cards-chip chain-chip';
@@ -13676,11 +13683,9 @@ async function runPlannedMoveSimulation() {
   const built = buildTurn1MoveOp();
   if (built.error) return { summary: built.error, cls: 'bad' };
   const { toSiteId, segments } = built;
-  const simStats = getActiveThrusterStats();
-  const netThrust = simStats && Number.isFinite(simStats.thrust) ? simStats.thrust : 0;
   let r;
   try {
-    r = await submitGameOp(_onlineGameId, { kind: 'MOVE', toSiteId, segments, netThrust, debug: true }, _onlineMe.token);
+    r = await submitGameOp(_onlineGameId, { kind: 'MOVE', toSiteId, segments, debug: true }, _onlineMe.token);
   } catch { return { summary: 'Server unreachable - try again.', cls: 'bad' }; }
   const sim = (r && r.ok && r.data) ? r.data : null;
   const calc = sim ? (sim.calc || sim.detail || null) : null;
@@ -13839,7 +13844,7 @@ async function moveRocket() {
         && !getChits().some((c) => c.zone === arrZone) && stackHasCrew()) {
       pickupChit = await promptGloryPickup((destSite && destSite.name) || toSiteId, arrZone, firstCrewId());
     }
-    const ok = await submitOnlineOp({ kind: 'MOVE', toSiteId, hazardPay, segments, pickupChit, netThrust });
+    const ok = await submitOnlineOp({ kind: 'MOVE', toSiteId, hazardPay, segments, pickupChit });
     if (ok) {
       // Advance the local plan past this turn so a multi-turn route stays
       // visible for the next move (mirrors the server's route shift); clear

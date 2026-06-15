@@ -414,8 +414,7 @@ function stackDryMass() {
   for (const slot of _stack) {
     const c = cardForSlot(slot);
     if (!c) continue;
-    const f = installedFace(slot);
-    mass += ((f.mass != null ? f.mass : c.mass) | 0);
+    mass += slotMassValue(slot, c, installedFace(slot));
   }
   return mass;
 }
@@ -977,6 +976,19 @@ function installedFace(slot) {
   return c;
 }
 
+// Mass of a stack slot, honouring a radiator's deployed side: a radiator's mass
+// is faces.primary.{light,heavy}.mass (light is lighter), NOT the fixed
+// faces.primary.mass. Everything else reads its installed face's mass. Mirror of
+// the server's slotMass so dry/wet mass (and the weight class) agree.
+function slotMassValue(slot, card, face) {
+  if (card && card.type === 'radiator') {
+    const pf = card.faces && card.faces.primary;
+    const blk = pf && pf[slot && slot.radSide === 'light' ? 'light' : 'heavy'];
+    if (blk && blk.mass != null) return blk.mass | 0;
+  }
+  return ((face && face.mass != null) ? face.mass : (card && card.mass)) | 0;
+}
+
 // A stack slot can serve as a thruster if it's a thruster card OR its
 // INSTALLED face carries a thrust value (robonauts whose beam/laser
 // thruster lives on the Tier-2 face, e.g. Rock Splitter's MagBeam).
@@ -1034,7 +1046,7 @@ export function getStackTotals() {
     const card = cardForSlot(slot);
     if (!card) continue;
     const f = installedFace(slot);
-    const m = (f.mass != null ? f.mass : card.mass) | 0;
+    const m = slotMassValue(slot, card, f);
     const r = (f.radHardness != null ? f.radHardness : card.radHardness);
     mass += m;
     if (r != null) minRad = (minRad == null) ? r : Math.min(minRad, r);
