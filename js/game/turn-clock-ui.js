@@ -9,7 +9,7 @@
 import {
   getTurn, getRound, getSeason, getLastEvent,
   getOpsRemaining, getMovesRemaining,
-  endTurn, formatTurnNumber,
+  endTurn, formatTurnNumber, getFirstPlayerColor,
   SLOTS, SEASONS, NEW_ROUND_SLOT, EVENT_SLOTS,
   getEventForRoll, getSeasonForSlot, EVENT_TABLE,
 } from './turn-clock.js';
@@ -279,8 +279,28 @@ function wheelSvg(displayTurn = null) {
   svg += `<circle class="turn-pointer" cx="${tp.x.toFixed(2)}" cy="${tp.y.toFixed(2)}" r="20"
     fill="#fde047" fill-opacity="0.35"
     stroke="#fde047" stroke-width="2" />`;
+  // The Sunspot Cube: the FIRST PLAYER's coloured cube parked on the cycle (it
+  // is one of their 7 cubes). Drawn on top of the pointer ring.
+  const fpc = getFirstPlayerColor();
+  if (fpc) svg += sunspotCubeSvg(tp.x, tp.y, 11, fpc);
   svg += '</svg>';
   return svg;
+}
+
+// An isometric 3D cube as an SVG string (the wheel builds an SVG string, not
+// DOM). Top face in the seat colour, left/right faces darkened for the bevel,
+// black outline for visibility on any season wedge.
+function sunspotCubeSvg(cx, cy, s, color) {
+  const top = `${cx},${cy - s} ${cx + s},${cy - s / 2} ${cx},${cy} ${cx - s},${cy - s / 2}`;
+  const left = `${cx - s},${cy - s / 2} ${cx},${cy} ${cx},${cy + s} ${cx - s},${cy + s / 2}`;
+  const right = `${cx + s},${cy - s / 2} ${cx},${cy} ${cx},${cy + s} ${cx + s},${cy + s / 2}`;
+  return `<g class="sunspot-cube">`
+    + `<polygon points="${top}" fill="${color}" stroke="#000" stroke-width="1"/>`
+    + `<polygon points="${left}" fill="${color}" stroke="#000" stroke-width="1"/>`
+    + `<polygon points="${left}" fill="#000" fill-opacity="0.22"/>`
+    + `<polygon points="${right}" fill="${color}" stroke="#000" stroke-width="1"/>`
+    + `<polygon points="${right}" fill="#000" fill-opacity="0.42"/>`
+    + '</g>';
 }
 
 // Tween the active-turn pointer from `fromSlot` to `toSlot` along

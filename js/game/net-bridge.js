@@ -118,6 +118,8 @@ export function hydrateFromSnapshot(snapshot, myId, maps) {
   hydrateOutposts(outposts);
 
   hydrateGlory((me && me.glory) || {});
+  const allPlayers = Array.isArray(snapshot.players) ? snapshot.players : [];
+  const firstP = allPlayers[snapshot.firstPlayerIndex || 0];
   hydrateClock({
     turn: snapshot.turn | 0,
     round: snapshot.round || 1,
@@ -126,6 +128,7 @@ export function hydrateFromSnapshot(snapshot, myId, maps) {
     opsRemaining: me ? (me.opsRemaining | 0) : 0,
     movesRemaining: me ? (me.movesRemaining | 0) : 0,
     discardsRemaining: me ? (me.discardsRemaining | 0) : 0,
+    firstPlayerColor: (firstP && firstP.color) || null,
   });
 
   // Shared, site-keyed board state -> re-key onto planner ids. This
