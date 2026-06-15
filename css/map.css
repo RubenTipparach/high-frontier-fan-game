@@ -7964,8 +7964,9 @@ body:has(#view-browse:not(.hidden)) #main {
 .assembly-cell-hi .assembly-center, .assembly-cell-sel .assembly-center {
   stroke: #38bdf8; stroke-width: 5; filter: drop-shadow(0 0 7px #38bdf8);
 }
-/* Active-law star: gold, sits on the in-power ideology (center at start). */
-.assembly-star { fill: #fde047; font-size: 26px; paint-order: stroke; stroke: rgba(0,0,0,0.65); stroke-width: 3px; }
+/* Active-law star: a faceted 3D gold star (drawn as polygons) with a soft drop
+   shadow for depth. Sits on the in-power ideology (center at start). */
+.assembly-star { filter: drop-shadow(0 1px 1.5px rgba(0,0,0,0.6)); pointer-events: none; }
 /* Fundraise guided flow. */
 .assembly-fr-prompt { background: rgba(120,140,220,0.14); border: 1px solid #3a4a7a; border-radius: 8px;
   padding: 8px 10px; font-size: 13px; margin: 4px 0 6px; }

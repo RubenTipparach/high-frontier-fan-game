@@ -150,11 +150,33 @@ export function renderAssemblyPanel({
     }
   };
 
-  // Active-law star: the marker that sits on the in-power ideology (or the
-  // Centrist center when there's no clear leader, its starting spot).
-  const drawStar = (parent, pt) => {
-    const t = svg('text', { x: pt.x, y: pt.y, class: 'assembly-star', 'text-anchor': 'middle', 'dominant-baseline': 'middle' }, parent);
-    t.textContent = '★';
+  // Active-law star: a faceted 3D gold star that sits on the in-power ideology
+  // (or the Centrist center when there's no clear leader, its starting spot).
+  // Each of the 10 triangles from the centre alternates a light / dark gold
+  // facet for the 3D bevel; a black silhouette outline keeps it readable on any
+  // wedge colour.
+  const drawStar = (parent, pt, size = 15) => {
+    const Ro = size;
+    const Ri = size * 0.42;
+    const verts = [];
+    for (let k = 0; k < 10; k += 1) {
+      const a = (-90 + k * 36) * Math.PI / 180;
+      const rad = (k % 2 === 0) ? Ro : Ri;
+      verts.push([pt.x + rad * Math.cos(a), pt.y + rad * Math.sin(a)]);
+    }
+    const g = svg('g', { class: 'assembly-star' }, parent);
+    for (let i = 0; i < 10; i += 1) {
+      const a = verts[i];
+      const b = verts[(i + 1) % 10];
+      svg('polygon', {
+        points: `${pt.x},${pt.y} ${a[0]},${a[1]} ${b[0]},${b[1]}`,
+        fill: i % 2 ? '#b8801a' : '#ffe066',
+      }, g);
+    }
+    svg('polygon', {
+      points: verts.map((v) => v.join(',')).join(' '),
+      fill: 'none', stroke: '#000', 'stroke-width': 1.6, 'stroke-linejoin': 'round',
+    }, g);
   };
 
   // Each ideology is one hoverable cell: wedge + label + delegate space, grouped
