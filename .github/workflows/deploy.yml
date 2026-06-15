@@ -13,16 +13,22 @@ permissions:
   pages: write
   id-token: write
 
-# Allow at most one Pages deploy at a time; cancel any in-flight run
-# if a new commit lands first. The deploy-api job has its own concurrency
-# group so a Fly deploy is not interrupted by a Pages-only push.
-concurrency:
-  group: pages
-  cancel-in-progress: true
+# NO workflow-level concurrency. A workflow-level group with
+# cancel-in-progress cancels the WHOLE run - including the deploy-api
+# (Fly) job - when a newer commit lands, which is exactly the bug that
+# left the live API server stale while Pages kept deploying. Concurrency
+# is applied PER JOB instead: the Pages build/deploy jobs cancel in-flight
+# (only the newest Pages site matters), while deploy-api uses its own
+# never-cancel group so a Fly deploy always runs to completion.
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Cancel an in-flight Pages build when a newer commit lands; only the
+    # most-recent site needs to deploy. Does NOT touch the Fly job.
+    concurrency:
+      group: pages-build
+      cancel-in-progress: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -91,6 +97,11 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    # Same Pages group: a newer push can cancel a stale in-flight Pages
+    # deploy. Kept separate from the Fly job's group.
+    concurrency:
+      group: pages-deploy
+      cancel-in-progress: true
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
