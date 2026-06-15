@@ -7948,6 +7948,9 @@ body:has(#view-browse:not(.hidden)) #main {
   border-radius: 14px; width: min(720px, 96vw); max-height: 92vh; overflow: auto; margin: 4vh auto; padding: 16px 18px 20px; }
 .assembly-modal .modal-x { position: absolute; top: 8px; right: 10px; background: none; border: none; color: #9aa0c4; font-size: 24px; line-height: 1; cursor: pointer; }
 .assembly-modal .modal-x:hover { color: #fff; }
+/* Simple variant (sidebar glance): just the cropped wheel, filling the panel. */
+.assembly-panel-simple { max-width: 100%; width: 100%; }
+.assembly-panel-simple .assembly-board { width: 100%; max-width: 100%; margin: 4px auto 0; }
 /* Large variant: a roomy wheel + the laws stacked in single-column rows. */
 .assembly-panel-large { max-width: 100%; width: 100%; }
 .assembly-panel-large .assembly-board { width: 100%; max-width: 620px; }

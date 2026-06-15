@@ -3191,9 +3191,9 @@ function renderAssemblyTab(snapshot) {
   }
   if (!host) return;
   host.innerHTML = '';
-  // Sidebar = a SIMPLIFIED glance: the compact board + the active-law read-out.
-  // It is not interactive; tapping it opens the big modal where players act.
-  const board = renderAssemblyPanel(assemblyDelegatesView(snapshot));
+  // Sidebar = a SIMPLIFIED glance: the bare wheel + the active-law read-out. It
+  // is not interactive; tapping it opens the big (complex) modal where players act.
+  const board = renderAssemblyPanel(assemblyDelegatesView(snapshot, 'simple'));
   board.classList.add('assembly-clickable');
   board.setAttribute('role', 'button');
   board.setAttribute('tabindex', '0');

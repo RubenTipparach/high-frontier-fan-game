@@ -94,11 +94,12 @@ export function renderAssemblyPanel({ delegates = null, seniority = null, varian
   const VB = { w: 900, h: 600 };
   const C = { x: 450, y: 300 };
   const R = 150, r = 62;
-  // The 900x600 viewBox is sized for the compact variant's ring of callout
-  // boxes. The large variant drops those, so crop tight to the wheel itself
-  // (centre 450,300, outer radius 150, plus room for cubes/discs) so it fills
-  // the modal instead of floating tiny in the middle.
-  const viewBox = variant === 'large' ? '292 144 316 322' : `0 0 ${VB.w} ${VB.h}`;
+  // The 900x600 viewBox is sized for the 'compact' variant's ring of callout
+  // boxes. The 'simple' (sidebar glance) and 'large' (modal) variants drop
+  // those, so crop tight to the wheel itself (centre 450,300, outer radius 150,
+  // plus room for cubes/discs) so it fills its container instead of floating
+  // tiny in the middle.
+  const viewBox = variant === 'compact' ? `0 0 ${VB.w} ${VB.h}` : '292 144 316 322';
   const board = svg('svg', { viewBox, class: 'assembly-board', role: 'img', 'aria-label': 'Sol Political Assembly' });
 
   // Arrowhead marker.
