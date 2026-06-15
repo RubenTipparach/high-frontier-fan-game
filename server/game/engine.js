@@ -3977,6 +3977,12 @@ function applyPickCrew(state, op, ctx) {
   if (state.players.some((p) => p !== player && p.faction && p.faction.cardId === cardId)) {
     return fail('crew_taken');
   }
+  // Multiplayer (2+ seats): one colour only - a player may only pick crew of
+  // their assigned seat colour (each colour is one double-sided card; they pick
+  // one of its two faces). A 1-player room is a free pick of any crew.
+  if (state.players.length > 1 && card.color && player.color && card.color !== player.color) {
+    return fail('wrong_crew_color');
+  }
   const switching = !!player.faction;
   player.faction = { cardId, face };
   // The picked crew card carries one of the six faction-band colours; that is

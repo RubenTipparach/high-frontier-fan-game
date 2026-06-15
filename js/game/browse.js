@@ -704,16 +704,27 @@ let _crewWizardOpen = false;
 // round:slot:activeIndex), so a flurry of snapshots doesn't keep re-popping it.
 let _draftAutoOpenKey = null;
 
+// Is this a solo (1-seat) room? Sandbox is deprecated, so "solo" is just a
+// 1-player server game - that player gets a FREE pick of any crew. A 2+ player
+// room follows standard rules: random seat colours, and each player picks ONE
+// of the two crew on THEIR assigned colour card (one colour only).
+function isSoloRoom(snapshot) {
+  return ((snapshot && snapshot.players) || []).length <= 1;
+}
+
 function maybePromptCrewPick(snapshot) {
   if (!_online || _spectator || _crewWizardOpen || !snapshot || !_onlineMe) return;
   const myId = _onlineMe.id;
   const myp = (snapshot.players || []).find((p) => p.profileId === myId);
   if (!myp || myp.faction) return;
   _crewWizardOpen = true;
-  // Every crew card is on offer. Pick any one that another player hasn't
-  // already claimed; your seat colour is then set to that crew's colour.
+  const solo = isSoloRoom(snapshot);
   openCrewWizard({
-    description: 'Pick your starting faction from any available crew. Your pick sets your colour and is permanent for this session.',
+    description: solo
+      ? 'Solo game: pick any crew as your starting faction. Your pick sets your colour and is permanent for this session.'
+      : 'Pick one of the two crew on your colour card. Your faction privilege is permanent for this session.',
+    // 2+ players: one colour only - restrict to this seat's assigned colour.
+    restrictToColor: solo ? null : myp.color,
     takenCardIds: crewCardsTakenByOthers(snapshot, myId),
     onCommit: ({ cardId, face }) => {
       submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
@@ -1003,11 +1014,14 @@ function maybePromptCrewPickForced(snapshot) {
   const myp = (snapshot.players || []).find((p) => p.profileId === myId);
   if (!myp) return;
   _crewWizardOpen = true;
-  const desc = myp.faction
-    ? 'Switch crews or flip to the other face. You can change as long as other players are still picking.'
-    : 'Pick your starting faction from any available crew.';
+  const solo = isSoloRoom(snapshot);
+  const desc = solo
+    ? (myp.faction ? 'Switch to any other crew.' : 'Pick any crew as your starting faction.')
+    : (myp.faction ? 'Switch to the other crew on your colour card while others are still picking.'
+                   : 'Pick one of the two crew on your colour card.');
   openCrewWizard({
     description: desc,
+    restrictToColor: solo ? null : myp.color,
     takenCardIds: crewCardsTakenByOthers(snapshot, myId),
     onCommit: ({ cardId, face }) => {
       submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
@@ -3748,6 +3762,7 @@ function humanizeOnlineOpError(code, detail) {
     unknown_crew: 'That crew card does not exist.',
     unknown_crew_face: 'Pick the primary or secondary face.',
     crew_taken: 'Another player already claimed that crew. Pick a different one.',
+    wrong_crew_color: 'Pick one of the two crew on your own colour card.',
     auction_in_progress: 'An auction is already underway.',
     need_opponent: 'Need another player to hold an auction.',
     hand_limit: 'Hand limit reached (4) - you cannot start or join an auction. Build or transfer cards first.',
