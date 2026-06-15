@@ -279,6 +279,41 @@ function mountGlobalChat() {
   });
 }
 
+// The modules / house-rules a lobby runs, as small tag chips (HTML string).
+// Shown on lobby + game rows so players can see what's in play at a glance.
+export function moduleTagsHtml(lobby) {
+  const tags = [];
+  if (lobby && lobby.m0) tags.push('<span class="module-tag tag-m0">🏛 M0 Politics</span>');
+  if (lobby && lobby.draftStart) tags.push('<span class="module-tag tag-draft">🃏 Draft start</span>');
+  return tags.length ? `<span class="module-tags">${tags.join('')}</span>` : '';
+}
+
+// One open-tables row for a waiting lobby. `actionLabel` is Join (public) or
+// Enter (a private table I'm already in).
+function lobbyListItem(lobby, actionLabel = 'Join') {
+  const li = document.createElement('li');
+  li.innerHTML = `
+    <div>
+      <span class="name"></span>
+      <span class="meta">hosted by @<span class="host"></span>
+        · <span class="count"></span>/${lobby.maxPlayers}
+        · <code></code></span>
+      ${moduleTagsHtml(lobby)}
+    </div>
+    <div class="row-actions">
+      <button class="primary"></button>
+    </div>
+  `;
+  li.querySelector('.name').textContent = lobby.name;
+  li.querySelector('.host').textContent = lobby.hostName;
+  li.querySelector('.count').textContent = lobby.memberCount;
+  li.querySelector('code').textContent = lobby.code;
+  const btn = li.querySelector('button');
+  btn.textContent = actionLabel;
+  btn.addEventListener('click', async () => { await openLobby(lobby.id, { join: true }); });
+  return li;
+}
+
 export async function refreshLobbyList() {
   refreshMyGames();
   refreshPublicGames();
@@ -289,33 +324,34 @@ export async function refreshLobbyList() {
     list.innerHTML = `<li class="empty">Failed to load (${r.error}).</li>`;
     return;
   }
+  list.innerHTML = '';
+  // Private section: invite-only tables I made or joined that haven't started
+  // yet (they never appear in the public open list). Shown above the open ones.
+  const me = activeProfile();
+  if (me) {
+    const mine = await listMyGames(me.token);
+    const priv = (mine.ok ? (mine.data.entries || []) : []).filter((l) =>
+      l.status === 'waiting' && l.joinPolicy === 'invite-only' && !l.gameId);
+    if (priv.length) {
+      const head = document.createElement('li');
+      head.className = 'lobby-list-group';
+      head.textContent = '🔒 Private (invite-only)';
+      list.appendChild(head);
+      for (const lobby of priv) list.appendChild(lobbyListItem(lobby, 'Enter'));
+      const head2 = document.createElement('li');
+      head2.className = 'lobby-list-group';
+      head2.textContent = '🌐 Open tables';
+      list.appendChild(head2);
+    }
+  }
   if (!r.data.entries.length) {
-    list.innerHTML = '<li class="empty">No open tables. Create one!</li>';
+    const empty = document.createElement('li');
+    empty.className = 'empty';
+    empty.textContent = list.children.length ? 'No open tables right now.' : 'No open tables. Create one!';
+    list.appendChild(empty);
     return;
   }
-  list.innerHTML = '';
-  for (const lobby of r.data.entries) {
-    const li = document.createElement('li');
-    li.innerHTML = `
-      <div>
-        <span class="name"></span>
-        <span class="meta">hosted by @<span class="host"></span>
-          · <span class="count"></span>/${lobby.maxPlayers}
-          · <code></code></span>
-      </div>
-      <div class="row-actions">
-        <button class="primary">Join</button>
-      </div>
-    `;
-    li.querySelector('.name').textContent = lobby.name;
-    li.querySelector('.host').textContent = lobby.hostName;
-    li.querySelector('.count').textContent = lobby.memberCount;
-    li.querySelector('code').textContent = lobby.code;
-    li.querySelector('button').addEventListener('click', async () => {
-      await openLobby(lobby.id, { join: true });
-    });
-    list.appendChild(li);
-  }
+  for (const lobby of r.data.entries) list.appendChild(lobbyListItem(lobby, 'Join'));
 }
 
 // "Your games" (in progress) + "Ended games": the tables the player is
@@ -349,13 +385,10 @@ export async function refreshMyGames() {
   const lastActiveAt = (g) => g.lastActionAt || g.lastTurnEndedAt || g.createdAt || 0;
   started.sort((a, b) => lastActiveAt(b) - lastActiveAt(a));
   ended.sort((a, b) => lastActiveAt(b) - lastActiveAt(a));
-  // Local solo sandbox games live alongside the server games in
-  // "Your games", ALWAYS on top, and themselves sorted most-recent first.
-  const sandboxRows = listSandboxGames()
-    .slice()
-    .sort((a, b) => (b.lastPlayedAt || b.createdAt || 0) - (a.lastPlayedAt || a.createdAt || 0))
-    .map(sandboxGameRow);
-  renderMyGames(startedEl, started, 'Resume', 'No games in progress.', sandboxRows);
+  // Sandbox mode is deprecated: local offline sandbox games are no longer
+  // surfaced in "Your games". (Old saves still exist in localStorage so nothing
+  // is destroyed, they're just hidden.) Solo now runs as a 1-player server room.
+  renderMyGames(startedEl, started, 'Resume', 'No games in progress.');
   renderMyGames(endedEl, ended, 'Review', 'No finished games.');
 }
 
@@ -512,6 +545,7 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
           · <span class="count"></span>/${g.maxPlayers}
           · <code></code>
           <span class="tag-cancelled" hidden>· cancelled</span></span>
+        ${moduleTagsHtml(g)}
         <span class="meta turn-meta" hidden></span>
       </div>
       <div class="row-actions">
@@ -619,6 +653,7 @@ async function onCreateSubmit(ev) {
   const maxRounds = Number(document.getElementById('create-rounds').value);
   const joinPolicy = document.querySelector('input[name=policy]:checked').value;
   const draftStart = !!document.getElementById('create-draft')?.checked;
+  const m0 = !!document.getElementById('create-m0')?.checked;
   const me = activeProfile();
   if (!me) return;
   if (!_createIdemKey) _createIdemKey = newIdemKey();   // stable across retries of this intent
@@ -627,7 +662,7 @@ async function onCreateSubmit(ev) {
   if (submitBtn) submitBtn.disabled = true;
   try {
     const r = await createLobby(
-      { name, maxPlayers, maxRounds, joinPolicy, draftStart, idempotencyKey: _createIdemKey }, me.token
+      { name, maxPlayers, maxRounds, joinPolicy, draftStart, m0, idempotencyKey: _createIdemKey }, me.token
     );
     if (!r.ok) { errEl.textContent = humanizeError(r.error); return; }   // keep the key so a retry dedupes
     _createIdemKey = null;   // success: the next room starts a fresh intent
@@ -642,13 +677,14 @@ async function onCreateSubmit(ev) {
 // you in it, started right away. It runs the same server-backed engine as a
 // full table, so it's the way to exercise multiplayer features alone. Needs
 // the server to allow maxPlayers=1 (it does); start only needs >=1 member.
-export async function createSoloRoom({ startingAqua = 100, economy = 'library' } = {}) {
+export async function createSoloRoom({ startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, m0 = false } = {}) {
   const me = activeProfile();
   if (!me) return { ok: false, error: 'no_profile' };
   const create = await createLobby(
-    { name: `${me.name}'s solo room`, maxPlayers: 1, maxRounds: 5,
+    { name: `${me.name}'s solo room`, maxPlayers: 1,
+      maxRounds: [4, 5, 6, 7].includes(Number(maxRounds)) ? Number(maxRounds) : 5,
       joinPolicy: 'invite-only', idempotencyKey: newIdemKey(),
-      startingAqua, economy },
+      startingAqua, economy, draftStart, m0 },
     me.token,
   );
   if (!create.ok) return create;

@@ -7300,17 +7300,20 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 
 .mp-crew-draft-overlay.is-minimized,
-.mp-auction-overlay.is-minimized {
+.mp-auction-overlay.is-minimized,
+.mp-first-player-overlay.is-minimized {
   background: transparent;
   backdrop-filter: none;
   pointer-events: none;
 }
 .mp-crew-draft-overlay.is-minimized .mp-crew-draft-panel,
-.mp-auction-overlay.is-minimized .mp-auction-modal { display: none; }
+.mp-auction-overlay.is-minimized .mp-auction-modal,
+.mp-first-player-overlay.is-minimized .mp-first-player-modal { display: none; }
 /* Collapsed activities dock as an inline button in the turn bar
    (.mp-turn-action), so the old floating mini-chip stays hidden. */
 .mp-crew-draft-overlay.is-minimized .mp-mini-chip,
-.mp-auction-overlay.is-minimized .mp-mini-chip {
+.mp-auction-overlay.is-minimized .mp-mini-chip,
+.mp-first-player-overlay.is-minimized .mp-mini-chip {
   display: none;
 }
 
@@ -7659,7 +7662,7 @@ body:has(#view-browse:not(.hidden)) #main {
   border: 1px solid var(--border, #26405f);
   border-radius: 14px;
   padding: 18px 20px;
-  max-width: min(96vw, 1040px);
+  max-width: min(96vw, 640px);
   width: 100%;
   max-height: 90vh;
   overflow-y: auto;
@@ -7668,32 +7671,37 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .draft-market-head h2 { margin: 0 0 4px; font-size: 20px; }
 .draft-market-head p { margin: 0 0 12px; }
-.draft-market-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px;
-}
-.draft-market-col {
+/* One row per deck (like the card market): colour-coded tag + top card + actions. */
+.draft-market-list { display: flex; flex-direction: column; gap: 8px; }
+.draft-market-row {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   background: rgba(148, 163, 184, 0.06);
   border: 1px solid rgba(148, 163, 184, 0.18);
+  border-left: 4px solid var(--deck-color, #888);
   border-radius: 10px;
-  padding: 10px 8px;
+  padding: 8px 10px;
 }
-.draft-market-deck-label {
-  font-size: 12px;
-  text-transform: capitalize;
-  letter-spacing: 0.3px;
-  text-align: center;
+.draft-market-tag {
+  flex: 0 0 110px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
-.draft-market-card { min-height: 120px; display: flex; align-items: center; justify-content: center; }
+.draft-market-glyph { font-size: 20px; }
+.draft-market-deckname { font-size: 13px; font-weight: 700; text-transform: capitalize; color: var(--deck-color, var(--ink)); }
+.draft-market-count { font-size: 11px; color: var(--ink-dim, #8b90b8); }
+.draft-market-card { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; justify-content: center; min-height: 132px; }
 .draft-market-empty { font-style: italic; }
-.draft-market-take { width: 100%; }
-.draft-market-take:disabled { opacity: 0.45; cursor: default; }
+.draft-market-actions { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; min-width: 96px; }
+.draft-market-actions .modal-btn { width: 100%; }
+.draft-market-take:disabled, .draft-market-cycle:disabled { opacity: 0.4; cursor: not-allowed; }
 .draft-market-foot { margin-top: 14px; display: flex; justify-content: flex-end; }
+@media (max-width: 540px) {
+  .draft-market-row { flex-wrap: wrap; }
+  .draft-market-tag { flex-basis: 100%; flex-direction: row; align-items: baseline; gap: 8px; }
+}
 
 /* "Fold to light" action on a deployed heavy radiator (heat/amber tint to read
    as a radiator action, distinct from Select / Set-active). */
@@ -7720,3 +7728,244 @@ body:has(#view-browse:not(.hidden)) #main {
   max-width: 120px;
   margin: 4px auto 0;
 }
+
+/* ===== player-to-player trading ===== */
+
+/* Trade button in the MP panel header (reuses the .mp-leave chip shape). */
+.mp-trade-open:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Crew-ability badges under each roster name. */
+.mp-ability-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 2px 0 4px 22px;
+}
+.mp-ability {
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.mp-ability.own { background: rgba(120, 140, 220, 0.18); color: var(--ink); }
+.mp-ability.borrowed { background: rgba(80, 200, 160, 0.16); color: #bff3df; border-color: #2f6f5c; }
+.mp-ability.borrowed.permanent { background: rgba(220, 180, 80, 0.18); color: #f4e2b0; border-color: #7a6326; }
+
+/* Builder modal: a focused, backdropped dialog. */
+.mp-modal-back {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(3, 2, 10, 0.78);
+  backdrop-filter: blur(4px);
+  animation: modal-fade 0.18s ease-out;
+}
+.mp-trade-builder-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 20px 20px;
+  max-width: 640px;
+  width: 100%;
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  color: var(--ink);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+}
+.mp-trade-head h3 { margin: 0 0 10px; font-size: 18px; letter-spacing: 0.5px; }
+.mp-trade-field { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 6px 0; }
+.mp-trade-field span { font-size: 13px; color: var(--ink-dim, #8b90b8); }
+.mp-trade-field input, .mp-trade-field select { width: 140px; }
+.mp-trade-colo { font-size: 12px; margin: 6px 0 10px; padding: 6px 10px; border-radius: 8px; }
+.mp-trade-colo.is-colo { background: rgba(80, 200, 160, 0.14); color: #bff3df; }
+.mp-trade-colo.no-colo { background: rgba(200, 160, 80, 0.14); color: #f0d9a8; }
+.mp-trade-cols { display: flex; gap: 18px; align-items: flex-start; }
+.mp-trade-col { flex: 1 1 0; min-width: 0; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.mp-trade-sub { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--ink-dim, #8b90b8); margin: 10px 0 4px; }
+.mp-trade-check { display: flex; align-items: center; gap: 4px; font-size: 12px; margin: 2px 0; }
+.mp-trade-ability-row { display: flex; gap: 6px; }
+.mp-trade-ability-row select { flex: 1 1 auto; min-width: 0; }
+.mp-trade-term { width: 64px; }
+.mp-trade-btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; flex-wrap: wrap; }
+
+/* Pending-trade card: docked bottom-right, non-blocking so play continues. */
+.mp-trade-overlay {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 118;
+  max-width: 340px;
+  animation: modal-fade 0.18s ease-out;
+}
+.mp-trade-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  color: var(--ink);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+}
+.mp-trade-card-head { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+.mp-trade-card-body { font-size: 13px; line-height: 1.5; }
+.mp-trade-card-body b { color: var(--ink-dim, #8b90b8); font-weight: 600; }
+.mp-trade-status { font-size: 12px; margin: 8px 0; }
+
+/* Clickable card name in the trade builder (opens the full card preview). */
+.mp-trade-check { gap: 6px; }
+.mp-trade-checkbox-only { display: inline-flex; align-items: center; margin: 0; }
+.mp-trade-cardname {
+  background: none;
+  border: none;
+  color: var(--accent, #7dd3fc);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+  text-align: left;
+}
+.mp-trade-cardname:hover { color: var(--ink); }
+.mp-trade-none { font-size: 11px; margin: 2px 0 4px; }
+.mp-card-preview-back { z-index: 145; cursor: zoom-out; }
+.mp-card-preview {
+  transform: scale(1.2);
+  filter: drop-shadow(0 18px 50px rgba(0, 0, 0, 0.6));
+}
+
+/* Per-player Trade button (sits next to the 📚 cards button in the roster). */
+.mp-player-trade {
+  flex: 0 0 auto;
+  border: 0;
+  border-left: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink-mute);
+  font-size: 14px;
+  padding: 0 11px;
+  cursor: pointer;
+}
+.mp-player-trade:hover:not(:disabled) { background: rgba(255, 255, 255, 0.06); color: var(--ink); }
+.mp-player-trade:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* In-panel trade negotiation block (shown in the Multiplayer panel when a
+   trade involves me, in place of the roster). */
+.mp-trade-block {
+  border: 1px solid #2f6f5c;
+  background: rgba(80, 200, 160, 0.08);
+  border-radius: 10px;
+  padding: 12px;
+  margin: 8px 0;
+}
+.mp-trade-block-head { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+.mp-trade-deal { display: flex; flex-direction: column; gap: 6px; }
+.mp-trade-deal-row { font-size: 13px; line-height: 1.5; }
+.mp-trade-deal-label {
+  display: inline-block;
+  min-width: 86px;
+  color: var(--ink-dim, #8b90b8);
+  font-weight: 600;
+}
+.mp-trade-side .mp-trade-cardname { font-size: 13px; }
+.mp-trade-status { font-size: 12px; margin: 8px 0; }
+.mp-trade-chat-hint { font-size: 11px; margin-top: 6px; }
+.mp-trade-block .mp-trade-btns { justify-content: flex-start; margin-top: 8px; }
+
+/* Highlight the roster row of the player I'm mid-trade with. */
+.mp-player.mp-trade-with {
+  border: 1px solid #2f6f5c;
+  border-radius: 10px;
+  background: rgba(80, 200, 160, 0.06);
+}
+.mp-player.mp-trade-with .mp-trade-block { margin: 8px; border: 0; background: transparent; padding: 0; }
+
+/* Component supply pips under each roster name: factory cubes (squares) +
+   colony domes (rounded). Filled = in play (player colour); empty = remaining. */
+.mp-components {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 3px 0 4px 22px;
+  align-items: center;
+}
+.mp-comp-group { display: inline-flex; align-items: center; gap: 4px; }
+.mp-comp-label { font-size: 10px; color: var(--ink-dim, #8b90b8); }
+.mp-comp-pips { display: inline-flex; gap: 2px; }
+.mp-pip {
+  width: 7px;
+  height: 7px;
+  background: transparent;
+  border: 1px solid var(--border);
+}
+.mp-pip-cube { border-radius: 1px; }            /* factory cube = square */
+.mp-pip-dome { border-radius: 5px 5px 1px 1px; } /* colony dome = rounded top */
+.mp-pip.filled { border-color: transparent; }
+
+/* Claim-disc pip = circle (vs square cube / rounded dome). */
+.mp-pip-disc { border-radius: 50%; }
+/* Claim relocation picker list. */
+.mp-relocate-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; max-height: 320px; overflow: auto; }
+.mp-relocate-item { text-align: left; }
+
+/* ===== Sol Political Assembly (M0) panel - mockup ===== */
+.assembly-panel { color: var(--ink); max-width: 720px; margin: 0 auto; }
+.assembly-head { display: flex; align-items: baseline; gap: 10px; justify-content: center; }
+.assembly-head h2 { margin: 0; font-size: 22px; letter-spacing: 1px; text-transform: uppercase; }
+.assembly-sub { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--ink-dim, #8b90b8); }
+.assembly-board { display: block; width: 100%; max-width: 720px; margin: 8px auto 0; }
+.assembly-wedge { stroke: #0b0a14; stroke-width: 2; }
+/* Hover: light up the whole cell (wedge or center) when hovered. */
+.assembly-cell { cursor: pointer; }
+.assembly-cell .assembly-wedge, .assembly-cell .assembly-center { transition: filter 0.12s ease; }
+.assembly-cell:hover .assembly-wedge { filter: brightness(1.35); }
+.assembly-cell:hover .assembly-center { filter: brightness(1.08); }
+.assembly-wedge-label { fill: #fff; font: 700 11px ui-sans-serif, system-ui, sans-serif; letter-spacing: 0.3px; paint-order: stroke; stroke: rgba(0,0,0,0.35); stroke-width: 2px; }
+.assembly-slot { fill: rgba(0,0,0,0.32); stroke: rgba(255,255,255,0.55); stroke-width: 1.5; }
+.assembly-center { fill: #f3f4fa; stroke: #0b0a14; stroke-width: 2; }
+.assembly-center-label { fill: #1a1830; font: 800 14px ui-sans-serif, system-ui, sans-serif; letter-spacing: 1px; }
+.assembly-center-sub { fill: #3a3760; font: 600 9px ui-sans-serif, system-ui, sans-serif; }
+
+/* Leader lines + arrowheads from each callout to its delegate space. */
+.assembly-arrow { stroke: var(--ink-dim, #8b90b8); stroke-width: 1.5; }
+.assembly-arrowhead { fill: var(--ink-dim, #8b90b8); }
+
+/* Callout boxes (foreignObject HTML), one per ideology, around the wheel. */
+.assembly-callout {
+  box-sizing: border-box;
+  height: 100%;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--ide-color, var(--border));
+  border-radius: 8px;
+  padding: 6px 9px;
+  background: rgba(13, 12, 24, 0.92);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+.assembly-callout-center { border-left-color: #f3f4fa; border-top: 1px solid rgba(243,244,250,0.35); }
+.assembly-callout-center .assembly-law-ide { color: #f3f4fa; }
+.assembly-callout-lobby { border-left-color: var(--accent, #7dd3fc); }
+.assembly-law-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.assembly-law-ide { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--ide-color, var(--ink-dim)); font-weight: 700; }
+.assembly-law-name { font-size: 12px; font-weight: 700; color: var(--ink); }
+.assembly-law-text { font-size: 11px; color: var(--ink-dim, #8b90b8); margin: 3px 0 5px; line-height: 1.35; }
+.assembly-law-award {
+  display: inline-block; font-size: 10px; font-weight: 700;
+  background: var(--ide-color, #333); color: #0b0a14;
+  padding: 1px 7px; border-radius: 999px;
+}
+
+/* Sol Political Assembly (M0) tab controls below the hex board. */
+.assembly-controls { margin: 10px 0; }
+.assembly-status { font-size: 12px; color: var(--ink-dim, #8b90b8); margin: 3px 0; }
+.assembly-status strong { color: var(--ink); }
+.assembly-action {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin: 8px 0;
+}
+.assembly-action .mp-detail-label { margin-bottom: 4px; }
+.assembly-action .modal-btn { margin-top: 6px; }

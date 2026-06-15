@@ -38,6 +38,7 @@
 
 import { PATENTS } from '../../data/patents.js';
 import { CREW } from '../../data/crew.js';
+import { freshAssembly } from '../../data/assembly.js';
 import { makeRng, shuffle } from './rng.js';
 // (startSiteId import dropped: the rocket now opens at LEO, siteId null.)
 
@@ -136,6 +137,14 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
     // Privileges permanently gained from a card power (POWER GIRDLE / IONOSAT
     // grant Powersat). NOT a faction privilege, so Anarchy does not suspend it.
     grantedPrivileges: [],
+    // Crew abilities borrowed from another player through a trade. Each entry is
+    // { ability, fromPlayerId, turnsRemaining } where turnsRemaining === null
+    // means a PERMANENT (irreversible) grant. Timed grants are decremented at
+    // the holder's END_TURN and dropped at 0 (engine.js). Privilege resolution
+    // unions these with the player's own abilities, so a borrowed power works
+    // exactly like an owned one for its term. A grant is SHARED, not surrendered:
+    // the lender keeps their ability while the borrower also holds it.
+    borrowedAbilities: [],
     rocket: {
       // siteId null = parked at LEO (the launch anchor). There is no
       // explicit LEO node in SITES, so null is the canonical "at LEO"
@@ -196,7 +205,7 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
 
 // players: [{ profileId, name, seat }] (seat 1-based, any order).
 // maxRounds: game length (rounds = Sunspot Cube cycles); default 5.
-export function createInitialState({ players, seed, maxRounds = 5, startingAqua, economy, draftStart } = {}) {
+export function createInitialState({ players, seed, maxRounds = 5, startingAqua, economy, draftStart, m0 } = {}) {
   // Sort by the incoming (lobby) seat first so the shuffle has a
   // deterministic base regardless of how the caller ordered the array,
   // then randomise the turn order with the seeded RNG. Turn order IS
@@ -214,7 +223,7 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
   // shuffled turn order so no one is always "the yellow player".
   const palette = shuffle(gen, PLAYER_COLORS);
   const decks = buildShuffledDecks(gen);
-  const rounds = [5, 6, 7].includes(maxRounds) ? maxRounds : 5;
+  const rounds = [4, 5, 6, 7].includes(maxRounds) ? maxRounds : 5;
   // Card economy + starting bank. Standard multiplayer is always 'market' +
   // AQUA_DEFAULT (the caller enforces that for 2+ player games); a solo game
   // may pick Free Library and a free-play bank. Anything unrecognised falls
@@ -242,6 +251,9 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
     // the regular gameplay ops (MOVE / BURN / AUCTION_* / END_TURN
     // / etc.) start being accepted.
     draftPhase: 'crew',
+    // Draft-start only: tracks whether the active player has used their one
+    // per-turn deck cycle yet (reset each draft turn). Inert outside the draft.
+    draftCycledThisTurn: false,
     // Card economy. Multiplayer is always 'market' (Card Market mode is
     // mandatory in MP - patents are auctioned, not free draws, and the Free
     // Market sell op is available); a solo game may choose 'library'. Server-
@@ -290,7 +302,20 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
     discs: {},
     factories: {},
     colonies: {},
+    // Module 0 (Sol Political Assembly). m0 is fixed at game start (chosen at
+    // room creation); games already in flight default to false (no retro apply).
+    // `assembly` holds delegate placements + drives the active-law resolver.
+    m0: !!m0,
+    assembly: m0 ? freshAssembly() : null,
     auction: null,
+    // Open player-to-player trade negotiation, or null. A side-channel deal that
+    // both parties must consent to (offer / counter / accept handshake); it does
+    // NOT cost the turn's operation and may be opened at any point, on or off
+    // turn. One open trade at a time (v1). See engine.js TRADE ops + the shape
+    // they write: { initiatorId, partnerId, awaiting, version, give, receive,
+    // location }. give/receive are always written from the initiator's
+    // perspective. Not redacted (a negotiation is open info, like hands in MP).
+    trade: null,
     players: ordered.map((p, i) =>
       freshPlayer({
         profileId: p.profileId,

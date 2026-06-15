@@ -1,0 +1,40 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="/css/style.css">
+<link rel="stylesheet" href="/css/map.css">
+<style> body{ background:#0a0913; margin:0; padding:20px; font-family:sans-serif;} .stage{display:flex;gap:24px;align-items:flex-start;} .label{color:#8b90b8; font:12px sans-serif; margin:8px 0;} #mp-panel{ background:#0d0c18; border:1px solid #2a2740; border-radius:12px; padding:12px; width:330px;} .mp-modal-back{position:static!important;background:transparent!important;backdrop-filter:none!important;padding:0!important;}</style>
+<script>
+function pips(n,total,shape,color){let s='';for(let i=0;i<total;i++){s+=`<span class="mp-pip mp-pip-${shape}${i<n?' filled':''}" ${i<n?`style="background:${color}"`:''}></span>`;}return s;}
+function grp(glyph,n,total,shape,color){return `<span class="mp-comp-group"><span class="mp-comp-label">${glyph} ${n}/${total}</span><span class="mp-comp-pips">${pips(n,total,shape,color)}</span></span>`;}
+window.addEventListener('DOMContentLoaded',()=>{
+  document.getElementById('comp').innerHTML = grp('🏭',3,7,'cube','#fccc00')+grp('🏠',1,7,'dome','#fccc00')+grp('🔘',9,9,'disc','#fccc00');
+});
+</script>
+</head><body>
+<div class="stage">
+  <div>
+    <div class="label">Component row: cubes + domes + claim discs (all 9 placed)</div>
+    <div id="mp-panel"><div id="mp-table"><div class="mp-roster">
+      <div class="mp-player mp-active">
+        <div class="mp-player-headrow"><button class="mp-player-head"><span class="dot" style="background:#fccc00"></span><span class="mp-name player-name" style="--player-color:#fccc00">@ruben (you)</span><span class="mp-stats">📍LEO · 💧6 · 1vp</span></button><button class="mp-player-cards">📚</button></div>
+        <div class="mp-ability-badges"><span class="mp-ability own">Felonious</span></div>
+        <div class="mp-components" id="comp"></div>
+      </div>
+    </div></div></div>
+  </div>
+  <div>
+    <div class="label">Relocation picker (at the 9-disc cap)</div>
+    <div class="mp-modal-back"><div class="mp-trade-builder-modal" style="max-width:420px">
+      <div class="mp-trade-head"><h3>All 9 claim discs are placed</h3></div>
+      <div class="mp-trade-colo no-colo">Move one of your existing claims to this new spot, or cancel.</div>
+      <div class="mp-relocate-list">
+        <button class="modal-btn mp-relocate-item">✓ claim · Ceres</button>
+        <button class="modal-btn mp-relocate-item">✗ busted · Vesta</button>
+        <button class="modal-btn mp-relocate-item">✓ claim · Pallas south</button>
+        <button class="modal-btn mp-relocate-item">✓ claim · Hygiea</button>
+      </div>
+      <div class="mp-trade-btns"><button class="modal-btn">Cancel</button></div>
+    </div></div>
+  </div>
+</div>
+</body></html>

@@ -50,6 +50,11 @@ import {
   onChange as onDiscsChange,
 } from './discs.js';
 import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
+import { renderAssemblyPanel } from './assembly.js';
+import {
+  activeLaws as assemblyActiveLaws, ASSEMBLY_PLACES, IDEOLOGY_ORDER as ASSEMBLY_IDEOLOGY_ORDER,
+  IDEOLOGY_BY_KEY as ASSEMBLY_IDEOLOGY_BY_KEY, DELEGATES_PER_PLAYER,
+} from '../../data/assembly.js';
 import {
   WEIGHT_CLASSES, weightClassForMass, TRACK_LEGEND,
   MIN_DRY_MASS, MAX_DRY_MASS, MAX_WET_MASS,
@@ -205,6 +210,28 @@ const ONLINE_POLL_AUCTION_MS = 500;
 // Academia hand limit for auction participation (mirror of the server
 // constant): can't start / bid / join an auction holding 4+ cards.
 const AUCTION_HAND_LIMIT = 4;
+// Physical component supply per player (mirror of the server constants): 7
+// wooden cubes = the factory limit, 7 wooden domes = the colony limit.
+const FACTORY_CUBES = 7;
+const COLONY_DOMES = 7;
+const CLAIM_DISCS = 9;
+// Count a player's in-play factories / colonies / claim discs from a site-keyed
+// snapshot map (factories, colonies, or discs).
+function ownedSiteCount(map, profileId) {
+  let n = 0;
+  for (const k in (map || {})) if (map[k] && map[k].ownerId === profileId) n += 1;
+  return n;
+}
+// Claim discs in play = SUCCESSFUL claims only (a busted prospect spends the
+// roll, not a disc, so failed discs never count toward the 9-disc supply).
+function ownedClaimCount(discs, profileId) {
+  let n = 0;
+  for (const k in (discs || {})) {
+    const d = discs[k];
+    if (d && d.ownerId === profileId && d.outcome === 'success') n += 1;
+  }
+  return n;
+}
 let _onlineToast = null;      // (msg, level) => void, from the caller
 let _onlineMaps = null;       // { serverToPlanner, plannerToServer }
 let _onlineSnapshot = null;   // latest server snapshot (for turn checks)
@@ -243,6 +270,8 @@ let _deckPickerOpen = false;
 // state across re-renders. The auction resets to expanded on each new
 // lot so a fresh card always surfaces.
 let _crewDraftMin = false;
+let _cardDraftMin = false;
+let _firstPlayerMin = false;
 let _auctionMin = false;
 // Rising-edge tracker for auction turn notifications: remembers, per lot,
 // whether it was already "my turn" (bid/pass) or "my close" so a re-render
@@ -294,6 +323,7 @@ export function refreshRoomOverlays() {
   syncCrewDraftOverlay(_online ? _onlineSnapshot : null);
   syncCardDraftOverlay(_online ? _onlineSnapshot : null);
   renderOnlineAuction(_online && _onlineSnapshot ? _onlineSnapshot.auction : null);
+  renderOnlineTrade(_online && _onlineSnapshot ? _onlineSnapshot.trade : null);
 }
 
 export function mountBrowse(opts = {}) {
@@ -586,6 +616,8 @@ function applySnapshot(snapshot, seq) {
   // Refresh the multiplayer table panel (room / turn / roster) from the
   // same snapshot so opponents' positions + resources stay live.
   renderMpPanel(snapshot);
+  // Sol Political Assembly (M0) tab + board, gated on snapshot.m0.
+  renderAssemblyTab(snapshot);
   // Big black turn banner above the hand. Mirrors the same source-of-
   // truth (snapshot.activeIndex) the panel uses so the two never drift.
   syncMpTurnBanner(snapshot);
@@ -607,6 +639,10 @@ function applySnapshot(snapshot, seq) {
   }
   // Competitive auction overlay is wired separately (see the TODO hook).
   renderOnlineAuction(snapshot.auction);
+  // Pending player-to-player trade: a docked, snapshot-driven card the two
+  // parties act on. Idempotent - appears when a deal opens, clears when it
+  // resolves or is declined.
+  renderOnlineTrade(snapshot.trade);
   // Round-end first-player handoff + end-of-game standings. Both are
   // driven straight off the snapshot and idempotent, so they appear /
   // clear as the server state flips.
@@ -621,7 +657,8 @@ function applySnapshot(snapshot, seq) {
   // auction, or a first-player handoff) so the waiting players see it
   // resolve in near-realtime even if the WS broadcast was dropped. Drop
   // back to the normal cadence otherwise.
-  const fastPoll = snapshot.auction || snapshot.pendingFirstPlayer || snapshot.pendingEvent;
+  const fastPoll = snapshot.auction || snapshot.pendingFirstPlayer || snapshot.pendingEvent
+    || snapshot.trade;
   setPollCadence(fastPoll ? ONLINE_POLL_AUCTION_MS : ONLINE_POLL_MS);
   // Eager one-shot fetch the moment the auctioneer's phase opens
   // (awaiting === 'auctioneer'). The accept can land within ms of
@@ -676,16 +713,27 @@ let _crewWizardOpen = false;
 // round:slot:activeIndex), so a flurry of snapshots doesn't keep re-popping it.
 let _draftAutoOpenKey = null;
 
+// Is this a solo (1-seat) room? Sandbox is deprecated, so "solo" is just a
+// 1-player server game - that player gets a FREE pick of any crew. A 2+ player
+// room follows standard rules: random seat colours, and each player picks ONE
+// of the two crew on THEIR assigned colour card (one colour only).
+function isSoloRoom(snapshot) {
+  return ((snapshot && snapshot.players) || []).length <= 1;
+}
+
 function maybePromptCrewPick(snapshot) {
   if (!_online || _spectator || _crewWizardOpen || !snapshot || !_onlineMe) return;
   const myId = _onlineMe.id;
   const myp = (snapshot.players || []).find((p) => p.profileId === myId);
   if (!myp || myp.faction) return;
   _crewWizardOpen = true;
-  // Every crew card is on offer. Pick any one that another player hasn't
-  // already claimed; your seat colour is then set to that crew's colour.
+  const solo = isSoloRoom(snapshot);
   openCrewWizard({
-    description: 'Pick your starting faction from any available crew. Your pick sets your colour and is permanent for this session.',
+    description: solo
+      ? 'Solo game: pick any crew as your starting faction. Your pick sets your colour and is permanent for this session.'
+      : 'Pick one of the two crew on your colour card. Your faction privilege is permanent for this session.',
+    // 2+ players: one colour only - restrict to this seat's assigned colour.
+    restrictToColor: solo ? null : myp.color,
     takenCardIds: crewCardsTakenByOthers(snapshot, myId),
     onCommit: ({ cardId, face }) => {
       submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
@@ -834,6 +882,11 @@ const DRAFT_DECK_TYPES = ['thruster', 'reactor', 'radiator', 'refinery', 'robona
 const DRAFT_DECK_GLYPH = {
   thruster: '🚀', reactor: '☢', radiator: '♨', refinery: '⚗', robonaut: '🤖', generator: '⚡',
 };
+// Per-deck-type accent colours so the draft rows aren't all one grey band.
+const DRAFT_DECK_COLOR = {
+  thruster: '#c0506a', reactor: '#7e57c2', radiator: '#3a8fb7',
+  refinery: '#3f9e6b', robonaut: '#c08a2e', generator: '#caa61e',
+};
 function syncCardDraftOverlay(snapshot) {
   const existing = document.getElementById('mp-card-draft-overlay');
   const drafting = !!(snapshot && snapshot.draftPhase === 'draft') && !_spectator
@@ -855,9 +908,13 @@ function syncCardDraftOverlay(snapshot) {
     overlay.className = 'mp-crew-draft-overlay';   // reuse crew-draft styling
     document.body.appendChild(overlay);
   }
+  const done = players.filter((p) => (p.hand || []).length >= DRAFT_HAND_TARGET).length;
   overlay.innerHTML = `
     <div class="mp-crew-draft-panel" role="dialog" aria-label="Card draft">
-      <div class="mp-modal-titlebar"><h3>🃏 Card draft</h3></div>
+      <div class="mp-modal-titlebar">
+        <h3>🃏 Card draft</h3>
+        <button type="button" class="mp-mini-btn" title="Minimize" aria-label="Minimize">&minus;</button>
+      </div>
       <p class="muted">Take the top of a market deck for free until everyone holds
         <strong>${DRAFT_HAND_TARGET}</strong> cards. Then every bank opens at 6 and play begins.</p>
       <ul class="mp-crew-draft-roster"></ul>
@@ -865,7 +922,11 @@ function syncCardDraftOverlay(snapshot) {
         ? `<p class="mp-crew-draft-me">Your draft pick - choose a deck.</p>
            <button type="button" class="modal-btn primary mp-card-draft-open">🃏 Pick a card</button>`
         : `<p class="mp-crew-draft-me">Waiting for <span class="player-name"${active && active.color ? ` style="--player-color:${esc(active.color)}"` : ''}>@${esc((active && active.name) || '?')}</span> to draft…</p>`}
-    </div>`;
+    </div>
+    <button type="button" class="mp-mini-chip" aria-label="Restore card draft">
+      🃏 Drafting in progress
+      <span class="mp-mini-chip-meta">${done}/${players.length} done</span>
+    </button>`;
   const roster = overlay.querySelector('.mp-crew-draft-roster');
   for (const p of players) {
     const li = document.createElement('li');
@@ -886,23 +947,55 @@ function syncCardDraftOverlay(snapshot) {
   }
   const openBtn = overlay.querySelector('.mp-card-draft-open');
   if (openBtn) openBtn.addEventListener('click', () => openDraftMarketModal());
-  // Auto-open the market once per local draft turn so the player is prompted.
+
+  // Minimize / restore, mirroring the crew + auction overlays. Collapsed, it
+  // docks a "Drafting" chip in the turn bar that pings (needs-action) when it
+  // is the local player's pick.
+  overlay.classList.toggle('is-minimized', _cardDraftMin);
+  setMpTurnAction('draft', _cardDraftMin ? {
+    label: '🃏 Drafting',
+    meta: myTurn ? 'your pick' : 'in progress',
+    needsAction: myTurn,
+    onClick: () => {
+      _cardDraftMin = false;
+      syncCardDraftOverlay(_onlineSnapshot);
+      if (isOnlineMyTurn()) openDraftMarketModal();
+    },
+  } : null);
+  const miniBtn = overlay.querySelector('.mp-mini-btn');
+  const miniChip = overlay.querySelector('.mp-mini-chip');
+  if (miniBtn) miniBtn.addEventListener('click', () => {
+    _cardDraftMin = true;
+    document.querySelector('.draft-market-overlay')?.remove();
+    overlay.classList.add('is-minimized');
+    syncCardDraftOverlay(_onlineSnapshot);
+  });
+  if (miniChip) miniChip.addEventListener('click', () => {
+    _cardDraftMin = false;
+    overlay.classList.remove('is-minimized');
+    setMpTurnAction('draft', null);
+    if (isOnlineMyTurn()) openDraftMarketModal();
+  });
+  // Auto-open the market once per local draft turn so the player is prompted -
+  // but not while the overlay is minimized (the player chose to tuck it away).
   const key = `${snapshot.round}:${snapshot.turn}:${snapshot.activeIndex}`;
-  if (myTurn && !document.querySelector('.draft-market-overlay') && _draftAutoOpenKey !== key) {
+  if (myTurn && !_cardDraftMin && !document.querySelector('.draft-market-overlay') && _draftAutoOpenKey !== key) {
     _draftAutoOpenKey = key;
     openDraftMarketModal();
   }
 }
 
-// The deck market for the draft: one column per market deck showing its
-// face-up top card; tapping a deck takes that card (DRAFT_PICK). Only the
-// active player can take; everyone else sees it read-only.
+// The deck market for the draft: a vertical list, ONE ROW PER DECK (like the
+// card market), each row a colour-coded deck tag + its face-up top card + Take.
+// The active player may also CYCLE one deck of their choice once per turn (top
+// card to the bottom, revealing the next) before taking. Others see it read-only.
 function openDraftMarketModal() {
   if (!_online || !_onlineSnapshot) return;
   document.querySelector('.draft-market-overlay')?.remove();
   const snap = _onlineSnapshot;
   const myTurn = isOnlineMyTurn();
   const decks = snap.decks || {};
+  const cycled = !!snap.draftCycledThisTurn;
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay draft-market-overlay';
   const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
@@ -915,48 +1008,80 @@ function openDraftMarketModal() {
   head.className = 'draft-market-head';
   head.innerHTML = `<h2>🃏 Draft a card</h2>
     <p class="muted">${myTurn
-      ? 'Take the top card of any deck (free) into your hand.'
+      ? (cycled
+          ? 'Take the top card of any deck (free). You\'ve used your cycle this turn.'
+          : 'Take the top card of any deck (free), or cycle one deck once to reveal its next card.')
       : 'Not your turn - this is a preview of the deck tops.'}</p>`;
   panel.appendChild(head);
-  const grid = document.createElement('div');
-  grid.className = 'draft-market-grid';
+  const list = document.createElement('div');
+  list.className = 'draft-market-list';
   for (const dt of DRAFT_DECK_TYPES) {
     const deck = Array.isArray(decks[dt]) ? decks[dt] : [];
     const topId = deck[0];
     const card = topId ? PATENTS_BY_ID[topId] : null;
-    const col = document.createElement('div');
-    col.className = 'draft-market-col';
-    const label = document.createElement('div');
-    label.className = 'draft-market-deck-label';
-    label.innerHTML = `${DRAFT_DECK_GLYPH[dt] || '🃏'} <strong>${esc(dt)}</strong> <span class="muted">(${deck.length} left)</span>`;
-    col.appendChild(label);
+    const row = document.createElement('div');
+    row.className = 'draft-market-row';
+    row.style.setProperty('--deck-color', DRAFT_DECK_COLOR[dt] || '#888');
+
+    const tag = document.createElement('div');
+    tag.className = 'draft-market-tag';
+    tag.innerHTML = `<span class="draft-market-glyph">${DRAFT_DECK_GLYPH[dt] || '🃏'}</span>`
+      + `<span class="draft-market-deckname">${esc(dt)}</span>`
+      + `<span class="draft-market-count">${deck.length} left</span>`;
+    row.appendChild(tag);
+
     const cardWrap = document.createElement('div');
     cardWrap.className = 'draft-market-card';
     if (card) {
-      try { cardWrap.appendChild(renderCard(card, { type: dt })); }
+      // 'patent' is the RENDER KIND (not the deck type) - passing the deck type
+      // here suppressed the type-<type> class, leaving every typebar grey.
+      try { cardWrap.appendChild(renderCard(card, { type: 'patent' })); }
       catch { cardWrap.textContent = card.name || topId; }
     } else {
       cardWrap.innerHTML = '<p class="muted draft-market-empty">Deck empty</p>';
     }
-    col.appendChild(cardWrap);
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'modal-btn primary draft-market-take';
-    btn.textContent = '🃏 Take';
-    btn.disabled = !myTurn || !card;
-    if (!myTurn) btn.title = 'Wait for your turn.';
-    else if (!card) btn.title = 'This deck is empty - pick another.';
-    btn.addEventListener('click', async () => {
-      if (btn.disabled) return;
-      btn.disabled = true;
+    row.appendChild(cardWrap);
+
+    const actions = document.createElement('div');
+    actions.className = 'draft-market-actions';
+    const take = document.createElement('button');
+    take.type = 'button';
+    take.className = 'modal-btn primary draft-market-take';
+    take.textContent = '🃏 Take';
+    take.disabled = !myTurn || !card;
+    if (!myTurn) take.title = 'Wait for your turn.';
+    else if (!card) take.title = 'This deck is empty - pick another.';
+    take.addEventListener('click', async () => {
+      if (take.disabled) return;
+      take.disabled = true;
       const ok = await submitOnlineOp({ kind: 'DRAFT_PICK', deckType: dt });
       if (ok) close();              // snapshot re-hydrates; overlay updates / turn passes
-      else btn.disabled = false;
+      else take.disabled = false;
     });
-    col.appendChild(btn);
-    grid.appendChild(col);
+    actions.appendChild(take);
+
+    const cyc = document.createElement('button');
+    cyc.type = 'button';
+    cyc.className = 'modal-btn draft-market-cycle';
+    cyc.textContent = '♻ Cycle';
+    cyc.disabled = !myTurn || cycled || deck.length < 2;
+    cyc.title = !myTurn ? 'Wait for your turn.'
+      : cycled ? 'You\'ve already cycled a deck this turn.'
+      : deck.length < 2 ? 'Nothing new to cycle to.'
+      : 'Send this deck\'s top card to the bottom and reveal the next (once per turn).';
+    cyc.addEventListener('click', async () => {
+      if (cyc.disabled) return;
+      cyc.disabled = true;
+      const ok = await submitOnlineOp({ kind: 'DRAFT_CYCLE', deckType: dt });
+      if (ok) openDraftMarketModal();   // refresh with the new top + cycle spent
+      else cyc.disabled = false;
+    });
+    actions.appendChild(cyc);
+    row.appendChild(actions);
+
+    list.appendChild(row);
   }
-  panel.appendChild(grid);
+  panel.appendChild(list);
   const foot = document.createElement('div');
   foot.className = 'draft-market-foot';
   foot.innerHTML = '<button type="button" class="modal-btn draft-market-close">Close</button>';
@@ -975,11 +1100,14 @@ function maybePromptCrewPickForced(snapshot) {
   const myp = (snapshot.players || []).find((p) => p.profileId === myId);
   if (!myp) return;
   _crewWizardOpen = true;
-  const desc = myp.faction
-    ? 'Switch crews or flip to the other face. You can change as long as other players are still picking.'
-    : 'Pick your starting faction from any available crew.';
+  const solo = isSoloRoom(snapshot);
+  const desc = solo
+    ? (myp.faction ? 'Switch to any other crew.' : 'Pick any crew as your starting faction.')
+    : (myp.faction ? 'Switch to the other crew on your colour card while others are still picking.'
+                   : 'Pick one of the two crew on your colour card.');
   openCrewWizard({
     description: desc,
+    restrictToColor: solo ? null : myp.color,
     takenCardIds: crewCardsTakenByOthers(snapshot, myId),
     onCommit: ({ cardId, face }) => {
       submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
@@ -1461,6 +1589,463 @@ function setMpAuctionError(text) {
   if (el) el.textContent = text || '';
 }
 
+// ===== player-to-player trading =====
+//
+// A trade is a free, off-turn, both-party-consent deal (see the server's TRADE
+// ops). The Trade button in the MP panel opens the builder; the pending deal
+// shows as a docked card both parties can act on. Submit bypasses the turn
+// guard (like auction ops), so it uses its own helper, not submitOnlineOp.
+
+async function submitMpTradeOp(op) {
+  if (!_online || _onlineBusy) return false;
+  if (_spectator) { _onlineToast('Spectator - view only.', 'error'); return false; }
+  _onlineBusy = true;
+  let r;
+  try {
+    r = await submitGameOp(_onlineGameId, op, _onlineMe.token);
+  } finally {
+    _onlineBusy = false;
+  }
+  if (!r || !r.ok) {
+    _onlineToast(humanizeOnlineOpError(r && r.error), 'error');
+    if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
+    return false;
+  }
+  applySnapshot(r.data.game.state, r.data.game.seq);
+  return true;
+}
+
+// Title-case a privilege key ("SECRETARY_GENERAL" -> "Secretary General").
+function abilityLabel(key) {
+  return String(key || '').toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+// The crew ability a player's current faction face grants (the one they own and
+// can lend), or null.
+function factionAbilityOf(player) {
+  const card = player && player.faction && CREW_BY_ID[player.faction.cardId];
+  const face = card && card.faces && card.faces[player.faction.face];
+  return face ? String(face.bonus || '').trim().toUpperCase().replace(/\s+/g, '_') : null;
+}
+// All ability keys a player could grant: their faction power plus any permanent
+// grants they hold.
+function grantableAbilitiesOf(player) {
+  const out = [];
+  const fk = factionAbilityOf(player);
+  if (fk) out.push(fk);
+  for (const g of (player.grantedPrivileges || [])) if (!out.includes(g)) out.push(g);
+  return out;
+}
+// Two rockets share a location (both at LEO, or parked at the same site).
+function tradeSharedLocation(a, b) {
+  const sa = a && a.rocket ? a.rocket.siteId : undefined;
+  const sb = b && b.rocket ? b.rocket.siteId : undefined;
+  if (sa == null && sb == null) return 'leo';
+  if (sa != null && sa === sb) return sa;
+  return null;
+}
+function cardLabel(id) {
+  const c = PATENTS_BY_ID[id] || CREW_BY_ID[id];
+  return c ? c.name : id;
+}
+
+// Pop the full card so a player can assess it before trading. Click anywhere to
+// close. Layered above the builder modal.
+function openCardPreview(id) {
+  const card = PATENTS_BY_ID[id] || CREW_BY_ID[id];
+  if (!card) return;
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back mp-card-preview-back';
+  const box = document.createElement('div');
+  box.className = 'mp-card-preview';
+  try { box.appendChild(renderCard(card, { type: CREW_BY_ID[id] ? 'crew' : 'patent' })); }
+  catch { box.textContent = card.name || id; }
+  back.appendChild(box);
+  back.addEventListener('click', () => back.remove());
+  document.body.appendChild(back);
+}
+
+// One selectable card row: a checkbox plus the card NAME as a button that opens
+// the full card preview (assess before trading). Returns the checkbox.
+function tradeCardRow(col, id) {
+  const w = document.createElement('div');
+  w.className = 'mp-trade-check';
+  const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = id; cb.id = 'tc_' + id + '_' + Math.random().toString(36).slice(2, 7);
+  const nameBtn = document.createElement('button');
+  nameBtn.type = 'button'; nameBtn.className = 'mp-trade-cardname';
+  nameBtn.textContent = cardLabel(id);
+  nameBtn.title = 'View the full card';
+  nameBtn.addEventListener('click', () => openCardPreview(id));
+  const lbl = document.createElement('label'); lbl.setAttribute('for', cb.id); lbl.className = 'mp-trade-checkbox-only'; lbl.appendChild(cb);
+  w.append(lbl, nameBtn);
+  col.appendChild(w);
+  return cb;
+}
+
+// Build one give/receive column for `owner`, scoped to a trade CONTEXT:
+//   { kind: 'leo' }            -> Aqua + Hand patents + Crew ability (the bank)
+//   { kind: 'site', siteId }   -> Aqua + Fuel + Cargo aboard + Crew ability
+// Returns { el, read } where read() collects the side object from the inputs.
+function buildTradeColumn(title, owner, context) {
+  const atSite = context.kind === 'site';
+  const col = document.createElement('div');
+  col.className = 'mp-trade-col';
+  const h = document.createElement('div');
+  h.className = 'mp-detail-label';
+  h.textContent = title;
+  col.appendChild(h);
+
+  // Aqua - the only currency, available wherever a trade is struck. At a LEO
+  // meeting the tank water folds into aqua (1:1 at the bank), so it adds to the
+  // spendable max.
+  const atLeoRocket = owner.rocket && owner.rocket.siteId == null && owner.rocket.tankGrade !== 'dirt';
+  const leoWater = (!atSite && atLeoRocket) ? Math.floor(owner.rocket.tank || 0) : 0;
+  const aquaMax = (owner.aqua || 0) + leoWater;
+  const aquaRow = document.createElement('label');
+  aquaRow.className = 'mp-trade-field';
+  aquaRow.innerHTML = `<span>💧 Aqua${leoWater ? ` (${owner.aqua || 0} + ${leoWater} fuel)` : ''}</span>`;
+  const aquaIn = document.createElement('input');
+  aquaIn.type = 'number'; aquaIn.min = '0'; aquaIn.value = '0';
+  aquaIn.max = String(aquaMax);
+  if (leoWater) aquaIn.title = 'At LEO, fuel in your tank counts as aqua (1:1 at the bank).';
+  aquaRow.appendChild(aquaIn);
+  col.appendChild(aquaRow);
+
+  // Fuel (tank water) - only when meeting at a colocated site (out at LEO,
+  // fuel is just aqua, so it isn't a separate thing to trade there).
+  let waterIn = null;
+  if (atSite) {
+    const tank = Math.floor((owner.rocket && owner.rocket.tank) || 0);
+    const waterRow = document.createElement('label');
+    waterRow.className = 'mp-trade-field';
+    waterRow.innerHTML = `<span>⛽ Fuel (${tank})</span>`;
+    waterIn = document.createElement('input');
+    waterIn.type = 'number'; waterIn.min = '0'; waterIn.value = '0'; waterIn.max = String(tank);
+    waterRow.appendChild(waterIn);
+    col.appendChild(waterRow);
+  }
+
+  // Cards: hand patents at the LEO meeting; cargo aboard the rocket at a site.
+  const field = atSite ? 'cargo' : 'hand';
+  const ids = atSite
+    ? ((owner.rocket && owner.rocket.stack) || []).filter((s) => s && PATENTS_BY_ID[s.id]).map((s) => s.id)
+    : (owner.hand || []).filter((id) => PATENTS_BY_ID[id]);
+  const cardChecks = [];
+  const lbl = document.createElement('div');
+  lbl.className = 'mp-trade-sub';
+  lbl.textContent = atSite ? 'Cargo aboard' : 'Hand patents';
+  col.appendChild(lbl);
+  if (ids.length) {
+    for (const id of ids) cardChecks.push(tradeCardRow(col, id));
+  } else {
+    const none = document.createElement('div');
+    none.className = 'muted mp-trade-none';
+    none.textContent = atSite ? 'No cargo aboard.' : 'No hand patents.';
+    col.appendChild(none);
+  }
+
+  // Crew ability grant (abstract). Pick one ability + a term.
+  const abilities = grantableAbilitiesOf(owner);
+  let abSel = null; let termIn = null;
+  if (abilities.length) {
+    const albl = document.createElement('div');
+    albl.className = 'mp-trade-sub';
+    albl.textContent = 'Crew ability';
+    col.appendChild(albl);
+    const row = document.createElement('div');
+    row.className = 'mp-trade-ability-row';
+    abSel = document.createElement('select');
+    abSel.innerHTML = '<option value="">— none —</option>'
+      + abilities.map((k) => `<option value="${k}">${abilityLabel(k)}</option>`).join('');
+    termIn = document.createElement('input');
+    termIn.type = 'number'; termIn.min = '0'; termIn.placeholder = 'turns';
+    termIn.title = 'Number of turns; leave blank or 0 for a PERMANENT (irreversible) grant';
+    termIn.className = 'mp-trade-term';
+    row.append(abSel, termIn);
+    col.appendChild(row);
+  }
+
+  function read() {
+    const intv = (el) => { const v = Math.floor(Number(el.value)); return Number.isFinite(v) && v > 0 ? v : 0; };
+    const side = {
+      aqua: intv(aquaIn),
+      water: waterIn ? intv(waterIn) : 0,
+      handCardIds: field === 'hand' ? cardChecks.filter((c) => c.checked).map((c) => c.value) : [],
+      cargoCardIds: field === 'cargo' ? cardChecks.filter((c) => c.checked).map((c) => c.value) : [],
+      abilities: [],
+    };
+    if (abSel && abSel.value) {
+      const t = termIn && termIn.value !== '' ? Math.floor(Number(termIn.value)) : 0;
+      side.abilities.push({ ability: abSel.value, turns: (Number.isFinite(t) && t > 0) ? t : null });
+    }
+    return side;
+  }
+  return { el: col, read };
+}
+
+// Open the trade builder modal. opts: { partnerId?, isCounter? }. On send it
+// fires TRADE_OFFER (new) or TRADE_COUNTER (responding to an open trade), with
+// give/receive built from MY perspective.
+function openTradeBuilder(opts = {}) {
+  if (!_online || !_onlineSnapshot || _spectator) return;
+  closeTradeBuilder();
+  const snap = _onlineSnapshot;
+  const myId = _onlineMe && _onlineMe.id;
+  const me = (snap.players || []).find((p) => p.profileId === myId);
+  const others = (snap.players || []).filter((p) => p.profileId !== myId);
+  if (!me || !others.length) { _onlineToast('No one to trade with.', 'error'); return; }
+
+  const back = document.createElement('div');
+  back.id = 'mp-trade-builder';
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal';
+  back.appendChild(modal);
+
+  let partnerId = opts.partnerId != null ? Number(opts.partnerId)
+    : (others[0] && others[0].profileId);
+  // Selected meeting place: 'leo' (bank + hand) or a colocated siteId (fuel +
+  // cargo). Defaults to LEO; reset when the partner changes.
+  let place = 'leo';
+
+  function rebuild() {
+    modal.innerHTML = '';
+    const partner = others.find((p) => p.profileId === partnerId) || others[0];
+    partnerId = partner.profileId;
+    // The site both rockets share (non-LEO), if any. LEO is always a valid
+    // meeting place; a shared site is an extra option (usually none).
+    const shared = tradeSharedLocation(me, partner);
+    const sharedSite = (shared && shared !== 'leo') ? shared : null;
+    if (place !== 'leo' && place !== sharedSite) place = 'leo';
+    const context = place === 'leo' ? { kind: 'leo' } : { kind: 'site', siteId: place };
+
+    const head = document.createElement('div');
+    head.className = 'mp-trade-head';
+    head.innerHTML = `<h3>${opts.isCounter ? 'Counter offer' : 'Propose a trade'}</h3>`;
+    modal.appendChild(head);
+
+    // Partner picker (locked when countering an open trade).
+    const pwrap = document.createElement('label');
+    pwrap.className = 'mp-trade-field';
+    pwrap.innerHTML = '<span>Partner</span>';
+    const psel = document.createElement('select');
+    psel.innerHTML = others.map((p) =>
+      `<option value="${p.profileId}"${p.profileId === partnerId ? ' selected' : ''}>@${p.name}</option>`).join('');
+    psel.disabled = !!opts.isCounter;
+    psel.addEventListener('change', () => { partnerId = Number(psel.value); place = 'leo'; rebuild(); });
+    pwrap.appendChild(psel);
+    modal.appendChild(pwrap);
+
+    // Meeting-place picker. LEO is always available (the bank + hand); a
+    // colocated site unlocks fuel + cargo aboard. A trade is struck at exactly
+    // one place.
+    const mwrap = document.createElement('label');
+    mwrap.className = 'mp-trade-field';
+    mwrap.innerHTML = '<span>Meeting place</span>';
+    const msel = document.createElement('select');
+    let opts2 = `<option value="leo"${place === 'leo' ? ' selected' : ''}>LEO · bank & hand</option>`;
+    if (sharedSite) {
+      opts2 += `<option value="${sharedSite}"${place === sharedSite ? ' selected' : ''}>${onlineSiteLabel(sharedSite)} · colocated</option>`;
+    }
+    msel.innerHTML = opts2;
+    msel.addEventListener('change', () => { place = msel.value; rebuild(); });
+    mwrap.appendChild(msel);
+    modal.appendChild(mwrap);
+
+    const colo = document.createElement('div');
+    colo.className = 'mp-trade-colo ' + (context.kind === 'site' ? 'is-colo' : 'no-colo');
+    colo.textContent = context.kind === 'site'
+      ? `Meeting at ${onlineSiteLabel(place)} - fuel and cargo aboard can change hands.`
+      : sharedSite
+        ? `LEO meeting: aqua, hand patents, and abilities. (Switch to ${onlineSiteLabel(sharedSite)} for fuel & cargo.)`
+        : `LEO meeting: aqua, hand patents, and abilities. Park together at a site to trade fuel & cargo.`;
+    modal.appendChild(colo);
+
+    const cols = document.createElement('div');
+    cols.className = 'mp-trade-cols';
+    const giveCol = buildTradeColumn('You give', me, context);
+    const recvCol = buildTradeColumn('You receive', partner, context);
+    cols.append(giveCol.el, recvCol.el);
+    modal.appendChild(cols);
+
+    const err = document.createElement('div');
+    err.className = 'hud-error';
+    modal.appendChild(err);
+
+    const btns = document.createElement('div');
+    btns.className = 'mp-trade-btns';
+    const cancel = document.createElement('button');
+    cancel.type = 'button'; cancel.className = 'modal-btn'; cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', closeTradeBuilder);
+    const send = document.createElement('button');
+    send.type = 'button'; send.className = 'modal-btn primary';
+    send.textContent = opts.isCounter ? 'Send counter' : 'Send offer';
+    send.addEventListener('click', async () => {
+      const give = giveCol.read();
+      const receive = recvCol.read();
+      const empty = (s) => !s.aqua && !s.water && !s.handCardIds.length && !s.cargoCardIds.length && !s.abilities.length;
+      if (empty(give) && empty(receive)) { err.textContent = 'Put at least one item on the table.'; return; }
+      send.disabled = true;
+      const op = opts.isCounter
+        ? { kind: 'TRADE_COUNTER', give, receive }
+        : { kind: 'TRADE_OFFER', partnerId, give, receive };
+      const ok = await submitMpTradeOp(op);
+      if (ok) closeTradeBuilder();
+      else send.disabled = false;
+    });
+    btns.append(cancel, send);
+    modal.appendChild(btns);
+  }
+  rebuild();
+  back.addEventListener('click', (ev) => { if (ev.target === back) closeTradeBuilder(); });
+  document.body.appendChild(back);
+}
+function closeTradeBuilder() {
+  const b = document.getElementById('mp-trade-builder');
+  if (b) b.remove();
+}
+
+// One-line summary of a side from the giver's voice ("2 aqua + Tug").
+function tradeSideText(side) {
+  const parts = [];
+  if (side.aqua) parts.push(`${side.aqua} aqua`);
+  if (side.water) parts.push(`${side.water} fuel`);
+  for (const id of (side.handCardIds || [])) parts.push(cardLabel(id));
+  for (const id of (side.cargoCardIds || [])) parts.push(cardLabel(id));
+  for (const g of (side.abilities || [])) {
+    parts.push(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`);
+  }
+  return parts.length ? parts.join(' + ') : 'nothing';
+}
+
+// One side of a deal as DOM, with each card name a button that previews the
+// full card. Aqua / fuel / abilities render as plain text chips.
+function tradeSideEl(side) {
+  const el = document.createElement('span');
+  el.className = 'mp-trade-side';
+  const nodes = [];
+  if (side.aqua) nodes.push(document.createTextNode(`${side.aqua} aqua`));
+  if (side.water) nodes.push(document.createTextNode(`${side.water} fuel`));
+  for (const id of (side.handCardIds || []).concat(side.cargoCardIds || [])) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'mp-trade-cardname'; b.textContent = cardLabel(id);
+    b.title = 'View the full card';
+    b.addEventListener('click', () => openCardPreview(id));
+    nodes.push(b);
+  }
+  for (const g of (side.abilities || [])) {
+    nodes.push(document.createTextNode(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`));
+  }
+  if (!nodes.length) { el.appendChild(document.createTextNode('nothing')); return el; }
+  nodes.forEach((n, i) => { if (i) el.appendChild(document.createTextNode(' + ')); el.appendChild(n); });
+  return el;
+}
+
+// The trade negotiation view. Docked onto the trade-partner's roster row
+// (embedded: true, so the "Trade with @Name" head is dropped - the row already
+// names them). Shows the deal + accept / counter / decline; the table chat
+// below the panel doubles as the negotiation channel.
+function renderMpTradeBlock(snapshot, host, { embedded = false } = {}) {
+  const trade = snapshot.trade;
+  const myId = _onlineMe && _onlineMe.id;
+  const myRole = trade.initiatorId === myId ? 'initiator' : 'partner';
+  const otherId = myRole === 'initiator' ? trade.partnerId : trade.initiatorId;
+  const other = (snapshot.players || []).find((p) => p.profileId === otherId);
+  // Stored give/receive are initiator-perspective; flip for the partner.
+  const myGive = myRole === 'initiator' ? trade.give : trade.receive;
+  const myReceive = myRole === 'initiator' ? trade.receive : trade.give;
+  const myMove = trade.awaiting === myRole;
+
+  const block = document.createElement('div');
+  block.className = 'mp-trade-block';
+  if (!embedded) {
+    const h = document.createElement('div');
+    h.className = 'mp-trade-block-head';
+    const who = document.createElement('span');
+    who.className = 'player-name';
+    if (other && other.color) who.style.setProperty('--player-color', other.color);
+    who.textContent = other ? '@' + other.name : 'the other player';
+    h.append(document.createTextNode('🤝 Trade with '), who);
+    block.appendChild(h);
+  }
+
+  const deal = document.createElement('div');
+  deal.className = 'mp-trade-deal';
+  const mkRow = (label, side) => {
+    const row = document.createElement('div');
+    row.className = 'mp-trade-deal-row';
+    const l = document.createElement('span');
+    l.className = 'mp-trade-deal-label';
+    l.textContent = label;
+    row.append(l, tradeSideEl(side));
+    return row;
+  };
+  deal.append(mkRow('You give', myGive), mkRow('You receive', myReceive));
+  block.appendChild(deal);
+
+  const status = document.createElement('div');
+  status.className = 'muted mp-trade-status';
+  status.textContent = myMove ? 'Your move - accept, counter, or decline.'
+    : `Waiting for ${other ? '@' + other.name : 'the other player'}…`;
+  block.appendChild(status);
+
+  const btns = document.createElement('div');
+  btns.className = 'mp-trade-btns';
+  if (myMove) {
+    const accept = document.createElement('button');
+    accept.type = 'button'; accept.className = 'modal-btn primary'; accept.textContent = '✅ Accept';
+    accept.addEventListener('click', () => submitMpTradeOp({ kind: 'TRADE_ACCEPT', version: trade.version }));
+    const counter = document.createElement('button');
+    counter.type = 'button'; counter.className = 'modal-btn'; counter.textContent = '↔ Counter';
+    counter.addEventListener('click', () => openTradeBuilder({ partnerId: otherId, isCounter: true }));
+    const decline = document.createElement('button');
+    decline.type = 'button'; decline.className = 'modal-btn'; decline.textContent = '🚫 Decline';
+    decline.addEventListener('click', () => submitMpTradeOp({ kind: 'TRADE_DECLINE' }));
+    btns.append(accept, counter, decline);
+  } else {
+    const withdraw = document.createElement('button');
+    withdraw.type = 'button'; withdraw.className = 'modal-btn'; withdraw.textContent = 'Withdraw';
+    withdraw.addEventListener('click', () => submitMpTradeOp({ kind: 'TRADE_DECLINE' }));
+    btns.append(withdraw);
+  }
+  block.appendChild(btns);
+
+  const hint = document.createElement('div');
+  hint.className = 'muted mp-trade-chat-hint';
+  hint.textContent = '💬 Negotiate in the table chat below.';
+  block.appendChild(hint);
+
+  host.appendChild(block);
+}
+
+// Snapshot-driven trade reachability. The negotiation view itself lives in the
+// Multiplayer panel (renderMpPanel). This just keeps a turn-bar shortcut so a
+// player on another pane can jump to the open trade, and cleans up a stale
+// builder when the deal closes. No auto pane switch (the shortcut is a click).
+function renderOnlineTrade(trade) {
+  const old = document.getElementById('mp-trade-overlay');
+  if (old) old.remove();
+  const myId = _onlineMe && _onlineMe.id;
+  const amParty = trade && (trade.initiatorId === myId || trade.partnerId === myId);
+  if (!trade || !_online || !gameViewVisible() || !amParty) {
+    setMpTurnAction('trade', null);
+    if (!trade) closeTradeBuilder();
+    return;
+  }
+  const myRole = trade.initiatorId === myId ? 'initiator' : 'partner';
+  const myMove = trade.awaiting === myRole;
+  const otherId = myRole === 'initiator' ? trade.partnerId : trade.initiatorId;
+  const other = (_onlineSnapshot && _onlineSnapshot.players || []).find((p) => p.profileId === otherId);
+  // Always surface a 🤝 chip in the same turn-bar area auctions dock to, so an
+  // open trade is obvious from any pane. Clicking jumps to the Multiplayer pane
+  // where the deal is docked on the partner's row.
+  setMpTurnAction('trade', {
+    label: other ? `🤝 ${other.name}` : '🤝 Trade',
+    meta: myMove ? 'your move' : 'awaiting reply',
+    needsAction: myMove,
+    onClick: () => showPane('mp'),
+  });
+}
+
 // ----- first-player handoff overlay (round-end) -----
 //
 // When a round (Sunspot cycle) closes the server sets
@@ -1500,6 +2085,8 @@ function renderFirstPlayerChooser(pending) {
   const existing = document.getElementById('mp-first-player-overlay');
   if (!pending || !_online || !gameViewVisible()) {
     if (existing) existing.remove();
+    setMpTurnAction('firstplayer', null);
+    _firstPlayerMin = false;
     return;
   }
   const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
@@ -1514,12 +2101,29 @@ function renderFirstPlayerChooser(pending) {
     overlay.className = 'mp-first-player-overlay';
     overlay.innerHTML = `
       <div class="mp-first-player-modal" role="dialog" aria-label="First player">
-        <h3 class="mp-first-player-title">⭐ First player</h3>
+        <div class="mp-modal-titlebar">
+          <h3 class="mp-first-player-title">⭐ First player</h3>
+          <button type="button" class="mp-mini-btn" title="Minimize" aria-label="Minimize">&minus;</button>
+        </div>
         <p class="mp-first-player-sub"></p>
         <div class="mp-first-player-choices" id="mp-first-player-choices"></div>
         <div class="hud-error" id="mp-first-player-error"></div>
-      </div>`;
+      </div>
+      <button type="button" class="mp-mini-chip" aria-label="Restore first-player selection">
+        ⭐ First player
+        <span class="mp-mini-chip-meta"></span>
+      </button>`;
     document.body.appendChild(overlay);
+    overlay.querySelector('.mp-mini-btn').addEventListener('click', () => {
+      _firstPlayerMin = true;
+      overlay.classList.add('is-minimized');
+      renderFirstPlayerChooser(_onlineSnapshot && _onlineSnapshot.pendingFirstPlayer);
+    });
+    overlay.querySelector('.mp-mini-chip').addEventListener('click', () => {
+      _firstPlayerMin = false;
+      overlay.classList.remove('is-minimized');
+      setMpTurnAction('firstplayer', null);
+    });
   }
 
   const sub = overlay.querySelector('.mp-first-player-sub');
@@ -1540,7 +2144,9 @@ function renderFirstPlayerChooser(pending) {
       const label = document.createElement('span');
       label.textContent = '@' + p.name;
       btn.append(dot, label);
-      btn.disabled = _onlineBusy;
+      // Don't gate on _onlineBusy here: a fast-poll re-render mid-submit would
+      // render the buttons disabled and they'd never re-enable. The submit
+      // helper guards re-entrancy instead.
       btn.addEventListener('click', () => submitSetFirstPlayer(p.profileId));
       choices.appendChild(btn);
     }
@@ -1552,6 +2158,19 @@ function renderFirstPlayerChooser(pending) {
     nm.textContent = '@' + (chooser ? chooser.name : '?');
     sub.append(nm, document.createTextNode(' to name the next first player.'));
   }
+
+  // Collapsible like the auction / crew overlays: minimized, it docks an
+  // "in progress" chip in the turn bar (pulsing when it's the chooser's pick).
+  overlay.classList.toggle('is-minimized', _firstPlayerMin);
+  setMpTurnAction('firstplayer', _firstPlayerMin ? {
+    label: '⭐ First player',
+    meta: amChooser ? 'your pick' : 'in progress',
+    needsAction: amChooser,
+    onClick: () => {
+      _firstPlayerMin = false;
+      renderFirstPlayerChooser(_onlineSnapshot && _onlineSnapshot.pendingFirstPlayer);
+    },
+  } : null);
 }
 
 // ----- end-of-game standings -----
@@ -1847,7 +2466,7 @@ function openNewsCardPreview(cardId) {
   const panel = document.createElement('div');
   panel.className = 'card-modal-panel';
   try {
-    const el = renderCard(card, { type: card.type || (CREW_BY_ID[cardId] ? 'crew' : 'patent') });
+    const el = renderCard(card, { type: CREW_BY_ID[cardId] ? 'crew' : 'patent' });
     el.classList.add('card-modal-card');
     panel.appendChild(el);
   } catch { panel.textContent = card.name || cardId; }
@@ -1977,7 +2596,7 @@ function renderEventChooser(snapshot) {
       pick.type = 'button';
       pick.className = 'et-card-pick' + (id === selected ? ' is-selected' : '');
       if (card) {
-        try { pick.appendChild(renderCard(card, { type: card.type })); }
+        try { pick.appendChild(renderCard(card, { type: CREW_BY_ID[card.id] ? 'crew' : 'patent' })); }
         catch { pick.textContent = card.name || id; }
       } else {
         pick.textContent = id;
@@ -2390,6 +3009,91 @@ function syncMpTabVisibility() {
   if (!_online && panel.dataset.active === 'mp') showPane(null);
 }
 
+// Render the Sol Political Assembly (M0) tab from the snapshot: the hex board
+// with each player's delegates (in seat colour), the active-law read-out, and
+// Fundraise / Lobby controls. Shows the 🏛 tab only when the game has m0 on.
+function renderAssemblyTab(snapshot) {
+  const host = document.getElementById('assembly-panel');
+  const tab = document.getElementById('sidepanel-tab-assembly');
+  const on = !!(_online && snapshot && snapshot.m0 && snapshot.assembly);
+  if (tab) tab.hidden = !on;
+  const panel = document.getElementById('browse-sidepanel');
+  if (!on) {
+    if (host) host.innerHTML = '<p class="muted">Politics (Module 0) is off in this game.</p>';
+    if (panel && panel.dataset.active === 'assembly') showPane(null);
+    return;
+  }
+  if (!host) return;
+  const players = snapshot.players || [];
+  const myId = _onlineMe && _onlineMe.id;
+  const colorOf = (pid) => (players.find((p) => p.profileId === pid) || {}).color || '#888';
+  const dmap = snapshot.assembly.delegates || {};
+  const delegates = {};
+  for (const place of ASSEMBLY_PLACES) {
+    const m = dmap[place] || {};
+    const arr = [];
+    for (const [pid, n] of Object.entries(m)) for (let i = 0; i < (n | 0); i += 1) arr.push(colorOf(Number(pid)));
+    delegates[place] = arr;
+  }
+  const laws = assemblyActiveLaws(snapshot.assembly);
+  host.innerHTML = '';
+  host.appendChild(renderAssemblyPanel({ delegates }));
+
+  const placedByMe = ASSEMBLY_PLACES.reduce((s, p) => s + ((dmap[p] || {})[myId] | 0), 0);
+  const left = Math.max(0, DELEGATES_PER_PLAYER - placedByMe);
+  const myTurn = isOnlineMyTurn();
+  const activeNames = [...laws.active].map((k) => (ASSEMBLY_IDEOLOGY_BY_KEY[k] || {}).name || k);
+
+  const status = document.createElement('div');
+  status.className = 'assembly-controls';
+  status.innerHTML = `<div class="assembly-status"><strong>Active laws:</strong> `
+    + `${activeNames.length ? esc(activeNames.join(', ')) : 'none yet'}`
+    + `${laws.lobbyingDisabled ? ' · lobbying disabled' : ''}</div>`
+    + `<div class="assembly-status">Your delegates: <strong>${left}</strong> / ${DELEGATES_PER_PLAYER} in hand</div>`;
+  host.appendChild(status);
+  if (_spectator) return;
+
+  // Fundraise: place a delegate (or move one of yours) + gain aqua. Spends the op.
+  const fr = document.createElement('div');
+  fr.className = 'assembly-action';
+  const placeOpt = (p) => `<option value="${p}">${p === 'centrist' ? 'Centrist (center)' : (ASSEMBLY_IDEOLOGY_BY_KEY[p] || {}).name || p}</option>`;
+  const myPlaces = ASSEMBLY_PLACES.filter((p) => ((dmap[p] || {})[myId] | 0) > 0);
+  fr.innerHTML = `<div class="mp-detail-label">Fundraise (operation)</div>`
+    + `<label class="mp-trade-field"><span>Move from</span><select class="asm-fr-from"><option value="">(new delegate)</option>${myPlaces.map(placeOpt).join('')}</select></label>`
+    + `<label class="mp-trade-field"><span>Into</span><select class="asm-fr-place">${ASSEMBLY_PLACES.map(placeOpt).join('')}</select></label>`;
+  const frBtn = document.createElement('button');
+  frBtn.type = 'button'; frBtn.className = 'modal-btn primary'; frBtn.textContent = '🏛 Fundraise';
+  const noNew = left <= 0;
+  frBtn.disabled = !myTurn;
+  frBtn.title = !myTurn ? 'Wait for your turn.' : 'Place / move a delegate and gain aqua (spends your operation).';
+  frBtn.addEventListener('click', () => {
+    const from = fr.querySelector('.asm-fr-from').value || undefined;
+    const place = fr.querySelector('.asm-fr-place').value;
+    if (!from && noNew) { _onlineToast('No delegates left in hand - move one instead.', 'error'); return; }
+    submitOnlineOp({ kind: 'FUNDRAISE', place, from });
+  });
+  fr.appendChild(frBtn);
+  host.appendChild(fr);
+
+  // Lobby: activate an inactive ideology you hold a delegate in (free, once/turn).
+  const lobbyable = ASSEMBLY_IDEOLOGY_ORDER.filter((k) => !laws.active.has(k) && ((dmap[k] || {})[myId] | 0) > 0);
+  if (!laws.lobbyingDisabled && lobbyable.length) {
+    const lb = document.createElement('div');
+    lb.className = 'assembly-action';
+    lb.innerHTML = `<div class="mp-detail-label">Lobby (free, once per turn)</div>`
+      + `<label class="mp-trade-field"><span>Activate</span><select class="asm-lobby-key">${lobbyable.map(placeOpt).join('')}</select></label>`;
+    const lbBtn = document.createElement('button');
+    lbBtn.type = 'button'; lbBtn.className = 'modal-btn'; lbBtn.textContent = '🗳 Lobby (1 aqua)';
+    lbBtn.disabled = !myTurn;
+    lbBtn.title = myTurn ? 'Pay 1 aqua + discard a delegate there to use its law this turn.' : 'Wait for your turn.';
+    lbBtn.addEventListener('click', () => {
+      submitOnlineOp({ kind: 'LOBBY', ideology: lb.querySelector('.asm-lobby-key').value });
+    });
+    lb.appendChild(lbBtn);
+    host.appendChild(lb);
+  }
+}
+
 // Server site id (data/sites.js slug) -> display name. LEO / unknown
 // fall back gracefully.
 function onlineSiteLabel(serverSiteId) {
@@ -2747,14 +3451,6 @@ function renderMpPanel(snapshot) {
   const active = players[snapshot.activeIndex] || null;
   const myId = _onlineMe && _onlineMe.id;
   const myp = players.find((p) => p.profileId === myId) || null;
-  // Auctioneer-side gating mirrors the server (AUCTION_START needs your
-  // turn, at least one op left, no auction open, AND under the
-  // academia hand limit (can't start with 4+ cards - winning would
-  // overflow the hand; the server enforces the same).
-  const myHandCount = (myp && Array.isArray(myp.hand)) ? myp.hand.length : 0;
-  const canStartAuction = !!(active && active.profileId === myId
-    && myp && myp.opsRemaining > 0 && !snapshot.auction
-    && myHandCount < AUCTION_HAND_LIMIT);
   tableEl.innerHTML = '';
 
   const head = document.createElement('div');
@@ -2765,29 +3461,9 @@ function renderMpPanel(snapshot) {
   room.className = 'mp-room';
   room.textContent = _onlineRoom || 'Multiplayer table';
   row.appendChild(room);
-  if (_onlineLeave) {
-    const leave = document.createElement('button');
-    leave.type = 'button';
-    leave.className = 'mp-leave';
-    leave.textContent = '← Lobbies';
-    leave.title = 'Back to the multiplayer lobbies list (the game stays running; you can resume)';
-    leave.addEventListener('click', () => {
-      try { _onlineLeave(); } catch (err) { console.error('mp leave:', err); }
-    });
-    row.appendChild(leave);
-  }
-  if (canStartAuction) {
-    const startBtn = document.createElement('button');
-    startBtn.type = 'button';
-    startBtn.className = 'mp-leave mp-auction-start';
-    startBtn.textContent = _deckPickerOpen ? 'Cancel' : '🎯 Start auction';
-    startBtn.title = 'Put the top of a patent deck up for auction (costs 1 op)';
-    startBtn.addEventListener('click', () => {
-      _deckPickerOpen = !_deckPickerOpen;
-      renderMpPanel(_onlineSnapshot);
-    });
-    row.appendChild(startBtn);
-  }
+  // The "← Lobbies" nav and "Start auction" controls deliberately do NOT live
+  // in this panel header (leave / Research Auction belong to the app nav + the
+  // operations flow, not the table read-out). Removed per design.
   const myTurn = !!(active && active.profileId === myId);
   const turn = document.createElement('div');
   turn.className = 'mp-turn' + (myTurn ? ' mp-your-turn' : '');
@@ -2799,13 +3475,6 @@ function renderMpPanel(snapshot) {
   clock.textContent = `Turn ${formatTurnNumber(snapshot.round, snapshot.turn, snapshot.maxRounds)} · slot ${(snapshot.turn | 0) + 1}/12`;
   head.append(row, turn, clock);
   tableEl.appendChild(head);
-
-  if (_deckPickerOpen && canStartAuction) {
-    const picker = document.createElement('div');
-    picker.className = 'mp-deck-picker';
-    buildMpDeckPicker(picker, snapshot);
-    tableEl.appendChild(picker);
-  }
 
   const roster = document.createElement('div');
   roster.className = 'mp-roster';
@@ -2879,6 +3548,36 @@ function renderMpPlayer(p, isMe, isActive) {
   const headRow = document.createElement('div');
   headRow.className = 'mp-player-headrow';
   headRow.append(head, cardsBtn);
+  // Is there an open trade between me and this player? If so the deal docks
+  // onto this row (below); otherwise this player gets a propose-trade button.
+  const snap = _onlineSnapshot;
+  const trade = snap && snap.trade;
+  const myId = _onlineMe && _onlineMe.id;
+  const amInTrade = trade && (trade.initiatorId === myId || trade.partnerId === myId);
+  const tradeOtherId = amInTrade
+    ? (trade.initiatorId === myId ? trade.partnerId : trade.initiatorId) : null;
+  const isTradePartner = !isMe && amInTrade && p.profileId === tradeOtherId;
+  // Per-player Trade button: propose a deal directly with this player. Hidden
+  // for myself + spectators; disabled while an auction or another trade is open.
+  if (!isMe && !_spectator && !isTradePartner) {
+    const tradeBtn = document.createElement('button');
+    tradeBtn.type = 'button';
+    tradeBtn.className = 'mp-player-trade';
+    tradeBtn.textContent = '🤝';
+    tradeBtn.disabled = !!(snap && (snap.auction || snap.trade));
+    tradeBtn.title = (snap && snap.auction) ? 'Finish the auction first'
+      : (snap && snap.trade) ? 'A trade is already open'
+      : `Propose a trade with @${p.name}`;
+    tradeBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      openTradeBuilder({ partnerId: p.profileId });
+    });
+    headRow.append(tradeBtn);
+  }
+  if (isTradePartner) wrap.classList.add('mp-trade-with');
+  // Crew-ability badges: this player's own faction power plus any borrowed
+  // through a trade (timed grants show a turn counter, permanent ones a lock).
+  const badges = renderAbilityBadges(p);
   const detail = document.createElement('div');
   detail.className = 'mp-player-detail';
   detail.hidden = true;
@@ -2889,8 +3588,81 @@ function renderMpPlayer(p, isMe, isActive) {
       detail.dataset.built = '1';
     }
   });
-  wrap.append(headRow, detail);
+  if (badges) wrap.append(headRow, badges);
+  else wrap.append(headRow);
+  // Component supply: this player's factory cubes + colony domes (used / total),
+  // shown as pips in their seat colour so the dwindling bits are visible.
+  if (snap) wrap.append(renderComponentRow(p, snap));
+  wrap.append(detail);
+  // Dock the open trade onto this player's row so it's tied to who it's with,
+  // while the rest of the roster + table info stays visible.
+  if (isTradePartner) renderMpTradeBlock(snap, wrap, { embedded: true });
   return wrap;
+}
+
+// A player's physical component supply: 7 factory cubes + 7 colony domes, drawn
+// as a row of pips (filled = in play, in the player's seat colour) so the
+// remaining bits are obvious at a glance. The build ops enforce the same cap.
+function renderComponentRow(p, snapshot) {
+  const facUsed = ownedSiteCount(snapshot.factories, p.profileId);
+  const colUsed = ownedSiteCount(snapshot.colonies, p.profileId);
+  const claimUsed = ownedClaimCount(snapshot.discs, p.profileId);
+  const row = document.createElement('div');
+  row.className = 'mp-components';
+  row.append(
+    componentGroup('🏭', facUsed, FACTORY_CUBES, p.color, 'cube', 'factory cube'),
+    componentGroup('🏠', colUsed, COLONY_DOMES, p.color, 'dome', 'colony dome'),
+    componentGroup('🔘', claimUsed, CLAIM_DISCS, p.color, 'disc', 'claim disc'),
+  );
+  return row;
+}
+function componentGroup(glyph, used, total, color, shape, label) {
+  const g = document.createElement('span');
+  g.className = 'mp-comp-group';
+  g.title = `${used} of ${total} ${label}s in play (${total - used} left)`;
+  const lab = document.createElement('span');
+  lab.className = 'mp-comp-label';
+  lab.textContent = `${glyph} ${used}/${total}`;
+  const pips = document.createElement('span');
+  pips.className = 'mp-comp-pips';
+  for (let i = 0; i < total; i += 1) {
+    const pip = document.createElement('span');
+    pip.className = 'mp-pip mp-pip-' + shape + (i < used ? ' filled' : '');
+    if (i < used && color) pip.style.background = color;
+    pips.appendChild(pip);
+  }
+  g.append(lab, pips);
+  return g;
+}
+
+// A row of ability badges for a player: their own crew power (if any) plus any
+// abilities borrowed through a trade. Borrowed timed grants show "·Nt" turns
+// left; permanent ones a 🔒. Returns null when there is nothing to show.
+function renderAbilityBadges(p) {
+  const own = factionAbilityOf(p);
+  const borrowed = Array.isArray(p.borrowedAbilities) ? p.borrowedAbilities : [];
+  if (!own && !borrowed.length) return null;
+  const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
+  const row = document.createElement('div');
+  row.className = 'mp-ability-badges';
+  if (own) {
+    const b = document.createElement('span');
+    b.className = 'mp-ability own';
+    b.textContent = abilityLabel(own);
+    b.title = `${abilityLabel(own)} - this player's crew ability`;
+    row.appendChild(b);
+  }
+  for (const g of borrowed) {
+    const from = players.find((pp) => pp.profileId === g.fromPlayerId);
+    const perm = g.turnsRemaining == null;
+    const b = document.createElement('span');
+    b.className = 'mp-ability borrowed' + (perm ? ' permanent' : '');
+    b.textContent = abilityLabel(g.ability) + ' ' + (perm ? '🔒' : `·${g.turnsRemaining}t`);
+    b.title = `${abilityLabel(g.ability)} - borrowed from ${from ? '@' + from.name : 'another player'}`
+      + (perm ? ' (permanent, irreversible)' : `, ${g.turnsRemaining} turn(s) left`);
+    row.appendChild(b);
+  }
+  return row;
 }
 
 function buildMpPlayerDetail(host, p, isMe) {
@@ -3160,6 +3932,10 @@ function humanizeOnlineOpError(code, detail) {
     unknown_crew: 'That crew card does not exist.',
     unknown_crew_face: 'Pick the primary or secondary face.',
     crew_taken: 'Another player already claimed that crew. Pick a different one.',
+    wrong_crew_color: 'Pick one of the two crew on your own colour card.',
+    already_cycled: 'You\'ve already cycled a deck this turn - now take a card.',
+    cannot_cycle: 'That deck has nothing new to cycle to.',
+    draft_in_progress: 'The card draft is still going.',
     auction_in_progress: 'An auction is already underway.',
     need_opponent: 'Need another player to hold an auction.',
     hand_limit: 'Hand limit reached (4) - you cannot start or join an auction. Build or transfer cards first.',
@@ -3186,6 +3962,10 @@ function humanizeOnlineOpError(code, detail) {
     not_at_site: 'Park the rocket at the site first.',
     not_claimed: 'Prospect and claim this site before you can industrialize it.',
     already_industrialized: 'This site already has a factory.',
+    no_factory_cubes: 'All 7 of your factory cubes are in play - you can\'t build another factory.',
+    no_colony_domes: 'All 7 of your colony domes are in play - you can\'t found another colony.',
+    claim_limit: 'All 9 of your claim discs are placed - move one to this spot to prospect here.',
+    disc_has_factory: 'That claim has a factory on it - it can\'t be moved.',
     cannot_industrialize: 'Industrialize needs a refinery + a robonaut (with their supports) in the stack.',
     no_mine_revival: 'Mine Revival needs a Termite Nest aboard.',
     no_busted_disc: 'Mine Revival needs a busted (failed) claim here to revive.',
@@ -3227,6 +4007,20 @@ function humanizeOnlineOpError(code, detail) {
     already_rerolled: 'The buggy has already re-rolled this claim.',
     cannot_reroll: 'No re-roll available for this claim.',
     reroll_window_closed: 'The buggy re-roll is only available the turn you prospect.',
+    // --- trading ---
+    trade_in_progress: 'A trade is already open. Finish or call it off first.',
+    no_trade: 'There is no open trade.',
+    not_in_trade: 'You are not part of this trade.',
+    not_awaiting_you: 'It is the other player\'s move in this trade.',
+    bad_partner: 'Pick a valid trading partner.',
+    empty_trade: 'A trade needs at least one item on the table.',
+    trade_stale: 'The terms changed - review the new offer before accepting.',
+    fuel_needs_site: 'Fuel and cargo trade only when both ships are parked together at a site. At LEO, trade aqua instead.',
+    card_not_aboard: 'That card is no longer aboard the rocket.',
+    cannot_trade_dirt: 'Dirt fuel can\'t be traded - only water.',
+    ability_not_held: 'That ability is no longer available to grant.',
+    tank_grade_mismatch: 'The receiving tank holds dirt - water can\'t mix in.',
+    hand_full: 'That would overflow a hand (limit 4).',
   })[code] || (code ? String(code) : 'Something went wrong.');
 }
 
@@ -3540,19 +4334,18 @@ function wireHandStrip() {
     // (user, 2026-05): the player confirms the spend before any
     // money moves. Rulebook I4: Boost is also one Operation per
     // turn (the multi-card batch counts as one op).
-    const massOf = (c) => {
-      const f = (c && c.faces && c.faces.primary) || c || {};
-      return (f.mass != null ? f.mass : (c && c.mass)) | 0;
-    };
     const cards = marked.map((id) => lookup(id)).filter(Boolean);
     if (!cards.length) return;
-    const cost = cards.reduce((sum, c) => sum + massOf(c), 0);
     const have = getAqua();
     const n = cards.length;
-    if (cost > have) {
+    // A radiator's deployed side changes its mass (heavy is heavier), and boost
+    // cost IS total mass - so the cheapest possible spend is every radiator on
+    // its light side. If even that exceeds the bank, no side choice can afford it.
+    const minCost = cards.reduce((s, c) => s + boostMassOf(c, c.type === 'radiator' ? 'light' : undefined), 0);
+    if (minCost > have) {
       await confirmModal({
         title: '💸 Not enough Aqua',
-        body: `Boosting ${n} card${n === 1 ? '' : 's'} costs <strong>${cost}</strong> Aqua `
+        body: `Boosting ${n} card${n === 1 ? '' : 's'} costs at least <strong>${minCost}</strong> Aqua `
           + `(total mass), but your bank holds only <strong>${have}</strong>.`,
         yes: 'OK', no: '',
       });
@@ -3570,16 +4363,17 @@ function wireHandStrip() {
     const opNote = continuedBoost
       ? 'You already boosted this turn, so this rides up free (no operation).'
       : 'The first boost spends your operation; keep boosting free for the rest of the turn.';
-    const res = await openBoostModal({ cards, cost, have, opNote });
+    const res = await openBoostModal({ cards, have, opNote });
     if (!res.ok) return;
     const radSides = res.radSides || {};
+    const cost = res.cost | 0;   // final spend reflects each radiator's chosen side
     // Online: the BOOST is a server op. Submit the marked ids + each radiator's
     // chosen deployed side; the server moves Hand -> LEO, charges aqua, spends
     // the op, locks the side, and broadcasts. Skip the local mutation below -
     // the snapshot re-hydrate is the source of truth (and other players see it).
     if (_online) {
       const sent = await submitOnlineOp({ kind: 'BOOST', cardIds: marked, radSides });
-      if (sent) clearBoostMarks();
+      if (sent) { clearBoostMarks(); await offerBoostTransfer(marked); }
       return;
     }
     // Charge the Aqua first (affordability pre-checked above;
@@ -9712,6 +10506,33 @@ function doColonize(site, stack, options) {
 // resolves true on the "yes" path, false on cancel / Esc /
 // backdrop tap. Used for the afterburn engage prompt; future
 // destructive actions can reuse it.
+// After a successful online boost, the boosted cards sit in the LEO Stack and
+// it's easy to forget to move them onto the rocket. If the rocket is at LEO
+// (colocated with the LEO Stack), offer to transfer them now. `ids` are the
+// just-boosted card ids; only those that actually landed in LEO are offered.
+async function offerBoostTransfer(ids) {
+  if (!_online || !_onlineSnapshot || !_onlineMe) return;
+  const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
+  if (!me || !me.rocket) return;
+  // LEO -> rocket transfer needs the rocket at LEO (or empty, which forms there).
+  const atLeo = me.rocket.siteId == null;
+  const rocketEmpty = !((me.rocket.stack || []).length);
+  if (!atLeo && !rocketEmpty) return;
+  const inLeo = new Set((me.leo || []).map((s) => s.id));
+  const moveIds = (ids || []).filter((id) => inLeo.has(id));
+  if (!moveIds.length) return;
+  const n = moveIds.length;
+  const names = moveIds.map((id) => cardLabel(id)).join(', ');
+  const ok = await confirmModal({
+    title: '🚀 Move boosted cards to your rocket?',
+    body: `You boosted ${n} card${n === 1 ? '' : 's'} to your LEO Stack (${esc(names)}). `
+      + `Your rocket is at LEO - load ${n === 1 ? 'it' : 'them'} onto the rocket now?`,
+    yes: 'Transfer to rocket', no: 'Leave in LEO',
+  });
+  if (!ok) return;
+  await submitOnlineOp({ kind: 'TRANSFER', cardIds: moveIds, from: 'leo', to: 'rocket' });
+}
+
 function confirmModal({ title, body, yes = 'OK', no = 'Cancel' }) {
   return new Promise((resolve) => {
     document.querySelector('.confirm-modal-overlay')?.remove();
@@ -9758,7 +10579,22 @@ function confirmModal({ title, body, yes = 'OK', no = 'Cancel' }) {
 // this popup is the one chance to set it. Resolves { ok, radSides } where
 // radSides maps each radiator id to 'light' | 'heavy' (default 'heavy', the
 // max-cooling side). Cancel resolves { ok: false }.
-function openBoostModal({ cards, cost, have, opNote }) {
+
+// Mass a card adds when boosted = aqua cost contribution. A radiator's deployed
+// side changes its mass (light = the base, heavy is heavier), so the side is
+// passed through. Mirror of the server's boostMass in engine.js.
+function boostMassOf(card, radSide) {
+  if (card && card.type === 'radiator') {
+    const f = card.faces && card.faces.primary;
+    const side = radSide === 'light' ? 'light' : 'heavy';
+    const blk = f && f[side];
+    if (blk && blk.mass != null) return blk.mass | 0;
+  }
+  const f = (card && card.faces && card.faces.primary) || card || {};
+  return (f.mass != null ? f.mass : (card && card.mass)) | 0;
+}
+
+function openBoostModal({ cards, have, opNote }) {
   return new Promise((resolve) => {
     document.querySelector('.confirm-modal-overlay')?.remove();
     const overlay = document.createElement('div');
@@ -9766,15 +10602,19 @@ function openBoostModal({ cards, cost, have, opNote }) {
     const radiators = (cards || []).filter((c) => c && c.type === 'radiator');
     const sides = {};
     for (const c of radiators) sides[c.id] = 'heavy';
+    // Live total cost = total mass, with each radiator's mass taken from its
+    // currently-selected side (heavy is heavier, so it costs more to boost).
+    const totalCost = () => (cards || []).reduce((s, c) =>
+      s + boostMassOf(c, c.type === 'radiator' ? sides[c.id] : undefined), 0);
     const close = (ok) => {
       overlay.remove();
       document.removeEventListener('keydown', onKey);
-      resolve(ok ? { ok: true, radSides: sides } : { ok: false });
+      resolve(ok ? { ok: true, radSides: sides, cost: totalCost() } : { ok: false });
     };
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
     const onKey = (e) => {
       if (e.key === 'Escape') close(false);
-      else if (e.key === 'Enter') close(true);
+      else if (e.key === 'Enter') { if (totalCost() <= have) close(true); }
     };
     document.addEventListener('keydown', onKey);
     const panel = document.createElement('div');
@@ -9789,32 +10629,53 @@ function openBoostModal({ cards, cost, have, opNote }) {
       <div class="boost-rad-row" data-id="${esc(c.id)}">
         <span class="boost-rad-name">${esc(c.name)}</span>
         <div class="boost-rad-toggle">
-          <button type="button" class="boost-rad-side" data-side="light">Light (${sideTherms(c, 'light')}🌡)</button>
-          <button type="button" class="boost-rad-side is-active" data-side="heavy">Heavy (${sideTherms(c, 'heavy')}🌡)</button>
+          <button type="button" class="boost-rad-side" data-side="light">Light · ${sideTherms(c, 'light')}🌡 · ${boostMassOf(c, 'light')} mass</button>
+          <button type="button" class="boost-rad-side is-active" data-side="heavy">Heavy · ${sideTherms(c, 'heavy')}🌡 · ${boostMassOf(c, 'heavy')} mass</button>
         </div>
       </div>`).join('');
     panel.innerHTML = `
       <h3>🛰 Boost to LEO</h3>
       <p>Boost <strong>${n}</strong> card${n === 1 ? '' : 's'} from your Hand to the LEO Stack
-        for <strong>${cost}</strong> Aqua (total mass ${cost}).
-        Bank: <strong>${have}</strong> → <strong>${have - cost}</strong>. ${opNote || 'The first boost spends your operation; keep boosting free for the rest of the turn.'}</p>
-      ${radiators.length ? `<p class="muted boost-rad-help">Pick each radiator's deployed side - it locks once boosted (only radiation damage can flip heavy to light afterward):</p>
+        for <strong class="boost-cost-val"></strong> Aqua (total mass).
+        Bank: <strong>${have}</strong> → <strong class="boost-after-val"></strong>. ${opNote || 'The first boost spends your operation; keep boosting free for the rest of the turn.'}</p>
+      ${radiators.length ? `<p class="muted boost-rad-help">Pick each radiator's deployed side - it locks once boosted (only radiation damage can flip heavy to light afterward). The heavy side cools more but weighs more, so it costs more Aqua to boost:</p>
       <div class="boost-rad-list">${radRows}</div>` : ''}
+      <div class="hud-error boost-cost-warn" hidden></div>
       <div class="turn-confirm-actions">
-        <button type="button" class="popup-btn primary" data-act="yes">🛰 Boost (${cost} aqua)</button>
+        <button type="button" class="popup-btn primary" data-act="yes">🛰 Boost</button>
         <button type="button" class="popup-btn" data-act="no">Cancel</button>
       </div>`;
+    const costEl = panel.querySelector('.boost-cost-val');
+    const afterEl = panel.querySelector('.boost-after-val');
+    const warnEl = panel.querySelector('.boost-cost-warn');
+    const yesBtn = panel.querySelector('[data-act="yes"]');
+    const refreshCost = () => {
+      const c = totalCost();
+      const afford = c <= have;
+      if (costEl) costEl.textContent = String(c);
+      if (afterEl) afterEl.textContent = String(have - c);
+      if (yesBtn) {
+        yesBtn.textContent = `🛰 Boost (${c} aqua)`;
+        yesBtn.disabled = !afford;
+      }
+      if (warnEl) {
+        warnEl.hidden = afford;
+        if (!afford) warnEl.textContent = `Not enough Aqua: need ${c}, have ${have}. Switch a radiator to its light side.`;
+      }
+    };
     panel.querySelectorAll('.boost-rad-row').forEach((row) => {
       const id = row.dataset.id;
       row.querySelectorAll('.boost-rad-side').forEach((btn) => {
         btn.addEventListener('click', () => {
           sides[id] = btn.dataset.side === 'light' ? 'light' : 'heavy';
           row.querySelectorAll('.boost-rad-side').forEach((b) => b.classList.toggle('is-active', b === btn));
+          refreshCost();
         });
       });
     });
-    panel.querySelector('[data-act="yes"]').addEventListener('click', () => close(true));
+    yesBtn.addEventListener('click', () => { if (totalCost() <= have) close(true); });
     panel.querySelector('[data-act="no"]').addEventListener('click', () => close(false));
+    refreshCost();
     overlay.appendChild(panel);
     mountOverlay(overlay);
   });
@@ -10941,6 +11802,46 @@ function freeMarketSellFromHand(card, afterFn) {
   });
 }
 
+// At the 9-claim cap: pick one of my placed discs to move to the new spot.
+// `discs` is [{ siteId, disc }]; onPick(siteId) fires the relocating prospect.
+function openClaimRelocatePicker(discs, onPick) {
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal';
+  modal.style.maxWidth = '420px';
+  const close = () => back.remove();
+  const h = document.createElement('div');
+  h.className = 'mp-trade-head';
+  h.innerHTML = '<h3>All 9 claim discs are placed</h3>';
+  modal.appendChild(h);
+  const note = document.createElement('div');
+  note.className = 'mp-trade-colo no-colo';
+  note.textContent = 'Move one of your existing claims to this new spot, or cancel.';
+  modal.appendChild(note);
+  const list = document.createElement('div');
+  list.className = 'mp-relocate-list';
+  for (const e of discs) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'modal-btn mp-relocate-item';
+    b.textContent = `✓ claim · ${onlineSiteLabel(e.siteId)}`;
+    b.addEventListener('click', () => { close(); onPick(e.siteId); });
+    list.appendChild(b);
+  }
+  modal.appendChild(list);
+  const btns = document.createElement('div');
+  btns.className = 'mp-trade-btns';
+  const cancel = document.createElement('button');
+  cancel.type = 'button'; cancel.className = 'modal-btn'; cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', close);
+  btns.appendChild(cancel);
+  modal.appendChild(btns);
+  back.appendChild(modal);
+  back.addEventListener('click', (ev) => { if (ev.target === back) close(); });
+  document.body.appendChild(back);
+}
+
 function doProspect(site, prosp) {
   if (!prosp) return;
   // Online: the server rolls the prospect die and resolves the disc.
@@ -10953,6 +11854,25 @@ function doProspect(site, prosp) {
     // request for the same site this turn resolves as the same valid scan
     // instead of bouncing. The raygun scan is a free action (no operation).
     const snap = _onlineSnapshot || {};
+    // Claim disc supply: at the cap (9 placed), the player must MOVE an existing
+    // disc to this new spot. Prompt for which one, then send it as relocateFrom.
+    const myId = _onlineMe && _onlineMe.id;
+    if (ownedClaimCount(snap.discs, myId) >= CLAIM_DISCS) {
+      const mine = Object.keys(snap.discs || {})
+        .filter((k) => snap.discs[k] && snap.discs[k].ownerId === myId
+          && snap.discs[k].outcome === 'success')   // only active claims occupy a disc
+        .map((k) => ({ siteId: k, disc: snap.discs[k] }))
+        // A disc with a factory built on it is locked - it can't be moved.
+        .filter((e) => e.siteId !== siteId && !(snap.factories && snap.factories[e.siteId]));
+      if (!mine.length) {
+        _onlineToast('All 9 claim discs are placed, and every movable one has a factory on it.', 'error');
+        return;
+      }
+      openClaimRelocatePicker(mine, (fromSiteId) => {
+        submitOnlineOp({ kind: 'PROSPECT', siteId, turn: snap.turn, round: snap.round, relocateFrom: fromSiteId });
+      });
+      return;
+    }
     submitOnlineOp({ kind: 'PROSPECT', siteId, turn: snap.turn, round: snap.round });
     return;
   }
@@ -12631,7 +13551,9 @@ async function moveRocket() {
   // (not a coasting waypoint) with a crew aboard, and isn't already carrying
   // that zone's chit (so coasting through / re-landing doesn't re-prompt).
   const landedHere = arrived && !arrived.isWaypoint && arrived.isLandable !== false;
-  const willAwardChit = landedHere && arrivedZone && arrivedZone !== 'Earth'
+  // LEO (home) never carries a chit, but the rest of the Earth zone (Luna,
+  // near-Earth asteroids) does - so gate on LEO, not the whole Earth zone.
+  const willAwardChit = landedHere && arrivedZone && !isLeoSite(arrived)
     && !zoneChitTaken(arrivedZone) && !getChits().some((c) => c.zone === arrivedZone) && crewAboard;
   const willCashIn = isLeoSite(arrived) && getChits().length > 0;
   const chitsToCash = willCashIn ? getChits() : [];
@@ -14149,7 +15071,7 @@ function showSitePopupFor(site) {
   // to load it now (the "I left it on arrival, grab it later" path). Lands
   // just before Navigate-to so the pure-inspection action stays last.
   if (rocketSite && site.id === rocketSite.id
-      && site.solarZone && site.solarZone !== 'Earth'
+      && site.solarZone && !isLeoSite(site)
       && !zoneChitTaken(site.solarZone) && stackHasCrew()) {
     const sds = getChitSides(site.solarZone);
     actions.push({
@@ -15892,7 +16814,7 @@ async function claimGloryHere(site) {
     if (ok) refreshOpenSitePopup();
     return ok;
   }
-  if (zone === 'Earth' || zoneChitTaken(zone) || !stackHasCrew()) return false;
+  if (isLeoSite(site) || zoneChitTaken(zone) || !stackHasCrew()) return false;
   const ownerId = firstCrewId();
   awardChitForZone(zone, getTurn(), ownerId);
   const s = getChitSides(zone);
@@ -16034,12 +16956,12 @@ function paintGlory() {
   // named). One unified row.
   // All-chits board: every claimable heliocentric zone as a coin. Available
   // zones are vibrant flip-coins; a zone any player has claimed is dimmed +
-  // shows the claimer's seat name (Earth is home, so it has no chit).
+  // shows the claimer's seat name. LEO (home, a Lagrange point) isn't a site,
+  // but the rest of the Earth zone has a chit like any other.
   const board = host.querySelector('#glory-zone-board');
   if (board) {
     const taken = takenZoneMap();
     for (const zone of Object.keys(ZONE_CHIT_VPS)) {
-      if (zone === 'Earth') continue;
       board.appendChild(buildZoneBoardChit(zone, taken[zone] || null));
     }
   }
@@ -16176,6 +17098,8 @@ const MP_LOG_ICONS = {
   SET_WIRING: '🔗',
   SET_RADIATOR_SIDE: '♨',
   AFTERBURN: '🔥',
+  TRADE_OFFER: '🤝', TRADE_COUNTER: '↔', TRADE_ACCEPT: '✅', TRADE_DECLINE: '🚫',
+  DRAFT_PICK: '🃏', DRAFT_CYCLE: '♻',
   UNDO: '↩', REDO: '↪',
 };
 

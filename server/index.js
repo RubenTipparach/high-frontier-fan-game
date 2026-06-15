@@ -583,7 +583,7 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // asks for 2+. Start only requires >=1 member, so a solo room can begin.
   const maxPlayers = Math.max(1, Math.min(5, Number(body.maxPlayers) || 5));
   // Game length: 5 (short, default) / 6 (medium) / 7 (extra long).
-  const maxRounds = [5, 6, 7].includes(Number(body.maxRounds)) ? Number(body.maxRounds) : 5;
+  const maxRounds = [4, 5, 6, 7].includes(Number(body.maxRounds)) ? Number(body.maxRounds) : 5;
   const joinPolicy = body.joinPolicy === 'invite-only' ? 'invite-only' : 'open';
   // Solo-game setup options. Stored on the lobby and honoured at start ONLY for
   // 1-player rooms (multiplayer is always market + the standard bank). Null when
@@ -596,6 +596,9 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // Opt-in draft-round opening (any player count). Stored on the lobby, applied
   // at start.
   const draftStart = body.draftStart ? 1 : 0;
+  // Opt-in Module 0 (Sol Political Assembly). Fixed at creation; games already
+  // running default to off (no retroactive apply).
+  const m0 = body.m0 ? 1 : 0;
   const now = nowMs();
   let code, info;
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -603,10 +606,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
     try {
       info = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start)
-           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, m0)
+           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?)`
         )
-        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart);
+        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, m0);
       break;
     } catch (err) {
       if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -642,6 +645,8 @@ app.get('/lobbies', (_req, res) => {
       `SELECT l.id, l.code, l.name,
               l.max_players AS maxPlayers,
               l.status,
+              l.draft_start AS draftStart,
+              l.m0          AS m0,
               l.created_at  AS createdAt,
               p.name        AS hostName,
               (SELECT COUNT(*) FROM lobby_members lm WHERE lm.lobby_id = l.id) AS memberCount
@@ -664,6 +669,10 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
     .prepare(
       `SELECT l.id, l.code, l.name, l.status,
               l.max_players AS maxPlayers,
+              l.join_policy AS joinPolicy,
+              l.host_id     AS hostId,
+              l.draft_start AS draftStart,
+              l.m0          AS m0,
               l.created_at  AS createdAt,
               p.name        AS hostName,
               (SELECT COUNT(*) FROM lobby_members lm2 WHERE lm2.lobby_id = l.id) AS memberCount,
@@ -889,7 +898,7 @@ app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
 app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, m0 FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -912,7 +921,7 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
     seat: m.seat || i + 1,
   }));
   // Lobbies predating the column come back null; default to 5.
-  const maxRounds = [5, 6, 7].includes(lobby.max_rounds) ? lobby.max_rounds : 5;
+  const maxRounds = [4, 5, 6, 7].includes(lobby.max_rounds) ? lobby.max_rounds : 5;
   // Solo-game setup options are honoured only for a 1-player game; multiplayer
   // is always market + the standard starting bank. Unset (or non-solo) leaves
   // them undefined so createInitialState uses its defaults.
@@ -922,7 +931,8 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   // Draft-start mode applies at any player count (it's a setup-flow choice, not
   // a solo-only one like the bank / economy above).
   const draftStart = !!lobby.draft_start;
-  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart });
+  const m0 = !!lobby.m0;
+  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, m0 });
 
   const now = nowMs();
   const gameId = db.transaction(() => {
@@ -1237,6 +1247,23 @@ function dispatchTurnNotifications(gameId, kind, state) {
       if (active) {
         if (dmOn) notifyProfile(active.profileId, 'turn', `🛸 It's your turn in **${name}**.${jump}`);
         notifyWebhook(`🛸 ${active.name || 'A player'}'s turn in **${name}**.${jump}`);
+      }
+    } else if (kind === 'TRADE_OFFER' || kind === 'TRADE_COUNTER') {
+      // A trade offer / counter just landed: ping the player now on the clock
+      // (the awaiting party) so they can accept, counter, or decline. DM under
+      // the 'turn' pref (it's a "your move" nudge), plus a channel post.
+      const t = state.trade;
+      if (t) {
+        const awaitingId = t.awaiting === 'initiator' ? t.initiatorId : t.partnerId;
+        const fromId = t.awaiting === 'initiator' ? t.partnerId : t.initiatorId;
+        const awaiting = state.players.find((p) => p.profileId === awaitingId);
+        const from = state.players.find((p) => p.profileId === fromId);
+        const verb = kind === 'TRADE_OFFER' ? 'offered you a trade' : 'sent a counteroffer';
+        const cverb = kind === 'TRADE_OFFER' ? 'offered a trade' : 'sent a counteroffer';
+        if (awaiting) {
+          if (dmOn) notifyProfile(awaiting.profileId, 'turn', `🤝 ${from ? from.name : 'A player'} ${verb} in **${name}**.${jump}`);
+          notifyWebhook(`🤝 ${from ? from.name : 'A player'} ${cverb} to ${awaiting.name || 'a player'} in **${name}**.${jump}`);
+        }
       }
     } else if (kind === 'AUCTION_START') {
       const auctioneer = state.auction && state.auction.auctioneerId;
@@ -1749,11 +1776,13 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
     // player can never unwind into the turn that just ended). Auction
     // ops advance the floor too: an auction moves aqua / decks / hands
     // that are not on the per-turn undo stack, so letting undo replay
-    // across one would silently drop those effects. PICK_CREW is also
+    // across one would silently drop those effects. TRADE ops are the
+    // same - a finalized trade moves two players' aqua / cards / water /
+    // abilities off the active player's undo stack. PICK_CREW is also
     // permanent (session-setup), and SET_FIRST_PLAYER opens a fresh
     // round-leader turn, so both commit the same way.
     if (kind === 'END_TURN' || kind === 'PICK_CREW' || kind === 'SET_FIRST_PLAYER'
-        || kind.startsWith('AUCTION_')) {
+        || kind.startsWith('AUCTION_') || kind.startsWith('TRADE_')) {
       db.prepare('UPDATE games SET committed_seq = ? WHERE id = ?').run(nextSeq, id);
     }
     if (result.state.status === 'finished') {

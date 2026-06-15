@@ -207,6 +207,22 @@ code {
   line-height: 1.4;
   color: var(--ink-mute);
 }
+/* Checkbox option row (Draft start / Module 0, etc.) - each on its own line,
+   checkbox aligned to the top of the wrapping label text. */
+.check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 6px 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink);
+  cursor: pointer;
+}
+.check-row input[type="checkbox"] { margin: 2px 0 0; flex: 0 0 auto; }
+.check-row span { flex: 1 1 auto; }
+.check-row strong { font-weight: 700; }
+
 /* Solo-room setup option groups (starting aqua, card economy). */
 .solo-opt-group { margin: 12px 0; }
 .solo-opt-label {
@@ -1009,3 +1025,28 @@ body.in-lobby .main-menu-fab { display: none; }
 /* Breathing room above the notify Save / Test DM buttons so they don't
    crowd the event checkboxes. */
 #notify-section .notify-actions { margin-top: 14px; }
+
+/* Open-tables section headers (Private / Open groups). */
+.lobby-list-group {
+  list-style: none;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--ink-dim);
+  padding: 10px 4px 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
+/* Module / house-rule tag chips on lobby + game rows. */
+.module-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.module-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+.module-tag.tag-m0 { background: rgba(120,140,220,0.16); color: #cdd6ff; border-color: #3a4a7a; }
+.module-tag.tag-draft { background: rgba(200,160,80,0.16); color: #f0d9a8; border-color: #7a6326; }

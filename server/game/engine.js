@@ -46,6 +46,10 @@ import { blackStepsBetween, walkBlackDown } from '../../data/fuel-graph.js';
 import { weightClassForMass } from '../../data/net-thrust-track.js';
 import { SOLAR_ZONE_INFO, adjacentSites } from '../../data/sites.js';
 import { ZONE_CHIT_VPS } from '../../data/zone-chits.js';
+import {
+  activeLaws, freshAssembly, ASSEMBLY_PLACES, IDEOLOGY_ORDER,
+  delegatesRemaining, playerDelegatesInPlace,
+} from '../../data/assembly.js';
 // Movement + metadata both come from the planner graph (the vendor
 // mission-planner data the client also uses). siteBySlug layers the
 // curated data/sites.js metadata onto a planner slug, so there is ONE
@@ -97,6 +101,20 @@ function slotMass(slot) {
   return 0;
 }
 
+// Mass a card adds when boosted (= its aqua cost). A radiator's deployed side
+// changes its mass (light = the base, heavy is heavier), so the chosen side is
+// honoured. Mirror of browse.js#boostMassOf.
+function boostMass(id, radSide) {
+  const card = PATENTS_BY_ID[id];
+  if (card && card.type === 'radiator') {
+    const f = card.faces && card.faces.primary;
+    const side = radSide === 'light' ? 'light' : 'heavy';
+    const blk = f && f[side];
+    if (blk && blk.mass != null) return blk.mass | 0;
+  }
+  return slotMass({ id });
+}
+
 // Water cost per unit of delta-v for this rocket. With an active
 // thruster we scale by its ISP against wet mass (ship.js#burnCost
 // model: ceil(wetMass / isp) water per burn). With no thruster yet
@@ -120,6 +138,34 @@ const TANK_MAX = 32; // wet-mass cap (mirror of rocket.js#TANK_MAX)
 // START or JOIN/BID in an auction while holding this many cards or
 // more (winning a lot would overflow the hand). User 2026-05-29.
 const AUCTION_HAND_LIMIT = 4;
+
+// Physical component supply per player (HF4 wooden bits): 7 cubes = the factory
+// limit, 7 domes = the colony limit. A player can never have more than this many
+// of each in play at once. (Claim discs are NOT capped - they can exceed 9.)
+// Mirrored client-side in browse.js (FACTORY_CUBES / COLONY_DOMES /
+// CLAIM_DISCS); keep synced. Claim discs ARE capped (9), but at the cap a
+// player may MOVE an existing disc to the new spot instead of being blocked.
+const FACTORY_CUBES = 7;
+const COLONY_DOMES = 7;
+const CLAIM_DISCS = 9;
+// Count a player's in-play factories / colonies (entries in the site-keyed map
+// owned by them), for the component-supply limit.
+function ownedSiteCount(map, profileId) {
+  let n = 0;
+  for (const k in (map || {})) if (map[k] && map[k].ownerId === profileId) n += 1;
+  return n;
+}
+// Claim discs in play for a player = their SUCCESSFUL claims only. A busted
+// prospect does not tie up a disc (the disc is spent on the roll, not parked),
+// so failed discs never count toward the 9-disc supply.
+function ownedClaimCount(discs, profileId) {
+  let n = 0;
+  for (const k in (discs || {})) {
+    const d = discs[k];
+    if (d && d.ownerId === profileId && d.outcome === 'success') n += 1;
+  }
+  return n;
+}
 
 // The active face of a stack slot: secondary when installed
 // black-side-up, else primary. Mirror of rocket.js#installedFace.
@@ -359,11 +405,12 @@ function zoneChitTaken(state, zone) {
   );
 }
 
-// First entry into a non-Earth heliocentric zone earns a glory chit
-// (mirror of js/game/glory.js#awardChitForZone). Earth is home and
-// never awards. Mutates the player's glory record in place.
+// First entry into a heliocentric zone earns a glory chit (mirror of
+// js/game/glory.js#awardChitForZone). LEO is the home base and never awards,
+// but the rest of the Earth zone (Luna, near-Earth asteroids) does. Mutates the
+// player's glory record in place.
 function maybeAwardGlory(state, player, site, turn) {
-  if (!site || !site.solarZone || site.solarZone === 'Earth') return null;
+  if (!site || !site.solarZone) return null;
   if (player.glory.visited.includes(site.solarZone)) return null;
   // Game-wide single-claim rule: if any player already retrieved this zone's
   // chit there is nothing left here to pick up. Without this gate two rockets
@@ -385,10 +432,10 @@ function maybeAwardGlory(state, player, site, turn) {
 // Free action: load the still-unclaimed glory chit for the zone the
 // rocket is parked in (a crew must be aboard). The explicit counterpart to
 // declining the on-arrival pick-up; mirrors the client's claimGloryHere.
-// maybeAwardGlory enforces the zone / Earth / already-claimed / crew gates,
-// so a null result means there is nothing here to load.
+// maybeAwardGlory enforces the zone / already-claimed / crew gates, so a null
+// result means there is nothing here to load. LEO (home) never carries a chit.
 function applyLoadGlory(state, _op, player) {
-  const site = player.rocket.siteId ? siteById(player.rocket.siteId) : null;
+  const site = (player.rocket.siteId && !rocketAtLeo(player)) ? siteById(player.rocket.siteId) : null;
   const chit = site ? maybeAwardGlory(state, player, site, state.turn) : null;
   if (!chit) return fail('no_chit_to_load');
   return { ok: true, state, log: `${player.name} loaded the ${chit.zone} glory chit.` };
@@ -539,11 +586,30 @@ function grantPrivilege(player, key) {
   player.grantedPrivileges = Array.isArray(player.grantedPrivileges) ? player.grantedPrivileges : [];
   if (!player.grantedPrivileges.includes(key)) player.grantedPrivileges.push(key);
 }
+// Crew abilities borrowed through a trade behave like an owned privilege for
+// their term. Like grantedPrivileges they are NOT suspended by Anarchy (they
+// are a property of the player, not the live crew face).
+function hasBorrowedAbility(player, key) {
+  return !!(player && Array.isArray(player.borrowedAbilities)
+    && player.borrowedAbilities.some((g) => g && g.ability === key));
+}
+// Does this player actually HOLD an ability they could grant? Their faction
+// face's printed power (regardless of Anarchy - they still own the crew, it is
+// only suspended for their own use) plus any permanent grants they hold.
+function playerOwnsAbility(player, key) {
+  if (!player || !key) return false;
+  const card = player.faction && CREW_BY_ID[player.faction.cardId];
+  const face = card && card.faces && card.faces[player.faction.face];
+  const factionKey = face ? privKey(face.bonus) : null;
+  return factionKey === key || hasGrantedPrivilege(player, key);
+}
 function hasPrivilege(state, player, key) {
-  return privilegeOf(state, player) === key || hasGrantedPrivilege(player, key);
+  return privilegeOf(state, player) === key || hasGrantedPrivilege(player, key)
+    || hasBorrowedAbility(player, key);
 }
 function playersWithPrivilege(state, key) {
-  return (state.players || []).filter((p) => privilegeOf(state, p) === key || hasGrantedPrivilege(p, key));
+  return (state.players || []).filter((p) => privilegeOf(state, p) === key
+    || hasGrantedPrivilege(p, key) || hasBorrowedAbility(p, key));
 }
 // May this player commit a Felony? Yes during Anarchy (everyone gains
 // Felonious, K2e), OR if they hold the Felonious privilege (Taikonauts) the
@@ -1560,7 +1626,7 @@ function applyMove(state, op, player) {
   // Loading the chit is the player's call (pickupChit). Default true so a
   // client that omits the flag still auto-loads; "Leave it" sends false and
   // the chit stays on the site for a later LOAD_GLORY (Claim glory chit).
-  const chit = (destSite && op.pickupChit !== false)
+  const chit = (destSite && op.pickupChit !== false && dest !== leoSlug())
     ? maybeAwardGlory(state, player, destSite, state.turn) : null;
   // Arriving home (LEO == null siteId): a crew hauls its carried glory chits
   // back to score them. The server doesn't track which crew carried which chit,
@@ -1679,14 +1745,15 @@ function applyBoost(state, op, player) {
   for (const id of ids) {
     if (player.hand.indexOf(id) < 0) return fail('not_in_hand');
   }
-  // Cost = total mass of the boosted cards (aqua).
+  // Cost = total mass of the boosted cards (aqua). A radiator's mass depends on
+  // its chosen deployed side (heavy is heavier), so factor that in per id.
+  const radSides = (op.radSides && typeof op.radSides === 'object') ? op.radSides : {};
   let cost = 0;
-  for (const id of ids) cost += slotMass({ id });
+  for (const id of ids) cost += boostMass(id, radSides[id]);
   if (cost > player.aqua) return fail('insufficient_aqua');
   // Move them hand -> LEO. A radiator locks its deployed light/heavy side here
   // (op.radSides[id]); default heavy (max cooling). Only radiation damage flips
   // it afterward.
-  const radSides = (op.radSides && typeof op.radSides === 'object') ? op.radSides : {};
   for (const id of ids) {
     const idx = player.hand.indexOf(id);
     if (idx >= 0) player.hand.splice(idx, 1);
@@ -2315,6 +2382,26 @@ function applyProspect(state, op, player) {
   const free = begun && (kind === 'raygun' || buggyRoams);
   if (!free && player.opsRemaining <= 0) return fail('no_ops_left');
 
+  // Claim disc supply: 9 per player. At the cap a player may MOVE one of their
+  // existing discs to this new spot (op.relocateFrom names it); the disc is
+  // freed BEFORE the roll so the count stays 9. Without a valid relocation the
+  // prospect is blocked (claim_limit) so the client can prompt for one. The
+  // disc commits to the new site whatever the roll, exactly like placing it.
+  let relocatedName = null;
+  if (ownedClaimCount(state.discs, player.profileId) >= CLAIM_DISCS) {
+    const relo = String(op.relocateFrom || '');
+    const reloDisc = relo && state.discs[relo];
+    // Only an active (successful) claim occupies a disc, so only one of those
+    // can be moved to free a slot; a busted disc isn't holding a disc at all.
+    if (!reloDisc || reloDisc.ownerId !== player.profileId || reloDisc.outcome !== 'success'
+        || relo === toSiteId) return fail('claim_limit');
+    // A disc with a factory built on it is locked in place - it can't be moved.
+    if (state.factories[relo]) return fail('disc_has_factory');
+    const reloSite = siteById(relo);
+    relocatedName = reloSite ? reloSite.name : relo;
+    delete state.discs[relo];
+  }
+
   const threshold = prospectThreshold(site);
   // Size-roll modifier (subsystem 2): colocated cards subtract from the d6
   // (negative = easier), conditioned on the site's spectral type / prospector
@@ -2348,6 +2435,7 @@ function applyProspect(state, op, player) {
   const tail = free ? (buggyRoams ? ' with a free buggy road scan' : ' with a free raygun scan') : '';
   const rollText = sizeMod ? `${roll}${sizeMod > 0 ? '+' : ''}${sizeMod} = ${effRoll}` : `${roll}`;
   let log = `${player.name} rolled ${rollText} vs ${threshold} and ${verb} ${site.name}${tail}.`;
+  if (relocatedName) log += ` (Moved a claim disc from ${relocatedName} - all 9 were placed.)`;
   // Taxes: a placed Claim pays every Taxes holder +1 aqua from the pool.
   if (success) {
     const tax = creditPrivilegeIncome(state, 'TAXES', 'Taxes');
@@ -2413,6 +2501,8 @@ function applyIndustrialize(state, op, player) {
   const disc = state.discs[siteId];
   if (!disc || disc.outcome !== 'success' || disc.ownerId !== player.profileId) return fail('not_claimed');
   if (state.factories[siteId]) return fail('already_industrialized');
+  // Factory cube supply: a player has only 7 cubes, so 7 factories max.
+  if (ownedSiteCount(state.factories, player.profileId) >= FACTORY_CUBES) return fail('no_factory_cubes');
   const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];
   // Every id must be a non-crew card in the stack; the set must include a
   // refinery + a robonaut (the build needs both) - unless ARCOLOGY waives the
@@ -2559,6 +2649,104 @@ function applyIncome(state, op, player) {
   player.aqua = (player.aqua | 0) + INCOME_AQUA;
   player.opsRemaining -= 1;
   return { ok: true, state, log: `${player.name} took income (+${INCOME_AQUA} aqua; bank ${player.aqua}).` };
+}
+
+// ===== Module 0: Sol Political Assembly =====
+//
+// Mechanics implemented from the published mat (our own functional wording, no
+// rulebook text reproduced). Delegate placements live in state.assembly; the
+// active-law resolver is the shared pure data/assembly.js#activeLaws. Some
+// per-law EFFECTS that hook other ops are wired where their host op exists; the
+// rest are flagged in docs/politics-m0-plan.md.
+function assemblyOf(state) {
+  if (!state.assembly) state.assembly = freshAssembly();
+  return state.assembly;
+}
+function placeCount(asm, place, profileId) {
+  return playerDelegatesInPlace(asm, place, profileId);
+}
+function setPlaceCount(asm, place, profileId, count) {
+  const m = asm.delegates[place] || (asm.delegates[place] = {});
+  if (count > 0) m[profileId] = count; else delete m[profileId];
+}
+// Is ideology `key`'s law in force right now (resolver verdict)?
+function lawInForce(state, key) {
+  return activeLaws(assemblyOf(state)).active.has(key);
+}
+// May `player` benefit from ideology `key`'s law this turn? It's in force and
+// they hold a delegate there, OR they spent a Lobby free action on it this turn.
+function playerCanUseLaw(state, player, key) {
+  const asm = assemblyOf(state);
+  if (lawInForce(state, key) && placeCount(asm, key, player.profileId) > 0) return true;
+  return Array.isArray(player.lobbiedLaws) && player.lobbiedLaws.includes(key);
+}
+
+// Fundraise (M0 operation, replaces Income): place a new delegate (or move one
+// of yours), gain aqua, run the vote tally (implicit - activeLaws is recomputed
+// on every read). Honor (Paleoconservative) makes the aqua gained equal your
+// glory-chit count; Authority (Martial Law) may discard an opponent's delegate.
+function applyFundraise(state, op, player) {
+  if (!state.m0) return fail('not_m0');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  const asm = assemblyOf(state);
+  const place = String(op.place || '');
+  if (!ASSEMBLY_PLACES.includes(place)) return fail('bad_place');
+  const from = op.from ? String(op.from) : null;
+  if (from) {
+    if (!ASSEMBLY_PLACES.includes(from)) return fail('bad_place');
+    if (placeCount(asm, from, player.profileId) <= 0) return fail('no_delegate_there');
+    setPlaceCount(asm, from, player.profileId, placeCount(asm, from, player.profileId) - 1);
+    setPlaceCount(asm, place, player.profileId, placeCount(asm, place, player.profileId) + 1);
+  } else {
+    if (delegatesRemaining(asm, player.profileId) <= 0) return fail('no_delegates_left');
+    setPlaceCount(asm, place, player.profileId, placeCount(asm, place, player.profileId) + 1);
+  }
+  // Authority (Martial Law): may discard an opponent's delegate.
+  let martial = '';
+  if (op.discard && playerCanUseLaw(state, player, 'authority')) {
+    const oppId = Number(op.discard.profileId);
+    const dplace = String(op.discard.place || '');
+    if (ASSEMBLY_PLACES.includes(dplace) && oppId !== player.profileId
+        && placeCount(asm, dplace, oppId) > 0) {
+      setPlaceCount(asm, dplace, oppId, placeCount(asm, dplace, oppId) - 1);
+      const opp = playerByProfile(state, oppId);
+      martial = ` Martial Law discarded ${opp ? opp.name : 'an opponent'}'s delegate from ${dplace}.`;
+    }
+  }
+  // Honor (Paleoconservative): aqua gained = your glory-chit count, else +1.
+  const honor = playerCanUseLaw(state, player, 'honor');
+  const gain = honor ? ((player.glory && player.glory.chits || []).length) : INCOME_AQUA;
+  player.aqua = (player.aqua | 0) + gain;
+  player.opsRemaining -= 1;
+  return {
+    ok: true, state,
+    log: `${player.name} fundraised - delegate to ${place}, +${gain} aqua${honor ? ' (Honor: per glory chit)' : ''}.${martial}`,
+  };
+}
+
+// Lobby (M0 free action, once per turn): pay 1 aqua and discard a delegate in an
+// INACTIVE ideology to use its Law this turn. Disabled while Unity's UN General
+// Assembly law is in force.
+function applyLobby(state, op, player) {
+  if (!state.m0) return fail('not_m0');
+  const asm = assemblyOf(state);
+  const laws = activeLaws(asm);
+  if (laws.lobbyingDisabled) return fail('lobbying_disabled');
+  if (player.lobbiedThisTurn) return fail('already_lobbied');
+  const key = String(op.ideology || '');
+  if (!IDEOLOGY_ORDER.includes(key)) return fail('bad_ideology');
+  if (laws.active.has(key)) return fail('law_already_active');
+  if (placeCount(asm, key, player.profileId) <= 0) return fail('no_delegate_there');
+  if ((player.aqua | 0) < 1) return fail('insufficient_aqua');
+  player.aqua -= 1;
+  setPlaceCount(asm, key, player.profileId, placeCount(asm, key, player.profileId) - 1);
+  player.lobbiedLaws = Array.isArray(player.lobbiedLaws) ? player.lobbiedLaws : [];
+  if (!player.lobbiedLaws.includes(key)) player.lobbiedLaws.push(key);
+  player.lobbiedThisTurn = true;
+  return {
+    ok: true, state,
+    log: `${player.name} lobbied ${key} - paid 1 aqua and discarded a delegate to use its Law this turn.`,
+  };
 }
 
 // Site refuel (rulebook I5): refine local water into the tank, one per site
@@ -2729,6 +2917,8 @@ function applyBuildColony(state, op, player) {
   const fac = state.factories[siteId];
   if (!fac || fac.ownerId !== player.profileId) return fail('no_factory');
   if (state.colonies[siteId]) return fail('already_colony');
+  // Colony dome supply: a player has only 7 domes, so 7 colonies max.
+  if (ownedSiteCount(state.colonies, player.profileId) >= COLONY_DOMES) return fail('no_colony_domes');
   const cardId0 = String(op.cardId || '');
   // The colonising crew is colocated with the factory whether it's ABOARD the
   // rocket OR in an OUTPOST stack at this site (a crew cargo-transferred to
@@ -2804,6 +2994,8 @@ function applyBuyCard(state, op, player) {
 // dispatcher (not the handler) maintains turnActions / turnRedo.
 const FUNCTIONAL = {
   INCOME: applyIncome,
+  FUNDRAISE: applyFundraise,
+  LOBBY: applyLobby,
   SITE_REFUEL: applySiteRefuel,
   DIRT_REFUEL: applyDirtRefuel,
   DELIVERY: applyDelivery,
@@ -2854,12 +3046,14 @@ function pickPayload(op) {
     case 'CASH_WATER': return { amount: op.amount };
     case 'DUMP': return { amount: op.amount };
     case 'FREE_MARKET': return { cardId: op.cardId };
+    case 'FUNDRAISE': return { place: op.place, from: op.from, discard: op.discard };
+    case 'LOBBY': return { ideology: op.ideology };
     case 'DISCARD': return { cardId: op.cardId };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
     case 'SET_RADIATOR_SIDE': return { cardId: op.cardId };
     case 'AFTERBURN': return {};
-    case 'PROSPECT': return { siteId: op.siteId, turn: op.turn, round: op.round };
+    case 'PROSPECT': return { siteId: op.siteId, turn: op.turn, round: op.round, relocateFrom: op.relocateFrom };
     case 'PROSPECT_REROLL': return { siteId: op.siteId };
     case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode };
     case 'DIRT_REFUEL': return { amount: op.amount };
@@ -2949,6 +3143,9 @@ function openTurnFor(state, player) {
   player.dirtTanksThisTurn = 0;
   // Afterburn lasts one turn: clear it as the player's next turn opens.
   if (player.rocket) player.rocket.afterburnEngaged = false;
+  // M0 Lobby is once per turn and its law-use lasts only this turn.
+  player.lobbiedThisTurn = false;
+  player.lobbiedLaws = [];
   state.turnActions = [];
   state.turnRedo = [];
 }
@@ -2965,6 +3162,12 @@ function applyEndTurn(state, _op, player) {
   const lapDone = nextIndex === firstIdx;
 
   let log = `${player.name} ended their turn.`;
+
+  // Borrowed crew abilities run down on the holder's own END_TURN: each timed
+  // grant loses a turn and drops at 0. Permanent grants (turnsRemaining null)
+  // never expire. The lender's own ability is unaffected (a grant is shared).
+  const expired = expireBorrowedAbilities(state, player);
+  if (expired.length) log += ' ' + expired.join(' ');
 
   // Passing without spending the turn's operation defaults to Income: the
   // player banks +1 aqua rather than wasting the operation. This also
@@ -3085,23 +3288,38 @@ function applyDraftPick(state, op, player) {
     };
   }
 
-  // Otherwise pass the turn (cube advances on a completed lap), like END_TURN
-  // minus income / first-player handoff / game-end.
+  // Otherwise just pass the turn to the next seat. NO Sunspot Cube advance and
+  // NO events during the draft (the cube is reset to slot 0 / round 1 when the
+  // draft completes), so a draft round never fires Inspiration / Glitch / Pad
+  // Explosion / etc. A new draft turn also clears the per-turn cycle.
   const n = state.players.length;
-  const firstIdx = state.firstPlayerIndex || 0;
   const nextIndex = (state.activeIndex + 1) % n;
-  let tail = '';
-  if (nextIndex === firstIdx) {
-    advanceClock(state);
-    state.activeIndex = firstIdx;
-    tail = ` Sunspot Cube advances to slot ${state.turn}.`;
-  } else {
-    state.activeIndex = nextIndex;
-  }
+  const tail = '';
+  state.activeIndex = nextIndex;
+  state.draftCycledThisTurn = false;
   openTurnFor(state, state.players[state.activeIndex]);
   return {
     ok: true, state,
     log: `${player.name} drafted ${cardName}.${tail} ${state.players[state.activeIndex].name} is up.`,
+  };
+}
+
+// Draft cycle: once per draft turn, the active player may CYCLE one deck of
+// their choice - the current top card goes to the bottom, revealing the next -
+// before they pick. Free (it doesn't take their pick), once per turn.
+function applyDraftCycle(state, op, player) {
+  if (state.draftCycledThisTurn) return fail('already_cycled');
+  const deckType = String(op.deckType || '');
+  const deck = state.decks[deckType];
+  if (!Array.isArray(deck)) return fail('bad_deck');
+  if (deck.length < 2) return fail('cannot_cycle');   // nothing new to reveal
+  const top = deck.shift();
+  deck.push(top);
+  state.draftCycledThisTurn = true;
+  const card = PATENTS_BY_ID[top];
+  return {
+    ok: true, state,
+    log: `${player.name} cycled the ${deckType} deck (${card ? card.name : top} to the bottom).`,
   };
 }
 
@@ -3535,6 +3753,334 @@ const AUCTION = {
   AUCTION_SELL: applyAuctionSell,
 };
 
+// ----- player-to-player trading (off-turn, both-party consent) -----
+//
+// A trade is a side-channel negotiation that both parties must consent to. It
+// is FREE (never spends an operation) and can be opened AT ANY POINT, on or off
+// turn, so like auction ops the TRADE handlers bypass the turn guard and
+// validate their own caller. One open trade at a time (v1).
+//
+// Consent is an offer / counter / accept handshake: an OFFER or COUNTER is the
+// sender's consent to those exact terms; an ACCEPT is the awaiting party's
+// consent to the same terms - so one accept always means both sides agreed to
+// identical (versioned) terms. A counter is a decline-and-re-offer that flips
+// who is "awaiting". Either party may decline at any time.
+//
+// state.trade.give / .receive are stored from the INITIATOR's perspective:
+//   give    = items the initiator hands to the partner
+//   receive = items the partner hands to the initiator
+// Each side has the shape:
+//   { aqua, water, handCardIds:[], cargoCardIds:[], abilities:[{ability,turns}] }
+// where water + cargoCardIds are IN-SPACE items that need the two rockets
+// colocated; aqua, handCardIds, abilities are abstract and trade anywhere.
+
+const TRADE_MAX_TERM = 99;   // sanity cap on a timed ability grant
+
+// Both rockets share a location when both sit at LEO (siteId null) or at the
+// same site. Returns 'leo' | <siteId> | null.
+function sharedRocketLocation(a, b) {
+  const sa = a.rocket ? a.rocket.siteId : undefined;
+  const sb = b.rocket ? b.rocket.siteId : undefined;
+  if (sa == null && sb == null) return 'leo';
+  if (sa != null && sa === sb) return sa;
+  return null;
+}
+
+function tankRoom(rocket) {
+  const dry = rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  return Math.max(0, (TANK_MAX - dry) - (rocket.tank || 0));
+}
+
+// Normalise one side of a deal off the wire into the canonical shape, dropping
+// anything malformed. Caller-supplied, so be defensive.
+function normTradeSide(raw) {
+  raw = raw || {};
+  const ints = (n) => { const v = Math.floor(Number(n)); return Number.isFinite(v) && v > 0 ? v : 0; };
+  const ids = (arr) => (Array.isArray(arr) ? arr.map(String) : []);
+  const abilities = (Array.isArray(raw.abilities) ? raw.abilities : [])
+    .map((g) => {
+      const ability = String((g && g.ability) || '');
+      if (!ability) return null;
+      // turns null/0/absent => permanent; otherwise a positive integer term.
+      const t = g && g.turns != null ? Math.floor(Number(g.turns)) : null;
+      const turns = Number.isFinite(t) && t > 0 ? Math.min(t, TRADE_MAX_TERM) : null;
+      return { ability, turns };
+    })
+    .filter(Boolean);
+  return {
+    aqua: ints(raw.aqua),
+    water: ints(raw.water),
+    handCardIds: ids(raw.handCardIds),
+    cargoCardIds: ids(raw.cargoCardIds),
+    abilities,
+  };
+}
+
+function sideHasInSpace(side) {
+  return side.water > 0 || side.cargoCardIds.length > 0;
+}
+function sideIsEmpty(side) {
+  return !side.aqua && !side.water && !side.handCardIds.length
+    && !side.cargoCardIds.length && !side.abilities.length;
+}
+
+// Aqua a player can spend in a trade: their bank, plus - when parked at LEO -
+// the water in their tank, which is 1:1 with aqua at the LEO bank (so at LEO
+// fuel just IS aqua, for simplicity). Dirt has no cash value, so it never
+// counts.
+function spendableAqua(player) {
+  let a = player.aqua | 0;
+  const r = player.rocket;
+  if (r && r.siteId == null && r.tankGrade !== 'dirt') a += Math.floor(r.tank || 0);
+  return a;
+}
+
+// Validate that `owner` can currently deliver everything in `side`. Returns an
+// error key, or null when the side is satisfiable. Re-run at accept time, since
+// the board may have moved since the offer was made.
+function validateTradeSide(state, owner, side) {
+  if (spendableAqua(owner) < side.aqua) return 'insufficient_aqua';
+  for (const id of side.handCardIds) {
+    if (!(owner.hand || []).includes(id)) return 'card_not_in_hand';
+  }
+  for (const id of side.cargoCardIds) {
+    if (!(owner.rocket.stack || []).some((s) => s.id === id)) return 'card_not_aboard';
+  }
+  if (side.water > 0) {
+    if (owner.rocket.tankGrade === 'dirt' && owner.rocket.tank > 0) return 'cannot_trade_dirt';
+    if (Math.floor(owner.rocket.tank || 0) < side.water) return 'insufficient_water';
+  }
+  for (const g of side.abilities) {
+    if (!playerOwnsAbility(owner, g.ability)) return 'ability_not_held';
+  }
+  return null;
+}
+
+// Will `receiver` have room for everything `side` brings them? (Hand limit +
+// tank room for water; in-space cargo lands in the rocket and is unbounded.)
+function validateTradeReceipt(receiver, side) {
+  const incomingHand = side.handCardIds.length;
+  if (((receiver.hand || []).length + incomingHand) > AUCTION_HAND_LIMIT) return 'hand_full';
+  if (side.water > 0) {
+    if (receiver.rocket.tankGrade === 'dirt' && receiver.rocket.tank > 0) return 'tank_grade_mismatch';
+    if (tankRoom(receiver.rocket) < side.water) return 'tank_full';
+  }
+  return null;
+}
+
+// An empty rocket sits at LEO with no active cards; re-pick actives that left
+// and clip the tank after a swap moved cards / water.
+function reconcileRocketAfterTrade(player) {
+  const stack = player.rocket.stack;
+  if (!stack.some((s) => s.id === player.rocket.activeThrusterId)) {
+    const t = stack.find(isThrusterSlot);
+    player.rocket.activeThrusterId = t ? t.id : null;
+  }
+  if (!stack.some((s) => s.id === player.rocket.activeProspectorId)) {
+    const p = stack.find(isProspectorSlot);
+    player.rocket.activeProspectorId = p ? p.id : null;
+  }
+  clipTank(player.rocket);
+  recallIfEmpty(player);
+}
+
+// Move one side's items from `giver` to `receiver`. Mutates both players.
+function executeTradeSide(giver, receiver, side) {
+  if (side.aqua) {
+    // Pay aqua from the bank first; at LEO any shortfall comes from tank water
+    // (1:1 at the bank). The receiver always banks it as aqua.
+    let need = side.aqua;
+    const fromBank = Math.min(giver.aqua | 0, need);
+    giver.aqua = (giver.aqua | 0) - fromBank;
+    need -= fromBank;
+    if (need > 0) giver.rocket.tank = (giver.rocket.tank || 0) - need;  // LEO water-as-aqua
+    receiver.aqua = (receiver.aqua | 0) + side.aqua;
+  }
+  for (const id of side.handCardIds) {
+    const i = (giver.hand || []).indexOf(id);
+    if (i >= 0) { giver.hand.splice(i, 1); receiver.hand.push(id); }
+  }
+  for (const id of side.cargoCardIds) {
+    const i = giver.rocket.stack.findIndex((s) => s.id === id);
+    if (i >= 0) { const [slot] = giver.rocket.stack.splice(i, 1); receiver.rocket.stack.push(slot); }
+  }
+  if (side.water > 0) {
+    giver.rocket.tank = (giver.rocket.tank || 0) - side.water;
+    receiver.rocket.tank = (receiver.rocket.tank || 0) + side.water;
+    receiver.rocket.tankGrade = 'water';
+  }
+  for (const g of side.abilities) {
+    receiver.borrowedAbilities = Array.isArray(receiver.borrowedAbilities) ? receiver.borrowedAbilities : [];
+    receiver.borrowedAbilities.push({ ability: g.ability, fromPlayerId: giver.profileId, turnsRemaining: g.turns });
+  }
+}
+
+// Decrement timed borrowed abilities on the holder's END_TURN; drop at 0.
+// Returns gameplay notes for the log.
+function expireBorrowedAbilities(state, player) {
+  const notes = [];
+  if (!Array.isArray(player.borrowedAbilities) || !player.borrowedAbilities.length) return notes;
+  const keep = [];
+  for (const g of player.borrowedAbilities) {
+    if (g.turnsRemaining == null) { keep.push(g); continue; }   // permanent
+    const left = g.turnsRemaining - 1;
+    if (left > 0) { keep.push({ ...g, turnsRemaining: left }); }
+    else notes.push(`${player.name}'s borrowed ${abilityLabel(g.ability)} expired.`);
+  }
+  player.borrowedAbilities = keep;
+  return notes;
+}
+
+// Human label for a privilege key (TITLE_CASE -> "Title Case").
+function abilityLabel(key) {
+  return String(key || '').toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// One-line gameplay summary of a side, from the giver's voice ("2 aqua, Tug").
+function tradeSideSummary(state, side) {
+  const parts = [];
+  if (side.aqua) parts.push(`${side.aqua} aqua`);
+  if (side.water) parts.push(`${side.water} fuel`);
+  for (const id of side.handCardIds) { const c = PATENTS_BY_ID[id]; parts.push(c ? c.name : id); }
+  for (const id of side.cargoCardIds) { const c = PATENTS_BY_ID[id]; parts.push(c ? c.name : id); }
+  for (const g of side.abilities) {
+    parts.push(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`);
+  }
+  return parts.length ? parts.join(' + ') : 'nothing';
+}
+
+function applyTradeOffer(state, op, ctx) {
+  if (state.auction) return fail('auction_in_progress');
+  if (state.trade) return fail('trade_in_progress');
+  const initiator = playerByProfile(state, ctx.profileId);
+  if (!initiator) return fail('not_a_player');
+  const partnerId = Number(op.partnerId);
+  if (!Number.isInteger(partnerId) || partnerId === initiator.profileId) return fail('bad_partner');
+  const partner = playerByProfile(state, partnerId);
+  if (!partner) return fail('bad_partner');
+
+  // Terms arrive from the OFFERER's (initiator's) perspective.
+  const give = normTradeSide(op.give);
+  const receive = normTradeSide(op.receive);
+  if (sideIsEmpty(give) && sideIsEmpty(receive)) return fail('empty_trade');
+
+  // In-space items (fuel / cargo) on EITHER side need the rockets colocated at
+  // a SITE. At LEO fuel is just aqua (1:1 at the bank), so fuel/cargo can only
+  // change hands when both ships are parked together out at a site/node.
+  const needsColo = sideHasInSpace(give) || sideHasInSpace(receive);
+  const location = needsColo ? sharedRocketLocation(initiator, partner) : null;
+  if (needsColo && (!location || location === 'leo')) return fail('fuel_needs_site');
+
+  // Light pre-validation so a malformed offer is rejected up front; accept
+  // re-validates against the live board.
+  let err = validateTradeSide(state, initiator, give) || validateTradeSide(state, partner, receive);
+  if (err) return fail(err);
+
+  state.trade = {
+    initiatorId: initiator.profileId,
+    partnerId: partner.profileId,
+    awaiting: 'partner',
+    version: 1,
+    give, receive, location,
+  };
+  return {
+    ok: true, state,
+    log: `${initiator.name} offered ${partner.name} a trade: gives ${tradeSideSummary(state, give)} for ${tradeSideSummary(state, receive)}.`,
+  };
+}
+
+function applyTradeCounter(state, op, ctx) {
+  const t = state.trade;
+  if (!t) return fail('no_trade');
+  const caller = playerByProfile(state, ctx.profileId);
+  if (!caller) return fail('not_a_player');
+  if (caller.profileId !== t.initiatorId && caller.profileId !== t.partnerId) return fail('not_in_trade');
+  const callerRole = caller.profileId === t.initiatorId ? 'initiator' : 'partner';
+  // Only the party currently on the clock may counter (the one who received
+  // the last offer); the sender is already waiting on a reply.
+  if (t.awaiting !== callerRole) return fail('not_awaiting_you');
+
+  // Counter terms arrive from the CALLER's perspective; store from the
+  // initiator's. If the partner is countering, swap the sides.
+  let give = normTradeSide(op.give);
+  let receive = normTradeSide(op.receive);
+  if (callerRole === 'partner') { const tmp = give; give = receive; receive = tmp; }
+  if (sideIsEmpty(give) && sideIsEmpty(receive)) return fail('empty_trade');
+
+  const initiator = playerByProfile(state, t.initiatorId);
+  const partner = playerByProfile(state, t.partnerId);
+  const needsColo = sideHasInSpace(give) || sideHasInSpace(receive);
+  const location = needsColo ? sharedRocketLocation(initiator, partner) : null;
+  if (needsColo && (!location || location === 'leo')) return fail('fuel_needs_site');
+  let err = validateTradeSide(state, initiator, give) || validateTradeSide(state, partner, receive);
+  if (err) return fail(err);
+
+  t.give = give; t.receive = receive; t.location = location;
+  t.version = (t.version || 1) + 1;
+  t.awaiting = callerRole === 'initiator' ? 'partner' : 'initiator';
+  return { ok: true, state, log: `${caller.name} countered the trade.` };
+}
+
+function applyTradeAccept(state, op, ctx) {
+  const t = state.trade;
+  if (!t) return fail('no_trade');
+  const caller = playerByProfile(state, ctx.profileId);
+  if (!caller) return fail('not_a_player');
+  if (caller.profileId !== t.initiatorId && caller.profileId !== t.partnerId) return fail('not_in_trade');
+  const callerRole = caller.profileId === t.initiatorId ? 'initiator' : 'partner';
+  // Only the party who received the latest terms accepts; that one accept is
+  // the second consent (the sender already consented by offering).
+  if (t.awaiting !== callerRole) return fail('not_awaiting_you');
+  // Accept must land on the terms currently on the table.
+  if (op.version != null && Number(op.version) !== t.version) return fail('trade_stale');
+
+  const initiator = playerByProfile(state, t.initiatorId);
+  const partner = playerByProfile(state, t.partnerId);
+  if (!initiator || !partner) return fail('not_in_trade');
+
+  // Re-validate against the live board (someone may have moved or spent).
+  const needsColo = sideHasInSpace(t.give) || sideHasInSpace(t.receive);
+  if (needsColo && sharedRocketLocation(initiator, partner) !== t.location) return fail('not_colocated');
+  let err = validateTradeSide(state, initiator, t.give) || validateTradeSide(state, partner, t.receive)
+    || validateTradeReceipt(partner, t.give) || validateTradeReceipt(initiator, t.receive);
+  if (err) return fail(err);
+
+  // Atomic swap. Both sides resolved off the same pre-swap balances above.
+  executeTradeSide(initiator, partner, t.give);
+  executeTradeSide(partner, initiator, t.receive);
+  reconcileRocketAfterTrade(initiator);
+  reconcileRocketAfterTrade(partner);
+
+  const giveSum = tradeSideSummary(state, t.give);
+  const recvSum = tradeSideSummary(state, t.receive);
+  state.trade = null;
+  return {
+    ok: true, state,
+    log: `${initiator.name} traded ${giveSum} to ${partner.name} for ${recvSum}.`,
+  };
+}
+
+function applyTradeDecline(state, op, ctx) {
+  const t = state.trade;
+  if (!t) return fail('no_trade');
+  const caller = playerByProfile(state, ctx.profileId);
+  if (!caller) return fail('not_a_player');
+  if (caller.profileId !== t.initiatorId && caller.profileId !== t.partnerId) return fail('not_in_trade');
+  const other = playerByProfile(state, caller.profileId === t.initiatorId ? t.partnerId : t.initiatorId);
+  state.trade = null;
+  return {
+    ok: true, state,
+    log: `${caller.name} called off the trade with ${other ? other.name : 'the other player'}.`,
+  };
+}
+
+const TRADE = {
+  TRADE_OFFER: applyTradeOffer,
+  TRADE_COUNTER: applyTradeCounter,
+  TRADE_ACCEPT: applyTradeAccept,
+  TRADE_DECLINE: applyTradeDecline,
+};
+
 // ----- starting-crew pick (pre-game; any player, any time) -----
 //
 // Each player picks one of the 12 faction faces at session open. The
@@ -3570,6 +4116,12 @@ function applyPickCrew(state, op, ctx) {
   if (state.players.some((p) => p !== player && p.faction && p.faction.cardId === cardId)) {
     return fail('crew_taken');
   }
+  // Multiplayer (2+ seats): one colour only - a player may only pick crew of
+  // their assigned seat colour (each colour is one double-sided card; they pick
+  // one of its two faces). A 1-player room is a free pick of any crew.
+  if (state.players.length > 1 && card.color && player.color && card.color !== player.color) {
+    return fail('wrong_crew_color');
+  }
   const switching = !!player.faction;
   player.faction = { cardId, face };
   // The picked crew card carries one of the six faction-band colours; that is
@@ -3594,6 +4146,7 @@ function applyPickCrew(state, op, ctx) {
     }
     if (state.draftStart) {
       state.draftPhase = 'draft';
+      state.draftCycledThisTurn = false;
       state.activeIndex = state.firstPlayerIndex || 0;
       openTurnFor(state, state.players[state.activeIndex]);
     } else {
@@ -3626,7 +4179,10 @@ function applySetFirstPlayer(state, op, ctx) {
   const pending = state.pendingFirstPlayer;
   if (!pending) return fail('no_first_player_choice');
   if (pending.chooserId !== ctx.profileId) return fail('not_first_player_chooser');
-  const targetId = String(op.profileId || '');
+  // profileId is numeric in state; the op carries a number too. Comparing a
+  // String()'d id against the numeric p.profileId never matched, so every pick
+  // bounced with unknown_player ("I can't select the first player").
+  const targetId = Number(op.profileId);
   const targetIdx = state.players.findIndex((p) => p.profileId === targetId);
   if (targetIdx < 0) return fail('unknown_player');
   // "another player": the first-player token must move off the chooser.
@@ -3682,9 +4238,10 @@ export function applyOperation(prevState, op, ctx) {
     // is blocked - no moves, no other ops, no turn passing (the pick passes the
     // turn itself).
     if (prevState.draftPhase === 'draft') {
-      if (op.kind !== 'DRAFT_PICK') return fail('draft_in_progress');
+      if (op.kind !== 'DRAFT_PICK' && op.kind !== 'DRAFT_CYCLE') return fail('draft_in_progress');
       if (!isPlayersTurn(prevState, ctx.profileId)) return fail('not_your_turn');
       const st = clone(prevState);
+      if (op.kind === 'DRAFT_CYCLE') return applyDraftCycle(st, op, currentPlayer(st));
       return applyDraftPick(st, op, currentPlayer(st));
     }
     return fail('awaiting_crew_picks');
@@ -3723,6 +4280,13 @@ export function applyOperation(prevState, op, ctx) {
   // by non-active players, and each handler validates its own caller
   // against the auction roles.
   if (AUCTION[op.kind]) return AUCTION[op.kind](clone(prevState), op, ctx);
+
+  // Trade ops are a side-channel deal: free, both-party consent, allowed at any
+  // point on or off turn. Like auction ops they bypass the turn guard and
+  // validate their own caller. They do NOT freeze the table - other players keep
+  // playing - but they refuse to open while an auction is up (the handlers check
+  // state.auction) to avoid two competing multi-party surfaces.
+  if (TRADE[op.kind]) return TRADE[op.kind](clone(prevState), op, ctx);
 
   // Off-turn route planning. A planned route is PRIVATE (redacted from
   // opponents) and INERT (only the owner's own MOVE ever executes it), so a
@@ -3803,7 +4367,8 @@ export function applyOperation(prevState, op, ctx) {
 // explicitly rather than via a group).
 export const SUPPORTED_OPS = [
   ...Object.keys(FUNCTIONAL), ...Object.keys(META), ...Object.keys(AUCTION),
-  ...Object.keys(CREW), ...Object.keys(LIFECYCLE), 'DRAFT_PICK', 'EVENT_CHOICE',
+  ...Object.keys(TRADE),
+  ...Object.keys(CREW), ...Object.keys(LIFECYCLE), 'DRAFT_PICK', 'DRAFT_CYCLE', 'EVENT_CHOICE',
 ];
 // Ops that require the caller to supply ctx.turnBaseState.
 export const NEEDS_TURN_BASE = new Set(['UNDO', 'REDO']);

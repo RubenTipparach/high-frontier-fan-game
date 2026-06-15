@@ -125,6 +125,10 @@ function requiresFromFace(face, type) {
   for (const [col, kind] of Object.entries(BOOLEAN_TO_REQ)) {
     if (face[col]) reqs.push({ kind, count: 1 });
   }
+  // Radiators SUPPLY therms (their Light/Heavy therm columns are cooling
+  // capacity, read via thermsSupplied), so they never REQUIRE therms - skip the
+  // thermostat requirement for radiators. Power-source requirements (e.g. an
+  // active refrigerator's "e Generator") DO apply to radiators and are kept.
   if (type !== 'radiator') {
     const therms = Number(face.Therms) || 0;
     if (therms > 0) reqs.push({ kind: 'thermostat', count: therms });

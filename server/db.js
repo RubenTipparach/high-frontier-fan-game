@@ -335,6 +335,10 @@ ensureColumn('lobbies', 'economy', 'economy TEXT');
 // picks until they hold 12 cards, then banks open at 6 and play begins.
 // 0 = off (the default for every legacy + normal room).
 ensureColumn('lobbies', 'draft_start', 'draft_start INTEGER NOT NULL DEFAULT 0');
+// m0: opt-in Module 0 (Sol Political Assembly). 0 = off, the default for every
+// legacy + normal room, so games already in flight stay m0=false (no retro
+// apply). Chosen at room creation, carried into the game state at start.
+ensureColumn('lobbies', 'm0', 'm0 INTEGER NOT NULL DEFAULT 0');
 // When a lobby was cancelled (admin "Cancel"), so the admin panel can list
 // cancelled rooms newest-cancelled-first. Nullable: only set on cancel,
 // cleared on restore; legacy cancelled rows fall back to created_at for sort.
