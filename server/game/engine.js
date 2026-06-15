@@ -97,6 +97,20 @@ function slotMass(slot) {
   return 0;
 }
 
+// Mass a card adds when boosted (= its aqua cost). A radiator's deployed side
+// changes its mass (light = the base, heavy is heavier), so the chosen side is
+// honoured. Mirror of browse.js#boostMassOf.
+function boostMass(id, radSide) {
+  const card = PATENTS_BY_ID[id];
+  if (card && card.type === 'radiator') {
+    const f = card.faces && card.faces.primary;
+    const side = radSide === 'light' ? 'light' : 'heavy';
+    const blk = f && f[side];
+    if (blk && blk.mass != null) return blk.mass | 0;
+  }
+  return slotMass({ id });
+}
+
 // Water cost per unit of delta-v for this rocket. With an active
 // thruster we scale by its ISP against wet mass (ship.js#burnCost
 // model: ceil(wetMass / isp) water per burn). With no thruster yet
@@ -1727,14 +1741,15 @@ function applyBoost(state, op, player) {
   for (const id of ids) {
     if (player.hand.indexOf(id) < 0) return fail('not_in_hand');
   }
-  // Cost = total mass of the boosted cards (aqua).
+  // Cost = total mass of the boosted cards (aqua). A radiator's mass depends on
+  // its chosen deployed side (heavy is heavier), so factor that in per id.
+  const radSides = (op.radSides && typeof op.radSides === 'object') ? op.radSides : {};
   let cost = 0;
-  for (const id of ids) cost += slotMass({ id });
+  for (const id of ids) cost += boostMass(id, radSides[id]);
   if (cost > player.aqua) return fail('insufficient_aqua');
   // Move them hand -> LEO. A radiator locks its deployed light/heavy side here
   // (op.radSides[id]); default heavy (max cooling). Only radiation damage flips
   // it afterward.
-  const radSides = (op.radSides && typeof op.radSides === 'object') ? op.radSides : {};
   for (const id of ids) {
     const idx = player.hand.indexOf(id);
     if (idx >= 0) player.hand.splice(idx, 1);

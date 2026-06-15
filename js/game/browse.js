@@ -3324,14 +3324,6 @@ function renderMpPanel(snapshot) {
   const active = players[snapshot.activeIndex] || null;
   const myId = _onlineMe && _onlineMe.id;
   const myp = players.find((p) => p.profileId === myId) || null;
-  // Auctioneer-side gating mirrors the server (AUCTION_START needs your
-  // turn, at least one op left, no auction open, AND under the
-  // academia hand limit (can't start with 4+ cards - winning would
-  // overflow the hand; the server enforces the same).
-  const myHandCount = (myp && Array.isArray(myp.hand)) ? myp.hand.length : 0;
-  const canStartAuction = !!(active && active.profileId === myId
-    && myp && myp.opsRemaining > 0 && !snapshot.auction
-    && myHandCount < AUCTION_HAND_LIMIT);
   tableEl.innerHTML = '';
 
   const head = document.createElement('div');
@@ -3342,29 +3334,9 @@ function renderMpPanel(snapshot) {
   room.className = 'mp-room';
   room.textContent = _onlineRoom || 'Multiplayer table';
   row.appendChild(room);
-  if (_onlineLeave) {
-    const leave = document.createElement('button');
-    leave.type = 'button';
-    leave.className = 'mp-leave';
-    leave.textContent = '← Lobbies';
-    leave.title = 'Back to the multiplayer lobbies list (the game stays running; you can resume)';
-    leave.addEventListener('click', () => {
-      try { _onlineLeave(); } catch (err) { console.error('mp leave:', err); }
-    });
-    row.appendChild(leave);
-  }
-  if (canStartAuction) {
-    const startBtn = document.createElement('button');
-    startBtn.type = 'button';
-    startBtn.className = 'mp-leave mp-auction-start';
-    startBtn.textContent = _deckPickerOpen ? 'Cancel' : '🎯 Start auction';
-    startBtn.title = 'Put the top of a patent deck up for auction (costs 1 op)';
-    startBtn.addEventListener('click', () => {
-      _deckPickerOpen = !_deckPickerOpen;
-      renderMpPanel(_onlineSnapshot);
-    });
-    row.appendChild(startBtn);
-  }
+  // The "← Lobbies" nav and "Start auction" controls deliberately do NOT live
+  // in this panel header (leave / Research Auction belong to the app nav + the
+  // operations flow, not the table read-out). Removed per design.
   const myTurn = !!(active && active.profileId === myId);
   const turn = document.createElement('div');
   turn.className = 'mp-turn' + (myTurn ? ' mp-your-turn' : '');
@@ -3376,13 +3348,6 @@ function renderMpPanel(snapshot) {
   clock.textContent = `Turn ${formatTurnNumber(snapshot.round, snapshot.turn, snapshot.maxRounds)} · slot ${(snapshot.turn | 0) + 1}/12`;
   head.append(row, turn, clock);
   tableEl.appendChild(head);
-
-  if (_deckPickerOpen && canStartAuction) {
-    const picker = document.createElement('div');
-    picker.className = 'mp-deck-picker';
-    buildMpDeckPicker(picker, snapshot);
-    tableEl.appendChild(picker);
-  }
 
   const roster = document.createElement('div');
   roster.className = 'mp-roster';
@@ -4242,19 +4207,18 @@ function wireHandStrip() {
     // (user, 2026-05): the player confirms the spend before any
     // money moves. Rulebook I4: Boost is also one Operation per
     // turn (the multi-card batch counts as one op).
-    const massOf = (c) => {
-      const f = (c && c.faces && c.faces.primary) || c || {};
-      return (f.mass != null ? f.mass : (c && c.mass)) | 0;
-    };
     const cards = marked.map((id) => lookup(id)).filter(Boolean);
     if (!cards.length) return;
-    const cost = cards.reduce((sum, c) => sum + massOf(c), 0);
     const have = getAqua();
     const n = cards.length;
-    if (cost > have) {
+    // A radiator's deployed side changes its mass (heavy is heavier), and boost
+    // cost IS total mass - so the cheapest possible spend is every radiator on
+    // its light side. If even that exceeds the bank, no side choice can afford it.
+    const minCost = cards.reduce((s, c) => s + boostMassOf(c, c.type === 'radiator' ? 'light' : undefined), 0);
+    if (minCost > have) {
       await confirmModal({
         title: '💸 Not enough Aqua',
-        body: `Boosting ${n} card${n === 1 ? '' : 's'} costs <strong>${cost}</strong> Aqua `
+        body: `Boosting ${n} card${n === 1 ? '' : 's'} costs at least <strong>${minCost}</strong> Aqua `
           + `(total mass), but your bank holds only <strong>${have}</strong>.`,
         yes: 'OK', no: '',
       });
@@ -4272,9 +4236,10 @@ function wireHandStrip() {
     const opNote = continuedBoost
       ? 'You already boosted this turn, so this rides up free (no operation).'
       : 'The first boost spends your operation; keep boosting free for the rest of the turn.';
-    const res = await openBoostModal({ cards, cost, have, opNote });
+    const res = await openBoostModal({ cards, have, opNote });
     if (!res.ok) return;
     const radSides = res.radSides || {};
+    const cost = res.cost | 0;   // final spend reflects each radiator's chosen side
     // Online: the BOOST is a server op. Submit the marked ids + each radiator's
     // chosen deployed side; the server moves Hand -> LEO, charges aqua, spends
     // the op, locks the side, and broadcasts. Skip the local mutation below -
@@ -10487,7 +10452,22 @@ function confirmModal({ title, body, yes = 'OK', no = 'Cancel' }) {
 // this popup is the one chance to set it. Resolves { ok, radSides } where
 // radSides maps each radiator id to 'light' | 'heavy' (default 'heavy', the
 // max-cooling side). Cancel resolves { ok: false }.
-function openBoostModal({ cards, cost, have, opNote }) {
+
+// Mass a card adds when boosted = aqua cost contribution. A radiator's deployed
+// side changes its mass (light = the base, heavy is heavier), so the side is
+// passed through. Mirror of the server's boostMass in engine.js.
+function boostMassOf(card, radSide) {
+  if (card && card.type === 'radiator') {
+    const f = card.faces && card.faces.primary;
+    const side = radSide === 'light' ? 'light' : 'heavy';
+    const blk = f && f[side];
+    if (blk && blk.mass != null) return blk.mass | 0;
+  }
+  const f = (card && card.faces && card.faces.primary) || card || {};
+  return (f.mass != null ? f.mass : (card && card.mass)) | 0;
+}
+
+function openBoostModal({ cards, have, opNote }) {
   return new Promise((resolve) => {
     document.querySelector('.confirm-modal-overlay')?.remove();
     const overlay = document.createElement('div');
@@ -10495,15 +10475,19 @@ function openBoostModal({ cards, cost, have, opNote }) {
     const radiators = (cards || []).filter((c) => c && c.type === 'radiator');
     const sides = {};
     for (const c of radiators) sides[c.id] = 'heavy';
+    // Live total cost = total mass, with each radiator's mass taken from its
+    // currently-selected side (heavy is heavier, so it costs more to boost).
+    const totalCost = () => (cards || []).reduce((s, c) =>
+      s + boostMassOf(c, c.type === 'radiator' ? sides[c.id] : undefined), 0);
     const close = (ok) => {
       overlay.remove();
       document.removeEventListener('keydown', onKey);
-      resolve(ok ? { ok: true, radSides: sides } : { ok: false });
+      resolve(ok ? { ok: true, radSides: sides, cost: totalCost() } : { ok: false });
     };
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
     const onKey = (e) => {
       if (e.key === 'Escape') close(false);
-      else if (e.key === 'Enter') close(true);
+      else if (e.key === 'Enter') { if (totalCost() <= have) close(true); }
     };
     document.addEventListener('keydown', onKey);
     const panel = document.createElement('div');
@@ -10518,32 +10502,53 @@ function openBoostModal({ cards, cost, have, opNote }) {
       <div class="boost-rad-row" data-id="${esc(c.id)}">
         <span class="boost-rad-name">${esc(c.name)}</span>
         <div class="boost-rad-toggle">
-          <button type="button" class="boost-rad-side" data-side="light">Light (${sideTherms(c, 'light')}🌡)</button>
-          <button type="button" class="boost-rad-side is-active" data-side="heavy">Heavy (${sideTherms(c, 'heavy')}🌡)</button>
+          <button type="button" class="boost-rad-side" data-side="light">Light · ${sideTherms(c, 'light')}🌡 · ${boostMassOf(c, 'light')} mass</button>
+          <button type="button" class="boost-rad-side is-active" data-side="heavy">Heavy · ${sideTherms(c, 'heavy')}🌡 · ${boostMassOf(c, 'heavy')} mass</button>
         </div>
       </div>`).join('');
     panel.innerHTML = `
       <h3>🛰 Boost to LEO</h3>
       <p>Boost <strong>${n}</strong> card${n === 1 ? '' : 's'} from your Hand to the LEO Stack
-        for <strong>${cost}</strong> Aqua (total mass ${cost}).
-        Bank: <strong>${have}</strong> → <strong>${have - cost}</strong>. ${opNote || 'The first boost spends your operation; keep boosting free for the rest of the turn.'}</p>
-      ${radiators.length ? `<p class="muted boost-rad-help">Pick each radiator's deployed side - it locks once boosted (only radiation damage can flip heavy to light afterward):</p>
+        for <strong class="boost-cost-val"></strong> Aqua (total mass).
+        Bank: <strong>${have}</strong> → <strong class="boost-after-val"></strong>. ${opNote || 'The first boost spends your operation; keep boosting free for the rest of the turn.'}</p>
+      ${radiators.length ? `<p class="muted boost-rad-help">Pick each radiator's deployed side - it locks once boosted (only radiation damage can flip heavy to light afterward). The heavy side cools more but weighs more, so it costs more Aqua to boost:</p>
       <div class="boost-rad-list">${radRows}</div>` : ''}
+      <div class="hud-error boost-cost-warn" hidden></div>
       <div class="turn-confirm-actions">
-        <button type="button" class="popup-btn primary" data-act="yes">🛰 Boost (${cost} aqua)</button>
+        <button type="button" class="popup-btn primary" data-act="yes">🛰 Boost</button>
         <button type="button" class="popup-btn" data-act="no">Cancel</button>
       </div>`;
+    const costEl = panel.querySelector('.boost-cost-val');
+    const afterEl = panel.querySelector('.boost-after-val');
+    const warnEl = panel.querySelector('.boost-cost-warn');
+    const yesBtn = panel.querySelector('[data-act="yes"]');
+    const refreshCost = () => {
+      const c = totalCost();
+      const afford = c <= have;
+      if (costEl) costEl.textContent = String(c);
+      if (afterEl) afterEl.textContent = String(have - c);
+      if (yesBtn) {
+        yesBtn.textContent = `🛰 Boost (${c} aqua)`;
+        yesBtn.disabled = !afford;
+      }
+      if (warnEl) {
+        warnEl.hidden = afford;
+        if (!afford) warnEl.textContent = `Not enough Aqua: need ${c}, have ${have}. Switch a radiator to its light side.`;
+      }
+    };
     panel.querySelectorAll('.boost-rad-row').forEach((row) => {
       const id = row.dataset.id;
       row.querySelectorAll('.boost-rad-side').forEach((btn) => {
         btn.addEventListener('click', () => {
           sides[id] = btn.dataset.side === 'light' ? 'light' : 'heavy';
           row.querySelectorAll('.boost-rad-side').forEach((b) => b.classList.toggle('is-active', b === btn));
+          refreshCost();
         });
       });
     });
-    panel.querySelector('[data-act="yes"]').addEventListener('click', () => close(true));
+    yesBtn.addEventListener('click', () => { if (totalCost() <= have) close(true); });
     panel.querySelector('[data-act="no"]').addEventListener('click', () => close(false));
+    refreshCost();
     overlay.appendChild(panel);
     mountOverlay(overlay);
   });
