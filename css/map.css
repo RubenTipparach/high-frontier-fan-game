@@ -7979,6 +7979,8 @@ body:has(#view-browse:not(.hidden)) #main {
 .assembly-panel-large { max-width: 100%; width: 100%; }
 .assembly-panel-large .assembly-board { width: 100%; max-width: 620px; }
 .assembly-laws { display: flex; flex-direction: column; gap: 8px; margin: 14px auto 0; max-width: 640px; }
+.assembly-laws-divider { margin: 8px 0 2px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--ink-dim, #8b90b8); border-top: 1px solid var(--border, #2a2740); padding-top: 10px; }
 .assembly-law-row { display: flex; gap: 10px; align-items: flex-start; background: rgba(255,255,255,0.03);
   border: 1px solid var(--border, #2a2740); border-radius: 8px; padding: 8px 10px; }
 .assembly-law-swatch { flex: none; width: 12px; height: 12px; border-radius: 3px; margin-top: 3px; border: 1px solid rgba(0,0,0,0.4); }

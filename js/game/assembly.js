@@ -247,6 +247,11 @@ export function renderAssemblyPanel({
     lFo.appendChild(lDiv);
   }
 
+  // Raise any highlighted / selected cell to the FRONT (SVG paints in document
+  // order, so a later-drawn neighbouring wedge would otherwise cover the blue
+  // glow). Re-appending moves them last = on top.
+  board.querySelectorAll('.assembly-cell-hi, .assembly-cell-sel').forEach((el) => board.appendChild(el));
+
   root.appendChild(board);
 
   // Large variant: list every law in single-column rows beneath the (bigger)
@@ -269,6 +274,11 @@ export function renderAssemblyPanel({
       return d;
     };
     IDEOLOGIES.forEach((i) => lawsEl.appendChild(row(i.color, i.name, i.law.name, i.law.text, i.award.text)));
+    // Centrist + Lobby are NOT ideologies (no vote / award); set them apart.
+    const divider = document.createElement('div');
+    divider.className = 'assembly-laws-divider';
+    divider.textContent = 'Center & free action';
+    lawsEl.appendChild(divider);
     lawsEl.appendChild(row('#f3f4fa', CENTRIST.name, CENTRIST.law.name, CENTRIST.law.text, ''));
     lawsEl.appendChild(row('#9aa0c4', 'Lobby', 'Free action', LOBBY_RULE, ''));
     root.appendChild(lawsEl);

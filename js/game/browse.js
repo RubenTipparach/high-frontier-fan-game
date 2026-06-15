@@ -3335,10 +3335,16 @@ function refreshAssemblyModal() {
   if (_assemblyMode === 'fundraise') renderAssemblyFundraise(body, snap);
   else renderAssemblyView(body, snap);
 }
+// On a narrow screen the callout-ring ('compact') board overlaps badly, so the
+// modal uses the stacked laws-in-rows ('large') layout there; desktop keeps the
+// ringed design.
+function assemblyModalVariant() {
+  return (typeof window !== 'undefined' && window.innerWidth <= 720) ? 'large' : 'compact';
+}
 // View mode: the original board (callout panels ringing the wheel; click your
 // delegate to Lobby).
 function renderAssemblyView(body, snapshot) {
-  const view = assemblyDelegatesView(snapshot, 'compact');
+  const view = assemblyDelegatesView(snapshot, assemblyModalVariant());
   view.onCellClick = (place) => tryLobbyAt(snapshot, place);
   body.appendChild(renderAssemblyPanel(view));
   body.appendChild(assemblyStatusEl(snapshot));
@@ -3392,7 +3398,7 @@ function renderAssemblyFundraise(body, snapshot) {
   body.appendChild(prompt);
 
   // Board with the interaction wired for the current step.
-  const view = assemblyDelegatesView(snapshot, 'compact');
+  const view = assemblyDelegatesView(snapshot, assemblyModalVariant());
   view.interactive = true;   // cell highlights/glow only show during a Fundraise
   const adj = (_fr.moveFrom ? ASSEMBLY_ADJACENT(_fr.moveFrom) : []);
   view.highlight = step === 'move' && _fr.moveFrom ? new Set(adj) : null;
