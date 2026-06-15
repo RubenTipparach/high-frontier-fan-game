@@ -16701,12 +16701,12 @@ function paintGlory() {
   // named). One unified row.
   // All-chits board: every claimable heliocentric zone as a coin. Available
   // zones are vibrant flip-coins; a zone any player has claimed is dimmed +
-  // shows the claimer's seat name (Earth is home, so it has no chit).
+  // shows the claimer's seat name. LEO (home, a Lagrange point) isn't a site,
+  // but the rest of the Earth zone has a chit like any other.
   const board = host.querySelector('#glory-zone-board');
   if (board) {
     const taken = takenZoneMap();
     for (const zone of Object.keys(ZONE_CHIT_VPS)) {
-      if (zone === 'Earth') continue;
       board.appendChild(buildZoneBoardChit(zone, taken[zone] || null));
     }
   }
