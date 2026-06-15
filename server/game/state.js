@@ -222,7 +222,7 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
   // shuffled turn order so no one is always "the yellow player".
   const palette = shuffle(gen, PLAYER_COLORS);
   const decks = buildShuffledDecks(gen);
-  const rounds = [5, 6, 7].includes(maxRounds) ? maxRounds : 5;
+  const rounds = [4, 5, 6, 7].includes(maxRounds) ? maxRounds : 5;
   // Card economy + starting bank. Standard multiplayer is always 'market' +
   // AQUA_DEFAULT (the caller enforces that for 2+ player games); a solo game
   // may pick Free Library and a free-play bank. Anything unrecognised falls

@@ -583,7 +583,7 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // asks for 2+. Start only requires >=1 member, so a solo room can begin.
   const maxPlayers = Math.max(1, Math.min(5, Number(body.maxPlayers) || 5));
   // Game length: 5 (short, default) / 6 (medium) / 7 (extra long).
-  const maxRounds = [5, 6, 7].includes(Number(body.maxRounds)) ? Number(body.maxRounds) : 5;
+  const maxRounds = [4, 5, 6, 7].includes(Number(body.maxRounds)) ? Number(body.maxRounds) : 5;
   const joinPolicy = body.joinPolicy === 'invite-only' ? 'invite-only' : 'open';
   // Solo-game setup options. Stored on the lobby and honoured at start ONLY for
   // 1-player rooms (multiplayer is always market + the standard bank). Null when
@@ -914,7 +914,7 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
     seat: m.seat || i + 1,
   }));
   // Lobbies predating the column come back null; default to 5.
-  const maxRounds = [5, 6, 7].includes(lobby.max_rounds) ? lobby.max_rounds : 5;
+  const maxRounds = [4, 5, 6, 7].includes(lobby.max_rounds) ? lobby.max_rounds : 5;
   // Solo-game setup options are honoured only for a 1-player game; multiplayer
   // is always market + the standard starting bank. Unset (or non-solo) leaves
   // them undefined so createInitialState uses its defaults.

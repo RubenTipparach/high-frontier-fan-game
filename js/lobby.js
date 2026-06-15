@@ -671,7 +671,7 @@ export async function createSoloRoom({ startingAqua = 100, economy = 'library', 
   if (!me) return { ok: false, error: 'no_profile' };
   const create = await createLobby(
     { name: `${me.name}'s solo room`, maxPlayers: 1,
-      maxRounds: [5, 6, 7].includes(Number(maxRounds)) ? Number(maxRounds) : 5,
+      maxRounds: [4, 5, 6, 7].includes(Number(maxRounds)) ? Number(maxRounds) : 5,
       joinPolicy: 'invite-only', idempotencyKey: newIdemKey(),
       startingAqua, economy, draftStart, m0 },
     me.token,

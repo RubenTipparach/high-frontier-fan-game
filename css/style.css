@@ -207,6 +207,22 @@ code {
   line-height: 1.4;
   color: var(--ink-mute);
 }
+/* Checkbox option row (Draft start / Module 0, etc.) - each on its own line,
+   checkbox aligned to the top of the wrapping label text. */
+.check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 6px 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink);
+  cursor: pointer;
+}
+.check-row input[type="checkbox"] { margin: 2px 0 0; flex: 0 0 auto; }
+.check-row span { flex: 1 1 auto; }
+.check-row strong { font-weight: 700; }
+
 /* Solo-room setup option groups (starting aqua, card economy). */
 .solo-opt-group { margin: 12px 0; }
 .solo-opt-label {
