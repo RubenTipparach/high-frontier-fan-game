@@ -619,6 +619,7 @@ async function onCreateSubmit(ev) {
   const maxRounds = Number(document.getElementById('create-rounds').value);
   const joinPolicy = document.querySelector('input[name=policy]:checked').value;
   const draftStart = !!document.getElementById('create-draft')?.checked;
+  const m0 = !!document.getElementById('create-m0')?.checked;
   const me = activeProfile();
   if (!me) return;
   if (!_createIdemKey) _createIdemKey = newIdemKey();   // stable across retries of this intent
@@ -627,7 +628,7 @@ async function onCreateSubmit(ev) {
   if (submitBtn) submitBtn.disabled = true;
   try {
     const r = await createLobby(
-      { name, maxPlayers, maxRounds, joinPolicy, draftStart, idempotencyKey: _createIdemKey }, me.token
+      { name, maxPlayers, maxRounds, joinPolicy, draftStart, m0, idempotencyKey: _createIdemKey }, me.token
     );
     if (!r.ok) { errEl.textContent = humanizeError(r.error); return; }   // keep the key so a retry dedupes
     _createIdemKey = null;   // success: the next room starts a fresh intent
