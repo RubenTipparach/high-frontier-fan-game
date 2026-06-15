@@ -7938,6 +7938,29 @@ body:has(#view-browse:not(.hidden)) #main {
 
 /* ===== Sol Political Assembly (M0) panel - mockup ===== */
 .assembly-panel { color: var(--ink); max-width: 720px; margin: 0 auto; }
+/* Sidebar glance: the compact board is a button into the big modal. */
+.assembly-clickable { cursor: pointer; border-radius: 10px; transition: filter 0.12s ease, outline-color 0.12s ease; outline: 1px solid transparent; }
+.assembly-clickable:hover, .assembly-clickable:focus-visible { filter: brightness(1.08); outline-color: var(--accent, #fbbf24); }
+.assembly-open-btn { width: 100%; margin-top: 8px; }
+/* The big interactive modal version. */
+.assembly-modal-overlay { align-items: flex-start; }
+.assembly-modal { position: relative; background: var(--panel, #0c0a16); border: 1px solid var(--border, #2a2740);
+  border-radius: 14px; width: min(720px, 96vw); max-height: 92vh; overflow: auto; margin: 4vh auto; padding: 16px 18px 20px; }
+.assembly-modal .modal-x { position: absolute; top: 8px; right: 10px; background: none; border: none; color: #9aa0c4; font-size: 24px; line-height: 1; cursor: pointer; }
+.assembly-modal .modal-x:hover { color: #fff; }
+/* Large variant: a roomy wheel + the laws stacked in single-column rows. */
+.assembly-panel-large { max-width: 100%; width: 100%; }
+.assembly-panel-large .assembly-board { width: 100%; max-width: 620px; }
+.assembly-laws { display: flex; flex-direction: column; gap: 8px; margin: 14px auto 0; max-width: 640px; }
+.assembly-law-row { display: flex; gap: 10px; align-items: flex-start; background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border, #2a2740); border-radius: 8px; padding: 8px 10px; }
+.assembly-law-swatch { flex: none; width: 12px; height: 12px; border-radius: 3px; margin-top: 3px; border: 1px solid rgba(0,0,0,0.4); }
+.assembly-law-body { flex: 1 1 auto; min-width: 0; }
+.assembly-law-row .assembly-law-head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; margin: 0 0 2px; }
+.assembly-law-row .assembly-law-ide { font-weight: 700; font-size: 13px; }
+.assembly-law-row .assembly-law-name { font-size: 12px; color: var(--accent, #fbbf24); }
+.assembly-law-row .assembly-law-award { font-size: 11px; color: #86efac; margin-left: auto; }
+.assembly-law-row .assembly-law-text { font-size: 12px; color: var(--ink-dim, #b8bcd8); line-height: 1.4; }
 .assembly-head { display: flex; align-items: baseline; gap: 10px; justify-content: center; }
 .assembly-head h2 { margin: 0; font-size: 22px; letter-spacing: 1px; text-transform: uppercase; }
 .assembly-sub { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--ink-dim, #8b90b8); }

@@ -3190,10 +3190,33 @@ function renderAssemblyTab(snapshot) {
     return;
   }
   if (!host) return;
+  host.innerHTML = '';
+  // Sidebar = a SIMPLIFIED glance: the compact board + the active-law read-out.
+  // It is not interactive; tapping it opens the big modal where players act.
+  const board = renderAssemblyPanel(assemblyDelegatesView(snapshot));
+  board.classList.add('assembly-clickable');
+  board.setAttribute('role', 'button');
+  board.setAttribute('tabindex', '0');
+  board.title = 'Open the Sol Political Assembly';
+  board.addEventListener('click', () => openAssemblyModal());
+  board.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openAssemblyModal(); } });
+  host.appendChild(board);
+  host.appendChild(assemblyStatusEl(snapshot));
+  const hint = document.createElement('button');
+  hint.type = 'button';
+  hint.className = 'modal-btn assembly-open-btn';
+  hint.textContent = _spectator ? '🏛 Open assembly' : '🏛 Open assembly to act';
+  hint.addEventListener('click', () => openAssemblyModal());
+  host.appendChild(hint);
+  // Keep an already-open modal in sync with each new snapshot.
+  if (_assemblyModalOpen) renderAssemblyModalContents(snapshot);
+}
+
+// Delegate cubes (seat-coloured) + seniority discs, shaped for renderAssemblyPanel.
+function assemblyDelegatesView(snapshot, variant = 'compact') {
   const players = snapshot.players || [];
-  const myId = _onlineMe && _onlineMe.id;
   const colorOf = (pid) => (players.find((p) => p.profileId === pid) || {}).color || '#888';
-  const dmap = snapshot.assembly.delegates || {};
+  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
   const delegates = {};
   for (const place of ASSEMBLY_PLACES) {
     const m = dmap[place] || {};
@@ -3201,31 +3224,45 @@ function renderAssemblyTab(snapshot) {
     for (const [pid, n] of Object.entries(m)) for (let i = 0; i < (n | 0); i += 1) arr.push(colorOf(Number(pid)));
     delegates[place] = arr;
   }
-  const seniority = snapshot.assembly.seniority || {};
-  const laws = assemblyActiveLaws(snapshot.assembly);
-  host.innerHTML = '';
-  host.appendChild(renderAssemblyPanel({ delegates, seniority }));
+  return { delegates, seniority: (snapshot.assembly && snapshot.assembly.seniority) || {}, variant };
+}
 
+// Glance read-out: active laws + how many delegates I still hold. Shown in both
+// the sidebar and the modal.
+function assemblyStatusEl(snapshot) {
+  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
+  const myId = _onlineMe && _onlineMe.id;
+  const laws = assemblyActiveLaws(snapshot.assembly);
+  const activeNames = [...laws.active].map((k) => (ASSEMBLY_IDEOLOGY_BY_KEY[k] || {}).name || k);
   const placedByMe = ASSEMBLY_PLACES.reduce((s, p) => s + ((dmap[p] || {})[myId] | 0), 0);
   const left = Math.max(0, DELEGATES_PER_PLAYER - placedByMe);
-  const myTurn = isOnlineMyTurn();
-  const activeNames = [...laws.active].map((k) => (ASSEMBLY_IDEOLOGY_BY_KEY[k] || {}).name || k);
-
   const status = document.createElement('div');
   status.className = 'assembly-controls';
   status.innerHTML = `<div class="assembly-status"><strong>Active laws:</strong> `
     + `${activeNames.length ? esc(activeNames.join(', ')) : 'none yet'}`
     + `${laws.lobbyingDisabled ? ' · lobbying disabled' : ''}</div>`
     + `<div class="assembly-status">Your delegates: <strong>${left}</strong> / ${DELEGATES_PER_PLAYER} in hand</div>`;
-  host.appendChild(status);
+  return status;
+}
+
+// Append the INTERACTIVE controls (Fundraise + Lobby) to a host. Lives in the
+// modal only (the sidebar is glance-only). Submitting routes through the server
+// op; applySnapshot then re-renders both the sidebar and (if open) the modal.
+function appendAssemblyActions(host, snapshot) {
   if (_spectator) return;
+  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
+  const myId = _onlineMe && _onlineMe.id;
+  const laws = assemblyActiveLaws(snapshot.assembly);
+  const placedByMe = ASSEMBLY_PLACES.reduce((s, p) => s + ((dmap[p] || {})[myId] | 0), 0);
+  const left = Math.max(0, DELEGATES_PER_PLAYER - placedByMe);
+  const myTurn = isOnlineMyTurn();
+  const placeOpt = (p) => `<option value="${p}">${p === 'centrist' ? 'Centrist (center)' : (ASSEMBLY_IDEOLOGY_BY_KEY[p] || {}).name || p}</option>`;
 
   // Fundraise: place a delegate (or move one of yours) + gain aqua. Spends the op.
   const fr = document.createElement('div');
   fr.className = 'assembly-action';
-  const placeOpt = (p) => `<option value="${p}">${p === 'centrist' ? 'Centrist (center)' : (ASSEMBLY_IDEOLOGY_BY_KEY[p] || {}).name || p}</option>`;
   const myPlaces = ASSEMBLY_PLACES.filter((p) => ((dmap[p] || {})[myId] | 0) > 0);
-  fr.innerHTML = `<div class="mp-detail-label">Fundraise (operation)</div>`
+  fr.innerHTML = '<div class="mp-detail-label">Fundraise (operation)</div>'
     + `<label class="mp-trade-field"><span>Move from</span><select class="asm-fr-from"><option value="">(new delegate)</option>${myPlaces.map(placeOpt).join('')}</select></label>`
     + `<label class="mp-trade-field"><span>Into</span><select class="asm-fr-place">${ASSEMBLY_PLACES.map(placeOpt).join('')}</select></label>`;
   const frBtn = document.createElement('button');
@@ -3247,7 +3284,7 @@ function renderAssemblyTab(snapshot) {
   if (!laws.lobbyingDisabled && lobbyable.length) {
     const lb = document.createElement('div');
     lb.className = 'assembly-action';
-    lb.innerHTML = `<div class="mp-detail-label">Lobby (free, once per turn)</div>`
+    lb.innerHTML = '<div class="mp-detail-label">Lobby (free, once per turn)</div>'
       + `<label class="mp-trade-field"><span>Activate</span><select class="asm-lobby-key">${lobbyable.map(placeOpt).join('')}</select></label>`;
     const lbBtn = document.createElement('button');
     lbBtn.type = 'button'; lbBtn.className = 'modal-btn'; lbBtn.textContent = '🗳 Lobby (1 aqua)';
@@ -3259,6 +3296,50 @@ function renderAssemblyTab(snapshot) {
     lb.appendChild(lbBtn);
     host.appendChild(lb);
   }
+}
+
+// The big, INTERACTIVE assembly modal (desktop). Opened by tapping the sidebar
+// glance. Shows the large board (laws in rows below) + the Fundraise / Lobby
+// controls. Snapshot-driven: applySnapshot refreshes it while it's open.
+let _assemblyModalOpen = false;
+function openAssemblyModal() {
+  if (!_online || !_onlineSnapshot || !_onlineSnapshot.m0) return;
+  _assemblyModalOpen = true;
+  let overlay = document.getElementById('assembly-modal-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'assembly-modal-overlay';
+    overlay.className = 'card-modal-overlay assembly-modal-overlay';
+    overlay.innerHTML = `
+      <div class="assembly-modal" role="dialog" aria-label="Sol Political Assembly">
+        <button type="button" class="modal-x" aria-label="Close" title="Close">&times;</button>
+        <div class="assembly-modal-body"></div>
+      </div>`;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeAssemblyModal(); });
+    overlay.querySelector('.modal-x').addEventListener('click', closeAssemblyModal);
+    document.addEventListener('keydown', assemblyModalKey);
+    document.body.appendChild(overlay);
+  }
+  renderAssemblyModalContents(_onlineSnapshot);
+}
+function assemblyModalKey(e) {
+  if (e.key === 'Escape' && _assemblyModalOpen) closeAssemblyModal();
+}
+function closeAssemblyModal() {
+  _assemblyModalOpen = false;
+  document.removeEventListener('keydown', assemblyModalKey);
+  const overlay = document.getElementById('assembly-modal-overlay');
+  if (overlay) overlay.remove();
+}
+function renderAssemblyModalContents(snapshot) {
+  const overlay = document.getElementById('assembly-modal-overlay');
+  if (!overlay) return;
+  if (!snapshot || !snapshot.m0 || !snapshot.assembly) { closeAssemblyModal(); return; }
+  const body = overlay.querySelector('.assembly-modal-body');
+  body.innerHTML = '';
+  body.appendChild(renderAssemblyPanel(assemblyDelegatesView(snapshot, 'large')));
+  body.appendChild(assemblyStatusEl(snapshot));
+  appendAssemblyActions(body, snapshot);
 }
 
 // Server site id (data/sites.js slug) -> display name. LEO / unknown

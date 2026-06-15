@@ -85,16 +85,21 @@ function callout(root, box, ide, slot) {
   fo.appendChild(div);
 }
 
-export function renderAssemblyPanel({ delegates = null, seniority = null } = {}) {
+export function renderAssemblyPanel({ delegates = null, seniority = null, variant = 'compact' } = {}) {
   const root = document.createElement('div');
-  root.className = 'assembly-panel';
+  root.className = 'assembly-panel assembly-panel-' + variant;
   root.innerHTML = `
     <div class="assembly-head"><h2>Sol Political Assembly</h2><span class="assembly-sub">Module 0</span></div>`;
 
   const VB = { w: 900, h: 600 };
   const C = { x: 450, y: 300 };
   const R = 150, r = 62;
-  const board = svg('svg', { viewBox: `0 0 ${VB.w} ${VB.h}`, class: 'assembly-board', role: 'img', 'aria-label': 'Sol Political Assembly' });
+  // The 900x600 viewBox is sized for the compact variant's ring of callout
+  // boxes. The large variant drops those, so crop tight to the wheel itself
+  // (centre 450,300, outer radius 150, plus room for cubes/discs) so it fills
+  // the modal instead of floating tiny in the middle.
+  const viewBox = variant === 'large' ? '292 144 316 322' : `0 0 ${VB.w} ${VB.h}`;
+  const board = svg('svg', { viewBox, class: 'assembly-board', role: 'img', 'aria-label': 'Sol Political Assembly' });
 
   // Arrowhead marker.
   const defs = svg('defs', {}, board);
@@ -159,33 +164,63 @@ export function renderAssemblyPanel({ delegates = null, seniority = null } = {})
   drawCubes(centerCell, { x: C.x, y: C.y + 24 }, delegates && delegates.centrist);
   drawDiscs(centerCell, { x: C.x, y: C.y + 24 }, seniority && seniority.centrist);
 
-  // Callout boxes around the wheel, each arrow -> its space.
-  const boxes = {
-    freedom:       { x: 344, y: 44,  w: 212, h: 84 },
-    honor:         { x: 636, y: 150, w: 210, h: 104 },
-    unity:         { x: 636, y: 326, w: 210, h: 118 },
-    authority:     { x: 344, y: 474, w: 212, h: 84 },
-    equality:      { x: 54,  y: 326, w: 210, h: 118 },
-    individuality: { x: 54,  y: 150, w: 210, h: 122 },
-  };
-  IDEOLOGY_ORDER.forEach((key) => callout(board, boxes[key], IDEOLOGY_BY_KEY[key], slots[key]));
+  // Callout boxes around the wheel, each arrow -> its space. Compact (sidebar
+  // glance) variant only; the large (modal) variant lists the laws in rows
+  // below the wheel instead, so the wheel itself can be much bigger.
+  if (variant === 'compact') {
+    const boxes = {
+      freedom:       { x: 344, y: 44,  w: 212, h: 84 },
+      honor:         { x: 636, y: 150, w: 210, h: 104 },
+      unity:         { x: 636, y: 326, w: 210, h: 118 },
+      authority:     { x: 344, y: 474, w: 212, h: 84 },
+      equality:      { x: 54,  y: 326, w: 210, h: 118 },
+      individuality: { x: 54,  y: 150, w: 210, h: 122 },
+    };
+    IDEOLOGY_ORDER.forEach((key) => callout(board, boxes[key], IDEOLOGY_BY_KEY[key], slots[key]));
 
-  // Centrist / Pad Insurance: a side box (top-right, mirroring Lobby top-left),
-  // accented white to match the white center hex. No arrow (it's the center).
-  const cFo = svg('foreignObject', { x: 662, y: 8, width: 230, height: 80 }, board);
-  const cDiv = document.createElementNS(XHTML, 'div');
-  cDiv.setAttribute('class', 'assembly-callout assembly-callout-center');
-  cDiv.innerHTML = `
-    <div class="assembly-law-head"><span class="assembly-law-ide">${CENTRIST.name}</span><span class="assembly-law-name">${CENTRIST.law.name}</span></div>
-    <div class="assembly-law-text">${CENTRIST.law.text}</div>`;
-  cFo.appendChild(cDiv);
+    // Centrist / Pad Insurance: a side box (top-right, mirroring Lobby top-left),
+    // accented white to match the white center hex. No arrow (it's the center).
+    const cFo = svg('foreignObject', { x: 662, y: 8, width: 230, height: 80 }, board);
+    const cDiv = document.createElementNS(XHTML, 'div');
+    cDiv.setAttribute('class', 'assembly-callout assembly-callout-center');
+    cDiv.innerHTML = `
+      <div class="assembly-law-head"><span class="assembly-law-ide">${CENTRIST.name}</span><span class="assembly-law-name">${CENTRIST.law.name}</span></div>
+      <div class="assembly-law-text">${CENTRIST.law.text}</div>`;
+    cFo.appendChild(cDiv);
 
-  const lFo = svg('foreignObject', { x: 8, y: 8, width: 230, height: 86 }, board);
-  const lDiv = document.createElementNS(XHTML, 'div');
-  lDiv.setAttribute('class', 'assembly-callout assembly-callout-lobby');
-  lDiv.innerHTML = `<div class="assembly-law-head"><span class="assembly-law-name">Lobby (free action)</span></div><div class="assembly-law-text">${LOBBY_RULE}</div>`;
-  lFo.appendChild(lDiv);
+    const lFo = svg('foreignObject', { x: 8, y: 8, width: 230, height: 86 }, board);
+    const lDiv = document.createElementNS(XHTML, 'div');
+    lDiv.setAttribute('class', 'assembly-callout assembly-callout-lobby');
+    lDiv.innerHTML = `<div class="assembly-law-head"><span class="assembly-law-name">Lobby (free action)</span></div><div class="assembly-law-text">${LOBBY_RULE}</div>`;
+    lFo.appendChild(lDiv);
+  }
 
   root.appendChild(board);
+
+  // Large variant: list every law in single-column rows beneath the (bigger)
+  // wheel, instead of the cramped callouts that ring the compact version.
+  if (variant === 'large') {
+    const lawsEl = document.createElement('div');
+    lawsEl.className = 'assembly-laws';
+    const row = (color, ide, lawName, text, award) => {
+      const d = document.createElement('div');
+      d.className = 'assembly-law-row';
+      d.innerHTML =
+        `<span class="assembly-law-swatch" style="background:${color}"></span>`
+        + '<div class="assembly-law-body">'
+        + `<div class="assembly-law-head"><span class="assembly-law-ide">${ide}</span>`
+        + (lawName ? `<span class="assembly-law-name">${lawName}</span>` : '')
+        + (award ? `<span class="assembly-law-award">${award}</span>` : '')
+        + '</div>'
+        + `<div class="assembly-law-text">${text}</div>`
+        + '</div>';
+      return d;
+    };
+    IDEOLOGIES.forEach((i) => lawsEl.appendChild(row(i.color, i.name, i.law.name, i.law.text, i.award.text)));
+    lawsEl.appendChild(row('#f3f4fa', CENTRIST.name, CENTRIST.law.name, CENTRIST.law.text, ''));
+    lawsEl.appendChild(row('#9aa0c4', 'Lobby', 'Free action', LOBBY_RULE, ''));
+    root.appendChild(lawsEl);
+  }
+
   return root;
 }
