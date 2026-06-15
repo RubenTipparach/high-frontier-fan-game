@@ -7931,6 +7931,7 @@ body:has(#view-browse:not(.hidden)) #main {
 /* Claim relocation picker list. */
 .mp-relocate-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; max-height: 320px; overflow: auto; }
 .mp-relocate-item { text-align: left; }
+.mp-relocate-item.is-selected { outline: 2px solid var(--accent, #fbbf24); background: rgba(251,191,36,0.14); }
 
 /* ===== Sol Political Assembly (M0) panel - mockup ===== */
 .assembly-panel { color: var(--ink); max-width: 720px; margin: 0 auto; }

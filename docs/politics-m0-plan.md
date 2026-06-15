@@ -124,15 +124,21 @@ All four verified against the real engine (server/game/engine.js) via a crafted
 m0 state (FREE_MARKET 2-for-5 + guard, AUCTION_START grant + guard, pad-explosion
 refund + no-refund).
 
-REMAINING (client surfacing + scoring):
-- Client triggers so the non-automatic effects are reachable online:
-  - Freedom: a 2-card select in the Free Market UI sending `cardIds`.
-  - Equality: a "Take for 1 (Research Grants)" option in the deck-tap auction
-    flow sending `useEquality: true`.
-  - Individuality: include an opponent's eligible factories in the Site Refuel /
-    ET Produce / Delivery pickers when the law is active (the client currently
-    filters to `ownerId === myOwnerId()`).
-  (Centrist needs nothing - it fires automatically server-side.)
+DONE (client surfacing - 2026-06-15):
+- Shared client helpers in `js/game/browse.js`: `myActiveLaws()` / `iCanUseLaw()`
+  (mirror of the server's playerCanUseLaw, read off the cached snapshot) and
+  `iCanUseFactory()` (mirror of canUseFactoryNonVictory).
+- Freedom: the Free Market flow (hand quick-action, card modal, AND the op-menu
+  Free Market) opens a Free Trade picker when the law is usable - sell 1 for 3
+  or pick a 2nd hand card and sell both for 5 (`cardIds`).
+- Equality: the MP deck-tap auction picker adds a "Take <deck> for 1 (Research
+  Grants)" row when the law is usable (`useEquality: true`).
+- Individuality: Site Refuel / ET Produce / Delivery now accept an opponent's
+  factory when the law is usable (the op-menu factory-site shortcut surfaces it
+  too, labelled "Freedom to Roam"); Homesteading stays owner-only.
+- Centrist needs no client trigger - it fires automatically server-side.
+
+REMAINING:
 - End-game ideology VP awards (the +1-per-X scoring). BLOCKED on a general
   end-game scoring framework (factory/colony/Bernal VP), which is Stage 4 and
   not built yet - the per-ideology awards slot in once that exists.

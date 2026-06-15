@@ -2992,6 +2992,31 @@ function buildMpDeckPicker(host, snapshot) {
     row.appendChild(b);
   }
   host.appendChild(row);
+
+  // Equality (Research Grants): skip the auction entirely. Pay 1 aqua and take
+  // the deck top straight to hand. Only offered when the law is usable.
+  if (iCanUseLaw('equality')) {
+    const glabel = document.createElement('div');
+    glabel.className = 'mp-detail-label';
+    glabel.innerHTML = '<strong>Research Grants:</strong> pay 1 aqua, take the top card (no auction).';
+    host.appendChild(glabel);
+    const grow = document.createElement('div');
+    grow.className = 'mp-deck-row';
+    for (const [type, name] of MP_AUCTION_DECKS) {
+      const deck = (snapshot.decks && snapshot.decks[type]) || [];
+      const g = document.createElement('button');
+      g.type = 'button';
+      g.className = 'modal-btn';
+      g.textContent = `Take ${name} for 1`;
+      g.disabled = !deck.length || _onlineBusy;
+      g.addEventListener('click', () => {
+        _deckPickerOpen = false;
+        submitOnlineOp({ kind: 'AUCTION_START', deckType: type, useEquality: true });
+      });
+      grow.appendChild(g);
+    }
+    host.appendChild(grow);
+  }
 }
 
 // ----- multiplayer table panel (online sidepanel pane) -----
@@ -5783,7 +5808,7 @@ function openCardModal(card, kind, slotIdx, { readOnly = false } = {}) {
     }
     for (const s of candidates) {
       const f = getFactory(s.id);
-      if (!f || f.ownerId !== myOwnerId() || f.spectralType !== cardSpectral) continue;
+      if (!f || !iCanUseFactory(f) || f.spectralType !== cardSpectral) continue;
       const outpostsHere = Object.values(getOutposts()).filter((o) => o.siteId === s.id);
       if (outpostsHere.length > 0 || exoFreeSlots.length > 0) {
         exoSite = s; exoFactory = f; exoOutposts = outpostsHere;
@@ -10066,10 +10091,14 @@ function openOpsMenu() {
     opSites.push({ site: landed, hint: '🛸 landed here · prospect / refuel' });
   }
   for (const f of (allFactories() || [])) {
-    if (f.ownerId !== myOwnerId() || seen.has(f.siteId)) continue;
+    // Individuality (Freedom to Roam) surfaces an opponent's factory too: refuel /
+    // ET / deliver work there (colonize stays owner-only, gated in the popup).
+    const mineFac = f.ownerId === myOwnerId();
+    if ((!mineFac && !iCanUseLaw('individuality')) || seen.has(f.siteId)) continue;
     const site = siteById(f.siteId); if (!site) continue;
     seen.add(f.siteId);
-    opSites.push({ site, hint: `🏭 factory${getColony(f.siteId) ? ' + 🌐' : ''} · refuel / ET / deliver / colonize` });
+    const acts = mineFac ? 'refuel / ET / deliver / colonize' : 'refuel / ET / deliver (Freedom to Roam)';
+    opSites.push({ site, hint: `🏭 factory${getColony(f.siteId) ? ' + 🌐' : ''} · ${acts}` });
   }
   // getDiscs() is a { siteId: disc } map, not an array.
   const discs = getDiscs() || {};
@@ -10134,7 +10163,13 @@ function doFreeMarket() {
       // Online: Free Market is the server FREE_MARKET op (sells the
       // card, credits aqua, spends the op). Submit + re-hydrate; skip
       // the local mutation that never persisted.
-      if (_online) { submitOnlineOp({ kind: 'FREE_MARKET', cardId }); return; }
+      if (_online) {
+        // Freedom (Free Trade Act): offer pairing this card with a second for 5.
+        const first = cardById(cardId);
+        if (first && iCanUseLaw('freedom')) { openFreeTradeModal(first); return; }
+        submitOnlineOp({ kind: 'FREE_MARKET', cardId });
+        return;
+      }
       if (!requireOp('Free Market')) return;
       const card = cardById(cardId);
       if (!card) {
@@ -10266,6 +10301,33 @@ const SANDBOX_OWNER_ID = 'sandbox-player';
 // (which silently hid your own factories / ops online).
 function myOwnerId() {
   return _online ? (_onlineMe && _onlineMe.id) : SANDBOX_OWNER_ID;
+}
+
+// The M0 ideology laws THIS player may benefit from right now: a law in force
+// where they hold a delegate, plus any they spent a Lobby free action on this
+// turn. Mirror of the server's playerCanUseLaw, read off the cached snapshot.
+// Empty when not online or not an M0 game.
+function myActiveLaws() {
+  const snap = _onlineSnapshot;
+  if (!_online || !snap || !snap.m0 || !snap.assembly) return new Set();
+  const myId = _onlineMe && _onlineMe.id;
+  const dmap = snap.assembly.delegates || {};
+  const me = (snap.players || []).find((p) => p.profileId === myId);
+  const usable = new Set(Array.isArray(me && me.lobbiedLaws) ? me.lobbiedLaws : []);
+  for (const key of assemblyActiveLaws(snap.assembly).active) {
+    if (((dmap[key] || {})[myId] | 0) > 0) usable.add(key);
+  }
+  return usable;
+}
+function iCanUseLaw(key) { return myActiveLaws().has(key); }
+// May this player USE the given factory for a NON-VICTORY op (Site Refuel, ET
+// Produce, Delivery)? Their own always; an opponent's only under Individuality
+// (Freedom to Roam). Mirror of the server's canUseFactoryNonVictory. Victory
+// builds (Homesteading a colony) stay owner-only and must NOT call this.
+function iCanUseFactory(factory) {
+  if (!factory) return false;
+  if (factory.ownerId === myOwnerId()) return true;
+  return iCanUseLaw('individuality');
 }
 
 // Industrialize handler (rulebook I7). The caller has already
@@ -11770,6 +11832,12 @@ async function discardHandCard(card, idx, afterFn) {
 // (e.g. to close the card popup).
 function freeMarketSellFromHand(card, afterFn) {
   if (!card) return;
+  // Freedom (Free Trade Act): online, when the law is usable, offer to pair this
+  // card with a second hand card and sell BOTH for 5 aqua (else 1 for 3).
+  if (_online && iCanUseLaw('freedom')) {
+    openFreeTradeModal(card, afterFn);
+    return;
+  }
   openSellConfirmModal({
     card,
     aqua: FREE_MARKET_AQUA,
@@ -11800,6 +11868,78 @@ function freeMarketSellFromHand(card, afterFn) {
       if (afterFn) afterFn();
     },
   });
+}
+
+// Freedom (Free Trade Act): sell the chosen Hand card alone for 3 aqua, or pair
+// it with one more Hand card and sell BOTH for 5. Online-only (the law lives on
+// the server snapshot). Submits FREE_MARKET with cardId (1) or cardIds (2).
+function openFreeTradeModal(firstCard, afterFn) {
+  const others = getHandSlots().filter((id) => id !== firstCard.id);
+  let second = null;
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal';
+  modal.style.maxWidth = '460px';
+  const close = () => back.remove();
+  const h = document.createElement('div');
+  h.className = 'mp-trade-head';
+  h.innerHTML = '<h3>💱 Free Market - Free Trade Act</h3>';
+  modal.appendChild(h);
+  const note = document.createElement('div');
+  note.className = 'mp-trade-colo no-colo';
+  note.innerHTML = `Sell <strong>${esc(firstCard.name)}</strong> alone for <strong>+3</strong> aqua, `
+    + 'or add a second Hand card and sell both for <strong>+5</strong>.';
+  modal.appendChild(note);
+  const list = document.createElement('div');
+  list.className = 'mp-relocate-list';
+  const sellTwo = document.createElement('button');
+  for (const id of others) {
+    const c = PATENTS_BY_ID[id];
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'modal-btn mp-relocate-item';
+    b.textContent = (c && c.name) || id;
+    b.addEventListener('click', () => {
+      second = (second === id) ? null : id;
+      for (const el of list.children) el.classList.remove('is-selected');
+      if (second) b.classList.add('is-selected');
+      sellTwo.disabled = !second || _onlineBusy;
+      sellTwo.textContent = second ? 'Sell 2 for +5' : 'Pick a 2nd card';
+    });
+    list.appendChild(b);
+  }
+  if (others.length) modal.appendChild(list);
+  const btns = document.createElement('div');
+  btns.className = 'mp-trade-btns';
+  const sellOne = document.createElement('button');
+  sellOne.type = 'button'; sellOne.className = 'modal-btn';
+  sellOne.textContent = 'Sell 1 for +3';
+  sellOne.disabled = _onlineBusy;
+  sellOne.addEventListener('click', () => {
+    close();
+    submitOnlineOp({ kind: 'FREE_MARKET', cardId: firstCard.id });
+    if (afterFn) afterFn();
+  });
+  sellTwo.type = 'button'; sellTwo.className = 'modal-btn primary';
+  sellTwo.textContent = 'Pick a 2nd card';
+  sellTwo.disabled = true;
+  sellTwo.addEventListener('click', () => {
+    if (!second) return;
+    close();
+    submitOnlineOp({ kind: 'FREE_MARKET', cardIds: [firstCard.id, second] });
+    if (afterFn) afterFn();
+  });
+  const cancel = document.createElement('button');
+  cancel.type = 'button'; cancel.className = 'modal-btn'; cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', close);
+  btns.appendChild(sellOne);
+  if (others.length) btns.appendChild(sellTwo);
+  btns.appendChild(cancel);
+  modal.appendChild(btns);
+  back.appendChild(modal);
+  back.addEventListener('click', (ev) => { if (ev.target === back) close(); });
+  document.body.appendChild(back);
 }
 
 // At the 9-claim cap: pick one of my placed discs to move to the new spot.
@@ -14784,7 +14924,7 @@ function showSitePopupFor(site) {
   // one op per turn anyway.
   if (rocketSite && site.id === rocketSite.id) {
     const factory = getFactory(site.id);
-    if (factory && factory.ownerId === myOwnerId()) {
+    if (iCanUseFactory(factory)) {
       const factoryGain = 7;
       const tank = getTankWater();
       const tmax = getTankMax();
@@ -14918,7 +15058,7 @@ function showSitePopupFor(site) {
   // "Deliver..." button opens a picker listing every deliverable card.
   {
     const factory = getFactory(site.id);
-    if (factory && factory.ownerId === myOwnerId()) {
+    if (iCanUseFactory(factory)) {
       const cost = deliveryCost(site);
       const items = [];
       for (const op of Object.values(getOutposts())) {
@@ -14964,7 +15104,7 @@ function showSitePopupFor(site) {
   // fresh outpost the player creates inline).
   {
     const factory = getFactory(site.id);
-    if (factory && factory.ownerId === myOwnerId()) {
+    if (iCanUseFactory(factory)) {
       const handIds = getHandSlots();
       const etOptions = findEtProduceOptions(handIds, cardById, factory.spectralType);
       const outpostsAtSite = Object.values(getOutposts()).filter((o) => o.siteId === site.id);
