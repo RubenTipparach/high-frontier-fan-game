@@ -4179,7 +4179,10 @@ function applySetFirstPlayer(state, op, ctx) {
   const pending = state.pendingFirstPlayer;
   if (!pending) return fail('no_first_player_choice');
   if (pending.chooserId !== ctx.profileId) return fail('not_first_player_chooser');
-  const targetId = String(op.profileId || '');
+  // profileId is numeric in state; the op carries a number too. Comparing a
+  // String()'d id against the numeric p.profileId never matched, so every pick
+  // bounced with unknown_player ("I can't select the first player").
+  const targetId = Number(op.profileId);
   const targetIdx = state.players.findIndex((p) => p.profileId === targetId);
   if (targetIdx < 0) return fail('unknown_player');
   // "another player": the first-player token must move off the chooser.

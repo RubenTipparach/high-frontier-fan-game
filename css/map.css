@@ -7300,17 +7300,20 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 
 .mp-crew-draft-overlay.is-minimized,
-.mp-auction-overlay.is-minimized {
+.mp-auction-overlay.is-minimized,
+.mp-first-player-overlay.is-minimized {
   background: transparent;
   backdrop-filter: none;
   pointer-events: none;
 }
 .mp-crew-draft-overlay.is-minimized .mp-crew-draft-panel,
-.mp-auction-overlay.is-minimized .mp-auction-modal { display: none; }
+.mp-auction-overlay.is-minimized .mp-auction-modal,
+.mp-first-player-overlay.is-minimized .mp-first-player-modal { display: none; }
 /* Collapsed activities dock as an inline button in the turn bar
    (.mp-turn-action), so the old floating mini-chip stays hidden. */
 .mp-crew-draft-overlay.is-minimized .mp-mini-chip,
-.mp-auction-overlay.is-minimized .mp-mini-chip {
+.mp-auction-overlay.is-minimized .mp-mini-chip,
+.mp-first-player-overlay.is-minimized .mp-mini-chip {
   display: none;
 }
 

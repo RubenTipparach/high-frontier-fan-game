@@ -271,6 +271,7 @@ let _deckPickerOpen = false;
 // lot so a fresh card always surfaces.
 let _crewDraftMin = false;
 let _cardDraftMin = false;
+let _firstPlayerMin = false;
 let _auctionMin = false;
 // Rising-edge tracker for auction turn notifications: remembers, per lot,
 // whether it was already "my turn" (bid/pass) or "my close" so a re-render
@@ -2084,6 +2085,8 @@ function renderFirstPlayerChooser(pending) {
   const existing = document.getElementById('mp-first-player-overlay');
   if (!pending || !_online || !gameViewVisible()) {
     if (existing) existing.remove();
+    setMpTurnAction('firstplayer', null);
+    _firstPlayerMin = false;
     return;
   }
   const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
@@ -2098,12 +2101,29 @@ function renderFirstPlayerChooser(pending) {
     overlay.className = 'mp-first-player-overlay';
     overlay.innerHTML = `
       <div class="mp-first-player-modal" role="dialog" aria-label="First player">
-        <h3 class="mp-first-player-title">⭐ First player</h3>
+        <div class="mp-modal-titlebar">
+          <h3 class="mp-first-player-title">⭐ First player</h3>
+          <button type="button" class="mp-mini-btn" title="Minimize" aria-label="Minimize">&minus;</button>
+        </div>
         <p class="mp-first-player-sub"></p>
         <div class="mp-first-player-choices" id="mp-first-player-choices"></div>
         <div class="hud-error" id="mp-first-player-error"></div>
-      </div>`;
+      </div>
+      <button type="button" class="mp-mini-chip" aria-label="Restore first-player selection">
+        ⭐ First player
+        <span class="mp-mini-chip-meta"></span>
+      </button>`;
     document.body.appendChild(overlay);
+    overlay.querySelector('.mp-mini-btn').addEventListener('click', () => {
+      _firstPlayerMin = true;
+      overlay.classList.add('is-minimized');
+      renderFirstPlayerChooser(_onlineSnapshot && _onlineSnapshot.pendingFirstPlayer);
+    });
+    overlay.querySelector('.mp-mini-chip').addEventListener('click', () => {
+      _firstPlayerMin = false;
+      overlay.classList.remove('is-minimized');
+      setMpTurnAction('firstplayer', null);
+    });
   }
 
   const sub = overlay.querySelector('.mp-first-player-sub');
@@ -2124,7 +2144,9 @@ function renderFirstPlayerChooser(pending) {
       const label = document.createElement('span');
       label.textContent = '@' + p.name;
       btn.append(dot, label);
-      btn.disabled = _onlineBusy;
+      // Don't gate on _onlineBusy here: a fast-poll re-render mid-submit would
+      // render the buttons disabled and they'd never re-enable. The submit
+      // helper guards re-entrancy instead.
       btn.addEventListener('click', () => submitSetFirstPlayer(p.profileId));
       choices.appendChild(btn);
     }
@@ -2136,6 +2158,19 @@ function renderFirstPlayerChooser(pending) {
     nm.textContent = '@' + (chooser ? chooser.name : '?');
     sub.append(nm, document.createTextNode(' to name the next first player.'));
   }
+
+  // Collapsible like the auction / crew overlays: minimized, it docks an
+  // "in progress" chip in the turn bar (pulsing when it's the chooser's pick).
+  overlay.classList.toggle('is-minimized', _firstPlayerMin);
+  setMpTurnAction('firstplayer', _firstPlayerMin ? {
+    label: '⭐ First player',
+    meta: amChooser ? 'your pick' : 'in progress',
+    needsAction: amChooser,
+    onClick: () => {
+      _firstPlayerMin = false;
+      renderFirstPlayerChooser(_onlineSnapshot && _onlineSnapshot.pendingFirstPlayer);
+    },
+  } : null);
 }
 
 // ----- end-of-game standings -----
