@@ -3228,21 +3228,28 @@ function assemblyDelegatesView(snapshot, variant = 'compact') {
   return { delegates, seniority: (snapshot.assembly && snapshot.assembly.seniority) || {}, variant };
 }
 
-// Glance read-out: active laws + how many delegates I still hold. Shown in both
+// Cubes a player has free: the 7-cube pool minus factories built minus delegates
+// placed (factories + delegates share the same cubes). Read off the snapshot.
+function myCubesFree(snapshot) {
+  const myId = _onlineMe && _onlineMe.id;
+  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
+  const delegates = ASSEMBLY_PLACES.reduce((s, p) => s + ((dmap[p] || {})[myId] | 0), 0);
+  const facs = Object.values(snapshot.factories || {}).filter((f) => f.ownerId === myId).length;
+  return Math.max(0, FACTORY_CUBES - delegates - facs);
+}
+// Glance read-out: active laws + how many cubes I still have free. Shown in both
 // the sidebar and the modal.
 function assemblyStatusEl(snapshot) {
-  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
-  const myId = _onlineMe && _onlineMe.id;
   const laws = assemblyActiveLaws(snapshot.assembly);
   const activeNames = [...laws.active].map((k) => (ASSEMBLY_IDEOLOGY_BY_KEY[k] || {}).name || k);
-  const placedByMe = ASSEMBLY_PLACES.reduce((s, p) => s + ((dmap[p] || {})[myId] | 0), 0);
-  const left = Math.max(0, DELEGATES_PER_PLAYER - placedByMe);
+  const free = myCubesFree(snapshot);
   const status = document.createElement('div');
   status.className = 'assembly-controls';
   status.innerHTML = `<div class="assembly-status"><strong>Active laws:</strong> `
     + `${activeNames.length ? esc(activeNames.join(', ')) : 'none yet'}`
     + `${laws.lobbyingDisabled ? ' · lobbying disabled' : ''}</div>`
-    + `<div class="assembly-status">Your delegates: <strong>${left}</strong> / ${DELEGATES_PER_PLAYER} in hand</div>`;
+    + `<div class="assembly-status">Your cubes: <strong>${free}</strong> / ${FACTORY_CUBES} free `
+    + '<span class="muted">(shared with factories)</span></div>';
   return status;
 }
 
@@ -3355,10 +3362,7 @@ function tryLobbyAt(snapshot, place) {
 }
 // Fundraise guided flow: place (optional) then move one space (optional).
 function renderAssemblyFundraise(body, snapshot) {
-  const myId = _onlineMe && _onlineMe.id;
-  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
-  const placedByMe = ASSEMBLY_PLACES.reduce((s, p) => s + ((dmap[p] || {})[myId] | 0), 0);
-  const inHand = Math.max(0, DELEGATES_PER_PLAYER - placedByMe);
+  const inHand = myCubesFree(snapshot);
   const step = _fr.step;
 
   // Prompt bar.
@@ -3411,8 +3415,7 @@ function mkBtn(label, cls, fn) {
 function onFundraiseCell(snapshot, place) {
   const myId = _onlineMe && _onlineMe.id;
   const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
-  const placedByMe = ASSEMBLY_PLACES.reduce((s, p) => s + ((dmap[p] || {})[myId] | 0), 0);
-  const inHand = Math.max(0, DELEGATES_PER_PLAYER - placedByMe);
+  const inHand = myCubesFree(snapshot);
   if (_fr.step === 'place') {
     if (inHand <= 0) { _onlineToast('No delegates left in hand.', 'error'); return; }
     _fr.place = (_fr.place === place) ? null : place;   // toggle
@@ -4312,7 +4315,8 @@ function humanizeOnlineOpError(code, detail) {
     not_at_site: 'Park the rocket at the site first.',
     not_claimed: 'Prospect and claim this site before you can industrialize it.',
     already_industrialized: 'This site already has a factory.',
-    no_factory_cubes: 'All 7 of your factory cubes are in play - you can\'t build another factory.',
+    no_factory_cubes: 'All 7 of your cubes are in play - remove an assembly delegate to free one for a factory.',
+    no_cubes_left: 'All 7 of your cubes are in play (factories + delegates) - none left to place.',
     no_colony_domes: 'All 7 of your colony domes are in play - you can\'t found another colony.',
     claim_limit: 'All 9 of your claim discs are placed - move one to this spot to prospect here.',
     disc_has_factory: 'That claim has a factory on it - it can\'t be moved.',
@@ -10676,6 +10680,51 @@ function iCanUseFactory(factory) {
 // doesn't burn the turn. The chain cards are removed from the
 // stack in reverse-index order so splices don't shift indices
 // we haven't visited yet.
+// Out of cubes for a factory: pick a delegate on the assembly to remove (frees
+// one cube). Resolves the chosen place, or null if cancelled. M0 only.
+function promptFreeDelegate(snapshot) {
+  return new Promise((resolve) => {
+    const myId = _onlineMe && _onlineMe.id;
+    const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
+    const places = ASSEMBLY_PLACES.filter((p) => ((dmap[p] || {})[myId] | 0) > 0);
+    if (!places.length) { _onlineToast('No delegates to remove - all 7 cubes are factories.', 'error'); resolve(null); return; }
+    const back = document.createElement('div');
+    back.className = 'mp-modal-back';
+    const modal = document.createElement('div');
+    modal.className = 'mp-trade-builder-modal';
+    modal.style.maxWidth = '420px';
+    const done = (v) => { back.remove(); resolve(v); };
+    const h = document.createElement('div');
+    h.className = 'mp-trade-head';
+    h.innerHTML = '<h3>No cubes left</h3>';
+    modal.appendChild(h);
+    const note = document.createElement('div');
+    note.className = 'mp-trade-colo no-colo';
+    note.textContent = 'All 7 of your cubes are in play. Remove a delegate from the assembly to free a cube for this factory.';
+    modal.appendChild(note);
+    const list = document.createElement('div');
+    list.className = 'mp-relocate-list';
+    for (const p of places) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'modal-btn mp-relocate-item';
+      b.textContent = 'Remove from ' + (p === 'centrist' ? 'Centrist' : (ASSEMBLY_IDEOLOGY_BY_KEY[p] || {}).name || p);
+      b.addEventListener('click', () => done(p));
+      list.appendChild(b);
+    }
+    modal.appendChild(list);
+    const btns = document.createElement('div');
+    btns.className = 'mp-trade-btns';
+    const cancel = document.createElement('button');
+    cancel.type = 'button'; cancel.className = 'modal-btn'; cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', () => done(null));
+    btns.appendChild(cancel);
+    modal.appendChild(btns);
+    back.appendChild(modal);
+    back.addEventListener('click', (e) => { if (e.target === back) done(null); });
+    document.body.appendChild(back);
+  });
+}
+
 function doIndustrialize(site, stack, options) {
   openIndustrializeModal({
     siteName: site.name,
@@ -10690,6 +10739,15 @@ function doIndustrialize(site, stack, options) {
         const sid = toServerId(_onlineMaps, site.id);
         if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
         const cardIds = opt.chainIndices.map((idx) => stack[idx] && stack[idx].id).filter(Boolean);
+        const snap = _onlineSnapshot || {};
+        // Shared 7-cube pool: a factory needs a free cube. If the pool is full
+        // (M0 delegates competing), offer to free one by removing a delegate.
+        if (snap.m0 && myCubesFree(snap) <= 0) {
+          promptFreeDelegate(snap).then((place) => {
+            if (place) submitOnlineOp({ kind: 'INDUSTRIALIZE', siteId: sid, cardIds, freeDelegate: place });
+          });
+          return;
+        }
         submitOnlineOp({ kind: 'INDUSTRIALIZE', siteId: sid, cardIds });
         return;
       }

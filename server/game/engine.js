@@ -2543,8 +2543,18 @@ function applyIndustrialize(state, op, player) {
   const disc = state.discs[siteId];
   if (!disc || disc.outcome !== 'success' || disc.ownerId !== player.profileId) return fail('not_claimed');
   if (state.factories[siteId]) return fail('already_industrialized');
-  // Factory cube supply: a player has only 7 cubes, so 7 factories max.
-  if (ownedSiteCount(state.factories, player.profileId) >= FACTORY_CUBES) return fail('no_factory_cubes');
+  // Cube supply: factories + assembly delegates share the 7 cubes. If the pool
+  // is full you may FREE one by removing a delegate from the politics map
+  // (op.freeDelegate = the place to pull it from); otherwise it's a hard cap.
+  if (cubesInPlay(state, player.profileId) >= FACTORY_CUBES) {
+    const asm = assemblyOf(state);
+    const free = op.freeDelegate ? String(op.freeDelegate) : null;
+    if (free && ASSEMBLY_PLACES.includes(free) && placeCount(asm, free, player.profileId) > 0) {
+      setPlaceCount(asm, free, player.profileId, placeCount(asm, free, player.profileId) - 1);
+    } else {
+      return fail('no_factory_cubes');
+    }
+  }
   const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];
   // Every id must be a non-crew card in the stack; the set must include a
   // refinery + a robonaut (the build needs both) - unless ARCOLOGY waives the
@@ -2733,6 +2743,14 @@ function canUseFactoryNonVictory(state, player, fac) {
   if (fac.ownerId === player.profileId) return true;
   return playerCanUseLaw(state, player, 'individuality');
 }
+// A player's 7 wooden cubes are ONE shared pool: each factory AND each assembly
+// delegate is a cube. cubesInPlay counts both; FACTORY_CUBES (7) caps the sum.
+// Running out for a factory is freed by removing a delegate (INDUSTRIALIZE
+// freeDelegate); placing a delegate is blocked when the pool is full.
+function cubesInPlay(state, profileId) {
+  return ownedSiteCount(state.factories, profileId)
+    + playerDelegatesPlaced(assemblyOf(state), profileId);
+}
 
 // Fundraise (M0 operation, replaces Income): OPTIONALLY place a new delegate
 // from hand AND OPTIONALLY move one of YOUR delegates one ADJACENT space, then
@@ -2757,7 +2775,7 @@ function applyFundraise(state, op, player) {
     if (!ASSEMBLY_PLACES.includes(moveFrom) || !ASSEMBLY_PLACES.includes(moveTo)) return fail('bad_place');
     if (!adjacentPlaces(moveFrom).includes(moveTo)) return fail('not_adjacent');
   }
-  if (place && delegatesRemaining(asm, pid) <= 0) return fail('no_delegates_left');
+  if (place && cubesInPlay(state, pid) >= FACTORY_CUBES) return fail('no_cubes_left');
   if (moveFrom) {
     // The move source must hold one of MY delegates (a same-space placement this
     // op seeds one, so place-then-move from the new space is allowed).
@@ -3165,7 +3183,7 @@ function pickPayload(op) {
     case 'DIRT_REFUEL': return { amount: op.amount };
     case 'DELIVERY': return { siteId: op.siteId, letter: op.letter, cardId: op.cardId };
     case 'BUILD_COLONY': return { cardId: op.cardId };
-    case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds };
+    case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds, freeDelegate: op.freeDelegate };
     case 'MINE_REVIVAL': return { siteId: op.siteId };
     case 'ET_PRODUCE': return { siteId: op.siteId, cardId: op.cardId, letter: op.letter, isNewOutpost: !!op.isNewOutpost };
     // Route ops ride the undo stack like every other functional op, so

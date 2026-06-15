@@ -73,8 +73,11 @@ export function adjacentPlaces(place) {
   return [IDEOLOGY_ORDER[(i + n - 1) % n], IDEOLOGY_ORDER[(i + 1) % n], 'centrist'];
 }
 
-// Delegates a player gets. TUNABLE default - confirm against the M0 rules.
-export const DELEGATES_PER_PLAYER = 5;
+// A player's wooden cubes are ONE shared pool of 7, used for BOTH factories and
+// assembly delegates (so at most 7 delegates, fewer once factories are built).
+// The engine enforces the factory+delegate sum against this; delegatesRemaining
+// here is just the delegates-only upper bound.
+export const DELEGATES_PER_PLAYER = 7;
 
 // Empty assembly: delegate placements keyed by place, then profileId -> count;
 // plus a neutral seniority-disc count per place. The round's first player drops
