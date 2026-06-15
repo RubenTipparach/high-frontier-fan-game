@@ -7908,33 +7908,37 @@ body:has(#view-browse:not(.hidden)) #main {
 .assembly-head { display: flex; align-items: baseline; gap: 10px; justify-content: center; }
 .assembly-head h2 { margin: 0; font-size: 22px; letter-spacing: 1px; text-transform: uppercase; }
 .assembly-sub { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--ink-dim, #8b90b8); }
-.assembly-lobby { font-size: 12px; color: var(--ink-dim, #8b90b8); text-align: center; margin: 6px 0 12px; }
-.assembly-lobby strong { color: var(--ink); }
-.assembly-wheel { display: block; width: 320px; max-width: 100%; margin: 0 auto; }
+.assembly-board { display: block; width: 100%; max-width: 720px; margin: 8px auto 0; }
 .assembly-wedge { stroke: #0b0a14; stroke-width: 2; }
 .assembly-wedge-label { fill: #fff; font: 700 11px ui-sans-serif, system-ui, sans-serif; letter-spacing: 0.3px; paint-order: stroke; stroke: rgba(0,0,0,0.35); stroke-width: 2px; }
-.assembly-slot { fill: rgba(0,0,0,0.28); stroke: rgba(255,255,255,0.55); stroke-width: 1.5; }
-.assembly-delegate { stroke: rgba(0,0,0,0.4); stroke-width: 0.5; }
+.assembly-slot { fill: rgba(0,0,0,0.32); stroke: rgba(255,255,255,0.55); stroke-width: 1.5; }
 .assembly-center { fill: #f3f4fa; stroke: #0b0a14; stroke-width: 2; }
-.assembly-center-label { fill: #1a1830; font: 800 15px ui-sans-serif, system-ui, sans-serif; letter-spacing: 1px; }
-.assembly-center-sub { fill: #3a3760; font: 600 10px ui-sans-serif, system-ui, sans-serif; }
+.assembly-center-label { fill: #1a1830; font: 800 14px ui-sans-serif, system-ui, sans-serif; letter-spacing: 1px; }
+.assembly-center-sub { fill: #3a3760; font: 600 9px ui-sans-serif, system-ui, sans-serif; }
 
-.assembly-law-center { margin: 12px auto; max-width: 460px; border-color: #c9ccd8; }
-.assembly-laws { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 12px; }
-.assembly-law {
+/* Leader lines + arrowheads from each callout to its delegate space. */
+.assembly-arrow { stroke: var(--ink-dim, #8b90b8); stroke-width: 1.5; }
+.assembly-arrowhead { fill: var(--ink-dim, #8b90b8); }
+
+/* Callout boxes (foreignObject HTML), one per ideology, around the wheel. */
+.assembly-callout {
+  box-sizing: border-box;
+  height: 100%;
   border: 1px solid var(--border);
   border-left: 4px solid var(--ide-color, var(--border));
   border-radius: 8px;
-  padding: 8px 10px;
-  background: var(--panel);
+  padding: 6px 9px;
+  background: rgba(13, 12, 24, 0.92);
+  font-family: ui-sans-serif, system-ui, sans-serif;
 }
-.assembly-law-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.assembly-law-ide { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--ide-color, var(--ink-dim)); font-weight: 700; }
-.assembly-law-name { font-size: 13px; font-weight: 700; }
-.assembly-law-text { font-size: 12px; color: var(--ink-dim, #8b90b8); margin: 4px 0 6px; line-height: 1.4; }
+.assembly-callout-center { border-left-color: #c9ccd8; }
+.assembly-callout-lobby { border-left-color: var(--accent, #7dd3fc); }
+.assembly-law-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.assembly-law-ide { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--ide-color, var(--ink-dim)); font-weight: 700; }
+.assembly-law-name { font-size: 12px; font-weight: 700; color: var(--ink); }
+.assembly-law-text { font-size: 11px; color: var(--ink-dim, #8b90b8); margin: 3px 0 5px; line-height: 1.35; }
 .assembly-law-award {
-  display: inline-block; font-size: 11px; font-weight: 700;
+  display: inline-block; font-size: 10px; font-weight: 700;
   background: var(--ide-color, #333); color: #0b0a14;
-  padding: 2px 7px; border-radius: 999px;
+  padding: 1px 7px; border-radius: 999px;
 }
-@media (max-width: 560px) { .assembly-laws { grid-template-columns: 1fr; } }
