@@ -52,6 +52,7 @@ import {
 } from './discs.js';
 import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
 import { renderAssemblyPanel } from './assembly.js';
+import { uiIcon } from './ui-icons.js';
 import {
   activeLaws as assemblyActiveLaws, ASSEMBLY_PLACES, IDEOLOGY_ORDER as ASSEMBLY_IDEOLOGY_ORDER,
   IDEOLOGY_BY_KEY as ASSEMBLY_IDEOLOGY_BY_KEY, DELEGATES_PER_PLAYER,
@@ -5125,13 +5126,13 @@ function renderStackSwitcher() {
   // fallback, so we treat that as available).
   const slots = [
     {
-      id: 'leo', label: '🌍', sub: 'LEO',
+      id: 'leo', icon: 'leo', sub: 'LEO',
       title: `LEO Stack - ${getLeoCards().length} card${getLeoCards().length === 1 ? '' : 's'}. Aqua bank: ${getAqua()}. Hand: ${getHandSlots().length} card${getHandSlots().length === 1 ? '' : 's'} (not yet boosted).`,
       siteAvailable: true,
       isEmpty: false,
     },
     {
-      id: 'rocket', label: '🚀', sub: 'Rocket',
+      id: 'rocket', icon: 'rocket', sub: 'Rocket',
       title: rocketStack.length
         ? `Rocket - ${rocketStack.length} card${rocketStack.length === 1 ? '' : 's'}, ${getTankWater()} water${rocketSite ? `, at ${rocketSite.name}` : ', at LEO'}`
         : 'Rocket - empty (boost cards from hand to build the stack)',
@@ -5151,14 +5152,14 @@ function renderStackSwitcher() {
       // can tell at a glance there's fuel to pump.
       const hasWater = (op.tank | 0) > 0;
       slots.push({
-        id: `outpost${letter}`, label: hasWater ? '🏛💧' : '🏛', sub: letter,
+        id: `outpost${letter}`, icon: 'outpost', water: hasWater, sub: letter,
         title: `Outpost ${letter} at ${opSite?.name || op.siteId} - ${op.cards.length} card${op.cards.length === 1 ? '' : 's'}, ${op.tank} water${factoryTag}${colonyTag}`,
         siteAvailable: !!opSite,
         isEmpty: false,
       });
     } else {
       slots.push({
-        id: `outpost${letter}`, label: '🏛', sub: letter,
+        id: `outpost${letter}`, icon: 'outpost', sub: letter,
         title: `Outpost slot ${letter} is empty - convert a parked rocket here via 🚀→🏛`,
         siteAvailable: false,
         isEmpty: true,
@@ -5166,12 +5167,15 @@ function renderStackSwitcher() {
     }
   }
 
+  // Small cyan droplet badge marking an outpost that holds water.
+  const waterDot = '<svg class="chip-water" viewBox="0 0 24 24" width="11" height="11" aria-hidden="true">'
+    + '<path d="M12 3 C12 3 19 12 19 17 A7 7 0 0 1 5 17 C5 12 12 3 12 3Z" fill="#52caf2" stroke="#d6f3ff" stroke-width="1.2"/></svg>';
   host.innerHTML = slots.map((s) => {
     const focusedClass = s.id === focused ? 'is-focused' : '';
     const emptyClass   = s.isEmpty ? 'is-empty' : '';
     return `<span class="hand-stack-group ${focusedClass} ${emptyClass}" data-stack="${esc(s.id)}">
       <button type="button" class="hand-stack-chip" title="${esc(s.title)}">
-        <span class="chip-glyph">${esc(s.label)}</span>
+        <span class="chip-glyph">${uiIcon(s.icon)}${s.water ? waterDot : ''}</span>
         <span class="chip-sub">${esc(s.sub)}</span>
       </button>
       <button type="button" class="hand-stack-pin" title="Fly map to ${esc(s.sub)}" ${s.siteAvailable ? '' : 'disabled'}>📍</button>
@@ -6510,6 +6514,13 @@ function wireSidebar() {
   if (!panel || !tabs || !close) return;
 
   for (const btn of tabs.querySelectorAll('button')) {
+    // Swap the placeholder emoji for the custom icon (keeps title / aria-label /
+    // hidden attrs; the unread badge is CSS, so innerHTML is safe to set).
+    const iconName = btn.id === 'sidepanel-search' ? 'search'
+      : btn.id === 'sidepanel-config' ? 'config'
+        : btn.dataset.pane;
+    const ico = iconName && uiIcon(iconName);
+    if (ico) btn.innerHTML = ico;
     // The 🔍 search button isn't a pane - it opens the search modal.
     if (btn.id === 'sidepanel-search') {
       btn.addEventListener('click', () => { _openMapSearch?.(); });

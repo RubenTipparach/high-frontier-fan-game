@@ -3622,7 +3622,11 @@ body:has(#view-browse:not(.hidden)) #main {
   border-radius: 8px;
   padding: 0;
   line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
+.sidepanel-tabs button svg.ui-icon { width: 23px; height: 23px; display: block; }
 .sidepanel-tabs button.active {
   background: var(--accent);
   color: #062136;
@@ -5546,7 +5550,9 @@ body:has(#view-browse:not(.hidden)) #main {
 .hand-stack-group.is-focused .hand-stack-pin {
   color: var(--accent);
 }
-.hand-stack-chip .chip-glyph { font-size: 16px; }
+.hand-stack-chip .chip-glyph { font-size: 16px; display: inline-flex; align-items: center; gap: 1px; }
+.hand-stack-chip .chip-glyph svg.ui-icon { width: 22px; height: 22px; display: block; }
+.hand-stack-chip .chip-glyph .chip-water { margin-left: -2px; align-self: flex-start; }
 .hand-stack-chip .chip-sub   { font-size: 12px; font-weight: 700; }
 .hand-stack-pin {
   border-left: 1px solid var(--border);
