@@ -1177,12 +1177,12 @@ export function thrustVisual(card, face, opts = {}) {
   const fuelFill = isGw ? TVC.goldFuel : (isDirt ? TVC.dirt : TVC.water);
   const fuelRim = isGw ? TVC.goldFuelRim : (isDirt ? TVC.dirtRim : TVC.waterRim);
   const center = solar ? tvSun(70, TV_CTR) : (push ? tvPushsat(70, TV_CTR) : '');
-  // GW afterburn shows the thrust GAIN as "+N" right in FRONT of (just left of)
-  // the flame, not crammed inside it; other thrusters keep the fuel-step count
-  // inside. The pair sits centred at the apex so it never runs off the edge.
+  // GW afterburn shows the thrust GAIN as "+N" sitting ON TOP of the flame
+  // (centred, drawn over it), not crammed inside it; other thrusters keep the
+  // fuel-step count inside.
   const flameGlyph = isGw
-    ? `<text x="64" y="${TV_TOP + 4.5}" text-anchor="end" font-size="14" font-weight="800" fill="#ffe2bf" stroke="#3a1500" stroke-width="2.6" paint-order="stroke">+${afterN}</text>`
-      + tvFlame(76, TV_TOP, null)
+    ? tvFlame(70, TV_TOP + 5, null)
+      + `<text x="70" y="${TV_TOP - 3}" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="800" fill="#ffffff" stroke="#3a1500" stroke-width="2.8" paint-order="stroke">+${afterN}</text>`
     : tvFlame(70, TV_TOP, afterN);
   const top = showAfter
     ? `<g data-tip="${escapeText(opts.breakdown?.afterburn || afterTip)}">${flameGlyph}</g>`
