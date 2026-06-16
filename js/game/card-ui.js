@@ -221,7 +221,7 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     if (isruCell && c.isru != null) {
       const pk = (c.prospector === 'raygun' || c.prospector === 'missile')
         ? c.prospector : 'buggy';
-      const icon = supportIconSvg(pk, { size: 14 }) || '';
+      const icon = supportIconSvg(pk, { size: 21 }) || '';
       isruCell.innerHTML = `${icon}${escapeText(String(c.isru))}`;
     }
     // Thrust triangle. Crew that double as a thruster carry a
@@ -303,8 +303,8 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   // generator circles / therm badge / robonaut prospector squares), falling
   // back to the text glyph or a generic type emoji only where no icon exists.
   const iconFor = (k) => (k === 'thermostat')
-    ? thermBadgeSvg(1, { size: 15 })
-    : (supportIconSvg(k, { size: 15 }) || `<em>${(REQUIREMENT_VIS[k] || {}).glyph || ''}</em>`);
+    ? thermBadgeSvg(1, { size: 22 })
+    : (supportIconSvg(k, { size: 22 }) || `<em>${(REQUIREMENT_VIS[k] || {}).glyph || ''}</em>`);
   const supplyGlyphs = supplies.map(iconFor).filter(Boolean).join('');
   // Robonauts ARE their prospector role - show the missile / raygun / buggy
   // icon(s) (dual-purpose cards stack both) instead of the generic robonaut
@@ -314,11 +314,11 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     const props = faceData.properties || card.properties || [];
     const active = [];
     for (const key of ['missile', 'raygun', 'buggy']) {
-      if (props.some((p) => p.key === key && p.value)) active.push(supportIconSvg(key, { size: 15 }));
+      if (props.some((p) => p.key === key && p.value)) active.push(supportIconSvg(key, { size: 22 }));
     }
     robonautGlyphs = active.join('');
   }
-  const fallback = robonautGlyphs || (typeIconSvg(card.type, { size: 15 }) || '');
+  const fallback = robonautGlyphs || (typeIconSvg(card.type, { size: 22 }) || '');
   const lead = supplyGlyphs || fallback;
   tbar.innerHTML = `${lead ? `<span class="typebar-icons">${lead}</span>` : ''}${escapeText(card.type.toUpperCase())}`;
   // Card name reads from the active face - the dark side carries
@@ -405,7 +405,7 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
         wrap.className = `side-block ${cls}`;
         const therms = block.therms ?? 0;
         const thermRow = therms > 0
-          ? thermBadgeSvg(Math.min(8, therms), { size: 16 })
+          ? thermBadgeSvg(Math.min(8, therms), { size: 24 })
           : '-';
         wrap.innerHTML = `<header>${label}</header>`
           + `<div class="rad-therms">${thermRow}</div>`
@@ -467,7 +467,7 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
       ? `<b>×${p.value}</b>` : '';
     // Robonaut prospector types (missile / raygun / buggy) get the custom
     // support-icon glyph; everything else keeps its emoji.
-    const propIcon = supportIconSvg(p.key, { size: 18 });
+    const propIcon = supportIconSvg(p.key, { size: 27 });
     if (propIcon) { b.classList.add('has-support-icon'); b.innerHTML = `${propIcon}${count}`; }
     else b.innerHTML = `<em>${p.glyph}</em>${count}`;
     propHost.appendChild(b);
@@ -516,8 +516,8 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   // glyph. The count rides as ×N except for therms (the N thermometers ARE
   // the count).
   const reqGlyphHtml = (kind, count) => {
-    if (kind === 'thermostat') return thermBadgeSvg(count, { size: 18 });
-    const icon = supportIconSvg(kind, { size: 18 });
+    if (kind === 'thermostat') return thermBadgeSvg(count, { size: 27 });
+    const icon = supportIconSvg(kind, { size: 27 });
     const cnt = count > 1 ? `<b>×${count}</b>` : '';
     if (icon) return `${icon}${cnt}`;
     const vis = REQUIREMENT_VIS[kind] || { glyph: '◇' };
@@ -605,7 +605,7 @@ function buildRadiatorFace(card, sideName) {
   const heavy = faceMeta.heavy || {};
   const cardName = faceMeta.name || card.name;
   const ability  = faceMeta.ability || '';
-  const therms = (n) => n > 0 ? thermBadgeSvg(Math.min(8, n), { size: 15 }) : '';
+  const therms = (n) => n > 0 ? thermBadgeSvg(Math.min(8, n), { size: 22 }) : '';
 
   // Name sits directly below the typebar so it reads as a
   // banner-and-title pair (matching the published radiator card
@@ -621,7 +621,7 @@ function buildRadiatorFace(card, sideName) {
   // never required, so they're not here (the typebar therm badge is the supply).
   const reqs = Array.isArray(faceMeta.requires) ? faceMeta.requires : [];
   const reqChip = (r) => {
-    const icon = supportIconSvg(r.kind, { size: 15 })
+    const icon = supportIconSvg(r.kind, { size: 22 })
       || `<em>${(REQUIREMENT_VIS[r.kind] || { glyph: '◇' }).glyph}</em>`;
     const cnt = (r.count > 1) ? `<b>×${r.count}</b>` : '';
     return `<span class="req has-support-icon">${icon}${cnt}</span>`;

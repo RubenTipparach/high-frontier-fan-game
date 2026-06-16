@@ -6207,16 +6207,9 @@ body:has(#view-browse:not(.hidden)) #main {
   flex: 1;
   display: flex;
   justify-content: center;
-  /* Fixed-height window so the deck-top preview stays a normal, consistent
-     size no matter how tall the card's art is (a taller thrust wedge no longer
-     bloats the row); the bottom of the card is clipped, as a deck top should be. */
-  height: 184px;
-  overflow: hidden;
 }
-.cart-deck-topcard .card {
-  transform: scale(0.62);
-  transform-origin: top center;
-}
+/* Market deck-top cards render at full size, the same as the library/catalog
+   cards (.card-grid), so the two views read identically. */
 .cart-deck-cards {
   list-style: none;
   margin: 0;

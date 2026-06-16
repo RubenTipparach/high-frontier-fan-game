@@ -235,7 +235,7 @@
   font-variant-numeric: tabular-nums;
 }
 .card-spectral { margin-left: auto; line-height: 0; }
-.spectral-hex { width: 22px; height: 26px; }
+.spectral-hex { width: 33px; height: 39px; }
 
 .card-body {
   display: flex;
