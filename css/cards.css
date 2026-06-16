@@ -585,18 +585,23 @@
    the body's vertical rhythm a touch to make room within the fixed height. */
 .card.type-gw-thruster .card-body,
 .card.type-freighter .card-body { gap: 4px; }
-/* On the GW purple (TW) back the future rides a clean column BESIDE the thrust
-   triangle (not overlaying it, which hid the afterburn "+N"). */
-.card-thrust-row { display: flex; align-items: center; gap: 5px; width: 100%; }
-.card-thrust-row .card-thrust { flex: 1 1 auto; min-width: 0; }
+/* On the GW purple (TW) back the FULL-SIZE thrust triangle shifts right and the
+   future fills the column on the LEFT. The triangle's SVG has transparent side
+   margins (the gold is only ~64% of its width), so nudging it right frees a
+   clean left column WITHOUT shrinking the triangle or overlapping the gold. */
+.card.type-gw-thruster .card-face[data-face="secondary"] .card-thrust { position: relative; }
+.card.type-gw-thruster .card-face[data-face="secondary"] .thrust-svg { margin-left: 19%; }
 .card-future-side {
-  flex: 0 0 35%;
+  position: absolute;
+  left: 0;
+  top: 3px;
+  width: 33%;
   margin: 0;
   padding: 0;
   border-top: none;
   text-align: left;
-  font-size: 8px;
-  line-height: 1.2;
+  font-size: 6.5px;
+  line-height: 1.25;
 }
 
 /* Footer is now just a small reserved strip at the bottom of

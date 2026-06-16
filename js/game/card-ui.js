@@ -621,17 +621,15 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     } else {
       fut.textContent = meta.future;
     }
-    // On a GW Thruster's purple (TW) back the future sits in a clean column
-    // BESIDE the thrust triangle (not overlaying it, which hid the afterburn
-    // "+N"). Everywhere else (e.g. freighters, no triangle) it goes below.
+    // On a GW Thruster's purple (TW) back the FULL-SIZE thrust triangle shifts
+    // to the right (CSS) and the future fills the freed column on the left - no
+    // overlap with the gold, and the afterburn "+N" stays visible on the
+    // triangle. Everywhere else (e.g. freighters, no triangle) it goes below.
     const thrustEl = (card.type === 'gw-thruster' && sideName === 'secondary')
       ? face.querySelector('.card-thrust') : null;
     if (thrustEl) {
       fut.classList.add('card-future-side');
-      const row = document.createElement('div');
-      row.className = 'card-thrust-row';
-      thrustEl.parentNode.insertBefore(row, thrustEl);
-      row.append(fut, thrustEl);
+      thrustEl.appendChild(fut);
     } else {
       const body = face.querySelector('.card-body');
       if (body) body.appendChild(fut);
