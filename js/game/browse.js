@@ -37,6 +37,7 @@ import {
   getTankWater, setTankWater, addFuel, removeFuel, getTankMax, getWaterCap,
   getTankGrade, setTankGrade, getActiveFuelGrade,
   getStackTotals, getActiveThrusterStats, setSolarZone, setHasPowersat,
+  computeRocketStatsFor,
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats, getSupportChainView,
   colocatedIsruMod, stackHasPower,
@@ -4250,7 +4251,19 @@ function buildMpPlayerDetail(host, p, isMe) {
   }));
   grid.appendChild(mpStackChip(
     `🚀 Rocket${rkt.tank ? ` (💧${rkt.tank})` : ''}`,
-    rkt.stack || [], { who: p.name, hasLocation: true, findServerSite: rkt.siteId || null },
+    rkt.stack || [], {
+      who: p.name, hasLocation: true, findServerSite: rkt.siteId || null,
+      rocketCtx: {
+        stack: rkt.stack || [],
+        activeThrusterId: rkt.activeThrusterId || null,
+        activeProspectorId: rkt.activeProspectorId || null,
+        tank: rkt.tank | 0,
+        tankGrade: rkt.tankGrade === 'dirt' ? 'dirt' : 'water',
+        afterburnEngaged: !!rkt.afterburnEngaged,
+        wiring: (rkt.wiring && typeof rkt.wiring === 'object') ? rkt.wiring : {},
+        solarZone: (rkt.siteId && SITES_BY_ID[rkt.siteId] && SITES_BY_ID[rkt.siteId].solarZone) || null,
+      },
+    },
   ));
   for (const letter of ['A', 'B', 'C', 'D']) {
     const op = outposts[letter];
@@ -4286,7 +4299,7 @@ function buildMpPlayerDetail(host, p, isMe) {
 // the stack's location. findServerSite is the server siteId (null =
 // LEO); hasLocation=false (e.g. an unbuilt outpost, or the hand)
 // renders the find button disabled. Returns the wrapper cell.
-function mpStackChip(title, slots, { who, hasLocation, findServerSite, hint } = {}) {
+function mpStackChip(title, slots, { who, hasLocation, findServerSite, hint, rocketCtx } = {}) {
   const arr = Array.isArray(slots) ? slots : [];
   const cell = document.createElement('div');
   cell.className = 'mp-stack-cell';
@@ -4310,7 +4323,7 @@ function mpStackChip(title, slots, { who, hasLocation, findServerSite, hint } = 
     // richer hint ("Outpost A at <site>, <n> water") when present so the modal
     // still reads in full.
     const modalTitle = hint || title;
-    chip.addEventListener('click', () => openMpStackModal(`${who ? '@' + who + ' - ' : ''}${modalTitle}`, arr));
+    chip.addEventListener('click', () => openMpStackModal(`${who ? '@' + who + ' - ' : ''}${modalTitle}`, arr, { rocketCtx }));
   }
   cell.appendChild(chip);
 
@@ -4332,10 +4345,58 @@ function mpStackChip(title, slots, { who, hasLocation, findServerSite, hint } = 
   return cell;
 }
 
+// A read-only headline header for an opponent's rocket: the same thrust /
+// fuel / mass / active-status read the owner sees in their own rocket modal,
+// computed from the snapshot via computeRocketStatsFor (which never disturbs
+// the local rocket). Returns an HTML string, '' when the stack has nothing to
+// summarise.
+function mpRocketHeaderHtml(ctx) {
+  let stats;
+  try { stats = computeRocketStatsFor(ctx); } catch (_) { return ''; }
+  if (!stats) return '';
+  const { totals, thrStats, active } = stats;
+  if (!totals || !totals.count) return '';
+  const fmt = (n) => (Number.isFinite(n) ? (Math.round(n * 100) / 100) : '-');
+  const tank = ctx.tank | 0;
+  const statusHtml = active
+    ? (active.active
+      ? '<p class="rocket-status ok">✓ Active - rocket can move.</p>'
+      : `<p class="rocket-status bad">🚫 Inactive - ${esc(active.reason || 'not flight-ready')}.</p>`)
+    : '';
+  const hasBurns = !!(thrStats && thrStats.fuel != null && thrStats.burnsAvailable != null);
+  const burnsLabel = hasBurns
+    ? `${thrStats.burnsAvailable} burn${thrStats.burnsAvailable === 1 ? '' : 's'}` : '';
+  const thrustHtml = thrStats
+    ? `<div class="rocket-totals-cell">
+         <span class="lbl">Thrust</span>
+         <strong class="${thrStats.canLift ? 'ok' : 'bad'}">${fmt(thrStats.thrust)}</strong>
+         <small class="cell-eqn">${esc(String(thrStats.weightClass || '').toLowerCase())}</small>
+       </div>
+       <div class="rocket-totals-cell">
+         <span class="lbl">Fuel / burn</span>
+         <strong>${fmt(thrStats.fuel)} FT${hasBurns ? ` <span class="muted">(${burnsLabel})</span>` : ''}</strong>
+         <small class="cell-eqn">${hasBurns ? `${thrStats.fuelSteps} fuel steps` : 'water per move'}</small>
+       </div>`
+    : '<div class="rocket-totals-cell"><span class="lbl">Thrust</span><strong class="bad">-</strong><small class="cell-eqn">no active thruster</small></div>';
+  return `
+    <div class="rocket-stack-header mp-rocket-header">
+      <div class="rocket-totals">
+        <div class="rocket-totals-grid">
+          <div class="rocket-totals-cell"><span class="lbl">Cards</span><strong>${totals.count}</strong><small class="cell-eqn">in stack</small></div>
+          <div class="rocket-totals-cell"><span class="lbl">Dry mass</span><strong>${totals.dryMass}</strong><small class="cell-eqn">card mass sum</small></div>
+          <div class="rocket-totals-cell"><span class="lbl">Wet mass</span><strong class="${thrStats && !thrStats.canLift ? 'bad' : ''}">${totals.wetMass}<small>/32</small></strong><small class="cell-eqn">dry ${totals.dryMass} + tank ${tank} · 💧 ${tank}</small></div>
+          <div class="rocket-totals-cell"><span class="lbl">Min rad-hard</span><strong>${totals.minRadHard != null ? totals.minRadHard : '-'}</strong><small class="cell-eqn">weakest card</small></div>
+          ${thrustHtml}
+        </div>
+      </div>
+      ${statusHtml}
+    </div>`;
+}
+
 // Read-only modal listing the cards in a stack (opponent inspection).
 // Renders each slot via the shared renderCard so it looks like every
 // other card surface. No actions - pure inspection.
-function openMpStackModal(title, slots) {
+function openMpStackModal(title, slots, { rocketCtx } = {}) {
   document.querySelector('.mp-stack-modal-overlay')?.remove();
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay mp-stack-modal-overlay';
@@ -4359,6 +4420,19 @@ function openMpStackModal(title, slots) {
   x.addEventListener('click', close);
   head.append(h, x);
   dialog.appendChild(head);
+
+  // For a rocket stack, lead with the same headline read the owner sees: net
+  // thrust, fuel per burn / burns, dry+wet mass, and the active/grounded
+  // verdict, computed read-only from the snapshot so the numbers match the
+  // engine without touching the local player's own rocket.
+  if (rocketCtx) {
+    const headerHtml = mpRocketHeaderHtml(rocketCtx);
+    if (headerHtml) {
+      const hdr = document.createElement('div');
+      hdr.innerHTML = headerHtml;
+      dialog.appendChild(hdr);
+    }
+  }
 
   const body = document.createElement('div');
   body.className = 'mp-stack-modal-cards';
@@ -17198,7 +17272,7 @@ function _fmtWater(v) {
   return Number.isInteger(n) ? String(n) : String(Math.round(n * 1000) / 1000);
 }
 
-// Resolve a stack slot (or a bare id) to { id, card, kind, face }.
+// Resolve a stack slot (or a bare id) to { id, card, kind, face, radSide }.
 function _resolveOwnedSlot(slot) {
   const id = typeof slot === 'string' ? slot : (slot && slot.id);
   if (!id) return null;
@@ -17206,7 +17280,10 @@ function _resolveOwnedSlot(slot) {
   if (!card) return null;
   const kind = (slot && slot.kind) || (CREW_BY_ID[id] ? 'crew' : 'patent');
   const face = (slot && slot.face === 'secondary') ? 'secondary' : 'primary';
-  return { id, card, kind, face };
+  // A radiator's mass / therms depend on which side is deployed (light vs
+  // heavy); carry it so the chip reads the installed side, not the fixed mass.
+  const radSide = (slot && typeof slot === 'object' && slot.radSide === 'light') ? 'light' : 'heavy';
+  return { id, card, kind, face, radSide };
 }
 
 // Ordered list of owned-card locations for the All cards view.
@@ -17307,14 +17384,25 @@ function collectOwnedCardsFromPlayer(player) {
 // cardGlanceSummary so the glyph language matches the full card. Click opens
 // the real card.
 function _ownedCardChip(entry) {
-  const { id, card, kind, face } = entry;
-  const name = kind === 'crew'
-    ? ((card.faces && card.faces[face] && card.faces[face].name) || card.name || id)
-    : (card.name || id);
-  const g = cardGlanceSummary(card, face);
+  const { id, card, kind, face, radSide } = entry;
+  // Read the INSTALLED face for the name AND the mass: a flipped (black-side)
+  // card is a different tech with its own name and (62 of 84 cards) its own
+  // mass. Reading card.name / card.mass showed the white side for a black-side
+  // stack. Mirrors chainChip / the full-card renderer.
+  const name = (card.faces && card.faces[face] && card.faces[face].name) || card.name || id;
+  const g = cardGlanceSummary(card, face, radSide);
   const statHtml = g.hasStats ? g.statsHtml : esc(kind === 'crew' ? 'crew' : (card.type || 'card'));
-  const massHtml = Number.isFinite(card.mass)
-    ? '<span class="acc-mass" title="Mass">m' + card.mass + '</span>' : '';
+  // A radiator's mass is its DEPLOYED side's mass (light vs heavy); everything
+  // else reads its installed face's mass, falling back to the card-level mass.
+  let massVal = card.mass;
+  if (card.type === 'radiator' && card.faces && card.faces.primary) {
+    const blk = card.faces.primary[radSide === 'light' ? 'light' : 'heavy'];
+    if (blk && blk.mass != null) massVal = blk.mass;
+  } else if (card.faces && card.faces[face] && card.faces[face].mass != null) {
+    massVal = card.faces[face].mass;
+  }
+  const massHtml = Number.isFinite(massVal)
+    ? '<span class="acc-mass" title="Mass">m' + massVal + '</span>' : '';
   const chip = document.createElement('button');
   chip.type = 'button';
   chip.className = 'all-cards-chip kind-' + kind + (kind === 'patent' ? ' type-' + card.type : '');

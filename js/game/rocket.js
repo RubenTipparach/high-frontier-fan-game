@@ -1061,6 +1061,53 @@ export function getStackTotals() {
   };
 }
 
+// Read-only stats for ANOTHER stack (an opponent's rocket from a snapshot)
+// WITHOUT disturbing the live local rocket. Temporarily swaps the module state
+// into the provided context, runs the SAME stat functions the local modal uses
+// (so the numbers match the engine), then restores - all synchronously and
+// WITHOUT firing change listeners, so there is no re-render or local-state
+// clobber. Returns { totals, thrStats, active, activeThrusterId }; thrStats is
+// null when the stack has no usable thruster.
+export function computeRocketStatsFor(ctx = {}) {
+  const saved = {
+    stack: _stack, activeThrusterId: _activeThrusterId,
+    activeProspectorId: _activeProspectorId, tank: _tankWater,
+    tankGrade: _tankGrade, afterburn: _afterburnEngaged, wiring: _wiring,
+    solarZone: _solarZone, hasPowersat: _hasPowersat,
+  };
+  try {
+    _stack = Array.isArray(ctx.stack) ? _clone(ctx.stack) : [];
+    _activeThrusterId = ctx.activeThrusterId || null;
+    _activeProspectorId = ctx.activeProspectorId || null;
+    _tankWater = ctx.tank | 0;
+    _tankGrade = ctx.tankGrade === 'dirt' ? 'dirt' : 'water';
+    _afterburnEngaged = !!ctx.afterburnEngaged;
+    _wiring = (ctx.wiring && typeof ctx.wiring === 'object' && !Array.isArray(ctx.wiring)) ? _clone(ctx.wiring) : {};
+    _solarZone = ctx.solarZone != null ? ctx.solarZone : null;
+    _hasPowersat = !!ctx.hasPowersat;
+    let thrStats = null;
+    try { thrStats = getActiveThrusterStats(); } catch (_) { thrStats = null; }
+    let active = null;
+    try { active = isRocketActive(); } catch (_) { active = null; }
+    return {
+      totals: getStackTotals(),
+      thrStats,
+      active,
+      activeThrusterId: getActiveThrusterId(),
+    };
+  } finally {
+    _stack = saved.stack;
+    _activeThrusterId = saved.activeThrusterId;
+    _activeProspectorId = saved.activeProspectorId;
+    _tankWater = saved.tank;
+    _tankGrade = saved.tankGrade;
+    _afterburnEngaged = saved.afterburn;
+    _wiring = saved.wiring;
+    _solarZone = saved.solarZone;
+    _hasPowersat = saved.hasPowersat;
+  }
+}
+
 // Normalise the current stack into the support-chain resolver's card shape
 // (data/support-chain.js). Everything (supplies / requires / thrustMod /
 // fuelMod / therms) reads the INSTALLED face, so a flipped dark-side card
