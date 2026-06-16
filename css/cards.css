@@ -250,7 +250,8 @@
   align-self: center;
   width: 100%;
   max-width: 130px;
-  margin: 2px 0 -2px;
+  /* Negative top margin nudges the thrust triangle up toward the stat box. */
+  margin: -10px 0 -2px;
 }
 .thrust-visual { display: block; }
 .thrust-svg { width: 100%; height: auto; }
