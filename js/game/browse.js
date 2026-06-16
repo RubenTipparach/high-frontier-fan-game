@@ -10601,18 +10601,38 @@ async function doPumpFuelToOutpost(letter, max, amount = null) {
   setStatus(`💧 Stored ${amt} water from the rocket in Outpost ${letter}.`);
 }
 
-// Buttons for the ROCKET fuel-tank modal: store the rocket's water in each
-// colocated outpost (the reverse of the pump-from-outpost buttons).
-function fuelTankToOutpostBtns() {
+// Outpost water transfer for the ROCKET fuel-tank modal: one block per
+// colocated outpost, styled like the LEO aqua-bank widget (two directions:
+// Outpost -> Tank +1/+5/Max fill, Tank -> Outpost -1/-5/Store all). The buttons
+// transfer immediately and the section refreshes in place.
+function fuelTankOutpostSections() {
   const rs = getRocketSite();
   if (!rs || getRocketStack().length === 0) return '';
-  const have = Math.floor(getTankWater());   // whole units only
-  if (have <= 0) return '';
   let html = '';
   for (const letter of OUTPOST_LETTERS) {
     const op = getOutpost(letter);
     if (!op || op.siteId !== rs.id) continue;
-    html += `<button type="button" class="popup-btn fuel-pump-to" data-letter="${esc(letter)}" data-max="${have}" title="Store up to ${have} water from the rocket in Outpost ${esc(letter)}">💧⤓ Store in Outpost ${esc(letter)} (${op.tank | 0})</button>`;
+    const L = esc(letter);
+    html += `<div class="fuel-tank-aqua ft-outpost" data-letter="${L}">
+      <div class="aqua-row"><span>🏛 Outpost ${L}</span><strong class="ft-op-bal">${op.tank | 0}</strong></div>
+      <p class="muted aqua-help">At this site you can move water between Outpost ${L} and the rocket tank, 1:1, for free.</p>
+      <div class="aqua-direction">
+        <span class="aqua-direction-label">🏛 Outpost → 💧 Tank</span>
+        <div class="aqua-actions">
+          <button type="button" class="popup-btn popup-btn-secondary ft-op-btn" data-dir="in" data-amt="1">+1</button>
+          <button type="button" class="popup-btn popup-btn-secondary ft-op-btn" data-dir="in" data-amt="5">+5</button>
+          <button type="button" class="popup-btn ft-op-btn" data-dir="in" data-amt="max">Max fill</button>
+        </div>
+      </div>
+      <div class="aqua-direction aqua-direction-reverse">
+        <span class="aqua-direction-label">💧 Tank → 🏛 Outpost</span>
+        <div class="aqua-actions">
+          <button type="button" class="popup-btn popup-btn-secondary ft-op-btn" data-dir="out" data-amt="1">-1</button>
+          <button type="button" class="popup-btn popup-btn-secondary ft-op-btn" data-dir="out" data-amt="5">-5</button>
+          <button type="button" class="popup-btn ft-op-btn" data-dir="out" data-amt="all">Store all</button>
+        </div>
+      </div>
+    </div>`;
   }
   return html;
 }
@@ -10670,25 +10690,6 @@ function outpostFillBtnHtml(stackId) {
   const have = Math.floor(getTankWater());
   if (have <= 0) return '';
   return `<button type="button" class="modal-btn stack stack-fill-fuel" data-letter="${esc(letter)}" data-max="${have}" title="Store up to ${have} water from the rocket here">💧 Fill ${have} ← rocket</button>`;
-}
-
-// Pump buttons for the ROCKET fuel-tank modal: one per colocated outpost
-// that holds water (when the rocket has tank room). This is where players
-// look to fill the rocket, so the outpost-water source surfaces here too.
-function fuelTankPumpBtns() {
-  const rs = getRocketSite();
-  if (!rs || getRocketStack().length === 0) return '';
-  const totals = getStackTotals();
-  const room = Math.max(0, getTankMax() - (totals.dryMass || 0) - getTankWater());
-  if (room <= 0) return '';
-  let html = '';
-  for (const letter of OUTPOST_LETTERS) {
-    const op = getOutpost(letter);
-    if (!op || op.siteId !== rs.id || (op.tank | 0) <= 0) continue;
-    const max = Math.min(op.tank | 0, room);
-    html += `<button type="button" class="popup-btn fuel-pump-from" data-letter="${esc(letter)}" data-max="${max}" title="Pump up to ${max} water from Outpost ${esc(letter)} into the rocket">💧⤒ Pump from Outpost ${esc(letter)} (${op.tank})</button>`;
-  }
-  return html;
 }
 
 // Footer button for an EMPTY outpost: decommission (dissolve) it to free
@@ -12101,9 +12102,8 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     <div class="fuel-tank-actions">
       ${tankDirt ? '' : `<button type="button" class="popup-btn popup-btn-secondary" id="tank-dump"
         title="Drain a chosen amount of water from the tank">💧⤓ Dump water</button>`}
-      ${tankDirt ? '' : fuelTankPumpBtns()}
-      ${tankDirt ? '' : fuelTankToOutpostBtns()}
     </div>
+    ${tankDirt ? '' : fuelTankOutpostSections()}
 <div class="fuel-tank-aqua" id="tank-aqua-section" hidden>
       <div class="aqua-row">
         <span>🏦 Aqua bank</span>
@@ -12437,26 +12437,6 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     if (dumpBtn) dumpBtn.disabled = cur <= 0;
   };
   refreshDumpButtons();
-  // Pump-from-outpost buttons (when a colocated outpost holds water).
-  panel.querySelectorAll('.fuel-pump-from').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const letter = btn.dataset.letter;
-      const max = Number(btn.dataset.max) || 0;
-      if (max <= 0) return;
-      close();
-      doPumpOutpostFuel(letter, max);
-    });
-  });
-  // Store-in-outpost buttons (when the rocket has water + a colocated outpost).
-  panel.querySelectorAll('.fuel-pump-to').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const letter = btn.dataset.letter;
-      const max = Number(btn.dataset.max) || 0;
-      if (max <= 0) return;
-      close();
-      doPumpFuelToOutpost(letter, max);
-    });
-  });
   function drainTo(targetLevel, durationMs = 250) {
     // Hand off to the unified tween: the continuous step picks
     // it up next frame and animates setLevel without disturbing
@@ -12629,6 +12609,99 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   aquaCash5Btn?.addEventListener('click',   (e) => cashOutToAqua(5, e));
   aquaCashAllBtn?.addEventListener('click', (e) => cashOutToAqua(getTankWater(), e));
 
+  // Outpost <-> tank transfer. Mirrors the aqua-bank widget above (same
+  // two-direction layout, same tween) but moves water between a colocated
+  // outpost and the rocket tank, 1:1, for free. Whole units only; a sub-1
+  // remainder stays in the rocket. Each section refreshes in place.
+  const outpostSections = panel.querySelectorAll('.ft-outpost');
+  const refreshOutpostSections = () => {
+    const room = Math.max(0, cap - getTankWater());
+    const tankWhole = Math.floor(getTankWater());
+    outpostSections.forEach((sec) => {
+      const letter = sec.dataset.letter;
+      const op = getOutpost(letter);
+      if (!op) { sec.hidden = true; return; }
+      const opWater = op.tank | 0;
+      const bal = sec.querySelector('.ft-op-bal');
+      if (bal) bal.textContent = String(opWater);
+      sec.querySelectorAll('.ft-op-btn').forEach((btn) => {
+        const dir = btn.dataset.dir;
+        const amt = btn.dataset.amt;
+        if (dir === 'in') {
+          // Outpost -> Tank: need outpost water + tank room.
+          const need = amt === 'max' ? 1 : Number(amt);
+          btn.disabled = opWater < need || room < 1;
+        } else {
+          // Tank -> Outpost: need whole water units in the tank.
+          const need = amt === 'all' ? 1 : Number(amt);
+          btn.disabled = tankWhole < need;
+        }
+      });
+    });
+  };
+  refreshOutpostSections();
+  const pumpOutpostIn = async (letter, amt, e) => {
+    e?.stopPropagation();
+    const op = getOutpost(letter);
+    if (!op) return;
+    const room = Math.max(0, cap - getTankWater());
+    const max = Math.min(op.tank | 0, room);
+    const want = amt === 'max' ? max : Math.min(amt, max);
+    if (want <= 0) { refreshOutpostSections(); return; }
+    if (_online) {
+      const ok = await submitOnlineOp({ kind: 'TRANSFER_FUEL', letter, amount: want });
+      if (!ok) { refreshOutpostSections(); return; }
+      animateTankLevel();
+      refreshOutpostSections();
+      return;
+    }
+    setOutpostTank(letter, (op.tank | 0) - want);
+    addFuel(want);
+    animateTankLevel();
+    refreshOutpostSections();
+    logAction({
+      type: 'fuel_transfer', icon: '💧',
+      summary: `Pumped ${want} water from Outpost ${letter} into the rocket`,
+      undoable: false,
+    });
+  };
+  const storeOutpostOut = async (letter, amt, e) => {
+    e?.stopPropagation();
+    const op = getOutpost(letter);
+    if (!op) return;
+    const tankWhole = Math.floor(getTankWater());
+    const want = amt === 'all' ? tankWhole : Math.min(amt, tankWhole);
+    if (want <= 0) { refreshOutpostSections(); return; }
+    if (_online) {
+      const ok = await submitOnlineOp({ kind: 'TRANSFER_FUEL', letter, amount: want, direction: 'toOutpost' });
+      if (!ok) { refreshOutpostSections(); return; }
+      animateTankLevel();
+      refreshOutpostSections();
+      return;
+    }
+    removeFuel(want);
+    setOutpostTank(letter, (op.tank | 0) + want);
+    animateTankLevel();
+    refreshOutpostSections();
+    logAction({
+      type: 'fuel_transfer', icon: '💧',
+      summary: `Stored ${want} water from the rocket in Outpost ${letter}`,
+      undoable: false,
+    });
+  };
+  outpostSections.forEach((sec) => {
+    const letter = sec.dataset.letter;
+    sec.querySelectorAll('.ft-op-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const dir = btn.dataset.dir;
+        const amtRaw = btn.dataset.amt;
+        const amt = (amtRaw === 'max' || amtRaw === 'all') ? amtRaw : Number(amtRaw);
+        if (dir === 'in') pumpOutpostIn(letter, amt, e);
+        else storeOutpostOut(letter, amt, e);
+      });
+    });
+  });
+
   // Dirt refuel section: shown when the ACTIVE engine is a dirt thruster.
   // Loading dirt is fueling that engine, so it lives here next to the water
   // controls (never the site popup). Dirt scoops free from the ground at a
@@ -12765,7 +12838,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   dirtDumpAll?.addEventListener('click', (e) => dumpDirt(getTankWater(), e));
 
   const unsubAqua = onAquaChange(refreshAquaButtons);
-  const unsubRocket = onRocketChange(() => { refreshAquaButtons(); refreshDirtButtons(); });
+  const unsubRocket = onRocketChange(() => { refreshAquaButtons(); refreshDirtButtons(); refreshOutpostSections(); });
   // Cleanup: detach listeners when the overlay tears down so a
   // closed modal doesn't keep responding to balance changes.
   const origRemove = overlay.remove.bind(overlay);
