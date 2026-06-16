@@ -16446,6 +16446,10 @@ function planRocketRouteTo(destSite) {
   const result = planRoute(_activeData, origin.id, destSite.id, {
     thrust,
     metricPriority,
+    // Pirouette thrusters waive the pivot cost on their first
+    // direction change(s) each turn; pass the active engine's
+    // bonus so the auto-planner discounts those pivots too.
+    freePivots: activeThrusterBonusPivots(),
   });
   if (!result || !result.segments.length) {
     // Every map location is reachable from LEO (the route graph has no
