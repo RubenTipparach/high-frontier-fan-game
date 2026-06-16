@@ -3430,6 +3430,12 @@ function renderAssemblyFundraise(body, snapshot) {
 
   // Board with the interaction wired for the current step.
   const view = assemblyDelegatesView(snapshot, assemblyModalVariant());
+  // Preview the in-progress placement immediately (a cube in my colour on the
+  // chosen space) so it shows up right away, before the op round-trips.
+  const myId = _onlineMe && _onlineMe.id;
+  const me = (snapshot.players || []).find((p) => p.profileId === myId);
+  const myColor = (me && me.color) || '#fff';
+  if (_fr.place) view.delegates[_fr.place] = [...(view.delegates[_fr.place] || []), myColor];
   view.interactive = true;   // cell highlights/glow only show during a Fundraise
   view.highlight = available;                                  // dark-blue "available"
   view.selected = step === 'place' ? _fr.place : _fr.moveFrom; // bright-blue "picked"

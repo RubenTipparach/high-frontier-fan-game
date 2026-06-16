@@ -280,21 +280,22 @@ function wheelSvg(displayTurn = null) {
     fill="#fde047" fill-opacity="0.35"
     stroke="#fde047" stroke-width="2" />`;
   // The Sunspot Cube: the FIRST PLAYER's coloured cube parked on the cycle (it
-  // is one of their 7 cubes). Drawn on top of the pointer ring.
+  // is one of their 7 cubes). Drawn on top of the pointer ring, and tweened
+  // ALONGSIDE the ring (tweenPointer moves both) so it slides, not teleports.
   const fpc = getFirstPlayerColor();
   if (fpc) svg += sunspotCubeSvg(tp.x, tp.y, 11, fpc);
   svg += '</svg>';
   return svg;
 }
 
-// An isometric 3D cube as an SVG string (the wheel builds an SVG string, not
-// DOM). Top face in the seat colour, left/right faces darkened for the bevel,
-// black outline for visibility on any season wedge.
+// An isometric 3D cube as an SVG string. Drawn at the origin and positioned via
+// a translate transform so the tween can slide it; top face in the seat colour,
+// left/right faces darkened for the bevel, black outline for visibility.
 function sunspotCubeSvg(cx, cy, s, color) {
-  const top = `${cx},${cy - s} ${cx + s},${cy - s / 2} ${cx},${cy} ${cx - s},${cy - s / 2}`;
-  const left = `${cx - s},${cy - s / 2} ${cx},${cy} ${cx},${cy + s} ${cx - s},${cy + s / 2}`;
-  const right = `${cx + s},${cy - s / 2} ${cx},${cy} ${cx},${cy + s} ${cx + s},${cy + s / 2}`;
-  return `<g class="sunspot-cube">`
+  const top = `0,${-s} ${s},${-s / 2} 0,0 ${-s},${-s / 2}`;
+  const left = `${-s},${-s / 2} 0,0 0,${s} ${-s},${s / 2}`;
+  const right = `${s},${-s / 2} 0,0 0,${s} ${s},${s / 2}`;
+  return `<g class="sunspot-cube" transform="translate(${cx.toFixed(2)},${cy.toFixed(2)})">`
     + `<polygon points="${top}" fill="${color}" stroke="#000" stroke-width="1"/>`
     + `<polygon points="${left}" fill="${color}" stroke="#000" stroke-width="1"/>`
     + `<polygon points="${left}" fill="#000" fill-opacity="0.22"/>`
@@ -311,6 +312,8 @@ function sunspotCubeSvg(cx, cy, s, color) {
 function tweenPointer(pointer, fromSlot, toSlot, durationMs = 650) {
   return new Promise((resolve) => {
     const labelR = WHEEL_R - WHEEL_RING_W / 2;
+    // The Sunspot Cube slides with the pointer ring (same slot path).
+    const cube = pointer.ownerSVGElement && pointer.ownerSVGElement.querySelector('.sunspot-cube');
     // Forward distance in slots - endTurn always advances by 1, but
     // we generalise so multi-step tweens (e.g. event replays) work.
     let forward = ((toSlot - fromSlot) % SLOTS + SLOTS) % SLOTS;
@@ -323,6 +326,7 @@ function tweenPointer(pointer, fromSlot, toSlot, durationMs = 650) {
       const pos = pointOnRing(interp, labelR);
       pointer.setAttribute('cx', pos.x.toFixed(2));
       pointer.setAttribute('cy', pos.y.toFixed(2));
+      if (cube) cube.setAttribute('transform', `translate(${pos.x.toFixed(2)},${pos.y.toFixed(2)})`);
       if (t < 1) requestAnimationFrame(frame);
       else resolve();
     }
