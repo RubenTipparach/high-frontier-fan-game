@@ -3231,14 +3231,14 @@ function syncMpTabVisibility() {
 
 // The politics tab icon (temple) is tinted to the ACTIVE LAW's colour so the
 // strip shows which law is in power at a glance: an ideology's colour when it
-// holds the star, WHITE for Centrist - Pad Insurance (matching the white center
-// hex), and neutral grey only when no law is in force. Outline is black when the
-// tab is selected (it sits on the bright accent) and white when not (dark strip).
+// holds the star, else WHITE for Centrist - which IS the no-ideology-law
+// baseline (matching the white center hex). There is no separate "no law"
+// colour; the star always rests on Centrist or an ideology. Outline is black
+// when the tab is selected (it sits on the bright accent), white when not.
 function activeLawColor(snapshot) {
   const star = snapshot && snapshot.activeLawStar;
-  if (star === 'centrist') return '#f3f4fa';   // Centrist law in power: white center hex
-  const ide = star && ASSEMBLY_IDEOLOGY_BY_KEY[star];
-  return ide ? ide.color : '#9aa3c0';           // no law in force: neutral
+  const ide = star && star !== 'centrist' && ASSEMBLY_IDEOLOGY_BY_KEY[star];
+  return ide ? ide.color : '#f3f4fa';   // Centrist / none = no ideology law = white
 }
 function assemblyTabIconSvg(color, selected) {
   const edge = selected ? '#04121f' : '#ffffff';
@@ -3349,9 +3349,12 @@ function assemblyStatusEl(snapshot) {
     ? 'Centrist - Pad Insurance'
     : ((ASSEMBLY_IDEOLOGY_BY_KEY[k] || {}).name || k)));
   const free = myCubesFree(snapshot);
+  // Outline the active-law read-out in the law-in-power's colour (an ideology's
+  // hue, or white for Centrist = no ideology law), matching the tab-strip icon.
+  const lawColor = activeLawColor(snapshot);
   const status = document.createElement('div');
   status.className = 'assembly-controls';
-  status.innerHTML = `<div class="assembly-status"><strong>Active laws:</strong> `
+  status.innerHTML = `<div class="assembly-status assembly-active-law" style="--law-color:${esc(lawColor)}"><strong>Active laws:</strong> `
     + `${activeNames.length ? esc(activeNames.join(', ')) : 'none yet'}`
     + `${laws.lobbyingDisabled ? ' · lobbying disabled' : ''}</div>`
     + `<div class="assembly-status">Your cubes: <strong>${free}</strong> / ${FACTORY_CUBES} free `

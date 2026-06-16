@@ -8168,6 +8168,10 @@ body:has(#view-browse:not(.hidden)) #main {
 .assembly-controls { margin: 10px 0; }
 .assembly-status { font-size: 12px; color: var(--ink-dim, #8b90b8); margin: 3px 0; }
 .assembly-status strong { color: var(--ink); }
+/* The active-law read-out is boxed in the law-in-power's colour (white for
+   Centrist = no ideology law), so the strip icon and the read-out agree. */
+.assembly-active-law { border: 1.5px solid var(--law-color, #3a4a7a); border-radius: 8px;
+  padding: 5px 9px; background: color-mix(in srgb, var(--law-color, #3a4a7a) 12%, transparent); }
 .assembly-action {
   border: 1px solid var(--border);
   border-radius: 10px;
