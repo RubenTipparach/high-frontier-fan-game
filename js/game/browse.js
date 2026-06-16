@@ -16505,11 +16505,11 @@ function paintCart() {
 // layered rectangles offset down-right so it reads as a
 // physical pile. Capped at 5 layers (more would just clutter).
 function renderDeckThicknessSvg(deckSize) {
-  const layers = Math.max(1, Math.min(5, Math.ceil(deckSize / 3)));
+  const layers = Math.max(1, Math.min(3, Math.ceil(deckSize / 6)));
   const svgNS = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(svgNS, 'svg');
-  const w = 60, h = 84;
-  const cardW = 38, cardH = 56;
+  const w = 48, h = 64;
+  const cardW = 32, cardH = 46;
   const offset = 4;
   svg.setAttribute('width', String(w));
   svg.setAttribute('height', String(h));
@@ -16533,7 +16533,7 @@ function renderDeckThicknessSvg(deckSize) {
   txt.setAttribute('x', String(2 + cardW / 2));
   txt.setAttribute('y', String(2 + cardH / 2 + 6));
   txt.setAttribute('text-anchor', 'middle');
-  txt.setAttribute('font-size', '20');
+  txt.setAttribute('font-size', '16');
   txt.setAttribute('font-weight', '800');
   txt.setAttribute('fill', '#7dd3fc');
   txt.textContent = String(deckSize);

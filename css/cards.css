@@ -231,7 +231,7 @@
 .card-statbox span { display: inline-flex; align-items: center; gap: 4px; }
 .card-statbox strong {
   color: var(--ink);
-  font-size: 13px;
+  font-size: 19.5px;
   font-variant-numeric: tabular-nums;
 }
 .card-spectral { margin-left: auto; line-height: 0; }

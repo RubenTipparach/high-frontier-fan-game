@@ -6207,13 +6207,15 @@ body:has(#view-browse:not(.hidden)) #main {
   flex: 1;
   display: flex;
   justify-content: center;
+  /* Fixed-height window so the deck-top preview stays a normal, consistent
+     size no matter how tall the card's art is (a taller thrust wedge no longer
+     bloats the row); the bottom of the card is clipped, as a deck top should be. */
+  height: 184px;
+  overflow: hidden;
 }
 .cart-deck-topcard .card {
-  /* Match the inspector scale so the cart and other stack
-     views read at the same visual size. */
-  transform: scale(0.65);
+  transform: scale(0.62);
   transform-origin: top center;
-  margin-bottom: -90px;
 }
 .cart-deck-cards {
   list-style: none;
