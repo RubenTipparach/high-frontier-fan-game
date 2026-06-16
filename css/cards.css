@@ -245,7 +245,8 @@
   flex: 1 1 auto;
 }
 
-.card-thrust {
+.card-thrust,
+.card-thrust-mod {
   align-self: center;
   width: 100%;
   max-width: 130px;
