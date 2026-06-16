@@ -7528,6 +7528,11 @@ body:has(#view-browse:not(.hidden)) #main {
   text-align: left;
   font: inherit;
 }
+/* A stack card that opens its close-up view on click (LEO / Rocket / Outpost
+   inspectors). Pointer + a soft lift on hover so it reads as tappable, without
+   fighting the card's own Flip / support-chip / radiator-toggle controls. */
+.card.is-viewable { cursor: pointer; }
+.card.is-viewable:hover { filter: brightness(1.06); }
 .all-cards-chip:hover { background: #1e2744; border-color: #3a4668; }
 /* Black side (installed Tier-2 face): the physical card's black side, so the
    chip goes near-black with a light name and a small ◆ black badge. */

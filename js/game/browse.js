@@ -4455,8 +4455,11 @@ function openMpStackModal(title, slots, { rocketCtx } = {}) {
     const kind = CREW_BY_ID[id] ? 'crew' : 'patent';
     const wrap = document.createElement('div');
     wrap.className = 'mp-stack-modal-card';
-    try { wrap.appendChild(renderCard(card, { type: kind, face, radSide })); }
-    catch { wrap.textContent = card.name || id; }
+    try {
+      const cardEl = renderCard(card, { type: kind, face, radSide });
+      makeCardViewable(cardEl, card, kind, face);
+      wrap.appendChild(cardEl);
+    } catch { wrap.textContent = card.name || id; }
     body.appendChild(wrap);
   }
   dialog.appendChild(body);
@@ -5717,7 +5720,9 @@ function openUnifiedStackInspector(stackId) {
         const wrap = document.createElement('div');
         wrap.className = 'rocket-slot';
         if (selected.has(slot.id)) wrap.classList.add('is-selected');
-        wrap.appendChild(renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy' }));
+        const cardEl = renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy' });
+        makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face);
+        wrap.appendChild(cardEl);
         const actions = document.createElement('div');
         actions.className = 'rocket-slot-actions';
         const selBtn = document.createElement('button');
@@ -6306,11 +6311,27 @@ function openDeckTapModal(card, kind, { allowAuction = false, inspectOnly = fals
   document.addEventListener('keydown', onKey);
 }
 
+// Make a rendered stack card open its read-only close-up modal on click, so a
+// player can inspect any card in LEO / the Rocket / an Outpost up close. Guards
+// the card's own controls (Flip, support chips, the radiator Light/Heavy
+// toggle) so those keep working; a click anywhere else on the card opens the
+// big view. `face` opens the modal on the side that's installed in the stack.
+function makeCardViewable(cardEl, card, kind, face) {
+  if (!cardEl) return cardEl;
+  cardEl.classList.add('is-viewable');
+  cardEl.title = 'Tap to view this card up close';
+  cardEl.addEventListener('click', (e) => {
+    if (e.target.closest('button, [role="button"], .rad-side, .card-flip')) return;
+    openCardModal(card, kind, null, { readOnly: true, face });
+  });
+  return cardEl;
+}
+
 // Inspect modal: enlarged copy of the clicked card with three
 // actions - Discard (pop back to the deck), Exo produce (will
 // need a factory location once Stage-3 builds them), and Add to
 // stack (push onto the LEO rocket).
-function openCardModal(card, kind, slotIdx, { readOnly = false } = {}) {
+function openCardModal(card, kind, slotIdx, { readOnly = false, face } = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay';
   const close = () => overlay.remove();
@@ -6320,7 +6341,11 @@ function openCardModal(card, kind, slotIdx, { readOnly = false } = {}) {
   panel.className = 'card-modal-panel';
   const cardEl = renderCard(card, {
     type: kind,
-    face: getPickedCrew()?.cardId === card.id ? getPickedCrew()?.face : undefined,
+    // Open on the explicitly requested face (e.g. the side installed in a
+    // stack), else the picked crew face, else the default primary.
+    face: face !== undefined
+      ? face
+      : (getPickedCrew()?.cardId === card.id ? getPickedCrew()?.face : undefined),
     onSupportClick: (kinds) => {
       close();
       openPatentsSupports(kinds);
@@ -8868,7 +8893,9 @@ function openRocketStackModal() {
         close();
         openPatentsSupports(kinds);
       };
-      wrap.appendChild(renderCard(card, cardOpts));
+      const cardEl = renderCard(card, cardOpts);
+      makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face);
+      wrap.appendChild(cardEl);
 
       const actions = document.createElement('div');
       actions.className = 'rocket-slot-actions';
