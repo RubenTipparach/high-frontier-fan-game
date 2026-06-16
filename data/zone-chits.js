@@ -12,7 +12,7 @@ export const ZONE_CHIT_VPS = {
   Venus:   { front: 1, back: 2 },
   Earth:   { front: 1, back: 2 },
   Mars:    { front: 1, back: 2 },
-  Ceres:   { front: 1, back: 3 },
+  Ceres:   { front: 1, back: 2 },
   Jupiter: { front: 1, back: 3 },
   Saturn:  { front: 1, back: 4 },
   Uranus:  { front: 1, back: 5 },
