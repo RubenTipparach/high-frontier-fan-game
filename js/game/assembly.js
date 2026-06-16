@@ -172,7 +172,7 @@ export function renderAssemblyPanel({
       if (animate && prevN != null && i >= prevN) {
         anims.push(() => cubeG.animate(
           [{ opacity: 0, transform: 'translateY(-7px)' }, { opacity: 1, transform: 'translateY(0px)' }],
-          { duration: 320, easing: 'cubic-bezier(0.34,1.3,0.6,1)' },
+          { duration: 520, easing: 'cubic-bezier(0.34,1.3,0.6,1)' },
         ));
       }
     });
@@ -275,7 +275,7 @@ export function renderAssemblyPanel({
     const dy = from.y - starPos.y;
     anims.push(() => starG.animate(
       [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0px, 0px)' }],
-      { duration: 560, easing: 'cubic-bezier(0.34,1.15,0.5,1)' },
+      { duration: 900, easing: 'cubic-bezier(0.34,1.1,0.5,1)' },
     ));
   }
 

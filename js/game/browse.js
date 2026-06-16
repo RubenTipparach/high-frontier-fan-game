@@ -3182,6 +3182,35 @@ function syncMpTabVisibility() {
   if (!_online && panel.dataset.active === 'mp') showPane(null);
 }
 
+// The politics tab icon (temple) is tinted to the ACTIVE LAW's ideology colour
+// so the strip shows which law is in power at a glance; neutral when there's no
+// ideology law (Centrist / none). Outline is black when the tab is selected (it
+// sits on the bright accent) and white when not (on the dark strip).
+function activeLawColor(snapshot) {
+  const star = snapshot && snapshot.activeLawStar;
+  const ide = star && star !== 'centrist' && ASSEMBLY_IDEOLOGY_BY_KEY[star];
+  return ide ? ide.color : '#9aa3c0';
+}
+function assemblyTabIconSvg(color, selected) {
+  const edge = selected ? '#04121f' : '#ffffff';
+  return '<svg class="ui-icon ui-icon-assembly" viewBox="0 0 24 24" width="23" height="23" aria-hidden="true">'
+    + `<g fill="${esc(color)}" stroke="${edge}" stroke-width="1" stroke-linejoin="round" stroke-linecap="round">`
+    + '<path d="M3 9.5 12 4l9 5.5z"/>'
+    + '<rect x="4.6" y="10.2" width="2.4" height="7.6" rx="0.4"/>'
+    + '<rect x="8.8" y="10.2" width="2.4" height="7.6" rx="0.4"/>'
+    + '<rect x="12.8" y="10.2" width="2.4" height="7.6" rx="0.4"/>'
+    + '<rect x="17" y="10.2" width="2.4" height="7.6" rx="0.4"/>'
+    + '<rect x="2.6" y="18" width="18.8" height="2.6" rx="0.6"/>'
+    + '</g></svg>';
+}
+function updateAssemblyTabIcon(snapshot) {
+  const tab = document.getElementById('sidepanel-tab-assembly');
+  if (!tab || tab.hidden) return;
+  const panel = document.getElementById('browse-sidepanel');
+  const selected = !!(panel && panel.dataset.active === 'assembly');
+  tab.innerHTML = assemblyTabIconSvg(activeLawColor(snapshot), selected);
+}
+
 // Render the Sol Political Assembly (M0) tab from the snapshot: the hex board
 // with each player's delegates (in seat colour), the active-law read-out, and
 // Fundraise / Lobby controls. Shows the 🏛 tab only when the game has m0 on.
@@ -3190,6 +3219,7 @@ function renderAssemblyTab(snapshot) {
   const tab = document.getElementById('sidepanel-tab-assembly');
   const on = !!(_online && snapshot && snapshot.m0 && snapshot.assembly);
   if (tab) tab.hidden = !on;
+  if (on) updateAssemblyTabIcon(snapshot);
   const panel = document.getElementById('browse-sidepanel');
   if (!on) {
     if (host) host.innerHTML = '<p class="muted">Politics (Module 0) is off in this game.</p>';
@@ -6665,6 +6695,8 @@ function showPane(pane) {
   for (const btn of panel.querySelectorAll('.sidepanel-tabs button')) {
     btn.classList.toggle('active', btn.dataset.pane === pane);
   }
+  // Re-tint the politics tab icon's outline for its new selected state.
+  updateAssemblyTabIcon(_onlineSnapshot);
   for (const el of panel.querySelectorAll('.panel-pane')) {
     el.classList.toggle('active', el.dataset.pane === pane);
   }
