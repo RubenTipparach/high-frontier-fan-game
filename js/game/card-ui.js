@@ -356,12 +356,14 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   // Type-specific stat list (everything that doesn't fit in the
   // thrust visual / requirement row).
   const stats = face.querySelector('.card-stats');
-  const add = (k, v) => {
+  const add = (k, v, color) => {
     if (v == null) return;
     const li = document.createElement('li');
     li.innerHTML = `<span></span><strong></strong>`;
     li.querySelector('span').textContent = k;
-    li.querySelector('strong').textContent = v;
+    const strong = li.querySelector('strong');
+    strong.textContent = v;
+    if (color) strong.style.color = color;
     stats.appendChild(li);
   };
   // Reach into the active face for stats that vary between
@@ -371,8 +373,12 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   if (isThruster) {
     add('ISP', fdata.isp ?? card.isp);
     const f = fdata.fuel ?? card.fuel;
-    add('Fuel', f != null && !Number.isInteger(f) ? f.toFixed(2) : f);
-    add('Thrust', fdata.thrust ?? card.thrust);
+    // Order + colour these to match the thrust triangle: Thrust (left, magenta
+    // like the thrust circle) then Fuel (right, blue/grey like the fuel droplet
+    // - blue for water, grey for dirt).
+    const isDirtFuel = (fdata.fuelType ?? card.fuelType) === 'Dirt';
+    add('Thrust', fdata.thrust ?? card.thrust, '#d6017a');
+    add('Fuel', f != null && !Number.isInteger(f) ? f.toFixed(2) : f, isDirtFuel ? '#6b7280' : '#0089bd');
     // Afterburn is shown by the flame on the thrust triangle (with its own
     // tooltip), so it no longer needs a separate stat line here.
   } else if (card.type === 'reactor') {
