@@ -3184,18 +3184,21 @@ body:has(#view-browse:not(.hidden)) #main {
   margin-right: -68px;
   transform-origin: top left;
   transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.2, 1),
-              margin-right 0.22s cubic-bezier(0.2, 0.7, 0.2, 1),
+              margin-left 0.22s cubic-bezier(0.2, 0.7, 0.2, 1),
               z-index 0s;
   z-index: 1;
 }
 .hand-slot:last-child { margin-right: 0; }
 
 .hand-slot:hover {
-  transform: scale(1.18);
-  margin-right: 40px;
   z-index: 50;
 }
-.hand-slot:hover + .hand-slot { margin-left: 40px; }
+/* Hovering just raises the card to the front (z-index) so it reads fully over
+   the overlap - no scaling, no shoving the row apart. Only the single card
+   immediately to the right nudges a little to give it room; everything past it
+   stays put (the next slot cancels the shift). */
+.hand-slot:hover + .hand-slot { margin-left: 14px; }
+.hand-slot:hover + .hand-slot + .hand-slot { margin-left: -14px; }
 .hand-cards:hover .hand-slot:not(:hover) { z-index: 1; }
 
 .hand-slot .card {
