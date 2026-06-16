@@ -621,15 +621,17 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     } else {
       fut.textContent = meta.future;
     }
-    // On a GW Thruster's purple (TW) back the future OVERLAYS the left of the
-    // thrust triangle, so the triangle keeps its full front-face size instead of
-    // being squeezed by a side column. Everywhere else (e.g. freighters, which
-    // have no triangle) it goes below the ability.
+    // On a GW Thruster's purple (TW) back the future sits in a clean column
+    // BESIDE the thrust triangle (not overlaying it, which hid the afterburn
+    // "+N"). Everywhere else (e.g. freighters, no triangle) it goes below.
     const thrustEl = (card.type === 'gw-thruster' && sideName === 'secondary')
       ? face.querySelector('.card-thrust') : null;
     if (thrustEl) {
       fut.classList.add('card-future-side');
-      thrustEl.appendChild(fut);
+      const row = document.createElement('div');
+      row.className = 'card-thrust-row';
+      thrustEl.parentNode.insertBefore(row, thrustEl);
+      row.append(fut, thrustEl);
     } else {
       const body = face.querySelector('.card-body');
       if (body) body.appendChild(fut);
@@ -1177,11 +1179,12 @@ export function thrustVisual(card, face, opts = {}) {
   const fuelFill = isGw ? TVC.goldFuel : (isDirt ? TVC.dirt : TVC.water);
   const fuelRim = isGw ? TVC.goldFuelRim : (isDirt ? TVC.dirtRim : TVC.waterRim);
   const center = solar ? tvSun(70, TV_CTR) : (push ? tvPushsat(70, TV_CTR) : '');
-  // GW afterburn shows the thrust GAIN as "+N" in FRONT of (left of) the flame,
-  // not crammed inside it; other thrusters keep the fuel-step count inside.
+  // GW afterburn shows the thrust GAIN as "+N" right in FRONT of (just left of)
+  // the flame, not crammed inside it; other thrusters keep the fuel-step count
+  // inside. The pair sits centred at the apex so it never runs off the edge.
   const flameGlyph = isGw
-    ? `<text x="60" y="${TV_TOP + 5}" text-anchor="end" font-size="16" font-weight="800" fill="#ffe2bf" stroke="#3a1500" stroke-width="2.8" paint-order="stroke">+${afterN}</text>`
-      + tvFlame(80, TV_TOP, null)
+    ? `<text x="64" y="${TV_TOP + 4.5}" text-anchor="end" font-size="14" font-weight="800" fill="#ffe2bf" stroke="#3a1500" stroke-width="2.6" paint-order="stroke">+${afterN}</text>`
+      + tvFlame(76, TV_TOP, null)
     : tvFlame(70, TV_TOP, afterN);
   const top = showAfter
     ? `<g data-tip="${escapeText(opts.breakdown?.afterburn || afterTip)}">${flameGlyph}</g>`
