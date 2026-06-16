@@ -50,7 +50,7 @@ import {
   activeLaws, freshAssembly, ASSEMBLY_PLACES, IDEOLOGY_ORDER,
   delegatesRemaining, playerDelegatesInPlace, playerDelegatesPlaced,
   seniorityInPlace, finalVote, IDEOLOGY_BY_KEY, adjacentPlaces,
-  ideologyForFactionColor,
+  ideologyForFactionColor, voteWinners,
 } from '../../data/assembly.js';
 // Movement + metadata both come from the planner graph (the vendor
 // mission-planner data the client also uses). siteBySlug layers the
@@ -2735,7 +2735,7 @@ function setPlaceCount(asm, place, profileId, count) {
 }
 // Is ideology `key`'s law in force right now (resolver verdict)?
 function lawInForce(state, key) {
-  return activeLaws(assemblyOf(state)).active.has(key);
+  return activeLaws(assemblyOf(state), state.activeLawStar).active.has(key);
 }
 // May `player` benefit from ideology `key`'s law this turn? It's in force and
 // they hold a delegate there, OR they spent a Lobby free action on it this turn.
@@ -2824,13 +2824,30 @@ function applyFundraise(state, op, player) {
   const gain = honor ? ((player.glory && player.glory.chits || []).length) : INCOME_AQUA;
   player.aqua = (player.aqua | 0) + gain;
   player.opsRemaining -= 1;
+  // Vote tally (the final step): move the active-law star onto the winner. One
+  // winner -> auto; a tie -> the fundraiser's pick (op.star ∈ the tied winners);
+  // no delegates anywhere -> the Centrist center.
+  const winners = voteWinners(asm);
+  let newStar;
+  if (winners.length === 0) newStar = 'centrist';
+  else if (winners.length === 1) [newStar] = winners;
+  else {
+    const pick = op.star ? String(op.star) : null;
+    if (!pick || !winners.includes(pick)) return fail('star_choice_required', { winners });
+    newStar = pick;
+  }
+  const starMoved = newStar !== state.activeLawStar;
+  state.activeLawStar = newStar;
   const parts = [];
   if (place) parts.push(`placed a delegate on ${placeName(place)}`);
   if (moveFrom) parts.push(`moved a delegate ${placeName(moveFrom)} -> ${placeName(moveTo)}`);
   const did = parts.length ? parts.join(' and ') : 'took income';
+  const starNote = starMoved
+    ? ` The active-law star moves to ${newStar === 'centrist' ? 'the center' : placeName(newStar)}.`
+    : '';
   return {
     ok: true, state,
-    log: `${player.name} fundraised - ${did}, +${gain} aqua${honor ? ' (Honor: per glory chit)' : ''}.${martial}`,
+    log: `${player.name} fundraised - ${did}, +${gain} aqua${honor ? ' (Honor: per glory chit)' : ''}.${martial}${starNote}`,
   };
 }
 
@@ -2840,7 +2857,7 @@ function applyFundraise(state, op, player) {
 function applyLobby(state, op, player) {
   if (!state.m0) return fail('not_m0');
   const asm = assemblyOf(state);
-  const laws = activeLaws(asm);
+  const laws = activeLaws(asm, state.activeLawStar);
   if (laws.lobbyingDisabled) return fail('lobbying_disabled');
   if (player.lobbiedThisTurn) return fail('already_lobbied');
   const key = String(op.ideology || '');
@@ -3189,7 +3206,7 @@ function pickPayload(op) {
     case 'CASH_WATER': return { amount: op.amount };
     case 'DUMP': return { amount: op.amount };
     case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds };
-    case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, discard: op.discard };
+    case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, discard: op.discard, star: op.star };
     case 'LOBBY': return { ideology: op.ideology };
     case 'DISCARD': return { cardId: op.cardId };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };

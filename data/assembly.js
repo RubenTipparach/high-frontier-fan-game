@@ -129,18 +129,10 @@ export function delegatesRemaining(assembly, profileId) {
   return Math.max(0, DELEGATES_PER_PLAYER - playerDelegatesPlaced(assembly, profileId));
 }
 
-// Which ideology Laws are in force, plus whether lobbying is disabled.
-//
-// RULE MODEL (mechanics; tune to the M0 rulebook):
-//  - Base: the ideology(ies) holding the MOST delegates are in power. Ties put
-//    every tied ideology in power. Zero delegates = not in power.
-//  - Unity override: when Unity is in power, EVERY ideology with 2+ delegates is
-//    also in power and lobbying is disabled (the printed UN General Assembly law).
-//  - The Centrist center is not an ideology law; its pad insurance is keyed off
-//    a delegate sitting there, handled separately.
-//
-// Returns { active: Set<ideologyKey>, lobbyingDisabled: boolean }.
-export function activeLaws(assembly) {
+// Vote tally: the ideologies tied for the MOST delegates (the spaces that win
+// the vote). Empty when no ideology has a delegate. The fundraiser moves the
+// active-law star onto the winner; on a tie they pick which tied space gets it.
+export function voteWinners(assembly) {
   const totals = {};
   let max = 0;
   for (const key of IDEOLOGY_ORDER) {
@@ -148,14 +140,29 @@ export function activeLaws(assembly) {
     totals[key] = n;
     if (n > max) max = n;
   }
+  if (max <= 0) return [];
+  return IDEOLOGY_ORDER.filter((k) => totals[k] === max);
+}
+
+// Which ideology Laws are in force, plus whether lobbying is disabled. Driven by
+// the active-law STAR (the marker the fundraiser moves on the vote tally): the
+// starred ideology's law is in power. Unity's override still applies when Unity
+// is starred (every 2+ ideology active, no lobbying). A 'centrist'/null star =
+// no ideology law in force. When `star` is undefined (legacy state with no
+// stored star) this falls back to the old plurality reading.
+//
+// Returns { active: Set<ideologyKey>, lobbyingDisabled: boolean }.
+export function activeLaws(assembly, star) {
   const active = new Set();
-  if (max > 0) {
-    for (const key of IDEOLOGY_ORDER) if (totals[key] === max) active.add(key);
+  if (star === undefined) {
+    for (const key of voteWinners(assembly)) active.add(key);   // legacy fallback
+  } else if (star && star !== 'centrist' && IDEOLOGY_ORDER.includes(star)) {
+    active.add(star);
   }
   let lobbyingDisabled = false;
   if (active.has('unity')) {
     lobbyingDisabled = true;
-    for (const key of IDEOLOGY_ORDER) if (totals[key] >= 2) active.add(key);
+    for (const key of IDEOLOGY_ORDER) if (delegatesInPlace(assembly, key) >= 2) active.add(key);
   }
   return { active, lobbyingDisabled };
 }

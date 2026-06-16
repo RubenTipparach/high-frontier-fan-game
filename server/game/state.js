@@ -327,6 +327,9 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
     m0: !!m0,
     assembly,
     homeIdeology,
+    // Active-law star: the marker for the in-power ideology, moved by the
+    // fundraiser on each vote tally. Starts at the Centrist center (no law).
+    activeLawStar: 'centrist',
     auction: null,
     // Open player-to-player trade negotiation, or null. A side-channel deal that
     // both parties must consent to (offer / counter / accept handshake); it does

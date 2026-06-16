@@ -88,11 +88,12 @@ function callout(root, box, ide, slot) {
 export function renderAssemblyPanel({
   delegates = null, seniority = null, variant = 'compact',
   onCellClick = null, highlight = null, selected = null,
-  activeStar = null, interactive = false,
+  activeStar = null, interactive = false, cubeGlow = null,
 } = {}) {
   const root = document.createElement('div');
   root.className = 'assembly-panel assembly-panel-' + variant + (interactive ? ' assembly-interactive' : '');
   const hi = highlight && highlight.has ? highlight : new Set(Array.isArray(highlight) ? highlight : []);
+  const glowSet = cubeGlow && cubeGlow.has ? cubeGlow : new Set(Array.isArray(cubeGlow) ? cubeGlow : []);
   // Make a cell (ideology wedge or the center) clickable / highlightable for the
   // interactive modal (Fundraise placement / move, click-to-lobby).
   const wireCell = (cell, key) => {
@@ -127,13 +128,16 @@ export function renderAssemblyPanel({
 
   // Delegate cubes live anywhere on the cell (no fixed slot): drop the iso-cubes
   // near `pt` in seat colours; nothing when empty. Drawn at 2x size.
-  const drawCubes = (parent, pt, list) => {
+  const drawCubes = (parent, pt, list, glow) => {
     const cubes = Array.isArray(list) ? list : [];
     if (!cubes.length) return;
     cubes.slice(0, 6).forEach((col, i) => {
       const ox = pt.x - 20 + (i % 3) * 20;
       const oy = pt.y - 8 + Math.floor(i / 3) * 22;
-      isoCube(parent, ox, oy, 12, col, false);
+      // When this space's cubes are "selectable" (the Fundraise move origin),
+      // wrap them so a blue glow marks the cube itself as the click target.
+      const host = glow ? svg('g', { class: 'assembly-cube-glow' }, parent) : parent;
+      isoCube(host, ox, oy, 12, col, false);
     });
   };
 
@@ -197,7 +201,7 @@ export function renderAssemblyPanel({
     t.textContent = ide.name.toUpperCase();
     const slot = polar(C.x, C.y, R - 34, cA);
     slots[key] = slot;
-    drawCubes(cell, slot, delegates && delegates[key]);
+    drawCubes(cell, slot, delegates && delegates[key], glowSet.has(key));
     if (activeStar === key) drawStar(cell, { x: lab.x, y: lab.y - 17 });
     wireCell(cell, key);
   });
@@ -212,7 +216,7 @@ export function renderAssemblyPanel({
   ct.textContent = 'CENTRIST';
   ct = svg('text', { x: C.x, y: C.y + 7, class: 'assembly-center-sub', 'text-anchor': 'middle' }, centerCell);
   ct.textContent = CENTRIST.law.name;
-  drawCubes(centerCell, { x: C.x, y: C.y + 30 }, delegates && delegates.centrist);
+  drawCubes(centerCell, { x: C.x, y: C.y + 30 }, delegates && delegates.centrist, glowSet.has('centrist'));
   if (activeStar === 'centrist' || !activeStar) drawStar(centerCell, { x: C.x, y: C.y - 28 });
   wireCell(centerCell, 'centrist');
 

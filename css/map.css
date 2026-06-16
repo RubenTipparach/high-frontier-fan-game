@@ -7972,6 +7972,11 @@ body:has(#view-browse:not(.hidden)) #main {
 .assembly-cell-sel .assembly-wedge, .assembly-cell-sel .assembly-center {
   stroke: #38bdf8; stroke-width: 5; filter: drop-shadow(0 0 8px #38bdf8);
 }
+/* Move-origin: a cube you can pick up glows blue (you select the CUBE, then a
+   destination SPACE). */
+.assembly-cube-glow { filter: drop-shadow(0 0 3px #38bdf8) drop-shadow(0 0 3px #38bdf8); cursor: pointer; }
+.assembly-interactive .assembly-cell-hi:hover .assembly-cube-glow,
+.assembly-cube-glow:hover { filter: drop-shadow(0 0 6px #7dd3fc) drop-shadow(0 0 6px #7dd3fc); }
 /* Active-law star: a faceted 3D gold star (drawn as polygons) with a soft drop
    shadow for depth. Sits on the in-power ideology (center at start). */
 .assembly-star { filter: drop-shadow(0 1px 1.5px rgba(0,0,0,0.6)); pointer-events: none; }

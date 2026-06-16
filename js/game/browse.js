@@ -55,6 +55,7 @@ import {
   activeLaws as assemblyActiveLaws, ASSEMBLY_PLACES, IDEOLOGY_ORDER as ASSEMBLY_IDEOLOGY_ORDER,
   IDEOLOGY_BY_KEY as ASSEMBLY_IDEOLOGY_BY_KEY, DELEGATES_PER_PLAYER,
   adjacentPlaces as ASSEMBLY_ADJACENT, lawLeader as assemblyLawLeader,
+  voteWinners as assemblyVoteWinners,
 } from '../../data/assembly.js';
 import {
   WEIGHT_CLASSES, weightClassForMass, TRACK_LEGEND,
@@ -3229,7 +3230,8 @@ function assemblyDelegatesView(snapshot, variant = 'compact') {
     delegates,
     seniority: (snapshot.assembly && snapshot.assembly.seniority) || {},
     variant,
-    activeStar: assemblyLawLeader(snapshot.assembly),
+    activeStar: snapshot.activeLawStar !== undefined
+      ? snapshot.activeLawStar : assemblyLawLeader(snapshot.assembly),
   };
 }
 
@@ -3249,7 +3251,7 @@ function myCubesFree(snapshot) {
 // Glance read-out: active laws + how many cubes I still have free. Shown in both
 // the sidebar and the modal.
 function assemblyStatusEl(snapshot) {
-  const laws = assemblyActiveLaws(snapshot.assembly);
+  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar);
   const activeNames = [...laws.active].map((k) => (ASSEMBLY_IDEOLOGY_BY_KEY[k] || {}).name || k);
   const free = myCubesFree(snapshot);
   const status = document.createElement('div');
@@ -3277,7 +3279,7 @@ function openAssemblyModal(mode = 'view') {
   if (!_online || !_onlineSnapshot || !_onlineSnapshot.m0) return;
   _assemblyModalOpen = true;
   _assemblyMode = mode;
-  if (mode === 'fundraise') { _fr = { step: 'place', place: null, moveFrom: null }; _assemblyMin = false; }
+  if (mode === 'fundraise') { _fr = { step: 'place', place: null, moveFrom: null, moveTo: null, star: null, tied: null }; _assemblyMin = false; }
   let overlay = document.getElementById('assembly-modal-overlay');
   if (!overlay) {
     overlay = document.createElement('div');
@@ -3364,7 +3366,7 @@ function tryLobbyAt(snapshot, place) {
   const myId = _onlineMe && _onlineMe.id;
   const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
   if (((dmap[place] || {})[myId] | 0) <= 0) return;   // not your delegate
-  const laws = assemblyActiveLaws(snapshot.assembly);
+  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar);
   if (laws.lobbyingDisabled) { _onlineToast('Unity disabled lobbying this round.', 'error'); return; }
   if (laws.active.has(place)) { _onlineToast('That law is already in power.', 'error'); return; }
   if (!isOnlineMyTurn()) { _onlineToast('Wait for your turn.', 'error'); return; }
@@ -3402,14 +3404,42 @@ function fundraiseAvailable(snapshot) {
     if (home) set.add(home);
     return set;
   }
-  if (!_fr.moveFrom) return fundraiseMyPlaces(snapshot);
-  return new Set(ASSEMBLY_ADJACENT(_fr.moveFrom));
+  if (_fr.step === 'star') return new Set(_fr.tied || []);      // tie: pick a winner
+  if (!_fr.moveFrom) return fundraiseMyPlaces(snapshot);        // move origin = your cubes
+  return new Set(ASSEMBLY_ADJACENT(_fr.moveFrom));             // move destinations
 }
-// Fundraise guided flow: place (optional) then move one space (optional).
+// Vote winners on the assembly AS PROJECTED by this fundraise's place + move.
+function fundraiseProjectedWinners(snapshot) {
+  const myId = _onlineMe && _onlineMe.id;
+  const src = (snapshot.assembly && snapshot.assembly.delegates) || {};
+  const delegates = {};
+  for (const place of ASSEMBLY_PLACES) delegates[place] = { ...(src[place] || {}) };
+  const bump = (place, d) => {
+    if (!place) return;
+    delegates[place] = delegates[place] || {};
+    delegates[place][myId] = (delegates[place][myId] | 0) + d;
+  };
+  bump(_fr.place, +1);
+  bump(_fr.moveFrom, -1);
+  bump(_fr.moveTo, +1);
+  return assemblyVoteWinners({ delegates });
+}
+// After place + move settle, run the vote tally: one winner auto-stars + commits;
+// a tie opens the star pick; no winner stars the centre + commits.
+function fundraiseAdvanceToStar(snapshot) {
+  const winners = fundraiseProjectedWinners(snapshot);
+  if (winners.length <= 1) { _fr.star = winners[0] || 'centrist'; commitFundraise(); return; }
+  _fr.tied = winners;
+  _fr.step = 'star';
+  refreshAssemblyModal();
+}
+// Fundraise guided flow: place (optional), move one space (optional), then the
+// vote tally moves the active-law star.
 function renderAssemblyFundraise(body, snapshot) {
   const inHand = myCubesFree(snapshot);
   const step = _fr.step;
   const available = fundraiseAvailable(snapshot);
+  const movePick = step === 'move' && !_fr.moveFrom;   // origin = pick one of your cubes
 
   // Prompt bar.
   const prompt = document.createElement('div');
@@ -3419,10 +3449,12 @@ function renderAssemblyFundraise(body, snapshot) {
     promptText = inHand > 0
       ? 'Step 1 - Place a delegate on a highlighted space (your home ideology or where you already have a delegate), or skip.'
       : 'Step 1 - No cubes left in hand. Skip to the move step.';
+  } else if (step === 'star') {
+    promptText = 'Step 3 - Tie vote! Click which ideology gets the active-law star.';
   } else if (_fr.moveFrom) {
-    promptText = `Step 2 - Move: click a highlighted adjacent space to move your ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.moveFrom] || {}).name || _fr.moveFrom)} delegate, or skip.`;
+    promptText = `Step 2 - Move: click a highlighted adjacent space to move your ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.moveFrom] || {}).name || _fr.moveFrom)} delegate.`;
   } else {
-    promptText = 'Step 2 - Move one space: click one of your own delegates (highlighted) to pick it up, or skip & finish.';
+    promptText = 'Step 2 - Move one space: click one of your glowing cubes to pick it up, or skip.';
   }
   prompt.innerHTML = `<strong>Fundraise</strong> &middot; <span>${promptText}</span>`
     + (_fr.place ? `<div class="assembly-fr-chosen">Placing on ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.place] || {}).name || _fr.place)}.</div>` : '');
@@ -3436,9 +3468,13 @@ function renderAssemblyFundraise(body, snapshot) {
   const me = (snapshot.players || []).find((p) => p.profileId === myId);
   const myColor = (me && me.color) || '#fff';
   if (_fr.place) view.delegates[_fr.place] = [...(view.delegates[_fr.place] || []), myColor];
-  view.interactive = true;   // cell highlights/glow only show during a Fundraise
-  view.highlight = available;                                  // dark-blue "available"
-  view.selected = step === 'place' ? _fr.place : _fr.moveFrom; // bright-blue "picked"
+  view.interactive = true;
+  if (movePick) {
+    view.cubeGlow = available;   // glow the CUBES you can pick up (origin = cube)
+  } else {
+    view.highlight = available;  // dark-blue "available" spaces; hover -> bright
+  }
+  view.selected = step === 'place' ? _fr.place : _fr.moveFrom; // bright-blue "picked" cube
   view.onCellClick = (place) => onFundraiseCell(snapshot, place, available);
   body.appendChild(renderAssemblyPanel(view));
 
@@ -3446,17 +3482,17 @@ function renderAssemblyFundraise(body, snapshot) {
   const btns = document.createElement('div');
   btns.className = 'assembly-fr-btns';
   if (step === 'place') {
-    const skip = mkBtn('Skip placement', 'modal-btn', () => { _fr.step = 'move'; refreshAssemblyModal(); });
-    const next = mkBtn(_fr.place ? 'Next: move →' : 'Next →', 'modal-btn primary', () => { _fr.step = 'move'; refreshAssemblyModal(); });
-    btns.append(skip, next);
-  } else {
-    if (_fr.moveFrom) btns.append(mkBtn('↩ Pick a different delegate', 'modal-btn', () => { _fr.moveFrom = null; refreshAssemblyModal(); }));
-    btns.append(mkBtn('Skip move & finish', 'modal-btn', () => commitFundraise()));
+    btns.append(
+      mkBtn('Skip placement', 'modal-btn', () => { _fr.step = 'move'; refreshAssemblyModal(); }),
+      mkBtn(_fr.place ? 'Next: move →' : 'Next →', 'modal-btn primary', () => { _fr.step = 'move'; refreshAssemblyModal(); }),
+    );
+  } else if (step === 'move') {
+    if (_fr.moveFrom) btns.append(mkBtn('↩ Pick a different cube', 'modal-btn', () => { _fr.moveFrom = null; refreshAssemblyModal(); }));
+    else btns.append(mkBtn('Skip move & tally', 'modal-btn', () => fundraiseAdvanceToStar(snapshot)));
   }
   body.appendChild(btns);
 
-  const status = assemblyStatusEl(snapshot);
-  body.appendChild(status);
+  body.appendChild(assemblyStatusEl(snapshot));
 }
 function mkBtn(label, cls, fn) {
   const b = document.createElement('button');
@@ -3476,21 +3512,29 @@ function onFundraiseCell(snapshot, place, available) {
     refreshAssemblyModal();
     return;
   }
+  if (_fr.step === 'star') {
+    if (!available.has(place)) { _onlineToast('Pick one of the tied ideologies for the star.', 'error'); return; }
+    _fr.star = place;
+    commitFundraise();
+    return;
+  }
   // move step: pick up your own cube, then choose an adjacent destination.
   if (!_fr.moveFrom) {
-    if (!available.has(place)) { _onlineToast('Pick one of your own delegates.', 'error'); return; }
+    if (!available.has(place)) { _onlineToast('Pick one of your own cubes.', 'error'); return; }
     _fr.moveFrom = place;
     refreshAssemblyModal();
     return;
   }
   if (place === _fr.moveFrom) { _fr.moveFrom = null; refreshAssemblyModal(); return; }   // put it back
   if (!available.has(place)) { _onlineToast('Move only to an adjacent space.', 'error'); return; }
-  commitFundraise(place);
+  _fr.moveTo = place;
+  fundraiseAdvanceToStar(snapshot);
 }
-function commitFundraise(moveTo) {
+function commitFundraise() {
   const op = { kind: 'FUNDRAISE' };
   if (_fr.place) op.place = _fr.place;
-  if (_fr.moveFrom && moveTo) { op.moveFrom = _fr.moveFrom; op.moveTo = moveTo; }
+  if (_fr.moveFrom && _fr.moveTo) { op.moveFrom = _fr.moveFrom; op.moveTo = _fr.moveTo; }
+  if (_fr.star) op.star = _fr.star;
   _assemblyMode = 'view';
   _fr = null;
   submitOnlineOp(op);
@@ -4469,6 +4513,8 @@ function humanizeOnlineOpError(code, detail) {
     already_industrialized: 'This site already has a factory.',
     no_factory_cubes: 'All 7 of your cubes are in play - remove an assembly delegate to free one for a factory.',
     no_cubes_left: 'All 7 of your cubes are in play (factories + delegates) - none left to place.',
+    bad_place_target: 'Place only on your home ideology or a space where you already have a delegate.',
+    star_choice_required: 'The vote is tied - pick which ideology gets the active-law star.',
     no_colony_domes: 'All 7 of your colony domes are in play - you can\'t found another colony.',
     claim_limit: 'All 9 of your claim discs are placed - move one to this spot to prospect here.',
     disc_has_factory: 'That claim has a factory on it - it can\'t be moved.',
@@ -10812,7 +10858,7 @@ function myActiveLaws() {
   const dmap = snap.assembly.delegates || {};
   const me = (snap.players || []).find((p) => p.profileId === myId);
   const usable = new Set(Array.isArray(me && me.lobbiedLaws) ? me.lobbiedLaws : []);
-  for (const key of assemblyActiveLaws(snap.assembly).active) {
+  for (const key of assemblyActiveLaws(snap.assembly, snap.activeLawStar).active) {
     if (((dmap[key] || {})[myId] | 0) > 0) usable.add(key);
   }
   return usable;
