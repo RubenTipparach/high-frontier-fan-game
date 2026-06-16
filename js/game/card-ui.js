@@ -221,7 +221,7 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     if (isruCell && c.isru != null) {
       const pk = (c.prospector === 'raygun' || c.prospector === 'missile')
         ? c.prospector : 'buggy';
-      const icon = supportIconSvg(pk, { size: 14 }) || '';
+      const icon = supportIconSvg(pk, { size: 21 }) || '';
       isruCell.innerHTML = `${icon}${escapeText(String(c.isru))}`;
     }
     // Thrust triangle. Crew that double as a thruster carry a
@@ -303,8 +303,8 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   // generator circles / therm badge / robonaut prospector squares), falling
   // back to the text glyph or a generic type emoji only where no icon exists.
   const iconFor = (k) => (k === 'thermostat')
-    ? thermBadgeSvg(1, { size: 15 })
-    : (supportIconSvg(k, { size: 15 }) || `<em>${(REQUIREMENT_VIS[k] || {}).glyph || ''}</em>`);
+    ? thermBadgeSvg(1, { size: 22 })
+    : (supportIconSvg(k, { size: 22 }) || `<em>${(REQUIREMENT_VIS[k] || {}).glyph || ''}</em>`);
   const supplyGlyphs = supplies.map(iconFor).filter(Boolean).join('');
   // Robonauts ARE their prospector role - show the missile / raygun / buggy
   // icon(s) (dual-purpose cards stack both) instead of the generic robonaut
@@ -314,11 +314,11 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     const props = faceData.properties || card.properties || [];
     const active = [];
     for (const key of ['missile', 'raygun', 'buggy']) {
-      if (props.some((p) => p.key === key && p.value)) active.push(supportIconSvg(key, { size: 15 }));
+      if (props.some((p) => p.key === key && p.value)) active.push(supportIconSvg(key, { size: 22 }));
     }
     robonautGlyphs = active.join('');
   }
-  const fallback = robonautGlyphs || (typeIconSvg(card.type, { size: 15 }) || '');
+  const fallback = robonautGlyphs || (typeIconSvg(card.type, { size: 22 }) || '');
   const lead = supplyGlyphs || fallback;
   tbar.innerHTML = `${lead ? `<span class="typebar-icons">${lead}</span>` : ''}${escapeText(card.type.toUpperCase())}`;
   // Card name reads from the active face - the dark side carries
@@ -356,12 +356,14 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   // Type-specific stat list (everything that doesn't fit in the
   // thrust visual / requirement row).
   const stats = face.querySelector('.card-stats');
-  const add = (k, v) => {
+  const add = (k, v, color) => {
     if (v == null) return;
     const li = document.createElement('li');
     li.innerHTML = `<span></span><strong></strong>`;
     li.querySelector('span').textContent = k;
-    li.querySelector('strong').textContent = v;
+    const strong = li.querySelector('strong');
+    strong.textContent = v;
+    if (color) strong.style.color = color;
     stats.appendChild(li);
   };
   // Reach into the active face for stats that vary between
@@ -371,20 +373,14 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   if (isThruster) {
     add('ISP', fdata.isp ?? card.isp);
     const f = fdata.fuel ?? card.fuel;
-    add('Fuel', f != null && !Number.isInteger(f) ? f.toFixed(2) : f);
-    add('Thrust', fdata.thrust ?? card.thrust);
-    const afterVal = fdata.afterburn ?? card.afterburn;
-    if (afterVal) {
-      // Afterburn stat line: the number is the FUEL STEPS spent to engage
-      // afterburn (the +1 net thrust gain is always +1). Carry that on the
-      // tooltip so the digit next to the flame is never read as a water cost.
-      const n = Number(afterVal);
-      const tip = `Afterburn: spend ${n} fuel step${n === 1 ? '' : 's'} to add +1 net thrust this turn. `
-        + `This number is the fuel steps spent to perform afterburn, not a water or aqua cost.`;
-      const li = document.createElement('li');
-      li.innerHTML = `<span>Afterburn</span><strong data-tip="${escapeText(tip)}">🔥 ${escapeText(String(n))}</strong>`;
-      stats.appendChild(li);
-    }
+    // Order + colour these to match the thrust triangle: Thrust (left, magenta
+    // like the thrust circle) then Fuel (right, blue/grey like the fuel droplet
+    // - blue for water, grey for dirt).
+    const isDirtFuel = (fdata.fuelType ?? card.fuelType) === 'Dirt';
+    add('Thrust', fdata.thrust ?? card.thrust, '#d6017a');
+    add('Fuel', f != null && !Number.isInteger(f) ? f.toFixed(2) : f, isDirtFuel ? '#6b7280' : '#0089bd');
+    // Afterburn is shown by the flame on the thrust triangle (with its own
+    // tooltip), so it no longer needs a separate stat line here.
   } else if (card.type === 'reactor') {
     add('Power', card.power);
     add('Heat',  card.heat);
@@ -405,7 +401,7 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
         wrap.className = `side-block ${cls}`;
         const therms = block.therms ?? 0;
         const thermRow = therms > 0
-          ? thermBadgeSvg(Math.min(8, therms), { size: 16 })
+          ? thermBadgeSvg(Math.min(8, therms), { size: 24 })
           : '-';
         wrap.innerHTML = `<header>${label}</header>`
           + `<div class="rad-therms">${thermRow}</div>`
@@ -467,7 +463,7 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
       ? `<b>×${p.value}</b>` : '';
     // Robonaut prospector types (missile / raygun / buggy) get the custom
     // support-icon glyph; everything else keeps its emoji.
-    const propIcon = supportIconSvg(p.key, { size: 18 });
+    const propIcon = supportIconSvg(p.key, { size: 27 });
     if (propIcon) { b.classList.add('has-support-icon'); b.innerHTML = `${propIcon}${count}`; }
     else b.innerHTML = `<em>${p.glyph}</em>${count}`;
     propHost.appendChild(b);
@@ -516,8 +512,8 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   // glyph. The count rides as ×N except for therms (the N thermometers ARE
   // the count).
   const reqGlyphHtml = (kind, count) => {
-    if (kind === 'thermostat') return thermBadgeSvg(count, { size: 18 });
-    const icon = supportIconSvg(kind, { size: 18 });
+    if (kind === 'thermostat') return thermBadgeSvg(count, { size: 27 });
+    const icon = supportIconSvg(kind, { size: 27 });
     const cnt = count > 1 ? `<b>×${count}</b>` : '';
     if (icon) return `${icon}${cnt}`;
     const vis = REQUIREMENT_VIS[kind] || { glyph: '◇' };
@@ -605,6 +601,8 @@ function buildRadiatorFace(card, sideName) {
   const heavy = faceMeta.heavy || {};
   const cardName = faceMeta.name || card.name;
   const ability  = faceMeta.ability || '';
+  // Therm-supply badges in the cyan typebar: kept compact so the radiator's
+  // cyan banner reads clearly (the 50%-larger icon pass washed it out).
   const therms = (n) => n > 0 ? thermBadgeSvg(Math.min(8, n), { size: 15 }) : '';
 
   // Name sits directly below the typebar so it reads as a
@@ -621,7 +619,7 @@ function buildRadiatorFace(card, sideName) {
   // never required, so they're not here (the typebar therm badge is the supply).
   const reqs = Array.isArray(faceMeta.requires) ? faceMeta.requires : [];
   const reqChip = (r) => {
-    const icon = supportIconSvg(r.kind, { size: 15 })
+    const icon = supportIconSvg(r.kind, { size: 17 })
       || `<em>${(REQUIREMENT_VIS[r.kind] || { glyph: '◇' }).glyph}</em>`;
     const cnt = (r.count > 1) ? `<b>×${r.count}</b>` : '';
     return `<span class="req has-support-icon">${icon}${cnt}</span>`;
@@ -736,10 +734,24 @@ function thrustCircleGlyph(value) {
     + `<text x="12" y="16.3" text-anchor="middle" font-size="12.5" font-weight="700" fill="#fff">${escapeText(String(value))}</text>`
     + '</svg>';
 }
+// Inline afterburn flame for the at-a-glance chips (no emoji).
+function flameGlyphInline() {
+  return '<svg class="gl-flame" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">'
+    + '<path d="M12 2 C16 8 21 9.5 17 17 C15.5 21 8.5 21 7 16 C5.8 12 9 11 10 7 C11 10 13 8.5 12 2 Z" fill="#e07d1e" stroke="#ffd9a0" stroke-width="0.8"/>'
+    + '<path d="M12 11 C14 13.5 15 15 13.5 18 C12.5 20 9 20 8.5 16.5 C8 13.5 11 13 12 11 Z" fill="#f4a93a"/>'
+    + '</svg>';
+}
 function fuelDropletGlyph(value, dirt) {
-  return `<span class="gl-fuel${dirt ? ' is-dirt' : ''}" aria-hidden="true">`
-    + `<span class="gl-fuel-ico">${dirt ? '🪨' : '💧'}</span>`
-    + `<span class="gl-fuel-n">${escapeText(String(value))}</span></span>`;
+  // Inline vector droplet matching the card's fuel glyph: light-blue for water,
+  // grey for dirt. No emoji, so it scales crisply at any chip size.
+  const fill = dirt ? '#b6bcc4' : '#52caf2';
+  const rim = dirt ? '#e6e9ee' : '#d6f3ff';
+  const s = String(value);
+  const fs = s.length <= 2 ? 9.5 : 7.5;
+  return `<svg class="gl-fuel-svg" viewBox="0 0 24 28" width="15" height="17.5" aria-hidden="true">`
+    + `<path d="M12 3 C12 3 20 13.2 20 18.5 A8 8 0 0 1 4 18.5 C4 13.2 12 3 12 3 Z" fill="${fill}" stroke="${rim}" stroke-width="1.1"/>`
+    + `<ellipse cx="9" cy="18" rx="1.9" ry="2.6" fill="#ffffff" opacity="0.55"/>`
+    + `<text x="12" y="22.2" text-anchor="middle" font-size="${fs}" font-weight="800" fill="#0a2230" stroke="#f2fbff" stroke-width="2.2" paint-order="stroke">${escapeText(s)}</text></svg>`;
 }
 // Reactor / generator thrust MODIFIER: the dark-pink circle from the card's
 // wrench triangle, showing how much thrust it adds to the thruster it powers.
@@ -758,7 +770,7 @@ function modThrustGlyph(value) {
 // + fuel droplet for thrusters, therms for radiators, ISRU + role for
 // robonauts, etc.). Reads the ACTIVE face so a flipped (installed / Tier-2)
 // card reports its own stats. Returns ready-to-inject HTML (statsHtml).
-export function cardGlanceSummary(card, faceName = 'primary') {
+export function cardGlanceSummary(card, faceName = 'primary', radSide = null) {
   const sideName = (faceName === 'secondary' && card.faces && card.faces.secondary)
     ? 'secondary' : 'primary';
   const fdata = (card.faces && card.faces[sideName]) || {};
@@ -795,10 +807,14 @@ export function cardGlanceSummary(card, faceName = 'primary') {
     const dirt = !!(fuelType && /dirt/i.test(String(fuelType)));
     if (thr != null) stats.push(thrustCircleGlyph(thr));
     if (fuel != null) stats.push(fuelDropletGlyph(Number.isInteger(fuel) ? fuel : fuel.toFixed(2), dirt));
-    if (fdata.afterburn ?? card.afterburn) stats.push('🔥');
+    if (fdata.afterburn ?? card.afterburn) stats.push(flameGlyphInline());
   } else if (type === 'radiator') {
-    const therms = card.therms ?? card.heat_cap ?? fdata.therms
-      ?? (fdata.light && fdata.light.therms) ?? (fdata.heavy && fdata.heavy.therms);
+    // A radiator cools by the side it's deployed on (light vs heavy therms).
+    // Prefer the radSide block when the caller knows which side is in play.
+    const sideBlk = (radSide === 'light' || radSide === 'heavy') ? fdata[radSide] : null;
+    const therms = (sideBlk && sideBlk.therms != null) ? sideBlk.therms
+      : (card.therms ?? card.heat_cap ?? fdata.therms
+        ?? (fdata.light && fdata.light.therms) ?? (fdata.heavy && fdata.heavy.therms));
     if (therms != null) stats.push(`🌡 ${txt(therms)} therm${therms === 1 ? '' : 's'}`);
   } else if (type === 'crew') {
     if (fdata.role) stats.push(txt(cap(fdata.role)));
@@ -925,6 +941,89 @@ export function svgBallerinaChip(size) {
 // math: "11 = 6 base + 3 reactor mod + 2 WISP mass class").
 // Shape: { thrust?, fuel?, afterburn? } strings; missing keys
 // fall back to the short default text.
+// ---------------------------------------------------------------------------
+// Thrust-triangle glyph kit. All-vector (no emoji) so the wedge scales cleanly.
+// Layout: a tall wedge (cyan = water thruster, grey = dirt thruster, dark =
+// modifier); a magenta thrust circle + a fuel droplet share the base; an
+// optional centre symbol (Sun = solar, Push-sat = beamed) and an optional top
+// symbol (afterburn flame, or a wrench on a modifier). Colours are centralised
+// here so they can be retuned in one place.
+// ---------------------------------------------------------------------------
+const TVC = {
+  cyanTri: '#00aeef', cyanTri2: '#00aeef', cyanStroke: '#0089bd',
+  greyTri: '#a3a9b1', greyTri2: '#7d838c',
+  darkTri: '#1b2030', magenta: '#e60a7e', magentaRim: '#f7a8cf', modPink: '#831843',
+  water: '#52caf2', waterRim: '#d6f3ff', dirt: '#b6bcc4', dirtRim: '#e6e9ee',
+  orange: '#e07d1e', orange2: '#f4a93a', wrench: '#eef2f8', sun: '#f6b51e',
+};
+const TV_VB = '0 0 140 114';
+const TV_TRI = 'M 63 16 L 23 94 Q 18 102 28 102 L 112 102 Q 122 102 117 94 L 77 16 Q 70 6 63 16 Z';
+const TV_BASE = 99, TV_CXL = 46, TV_CXR = 95, TV_R = 13, TV_DS = 1.35, TV_TOP = 24, TV_CTR = 60;
+let _tvSeq = 0;   // unique gradient ids so a removed card SVG never breaks others
+
+function tvWedge(g1, g2, stroke, id) {
+  return `<defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">`
+    + `<stop offset="0" stop-color="${g1}"/><stop offset="1" stop-color="${g2}"/></linearGradient></defs>`
+    + `<path d="${TV_TRI}" fill="url(#${id})" stroke="${stroke}" stroke-width="2.5" stroke-linejoin="round"/>`;
+}
+function tvDarkWedge() {
+  return `<path d="${TV_TRI}" fill="${TVC.darkTri}" stroke="#3c465e" stroke-width="2.5" stroke-linejoin="round"/>`;
+}
+// Magenta thrust circle (or the dark-pink modifier circle), bottom-aligned to `by`.
+function tvCircle(cx, by, n, fill, rim) {
+  const cy = by - TV_R;
+  const s = String(n);
+  const fs = s.length <= 2 ? 16 : 12;
+  return `<circle cx="${cx}" cy="${cy}" r="${TV_R}" fill="${fill}" stroke="${rim}" stroke-width="2"/>`
+    + `<text x="${cx}" y="${cy + 5.6}" text-anchor="middle" font-size="${fs}" font-weight="800" fill="#fff">${escapeText(s)}</text>`;
+}
+// Fuel water-droplet (light blue = water, grey = dirt), bottom-aligned to `by`.
+function tvDroplet(cx, by, n, fill, rim) {
+  const cy = by - 12 * TV_DS;
+  const s = String(n);
+  const fs = s.length <= 2 ? 9 : 7;
+  return `<g transform="translate(${cx},${cy}) scale(${TV_DS})">`
+    + `<path d="M0 -12 C0 -12 8.5 -1.5 8.5 4 A8.5 8.5 0 0 1 -8.5 4 C-8.5 -1.5 0 -12 0 -12 Z" fill="${fill}" stroke="${rim}" stroke-width="1.1"/>`
+    + `<ellipse cx="-2.8" cy="2.6" rx="2.2" ry="3" fill="#ffffff" opacity="0.55"/>`
+    + `<text x="0" y="6.6" text-anchor="middle" font-size="${fs}" font-weight="800" fill="#0a2230" stroke="#f2fbff" stroke-width="2.2" paint-order="stroke">${escapeText(s)}</text></g>`;
+}
+function tvFlame(cx, cy, n) {
+  const s = 1.35;
+  return `<g transform="translate(${cx},${cy}) scale(${s})">`
+    + `<path d="M0 -12 C4.5 -5 9 -4 6 4 C5 9 -5 9 -6.5 3 C-7.5 -1 -3.2 -2 -2 -6 C-1 -3 1 -4 0 -12 Z" fill="${TVC.orange}" stroke="#ffd9a0" stroke-width="0.8"/>`
+    + `<path d="M0 -4 C2 -1 3 1 1.5 4 C0.5 6 -2 6 -2.4 3 C-2.7 0 -0.8 -1 0 -4 Z" fill="${TVC.orange2}"/>`
+    + (n != null ? `<text x="0" y="3" text-anchor="middle" font-size="7.5" font-weight="800" fill="#3a1500" stroke="#ffe2bf" stroke-width="1.8" paint-order="stroke">${escapeText(String(n))}</text>` : '')
+    + '</g>';
+}
+// Open-end wrench: solid head with a U/semicircle jaw notch (notch = wedge bg).
+function tvWrench(cx, cy, s) {
+  s = s || 1.25;
+  // Handle + rounded jaw head, with a U-notch cut from the tip. The notch top
+  // runs ABOVE the head so the jaw opens cleanly (no leftover bridge of metal
+  // across the opening).
+  return `<g transform="translate(${cx},${cy}) rotate(-28) scale(${s})">`
+    + `<rect x="-2.4" y="-1" width="4.8" height="13" rx="2.4" fill="${TVC.wrench}"/>`
+    + `<ellipse cx="0" cy="-7" rx="6.2" ry="5.8" fill="${TVC.wrench}"/>`
+    + `<path d="M -3.7 -15 L -3.7 -7.2 A 3.7 3.7 0 0 0 3.7 -7.2 L 3.7 -15 Z" fill="${TVC.darkTri}"/></g>`;
+}
+function tvSun(cx, cy, s) {
+  s = s || 1.3;
+  let rays = '';
+  for (let i = 0; i < 8; i++) {
+    const a = i * Math.PI / 4;
+    rays += `<line x1="${(Math.cos(a) * 7.5).toFixed(2)}" y1="${(Math.sin(a) * 7.5).toFixed(2)}" x2="${(Math.cos(a) * 11).toFixed(2)}" y2="${(Math.sin(a) * 11).toFixed(2)}" stroke="${TVC.sun}" stroke-width="2.4" stroke-linecap="round"/>`;
+  }
+  return `<g transform="translate(${cx},${cy}) scale(${s})">${rays}<circle r="6" fill="${TVC.sun}" stroke="#fff3c4" stroke-width="1"/><circle cx="-1.8" cy="-1.8" r="1.8" fill="#fde68a"/></g>`;
+}
+function tvPushsat(cx, cy, s) {
+  s = s || 1.25;
+  return `<g transform="translate(${cx},${cy}) scale(${s})">`
+    + `<rect x="-9.5" y="-3.2" width="6" height="6.4" rx="0.6" fill="#5aa0e0" stroke="#cde6ff" stroke-width="0.8"/>`
+    + `<rect x="3.5" y="-3.2" width="6" height="6.4" rx="0.6" fill="#5aa0e0" stroke="#cde6ff" stroke-width="0.8"/>`
+    + `<rect x="-3" y="-4.2" width="6" height="8.4" rx="1.2" fill="#cbd5e1" stroke="#7b8aa3" stroke-width="0.8"/><circle cx="0" cy="-0.2" r="1.5" fill="#7b8aa3"/>`
+    + `<g stroke="#9fd0ff" stroke-width="1.5" stroke-linecap="round" fill="none"><path d="M-3 6.2 L0 8.6 L3 6.2"/><path d="M-3 8.8 L0 11.2 L3 8.8"/></g></g>`;
+}
+
 export function thrustVisual(card, face, opts = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'thrust-visual';
@@ -950,76 +1049,54 @@ export function thrustVisual(card, face, opts = {}) {
     fuel = Math.max(1, Math.ceil(thrust / Math.max(1, isp || 1)));
   }
   const fuelText = Number.isInteger(fuel) ? `${fuel}` : fuel.toFixed(2);
-  // Fuel-type emoji: 💧 for water (the default), 🪨 for dirt /
-  // regolith eaters (mass drivers and similar). Driven straight
-  // off the spreadsheet's "Fuel Type" column on each face.
+  // Fuel type drives the wedge + droplet colour: water = cyan wedge + light-blue
+  // droplet; dirt = grey wedge + grey droplet. Read off the face's Fuel Type.
   const ftype = (face && face.fuelType) || card.fuelType;
-  const fuelEmoji = ftype === 'Dirt' ? '🪨' : '💧';
+  const isDirt = ftype === 'Dirt';
   // Afterburn value = the FUEL STEPS spent to engage afterburn (the thrust gain
-  // is always +1). Shown as a digit beside the flame so the cost reads off the
-  // card itself, not just the rocket modal.
+  // is always +1). Shown as a digit on the flame so the cost reads off the card.
   const afterVal = (face && face.afterburn != null) ? face.afterburn : (card ? card.afterburn : null);
   const afterN = Number(afterVal) || 0;
   const showAfter = afterN > 0;
   const afterTip = `Afterburn: spend ${afterN} fuel step${afterN === 1 ? '' : 's'} to add +1 net thrust this turn. `
     + `This number is the fuel steps spent to perform afterburn, not a water or aqua cost.`;
+  // Centre symbol: Sun (solar power) or Push-sat (beamed power), from the
+  // installed face's property booleans.
+  const props = (face && face.properties) || card.properties || [];
+  const hasProp = (k) => props.some((p) => p && p.key === k && p.value);
+  const solar = hasProp('solar');
+  const push = hasProp('push');
 
-  // Rounded-triangle path. Apex at (70,12); base (18,86)–(122,86).
-  // Each corner is curved with a small quadratic; tangent points
-  // are pre-computed ~10 units along each edge so the silhouette
-  // reads as a soft equilateral wedge instead of a sharp pennant.
-  const trianglePath = 'M 64.25 20.18 L 23.75 77.82 ' +
-    'Q 18 86 28 86 L 112 86 ' +
-    'Q 122 86 116.25 77.82 L 75.75 20.18 ' +
-    'Q 70 12 64.25 20.18 Z';
+  const uid = 'tv' + (_tvSeq++);
+  const wedge = isDirt
+    ? tvWedge(TVC.greyTri, TVC.greyTri2, '#6b7280', uid)
+    : tvWedge(TVC.cyanTri, TVC.cyanTri2, TVC.cyanStroke, uid);
+  const fuelFill = isDirt ? TVC.dirt : TVC.water;
+  const fuelRim = isDirt ? TVC.dirtRim : TVC.waterRim;
+  const center = solar ? tvSun(70, TV_CTR) : (push ? tvPushsat(70, TV_CTR) : '');
+  const top = showAfter
+    ? `<g data-tip="${escapeText(opts.breakdown?.afterburn || afterTip)}">${tvFlame(70, TV_TOP, afterN)}</g>`
+    : '';
+  const thrustTip = escapeText(opts.breakdown?.thrust || `Thrust: ${thrust}`);
+  const fuelTip = escapeText(opts.breakdown?.fuel || `Fuel per burn: ${fuelText} ${ftype || 'Water'}`);
 
-  // Pink circle at (50, 72) r=10 and droplet at (88, 79) sit
-  // safely inside the triangle: at y≈72 the interior is ~70
-  // viewBox-units wide (32 to 108), giving each icon room.
-  // The arrow connects them at y=72.
   wrap.innerHTML = `
-    <svg viewBox="0 0 140 96" class="thrust-svg">
-      <defs>
-        <marker id="thrust-arrow" viewBox="0 0 8 8" refX="6" refY="4"
-          markerWidth="6" markerHeight="6" orient="auto">
-          <path d="M0,0 L8,4 L0,8 z" fill="currentColor"/>
-        </marker>
-      </defs>
-      <path d="${trianglePath}"
-        fill="rgba(96,165,250,0.35)" stroke="#60a5fa" stroke-width="2.5"
-        stroke-linejoin="round"/>
-      ${showAfter ? `<g data-tip="${escapeText(opts.breakdown?.afterburn || afterTip)}">
-        <text x="70" y="45" text-anchor="middle" font-size="20">🔥</text>
-        <text x="70" y="41" text-anchor="middle" font-size="11" font-weight="700"
-          fill="#0c1d34" stroke="#ffffff" stroke-width="2.4" paint-order="stroke">${escapeText(String(afterN))}</text>
-      </g>` : ''}
-      <line x1="63" y1="72" x2="76" y2="72"
-        stroke="currentColor" stroke-width="1.6"
-        marker-end="url(#thrust-arrow)"/>
-      <g data-tip="${escapeText(opts.breakdown?.thrust || `Thrust: ${thrust}`)}">
-        <circle cx="50" cy="72" r="10" fill="#ec4899" stroke="#fbcfe8" stroke-width="1.5"/>
-        <text x="50" y="76" text-anchor="middle" font-size="13"
-          font-weight="700" fill="#ffffff">${thrust}</text>
-      </g>
-      <g data-tip="${escapeText(opts.breakdown?.fuel || `Fuel per burn: ${fuelText} ${ftype || 'Water'}`)}">
-        <text x="88" y="79" text-anchor="middle" font-size="22">${fuelEmoji}</text>
-        <text x="88" y="75" text-anchor="middle" font-size="9"
-          font-weight="700" fill="#0c1d34" stroke="#ffffff"
-          stroke-width="2.4" paint-order="stroke">${fuelText}</text>
-      </g>
+    <svg viewBox="${TV_VB}" class="thrust-svg">
+      ${wedge}
+      ${top}
+      ${center}
+      <g data-tip="${thrustTip}">${tvCircle(TV_CXL, TV_BASE, thrust, TVC.magenta, TVC.magentaRim)}</g>
+      <g data-tip="${fuelTip}">${tvDroplet(TV_CXR, TV_BASE, fuelText, fuelFill, fuelRim)}</g>
     </svg>
   `;
   return wrap;
 }
 
-// Modifier triangle for reactor / generator cards that pair
-// with a thruster. Same rounded-triangle silhouette as the
-// regular thrust visual but rendered in slate-grey + capped
-// with a 🔧 wrench glyph so the player reads it as "this
-// modifies a thruster I'm stacked with" rather than "this is
-// my own thrust." Thrust mod (+N / -N) sits in a darker
-// pink-circle clone; fuel mod (×N or fraction) sits next to
-// a 💧 droplet just like the regular triangle.
+// Modifier triangle for reactor / generator cards that pair with a thruster.
+// Dark wedge capped with an open-end WRENCH (this card modifies a thruster I'm
+// stacked with, not its own thrust), plus a Sun in the centre when the modifier
+// is solar. Thrust mod (+N / -N) sits in a dark-pink circle; fuel mod (×N) in a
+// grey droplet, same base row as the regular thrust visual.
 export function thrustModVisual(face) {
   const wrap = document.createElement('div');
   wrap.className = 'thrust-visual is-modifier';
@@ -1029,29 +1106,17 @@ export function thrustModVisual(face) {
   const fmText = fm == null
     ? ''
     : (Number.isInteger(fm) ? `×${fm}` : `×${fm.toFixed(2)}`);
-  const trianglePath = 'M 64.25 20.18 L 23.75 77.82 ' +
-    'Q 18 86 28 86 L 112 86 ' +
-    'Q 122 86 116.25 77.82 L 75.75 20.18 ' +
-    'Q 70 12 64.25 20.18 Z';
+  const props = face.properties || [];
+  const solar = props.some((p) => p && p.key === 'solar' && p.value);
+  const center = solar ? tvSun(70, TV_CTR) : '';
+  const wrenchTop = tvWrench(70, solar ? 40 : 50, 1.25);
   wrap.innerHTML = `
-    <svg viewBox="0 0 140 96" class="thrust-svg thrust-svg-mod">
-      <path d="${trianglePath}"
-        fill="rgba(51, 65, 85, 0.55)" stroke="#94a3b8"
-        stroke-width="2.5" stroke-linejoin="round"/>
-      <text x="70" y="40" text-anchor="middle" font-size="22"
-        data-tip="Thruster modifier">🔧</text>
-      <g data-tip="Thrust modifier: ${tmText}">
-        <circle cx="50" cy="72" r="10" fill="#831843" stroke="#fbcfe8" stroke-width="1.5"/>
-        <text x="50" y="76" text-anchor="middle" font-size="12"
-          font-weight="700" fill="#ffffff">${tmText}</text>
-      </g>
-      ${fm != null ? `
-      <g data-tip="Fuel modifier: ${fmText}">
-        <text x="88" y="79" text-anchor="middle" font-size="22">💧</text>
-        <text x="88" y="75" text-anchor="middle" font-size="9"
-          font-weight="700" fill="#0c1d34" stroke="#ffffff"
-          stroke-width="2.4" paint-order="stroke">${fmText}</text>
-      </g>` : ''}
+    <svg viewBox="${TV_VB}" class="thrust-svg thrust-svg-mod">
+      ${tvDarkWedge()}
+      <g data-tip="Thruster modifier">${wrenchTop}</g>
+      ${center}
+      <g data-tip="Thrust modifier: ${escapeText(tmText)}">${tvCircle(TV_CXL, TV_BASE, tmText, TVC.modPink, TVC.magentaRim)}</g>
+      ${fm != null ? `<g data-tip="Fuel modifier: ${escapeText(fmText)}">${tvDroplet(TV_CXR, TV_BASE, fmText, TVC.dirt, TVC.dirtRim)}</g>` : ''}
     </svg>
   `;
   return wrap;

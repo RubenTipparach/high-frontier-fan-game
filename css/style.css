@@ -23,7 +23,7 @@
   --card-generator: #fa8072;
   --card-robonaut:  #d946ef;
   --card-reactor:   #a78bfa;
-  --card-radiator:  #7dd3fc;
+  --card-radiator:  #2aa7e0;
   --card-refinery:  #94a3b8;
 
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -424,6 +424,9 @@ label.checkbox input { accent-color: var(--accent-2); }
   font-weight: 600;
   color: var(--ink);
 }
+/* Roster line: who is sitting at the table, one muted @name list per row. */
+.lobby-list .lobby-roster { display: block; margin-top: 2px; }
+.lobby-list .lobby-roster .player-name { font-weight: 500; }
 .lobby-list .turn-meta[hidden] { display: none; }
 .lobby-list li.is-your-turn {
   border-left: 3px solid var(--accent, #fbbf24);
@@ -1050,3 +1053,15 @@ body.in-lobby .main-menu-fab { display: none; }
 }
 .module-tag.tag-m0 { background: rgba(120,140,220,0.16); color: #cdd6ff; border-color: #3a4a7a; }
 .module-tag.tag-draft { background: rgba(200,160,80,0.16); color: #f0d9a8; border-color: #7a6326; }
+
+/* Lobby room-settings editor (host) + read-only summary (others). */
+.lobby-settings { margin: 6px 0 12px; }
+.lobby-settings-ro { font-size: 12px; color: var(--ink-dim); }
+.lobby-settings-head {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--ink-mute); margin-bottom: 8px;
+}
+.lobby-settings-saved { text-transform: none; letter-spacing: 0; margin-left: 6px; }
+.lobby-set-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 6px 0; font-size: 13px; }
+.lobby-set-row span { color: var(--ink-dim); }
+.lobby-set-row select { min-width: 160px; }

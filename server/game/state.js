@@ -38,7 +38,7 @@
 
 import { PATENTS } from '../../data/patents.js';
 import { CREW } from '../../data/crew.js';
-import { freshAssembly } from '../../data/assembly.js';
+import { freshAssembly, IDEOLOGY_ORDER } from '../../data/assembly.js';
 import { makeRng, shuffle } from './rng.js';
 // (startSiteId import dropped: the rocket now opens at LEO, siteId null.)
 
@@ -236,6 +236,22 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
   const draft = !!draftStart;
   const startAqua = draft ? 0
     : (Number.isFinite(startingAqua) ? Math.max(0, Math.floor(startingAqua)) : AQUA_DEFAULT);
+  // M0: every player opens with one delegate already seated in "their" ideology,
+  // assigned by turn-order position around the hex (seat 1 -> first ideology, and
+  // so on, wrapping past 6). Leaves DELEGATES_PER_PLAYER-1 in hand.
+  const assembly = m0 ? freshAssembly() : null;
+  // Each player's HOME ideology - where their starting delegate sits and the one
+  // space a new delegate may always be placed on (Fundraise rule). Multiplayer
+  // assigns it randomly by shuffled seat order; SOLO overrides it to the picked
+  // faction's colour-ideology in applyPickCrew. Keyed by profileId.
+  const homeIdeology = {};
+  if (assembly) {
+    ordered.forEach((p, i) => {
+      const ide = IDEOLOGY_ORDER[i % IDEOLOGY_ORDER.length];
+      assembly.delegates[ide][p.profileId] = 1;
+      homeIdeology[p.profileId] = ide;
+    });
+  }
   return {
     version: 2,
     seed,
@@ -280,6 +296,9 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
     firstPlayerIndex: 0,
     firstPlayerRotation: true,
     pendingFirstPlayer: null,
+    // M0: while set, the round's first player owes a seniority-disc placement
+    // before the round resolves. { chooserId }. Null otherwise.
+    pendingSeniority: null,
     // Open Sunspot-event choice, when an event needs input from one or
     // more players (Budget Cuts discard pick, Pad Explosion tie-break).
     // { kind, waiting: [profileId...], options?: { [profileId]: [cardId...] } }
@@ -306,7 +325,11 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
     // room creation); games already in flight default to false (no retro apply).
     // `assembly` holds delegate placements + drives the active-law resolver.
     m0: !!m0,
-    assembly: m0 ? freshAssembly() : null,
+    assembly,
+    homeIdeology,
+    // Active-law star: the marker for the in-power ideology, moved by the
+    // fundraiser on each vote tally. Starts at the Centrist center (no law).
+    activeLawStar: 'centrist',
     auction: null,
     // Open player-to-player trade negotiation, or null. A side-channel deal that
     // both parties must consent to (offer / counter / accept handshake); it does

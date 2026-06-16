@@ -109,7 +109,12 @@ export function hydrateGlory({ chits = [], claimed = [], visited = [], vps = 0 }
 export function getChits()         { return _chits.slice(); }
 export function getClaimedChits()  { return _claimed.slice(); }
 export function getVisitedZones()  { return [..._visited]; }
-export function getVps()           { return _vps; }
+// Scored glory VP, ALWAYS derived from the claimed chits' zone + side via the
+// data source (ZONE_CHIT_VPS), so editing a chit's value revalues banked chits
+// instead of reading a stale snapshot captured at claim time.
+export function getVps() {
+  return _claimed.reduce((s, c) => s + getChitVpValue(c.zone, c.side === 'back' ? 'back' : 'front'), 0);
+}
 export function isZoneVisited(zone) { return _visited.has(zone); }
 
 // {front, back} for a zone, defaulting to {1, 1} for unknown zones.

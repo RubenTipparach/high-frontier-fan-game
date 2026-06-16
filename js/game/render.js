@@ -4305,10 +4305,46 @@ export class MapRenderer {
     // The raw vendor float id stays on the title for the rare
     // case someone needs to grep the planner JSON directly.
     if (site.id2 || site.id) {
+      const locId = site.id2 || shortRefId(site.id);
       const idRow = document.createElement('div');
-      idRow.className = 't-id';
-      idRow.textContent = `id: ${site.id2 || shortRefId(site.id)}`;
-      idRow.title = `Tap to select, then copy. (raw key: ${site.id})`;
+      idRow.className = 't-id t-id-row';
+      const idText = document.createElement('span');
+      idText.className = 't-id-text';
+      idText.textContent = `id: ${locId}`;
+      idText.title = `raw key: ${site.id}`;
+      idRow.appendChild(idText);
+      // Copy the location id to the clipboard.
+      const copyBtn = document.createElement('button');
+      copyBtn.type = 'button';
+      copyBtn.className = 't-id-btn';
+      copyBtn.title = 'Copy id';
+      copyBtn.innerHTML = '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">'
+        + '<rect x="5" y="5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/>'
+        + '<path d="M3 11V3.5A1.5 1.5 0 0 1 4.5 2H11" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>';
+      copyBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        try { navigator.clipboard && navigator.clipboard.writeText(locId); } catch (_) { /* ignore */ }
+        const prev = copyBtn.innerHTML;
+        copyBtn.classList.add('is-ok');
+        copyBtn.textContent = '✓';
+        setTimeout(() => { copyBtn.classList.remove('is-ok'); copyBtn.innerHTML = prev; }, 900);
+      });
+      idRow.appendChild(copyBtn);
+      // Open the player notes + tags modal for this location (wired by the host).
+      const notesBtn = document.createElement('button');
+      notesBtn.type = 'button';
+      notesBtn.className = 't-id-btn t-id-notes';
+      notesBtn.title = 'Notes & tags';
+      notesBtn.innerHTML = '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">'
+        + '<rect x="3" y="2" width="10" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/>'
+        + '<line x1="5.5" y1="6" x2="10.5" y2="6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>'
+        + '<line x1="5.5" y1="9" x2="9" y2="9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>'
+        + '<span class="t-id-notes-badge" hidden></span>';
+      notesBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (typeof this.onSiteNotes === 'function') this.onSiteNotes(locId, site.name || site.label || locId);
+      });
+      idRow.appendChild(notesBtn);
       el.appendChild(idRow);
     }
     if (actions && actions.length) {

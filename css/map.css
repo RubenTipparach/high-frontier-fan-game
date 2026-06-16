@@ -1807,6 +1807,28 @@
 .turn-clock-die-host .die-3d:hover {
   transform: scale(1.06);
 }
+/* Solar Flare strength: a second, smaller rolling die inline in the event
+   readout (separate from the event-roll die in the wheel). */
+.turn-clock-flare-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 2px;
+  font-weight: 600;
+  color: #fbbf24;
+}
+/* inline-block (NOT flex) so the die is never flex-shrunk into a rectangle;
+   a uniform transform scales the whole 3D cube down without distorting it. */
+.turn-clock-flare-line .flare-die-host {
+  display: inline-block;
+  width: 30px;
+  height: 30px;
+  flex: none;
+}
+.turn-clock-flare-line .flare-die-host .die-3d {
+  transform: scale(0.68);
+  transform-origin: top left;
+}
 .turn-clock-panel {
   position: relative;
   background: var(--panel);
@@ -2419,7 +2441,8 @@
 }
 .map-popup .popup-actions,
 .map-popup .popup-actions .popup-btn,
-.map-popup .popup-close {
+.map-popup .popup-close,
+.map-popup .t-id-btn {
   pointer-events: auto;
 }
 .map-popup.hidden { display: none; }
@@ -2442,6 +2465,45 @@
   word-break: break-all;
   user-select: all;
   -webkit-user-select: all;
+}
+.map-popup .t-id-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.map-popup .t-id-row .t-id-text { flex: 1; min-width: 0; }
+.map-popup .t-id-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border, #2a3450);
+  border-radius: 6px;
+  background: rgba(125, 211, 252, 0.06);
+  color: var(--ink-dim);
+  cursor: pointer;
+  position: relative;
+  user-select: none;
+}
+.map-popup .t-id-btn:hover { color: #7dd3fc; border-color: #38bdf8; background: rgba(56, 189, 248, 0.16); }
+.map-popup .t-id-btn.is-ok { color: #4ade80; border-color: #4ade80; }
+.map-popup .t-id-notes-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: #f6b51e;
+  color: #1a1300;
+  font: 700 9px ui-sans-serif, system-ui, sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 /* Site ISRU readout: the gating number for both prospecting and
    refining. Matches the card-prop-isru chip's cyan styling so the
@@ -3005,6 +3067,9 @@ body:has(#view-browse:not(.hidden)) #main {
 .browse-sidepanel[data-active="patents"]:not([data-active=""]) ~ .mp-turn-banner {
   right: min(620px, 80vw);
 }
+.browse-sidepanel[data-active="cart"]:not([data-active=""]) ~ .mp-turn-banner {
+  right: min(560px, 80vw);
+}
 @media (max-width: 720px) {
   .mp-turn-banner {
     right: 0 !important;
@@ -3078,6 +3143,9 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .browse-sidepanel[data-active="patents"]:not([data-active=""]) ~ .sandbox-hand {
   right: min(620px, 80vw);
+}
+.browse-sidepanel[data-active="cart"]:not([data-active=""]) ~ .sandbox-hand {
+  right: min(560px, 80vw);
 }
 @media (max-width: 720px) {
   /* Phones: the hand strip takes the full bottom width. The
@@ -3156,18 +3224,21 @@ body:has(#view-browse:not(.hidden)) #main {
   margin-right: -68px;
   transform-origin: top left;
   transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.2, 1),
-              margin-right 0.22s cubic-bezier(0.2, 0.7, 0.2, 1),
+              margin-left 0.22s cubic-bezier(0.2, 0.7, 0.2, 1),
               z-index 0s;
   z-index: 1;
 }
 .hand-slot:last-child { margin-right: 0; }
 
 .hand-slot:hover {
-  transform: scale(1.18);
-  margin-right: 40px;
   z-index: 50;
 }
-.hand-slot:hover + .hand-slot { margin-left: 40px; }
+/* Hovering just raises the card to the front (z-index) so it reads fully over
+   the overlap - no scaling, no shoving the row apart. Only the single card
+   immediately to the right nudges a little to give it room; everything past it
+   stays put (the next slot cancels the shift). */
+.hand-slot:hover + .hand-slot { margin-left: 14px; }
+.hand-slot:hover + .hand-slot + .hand-slot { margin-left: -14px; }
 .hand-cards:hover .hand-slot:not(:hover) { z-index: 1; }
 
 .hand-slot .card {
@@ -3440,6 +3511,11 @@ body:has(#view-browse:not(.hidden)) #main {
 .browse-sidepanel[data-active="patents"] {
   width: min(620px, 80vw);
 }
+/* Cart / market pane is wider too so the full-size deck-top card has room
+   (deck-thickness graphic + card + padding) instead of being squished. */
+.browse-sidepanel[data-active="cart"] {
+  width: min(560px, 80vw);
+}
 .browse-sidepanel[data-active=""] { width: 48px; }
 
 /* Phone / narrow-portrait layout. The hand strip owns the bottom
@@ -3589,7 +3665,11 @@ body:has(#view-browse:not(.hidden)) #main {
   border-radius: 8px;
   padding: 0;
   line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
+.sidepanel-tabs button svg.ui-icon { width: 23px; height: 23px; display: block; }
 .sidepanel-tabs button.active {
   background: var(--accent);
   color: #062136;
@@ -5513,7 +5593,9 @@ body:has(#view-browse:not(.hidden)) #main {
 .hand-stack-group.is-focused .hand-stack-pin {
   color: var(--accent);
 }
-.hand-stack-chip .chip-glyph { font-size: 16px; }
+.hand-stack-chip .chip-glyph { font-size: 16px; display: inline-flex; align-items: center; gap: 1px; }
+.hand-stack-chip .chip-glyph svg.ui-icon { width: 22px; height: 22px; display: block; }
+.hand-stack-chip .chip-glyph .chip-water { margin-left: -2px; align-self: flex-start; }
 .hand-stack-chip .chip-sub   { font-size: 12px; font-weight: 700; }
 .hand-stack-pin {
   border-left: 1px solid var(--border);
@@ -6153,7 +6235,9 @@ body:has(#view-browse:not(.hidden)) #main {
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 8px 10px;
+  /* Extra right padding so the full-size deck-top card never sits flush
+     against the panel edge. */
+  padding: 8px 16px 10px 10px;
 }
 .cart-deck-title {
   margin: 0 0 6px;
@@ -6186,13 +6270,8 @@ body:has(#view-browse:not(.hidden)) #main {
   display: flex;
   justify-content: center;
 }
-.cart-deck-topcard .card {
-  /* Match the inspector scale so the cart and other stack
-     views read at the same visual size. */
-  transform: scale(0.65);
-  transform-origin: top center;
-  margin-bottom: -90px;
-}
+/* Market deck-top cards render at full size, the same as the library/catalog
+   cards (.card-grid), so the two views read identically. */
 .cart-deck-cards {
   list-style: none;
   margin: 0;
@@ -7421,6 +7500,8 @@ body:has(#view-browse:not(.hidden)) #main {
 .mp-go-total { grid-area: total; font-size: 16px; font-weight: 800; white-space: nowrap; }
 .mp-go-break { grid-area: break; font-size: 12px; }
 .mp-game-over-note { margin: 14px 0 0; font-size: 12px; }
+.mp-game-over-vote { margin: 0 0 12px; font-size: 13px; color: #cdd6ff;
+  background: rgba(120,140,220,0.14); border: 1px solid #3a4a7a; border-radius: 8px; padding: 7px 10px; }
 
 /* ===== All cards overview (hand panel + MP panel "📚 All cards") =====
    A read-only audit of every card the local player owns, grouped by where it
@@ -7504,7 +7585,33 @@ body:has(#view-browse:not(.hidden)) #main {
   text-align: left;
   font: inherit;
 }
+/* A stack card that opens its close-up view on click (LEO / Rocket / Outpost
+   inspectors). Pointer + a soft lift on hover so it reads as tappable, without
+   fighting the card's own Flip / support-chip / radiator-toggle controls. */
+.card.is-viewable { cursor: pointer; }
+.card.is-viewable:hover { filter: brightness(1.06); }
 .all-cards-chip:hover { background: #1e2744; border-color: #3a4668; }
+/* Black side (installed Tier-2 face): the physical card's black side, so the
+   chip goes near-black with a light name and a small ◆ black badge. */
+.all-cards-chip.is-black-side {
+  background: linear-gradient(180deg, #0a0c14 0%, #11131c 100%);
+  border-color: #2a2f44;
+  border-left-color: #0a0c14;
+  color: #e7ebff;
+}
+.all-cards-chip.is-black-side:hover { background: #15171f; border-color: #3a4263; }
+.all-cards-chip .acc-side {
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #cdd4ee;
+  background: #000;
+  border: 1px solid #3a4263;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
 .all-cards-chip .acc-top { display: flex; align-items: center; gap: 6px; }
 .all-cards-chip .acc-ic { display: inline-flex; align-items: center; flex: 0 0 auto; }
 .all-cards-chip .acc-ic svg { width: 15px; height: 15px; display: block; }
@@ -7893,6 +8000,11 @@ body:has(#view-browse:not(.hidden)) #main {
   align-items: center;
 }
 .mp-comp-group { display: inline-flex; align-items: center; gap: 4px; }
+.mp-comp-click { cursor: pointer; border-radius: 5px; padding: 1px 3px; }
+.mp-comp-click:hover { background: rgba(255,255,255,0.07); outline: 1px solid var(--border, #2a2740); }
+.mp-cube-row { display: flex; align-items: center; gap: 8px; text-align: left; font-size: 13px; }
+.mp-cube-ic { width: 18px; text-align: center; flex: none; }
+.mp-cube-go { margin-left: auto; color: var(--ink-dim, #8b90b8); font-size: 16px; }
 .mp-comp-label { font-size: 10px; color: var(--ink-dim, #8b90b8); }
 .mp-comp-pips { display: inline-flex; gap: 2px; }
 .mp-pip {
@@ -7910,19 +8022,84 @@ body:has(#view-browse:not(.hidden)) #main {
 /* Claim relocation picker list. */
 .mp-relocate-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; max-height: 320px; overflow: auto; }
 .mp-relocate-item { text-align: left; }
+.mp-relocate-item.is-selected { outline: 2px solid var(--accent, #fbbf24); background: rgba(251,191,36,0.14); }
 
 /* ===== Sol Political Assembly (M0) panel - mockup ===== */
 .assembly-panel { color: var(--ink); max-width: 720px; margin: 0 auto; }
+/* Sidebar glance: the compact board is a button into the big modal. */
+.assembly-clickable { cursor: pointer; border-radius: 10px; transition: filter 0.12s ease, outline-color 0.12s ease; outline: 1px solid transparent; }
+.assembly-clickable:hover, .assembly-clickable:focus-visible { filter: brightness(1.08); outline-color: var(--accent, #fbbf24); }
+.assembly-open-btn { width: 100%; margin-top: 8px; }
+/* The big interactive modal version (collapsible like the auction overlay). */
+.assembly-modal-overlay { position: fixed; inset: 0; z-index: 122; display: flex; align-items: flex-start;
+  justify-content: center; padding: 24px; background: rgba(3, 2, 10, 0.78); backdrop-filter: blur(4px); }
+/* Confirm dialogs (e.g. the Lobby "are you sure") must sit ABOVE every modal
+   that can spawn them - including the assembly modal (z 122). */
+.confirm-modal-overlay { z-index: 200; }
+.assembly-modal-overlay.is-minimized { background: transparent; backdrop-filter: none; pointer-events: none; }
+.assembly-modal-overlay.is-minimized .assembly-modal { display: none; }
+.assembly-modal-overlay.is-minimized .mp-mini-chip { display: none; }
+.assembly-modal { position: relative; background: var(--panel, #0c0a16); border: 1px solid var(--border, #2a2740);
+  border-radius: 14px; width: min(900px, 96vw); max-height: 92vh; overflow: auto; margin: 2vh auto; padding: 8px 18px 18px; }
+.assembly-modal-title { margin: 0; font-size: 16px; }
+/* In the modal the board fills the (wide) panel, callouts and all. */
+.assembly-modal .assembly-panel { max-width: 100%; }
+.assembly-modal .assembly-panel-compact .assembly-board { max-width: 100%; }
+/* Interactive cells (Fundraise / lobby clicks). */
+.assembly-cell-click { cursor: pointer; }
+/* AVAILABLE cells (where you may act) get a DARK blue outline; hovering one - or
+   the SELECTED cell - lights up a BRIGHT blue glowy outline. Only during a
+   Fundraise (.assembly-interactive) does hover apply. */
+.assembly-cell-hi .assembly-wedge, .assembly-cell-hi .assembly-center {
+  stroke: #1d4ed8; stroke-width: 4;
+}
+.assembly-interactive .assembly-cell-hi:hover .assembly-wedge,
+.assembly-interactive .assembly-cell-hi:hover .assembly-center,
+.assembly-cell-sel .assembly-wedge, .assembly-cell-sel .assembly-center {
+  stroke: #38bdf8; stroke-width: 5; filter: drop-shadow(0 0 8px #38bdf8);
+}
+/* Move-origin: a cube you can pick up glows blue (you select the CUBE, then a
+   destination SPACE). */
+.assembly-cube-glow { filter: drop-shadow(0 0 3px #38bdf8) drop-shadow(0 0 3px #38bdf8); cursor: pointer; }
+.assembly-interactive .assembly-cell-hi:hover .assembly-cube-glow,
+.assembly-cube-glow:hover { filter: drop-shadow(0 0 6px #7dd3fc) drop-shadow(0 0 6px #7dd3fc); }
+/* Active-law star: a faceted 3D gold star (drawn as polygons) with a soft drop
+   shadow for depth. Sits on the in-power ideology (center at start). */
+.assembly-star { filter: drop-shadow(0 1px 1.5px rgba(0,0,0,0.6)); pointer-events: none; }
+/* Fundraise guided flow. */
+.assembly-fr-prompt { background: rgba(120,140,220,0.14); border: 1px solid #3a4a7a; border-radius: 8px;
+  padding: 8px 10px; font-size: 13px; margin: 4px 0 6px; }
+.assembly-fr-chosen { font-size: 12px; color: var(--accent, #fbbf24); margin-top: 4px; }
+.assembly-fr-btns { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 10px 0 4px; }
+/* Simple variant (sidebar glance): just the cropped wheel, filling the panel. */
+.assembly-panel-simple { max-width: 100%; width: 100%; }
+.assembly-panel-simple .assembly-board { width: 100%; max-width: 100%; margin: 4px auto 0; }
+/* Large variant: a roomy wheel + the laws stacked in single-column rows. */
+.assembly-panel-large { max-width: 100%; width: 100%; }
+.assembly-panel-large .assembly-board { width: 100%; max-width: 620px; }
+.assembly-laws { display: flex; flex-direction: column; gap: 8px; margin: 14px auto 0; max-width: 640px; }
+.assembly-laws-divider { margin: 8px 0 2px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--ink-dim, #8b90b8); border-top: 1px solid var(--border, #2a2740); padding-top: 10px; }
+.assembly-law-row { display: flex; gap: 10px; align-items: flex-start; background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border, #2a2740); border-radius: 8px; padding: 8px 10px; }
+.assembly-law-swatch { flex: none; width: 12px; height: 12px; border-radius: 3px; margin-top: 3px; border: 1px solid rgba(0,0,0,0.4); }
+.assembly-law-body { flex: 1 1 auto; min-width: 0; }
+.assembly-law-row .assembly-law-head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; margin: 0 0 2px; }
+.assembly-law-row .assembly-law-ide { font-weight: 700; font-size: 13px; }
+.assembly-law-row .assembly-law-name { font-size: 12px; color: var(--accent, #fbbf24); }
+.assembly-law-row .assembly-law-award { font-size: 11px; color: #86efac; margin-left: auto; }
+.assembly-law-row .assembly-law-text { font-size: 12px; color: var(--ink-dim, #b8bcd8); line-height: 1.4; }
 .assembly-head { display: flex; align-items: baseline; gap: 10px; justify-content: center; }
 .assembly-head h2 { margin: 0; font-size: 22px; letter-spacing: 1px; text-transform: uppercase; }
 .assembly-sub { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--ink-dim, #8b90b8); }
 .assembly-board { display: block; width: 100%; max-width: 720px; margin: 8px auto 0; }
 .assembly-wedge { stroke: #0b0a14; stroke-width: 2; }
-/* Hover: light up the whole cell (wedge or center) when hovered. */
-.assembly-cell { cursor: pointer; }
-.assembly-cell .assembly-wedge, .assembly-cell .assembly-center { transition: filter 0.12s ease; }
-.assembly-cell:hover .assembly-wedge { filter: brightness(1.35); }
-.assembly-cell:hover .assembly-center { filter: brightness(1.08); }
+/* Seniority discs: red translucent pucks with a black outline, sitting behind
+   the cubes / name (count toward the end-game vote). */
+.assembly-disc { fill: rgba(214, 40, 40, 0.4); stroke: #000; stroke-width: 1.2; }
+.assembly-cell .assembly-wedge, .assembly-cell .assembly-center { transition: filter 0.12s ease, stroke 0.12s ease; }
+/* During a Fundraise only the AVAILABLE cells invite a click. */
+.assembly-interactive .assembly-cell-hi { cursor: pointer; }
 .assembly-wedge-label { fill: #fff; font: 700 11px ui-sans-serif, system-ui, sans-serif; letter-spacing: 0.3px; paint-order: stroke; stroke: rgba(0,0,0,0.35); stroke-width: 2px; }
 .assembly-slot { fill: rgba(0,0,0,0.32); stroke: rgba(255,255,255,0.55); stroke-width: 1.5; }
 .assembly-center { fill: #f3f4fa; stroke: #0b0a14; stroke-width: 2; }
@@ -7969,3 +8146,50 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .assembly-action .mp-detail-label { margin-bottom: 4px; }
 .assembly-action .modal-btn { margin-top: 6px; }
+
+/* Site notes + tags modal (player-driven location annotations) */
+.site-notes-modal {
+  width: min(520px, 94vw);
+  max-height: 88vh;
+  overflow: auto;
+  background: #11162a;
+  border: 1px solid #2a3450;
+  border-radius: 12px;
+  padding: 0 0 14px;
+  color: var(--ink, #e6e9ff);
+}
+.site-notes-head {
+  position: sticky; top: 0;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 12px 14px;
+  background: #141a2c; border-bottom: 1px solid #2a3450;
+}
+.site-notes-head h3 { margin: 0; font-size: 15px; }
+.site-notes-body { padding: 12px 14px; }
+.site-notes-sec { margin-bottom: 14px; }
+.site-notes-sec h4 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: #8fa6d8; }
+.site-notes-sec h5 { margin: 10px 0 4px; font-size: 11px; color: #7c89ad; font-weight: 600; }
+.site-tags-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.site-tag-chip, .site-tag-pick {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 9px; border-radius: 999px; cursor: pointer;
+  font: 600 12px ui-sans-serif, system-ui, sans-serif;
+  background: #1a2138; border: 1px solid #2c3658; color: #cdd6ee;
+}
+.site-tag-chip .site-tag-dot, .site-tag-pick .site-tag-dot {
+  width: 9px; height: 9px; border-radius: 50%; background: var(--tag, #9aa3c0); flex: 0 0 auto;
+}
+.site-tag-chip.is-mine { border-color: var(--tag, #38bdf8); background: color-mix(in srgb, var(--tag, #38bdf8) 22%, #1a2138); }
+.site-tag-chip:hover, .site-tag-pick:hover { border-color: var(--tag, #38bdf8); }
+.site-tag-chip .site-tag-n { color: #8b90b8; font-weight: 700; }
+.site-tag-pick { opacity: 0.85; }
+.site-tag-custom { display: flex; gap: 6px; margin-top: 8px; }
+.site-tag-custom input { flex: 1; min-width: 0; background: #0e1322; border: 1px solid #2c3658; border-radius: 6px; color: var(--ink); padding: 6px 8px; font: inherit; }
+.site-msgs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.site-msgs li { background: #0e1322; border: 1px solid #222c46; border-radius: 8px; padding: 7px 10px; }
+.site-msg-body { font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+.site-msg-meta { font-size: 11px; color: #8b90b8; margin-top: 3px; display: flex; align-items: center; gap: 8px; }
+.site-msg-del { background: none; border: 0; color: #f87171; cursor: pointer; font: inherit; padding: 0; text-decoration: underline; }
+.site-msg-post { display: flex; gap: 6px; margin-top: 8px; align-items: flex-end; }
+.site-msg-post textarea { flex: 1; resize: vertical; background: #0e1322; border: 1px solid #2c3658; border-radius: 6px; color: var(--ink); padding: 6px 8px; font: inherit; }
+.site-notes-foot { margin: 4px 0 0; font-size: 11px; }

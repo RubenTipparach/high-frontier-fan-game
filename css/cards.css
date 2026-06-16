@@ -231,11 +231,11 @@
 .card-statbox span { display: inline-flex; align-items: center; gap: 4px; }
 .card-statbox strong {
   color: var(--ink);
-  font-size: 13px;
+  font-size: 19.5px;
   font-variant-numeric: tabular-nums;
 }
 .card-spectral { margin-left: auto; line-height: 0; }
-.spectral-hex { width: 22px; height: 26px; }
+.spectral-hex { width: 33px; height: 39px; }
 
 .card-body {
   display: flex;
@@ -245,11 +245,13 @@
   flex: 1 1 auto;
 }
 
-.card-thrust {
+.card-thrust,
+.card-thrust-mod {
   align-self: center;
   width: 100%;
   max-width: 130px;
-  margin: 2px 0 -2px;
+  /* Negative top margin nudges the thrust triangle up toward the stat box. */
+  margin: -10px 0 -2px;
 }
 .thrust-visual { display: block; }
 .thrust-svg { width: 100%; height: auto; }
@@ -430,6 +432,12 @@
   font-weight: 600;
   opacity: 0.7;
   font-size: 14px;
+}
+/* The black (secondary / installed) face has a dark background, so the dark
+   "or" slash between alternative supports is nearly invisible - force it white. */
+.card-face[data-face="secondary"] .card-requires .req .req-or {
+  color: #ffffff;
+  opacity: 0.95;
 }
 
 /* Modifier triangle for reactor / generator pairing cards.
@@ -648,26 +656,32 @@
   transition: opacity 0.22s ease, filter 0.22s ease;
 }
 .card-face.is-radiator .rad-half .card-typebar {
-  background: #7dd3fc;
-  color: #0a2c43;
+  background: var(--card-radiator);
+  color: #04222f;
   font-size: 12px;
-  padding: 4px 8px;
+  padding: 2px 8px;
 }
 .card-face.is-radiator .rad-half .card-statbox {
   display: flex;
   gap: 10px;
-  padding: 4px 8px;
+  padding: 2px 8px;
   font-size: 11px;
   align-items: center;
 }
+/* Tighten the two-headed radiator so both halves (with the enlarged icons)
+   fit the card without clipping the face-up half's typebar. */
+.card-face.is-radiator .spectral-hex { width: 24px; height: 28px; }
+.card-face.is-radiator .card-supports { margin: 2px 8px; padding: 3px 6px; }
+.card-face.is-radiator .card-supports .card-supports-label { margin-bottom: 1px; }
 .card-face.is-radiator .rad-half .card-blurb {
   font-size: 11px;
-  margin: 2px 8px;
+  margin: 1px 8px 2px;
   flex: 1;
   color: var(--ink-dim);
 }
+.card-face.is-radiator .rad-toggle { padding: 1px 0; }
 .card-face.is-radiator .rad-half .card-name-row {
-  padding: 4px 8px 2px;
+  padding: 2px 8px 1px;
   text-align: center;
   border-bottom: 1px dashed var(--border);
 }
@@ -679,8 +693,9 @@
 /* Heavy half is upside-down so the player physically rotates
    the card 180° to read it. */
 .card-face.is-radiator .half-heavy { transform: rotate(180deg); }
-/* Dim the inactive half. data-rotated=0 means light side is
-   currently up, so heavy is dimmed; data-rotated=1 swaps. */
+/* Dim the inactive (face-DOWN) half - washed out, INCLUDING its cyan
+   typebar - so only the face-up side reads in full colour. data-rotated=0
+   means light is up (heavy dimmed); data-rotated=1 swaps. */
 .card[data-rotated="0"] .card-face.is-radiator .half-heavy,
 .card[data-rotated="1"] .card-face.is-radiator .half-light {
   opacity: 0.32;

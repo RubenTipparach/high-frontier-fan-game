@@ -979,6 +979,17 @@ produce a log line that lands in it. This is not console logging - a
   real game actions (Plan rocket route, Prospect, Refuel, etc.)
   must precede it. New site-popup buttons land before
   Navigate-to, never after.
+- **A faction's colour IS its ideology (colour = ideology theme).**
+  Each of the six factions carries one of six seat-band colours, and that
+  colour maps 1:1 to an Assembly ideology. The two palettes pair by HUE even
+  though the hex values differ between them (crew `#b40054` / ideology
+  `#c01f6e` = Freedom; gold = Unity; mauve = Authority; mint = Equality; grey
+  = Individuality; cream/silver = Honor). The canonical map lives in
+  `data/assembly.js` (`IDEOLOGY_BY_FACTION_COLOR` / `ideologyForFactionColor`).
+  Used in SOLO to seat the starting delegate in the picked faction's ideology
+  (multiplayer assigns the starting ideology randomly by shuffled seat order).
+  This colour=ideology pairing recurs in later modules - reuse the same map,
+  don't re-derive it.
 - **Player names track the player's seat colour.** Every render
   of `@<name>` in the multiplayer UI tints the text in that
   player's server-assigned seat colour (the same six crew-card

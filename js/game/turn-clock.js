@@ -219,6 +219,8 @@ function notify() {
 // Game length, when known (multiplayer carries state.maxRounds). null
 // in the open-ended sandbox, where the cycle just keeps ticking.
 let _maxRounds = null;
+// First player's seat colour - the Sunspot Cube on the cycle is their cube.
+let _firstPlayerColor = null;
 
 // Replace the in-memory clock state from a server snapshot.
 export function hydrateClock({
@@ -229,6 +231,7 @@ export function hydrateClock({
   opsRemaining = 0,
   movesRemaining = 0,
   discardsRemaining = 0,
+  firstPlayerColor = null,
 } = {}) {
   _turn = turn;
   _round = round;
@@ -237,12 +240,14 @@ export function hydrateClock({
   _opsRemaining = opsRemaining;
   _movesRemaining = movesRemaining;
   _discardsRemaining = discardsRemaining;
+  _firstPlayerColor = firstPlayerColor || null;
   notify();
 }
 
 export function getTurn()  { return _turn;  }
 export function getRound() { return _round; }
 export function getMaxRounds() { return _maxRounds; }
+export function getFirstPlayerColor() { return _firstPlayerColor; }
 
 // Compact "where are we" label: round.slot/maxRounds, with the slot shown
 // 1-based (1-12) to match the reindexed clock face. The "/maxRounds" tail

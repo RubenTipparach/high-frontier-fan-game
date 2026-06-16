@@ -414,8 +414,7 @@ function stackDryMass() {
   for (const slot of _stack) {
     const c = cardForSlot(slot);
     if (!c) continue;
-    const f = installedFace(slot);
-    mass += ((f.mass != null ? f.mass : c.mass) | 0);
+    mass += slotMassValue(slot, c, installedFace(slot));
   }
   return mass;
 }
@@ -977,6 +976,21 @@ function installedFace(slot) {
   return c;
 }
 
+// Mass of a stack slot, honouring a radiator's deployed side: a radiator's mass
+// is its INSTALLED face's {light,heavy}.mass (light is lighter), NOT the fixed
+// face mass and NOT always the PRIMARY face. A flipped radiator (its black /
+// Tier-2 tech) carries its own light/heavy masses, so read the side block off
+// the installed `face` that was passed in. Everything else reads its installed
+// face's mass. Mirror of the server's slotMass so dry/wet mass (and the weight
+// class) agree.
+function slotMassValue(slot, card, face) {
+  if (card && card.type === 'radiator' && face) {
+    const blk = face[slot && slot.radSide === 'light' ? 'light' : 'heavy'];
+    if (blk && blk.mass != null) return blk.mass | 0;
+  }
+  return ((face && face.mass != null) ? face.mass : (card && card.mass)) | 0;
+}
+
 // A stack slot can serve as a thruster if it's a thruster card OR its
 // INSTALLED face carries a thrust value (robonauts whose beam/laser
 // thruster lives on the Tier-2 face, e.g. Rock Splitter's MagBeam).
@@ -1034,7 +1048,7 @@ export function getStackTotals() {
     const card = cardForSlot(slot);
     if (!card) continue;
     const f = installedFace(slot);
-    const m = (f.mass != null ? f.mass : card.mass) | 0;
+    const m = slotMassValue(slot, card, f);
     const r = (f.radHardness != null ? f.radHardness : card.radHardness);
     mass += m;
     if (r != null) minRad = (minRad == null) ? r : Math.min(minRad, r);
@@ -1047,6 +1061,53 @@ export function getStackTotals() {
     wetMass: mass + _tankWater,
     minRadHard: minRad,
   };
+}
+
+// Read-only stats for ANOTHER stack (an opponent's rocket from a snapshot)
+// WITHOUT disturbing the live local rocket. Temporarily swaps the module state
+// into the provided context, runs the SAME stat functions the local modal uses
+// (so the numbers match the engine), then restores - all synchronously and
+// WITHOUT firing change listeners, so there is no re-render or local-state
+// clobber. Returns { totals, thrStats, active, activeThrusterId }; thrStats is
+// null when the stack has no usable thruster.
+export function computeRocketStatsFor(ctx = {}) {
+  const saved = {
+    stack: _stack, activeThrusterId: _activeThrusterId,
+    activeProspectorId: _activeProspectorId, tank: _tankWater,
+    tankGrade: _tankGrade, afterburn: _afterburnEngaged, wiring: _wiring,
+    solarZone: _solarZone, hasPowersat: _hasPowersat,
+  };
+  try {
+    _stack = Array.isArray(ctx.stack) ? _clone(ctx.stack) : [];
+    _activeThrusterId = ctx.activeThrusterId || null;
+    _activeProspectorId = ctx.activeProspectorId || null;
+    _tankWater = ctx.tank | 0;
+    _tankGrade = ctx.tankGrade === 'dirt' ? 'dirt' : 'water';
+    _afterburnEngaged = !!ctx.afterburnEngaged;
+    _wiring = (ctx.wiring && typeof ctx.wiring === 'object' && !Array.isArray(ctx.wiring)) ? _clone(ctx.wiring) : {};
+    _solarZone = ctx.solarZone != null ? ctx.solarZone : null;
+    _hasPowersat = !!ctx.hasPowersat;
+    let thrStats = null;
+    try { thrStats = getActiveThrusterStats(); } catch (_) { thrStats = null; }
+    let active = null;
+    try { active = isRocketActive(); } catch (_) { active = null; }
+    return {
+      totals: getStackTotals(),
+      thrStats,
+      active,
+      activeThrusterId: getActiveThrusterId(),
+    };
+  } finally {
+    _stack = saved.stack;
+    _activeThrusterId = saved.activeThrusterId;
+    _activeProspectorId = saved.activeProspectorId;
+    _tankWater = saved.tank;
+    _tankGrade = saved.tankGrade;
+    _afterburnEngaged = saved.afterburn;
+    _wiring = saved.wiring;
+    _solarZone = saved.solarZone;
+    _hasPowersat = saved.hasPowersat;
+  }
 }
 
 // Normalise the current stack into the support-chain resolver's card shape

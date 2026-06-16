@@ -48,7 +48,9 @@ import { SOLAR_ZONE_INFO, adjacentSites } from '../../data/sites.js';
 import { ZONE_CHIT_VPS } from '../../data/zone-chits.js';
 import {
   activeLaws, freshAssembly, ASSEMBLY_PLACES, IDEOLOGY_ORDER,
-  delegatesRemaining, playerDelegatesInPlace,
+  delegatesRemaining, playerDelegatesInPlace, playerDelegatesPlaced,
+  seniorityInPlace, finalVote, IDEOLOGY_BY_KEY, adjacentPlaces,
+  ideologyForFactionColor, voteWinners,
 } from '../../data/assembly.js';
 // Movement + metadata both come from the planner graph (the vendor
 // mission-planner data the client also uses). siteBySlug layers the
@@ -56,8 +58,9 @@ import {
 // id space across client + server. (data/graph.js is no longer used.)
 import {
   siteExists as plannerSiteExists, findPath as plannerFindPath,
-  leoSlug, siteBySlug as siteById, hazardKind,
+  leoSlug, siteBySlug as siteById, hazardKind, nodeBySlug,
   nodeSizeNumber, lineOfSightSites, siteBodyOf, buggyRoamSites,
+  isSiteNode, zoneOfSlug,
 } from './planner-graph.js';
 import { isBuggyRoamBody } from '../../data/buggy-roam.js';
 import { makeRng } from './rng.js';
@@ -89,7 +92,17 @@ function slotMass(slot) {
   if (!slot || !slot.id) return 0;
   const p = PATENTS_BY_ID[slot.id];
   if (p) {
+    // A radiator's mass depends on the side it deployed on (light vs heavy),
+    // stored at faces.<installedFace>.{light,heavy}.mass - NOT the fixed
+    // faces.*.mass, AND NOT always the PRIMARY face: a flipped radiator (its
+    // black/Tier-2 tech) carries its OWN light/heavy masses. Read the INSTALLED
+    // face's side block so dry/wet mass (and weight class) match the radiator's
+    // actual tech + side. Mirror of rocket.js#slotMassValue.
     const f = slotFace(slot, p);
+    if (p.type === 'radiator' && f) {
+      const blk = f[slot.radSide === 'light' ? 'light' : 'heavy'];
+      if (blk && blk.mass != null) return blk.mass | 0;
+    }
     return (f.mass != null ? f.mass : p.mass) | 0;
   }
   const crew = CREW_BY_ID[slot.id];
@@ -268,9 +281,10 @@ function stackHasMoonCable(rocket) {
   return !!(rocket && (rocket.stack || []).some(isMooncableThruster));
 }
 
-// Does the stack carry an OPERATIONAL safe-aerobrake card (a parachute
-// generator: Magnetoshell Plasma Parachute / Granular Rainbow Corral)? Such a
-// card lets the whole stack ride out aerobrake hazards with no roll.
+// Does the stack carry a safe-aerobrake card (a parachute generator:
+// Magnetoshell Plasma Parachute / Granular Rainbow Corral)? The ability
+// activates just by being ABOARD (no support-chain / operational requirement),
+// and lets the whole stack ride out aerobrake hazards with no roll.
 function stackSafeAerobrake(rocket) {
   return !!(rocket && (rocket.stack || []).some((s) => {
     const pw = powerOfSlot(s);
@@ -801,14 +815,21 @@ function exposedLeo(p) {
   return (p.leo || []).filter((s) => !isCrewSlot(s) && s.face !== 'secondary');
 }
 
-// Apply the solar flare's toll to one player's non-LEO stacks (rocket +
-// outposts) at the given flare roll. Pushes gameplay sentences to notesArr.
-// Returns the number of cards affected. (Mirror of the old inline sweep.)
+// Apply the solar flare's toll to one player's EXPOSED stacks at the given
+// flare roll. Per the Solar Flare rule, a flare hits cards in non-LEO stacks
+// UNLESS shielded, and three shieldings make most stacks immune:
+//   - Van Allen Shielding: cards at LEO (rocket.siteId == null) are immune.
+//   - Bunker Shielding: cards on a Site are immune. That covers every outpost
+//     (always built on a site) AND a rocket parked / landed at a site.
+// So the ONLY thing a flare can reach in this engine is a rocket caught in deep
+// space at a transit waypoint (a lagrange / burn / hohmann node, isSiteNode ==
+// false). Each affected card adds its heliocentric-zone modifier before the
+// rad-hardness check. Pushes gameplay sentences to notesArr; returns the number
+// of cards affected.
 function applyFlareToPlayer(state, p, flare, notesArr) {
   let touched = 0;
-  const sweep = (slots, siteId, where) => {
-    const site = siteId ? siteById(siteId) : null;
-    const zone = (site && site.solarZone) || 'Earth';
+  const sweep = (slots, slug, where) => {
+    const zone = zoneOfSlug(slug) || 'Earth';
     const info = SOLAR_ZONE_INFO[zone];
     const mod = info ? info.solar : 0;
     if (mod === null) return slots;
@@ -837,7 +858,10 @@ function applyFlareToPlayer(state, p, flare, notesArr) {
     }
     return survivors;
   };
-  if (p.rocket.siteId) {
+  // Rocket: hit ONLY when caught in deep space (a transit waypoint that is not
+  // a Site and not LEO). A rocket parked at a Site rides out the flare (Bunker
+  // Shielding); a rocket at LEO is immune (Van Allen).
+  if (p.rocket.siteId && !isSiteNode(p.rocket.siteId)) {
     const before = p.rocket.stack.length;
     p.rocket.stack = sweep(p.rocket.stack, p.rocket.siteId, 'aboard the rocket');
     if (p.rocket.stack.length !== before) {
@@ -847,9 +871,8 @@ function applyFlareToPlayer(state, p, flare, notesArr) {
       recallIfEmpty(p);
     }
   }
-  for (const o of Object.values(p.outposts || {})) {
-    if (o) o.cards = sweep(o.cards || [], o.siteId, `at Outpost ${o.letter}`);
-  }
+  // Outposts are always built on a Site, so Bunker Shielding makes every
+  // outpost stack immune. No sweep.
   return touched;
 }
 // Would the flare touch this player at all? Dry run on a clone so we only
@@ -1043,9 +1066,19 @@ function applyEventChoice(state, op, ctx) {
       }
     }
     if (lose) {
+      // Centrist (Pad Insurance): a delegate in the center repays the boost cost
+      // of the card lost to the explosion. Read the cost off the slot (radiator
+      // side matters) BEFORE it leaves LEO.
+      const lostSlot = (player.leo || []).find((s) => s.id === lose);
+      const insured = placeCount(assemblyOf(state), 'centrist', player.profileId) > 0;
+      const refund = insured ? boostMass(lose, lostSlot && lostSlot.radSide) : 0;
       player.leo = (player.leo || []).filter((s) => s.id !== lose);
       (player.hand = player.hand || []).push(lose);   // Decommission -> back to hand
       log = `${player.name} decommissioned ${cardNameOf(lose)} from LEO to hand (Pad Explosion).`;
+      if (refund > 0) {
+        player.aqua += refund;
+        log += ` Pad Insurance repaid ${refund} aqua.`;
+      }
       newsCards.push(lose);
     } else {
       log = `${player.name} had nothing exposed to the Pad Explosion.`;
@@ -1781,22 +1814,43 @@ function applyBoost(state, op, player) {
 // was never credited (user 2026-05-29: "the sell didnt write to
 // server" -> a later REFUEL failed insufficient_aqua).
 const FREE_MARKET_AQUA = 3;  // mirror of card-market.js
+const FREE_TRADE_AQUA = 5;   // Freedom (Free Trade Act): 2 cards for 5
 function applyFreeMarket(state, op, player) {
   if (player.opsRemaining <= 0) return fail('no_ops_left');
-  const cardId = String(op.cardId || '');
-  const idx = player.hand.indexOf(cardId);
-  if (idx < 0) return fail('not_in_hand');
-  const card = PATENTS_BY_ID[cardId];
-  if (!card) return fail('unknown_card');
-  player.hand.splice(idx, 1);
-  // Card returns to the BOTTOM of its deck so it can re-circulate.
-  const deck = state.decks[card.type];
-  if (Array.isArray(deck)) deck.push(cardId);
-  player.aqua += FREE_MARKET_AQUA;
+  // Base: sell ONE hand card for FREE_MARKET_AQUA. Freedom (Free Trade Act): a
+  // player who can use the law may sell TWO cards for FREE_TRADE_AQUA total.
+  const ids = (Array.isArray(op.cardIds) && op.cardIds.length)
+    ? op.cardIds.map(String)
+    : (op.cardId ? [String(op.cardId)] : []);
+  if (!ids.length) return fail('no_card');
+  if (ids.length > 2) return fail('too_many_cards');
+  if (ids.length === 2 && !playerCanUseLaw(state, player, 'freedom')) return fail('needs_freedom_law');
+  // Validate every card is present (handling a duplicate id twice) before any
+  // mutation, so a bad second card can't half-apply the sale.
+  const remaining = [...player.hand];
+  const cards = [];
+  for (const id of ids) {
+    const i = remaining.indexOf(id);
+    if (i < 0) return fail('not_in_hand');
+    remaining.splice(i, 1);
+    const card = PATENTS_BY_ID[id];
+    if (!card) return fail('unknown_card');
+    cards.push(card);
+  }
+  for (const id of ids) {
+    player.hand.splice(player.hand.indexOf(id), 1);
+    const card = PATENTS_BY_ID[id];
+    const deck = state.decks[card.type];
+    if (Array.isArray(deck)) deck.push(id);   // back to the BOTTOM of its deck
+  }
+  const gain = (ids.length === 2) ? FREE_TRADE_AQUA : FREE_MARKET_AQUA;
+  player.aqua += gain;
   player.opsRemaining -= 1;
+  const names = cards.map((c) => c.name).join(' + ');
+  const tag = (ids.length === 2) ? ', Free Trade Act' : '';
   return {
     ok: true, state,
-    log: `${player.name} sold ${card.name} for +${FREE_MARKET_AQUA} aqua (Free Market).`,
+    log: `${player.name} sold ${names} for +${gain} aqua (Free Market${tag}).`,
   };
 }
 
@@ -1998,29 +2052,37 @@ function applyTransfer(state, op, player) {
   // Legacy shorthand: only `to` (rocket|leo) given -> the other is `from`.
   if (!from && (to === 'rocket' || to === 'leo')) from = (to === 'rocket' ? 'leo' : 'rocket');
   if (!from || !to || from === to) return fail('bad_transfer');
-  if (from !== 'rocket' && to !== 'rocket') return fail('bad_transfer');
+  const validEndpoint = (ep) => ep === 'leo' || ep === 'rocket'
+    || (typeof ep === 'string' && ep.startsWith('outpost') && ['A', 'B', 'C', 'D'].includes(ep.slice('outpost'.length)));
+  if (!validEndpoint(from) || !validEndpoint(to)) return fail('bad_transfer');
 
   const ids = Array.isArray(op.cardIds)
     ? op.cardIds.map(String)
     : (op.cardId != null ? [String(op.cardId)] : []);
   if (!ids.length) return fail('bad_transfer');
 
-  // The non-rocket endpoint + its colocation requirement.
-  const other = from === 'rocket' ? to : from;
+  // Both stacks must exist (an outpost endpoint must be built).
+  const outpostOf = (ep) => player.outposts && player.outposts[ep.slice('outpost'.length)];
+  if (from.startsWith('outpost') && !outpostOf(from)) return fail('no_outpost');
+  if (to.startsWith('outpost') && !outpostOf(to)) return fail('no_outpost');
+
+  // Colocation: cards move between two stacks at the SAME location. LEO is the
+  // null site; the rocket sits at its siteId (null = LEO); an outpost at its
+  // siteId. Any colocated pair works (outpost <-> outpost, LEO <-> rocket,
+  // outpost <-> rocket, ...), not just rocket-involving moves.
+  const siteOf = (ep) => {
+    if (ep === 'leo') return null;
+    if (ep === 'rocket') return player.rocket.siteId == null ? null : player.rocket.siteId;
+    return outpostOf(ep).siteId;
+  };
   const rocketEmpty = player.rocket.stack.length === 0;
-  if (other === 'leo') {
-    if (!rocketAtLeo(player) && !rocketEmpty) return fail('rocket_not_at_leo');
-  } else if (other.startsWith('outpost')) {
-    const opp = player.outposts && player.outposts[other.slice('outpost'.length)];
-    if (!opp) return fail('no_outpost');
-    if (rocketEmpty) {
-      // Forming the rocket at the outpost: it adopts the outpost's site.
-      player.rocket.siteId = opp.siteId;
-    } else if (player.rocket.siteId !== opp.siteId) {
-      return fail('not_colocated');
-    }
-  } else {
-    return fail('bad_transfer');
+  const involvesRocket = from === 'rocket' || to === 'rocket';
+  if (involvesRocket && rocketEmpty) {
+    // An empty rocket forms at the OTHER endpoint's location.
+    const other = from === 'rocket' ? to : from;
+    player.rocket.siteId = siteOf(other);
+  } else if (siteOf(from) !== siteOf(to)) {
+    return fail('not_colocated');
   }
 
   const srcArr = stackArrayOf(player, from);
@@ -2202,8 +2264,21 @@ function applyTransferFuel(state, op, player) {
   }
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
-  // Outposts only hold water; pumping it into a dirt rocket tank would mix
-  // the grades, which is never allowed.
+  // Rocket -> outpost: store the rocket's water at the outpost.
+  if (op.direction === 'toOutpost') {
+    if ((player.rocket.tank | 0) > 0 && tankGradeOf(player.rocket) === 'dirt') return fail('cannot_store_dirt');
+    // Only WHOLE water units transfer; a sub-1 remainder stays in the tank.
+    const tank = Math.floor(player.rocket.tank || 0);
+    const amt = Math.min(want, tank);
+    if (amt <= 0) return fail('no_water');
+    player.rocket.tank = (player.rocket.tank || 0) - amt;
+    outpost.tank = (outpost.tank | 0) + amt;
+    return {
+      ok: true, state,
+      log: `${player.name} pumped ${amt} water from the rocket into Outpost ${letter} (outpost ${outpost.tank}).`,
+    };
+  }
+  // Outpost -> rocket (default).
   if ((player.rocket.tank | 0) > 0 && tankGradeOf(player.rocket) === 'dirt') return fail('cannot_mix_fuel');
   const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
   const room = Math.max(0, TANK_MAX - dry - (player.rocket.tank | 0));
@@ -2501,8 +2576,18 @@ function applyIndustrialize(state, op, player) {
   const disc = state.discs[siteId];
   if (!disc || disc.outcome !== 'success' || disc.ownerId !== player.profileId) return fail('not_claimed');
   if (state.factories[siteId]) return fail('already_industrialized');
-  // Factory cube supply: a player has only 7 cubes, so 7 factories max.
-  if (ownedSiteCount(state.factories, player.profileId) >= FACTORY_CUBES) return fail('no_factory_cubes');
+  // Cube supply: factories + assembly delegates share the 7 cubes. If the pool
+  // is full you may FREE one by removing a delegate from the politics map
+  // (op.freeDelegate = the place to pull it from); otherwise it's a hard cap.
+  if (cubesInPlay(state, player.profileId) >= FACTORY_CUBES) {
+    const asm = assemblyOf(state);
+    const free = op.freeDelegate ? String(op.freeDelegate) : null;
+    if (free && ASSEMBLY_PLACES.includes(free) && placeCount(asm, free, player.profileId) > 0) {
+      setPlaceCount(asm, free, player.profileId, placeCount(asm, free, player.profileId) - 1);
+    } else {
+      return fail('no_factory_cubes');
+    }
+  }
   const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];
   // Every id must be a non-crew card in the stack; the set must include a
   // refinery + a robonaut (the build needs both) - unless ARCOLOGY waives the
@@ -2518,6 +2603,9 @@ function applyIndustrialize(state, op, player) {
     if (c && c.type === 'robonaut') hasRobonaut = true;
     const pw = powerOfSlot(slot);   // capture now (the slot is decommissioned below)
     if (!pw) continue;
+    // Magnetoshell Plasma Parachute: "Cannot be used to support Bernals or
+    // during industrialization." Reject it from the build set.
+    if (pw.safeAerobrakeNoBernalOrIndustrialize) return fail('card_no_industrialize');
     // ARCOLOGY (Solar Carbotherm): no robonaut decommission needed in the
     // listed inner-system zones.
     if (Array.isArray(pw.noRobonautDecommissionZones)
@@ -2610,7 +2698,9 @@ function applyEtProduce(state, op, player) {
   if (!site) return fail('unknown_site');
   const fac = state.factories[siteId];
   if (!fac) return fail('no_factory');
-  if (fac.ownerId !== player.profileId) {
+  // Individuality (Freedom to Roam) lets a player ET-produce at an opponent's
+  // factory legitimately (a non-victory use), skipping the felony path.
+  if (fac.ownerId !== player.profileId && !playerCanUseLaw(state, player, 'individuality')) {
     // Factory Hijack (Felony, N6a): ET-produce at an opponent's Factory during
     // Anarchy, with your own Human colocated, unless an opposing Human or
     // colony defends it. The product still lands in YOUR outpost here.
@@ -2671,7 +2761,7 @@ function setPlaceCount(asm, place, profileId, count) {
 }
 // Is ideology `key`'s law in force right now (resolver verdict)?
 function lawInForce(state, key) {
-  return activeLaws(assemblyOf(state)).active.has(key);
+  return activeLaws(assemblyOf(state), state.activeLawStar).active.has(key);
 }
 // May `player` benefit from ideology `key`'s law this turn? It's in force and
 // they hold a delegate there, OR they spent a Lobby free action on it this turn.
@@ -2680,26 +2770,68 @@ function playerCanUseLaw(state, player, key) {
   if (lawInForce(state, key) && placeCount(asm, key, player.profileId) > 0) return true;
   return Array.isArray(player.lobbiedLaws) && player.lobbiedLaws.includes(key);
 }
+// May `player` operate at this factory for a NON-VICTORY purpose (site refuel,
+// ET production, delivery)? Their own always; an opponent's only when
+// Individuality (Freedom to Roam) lets them treat it as their own. Victory
+// builds (Homesteading a colony) do NOT get this and stay owner-only.
+function canUseFactoryNonVictory(state, player, fac) {
+  if (!fac) return false;
+  if (fac.ownerId === player.profileId) return true;
+  return playerCanUseLaw(state, player, 'individuality');
+}
+// A player's 7 wooden cubes are ONE shared pool: each factory, each assembly
+// delegate, AND the first player's Sunspot (first-player) marker is a cube.
+// cubesInPlay counts all three; FACTORY_CUBES (7) caps the sum. Running out for
+// a factory is freed by removing a delegate (INDUSTRIALIZE freeDelegate);
+// placing a delegate is blocked when the pool is full.
+function cubesInPlay(state, profileId) {
+  let n = ownedSiteCount(state.factories, profileId)
+    + playerDelegatesPlaced(assemblyOf(state), profileId);
+  const fp = state.players[state.firstPlayerIndex || 0];
+  if (fp && fp.profileId === profileId) n += 1;   // the Sunspot / first-player cube
+  return n;
+}
 
-// Fundraise (M0 operation, replaces Income): place a new delegate (or move one
-// of yours), gain aqua, run the vote tally (implicit - activeLaws is recomputed
-// on every read). Honor (Paleoconservative) makes the aqua gained equal your
-// glory-chit count; Authority (Martial Law) may discard an opponent's delegate.
+// Fundraise (M0 operation, replaces Income): OPTIONALLY place a new delegate
+// from hand AND OPTIONALLY move one of YOUR delegates one ADJACENT space, then
+// gain aqua (the vote tally is implicit - activeLaws is recomputed on read).
+// Either sub-action may be skipped (skipping both just banks the income). Honor
+// (Paleoconservative) makes the aqua gained equal your glory-chit count;
+// Authority (Martial Law) may also discard an opponent's delegate.
 function applyFundraise(state, op, player) {
   if (!state.m0) return fail('not_m0');
   if (player.opsRemaining <= 0) return fail('no_ops_left');
   const asm = assemblyOf(state);
-  const place = String(op.place || '');
-  if (!ASSEMBLY_PLACES.includes(place)) return fail('bad_place');
-  const from = op.from ? String(op.from) : null;
-  if (from) {
-    if (!ASSEMBLY_PLACES.includes(from)) return fail('bad_place');
-    if (placeCount(asm, from, player.profileId) <= 0) return fail('no_delegate_there');
-    setPlaceCount(asm, from, player.profileId, placeCount(asm, from, player.profileId) - 1);
-    setPlaceCount(asm, place, player.profileId, placeCount(asm, place, player.profileId) + 1);
-  } else {
-    if (delegatesRemaining(asm, player.profileId) <= 0) return fail('no_delegates_left');
-    setPlaceCount(asm, place, player.profileId, placeCount(asm, place, player.profileId) + 1);
+  const pid = player.profileId;
+  const placeName = (p) => (p === 'centrist' ? 'Centrist' : ((IDEOLOGY_BY_KEY[p] || {}).name || p));
+  // Optional: place a NEW delegate from hand. It may only go on your HOME
+  // ideology or a space where you already hold a delegate.
+  const place = op.place ? String(op.place) : null;
+  if (place && !ASSEMBLY_PLACES.includes(place)) return fail('bad_place');
+  if (place) {
+    const home = (state.homeIdeology || {})[pid];
+    if (place !== home && placeCount(asm, place, pid) <= 0) return fail('bad_place_target');
+  }
+  // Optional: move one of MY delegates one ADJACENT space.
+  const moveFrom = op.moveFrom ? String(op.moveFrom) : null;
+  const moveTo = op.moveTo ? String(op.moveTo) : null;
+  if ((moveFrom && !moveTo) || (!moveFrom && moveTo)) return fail('bad_move');
+  if (moveFrom) {
+    if (!ASSEMBLY_PLACES.includes(moveFrom) || !ASSEMBLY_PLACES.includes(moveTo)) return fail('bad_place');
+    if (!adjacentPlaces(moveFrom).includes(moveTo)) return fail('not_adjacent');
+  }
+  if (place && cubesInPlay(state, pid) >= FACTORY_CUBES) return fail('no_cubes_left');
+  if (moveFrom) {
+    // The move source must hold one of MY delegates (a same-space placement this
+    // op seeds one, so place-then-move from the new space is allowed).
+    let have = placeCount(asm, moveFrom, pid);
+    if (place === moveFrom) have += 1;
+    if (have <= 0) return fail('no_delegate_there');
+  }
+  if (place) setPlaceCount(asm, place, pid, placeCount(asm, place, pid) + 1);
+  if (moveFrom) {
+    setPlaceCount(asm, moveFrom, pid, placeCount(asm, moveFrom, pid) - 1);
+    setPlaceCount(asm, moveTo, pid, placeCount(asm, moveTo, pid) + 1);
   }
   // Authority (Martial Law): may discard an opponent's delegate.
   let martial = '';
@@ -2718,9 +2850,30 @@ function applyFundraise(state, op, player) {
   const gain = honor ? ((player.glory && player.glory.chits || []).length) : INCOME_AQUA;
   player.aqua = (player.aqua | 0) + gain;
   player.opsRemaining -= 1;
+  // Vote tally (the final step): move the active-law star onto the winner. One
+  // winner -> auto; a tie -> the fundraiser's pick (op.star ∈ the tied winners);
+  // no delegates anywhere -> the Centrist center.
+  const winners = voteWinners(asm);
+  let newStar;
+  if (winners.length === 0) newStar = 'centrist';
+  else if (winners.length === 1) [newStar] = winners;
+  else {
+    const pick = op.star ? String(op.star) : null;
+    if (!pick || !winners.includes(pick)) return fail('star_choice_required', { winners });
+    newStar = pick;
+  }
+  const starMoved = newStar !== state.activeLawStar;
+  state.activeLawStar = newStar;
+  const parts = [];
+  if (place) parts.push(`placed a delegate on ${placeName(place)}`);
+  if (moveFrom) parts.push(`moved a delegate ${placeName(moveFrom)} -> ${placeName(moveTo)}`);
+  const did = parts.length ? parts.join(' and ') : 'took income';
+  const starNote = starMoved
+    ? ` The active-law star moves to ${newStar === 'centrist' ? 'the center' : placeName(newStar)}.`
+    : '';
   return {
     ok: true, state,
-    log: `${player.name} fundraised - delegate to ${place}, +${gain} aqua${honor ? ' (Honor: per glory chit)' : ''}.${martial}`,
+    log: `${player.name} fundraised - ${did}, +${gain} aqua${honor ? ' (Honor: per glory chit)' : ''}.${martial}${starNote}`,
   };
 }
 
@@ -2730,7 +2883,7 @@ function applyFundraise(state, op, player) {
 function applyLobby(state, op, player) {
   if (!state.m0) return fail('not_m0');
   const asm = assemblyOf(state);
-  const laws = activeLaws(asm);
+  const laws = activeLaws(asm, state.activeLawStar);
   if (laws.lobbyingDisabled) return fail('lobbying_disabled');
   if (player.lobbiedThisTurn) return fail('already_lobbied');
   const key = String(op.ideology || '');
@@ -2759,6 +2912,35 @@ function applySiteRefuel(state, op, player) {
   const siteId = String(op.siteId || '');
   const site = siteById(siteId);
   if (!site) return fail('unknown_site');
+
+  // Outpost Factory-Refuel: a flat +7 water into an OUTPOST's own tank at a
+  // usable factory here. The rocket need NOT be present - the outpost stores its
+  // own fuel. Outposts can only FACTORY-refuel (ISRU refuel needs the rocket's
+  // prospector). Still costs the operation + the one-per-site-per-turn lock.
+  if (op.outpost) {
+    const letter = String(op.outpost);
+    const outpost = player.outposts && player.outposts[letter];
+    if (!outpost || outpost.siteId !== siteId) return fail('no_outpost');
+    const fac = state.factories[siteId];
+    if (!canUseFactoryNonVictory(state, player, fac)) return fail('no_factory');
+    if (player.opsRemaining <= 0) return fail('no_ops_left');
+    player.refueledSites = Array.isArray(player.refueledSites) ? player.refueledSites : [];
+    if (player.refueledSites.includes(siteId)) return fail('already_refueled');
+    const odry = (outpost.cards || []).reduce((m, s) => m + slotMass(s), 0);
+    const ocap = Math.max(0, TANK_MAX - odry);
+    const otank = Number(outpost.tank) || 0;
+    if (otank >= ocap) return fail('tank_full');
+    const gain = Math.min(7, ocap - otank);
+    if (gain <= 0) return fail('tank_full');
+    outpost.tank = round6(otank + gain);
+    player.refueledSites.push(siteId);
+    player.opsRemaining -= 1;
+    return {
+      ok: true, state,
+      log: `${player.name}: Factory-Refuel at ${site.name} (+${round6(gain)} water into Outpost ${letter}; tank ${round6(outpost.tank)}).`,
+    };
+  }
+
   if (player.rocket.siteId !== siteId) return fail('not_at_site');
   // Atmospheric Scoop (subsystem 5) can raise an aerostat site to hydration 2.
   const water = effectiveHydration(site, player);
@@ -2775,7 +2957,9 @@ function applySiteRefuel(state, op, player) {
   let rawGain, label;
   if (op.mode === 'factory') {
     const fac = state.factories[siteId];
-    if (!fac || fac.ownerId !== player.profileId) return fail('no_factory');
+    // Individuality (Freedom to Roam): an opponent's factory may be used to
+    // refuel (a non-victory purpose).
+    if (!canUseFactoryNonVictory(state, player, fac)) return fail('no_factory');
     rawGain = 7;
     label = 'Factory-Refuel';
   } else {
@@ -2879,7 +3063,9 @@ function applyDelivery(state, op, player) {
   const site = siteById(siteId);
   if (!site) return fail('unknown_site');
   const fac = state.factories[siteId];
-  if (!fac || fac.ownerId !== player.profileId) return fail('no_factory');
+  // Individuality (Freedom to Roam): deliver from an opponent's factory (a
+  // non-victory use). The delivered card is still read from YOUR own outpost.
+  if (!canUseFactoryNonVictory(state, player, fac)) return fail('no_factory');
   if (player.opsRemaining <= 0) return fail('no_ops_left');
   const outpost = player.outposts && player.outposts[letter];
   if (!outpost || outpost.siteId !== siteId) return fail('no_outpost');
@@ -3038,15 +3224,15 @@ function pickPayload(op) {
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };
     case 'BOOST': return { cardIds: op.cardIds, radSides: op.radSides || {} };
     case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from, to: op.to };
-    case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount };
+    case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount, direction: op.direction };
     case 'DISSOLVE_OUTPOST': return { letter: op.letter };
     case 'DECOMMISSION': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from };
     case 'CLAIM_JUMP': return { siteId: op.siteId };
     case 'REFUEL': return { amount: op.amount };
     case 'CASH_WATER': return { amount: op.amount };
     case 'DUMP': return { amount: op.amount };
-    case 'FREE_MARKET': return { cardId: op.cardId };
-    case 'FUNDRAISE': return { place: op.place, from: op.from, discard: op.discard };
+    case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds };
+    case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, discard: op.discard, star: op.star };
     case 'LOBBY': return { ideology: op.ideology };
     case 'DISCARD': return { cardId: op.cardId };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
@@ -3055,11 +3241,11 @@ function pickPayload(op) {
     case 'AFTERBURN': return {};
     case 'PROSPECT': return { siteId: op.siteId, turn: op.turn, round: op.round, relocateFrom: op.relocateFrom };
     case 'PROSPECT_REROLL': return { siteId: op.siteId };
-    case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode };
+    case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode, outpost: op.outpost };
     case 'DIRT_REFUEL': return { amount: op.amount };
     case 'DELIVERY': return { siteId: op.siteId, letter: op.letter, cardId: op.cardId };
     case 'BUILD_COLONY': return { cardId: op.cardId };
-    case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds };
+    case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds, freeDelegate: op.freeDelegate };
     case 'MINE_REVIVAL': return { siteId: op.siteId };
     case 'ET_PRODUCE': return { siteId: op.siteId, cardId: op.cardId, letter: op.letter, isNewOutpost: !!op.isNewOutpost };
     // Route ops ride the undo stack like every other functional op, so
@@ -3211,27 +3397,48 @@ function applyEndTurn(state, _op, player) {
   log += clockEventLog(state);
   log += ` Round ${prevRound} complete.`;
 
-  // Game-length cap: finish once the configured number of rounds has
-  // been played. Legacy games get maxRounds backfilled (default 5);
-  // a game with no cap at all just keeps going.
+  // M0: the round's FIRST player drops one permanent seniority disc on the
+  // assembly before the round resolves (game finish + score, or first-player
+  // handoff). Freeze the table on that pick (like the handoff). PLACE_SENIORITY
+  // resolves it and then calls resolveRoundClose. Non-M0 games skip straight to
+  // the resolve.
+  if (state.m0) {
+    const chooser = state.players[firstIdx];
+    state.activeIndex = firstIdx;
+    state.pendingSeniority = { chooserId: chooser.profileId };
+    state.turnActions = [];
+    state.turnRedo = [];
+    log += ` ${chooser.name} places a seniority disc on the assembly.`;
+    return { ok: true, state, log };
+  }
+  return resolveRoundClose(state, log);
+}
+
+// Finish the round once any M0 seniority placement is done: end the game (with
+// scoring) once the round cap is passed, otherwise open the next round (the
+// first-player handoff for rotation games, or the same leader again).
+function resolveRoundClose(state, log) {
+  const n = state.players.length;
+  const firstIdx = state.firstPlayerIndex || 0;
+
+  // Game-length cap: finish once the configured number of rounds has been
+  // played. Legacy games get maxRounds backfilled (default 5).
   if (state.maxRounds && state.round > state.maxRounds) {
     state.status = 'finished';
     state.finishedAt = Date.now();
     state.pendingFirstPlayer = null;
     state.turnActions = [];
     state.turnRedo = [];
-    log += ` Game over after ${state.maxRounds} rounds.`;
+    computeFinalScores(state);
+    log += ` Game over after ${state.maxRounds} rounds.` + finalScoreLog(state);
     return { ok: true, state, log };
   }
 
   log += ` Round ${state.round} begins.`;
 
-  // First-player rotation (rotation-enabled games, 2+ players): the
-  // player who led the round just finished names the next first
-  // player. Freeze the table on that choice - the active pointer rests
-  // on the chooser and budgets are NOT refilled until the pick lands
-  // (SET_FIRST_PLAYER opens the new leader's turn). Mirrors the auction
-  // freeze: every other op is rejected while pendingFirstPlayer is set.
+  // First-player rotation (rotation-enabled games, 2+ players): the player who
+  // led the round just finished names the next first player. Freeze the table on
+  // that choice; SET_FIRST_PLAYER opens the new leader's turn.
   if (state.firstPlayerRotation && n >= 2) {
     const chooser = state.players[firstIdx];
     state.activeIndex = firstIdx;
@@ -3246,6 +3453,113 @@ function applyEndTurn(state, _op, player) {
   state.activeIndex = firstIdx;
   openTurnFor(state, state.players[firstIdx]);
   return { ok: true, state, log };
+}
+
+// ----- end-game scoring -----
+
+// Entries in an { [siteId]: { ownerId, ... } } map owned by a player.
+function countOwnedBy(map, profileId) {
+  let n = 0;
+  for (const k in (map || {})) if (map[k] && map[k].ownerId === profileId) n += 1;
+  return n;
+}
+// A player's SUCCESSFUL claim discs (busted scans don't count).
+function countSuccessfulClaims(state, profileId) {
+  let n = 0;
+  for (const k in (state.discs || {})) {
+    const d = state.discs[k];
+    if (d && d.ownerId === profileId && d.outcome === 'success') n += 1;
+  }
+  return n;
+}
+// Total glory chits a player has earned (still aboard + already brought home).
+function gloryChitCount(player) {
+  const g = player.glory || {};
+  return ((g.chits || []).length) + ((g.claimed || []).length);
+}
+// Does a site have a hazardous lander burn (the planner's landing skull)?
+function siteHasHazardLanding(siteId) {
+  const n = nodeBySlug(siteId);
+  return !!(n && n.hazard);
+}
+// The winning ideology's end-game award, scored from THIS player's own holdings.
+function ideologyAwardVp(state, player, key) {
+  const pid = player.profileId;
+  const asm = assemblyOf(state);
+  switch (key) {
+    case 'freedom': return countOwnedBy(state.factories, pid);                 // +1 / factory cube
+    case 'authority': return countSuccessfulClaims(state, pid);               // +1 / claim disc
+    case 'equality': return countOwnedBy(state.colonies, pid);                // +1 / colony dome
+    case 'honor': return gloryChitCount(player);                              // +1 / glory chit
+    case 'unity':                                                             // +1 / ideology you sit in
+      return IDEOLOGY_ORDER.reduce((s, k) => s + (playerDelegatesInPlace(asm, k, pid) > 0 ? 1 : 0), 0);
+    case 'individuality': {
+      // +1 per wood/plastic token (claim disc / factory cube / colony dome) on a
+      // Site with a hazardous lander burn. Outpost stacks do NOT count.
+      let n = 0;
+      for (const sid in (state.discs || {})) {
+        const d = state.discs[sid];
+        if (d && d.ownerId === pid && d.outcome === 'success' && siteHasHazardLanding(sid)) n += 1;
+      }
+      for (const sid in (state.factories || {})) {
+        if (state.factories[sid] && state.factories[sid].ownerId === pid && siteHasHazardLanding(sid)) n += 1;
+      }
+      for (const sid in (state.colonies || {})) {
+        if (state.colonies[sid] && state.colonies[sid].ownerId === pid && siteHasHazardLanding(sid)) n += 1;
+      }
+      return n;
+    }
+    default: return 0;
+  }
+}
+// Compute + stash the end-game breakdown on state.finalScores and the assembly
+// vote result on state.finalVote. M0 adds the per-cube VP and the winning-
+// ideology award; the factory / colony / glory lines score in any game (an
+// empty assembly just contributes 0). Ranking: total desc, ties by aqua.
+function computeFinalScores(state) {
+  const asm = assemblyOf(state);
+  const vote = finalVote(asm);
+  const winnerKey = vote.winner;
+  const winnerName = winnerKey ? ((IDEOLOGY_BY_KEY[winnerKey] || {}).name || winnerKey) : null;
+  const m0 = !!state.m0;
+  const scores = state.players.map((p) => {
+    const cubeVp = m0 ? playerDelegatesPlaced(asm, p.profileId) : 0;
+    const awardVp = (m0 && winnerKey) ? ideologyAwardVp(state, p, winnerKey) : 0;
+    const factoryVp = countOwnedBy(state.factories, p.profileId);
+    const colonyVp = countOwnedBy(state.colonies, p.profileId);
+    // Glory VP is derived from the claimed chits' zone + side via ZONE_CHIT_VPS
+    // (the data source), not the running p.glory.vps snapshot, so a chit's value
+    // edit revalues banked chits at scoring time.
+    const gloryVp = (p.glory && Array.isArray(p.glory.claimed))
+      ? p.glory.claimed.reduce((s, c) => s
+        + (((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[c.side === 'back' ? 'back' : 'front']) | 0), 0)
+      : 0;
+    const total = cubeVp + awardVp + factoryVp + colonyVp + gloryVp;
+    return {
+      profileId: p.profileId, name: p.name, color: p.color || null,
+      cubeVp, awardVp, factoryVp, colonyVp, gloryVp, total, aqua: p.aqua | 0,
+    };
+  });
+  const ranked = [...scores].sort((a, b) => b.total - a.total || b.aqua - a.aqua);
+  ranked.forEach((s, i) => { s.rank = i + 1; });
+  state.finalScores = scores;
+  state.finalVote = {
+    winner: winnerKey,
+    winnerName,
+    award: winnerKey ? (((IDEOLOGY_BY_KEY[winnerKey] || {}).award || {}).text || null) : null,
+    awardTBD: false,
+    totals: vote.totals,
+    tied: vote.tied,
+  };
+}
+// One-line game-over summary for the op log + galactic news.
+function finalScoreLog(state) {
+  const fs = state.finalScores || [];
+  if (!fs.length) return '';
+  const top = [...fs].sort((a, b) => b.total - a.total || b.aqua - a.aqua)[0];
+  const fv = state.finalVote || {};
+  const voteStr = fv.winnerName ? ` ${fv.winnerName} carried the assembly vote.` : '';
+  return `${voteStr}${top ? ` ${top.name} wins with ${top.total} VP.` : ''}`;
 }
 
 // ----- draft-start mode -----
@@ -3542,6 +3856,21 @@ function applyAuctionStart(state, op, ctx) {
   if (!DECK_TYPES.includes(deckType)) return fail('bad_deck');
   const deck = state.decks[deckType];
   if (!deck || !deck.length) return fail('deck_empty');
+
+  // Equality (Research Grants): instead of opening an auction, pay 1 aqua and
+  // take the deck-top card straight into hand (no bidding, no support draw).
+  if (op.useEquality && playerCanUseLaw(state, player, 'equality')) {
+    if (player.aqua < 1) return fail('insufficient_aqua');
+    const grantId = deck.shift();
+    player.aqua -= 1;
+    (player.hand = player.hand || []).push(grantId);
+    player.opsRemaining -= 1;
+    // A research op commits the turn (it moves a deck + hand), like an auction.
+    state.turnActions = [];
+    state.turnRedo = [];
+    const gc = PATENTS_BY_ID[grantId];
+    return { ok: true, state, log: `${player.name} claimed ${gc ? gc.name : grantId} from the ${deckType} deck for 1 aqua (Research Grants).` };
+  }
 
   const cardId = deck.shift();
   player.opsRemaining -= 1;
@@ -4129,6 +4458,24 @@ function applyPickCrew(state, op, ctx) {
   // way round). Since each card is claimed by one player, seat colours stay
   // unique.
   if (card.color) player.color = card.color;
+  // SOLO M0: a faction's colour IS its ideology, so seat the player's starting
+  // delegate in the matching ideology (multiplayer keeps the random seat-order
+  // ideology assigned at setup). The faction is chosen here, AFTER createInitial
+  // State placed the seat-order cube, so move it; a re-pick moves it again.
+  if (state.m0 && state.players.length === 1) {
+    const ide = ideologyForFactionColor(card.color);
+    if (ide) {
+      const asm = state.assembly || (state.assembly = freshAssembly());
+      for (const place of ASSEMBLY_PLACES) {
+        if (playerDelegatesInPlace(asm, place, player.profileId) > 0) {
+          setPlaceCount(asm, place, player.profileId, 0);
+        }
+      }
+      setPlaceCount(asm, ide, player.profileId, 1);
+      state.homeIdeology = state.homeIdeology || {};
+      state.homeIdeology[player.profileId] = ide;
+    }
+  }
   // Replace any previous crew slot in LEO with the new pick so a
   // re-pick during the draft doesn't leave a stale crew sitting in
   // the stack. First-time pickers just get one push.
@@ -4178,15 +4525,15 @@ const CREW = {
 function applySetFirstPlayer(state, op, ctx) {
   const pending = state.pendingFirstPlayer;
   if (!pending) return fail('no_first_player_choice');
-  if (pending.chooserId !== ctx.profileId) return fail('not_first_player_chooser');
-  // profileId is numeric in state; the op carries a number too. Comparing a
-  // String()'d id against the numeric p.profileId never matched, so every pick
-  // bounced with unknown_player ("I can't select the first player").
-  const targetId = Number(op.profileId);
-  const targetIdx = state.players.findIndex((p) => p.profileId === targetId);
+  // Compare ids type-agnostically (string-vs-number mismatches between the op
+  // payload, the state, and the chooser id were making every pick bounce with
+  // unknown_player - "I can't select the first player").
+  const sameId = (a, b) => String(a) === String(b);
+  if (!sameId(pending.chooserId, ctx.profileId)) return fail('not_first_player_chooser');
+  const targetIdx = state.players.findIndex((p) => sameId(p.profileId, op.profileId));
   if (targetIdx < 0) return fail('unknown_player');
   // "another player": the first-player token must move off the chooser.
-  if (state.players[targetIdx].profileId === pending.chooserId) {
+  if (sameId(state.players[targetIdx].profileId, pending.chooserId)) {
     return fail('must_choose_another');
   }
   const chooser = playerByProfile(state, pending.chooserId);
@@ -4202,8 +4549,34 @@ function applySetFirstPlayer(state, op, ctx) {
   };
 }
 
+// ----- seniority disc (M0 round-end) -----
+//
+// When an M0 round closes, END_TURN sets pendingSeniority and freezes the
+// table; the player who led that round drops ONE permanent neutral seniority
+// disc on an assembly space of their choice (these count toward the end-game
+// vote and break its ties). Like SET_FIRST_PLAYER it validates its own caller
+// and runs while the table is frozen, then hands off to resolveRoundClose
+// (which finishes + scores the game, or opens the first-player handoff).
+function applyPlaceSeniority(state, op, ctx) {
+  const pending = state.pendingSeniority;
+  if (!pending) return fail('no_seniority_pending');
+  const sameId = (a, b) => String(a) === String(b);
+  if (!sameId(pending.chooserId, ctx.profileId)) return fail('not_seniority_chooser');
+  const place = String(op.place || '');
+  if (!ASSEMBLY_PLACES.includes(place)) return fail('bad_place');
+  const asm = assemblyOf(state);
+  asm.seniority = asm.seniority || {};
+  asm.seniority[place] = (asm.seniority[place] | 0) + 1;
+  state.pendingSeniority = null;
+  const chooser = playerByProfile(state, pending.chooserId);
+  const placeName = place === 'centrist' ? 'Centrist' : ((IDEOLOGY_BY_KEY[place] || {}).name || place);
+  const log = `${chooser ? chooser.name : 'The first player'} placed a seniority disc on ${placeName}.`;
+  return resolveRoundClose(state, log);
+}
+
 const LIFECYCLE = {
   SET_FIRST_PLAYER: applySetFirstPlayer,
+  PLACE_SENIORITY: applyPlaceSeniority,
 };
 
 // Validate + apply one operation. ctx = { profileId, turnBaseState? }.
@@ -4274,6 +4647,7 @@ export function applyOperation(prevState, op, ctx) {
     return fail('awaiting_event_choice');
   }
 
+  if (prevState.pendingSeniority) return fail('awaiting_seniority');
   if (prevState.pendingFirstPlayer) return fail('awaiting_first_player');
 
   // Auction ops bypass the turn guard below - bids/passes are sent

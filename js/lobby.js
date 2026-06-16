@@ -4,7 +4,7 @@
 
 import {
   listLobbies, listMyGames, listPublicGames, getLobby, createLobby, joinLobby, leaveLobby,
-  startLobby, kickPlayer, claimInviteLink, lookupInviteLink,
+  startLobby, updateLobbySettings, kickPlayer, claimInviteLink, lookupInviteLink,
   fetchGlobalChat, sendGlobalChat, getAnnouncement,
   closeLobby, restoreLobby,
 } from './api.js';
@@ -308,6 +308,8 @@ function lobbyListItem(lobby, actionLabel = 'Join') {
   li.querySelector('.host').textContent = lobby.hostName;
   li.querySelector('.count').textContent = lobby.memberCount;
   li.querySelector('code').textContent = lobby.code;
+  const roster = mkRoster(lobby.memberNames);
+  if (roster) li.querySelector('div').appendChild(roster);
   const btn = li.querySelector('button');
   btn.textContent = actionLabel;
   btn.addEventListener('click', async () => { await openLobby(lobby.id, { join: true }); });
@@ -471,6 +473,8 @@ export async function refreshPublicGames() {
     li.querySelector('.host').textContent = g.hostName;
     li.querySelector('.count').textContent = g.playerCount;
     li.querySelector('code').textContent = g.lobbyCode;
+    const watchRoster = mkRoster(g.playerNames);
+    if (watchRoster) li.querySelector('div').appendChild(watchRoster);
     li.querySelector('button').addEventListener('click', () => {
       watchGame(g);
     });
@@ -522,6 +526,22 @@ function mkPlayerName(text, color) {
   return span;
 }
 
+// A muted roster line of @names for a lobby / game row, so the list shows
+// who is sitting at each table at a glance. `namesCsv` is the server's
+// comma-joined member list (join order). Seat colours aren't known in the
+// list view, so the names fall back to currentColor.
+function mkRoster(namesCsv) {
+  const names = String(namesCsv || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (!names.length) return null;
+  const wrap = document.createElement('span');
+  wrap.className = 'meta lobby-roster';
+  names.forEach((n, i) => {
+    if (i) wrap.append(', ');
+    wrap.appendChild(mkPlayerName('@' + n, null));
+  });
+  return wrap;
+}
+
 function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
   listEl.innerHTML = '';
   for (const li of prependRows) listEl.appendChild(li);
@@ -556,6 +576,8 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
     li.querySelector('.host').textContent = g.hostName;
     li.querySelector('.count').textContent = g.memberCount;
     li.querySelector('code').textContent = g.code;
+    const myRoster = mkRoster(g.memberNames);
+    if (myRoster) li.querySelector('div').appendChild(myRoster);
     // In-progress games show whose turn it is, the round, and how long
     // ago the last turn ended (from /lobbies/mine). The active player's
     // name is tinted with their seat colour, matching the in-game UI.
@@ -802,6 +824,85 @@ export async function enterLobby(lobby) {
   if (lobby.status !== 'started') _onShowView('view-lobby');
 }
 
+// Room config in the waiting room. The host gets live-editable controls
+// (game length, draft start, M0, visibility) that POST to /settings; everyone
+// else sees a read-only summary. Hidden once the game has started.
+let _savingSettings = false;
+function renderLobbySettings(lobby, iAmHost, me) {
+  const meta = document.getElementById('lobby-meta');
+  if (!meta) return;
+  let box = document.getElementById('lobby-settings');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'lobby-settings';
+    box.className = 'lobby-settings';
+    meta.parentNode.insertBefore(box, meta.nextSibling);
+  }
+  const waiting = lobby.status === 'waiting';
+  const rounds = [4, 5, 6, 7].includes(lobby.maxRounds) ? lobby.maxRounds : 5;
+  const roundLabel = { 4: 'Quick - 4', 5: 'Short - 5', 6: 'Medium - 6', 7: 'Extra long - 7' }[rounds];
+
+  if (!iAmHost || !waiting) {
+    // Read-only summary (non-host, or already started).
+    const mods = [];
+    if (lobby.m0) mods.push('🏛 M0 Politics');
+    if (lobby.draftStart) mods.push('🃏 Draft start');
+    box.innerHTML = `<div class="lobby-settings-ro">⚙ ${escapeHtml(roundLabel)}`
+      + `${mods.length ? ' · ' + mods.map(escapeHtml).join(' · ') : ''}</div>`;
+    return;
+  }
+
+  // Host editor.
+  const seated = Array.isArray(lobby.members) ? lobby.members.length : 1;
+  const minPlayers = Math.max(seated, 1);
+  const maxPlayers = Math.max(minPlayers, Number(lobby.maxPlayers) || minPlayers);
+  let maxOpts = '';
+  for (let n = minPlayers; n <= 6; n += 1) {
+    maxOpts += `<option value="${n}"${n === maxPlayers ? ' selected' : ''}>${n}</option>`;
+  }
+  box.innerHTML = `
+    <div class="lobby-settings-head">⚙ Room settings <span class="muted lobby-settings-saved"></span></div>
+    <label class="lobby-set-row"><span>Max players</span>
+      <select id="set-maxplayers">${maxOpts}</select></label>
+    <label class="lobby-set-row"><span>Game length</span>
+      <select id="set-rounds">
+        <option value="4"${rounds === 4 ? ' selected' : ''}>Quick - 4 rounds</option>
+        <option value="5"${rounds === 5 ? ' selected' : ''}>Short - 5 rounds</option>
+        <option value="6"${rounds === 6 ? ' selected' : ''}>Medium - 6 rounds</option>
+        <option value="7"${rounds === 7 ? ' selected' : ''}>Extra long - 7 rounds</option>
+      </select></label>
+    <label class="lobby-set-row"><span>Visibility</span>
+      <select id="set-policy">
+        <option value="open"${lobby.joinPolicy !== 'invite-only' ? ' selected' : ''}>Open</option>
+        <option value="invite-only"${lobby.joinPolicy === 'invite-only' ? ' selected' : ''}>Invite-only</option>
+      </select></label>
+    <label class="check-row"><input type="checkbox" id="set-draft"${lobby.draftStart ? ' checked' : ''}/>
+      <span><strong>Draft start</strong> - open with a card draft</span></label>
+    <label class="check-row"><input type="checkbox" id="set-m0"${lobby.m0 ? ' checked' : ''}/>
+      <span><strong>Module 0: Politics</strong> - adds the Sol Political Assembly</span></label>`;
+
+  const saved = box.querySelector('.lobby-settings-saved');
+  const save = async (settings) => {
+    if (_savingSettings) return;
+    _savingSettings = true;
+    if (saved) saved.textContent = 'saving…';
+    const r = await updateLobbySettings(lobby.id, settings, me.token);
+    _savingSettings = false;
+    if (r && r.ok) {
+      _activeLobby = r.data.lobby;
+      if (saved) saved.textContent = 'saved ✓';
+      renderLobby(_activeLobby);
+    } else if (saved) {
+      saved.textContent = 'save failed';
+    }
+  };
+  box.querySelector('#set-maxplayers').addEventListener('change', (e) => save({ maxPlayers: Number(e.target.value) }));
+  box.querySelector('#set-rounds').addEventListener('change', (e) => save({ maxRounds: Number(e.target.value) }));
+  box.querySelector('#set-policy').addEventListener('change', (e) => save({ joinPolicy: e.target.value }));
+  box.querySelector('#set-draft').addEventListener('change', (e) => save({ draftStart: e.target.checked }));
+  box.querySelector('#set-m0').addEventListener('change', (e) => save({ m0: e.target.checked }));
+}
+
 function renderLobby(lobby) {
   const me = activeProfile();
   // Kicked-out detection: if I'm holding this lobby but the fresh
@@ -829,6 +930,7 @@ function renderLobby(lobby) {
 
   const iAmHost = me && me.id === lobby.hostId;
   const canKick = iAmHost && lobby.status === 'waiting';
+  renderLobbySettings(lobby, iAmHost, me);
   const roster = document.getElementById('lobby-roster');
   roster.innerHTML = '';
   for (const member of lobby.members) {

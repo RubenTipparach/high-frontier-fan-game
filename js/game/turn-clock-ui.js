@@ -9,7 +9,7 @@
 import {
   getTurn, getRound, getSeason, getLastEvent,
   getOpsRemaining, getMovesRemaining,
-  endTurn, formatTurnNumber,
+  endTurn, formatTurnNumber, getFirstPlayerColor,
   SLOTS, SEASONS, NEW_ROUND_SLOT, EVENT_SLOTS,
   getEventForRoll, getSeasonForSlot, EVENT_TABLE,
 } from './turn-clock.js';
@@ -279,8 +279,29 @@ function wheelSvg(displayTurn = null) {
   svg += `<circle class="turn-pointer" cx="${tp.x.toFixed(2)}" cy="${tp.y.toFixed(2)}" r="20"
     fill="#fde047" fill-opacity="0.35"
     stroke="#fde047" stroke-width="2" />`;
+  // The Sunspot Cube: the FIRST PLAYER's coloured cube parked on the cycle (it
+  // is one of their 7 cubes). Drawn on top of the pointer ring, and tweened
+  // ALONGSIDE the ring (tweenPointer moves both) so it slides, not teleports.
+  const fpc = getFirstPlayerColor();
+  if (fpc) svg += sunspotCubeSvg(tp.x, tp.y, 11, fpc);
   svg += '</svg>';
   return svg;
+}
+
+// An isometric 3D cube as an SVG string. Drawn at the origin and positioned via
+// a translate transform so the tween can slide it; top face in the seat colour,
+// left/right faces darkened for the bevel, black outline for visibility.
+function sunspotCubeSvg(cx, cy, s, color) {
+  const top = `0,${-s} ${s},${-s / 2} 0,0 ${-s},${-s / 2}`;
+  const left = `${-s},${-s / 2} 0,0 0,${s} ${-s},${s / 2}`;
+  const right = `${s},${-s / 2} 0,0 0,${s} ${s},${s / 2}`;
+  return `<g class="sunspot-cube" transform="translate(${cx.toFixed(2)},${cy.toFixed(2)})">`
+    + `<polygon points="${top}" fill="${color}" stroke="#000" stroke-width="1"/>`
+    + `<polygon points="${left}" fill="${color}" stroke="#000" stroke-width="1"/>`
+    + `<polygon points="${left}" fill="#000" fill-opacity="0.22"/>`
+    + `<polygon points="${right}" fill="${color}" stroke="#000" stroke-width="1"/>`
+    + `<polygon points="${right}" fill="#000" fill-opacity="0.42"/>`
+    + '</g>';
 }
 
 // Tween the active-turn pointer from `fromSlot` to `toSlot` along
@@ -291,6 +312,8 @@ function wheelSvg(displayTurn = null) {
 function tweenPointer(pointer, fromSlot, toSlot, durationMs = 650) {
   return new Promise((resolve) => {
     const labelR = WHEEL_R - WHEEL_RING_W / 2;
+    // The Sunspot Cube slides with the pointer ring (same slot path).
+    const cube = pointer.ownerSVGElement && pointer.ownerSVGElement.querySelector('.sunspot-cube');
     // Forward distance in slots - endTurn always advances by 1, but
     // we generalise so multi-step tweens (e.g. event replays) work.
     let forward = ((toSlot - fromSlot) % SLOTS + SLOTS) % SLOTS;
@@ -303,6 +326,7 @@ function tweenPointer(pointer, fromSlot, toSlot, durationMs = 650) {
       const pos = pointOnRing(interp, labelR);
       pointer.setAttribute('cx', pos.x.toFixed(2));
       pointer.setAttribute('cy', pos.y.toFixed(2));
+      if (cube) cube.setAttribute('transform', `translate(${pos.x.toFixed(2)},${pos.y.toFixed(2)})`);
       if (t < 1) requestAnimationFrame(frame);
       else resolve();
     }
@@ -500,6 +524,10 @@ export function openTurnClockModal({ rolling = null, animateFrom = null } = {}) 
     const dieValue = (lastEvent && lastEvent.dieRoll) || 1;
     const die = buildDie(dieValue);
     dieHost.appendChild(die);
+    // The Solar Flare's second (strength) die, if any. Built static here; it
+    // only animates AFTER the event die settles (see the rollContext block).
+    let flareDieEl = null;
+    let flareDieVal = null;
     if (lastEvent) {
       const eventSeason = getSeasonForSlot(lastEvent.turn);
       const ev = getEventForRoll(lastEvent.dieRoll, eventSeason && eventSeason.name);
@@ -533,14 +561,39 @@ export function openTurnClockModal({ rolling = null, animateFrom = null } = {}) 
              </p>`}
            </div>`
         : '';
+      // Solar Flare carries a SECOND roll (the flare-strength d6) separate from
+      // the event-roll die. Surface it as its own rolling die + face value so a
+      // player sees how hard the flare hit, not just that one happened.
+      const isFlare = !!(ev && ev.name === 'Solar Flare');
+      const flareRoll = (isFlare && typeof lastEvent.flareRoll === 'number')
+        ? lastEvent.flareRoll : null;
+      const flareLineHtml = flareRoll
+        ? `<p class="turn-clock-flare-line">
+             ☀️ Flare strength:
+             <span class="flare-die-host"></span>
+             <strong class="big">${flareRoll}</strong>
+           </p>`
+        : '';
       eventHost.innerHTML = `
         <p class="turn-clock-event-line">
           Last event (round <strong>${lastEvent.round}</strong>,
           turn <strong>${lastEvent.turn}</strong>):
           d6 rolled <strong class="big">${lastEvent.dieRoll}</strong>.
         </p>
+        ${flareLineHtml}
         ${evBlock}
       `;
+      // Mount the flare-strength die (shows the result statically). It rolls
+      // only after the event die finishes its tumble - wired below where the
+      // event die's own roll is scheduled.
+      if (flareRoll) {
+        const flareHost = eventHost.querySelector('.flare-die-host');
+        if (flareHost) {
+          flareDieEl = buildDie(flareRoll);
+          flareDieVal = flareRoll;
+          flareHost.appendChild(flareDieEl);
+        }
+      }
       // Card chips in the Inspiration outcome open a read-only preview.
       eventHost.querySelectorAll('.tc-card-chip[data-card-id]').forEach((b) => {
         b.addEventListener('click', (e) => {
@@ -571,7 +624,12 @@ export function openTurnClockModal({ rolling = null, animateFrom = null } = {}) 
       // Slight delay so the pointer animation kicks off first and
       // the cube-arriving-on-event reads as the cause of the roll.
       const delay = startSlot !== null ? 400 : 0;
-      setTimeout(() => rollDie(die, rollContext.value), delay);
+      setTimeout(() => {
+        rollDie(die, rollContext.value).then(() => {
+          // The flare-strength die tumbles only once the event die has settled.
+          if (flareDieEl) rollDie(flareDieEl, flareDieVal);
+        });
+      }, delay);
     }
   };
   repaint(rolling, animateFrom);

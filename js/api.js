@@ -119,8 +119,8 @@ export async function getLobbyByCode(code) {
   return call('GET', '/lobbies/by-code/' + encodeURIComponent(code));
 }
 
-export async function createLobby({ name, maxPlayers, maxRounds, joinPolicy, idempotencyKey, startingAqua, economy, draftStart }, token) {
-  return call('POST', '/lobbies', { body: { name, maxPlayers, maxRounds, joinPolicy, idempotencyKey, startingAqua, economy, draftStart }, token });
+export async function createLobby({ name, maxPlayers, maxRounds, joinPolicy, idempotencyKey, startingAqua, economy, draftStart, m0 }, token) {
+  return call('POST', '/lobbies', { body: { name, maxPlayers, maxRounds, joinPolicy, idempotencyKey, startingAqua, economy, draftStart, m0 }, token });
 }
 
 export async function joinLobby(id, token) {
@@ -142,6 +142,12 @@ export async function kickPlayer(id, targetProfileId, token) {
 
 export async function startLobby(id, token) {
   return call('POST', `/lobbies/${id}/start`, { token });
+}
+
+// Host-only: edit room config (maxRounds / draftStart / m0 / joinPolicy) while
+// the lobby is still waiting. Returns the updated lobby row.
+export async function updateLobbySettings(id, settings, token) {
+  return call('POST', `/lobbies/${id}/settings`, { token, body: settings });
 }
 
 // Host-only: close (soft-delete) a solo room. Marks it cancelled server-side;
@@ -306,4 +312,21 @@ export async function discordSignup(code, name) {
 // --- Server-wide announcement banner ---
 export async function getAnnouncement() {
   return call('GET', '/announcement', {});
+}
+
+// --- Site notes + tags (player-driven location annotations) ---
+// siteId is the location's display id (the popup "id: ..."). All require a
+// profile token. The aggregate response is { tags:[{tag,count,mine}],
+// messages:[{id,body,author,mine,createdAt}] }.
+export async function getSiteAnnotations(siteId, token) {
+  return call('GET', '/sites/' + encodeURIComponent(siteId) + '/annotations', { token });
+}
+export async function postSiteAnnotation(siteId, payload, token) {
+  return call('POST', '/sites/' + encodeURIComponent(siteId) + '/annotations', { body: payload, token });
+}
+export async function removeSiteTag(siteId, tag, token) {
+  return call('POST', '/sites/' + encodeURIComponent(siteId) + '/untag', { body: { tag }, token });
+}
+export async function deleteSiteAnnotation(siteId, annId, token) {
+  return call('DELETE', '/sites/' + encodeURIComponent(siteId) + '/annotations/' + annId, { token });
 }

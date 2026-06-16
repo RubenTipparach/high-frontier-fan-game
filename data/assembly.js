@@ -39,9 +39,7 @@ export const IDEOLOGIES = [
   {
     key: 'individuality', name: 'Individuality', color: '#6b7280',
     law: { name: 'Freedom to Roam Treaty', text: 'Treat an opponent’s Factory or Bernal as your own for non-victory purposes.' },
-    // The two site icons on the mat are unreadable in the scan - confirm from
-    // the M0 rules which site types these tokens sit on.
-    award: { text: '+1 VP per token on certain sites (TBD)' },
+    award: { text: '+1 VP per token on a Site with hazardous lander burns' },
   },
 ];
 
@@ -56,6 +54,24 @@ export const CENTRIST = {
 // Lobby free action: activate an inactive ideology's Law for a price.
 export const LOBBY_RULE = 'Pay 1 aqua and discard a delegate in an inactive ideology to use its Law.';
 
+// Faction colour -> ideology. A faction's seat-band colour IS its ideology
+// (the two palettes pair by hue, even though the hex values differ slightly:
+// crew #b40054 vs ideology #c01f6e, etc.). Used in SOLO to seat the starting
+// delegate in the picked faction's ideology; this colour=ideology theme recurs
+// in later modules. Keyed by the crew/faction colour (lowercased).
+export const IDEOLOGY_BY_FACTION_COLOR = {
+  '#b40054': 'freedom',        // magenta
+  '#e3e0d4': 'honor',          // cream / silver
+  '#fccc00': 'unity',          // gold
+  '#c09cc0': 'authority',      // mauve / purple
+  '#a8d8c0': 'equality',       // mint / green
+  '#9c9c9c': 'individuality',  // grey
+};
+export function ideologyForFactionColor(color) {
+  if (!color) return null;
+  return IDEOLOGY_BY_FACTION_COLOR[String(color).toLowerCase()] || null;
+}
+
 // Clockwise from the top, matching the mat's seating, for the hex wheel layout.
 export const IDEOLOGY_ORDER = ['freedom', 'honor', 'unity', 'authority', 'equality', 'individuality'];
 export const IDEOLOGY_BY_KEY = Object.fromEntries(IDEOLOGIES.map((i) => [i.key, i]));
@@ -63,15 +79,35 @@ export const IDEOLOGY_BY_KEY = Object.fromEntries(IDEOLOGIES.map((i) => [i.key, 
 // Every place a delegate can sit: the six ideologies + the Centrist center.
 export const ASSEMBLY_PLACES = [...IDEOLOGY_ORDER, 'centrist'];
 
-// Delegates a player gets. TUNABLE default - confirm against the M0 rules.
-export const DELEGATES_PER_PLAYER = 5;
+// Hex adjacency for Fundraise's "move one space": each ideology touches its two
+// ring neighbours and the Centrist center; the center touches every ideology.
+export function adjacentPlaces(place) {
+  if (place === 'centrist') return [...IDEOLOGY_ORDER];
+  const i = IDEOLOGY_ORDER.indexOf(place);
+  if (i < 0) return [];
+  const n = IDEOLOGY_ORDER.length;
+  return [IDEOLOGY_ORDER[(i + n - 1) % n], IDEOLOGY_ORDER[(i + 1) % n], 'centrist'];
+}
 
-// Empty assembly: delegate placements keyed by place, then profileId -> count.
-// { [place]: { [profileId]: count } }.
+// A player's wooden cubes are ONE shared pool of 7, used for BOTH factories and
+// assembly delegates (so at most 7 delegates, fewer once factories are built).
+// The engine enforces the factory+delegate sum against this; delegatesRemaining
+// here is just the delegates-only upper bound.
+export const DELEGATES_PER_PLAYER = 7;
+
+// Empty assembly: delegate placements keyed by place, then profileId -> count;
+// plus a neutral seniority-disc count per place. The round's first player drops
+// one permanent seniority disc each round end (data/assembly.js stays pure: the
+// engine mutates these). { delegates:{[place]:{[pid]:n}}, seniority:{[place]:n} }.
 export function freshAssembly() {
   const delegates = {};
-  for (const place of ASSEMBLY_PLACES) delegates[place] = {};
-  return { delegates };
+  const seniority = {};
+  for (const place of ASSEMBLY_PLACES) { delegates[place] = {}; seniority[place] = 0; }
+  return { delegates, seniority };
+}
+// Seniority discs sitting in a place (neutral; not owned by any player).
+export function seniorityInPlace(assembly, place) {
+  return ((assembly && assembly.seniority && assembly.seniority[place]) | 0);
 }
 
 // Total delegates sitting in a place (across all players).
@@ -93,33 +129,94 @@ export function delegatesRemaining(assembly, profileId) {
   return Math.max(0, DELEGATES_PER_PLAYER - playerDelegatesPlaced(assembly, profileId));
 }
 
-// Which ideology Laws are in force, plus whether lobbying is disabled.
-//
-// RULE MODEL (mechanics; tune to the M0 rulebook):
-//  - Base: the ideology(ies) holding the MOST delegates are in power. Ties put
-//    every tied ideology in power. Zero delegates = not in power.
-//  - Unity override: when Unity is in power, EVERY ideology with 2+ delegates is
-//    also in power and lobbying is disabled (the printed UN General Assembly law).
-//  - The Centrist center is not an ideology law; its pad insurance is keyed off
-//    a delegate sitting there, handled separately.
-//
-// Returns { active: Set<ideologyKey>, lobbyingDisabled: boolean }.
-export function activeLaws(assembly) {
+// Vote tally: the spaces tied for the MOST delegates (the spaces that win the
+// vote). Centrist is a full participant here (it holds delegates and can win the
+// vote); starring it means no ideology law is in force, only the always-on
+// Centrist passive. Empty when no space has a delegate. The fundraiser moves the
+// active-law star onto the winner; on a tie they pick which tied space gets it.
+export function voteWinners(assembly) {
   const totals = {};
   let max = 0;
-  for (const key of IDEOLOGY_ORDER) {
+  for (const key of ASSEMBLY_PLACES) {
     const n = delegatesInPlace(assembly, key);
     totals[key] = n;
     if (n > max) max = n;
   }
+  if (max <= 0) return [];
+  return ASSEMBLY_PLACES.filter((k) => totals[k] === max);
+}
+
+// Which Laws are in force, plus whether lobbying is disabled. Driven by the
+// active-law STAR (the marker the fundraiser moves on the vote tally): the
+// starred space's law is in power. A star on Centrist puts Centrist - Pad
+// Insurance in power; a star on an ideology puts that ideology's law in power.
+// Unity's override still applies when Unity is starred (every 2+ ideology
+// active, no lobbying). A null star = no law in force. When `star` is undefined
+// (legacy state with no stored star) this falls back to the old plurality
+// reading.
+//
+// Returns { active: Set<placeKey>, lobbyingDisabled: boolean }.
+export function activeLaws(assembly, star) {
   const active = new Set();
-  if (max > 0) {
-    for (const key of IDEOLOGY_ORDER) if (totals[key] === max) active.add(key);
+  if (star === undefined) {
+    for (const key of voteWinners(assembly)) active.add(key);   // legacy fallback
+  } else if (star === 'centrist') {
+    active.add('centrist');   // Centrist - Pad Insurance is the law in power
+  } else if (star && IDEOLOGY_ORDER.includes(star)) {
+    active.add(star);
   }
   let lobbyingDisabled = false;
   if (active.has('unity')) {
     lobbyingDisabled = true;
-    for (const key of IDEOLOGY_ORDER) if (totals[key] >= 2) active.add(key);
+    for (const key of IDEOLOGY_ORDER) if (delegatesInPlace(assembly, key) >= 2) active.add(key);
   }
   return { active, lobbyingDisabled };
+}
+
+// The single ideology whose law is "in power" - the strict delegate plurality
+// leader. A tie or an empty board has no leader, so the active-law marker sits
+// at the Centrist center (its starting position). Returns a place key.
+export function lawLeader(assembly) {
+  let leader = null;
+  let best = 0;
+  let tie = false;
+  for (const key of IDEOLOGY_ORDER) {
+    const n = delegatesInPlace(assembly, key);
+    if (n > best) { best = n; leader = key; tie = false; }
+    else if (n === best && n > 0) tie = true;
+  }
+  return (leader && !tie && best > 0) ? leader : 'centrist';
+}
+
+// End-game political vote. For each IDEOLOGY space (Centrist is not in the
+// running), votes = every player's delegate cubes there + neutral seniority
+// discs there. The winner is the space with the most votes; a tie is broken by
+// the most seniority discs; any remaining tie falls to IDEOLOGY_ORDER. The
+// winning ideology's end-game award is then applied (by the engine, which holds
+// the holdings the award counts). Returns:
+//   { winner: key|null, totals: { [key]: { cubes, discs, votes } }, tied: [keys] }
+export function finalVote(assembly) {
+  const totals = {};
+  for (const key of IDEOLOGY_ORDER) {
+    const cubes = delegatesInPlace(assembly, key);
+    const discs = seniorityInPlace(assembly, key);
+    totals[key] = { cubes, discs, votes: cubes + discs };
+  }
+  let winner = null;
+  let bestVotes = 0;
+  let bestDiscs = -1;
+  for (const key of IDEOLOGY_ORDER) {
+    const t = totals[key];
+    if (t.votes <= 0) continue;
+    if (t.votes > bestVotes
+        || (t.votes === bestVotes && t.discs > bestDiscs)) {
+      winner = key; bestVotes = t.votes; bestDiscs = t.discs;
+    }
+  }
+  // Report any spaces still tied with the winner on BOTH votes and discs (the
+  // engine can surface "tie broken by seat order" in the breakdown).
+  const tied = winner
+    ? IDEOLOGY_ORDER.filter((k) => totals[k].votes === bestVotes && totals[k].discs === bestDiscs)
+    : [];
+  return { winner, totals, tied };
 }

@@ -37,6 +37,7 @@ import {
   getTankWater, setTankWater, addFuel, removeFuel, getTankMax, getWaterCap,
   getTankGrade, setTankGrade, getActiveFuelGrade,
   getStackTotals, getActiveThrusterStats, setSolarZone, setHasPowersat,
+  computeRocketStatsFor,
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats, getSupportChainView,
   colocatedIsruMod, stackHasPower,
@@ -51,9 +52,15 @@ import {
 } from './discs.js';
 import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
 import { renderAssemblyPanel } from './assembly.js';
+import { uiIcon } from './ui-icons.js';
+import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
+import { apiAvailable, getSiteAnnotations, postSiteAnnotation, removeSiteTag, deleteSiteAnnotation } from '../api.js';
+import { activeProfile } from '../auth.js';
 import {
   activeLaws as assemblyActiveLaws, ASSEMBLY_PLACES, IDEOLOGY_ORDER as ASSEMBLY_IDEOLOGY_ORDER,
   IDEOLOGY_BY_KEY as ASSEMBLY_IDEOLOGY_BY_KEY, DELEGATES_PER_PLAYER,
+  adjacentPlaces as ASSEMBLY_ADJACENT, lawLeader as assemblyLawLeader,
+  voteWinners as assemblyVoteWinners,
 } from '../../data/assembly.js';
 import {
   WEIGHT_CLASSES, weightClassForMass, TRACK_LEGEND,
@@ -647,6 +654,8 @@ function applySnapshot(snapshot, seq) {
   // driven straight off the snapshot and idempotent, so they appear /
   // clear as the server state flips.
   renderFirstPlayerChooser(snapshot.pendingFirstPlayer);
+  // M0 round-end seniority-disc placement (same idempotent overlay treatment).
+  renderSeniorityChooser(snapshot.pendingSeniority);
   // Open Sunspot event (Budget Cuts discard / Pad Explosion tie-break):
   // same idempotent snapshot-driven overlay treatment as the first-player
   // handoff; appears for waiting players, shows progress to everyone else.
@@ -658,7 +667,7 @@ function applySnapshot(snapshot, seq) {
   // resolve in near-realtime even if the WS broadcast was dropped. Drop
   // back to the normal cadence otherwise.
   const fastPoll = snapshot.auction || snapshot.pendingFirstPlayer || snapshot.pendingEvent
-    || snapshot.trade;
+    || snapshot.pendingSeniority || snapshot.trade;
   setPollCadence(fastPoll ? ONLINE_POLL_AUCTION_MS : ONLINE_POLL_MS);
   // Eager one-shot fetch the moment the auctioneer's phase opens
   // (awaiting === 'auctioneer'). The accept can land within ms of
@@ -1281,6 +1290,16 @@ function syncMpTurnBanner(snapshot) {
     banner.classList.add('is-anarchy');
   } else {
     banner.classList.remove('is-anarchy');
+  }
+  // Lobbied law(s): on my turn, surface any ideology law I activated via Lobby
+  // this turn so the benefit is visible while I act.
+  if (myTurn) {
+    const me = snapshot.players.find((p) => p.profileId === myId);
+    const lobbied = (me && Array.isArray(me.lobbiedLaws)) ? me.lobbiedLaws : [];
+    if (lobbied.length) {
+      const names = lobbied.map((k) => (ASSEMBLY_IDEOLOGY_BY_KEY[k] || {}).name || k);
+      label.textContent += ` · 🗳 Lobbied: ${names.join(', ')}`;
+    }
   }
   banner.hidden = false;
 }
@@ -2173,6 +2192,122 @@ function renderFirstPlayerChooser(pending) {
   } : null);
 }
 
+// ----- M0 seniority-disc placement (round-end) -----
+//
+// When an M0 round closes the server sets snapshot.pendingSeniority = { chooserId }
+// and freezes the table; the round's first player drops one permanent neutral
+// disc on an assembly space. Mirrors the first-player handoff overlay (collapsible,
+// snapshot-driven). PLACE_SENIORITY bypasses the turn guard server-side.
+let _seniorityMin = false;
+function setSeniorityError(text) {
+  const el = document.getElementById('mp-seniority-error');
+  if (el) el.textContent = text || '';
+}
+async function submitPlaceSeniority(place) {
+  if (!_online || _onlineBusy) return false;
+  if (_spectator) { _onlineToast('Spectator - view only.', 'error'); return false; }
+  _onlineBusy = true;
+  setSeniorityError('');
+  let r;
+  try {
+    r = await submitGameOp(_onlineGameId, { kind: 'PLACE_SENIORITY', place }, _onlineMe.token);
+  } finally {
+    _onlineBusy = false;
+  }
+  if (!r || !r.ok) {
+    setSeniorityError(humanizeOnlineOpError(r && r.error));
+    if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
+    return false;
+  }
+  applySnapshot(r.data.game.state, r.data.game.seq);
+  return true;
+}
+function renderSeniorityChooser(pending) {
+  const existing = document.getElementById('mp-seniority-overlay');
+  if (!pending || !_online || !gameViewVisible()) {
+    if (existing) existing.remove();
+    setMpTurnAction('seniority', null);
+    _seniorityMin = false;
+    return;
+  }
+  const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
+  const chooser = players.find((p) => p.profileId === pending.chooserId);
+  const myId = _onlineMe && _onlineMe.id;
+  const amChooser = !!myId && pending.chooserId === myId;
+
+  let overlay = existing;
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'mp-seniority-overlay';
+    overlay.className = 'mp-first-player-overlay';
+    overlay.innerHTML = `
+      <div class="mp-first-player-modal" role="dialog" aria-label="Seniority disc">
+        <div class="mp-modal-titlebar">
+          <h3 class="mp-first-player-title">🏛 Seniority disc</h3>
+          <button type="button" class="mp-mini-btn" title="Minimize" aria-label="Minimize">&minus;</button>
+        </div>
+        <p class="mp-first-player-sub"></p>
+        <div class="mp-first-player-choices" id="mp-seniority-choices"></div>
+        <div class="hud-error" id="mp-seniority-error"></div>
+      </div>
+      <button type="button" class="mp-mini-chip" aria-label="Restore seniority placement">
+        🏛 Seniority disc
+        <span class="mp-mini-chip-meta"></span>
+      </button>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('.mp-mini-btn').addEventListener('click', () => {
+      _seniorityMin = true;
+      overlay.classList.add('is-minimized');
+      renderSeniorityChooser(_onlineSnapshot && _onlineSnapshot.pendingSeniority);
+    });
+    overlay.querySelector('.mp-mini-chip').addEventListener('click', () => {
+      _seniorityMin = false;
+      overlay.classList.remove('is-minimized');
+      setMpTurnAction('seniority', null);
+    });
+  }
+
+  const sub = overlay.querySelector('.mp-first-player-sub');
+  const choices = overlay.querySelector('#mp-seniority-choices');
+  choices.innerHTML = '';
+
+  if (amChooser) {
+    sub.textContent = 'You led the round. Drop a permanent seniority disc on an assembly space (it counts toward the end-game vote and breaks its ties).';
+    for (const place of ASSEMBLY_PLACES) {
+      const info = ASSEMBLY_IDEOLOGY_BY_KEY[place];
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'mp-first-player-pick';
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      dot.style.background = (info && info.color) || '#9aa0c4';
+      const label = document.createElement('span');
+      label.textContent = place === 'centrist' ? 'Centrist (center)' : (info ? info.name : place);
+      btn.append(dot, label);
+      btn.addEventListener('click', () => submitPlaceSeniority(place));
+      choices.appendChild(btn);
+    }
+  } else {
+    sub.textContent = 'Waiting for ';
+    const nm = document.createElement('span');
+    nm.className = 'player-name';
+    if (chooser && chooser.color) nm.style.setProperty('--player-color', chooser.color);
+    nm.textContent = '@' + (chooser ? chooser.name : '?');
+    sub.append(nm, document.createTextNode(' to place a seniority disc.'));
+  }
+
+  overlay.classList.toggle('is-minimized', _seniorityMin);
+  setMpTurnAction('seniority', _seniorityMin ? {
+    label: '🏛 Seniority disc',
+    meta: amChooser ? 'your placement' : 'in progress',
+    needsAction: amChooser,
+    onClick: () => {
+      _seniorityMin = false;
+      renderSeniorityChooser(_onlineSnapshot && _onlineSnapshot.pendingSeniority);
+    },
+  } : null);
+}
+
 // ----- end-of-game standings -----
 //
 // The server marks the state finished once the round cap is reached.
@@ -2639,9 +2774,22 @@ function renderGameOver(snapshot) {
     return;
   }
   const myId = _onlineMe && _onlineMe.id;
-  const scored = (snapshot.players || [])
-    .map((p) => ({ p, s: computeSnapshotScore(snapshot, p.profileId) }))
-    .sort((a, b) => b.s.total - a.s.total);
+  const players = snapshot.players || [];
+  const fv = snapshot.finalVote || null;
+  // Prefer the server's authoritative final scores (M0 cube VP + the winning
+  // ideology's award + factory / colony / glory). Fall back to the client tally
+  // for non-M0 or older snapshots that carry no finalScores.
+  const serverScores = Array.isArray(snapshot.finalScores) ? snapshot.finalScores : null;
+  let rows;
+  if (serverScores && serverScores.length) {
+    rows = serverScores
+      .map((s) => ({ s, p: players.find((pp) => pp.profileId === s.profileId) || { name: s.name, color: s.color } }))
+      .sort((a, b) => b.s.total - a.s.total || (b.s.aqua || 0) - (a.s.aqua || 0));
+  } else {
+    rows = players
+      .map((p) => ({ p, s: computeSnapshotScore(snapshot, p.profileId) }))
+      .sort((a, b) => b.s.total - a.s.total);
+  }
 
   let overlay = existing;
   if (!overlay) {
@@ -2650,16 +2798,24 @@ function renderGameOver(snapshot) {
     overlay.className = 'mp-game-over-overlay';
     document.body.appendChild(overlay);
   }
+  const voteBanner = (fv && fv.winnerName)
+    ? `<p class="mp-game-over-vote">🏛 <strong>${esc(fv.winnerName)}</strong> carried the assembly vote: ${esc(fv.award || '')}${fv.awardTBD ? ' <em>(award TBD)</em>' : ''}</p>`
+    : '';
+  const note = serverScores
+    ? 'Final score: delegate cubes + the winning ideology award + factory / colony / glory VP.'
+    : 'Provisional tally - full end-game scoring lands in a later update.';
   overlay.innerHTML = `
     <div class="mp-game-over-modal" role="dialog" aria-label="Final standings">
       <button type="button" class="modal-x" aria-label="Close" title="Close">&times;</button>
       <h2 class="mp-game-over-title">🏁 Game over</h2>
       <p class="muted mp-game-over-sub">Final standings after ${snapshot.maxRounds || ''} rounds, ranked by victory points.</p>
+      ${voteBanner}
       <ol class="mp-game-over-list"></ol>
-      <p class="muted mp-game-over-note">Provisional tally - full end-game scoring lands in a later update.</p>
+      <p class="muted mp-game-over-note">${note}</p>
     </div>`;
   const list = overlay.querySelector('.mp-game-over-list');
-  scored.forEach(({ p, s }, i) => {
+  const winnerName = fv && fv.winnerName ? fv.winnerName : 'ideology';
+  rows.forEach(({ p, s }, i) => {
     const li = document.createElement('li');
     li.className = 'mp-go-row' + (i === 0 ? ' is-winner' : '');
     const rank = document.createElement('span');
@@ -2674,7 +2830,9 @@ function renderGameOver(snapshot) {
     total.textContent = `${s.total} VP`;
     const brk = document.createElement('span');
     brk.className = 'mp-go-break muted';
-    brk.textContent = `glory ${s.glory} · factories ${s.factories} · colonies ${s.colonies} · claims ${s.claims}`;
+    brk.textContent = serverScores
+      ? `cubes ${s.cubeVp} · ${winnerName} award ${s.awardVp} · factories ${s.factoryVp} · colonies ${s.colonyVp} · glory ${s.gloryVp}`
+      : `glory ${s.glory} · factories ${s.factories} · colonies ${s.colonies} · claims ${s.claims}`;
     li.append(rank, name, total, brk);
     list.appendChild(li);
   });
@@ -2992,6 +3150,31 @@ function buildMpDeckPicker(host, snapshot) {
     row.appendChild(b);
   }
   host.appendChild(row);
+
+  // Equality (Research Grants): skip the auction entirely. Pay 1 aqua and take
+  // the deck top straight to hand. Only offered when the law is usable.
+  if (iCanUseLaw('equality')) {
+    const glabel = document.createElement('div');
+    glabel.className = 'mp-detail-label';
+    glabel.innerHTML = '<strong>Research Grants:</strong> pay 1 aqua, take the top card (no auction).';
+    host.appendChild(glabel);
+    const grow = document.createElement('div');
+    grow.className = 'mp-deck-row';
+    for (const [type, name] of MP_AUCTION_DECKS) {
+      const deck = (snapshot.decks && snapshot.decks[type]) || [];
+      const g = document.createElement('button');
+      g.type = 'button';
+      g.className = 'modal-btn';
+      g.textContent = `Take ${name} for 1`;
+      g.disabled = !deck.length || _onlineBusy;
+      g.addEventListener('click', () => {
+        _deckPickerOpen = false;
+        submitOnlineOp({ kind: 'AUCTION_START', deckType: type, useEquality: true });
+      });
+      grow.appendChild(g);
+    }
+    host.appendChild(grow);
+  }
 }
 
 // ----- multiplayer table panel (online sidepanel pane) -----
@@ -3009,6 +3192,35 @@ function syncMpTabVisibility() {
   if (!_online && panel.dataset.active === 'mp') showPane(null);
 }
 
+// The politics tab icon (temple) is tinted to the ACTIVE LAW's ideology colour
+// so the strip shows which law is in power at a glance; neutral when there's no
+// ideology law (Centrist / none). Outline is black when the tab is selected (it
+// sits on the bright accent) and white when not (on the dark strip).
+function activeLawColor(snapshot) {
+  const star = snapshot && snapshot.activeLawStar;
+  const ide = star && star !== 'centrist' && ASSEMBLY_IDEOLOGY_BY_KEY[star];
+  return ide ? ide.color : '#9aa3c0';
+}
+function assemblyTabIconSvg(color, selected) {
+  const edge = selected ? '#04121f' : '#ffffff';
+  return '<svg class="ui-icon ui-icon-assembly" viewBox="0 0 24 24" width="23" height="23" aria-hidden="true">'
+    + `<g fill="${esc(color)}" stroke="${edge}" stroke-width="1" stroke-linejoin="round" stroke-linecap="round">`
+    + '<path d="M3 9.5 12 4l9 5.5z"/>'
+    + '<rect x="4.6" y="10.2" width="2.4" height="7.6" rx="0.4"/>'
+    + '<rect x="8.8" y="10.2" width="2.4" height="7.6" rx="0.4"/>'
+    + '<rect x="12.8" y="10.2" width="2.4" height="7.6" rx="0.4"/>'
+    + '<rect x="17" y="10.2" width="2.4" height="7.6" rx="0.4"/>'
+    + '<rect x="2.6" y="18" width="18.8" height="2.6" rx="0.6"/>'
+    + '</g></svg>';
+}
+function updateAssemblyTabIcon(snapshot) {
+  const tab = document.getElementById('sidepanel-tab-assembly');
+  if (!tab || tab.hidden) return;
+  const panel = document.getElementById('browse-sidepanel');
+  const selected = !!(panel && panel.dataset.active === 'assembly');
+  tab.innerHTML = assemblyTabIconSvg(activeLawColor(snapshot), selected);
+}
+
 // Render the Sol Political Assembly (M0) tab from the snapshot: the hex board
 // with each player's delegates (in seat colour), the active-law read-out, and
 // Fundraise / Lobby controls. Shows the 🏛 tab only when the game has m0 on.
@@ -3017,6 +3229,7 @@ function renderAssemblyTab(snapshot) {
   const tab = document.getElementById('sidepanel-tab-assembly');
   const on = !!(_online && snapshot && snapshot.m0 && snapshot.assembly);
   if (tab) tab.hidden = !on;
+  if (on) updateAssemblyTabIcon(snapshot);
   const panel = document.getElementById('browse-sidepanel');
   if (!on) {
     if (host) host.innerHTML = '<p class="muted">Politics (Module 0) is off in this game.</p>';
@@ -3024,10 +3237,42 @@ function renderAssemblyTab(snapshot) {
     return;
   }
   if (!host) return;
+  host.innerHTML = '';
+  // Sidebar = a SIMPLIFIED glance: the bare wheel + the active-law read-out. It
+  // is not interactive; tapping it opens the big (complex) modal where players act.
+  const board = renderAssemblyPanel(assemblyDelegatesView(snapshot, 'simple'));
+  board.classList.add('assembly-clickable');
+  board.setAttribute('role', 'button');
+  board.setAttribute('tabindex', '0');
+  board.title = 'Open the Sol Political Assembly';
+  board.addEventListener('click', () => openAssemblyModal());
+  board.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openAssemblyModal(); } });
+  host.appendChild(board);
+  host.appendChild(assemblyStatusEl(snapshot));
+  const hint = document.createElement('button');
+  hint.type = 'button';
+  hint.className = 'modal-btn assembly-open-btn';
+  hint.textContent = _spectator ? '🏛 Open assembly' : '💰 Fundraise Op';
+  hint.title = _spectator ? 'Open the assembly board' : 'Fundraise: place / move a delegate, then move the active-law star (spends your operation)';
+  hint.addEventListener('click', () => openAssemblyModal(_spectator ? 'view' : 'fundraise'));
+  host.appendChild(hint);
+  if (!_spectator) {
+    const lobbyBtn = document.createElement('button');
+    lobbyBtn.type = 'button';
+    lobbyBtn.className = 'modal-btn assembly-open-btn';
+    lobbyBtn.textContent = '🗳 Lobby a law';
+    lobbyBtn.addEventListener('click', () => openAssemblyModal('lobby'));
+    host.appendChild(lobbyBtn);
+  }
+  // Keep an already-open modal in sync with each new snapshot.
+  if (_assemblyModalOpen) refreshAssemblyModal();
+}
+
+// Delegate cubes (seat-coloured) + seniority discs, shaped for renderAssemblyPanel.
+function assemblyDelegatesView(snapshot, variant = 'compact') {
   const players = snapshot.players || [];
-  const myId = _onlineMe && _onlineMe.id;
   const colorOf = (pid) => (players.find((p) => p.profileId === pid) || {}).color || '#888';
-  const dmap = snapshot.assembly.delegates || {};
+  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
   const delegates = {};
   for (const place of ASSEMBLY_PLACES) {
     const m = dmap[place] || {};
@@ -3035,63 +3280,373 @@ function renderAssemblyTab(snapshot) {
     for (const [pid, n] of Object.entries(m)) for (let i = 0; i < (n | 0); i += 1) arr.push(colorOf(Number(pid)));
     delegates[place] = arr;
   }
-  const laws = assemblyActiveLaws(snapshot.assembly);
-  host.innerHTML = '';
-  host.appendChild(renderAssemblyPanel({ delegates }));
+  return {
+    delegates,
+    seniority: (snapshot.assembly && snapshot.assembly.seniority) || {},
+    variant,
+    activeStar: snapshot.activeLawStar !== undefined
+      ? snapshot.activeLawStar : assemblyLawLeader(snapshot.assembly),
+  };
+}
 
-  const placedByMe = ASSEMBLY_PLACES.reduce((s, p) => s + ((dmap[p] || {})[myId] | 0), 0);
-  const left = Math.max(0, DELEGATES_PER_PLAYER - placedByMe);
-  const myTurn = isOnlineMyTurn();
-  const activeNames = [...laws.active].map((k) => (ASSEMBLY_IDEOLOGY_BY_KEY[k] || {}).name || k);
-
+// Cubes a player has free: the 7-cube pool minus factories built minus delegates
+// placed (factories + delegates share the same cubes). Read off the snapshot.
+function myCubesFree(snapshot) {
+  const myId = _onlineMe && _onlineMe.id;
+  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
+  const delegates = ASSEMBLY_PLACES.reduce((s, p) => s + ((dmap[p] || {})[myId] | 0), 0);
+  const facs = Object.values(snapshot.factories || {}).filter((f) => f.ownerId === myId).length;
+  // The first player's Sunspot marker is also one of their cubes.
+  const players = snapshot.players || [];
+  const fp = players[snapshot.firstPlayerIndex || 0];
+  const sunspot = (fp && fp.profileId === myId) ? 1 : 0;
+  return Math.max(0, FACTORY_CUBES - delegates - facs - sunspot);
+}
+// Glance read-out: active laws + how many cubes I still have free. Shown in both
+// the sidebar and the modal.
+function assemblyStatusEl(snapshot) {
+  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar);
+  const activeNames = [...laws.active].map((k) => (k === 'centrist'
+    ? 'Centrist - Pad Insurance'
+    : ((ASSEMBLY_IDEOLOGY_BY_KEY[k] || {}).name || k)));
+  const free = myCubesFree(snapshot);
   const status = document.createElement('div');
   status.className = 'assembly-controls';
   status.innerHTML = `<div class="assembly-status"><strong>Active laws:</strong> `
     + `${activeNames.length ? esc(activeNames.join(', ')) : 'none yet'}`
     + `${laws.lobbyingDisabled ? ' · lobbying disabled' : ''}</div>`
-    + `<div class="assembly-status">Your delegates: <strong>${left}</strong> / ${DELEGATES_PER_PLAYER} in hand</div>`;
-  host.appendChild(status);
-  if (_spectator) return;
+    + `<div class="assembly-status">Your cubes: <strong>${free}</strong> / ${FACTORY_CUBES} free `
+    + '<span class="muted">(shared with factories)</span></div>';
+  return status;
+}
 
-  // Fundraise: place a delegate (or move one of yours) + gain aqua. Spends the op.
-  const fr = document.createElement('div');
-  fr.className = 'assembly-action';
-  const placeOpt = (p) => `<option value="${p}">${p === 'centrist' ? 'Centrist (center)' : (ASSEMBLY_IDEOLOGY_BY_KEY[p] || {}).name || p}</option>`;
-  const myPlaces = ASSEMBLY_PLACES.filter((p) => ((dmap[p] || {})[myId] | 0) > 0);
-  fr.innerHTML = `<div class="mp-detail-label">Fundraise (operation)</div>`
-    + `<label class="mp-trade-field"><span>Move from</span><select class="asm-fr-from"><option value="">(new delegate)</option>${myPlaces.map(placeOpt).join('')}</select></label>`
-    + `<label class="mp-trade-field"><span>Into</span><select class="asm-fr-place">${ASSEMBLY_PLACES.map(placeOpt).join('')}</select></label>`;
-  const frBtn = document.createElement('button');
-  frBtn.type = 'button'; frBtn.className = 'modal-btn primary'; frBtn.textContent = '🏛 Fundraise';
-  const noNew = left <= 0;
-  frBtn.disabled = !myTurn;
-  frBtn.title = !myTurn ? 'Wait for your turn.' : 'Place / move a delegate and gain aqua (spends your operation).';
-  frBtn.addEventListener('click', () => {
-    const from = fr.querySelector('.asm-fr-from').value || undefined;
-    const place = fr.querySelector('.asm-fr-place').value;
-    if (!from && noNew) { _onlineToast('No delegates left in hand - move one instead.', 'error'); return; }
-    submitOnlineOp({ kind: 'FUNDRAISE', place, from });
-  });
-  fr.appendChild(frBtn);
-  host.appendChild(fr);
+// The big, INTERACTIVE assembly modal (desktop). Opened by tapping the sidebar
+// glance ('view' mode) or by the Fundraise op ('fundraise' guided mode).
+// Collapsible like the auction overlay. Snapshot-driven while open.
+//   view:      click one of YOUR delegates to Lobby it (1 aqua + discard).
+//   fundraise: step 1 place a delegate (optional), step 2 move one of your
+//              delegates one ADJACENT space (optional), then submit.
+let _assemblyModalOpen = false;
+let _assemblyMin = false;
+let _assemblyMode = 'view';
+let _fr = null;   // fundraise draft { step:'place'|'move', place, moveFrom }
 
-  // Lobby: activate an inactive ideology you hold a delegate in (free, once/turn).
-  const lobbyable = ASSEMBLY_IDEOLOGY_ORDER.filter((k) => !laws.active.has(k) && ((dmap[k] || {})[myId] | 0) > 0);
-  if (!laws.lobbyingDisabled && lobbyable.length) {
-    const lb = document.createElement('div');
-    lb.className = 'assembly-action';
-    lb.innerHTML = `<div class="mp-detail-label">Lobby (free, once per turn)</div>`
-      + `<label class="mp-trade-field"><span>Activate</span><select class="asm-lobby-key">${lobbyable.map(placeOpt).join('')}</select></label>`;
-    const lbBtn = document.createElement('button');
-    lbBtn.type = 'button'; lbBtn.className = 'modal-btn'; lbBtn.textContent = '🗳 Lobby (1 aqua)';
-    lbBtn.disabled = !myTurn;
-    lbBtn.title = myTurn ? 'Pay 1 aqua + discard a delegate there to use its law this turn.' : 'Wait for your turn.';
-    lbBtn.addEventListener('click', () => {
-      submitOnlineOp({ kind: 'LOBBY', ideology: lb.querySelector('.asm-lobby-key').value });
-    });
-    lb.appendChild(lbBtn);
-    host.appendChild(lb);
+function openAssemblyModal(mode = 'view') {
+  if (!_online || !_onlineSnapshot || !_onlineSnapshot.m0) return;
+  _assemblyModalOpen = true;
+  _assemblyMode = mode;
+  if (mode === 'fundraise') { _fr = { step: 'place', place: null, moveFrom: null, moveTo: null, star: null, tied: null }; _assemblyMin = false; }
+  let overlay = document.getElementById('assembly-modal-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'assembly-modal-overlay';
+    overlay.className = 'assembly-modal-overlay';
+    overlay.innerHTML = `
+      <div class="assembly-modal" role="dialog" aria-label="Sol Political Assembly">
+        <div class="mp-modal-titlebar">
+          <h3 class="assembly-modal-title">🏛 Sol Political Assembly</h3>
+          <button type="button" class="mp-mini-btn" title="Minimize" aria-label="Minimize">&minus;</button>
+        </div>
+        <div class="assembly-modal-body"></div>
+      </div>
+      <button type="button" class="mp-mini-chip" aria-label="Restore assembly">
+        🏛 Assembly <span class="mp-mini-chip-meta"></span>
+      </button>`;
+    overlay.querySelector('.mp-mini-btn').addEventListener('click', () => { _assemblyMin = true; refreshAssemblyModal(); });
+    overlay.querySelector('.mp-mini-chip').addEventListener('click', () => { _assemblyMin = false; setMpTurnAction('assembly', null); refreshAssemblyModal(); });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay && _assemblyMode === 'view') closeAssemblyModal(); });
+    document.addEventListener('keydown', assemblyModalKey);
+    document.body.appendChild(overlay);
   }
+  refreshAssemblyModal();
+}
+function assemblyModalKey(e) {
+  if (e.key === 'Escape' && _assemblyModalOpen && _assemblyMode === 'view') closeAssemblyModal();
+}
+function closeAssemblyModal() {
+  _assemblyModalOpen = false;
+  _assemblyMin = false;
+  _assemblyMode = 'view';
+  _fr = null;
+  setMpTurnAction('assembly', null);
+  document.removeEventListener('keydown', assemblyModalKey);
+  const overlay = document.getElementById('assembly-modal-overlay');
+  if (overlay) overlay.remove();
+}
+// Re-draw the modal from the current snapshot + interaction state. Called on
+// open, on every step, and on each snapshot while open.
+function refreshAssemblyModal() {
+  const overlay = document.getElementById('assembly-modal-overlay');
+  if (!overlay) return;
+  const snap = _onlineSnapshot;
+  if (!snap || !snap.m0 || !snap.assembly) { closeAssemblyModal(); return; }
+  overlay.classList.toggle('is-minimized', _assemblyMin);
+  setMpTurnAction('assembly', _assemblyMin ? {
+    label: '🏛 Assembly',
+    meta: _assemblyMode === 'fundraise' ? 'fundraising' : (_assemblyMode === 'lobby' ? 'lobbying' : 'open'),
+    needsAction: _assemblyMode === 'fundraise' || _assemblyMode === 'lobby',
+    onClick: () => { _assemblyMin = false; refreshAssemblyModal(); },
+  } : null);
+  if (_assemblyMin) return;
+  const body = overlay.querySelector('.assembly-modal-body');
+  body.innerHTML = '';
+  if (_assemblyMode === 'fundraise') renderAssemblyFundraise(body, snap);
+  else renderAssemblyView(body, snap);
+}
+// On a narrow screen the callout-ring ('compact') board overlaps badly, so the
+// modal uses the stacked laws-in-rows ('large') layout there; desktop keeps the
+// ringed design.
+function assemblyModalVariant() {
+  return (typeof window !== 'undefined' && window.innerWidth <= 720) ? 'large' : 'compact';
+}
+// The ideologies the player can lobby right now: a delegate they own, whose law
+// is NOT already in power, while lobbying isn't disabled (Unity). Centrist is
+// not an ideology law, so it's never lobby-able.
+function lobbyEligiblePlaces(snapshot) {
+  const set = new Set();
+  if (_spectator) return set;
+  const myId = _onlineMe && _onlineMe.id;
+  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
+  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar);
+  if (laws.lobbyingDisabled) return set;
+  for (const place of ASSEMBLY_IDEOLOGY_ORDER) {
+    if (((dmap[place] || {})[myId] | 0) <= 0) continue;
+    if (laws.active.has(place)) continue;
+    set.add(place);
+  }
+  return set;
+}
+
+// View mode (and Lobby mode): the board + the active-law read-out. In Lobby mode
+// the player's lobby-eligible delegates glow; tapping one lobbies that law.
+function renderAssemblyView(body, snapshot) {
+  const lobbyMode = _assemblyMode === 'lobby';
+  const view = assemblyDelegatesView(snapshot, assemblyModalVariant());
+  view.interactive = true;
+  view.onCellClick = (place) => tryLobbyAt(snapshot, place);
+  if (lobbyMode) view.cubeGlow = lobbyEligiblePlaces(snapshot);
+  body.appendChild(renderAssemblyPanel(view));
+  body.appendChild(assemblyStatusEl(snapshot));
+  const hint = document.createElement('p');
+  hint.className = 'assembly-status muted';
+  if (_spectator) hint.textContent = 'Spectating.';
+  else if (lobbyMode) {
+    const elig = lobbyEligiblePlaces(snapshot);
+    hint.textContent = elig.size
+      ? 'Lobby: tap one of your glowing delegates to use its law this turn (1 aqua, discards the delegate).'
+      : 'No delegate you can lobby right now (you need a delegate in an inactive ideology, and Unity must not be disabling lobbying).';
+  } else hint.textContent = 'Press Lobby, then tap a delegate, to use an inactive ideology’s law (1 aqua, discards the delegate).';
+  body.appendChild(hint);
+  const btns = document.createElement('div');
+  btns.className = 'assembly-fr-btns';
+  if (!_spectator && !lobbyMode) {
+    btns.append(mkBtn('🗳 Lobby', 'modal-btn primary', () => { _assemblyMode = 'lobby'; refreshAssemblyModal(); }));
+  } else if (lobbyMode) {
+    btns.append(mkBtn('↩ Done', 'modal-btn', () => { _assemblyMode = 'view'; refreshAssemblyModal(); }));
+  }
+  btns.append(mkBtn('Close', 'modal-btn', closeAssemblyModal));
+  body.appendChild(btns);
+}
+// Click a delegate to Lobby that ideology (server LOBBY: 1 aqua + discard, only
+// an inactive ideology, not while Unity disables lobbying).
+function tryLobbyAt(snapshot, place) {
+  if (_spectator || place === 'centrist') return;
+  const myId = _onlineMe && _onlineMe.id;
+  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
+  if (((dmap[place] || {})[myId] | 0) <= 0) return;   // not your delegate
+  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar);
+  if (laws.lobbyingDisabled) { _onlineToast('Unity disabled lobbying this round.', 'error'); return; }
+  if (laws.active.has(place)) { _onlineToast('That law is already in power.', 'error'); return; }
+  if (!isOnlineMyTurn()) { _onlineToast('Wait for your turn.', 'error'); return; }
+  const name = (ASSEMBLY_IDEOLOGY_BY_KEY[place] || {}).name || place;
+  confirmModal({
+    title: '🗳 Lobby',
+    body: `Lobby <strong>${esc(name)}</strong>? Pay 1 aqua and discard your delegate there to use its law this turn.`,
+    yes: '🗳 Lobby (1 aqua)', no: 'Cancel',
+  }).then((ok) => {
+    if (!ok) return;
+    _assemblyMode = 'view';   // leave lobby-select mode once a law is lobbied
+    submitOnlineOp({ kind: 'LOBBY', ideology: place });
+  });
+}
+// Places where the player currently holds a delegate (counting a placement made
+// earlier in this same Fundraise).
+function fundraiseMyPlaces(snapshot) {
+  const myId = _onlineMe && _onlineMe.id;
+  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
+  const set = new Set();
+  for (const p of ASSEMBLY_PLACES) {
+    let n = (dmap[p] || {})[myId] | 0;
+    if (_fr && _fr.place === p) n += 1;
+    if (n > 0) set.add(p);
+  }
+  return set;
+}
+// The cells the player MAY act on this Fundraise step (the dark-blue
+// "available" set; hovering one lights it bright blue):
+//   place step  - your HOME ideology + every space you already hold a delegate.
+//   move (pick) - every space you hold a delegate.
+//   move (dest) - the spaces adjacent to the cube you picked up.
+function fundraiseAvailable(snapshot) {
+  const myId = _onlineMe && _onlineMe.id;
+  const home = (snapshot.homeIdeology || {})[myId] || null;
+  if (_fr.step === 'place') {
+    if (myCubesFree(snapshot) <= 0) return new Set();   // nothing to place
+    const set = fundraiseMyPlaces(snapshot);
+    if (home) set.add(home);
+    return set;
+  }
+  if (_fr.step === 'star') return new Set(_fr.tied || []);      // tie: pick a winner
+  if (!_fr.moveFrom) return fundraiseMyPlaces(snapshot);        // move origin = your cubes
+  return new Set(ASSEMBLY_ADJACENT(_fr.moveFrom));             // move destinations
+}
+// Vote winners on the assembly AS PROJECTED by this fundraise's place + move.
+function fundraiseProjectedWinners(snapshot) {
+  const myId = _onlineMe && _onlineMe.id;
+  const src = (snapshot.assembly && snapshot.assembly.delegates) || {};
+  const delegates = {};
+  for (const place of ASSEMBLY_PLACES) delegates[place] = { ...(src[place] || {}) };
+  const bump = (place, d) => {
+    if (!place) return;
+    delegates[place] = delegates[place] || {};
+    delegates[place][myId] = (delegates[place][myId] | 0) + d;
+  };
+  bump(_fr.place, +1);
+  bump(_fr.moveFrom, -1);
+  bump(_fr.moveTo, +1);
+  return assemblyVoteWinners({ delegates });
+}
+// After place + move settle, run the vote tally. The fundraiser ALWAYS gets the
+// tally step and places the active-law star themselves: a single winner is a
+// one-click confirm, a tie is a pick, no winner sends the star to Centrist.
+function fundraiseAdvanceToStar(snapshot) {
+  _fr.tied = fundraiseProjectedWinners(snapshot);
+  _fr.step = 'star';
+  refreshAssemblyModal();
+}
+// Fundraise guided flow: place (optional), move one space (optional), then the
+// vote tally moves the active-law star.
+function renderAssemblyFundraise(body, snapshot) {
+  const inHand = myCubesFree(snapshot);
+  const step = _fr.step;
+  const available = fundraiseAvailable(snapshot);
+  const movePick = step === 'move' && !_fr.moveFrom;   // origin = pick one of your cubes
+
+  // Prompt bar.
+  const prompt = document.createElement('div');
+  prompt.className = 'assembly-fr-prompt';
+  let promptText;
+  if (step === 'place') {
+    promptText = inHand > 0
+      ? 'Step 1 - Place a delegate on a highlighted space (your home ideology or where you already have a delegate), or skip.'
+      : 'Step 1 - No cubes left in hand. Skip to the move step.';
+  } else if (step === 'star') {
+    const w = _fr.tied || [];
+    if (w.length === 0) promptText = 'Step 3 - Vote tally: no ideology holds a majority. The active-law star returns to Centrist.';
+    else if (w.length === 1) promptText = `Step 3 - Vote tally: ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[w[0]] || {}).name || w[0])} wins. Click it to set the active-law star.`;
+    else promptText = 'Step 3 - Tie vote! Click which tied ideology gets the active-law star.';
+  } else if (_fr.moveFrom) {
+    promptText = `Step 2 - Move: click a highlighted adjacent space to move your ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.moveFrom] || {}).name || _fr.moveFrom)} delegate.`;
+  } else {
+    promptText = 'Step 2 - Move one space: click one of your glowing cubes to pick it up, or skip.';
+  }
+  prompt.innerHTML = `<strong>Fundraise</strong> &middot; <span>${promptText}</span>`
+    + (_fr.place ? `<div class="assembly-fr-chosen">Placing on ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.place] || {}).name || _fr.place)}.</div>` : '');
+  body.appendChild(prompt);
+
+  // Board with the interaction wired for the current step.
+  const view = assemblyDelegatesView(snapshot, assemblyModalVariant());
+  // Preview the in-progress placement immediately (a cube in my colour on the
+  // chosen space) so it shows up right away, before the op round-trips.
+  const myId = _onlineMe && _onlineMe.id;
+  const me = (snapshot.players || []).find((p) => p.profileId === myId);
+  const myColor = (me && me.color) || '#fff';
+  if (_fr.place) view.delegates[_fr.place] = [...(view.delegates[_fr.place] || []), myColor];
+  // Once a move is chosen (we are on the tally step), preview it too so the vote
+  // standing the player is starring reflects the move they just made.
+  if (_fr.moveFrom && _fr.moveTo) {
+    const from = view.delegates[_fr.moveFrom] || [];
+    const idx = from.indexOf(myColor);
+    if (idx >= 0) view.delegates[_fr.moveFrom] = [...from.slice(0, idx), ...from.slice(idx + 1)];
+    view.delegates[_fr.moveTo] = [...(view.delegates[_fr.moveTo] || []), myColor];
+  }
+  view.interactive = true;
+  if (movePick) {
+    view.cubeGlow = available;   // glow the CUBES you can pick up (origin = cube)
+  } else {
+    view.highlight = available;  // dark-blue "available" spaces; hover -> bright
+  }
+  view.selected = step === 'place' ? _fr.place : (step === 'move' ? _fr.moveFrom : null); // bright-blue "picked" cube
+  view.onCellClick = (place) => onFundraiseCell(snapshot, place, available);
+  body.appendChild(renderAssemblyPanel(view));
+
+  // Step buttons.
+  const btns = document.createElement('div');
+  btns.className = 'assembly-fr-btns';
+  if (step === 'place') {
+    btns.append(
+      mkBtn('Skip placement', 'modal-btn', () => { _fr.step = 'move'; refreshAssemblyModal(); }),
+      mkBtn(_fr.place ? 'Next: move →' : 'Next →', 'modal-btn primary', () => { _fr.step = 'move'; refreshAssemblyModal(); }),
+    );
+  } else if (step === 'move') {
+    if (_fr.moveFrom) btns.append(mkBtn('↩ Pick a different cube', 'modal-btn', () => { _fr.moveFrom = null; refreshAssemblyModal(); }));
+    else btns.append(mkBtn('Skip move & tally', 'modal-btn', () => fundraiseAdvanceToStar(snapshot)));
+  } else if (step === 'star') {
+    btns.append(mkBtn('↩ Back to move', 'modal-btn', () => { _fr.step = 'move'; _fr.moveFrom = null; _fr.moveTo = null; _fr.tied = null; refreshAssemblyModal(); }));
+    if ((_fr.tied || []).length === 0) {
+      btns.append(mkBtn('Set star to Centrist', 'modal-btn primary', () => { _fr.star = 'centrist'; commitFundraise(); }));
+    }
+  }
+  body.appendChild(btns);
+
+  body.appendChild(assemblyStatusEl(snapshot));
+}
+function mkBtn(label, cls, fn) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = cls; b.textContent = label;
+  b.addEventListener('click', fn);
+  return b;
+}
+function onFundraiseCell(snapshot, place, available) {
+  if (_fr.step === 'place') {
+    if (myCubesFree(snapshot) <= 0) { _onlineToast('No cubes left in hand.', 'error'); return; }
+    if (place === _fr.place) { _fr.place = null; refreshAssemblyModal(); return; }   // unselect
+    if (!available.has(place)) {
+      _onlineToast('Place on your home ideology or a space where you already have a delegate.', 'error');
+      return;
+    }
+    _fr.place = place;
+    refreshAssemblyModal();
+    return;
+  }
+  if (_fr.step === 'star') {
+    if (!available.has(place)) { _onlineToast('Pick one of the tied ideologies for the star.', 'error'); return; }
+    _fr.star = place;
+    commitFundraise();
+    return;
+  }
+  // move step: pick up your own cube, then choose an adjacent destination.
+  if (!_fr.moveFrom) {
+    if (!available.has(place)) { _onlineToast('Pick one of your own cubes.', 'error'); return; }
+    _fr.moveFrom = place;
+    refreshAssemblyModal();
+    return;
+  }
+  if (place === _fr.moveFrom) { _fr.moveFrom = null; refreshAssemblyModal(); return; }   // put it back
+  if (!available.has(place)) { _onlineToast('Move only to an adjacent space.', 'error'); return; }
+  _fr.moveTo = place;
+  fundraiseAdvanceToStar(snapshot);
+}
+function commitFundraise() {
+  const op = { kind: 'FUNDRAISE' };
+  if (_fr.place) op.place = _fr.place;
+  if (_fr.moveFrom && _fr.moveTo) { op.moveFrom = _fr.moveFrom; op.moveTo = _fr.moveTo; }
+  if (_fr.star) op.star = _fr.star;
+  _assemblyMode = 'view';
+  _fr = null;
+  submitOnlineOp(op);
+  // The snapshot apply will refresh the modal in view mode (or it can be closed).
+  closeAssemblyModal();
 }
 
 // Server site id (data/sites.js slug) -> display name. LEO / unknown
@@ -3604,17 +4159,118 @@ function renderMpPlayer(p, isMe, isActive) {
 // as a row of pips (filled = in play, in the player's seat colour) so the
 // remaining bits are obvious at a glance. The build ops enforce the same cap.
 function renderComponentRow(p, snapshot) {
+  // The 7 cubes are ONE pool: built factories + assembly delegates + the
+  // first-player Sunspot cube. The factory pip row shows the whole pool used,
+  // and clicking it breaks down where each cube sits.
   const facUsed = ownedSiteCount(snapshot.factories, p.profileId);
+  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
+  const delegateUsed = ASSEMBLY_PLACES.reduce((s, pl) => s + ((dmap[pl] || {})[p.profileId] | 0), 0);
+  const players = snapshot.players || [];
+  const fp = players[snapshot.firstPlayerIndex || 0];
+  const sunspotUsed = (fp && fp.profileId === p.profileId) ? 1 : 0;
+  const cubesUsed = facUsed + delegateUsed + sunspotUsed;
   const colUsed = ownedSiteCount(snapshot.colonies, p.profileId);
   const claimUsed = ownedClaimCount(snapshot.discs, p.profileId);
   const row = document.createElement('div');
   row.className = 'mp-components';
+  const facGroup = componentGroup('🏭', cubesUsed, FACTORY_CUBES, p.color, 'cube', 'cube');
+  facGroup.classList.add('mp-comp-click');
+  facGroup.title = 'Cubes in play (factories + delegates + sunspot). Tap to see where.';
+  facGroup.addEventListener('click', () => openCubeBreakdownModal(p, snapshot));
   row.append(
-    componentGroup('🏭', facUsed, FACTORY_CUBES, p.color, 'cube', 'factory cube'),
+    facGroup,
     componentGroup('🏠', colUsed, COLONY_DOMES, p.color, 'dome', 'colony dome'),
     componentGroup('🔘', claimUsed, CLAIM_DISCS, p.color, 'disc', 'claim disc'),
   );
   return row;
+}
+
+// Close the assembly + cube modals and fly the map to a server site (used by the
+// cube breakdown's factory rows).
+function flyToServerSite(serverSiteId) {
+  closeAssemblyModal();
+  document.querySelectorAll('.mp-modal-back').forEach((el) => el.remove());
+  if (!_renderer || !_activeData || !_onlineMaps) return;
+  const pid = toPlannerId(_onlineMaps, serverSiteId);
+  const site = pid && _activeData.byId ? _activeData.byId[pid] : null;
+  if (site && Number.isFinite(site.x) && Number.isFinite(site.y)) {
+    _renderer.flyTo(site, locateZoom(4));
+  }
+}
+
+// Where a player's 7 cubes are: the first-player Sunspot cube, assembly
+// delegates (politics map), and built factories (on sites). Opened by tapping
+// the factory/cube pip row.
+function openCubeBreakdownModal(p, snapshot) {
+  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
+  const players = snapshot.players || [];
+  const fp = players[snapshot.firstPlayerIndex || 0];
+  const isFirst = !!(fp && fp.profileId === p.profileId);
+  const items = [];
+  if (isFirst) items.push({ icon: '🌞', text: 'First-player marker (Sunspot cube)', kind: 'sunspot' });
+  for (const place of ASSEMBLY_PLACES) {
+    const n = (dmap[place] || {})[p.profileId] | 0;
+    const name = place === 'centrist' ? 'Centrist (center)' : (ASSEMBLY_IDEOLOGY_BY_KEY[place] || {}).name || place;
+    for (let i = 0; i < n; i += 1) items.push({ icon: '🏛', text: `Delegate on ${name}`, kind: 'delegate' });
+  }
+  for (const sid in (snapshot.factories || {})) {
+    if (snapshot.factories[sid] && snapshot.factories[sid].ownerId === p.profileId) {
+      items.push({ icon: '🏭', text: `Factory at ${onlineSiteLabel(sid)}`, kind: 'factory', siteId: sid });
+    }
+  }
+  const used = items.length;
+  const free = Math.max(0, FACTORY_CUBES - used);
+
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal';
+  modal.style.maxWidth = '420px';
+  const close = () => back.remove();
+  // Each cube row jumps to where it lives: the Sunspot cube opens the cycle, a
+  // delegate opens the assembly, a factory closes the modals and flies the map
+  // to its site.
+  const actionFor = (it) => {
+    if (it.kind === 'sunspot') return () => { close(); openTurnClockModal(); };
+    if (it.kind === 'delegate') return () => { close(); openAssemblyModal(); };
+    if (it.kind === 'factory') return () => { close(); flyToServerSite(it.siteId); };
+    return null;
+  };
+  const head = document.createElement('div');
+  head.className = 'mp-trade-head';
+  head.innerHTML = `<h3>🧊 ${esc(p.name)}'s cubes - ${used}/${FACTORY_CUBES} in play (${free} free)</h3>`;
+  modal.appendChild(head);
+  const list = document.createElement('div');
+  list.className = 'mp-relocate-list';
+  if (!items.length) {
+    const e = document.createElement('div');
+    e.className = 'mp-trade-colo no-colo';
+    e.textContent = 'No cubes in play yet.';
+    list.appendChild(e);
+  } else {
+    for (const it of items) {
+      const fn = actionFor(it);
+      const r = document.createElement('button');
+      r.type = 'button';
+      r.className = 'modal-btn mp-relocate-item mp-cube-row';
+      r.innerHTML = `<span class="mp-cube-ic">${it.icon}</span> ${esc(it.text)}`
+        + (fn ? '<span class="mp-cube-go">›</span>' : '');
+      if (fn) r.addEventListener('click', fn);
+      else r.disabled = true;
+      list.appendChild(r);
+    }
+  }
+  modal.appendChild(list);
+  const btns = document.createElement('div');
+  btns.className = 'mp-trade-btns';
+  const ok = document.createElement('button');
+  ok.type = 'button'; ok.className = 'modal-btn'; ok.textContent = 'Close';
+  ok.addEventListener('click', close);
+  btns.appendChild(ok);
+  modal.appendChild(btns);
+  back.appendChild(modal);
+  back.addEventListener('click', (e) => { if (e.target === back) close(); });
+  document.body.appendChild(back);
 }
 function componentGroup(glyph, used, total, color, shape, label) {
   const g = document.createElement('span');
@@ -3686,7 +4342,19 @@ function buildMpPlayerDetail(host, p, isMe) {
   }));
   grid.appendChild(mpStackChip(
     `🚀 Rocket${rkt.tank ? ` (💧${rkt.tank})` : ''}`,
-    rkt.stack || [], { who: p.name, hasLocation: true, findServerSite: rkt.siteId || null },
+    rkt.stack || [], {
+      who: p.name, hasLocation: true, findServerSite: rkt.siteId || null,
+      rocketCtx: {
+        stack: rkt.stack || [],
+        activeThrusterId: rkt.activeThrusterId || null,
+        activeProspectorId: rkt.activeProspectorId || null,
+        tank: rkt.tank | 0,
+        tankGrade: rkt.tankGrade === 'dirt' ? 'dirt' : 'water',
+        afterburnEngaged: !!rkt.afterburnEngaged,
+        wiring: (rkt.wiring && typeof rkt.wiring === 'object') ? rkt.wiring : {},
+        solarZone: (rkt.siteId && SITES_BY_ID[rkt.siteId] && SITES_BY_ID[rkt.siteId].solarZone) || null,
+      },
+    },
   ));
   for (const letter of ['A', 'B', 'C', 'D']) {
     const op = outposts[letter];
@@ -3722,7 +4390,7 @@ function buildMpPlayerDetail(host, p, isMe) {
 // the stack's location. findServerSite is the server siteId (null =
 // LEO); hasLocation=false (e.g. an unbuilt outpost, or the hand)
 // renders the find button disabled. Returns the wrapper cell.
-function mpStackChip(title, slots, { who, hasLocation, findServerSite, hint } = {}) {
+function mpStackChip(title, slots, { who, hasLocation, findServerSite, hint, rocketCtx } = {}) {
   const arr = Array.isArray(slots) ? slots : [];
   const cell = document.createElement('div');
   cell.className = 'mp-stack-cell';
@@ -3746,7 +4414,7 @@ function mpStackChip(title, slots, { who, hasLocation, findServerSite, hint } = 
     // richer hint ("Outpost A at <site>, <n> water") when present so the modal
     // still reads in full.
     const modalTitle = hint || title;
-    chip.addEventListener('click', () => openMpStackModal(`${who ? '@' + who + ' - ' : ''}${modalTitle}`, arr));
+    chip.addEventListener('click', () => openMpStackModal(`${who ? '@' + who + ' - ' : ''}${modalTitle}`, arr, { rocketCtx }));
   }
   cell.appendChild(chip);
 
@@ -3768,10 +4436,58 @@ function mpStackChip(title, slots, { who, hasLocation, findServerSite, hint } = 
   return cell;
 }
 
+// A read-only headline header for an opponent's rocket: the same thrust /
+// fuel / mass / active-status read the owner sees in their own rocket modal,
+// computed from the snapshot via computeRocketStatsFor (which never disturbs
+// the local rocket). Returns an HTML string, '' when the stack has nothing to
+// summarise.
+function mpRocketHeaderHtml(ctx) {
+  let stats;
+  try { stats = computeRocketStatsFor(ctx); } catch (_) { return ''; }
+  if (!stats) return '';
+  const { totals, thrStats, active } = stats;
+  if (!totals || !totals.count) return '';
+  const fmt = (n) => (Number.isFinite(n) ? (Math.round(n * 100) / 100) : '-');
+  const tank = ctx.tank | 0;
+  const statusHtml = active
+    ? (active.active
+      ? '<p class="rocket-status ok">✓ Active - rocket can move.</p>'
+      : `<p class="rocket-status bad">🚫 Inactive - ${esc(active.reason || 'not flight-ready')}.</p>`)
+    : '';
+  const hasBurns = !!(thrStats && thrStats.fuel != null && thrStats.burnsAvailable != null);
+  const burnsLabel = hasBurns
+    ? `${thrStats.burnsAvailable} burn${thrStats.burnsAvailable === 1 ? '' : 's'}` : '';
+  const thrustHtml = thrStats
+    ? `<div class="rocket-totals-cell">
+         <span class="lbl">Thrust</span>
+         <strong class="${thrStats.canLift ? 'ok' : 'bad'}">${fmt(thrStats.thrust)}</strong>
+         <small class="cell-eqn">${esc(String(thrStats.weightClass || '').toLowerCase())}</small>
+       </div>
+       <div class="rocket-totals-cell">
+         <span class="lbl">Fuel / burn</span>
+         <strong>${fmt(thrStats.fuel)} FT${hasBurns ? ` <span class="muted">(${burnsLabel})</span>` : ''}</strong>
+         <small class="cell-eqn">${hasBurns ? `${thrStats.fuelSteps} fuel steps` : 'water per move'}</small>
+       </div>`
+    : '<div class="rocket-totals-cell"><span class="lbl">Thrust</span><strong class="bad">-</strong><small class="cell-eqn">no active thruster</small></div>';
+  return `
+    <div class="rocket-stack-header mp-rocket-header">
+      <div class="rocket-totals">
+        <div class="rocket-totals-grid">
+          <div class="rocket-totals-cell"><span class="lbl">Cards</span><strong>${totals.count}</strong><small class="cell-eqn">in stack</small></div>
+          <div class="rocket-totals-cell"><span class="lbl">Dry mass</span><strong>${totals.dryMass}</strong><small class="cell-eqn">card mass sum</small></div>
+          <div class="rocket-totals-cell"><span class="lbl">Wet mass</span><strong class="${thrStats && !thrStats.canLift ? 'bad' : ''}">${totals.wetMass}<small>/32</small></strong><small class="cell-eqn">dry ${totals.dryMass} + tank ${tank} · 💧 ${tank}</small></div>
+          <div class="rocket-totals-cell"><span class="lbl">Min rad-hard</span><strong>${totals.minRadHard != null ? totals.minRadHard : '-'}</strong><small class="cell-eqn">weakest card</small></div>
+          ${thrustHtml}
+        </div>
+      </div>
+      ${statusHtml}
+    </div>`;
+}
+
 // Read-only modal listing the cards in a stack (opponent inspection).
 // Renders each slot via the shared renderCard so it looks like every
 // other card surface. No actions - pure inspection.
-function openMpStackModal(title, slots) {
+function openMpStackModal(title, slots, { rocketCtx } = {}) {
   document.querySelector('.mp-stack-modal-overlay')?.remove();
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay mp-stack-modal-overlay';
@@ -3796,6 +4512,19 @@ function openMpStackModal(title, slots) {
   head.append(h, x);
   dialog.appendChild(head);
 
+  // For a rocket stack, lead with the same headline read the owner sees: net
+  // thrust, fuel per burn / burns, dry+wet mass, and the active/grounded
+  // verdict, computed read-only from the snapshot so the numbers match the
+  // engine without touching the local player's own rocket.
+  if (rocketCtx) {
+    const headerHtml = mpRocketHeaderHtml(rocketCtx);
+    if (headerHtml) {
+      const hdr = document.createElement('div');
+      hdr.innerHTML = headerHtml;
+      dialog.appendChild(hdr);
+    }
+  }
+
   const body = document.createElement('div');
   body.className = 'mp-stack-modal-cards';
   for (const slot of slots) {
@@ -3815,8 +4544,11 @@ function openMpStackModal(title, slots) {
     const kind = CREW_BY_ID[id] ? 'crew' : 'patent';
     const wrap = document.createElement('div');
     wrap.className = 'mp-stack-modal-card';
-    try { wrap.appendChild(renderCard(card, { type: kind, face, radSide })); }
-    catch { wrap.textContent = card.name || id; }
+    try {
+      const cardEl = renderCard(card, { type: kind, face, radSide });
+      makeCardViewable(cardEl, card, kind, face);
+      wrap.appendChild(cardEl);
+    } catch { wrap.textContent = card.name || id; }
     body.appendChild(wrap);
   }
   dialog.appendChild(body);
@@ -3962,16 +4694,21 @@ function humanizeOnlineOpError(code, detail) {
     not_at_site: 'Park the rocket at the site first.',
     not_claimed: 'Prospect and claim this site before you can industrialize it.',
     already_industrialized: 'This site already has a factory.',
-    no_factory_cubes: 'All 7 of your factory cubes are in play - you can\'t build another factory.',
+    no_factory_cubes: 'All 7 of your cubes are in play - remove an assembly delegate to free one for a factory.',
+    no_cubes_left: 'All 7 of your cubes are in play (factories + delegates) - none left to place.',
+    bad_place_target: 'Place only on your home ideology or a space where you already have a delegate.',
+    star_choice_required: 'The vote is tied - pick which ideology gets the active-law star.',
     no_colony_domes: 'All 7 of your colony domes are in play - you can\'t found another colony.',
     claim_limit: 'All 9 of your claim discs are placed - move one to this spot to prospect here.',
     disc_has_factory: 'That claim has a factory on it - it can\'t be moved.',
     cannot_industrialize: 'Industrialize needs a refinery + a robonaut (with their supports) in the stack.',
+    card_no_industrialize: 'That parachute card cannot be used during industrialization. Leave it out of the build.',
     no_mine_revival: 'Mine Revival needs a Termite Nest aboard.',
     no_busted_disc: 'Mine Revival needs a busted (failed) claim here to revive.',
     site_too_small: 'Mine Revival only works on a site of size 2 or more.',
     no_factory: 'You need your own factory here.',
     cannot_mix_fuel: 'Water and dirt can\'t mix - burn the tank empty before switching fuel.',
+    cannot_store_dirt: 'Outposts only store water - the rocket tank holds dirt.',
     wrong_fuel_grade: 'Wrong fuel: a water thruster can only burn water, and the tank holds dirt. Dump the dirt and refuel with water.',
     not_dirt_thruster: 'Dirt refuel needs a dirt-burning thruster aboard.',
     not_at_site: 'Park at a site first - dirt comes from the ground.',
@@ -4465,6 +5202,105 @@ function wireHandStrip() {
 //   - empty outpost slot : the main button still opens a modal
 //                          explaining how to create one; the pin is
 //                          disabled (nowhere to fly).
+// Player notes + tags for a map location, pooled across ALL games. Opened from
+// the site popup's notes button. Needs a signed-in profile + the live server;
+// shows a gentle notice otherwise. Tags are player-driven (quick-picks plus any
+// custom tag); messages are free text. Everything is shared with every player.
+function openSiteNotesModal(siteId, siteName) {
+  document.querySelector('.site-notes-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay site-notes-overlay';
+  overlay.tabIndex = -1;
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  const dialog = document.createElement('div');
+  dialog.className = 'site-notes-modal';
+  dialog.innerHTML = `<div class="site-notes-head">
+      <h3>🏷 Notes &middot; <span class="site-notes-loc"></span></h3>
+      <button type="button" class="modal-x" title="Close (Esc)">×</button>
+    </div>
+    <div class="site-notes-body"><p class="muted">Loading…</p></div>`;
+  dialog.querySelector('.site-notes-loc').textContent = siteName || siteId;
+  dialog.querySelector('.modal-x').addEventListener('click', close);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  overlay.focus();
+
+  const body = dialog.querySelector('.site-notes-body');
+  const prof = activeProfile();
+  const token = prof && prof.token;
+  if (!apiAvailable() || !token) {
+    body.innerHTML = '<p class="muted">Location notes need a signed-in profile and the live server. '
+      + 'They are shared with every player across all games.</p>';
+    return;
+  }
+
+  let state = { tags: [], messages: [] };
+  const apply = (r) => {
+    if (r && r.ok && r.data) { state = r.data; render(); }
+    else body.innerHTML = '<p class="muted">Could not reach the notes service.</p>';
+  };
+  const refetch = async () => apply(await getSiteAnnotations(siteId, token));
+
+  function render() {
+    const tagChips = state.tags.map((t) => {
+      const d = tagDisplay(t.tag);
+      return `<button type="button" class="site-tag-chip${t.mine ? ' is-mine' : ''}" data-tag="${esc(t.tag)}" style="--tag:${esc(d.color)}" title="${t.mine ? 'Tap to remove your tag' : 'Tap to add this tag'}"><span class="site-tag-dot"></span>${esc(d.label)} <span class="site-tag-n">${t.count}</span></button>`;
+    }).join('');
+    const quick = SITE_TAGS.filter((t) => !state.tags.some((x) => x.tag === t.key)).map((t) =>
+      `<button type="button" class="site-tag-pick" data-add="${esc(t.key)}" style="--tag:${esc(t.color)}"><span class="site-tag-dot"></span>${esc(t.label)}</button>`).join('');
+    const msgs = state.messages.length ? state.messages.map((m) =>
+      `<li><div class="site-msg-body">${esc(m.body)}</div><div class="site-msg-meta"><span class="player-name">${esc(m.author)}</span> · ${esc(new Date(m.createdAt).toLocaleDateString())}${m.mine ? ` <button type="button" class="site-msg-del" data-del="${m.id}">delete</button>` : ''}</div></li>`).join('')
+      : '<li class="muted">No messages yet.</li>';
+    body.innerHTML = `
+      <div class="site-notes-sec">
+        <h4>Tags <span class="muted">(tap yours to remove)</span></h4>
+        <div class="site-tags-row">${tagChips || '<span class="muted">No tags yet.</span>'}</div>
+        <h5>Add a tag</h5>
+        <div class="site-tags-row site-tags-pick">${quick}</div>
+        <div class="site-tag-custom"><input type="text" placeholder="custom tag" maxlength="24"><button type="button" class="modal-btn">Add</button></div>
+      </div>
+      <div class="site-notes-sec">
+        <h4>Messages</h4>
+        <ul class="site-msgs">${msgs}</ul>
+        <div class="site-msg-post"><textarea rows="2" maxlength="500" placeholder="Leave a note for other players…"></textarea><button type="button" class="modal-btn primary">Post</button></div>
+      </div>
+      <p class="site-notes-foot muted">Shared with every player across all games.</p>`;
+    body.querySelectorAll('.site-tag-chip').forEach((b) => b.addEventListener('click', async () => {
+      const tag = b.getAttribute('data-tag');
+      apply(b.classList.contains('is-mine')
+        ? await removeSiteTag(siteId, tag, token)
+        : await postSiteAnnotation(siteId, { kind: 'tag', tag, siteName }, token));
+    }));
+    body.querySelectorAll('.site-tag-pick').forEach((b) => b.addEventListener('click', async () => {
+      apply(await postSiteAnnotation(siteId, { kind: 'tag', tag: b.getAttribute('data-add'), siteName }, token));
+    }));
+    const customIn = body.querySelector('.site-tag-custom input');
+    const customAdd = async () => {
+      const t = normaliseTag(customIn.value);
+      if (!t) return;
+      customIn.value = '';
+      apply(await postSiteAnnotation(siteId, { kind: 'tag', tag: t, siteName }, token));
+    };
+    body.querySelector('.site-tag-custom .modal-btn').addEventListener('click', customAdd);
+    customIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); customAdd(); } });
+    body.querySelectorAll('.site-msg-del').forEach((b) => b.addEventListener('click', async () => {
+      apply(await deleteSiteAnnotation(siteId, Number(b.getAttribute('data-del')), token));
+    }));
+    const ta = body.querySelector('.site-msg-post textarea');
+    body.querySelector('.site-msg-post .modal-btn').addEventListener('click', async () => {
+      const text = ta.value.trim();
+      if (!text) return;
+      ta.value = '';
+      apply(await postSiteAnnotation(siteId, { kind: 'message', body: text, siteName }, token));
+    });
+  }
+  refetch();
+}
+
 function renderStackSwitcher() {
   const host = document.getElementById('hand-stack-switcher');
   if (!host) return;
@@ -4479,13 +5315,13 @@ function renderStackSwitcher() {
   // fallback, so we treat that as available).
   const slots = [
     {
-      id: 'leo', label: '🌍', sub: 'LEO',
+      id: 'leo', icon: 'leo', sub: 'LEO',
       title: `LEO Stack - ${getLeoCards().length} card${getLeoCards().length === 1 ? '' : 's'}. Aqua bank: ${getAqua()}. Hand: ${getHandSlots().length} card${getHandSlots().length === 1 ? '' : 's'} (not yet boosted).`,
       siteAvailable: true,
       isEmpty: false,
     },
     {
-      id: 'rocket', label: '🚀', sub: 'Rocket',
+      id: 'rocket', icon: 'rocket', sub: 'Rocket',
       title: rocketStack.length
         ? `Rocket - ${rocketStack.length} card${rocketStack.length === 1 ? '' : 's'}, ${getTankWater()} water${rocketSite ? `, at ${rocketSite.name}` : ', at LEO'}`
         : 'Rocket - empty (boost cards from hand to build the stack)',
@@ -4505,14 +5341,14 @@ function renderStackSwitcher() {
       // can tell at a glance there's fuel to pump.
       const hasWater = (op.tank | 0) > 0;
       slots.push({
-        id: `outpost${letter}`, label: hasWater ? '🏛💧' : '🏛', sub: letter,
+        id: `outpost${letter}`, icon: 'outpost', water: hasWater, sub: letter,
         title: `Outpost ${letter} at ${opSite?.name || op.siteId} - ${op.cards.length} card${op.cards.length === 1 ? '' : 's'}, ${op.tank} water${factoryTag}${colonyTag}`,
         siteAvailable: !!opSite,
         isEmpty: false,
       });
     } else {
       slots.push({
-        id: `outpost${letter}`, label: '🏛', sub: letter,
+        id: `outpost${letter}`, icon: 'outpost', sub: letter,
         title: `Outpost slot ${letter} is empty - convert a parked rocket here via 🚀→🏛`,
         siteAvailable: false,
         isEmpty: true,
@@ -4520,12 +5356,15 @@ function renderStackSwitcher() {
     }
   }
 
+  // Small cyan droplet badge marking an outpost that holds water.
+  const waterDot = '<svg class="chip-water" viewBox="0 0 24 24" width="11" height="11" aria-hidden="true">'
+    + '<path d="M12 3 C12 3 19 12 19 17 A7 7 0 0 1 5 17 C5 12 12 3 12 3Z" fill="#52caf2" stroke="#d6f3ff" stroke-width="1.2"/></svg>';
   host.innerHTML = slots.map((s) => {
     const focusedClass = s.id === focused ? 'is-focused' : '';
     const emptyClass   = s.isEmpty ? 'is-empty' : '';
     return `<span class="hand-stack-group ${focusedClass} ${emptyClass}" data-stack="${esc(s.id)}">
       <button type="button" class="hand-stack-chip" title="${esc(s.title)}">
-        <span class="chip-glyph">${esc(s.label)}</span>
+        <span class="chip-glyph">${uiIcon(s.icon)}${s.water ? waterDot : ''}</span>
         <span class="chip-sub">${esc(s.sub)}</span>
       </button>
       <button type="button" class="hand-stack-pin" title="Fly map to ${esc(s.sub)}" ${s.siteAvailable ? '' : 'disabled'}>📍</button>
@@ -4722,12 +5561,9 @@ function getColocatedDestinations(sourceId) {
 // one after the first. LEO<->Rocket only; other combos toast.
 function transferSelectedOnline(sourceId, destId, ids) {
   if (!_online) return false;
-  // The server understands leo / rocket / outpostX as endpoints; one side
-  // must be the rocket (the mobile carrier). It validates colocation.
-  if (sourceId !== 'rocket' && destId !== 'rocket') {
-    _onlineToast('Card transfers must involve the rocket.', 'error');
-    return true;
-  }
+  // The server understands leo / rocket / outpostX as endpoints and validates
+  // colocation, so ANY two colocated stacks can trade (outpost <-> outpost,
+  // LEO <-> rocket, outpost <-> rocket, ...).
   submitOnlineOp({ kind: 'TRANSFER', cardIds: [...ids], from: sourceId, to: destId });
   return true;
 }
@@ -4745,13 +5581,9 @@ function transferOneCard(sourceId, destId, cardId) {
   // hand. The crew PICK_CREW staged in LEO lives in player.leo, so it
   // must travel via TRANSFER.
   if (_online) {
-    // Any colocated stack <-> rocket move (LEO or an outpost). The server
-    // validates colocation + forms the rocket at an outpost when empty.
-    if (sourceId === 'rocket' || destId === 'rocket') {
-      submitOnlineOp({ kind: 'TRANSFER', cardId, from: sourceId, to: destId });
-    } else {
-      _onlineToast('Card transfers must involve the rocket.', 'error');
-    }
+    // Any colocated stack-to-stack move. The server validates colocation and
+    // forms the rocket at an outpost when empty.
+    submitOnlineOp({ kind: 'TRANSFER', cardId, from: sourceId, to: destId });
     return false;
   }
   const TANK_MAX = 32;
@@ -5040,6 +5872,7 @@ function openUnifiedStackInspector(stackId) {
             ? '<button type="button" class="modal-btn stack leo-fuel-tank" title="Open the docked rocket\'s water tank to transfer fuel">💧 Rocket fuel tank</button>'
             : ''}
           ${outpostPumpBtnHtml(stackId)}
+          ${outpostFillBtnHtml(stackId)}
           ${outpostDissolveBtnHtml(stackId)}
           <button type="button" class="modal-btn stack-inspector-close">Close</button>
         </div>
@@ -5074,7 +5907,9 @@ function openUnifiedStackInspector(stackId) {
         const wrap = document.createElement('div');
         wrap.className = 'rocket-slot';
         if (selected.has(slot.id)) wrap.classList.add('is-selected');
-        wrap.appendChild(renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy' }));
+        const cardEl = renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy' });
+        makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face);
+        wrap.appendChild(cardEl);
         const actions = document.createElement('div');
         actions.className = 'rocket-slot-actions';
         const selBtn = document.createElement('button');
@@ -5220,6 +6055,16 @@ function openUnifiedStackInspector(stackId) {
         if (max <= 0) return;
         close();
         doPumpOutpostFuel(letter, max);
+      });
+    }
+    const fillBtn = dialog.querySelector('.stack-fill-fuel');
+    if (fillBtn) {
+      fillBtn.addEventListener('click', () => {
+        const letter = fillBtn.dataset.letter;
+        const max = Number(fillBtn.dataset.max) || 0;
+        if (max <= 0) return;
+        close();
+        doPumpFuelToOutpost(letter, max);
       });
     }
     // Decommission an empty outpost (dissolve it, free the slot).
@@ -5663,11 +6508,27 @@ function openDeckTapModal(card, kind, { allowAuction = false, inspectOnly = fals
   document.addEventListener('keydown', onKey);
 }
 
+// Make a rendered stack card open its read-only close-up modal on click, so a
+// player can inspect any card in LEO / the Rocket / an Outpost up close. Guards
+// the card's own controls (Flip, support chips, the radiator Light/Heavy
+// toggle) so those keep working; a click anywhere else on the card opens the
+// big view. `face` opens the modal on the side that's installed in the stack.
+function makeCardViewable(cardEl, card, kind, face) {
+  if (!cardEl) return cardEl;
+  cardEl.classList.add('is-viewable');
+  cardEl.title = 'Tap to view this card up close';
+  cardEl.addEventListener('click', (e) => {
+    if (e.target.closest('button, [role="button"], .rad-side, .card-flip')) return;
+    openCardModal(card, kind, null, { readOnly: true, face });
+  });
+  return cardEl;
+}
+
 // Inspect modal: enlarged copy of the clicked card with three
 // actions - Discard (pop back to the deck), Exo produce (will
 // need a factory location once Stage-3 builds them), and Add to
 // stack (push onto the LEO rocket).
-function openCardModal(card, kind, slotIdx, { readOnly = false } = {}) {
+function openCardModal(card, kind, slotIdx, { readOnly = false, face } = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay';
   const close = () => overlay.remove();
@@ -5677,7 +6538,11 @@ function openCardModal(card, kind, slotIdx, { readOnly = false } = {}) {
   panel.className = 'card-modal-panel';
   const cardEl = renderCard(card, {
     type: kind,
-    face: getPickedCrew()?.cardId === card.id ? getPickedCrew()?.face : undefined,
+    // Open on the explicitly requested face (e.g. the side installed in a
+    // stack), else the picked crew face, else the default primary.
+    face: face !== undefined
+      ? face
+      : (getPickedCrew()?.cardId === card.id ? getPickedCrew()?.face : undefined),
     onSupportClick: (kinds) => {
       close();
       openPatentsSupports(kinds);
@@ -5783,7 +6648,7 @@ function openCardModal(card, kind, slotIdx, { readOnly = false } = {}) {
     }
     for (const s of candidates) {
       const f = getFactory(s.id);
-      if (!f || f.ownerId !== myOwnerId() || f.spectralType !== cardSpectral) continue;
+      if (!f || !iCanUseFactory(f) || f.spectralType !== cardSpectral) continue;
       const outpostsHere = Object.values(getOutposts()).filter((o) => o.siteId === s.id);
       if (outpostsHere.length > 0 || exoFreeSlots.length > 0) {
         exoSite = s; exoFactory = f; exoOutposts = outpostsHere;
@@ -5842,6 +6707,13 @@ function wireSidebar() {
   if (!panel || !tabs || !close) return;
 
   for (const btn of tabs.querySelectorAll('button')) {
+    // Swap the placeholder emoji for the custom icon (keeps title / aria-label /
+    // hidden attrs; the unread badge is CSS, so innerHTML is safe to set).
+    const iconName = btn.id === 'sidepanel-search' ? 'search'
+      : btn.id === 'sidepanel-config' ? 'config'
+        : btn.dataset.pane;
+    const ico = iconName && uiIcon(iconName);
+    if (ico) btn.innerHTML = ico;
     // The 🔍 search button isn't a pane - it opens the search modal.
     if (btn.id === 'sidepanel-search') {
       btn.addEventListener('click', () => { _openMapSearch?.(); });
@@ -5878,6 +6750,8 @@ function showPane(pane) {
   for (const btn of panel.querySelectorAll('.sidepanel-tabs button')) {
     btn.classList.toggle('active', btn.dataset.pane === pane);
   }
+  // Re-tint the politics tab icon's outline for its new selected state.
+  updateAssemblyTabIcon(_onlineSnapshot);
   for (const el of panel.querySelectorAll('.panel-pane')) {
     el.classList.toggle('active', el.dataset.pane === pane);
   }
@@ -6420,7 +7294,7 @@ function ensureMapShell(host) {
       </div>
       <div class="map-search">
         <input id="map-search-input" type="text" autocomplete="off"
-          spellcheck="false" placeholder="Find site…" />
+          spellcheck="false" placeholder="Find site or node id…" />
         <button id="map-search-go" title="Fly to site"
           aria-label="Fly to site">🔍</button>
         <button id="map-search-close" class="map-search-close"
@@ -7226,20 +8100,27 @@ function wireSearch(host) {
   closeBtn?.addEventListener('click', closeSearchModal);
   backdrop?.addEventListener('click', closeSearchModal);
 
+  // Search by NAME (named sites only) OR by node id (every node, waypoints
+  // included - burns, lagranges, hohmanns, etc., which have ids but no name).
+  // Ranking: name starts-with, name includes, id starts-with, id includes.
   function searchSites(q) {
     if (!_activeData || !q) return [];
     const ql = q.toLowerCase().trim();
     if (!ql) return [];
-    const startsWith = [];
-    const includes   = [];
+    const nameStarts = []; const nameIncl = []; const idStarts = []; const idIncl = [];
+    const seen = new Set();
     for (const s of _activeData.sites) {
-      if (s.isWaypoint || !s.name) continue;
-      const nl = s.name.toLowerCase();
-      if (nl.startsWith(ql))       startsWith.push(s);
-      else if (nl.includes(ql))    includes.push(s);
-      if (startsWith.length + includes.length >= 32) break;
+      if (seen.has(s)) continue;
+      const nm = (!s.isWaypoint && s.name) ? s.name.toLowerCase() : '';
+      if (nm.startsWith(ql)) { nameStarts.push(s); seen.add(s); continue; }
+      if (nm.includes(ql)) { nameIncl.push(s); seen.add(s); continue; }
+      const id2 = String(s.id2 || '').toLowerCase();
+      const id = String(s.id || '').toLowerCase();
+      if (id2.startsWith(ql) || id.startsWith(ql)) { idStarts.push(s); seen.add(s); continue; }
+      if (id2.includes(ql) || id.includes(ql)) { idIncl.push(s); seen.add(s); }
+      if (nameStarts.length + nameIncl.length + idStarts.length + idIncl.length >= 60) break;
     }
-    return startsWith.concat(includes).slice(0, 8);
+    return nameStarts.concat(nameIncl, idStarts, idIncl).slice(0, 12);
   }
 
   function renderList(items) {
@@ -7250,8 +8131,10 @@ function wireSearch(host) {
     items.forEach((s, i) => {
       const li = document.createElement('li');
       li.innerHTML = `<strong></strong> <em></em>`;
-      li.querySelector('strong').textContent = s.name;
-      li.querySelector('em').textContent = s.type;
+      const nodeId = s.id2 || s.id || '';
+      // Named site -> name + type; a bare node -> its id + type.
+      li.querySelector('strong').textContent = s.name || ('id: ' + nodeId);
+      li.querySelector('em').textContent = s.name ? `${s.type} · ${nodeId}` : (s.type || 'node');
       li.classList.toggle('active', i === activeIndex);
       li.addEventListener('mousedown', (e) => {
         // mousedown not click so the input doesn't blur before we
@@ -7273,7 +8156,7 @@ function wireSearch(host) {
   function pickItem(site) {
     if (!site || !_renderer) return;
     _renderer.flyTo(site, locateZoom(SEARCH_FLY_ZOOM));
-    input.value = site.name;
+    input.value = site.name || (site.id2 || site.id || '');
     list.classList.add('hidden');
     closeSearchModal();
   }
@@ -7392,6 +8275,7 @@ async function mountMapFor() {
       _renderer.focusRocketWhenKnown();
     }
     _renderer.onSandboxRocketClick = () => openRocketStackModal();
+    _renderer.onSiteNotes = (siteId, siteName) => openSiteNotesModal(siteId, siteName);
     wireDebugPanel(_renderer);
     wireMapInsets(_renderer);
     // Hand the canonical zone polygons + palette to the renderer so
@@ -7500,15 +8384,24 @@ function chainKindIcon(kind, size = 13) {
 // language as the All cards view, via cardGlanceSummary) with a chain ring
 // (orange = the active root card, green = a card supporting it) and a ✓ / ✗
 // validity pill (rule 4). Clicking opens the card read-only.
-function chainChip(card, face, kind, { ring, valid } = {}) {
+function chainChip(card, face, kind, { ring, valid, radSide } = {}) {
   // Patents read the INSTALLED face's name too: a flipped card is a different
   // tech (Flywheel Tractor's black side is Electrophoretic Sandworm), and the
   // chip must match the card the modal shows.
   const name = (card.faces && card.faces[face] && card.faces[face].name)
     || card.name || card.id;
-  const g = cardGlanceSummary(card, face);
+  const g = cardGlanceSummary(card, face, radSide);
   const statHtml = g.hasStats ? g.statsHtml : esc(kind === 'crew' ? 'crew' : (card.type || 'card'));
-  const massHtml = Number.isFinite(card.mass) ? '<span class="acc-mass">m' + card.mass + '</span>' : '';
+  // A radiator's mass is its DEPLOYED side's mass (light vs heavy) on the
+  // INSTALLED face (a flipped radiator's black tech has its own light/heavy
+  // masses), not the fixed card.mass; show the side that's actually in the stack.
+  let massVal = card.mass;
+  const radFace = card.faces && (card.faces[face] || card.faces.primary);
+  if (card.type === 'radiator' && radFace) {
+    const blk = radFace[radSide === 'light' ? 'light' : 'heavy'];
+    if (blk && blk.mass != null) massVal = blk.mass;
+  }
+  const massHtml = Number.isFinite(massVal) ? '<span class="acc-mass">m' + massVal + '</span>' : '';
   const chip = document.createElement('button');
   chip.type = 'button';
   chip.className = 'all-cards-chip chain-chip kind-' + kind
@@ -7639,7 +8532,7 @@ function buildSupportChainViz(host, lookup) {
       if (card) {
         const ring = isActive ? 'active' : 'support';
         li.appendChild(chainChip(card, slot ? slot.face : 'primary', kind,
-          { ring, valid: isRef ? null : valid }));
+          { ring, valid: isRef ? null : valid, radSide: slot ? slot.radSide : undefined }));
       } else {
         const ph = document.createElement('div');
         ph.className = 'all-cards-chip chain-chip';
@@ -8216,7 +9109,9 @@ function openRocketStackModal() {
         close();
         openPatentsSupports(kinds);
       };
-      wrap.appendChild(renderCard(card, cardOpts));
+      const cardEl = renderCard(card, cardOpts);
+      makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face);
+      wrap.appendChild(cardEl);
 
       const actions = document.createElement('div');
       actions.className = 'rocket-slot-actions';
@@ -9686,24 +10581,78 @@ async function doConvertToOutpost(site) {
 }
 
 
-// Pump water from a colocated outpost into the rocket tank. Prompts for
-// an amount (capped by the outpost's water + the rocket's tank room),
-// then routes through the server (TRANSFER_FUEL) online or mutates the
-// local stacks in solo.
-async function doPumpOutpostFuel(letter, max) {
+// Pump water from the ROCKET tank into a colocated outpost (store it there).
+// Whole units only; a sub-1 remainder stays in the rocket. Server-routed online.
+async function doPumpFuelToOutpost(letter, max, amount = null) {
   if (max <= 0) return;
-  const amount = await pickFuelAmount({
-    title: `💧 Pump fuel from Outpost ${letter}`,
-    max,
-  });
-  if (!amount) return;
+  const amt0 = amount != null ? Math.min(amount, max)
+    : await pickFuelAmount({ title: `💧 Store fuel in Outpost ${letter}`, max });
+  if (!amt0) return;
   if (_online) {
-    await submitOnlineOp({ kind: 'TRANSFER_FUEL', letter, amount });
+    await submitOnlineOp({ kind: 'TRANSFER_FUEL', letter, amount: amt0, direction: 'toOutpost' });
     return;
   }
   const op = getOutpost(letter);
   if (!op) return;
-  const amt = Math.min(amount, op.tank | 0, max);
+  const amt = Math.min(amt0, Math.floor(getTankWater()), max);
+  if (amt <= 0) return;
+  removeFuel(amt);
+  setOutpostTank(letter, (op.tank | 0) + amt);
+  setStatus(`💧 Stored ${amt} water from the rocket in Outpost ${letter}.`);
+}
+
+// Outpost water transfer for the ROCKET fuel-tank modal: one block per
+// colocated outpost, styled like the LEO aqua-bank widget (two directions:
+// Outpost -> Tank +1/+5/Max fill, Tank -> Outpost -1/-5/Store all). The buttons
+// transfer immediately and the section refreshes in place.
+function fuelTankOutpostSections() {
+  const rs = getRocketSite();
+  if (!rs || getRocketStack().length === 0) return '';
+  let html = '';
+  for (const letter of OUTPOST_LETTERS) {
+    const op = getOutpost(letter);
+    if (!op || op.siteId !== rs.id) continue;
+    const L = esc(letter);
+    html += `<div class="fuel-tank-aqua ft-outpost" data-letter="${L}">
+      <div class="aqua-row"><span>🏛 Outpost ${L}</span><strong class="ft-op-bal">${op.tank | 0}</strong></div>
+      <p class="muted aqua-help">At this site you can move water between Outpost ${L} and the rocket tank, 1:1, for free.</p>
+      <div class="aqua-direction">
+        <span class="aqua-direction-label">🏛 Outpost → 💧 Tank</span>
+        <div class="aqua-actions">
+          <button type="button" class="popup-btn popup-btn-secondary ft-op-btn" data-dir="in" data-amt="1">+1</button>
+          <button type="button" class="popup-btn popup-btn-secondary ft-op-btn" data-dir="in" data-amt="5">+5</button>
+          <button type="button" class="popup-btn ft-op-btn" data-dir="in" data-amt="max">Max fill</button>
+        </div>
+      </div>
+      <div class="aqua-direction aqua-direction-reverse">
+        <span class="aqua-direction-label">💧 Tank → 🏛 Outpost</span>
+        <div class="aqua-actions">
+          <button type="button" class="popup-btn popup-btn-secondary ft-op-btn" data-dir="out" data-amt="1">-1</button>
+          <button type="button" class="popup-btn popup-btn-secondary ft-op-btn" data-dir="out" data-amt="5">-5</button>
+          <button type="button" class="popup-btn ft-op-btn" data-dir="out" data-amt="all">Store all</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  return html;
+}
+
+// Pump water from a colocated outpost into the rocket tank. Prompts for
+// an amount (capped by the outpost's water + the rocket's tank room),
+// then routes through the server (TRANSFER_FUEL) online or mutates the
+// local stacks in solo.
+async function doPumpOutpostFuel(letter, max, amount = null) {
+  if (max <= 0) return;
+  const amt0 = amount != null ? Math.min(amount, max)
+    : await pickFuelAmount({ title: `💧 Pump fuel from Outpost ${letter}`, max });
+  if (!amt0) return;
+  if (_online) {
+    await submitOnlineOp({ kind: 'TRANSFER_FUEL', letter, amount: amt0 });
+    return;
+  }
+  const op = getOutpost(letter);
+  if (!op) return;
+  const amt = Math.min(amt0, op.tank | 0, max);
   if (amt <= 0) return;
   setOutpostTank(letter, (op.tank | 0) - amt);
   addFuel(amt);
@@ -9728,23 +10677,19 @@ function outpostPumpBtnHtml(stackId) {
   return `<button type="button" class="modal-btn stack stack-pump-fuel" data-letter="${esc(letter)}" data-max="${max}" ${disabled} title="${title}">💧 Pump ${max > 0 ? max + ' ' : ''}→ rocket</button>`;
 }
 
-// Pump buttons for the ROCKET fuel-tank modal: one per colocated outpost
-// that holds water (when the rocket has tank room). This is where players
-// look to fill the rocket, so the outpost-water source surfaces here too.
-function fuelTankPumpBtns() {
+// Footer button for the outpost inspector: store the colocated rocket's water
+// IN this outpost (reverse of the pump-to-rocket button). Empty string when not
+// applicable (not an outpost, no rocket here, or the rocket has no water).
+function outpostFillBtnHtml(stackId) {
+  if (!stackId.startsWith('outpost')) return '';
+  const letter = stackId.slice('outpost'.length);
+  const op = getOutpost(letter);
+  if (!op) return '';
   const rs = getRocketSite();
-  if (!rs || getRocketStack().length === 0) return '';
-  const totals = getStackTotals();
-  const room = Math.max(0, getTankMax() - (totals.dryMass || 0) - getTankWater());
-  if (room <= 0) return '';
-  let html = '';
-  for (const letter of OUTPOST_LETTERS) {
-    const op = getOutpost(letter);
-    if (!op || op.siteId !== rs.id || (op.tank | 0) <= 0) continue;
-    const max = Math.min(op.tank | 0, room);
-    html += `<button type="button" class="popup-btn fuel-pump-from" data-letter="${esc(letter)}" data-max="${max}" title="Pump up to ${max} water from Outpost ${esc(letter)} into the rocket">💧⤒ Pump from Outpost ${esc(letter)} (${op.tank})</button>`;
-  }
-  return html;
+  if (!rs || rs.id !== op.siteId || getRocketStack().length === 0) return '';
+  const have = Math.floor(getTankWater());
+  if (have <= 0) return '';
+  return `<button type="button" class="modal-btn stack stack-fill-fuel" data-letter="${esc(letter)}" data-max="${have}" title="Store up to ${have} water from the rocket here">💧 Fill ${have} ← rocket</button>`;
 }
 
 // Footer button for an EMPTY outpost: decommission (dissolve) it to free
@@ -9783,10 +10728,12 @@ function pickFuelAmount({ title = '💧 Transfer water', max = 1 } = {}) {
     panel.innerHTML = `
       <h3>${esc(title)}</h3>
       <div class="dump-stepper">
-        <button type="button" class="popup-btn popup-btn-secondary fa-step" data-step="-1" aria-label="Less">−</button>
+        <button type="button" class="popup-btn popup-btn-secondary fa-step" data-step="-5" aria-label="Less 5">−5</button>
+        <button type="button" class="popup-btn popup-btn-secondary fa-step" data-step="-1" aria-label="Less 1">−1</button>
         <input type="number" class="fa-amount" min="1" max="${max}" value="${amount}" inputmode="numeric" aria-label="Water to transfer" />
-        <button type="button" class="popup-btn popup-btn-secondary fa-step" data-step="1" aria-label="More">+</button>
-        <button type="button" class="popup-btn fa-all" title="Transfer the maximum">All (${max})</button>
+        <button type="button" class="popup-btn popup-btn-secondary fa-step" data-step="1" aria-label="More 1">+1</button>
+        <button type="button" class="popup-btn popup-btn-secondary fa-step" data-step="5" aria-label="More 5">+5</button>
+        <button type="button" class="popup-btn fa-all" title="Transfer the maximum">Max (${max})</button>
       </div>
       <div class="turn-confirm-actions">
         <button type="button" class="popup-btn primary" data-act="yes">💧 Transfer <span class="fa-n">${amount}</span></button>
@@ -10036,19 +10983,29 @@ function openOpsMenu() {
     b.addEventListener('click', () => { close(); fn(); });
     now.appendChild(b);
   };
-  addOp('💰 Income (+1 aqua)', 'Take 1 Aqua from the Pool into your Bank. Costs one operation.', doIncomeOp);
+  const m0On = !!(_onlineSnapshot && _onlineSnapshot.m0);
+  // M0 replaces Income with Fundraise (opens the assembly window to act). Off M0
+  // it's the plain Income op.
+  if (m0On) {
+    addOp('🏛 Fundraise', 'Open the assembly: place / move a delegate and gain aqua. Costs one operation.',
+      () => openAssemblyModal('fundraise'));
+  } else {
+    addOp('💰 Income (+1 aqua)', 'Take 1 Aqua from the Pool into your Bank. Costs one operation.', doIncomeOp);
+  }
   addOp('🎯 Research Auction', 'Open the card market / auction. Costs one operation.', doResearchAuction);
   if (market) {
     addOp(`💱 Free Market (+${FREE_MARKET_AQUA} aqua)`,
       handN > 0 ? 'Sell a hand card for aqua. Costs one operation.' : 'No hand cards to sell.',
       doFreeMarket, handN > 0);
   }
-  // Pass: take no other operation. Passing banks income (+1 aqua) and ends
-  // the turn in one tap - the default when you don't want to spend the op
-  // on anything else.
-  addOp('⏭ Pass &amp; take income (+1 aqua)',
-    'Take no other operation: bank +1 aqua and end your turn.',
-    passTurn);
+  // Pass: take no other operation. Passing banks income (+1 aqua) and ends the
+  // turn in one tap. Removed under M0 (income is the Fundraise operation there,
+  // so there is no plain pass-for-income).
+  if (!m0On) {
+    addOp('⏭ Pass &amp; take income (+1 aqua)',
+      'Take no other operation: bank +1 aqua and end your turn.',
+      passTurn);
+  }
 
   // Site-op shortcuts: sites where a site-op is possible (your
   // factories - refuel / ET / colonize; claimed discs without a
@@ -10066,10 +11023,14 @@ function openOpsMenu() {
     opSites.push({ site: landed, hint: '🛸 landed here · prospect / refuel' });
   }
   for (const f of (allFactories() || [])) {
-    if (f.ownerId !== myOwnerId() || seen.has(f.siteId)) continue;
+    // Individuality (Freedom to Roam) surfaces an opponent's factory too: refuel /
+    // ET / deliver work there (colonize stays owner-only, gated in the popup).
+    const mineFac = f.ownerId === myOwnerId();
+    if ((!mineFac && !iCanUseLaw('individuality')) || seen.has(f.siteId)) continue;
     const site = siteById(f.siteId); if (!site) continue;
     seen.add(f.siteId);
-    opSites.push({ site, hint: `🏭 factory${getColony(f.siteId) ? ' + 🌐' : ''} · refuel / ET / deliver / colonize` });
+    const acts = mineFac ? 'refuel / ET / deliver / colonize' : 'refuel / ET / deliver (Freedom to Roam)';
+    opSites.push({ site, hint: `🏭 factory${getColony(f.siteId) ? ' + 🌐' : ''} · ${acts}` });
   }
   // getDiscs() is a { siteId: disc } map, not an array.
   const discs = getDiscs() || {};
@@ -10134,7 +11095,13 @@ function doFreeMarket() {
       // Online: Free Market is the server FREE_MARKET op (sells the
       // card, credits aqua, spends the op). Submit + re-hydrate; skip
       // the local mutation that never persisted.
-      if (_online) { submitOnlineOp({ kind: 'FREE_MARKET', cardId }); return; }
+      if (_online) {
+        // Freedom (Free Trade Act): offer pairing this card with a second for 5.
+        const first = cardById(cardId);
+        if (first && iCanUseLaw('freedom')) { openFreeTradeModal(first); return; }
+        submitOnlineOp({ kind: 'FREE_MARKET', cardId });
+        return;
+      }
       if (!requireOp('Free Market')) return;
       const card = cardById(cardId);
       if (!card) {
@@ -10268,6 +11235,33 @@ function myOwnerId() {
   return _online ? (_onlineMe && _onlineMe.id) : SANDBOX_OWNER_ID;
 }
 
+// The M0 ideology laws THIS player may benefit from right now: a law in force
+// where they hold a delegate, plus any they spent a Lobby free action on this
+// turn. Mirror of the server's playerCanUseLaw, read off the cached snapshot.
+// Empty when not online or not an M0 game.
+function myActiveLaws() {
+  const snap = _onlineSnapshot;
+  if (!_online || !snap || !snap.m0 || !snap.assembly) return new Set();
+  const myId = _onlineMe && _onlineMe.id;
+  const dmap = snap.assembly.delegates || {};
+  const me = (snap.players || []).find((p) => p.profileId === myId);
+  const usable = new Set(Array.isArray(me && me.lobbiedLaws) ? me.lobbiedLaws : []);
+  for (const key of assemblyActiveLaws(snap.assembly, snap.activeLawStar).active) {
+    if (((dmap[key] || {})[myId] | 0) > 0) usable.add(key);
+  }
+  return usable;
+}
+function iCanUseLaw(key) { return myActiveLaws().has(key); }
+// May this player USE the given factory for a NON-VICTORY op (Site Refuel, ET
+// Produce, Delivery)? Their own always; an opponent's only under Individuality
+// (Freedom to Roam). Mirror of the server's canUseFactoryNonVictory. Victory
+// builds (Homesteading a colony) stay owner-only and must NOT call this.
+function iCanUseFactory(factory) {
+  if (!factory) return false;
+  if (factory.ownerId === myOwnerId()) return true;
+  return iCanUseLaw('individuality');
+}
+
 // Industrialize handler (rulebook I7). The caller has already
 // validated that the rocket is parked at a claimed site with no
 // existing factory AND that findIndustrializeOptions(stack)
@@ -10279,6 +11273,51 @@ function myOwnerId() {
 // doesn't burn the turn. The chain cards are removed from the
 // stack in reverse-index order so splices don't shift indices
 // we haven't visited yet.
+// Out of cubes for a factory: pick a delegate on the assembly to remove (frees
+// one cube). Resolves the chosen place, or null if cancelled. M0 only.
+function promptFreeDelegate(snapshot) {
+  return new Promise((resolve) => {
+    const myId = _onlineMe && _onlineMe.id;
+    const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
+    const places = ASSEMBLY_PLACES.filter((p) => ((dmap[p] || {})[myId] | 0) > 0);
+    if (!places.length) { _onlineToast('No delegates to remove - all 7 cubes are factories.', 'error'); resolve(null); return; }
+    const back = document.createElement('div');
+    back.className = 'mp-modal-back';
+    const modal = document.createElement('div');
+    modal.className = 'mp-trade-builder-modal';
+    modal.style.maxWidth = '420px';
+    const done = (v) => { back.remove(); resolve(v); };
+    const h = document.createElement('div');
+    h.className = 'mp-trade-head';
+    h.innerHTML = '<h3>No cubes left</h3>';
+    modal.appendChild(h);
+    const note = document.createElement('div');
+    note.className = 'mp-trade-colo no-colo';
+    note.textContent = 'All 7 of your cubes are in play. Remove a delegate from the assembly to free a cube for this factory.';
+    modal.appendChild(note);
+    const list = document.createElement('div');
+    list.className = 'mp-relocate-list';
+    for (const p of places) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'modal-btn mp-relocate-item';
+      b.textContent = 'Remove from ' + (p === 'centrist' ? 'Centrist' : (ASSEMBLY_IDEOLOGY_BY_KEY[p] || {}).name || p);
+      b.addEventListener('click', () => done(p));
+      list.appendChild(b);
+    }
+    modal.appendChild(list);
+    const btns = document.createElement('div');
+    btns.className = 'mp-trade-btns';
+    const cancel = document.createElement('button');
+    cancel.type = 'button'; cancel.className = 'modal-btn'; cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', () => done(null));
+    btns.appendChild(cancel);
+    modal.appendChild(btns);
+    back.appendChild(modal);
+    back.addEventListener('click', (e) => { if (e.target === back) done(null); });
+    document.body.appendChild(back);
+  });
+}
+
 function doIndustrialize(site, stack, options) {
   openIndustrializeModal({
     siteName: site.name,
@@ -10293,6 +11332,15 @@ function doIndustrialize(site, stack, options) {
         const sid = toServerId(_onlineMaps, site.id);
         if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
         const cardIds = opt.chainIndices.map((idx) => stack[idx] && stack[idx].id).filter(Boolean);
+        const snap = _onlineSnapshot || {};
+        // Shared 7-cube pool: a factory needs a free cube. If the pool is full
+        // (M0 delegates competing), offer to free one by removing a delegate.
+        if (snap.m0 && myCubesFree(snap) <= 0) {
+          promptFreeDelegate(snap).then((place) => {
+            if (place) submitOnlineOp({ kind: 'INDUSTRIALIZE', siteId: sid, cardIds, freeDelegate: place });
+          });
+          return;
+        }
         submitOnlineOp({ kind: 'INDUSTRIALIZE', siteId: sid, cardIds });
         return;
       }
@@ -11054,8 +12102,8 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     <div class="fuel-tank-actions">
       ${tankDirt ? '' : `<button type="button" class="popup-btn popup-btn-secondary" id="tank-dump"
         title="Drain a chosen amount of water from the tank">💧⤓ Dump water</button>`}
-      ${tankDirt ? '' : fuelTankPumpBtns()}
     </div>
+    ${tankDirt ? '' : fuelTankOutpostSections()}
 <div class="fuel-tank-aqua" id="tank-aqua-section" hidden>
       <div class="aqua-row">
         <span>🏦 Aqua bank</span>
@@ -11389,16 +12437,6 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     if (dumpBtn) dumpBtn.disabled = cur <= 0;
   };
   refreshDumpButtons();
-  // Pump-from-outpost buttons (when a colocated outpost holds water).
-  panel.querySelectorAll('.fuel-pump-from').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const letter = btn.dataset.letter;
-      const max = Number(btn.dataset.max) || 0;
-      if (max <= 0) return;
-      close();
-      doPumpOutpostFuel(letter, max);
-    });
-  });
   function drainTo(targetLevel, durationMs = 250) {
     // Hand off to the unified tween: the continuous step picks
     // it up next frame and animates setLevel without disturbing
@@ -11571,6 +12609,99 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   aquaCash5Btn?.addEventListener('click',   (e) => cashOutToAqua(5, e));
   aquaCashAllBtn?.addEventListener('click', (e) => cashOutToAqua(getTankWater(), e));
 
+  // Outpost <-> tank transfer. Mirrors the aqua-bank widget above (same
+  // two-direction layout, same tween) but moves water between a colocated
+  // outpost and the rocket tank, 1:1, for free. Whole units only; a sub-1
+  // remainder stays in the rocket. Each section refreshes in place.
+  const outpostSections = panel.querySelectorAll('.ft-outpost');
+  const refreshOutpostSections = () => {
+    const room = Math.max(0, cap - getTankWater());
+    const tankWhole = Math.floor(getTankWater());
+    outpostSections.forEach((sec) => {
+      const letter = sec.dataset.letter;
+      const op = getOutpost(letter);
+      if (!op) { sec.hidden = true; return; }
+      const opWater = op.tank | 0;
+      const bal = sec.querySelector('.ft-op-bal');
+      if (bal) bal.textContent = String(opWater);
+      sec.querySelectorAll('.ft-op-btn').forEach((btn) => {
+        const dir = btn.dataset.dir;
+        const amt = btn.dataset.amt;
+        if (dir === 'in') {
+          // Outpost -> Tank: need outpost water + tank room.
+          const need = amt === 'max' ? 1 : Number(amt);
+          btn.disabled = opWater < need || room < 1;
+        } else {
+          // Tank -> Outpost: need whole water units in the tank.
+          const need = amt === 'all' ? 1 : Number(amt);
+          btn.disabled = tankWhole < need;
+        }
+      });
+    });
+  };
+  refreshOutpostSections();
+  const pumpOutpostIn = async (letter, amt, e) => {
+    e?.stopPropagation();
+    const op = getOutpost(letter);
+    if (!op) return;
+    const room = Math.max(0, cap - getTankWater());
+    const max = Math.min(op.tank | 0, room);
+    const want = amt === 'max' ? max : Math.min(amt, max);
+    if (want <= 0) { refreshOutpostSections(); return; }
+    if (_online) {
+      const ok = await submitOnlineOp({ kind: 'TRANSFER_FUEL', letter, amount: want });
+      if (!ok) { refreshOutpostSections(); return; }
+      animateTankLevel();
+      refreshOutpostSections();
+      return;
+    }
+    setOutpostTank(letter, (op.tank | 0) - want);
+    addFuel(want);
+    animateTankLevel();
+    refreshOutpostSections();
+    logAction({
+      type: 'fuel_transfer', icon: '💧',
+      summary: `Pumped ${want} water from Outpost ${letter} into the rocket`,
+      undoable: false,
+    });
+  };
+  const storeOutpostOut = async (letter, amt, e) => {
+    e?.stopPropagation();
+    const op = getOutpost(letter);
+    if (!op) return;
+    const tankWhole = Math.floor(getTankWater());
+    const want = amt === 'all' ? tankWhole : Math.min(amt, tankWhole);
+    if (want <= 0) { refreshOutpostSections(); return; }
+    if (_online) {
+      const ok = await submitOnlineOp({ kind: 'TRANSFER_FUEL', letter, amount: want, direction: 'toOutpost' });
+      if (!ok) { refreshOutpostSections(); return; }
+      animateTankLevel();
+      refreshOutpostSections();
+      return;
+    }
+    removeFuel(want);
+    setOutpostTank(letter, (op.tank | 0) + want);
+    animateTankLevel();
+    refreshOutpostSections();
+    logAction({
+      type: 'fuel_transfer', icon: '💧',
+      summary: `Stored ${want} water from the rocket in Outpost ${letter}`,
+      undoable: false,
+    });
+  };
+  outpostSections.forEach((sec) => {
+    const letter = sec.dataset.letter;
+    sec.querySelectorAll('.ft-op-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const dir = btn.dataset.dir;
+        const amtRaw = btn.dataset.amt;
+        const amt = (amtRaw === 'max' || amtRaw === 'all') ? amtRaw : Number(amtRaw);
+        if (dir === 'in') pumpOutpostIn(letter, amt, e);
+        else storeOutpostOut(letter, amt, e);
+      });
+    });
+  });
+
   // Dirt refuel section: shown when the ACTIVE engine is a dirt thruster.
   // Loading dirt is fueling that engine, so it lives here next to the water
   // controls (never the site popup). Dirt scoops free from the ground at a
@@ -11707,7 +12838,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   dirtDumpAll?.addEventListener('click', (e) => dumpDirt(getTankWater(), e));
 
   const unsubAqua = onAquaChange(refreshAquaButtons);
-  const unsubRocket = onRocketChange(() => { refreshAquaButtons(); refreshDirtButtons(); });
+  const unsubRocket = onRocketChange(() => { refreshAquaButtons(); refreshDirtButtons(); refreshOutpostSections(); });
   // Cleanup: detach listeners when the overlay tears down so a
   // closed modal doesn't keep responding to balance changes.
   const origRemove = overlay.remove.bind(overlay);
@@ -11770,6 +12901,12 @@ async function discardHandCard(card, idx, afterFn) {
 // (e.g. to close the card popup).
 function freeMarketSellFromHand(card, afterFn) {
   if (!card) return;
+  // Freedom (Free Trade Act): online, when the law is usable, offer to pair this
+  // card with a second hand card and sell BOTH for 5 aqua (else 1 for 3).
+  if (_online && iCanUseLaw('freedom')) {
+    openFreeTradeModal(card, afterFn);
+    return;
+  }
   openSellConfirmModal({
     card,
     aqua: FREE_MARKET_AQUA,
@@ -11800,6 +12937,78 @@ function freeMarketSellFromHand(card, afterFn) {
       if (afterFn) afterFn();
     },
   });
+}
+
+// Freedom (Free Trade Act): sell the chosen Hand card alone for 3 aqua, or pair
+// it with one more Hand card and sell BOTH for 5. Online-only (the law lives on
+// the server snapshot). Submits FREE_MARKET with cardId (1) or cardIds (2).
+function openFreeTradeModal(firstCard, afterFn) {
+  const others = getHandSlots().filter((id) => id !== firstCard.id);
+  let second = null;
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal';
+  modal.style.maxWidth = '460px';
+  const close = () => back.remove();
+  const h = document.createElement('div');
+  h.className = 'mp-trade-head';
+  h.innerHTML = '<h3>💱 Free Market - Free Trade Act</h3>';
+  modal.appendChild(h);
+  const note = document.createElement('div');
+  note.className = 'mp-trade-colo no-colo';
+  note.innerHTML = `Sell <strong>${esc(firstCard.name)}</strong> alone for <strong>+3</strong> aqua, `
+    + 'or add a second Hand card and sell both for <strong>+5</strong>.';
+  modal.appendChild(note);
+  const list = document.createElement('div');
+  list.className = 'mp-relocate-list';
+  const sellTwo = document.createElement('button');
+  for (const id of others) {
+    const c = PATENTS_BY_ID[id];
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'modal-btn mp-relocate-item';
+    b.textContent = (c && c.name) || id;
+    b.addEventListener('click', () => {
+      second = (second === id) ? null : id;
+      for (const el of list.children) el.classList.remove('is-selected');
+      if (second) b.classList.add('is-selected');
+      sellTwo.disabled = !second || _onlineBusy;
+      sellTwo.textContent = second ? 'Sell 2 for +5' : 'Pick a 2nd card';
+    });
+    list.appendChild(b);
+  }
+  if (others.length) modal.appendChild(list);
+  const btns = document.createElement('div');
+  btns.className = 'mp-trade-btns';
+  const sellOne = document.createElement('button');
+  sellOne.type = 'button'; sellOne.className = 'modal-btn';
+  sellOne.textContent = 'Sell 1 for +3';
+  sellOne.disabled = _onlineBusy;
+  sellOne.addEventListener('click', () => {
+    close();
+    submitOnlineOp({ kind: 'FREE_MARKET', cardId: firstCard.id });
+    if (afterFn) afterFn();
+  });
+  sellTwo.type = 'button'; sellTwo.className = 'modal-btn primary';
+  sellTwo.textContent = 'Pick a 2nd card';
+  sellTwo.disabled = true;
+  sellTwo.addEventListener('click', () => {
+    if (!second) return;
+    close();
+    submitOnlineOp({ kind: 'FREE_MARKET', cardIds: [firstCard.id, second] });
+    if (afterFn) afterFn();
+  });
+  const cancel = document.createElement('button');
+  cancel.type = 'button'; cancel.className = 'modal-btn'; cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', close);
+  btns.appendChild(sellOne);
+  if (others.length) btns.appendChild(sellTwo);
+  btns.appendChild(cancel);
+  modal.appendChild(btns);
+  back.appendChild(modal);
+  back.addEventListener('click', (ev) => { if (ev.target === back) close(); });
+  document.body.appendChild(back);
 }
 
 // At the 9-claim cap: pick one of my placed discs to move to the new spot.
@@ -13372,8 +14581,13 @@ async function moveRocket() {
   // move-queue below, in route order, so an early rad failure
   // can stop the ship before a later generic hazard is reached.
   const hazards = routeHazards(turn1);
+  // A safe-aerobrake card (parachute generator) aboard rides the stack through
+  // aerobrake corridors with no roll - matching the server, which waives them -
+  // so don't prompt pay/roll for venus (aerobrake) nodes. Skull / radiation are
+  // unaffected. The ability activates by being aboard (no support chain needed).
+  const safeAero = stackHasPower('safeAerobrake');
   const radHazards     = hazards.filter((h) => h.site.type === 'radhaz');
-  const genericHazards = hazards.filter((h) => h.site.type !== 'radhaz');
+  const genericHazards = hazards.filter((h) => h.site.type !== 'radhaz' && !(safeAero && h.site.type === 'venus'));
   let hazardChoice = null;
   let lockUndo = false;
   // Factory-assist pre-flight. A maneuver where net thrust <= site
@@ -14784,7 +15998,7 @@ function showSitePopupFor(site) {
   // one op per turn anyway.
   if (rocketSite && site.id === rocketSite.id) {
     const factory = getFactory(site.id);
-    if (factory && factory.ownerId === myOwnerId()) {
+    if (iCanUseFactory(factory)) {
       const factoryGain = 7;
       const tank = getTankWater();
       const tmax = getTankMax();
@@ -14810,6 +16024,30 @@ function showSitePopupFor(site) {
           _renderer.clearSitePopup();
         },
       });
+    }
+  }
+  // Outpost Factory-Refuel: store +7 water in one of YOUR outposts at a usable
+  // factory here - no rocket needs to be present (the outpost holds its own
+  // fuel). Online only (server op); shares the one-per-site-per-turn lock.
+  if (_online) {
+    const factory = getFactory(site.id);
+    if (iCanUseFactory(factory)) {
+      const refueledThisTurn = hasRefueledThisTurn(site.id);
+      for (const o of Object.values(getOutposts()).filter((op) => op.siteId === site.id)) {
+        actions.push({
+          label: refueledThisTurn ? `🏭 Outpost ${o.letter} refuel done` : `🏭 Factory-Refuel Outpost ${o.letter} (+7)`,
+          variant: refueledThisTurn ? 'secondary' : 'rocket',
+          disabled: refueledThisTurn,
+          title: refueledThisTurn ? 'Already refueled at this site this turn.' : 'Store +7 water in this outpost (no rocket needed). Costs your operation.',
+          onClick: () => {
+            if (refueledThisTurn) return;
+            const sid = toServerId(_onlineMaps, site.id);
+            if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
+            submitOnlineOp({ kind: 'SITE_REFUEL', siteId: sid, outpost: o.letter });
+            _renderer.clearSitePopup();
+          },
+        });
+      }
     }
   }
   // Dirt refuel is NOT a site-popup action: it lives in the rocket fuel
@@ -14918,7 +16156,7 @@ function showSitePopupFor(site) {
   // "Deliver..." button opens a picker listing every deliverable card.
   {
     const factory = getFactory(site.id);
-    if (factory && factory.ownerId === myOwnerId()) {
+    if (iCanUseFactory(factory)) {
       const cost = deliveryCost(site);
       const items = [];
       for (const op of Object.values(getOutposts())) {
@@ -14964,7 +16202,7 @@ function showSitePopupFor(site) {
   // fresh outpost the player creates inline).
   {
     const factory = getFactory(site.id);
-    if (factory && factory.ownerId === myOwnerId()) {
+    if (iCanUseFactory(factory)) {
       const handIds = getHandSlots();
       const etOptions = findEtProduceOptions(handIds, cardById, factory.spectralType);
       const outpostsAtSite = Object.values(getOutposts()).filter((o) => o.siteId === site.id);
@@ -15623,11 +16861,11 @@ function paintCart() {
 // layered rectangles offset down-right so it reads as a
 // physical pile. Capped at 5 layers (more would just clutter).
 function renderDeckThicknessSvg(deckSize) {
-  const layers = Math.max(1, Math.min(5, Math.ceil(deckSize / 3)));
+  const layers = Math.max(1, Math.min(3, Math.ceil(deckSize / 6)));
   const svgNS = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(svgNS, 'svg');
-  const w = 60, h = 84;
-  const cardW = 38, cardH = 56;
+  const w = 48, h = 64;
+  const cardW = 32, cardH = 46;
   const offset = 4;
   svg.setAttribute('width', String(w));
   svg.setAttribute('height', String(h));
@@ -15651,7 +16889,7 @@ function renderDeckThicknessSvg(deckSize) {
   txt.setAttribute('x', String(2 + cardW / 2));
   txt.setAttribute('y', String(2 + cardH / 2 + 6));
   txt.setAttribute('text-anchor', 'middle');
-  txt.setAttribute('font-size', '20');
+  txt.setAttribute('font-size', '16');
   txt.setAttribute('font-weight', '800');
   txt.setAttribute('fill', '#7dd3fc');
   txt.textContent = String(deckSize);
@@ -16328,8 +17566,8 @@ function takenZoneMap() {
     // front default.
     const side = (banked && banked.side === 'back') ? 'back' : 'front';
     const sides = getChitSides(zone);
-    const vp = (banked && Number.isFinite(banked.vp))
-      ? banked.vp : (side === 'back' ? sides.back : sides.front);
+    // Always derive from the data source (getChitSides), never a stored snapshot.
+    const vp = side === 'back' ? sides.back : sides.front;
     map[zone] = { ...seat, side, vp };
   };
   if (_online && _onlineSnapshot && Array.isArray(_onlineSnapshot.players)) {
@@ -16360,7 +17598,8 @@ function buildZoneBoardChit(zone, takenBy = null) {
     const label = (takenBy.handle && takenBy.name) ? '@' + takenBy.name : (takenBy.name || '');
     const color = takenBy.color || null;
     const side = takenBy.side === 'back' ? 'back' : 'front';
-    const vp = Number.isFinite(takenBy.vp) ? takenBy.vp : (side === 'back' ? sides.back : sides.front);
+    // Always derive from the data source (getChitSides), never a stored snapshot.
+    const vp = side === 'back' ? sides.back : sides.front;
     const wrap = document.createElement('div');
     wrap.className = 'chit-token-wrap';
     wrap.innerHTML = `
@@ -16421,7 +17660,7 @@ function _fmtWater(v) {
   return Number.isInteger(n) ? String(n) : String(Math.round(n * 1000) / 1000);
 }
 
-// Resolve a stack slot (or a bare id) to { id, card, kind, face }.
+// Resolve a stack slot (or a bare id) to { id, card, kind, face, radSide }.
 function _resolveOwnedSlot(slot) {
   const id = typeof slot === 'string' ? slot : (slot && slot.id);
   if (!id) return null;
@@ -16429,7 +17668,10 @@ function _resolveOwnedSlot(slot) {
   if (!card) return null;
   const kind = (slot && slot.kind) || (CREW_BY_ID[id] ? 'crew' : 'patent');
   const face = (slot && slot.face === 'secondary') ? 'secondary' : 'primary';
-  return { id, card, kind, face };
+  // A radiator's mass / therms depend on which side is deployed (light vs
+  // heavy); carry it so the chip reads the installed side, not the fixed mass.
+  const radSide = (slot && typeof slot === 'object' && slot.radSide === 'light') ? 'light' : 'heavy';
+  return { id, card, kind, face, radSide };
 }
 
 // Ordered list of owned-card locations for the All cards view.
@@ -16530,23 +17772,46 @@ function collectOwnedCardsFromPlayer(player) {
 // cardGlanceSummary so the glyph language matches the full card. Click opens
 // the real card.
 function _ownedCardChip(entry) {
-  const { id, card, kind, face } = entry;
-  const name = kind === 'crew'
-    ? ((card.faces && card.faces[face] && card.faces[face].name) || card.name || id)
-    : (card.name || id);
-  const g = cardGlanceSummary(card, face);
+  const { id, card, kind, face, radSide } = entry;
+  // Read the INSTALLED face for the name AND the mass: a flipped (black-side)
+  // card is a different tech with its own name and (62 of 84 cards) its own
+  // mass. Reading card.name / card.mass showed the white side for a black-side
+  // stack. Mirrors chainChip / the full-card renderer.
+  const name = (card.faces && card.faces[face] && card.faces[face].name) || card.name || id;
+  const g = cardGlanceSummary(card, face, radSide);
   const statHtml = g.hasStats ? g.statsHtml : esc(kind === 'crew' ? 'crew' : (card.type || 'card'));
-  const massHtml = Number.isFinite(card.mass)
-    ? '<span class="acc-mass" title="Mass">m' + card.mass + '</span>' : '';
+  // A radiator's mass is its DEPLOYED side's mass (light vs heavy) on the
+  // INSTALLED face (a flipped radiator's black tech has its own light/heavy
+  // masses); everything else reads its installed face's mass, falling back to
+  // the card-level mass.
+  let massVal = card.mass;
+  const radFace = card.faces && (card.faces[face] || card.faces.primary);
+  if (card.type === 'radiator' && radFace) {
+    const blk = radFace[radSide === 'light' ? 'light' : 'heavy'];
+    if (blk && blk.mass != null) massVal = blk.mass;
+  } else if (card.faces && card.faces[face] && card.faces[face].mass != null) {
+    massVal = card.faces[face].mass;
+  }
+  const massHtml = Number.isFinite(massVal)
+    ? '<span class="acc-mass" title="Mass">m' + massVal + '</span>' : '';
+  // A component card flipped to its installed (Tier-2) face is on its BLACK
+  // side - a different tech. Crew faces are independent members, not a black
+  // side, so they never get the marker. Mark black-side chips with the dark
+  // treatment + a ◆ badge so a returning player spots flipped cards at a glance.
+  const blackSide = kind !== 'crew' && face === 'secondary';
+  const sideBadge = blackSide
+    ? '<span class="acc-side" title="Black side (installed / Tier-2 face)">◆ black</span>' : '';
   const chip = document.createElement('button');
   chip.type = 'button';
-  chip.className = 'all-cards-chip kind-' + kind + (kind === 'patent' ? ' type-' + card.type : '');
+  chip.className = 'all-cards-chip kind-' + kind + (kind === 'patent' ? ' type-' + card.type : '')
+    + (blackSide ? ' is-black-side' : '');
   if (kind === 'crew' && card.color) chip.style.setProperty('--chip-color', card.color);
-  chip.title = 'Open ' + name;
+  chip.title = 'Open ' + name + (blackSide ? ' (black side)' : '');
   chip.innerHTML =
     '<div class="acc-top">'
     + (g.icon ? '<span class="acc-ic">' + g.icon + '</span>' : '')
     + '<span class="acc-name">' + esc(name) + '</span>'
+    + sideBadge
     + (g.spectralHtml ? '<span class="acc-spec">' + g.spectralHtml + '</span>' : '')
     + '</div>'
     + '<div class="acc-bot"><span class="acc-stat">' + statHtml + '</span>' + massHtml + '</div>';
@@ -17101,6 +18366,8 @@ const MP_LOG_ICONS = {
   TRADE_OFFER: '🤝', TRADE_COUNTER: '↔', TRADE_ACCEPT: '✅', TRADE_DECLINE: '🚫',
   DRAFT_PICK: '🃏', DRAFT_CYCLE: '♻',
   UNDO: '↩', REDO: '↪',
+  FUNDRAISE: '🗳', LOBBY: '📜',
+  ADMIN_REPAIR: '🔧', ADMIN_EDIT: '🔧',
 };
 
 // Short relative-time string for the log row. Cap at days so the
