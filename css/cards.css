@@ -589,18 +589,29 @@
    future fills the column on the LEFT. The triangle's SVG has transparent side
    margins (the gold is only ~64% of its width), so nudging it right frees a
    clean left column WITHOUT shrinking the triangle or overlapping the gold. */
-.card.type-gw-thruster .card-face[data-face="secondary"] .card-thrust { position: relative; }
-.card.type-gw-thruster .card-face[data-face="secondary"] .thrust-svg { width: 62%; margin-left: 38%; }
+/* Let the thrust area span the full card so the future has the left half; keep
+   the triangle itself at its FULL size (its 130px box) but pin it to the RIGHT.
+   The triangle only fills ~130px of the card, so this frees the left half for
+   the future WITHOUT shrinking or overlapping the gold. */
+.card.type-gw-thruster .card-face[data-face="secondary"] .card-thrust {
+  position: relative;
+  max-width: none;
+}
+.card.type-gw-thruster .card-face[data-face="secondary"] .thrust-visual {
+  max-width: 130px;
+  margin-left: auto;
+  transform: translateX(13px);
+}
 .card-future-side {
   position: absolute;
-  left: 0;
-  top: 3px;
-  width: 47%;
+  left: -2px;
+  top: 4px;
+  width: 51%;
   margin: 0;
   padding: 1px 6px 0 0;
   border-top: none;
   text-align: left;
-  font-size: 6.5px;
+  font-size: 7px;
   line-height: 1.25;
 }
 
