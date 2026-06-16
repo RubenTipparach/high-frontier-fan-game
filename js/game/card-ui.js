@@ -990,10 +990,13 @@ function tvFlame(cx, cy, n) {
 // Open-end wrench: solid head with a U/semicircle jaw notch (notch = wedge bg).
 function tvWrench(cx, cy, s) {
   s = s || 1.25;
+  // Handle + rounded jaw head, with a U-notch cut from the tip. The notch top
+  // runs ABOVE the head so the jaw opens cleanly (no leftover bridge of metal
+  // across the opening).
   return `<g transform="translate(${cx},${cy}) rotate(-28) scale(${s})">`
     + `<rect x="-2.4" y="-1" width="4.8" height="13" rx="2.4" fill="${TVC.wrench}"/>`
     + `<ellipse cx="0" cy="-7" rx="6.2" ry="5.8" fill="${TVC.wrench}"/>`
-    + `<path d="M -3.7 -12.6 L -3.7 -7.2 A 3.7 3.7 0 0 0 3.7 -7.2 L 3.7 -12.6 Z" fill="${TVC.darkTri}"/></g>`;
+    + `<path d="M -3.7 -15 L -3.7 -7.2 A 3.7 3.7 0 0 0 3.7 -7.2 L 3.7 -15 Z" fill="${TVC.darkTri}"/></g>`;
 }
 function tvSun(cx, cy, s) {
   s = s || 1.3;
