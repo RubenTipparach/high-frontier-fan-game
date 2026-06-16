@@ -565,6 +565,29 @@
   color: var(--ink-dim);
   line-height: 1.35;
 }
+/* Future mission: the end-game objective on the Tier-2 (purple) side, rendered
+   as a blue callout with the mission name emphasised. Kept compact so it fits
+   the fixed card height alongside a thrust triangle. */
+.card-future {
+  margin: 1px 0 0;
+  font-size: 8.5px;
+  line-height: 1.25;
+  color: #6cc6ff;
+  border-top: 1px solid rgba(108, 198, 255, 0.35);
+  padding-top: 3px;
+}
+.card-future-head {
+  font-weight: 800;
+  color: #9bd7ff;
+  letter-spacing: 0.2px;
+}
+/* GW Thruster / Freighter faces carry an extra block (the future), so tighten
+   the body's vertical rhythm a touch to make room within the fixed height. */
+.card.type-gw-thruster .card-body,
+.card.type-freighter .card-body { gap: 4px; }
+/* The future callout only rides the purple back, so shrink the thrust triangle
+   a little THERE to fit it (the white front keeps the triangle full size). */
+.card.type-gw-thruster .card-face[data-face="secondary"] .thrust-svg { width: 80%; }
 
 /* Footer is now just a small reserved strip at the bottom of
    the card for the Flip button (and future per-card actions).

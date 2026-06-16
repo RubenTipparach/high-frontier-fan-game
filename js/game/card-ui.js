@@ -603,6 +603,23 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   const meta = (card.faces && card.faces[sideName]) || {};
   face.querySelector('.card-blurb').textContent =
     meta.ability || meta.blurb || card.blurb || '';
+  // Future mission: the end-game objective printed on the Tier-2 (purple /
+  // promoted) side. Rendered as a blue callout below the ability, with the
+  // mission name (before the colon) emphasised. Only the secondary face carries
+  // a `future`, so it never shows on the white side.
+  if (meta.future) {
+    const fut = document.createElement('div');
+    fut.className = 'card-future';
+    const ci = meta.future.indexOf(':');
+    if (ci > 0) {
+      fut.innerHTML = `<span class="card-future-head">${escapeText(meta.future.slice(0, ci))}</span> `
+        + escapeText(meta.future.slice(ci + 1).trim());
+    } else {
+      fut.textContent = meta.future;
+    }
+    const body = face.querySelector('.card-body');
+    if (body) body.appendChild(fut);
+  }
   return face;
 }
 

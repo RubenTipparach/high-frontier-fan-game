@@ -219,6 +219,10 @@ function buildFace(label, tier, type) {
     // primary face's name for the card id and lookup.
     name:       tier.Name || null,
     ability:    tier.Ability || null,
+    // Future mission: an end-game objective printed on the Tier-2 (purple /
+    // promoted) side only. Reference-only for now (futures are expansion), but
+    // the card renderer surfaces it as the blue callout on that face.
+    future:     tier.Future || null,
     requires:   requiresFromFace(tier, type),
     supplies:   suppliesFromFace(tier, type),
     properties: propertiesFromFace(tier),
