@@ -601,7 +601,9 @@ function buildRadiatorFace(card, sideName) {
   const heavy = faceMeta.heavy || {};
   const cardName = faceMeta.name || card.name;
   const ability  = faceMeta.ability || '';
-  const therms = (n) => n > 0 ? thermBadgeSvg(Math.min(8, n), { size: 22 }) : '';
+  // Therm-supply badges in the cyan typebar: kept compact so the radiator's
+  // cyan banner reads clearly (the 50%-larger icon pass washed it out).
+  const therms = (n) => n > 0 ? thermBadgeSvg(Math.min(8, n), { size: 15 }) : '';
 
   // Name sits directly below the typebar so it reads as a
   // banner-and-title pair (matching the published radiator card
