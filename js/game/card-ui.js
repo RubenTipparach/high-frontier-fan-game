@@ -336,7 +336,13 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   face.querySelector('.m').textContent = massVal != null ? massVal : '-';
   face.querySelector('.r').textContent = radVal != null ? radVal : '-';
 
-  face.querySelector('.card-spectral').appendChild(spectralHex(card.spectralType));
+  // Spectral hex shows on both faces normally, but GW Thrusters / Freighters
+  // drop it on their purple (promoted) BACK - that side doesn't use spectral
+  // matching, so the published cards leave it off.
+  const isPromoCard = card.type === 'gw-thruster' || card.type === 'freighter';
+  if (!(isPromoCard && sideName === 'secondary')) {
+    face.querySelector('.card-spectral').appendChild(spectralHex(card.spectralType));
+  }
   // Promotion colony dome - FRONT (white) face only. The purple Tier-2 side is
   // already promoted, so per the published cards it drops the promotion symbol.
   if (sideName === 'primary' && card.promotionColony) {
@@ -758,17 +764,19 @@ function colonyDomeGlyph(promo) {
   const isPush = p.toLowerCase() === 'push';
   const letter = isPush ? '' : p.charAt(0).toUpperCase();
   const gid = 'dome' + (_domeSeq++);
+  // Letter centred on the dome body (dominant-baseline central + text-anchor
+  // middle), not hung off a baseline.
   const inner = isPush
-    ? '<g stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" fill="none"><path d="M-3.4 -3 L0 0.4 L3.4 -3"/><path d="M-3.4 0.4 L0 3.8 L3.4 0.4"/></g>'
-    : `<text x="0" y="3.1" text-anchor="middle" font-size="9.5" font-weight="800" fill="#ffffff" stroke="#0e3f4f" stroke-width="0.6" paint-order="stroke">${escapeText(letter)}</text>`;
+    ? '<g stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" fill="none"><path d="M-4.5 -2.5 L0 2 L4.5 -2.5"/><path d="M-4.5 2.5 L0 7 L4.5 2.5"/></g>'
+    : `<text x="0" y="1.4" text-anchor="middle" dominant-baseline="central" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" font-weight="800" fill="#ffffff" stroke="#0e3f4f" stroke-width="0.7" paint-order="stroke">${escapeText(letter)}</text>`;
   const tip = isPush
     ? 'Promotion: flips to its purple side at a push-sat colony.'
     : `Promotion: flips to its purple side at a ${p} colony.`;
-  const str = `<svg viewBox="-13 -13 26 26" class="colony-dome-glyph" data-tip="${escapeText(tip)}">`
+  const str = `<svg viewBox="-15 -14 30 29" class="colony-dome-glyph" data-tip="${escapeText(tip)}">`
     + `<defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#46c4df"/><stop offset="1" stop-color="#15697f"/></linearGradient></defs>`
-    + '<ellipse cx="0" cy="6" rx="11" ry="2.6" fill="#0c4554"/>'
-    + `<path d="M -10.5 6 A 10.5 10 0 0 1 10.5 6 Z" fill="url(#${gid})" stroke="#0c3a48" stroke-width="1.2"/>`
-    + '<ellipse cx="-3.4" cy="-1.6" rx="3.8" ry="2.4" fill="#ffffff" opacity="0.42"/>'
+    + '<ellipse cx="0" cy="8.5" rx="13" ry="3" fill="#0c4554"/>'
+    + `<path d="M -12.5 8.5 A 12.5 12.5 0 0 1 12.5 8.5 Z" fill="url(#${gid})" stroke="#0c3a48" stroke-width="1.4"/>`
+    + '<ellipse cx="-4.4" cy="-2" rx="4.6" ry="2.8" fill="#ffffff" opacity="0.4"/>'
     + inner
     + '</svg>';
   const tpl = document.createElement('template');
