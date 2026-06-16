@@ -333,6 +333,59 @@ function drawDroplet(ctx, cx, cy, h) {
   ctx.closePath();
 }
 
+// Push-sat marker: a beamed-power relay drawn at (cx, cy), matching
+// the card's push-sat glyph (card-ui.js#tvPushsat) - two solar panels
+// flanking a body + dish, with two downward beam chevrons. `size` is
+// the visual height in screen pixels; the glyph is centred on (cx, cy).
+function drawPushSat(ctx, cx, cy, size) {
+  // Native glyph units span roughly 19 wide x 15 tall; scale so the
+  // height reads about `size`, then centre it vertically (the beams
+  // hang below the body, so shift up a touch).
+  const k = size / 15;
+  ctx.save();
+  ctx.translate(cx, cy - 2.6 * k);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  // Solar panels (left + right).
+  ctx.fillStyle = '#5aa0e0';
+  ctx.strokeStyle = '#cde6ff';
+  ctx.lineWidth = 0.8 * k;
+  for (const px of [-9.5, 3.5]) {
+    ctx.beginPath();
+    ctx.rect(px * k, -3.2 * k, 6 * k, 6.4 * k);
+    ctx.fill();
+    ctx.stroke();
+  }
+  // Body (rounded) + dish.
+  ctx.fillStyle = '#cbd5e1';
+  ctx.strokeStyle = '#7b8aa3';
+  const bx = -3 * k, by = -4.2 * k, bw = 6 * k, bh = 8.4 * k, br = 1.2 * k;
+  ctx.beginPath();
+  ctx.moveTo(bx + br, by);
+  ctx.arcTo(bx + bw, by, bx + bw, by + bh, br);
+  ctx.arcTo(bx + bw, by + bh, bx, by + bh, br);
+  ctx.arcTo(bx, by + bh, bx, by, br);
+  ctx.arcTo(bx, by, bx + bw, by, br);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(0, -0.2 * k, 1.5 * k, 0, Math.PI * 2);
+  ctx.fillStyle = '#7b8aa3';
+  ctx.fill();
+  // Two downward beam chevrons.
+  ctx.strokeStyle = '#9fd0ff';
+  ctx.lineWidth = 1.5 * k;
+  for (const oy of [6.2, 8.8]) {
+    ctx.beginPath();
+    ctx.moveTo(-3 * k, oy * k);
+    ctx.lineTo(0, (oy + 2.4) * k);
+    ctx.lineTo(3 * k, oy * k);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 // ----- Planet rings -----
 //
 // Each ring system is a list of concentric bands. Each band has:
@@ -3654,14 +3707,23 @@ export class MapRenderer {
       if (site.submarine)    flags.push('🌊');
       if (site.astrobiology) flags.push('🌿');
       if (site.atmospheric)  flags.push('⛅');
-      if (flags.length) {
+      // Push-sat is a hand-drawn vector glyph (matching the card's
+      // push-sat), so it takes its own slot in the centre row after
+      // the emoji flags rather than being an emoji itself.
+      const hasPush = !!site.push;
+      const total = flags.length + (hasPush ? 1 : 0);
+      if (total) {
         const emoji = Math.max(8, EMOJI_PX * hexS);
-        ctx.font = `${emoji}px ${EMOJI_FONT}`;
         const dy = vis.kind === 'comet' ? -emoji - 4 : 0;
         const spread = emoji * 0.7;
-        const startX = sx - spread * (flags.length - 1) / 2;
-        for (let i = 0; i < flags.length; i++) {
-          ctx.fillText(flags[i], startX + i * spread, sy + dy);
+        const startX = sx - spread * (total - 1) / 2;
+        let slot = 0;
+        ctx.font = `${emoji}px ${EMOJI_FONT}`;
+        for (let i = 0; i < flags.length; i++, slot++) {
+          ctx.fillText(flags[i], startX + slot * spread, sy + dy);
+        }
+        if (hasPush) {
+          drawPushSat(ctx, startX + slot * spread, sy + dy, emoji);
         }
       }
 
@@ -4249,7 +4311,7 @@ export class MapRenderer {
     // apparition) + heliocentric zone. Each renders as its own
     // chip with a colour that matches the underlying game system
     // (synodic palette for the season, neutral grey for the zone).
-    if (site.siteSynodic || site.solarZone) {
+    if (site.siteSynodic || site.solarZone || site.push) {
       const tags = document.createElement('div');
       tags.className = 't-tags';
       if (site.siteSynodic) {
@@ -4264,6 +4326,22 @@ export class MapRenderer {
         chip.className = 't-tag t-tag-zone';
         chip.textContent = `${site.solarZone} zone`;
         chip.title = `Heliocentric zone (drives solar-power modifier).`;
+        tags.appendChild(chip);
+      }
+      if (site.push) {
+        const chip = document.createElement('span');
+        chip.className = 't-tag t-tag-push';
+        // Same push-sat glyph as the card + the map marker: panels +
+        // body/dish + downward beams, as an inline SVG so the chip
+        // reads identically to the hex flag.
+        chip.innerHTML = '<svg viewBox="-11 -6 22 19" width="12" height="11" aria-hidden="true" style="vertical-align:-2px">'
+          + '<rect x="-9.5" y="-3.2" width="6" height="6.4" rx="0.6" fill="#5aa0e0" stroke="#cde6ff" stroke-width="0.8"/>'
+          + '<rect x="3.5" y="-3.2" width="6" height="6.4" rx="0.6" fill="#5aa0e0" stroke="#cde6ff" stroke-width="0.8"/>'
+          + '<rect x="-3" y="-4.2" width="6" height="8.4" rx="1.2" fill="#cbd5e1" stroke="#7b8aa3" stroke-width="0.8"/>'
+          + '<circle cx="0" cy="-0.2" r="1.5" fill="#7b8aa3"/>'
+          + '<g stroke="#9fd0ff" stroke-width="1.5" stroke-linecap="round" fill="none"><path d="M-3 6.2 L0 8.6 L3 6.2"/><path d="M-3 8.8 L0 11.2 L3 8.8"/></g>'
+          + '</svg> push-sat';
+        chip.title = `A push-sat (beamed-power relay) covers this site: a stack here can draw the push-sat support for free.`;
         tags.appendChild(chip);
       }
       el.appendChild(tags);

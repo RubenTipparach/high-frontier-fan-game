@@ -128,6 +128,10 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
       // from the hand-curated table; waypoints never match and stay null.
       spectralType: local ? (local.spectralType || null) : null,
       hydration: parseHydration(p.siteWater),
+      // Push-sat coverage: a beamed-power relay parked over this site lets a
+      // stack draw the push-sat support for free. Sourced from the manifest's
+      // Push column (data/sites.js); waypoints never match and stay false.
+      push: !!(local && local.push),
       hazard: !!p.hazard,
       // Comets are always landing sites in HF4 - you touch down
       // on the nucleus to harvest water. The planner JSON doesn't
