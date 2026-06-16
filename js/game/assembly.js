@@ -12,6 +12,24 @@ import { IDEOLOGIES, CENTRIST, LOBBY_RULE, IDEOLOGY_ORDER, IDEOLOGY_BY_KEY } fro
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 const XHTML = 'http://www.w3.org/1999/xhtml';
+
+// Per-variant memory of the last render's star place + per-space cube counts, so
+// the NEXT render can animate what changed: the active-law star slides from its
+// old space to the new one, and freshly-placed cubes drop in. Keyed by variant
+// because the sidebar glance and the modal render at the same time.
+const _assemblyAnim = {};
+const _prefersReduced = () => {
+  try { return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+  catch (_) { return false; }
+};
+// Run queued WAAPI animations after the panel is mounted (the caller appends
+// `root` synchronously right after renderAssemblyPanel returns, so a single rAF
+// lands once the elements are in the DOM and can paint).
+function flushAssemblyAnims(anims) {
+  if (!anims.length) return;
+  if (typeof requestAnimationFrame !== 'function') return;
+  requestAnimationFrame(() => { for (const fn of anims) { try { fn(); } catch (_) { /* ignore */ } } });
+}
 function svg(tag, attrs, parent) {
   const el = document.createElementNS(SVGNS, tag);
   for (const k in attrs) el.setAttribute(k, attrs[k]);
@@ -126,18 +144,37 @@ export function renderAssemblyPanel({
   const centers = { freedom: -90, honor: -30, unity: 30, authority: 90, equality: 150, individuality: 210 };
   const slots = {};
 
+  // Animation bookkeeping for THIS render: what the same variant showed last
+  // time, the new per-space cube counts we are about to draw, and a queue of
+  // WAAPI animations to fire once mounted. `prev` is undefined on the first
+  // render of a variant, so nothing animates on open (only on later changes).
+  const prev = _assemblyAnim[variant];
+  const counts = {};
+  const anims = [];
+  const animate = !_prefersReduced();
+
   // Delegate cubes live anywhere on the cell (no fixed slot): drop the iso-cubes
-  // near `pt` in seat colours; nothing when empty. Drawn at 2x size.
-  const drawCubes = (parent, pt, list, glow) => {
+  // near `pt` in seat colours; nothing when empty. Drawn at 2x size. Cubes added
+  // since the last render of this variant (index >= the previous count) drop in.
+  const drawCubes = (parent, pt, list, glow, placeKey) => {
     const cubes = Array.isArray(list) ? list : [];
+    counts[placeKey] = cubes.length;
     if (!cubes.length) return;
+    const prevN = prev && prev.counts ? (prev.counts[placeKey] | 0) : null;
     cubes.slice(0, 6).forEach((col, i) => {
       const ox = pt.x - 20 + (i % 3) * 20;
       const oy = pt.y - 8 + Math.floor(i / 3) * 22;
       // When this space's cubes are "selectable" (the Fundraise move origin),
       // wrap them so a blue glow marks the cube itself as the click target.
       const host = glow ? svg('g', { class: 'assembly-cube-glow' }, parent) : parent;
-      isoCube(host, ox, oy, 12, col, false);
+      const cubeG = svg('g', { class: 'assembly-cube' }, host);
+      isoCube(cubeG, ox, oy, 12, col, false);
+      if (animate && prevN != null && i >= prevN) {
+        anims.push(() => cubeG.animate(
+          [{ opacity: 0, transform: 'translateY(-7px)' }, { opacity: 1, transform: 'translateY(0px)' }],
+          { duration: 320, easing: 'cubic-bezier(0.34,1.3,0.6,1)' },
+        ));
+      }
     });
   };
 
@@ -181,6 +218,14 @@ export function renderAssemblyPanel({
       points: verts.map((v) => v.join(',')).join(' '),
       fill: 'none', stroke: '#000', 'stroke-width': 1.6, 'stroke-linejoin': 'round',
     }, g);
+    return g;
+  };
+  // Star position for any place key (matches the drawStar call offsets below),
+  // so the FLIP knows both the old and new screen spots.
+  const starPosFor = (place) => {
+    if (!place || place === 'centrist' || centers[place] == null) return { x: C.x, y: C.y - 28 };
+    const lab = polar(C.x, C.y, (r + R) / 2 - 16, centers[place]);
+    return { x: lab.x, y: lab.y - 17 };
   };
 
   // Each ideology is one hoverable cell: wedge + label + delegate space, grouped
@@ -201,8 +246,7 @@ export function renderAssemblyPanel({
     t.textContent = ide.name.toUpperCase();
     const slot = polar(C.x, C.y, R - 34, cA);
     slots[key] = slot;
-    drawCubes(cell, slot, delegates && delegates[key], glowSet.has(key));
-    if (activeStar === key) drawStar(cell, { x: lab.x, y: lab.y - 17 });
+    drawCubes(cell, slot, delegates && delegates[key], glowSet.has(key), key);
     wireCell(cell, key);
   });
 
@@ -216,9 +260,24 @@ export function renderAssemblyPanel({
   ct.textContent = 'CENTRIST';
   ct = svg('text', { x: C.x, y: C.y + 7, class: 'assembly-center-sub', 'text-anchor': 'middle' }, centerCell);
   ct.textContent = CENTRIST.law.name;
-  drawCubes(centerCell, { x: C.x, y: C.y + 30 }, delegates && delegates.centrist, glowSet.has('centrist'));
-  if (activeStar === 'centrist' || !activeStar) drawStar(centerCell, { x: C.x, y: C.y - 28 });
+  drawCubes(centerCell, { x: C.x, y: C.y + 30 }, delegates && delegates.centrist, glowSet.has('centrist'), 'centrist');
   wireCell(centerCell, 'centrist');
+
+  // Active-law star: drawn once, on TOP of every cell (so it never hides behind
+  // a neighbouring wedge), at the in-power space. When that space changed since
+  // the last render, slide it there from its old spot.
+  const starPlace = activeStar || 'centrist';
+  const starPos = starPosFor(starPlace);
+  const starG = drawStar(board, starPos);
+  if (animate && prev && prev.star && prev.star !== starPlace) {
+    const from = starPosFor(prev.star);
+    const dx = from.x - starPos.x;
+    const dy = from.y - starPos.y;
+    anims.push(() => starG.animate(
+      [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0px, 0px)' }],
+      { duration: 560, easing: 'cubic-bezier(0.34,1.15,0.5,1)' },
+    ));
+  }
 
   // Callout boxes around the wheel, each arrow -> its space. Compact (sidebar
   // glance) variant only; the large (modal) variant lists the laws in rows
@@ -255,6 +314,8 @@ export function renderAssemblyPanel({
   // order, so a later-drawn neighbouring wedge would otherwise cover the blue
   // glow). Re-appending moves them last = on top.
   board.querySelectorAll('.assembly-cell-hi, .assembly-cell-sel').forEach((el) => board.appendChild(el));
+  // Keep the active-law star above any re-fronted cell.
+  if (starG) board.appendChild(starG);
 
   root.appendChild(board);
 
@@ -287,6 +348,11 @@ export function renderAssemblyPanel({
     lawsEl.appendChild(row('#9aa0c4', 'Lobby', 'Free action', LOBBY_RULE, ''));
     root.appendChild(lawsEl);
   }
+
+  // Remember this render so the next one can animate the deltas, then fire the
+  // queued drop-in / star-slide animations once mounted.
+  _assemblyAnim[variant] = { star: starPlace, counts };
+  flushAssemblyAnims(anims);
 
   return root;
 }
