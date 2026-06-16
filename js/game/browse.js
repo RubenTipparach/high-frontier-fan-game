@@ -3424,12 +3424,11 @@ function fundraiseProjectedWinners(snapshot) {
   bump(_fr.moveTo, +1);
   return assemblyVoteWinners({ delegates });
 }
-// After place + move settle, run the vote tally: one winner auto-stars + commits;
-// a tie opens the star pick; no winner stars the centre + commits.
+// After place + move settle, run the vote tally. The fundraiser ALWAYS gets the
+// tally step and places the active-law star themselves: a single winner is a
+// one-click confirm, a tie is a pick, no winner sends the star to Centrist.
 function fundraiseAdvanceToStar(snapshot) {
-  const winners = fundraiseProjectedWinners(snapshot);
-  if (winners.length <= 1) { _fr.star = winners[0] || 'centrist'; commitFundraise(); return; }
-  _fr.tied = winners;
+  _fr.tied = fundraiseProjectedWinners(snapshot);
   _fr.step = 'star';
   refreshAssemblyModal();
 }
@@ -3450,7 +3449,10 @@ function renderAssemblyFundraise(body, snapshot) {
       ? 'Step 1 - Place a delegate on a highlighted space (your home ideology or where you already have a delegate), or skip.'
       : 'Step 1 - No cubes left in hand. Skip to the move step.';
   } else if (step === 'star') {
-    promptText = 'Step 3 - Tie vote! Click which ideology gets the active-law star.';
+    const w = _fr.tied || [];
+    if (w.length === 0) promptText = 'Step 3 - Vote tally: no ideology holds a majority. The active-law star returns to Centrist.';
+    else if (w.length === 1) promptText = `Step 3 - Vote tally: ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[w[0]] || {}).name || w[0])} wins. Click it to set the active-law star.`;
+    else promptText = 'Step 3 - Tie vote! Click which tied ideology gets the active-law star.';
   } else if (_fr.moveFrom) {
     promptText = `Step 2 - Move: click a highlighted adjacent space to move your ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.moveFrom] || {}).name || _fr.moveFrom)} delegate.`;
   } else {
@@ -3468,13 +3470,21 @@ function renderAssemblyFundraise(body, snapshot) {
   const me = (snapshot.players || []).find((p) => p.profileId === myId);
   const myColor = (me && me.color) || '#fff';
   if (_fr.place) view.delegates[_fr.place] = [...(view.delegates[_fr.place] || []), myColor];
+  // Once a move is chosen (we are on the tally step), preview it too so the vote
+  // standing the player is starring reflects the move they just made.
+  if (_fr.moveFrom && _fr.moveTo) {
+    const from = view.delegates[_fr.moveFrom] || [];
+    const idx = from.indexOf(myColor);
+    if (idx >= 0) view.delegates[_fr.moveFrom] = [...from.slice(0, idx), ...from.slice(idx + 1)];
+    view.delegates[_fr.moveTo] = [...(view.delegates[_fr.moveTo] || []), myColor];
+  }
   view.interactive = true;
   if (movePick) {
     view.cubeGlow = available;   // glow the CUBES you can pick up (origin = cube)
   } else {
     view.highlight = available;  // dark-blue "available" spaces; hover -> bright
   }
-  view.selected = step === 'place' ? _fr.place : _fr.moveFrom; // bright-blue "picked" cube
+  view.selected = step === 'place' ? _fr.place : (step === 'move' ? _fr.moveFrom : null); // bright-blue "picked" cube
   view.onCellClick = (place) => onFundraiseCell(snapshot, place, available);
   body.appendChild(renderAssemblyPanel(view));
 
@@ -3489,6 +3499,11 @@ function renderAssemblyFundraise(body, snapshot) {
   } else if (step === 'move') {
     if (_fr.moveFrom) btns.append(mkBtn('↩ Pick a different cube', 'modal-btn', () => { _fr.moveFrom = null; refreshAssemblyModal(); }));
     else btns.append(mkBtn('Skip move & tally', 'modal-btn', () => fundraiseAdvanceToStar(snapshot)));
+  } else if (step === 'star') {
+    btns.append(mkBtn('↩ Back to move', 'modal-btn', () => { _fr.step = 'move'; _fr.moveFrom = null; _fr.moveTo = null; _fr.tied = null; refreshAssemblyModal(); }));
+    if ((_fr.tied || []).length === 0) {
+      btns.append(mkBtn('Set star to Centrist', 'modal-btn primary', () => { _fr.star = 'centrist'; commitFundraise(); }));
+    }
   }
   body.appendChild(btns);
 
