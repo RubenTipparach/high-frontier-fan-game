@@ -3229,14 +3229,16 @@ function syncMpTabVisibility() {
   if (!_online && panel.dataset.active === 'mp') showPane(null);
 }
 
-// The politics tab icon (temple) is tinted to the ACTIVE LAW's ideology colour
-// so the strip shows which law is in power at a glance; neutral when there's no
-// ideology law (Centrist / none). Outline is black when the tab is selected (it
-// sits on the bright accent) and white when not (on the dark strip).
+// The politics tab icon (temple) is tinted to the ACTIVE LAW's colour so the
+// strip shows which law is in power at a glance: an ideology's colour when it
+// holds the star, WHITE for Centrist - Pad Insurance (matching the white center
+// hex), and neutral grey only when no law is in force. Outline is black when the
+// tab is selected (it sits on the bright accent) and white when not (dark strip).
 function activeLawColor(snapshot) {
   const star = snapshot && snapshot.activeLawStar;
-  const ide = star && star !== 'centrist' && ASSEMBLY_IDEOLOGY_BY_KEY[star];
-  return ide ? ide.color : '#9aa3c0';
+  if (star === 'centrist') return '#f3f4fa';   // Centrist law in power: white center hex
+  const ide = star && ASSEMBLY_IDEOLOGY_BY_KEY[star];
+  return ide ? ide.color : '#9aa3c0';           // no law in force: neutral
 }
 function assemblyTabIconSvg(color, selected) {
   const edge = selected ? '#04121f' : '#ffffff';
@@ -3569,7 +3571,8 @@ function renderAssemblyFundraise(body, snapshot) {
   const available = fundraiseAvailable(snapshot);
   const movePick = step === 'move' && !_fr.moveFrom;   // origin = pick one of your cubes
 
-  // Prompt bar.
+  // Prompt bar. Built here but appended at the BOTTOM, just above the action
+  // buttons (where the player is looking / clicking), not at the top of the modal.
   const prompt = document.createElement('div');
   prompt.className = 'assembly-fr-prompt';
   let promptText;
@@ -3589,7 +3592,6 @@ function renderAssemblyFundraise(body, snapshot) {
   }
   prompt.innerHTML = `<strong>Fundraise</strong> &middot; <span>${promptText}</span>`
     + (_fr.place ? `<div class="assembly-fr-chosen">Placing on ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.place] || {}).name || _fr.place)}.</div>` : '');
-  body.appendChild(prompt);
 
   // Board with the interaction wired for the current step.
   const view = assemblyDelegatesView(snapshot, assemblyModalVariant());
@@ -3642,6 +3644,8 @@ function renderAssemblyFundraise(body, snapshot) {
   const cancelBtn = mkBtn('✕ Cancel', 'modal-btn cancel', closeAssemblyModal);
   cancelBtn.title = 'Abandon this Fundraise. Your operation is not spent.';
   btns.append(undoBtn, cancelBtn);
+  // Prompt sits directly above the buttons at the bottom of the modal.
+  body.appendChild(prompt);
   body.appendChild(btns);
 
   body.appendChild(assemblyStatusEl(snapshot));
