@@ -619,7 +619,7 @@ function buildRadiatorFace(card, sideName) {
   // never required, so they're not here (the typebar therm badge is the supply).
   const reqs = Array.isArray(faceMeta.requires) ? faceMeta.requires : [];
   const reqChip = (r) => {
-    const icon = supportIconSvg(r.kind, { size: 22 })
+    const icon = supportIconSvg(r.kind, { size: 17 })
       || `<em>${(REQUIREMENT_VIS[r.kind] || { glyph: '◇' }).glyph}</em>`;
     const cnt = (r.count > 1) ? `<b>×${r.count}</b>` : '';
     return `<span class="req has-support-icon">${icon}${cnt}</span>`;
