@@ -8193,19 +8193,3 @@ body:has(#view-browse:not(.hidden)) #main {
 .site-msg-post { display: flex; gap: 6px; margin-top: 8px; align-items: flex-end; }
 .site-msg-post textarea { flex: 1; resize: vertical; background: #0e1322; border: 1px solid #2c3658; border-radius: 6px; color: var(--ink); padding: 6px 8px; font: inherit; }
 .site-notes-foot { margin: 4px 0 0; font-size: 11px; }
-
-/* Rocket fuel-tank modal: standard +/- water transfer rows (per colocated outpost) */
-.fuel-tank-xfer { display: flex; flex-direction: column; gap: 8px; margin: 6px 14px 2px; }
-.ft-xfer {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  align-items: center;
-  gap: 8px;
-  background: rgba(56, 189, 248, 0.06);
-  border: 1px solid #243049;
-  border-radius: 8px;
-  padding: 6px 8px;
-}
-.ft-xfer-label { font-size: 12px; font-weight: 700; color: #cdd6ee; }
-.ft-xfer-grp { display: inline-flex; gap: 4px; }
-.ft-xfer-btn { min-width: 34px; padding: 4px 8px; font-size: 12px; font-weight: 700; }

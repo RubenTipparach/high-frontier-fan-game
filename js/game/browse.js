@@ -10617,35 +10617,6 @@ function fuelTankToOutpostBtns() {
   return html;
 }
 
-// Standard fuel-transfer rows for the rocket tank modal: one block per
-// colocated outpost, with +1/+5/max (pump FROM the outpost into the rocket) and
-// -1/-5/max (store FROM the rocket into the outpost). Each button transfers
-// immediately; the modal refreshes after.
-function fuelTankXferRows() {
-  const rs = getRocketSite();
-  if (!rs || getRocketStack().length === 0) return '';
-  let html = '';
-  for (const letter of OUTPOST_LETTERS) {
-    const op = getOutpost(letter);
-    if (!op || op.siteId !== rs.id) continue;
-    const L = esc(letter);
-    html += `<div class="ft-xfer">
-      <div class="ft-xfer-label">Outpost ${L} <span class="muted">(${op.tank | 0} water)</span></div>
-      <div class="ft-xfer-grp" title="Pump water from Outpost ${L} into the rocket">
-        <button type="button" class="popup-btn popup-btn-secondary ft-xfer-btn" data-dir="in" data-letter="${L}" data-amt="1">+1</button>
-        <button type="button" class="popup-btn popup-btn-secondary ft-xfer-btn" data-dir="in" data-letter="${L}" data-amt="5">+5</button>
-        <button type="button" class="popup-btn ft-xfer-btn" data-dir="in" data-letter="${L}" data-amt="max">max</button>
-      </div>
-      <div class="ft-xfer-grp" title="Store rocket water in Outpost ${L}">
-        <button type="button" class="popup-btn popup-btn-secondary ft-xfer-btn" data-dir="out" data-letter="${L}" data-amt="1">−1</button>
-        <button type="button" class="popup-btn popup-btn-secondary ft-xfer-btn" data-dir="out" data-letter="${L}" data-amt="5">−5</button>
-        <button type="button" class="popup-btn ft-xfer-btn" data-dir="out" data-letter="${L}" data-amt="max">max</button>
-      </div>
-    </div>`;
-  }
-  return html;
-}
-
 // Pump water from a colocated outpost into the rocket tank. Prompts for
 // an amount (capped by the outpost's water + the rocket's tank room),
 // then routes through the server (TRANSFER_FUEL) online or mutates the
@@ -10756,10 +10727,12 @@ function pickFuelAmount({ title = '💧 Transfer water', max = 1 } = {}) {
     panel.innerHTML = `
       <h3>${esc(title)}</h3>
       <div class="dump-stepper">
-        <button type="button" class="popup-btn popup-btn-secondary fa-step" data-step="-1" aria-label="Less">−</button>
+        <button type="button" class="popup-btn popup-btn-secondary fa-step" data-step="-5" aria-label="Less 5">−5</button>
+        <button type="button" class="popup-btn popup-btn-secondary fa-step" data-step="-1" aria-label="Less 1">−1</button>
         <input type="number" class="fa-amount" min="1" max="${max}" value="${amount}" inputmode="numeric" aria-label="Water to transfer" />
-        <button type="button" class="popup-btn popup-btn-secondary fa-step" data-step="1" aria-label="More">+</button>
-        <button type="button" class="popup-btn fa-all" title="Transfer the maximum">All (${max})</button>
+        <button type="button" class="popup-btn popup-btn-secondary fa-step" data-step="1" aria-label="More 1">+1</button>
+        <button type="button" class="popup-btn popup-btn-secondary fa-step" data-step="5" aria-label="More 5">+5</button>
+        <button type="button" class="popup-btn fa-all" title="Transfer the maximum">Max (${max})</button>
       </div>
       <div class="turn-confirm-actions">
         <button type="button" class="popup-btn primary" data-act="yes">💧 Transfer <span class="fa-n">${amount}</span></button>
@@ -12128,8 +12101,9 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     <div class="fuel-tank-actions">
       ${tankDirt ? '' : `<button type="button" class="popup-btn popup-btn-secondary" id="tank-dump"
         title="Drain a chosen amount of water from the tank">💧⤓ Dump water</button>`}
+      ${tankDirt ? '' : fuelTankPumpBtns()}
+      ${tankDirt ? '' : fuelTankToOutpostBtns()}
     </div>
-    ${tankDirt ? '' : `<div class="fuel-tank-xfer">${fuelTankXferRows()}</div>`}
 <div class="fuel-tank-aqua" id="tank-aqua-section" hidden>
       <div class="aqua-row">
         <span>🏦 Aqua bank</span>
@@ -12481,31 +12455,6 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
       if (max <= 0) return;
       close();
       doPumpFuelToOutpost(letter, max);
-    });
-  });
-  // Standard +1/+5/max (pump in) and -1/-5/max (store out) transfer buttons.
-  // They transfer the chosen increment and reopen the modal so the tank +
-  // remaining maxes refresh in place.
-  panel.querySelectorAll('.ft-xfer-btn').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const letter = btn.dataset.letter;
-      const dir = btn.dataset.dir;
-      const raw = btn.dataset.amt;
-      let amt;
-      if (dir === 'in') {
-        const op = getOutpost(letter);
-        const room = Math.max(0, getTankMax() - (getStackTotals().dryMass || 0) - getTankWater());
-        const cap = Math.min(op ? (op.tank | 0) : 0, room);
-        amt = raw === 'max' ? cap : Math.min(Number(raw), cap);
-        if (amt <= 0) return;
-        await doPumpOutpostFuel(letter, cap, amt);
-      } else {
-        const cap = Math.floor(getTankWater());
-        amt = raw === 'max' ? cap : Math.min(Number(raw), cap);
-        if (amt <= 0) return;
-        await doPumpFuelToOutpost(letter, cap, amt);
-      }
-      openFuelTankModal();   // refresh in place
     });
   });
   function drainTo(targetLevel, durationMs = 250) {
