@@ -2441,7 +2441,8 @@
 }
 .map-popup .popup-actions,
 .map-popup .popup-actions .popup-btn,
-.map-popup .popup-close {
+.map-popup .popup-close,
+.map-popup .t-id-btn {
   pointer-events: auto;
 }
 .map-popup.hidden { display: none; }
