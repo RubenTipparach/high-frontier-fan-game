@@ -146,19 +146,23 @@ export function voteWinners(assembly) {
   return ASSEMBLY_PLACES.filter((k) => totals[k] === max);
 }
 
-// Which ideology Laws are in force, plus whether lobbying is disabled. Driven by
-// the active-law STAR (the marker the fundraiser moves on the vote tally): the
-// starred ideology's law is in power. Unity's override still applies when Unity
-// is starred (every 2+ ideology active, no lobbying). A 'centrist'/null star =
-// no ideology law in force. When `star` is undefined (legacy state with no
-// stored star) this falls back to the old plurality reading.
+// Which Laws are in force, plus whether lobbying is disabled. Driven by the
+// active-law STAR (the marker the fundraiser moves on the vote tally): the
+// starred space's law is in power. A star on Centrist puts Centrist - Pad
+// Insurance in power; a star on an ideology puts that ideology's law in power.
+// Unity's override still applies when Unity is starred (every 2+ ideology
+// active, no lobbying). A null star = no law in force. When `star` is undefined
+// (legacy state with no stored star) this falls back to the old plurality
+// reading.
 //
-// Returns { active: Set<ideologyKey>, lobbyingDisabled: boolean }.
+// Returns { active: Set<placeKey>, lobbyingDisabled: boolean }.
 export function activeLaws(assembly, star) {
   const active = new Set();
   if (star === undefined) {
     for (const key of voteWinners(assembly)) active.add(key);   // legacy fallback
-  } else if (star && star !== 'centrist' && IDEOLOGY_ORDER.includes(star)) {
+  } else if (star === 'centrist') {
+    active.add('centrist');   // Centrist - Pad Insurance is the law in power
+  } else if (star && IDEOLOGY_ORDER.includes(star)) {
     active.add(star);
   }
   let lobbyingDisabled = false;

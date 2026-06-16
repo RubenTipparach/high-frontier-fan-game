@@ -3253,7 +3253,9 @@ function myCubesFree(snapshot) {
 // the sidebar and the modal.
 function assemblyStatusEl(snapshot) {
   const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar);
-  const activeNames = [...laws.active].map((k) => (ASSEMBLY_IDEOLOGY_BY_KEY[k] || {}).name || k);
+  const activeNames = [...laws.active].map((k) => (k === 'centrist'
+    ? 'Centrist - Pad Insurance'
+    : ((ASSEMBLY_IDEOLOGY_BY_KEY[k] || {}).name || k)));
   const free = myCubesFree(snapshot);
   const status = document.createElement('div');
   status.className = 'assembly-controls';
