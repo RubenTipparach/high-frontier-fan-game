@@ -322,7 +322,11 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   }
   const fallback = robonautGlyphs || (typeIconSvg(card.type, { size: 22 }) || '');
   const lead = supplyGlyphs || fallback;
-  tbar.innerHTML = `${lead ? `<span class="typebar-icons">${lead}</span>` : ''}${escapeText(card.type.toUpperCase())}`;
+  // GW Thrusters promote to a TW (Terawatt) thruster on their purple back, so
+  // that face's typebar reads "TW THRUSTER"; the white front reads "GW THRUSTER".
+  let typeLabel = card.type.toUpperCase();
+  if (card.type === 'gw-thruster') typeLabel = sideName === 'secondary' ? 'TW THRUSTER' : 'GW THRUSTER';
+  tbar.innerHTML = `${lead ? `<span class="typebar-icons">${lead}</span>` : ''}${escapeText(typeLabel)}`;
   // Card name reads from the active face - the dark side carries
   // its own printed name on every HF4 card.
   const faceName = (card.faces && card.faces[sideName] && card.faces[sideName].name);
@@ -617,8 +621,21 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     } else {
       fut.textContent = meta.future;
     }
-    const body = face.querySelector('.card-body');
-    if (body) body.appendChild(fut);
+    // On a GW Thruster's purple (TW) back the future sits in a column BESIDE the
+    // thrust triangle so it doesn't clutter the stacked body; everywhere else
+    // (e.g. freighters, which have no triangle) it goes below the ability.
+    const thrustEl = (card.type === 'gw-thruster' && sideName === 'secondary')
+      ? face.querySelector('.card-thrust') : null;
+    if (thrustEl) {
+      fut.classList.add('card-future-side');
+      const row = document.createElement('div');
+      row.className = 'card-thrust-row';
+      thrustEl.parentNode.insertBefore(row, thrustEl);
+      row.append(fut, thrustEl);
+    } else {
+      const body = face.querySelector('.card-body');
+      if (body) body.appendChild(fut);
+    }
   }
   return face;
 }

@@ -585,9 +585,17 @@
    the body's vertical rhythm a touch to make room within the fixed height. */
 .card.type-gw-thruster .card-body,
 .card.type-freighter .card-body { gap: 4px; }
-/* The future callout only rides the purple back, so shrink the thrust triangle
-   a little THERE to fit it (the white front keeps the triangle full size). */
-.card.type-gw-thruster .card-face[data-face="secondary"] .thrust-svg { width: 80%; }
+/* On the GW purple (TW) back the future rides a column BESIDE the thrust
+   triangle instead of stacking under it, so it doesn't crowd the body. */
+.card-thrust-row { display: flex; align-items: center; gap: 6px; width: 100%; }
+.card-thrust-row .card-thrust { flex: 1 1 auto; min-width: 0; }
+.card-future-side {
+  flex: 0 0 42%;
+  border-top: none;
+  padding-top: 0;
+  margin: 0;
+  text-align: left;
+}
 
 /* Footer is now just a small reserved strip at the bottom of
    the card for the Flip button (and future per-card actions).
