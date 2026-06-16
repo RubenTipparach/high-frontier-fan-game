@@ -8149,11 +8149,13 @@ function chainChip(card, face, kind, { ring, valid, radSide } = {}) {
     || card.name || card.id;
   const g = cardGlanceSummary(card, face, radSide);
   const statHtml = g.hasStats ? g.statsHtml : esc(kind === 'crew' ? 'crew' : (card.type || 'card'));
-  // A radiator's mass is its DEPLOYED side's mass (light vs heavy), not the
-  // fixed card.mass; show the side that's actually in the stack.
+  // A radiator's mass is its DEPLOYED side's mass (light vs heavy) on the
+  // INSTALLED face (a flipped radiator's black tech has its own light/heavy
+  // masses), not the fixed card.mass; show the side that's actually in the stack.
   let massVal = card.mass;
-  if (card.type === 'radiator' && card.faces && card.faces.primary) {
-    const blk = card.faces.primary[radSide === 'light' ? 'light' : 'heavy'];
+  const radFace = card.faces && (card.faces[face] || card.faces.primary);
+  if (card.type === 'radiator' && radFace) {
+    const blk = radFace[radSide === 'light' ? 'light' : 'heavy'];
     if (blk && blk.mass != null) massVal = blk.mass;
   }
   const massHtml = Number.isFinite(massVal) ? '<span class="acc-mass">m' + massVal + '</span>' : '';
@@ -17392,26 +17394,38 @@ function _ownedCardChip(entry) {
   const name = (card.faces && card.faces[face] && card.faces[face].name) || card.name || id;
   const g = cardGlanceSummary(card, face, radSide);
   const statHtml = g.hasStats ? g.statsHtml : esc(kind === 'crew' ? 'crew' : (card.type || 'card'));
-  // A radiator's mass is its DEPLOYED side's mass (light vs heavy); everything
-  // else reads its installed face's mass, falling back to the card-level mass.
+  // A radiator's mass is its DEPLOYED side's mass (light vs heavy) on the
+  // INSTALLED face (a flipped radiator's black tech has its own light/heavy
+  // masses); everything else reads its installed face's mass, falling back to
+  // the card-level mass.
   let massVal = card.mass;
-  if (card.type === 'radiator' && card.faces && card.faces.primary) {
-    const blk = card.faces.primary[radSide === 'light' ? 'light' : 'heavy'];
+  const radFace = card.faces && (card.faces[face] || card.faces.primary);
+  if (card.type === 'radiator' && radFace) {
+    const blk = radFace[radSide === 'light' ? 'light' : 'heavy'];
     if (blk && blk.mass != null) massVal = blk.mass;
   } else if (card.faces && card.faces[face] && card.faces[face].mass != null) {
     massVal = card.faces[face].mass;
   }
   const massHtml = Number.isFinite(massVal)
     ? '<span class="acc-mass" title="Mass">m' + massVal + '</span>' : '';
+  // A component card flipped to its installed (Tier-2) face is on its BLACK
+  // side - a different tech. Crew faces are independent members, not a black
+  // side, so they never get the marker. Mark black-side chips with the dark
+  // treatment + a ◆ badge so a returning player spots flipped cards at a glance.
+  const blackSide = kind !== 'crew' && face === 'secondary';
+  const sideBadge = blackSide
+    ? '<span class="acc-side" title="Black side (installed / Tier-2 face)">◆ black</span>' : '';
   const chip = document.createElement('button');
   chip.type = 'button';
-  chip.className = 'all-cards-chip kind-' + kind + (kind === 'patent' ? ' type-' + card.type : '');
+  chip.className = 'all-cards-chip kind-' + kind + (kind === 'patent' ? ' type-' + card.type : '')
+    + (blackSide ? ' is-black-side' : '');
   if (kind === 'crew' && card.color) chip.style.setProperty('--chip-color', card.color);
-  chip.title = 'Open ' + name;
+  chip.title = 'Open ' + name + (blackSide ? ' (black side)' : '');
   chip.innerHTML =
     '<div class="acc-top">'
     + (g.icon ? '<span class="acc-ic">' + g.icon + '</span>' : '')
     + '<span class="acc-name">' + esc(name) + '</span>'
+    + sideBadge
     + (g.spectralHtml ? '<span class="acc-spec">' + g.spectralHtml + '</span>' : '')
     + '</div>'
     + '<div class="acc-bot"><span class="acc-stat">' + statHtml + '</span>' + massHtml + '</div>';

@@ -93,15 +93,16 @@ function slotMass(slot) {
   const p = PATENTS_BY_ID[slot.id];
   if (p) {
     // A radiator's mass depends on the side it deployed on (light vs heavy),
-    // stored at faces.primary.{light,heavy}.mass - NOT the fixed faces.primary
-    // .mass. Read it by slot.radSide so the dry/wet mass (and weight class)
-    // match the radiator's actual side. Mirror of boostMass + rocket.js.
-    if (p.type === 'radiator') {
-      const pf = p.faces && p.faces.primary;
-      const blk = pf && pf[slot.radSide === 'light' ? 'light' : 'heavy'];
+    // stored at faces.<installedFace>.{light,heavy}.mass - NOT the fixed
+    // faces.*.mass, AND NOT always the PRIMARY face: a flipped radiator (its
+    // black/Tier-2 tech) carries its OWN light/heavy masses. Read the INSTALLED
+    // face's side block so dry/wet mass (and weight class) match the radiator's
+    // actual tech + side. Mirror of rocket.js#slotMassValue.
+    const f = slotFace(slot, p);
+    if (p.type === 'radiator' && f) {
+      const blk = f[slot.radSide === 'light' ? 'light' : 'heavy'];
       if (blk && blk.mass != null) return blk.mass | 0;
     }
-    const f = slotFace(slot, p);
     return (f.mass != null ? f.mass : p.mass) | 0;
   }
   const crew = CREW_BY_ID[slot.id];

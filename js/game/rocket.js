@@ -977,13 +977,15 @@ function installedFace(slot) {
 }
 
 // Mass of a stack slot, honouring a radiator's deployed side: a radiator's mass
-// is faces.primary.{light,heavy}.mass (light is lighter), NOT the fixed
-// faces.primary.mass. Everything else reads its installed face's mass. Mirror of
-// the server's slotMass so dry/wet mass (and the weight class) agree.
+// is its INSTALLED face's {light,heavy}.mass (light is lighter), NOT the fixed
+// face mass and NOT always the PRIMARY face. A flipped radiator (its black /
+// Tier-2 tech) carries its own light/heavy masses, so read the side block off
+// the installed `face` that was passed in. Everything else reads its installed
+// face's mass. Mirror of the server's slotMass so dry/wet mass (and the weight
+// class) agree.
 function slotMassValue(slot, card, face) {
-  if (card && card.type === 'radiator') {
-    const pf = card.faces && card.faces.primary;
-    const blk = pf && pf[slot && slot.radSide === 'light' ? 'light' : 'heavy'];
+  if (card && card.type === 'radiator' && face) {
+    const blk = face[slot && slot.radSide === 'light' ? 'light' : 'heavy'];
     if (blk && blk.mass != null) return blk.mass | 0;
   }
   return ((face && face.mass != null) ? face.mass : (card && card.mass)) | 0;

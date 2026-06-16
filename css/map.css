@@ -7529,6 +7529,27 @@ body:has(#view-browse:not(.hidden)) #main {
   font: inherit;
 }
 .all-cards-chip:hover { background: #1e2744; border-color: #3a4668; }
+/* Black side (installed Tier-2 face): the physical card's black side, so the
+   chip goes near-black with a light name and a small ◆ black badge. */
+.all-cards-chip.is-black-side {
+  background: linear-gradient(180deg, #0a0c14 0%, #11131c 100%);
+  border-color: #2a2f44;
+  border-left-color: #0a0c14;
+  color: #e7ebff;
+}
+.all-cards-chip.is-black-side:hover { background: #15171f; border-color: #3a4263; }
+.all-cards-chip .acc-side {
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #cdd4ee;
+  background: #000;
+  border: 1px solid #3a4263;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
 .all-cards-chip .acc-top { display: flex; align-items: center; gap: 6px; }
 .all-cards-chip .acc-ic { display: inline-flex; align-items: center; flex: 0 0 auto; }
 .all-cards-chip .acc-ic svg { width: 15px; height: 15px; display: block; }
