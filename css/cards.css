@@ -234,8 +234,10 @@
   font-size: 19.5px;
   font-variant-numeric: tabular-nums;
 }
-.card-spectral { margin-left: auto; line-height: 0; }
+.card-spectral { margin-left: auto; line-height: 0; display: inline-flex; align-items: flex-end; gap: 3px; }
 .spectral-hex { width: 33px; height: 39px; }
+/* Promotion colony dome sits just left of the spectral hex (front face only). */
+.colony-dome-glyph { width: 26px; height: 26px; margin-bottom: 3px; }
 
 .card-body {
   display: flex;

@@ -296,6 +296,9 @@ function buildPatent(sheet, row) {
     afterburn:   primaryFace.afterburn,
     loadLimit:   primaryFace.loadLimit,
     factoryOnly: primaryFace.factoryOnly,
+    // Colony type this card promotes (flips to its purple side) at. Card-level
+    // (same for both faces); the renderer shows it on the FRONT face only.
+    promotionColony: row['Promotion Colony'] || null,
     requires:    primaryFace.requires,
     supplies:    primaryFace.supplies,
     properties:  primaryFace.properties,
