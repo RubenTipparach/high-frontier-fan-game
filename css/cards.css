@@ -656,8 +656,8 @@
   transition: opacity 0.22s ease, filter 0.22s ease;
 }
 .card-face.is-radiator .rad-half .card-typebar {
-  background: #7dd3fc;
-  color: #0a2c43;
+  background: var(--card-radiator);
+  color: #04222f;
   font-size: 12px;
   padding: 4px 8px;
 }
