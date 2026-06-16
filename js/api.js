@@ -313,3 +313,20 @@ export async function discordSignup(code, name) {
 export async function getAnnouncement() {
   return call('GET', '/announcement', {});
 }
+
+// --- Site notes + tags (player-driven location annotations) ---
+// siteId is the location's display id (the popup "id: ..."). All require a
+// profile token. The aggregate response is { tags:[{tag,count,mine}],
+// messages:[{id,body,author,mine,createdAt}] }.
+export async function getSiteAnnotations(siteId, token) {
+  return call('GET', '/sites/' + encodeURIComponent(siteId) + '/annotations', { token });
+}
+export async function postSiteAnnotation(siteId, payload, token) {
+  return call('POST', '/sites/' + encodeURIComponent(siteId) + '/annotations', { body: payload, token });
+}
+export async function removeSiteTag(siteId, tag, token) {
+  return call('POST', '/sites/' + encodeURIComponent(siteId) + '/untag', { body: { tag }, token });
+}
+export async function deleteSiteAnnotation(siteId, annId, token) {
+  return call('DELETE', '/sites/' + encodeURIComponent(siteId) + '/annotations/' + annId, { token });
+}

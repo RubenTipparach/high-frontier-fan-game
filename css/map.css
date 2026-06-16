@@ -2465,6 +2465,45 @@
   user-select: all;
   -webkit-user-select: all;
 }
+.map-popup .t-id-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.map-popup .t-id-row .t-id-text { flex: 1; min-width: 0; }
+.map-popup .t-id-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border, #2a3450);
+  border-radius: 6px;
+  background: rgba(125, 211, 252, 0.06);
+  color: var(--ink-dim);
+  cursor: pointer;
+  position: relative;
+  user-select: none;
+}
+.map-popup .t-id-btn:hover { color: #7dd3fc; border-color: #38bdf8; background: rgba(56, 189, 248, 0.16); }
+.map-popup .t-id-btn.is-ok { color: #4ade80; border-color: #4ade80; }
+.map-popup .t-id-notes-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: #f6b51e;
+  color: #1a1300;
+  font: 700 9px ui-sans-serif, system-ui, sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 /* Site ISRU readout: the gating number for both prospecting and
    refining. Matches the card-prop-isru chip's cyan styling so the
    player reads "this number is the same idiom as the rig number
@@ -8103,3 +8142,50 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .assembly-action .mp-detail-label { margin-bottom: 4px; }
 .assembly-action .modal-btn { margin-top: 6px; }
+
+/* Site notes + tags modal (player-driven location annotations) */
+.site-notes-modal {
+  width: min(520px, 94vw);
+  max-height: 88vh;
+  overflow: auto;
+  background: #11162a;
+  border: 1px solid #2a3450;
+  border-radius: 12px;
+  padding: 0 0 14px;
+  color: var(--ink, #e6e9ff);
+}
+.site-notes-head {
+  position: sticky; top: 0;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 12px 14px;
+  background: #141a2c; border-bottom: 1px solid #2a3450;
+}
+.site-notes-head h3 { margin: 0; font-size: 15px; }
+.site-notes-body { padding: 12px 14px; }
+.site-notes-sec { margin-bottom: 14px; }
+.site-notes-sec h4 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: #8fa6d8; }
+.site-notes-sec h5 { margin: 10px 0 4px; font-size: 11px; color: #7c89ad; font-weight: 600; }
+.site-tags-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.site-tag-chip, .site-tag-pick {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 9px; border-radius: 999px; cursor: pointer;
+  font: 600 12px ui-sans-serif, system-ui, sans-serif;
+  background: #1a2138; border: 1px solid #2c3658; color: #cdd6ee;
+}
+.site-tag-chip .site-tag-dot, .site-tag-pick .site-tag-dot {
+  width: 9px; height: 9px; border-radius: 50%; background: var(--tag, #9aa3c0); flex: 0 0 auto;
+}
+.site-tag-chip.is-mine { border-color: var(--tag, #38bdf8); background: color-mix(in srgb, var(--tag, #38bdf8) 22%, #1a2138); }
+.site-tag-chip:hover, .site-tag-pick:hover { border-color: var(--tag, #38bdf8); }
+.site-tag-chip .site-tag-n { color: #8b90b8; font-weight: 700; }
+.site-tag-pick { opacity: 0.85; }
+.site-tag-custom { display: flex; gap: 6px; margin-top: 8px; }
+.site-tag-custom input { flex: 1; min-width: 0; background: #0e1322; border: 1px solid #2c3658; border-radius: 6px; color: var(--ink); padding: 6px 8px; font: inherit; }
+.site-msgs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.site-msgs li { background: #0e1322; border: 1px solid #222c46; border-radius: 8px; padding: 7px 10px; }
+.site-msg-body { font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+.site-msg-meta { font-size: 11px; color: #8b90b8; margin-top: 3px; display: flex; align-items: center; gap: 8px; }
+.site-msg-del { background: none; border: 0; color: #f87171; cursor: pointer; font: inherit; padding: 0; text-decoration: underline; }
+.site-msg-post { display: flex; gap: 6px; margin-top: 8px; align-items: flex-end; }
+.site-msg-post textarea { flex: 1; resize: vertical; background: #0e1322; border: 1px solid #2c3658; border-radius: 6px; color: var(--ink); padding: 6px 8px; font: inherit; }
+.site-notes-foot { margin: 4px 0 0; font-size: 11px; }

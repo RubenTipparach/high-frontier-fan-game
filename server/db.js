@@ -309,6 +309,24 @@ db.exec(`
     sent_at     INTEGER NOT NULL,
     PRIMARY KEY (game_id, target_id)
   );
+
+  -- Player-driven location notes + tags, collected across ALL games (no game_id
+  -- scope). kind = 'message' (free text) or 'tag' (a tag key). site_id is the
+  -- location's stable display id (what the popup shows as "id: ..."). One row
+  -- per message; one row per (site, author, tag) for tags.
+  CREATE TABLE IF NOT EXISTS site_annotations (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    site_id     TEXT NOT NULL,
+    site_name   TEXT,
+    profile_id  INTEGER REFERENCES profiles(id) ON DELETE SET NULL,
+    author_name TEXT,
+    kind        TEXT NOT NULL,
+    body        TEXT NOT NULL,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_site_annotations_site ON site_annotations(site_id);
+  CREATE INDEX IF NOT EXISTS idx_site_annotations_author ON site_annotations(profile_id);
 `);
 
 // Idempotent column adds for tables that predate a column. better-sqlite3

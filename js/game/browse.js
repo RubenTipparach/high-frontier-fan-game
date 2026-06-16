@@ -53,6 +53,9 @@ import {
 import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
 import { renderAssemblyPanel } from './assembly.js';
 import { uiIcon } from './ui-icons.js';
+import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
+import { apiAvailable, getSiteAnnotations, postSiteAnnotation, removeSiteTag, deleteSiteAnnotation } from '../api.js';
+import { activeProfile } from '../auth.js';
 import {
   activeLaws as assemblyActiveLaws, ASSEMBLY_PLACES, IDEOLOGY_ORDER as ASSEMBLY_IDEOLOGY_ORDER,
   IDEOLOGY_BY_KEY as ASSEMBLY_IDEOLOGY_BY_KEY, DELEGATES_PER_PLAYER,
@@ -5112,6 +5115,105 @@ function wireHandStrip() {
 //   - empty outpost slot : the main button still opens a modal
 //                          explaining how to create one; the pin is
 //                          disabled (nowhere to fly).
+// Player notes + tags for a map location, pooled across ALL games. Opened from
+// the site popup's notes button. Needs a signed-in profile + the live server;
+// shows a gentle notice otherwise. Tags are player-driven (quick-picks plus any
+// custom tag); messages are free text. Everything is shared with every player.
+function openSiteNotesModal(siteId, siteName) {
+  document.querySelector('.site-notes-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay site-notes-overlay';
+  overlay.tabIndex = -1;
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  const dialog = document.createElement('div');
+  dialog.className = 'site-notes-modal';
+  dialog.innerHTML = `<div class="site-notes-head">
+      <h3>🏷 Notes &middot; <span class="site-notes-loc"></span></h3>
+      <button type="button" class="modal-x" title="Close (Esc)">×</button>
+    </div>
+    <div class="site-notes-body"><p class="muted">Loading…</p></div>`;
+  dialog.querySelector('.site-notes-loc').textContent = siteName || siteId;
+  dialog.querySelector('.modal-x').addEventListener('click', close);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  overlay.focus();
+
+  const body = dialog.querySelector('.site-notes-body');
+  const prof = activeProfile();
+  const token = prof && prof.token;
+  if (!apiAvailable() || !token) {
+    body.innerHTML = '<p class="muted">Location notes need a signed-in profile and the live server. '
+      + 'They are shared with every player across all games.</p>';
+    return;
+  }
+
+  let state = { tags: [], messages: [] };
+  const apply = (r) => {
+    if (r && r.ok && r.data) { state = r.data; render(); }
+    else body.innerHTML = '<p class="muted">Could not reach the notes service.</p>';
+  };
+  const refetch = async () => apply(await getSiteAnnotations(siteId, token));
+
+  function render() {
+    const tagChips = state.tags.map((t) => {
+      const d = tagDisplay(t.tag);
+      return `<button type="button" class="site-tag-chip${t.mine ? ' is-mine' : ''}" data-tag="${esc(t.tag)}" style="--tag:${esc(d.color)}" title="${t.mine ? 'Tap to remove your tag' : 'Tap to add this tag'}"><span class="site-tag-dot"></span>${esc(d.label)} <span class="site-tag-n">${t.count}</span></button>`;
+    }).join('');
+    const quick = SITE_TAGS.filter((t) => !state.tags.some((x) => x.tag === t.key)).map((t) =>
+      `<button type="button" class="site-tag-pick" data-add="${esc(t.key)}" style="--tag:${esc(t.color)}"><span class="site-tag-dot"></span>${esc(t.label)}</button>`).join('');
+    const msgs = state.messages.length ? state.messages.map((m) =>
+      `<li><div class="site-msg-body">${esc(m.body)}</div><div class="site-msg-meta"><span class="player-name">${esc(m.author)}</span> · ${esc(new Date(m.createdAt).toLocaleDateString())}${m.mine ? ` <button type="button" class="site-msg-del" data-del="${m.id}">delete</button>` : ''}</div></li>`).join('')
+      : '<li class="muted">No messages yet.</li>';
+    body.innerHTML = `
+      <div class="site-notes-sec">
+        <h4>Tags <span class="muted">(tap yours to remove)</span></h4>
+        <div class="site-tags-row">${tagChips || '<span class="muted">No tags yet.</span>'}</div>
+        <h5>Add a tag</h5>
+        <div class="site-tags-row site-tags-pick">${quick}</div>
+        <div class="site-tag-custom"><input type="text" placeholder="custom tag" maxlength="24"><button type="button" class="modal-btn">Add</button></div>
+      </div>
+      <div class="site-notes-sec">
+        <h4>Messages</h4>
+        <ul class="site-msgs">${msgs}</ul>
+        <div class="site-msg-post"><textarea rows="2" maxlength="500" placeholder="Leave a note for other players…"></textarea><button type="button" class="modal-btn primary">Post</button></div>
+      </div>
+      <p class="site-notes-foot muted">Shared with every player across all games.</p>`;
+    body.querySelectorAll('.site-tag-chip').forEach((b) => b.addEventListener('click', async () => {
+      const tag = b.getAttribute('data-tag');
+      apply(b.classList.contains('is-mine')
+        ? await removeSiteTag(siteId, tag, token)
+        : await postSiteAnnotation(siteId, { kind: 'tag', tag, siteName }, token));
+    }));
+    body.querySelectorAll('.site-tag-pick').forEach((b) => b.addEventListener('click', async () => {
+      apply(await postSiteAnnotation(siteId, { kind: 'tag', tag: b.getAttribute('data-add'), siteName }, token));
+    }));
+    const customIn = body.querySelector('.site-tag-custom input');
+    const customAdd = async () => {
+      const t = normaliseTag(customIn.value);
+      if (!t) return;
+      customIn.value = '';
+      apply(await postSiteAnnotation(siteId, { kind: 'tag', tag: t, siteName }, token));
+    };
+    body.querySelector('.site-tag-custom .modal-btn').addEventListener('click', customAdd);
+    customIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); customAdd(); } });
+    body.querySelectorAll('.site-msg-del').forEach((b) => b.addEventListener('click', async () => {
+      apply(await deleteSiteAnnotation(siteId, Number(b.getAttribute('data-del')), token));
+    }));
+    const ta = body.querySelector('.site-msg-post textarea');
+    body.querySelector('.site-msg-post .modal-btn').addEventListener('click', async () => {
+      const text = ta.value.trim();
+      if (!text) return;
+      ta.value = '';
+      apply(await postSiteAnnotation(siteId, { kind: 'message', body: text, siteName }, token));
+    });
+  }
+  refetch();
+}
+
 function renderStackSwitcher() {
   const host = document.getElementById('hand-stack-switcher');
   if (!host) return;
@@ -8071,6 +8173,7 @@ async function mountMapFor() {
       _renderer.focusRocketWhenKnown();
     }
     _renderer.onSandboxRocketClick = () => openRocketStackModal();
+    _renderer.onSiteNotes = (siteId, siteName) => openSiteNotesModal(siteId, siteName);
     wireDebugPanel(_renderer);
     wireMapInsets(_renderer);
     // Hand the canonical zone polygons + palette to the renderer so

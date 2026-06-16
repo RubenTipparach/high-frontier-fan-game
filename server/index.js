@@ -19,6 +19,7 @@ import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE } from './game/engine.js
 import { randomSeed } from './game/rng.js';
 import { siteBySlug } from './game/planner-graph.js';
 import { PATENTS_BY_ID } from '../data/patents.js';
+import { normaliseTag } from '../data/site-tags.js';
 import {
   sendDM, discordEnabled,
   sendWebhook, webhookEnabled, isWebhookUrl, defaultWebhookUrl,
@@ -2606,6 +2607,198 @@ setInterval(() => {
   }
 }, 30_000).unref();
 
+// ----- Site notes + tags (player-driven location annotations) -----
+//
+// Pooled across ALL games (no game scope). site_id is the location's display id
+// (the popup "id: ..."). Any signed-in player can read the aggregate, post a
+// message or stamp a tag, and remove their own. Admin endpoints (below) view /
+// edit / delete everything and export.
+const SITE_ID_RE = /^[\w.\-:]{1,80}$/;
+
+function aggregateSiteAnnotations(siteId, meId) {
+  const rows = db.prepare(
+    `SELECT id, kind, body, profile_id, author_name, created_at
+       FROM site_annotations WHERE site_id = ? ORDER BY created_at ASC`
+  ).all(siteId);
+  const tagMap = new Map();
+  const messages = [];
+  for (const r of rows) {
+    if (r.kind === 'tag') {
+      const t = tagMap.get(r.body) || { tag: r.body, count: 0, mine: false };
+      t.count += 1;
+      if (meId != null && r.profile_id === meId) t.mine = true;
+      tagMap.set(r.body, t);
+    } else {
+      messages.push({
+        id: r.id, body: r.body, author: r.author_name || 'player',
+        mine: meId != null && r.profile_id === meId, createdAt: r.created_at,
+      });
+    }
+  }
+  return { tags: [...tagMap.values()].sort((a, b) => b.count - a.count), messages };
+}
+
+app.get('/sites/:siteId/annotations', requireProfile, (req, res) => {
+  const siteId = String(req.params.siteId || '');
+  if (!SITE_ID_RE.test(siteId)) return res.status(400).json({ error: 'bad_site' });
+  res.json(aggregateSiteAnnotations(siteId, req.profile.id));
+});
+
+app.post('/sites/:siteId/annotations', requireProfile, (req, res) => {
+  const siteId = String(req.params.siteId || '');
+  if (!SITE_ID_RE.test(siteId)) return res.status(400).json({ error: 'bad_site' });
+  const body = req.body || {};
+  const kind = body.kind === 'tag' ? 'tag' : 'message';
+  const siteName = String(body.siteName || '').slice(0, 80) || null;
+  if (kind === 'tag') {
+    const tag = normaliseTag(body.tag != null ? body.tag : body.body);
+    if (!tag) return res.status(400).json({ error: 'bad_tag' });
+    const dup = db.prepare(
+      `SELECT id FROM site_annotations WHERE site_id=? AND profile_id=? AND kind='tag' AND body=?`
+    ).get(siteId, req.profile.id, tag);
+    if (!dup) {
+      db.prepare(
+        `INSERT INTO site_annotations (site_id, site_name, profile_id, author_name, kind, body, created_at)
+         VALUES (?,?,?,?,'tag',?,?)`
+      ).run(siteId, siteName, req.profile.id, req.profile.name, tag, nowMs());
+    }
+  } else {
+    const text = String(body.body || '').trim().slice(0, 500);
+    if (!text) return res.status(400).json({ error: 'empty' });
+    db.prepare(
+      `INSERT INTO site_annotations (site_id, site_name, profile_id, author_name, kind, body, created_at)
+       VALUES (?,?,?,?,'message',?,?)`
+    ).run(siteId, siteName, req.profile.id, req.profile.name, text, nowMs());
+  }
+  res.json(aggregateSiteAnnotations(siteId, req.profile.id));
+});
+
+// Remove one of MY tags from a site.
+app.post('/sites/:siteId/untag', requireProfile, (req, res) => {
+  const siteId = String(req.params.siteId || '');
+  if (!SITE_ID_RE.test(siteId)) return res.status(400).json({ error: 'bad_site' });
+  const tag = normaliseTag((req.body || {}).tag);
+  if (tag) {
+    db.prepare(`DELETE FROM site_annotations WHERE site_id=? AND profile_id=? AND kind='tag' AND body=?`)
+      .run(siteId, req.profile.id, tag);
+  }
+  res.json(aggregateSiteAnnotations(siteId, req.profile.id));
+});
+
+// Delete one of MY messages.
+app.delete('/sites/:siteId/annotations/:annId', requireProfile, (req, res) => {
+  const siteId = String(req.params.siteId || '');
+  const annId = Number(req.params.annId);
+  db.prepare(`DELETE FROM site_annotations WHERE id=? AND site_id=? AND profile_id=?`)
+    .run(annId, siteId, req.profile.id);
+  res.json(aggregateSiteAnnotations(siteId, req.profile.id));
+});
+
+// ----- Admin: site notes viewer / editor / export -----
+function allSiteAnnotationRows() {
+  return db.prepare(
+    `SELECT id, site_id, site_name, author_name, kind, body, created_at, updated_at
+       FROM site_annotations ORDER BY site_id ASC, created_at ASC`
+  ).all();
+}
+
+// JSON export of every annotation (for programmatic use).
+app.get('/admin/site-notes.json', requireAdmin, (req, res) => {
+  res.json({ annotations: allSiteAnnotationRows() });
+});
+
+// CSV export.
+app.get('/admin/site-notes.csv', requireAdmin, (req, res) => {
+  const cell = (v) => {
+    const s = v == null ? '' : String(v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const head = 'id,site_id,site_name,author,kind,body,created_at,updated_at';
+  const lines = allSiteAnnotationRows().map((r) =>
+    [r.id, r.site_id, r.site_name, r.author_name, r.kind, r.body, r.created_at, r.updated_at].map(cell).join(','));
+  res.type('text/csv').set('content-disposition', 'attachment; filename="site-notes.csv"')
+    .send([head, ...lines].join('\n'));
+});
+
+// Admin actions: edit a body, delete a row, or add a tag/message to a site.
+app.post('/admin/site-notes/:annId/edit', requireAdmin, (req, res) => {
+  const annId = Number(req.params.annId);
+  const text = String((req.body || {}).body || '').trim().slice(0, 500);
+  if (text) db.prepare(`UPDATE site_annotations SET body=?, updated_at=? WHERE id=?`).run(text, nowMs(), annId);
+  res.redirect('/admin/site-notes');
+});
+app.post('/admin/site-notes/:annId/delete', requireAdmin, (req, res) => {
+  db.prepare(`DELETE FROM site_annotations WHERE id=?`).run(Number(req.params.annId));
+  res.redirect('/admin/site-notes');
+});
+app.post('/admin/site-notes/add', requireAdmin, (req, res) => {
+  const b = req.body || {};
+  const siteId = String(b.site_id || '').trim();
+  if (!SITE_ID_RE.test(siteId)) return res.redirect('/admin/site-notes');
+  const kind = b.kind === 'tag' ? 'tag' : 'message';
+  const value = kind === 'tag' ? normaliseTag(b.body) : String(b.body || '').trim().slice(0, 500);
+  if (value) {
+    db.prepare(
+      `INSERT INTO site_annotations (site_id, site_name, profile_id, author_name, kind, body, created_at)
+       VALUES (?,?,NULL,'admin',?,?,?)`
+    ).run(siteId, String(b.site_name || '').slice(0, 80) || null, kind, value, nowMs());
+  }
+  res.redirect('/admin/site-notes');
+});
+
+// Admin HTML page: every site WITH data (no empty sites), tags + messages, with
+// inline edit / delete / add forms and the JSON / CSV download links.
+app.get('/admin/site-notes', (req, res) => {
+  if (!adminFromRequest(req, res)) return res.type('html').send(adminLoginPage());
+  const rows = allSiteAnnotationRows();
+  const bySite = new Map();
+  for (const r of rows) {
+    if (!bySite.has(r.site_id)) bySite.set(r.site_id, { name: r.site_name, tags: [], messages: [] });
+    const g = bySite.get(r.site_id);
+    if (!g.name && r.site_name) g.name = r.site_name;
+    (r.kind === 'tag' ? g.tags : g.messages).push(r);
+  }
+  const when = (ms) => (ms ? new Date(ms).toISOString().slice(0, 16).replace('T', ' ') : '');
+  const sections = [...bySite.entries()].map(([siteId, g]) => {
+    const tagRows = g.tags.map((t) =>
+      `<li><code>${esc(t.body)}</code> <span class="muted">by ${esc(t.author_name || '?')} · ${when(t.created_at)}</span>
+        <form method="post" action="/admin/site-notes/${t.id}/delete" style="display:inline"><button>delete</button></form></li>`).join('');
+    const msgRows = g.messages.map((m) =>
+      `<li><form method="post" action="/admin/site-notes/${m.id}/edit" style="display:flex;gap:6px;align-items:center">
+          <input name="body" value="${esc(m.body)}" style="flex:1;min-width:280px">
+          <span class="muted">${esc(m.author_name || '?')} · ${when(m.created_at)}${m.updated_at ? ' (edited)' : ''}</span>
+          <button>save</button></form>
+        <form method="post" action="/admin/site-notes/${m.id}/delete" style="display:inline"><button>delete</button></form></li>`).join('');
+    return `<section class="site">
+      <h3>${esc(g.name || siteId)} <code>${esc(siteId)}</code></h3>
+      <h4>Tags (${g.tags.length})</h4><ul>${tagRows || '<li class="muted">none</li>'}</ul>
+      <h4>Messages (${g.messages.length})</h4><ul>${msgRows || '<li class="muted">none</li>'}</ul>
+      <form method="post" action="/admin/site-notes/add" style="margin-top:6px">
+        <input type="hidden" name="site_id" value="${esc(siteId)}">
+        <input type="hidden" name="site_name" value="${esc(g.name || '')}">
+        <select name="kind"><option value="tag">tag</option><option value="message">message</option></select>
+        <input name="body" placeholder="value" style="min-width:240px"><button>add</button>
+      </form>
+    </section>`;
+  }).join('');
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Site notes</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font:14px ui-sans-serif,system-ui,sans-serif;background:#07060f;color:#e6e9ff;margin:0;padding:24px}
+h1{color:#7dd3fc;margin:0 0 4px}.muted{color:#8b90b8;font-size:12px}
+a{color:#7dd3fc}code{background:#161d33;padding:1px 5px;border-radius:4px;color:#a8d8c0}
+.site{border:1px solid #2a3450;border-radius:10px;padding:12px 14px;margin:14px 0;background:#0e1322}
+h3{margin:0 0 8px}h4{margin:10px 0 4px;color:#8fa6d8;font-size:12px;text-transform:uppercase}
+ul{list-style:none;margin:0;padding:0}li{margin:3px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+input,select,button{font:inherit;background:#161d33;color:#e6e9ff;border:1px solid #2a3450;border-radius:6px;padding:5px 8px}
+button{cursor:pointer}.dl{margin:10px 0}</style></head><body>
+<h1>Site notes &amp; tags</h1>
+<p class="muted">${bySite.size} location${bySite.size === 1 ? '' : 's'} with player data (empty locations are hidden).</p>
+<div class="dl"><a href="/admin/site-notes.json">⬇ JSON</a> &nbsp; <a href="/admin/site-notes.csv">⬇ CSV</a> &nbsp; <a href="/admin">← dashboard</a></div>
+${sections || '<p class="muted">No site notes yet.</p>'}
+</body></html>`;
+  res.type('html').send(html);
+});
+
 // ----- Admin dashboard -----
 //
 // Admin dashboard at /admin: KPIs, profiles, lobbies, recent chat,
@@ -2900,6 +3093,7 @@ app.get('/admin', (req, res) => {
     </div>
     <div class="ws-info">
       <strong>${wsCount}</strong> open sockets · <strong>${wsAuthed}</strong> authed
+      · <a href="/admin/site-notes">Site notes</a>
       · <a href="#" onclick="fetch('/admin/logout',{method:'POST'}).then(function(){location.href='/admin';});return false;">Sign out</a>
     </div>
   </div>
