@@ -78,23 +78,31 @@ function makeDominancePrune() {
     const key = dominanceKey(node);
     const br  = node.burnsRemaining ?? 0;
     const bonus = node.bonus ?? 0;
+    // Free pivots (pirouette thrusters) are a banked resource like
+    // burnsRemaining / bonus: a state with MORE free pivots in hand
+    // dominates an otherwise-equal one. For non-pirouette thrusters
+    // pivots is always 0, so this term is inert and the search is
+    // byte-identical to before.
+    const pivots = node.pivots ?? 0;
     const entries = frontier.get(key);
     if (entries) {
       for (const e of entries) {
         if (tupleNs.lessThanEq(e.weight, weight)
             && e.burnsRemaining >= br
-            && e.bonus >= bonus) {
+            && e.bonus >= bonus
+            && e.pivots >= pivots) {
           return true;
         }
       }
       const kept = entries.filter((e) =>
         !(tupleNs.lessThanEq(weight, e.weight)
           && br >= e.burnsRemaining
-          && bonus >= e.bonus));
-      kept.push({ weight, burnsRemaining: br, bonus });
+          && bonus >= e.bonus
+          && pivots >= e.pivots));
+      kept.push({ weight, burnsRemaining: br, bonus, pivots });
       frontier.set(key, kept);
     } else {
-      frontier.set(key, [{ weight, burnsRemaining: br, bonus }]);
+      frontier.set(key, [{ weight, burnsRemaining: br, bonus, pivots }]);
     }
     return false;
   };
@@ -104,7 +112,7 @@ function pathId(p) {
   if (p[PATH_ID]) return p[PATH_ID];
   const id = p.done
     ? p.node
-    : `s:${p.node}|${p.dir ?? ''}|${p.bonus}|${p.burnsRemaining}|${p.wait ? 1 : 0}`;
+    : `s:${p.node}|${p.dir ?? ''}|${p.bonus}|${p.burnsRemaining}|${p.pivots ?? 0}|${p.wait ? 1 : 0}`;
   Object.defineProperty(p, PATH_ID, { value: id });
   return id;
 }
@@ -128,10 +136,16 @@ function pathId(p) {
 //     flyby bonus.
 //   metricPriority: order of optimization metrics. Default matches
 //     the vendor's UI default.
+//   freePivots: free Hohmann direction changes per turn (a
+//     pirouette thruster's `bonusPivots`). Each one waives the
+//     2-burn pivot cost of a direction change; the per-turn pool
+//     refills on a wait. Defaults to 0 (no discount), so a normal
+//     thruster's search is unchanged.
 export function buildPlanner(graph, {
   thrust = 4,
   solarSeason = 'red',
   metricPriority = ['turns', 'burns', 'hazards', 'radHazards'],
+  freePivots = 0,
 } = {}) {
   const points = graph.byId;
   const edgeLabels = graph.edgeLabels || {};
@@ -168,7 +182,8 @@ export function buildPlanner(graph, {
   function getNeighbors(p) {
     if (p.done) return [];
     const { node, dir, bonus, burnsRemaining, wait } = p;
-    const ns = [{ node, dir: null, bonus: 0, done: true, burnsRemaining }];
+    const pivots = p.pivots ?? 0;
+    const ns = [{ node, dir: null, bonus: 0, done: true, burnsRemaining, pivots }];
     const venusFlybyAvailable = solarSeason === 'blue';
     // Hohmann direction-change branch.
     if (edgeLabels[node] && dir != null && !wait) {
@@ -176,9 +191,15 @@ export function buildPlanner(graph, {
         if (edgeLabels[node][otherNode] !== dir) {
           const otherPoint = points[otherNode];
           if (!otherPoint) continue;
-          const directionChangeCost =
-            (edgeLabels[node][otherNode] === '0' ? 0 : 2)
-            + (otherPoint.type === 'burn' ? (otherPoint.landing ?? 1) : 0);
+          // Pivot cost has two parts: the 2-burn direction change
+          // itself, and the landing burn if the new node is a burn
+          // node. A pirouette thruster's free pivot waives ONLY the
+          // 2-burn pivot part (not the landing); '0'-label edges are
+          // free continuations, not pivots, so they never spend one.
+          const pivotPart = (edgeLabels[node][otherNode] === '0') ? 0 : 2;
+          const landingPart = (otherPoint.type === 'burn' ? (otherPoint.landing ?? 1) : 0);
+          const usePivot = (pivotPart > 0 && pivots > 0) ? 1 : 0;
+          const directionChangeCost = (usePivot ? 0 : pivotPart) + landingPart;
           const bonusAfter = Math.max(bonus - directionChangeCost, 0);
           const bonusUsed = bonus - bonusAfter;
           const brAfter = burnsRemaining - directionChangeCost + bonusUsed;
@@ -193,6 +214,7 @@ export function buildPlanner(graph, {
             // is the flyby bonus actually applied to it. planRoute sums
             // them so the UI can show "BURNS - FLY BY = TOTAL".
             ns.push({ node: otherNode, dir: newDir, bonus: bonusAfter, burnsRemaining: brAfter,
+              pivots: pivots - usePivot,
               _gross: directionChangeCost, _flyby: bonusUsed });
           }
         }
@@ -202,9 +224,10 @@ export function buildPlanner(graph, {
     // burn/lagrange nodes once the budget is fully spent. Resets
     // dir to null so the rocket can pivot freely next turn -
     // exactly the "Hohmann stop to pivot" rule the user called out.
+    // Free pivots are a per-turn pool, so they refill on the wait.
     if (!wait && (points[node]?.type === 'hohmann'
         || ((points[node]?.type === 'burn' || points[node]?.type === 'lagrange') && burnsRemaining === 0))) {
-      ns.push({ node, dir: null, bonus: 0, wait: true, burnsRemaining: thrust });
+      ns.push({ node, dir: null, bonus: 0, wait: true, burnsRemaining: thrust, pivots: freePivots });
     }
     // Move to a neighbour (non-Hohmann-pivot path).
     for (const other of neighborsOf(node)) {
@@ -230,6 +253,7 @@ export function buildPlanner(graph, {
         // _gross = entry cost before flyby help, _flyby = bonus applied
         // to it (see the dir-change branch above). Inert for the search.
         ns.push({ node: other, dir: newDir, bonus: bonusAfter, burnsRemaining: burnsRemaining - (entryCost - bonusUsed),
+          pivots,
           _gross: entryCost, _flyby: bonusUsed });
       }
     }
@@ -267,13 +291,13 @@ export function buildPlanner(graph, {
   }
 
   function findPath(fromId) {
-    const source = { node: fromId, dir: null, bonus: 0, burnsRemaining: thrust };
+    const source = { node: fromId, dir: null, bonus: 0, burnsRemaining: thrust, pivots: freePivots };
     return dijkstra(getNeighbors, nodeWeight, tupleNs, pathId, source, allowed, makeDominancePrune());
   }
 
   function drawPath(pathData, fromId, toId) {
     const { distance, previous } = pathData;
-    const source = { node: fromId, dir: null, bonus: 0, burnsRemaining: thrust };
+    const source = { node: fromId, dir: null, bonus: 0, burnsRemaining: thrust, pivots: freePivots };
     const target = { node: toId, dir: null, bonus: 0, done: true };
     const targetId = pathId(target);
     if (!(targetId in distance)) return null;

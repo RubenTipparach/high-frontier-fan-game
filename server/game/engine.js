@@ -1066,18 +1066,36 @@ function applyEventChoice(state, op, ctx) {
       }
     }
     if (lose) {
-      // Centrist (Pad Insurance): a delegate in the center repays the boost cost
-      // of the card lost to the explosion. Read the cost off the slot (radiator
-      // side matters) BEFORE it leaves LEO.
+      // Pad Insurance (Centrist - Pad Insurance law). Read the lost card's
+      // boost cost off the slot (radiator side matters) BEFORE it leaves LEO.
       const lostSlot = (player.leo || []).find((s) => s.id === lose);
-      const insured = placeCount(assemblyOf(state), 'centrist', player.profileId) > 0;
-      const refund = insured ? boostMass(lose, lostSlot && lostSlot.radSide) : 0;
+      const refundAmt = boostMass(lose, lostSlot && lostSlot.radSide);
+      const asm = assemblyOf(state);
+      // When the Centrist law is the ACTIVE law, every player who loses cargo
+      // is repaid automatically. When it is NOT active, a player who holds a
+      // delegate on Centrist may LOBBY for it: pay 1 aqua and discard that
+      // delegate to claim the repayment this once (standard M0 lobby cost).
+      const lawActive = lawInForce(state, 'centrist');
+      const hasCentristDelegate = placeCount(asm, 'centrist', player.profileId) > 0;
+      let insured = false;
+      let lobbied = false;
+      if (lawActive) {
+        insured = true;
+      } else if (op.lobby && hasCentristDelegate && refundAmt >= 1 && (player.aqua | 0) >= 1) {
+        player.aqua -= 1;
+        setPlaceCount(asm, 'centrist', player.profileId, placeCount(asm, 'centrist', player.profileId) - 1);
+        insured = true;
+        lobbied = true;
+      }
+      const refund = insured ? refundAmt : 0;
       player.leo = (player.leo || []).filter((s) => s.id !== lose);
       (player.hand = player.hand || []).push(lose);   // Decommission -> back to hand
       log = `${player.name} decommissioned ${cardNameOf(lose)} from LEO to hand (Pad Explosion).`;
       if (refund > 0) {
         player.aqua += refund;
-        log += ` Pad Insurance repaid ${refund} aqua.`;
+        log += lobbied
+          ? ` Lobbied Centrist (1 aqua + a delegate) for Pad Insurance, repaid ${refund} aqua.`
+          : ` Pad Insurance repaid ${refund} aqua.`;
       }
       newsCards.push(lose);
     } else {

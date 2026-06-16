@@ -1407,6 +1407,10 @@ export function getActiveThrusterStats() {
     afterburnAvailable: Number.isFinite(f.afterburn) && f.afterburn > 0,
     afterburnSteps:     Number(f.afterburn) || 0,   // fuel steps spent to engage (gain is always +1)
     afterburnEngaged:   _afterburnEngaged,
+    // Free Hohmann pivots per turn (pirouette thrusters). Read off the
+    // INSTALLED face so a dark-side thruster like the Dual-Stage 4-Grid,
+    // whose bonus lives on its Tier-2 face, is counted when flipped.
+    bonusPivots:        Number(f.bonusPivots) || 0,
     solarDriven,
     solarSource,
     solarZone: _solarZone,
