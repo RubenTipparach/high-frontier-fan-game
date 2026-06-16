@@ -5475,12 +5475,9 @@ function getColocatedDestinations(sourceId) {
 // one after the first. LEO<->Rocket only; other combos toast.
 function transferSelectedOnline(sourceId, destId, ids) {
   if (!_online) return false;
-  // The server understands leo / rocket / outpostX as endpoints; one side
-  // must be the rocket (the mobile carrier). It validates colocation.
-  if (sourceId !== 'rocket' && destId !== 'rocket') {
-    _onlineToast('Card transfers must involve the rocket.', 'error');
-    return true;
-  }
+  // The server understands leo / rocket / outpostX as endpoints and validates
+  // colocation, so ANY two colocated stacks can trade (outpost <-> outpost,
+  // LEO <-> rocket, outpost <-> rocket, ...).
   submitOnlineOp({ kind: 'TRANSFER', cardIds: [...ids], from: sourceId, to: destId });
   return true;
 }
@@ -5498,13 +5495,9 @@ function transferOneCard(sourceId, destId, cardId) {
   // hand. The crew PICK_CREW staged in LEO lives in player.leo, so it
   // must travel via TRANSFER.
   if (_online) {
-    // Any colocated stack <-> rocket move (LEO or an outpost). The server
-    // validates colocation + forms the rocket at an outpost when empty.
-    if (sourceId === 'rocket' || destId === 'rocket') {
-      submitOnlineOp({ kind: 'TRANSFER', cardId, from: sourceId, to: destId });
-    } else {
-      _onlineToast('Card transfers must involve the rocket.', 'error');
-    }
+    // Any colocated stack-to-stack move. The server validates colocation and
+    // forms the rocket at an outpost when empty.
+    submitOnlineOp({ kind: 'TRANSFER', cardId, from: sourceId, to: destId });
     return false;
   }
   const TANK_MAX = 32;

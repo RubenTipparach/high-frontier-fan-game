@@ -2052,29 +2052,37 @@ function applyTransfer(state, op, player) {
   // Legacy shorthand: only `to` (rocket|leo) given -> the other is `from`.
   if (!from && (to === 'rocket' || to === 'leo')) from = (to === 'rocket' ? 'leo' : 'rocket');
   if (!from || !to || from === to) return fail('bad_transfer');
-  if (from !== 'rocket' && to !== 'rocket') return fail('bad_transfer');
+  const validEndpoint = (ep) => ep === 'leo' || ep === 'rocket'
+    || (typeof ep === 'string' && ep.startsWith('outpost') && ['A', 'B', 'C', 'D'].includes(ep.slice('outpost'.length)));
+  if (!validEndpoint(from) || !validEndpoint(to)) return fail('bad_transfer');
 
   const ids = Array.isArray(op.cardIds)
     ? op.cardIds.map(String)
     : (op.cardId != null ? [String(op.cardId)] : []);
   if (!ids.length) return fail('bad_transfer');
 
-  // The non-rocket endpoint + its colocation requirement.
-  const other = from === 'rocket' ? to : from;
+  // Both stacks must exist (an outpost endpoint must be built).
+  const outpostOf = (ep) => player.outposts && player.outposts[ep.slice('outpost'.length)];
+  if (from.startsWith('outpost') && !outpostOf(from)) return fail('no_outpost');
+  if (to.startsWith('outpost') && !outpostOf(to)) return fail('no_outpost');
+
+  // Colocation: cards move between two stacks at the SAME location. LEO is the
+  // null site; the rocket sits at its siteId (null = LEO); an outpost at its
+  // siteId. Any colocated pair works (outpost <-> outpost, LEO <-> rocket,
+  // outpost <-> rocket, ...), not just rocket-involving moves.
+  const siteOf = (ep) => {
+    if (ep === 'leo') return null;
+    if (ep === 'rocket') return player.rocket.siteId == null ? null : player.rocket.siteId;
+    return outpostOf(ep).siteId;
+  };
   const rocketEmpty = player.rocket.stack.length === 0;
-  if (other === 'leo') {
-    if (!rocketAtLeo(player) && !rocketEmpty) return fail('rocket_not_at_leo');
-  } else if (other.startsWith('outpost')) {
-    const opp = player.outposts && player.outposts[other.slice('outpost'.length)];
-    if (!opp) return fail('no_outpost');
-    if (rocketEmpty) {
-      // Forming the rocket at the outpost: it adopts the outpost's site.
-      player.rocket.siteId = opp.siteId;
-    } else if (player.rocket.siteId !== opp.siteId) {
-      return fail('not_colocated');
-    }
-  } else {
-    return fail('bad_transfer');
+  const involvesRocket = from === 'rocket' || to === 'rocket';
+  if (involvesRocket && rocketEmpty) {
+    // An empty rocket forms at the OTHER endpoint's location.
+    const other = from === 'rocket' ? to : from;
+    player.rocket.siteId = siteOf(other);
+  } else if (siteOf(from) !== siteOf(to)) {
+    return fail('not_colocated');
   }
 
   const srcArr = stackArrayOf(player, from);
