@@ -433,6 +433,12 @@
   opacity: 0.7;
   font-size: 14px;
 }
+/* The black (secondary / installed) face has a dark background, so the dark
+   "or" slash between alternative supports is nearly invisible - force it white. */
+.card-face[data-face="secondary"] .card-requires .req .req-or {
+  color: #ffffff;
+  opacity: 0.95;
+}
 
 /* Modifier triangle for reactor / generator pairing cards.
    Same silhouette as the thrust triangle but slate-grey with

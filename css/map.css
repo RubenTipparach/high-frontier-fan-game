@@ -3462,6 +3462,11 @@ body:has(#view-browse:not(.hidden)) #main {
 .browse-sidepanel[data-active="patents"] {
   width: min(620px, 80vw);
 }
+/* Cart / market pane is wider too so the full-size deck-top card has room
+   (deck-thickness graphic + card + padding) instead of being squished. */
+.browse-sidepanel[data-active="cart"] {
+  width: min(560px, 80vw);
+}
 .browse-sidepanel[data-active=""] { width: 48px; }
 
 /* Phone / narrow-portrait layout. The hand strip owns the bottom
