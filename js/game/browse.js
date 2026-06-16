@@ -4617,6 +4617,7 @@ function humanizeOnlineOpError(code, detail) {
     claim_limit: 'All 9 of your claim discs are placed - move one to this spot to prospect here.',
     disc_has_factory: 'That claim has a factory on it - it can\'t be moved.',
     cannot_industrialize: 'Industrialize needs a refinery + a robonaut (with their supports) in the stack.',
+    card_no_industrialize: 'That parachute card cannot be used during industrialization. Leave it out of the build.',
     no_mine_revival: 'Mine Revival needs a Termite Nest aboard.',
     no_busted_disc: 'Mine Revival needs a busted (failed) claim here to revive.',
     site_too_small: 'Mine Revival only works on a site of size 2 or more.',
@@ -14353,8 +14354,13 @@ async function moveRocket() {
   // move-queue below, in route order, so an early rad failure
   // can stop the ship before a later generic hazard is reached.
   const hazards = routeHazards(turn1);
+  // A safe-aerobrake card (parachute generator) aboard rides the stack through
+  // aerobrake corridors with no roll - matching the server, which waives them -
+  // so don't prompt pay/roll for venus (aerobrake) nodes. Skull / radiation are
+  // unaffected. The ability activates by being aboard (no support chain needed).
+  const safeAero = stackHasPower('safeAerobrake');
   const radHazards     = hazards.filter((h) => h.site.type === 'radhaz');
-  const genericHazards = hazards.filter((h) => h.site.type !== 'radhaz');
+  const genericHazards = hazards.filter((h) => h.site.type !== 'radhaz' && !(safeAero && h.site.type === 'venus'));
   let hazardChoice = null;
   let lockUndo = false;
   // Factory-assist pre-flight. A maneuver where net thrust <= site

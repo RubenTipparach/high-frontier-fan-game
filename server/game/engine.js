@@ -281,9 +281,10 @@ function stackHasMoonCable(rocket) {
   return !!(rocket && (rocket.stack || []).some(isMooncableThruster));
 }
 
-// Does the stack carry an OPERATIONAL safe-aerobrake card (a parachute
-// generator: Magnetoshell Plasma Parachute / Granular Rainbow Corral)? Such a
-// card lets the whole stack ride out aerobrake hazards with no roll.
+// Does the stack carry a safe-aerobrake card (a parachute generator:
+// Magnetoshell Plasma Parachute / Granular Rainbow Corral)? The ability
+// activates just by being ABOARD (no support-chain / operational requirement),
+// and lets the whole stack ride out aerobrake hazards with no roll.
 function stackSafeAerobrake(rocket) {
   return !!(rocket && (rocket.stack || []).some((s) => {
     const pw = powerOfSlot(s);
@@ -2581,6 +2582,9 @@ function applyIndustrialize(state, op, player) {
     if (c && c.type === 'robonaut') hasRobonaut = true;
     const pw = powerOfSlot(slot);   // capture now (the slot is decommissioned below)
     if (!pw) continue;
+    // Magnetoshell Plasma Parachute: "Cannot be used to support Bernals or
+    // during industrialization." Reject it from the build set.
+    if (pw.safeAerobrakeNoBernalOrIndustrialize) return fail('card_no_industrialize');
     // ARCOLOGY (Solar Carbotherm): no robonaut decommission needed in the
     // listed inner-system zones.
     if (Array.isArray(pw.noRobonautDecommissionZones)
