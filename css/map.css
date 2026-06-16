@@ -8033,6 +8033,9 @@ body:has(#view-browse:not(.hidden)) #main {
 /* The big interactive modal version (collapsible like the auction overlay). */
 .assembly-modal-overlay { position: fixed; inset: 0; z-index: 122; display: flex; align-items: flex-start;
   justify-content: center; padding: 24px; background: rgba(3, 2, 10, 0.78); backdrop-filter: blur(4px); }
+/* Confirm dialogs (e.g. the Lobby "are you sure") must sit ABOVE every modal
+   that can spawn them - including the assembly modal (z 122). */
+.confirm-modal-overlay { z-index: 200; }
 .assembly-modal-overlay.is-minimized { background: transparent; backdrop-filter: none; pointer-events: none; }
 .assembly-modal-overlay.is-minimized .assembly-modal { display: none; }
 .assembly-modal-overlay.is-minimized .mp-mini-chip { display: none; }

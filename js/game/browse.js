@@ -3252,8 +3252,9 @@ function renderAssemblyTab(snapshot) {
   const hint = document.createElement('button');
   hint.type = 'button';
   hint.className = 'modal-btn assembly-open-btn';
-  hint.textContent = _spectator ? '🏛 Open assembly' : '🏛 Open assembly to act';
-  hint.addEventListener('click', () => openAssemblyModal());
+  hint.textContent = _spectator ? '🏛 Open assembly' : '💰 Fundraise Op';
+  hint.title = _spectator ? 'Open the assembly board' : 'Fundraise: place / move a delegate, then move the active-law star (spends your operation)';
+  hint.addEventListener('click', () => openAssemblyModal(_spectator ? 'view' : 'fundraise'));
   host.appendChild(hint);
   if (!_spectator) {
     const lobbyBtn = document.createElement('button');
