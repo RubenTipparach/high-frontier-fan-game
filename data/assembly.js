@@ -129,19 +129,21 @@ export function delegatesRemaining(assembly, profileId) {
   return Math.max(0, DELEGATES_PER_PLAYER - playerDelegatesPlaced(assembly, profileId));
 }
 
-// Vote tally: the ideologies tied for the MOST delegates (the spaces that win
-// the vote). Empty when no ideology has a delegate. The fundraiser moves the
+// Vote tally: the spaces tied for the MOST delegates (the spaces that win the
+// vote). Centrist is a full participant here (it holds delegates and can win the
+// vote); starring it means no ideology law is in force, only the always-on
+// Centrist passive. Empty when no space has a delegate. The fundraiser moves the
 // active-law star onto the winner; on a tie they pick which tied space gets it.
 export function voteWinners(assembly) {
   const totals = {};
   let max = 0;
-  for (const key of IDEOLOGY_ORDER) {
+  for (const key of ASSEMBLY_PLACES) {
     const n = delegatesInPlace(assembly, key);
     totals[key] = n;
     if (n > max) max = n;
   }
   if (max <= 0) return [];
-  return IDEOLOGY_ORDER.filter((k) => totals[k] === max);
+  return ASSEMBLY_PLACES.filter((k) => totals[k] === max);
 }
 
 // Which ideology Laws are in force, plus whether lobbying is disabled. Driven by
