@@ -3027,6 +3027,9 @@ body:has(#view-browse:not(.hidden)) #main {
 .browse-sidepanel[data-active="patents"]:not([data-active=""]) ~ .mp-turn-banner {
   right: min(620px, 80vw);
 }
+.browse-sidepanel[data-active="cart"]:not([data-active=""]) ~ .mp-turn-banner {
+  right: min(560px, 80vw);
+}
 @media (max-width: 720px) {
   .mp-turn-banner {
     right: 0 !important;
@@ -3100,6 +3103,9 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .browse-sidepanel[data-active="patents"]:not([data-active=""]) ~ .sandbox-hand {
   right: min(620px, 80vw);
+}
+.browse-sidepanel[data-active="cart"]:not([data-active=""]) ~ .sandbox-hand {
+  right: min(560px, 80vw);
 }
 @media (max-width: 720px) {
   /* Phones: the hand strip takes the full bottom width. The
