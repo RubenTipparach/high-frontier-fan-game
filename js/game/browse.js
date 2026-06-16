@@ -3240,10 +3240,26 @@ function activeLawColor(snapshot) {
   const ide = star && star !== 'centrist' && ASSEMBLY_IDEOLOGY_BY_KEY[star];
   return ide ? ide.color : '#f3f4fa';   // Centrist / none = no ideology law = white
 }
-function assemblyTabIconSvg(color, selected) {
+// The active law's initial (F/H/U/A/E/I) drawn in front of the temple, so the
+// grey-family laws (Honor, Individuality) are told apart at a glance even when
+// their tints are close. Empty for Centrist / no star: a white temple with NO
+// letter reads as "no ideology law in power".
+function activeLawLetter(snapshot) {
+  const star = snapshot && snapshot.activeLawStar;
+  if (!star || star === 'centrist') return '';
+  return ((ASSEMBLY_IDEOLOGY_BY_KEY[star] || {}).name || star).charAt(0).toUpperCase();
+}
+function assemblyTabIconSvg(color, selected, letter) {
   const edge = selected ? '#04121f' : '#ffffff';
-  return '<svg class="ui-icon ui-icon-assembly" viewBox="0 0 24 24" width="23" height="23" aria-hidden="true">'
-    + `<g fill="${esc(color)}" stroke="${edge}" stroke-width="1" stroke-linejoin="round" stroke-linecap="round">`
+  const L = letter ? esc(letter) : '';
+  // When a law is lettered the viewBox widens to make room for the glyph in
+  // front of the temple, and the temple group shifts right; the .is-lettered
+  // CSS gives the icon a touch more width so the temple keeps its size.
+  const vbW = L ? 34 : 24;
+  const shift = L ? 11 : 0;
+  return `<svg class="ui-icon ui-icon-assembly${L ? ' is-lettered' : ''}" viewBox="0 0 ${vbW} 24" width="23" height="23" aria-hidden="true">`
+    + (L ? `<text x="0.5" y="18.5" font-family="ui-sans-serif, system-ui, sans-serif" font-weight="800" font-size="18" fill="${esc(color)}" stroke="${edge}" stroke-width="0.7" stroke-linejoin="round">${L}</text>` : '')
+    + `<g transform="translate(${shift},0)" fill="${esc(color)}" stroke="${edge}" stroke-width="1" stroke-linejoin="round" stroke-linecap="round">`
     + '<path d="M3 9.5 12 4l9 5.5z"/>'
     + '<rect x="4.6" y="10.2" width="2.4" height="7.6" rx="0.4"/>'
     + '<rect x="8.8" y="10.2" width="2.4" height="7.6" rx="0.4"/>'
@@ -3257,7 +3273,7 @@ function updateAssemblyTabIcon(snapshot) {
   if (!tab || tab.hidden) return;
   const panel = document.getElementById('browse-sidepanel');
   const selected = !!(panel && panel.dataset.active === 'assembly');
-  tab.innerHTML = assemblyTabIconSvg(activeLawColor(snapshot), selected);
+  tab.innerHTML = assemblyTabIconSvg(activeLawColor(snapshot), selected, activeLawLetter(snapshot));
 }
 
 // Render the Sol Political Assembly (M0) tab from the snapshot: the hex board

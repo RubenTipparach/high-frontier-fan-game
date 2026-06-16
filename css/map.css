@@ -3698,6 +3698,9 @@ body:has(#view-browse:not(.hidden)) #main {
   justify-content: center;
 }
 .sidepanel-tabs button svg.ui-icon { width: 23px; height: 23px; display: block; }
+/* The politics icon grows a little wider when it carries an active-law letter,
+   so the temple keeps its size with the glyph in front of it. */
+.sidepanel-tabs button svg.ui-icon-assembly.is-lettered { width: 30px; }
 .sidepanel-tabs button.active {
   background: var(--accent);
   color: #062136;
