@@ -10496,20 +10496,18 @@ async function doConvertToOutpost(site) {
 
 // Pump water from the ROCKET tank into a colocated outpost (store it there).
 // Whole units only; a sub-1 remainder stays in the rocket. Server-routed online.
-async function doPumpFuelToOutpost(letter, max) {
+async function doPumpFuelToOutpost(letter, max, amount = null) {
   if (max <= 0) return;
-  const amount = await pickFuelAmount({
-    title: `💧 Store fuel in Outpost ${letter}`,
-    max,
-  });
-  if (!amount) return;
+  const amt0 = amount != null ? Math.min(amount, max)
+    : await pickFuelAmount({ title: `💧 Store fuel in Outpost ${letter}`, max });
+  if (!amt0) return;
   if (_online) {
-    await submitOnlineOp({ kind: 'TRANSFER_FUEL', letter, amount, direction: 'toOutpost' });
+    await submitOnlineOp({ kind: 'TRANSFER_FUEL', letter, amount: amt0, direction: 'toOutpost' });
     return;
   }
   const op = getOutpost(letter);
   if (!op) return;
-  const amt = Math.min(amount, Math.floor(getTankWater()), max);
+  const amt = Math.min(amt0, Math.floor(getTankWater()), max);
   if (amt <= 0) return;
   removeFuel(amt);
   setOutpostTank(letter, (op.tank | 0) + amt);
@@ -10532,24 +10530,51 @@ function fuelTankToOutpostBtns() {
   return html;
 }
 
+// Standard fuel-transfer rows for the rocket tank modal: one block per
+// colocated outpost, with +1/+5/max (pump FROM the outpost into the rocket) and
+// -1/-5/max (store FROM the rocket into the outpost). Each button transfers
+// immediately; the modal refreshes after.
+function fuelTankXferRows() {
+  const rs = getRocketSite();
+  if (!rs || getRocketStack().length === 0) return '';
+  let html = '';
+  for (const letter of OUTPOST_LETTERS) {
+    const op = getOutpost(letter);
+    if (!op || op.siteId !== rs.id) continue;
+    const L = esc(letter);
+    html += `<div class="ft-xfer">
+      <div class="ft-xfer-label">Outpost ${L} <span class="muted">(${op.tank | 0} water)</span></div>
+      <div class="ft-xfer-grp" title="Pump water from Outpost ${L} into the rocket">
+        <button type="button" class="popup-btn popup-btn-secondary ft-xfer-btn" data-dir="in" data-letter="${L}" data-amt="1">+1</button>
+        <button type="button" class="popup-btn popup-btn-secondary ft-xfer-btn" data-dir="in" data-letter="${L}" data-amt="5">+5</button>
+        <button type="button" class="popup-btn ft-xfer-btn" data-dir="in" data-letter="${L}" data-amt="max">max</button>
+      </div>
+      <div class="ft-xfer-grp" title="Store rocket water in Outpost ${L}">
+        <button type="button" class="popup-btn popup-btn-secondary ft-xfer-btn" data-dir="out" data-letter="${L}" data-amt="1">−1</button>
+        <button type="button" class="popup-btn popup-btn-secondary ft-xfer-btn" data-dir="out" data-letter="${L}" data-amt="5">−5</button>
+        <button type="button" class="popup-btn ft-xfer-btn" data-dir="out" data-letter="${L}" data-amt="max">max</button>
+      </div>
+    </div>`;
+  }
+  return html;
+}
+
 // Pump water from a colocated outpost into the rocket tank. Prompts for
 // an amount (capped by the outpost's water + the rocket's tank room),
 // then routes through the server (TRANSFER_FUEL) online or mutates the
 // local stacks in solo.
-async function doPumpOutpostFuel(letter, max) {
+async function doPumpOutpostFuel(letter, max, amount = null) {
   if (max <= 0) return;
-  const amount = await pickFuelAmount({
-    title: `💧 Pump fuel from Outpost ${letter}`,
-    max,
-  });
-  if (!amount) return;
+  const amt0 = amount != null ? Math.min(amount, max)
+    : await pickFuelAmount({ title: `💧 Pump fuel from Outpost ${letter}`, max });
+  if (!amt0) return;
   if (_online) {
-    await submitOnlineOp({ kind: 'TRANSFER_FUEL', letter, amount });
+    await submitOnlineOp({ kind: 'TRANSFER_FUEL', letter, amount: amt0 });
     return;
   }
   const op = getOutpost(letter);
   if (!op) return;
-  const amt = Math.min(amount, op.tank | 0, max);
+  const amt = Math.min(amt0, op.tank | 0, max);
   if (amt <= 0) return;
   setOutpostTank(letter, (op.tank | 0) - amt);
   addFuel(amt);
@@ -12016,9 +12041,8 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     <div class="fuel-tank-actions">
       ${tankDirt ? '' : `<button type="button" class="popup-btn popup-btn-secondary" id="tank-dump"
         title="Drain a chosen amount of water from the tank">💧⤓ Dump water</button>`}
-      ${tankDirt ? '' : fuelTankPumpBtns()}
-      ${tankDirt ? '' : fuelTankToOutpostBtns()}
     </div>
+    ${tankDirt ? '' : `<div class="fuel-tank-xfer">${fuelTankXferRows()}</div>`}
 <div class="fuel-tank-aqua" id="tank-aqua-section" hidden>
       <div class="aqua-row">
         <span>🏦 Aqua bank</span>
@@ -12370,6 +12394,31 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
       if (max <= 0) return;
       close();
       doPumpFuelToOutpost(letter, max);
+    });
+  });
+  // Standard +1/+5/max (pump in) and -1/-5/max (store out) transfer buttons.
+  // They transfer the chosen increment and reopen the modal so the tank +
+  // remaining maxes refresh in place.
+  panel.querySelectorAll('.ft-xfer-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const letter = btn.dataset.letter;
+      const dir = btn.dataset.dir;
+      const raw = btn.dataset.amt;
+      let amt;
+      if (dir === 'in') {
+        const op = getOutpost(letter);
+        const room = Math.max(0, getTankMax() - (getStackTotals().dryMass || 0) - getTankWater());
+        const cap = Math.min(op ? (op.tank | 0) : 0, room);
+        amt = raw === 'max' ? cap : Math.min(Number(raw), cap);
+        if (amt <= 0) return;
+        await doPumpOutpostFuel(letter, cap, amt);
+      } else {
+        const cap = Math.floor(getTankWater());
+        amt = raw === 'max' ? cap : Math.min(Number(raw), cap);
+        if (amt <= 0) return;
+        await doPumpFuelToOutpost(letter, cap, amt);
+      }
+      openFuelTankModal();   // refresh in place
     });
   });
   function drainTo(targetLevel, durationMs = 250) {
