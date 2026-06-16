@@ -688,9 +688,12 @@
    the card 180° to read it. */
 .card-face.is-radiator .half-heavy { transform: rotate(180deg); }
 /* Dim the inactive half. data-rotated=0 means light side is
-   currently up, so heavy is dimmed; data-rotated=1 swaps. */
-.card[data-rotated="0"] .card-face.is-radiator .half-heavy,
-.card[data-rotated="1"] .card-face.is-radiator .half-light {
+   currently up, so heavy is dimmed; data-rotated=1 swaps. The cyan
+   RADIATOR typebar is EXCLUDED so the blue label always reads, no
+   matter which side is active (the active side still stands out via the
+   bold toggle + full-colour stats below). */
+.card[data-rotated="0"] .card-face.is-radiator .half-heavy > :not(.card-typebar),
+.card[data-rotated="1"] .card-face.is-radiator .half-light > :not(.card-typebar) {
   opacity: 0.32;
   filter: grayscale(0.7);
 }
