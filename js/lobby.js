@@ -853,8 +853,17 @@ function renderLobbySettings(lobby, iAmHost, me) {
   }
 
   // Host editor.
+  const seated = Array.isArray(lobby.members) ? lobby.members.length : 1;
+  const minPlayers = Math.max(seated, 1);
+  const maxPlayers = Math.max(minPlayers, Number(lobby.maxPlayers) || minPlayers);
+  let maxOpts = '';
+  for (let n = minPlayers; n <= 6; n += 1) {
+    maxOpts += `<option value="${n}"${n === maxPlayers ? ' selected' : ''}>${n}</option>`;
+  }
   box.innerHTML = `
     <div class="lobby-settings-head">⚙ Room settings <span class="muted lobby-settings-saved"></span></div>
+    <label class="lobby-set-row"><span>Max players</span>
+      <select id="set-maxplayers">${maxOpts}</select></label>
     <label class="lobby-set-row"><span>Game length</span>
       <select id="set-rounds">
         <option value="4"${rounds === 4 ? ' selected' : ''}>Quick - 4 rounds</option>
@@ -887,6 +896,7 @@ function renderLobbySettings(lobby, iAmHost, me) {
       saved.textContent = 'save failed';
     }
   };
+  box.querySelector('#set-maxplayers').addEventListener('change', (e) => save({ maxPlayers: Number(e.target.value) }));
   box.querySelector('#set-rounds').addEventListener('change', (e) => save({ maxRounds: Number(e.target.value) }));
   box.querySelector('#set-policy').addEventListener('change', (e) => save({ joinPolicy: e.target.value }));
   box.querySelector('#set-draft').addEventListener('change', (e) => save({ draftStart: e.target.checked }));

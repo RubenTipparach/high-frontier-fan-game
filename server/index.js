@@ -906,6 +906,12 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   const body = req.body || {};
   const sets = [];
   const args = [];
+  if (body.maxPlayers !== undefined) {
+    // Can't drop below the players already seated.
+    const seated = db.prepare('SELECT COUNT(*) AS n FROM lobby_members WHERE lobby_id = ?').get(id).n | 0;
+    const mp = Math.max(seated, 1, Math.min(6, Number(body.maxPlayers) || seated));
+    sets.push('max_players = ?'); args.push(mp);
+  }
   if (body.maxRounds !== undefined) {
     const mr = [4, 5, 6, 7].includes(Number(body.maxRounds)) ? Number(body.maxRounds) : 5;
     sets.push('max_rounds = ?'); args.push(mr);
