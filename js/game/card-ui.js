@@ -621,17 +621,15 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     } else {
       fut.textContent = meta.future;
     }
-    // On a GW Thruster's purple (TW) back the future sits in a column BESIDE the
-    // thrust triangle so it doesn't clutter the stacked body; everywhere else
-    // (e.g. freighters, which have no triangle) it goes below the ability.
+    // On a GW Thruster's purple (TW) back the future OVERLAYS the left of the
+    // thrust triangle, so the triangle keeps its full front-face size instead of
+    // being squeezed by a side column. Everywhere else (e.g. freighters, which
+    // have no triangle) it goes below the ability.
     const thrustEl = (card.type === 'gw-thruster' && sideName === 'secondary')
       ? face.querySelector('.card-thrust') : null;
     if (thrustEl) {
       fut.classList.add('card-future-side');
-      const row = document.createElement('div');
-      row.className = 'card-thrust-row';
-      thrustEl.parentNode.insertBefore(row, thrustEl);
-      row.append(fut, thrustEl);
+      thrustEl.appendChild(fut);
     } else {
       const body = face.querySelector('.card-body');
       if (body) body.appendChild(fut);
@@ -1157,7 +1155,6 @@ export function thrustVisual(card, face, opts = {}) {
   const afterVal = (face && face.afterburn != null) ? face.afterburn : (card ? card.afterburn : null);
   const afterN = Number(afterVal) || 0;
   const showAfter = afterN > 0;
-  const afterDisplay = isGw ? `+${afterN}` : afterN;
   const afterTip = isGw
     ? `Afterburn: burn 1 fuel step to add +${afterN} net thrust this turn. This number is the thrust gained, not a fuel cost.`
     : `Afterburn: spend ${afterN} fuel step${afterN === 1 ? '' : 's'} to add +1 net thrust this turn. `
@@ -1180,8 +1177,14 @@ export function thrustVisual(card, face, opts = {}) {
   const fuelFill = isGw ? TVC.goldFuel : (isDirt ? TVC.dirt : TVC.water);
   const fuelRim = isGw ? TVC.goldFuelRim : (isDirt ? TVC.dirtRim : TVC.waterRim);
   const center = solar ? tvSun(70, TV_CTR) : (push ? tvPushsat(70, TV_CTR) : '');
+  // GW afterburn shows the thrust GAIN as "+N" in FRONT of (left of) the flame,
+  // not crammed inside it; other thrusters keep the fuel-step count inside.
+  const flameGlyph = isGw
+    ? `<text x="60" y="${TV_TOP + 5}" text-anchor="end" font-size="16" font-weight="800" fill="#ffe2bf" stroke="#3a1500" stroke-width="2.8" paint-order="stroke">+${afterN}</text>`
+      + tvFlame(80, TV_TOP, null)
+    : tvFlame(70, TV_TOP, afterN);
   const top = showAfter
-    ? `<g data-tip="${escapeText(opts.breakdown?.afterburn || afterTip)}">${tvFlame(70, TV_TOP, afterDisplay)}</g>`
+    ? `<g data-tip="${escapeText(opts.breakdown?.afterburn || afterTip)}">${flameGlyph}</g>`
     : '';
   const thrustTip = escapeText(opts.breakdown?.thrust || `Thrust: ${thrust}`);
   const fuelTip = escapeText(opts.breakdown?.fuel || `Fuel per burn: ${fuelText} ${ftype || (isGw ? 'ISO' : 'Water')}`);
