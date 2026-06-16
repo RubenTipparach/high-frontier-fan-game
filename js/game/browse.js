@@ -1291,6 +1291,16 @@ function syncMpTurnBanner(snapshot) {
   } else {
     banner.classList.remove('is-anarchy');
   }
+  // Lobbied law(s): on my turn, surface any ideology law I activated via Lobby
+  // this turn so the benefit is visible while I act.
+  if (myTurn) {
+    const me = snapshot.players.find((p) => p.profileId === myId);
+    const lobbied = (me && Array.isArray(me.lobbiedLaws)) ? me.lobbiedLaws : [];
+    if (lobbied.length) {
+      const names = lobbied.map((k) => (ASSEMBLY_IDEOLOGY_BY_KEY[k] || {}).name || k);
+      label.textContent += ` · 🗳 Lobbied: ${names.join(', ')}`;
+    }
+  }
   banner.hidden = false;
 }
 
@@ -3245,6 +3255,14 @@ function renderAssemblyTab(snapshot) {
   hint.textContent = _spectator ? '🏛 Open assembly' : '🏛 Open assembly to act';
   hint.addEventListener('click', () => openAssemblyModal());
   host.appendChild(hint);
+  if (!_spectator) {
+    const lobbyBtn = document.createElement('button');
+    lobbyBtn.type = 'button';
+    lobbyBtn.className = 'modal-btn assembly-open-btn';
+    lobbyBtn.textContent = '🗳 Lobby a law';
+    lobbyBtn.addEventListener('click', () => openAssemblyModal('lobby'));
+    host.appendChild(lobbyBtn);
+  }
   // Keep an already-open modal in sync with each new snapshot.
   if (_assemblyModalOpen) refreshAssemblyModal();
 }
@@ -3364,8 +3382,8 @@ function refreshAssemblyModal() {
   overlay.classList.toggle('is-minimized', _assemblyMin);
   setMpTurnAction('assembly', _assemblyMin ? {
     label: '🏛 Assembly',
-    meta: _assemblyMode === 'fundraise' ? 'fundraising' : 'open',
-    needsAction: _assemblyMode === 'fundraise',
+    meta: _assemblyMode === 'fundraise' ? 'fundraising' : (_assemblyMode === 'lobby' ? 'lobbying' : 'open'),
+    needsAction: _assemblyMode === 'fundraise' || _assemblyMode === 'lobby',
     onClick: () => { _assemblyMin = false; refreshAssemblyModal(); },
   } : null);
   if (_assemblyMin) return;
@@ -3380,21 +3398,53 @@ function refreshAssemblyModal() {
 function assemblyModalVariant() {
   return (typeof window !== 'undefined' && window.innerWidth <= 720) ? 'large' : 'compact';
 }
-// View mode: the original board (callout panels ringing the wheel; click your
-// delegate to Lobby).
+// The ideologies the player can lobby right now: a delegate they own, whose law
+// is NOT already in power, while lobbying isn't disabled (Unity). Centrist is
+// not an ideology law, so it's never lobby-able.
+function lobbyEligiblePlaces(snapshot) {
+  const set = new Set();
+  if (_spectator) return set;
+  const myId = _onlineMe && _onlineMe.id;
+  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
+  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar);
+  if (laws.lobbyingDisabled) return set;
+  for (const place of ASSEMBLY_IDEOLOGY_ORDER) {
+    if (((dmap[place] || {})[myId] | 0) <= 0) continue;
+    if (laws.active.has(place)) continue;
+    set.add(place);
+  }
+  return set;
+}
+
+// View mode (and Lobby mode): the board + the active-law read-out. In Lobby mode
+// the player's lobby-eligible delegates glow; tapping one lobbies that law.
 function renderAssemblyView(body, snapshot) {
+  const lobbyMode = _assemblyMode === 'lobby';
   const view = assemblyDelegatesView(snapshot, assemblyModalVariant());
+  view.interactive = true;
   view.onCellClick = (place) => tryLobbyAt(snapshot, place);
+  if (lobbyMode) view.cubeGlow = lobbyEligiblePlaces(snapshot);
   body.appendChild(renderAssemblyPanel(view));
   body.appendChild(assemblyStatusEl(snapshot));
   const hint = document.createElement('p');
   hint.className = 'assembly-status muted';
-  hint.textContent = _spectator ? 'Spectating.' : 'Click one of your delegates to lobby its law (1 aqua, discards the delegate).';
+  if (_spectator) hint.textContent = 'Spectating.';
+  else if (lobbyMode) {
+    const elig = lobbyEligiblePlaces(snapshot);
+    hint.textContent = elig.size
+      ? 'Lobby: tap one of your glowing delegates to use its law this turn (1 aqua, discards the delegate).'
+      : 'No delegate you can lobby right now (you need a delegate in an inactive ideology, and Unity must not be disabling lobbying).';
+  } else hint.textContent = 'Press Lobby, then tap a delegate, to use an inactive ideology’s law (1 aqua, discards the delegate).';
   body.appendChild(hint);
-  const close = document.createElement('button');
-  close.type = 'button'; close.className = 'modal-btn assembly-open-btn'; close.textContent = 'Close';
-  close.addEventListener('click', closeAssemblyModal);
-  body.appendChild(close);
+  const btns = document.createElement('div');
+  btns.className = 'assembly-fr-btns';
+  if (!_spectator && !lobbyMode) {
+    btns.append(mkBtn('🗳 Lobby', 'modal-btn primary', () => { _assemblyMode = 'lobby'; refreshAssemblyModal(); }));
+  } else if (lobbyMode) {
+    btns.append(mkBtn('↩ Done', 'modal-btn', () => { _assemblyMode = 'view'; refreshAssemblyModal(); }));
+  }
+  btns.append(mkBtn('Close', 'modal-btn', closeAssemblyModal));
+  body.appendChild(btns);
 }
 // Click a delegate to Lobby that ideology (server LOBBY: 1 aqua + discard, only
 // an inactive ideology, not while Unity disables lobbying).
@@ -3412,7 +3462,11 @@ function tryLobbyAt(snapshot, place) {
     title: '🗳 Lobby',
     body: `Lobby <strong>${esc(name)}</strong>? Pay 1 aqua and discard your delegate there to use its law this turn.`,
     yes: '🗳 Lobby (1 aqua)', no: 'Cancel',
-  }).then((ok) => { if (ok) submitOnlineOp({ kind: 'LOBBY', ideology: place }); });
+  }).then((ok) => {
+    if (!ok) return;
+    _assemblyMode = 'view';   // leave lobby-select mode once a law is lobbied
+    submitOnlineOp({ kind: 'LOBBY', ideology: place });
+  });
 }
 // Places where the player currently holds a delegate (counting a placement made
 // earlier in this same Fundraise).
