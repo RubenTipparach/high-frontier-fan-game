@@ -1182,7 +1182,7 @@ export function thrustVisual(card, face, opts = {}) {
   // fuel-step count inside.
   const flameGlyph = isGw
     ? tvFlame(70, TV_TOP + 5, null)
-      + `<text x="70" y="${TV_TOP - 3}" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="800" fill="#ffffff" stroke="#3a1500" stroke-width="2.8" paint-order="stroke">+${afterN}</text>`
+      + `<text x="70" y="${TV_TOP + 1}" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="800" fill="#ffffff" stroke="#3a1500" stroke-width="2.8" paint-order="stroke">+${afterN}</text>`
     : tvFlame(70, TV_TOP, afterN);
   const top = showAfter
     ? `<g data-tip="${escapeText(opts.breakdown?.afterburn || afterTip)}">${flameGlyph}</g>`
