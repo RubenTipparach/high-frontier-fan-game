@@ -8099,6 +8099,8 @@ body:has(#view-browse:not(.hidden)) #main {
   padding: 8px 10px; font-size: 13px; margin: 4px 0 6px; }
 .assembly-fr-chosen { font-size: 12px; color: var(--accent, #fbbf24); margin-top: 4px; }
 .assembly-fr-btns { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 10px 0 4px; }
+.assembly-fr-btns .modal-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.assembly-fr-btns .modal-btn:disabled:hover { background: var(--bg-2); }
 /* Simple variant (sidebar glance): just the cropped wheel, filling the panel. */
 .assembly-panel-simple { max-width: 100%; width: 100%; }
 .assembly-panel-simple .assembly-board { width: 100%; max-width: 100%; margin: 4px auto 0; }

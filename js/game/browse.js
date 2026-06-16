@@ -3617,7 +3617,11 @@ function renderAssemblyFundraise(body, snapshot) {
   view.onCellClick = (place) => onFundraiseCell(snapshot, place, available);
   body.appendChild(renderAssemblyPanel(view));
 
-  // Step buttons.
+  // Step buttons. Each step shows its forward action(s); below them a consistent
+  // Undo (step back one choice) + Cancel (abandon the whole Fundraise, no
+  // operation spent) footer is ALWAYS present so a player is never trapped
+  // mid-op. The Undo subsumes the old per-step back buttons ("pick a different
+  // cube", "back to move").
   const btns = document.createElement('div');
   btns.className = 'assembly-fr-btns';
   if (step === 'place') {
@@ -3626,14 +3630,18 @@ function renderAssemblyFundraise(body, snapshot) {
       mkBtn(_fr.place ? 'Next: move →' : 'Next →', 'modal-btn primary', () => { _fr.step = 'move'; refreshAssemblyModal(); }),
     );
   } else if (step === 'move') {
-    if (_fr.moveFrom) btns.append(mkBtn('↩ Pick a different cube', 'modal-btn', () => { _fr.moveFrom = null; refreshAssemblyModal(); }));
-    else btns.append(mkBtn('Skip move & tally', 'modal-btn', () => fundraiseAdvanceToStar(snapshot)));
+    if (!_fr.moveFrom) btns.append(mkBtn('Skip move & tally', 'modal-btn', () => fundraiseAdvanceToStar(snapshot)));
   } else if (step === 'star') {
-    btns.append(mkBtn('↩ Back to move', 'modal-btn', () => { _fr.step = 'move'; _fr.moveFrom = null; _fr.moveTo = null; _fr.tied = null; refreshAssemblyModal(); }));
     if ((_fr.tied || []).length === 0) {
       btns.append(mkBtn('Set star to Centrist', 'modal-btn primary', () => { _fr.star = 'centrist'; commitFundraise(); }));
     }
   }
+  const undoBtn = mkBtn('↩ Undo', 'modal-btn', fundraiseUndo);
+  undoBtn.disabled = !fundraiseCanUndo();
+  undoBtn.title = 'Step back one choice in this Fundraise.';
+  const cancelBtn = mkBtn('✕ Cancel', 'modal-btn cancel', closeAssemblyModal);
+  cancelBtn.title = 'Abandon this Fundraise. Your operation is not spent.';
+  btns.append(undoBtn, cancelBtn);
   body.appendChild(btns);
 
   body.appendChild(assemblyStatusEl(snapshot));
@@ -3673,6 +3681,32 @@ function onFundraiseCell(snapshot, place, available) {
   if (!available.has(place)) { _onlineToast('Move only to an adjacent space.', 'error'); return; }
   _fr.moveTo = place;
   fundraiseAdvanceToStar(snapshot);
+}
+// Step back ONE action in the guided Fundraise: the inverse of the forward
+// clicks, popped newest-first (the star tally -> the move destination -> the
+// picked-up cube -> the placement). Only edits the local draft; nothing has
+// been submitted yet. No-op at the very start (nothing chosen).
+function fundraiseUndo() {
+  if (!_fr) return;
+  if (_fr.step === 'star') {
+    _fr.star = null;
+    _fr.tied = null;
+    _fr.step = 'move';
+    if (_fr.moveTo) _fr.moveTo = null;   // undo the destination, keep the picked cube to re-aim
+    else _fr.moveFrom = null;            // tally was reached via "Skip move", so drop to cube-pick
+  } else if (_fr.step === 'move') {
+    if (_fr.moveFrom) _fr.moveFrom = null;   // put the picked-up cube back down
+    else _fr.step = 'place';                 // back to the placement step
+  } else if (_fr.place) {
+    _fr.place = null;                        // unselect the placed delegate
+  }
+  refreshAssemblyModal();
+}
+// Is there a prior Fundraise choice to step back through? False only at the very
+// start (the place step with nothing placed), where Undo is disabled.
+function fundraiseCanUndo() {
+  if (!_fr) return false;
+  return _fr.step !== 'place' || !!_fr.place;
 }
 function commitFundraise() {
   const op = { kind: 'FUNDRAISE' };
