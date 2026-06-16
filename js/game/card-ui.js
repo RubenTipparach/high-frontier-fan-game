@@ -373,18 +373,8 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     const f = fdata.fuel ?? card.fuel;
     add('Fuel', f != null && !Number.isInteger(f) ? f.toFixed(2) : f);
     add('Thrust', fdata.thrust ?? card.thrust);
-    const afterVal = fdata.afterburn ?? card.afterburn;
-    if (afterVal) {
-      // Afterburn stat line: the number is the FUEL STEPS spent to engage
-      // afterburn (the +1 net thrust gain is always +1). Carry that on the
-      // tooltip so the digit next to the flame is never read as a water cost.
-      const n = Number(afterVal);
-      const tip = `Afterburn: spend ${n} fuel step${n === 1 ? '' : 's'} to add +1 net thrust this turn. `
-        + `This number is the fuel steps spent to perform afterburn, not a water or aqua cost.`;
-      const li = document.createElement('li');
-      li.innerHTML = `<span>Afterburn</span><strong data-tip="${escapeText(tip)}">🔥 ${escapeText(String(n))}</strong>`;
-      stats.appendChild(li);
-    }
+    // Afterburn is shown by the flame on the thrust triangle (with its own
+    // tooltip), so it no longer needs a separate stat line here.
   } else if (card.type === 'reactor') {
     add('Power', card.power);
     add('Heat',  card.heat);
