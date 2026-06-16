@@ -4623,6 +4623,7 @@ function humanizeOnlineOpError(code, detail) {
     site_too_small: 'Mine Revival only works on a site of size 2 or more.',
     no_factory: 'You need your own factory here.',
     cannot_mix_fuel: 'Water and dirt can\'t mix - burn the tank empty before switching fuel.',
+    cannot_store_dirt: 'Outposts only store water - the rocket tank holds dirt.',
     wrong_fuel_grade: 'Wrong fuel: a water thruster can only burn water, and the tank holds dirt. Dump the dirt and refuel with water.',
     not_dirt_thruster: 'Dirt refuel needs a dirt-burning thruster aboard.',
     not_at_site: 'Park at a site first - dirt comes from the ground.',
@@ -5786,6 +5787,7 @@ function openUnifiedStackInspector(stackId) {
             ? '<button type="button" class="modal-btn stack leo-fuel-tank" title="Open the docked rocket\'s water tank to transfer fuel">💧 Rocket fuel tank</button>'
             : ''}
           ${outpostPumpBtnHtml(stackId)}
+          ${outpostFillBtnHtml(stackId)}
           ${outpostDissolveBtnHtml(stackId)}
           <button type="button" class="modal-btn stack-inspector-close">Close</button>
         </div>
@@ -5968,6 +5970,16 @@ function openUnifiedStackInspector(stackId) {
         if (max <= 0) return;
         close();
         doPumpOutpostFuel(letter, max);
+      });
+    }
+    const fillBtn = dialog.querySelector('.stack-fill-fuel');
+    if (fillBtn) {
+      fillBtn.addEventListener('click', () => {
+        const letter = fillBtn.dataset.letter;
+        const max = Number(fillBtn.dataset.max) || 0;
+        if (max <= 0) return;
+        close();
+        doPumpFuelToOutpost(letter, max);
       });
     }
     // Decommission an empty outpost (dissolve it, free the slot).
@@ -10482,6 +10494,44 @@ async function doConvertToOutpost(site) {
 }
 
 
+// Pump water from the ROCKET tank into a colocated outpost (store it there).
+// Whole units only; a sub-1 remainder stays in the rocket. Server-routed online.
+async function doPumpFuelToOutpost(letter, max) {
+  if (max <= 0) return;
+  const amount = await pickFuelAmount({
+    title: `💧 Store fuel in Outpost ${letter}`,
+    max,
+  });
+  if (!amount) return;
+  if (_online) {
+    await submitOnlineOp({ kind: 'TRANSFER_FUEL', letter, amount, direction: 'toOutpost' });
+    return;
+  }
+  const op = getOutpost(letter);
+  if (!op) return;
+  const amt = Math.min(amount, Math.floor(getTankWater()), max);
+  if (amt <= 0) return;
+  removeFuel(amt);
+  setOutpostTank(letter, (op.tank | 0) + amt);
+  setStatus(`💧 Stored ${amt} water from the rocket in Outpost ${letter}.`);
+}
+
+// Buttons for the ROCKET fuel-tank modal: store the rocket's water in each
+// colocated outpost (the reverse of the pump-from-outpost buttons).
+function fuelTankToOutpostBtns() {
+  const rs = getRocketSite();
+  if (!rs || getRocketStack().length === 0) return '';
+  const have = Math.floor(getTankWater());   // whole units only
+  if (have <= 0) return '';
+  let html = '';
+  for (const letter of OUTPOST_LETTERS) {
+    const op = getOutpost(letter);
+    if (!op || op.siteId !== rs.id) continue;
+    html += `<button type="button" class="popup-btn fuel-pump-to" data-letter="${esc(letter)}" data-max="${have}" title="Store up to ${have} water from the rocket in Outpost ${esc(letter)}">💧⤓ Store in Outpost ${esc(letter)} (${op.tank | 0})</button>`;
+  }
+  return html;
+}
+
 // Pump water from a colocated outpost into the rocket tank. Prompts for
 // an amount (capped by the outpost's water + the rocket's tank room),
 // then routes through the server (TRANSFER_FUEL) online or mutates the
@@ -10522,6 +10572,21 @@ function outpostPumpBtnHtml(stackId) {
   const disabled = max <= 0 ? 'disabled' : '';
   const title = max > 0 ? `Pump up to ${max} water into the rocket` : 'Rocket tank is full';
   return `<button type="button" class="modal-btn stack stack-pump-fuel" data-letter="${esc(letter)}" data-max="${max}" ${disabled} title="${title}">💧 Pump ${max > 0 ? max + ' ' : ''}→ rocket</button>`;
+}
+
+// Footer button for the outpost inspector: store the colocated rocket's water
+// IN this outpost (reverse of the pump-to-rocket button). Empty string when not
+// applicable (not an outpost, no rocket here, or the rocket has no water).
+function outpostFillBtnHtml(stackId) {
+  if (!stackId.startsWith('outpost')) return '';
+  const letter = stackId.slice('outpost'.length);
+  const op = getOutpost(letter);
+  if (!op) return '';
+  const rs = getRocketSite();
+  if (!rs || rs.id !== op.siteId || getRocketStack().length === 0) return '';
+  const have = Math.floor(getTankWater());
+  if (have <= 0) return '';
+  return `<button type="button" class="modal-btn stack stack-fill-fuel" data-letter="${esc(letter)}" data-max="${have}" title="Store up to ${have} water from the rocket here">💧 Fill ${have} ← rocket</button>`;
 }
 
 // Pump buttons for the ROCKET fuel-tank modal: one per colocated outpost
@@ -11952,6 +12017,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
       ${tankDirt ? '' : `<button type="button" class="popup-btn popup-btn-secondary" id="tank-dump"
         title="Drain a chosen amount of water from the tank">💧⤓ Dump water</button>`}
       ${tankDirt ? '' : fuelTankPumpBtns()}
+      ${tankDirt ? '' : fuelTankToOutpostBtns()}
     </div>
 <div class="fuel-tank-aqua" id="tank-aqua-section" hidden>
       <div class="aqua-row">
@@ -12294,6 +12360,16 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
       if (max <= 0) return;
       close();
       doPumpOutpostFuel(letter, max);
+    });
+  });
+  // Store-in-outpost buttons (when the rocket has water + a colocated outpost).
+  panel.querySelectorAll('.fuel-pump-to').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const letter = btn.dataset.letter;
+      const max = Number(btn.dataset.max) || 0;
+      if (max <= 0) return;
+      close();
+      doPumpFuelToOutpost(letter, max);
     });
   });
   function drainTo(targetLevel, durationMs = 250) {

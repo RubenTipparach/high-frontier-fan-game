@@ -2264,8 +2264,21 @@ function applyTransferFuel(state, op, player) {
   }
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
-  // Outposts only hold water; pumping it into a dirt rocket tank would mix
-  // the grades, which is never allowed.
+  // Rocket -> outpost: store the rocket's water at the outpost.
+  if (op.direction === 'toOutpost') {
+    if ((player.rocket.tank | 0) > 0 && tankGradeOf(player.rocket) === 'dirt') return fail('cannot_store_dirt');
+    // Only WHOLE water units transfer; a sub-1 remainder stays in the tank.
+    const tank = Math.floor(player.rocket.tank || 0);
+    const amt = Math.min(want, tank);
+    if (amt <= 0) return fail('no_water');
+    player.rocket.tank = (player.rocket.tank || 0) - amt;
+    outpost.tank = (outpost.tank | 0) + amt;
+    return {
+      ok: true, state,
+      log: `${player.name} pumped ${amt} water from the rocket into Outpost ${letter} (outpost ${outpost.tank}).`,
+    };
+  }
+  // Outpost -> rocket (default).
   if ((player.rocket.tank | 0) > 0 && tankGradeOf(player.rocket) === 'dirt') return fail('cannot_mix_fuel');
   const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
   const room = Math.max(0, TANK_MAX - dry - (player.rocket.tank | 0));
@@ -3211,7 +3224,7 @@ function pickPayload(op) {
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };
     case 'BOOST': return { cardIds: op.cardIds, radSides: op.radSides || {} };
     case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from, to: op.to };
-    case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount };
+    case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount, direction: op.direction };
     case 'DISSOLVE_OUTPOST': return { letter: op.letter };
     case 'DECOMMISSION': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from };
     case 'CLAIM_JUMP': return { siteId: op.siteId };
