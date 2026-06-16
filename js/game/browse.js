@@ -6901,12 +6901,12 @@ function manualTipId() {
   return _manualOriginId;
 }
 function activeThrusterBonusPivots() {
-  const id = getActiveThrusterId();
-  if (!id) return 0;
-  const card = PATENTS_BY_ID[id];
-  if (!card) return 0;
-  const f = (card.faces && card.faces.primary) || card;
-  return Number(f.bonusPivots) || 0;
+  // Read off the active thruster's INSTALLED face (via the shared stats),
+  // not faces.primary: a dark-side pirouette thruster like the Dual-Stage
+  // 4-Grid carries its bonus on its Tier-2 face, so the primary-face read
+  // missed it and the planner never discounted the pivots.
+  const stats = getActiveThrusterStats();
+  return stats ? (Number(stats.bonusPivots) || 0) : 0;
 }
 function enterManualMoveMode() {
   _routeFrom = null;
