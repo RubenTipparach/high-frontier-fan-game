@@ -7201,7 +7201,7 @@ function ensureMapShell(host) {
       </div>
       <div class="map-search">
         <input id="map-search-input" type="text" autocomplete="off"
-          spellcheck="false" placeholder="Find site…" />
+          spellcheck="false" placeholder="Find site or node id…" />
         <button id="map-search-go" title="Fly to site"
           aria-label="Fly to site">🔍</button>
         <button id="map-search-close" class="map-search-close"
@@ -8007,20 +8007,27 @@ function wireSearch(host) {
   closeBtn?.addEventListener('click', closeSearchModal);
   backdrop?.addEventListener('click', closeSearchModal);
 
+  // Search by NAME (named sites only) OR by node id (every node, waypoints
+  // included - burns, lagranges, hohmanns, etc., which have ids but no name).
+  // Ranking: name starts-with, name includes, id starts-with, id includes.
   function searchSites(q) {
     if (!_activeData || !q) return [];
     const ql = q.toLowerCase().trim();
     if (!ql) return [];
-    const startsWith = [];
-    const includes   = [];
+    const nameStarts = []; const nameIncl = []; const idStarts = []; const idIncl = [];
+    const seen = new Set();
     for (const s of _activeData.sites) {
-      if (s.isWaypoint || !s.name) continue;
-      const nl = s.name.toLowerCase();
-      if (nl.startsWith(ql))       startsWith.push(s);
-      else if (nl.includes(ql))    includes.push(s);
-      if (startsWith.length + includes.length >= 32) break;
+      if (seen.has(s)) continue;
+      const nm = (!s.isWaypoint && s.name) ? s.name.toLowerCase() : '';
+      if (nm.startsWith(ql)) { nameStarts.push(s); seen.add(s); continue; }
+      if (nm.includes(ql)) { nameIncl.push(s); seen.add(s); continue; }
+      const id2 = String(s.id2 || '').toLowerCase();
+      const id = String(s.id || '').toLowerCase();
+      if (id2.startsWith(ql) || id.startsWith(ql)) { idStarts.push(s); seen.add(s); continue; }
+      if (id2.includes(ql) || id.includes(ql)) { idIncl.push(s); seen.add(s); }
+      if (nameStarts.length + nameIncl.length + idStarts.length + idIncl.length >= 60) break;
     }
-    return startsWith.concat(includes).slice(0, 8);
+    return nameStarts.concat(nameIncl, idStarts, idIncl).slice(0, 12);
   }
 
   function renderList(items) {
@@ -8031,8 +8038,10 @@ function wireSearch(host) {
     items.forEach((s, i) => {
       const li = document.createElement('li');
       li.innerHTML = `<strong></strong> <em></em>`;
-      li.querySelector('strong').textContent = s.name;
-      li.querySelector('em').textContent = s.type;
+      const nodeId = s.id2 || s.id || '';
+      // Named site -> name + type; a bare node -> its id + type.
+      li.querySelector('strong').textContent = s.name || ('id: ' + nodeId);
+      li.querySelector('em').textContent = s.name ? `${s.type} · ${nodeId}` : (s.type || 'node');
       li.classList.toggle('active', i === activeIndex);
       li.addEventListener('mousedown', (e) => {
         // mousedown not click so the input doesn't blur before we
@@ -8054,7 +8063,7 @@ function wireSearch(host) {
   function pickItem(site) {
     if (!site || !_renderer) return;
     _renderer.flyTo(site, locateZoom(SEARCH_FLY_ZOOM));
-    input.value = site.name;
+    input.value = site.name || (site.id2 || site.id || '');
     list.classList.add('hidden');
     closeSearchModal();
   }
