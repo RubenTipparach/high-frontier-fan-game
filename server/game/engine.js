@@ -3502,7 +3502,13 @@ function computeFinalScores(state) {
     const awardVp = (m0 && winnerKey) ? ideologyAwardVp(state, p, winnerKey) : 0;
     const factoryVp = countOwnedBy(state.factories, p.profileId);
     const colonyVp = countOwnedBy(state.colonies, p.profileId);
-    const gloryVp = (p.glory && p.glory.vps) | 0;
+    // Glory VP is derived from the claimed chits' zone + side via ZONE_CHIT_VPS
+    // (the data source), not the running p.glory.vps snapshot, so a chit's value
+    // edit revalues banked chits at scoring time.
+    const gloryVp = (p.glory && Array.isArray(p.glory.claimed))
+      ? p.glory.claimed.reduce((s, c) => s
+        + (((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[c.side === 'back' ? 'back' : 'front']) | 0), 0)
+      : 0;
     const total = cubeVp + awardVp + factoryVp + colonyVp + gloryVp;
     return {
       profileId: p.profileId, name: p.name, color: p.color || null,

@@ -17221,8 +17221,8 @@ function takenZoneMap() {
     // front default.
     const side = (banked && banked.side === 'back') ? 'back' : 'front';
     const sides = getChitSides(zone);
-    const vp = (banked && Number.isFinite(banked.vp))
-      ? banked.vp : (side === 'back' ? sides.back : sides.front);
+    // Always derive from the data source (getChitSides), never a stored snapshot.
+    const vp = side === 'back' ? sides.back : sides.front;
     map[zone] = { ...seat, side, vp };
   };
   if (_online && _onlineSnapshot && Array.isArray(_onlineSnapshot.players)) {
@@ -17253,7 +17253,8 @@ function buildZoneBoardChit(zone, takenBy = null) {
     const label = (takenBy.handle && takenBy.name) ? '@' + takenBy.name : (takenBy.name || '');
     const color = takenBy.color || null;
     const side = takenBy.side === 'back' ? 'back' : 'front';
-    const vp = Number.isFinite(takenBy.vp) ? takenBy.vp : (side === 'back' ? sides.back : sides.front);
+    // Always derive from the data source (getChitSides), never a stored snapshot.
+    const vp = side === 'back' ? sides.back : sides.front;
     const wrap = document.createElement('div');
     wrap.className = 'chit-token-wrap';
     wrap.innerHTML = `
