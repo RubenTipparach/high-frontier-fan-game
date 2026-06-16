@@ -746,7 +746,7 @@ function flameGlyphInline() {
 function fuelDropletGlyph(value, dirt) {
   // Inline vector droplet matching the card's fuel glyph: light-blue for water,
   // grey for dirt. No emoji, so it scales crisply at any chip size.
-  const fill = dirt ? '#b6bcc4' : '#69d8f7';
+  const fill = dirt ? '#b6bcc4' : '#52caf2';
   const rim = dirt ? '#e6e9ee' : '#d6f3ff';
   const s = String(value);
   const fs = s.length <= 2 ? 9.5 : 7.5;
@@ -952,9 +952,10 @@ export function svgBallerinaChip(size) {
 // here so they can be retuned in one place.
 // ---------------------------------------------------------------------------
 const TVC = {
-  cyanTri: '#2cc2e4', cyanTri2: '#5fd4ee', greyTri: '#a3a9b1', greyTri2: '#7d838c',
+  cyanTri: '#00aeef', cyanTri2: '#00aeef', cyanStroke: '#0089bd',
+  greyTri: '#a3a9b1', greyTri2: '#7d838c',
   darkTri: '#1b2030', magenta: '#e60a7e', magentaRim: '#f7a8cf', modPink: '#831843',
-  water: '#69d8f7', waterRim: '#d6f3ff', dirt: '#b6bcc4', dirtRim: '#e6e9ee',
+  water: '#52caf2', waterRim: '#d6f3ff', dirt: '#b6bcc4', dirtRim: '#e6e9ee',
   orange: '#e07d1e', orange2: '#f4a93a', wrench: '#eef2f8', sun: '#f6b51e',
 };
 const TV_VB = '0 0 140 114';
@@ -1068,7 +1069,7 @@ export function thrustVisual(card, face, opts = {}) {
   const uid = 'tv' + (_tvSeq++);
   const wedge = isDirt
     ? tvWedge(TVC.greyTri, TVC.greyTri2, '#6b7280', uid)
-    : tvWedge(TVC.cyanTri, TVC.cyanTri2, '#1a9fc4', uid);
+    : tvWedge(TVC.cyanTri, TVC.cyanTri2, TVC.cyanStroke, uid);
   const fuelFill = isDirt ? TVC.dirt : TVC.water;
   const fuelRim = isDirt ? TVC.dirtRim : TVC.waterRim;
   const center = solar ? tvSun(70, TV_CTR) : (push ? tvPushsat(70, TV_CTR) : '');
