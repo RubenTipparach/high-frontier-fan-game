@@ -764,11 +764,11 @@ function colonyDomeGlyph(promo) {
   const isPush = p.toLowerCase() === 'push';
   const letter = isPush ? '' : p.charAt(0).toUpperCase();
   const gid = 'dome' + (_domeSeq++);
-  // Letter centred on the dome body (dominant-baseline central + text-anchor
-  // middle), not hung off a baseline.
+  // Letter sits low inside the dome body (dominant-baseline central + text-anchor
+  // middle), a touch smaller so it reads as inside the dome, not on top of it.
   const inner = isPush
-    ? '<g stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" fill="none"><path d="M-4.5 -2.5 L0 2 L4.5 -2.5"/><path d="M-4.5 2.5 L0 7 L4.5 2.5"/></g>'
-    : `<text x="0" y="1.4" text-anchor="middle" dominant-baseline="central" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" font-weight="800" fill="#ffffff" stroke="#0e3f4f" stroke-width="0.7" paint-order="stroke">${escapeText(letter)}</text>`;
+    ? '<g transform="translate(0,2)" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" fill="none"><path d="M-4.5 -2.5 L0 2 L4.5 -2.5"/><path d="M-4.5 2.5 L0 7 L4.5 2.5"/></g>'
+    : `<text x="0" y="3.6" text-anchor="middle" dominant-baseline="central" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" font-weight="800" fill="#ffffff" stroke="#0e3f4f" stroke-width="0.7" paint-order="stroke">${escapeText(letter)}</text>`;
   const tip = isPush
     ? 'Promotion: flips to its purple side at a push-sat colony.'
     : `Promotion: flips to its purple side at a ${p} colony.`;
@@ -776,7 +776,6 @@ function colonyDomeGlyph(promo) {
     + `<defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#46c4df"/><stop offset="1" stop-color="#15697f"/></linearGradient></defs>`
     + '<ellipse cx="0" cy="8.5" rx="13" ry="3" fill="#0c4554"/>'
     + `<path d="M -12.5 8.5 A 12.5 12.5 0 0 1 12.5 8.5 Z" fill="url(#${gid})" stroke="#0c3a48" stroke-width="1.4"/>`
-    + '<ellipse cx="-4.4" cy="-2" rx="4.6" ry="2.8" fill="#ffffff" opacity="0.4"/>'
     + inner
     + '</svg>';
   const tpl = document.createElement('template');
