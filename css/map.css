@@ -6175,7 +6175,9 @@ body:has(#view-browse:not(.hidden)) #main {
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 8px 10px;
+  /* Extra right padding so the full-size deck-top card never sits flush
+     against the panel edge. */
+  padding: 8px 16px 10px 10px;
 }
 .cart-deck-title {
   margin: 0 0 6px;
