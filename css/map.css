@@ -1963,6 +1963,29 @@
 .mp-event-modal { max-width: 560px; width: min(560px, 92vw); }
 .mp-event-modal .card-modal-actions { justify-content: flex-end; }
 .mp-event-modal .hud-error:empty { display: none; }
+.mp-event-insurance {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  background: rgba(125, 211, 252, 0.14);
+  border: 1px solid rgba(125, 211, 252, 0.5);
+  color: #bae6fd;
+}
+.mp-event-lobby {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  background: rgba(192, 31, 110, 0.12);
+  border: 1px solid rgba(192, 31, 110, 0.45);
+  color: var(--ink, #e6e8f5);
+  cursor: pointer;
+}
+.mp-event-lobby input { margin-top: 2px; flex: 0 0 auto; }
 /* Galactic news: toolbar broadcast button badge + feed modal. */
 #news-feed { position: relative; }
 .news-badge {

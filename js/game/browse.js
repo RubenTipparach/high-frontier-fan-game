@@ -61,6 +61,7 @@ import {
   IDEOLOGY_BY_KEY as ASSEMBLY_IDEOLOGY_BY_KEY, DELEGATES_PER_PLAYER,
   adjacentPlaces as ASSEMBLY_ADJACENT, lawLeader as assemblyLawLeader,
   voteWinners as assemblyVoteWinners,
+  playerDelegatesInPlace as assemblyPlayerDelegatesInPlace,
 } from '../../data/assembly.js';
 import {
   WEIGHT_CLASSES, weightClassForMass, TRACK_LEGEND,
@@ -2682,6 +2683,9 @@ function renderEventChooser(snapshot) {
   const actions = overlay.querySelector('#mp-event-actions');
   cardsHost.innerHTML = '';
   actions.innerHTML = '';
+  // The overlay is reused across re-renders; drop any Pad Insurance note /
+  // lobby checkbox from a prior pass so they don't accumulate.
+  overlay.querySelectorAll('.mp-event-insurance, .mp-event-lobby').forEach((n) => n.remove());
 
   if (!amWaiting) {
     // Per user decision the table is NOT frozen: players who owe nothing
@@ -2691,6 +2695,37 @@ function renderEventChooser(snapshot) {
   }
 
   sub.textContent = ask;
+
+  // Pad Insurance (Centrist - Pad Insurance law). Two paths:
+  //  - Law ACTIVE: every player who loses cargo is repaid automatically.
+  //  - Law NOT active but you hold a delegate on Centrist: you may lobby
+  //    (1 aqua + discard that delegate) to claim the repayment this once.
+  // A checkbox carries the lobby choice into the EVENT_CHOICE submit.
+  let padLobby = false;
+  if (isPad && snapshot.m0 && snapshot.assembly) {
+    const insuranceActive = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar).active.has('centrist');
+    const myCentrist = assemblyPlayerDelegatesInPlace(snapshot.assembly, 'centrist', myId);
+    const canLobby = !insuranceActive && myCentrist > 0 && me && (me.aqua | 0) >= 1;
+    if (insuranceActive) {
+      const note = document.createElement('p');
+      note.className = 'mp-event-insurance';
+      note.textContent = '\uD83D\uDEF0 Pad Insurance is the active law: the boost cost of your lost card is repaid automatically.';
+      sub.insertAdjacentElement('afterend', note);
+    } else if (canLobby) {
+      const wrap = document.createElement('label');
+      wrap.className = 'mp-event-lobby';
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.id = 'mp-event-lobby-box';
+      const txt = document.createElement('span');
+      txt.textContent = 'Lobby Centrist for Pad Insurance (pay 1 aqua, discard your Centrist delegate) to be repaid the lost card\u2019s boost cost.';
+      wrap.appendChild(box);
+      wrap.appendChild(txt);
+      sub.insertAdjacentElement('afterend', wrap);
+      box.addEventListener('change', () => { padLobby = box.checked; });
+    }
+  }
+
   // ACKNOWLEDGE mode (glitch / flare / pad single): no card grid, just a
   // mandatory Confirm that submits an empty EVENT_CHOICE - the server commits
   // the effect.
@@ -2701,7 +2736,7 @@ function renderEventChooser(snapshot) {
     ack.textContent = isGlitch ? '\u26A0\uFE0F Take the glitch'
       : isFlare ? '\u2600\uFE0F Face the flare'
       : '\uD83E\uDDE8 Take the hit';
-    ack.addEventListener('click', () => { ack.disabled = true; submitEventChoice(''); });
+    ack.addEventListener('click', () => { ack.disabled = true; submitEventChoice('', padLobby); });
     actions.appendChild(ack);
     return;
   }
@@ -2719,7 +2754,7 @@ function renderEventChooser(snapshot) {
   confirm.addEventListener('click', () => {
     if (!selected) return;
     confirm.disabled = true;
-    submitEventChoice(selected);
+    submitEventChoice(selected, padLobby);
   });
   actions.appendChild(confirm);
 
@@ -2747,12 +2782,14 @@ function renderEventChooser(snapshot) {
   repaint();
 }
 
-async function submitEventChoice(cardId) {
+async function submitEventChoice(cardId, lobby = false) {
   if (!_online || _onlineBusy) return false;
   _onlineBusy = true;
   let r;
   try {
-    r = await submitGameOp(_onlineGameId, { kind: 'EVENT_CHOICE', cardId }, _onlineMe.token);
+    const op = { kind: 'EVENT_CHOICE', cardId };
+    if (lobby) op.lobby = true;
+    r = await submitGameOp(_onlineGameId, op, _onlineMe.token);
   } finally {
     _onlineBusy = false;
   }
