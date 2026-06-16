@@ -791,12 +791,31 @@
   pointer-events: none;
 }
 
-/* GW thrusters burn isotope (ISO) fuel; the published cards mark that
-   class in gold. Outline both faces in gold so the ISO-fuel thruster
-   reads at a glance, front and back. */
-.card.type-gw-thruster .card-face {
-  border-color: #d4af37;
-  border-width: 2px;
+/* GW Thrusters and Freighters share one published-card look: a BLACK front
+   face and a PURPLE radial-gradient back inside a thick purple frame. The
+   coloured typebar (GW = isotope orange, Freighter = blue) and, on GW, the
+   gold thrust triangle + fuel droplet tell the two card types apart. */
+.card.type-gw-thruster .card-typebar { background: var(--card-gw-thruster, #ca6c18); color: #fff; }
+.card.type-freighter   .card-typebar { background: var(--card-freighter, #00aeef); color: #fff; }
+/* Front (the white-side slot) is black with light ink, not the parchment look. */
+.card.type-gw-thruster .card-face[data-face="primary"],
+.card.type-freighter   .card-face[data-face="primary"] {
+  --ink: #f3f4fa;
+  --ink-dim: #b9bedd;
+  --ink-mute: #8b90b8;
+  --border: #1c1a2a;
+  --accent: #7dd3fc;
+  --accent-2: #38bdf8;
+  --bg-2: #08080e;
+}
+.card.type-gw-thruster .card-face[data-face="primary"]   .thrust-svg,
+.card.type-freighter   .card-face[data-face="primary"]   .thrust-svg { color: #ffffff; }
+/* Back (the black-side slot) is a radial purple wash inside a thick purple frame. */
+.card.type-gw-thruster .card-face[data-face="secondary"],
+.card.type-freighter   .card-face[data-face="secondary"] {
+  background: radial-gradient(circle at 50% 44%, #655ca8 0%, #652d91 100%);
+  border-color: #92278f;
+  border-width: 3px;
 }
 
 /* Radiator Light/Heavy toggle row under the name. Replaces

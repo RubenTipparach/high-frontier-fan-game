@@ -21,6 +21,7 @@ const SPECTRAL_STYLE = {
   B: { glyph: 'B', fill: '#60a5fa', ink: '#0c0a16' },  // alkaline
   D: { glyph: 'D', fill: '#67e8f9', ink: '#0c0a16' },  // icy / cometary
   H: { glyph: 'H', fill: '#0ea5e9', ink: '#f0f9ff' },  // hydrous (matches map + industrialize badge)
+  Any: { glyph: 'any', fill: '#6b7280', ink: '#f3f4fa' },  // freighters: works at any spectral type
   unknown: { glyph: '?', fill: '#475569', ink: '#e5e7eb' },
 };
 const SPECTRAL_LABEL = {
@@ -31,6 +32,7 @@ const SPECTRAL_LABEL = {
   B: 'Alkaline',
   D: 'Icy / cometary',
   H: 'Hydrous',
+  Any: 'Any spectral type',
   unknown: 'Unknown',
 };
 
@@ -416,6 +418,9 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     }
   } else if (card.type === 'refinery') {
     add('Water out', card.water_out);
+  } else if (card.type === 'freighter') {
+    // Freighters haul cargo, not thrust: the Load-Limit is the headline stat.
+    add('Load limit', fdata.loadLimit ?? card.loadLimit);
   } else if (card.type === 'robonaut') {
     add('+Prospect', card.prospect_bonus);
   } else if (card.type === 'lab' || card.type === 'generator') {
@@ -717,7 +722,9 @@ function spectralHex(type) {
   text.setAttribute('x', '0');
   text.setAttribute('y', '4');
   text.setAttribute('text-anchor', 'middle');
-  text.setAttribute('font-size', '12');
+  // Single spectral letters render large; a multi-character glyph (e.g. "any")
+  // shrinks to fit inside the hex.
+  text.setAttribute('font-size', style.glyph.length > 1 ? '8' : '12');
   text.setAttribute('font-weight', '700');
   text.setAttribute('fill', '#ffffff');
   text.textContent = style.glyph;
@@ -952,6 +959,10 @@ export function svgBallerinaChip(size) {
 const TVC = {
   cyanTri: '#00aeef', cyanTri2: '#00aeef', cyanStroke: '#0089bd',
   greyTri: '#a3a9b1', greyTri2: '#7d838c',
+  // GW Thrusters run isotope fuel: a gold wedge + gold fuel droplet, set apart
+  // from the cyan (water) / grey (dirt) thrusters.
+  goldTri: '#f8cf3b', goldTri2: '#e0aa2c', goldStroke: '#a8761a',
+  goldFuel: '#e0aa2c', goldFuelRim: '#f6e3a8',
   darkTri: '#1b2030', magenta: '#e60a7e', magentaRim: '#f7a8cf', modPink: '#831843',
   water: '#52caf2', waterRim: '#d6f3ff', dirt: '#b6bcc4', dirtRim: '#e6e9ee',
   orange: '#e07d1e', orange2: '#f4a93a', wrench: '#eef2f8', sun: '#f6b51e',
@@ -1067,12 +1078,17 @@ export function thrustVisual(card, face, opts = {}) {
   const solar = hasProp('solar');
   const push = hasProp('push');
 
+  // GW Thrusters burn isotope fuel: gold wedge + gold droplet, regardless of the
+  // water/dirt split that colours the other thrusters.
+  const isGw = card && card.type === 'gw-thruster';
   const uid = 'tv' + (_tvSeq++);
-  const wedge = isDirt
-    ? tvWedge(TVC.greyTri, TVC.greyTri2, '#6b7280', uid)
-    : tvWedge(TVC.cyanTri, TVC.cyanTri2, TVC.cyanStroke, uid);
-  const fuelFill = isDirt ? TVC.dirt : TVC.water;
-  const fuelRim = isDirt ? TVC.dirtRim : TVC.waterRim;
+  const wedge = isGw
+    ? tvWedge(TVC.goldTri, TVC.goldTri2, TVC.goldStroke, uid)
+    : isDirt
+      ? tvWedge(TVC.greyTri, TVC.greyTri2, '#6b7280', uid)
+      : tvWedge(TVC.cyanTri, TVC.cyanTri2, TVC.cyanStroke, uid);
+  const fuelFill = isGw ? TVC.goldFuel : (isDirt ? TVC.dirt : TVC.water);
+  const fuelRim = isGw ? TVC.goldFuelRim : (isDirt ? TVC.dirtRim : TVC.waterRim);
   const center = solar ? tvSun(70, TV_CTR) : (push ? tvPushsat(70, TV_CTR) : '');
   const top = showAfter
     ? `<g data-tip="${escapeText(opts.breakdown?.afterburn || afterTip)}">${tvFlame(70, TV_TOP, afterN)}</g>`
