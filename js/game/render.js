@@ -1249,12 +1249,16 @@ export class MapRenderer {
   // Smoothly pan (no zoom change) to centre a world-space point.
   // Used when the user taps a site so the camera follows the
   // selection instead of jumping or staying put.
-  panTo(target, { ms = 320 } = {}) {
+  panTo(target, opts = {}) {
     if (!target || typeof target.x !== 'number' || typeof target.y !== 'number') return;
-    this._cancelPanAnim();
     const eff = this.zoom * this.fitScale;
-    const targetPanX = this._viewCenterX() - target.x * eff;
-    const targetPanY = this._viewCenterY() - target.y * eff;
+    this._animatePan(this._viewCenterX() - target.x * eff, this._viewCenterY() - target.y * eff, opts);
+  }
+
+  // Low-level pan tween to an explicit screen-space pan target, shared by panTo
+  // and centerSitePopup.
+  _animatePan(targetPanX, targetPanY, { ms = 320 } = {}) {
+    this._cancelPanAnim();
     const startX = this.pan.x;
     const startY = this.pan.y;
     const t0 = performance.now();
@@ -1269,6 +1273,35 @@ export class MapRenderer {
       else this._panAnimRaf = null;
     };
     this._panAnimRaf = requestAnimationFrame(step);
+  }
+
+  // Pan so the OPEN site popup is centred in the viewport (rather than the node
+  // it points at), so a tall popup near a screen edge doesn't clip off. The
+  // popup is glued to the node by a fixed pixel offset, so we measure that
+  // offset from the popup's current screen box - call this AFTER setSitePopup has
+  // built + shown the popup.
+  centerSitePopup({ ms = 320 } = {}) {
+    const el = this._popupEl;
+    const site = this._popupSite;
+    if (!el || !site || el.classList.contains('hidden')) return;
+    this._positionSitePopup();   // glue it to the node at the current frame first
+    const hb = this.host.getBoundingClientRect();
+    const pr = el.getBoundingClientRect();
+    if (!pr.width || !pr.height) return;   // not laid out yet - nothing to centre
+    const eff = this.zoom * this.fitScale;
+    // Popup centre + node, both in host-relative screen px.
+    const popupCx = pr.left - hb.left + pr.width / 2;
+    const popupCy = pr.top - hb.top + pr.height / 2;
+    const nodeSx = this.pan.x + site.x * eff;
+    const nodeSy = this.pan.y + site.y * eff;
+    const offX = popupCx - nodeSx;
+    const offY = popupCy - nodeSy;
+    // Solve for the pan that lands the popup centre on the viewport centre.
+    this._animatePan(
+      this._viewCenterX() - site.x * eff - offX,
+      this._viewCenterY() - site.y * eff - offY,
+      { ms },
+    );
   }
 
   _cancelPanAnim() {

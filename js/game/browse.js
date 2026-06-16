@@ -23,7 +23,7 @@ import {
   prospect as soloProspect, endRound as soloEndRound,
   bindData as soloBindData, onChange as soloOnChange, SOLO_CONFIG,
 } from './solo.js';
-import { PATENTS, PATENTS_BY_ID, PATENT_TYPES, patentsByType, radiatorRadHardness } from '../../data/patents.js';
+import { PATENTS, PATENTS_BY_ID, PATENT_TYPES, patentsByType, radiatorRadHardness, isExpansionType } from '../../data/patents.js';
 import {
   getHandSlots, isInHand, addToHand, removeFromHandAt, removeFromHand,
   clearHand, onHandChange,
@@ -3250,23 +3250,29 @@ function activeLawLetter(snapshot) {
   return ((ASSEMBLY_IDEOLOGY_BY_KEY[star] || {}).name || star).charAt(0).toUpperCase();
 }
 function assemblyTabIconSvg(color, selected, letter) {
-  const edge = selected ? '#04121f' : '#ffffff';
+  // Always a dark outline (no white halo) - it defines the temple on the bright
+  // accent when selected and the badge against the law-coloured temple, and just
+  // disappears against the dark strip when not selected, which is fine.
+  const edge = '#04121f';
   const L = letter ? esc(letter) : '';
-  // When a law is lettered the viewBox widens to make room for the glyph in
-  // front of the temple, and the temple group shifts right; the .is-lettered
-  // CSS gives the icon a touch more width so the temple keeps its size.
-  const vbW = L ? 34 : 24;
-  const shift = L ? 11 : 0;
-  return `<svg class="ui-icon ui-icon-assembly${L ? ' is-lettered' : ''}" viewBox="0 0 ${vbW} 24" width="23" height="23" aria-hidden="true">`
-    + (L ? `<text x="0.5" y="18.5" font-family="ui-sans-serif, system-ui, sans-serif" font-weight="800" font-size="18" fill="${esc(color)}" stroke="${edge}" stroke-width="0.7" stroke-linejoin="round">${L}</text>` : '')
-    + `<g transform="translate(${shift},0)" fill="${esc(color)}" stroke="${edge}" stroke-width="1" stroke-linejoin="round" stroke-linecap="round">`
+  // The active law's initial rides in a small corner badge on the temple, so the
+  // grey-family laws (Honor, Individuality) are told apart at a glance. Centrist
+  // (no ideology law) shows a bare white temple with no badge.
+  const badge = L
+    ? `<circle cx="17.6" cy="17.6" r="6.1" fill="${esc(color)}" stroke="${edge}" stroke-width="1.3"/>`
+      + `<text x="17.6" y="20.8" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-weight="800" font-size="9" fill="#0b0a16">${L}</text>`
+    : '';
+  return '<svg class="ui-icon ui-icon-assembly" viewBox="0 0 24 24" width="23" height="23" aria-hidden="true">'
+    + `<g fill="${esc(color)}" stroke="${edge}" stroke-width="1" stroke-linejoin="round" stroke-linecap="round">`
     + '<path d="M3 9.5 12 4l9 5.5z"/>'
     + '<rect x="4.6" y="10.2" width="2.4" height="7.6" rx="0.4"/>'
     + '<rect x="8.8" y="10.2" width="2.4" height="7.6" rx="0.4"/>'
     + '<rect x="12.8" y="10.2" width="2.4" height="7.6" rx="0.4"/>'
     + '<rect x="17" y="10.2" width="2.4" height="7.6" rx="0.4"/>'
     + '<rect x="2.6" y="18" width="18.8" height="2.6" rx="0.6"/>'
-    + '</g></svg>';
+    + '</g>'
+    + badge
+    + '</svg>';
 }
 function updateAssemblyTabIcon(snapshot) {
   const tab = document.getElementById('sidepanel-tab-assembly');
@@ -6527,8 +6533,8 @@ function openDeckTapModal(card, kind, { allowAuction = false, inspectOnly = fals
     // play. Either way there's no add / auction here.
     const note = document.createElement('p');
     note.className = 'muted card-modal-note';
-    note.textContent = card.type === 'gw-thruster'
-      ? '🚧 GW thrusters are an upcoming expansion. Preview only for now - flip to see both faces.'
+    note.textContent = isExpansionType(card.type)
+      ? '🚧 This is an upcoming expansion card. Preview only for now - flip to see both faces.'
       : '👥 Crew is chosen at New game via the starting-crew wizard.';
     actions.append(note);
   } else if (inMarket && allowAuction) {
@@ -15533,20 +15539,20 @@ function onSiteSelect(site) {
   if (_renderer) _renderer.clearSitePopup();
 
   _selectedId = site.id;
-  if (_renderer) {
-    _renderer.setRouteEndpoints(site.id, null);
-    // Smooth-pan the camera so the selected hex sits at the centre
-    // of the map. Keeps the existing zoom - jumping zoom on every
-    // tap would be disorienting.
-    _renderer.panTo(site);
-  }
+  if (_renderer) _renderer.setRouteEndpoints(site.id, null);
 
   if (site.isDecorative) {
+    // No popup on a decorative node - just centre the node itself. Keeps the
+    // existing zoom; jumping zoom on every tap would be disorienting.
+    if (_renderer) _renderer.panTo(site);
     setStatus(`Decorative routing node - not selectable.`);
     return;
   }
 
   showSitePopupFor(site);
+  // Smooth-pan so the POPUP MENU sits at the centre of the map (not the node it
+  // points at), so a tall popup near the top edge doesn't clip off-screen.
+  if (_renderer) _renderer.centerSitePopup();
   setStatus(`Selected <strong>${esc(site.name)}</strong>.`);
 }
 
@@ -17127,7 +17133,7 @@ function renderPatents() {
   // without it cluttering the buildable list. The tab label
   // marks it as soon-only so there's no surprise when grab
   // buttons refuse to engage.
-  const expansionTypes = ['gw-thruster'];
+  const expansionTypes = ['gw-thruster', 'freighter'];
   // 'supports' is a synthetic filter that groups every card
   // whose primary face SUPPLIES a stack-support chip (reactors,
   // generators, radiators today). A sub-row of kind chips lets
@@ -17142,6 +17148,7 @@ function renderPatents() {
   counts.supports = patentsThatSupply(supplyKinds).length;
   const TYPE_LABEL = {
     'gw-thruster': 'GW thrusters (soon)',
+    'freighter': 'Freighters (soon)',
     'supports': 'Supports',
   };
   // Seed initial active tab from a pending programmatic open
@@ -17229,12 +17236,12 @@ function renderPatents() {
     if (inHand)   el.classList.add('in-hand');
     if (inRocket) el.classList.add('in-rocket');
     if (inHand || inRocket) return el;   // placeholder - not interactive
-    // Expansion-only cards (GW thrusters today) can't be played
+    // Expansion-only cards (GW thrusters, Freighters) can't be played
     // yet, but they're fully inspectable: tap opens the read-only
     // card view and the Flip button shows both faces up close. Only
     // the drag / tap-to-ADD handlers are skipped (the engine refuses
     // to stack them); a CSS badge signals the "coming soon" intent.
-    if (card.type === 'gw-thruster') {
+    if (isExpansionType(card.type)) {
       el.classList.add('is-expansion');
       const badge = document.createElement('div');
       badge.className = 'card-expansion-badge';

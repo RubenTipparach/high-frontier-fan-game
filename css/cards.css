@@ -810,12 +810,17 @@
 }
 .card.type-gw-thruster .card-face[data-face="primary"]   .thrust-svg,
 .card.type-freighter   .card-face[data-face="primary"]   .thrust-svg { color: #ffffff; }
-/* Back (the black-side slot) is a radial purple wash inside a thick purple frame. */
+/* Back (the black-side slot) is a radial purple wash inside a thick purple frame.
+   Lighten the dim/mute inks so labels (e.g. SUPPORTS REQUIRED, Thrust, Fuel) read
+   against the purple instead of the dark default ink-mute. */
 .card.type-gw-thruster .card-face[data-face="secondary"],
 .card.type-freighter   .card-face[data-face="secondary"] {
   background: radial-gradient(circle at 50% 44%, #655ca8 0%, #652d91 100%);
   border-color: #92278f;
   border-width: 3px;
+  --ink: #f4f1ff;
+  --ink-dim: #d6d0f0;
+  --ink-mute: #b8aeda;
 }
 
 /* Radiator Light/Heavy toggle row under the name. Replaces
