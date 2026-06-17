@@ -16406,10 +16406,13 @@ function showSitePopupFor(site) {
   }
   // Claim glory chit: when the rocket is parked here with a crew aboard
   // and this site's heliocentric zone still has an unclaimed chit, offer
-  // to load it now (the "I left it on arrival, grab it later" path). Lands
-  // just before Navigate-to so the pure-inspection action stays last.
+  // to load it now (the "I left it on arrival, grab it later" path). Only at
+  // a REAL landable site - never a Lagrange / burn / hohmann routing waypoint
+  // (same gate the arrival pickup uses). Lands just before Navigate-to so the
+  // pure-inspection action stays last.
   if (rocketSite && site.id === rocketSite.id
       && site.solarZone && !isLeoSite(site)
+      && !site.isWaypoint && site.isLandable !== false
       && !zoneChitTaken(site.solarZone) && stackHasCrew()) {
     const sds = getChitSides(site.solarZone);
     actions.push({
@@ -18184,7 +18187,8 @@ async function claimGloryHere(site) {
     if (ok) refreshOpenSitePopup();
     return ok;
   }
-  if (isLeoSite(site) || zoneChitTaken(zone) || !stackHasCrew()) return false;
+  if (isLeoSite(site) || site.isWaypoint || site.isLandable === false
+      || zoneChitTaken(zone) || !stackHasCrew()) return false;
   const ownerId = firstCrewId();
   awardChitForZone(zone, getTurn(), ownerId);
   const s = getChitSides(zone);
