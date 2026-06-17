@@ -2562,6 +2562,13 @@ function publishToProfile(profileId, payload) {
 wss.on('connection', (ws) => {
   ws._channels = new Set();
   ws._profile = null;
+  // Liveness: the heartbeat sweep below pings every socket and drops any
+  // that didn't answer since the last sweep. Seed alive on connect and
+  // refresh on every protocol PONG (browsers and the ws client answer
+  // server pings automatically, so no client change is needed).
+  ws.isAlive = true;
+  ws._lastPong = Date.now();
+  ws.on('pong', () => { ws.isAlive = true; ws._lastPong = Date.now(); });
   ws.on('message', (raw) => {
     let msg;
     try { msg = JSON.parse(String(raw)); }
@@ -2595,6 +2602,9 @@ wss.on('connection', (ws) => {
         return;
       }
       case 'ping':
+        // App-level keepalive from js/ws.js; also refreshes liveness.
+        ws.isAlive = true;
+        ws._lastPong = nowMs();
         ws.send(JSON.stringify({ type: 'pong', ts: nowMs() }));
         return;
       default:
@@ -2640,14 +2650,23 @@ function isValidChannel(channel, profile) {
   return false;
 }
 
-// Heartbeat: clients that haven't pinged in 60s are dropped to free
-// the in-memory channel sets.
-setInterval(() => {
-  const cutoff = Date.now() - 60_000;
+// Heartbeat: PING every socket on an interval and terminate any that did
+// not answer since the last sweep. A half-open connection (a silently
+// dropped mobile link, a backgrounded tab, a proxy timeout) otherwise sits
+// in the channel sets forever, receiving broadcasts into the void and
+// leaking memory. The previous version read ws._lastPong, which nothing
+// ever set, so it never dropped anyone. Interval is configurable so tests
+// can run it fast.
+const WS_HEARTBEAT_MS = Number(process.env.WS_HEARTBEAT_MS) || 30_000;
+const wsHeartbeat = setInterval(() => {
   for (const ws of wss.clients) {
-    if (ws._lastPong && ws._lastPong < cutoff) ws.terminate();
+    if (ws.isAlive === false) { ws.terminate(); continue; }
+    ws.isAlive = false;
+    try { ws.ping(); } catch { /* socket already closing */ }
   }
-}, 30_000).unref();
+}, WS_HEARTBEAT_MS);
+wsHeartbeat.unref();
+wss.on('close', () => clearInterval(wsHeartbeat));
 
 // ----- Site notes + tags (player-driven location annotations) -----
 //
