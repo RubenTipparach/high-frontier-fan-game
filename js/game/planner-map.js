@@ -396,6 +396,18 @@ function synthesizeBodies(sites, viewW, viewH) {
       nx: 0.337, ny: 0.429,
     },
   ];
+  // Venus is a flavour planet too, anchored on its flyby node (the planner's
+  // single `venus`-type node, id2 venus-2lgjk) so it follows the data.
+  const venusNode = sites.find((s) => s.type === 'venus');
+  if (venusNode) {
+    synthetics.push({
+      id: 'synthetic_venus',
+      name: 'Venus',
+      type: 'inner-planet',
+      nx: venusNode.x / viewW,
+      ny: venusNode.y / viewH,
+    });
+  }
   for (const s of synthetics) {
     sites.push({
       id: s.id,

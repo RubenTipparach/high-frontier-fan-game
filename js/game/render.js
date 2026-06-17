@@ -230,8 +230,13 @@ const PALETTE_DEFAULTS = {
 function paletteFor(site) {
   if (site._palette) return site._palette;
   const n = (site.name || '').toLowerCase();
-  for (const key of Object.keys(BODY_PALETTES)) {
-    if (n.includes(key)) { site._palette = BODY_PALETTES[key]; return site._palette; }
+  // The Venus aerostat is a cloud CITY, not the Venus planet (that body is the
+  // synthetic node on the Venus flyby), so it must NOT take the venus palette -
+  // fall through to the neutral type default.
+  if (site.id2 !== 'venus-aerostat-xity') {
+    for (const key of Object.keys(BODY_PALETTES)) {
+      if (n.includes(key)) { site._palette = BODY_PALETTES[key]; return site._palette; }
+    }
   }
   site._palette = PALETTE_DEFAULTS[site.type] || PALETTE_DEFAULTS.asteroid;
   return site._palette;
