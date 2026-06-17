@@ -102,7 +102,7 @@ export const SITES = [
   { id: 'mathilde', name: 'Mathilde', body: 'Mathilde', type: 'asteroid', class: 'A', spectralType: 'C', hydration: 2, vps: 2, dvLeo: 5.0, solarZone: 'Ceres', x: 665.1, y: 495.0 },
   { id: 'comet_wilson_harrington', name: 'Comet Wilson-Harrington', body: 'Comet', type: 'comet', class: 'A', spectralType: 'D', hydration: 4, vps: 3, dvLeo: 4.0, solarZone: 'Ceres', x: 604.4, y: 306.0 },
   { id: 'comet_hartley_2', name: 'Comet Hartley 2', body: 'Comet', type: 'comet', class: 'A', spectralType: 'D', hydration: 4, vps: 3, dvLeo: 4.0, solarZone: 'Ceres', x: 604.4, y: 288.0 },
-  { id: 'churynmov_gerasimenko', name: 'Churynmov-Gerasimenko', body: 'Churynmov-Gerasimenko', type: 'asteroid', class: 'A', spectralType: 'C', hydration: 4, vps: 3, dvLeo: 3.0, solarZone: 'Ceres', x: 535.5, y: 351.0 },
+  { id: 'churynmov_gerasimenko', name: 'Churyumov-Gerasimenko', body: 'Churyumov-Gerasimenko', type: 'asteroid', class: 'A', spectralType: 'C', hydration: 4, vps: 3, dvLeo: 3.0, solarZone: 'Ceres', x: 535.5, y: 351.0 },
   { id: 'comet_elst_pizarro', name: 'Comet Elst-Pizarro', body: 'Comet', type: 'comet', class: 'A', spectralType: 'D', hydration: 4, vps: 3, dvLeo: 3.0, solarZone: 'Ceres', x: 535.5, y: 369.0 },
   { id: 'comet_encke', name: 'Comet Encke', body: 'Comet', type: 'comet', class: 'A', spectralType: 'V', hydration: 4, vps: 3, dvLeo: 4.0, solarZone: 'Ceres', siteSynodic: 'blue', x: 604.4, y: 270.0 },
   { id: 'davida', name: 'Davida', body: 'Davida', type: 'asteroid', class: 'A', spectralType: 'C', hydration: 2, vps: 2, dvLeo: 4.0, solarZone: 'Ceres', x: 604.4, y: 324.0 },
