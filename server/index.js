@@ -2704,7 +2704,7 @@ app.delete('/sites/:siteId/annotations/:annId', requireProfile, (req, res) => {
 function allSiteAnnotationRows() {
   return db.prepare(
     `SELECT id, site_id, site_name, author_name, kind, body, created_at, updated_at
-       FROM site_annotations ORDER BY site_id ASC, created_at ASC`
+       FROM site_annotations ORDER BY created_at DESC, id DESC`
   ).all();
 }
 
@@ -2735,6 +2735,10 @@ app.post('/admin/site-notes/:annId/edit', requireAdmin, (req, res) => {
 });
 app.post('/admin/site-notes/:annId/delete', requireAdmin, (req, res) => {
   db.prepare(`DELETE FROM site_annotations WHERE id=?`).run(Number(req.params.annId));
+  res.redirect('/admin/site-notes');
+});
+app.post('/admin/site-notes/wipe', requireAdmin, (req, res) => {
+  db.prepare(`DELETE FROM site_annotations`).run();
   res.redirect('/admin/site-notes');
 });
 app.post('/admin/site-notes/add', requireAdmin, (req, res) => {
@@ -2796,10 +2800,12 @@ a{color:#7dd3fc}code{background:#161d33;padding:1px 5px;border-radius:4px;color:
 h3{margin:0 0 8px}h4{margin:10px 0 4px;color:#8fa6d8;font-size:12px;text-transform:uppercase}
 ul{list-style:none;margin:0;padding:0}li{margin:3px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 input,select,button{font:inherit;background:#161d33;color:#e6e9ff;border:1px solid #2a3450;border-radius:6px;padding:5px 8px}
-button{cursor:pointer}.dl{margin:10px 0}</style></head><body>
+button{cursor:pointer}.dl{margin:10px 0;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.dl .wipe button{background:#5a1620;border-color:#7a2230;color:#ffd0d0}</style></head><body>
 <h1>Site notes &amp; tags</h1>
-<p class="muted">${bySite.size} location${bySite.size === 1 ? '' : 's'} with player data (empty locations are hidden).</p>
-<div class="dl"><a href="/admin/site-notes.json">⬇ JSON</a> &nbsp; <a href="/admin/site-notes.csv">⬇ CSV</a> &nbsp; <a href="/admin">← dashboard</a></div>
+<p class="muted">${bySite.size} location${bySite.size === 1 ? '' : 's'} with player data (empty locations are hidden), newest first.</p>
+<div class="dl"><a href="/admin/site-notes.json">⬇ JSON</a> <a href="/admin/site-notes.csv">⬇ CSV</a> <a href="/admin">← dashboard</a>
+  <form class="wipe" method="post" action="/admin/site-notes/wipe" style="display:inline;margin-left:auto" onsubmit="return confirm('Wipe ALL site notes? This deletes every tag and message and cannot be undone.')"><button>🗑 Wipe all</button></form></div>
 ${sections || '<p class="muted">No site notes yet.</p>'}
 </body></html>`;
   res.type('html').send(html);
