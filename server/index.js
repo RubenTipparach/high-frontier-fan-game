@@ -2744,7 +2744,7 @@ const SERVER_TAG_FIELDS = [
 // Colours mirror js/game/render.js SYNODIC_COLOURS so the picker reads like
 // the board.
 const SEASON_OPTIONS = [
-  { key: 'red',    label: 'Red',    color: '#f87171' },
+  { key: 'red',    label: 'Red',    color: '#ef4444' },
   { key: 'yellow', label: 'Yellow', color: '#facc15' },
   { key: 'blue',   label: 'Blue',   color: '#60a5fa' },
 ];

@@ -48,7 +48,6 @@ const page = await browser.newPage({ deviceScaleFactor: 1 });
 
 const result = await page.evaluate(({ SZ, K, MAP_R, HAZ_R, VEN_R }) => {
   const PINK = '#ec1f8d';
-  const RING = '#c66932';
   const C = SZ / 2;
 
   function drawLanderGlyph(ctx, cx, cy, r, fill) {
@@ -134,11 +133,6 @@ const result = await page.evaluate(({ SZ, K, MAP_R, HAZ_R, VEN_R }) => {
     drawSkullGlyph(ctx, cx, cy, r * 0.92, '#ffffff'); ctx.restore();
     drawCutLine(ctx, cx, cy, r);
   }
-  function ring(ctx, cx, cy, r) {
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.lineWidth = r * 0.16; ctx.strokeStyle = RING; ctx.stroke();
-  }
-
   function make(draw) {
     const cv = document.createElement('canvas');
     cv.width = SZ; cv.height = SZ;
@@ -153,10 +147,13 @@ const result = await page.evaluate(({ SZ, K, MAP_R, HAZ_R, VEN_R }) => {
     // Full lander + hazard: the skull sits ON TOP of the lander (centred).
     'lander-hazard':       make((c, x, y) => { drawLanderGlyph(c, x, y, lr, PINK); drawSkullOutlined(c, x, y - lr * 0.14, lr * 0.5); }),
     'lander-half-hazard':  make((c, x, y) => drawLanderHazardGlyph(c, x, y, lr, PINK)),
-    'hazard':              make((c, x, y) => { ring(c, x, y, HAZ_R * K); drawSkullGlyph(c, x, y, HAZ_R * K * 0.78, '#ffffff'); }),
+    // Skull / parachute carry NO ring of their own: the node's own circle (a
+    // lagrange ring, or a burn's pink circle) is the ring, recoloured by season
+    // when seasonal. Drawing a second ring here just doubled it up.
+    'hazard':              make((c, x, y) => drawSkullGlyph(c, x, y, HAZ_R * K * 0.92, '#ffffff')),
     // A parachute is itself a kind of hazard, so aerobrake sites (which the data
     // also marks hazard) use just the parachute - no skull.
-    'aerobrake':           make((c, x, y) => { ring(c, x, y, VEN_R * K); drawParachuteGlyph(c, x, y, VEN_R * 0.9 * K, '#ffffff'); }),
+    'aerobrake':           make((c, x, y) => drawParachuteGlyph(c, x, y, VEN_R * 0.95 * K, '#ffffff')),
   };
 }, { SZ: ICON_PNG_SIZE, K: ICON_SUPERSAMPLE, MAP_R, HAZ_R, VEN_R });
 

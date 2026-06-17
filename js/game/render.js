@@ -520,7 +520,7 @@ function _readableInkHex(hex) {
 // translate to UI-tuned hex values; same intent, palette adapted
 // to our darker backdrop.
 const SYNODIC_COLOURS = {
-  red:    '#f87171',
+  red:    '#ef4444',
   yellow: '#facc15',
   blue:   '#60a5fa',
 };
@@ -2611,45 +2611,45 @@ export class MapRenderer {
         continue;
       }
       ctx.lineWidth = 1.5;
-      // Burns may carry a `landing` flag → draw as a rectangle
-      // (planner-style), so split landing burns out of the normal
-      // circle batch.
-      // Plain burns stay as the pink circle batch. Lander burns (landing set)
-      // and hazard burns both render as vector glyphs in the glyph pass below,
-      // so drop them here.
+      // Lander burns (landing set) draw as lander glyphs in the glyph pass, so
+      // keep them out of the pink circle batch. HAZARD burns DO stay here: a
+      // hazard burn reads as a burn AND a hazard - the pink circle below plus
+      // the hazard ring glyph drawn on top.
       const circles  = type === 'burn'
-        ? items.filter((w) => w.landing == null && !w.hazard)
+        ? items.filter((w) => w.landing == null)
         : items;
 
       if (circles.length) {
-        ctx.beginPath();
-        for (const w of circles) {
+        const arc = (w) => {
           const sx = this.pan.x + w.x * eff;
           const sy = this.pan.y + w.y * eff;
-          // LEO is enlarged to fit multiple parked rockets; bump
-          // the cull margin so the bigger ring isn't clipped.
           const wr = isLeoWaypoint(w) ? vis.r * 2 : vis.r;
-          if (sx < -wr || sx > hostW + wr || sy < -wr || sy > hostH + wr) continue;
+          if (sx < -wr || sx > hostW + wr || sy < -wr || sy > hostH + wr) return false;
           ctx.moveTo(sx + wr, sy);
           ctx.arc(sx, sy, wr, 0, Math.PI * 2);
+          return true;
+        };
+        // Fill (shared colour) for every circle.
+        if (vis.fill !== 'transparent') {
+          ctx.fillStyle = vis.fill;
+          ctx.beginPath();
+          for (const w of circles) arc(w);
+          ctx.fill();
         }
-        if (vis.fill !== 'transparent') { ctx.fillStyle = vis.fill; ctx.fill(); }
+        // Default ring colour for non-season nodes, one batched stroke.
         ctx.strokeStyle = vis.stroke;
+        ctx.beginPath();
+        for (const w of circles) { if (!seasonOf(w)) arc(w); }
         ctx.stroke();
-        // Season-tagged nodes REPLACE their ring colour with the synodic
-        // season colour (red / yellow / blue), re-stroked over the batch so
-        // the node carries no extra ring - just a recoloured one.
+        // Season nodes REPLACE their own ring colour with the synodic season
+        // colour. The hazard / aerobrake glyph carries no ring of its own, so
+        // this recoloured circle is the node's single ring.
         for (const w of circles) {
           const seas = seasonOf(w);
           if (!seas) continue;
-          const sx = this.pan.x + w.x * eff;
-          const sy = this.pan.y + w.y * eff;
-          const wr = isLeoWaypoint(w) ? vis.r * 2 : vis.r;
-          if (sx < -wr || sx > hostW + wr || sy < -wr || sy > hostH + wr) continue;
-          ctx.beginPath();
-          ctx.arc(sx, sy, wr, 0, Math.PI * 2);
           ctx.strokeStyle = SYNODIC_COLOURS[seas];
-          ctx.stroke();
+          ctx.beginPath();
+          if (arc(w)) ctx.stroke();
         }
       }
 

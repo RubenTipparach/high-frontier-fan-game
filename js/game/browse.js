@@ -5381,7 +5381,7 @@ function openSiteNotesModal(siteId, siteName) {
   }
   // A node's synodic season: it can only be entered during that Sunspot phase.
   // Tinted with the same red / yellow / blue the map uses for season lanes.
-  const SEASON_COLORS = { red: '#f87171', yellow: '#facc15', blue: '#60a5fa' };
+  const SEASON_COLORS = { red: '#ef4444', yellow: '#facc15', blue: '#60a5fa' };
   const serverChipParts = serverTagLabels.map((l) =>
     `<span class="site-tag-chip is-server" style="--tag:#8fa6d8"><span class="site-tag-dot"></span>${esc(l)}</span>`);
   if (nt && SEASON_COLORS[nt.season]) {
