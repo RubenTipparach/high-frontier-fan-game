@@ -2715,9 +2715,10 @@ export class MapRenderer {
       }
     }
 
-    // Flyby-boost "+N" labels, drawn LAST so the number sits IN FRONT of any
-    // node glyph. Each rides a black DISC sized to fit the number, so the
-    // gravity-assist value stays readable over a busy node.
+    // Flyby-boost "+N" labels, drawn LAST so the number sits in front. Each
+    // rides a black DISC sized to fit the number. When the node ALSO carries a
+    // marker glyph (e.g. the Venus aerobrake) the disc drops just below it so
+    // the glyph isn't covered - otherwise it centres on the node.
     ctx.font = '700 11px ui-sans-serif, system-ui, sans-serif';
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'center';
@@ -2731,16 +2732,20 @@ export class MapRenderer {
       // Radius = half the text-box diagonal + padding so the number always fits
       // inside the circle, with a minimum so single-char values aren't tiny.
       const rad = Math.max(9, Math.sqrt(tw * tw + 11 * 11) / 2 + 2);
+      const hasGlyph = (w.type === 'burn' && w.landing != null)
+        || w.type === 'venus'
+        || (w.hazard && w.type !== 'radhaz' && w.type !== 'lagrange');
+      const cy = hasGlyph ? sy + (MAP_ICON_BOX / 2 + rad - 2) : sy;
       ctx.fillStyle = '#000000';
       ctx.beginPath();
-      ctx.arc(sx, sy, rad, 0, Math.PI * 2);
+      ctx.arc(sx, cy, rad, 0, Math.PI * 2);
       ctx.fill();
       // Lagrange-colour outline so flyby spots read as the same family of node.
       ctx.lineWidth = 1.5;
       ctx.strokeStyle = '#c66932';
       ctx.stroke();
       ctx.fillStyle = '#ffffff';
-      ctx.fillText(txt, sx, sy + 0.5);
+      ctx.fillText(txt, sx, cy + 0.5);
     }
   }
 
