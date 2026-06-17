@@ -105,7 +105,8 @@ const result = await page.evaluate(({ SZ, K, MAP_R, HAZ_R, VEN_R }) => {
     drawSkullGlyph(ctx, cx, cy, r * 1.06, '#3a0a22');
     drawSkullGlyph(ctx, cx, cy, r, '#ffffff');
   }
-  function drawParachuteGlyph(ctx, cx, cy, r, fill) {
+  function drawParachuteGlyph(ctx, cx, cy, r, fill, opts) {
+    const payload = !opts || opts.payload !== false;
     ctx.save(); ctx.translate(cx, cy); ctx.scale(r, r); ctx.fillStyle = fill; ctx.strokeStyle = fill;
     ctx.beginPath();
     ctx.arc(0, -0.22, 0.80, Math.PI, 0, false);
@@ -120,8 +121,10 @@ const result = await page.evaluate(({ SZ, K, MAP_R, HAZ_R, VEN_R }) => {
     ctx.moveTo(0.267, 0.04); ctx.lineTo(0, 0.62);
     ctx.moveTo(0.78, -0.22); ctx.lineTo(0, 0.62);
     ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(-0.14, 0.62); ctx.lineTo(0.14, 0.62);
-    ctx.lineTo(0.10, 0.82); ctx.lineTo(-0.10, 0.82); ctx.closePath(); ctx.fill();
+    if (payload) {
+      ctx.beginPath(); ctx.moveTo(-0.14, 0.62); ctx.lineTo(0.14, 0.62);
+      ctx.lineTo(0.10, 0.82); ctx.lineTo(-0.10, 0.82); ctx.closePath(); ctx.fill();
+    }
     ctx.restore();
   }
   function drawLanderHazardGlyph(ctx, cx, cy, r, landerFill) {
@@ -151,6 +154,8 @@ const result = await page.evaluate(({ SZ, K, MAP_R, HAZ_R, VEN_R }) => {
     'lander-hazard':       make((c, x, y) => { drawLanderGlyph(c, x, y, lr, PINK); drawSkullOutlined(c, x, y - lr * 0.14, lr * 0.5); }),
     'lander-half-hazard':  make((c, x, y) => drawLanderHazardGlyph(c, x, y, lr, PINK)),
     'hazard':              make((c, x, y) => { ring(c, x, y, HAZ_R * K); drawSkullGlyph(c, x, y, HAZ_R * K * 0.78, '#ffffff'); }),
+    // A parachute is itself a kind of hazard, so aerobrake sites (which the data
+    // also marks hazard) use just the parachute - no skull.
     'aerobrake':           make((c, x, y) => { ring(c, x, y, VEN_R * K); drawParachuteGlyph(c, x, y, VEN_R * 0.9 * K, '#ffffff'); }),
   };
 }, { SZ: ICON_PNG_SIZE, K: ICON_SUPERSAMPLE, MAP_R, HAZ_R, VEN_R });

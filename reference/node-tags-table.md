@@ -1,81 +1,112 @@
-### Summary
-- messages ignored: 1 | "burns" tags ignored: 0 | tagged nodes: 74
-- player sprite counts: {"lander":11,"lander-hazard":9,"lander-half-hazard":4,"lander-half":5,"aerobrake":27,"hazard":18}
-- nodes where server sprite != player sprite: 48
+# Map node markers - single source of truth (data/node-tags.js)
 
-| id2 | node type | server tags | player tags | player→sprite | server→sprite agrees? |
-|---|---|---|---|---|---|
-| burn-0hh45 | burn | lander-burn | lander-burn | lander | ✓ |
-| burn-0ktq5 | burn | lander-burn, hazard | hazard, lander-burn | lander-hazard | ✓ |
-| burn-0vwaf | burn | lander-burn | lander-burn | lander | ✓ |
-| burn-1sg3i | burn | lander-burn, hazard | lander-burn | lander | ✗ (lander-hazard) |
-| burn-2ixpg | burn | half-lander-burn | half-burn, hazard, lander-burn | lander-half-hazard | ✗ (lander-half) |
-| burn-5eobz | burn | lander-burn, hazard | hazard, lander-burn | lander-hazard | ✓ |
-| burn-6sioj | burn | half-lander-burn | half-burn, lander-burn | lander-half | ✓ |
-| burn-8btep | burn | half-lander-burn | half-burn, lander-burn | lander-half | ✓ |
-| burn-a5tjw | burn | lander-burn | lander-burn | lander | ✓ |
-| burn-b2645 | burn | half-lander-burn | half-burn, hazard, lander-burn | lander-half-hazard | ✗ (lander-half) |
-| burn-bh269 | burn | lander-burn, hazard | hazard, lander-burn | lander-hazard | ✓ |
-| burn-cuvhh | burn | half-lander-burn | half-burn, lander-burn | lander-half | ✓ |
-| burn-deuoo | burn | lander-burn | lander-burn | lander | ✓ |
-| burn-fj9bx | burn | half-lander-burn, hazard | half-burn, hazard, lander-burn | lander-half-hazard | ✓ |
-| burn-fklp9 | burn | lander-burn, hazard | hazard, lander-burn | lander-hazard | ✓ |
-| burn-gxqyl | burn | lander-burn | lander-burn | lander | ✓ |
-| burn-jis7t | burn | lander-burn, hazard | hazard, lander-burn | lander-hazard | ✓ |
-| burn-lkqzk | burn | lander-burn, hazard | hazard, lander-burn | lander-hazard | ✓ |
-| burn-mojo4 | burn | lander-burn, hazard | hazard, lander-burn | lander-hazard | ✓ |
-| burn-ohf4h | burn | lander-burn, hazard | hazard, lander-burn | lander-hazard | ✓ |
-| burn-onxqb | burn | half-lander-burn | half-burn, lander-burn | lander-half | ✓ |
-| burn-opo7v | burn | half-lander-burn, hazard | half-burn, hazard, lander-burn | lander-half-hazard | ✓ |
-| burn-ph6aq | burn | half-lander-burn | half-burn, lander-burn | lander-half | ✓ |
-| burn-r1vpn | burn | lander-burn | lander-burn | lander | ✓ |
-| burn-sdkuj | burn | lander-burn | lander-burn | lander | ✓ |
-| burn-st233 | burn | lander-burn, hazard | hazard, lander-burn | lander-hazard | ✓ |
-| burn-vqwky | burn | lander-burn | lander-burn | lander | ✓ |
-| burn-wn2ap | burn | lander-burn | lander-burn | lander | ✓ |
-| burn-z7ntn | burn | lander-burn | lander-burn | lander | ✓ |
-| lag-0n050 | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-0ss6n | lagrange | hazard | hazard | hazard | ✗ ((none)) |
-| lag-25q0c | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-3hf9y | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-3tls2 | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-55ra2 | lagrange | hazard | hazard | hazard | ✗ ((none)) |
-| lag-5kd7m | lagrange | hazard | hazard | hazard | ✗ ((none)) |
-| lag-5pmg4 | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-5rcv3 | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-60v7l | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-6jjmn | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-7xipc | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-7z5xf | lagrange | hazard | hazard | hazard | ✗ ((none)) |
-| lag-8fg84 | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-968np | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-9uw56 | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-c3cha | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-cfzlh | lagrange | hazard | hazard | hazard | ✗ ((none)) |
-| lag-dadvt | lagrange | hazard | hazard | hazard | ✗ ((none)) |
-| lag-dzgne | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-e9ydu | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-exzgn | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-fp0u6 | lagrange | hazard | hazard | hazard | ✗ ((none)) |
-| lag-gqofs | lagrange | hazard | hazard | hazard | ✗ ((none)) |
-| lag-j9xww | lagrange | hazard | hazard | hazard | ✗ ((none)) |
-| lag-jb3sl | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-jc8ea | lagrange | hazard | hazard | hazard | ✗ ((none)) |
-| lag-jox91 | lagrange | hazard | hazard | hazard | ✗ ((none)) |
-| lag-k88xf | lagrange | hazard | hazard | hazard | ✗ ((none)) |
-| lag-lozeb | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-m01cm | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-m9db0 | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-mdelw | lagrange | hazard | hazard | hazard | ✗ ((none)) |
-| lag-n7yan | lagrange | hazard | hazard | hazard | ✗ ((none)) |
-| lag-n95ot | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-p5ep5 | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-pzen6 | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-pzmun | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-qeogw | lagrange | hazard | hazard | hazard | ✗ ((none)) |
-| lag-tphnu | lagrange | hazard | hazard | hazard | ✗ ((none)) |
-| lag-tspde | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-u1kzp | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-vlqer | lagrange | hazard | aero-break | aerobrake | ✗ ((none)) |
-| lag-wx5rf | lagrange | hazard | hazard | hazard | ✗ ((none)) |
-| lag-y2g71 | lagrange | hazard | hazard | hazard | ✗ ((none)) |
+Generated by scripts/gen-node-tags.mjs from player site-notes tags + the planner burn flags.
+A parachute is itself a kind of hazard: aerobrake nodes record aerobrake + hazard but render just the parachute. 99 nodes.
+
+Sprite counts: {"lander":18,"lander-hazard":10,"hazard":22,"lander-half-hazard":4,"lander-half":18,"aerobrake":27}
+
+| id2 | node type | source | flags | marker sprite |
+|---|---|---|---|---|
+| burn-0gvyj | burn | planner burn | lander | lander |
+| burn-0hh45 | burn | player tag | lander | lander |
+| burn-0ktq5 | burn | player tag | hazard+lander | lander-hazard |
+| burn-0v3ll | burn | planner burn | hazard | hazard |
+| burn-0vwaf | burn | player tag | lander | lander |
+| burn-1sg3i | burn | player tag | lander | lander |
+| burn-2ixpg | burn | player tag | half+hazard+lander | lander-half-hazard |
+| burn-2o7lg | burn | planner burn | half+lander | lander-half |
+| burn-5eobz | burn | player tag | hazard+lander | lander-hazard |
+| burn-6sioj | burn | player tag | half+lander | lander-half |
+| burn-8btep | burn | player tag | half+lander | lander-half |
+| burn-8y72w | burn | planner burn | lander | lander |
+| burn-94orx | burn | planner burn | half+lander | lander-half |
+| burn-a5tjw | burn | player tag | lander | lander |
+| burn-b2645 | burn | player tag | half+hazard+lander | lander-half-hazard |
+| burn-bcegw | burn | planner burn | hazard | hazard |
+| burn-bh269 | burn | player tag | hazard+lander | lander-hazard |
+| burn-cuvhh | burn | player tag | half+lander | lander-half |
+| burn-deuoo | burn | player tag | lander | lander |
+| burn-dkywy | burn | planner burn | hazard | hazard |
+| burn-f0zdm | burn | planner burn | half+lander | lander-half |
+| burn-fj9bx | burn | player tag | half+hazard+lander | lander-half-hazard |
+| burn-fklp9 | burn | player tag | hazard+lander | lander-hazard |
+| burn-gx92p | burn | planner burn | lander | lander |
+| burn-gxqyl | burn | player tag | lander | lander |
+| burn-jis7t | burn | player tag | hazard+lander | lander-hazard |
+| burn-kx921 | burn | planner burn | lander | lander |
+| burn-lkqzk | burn | player tag | hazard+lander | lander-hazard |
+| burn-ln7ok | burn | planner burn | half+lander | lander-half |
+| burn-m5tf9 | burn | planner burn | half+lander | lander-half |
+| burn-mojo4 | burn | player tag | hazard+lander | lander-hazard |
+| burn-msiol | burn | planner burn | half+lander | lander-half |
+| burn-o0yoc | burn | planner burn | half+lander | lander-half |
+| burn-ohf4h | burn | player tag | hazard+lander | lander-hazard |
+| burn-onxqb | burn | player tag | half+lander | lander-half |
+| burn-opo7v | burn | player tag | half+hazard+lander | lander-half-hazard |
+| burn-p4xxi | burn | planner burn | lander | lander |
+| burn-pak2h | burn | planner burn | half+lander | lander-half |
+| burn-pel45 | burn | planner burn | half+lander | lander-half |
+| burn-ph6aq | burn | player tag | half+lander | lander-half |
+| burn-q9u73 | burn | planner burn | hazard | hazard |
+| burn-qk5dq | burn | planner burn | half+lander | lander-half |
+| burn-r1gov | burn | planner burn | lander | lander |
+| burn-r1vpn | burn | player tag | lander | lander |
+| burn-sdkuj | burn | player tag | lander | lander |
+| burn-st233 | burn | player tag | hazard+lander | lander-hazard |
+| burn-tn04s | burn | planner burn | half+lander | lander-half |
+| burn-utoma | burn | planner burn | hazard+lander | lander-hazard |
+| burn-v3t72 | burn | planner burn | half+lander | lander-half |
+| burn-vqwky | burn | player tag | lander | lander |
+| burn-wn2ap | burn | player tag | lander | lander |
+| burn-y0j6e | burn | planner burn | half+lander | lander-half |
+| burn-yxsbu | burn | planner burn | lander | lander |
+| burn-z7ntn | burn | player tag | lander | lander |
+| lag-0n050 | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-0ss6n | lagrange | player tag | hazard | hazard |
+| lag-25q0c | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-3hf9y | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-3tls2 | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-55ra2 | lagrange | player tag | hazard | hazard |
+| lag-5kd7m | lagrange | player tag | hazard | hazard |
+| lag-5pmg4 | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-5rcv3 | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-60v7l | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-6jjmn | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-7xipc | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-7z5xf | lagrange | player tag | hazard | hazard |
+| lag-8fg84 | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-968np | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-9uw56 | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-c3cha | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-cfzlh | lagrange | player tag | hazard | hazard |
+| lag-dadvt | lagrange | player tag | hazard | hazard |
+| lag-dzgne | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-e9ydu | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-exzgn | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-fp0u6 | lagrange | player tag | hazard | hazard |
+| lag-gqofs | lagrange | player tag | hazard | hazard |
+| lag-j9xww | lagrange | player tag | hazard | hazard |
+| lag-jb3sl | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-jc8ea | lagrange | player tag | hazard | hazard |
+| lag-jox91 | lagrange | player tag | hazard | hazard |
+| lag-k88xf | lagrange | player tag | hazard | hazard |
+| lag-lozeb | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-m01cm | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-m9db0 | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-mdelw | lagrange | player tag | hazard | hazard |
+| lag-n7yan | lagrange | player tag | hazard | hazard |
+| lag-n95ot | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-p5ep5 | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-pzen6 | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-pzmun | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-qeogw | lagrange | player tag | hazard | hazard |
+| lag-tphnu | lagrange | player tag | hazard | hazard |
+| lag-tspde | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-u1kzp | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-vlqer | lagrange | player tag | aerobrake+hazard | aerobrake |
+| lag-wx5rf | lagrange | player tag | hazard | hazard |
+| lag-y2g71 | lagrange | player tag | hazard | hazard |
+(node:10903) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/user/high-frontier-fan-game/data/node-tags.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /home/user/high-frontier-fan-game/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
