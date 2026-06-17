@@ -6981,27 +6981,45 @@ function setRoutePriority(mode) {
   _routePriority = mode;
   try { localStorage.setItem(STORAGE_ROUTE_PRIORITY, mode); } catch {}
 }
-// Avoid-hazards planner toggle. When ON, the planner treats BOTH hazard burns
-// and radiation hazards as the dominant cost, routing around them even at the
-// price of extra burns / turns. Persisted per device.
+// Avoid-hazards / avoid-radiation planner toggles. These are INDEPENDENT: a
+// player can route around generic hazard burns (the skull / aerobrake rolls)
+// while still flying straight through radiation belts, or the reverse. When a
+// toggle is ON the planner treats that hazard class as the dominant cost,
+// routing around it even at the price of extra burns / turns. Persisted per
+// device. Avoid-hazards defaults ON; avoid-radiation defaults OFF (a confident
+// player flies through radiation unless they opt in).
 const STORAGE_ROUTE_AVOID_HAZARDS = 'hf-sandbox-route-avoid-hazards';
+const STORAGE_ROUTE_AVOID_RADIATION = 'hf-sandbox-route-avoid-radiation';
 let _routeAvoidHazards = (() => {
-  try { return localStorage.getItem(STORAGE_ROUTE_AVOID_HAZARDS) === '1'; }
+  try {
+    const v = localStorage.getItem(STORAGE_ROUTE_AVOID_HAZARDS);
+    return v === null ? true : v === '1';   // absent -> default ON
+  } catch { return true; }
+})();
+let _routeAvoidRadiation = (() => {
+  try { return localStorage.getItem(STORAGE_ROUTE_AVOID_RADIATION) === '1'; }
   catch { return false; }
 })();
 function setRouteAvoidHazards(on) {
   _routeAvoidHazards = !!on;
   try { localStorage.setItem(STORAGE_ROUTE_AVOID_HAZARDS, on ? '1' : '0'); } catch {}
 }
+function setRouteAvoidRadiation(on) {
+  _routeAvoidRadiation = !!on;
+  try { localStorage.setItem(STORAGE_ROUTE_AVOID_RADIATION, on ? '1' : '0'); } catch {}
+}
 function routeMetricPriority() {
   const base = _routePriority === 'burns' ? ['burns', 'turns'] : ['turns', 'burns'];
   // The planner compares these metrics lexicographically, so the FIRST entry is
-  // the one it minimizes hardest. Avoid-hazards leads with hazards + radHazards
-  // (every hazard / rad-hazard node crossed outweighs any number of burns or
-  // turns); off, they stay the final tiebreaker, the old behaviour.
-  return _routeAvoidHazards
-    ? ['hazards', 'radHazards', ...base]
-    : [...base, 'hazards', 'radHazards'];
+  // the one it minimizes hardest. Each AVOIDED hazard class leads the base
+  // metrics (any crossing outweighs any number of burns or turns); an
+  // un-avoided class stays the final tiebreaker, the old behaviour. Generic
+  // hazards lead radiation when both are avoided, preserving prior ordering.
+  const lead = [];
+  const tail = [];
+  (_routeAvoidHazards ? lead : tail).push('hazards');
+  (_routeAvoidRadiation ? lead : tail).push('radHazards');
+  return [...lead, ...base, ...tail];
 }
 
 // Manual move mode. Alternative to the auto-planner: the player
@@ -15814,9 +15832,19 @@ function openRouteOptionsModal(onClose) {
       <input type="checkbox" name="route-avoid-hazards"
         ${_routeAvoidHazards ? 'checked' : ''}>
       <div>
-        <strong>☢ Avoid hazards</strong>
-        <em>Route around radiation belts and hazard burns wherever a path
-        exists, even when the detour costs extra burns or turns.</em>
+        <strong>☠ Avoid hazards</strong>
+        <em>Route around hazard burns (the skull / aerobrake rolls)
+        wherever a path exists, even when the detour costs extra burns
+        or turns.</em>
+      </div>
+    </label>
+    <label class="route-options-choice route-options-avoid ${_routeAvoidRadiation ? 'is-active' : ''}">
+      <input type="checkbox" name="route-avoid-radiation"
+        ${_routeAvoidRadiation ? 'checked' : ''}>
+      <div>
+        <strong>☢ Avoid radiation</strong>
+        <em>Route around radiation belts too. Leave off if you're confident
+        flying through radiation and only want to dodge the hazard rolls.</em>
       </div>
     </label>
     <div class="route-options-manual">
@@ -15866,11 +15894,19 @@ function openRouteOptionsModal(onClose) {
       }
     });
   });
-  const avoidEl = panel.querySelector('input[name="route-avoid-hazards"]');
-  if (avoidEl) {
-    avoidEl.addEventListener('change', () => {
-      setRouteAvoidHazards(avoidEl.checked);
-      avoidEl.closest('.route-options-avoid').classList.toggle('is-active', avoidEl.checked);
+  const avoidHazEl = panel.querySelector('input[name="route-avoid-hazards"]');
+  if (avoidHazEl) {
+    avoidHazEl.addEventListener('change', () => {
+      setRouteAvoidHazards(avoidHazEl.checked);
+      avoidHazEl.closest('.route-options-avoid').classList.toggle('is-active', avoidHazEl.checked);
+      replanCurrentRoute();
+    });
+  }
+  const avoidRadEl = panel.querySelector('input[name="route-avoid-radiation"]');
+  if (avoidRadEl) {
+    avoidRadEl.addEventListener('change', () => {
+      setRouteAvoidRadiation(avoidRadEl.checked);
+      avoidRadEl.closest('.route-options-avoid').classList.toggle('is-active', avoidRadEl.checked);
       replanCurrentRoute();
     });
   }
@@ -16571,7 +16607,7 @@ function canPlanRocketRoute() {
 // those wrong. Per-turn burn budget = the active thruster's
 // thrust value (defaults to 4 when no thruster is active).
 // Re-plan the route currently on screen (if any) after a planner setting
-// changes - priority or avoid-hazards - so the toggle takes effect at once
+// changes - priority or hazard / radiation avoidance - so the toggle takes effect at once
 // instead of waiting for the next destination pick. No-op in manual mode or
 // when no auto route is plotted.
 function replanCurrentRoute() {
