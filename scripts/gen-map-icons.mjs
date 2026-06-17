@@ -141,7 +141,7 @@ const result = await page.evaluate(({ SZ, K, MAP_R, HAZ_R, VEN_R }) => {
     'lander':              make((c, x, y) => drawLanderGlyph(c, x, y, lr, PINK)),
     'lander-half':         make((c, x, y) => drawHalfLanderGlyph(c, x, y, lr, PINK)),
     // Full lander + hazard: the skull sits ON TOP of the lander (centred).
-    'lander-hazard':       make((c, x, y) => { drawLanderGlyph(c, x, y, lr, PINK); drawSkullOutlined(c, x, y - lr * 0.16, lr * 0.62); }),
+    'lander-hazard':       make((c, x, y) => { drawLanderGlyph(c, x, y, lr, PINK); drawSkullOutlined(c, x, y - lr * 0.14, lr * 0.5); }),
     'lander-half-hazard':  make((c, x, y) => drawLanderHazardGlyph(c, x, y, lr, PINK)),
     'hazard':              make((c, x, y) => { ring(c, x, y, HAZ_R * K); drawSkullGlyph(c, x, y, HAZ_R * K * 0.78, '#ffffff'); }),
     'aerobrake':           make((c, x, y) => { ring(c, x, y, VEN_R * K); drawParachuteGlyph(c, x, y, VEN_R * 0.9 * K, '#ffffff'); }),
