@@ -654,6 +654,9 @@ const MAP_ICON_NAMES = ['lander', 'lander-half', 'lander-hazard', 'lander-half-h
 // The sprites are authored at 6.4x (gen-map-icons.mjs ICON_SUPERSAMPLE) in a
 // 128px canvas, so each blits back down to a 20px screen box centred on the node.
 const MAP_ICON_BOX = 20;
+// The Venus aerobrake parachute sits on the Low-Venus-Orbit Lagrange node (its
+// stable ref id), NOT the Venus flyby node - that one is just the "+2" spot.
+const AEROBRAKE_NODE_ID2 = 'lag-968np';
 
 function drawRockyAsteroid(ctx, cx, cy, r, palette, site) {
   if (!site._rockShape) {
@@ -2671,6 +2674,8 @@ export class MapRenderer {
     if (lagrangeItems) {
       ctx.fillStyle = '#fdba74';
       for (const w of lagrangeItems) {
+        // The aerobrake node wears the parachute sprite instead of an "L".
+        if (w.id2 === AEROBRAKE_NODE_ID2) continue;
         const sx = this.pan.x + w.x * eff;
         const sy = this.pan.y + w.y * eff;
         if (sx < -20 || sx > hostW + 20 || sy < -20 || sy > hostH + 20) continue;
@@ -2700,7 +2705,7 @@ export class MapRenderer {
         if (w.type === 'burn' && w.landing != null) {
           if (w.hazard) name = w.landing < 1 ? 'lander-half-hazard' : 'lander-hazard';
           else name = w.landing < 1 ? 'lander-half' : 'lander';
-        } else if (w.type === 'venus') {
+        } else if (w.id2 === AEROBRAKE_NODE_ID2) {
           name = 'aerobrake';
         } else if (w.hazard && w.type !== 'radhaz' && w.type !== 'lagrange') {
           name = 'hazard';
@@ -2733,7 +2738,7 @@ export class MapRenderer {
       // inside the circle, with a minimum so single-char values aren't tiny.
       const rad = Math.max(9, Math.sqrt(tw * tw + 11 * 11) / 2 + 2);
       const hasGlyph = (w.type === 'burn' && w.landing != null)
-        || w.type === 'venus'
+        || w.id2 === AEROBRAKE_NODE_ID2
         || (w.hazard && w.type !== 'radhaz' && w.type !== 'lagrange');
       const cy = hasGlyph ? sy + (MAP_ICON_BOX / 2 + rad - 2) : sy;
       ctx.fillStyle = '#000000';
