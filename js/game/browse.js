@@ -54,6 +54,8 @@ import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
 import { renderAssemblyPanel } from './assembly.js';
 import { uiIcon } from './ui-icons.js';
 import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
+import { NODE_TAGS } from '../../data/node-tags.js';
+import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
 import { apiAvailable, getSiteAnnotations, postSiteAnnotation, removeSiteTag, deleteSiteAnnotation } from '../api.js';
 import { activeProfile } from '../auth.js';
 import {
@@ -340,6 +342,20 @@ export function mountBrowse(opts = {}) {
   // Stash online context up front so the renderMap()/sync paths below
   // (which fire synchronously during mount) already see online mode.
   if (opts && opts.online) {
+    // Switching to a DIFFERENT online game (e.g. spectating game A, returning
+    // to the lobby, then creating solo game B) must drop game A's cached
+    // per-game state first. Otherwise its snapshot / players / crew draft
+    // render during this synchronous mount - before B's first snapshot lands -
+    // so the crew draft thinks you're game A's first player and Pick Crew stays
+    // disabled until a refresh. The WS / poll below re-subscribe for the new
+    // game; tearing the old ones down here also stops a leaked subscription.
+    if (_onlineGameId !== (opts.gameId || null)) {
+      if (_onlineOffWS) { try { _onlineOffWS(); } catch { /* ignore */ } _onlineOffWS = null; }
+      if (_onlinePoll) { clearInterval(_onlinePoll); _onlinePoll = null; _onlinePollMs = 0; }
+      _onlineSnapshot = null;
+      _lastAppliedSeq = -1;
+      _onlineMaps = null;
+    }
     _online = true;
     _spectator = !!opts.spectator;
     _onlineGameId = opts.gameId || null;
@@ -5345,6 +5361,29 @@ function openSiteNotesModal(siteId, siteName) {
   };
   const refetch = async () => apply(await getSiteAnnotations(siteId, token));
 
+  // "Server tags" = how the map-data SINGLE SOURCE OF TRUTH (data/node-tags.js)
+  // classifies this node, plus the planner's flyby / radhaz, shown next to the
+  // raw player tags so the two can be compared. An aerobrake node records
+  // aerobrake + hazard here (a parachute is itself a kind of hazard), even
+  // though its marker is just the parachute.
+  const serverNode = (_activeData && _activeData.sites)
+    ? _activeData.sites.find((s) => s.id2 === siteId) : null;
+  const nt = NODE_TAGS[siteId];
+  // Marker meanings (burn / hazard / aerobrake / lander-burn / flyby /
+  // radiation), shared with the site popup so both read the same vocabulary.
+  const labels = serverTagLabels(serverNode || { id2: siteId });
+  // A node's synodic season: it can only be entered during that Sunspot phase.
+  // Tinted with the same red / yellow / blue the map uses for season lanes.
+  const SEASON_COLORS = { red: '#ef4444', yellow: '#facc15', blue: '#60a5fa' };
+  const serverChipParts = labels.map((l) => {
+    const info = tagInfo(l);
+    return `<span class="site-tag-chip is-server" style="--tag:#8fa6d8"${info ? ` title="${esc(info)}"` : ''}><span class="site-tag-dot"></span>${esc(l)}</span>`;
+  });
+  if (nt && SEASON_COLORS[nt.season]) {
+    serverChipParts.push(`<span class="site-tag-chip is-server" style="--tag:${SEASON_COLORS[nt.season]}" title="${esc(tagInfo(nt.season + ' season'))}"><span class="site-tag-dot"></span>${esc(nt.season)} season</span>`);
+  }
+  const serverChips = serverChipParts.length ? serverChipParts.join('') : '<span class="muted">none</span>';
+
   function render() {
     const tagChips = state.tags.map((t) => {
       const d = tagDisplay(t.tag);
@@ -5357,7 +5396,11 @@ function openSiteNotesModal(siteId, siteName) {
       : '<li class="muted">No messages yet.</li>';
     body.innerHTML = `
       <div class="site-notes-sec">
-        <h4>Tags <span class="muted">(tap yours to remove)</span></h4>
+        <h4>Server tags <span class="muted">(what the map data says)</span></h4>
+        <div class="site-tags-row">${serverChips}</div>
+      </div>
+      <div class="site-notes-sec">
+        <h4>Player tags <span class="muted">(tap yours to remove)</span></h4>
         <div class="site-tags-row">${tagChips || '<span class="muted">No tags yet.</span>'}</div>
         <h5>Add a tag</h5>
         <div class="site-tags-row site-tags-pick">${quick}</div>
@@ -6509,7 +6552,7 @@ function openDeckTapModal(card, kind, { allowAuction = false, inspectOnly = fals
     type: kind,
     onSupportClick: (kinds) => {
       close();
-      openPatentsSupports(kinds);
+      openSupportBrowser(kinds);
     },
   });
   cardEl.classList.add('card-modal-card');
@@ -6645,7 +6688,7 @@ function openCardModal(card, kind, slotIdx, { readOnly = false, face } = {}) {
       : (getPickedCrew()?.cardId === card.id ? getPickedCrew()?.face : undefined),
     onSupportClick: (kinds) => {
       close();
-      openPatentsSupports(kinds);
+      openSupportBrowser(kinds);
     },
   });
   cardEl.classList.add('card-modal-card');
@@ -7162,6 +7205,19 @@ function manualHopCost(tipId, toId) {
   if (tipId === toId) return { ok: false, reason: 'already there' };
   if (toNode.isLandable === false) {
     return { ok: false, reason: `can't land on ${esc(toNode.name || toId)}` };
+  }
+  // Synodic-season gate: a seasonal space is only on the board during its
+  // Sunspot phase, so off-season it can't be entered by hand either (mirrors
+  // the auto-planner's seasonBlocked). Returning !ok here both drops the node
+  // from the reachable glow and rejects a tap with the reason.
+  const toSeason = (NODE_TAGS[toNode.id2] && NODE_TAGS[toNode.id2].season) || toNode.siteSynodic || null;
+  if (toSeason) {
+    let nowSeason = null;
+    try { nowSeason = getSeason()?.name || null; } catch { nowSeason = null; }
+    if (nowSeason && toSeason !== nowSeason) {
+      const cap = toSeason[0].toUpperCase() + toSeason.slice(1);
+      return { ok: false, reason: `${esc(toNode.name || toId)} is a ${toSeason}-season space (only enterable in Season ${cap}; the Sunspot Cube is in ${nowSeason} now)` };
+    }
   }
   // Adjacency runs over the contracted graph (decorative bends collapsed).
   const entry = meaningfulNeighbors(tipId).find((e) => e.id === toId);
@@ -9207,7 +9263,7 @@ function openRocketStackModal() {
       if (isThruster && slot.id === activeId) cardOpts.supplied = supplied;
       cardOpts.onSupportClick = (kinds) => {
         close();
-        openPatentsSupports(kinds);
+        openSupportBrowser(kinds);
       };
       const cardEl = renderCard(card, cardOpts);
       makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face);
@@ -13769,7 +13825,9 @@ function animPathSegments(fromServerId, toServerId) {
   try {
     // Generous thrust so the planner always finds the geometric path
     // (we only need a polyline to slide along, not a legal burn plan).
-    const r = planRoute(_activeData, fromPid, toPid, { thrust: 12 });
+    // gateSeason:false so a move made in-season still animates after the
+    // Sunspot Cube has advanced past that season.
+    const r = planRoute(_activeData, fromPid, toPid, { thrust: 12, gateSeason: false });
     if (r && r.segments && r.segments.length) {
       segs = r.segments.map((s) => ({ from: s.from, to: s.to }));
     }
@@ -14555,6 +14613,15 @@ async function moveRocket() {
     const landG = destSite ? maneuverGate(destSite, netThrust) : { ok: true };
     if (destSite && !landG.ok) { _onlineToast(`Can't land on ${destSite.name} - not enough thrust and no factory to assist.`, 'error'); return false; }
     if (landG.assist && landG.needsRoll && destSite) assistHz.push({ site: destSite, glyph: '🏭', label: 'landing assist' });
+    // Synodic-season gate (also catches a route planned in-season last turn):
+    // a seasonal space can only be entered while the Sunspot Cube is in its season.
+    const destSeason = destSite ? ((NODE_TAGS[destSite.id2] && NODE_TAGS[destSite.id2].season) || destSite.siteSynodic || null) : null;
+    let curSeasonName = null; try { curSeasonName = getSeason()?.name || null; } catch { curSeasonName = null; }
+    if (destSeason && curSeasonName && destSeason !== curSeasonName) {
+      const cap = destSeason[0].toUpperCase() + destSeason.slice(1);
+      _onlineToast(`${destSite.name} is a ${destSeason}-season space - only enterable during Season ${cap} (the Sunspot Cube is in ${curSeasonName} now).`, 'error');
+      return false;
+    }
     const genericHz = hz.filter((h) => h.site.type !== 'radhaz').concat(assistHz);
     let hazardPay = false;
     // Generic (skull / aerobrake / factory assist): pay aqua, roll, or
@@ -16040,7 +16107,20 @@ function showSitePopupFor(site) {
         // don't pre-disable on ops==0 because a disabled button
         // gives no feedback; the modal is the notification the
         // user asked for.)
-        actions.push({
+        // When M0 politics is active, Fundraise REPLACES Income (rulebook):
+        // it opens the assembly board's guided fundraise flow (place / move a
+        // delegate, gain aqua, vote tally) instead of the plain +1 aqua.
+        const m0Active = _online && _onlineSnapshot && _onlineSnapshot.m0;
+        actions.push(m0Active ? {
+          label: '🏛 Fundraising',
+          variant: 'rocket',
+          disabled: false,
+          title: 'Fundraise: place or move a delegate, gain 1 Aqua, run a vote tally. Costs one operation.',
+          onClick: () => {
+            _renderer.clearSitePopup();
+            openAssemblyModal('fundraise');
+          },
+        } : {
           label: '💰 Income (+1 aqua)',
           variant: 'rocket',
           disabled: false,
@@ -16551,10 +16631,28 @@ function planRocketRouteTo(destSite) {
   const assistNote = (liftGate.assist || landGate.assist)
     ? ` <em class="muted">(🏭 factory assist${(liftGate.needsRoll || landGate.needsRoll) ? ' - hazard roll on the move' : ' - free, colony present'})</em>`
     : '';
+  // Synodic-season gate: a seasonal space is only on the board during its
+  // Sunspot phase, so it can't be entered (or even routed to) off-season.
+  let nowSeason = null;
+  try { nowSeason = getSeason()?.name || null; } catch { nowSeason = null; }
+  const destSeason = (NODE_TAGS[destSite.id2] && NODE_TAGS[destSite.id2].season) || destSite.siteSynodic || null;
+  if (destSeason && nowSeason && destSeason !== nowSeason) {
+    const cap = destSeason[0].toUpperCase() + destSeason.slice(1);
+    setStatus(
+      `🗓 <strong>${esc(destSite.name)}</strong> is a ${destSeason}-season space: it can only be `
+      + `entered during Season ${cap}, but the Sunspot Cube is in ${nowSeason} now.`
+    );
+    _renderer.setRoute(null);
+    _renderer.setRouteEndpoints(origin.id, destSite.id);
+    return false;
+  }
   const metricPriority = routeMetricPriority();
   const result = planRoute(_activeData, origin.id, destSite.id, {
     thrust,
     metricPriority,
+    // The current Sunspot season gates which seasonal spaces (and the
+    // Venus flyby) the route may use.
+    solarSeason: nowSeason || 'red',
     // Pirouette thrusters waive the pivot cost on their first
     // direction change(s) each turn; pass the active engine's
     // bonus so the auto-planner discounts those pivots too.
@@ -16829,6 +16927,68 @@ export function openPatentsSupports(kinds) {
   const want = expandSupportKinds(kinds || []);
   _pendingPatentSelection = { type: 'supports', kinds: want };
   showPane('patents');
+}
+
+// Support browser modal. Tapping a support icon opens this instead of the
+// library: a grid of every card that SUPPLIES that one support, with a
+// WHITE-side / BLACK-side toggle (cards render on the chosen face; never a mix).
+// The support icons in the modal act as FILTER buttons - tapping one filters
+// the whole deck to that single support type (a plain replace, no stacking /
+// narrowing). The seed kinds form one OR-group (a reactor chip = any reactor).
+let _sbState = null;
+function sbSuppliesOf(p, side) {
+  const f = p.faces && p.faces[side];
+  return (f && f.supplies) || (side === 'primary' ? (p.supplies || []) : []) || [];
+}
+export function openSupportBrowser(kinds) {
+  document.querySelector('.support-browser-overlay')?.remove();
+  _sbState = {
+    filter: (kinds && kinds.length) ? Array.from(new Set(kinds)) : [],
+    side: 'primary',   // default to the white face
+  };
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay support-browser-overlay';
+  overlay.tabIndex = -1;
+  const dialog = document.createElement('div');
+  dialog.className = 'support-browser-modal';
+  overlay.appendChild(dialog);
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  document.body.appendChild(overlay);
+  overlay.focus();
+  sbRender(dialog, close);
+}
+function sbRender(dialog, close) {
+  const st = _sbState;
+  const sideWord = st.side === 'primary' ? 'white' : 'black';
+  const filterSet = new Set(st.filter);
+  const matches = st.filter.length
+    ? PATENTS.filter((p) => sbSuppliesOf(p, st.side).some((k) => filterSet.has(k)))
+    : [];
+  const filterRow = listSupplyKinds().map((k) =>
+    `<button type="button" class="sb-filter-btn${filterSet.has(k) ? ' is-on' : ''}" data-k="${esc(k)}" title="${esc(k)}">${supportKindGlyphHtml(k)}</button>`).join('');
+  dialog.innerHTML = `
+    <div class="sb-head">
+      <h3>🔌 Cards that supply</h3>
+      <div class="sb-side-toggle">
+        <button type="button" class="sb-side${st.side === 'primary' ? ' is-on' : ''}" data-side="primary">⚪ White side</button>
+        <button type="button" class="sb-side${st.side === 'secondary' ? ' is-on' : ''}" data-side="secondary">⚫ Black side</button>
+      </div>
+      <button class="modal-x" type="button" aria-label="Close">✕</button>
+    </div>
+    <div class="sb-filter">
+      <span class="sb-lbl">Filter by support (${sideWord} side):</span>
+      <div class="sb-filter-row">${filterRow}</div>
+    </div>
+    <div class="sb-grid">${matches.length ? '' : `<p class="muted">Pick a support to see which cards' ${sideWord} side supplies it.</p>`}</div>`;
+  const grid = dialog.querySelector('.sb-grid');
+  for (const p of matches) grid.appendChild(renderCard(p, { face: st.side }));
+  dialog.querySelector('.modal-x').addEventListener('click', close);
+  dialog.querySelectorAll('.sb-side').forEach((b) => b.addEventListener('click', () => { st.side = b.getAttribute('data-side'); sbRender(dialog, close); }));
+  // Each support is a filter button: tap to filter the whole deck to that one
+  // support type (replace, not stack).
+  dialog.querySelectorAll('.sb-filter-btn').forEach((b) => b.addEventListener('click', () => { st.filter = [b.getAttribute('data-k')]; sbRender(dialog, close); }));
 }
 
 // 🛒 Patent Market cart. Shown only in Card Market mode (the

@@ -2617,9 +2617,14 @@
   border-radius: 4px;
   border: 1px solid transparent;
 }
-.map-popup .t-tag-season-red    { background: rgba(248, 113, 113, 0.22); border-color: #f87171; color: #fecaca; }
+.map-popup .t-tag-season-red    { background: rgba(239, 68, 68, 0.22);  border-color: #ef4444; color: #fecaca; }
 .map-popup .t-tag-season-yellow { background: rgba(250, 204, 21, 0.22);  border-color: #facc15; color: #fde68a; }
 .map-popup .t-tag-season-blue   { background: rgba(96, 165, 250, 0.22);  border-color: #60a5fa; color: #bfdbfe; }
+.map-popup .t-tag-marker {
+  background: rgba(143, 166, 216, 0.18);
+  border-color: rgba(143, 166, 216, 0.6);
+  color: #c7d2fe;
+}
 .map-popup .t-tag-zone {
   background: rgba(148, 163, 184, 0.18);
   border-color: rgba(148, 163, 184, 0.6);
@@ -4565,11 +4570,19 @@ body:has(#view-browse:not(.hidden)) #main {
      transform-origin to default so the selected pop-up
      doesn't drift sideways. */
   .hand-quick-actions { display: none !important; }
+  /* On touch a :hover STICKS on the last-tapped card until you tap elsewhere.
+     Fully neutralise every hover effect here so a stuck hover leaves NO residue
+     - otherwise after you tap to unselect a card it stays popped over the fan
+     (z-index) with a shifted neighbour instead of dropping back into place.
+     Only .is-selected (toggled in JS) drives the selected look on touch. */
   .hand-slot:hover {
     transform: none;
     margin-right: -68px;
+    z-index: 1;
   }
-  .hand-slot:hover + .hand-slot { margin-left: 0; }
+  .hand-slot:hover + .hand-slot,
+  .hand-slot:hover + .hand-slot + .hand-slot { margin-left: 0; }
+  .hand-cards:hover .hand-slot:not(:hover) { z-index: 1; }
 
   /* Selected (active tap) state: raise + add the cyan ring +
      reveal the View button. Same idiom as the boost-marked
@@ -8216,6 +8229,9 @@ body:has(#view-browse:not(.hidden)) #main {
 .site-tag-chip.is-mine { border-color: var(--tag, #38bdf8); background: color-mix(in srgb, var(--tag, #38bdf8) 22%, #1a2138); }
 .site-tag-chip:hover, .site-tag-pick:hover { border-color: var(--tag, #38bdf8); }
 .site-tag-chip .site-tag-n { color: #8b90b8; font-weight: 700; }
+/* Read-only "server tags" chips: not clickable, dimmed, no hover affordance. */
+.site-tag-chip.is-server { cursor: default; opacity: 0.8; border-style: dashed; }
+.site-tag-chip.is-server:hover { border-color: #39406a; }
 .site-tag-pick { opacity: 0.85; }
 .site-tag-custom { display: flex; gap: 6px; margin-top: 8px; }
 .site-tag-custom input { flex: 1; min-width: 0; background: #0e1322; border: 1px solid #2c3658; border-radius: 6px; color: var(--ink); padding: 6px 8px; font: inherit; }

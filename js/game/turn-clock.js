@@ -55,7 +55,7 @@ export const SLOTS = 12;
 export const SEASONS = [
   { name: 'blue',   color: '#60a5fa', from: 10, to: 1, label: 'Season Blue'   },
   { name: 'yellow', color: '#facc15', from: 2,  to: 5, label: 'Season Yellow' },
-  { name: 'red',    color: '#f87171', from: 6,  to: 9, label: 'Season Red'   },
+  { name: 'red',    color: '#ef4444', from: 6,  to: 9, label: 'Season Red'   },
 ];
 export const NEW_ROUND_SLOT = 0;
 // Even slots. An event fires when the cube LANDS here; this is one slot

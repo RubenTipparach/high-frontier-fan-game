@@ -327,6 +327,24 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_site_annotations_site ON site_annotations(site_id);
   CREATE INDEX IF NOT EXISTS idx_site_annotations_author ON site_annotations(profile_id);
+
+  -- Admin-curated "server tags" for solar-map nodes: the canonical marker
+  -- flags (lander / half / hazard / aerobrake) an admin sets on a node from
+  -- the /admin/site-notes + /admin/site-tags pages. Distinct from the
+  -- player-submitted site_annotations ("what players think"): this is the
+  -- server's own authoritative marker tagging. Only EDITED nodes get a row,
+  -- so the /admin/site-tags export ships exactly these rows back to
+  -- data/node-tag-overrides.json for re-applying to git.
+  CREATE TABLE IF NOT EXISTS node_tags (
+    site_id    TEXT PRIMARY KEY,
+    site_name  TEXT,
+    lander     INTEGER NOT NULL DEFAULT 0,
+    half       INTEGER NOT NULL DEFAULT 0,
+    hazard     INTEGER NOT NULL DEFAULT 0,
+    aerobrake  INTEGER NOT NULL DEFAULT 0,
+    season     TEXT,
+    updated_at INTEGER NOT NULL
+  );
 `);
 
 // Idempotent column adds for tables that predate a column. better-sqlite3
@@ -368,6 +386,10 @@ ensureColumn('lobbies', 'cancelled_at', 'cancelled_at INTEGER');
 ensureColumn('lobbies', 'idempotency_key', 'idempotency_key TEXT');
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_lobbies_idem
   ON lobbies(idempotency_key) WHERE idempotency_key IS NOT NULL;`);
+// node_tags predates the synodic-season column on DBs that created the table
+// before seasons shipped; add it idempotently. A space's season ('red' /
+// 'yellow' / 'blue', or NULL) gates which Sunspot Cycle phase it can be entered.
+ensureColumn('node_tags', 'season', 'season TEXT');
 
 export function nowMs() {
   return Date.now();

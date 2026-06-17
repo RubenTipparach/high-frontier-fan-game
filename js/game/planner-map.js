@@ -37,6 +37,7 @@ import { ZONE_ASSIGNMENTS } from '../../data/zones.js';
 // Don't re-implement these here - a local copy would silently drift and
 // break move validation.
 import { makeRefId, normalizeSiteName } from '../../data/planner-ids.js';
+import { classifyBody } from '../../data/body-class.js';
 const LOCAL_SITE_BY_NAME = new Map();
 for (const s of LOCAL_SITES) {
   if (s && s.name) LOCAL_SITE_BY_NAME.set(normalizeSiteName(s.name), s);
@@ -311,22 +312,6 @@ function routingLabel(type) {
 //   planet | dwarf | moon | comet | asteroid (default).
 // Planner data flattens every game destination to type='site', so
 // we use name prefixes / substrings to recover the body class.
-const GAS_GIANT_KEYS = ['jupiter', 'saturn', 'uranus', 'neptune'];
-const INNER_PLANET_KEYS = ['mercury', 'venus', 'earth', 'mars', 'luna'];
-const PLANET_KEYS = [...GAS_GIANT_KEYS, ...INNER_PLANET_KEYS];
-const DWARF_KEYS = [
-  'pluto', 'ceres', 'eris', 'sedna', 'makemake',
-  'haumea', 'orcus', 'quaoar', 'gonggong',
-];
-const MOON_KEYS = [
-  'luna', 'phobos', 'deimos',
-  'io ', 'europa', 'ganymede', 'callisto',
-  'titan', 'enceladus', 'iapetus', 'rhea', 'mimas',
-  'hyperion', 'dione', 'tethys', 'phoebe',
-  'charon', 'nix', 'hydra',
-  'miranda', 'ariel', 'umbriel', 'titania', 'oberon',
-  'triton', 'nereid', 'proteus',
-];
 // Resolve site flags by exact site-name match first, then by body
 // group (so a "Mars: ..." surface site picks up any Mars-group
 // flags even if its own row doesn't carry them).
@@ -343,17 +328,6 @@ function lookupFlags(siteName, flagsDoc) {
   return empty;
 }
 
-function classifyBody(name) {
-  const n = (name || '').toLowerCase();
-  if (!n) return 'site';
-  if (n.startsWith('comet')) return 'comet';
-  for (const k of GAS_GIANT_KEYS)  if (n.startsWith(k)) return 'gas-giant';
-  for (const k of INNER_PLANET_KEYS) if (n.startsWith(k)) return 'inner-planet';
-  for (const k of DWARF_KEYS)  if (n.includes(k))  return 'dwarf';
-  for (const k of MOON_KEYS)   if (n.includes(k))  return 'moon';
-  return 'asteroid';
-}
-
 // bodyKey clusters all sites that belong to the same celestial
 // body. "Mars: north pole" and "Mars: Hellas Basin" both have
 // bodyKey 'mars'. Used by the renderer to draw a single shared
@@ -361,6 +335,11 @@ function classifyBody(name) {
 function bodyKeyFor(site) {
   const n = (site.name || '').toLowerCase();
   if (!n || site.isWaypoint) return null;
+  // Synthetic flavour bodies (Sun / Earth / Jupiter / Venus) stand alone - never
+  // cluster them with a surface site that merely shares a name word (e.g. the
+  // Venus planet body vs "Venus Aerostat-Xity"), which would draw the shared
+  // halo at the cluster centroid instead of on the body's own node.
+  if (typeof site.id === 'string' && site.id.startsWith('synthetic_')) return null;
   // Strip ":" or "-" suffixes and take the first word as the key.
   const first = n.replace(/[:\-].*$/, '').split(/\s+/)[0];
   return first || null;
@@ -396,6 +375,18 @@ function synthesizeBodies(sites, viewW, viewH) {
       nx: 0.337, ny: 0.429,
     },
   ];
+  // Venus is a flavour planet too, anchored on its flyby node (the planner's
+  // single `venus`-type node, id2 venus-2lgjk) so it follows the data.
+  const venusNode = sites.find((s) => s.type === 'venus');
+  if (venusNode) {
+    synthetics.push({
+      id: 'synthetic_venus',
+      name: 'Venus',
+      type: 'inner-planet',
+      nx: venusNode.x / viewW,
+      ny: venusNode.y / viewH,
+    });
+  }
   for (const s of synthetics) {
     sites.push({
       id: s.id,
