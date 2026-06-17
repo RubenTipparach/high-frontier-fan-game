@@ -2735,6 +2735,10 @@ export class MapRenderer {
       ctx.beginPath();
       ctx.arc(sx, sy, rad, 0, Math.PI * 2);
       ctx.fill();
+      // Lagrange-colour outline so flyby spots read as the same family of node.
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = '#c66932';
+      ctx.stroke();
       ctx.fillStyle = '#ffffff';
       ctx.fillText(txt, sx, sy + 0.5);
     }
