@@ -7211,6 +7211,19 @@ function manualHopCost(tipId, toId) {
   if (toNode.isLandable === false) {
     return { ok: false, reason: `can't land on ${esc(toNode.name || toId)}` };
   }
+  // Synodic-season gate: a seasonal space is only on the board during its
+  // Sunspot phase, so off-season it can't be entered by hand either (mirrors
+  // the auto-planner's seasonBlocked). Returning !ok here both drops the node
+  // from the reachable glow and rejects a tap with the reason.
+  const toSeason = (NODE_TAGS[toNode.id2] && NODE_TAGS[toNode.id2].season) || toNode.siteSynodic || null;
+  if (toSeason) {
+    let nowSeason = null;
+    try { nowSeason = getSeason()?.name || null; } catch { nowSeason = null; }
+    if (nowSeason && toSeason !== nowSeason) {
+      const cap = toSeason[0].toUpperCase() + toSeason.slice(1);
+      return { ok: false, reason: `${esc(toNode.name || toId)} is a ${toSeason}-season space (only enterable in Season ${cap}; the Sunspot Cube is in ${nowSeason} now)` };
+    }
+  }
   // Adjacency runs over the contracted graph (decorative bends collapsed).
   const entry = meaningfulNeighbors(tipId).find((e) => e.id === toId);
   if (!entry) {
