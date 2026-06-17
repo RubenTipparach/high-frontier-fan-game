@@ -5,7 +5,8 @@
   "description": "Static frontend build (esbuild) for High Frontier fan game.",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "check": "node scripts/check-boot.mjs"
+    "check": "node scripts/check-boot.mjs",
+    "icons": "node scripts/gen-map-icons.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.24.2"

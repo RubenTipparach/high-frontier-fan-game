@@ -12,10 +12,16 @@
 // scripts/screenshot.mjs for the environment notes.
 
 import { createRequire } from 'node:module';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
+
+// Managed sandboxes keep the Playwright browsers at /opt/pw-browsers; default to
+// it when the env var isn't set so `npm run icons` works without a prefix.
+if (!process.env.PLAYWRIGHT_BROWSERS_PATH && existsSync('/opt/pw-browsers')) {
+  process.env.PLAYWRIGHT_BROWSERS_PATH = '/opt/pw-browsers';
+}
 
 function loadPlaywright() {
   const req = createRequire(import.meta.url);
