@@ -115,6 +115,7 @@ export const NODE_TAGS = {
   "lag-fr8bt": {"hazard":true},
   "lag-gqofs": {"hazard":true},
   "lag-hqf9g": {"hazard":true},
+  "lag-hx2fh": {"hazard":true},
   "lag-hzit6": {"hazard":true,"season":"blue"},
   "lag-ibzms": {"hazard":true},
   "lag-iue9q": {"hazard":true},
