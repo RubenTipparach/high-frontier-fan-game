@@ -37,6 +37,7 @@ import { ZONE_ASSIGNMENTS } from '../../data/zones.js';
 // Don't re-implement these here - a local copy would silently drift and
 // break move validation.
 import { makeRefId, normalizeSiteName } from '../../data/planner-ids.js';
+import { classifyBody } from '../../data/body-class.js';
 const LOCAL_SITE_BY_NAME = new Map();
 for (const s of LOCAL_SITES) {
   if (s && s.name) LOCAL_SITE_BY_NAME.set(normalizeSiteName(s.name), s);
@@ -311,22 +312,6 @@ function routingLabel(type) {
 //   planet | dwarf | moon | comet | asteroid (default).
 // Planner data flattens every game destination to type='site', so
 // we use name prefixes / substrings to recover the body class.
-const GAS_GIANT_KEYS = ['jupiter', 'saturn', 'uranus', 'neptune'];
-const INNER_PLANET_KEYS = ['mercury', 'venus', 'earth', 'mars', 'luna'];
-const PLANET_KEYS = [...GAS_GIANT_KEYS, ...INNER_PLANET_KEYS];
-const DWARF_KEYS = [
-  'pluto', 'ceres', 'eris', 'sedna', 'makemake',
-  'haumea', 'orcus', 'quaoar', 'gonggong',
-];
-const MOON_KEYS = [
-  'luna', 'phobos', 'deimos',
-  'io ', 'europa', 'ganymede', 'callisto',
-  'titan', 'enceladus', 'iapetus', 'rhea', 'mimas',
-  'hyperion', 'dione', 'tethys', 'phoebe',
-  'charon', 'nix', 'hydra',
-  'miranda', 'ariel', 'umbriel', 'titania', 'oberon',
-  'triton', 'nereid', 'proteus',
-];
 // Resolve site flags by exact site-name match first, then by body
 // group (so a "Mars: ..." surface site picks up any Mars-group
 // flags even if its own row doesn't carry them).
@@ -341,17 +326,6 @@ function lookupFlags(siteName, flagsDoc) {
     if (flagsDoc.groups && flagsDoc.groups[grp]) return flagsDoc.groups[grp];
   }
   return empty;
-}
-
-function classifyBody(name) {
-  const n = (name || '').toLowerCase();
-  if (!n) return 'site';
-  if (n.startsWith('comet')) return 'comet';
-  for (const k of GAS_GIANT_KEYS)  if (n.startsWith(k)) return 'gas-giant';
-  for (const k of INNER_PLANET_KEYS) if (n.startsWith(k)) return 'inner-planet';
-  for (const k of DWARF_KEYS)  if (n.includes(k))  return 'dwarf';
-  for (const k of MOON_KEYS)   if (n.includes(k))  return 'moon';
-  return 'asteroid';
 }
 
 // bodyKey clusters all sites that belong to the same celestial

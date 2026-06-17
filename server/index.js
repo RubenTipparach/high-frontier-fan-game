@@ -24,10 +24,12 @@ import { siteBySlug } from './game/planner-graph.js';
 import { PATENTS_BY_ID } from '../data/patents.js';
 import { normaliseTag } from '../data/site-tags.js';
 import { NODE_TAGS as STATIC_NODE_TAGS } from '../data/node-tags.js';
+import { makeRefId, disambiguate } from '../data/planner-ids.js';
+import { classifyBody } from '../data/body-class.js';
 
 // Snapshot of every marker-relevant solar-map node (id2 + type + planner
 // flags), the same file gen-node-tags.mjs reads. Used by the admin site-tags
-// search so an admin can tag ANY node, not only ones players already noted.
+// search so an admin can tag ANY routing node, not only ones players noted.
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let PLANNER_NODES = [];
 try {
@@ -35,6 +37,25 @@ try {
     readFileSync(resolve(__dirname, '..', 'data', 'planner-nodes.json'), 'utf8')
   );
 } catch { PLANNER_NODES = []; }
+
+// Every NAMED site (planet / asteroid / moon / comet / dwarf) from the planner
+// data, so the admin site-tags page can search + tag actual sites, not just
+// routing waypoints. The id2 slug is derived the SAME way planner-map.js does
+// (makeRefId + disambiguate in point order), so it matches the slug the client
+// tags with. The Docker image copies vendor/ to the server (server/Dockerfile),
+// so this file is present at runtime.
+let NAMED_SITES = [];
+try {
+  const raw = JSON.parse(readFileSync(
+    resolve(__dirname, '..', 'vendor', 'hf-mission-planner', 'assets', 'data-hf4.json'), 'utf8'));
+  const entries = Object.entries(raw.points || {});
+  const ids = disambiguate(entries.map(([, p]) => makeRefId(p, p.type || 'unknown')));
+  entries.forEach(([, p], i) => {
+    if (p.type === 'site' && p.siteName) {
+      NAMED_SITES.push({ id2: ids[i], name: p.siteName, type: classifyBody(p.siteName) });
+    }
+  });
+} catch { NAMED_SITES = []; }
 import {
   sendDM, discordEnabled,
   sendWebhook, webhookEnabled, isWebhookUrl, defaultWebhookUrl,
@@ -2992,13 +3013,16 @@ app.get('/admin/site-tags', (req, res) => {
   const q = String(req.query.q || '').trim().toLowerCase().slice(0, 40);
   let page = Math.max(0, parseInt(req.query.page, 10) || 0);
 
-  // Name hints from existing annotations + overrides; node types from the snapshot.
+  // Name + type for the searchable nodes: NAMED_SITES (planets / asteroids /
+  // comets) as the base, then any names players / admins gave via annotations.
   const nameById = new Map();
+  const typeById = new Map();
+  for (const s of NAMED_SITES) { nameById.set(s.id2, s.name); typeById.set(s.id2, s.type); }
+  for (const n of PLANNER_NODES) typeById.set(n.id2, n.type);
   for (const r of db.prepare(`SELECT site_id, site_name FROM site_annotations WHERE site_name IS NOT NULL`).all())
     if (!nameById.has(r.site_id)) nameById.set(r.site_id, r.site_name);
   for (const r of db.prepare(`SELECT site_id, site_name FROM node_tags WHERE site_name IS NOT NULL`).all())
     nameById.set(r.site_id, r.site_name);
-  const typeById = new Map(PLANNER_NODES.map((n) => [n.id2, n.type]));
 
   const editedIds = db.prepare(`SELECT site_id FROM node_tags ORDER BY site_id ASC`).all().map((r) => r.site_id);
 
@@ -3026,13 +3050,17 @@ app.get('/admin/site-tags', (req, res) => {
     return true;
   };
 
-  // Candidate universe: every planner node id, plus any annotation / override id
-  // not in the snapshot. Empty query = browse them all (paginated).
+  // Candidate universe: every routing node + every named site, plus any
+  // annotation / override id not in either. Empty query = browse them all.
   const seen = new Set();
   const allIds = [];
   for (const n of PLANNER_NODES) if (!seen.has(n.id2)) { allIds.push(n.id2); seen.add(n.id2); }
+  for (const s of NAMED_SITES) if (!seen.has(s.id2)) { allIds.push(s.id2); seen.add(s.id2); }
   for (const id of nameById.keys()) if (!seen.has(id)) { allIds.push(id); seen.add(id); }
-  const matchIds = (q ? allIds.filter((id) => id.toLowerCase().includes(q)) : allIds).filter(passesFilter).sort();
+  // Search matches the node id OR its name (so "mars" finds "Mars: Arsia Mons").
+  const matchIds = (q
+    ? allIds.filter((id) => id.toLowerCase().includes(q) || (nameById.get(id) || '').toLowerCase().includes(q))
+    : allIds).filter(passesFilter).sort();
 
   const PAGE_SIZE = 50;
   const total = matchIds.length;
@@ -3089,7 +3117,7 @@ button{cursor:pointer}.dl{margin:10px 0;display:flex;gap:14px;align-items:center
 <div class="dl"><a href="/admin/site-tags/export.json">⬇ Export edited server tags (JSON)</a> <a href="/admin/site-notes">← site notes</a> <a href="/admin">← dashboard</a></div>
 <p class="muted">Re-apply to git: save the export as <code>data/node-tag-overrides.json</code>, run <code>node scripts/gen-node-tags.mjs</code>, then commit <code>data/node-tags.js</code>.</p>
 <form class="search" method="get" action="/admin/site-tags">
-  <input name="q" value="${esc(q)}" placeholder="filter by node id (e.g. burn-0hh45, lag-); blank = all" autofocus>
+  <input name="q" value="${esc(q)}" placeholder="search by id or name (e.g. mars, icarus, ceres, burn-0hh45); blank = all" autofocus>
   <button>Search</button>${q ? ' <a href="/admin/site-tags">clear</a>' : ''}</form>
 ${editedBlock}
 ${browseBlock}
