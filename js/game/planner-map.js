@@ -361,6 +361,11 @@ function classifyBody(name) {
 function bodyKeyFor(site) {
   const n = (site.name || '').toLowerCase();
   if (!n || site.isWaypoint) return null;
+  // Synthetic flavour bodies (Sun / Earth / Jupiter / Venus) stand alone - never
+  // cluster them with a surface site that merely shares a name word (e.g. the
+  // Venus planet body vs "Venus Aerostat-Xity"), which would draw the shared
+  // halo at the cluster centroid instead of on the body's own node.
+  if (typeof site.id === 'string' && site.id.startsWith('synthetic_')) return null;
   // Strip ":" or "-" suffixes and take the first word as the key.
   const first = n.replace(/[:\-].*$/, '').split(/\s+/)[0];
   return first || null;
