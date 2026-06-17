@@ -3558,6 +3558,9 @@ export class MapRenderer {
       const gx = sx;
       const gy = py + h * 0.42;
       ctx.save();
+      // Semi-transparent (~50%) so the stack underneath stays visible through
+      // the glitch token instead of being fully masked.
+      ctx.globalAlpha = 0.5;
       ctx.beginPath();
       ctx.arc(gx, gy, gr, 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(220, 38, 38, 0.94)';
