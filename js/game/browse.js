@@ -16873,10 +16873,11 @@ export function openPatentsSupports(kinds) {
 }
 
 // Support browser modal. Tapping a support icon opens this instead of the
-// library: a grid of every card that SUPPLIES the tapped support, with a
+// library: a grid of every card that SUPPLIES that one support, with a
 // WHITE-side / BLACK-side toggle (cards render on the chosen face; never a mix).
-// Tapping a support icon in the modal adds it to an AND filter, narrowing the
-// grid. The seed kinds form one OR-group (a reactor chip = any reactor).
+// The support icons in the modal act as FILTER buttons - tapping one filters
+// the whole deck to that single support type (a plain replace, no stacking /
+// narrowing). The seed kinds form one OR-group (a reactor chip = any reactor).
 let _sbState = null;
 function sbSuppliesOf(p, side) {
   const f = p.faces && p.faces[side];
@@ -16885,8 +16886,8 @@ function sbSuppliesOf(p, side) {
 export function openSupportBrowser(kinds) {
   document.querySelector('.support-browser-overlay')?.remove();
   _sbState = {
-    groups: (kinds && kinds.length) ? [Array.from(new Set(kinds))] : [],
-    side: 'secondary',   // default to the black / installed face
+    filter: (kinds && kinds.length) ? Array.from(new Set(kinds)) : [],
+    side: 'primary',   // default to the white face
   };
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay support-browser-overlay';
@@ -16904,16 +16905,12 @@ export function openSupportBrowser(kinds) {
 function sbRender(dialog, close) {
   const st = _sbState;
   const sideWord = st.side === 'primary' ? 'white' : 'black';
-  const matches = PATENTS.filter((p) => {
-    const sup = new Set(sbSuppliesOf(p, st.side));
-    return st.groups.every((g) => g.some((k) => sup.has(k)));
-  });
-  const activeChips = st.groups.length
-    ? st.groups.map((g, i) =>
-        `<button type="button" class="sb-active" data-rm="${i}" title="Remove this filter">${g.map(supportKindGlyphHtml).join('')}<span class="sb-x">×</span></button>`).join('')
-    : '<span class="muted">every supplier</span>';
-  const addRow = listSupplyKinds().map((k) =>
-    `<button type="button" class="sb-add" data-add="${esc(k)}" title="${esc(k)}">${supportKindGlyphHtml(k)}</button>`).join('');
+  const filterSet = new Set(st.filter);
+  const matches = st.filter.length
+    ? PATENTS.filter((p) => sbSuppliesOf(p, st.side).some((k) => filterSet.has(k)))
+    : [];
+  const filterRow = listSupplyKinds().map((k) =>
+    `<button type="button" class="sb-filter-btn${filterSet.has(k) ? ' is-on' : ''}" data-k="${esc(k)}" title="${esc(k)}">${supportKindGlyphHtml(k)}</button>`).join('');
   dialog.innerHTML = `
     <div class="sb-head">
       <h3>🔌 Cards that supply</h3>
@@ -16924,20 +16921,17 @@ function sbRender(dialog, close) {
       <button class="modal-x" type="button" aria-label="Close">✕</button>
     </div>
     <div class="sb-filter">
-      <div class="sb-row"><span class="sb-lbl">${sideWord}-side supplies:</span><div class="sb-active-row">${activeChips}</div></div>
-      <div class="sb-row"><span class="sb-lbl">add a support to narrow:</span><div class="sb-add-row">${addRow}</div></div>
+      <span class="sb-lbl">Filter by support (${sideWord} side):</span>
+      <div class="sb-filter-row">${filterRow}</div>
     </div>
-    <div class="sb-grid">${matches.length ? '' : `<p class="muted">No card's ${sideWord} side supplies all of those. Try the other side or remove a filter.</p>`}</div>`;
+    <div class="sb-grid">${matches.length ? '' : `<p class="muted">Pick a support to see which cards' ${sideWord} side supplies it.</p>`}</div>`;
   const grid = dialog.querySelector('.sb-grid');
   for (const p of matches) grid.appendChild(renderCard(p, { face: st.side }));
   dialog.querySelector('.modal-x').addEventListener('click', close);
   dialog.querySelectorAll('.sb-side').forEach((b) => b.addEventListener('click', () => { st.side = b.getAttribute('data-side'); sbRender(dialog, close); }));
-  dialog.querySelectorAll('.sb-active').forEach((b) => b.addEventListener('click', () => { st.groups.splice(Number(b.getAttribute('data-rm')), 1); sbRender(dialog, close); }));
-  dialog.querySelectorAll('.sb-add').forEach((b) => b.addEventListener('click', () => {
-    const k = b.getAttribute('data-add');
-    if (!st.groups.some((g) => g.length === 1 && g[0] === k)) st.groups.push([k]);
-    sbRender(dialog, close);
-  }));
+  // Each support is a filter button: tap to filter the whole deck to that one
+  // support type (replace, not stack).
+  dialog.querySelectorAll('.sb-filter-btn').forEach((b) => b.addEventListener('click', () => { st.filter = [b.getAttribute('data-k')]; sbRender(dialog, close); }));
 }
 
 // 🛒 Patent Market cart. Shown only in Card Market mode (the
