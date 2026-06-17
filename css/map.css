@@ -8216,6 +8216,9 @@ body:has(#view-browse:not(.hidden)) #main {
 .site-tag-chip.is-mine { border-color: var(--tag, #38bdf8); background: color-mix(in srgb, var(--tag, #38bdf8) 22%, #1a2138); }
 .site-tag-chip:hover, .site-tag-pick:hover { border-color: var(--tag, #38bdf8); }
 .site-tag-chip .site-tag-n { color: #8b90b8; font-weight: 700; }
+/* Read-only "server tags" chips: not clickable, dimmed, no hover affordance. */
+.site-tag-chip.is-server { cursor: default; opacity: 0.8; border-style: dashed; }
+.site-tag-chip.is-server:hover { border-color: #39406a; }
 .site-tag-pick { opacity: 0.85; }
 .site-tag-custom { display: flex; gap: 6px; margin-top: 8px; }
 .site-tag-custom input { flex: 1; min-width: 0; background: #0e1322; border: 1px solid #2c3658; border-radius: 6px; color: var(--ink); padding: 6px 8px; font: inherit; }

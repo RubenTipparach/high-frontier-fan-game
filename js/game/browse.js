@@ -5345,6 +5345,24 @@ function openSiteNotesModal(siteId, siteName) {
   };
   const refetch = async () => apply(await getSiteAnnotations(siteId, token));
 
+  // "Server tags" = what the map DATA classifies this node as (its planner
+  // flags), shown alongside the player tags so the two can be compared. The
+  // player tags drive the actual map markers (data/node-tags.js); this is the
+  // read-only data view.
+  const serverNode = (_activeData && _activeData.sites)
+    ? _activeData.sites.find((s) => s.id2 === siteId) : null;
+  const serverTagLabels = [];
+  if (serverNode) {
+    if (serverNode.landing != null) serverTagLabels.push(serverNode.landing < 1 ? 'half-lander-burn' : 'lander-burn');
+    if (serverNode.hazard) serverTagLabels.push('hazard');
+    if (serverNode.type === 'venus') serverTagLabels.push('venus flyby');
+    else if (serverNode.flybyBoost != null) serverTagLabels.push('flyby +' + (serverNode.flybyBoost === 'thrust' ? 'T' : serverNode.flybyBoost));
+    if (serverNode.type === 'radhaz') serverTagLabels.push('radiation');
+  }
+  const serverChips = serverTagLabels.length
+    ? serverTagLabels.map((l) => `<span class="site-tag-chip is-server" style="--tag:#8fa6d8"><span class="site-tag-dot"></span>${esc(l)}</span>`).join('')
+    : '<span class="muted">none</span>';
+
   function render() {
     const tagChips = state.tags.map((t) => {
       const d = tagDisplay(t.tag);
@@ -5357,7 +5375,11 @@ function openSiteNotesModal(siteId, siteName) {
       : '<li class="muted">No messages yet.</li>';
     body.innerHTML = `
       <div class="site-notes-sec">
-        <h4>Tags <span class="muted">(tap yours to remove)</span></h4>
+        <h4>Server tags <span class="muted">(what the map data says)</span></h4>
+        <div class="site-tags-row">${serverChips}</div>
+      </div>
+      <div class="site-notes-sec">
+        <h4>Player tags <span class="muted">(tap yours to remove)</span></h4>
         <div class="site-tags-row">${tagChips || '<span class="muted">No tags yet.</span>'}</div>
         <h5>Add a tag</h5>
         <div class="site-tags-row site-tags-pick">${quick}</div>
