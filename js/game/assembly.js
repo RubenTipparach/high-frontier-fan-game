@@ -156,14 +156,22 @@ export function renderAssemblyPanel({
   // Delegate cubes live anywhere on the cell (no fixed slot): drop the iso-cubes
   // near `pt` in seat colours; nothing when empty. Drawn at 2x size. Cubes added
   // since the last render of this variant (index >= the previous count) drop in.
+  // Up to 6 cubes pack into a centred 3-wide grid: each row is centred on `pt`
+  // by its own cube count and the whole stack is centred vertically, so a lone
+  // starter cube sits dead-centre in its wedge instead of drifting up-and-left
+  // (which pushed the top wedge's cube out past the edge).
   const drawCubes = (parent, pt, list, glow, placeKey) => {
     const cubes = Array.isArray(list) ? list : [];
     counts[placeKey] = cubes.length;
     if (!cubes.length) return;
     const prevN = prev && prev.counts ? (prev.counts[placeKey] | 0) : null;
+    const shown = Math.min(cubes.length, 6);
+    const rows = Math.ceil(shown / 3);
     cubes.slice(0, 6).forEach((col, i) => {
-      const ox = pt.x - 20 + (i % 3) * 20;
-      const oy = pt.y - 8 + Math.floor(i / 3) * 22;
+      const row = Math.floor(i / 3);
+      const inThisRow = Math.min(3, shown - row * 3);
+      const ox = pt.x + ((i % 3) - (inThisRow - 1) / 2) * 20;
+      const oy = pt.y + (row - (rows - 1) / 2) * 20;
       // When this space's cubes are "selectable" (the Fundraise move origin),
       // wrap them so a blue glow marks the cube itself as the click target.
       const host = glow ? svg('g', { class: 'assembly-cube-glow' }, parent) : parent;
@@ -244,7 +252,7 @@ export function renderAssemblyPanel({
     drawDiscs(cell, { x: lab.x, y: lab.y + 6 }, seniority && seniority[key]);
     const t = svg('text', { x: lab.x, y: lab.y, class: 'assembly-wedge-label', 'text-anchor': 'middle', 'dominant-baseline': 'middle' }, cell);
     t.textContent = ide.name.toUpperCase();
-    const slot = polar(C.x, C.y, R - 34, cA);
+    const slot = polar(C.x, C.y, R - 40, cA);
     slots[key] = slot;
     drawCubes(cell, slot, delegates && delegates[key], glowSet.has(key), key);
     wireCell(cell, key);

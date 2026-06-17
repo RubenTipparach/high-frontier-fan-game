@@ -234,8 +234,10 @@
   font-size: 19.5px;
   font-variant-numeric: tabular-nums;
 }
-.card-spectral { margin-left: auto; line-height: 0; }
-.spectral-hex { width: 33px; height: 39px; }
+.card-spectral { margin-left: auto; line-height: 0; display: inline-flex; align-items: flex-end; gap: 4px; }
+.spectral-hex { width: 42px; height: 50px; }
+/* Promotion colony dome sits next to the spectral hex (front face only). */
+.colony-dome-glyph { width: 40px; height: 39px; margin-bottom: 4px; }
 
 .card-body {
   display: flex;
@@ -563,6 +565,55 @@
   color: var(--ink-dim);
   line-height: 1.35;
 }
+/* Future mission: the end-game objective on the Tier-2 (purple) side, rendered
+   as a blue callout with the mission name emphasised. Kept compact so it fits
+   the fixed card height alongside a thrust triangle. */
+.card-future {
+  margin: 1px 0 0;
+  font-size: 8.5px;
+  line-height: 1.25;
+  color: #6cc6ff;
+  border-top: 1px solid rgba(108, 198, 255, 0.35);
+  padding-top: 3px;
+}
+.card-future-head {
+  font-weight: 800;
+  color: #9bd7ff;
+  letter-spacing: 0.2px;
+}
+/* GW Thruster / Freighter faces carry an extra block (the future), so tighten
+   the body's vertical rhythm a touch to make room within the fixed height. */
+.card.type-gw-thruster .card-body,
+.card.type-freighter .card-body { gap: 4px; }
+/* On the GW purple (TW) back the FULL-SIZE thrust triangle shifts right and the
+   future fills the column on the LEFT. The triangle's SVG has transparent side
+   margins (the gold is only ~64% of its width), so nudging it right frees a
+   clean left column WITHOUT shrinking the triangle or overlapping the gold. */
+/* Let the thrust area span the full card so the future has the left half; keep
+   the triangle itself at its FULL size (its 130px box) but pin it to the RIGHT.
+   The triangle only fills ~130px of the card, so this frees the left half for
+   the future WITHOUT shrinking or overlapping the gold. */
+.card.type-gw-thruster .card-face[data-face="secondary"] .card-thrust {
+  position: relative;
+  max-width: none;
+}
+.card.type-gw-thruster .card-face[data-face="secondary"] .thrust-visual {
+  max-width: 130px;
+  margin-left: auto;
+  transform: translateX(13px);
+}
+.card-future-side {
+  position: absolute;
+  left: -2px;
+  top: 4px;
+  width: 51%;
+  margin: 0;
+  padding: 1px 6px 0 0;
+  border-top: none;
+  text-align: left;
+  font-size: 7px;
+  line-height: 1.25;
+}
 
 /* Footer is now just a small reserved strip at the bottom of
    the card for the Flip button (and future per-card actions).
@@ -791,12 +842,36 @@
   pointer-events: none;
 }
 
-/* GW thrusters burn isotope (ISO) fuel; the published cards mark that
-   class in gold. Outline both faces in gold so the ISO-fuel thruster
-   reads at a glance, front and back. */
-.card.type-gw-thruster .card-face {
-  border-color: #d4af37;
-  border-width: 2px;
+/* GW Thrusters and Freighters share one published-card look: a BLACK front
+   face and a PURPLE radial-gradient back inside a thick purple frame. The
+   coloured typebar (GW = isotope orange, Freighter = blue) and, on GW, the
+   gold thrust triangle + fuel droplet tell the two card types apart. */
+.card.type-gw-thruster .card-typebar { background: var(--card-gw-thruster, #ca6c18); color: #fff; }
+.card.type-freighter   .card-typebar { background: var(--card-freighter, #00aeef); color: #fff; }
+/* Front (the white-side slot) is black with light ink, not the parchment look. */
+.card.type-gw-thruster .card-face[data-face="primary"],
+.card.type-freighter   .card-face[data-face="primary"] {
+  --ink: #f3f4fa;
+  --ink-dim: #b9bedd;
+  --ink-mute: #8b90b8;
+  --border: #1c1a2a;
+  --accent: #7dd3fc;
+  --accent-2: #38bdf8;
+  --bg-2: #08080e;
+}
+.card.type-gw-thruster .card-face[data-face="primary"]   .thrust-svg,
+.card.type-freighter   .card-face[data-face="primary"]   .thrust-svg { color: #ffffff; }
+/* Back (the black-side slot) is a radial purple wash inside a thick purple frame.
+   Lighten the dim/mute inks so labels (e.g. SUPPORTS REQUIRED, Thrust, Fuel) read
+   against the purple instead of the dark default ink-mute. */
+.card.type-gw-thruster .card-face[data-face="secondary"],
+.card.type-freighter   .card-face[data-face="secondary"] {
+  background: radial-gradient(circle at 50% 44%, #655ca8 0%, #652d91 100%);
+  border-color: #92278f;
+  border-width: 3px;
+  --ink: #f4f1ff;
+  --ink-dim: #d6d0f0;
+  --ink-mute: #b8aeda;
 }
 
 /* Radiator Light/Heavy toggle row under the name. Replaces

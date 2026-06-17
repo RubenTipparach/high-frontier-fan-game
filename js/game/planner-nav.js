@@ -225,8 +225,13 @@ export function buildPlanner(graph, {
     // dir to null so the rocket can pivot freely next turn -
     // exactly the "Hohmann stop to pivot" rule the user called out.
     // Free pivots are a per-turn pool, so they refill on the wait.
-    if (!wait && (points[node]?.type === 'hohmann'
-        || ((points[node]?.type === 'burn' || points[node]?.type === 'lagrange') && burnsRemaining === 0))) {
+    // EXCEPT a LANDER burn (a burn node carrying a `landing`, drawn with the 🚀
+    // glyph): a landing must finish inside one turn, so you can never pause
+    // partway down it. Regular deep-space burns (landing == null) still may.
+    const waitPoint = points[node];
+    const isLanderBurn = waitPoint?.type === 'burn' && waitPoint.landing != null;
+    if (!wait && !isLanderBurn && (waitPoint?.type === 'hohmann'
+        || ((waitPoint?.type === 'burn' || waitPoint?.type === 'lagrange') && burnsRemaining === 0))) {
       ns.push({ node, dir: null, bonus: 0, wait: true, burnsRemaining: thrust, pivots: freePivots });
     }
     // Move to a neighbour (non-Hohmann-pivot path).

@@ -23,7 +23,7 @@ import {
   prospect as soloProspect, endRound as soloEndRound,
   bindData as soloBindData, onChange as soloOnChange, SOLO_CONFIG,
 } from './solo.js';
-import { PATENTS, PATENTS_BY_ID, PATENT_TYPES, patentsByType, radiatorRadHardness } from '../../data/patents.js';
+import { PATENTS, PATENTS_BY_ID, PATENT_TYPES, patentsByType, radiatorRadHardness, isExpansionType } from '../../data/patents.js';
 import {
   getHandSlots, isInHand, addToHand, removeFromHandAt, removeFromHand,
   clearHand, onHandChange,
@@ -3229,17 +3229,39 @@ function syncMpTabVisibility() {
   if (!_online && panel.dataset.active === 'mp') showPane(null);
 }
 
-// The politics tab icon (temple) is tinted to the ACTIVE LAW's ideology colour
-// so the strip shows which law is in power at a glance; neutral when there's no
-// ideology law (Centrist / none). Outline is black when the tab is selected (it
-// sits on the bright accent) and white when not (on the dark strip).
+// The politics tab icon (temple) is tinted to the ACTIVE LAW's colour so the
+// strip shows which law is in power at a glance: an ideology's colour when it
+// holds the star, else WHITE for Centrist - which IS the no-ideology-law
+// baseline (matching the white center hex). There is no separate "no law"
+// colour; the star always rests on Centrist or an ideology. Outline is black
+// when the tab is selected (it sits on the bright accent), white when not.
 function activeLawColor(snapshot) {
   const star = snapshot && snapshot.activeLawStar;
   const ide = star && star !== 'centrist' && ASSEMBLY_IDEOLOGY_BY_KEY[star];
-  return ide ? ide.color : '#9aa3c0';
+  return ide ? ide.color : '#f3f4fa';   // Centrist / none = no ideology law = white
 }
-function assemblyTabIconSvg(color, selected) {
-  const edge = selected ? '#04121f' : '#ffffff';
+// The active law's initial (F/H/U/A/E/I) drawn in front of the temple, so the
+// grey-family laws (Honor, Individuality) are told apart at a glance even when
+// their tints are close. Empty for Centrist / no star: a white temple with NO
+// letter reads as "no ideology law in power".
+function activeLawLetter(snapshot) {
+  const star = snapshot && snapshot.activeLawStar;
+  if (!star || star === 'centrist') return '';
+  return ((ASSEMBLY_IDEOLOGY_BY_KEY[star] || {}).name || star).charAt(0).toUpperCase();
+}
+function assemblyTabIconSvg(color, selected, letter) {
+  // Always a dark outline (no white halo) - it defines the temple on the bright
+  // accent when selected and the badge against the law-coloured temple, and just
+  // disappears against the dark strip when not selected, which is fine.
+  const edge = '#04121f';
+  const L = letter ? esc(letter) : '';
+  // The active law's initial rides in a small corner badge on the temple, so the
+  // grey-family laws (Honor, Individuality) are told apart at a glance. Centrist
+  // (no ideology law) shows a bare white temple with no badge.
+  const badge = L
+    ? `<circle cx="17.6" cy="17.6" r="6.1" fill="${esc(color)}" stroke="${edge}" stroke-width="1.3"/>`
+      + `<text x="17.6" y="20.8" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-weight="800" font-size="9" fill="#0b0a16">${L}</text>`
+    : '';
   return '<svg class="ui-icon ui-icon-assembly" viewBox="0 0 24 24" width="23" height="23" aria-hidden="true">'
     + `<g fill="${esc(color)}" stroke="${edge}" stroke-width="1" stroke-linejoin="round" stroke-linecap="round">`
     + '<path d="M3 9.5 12 4l9 5.5z"/>'
@@ -3248,14 +3270,16 @@ function assemblyTabIconSvg(color, selected) {
     + '<rect x="12.8" y="10.2" width="2.4" height="7.6" rx="0.4"/>'
     + '<rect x="17" y="10.2" width="2.4" height="7.6" rx="0.4"/>'
     + '<rect x="2.6" y="18" width="18.8" height="2.6" rx="0.6"/>'
-    + '</g></svg>';
+    + '</g>'
+    + badge
+    + '</svg>';
 }
 function updateAssemblyTabIcon(snapshot) {
   const tab = document.getElementById('sidepanel-tab-assembly');
   if (!tab || tab.hidden) return;
   const panel = document.getElementById('browse-sidepanel');
   const selected = !!(panel && panel.dataset.active === 'assembly');
-  tab.innerHTML = assemblyTabIconSvg(activeLawColor(snapshot), selected);
+  tab.innerHTML = assemblyTabIconSvg(activeLawColor(snapshot), selected, activeLawLetter(snapshot));
 }
 
 // Render the Sol Political Assembly (M0) tab from the snapshot: the hex board
@@ -3347,9 +3371,12 @@ function assemblyStatusEl(snapshot) {
     ? 'Centrist - Pad Insurance'
     : ((ASSEMBLY_IDEOLOGY_BY_KEY[k] || {}).name || k)));
   const free = myCubesFree(snapshot);
+  // Outline the active-law read-out in the law-in-power's colour (an ideology's
+  // hue, or white for Centrist = no ideology law), matching the tab-strip icon.
+  const lawColor = activeLawColor(snapshot);
   const status = document.createElement('div');
   status.className = 'assembly-controls';
-  status.innerHTML = `<div class="assembly-status"><strong>Active laws:</strong> `
+  status.innerHTML = `<div class="assembly-status assembly-active-law" style="--law-color:${esc(lawColor)}"><strong>Active laws:</strong> `
     + `${activeNames.length ? esc(activeNames.join(', ')) : 'none yet'}`
     + `${laws.lobbyingDisabled ? ' · lobbying disabled' : ''}</div>`
     + `<div class="assembly-status">Your cubes: <strong>${free}</strong> / ${FACTORY_CUBES} free `
@@ -3569,7 +3596,8 @@ function renderAssemblyFundraise(body, snapshot) {
   const available = fundraiseAvailable(snapshot);
   const movePick = step === 'move' && !_fr.moveFrom;   // origin = pick one of your cubes
 
-  // Prompt bar.
+  // Prompt bar. Built here but appended at the BOTTOM, just above the action
+  // buttons (where the player is looking / clicking), not at the top of the modal.
   const prompt = document.createElement('div');
   prompt.className = 'assembly-fr-prompt';
   let promptText;
@@ -3589,7 +3617,6 @@ function renderAssemblyFundraise(body, snapshot) {
   }
   prompt.innerHTML = `<strong>Fundraise</strong> &middot; <span>${promptText}</span>`
     + (_fr.place ? `<div class="assembly-fr-chosen">Placing on ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.place] || {}).name || _fr.place)}.</div>` : '');
-  body.appendChild(prompt);
 
   // Board with the interaction wired for the current step.
   const view = assemblyDelegatesView(snapshot, assemblyModalVariant());
@@ -3617,7 +3644,11 @@ function renderAssemblyFundraise(body, snapshot) {
   view.onCellClick = (place) => onFundraiseCell(snapshot, place, available);
   body.appendChild(renderAssemblyPanel(view));
 
-  // Step buttons.
+  // Step buttons. Each step shows its forward action(s); below them a consistent
+  // Undo (step back one choice) + Cancel (abandon the whole Fundraise, no
+  // operation spent) footer is ALWAYS present so a player is never trapped
+  // mid-op. The Undo subsumes the old per-step back buttons ("pick a different
+  // cube", "back to move").
   const btns = document.createElement('div');
   btns.className = 'assembly-fr-btns';
   if (step === 'place') {
@@ -3626,14 +3657,20 @@ function renderAssemblyFundraise(body, snapshot) {
       mkBtn(_fr.place ? 'Next: move →' : 'Next →', 'modal-btn primary', () => { _fr.step = 'move'; refreshAssemblyModal(); }),
     );
   } else if (step === 'move') {
-    if (_fr.moveFrom) btns.append(mkBtn('↩ Pick a different cube', 'modal-btn', () => { _fr.moveFrom = null; refreshAssemblyModal(); }));
-    else btns.append(mkBtn('Skip move & tally', 'modal-btn', () => fundraiseAdvanceToStar(snapshot)));
+    if (!_fr.moveFrom) btns.append(mkBtn('Skip move & tally', 'modal-btn', () => fundraiseAdvanceToStar(snapshot)));
   } else if (step === 'star') {
-    btns.append(mkBtn('↩ Back to move', 'modal-btn', () => { _fr.step = 'move'; _fr.moveFrom = null; _fr.moveTo = null; _fr.tied = null; refreshAssemblyModal(); }));
     if ((_fr.tied || []).length === 0) {
       btns.append(mkBtn('Set star to Centrist', 'modal-btn primary', () => { _fr.star = 'centrist'; commitFundraise(); }));
     }
   }
+  const undoBtn = mkBtn('↩ Undo', 'modal-btn', fundraiseUndo);
+  undoBtn.disabled = !fundraiseCanUndo();
+  undoBtn.title = 'Step back one choice in this Fundraise.';
+  const cancelBtn = mkBtn('✕ Cancel', 'modal-btn cancel', closeAssemblyModal);
+  cancelBtn.title = 'Abandon this Fundraise. Your operation is not spent.';
+  btns.append(undoBtn, cancelBtn);
+  // Prompt sits directly above the buttons at the bottom of the modal.
+  body.appendChild(prompt);
   body.appendChild(btns);
 
   body.appendChild(assemblyStatusEl(snapshot));
@@ -3673,6 +3710,32 @@ function onFundraiseCell(snapshot, place, available) {
   if (!available.has(place)) { _onlineToast('Move only to an adjacent space.', 'error'); return; }
   _fr.moveTo = place;
   fundraiseAdvanceToStar(snapshot);
+}
+// Step back ONE action in the guided Fundraise: the inverse of the forward
+// clicks, popped newest-first (the star tally -> the move destination -> the
+// picked-up cube -> the placement). Only edits the local draft; nothing has
+// been submitted yet. No-op at the very start (nothing chosen).
+function fundraiseUndo() {
+  if (!_fr) return;
+  if (_fr.step === 'star') {
+    _fr.star = null;
+    _fr.tied = null;
+    _fr.step = 'move';
+    if (_fr.moveTo) _fr.moveTo = null;   // undo the destination, keep the picked cube to re-aim
+    else _fr.moveFrom = null;            // tally was reached via "Skip move", so drop to cube-pick
+  } else if (_fr.step === 'move') {
+    if (_fr.moveFrom) _fr.moveFrom = null;   // put the picked-up cube back down
+    else _fr.step = 'place';                 // back to the placement step
+  } else if (_fr.place) {
+    _fr.place = null;                        // unselect the placed delegate
+  }
+  refreshAssemblyModal();
+}
+// Is there a prior Fundraise choice to step back through? False only at the very
+// start (the place step with nothing placed), where Undo is disabled.
+function fundraiseCanUndo() {
+  if (!_fr) return false;
+  return _fr.step !== 'place' || !!_fr.place;
 }
 function commitFundraise() {
   const op = { kind: 'FUNDRAISE' };
@@ -6470,8 +6533,8 @@ function openDeckTapModal(card, kind, { allowAuction = false, inspectOnly = fals
     // play. Either way there's no add / auction here.
     const note = document.createElement('p');
     note.className = 'muted card-modal-note';
-    note.textContent = card.type === 'gw-thruster'
-      ? '🚧 GW thrusters are an upcoming expansion. Preview only for now - flip to see both faces.'
+    note.textContent = isExpansionType(card.type)
+      ? '🚧 This is an upcoming expansion card. Preview only for now - flip to see both faces.'
       : '👥 Crew is chosen at New game via the starting-crew wizard.';
     actions.append(note);
   } else if (inMarket && allowAuction) {
@@ -9793,25 +9856,31 @@ function radBypassThreshold() {
 
 // Resolve the current rocket stack into [{id, name, radHardness}] rows for
 // the rad-hardness check - used both by the upfront at-risk preview in the
-// confirm modal and by the per-zone roll modal. Patents read rad-hard off
-// the card; crew read name + rad-hard off the chosen FACE (they live on the
-// face, not the physical card), so a flipped crew row is never blank.
+// confirm modal and by the per-zone roll modal. Name + rad-hard are read off
+// the INSTALLED face (the black / secondary side when a card is flipped), NOT
+// the white-side default, so a flipped card is checked against its actual
+// rad-hardness instead of its old white-side value. Crew live on the face too.
 function radStackCards() {
   return getRocketStack()
     .map((slot) => {
       const patent = PATENTS_BY_ID[slot.id];
       if (patent) {
+        const face = (slot.face === 'secondary' && patent.faces && patent.faces.secondary)
+          ? patent.faces.secondary : ((patent.faces && patent.faces.primary) || patent);
         // A radiator's rad-hardness is its DEPLOYED side's (heavy is more
         // fragile); a heavy one degrades to light instead of being lost.
         if (patent.type === 'radiator') {
-          const rf = (slot.face === 'secondary' && patent.faces && patent.faces.secondary)
-            ? patent.faces.secondary : ((patent.faces && patent.faces.primary) || patent);
           return {
             id: slot.id, name: patent.name, type: 'radiator', radSide: slot.radSide || 'heavy',
-            radHardness: radiatorRadHardness(rf, slot.radSide),
+            radHardness: radiatorRadHardness(face, slot.radSide),
           };
         }
-        return { id: slot.id, name: patent.name, radHardness: patent.radHardness != null ? patent.radHardness : 0 };
+        return {
+          id: slot.id,
+          name: face.name || patent.name,
+          radHardness: face.radHardness != null ? face.radHardness
+            : (patent.radHardness != null ? patent.radHardness : 0),
+        };
       }
       const crew = CREW_BY_ID[slot.id];
       if (crew) {
@@ -15476,20 +15545,20 @@ function onSiteSelect(site) {
   if (_renderer) _renderer.clearSitePopup();
 
   _selectedId = site.id;
-  if (_renderer) {
-    _renderer.setRouteEndpoints(site.id, null);
-    // Smooth-pan the camera so the selected hex sits at the centre
-    // of the map. Keeps the existing zoom - jumping zoom on every
-    // tap would be disorienting.
-    _renderer.panTo(site);
-  }
+  if (_renderer) _renderer.setRouteEndpoints(site.id, null);
 
   if (site.isDecorative) {
+    // No popup on a decorative node - just centre the node itself. Keeps the
+    // existing zoom; jumping zoom on every tap would be disorienting.
+    if (_renderer) _renderer.panTo(site);
     setStatus(`Decorative routing node - not selectable.`);
     return;
   }
 
   showSitePopupFor(site);
+  // Smooth-pan so the POPUP MENU sits at the centre of the map (not the node it
+  // points at), so a tall popup near the top edge doesn't clip off-screen.
+  if (_renderer) _renderer.centerSitePopup();
   setStatus(`Selected <strong>${esc(site.name)}</strong>.`);
 }
 
@@ -16343,10 +16412,13 @@ function showSitePopupFor(site) {
   }
   // Claim glory chit: when the rocket is parked here with a crew aboard
   // and this site's heliocentric zone still has an unclaimed chit, offer
-  // to load it now (the "I left it on arrival, grab it later" path). Lands
-  // just before Navigate-to so the pure-inspection action stays last.
+  // to load it now (the "I left it on arrival, grab it later" path). Only at
+  // a REAL landable site - never a Lagrange / burn / hohmann routing waypoint
+  // (same gate the arrival pickup uses). Lands just before Navigate-to so the
+  // pure-inspection action stays last.
   if (rocketSite && site.id === rocketSite.id
       && site.solarZone && !isLeoSite(site)
+      && !site.isWaypoint && site.isLandable !== false
       && !zoneChitTaken(site.solarZone) && stackHasCrew()) {
     const sds = getChitSides(site.solarZone);
     actions.push({
@@ -17070,7 +17142,7 @@ function renderPatents() {
   // without it cluttering the buildable list. The tab label
   // marks it as soon-only so there's no surprise when grab
   // buttons refuse to engage.
-  const expansionTypes = ['gw-thruster'];
+  const expansionTypes = ['gw-thruster', 'freighter'];
   // 'supports' is a synthetic filter that groups every card
   // whose primary face SUPPLIES a stack-support chip (reactors,
   // generators, radiators today). A sub-row of kind chips lets
@@ -17085,6 +17157,7 @@ function renderPatents() {
   counts.supports = patentsThatSupply(supplyKinds).length;
   const TYPE_LABEL = {
     'gw-thruster': 'GW thrusters (soon)',
+    'freighter': 'Freighters (soon)',
     'supports': 'Supports',
   };
   // Seed initial active tab from a pending programmatic open
@@ -17172,12 +17245,12 @@ function renderPatents() {
     if (inHand)   el.classList.add('in-hand');
     if (inRocket) el.classList.add('in-rocket');
     if (inHand || inRocket) return el;   // placeholder - not interactive
-    // Expansion-only cards (GW thrusters today) can't be played
+    // Expansion-only cards (GW thrusters, Freighters) can't be played
     // yet, but they're fully inspectable: tap opens the read-only
     // card view and the Flip button shows both faces up close. Only
     // the drag / tap-to-ADD handlers are skipped (the engine refuses
     // to stack them); a CSS badge signals the "coming soon" intent.
-    if (card.type === 'gw-thruster') {
+    if (isExpansionType(card.type)) {
       el.classList.add('is-expansion');
       const badge = document.createElement('div');
       badge.className = 'card-expansion-badge';
@@ -18120,7 +18193,8 @@ async function claimGloryHere(site) {
     if (ok) refreshOpenSitePopup();
     return ok;
   }
-  if (isLeoSite(site) || zoneChitTaken(zone) || !stackHasCrew()) return false;
+  if (isLeoSite(site) || site.isWaypoint || site.isLandable === false
+      || zoneChitTaken(zone) || !stackHasCrew()) return false;
   const ownerId = firstCrewId();
   awardChitForZone(zone, getTurn(), ownerId);
   const s = getChitSides(zone);

@@ -48,8 +48,7 @@ export const REQUIREMENT_KINDS = [
 
 // Map each Excel sheet name to the card type. Sheets we don't
 // fold into the patent deck (Bernals are city tiles; Colonists
-// are crew; Freighters are logistics, surfaced separately if
-// Stage 3 wants them) sit in the skip set below.
+// are crew) sit in the skip set below.
 const SHEET_TO_TYPE = {
   'Thrusters':    'thruster',
   'Reactors':     'reactor',
@@ -57,13 +56,14 @@ const SHEET_TO_TYPE = {
   'Refineries':   'refinery',
   'Robonauts':    'robonaut',
   'Generators':   'generator',
-  // GW Thrusters (and the future TW class) are an upcoming
-  // expansion. They land in their own type so the UI can group
-  // and gate them; right now the rest of the engine refuses to
-  // hand them out or stack them.
+  // GW Thrusters (and the future TW class) and Freighters are an
+  // upcoming expansion. They land in their own type so the UI can
+  // group and gate them; right now the rest of the engine refuses
+  // to hand them out or stack them (see EXPANSION_TYPES below).
   'GW Thrusters': 'gw-thruster',
+  'Freighters':   'freighter',
 };
-const SHEETS_NOT_PATENTS = new Set(['Bernals', 'Colonists', 'Freighters']);
+const SHEETS_NOT_PATENTS = new Set(['Bernals', 'Colonists']);
 
 // Columns under the spreadsheet's "Support Requirements" banner -
 // the ONLY columns that translate into stack-level support
@@ -219,6 +219,10 @@ function buildFace(label, tier, type) {
     // primary face's name for the card id and lookup.
     name:       tier.Name || null,
     ability:    tier.Ability || null,
+    // Future mission: an end-game objective printed on the Tier-2 (purple /
+    // promoted) side only. Reference-only for now (futures are expansion), but
+    // the card renderer surfaces it as the blue callout on that face.
+    future:     tier.Future || null,
     requires:   requiresFromFace(tier, type),
     supplies:   suppliesFromFace(tier, type),
     properties: propertiesFromFace(tier),
@@ -245,6 +249,11 @@ function buildFace(label, tier, type) {
     base.thrust      = tier.Thrust;
     base.fuel        = tier['Fuel Consumption'];
     base.fuelType    = tier['Fuel Type'];
+    // Freighters carry cargo, not thrust: their key stat is the Load-Limit (how
+    // many cards/FTs they can haul) and whether they can only be loaded at a
+    // Factory. Other card types leave these blank.
+    base.loadLimit   = tier['Load-Limit'];
+    base.factoryOnly = tier['Factory Loading Only'] || false;
     // Afterburn is the NUMBER of fuel steps you may expend to gain +1 net
     // thrust (rulebook MW Afterburn); 0 / blank = no afterburn. Keep it numeric
     // (it used to be flattened to a boolean, which dropped the cost and broke
@@ -289,6 +298,11 @@ function buildPatent(sheet, row) {
     thrust:      primaryFace.thrust,
     fuel:        primaryFace.fuel,
     afterburn:   primaryFace.afterburn,
+    loadLimit:   primaryFace.loadLimit,
+    factoryOnly: primaryFace.factoryOnly,
+    // Colony type this card promotes (flips to its purple side) at. Card-level
+    // (same for both faces); the renderer shows it on the FRONT face only.
+    promotionColony: row['Promotion Colony'] || null,
     requires:    primaryFace.requires,
     supplies:    primaryFace.supplies,
     properties:  primaryFace.properties,
@@ -383,7 +397,7 @@ export const PATENT_TYPES = [
 // refuse to let them into the hand or rocket stack. Adding a
 // type here is enough to gate it - downstream code that filters
 // the patent deck reads this set.
-export const EXPANSION_TYPES = new Set(['gw-thruster']);
+export const EXPANSION_TYPES = new Set(['gw-thruster', 'freighter']);
 export function isExpansionType(type) {
   return EXPANSION_TYPES.has(type);
 }

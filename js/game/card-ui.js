@@ -21,6 +21,7 @@ const SPECTRAL_STYLE = {
   B: { glyph: 'B', fill: '#60a5fa', ink: '#0c0a16' },  // alkaline
   D: { glyph: 'D', fill: '#67e8f9', ink: '#0c0a16' },  // icy / cometary
   H: { glyph: 'H', fill: '#0ea5e9', ink: '#f0f9ff' },  // hydrous (matches map + industrialize badge)
+  Any: { glyph: 'any', fill: '#6b7280', ink: '#f3f4fa' },  // freighters: works at any spectral type
   unknown: { glyph: '?', fill: '#475569', ink: '#e5e7eb' },
 };
 const SPECTRAL_LABEL = {
@@ -31,6 +32,7 @@ const SPECTRAL_LABEL = {
   B: 'Alkaline',
   D: 'Icy / cometary',
   H: 'Hydrous',
+  Any: 'Any spectral type',
   unknown: 'Unknown',
 };
 
@@ -320,7 +322,11 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   }
   const fallback = robonautGlyphs || (typeIconSvg(card.type, { size: 22 }) || '');
   const lead = supplyGlyphs || fallback;
-  tbar.innerHTML = `${lead ? `<span class="typebar-icons">${lead}</span>` : ''}${escapeText(card.type.toUpperCase())}`;
+  // GW Thrusters promote to a TW (Terawatt) thruster on their purple back, so
+  // that face's typebar reads "TW THRUSTER"; the white front reads "GW THRUSTER".
+  let typeLabel = card.type.toUpperCase();
+  if (card.type === 'gw-thruster') typeLabel = sideName === 'secondary' ? 'TW THRUSTER' : 'GW THRUSTER';
+  tbar.innerHTML = `${lead ? `<span class="typebar-icons">${lead}</span>` : ''}${escapeText(typeLabel)}`;
   // Card name reads from the active face - the dark side carries
   // its own printed name on every HF4 card.
   const faceName = (card.faces && card.faces[sideName] && card.faces[sideName].name);
@@ -334,7 +340,18 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   face.querySelector('.m').textContent = massVal != null ? massVal : '-';
   face.querySelector('.r').textContent = radVal != null ? radVal : '-';
 
-  face.querySelector('.card-spectral').appendChild(spectralHex(card.spectralType));
+  // Spectral hex shows on both faces normally, but GW Thrusters / Freighters
+  // drop it on their purple (promoted) BACK - that side doesn't use spectral
+  // matching, so the published cards leave it off.
+  const isPromoCard = card.type === 'gw-thruster' || card.type === 'freighter';
+  if (!(isPromoCard && sideName === 'secondary')) {
+    face.querySelector('.card-spectral').appendChild(spectralHex(card.spectralType));
+  }
+  // Promotion colony dome - FRONT (white) face only. The purple Tier-2 side is
+  // already promoted, so per the published cards it drops the promotion symbol.
+  if (sideName === 'primary' && card.promotionColony) {
+    face.querySelector('.card-spectral').appendChild(colonyDomeGlyph(card.promotionColony));
+  }
 
   if (isThruster) {
     const thrustHost = face.querySelector('.card-thrust');
@@ -377,8 +394,11 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     // like the thrust circle) then Fuel (right, blue/grey like the fuel droplet
     // - blue for water, grey for dirt).
     const isDirtFuel = (fdata.fuelType ?? card.fuelType) === 'Dirt';
+    // GW Thrusters burn ISO (isotope) fuel - colour the value gold like the
+    // droplet, not the water-blue / dirt-grey of the other thrusters.
+    const fuelColor = card.type === 'gw-thruster' ? '#e0aa2c' : (isDirtFuel ? '#6b7280' : '#0089bd');
     add('Thrust', fdata.thrust ?? card.thrust, '#d6017a');
-    add('Fuel', f != null && !Number.isInteger(f) ? f.toFixed(2) : f, isDirtFuel ? '#6b7280' : '#0089bd');
+    add('Fuel', f != null && !Number.isInteger(f) ? f.toFixed(2) : f, fuelColor);
     // Afterburn is shown by the flame on the thrust triangle (with its own
     // tooltip), so it no longer needs a separate stat line here.
   } else if (card.type === 'reactor') {
@@ -416,6 +436,9 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     }
   } else if (card.type === 'refinery') {
     add('Water out', card.water_out);
+  } else if (card.type === 'freighter') {
+    // Freighters haul cargo, not thrust: the Load-Limit is the headline stat.
+    add('Load limit', fdata.loadLimit ?? card.loadLimit);
   } else if (card.type === 'robonaut') {
     add('+Prospect', card.prospect_bonus);
   } else if (card.type === 'lab' || card.type === 'generator') {
@@ -457,10 +480,16 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
       propHost.appendChild(b);
       continue;
     }
-    b.setAttribute('data-tip', p.desc
-      || (p.value === true ? p.label : `${p.label}: ${p.value}`));
-    const count = (typeof p.value === 'number' && p.value > 1)
-      ? `<b>×${p.value}</b>` : '';
+    // GW afterburn reads as the thrust GAINED ("+N", burn 1 fuel step), not a
+    // "×N" multiplier like the other numeric properties - and carries its own
+    // tooltip explaining the inverted cost.
+    const isGwAfterburn = card.type === 'gw-thruster' && p.key === 'afterburn';
+    b.setAttribute('data-tip', isGwAfterburn
+      ? `Afterburn: burn 1 fuel step to add +${p.value} net thrust this turn. This number is the thrust gained, not a fuel cost.`
+      : (p.desc || (p.value === true ? p.label : `${p.label}: ${p.value}`)));
+    const count = isGwAfterburn
+      ? `<b>+${p.value}</b>`
+      : ((typeof p.value === 'number' && p.value > 1) ? `<b>×${p.value}</b>` : '');
     // Robonaut prospector types (missile / raygun / buggy) get the custom
     // support-icon glyph; everything else keeps its emoji.
     const propIcon = supportIconSvg(p.key, { size: 27 });
@@ -578,6 +607,34 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   const meta = (card.faces && card.faces[sideName]) || {};
   face.querySelector('.card-blurb').textContent =
     meta.ability || meta.blurb || card.blurb || '';
+  // Future mission: the end-game objective printed on the Tier-2 (purple /
+  // promoted) side. Rendered as a blue callout below the ability, with the
+  // mission name (before the colon) emphasised. Only the secondary face carries
+  // a `future`, so it never shows on the white side.
+  if (meta.future) {
+    const fut = document.createElement('div');
+    fut.className = 'card-future';
+    const ci = meta.future.indexOf(':');
+    if (ci > 0) {
+      fut.innerHTML = `<span class="card-future-head">${escapeText(meta.future.slice(0, ci))}</span> `
+        + escapeText(meta.future.slice(ci + 1).trim());
+    } else {
+      fut.textContent = meta.future;
+    }
+    // On a GW Thruster's purple (TW) back the FULL-SIZE thrust triangle shifts
+    // to the right (CSS) and the future fills the freed column on the left - no
+    // overlap with the gold, and the afterburn "+N" stays visible on the
+    // triangle. Everywhere else (e.g. freighters, no triangle) it goes below.
+    const thrustEl = (card.type === 'gw-thruster' && sideName === 'secondary')
+      ? face.querySelector('.card-thrust') : null;
+    if (thrustEl) {
+      fut.classList.add('card-future-side');
+      thrustEl.appendChild(fut);
+    } else {
+      const body = face.querySelector('.card-body');
+      if (body) body.appendChild(fut);
+    }
+  }
   return face;
 }
 
@@ -717,12 +774,45 @@ function spectralHex(type) {
   text.setAttribute('x', '0');
   text.setAttribute('y', '4');
   text.setAttribute('text-anchor', 'middle');
-  text.setAttribute('font-size', '12');
+  // Single spectral letters render large; a multi-character glyph (e.g. "any")
+  // shrinks to fit inside the hex.
+  text.setAttribute('font-size', style.glyph.length > 1 ? '8' : '12');
   text.setAttribute('font-weight', '700');
   text.setAttribute('fill', '#ffffff');
   text.textContent = style.glyph;
   svg.appendChild(text);
   return svg;
+}
+
+let _domeSeq = 0;
+// Promotion colony dome. GW Thrusters and Freighters flip to their purple
+// (promoted) side at a Colony of a given type; the published cards mark that
+// with a teal colony dome (matching the map's colony sprite) carrying the
+// colony's letter - a spectral class (C/S/M/V/B/D/H) - or a beamed-power symbol
+// for "Push". Rendered on the FRONT face only: the purple side is already
+// promoted and drops the symbol.
+function colonyDomeGlyph(promo) {
+  const p = String(promo || '').trim();
+  const isPush = p.toLowerCase() === 'push';
+  const letter = isPush ? '' : p.charAt(0).toUpperCase();
+  const gid = 'dome' + (_domeSeq++);
+  // Letter sits low inside the dome body (dominant-baseline central + text-anchor
+  // middle), a touch smaller so it reads as inside the dome, not on top of it.
+  const inner = isPush
+    ? '<g transform="translate(0,2)" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" fill="none"><path d="M-4.5 -2.5 L0 2 L4.5 -2.5"/><path d="M-4.5 2.5 L0 7 L4.5 2.5"/></g>'
+    : `<text x="0" y="3.6" text-anchor="middle" dominant-baseline="central" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" font-weight="800" fill="#ffffff" stroke="#0e3f4f" stroke-width="0.7" paint-order="stroke">${escapeText(letter)}</text>`;
+  const tip = isPush
+    ? 'Promotion: flips to its purple side at a push-sat colony.'
+    : `Promotion: flips to its purple side at a ${p} colony.`;
+  const str = `<svg viewBox="-15 -14 30 29" class="colony-dome-glyph" data-tip="${escapeText(tip)}">`
+    + `<defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#46c4df"/><stop offset="1" stop-color="#15697f"/></linearGradient></defs>`
+    + '<ellipse cx="0" cy="8.5" rx="13" ry="3" fill="#0c4554"/>'
+    + `<path d="M -12.5 8.5 A 12.5 12.5 0 0 1 12.5 8.5 Z" fill="url(#${gid})" stroke="#0c3a48" stroke-width="1.4"/>`
+    + inner
+    + '</svg>';
+  const tpl = document.createElement('template');
+  tpl.innerHTML = str.trim();
+  return tpl.content.firstElementChild;
 }
 
 // Small inline glyphs that echo the card's thrust triangle: the pink thrust
@@ -952,6 +1042,10 @@ export function svgBallerinaChip(size) {
 const TVC = {
   cyanTri: '#00aeef', cyanTri2: '#00aeef', cyanStroke: '#0089bd',
   greyTri: '#a3a9b1', greyTri2: '#7d838c',
+  // GW Thrusters run isotope fuel: a gold wedge + gold fuel droplet, set apart
+  // from the cyan (water) / grey (dirt) thrusters.
+  goldTri: '#f8cf3b', goldTri2: '#e0aa2c', goldStroke: '#a8761a',
+  goldFuel: '#e0aa2c', goldFuelRim: '#f6e3a8',
   darkTri: '#1b2030', magenta: '#e60a7e', magentaRim: '#f7a8cf', modPink: '#831843',
   water: '#52caf2', waterRim: '#d6f3ff', dirt: '#b6bcc4', dirtRim: '#e6e9ee',
   orange: '#e07d1e', orange2: '#f4a93a', wrench: '#eef2f8', sun: '#f6b51e',
@@ -1053,13 +1147,18 @@ export function thrustVisual(card, face, opts = {}) {
   // droplet; dirt = grey wedge + grey droplet. Read off the face's Fuel Type.
   const ftype = (face && face.fuelType) || card.fuelType;
   const isDirt = ftype === 'Dirt';
-  // Afterburn value = the FUEL STEPS spent to engage afterburn (the thrust gain
-  // is always +1). Shown as a digit on the flame so the cost reads off the card.
+  // GW Thrusters burn isotope (ISO) fuel and afterburn differently from the rest.
+  const isGw = card && card.type === 'gw-thruster';
+  // Afterburn. Normal thrusters: the number is the FUEL STEPS spent to gain a
+  // fixed +1 net thrust. GW Thrusters invert it - burn ONE fuel step to gain
+  // that many net thrust - so the number is the thrust GAINED and reads as "+N".
   const afterVal = (face && face.afterburn != null) ? face.afterburn : (card ? card.afterburn : null);
   const afterN = Number(afterVal) || 0;
   const showAfter = afterN > 0;
-  const afterTip = `Afterburn: spend ${afterN} fuel step${afterN === 1 ? '' : 's'} to add +1 net thrust this turn. `
-    + `This number is the fuel steps spent to perform afterburn, not a water or aqua cost.`;
+  const afterTip = isGw
+    ? `Afterburn: burn 1 fuel step to add +${afterN} net thrust this turn. This number is the thrust gained, not a fuel cost.`
+    : `Afterburn: spend ${afterN} fuel step${afterN === 1 ? '' : 's'} to add +1 net thrust this turn. `
+      + `This number is the fuel steps spent to perform afterburn, not a water or aqua cost.`;
   // Centre symbol: Sun (solar power) or Push-sat (beamed power), from the
   // installed face's property booleans.
   const props = (face && face.properties) || card.properties || [];
@@ -1067,18 +1166,29 @@ export function thrustVisual(card, face, opts = {}) {
   const solar = hasProp('solar');
   const push = hasProp('push');
 
+  // GW gold wedge + gold droplet (isGw computed above), regardless of the
+  // water/dirt split that colours the other thrusters.
   const uid = 'tv' + (_tvSeq++);
-  const wedge = isDirt
-    ? tvWedge(TVC.greyTri, TVC.greyTri2, '#6b7280', uid)
-    : tvWedge(TVC.cyanTri, TVC.cyanTri2, TVC.cyanStroke, uid);
-  const fuelFill = isDirt ? TVC.dirt : TVC.water;
-  const fuelRim = isDirt ? TVC.dirtRim : TVC.waterRim;
+  const wedge = isGw
+    ? tvWedge(TVC.goldTri, TVC.goldTri2, TVC.goldStroke, uid)
+    : isDirt
+      ? tvWedge(TVC.greyTri, TVC.greyTri2, '#6b7280', uid)
+      : tvWedge(TVC.cyanTri, TVC.cyanTri2, TVC.cyanStroke, uid);
+  const fuelFill = isGw ? TVC.goldFuel : (isDirt ? TVC.dirt : TVC.water);
+  const fuelRim = isGw ? TVC.goldFuelRim : (isDirt ? TVC.dirtRim : TVC.waterRim);
   const center = solar ? tvSun(70, TV_CTR) : (push ? tvPushsat(70, TV_CTR) : '');
+  // GW afterburn shows the thrust GAIN as "+N" sitting ON TOP of the flame
+  // (centred, drawn over it), not crammed inside it; other thrusters keep the
+  // fuel-step count inside.
+  const flameGlyph = isGw
+    ? tvFlame(70, TV_TOP + 5, null)
+      + `<text x="70" y="${TV_TOP + 5}" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="800" fill="#ffffff" stroke="#3a1500" stroke-width="2.8" paint-order="stroke">+${afterN}</text>`
+    : tvFlame(70, TV_TOP, afterN);
   const top = showAfter
-    ? `<g data-tip="${escapeText(opts.breakdown?.afterburn || afterTip)}">${tvFlame(70, TV_TOP, afterN)}</g>`
+    ? `<g data-tip="${escapeText(opts.breakdown?.afterburn || afterTip)}">${flameGlyph}</g>`
     : '';
   const thrustTip = escapeText(opts.breakdown?.thrust || `Thrust: ${thrust}`);
-  const fuelTip = escapeText(opts.breakdown?.fuel || `Fuel per burn: ${fuelText} ${ftype || 'Water'}`);
+  const fuelTip = escapeText(opts.breakdown?.fuel || `Fuel per burn: ${fuelText} ${ftype || (isGw ? 'ISO' : 'Water')}`);
 
   wrap.innerHTML = `
     <svg viewBox="${TV_VB}" class="thrust-svg">

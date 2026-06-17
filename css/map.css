@@ -8096,9 +8096,11 @@ body:has(#view-browse:not(.hidden)) #main {
 .assembly-star { filter: drop-shadow(0 1px 1.5px rgba(0,0,0,0.6)); pointer-events: none; }
 /* Fundraise guided flow. */
 .assembly-fr-prompt { background: rgba(120,140,220,0.14); border: 1px solid #3a4a7a; border-radius: 8px;
-  padding: 8px 10px; font-size: 13px; margin: 4px 0 6px; }
+  padding: 8px 10px; font-size: 13px; margin: 8px 0 0; }
 .assembly-fr-chosen { font-size: 12px; color: var(--accent, #fbbf24); margin-top: 4px; }
-.assembly-fr-btns { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 10px 0 4px; }
+.assembly-fr-btns { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 8px 0 4px; }
+.assembly-fr-btns .modal-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.assembly-fr-btns .modal-btn:disabled:hover { background: var(--bg-2); }
 /* Simple variant (sidebar glance): just the cropped wheel, filling the panel. */
 .assembly-panel-simple { max-width: 100%; width: 100%; }
 .assembly-panel-simple .assembly-board { width: 100%; max-width: 100%; margin: 4px auto 0; }
@@ -8166,6 +8168,10 @@ body:has(#view-browse:not(.hidden)) #main {
 .assembly-controls { margin: 10px 0; }
 .assembly-status { font-size: 12px; color: var(--ink-dim, #8b90b8); margin: 3px 0; }
 .assembly-status strong { color: var(--ink); }
+/* The active-law read-out is boxed in the law-in-power's colour (white for
+   Centrist = no ideology law), so the strip icon and the read-out agree. */
+.assembly-active-law { border: 1.5px solid var(--law-color, #3a4a7a); border-radius: 8px;
+  padding: 5px 9px; background: color-mix(in srgb, var(--law-color, #3a4a7a) 12%, transparent); }
 .assembly-action {
   border: 1px solid var(--border);
   border-radius: 10px;
