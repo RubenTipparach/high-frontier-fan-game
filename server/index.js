@@ -12,6 +12,9 @@ import express from 'express';
 import cors from 'cors';
 import { createServer } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
@@ -20,6 +23,18 @@ import { randomSeed } from './game/rng.js';
 import { siteBySlug } from './game/planner-graph.js';
 import { PATENTS_BY_ID } from '../data/patents.js';
 import { normaliseTag } from '../data/site-tags.js';
+import { NODE_TAGS as STATIC_NODE_TAGS } from '../data/node-tags.js';
+
+// Snapshot of every marker-relevant solar-map node (id2 + type + planner
+// flags), the same file gen-node-tags.mjs reads. Used by the admin site-tags
+// search so an admin can tag ANY node, not only ones players already noted.
+const __dirname = dirname(fileURLToPath(import.meta.url));
+let PLANNER_NODES = [];
+try {
+  PLANNER_NODES = JSON.parse(
+    readFileSync(resolve(__dirname, '..', 'data', 'planner-nodes.json'), 'utf8')
+  );
+} catch { PLANNER_NODES = []; }
 import {
   sendDM, discordEnabled,
   sendWebhook, webhookEnabled, isWebhookUrl, defaultWebhookUrl,
@@ -2708,6 +2723,139 @@ function allSiteAnnotationRows() {
   ).all();
 }
 
+// ----- Admin: server tags (canonical solar-map marker flags per node) -----
+//
+// "Server tags" are the authoritative marker flags the map renderer reads from
+// data/node-tags.js (lander / half / hazard / aerobrake), as opposed to the
+// player-submitted site_annotations ("what players think"). An admin edits them
+// on /admin/site-notes + /admin/site-tags; the edit persists in the node_tags
+// table (DB) and is exported back to data/node-tag-overrides.json for git.
+
+// The four editable marker flags and the data/site-tags.js tag body each maps to.
+const SERVER_TAG_FIELDS = [
+  { key: 'lander',    body: 'lander-burn', label: 'Lander-burn' },
+  { key: 'half',      body: 'half-burn',   label: 'Half-burn' },
+  { key: 'hazard',    body: 'hazard',      label: 'Hazard' },
+  { key: 'aerobrake', body: 'aero-break',  label: 'Aero-break' },
+];
+
+// Shared CSS for the server-tag checkbox editor, injected into both admin pages.
+const SERVER_TAG_CSS = `
+.st-edit{margin:8px 0 2px;padding:8px 10px;background:#0b1120;border:1px solid #243049;border-radius:8px}
+.st-row{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px}
+.stbox{display:flex;gap:5px;align-items:center;font-size:13px;color:#cdd6f4;background:none;border:0;padding:0;cursor:pointer}
+.st-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.st-save{background:#16324a;border-color:#2b557a;color:#cfe8ff}
+.st-reset{background:#2a1622;border-color:#5a2436;color:#f6b8c8;font-size:12px;padding:3px 8px}
+.st-edited{color:#7dd3fc;font-size:12px}
+.node{border:1px solid #2a3450;border-radius:10px;padding:10px 14px;margin:10px 0;background:#0e1322}
+.node h3{margin:0 0 2px}`;
+
+// The admin-edited override row for a node, or null if never edited.
+function nodeTagRow(siteId) {
+  return db.prepare(
+    `SELECT site_id, site_name, lander, half, hazard, aerobrake, updated_at
+       FROM node_tags WHERE site_id=?`
+  ).get(siteId) || null;
+}
+
+// Effective server tags for a node: the admin override if it exists (edited),
+// else the baseline flags from the generated data/node-tags.js (default).
+function effectiveServerTags(siteId) {
+  const row = nodeTagRow(siteId);
+  const src = row || STATIC_NODE_TAGS[siteId] || {};
+  return {
+    lander: !!src.lander, half: !!src.half, hazard: !!src.hazard, aerobrake: !!src.aerobrake,
+    edited: !!row, updated_at: row ? row.updated_at : null,
+  };
+}
+
+// Upsert a node's server tags from posted checkbox flags. Aerobrake implies
+// hazard, the same rule scripts/gen-node-tags.mjs enforces.
+function saveNodeTag(siteId, siteName, body) {
+  const f = {
+    lander: body.lander ? 1 : 0, half: body.half ? 1 : 0,
+    hazard: body.hazard ? 1 : 0, aerobrake: body.aerobrake ? 1 : 0,
+  };
+  if (f.aerobrake) f.hazard = 1;
+  db.prepare(
+    `INSERT INTO node_tags (site_id, site_name, lander, half, hazard, aerobrake, updated_at)
+       VALUES (@site_id,@site_name,@lander,@half,@hazard,@aerobrake,@updated_at)
+     ON CONFLICT(site_id) DO UPDATE SET
+       site_name=excluded.site_name, lander=excluded.lander, half=excluded.half,
+       hazard=excluded.hazard, aerobrake=excluded.aerobrake, updated_at=excluded.updated_at`
+  ).run({ site_id: siteId, site_name: (siteName || '').slice(0, 80) || null, ...f, updated_at: nowMs() });
+}
+
+// Only the admin-EDITED overrides, as the data/node-tag-overrides.json shape:
+// id2 -> { lander, half, hazard, aerobrake } with only the true flags kept (an
+// empty {} means the node was explicitly cleared to no marker).
+function editedNodeTagOverrides() {
+  const rows = db.prepare(
+    `SELECT site_id, lander, half, hazard, aerobrake FROM node_tags ORDER BY site_id ASC`
+  ).all();
+  const out = {};
+  for (const r of rows) {
+    const rec = {};
+    if (r.lander) rec.lander = true;
+    if (r.half) rec.half = true;
+    if (r.hazard) rec.hazard = true;
+    if (r.aerobrake) rec.aerobrake = true;
+    out[r.site_id] = rec;
+  }
+  return out;
+}
+
+// Render the per-node server-tag checkbox editor. Both admin pages share it;
+// `back` is the same-origin path to return to after save/reset.
+function serverTagEditor(siteId, siteName, back) {
+  const t = effectiveServerTags(siteId);
+  const boxes = SERVER_TAG_FIELDS.map((f) =>
+    `<label class="stbox"><input type="checkbox" name="${f.key}"${t[f.key] ? ' checked' : ''}> ${f.label}</label>`).join('');
+  const when = t.updated_at ? ' · ' + new Date(t.updated_at).toISOString().slice(0, 16).replace('T', ' ') : '';
+  const badge = t.edited
+    ? `<span class="st-edited">edited${when}</span>`
+    : `<span class="muted">default (from map data)</span>`;
+  const reset = t.edited
+    ? `<form method="post" action="/admin/node-tags/reset" style="display:inline">
+         <input type="hidden" name="site_id" value="${esc(siteId)}">
+         <input type="hidden" name="back" value="${esc(back)}">
+         <button class="st-reset" title="Remove this override; revert to the map-data default">reset</button></form>`
+    : '';
+  return `<form method="post" action="/admin/node-tags/save" class="st-edit">
+      <input type="hidden" name="site_id" value="${esc(siteId)}">
+      <input type="hidden" name="site_name" value="${esc(siteName || '')}">
+      <input type="hidden" name="back" value="${esc(back)}">
+      <div class="st-row">${boxes}</div>
+      <div class="st-actions"><button class="st-save">Save node</button> ${badge} ${reset}</div>
+    </form>`;
+}
+
+// Save / reset a node's server tags (shared by both admin pages; `back` returns
+// the caller to the page + query they came from).
+function safeAdminBack(v) {
+  return (typeof v === 'string' && /^\/admin\/site-(notes|tags)(\?|#|$)/.test(v)) ? v : '/admin/site-tags';
+}
+app.post('/admin/node-tags/save', requireAdmin, (req, res) => {
+  const b = req.body || {};
+  const siteId = String(b.site_id || '').trim();
+  if (SITE_ID_RE.test(siteId)) saveNodeTag(siteId, String(b.site_name || ''), b);
+  res.redirect(safeAdminBack(b.back));
+});
+app.post('/admin/node-tags/reset', requireAdmin, (req, res) => {
+  const b = req.body || {};
+  db.prepare(`DELETE FROM node_tags WHERE site_id=?`).run(String(b.site_id || '').trim());
+  res.redirect(safeAdminBack(b.back));
+});
+
+// Export ONLY the admin-edited server tags, in the data/node-tag-overrides.json
+// shape scripts/gen-node-tags.mjs merges. Commit that file + re-run the
+// generator to bake these edits into data/node-tags.js.
+app.get('/admin/site-tags/export.json', requireAdmin, (req, res) => {
+  res.set('content-disposition', 'attachment; filename="node-tag-overrides.json"')
+    .json(editedNodeTagOverrides());
+});
+
 // JSON export of every annotation (for programmatic use).
 app.get('/admin/site-notes.json', requireAdmin, (req, res) => {
   res.json({ annotations: allSiteAnnotationRows() });
@@ -2781,7 +2929,8 @@ app.get('/admin/site-notes', (req, res) => {
         <form method="post" action="/admin/site-notes/${m.id}/delete" style="display:inline"><button>delete</button></form></li>`).join('');
     return `<section class="site">
       <h3>${esc(g.name || siteId)} <code>${esc(siteId)}</code></h3>
-      <h4>Tags (${g.tags.length})</h4><ul>${tagRows || '<li class="muted">none</li>'}</ul>
+      <h4>Server tags <span class="muted">(map markers)</span></h4>${serverTagEditor(siteId, g.name, '/admin/site-notes')}
+      <h4>Player tags (${g.tags.length})</h4><ul>${tagRows || '<li class="muted">none</li>'}</ul>
       <h4>Messages (${g.messages.length})</h4><ul>${msgRows || '<li class="muted">none</li>'}</ul>
       <form method="post" action="/admin/site-notes/add" style="margin-top:6px">
         <input type="hidden" name="site_id" value="${esc(siteId)}">
@@ -2801,12 +2950,78 @@ h3{margin:0 0 8px}h4{margin:10px 0 4px;color:#8fa6d8;font-size:12px;text-transfo
 ul{list-style:none;margin:0;padding:0}li{margin:3px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 input,select,button{font:inherit;background:#161d33;color:#e6e9ff;border:1px solid #2a3450;border-radius:6px;padding:5px 8px}
 button{cursor:pointer}.dl{margin:10px 0;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
-.dl .wipe button{background:#5a1620;border-color:#7a2230;color:#ffd0d0}</style></head><body>
+.dl .wipe button{background:#5a1620;border-color:#7a2230;color:#ffd0d0}${SERVER_TAG_CSS}</style></head><body>
 <h1>Site notes &amp; tags</h1>
-<p class="muted">${bySite.size} location${bySite.size === 1 ? '' : 's'} with player data (empty locations are hidden), newest first.</p>
+<p class="muted">${bySite.size} location${bySite.size === 1 ? '' : 's'} with player data (empty locations are hidden), newest first. Edit a node's <b>server tags</b> (the map markers) inline, or <a href="/admin/site-tags">search every node on the site-tags page</a>.</p>
 <div class="dl"><a href="/admin/site-notes.json">⬇ JSON</a> <a href="/admin/site-notes.csv">⬇ CSV</a> <a href="/admin">← dashboard</a>
   <form class="wipe" method="post" action="/admin/site-notes/wipe" style="display:inline;margin-left:auto" onsubmit="return confirm('Wipe ALL site notes? This deletes every tag and message and cannot be undone.')"><button>🗑 Wipe all</button></form></div>
 ${sections || '<p class="muted">No site notes yet.</p>'}
+</body></html>`;
+  res.type('html').send(html);
+});
+
+// Admin HTML page: search ANY solar-map node and edit its server tags. Lists
+// the edited overrides at the top, plus a search box over every node id; the
+// export link downloads ONLY the edited overrides for re-applying to git.
+app.get('/admin/site-tags', (req, res) => {
+  if (!adminFromRequest(req, res)) return res.type('html').send(adminLoginPage());
+  const q = String(req.query.q || '').trim().toLowerCase().slice(0, 40);
+  const back = '/admin/site-tags' + (q ? '?q=' + encodeURIComponent(q) : '');
+
+  // Name hints from existing annotations + overrides; node types from the snapshot.
+  const nameById = new Map();
+  for (const r of db.prepare(`SELECT site_id, site_name FROM site_annotations WHERE site_name IS NOT NULL`).all())
+    if (!nameById.has(r.site_id)) nameById.set(r.site_id, r.site_name);
+  for (const r of db.prepare(`SELECT site_id, site_name FROM node_tags WHERE site_name IS NOT NULL`).all())
+    nameById.set(r.site_id, r.site_name);
+  const typeById = new Map(PLANNER_NODES.map((n) => [n.id2, n.type]));
+
+  const editedIds = db.prepare(`SELECT site_id FROM node_tags ORDER BY site_id ASC`).all().map((r) => r.site_id);
+
+  let matchIds = [];
+  if (q) {
+    const seen = new Set();
+    for (const n of PLANNER_NODES) if (n.id2.toLowerCase().includes(q) && !seen.has(n.id2)) { matchIds.push(n.id2); seen.add(n.id2); }
+    for (const id of nameById.keys()) if (id.toLowerCase().includes(q) && !seen.has(id)) { matchIds.push(id); seen.add(id); }
+    matchIds.sort();
+  }
+  const MAX = 80;
+  const shown = matchIds.slice(0, MAX);
+
+  const nodeCard = (siteId) => {
+    const type = typeById.get(siteId);
+    const nm = nameById.get(siteId) || '';
+    return `<section class="node">
+      <h3>${nm ? esc(nm) + ' ' : ''}<code>${esc(siteId)}</code>${type ? ' <span class="muted">' + esc(type) + '</span>' : ''}</h3>
+      ${serverTagEditor(siteId, nm, back)}
+    </section>`;
+  };
+
+  const editedBlock = editedIds.length
+    ? `<h2>Edited server tags (${editedIds.length})</h2>${editedIds.map(nodeCard).join('')}`
+    : `<p class="muted">No server tags have been edited yet. Search for a node below to tag it.</p>`;
+  const searchBlock = q
+    ? `<h2>Search "${esc(q)}": ${matchIds.length} match${matchIds.length === 1 ? '' : 'es'}${matchIds.length > MAX ? ', showing first ' + MAX : ''}</h2>
+       ${shown.length ? shown.map(nodeCard).join('') : '<p class="muted">No nodes match that id.</p>'}`
+    : '';
+
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Site tags</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font:14px ui-sans-serif,system-ui,sans-serif;background:#07060f;color:#e6e9ff;margin:0;padding:24px}
+h1{color:#7dd3fc;margin:0 0 4px}h2{color:#8fa6d8;font-size:14px;margin:18px 0 6px}.muted{color:#8b90b8;font-size:12px}
+a{color:#7dd3fc}code{background:#161d33;padding:1px 5px;border-radius:4px;color:#a8d8c0}
+input,select,button{font:inherit;background:#161d33;color:#e6e9ff;border:1px solid #2a3450;border-radius:6px;padding:5px 8px}
+button{cursor:pointer}.dl{margin:10px 0;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.search{margin:12px 0;display:flex;gap:8px;align-items:center}.search input{min-width:240px}${SERVER_TAG_CSS}</style></head><body>
+<h1>Site tags</h1>
+<p class="muted">Set the canonical <b>server tags</b> (the map markers) on any node. Edits save per node and persist on the server; they reach the game only once exported and committed to git.</p>
+<div class="dl"><a href="/admin/site-tags/export.json">⬇ Export edited server tags (JSON)</a> <a href="/admin/site-notes">← site notes</a> <a href="/admin">← dashboard</a></div>
+<p class="muted">Re-apply to git: save the export as <code>data/node-tag-overrides.json</code>, run <code>node scripts/gen-node-tags.mjs</code>, then commit <code>data/node-tags.js</code>.</p>
+<form class="search" method="get" action="/admin/site-tags">
+  <input name="q" value="${esc(q)}" placeholder="search node id (e.g. burn-0hh45, lag-)" autofocus>
+  <button>Search</button>${q ? ' <a href="/admin/site-tags">clear</a>' : ''}</form>
+${searchBlock}
+${editedBlock}
 </body></html>`;
   res.type('html').send(html);
 });

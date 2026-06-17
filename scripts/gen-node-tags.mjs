@@ -13,8 +13,11 @@
 //      lander / hazard marker. Lagrange/venus hazard flags are too coarse
 //      (the planner marks nearly every inner lagrange hazardous), so for those
 //      node types we trust ONLY the player tags.
+//   3. data/node-tag-overrides.json (OPTIONAL) - admin-edited server tags
+//      exported from /admin/site-tags. These WIN over both inputs above; an
+//      empty {} entry clears a node to no marker. Missing file = no overrides.
 //
-// Re-run after editing either input:  node scripts/gen-node-tags.mjs
+// Re-run after editing any input:  node scripts/gen-node-tags.mjs
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -52,6 +55,21 @@ for (const n of planner) {
   if (n.landing != null) { r.lander = true; if (n.landing < 1) r.half = true; }
   if (n.hazard) r.hazard = true;
   if (Object.keys(r).length) resolved[n.id2] = r;
+}
+
+// 3) Admin overrides (data/node-tag-overrides.json, exported from /admin/site-tags)
+//    win over everything: an admin edited these server tags by hand. An entry
+//    with no truthy flag means the node was explicitly cleared to NO marker.
+let overrides = {};
+try { overrides = JSON.parse(readFileSync(resolve(dataDir, 'node-tag-overrides.json'), 'utf8')); } catch { overrides = {}; }
+for (const [id, raw] of Object.entries(overrides)) {
+  const r = {};
+  if (raw && raw.lander) r.lander = true;
+  if (raw && raw.half) r.half = true;
+  if (raw && raw.hazard) r.hazard = true;
+  if (raw && raw.aerobrake) { r.aerobrake = true; r.hazard = true; }  // aerobrake implies hazard
+  if (Object.keys(r).length) resolved[id] = r;
+  else delete resolved[id];                 // explicitly cleared
 }
 
 function sprite(t) {
