@@ -54,6 +54,7 @@ import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
 import { renderAssemblyPanel } from './assembly.js';
 import { uiIcon } from './ui-icons.js';
 import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
+import { NODE_TAGS } from '../../data/node-tags.js';
 import { apiAvailable, getSiteAnnotations, postSiteAnnotation, removeSiteTag, deleteSiteAnnotation } from '../api.js';
 import { activeProfile } from '../auth.js';
 import {
@@ -5345,16 +5346,21 @@ function openSiteNotesModal(siteId, siteName) {
   };
   const refetch = async () => apply(await getSiteAnnotations(siteId, token));
 
-  // "Server tags" = what the map DATA classifies this node as (its planner
-  // flags), shown alongside the player tags so the two can be compared. The
-  // player tags drive the actual map markers (data/node-tags.js); this is the
-  // read-only data view.
+  // "Server tags" = how the map-data SINGLE SOURCE OF TRUTH (data/node-tags.js)
+  // classifies this node, plus the planner's flyby / radhaz, shown next to the
+  // raw player tags so the two can be compared. An aerobrake node records
+  // aerobrake + hazard here (a parachute is itself a kind of hazard), even
+  // though its marker is just the parachute.
   const serverNode = (_activeData && _activeData.sites)
     ? _activeData.sites.find((s) => s.id2 === siteId) : null;
+  const nt = NODE_TAGS[siteId];
   const serverTagLabels = [];
+  if (nt) {
+    if (nt.lander) serverTagLabels.push(nt.half ? 'half-lander-burn' : 'lander-burn');
+    if (nt.aerobrake) serverTagLabels.push('aero-break');
+    if (nt.hazard) serverTagLabels.push('hazard');
+  }
   if (serverNode) {
-    if (serverNode.landing != null) serverTagLabels.push(serverNode.landing < 1 ? 'half-lander-burn' : 'lander-burn');
-    if (serverNode.hazard) serverTagLabels.push('hazard');
     if (serverNode.type === 'venus') serverTagLabels.push('venus flyby');
     else if (serverNode.flybyBoost != null) serverTagLabels.push('flyby +' + (serverNode.flybyBoost === 'thrust' ? 'T' : serverNode.flybyBoost));
     if (serverNode.type === 'radhaz') serverTagLabels.push('radiation');
