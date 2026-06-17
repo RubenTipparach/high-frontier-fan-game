@@ -3002,20 +3002,46 @@ app.get('/admin/site-tags', (req, res) => {
 
   const editedIds = db.prepare(`SELECT site_id FROM node_tags ORDER BY site_id ASC`).all().map((r) => r.site_id);
 
+  // Bulk effective-tags lookup (override row if any, else the static map-data
+  // baseline) so we can filter all nodes without a per-node query.
+  const overrideRows = new Map(db.prepare(
+    `SELECT site_id, lander, half, hazard, aerobrake, season FROM node_tags`).all().map((r) => [r.site_id, r]));
+  const effOf = (id) => {
+    const src = overrideRows.get(id) || STATIC_NODE_TAGS[id] || {};
+    return { lander: !!src.lander, half: !!src.half, hazard: !!src.hazard, aerobrake: !!src.aerobrake,
+      season: SEASON_KEYS.includes(src.season) ? src.season : '' };
+  };
+
+  // Tag filters (the f= checkboxes). Markers are AND-ed; seasons are OR-ed.
+  // Search can be blank when filters are selected.
+  const selected = [].concat(req.query.f || []).map(String).filter(Boolean);
+  const markerFilters = SERVER_TAG_FIELDS.map((x) => x.key).filter((k) => selected.includes(k));
+  const seasonFilters = selected.filter((v) => v.startsWith('season-')).map((v) => v.slice(7)).filter((s) => SEASON_KEYS.includes(s));
+  const filterQS = selected.map((v) => '&f=' + encodeURIComponent(v)).join('');
+  const passesFilter = (id) => {
+    if (!markerFilters.length && !seasonFilters.length) return true;
+    const e = effOf(id);
+    for (const m of markerFilters) if (!e[m]) return false;
+    if (seasonFilters.length && !seasonFilters.includes(e.season)) return false;
+    return true;
+  };
+
   // Candidate universe: every planner node id, plus any annotation / override id
   // not in the snapshot. Empty query = browse them all (paginated).
   const seen = new Set();
   const allIds = [];
   for (const n of PLANNER_NODES) if (!seen.has(n.id2)) { allIds.push(n.id2); seen.add(n.id2); }
   for (const id of nameById.keys()) if (!seen.has(id)) { allIds.push(id); seen.add(id); }
-  const matchIds = (q ? allIds.filter((id) => id.toLowerCase().includes(q)) : allIds).sort();
+  const matchIds = (q ? allIds.filter((id) => id.toLowerCase().includes(q)) : allIds).filter(passesFilter).sort();
 
   const PAGE_SIZE = 50;
   const total = matchIds.length;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   if (page >= pages) page = pages - 1;
   const shown = matchIds.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
-  const back = '/admin/site-tags?q=' + encodeURIComponent(q) + '&page=' + page;
+  const baseQS = 'q=' + encodeURIComponent(q) + filterQS;
+  const pageUrl = (p) => '/admin/site-tags?' + baseQS + '&page=' + p;
+  const back = pageUrl(page);
 
   const nodeCard = (siteId) => {
     const type = typeById.get(siteId);
@@ -3026,7 +3052,6 @@ app.get('/admin/site-tags', (req, res) => {
     </section>`;
   };
 
-  const pageUrl = (p) => '/admin/site-tags?q=' + encodeURIComponent(q) + '&page=' + p;
   const pager = pages > 1
     ? `<div class="pager">
         ${page > 0 ? `<a href="${pageUrl(page - 1)}">‹ prev</a>` : '<span class="muted">‹ prev</span>'}
@@ -3035,12 +3060,20 @@ app.get('/admin/site-tags', (req, res) => {
       </div>`
     : '';
 
+  // Filter checkboxes (markers + the three seasons), carrying current state.
+  const filterChips = [
+    ...SERVER_TAG_FIELDS.map((f) => ({ value: f.key, label: f.label, dot: '' })),
+    ...SEASON_OPTIONS.map((s) => ({ value: 'season-' + s.key, label: s.label + ' season', dot: s.color })),
+  ].map((c) =>
+    `<label class="stbox"><input type="checkbox" name="f" value="${c.value}"${selected.includes(c.value) ? ' checked' : ''}>${c.dot ? ` <span class="st-dot" style="background:${c.dot}"></span>` : ' '}${c.label}</label>`).join('');
+
   const editedBlock = editedIds.length
     ? `<h2>Edited server tags (${editedIds.length})</h2>${editedIds.map(nodeCard).join('')}`
     : '';
-  const browseBlock = `<h2>${q ? 'Search "' + esc(q) + '"' : 'All nodes'}: ${total} node${total === 1 ? '' : 's'}</h2>
+  const filterNote = selected.length ? ' · filtered by ' + selected.length + ' tag' + (selected.length === 1 ? '' : 's') : '';
+  const browseBlock = `<h2>${q ? 'Search "' + esc(q) + '"' : 'All nodes'}${filterNote}: ${total} node${total === 1 ? '' : 's'}</h2>
        ${pager}
-       ${shown.length ? shown.map(nodeCard).join('') : '<p class="muted">No nodes match that id.</p>'}
+       ${shown.length ? shown.map(nodeCard).join('') : '<p class="muted">No nodes match.</p>'}
        ${shown.length ? pager : ''}`;
 
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>Site tags</title>

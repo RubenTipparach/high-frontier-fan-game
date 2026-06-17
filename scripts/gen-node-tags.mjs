@@ -15,8 +15,11 @@
 //      lander / hazard marker. Lagrange/venus hazard flags are too coarse
 //      (the planner marks nearly every inner lagrange hazardous), so for those
 //      node types we trust ONLY the player tags.
-//   3. data/node-tag-overrides.json (OPTIONAL) - admin-edited server tags
-//      exported from /admin/site-tags. These WIN over both inputs above; an
+//   3. data/node-seasons.json - the canonical season seed for the 15 seasonal
+//      comets / asteroids (derived from the planner JSON's siteSynodic). Sets
+//      the season for those named sites; overrides a player colour-tag guess.
+//   4. data/node-tag-overrides.json (OPTIONAL) - admin-edited server tags
+//      exported from /admin/site-tags. These WIN over every input above; an
 //      empty {} entry clears a node to no marker. Missing file = no overrides.
 //
 // Re-run after editing any input:  node scripts/gen-node-tags.mjs
@@ -61,6 +64,18 @@ for (const n of planner) {
   if (n.landing != null) { r.lander = true; if (n.landing < 1) r.half = true; }
   if (n.hazard) r.hazard = true;
   if (Object.keys(r).length) resolved[n.id2] = r;
+}
+
+// 2b) Canonical synodic SEASON seed (data/node-seasons.json, derived from the
+//     planner JSON's siteSynodic on the 15 seasonal comets / asteroids). This
+//     is the authoritative season for those named sites, so it overrides a
+//     player colour-tag guess; an admin override (step 3) still wins. Named
+//     sites carry no marker, so a season-only entry is created here as needed.
+let seasonSeed = {};
+try { seasonSeed = JSON.parse(readFileSync(resolve(dataDir, 'node-seasons.json'), 'utf8')); } catch { seasonSeed = {}; }
+for (const [id, s] of Object.entries(seasonSeed)) {
+  if (!SEASON[s]) continue;
+  (resolved[id] || (resolved[id] = {})).season = SEASON[s];
 }
 
 // 3) Admin overrides (data/node-tag-overrides.json, exported from /admin/site-tags)

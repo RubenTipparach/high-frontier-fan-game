@@ -3,6 +3,8 @@
 // the planner's own burn flags. half-burn + lander-burn => half-lander; every
 // aerobrake site is also a hazard. Keyed by a node's id2 ref.
 export const NODE_TAGS = {
+  "asbolus": {"season":"blue"},
+  "bee-zed": {"season":"red"},
   "burn-0gvyj": {"lander":true},
   "burn-0hh45": {"lander":true},
   "burn-0ktq5": {"lander":true,"hazard":true},
@@ -57,6 +59,17 @@ export const NODE_TAGS = {
   "burn-y0j6e": {"lander":true,"half":true},
   "burn-yxsbu": {"lander":true},
   "burn-z7ntn": {"lander":true},
+  "comet-bartley-2": {"season":"yellow"},
+  "comet-borrelly": {"season":"yellow"},
+  "comet-crommelin": {"season":"yellow"},
+  "comet-encke": {"season":"blue"},
+  "comet-halley": {"season":"red"},
+  "comet-holmes": {"season":"red"},
+  "comet-neujmin-1": {"season":"blue"},
+  "hermes-a": {"season":"blue"},
+  "hermes-b": {"season":"blue"},
+  "icarus": {"season":"red"},
+  "kreutz-sungrazer": {"season":"yellow"},
   "lag-0n050": {"aerobrake":true,"hazard":true},
   "lag-0ss6n": {"hazard":true},
   "lag-25q0c": {"aerobrake":true,"hazard":true},
@@ -102,6 +115,8 @@ export const NODE_TAGS = {
   "lag-vlqer": {"aerobrake":true,"hazard":true},
   "lag-wx5rf": {"hazard":true},
   "lag-y2g71": {"hazard":true},
+  "phaethon": {"season":"yellow"},
+  "pholus": {"season":"red"},
 };
 
 // Resolve a { lander, half, hazard, aerobrake } record to a map marker sprite
