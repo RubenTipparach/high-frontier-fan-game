@@ -342,6 +342,7 @@ db.exec(`
     half       INTEGER NOT NULL DEFAULT 0,
     hazard     INTEGER NOT NULL DEFAULT 0,
     aerobrake  INTEGER NOT NULL DEFAULT 0,
+    season     TEXT,
     updated_at INTEGER NOT NULL
   );
 `);
@@ -385,6 +386,10 @@ ensureColumn('lobbies', 'cancelled_at', 'cancelled_at INTEGER');
 ensureColumn('lobbies', 'idempotency_key', 'idempotency_key TEXT');
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_lobbies_idem
   ON lobbies(idempotency_key) WHERE idempotency_key IS NOT NULL;`);
+// node_tags predates the synodic-season column on DBs that created the table
+// before seasons shipped; add it idempotently. A space's season ('red' /
+// 'yellow' / 'blue', or NULL) gates which Sunspot Cycle phase it can be entered.
+ensureColumn('node_tags', 'season', 'season TEXT');
 
 export function nowMs() {
   return Date.now();

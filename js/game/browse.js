@@ -5379,9 +5379,15 @@ function openSiteNotesModal(siteId, siteName) {
     else if (serverNode.flybyBoost != null) serverTagLabels.push('flyby +' + (serverNode.flybyBoost === 'thrust' ? 'T' : serverNode.flybyBoost));
     if (serverNode.type === 'radhaz') serverTagLabels.push('radiation');
   }
-  const serverChips = serverTagLabels.length
-    ? serverTagLabels.map((l) => `<span class="site-tag-chip is-server" style="--tag:#8fa6d8"><span class="site-tag-dot"></span>${esc(l)}</span>`).join('')
-    : '<span class="muted">none</span>';
+  // A node's synodic season: it can only be entered during that Sunspot phase.
+  // Tinted with the same red / yellow / blue the map uses for season lanes.
+  const SEASON_COLORS = { red: '#f87171', yellow: '#facc15', blue: '#60a5fa' };
+  const serverChipParts = serverTagLabels.map((l) =>
+    `<span class="site-tag-chip is-server" style="--tag:#8fa6d8"><span class="site-tag-dot"></span>${esc(l)}</span>`);
+  if (nt && SEASON_COLORS[nt.season]) {
+    serverChipParts.push(`<span class="site-tag-chip is-server" style="--tag:${SEASON_COLORS[nt.season]}"><span class="site-tag-dot"></span>${esc(nt.season)} season</span>`);
+  }
+  const serverChips = serverChipParts.length ? serverChipParts.join('') : '<span class="muted">none</span>';
 
   function render() {
     const tagChips = state.tags.map((t) => {

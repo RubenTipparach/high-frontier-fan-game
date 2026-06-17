@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 // Generate data/node-tags.js - the SINGLE SOURCE OF TRUTH for solar-map node
 // markers. Merges two inputs into one comprehensive id2 -> { lander, half,
-// hazard, aerobrake } map that the renderer reads with NO runtime fallback:
+// hazard, aerobrake, season } map that the renderer reads with NO runtime
+// fallback:
 //
 //   1. data/site-notes.json  - the in-app player tag export ("tag" annotations).
 //      Player tags are authoritative for the node they're on. half-burn +
 //      lander-burn => half-lander; the plain "burns" tag and "message" notes
 //      are ignored. RULE: every aerobrake site is ALSO a hazard, so aero-break
-//      implies hazard.
+//      implies hazard. The red / yellow / blue tags are the node's SEASON (the
+//      Sunspot phase it can be entered in); a node carries at most one.
 //   2. data/planner-nodes.json - a snapshot of the upstream planner flags
 //      ({ id2, type, landing, hazard }). Used to fill in every UNTAGGED burn's
 //      lander / hazard marker. Lagrange/venus hazard flags are too coarse
@@ -28,12 +30,16 @@ const notes = JSON.parse(readFileSync(resolve(dataDir, 'site-notes.json'), 'utf8
 const planner = JSON.parse(readFileSync(resolve(dataDir, 'planner-nodes.json'), 'utf8'));
 
 const FLAG = { 'lander-burn': 'lander', 'half-burn': 'half', 'hazard': 'hazard', 'aero-break': 'aerobrake' };
+// A space's synodic SEASON (the Sunspot-phase it can be entered in). The
+// red / yellow / blue player tags ARE the season; a node carries at most one.
+const SEASON = { red: 'red', yellow: 'yellow', blue: 'blue' };
 
 // 1) Player tags (authoritative per node).
 const tagsBySite = {};
 for (const a of notes.annotations || []) {
   if (a.kind !== 'tag') continue;          // ignore "message" notes
   if (a.body === 'burns') continue;         // ignore the plain "burns" tag for now
+  if (SEASON[a.body]) { (tagsBySite[a.site_id] || (tagsBySite[a.site_id] = {})).season = SEASON[a.body]; continue; }
   const flag = FLAG[a.body];
   if (!flag) continue;
   (tagsBySite[a.site_id] || (tagsBySite[a.site_id] = {}))[flag] = true;
@@ -68,6 +74,7 @@ for (const [id, raw] of Object.entries(overrides)) {
   if (raw && raw.half) r.half = true;
   if (raw && raw.hazard) r.hazard = true;
   if (raw && raw.aerobrake) { r.aerobrake = true; r.hazard = true; }  // aerobrake implies hazard
+  if (raw && SEASON[raw.season]) r.season = SEASON[raw.season];
   if (Object.keys(r).length) resolved[id] = r;
   else delete resolved[id];                 // explicitly cleared
 }
