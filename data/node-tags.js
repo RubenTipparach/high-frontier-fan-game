@@ -63,7 +63,6 @@ export const NODE_TAGS = {
   "comet-bartley-2": {"season":"yellow"},
   "comet-borrelly": {"season":"yellow"},
   "comet-crommelin": {"season":"yellow"},
-  "comet-elst-pizarro": {"season":"blue"},
   "comet-encke": {"season":"blue"},
   "comet-halley": {"season":"red"},
   "comet-holmes": {"season":"red"},
