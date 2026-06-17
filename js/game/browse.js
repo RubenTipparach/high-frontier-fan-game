@@ -341,6 +341,20 @@ export function mountBrowse(opts = {}) {
   // Stash online context up front so the renderMap()/sync paths below
   // (which fire synchronously during mount) already see online mode.
   if (opts && opts.online) {
+    // Switching to a DIFFERENT online game (e.g. spectating game A, returning
+    // to the lobby, then creating solo game B) must drop game A's cached
+    // per-game state first. Otherwise its snapshot / players / crew draft
+    // render during this synchronous mount - before B's first snapshot lands -
+    // so the crew draft thinks you're game A's first player and Pick Crew stays
+    // disabled until a refresh. The WS / poll below re-subscribe for the new
+    // game; tearing the old ones down here also stops a leaked subscription.
+    if (_onlineGameId !== (opts.gameId || null)) {
+      if (_onlineOffWS) { try { _onlineOffWS(); } catch { /* ignore */ } _onlineOffWS = null; }
+      if (_onlinePoll) { clearInterval(_onlinePoll); _onlinePoll = null; _onlinePollMs = 0; }
+      _onlineSnapshot = null;
+      _lastAppliedSeq = -1;
+      _onlineMaps = null;
+    }
     _online = true;
     _spectator = !!opts.spectator;
     _onlineGameId = opts.gameId || null;
