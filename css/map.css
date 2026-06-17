@@ -3830,6 +3830,26 @@ body:has(#view-browse:not(.hidden)) #main {
 .patent-filter button[data-type="supports"]         { border-left-color: #34d399; }
 .patent-filter button.active[data-type="supports"]  { background: #34d399; color: #022c1f; border-color: #047857; }
 
+/* Library name search: a global filter row under the type tabs. While the
+   input has text it overrides the tabs (renderPatents shows every matching
+   card across all types). The supports browser's "Find in library" button
+   pre-fills it. */
+.patent-search { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; }
+.patent-search-input {
+  flex: 1 1 auto; min-width: 0;
+  background: rgba(15, 23, 42, 0.7); color: #e2e8f0;
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 10px; font-size: 13px;
+}
+.patent-search-input:focus { outline: none; border-color: #34d399; }
+.patent-search-clear {
+  flex: 0 0 auto; background: rgba(30, 41, 59, 0.85); color: #cbd5e1;
+  border: 1px solid var(--border); border-radius: 6px;
+  width: 28px; height: 28px; font-size: 16px; line-height: 1; cursor: pointer;
+}
+.patent-search-clear:hover { background: #475569; color: #fff; }
+.patent-search-empty { padding: 18px; text-align: center; }
+
 /* Sub-filter row under the Supports tab: one chip per kind of
    support a card can supply. Hidden on other tabs so the row
    doesn't take vertical space when it's meaningless. Multi-
