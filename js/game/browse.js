@@ -9856,25 +9856,31 @@ function radBypassThreshold() {
 
 // Resolve the current rocket stack into [{id, name, radHardness}] rows for
 // the rad-hardness check - used both by the upfront at-risk preview in the
-// confirm modal and by the per-zone roll modal. Patents read rad-hard off
-// the card; crew read name + rad-hard off the chosen FACE (they live on the
-// face, not the physical card), so a flipped crew row is never blank.
+// confirm modal and by the per-zone roll modal. Name + rad-hard are read off
+// the INSTALLED face (the black / secondary side when a card is flipped), NOT
+// the white-side default, so a flipped card is checked against its actual
+// rad-hardness instead of its old white-side value. Crew live on the face too.
 function radStackCards() {
   return getRocketStack()
     .map((slot) => {
       const patent = PATENTS_BY_ID[slot.id];
       if (patent) {
+        const face = (slot.face === 'secondary' && patent.faces && patent.faces.secondary)
+          ? patent.faces.secondary : ((patent.faces && patent.faces.primary) || patent);
         // A radiator's rad-hardness is its DEPLOYED side's (heavy is more
         // fragile); a heavy one degrades to light instead of being lost.
         if (patent.type === 'radiator') {
-          const rf = (slot.face === 'secondary' && patent.faces && patent.faces.secondary)
-            ? patent.faces.secondary : ((patent.faces && patent.faces.primary) || patent);
           return {
             id: slot.id, name: patent.name, type: 'radiator', radSide: slot.radSide || 'heavy',
-            radHardness: radiatorRadHardness(rf, slot.radSide),
+            radHardness: radiatorRadHardness(face, slot.radSide),
           };
         }
-        return { id: slot.id, name: patent.name, radHardness: patent.radHardness != null ? patent.radHardness : 0 };
+        return {
+          id: slot.id,
+          name: face.name || patent.name,
+          radHardness: face.radHardness != null ? face.radHardness
+            : (patent.radHardness != null ? patent.radHardness : 0),
+        };
       }
       const crew = CREW_BY_ID[slot.id];
       if (crew) {
