@@ -1800,18 +1800,20 @@ function applyBoost(state, op, player) {
   // its chosen deployed side (heavy is heavier), so factor that in per id.
   const radSides = (op.radSides && typeof op.radSides === 'object') ? op.radSides : {};
   let cost = 0;
-  for (const id of ids) cost += boostMass(id, radSides[id]);
+  // Default to the light side (matches the slot assignment below) so the
+  // charge and the locked side never disagree.
+  for (const id of ids) cost += boostMass(id, radSides[id] === 'heavy' ? 'heavy' : 'light');
   if (cost > player.aqua) return fail('insufficient_aqua');
   // Move them hand -> LEO. A radiator locks its deployed light/heavy side here
-  // (op.radSides[id]); default heavy (max cooling). Only radiation damage flips
-  // it afterward.
+  // (op.radSides[id]); default light (lighter, cheapest to boost). Only
+  // radiation damage flips it afterward.
   for (const id of ids) {
     const idx = player.hand.indexOf(id);
     if (idx >= 0) player.hand.splice(idx, 1);
     const slot = { id, kind: 'patent' };
     const card = PATENTS_BY_ID[id];
     if (card && card.type === 'radiator') {
-      slot.radSide = radSides[id] === 'light' ? 'light' : 'heavy';
+      slot.radSide = radSides[id] === 'heavy' ? 'heavy' : 'light';
     }
     player.leo.push(slot);
   }

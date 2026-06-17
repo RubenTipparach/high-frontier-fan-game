@@ -993,3 +993,12 @@
 .sb-filter-btn em { font-style: normal; }
 .sb-grid { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; padding: 14px; overflow-y: auto; }
 .sb-grid .card { cursor: default; }
+/* Each supplier card gets a "Find in library" button below it (jumps to the
+   library searched for that card so it can be added to hand). */
+.sb-card { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.sb-find-btn {
+  background: #1b1830; color: #cdd2f0; border: 1px solid #34304e;
+  border-radius: 7px; padding: 5px 10px; font-size: 11px; font-weight: 600;
+  cursor: pointer; white-space: nowrap;
+}
+.sb-find-btn:hover { background: #2a2547; border-color: #5b54a0; color: #fff; }

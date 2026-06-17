@@ -3673,10 +3673,24 @@ function renderAssemblyFundraise(body, snapshot) {
       mkBtn(_fr.place ? 'Next: move →' : 'Next →', 'modal-btn primary', () => { _fr.step = 'move'; refreshAssemblyModal(); }),
     );
   } else if (step === 'move') {
-    if (!_fr.moveFrom) btns.append(mkBtn('Skip move & tally', 'modal-btn', () => fundraiseAdvanceToStar(snapshot)));
+    // Skip the move entirely - even after a cube has been picked up - so the
+    // player is never trapped at the destination-pick step. Drop any picked
+    // cube (record no move) and go straight to the vote tally.
+    btns.append(mkBtn('Skip move & tally', 'modal-btn', () => {
+      _fr.moveFrom = null; _fr.moveTo = null;
+      fundraiseAdvanceToStar(snapshot);
+    }));
   } else if (step === 'star') {
     if ((_fr.tied || []).length === 0) {
       btns.append(mkBtn('Set star to Centrist', 'modal-btn primary', () => { _fr.star = 'centrist'; commitFundraise(); }));
+    } else {
+      // If the active-law star already sits on one of the winning (tied)
+      // ideologies, offer to keep it there instead of forcing a re-pick.
+      const cur = snapshot.activeLawStar;
+      if (cur && (_fr.tied || []).includes(cur)) {
+        const curName = (ASSEMBLY_IDEOLOGY_BY_KEY[cur] || {}).name || cur;
+        btns.append(mkBtn(`Keep star on ${curName} (skip)`, 'modal-btn primary', () => { _fr.star = cur; commitFundraise(); }));
+      }
     }
   }
   const undoBtn = mkBtn('↩ Undo', 'modal-btn', fundraiseUndo);
@@ -5245,7 +5259,7 @@ function wireHandStrip() {
       const card = lookup(id);
       if (!card) continue;
       // Lock the radiator's chosen deployed side into the LEO slot at boost.
-      const radSide = card.type === 'radiator' ? (radSides[id] || 'heavy') : undefined;
+      const radSide = card.type === 'radiator' ? (radSides[id] || 'light') : undefined;
       addCardToLeo({ id, kind: kindOf(id), radSide });
       removeFromHand(id);
     }
@@ -9594,7 +9608,9 @@ const HAZARD_COST_PER = 4;
 function classifyHazard(site) {
   if (!site) return null;
   if (site.type === 'radhaz') return { glyph: '☢', label: 'Radiation hazard' };
-  if (site.type === 'venus')  return { glyph: '🪂', label: 'Aerobrake corridor' };
+  // Venus 'venus' nodes are gravity-assist FLYBYS (flybyBoost), not
+  // atmospheric aerobraking, so flying through one is a free maneuver - never
+  // a hazard roll. (User: venus-2lgjk must not require a roll.)
   // Skull hazards live on hazard-flagged burn spaces. Lagrange
   // (flyby / gravity-assist) nodes are flybys, not hazards, even
   // when the planner flags them.
@@ -11829,7 +11845,10 @@ function openBoostModal({ cards, have, opNote }) {
     overlay.className = 'card-modal-overlay confirm-modal-overlay';
     const radiators = (cards || []).filter((c) => c && c.type === 'radiator');
     const sides = {};
-    for (const c of radiators) sides[c.id] = 'heavy';
+    // Default each radiator to its LIGHT deployed side: lighter, so the
+    // cheapest boost. The player can flip any to heavy (more cooling) before
+    // confirming; the side locks once boosted.
+    for (const c of radiators) sides[c.id] = 'light';
     // Live total cost = total mass, with each radiator's mass taken from its
     // currently-selected side (heavy is heavier, so it costs more to boost).
     const totalCost = () => (cards || []).reduce((s, c) =>
@@ -11857,8 +11876,8 @@ function openBoostModal({ cards, have, opNote }) {
       <div class="boost-rad-row" data-id="${esc(c.id)}">
         <span class="boost-rad-name">${esc(c.name)}</span>
         <div class="boost-rad-toggle">
-          <button type="button" class="boost-rad-side" data-side="light">Light · ${sideTherms(c, 'light')}🌡 · ${boostMassOf(c, 'light')} mass</button>
-          <button type="button" class="boost-rad-side is-active" data-side="heavy">Heavy · ${sideTherms(c, 'heavy')}🌡 · ${boostMassOf(c, 'heavy')} mass</button>
+          <button type="button" class="boost-rad-side is-active" data-side="light">Light · ${sideTherms(c, 'light')}🌡 · ${boostMassOf(c, 'light')} mass</button>
+          <button type="button" class="boost-rad-side" data-side="heavy">Heavy · ${sideTherms(c, 'heavy')}🌡 · ${boostMassOf(c, 'heavy')} mass</button>
         </div>
       </div>`).join('');
     panel.innerHTML = `
@@ -14126,7 +14145,8 @@ function playRemoteProspectRoll(site, disc, opts = {}) {
     resultLine.innerHTML = ok
       ? `Rolled <strong>${disc.roll}</strong> ≤ ${disc.threshold} - <strong class="ok">claim placed</strong>.`
       : `Rolled <strong>${disc.roll}</strong> > ${disc.threshold} - <strong class="bad">site exhausted</strong>.`;
-    if (opts.canReroll) {
+    if (opts.canReroll && !ok) {
+      // Only a FAILURE is worth a re-roll - offer re-roll or keep the bust.
       if (rerollBtn) {
         rerollBtn.disabled = false;
         rerollBtn.addEventListener('click', () => {
@@ -14137,7 +14157,10 @@ function playRemoteProspectRoll(site, disc, opts = {}) {
       }
       if (keepBtn) { keepBtn.disabled = false; keepBtn.addEventListener('click', close); }
     } else {
-      // Linger on the verdict, then clear - the disc is already on the map.
+      // Auto-keep a SUCCESS (no one re-rolls a claim they already won), and a
+      // roll with no re-roll just settles: linger on the verdict, then clear.
+      // The disc is already on the map.
+      panel.querySelector('.prospect-roll-actions')?.remove();
       setTimeout(close, 1500);
     }
   });
@@ -16965,6 +16988,15 @@ export function openPatentsSupports(kinds) {
   showPane('patents');
 }
 
+// Open the library (patents pane) with the name search pre-filled to `query`,
+// so a "Find in library" affordance can jump straight to one card and the
+// player can add it to their hand (Free Library mode). Consumed once by
+// renderPatents.
+export function openPatentsSearch(query) {
+  _pendingPatentSelection = { type: 'search', query: String(query || '') };
+  showPane('patents');
+}
+
 // Support browser modal. Tapping a support icon opens this instead of the
 // library: a grid of every card that SUPPLIES that one support, with a
 // WHITE-side / BLACK-side toggle (cards render on the chosen face; never a mix).
@@ -17019,7 +17051,22 @@ function sbRender(dialog, close) {
     </div>
     <div class="sb-grid">${matches.length ? '' : `<p class="muted">Pick a support to see which cards' ${sideWord} side supplies it.</p>`}</div>`;
   const grid = dialog.querySelector('.sb-grid');
-  for (const p of matches) grid.appendChild(renderCard(p, { face: st.side }));
+  for (const p of matches) {
+    const cell = document.createElement('div');
+    cell.className = 'sb-card';
+    cell.appendChild(renderCard(p, { face: st.side }));
+    // Jump from "here is a card that supplies this" to the library, searched
+    // for that exact card, so the player can add it to their hand.
+    const find = document.createElement('button');
+    find.type = 'button';
+    find.className = 'sb-find-btn';
+    find.textContent = '🔍 Find in library';
+    find.title = 'Open the library searched for this card so you can add it to your hand.';
+    const nm = (p.faces && p.faces[st.side] && p.faces[st.side].name) || p.name || p.id;
+    find.addEventListener('click', () => { close(); openPatentsSearch(nm); });
+    cell.appendChild(find);
+    grid.appendChild(cell);
+  }
   dialog.querySelector('.modal-x').addEventListener('click', close);
   dialog.querySelectorAll('.sb-side').forEach((b) => b.addEventListener('click', () => { st.side = b.getAttribute('data-side'); sbRender(dialog, close); }));
   // Each support is a filter button: tap to filter the whole deck to that one
@@ -17360,12 +17407,46 @@ function renderPatents() {
   // (openPatentsSupports), falling back to the first type.
   const seed = _pendingPatentSelection;
   const initialType = (seed && types.includes(seed.type)) ? seed.type : types[0];
+  // A programmatic "search" seed (openPatentsSearch) pre-fills the name search
+  // below; its type isn't a real tab, so the active tab falls back to types[0].
+  const initialSearch = (seed && seed.type === 'search') ? String(seed.query || '') : '';
   types.forEach((t) => {
     const label = TYPE_LABEL[t] || cap(t);
     const active = t === initialType ? ' class="active"' : '';
     bar.innerHTML += `<button${active} data-type="${t}">${label} (${counts[t]})</button>`;
   });
   host.appendChild(bar);
+
+  // Library name search. A global, type-agnostic filter (it overrides the type
+  // tabs while non-empty) so the player can pin one card by name - the target
+  // of the "Find in library" button in the supports browser (openPatentsSearch).
+  let searchQuery = initialSearch;
+  // White (primary) vs black (secondary) face for the whole grid, so the
+  // player can browse every card's installed/black side at once.
+  let librarySide = 'primary';
+  const searchRow = document.createElement('div');
+  searchRow.className = 'patent-search';
+  const searchInput = document.createElement('input');
+  searchInput.type = 'search';
+  searchInput.className = 'patent-search-input';
+  searchInput.placeholder = '🔍 Search cards by name…';
+  searchInput.autocomplete = 'off';
+  searchInput.setAttribute('aria-label', 'Search the library by card name');
+  searchInput.value = initialSearch;
+  const searchClear = document.createElement('button');
+  searchClear.type = 'button';
+  searchClear.className = 'patent-search-clear';
+  searchClear.title = 'Clear search';
+  searchClear.setAttribute('aria-label', 'Clear search');
+  searchClear.textContent = '×';
+  searchClear.hidden = !initialSearch;
+  const sideToggle = document.createElement('div');
+  sideToggle.className = 'patent-side-toggle';
+  sideToggle.innerHTML =
+    '<button type="button" class="patent-side is-active" data-side="primary">⚪ White</button>'
+    + '<button type="button" class="patent-side" data-side="secondary">⚫ Black</button>';
+  searchRow.append(searchInput, searchClear, sideToggle);
+  host.appendChild(searchRow);
 
   // Sub-filter row for the Supports tab: one chip per supply
   // kind, multi-select. Hidden when any other type tab is
@@ -17429,7 +17510,7 @@ function renderPatents() {
   // Cards not in the deck have drag + tap disabled (no
   // duplicates allowed; pull them back from hand/rocket first).
   const decorateForHand = (card, asKind) => {
-    const el = renderCard(card, { type: asKind });
+    const el = renderCard(card, { type: asKind, face: asKind === 'crew' ? undefined : librarySide });
     el.dataset.cardId  = card.id;
     el.dataset.cardKind = asKind;
     // Crew-face tiles are a display projection of a physical card
@@ -17491,8 +17572,35 @@ function renderPatents() {
     return el;
   };
 
+  // Match a card by name on EITHER face (the dark side has its own name) or by
+  // id, case-insensitive substring.
+  const cardMatchesQuery = (card, q) => {
+    if (!q) return true;
+    const names = [card.name];
+    if (card.faces) {
+      if (card.faces.primary) names.push(card.faces.primary.name);
+      if (card.faces.secondary) names.push(card.faces.secondary.name);
+    }
+    names.push(card.id);
+    return names.some((s) => s && String(s).toLowerCase().includes(q));
+  };
   const repaint = (filter) => {
     grid.innerHTML = '';
+    const q = (searchQuery || '').trim().toLowerCase();
+    if (q) {
+      // Global name search across the whole library (every type + crew),
+      // ignoring the active type tab so the exact card always surfaces.
+      let hits = 0;
+      for (const p of PATENTS) if (cardMatchesQuery(p, q)) { grid.appendChild(decorateForHand(p, 'patent')); hits++; }
+      for (const c of CREW_FACES) if (cardMatchesQuery(c, q)) { grid.appendChild(decorateForHand(c, 'crew')); hits++; }
+      if (!hits) {
+        const empty = document.createElement('p');
+        empty.className = 'muted patent-search-empty';
+        empty.textContent = `No cards match "${(searchQuery || '').trim()}".`;
+        grid.appendChild(empty);
+      }
+      return;
+    }
     if (filter === 'crew') {
       // All 12 faction faces, each a flip-less single-face card.
       for (const c of CREW_FACES) grid.appendChild(decorateForHand(c, 'crew'));
@@ -17540,6 +17648,26 @@ function renderPatents() {
       repaint(b.dataset.type);
     };
   });
+
+  // Live name search: filter as the player types; clearing restores the tabs.
+  const onSearch = () => {
+    searchQuery = searchInput.value || '';
+    searchClear.hidden = !searchQuery;
+    // While searching, the global results override the tabs - hide the
+    // supports sub-row so it doesn't look like it's filtering the visible grid.
+    supportRow.style.display = searchQuery.trim() ? 'none' : '';
+    repaintActive();
+  };
+  searchInput.addEventListener('input', onSearch);
+  searchClear.addEventListener('click', () => { searchInput.value = ''; onSearch(); searchInput.focus(); });
+  sideToggle.querySelectorAll('.patent-side').forEach((b) => {
+    b.addEventListener('click', () => {
+      librarySide = b.dataset.side === 'secondary' ? 'secondary' : 'primary';
+      sideToggle.querySelectorAll('.patent-side').forEach((x) => x.classList.toggle('is-active', x === b));
+      repaintActive();
+    });
+  });
+  if (initialSearch.trim()) supportRow.style.display = 'none';
   repaint(initialType);
 }
 
