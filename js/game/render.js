@@ -2137,7 +2137,6 @@ export class MapRenderer {
     // Crisp, viewport-culled, drawn live (not scaled from the cache) so
     // node markers / hexes / labels stay sharp at every zoom level.
     this._step('waypoints', () => this._drawWaypointsScreen(ctx));
-    this._step('seasons', () => this._drawSeasonRings(ctx));
     this._step('hexes', () => this._drawSiteHexesScreen(ctx));
     this._step('labels', () => this._drawSiteLabelsScreen(ctx));
 
@@ -2637,6 +2636,21 @@ export class MapRenderer {
         if (vis.fill !== 'transparent') { ctx.fillStyle = vis.fill; ctx.fill(); }
         ctx.strokeStyle = vis.stroke;
         ctx.stroke();
+        // Season-tagged nodes REPLACE their ring colour with the synodic
+        // season colour (red / yellow / blue), re-stroked over the batch so
+        // the node carries no extra ring - just a recoloured one.
+        for (const w of circles) {
+          const seas = seasonOf(w);
+          if (!seas) continue;
+          const sx = this.pan.x + w.x * eff;
+          const sy = this.pan.y + w.y * eff;
+          const wr = isLeoWaypoint(w) ? vis.r * 2 : vis.r;
+          if (sx < -wr || sx > hostW + wr || sy < -wr || sy > hostH + wr) continue;
+          ctx.beginPath();
+          ctx.arc(sx, sy, wr, 0, Math.PI * 2);
+          ctx.strokeStyle = SYNODIC_COLOURS[seas];
+          ctx.stroke();
+        }
       }
 
       // Lander burns no longer draw a magenta disc here - they render as a
@@ -2912,43 +2926,6 @@ export class MapRenderer {
 
   // Hex markers + endpoint rings, drawn in SCREEN space so they
   // stay readable at any zoom level.
-  // Synodic-season rings: a coloured halo around every seasonal space (comet /
-  // seasonal asteroid, or any node tagged with a season) so a glance tells you
-  // which Sunspot phase it opens in. Same red / yellow / blue palette as the
-  // seasonal comet lanes. Drawn between the node markers and the hexes so it
-  // haloes the node without covering its glyph.
-  _drawSeasonRings(ctx) {
-    const eff = this.zoom * this.fitScale;
-    const { hostW, hostH } = this;
-    const hexS = this._hexScale();
-    ctx.save();
-    ctx.lineWidth = 2.5;
-    const ring = (node, baseR) => {
-      const season = seasonOf(node);
-      if (!season) return;
-      const sx = this.pan.x + node.x * eff;
-      const sy = this.pan.y + node.y * eff;
-      if (sx < -40 || sx > hostW + 40 || sy < -40 || sy > hostH + 40) return;
-      const col = SYNODIC_COLOURS[season];
-      ctx.beginPath();
-      ctx.arc(sx, sy, baseR, 0, Math.PI * 2);
-      ctx.strokeStyle = col;
-      ctx.shadowColor = col;
-      ctx.shadowBlur = 8;
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-    };
-    for (const site of this._realSites) {
-      if (site.isLandable === false) continue;
-      const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
-      if (vis.kind === 'sun') continue;
-      ring(site, vis.r * hexS + 5);
-    }
-    // Waypoints (a burn / lagrange admin-tagged with a season) ring the marker.
-    for (const w of this._waypoints) ring(w, (TYPE_VIS[w.type]?.r || 7) + 6);
-    ctx.restore();
-  }
-
   _drawSiteHexesScreen(ctx) {
     const eff = this.zoom * this.fitScale;
     const { hostW, hostH } = this;
