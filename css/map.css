@@ -3849,6 +3849,14 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .patent-search-clear:hover { background: #475569; color: #fff; }
 .patent-search-empty { padding: 18px; text-align: center; }
+/* White / black face toggle for the whole library grid. */
+.patent-side-toggle { display: flex; gap: 4px; flex: 0 0 auto; }
+.patent-side {
+  background: rgba(30, 41, 59, 0.85); color: #cbd5e1;
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 9px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.patent-side.is-active { background: #3a3568; color: #fff; border-color: #5b54a0; }
 
 /* Sub-filter row under the Supports tab: one chip per kind of
    support a card can supply. Hidden on other tabs so the row

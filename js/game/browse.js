@@ -9608,7 +9608,9 @@ const HAZARD_COST_PER = 4;
 function classifyHazard(site) {
   if (!site) return null;
   if (site.type === 'radhaz') return { glyph: '☢', label: 'Radiation hazard' };
-  if (site.type === 'venus')  return { glyph: '🪂', label: 'Aerobrake corridor' };
+  // Venus 'venus' nodes are gravity-assist FLYBYS (flybyBoost), not
+  // atmospheric aerobraking, so flying through one is a free maneuver - never
+  // a hazard roll. (User: venus-2lgjk must not require a roll.)
   // Skull hazards live on hazard-flagged burn spaces. Lagrange
   // (flyby / gravity-assist) nodes are flybys, not hazards, even
   // when the planner flags them.
@@ -14143,7 +14145,8 @@ function playRemoteProspectRoll(site, disc, opts = {}) {
     resultLine.innerHTML = ok
       ? `Rolled <strong>${disc.roll}</strong> ≤ ${disc.threshold} - <strong class="ok">claim placed</strong>.`
       : `Rolled <strong>${disc.roll}</strong> > ${disc.threshold} - <strong class="bad">site exhausted</strong>.`;
-    if (opts.canReroll) {
+    if (opts.canReroll && !ok) {
+      // Only a FAILURE is worth a re-roll - offer re-roll or keep the bust.
       if (rerollBtn) {
         rerollBtn.disabled = false;
         rerollBtn.addEventListener('click', () => {
@@ -14154,7 +14157,10 @@ function playRemoteProspectRoll(site, disc, opts = {}) {
       }
       if (keepBtn) { keepBtn.disabled = false; keepBtn.addEventListener('click', close); }
     } else {
-      // Linger on the verdict, then clear - the disc is already on the map.
+      // Auto-keep a SUCCESS (no one re-rolls a claim they already won), and a
+      // roll with no re-roll just settles: linger on the verdict, then clear.
+      // The disc is already on the map.
+      panel.querySelector('.prospect-roll-actions')?.remove();
       setTimeout(close, 1500);
     }
   });
@@ -17415,6 +17421,9 @@ function renderPatents() {
   // tabs while non-empty) so the player can pin one card by name - the target
   // of the "Find in library" button in the supports browser (openPatentsSearch).
   let searchQuery = initialSearch;
+  // White (primary) vs black (secondary) face for the whole grid, so the
+  // player can browse every card's installed/black side at once.
+  let librarySide = 'primary';
   const searchRow = document.createElement('div');
   searchRow.className = 'patent-search';
   const searchInput = document.createElement('input');
@@ -17431,7 +17440,12 @@ function renderPatents() {
   searchClear.setAttribute('aria-label', 'Clear search');
   searchClear.textContent = '×';
   searchClear.hidden = !initialSearch;
-  searchRow.append(searchInput, searchClear);
+  const sideToggle = document.createElement('div');
+  sideToggle.className = 'patent-side-toggle';
+  sideToggle.innerHTML =
+    '<button type="button" class="patent-side is-active" data-side="primary">⚪ White</button>'
+    + '<button type="button" class="patent-side" data-side="secondary">⚫ Black</button>';
+  searchRow.append(searchInput, searchClear, sideToggle);
   host.appendChild(searchRow);
 
   // Sub-filter row for the Supports tab: one chip per supply
@@ -17496,7 +17510,7 @@ function renderPatents() {
   // Cards not in the deck have drag + tap disabled (no
   // duplicates allowed; pull them back from hand/rocket first).
   const decorateForHand = (card, asKind) => {
-    const el = renderCard(card, { type: asKind });
+    const el = renderCard(card, { type: asKind, face: asKind === 'crew' ? undefined : librarySide });
     el.dataset.cardId  = card.id;
     el.dataset.cardKind = asKind;
     // Crew-face tiles are a display projection of a physical card
@@ -17646,6 +17660,13 @@ function renderPatents() {
   };
   searchInput.addEventListener('input', onSearch);
   searchClear.addEventListener('click', () => { searchInput.value = ''; onSearch(); searchInput.focus(); });
+  sideToggle.querySelectorAll('.patent-side').forEach((b) => {
+    b.addEventListener('click', () => {
+      librarySide = b.dataset.side === 'secondary' ? 'secondary' : 'primary';
+      sideToggle.querySelectorAll('.patent-side').forEach((x) => x.classList.toggle('is-active', x === b));
+      repaintActive();
+    });
+  });
   if (initialSearch.trim()) supportRow.style.display = 'none';
   repaint(initialType);
 }
