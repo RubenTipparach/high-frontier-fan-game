@@ -16062,7 +16062,20 @@ function showSitePopupFor(site) {
         // don't pre-disable on ops==0 because a disabled button
         // gives no feedback; the modal is the notification the
         // user asked for.)
-        actions.push({
+        // When M0 politics is active, Fundraise REPLACES Income (rulebook):
+        // it opens the assembly board's guided fundraise flow (place / move a
+        // delegate, gain aqua, vote tally) instead of the plain +1 aqua.
+        const m0Active = _online && _onlineSnapshot && _onlineSnapshot.m0;
+        actions.push(m0Active ? {
+          label: '🏛 Fundraising',
+          variant: 'rocket',
+          disabled: false,
+          title: 'Fundraise: place or move a delegate, gain 1 Aqua, run a vote tally. Costs one operation.',
+          onClick: () => {
+            _renderer.clearSitePopup();
+            openAssemblyModal('fundraise');
+          },
+        } : {
           label: '💰 Income (+1 aqua)',
           variant: 'rocket',
           disabled: false,
