@@ -77,7 +77,8 @@ const result = await page.evaluate(({ SZ, K, MAP_R, HAZ_R, VEN_R }) => {
   function drawCutLine(ctx, cx, cy, r) {
     ctx.save();
     ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(1.3, 0.12 * r); ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(cx, cy - 0.56 * r); ctx.lineTo(cx, cy + 0.74 * r); ctx.stroke();
+    // Span the full lander (body top to footpads) so the "cut" reads cleanly.
+    ctx.beginPath(); ctx.moveTo(cx, cy - 0.82 * r); ctx.lineTo(cx, cy + 0.82 * r); ctx.stroke();
     ctx.restore();
   }
   function drawHalfLanderGlyph(ctx, cx, cy, r, fill) {

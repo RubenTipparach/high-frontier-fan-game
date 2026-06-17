@@ -2716,8 +2716,8 @@ export class MapRenderer {
     }
 
     // Flyby-boost "+N" labels, drawn LAST so the number sits IN FRONT of any
-    // node glyph. Each rides a black rounded pill so the gravity-assist value
-    // stays readable over a busy node.
+    // node glyph. Each rides a black DISC sized to fit the number, so the
+    // gravity-assist value stays readable over a busy node.
     ctx.font = '700 11px ui-sans-serif, system-ui, sans-serif';
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'center';
@@ -2727,12 +2727,13 @@ export class MapRenderer {
       const sy = this.pan.y + w.y * eff;
       if (sx < -20 || sx > hostW + 20 || sy < -20 || sy > hostH + 20) continue;
       const txt = '+' + (w.flybyBoost === 'thrust' ? 'T' : w.flybyBoost);
-      const bw = ctx.measureText(txt).width + 7;
-      const bh = 15;
+      const tw = ctx.measureText(txt).width;
+      // Radius = half the text-box diagonal + padding so the number always fits
+      // inside the circle, with a minimum so single-char values aren't tiny.
+      const rad = Math.max(9, Math.sqrt(tw * tw + 11 * 11) / 2 + 2);
       ctx.fillStyle = '#000000';
       ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(sx - bw / 2, sy - bh / 2, bw, bh, 4);
-      else ctx.rect(sx - bw / 2, sy - bh / 2, bw, bh);
+      ctx.arc(sx, sy, rad, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#ffffff';
       ctx.fillText(txt, sx, sy + 0.5);
