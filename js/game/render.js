@@ -179,7 +179,7 @@ const TYPE_VIS = {
   lagrange:       { kind: 'circle', r:  7, fill: 'transparent', stroke: '#c66932' },
   burn:           { kind: 'circle', r:  6, hitR: 8, fill: '#d60f7a', stroke: '#fde0ee', hideBelowZoom: 1.4 },
   hohmann:        { kind: 'circle', r:  4, hitR: 9, fill: '#10b981', stroke: '#a7f3d0', hideBelowZoom: 2.5 },
-  venus:          { kind: 'circle', r:  8, fill: '#fb923c', stroke: '#fed7aa' },
+  venus:          { kind: 'circle', r:  8, fill: 'transparent', stroke: '#c66932' },
   radhaz:         { kind: 'circle', r:  7, fill: '#fbbf24', stroke: '#fde68a' },
   orbit:          { kind: 'circle', r:  6, fill: '#0c0a16', stroke: '#7dd3fc' },
   decorative:     { kind: 'none' },
@@ -645,6 +645,143 @@ function drawRadiationGlyph(ctx, cx, cy, r) {
   ctx.beginPath();
   ctx.arc(cx, cy, innerR * 0.7, 0, Math.PI * 2);
   ctx.fill();
+}
+
+// ----- Vector node-marker glyphs -------------------------------------------
+// Hand-drawn canvas paths (same approach as the radiation trefoil above) so the
+// routing-node markers read crisply at the published board's flat aesthetic
+// instead of relying on system emoji. Each is centred at (cx, cy) and scaled to
+// radius r.
+const LANDER_PINK = '#ec1f8d';
+const HAZARD_RING = '#c66932';   // same orange as the Lagrange ring
+
+// Pink two-legged lander (descent module) - the lander-burn marker. Drawn
+// with a white outline (white underlay first, then the pink on top) so it pops
+// on the dark map. The body/module is enlarged; legs + footpads are unchanged.
+function drawLanderGlyph(ctx, cx, cy, r, fill) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(r, r);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  const legs = new Path2D('M-0.26 0.14L-0.64 0.70M0.26 0.14L0.64 0.70');
+  const feet = new Path2D('M-0.80 0.70L-0.50 0.70M0.50 0.70L0.80 0.70');
+  const body = new Path2D();
+  body.moveTo(-0.48, 0.18); body.lineTo(-0.48, -0.14);
+  body.quadraticCurveTo(-0.48, -0.72, 0, -0.72);
+  body.quadraticCurveTo(0.48, -0.72, 0.48, -0.14);
+  body.lineTo(0.48, 0.18); body.closePath();
+  const nozzle = new Path2D('M-0.15 0.16L0.15 0.16L0.10 0.40L-0.10 0.40Z');
+  // White outline underlay (thicker strokes + a stroked-and-filled body).
+  ctx.strokeStyle = '#ffffff';
+  ctx.fillStyle = '#ffffff';
+  ctx.lineWidth = 0.36; ctx.stroke(legs);
+  ctx.lineWidth = 0.34; ctx.stroke(feet);
+  ctx.lineWidth = 0.30; ctx.fill(body); ctx.stroke(body);
+  ctx.fill(nozzle); ctx.stroke(nozzle);
+  // Pink on top.
+  ctx.strokeStyle = fill;
+  ctx.fillStyle = fill;
+  ctx.lineWidth = 0.16; ctx.stroke(legs);
+  ctx.lineWidth = 0.15; ctx.stroke(feet);
+  ctx.fill(body);
+  ctx.fill(nozzle);
+  ctx.restore();
+}
+
+// The white "knife cut" line down the centre of a half lander.
+function drawCutLine(ctx, cx, cy, r) {
+  ctx.save();
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = Math.max(1.3, 0.12 * r);
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - 0.56 * r);
+  ctx.lineTo(cx, cy + 0.74 * r);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Half lander (landing < 1): the left half of the lander + the cut line.
+function drawHalfLanderGlyph(ctx, cx, cy, r, fill) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(cx - 1.2 * r, cy - 1.6 * r, 1.2 * r, 3.2 * r);
+  ctx.clip();
+  drawLanderGlyph(ctx, cx, cy, r, fill);
+  ctx.restore();
+  drawCutLine(ctx, cx, cy, r);
+}
+
+// White skull - the hazard marker. Eyes / nose / teeth are real holes (even-odd
+// fill) so they read on any background without a fixed cut-out colour.
+function drawSkullGlyph(ctx, cx, cy, r, fill) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(r, r);
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  ctx.arc(0, -0.16, 0.74, Math.PI * 0.86, Math.PI * 0.14, false);
+  ctx.lineTo(0.40, 0.30);
+  ctx.quadraticCurveTo(0.40, 0.62, 0.16, 0.66);
+  ctx.lineTo(-0.16, 0.66);
+  ctx.quadraticCurveTo(-0.40, 0.62, -0.40, 0.30);
+  ctx.closePath();
+  ctx.moveTo(-0.10, -0.10); ctx.arc(-0.30, -0.10, 0.20, 0, Math.PI * 2);
+  ctx.moveTo(0.50, -0.10);  ctx.arc(0.30, -0.10, 0.20, 0, Math.PI * 2);
+  ctx.moveTo(0, 0.02); ctx.lineTo(0.12, 0.28); ctx.lineTo(-0.12, 0.28); ctx.closePath();
+  ctx.rect(-0.22, 0.50, 0.10, 0.20);
+  ctx.rect(-0.05, 0.50, 0.10, 0.20);
+  ctx.rect(0.12, 0.50, 0.10, 0.20);
+  ctx.fill('evenodd');
+  ctx.restore();
+}
+
+// White parachute (aerobrake) - canopy + suspension lines + payload.
+function drawParachuteGlyph(ctx, cx, cy, r, fill) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(r, r);
+  ctx.fillStyle = fill;
+  ctx.strokeStyle = fill;
+  ctx.beginPath();
+  ctx.arc(0, -0.22, 0.80, Math.PI, 0, false);
+  ctx.arc(0.533, -0.22, 0.267, 0, Math.PI, false);
+  ctx.arc(0, -0.22, 0.267, 0, Math.PI, false);
+  ctx.arc(-0.533, -0.22, 0.267, 0, Math.PI, false);
+  ctx.closePath();
+  ctx.fill();
+  ctx.lineWidth = 0.09;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-0.78, -0.22); ctx.lineTo(0, 0.62);
+  ctx.moveTo(-0.267, 0.04); ctx.lineTo(0, 0.62);
+  ctx.moveTo(0.267, 0.04);  ctx.lineTo(0, 0.62);
+  ctx.moveTo(0.78, -0.22);  ctx.lineTo(0, 0.62);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(-0.14, 0.62); ctx.lineTo(0.14, 0.62);
+  ctx.lineTo(0.10, 0.82); ctx.lineTo(-0.10, 0.82); ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+// Half lander + hazard combo: pink half-lander (left) | white half-skull
+// (right), split by the cut line.
+function drawLanderHazardGlyph(ctx, cx, cy, r, landerFill) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(cx - 1.2 * r, cy - 1.6 * r, 1.2 * r, 3.2 * r);
+  ctx.clip();
+  drawLanderGlyph(ctx, cx, cy, r, landerFill);
+  ctx.restore();
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(cx, cy - 1.6 * r, 1.2 * r, 3.2 * r);
+  ctx.clip();
+  drawSkullGlyph(ctx, cx, cy, r * 0.92, '#ffffff');
+  ctx.restore();
+  drawCutLine(ctx, cx, cy, r);
 }
 
 function drawRockyAsteroid(ctx, cx, cy, r, palette, site) {
@@ -2570,8 +2707,12 @@ export class MapRenderer {
       // Burns may carry a `landing` flag → draw as a rectangle
       // (planner-style), so split landing burns out of the normal
       // circle batch.
-      const landings = type === 'burn' ? items.filter((w) => w.landing != null) : [];
-      const circles  = type === 'burn' ? items.filter((w) => w.landing == null) : items;
+      // Plain burns stay as the pink circle batch. Lander burns (landing set)
+      // and hazard burns both render as vector glyphs in the glyph pass below,
+      // so drop them here.
+      const circles  = type === 'burn'
+        ? items.filter((w) => w.landing == null && !w.hazard)
+        : items;
 
       if (circles.length) {
         ctx.beginPath();
@@ -2590,62 +2731,9 @@ export class MapRenderer {
         ctx.stroke();
       }
 
-      // Pink lander rings: every burn node that carries a landing
-      // flag gets a magenta disc behind the rocket glyph. Landing=1
-      // paints a full disc; landing<1 paints a half disc clipped on
-      // the left, matching the half-rocket glyph drawn on top.
-      if (landings.length) {
-        ctx.fillStyle = vis.fill;
-        ctx.strokeStyle = vis.stroke;
-        ctx.lineWidth = 1.5;
-        const fullLandings = landings.filter((w) => w.landing >= 1);
-        const halfLandings = landings.filter((w) => w.landing < 1);
-        if (fullLandings.length) {
-          ctx.beginPath();
-          for (const w of fullLandings) {
-            const sx = this.pan.x + w.x * eff;
-            const sy = this.pan.y + w.y * eff;
-            if (sx < -vis.r * 2 || sx > hostW + vis.r * 2 || sy < -vis.r * 2 || sy > hostH + vis.r * 2) continue;
-            const ringR = vis.r * 1.4;
-            ctx.moveTo(sx + ringR, sy);
-            ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
-          }
-          ctx.fill();
-          ctx.stroke();
-        }
-        if (halfLandings.length) {
-          // Half-lander disc: a half-moon - left semicircle
-          // filled solid pink, right semicircle empty, with a
-          // full circular outline + diameter line splitting the
-          // two. The full rocket glyph rides on top in the
-          // emoji pass below.
-          for (const w of halfLandings) {
-            const sx = this.pan.x + w.x * eff;
-            const sy = this.pan.y + w.y * eff;
-            if (sx < -vis.r * 2 || sx > hostW + vis.r * 2 || sy < -vis.r * 2 || sy > hostH + vis.r * 2) continue;
-            const ringR = vis.r * 1.4;
-            // Fill: left semicircle (top → left → bottom, close
-            // with the diameter).
-            ctx.beginPath();
-            ctx.moveTo(sx, sy - ringR);
-            ctx.arc(sx, sy, ringR, -Math.PI / 2, Math.PI / 2, true);
-            ctx.closePath();
-            ctx.fill();
-            // Outline: full circle.
-            ctx.beginPath();
-            ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
-            ctx.stroke();
-            // Diameter line separating the two halves.
-            ctx.beginPath();
-            ctx.moveTo(sx, sy - ringR);
-            ctx.lineTo(sx, sy + ringR);
-            ctx.stroke();
-          }
-        }
-      }
-      // Landing burns are now drawn as a 🚀 glyph (full or half)
-      // in the per-emoji pass below; we just paint the lander disc
-      // underneath here.
+      // Lander burns no longer draw a magenta disc here - they render as a
+      // transparent pink lander glyph (full, or half with a knife-cut line)
+      // in the vector-glyph pass below.
     }
 
     // Selected waypoint highlight: same yellow border + glow used
@@ -2691,24 +2779,8 @@ export class MapRenderer {
       }
     }
 
-    // Flyby boost glyphs (~15 nodes across the map). One pass with
-    // bold text labels so the gravity-assist markers from the planner
-    // come through.
-    ctx.font = '700 11px ui-sans-serif, system-ui, sans-serif';
-    ctx.textBaseline = 'middle';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#ffffff';
-    ctx.strokeStyle = 'rgba(5, 4, 16, 0.85)';
-    ctx.lineWidth = 3;
-    for (const w of this._waypoints) {
-      if (!w.flybyBoost) continue;
-      const sx = this.pan.x + w.x * eff;
-      const sy = this.pan.y + w.y * eff;
-      if (sx < -20 || sx > hostW + 20 || sy < -20 || sy > hostH + 20) continue;
-      const txt = '+' + (w.flybyBoost === 'thrust' ? 'T' : w.flybyBoost);
-      ctx.strokeText(txt, sx, sy);
-      ctx.fillText(txt, sx, sy);
-    }
+    // (Flyby-boost "+N" labels are drawn LAST - after the node glyphs - so the
+    // number sits in front of the glyph on a black background. See below.)
 
     // Lagrange "L" label inside each Lagrange ring. Small + bold so
     // the orange ring stays the dominant cue and the L just tags it.
@@ -2727,36 +2799,69 @@ export class MapRenderer {
       }
     }
 
-    // Emoji indicators for the planner's flagged routing nodes:
-    //   landing == 1   -> 🚀 over a solid pink disc
-    //   landing  < 1   -> 🚀 over a pink disc with a striped right half
-    //   venus flyby    -> 🪂 (aerobrake)
-    //   hazard nodes   -> ☠
-    // Real-site emoji overlays (🌊 submarine, 🌿 astrobiology) are
-    // drawn in the screen-space hex layer where the icons can sit
-    // adjacent to the hex without colliding with the routing-node
-    // graphics here.
-    ctx.font = `${Math.max(12, EMOJI_PX)}px ${EMOJI_FONT}`;
-    ctx.fillStyle = '#ffffff';
-    ctx.textBaseline = 'middle';
-    ctx.textAlign = 'center';
+    // Vector glyphs for the planner's flagged routing nodes (replacing emoji):
+    //   lander burn (landing>=1)  -> pink two-legged lander
+    //   half lander (landing<1)   -> half lander + white knife-cut line
+    //   lander + hazard           -> half lander | white half-skull
+    //   hazard burn (no landing)  -> white skull in a Lagrange-colour ring
+    //   venus flyby               -> white parachute (the venus ring is drawn
+    //                                in the type loop as a transparent ring)
+    // radhaz keeps its trefoil; hazard-flagged lagrange points are flybys, not
+    // hazards, so they get no skull. (Site flags 🌊 / 🌿 stay in the hex layer.)
     for (const w of this._waypoints) {
       const sx = this.pan.x + w.x * eff;
       const sy = this.pan.y + w.y * eff;
       if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
       if (w.type === 'burn' && w.landing != null) {
-        // Full rocket on both full and half landers - half-status
-        // is now conveyed by the striped half of the pink disc
-        // drawn underneath, not by a clipped glyph.
-        ctx.fillText('🚀', sx, sy);
+        const lr = TYPE_VIS.burn.r * 1.6;
+        if (w.hazard) {
+          if (w.landing < 1) {
+            drawLanderHazardGlyph(ctx, sx, sy, lr, LANDER_PINK);
+          } else {
+            // Full lander that is also a hazard (rare): full lander + a small
+            // skull badge in the upper-right.
+            drawLanderGlyph(ctx, sx, sy, lr, LANDER_PINK);
+            drawSkullGlyph(ctx, sx + lr * 0.62, sy - lr * 0.46, lr * 0.5, '#ffffff');
+          }
+        } else if (w.landing < 1) {
+          drawHalfLanderGlyph(ctx, sx, sy, lr, LANDER_PINK);
+        } else {
+          drawLanderGlyph(ctx, sx, sy, lr, LANDER_PINK);
+        }
       } else if (w.type === 'venus') {
-        ctx.fillText('🪂', sx, sy);
+        drawParachuteGlyph(ctx, sx, sy, TYPE_VIS.venus.r * 0.9, '#ffffff');
       } else if (w.hazard && w.type !== 'radhaz' && w.type !== 'lagrange') {
-        // radhaz gets the trefoil; the skull marks generic hazard
-        // nodes (hazard-flagged burns). Hazard-flagged lagrange
-        // points are flybys, not hazards, so they get no skull.
-        ctx.fillText('☠', sx, sy);
+        const hr = 7.5;
+        ctx.beginPath();
+        ctx.arc(sx, sy, hr, 0, Math.PI * 2);
+        ctx.lineWidth = Math.max(1.2, hr * 0.16);
+        ctx.strokeStyle = HAZARD_RING;
+        ctx.stroke();
+        drawSkullGlyph(ctx, sx, sy, hr * 0.78, '#ffffff');
       }
+    }
+
+    // Flyby-boost "+N" labels, drawn LAST so the number sits IN FRONT of any
+    // node glyph. Each rides a black rounded pill so the gravity-assist value
+    // stays readable over a busy node.
+    ctx.font = '700 11px ui-sans-serif, system-ui, sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    for (const w of this._waypoints) {
+      if (!w.flybyBoost) continue;
+      const sx = this.pan.x + w.x * eff;
+      const sy = this.pan.y + w.y * eff;
+      if (sx < -20 || sx > hostW + 20 || sy < -20 || sy > hostH + 20) continue;
+      const txt = '+' + (w.flybyBoost === 'thrust' ? 'T' : w.flybyBoost);
+      const bw = ctx.measureText(txt).width + 7;
+      const bh = 15;
+      ctx.fillStyle = '#000000';
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(sx - bw / 2, sy - bh / 2, bw, bh, 4);
+      else ctx.rect(sx - bw / 2, sy - bh / 2, bw, bh);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(txt, sx, sy + 0.5);
     }
   }
 
