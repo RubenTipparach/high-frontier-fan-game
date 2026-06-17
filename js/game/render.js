@@ -179,7 +179,7 @@ const TYPE_VIS = {
   lagrange:       { kind: 'circle', r:  7, fill: 'transparent', stroke: '#c66932' },
   burn:           { kind: 'circle', r:  6, hitR: 8, fill: '#d60f7a', stroke: '#fde0ee', hideBelowZoom: 1.4 },
   hohmann:        { kind: 'circle', r:  4, hitR: 9, fill: '#10b981', stroke: '#a7f3d0', hideBelowZoom: 2.5 },
-  venus:          { kind: 'circle', r:  8, fill: 'transparent', stroke: '#c66932' },
+  venus:          { kind: 'circle', r:  8, fill: 'transparent', stroke: 'transparent' },
   radhaz:         { kind: 'circle', r:  7, fill: '#fbbf24', stroke: '#fde68a' },
   orbit:          { kind: 'circle', r:  6, fill: '#0c0a16', stroke: '#7dd3fc' },
   decorative:     { kind: 'none' },
@@ -647,142 +647,13 @@ function drawRadiationGlyph(ctx, cx, cy, r) {
   ctx.fill();
 }
 
-// ----- Vector node-marker glyphs -------------------------------------------
-// Hand-drawn canvas paths (same approach as the radiation trefoil above) so the
-// routing-node markers read crisply at the published board's flat aesthetic
-// instead of relying on system emoji. Each is centred at (cx, cy) and scaled to
-// radius r.
-const LANDER_PINK = '#ec1f8d';
-const HAZARD_RING = '#c66932';   // same orange as the Lagrange ring
-
-// Pink two-legged lander (descent module) - the lander-burn marker. Drawn
-// with a white outline (white underlay first, then the pink on top) so it pops
-// on the dark map. The body/module is enlarged; legs + footpads are unchanged.
-function drawLanderGlyph(ctx, cx, cy, r, fill) {
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.scale(r, r);
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  const legs = new Path2D('M-0.26 0.14L-0.64 0.70M0.26 0.14L0.64 0.70');
-  const feet = new Path2D('M-0.80 0.70L-0.50 0.70M0.50 0.70L0.80 0.70');
-  const body = new Path2D();
-  body.moveTo(-0.48, 0.18); body.lineTo(-0.48, -0.14);
-  body.quadraticCurveTo(-0.48, -0.72, 0, -0.72);
-  body.quadraticCurveTo(0.48, -0.72, 0.48, -0.14);
-  body.lineTo(0.48, 0.18); body.closePath();
-  const nozzle = new Path2D('M-0.15 0.16L0.15 0.16L0.10 0.40L-0.10 0.40Z');
-  // White outline underlay (thicker strokes + a stroked-and-filled body).
-  ctx.strokeStyle = '#ffffff';
-  ctx.fillStyle = '#ffffff';
-  ctx.lineWidth = 0.36; ctx.stroke(legs);
-  ctx.lineWidth = 0.34; ctx.stroke(feet);
-  ctx.lineWidth = 0.30; ctx.fill(body); ctx.stroke(body);
-  ctx.fill(nozzle); ctx.stroke(nozzle);
-  // Pink on top.
-  ctx.strokeStyle = fill;
-  ctx.fillStyle = fill;
-  ctx.lineWidth = 0.16; ctx.stroke(legs);
-  ctx.lineWidth = 0.15; ctx.stroke(feet);
-  ctx.fill(body);
-  ctx.fill(nozzle);
-  ctx.restore();
-}
-
-// The white "knife cut" line down the centre of a half lander.
-function drawCutLine(ctx, cx, cy, r) {
-  ctx.save();
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = Math.max(1.3, 0.12 * r);
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - 0.56 * r);
-  ctx.lineTo(cx, cy + 0.74 * r);
-  ctx.stroke();
-  ctx.restore();
-}
-
-// Half lander (landing < 1): the left half of the lander + the cut line.
-function drawHalfLanderGlyph(ctx, cx, cy, r, fill) {
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(cx - 1.2 * r, cy - 1.6 * r, 1.2 * r, 3.2 * r);
-  ctx.clip();
-  drawLanderGlyph(ctx, cx, cy, r, fill);
-  ctx.restore();
-  drawCutLine(ctx, cx, cy, r);
-}
-
-// White skull - the hazard marker. Eyes / nose / teeth are real holes (even-odd
-// fill) so they read on any background without a fixed cut-out colour.
-function drawSkullGlyph(ctx, cx, cy, r, fill) {
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.scale(r, r);
-  ctx.fillStyle = fill;
-  ctx.beginPath();
-  ctx.arc(0, -0.16, 0.74, Math.PI * 0.86, Math.PI * 0.14, false);
-  ctx.lineTo(0.40, 0.30);
-  ctx.quadraticCurveTo(0.40, 0.62, 0.16, 0.66);
-  ctx.lineTo(-0.16, 0.66);
-  ctx.quadraticCurveTo(-0.40, 0.62, -0.40, 0.30);
-  ctx.closePath();
-  ctx.moveTo(-0.10, -0.10); ctx.arc(-0.30, -0.10, 0.20, 0, Math.PI * 2);
-  ctx.moveTo(0.50, -0.10);  ctx.arc(0.30, -0.10, 0.20, 0, Math.PI * 2);
-  ctx.moveTo(0, 0.02); ctx.lineTo(0.12, 0.28); ctx.lineTo(-0.12, 0.28); ctx.closePath();
-  ctx.rect(-0.22, 0.50, 0.10, 0.20);
-  ctx.rect(-0.05, 0.50, 0.10, 0.20);
-  ctx.rect(0.12, 0.50, 0.10, 0.20);
-  ctx.fill('evenodd');
-  ctx.restore();
-}
-
-// White parachute (aerobrake) - canopy + suspension lines + payload.
-function drawParachuteGlyph(ctx, cx, cy, r, fill) {
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.scale(r, r);
-  ctx.fillStyle = fill;
-  ctx.strokeStyle = fill;
-  ctx.beginPath();
-  ctx.arc(0, -0.22, 0.80, Math.PI, 0, false);
-  ctx.arc(0.533, -0.22, 0.267, 0, Math.PI, false);
-  ctx.arc(0, -0.22, 0.267, 0, Math.PI, false);
-  ctx.arc(-0.533, -0.22, 0.267, 0, Math.PI, false);
-  ctx.closePath();
-  ctx.fill();
-  ctx.lineWidth = 0.09;
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(-0.78, -0.22); ctx.lineTo(0, 0.62);
-  ctx.moveTo(-0.267, 0.04); ctx.lineTo(0, 0.62);
-  ctx.moveTo(0.267, 0.04);  ctx.lineTo(0, 0.62);
-  ctx.moveTo(0.78, -0.22);  ctx.lineTo(0, 0.62);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(-0.14, 0.62); ctx.lineTo(0.14, 0.62);
-  ctx.lineTo(0.10, 0.82); ctx.lineTo(-0.10, 0.82); ctx.closePath();
-  ctx.fill();
-  ctx.restore();
-}
-
-// Half lander + hazard combo: pink half-lander (left) | white half-skull
-// (right), split by the cut line.
-function drawLanderHazardGlyph(ctx, cx, cy, r, landerFill) {
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(cx - 1.2 * r, cy - 1.6 * r, 1.2 * r, 3.2 * r);
-  ctx.clip();
-  drawLanderGlyph(ctx, cx, cy, r, landerFill);
-  ctx.restore();
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(cx, cy - 1.6 * r, 1.2 * r, 3.2 * r);
-  ctx.clip();
-  drawSkullGlyph(ctx, cx, cy, r * 0.92, '#ffffff');
-  ctx.restore();
-  drawCutLine(ctx, cx, cy, r);
-}
+// Solar-map routing-node markers (lander / hazard / aerobrake) are now PNG
+// sprites under assets/map-icons/, generated by scripts/gen-map-icons.mjs and
+// blitted by _drawWaypointsScreen below. Re-run that script to change the art.
+const MAP_ICON_NAMES = ['lander', 'lander-half', 'lander-hazard', 'lander-half-hazard', 'hazard', 'aerobrake'];
+// The sprites are authored at 6.4x (gen-map-icons.mjs ICON_SUPERSAMPLE) in a
+// 128px canvas, so each blits back down to a 20px screen box centred on the node.
+const MAP_ICON_BOX = 20;
 
 function drawRockyAsteroid(ctx, cx, cy, r, palette, site) {
   if (!site._rockShape) {
@@ -1629,6 +1500,18 @@ export class MapRenderer {
     this.canvas.className = 'map-canvas';
     this.host.appendChild(this.canvas);
     this.ctx = this.canvas.getContext('2d');
+
+    // Routing-node marker sprites (lander / hazard / aerobrake), generated by
+    // scripts/gen-map-icons.mjs. Loaded async; each load invalidates the static
+    // layer (the markers bake into it) and schedules a redraw so they appear as
+    // soon as they arrive.
+    this._mapIcons = {};
+    for (const name of MAP_ICON_NAMES) {
+      const img = new Image();
+      img.onload = () => { this._invalidateStatic(); this._scheduleDraw(); };
+      img.src = assetUrl(`assets/map-icons/${name}.png`);
+      this._mapIcons[name] = img;
+    }
 
     this._tooltipEl = document.createElement('div');
     this._tooltipEl.className = 'map-tooltip hidden';
@@ -2799,45 +2682,36 @@ export class MapRenderer {
       }
     }
 
-    // Vector glyphs for the planner's flagged routing nodes (replacing emoji):
-    //   lander burn (landing>=1)  -> pink two-legged lander
-    //   half lander (landing<1)   -> half lander + white knife-cut line
-    //   lander + hazard           -> half lander | white half-skull
-    //   hazard burn (no landing)  -> white skull in a Lagrange-colour ring
-    //   venus flyby               -> white parachute (the venus ring is drawn
-    //                                in the type loop as a transparent ring)
+    // PNG sprite markers for the planner's flagged routing nodes (generated by
+    // scripts/gen-map-icons.mjs):
+    //   lander burn (landing>=1)  -> lander             (pink two-legged lander)
+    //   half lander (landing<1)   -> lander-half        (+ white knife-cut line)
+    //   full lander + hazard      -> lander-hazard      (skull on top of lander)
+    //   half lander + hazard      -> lander-half-hazard (half lander | half skull)
+    //   hazard burn (no landing)  -> hazard             (skull in a Lagrange ring)
+    //   venus flyby               -> aerobrake          (parachute in a Lagrange ring)
     // radhaz keeps its trefoil; hazard-flagged lagrange points are flybys, not
     // hazards, so they get no skull. (Site flags 🌊 / 🌿 stay in the hex layer.)
-    for (const w of this._waypoints) {
-      const sx = this.pan.x + w.x * eff;
-      const sy = this.pan.y + w.y * eff;
-      if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
-      if (w.type === 'burn' && w.landing != null) {
-        const lr = TYPE_VIS.burn.r * 1.6;
-        if (w.hazard) {
-          if (w.landing < 1) {
-            drawLanderHazardGlyph(ctx, sx, sy, lr, LANDER_PINK);
-          } else {
-            // Full lander that is also a hazard (rare): full lander + a small
-            // skull badge in the upper-right.
-            drawLanderGlyph(ctx, sx, sy, lr, LANDER_PINK);
-            drawSkullGlyph(ctx, sx + lr * 0.62, sy - lr * 0.46, lr * 0.5, '#ffffff');
-          }
-        } else if (w.landing < 1) {
-          drawHalfLanderGlyph(ctx, sx, sy, lr, LANDER_PINK);
-        } else {
-          drawLanderGlyph(ctx, sx, sy, lr, LANDER_PINK);
+    const icons = this._mapIcons;
+    if (icons) {
+      const box = MAP_ICON_BOX, ih = box / 2;
+      for (const w of this._waypoints) {
+        let name = null;
+        if (w.type === 'burn' && w.landing != null) {
+          if (w.hazard) name = w.landing < 1 ? 'lander-half-hazard' : 'lander-hazard';
+          else name = w.landing < 1 ? 'lander-half' : 'lander';
+        } else if (w.type === 'venus') {
+          name = 'aerobrake';
+        } else if (w.hazard && w.type !== 'radhaz' && w.type !== 'lagrange') {
+          name = 'hazard';
         }
-      } else if (w.type === 'venus') {
-        drawParachuteGlyph(ctx, sx, sy, TYPE_VIS.venus.r * 0.9, '#ffffff');
-      } else if (w.hazard && w.type !== 'radhaz' && w.type !== 'lagrange') {
-        const hr = 7.5;
-        ctx.beginPath();
-        ctx.arc(sx, sy, hr, 0, Math.PI * 2);
-        ctx.lineWidth = Math.max(1.2, hr * 0.16);
-        ctx.strokeStyle = HAZARD_RING;
-        ctx.stroke();
-        drawSkullGlyph(ctx, sx, sy, hr * 0.78, '#ffffff');
+        if (!name) continue;
+        const img = icons[name];
+        if (!img || !img.complete || !img.naturalWidth) continue;
+        const sx = this.pan.x + w.x * eff;
+        const sy = this.pan.y + w.y * eff;
+        if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
+        ctx.drawImage(img, sx - ih, sy - ih, box, box);
       }
     }
 
