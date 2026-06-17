@@ -13817,7 +13817,9 @@ function animPathSegments(fromServerId, toServerId) {
   try {
     // Generous thrust so the planner always finds the geometric path
     // (we only need a polyline to slide along, not a legal burn plan).
-    const r = planRoute(_activeData, fromPid, toPid, { thrust: 12 });
+    // gateSeason:false so a move made in-season still animates after the
+    // Sunspot Cube has advanced past that season.
+    const r = planRoute(_activeData, fromPid, toPid, { thrust: 12, gateSeason: false });
     if (r && r.segments && r.segments.length) {
       segs = r.segments.map((s) => ({ from: s.from, to: s.to }));
     }
@@ -14603,6 +14605,15 @@ async function moveRocket() {
     const landG = destSite ? maneuverGate(destSite, netThrust) : { ok: true };
     if (destSite && !landG.ok) { _onlineToast(`Can't land on ${destSite.name} - not enough thrust and no factory to assist.`, 'error'); return false; }
     if (landG.assist && landG.needsRoll && destSite) assistHz.push({ site: destSite, glyph: '🏭', label: 'landing assist' });
+    // Synodic-season gate (also catches a route planned in-season last turn):
+    // a seasonal space can only be entered while the Sunspot Cube is in its season.
+    const destSeason = destSite ? ((NODE_TAGS[destSite.id2] && NODE_TAGS[destSite.id2].season) || destSite.siteSynodic || null) : null;
+    let curSeasonName = null; try { curSeasonName = getSeason()?.name || null; } catch { curSeasonName = null; }
+    if (destSeason && curSeasonName && destSeason !== curSeasonName) {
+      const cap = destSeason[0].toUpperCase() + destSeason.slice(1);
+      _onlineToast(`${destSite.name} is a ${destSeason}-season space - only enterable during Season ${cap} (the Sunspot Cube is in ${curSeasonName} now).`, 'error');
+      return false;
+    }
     const genericHz = hz.filter((h) => h.site.type !== 'radhaz').concat(assistHz);
     let hazardPay = false;
     // Generic (skull / aerobrake / factory assist): pay aqua, roll, or
@@ -16612,10 +16623,28 @@ function planRocketRouteTo(destSite) {
   const assistNote = (liftGate.assist || landGate.assist)
     ? ` <em class="muted">(🏭 factory assist${(liftGate.needsRoll || landGate.needsRoll) ? ' - hazard roll on the move' : ' - free, colony present'})</em>`
     : '';
+  // Synodic-season gate: a seasonal space is only on the board during its
+  // Sunspot phase, so it can't be entered (or even routed to) off-season.
+  let nowSeason = null;
+  try { nowSeason = getSeason()?.name || null; } catch { nowSeason = null; }
+  const destSeason = (NODE_TAGS[destSite.id2] && NODE_TAGS[destSite.id2].season) || destSite.siteSynodic || null;
+  if (destSeason && nowSeason && destSeason !== nowSeason) {
+    const cap = destSeason[0].toUpperCase() + destSeason.slice(1);
+    setStatus(
+      `🗓 <strong>${esc(destSite.name)}</strong> is a ${destSeason}-season space: it can only be `
+      + `entered during Season ${cap}, but the Sunspot Cube is in ${nowSeason} now.`
+    );
+    _renderer.setRoute(null);
+    _renderer.setRouteEndpoints(origin.id, destSite.id);
+    return false;
+  }
   const metricPriority = routeMetricPriority();
   const result = planRoute(_activeData, origin.id, destSite.id, {
     thrust,
     metricPriority,
+    // The current Sunspot season gates which seasonal spaces (and the
+    // Venus flyby) the route may use.
+    solarSeason: nowSeason || 'red',
     // Pirouette thrusters waive the pivot cost on their first
     // direction change(s) each turn; pass the active engine's
     // bonus so the auto-planner discounts those pivots too.

@@ -3392,6 +3392,7 @@ app.get('/admin', (req, res) => {
     <div class="ws-info">
       <strong>${wsCount}</strong> open sockets · <strong>${wsAuthed}</strong> authed
       · <a href="/admin/site-notes">Site notes</a>
+      · <a href="/admin/site-tags">Site tags</a>
       · <a href="#" onclick="fetch('/admin/logout',{method:'POST'}).then(function(){location.href='/admin';});return false;">Sign out</a>
     </div>
   </div>

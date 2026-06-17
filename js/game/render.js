@@ -670,6 +670,15 @@ function markerSpriteFor(w) {
   return spriteForTags(NODE_TAGS[w.id2]);
 }
 
+// A node's synodic season ('red' | 'yellow' | 'blue'), or null. The node tag
+// (NODE_TAGS, the single source) wins, with the planner's own siteSynodic as a
+// fallback. Only seasons we have a colour for are returned.
+function seasonOf(node) {
+  const s = (node && node.id2 && NODE_TAGS[node.id2] && NODE_TAGS[node.id2].season)
+    || (node && node.siteSynodic) || null;
+  return s && SYNODIC_COLOURS[s] ? s : null;
+}
+
 function drawRockyAsteroid(ctx, cx, cy, r, palette, site) {
   if (!site._rockShape) {
     const VERTS = 9;
@@ -2128,6 +2137,7 @@ export class MapRenderer {
     // Crisp, viewport-culled, drawn live (not scaled from the cache) so
     // node markers / hexes / labels stay sharp at every zoom level.
     this._step('waypoints', () => this._drawWaypointsScreen(ctx));
+    this._step('seasons', () => this._drawSeasonRings(ctx));
     this._step('hexes', () => this._drawSiteHexesScreen(ctx));
     this._step('labels', () => this._drawSiteLabelsScreen(ctx));
 
@@ -2902,6 +2912,43 @@ export class MapRenderer {
 
   // Hex markers + endpoint rings, drawn in SCREEN space so they
   // stay readable at any zoom level.
+  // Synodic-season rings: a coloured halo around every seasonal space (comet /
+  // seasonal asteroid, or any node tagged with a season) so a glance tells you
+  // which Sunspot phase it opens in. Same red / yellow / blue palette as the
+  // seasonal comet lanes. Drawn between the node markers and the hexes so it
+  // haloes the node without covering its glyph.
+  _drawSeasonRings(ctx) {
+    const eff = this.zoom * this.fitScale;
+    const { hostW, hostH } = this;
+    const hexS = this._hexScale();
+    ctx.save();
+    ctx.lineWidth = 2.5;
+    const ring = (node, baseR) => {
+      const season = seasonOf(node);
+      if (!season) return;
+      const sx = this.pan.x + node.x * eff;
+      const sy = this.pan.y + node.y * eff;
+      if (sx < -40 || sx > hostW + 40 || sy < -40 || sy > hostH + 40) return;
+      const col = SYNODIC_COLOURS[season];
+      ctx.beginPath();
+      ctx.arc(sx, sy, baseR, 0, Math.PI * 2);
+      ctx.strokeStyle = col;
+      ctx.shadowColor = col;
+      ctx.shadowBlur = 8;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    };
+    for (const site of this._realSites) {
+      if (site.isLandable === false) continue;
+      const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
+      if (vis.kind === 'sun') continue;
+      ring(site, vis.r * hexS + 5);
+    }
+    // Waypoints (a burn / lagrange admin-tagged with a season) ring the marker.
+    for (const w of this._waypoints) ring(w, (TYPE_VIS[w.type]?.r || 7) + 6);
+    ctx.restore();
+  }
+
   _drawSiteHexesScreen(ctx) {
     const eff = this.zoom * this.fitScale;
     const { hostW, hostH } = this;
@@ -2964,12 +3011,13 @@ export class MapRenderer {
           // (red / yellow / blue per the published-card colour
           // language for comets + similar season-keyed sites) >
           // default white outline.
+          const hexSeason = seasonOf(site);
           ctx.strokeStyle = site.hazard
             ? '#f87171'
-            : (site.siteSynodic ? SYNODIC_COLOURS[site.siteSynodic] : '#ffffff');
+            : (hexSeason ? SYNODIC_COLOURS[hexSeason] : '#ffffff');
           // Synodic-coloured hexes carry a thicker outline so
           // the season reads from across the map.
-          if (site.siteSynodic) ctx.lineWidth = 2.4;
+          if (hexSeason) ctx.lineWidth = 2.4;
           ctx.stroke();
         }
       } else {

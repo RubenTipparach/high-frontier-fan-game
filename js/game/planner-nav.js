@@ -31,6 +31,7 @@
 // matching the table-game pivot rule.
 
 import { dijkstra } from './planner-dijkstra.js';
+import { NODE_TAGS } from '../../data/node-tags.js';
 
 const PATH_ID = Symbol('pathId');
 
@@ -144,12 +145,28 @@ function pathId(p) {
 export function buildPlanner(graph, {
   thrust = 4,
   solarSeason = 'red',
+  gateSeason = true,
   metricPriority = ['turns', 'burns', 'hazards', 'radHazards'],
   freePivots = 0,
 } = {}) {
   const points = graph.byId;
   const edgeLabels = graph.edgeLabels || {};
   const neighbors = graph.neighbors;
+
+  // Synodic-season gate. A seasonal space (a comet / seasonal asteroid) is only
+  // on the board during its Sunspot phase, so off-season the planner must not
+  // route TO or THROUGH it. Season comes from the node's tag (NODE_TAGS, the
+  // single source) with the planner's own siteSynodic as a fallback. The
+  // rocket's current node is the search SOURCE, never an `other` here, so
+  // LEAVING an off-season node is unaffected - only ENTERING one is blocked.
+  // gateSeason:false (used by the pure animation path) disables it.
+  function seasonBlocked(pid) {
+    if (!gateSeason) return false;
+    const pt = points[pid];
+    if (!pt) return false;
+    const season = (NODE_TAGS[pt.id2] && NODE_TAGS[pt.id2].season) || pt.siteSynodic || null;
+    return season != null && season !== solarSeason;
+  }
 
   function neighborsOf(id) {
     const s = neighbors.get(id);
@@ -191,6 +208,7 @@ export function buildPlanner(graph, {
         if (edgeLabels[node][otherNode] !== dir) {
           const otherPoint = points[otherNode];
           if (!otherPoint) continue;
+          if (seasonBlocked(otherNode)) continue;   // off-season space: not on the board
           // Pivot cost has two parts: the 2-burn direction change
           // itself, and the landing burn if the new node is a burn
           // node. A pirouette thruster's free pivot waives ONLY the
@@ -238,6 +256,7 @@ export function buildPlanner(graph, {
     for (const other of neighborsOf(node)) {
       const otherPoint = points[other];
       if (!otherPoint) continue;
+      if (seasonBlocked(other)) continue;           // off-season space: not on the board
       if (edgeLabels[other] && edgeLabels[other][node] === '0') continue;
       const sameDirOrFree =
         !(node in edgeLabels)
