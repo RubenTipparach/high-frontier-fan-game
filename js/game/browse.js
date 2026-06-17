@@ -55,6 +55,7 @@ import { renderAssemblyPanel } from './assembly.js';
 import { uiIcon } from './ui-icons.js';
 import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
 import { NODE_TAGS } from '../../data/node-tags.js';
+import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
 import { apiAvailable, getSiteAnnotations, postSiteAnnotation, removeSiteTag, deleteSiteAnnotation } from '../api.js';
 import { activeProfile } from '../auth.js';
 import {
@@ -5368,24 +5369,18 @@ function openSiteNotesModal(siteId, siteName) {
   const serverNode = (_activeData && _activeData.sites)
     ? _activeData.sites.find((s) => s.id2 === siteId) : null;
   const nt = NODE_TAGS[siteId];
-  const serverTagLabels = [];
-  if (nt) {
-    if (nt.lander) serverTagLabels.push(nt.half ? 'half-lander-burn' : 'lander-burn');
-    if (nt.aerobrake) serverTagLabels.push('aero-break');
-    if (nt.hazard) serverTagLabels.push('hazard');
-  }
-  if (serverNode) {
-    if (serverNode.type === 'venus') serverTagLabels.push('venus flyby');
-    else if (serverNode.flybyBoost != null) serverTagLabels.push('flyby +' + (serverNode.flybyBoost === 'thrust' ? 'T' : serverNode.flybyBoost));
-    if (serverNode.type === 'radhaz') serverTagLabels.push('radiation');
-  }
+  // Marker meanings (burn / hazard / aerobrake / lander-burn / flyby /
+  // radiation), shared with the site popup so both read the same vocabulary.
+  const labels = serverTagLabels(serverNode || { id2: siteId });
   // A node's synodic season: it can only be entered during that Sunspot phase.
   // Tinted with the same red / yellow / blue the map uses for season lanes.
   const SEASON_COLORS = { red: '#ef4444', yellow: '#facc15', blue: '#60a5fa' };
-  const serverChipParts = serverTagLabels.map((l) =>
-    `<span class="site-tag-chip is-server" style="--tag:#8fa6d8"><span class="site-tag-dot"></span>${esc(l)}</span>`);
+  const serverChipParts = labels.map((l) => {
+    const info = tagInfo(l);
+    return `<span class="site-tag-chip is-server" style="--tag:#8fa6d8"${info ? ` title="${esc(info)}"` : ''}><span class="site-tag-dot"></span>${esc(l)}</span>`;
+  });
   if (nt && SEASON_COLORS[nt.season]) {
-    serverChipParts.push(`<span class="site-tag-chip is-server" style="--tag:${SEASON_COLORS[nt.season]}"><span class="site-tag-dot"></span>${esc(nt.season)} season</span>`);
+    serverChipParts.push(`<span class="site-tag-chip is-server" style="--tag:${SEASON_COLORS[nt.season]}" title="${esc(tagInfo(nt.season + ' season'))}"><span class="site-tag-dot"></span>${esc(nt.season)} season</span>`);
   }
   const serverChips = serverChipParts.length ? serverChipParts.join('') : '<span class="muted">none</span>';
 

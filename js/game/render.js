@@ -2,6 +2,7 @@ import { getRocketSprite, getRocketSpriteSize } from './rocket-sprite.js';
 import { thrustVisual } from './card-ui.js';
 import { assetUrl } from '../base.js';
 import { NODE_TAGS, spriteForTags } from '../../data/node-tags.js';
+import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
 
 // Canvas-based renderer for the delta-v map.
 //
@@ -4364,18 +4365,37 @@ export class MapRenderer {
     meta.textContent = parts.join(' · ');
     el.appendChild(name);
     if (meta.textContent) el.appendChild(meta);
+    // Marker row: what the node's glyphs MEAN (burn / hazard / aerobrake /
+    // lander-burn / flyby / radiation), each with a gameplay tooltip so a
+    // player can look up an unfamiliar symbol without leaving the popup. Same
+    // label vocabulary as the notes modal.
+    const markers = serverTagLabels(site);
+    if (markers.length) {
+      const mrow = document.createElement('div');
+      mrow.className = 't-tags';
+      for (const label of markers) {
+        const chip = document.createElement('span');
+        chip.className = 't-tag t-tag-marker';
+        chip.textContent = label;
+        const info = tagInfo(label);
+        if (info) chip.title = info;
+        mrow.appendChild(chip);
+      }
+      el.appendChild(mrow);
+    }
     // Tags row: season (only if the node requires a specific
     // apparition) + heliocentric zone. Each renders as its own
     // chip with a colour that matches the underlying game system
     // (synodic palette for the season, neutral grey for the zone).
-    if (site.siteSynodic || site.solarZone || site.push) {
+    const popupSeason = seasonOf(site);
+    if (popupSeason || site.solarZone || site.push) {
       const tags = document.createElement('div');
       tags.className = 't-tags';
-      if (site.siteSynodic) {
+      if (popupSeason) {
         const chip = document.createElement('span');
-        chip.className = `t-tag t-tag-season t-tag-season-${site.siteSynodic}`;
-        chip.textContent = `${site.siteSynodic} season`;
-        chip.title = `Only accessible during the ${site.siteSynodic} apparition window.`;
+        chip.className = `t-tag t-tag-season t-tag-season-${popupSeason}`;
+        chip.textContent = `${popupSeason} season`;
+        chip.title = `Only enterable during the ${popupSeason} phase of the Sunspot cycle.`;
         tags.appendChild(chip);
       }
       if (site.solarZone) {
