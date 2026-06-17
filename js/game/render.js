@@ -1,6 +1,7 @@
 import { getRocketSprite, getRocketSpriteSize } from './rocket-sprite.js';
 import { thrustVisual } from './card-ui.js';
 import { assetUrl } from '../base.js';
+import { NODE_TAGS, spriteForTags } from '../../data/node-tags.js';
 
 // Canvas-based renderer for the delta-v map.
 //
@@ -654,9 +655,23 @@ const MAP_ICON_NAMES = ['lander', 'lander-half', 'lander-hazard', 'lander-half-h
 // The sprites are authored at 6.4x (gen-map-icons.mjs ICON_SUPERSAMPLE) in a
 // 128px canvas, so each blits back down to a 20px screen box centred on the node.
 const MAP_ICON_BOX = 20;
-// The Venus aerobrake parachute sits on the Low-Venus-Orbit Lagrange node (its
-// stable ref id), NOT the Venus flyby node - that one is just the "+2" spot.
-const AEROBRAKE_NODE_ID2 = 'lag-968np';
+
+// The marker sprite for a routing node. PLAYER tags (data/site-tags.js, curated
+// via the in-app site-notes) take priority; otherwise fall back to the planner's
+// own landing / hazard flags. Null when the node carries no marker. This is why
+// e.g. the aerobrake parachutes land on the lagranges players tagged "aero-break"
+// (the planner data has no aerobrake flag of its own).
+function markerSpriteFor(w) {
+  const tagged = spriteForTags(NODE_TAGS[w.id2]);
+  if (tagged) return tagged;
+  if (w.type === 'burn' && w.landing != null) {
+    return w.hazard
+      ? (w.landing < 1 ? 'lander-half-hazard' : 'lander-hazard')
+      : (w.landing < 1 ? 'lander-half' : 'lander');
+  }
+  if (w.hazard && w.type !== 'radhaz' && w.type !== 'lagrange') return 'hazard';
+  return null;
+}
 
 function drawRockyAsteroid(ctx, cx, cy, r, palette, site) {
   if (!site._rockShape) {
@@ -2674,8 +2689,8 @@ export class MapRenderer {
     if (lagrangeItems) {
       ctx.fillStyle = '#fdba74';
       for (const w of lagrangeItems) {
-        // The aerobrake node wears the parachute sprite instead of an "L".
-        if (w.id2 === AEROBRAKE_NODE_ID2) continue;
+        // A tagged lagrange (aerobrake / hazard) wears its sprite, not an "L".
+        if (markerSpriteFor(w)) continue;
         const sx = this.pan.x + w.x * eff;
         const sy = this.pan.y + w.y * eff;
         if (sx < -20 || sx > hostW + 20 || sy < -20 || sy > hostH + 20) continue;
@@ -2701,15 +2716,7 @@ export class MapRenderer {
     if (icons) {
       const box = MAP_ICON_BOX, ih = box / 2;
       for (const w of this._waypoints) {
-        let name = null;
-        if (w.type === 'burn' && w.landing != null) {
-          if (w.hazard) name = w.landing < 1 ? 'lander-half-hazard' : 'lander-hazard';
-          else name = w.landing < 1 ? 'lander-half' : 'lander';
-        } else if (w.id2 === AEROBRAKE_NODE_ID2) {
-          name = 'aerobrake';
-        } else if (w.hazard && w.type !== 'radhaz' && w.type !== 'lagrange') {
-          name = 'hazard';
-        }
+        const name = markerSpriteFor(w);
         if (!name) continue;
         const img = icons[name];
         if (!img || !img.complete || !img.naturalWidth) continue;
@@ -2737,9 +2744,7 @@ export class MapRenderer {
       // Radius = half the text-box diagonal + padding so the number always fits
       // inside the circle, with a minimum so single-char values aren't tiny.
       const rad = Math.max(9, Math.sqrt(tw * tw + 11 * 11) / 2 + 2);
-      const hasGlyph = (w.type === 'burn' && w.landing != null)
-        || w.id2 === AEROBRAKE_NODE_ID2
-        || (w.hazard && w.type !== 'radhaz' && w.type !== 'lagrange');
+      const hasGlyph = !!markerSpriteFor(w);
       const cy = hasGlyph ? sy + (MAP_ICON_BOX / 2 + rad - 2) : sy;
       ctx.fillStyle = '#000000';
       ctx.beginPath();
