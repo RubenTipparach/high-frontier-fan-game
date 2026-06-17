@@ -2746,8 +2746,8 @@
   font-size: 11px;
   line-height: 1.45;
 }
-/* Avoid-hazards checkbox sits below the two priority radios; amber active tint
-   marks it as a hazard control rather than a priority pick. */
+/* Avoid-hazards / avoid-radiation checkboxes sit below the two priority radios;
+   amber active tint marks them as hazard controls rather than a priority pick. */
 .route-options-avoid { margin-top: 8px; }
 .route-options-avoid.is-active {
   border-color: rgba(251, 191, 36, 0.7);
