@@ -3950,10 +3950,17 @@ function navigateToChatLocation(siteId) {
   if (!siteId || !_renderer || !_activeData) return;
   const site = (_activeData.byId && _activeData.byId[siteId])
     || _activeData.sites.find((s) => s.id === siteId);
-  if (site && Number.isFinite(site.x) && Number.isFinite(site.y)) {
-    document.querySelectorAll('.mp-modal-back').forEach((el) => el.remove());
-    _renderer.flyTo(site, locateZoom(4));
-  }
+  if (!site || !Number.isFinite(site.x) || !Number.isFinite(site.y)) return;
+  // Reveal the map so the player actually SEES where the link flew. A
+  // full-screen MP modal (auction overlay, stack peek) covers the map on every
+  // size, so close those. The side panel only COVERS the map on a phone (it's
+  // a sidebar on desktop), so collapse it only on a narrow viewport - on
+  // desktop the map sits beside it and we leave the chat open. (User request.)
+  document.querySelectorAll('.mp-modal-back').forEach((el) => el.remove());
+  let narrow = false;
+  try { narrow = window.matchMedia('(max-width: 720px)').matches; } catch (e) { /* ignore */ }
+  if (narrow) { try { showPane(null); } catch (e) { /* ignore */ } }
+  _renderer.flyTo(site, locateZoom(4));
 }
 let _chatLocWired = false;
 function wireChatLocLinks() {
@@ -5968,14 +5975,10 @@ async function decommissionSelectedToHand(stackId, ids, onDone) {
     yes: '♻ Decommission', no: 'Cancel',
   });
   if (!ok) return;
-  // Online: rocket / LEO decommission routes through the server so the
-  // hand actually gains the cards (a local mutation would be clobbered by
-  // the next snapshot). Outpost decommission has no server op yet.
+  // Online: decommission routes through the server so the hand actually gains
+  // the cards (a local mutation would be clobbered by the next snapshot). The
+  // server accepts rocket / LEO / outpost<L> as the source.
   if (_online) {
-    if (stackId !== 'rocket' && stackId !== 'leo') {
-      _onlineToast('Decommission from there is not available online yet.', 'error');
-      return;
-    }
     const okOp = await submitOnlineOp({ kind: 'DECOMMISSION', cardIds: list, from: stackId });
     if (okOp) { try { onDone && onDone(); } catch (e) { /* ignore */ } }
     return;

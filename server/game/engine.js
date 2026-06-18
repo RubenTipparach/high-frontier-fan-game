@@ -2158,12 +2158,18 @@ function recallIfEmpty(player) {
 // Crew never enters the hand, so any crew in the selection is skipped.
 // op = { cardIds: [...], from: 'rocket' | 'leo' }. Turn-gated (functional).
 function applyDecommission(state, op, player) {
-  const from = op.from === 'leo' ? 'leo' : 'rocket';
+  const fromRaw = String(op.from || 'rocket');
+  let from, src;
+  if (fromRaw === 'leo') { from = 'leo'; src = (player.leo = player.leo || []); }
+  else if (fromRaw.startsWith('outpost')) {
+    const o = player.outposts && player.outposts[fromRaw.slice('outpost'.length)];
+    if (!o) return fail('no_outpost');
+    from = 'outpost'; src = (o.cards = o.cards || []);
+  } else { from = 'rocket'; src = player.rocket.stack; }
   const ids = Array.isArray(op.cardIds)
     ? op.cardIds.map(String)
     : (op.cardId != null ? [String(op.cardId)] : []);
   if (!ids.length) return fail('bad_decommission');
-  const src = from === 'leo' ? (player.leo || []) : player.rocket.stack;
   let returned = 0;
   let crewToLeo = 0;
   let blocked = 0;
@@ -2171,11 +2177,11 @@ function applyDecommission(state, op, player) {
     const idx = src.findIndex((s) => s.id === id);
     if (idx < 0) continue;
     const slot = src[idx];
-    // Decommissioning a Crew (a Human) is a FELONY. Normally blocked; during
-    // Anarchy it's allowed (Felonious privilege, G6) and the crew returns to
-    // the LEO Stack rather than the patent hand (crew aren't hand cards).
+    // Decommissioning a Crew (a Human) is a FELONY, allowed only from the
+    // ROCKET during Anarchy (the crew recalls to the LEO Stack). From LEO or an
+    // outpost it's blocked - crew there have nowhere to recall to.
     if (isCrewSlot(slot)) {
-      if (!mayCommitFelony(state, player) || from === 'leo') { blocked++; continue; }
+      if (!mayCommitFelony(state, player) || from !== 'rocket') { blocked++; continue; }
       src.splice(idx, 1);
       (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face === 'secondary' ? 'secondary' : 'primary' });
       if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
