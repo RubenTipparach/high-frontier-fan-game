@@ -3250,23 +3250,34 @@ app.get('/admin', (req, res) => {
        FROM lobbies l
        JOIN profiles p ON p.id = l.host_id
        WHERE l.status != 'cancelled'
+         AND NOT EXISTS (SELECT 1 FROM games g2 WHERE g2.lobby_id = l.id AND g2.status = 'finished')
        ORDER BY l.created_at DESC
        LIMIT 50`
     )
     .all();
 
-  // Cancelled rooms, newest-cancelled first (legacy rows with no cancel stamp
-  // fall back to created_at). Shown in a popup modal, not the main list.
-  const cancelledLobbies = db
+  // Ended games: cancelled rooms OR rooms whose game finished. Most-recently
+  // ended first (cancelled -> cancelled_at; finished -> the game's finished_at;
+  // legacy rows fall back to created_at). Capped at the last 10 and shown in a
+  // popup modal, not the main list. A cancelled lobby's game is also cancelled
+  // (never 'finished'), so the two cases don't overlap.
+  const endedLobbies = db
     .prepare(
-      `SELECT l.id, l.code, l.name, l.max_players,
-              datetime(COALESCE(l.cancelled_at, l.created_at) / 1000, 'unixepoch') AS cancelled_when,
-              p.name AS host_name
+      `SELECT l.id, l.code, l.name, l.max_players, p.name AS host_name,
+              CASE WHEN l.status = 'cancelled' THEN 'cancelled' ELSE 'finished' END AS kind,
+              datetime(COALESCE(
+                l.cancelled_at,
+                (SELECT MAX(g.finished_at) FROM games g WHERE g.lobby_id = l.id AND g.status = 'finished'),
+                l.created_at) / 1000, 'unixepoch') AS ended_when
        FROM lobbies l
        JOIN profiles p ON p.id = l.host_id
        WHERE l.status = 'cancelled'
-       ORDER BY COALESCE(l.cancelled_at, l.created_at) DESC
-       LIMIT 200`
+          OR EXISTS (SELECT 1 FROM games g WHERE g.lobby_id = l.id AND g.status = 'finished')
+       ORDER BY COALESCE(
+         l.cancelled_at,
+         (SELECT MAX(g.finished_at) FROM games g WHERE g.lobby_id = l.id AND g.status = 'finished'),
+         l.created_at) DESC
+       LIMIT 10`
     )
     .all();
 
@@ -3361,16 +3372,19 @@ app.get('/admin', (req, res) => {
     </tr>
   `).join('') || '<tr class="empty-row"><td colspan=9><em>No active rooms.</em></td></tr>';
 
-  const cancelledRows = cancelledLobbies.map((r) => `
+  const endedRows = endedLobbies.map((r) => `
     <tr>
       <td><code>${esc(r.code)}</code></td>
       <td>${esc(r.name)}</td>
       <td>@${esc(r.host_name)}</td>
       <td class="num">${r.max_players}</td>
-      <td>${esc(r.cancelled_when)}</td>
-      <td><button class="btn-restore-lobby" data-lid="${r.id}" data-lname="${esc(r.name)}">Restore</button></td>
+      <td><span class="pill pill-${r.kind === 'finished' ? 'finished' : 'cancelled'}">${r.kind}</span></td>
+      <td>${esc(r.ended_when)}</td>
+      <td>${r.kind === 'cancelled'
+        ? `<button class="btn-restore-lobby" data-lid="${r.id}" data-lname="${esc(r.name)}">Restore</button>`
+        : '<span class="muted">—</span>'}</td>
     </tr>
-  `).join('') || '<tr><td colspan=6><em>No cancelled rooms.</em></td></tr>';
+  `).join('') || '<tr><td colspan=7><em>No canceled or finished games.</em></td></tr>';
 
   const chatRows = chats.map((r) => `
     <tr>
@@ -3614,7 +3628,7 @@ app.get('/admin', (req, res) => {
   <h2>Rooms</h2>
   <div class="rooms-toolbar">
     <input id="room-search" type="search" placeholder="Search room name…" autocomplete="off" />
-    <button id="show-cancelled" type="button">🗑 Canceled rooms (${cancelledLobbies.length})</button>
+    <button id="show-cancelled" type="button">🗑 Canceled / finished games (${endedLobbies.length})</button>
   </div>
   <table>
     <thead><tr>
@@ -3627,15 +3641,15 @@ app.get('/admin', (req, res) => {
   <div id="cancelled-modal" class="modal-overlay" hidden>
     <div class="modal-box">
       <div class="modal-head">
-        <h3>🗑 Canceled rooms</h3>
+        <h3>🗑 Canceled / finished games <span class="muted" style="font-size:12px">(last 10)</span></h3>
         <button id="cancelled-close" type="button" class="modal-x" aria-label="Close">×</button>
       </div>
       <div class="modal-body">
         <table>
           <thead><tr>
-            <th>Code</th><th>Name</th><th>Host</th><th class="num">Players</th><th>Canceled</th><th>Manage</th>
+            <th>Code</th><th>Name</th><th>Host</th><th class="num">Players</th><th>Status</th><th>Ended</th><th>Manage</th>
           </tr></thead>
-          <tbody>${cancelledRows}</tbody>
+          <tbody>${endedRows}</tbody>
         </table>
       </div>
     </div>
