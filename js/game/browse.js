@@ -4658,6 +4658,11 @@ function openMpStackModal(title, slots, { rocketCtx } = {}) {
 
   const body = document.createElement('div');
   body.className = 'mp-stack-modal-cards';
+  // Swipe-browse siblings: same resolve order as the loop below, so a running
+  // counter (bumped only for resolved cards) lines each card up with its
+  // sibling entry even when a stack holds duplicates of the same card.
+  const sibs = stackSiblings(slots);
+  let sibIdx = 0;
   for (const slot of slots) {
     // The HAND ships as bare id strings; LEO / rocket / outpost ship as
     // { id, kind, face } slot objects. Normalise so both render.
@@ -4677,9 +4682,10 @@ function openMpStackModal(title, slots, { rocketCtx } = {}) {
     wrap.className = 'mp-stack-modal-card';
     try {
       const cardEl = renderCard(card, { type: kind, face, radSide });
-      makeCardViewable(cardEl, card, kind, face);
+      makeCardViewable(cardEl, card, kind, face, { siblings: sibs, index: sibIdx });
       wrap.appendChild(cardEl);
     } catch { wrap.textContent = card.name || id; }
+    sibIdx++;
     body.appendChild(wrap);
   }
   dialog.appendChild(body);
@@ -5164,7 +5170,7 @@ function wireHandStrip() {
       viewBtn.title = 'Open this card';
       viewBtn.addEventListener('click', (ev) => {
         ev.stopPropagation();
-        openCardModal(card, kindOf(id), idx);
+        openCardModal(card, kindOf(id), idx, { nav: { siblings: stackSiblings(slots), index: idx } });
       });
       wrap.appendChild(viewBtn);
 
@@ -5177,7 +5183,7 @@ function wireHandStrip() {
             s.classList.remove('is-selected'));
           if (!wasSelected) wrap.classList.add('is-selected');
         } else {
-          openCardModal(card, kindOf(id), idx);
+          openCardModal(card, kindOf(id), idx, { nav: { siblings: stackSiblings(slots), index: idx } });
         }
       });
       host.appendChild(wrap);
@@ -6057,6 +6063,10 @@ function openUnifiedStackInspector(stackId) {
     if (!cards.length) {
       row.innerHTML = '<p class="muted">Stack is empty.</p>';
     } else {
+      // Swipe-browse siblings: counter bumped per resolved card, aligned with
+      // stackSiblings' resolve order (handles duplicate cards in a stack).
+      const sibs = stackSiblings(cards);
+      let sibIdx = 0;
       for (const slot of cards) {
         const card = cardById(slot.id);
         if (!card) continue;
@@ -6066,7 +6076,8 @@ function openUnifiedStackInspector(stackId) {
         wrap.className = 'rocket-slot';
         if (selected.has(slot.id)) wrap.classList.add('is-selected');
         const cardEl = renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy' });
-        makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face);
+        makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, { siblings: sibs, index: sibIdx });
+        sibIdx++;
         wrap.appendChild(cardEl);
         const actions = document.createElement('div');
         actions.className = 'rocket-slot-actions';
@@ -6563,6 +6574,14 @@ function openDeckTapModal(card, kind, { allowAuction = false, inspectOnly = fals
 
   const panel = document.createElement('div');
   panel.className = 'card-modal-panel';
+  // Corner × close button (top-right of the card).
+  const xBtn = document.createElement('button');
+  xBtn.type = 'button';
+  xBtn.className = 'modal-x';
+  xBtn.textContent = '×';
+  xBtn.setAttribute('aria-label', 'Close');
+  xBtn.addEventListener('click', close);
+  panel.appendChild(xBtn);
   const cardEl = renderCard(card, {
     type: kind,
     onSupportClick: (kinds) => {
@@ -6671,29 +6690,121 @@ function openDeckTapModal(card, kind, { allowAuction = false, inspectOnly = fals
 // the card's own controls (Flip, support chips, the radiator Light/Heavy
 // toggle) so those keep working; a click anywhere else on the card opens the
 // big view. `face` opens the modal on the side that's installed in the stack.
-function makeCardViewable(cardEl, card, kind, face) {
+function makeCardViewable(cardEl, card, kind, face, nav) {
   if (!cardEl) return cardEl;
   cardEl.classList.add('is-viewable');
   cardEl.title = 'Tap to view this card up close';
   cardEl.addEventListener('click', (e) => {
     if (e.target.closest('button, [role="button"], .rad-side, .card-flip')) return;
-    openCardModal(card, kind, null, { readOnly: true, face });
+    openCardModal(card, kind, null, { readOnly: true, face, nav });
   });
   return cardEl;
+}
+
+// Build the swipe-browse sibling list for a stack or the hand. Accepts bare id
+// strings (hand) or { id, kind, face } slot objects (LEO / rocket / outpost).
+// slotIdx is the position in the list (the hand uses it for per-card actions).
+function stackSiblings(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const s of list) {
+    const id = (typeof s === 'string') ? s : (s && s.id);
+    if (!id) continue;
+    const c = PATENTS_BY_ID[id] || CREW_BY_ID[id];
+    if (!c) continue;
+    out.push({
+      card: c,
+      kind: (s && typeof s === 'object' && s.kind) ? s.kind : (CREW_BY_ID[id] ? 'crew' : 'patent'),
+      face: (s && typeof s === 'object') ? s.face : undefined,
+      slotIdx: out.length,
+    });
+  }
+  return out;
+}
+
+// Swipe (touch) + arrow-key + on-screen ‹ › browsing for a card modal whose
+// card belongs to a stack / hand. nav = { siblings, index }; navigating closes
+// this modal and reopens the sibling, carrying the same list.
+function setupCardModalNav(overlay, panel, close, cleanups, nav, { readOnly }) {
+  const sibs = nav && Array.isArray(nav.siblings) ? nav.siblings : null;
+  const idx = nav ? (nav.index | 0) : -1;
+  if (!sibs || sibs.length < 2 || idx < 0) return;
+  const go = (dir) => {
+    const ni = idx + dir;
+    if (ni < 0 || ni >= sibs.length) return;
+    const s = sibs[ni];
+    if (!s || !s.card) return;
+    close();
+    openCardModal(s.card, s.kind || 'patent', (s.slotIdx != null ? s.slotIdx : null),
+      { readOnly, face: s.face, nav: { siblings: sibs, index: ni } });
+  };
+  // Touch swipe: left -> next card, right -> previous.
+  let sx = 0, sy = 0, st = 0;
+  const onTS = (e) => { const t = e.changedTouches[0]; sx = t.clientX; sy = t.clientY; st = Date.now(); };
+  const onTE = (e) => {
+    const t = e.changedTouches[0];
+    const dx = t.clientX - sx, dy = t.clientY - sy;
+    if (Date.now() - st < 700 && Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.4) go(dx < 0 ? 1 : -1);
+  };
+  overlay.addEventListener('touchstart', onTS, { passive: true });
+  overlay.addEventListener('touchend', onTE, { passive: true });
+  cleanups.push(() => { overlay.removeEventListener('touchstart', onTS); overlay.removeEventListener('touchend', onTE); });
+  // Arrow keys.
+  const onArrow = (e) => {
+    if (e.key === 'ArrowLeft') { e.preventDefault(); go(-1); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); go(1); }
+  };
+  document.addEventListener('keydown', onArrow);
+  cleanups.push(() => document.removeEventListener('keydown', onArrow));
+  // On-screen control (surfaces the browse on desktop too).
+  const bar = document.createElement('div');
+  bar.className = 'card-modal-nav';
+  const prev = document.createElement('button');
+  prev.type = 'button'; prev.className = 'card-modal-arrow'; prev.textContent = '‹';
+  prev.setAttribute('aria-label', 'Previous card'); prev.disabled = idx <= 0;
+  prev.addEventListener('click', () => go(-1));
+  const pos = document.createElement('span');
+  pos.className = 'card-modal-pos'; pos.textContent = `${idx + 1} / ${sibs.length}`;
+  const next = document.createElement('button');
+  next.type = 'button'; next.className = 'card-modal-arrow'; next.textContent = '›';
+  next.setAttribute('aria-label', 'Next card'); next.disabled = idx >= sibs.length - 1;
+  next.addEventListener('click', () => go(1));
+  bar.append(prev, pos, next);
+  overlay.appendChild(bar);
 }
 
 // Inspect modal: enlarged copy of the clicked card with three
 // actions - Discard (pop back to the deck), Exo produce (will
 // need a factory location once Stage-3 builds them), and Add to
 // stack (push onto the LEO rocket).
-function openCardModal(card, kind, slotIdx, { readOnly = false, face } = {}) {
+function openCardModal(card, kind, slotIdx, { readOnly = false, face, nav } = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay';
-  const close = () => overlay.remove();
+  // Teardown registry: the corner ×, Esc, and any swipe / arrow-key
+  // listeners all unhook here, so swipe-browsing to a sibling card leaves
+  // nothing dangling behind the reopened modal.
+  const cleanups = [];
+  const close = () => {
+    for (const fn of cleanups) { try { fn(); } catch (e) {} }
+    overlay.remove();
+  };
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  cleanups.push(() => document.removeEventListener('keydown', onKey));
 
   const panel = document.createElement('div');
   panel.className = 'card-modal-panel';
+  // Corner × close button (top-right of the card). The backdrop tap + Esc
+  // still dismiss too; this is the obvious affordance on touch, where the
+  // backdrop can be a tight target around a big card.
+  const xBtn = document.createElement('button');
+  xBtn.type = 'button';
+  xBtn.className = 'modal-x';
+  xBtn.textContent = '×';
+  xBtn.setAttribute('aria-label', 'Close');
+  xBtn.addEventListener('click', close);
+  panel.appendChild(xBtn);
   const cardEl = renderCard(card, {
     type: kind,
     // Open on the explicitly requested face (e.g. the side installed in a
@@ -6709,14 +6820,19 @@ function openCardModal(card, kind, slotIdx, { readOnly = false, face } = {}) {
   cardEl.classList.add('card-modal-card');
   panel.appendChild(cardEl);
 
-  // Read-only inspection (e.g. the All cards overview): show the card and its
-  // Flip, but NONE of the act-on-card buttons (Discard / Free Market / Exo /
-  // Boost). Mirrors the crew path's mount + Esc handling.
-  if (readOnly) {
+  // Mount + wire swipe / arrow-key / on-screen browsing (only when the card
+  // belongs to a stack or the hand, via nav). Shared by all three exits.
+  const mount = () => {
     overlay.appendChild(panel);
     mountOverlay(overlay);
-    const onKeyRO = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKeyRO); } };
-    document.addEventListener('keydown', onKeyRO);
+    setupCardModalNav(overlay, panel, close, cleanups, nav, { readOnly });
+  };
+
+  // Read-only inspection (e.g. the All cards overview): show the card and its
+  // Flip, but NONE of the act-on-card buttons (Discard / Free Market / Exo /
+  // Boost).
+  if (readOnly) {
+    mount();
     return;
   }
 
@@ -6733,10 +6849,7 @@ function openCardModal(card, kind, slotIdx, { readOnly = false, face } = {}) {
     note.textContent = '👥 Crew can only be transferred between stacks (LEO ↔ rocket ↔ outpost). It has no hand actions.';
     actions.append(note);
     panel.appendChild(actions);
-    overlay.appendChild(panel);
-    mountOverlay(overlay);
-    const onKeyCrew = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKeyCrew); } };
-    document.addEventListener('keydown', onKeyCrew);
+    mount();
     return;
   }
 
@@ -6842,13 +6955,7 @@ function openCardModal(card, kind, slotIdx, { readOnly = false, face } = {}) {
 
   actions.append(discardBtn, sellBtn, produceBtn, boostBtn);
   panel.appendChild(actions);
-  overlay.appendChild(panel);
-  mountOverlay(overlay);
-
-  // Tap the backdrop or press Escape to dismiss - no explicit ×
-  // button (the action row already crowds the bottom).
-  const onKey = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
-  document.addEventListener('keydown', onKey);
+  mount();
 }
 
 // Side panel: a vertical tab strip on the right edge of the
@@ -9242,6 +9349,12 @@ function openRocketStackModal() {
       for (const r of reqs) if (r && r.kind) requiredKinds.add(r.kind);
     }
 
+    // Swipe-browse siblings for the card modal. The loop's lookup resolves a
+    // couple of ids stackSiblings can't (e.g. the open-cycle special card), so
+    // match by a pointer that only advances on shared cards - that card just
+    // gets no swipe-nav rather than drifting the indices of its neighbours.
+    const sibs = stackSiblings(stack);
+    let sp = 0;
     stack.forEach((slot, idx) => {
       const card = lookup(slot.id);
       if (!card) return;
@@ -9299,7 +9412,12 @@ function openRocketStackModal() {
         openSupportBrowser(kinds);
       };
       const cardEl = renderCard(card, cardOpts);
-      makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face);
+      let cardNav = null;
+      if (sibs[sp] && sibs[sp].card && sibs[sp].card.id === slot.id) {
+        cardNav = { siblings: sibs, index: sp };
+        sp++;
+      }
+      makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, cardNav);
       wrap.appendChild(cardEl);
 
       const actions = document.createElement('div');
