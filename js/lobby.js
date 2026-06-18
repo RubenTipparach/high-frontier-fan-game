@@ -47,6 +47,15 @@ export function initLobby({ onShowView, onToast }) {
   document.getElementById('btn-leave-lobby').addEventListener('click', onLeaveLobby);
   document.getElementById('btn-start').addEventListener('click', onStartClick);
 
+  // A game opens with ONE draft mode or none: Draft start and Random draft are
+  // mutually exclusive, so checking one clears the other.
+  const cDraft = document.getElementById('create-draft');
+  const cRand = document.getElementById('create-random-draft');
+  if (cDraft && cRand) {
+    cDraft.addEventListener('change', () => { if (cDraft.checked) cRand.checked = false; });
+    cRand.addEventListener('change', () => { if (cRand.checked) cDraft.checked = false; });
+  }
+
   // Invites chip in the lobby top row. Click toggles a small popover
   // with the pending-invite list; an outside click closes it. The badge
   // count is kept in sync with the live #invite-list (invites.js owns
@@ -904,8 +913,18 @@ function renderLobbySettings(lobby, iAmHost, me) {
   box.querySelector('#set-maxplayers').addEventListener('change', (e) => save({ maxPlayers: Number(e.target.value) }));
   box.querySelector('#set-rounds').addEventListener('change', (e) => save({ maxRounds: Number(e.target.value) }));
   box.querySelector('#set-policy').addEventListener('change', (e) => save({ joinPolicy: e.target.value }));
-  box.querySelector('#set-draft').addEventListener('change', (e) => save({ draftStart: e.target.checked }));
-  box.querySelector('#set-random-draft').addEventListener('change', (e) => save({ randomDraft: e.target.checked }));
+  // Draft start / Random draft are mutually exclusive; checking one clears the
+  // other, and we save BOTH flags so the server never holds both at once.
+  const setDraftEl = box.querySelector('#set-draft');
+  const setRandEl = box.querySelector('#set-random-draft');
+  setDraftEl.addEventListener('change', (e) => {
+    if (e.target.checked && setRandEl) setRandEl.checked = false;
+    save({ draftStart: e.target.checked, randomDraft: setRandEl ? setRandEl.checked : false });
+  });
+  setRandEl.addEventListener('change', (e) => {
+    if (e.target.checked && setDraftEl) setDraftEl.checked = false;
+    save({ randomDraft: e.target.checked, draftStart: setDraftEl ? setDraftEl.checked : false });
+  });
   box.querySelector('#set-m0').addEventListener('change', (e) => save({ m0: e.target.checked }));
 }
 
