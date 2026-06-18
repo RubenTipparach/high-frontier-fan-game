@@ -4205,11 +4205,12 @@ function validateTradeSide(state, owner, side) {
   return null;
 }
 
-// Will `receiver` have room for everything `side` brings them? (Hand limit +
-// tank room for water; in-space cargo lands in the rocket and is unbounded.)
+// Will `receiver` have room for everything `side` brings them? Hand cards are
+// NOT limited on a trade (user request): a trade may take a hand OVER the
+// auction limit of 4. That limit still gates auctions, so an over-full hand
+// just can't start / join one until it's reduced. Water still needs tank room;
+// in-space cargo lands in the rocket and is unbounded.
 function validateTradeReceipt(receiver, side) {
-  const incomingHand = side.handCardIds.length;
-  if (((receiver.hand || []).length + incomingHand) > AUCTION_HAND_LIMIT) return 'hand_full';
   if (side.water > 0) {
     if (receiver.rocket.tankGrade === 'dirt' && receiver.rocket.tank > 0) return 'tank_grade_mismatch';
     if (tankRoom(receiver.rocket) < side.water) return 'tank_full';
