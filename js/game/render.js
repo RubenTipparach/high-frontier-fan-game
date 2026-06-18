@@ -2133,7 +2133,12 @@ export class MapRenderer {
     // the gameplay route/trail follow on top.
     this._step('edges', () => this._drawEdges(ctx));
     this._step('belt', () => this._drawAsteroidBelt(ctx));
-    {
+    // Battery saver: skip the ambient chibi-ship traffic entirely. With the
+    // redraw loop stopped these advance by the whole elapsed gap on each
+    // on-demand repaint (e.g. a 5s snapshot poll), so they JUMP across the map
+    // - the opposite of calm. The belt above reads the now-frozen _animTime, so
+    // it's already static and stays drawn.
+    if (!isBatterySave()) {
       const now = performance.now();
       const dt = this._ambientLastT ? Math.min(80, now - this._ambientLastT) : 16;
       this._ambientLastT = now;
