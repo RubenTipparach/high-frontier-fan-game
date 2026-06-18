@@ -3371,6 +3371,7 @@ app.get('/admin', (req, res) => {
 <html><head><meta charset="utf-8"><title>High Frontier admin</title>
 <style>
   :root { color-scheme: dark; }
+  *{box-sizing:border-box}
   body{font:14px ui-sans-serif,system-ui,-apple-system,sans-serif;background:#07060f;color:#e6e9ff;margin:0;padding:24px;max-width:1200px}
   h1{margin:0 0 4px;color:#7dd3fc;font-size:22px}
   .sub{color:#5a5f80;font-size:12px;text-transform:uppercase;letter-spacing:2px;margin-bottom:18px}
@@ -3437,6 +3438,24 @@ app.get('/admin', (req, res) => {
   .ge-msg{font-size:12px;margin:0 0 8px;min-height:14px}
   .ge-msg.ok{color:#86efac}
   .ge-msg.err{color:#fda4af}
+  /* Mobile: keep wide tables on the page (scroll them, not the whole page),
+     give controls real tap targets, and let the modal use the full width. */
+  @media (max-width:700px){
+    body{padding:12px}
+    h1{font-size:19px}
+    .sub{margin-bottom:12px}
+    table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap}
+    .kpis{gap:8px}
+    .kpi{flex:1 1 calc(50% - 8px);min-width:0}
+    .kpi strong{font-size:19px}
+    button{padding:8px 12px;font-size:14px}
+    input,select,textarea{font-size:16px}   /* 16px stops iOS zoom-on-focus */
+    .rooms-toolbar{gap:8px}
+    #room-search{flex:1 1 100%;max-width:none}
+    .ws-info{margin-left:0;width:100%}
+    .modal-overlay{padding:8px}
+    .modal-box{width:100%;max-height:94vh}
+  }
 </style></head>
 <body>
   <div class="header-row">
