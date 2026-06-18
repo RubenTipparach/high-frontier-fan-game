@@ -481,12 +481,13 @@ function initNewGameModal() {
     const economy = econBtn ? econBtn.dataset.econ : 'library';
     const maxRounds = roundsBtn ? Number(roundsBtn.dataset.rounds) : 5;
     const draftStart = !!document.getElementById('solo-draft')?.checked;
+    const randomDraft = !!document.getElementById('solo-random-draft')?.checked;
     const m0 = !!document.getElementById('solo-m0')?.checked;
     soloCreate.disabled = true;
     const prev = soloCreate.textContent;
     soloCreate.textContent = 'Creating room…';
     try {
-      const r = await createSoloRoom({ startingAqua, economy, maxRounds, draftStart, m0 });
+      const r = await createSoloRoom({ startingAqua, economy, maxRounds, draftStart, randomDraft, m0 });
       if (r && r.ok) { close(); }
       else { toast('Could not start a solo room: ' + ((r && r.error) || 'network'), 'error'); }
     } catch (err) {

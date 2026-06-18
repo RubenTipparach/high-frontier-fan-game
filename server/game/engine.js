@@ -3592,6 +3592,25 @@ function finalScoreLog(state) {
 // 2026-06-10.)
 const DRAFT_HAND_SIZE = 12;
 const DRAFT_END_AQUA = 6;
+// Random-draft deal: give each player DRAFT_HAND_SIZE cards drawn from RANDOM
+// decks (the decks are pre-shuffled, so a random deck's top card is a random
+// card). Uses the seeded RNG and advances state.rng.cursor so the deal replays
+// identically from the op log.
+function dealRandomDraft(state) {
+  const gen = makeRng(state.seed, (state.rng && state.rng.cursor) || 0);
+  const types = DECK_TYPES.filter((t) => Array.isArray(state.decks[t]));
+  for (const p of state.players) {
+    p.hand = p.hand || [];
+    while (p.hand.length < DRAFT_HAND_SIZE) {
+      const avail = types.filter((t) => state.decks[t].length);
+      if (!avail.length) break;   // decks exhausted (only at absurd player counts)
+      const t = avail[gen.int(avail.length)];
+      p.hand.push(state.decks[t].shift());
+    }
+  }
+  state.rng = state.rng || {};
+  state.rng.cursor = gen.cursor;
+}
 function applyDraftPick(state, op, player) {
   const deckType = String(op.deckType || '');
   const deck = state.decks[deckType];
@@ -4512,7 +4531,18 @@ function applyPickCrew(state, op, ctx) {
     for (const sg of playersWithPrivilege(state, 'SECRETARY_GENERAL')) {
       sg.aqua = (sg.aqua | 0) + 2;
     }
-    if (state.draftStart) {
+    if (state.randomDraft) {
+      // Random draft: deal each player a full hand from random decks and open
+      // normal play immediately (banks at DRAFT_END_AQUA), no interactive draft.
+      dealRandomDraft(state);
+      for (const p of state.players) p.aqua = DRAFT_END_AQUA;
+      state.draftPhase = 'play';
+      state.turn = 0;
+      state.round = 1;
+      state.lastEvent = null;
+      state.activeIndex = state.firstPlayerIndex || 0;
+      openTurnFor(state, state.players[state.activeIndex]);
+    } else if (state.draftStart) {
       state.draftPhase = 'draft';
       state.draftCycledThisTurn = false;
       state.activeIndex = state.firstPlayerIndex || 0;

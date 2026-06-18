@@ -540,6 +540,7 @@ function lobbyRow(lobbyId) {
     maxRounds: row.max_rounds,
     joinPolicy: row.join_policy,
     draftStart: !!row.draft_start,
+    randomDraft: !!row.random_draft,
     m0: !!row.m0,
     status: row.status,
     createdAt: row.created_at,
@@ -637,6 +638,9 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // Opt-in draft-round opening (any player count). Stored on the lobby, applied
   // at start.
   const draftStart = body.draftStart ? 1 : 0;
+  // Opt-in random-draft opening: each player is dealt 12 random cards (no
+  // interactive pick). Stored on the lobby, applied at start.
+  const randomDraft = body.randomDraft ? 1 : 0;
   // Opt-in Module 0 (Sol Political Assembly). Fixed at creation; games already
   // running default to off (no retroactive apply).
   const m0 = body.m0 ? 1 : 0;
@@ -647,10 +651,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
     try {
       info = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, m0)
-           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, m0)
+           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, m0);
+        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, m0);
       break;
     } catch (err) {
       if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -687,6 +691,7 @@ app.get('/lobbies', (_req, res) => {
               l.max_players AS maxPlayers,
               l.status,
               l.draft_start AS draftStart,
+              l.random_draft AS randomDraft,
               l.m0          AS m0,
               l.created_at  AS createdAt,
               p.name        AS hostName,
@@ -718,6 +723,7 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
               l.join_policy AS joinPolicy,
               l.host_id     AS hostId,
               l.draft_start AS draftStart,
+              l.random_draft AS randomDraft,
               l.m0          AS m0,
               l.created_at  AS createdAt,
               p.name        AS hostName,
@@ -953,6 +959,7 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
     sets.push('max_rounds = ?'); args.push(mr);
   }
   if (body.draftStart !== undefined) { sets.push('draft_start = ?'); args.push(body.draftStart ? 1 : 0); }
+  if (body.randomDraft !== undefined) { sets.push('random_draft = ?'); args.push(body.randomDraft ? 1 : 0); }
   if (body.m0 !== undefined) { sets.push('m0 = ?'); args.push(body.m0 ? 1 : 0); }
   if (body.joinPolicy !== undefined) {
     sets.push('join_policy = ?'); args.push(body.joinPolicy === 'invite-only' ? 'invite-only' : 'open');
@@ -984,7 +991,7 @@ app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
 app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, m0 FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, m0 FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -1017,8 +1024,9 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   // Draft-start mode applies at any player count (it's a setup-flow choice, not
   // a solo-only one like the bank / economy above).
   const draftStart = !!lobby.draft_start;
+  const randomDraft = !!lobby.random_draft;
   const m0 = !!lobby.m0;
-  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, m0 });
+  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0 });
 
   const now = nowMs();
   const gameId = db.transaction(() => {
