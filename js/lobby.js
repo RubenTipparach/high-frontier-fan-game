@@ -397,11 +397,14 @@ export async function refreshMyGames() {
   const lastActiveAt = (g) => g.lastActionAt || g.lastTurnEndedAt || g.createdAt || 0;
   started.sort((a, b) => lastActiveAt(b) - lastActiveAt(a));
   ended.sort((a, b) => lastActiveAt(b) - lastActiveAt(a));
+  // Cap "Ended games" to the 10 most-recently-ended (matches the admin
+  // dashboard). In-progress games are never capped - you always see them all.
+  const endedRecent = ended.slice(0, 10);
   // Sandbox mode is deprecated: local offline sandbox games are no longer
   // surfaced in "Your games". (Old saves still exist in localStorage so nothing
   // is destroyed, they're just hidden.) Solo now runs as a 1-player server room.
   renderMyGames(startedEl, started, 'Resume', 'No games in progress.');
-  renderMyGames(endedEl, ended, 'Review', 'No finished games.');
+  renderMyGames(endedEl, endedRecent, 'Review', 'No finished games.');
 }
 
 // One "Your games" row for a local sandbox game. Resume snapshots the
