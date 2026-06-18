@@ -60,7 +60,7 @@ import {
   siteExists as plannerSiteExists, findPath as plannerFindPath,
   leoSlug, siteBySlug as siteById, hazardKind, nodeBySlug,
   nodeSizeNumber, lineOfSightSites, siteBodyOf, buggyRoamSites,
-  isSiteNode, zoneOfSlug, isAerobrakeNode,
+  isSiteNode, zoneOfSlug, isAerobrakeNode, isAerobrakeLandableSite,
 } from './planner-graph.js';
 import { isBuggyRoamBody } from '../../data/buggy-roam.js';
 import { makeRng } from './rng.js';
@@ -1464,12 +1464,12 @@ function applyMove(state, op, player) {
   // the destination.
   const liftG = from ? maneuverGate(state, from, thrust) : { ok: true, needsRoll: false };
   if (!liftG.ok) return fail('cannot_liftoff', { thrust, siteSize: liftG.size, site: from });
-  // Aerobrake landing: if this turn's approach crossed an aerobrake corridor,
-  // the stack parachutes down - no thrust-to-land requirement, no factory
-  // needed (the aero hazard roll above IS the descent risk). Liftoff is never
-  // aerobraked (you can't parachute UP), so only the landing gate is waived.
-  const aeroApproach = arrivals.some((slug) => isAerobrakeNode(slug));
-  const landG = aeroApproach
+  // Aerobrake landing: a destination that sits next to an aerobrake corridor
+  // (the 🪂 symbol) can be reached by parachute - no thrust-to-land
+  // requirement, no factory needed. Liftoff is never aerobraked (you can't
+  // parachute UP), so only the landing gate is waived. The aero hazard roll
+  // (above, for corridor nodes actually crossed this turn) is the descent risk.
+  const landG = isAerobrakeLandableSite(dest)
     ? { ok: true, assist: false, needsRoll: false }
     : maneuverGate(state, dest, thrust);
   if (!landG.ok) return fail('cannot_land', { thrust, siteSize: landG.size, site: dest });

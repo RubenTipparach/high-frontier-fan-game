@@ -22,6 +22,7 @@ import { SITES } from '../../data/sites.js';
 import { raygunReachable } from '../../data/raygun-los.js';
 import { buggyRoamReachable } from '../../data/buggy-roam.js';
 import { NODE_TAGS } from '../../data/node-tags.js';
+import { aerobrakeLandableSet } from '../../data/aerobrake-landing.js';
 
 // The mission-planner data (vendor JSON) is the single source of truth
 // for the movement graph - the SAME file the client renders from - and a
@@ -246,6 +247,25 @@ export function buggyRoamSites(fromSlug) {
 export function isAerobrakeNode(slug) {
   const t = NODE_TAGS[String(slug)];
   return !!(t && t.aerobrake);
+}
+
+// Sites you can parachute onto: a real site within a few hops of an aerobrake
+// corridor (the 🪂 symbol next to it). Landing there waives the thrust-to-land
+// gate, since you descend by parachute. Memoised: built once from the static
+// graph + node-tags via the SHARED helper the client also uses, so both agree.
+let _aeroLandable = null;
+export function isAerobrakeLandableSite(slug) {
+  if (!_aeroLandable) {
+    const aeroIds = [];
+    for (const s of NODES_BY_SLUG.keys()) if (isAerobrakeNode(s)) aeroIds.push(s);
+    _aeroLandable = aerobrakeLandableSet({
+      aeroIds,
+      neighborsOf: (s) => neighborSlugs(s),
+      isSiteId: (s) => isSiteNode(s),
+      maxHops: 3,
+    });
+  }
+  return _aeroLandable.has(String(slug));
 }
 
 // Hazard class of a planner node (mirror of browse.js#classifyHazard so

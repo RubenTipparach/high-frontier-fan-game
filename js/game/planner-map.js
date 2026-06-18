@@ -38,6 +38,8 @@ import { ZONE_ASSIGNMENTS } from '../../data/zones.js';
 // break move validation.
 import { makeRefId, normalizeSiteName } from '../../data/planner-ids.js';
 import { classifyBody } from '../../data/body-class.js';
+import { NODE_TAGS } from '../../data/node-tags.js';
+import { aerobrakeLandableSet } from '../../data/aerobrake-landing.js';
 const LOCAL_SITE_BY_NAME = new Map();
 for (const s of LOCAL_SITES) {
   if (s && s.name) LOCAL_SITE_BY_NAME.set(normalizeSiteName(s.name), s);
@@ -208,6 +210,30 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
   for (const s of sites) s.bodyKey = bodyKeyFor(s);
 
   const byId = Object.fromEntries(sites.map((s) => [s.id, s]));
+
+  // Aerobrake-landable sites: a real site within a few hops of an aerobrake
+  // corridor (the 🪂 symbol next to it). Computed via the SHARED helper the
+  // server also uses, so the client's "you can parachute down here" gate
+  // matches the server's authoritative one. We walk in planner-id space (the
+  // neighbours map) and stamp each site's id2-keyed verdict back on it.
+  const aeroPlannerIds = sites
+    .filter((s) => NODE_TAGS[s.id2] && NODE_TAGS[s.id2].aerobrake)
+    .map((s) => s.id);
+  const isSitePid = (pid) => {
+    const s = byId[pid];
+    // A real site = a non-waypoint body, or a burnspace that is itself a
+    // landing site (landing > 0). Mirrors the server's isSiteNode.
+    return !!(s && (!s.isWaypoint || (s.landing != null && s.landing > 0)));
+  };
+  const landablePids = aerobrakeLandableSet({
+    aeroIds: aeroPlannerIds,
+    neighborsOf: (pid) => [...(neighbors.get(pid) || [])],
+    isSiteId: isSitePid,
+    maxHops: 3,
+  });
+  const aeroLandableId2 = new Set();
+  for (const pid of landablePids) { const s = byId[pid]; if (s && s.id2) aeroLandableId2.add(s.id2); }
+  for (const s of sites) s.aeroLandable = aeroLandableId2.has(s.id2);
 
   // Chains of decorative routing nodes (degree-2 nodes whose only
   // job is to bend a straight line into a curve). We split them out

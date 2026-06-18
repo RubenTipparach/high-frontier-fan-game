@@ -14771,12 +14771,8 @@ async function moveRocket() {
     // Hazards along THIS turn's segments only.
     const hz = routeHazards(turn1Segs);
     const radHz = hz.filter((h) => h.site.type === 'radhaz');
-    // Aerobrake corridor on this turn's approach: the stack parachutes down,
-    // so the landing thrust gate is waived (land on a high-gravity body by
-    // aerobraking, no thrust needed). A parachute card (safe-aerobrake) waives
-    // the aero hazard roll itself; the server applies the same two waivers
-    // authoritatively, so the client preview matches what the server resolves.
-    const aeroApproach = hz.some((h) => h.aero);
+    // A parachute card (safe-aerobrake) waives the aero hazard roll; the server
+    // applies the same waiver, so the client preview matches what it resolves.
     const safeAeroOnline = stackHasPower('safeAerobrake');
     // Factory-assist maneuvers: an under-thrust liftoff (current site) or
     // landing (destination) is only legal with a factory there and is a
@@ -14792,8 +14788,10 @@ async function moveRocket() {
     const liftG = curSite ? maneuverGate(curSite, netThrust) : { ok: true };
     if (curSite && !liftG.ok) { _onlineToast(`Can't lift off from ${curSite.name} - not enough thrust and no factory to assist.`, 'error'); return false; }
     if (liftG.assist && liftG.needsRoll && curSite) assistHz.push({ site: curSite, glyph: '🏭', label: 'liftoff assist' });
+    // Aerobrake-landable destination (🪂 corridor next to it): parachute down,
+    // so the landing thrust gate is waived (same adjacency signal the server uses).
     const landG = destSite
-      ? (aeroApproach ? { ok: true, assist: false, needsRoll: false } : maneuverGate(destSite, netThrust))
+      ? (destSite.aeroLandable ? { ok: true, assist: false, needsRoll: false } : maneuverGate(destSite, netThrust))
       : { ok: true };
     if (destSite && !landG.ok) { _onlineToast(`Can't land on ${destSite.name} - not enough thrust and no factory to assist.`, 'error'); return false; }
     if (landG.assist && landG.needsRoll && destSite) assistHz.push({ site: destSite, glyph: '🏭', label: 'landing assist' });
@@ -14945,10 +14943,6 @@ async function moveRocket() {
   // so don't prompt pay/roll for aerobrake nodes. Skull / radiation are
   // unaffected. The ability activates by being aboard (no support chain needed).
   const safeAero = stackHasPower('safeAerobrake');
-  // Aerobrake corridor on this turn's approach: the stack parachutes down, so
-  // the landing thrust gate / factory-assist roll is waived below (the aero
-  // hazard roll is the descent risk).
-  const aeroApproach = hazards.some((h) => h.aero);
   const radHazards     = hazards.filter((h) => h.site.type === 'radhaz');
   const genericHazards = hazards.filter((h) => h.site.type !== 'radhaz' && !(safeAero && h.aero));
   let hazardChoice = null;
@@ -14969,13 +14963,15 @@ async function moveRocket() {
       assistManeuvers.push({ site: curSite, kind: 'liftoff', label: 'liftoff assist', glyph: '🏭', size: liftG.size });
     }
     const destId = _plannedRoute[_plannedRoute.length - 1].to;
-    // Aerobrake landing needs no factory assist (you parachute down), so skip
-    // the landing-assist roll entirely when this turn's approach is aerobraked.
-    if (!aeroApproach && turn1[turn1.length - 1].to === destId) {
+    if (turn1[turn1.length - 1].to === destId) {
       const destSite = _activeData.sites.find((s) => s.id === destId);
-      const landG = maneuverGate(destSite, assistNet);
-      if (landG.assist && landG.needsRoll && destSite) {
-        assistManeuvers.push({ site: destSite, kind: 'landing', label: 'landing assist', glyph: '🏭', size: landG.size });
+      // Aerobrake landing needs no factory assist (you parachute down), so skip
+      // the landing-assist roll when the destination is aerobrake-landable.
+      if (destSite && !destSite.aeroLandable) {
+        const landG = maneuverGate(destSite, assistNet);
+        if (landG.assist && landG.needsRoll) {
+          assistManeuvers.push({ site: destSite, kind: 'landing', label: 'landing assist', glyph: '🏭', size: landG.size });
+        }
       }
     }
     if (assistManeuvers.length) {
@@ -16828,11 +16824,11 @@ function planRocketRouteTo(destSite) {
     _renderer.setRouteEndpoints(origin.id, destSite.id);
     return false;
   }
-  // Aerobrake-capable destination: a body with an aerobrake corridor can be
-  // reached by parachuting in, so an under-thrust landing is NOT hard-blocked
-  // here - the route descends through the corridor and the move-time gate
-  // (route-based, both client + server) confirms the aerobrake landing.
-  const destAeroCapable = (destSite.aerobrakes | 0) > 0;
+  // Aerobrake-landable destination: a site sitting next to an aerobrake
+  // corridor (the 🪂 symbol) can be reached by parachuting in, so an
+  // under-thrust landing is NOT hard-blocked - you descend by parachute. Same
+  // adjacency signal the server's landing gate uses, so the two agree.
+  const destAeroCapable = !!destSite.aeroLandable;
   if (!landGate.ok && !destAeroCapable) {
     setStatus(
       `🛬 Can't land on <strong>${esc(destSite.name)}</strong>: net thrust `
