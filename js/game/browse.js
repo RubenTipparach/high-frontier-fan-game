@@ -3882,6 +3882,7 @@ function setupMpChat(host) {
 let _locLinkRe;            // RegExp | null once built
 let _locLinkBuilt = false; // false until built against real map data
 let _locLinkMap = null;    // normalized name -> planner site
+let _locSlugMap = null;    // node id2 (slug, lowercased) -> planner site (waypoints included)
 const LOC_LINK_DENY = new Set(['sun']); // common English words that are also site names
 function normLoc(s) {
   return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -3889,21 +3890,32 @@ function normLoc(s) {
 function buildLocLinkIndex() {
   _locLinkBuilt = true;
   _locLinkMap = new Map();
+  _locSlugMap = new Map();
   _locLinkRe = null;
   if (!_activeData || !Array.isArray(_activeData.sites)) { _locLinkBuilt = false; return; }
   const norms = [];
   for (const s of _activeData.sites) {
-    if (!s || s.isWaypoint || !s.name) continue;             // named real sites only
-    if (!Number.isFinite(s.x) || !Number.isFinite(s.y)) continue;  // must be navigable
+    if (!s || !Number.isFinite(s.x) || !Number.isFinite(s.y)) continue;  // navigable only
+    // EVERY node is reachable by its slug/id (id2) - waypoints (lagranges,
+    // burns, the venus flyby) included, since they have no name to match on.
+    if (s.id2) _locSlugMap.set(String(s.id2).toLowerCase(), s);
+    // Named real sites are ALSO reachable by name.
+    if (s.isWaypoint || !s.name) continue;
     const n = normLoc(s.name);
     if (!n || LOC_LINK_DENY.has(n) || _locLinkMap.has(n)) continue;
     _locLinkMap.set(n, s);
     norms.push(n);
   }
-  if (!norms.length) return;
-  norms.sort((a, b) => b.length - a.length);                 // longest match wins
-  const frags = norms.map((n) => n.split(' ').join('\\W+'));  // tokens are alnum, no escaping
-  _locLinkRe = new RegExp('\\b(' + frags.join('|') + ')\\b', 'gi');
+  norms.sort((a, b) => b.length - a.length);                 // longest name match wins
+  const nameFrags = norms.map((n) => n.split(' ').join('\\W+')); // tokens are alnum, no escaping
+  // A generic slug token (lowercase alphanumeric segments joined by hyphens:
+  // "mars-north-pole", "lag-3hf9y", "venus-2lgjk") so ANY node id links,
+  // waypoints too. It goes FIRST so a full node id matches whole instead of a
+  // shorter body name shadowing its prefix ("venus" inside "venus-2lgjk").
+  // Resolved against the slug map; a non-location hyphenated word ("co-op")
+  // simply misses both maps and stays plain text.
+  const SLUG_TOKEN = '[a-z0-9]+(?:-[a-z0-9]+)+';
+  _locLinkRe = new RegExp('\\b(' + [SLUG_TOKEN, ...nameFrags].join('|') + ')\\b', 'gi');
 }
 function getLocLinkRe() {
   if (!_locLinkBuilt) buildLocLinkIndex();   // retries until the map data is ready
@@ -3917,15 +3929,17 @@ function fillChatBody(el, text) {
   re.lastIndex = 0;
   let last = 0, m;
   while ((m = re.exec(text)) !== null) {
-    const site = _locLinkMap.get(normLoc(m[0]));
-    if (!site) continue;   // safety net; the matched span normalizes back to a key
+    // A name match resolves by normalized name; anything else (a slug token)
+    // resolves by node id2. A hyphenated word that is neither just stays text.
+    const site = _locLinkMap.get(normLoc(m[0])) || _locSlugMap.get(m[0].toLowerCase());
+    if (!site) continue;
     if (m.index > last) el.appendChild(document.createTextNode(text.slice(last, m.index)));
     const a = document.createElement('a');
     a.className = 'chat-loc-link';
     a.href = '#';
     a.dataset.siteId = site.id;
     a.textContent = m[0];
-    a.title = `Show ${site.name} on the map`;
+    a.title = `Show ${site.name || site.id2 || m[0]} on the map`;
     el.appendChild(a);
     last = m.index + m[0].length;
   }
