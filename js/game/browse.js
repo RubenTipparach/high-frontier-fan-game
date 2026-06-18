@@ -9724,9 +9724,22 @@ function isLeoSite(site) {
 // Returns the glyph + a short label so the confirm modal can list
 // what the player is about to fly through.
 const HAZARD_COST_PER = 4;
+// An aerobrake corridor: a node carrying the node-tags 'aerobrake' flag (the
+// same flag that draws the 🪂 sprite, keyed by id2). Shared with the server's
+// isAerobrakeNode so both classify the SAME corridors. Distinct from a Venus
+// gravity-assist flyby (type 'venus') and a plain hazard-flagged lagrange.
+function isAerobrakeSite(site) {
+  return !!(site && site.id2 && NODE_TAGS[site.id2] && NODE_TAGS[site.id2].aerobrake);
+}
 function classifyHazard(site) {
   if (!site) return null;
   if (site.type === 'radhaz') return { glyph: '☢', label: 'Radiation hazard' };
+  // Aerobrake corridor: an atmospheric-entry hazard you parachute through
+  // (roll or pay), flagged even though the node is a lagrange. A parachute
+  // card waives the roll. The `aero` flag lets the move flow both waive the
+  // roll for a safe-aerobrake stack AND drop the landing thrust gate for this
+  // approach (you parachute down regardless of thrust / site size).
+  if (isAerobrakeSite(site)) return { glyph: '🪂', label: 'Aerobrake corridor', aero: true };
   // Venus 'venus' nodes are gravity-assist FLYBYS (flybyBoost), not
   // atmospheric aerobraking, so flying through one is a free maneuver - never
   // a hazard roll. (User: venus-2lgjk must not require a roll.)
@@ -14758,6 +14771,13 @@ async function moveRocket() {
     // Hazards along THIS turn's segments only.
     const hz = routeHazards(turn1Segs);
     const radHz = hz.filter((h) => h.site.type === 'radhaz');
+    // Aerobrake corridor on this turn's approach: the stack parachutes down,
+    // so the landing thrust gate is waived (land on a high-gravity body by
+    // aerobraking, no thrust needed). A parachute card (safe-aerobrake) waives
+    // the aero hazard roll itself; the server applies the same two waivers
+    // authoritatively, so the client preview matches what the server resolves.
+    const aeroApproach = hz.some((h) => h.aero);
+    const safeAeroOnline = stackHasPower('safeAerobrake');
     // Factory-assist maneuvers: an under-thrust liftoff (current site) or
     // landing (destination) is only legal with a factory there and is a
     // hazard roll unless a colony waives it. These join the generic
@@ -14772,7 +14792,9 @@ async function moveRocket() {
     const liftG = curSite ? maneuverGate(curSite, netThrust) : { ok: true };
     if (curSite && !liftG.ok) { _onlineToast(`Can't lift off from ${curSite.name} - not enough thrust and no factory to assist.`, 'error'); return false; }
     if (liftG.assist && liftG.needsRoll && curSite) assistHz.push({ site: curSite, glyph: '🏭', label: 'liftoff assist' });
-    const landG = destSite ? maneuverGate(destSite, netThrust) : { ok: true };
+    const landG = destSite
+      ? (aeroApproach ? { ok: true, assist: false, needsRoll: false } : maneuverGate(destSite, netThrust))
+      : { ok: true };
     if (destSite && !landG.ok) { _onlineToast(`Can't land on ${destSite.name} - not enough thrust and no factory to assist.`, 'error'); return false; }
     if (landG.assist && landG.needsRoll && destSite) assistHz.push({ site: destSite, glyph: '🏭', label: 'landing assist' });
     // Synodic-season gate (also catches a route planned in-season last turn):
@@ -14784,7 +14806,9 @@ async function moveRocket() {
       _onlineToast(`${destSite.name} is a ${destSeason}-season space - only enterable during Season ${cap} (the Sunspot Cube is in ${curSeasonName} now).`, 'error');
       return false;
     }
-    const genericHz = hz.filter((h) => h.site.type !== 'radhaz').concat(assistHz);
+    // Drop aero hazards from the pay/roll prompt when a parachute card is
+    // aboard (the server waives them too), so the client preview matches.
+    const genericHz = hz.filter((h) => h.site.type !== 'radhaz' && !(safeAeroOnline && h.aero)).concat(assistHz);
     let hazardPay = false;
     // Generic (skull / aerobrake / factory assist): pay aqua, roll, or
     // cancel. Each is a separate d6 - the modal says "cannot be undone".
@@ -14918,11 +14942,15 @@ async function moveRocket() {
   const hazards = routeHazards(turn1);
   // A safe-aerobrake card (parachute generator) aboard rides the stack through
   // aerobrake corridors with no roll - matching the server, which waives them -
-  // so don't prompt pay/roll for venus (aerobrake) nodes. Skull / radiation are
+  // so don't prompt pay/roll for aerobrake nodes. Skull / radiation are
   // unaffected. The ability activates by being aboard (no support chain needed).
   const safeAero = stackHasPower('safeAerobrake');
+  // Aerobrake corridor on this turn's approach: the stack parachutes down, so
+  // the landing thrust gate / factory-assist roll is waived below (the aero
+  // hazard roll is the descent risk).
+  const aeroApproach = hazards.some((h) => h.aero);
   const radHazards     = hazards.filter((h) => h.site.type === 'radhaz');
-  const genericHazards = hazards.filter((h) => h.site.type !== 'radhaz' && !(safeAero && h.site.type === 'venus'));
+  const genericHazards = hazards.filter((h) => h.site.type !== 'radhaz' && !(safeAero && h.aero));
   let hazardChoice = null;
   let lockUndo = false;
   // Factory-assist pre-flight. A maneuver where net thrust <= site
@@ -14941,7 +14969,9 @@ async function moveRocket() {
       assistManeuvers.push({ site: curSite, kind: 'liftoff', label: 'liftoff assist', glyph: '🏭', size: liftG.size });
     }
     const destId = _plannedRoute[_plannedRoute.length - 1].to;
-    if (turn1[turn1.length - 1].to === destId) {
+    // Aerobrake landing needs no factory assist (you parachute down), so skip
+    // the landing-assist roll entirely when this turn's approach is aerobraked.
+    if (!aeroApproach && turn1[turn1.length - 1].to === destId) {
       const destSite = _activeData.sites.find((s) => s.id === destId);
       const landG = maneuverGate(destSite, assistNet);
       if (landG.assist && landG.needsRoll && destSite) {
@@ -16798,7 +16828,12 @@ function planRocketRouteTo(destSite) {
     _renderer.setRouteEndpoints(origin.id, destSite.id);
     return false;
   }
-  if (!landGate.ok) {
+  // Aerobrake-capable destination: a body with an aerobrake corridor can be
+  // reached by parachuting in, so an under-thrust landing is NOT hard-blocked
+  // here - the route descends through the corridor and the move-time gate
+  // (route-based, both client + server) confirms the aerobrake landing.
+  const destAeroCapable = (destSite.aerobrakes | 0) > 0;
+  if (!landGate.ok && !destAeroCapable) {
     setStatus(
       `🛬 Can't land on <strong>${esc(destSite.name)}</strong>: net thrust `
       + `<strong>${netThrust}</strong> must exceed its size <strong>${landGate.size}</strong> `
@@ -16808,9 +16843,11 @@ function planRocketRouteTo(destSite) {
     _renderer.setRouteEndpoints(origin.id, destSite.id);
     return false;
   }
-  const assistNote = (liftGate.assist || landGate.assist)
-    ? ` <em class="muted">(🏭 factory assist${(liftGate.needsRoll || landGate.needsRoll) ? ' - hazard roll on the move' : ' - free, colony present'})</em>`
-    : '';
+  const assistNote = (!landGate.ok && destAeroCapable)
+    ? ` <em class="muted">(🪂 aerobrake descent - parachutes down through the atmosphere)</em>`
+    : (liftGate.assist || landGate.assist)
+      ? ` <em class="muted">(🏭 factory assist${(liftGate.needsRoll || landGate.needsRoll) ? ' - hazard roll on the move' : ' - free, colony present'})</em>`
+      : '';
   // Synodic-season gate: a seasonal space is only on the board during its
   // Sunspot phase, so it can't be entered (or even routed to) off-season.
   let nowSeason = null;

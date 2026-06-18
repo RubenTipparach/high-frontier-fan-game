@@ -21,6 +21,7 @@ import { makeRefId, normalizeSiteName } from '../../data/planner-ids.js';
 import { SITES } from '../../data/sites.js';
 import { raygunReachable } from '../../data/raygun-los.js';
 import { buggyRoamReachable } from '../../data/buggy-roam.js';
+import { NODE_TAGS } from '../../data/node-tags.js';
 
 // The mission-planner data (vendor JSON) is the single source of truth
 // for the movement graph - the SAME file the client renders from - and a
@@ -237,15 +238,31 @@ export function buggyRoamSites(fromSlug) {
   });
 }
 
+// An aerobrake corridor node: carries the node-tags 'aerobrake' flag (the
+// SAME flag the client renders the 🪂 sprite from, keyed by the slug == id2).
+// Shared static source of truth so client + server agree byte-for-byte. Drives
+// BOTH the atmospheric-entry hazard roll AND the landing-thrust-gate waiver
+// (you parachute down). NOT the same as a Venus gravity-assist flyby.
+export function isAerobrakeNode(slug) {
+  const t = NODE_TAGS[String(slug)];
+  return !!(t && t.aerobrake);
+}
+
 // Hazard class of a planner node (mirror of browse.js#classifyHazard so
 // the server resolves the SAME hazards the sandbox shows):
 //   'rad'   - radiation zone (rolls, NOT aqua-payable)
+//   'aero'  - aerobrake corridor (aqua-payable; parachute card waives it)
 //   'skull' - hazard-flagged burn space (aqua-payable)
-//   null    - safe (lagrange + Venus gravity-assist flybys are never hazards)
+//   null    - safe (Venus gravity-assist flybys + plain lagranges are never hazards)
 export function hazardKind(slug) {
   const n = NODES_BY_SLUG.get(String(slug));
   if (!n) return null;
   if (n.type === 'radhaz') return 'rad';
+  // Aerobrake corridors are atmospheric-entry hazard spaces - you parachute
+  // through them (roll or pay), even though the node is a lagrange. Checked
+  // before the lagrange exclusion below so the corridor IS a hazard, while a
+  // plain hazard-flagged lagrange (gravity-assist flyby) stays safe.
+  if (isAerobrakeNode(slug)) return 'aero';
   // 'venus' nodes are gravity-assist flybys (flybyBoost), not atmospheric
   // aerobraking, so they never trigger a hazard roll. (User: venus-2lgjk.)
   if (n.hazard && n.type !== 'lagrange') return 'skull';
