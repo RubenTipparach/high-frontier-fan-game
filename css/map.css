@@ -3858,6 +3858,23 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .patent-side.is-active { background: #3a3568; color: #fff; border-color: #5b54a0; }
 
+/* Battery saver (js/prefs.js): kill every animation + transition app-wide.
+   Using 0s durations (not `none`) so animation/transition END events still
+   fire, keeping any cleanup that listens for them working. The map's ambient
+   redraw loop is stopped separately in render.js. */
+html.battery-save *,
+html.battery-save *::before,
+html.battery-save *::after {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+  scroll-behavior: auto !important;
+}
+/* Battery-saver menu toggle, active state. */
+#btn-battery-save.is-active { background: #2e7d32; color: #fff; border-color: #1b5e20; }
+
 /* Sub-filter row under the Supports tab: one chip per kind of
    support a card can supply. Hidden on other tabs so the row
    doesn't take vertical space when it's meaningless. Multi-

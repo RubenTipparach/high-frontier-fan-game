@@ -7,6 +7,7 @@
 
 import { MapRenderer, LEO_ANCHOR } from './render.js';
 import { appBase } from '../base.js';
+import { isBatterySave } from '../prefs.js';
 import { erudaEnabled, setEruda } from '../debug-console.js';
 import { loadPlannerMap } from './planner-map.js';
 import { planRoute } from './planner-nav.js';
@@ -13538,6 +13539,8 @@ function animateRocketAlong(segments, totalMs = 700) {
   // A manual route already walked hop-by-hop during plotting snaps on commit
   // (the player has already seen the ship travel) instead of re-flying it.
   if (_fastMoveAnim) totalMs = 0;
+  // Battery saver: snap the rocket to its destination instead of flying it.
+  if (isBatterySave()) totalMs = 0;
   return new Promise((resolve) => {
     if (!_renderer || !_activeData || !segments || !segments.length) {
       resolve(); return;
