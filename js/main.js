@@ -8,6 +8,7 @@ import {
   adoptServerSession, markDiscordLinked, onProfileChange,
 } from './auth.js';
 import { ws } from './ws.js';
+import { isBatterySave, setBatterySave, applyBatterySaveClass } from './prefs.js';
 import {
   initLobby, refreshLobbyList, openLobby, exitToLobbyList, createSoloRoom,
 } from './lobby.js';
@@ -202,6 +203,20 @@ function initBrowseButton() {
         ? '⤬ Exit fullscreen'
         : '⛶ Fullscreen';
     });
+  }
+
+  // Battery saver toggle. Reflects + flips the calm/static display mode
+  // (js/prefs.js); the renderer + animation paths read it live.
+  const batteryBtn = document.getElementById('btn-battery-save');
+  if (batteryBtn) {
+    const syncBattery = () => {
+      const on = isBatterySave();
+      batteryBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      batteryBtn.classList.toggle('is-active', on);
+      batteryBtn.textContent = on ? '🔋 Battery saver: On' : '🔋 Battery saver: Off';
+    };
+    batteryBtn.addEventListener('click', () => { setBatterySave(!isBatterySave()); syncBattery(); });
+    syncBattery();
   }
 }
 
@@ -857,6 +872,8 @@ async function boot() {
   // missing export breaks linking, main.js never runs, this stays unset,
   // and the watchdog shows the hard-refresh banner.
   window.__hfBooted = true;
+  // Apply the saved (or OS-default) battery-saver state before the map mounts.
+  applyBatterySaveClass();
   // Bring the on-device debug console (Eruda) back up if it was left enabled
   // in Config, so it's ready to capture early logs + failed server calls.
   initErudaFromPref();

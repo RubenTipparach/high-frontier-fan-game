@@ -1,6 +1,7 @@
 import { getRocketSprite, getRocketSpriteSize } from './rocket-sprite.js';
 import { thrustVisual } from './card-ui.js';
 import { assetUrl } from '../base.js';
+import { isBatterySave, onBatterySaveChange } from '../prefs.js';
 import { NODE_TAGS, spriteForTags } from '../../data/node-tags.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
 
@@ -958,6 +959,8 @@ export class MapRenderer {
     this._buildAsteroidBelt();
     this._mount();
     this._startAnimation();
+    // Battery saver flips the ambient loop on / off without a remount.
+    this._offBattery = onBatterySaveChange(() => { this._startAnimation(); this._scheduleDraw(); });
   }
 
   // ---- public surface ----
@@ -1934,6 +1937,11 @@ export class MapRenderer {
   }
 
   _startAnimation() {
+    if (this._animRaf) { cancelAnimationFrame(this._animRaf); this._animRaf = null; }
+    // Battery saver: no ambient redraw loop. The map still repaints on demand
+    // (pan / zoom / hover / state change each call _scheduleDraw), so it stays
+    // interactive but static - like a paper map - which is the whole point.
+    if (isBatterySave()) { this._scheduleDraw(); return; }
     // The ambient drift (rockets crossing the map, asteroid-belt twinkle) now
     // targets ~60fps so the motion reads smoothly instead of stepping. The
     // ambient dt is elapsed-time based (and clamped), so sprite speed is
@@ -2125,7 +2133,12 @@ export class MapRenderer {
     // the gameplay route/trail follow on top.
     this._step('edges', () => this._drawEdges(ctx));
     this._step('belt', () => this._drawAsteroidBelt(ctx));
-    {
+    // Battery saver: skip the ambient chibi-ship traffic entirely. With the
+    // redraw loop stopped these advance by the whole elapsed gap on each
+    // on-demand repaint (e.g. a 5s snapshot poll), so they JUMP across the map
+    // - the opposite of calm. The belt above reads the now-frozen _animTime, so
+    // it's already static and stays drawn.
+    if (!isBatterySave()) {
       const now = performance.now();
       const dt = this._ambientLastT ? Math.min(80, now - this._ambientLastT) : 16;
       this._ambientLastT = now;

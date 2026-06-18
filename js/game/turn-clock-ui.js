@@ -15,6 +15,7 @@ import {
 } from './turn-clock.js';
 import { PATENTS_BY_ID } from '../../data/patents.js';
 import { renderCard } from './card-ui.js';
+import { isBatterySave } from '../prefs.js';
 
 // Small attr/text escapers shared by the event-outcome chips.
 function escTc(t) {
@@ -457,8 +458,10 @@ export function openEventLegend() {
 // finishes so the caller can update the result line right after.
 export function rollDie(dieEl, value) {
   return new Promise((resolve) => {
-    dieEl.classList.add('rolling');
     dieEl.dataset.value = String(value);
+    // Battery saver: show the result immediately, no tumble.
+    if (isBatterySave()) { resolve(); return; }
+    dieEl.classList.add('rolling');
     setTimeout(() => {
       dieEl.classList.remove('rolling');
       resolve();
