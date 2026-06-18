@@ -20,7 +20,7 @@ import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
 import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE } from './game/engine.js';
 import { randomSeed } from './game/rng.js';
-import { siteBySlug } from './game/planner-graph.js';
+import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
 import { PATENTS_BY_ID } from '../data/patents.js';
 import { normaliseTag } from '../data/site-tags.js';
 import { NODE_TAGS as STATIC_NODE_TAGS } from '../data/node-tags.js';
@@ -1396,6 +1396,13 @@ function notifyWebhook(text) {
 // can hit one of them or all). Otherwise -> the active seat.
 function actorsNeeded(state) {
   if (!state || !Array.isArray(state.players)) return [];
+  // Card-draft phase (draft-start): the active seat is on the clock to pick a
+  // card, so the game IS waiting on them (unlike the crew draft, where any
+  // seat may pick simultaneously and nobody is singled out).
+  if (state.draftPhase === 'draft') {
+    const d = state.players[state.activeIndex];
+    return d ? [d.profileId] : [];
+  }
   const draftDone = state.draftPhase === 'play'
     || (state.draftPhase == null && state.players.every((p) => !!p.faction));
   if (!draftDone) return [];
@@ -1547,6 +1554,37 @@ function dispatchTurnNotifications(gameId, kind, state) {
           }
         }
         notifyWebhook(`🔨 ${isReset ? 'The auctioneer reset the bidding' : 'The bidding reopened'} in **${name}**.${jump}`);
+      }
+    } else if (kind === 'PICK_CREW') {
+      // The crew draft just closed into the next phase. Ping whoever is now on
+      // the clock - the first card-drafter (draft-start) or the first player
+      // (random / normal). During the crew draft itself nobody is singled out
+      // (any seat may pick), so this only fires on the transition.
+      if (state.draftPhase === 'draft') {
+        const drafter = state.players[state.activeIndex];
+        if (drafter) {
+          if (dmOn) notifyProfile(drafter.profileId, 'turn', `🎴 The card draft has begun in **${name}** - pick your first card.${jump}`);
+          notifyWebhook(`🎴 The card draft has begun in **${name}** - ${drafter.name || 'the first player'} drafts first.${jump}`);
+        }
+      } else if (state.draftPhase === 'play') {
+        const active = state.players[state.activeIndex];
+        if (active) {
+          if (dmOn) notifyProfile(active.profileId, 'turn', `🛸 The draft is done in **${name}** - it's your turn.${jump}`);
+          notifyWebhook(`🛸 Play has begun in **${name}** - ${active.name || 'the first player'} is up.${jump}`);
+        }
+      }
+    } else if (kind === 'DRAFT_PICK') {
+      // Card draft (draft-start): each pick hands the draft to the next seat,
+      // or, on the final pick, opens normal play for the first player.
+      const active = state.players[state.activeIndex];
+      if (active) {
+        if (state.draftPhase === 'draft') {
+          if (dmOn) notifyProfile(active.profileId, 'turn', `🎴 It's your card-draft pick in **${name}**.${jump}`);
+          notifyWebhook(`🎴 ${active.name || 'A player'} is up to draft in **${name}**.${jump}`);
+        } else if (state.draftPhase === 'play') {
+          if (dmOn) notifyProfile(active.profileId, 'turn', `🛸 The draft is done in **${name}** - it's your turn.${jump}`);
+          notifyWebhook(`🛸 Play has begun in **${name}** - ${active.name || 'the first player'} is up.${jump}`);
+        }
       }
     }
   } catch (e) {
@@ -3318,12 +3356,10 @@ app.get('/admin', (req, res) => {
       <td>${esc(r.join_policy)}</td>
       <td class="num">${r.members} / ${r.max_players}</td>
       <td>${esc(r.created)}</td>
-      <td>
-        ${r.game_id ? `<button class="btn-manage-game" data-gid="${r.game_id}" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}">Manage state</button>` : ''}
-        <button class="btn-del-lobby danger" data-lid="${r.id}" data-lname="${esc(r.name)}">Cancel</button>
-      </td>
+      <td>${r.game_id ? `<button class="btn-manage-game" data-gid="${r.game_id}" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}">Manage state</button>` : '<span class="muted">—</span>'}</td>
+      <td><button class="btn-del-lobby danger" data-lid="${r.id}" data-lname="${esc(r.name)}">Cancel</button></td>
     </tr>
-  `).join('') || '<tr class="empty-row"><td colspan=8><em>No active rooms.</em></td></tr>';
+  `).join('') || '<tr class="empty-row"><td colspan=9><em>No active rooms.</em></td></tr>';
 
   const cancelledRows = cancelledLobbies.map((r) => `
     <tr>
@@ -3426,6 +3462,9 @@ app.get('/admin', (req, res) => {
   .ge-stats{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 10px;font-size:12px}
   .ge-stats input{width:64px;background:#0a0814;border:1px solid #2a2740;color:#e6e9ff;border-radius:6px;padding:3px 6px}
   .ge-stats select{background:#0a0814;border:1px solid #2a2740;color:#e6e9ff;border-radius:6px;padding:3px 6px}
+  .ge-teleport{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 10px;font-size:12px}
+  .ge-teleport strong{color:#7dd3fc}
+  .ge-teleport input{flex:1 1 200px;min-width:140px;background:#0a0814;border:1px solid #2a2740;color:#e6e9ff;border-radius:6px;padding:3px 6px}
   .ge-loc{margin:6px 0}
   .ge-loc>.ge-loc-h{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#7dd3fc;margin:0 0 3px}
   .ge-card{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:3px 0;border-bottom:1px solid #16142400}
@@ -3455,6 +3494,17 @@ app.get('/admin', (req, res) => {
     .ws-info{margin-left:0;width:100%}
     .modal-overlay{padding:8px}
     .modal-box{width:100%;max-height:94vh}
+    .modal-body{padding:8px 10px 14px}
+    /* Manage-state modal: stack each control so it's readable + tappable on a
+       phone instead of wrapping into a cramped row. */
+    .ge-player{padding:10px}
+    .ge-player>h4{font-size:15px}
+    .ge-card{gap:8px}
+    .ge-card .ge-name{flex:1 1 100%;min-width:0}
+    .ge-card select{flex:1 1 auto}
+    .ge-give select,.ge-give-card,.ge-give-loc{flex:1 1 100%}
+    .ge-teleport input{flex:1 1 100%}
+    #game-edit-body button{padding:8px 12px;font-size:14px}
   }
 </style></head>
 <body>
@@ -3569,7 +3619,7 @@ app.get('/admin', (req, res) => {
   <table>
     <thead><tr>
       <th>Code</th><th>Name</th><th>Host</th>
-      <th>Status</th><th>Policy</th><th class="num">Players</th><th>Created</th><th>Manage</th>
+      <th>Status</th><th>Policy</th><th class="num">Players</th><th>Created</th><th>State</th><th>Manage</th>
     </tr></thead>
     <tbody id="lobby-tbody">${lobbyRows}</tbody>
   </table>
@@ -3971,6 +4021,9 @@ document.addEventListener('click', function (ev) {
         + '<select class="ge-grade"><option value="water"' + (p.rocket && p.rocket.tankGrade === 'water' ? ' selected' : '') + '>water</option>'
         + '<option value="dirt"' + (p.rocket && p.rocket.tankGrade === 'dirt' ? ' selected' : '') + '>dirt</option></select>'
         + '<button data-act="set_water">Set</button></div>';
+      html += '<div class="ge-teleport">🛸 Rocket at <strong>' + esc(p.rocket ? (p.rocket.siteName || 'LEO') : 'LEO') + '</strong>'
+        + ' &rarr; <input type="text" class="ge-tp-node" placeholder="node id or name" autocomplete="off">'
+        + '<button data-act="teleport">Teleport</button></div>';
       locs.forEach(function (loc) {
         var cards = cardsAt(p, loc);
         html += '<div class="ge-loc"><div class="ge-loc-h">' + esc(locLabel(loc, p)) + ' (' + cards.length + ')</div>';
@@ -4034,6 +4087,10 @@ document.addEventListener('click', function (ev) {
       postEdit({ action: 'set_aqua', profileId: pid, value: Number(pEl.querySelector('.ge-aqua').value) }, 'Aqua set.');
     } else if (act === 'set_water') {
       postEdit({ action: 'set_water', profileId: pid, value: Number(pEl.querySelector('.ge-water').value), grade: pEl.querySelector('.ge-grade').value }, 'Tank set.');
+    } else if (act === 'teleport') {
+      var node = (pEl.querySelector('.ge-tp-node').value || '').trim();
+      if (!node) { msg('Enter a node id or name to teleport to.', false); return; }
+      postEdit({ action: 'teleport', profileId: pid, node: node }, 'Rocket teleported.');
     } else if (act === 'give') {
       postEdit({ action: 'give_card', profileId: pid, cardId: pEl.querySelector('.ge-give-card').value, to: pEl.querySelector('.ge-give-loc').value }, 'Card granted.');
     } else if (act === 'move' || act === 'remove') {
@@ -4267,6 +4324,17 @@ app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
     player.rocket.tank = v;
     if (body.grade === 'water' || body.grade === 'dirt') player.rocket.tankGrade = body.grade;
     log = `Correction: ${name}'s rocket tank set to ${v} ${player.rocket.tankGrade || 'water'}.`;
+  } else if (body.action === 'teleport') {
+    // Move the player's rocket stack to an arbitrary node. The reference may be
+    // a node id (slug) or a site name; it MUST resolve to a real graph node.
+    const slug = resolveNodeRef(body.node);
+    if (!slug) return res.status(400).json({ error: 'unknown_node' });
+    player.rocket = player.rocket || {};
+    player.rocket.siteId = slug;
+    player.rocket.route = [];   // a teleport invalidates any planned route
+    const node = nodeBySlug(slug);
+    const where = (node && node.name) ? node.name : slug;
+    log = `Correction: ${name}'s rocket teleported to ${where} (${slug}).`;
   } else {
     return res.status(400).json({ error: 'bad_action' });
   }

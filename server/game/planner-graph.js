@@ -126,6 +126,26 @@ export function nodeBySlug(slug) {
   return NODES_BY_SLUG.get(String(slug)) || null;
 }
 
+// Resolve an admin-supplied node reference (a node slug/id OR a site name) to a
+// canonical slug, or null when it matches no node. Exact slug wins; then a
+// lowercased slug; then a normalized-name match against any named node, so
+// "mars-north-pole", "Mars: north pole", and "mars north pole" all resolve.
+// Backs the admin rocket-teleport tool, which requires a valid node.
+export function resolveNodeRef(ref) {
+  if (ref == null) return null;
+  const s = String(ref).trim();
+  if (!s) return null;
+  if (NODES_BY_SLUG.has(s)) return s;
+  const lower = s.toLowerCase();
+  if (NODES_BY_SLUG.has(lower)) return lower;
+  const norm = normalizeSiteName(s);
+  if (!norm) return null;
+  for (const n of NODES_BY_SLUG.values()) {
+    if (n.name && normalizeSiteName(n.name) === norm) return n.slug;
+  }
+  return null;
+}
+
 // Curated data/sites.js metadata for a planner slug (class / hydration /
 // vps / solarZone / name), or null for a waypoint / unmatched node. This
 // is the engine's metadata accessor - the planner slug is the one id, so
