@@ -7,7 +7,6 @@
 
 import { MapRenderer, LEO_ANCHOR } from './render.js';
 import { appBase } from '../base.js';
-import { isBatterySave } from '../prefs.js';
 import { erudaEnabled, setEruda } from '../debug-console.js';
 import { loadPlannerMap } from './planner-map.js';
 import { planRoute } from './planner-nav.js';
@@ -3869,6 +3868,89 @@ function setupMpChat(host) {
   // Backfill from the in-memory log so the pane shows prior messages
   // even when it mounts after the conversation already started.
   fillChatList(list);
+  wireChatLocLinks();
+}
+
+// ----- Chat location links -----
+// A chat message that names a map location (a site name like "Ceres" or
+// "Mars: north pole", or its slug) renders that reference as a tappable link
+// that flies the map to it. Built ONCE from the active map data: a
+// normalized-name -> site map plus one alternation regex (longest name first)
+// whose word tokens are joined by \W+, so loose punctuation still matches
+// ("mars north pole" hits "Mars: north pole", and the slug "mars-north-pole"
+// normalizes the same way).
+let _locLinkRe;            // RegExp | null once built
+let _locLinkBuilt = false; // false until built against real map data
+let _locLinkMap = null;    // normalized name -> planner site
+const LOC_LINK_DENY = new Set(['sun']); // common English words that are also site names
+function normLoc(s) {
+  return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+function buildLocLinkIndex() {
+  _locLinkBuilt = true;
+  _locLinkMap = new Map();
+  _locLinkRe = null;
+  if (!_activeData || !Array.isArray(_activeData.sites)) { _locLinkBuilt = false; return; }
+  const norms = [];
+  for (const s of _activeData.sites) {
+    if (!s || s.isWaypoint || !s.name) continue;             // named real sites only
+    if (!Number.isFinite(s.x) || !Number.isFinite(s.y)) continue;  // must be navigable
+    const n = normLoc(s.name);
+    if (!n || LOC_LINK_DENY.has(n) || _locLinkMap.has(n)) continue;
+    _locLinkMap.set(n, s);
+    norms.push(n);
+  }
+  if (!norms.length) return;
+  norms.sort((a, b) => b.length - a.length);                 // longest match wins
+  const frags = norms.map((n) => n.split(' ').join('\\W+'));  // tokens are alnum, no escaping
+  _locLinkRe = new RegExp('\\b(' + frags.join('|') + ')\\b', 'gi');
+}
+function getLocLinkRe() {
+  if (!_locLinkBuilt) buildLocLinkIndex();   // retries until the map data is ready
+  return _locLinkRe;
+}
+// Fill `el` with `text`, turning any location reference into a .chat-loc-link.
+function fillChatBody(el, text) {
+  el.textContent = '';
+  const re = getLocLinkRe();
+  if (!text || !re) { el.textContent = text || ''; return; }
+  re.lastIndex = 0;
+  let last = 0, m;
+  while ((m = re.exec(text)) !== null) {
+    const site = _locLinkMap.get(normLoc(m[0]));
+    if (!site) continue;   // safety net; the matched span normalizes back to a key
+    if (m.index > last) el.appendChild(document.createTextNode(text.slice(last, m.index)));
+    const a = document.createElement('a');
+    a.className = 'chat-loc-link';
+    a.href = '#';
+    a.dataset.siteId = site.id;
+    a.textContent = m[0];
+    a.title = `Show ${site.name} on the map`;
+    el.appendChild(a);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) el.appendChild(document.createTextNode(text.slice(last)));
+}
+// Fly the map to a chat location link's site (delegated, wired once).
+function navigateToChatLocation(siteId) {
+  if (!siteId || !_renderer || !_activeData) return;
+  const site = (_activeData.byId && _activeData.byId[siteId])
+    || _activeData.sites.find((s) => s.id === siteId);
+  if (site && Number.isFinite(site.x) && Number.isFinite(site.y)) {
+    document.querySelectorAll('.mp-modal-back').forEach((el) => el.remove());
+    _renderer.flyTo(site, locateZoom(4));
+  }
+}
+let _chatLocWired = false;
+function wireChatLocLinks() {
+  if (_chatLocWired) return;
+  _chatLocWired = true;
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest && e.target.closest('.chat-loc-link');
+    if (!a) return;
+    e.preventDefault();
+    navigateToChatLocation(a.dataset.siteId);
+  });
 }
 
 // Build one chat <li> for a message, tinting the speaker's @name with
@@ -3885,7 +3967,7 @@ function chatMsgEl(msg) {
   who.textContent = '@' + (msg.profileName || 'someone');
   const body = document.createElement('span');
   body.className = 'mp-chat-body';
-  body.textContent = msg.body || '';
+  fillChatBody(body, msg.body || '');
   li.append(who, document.createTextNode(' '), body);
   return li;
 }
@@ -13670,8 +13752,12 @@ function animateRocketAlong(segments, totalMs = 700) {
   // A manual route already walked hop-by-hop during plotting snaps on commit
   // (the player has already seen the ship travel) instead of re-flying it.
   if (_fastMoveAnim) totalMs = 0;
-  // Battery saver: snap the rocket to its destination instead of flying it.
-  if (isBatterySave()) totalMs = 0;
+  // NOTE: rocket movement stays animated EVEN in battery-saver mode - a
+  // smoothly sliding ship is load-bearing for reading the board (user
+  // decision). Battery saver still stops the ambient drift loop + CSS motion;
+  // this one tween is exempt. It self-schedules its own frames
+  // (setSandboxRocket -> _scheduleDraw), so it animates fine with the ambient
+  // loop off.
   return new Promise((resolve) => {
     if (!_renderer || !_activeData || !segments || !segments.length) {
       resolve(); return;
