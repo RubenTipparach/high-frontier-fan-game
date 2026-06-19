@@ -2407,14 +2407,17 @@ export class MapRenderer {
       ctx.setLineDash([]);
     }
 
-    // One-way edges: a single cyan arrowhead at the DESTINATION end of the
-    // connection, pointing AT the destination node, so a glance reads the only
-    // direction the edge is traversable (the planner blocks the reverse).
-    // Screen-constant size, tip backed off so it isn't hidden under the node.
+    // One-way edges: a single arrowhead at the DESTINATION end of the
+    // connection, its tip touching the destination node's border (sized to the
+    // node, whether a hex site or a waypoint) and pointing into it, with the
+    // arms trailing back ALONG the edge so the arrowhead sits on the line. Same
+    // orange as the Lagrange / flyby nodes. Reads the only direction the edge
+    // is traversable (the planner blocks the reverse).
     if (this._directedEdges.length) {
-      const s = 8 / eff;          // arrowhead arm length, ~constant on screen
+      const hexS = this._hexScale();
+      const s = 8 / eff;          // arrowhead arm length (~constant on screen)
       const spread = 0.5;         // half-angle of the arrowhead
-      ctx.strokeStyle = '#67e8f9';
+      ctx.strokeStyle = '#c66932';
       ctx.globalAlpha = 0.95;
       ctx.lineWidth = 1.8 / eff;
       ctx.lineCap = 'round';
@@ -2425,8 +2428,16 @@ export class MapRenderer {
         const len = Math.hypot(dx, dy) || 1;
         const ux = dx / len, uy = dy / len;
         const ang = Math.atan2(dy, dx);
-        // Tip sits just shy of B (clamped so a short edge never overshoots A).
-        const back = Math.min(13 / eff, len * 0.45);
+        // Destination node's on-screen marker radius, so the tip lands right on
+        // its border (sites are drawn at HEX_R * hexScale; waypoints at vis.r,
+        // LEO doubled; a decorative has no marker, so a small clearance).
+        const visB = TYPE_VIS[sb.type] || TYPE_VIS.unknown;
+        const rB = visB.kind === 'hex' ? HEX_R * hexS
+          : visB.kind === 'none' ? 5
+            : isLeoWaypoint(sb) ? (visB.r || 7) * 2 : (visB.r || 6);
+        // Convert that screen radius to world units; clamp so a very short edge
+        // never overshoots the source.
+        const back = Math.min(rB / eff, len * 0.6);
         const tx = sb.x - ux * back;
         const ty = sb.y - uy * back;
         ctx.moveTo(tx - Math.cos(ang - spread) * s, ty - Math.sin(ang - spread) * s);
