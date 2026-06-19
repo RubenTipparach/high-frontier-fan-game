@@ -12617,11 +12617,11 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         <span class="aqua-direction-label">🟤 Tank → ⤓ Dump</span>
         <div class="aqua-actions">
           <button type="button" class="popup-btn popup-btn-secondary" id="dirt-dump-1"
-            title="Jettison 1 dirt FT">-1</button>
+            title="Jettison 1 dirt fuel step">-1</button>
           <button type="button" class="popup-btn popup-btn-secondary" id="dirt-dump-5"
-            title="Jettison 5 dirt FTs">-5</button>
+            title="Jettison 5 dirt fuel steps">-5</button>
           <button type="button" class="popup-btn" id="dirt-dump-all"
-            title="Jettison all dirt from the tank">Dump all</button>
+            title="Jettison all dirt down to dry mass">Dump all</button>
         </div>
       </div>
       <p class="muted aqua-help" id="dirt-help">
@@ -13248,10 +13248,14 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     if (dirtFill5)   dirtFill5.disabled   = blocked || fillable < 5;
     if (dirtFillMax) dirtFillMax.disabled = blocked;
     // Dump (jettison) needs no engine: you can always vent loaded dirt, so
-    // the only gate is "is there dirt to dump?".
-    if (dirtDump1)   dirtDump1.disabled   = cur < 1;
-    if (dirtDump5)   dirtDump5.disabled   = cur < 5;
-    if (dirtDumpAll) dirtDumpAll.disabled = cur < 1;
+    // the only gate is "are there fuel steps to dump?". Dumping walks the
+    // fuel ladder (same as a burn / the water dump), so it's gated on the
+    // black steps from wet down to dry, not whole tank units.
+    const dirtDry = Math.max(0, (getStackTotals().dryMass | 0));
+    const dirtSteps = blackStepsBetween(dirtDry, dirtDry + cur);
+    if (dirtDump1)   dirtDump1.disabled   = dirtSteps < 1;
+    if (dirtDump5)   dirtDump5.disabled   = dirtSteps < 5;
+    if (dirtDumpAll) dirtDumpAll.disabled = dirtSteps < 1;
     if (dirtHelp) {
       dirtHelp.textContent = !activeDirt
         ? 'Make your dirt thruster the active engine to scoop dirt (a water engine can\'t burn it).'
@@ -13301,13 +13305,21 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   dirtFill1?.addEventListener('click',   (e) => fillDirt(1, e));
   dirtFill5?.addEventListener('click',   (e) => fillDirt(5, e));
   dirtFillMax?.addEventListener('click', (e) => fillDirt(Infinity, e));
-  // Dump dirt: same inline +1 / +5 / Dump-all UX as the scoop row (no
-  // separate Dump-dirt button / amount-picker modal). Jettisons grey
-  // propellant; destroyed for now (the dump note explains the Stage 3+ plan).
-  const dumpDirt = async (amount, e) => {
+  // Dump dirt: same inline -1 / -5 / Dump-all UX as the scoop row. Jettisons
+  // grey propellant by FUEL STEP (walking the black ladder down, exactly like a
+  // burn and like the water dump), so -1 vents one step's worth of mass (which
+  // can be a fraction), not a whole tank unit. Destroyed for now (the dump note
+  // explains the Stage 3+ plan).
+  const round6 = (n) => Math.round((Number(n) || 0) * 1e6) / 1e6;
+  const dumpDirt = async (steps, e) => {
     e?.stopPropagation();
     const cur = getTankWater();
-    const drain = Math.min(amount, cur);
+    const dry = Math.max(0, getStackTotals().dryMass | 0);
+    const wet = dry + cur;
+    const maxSteps = blackStepsBetween(dry, wet);
+    const k = Math.min(steps, maxSteps);
+    if (k < 1) { refreshDirtButtons(); return; }
+    const drain = Math.max(0, round6(wet - walkBlackDown(wet, k)));
     if (drain <= 0) { refreshDirtButtons(); return; }
     // Online: jettisoning is the server DUMP op; await it so the snapshot
     // lowers the tank first, then drain-animate to the new level.
@@ -13325,15 +13337,15 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     logAction({
       type: 'dump', icon: '🟤⤓',
       summary: left <= 0
-        ? `Dumped ${drain} dirt (tank empty)`
-        : `Dumped ${drain} dirt (tank ${left}/${getTankMax()})`,
+        ? `Dumped ${k} dirt fuel step${k === 1 ? '' : 's'} (tank empty)`
+        : `Dumped ${k} dirt fuel step${k === 1 ? '' : 's'} (tank ${massLabel(left)}/${getTankMax()})`,
       undoable: false,
     });
     refreshDirtButtons();
   };
   dirtDump1?.addEventListener('click',   (e) => dumpDirt(1, e));
   dirtDump5?.addEventListener('click',   (e) => dumpDirt(5, e));
-  dirtDumpAll?.addEventListener('click', (e) => dumpDirt(getTankWater(), e));
+  dirtDumpAll?.addEventListener('click', (e) => dumpDirt(Infinity, e));
 
   const unsubAqua = onAquaChange(refreshAquaButtons);
   const unsubRocket = onRocketChange(() => { refreshAquaButtons(); refreshDirtButtons(); refreshOutpostSections(); });
