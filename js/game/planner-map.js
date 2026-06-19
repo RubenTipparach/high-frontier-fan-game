@@ -247,9 +247,24 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
   // full straight-segment graph for shortest-path math.
   const { chains, straightEdges } = buildChains(sites, edges, byId);
 
+  // One-way edges: the planner (planner-nav) blocks moving INTO a node across
+  // an edge labelled '0', so an edge labelled '0' from a to b is traversable
+  // a -> b ONLY. Surface those so the renderer can draw a direction arrow.
+  // (Exactly one side is '0'; a both-sides-'0' edge would be unusable and
+  // doesn't occur in the data.)
+  const directedEdges = [];
+  for (const a in edgeLabels) {
+    for (const b in edgeLabels[a]) {
+      if (edgeLabels[a][b] === '0' && !(edgeLabels[b] && edgeLabels[b][a] === '0')) {
+        directedEdges.push({ from: a, to: b });
+      }
+    }
+  }
+
   _cache = {
     sites, edges, byId, chains, straightEdges,
     edgeLabels,   // raw direction labels for Hohmann pivots
+    directedEdges, // one-way ('0'-label) edges {from, to} for direction arrows
     neighbors,    // Map<id, Set<id>> for the ported planner
     mode: 'classic',
   };

@@ -1441,6 +1441,13 @@ export class MapRenderer {
         else this._normalEdges.push(seg);
       }
     }
+    // One-way edges (planner '0'-label): resolve endpoints so _drawEdges can
+    // draw a direction arrow showing the only way the edge is traversable.
+    this._directedEdges = [];
+    for (const d of (this.data.directedEdges || [])) {
+      const sa = this.data.byId[d.from], sb = this.data.byId[d.to];
+      if (sa && sb) this._directedEdges.push({ sa, sb });
+    }
     this._chains = [];
     this._hazardChains = [];
     this._cometChainsBySeason = new Map();
@@ -2399,6 +2406,30 @@ export class MapRenderer {
       ctx.stroke();
       ctx.setLineDash([]);
     }
+
+    // One-way edges: a small cyan chevron mid-edge points the ONLY direction
+    // the connection is traversable (the planner blocks the reverse). Helps a
+    // player read which way a Hohmann continuation flows. Screen-constant size.
+    if (this._directedEdges.length) {
+      const s = 7 / eff;          // arrowhead arm length, ~constant on screen
+      const spread = 0.5;         // half-angle of the chevron
+      ctx.strokeStyle = '#67e8f9';
+      ctx.globalAlpha = 0.9;
+      ctx.lineWidth = 1.8 / eff;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      for (const { sa, sb } of this._directedEdges) {
+        const ang = Math.atan2(sb.y - sa.y, sb.x - sa.x);
+        // Tip sits a bit past the midpoint, toward the destination.
+        const tx = sa.x + (sb.x - sa.x) * 0.58;
+        const ty = sa.y + (sb.y - sa.y) * 0.58;
+        ctx.moveTo(tx - Math.cos(ang - spread) * s, ty - Math.sin(ang - spread) * s);
+        ctx.lineTo(tx, ty);
+        ctx.lineTo(tx - Math.cos(ang + spread) * s, ty - Math.sin(ang + spread) * s);
+      }
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+    }
     ctx.globalAlpha = 1;
   }
 
@@ -2786,9 +2817,13 @@ export class MapRenderer {
       ctx.beginPath();
       ctx.arc(sx, cy, rad, 0, Math.PI * 2);
       ctx.fill();
-      // Lagrange-colour outline so flyby spots read as the same family of node.
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = '#c66932';
+      // Outline reads as the same family of flyby node (Lagrange orange),
+      // EXCEPT a season-keyed flyby (e.g. the blue-season Venus flyby
+      // venus-2lgjk) wears its synodic-season colour - thicker - so the season
+      // reads at a glance instead of being hidden under the orange disc.
+      const flSeason = seasonOf(w);
+      ctx.lineWidth = flSeason ? 2.4 : 1.5;
+      ctx.strokeStyle = flSeason ? SYNODIC_COLOURS[flSeason] : '#c66932';
       ctx.stroke();
       ctx.fillStyle = '#ffffff';
       ctx.fillText(txt, sx, cy + 0.5);
