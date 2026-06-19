@@ -432,6 +432,14 @@ function initNewGameModal() {
   const soloCreate = document.getElementById('btn-solo-create');
   const soloBack = document.getElementById('btn-solo-back');
   if (!trigger || !overlay || !closeBtn || !mpBtn || !soloBtn || !sandboxBtn) return;
+  // Solo setup: Draft start and Random draft are mutually exclusive (one draft
+  // mode or none), so checking one clears the other.
+  const sDraft = document.getElementById('solo-draft');
+  const sRand = document.getElementById('solo-random-draft');
+  if (sDraft && sRand) {
+    sDraft.addEventListener('change', () => { if (sDraft.checked) sRand.checked = false; });
+    sRand.addEventListener('change', () => { if (sRand.checked) sDraft.checked = false; });
+  }
   // Reset to the mode chooser (hide the sub-steps).
   const showMode = () => {
     if (modeSection) modeSection.classList.remove('hidden');
@@ -481,12 +489,13 @@ function initNewGameModal() {
     const economy = econBtn ? econBtn.dataset.econ : 'library';
     const maxRounds = roundsBtn ? Number(roundsBtn.dataset.rounds) : 5;
     const draftStart = !!document.getElementById('solo-draft')?.checked;
+    const randomDraft = !!document.getElementById('solo-random-draft')?.checked;
     const m0 = !!document.getElementById('solo-m0')?.checked;
     soloCreate.disabled = true;
     const prev = soloCreate.textContent;
     soloCreate.textContent = 'Creating room…';
     try {
-      const r = await createSoloRoom({ startingAqua, economy, maxRounds, draftStart, m0 });
+      const r = await createSoloRoom({ startingAqua, economy, maxRounds, draftStart, randomDraft, m0 });
       if (r && r.ok) { close(); }
       else { toast('Could not start a solo room: ' + ((r && r.error) || 'network'), 'error'); }
     } catch (err) {

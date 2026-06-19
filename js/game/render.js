@@ -1441,6 +1441,41 @@ export class MapRenderer {
         else this._normalEdges.push(seg);
       }
     }
+    // One-way edges (planner '0'-label): draw ONE direction arrow per one-way
+    // curve, on its visible terminus, pointing the only way it's traversable.
+    // A one-way curve is often a run of HIDDEN bend nodes (degree-2 decorative
+    // chain interiors) drawn as a single smooth ribbon, and the '0' label can
+    // sit on ANY hop of that run - frequently an interior one. So we can't just
+    // keep the hops that end at a visible node (that drops a curve whose only
+    // labelled hop is interior, leaving it arrow-less). Instead, from every
+    // one-way hop we walk FORWARD through the bend run to the curve's terminus
+    // and place the arrow there, oriented along the final segment (which is the
+    // ribbon's tangent at that node). Dedupe so each curve yields one arrow and
+    // the arrowhead never lands on an invisible mid-curve bend.
+    const bendNodeIds = new Set();
+    for (const chain of (this.data.chains || [])) {
+      for (let i = 1; i < chain.length - 1; i++) bendNodeIds.add(chain[i]);
+    }
+    const neigh = this.data.neighbors;
+    const seenArrow = new Set();
+    this._directedEdges = [];
+    for (const d of (this.data.directedEdges || [])) {
+      // Walk forward from `to` through any bend nodes to the curve's terminus,
+      // keeping the last segment so the arrow points along the ribbon there.
+      let prevId = d.from, curId = d.to;
+      while (bendNodeIds.has(curId)) {
+        const ns = neigh && neigh.get(curId);
+        if (!ns) break;
+        let nextId = null;
+        for (const n of ns) { if (n !== prevId) { nextId = n; break; } }
+        if (nextId == null) break;
+        prevId = curId; curId = nextId;
+      }
+      const key = prevId + '>' + curId;
+      if (seenArrow.has(key)) continue;
+      const sa = this.data.byId[prevId], sb = this.data.byId[curId];
+      if (sa && sb) { this._directedEdges.push({ sa, sb }); seenArrow.add(key); }
+    }
     this._chains = [];
     this._hazardChains = [];
     this._cometChainsBySeason = new Map();
@@ -2399,6 +2434,48 @@ export class MapRenderer {
       ctx.stroke();
       ctx.setLineDash([]);
     }
+
+    // One-way edges: a single arrowhead at the DESTINATION end of the
+    // connection, its tip touching the destination node's border (sized to the
+    // node, whether a hex site or a waypoint) and pointing into it, with the
+    // arms trailing back ALONG the edge so the arrowhead sits on the line. Same
+    // orange as the Lagrange / flyby nodes. Reads the only direction the edge
+    // is traversable (the planner blocks the reverse).
+    if (this._directedEdges.length) {
+      const hexS = this._hexScale();
+      const s = 8 / eff;          // arrowhead arm length (~constant on screen)
+      const spread = 0.5;         // half-angle of the arrowhead
+      ctx.strokeStyle = '#c66932';
+      ctx.globalAlpha = 0.95;
+      ctx.lineWidth = 1.8 / eff;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      for (const { sa, sb } of this._directedEdges) {
+        const dx = sb.x - sa.x, dy = sb.y - sa.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const ux = dx / len, uy = dy / len;
+        const ang = Math.atan2(dy, dx);
+        // Destination node's on-screen marker radius, so the tip lands right on
+        // its border (sites are drawn at HEX_R * hexScale; waypoints at vis.r,
+        // LEO doubled; a decorative has no marker, so a small clearance).
+        const visB = TYPE_VIS[sb.type] || TYPE_VIS.unknown;
+        const rB = visB.kind === 'hex' ? HEX_R * hexS
+          : visB.kind === 'none' ? 5
+            : isLeoWaypoint(sb) ? (visB.r || 7) * 2 : (visB.r || 6);
+        // Convert that screen radius to world units; clamp so a very short edge
+        // never overshoots the source.
+        const back = Math.min(rB / eff, len * 0.6);
+        const tx = sb.x - ux * back;
+        const ty = sb.y - uy * back;
+        ctx.moveTo(tx - Math.cos(ang - spread) * s, ty - Math.sin(ang - spread) * s);
+        ctx.lineTo(tx, ty);
+        ctx.lineTo(tx - Math.cos(ang + spread) * s, ty - Math.sin(ang + spread) * s);
+      }
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+      ctx.lineJoin = 'miter';
+    }
     ctx.globalAlpha = 1;
   }
 
@@ -2745,8 +2822,9 @@ export class MapRenderer {
     //   half lander + hazard      -> lander-half-hazard (half lander | half skull)
     //   hazard burn (no landing)  -> hazard             (skull in a Lagrange ring)
     //   venus flyby               -> aerobrake          (parachute in a Lagrange ring)
-    // radhaz keeps its trefoil; hazard-flagged lagrange points are flybys, not
-    // hazards, so they get no skull. (Site flags 🌊 / 🌿 stay in the hex layer.)
+    // radhaz keeps its trefoil. A lagrange wears a skull only when the curated
+    // tags mark it a hazard (the planner's coarse flag is ignored for
+    // lagranges). (Site flags 🌊 / 🌿 stay in the hex layer.)
     const icons = this._mapIcons;
     if (icons) {
       const box = MAP_ICON_BOX, ih = box / 2;
@@ -2785,9 +2863,13 @@ export class MapRenderer {
       ctx.beginPath();
       ctx.arc(sx, cy, rad, 0, Math.PI * 2);
       ctx.fill();
-      // Lagrange-colour outline so flyby spots read as the same family of node.
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = '#c66932';
+      // Outline reads as the same family of flyby node (Lagrange orange),
+      // EXCEPT a season-keyed flyby (e.g. the blue-season Venus flyby
+      // venus-2lgjk) wears its synodic-season colour - thicker - so the season
+      // reads at a glance instead of being hidden under the orange disc.
+      const flSeason = seasonOf(w);
+      ctx.lineWidth = flSeason ? 2.4 : 1.5;
+      ctx.strokeStyle = flSeason ? SYNODIC_COLOURS[flSeason] : '#c66932';
       ctx.stroke();
       ctx.fillStyle = '#ffffff';
       ctx.fillText(txt, sx, cy + 0.5);

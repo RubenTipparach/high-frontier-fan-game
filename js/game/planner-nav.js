@@ -168,6 +168,15 @@ export function buildPlanner(graph, {
     return season != null && season !== solarSeason;
   }
 
+  // An aerobrake corridor (node-tags 'aerobrake', keyed by id2 - the same flag
+  // the renderer draws the 🪂 sprite from and the hazard classifier rolls on).
+  // The route can't STOP on one (you're falling through the atmosphere), and
+  // the descent OFF one is free (a parachute, not a burn).
+  function isAeroNode(pid) {
+    const pt = points[pid];
+    return !!(pt && pt.id2 && NODE_TAGS[pt.id2] && NODE_TAGS[pt.id2].aerobrake);
+  }
+
   function neighborsOf(id) {
     const s = neighbors.get(id);
     return s ? Array.from(s) : [];
@@ -200,8 +209,19 @@ export function buildPlanner(graph, {
     if (p.done) return [];
     const { node, dir, bonus, burnsRemaining, wait } = p;
     const pivots = p.pivots ?? 0;
-    const ns = [{ node, dir: null, bonus: 0, done: true, burnsRemaining, pivots }];
+    // The route can never STOP on an aerobrake corridor - not at a turn boundary
+    // (the `wait` branch below, gated by isAeroStop) and not as the final
+    // destination either. So the "done" (stop here) state is only offered when
+    // the node isn't an aerobrake corridor; a route to such a node yields no
+    // path, the same as any unreachable destination.
+    const ns = isAeroNode(node)
+      ? []
+      : [{ node, dir: null, bonus: 0, done: true, burnsRemaining, pivots }];
     const venusFlybyAvailable = solarSeason === 'blue';
+    // Leaving an aerobrake corridor is a parachute descent: the next hop (the
+    // landing burn into the body) costs no burns, so a low-thrust stack can
+    // still touch down on a high-gravity atmospheric body.
+    const fromAero = isAeroNode(node);
     // Hohmann direction-change branch.
     if (edgeLabels[node] && dir != null && !wait) {
       for (const otherNode of Object.keys(edgeLabels[node])) {
@@ -215,7 +235,7 @@ export function buildPlanner(graph, {
           // 2-burn pivot part (not the landing); '0'-label edges are
           // free continuations, not pivots, so they never spend one.
           const pivotPart = (edgeLabels[node][otherNode] === '0') ? 0 : 2;
-          const landingPart = (otherPoint.type === 'burn' ? (otherPoint.landing ?? 1) : 0);
+          const landingPart = fromAero ? 0 : (otherPoint.type === 'burn' ? (otherPoint.landing ?? 1) : 0);
           const usePivot = (pivotPart > 0 && pivots > 0) ? 1 : 0;
           const directionChangeCost = (usePivot ? 0 : pivotPart) + landingPart;
           const bonusAfter = Math.max(bonus - directionChangeCost, 0);
@@ -248,7 +268,11 @@ export function buildPlanner(graph, {
     // partway down it. Regular deep-space burns (landing == null) still may.
     const waitPoint = points[node];
     const isLanderBurn = waitPoint?.type === 'burn' && waitPoint.landing != null;
-    if (!wait && !isLanderBurn && (waitPoint?.type === 'hohmann'
+    // An aerobrake corridor can't be a stop either: you're parachuting through
+    // the atmosphere, so a turn can never END on one. The route must clear the
+    // corridor + its descent inside a single turn (like a lander burn).
+    const isAeroStop = isAeroNode(node);
+    if (!wait && !isLanderBurn && !isAeroStop && (waitPoint?.type === 'hohmann'
         || ((waitPoint?.type === 'burn' || waitPoint?.type === 'lagrange') && burnsRemaining === 0))) {
       ns.push({ node, dir: null, bonus: 0, wait: true, burnsRemaining: thrust, pivots: freePivots });
     }
@@ -266,7 +290,7 @@ export function buildPlanner(graph, {
       if (!sameDirOrFree) continue;
       const newDir = (edgeLabels[other] && edgeLabels[other][node])
         ? edgeLabels[other][node] : null;
-      const entryCost = otherPoint.type === 'burn' ? (otherPoint.landing ?? 1) : 0;
+      const entryCost = fromAero ? 0 : (otherPoint.type === 'burn' ? (otherPoint.landing ?? 1) : 0);
       const rawFlyby = (otherPoint.type === 'venus' && !venusFlybyAvailable)
         ? 0
         : (otherPoint.flybyBoost ?? 0);

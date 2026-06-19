@@ -60,7 +60,7 @@ import {
   siteExists as plannerSiteExists, findPath as plannerFindPath,
   leoSlug, siteBySlug as siteById, hazardKind, nodeBySlug,
   nodeSizeNumber, lineOfSightSites, siteBodyOf, buggyRoamSites,
-  isSiteNode, zoneOfSlug,
+  isSiteNode, zoneOfSlug, isAerobrakeNode, isAerobrakeLandableSite,
 } from './planner-graph.js';
 import { isBuggyRoamBody } from '../../data/buggy-roam.js';
 import { makeRng } from './rng.js';
@@ -1395,6 +1395,11 @@ function applyMove(state, op, player) {
     arrivals = path.path.slice(1);
   }
   if (dest === from) return fail('already_here');
+  // Can't END the turn on an aerobrake corridor (the 🪂 parachute space): you
+  // are falling through the atmosphere, so the descent must finish this turn on
+  // a real node. The corridor is fine to cross (it's in `arrivals` and rolls as
+  // an aero hazard); it just can't be where the rocket stops.
+  if (isAerobrakeNode(dest)) return fail('cannot_stop_on_aerobrake', { site: dest });
 
   // Fuel-step model (shared with the client via data/fuel-graph.js): a burn
   // spends fuel STEPS - black connections on the ladder - NOT water 1-to-1.
@@ -1464,7 +1469,14 @@ function applyMove(state, op, player) {
   // the destination.
   const liftG = from ? maneuverGate(state, from, thrust) : { ok: true, needsRoll: false };
   if (!liftG.ok) return fail('cannot_liftoff', { thrust, siteSize: liftG.size, site: from });
-  const landG = maneuverGate(state, dest, thrust);
+  // Aerobrake landing: a destination that sits next to an aerobrake corridor
+  // (the 🪂 symbol) can be reached by parachute - no thrust-to-land
+  // requirement, no factory needed. Liftoff is never aerobraked (you can't
+  // parachute UP), so only the landing gate is waived. The aero hazard roll
+  // (above, for corridor nodes actually crossed this turn) is the descent risk.
+  const landG = isAerobrakeLandableSite(dest)
+    ? { ok: true, assist: false, needsRoll: false }
+    : maneuverGate(state, dest, thrust);
   if (!landG.ok) return fail('cannot_land', { thrust, siteSize: landG.size, site: dest });
   // Ordered roll items: liftoff assist, route generics (skull/aero), then
   // landing assist. Each is aqua-payable (FINAO) or a d6 where a 1 is a
@@ -2151,12 +2163,18 @@ function recallIfEmpty(player) {
 // Crew never enters the hand, so any crew in the selection is skipped.
 // op = { cardIds: [...], from: 'rocket' | 'leo' }. Turn-gated (functional).
 function applyDecommission(state, op, player) {
-  const from = op.from === 'leo' ? 'leo' : 'rocket';
+  const fromRaw = String(op.from || 'rocket');
+  let from, src;
+  if (fromRaw === 'leo') { from = 'leo'; src = (player.leo = player.leo || []); }
+  else if (fromRaw.startsWith('outpost')) {
+    const o = player.outposts && player.outposts[fromRaw.slice('outpost'.length)];
+    if (!o) return fail('no_outpost');
+    from = 'outpost'; src = (o.cards = o.cards || []);
+  } else { from = 'rocket'; src = player.rocket.stack; }
   const ids = Array.isArray(op.cardIds)
     ? op.cardIds.map(String)
     : (op.cardId != null ? [String(op.cardId)] : []);
   if (!ids.length) return fail('bad_decommission');
-  const src = from === 'leo' ? (player.leo || []) : player.rocket.stack;
   let returned = 0;
   let crewToLeo = 0;
   let blocked = 0;
@@ -2164,11 +2182,11 @@ function applyDecommission(state, op, player) {
     const idx = src.findIndex((s) => s.id === id);
     if (idx < 0) continue;
     const slot = src[idx];
-    // Decommissioning a Crew (a Human) is a FELONY. Normally blocked; during
-    // Anarchy it's allowed (Felonious privilege, G6) and the crew returns to
-    // the LEO Stack rather than the patent hand (crew aren't hand cards).
+    // Decommissioning a Crew (a Human) is a FELONY, allowed only from the
+    // ROCKET during Anarchy (the crew recalls to the LEO Stack). From LEO or an
+    // outpost it's blocked - crew there have nowhere to recall to.
     if (isCrewSlot(slot)) {
-      if (!mayCommitFelony(state, player) || from === 'leo') { blocked++; continue; }
+      if (!mayCommitFelony(state, player) || from !== 'rocket') { blocked++; continue; }
       src.splice(idx, 1);
       (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face === 'secondary' ? 'secondary' : 'primary' });
       if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
@@ -3592,6 +3610,25 @@ function finalScoreLog(state) {
 // 2026-06-10.)
 const DRAFT_HAND_SIZE = 12;
 const DRAFT_END_AQUA = 6;
+// Random-draft deal: give each player DRAFT_HAND_SIZE cards drawn from RANDOM
+// decks (the decks are pre-shuffled, so a random deck's top card is a random
+// card). Uses the seeded RNG and advances state.rng.cursor so the deal replays
+// identically from the op log.
+function dealRandomDraft(state) {
+  const gen = makeRng(state.seed, (state.rng && state.rng.cursor) || 0);
+  const types = DECK_TYPES.filter((t) => Array.isArray(state.decks[t]));
+  for (const p of state.players) {
+    p.hand = p.hand || [];
+    while (p.hand.length < DRAFT_HAND_SIZE) {
+      const avail = types.filter((t) => state.decks[t].length);
+      if (!avail.length) break;   // decks exhausted (only at absurd player counts)
+      const t = avail[gen.int(avail.length)];
+      p.hand.push(state.decks[t].shift());
+    }
+  }
+  state.rng = state.rng || {};
+  state.rng.cursor = gen.cursor;
+}
 function applyDraftPick(state, op, player) {
   const deckType = String(op.deckType || '');
   const deck = state.decks[deckType];
@@ -4512,7 +4549,18 @@ function applyPickCrew(state, op, ctx) {
     for (const sg of playersWithPrivilege(state, 'SECRETARY_GENERAL')) {
       sg.aqua = (sg.aqua | 0) + 2;
     }
-    if (state.draftStart) {
+    if (state.randomDraft) {
+      // Random draft: deal each player a full hand from random decks and open
+      // normal play immediately (banks at DRAFT_END_AQUA), no interactive draft.
+      dealRandomDraft(state);
+      for (const p of state.players) p.aqua = DRAFT_END_AQUA;
+      state.draftPhase = 'play';
+      state.turn = 0;
+      state.round = 1;
+      state.lastEvent = null;
+      state.activeIndex = state.firstPlayerIndex || 0;
+      openTurnFor(state, state.players[state.activeIndex]);
+    } else if (state.draftStart) {
       state.draftPhase = 'draft';
       state.draftCycledThisTurn = false;
       state.activeIndex = state.firstPlayerIndex || 0;

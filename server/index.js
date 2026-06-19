@@ -20,7 +20,7 @@ import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
 import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE } from './game/engine.js';
 import { randomSeed } from './game/rng.js';
-import { siteBySlug } from './game/planner-graph.js';
+import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
 import { PATENTS_BY_ID } from '../data/patents.js';
 import { normaliseTag } from '../data/site-tags.js';
 import { NODE_TAGS as STATIC_NODE_TAGS } from '../data/node-tags.js';
@@ -540,6 +540,7 @@ function lobbyRow(lobbyId) {
     maxRounds: row.max_rounds,
     joinPolicy: row.join_policy,
     draftStart: !!row.draft_start,
+    randomDraft: !!row.random_draft,
     m0: !!row.m0,
     status: row.status,
     createdAt: row.created_at,
@@ -637,6 +638,9 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // Opt-in draft-round opening (any player count). Stored on the lobby, applied
   // at start.
   const draftStart = body.draftStart ? 1 : 0;
+  // Opt-in random-draft opening: each player is dealt 12 random cards (no
+  // interactive pick). Stored on the lobby, applied at start.
+  const randomDraft = body.randomDraft ? 1 : 0;
   // Opt-in Module 0 (Sol Political Assembly). Fixed at creation; games already
   // running default to off (no retroactive apply).
   const m0 = body.m0 ? 1 : 0;
@@ -647,10 +651,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
     try {
       info = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, m0)
-           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, m0)
+           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, m0);
+        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, m0);
       break;
     } catch (err) {
       if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -687,6 +691,7 @@ app.get('/lobbies', (_req, res) => {
               l.max_players AS maxPlayers,
               l.status,
               l.draft_start AS draftStart,
+              l.random_draft AS randomDraft,
               l.m0          AS m0,
               l.created_at  AS createdAt,
               p.name        AS hostName,
@@ -718,6 +723,7 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
               l.join_policy AS joinPolicy,
               l.host_id     AS hostId,
               l.draft_start AS draftStart,
+              l.random_draft AS randomDraft,
               l.m0          AS m0,
               l.created_at  AS createdAt,
               p.name        AS hostName,
@@ -953,6 +959,7 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
     sets.push('max_rounds = ?'); args.push(mr);
   }
   if (body.draftStart !== undefined) { sets.push('draft_start = ?'); args.push(body.draftStart ? 1 : 0); }
+  if (body.randomDraft !== undefined) { sets.push('random_draft = ?'); args.push(body.randomDraft ? 1 : 0); }
   if (body.m0 !== undefined) { sets.push('m0 = ?'); args.push(body.m0 ? 1 : 0); }
   if (body.joinPolicy !== undefined) {
     sets.push('join_policy = ?'); args.push(body.joinPolicy === 'invite-only' ? 'invite-only' : 'open');
@@ -984,7 +991,7 @@ app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
 app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, m0 FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, m0 FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -1017,8 +1024,9 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   // Draft-start mode applies at any player count (it's a setup-flow choice, not
   // a solo-only one like the bank / economy above).
   const draftStart = !!lobby.draft_start;
+  const randomDraft = !!lobby.random_draft;
   const m0 = !!lobby.m0;
-  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, m0 });
+  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0 });
 
   const now = nowMs();
   const gameId = db.transaction(() => {
@@ -1388,6 +1396,13 @@ function notifyWebhook(text) {
 // can hit one of them or all). Otherwise -> the active seat.
 function actorsNeeded(state) {
   if (!state || !Array.isArray(state.players)) return [];
+  // Card-draft phase (draft-start): the active seat is on the clock to pick a
+  // card, so the game IS waiting on them (unlike the crew draft, where any
+  // seat may pick simultaneously and nobody is singled out).
+  if (state.draftPhase === 'draft') {
+    const d = state.players[state.activeIndex];
+    return d ? [d.profileId] : [];
+  }
   const draftDone = state.draftPhase === 'play'
     || (state.draftPhase == null && state.players.every((p) => !!p.faction));
   if (!draftDone) return [];
@@ -1539,6 +1554,37 @@ function dispatchTurnNotifications(gameId, kind, state) {
           }
         }
         notifyWebhook(`🔨 ${isReset ? 'The auctioneer reset the bidding' : 'The bidding reopened'} in **${name}**.${jump}`);
+      }
+    } else if (kind === 'PICK_CREW') {
+      // The crew draft just closed into the next phase. Ping whoever is now on
+      // the clock - the first card-drafter (draft-start) or the first player
+      // (random / normal). During the crew draft itself nobody is singled out
+      // (any seat may pick), so this only fires on the transition.
+      if (state.draftPhase === 'draft') {
+        const drafter = state.players[state.activeIndex];
+        if (drafter) {
+          if (dmOn) notifyProfile(drafter.profileId, 'turn', `🎴 The card draft has begun in **${name}** - pick your first card.${jump}`);
+          notifyWebhook(`🎴 The card draft has begun in **${name}** - ${drafter.name || 'the first player'} drafts first.${jump}`);
+        }
+      } else if (state.draftPhase === 'play') {
+        const active = state.players[state.activeIndex];
+        if (active) {
+          if (dmOn) notifyProfile(active.profileId, 'turn', `🛸 The draft is done in **${name}** - it's your turn.${jump}`);
+          notifyWebhook(`🛸 Play has begun in **${name}** - ${active.name || 'the first player'} is up.${jump}`);
+        }
+      }
+    } else if (kind === 'DRAFT_PICK') {
+      // Card draft (draft-start): each pick hands the draft to the next seat,
+      // or, on the final pick, opens normal play for the first player.
+      const active = state.players[state.activeIndex];
+      if (active) {
+        if (state.draftPhase === 'draft') {
+          if (dmOn) notifyProfile(active.profileId, 'turn', `🎴 It's your card-draft pick in **${name}**.${jump}`);
+          notifyWebhook(`🎴 ${active.name || 'A player'} is up to draft in **${name}**.${jump}`);
+        } else if (state.draftPhase === 'play') {
+          if (dmOn) notifyProfile(active.profileId, 'turn', `🛸 The draft is done in **${name}** - it's your turn.${jump}`);
+          notifyWebhook(`🛸 Play has begun in **${name}** - ${active.name || 'the first player'} is up.${jump}`);
+        }
       }
     }
   } catch (e) {
@@ -3204,23 +3250,34 @@ app.get('/admin', (req, res) => {
        FROM lobbies l
        JOIN profiles p ON p.id = l.host_id
        WHERE l.status != 'cancelled'
+         AND NOT EXISTS (SELECT 1 FROM games g2 WHERE g2.lobby_id = l.id AND g2.status = 'finished')
        ORDER BY l.created_at DESC
        LIMIT 50`
     )
     .all();
 
-  // Cancelled rooms, newest-cancelled first (legacy rows with no cancel stamp
-  // fall back to created_at). Shown in a popup modal, not the main list.
-  const cancelledLobbies = db
+  // Ended games: cancelled rooms OR rooms whose game finished. Most-recently
+  // ended first (cancelled -> cancelled_at; finished -> the game's finished_at;
+  // legacy rows fall back to created_at). Capped at the last 10 and shown in a
+  // popup modal, not the main list. A cancelled lobby's game is also cancelled
+  // (never 'finished'), so the two cases don't overlap.
+  const endedLobbies = db
     .prepare(
-      `SELECT l.id, l.code, l.name, l.max_players,
-              datetime(COALESCE(l.cancelled_at, l.created_at) / 1000, 'unixepoch') AS cancelled_when,
-              p.name AS host_name
+      `SELECT l.id, l.code, l.name, l.max_players, p.name AS host_name,
+              CASE WHEN l.status = 'cancelled' THEN 'cancelled' ELSE 'finished' END AS kind,
+              datetime(COALESCE(
+                l.cancelled_at,
+                (SELECT MAX(g.finished_at) FROM games g WHERE g.lobby_id = l.id AND g.status = 'finished'),
+                l.created_at) / 1000, 'unixepoch') AS ended_when
        FROM lobbies l
        JOIN profiles p ON p.id = l.host_id
        WHERE l.status = 'cancelled'
-       ORDER BY COALESCE(l.cancelled_at, l.created_at) DESC
-       LIMIT 200`
+          OR EXISTS (SELECT 1 FROM games g WHERE g.lobby_id = l.id AND g.status = 'finished')
+       ORDER BY COALESCE(
+         l.cancelled_at,
+         (SELECT MAX(g.finished_at) FROM games g WHERE g.lobby_id = l.id AND g.status = 'finished'),
+         l.created_at) DESC
+       LIMIT 10`
     )
     .all();
 
@@ -3310,23 +3367,24 @@ app.get('/admin', (req, res) => {
       <td>${esc(r.join_policy)}</td>
       <td class="num">${r.members} / ${r.max_players}</td>
       <td>${esc(r.created)}</td>
-      <td>
-        ${r.game_id ? `<button class="btn-manage-game" data-gid="${r.game_id}" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}">Manage state</button>` : ''}
-        <button class="btn-del-lobby danger" data-lid="${r.id}" data-lname="${esc(r.name)}">Cancel</button>
-      </td>
+      <td>${r.game_id ? `<button class="btn-manage-game" data-gid="${r.game_id}" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}">Manage state</button>` : '<span class="muted">—</span>'}</td>
+      <td><button class="btn-del-lobby danger" data-lid="${r.id}" data-lname="${esc(r.name)}">Cancel</button></td>
     </tr>
-  `).join('') || '<tr class="empty-row"><td colspan=8><em>No active rooms.</em></td></tr>';
+  `).join('') || '<tr class="empty-row"><td colspan=9><em>No active rooms.</em></td></tr>';
 
-  const cancelledRows = cancelledLobbies.map((r) => `
+  const endedRows = endedLobbies.map((r) => `
     <tr>
       <td><code>${esc(r.code)}</code></td>
       <td>${esc(r.name)}</td>
       <td>@${esc(r.host_name)}</td>
       <td class="num">${r.max_players}</td>
-      <td>${esc(r.cancelled_when)}</td>
-      <td><button class="btn-restore-lobby" data-lid="${r.id}" data-lname="${esc(r.name)}">Restore</button></td>
+      <td><span class="pill pill-${r.kind === 'finished' ? 'finished' : 'cancelled'}">${r.kind}</span></td>
+      <td>${esc(r.ended_when)}</td>
+      <td>${r.kind === 'cancelled'
+        ? `<button class="btn-restore-lobby" data-lid="${r.id}" data-lname="${esc(r.name)}">Restore</button>`
+        : '<span class="muted">—</span>'}</td>
     </tr>
-  `).join('') || '<tr><td colspan=6><em>No cancelled rooms.</em></td></tr>';
+  `).join('') || '<tr><td colspan=7><em>No canceled or finished games.</em></td></tr>';
 
   const chatRows = chats.map((r) => `
     <tr>
@@ -3363,6 +3421,7 @@ app.get('/admin', (req, res) => {
 <html><head><meta charset="utf-8"><title>High Frontier admin</title>
 <style>
   :root { color-scheme: dark; }
+  *{box-sizing:border-box}
   body{font:14px ui-sans-serif,system-ui,-apple-system,sans-serif;background:#07060f;color:#e6e9ff;margin:0;padding:24px;max-width:1200px}
   h1{margin:0 0 4px;color:#7dd3fc;font-size:22px}
   .sub{color:#5a5f80;font-size:12px;text-transform:uppercase;letter-spacing:2px;margin-bottom:18px}
@@ -3417,6 +3476,9 @@ app.get('/admin', (req, res) => {
   .ge-stats{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 10px;font-size:12px}
   .ge-stats input{width:64px;background:#0a0814;border:1px solid #2a2740;color:#e6e9ff;border-radius:6px;padding:3px 6px}
   .ge-stats select{background:#0a0814;border:1px solid #2a2740;color:#e6e9ff;border-radius:6px;padding:3px 6px}
+  .ge-teleport{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 10px;font-size:12px}
+  .ge-teleport strong{color:#7dd3fc}
+  .ge-teleport input{flex:1 1 200px;min-width:140px;background:#0a0814;border:1px solid #2a2740;color:#e6e9ff;border-radius:6px;padding:3px 6px}
   .ge-loc{margin:6px 0}
   .ge-loc>.ge-loc-h{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#7dd3fc;margin:0 0 3px}
   .ge-card{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:3px 0;border-bottom:1px solid #16142400}
@@ -3429,6 +3491,35 @@ app.get('/admin', (req, res) => {
   .ge-msg{font-size:12px;margin:0 0 8px;min-height:14px}
   .ge-msg.ok{color:#86efac}
   .ge-msg.err{color:#fda4af}
+  /* Mobile: keep wide tables on the page (scroll them, not the whole page),
+     give controls real tap targets, and let the modal use the full width. */
+  @media (max-width:700px){
+    body{padding:12px}
+    h1{font-size:19px}
+    .sub{margin-bottom:12px}
+    table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap}
+    .kpis{gap:8px}
+    .kpi{flex:1 1 calc(50% - 8px);min-width:0}
+    .kpi strong{font-size:19px}
+    button{padding:8px 12px;font-size:14px}
+    input,select,textarea{font-size:16px}   /* 16px stops iOS zoom-on-focus */
+    .rooms-toolbar{gap:8px}
+    #room-search{flex:1 1 100%;max-width:none}
+    .ws-info{margin-left:0;width:100%}
+    .modal-overlay{padding:8px}
+    .modal-box{width:100%;max-height:94vh}
+    .modal-body{padding:8px 10px 14px}
+    /* Manage-state modal: stack each control so it's readable + tappable on a
+       phone instead of wrapping into a cramped row. */
+    .ge-player{padding:10px}
+    .ge-player>h4{font-size:15px}
+    .ge-card{gap:8px}
+    .ge-card .ge-name{flex:1 1 100%;min-width:0}
+    .ge-card select{flex:1 1 auto}
+    .ge-give select,.ge-give-card,.ge-give-loc{flex:1 1 100%}
+    .ge-teleport input{flex:1 1 100%}
+    #game-edit-body button{padding:8px 12px;font-size:14px}
+  }
 </style></head>
 <body>
   <div class="header-row">
@@ -3537,12 +3628,12 @@ app.get('/admin', (req, res) => {
   <h2>Rooms</h2>
   <div class="rooms-toolbar">
     <input id="room-search" type="search" placeholder="Search room name…" autocomplete="off" />
-    <button id="show-cancelled" type="button">🗑 Canceled rooms (${cancelledLobbies.length})</button>
+    <button id="show-cancelled" type="button">🗑 Canceled / finished games (${endedLobbies.length})</button>
   </div>
   <table>
     <thead><tr>
       <th>Code</th><th>Name</th><th>Host</th>
-      <th>Status</th><th>Policy</th><th class="num">Players</th><th>Created</th><th>Manage</th>
+      <th>Status</th><th>Policy</th><th class="num">Players</th><th>Created</th><th>State</th><th>Manage</th>
     </tr></thead>
     <tbody id="lobby-tbody">${lobbyRows}</tbody>
   </table>
@@ -3550,15 +3641,15 @@ app.get('/admin', (req, res) => {
   <div id="cancelled-modal" class="modal-overlay" hidden>
     <div class="modal-box">
       <div class="modal-head">
-        <h3>🗑 Canceled rooms</h3>
+        <h3>🗑 Canceled / finished games <span class="muted" style="font-size:12px">(last 10)</span></h3>
         <button id="cancelled-close" type="button" class="modal-x" aria-label="Close">×</button>
       </div>
       <div class="modal-body">
         <table>
           <thead><tr>
-            <th>Code</th><th>Name</th><th>Host</th><th class="num">Players</th><th>Canceled</th><th>Manage</th>
+            <th>Code</th><th>Name</th><th>Host</th><th class="num">Players</th><th>Status</th><th>Ended</th><th>Manage</th>
           </tr></thead>
-          <tbody>${cancelledRows}</tbody>
+          <tbody>${endedRows}</tbody>
         </table>
       </div>
     </div>
@@ -3944,6 +4035,9 @@ document.addEventListener('click', function (ev) {
         + '<select class="ge-grade"><option value="water"' + (p.rocket && p.rocket.tankGrade === 'water' ? ' selected' : '') + '>water</option>'
         + '<option value="dirt"' + (p.rocket && p.rocket.tankGrade === 'dirt' ? ' selected' : '') + '>dirt</option></select>'
         + '<button data-act="set_water">Set</button></div>';
+      html += '<div class="ge-teleport">🛸 Rocket at <strong>' + esc(p.rocket ? (p.rocket.siteName || 'LEO') : 'LEO') + '</strong>'
+        + ' &rarr; <input type="text" class="ge-tp-node" placeholder="node id or name" autocomplete="off">'
+        + '<button data-act="teleport">Teleport</button></div>';
       locs.forEach(function (loc) {
         var cards = cardsAt(p, loc);
         html += '<div class="ge-loc"><div class="ge-loc-h">' + esc(locLabel(loc, p)) + ' (' + cards.length + ')</div>';
@@ -4007,6 +4101,10 @@ document.addEventListener('click', function (ev) {
       postEdit({ action: 'set_aqua', profileId: pid, value: Number(pEl.querySelector('.ge-aqua').value) }, 'Aqua set.');
     } else if (act === 'set_water') {
       postEdit({ action: 'set_water', profileId: pid, value: Number(pEl.querySelector('.ge-water').value), grade: pEl.querySelector('.ge-grade').value }, 'Tank set.');
+    } else if (act === 'teleport') {
+      var node = (pEl.querySelector('.ge-tp-node').value || '').trim();
+      if (!node) { msg('Enter a node id or name to teleport to.', false); return; }
+      postEdit({ action: 'teleport', profileId: pid, node: node }, 'Rocket teleported.');
     } else if (act === 'give') {
       postEdit({ action: 'give_card', profileId: pid, cardId: pEl.querySelector('.ge-give-card').value, to: pEl.querySelector('.ge-give-loc').value }, 'Card granted.');
     } else if (act === 'move' || act === 'remove') {
@@ -4240,6 +4338,17 @@ app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
     player.rocket.tank = v;
     if (body.grade === 'water' || body.grade === 'dirt') player.rocket.tankGrade = body.grade;
     log = `Correction: ${name}'s rocket tank set to ${v} ${player.rocket.tankGrade || 'water'}.`;
+  } else if (body.action === 'teleport') {
+    // Move the player's rocket stack to an arbitrary node. The reference may be
+    // a node id (slug) or a site name; it MUST resolve to a real graph node.
+    const slug = resolveNodeRef(body.node);
+    if (!slug) return res.status(400).json({ error: 'unknown_node' });
+    player.rocket = player.rocket || {};
+    player.rocket.siteId = slug;
+    player.rocket.route = [];   // a teleport invalidates any planned route
+    const node = nodeBySlug(slug);
+    const where = (node && node.name) ? node.name : slug;
+    log = `Correction: ${name}'s rocket teleported to ${where} (${slug}).`;
   } else {
     return res.status(400).json({ error: 'bad_action' });
   }

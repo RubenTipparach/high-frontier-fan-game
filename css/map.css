@@ -3409,6 +3409,49 @@ body:has(#view-browse:not(.hidden)) #main {
   transform-origin: center;
   margin: 60px 60px 0;
 }
+/* Swipe-browse control for a card that belongs to a stack / hand: a pill
+   pinned to the bottom-centre of the overlay with ‹ position › arrows. Touch
+   swipe + arrow keys do the same thing; this just surfaces it on desktop and
+   shows where you are in the stack. */
+.card-modal-nav {
+  position: fixed;
+  left: 50%;
+  bottom: max(18px, env(safe-area-inset-bottom, 18px));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(15, 16, 35, 0.92);
+  border: 1px solid rgba(120, 130, 170, 0.55);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  z-index: 110;
+}
+.card-modal-arrow {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  font-size: 24px;
+  line-height: 1;
+  background: var(--bg-2);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.card-modal-arrow:hover:not(:disabled) { background: var(--panel-2); }
+.card-modal-arrow:disabled { opacity: 0.32; cursor: default; }
+.card-modal-pos {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--ink-dim);
+  min-width: 44px;
+  text-align: center;
+}
 .card-modal-actions {
   display: flex;
   gap: 8px;
@@ -7007,6 +7050,17 @@ html.battery-save *::after {
    appendMpChat from the cached snapshot). */
 .mp-chat-list .mp-chat-who { font-weight: 600; margin-right: 4px; }
 .mp-chat-list .mp-chat-empty { font-size: 12px; padding: 2px 0; }
+/* A location reference in a chat message: tap it to fly the map there. */
+.chat-loc-link {
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  font-weight: 600;
+}
+.chat-loc-link::before { content: "📍"; font-size: 0.85em; margin-right: 1px; }
+.chat-loc-link:hover { color: var(--accent-2); text-decoration-style: solid; }
 .mp-chat-form { display: flex; gap: 6px; margin-top: 6px; }
 .mp-chat-form input {
   flex: 1 1 auto;

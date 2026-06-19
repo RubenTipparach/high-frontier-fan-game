@@ -47,6 +47,15 @@ export function initLobby({ onShowView, onToast }) {
   document.getElementById('btn-leave-lobby').addEventListener('click', onLeaveLobby);
   document.getElementById('btn-start').addEventListener('click', onStartClick);
 
+  // A game opens with ONE draft mode or none: Draft start and Random draft are
+  // mutually exclusive, so checking one clears the other.
+  const cDraft = document.getElementById('create-draft');
+  const cRand = document.getElementById('create-random-draft');
+  if (cDraft && cRand) {
+    cDraft.addEventListener('change', () => { if (cDraft.checked) cRand.checked = false; });
+    cRand.addEventListener('change', () => { if (cRand.checked) cDraft.checked = false; });
+  }
+
   // Invites chip in the lobby top row. Click toggles a small popover
   // with the pending-invite list; an outside click closes it. The badge
   // count is kept in sync with the live #invite-list (invites.js owns
@@ -285,6 +294,7 @@ export function moduleTagsHtml(lobby) {
   const tags = [];
   if (lobby && lobby.m0) tags.push('<span class="module-tag tag-m0">🏛 M0 Politics</span>');
   if (lobby && lobby.draftStart) tags.push('<span class="module-tag tag-draft">🃏 Draft start</span>');
+  if (lobby && lobby.randomDraft) tags.push('<span class="module-tag tag-draft">🎲 Random draft</span>');
   return tags.length ? `<span class="module-tags">${tags.join('')}</span>` : '';
 }
 
@@ -387,11 +397,14 @@ export async function refreshMyGames() {
   const lastActiveAt = (g) => g.lastActionAt || g.lastTurnEndedAt || g.createdAt || 0;
   started.sort((a, b) => lastActiveAt(b) - lastActiveAt(a));
   ended.sort((a, b) => lastActiveAt(b) - lastActiveAt(a));
+  // Cap "Ended games" to the 10 most-recently-ended (matches the admin
+  // dashboard). In-progress games are never capped - you always see them all.
+  const endedRecent = ended.slice(0, 10);
   // Sandbox mode is deprecated: local offline sandbox games are no longer
   // surfaced in "Your games". (Old saves still exist in localStorage so nothing
   // is destroyed, they're just hidden.) Solo now runs as a 1-player server room.
   renderMyGames(startedEl, started, 'Resume', 'No games in progress.');
-  renderMyGames(endedEl, ended, 'Review', 'No finished games.');
+  renderMyGames(endedEl, endedRecent, 'Review', 'No finished games.');
 }
 
 // One "Your games" row for a local sandbox game. Resume snapshots the
@@ -675,6 +688,7 @@ async function onCreateSubmit(ev) {
   const maxRounds = Number(document.getElementById('create-rounds').value);
   const joinPolicy = document.querySelector('input[name=policy]:checked').value;
   const draftStart = !!document.getElementById('create-draft')?.checked;
+  const randomDraft = !!document.getElementById('create-random-draft')?.checked;
   const m0 = !!document.getElementById('create-m0')?.checked;
   const me = activeProfile();
   if (!me) return;
@@ -684,7 +698,7 @@ async function onCreateSubmit(ev) {
   if (submitBtn) submitBtn.disabled = true;
   try {
     const r = await createLobby(
-      { name, maxPlayers, maxRounds, joinPolicy, draftStart, m0, idempotencyKey: _createIdemKey }, me.token
+      { name, maxPlayers, maxRounds, joinPolicy, draftStart, randomDraft, m0, idempotencyKey: _createIdemKey }, me.token
     );
     if (!r.ok) { errEl.textContent = humanizeError(r.error); return; }   // keep the key so a retry dedupes
     _createIdemKey = null;   // success: the next room starts a fresh intent
@@ -699,14 +713,14 @@ async function onCreateSubmit(ev) {
 // you in it, started right away. It runs the same server-backed engine as a
 // full table, so it's the way to exercise multiplayer features alone. Needs
 // the server to allow maxPlayers=1 (it does); start only needs >=1 member.
-export async function createSoloRoom({ startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, m0 = false } = {}) {
+export async function createSoloRoom({ startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, m0 = false } = {}) {
   const me = activeProfile();
   if (!me) return { ok: false, error: 'no_profile' };
   const create = await createLobby(
     { name: `${me.name}'s solo room`, maxPlayers: 1,
       maxRounds: [4, 5, 6, 7].includes(Number(maxRounds)) ? Number(maxRounds) : 5,
       joinPolicy: 'invite-only', idempotencyKey: newIdemKey(),
-      startingAqua, economy, draftStart, m0 },
+      startingAqua, economy, draftStart, randomDraft, m0 },
     me.token,
   );
   if (!create.ok) return create;
@@ -847,6 +861,7 @@ function renderLobbySettings(lobby, iAmHost, me) {
     const mods = [];
     if (lobby.m0) mods.push('🏛 M0 Politics');
     if (lobby.draftStart) mods.push('🃏 Draft start');
+    if (lobby.randomDraft) mods.push('🎲 Random draft');
     box.innerHTML = `<div class="lobby-settings-ro">⚙ ${escapeHtml(roundLabel)}`
       + `${mods.length ? ' · ' + mods.map(escapeHtml).join(' · ') : ''}</div>`;
     return;
@@ -878,6 +893,8 @@ function renderLobbySettings(lobby, iAmHost, me) {
       </select></label>
     <label class="check-row"><input type="checkbox" id="set-draft"${lobby.draftStart ? ' checked' : ''}/>
       <span><strong>Draft start</strong> - open with a card draft</span></label>
+    <label class="check-row"><input type="checkbox" id="set-random-draft"${lobby.randomDraft ? ' checked' : ''}/>
+      <span><strong>Random draft</strong> - dealt 12 random cards, no picking</span></label>
     <label class="check-row"><input type="checkbox" id="set-m0"${lobby.m0 ? ' checked' : ''}/>
       <span><strong>Module 0: Politics</strong> - adds the Sol Political Assembly</span></label>`;
 
@@ -899,7 +916,18 @@ function renderLobbySettings(lobby, iAmHost, me) {
   box.querySelector('#set-maxplayers').addEventListener('change', (e) => save({ maxPlayers: Number(e.target.value) }));
   box.querySelector('#set-rounds').addEventListener('change', (e) => save({ maxRounds: Number(e.target.value) }));
   box.querySelector('#set-policy').addEventListener('change', (e) => save({ joinPolicy: e.target.value }));
-  box.querySelector('#set-draft').addEventListener('change', (e) => save({ draftStart: e.target.checked }));
+  // Draft start / Random draft are mutually exclusive; checking one clears the
+  // other, and we save BOTH flags so the server never holds both at once.
+  const setDraftEl = box.querySelector('#set-draft');
+  const setRandEl = box.querySelector('#set-random-draft');
+  setDraftEl.addEventListener('change', (e) => {
+    if (e.target.checked && setRandEl) setRandEl.checked = false;
+    save({ draftStart: e.target.checked, randomDraft: setRandEl ? setRandEl.checked : false });
+  });
+  setRandEl.addEventListener('change', (e) => {
+    if (e.target.checked && setDraftEl) setDraftEl.checked = false;
+    save({ randomDraft: e.target.checked, draftStart: setDraftEl ? setDraftEl.checked : false });
+  });
   box.querySelector('#set-m0').addEventListener('change', (e) => save({ m0: e.target.checked }));
 }
 

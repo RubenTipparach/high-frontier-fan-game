@@ -7,7 +7,6 @@
 
 import { MapRenderer, LEO_ANCHOR } from './render.js';
 import { appBase } from '../base.js';
-import { isBatterySave } from '../prefs.js';
 import { erudaEnabled, setEruda } from '../debug-console.js';
 import { loadPlannerMap } from './planner-map.js';
 import { planRoute } from './planner-nav.js';
@@ -3869,6 +3868,110 @@ function setupMpChat(host) {
   // Backfill from the in-memory log so the pane shows prior messages
   // even when it mounts after the conversation already started.
   fillChatList(list);
+  wireChatLocLinks();
+}
+
+// ----- Chat location links -----
+// A chat message that names a map location (a site name like "Ceres" or
+// "Mars: north pole", or its slug) renders that reference as a tappable link
+// that flies the map to it. Built ONCE from the active map data: a
+// normalized-name -> site map plus one alternation regex (longest name first)
+// whose word tokens are joined by \W+, so loose punctuation still matches
+// ("mars north pole" hits "Mars: north pole", and the slug "mars-north-pole"
+// normalizes the same way).
+let _locLinkRe;            // RegExp | null once built
+let _locLinkBuilt = false; // false until built against real map data
+let _locLinkMap = null;    // normalized name -> planner site
+let _locSlugMap = null;    // node id2 (slug, lowercased) -> planner site (waypoints included)
+const LOC_LINK_DENY = new Set(['sun']); // common English words that are also site names
+function normLoc(s) {
+  return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+function buildLocLinkIndex() {
+  _locLinkBuilt = true;
+  _locLinkMap = new Map();
+  _locSlugMap = new Map();
+  _locLinkRe = null;
+  if (!_activeData || !Array.isArray(_activeData.sites)) { _locLinkBuilt = false; return; }
+  const norms = [];
+  for (const s of _activeData.sites) {
+    if (!s || !Number.isFinite(s.x) || !Number.isFinite(s.y)) continue;  // navigable only
+    // EVERY node is reachable by its slug/id (id2) - waypoints (lagranges,
+    // burns, the venus flyby) included, since they have no name to match on.
+    if (s.id2) _locSlugMap.set(String(s.id2).toLowerCase(), s);
+    // Named real sites are ALSO reachable by name.
+    if (s.isWaypoint || !s.name) continue;
+    const n = normLoc(s.name);
+    if (!n || LOC_LINK_DENY.has(n) || _locLinkMap.has(n)) continue;
+    _locLinkMap.set(n, s);
+    norms.push(n);
+  }
+  norms.sort((a, b) => b.length - a.length);                 // longest name match wins
+  const nameFrags = norms.map((n) => n.split(' ').join('\\W+')); // tokens are alnum, no escaping
+  // A generic slug token (lowercase alphanumeric segments joined by hyphens:
+  // "mars-north-pole", "lag-3hf9y", "venus-2lgjk") so ANY node id links,
+  // waypoints too. It goes FIRST so a full node id matches whole instead of a
+  // shorter body name shadowing its prefix ("venus" inside "venus-2lgjk").
+  // Resolved against the slug map; a non-location hyphenated word ("co-op")
+  // simply misses both maps and stays plain text.
+  const SLUG_TOKEN = '[a-z0-9]+(?:-[a-z0-9]+)+';
+  _locLinkRe = new RegExp('\\b(' + [SLUG_TOKEN, ...nameFrags].join('|') + ')\\b', 'gi');
+}
+function getLocLinkRe() {
+  if (!_locLinkBuilt) buildLocLinkIndex();   // retries until the map data is ready
+  return _locLinkRe;
+}
+// Fill `el` with `text`, turning any location reference into a .chat-loc-link.
+function fillChatBody(el, text) {
+  el.textContent = '';
+  const re = getLocLinkRe();
+  if (!text || !re) { el.textContent = text || ''; return; }
+  re.lastIndex = 0;
+  let last = 0, m;
+  while ((m = re.exec(text)) !== null) {
+    // A name match resolves by normalized name; anything else (a slug token)
+    // resolves by node id2. A hyphenated word that is neither just stays text.
+    const site = _locLinkMap.get(normLoc(m[0])) || _locSlugMap.get(m[0].toLowerCase());
+    if (!site) continue;
+    if (m.index > last) el.appendChild(document.createTextNode(text.slice(last, m.index)));
+    const a = document.createElement('a');
+    a.className = 'chat-loc-link';
+    a.href = '#';
+    a.dataset.siteId = site.id;
+    a.textContent = m[0];
+    a.title = `Show ${site.name || site.id2 || m[0]} on the map`;
+    el.appendChild(a);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) el.appendChild(document.createTextNode(text.slice(last)));
+}
+// Fly the map to a chat location link's site (delegated, wired once).
+function navigateToChatLocation(siteId) {
+  if (!siteId || !_renderer || !_activeData) return;
+  const site = (_activeData.byId && _activeData.byId[siteId])
+    || _activeData.sites.find((s) => s.id === siteId);
+  if (!site || !Number.isFinite(site.x) || !Number.isFinite(site.y)) return;
+  // Reveal the map so the player actually SEES where the link flew. A
+  // full-screen MP modal (auction overlay, stack peek) covers the map on every
+  // size, so close those. The side panel only COVERS the map on a phone (it's
+  // a sidebar on desktop), so collapse it only on a narrow viewport - on
+  // desktop the map sits beside it and we leave the chat open. (User request.)
+  document.querySelectorAll('.mp-modal-back').forEach((el) => el.remove());
+  let narrow = false;
+  try { narrow = window.matchMedia('(max-width: 720px)').matches; } catch (e) { /* ignore */ }
+  if (narrow) { try { showPane(null); } catch (e) { /* ignore */ } }
+  _renderer.flyTo(site, locateZoom(4));
+}
+let _chatLocWired = false;
+function wireChatLocLinks() {
+  if (_chatLocWired) return;
+  _chatLocWired = true;
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest && e.target.closest('.chat-loc-link');
+    if (!a) return;
+    e.preventDefault();
+    navigateToChatLocation(a.dataset.siteId);
+  });
 }
 
 // Build one chat <li> for a message, tinting the speaker's @name with
@@ -3885,7 +3988,7 @@ function chatMsgEl(msg) {
   who.textContent = '@' + (msg.profileName || 'someone');
   const body = document.createElement('span');
   body.className = 'mp-chat-body';
-  body.textContent = msg.body || '';
+  fillChatBody(body, msg.body || '');
   li.append(who, document.createTextNode(' '), body);
   return li;
 }
@@ -4658,6 +4761,11 @@ function openMpStackModal(title, slots, { rocketCtx } = {}) {
 
   const body = document.createElement('div');
   body.className = 'mp-stack-modal-cards';
+  // Swipe-browse siblings: same resolve order as the loop below, so a running
+  // counter (bumped only for resolved cards) lines each card up with its
+  // sibling entry even when a stack holds duplicates of the same card.
+  const sibs = stackSiblings(slots);
+  let sibIdx = 0;
   for (const slot of slots) {
     // The HAND ships as bare id strings; LEO / rocket / outpost ship as
     // { id, kind, face } slot objects. Normalise so both render.
@@ -4677,9 +4785,10 @@ function openMpStackModal(title, slots, { rocketCtx } = {}) {
     wrap.className = 'mp-stack-modal-card';
     try {
       const cardEl = renderCard(card, { type: kind, face, radSide });
-      makeCardViewable(cardEl, card, kind, face);
+      makeCardViewable(cardEl, card, kind, face, { siblings: sibs, index: sibIdx });
       wrap.appendChild(cardEl);
     } catch { wrap.textContent = card.name || id; }
+    sibIdx++;
     body.appendChild(wrap);
   }
   dialog.appendChild(body);
@@ -4862,6 +4971,7 @@ function humanizeOnlineOpError(code, detail) {
     nothing_decommissioned: 'Nothing decommissioned (crew can\'t return to the hand).',
     cannot_liftoff: 'Not enough thrust to lift off (and no factory here to assist).',
     cannot_land: 'Not enough thrust to land there (and no factory to assist).',
+    cannot_stop_on_aerobrake: 'Can\'t stop on a parachute space - aerobraking carries you through, so finish your move on a landing site or node.',
     raygun_out_of_range: 'The raygun has no line of sight to that site from here.',
     buggy_out_of_range: 'The buggy can only road to sites on the same connected body (Mars, the Moon, Io, Callisto, Ganymede, Europa).',
     not_a_radiator: 'That card is not a radiator.',
@@ -5164,7 +5274,7 @@ function wireHandStrip() {
       viewBtn.title = 'Open this card';
       viewBtn.addEventListener('click', (ev) => {
         ev.stopPropagation();
-        openCardModal(card, kindOf(id), idx);
+        openCardModal(card, kindOf(id), idx, { nav: { siblings: stackSiblings(slots), index: idx } });
       });
       wrap.appendChild(viewBtn);
 
@@ -5177,7 +5287,7 @@ function wireHandStrip() {
             s.classList.remove('is-selected'));
           if (!wasSelected) wrap.classList.add('is-selected');
         } else {
-          openCardModal(card, kindOf(id), idx);
+          openCardModal(card, kindOf(id), idx, { nav: { siblings: stackSiblings(slots), index: idx } });
         }
       });
       host.appendChild(wrap);
@@ -5866,14 +5976,10 @@ async function decommissionSelectedToHand(stackId, ids, onDone) {
     yes: '♻ Decommission', no: 'Cancel',
   });
   if (!ok) return;
-  // Online: rocket / LEO decommission routes through the server so the
-  // hand actually gains the cards (a local mutation would be clobbered by
-  // the next snapshot). Outpost decommission has no server op yet.
+  // Online: decommission routes through the server so the hand actually gains
+  // the cards (a local mutation would be clobbered by the next snapshot). The
+  // server accepts rocket / LEO / outpost<L> as the source.
   if (_online) {
-    if (stackId !== 'rocket' && stackId !== 'leo') {
-      _onlineToast('Decommission from there is not available online yet.', 'error');
-      return;
-    }
     const okOp = await submitOnlineOp({ kind: 'DECOMMISSION', cardIds: list, from: stackId });
     if (okOp) { try { onDone && onDone(); } catch (e) { /* ignore */ } }
     return;
@@ -6057,6 +6163,10 @@ function openUnifiedStackInspector(stackId) {
     if (!cards.length) {
       row.innerHTML = '<p class="muted">Stack is empty.</p>';
     } else {
+      // Swipe-browse siblings: counter bumped per resolved card, aligned with
+      // stackSiblings' resolve order (handles duplicate cards in a stack).
+      const sibs = stackSiblings(cards);
+      let sibIdx = 0;
       for (const slot of cards) {
         const card = cardById(slot.id);
         if (!card) continue;
@@ -6066,7 +6176,8 @@ function openUnifiedStackInspector(stackId) {
         wrap.className = 'rocket-slot';
         if (selected.has(slot.id)) wrap.classList.add('is-selected');
         const cardEl = renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy' });
-        makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face);
+        makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, { siblings: sibs, index: sibIdx });
+        sibIdx++;
         wrap.appendChild(cardEl);
         const actions = document.createElement('div');
         actions.className = 'rocket-slot-actions';
@@ -6563,6 +6674,14 @@ function openDeckTapModal(card, kind, { allowAuction = false, inspectOnly = fals
 
   const panel = document.createElement('div');
   panel.className = 'card-modal-panel';
+  // Corner × close button (top-right of the card).
+  const xBtn = document.createElement('button');
+  xBtn.type = 'button';
+  xBtn.className = 'modal-x';
+  xBtn.textContent = '×';
+  xBtn.setAttribute('aria-label', 'Close');
+  xBtn.addEventListener('click', close);
+  panel.appendChild(xBtn);
   const cardEl = renderCard(card, {
     type: kind,
     onSupportClick: (kinds) => {
@@ -6671,29 +6790,121 @@ function openDeckTapModal(card, kind, { allowAuction = false, inspectOnly = fals
 // the card's own controls (Flip, support chips, the radiator Light/Heavy
 // toggle) so those keep working; a click anywhere else on the card opens the
 // big view. `face` opens the modal on the side that's installed in the stack.
-function makeCardViewable(cardEl, card, kind, face) {
+function makeCardViewable(cardEl, card, kind, face, nav) {
   if (!cardEl) return cardEl;
   cardEl.classList.add('is-viewable');
   cardEl.title = 'Tap to view this card up close';
   cardEl.addEventListener('click', (e) => {
     if (e.target.closest('button, [role="button"], .rad-side, .card-flip')) return;
-    openCardModal(card, kind, null, { readOnly: true, face });
+    openCardModal(card, kind, null, { readOnly: true, face, nav });
   });
   return cardEl;
+}
+
+// Build the swipe-browse sibling list for a stack or the hand. Accepts bare id
+// strings (hand) or { id, kind, face } slot objects (LEO / rocket / outpost).
+// slotIdx is the position in the list (the hand uses it for per-card actions).
+function stackSiblings(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const s of list) {
+    const id = (typeof s === 'string') ? s : (s && s.id);
+    if (!id) continue;
+    const c = PATENTS_BY_ID[id] || CREW_BY_ID[id];
+    if (!c) continue;
+    out.push({
+      card: c,
+      kind: (s && typeof s === 'object' && s.kind) ? s.kind : (CREW_BY_ID[id] ? 'crew' : 'patent'),
+      face: (s && typeof s === 'object') ? s.face : undefined,
+      slotIdx: out.length,
+    });
+  }
+  return out;
+}
+
+// Swipe (touch) + arrow-key + on-screen ‹ › browsing for a card modal whose
+// card belongs to a stack / hand. nav = { siblings, index }; navigating closes
+// this modal and reopens the sibling, carrying the same list.
+function setupCardModalNav(overlay, panel, close, cleanups, nav, { readOnly }) {
+  const sibs = nav && Array.isArray(nav.siblings) ? nav.siblings : null;
+  const idx = nav ? (nav.index | 0) : -1;
+  if (!sibs || sibs.length < 2 || idx < 0) return;
+  const go = (dir) => {
+    const ni = idx + dir;
+    if (ni < 0 || ni >= sibs.length) return;
+    const s = sibs[ni];
+    if (!s || !s.card) return;
+    close();
+    openCardModal(s.card, s.kind || 'patent', (s.slotIdx != null ? s.slotIdx : null),
+      { readOnly, face: s.face, nav: { siblings: sibs, index: ni } });
+  };
+  // Touch swipe: left -> next card, right -> previous.
+  let sx = 0, sy = 0, st = 0;
+  const onTS = (e) => { const t = e.changedTouches[0]; sx = t.clientX; sy = t.clientY; st = Date.now(); };
+  const onTE = (e) => {
+    const t = e.changedTouches[0];
+    const dx = t.clientX - sx, dy = t.clientY - sy;
+    if (Date.now() - st < 700 && Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.4) go(dx < 0 ? 1 : -1);
+  };
+  overlay.addEventListener('touchstart', onTS, { passive: true });
+  overlay.addEventListener('touchend', onTE, { passive: true });
+  cleanups.push(() => { overlay.removeEventListener('touchstart', onTS); overlay.removeEventListener('touchend', onTE); });
+  // Arrow keys.
+  const onArrow = (e) => {
+    if (e.key === 'ArrowLeft') { e.preventDefault(); go(-1); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); go(1); }
+  };
+  document.addEventListener('keydown', onArrow);
+  cleanups.push(() => document.removeEventListener('keydown', onArrow));
+  // On-screen control (surfaces the browse on desktop too).
+  const bar = document.createElement('div');
+  bar.className = 'card-modal-nav';
+  const prev = document.createElement('button');
+  prev.type = 'button'; prev.className = 'card-modal-arrow'; prev.textContent = '‹';
+  prev.setAttribute('aria-label', 'Previous card'); prev.disabled = idx <= 0;
+  prev.addEventListener('click', () => go(-1));
+  const pos = document.createElement('span');
+  pos.className = 'card-modal-pos'; pos.textContent = `${idx + 1} / ${sibs.length}`;
+  const next = document.createElement('button');
+  next.type = 'button'; next.className = 'card-modal-arrow'; next.textContent = '›';
+  next.setAttribute('aria-label', 'Next card'); next.disabled = idx >= sibs.length - 1;
+  next.addEventListener('click', () => go(1));
+  bar.append(prev, pos, next);
+  overlay.appendChild(bar);
 }
 
 // Inspect modal: enlarged copy of the clicked card with three
 // actions - Discard (pop back to the deck), Exo produce (will
 // need a factory location once Stage-3 builds them), and Add to
 // stack (push onto the LEO rocket).
-function openCardModal(card, kind, slotIdx, { readOnly = false, face } = {}) {
+function openCardModal(card, kind, slotIdx, { readOnly = false, face, nav } = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay';
-  const close = () => overlay.remove();
+  // Teardown registry: the corner ×, Esc, and any swipe / arrow-key
+  // listeners all unhook here, so swipe-browsing to a sibling card leaves
+  // nothing dangling behind the reopened modal.
+  const cleanups = [];
+  const close = () => {
+    for (const fn of cleanups) { try { fn(); } catch (e) {} }
+    overlay.remove();
+  };
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  cleanups.push(() => document.removeEventListener('keydown', onKey));
 
   const panel = document.createElement('div');
   panel.className = 'card-modal-panel';
+  // Corner × close button (top-right of the card). The backdrop tap + Esc
+  // still dismiss too; this is the obvious affordance on touch, where the
+  // backdrop can be a tight target around a big card.
+  const xBtn = document.createElement('button');
+  xBtn.type = 'button';
+  xBtn.className = 'modal-x';
+  xBtn.textContent = '×';
+  xBtn.setAttribute('aria-label', 'Close');
+  xBtn.addEventListener('click', close);
+  panel.appendChild(xBtn);
   const cardEl = renderCard(card, {
     type: kind,
     // Open on the explicitly requested face (e.g. the side installed in a
@@ -6709,14 +6920,19 @@ function openCardModal(card, kind, slotIdx, { readOnly = false, face } = {}) {
   cardEl.classList.add('card-modal-card');
   panel.appendChild(cardEl);
 
-  // Read-only inspection (e.g. the All cards overview): show the card and its
-  // Flip, but NONE of the act-on-card buttons (Discard / Free Market / Exo /
-  // Boost). Mirrors the crew path's mount + Esc handling.
-  if (readOnly) {
+  // Mount + wire swipe / arrow-key / on-screen browsing (only when the card
+  // belongs to a stack or the hand, via nav). Shared by all three exits.
+  const mount = () => {
     overlay.appendChild(panel);
     mountOverlay(overlay);
-    const onKeyRO = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKeyRO); } };
-    document.addEventListener('keydown', onKeyRO);
+    setupCardModalNav(overlay, panel, close, cleanups, nav, { readOnly });
+  };
+
+  // Read-only inspection (e.g. the All cards overview): show the card and its
+  // Flip, but NONE of the act-on-card buttons (Discard / Free Market / Exo /
+  // Boost).
+  if (readOnly) {
+    mount();
     return;
   }
 
@@ -6733,10 +6949,7 @@ function openCardModal(card, kind, slotIdx, { readOnly = false, face } = {}) {
     note.textContent = '👥 Crew can only be transferred between stacks (LEO ↔ rocket ↔ outpost). It has no hand actions.';
     actions.append(note);
     panel.appendChild(actions);
-    overlay.appendChild(panel);
-    mountOverlay(overlay);
-    const onKeyCrew = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKeyCrew); } };
-    document.addEventListener('keydown', onKeyCrew);
+    mount();
     return;
   }
 
@@ -6842,13 +7055,7 @@ function openCardModal(card, kind, slotIdx, { readOnly = false, face } = {}) {
 
   actions.append(discardBtn, sellBtn, produceBtn, boostBtn);
   panel.appendChild(actions);
-  overlay.appendChild(panel);
-  mountOverlay(overlay);
-
-  // Tap the backdrop or press Escape to dismiss - no explicit ×
-  // button (the action row already crowds the bottom).
-  const onKey = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
-  document.addEventListener('keydown', onKey);
+  mount();
 }
 
 // Side panel: a vertical tab strip on the right edge of the
@@ -9242,6 +9449,12 @@ function openRocketStackModal() {
       for (const r of reqs) if (r && r.kind) requiredKinds.add(r.kind);
     }
 
+    // Swipe-browse siblings for the card modal. The loop's lookup resolves a
+    // couple of ids stackSiblings can't (e.g. the open-cycle special card), so
+    // match by a pointer that only advances on shared cards - that card just
+    // gets no swipe-nav rather than drifting the indices of its neighbours.
+    const sibs = stackSiblings(stack);
+    let sp = 0;
     stack.forEach((slot, idx) => {
       const card = lookup(slot.id);
       if (!card) return;
@@ -9299,7 +9512,12 @@ function openRocketStackModal() {
         openSupportBrowser(kinds);
       };
       const cardEl = renderCard(card, cardOpts);
-      makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face);
+      let cardNav = null;
+      if (sibs[sp] && sibs[sp].card && sibs[sp].card.id === slot.id) {
+        cardNav = { siblings: sibs, index: sp };
+        sp++;
+      }
+      makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, cardNav);
       wrap.appendChild(cardEl);
 
       const actions = document.createElement('div');
@@ -9606,16 +9824,30 @@ function isLeoSite(site) {
 // Returns the glyph + a short label so the confirm modal can list
 // what the player is about to fly through.
 const HAZARD_COST_PER = 4;
+// An aerobrake corridor: a node carrying the node-tags 'aerobrake' flag (the
+// same flag that draws the 🪂 sprite, keyed by id2). Shared with the server's
+// isAerobrakeNode so both classify the SAME corridors. Distinct from a Venus
+// gravity-assist flyby (type 'venus') and a plain hazard-flagged lagrange.
+function isAerobrakeSite(site) {
+  return !!(site && site.id2 && NODE_TAGS[site.id2] && NODE_TAGS[site.id2].aerobrake);
+}
 function classifyHazard(site) {
   if (!site) return null;
   if (site.type === 'radhaz') return { glyph: '☢', label: 'Radiation hazard' };
+  // Aerobrake corridor: an atmospheric-entry hazard you parachute through
+  // (roll or pay), flagged even though the node is a lagrange. A parachute
+  // card waives the roll. The `aero` flag lets the move flow both waive the
+  // roll for a safe-aerobrake stack AND drop the landing thrust gate for this
+  // approach (you parachute down regardless of thrust / site size).
+  if (isAerobrakeSite(site)) return { glyph: '🪂', label: 'Aerobrake corridor', aero: true };
   // Venus 'venus' nodes are gravity-assist FLYBYS (flybyBoost), not
   // atmospheric aerobraking, so flying through one is a free maneuver - never
-  // a hazard roll. (User: venus-2lgjk must not require a roll.)
-  // Skull hazards live on hazard-flagged burn spaces. Lagrange
-  // (flyby / gravity-assist) nodes are flybys, not hazards, even
-  // when the planner flags them.
-  if (site.hazard && site.type !== 'lagrange') return { glyph: '☠', label: 'Hazard node' };
+  // a hazard roll (venus-2lgjk isn't tagged a hazard, so it stays safe).
+  // Otherwise: ANY node the curated tags mark as a hazard rolls a skull.
+  // site.hazard now reads the node-tag map (the source of truth), so a hazard
+  // can sit on ANY node type - lagranges included. Untagged lagranges (the
+  // planner's coarse flag) are NOT marked, so they stay safe.
+  if (site.hazard) return { glyph: '☠', label: 'Hazard node' };
   return null;
 }
 function isHazardSite(site) {
@@ -13539,8 +13771,12 @@ function animateRocketAlong(segments, totalMs = 700) {
   // A manual route already walked hop-by-hop during plotting snaps on commit
   // (the player has already seen the ship travel) instead of re-flying it.
   if (_fastMoveAnim) totalMs = 0;
-  // Battery saver: snap the rocket to its destination instead of flying it.
-  if (isBatterySave()) totalMs = 0;
+  // NOTE: rocket movement stays animated EVEN in battery-saver mode - a
+  // smoothly sliding ship is load-bearing for reading the board (user
+  // decision). Battery saver still stops the ambient drift loop + CSS motion;
+  // this one tween is exempt. It self-schedules its own frames
+  // (setSandboxRocket -> _scheduleDraw), so it animates fine with the ambient
+  // loop off.
   return new Promise((resolve) => {
     if (!_renderer || !_activeData || !segments || !segments.length) {
       resolve(); return;
@@ -14623,6 +14859,20 @@ async function moveRocket() {
     setStatus(`⛓️ Can't move - support chain broken: ${why}`);
     return false;
   }
+  // Can't END this turn on an aerobrake corridor (the 🪂 parachute space): the
+  // stack is falling through the atmosphere, so the descent has to finish on a
+  // real landing site or node this turn, never mid-parachute. Crossing one is
+  // fine (it rolls as an aero hazard); stopping on it is not. Checked here -
+  // before the online/offline split - so a hand-built (manual) route is caught
+  // too, and the auto-planner already refuses to route to one.
+  const turn1End = (_plannedRoute || []).filter((s) => (s.turn || 1) === 1).slice(-1)[0];
+  if (turn1End) {
+    const endPt = _activeData.byId?.[turn1End.to];
+    if (endPt && NODE_TAGS[endPt.id2] && NODE_TAGS[endPt.id2].aerobrake) {
+      setStatus('🪂 Can\'t stop on a parachute space - aerobraking carries you through, so finish your move on a landing site or node.');
+      return false;
+    }
+  }
   // Online: the server owns movement, fuel, and the hazard dice (seeded,
   // authoritative). The CLIENT still runs the same pre-flight the sandbox
   // does - it lists the hazards the route crosses, warns that each rad /
@@ -14640,6 +14890,9 @@ async function moveRocket() {
     // Hazards along THIS turn's segments only.
     const hz = routeHazards(turn1Segs);
     const radHz = hz.filter((h) => h.site.type === 'radhaz');
+    // A parachute card (safe-aerobrake) waives the aero hazard roll; the server
+    // applies the same waiver, so the client preview matches what it resolves.
+    const safeAeroOnline = stackHasPower('safeAerobrake');
     // Factory-assist maneuvers: an under-thrust liftoff (current site) or
     // landing (destination) is only legal with a factory there and is a
     // hazard roll unless a colony waives it. These join the generic
@@ -14654,7 +14907,11 @@ async function moveRocket() {
     const liftG = curSite ? maneuverGate(curSite, netThrust) : { ok: true };
     if (curSite && !liftG.ok) { _onlineToast(`Can't lift off from ${curSite.name} - not enough thrust and no factory to assist.`, 'error'); return false; }
     if (liftG.assist && liftG.needsRoll && curSite) assistHz.push({ site: curSite, glyph: '🏭', label: 'liftoff assist' });
-    const landG = destSite ? maneuverGate(destSite, netThrust) : { ok: true };
+    // Aerobrake-landable destination (🪂 corridor next to it): parachute down,
+    // so the landing thrust gate is waived (same adjacency signal the server uses).
+    const landG = destSite
+      ? (destSite.aeroLandable ? { ok: true, assist: false, needsRoll: false } : maneuverGate(destSite, netThrust))
+      : { ok: true };
     if (destSite && !landG.ok) { _onlineToast(`Can't land on ${destSite.name} - not enough thrust and no factory to assist.`, 'error'); return false; }
     if (landG.assist && landG.needsRoll && destSite) assistHz.push({ site: destSite, glyph: '🏭', label: 'landing assist' });
     // Synodic-season gate (also catches a route planned in-season last turn):
@@ -14666,7 +14923,9 @@ async function moveRocket() {
       _onlineToast(`${destSite.name} is a ${destSeason}-season space - only enterable during Season ${cap} (the Sunspot Cube is in ${curSeasonName} now).`, 'error');
       return false;
     }
-    const genericHz = hz.filter((h) => h.site.type !== 'radhaz').concat(assistHz);
+    // Drop aero hazards from the pay/roll prompt when a parachute card is
+    // aboard (the server waives them too), so the client preview matches.
+    const genericHz = hz.filter((h) => h.site.type !== 'radhaz' && !(safeAeroOnline && h.aero)).concat(assistHz);
     let hazardPay = false;
     // Generic (skull / aerobrake / factory assist): pay aqua, roll, or
     // cancel. Each is a separate d6 - the modal says "cannot be undone".
@@ -14800,11 +15059,11 @@ async function moveRocket() {
   const hazards = routeHazards(turn1);
   // A safe-aerobrake card (parachute generator) aboard rides the stack through
   // aerobrake corridors with no roll - matching the server, which waives them -
-  // so don't prompt pay/roll for venus (aerobrake) nodes. Skull / radiation are
+  // so don't prompt pay/roll for aerobrake nodes. Skull / radiation are
   // unaffected. The ability activates by being aboard (no support chain needed).
   const safeAero = stackHasPower('safeAerobrake');
   const radHazards     = hazards.filter((h) => h.site.type === 'radhaz');
-  const genericHazards = hazards.filter((h) => h.site.type !== 'radhaz' && !(safeAero && h.site.type === 'venus'));
+  const genericHazards = hazards.filter((h) => h.site.type !== 'radhaz' && !(safeAero && h.aero));
   let hazardChoice = null;
   let lockUndo = false;
   // Factory-assist pre-flight. A maneuver where net thrust <= site
@@ -14825,9 +15084,13 @@ async function moveRocket() {
     const destId = _plannedRoute[_plannedRoute.length - 1].to;
     if (turn1[turn1.length - 1].to === destId) {
       const destSite = _activeData.sites.find((s) => s.id === destId);
-      const landG = maneuverGate(destSite, assistNet);
-      if (landG.assist && landG.needsRoll && destSite) {
-        assistManeuvers.push({ site: destSite, kind: 'landing', label: 'landing assist', glyph: '🏭', size: landG.size });
+      // Aerobrake landing needs no factory assist (you parachute down), so skip
+      // the landing-assist roll when the destination is aerobrake-landable.
+      if (destSite && !destSite.aeroLandable) {
+        const landG = maneuverGate(destSite, assistNet);
+        if (landG.assist && landG.needsRoll) {
+          assistManeuvers.push({ site: destSite, kind: 'landing', label: 'landing assist', glyph: '🏭', size: landG.size });
+        }
       }
     }
     if (assistManeuvers.length) {
@@ -16680,7 +16943,12 @@ function planRocketRouteTo(destSite) {
     _renderer.setRouteEndpoints(origin.id, destSite.id);
     return false;
   }
-  if (!landGate.ok) {
+  // Aerobrake-landable destination: a site sitting next to an aerobrake
+  // corridor (the 🪂 symbol) can be reached by parachuting in, so an
+  // under-thrust landing is NOT hard-blocked - you descend by parachute. Same
+  // adjacency signal the server's landing gate uses, so the two agree.
+  const destAeroCapable = !!destSite.aeroLandable;
+  if (!landGate.ok && !destAeroCapable) {
     setStatus(
       `🛬 Can't land on <strong>${esc(destSite.name)}</strong>: net thrust `
       + `<strong>${netThrust}</strong> must exceed its size <strong>${landGate.size}</strong> `
@@ -16690,9 +16958,11 @@ function planRocketRouteTo(destSite) {
     _renderer.setRouteEndpoints(origin.id, destSite.id);
     return false;
   }
-  const assistNote = (liftGate.assist || landGate.assist)
-    ? ` <em class="muted">(🏭 factory assist${(liftGate.needsRoll || landGate.needsRoll) ? ' - hazard roll on the move' : ' - free, colony present'})</em>`
-    : '';
+  const assistNote = (!landGate.ok && destAeroCapable)
+    ? ` <em class="muted">(🪂 aerobrake descent - parachutes down through the atmosphere)</em>`
+    : (liftGate.assist || landGate.assist)
+      ? ` <em class="muted">(🏭 factory assist${(liftGate.needsRoll || landGate.needsRoll) ? ' - hazard roll on the move' : ' - free, colony present'})</em>`
+      : '';
   // Synodic-season gate: a seasonal space is only on the board during its
   // Sunspot phase, so it can't be entered (or even routed to) off-season.
   let nowSeason = null;

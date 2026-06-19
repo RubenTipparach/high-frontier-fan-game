@@ -205,7 +205,7 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
 
 // players: [{ profileId, name, seat }] (seat 1-based, any order).
 // maxRounds: game length (rounds = Sunspot Cube cycles); default 5.
-export function createInitialState({ players, seed, maxRounds = 5, startingAqua, economy, draftStart, m0 } = {}) {
+export function createInitialState({ players, seed, maxRounds = 5, startingAqua, economy, draftStart, randomDraft, m0 } = {}) {
   // Sort by the incoming (lobby) seat first so the shuffle has a
   // deterministic base regardless of how the caller ordered the array,
   // then randomise the turn order with the seeded RNG. Turn order IS
@@ -260,6 +260,9 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
     // Draft-start mode flag (see startAqua above). applyPickCrew flips the
     // phase to 'draft' instead of 'play' when this is set.
     draftStart: draft,
+    // Random-draft mode: applyPickCrew deals 12 random cards per player and goes
+    // straight to play (no interactive draft). Independent of draftStart.
+    randomDraft: !!randomDraft,
     // Draft phase. Every game opens in 'crew' - all players pick a
     // faction and may re-pick freely until everyone has chosen. The
     // engine's applyPickCrew flips this to 'play' the moment the

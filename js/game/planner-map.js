@@ -38,6 +38,8 @@ import { ZONE_ASSIGNMENTS } from '../../data/zones.js';
 // break move validation.
 import { makeRefId, normalizeSiteName } from '../../data/planner-ids.js';
 import { classifyBody } from '../../data/body-class.js';
+import { NODE_TAGS } from '../../data/node-tags.js';
+import { aerobrakeLandableSet } from '../../data/aerobrake-landing.js';
 const LOCAL_SITE_BY_NAME = new Map();
 for (const s of LOCAL_SITES) {
   if (s && s.name) LOCAL_SITE_BY_NAME.set(normalizeSiteName(s.name), s);
@@ -133,7 +135,12 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
       // stack draw the push-sat support for free. Sourced from the manifest's
       // Push column (data/sites.js); waypoints never match and stay false.
       push: !!(local && local.push),
-      hazard: !!p.hazard,
+      // Hazard is driven by the CURATED node tags (data/node-tags.js), NOT the
+      // planner's own flag: the planner marks nearly every inner lagrange
+      // hazardous (too coarse), so the tag map is the source of truth for what
+      // shows + rolls a hazard. Burns fold their planner flag into the tag map
+      // already, so this stays correct for them. (User: engine uses my tags.)
+      hazard: !!(NODE_TAGS[id2] && NODE_TAGS[id2].hazard),
       // Comets are always landing sites in HF4 - you touch down
       // on the nucleus to harvest water. The planner JSON doesn't
       // flag them, so default landing=1 for any classified comet.
@@ -209,6 +216,30 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
 
   const byId = Object.fromEntries(sites.map((s) => [s.id, s]));
 
+  // Aerobrake-landable sites: a real site within a few hops of an aerobrake
+  // corridor (the 🪂 symbol next to it). Computed via the SHARED helper the
+  // server also uses, so the client's "you can parachute down here" gate
+  // matches the server's authoritative one. We walk in planner-id space (the
+  // neighbours map) and stamp each site's id2-keyed verdict back on it.
+  const aeroPlannerIds = sites
+    .filter((s) => NODE_TAGS[s.id2] && NODE_TAGS[s.id2].aerobrake)
+    .map((s) => s.id);
+  const isSitePid = (pid) => {
+    const s = byId[pid];
+    // A real site = a non-waypoint body, or a burnspace that is itself a
+    // landing site (landing > 0). Mirrors the server's isSiteNode.
+    return !!(s && (!s.isWaypoint || (s.landing != null && s.landing > 0)));
+  };
+  const landablePids = aerobrakeLandableSet({
+    aeroIds: aeroPlannerIds,
+    neighborsOf: (pid) => [...(neighbors.get(pid) || [])],
+    isSiteId: isSitePid,
+    maxHops: 3,
+  });
+  const aeroLandableId2 = new Set();
+  for (const pid of landablePids) { const s = byId[pid]; if (s && s.id2) aeroLandableId2.add(s.id2); }
+  for (const s of sites) s.aeroLandable = aeroLandableId2.has(s.id2);
+
   // Chains of decorative routing nodes (degree-2 nodes whose only
   // job is to bend a straight line into a curve). We split them out
   // here so the renderer can paint them as smooth Bezier ribbons
@@ -216,9 +247,24 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
   // full straight-segment graph for shortest-path math.
   const { chains, straightEdges } = buildChains(sites, edges, byId);
 
+  // One-way edges: the planner (planner-nav) blocks moving INTO a node across
+  // an edge labelled '0', so an edge labelled '0' from a to b is traversable
+  // a -> b ONLY. Surface those so the renderer can draw a direction arrow.
+  // (Exactly one side is '0'; a both-sides-'0' edge would be unusable and
+  // doesn't occur in the data.)
+  const directedEdges = [];
+  for (const a in edgeLabels) {
+    for (const b in edgeLabels[a]) {
+      if (edgeLabels[a][b] === '0' && !(edgeLabels[b] && edgeLabels[b][a] === '0')) {
+        directedEdges.push({ from: a, to: b });
+      }
+    }
+  }
+
   _cache = {
     sites, edges, byId, chains, straightEdges,
     edgeLabels,   // raw direction labels for Hohmann pivots
+    directedEdges, // one-way ('0'-label) edges {from, to} for direction arrows
     neighbors,    // Map<id, Set<id>> for the ported planner
     mode: 'classic',
   };

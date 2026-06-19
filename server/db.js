@@ -375,6 +375,11 @@ ensureColumn('lobbies', 'draft_start', 'draft_start INTEGER NOT NULL DEFAULT 0')
 // legacy + normal room, so games already in flight stay m0=false (no retro
 // apply). Chosen at room creation, carried into the game state at start.
 ensureColumn('lobbies', 'm0', 'm0 INTEGER NOT NULL DEFAULT 0');
+// random_draft: opt-in "random draft" opening - instead of interactive picks,
+// each player is dealt 12 random cards from random decks, then play begins
+// (banks at 6). 0 = off (default). Independent of draft_start; random wins if
+// both are set.
+ensureColumn('lobbies', 'random_draft', 'random_draft INTEGER NOT NULL DEFAULT 0');
 // When a lobby was cancelled (admin "Cancel"), so the admin panel can list
 // cancelled rooms newest-cancelled-first. Nullable: only set on cancel,
 // cleared on restore; legacy cancelled rows fall back to created_at for sort.
