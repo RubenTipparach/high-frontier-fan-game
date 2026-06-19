@@ -135,7 +135,12 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
       // stack draw the push-sat support for free. Sourced from the manifest's
       // Push column (data/sites.js); waypoints never match and stay false.
       push: !!(local && local.push),
-      hazard: !!p.hazard,
+      // Hazard is driven by the CURATED node tags (data/node-tags.js), NOT the
+      // planner's own flag: the planner marks nearly every inner lagrange
+      // hazardous (too coarse), so the tag map is the source of truth for what
+      // shows + rolls a hazard. Burns fold their planner flag into the tag map
+      // already, so this stays correct for them. (User: engine uses my tags.)
+      hazard: !!(NODE_TAGS[id2] && NODE_TAGS[id2].hazard),
       // Comets are always landing sites in HF4 - you touch down
       // on the nucleus to harvest water. The planner JSON doesn't
       // flag them, so default landing=1 for any classified comet.

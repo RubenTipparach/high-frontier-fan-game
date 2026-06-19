@@ -9841,11 +9841,12 @@ function classifyHazard(site) {
   if (isAerobrakeSite(site)) return { glyph: '🪂', label: 'Aerobrake corridor', aero: true };
   // Venus 'venus' nodes are gravity-assist FLYBYS (flybyBoost), not
   // atmospheric aerobraking, so flying through one is a free maneuver - never
-  // a hazard roll. (User: venus-2lgjk must not require a roll.)
-  // Skull hazards live on hazard-flagged burn spaces. Lagrange
-  // (flyby / gravity-assist) nodes are flybys, not hazards, even
-  // when the planner flags them.
-  if (site.hazard && site.type !== 'lagrange') return { glyph: '☠', label: 'Hazard node' };
+  // a hazard roll (venus-2lgjk isn't tagged a hazard, so it stays safe).
+  // Otherwise: ANY node the curated tags mark as a hazard rolls a skull.
+  // site.hazard now reads the node-tag map (the source of truth), so a hazard
+  // can sit on ANY node type - lagranges included. Untagged lagranges (the
+  // planner's coarse flag) are NOT marked, so they stay safe.
+  if (site.hazard) return { glyph: '☠', label: 'Hazard node' };
   return null;
 }
 function isHazardSite(site) {

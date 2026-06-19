@@ -292,20 +292,22 @@ export function isAerobrakeLandableSite(slug) {
 // the server resolves the SAME hazards the sandbox shows):
 //   'rad'   - radiation zone (rolls, NOT aqua-payable)
 //   'aero'  - aerobrake corridor (aqua-payable; parachute card waives it)
-//   'skull' - hazard-flagged burn space (aqua-payable)
-//   null    - safe (Venus gravity-assist flybys + plain lagranges are never hazards)
+//   'skull' - any node the CURATED tags mark as a hazard (aqua-payable)
+//   null    - safe (anything the tags don't mark)
 export function hazardKind(slug) {
   const n = NODES_BY_SLUG.get(String(slug));
   if (!n) return null;
   if (n.type === 'radhaz') return 'rad';
   // Aerobrake corridors are atmospheric-entry hazard spaces - you parachute
-  // through them (roll or pay), even though the node is a lagrange. Checked
-  // before the lagrange exclusion below so the corridor IS a hazard, while a
-  // plain hazard-flagged lagrange (gravity-assist flyby) stays safe.
+  // through them (roll or pay). Checked before the skull case so they read
+  // 'aero' (parachute-waivable) rather than a plain skull.
   if (isAerobrakeNode(slug)) return 'aero';
-  // 'venus' nodes are gravity-assist flybys (flybyBoost), not atmospheric
-  // aerobraking, so they never trigger a hazard roll. (User: venus-2lgjk.)
-  if (n.hazard && n.type !== 'lagrange') return 'skull';
+  // The CURATED node tags (data/node-tags.js) are the source of truth for skull
+  // hazards, NOT the planner's own coarse flag (it marks nearly every inner
+  // lagrange). A hazard can sit on ANY node type the tags mark - lagranges
+  // included. Mirrors the client (planner-map sets site.hazard from the same
+  // tag map). (User: engine should use my tags.)
+  if (NODE_TAGS[String(slug)] && NODE_TAGS[String(slug)].hazard) return 'skull';
   return null;
 }
 

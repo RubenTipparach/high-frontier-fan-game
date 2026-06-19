@@ -2745,8 +2745,9 @@ export class MapRenderer {
     //   half lander + hazard      -> lander-half-hazard (half lander | half skull)
     //   hazard burn (no landing)  -> hazard             (skull in a Lagrange ring)
     //   venus flyby               -> aerobrake          (parachute in a Lagrange ring)
-    // radhaz keeps its trefoil; hazard-flagged lagrange points are flybys, not
-    // hazards, so they get no skull. (Site flags 🌊 / 🌿 stay in the hex layer.)
+    // radhaz keeps its trefoil. A lagrange wears a skull only when the curated
+    // tags mark it a hazard (the planner's coarse flag is ignored for
+    // lagranges). (Site flags 🌊 / 🌿 stay in the hex layer.)
     const icons = this._mapIcons;
     if (icons) {
       const box = MAP_ICON_BOX, ih = box / 2;
