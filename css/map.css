@@ -702,10 +702,65 @@
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 22px 24px 18px;
-  width: min(360px, 92vw);
+  width: min(1040px, 96vw);
   text-align: center;
   box-shadow: 0 24px 56px rgba(0, 0, 0, 0.55);
   cursor: pointer;
+}
+/* Horizontal fuel window: tank + controls together on the left,
+   then the full detailed fuel strip taking the remaining width.
+   The strip re-renders as water moves, in lockstep with the
+   cylinder. The tank readout (current / cap) sits ON TOP of the
+   cylinder. */
+.fuel-tank-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 18px;
+  text-align: left;
+  margin-top: 6px;
+}
+.fuel-tank-col { min-width: 0; }
+.fuel-tank-col-stage { flex: 0 0 auto; order: 1; }
+.fuel-tank-col-controls { order: 2; }
+.fuel-tank-col-strip { order: 3; }
+/* Stack the readout above the cylinder (tank readout on top of the bar). */
+.fuel-tank-stage { flex-direction: column; }
+.fuel-tank-stage .fuel-tank-readout { order: -1; flex: 0 0 auto; }
+.fuel-tank-stage .fuel-tank-svg { flex: 0 0 auto; }
+.fuel-tank-stage .fuel-tank-amount { justify-content: center; }
+.fuel-tank-col-strip {
+  flex: 1 1 340px;
+  min-width: 240px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+}
+.fuel-tank-col-strip .ntd-title-mini {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+/* The detailed Fuel Strip Track is wide; it scrolls horizontally
+   inside its column exactly like the click-to-open modal does. */
+.fuel-tank-col-strip .fuel-tank-strip.ntd-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+.fuel-tank-col-controls {
+  flex: 0 0 260px;
+  max-width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fuel-tank-col-controls > * { margin-top: 0; }
+@media (max-width: 780px) {
+  .fuel-tank-col-strip,
+  .fuel-tank-col-controls { flex: 1 1 100%; max-width: none; }
 }
 .fuel-tank-title { margin: 0 0 4px; font-size: 16px; color: var(--accent); }
 .fuel-tank-sub   { margin: 0 0 12px; font-size: 11px; }

@@ -255,6 +255,8 @@ let _onlineOffWS = null;      // unsubscribe handle for the game channel
 let _onlineBusy = false;      // in-flight op guard (prevents double submit)
 let _onlineRoom = null;       // table / lobby name for the multiplayer panel
 let _onlineLobbyId = null;    // lobby id (for chat REST + WS channel)
+let _onlineHostId = null;     // host profile id (gates host-only controls)
+let _onlineCloseRoom = null;  // () => void, host closes the room (from the host page)
 let _onlineLeave = null;      // () => void callback wired by the host page
 let _onlineChatOff = null;    // unsubscribe handle for the lobby chat WS
 // In-memory mirror of the table chat. Kept module-level so a second
@@ -363,6 +365,8 @@ export function mountBrowse(opts = {}) {
     _onlineToast = typeof opts.onToast === 'function' ? opts.onToast : (() => {});
     _onlineRoom = opts.room || null;
     _onlineLobbyId = opts.lobbyId || null;
+    _onlineHostId = opts.hostId || null;
+    _onlineCloseRoom = typeof opts.onCloseRoom === 'function' ? opts.onCloseRoom : null;
     _onlineLeave = typeof opts.onLeave === 'function' ? opts.onLeave : null;
     setOnline(true);
   } else {
@@ -12161,25 +12165,35 @@ function openBoostModal({ cards, have, opNote }) {
   });
 }
 
-// Stepper modal for dumping water. The player dials in how much to
-// drain (1..max) with the +/- steppers, types a value directly, or
-// taps "All" to jump to the full tank, then confirms. Resolves to
-// the chosen amount, or null if cancelled. Dumped water is destroyed
-// for now (Stage 3+ turns this into an outpost-stack drop).
+// Stepper modal for dumping water. Dumping walks the BLACK (burn)
+// ladder: the player dials in how many FUEL STEPS to jettison
+// (1..available), each step dropping the WET chit one node down the
+// strip - the same non-linear mass drop a burn spends. Resolves to
+// the WATER amount those steps remove (so the dump op subtracts the
+// exact mass and the tank lands on the same node), or null if
+// cancelled. Dumped water is destroyed for now (Stage 3+ turns this
+// into an outpost-stack drop).
 function openDumpWaterModal(maxWater) {
   return new Promise((resolve) => {
-    const max = Math.max(0, maxWater | 0);
+    const max = Math.max(0, Number(maxWater) || 0);
     if (max <= 0) { resolve(null); return; }
+    const totals = getStackTotals();
+    const dryMass = Math.max(0, totals.dryMass | 0);
+    const tank = getTankWater();
+    const wetMass = dryMass + tank;       // true (possibly fractional) wet position
+    // How many black burn connections separate wet from dry: the fuel
+    // steps available to jettison.
+    const maxSteps = blackStepsBetween(dryMass, wetMass);
+    if (maxSteps < 1) { resolve(null); return; }
     document.querySelector('.dump-water-overlay')?.remove();
     const overlay = document.createElement('div');
     overlay.className = 'card-modal-overlay confirm-modal-overlay dump-water-overlay';
-    // Current wet mass drives the preview: dumping water lowers the
-    // wet mass, which can drop the rocket into a lighter weight class
-    // with a better net-thrust modifier.
-    const totals = getStackTotals();
-    const curWet = Math.max(0, totals.wetMass | 0);
     const tankCap = getTankMax();
-    let amount = Math.min(1, max);
+    // Water removed by jettisoning `k` fuel steps: walk the wet chit
+    // down k black connections and take the mass it falls.
+    const round6 = (n) => Math.round((Number(n) || 0) * 1e6) / 1e6;
+    const waterForSteps = (k) => Math.max(0, round6(wetMass - walkBlackDown(wetMass, k)));
+    let steps = 1;
     const close = (val) => {
       overlay.remove();
       document.removeEventListener('keydown', onKey);
@@ -12188,69 +12202,74 @@ function openDumpWaterModal(maxWater) {
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
     const onKey = (e) => {
       if (e.key === 'Escape') close(null);
-      else if (e.key === 'Enter') close(amount);
+      else if (e.key === 'Enter') close(waterForSteps(steps));
     };
     document.addEventListener('keydown', onKey);
     const panel = document.createElement('div');
     panel.className = 'turn-confirm-panel dump-water-panel';
     panel.innerHTML = `
-      <h3>💧⤓ Dump water</h3>
-      <p class="muted">Drain water from the rocket tank. Dumped water is
-      destroyed for now (Stage 3+ turns this into an outpost-stack drop
-      once factories land).</p>
+      <h3>💧⤓ Dump fuel</h3>
+      <p class="muted">Jettison fuel one step at a time down the fuel
+      strip. Each step drops the wet chit one node toward dry mass.
+      Dumped fuel is destroyed for now (Stage 3+ turns this into an
+      outpost-stack drop once factories land).</p>
       <div class="dump-stepper">
-        <button type="button" class="popup-btn popup-btn-secondary dump-step" data-step="-1" aria-label="Dump one less">−</button>
-        <input type="number" class="dump-amount" min="1" max="${max}" value="${amount}" inputmode="numeric" aria-label="Water to dump" />
-        <button type="button" class="popup-btn popup-btn-secondary dump-step" data-step="1" aria-label="Dump one more">+</button>
-        <button type="button" class="popup-btn dump-all" title="Dump the entire tank">All (${max})</button>
+        <button type="button" class="popup-btn popup-btn-secondary dump-step" data-step="-1" aria-label="Jettison one fewer step">−</button>
+        <input type="number" class="dump-amount" min="1" max="${maxSteps}" value="1" inputmode="numeric" aria-label="Fuel steps to jettison" />
+        <button type="button" class="popup-btn popup-btn-secondary dump-step" data-step="1" aria-label="Jettison one more step">+</button>
+        <button type="button" class="popup-btn dump-all" title="Jettison every fuel step down to dry mass">All (${maxSteps})</button>
       </div>
       <div class="dump-preview">
-        <span class="dump-preview-mass">Wet mass <strong>${curWet}</strong> →
-          <strong class="dump-after-wet">${curWet}</strong><small>/${tankCap}</small></span>
+        <span class="dump-preview-mass">Wet mass <strong>${esc(massLabel(wetMass))}</strong> →
+          <strong class="dump-after-wet">${esc(massLabel(wetMass))}</strong><small>/${tankCap}</small></span>
+        <span class="dump-preview-water"></span>
         <span class="dump-preview-class"></span>
       </div>
       <div class="turn-confirm-actions">
-        <button type="button" class="popup-btn primary" data-act="yes">💧⤓ Dump <span class="dump-confirm-n">${amount}</span></button>
+        <button type="button" class="popup-btn primary" data-act="yes">💧⤓ Dump <span class="dump-confirm-n">1</span> step</button>
         <button type="button" class="popup-btn" data-act="no">Cancel</button>
       </div>
     `;
     const input = panel.querySelector('.dump-amount');
     const confirmN = panel.querySelector('.dump-confirm-n');
+    const confirmBtn = panel.querySelector('[data-act="yes"]');
     const afterWetEl = panel.querySelector('.dump-after-wet');
+    const waterEl = panel.querySelector('.dump-preview-water');
     const classEl = panel.querySelector('.dump-preview-class');
-    const clamp = (v) => Math.max(1, Math.min(max, Math.round(Number(v)) || 1));
-    // Reflect the resulting wet mass + the weight class (net-thrust
-    // modifier) the rocket would fall into after dumping `n` water.
-    const updatePreview = (n) => {
-      const afterWet = Math.max(0, curWet - n);
-      afterWetEl.textContent = String(afterWet);
-      const wc = weightClassForMass(Math.max(1, afterWet));
+    const clamp = (v) => Math.max(1, Math.min(maxSteps, Math.round(Number(v)) || 1));
+    // Reflect the resulting wet mass, the water that jettison removes,
+    // and the weight class (net-thrust modifier) the rocket falls into.
+    const updatePreview = (k) => {
+      const afterWet = walkBlackDown(wetMass, k);
+      afterWetEl.textContent = massLabel(afterWet);
+      const removed = waterForSteps(k);
+      waterEl.innerHTML = `Removes <strong>${esc(massLabel(removed))}</strong> water`;
+      const wc = weightClassForMass(Math.max(1, Math.round(afterWet)));
       const mod = wc.netThrust >= 0 ? `+${wc.netThrust}` : String(wc.netThrust);
       classEl.innerHTML = `Class <strong>${esc(wc.id)} ${mod}</strong> net thrust`;
     };
-    const setAmount = (v) => {
-      amount = clamp(v);
-      input.value = String(amount);
-      confirmN.textContent = String(amount);
-      updatePreview(amount);
+    const setSteps = (v) => {
+      steps = clamp(v);
+      input.value = String(steps);
+      confirmN.textContent = String(steps);
+      confirmBtn.lastChild.textContent = steps === 1 ? ' step' : ' steps';
+      updatePreview(steps);
     };
     panel.querySelectorAll('.dump-step').forEach((b) => {
-      b.addEventListener('click', () => setAmount(amount + Number(b.dataset.step)));
+      b.addEventListener('click', () => setSteps(steps + Number(b.dataset.step)));
     });
-    panel.querySelector('.dump-all').addEventListener('click', () => setAmount(max));
+    panel.querySelector('.dump-all').addEventListener('click', () => setSteps(maxSteps));
     input.addEventListener('input', () => {
-      // Allow free typing; only snap to the clamped value on the
-      // confirm/step paths so the field doesn't fight the user
-      // mid-keystroke. Keep the confirm label + preview in sync though.
       const v = clamp(input.value);
-      amount = v;
+      steps = v;
       confirmN.textContent = String(v);
+      confirmBtn.lastChild.textContent = v === 1 ? ' step' : ' steps';
       updatePreview(v);
     });
-    input.addEventListener('blur', () => setAmount(input.value));
-    panel.querySelector('[data-act="yes"]').addEventListener('click', () => close(amount));
+    input.addEventListener('blur', () => setSteps(input.value));
+    confirmBtn.addEventListener('click', () => close(waterForSteps(steps)));
     panel.querySelector('[data-act="no"]').addEventListener('click', () => close(null));
-    updatePreview(amount);
+    setSteps(1);
     overlay.appendChild(panel);
     mountOverlay(overlay);
     setTimeout(() => { input.focus(); input.select(); }, 0);
@@ -12482,6 +12501,8 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
     <h2 class="fuel-tank-title">${isDirt ? '🟤 Dirt tank' : '💧 Water tank'}</h2>
     <p class="muted fuel-tank-sub">Tap outside or press Esc to close</p>
+    <div class="fuel-tank-body">
+    <div class="fuel-tank-col fuel-tank-col-stage">
     <div class="fuel-tank-stage">
       <svg viewBox="0 0 120 220" class="fuel-tank-svg" preserveAspectRatio="xMidYMid meet">
         <!-- Outer cylinder (stroke only) -->
@@ -12531,6 +12552,18 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         <em class="muted">${fuelWord}</em>
       </div>
     </div>
+    </div>
+    <div class="fuel-tank-col fuel-tank-col-strip">
+      <div class="ntd-title-mini muted">Fuel Strip Track</div>
+      <div class="fuel-tank-strip ntd-scroll"></div>
+      <div class="ntd-legend">
+        <span><i class="ntd-line burn"></i> burn (spend FT → dry mass)</span>
+        <span><i class="ntd-line refuel"></i> refuel (load FT → wet mass)</span>
+        <span><i class="ntd-chit dry"></i> dry</span>
+        <span><i class="ntd-chit wet"></i> wet</span>
+      </div>
+    </div>
+    <div class="fuel-tank-col fuel-tank-col-controls">
     <div class="fuel-tank-actions">
       ${tankDirt ? '' : `<button type="button" class="popup-btn popup-btn-secondary" id="tank-dump"
         title="Drain a chosen amount of water from the tank">💧⤓ Dump water</button>`}
@@ -12627,6 +12660,8 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         fuel in finer fractions as mass grows.
       </p>
     </div>
+    </div>
+    </div>
   `;
 
   const waterRect = panel.querySelector('.tank-water');
@@ -12635,6 +12670,36 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const liftLine  = panel.querySelector('.tank-lift-line');
   const nowReadout = panel.querySelector('.tank-now');
   const ticksG     = panel.querySelector('.tank-ticks');
+
+  // Fuel strip (middle column). This is the SAME detailed Fuel Strip
+  // Track as the click-to-open modal (renderDetailTrack), reused
+  // as-is. The Net Thrust readout text moves under it so they read
+  // as one block. As water moves (dump / pump / refuel / aqua) the
+  // track re-renders at the new wet mass, so the WET chit walks the
+  // ladder and the blue burn path grows / shrinks in lockstep with
+  // the tank cylinder beside it. Re-render is bounded: only when the
+  // wet mass crosses an integer or shifts by a fuel-step (~0.1), so
+  // a tween redraws a handful of times, not 60x a second.
+  const stripCol  = panel.querySelector('.fuel-tank-col-strip');
+  const ntBlock   = panel.querySelector('.fuel-tank-netthrust');
+  if (stripCol && ntBlock) stripCol.appendChild(ntBlock);
+  const stripHost = panel.querySelector('.fuel-tank-strip');
+  let lastRenderWet = -999;
+  function updateStrip(level) {
+    if (!stripHost) return;
+    const wet = Math.max(0, dryMass + level);
+    if (Math.abs(wet - lastRenderWet) < 0.09
+        && Math.round(wet) === Math.round(lastRenderWet)) return;
+    renderDetailTrack(stripHost, { dryMass, wetMass: wet });
+    lastRenderWet = wet;
+    // Keep the moving WET chit in view as the wide track scrolls.
+    const range = stripHost.scrollWidth - stripHost.clientWidth;
+    if (range > 0) {
+      const frac = Math.max(0, Math.min(1, wet / MAX_WET_MASS));
+      stripHost.scrollLeft = frac * range;
+    }
+  }
+  updateStrip(fromW);
 
   // Geometry: 200 svg units span TANK_VIS_MAX wet-mass units.
   // The dry-mass block fills the bottom; water sits above it.
@@ -12691,6 +12756,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     // tank; longer (fractional) values just get a smaller font.
     const len = nowReadout.textContent.length;
     nowReadout.style.fontSize = len >= 6 ? '20px' : len >= 5 ? '24px' : len >= 4 ? '30px' : '38px';
+    updateStrip(clamped);
   }
   // Seed the initial water level (the static HTML only renders the number).
   setLevel(fromW);
@@ -16168,6 +16234,16 @@ function openRouteOptionsModal(onClose) {
         This can't be undone.
       </p>
     </div>` : ''}
+    ${(_online && _onlineCloseRoom && _onlineMe && _onlineHostId && _onlineMe.id === _onlineHostId) ? `
+    <div class="route-options-danger">
+      <button type="button" class="popup-btn danger route-options-close-room-btn">
+        🚪 Close this room
+      </button>
+      <p class="muted route-options-manual-help">
+        Ends the table for everyone and returns to the lobby. The room
+        moves to your Ended games, where you can Restore it later.
+      </p>
+    </div>` : ''}
   `;
   panel.querySelector('.modal-x').addEventListener('click', close);
   panel.querySelectorAll('input[name="route-priority"]').forEach((el) => {
@@ -16229,6 +16305,19 @@ function openRouteOptionsModal(onClose) {
           + (v ? '?v=' + encodeURIComponent(v) : '');
         window.location.assign(url);
       } catch { window.location.assign('../../lobby'); }
+    });
+  }
+  const closeRoomBtn = panel.querySelector('.route-options-close-room-btn');
+  if (closeRoomBtn) {
+    closeRoomBtn.addEventListener('click', async () => {
+      const ok = await confirmModal({
+        title: '🚪 Close this room',
+        body: 'End this table for everyone and return to the lobby? It moves to your Ended games, where you can Restore it later.',
+        yes: '🚪 Close room', no: 'Cancel',
+      });
+      if (!ok) return;
+      close();
+      if (_onlineCloseRoom) _onlineCloseRoom();
     });
   }
 

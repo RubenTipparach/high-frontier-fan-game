@@ -720,10 +720,11 @@ label.checkbox input { accent-color: var(--accent-2); }
 #view-lobby-list .lobby-your-games > .lobby-list {
   flex: 1;
   overflow-y: auto;
-  /* No fixed cap on desktop: the panel is stretched to the global-chat
-     panel's height (grid align-items:stretch), so flex:1 lets the list
-     span the whole panel and only scrolls when its rows actually
-     overflow that height. The mobile breakpoint re-caps it at 200px. */
+  /* Show roughly the top 10 in-progress games, then scroll for the rest.
+     flex:1 still lets the list grow to fill a shorter panel; the cap only
+     bites once there are enough rows to exceed ~10. The mobile breakpoint
+     re-caps it tighter at 200px. */
+  max-height: 680px;
   min-height: 0;
   /* Smooth scrolling: isolate the list's painting to its own
      composited layer so scrolling it doesn't repaint the rest of the

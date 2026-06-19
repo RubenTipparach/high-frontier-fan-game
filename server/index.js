@@ -861,17 +861,17 @@ app.post('/lobbies/:id/leave', requireProfile, (req, res) => {
 
 // Player-facing close (soft delete) of a room you host. Mirrors the admin
 // cancel: marks the lobby + its game 'cancelled' (kept for audit / restore),
-// never a hard delete. Restricted to SOLO rooms (a single member) so a host
-// can't disband a live multiplayer table from the normal UI - that stays an
-// admin action. The room moves to the player's "ended" list, restorable below.
+// never a hard delete. Host-only, allowed for any room the host owns (solo
+// OR a live multiplayer table) so the host can shut a game down from the
+// in-game settings. Everyone else at the table is dropped back to the lobby
+// (the lobby_disbanded broadcast). The room moves to the host's "ended" list,
+// restorable below.
 app.post('/lobbies/:id/close', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
   const lobby = db.prepare('SELECT id, host_id FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
-  const members = db.prepare('SELECT COUNT(*) AS n FROM lobby_members WHERE lobby_id = ?').get(id).n;
-  if (members > 1) return res.status(409).json({ error: 'not_solo' });
   const now = nowMs();
   db.transaction(() => {
     cancelLobbyInvites(id);
