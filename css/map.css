@@ -1172,11 +1172,37 @@
   margin: 6px 0 0;
   line-height: 1.45;
 }
-.rocket-wetmass-cell { cursor: pointer; }
-.rocket-wetmass-cell:hover {
-  background: rgba(125, 211, 252, 0.08);
-  border-radius: 4px;
+/* The wet-mass total doubles as the "open fuel tank" button, so it
+   gets the blue clickable-button treatment to stand apart from the
+   read-only totals cells around it (cards / dry mass / rad-hard). */
+.rocket-wetmass-cell {
+  cursor: pointer;
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.26), rgba(14, 116, 187, 0.20));
+  border-color: rgba(56, 189, 248, 0.65);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10),
+              0 1px 4px rgba(8, 47, 73, 0.45);
+  transition: background 0.12s ease, border-color 0.12s ease,
+              box-shadow 0.12s ease, transform 0.05s ease;
 }
+.rocket-wetmass-cell .lbl { color: #bae6fd; }
+.rocket-wetmass-cell::after {
+  content: "💧 tap to open tank";
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #7dd3fc;
+}
+.rocket-wetmass-cell:hover,
+.rocket-wetmass-cell:focus-visible {
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.38), rgba(14, 116, 187, 0.30));
+  border-color: rgba(125, 211, 252, 0.9);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16),
+              0 0 0 1px rgba(125, 211, 252, 0.45),
+              0 2px 8px rgba(8, 47, 73, 0.55);
+  outline: none;
+}
+.rocket-wetmass-cell:active { transform: translateY(1px); }
 
 /* Aqua transfer panel inside the fuel-tank modal. Only rendered
    when the rocket is parked at LEO - converts aqua 1:1 into water
