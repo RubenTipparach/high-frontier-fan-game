@@ -12165,117 +12165,6 @@ function openBoostModal({ cards, have, opNote }) {
   });
 }
 
-// Stepper modal for dumping water. Dumping walks the BLACK (burn)
-// ladder: the player dials in how many FUEL STEPS to jettison
-// (1..available), each step dropping the WET chit one node down the
-// strip - the same non-linear mass drop a burn spends. Resolves to
-// the WATER amount those steps remove (so the dump op subtracts the
-// exact mass and the tank lands on the same node), or null if
-// cancelled. Dumped water is destroyed for now (Stage 3+ turns this
-// into an outpost-stack drop).
-function openDumpWaterModal(maxWater) {
-  return new Promise((resolve) => {
-    const max = Math.max(0, Number(maxWater) || 0);
-    if (max <= 0) { resolve(null); return; }
-    const totals = getStackTotals();
-    const dryMass = Math.max(0, totals.dryMass | 0);
-    const tank = getTankWater();
-    const wetMass = dryMass + tank;       // true (possibly fractional) wet position
-    // How many black burn connections separate wet from dry: the fuel
-    // steps available to jettison.
-    const maxSteps = blackStepsBetween(dryMass, wetMass);
-    if (maxSteps < 1) { resolve(null); return; }
-    document.querySelector('.dump-water-overlay')?.remove();
-    const overlay = document.createElement('div');
-    overlay.className = 'card-modal-overlay confirm-modal-overlay dump-water-overlay';
-    const tankCap = getTankMax();
-    // Water removed by jettisoning `k` fuel steps: walk the wet chit
-    // down k black connections and take the mass it falls.
-    const round6 = (n) => Math.round((Number(n) || 0) * 1e6) / 1e6;
-    const waterForSteps = (k) => Math.max(0, round6(wetMass - walkBlackDown(wetMass, k)));
-    let steps = 1;
-    const close = (val) => {
-      overlay.remove();
-      document.removeEventListener('keydown', onKey);
-      resolve(val);
-    };
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
-    const onKey = (e) => {
-      if (e.key === 'Escape') close(null);
-      else if (e.key === 'Enter') close(waterForSteps(steps));
-    };
-    document.addEventListener('keydown', onKey);
-    const panel = document.createElement('div');
-    panel.className = 'turn-confirm-panel dump-water-panel';
-    panel.innerHTML = `
-      <h3>💧⤓ Dump fuel</h3>
-      <p class="muted">Jettison fuel one step at a time down the fuel
-      strip. Each step drops the wet chit one node toward dry mass.
-      Dumped fuel is destroyed for now (Stage 3+ turns this into an
-      outpost-stack drop once factories land).</p>
-      <div class="dump-stepper">
-        <button type="button" class="popup-btn popup-btn-secondary dump-step" data-step="-1" aria-label="Jettison one fewer step">−</button>
-        <input type="number" class="dump-amount" min="1" max="${maxSteps}" value="1" inputmode="numeric" aria-label="Fuel steps to jettison" />
-        <button type="button" class="popup-btn popup-btn-secondary dump-step" data-step="1" aria-label="Jettison one more step">+</button>
-        <button type="button" class="popup-btn dump-all" title="Jettison every fuel step down to dry mass">All (${maxSteps})</button>
-      </div>
-      <div class="dump-preview">
-        <span class="dump-preview-mass">Wet mass <strong>${esc(massLabel(wetMass))}</strong> →
-          <strong class="dump-after-wet">${esc(massLabel(wetMass))}</strong><small>/${tankCap}</small></span>
-        <span class="dump-preview-water"></span>
-        <span class="dump-preview-class"></span>
-      </div>
-      <div class="turn-confirm-actions">
-        <button type="button" class="popup-btn primary" data-act="yes">💧⤓ Dump <span class="dump-confirm-n">1</span> step</button>
-        <button type="button" class="popup-btn" data-act="no">Cancel</button>
-      </div>
-    `;
-    const input = panel.querySelector('.dump-amount');
-    const confirmN = panel.querySelector('.dump-confirm-n');
-    const confirmBtn = panel.querySelector('[data-act="yes"]');
-    const afterWetEl = panel.querySelector('.dump-after-wet');
-    const waterEl = panel.querySelector('.dump-preview-water');
-    const classEl = panel.querySelector('.dump-preview-class');
-    const clamp = (v) => Math.max(1, Math.min(maxSteps, Math.round(Number(v)) || 1));
-    // Reflect the resulting wet mass, the water that jettison removes,
-    // and the weight class (net-thrust modifier) the rocket falls into.
-    const updatePreview = (k) => {
-      const afterWet = walkBlackDown(wetMass, k);
-      afterWetEl.textContent = massLabel(afterWet);
-      const removed = waterForSteps(k);
-      waterEl.innerHTML = `Removes <strong>${esc(massLabel(removed))}</strong> water`;
-      const wc = weightClassForMass(Math.max(1, Math.round(afterWet)));
-      const mod = wc.netThrust >= 0 ? `+${wc.netThrust}` : String(wc.netThrust);
-      classEl.innerHTML = `Class <strong>${esc(wc.id)} ${mod}</strong> net thrust`;
-    };
-    const setSteps = (v) => {
-      steps = clamp(v);
-      input.value = String(steps);
-      confirmN.textContent = String(steps);
-      confirmBtn.lastChild.textContent = steps === 1 ? ' step' : ' steps';
-      updatePreview(steps);
-    };
-    panel.querySelectorAll('.dump-step').forEach((b) => {
-      b.addEventListener('click', () => setSteps(steps + Number(b.dataset.step)));
-    });
-    panel.querySelector('.dump-all').addEventListener('click', () => setSteps(maxSteps));
-    input.addEventListener('input', () => {
-      const v = clamp(input.value);
-      steps = v;
-      confirmN.textContent = String(v);
-      confirmBtn.lastChild.textContent = v === 1 ? ' step' : ' steps';
-      updatePreview(v);
-    });
-    input.addEventListener('blur', () => setSteps(input.value));
-    confirmBtn.addEventListener('click', () => close(waterForSteps(steps)));
-    panel.querySelector('[data-act="no"]').addEventListener('click', () => close(null));
-    setSteps(1);
-    overlay.appendChild(panel);
-    mountOverlay(overlay);
-    setTimeout(() => { input.focus(); input.select(); }, 0);
-  });
-}
-
 // Interactive fuel-strip diagram for the rocket-stack header -
 // the published HF4 "Net Thrust track". Mass positions 1..32 are
 // grouped into the doubling weight-class bands (data/net-thrust-
@@ -12565,8 +12454,18 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     </div>
     <div class="fuel-tank-col fuel-tank-col-controls">
     <div class="fuel-tank-actions">
-      ${tankDirt ? '' : `<button type="button" class="popup-btn popup-btn-secondary" id="tank-dump"
-        title="Drain a chosen amount of water from the tank">💧⤓ Dump water</button>`}
+      ${tankDirt ? '' : `
+      <div class="aqua-direction aqua-direction-reverse fuel-tank-dump-row">
+        <span class="aqua-direction-label">💧⤓ DUMP</span>
+        <div class="aqua-actions">
+          <button type="button" class="popup-btn popup-btn-secondary" id="water-dump-1"
+            title="Jettison 1 fuel step of water">-1</button>
+          <button type="button" class="popup-btn popup-btn-secondary" id="water-dump-5"
+            title="Jettison 5 fuel steps of water">-5</button>
+          <button type="button" class="popup-btn" id="water-dump-max"
+            title="Jettison all water down to dry mass">max</button>
+        </div>
+      </div>`}
     </div>
     ${tankDirt ? '' : fuelTankOutpostSections()}
 <div class="fuel-tank-aqua" id="tank-aqua-section" hidden>
@@ -12929,10 +12828,16 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   // dropping from before-value to after-value over ~250ms. The
   // readout updates each frame; in-flight droplets are cleared
   // because dumping should feel like emptying, not filling.
-  const dumpBtn = panel.querySelector('#tank-dump');
+  const waterDump1   = panel.querySelector('#water-dump-1');
+  const waterDump5   = panel.querySelector('#water-dump-5');
+  const waterDumpMax = panel.querySelector('#water-dump-max');
   const refreshDumpButtons = () => {
     const cur = getTankWater();
-    if (dumpBtn) dumpBtn.disabled = cur <= 0;
+    const dry = Math.max(0, getStackTotals().dryMass | 0);
+    const steps = blackStepsBetween(dry, dry + cur);
+    if (waterDump1)   waterDump1.disabled   = steps < 1;
+    if (waterDump5)   waterDump5.disabled   = steps < 5;
+    if (waterDumpMax) waterDumpMax.disabled = steps < 1;
   };
   refreshDumpButtons();
   function drainTo(targetLevel, durationMs = 250) {
@@ -12954,39 +12859,57 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
       onDone: () => refreshDumpButtons(),
     };
   }
-  dumpBtn?.addEventListener('click', async (e) => {
-    // Stop the overlay's onTap handler from interpreting this
-    // click as "skip animation / close" - that's why dump looked
-    // like it dismissed the modal.
-    e.stopPropagation();
-    const max = getTankWater();
-    if (max <= 0) return;
-    const amount = await openDumpWaterModal(max);
-    if (!amount || amount <= 0) return;
-    // Re-clamp in case the tank changed while the picker was open.
-    const drain = Math.min(amount, getTankWater());
-    if (drain <= 0) return;
+  // Dump fuel by FUEL STEP (water OR dirt - same path). -1 walks the wet chit
+  // one black connection down the ladder (the same non-linear mass drop a burn
+  // spends, so it can be a fraction); max walks all the way to dry mass. Logs
+  // the tank before / after so the step amount is visible in the console.
+  const round6 = (n) => Math.round((Number(n) || 0) * 1e6) / 1e6;
+  async function dumpFuelBySteps(steps, e, onRefresh) {
+    // Stop the overlay's onTap handler from reading this click as
+    // "skip animation / close".
+    e?.stopPropagation();
+    const before = getTankWater();
+    const dry = Math.max(0, getStackTotals().dryMass | 0);
+    const wet = dry + before;
+    const maxSteps = blackStepsBetween(dry, wet);
+    const k = Math.min(steps, maxSteps);
+    const grade = getTankGrade() === 'dirt' ? 'dirt' : 'water';
+    if (k < 1) {
+      console.log('[dump] nothing to dump', { grade, tankWater: round6(before), dryMass: dry, wetMass: round6(wet), maxSteps, stepsRequested: steps });
+      onRefresh && onRefresh();
+      return;
+    }
+    const drain = Math.max(0, round6(wet - walkBlackDown(wet, k)));
+    console.log('[dump] BEFORE', { grade, tankWater: round6(before), dryMass: dry, wetMass: round6(wet), stepsRequested: steps, stepsToDump: k, maxSteps, drainWater: drain });
+    if (drain <= 0) { console.log('[dump] drain is 0, aborting'); onRefresh && onRefresh(); return; }
     // Online: jettisoning is the server DUMP op; await it so the snapshot
     // lowers the tank first, then drain-animate to the new level.
     if (_online) {
       const ok = await submitOnlineOp({ kind: 'DUMP', amount: drain });
-      if (!ok) return;
-      const leftOnline = getTankWater();
-      drainTo(leftOnline, leftOnline <= 0 ? 600 : 250);
+      const afterOnline = getTankWater();
+      console.log('[dump] AFTER (online)', { ok, requestedDrain: drain, tankWater: round6(afterOnline), removed: round6(before - afterOnline) });
+      if (!ok) { onRefresh && onRefresh(); return; }
+      drainTo(afterOnline, afterOnline <= 0 ? 600 : 250);
+      onRefresh && onRefresh();
       return;
     }
     removeFuel(drain);
-    const left = getTankWater();
-    drainTo(left, left <= 0 ? 600 : 250);
+    const after = getTankWater();
+    console.log('[dump] AFTER', { grade, tankWater: round6(after), removed: round6(before - after), wetMassAfter: round6(dry + after) });
+    drainTo(after, after <= 0 ? 600 : 250);
     logAction({
       type: 'dump',
-      icon: '💧⤓',
-      summary: left <= 0
-        ? `Dumped ${drain} water (tank empty)`
-        : `Dumped ${drain} water (tank ${left}/${getTankMax()})`,
+      icon: grade === 'dirt' ? '🟤⤓' : '💧⤓',
+      summary: after <= 0
+        ? `Dumped ${k} ${grade} fuel step${k === 1 ? '' : 's'} (tank empty)`
+        : `Dumped ${k} ${grade} fuel step${k === 1 ? '' : 's'} (tank ${massLabel(after)}/${getTankMax()})`,
       undoable: false,
     });
-  });
+    onRefresh && onRefresh();
+  }
+  waterDump1?.addEventListener('click',   (e) => dumpFuelBySteps(1, e, refreshDumpButtons));
+  waterDump5?.addEventListener('click',   (e) => dumpFuelBySteps(5, e, refreshDumpButtons));
+  waterDumpMax?.addEventListener('click', (e) => dumpFuelBySteps(Infinity, e, refreshDumpButtons));
 
   // Aqua → water transfer panel. Gated behind LEO presence -
   // refilling water from the aqua reserve is a "back at port"
@@ -13305,47 +13228,12 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   dirtFill1?.addEventListener('click',   (e) => fillDirt(1, e));
   dirtFill5?.addEventListener('click',   (e) => fillDirt(5, e));
   dirtFillMax?.addEventListener('click', (e) => fillDirt(Infinity, e));
-  // Dump dirt: same inline -1 / -5 / Dump-all UX as the scoop row. Jettisons
-  // grey propellant by FUEL STEP (walking the black ladder down, exactly like a
-  // burn and like the water dump), so -1 vents one step's worth of mass (which
-  // can be a fraction), not a whole tank unit. Destroyed for now (the dump note
-  // explains the Stage 3+ plan).
-  const round6 = (n) => Math.round((Number(n) || 0) * 1e6) / 1e6;
-  const dumpDirt = async (steps, e) => {
-    e?.stopPropagation();
-    const cur = getTankWater();
-    const dry = Math.max(0, getStackTotals().dryMass | 0);
-    const wet = dry + cur;
-    const maxSteps = blackStepsBetween(dry, wet);
-    const k = Math.min(steps, maxSteps);
-    if (k < 1) { refreshDirtButtons(); return; }
-    const drain = Math.max(0, round6(wet - walkBlackDown(wet, k)));
-    if (drain <= 0) { refreshDirtButtons(); return; }
-    // Online: jettisoning is the server DUMP op; await it so the snapshot
-    // lowers the tank first, then drain-animate to the new level.
-    if (_online) {
-      const ok = await submitOnlineOp({ kind: 'DUMP', amount: drain });
-      if (!ok) { refreshDirtButtons(); return; }
-      const left = getTankWater();
-      drainTo(left, left <= 0 ? 600 : 250);
-      refreshDirtButtons();
-      return;
-    }
-    removeFuel(drain);
-    const left = getTankWater();
-    drainTo(left, left <= 0 ? 600 : 250);
-    logAction({
-      type: 'dump', icon: '🟤⤓',
-      summary: left <= 0
-        ? `Dumped ${k} dirt fuel step${k === 1 ? '' : 's'} (tank empty)`
-        : `Dumped ${k} dirt fuel step${k === 1 ? '' : 's'} (tank ${massLabel(left)}/${getTankMax()})`,
-      undoable: false,
-    });
-    refreshDirtButtons();
-  };
-  dirtDump1?.addEventListener('click',   (e) => dumpDirt(1, e));
-  dirtDump5?.addEventListener('click',   (e) => dumpDirt(5, e));
-  dirtDumpAll?.addEventListener('click', (e) => dumpDirt(Infinity, e));
+  // Dump dirt: same inline -1 / -5 / Dump-all UX as the scoop row, routed
+  // through the shared fuel-step dump (walks the black ladder down, logs
+  // before / after), so dirt vents by fuel step exactly like water.
+  dirtDump1?.addEventListener('click',   (e) => dumpFuelBySteps(1, e, refreshDirtButtons));
+  dirtDump5?.addEventListener('click',   (e) => dumpFuelBySteps(5, e, refreshDirtButtons));
+  dirtDumpAll?.addEventListener('click', (e) => dumpFuelBySteps(Infinity, e, refreshDirtButtons));
 
   const unsubAqua = onAquaChange(refreshAquaButtons);
   const unsubRocket = onRocketChange(() => { refreshAquaButtons(); refreshDirtButtons(); refreshOutpostSections(); });
