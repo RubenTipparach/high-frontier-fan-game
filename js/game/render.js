@@ -1443,8 +1443,20 @@ export class MapRenderer {
     }
     // One-way edges (planner '0'-label): resolve endpoints so _drawEdges can
     // draw a direction arrow showing the only way the edge is traversable.
+    // A one-way curve is a run of HIDDEN bend nodes (a degree-2 decorative
+    // chain interior) rendered as one smooth ribbon, so drawing an arrow at
+    // every internal hop would stamp arrowheads on invisible bends mid-curve.
+    // Keep only the hop whose destination is NOT a mid-chain bend - the curve's
+    // visible terminus - giving ONE arrow per one-way curve, on the end node's
+    // border. The terminal hop's direction is the curve's tangent there, so the
+    // arrowhead lines up with the ribbon automatically.
+    const bendNodeIds = new Set();
+    for (const chain of (this.data.chains || [])) {
+      for (let i = 1; i < chain.length - 1; i++) bendNodeIds.add(chain[i]);
+    }
     this._directedEdges = [];
     for (const d of (this.data.directedEdges || [])) {
+      if (bendNodeIds.has(d.to)) continue;   // mid-curve bend, not a terminus
       const sa = this.data.byId[d.from], sb = this.data.byId[d.to];
       if (sa && sb) this._directedEdges.push({ sa, sb });
     }
