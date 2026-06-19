@@ -4971,6 +4971,7 @@ function humanizeOnlineOpError(code, detail) {
     nothing_decommissioned: 'Nothing decommissioned (crew can\'t return to the hand).',
     cannot_liftoff: 'Not enough thrust to lift off (and no factory here to assist).',
     cannot_land: 'Not enough thrust to land there (and no factory to assist).',
+    cannot_stop_on_aerobrake: 'Can\'t stop on a parachute space - aerobraking carries you through, so finish your move on a landing site or node.',
     raygun_out_of_range: 'The raygun has no line of sight to that site from here.',
     buggy_out_of_range: 'The buggy can only road to sites on the same connected body (Mars, the Moon, Io, Callisto, Ganymede, Europa).',
     not_a_radiator: 'That card is not a radiator.',
@@ -14857,6 +14858,20 @@ async function moveRocket() {
       : (act.reason || 'support chain not satisfied');
     setStatus(`⛓️ Can't move - support chain broken: ${why}`);
     return false;
+  }
+  // Can't END this turn on an aerobrake corridor (the 🪂 parachute space): the
+  // stack is falling through the atmosphere, so the descent has to finish on a
+  // real landing site or node this turn, never mid-parachute. Crossing one is
+  // fine (it rolls as an aero hazard); stopping on it is not. Checked here -
+  // before the online/offline split - so a hand-built (manual) route is caught
+  // too, and the auto-planner already refuses to route to one.
+  const turn1End = (_plannedRoute || []).filter((s) => (s.turn || 1) === 1).slice(-1)[0];
+  if (turn1End) {
+    const endPt = _activeData.byId?.[turn1End.to];
+    if (endPt && NODE_TAGS[endPt.id2] && NODE_TAGS[endPt.id2].aerobrake) {
+      setStatus('🪂 Can\'t stop on a parachute space - aerobraking carries you through, so finish your move on a landing site or node.');
+      return false;
+    }
   }
   // Online: the server owns movement, fuel, and the hazard dice (seeded,
   // authoritative). The CLIENT still runs the same pre-flight the sandbox

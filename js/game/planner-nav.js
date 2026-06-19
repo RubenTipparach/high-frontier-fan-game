@@ -209,7 +209,14 @@ export function buildPlanner(graph, {
     if (p.done) return [];
     const { node, dir, bonus, burnsRemaining, wait } = p;
     const pivots = p.pivots ?? 0;
-    const ns = [{ node, dir: null, bonus: 0, done: true, burnsRemaining, pivots }];
+    // The route can never STOP on an aerobrake corridor - not at a turn boundary
+    // (the `wait` branch below, gated by isAeroStop) and not as the final
+    // destination either. So the "done" (stop here) state is only offered when
+    // the node isn't an aerobrake corridor; a route to such a node yields no
+    // path, the same as any unreachable destination.
+    const ns = isAeroNode(node)
+      ? []
+      : [{ node, dir: null, bonus: 0, done: true, burnsRemaining, pivots }];
     const venusFlybyAvailable = solarSeason === 'blue';
     // Leaving an aerobrake corridor is a parachute descent: the next hop (the
     // landing burn into the body) costs no burns, so a low-thrust stack can

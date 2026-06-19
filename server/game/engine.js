@@ -1395,6 +1395,11 @@ function applyMove(state, op, player) {
     arrivals = path.path.slice(1);
   }
   if (dest === from) return fail('already_here');
+  // Can't END the turn on an aerobrake corridor (the 🪂 parachute space): you
+  // are falling through the atmosphere, so the descent must finish this turn on
+  // a real node. The corridor is fine to cross (it's in `arrivals` and rolls as
+  // an aero hazard); it just can't be where the rocket stops.
+  if (isAerobrakeNode(dest)) return fail('cannot_stop_on_aerobrake', { site: dest });
 
   // Fuel-step model (shared with the client via data/fuel-graph.js): a burn
   // spends fuel STEPS - black connections on the ladder - NOT water 1-to-1.
