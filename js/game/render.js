@@ -1441,24 +1441,40 @@ export class MapRenderer {
         else this._normalEdges.push(seg);
       }
     }
-    // One-way edges (planner '0'-label): resolve endpoints so _drawEdges can
-    // draw a direction arrow showing the only way the edge is traversable.
-    // A one-way curve is a run of HIDDEN bend nodes (a degree-2 decorative
-    // chain interior) rendered as one smooth ribbon, so drawing an arrow at
-    // every internal hop would stamp arrowheads on invisible bends mid-curve.
-    // Keep only the hop whose destination is NOT a mid-chain bend - the curve's
-    // visible terminus - giving ONE arrow per one-way curve, on the end node's
-    // border. The terminal hop's direction is the curve's tangent there, so the
-    // arrowhead lines up with the ribbon automatically.
+    // One-way edges (planner '0'-label): draw ONE direction arrow per one-way
+    // curve, on its visible terminus, pointing the only way it's traversable.
+    // A one-way curve is often a run of HIDDEN bend nodes (degree-2 decorative
+    // chain interiors) drawn as a single smooth ribbon, and the '0' label can
+    // sit on ANY hop of that run - frequently an interior one. So we can't just
+    // keep the hops that end at a visible node (that drops a curve whose only
+    // labelled hop is interior, leaving it arrow-less). Instead, from every
+    // one-way hop we walk FORWARD through the bend run to the curve's terminus
+    // and place the arrow there, oriented along the final segment (which is the
+    // ribbon's tangent at that node). Dedupe so each curve yields one arrow and
+    // the arrowhead never lands on an invisible mid-curve bend.
     const bendNodeIds = new Set();
     for (const chain of (this.data.chains || [])) {
       for (let i = 1; i < chain.length - 1; i++) bendNodeIds.add(chain[i]);
     }
+    const neigh = this.data.neighbors;
+    const seenArrow = new Set();
     this._directedEdges = [];
     for (const d of (this.data.directedEdges || [])) {
-      if (bendNodeIds.has(d.to)) continue;   // mid-curve bend, not a terminus
-      const sa = this.data.byId[d.from], sb = this.data.byId[d.to];
-      if (sa && sb) this._directedEdges.push({ sa, sb });
+      // Walk forward from `to` through any bend nodes to the curve's terminus,
+      // keeping the last segment so the arrow points along the ribbon there.
+      let prevId = d.from, curId = d.to;
+      while (bendNodeIds.has(curId)) {
+        const ns = neigh && neigh.get(curId);
+        if (!ns) break;
+        let nextId = null;
+        for (const n of ns) { if (n !== prevId) { nextId = n; break; } }
+        if (nextId == null) break;
+        prevId = curId; curId = nextId;
+      }
+      const key = prevId + '>' + curId;
+      if (seenArrow.has(key)) continue;
+      const sa = this.data.byId[prevId], sb = this.data.byId[curId];
+      if (sa && sb) { this._directedEdges.push({ sa, sb }); seenArrow.add(key); }
     }
     this._chains = [];
     this._hazardChains = [];
