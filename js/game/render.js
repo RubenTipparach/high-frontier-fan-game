@@ -2407,28 +2407,35 @@ export class MapRenderer {
       ctx.setLineDash([]);
     }
 
-    // One-way edges: a small cyan chevron mid-edge points the ONLY direction
-    // the connection is traversable (the planner blocks the reverse). Helps a
-    // player read which way a Hohmann continuation flows. Screen-constant size.
+    // One-way edges: a single cyan arrowhead at the DESTINATION end of the
+    // connection, pointing AT the destination node, so a glance reads the only
+    // direction the edge is traversable (the planner blocks the reverse).
+    // Screen-constant size, tip backed off so it isn't hidden under the node.
     if (this._directedEdges.length) {
-      const s = 7 / eff;          // arrowhead arm length, ~constant on screen
-      const spread = 0.5;         // half-angle of the chevron
+      const s = 8 / eff;          // arrowhead arm length, ~constant on screen
+      const spread = 0.5;         // half-angle of the arrowhead
       ctx.strokeStyle = '#67e8f9';
-      ctx.globalAlpha = 0.9;
+      ctx.globalAlpha = 0.95;
       ctx.lineWidth = 1.8 / eff;
       ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
       ctx.beginPath();
       for (const { sa, sb } of this._directedEdges) {
-        const ang = Math.atan2(sb.y - sa.y, sb.x - sa.x);
-        // Tip sits a bit past the midpoint, toward the destination.
-        const tx = sa.x + (sb.x - sa.x) * 0.58;
-        const ty = sa.y + (sb.y - sa.y) * 0.58;
+        const dx = sb.x - sa.x, dy = sb.y - sa.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const ux = dx / len, uy = dy / len;
+        const ang = Math.atan2(dy, dx);
+        // Tip sits just shy of B (clamped so a short edge never overshoots A).
+        const back = Math.min(13 / eff, len * 0.45);
+        const tx = sb.x - ux * back;
+        const ty = sb.y - uy * back;
         ctx.moveTo(tx - Math.cos(ang - spread) * s, ty - Math.sin(ang - spread) * s);
         ctx.lineTo(tx, ty);
         ctx.lineTo(tx - Math.cos(ang + spread) * s, ty - Math.sin(ang + spread) * s);
       }
       ctx.stroke();
       ctx.lineCap = 'butt';
+      ctx.lineJoin = 'miter';
     }
     ctx.globalAlpha = 1;
   }
