@@ -5248,6 +5248,14 @@ html.battery-save *::after {
   pointer-events: none;  /* the wrapper owns the click; no flip / tooltip capture */
 }
 .et-card-pick .card-flip { display: none; }  /* picker is a preview, not a flipper */
+/* The Sunspot event picker (Budget Cuts / Pad Explosion) DOES let you flip a
+   card to read its other face before choosing. Re-show the Flip button and
+   give it back pointer events (the card body stays click-through so the
+   wrapper still owns selection). */
+.mp-event-modal .et-card-pick .card-flip {
+  display: inline-flex;
+  pointer-events: auto;
+}
 .et-card-pick:hover { transform: translateY(-2px); }
 .et-card-pick.is-selected {
   border-color: var(--accent);

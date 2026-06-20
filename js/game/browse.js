@@ -2782,12 +2782,19 @@ function renderEventChooser(snapshot) {
     cardsHost.innerHTML = '';
     for (const id of optionIds) {
       const card = lookup(id);
-      const pick = document.createElement('button');
-      pick.type = 'button';
+      // A div (not a <button>) so the card's own "Flip" button can live inside
+      // it as a real, clickable control - a button nested in a button is
+      // invalid and swallows the flip click into a card selection.
+      const pick = document.createElement('div');
       pick.className = 'et-card-pick' + (id === selected ? ' is-selected' : '');
+      pick.setAttribute('role', 'button');
+      pick.tabIndex = 0;
       if (card) {
-        try { pick.appendChild(renderCard(card, { type: CREW_BY_ID[card.id] ? 'crew' : 'patent' })); }
-        catch { pick.textContent = card.name || id; }
+        try {
+          pick.appendChild(renderCard(card, { type: CREW_BY_ID[card.id] ? 'crew' : 'patent' }));
+          // Let the card flip to its other face WITHOUT selecting it for discard.
+          pick.querySelector('.card-flip')?.addEventListener('click', (e) => e.stopPropagation());
+        } catch { pick.textContent = card.name || id; }
       } else {
         pick.textContent = id;
       }
@@ -2795,7 +2802,11 @@ function renderEventChooser(snapshot) {
       tick.className = 'et-pick-tick';
       tick.textContent = '\u2713';
       pick.appendChild(tick);
-      pick.addEventListener('click', () => { selected = id; confirm.disabled = false; repaint(); });
+      const choose = () => { selected = id; confirm.disabled = false; repaint(); };
+      pick.addEventListener('click', choose);
+      pick.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(); }
+      });
       cardsHost.appendChild(pick);
     }
   };
