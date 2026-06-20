@@ -98,7 +98,7 @@ export function hydrateFromSnapshot(snapshot, myId, maps) {
     stack: r.stack || [],
     activeThrusterId: r.activeThrusterId || null,
     activeProspectorId: r.activeProspectorId || null,
-    tank: r.tank | 0,
+    tank: Math.max(0, Math.round((Number(r.tank) || 0) * 1e6) / 1e6),
     tankGrade: r.tankGrade === 'dirt' ? 'dirt' : 'water',
     afterburnEngaged: !!r.afterburnEngaged,
     wiring: (r.wiring && typeof r.wiring === 'object') ? r.wiring : {},

@@ -1081,7 +1081,7 @@ export function computeRocketStatsFor(ctx = {}) {
     _stack = Array.isArray(ctx.stack) ? _clone(ctx.stack) : [];
     _activeThrusterId = ctx.activeThrusterId || null;
     _activeProspectorId = ctx.activeProspectorId || null;
-    _tankWater = ctx.tank | 0;
+    _tankWater = Math.max(0, Math.round((Number(ctx.tank) || 0) * 1e6) / 1e6);
     _tankGrade = ctx.tankGrade === 'dirt' ? 'dirt' : 'water';
     _afterburnEngaged = !!ctx.afterburnEngaged;
     _wiring = (ctx.wiring && typeof ctx.wiring === 'object' && !Array.isArray(ctx.wiring)) ? _clone(ctx.wiring) : {};
