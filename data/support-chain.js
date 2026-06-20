@@ -189,10 +189,17 @@ export function resolveCoolingAcross({ cards = [], orders = [] } = {}) {
   const radiatorTotal = cards
     .filter((c) => c.type === 'radiator' && radiatorPowered(c))
     .reduce((s, c) => s + (Number(c.therms) || 0), 0);
-  let pool = radiatorTotal;
-  const reserved = new Set(); // reactor ids a higher-priority chain already cooled
 
   const perChain = orders.map((order) => {
+    // Each active chain shares the FULL radiator pool (rule 5: the thruster and
+    // prospector chains run in parallel and MAY SHARE radiators freely - one
+    // radiator can cool a reactor in the thruster chain AND the prospector's
+    // heat with no contention). So cooling resolves PER CHAIN against the whole
+    // pool; the chains never deplete each other. Dedicated reactor cooling
+    // (rule 3) still holds WITHIN a chain - two reactors in the same chain can't
+    // share the same therms.
+    let pool = radiatorTotal;
+    const reserved = new Set();
     const reactorIds = order.filter((id) => {
       const c = byId.get(id); return c && c.type === 'reactor';
     });
@@ -219,13 +226,8 @@ export function resolveCoolingAcross({ cards = [], orders = [] } = {}) {
       }
     }
     const reactorCooling = [];
-    // Reactors a higher-priority chain already reserved: shared, already cooled.
-    for (const id of reactorIds) {
-      if (reserved.has(id)) {
-        reactorCooling.push({ reactorId: id, demand: Number(byId.get(id).therms) || 0, ok: true, shared: true });
-      }
-    }
-    // This chain's own reactors, hottest-first, reserve from the remaining pool.
+    // This chain's reactors, hottest-first, reserve dedicated therms from the
+    // (full) pool; within the chain no two reactors can share the same therms.
     const own = reactorIds.filter((id) => !reserved.has(id))
       .sort((a, b) => (Number(byId.get(b).therms) || 0) - (Number(byId.get(a).therms) || 0));
     for (const id of own) {
@@ -245,8 +247,12 @@ export function resolveCoolingAcross({ cards = [], orders = [] } = {}) {
       .reduce((s, c) => s + (Number(c.therms) || 0), 0);
     const nonReactorCooled = nonReactorHeat <= pool;
     const coolingOk = reactorsCooled && nonReactorCooled;
-    return { reactorCooling, reactorsCooled, reactorDemand, nonReactorHeat, nonReactorCooled, coolingOk };
+    return { reactorCooling, reactorsCooled, reactorDemand, nonReactorHeat, nonReactorCooled, coolingOk, remaining: pool };
   });
 
-  return { perChain, radiatorTotal, radiatorRemaining: pool };
+  return {
+    perChain,
+    radiatorTotal,
+    radiatorRemaining: perChain.length ? perChain[0].remaining : radiatorTotal,
+  };
 }

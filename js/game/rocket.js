@@ -652,10 +652,10 @@ export function onRocketChange(cb) {
 }
 
 // Dedicated reactor cooling across the active thruster chain AND the active
-// prospector chain, sharing the one stack-wide radiator pool. The active
-// thruster has FIRST claim (user decision: prioritize thruster); the prospector
-// reserves its reactor's dedicated therms from the remainder and goes inactive
-// if it can't. A reactor that powers both chains is cooled once. Returns the
+// prospector chain. Per rule 5 the two chains run in PARALLEL and may SHARE the
+// radiator pool freely: each resolves its cooling INDEPENDENTLY against the full
+// pool, so the thruster's reactors never starve the prospector (and vice versa).
+// Dedicated reactor cooling still holds WITHIN a chain. Returns the
 // resolveCoolingAcross output plus the per-chain index of each active root, so
 // the cooling gate and the visualizer read the SAME allocation. Inactive
 // thrusters / inactive robonauts / refineries are never roots here, so their
@@ -1254,11 +1254,11 @@ export function getSupportChainView() {
     const p = buildRoot('prospector', _activeProspectorId);
     if (p) {
       roots.push(p);
-      // The active thruster has first claim on the radiator pool, so the
-      // prospector's dedicated reactor cooling is whatever the thruster chain
-      // leaves. Re-resolve cooling across both (thruster first) and override the
-      // prospector root's verdict, so its pills match the gate in
-      // getActiveProspectorStats (a reactor the thruster reserved reads short).
+      // The prospector chain shares the radiator pool with the thruster chain
+      // (rule 5: chains run in parallel and may share radiators freely), so it
+      // resolves its cooling INDEPENDENTLY against the full pool. Re-resolve
+      // across both and override the prospector root's verdict so its pills
+      // match the gate in getActiveProspectorStats.
       if (t) {
         const cool = resolveCoolingAcross({ cards, orders: [t.chain.order, p.chain.order] });
         const pc = cool.perChain[1];
@@ -1268,7 +1268,7 @@ export function getSupportChainView() {
           p.chain.nonReactorHeat = pc.nonReactorHeat;
           p.chain.nonReactorCooled = pc.nonReactorCooled;
           p.chain.coolingOk = pc.coolingOk;
-          p.chain.radiatorRemaining = cool.radiatorRemaining;
+          p.chain.radiatorRemaining = pc.remaining;
           p.coolingAfterThruster = true;
         }
       }
