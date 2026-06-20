@@ -2871,7 +2871,19 @@ async function submitEventChoice(cardId, lobby = false) {
 function renderGameOver(snapshot) {
   const existing = document.getElementById('mp-game-over-overlay');
   const finished = !!(snapshot && snapshot.status === 'finished') && _online && gameViewVisible();
-  if (!finished || _gameOverDismissed) {
+  if (!finished) {
+    if (existing) existing.remove();
+    setMpTurnAction('gameover', null);
+    return;
+  }
+  // The game is over: always dock a "Final score" button in the bottom turn
+  // bar so the standings stay one tap away even after the modal is dismissed.
+  setMpTurnAction('gameover', {
+    label: '🏁 Final score',
+    needsAction: false,
+    onClick: () => { _gameOverDismissed = false; renderGameOver(_onlineSnapshot); },
+  });
+  if (_gameOverDismissed) {
     if (existing) existing.remove();
     return;
   }
@@ -5117,6 +5129,7 @@ export function unmountBrowseOnline() {
   if (fpOverlay) fpOverlay.remove();
   const goOverlay = document.getElementById('mp-game-over-overlay');
   if (goOverlay) goOverlay.remove();
+  setMpTurnAction('gameover', null);
   _gameOverDismissed = false;
   // Tear down any open crew-pick wizard so it doesn't leak across
   // sessions when the player returns to the lobby list.

@@ -525,8 +525,8 @@ function lobbyRow(lobbyId) {
   // mount the game surface off this id once status flips to 'started'.
   const game = db
     .prepare(
-      `SELECT id FROM games
-       WHERE lobby_id = ? AND status = 'active'
+      `SELECT id, status FROM games
+       WHERE lobby_id = ? AND status != 'cancelled'
        ORDER BY created_at DESC LIMIT 1`
     )
     .get(lobbyId);
@@ -547,6 +547,7 @@ function lobbyRow(lobbyId) {
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     gameId: game ? game.id : null,
+    gameStatus: game ? game.status : null,
     members,
   };
 }
