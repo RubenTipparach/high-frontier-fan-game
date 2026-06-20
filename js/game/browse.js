@@ -2368,7 +2368,14 @@ function computeSnapshotScore(snapshot, profileId) {
   let spectralBonus = 0;
   for (const t in ownBySpec) spectralBonus += ownBySpec[t] * priceFor(globalBySpec[t] || 0);
   let colonyVp = 0;
-  for (const c of cols) colonyVp += (COLONY_VP[c.type] || COLONY_VP.other);
+  for (const c of cols) {
+    // Colony location VP (astrobiology +1, submarine / Bernal +2). The snapshot
+    // colony record has no type, so classify by its site: convert the server
+    // slug to the client site id and read the runtime-merged flags.
+    const cid = (_onlineMaps && toPlannerId(_onlineMaps, c.siteId)) || c.siteId;
+    const t = colonyTypeOfSite(cid) || c.type || 'other';
+    colonyVp += (COLONY_VP[t] || COLONY_VP.other);
+  }
   const tokens = rocket + claims + facs.length + outposts;
   return {
     glory, claims, factories: facs.length, colonies: cols.length,
@@ -2892,18 +2899,25 @@ function renderGameOver(snapshot) {
   const fv = snapshot.finalVote || null;
   // Prefer the server's authoritative final scores (M0 cube VP + the winning
   // ideology's award + factory / colony / glory). Fall back to the client tally
-  // for non-M0 or older snapshots that carry no finalScores.
-  const serverScores = Array.isArray(snapshot.finalScores) ? snapshot.finalScores : null;
-  let rows;
-  if (serverScores && serverScores.length) {
-    rows = serverScores
-      .map((s) => ({ s, p: players.find((pp) => pp.profileId === s.profileId) || { name: s.name, color: s.color } }))
-      .sort((a, b) => b.s.total - a.s.total || (b.s.aqua || 0) - (a.s.aqua || 0));
-  } else {
-    rows = players
-      .map((p) => ({ p, s: computeSnapshotScore(snapshot, p.profileId) }))
-      .sort((a, b) => b.s.total - a.s.total);
+  // Score every player with the full rulebook-M2b model (computeSnapshotScore:
+  // factories priced off the Exploitation Track, +1 per owned token, colonies
+  // by location type, glory). The server's finalScores only carries the M0
+  // assembly bits (delegate cubes + the winning-ideology award), so merge those
+  // in. Ranking: total desc, ties by aqua.
+  const serverById = {};
+  for (const sv of (Array.isArray(snapshot.finalScores) ? snapshot.finalScores : [])) {
+    serverById[sv.profileId] = sv;
   }
+  const m0 = !!snapshot.m0;
+  const rows = players
+    .map((p) => {
+      const cs = computeSnapshotScore(snapshot, p.profileId);
+      const sv = serverById[p.profileId] || {};
+      const cubeVp = m0 ? (sv.cubeVp | 0) : 0;
+      const awardVp = m0 ? (sv.awardVp | 0) : 0;
+      return { p, s: { ...cs, cubeVp, awardVp, aqua: (p.aqua | 0), total: cs.total + cubeVp + awardVp } };
+    })
+    .sort((a, b) => b.s.total - a.s.total || (b.s.aqua || 0) - (a.s.aqua || 0));
 
   let overlay = existing;
   if (!overlay) {
@@ -2915,9 +2929,8 @@ function renderGameOver(snapshot) {
   const voteBanner = (fv && fv.winnerName)
     ? `<p class="mp-game-over-vote">🏛 <strong>${esc(fv.winnerName)}</strong> carried the assembly vote: ${esc(fv.award || '')}${fv.awardTBD ? ' <em>(award TBD)</em>' : ''}</p>`
     : '';
-  const note = serverScores
-    ? 'Final score: delegate cubes + the winning ideology award + factory / colony / glory VP.'
-    : 'Provisional tally - full end-game scoring lands in a later update.';
+  const note = 'Final score: factory market value (Exploitation Track 8 / 5 / 4 per spectral) + 1 per token (factory, claim, outpost, rocket) + colonies by location + glory'
+    + (m0 ? ' + delegate cubes + the winning ideology award' : '') + '.';
   overlay.innerHTML = `
     <div class="mp-game-over-modal" role="dialog" aria-label="Final standings">
       <button type="button" class="modal-x" aria-label="Close" title="Close">&times;</button>
@@ -2944,9 +2957,13 @@ function renderGameOver(snapshot) {
     total.textContent = `${s.total} VP`;
     const brk = document.createElement('span');
     brk.className = 'mp-go-break muted';
-    brk.textContent = serverScores
-      ? `cubes ${s.cubeVp} · ${winnerName} award ${s.awardVp} · factories ${s.factoryVp} · colonies ${s.colonyVp} · glory ${s.gloryVp}`
-      : `glory ${s.glory} · factories ${s.factories} · colonies ${s.colonies} · claims ${s.claims}`;
+    const parts = [];
+    if (m0) { parts.push(`cubes ${s.cubeVp}`); parts.push(`${winnerName} award ${s.awardVp}`); }
+    parts.push(`factory market ${s.spectralBonus} (${s.factories} factories)`);
+    parts.push(`tokens ${s.tokens}`);
+    parts.push(`colonies ${s.colonyVp}`);
+    parts.push(`glory ${s.glory}`);
+    brk.textContent = parts.join(' · ');
     li.append(rank, name, total, brk);
     list.appendChild(li);
   });
