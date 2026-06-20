@@ -3041,53 +3041,42 @@ function applySiteRefuel(state, op, player) {
   };
 }
 
-// Free dirt refuel (Cargo Transfer free action / moon-cable crew bonus): top
-// the tank with grey dirt FTs. Loading dirt fuels the ACTIVE engine, so it's
-// gated on the active thruster being a dirt thruster (a water thruster can't
-// burn dirt - the same grade rule the MOVE fuel-grade gate enforces). Dirt
-// can't mix with water (empty the tank first). Dirt needs NO ISRU rig.
+// Free dirt refuel (Cargo Transfer / Internal Tankage free action): top the
+// tank with grey dirt FTs. Loading dirt fuels the ACTIVE engine, so it's gated
+// on the active thruster being a dirt thruster (a water thruster can't burn
+// dirt - the same grade rule the MOVE fuel-grade gate enforces). Dirt can't mix
+// with water (empty the tank first). Dirt needs NO ISRU rig.
 //
-// WHERE and HOW MUCH (HF4 MOONCABLE card):
-//   - At a real SITE: any activated dirt thruster scoops from the ground,
-//     1 tank max per turn (the general "1 tank of dirt max per Turn" throttle).
+// WHERE (HF4 MOONCABLE card):
+//   - At a real SITE: any activated dirt thruster scoops from the ground.
 //   - At LEO / Home Bernal: there's no ground, so it takes the MOON CABLE (a
-//     NASRDA crew card aboard - negotiable) to pipe dirt up. A non-crew dirt
-//     thrust triangle takes up to 7 tanks this turn; the crew dirt triangle
-//     (NASRDA's own) takes 1. The cable need NOT be the active thruster - it
-//     just has to be in the stack, and it refuels whichever triangle is active.
-// The per-turn allotment is cumulative (load it in any increments up to the
-// cap) and resets each turn. Costs NO operation. op = { amount? }.
+//     NASRDA crew card aboard - negotiable) to pipe dirt up. The cable need NOT
+//     be the active thruster - it just has to be in the stack, and it refuels
+//     whichever triangle is active.
+// It is a FREE ACTION (costs NO operation) with NO per-turn cap: load as much
+// as the tank holds, in any increments, any number of times per turn.
+// op = { amount? }.
 function applyDirtRefuel(state, op, player) {
   const tid = player.rocket.activeThrusterId;
   const slot = tid && player.rocket.stack.find((s) => s.id === tid);
   if (!slot) return fail('no_thruster');
   if (!faceBurnsDirt(thrusterFaceOf(slot))) return fail('not_dirt_thruster');
-  const isCrew = isCrewSlot(slot);
-  let perTurnMax;
   if (rocketAtLeo(player)) {
     if (!stackHasMoonCable(player.rocket)) return fail('dirt_needs_mooncable');
-    perTurnMax = isCrew ? 1 : 7;
   } else {
     if (!siteById(player.rocket.siteId)) return fail('not_at_site');
-    perTurnMax = 1;
   }
   const tank = Number(player.rocket.tank) || 0;
   if (tank > 0 && tankGradeOf(player.rocket) === 'water') return fail('cannot_mix_fuel');
-  const loaded = Number(player.dirtTanksThisTurn) || 0;
-  const allow = perTurnMax - loaded;
-  if (allow <= 0) return fail('already_dirt_refueled');
   const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
   const cap = Math.max(0, TANK_MAX - dry);
   const room = cap - tank;
   if (room <= 0) return fail('tank_full');
   const want = Number(op && op.amount);
-  const gain = Number.isFinite(want) && want > 0
-    ? Math.min(want, allow, room)
-    : Math.min(allow, room);
+  const gain = Number.isFinite(want) && want > 0 ? Math.min(want, room) : room;
   if (gain <= 0) return fail('tank_full');
   player.rocket.tank = round6(tank + gain);
   player.rocket.tankGrade = 'dirt';
-  player.dirtTanksThisTurn = loaded + gain;
   return {
     ok: true, state,
     log: `${player.name} loaded +${round6(gain)} dirt FT${gain === 1 ? '' : 's'} (tank ${round6(player.rocket.tank)} dirt).`,

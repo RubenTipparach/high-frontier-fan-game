@@ -12571,9 +12571,8 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         </div>
       </div>
       <p class="muted aqua-help" id="dirt-help">
-        A dirt thruster scoops grey propellant from the ground for free (a
-        crew dirt thruster takes 1 per turn). Dirt has no aqua value and
-        can't mix with water.
+        A dirt thruster scoops grey propellant from the ground for free,
+        any amount per turn. Dirt has no aqua value and can't mix with water.
       </p>
     </div>
     <p class="muted fuel-tank-dump-note">
@@ -13208,17 +13207,12 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const dirtDump5   = panel.querySelector('#dirt-dump-5');
   const dirtDumpAll = panel.querySelector('#dirt-dump-all');
   const dirtHelp    = panel.querySelector('#dirt-help');
-  const isCrewDirt  = !!CREW_BY_ID[getActiveThrusterId()];
   // Dirt needs NO ISRU rig. At LEO it takes the MOON CABLE (a NASRDA crew card
   // aboard - need NOT be the active thruster) to pipe dirt up; at a real site
   // any active dirt thruster scoops from the ground. Keyed off the CARD, not
   // the suspendable Mooncable faction privilege.
   const hasMooncable = stackHasMoonCable();
   const canScoopDirt = (atLeo && hasMooncable) || (!!getRocketSite() && !atLeo);
-  // Per-turn dirt allotment (cumulative): 7 tanks via the moon cable for a
-  // non-crew triangle at LEO, otherwise 1 (a crew triangle at LEO, or any
-  // dirt thruster scooping at a site).
-  const dirtPerTurnMax = atLeo ? (isCrewDirt ? 1 : 7) : 1;
   // Show the scoop panel whenever the tank is in DIRT MODE (dirt loaded, or
   // an empty tank under a dirt engine) so the player always sees the dirt
   // controls, not just when the dirt thruster happens to be the active
@@ -13232,12 +13226,11 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     if (!dirtSection || dirtSection.hidden) return;
     const cur = getTankWater();
     const room = Math.max(0, cap - cur);
-    const remaining = Math.max(0, dirtPerTurnMax - dirtTanksLoadedThisTurn());
-    const fillable = Math.min(remaining, room);   // tanks that can still go in
-    const allotDone = remaining < 1;
+    // Dirt refuel is a FREE action with NO per-turn cap: the only limit is tank
+    // room. Load as much as fits, any number of times this turn.
+    const fillable = room;
     const blocked = !activeDirt || !canScoopDirt || fillable < 1;
     if (dirtFill1)   dirtFill1.disabled   = blocked;
-    // +5 / Max are bounded by the per-turn allotment (7 via moon cable, else 1).
     if (dirtFill5)   dirtFill5.disabled   = blocked || fillable < 5;
     if (dirtFillMax) dirtFillMax.disabled = blocked;
     // Dump (jettison) needs no engine: you can always vent loaded dirt, so
@@ -13258,13 +13251,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
               : 'Park at a site to scoop dirt.')
           : room < 1
             ? 'Tank is full.'
-            : allotDone
-              ? (atLeo && !isCrewDirt
-                  ? 'This dirt triangle has taken its 7 dirt tanks via the moon cable this turn.'
-                  : 'This dirt thruster already took its 1 dirt tank this turn.')
-              : (atLeo && !isCrewDirt
-                  ? 'The moon cable pipes up to 7 dirt tanks this turn. No aqua value, no ISRU needed; dirt can\'t mix with water or be transferred.'
-                  : 'A dirt thruster takes 1 dirt tank per turn. No aqua value, no ISRU needed; dirt can\'t mix with water or be transferred.');
+            : 'Scoop as much dirt as the tank holds - it\'s free and unlimited per turn. No aqua value, no ISRU needed; dirt can\'t mix with water or be transferred.';
     }
   }
   refreshDirtButtons();
@@ -13274,7 +13261,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     const cur = getTankWater();
     if (cur > 0 && getTankGrade() === 'water') { refreshDirtButtons(); return; }
     const room = Math.max(0, cap - cur);
-    const fillable = Math.min(Math.max(0, dirtPerTurnMax - dirtTanksLoadedThisTurn()), room);
+    const fillable = room;
     if (fillable < 1) { refreshDirtButtons(); return; }
     const want = amount > 0 ? Math.min(amount, fillable) : fillable;
     // Online: the server validates the active dirt thruster + grade + scoop
@@ -13287,7 +13274,6 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     }
     setTankGrade('dirt');
     addFuel(want);
-    markDirtRefueledThisTurn();
     animateTankLevel();
     logAction({
       type: 'dirt_refuel', icon: '🟤',
