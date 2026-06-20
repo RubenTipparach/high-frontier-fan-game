@@ -3047,8 +3047,10 @@ function applySiteRefuel(state, op, player) {
 // dirt - the same grade rule the MOVE fuel-grade gate enforces). Dirt can't mix
 // with water (empty the tank first). Dirt needs NO ISRU rig.
 //
-// WHERE (HF4 MOONCABLE card):
-//   - At a real SITE: any activated dirt thruster scoops from the ground.
+// WHERE (HF4 MOONCABLE card + ISRU):
+//   - At a real SITE: scooping dirt needs an ISRU source colocated - a FACTORY
+//     at the site, or an ISRU platform (a card with an ISRU rating) aboard the
+//     rocket. The active dirt thruster burns it; it does not scoop on its own.
 //   - At LEO / Home Bernal: there's no ground, so it takes the MOON CABLE (a
 //     NASRDA crew card aboard - negotiable) to pipe dirt up. The cable need NOT
 //     be the active thruster - it just has to be in the stack, and it refuels
@@ -3065,6 +3067,9 @@ function applyDirtRefuel(state, op, player) {
     if (!stackHasMoonCable(player.rocket)) return fail('dirt_needs_mooncable');
   } else {
     if (!siteById(player.rocket.siteId)) return fail('not_at_site');
+    const factoryHere = !!state.factories[player.rocket.siteId];
+    const isruAboard = player.rocket.stack.some(slotHasIsruRig);
+    if (!factoryHere && !isruAboard) return fail('dirt_needs_isru');
   }
   const tank = Number(player.rocket.tank) || 0;
   if (tank > 0 && tankGradeOf(player.rocket) === 'water') return fail('cannot_mix_fuel');

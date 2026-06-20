@@ -33,7 +33,7 @@ import {
   getRocketStack, isInRocket, addToStack as rocketAddCard, setRadiatorSide,
   removeFromStack as rocketRemoveCard, clearStack as rocketClearStack,
   onRocketChange, isRocketActive,
-  getActiveThrusterId, setActiveThruster, stackHasMoonCable,
+  getActiveThrusterId, setActiveThruster, stackHasMoonCable, getDirtCapability,
   getTankWater, setTankWater, addFuel, removeFuel, getTankMax, getWaterCap,
   getTankGrade, setTankGrade, getActiveFuelGrade,
   getStackTotals, getActiveThrusterStats, setSolarZone, setHasPowersat,
@@ -5002,9 +5002,9 @@ function humanizeOnlineOpError(code, detail) {
     not_dirt_thruster: 'Dirt refuel needs a dirt-burning thruster aboard.',
     not_at_site: 'Park at a site first - dirt comes from the ground.',
     dirt_needs_mooncable: 'Taking on dirt at LEO needs the moon cable (a NASRDA crew card aboard). Scoop at a site instead.',
+    dirt_needs_isru: 'Scooping dirt needs an ISRU source here: a factory at this site, or an ISRU platform aboard.',
     not_water_fuel: 'Dirt has no cash value - only water converts back to aqua.',
     no_thruster: 'Activate a thruster first.',
-    already_dirt_refueled: 'That dirt triangle has taken its dirt allotment this turn (7 via the moon cable, else 1).',
     not_in_outpost: 'That card is not in the outpost.',
     not_black_side: 'Only a Black-Side (installed) card can be delivered.',
     insufficient_outpost_water: 'The outpost doesn\'t have enough water to pay the delivery cost.',
@@ -12571,8 +12571,9 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         </div>
       </div>
       <p class="muted aqua-help" id="dirt-help">
-        A dirt thruster scoops grey propellant from the ground for free,
-        any amount per turn. Dirt has no aqua value and can't mix with water.
+        A dirt thruster scoops grey propellant for free, any amount per turn,
+        at a site with a factory or ISRU platform. Dirt has no aqua value and
+        can't mix with water.
       </p>
     </div>
     <p class="muted fuel-tank-dump-note">
@@ -13212,7 +13213,14 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   // any active dirt thruster scoops from the ground. Keyed off the CARD, not
   // the suspendable Mooncable faction privilege.
   const hasMooncable = stackHasMoonCable();
-  const canScoopDirt = (atLeo && hasMooncable) || (!!getRocketSite() && !atLeo);
+  // Scooping dirt at a site needs an ISRU SOURCE colocated: a factory at the
+  // site, or an ISRU platform (a card with an ISRU rating) aboard the rocket.
+  // At LEO it's the moon cable instead (no ground to scoop).
+  const dirtHere = getRocketSite();
+  const dirtFactoryHere = !!(dirtHere && getFactory(dirtHere.id));
+  const dirtIsruAboard = getDirtCapability().hasIsru;
+  const dirtIsruSource = dirtFactoryHere || dirtIsruAboard;
+  const canScoopDirt = atLeo ? hasMooncable : (!!dirtHere && dirtIsruSource);
   // Show the scoop panel whenever the tank is in DIRT MODE (dirt loaded, or
   // an empty tank under a dirt engine) so the player always sees the dirt
   // controls, not just when the dirt thruster happens to be the active
@@ -13247,11 +13255,13 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         ? 'Make your dirt thruster the active engine to scoop dirt (a water engine can\'t burn it).'
         : !canScoopDirt
           ? (atLeo
-              ? 'Carry the moon cable (a NASRDA crew card) to take on dirt at LEO, or park at a site to scoop from the ground.'
-              : 'Park at a site to scoop dirt.')
+              ? 'Carry the moon cable (a NASRDA crew card) to take on dirt at LEO, or park at a site with a factory or ISRU platform.'
+              : !dirtHere
+                ? 'Park at a site to scoop dirt.'
+                : 'Scooping dirt needs an ISRU source here: a factory at this site, or an ISRU platform (an ISRU-rated card) aboard.')
           : room < 1
             ? 'Tank is full.'
-            : 'Scoop as much dirt as the tank holds - it\'s free and unlimited per turn. No aqua value, no ISRU needed; dirt can\'t mix with water or be transferred.';
+            : 'Scoop as much dirt as the tank holds - it\'s free and unlimited per turn. No aqua value; dirt can\'t mix with water or be transferred.';
     }
   }
   refreshDirtButtons();
