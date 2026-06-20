@@ -285,6 +285,7 @@ let _crewDraftMin = false;
 let _cardDraftMin = false;
 let _firstPlayerMin = false;
 let _auctionMin = false;
+let _eventMin = false;
 // Rising-edge tracker for auction turn notifications: remembers, per lot,
 // whether it was already "my turn" (bid/pass) or "my close" so a re-render
 // only toasts when the turn newly lands on me - e.g. the auctioneer raises
@@ -2646,6 +2647,7 @@ function renderEventChooser(snapshot) {
   const pending = snapshot && snapshot.pendingEvent;
   if (!pending || !_online || !gameViewVisible()) {
     if (existing) existing.remove();
+    setMpTurnAction('event', null);
     return;
   }
   const players = (snapshot.players || []);
@@ -2684,18 +2686,36 @@ function renderEventChooser(snapshot) {
 
   let overlay = existing;
   if (!overlay) {
+    // Fresh event: start expanded (mirrors the auction surfacing each lot).
+    _eventMin = false;
     overlay = document.createElement('div');
     overlay.id = 'mp-event-overlay';
     overlay.className = 'mp-first-player-overlay';
     overlay.innerHTML = `
       <div class="mp-first-player-modal mp-event-modal" role="dialog" aria-label="Sunspot event">
-        <h3 class="mp-first-player-title"></h3>
+        <div class="mp-modal-titlebar">
+          <h3 class="mp-first-player-title"></h3>
+          <button type="button" class="mp-mini-btn" title="Minimize (keep playing - deal cards, pan the map)" aria-label="Minimize">&minus;</button>
+        </div>
         <p class="mp-first-player-sub"></p>
         <div class="et-cards" id="mp-event-cards"></div>
         <div class="card-modal-actions" id="mp-event-actions"></div>
         <div class="hud-error" id="mp-event-error"></div>
-      </div>`;
+      </div>
+      <button type="button" class="mp-mini-chip" aria-label="Restore Sunspot event">
+        ${EV_TITLE[kind] || '☄️ Sunspot event'}
+      </button>`;
     document.body.appendChild(overlay);
+    overlay.querySelector('.mp-mini-btn').addEventListener('click', () => {
+      _eventMin = true;
+      overlay.classList.add('is-minimized');
+      renderEventChooser(_onlineSnapshot);
+    });
+    overlay.querySelector('.mp-mini-chip').addEventListener('click', () => {
+      _eventMin = false;
+      overlay.classList.remove('is-minimized');
+      setMpTurnAction('event', null);
+    });
   }
   overlay.querySelector('.mp-first-player-title').textContent = title;
   const sub = overlay.querySelector('.mp-first-player-sub');
@@ -2711,6 +2731,7 @@ function renderEventChooser(snapshot) {
     // Per user decision the table is NOT frozen: players who owe nothing
     // play on with no blocker. (The debt-holder settles on their turn.)
     overlay.remove();
+    setMpTurnAction('event', null);
     return;
   }
 
@@ -2745,6 +2766,19 @@ function renderEventChooser(snapshot) {
       box.addEventListener('change', () => { padLobby = box.checked; });
     }
   }
+
+  // Minimize / restore. Collapsed, the overlay stops blocking the board (CSS
+  // drops its backdrop + pointer events) so the player can deal cards, pan the
+  // map, and chat while the dialog waits; the call to action docks in the turn
+  // bar. Trades are allowed server-side during an unsettled event debt, so the
+  // tucked-away dialog never stops a deal.
+  overlay.classList.toggle('is-minimized', _eventMin);
+  setMpTurnAction('event', _eventMin ? {
+    label: title,
+    meta: pickMode ? 'choose a card' : 'confirm the hit',
+    needsAction: true,
+    onClick: () => { _eventMin = false; renderEventChooser(_onlineSnapshot); },
+  } : null);
 
   // ACKNOWLEDGE mode (glitch / flare / pad single): no card grid, just a
   // mandatory Confirm that submits an empty EVENT_CHOICE - the server commits

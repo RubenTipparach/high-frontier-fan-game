@@ -4704,7 +4704,11 @@ export function applyOperation(prevState, op, ctx) {
   // included, so the debt can't be dodged). A debt whose options
   // vanished (hand emptied, tied card already gone) clears itself.
   if (op.kind === 'EVENT_CHOICE') return applyEventChoice(clone(prevState), op, ctx);
-  if (prevState.pendingEvent && !op.debug
+  // Trades are a consensual side-channel (below) that never freeze the table,
+  // so an unsettled event debt does not block them either - a player owing a
+  // Budget Cuts discard can still deal cards while their dialog sits minimized.
+  // Every OTHER op on their turn still waits on the choice.
+  if (prevState.pendingEvent && !op.debug && !TRADE[op.kind]
       && isPlayersTurn(prevState, ctx.profileId)
       && eventDebtFor(prevState, ctx.profileId)) {
     const st0 = clone(prevState);
