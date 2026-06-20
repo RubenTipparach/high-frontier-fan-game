@@ -5330,6 +5330,29 @@ html.battery-save *::after {
   color: var(--accent);
 }
 
+/* Radiator Light / Heavy deploy-side toggle in the ET Produce modal (mirrors
+   the boost picker). Shown only when the selected card is a radiator. */
+.et-radside-block { display: flex; flex-direction: column; gap: 4px; }
+.et-radside-toggle { display: inline-flex; }
+.et-radside-btn {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--ink-dim, #9fb3cc);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.et-radside-btn:first-child { border-radius: 7px 0 0 7px; }
+.et-radside-btn:last-child { border-radius: 0 7px 7px 0; border-left: none; }
+.et-radside-btn.is-active {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(0, 0, 0, 0.28)), #0ea5e9;
+  color: #f0f9ff;
+  border-color: #7dd3fc;
+}
+
 .et-produce-modal .card-modal-actions { margin-top: 4px; justify-content: flex-end; }
 .et-produce-modal .modal-btn.primary { background: #14532d; color: #d1fae5; border-color: #166534; }
 .et-produce-modal .modal-btn.primary:hover { background: #166534; }

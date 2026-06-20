@@ -11634,14 +11634,15 @@ function doEtProduce(site, factory, options, outpostsAtSite, freeSlots) {
     options,
     existingOutpost,
     freeSlots,
-    onCommit: ({ cardId, letter, isNewOutpost }) => {
+    onCommit: ({ cardId, letter, isNewOutpost, radSide }) => {
       if (!cardId || !letter) return;
       // Online: the server moves the hand card into the (maybe-new) outpost
-      // Black-Side-up; the snapshot repaints.
+      // Black-Side-up; the snapshot repaints. radSide is the radiator's chosen
+      // deployed side (Light / Heavy), ignored by non-radiators.
       if (_online) {
         const sid = toServerId(_onlineMaps, site.id);
         if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
-        submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, letter, isNewOutpost });
+        submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, letter, isNewOutpost, radSide });
         return;
       }
       if (!requireOp('ET Production')) return;
@@ -11667,6 +11668,7 @@ function doEtProduce(site, factory, options, outpostsAtSite, freeSlots) {
         id: cardId,
         kind: 'patent',
         face: 'secondary',
+        ...(radSide ? { radSide } : {}),
       });
       if (!added) {
         // Roll back: put card back in hand.

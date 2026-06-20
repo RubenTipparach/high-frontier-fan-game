@@ -2760,9 +2760,13 @@ function applyEtProduce(state, op, player) {
     return fail('not_colocated');
   }
   player.hand.splice(hIdx, 1);
-  outpost.cards.push({ id: cardId, kind: 'patent', face: 'secondary' });
-  player.opsRemaining -= 1;
   const card = PATENTS_BY_ID[cardId];
+  const produced = { id: cardId, kind: 'patent', face: 'secondary' };
+  // Radiators deploy a Light or Heavy side; the producer picks it (default
+  // Heavy = max cooling). Non-radiators carry no side.
+  if (card && card.type === 'radiator') produced.radSide = op.radSide === 'light' ? 'light' : 'heavy';
+  outpost.cards.push(produced);
+  player.opsRemaining -= 1;
   return {
     ok: true, state,
     log: `${player.name} ET-produced ${card ? card.name : cardId} (Black-Side) at ${site.name} into Outpost ${letter}.`,
@@ -3285,7 +3289,7 @@ function pickPayload(op) {
     case 'BUILD_COLONY': return { cardId: op.cardId };
     case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds, freeDelegate: op.freeDelegate };
     case 'MINE_REVIVAL': return { siteId: op.siteId };
-    case 'ET_PRODUCE': return { siteId: op.siteId, cardId: op.cardId, letter: op.letter, isNewOutpost: !!op.isNewOutpost };
+    case 'ET_PRODUCE': return { siteId: op.siteId, cardId: op.cardId, letter: op.letter, isNewOutpost: !!op.isNewOutpost, ...(op.radSide ? { radSide: op.radSide } : {}) };
     // Route ops ride the undo stack like every other functional op, so
     // an UNDO/REDO replay (rebuildFromBase) must carry their payload or
     // the replay would re-run SET_ROUTE with no segments and silently

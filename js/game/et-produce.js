@@ -110,6 +110,14 @@ export function openEtProduceModal({
   let selectedSlot = existingOutpost
     ? existingOutpost
     : (freeSlots[0] || null);
+  // Radiators land Black-Side-up but still choose a deployed side (Light =
+  // lighter / less cooling, Heavy = more therms). Default Heavy (max cooling);
+  // reset when the player picks a different card.
+  let radSide = 'heavy';
+  const isRad = (i) => !!(options[i] && options[i].card && options[i].card.type === 'radiator');
+  const secFace = (card) => (card && card.faces && card.faces.secondary) || card || {};
+  const sideTherms = (card, which) => { const b = secFace(card)[which]; return (b && b.therms != null) ? b.therms : 0; };
+  const sideRad = (card, which) => { const b = secFace(card)[which]; return (b && b.radHardness != null) ? b.radHardness : 0; };
 
   const needsSlotPick = !existingOutpost;
 
@@ -126,6 +134,7 @@ export function openEtProduceModal({
       cardId: opt.id,
       letter: selectedSlot,
       isNewOutpost: needsSlotPick,
+      radSide: (opt.card && opt.card.type === 'radiator') ? radSide : undefined,
     });
   };
   const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(false); } };
@@ -161,6 +170,14 @@ export function openEtProduceModal({
         </div>
         <div class="et-section-label">Pick a Hand card to produce:</div>
         <div class="et-cards"></div>
+        ${isRad(selectedCard) ? `
+        <div class="et-radside-block">
+          <div class="et-section-label">Deploy this radiator's side:</div>
+          <div class="et-radside-toggle">
+            <button type="button" class="et-radside-btn ${radSide === 'light' ? 'is-active' : ''}" data-side="light">Light · ${sideTherms(options[selectedCard].card, 'light')}🌡 · rad ${sideRad(options[selectedCard].card, 'light')}</button>
+            <button type="button" class="et-radside-btn ${radSide === 'heavy' ? 'is-active' : ''}" data-side="heavy">Heavy · ${sideTherms(options[selectedCard].card, 'heavy')}🌡 · rad ${sideRad(options[selectedCard].card, 'heavy')}</button>
+          </div>
+        </div>` : ''}
         ${slotHtml}
       </div>
       <div class="card-modal-actions">
@@ -179,7 +196,10 @@ export function openEtProduceModal({
       pick.dataset.card = String(i);
       pick.setAttribute('aria-pressed', i === selectedCard ? 'true' : 'false');
       try {
-        pick.appendChild(renderCard(opt.card, { type: opt.card.type, face: 'secondary' }));
+        // The selected radiator previews its currently-chosen side; others
+        // show the default (heavy / max cooling).
+        const rs = (opt.card.type === 'radiator' && i === selectedCard) ? radSide : 'heavy';
+        pick.appendChild(renderCard(opt.card, { type: opt.card.type, face: 'secondary', radSide: rs }));
       } catch {
         pick.textContent = opt.name;
       }
@@ -188,7 +208,7 @@ export function openEtProduceModal({
       tick.textContent = '✓';
       pick.appendChild(tick);
       pick.addEventListener('click', () => {
-        selectedCard = i;
+        if (selectedCard !== i) { selectedCard = i; radSide = 'heavy'; }
         render();
       });
       // Magnifier: enlarged read-only look at the card, Black-Side-up
@@ -211,6 +231,12 @@ export function openEtProduceModal({
     dialog.querySelectorAll('.et-slot-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         selectedSlot = btn.getAttribute('data-slot');
+        render();
+      });
+    });
+    dialog.querySelectorAll('.et-radside-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        radSide = btn.getAttribute('data-side') === 'light' ? 'light' : 'heavy';
         render();
       });
     });
