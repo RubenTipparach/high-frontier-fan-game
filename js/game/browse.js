@@ -12543,15 +12543,17 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     </div>
     <div class="fuel-tank-netthrust">
       <div class="ntt-head">🚀 Fuel Strip Track</div>
-      <div class="ntt-row">
-        Wet mass <strong>${wmNow}</strong> → <strong>${wcNow.id}</strong>
-        weight class (<strong>${ntMod}</strong> net thrust)
+      <div class="ntt-body">
+        <div class="ntt-row">
+          Wet mass <strong>${wmNow}</strong> → <strong>${wcNow.id}</strong>
+          weight class (<strong>${ntMod}</strong> net thrust)
+        </div>
+        ${thrust != null
+          ? `<div class="ntt-row">Base thrust <strong>${thrust}</strong>
+               ${ntMod} weight = net thrust <strong>${netThrustVal}</strong></div>`
+          : '<div class="ntt-row muted">(no active thruster - no base thrust)</div>'}
+        <div class="ntt-row muted">Fuel steps this band: <strong>${fracLadder}</strong></div>
       </div>
-      ${thrust != null
-        ? `<div class="ntt-row">Base thrust <strong>${thrust}</strong>
-             ${ntMod} weight = net thrust <strong>${netThrustVal}</strong></div>`
-        : '<div class="ntt-row muted">(no active thruster - no base thrust)</div>'}
-      <div class="ntt-row muted">Fuel steps this band: <strong>${fracLadder}</strong></div>
       <p class="muted ntt-note">
         Heavier stacks read a lower net thrust. A burn spends fuel
         and walks the wet-mass chit toward dry mass (black line);
@@ -12583,10 +12585,28 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const ntBlock   = panel.querySelector('.fuel-tank-netthrust');
   if (stripCol && ntBlock) stripCol.appendChild(ntBlock);
   const stripHost = panel.querySelector('.fuel-tank-strip');
+  const nttBody   = ntBlock && ntBlock.querySelector('.ntt-body');
   let lastRenderWet = -999;
+  // Net Thrust readout text under the strip, recomputed from the live wet mass
+  // (it used to render once at open and go stale as the tank moved).
+  function updateNetThrustText(wet) {
+    if (!nttBody) return;
+    const wm = Math.max(0, wet);
+    const wc = weightClassForMass(Math.max(1, Math.round(wm)));
+    const mod = wc.netThrust >= 0 ? `+${wc.netThrust}` : String(wc.netThrust);
+    const nt = (thrust != null) ? (thrust + wc.netThrust) : null;
+    const frac = (wc.fractions && wc.fractions.length) ? wc.fractions.join(' ') : 'whole steps';
+    nttBody.innerHTML = `
+      <div class="ntt-row">Wet mass <strong>${esc(massLabel(wm))}</strong> → <strong>${esc(wc.id)}</strong> weight class (<strong>${mod}</strong> net thrust)</div>
+      ${thrust != null
+        ? `<div class="ntt-row">Base thrust <strong>${thrust}</strong> ${mod} weight = net thrust <strong>${nt}</strong></div>`
+        : '<div class="ntt-row muted">(no active thruster - no base thrust)</div>'}
+      <div class="ntt-row muted">Fuel steps this band: <strong>${frac}</strong></div>`;
+  }
   function updateStrip(level) {
     if (!stripHost) return;
     const wet = Math.max(0, dryMass + level);
+    updateNetThrustText(wet);
     if (Math.abs(wet - lastRenderWet) < 0.09
         && Math.round(wet) === Math.round(lastRenderWet)) return;
     renderDetailTrack(stripHost, { dryMass, wetMass: wet });
@@ -12655,7 +12675,10 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     // tank; longer (fractional) values just get a smaller font.
     const len = nowReadout.textContent.length;
     nowReadout.style.fontSize = len >= 6 ? '20px' : len >= 5 ? '24px' : len >= 4 ? '30px' : '38px';
-    updateStrip(clamped);
+    // The fuel strip + Net Thrust text are pinned to the COMMITTED tank via the
+    // onRocketChange sync below (not per animation frame), so they always match
+    // the real tank instead of lagging a tween or flickering as the cylinder
+    // drains.
   }
   // Seed the initial water level (the static HTML only renders the number).
   setLevel(fromW);
@@ -13236,7 +13259,14 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   dirtDumpAll?.addEventListener('click', (e) => dumpFuelBySteps(Infinity, e, refreshDirtButtons));
 
   const unsubAqua = onAquaChange(refreshAquaButtons);
-  const unsubRocket = onRocketChange(() => { refreshAquaButtons(); refreshDirtButtons(); refreshOutpostSections(); });
+  const unsubRocket = onRocketChange(() => {
+    refreshAquaButtons(); refreshDirtButtons(); refreshOutpostSections();
+    refreshDumpButtons();
+    // Keep the fuel strip + Net Thrust text pinned to the live tank. This
+    // fires on every tank change INCLUDING an online snapshot hydrate, so the
+    // strip never lags behind a dump / refuel the way a tween-only update can.
+    updateStrip(getTankWater());
+  });
   // Cleanup: detach listeners when the overlay tears down so a
   // closed modal doesn't keep responding to balance changes.
   const origRemove = overlay.remove.bind(overlay);
