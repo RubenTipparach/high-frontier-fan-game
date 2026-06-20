@@ -39,6 +39,9 @@ import {
 // STEPS (black connections), and the water it costs is the non-linear mass
 // drop, leaving a possibly-fractional remainder.
 import { blackStepsBetween, walkBlackDown } from '../../data/fuel-graph.js';
+// Endgame VP math, shared with the client live panel + game-over modal so the
+// authoritative score can never drift from what players see.
+import { scorePlayer } from '../../data/endgame-scoring.js';
 // Net-thrust band (weight class) + solar-zone modifiers, the same pure
 // tables the client folds into rocket.js#getActiveThrusterStats. The
 // engine reads them so the liftoff/landing gate uses the FINAL net thrust,
@@ -3172,7 +3175,11 @@ function applyBuildColony(state, op, player) {
   }
   player.leo = player.leo || [];
   player.leo.push({ id: cardId, kind: 'crew', face: slot.face === 'secondary' ? 'secondary' : 'primary' });
-  state.colonies[siteId] = { ownerId: player.profileId };
+  // Store the colony's location type (sent by the client, which has the site
+  // flags) so the endgame scorer can value it by type - astrobiology +1,
+  // submarine / Bernal +2, plain colony +1.
+  const cType = ['astrobiology', 'submarine', 'bernal'].includes(op.colonyType) ? op.colonyType : 'other';
+  state.colonies[siteId] = { ownerId: player.profileId, type: cType };
   const crew = CREW_BY_ID[cardId];
   const crewName = crew ? ((crew.faces && crew.faces[slot.face === 'secondary' ? 'secondary' : 'primary'] || {}).name || crew.id) : cardId;
   return {
@@ -3280,7 +3287,7 @@ function pickPayload(op) {
     case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode, outpost: op.outpost };
     case 'DIRT_REFUEL': return { amount: op.amount };
     case 'DELIVERY': return { siteId: op.siteId, letter: op.letter, cardId: op.cardId };
-    case 'BUILD_COLONY': return { cardId: op.cardId };
+    case 'BUILD_COLONY': return { cardId: op.cardId, colonyType: op.colonyType };
     case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds, freeDelegate: op.freeDelegate };
     case 'MINE_REVIVAL': return { siteId: op.siteId };
     case 'ET_PRODUCE': return { siteId: op.siteId, cardId: op.cardId, letter: op.letter, isNewOutpost: !!op.isNewOutpost, ...(op.radSide ? { radSide: op.radSide } : {}) };
@@ -3558,38 +3565,19 @@ function computeFinalScores(state) {
   const winnerKey = vote.winner;
   const winnerName = winnerKey ? ((IDEOLOGY_BY_KEY[winnerKey] || {}).name || winnerKey) : null;
   const m0 = !!state.m0;
-  // Exploitation Track market price per spectral (rulebook M2b; keep in sync
-  // with js/game/scoring.js SPECTRAL_DIMINISHING_SCHEDULE). The Nth factory of
-  // a spectral ANYWHERE on the map prices at 8 / 5 / 4 (4 thereafter); each
-  // player scores their own factories at the current global price.
-  const SPECTRAL_SCHEDULE = [8, 5, 4];
-  const lastRate = SPECTRAL_SCHEDULE[SPECTRAL_SCHEDULE.length - 1];
-  const priceFor = (n) => (n <= 0 ? 0 : (SPECTRAL_SCHEDULE[n - 1] != null ? SPECTRAL_SCHEDULE[n - 1] : lastRate));
-  const globalSpec = {};
-  for (const sid in (state.factories || {})) {
-    const f = state.factories[sid];
-    if (f) { const t = f.spectralType || 'C'; globalSpec[t] = (globalSpec[t] || 0) + 1; }
-  }
+  // ALL factories on the map as the shared scorer's plain shape (the global
+  // count of each spectral drives its Exploitation Track market price).
+  const allFactories = Object.values(state.factories || {})
+    .map((f) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C' }));
   const scores = state.players.map((p) => {
     const cubeVp = m0 ? playerDelegatesPlaced(asm, p.profileId) : 0;
     const awardVp = (m0 && winnerKey) ? ideologyAwardVp(state, p, winnerKey) : 0;
-    // Factory market value off the Exploitation Track.
-    const ownSpec = {};
-    for (const sid in (state.factories || {})) {
-      const f = state.factories[sid];
-      if (f && f.ownerId === p.profileId) { const t = f.spectralType || 'C'; ownSpec[t] = (ownSpec[t] || 0) + 1; }
-    }
-    let spectralVp = 0;
-    for (const t in ownSpec) spectralVp += ownSpec[t] * priceFor(globalSpec[t] || 0);
-    // +1 per owned token: factory, success claim disc, outpost, the rocket.
-    const factoryCount = countOwnedBy(state.factories, p.profileId);
-    const claimCount = ownedClaimCount(state.discs, p.profileId);
-    const outpostCount = p.outposts ? Object.keys(p.outposts).length : 0;
-    const rocketCount = (p.rocket && Array.isArray(p.rocket.stack) && p.rocket.stack.length > 0) ? 1 : 0;
-    const tokenVp = factoryCount + claimCount + outpostCount + rocketCount;
-    // Colonies: flat +1 here (the server has no site location flags; the client
-    // modal scores them by location type - astrobiology +1, submarine/Bernal +2).
-    const colonyVp = countOwnedBy(state.colonies, p.profileId);
+    const ownColonies = Object.values(state.colonies || {})
+      .filter((c) => c && c.ownerId === p.profileId)
+      .map((c) => ({ type: c.type || 'other' }));
+    const claims = ownedClaimCount(state.discs, p.profileId);
+    const outposts = p.outposts ? Object.keys(p.outposts).length : 0;
+    const rocket = (p.rocket && Array.isArray(p.rocket.stack) && p.rocket.stack.length > 0) ? 1 : 0;
     // Glory VP is derived from the claimed chits' zone + side via ZONE_CHIT_VPS
     // (the data source), not the running p.glory.vps snapshot, so a chit's value
     // edit revalues banked chits at scoring time.
@@ -3597,10 +3585,14 @@ function computeFinalScores(state) {
       ? p.glory.claimed.reduce((s, c) => s
         + (((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[c.side === 'back' ? 'back' : 'front']) | 0), 0)
       : 0;
-    const total = cubeVp + awardVp + spectralVp + tokenVp + colonyVp + gloryVp;
+    const b = scorePlayer({
+      ownerId: p.profileId, factories: allFactories, ownColonies,
+      claims, outposts, rocket, glory: gloryVp, cubeVp, awardVp,
+    });
     return {
       profileId: p.profileId, name: p.name, color: p.color || null,
-      cubeVp, awardVp, spectralVp, tokenVp, factoryVp: factoryCount, colonyVp, gloryVp, total, aqua: p.aqua | 0,
+      cubeVp, awardVp, spectralVp: b.spectralVp, tokenVp: b.tokenVp,
+      factoryVp: b.factoryCount, colonyVp: b.colonyVp, gloryVp, total: b.total, aqua: p.aqua | 0,
     };
   });
   const ranked = [...scores].sort((a, b) => b.total - a.total || b.aqua - a.aqua);

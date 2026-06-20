@@ -128,6 +128,7 @@ import {
 import {
   computeEndgameScore, SPECTRAL_DIMINISHING_SCHEDULE, COLONY_VP,
 } from './scoring.js';
+import { scorePlayer } from '../../data/endgame-scoring.js';
 import {
   MARKET_MODE, FREE_MARKET_AQUA, STARTER_CASH_AMOUNT,
   getMarketMode, setMarketMode, onMarketChange,
@@ -2340,7 +2341,7 @@ function renderSeniorityChooser(pending) {
 // numbers line up.
 let _gameOverDismissed = false;
 
-function computeSnapshotScore(snapshot, profileId) {
+function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0 } = {}) {
   const player = (snapshot.players || []).find((p) => p.profileId === profileId);
   const glory = (player && player.glory && player.glory.vps) || 0;
   let claims = 0;
@@ -2349,39 +2350,26 @@ function computeSnapshotScore(snapshot, profileId) {
     const d = discs[id];
     if (d && d.outcome === 'success' && d.ownerId === profileId) claims += 1;
   }
-  const allFacs = Object.values(snapshot.factories || {});
-  const facs = allFacs.filter((f) => f.ownerId === profileId);
-  const cols = Object.values(snapshot.colonies || {}).filter((c) => c.ownerId === profileId);
+  // ALL factories drive the global Exploitation Track price; the shared scorer
+  // filters the player's own. (data/endgame-scoring.js - the SAME math the
+  // server and the live scoring tab run, so the three can never drift.)
+  const factories = Object.values(snapshot.factories || {})
+    .map((f) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C' }));
+  // Colonies score by location type; classify each by its site (convert the
+  // server slug to the client id to read the runtime-merged flags), falling
+  // back to a stored type, then 'other'.
+  const ownColonies = [];
+  for (const [siteId, c] of Object.entries(snapshot.colonies || {})) {
+    if (!c || c.ownerId !== profileId) continue;
+    const cid = (_onlineMaps && toPlannerId(_onlineMaps, siteId)) || siteId;
+    ownColonies.push({ type: colonyTypeOfSite(cid) || c.type || 'other' });
+  }
   const rocket = player && player.rocket && (player.rocket.stack || []).length > 0 ? 1 : 0;
   const outposts = player && player.outposts ? Object.keys(player.outposts).length : 0;
-  // Exploitation track is GLOBAL: the market price per spectral comes from ALL
-  // players' factories of that spectral; the player scores it for each of their
-  // own. (Mirrors scoring.js#computeEndgameScore so the live panel and the
-  // final standings agree.)
-  const globalBySpec = {};
-  for (const f of allFacs) { const t = f.spectralType || 'C'; globalBySpec[t] = (globalBySpec[t] || 0) + 1; }
-  const lastRate = SPECTRAL_DIMINISHING_SCHEDULE[SPECTRAL_DIMINISHING_SCHEDULE.length - 1];
-  const priceFor = (n) => (n <= 0 ? 0
-    : (SPECTRAL_DIMINISHING_SCHEDULE[n - 1] != null ? SPECTRAL_DIMINISHING_SCHEDULE[n - 1] : lastRate));
-  const ownBySpec = {};
-  for (const f of facs) { const t = f.spectralType || 'C'; ownBySpec[t] = (ownBySpec[t] || 0) + 1; }
-  let spectralBonus = 0;
-  for (const t in ownBySpec) spectralBonus += ownBySpec[t] * priceFor(globalBySpec[t] || 0);
-  let colonyVp = 0;
-  for (const c of cols) {
-    // Colony location VP (astrobiology +1, submarine / Bernal +2). The snapshot
-    // colony record has no type, so classify by its site: convert the server
-    // slug to the client site id and read the runtime-merged flags.
-    const cid = (_onlineMaps && toPlannerId(_onlineMaps, c.siteId)) || c.siteId;
-    const t = colonyTypeOfSite(cid) || c.type || 'other';
-    colonyVp += (COLONY_VP[t] || COLONY_VP.other);
-  }
-  const tokens = rocket + claims + facs.length + outposts;
-  return {
-    glory, claims, factories: facs.length, colonies: cols.length,
-    rocket, outposts, spectralBonus, colonyVp, tokens,
-    total: tokens + spectralBonus + colonyVp + glory,
-  };
+  return scorePlayer({
+    ownerId: profileId, factories, ownColonies,
+    claims, outposts, rocket, glory, cubeVp, awardVp,
+  });
 }
 
 // Galactic news broadcast: a shared feed of what just happened at the
@@ -2911,11 +2899,11 @@ function renderGameOver(snapshot) {
   const m0 = !!snapshot.m0;
   const rows = players
     .map((p) => {
-      const cs = computeSnapshotScore(snapshot, p.profileId);
       const sv = serverById[p.profileId] || {};
       const cubeVp = m0 ? (sv.cubeVp | 0) : 0;
       const awardVp = m0 ? (sv.awardVp | 0) : 0;
-      return { p, s: { ...cs, cubeVp, awardVp, aqua: (p.aqua | 0), total: cs.total + cubeVp + awardVp } };
+      const s = computeSnapshotScore(snapshot, p.profileId, { cubeVp, awardVp });
+      return { p, s: { ...s, aqua: (p.aqua | 0) } };
     })
     .sort((a, b) => b.s.total - a.s.total || (b.s.aqua || 0) - (a.s.aqua || 0));
 
@@ -2942,29 +2930,104 @@ function renderGameOver(snapshot) {
     </div>`;
   const list = overlay.querySelector('.mp-game-over-list');
   const winnerName = fv && fv.winnerName ? fv.winnerName : 'ideology';
+  const COLONY_LABEL = { astrobiology: 'astrobiology', submarine: 'submarine', bernal: 'Bernal', other: 'colony' };
+  // One scorecard per player, ranked. Each shows the factory market chart
+  // (Exploitation Track), colonies by location, glory chits, and the token tally
+  // - the same breakdown the live scoring tab uses.
+  const cat = (icon, label, vp) => {
+    const block = document.createElement('div');
+    block.className = 'mp-go-cat';
+    const h = document.createElement('div');
+    h.className = 'mp-go-cat-head';
+    h.innerHTML = `<span class="mp-go-cat-label">${icon} ${esc(label)}</span><span class="mp-go-cat-vp">${vp} VP</span>`;
+    block.appendChild(h);
+    const chips = document.createElement('div');
+    chips.className = 'mp-go-chips';
+    block.appendChild(chips);
+    return { block, chips };
+  };
+  const noneChip = (host) => { const s = document.createElement('span'); s.className = 'mp-go-none muted'; s.textContent = 'none'; host.appendChild(s); };
+
   rows.forEach(({ p, s }, i) => {
     const li = document.createElement('li');
     li.className = 'mp-go-row' + (i === 0 ? ' is-winner' : '');
+
+    const head = document.createElement('div');
+    head.className = 'mp-go-head';
     const rank = document.createElement('span');
     rank.className = 'mp-go-rank';
-    rank.textContent = i === 0 ? '🏆' : `${i + 1}.`;
+    rank.textContent = i === 0 ? '🏆' : `${i + 1}`;
     const name = document.createElement('span');
     name.className = 'mp-go-name player-name';
     if (p.color) name.style.setProperty('--player-color', p.color);
     name.textContent = '@' + p.name + (p.profileId === myId ? ' (you)' : '');
     const total = document.createElement('span');
     total.className = 'mp-go-total';
-    total.textContent = `${s.total} VP`;
-    const brk = document.createElement('span');
-    brk.className = 'mp-go-break muted';
-    const parts = [];
-    if (m0) { parts.push(`cubes ${s.cubeVp}`); parts.push(`${winnerName} award ${s.awardVp}`); }
-    parts.push(`factory market ${s.spectralBonus} (${s.factories} factories)`);
-    parts.push(`tokens ${s.tokens}`);
-    parts.push(`colonies ${s.colonyVp}`);
-    parts.push(`glory ${s.glory}`);
-    brk.textContent = parts.join(' · ');
-    li.append(rank, name, total, brk);
+    total.innerHTML = `${s.total}<small>VP</small>`;
+    head.append(rank, name, total);
+    li.appendChild(head);
+
+    const detail = document.createElement('div');
+    detail.className = 'mp-go-detail';
+
+    // Factory market chart (Exploitation Track) + the +1-per-factory token.
+    const fac = cat('🏭', 'Factories', s.spectralVp + s.factoryCount);
+    if (s.spectralRows.length) {
+      for (const r of s.spectralRows) {
+        const chip = document.createElement('span');
+        chip.className = `mp-go-chip spectral-${esc(r.spec)}`;
+        chip.innerHTML = `<b>${esc(r.spec)}</b> ×${r.count} <span class="mp-go-chip-x">@${r.price}</span> = ${r.vp}`;
+        chip.title = `${r.count} ${r.spec}-spectral factor${r.count === 1 ? 'y' : 'ies'} at market price ${r.price} (${r.globalCount} of this spectral on the map) = ${r.vp} VP, plus +1 each as a token`;
+        fac.chips.appendChild(chip);
+      }
+    } else noneChip(fac.chips);
+    detail.appendChild(fac.block);
+
+    // Colonies by location type.
+    const col = cat('🏠', 'Colonies', s.colonyVp);
+    const colTypes = Object.entries(s.colonyByType).filter(([, n]) => n > 0);
+    if (colTypes.length) {
+      for (const [t, n] of colTypes) {
+        const chip = document.createElement('span');
+        chip.className = `mp-go-chip mp-go-colony-${t}`;
+        chip.textContent = `${COLONY_LABEL[t] || t} ×${n} (+${(COLONY_VP[t] || 1) * n})`;
+        col.chips.appendChild(chip);
+      }
+    } else noneChip(col.chips);
+    detail.appendChild(col.block);
+
+    // Glory chits awarded.
+    const glory = cat('🏅', 'Glory chits', s.glory);
+    const claimed = (p.glory && Array.isArray(p.glory.claimed)) ? p.glory.claimed : [];
+    if (claimed.length) {
+      for (const c of claimed) {
+        const chip = document.createElement('span');
+        chip.className = 'mp-go-chip mp-go-glory-chip';
+        chip.textContent = (c.zone || 'chit') + (c.side === 'back' ? ' ▸' : '');
+        glory.chips.appendChild(chip);
+      }
+    } else noneChip(glory.chips);
+    detail.appendChild(glory.block);
+
+    // Other tokens (claims / outposts / rocket) + the M0 assembly bits.
+    const tok = cat('🎟', 'Tokens', s.claims + s.outposts + s.rocket + (m0 ? s.cubeVp + s.awardVp : 0));
+    const tparts = [];
+    if (s.claims) tparts.push(`claims ×${s.claims}`);
+    if (s.outposts) tparts.push(`outposts ×${s.outposts}`);
+    if (s.rocket) tparts.push('rocket');
+    if (m0 && s.cubeVp) tparts.push(`cubes ${s.cubeVp}`);
+    if (m0 && s.awardVp) tparts.push(`${winnerName} award ${s.awardVp}`);
+    if (tparts.length) {
+      for (const t of tparts) {
+        const chip = document.createElement('span');
+        chip.className = 'mp-go-chip';
+        chip.textContent = t;
+        tok.chips.appendChild(chip);
+      }
+    } else noneChip(tok.chips);
+    detail.appendChild(tok.block);
+
+    li.appendChild(detail);
     list.appendChild(li);
   });
   overlay.querySelector('.modal-x').addEventListener('click', () => {
@@ -11943,7 +12006,9 @@ function doColonize(site, stack, options) {
       // the colony; the snapshot repaints the colony ring. Build Colony is a
       // FREE action server-side, so no op is spent.
       if (_online) {
-        submitOnlineOp({ kind: 'BUILD_COLONY', cardId: pick.id });
+        // Send the colony's location type (the client has the site flags; the
+        // server doesn't) so the server scores it by type at game end.
+        submitOnlineOp({ kind: 'BUILD_COLONY', cardId: pick.id, colonyType: colonyTypeOfSite(site.id) || 'other' });
         return;
       }
       const crewCard = CREW_BY_ID[pick.id];
