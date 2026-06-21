@@ -9992,6 +9992,22 @@ function classifyHazard(site) {
 function isHazardSite(site) {
   return classifyHazard(site) !== null;
 }
+// A factory that has a colony makes its launch pad safe. On LIFTOFF from
+// `fromSite`, a skull / aerobrake hazard on the immediate liftoff leg (a node
+// adjacent to the launch site) passes with no roll when a factory-with-colony
+// sits on that hazard node or a node adjacent to it. Liftoff only (never
+// landing or deeper route hazards), and radiation zones still always roll.
+// Mirror of engine.js#liftoffColonyWaives (the server is authoritative).
+function liftoffColonyWaives(fromSite, hazSite) {
+  if (!fromSite || !hazSite) return false;
+  if (hazSite.type === 'radhaz') return false;
+  const neigh = _activeData && _activeData.neighbors;
+  if (!neigh) return false;
+  const fromN = neigh.get(fromSite.id);
+  if (!fromN || !fromN.has(hazSite.id)) return false;
+  const around = [hazSite.id, ...(neigh.get(hazSite.id) || [])];
+  return around.some((pid) => getFactory(pid) && getColony(pid));
+}
 
 // Walk every endpoint a route's turn-1 segments would touch,
 // collecting the distinct hazard sites along the way. We check
@@ -15056,7 +15072,7 @@ async function moveRocket() {
     }
     // Drop aero hazards from the pay/roll prompt when a parachute card is
     // aboard (the server waives them too), so the client preview matches.
-    const genericHz = hz.filter((h) => h.site.type !== 'radhaz' && !(safeAeroOnline && h.aero)).concat(assistHz);
+    const genericHz = hz.filter((h) => h.site.type !== 'radhaz' && !(safeAeroOnline && h.aero) && !liftoffColonyWaives(curSite, h.site)).concat(assistHz);
     let hazardPay = false;
     // Generic (skull / aerobrake / factory assist): pay aqua, roll, or
     // cancel. Each is a separate d6 - the modal says "cannot be undone".
@@ -15194,7 +15210,7 @@ async function moveRocket() {
   // unaffected. The ability activates by being aboard (no support chain needed).
   const safeAero = stackHasPower('safeAerobrake');
   const radHazards     = hazards.filter((h) => h.site.type === 'radhaz');
-  const genericHazards = hazards.filter((h) => h.site.type !== 'radhaz' && !(safeAero && h.aero));
+  const genericHazards = hazards.filter((h) => h.site.type !== 'radhaz' && !(safeAero && h.aero) && !liftoffColonyWaives(getRocketSite(), h.site));
   let hazardChoice = null;
   let lockUndo = false;
   // Factory-assist pre-flight. A maneuver where net thrust <= site
@@ -15453,7 +15469,13 @@ async function runMoveQueue(ctx, resuming) {
     ? `🛸 Resuming move to <strong>${esc(arrivedName)}</strong>…`
     : `🛸 Moving rocket to <strong>${esc(arrivedName)}</strong>…`);
   const hazardIndexById = new Map();
+  // The launch site this turn lifts off from; a factory-with-colony pad waives
+  // the immediate liftoff-leg skull / aero rolls (see liftoffColonyWaives).
+  const liftoffOrigin = turn1.length
+    ? (_activeData.sites.find((s) => s.id === turn1[0].from) || null)
+    : null;
   for (const h of hazards) {
+    if (liftoffColonyWaives(liftoffOrigin, h.site)) continue;
     const idx = turn1.findIndex((s) => s.to === h.site.id);
     if (idx >= 0) hazardIndexById.set(h.site.id, { idx, hazard: h });
   }

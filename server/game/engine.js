@@ -64,6 +64,7 @@ import {
   leoSlug, siteBySlug as siteById, hazardKind, nodeBySlug,
   nodeSizeNumber, lineOfSightSites, siteBodyOf, buggyRoamSites,
   isSiteNode, zoneOfSlug, isAerobrakeNode, isAerobrakeLandableSite,
+  neighborSlugs,
 } from './planner-graph.js';
 import { isBuggyRoamBody } from '../../data/buggy-roam.js';
 import { makeRng } from './rng.js';
@@ -1300,6 +1301,23 @@ function maneuverGate(state, slug, thrust) {
   return { ok: true, assist: true, needsRoll: !colony, size };
 }
 
+// Liftoff hazard waiver (mirror of browse.js#liftoffColonyWaives). A
+// factory that has a colony makes the launch pad safe: when the rocket
+// LIFTS OFF from `from`, a skull / aerobrake hazard node on the immediate
+// liftoff leg (adjacent to the launch site) is passed with no roll if a
+// factory-with-colony sits on that hazard node or on a node adjacent to
+// it. Liftoff only (never landing or deeper route hazards), and radiation
+// zones still always roll (unwaivable, like FINAO). `from` null = LEO,
+// which has no pad hazard so nothing to waive.
+function liftoffColonyWaives(state, from, hazSlug) {
+  if (!from) return false;
+  const k = hazardKind(hazSlug);
+  if (k !== 'skull' && k !== 'aero') return false;
+  if (!neighborSlugs(from).includes(hazSlug)) return false;
+  const around = [hazSlug, ...neighborSlugs(hazSlug)];
+  return around.some((s) => state.factories[s] && state.colonies[s]);
+}
+
 // Destroy the rocket: patents fall back to the hand, crew re-spawns in
 // the LEO Stack (variant rule), tank is lost, ship recalls to LEO.
 // Mirror of browse.js#explodeRocket's state half.
@@ -1486,13 +1504,17 @@ function applyMove(state, op, player) {
   // critical that destroys the ship.
   const rollItems = [];
   const safeAero = stackSafeAerobrake(player.rocket);
-  const safeAeroSlugs = [];   // aero hazards the parachute waived (for playback)
+  const safeAeroSlugs = [];     // aero hazards the parachute waived (for playback)
+  const colonyWaivedSlugs = []; // liftoff hazards a colony pad waived (for playback)
   if (liftG.needsRoll) rollItems.push({ slug: from, kind: 'assist', phase: 'liftoff' });
   for (const slug of generic) {
     const k = hazardKind(slug);
     // A safe-aerobrake card (parachute generator) carries the stack through
     // aerobrake hazards with no roll; skull hazards still roll.
     if (k === 'aero' && safeAero) { safeAeroSlugs.push(slug); continue; }
+    // A factory-with-colony makes the launch pad safe: liftoff-leg skull /
+    // aero hazards adjacent to the colony pass with no roll.
+    if (liftoffColonyWaives(state, from, slug)) { colonyWaivedSlugs.push(slug); continue; }
     rollItems.push({ slug, kind: k });
   }
   if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
@@ -1521,6 +1543,7 @@ function applyMove(state, op, player) {
   // Aerobrakes the parachute waived: recorded as safely passed (no roll) so
   // the client plays them back as a clean pass rather than a missing node.
   for (const slug of safeAeroSlugs) rolls.push({ slug, kind: 'aero', safe: true });
+  for (const slug of colonyWaivedSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true });
 
   // Generic + assist rolls: a rolled 1 is a critical that destroys the
   // ship at that node (unless paid past via FINAO).
