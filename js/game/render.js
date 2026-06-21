@@ -836,6 +836,10 @@ export class MapRenderer {
     this._backdropImg = null;
     this._backdropReady = false;
     this._backdropVisible = false;
+    // Optional node-editing hooks (Rat Frontier authoring on the live map).
+    // null = off (the main game never sets it, so behaviour is unchanged).
+    this._nodeEdit = null;
+    this._nodeDrag = null;
     this._cachePan = { x: 0, y: 0 };
     this._cacheZoom = 0;
     this._cacheEpoch = -1;
@@ -1722,6 +1726,34 @@ export class MapRenderer {
     this._scheduleDraw();
   }
   isBackdropVisible() { return this._backdropVisible; }
+
+  // Node editing on the live map. Pass a handler bag to turn it on; null off.
+  //   { active, allowDrag, onPickNode(id)->bool, onMoveNode(id,wx,wy),
+  //     onDropNode(id), onClickNode(id), onClickEmpty(wx,wy) }
+  // The renderer fires these; the caller owns the data mutation. Call redraw()
+  // (live layers reread this.data) or refreshStatic() after mutating.
+  setNodeEdit(opts) { this._nodeEdit = opts || null; if (!opts) this._nodeDrag = null; }
+  redraw() { this._scheduleDraw(); }
+  refreshStatic() { this._invalidateStatic(); this._scheduleDraw(); }
+  // Re-ingest this.data.sites after nodes were added/removed (moves only need
+  // redraw() since the site objects are mutated in place).
+  refreshData() { this._partitionSites(); this._invalidateStatic(); this._scheduleDraw(); }
+  eventToWorld(ev) { return this._eventToWorld(ev); }
+  hitTestNode(wx, wy) { return this._hitTest(wx, wy); }
+  // _hitTest returns the node OBJECT (or null); the edit hooks want its id.
+  _hitNodeId(wx, wy) {
+    const hit = this._hitTest(wx, wy);
+    if (!hit) return null;
+    return typeof hit === 'string' ? hit : (hit.id || hit.id2 || null);
+  }
+  _dispatchEditTap(wp) {
+    const ne = this._nodeEdit;
+    if (!ne || !ne.active) return false;
+    const id = this._hitNodeId(wp.x, wp.y);
+    if (id) { if (ne.onClickNode) ne.onClickNode(id); }
+    else if (ne.onClickEmpty) ne.onClickEmpty(wp.x, wp.y);
+    return true;
+  }
 
   // Zones nest inner -> outer (Mercury innermost). The order drives
   // the derived-assignment rule: a node belongs to the INNERMOST
@@ -3981,6 +4013,17 @@ export class MapRenderer {
           return;
         }
       }
+      // Node-edit: grabbing a node (when drag is enabled) starts a move
+      // instead of a pan. Empty space still pans.
+      if (this._nodeEdit && this._nodeEdit.active && this._nodeEdit.allowDrag) {
+        const wp = this._eventToWorld(ev);
+        const id = this._hitNodeId(wp.x, wp.y);
+        if (id && (!this._nodeEdit.onPickNode || this._nodeEdit.onPickNode(id))) {
+          this._nodeDrag = { id, moved: false };
+          this._nodeGrabConsumed = true;
+          return;
+        }
+      }
       this._dragStart = {
         x: ev.clientX, y: ev.clientY,
         panX: this.pan.x, panY: this.pan.y,
@@ -3991,6 +4034,13 @@ export class MapRenderer {
       if (this._zoneDragVertex != null) {
         const wp = this._eventToWorld(ev);
         this.moveZoneVertex(this._zoneDragVertex, wp.x, wp.y);
+        return;
+      }
+      if (this._nodeDrag) {
+        const wp = this._eventToWorld(ev);
+        this._nodeDrag.moved = true;
+        if (this._nodeEdit && this._nodeEdit.onMoveNode) this._nodeEdit.onMoveNode(this._nodeDrag.id, wp.x, wp.y);
+        this._scheduleDraw();
         return;
       }
       if (!this._dragStart) return;
@@ -4004,6 +4054,10 @@ export class MapRenderer {
     });
     window.addEventListener('mouseup', () => {
       this._dragStart = null;
+      if (this._nodeDrag) {
+        if (this._nodeEdit && this._nodeEdit.onDropNode) this._nodeEdit.onDropNode(this._nodeDrag.id);
+        this._nodeDrag = null;
+      }
       if (this._zoneDragVertex != null) {
         this._zoneDragVertex = null;
         this._recomputeDerivedAssignments(); // moved vertex changed coverage
@@ -4035,6 +4089,12 @@ export class MapRenderer {
           const wp = this._eventToWorld(ev);
           this.addZonePolyPoint(wp.x, wp.y);
         }
+        return;
+      }
+      // Node-edit owns clicks: tap a node (select/connect) or empty (place).
+      if (this._nodeEdit && this._nodeEdit.active) {
+        if (this._nodeGrabConsumed) { this._nodeGrabConsumed = false; return; }
+        this._dispatchEditTap(this._eventToWorld(ev));
         return;
       }
       // Rocket sits on top of the map so test it first; if the
@@ -4114,6 +4174,8 @@ export class MapRenderer {
             const pt = this._eventToWorld(last);
             if (this._zonePaint.active && this.options.zoneEditMode) {
               this.addZonePolyPoint(pt.x, pt.y);
+            } else if (this._nodeEdit && this._nodeEdit.active) {
+              this._dispatchEditTap(pt);          // touch tap -> place/select
             } else {
               const hit = this._hitTest(pt.x, pt.y);
               if (this.options.debug) this._emitDebugClick(pt, hit);

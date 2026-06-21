@@ -83,6 +83,12 @@ export async function ratFrontierAccess(token) {
   return call('GET', '/rat-frontier/access', { token });
 }
 
+// Save authoritative server node-tags from the Rat Frontier map editor.
+// tags = { "<id2>": { lander, half, hazard, aerobrake, season, site_name } }.
+export async function ratSaveNodeTags(token, tags) {
+  return call('POST', '/rat-frontier/node-tags', { token, body: { tags } });
+}
+
 export async function whoami(token) {
   return call('GET', '/profiles/me', { token });
 }

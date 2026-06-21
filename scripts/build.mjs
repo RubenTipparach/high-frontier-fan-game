@@ -97,7 +97,6 @@ function copyInto(rel) {
 copyInto('assets');                                          // rocket PNGs (render.js#assetUrl)
 copyInto('data/site-flags.json');                            // planner-map.js#assetUrl
 copyInto('vendor/hf-mission-planner/assets/data-hf4.json');  // planner-map.js#assetUrl
-copyInto('rat-map-editor.html');                             // Rat Frontier editor (rat-view.js iframe)
 
 // Sanity: every reference the page makes must exist in dist.
 const mustExist = [

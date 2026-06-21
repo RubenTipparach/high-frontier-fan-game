@@ -10,9 +10,9 @@ import { renderCard } from '../card-ui.js';
 import { MapRenderer } from '../render.js';
 import { RAT_PATENTS, RAT_CREW } from '../../../data/rat-frontier/rat-cards.js';
 import { loadRatMap } from './rat-planner-map.js';
+import { attachMapEditor } from './rat-map-edit.js';
 
 const MAP_IMG = assetUrl('assets/rat-frontier/map/alpha-centauri.png');
-const EDITOR_URL = assetUrl('rat-map-editor.html');
 
 let _styleInjected = false;
 function injectStyle() {
@@ -36,8 +36,6 @@ function injectStyle() {
     font-weight:700;margin:6px 2px 2px;text-transform:uppercase;}
   .rat-map-pane{overflow:hidden;}
   .rat-map-pane .browse-map{position:absolute;inset:0;}
-  .rat-edit-pane{overflow:hidden;}
-  .rat-edit-frame{position:absolute;inset:0;width:100%;height:100%;border:0;}
   @media (max-width:720px){
     .rat-topbar{flex-wrap:wrap;gap:6px;padding:6px 8px;}
     .rat-topbar h2{font-size:14px;width:100%;}
@@ -93,6 +91,8 @@ function mapPane() {
     // Mount the pixel-art board as a world-space backdrop (default ON), so the
     // nodes sit over the drawn map instead of the procedural starfield.
     renderer.setBackdropImage(MAP_IMG, { visible: pane._bgOn !== false });
+    // Edit/Annotate live on this map (View / Edit / Annotate overlay bar).
+    pane._editor = attachMapEditor(renderer, loadRatMap(), host);
     requestAnimationFrame(() => { try { renderer.reset(); } catch {} });
     setTimeout(() => { try { renderer.reset(); } catch {} }, 250);
   };
@@ -101,23 +101,6 @@ function mapPane() {
     pane._bgOn = !pane._bgOn;
     if (pane._renderer) pane._renderer.setBackdropVisible(pane._bgOn);
     return pane._bgOn;
-  };
-  return pane;
-}
-
-// Edit/Annotate the board: the standalone map editor (with its own Edit /
-// Annotate modes, node tools, tags + comments) embedded as an iframe so the
-// authoring tool lives right inside the variant view.
-function editPane() {
-  const pane = document.createElement('div');
-  pane.className = 'rat-pane rat-edit-pane';
-  let frame = null;
-  pane._mount = () => {
-    if (frame) return;
-    frame = document.createElement('iframe');
-    frame.className = 'rat-edit-frame';
-    frame.src = EDITOR_URL;
-    pane.appendChild(frame);
   };
   return pane;
 }
@@ -131,20 +114,16 @@ export function mountRatFrontier(container, { onBack } = {}) {
   top.innerHTML = `<h2>🐀 Rat Frontier</h2>
     <button class="rat-tab is-active" data-tab="cards">Cards</button>
     <button class="rat-tab" data-tab="map">Map</button>
-    <button class="rat-tab" data-tab="edit">✏️ Edit</button>
     <button class="rat-tab is-active" id="rat-bg-toggle" hidden>🗺 Map art</button>
     <span class="grow"></span>
     <button class="rat-back">← Back</button>`;
   container.appendChild(top);
 
   const cards = cardsPane();
-  const map = mapPane();
-  const edit = editPane();
+  const map = mapPane();   // the live map carries View / Edit / Annotate modes
   map.style.display = 'none';
-  edit.style.display = 'none';
   container.appendChild(cards);
   container.appendChild(map);
-  container.appendChild(edit);
 
   const bgToggle = top.querySelector('#rat-bg-toggle');
   top.querySelectorAll('.rat-tab[data-tab]').forEach((btn) => {
@@ -153,10 +132,8 @@ export function mountRatFrontier(container, { onBack } = {}) {
       const which = btn.dataset.tab;
       cards.style.display = which === 'cards' ? '' : 'none';
       map.style.display = which === 'map' ? '' : 'none';
-      edit.style.display = which === 'edit' ? '' : 'none';
       bgToggle.hidden = which !== 'map';        // map-art toggle only on the map tab
       if (which === 'map') requestAnimationFrame(() => map._mount());
-      if (which === 'edit') requestAnimationFrame(() => edit._mount());
     });
   });
   bgToggle.addEventListener('click', () => {
