@@ -30,12 +30,22 @@ export function loadRatMap() {
   };
   for (const [a, b] of edges) { addNbr(a, b); addNbr(b, a); }
 
+  // Curved routes: the editor emits `chains` (node-id sequences the renderer
+  // beziers) and `straightEdges` (drawn as lines). Fall back to all-straight
+  // when the data has no chains (e.g. the old auto-extraction).
+  const chains = (ALPHA_CENTAURI_MAP.chains || [])
+    .map((ch) => ch.filter((id) => byId[id]))
+    .filter((ch) => ch.length >= 2);
+  const straightEdges = (ALPHA_CENTAURI_MAP.straightEdges || edges)
+    .filter(([a, b]) => byId[a] && byId[b])
+    .map(([a, b]) => [a, b]);
+
   _cache = {
     sites,
     edges,
     byId,
-    chains: [],                  // no decorative bezier chains (draw straight)
-    straightEdges: edges,
+    chains,
+    straightEdges,
     edgeLabels: {},
     directedEdges: [],
     neighbors,
