@@ -1,0 +1,33 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Rat Frontier card preview</title>
+<style>
+  body{margin:0;background:#241c14;background-image:
+    repeating-linear-gradient(45deg,#2a2118 0 18px,#241c14 18px 36px);
+    font-family:'Trebuchet MS',sans-serif;padding:26px;}
+  h1{color:#fef3c0;font-size:22px;margin:0 0 4px;}
+  .sub{color:#cdb988;font-size:13px;margin:0 0 20px;}
+  .grid{display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start;}
+</style></head>
+<body>
+  <h1>🐀 RAT FRONTIER — card renderer preview</h1>
+  <p class="sub">Rat-skinned port of the HF4 card renderer. Stats from the Rattus Space Program Unity prefabs; pixel art from the .aseprite source.</p>
+  <div class="grid" id="grid"></div>
+  <script type="module">
+    import { RAT_PATENTS, RAT_CREW } from './data/rat-frontier/rat-cards.js';
+    import { renderRatCard } from './js/game/rat-frontier/rat-card-ui.js';
+    const grid = document.getElementById('grid');
+    const show = [
+      RAT_PATENTS.find(c=>c.id==='rat_thr_cheese'),
+      RAT_PATENTS.find(c=>c.id==='rat_thr_fart'),
+      RAT_PATENTS.find(c=>c.id==='rat_rea_moldy'),
+      RAT_PATENTS.find(c=>c.id==='rat_gen_wheel'),
+      RAT_PATENTS.find(c=>c.id==='rat_rad_fridge'),
+      RAT_PATENTS.find(c=>c.id==='rat_rob_laser'),
+      RAT_PATENTS.find(c=>c.id==='rat_rob_drill'),
+      RAT_PATENTS.find(c=>c.id==='rat_ref_bowl'),
+      RAT_CREW.find(c=>c.id==='rat_crew_walter'),
+      RAT_CREW.find(c=>c.id==='rat_crew_elong'),
+    ].filter(Boolean);
+    for (const c of show) grid.appendChild(renderRatCard(c));
+  </script>
+</body></html>
