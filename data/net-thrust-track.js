@@ -79,9 +79,15 @@ export const MAX_WET_MASS = 32;
 
 // The weight class (and its net-thrust modifier) for a given wet
 // mass. Single source of truth for the band rule; the strip
-// renderer and the engine both read this.
+// renderer and the engine both read this. The band is keyed off the
+// integer mass CELL the wet chit sits on, so a fractional wet mass
+// (e.g. 1 8/9, a tank with a sub-unit remainder) FLOORS to its cell:
+// 1 8/9 is still WISP (cell 1), it does NOT round up into PROBE
+// (cell 2). This matches the fuel-strip renderer (bandOf also
+// floors) and the published Net Thrust track, where the fuel-step
+// sub-positions between cells N and N+1 are stacked above cell N.
 export function weightClassForMass(mass) {
-  const m = Math.max(1, Math.round(mass || 1));
+  const m = Math.max(1, Math.floor((mass || 1) + 1e-9));
   for (const wc of WEIGHT_CLASSES) {
     if (m >= wc.massMin && m <= wc.massMax) return wc;
   }
