@@ -40,9 +40,10 @@
         loc.replace(sandbox[1] + loc.search + loc.hash);
         return;
       }
-      // /lobby and bare /sandbox - stash the landing intent so boot
-      // routes to the right view after the bounce to root.
-      var view = loc.pathname.match(/^(.*\/)(lobby|sandbox)(?:\/[^/]*)?\/?$/);
+      // /lobby, bare /sandbox, and /rat-frontier - stash the landing intent
+      // so boot routes to the right view after the bounce to root (this is
+      // what keeps a version-reload of /rat-frontier from dropping to lobby).
+      var view = loc.pathname.match(/^(.*\/)(lobby|sandbox|rat-frontier)(?:\/[^/]*)?\/?$/);
       if (view) {
         try { sessionStorage.setItem('hf-landing-redirect', view[2]); } catch (e) { /* private mode */ }
         loc.replace(view[1] + loc.search + loc.hash);

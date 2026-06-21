@@ -46,6 +46,19 @@
     border-radius:7px; padding:7px; font-size:13px; font-weight:600; cursor:pointer; }
   .modebtn.active{ background:#3aa0ff; color:#04101f; border-color:#fff3; }
   #mode-annotate.active{ background:#e0218a; color:#fff; }
+  /* Mobile: stack the map on top (big) and the controls below in a scrollable
+     panel, with the Edit/Annotate switch + tools pinned at the top so they're
+     always reachable. */
+  @media (max-width:720px){
+    #app{ flex-direction:column; }
+    #stage{ order:1; flex:1 1 auto; min-height:52vh; }
+    #side{ order:2; width:100%; max-height:48vh; border-right:0; border-top:2px solid var(--line);
+      position:relative; }
+    .modeswitch{ position:sticky; top:0; z-index:5; background:var(--panel); padding:4px 0; }
+    .tools{ grid-template-columns:1fr 1fr 1fr; }
+    button.tool{ text-align:center; }
+    button.tool .k{ display:none; }
+  }
 </style>
 </head>
 <body>

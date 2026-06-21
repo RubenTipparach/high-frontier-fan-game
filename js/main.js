@@ -54,6 +54,8 @@ function setUrlForView(view) {
       // showView's URL block. Each solo game routes to /sandbox/<id>.
       const sid = currentSandboxId();
       path = base + 'sandbox' + (sid ? '/' + sid : '');
+    } else if (view === 'view-rat-frontier') {
+      path = base + 'rat-frontier';
     } else if (view === 'view-lobby-list' || view === 'view-create-lobby') {
       path = base + 'lobby';
     } else if (view === 'view-lobby') {
@@ -817,9 +819,10 @@ function readLandingIntent() {
       sessionStorage.removeItem('hf-landing-redirect');
       if (stashed === 'sandbox') return 'sandbox';
       if (stashed === 'lobby') return 'lobby';
+      if (stashed === 'rat-frontier') return 'rat-frontier';
     }
   } catch { /* private mode */ }
-  const m = window.location.pathname.match(/\/(lobby|sandbox)(?:\/[^/]*)?\/?$/);
+  const m = window.location.pathname.match(/\/(lobby|sandbox|rat-frontier)(?:\/[^/]*)?\/?$/);
   return m ? m[1] : null;
 }
 
@@ -1017,6 +1020,15 @@ async function boot() {
           } else {
             mountBrowse({});
             showView('view-browse');
+          }
+        } else if (landing === 'rat-frontier') {
+          // Direct /rat-frontier load (or a version-reload that kept the
+          // path). Admins re-open the variant; anyone else lands on the lobby.
+          if (activeProfile() && activeProfile().isAdmin) {
+            console.log('[hf:boot] landing on rat-frontier');
+            openRatFrontier();
+          } else {
+            showView('view-lobby-list');
           }
         } else {
           console.log('[hf:boot] landing on lobby (default)');

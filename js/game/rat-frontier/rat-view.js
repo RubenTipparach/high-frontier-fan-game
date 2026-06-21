@@ -12,6 +12,7 @@ import { RAT_PATENTS, RAT_CREW } from '../../../data/rat-frontier/rat-cards.js';
 import { loadRatMap } from './rat-planner-map.js';
 
 const MAP_IMG = assetUrl('assets/rat-frontier/map/alpha-centauri.png');
+const EDITOR_URL = assetUrl('rat-map-editor.html');
 
 let _styleInjected = false;
 function injectStyle() {
@@ -35,6 +36,13 @@ function injectStyle() {
     font-weight:700;margin:6px 2px 2px;text-transform:uppercase;}
   .rat-map-pane{overflow:hidden;}
   .rat-map-pane .browse-map{position:absolute;inset:0;}
+  .rat-edit-pane{overflow:hidden;}
+  .rat-edit-frame{position:absolute;inset:0;width:100%;height:100%;border:0;}
+  @media (max-width:720px){
+    .rat-topbar{flex-wrap:wrap;gap:6px;padding:6px 8px;}
+    .rat-topbar h2{font-size:14px;width:100%;}
+    .rat-tab{padding:6px 10px;font-size:12px;}
+  }
   `;
   const s = document.createElement('style');
   s.textContent = css;
@@ -97,6 +105,23 @@ function mapPane() {
   return pane;
 }
 
+// Edit/Annotate the board: the standalone map editor (with its own Edit /
+// Annotate modes, node tools, tags + comments) embedded as an iframe so the
+// authoring tool lives right inside the variant view.
+function editPane() {
+  const pane = document.createElement('div');
+  pane.className = 'rat-pane rat-edit-pane';
+  let frame = null;
+  pane._mount = () => {
+    if (frame) return;
+    frame = document.createElement('iframe');
+    frame.className = 'rat-edit-frame';
+    frame.src = EDITOR_URL;
+    pane.appendChild(frame);
+  };
+  return pane;
+}
+
 export function mountRatFrontier(container, { onBack } = {}) {
   injectStyle();
   container.innerHTML = '';
@@ -105,27 +130,33 @@ export function mountRatFrontier(container, { onBack } = {}) {
   top.className = 'rat-topbar';
   top.innerHTML = `<h2>🐀 Rat Frontier</h2>
     <button class="rat-tab is-active" data-tab="cards">Cards</button>
-    <button class="rat-tab" data-tab="map">Alpha Centauri map</button>
+    <button class="rat-tab" data-tab="map">Map</button>
+    <button class="rat-tab" data-tab="edit">✏️ Edit</button>
     <button class="rat-tab is-active" id="rat-bg-toggle" hidden>🗺 Map art</button>
     <span class="grow"></span>
-    <button class="rat-back">← Back to menu</button>`;
+    <button class="rat-back">← Back</button>`;
   container.appendChild(top);
 
   const cards = cardsPane();
   const map = mapPane();
+  const edit = editPane();
   map.style.display = 'none';
+  edit.style.display = 'none';
   container.appendChild(cards);
   container.appendChild(map);
+  container.appendChild(edit);
 
   const bgToggle = top.querySelector('#rat-bg-toggle');
   top.querySelectorAll('.rat-tab[data-tab]').forEach((btn) => {
     btn.addEventListener('click', () => {
       top.querySelectorAll('.rat-tab[data-tab]').forEach((b) => b.classList.toggle('is-active', b === btn));
-      const isMap = btn.dataset.tab === 'map';
-      cards.style.display = isMap ? 'none' : '';
-      map.style.display = isMap ? '' : 'none';
-      bgToggle.hidden = !isMap;                 // map-art toggle only on the map tab
-      if (isMap) requestAnimationFrame(() => map._mount());
+      const which = btn.dataset.tab;
+      cards.style.display = which === 'cards' ? '' : 'none';
+      map.style.display = which === 'map' ? '' : 'none';
+      edit.style.display = which === 'edit' ? '' : 'none';
+      bgToggle.hidden = which !== 'map';        // map-art toggle only on the map tab
+      if (which === 'map') requestAnimationFrame(() => map._mount());
+      if (which === 'edit') requestAnimationFrame(() => edit._mount());
     });
   });
   bgToggle.addEventListener('click', () => {
