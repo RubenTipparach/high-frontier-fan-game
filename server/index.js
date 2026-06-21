@@ -214,21 +214,52 @@ app.get('/healthz', (_req, res) => {
 // path the admin already has - a Discord account linked to this profile whose
 // id is on the server admin allowlist (ADMIN_DISCORD_ID(S)). So whoever is
 // already a server admin gets Rat Frontier with no extra secret.
-app.get('/rat-frontier/access', requireProfile, (req, res) => {
-  let allowed = isRatAdmin(req.profile.name);
-  // Primary cross-origin path: match the signed-in profile's linked Discord
-  // identity against the admin allowlist (the game client sends a Bearer
-  // token, not the admin cookie, so this is what works from GitHub Pages).
-  if (!allowed) {
+// Is this profile a Rat Frontier admin? Three ways in: the RAT_ADMIN_NAMES
+// name flag, a Discord account linked to this profile whose id is on the
+// server admin allowlist (the cross-origin path - the game client sends a
+// Bearer token, not the admin cookie), or a live admin-portal cookie session
+// (same-origin). Shared by /rat-frontier/access, /profiles/me, and the
+// node-tags save below.
+function profileIsAdmin(profile, req) {
+  if (profile && isRatAdmin(profile.name)) return true;
+  if (profile) {
     const acct = db
       .prepare('SELECT discord_id FROM discord_accounts WHERE profile_id = ?')
-      .get(req.profile.id);
-    if (acct && isAdminDiscordId(acct.discord_id)) allowed = true;
+      .get(profile.id);
+    if (acct && isAdminDiscordId(acct.discord_id)) return true;
   }
-  // Also honour a live admin-portal session when the cookie is present
-  // (same-origin / direct API use; CORS credentials are off cross-origin).
-  if (!allowed && adminFromRequest(req)) allowed = true;
-  res.json({ allowed, profile: req.profile.name });
+  if (req && adminFromRequest(req)) return true;
+  return false;
+}
+
+app.get('/rat-frontier/access', requireProfile, (req, res) => {
+  res.json({ allowed: profileIsAdmin(req.profile, req), profile: req.profile.name });
+});
+
+// Assign authoritative server node-tags from the Rat Frontier map editor.
+// Bearer-authed + admin-checked (the editor runs on GitHub Pages and can't
+// use the admin cookie), so the editor writes the real node_tags store with
+// the admin's login - applied immediately. Body: { tags: { "<id2>": { lander,
+// half, hazard, aerobrake, season, site_name } } }. An entry with every flag
+// off and no season clears the override (reverts to the baseline tag).
+app.post('/rat-frontier/node-tags', requireProfile, (req, res) => {
+  if (!profileIsAdmin(req.profile, req)) return res.status(403).json({ error: 'not_admin' });
+  const tags = (req.body && req.body.tags) || {};
+  let saved = 0, cleared = 0;
+  for (const siteId of Object.keys(tags)) {
+    if (!SITE_ID_RE.test(siteId)) continue;
+    const t = tags[siteId] || {};
+    const empty = !t.lander && !t.half && !t.hazard && !t.aerobrake
+      && !SEASON_KEYS.includes(t.season);
+    if (empty) {
+      db.prepare('DELETE FROM node_tags WHERE site_id = ?').run(siteId);
+      cleared++;
+    } else {
+      saveNodeTag(siteId, String(t.site_name || ''), t);
+      saved++;
+    }
+  }
+  res.json({ ok: true, saved, cleared });
 });
 
 // Server-wide announcement banner (shown atop global chat). Seeded once
@@ -503,9 +534,7 @@ app.get('/profiles/me', requireProfile, (req, res) => {
   // -> the allowlist, and we match it against THIS profile's linked Discord
   // id (or the RAT_ADMIN_NAMES name flag, or a live admin-portal cookie).
   // The raw Discord id is never sent to the client, so this can't be spoofed.
-  const isAdmin = isRatAdmin(req.profile.name)
-    || (acct && isAdminDiscordId(acct.discord_id))
-    || !!adminFromRequest(req);
+  const isAdmin = profileIsAdmin(req.profile, req);
   res.json({
     id: req.profile.id,
     name: req.profile.name,

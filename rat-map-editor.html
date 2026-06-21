@@ -35,6 +35,12 @@
     border-radius:5px; font:11px/1.3 monospace; padding:5px; }
   #status{ font-size:11px; color:#7c8; min-height:14px; }
   .legend{ font-size:11px; color:#9aa; display:flex; align-items:center; gap:4px; margin:2px 0; }
+  .tagrow{ display:grid; grid-template-columns:1fr 1fr; gap:2px; }
+  .tg{ font-size:11px; color:#cdd; display:flex; align-items:center; gap:4px; margin:0; }
+  .tg input{ width:auto; }
+  .comments{ max-height:120px; overflow:auto; font-size:11px; color:#bcd; margin-bottom:4px; }
+  .comments .c{ border-top:1px solid var(--line); padding:3px 0; }
+  .comments .c .a{ color:#8a86a8; }
 </style>
 </head>
 <body>
@@ -60,6 +66,22 @@
         <label>Hydration (0-4)</label><input id="p-hyd" type="number" min="0" max="4" />
         <label>Site size (1-6)</label><input id="p-size" type="number" min="1" max="6" />
       </div>
+      <label style="margin-top:8px">Server tags (apply on Save)</label>
+      <div class="tagrow">
+        <label class="tg"><input type="checkbox" data-tag="lander"> Lander</label>
+        <label class="tg"><input type="checkbox" data-tag="half"> Half</label>
+        <label class="tg"><input type="checkbox" data-tag="hazard"> Hazard</label>
+        <label class="tg"><input type="checkbox" data-tag="aerobrake"> Aerobrake</label>
+      </div>
+      <label>Season</label>
+      <select id="p-season">
+        <option value="">(none)</option><option value="red">Red</option>
+        <option value="yellow">Yellow</option><option value="blue">Blue</option>
+      </select>
+      <label style="margin-top:8px">Comments</label>
+      <div id="p-comments" class="comments"></div>
+      <input id="p-comment" placeholder="Add a comment..." />
+      <div class="row" style="margin-top:4px"><button id="p-comment-add">Post comment</button></div>
       <div class="row" style="margin-top:6px"><button id="p-del">Delete node</button></div>
     </div>
 
@@ -82,6 +104,10 @@
         <button id="btn-export" class="primary">Export .js</button>
         <button id="btn-copy">Copy JSON</button>
       </div>
+      <div class="row" style="margin-top:5px">
+        <button id="btn-save-tags" class="primary" style="flex:1">💾 Save tags → server</button>
+      </div>
+      <div id="acct" class="hint" style="margin-top:4px"></div>
       <label>Import JSON (paste + Load)</label>
       <textarea id="io"></textarea>
       <div class="row"><button id="btn-import">Load from box</button></div>
@@ -142,7 +168,22 @@ const svg = document.getElementById('svg');
 const stage = document.getElementById('stage');
 
 // ---------- helpers ----------
-const nid = () => 'n' + (state.nextId++);
+// Stable, server-safe ids (used as the node id, the map id2, the node_tags
+// site_id, AND the site_annotations site_id - one key for everything).
+const nid = (type) => 'rat_' + (type || 'n') + '_' + (state.nextId++);
+const API_BASE = (document.querySelector('meta[name="hf-api-base"]')?.content
+  || 'https://high-frontier-fan-game.fly.dev').replace(/\/+$/, '');
+function myToken(){ try { return JSON.parse(localStorage.getItem('hf.profile')||'null')?.token || null; } catch { return null; } }
+const SEASON_RING = { red:'#ef4444', yellow:'#facc15', blue:'#60a5fa' };
+// Tag -> overlay glyph (mirrors data/node-tags.js#spriteForTags precedence).
+function tagGlyph(t){
+  if(!t) return '';
+  if(t.aerobrake) return '🪂';
+  if(t.lander && t.hazard) return '🚀☠';
+  if(t.lander) return '🚀';
+  if(t.hazard) return '☠';
+  return '';
+}
 function pushUndo(){ undoStack.push(JSON.stringify(state)); if(undoStack.length>60) undoStack.shift(); }
 function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch{} }
 function setStatus(t){ document.getElementById('status').textContent = t; }
@@ -223,14 +264,22 @@ function render(){
     g.appendChild(el);
     if(n.name){ const tx=document.createElementNS(NS,'text'); tx.setAttribute('x',n.x+7); tx.setAttribute('y',n.y+3);
       tx.setAttribute('font-size',6); tx.setAttribute('fill','#cdd'); tx.textContent=n.name; g.appendChild(tx); }
+    // tag context: season ring + sprite glyph, so the node changes by tag
+    const tg=n.tags||{};
+    if(SEASON_RING[tg.season]){ const ring=document.createElementNS(NS,'circle'); ring.setAttribute('cx',n.x);
+      ring.setAttribute('cy',n.y); ring.setAttribute('r',(t.r||6)+2.5); ring.setAttribute('fill','none');
+      ring.setAttribute('stroke',SEASON_RING[tg.season]); ring.setAttribute('stroke-width',1.4); g.appendChild(ring); }
+    const gl=tagGlyph(tg);
+    if(gl){ const tx=document.createElementNS(NS,'text'); tx.setAttribute('x',n.x); tx.setAttribute('y',n.y-7);
+      tx.setAttribute('text-anchor','middle'); tx.setAttribute('font-size',7); tx.textContent=gl; g.appendChild(tx); }
   }
   document.getElementById('status').dataset.k='';
 }
 
 // ---------- interaction ----------
 function placeNode(type, p){
-  const id=nid(); state.nodes[id]={ id, type, x:snap(p.x), y:snap(p.y),
-    name:'', spectralType: type==='site'?'C':undefined,
+  const id=nid(type); state.nodes[id]={ id, type, x:snap(p.x), y:snap(p.y),
+    name:'', tags:{}, spectralType: type==='site'?'C':undefined,
     hydration: type==='site'?1:undefined, siteSize: type==='site'?3:undefined };
   return id;
 }
@@ -248,8 +297,21 @@ function selectNode(id){
   document.getElementById('p-site-only').style.display = n.type==='site'?'':'none';
   if(n.type==='site'){ document.getElementById('p-spectral').value=n.spectralType||'C';
     document.getElementById('p-hyd').value=n.hydration??1; document.getElementById('p-size').value=n.siteSize??3; }
+  const tg=n.tags||(n.tags={});
+  document.querySelectorAll('#nodeprops [data-tag]').forEach(cb=>{ cb.checked=!!tg[cb.dataset.tag]; });
+  document.getElementById('p-season').value=tg.season||'';
+  loadComments(id);
   render();
 }
+
+// tag checkbox + season -> node.tags (aerobrake implies hazard, mirroring the server)
+document.querySelectorAll('#nodeprops [data-tag]').forEach(cb=>{
+  cb.addEventListener('change', ()=>{ if(!selected) return; const tg=state.nodes[selected].tags||(state.nodes[selected].tags={});
+    tg[cb.dataset.tag]=cb.checked; if(tg.aerobrake) tg.hazard=true;
+    document.querySelector('#nodeprops [data-tag="hazard"]').checked=!!tg.hazard; save(); render(); });
+});
+document.getElementById('p-season').addEventListener('change', e=>{ if(!selected) return;
+  (state.nodes[selected].tags||(state.nodes[selected].tags={})).season=e.target.value||undefined; save(); render(); });
 
 svg.addEventListener('dblclick', e=>{ if(curve){ finishCurve(); } });
 
@@ -336,23 +398,18 @@ document.getElementById('btn-undo').onclick=()=>{ const s=undoStack.pop(); if(s)
 function buildExport(){
   const nx=x=>Math.round(x/SRC_W*VIEW_W*10)/10, ny=y=>Math.round(y/SRC_H*VIEW_H*10)/10;
   const sites=[]; const order=Object.keys(state.nodes);
-  let si=1, bi=1, li=1, hi=1, oi=1, ui=1, di=1;
-  const idmap={};
-  for(const id of order){ const n=state.nodes[id]; let outId;
-    switch(n.type){ case 'site': outId=`ac_site_${si++}`; break; case 'sun': outId=`ac_sun_${ui++}`; break;
-      case 'burn': outId=`ac_burn_${bi++}`; break; case 'lagrange': outId=`ac_lag_${li++}`; break;
-      case 'hohmann': outId=`ac_hoh_${hi++}`; break; case 'orbit': outId=`ac_hub_${oi++}`; break;
-      default: outId=`ac_dec_${di++}`; }
-    idmap[id]=outId; }
+  // node ids are already stable + server-safe (rat_<type>_<n>); they ARE the
+  // id2 / node_tags site_id / annotations site_id, so no remap.
   for(const id of order){ const n=state.nodes[id]; const t=TYPE[n.type]||TYPE.burn;
-    const rec={ id:idmap[id], id2:idmap[id], serverId: t.wp?null:idmap[id], name:n.name||'',
+    const rec={ id, id2:id, serverId: t.wp?null:id, name:n.name||'',
       type:n.type, isWaypoint:!!t.wp, isDecorative:n.type==='decorative', x:nx(n.x), y:ny(n.y),
       srcPx:[Math.round(n.x*10)/10, Math.round(n.y*10)/10] };
     if(n.type==='site'){ rec.spectralType=n.spectralType||'C'; rec.hydration=n.hydration??1; rec.siteSize=n.siteSize??3; rec.landing=1; }
+    const tg=n.tags||{}; if(tg.lander||tg.half||tg.hazard||tg.aerobrake||tg.season){
+      rec.tags={ lander:!!tg.lander, half:!!tg.half, hazard:!!tg.hazard, aerobrake:!!tg.aerobrake, season:tg.season||null }; }
     sites.push(rec); }
-  const straightEdges = state.straight.map(([a,b])=>[idmap[a],idmap[b]]).filter(([a,b])=>a&&b);
-  const chains = state.curves.map(ids=>ids.map(i=>idmap[i]).filter(Boolean)).filter(ids=>ids.length>=2);
-  // full edge list (straight + every consecutive pair in each chain) for neighbours/pathfinding
+  const straightEdges = state.straight.filter(([a,b])=>state.nodes[a]&&state.nodes[b]);
+  const chains = state.curves.map(ids=>ids.filter(i=>state.nodes[i])).filter(ids=>ids.length>=2);
   const edgeSet=new Set(), edges=[];
   const addE=(a,b)=>{ const k=a<b?a+'|'+b:b+'|'+a; if(!edgeSet.has(k)){ edgeSet.add(k); edges.push([a,b]); } };
   for(const [a,b] of straightEdges) addE(a,b);
@@ -385,21 +442,73 @@ document.getElementById('btn-import').onclick=()=>{
 function importData(data){
   pushUndo();
   state={nodes:{},straight:[],curves:[],nextId:1};
-  const back={};
-  const ix=x=>x*SRC_W/VIEW_W, iy=y=>y*SRC_H/VIEW_H;
-  for(const s of (data.sites||[])){ const id=nid(); back[s.id]=id;
+  const ix=x=>x*SRC_W/VIEW_W, iy=y=>y*SRC_H/VIEW_H; let maxN=0;
+  for(const s of (data.sites||[])){ const id=s.id||nid(s.type);
     const px = s.srcPx ? s.srcPx[0] : ix(s.x), py = s.srcPx ? s.srcPx[1] : iy(s.y);
     state.nodes[id]={ id, type:s.type||'burn', x:px, y:py, name:s.name||'',
-      spectralType:s.spectralType, hydration:s.hydration, siteSize:s.siteSize }; }
-  for(const [a,b] of (data.straightEdges||data.edges||[])){ if(back[a]&&back[b]) state.straight.push([back[a],back[b]]); }
-  for(const ch of (data.chains||[])){ const ids=ch.map(i=>back[i]).filter(Boolean); if(ids.length>=2) state.curves.push(ids); }
+      tags: s.tags? {...s.tags}:{}, spectralType:s.spectralType, hydration:s.hydration, siteSize:s.siteSize };
+    const m=/_(\d+)$/.exec(id); if(m) maxN=Math.max(maxN, +m[1]); }
+  state.nextId=maxN+1;
+  for(const [a,b] of (data.straightEdges||data.edges||[])){ if(state.nodes[a]&&state.nodes[b]) state.straight.push([a,b]); }
+  for(const ch of (data.chains||[])){ const ids=ch.filter(i=>state.nodes[i]); if(ids.length>=2) state.curves.push(ids); }
   selectNode(null); save(); render(); setStatus(`Loaded ${Object.keys(state.nodes).length} nodes`);
 }
+
+// ---------- server (tags + comments) ----------
+async function api(path, opts={}){
+  const token=myToken();
+  let r; try{ r=await fetch(API_BASE+path,{ ...opts, headers:{ 'content-type':'application/json',
+    ...(token?{authorization:'Bearer '+token}:{}), ...(opts.headers||{}) } }); }
+  catch{ return { ok:false, status:0 }; }
+  let data=null; try{ data=await r.json(); }catch{}
+  return { ok:r.ok, status:r.status, data };
+}
+function escapeHtml(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function refreshAcct(){
+  const el=document.getElementById('acct'); const token=myToken();
+  if(!token){ el.textContent='Not signed in (sign in on the game site in this browser, then reload).'; el.style.color='#f88'; return; }
+  api('/profiles/me').then(r=>{ if(r.ok && r.data){ const adm=r.data.isAdmin;
+    el.textContent=(adm?'✓ Admin @':'Signed in @')+r.data.name+(adm?' - can save server tags':' - NOT admin, saves 403');
+    el.style.color=adm?'#7c8':'#fb8'; } else { el.textContent='Session check failed ('+r.status+')'; el.style.color='#f88'; } });
+}
+async function saveTags(){
+  if(!myToken()){ setStatus('Sign in on the game site first (same browser).'); return; }
+  const tags={};
+  for(const id in state.nodes){ const n=state.nodes[id]; const tg=n.tags||{};
+    tags[id]={ lander:!!tg.lander, half:!!tg.half, hazard:!!tg.hazard, aerobrake:!!tg.aerobrake,
+      season:tg.season||null, site_name:n.name||n.type }; }
+  setStatus('Saving tags to server...');
+  const r=await api('/rat-frontier/node-tags',{ method:'POST', body:JSON.stringify({ tags }) });
+  if(r.ok){ setStatus(`Saved: ${r.data.saved} tagged, ${r.data.cleared} cleared - applied now.`); }
+  else if(r.status===403){ setStatus('Not an admin on this server - tags not saved.'); }
+  else setStatus('Save failed ('+r.status+').');
+}
+async function loadComments(id){
+  const box=document.getElementById('p-comments'); box.innerHTML='';
+  if(!myToken()){ box.innerHTML='<div class="hint">sign in to read/post comments</div>'; return; }
+  const r=await api('/sites/'+encodeURIComponent(id)+'/annotations');
+  if(r.ok && r.data && r.data.messages){ for(const m of r.data.messages){ const d=document.createElement('div');
+    d.className='c'; d.innerHTML=`<span class="a">@${escapeHtml(m.author||'?')}:</span> ${escapeHtml(m.body)}`; box.appendChild(d); }
+    if(!r.data.messages.length) box.innerHTML='<div class="hint">no comments yet</div>'; }
+  else box.innerHTML='<div class="hint">could not load comments</div>';
+}
+async function addComment(){
+  if(!selected) return; const inp=document.getElementById('p-comment'); const body=inp.value.trim(); if(!body) return;
+  if(!myToken()){ setStatus('Sign in to post comments.'); return; }
+  const n=state.nodes[selected];
+  const r=await api('/sites/'+encodeURIComponent(selected)+'/annotations',{ method:'POST',
+    body:JSON.stringify({ kind:'message', body, siteName:n.name||n.type }) });
+  if(r.ok){ inp.value=''; loadComments(selected); setStatus('Comment posted.'); } else setStatus('Comment failed ('+r.status+').');
+}
+document.getElementById('btn-save-tags').onclick=saveTags;
+document.getElementById('p-comment-add').onclick=addComment;
+document.getElementById('p-comment').addEventListener('keydown', e=>{ if(e.key==='Enter') addComment(); });
 
 // ---------- boot ----------
 try{ const s=localStorage.getItem(LS_KEY); if(s) state=JSON.parse(s); }catch{}
 window.addEventListener('resize', render);
 fit();
+refreshAcct();
 setStatus('Ready. Pick a tool and click the board. Space-drag or right-drag to pan, wheel to zoom.');
 </script>
 </body>

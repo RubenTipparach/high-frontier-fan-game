@@ -5,11 +5,18 @@
 // edgeLabels, directedEdges, neighbors, mode }.
 
 import { ALPHA_CENTAURI_MAP } from '../../../data/rat-frontier/alpha-centauri-map.js';
+import { NODE_TAGS } from '../../../data/node-tags.js';
 
 let _cache = null;
 
 export function loadRatMap() {
   if (_cache) return _cache;
+  // Stamp any hand-authored node tags (from the editor) into NODE_TAGS so the
+  // ORIGINAL renderer's sprite logic (spriteForTags) draws the lander / hazard
+  // / aerobrake markers + season ring on rat nodes, keyed by the node's id2.
+  for (const s of ALPHA_CENTAURI_MAP.sites) {
+    if (s.tags) NODE_TAGS[s.id2] = { ...(NODE_TAGS[s.id2] || {}), ...s.tags };
+  }
   const sites = ALPHA_CENTAURI_MAP.sites.map((s) => ({
     ...s,
     id2: s.id2 || s.id,
