@@ -2908,6 +2908,9 @@ const SEASON_OPTIONS = [
   { key: 'red',    label: 'Red',    color: '#ef4444' },
   { key: 'yellow', label: 'Yellow', color: '#facc15' },
   { key: 'blue',   label: 'Blue',   color: '#60a5fa' },
+  // Rat Frontier adds two seasons.
+  { key: 'green',  label: 'Green',       color: '#22c55e' },
+  { key: 'beige',  label: 'Brown-beige', color: '#c2a878' },
 ];
 const SEASON_KEYS = SEASON_OPTIONS.map((s) => s.key);
 

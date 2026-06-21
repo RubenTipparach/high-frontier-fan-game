@@ -525,6 +525,9 @@ const SYNODIC_COLOURS = {
   red:    '#ef4444',
   yellow: '#facc15',
   blue:   '#60a5fa',
+  // Rat Frontier seasons.
+  green:  '#22c55e',
+  beige:  '#c2a878',
 };
 
 // Tiny "#rrggbb" → "rgba(r, g, b, a)" helper. Used to dim the

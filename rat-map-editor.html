@@ -41,22 +41,40 @@
   .comments{ max-height:120px; overflow:auto; font-size:11px; color:#bcd; margin-bottom:4px; }
   .comments .c{ border-top:1px solid var(--line); padding:3px 0; }
   .comments .c .a{ color:#8a86a8; }
+  .modeswitch{ display:flex; gap:5px; }
+  .modebtn{ flex:1; background:#2a2540; color:var(--ink); border:1px solid transparent;
+    border-radius:7px; padding:7px; font-size:13px; font-weight:600; cursor:pointer; }
+  .modebtn.active{ background:#3aa0ff; color:#04101f; border-color:#fff3; }
+  #mode-annotate.active{ background:#e0218a; color:#fff; }
 </style>
 </head>
 <body>
 <div id="app">
   <div id="side">
     <h1>🐀 Alpha Centauri editor</h1>
-    <div class="hint">Place nodes, then connect them. Straight or curved routes. Export the map data the game's MapRenderer draws.</div>
+    <div class="hint" id="mode-hint">Edit mode: place / move nodes, connect them, draw curves.</div>
+
+    <div class="modeswitch">
+      <button id="mode-edit" class="modebtn active">✏️ Edit</button>
+      <button id="mode-annotate" class="modebtn">🏷️ Annotate</button>
+    </div>
 
     <div class="grp">
-      <h2>Tools</h2>
+      <h2 id="tools-title">Tools</h2>
       <div class="tools" id="toolbar"></div>
     </div>
 
     <div class="grp" id="nodeprops" style="display:none">
       <h2>Selected node</h2>
       <label>Name</label><input id="p-name" />
+      <div id="p-type-wrap">
+        <label>Node type (annotate)</label>
+        <select id="p-type">
+          <option value="site">Site</option><option value="sun">Sun</option>
+          <option value="burn">Burn</option><option value="lagrange">Lagrange</option>
+          <option value="hohmann">Hohmann</option><option value="orbit">Orbit hub</option>
+        </select>
+      </div>
       <div id="p-site-only">
         <label>Spectral type</label>
         <select id="p-spectral">
@@ -66,22 +84,25 @@
         <label>Hydration (0-4)</label><input id="p-hyd" type="number" min="0" max="4" />
         <label>Site size (1-6)</label><input id="p-size" type="number" min="1" max="6" />
       </div>
-      <label style="margin-top:8px">Server tags (apply on Save)</label>
-      <div class="tagrow">
-        <label class="tg"><input type="checkbox" data-tag="lander"> Lander</label>
-        <label class="tg"><input type="checkbox" data-tag="half"> Half</label>
-        <label class="tg"><input type="checkbox" data-tag="hazard"> Hazard</label>
-        <label class="tg"><input type="checkbox" data-tag="aerobrake"> Aerobrake</label>
+      <div id="p-annotate">
+        <label style="margin-top:8px">Server tags (apply on Save)</label>
+        <div class="tagrow">
+          <label class="tg"><input type="checkbox" data-tag="lander"> Lander</label>
+          <label class="tg"><input type="checkbox" data-tag="half"> Half</label>
+          <label class="tg"><input type="checkbox" data-tag="hazard"> Hazard</label>
+          <label class="tg"><input type="checkbox" data-tag="aerobrake"> Aerobrake</label>
+        </div>
+        <label>Season</label>
+        <select id="p-season">
+          <option value="">(none)</option><option value="red">Red</option>
+          <option value="yellow">Yellow</option><option value="blue">Blue</option>
+          <option value="green">Green</option><option value="beige">Brown-beige</option>
+        </select>
+        <label style="margin-top:8px">Comments</label>
+        <div id="p-comments" class="comments"></div>
+        <input id="p-comment" placeholder="Add a comment..." />
+        <div class="row" style="margin-top:4px"><button id="p-comment-add">Post comment</button></div>
       </div>
-      <label>Season</label>
-      <select id="p-season">
-        <option value="">(none)</option><option value="red">Red</option>
-        <option value="yellow">Yellow</option><option value="blue">Blue</option>
-      </select>
-      <label style="margin-top:8px">Comments</label>
-      <div id="p-comments" class="comments"></div>
-      <input id="p-comment" placeholder="Add a comment..." />
-      <div class="row" style="margin-top:4px"><button id="p-comment-add">Post comment</button></div>
       <div class="row" style="margin-top:6px"><button id="p-del">Delete node</button></div>
     </div>
 
@@ -147,16 +168,20 @@ const TYPE = {
 };
 const SPECTRAL_FILL = { C:'#fbbf24', S:'#fbbf24', M:'#9ca3af', V:'#f97316', B:'#60a5fa', D:'#67e8f9', H:'#0ea5e9' };
 
+// [id, label, key, mode] - mode 'edit' tools only show in Edit; 'both' shows
+// in both. Annotate mode is select-only (you pick a node, then change its type
+// / tags / comments in the panel).
 const TOOLS = [
-  ['select','Move',  'V'], ['delete','Delete','X'],
-  ['site','Site',    'S'], ['sun','Sun','U'],
-  ['burn','Burn',    'B'], ['lagrange','Lagrange','L'],
-  ['hohmann','Hohmann','H'], ['orbit','Orbit hub','O'],
-  ['edge','Straight','E'], ['curve','Curve','C'],
+  ['select','Select','V','both'], ['delete','Delete','X','edit'],
+  ['site','Site',    'S','edit'], ['sun','Sun','U','edit'],
+  ['burn','Burn',    'B','edit'], ['lagrange','Lagrange','L','edit'],
+  ['hohmann','Hohmann','H','edit'], ['orbit','Orbit hub','O','edit'],
+  ['edge','Straight','E','edit'], ['curve','Curve','C','edit'],
 ];
 
 let state = { nodes:{}, straight:[], curves:[], nextId:1 };
 let cam = { s:1, tx:0, ty:0 };
+let mode = 'edit';         // 'edit' (structure) | 'annotate' (type/tags/comments)
 let tool = 'burn';
 let selected = null;       // node id
 let pending = null;        // edge start id
@@ -174,7 +199,7 @@ const nid = (type) => 'rat_' + (type || 'n') + '_' + (state.nextId++);
 const API_BASE = (document.querySelector('meta[name="hf-api-base"]')?.content
   || 'https://high-frontier-fan-game.fly.dev').replace(/\/+$/, '');
 function myToken(){ try { return JSON.parse(localStorage.getItem('hf.profile')||'null')?.token || null; } catch { return null; } }
-const SEASON_RING = { red:'#ef4444', yellow:'#facc15', blue:'#60a5fa' };
+const SEASON_RING = { red:'#ef4444', yellow:'#facc15', blue:'#60a5fa', green:'#22c55e', beige:'#c2a878' };
 // Tag -> overlay glyph (mirrors data/node-tags.js#spriteForTags precedence).
 function tagGlyph(t){
   if(!t) return '';
@@ -197,7 +222,9 @@ function screenToImg(ev){
 function snap(v){ return document.getElementById('chk-grid').checked ? Math.round(v/2)*2 : Math.round(v*10)/10; }
 function nodeAt(p, rad=8){
   let best=null, bd=rad/cam.s;
-  for(const id in state.nodes){ const n=state.nodes[id]; const d=Math.hypot(n.x-p.x,n.y-p.y);
+  for(const id in state.nodes){ const n=state.nodes[id];
+    if(mode==='annotate' && n.type==='decorative') continue;  // hidden curve points aren't selectable
+    const d=Math.hypot(n.x-p.x,n.y-p.y);
     if(d<bd){ bd=d; best=id; } }
   return best;
 }
@@ -254,6 +281,7 @@ function render(){
 
   // nodes
   for(const id in state.nodes){ const n=state.nodes[id]; const t=TYPE[n.type]||TYPE.burn;
+    if(mode==='annotate' && n.type==='decorative') continue;  // curve points are edit-only
     let el;
     if(t.hex){ el=document.createElementNS(NS,'polygon'); el.setAttribute('points',hexPts(n.x,n.y,6));
       el.setAttribute('fill',(SPECTRAL_FILL[n.spectralType]||'#fbbf24')+'cc'); el.setAttribute('stroke','#0c0a08'); el.setAttribute('stroke-width',0.8);
@@ -294,6 +322,7 @@ function selectNode(id){
   if(!id){ box.style.display='none'; render(); return; }
   const n=state.nodes[id]; box.style.display='';
   document.getElementById('p-name').value=n.name||'';
+  const typeSel=document.getElementById('p-type'); if([...typeSel.options].some(o=>o.value===n.type)) typeSel.value=n.type;
   document.getElementById('p-site-only').style.display = n.type==='site'?'':'none';
   if(n.type==='site'){ document.getElementById('p-spectral').value=n.spectralType||'C';
     document.getElementById('p-hyd').value=n.hydration??1; document.getElementById('p-size').value=n.siteSize??3; }
@@ -312,6 +341,11 @@ document.querySelectorAll('#nodeprops [data-tag]').forEach(cb=>{
 });
 document.getElementById('p-season').addEventListener('change', e=>{ if(!selected) return;
   (state.nodes[selected].tags||(state.nodes[selected].tags={})).season=e.target.value||undefined; save(); render(); });
+// annotate mode: change a node's type (special changes)
+document.getElementById('p-type').addEventListener('change', e=>{ if(!selected) return;
+  const n=state.nodes[selected]; n.type=e.target.value;
+  if(n.type==='site' && n.spectralType===undefined){ n.spectralType='C'; n.hydration=1; n.siteSize=3; }
+  save(); selectNode(selected); render(); });
 
 svg.addEventListener('dblclick', e=>{ if(curve){ finishCurve(); } });
 
@@ -322,7 +356,9 @@ svg.addEventListener('pointerdown', e=>{
   if(e.button===1 || e.button===2 || spaceDown){ panning={x:e.clientX,y:e.clientY,tx:cam.tx,ty:cam.ty}; svg.setPointerCapture(e.pointerId); return; }
   const hit=nodeAt(p);
   if(tool==='select'){
-    if(hit){ selectNode(hit); drag={id:hit}; svg.setPointerCapture(e.pointerId); } else selectNode(null);
+    // Edit mode: click-drag to move. Annotate mode: select only (no move).
+    if(hit){ selectNode(hit); if(mode==='edit'){ drag={id:hit}; svg.setPointerCapture(e.pointerId); } }
+    else selectNode(null);
     return;
   }
   if(tool==='delete'){ if(hit){ pushUndo(); deleteNode(hit); save(); render(); } return; }
@@ -365,7 +401,8 @@ window.addEventListener('keydown', e=>{
   if(e.key===' '){ spaceDown=true; }
   if(e.key==='Enter' && curve){ finishCurve(); }
   if(e.key==='Escape'){ curve=null; pending=null; _undoArmed=false; render(); }
-  const t=TOOLS.find(t=>t[2].toLowerCase()===e.key.toLowerCase()); if(t && !/input|textarea|select/i.test(document.activeElement.tagName)){ setTool(t[0]); }
+  const t=TOOLS.find(t=>t[2].toLowerCase()===e.key.toLowerCase());
+  if(t && (t[3]==='both'||t[3]===mode) && !/input|textarea|select/i.test(document.activeElement.tagName)){ setTool(t[0]); }
 });
 window.addEventListener('keyup', e=>{ if(e.key===' ') spaceDown=false; });
 
@@ -376,13 +413,34 @@ document.getElementById('p-hyd').addEventListener('input', e=>{ if(selected){ st
 document.getElementById('p-size').addEventListener('input', e=>{ if(selected){ state.nodes[selected].siteSize=+e.target.value; save(); } });
 document.getElementById('p-del').addEventListener('click', ()=>{ if(selected){ pushUndo(); deleteNode(selected); save(); render(); } });
 
-// ---------- toolbar ----------
+// ---------- toolbar + modes ----------
 function setTool(t){ tool=t; pending=null; if(curve) finishCurve();
   document.querySelectorAll('#toolbar .tool').forEach(b=>b.classList.toggle('active', b.dataset.tool===t)); }
 const tb=document.getElementById('toolbar');
-for(const [id,label,key] of TOOLS){ const b=document.createElement('button'); b.className='tool'; b.dataset.tool=id;
-  b.innerHTML=`${label}<span class="k">${key}</span>`; b.onclick=()=>setTool(id); tb.appendChild(b); }
-setTool('burn');
+const toolBtns={};
+for(const [id,label,key,m] of TOOLS){ const b=document.createElement('button'); b.className='tool'; b.dataset.tool=id;
+  b.dataset.mode=m; b.innerHTML=`${label}<span class="k">${key}</span>`; b.onclick=()=>setTool(id); tb.appendChild(b); toolBtns[id]=b; }
+
+function setMode(m){
+  mode=m; pending=null; if(curve) finishCurve();
+  document.getElementById('mode-edit').classList.toggle('active', m==='edit');
+  document.getElementById('mode-annotate').classList.toggle('active', m==='annotate');
+  document.getElementById('mode-hint').textContent = m==='edit'
+    ? 'Edit mode: place / move nodes, connect them, draw curves.'
+    : 'Annotate mode: click a node to change its type, set tags / season, and comment. Curve points are hidden.';
+  document.getElementById('tools-title').textContent = m==='edit' ? 'Tools' : 'Tools (annotate)';
+  // show only this mode's tools; annotate is select-only
+  for(const id in toolBtns){ const bm=toolBtns[id].dataset.mode; toolBtns[id].style.display=(bm==='both'||bm===m)?'':'none'; }
+  setTool('select');
+  // panel sections that are annotate-only
+  document.getElementById('p-type-wrap').style.display = m==='annotate' ? '' : 'none';
+  document.getElementById('p-annotate').style.display = m==='annotate' ? '' : 'none';
+  if(selected) selectNode(selected);
+  render();
+}
+document.getElementById('mode-edit').onclick=()=>setMode('edit');
+document.getElementById('mode-annotate').onclick=()=>setMode('annotate');
+setMode('edit'); setTool('burn');
 
 // ---------- view ----------
 function fit(){ const r=svg.getBoundingClientRect(); cam.s=Math.min(r.width/SRC_W, r.height/SRC_H)*0.95;
