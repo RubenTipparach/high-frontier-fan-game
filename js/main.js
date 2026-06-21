@@ -2,7 +2,8 @@
 
 import { probeServer, apiAvailable, lookupInviteLink, claimInviteLink, getLobbyByCode,
   getNotifyPrefs, setNotifyPrefs, testNotify, startDiscordOauth, whoami,
-  discordSignInEnabled, discordLoginStartUrl, discordExchange, discordSignup } from './api.js';
+  discordSignInEnabled, discordLoginStartUrl, discordExchange, discordSignup,
+  ratFrontierAccess } from './api.js';
 import {
   restoreProfile, activeProfile, signIn, signOut, mintDeviceCode,
   adoptServerSession, markDiscordLinked, onProfileChange,
@@ -16,13 +17,14 @@ import {
   initInvites, refreshInvitesList, subscribeInvitesForProfile,
 } from './invites.js';
 import { mountBrowse, isBrowseOnline, refreshRoomOverlays, requestRocketFocus } from './game/browse.js';
+import { mountRatFrontier } from './game/rat-frontier/rat-view.js';
 import { newSandboxGame, currentSandboxId, activateSandboxGame } from './game/sandbox-games.js';
 import { appBase } from './base.js';
 import { initErudaFromPref } from './debug-console.js';
 
 const VIEWS = [
   'view-signin', 'view-lobby-list', 'view-create-lobby', 'view-lobby',
-  'view-browse',
+  'view-browse', 'view-rat-frontier',
 ];
 
 // Track which view the user was on before opening Browse, so the
@@ -463,6 +465,13 @@ function initNewGameModal() {
     close();
     showView('view-create-lobby');
   });
+  // Admin-gated Rat Frontier variant. The row is revealed only when the
+  // server confirms this profile is on the allowlist (see refreshRatAccess).
+  const ratBtn = document.getElementById('btn-new-game-rat');
+  if (ratBtn) ratBtn.addEventListener('click', () => {
+    close();
+    openRatFrontier();
+  });
   // Solo room: pick the sandbox-style options first (starting bank + card
   // economy), then create + start a private 1-player server game.
   soloBtn.addEventListener('click', () => {
@@ -521,6 +530,33 @@ function initNewGameModal() {
     showView('view-browse');   // setUrlForView reads currentSandboxId()
     mountBrowse({ newGame: true });
   });
+}
+
+// Mount the admin-gated Rat Frontier surface (card catalog + Alpha
+// Centauri map) into its view and switch to it.
+function openRatFrontier() {
+  const host = document.getElementById('view-rat-frontier');
+  if (!host) return;
+  showView('view-rat-frontier');
+  mountRatFrontier(host, { onBack: () => showView(_prevView || 'view-lobby-list') });
+}
+
+// Reveal or hide the Rat Frontier menu row based on whether the current
+// profile is on the server's secret allowlist. Called on every profile
+// change; fails closed (hidden) when signed out or the server says no.
+let _ratAccessReqId = 0;
+async function refreshRatAccess(profile) {
+  const row = document.getElementById('new-game-rat-row');
+  if (!row) return;
+  const reqId = ++_ratAccessReqId;
+  if (!profile || !profile.token || !apiAvailable()) { row.classList.add('hidden'); return; }
+  let allowed = false;
+  try {
+    const r = await ratFrontierAccess(profile.token);
+    allowed = !!(r && r.ok && r.data && r.data.allowed);
+  } catch { allowed = false; }
+  if (reqId !== _ratAccessReqId) return;   // a newer profile change superseded us
+  row.classList.toggle('hidden', !allowed);
 }
 
 function initAccountMenu() {
@@ -904,6 +940,8 @@ async function boot() {
   initMainMenu();
   initNewGameModal();
   onProfileChange(reflectProfile);
+  onProfileChange(refreshRatAccess);
+  refreshRatAccess(activeProfile());
 
   await updateServerStatus();
 

@@ -65,6 +65,18 @@ import {
 
 const PORT = Number(process.env.PORT) || 8080;
 
+// Rat Frontier is an admin-gated experimental variant. The allowlist is a
+// secret env flag: a comma-separated list of profile names that may see and
+// open it. Re-read on every boot so rotating the secret takes effect on
+// restart, the same way the admin-allowlist seed does.
+const RAT_ADMIN_NAMES = new Set(
+  (process.env.RAT_ADMIN_NAMES || process.env.RAT_FRONTIER_ADMINS || '')
+    .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+);
+function isRatAdmin(name) {
+  return RAT_ADMIN_NAMES.has(String(name || '').toLowerCase());
+}
+
 // ----- Config / constants -----
 
 const RESERVED_NAMES = new Set([
@@ -194,6 +206,12 @@ function requireProfile(req, res, next) {
 
 app.get('/healthz', (_req, res) => {
   res.json({ ok: true, ts: nowMs() });
+});
+
+// Whether the calling profile may use the admin-gated Rat Frontier variant.
+// The client hides the menu entry unless this returns { allowed: true }.
+app.get('/rat-frontier/access', requireProfile, (req, res) => {
+  res.json({ allowed: isRatAdmin(req.profile.name) });
 });
 
 // Server-wide announcement banner (shown atop global chat). Seeded once

@@ -1,0 +1,15 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Rat Frontier map</title>
+<style>html,body{margin:0;height:100%;background:#000;}#view-rat-frontier{position:absolute;inset:0;}</style>
+</head><body>
+  <section id="view-rat-frontier"></section>
+  <script type="module">
+    import { mountRatFrontier } from './js/game/rat-frontier/rat-view.js';
+    const host = document.getElementById('view-rat-frontier');
+    mountRatFrontier(host, { onBack: () => {} });
+    setTimeout(() => {
+      const b = [...host.querySelectorAll('.rat-tab')].find(x => x.dataset.tab === 'map');
+      if (b) b.click();
+    }, 300);
+  </script>
+</body></html>
