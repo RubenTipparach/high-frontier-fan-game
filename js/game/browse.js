@@ -3009,23 +3009,20 @@ function renderGameOver(snapshot) {
     } else noneChip(glory.chips);
     detail.appendChild(glory.block);
 
-    // Other tokens (claims / outposts / rocket) + the M0 assembly bits.
-    const tok = cat('🎟', 'Tokens', s.claims + s.outposts + s.rocket + (m0 ? s.cubeVp + s.awardVp : 0));
-    const tparts = [];
-    if (s.claims) tparts.push(`claims ×${s.claims}`);
-    if (s.outposts) tparts.push(`outposts ×${s.outposts}`);
-    if (s.rocket) tparts.push('rocket');
-    if (m0 && s.cubeVp) tparts.push(`cubes ${s.cubeVp}`);
-    if (m0 && s.awardVp) tparts.push(`${winnerName} award ${s.awardVp}`);
-    if (tparts.length) {
+    // Assembly bits (M0 only): delegate cubes + winning-ideology award.
+    if (m0 && (s.cubeVp || s.awardVp)) {
+      const tok = cat('🏛', 'Assembly', s.cubeVp + s.awardVp);
+      const tparts = [];
+      if (s.cubeVp) tparts.push(`cubes ${s.cubeVp}`);
+      if (s.awardVp) tparts.push(`${winnerName} award ${s.awardVp}`);
       for (const t of tparts) {
         const chip = document.createElement('span');
         chip.className = 'mp-go-chip';
         chip.textContent = t;
         tok.chips.appendChild(chip);
       }
-    } else noneChip(tok.chips);
-    detail.appendChild(tok.block);
+      detail.appendChild(tok.block);
+    }
 
     li.appendChild(detail);
     list.appendChild(li);
@@ -19011,11 +19008,10 @@ function paintGlory() {
   }).join('');
 
   // --- Tokens (+1 each) ---------------------------------------------
+  // Only factories and colony domes earn a token. The colony dome's +1 is in
+  // the colony-locations block below, so this lists the factory token only.
   const tokenRows = [
-    ['🚀 Rocket',    score.tokens.rocket],
-    ['🟡 Claims',    score.tokens.claims],
     ['🏭 Factories', score.tokens.factories],
-    ['🏛 Outposts',  score.tokens.outposts],
   ].map(([label, n]) =>
     `<li><span>${label}</span><strong>+${n} VP</strong></li>`
   ).join('');

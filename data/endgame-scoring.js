@@ -9,8 +9,10 @@
 //     ANYWHERE on the map sells at 8 / 5 / 4 (4 thereafter). Each player scores
 //     that current market price for every factory they own of that spectral, so
 //     a rival building your spectral trims your price.
-//   - +1 VP per owned TOKEN: each factory, each successful claim, each outpost,
-//     and the rocket (if it holds any cards).
+//   - +1 VP per scoring TOKEN: each FACTORY and each COLONY DOME. Outposts,
+//     claims, and the rocket do NOT score a token (user: outposts don't count,
+//     factories and colony domes do). The colony dome's +1 rides its COLONY_VP
+//     base below, so the token line here is just the factory count.
 //   - COLONIES score by location type: astrobiology +1, submarine +2,
 //     Bernal +2, a plain colony +1.
 //   - Career GLORY chit VP.
@@ -88,7 +90,10 @@ export function scorePlayer({
   for (const [t, n] of Object.entries(colonyByType)) colonyVp += n * (COLONY_VP[t] || 1);
 
   const factoryCount = own.length;
-  const tokenVp = factoryCount + claims + outposts + rocket;
+  // Only factories and colony domes earn a +1 token. The colony dome's +1 is
+  // already in colonyVp (its COLONY_VP base), so the factory count is the token
+  // line here. Outposts, claims, and the rocket carry no token VP.
+  const tokenVp = factoryCount;
 
   const total = spectralVp + tokenVp + colonyVp + glory + cubeVp + awardVp;
   return {

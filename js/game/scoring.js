@@ -105,10 +105,12 @@ export function computeEndgameScore({ ownerId, colonyTypeOf } = {}) {
   let colonyVp = 0;
   for (const [t, n] of Object.entries(colonyByType)) colonyVp += n * (COLONY_VP[t] || 1);
 
-  // Token total: +1 per rocket / claim / OWN factory / outpost.
-  // Colonies are scored separately (by location type) below.
-  const tokensTotal =
-    rocketCount + claimCount + ownFactories.length + outpostList.length;
+  // Token total: only FACTORIES and COLONY DOMES earn a +1 token. The colony
+  // dome's +1 rides its COLONY_VP base (scored separately below), so the token
+  // line here is just the player's own factories. Outposts, claims, and the
+  // rocket carry no token VP (user: outposts don't count, factories and colony
+  // domes do).
+  const tokensTotal = ownFactories.length;
 
   // Exploitation track (GLOBAL): the disc for each spectral sits at the total
   // count of that spectral's factories across ALL players, and the per-factory
