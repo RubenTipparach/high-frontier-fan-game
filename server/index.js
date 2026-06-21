@@ -216,13 +216,19 @@ app.get('/healthz', (_req, res) => {
 // already a server admin gets Rat Frontier with no extra secret.
 app.get('/rat-frontier/access', requireProfile, (req, res) => {
   let allowed = isRatAdmin(req.profile.name);
+  // Primary cross-origin path: match the signed-in profile's linked Discord
+  // identity against the admin allowlist (the game client sends a Bearer
+  // token, not the admin cookie, so this is what works from GitHub Pages).
   if (!allowed) {
     const acct = db
       .prepare('SELECT discord_id FROM discord_accounts WHERE profile_id = ?')
       .get(req.profile.id);
     if (acct && isAdminDiscordId(acct.discord_id)) allowed = true;
   }
-  res.json({ allowed });
+  // Also honour a live admin-portal session when the cookie is present
+  // (same-origin / direct API use; CORS credentials are off cross-origin).
+  if (!allowed && adminFromRequest(req)) allowed = true;
+  res.json({ allowed, profile: req.profile.name });
 });
 
 // Server-wide announcement banner (shown atop global chat). Seeded once

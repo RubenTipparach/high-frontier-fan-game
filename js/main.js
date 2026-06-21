@@ -969,6 +969,9 @@ async function boot() {
 
   const me = await restoreProfile();
   reflectProfile(me);
+  // Verify Rat Frontier (admin) access against the server on page load, once
+  // the profile is restored.
+  refreshRatAccess(me);
 
   if (me) {
     console.log('[hf:boot] signed in as @' + me.name + ' (id=' + me.id + ')');
