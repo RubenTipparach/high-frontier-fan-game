@@ -59,6 +59,11 @@
       buildless; flip the value per environment by editing this tag.
     -->
     <meta name="hf-api-base" content="https://high-frontier-fan-game.fly.dev" />
+    <!-- Rat Frontier (experimental) admin allowlist: comma-separated profile
+         names that may see + open the variant. Client-side reveal only (a
+         static-site value is public, so this is a soft gate); the server's
+         /rat-frontier/access endpoint stays the real check. Edit per env. -->
+    <meta name="hf-rat-admins" content="" />
     <link
       rel="icon"
       type="image/svg+xml"

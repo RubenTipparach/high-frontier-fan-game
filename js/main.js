@@ -544,12 +544,22 @@ function openRatFrontier() {
 // Reveal or hide the Rat Frontier menu row based on whether the current
 // profile is on the server's secret allowlist. Called on every profile
 // change; fails closed (hidden) when signed out or the server says no.
+// Admin names from the client config meta tag (soft, static-site gate).
+function ratAdminsFromConfig() {
+  const el = document.querySelector('meta[name="hf-rat-admins"]');
+  return new Set((el?.content || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
+}
 let _ratAccessReqId = 0;
 async function refreshRatAccess(profile) {
   const row = document.getElementById('new-game-rat-row');
   if (!row) return;
   const reqId = ++_ratAccessReqId;
-  if (!profile || !profile.token || !apiAvailable()) { row.classList.add('hidden'); return; }
+  if (!profile) { row.classList.add('hidden'); return; }
+  // Client-config allowlist reveals the entry immediately (no round-trip).
+  const name = String(profile.name || '').toLowerCase();
+  if (name && ratAdminsFromConfig().has(name)) { row.classList.remove('hidden'); return; }
+  // Otherwise fall back to the server's real check (the authoritative gate).
+  if (!profile.token || !apiAvailable()) { row.classList.add('hidden'); return; }
   let allowed = false;
   try {
     const r = await ratFrontierAccess(profile.token);

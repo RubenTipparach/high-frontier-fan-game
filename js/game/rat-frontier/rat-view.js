@@ -89,6 +89,23 @@ function mapPane() {
   svg.setAttribute('height', SRC_H);
   svg.setAttribute('viewBox', `0 0 ${SRC_W} ${SRC_H}`);
 
+  // Movement graph: draw edges first so site hexes sit on top. Edges that
+  // follow an actually-drawn route line are brighter; provisional kNN links
+  // are faint.
+  const byId = new Map(ALPHA_CENTAURI_MAP.sites.map((s) => [s.id, s]));
+  for (const e of (ALPHA_CENTAURI_MAP.edges || [])) {
+    const a = byId.get(e.a), b = byId.get(e.b);
+    if (!a || !b) continue;
+    const ln = document.createElementNS(svgNS, 'line');
+    ln.setAttribute('x1', a.srcPx[0]); ln.setAttribute('y1', a.srcPx[1]);
+    ln.setAttribute('x2', b.srcPx[0]); ln.setAttribute('y2', b.srcPx[1]);
+    const drawn = e.frac >= 0.5;
+    ln.setAttribute('stroke', drawn ? '#ffd24a' : '#e6c34a');
+    ln.setAttribute('stroke-width', drawn ? '0.8' : '0.4');
+    ln.setAttribute('stroke-opacity', drawn ? '0.85' : '0.28');
+    svg.appendChild(ln);
+  }
+
   const hexPath = (cx, cy, r) => {
     const pts = [];
     for (let i = 0; i < 6; i++) {
@@ -128,7 +145,7 @@ function mapPane() {
 
   const hint = document.createElement('div');
   hint.className = 'rat-map-hint';
-  hint.textContent = `Alpha Centauri · ${ALPHA_CENTAURI_MAP.meta.stars} stars · ${ALPHA_CENTAURI_MAP.meta.planets} bodies · ${ALPHA_CENTAURI_MAP.meta.asteroids} belt sites · drag to pan, scroll to zoom`;
+  hint.textContent = `Alpha Centauri · ${ALPHA_CENTAURI_MAP.meta.stars} stars · ${ALPHA_CENTAURI_MAP.meta.planets} bodies · ${ALPHA_CENTAURI_MAP.meta.asteroids} belt · ${ALPHA_CENTAURI_MAP.meta.edges || 0} routes · drag to pan, scroll to zoom`;
   pane.appendChild(hint);
 
   // Camera: scale + translate on the world layer.
