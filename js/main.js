@@ -450,6 +450,9 @@ function initNewGameModal() {
   };
   const open = () => {
     showMode();
+    // Re-check Rat Frontier access each open so a freshly-linked admin or a
+    // just-deployed server reveals the entry without a full reload.
+    refreshRatAccess(activeProfile());
     overlay.classList.remove('hidden');
     document.addEventListener('keydown', onKey);
   };
