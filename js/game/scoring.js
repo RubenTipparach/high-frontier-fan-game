@@ -41,11 +41,12 @@ import { getOutposts } from './stacks.js';
 import { getRocketStack } from './rocket.js';
 import { getVps } from './glory.js';
 
-// Per-spectral diminishing schedule from rulebook M2b. Read
-// position by position: index 0 = 1st factory of that spectral,
-// index 1 = 2nd, anything past the end uses the last value.
-// All six spectrals (C/S/M/V/D/H) share this schedule.
-export const SPECTRAL_DIMINISHING_SCHEDULE = [8, 5, 4];
+// Per-spectral diminishing schedule + colony-location VP come from the shared
+// pure scorer (data/endgame-scoring.js), the SAME constants the server and the
+// final-score modal use, so the live tab can never drift from them. Re-exported
+// here for the existing importers (browse.js).
+import { SPECTRAL_DIMINISHING_SCHEDULE, COLONY_VP } from '../../data/endgame-scoring.js';
+export { SPECTRAL_DIMINISHING_SCHEDULE, COLONY_VP };
 
 // Total VP for N factories of a single spectral. N <= 0 returns
 // 0. The schedule's final value is the "floor" rate that
@@ -62,11 +63,6 @@ export function spectralVpForCount(n) {
   return total;
 }
 
-// Colony-location VP from the published tracker ("COLONY
-// LOCATIONS"): Astrobiology +1, Submarine +2, Bernal +2 each.
-// Anything else (a plain colony dome) scores +1, matching the old
-// flat token value.
-export const COLONY_VP = { astrobiology: 1, submarine: 2, bernal: 2, other: 1 };
 
 export function computeEndgameScore({ ownerId, colonyTypeOf } = {}) {
   // Tokens: rocket counts if the player has any cards in it.
@@ -109,10 +105,12 @@ export function computeEndgameScore({ ownerId, colonyTypeOf } = {}) {
   let colonyVp = 0;
   for (const [t, n] of Object.entries(colonyByType)) colonyVp += n * (COLONY_VP[t] || 1);
 
-  // Token total: +1 per rocket / claim / OWN factory / outpost.
-  // Colonies are scored separately (by location type) below.
-  const tokensTotal =
-    rocketCount + claimCount + ownFactories.length + outpostList.length;
+  // Token total: only FACTORIES and COLONY DOMES earn a +1 token. The colony
+  // dome's +1 rides its COLONY_VP base (scored separately below), so the token
+  // line here is just the player's own factories. Outposts, claims, and the
+  // rocket carry no token VP (user: outposts don't count, factories and colony
+  // domes do).
+  const tokensTotal = ownFactories.length;
 
   // Exploitation track (GLOBAL): the disc for each spectral sits at the total
   // count of that spectral's factories across ALL players, and the per-factory

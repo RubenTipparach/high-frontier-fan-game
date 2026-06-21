@@ -652,10 +652,10 @@ export function onRocketChange(cb) {
 }
 
 // Dedicated reactor cooling across the active thruster chain AND the active
-// prospector chain, sharing the one stack-wide radiator pool. The active
-// thruster has FIRST claim (user decision: prioritize thruster); the prospector
-// reserves its reactor's dedicated therms from the remainder and goes inactive
-// if it can't. A reactor that powers both chains is cooled once. Returns the
+// prospector chain. Per rule 5 the two chains run in PARALLEL and may SHARE the
+// radiator pool freely: each resolves its cooling INDEPENDENTLY against the full
+// pool, so the thruster's reactors never starve the prospector (and vice versa).
+// Dedicated reactor cooling still holds WITHIN a chain. Returns the
 // resolveCoolingAcross output plus the per-chain index of each active root, so
 // the cooling gate and the visualizer read the SAME allocation. Inactive
 // thrusters / inactive robonauts / refineries are never roots here, so their
@@ -1081,7 +1081,7 @@ export function computeRocketStatsFor(ctx = {}) {
     _stack = Array.isArray(ctx.stack) ? _clone(ctx.stack) : [];
     _activeThrusterId = ctx.activeThrusterId || null;
     _activeProspectorId = ctx.activeProspectorId || null;
-    _tankWater = ctx.tank | 0;
+    _tankWater = Math.max(0, Math.round((Number(ctx.tank) || 0) * 1e6) / 1e6);
     _tankGrade = ctx.tankGrade === 'dirt' ? 'dirt' : 'water';
     _afterburnEngaged = !!ctx.afterburnEngaged;
     _wiring = (ctx.wiring && typeof ctx.wiring === 'object' && !Array.isArray(ctx.wiring)) ? _clone(ctx.wiring) : {};
@@ -1161,10 +1161,13 @@ export function getSupportChainView() {
     .map((r) => (r && typeof r === 'object') ? r.kind : r)
     .filter(Boolean);
 
-  // Every OTHER card that supplies `kind` (the resolver's candidate set): the
-  // choices a player can wire a consumer's support to.
-  const candidatesFor = (consumerId, kind) => cards
-    .filter((c) => c.id !== consumerId && Array.isArray(c.supplies) && c.supplies.includes(kind))
+  // Every OTHER card that supplies ANY kind in an OR-group (the resolver's
+  // candidate set): the choices a player can wire a consumer's support to. A
+  // reactor OR-group (fusion / antimatter) lists every reactor that satisfies
+  // it, so the picker can offer all of them.
+  const candidatesFor = (consumerId, kinds) => cards
+    .filter((c) => c.id !== consumerId && Array.isArray(c.supplies)
+      && kinds.some((k) => c.supplies.includes(k)))
     .map((c) => c.id);
 
   const buildRoot = (kind, activeId) => {
@@ -1214,9 +1217,21 @@ export function getSupportChainView() {
       if (!c) continue;
       const edgeKinds = satByConsumer.get(id) || new Map();
       const entries = [];
+      // One entry PER OR-GROUP (same supplier-prefix), keyed by the group's
+      // first kind to match the resolver's edge + wiring key. The candidate
+      // list is the UNION across the group's kinds, so a reactor group offers
+      // every reactor that satisfies it (fusion OR antimatter) - which is what
+      // lets the player pick the better reactor as the first/modifier reactor.
+      const groups = new Map();
       for (const k of reqKindsOf(c)) {
-        const cands = candidatesFor(id, k);
-        if (cands.length) entries.push({ kind: k, candidates: cands, chosen: edgeKinds.get(k) || null });
+        const p = String(k).split('-')[0];
+        if (!groups.has(p)) groups.set(p, []);
+        if (!groups.get(p).includes(k)) groups.get(p).push(k);
+      }
+      for (const [, kinds] of groups) {
+        const groupKey = kinds[0];
+        const cands = candidatesFor(id, kinds);
+        if (cands.length) entries.push({ kind: groupKey, kinds, candidates: cands, chosen: edgeKinds.get(groupKey) || null });
       }
       if (entries.length) wirable[id] = entries;
     }
@@ -1239,11 +1254,11 @@ export function getSupportChainView() {
     const p = buildRoot('prospector', _activeProspectorId);
     if (p) {
       roots.push(p);
-      // The active thruster has first claim on the radiator pool, so the
-      // prospector's dedicated reactor cooling is whatever the thruster chain
-      // leaves. Re-resolve cooling across both (thruster first) and override the
-      // prospector root's verdict, so its pills match the gate in
-      // getActiveProspectorStats (a reactor the thruster reserved reads short).
+      // The prospector chain shares the radiator pool with the thruster chain
+      // (rule 5: chains run in parallel and may share radiators freely), so it
+      // resolves its cooling INDEPENDENTLY against the full pool. Re-resolve
+      // across both and override the prospector root's verdict so its pills
+      // match the gate in getActiveProspectorStats.
       if (t) {
         const cool = resolveCoolingAcross({ cards, orders: [t.chain.order, p.chain.order] });
         const pc = cool.perChain[1];
@@ -1253,7 +1268,7 @@ export function getSupportChainView() {
           p.chain.nonReactorHeat = pc.nonReactorHeat;
           p.chain.nonReactorCooled = pc.nonReactorCooled;
           p.chain.coolingOk = pc.coolingOk;
-          p.chain.radiatorRemaining = cool.radiatorRemaining;
+          p.chain.radiatorRemaining = pc.remaining;
           p.coolingAfterThruster = true;
         }
       }

@@ -43,7 +43,7 @@ export const CREW = [
     color: '#fccc00',
     faces: {
       primary:   { name: 'United Nations Cosmonauts', role: 'Faction A', bonus: 'SECRETARY GENERAL', blurb: 'Start with +2 Aqua. (Module 2: after 1st anchor of your Home Bernal.)', mass: 1, radHardness: 4, isru: 4, prospector: 'buggy',  thruster: { name: 'Liberty',   thrustMN: 1.34, specImpKs: 0.43, thrust: 12, fuelPerBurn: 9,  afterburn: 2 } },
-      secondary: { name: 'B612 Foundation',           role: 'Faction H', bonus: 'BLINK TELESCOPE',   blurb: '1 re-roll per prospecting operation when using a Raygun.',        mass: 1, radHardness: 3, isru: 4, prospector: 'buggy',  thruster: { name: 'New Glenn', thrustMN: 17.1, specImpKs: 0.39, thrust: 15, fuelPerBurn: 10, afterburn: 2 } },
+      secondary: { name: 'B612 Foundation',           role: 'Faction H', bonus: 'BLINK TELESCOPE',   blurb: '1 re-roll per prospecting operation when using a Raygun.',        mass: 1, radHardness: 3, isru: 4, prospector: 'raygun', thruster: { name: 'New Glenn', thrustMN: 17.1, specImpKs: 0.39, thrust: 15, fuelPerBurn: 10, afterburn: 2 } },
     },
   },
   {

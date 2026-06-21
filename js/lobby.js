@@ -613,13 +613,16 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
     }
     const btn = li.querySelector('button');
     // Solo rooms (single seat) can be closed + restored by their host. The
-    // server enforces host-only + solo; the buttons only show for maxPlayers 1.
+    // server enforces host-only; the buttons only show for maxPlayers 1.
     const isSolo = g.maxPlayers === 1;
+    const meRow = activeProfile();
+    const iAmHost = !!(meRow && g.hostId && meRow.id === g.hostId);
     const actions = li.querySelector('.row-actions');
     if (cancelled) {
       li.querySelector('.tag-cancelled').hidden = false;
-      if (isSolo) {
-        // A closed solo room can be brought back.
+      if (iAmHost) {
+        // The host can bring a closed room back (solo OR a multiplayer table
+        // they shut down). Restore reopens it at its prior stage.
         btn.textContent = '♻ Restore';
         btn.addEventListener('click', async () => {
           const me = activeProfile();
@@ -630,7 +633,7 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
           else { btn.disabled = false; btn.textContent = 'Restore failed'; }
         });
       } else {
-        // Multiplayer cancelled rooms stay an audit-only terminal state.
+        // A room someone else closed stays an audit-only terminal state.
         btn.textContent = 'Cancelled';
         btn.disabled = true;
       }
@@ -998,6 +1001,7 @@ function renderLobby(lobby) {
         online: true,
         gameId: lobby.gameId,
         lobbyId: lobby.id,
+        hostId: lobby.hostId,
         me,
         onToast: _onToast,
         room: lobby.name,
@@ -1009,6 +1013,21 @@ function renderLobby(lobby) {
           unmountBrowseOnline();
           _onShowView('view-lobby-list');
           refreshLobbyList();
+        },
+        // Host-only "Close this room" in the in-game settings. Soft-closes
+        // the table (restorable from Ended games), then drops to the lobby.
+        // The confirm lives in the settings modal, so just do the close here.
+        onCloseRoom: async () => {
+          const meNow = activeProfile();
+          if (!meNow) return;
+          const r = await closeLobby(lobby.id, meNow.token);
+          if (!r.ok) { _onToast(humanizeError(r.error) || 'Could not close the room.', 'error'); return; }
+          _gameMounted = false;
+          unmountBrowseOnline();
+          _onToast('Room closed. Find it under Ended games to restore it.');
+          _onShowView('view-lobby-list');
+          refreshLobbyList();
+          refreshMyGames();
         },
       });
       _onShowView('view-browse');
@@ -1024,6 +1043,23 @@ async function onLeaveLobby() {
   if (!_activeLobby) return;
   const me = activeProfile();
   if (!me) return;
+  const iAmHost = me.id === _activeLobby.hostId;
+  // The host leaving a waiting room CLOSES the room (there's no one to hand
+  // it to), so confirm first. We soft-close it (restorable) rather than the
+  // old hard-disband, so the host can bring it back from Ended games.
+  if (iAmHost && _activeLobby.status === 'waiting') {
+    const ok = await confirmDialog({
+      title: '🚪 Close this room',
+      body: 'Leaving closes this room for everyone. It moves to your Ended games, where you can Restore it later. Leave and close?',
+      yes: '🚪 Leave and close', no: 'Stay',
+    });
+    if (!ok) return;
+    const r = await closeLobby(_activeLobby.id, me.token);
+    if (!r.ok) { _onToast(humanizeError(r.error) || 'Could not close the room.', 'error'); return; }
+    leaveCurrent();
+    refreshMyGames();
+    return;
+  }
   await leaveLobby(_activeLobby.id, me.token);
   leaveCurrent();
 }

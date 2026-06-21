@@ -33,7 +33,7 @@ import {
   getRocketStack, isInRocket, addToStack as rocketAddCard, setRadiatorSide,
   removeFromStack as rocketRemoveCard, clearStack as rocketClearStack,
   onRocketChange, isRocketActive,
-  getActiveThrusterId, setActiveThruster, stackHasMoonCable,
+  getActiveThrusterId, setActiveThruster, stackHasMoonCable, getDirtCapability,
   getTankWater, setTankWater, addFuel, removeFuel, getTankMax, getWaterCap,
   getTankGrade, setTankGrade, getActiveFuelGrade,
   getStackTotals, getActiveThrusterStats, setSolarZone, setHasPowersat,
@@ -128,6 +128,7 @@ import {
 import {
   computeEndgameScore, SPECTRAL_DIMINISHING_SCHEDULE, COLONY_VP,
 } from './scoring.js';
+import { scorePlayer } from '../../data/endgame-scoring.js';
 import {
   MARKET_MODE, FREE_MARKET_AQUA, STARTER_CASH_AMOUNT,
   getMarketMode, setMarketMode, onMarketChange,
@@ -255,6 +256,8 @@ let _onlineOffWS = null;      // unsubscribe handle for the game channel
 let _onlineBusy = false;      // in-flight op guard (prevents double submit)
 let _onlineRoom = null;       // table / lobby name for the multiplayer panel
 let _onlineLobbyId = null;    // lobby id (for chat REST + WS channel)
+let _onlineHostId = null;     // host profile id (gates host-only controls)
+let _onlineCloseRoom = null;  // () => void, host closes the room (from the host page)
 let _onlineLeave = null;      // () => void callback wired by the host page
 let _onlineChatOff = null;    // unsubscribe handle for the lobby chat WS
 // In-memory mirror of the table chat. Kept module-level so a second
@@ -283,6 +286,7 @@ let _crewDraftMin = false;
 let _cardDraftMin = false;
 let _firstPlayerMin = false;
 let _auctionMin = false;
+let _eventMin = false;
 // Rising-edge tracker for auction turn notifications: remembers, per lot,
 // whether it was already "my turn" (bid/pass) or "my close" so a re-render
 // only toasts when the turn newly lands on me - e.g. the auctioneer raises
@@ -363,6 +367,8 @@ export function mountBrowse(opts = {}) {
     _onlineToast = typeof opts.onToast === 'function' ? opts.onToast : (() => {});
     _onlineRoom = opts.room || null;
     _onlineLobbyId = opts.lobbyId || null;
+    _onlineHostId = opts.hostId || null;
+    _onlineCloseRoom = typeof opts.onCloseRoom === 'function' ? opts.onCloseRoom : null;
     _onlineLeave = typeof opts.onLeave === 'function' ? opts.onLeave : null;
     setOnline(true);
   } else {
@@ -2335,7 +2341,7 @@ function renderSeniorityChooser(pending) {
 // numbers line up.
 let _gameOverDismissed = false;
 
-function computeSnapshotScore(snapshot, profileId) {
+function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0 } = {}) {
   const player = (snapshot.players || []).find((p) => p.profileId === profileId);
   const glory = (player && player.glory && player.glory.vps) || 0;
   let claims = 0;
@@ -2344,32 +2350,26 @@ function computeSnapshotScore(snapshot, profileId) {
     const d = discs[id];
     if (d && d.outcome === 'success' && d.ownerId === profileId) claims += 1;
   }
-  const allFacs = Object.values(snapshot.factories || {});
-  const facs = allFacs.filter((f) => f.ownerId === profileId);
-  const cols = Object.values(snapshot.colonies || {}).filter((c) => c.ownerId === profileId);
+  // ALL factories drive the global Exploitation Track price; the shared scorer
+  // filters the player's own. (data/endgame-scoring.js - the SAME math the
+  // server and the live scoring tab run, so the three can never drift.)
+  const factories = Object.values(snapshot.factories || {})
+    .map((f) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C' }));
+  // Colonies score by location type; classify each by its site (convert the
+  // server slug to the client id to read the runtime-merged flags), falling
+  // back to a stored type, then 'other'.
+  const ownColonies = [];
+  for (const [siteId, c] of Object.entries(snapshot.colonies || {})) {
+    if (!c || c.ownerId !== profileId) continue;
+    const cid = (_onlineMaps && toPlannerId(_onlineMaps, siteId)) || siteId;
+    ownColonies.push({ type: colonyTypeOfSite(cid) || c.type || 'other' });
+  }
   const rocket = player && player.rocket && (player.rocket.stack || []).length > 0 ? 1 : 0;
   const outposts = player && player.outposts ? Object.keys(player.outposts).length : 0;
-  // Exploitation track is GLOBAL: the market price per spectral comes from ALL
-  // players' factories of that spectral; the player scores it for each of their
-  // own. (Mirrors scoring.js#computeEndgameScore so the live panel and the
-  // final standings agree.)
-  const globalBySpec = {};
-  for (const f of allFacs) { const t = f.spectralType || 'C'; globalBySpec[t] = (globalBySpec[t] || 0) + 1; }
-  const lastRate = SPECTRAL_DIMINISHING_SCHEDULE[SPECTRAL_DIMINISHING_SCHEDULE.length - 1];
-  const priceFor = (n) => (n <= 0 ? 0
-    : (SPECTRAL_DIMINISHING_SCHEDULE[n - 1] != null ? SPECTRAL_DIMINISHING_SCHEDULE[n - 1] : lastRate));
-  const ownBySpec = {};
-  for (const f of facs) { const t = f.spectralType || 'C'; ownBySpec[t] = (ownBySpec[t] || 0) + 1; }
-  let spectralBonus = 0;
-  for (const t in ownBySpec) spectralBonus += ownBySpec[t] * priceFor(globalBySpec[t] || 0);
-  let colonyVp = 0;
-  for (const c of cols) colonyVp += (COLONY_VP[c.type] || COLONY_VP.other);
-  const tokens = rocket + claims + facs.length + outposts;
-  return {
-    glory, claims, factories: facs.length, colonies: cols.length,
-    rocket, outposts, spectralBonus, colonyVp, tokens,
-    total: tokens + spectralBonus + colonyVp + glory,
-  };
+  return scorePlayer({
+    ownerId: profileId, factories, ownColonies,
+    claims, outposts, rocket, glory, cubeVp, awardVp,
+  });
 }
 
 // Galactic news broadcast: a shared feed of what just happened at the
@@ -2642,6 +2642,7 @@ function renderEventChooser(snapshot) {
   const pending = snapshot && snapshot.pendingEvent;
   if (!pending || !_online || !gameViewVisible()) {
     if (existing) existing.remove();
+    setMpTurnAction('event', null);
     return;
   }
   const players = (snapshot.players || []);
@@ -2680,18 +2681,36 @@ function renderEventChooser(snapshot) {
 
   let overlay = existing;
   if (!overlay) {
+    // Fresh event: start expanded (mirrors the auction surfacing each lot).
+    _eventMin = false;
     overlay = document.createElement('div');
     overlay.id = 'mp-event-overlay';
     overlay.className = 'mp-first-player-overlay';
     overlay.innerHTML = `
       <div class="mp-first-player-modal mp-event-modal" role="dialog" aria-label="Sunspot event">
-        <h3 class="mp-first-player-title"></h3>
+        <div class="mp-modal-titlebar">
+          <h3 class="mp-first-player-title"></h3>
+          <button type="button" class="mp-mini-btn" title="Minimize (keep playing - deal cards, pan the map)" aria-label="Minimize">&minus;</button>
+        </div>
         <p class="mp-first-player-sub"></p>
         <div class="et-cards" id="mp-event-cards"></div>
         <div class="card-modal-actions" id="mp-event-actions"></div>
         <div class="hud-error" id="mp-event-error"></div>
-      </div>`;
+      </div>
+      <button type="button" class="mp-mini-chip" aria-label="Restore Sunspot event">
+        ${EV_TITLE[kind] || '☄️ Sunspot event'}
+      </button>`;
     document.body.appendChild(overlay);
+    overlay.querySelector('.mp-mini-btn').addEventListener('click', () => {
+      _eventMin = true;
+      overlay.classList.add('is-minimized');
+      renderEventChooser(_onlineSnapshot);
+    });
+    overlay.querySelector('.mp-mini-chip').addEventListener('click', () => {
+      _eventMin = false;
+      overlay.classList.remove('is-minimized');
+      setMpTurnAction('event', null);
+    });
   }
   overlay.querySelector('.mp-first-player-title').textContent = title;
   const sub = overlay.querySelector('.mp-first-player-sub');
@@ -2707,6 +2726,7 @@ function renderEventChooser(snapshot) {
     // Per user decision the table is NOT frozen: players who owe nothing
     // play on with no blocker. (The debt-holder settles on their turn.)
     overlay.remove();
+    setMpTurnAction('event', null);
     return;
   }
 
@@ -2741,6 +2761,19 @@ function renderEventChooser(snapshot) {
       box.addEventListener('change', () => { padLobby = box.checked; });
     }
   }
+
+  // Minimize / restore. Collapsed, the overlay stops blocking the board (CSS
+  // drops its backdrop + pointer events) so the player can deal cards, pan the
+  // map, and chat while the dialog waits; the call to action docks in the turn
+  // bar. Trades are allowed server-side during an unsettled event debt, so the
+  // tucked-away dialog never stops a deal.
+  overlay.classList.toggle('is-minimized', _eventMin);
+  setMpTurnAction('event', _eventMin ? {
+    label: title,
+    meta: pickMode ? 'choose a card' : 'confirm the hit',
+    needsAction: true,
+    onClick: () => { _eventMin = false; renderEventChooser(_onlineSnapshot); },
+  } : null);
 
   // ACKNOWLEDGE mode (glitch / flare / pad single): no card grid, just a
   // mandatory Confirm that submits an empty EVENT_CHOICE - the server commits
@@ -2778,12 +2811,19 @@ function renderEventChooser(snapshot) {
     cardsHost.innerHTML = '';
     for (const id of optionIds) {
       const card = lookup(id);
-      const pick = document.createElement('button');
-      pick.type = 'button';
+      // A div (not a <button>) so the card's own "Flip" button can live inside
+      // it as a real, clickable control - a button nested in a button is
+      // invalid and swallows the flip click into a card selection.
+      const pick = document.createElement('div');
       pick.className = 'et-card-pick' + (id === selected ? ' is-selected' : '');
+      pick.setAttribute('role', 'button');
+      pick.tabIndex = 0;
       if (card) {
-        try { pick.appendChild(renderCard(card, { type: CREW_BY_ID[card.id] ? 'crew' : 'patent' })); }
-        catch { pick.textContent = card.name || id; }
+        try {
+          pick.appendChild(renderCard(card, { type: CREW_BY_ID[card.id] ? 'crew' : 'patent' }));
+          // Let the card flip to its other face WITHOUT selecting it for discard.
+          pick.querySelector('.card-flip')?.addEventListener('click', (e) => e.stopPropagation());
+        } catch { pick.textContent = card.name || id; }
       } else {
         pick.textContent = id;
       }
@@ -2791,7 +2831,11 @@ function renderEventChooser(snapshot) {
       tick.className = 'et-pick-tick';
       tick.textContent = '\u2713';
       pick.appendChild(tick);
-      pick.addEventListener('click', () => { selected = id; confirm.disabled = false; repaint(); });
+      const choose = () => { selected = id; confirm.disabled = false; repaint(); };
+      pick.addEventListener('click', choose);
+      pick.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(); }
+      });
       cardsHost.appendChild(pick);
     }
   };
@@ -2822,7 +2866,19 @@ async function submitEventChoice(cardId, lobby = false) {
 function renderGameOver(snapshot) {
   const existing = document.getElementById('mp-game-over-overlay');
   const finished = !!(snapshot && snapshot.status === 'finished') && _online && gameViewVisible();
-  if (!finished || _gameOverDismissed) {
+  if (!finished) {
+    if (existing) existing.remove();
+    setMpTurnAction('gameover', null);
+    return;
+  }
+  // The game is over: always dock a "Final score" button in the bottom turn
+  // bar so the standings stay one tap away even after the modal is dismissed.
+  setMpTurnAction('gameover', {
+    label: '🏁 Final score',
+    needsAction: false,
+    onClick: () => { _gameOverDismissed = false; renderGameOver(_onlineSnapshot); },
+  });
+  if (_gameOverDismissed) {
     if (existing) existing.remove();
     return;
   }
@@ -2831,18 +2887,25 @@ function renderGameOver(snapshot) {
   const fv = snapshot.finalVote || null;
   // Prefer the server's authoritative final scores (M0 cube VP + the winning
   // ideology's award + factory / colony / glory). Fall back to the client tally
-  // for non-M0 or older snapshots that carry no finalScores.
-  const serverScores = Array.isArray(snapshot.finalScores) ? snapshot.finalScores : null;
-  let rows;
-  if (serverScores && serverScores.length) {
-    rows = serverScores
-      .map((s) => ({ s, p: players.find((pp) => pp.profileId === s.profileId) || { name: s.name, color: s.color } }))
-      .sort((a, b) => b.s.total - a.s.total || (b.s.aqua || 0) - (a.s.aqua || 0));
-  } else {
-    rows = players
-      .map((p) => ({ p, s: computeSnapshotScore(snapshot, p.profileId) }))
-      .sort((a, b) => b.s.total - a.s.total);
+  // Score every player with the full rulebook-M2b model (computeSnapshotScore:
+  // factories priced off the Exploitation Track, +1 per owned token, colonies
+  // by location type, glory). The server's finalScores only carries the M0
+  // assembly bits (delegate cubes + the winning-ideology award), so merge those
+  // in. Ranking: total desc, ties by aqua.
+  const serverById = {};
+  for (const sv of (Array.isArray(snapshot.finalScores) ? snapshot.finalScores : [])) {
+    serverById[sv.profileId] = sv;
   }
+  const m0 = !!snapshot.m0;
+  const rows = players
+    .map((p) => {
+      const sv = serverById[p.profileId] || {};
+      const cubeVp = m0 ? (sv.cubeVp | 0) : 0;
+      const awardVp = m0 ? (sv.awardVp | 0) : 0;
+      const s = computeSnapshotScore(snapshot, p.profileId, { cubeVp, awardVp });
+      return { p, s: { ...s, aqua: (p.aqua | 0) } };
+    })
+    .sort((a, b) => b.s.total - a.s.total || (b.s.aqua || 0) - (a.s.aqua || 0));
 
   let overlay = existing;
   if (!overlay) {
@@ -2854,9 +2917,8 @@ function renderGameOver(snapshot) {
   const voteBanner = (fv && fv.winnerName)
     ? `<p class="mp-game-over-vote">🏛 <strong>${esc(fv.winnerName)}</strong> carried the assembly vote: ${esc(fv.award || '')}${fv.awardTBD ? ' <em>(award TBD)</em>' : ''}</p>`
     : '';
-  const note = serverScores
-    ? 'Final score: delegate cubes + the winning ideology award + factory / colony / glory VP.'
-    : 'Provisional tally - full end-game scoring lands in a later update.';
+  const note = 'Final score: factory market value (Exploitation Track 8 / 5 / 4 per spectral) + 1 per token (factory, claim, outpost, rocket) + colonies by location + glory'
+    + (m0 ? ' + delegate cubes + the winning ideology award' : '') + '.';
   overlay.innerHTML = `
     <div class="mp-game-over-modal" role="dialog" aria-label="Final standings">
       <button type="button" class="modal-x" aria-label="Close" title="Close">&times;</button>
@@ -2868,25 +2930,101 @@ function renderGameOver(snapshot) {
     </div>`;
   const list = overlay.querySelector('.mp-game-over-list');
   const winnerName = fv && fv.winnerName ? fv.winnerName : 'ideology';
+  const COLONY_LABEL = { astrobiology: 'astrobiology', submarine: 'submarine', bernal: 'Bernal', other: 'colony' };
+  // One scorecard per player, ranked. Each shows the factory market chart
+  // (Exploitation Track), colonies by location, glory chits, and the token tally
+  // - the same breakdown the live scoring tab uses.
+  const cat = (icon, label, vp) => {
+    const block = document.createElement('div');
+    block.className = 'mp-go-cat';
+    const h = document.createElement('div');
+    h.className = 'mp-go-cat-head';
+    h.innerHTML = `<span class="mp-go-cat-label">${icon} ${esc(label)}</span><span class="mp-go-cat-vp">${vp} VP</span>`;
+    block.appendChild(h);
+    const chips = document.createElement('div');
+    chips.className = 'mp-go-chips';
+    block.appendChild(chips);
+    return { block, chips };
+  };
+  const noneChip = (host) => { const s = document.createElement('span'); s.className = 'mp-go-none muted'; s.textContent = 'none'; host.appendChild(s); };
+
   rows.forEach(({ p, s }, i) => {
     const li = document.createElement('li');
     li.className = 'mp-go-row' + (i === 0 ? ' is-winner' : '');
+
+    const head = document.createElement('div');
+    head.className = 'mp-go-head';
     const rank = document.createElement('span');
     rank.className = 'mp-go-rank';
-    rank.textContent = i === 0 ? '🏆' : `${i + 1}.`;
+    rank.textContent = i === 0 ? '🏆' : `${i + 1}`;
     const name = document.createElement('span');
     name.className = 'mp-go-name player-name';
     if (p.color) name.style.setProperty('--player-color', p.color);
     name.textContent = '@' + p.name + (p.profileId === myId ? ' (you)' : '');
     const total = document.createElement('span');
     total.className = 'mp-go-total';
-    total.textContent = `${s.total} VP`;
-    const brk = document.createElement('span');
-    brk.className = 'mp-go-break muted';
-    brk.textContent = serverScores
-      ? `cubes ${s.cubeVp} · ${winnerName} award ${s.awardVp} · factories ${s.factoryVp} · colonies ${s.colonyVp} · glory ${s.gloryVp}`
-      : `glory ${s.glory} · factories ${s.factories} · colonies ${s.colonies} · claims ${s.claims}`;
-    li.append(rank, name, total, brk);
+    total.innerHTML = `${s.total}<small>VP</small>`;
+    head.append(rank, name, total);
+    li.appendChild(head);
+
+    const detail = document.createElement('div');
+    detail.className = 'mp-go-detail';
+
+    // Factory market chart (Exploitation Track) + the +1-per-factory token.
+    const fac = cat('🏭', 'Factories', s.spectralVp + s.factoryCount);
+    if (s.spectralRows.length) {
+      for (const r of s.spectralRows) {
+        const chip = document.createElement('span');
+        chip.className = `mp-go-chip spectral-${esc(r.spec)}`;
+        chip.innerHTML = `<b>${esc(r.spec)}</b> ×${r.count} <span class="mp-go-chip-x">@${r.price}</span> = ${r.vp}`;
+        chip.title = `${r.count} ${r.spec}-spectral factor${r.count === 1 ? 'y' : 'ies'} at market price ${r.price} (${r.globalCount} of this spectral on the map) = ${r.vp} VP, plus +1 each as a token`;
+        fac.chips.appendChild(chip);
+      }
+    } else noneChip(fac.chips);
+    detail.appendChild(fac.block);
+
+    // Colonies by location type.
+    const col = cat('🏠', 'Colonies', s.colonyVp);
+    const colTypes = Object.entries(s.colonyByType).filter(([, n]) => n > 0);
+    if (colTypes.length) {
+      for (const [t, n] of colTypes) {
+        const chip = document.createElement('span');
+        chip.className = `mp-go-chip mp-go-colony-${t}`;
+        chip.textContent = `${COLONY_LABEL[t] || t} ×${n} (+${(COLONY_VP[t] || 1) * n})`;
+        col.chips.appendChild(chip);
+      }
+    } else noneChip(col.chips);
+    detail.appendChild(col.block);
+
+    // Glory chits awarded.
+    const glory = cat('🏅', 'Glory chits', s.glory);
+    const claimed = (p.glory && Array.isArray(p.glory.claimed)) ? p.glory.claimed : [];
+    if (claimed.length) {
+      for (const c of claimed) {
+        const chip = document.createElement('span');
+        chip.className = 'mp-go-chip mp-go-glory-chip';
+        chip.textContent = (c.zone || 'chit') + (c.side === 'back' ? ' ▸' : '');
+        glory.chips.appendChild(chip);
+      }
+    } else noneChip(glory.chips);
+    detail.appendChild(glory.block);
+
+    // Assembly bits (M0 only): delegate cubes + winning-ideology award.
+    if (m0 && (s.cubeVp || s.awardVp)) {
+      const tok = cat('🏛', 'Assembly', s.cubeVp + s.awardVp);
+      const tparts = [];
+      if (s.cubeVp) tparts.push(`cubes ${s.cubeVp}`);
+      if (s.awardVp) tparts.push(`${winnerName} award ${s.awardVp}`);
+      for (const t of tparts) {
+        const chip = document.createElement('span');
+        chip.className = 'mp-go-chip';
+        chip.textContent = t;
+        tok.chips.appendChild(chip);
+      }
+      detail.appendChild(tok.block);
+    }
+
+    li.appendChild(detail);
     list.appendChild(li);
   });
   overlay.querySelector('.modal-x').addEventListener('click', () => {
@@ -4953,9 +5091,9 @@ function humanizeOnlineOpError(code, detail) {
     not_dirt_thruster: 'Dirt refuel needs a dirt-burning thruster aboard.',
     not_at_site: 'Park at a site first - dirt comes from the ground.',
     dirt_needs_mooncable: 'Taking on dirt at LEO needs the moon cable (a NASRDA crew card aboard). Scoop at a site instead.',
+    dirt_needs_isru: 'Scooping dirt needs an ISRU source here: a factory at this site, or an ISRU platform aboard.',
     not_water_fuel: 'Dirt has no cash value - only water converts back to aqua.',
     no_thruster: 'Activate a thruster first.',
-    already_dirt_refueled: 'That dirt triangle has taken its dirt allotment this turn (7 via the moon cable, else 1).',
     not_in_outpost: 'That card is not in the outpost.',
     not_black_side: 'Only a Black-Side (installed) card can be delivered.',
     insufficient_outpost_water: 'The outpost doesn\'t have enough water to pay the delivery cost.',
@@ -5068,6 +5206,7 @@ export function unmountBrowseOnline() {
   if (fpOverlay) fpOverlay.remove();
   const goOverlay = document.getElementById('mp-game-over-overlay');
   if (goOverlay) goOverlay.remove();
+  setMpTurnAction('gameover', null);
   _gameOverDismissed = false;
   // Tear down any open crew-pick wizard so it doesn't leak across
   // sessions when the player returns to the lobby list.
@@ -11585,14 +11724,15 @@ function doEtProduce(site, factory, options, outpostsAtSite, freeSlots) {
     options,
     existingOutpost,
     freeSlots,
-    onCommit: ({ cardId, letter, isNewOutpost }) => {
+    onCommit: ({ cardId, letter, isNewOutpost, radSide }) => {
       if (!cardId || !letter) return;
       // Online: the server moves the hand card into the (maybe-new) outpost
-      // Black-Side-up; the snapshot repaints.
+      // Black-Side-up; the snapshot repaints. radSide is the radiator's chosen
+      // deployed side (Light / Heavy), ignored by non-radiators.
       if (_online) {
         const sid = toServerId(_onlineMaps, site.id);
         if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
-        submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, letter, isNewOutpost });
+        submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, letter, isNewOutpost, radSide });
         return;
       }
       if (!requireOp('ET Production')) return;
@@ -11618,6 +11758,7 @@ function doEtProduce(site, factory, options, outpostsAtSite, freeSlots) {
         id: cardId,
         kind: 'patent',
         face: 'secondary',
+        ...(radSide ? { radSide } : {}),
       });
       if (!added) {
         // Roll back: put card back in hand.
@@ -11862,7 +12003,9 @@ function doColonize(site, stack, options) {
       // the colony; the snapshot repaints the colony ring. Build Colony is a
       // FREE action server-side, so no op is spent.
       if (_online) {
-        submitOnlineOp({ kind: 'BUILD_COLONY', cardId: pick.id });
+        // Send the colony's location type (the client has the site flags; the
+        // server doesn't) so the server scores it by type at game end.
+        submitOnlineOp({ kind: 'BUILD_COLONY', cardId: pick.id, colonyType: colonyTypeOfSite(site.id) || 'other' });
         return;
       }
       const crewCard = CREW_BY_ID[pick.id];
@@ -12161,102 +12304,6 @@ function openBoostModal({ cards, have, opNote }) {
   });
 }
 
-// Stepper modal for dumping water. The player dials in how much to
-// drain (1..max) with the +/- steppers, types a value directly, or
-// taps "All" to jump to the full tank, then confirms. Resolves to
-// the chosen amount, or null if cancelled. Dumped water is destroyed
-// for now (Stage 3+ turns this into an outpost-stack drop).
-function openDumpWaterModal(maxWater) {
-  return new Promise((resolve) => {
-    const max = Math.max(0, maxWater | 0);
-    if (max <= 0) { resolve(null); return; }
-    document.querySelector('.dump-water-overlay')?.remove();
-    const overlay = document.createElement('div');
-    overlay.className = 'card-modal-overlay confirm-modal-overlay dump-water-overlay';
-    // Current wet mass drives the preview: dumping water lowers the
-    // wet mass, which can drop the rocket into a lighter weight class
-    // with a better net-thrust modifier.
-    const totals = getStackTotals();
-    const curWet = Math.max(0, totals.wetMass | 0);
-    const tankCap = getTankMax();
-    let amount = Math.min(1, max);
-    const close = (val) => {
-      overlay.remove();
-      document.removeEventListener('keydown', onKey);
-      resolve(val);
-    };
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
-    const onKey = (e) => {
-      if (e.key === 'Escape') close(null);
-      else if (e.key === 'Enter') close(amount);
-    };
-    document.addEventListener('keydown', onKey);
-    const panel = document.createElement('div');
-    panel.className = 'turn-confirm-panel dump-water-panel';
-    panel.innerHTML = `
-      <h3>💧⤓ Dump water</h3>
-      <p class="muted">Drain water from the rocket tank. Dumped water is
-      destroyed for now (Stage 3+ turns this into an outpost-stack drop
-      once factories land).</p>
-      <div class="dump-stepper">
-        <button type="button" class="popup-btn popup-btn-secondary dump-step" data-step="-1" aria-label="Dump one less">−</button>
-        <input type="number" class="dump-amount" min="1" max="${max}" value="${amount}" inputmode="numeric" aria-label="Water to dump" />
-        <button type="button" class="popup-btn popup-btn-secondary dump-step" data-step="1" aria-label="Dump one more">+</button>
-        <button type="button" class="popup-btn dump-all" title="Dump the entire tank">All (${max})</button>
-      </div>
-      <div class="dump-preview">
-        <span class="dump-preview-mass">Wet mass <strong>${curWet}</strong> →
-          <strong class="dump-after-wet">${curWet}</strong><small>/${tankCap}</small></span>
-        <span class="dump-preview-class"></span>
-      </div>
-      <div class="turn-confirm-actions">
-        <button type="button" class="popup-btn primary" data-act="yes">💧⤓ Dump <span class="dump-confirm-n">${amount}</span></button>
-        <button type="button" class="popup-btn" data-act="no">Cancel</button>
-      </div>
-    `;
-    const input = panel.querySelector('.dump-amount');
-    const confirmN = panel.querySelector('.dump-confirm-n');
-    const afterWetEl = panel.querySelector('.dump-after-wet');
-    const classEl = panel.querySelector('.dump-preview-class');
-    const clamp = (v) => Math.max(1, Math.min(max, Math.round(Number(v)) || 1));
-    // Reflect the resulting wet mass + the weight class (net-thrust
-    // modifier) the rocket would fall into after dumping `n` water.
-    const updatePreview = (n) => {
-      const afterWet = Math.max(0, curWet - n);
-      afterWetEl.textContent = String(afterWet);
-      const wc = weightClassForMass(Math.max(1, afterWet));
-      const mod = wc.netThrust >= 0 ? `+${wc.netThrust}` : String(wc.netThrust);
-      classEl.innerHTML = `Class <strong>${esc(wc.id)} ${mod}</strong> net thrust`;
-    };
-    const setAmount = (v) => {
-      amount = clamp(v);
-      input.value = String(amount);
-      confirmN.textContent = String(amount);
-      updatePreview(amount);
-    };
-    panel.querySelectorAll('.dump-step').forEach((b) => {
-      b.addEventListener('click', () => setAmount(amount + Number(b.dataset.step)));
-    });
-    panel.querySelector('.dump-all').addEventListener('click', () => setAmount(max));
-    input.addEventListener('input', () => {
-      // Allow free typing; only snap to the clamped value on the
-      // confirm/step paths so the field doesn't fight the user
-      // mid-keystroke. Keep the confirm label + preview in sync though.
-      const v = clamp(input.value);
-      amount = v;
-      confirmN.textContent = String(v);
-      updatePreview(v);
-    });
-    input.addEventListener('blur', () => setAmount(input.value));
-    panel.querySelector('[data-act="yes"]').addEventListener('click', () => close(amount));
-    panel.querySelector('[data-act="no"]').addEventListener('click', () => close(null));
-    updatePreview(amount);
-    overlay.appendChild(panel);
-    mountOverlay(overlay);
-    setTimeout(() => { input.focus(); input.select(); }, 0);
-  });
-}
-
 // Interactive fuel-strip diagram for the rocket-stack header -
 // the published HF4 "Net Thrust track". Mass positions 1..32 are
 // grouped into the doubling weight-class bands (data/net-thrust-
@@ -12482,6 +12529,8 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
     <h2 class="fuel-tank-title">${isDirt ? '🟤 Dirt tank' : '💧 Water tank'}</h2>
     <p class="muted fuel-tank-sub">Tap outside or press Esc to close</p>
+    <div class="fuel-tank-body">
+    <div class="fuel-tank-col fuel-tank-col-stage">
     <div class="fuel-tank-stage">
       <svg viewBox="0 0 120 220" class="fuel-tank-svg" preserveAspectRatio="xMidYMid meet">
         <!-- Outer cylinder (stroke only) -->
@@ -12531,9 +12580,31 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         <em class="muted">${fuelWord}</em>
       </div>
     </div>
+    </div>
+    <div class="fuel-tank-col fuel-tank-col-strip">
+      <div class="ntd-title-mini muted">Fuel Strip Track</div>
+      <div class="fuel-tank-strip ntd-scroll"></div>
+      <div class="ntd-legend">
+        <span><i class="ntd-line burn"></i> burn (spend FT → dry mass)</span>
+        <span><i class="ntd-line refuel"></i> refuel (load FT → wet mass)</span>
+        <span><i class="ntd-chit dry"></i> dry</span>
+        <span><i class="ntd-chit wet"></i> wet</span>
+      </div>
+    </div>
+    <div class="fuel-tank-col fuel-tank-col-controls">
     <div class="fuel-tank-actions">
-      ${tankDirt ? '' : `<button type="button" class="popup-btn popup-btn-secondary" id="tank-dump"
-        title="Drain a chosen amount of water from the tank">💧⤓ Dump water</button>`}
+      ${tankDirt ? '' : `
+      <div class="aqua-direction aqua-direction-reverse fuel-tank-dump-row">
+        <span class="aqua-direction-label">💧⤓ DUMP</span>
+        <div class="aqua-actions">
+          <button type="button" class="popup-btn popup-btn-secondary" id="water-dump-1"
+            title="Jettison 1 fuel step of water">-1</button>
+          <button type="button" class="popup-btn popup-btn-secondary" id="water-dump-5"
+            title="Jettison 5 fuel steps of water">-5</button>
+          <button type="button" class="popup-btn" id="water-dump-max"
+            title="Jettison all water down to dry mass">max</button>
+        </div>
+      </div>`}
     </div>
     ${tankDirt ? '' : fuelTankOutpostSections()}
 <div class="fuel-tank-aqua" id="tank-aqua-section" hidden>
@@ -12584,16 +12655,16 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         <span class="aqua-direction-label">🟤 Tank → ⤓ Dump</span>
         <div class="aqua-actions">
           <button type="button" class="popup-btn popup-btn-secondary" id="dirt-dump-1"
-            title="Jettison 1 dirt FT">-1</button>
+            title="Jettison 1 dirt fuel step">-1</button>
           <button type="button" class="popup-btn popup-btn-secondary" id="dirt-dump-5"
-            title="Jettison 5 dirt FTs">-5</button>
+            title="Jettison 5 dirt fuel steps">-5</button>
           <button type="button" class="popup-btn" id="dirt-dump-all"
-            title="Jettison all dirt from the tank">Dump all</button>
+            title="Jettison all dirt down to dry mass">Dump all</button>
         </div>
       </div>
       <p class="muted aqua-help" id="dirt-help">
-        A dirt thruster scoops grey propellant from the ground for free (a
-        crew dirt thruster takes 1 per turn). Dirt has no aqua value and
+        A dirt thruster scoops grey propellant for free, any amount per turn,
+        at a site with a factory or ISRU platform. Dirt has no aqua value and
         can't mix with water.
       </p>
     </div>
@@ -12611,21 +12682,25 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     </div>
     <div class="fuel-tank-netthrust">
       <div class="ntt-head">🚀 Fuel Strip Track</div>
-      <div class="ntt-row">
-        Wet mass <strong>${wmNow}</strong> → <strong>${wcNow.id}</strong>
-        weight class (<strong>${ntMod}</strong> net thrust)
+      <div class="ntt-body">
+        <div class="ntt-row">
+          Wet mass <strong>${wmNow}</strong> → <strong>${wcNow.id}</strong>
+          weight class (<strong>${ntMod}</strong> net thrust)
+        </div>
+        ${thrust != null
+          ? `<div class="ntt-row">Base thrust <strong>${thrust}</strong>
+               ${ntMod} weight = net thrust <strong>${netThrustVal}</strong></div>`
+          : '<div class="ntt-row muted">(no active thruster - no base thrust)</div>'}
+        <div class="ntt-row muted">Fuel steps this band: <strong>${fracLadder}</strong></div>
       </div>
-      ${thrust != null
-        ? `<div class="ntt-row">Base thrust <strong>${thrust}</strong>
-             ${ntMod} weight = net thrust <strong>${netThrustVal}</strong></div>`
-        : '<div class="ntt-row muted">(no active thruster - no base thrust)</div>'}
-      <div class="ntt-row muted">Fuel steps this band: <strong>${fracLadder}</strong></div>
       <p class="muted ntt-note">
         Heavier stacks read a lower net thrust. A burn spends fuel
         and walks the wet-mass chit toward dry mass (black line);
         refuelling walks it back up (red dotted). Each band spends
         fuel in finer fractions as mass grows.
       </p>
+    </div>
+    </div>
     </div>
   `;
 
@@ -12635,6 +12710,54 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const liftLine  = panel.querySelector('.tank-lift-line');
   const nowReadout = panel.querySelector('.tank-now');
   const ticksG     = panel.querySelector('.tank-ticks');
+
+  // Fuel strip (middle column). This is the SAME detailed Fuel Strip
+  // Track as the click-to-open modal (renderDetailTrack), reused
+  // as-is. The Net Thrust readout text moves under it so they read
+  // as one block. As water moves (dump / pump / refuel / aqua) the
+  // track re-renders at the new wet mass, so the WET chit walks the
+  // ladder and the blue burn path grows / shrinks in lockstep with
+  // the tank cylinder beside it. Re-render is bounded: only when the
+  // wet mass crosses an integer or shifts by a fuel-step (~0.1), so
+  // a tween redraws a handful of times, not 60x a second.
+  const stripCol  = panel.querySelector('.fuel-tank-col-strip');
+  const ntBlock   = panel.querySelector('.fuel-tank-netthrust');
+  if (stripCol && ntBlock) stripCol.appendChild(ntBlock);
+  const stripHost = panel.querySelector('.fuel-tank-strip');
+  const nttBody   = ntBlock && ntBlock.querySelector('.ntt-body');
+  let lastRenderWet = -999;
+  // Net Thrust readout text under the strip, recomputed from the live wet mass
+  // (it used to render once at open and go stale as the tank moved).
+  function updateNetThrustText(wet) {
+    if (!nttBody) return;
+    const wm = Math.max(0, wet);
+    const wc = weightClassForMass(Math.max(1, Math.round(wm)));
+    const mod = wc.netThrust >= 0 ? `+${wc.netThrust}` : String(wc.netThrust);
+    const nt = (thrust != null) ? (thrust + wc.netThrust) : null;
+    const frac = (wc.fractions && wc.fractions.length) ? wc.fractions.join(' ') : 'whole steps';
+    nttBody.innerHTML = `
+      <div class="ntt-row">Wet mass <strong>${esc(massLabel(wm))}</strong> → <strong>${esc(wc.id)}</strong> weight class (<strong>${mod}</strong> net thrust)</div>
+      ${thrust != null
+        ? `<div class="ntt-row">Base thrust <strong>${thrust}</strong> ${mod} weight = net thrust <strong>${nt}</strong></div>`
+        : '<div class="ntt-row muted">(no active thruster - no base thrust)</div>'}
+      <div class="ntt-row muted">Fuel steps this band: <strong>${frac}</strong></div>`;
+  }
+  function updateStrip(level) {
+    if (!stripHost) return;
+    const wet = Math.max(0, dryMass + level);
+    updateNetThrustText(wet);
+    if (Math.abs(wet - lastRenderWet) < 0.09
+        && Math.round(wet) === Math.round(lastRenderWet)) return;
+    renderDetailTrack(stripHost, { dryMass, wetMass: wet });
+    lastRenderWet = wet;
+    // Keep the moving WET chit in view as the wide track scrolls.
+    const range = stripHost.scrollWidth - stripHost.clientWidth;
+    if (range > 0) {
+      const frac = Math.max(0, Math.min(1, wet / MAX_WET_MASS));
+      stripHost.scrollLeft = frac * range;
+    }
+  }
+  updateStrip(fromW);
 
   // Geometry: 200 svg units span TANK_VIS_MAX wet-mass units.
   // The dry-mass block fills the bottom; water sits above it.
@@ -12691,6 +12814,10 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     // tank; longer (fractional) values just get a smaller font.
     const len = nowReadout.textContent.length;
     nowReadout.style.fontSize = len >= 6 ? '20px' : len >= 5 ? '24px' : len >= 4 ? '30px' : '38px';
+    // The fuel strip + Net Thrust text are pinned to the COMMITTED tank via the
+    // onRocketChange sync below (not per animation frame), so they always match
+    // the real tank instead of lagging a tween or flickering as the cylinder
+    // drains.
   }
   // Seed the initial water level (the static HTML only renders the number).
   setLevel(fromW);
@@ -12863,10 +12990,16 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   // dropping from before-value to after-value over ~250ms. The
   // readout updates each frame; in-flight droplets are cleared
   // because dumping should feel like emptying, not filling.
-  const dumpBtn = panel.querySelector('#tank-dump');
+  const waterDump1   = panel.querySelector('#water-dump-1');
+  const waterDump5   = panel.querySelector('#water-dump-5');
+  const waterDumpMax = panel.querySelector('#water-dump-max');
   const refreshDumpButtons = () => {
     const cur = getTankWater();
-    if (dumpBtn) dumpBtn.disabled = cur <= 0;
+    const dry = Math.max(0, getStackTotals().dryMass | 0);
+    const steps = blackStepsBetween(dry, dry + cur);
+    if (waterDump1)   waterDump1.disabled   = steps < 1;
+    if (waterDump5)   waterDump5.disabled   = steps < 5;
+    if (waterDumpMax) waterDumpMax.disabled = steps < 1;
   };
   refreshDumpButtons();
   function drainTo(targetLevel, durationMs = 250) {
@@ -12888,39 +13021,57 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
       onDone: () => refreshDumpButtons(),
     };
   }
-  dumpBtn?.addEventListener('click', async (e) => {
-    // Stop the overlay's onTap handler from interpreting this
-    // click as "skip animation / close" - that's why dump looked
-    // like it dismissed the modal.
-    e.stopPropagation();
-    const max = getTankWater();
-    if (max <= 0) return;
-    const amount = await openDumpWaterModal(max);
-    if (!amount || amount <= 0) return;
-    // Re-clamp in case the tank changed while the picker was open.
-    const drain = Math.min(amount, getTankWater());
-    if (drain <= 0) return;
+  // Dump fuel by FUEL STEP (water OR dirt - same path). -1 walks the wet chit
+  // one black connection down the ladder (the same non-linear mass drop a burn
+  // spends, so it can be a fraction); max walks all the way to dry mass. Logs
+  // the tank before / after so the step amount is visible in the console.
+  const round6 = (n) => Math.round((Number(n) || 0) * 1e6) / 1e6;
+  async function dumpFuelBySteps(steps, e, onRefresh) {
+    // Stop the overlay's onTap handler from reading this click as
+    // "skip animation / close".
+    e?.stopPropagation();
+    const before = getTankWater();
+    const dry = Math.max(0, getStackTotals().dryMass | 0);
+    const wet = dry + before;
+    const maxSteps = blackStepsBetween(dry, wet);
+    const k = Math.min(steps, maxSteps);
+    const grade = getTankGrade() === 'dirt' ? 'dirt' : 'water';
+    if (k < 1) {
+      console.log('[dump] nothing to dump', { grade, tankWater: round6(before), dryMass: dry, wetMass: round6(wet), maxSteps, stepsRequested: steps });
+      onRefresh && onRefresh();
+      return;
+    }
+    const drain = Math.max(0, round6(wet - walkBlackDown(wet, k)));
+    console.log('[dump] BEFORE', { grade, tankWater: round6(before), dryMass: dry, wetMass: round6(wet), stepsRequested: steps, stepsToDump: k, maxSteps, drainWater: drain });
+    if (drain <= 0) { console.log('[dump] drain is 0, aborting'); onRefresh && onRefresh(); return; }
     // Online: jettisoning is the server DUMP op; await it so the snapshot
     // lowers the tank first, then drain-animate to the new level.
     if (_online) {
       const ok = await submitOnlineOp({ kind: 'DUMP', amount: drain });
-      if (!ok) return;
-      const leftOnline = getTankWater();
-      drainTo(leftOnline, leftOnline <= 0 ? 600 : 250);
+      const afterOnline = getTankWater();
+      console.log('[dump] AFTER (online)', { ok, requestedDrain: drain, tankWater: round6(afterOnline), removed: round6(before - afterOnline) });
+      if (!ok) { onRefresh && onRefresh(); return; }
+      drainTo(afterOnline, afterOnline <= 0 ? 600 : 250);
+      onRefresh && onRefresh();
       return;
     }
     removeFuel(drain);
-    const left = getTankWater();
-    drainTo(left, left <= 0 ? 600 : 250);
+    const after = getTankWater();
+    console.log('[dump] AFTER', { grade, tankWater: round6(after), removed: round6(before - after), wetMassAfter: round6(dry + after) });
+    drainTo(after, after <= 0 ? 600 : 250);
     logAction({
       type: 'dump',
-      icon: '💧⤓',
-      summary: left <= 0
-        ? `Dumped ${drain} water (tank empty)`
-        : `Dumped ${drain} water (tank ${left}/${getTankMax()})`,
+      icon: grade === 'dirt' ? '🟤⤓' : '💧⤓',
+      summary: after <= 0
+        ? `Dumped ${k} ${grade} fuel step${k === 1 ? '' : 's'} (tank empty)`
+        : `Dumped ${k} ${grade} fuel step${k === 1 ? '' : 's'} (tank ${massLabel(after)}/${getTankMax()})`,
       undoable: false,
     });
-  });
+    onRefresh && onRefresh();
+  }
+  waterDump1?.addEventListener('click',   (e) => dumpFuelBySteps(1, e, refreshDumpButtons));
+  waterDump5?.addEventListener('click',   (e) => dumpFuelBySteps(5, e, refreshDumpButtons));
+  waterDumpMax?.addEventListener('click', (e) => dumpFuelBySteps(Infinity, e, refreshDumpButtons));
 
   // Aqua → water transfer panel. Gated behind LEO presence -
   // refilling water from the aqua reserve is a "back at port"
@@ -13149,17 +13300,19 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   const dirtDump5   = panel.querySelector('#dirt-dump-5');
   const dirtDumpAll = panel.querySelector('#dirt-dump-all');
   const dirtHelp    = panel.querySelector('#dirt-help');
-  const isCrewDirt  = !!CREW_BY_ID[getActiveThrusterId()];
   // Dirt needs NO ISRU rig. At LEO it takes the MOON CABLE (a NASRDA crew card
   // aboard - need NOT be the active thruster) to pipe dirt up; at a real site
   // any active dirt thruster scoops from the ground. Keyed off the CARD, not
   // the suspendable Mooncable faction privilege.
   const hasMooncable = stackHasMoonCable();
-  const canScoopDirt = (atLeo && hasMooncable) || (!!getRocketSite() && !atLeo);
-  // Per-turn dirt allotment (cumulative): 7 tanks via the moon cable for a
-  // non-crew triangle at LEO, otherwise 1 (a crew triangle at LEO, or any
-  // dirt thruster scooping at a site).
-  const dirtPerTurnMax = atLeo ? (isCrewDirt ? 1 : 7) : 1;
+  // Scooping dirt at a site needs an ISRU SOURCE colocated: a factory at the
+  // site, or an ISRU platform (a card with an ISRU rating) aboard the rocket.
+  // At LEO it's the moon cable instead (no ground to scoop).
+  const dirtHere = getRocketSite();
+  const dirtFactoryHere = !!(dirtHere && getFactory(dirtHere.id));
+  const dirtIsruAboard = getDirtCapability().hasIsru;
+  const dirtIsruSource = dirtFactoryHere || dirtIsruAboard;
+  const canScoopDirt = atLeo ? hasMooncable : (!!dirtHere && dirtIsruSource);
   // Show the scoop panel whenever the tank is in DIRT MODE (dirt loaded, or
   // an empty tank under a dirt engine) so the player always sees the dirt
   // controls, not just when the dirt thruster happens to be the active
@@ -13173,35 +13326,34 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     if (!dirtSection || dirtSection.hidden) return;
     const cur = getTankWater();
     const room = Math.max(0, cap - cur);
-    const remaining = Math.max(0, dirtPerTurnMax - dirtTanksLoadedThisTurn());
-    const fillable = Math.min(remaining, room);   // tanks that can still go in
-    const allotDone = remaining < 1;
+    // Dirt refuel is a FREE action with NO per-turn cap: the only limit is tank
+    // room. Load as much as fits, any number of times this turn.
+    const fillable = room;
     const blocked = !activeDirt || !canScoopDirt || fillable < 1;
     if (dirtFill1)   dirtFill1.disabled   = blocked;
-    // +5 / Max are bounded by the per-turn allotment (7 via moon cable, else 1).
     if (dirtFill5)   dirtFill5.disabled   = blocked || fillable < 5;
     if (dirtFillMax) dirtFillMax.disabled = blocked;
     // Dump (jettison) needs no engine: you can always vent loaded dirt, so
-    // the only gate is "is there dirt to dump?".
-    if (dirtDump1)   dirtDump1.disabled   = cur < 1;
-    if (dirtDump5)   dirtDump5.disabled   = cur < 5;
-    if (dirtDumpAll) dirtDumpAll.disabled = cur < 1;
+    // the only gate is "are there fuel steps to dump?". Dumping walks the
+    // fuel ladder (same as a burn / the water dump), so it's gated on the
+    // black steps from wet down to dry, not whole tank units.
+    const dirtDry = Math.max(0, (getStackTotals().dryMass | 0));
+    const dirtSteps = blackStepsBetween(dirtDry, dirtDry + cur);
+    if (dirtDump1)   dirtDump1.disabled   = dirtSteps < 1;
+    if (dirtDump5)   dirtDump5.disabled   = dirtSteps < 5;
+    if (dirtDumpAll) dirtDumpAll.disabled = dirtSteps < 1;
     if (dirtHelp) {
       dirtHelp.textContent = !activeDirt
         ? 'Make your dirt thruster the active engine to scoop dirt (a water engine can\'t burn it).'
         : !canScoopDirt
           ? (atLeo
-              ? 'Carry the moon cable (a NASRDA crew card) to take on dirt at LEO, or park at a site to scoop from the ground.'
-              : 'Park at a site to scoop dirt.')
+              ? 'Carry the moon cable (a NASRDA crew card) to take on dirt at LEO, or park at a site with a factory or ISRU platform.'
+              : !dirtHere
+                ? 'Park at a site to scoop dirt.'
+                : 'Scooping dirt needs an ISRU source here: a factory at this site, or an ISRU platform (an ISRU-rated card) aboard.')
           : room < 1
             ? 'Tank is full.'
-            : allotDone
-              ? (atLeo && !isCrewDirt
-                  ? 'This dirt triangle has taken its 7 dirt tanks via the moon cable this turn.'
-                  : 'This dirt thruster already took its 1 dirt tank this turn.')
-              : (atLeo && !isCrewDirt
-                  ? 'The moon cable pipes up to 7 dirt tanks this turn. No aqua value, no ISRU needed; dirt can\'t mix with water or be transferred.'
-                  : 'A dirt thruster takes 1 dirt tank per turn. No aqua value, no ISRU needed; dirt can\'t mix with water or be transferred.');
+            : 'Scoop as much dirt as the tank holds - it\'s free and unlimited per turn. No aqua value; dirt can\'t mix with water or be transferred.';
     }
   }
   refreshDirtButtons();
@@ -13211,7 +13363,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     const cur = getTankWater();
     if (cur > 0 && getTankGrade() === 'water') { refreshDirtButtons(); return; }
     const room = Math.max(0, cap - cur);
-    const fillable = Math.min(Math.max(0, dirtPerTurnMax - dirtTanksLoadedThisTurn()), room);
+    const fillable = room;
     if (fillable < 1) { refreshDirtButtons(); return; }
     const want = amount > 0 ? Math.min(amount, fillable) : fillable;
     // Online: the server validates the active dirt thruster + grade + scoop
@@ -13224,7 +13376,6 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     }
     setTankGrade('dirt');
     addFuel(want);
-    markDirtRefueledThisTurn();
     animateTankLevel();
     logAction({
       type: 'dirt_refuel', icon: '🟤',
@@ -13235,42 +13386,22 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   dirtFill1?.addEventListener('click',   (e) => fillDirt(1, e));
   dirtFill5?.addEventListener('click',   (e) => fillDirt(5, e));
   dirtFillMax?.addEventListener('click', (e) => fillDirt(Infinity, e));
-  // Dump dirt: same inline +1 / +5 / Dump-all UX as the scoop row (no
-  // separate Dump-dirt button / amount-picker modal). Jettisons grey
-  // propellant; destroyed for now (the dump note explains the Stage 3+ plan).
-  const dumpDirt = async (amount, e) => {
-    e?.stopPropagation();
-    const cur = getTankWater();
-    const drain = Math.min(amount, cur);
-    if (drain <= 0) { refreshDirtButtons(); return; }
-    // Online: jettisoning is the server DUMP op; await it so the snapshot
-    // lowers the tank first, then drain-animate to the new level.
-    if (_online) {
-      const ok = await submitOnlineOp({ kind: 'DUMP', amount: drain });
-      if (!ok) { refreshDirtButtons(); return; }
-      const left = getTankWater();
-      drainTo(left, left <= 0 ? 600 : 250);
-      refreshDirtButtons();
-      return;
-    }
-    removeFuel(drain);
-    const left = getTankWater();
-    drainTo(left, left <= 0 ? 600 : 250);
-    logAction({
-      type: 'dump', icon: '🟤⤓',
-      summary: left <= 0
-        ? `Dumped ${drain} dirt (tank empty)`
-        : `Dumped ${drain} dirt (tank ${left}/${getTankMax()})`,
-      undoable: false,
-    });
-    refreshDirtButtons();
-  };
-  dirtDump1?.addEventListener('click',   (e) => dumpDirt(1, e));
-  dirtDump5?.addEventListener('click',   (e) => dumpDirt(5, e));
-  dirtDumpAll?.addEventListener('click', (e) => dumpDirt(getTankWater(), e));
+  // Dump dirt: same inline -1 / -5 / Dump-all UX as the scoop row, routed
+  // through the shared fuel-step dump (walks the black ladder down, logs
+  // before / after), so dirt vents by fuel step exactly like water.
+  dirtDump1?.addEventListener('click',   (e) => dumpFuelBySteps(1, e, refreshDirtButtons));
+  dirtDump5?.addEventListener('click',   (e) => dumpFuelBySteps(5, e, refreshDirtButtons));
+  dirtDumpAll?.addEventListener('click', (e) => dumpFuelBySteps(Infinity, e, refreshDirtButtons));
 
   const unsubAqua = onAquaChange(refreshAquaButtons);
-  const unsubRocket = onRocketChange(() => { refreshAquaButtons(); refreshDirtButtons(); refreshOutpostSections(); });
+  const unsubRocket = onRocketChange(() => {
+    refreshAquaButtons(); refreshDirtButtons(); refreshOutpostSections();
+    refreshDumpButtons();
+    // Keep the fuel strip + Net Thrust text pinned to the live tank. This
+    // fires on every tank change INCLUDING an online snapshot hydrate, so the
+    // strip never lags behind a dump / refuel the way a tween-only update can.
+    updateStrip(getTankWater());
+  });
   // Cleanup: detach listeners when the overlay tears down so a
   // closed modal doesn't keep responding to balance changes.
   const origRemove = overlay.remove.bind(overlay);
@@ -16168,6 +16299,16 @@ function openRouteOptionsModal(onClose) {
         This can't be undone.
       </p>
     </div>` : ''}
+    ${(_online && _onlineCloseRoom && _onlineMe && _onlineHostId && _onlineMe.id === _onlineHostId) ? `
+    <div class="route-options-danger">
+      <button type="button" class="popup-btn danger route-options-close-room-btn">
+        🚪 Close this room
+      </button>
+      <p class="muted route-options-manual-help">
+        Ends the table for everyone and returns to the lobby. The room
+        moves to your Ended games, where you can Restore it later.
+      </p>
+    </div>` : ''}
   `;
   panel.querySelector('.modal-x').addEventListener('click', close);
   panel.querySelectorAll('input[name="route-priority"]').forEach((el) => {
@@ -16229,6 +16370,19 @@ function openRouteOptionsModal(onClose) {
           + (v ? '?v=' + encodeURIComponent(v) : '');
         window.location.assign(url);
       } catch { window.location.assign('../../lobby'); }
+    });
+  }
+  const closeRoomBtn = panel.querySelector('.route-options-close-room-btn');
+  if (closeRoomBtn) {
+    closeRoomBtn.addEventListener('click', async () => {
+      const ok = await confirmModal({
+        title: '🚪 Close this room',
+        body: 'End this table for everyone and return to the lobby? It moves to your Ended games, where you can Restore it later.',
+        yes: '🚪 Close room', no: 'Cancel',
+      });
+      if (!ok) return;
+      close();
+      if (_onlineCloseRoom) _onlineCloseRoom();
     });
   }
 
@@ -18854,11 +19008,10 @@ function paintGlory() {
   }).join('');
 
   // --- Tokens (+1 each) ---------------------------------------------
+  // Only factories and colony domes earn a token. The colony dome's +1 is in
+  // the colony-locations block below, so this lists the factory token only.
   const tokenRows = [
-    ['🚀 Rocket',    score.tokens.rocket],
-    ['🟡 Claims',    score.tokens.claims],
     ['🏭 Factories', score.tokens.factories],
-    ['🏛 Outposts',  score.tokens.outposts],
   ].map(([label, n]) =>
     `<li><span>${label}</span><strong>+${n} VP</strong></li>`
   ).join('');

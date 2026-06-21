@@ -2859,15 +2859,22 @@ export class MapRenderer {
       const rad = Math.max(9, Math.sqrt(tw * tw + 11 * 11) / 2 + 2);
       const hasGlyph = !!markerSpriteFor(w);
       const cy = hasGlyph ? sy + (MAP_ICON_BOX / 2 + rad - 2) : sy;
+      const flSeason = seasonOf(w);
       ctx.fillStyle = '#000000';
       ctx.beginPath();
       ctx.arc(sx, cy, rad, 0, Math.PI * 2);
       ctx.fill();
+      // A season-keyed flyby (e.g. the blue-season Venus flyby venus-2lgjk)
+      // washes its whole disc in the synodic-season colour so the node READS as
+      // that season at a glance, not just a thin ring the black "+N" disc would
+      // otherwise swallow. The wash sits over black so the white "+N" stays
+      // legible; the matching thicker ring frames it.
+      if (flSeason) {
+        ctx.fillStyle = hexToRgba(SYNODIC_COLOURS[flSeason], 0.55);
+        ctx.fill();
+      }
       // Outline reads as the same family of flyby node (Lagrange orange),
-      // EXCEPT a season-keyed flyby (e.g. the blue-season Venus flyby
-      // venus-2lgjk) wears its synodic-season colour - thicker - so the season
-      // reads at a glance instead of being hidden under the orange disc.
-      const flSeason = seasonOf(w);
+      // EXCEPT a season-keyed flyby wears its synodic-season colour - thicker.
       ctx.lineWidth = flSeason ? 2.4 : 1.5;
       ctx.strokeStyle = flSeason ? SYNODIC_COLOURS[flSeason] : '#c66932';
       ctx.stroke();

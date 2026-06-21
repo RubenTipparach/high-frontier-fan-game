@@ -31,18 +31,38 @@ export function resolveSupportChain({ cards = [], activeId = null, wiring = {} }
   const reqKindsOf = (c) => (c.requires || [])
     .map((r) => (r && typeof r === 'object') ? r.kind : r)
     .filter(Boolean);
-  const supplies = (c, kind) => Array.isArray(c.supplies) && c.supplies.includes(kind);
+  // Requirements that share a supplier-prefix (the reactor-* kinds, or the two
+  // gen-* kinds) form ONE OR-group: the consumer needs ANY ONE supplier of
+  // those kinds, not all of them. This matches the activation gate
+  // (isRocketActive), which has always grouped by prefix; the chain walk now
+  // agrees. A generator that accepts "fusion OR antimatter" therefore pulls in
+  // exactly ONE reactor (the player's wired pick, else the first match) and the
+  // other reactor is a spare, not a second forced chain member. The group is
+  // keyed by its FIRST kind (a real kind), so edges / wiring / display use a
+  // concrete kind rather than a bare prefix.
+  const reqGroupsByPrefix = (c) => {
+    const groups = new Map();   // prefix -> [kinds]
+    for (const k of reqKindsOf(c)) {
+      const p = String(k).split('-')[0];
+      if (!groups.has(p)) groups.set(p, []);
+      if (!groups.get(p).includes(k)) groups.get(p).push(k);
+    }
+    return groups;
+  };
+  const suppliesAny = (c, kinds) => Array.isArray(c.supplies)
+    && kinds.some((k) => c.supplies.includes(k));
 
-  // Every OTHER card in the stack that could satisfy (consumer, kind).
-  const candidatesFor = (consumerId, kind) => cards
-    .filter((c) => c.id !== consumerId && supplies(c, kind))
+  // Every OTHER card in the stack that could satisfy an OR-group.
+  const candidatesFor = (consumerId, kinds) => cards
+    .filter((c) => c.id !== consumerId && suppliesAny(c, kinds))
     .map((c) => c.id);
 
-  // The chosen supplier for (consumer, kind): player wiring if it's still a
-  // valid candidate, otherwise the first match (stack order = deterministic).
-  const supplierFor = (consumerId, kind) => {
-    const cands = candidatesFor(consumerId, kind);
-    const wired = wiring[consumerId] && wiring[consumerId][kind];
+  // The chosen supplier for an OR-group: player wiring (keyed by the group key)
+  // if it's still a valid candidate, otherwise the first match (stack order =
+  // deterministic).
+  const supplierFor = (consumerId, groupKey, kinds) => {
+    const cands = candidatesFor(consumerId, kinds);
+    const wired = wiring[consumerId] && wiring[consumerId][groupKey];
     if (wired && cands.includes(wired)) return wired;
     return cands.length ? cands[0] : null;
   };
@@ -66,10 +86,11 @@ export function resolveSupportChain({ cards = [], activeId = null, wiring = {} }
     stack.push(consumerId); onStack.add(consumerId);
     const c = byId.get(consumerId);
     if (c) {
-      for (const kind of reqKindsOf(c)) {
-        const sup = supplierFor(consumerId, kind);
+      for (const [, kinds] of reqGroupsByPrefix(c)) {
+        const groupKey = kinds[0];
+        const sup = supplierFor(consumerId, groupKey, kinds);
         if (sup) {
-          edges.push({ from: consumerId, to: sup, kind });
+          edges.push({ from: consumerId, to: sup, kind: groupKey, kinds });
           walk(sup);
         }
       }
@@ -152,17 +173,33 @@ export function resolveCoolingAcross({ cards = [], orders = [] } = {}) {
   // chain visualizer's "needs a generator - no supplier" flag.
   const supplierExists = (kind) =>
     cards.some((c) => Array.isArray(c.supplies) && c.supplies.includes(kind));
-  const radiatorPowered = (c) => (c.requires || [])
-    .map((r) => (r && typeof r === 'object') ? r.kind : r)
-    .filter(Boolean)
-    .every((kind) => supplierExists(kind));
+  // A radiator runs iff EACH of its OR-groups (same prefix = one group, like
+  // the chain walk) has at least one supplier in the stack.
+  const radiatorPowered = (c) => {
+    const groups = new Map();
+    for (const r of (c.requires || [])) {
+      const k = (r && typeof r === 'object') ? r.kind : r;
+      if (!k) continue;
+      const p = String(k).split('-')[0];
+      if (!groups.has(p)) groups.set(p, []);
+      groups.get(p).push(k);
+    }
+    return [...groups.values()].every((kinds) => kinds.some((k) => supplierExists(k)));
+  };
   const radiatorTotal = cards
     .filter((c) => c.type === 'radiator' && radiatorPowered(c))
     .reduce((s, c) => s + (Number(c.therms) || 0), 0);
-  let pool = radiatorTotal;
-  const reserved = new Set(); // reactor ids a higher-priority chain already cooled
 
   const perChain = orders.map((order) => {
+    // Each active chain shares the FULL radiator pool (rule 5: the thruster and
+    // prospector chains run in parallel and MAY SHARE radiators freely - one
+    // radiator can cool a reactor in the thruster chain AND the prospector's
+    // heat with no contention). So cooling resolves PER CHAIN against the whole
+    // pool; the chains never deplete each other. Dedicated reactor cooling
+    // (rule 3) still holds WITHIN a chain - two reactors in the same chain can't
+    // share the same therms.
+    let pool = radiatorTotal;
+    const reserved = new Set();
     const reactorIds = order.filter((id) => {
       const c = byId.get(id); return c && c.type === 'reactor';
     });
@@ -189,13 +226,8 @@ export function resolveCoolingAcross({ cards = [], orders = [] } = {}) {
       }
     }
     const reactorCooling = [];
-    // Reactors a higher-priority chain already reserved: shared, already cooled.
-    for (const id of reactorIds) {
-      if (reserved.has(id)) {
-        reactorCooling.push({ reactorId: id, demand: Number(byId.get(id).therms) || 0, ok: true, shared: true });
-      }
-    }
-    // This chain's own reactors, hottest-first, reserve from the remaining pool.
+    // This chain's reactors, hottest-first, reserve dedicated therms from the
+    // (full) pool; within the chain no two reactors can share the same therms.
     const own = reactorIds.filter((id) => !reserved.has(id))
       .sort((a, b) => (Number(byId.get(b).therms) || 0) - (Number(byId.get(a).therms) || 0));
     for (const id of own) {
@@ -215,8 +247,12 @@ export function resolveCoolingAcross({ cards = [], orders = [] } = {}) {
       .reduce((s, c) => s + (Number(c.therms) || 0), 0);
     const nonReactorCooled = nonReactorHeat <= pool;
     const coolingOk = reactorsCooled && nonReactorCooled;
-    return { reactorCooling, reactorsCooled, reactorDemand, nonReactorHeat, nonReactorCooled, coolingOk };
+    return { reactorCooling, reactorsCooled, reactorDemand, nonReactorHeat, nonReactorCooled, coolingOk, remaining: pool };
   });
 
-  return { perChain, radiatorTotal, radiatorRemaining: pool };
+  return {
+    perChain,
+    radiatorTotal,
+    radiatorRemaining: perChain.length ? perChain[0].remaining : radiatorTotal,
+  };
 }

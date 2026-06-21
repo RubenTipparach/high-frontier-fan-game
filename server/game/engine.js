@@ -39,6 +39,9 @@ import {
 // STEPS (black connections), and the water it costs is the non-linear mass
 // drop, leaving a possibly-fractional remainder.
 import { blackStepsBetween, walkBlackDown } from '../../data/fuel-graph.js';
+// Endgame VP math, shared with the client live panel + game-over modal so the
+// authoritative score can never drift from what players see.
+import { scorePlayer } from '../../data/endgame-scoring.js';
 // Net-thrust band (weight class) + solar-zone modifiers, the same pure
 // tables the client folds into rocket.js#getActiveThrusterStats. The
 // engine reads them so the liftoff/landing gate uses the FINAL net thrust,
@@ -2760,9 +2763,13 @@ function applyEtProduce(state, op, player) {
     return fail('not_colocated');
   }
   player.hand.splice(hIdx, 1);
-  outpost.cards.push({ id: cardId, kind: 'patent', face: 'secondary' });
-  player.opsRemaining -= 1;
   const card = PATENTS_BY_ID[cardId];
+  const produced = { id: cardId, kind: 'patent', face: 'secondary' };
+  // Radiators deploy a Light or Heavy side; the producer picks it (default
+  // Heavy = max cooling). Non-radiators carry no side.
+  if (card && card.type === 'radiator') produced.radSide = op.radSide === 'light' ? 'light' : 'heavy';
+  outpost.cards.push(produced);
+  player.opsRemaining -= 1;
   return {
     ok: true, state,
     log: `${player.name} ET-produced ${card ? card.name : cardId} (Black-Side) at ${site.name} into Outpost ${letter}.`,
@@ -3037,53 +3044,47 @@ function applySiteRefuel(state, op, player) {
   };
 }
 
-// Free dirt refuel (Cargo Transfer free action / moon-cable crew bonus): top
-// the tank with grey dirt FTs. Loading dirt fuels the ACTIVE engine, so it's
-// gated on the active thruster being a dirt thruster (a water thruster can't
-// burn dirt - the same grade rule the MOVE fuel-grade gate enforces). Dirt
-// can't mix with water (empty the tank first). Dirt needs NO ISRU rig.
+// Free dirt refuel (Cargo Transfer / Internal Tankage free action): top the
+// tank with grey dirt FTs. Loading dirt fuels the ACTIVE engine, so it's gated
+// on the active thruster being a dirt thruster (a water thruster can't burn
+// dirt - the same grade rule the MOVE fuel-grade gate enforces). Dirt can't mix
+// with water (empty the tank first). Dirt needs NO ISRU rig.
 //
-// WHERE and HOW MUCH (HF4 MOONCABLE card):
-//   - At a real SITE: any activated dirt thruster scoops from the ground,
-//     1 tank max per turn (the general "1 tank of dirt max per Turn" throttle).
+// WHERE (HF4 MOONCABLE card + ISRU):
+//   - At a real SITE: scooping dirt needs an ISRU source colocated - a FACTORY
+//     at the site, or an ISRU platform (a card with an ISRU rating) aboard the
+//     rocket. The active dirt thruster burns it; it does not scoop on its own.
 //   - At LEO / Home Bernal: there's no ground, so it takes the MOON CABLE (a
-//     NASRDA crew card aboard - negotiable) to pipe dirt up. A non-crew dirt
-//     thrust triangle takes up to 7 tanks this turn; the crew dirt triangle
-//     (NASRDA's own) takes 1. The cable need NOT be the active thruster - it
-//     just has to be in the stack, and it refuels whichever triangle is active.
-// The per-turn allotment is cumulative (load it in any increments up to the
-// cap) and resets each turn. Costs NO operation. op = { amount? }.
+//     NASRDA crew card aboard - negotiable) to pipe dirt up. The cable need NOT
+//     be the active thruster - it just has to be in the stack, and it refuels
+//     whichever triangle is active.
+// It is a FREE ACTION (costs NO operation) with NO per-turn cap: load as much
+// as the tank holds, in any increments, any number of times per turn.
+// op = { amount? }.
 function applyDirtRefuel(state, op, player) {
   const tid = player.rocket.activeThrusterId;
   const slot = tid && player.rocket.stack.find((s) => s.id === tid);
   if (!slot) return fail('no_thruster');
   if (!faceBurnsDirt(thrusterFaceOf(slot))) return fail('not_dirt_thruster');
-  const isCrew = isCrewSlot(slot);
-  let perTurnMax;
   if (rocketAtLeo(player)) {
     if (!stackHasMoonCable(player.rocket)) return fail('dirt_needs_mooncable');
-    perTurnMax = isCrew ? 1 : 7;
   } else {
     if (!siteById(player.rocket.siteId)) return fail('not_at_site');
-    perTurnMax = 1;
+    const factoryHere = !!state.factories[player.rocket.siteId];
+    const isruAboard = player.rocket.stack.some(slotHasIsruRig);
+    if (!factoryHere && !isruAboard) return fail('dirt_needs_isru');
   }
   const tank = Number(player.rocket.tank) || 0;
   if (tank > 0 && tankGradeOf(player.rocket) === 'water') return fail('cannot_mix_fuel');
-  const loaded = Number(player.dirtTanksThisTurn) || 0;
-  const allow = perTurnMax - loaded;
-  if (allow <= 0) return fail('already_dirt_refueled');
   const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
   const cap = Math.max(0, TANK_MAX - dry);
   const room = cap - tank;
   if (room <= 0) return fail('tank_full');
   const want = Number(op && op.amount);
-  const gain = Number.isFinite(want) && want > 0
-    ? Math.min(want, allow, room)
-    : Math.min(allow, room);
+  const gain = Number.isFinite(want) && want > 0 ? Math.min(want, room) : room;
   if (gain <= 0) return fail('tank_full');
   player.rocket.tank = round6(tank + gain);
   player.rocket.tankGrade = 'dirt';
-  player.dirtTanksThisTurn = loaded + gain;
   return {
     ok: true, state,
     log: `${player.name} loaded +${round6(gain)} dirt FT${gain === 1 ? '' : 's'} (tank ${round6(player.rocket.tank)} dirt).`,
@@ -3174,7 +3175,11 @@ function applyBuildColony(state, op, player) {
   }
   player.leo = player.leo || [];
   player.leo.push({ id: cardId, kind: 'crew', face: slot.face === 'secondary' ? 'secondary' : 'primary' });
-  state.colonies[siteId] = { ownerId: player.profileId };
+  // Store the colony's location type (sent by the client, which has the site
+  // flags) so the endgame scorer can value it by type - astrobiology +1,
+  // submarine / Bernal +2, plain colony +1.
+  const cType = ['astrobiology', 'submarine', 'bernal'].includes(op.colonyType) ? op.colonyType : 'other';
+  state.colonies[siteId] = { ownerId: player.profileId, type: cType };
   const crew = CREW_BY_ID[cardId];
   const crewName = crew ? ((crew.faces && crew.faces[slot.face === 'secondary' ? 'secondary' : 'primary'] || {}).name || crew.id) : cardId;
   return {
@@ -3282,10 +3287,10 @@ function pickPayload(op) {
     case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode, outpost: op.outpost };
     case 'DIRT_REFUEL': return { amount: op.amount };
     case 'DELIVERY': return { siteId: op.siteId, letter: op.letter, cardId: op.cardId };
-    case 'BUILD_COLONY': return { cardId: op.cardId };
+    case 'BUILD_COLONY': return { cardId: op.cardId, colonyType: op.colonyType };
     case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds, freeDelegate: op.freeDelegate };
     case 'MINE_REVIVAL': return { siteId: op.siteId };
-    case 'ET_PRODUCE': return { siteId: op.siteId, cardId: op.cardId, letter: op.letter, isNewOutpost: !!op.isNewOutpost };
+    case 'ET_PRODUCE': return { siteId: op.siteId, cardId: op.cardId, letter: op.letter, isNewOutpost: !!op.isNewOutpost, ...(op.radSide ? { radSide: op.radSide } : {}) };
     // Route ops ride the undo stack like every other functional op, so
     // an UNDO/REDO replay (rebuildFromBase) must carry their payload or
     // the replay would re-run SET_ROUTE with no segments and silently
@@ -3560,11 +3565,19 @@ function computeFinalScores(state) {
   const winnerKey = vote.winner;
   const winnerName = winnerKey ? ((IDEOLOGY_BY_KEY[winnerKey] || {}).name || winnerKey) : null;
   const m0 = !!state.m0;
+  // ALL factories on the map as the shared scorer's plain shape (the global
+  // count of each spectral drives its Exploitation Track market price).
+  const allFactories = Object.values(state.factories || {})
+    .map((f) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C' }));
   const scores = state.players.map((p) => {
     const cubeVp = m0 ? playerDelegatesPlaced(asm, p.profileId) : 0;
     const awardVp = (m0 && winnerKey) ? ideologyAwardVp(state, p, winnerKey) : 0;
-    const factoryVp = countOwnedBy(state.factories, p.profileId);
-    const colonyVp = countOwnedBy(state.colonies, p.profileId);
+    const ownColonies = Object.values(state.colonies || {})
+      .filter((c) => c && c.ownerId === p.profileId)
+      .map((c) => ({ type: c.type || 'other' }));
+    const claims = ownedClaimCount(state.discs, p.profileId);
+    const outposts = p.outposts ? Object.keys(p.outposts).length : 0;
+    const rocket = (p.rocket && Array.isArray(p.rocket.stack) && p.rocket.stack.length > 0) ? 1 : 0;
     // Glory VP is derived from the claimed chits' zone + side via ZONE_CHIT_VPS
     // (the data source), not the running p.glory.vps snapshot, so a chit's value
     // edit revalues banked chits at scoring time.
@@ -3572,10 +3585,14 @@ function computeFinalScores(state) {
       ? p.glory.claimed.reduce((s, c) => s
         + (((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[c.side === 'back' ? 'back' : 'front']) | 0), 0)
       : 0;
-    const total = cubeVp + awardVp + factoryVp + colonyVp + gloryVp;
+    const b = scorePlayer({
+      ownerId: p.profileId, factories: allFactories, ownColonies,
+      claims, outposts, rocket, glory: gloryVp, cubeVp, awardVp,
+    });
     return {
       profileId: p.profileId, name: p.name, color: p.color || null,
-      cubeVp, awardVp, factoryVp, colonyVp, gloryVp, total, aqua: p.aqua | 0,
+      cubeVp, awardVp, spectralVp: b.spectralVp, tokenVp: b.tokenVp,
+      factoryVp: b.factoryCount, colonyVp: b.colonyVp, gloryVp, total: b.total, aqua: p.aqua | 0,
     };
   });
   const ranked = [...scores].sort((a, b) => b.total - a.total || b.aqua - a.aqua);
@@ -4704,7 +4721,11 @@ export function applyOperation(prevState, op, ctx) {
   // included, so the debt can't be dodged). A debt whose options
   // vanished (hand emptied, tied card already gone) clears itself.
   if (op.kind === 'EVENT_CHOICE') return applyEventChoice(clone(prevState), op, ctx);
-  if (prevState.pendingEvent && !op.debug
+  // Trades are a consensual side-channel (below) that never freeze the table,
+  // so an unsettled event debt does not block them either - a player owing a
+  // Budget Cuts discard can still deal cards while their dialog sits minimized.
+  // Every OTHER op on their turn still waits on the choice.
+  if (prevState.pendingEvent && !op.debug && !TRADE[op.kind]
       && isPlayersTurn(prevState, ctx.profileId)
       && eventDebtFor(prevState, ctx.profileId)) {
     const st0 = clone(prevState);

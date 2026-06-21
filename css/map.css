@@ -702,10 +702,65 @@
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 22px 24px 18px;
-  width: min(360px, 92vw);
+  width: min(1040px, 96vw);
   text-align: center;
   box-shadow: 0 24px 56px rgba(0, 0, 0, 0.55);
   cursor: pointer;
+}
+/* Horizontal fuel window: tank + controls together on the left,
+   then the full detailed fuel strip taking the remaining width.
+   The strip re-renders as water moves, in lockstep with the
+   cylinder. The tank readout (current / cap) sits ON TOP of the
+   cylinder. */
+.fuel-tank-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 18px;
+  text-align: left;
+  margin-top: 6px;
+}
+.fuel-tank-col { min-width: 0; }
+.fuel-tank-col-stage { flex: 0 0 auto; order: 1; }
+.fuel-tank-col-controls { order: 2; }
+.fuel-tank-col-strip { order: 3; }
+/* Stack the readout above the cylinder (tank readout on top of the bar). */
+.fuel-tank-stage { flex-direction: column; }
+.fuel-tank-stage .fuel-tank-readout { order: -1; flex: 0 0 auto; }
+.fuel-tank-stage .fuel-tank-svg { flex: 0 0 auto; }
+.fuel-tank-stage .fuel-tank-amount { justify-content: center; }
+.fuel-tank-col-strip {
+  flex: 1 1 340px;
+  min-width: 240px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+}
+.fuel-tank-col-strip .ntd-title-mini {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+/* The detailed Fuel Strip Track is wide; it scrolls horizontally
+   inside its column exactly like the click-to-open modal does. */
+.fuel-tank-col-strip .fuel-tank-strip.ntd-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+.fuel-tank-col-controls {
+  flex: 0 0 260px;
+  max-width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fuel-tank-col-controls > * { margin-top: 0; }
+@media (max-width: 780px) {
+  .fuel-tank-col-strip,
+  .fuel-tank-col-controls { flex: 1 1 100%; max-width: none; }
 }
 .fuel-tank-title { margin: 0 0 4px; font-size: 16px; color: var(--accent); }
 .fuel-tank-sub   { margin: 0 0 12px; font-size: 11px; }
@@ -1172,11 +1227,37 @@
   margin: 6px 0 0;
   line-height: 1.45;
 }
-.rocket-wetmass-cell { cursor: pointer; }
-.rocket-wetmass-cell:hover {
-  background: rgba(125, 211, 252, 0.08);
-  border-radius: 4px;
+/* The wet-mass total doubles as the "open fuel tank" button, so it
+   gets the blue clickable-button treatment to stand apart from the
+   read-only totals cells around it (cards / dry mass / rad-hard). */
+.rocket-wetmass-cell {
+  cursor: pointer;
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.26), rgba(14, 116, 187, 0.20));
+  border-color: rgba(56, 189, 248, 0.65);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10),
+              0 1px 4px rgba(8, 47, 73, 0.45);
+  transition: background 0.12s ease, border-color 0.12s ease,
+              box-shadow 0.12s ease, transform 0.05s ease;
 }
+.rocket-wetmass-cell .lbl { color: #bae6fd; }
+.rocket-wetmass-cell::after {
+  content: "💧 tap to open tank";
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #7dd3fc;
+}
+.rocket-wetmass-cell:hover,
+.rocket-wetmass-cell:focus-visible {
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.38), rgba(14, 116, 187, 0.30));
+  border-color: rgba(125, 211, 252, 0.9);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16),
+              0 0 0 1px rgba(125, 211, 252, 0.45),
+              0 2px 8px rgba(8, 47, 73, 0.55);
+  outline: none;
+}
+.rocket-wetmass-cell:active { transform: translateY(1px); }
 
 /* Aqua transfer panel inside the fuel-tank modal. Only rendered
    when the rocket is parked at LEO - converts aqua 1:1 into water
@@ -5167,6 +5248,14 @@ html.battery-save *::after {
   pointer-events: none;  /* the wrapper owns the click; no flip / tooltip capture */
 }
 .et-card-pick .card-flip { display: none; }  /* picker is a preview, not a flipper */
+/* The Sunspot event picker (Budget Cuts / Pad Explosion) DOES let you flip a
+   card to read its other face before choosing. Re-show the Flip button and
+   give it back pointer events (the card body stays click-through so the
+   wrapper still owns selection). */
+.mp-event-modal .et-card-pick .card-flip {
+  display: inline-flex;
+  pointer-events: auto;
+}
 .et-card-pick:hover { transform: translateY(-2px); }
 .et-card-pick.is-selected {
   border-color: var(--accent);
@@ -5239,6 +5328,29 @@ html.battery-save *::after {
   background: rgba(125, 211, 252, 0.18);
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* Radiator Light / Heavy deploy-side toggle in the ET Produce modal (mirrors
+   the boost picker). Shown only when the selected card is a radiator. */
+.et-radside-block { display: flex; flex-direction: column; gap: 4px; }
+.et-radside-toggle { display: inline-flex; }
+.et-radside-btn {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--ink-dim, #9fb3cc);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.et-radside-btn:first-child { border-radius: 7px 0 0 7px; }
+.et-radside-btn:last-child { border-radius: 0 7px 7px 0; border-left: none; }
+.et-radside-btn.is-active {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(0, 0, 0, 0.28)), #0ea5e9;
+  color: #f0f9ff;
+  border-color: #7dd3fc;
 }
 
 .et-produce-modal .card-modal-actions { margin-top: 4px; justify-content: flex-end; }
@@ -7610,7 +7722,7 @@ html.battery-save *::after {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 20px 24px 22px;
-  max-width: 520px;
+  max-width: 680px;
   width: 100%;
   max-height: calc(100vh - 48px);
   overflow: auto;
@@ -7621,11 +7733,9 @@ html.battery-save *::after {
 .mp-game-over-sub { margin: 0 0 14px; font-size: 13px; }
 .mp-game-over-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .mp-go-row {
-  display: grid;
-  grid-template-columns: 32px 1fr auto;
-  grid-template-areas: "rank name total" "rank break break";
-  align-items: center;
-  gap: 2px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 9px;
@@ -7635,10 +7745,25 @@ html.battery-save *::after {
   border-color: #fbbf24;
   background: rgba(251, 191, 36, 0.1);
 }
-.mp-go-rank { grid-area: rank; font-size: 18px; font-weight: 800; text-align: center; }
-.mp-go-name { grid-area: name; font-size: 16px; font-weight: 700; color: var(--player-color, var(--ink)); }
-.mp-go-total { grid-area: total; font-size: 16px; font-weight: 800; white-space: nowrap; }
-.mp-go-break { grid-area: break; font-size: 12px; }
+.mp-go-head { display: flex; align-items: center; gap: 10px; }
+.mp-go-rank { font-size: 18px; font-weight: 800; min-width: 22px; text-align: center; }
+.mp-go-name { font-size: 16px; font-weight: 700; color: var(--player-color, var(--ink)); flex: 1 1 auto; min-width: 0; }
+.mp-go-total { font-size: 22px; font-weight: 800; white-space: nowrap; }
+.mp-go-total small { font-size: 11px; font-weight: 700; color: var(--ink-dim); margin-left: 3px; }
+/* Per-player scorecard: one tile per category, the live scoring tab's language. */
+.mp-go-detail { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.mp-go-cat { background: rgba(0, 0, 0, 0.18); border: 1px solid var(--border); border-radius: 7px; padding: 6px 8px; }
+.mp-go-cat-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; margin-bottom: 5px; }
+.mp-go-cat-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--ink-dim); }
+.mp-go-cat-vp { font-size: 13px; font-weight: 800; color: var(--ink); white-space: nowrap; }
+.mp-go-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.mp-go-chip { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 10px; background: rgba(255, 255, 255, 0.06); border: 1px solid var(--border); white-space: nowrap; }
+.mp-go-chip b { font-weight: 800; }
+.mp-go-chip-x { color: var(--ink-dim); }
+.mp-go-none { font-size: 11px; }
+.mp-go-glory-chip { background: rgba(251, 191, 36, 0.14); border-color: rgba(251, 191, 36, 0.4); }
+.mp-go-colony-submarine, .mp-go-colony-bernal { background: rgba(56, 189, 248, 0.14); border-color: rgba(56, 189, 248, 0.4); }
+.mp-go-colony-astrobiology { background: rgba(34, 197, 94, 0.14); border-color: rgba(34, 197, 94, 0.4); }
 .mp-game-over-note { margin: 14px 0 0; font-size: 12px; }
 .mp-game-over-vote { margin: 0 0 12px; font-size: 13px; color: #cdd6ff;
   background: rgba(120,140,220,0.14); border: 1px solid #3a4a7a; border-radius: 8px; padding: 7px 10px; }
