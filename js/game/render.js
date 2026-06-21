@@ -840,6 +840,9 @@ export class MapRenderer {
     // null = off (the main game never sets it, so behaviour is unchanged).
     this._nodeEdit = null;
     this._nodeDrag = null;
+    // Body spheres + sun discs. On for the solar map; the Rat Frontier board
+    // turns them off (its nodes are flat markers over the pixel-art backdrop).
+    this._bodiesVisible = true;
     this._cachePan = { x: 0, y: 0 };
     this._cacheZoom = 0;
     this._cacheEpoch = -1;
@@ -1726,6 +1729,8 @@ export class MapRenderer {
     this._scheduleDraw();
   }
   isBackdropVisible() { return this._backdropVisible; }
+  // Toggle the body spheres + sun discs (off for the rat board).
+  setBodiesVisible(on) { this._bodiesVisible = !!on; this._scheduleDraw(); }
 
   // Node editing on the live map. Pass a handler bag to turn it on; null off.
   //   { active, allowDrag, onPickNode(id)->bool, onMoveNode(id,wx,wy),
@@ -2223,13 +2228,13 @@ export class MapRenderer {
     ctx.translate(this.pan.x, this.pan.y);
     ctx.scale(eff, eff);
     this._step('guides', () => this._drawGuides(ctx));
-    this._step('sun/comet', () => this._drawSiteSunCometWorld(ctx));
+    if (this._bodiesVisible) this._step('sun/comet', () => this._drawSiteSunCometWorld(ctx));
     ctx.restore();
 
     // Body spheres / rocky asteroids: blitted from the sprite cache in
     // screen space, viewport-culled. Drawn before the edges so the
     // delta-v lines sit over the planets, not behind them.
-    this._step('planets (sprite)', () => this._drawSiteHalosScreen(ctx));
+    if (this._bodiesVisible) this._step('planets (sprite)', () => this._drawSiteHalosScreen(ctx));
 
     ctx.save();
     ctx.translate(this.pan.x, this.pan.y);
@@ -2752,6 +2757,11 @@ export class MapRenderer {
     for (const [type, items] of this._waypointsByType) {
       const vis = TYPE_VIS[type] || TYPE_VIS.unknown;
       if (vis.kind === 'none') continue;     // decoratives = invisible
+      // Suns are NOT circle-batch waypoints: TYPE_VIS.sun has no fill/stroke,
+      // so they'd paint with the previous batch's leftover fillStyle (the
+      // "sphere that changes random colours"). The sun disc is drawn by
+      // drawSun off _realSites; a sun WAYPOINT just isn't drawn here.
+      if (vis.kind === 'sun') continue;
       // Per-type zoom gating: burn nodes only appear once zoomed
       // past their threshold so they don't speckle the wide view.
       if (vis.hideBelowZoom && this.zoom < vis.hideBelowZoom) continue;

@@ -91,6 +91,7 @@ function mapPane() {
     // Mount the pixel-art board as a world-space backdrop (default ON), so the
     // nodes sit over the drawn map instead of the procedural starfield.
     renderer.setBackdropImage(MAP_IMG, { visible: pane._bgOn !== false });
+    renderer.setBodiesVisible(false);   // no HF body spheres / sun discs on the rat board
     // Edit/Annotate live on this map (View / Edit / Annotate overlay bar).
     pane._editor = attachMapEditor(renderer, loadRatMap(), host);
     requestAnimationFrame(() => { try { renderer.reset(); } catch {} });
