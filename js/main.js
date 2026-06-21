@@ -558,6 +558,9 @@ async function refreshRatAccess(profile) {
   if (!row) return;
   const reqId = ++_ratAccessReqId;
   if (!profile) { row.classList.add('hidden'); return; }
+  // Server-derived admin flag from /profiles/me (set on page load): the
+  // authoritative, page-load answer. Reveal immediately when it's true.
+  if (profile.isAdmin) { row.classList.remove('hidden'); return; }
   // Client-config allowlist reveals the entry immediately (no round-trip).
   const name = String(profile.name || '').toLowerCase();
   if (name && ratAdminsFromConfig().has(name)) { row.classList.remove('hidden'); return; }

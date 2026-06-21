@@ -494,13 +494,23 @@ app.get('/profiles/me', requireProfile, (req, res) => {
   // shown to a signed-in user only until their account has a Discord
   // identity, then hidden. oauthEnabled lets the client skip the button
   // entirely on a deployment with no Discord OAuth.
-  const discordLinked = !!db
-    .prepare('SELECT 1 FROM discord_accounts WHERE profile_id = ?')
+  const acct = db
+    .prepare('SELECT discord_id FROM discord_accounts WHERE profile_id = ?')
     .get(req.profile.id);
+  const discordLinked = !!acct;
+  // Admin status, server-derived on every page load (restoreProfile calls
+  // this): the secret admin id lives in GitHub secrets -> ADMIN_DISCORD_ID(S)
+  // -> the allowlist, and we match it against THIS profile's linked Discord
+  // id (or the RAT_ADMIN_NAMES name flag, or a live admin-portal cookie).
+  // The raw Discord id is never sent to the client, so this can't be spoofed.
+  const isAdmin = isRatAdmin(req.profile.name)
+    || (acct && isAdminDiscordId(acct.discord_id))
+    || !!adminFromRequest(req);
   res.json({
     id: req.profile.id,
     name: req.profile.name,
     discordLinked,
+    isAdmin,
     oauthEnabled: oauthEnabled(),
   });
 });
