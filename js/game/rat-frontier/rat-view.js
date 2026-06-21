@@ -5,10 +5,13 @@
 //            (js/game/render.js), fed the rat planner-map data.
 // Only the DATA is new (data/rat-frontier/*). The rendering is reused.
 
+import { assetUrl } from '../../base.js';
 import { renderCard } from '../card-ui.js';
 import { MapRenderer } from '../render.js';
 import { RAT_PATENTS, RAT_CREW } from '../../../data/rat-frontier/rat-cards.js';
 import { loadRatMap } from './rat-planner-map.js';
+
+const MAP_IMG = assetUrl('assets/rat-frontier/map/alpha-centauri.png');
 
 let _styleInjected = false;
 function injectStyle() {
@@ -79,8 +82,17 @@ function mapPane() {
     // browse the whole board, so drop the initial zoom and fit to data once
     // the pane is sized.
     renderer.options.initialZoom = 1;
+    // Mount the pixel-art board as a world-space backdrop (default ON), so the
+    // nodes sit over the drawn map instead of the procedural starfield.
+    renderer.setBackdropImage(MAP_IMG, { visible: pane._bgOn !== false });
     requestAnimationFrame(() => { try { renderer.reset(); } catch {} });
     setTimeout(() => { try { renderer.reset(); } catch {} }, 250);
+  };
+  pane._bgOn = true;
+  pane.toggleBackdrop = () => {
+    pane._bgOn = !pane._bgOn;
+    if (pane._renderer) pane._renderer.setBackdropVisible(pane._bgOn);
+    return pane._bgOn;
   };
   return pane;
 }
@@ -94,6 +106,7 @@ export function mountRatFrontier(container, { onBack } = {}) {
   top.innerHTML = `<h2>🐀 Rat Frontier</h2>
     <button class="rat-tab is-active" data-tab="cards">Cards</button>
     <button class="rat-tab" data-tab="map">Alpha Centauri map</button>
+    <button class="rat-tab is-active" id="rat-bg-toggle" hidden>🗺 Map art</button>
     <span class="grow"></span>
     <button class="rat-back">← Back to menu</button>`;
   container.appendChild(top);
@@ -104,14 +117,21 @@ export function mountRatFrontier(container, { onBack } = {}) {
   container.appendChild(cards);
   container.appendChild(map);
 
-  top.querySelectorAll('.rat-tab').forEach((btn) => {
+  const bgToggle = top.querySelector('#rat-bg-toggle');
+  top.querySelectorAll('.rat-tab[data-tab]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      top.querySelectorAll('.rat-tab').forEach((b) => b.classList.toggle('is-active', b === btn));
+      top.querySelectorAll('.rat-tab[data-tab]').forEach((b) => b.classList.toggle('is-active', b === btn));
       const isMap = btn.dataset.tab === 'map';
       cards.style.display = isMap ? 'none' : '';
       map.style.display = isMap ? '' : 'none';
+      bgToggle.hidden = !isMap;                 // map-art toggle only on the map tab
       if (isMap) requestAnimationFrame(() => map._mount());
     });
+  });
+  bgToggle.addEventListener('click', () => {
+    const on = map.toggleBackdrop();
+    bgToggle.classList.toggle('is-active', on);
+    bgToggle.textContent = on ? '🗺 Map art' : '🗺 Map art (off)';
   });
   top.querySelector('.rat-back').addEventListener('click', () => { if (onBack) onBack(); });
   return { cards, map };

@@ -831,6 +831,11 @@ export class MapRenderer {
     this._staticCanvas = null;
     this._staticCtx = null;
     this._staticEpoch = 0;
+    // Optional raster map backdrop (Rat Frontier's pixel-art board), drawn in
+    // world space behind the zones so it tracks pan/zoom + aligns with nodes.
+    this._backdropImg = null;
+    this._backdropReady = false;
+    this._backdropVisible = false;
     this._cachePan = { x: 0, y: 0 };
     this._cacheZoom = 0;
     this._cacheEpoch = -1;
@@ -1696,6 +1701,28 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
+  // Raster map backdrop: a pixel-art image painted across the whole world rect
+  // (0..VIEW_W, 0..VIEW_H) behind the zones, so it pans/zooms with the board
+  // and lines up with node coordinates. Used by the Rat Frontier map (the
+  // alpha-centauri.png board). Pass visible to set the initial state.
+  setBackdropImage(url, { visible = true } = {}) {
+    this._backdropVisible = !!visible;
+    if (!url) { this._backdropImg = null; this._backdropReady = false; this._invalidateStatic(); this._scheduleDraw(); return; }
+    const img = new Image();
+    img.onload = () => {
+      this._backdropImg = img; this._backdropReady = true;
+      this._invalidateStatic(); this._scheduleDraw();
+    };
+    img.onerror = () => { this._backdropReady = false; };
+    img.src = url;
+  }
+  setBackdropVisible(on) {
+    this._backdropVisible = !!on;
+    this._invalidateStatic();
+    this._scheduleDraw();
+  }
+  isBackdropVisible() { return this._backdropVisible; }
+
   // Zones nest inner -> outer (Mercury innermost). The order drives
   // the derived-assignment rule: a node belongs to the INNERMOST
   // polygon that contains it.
@@ -2074,6 +2101,14 @@ export class MapRenderer {
       sctx.save();
       sctx.translate(this.pan.x, this.pan.y);
       sctx.scale(eff, eff);
+      // Raster board backdrop (behind everything), filling the world rect so
+      // it aligns with node coordinates. Drawn pixelated to keep the art crisp.
+      if (this._backdropVisible && this._backdropReady) {
+        const sm = sctx.imageSmoothingEnabled;
+        sctx.imageSmoothingEnabled = false;
+        sctx.drawImage(this._backdropImg, 0, 0, VIEW_W, VIEW_H);
+        sctx.imageSmoothingEnabled = sm;
+      }
       this._drawCanonicalZones(sctx, eff);
       if (this.data.mode === 'clean' && Array.isArray(this.data.zones)) {
         this._drawZoneBands(sctx, this.data.zones, this.data.zoneInfo);
