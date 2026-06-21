@@ -210,8 +210,19 @@ app.get('/healthz', (_req, res) => {
 
 // Whether the calling profile may use the admin-gated Rat Frontier variant.
 // The client hides the menu entry unless this returns { allowed: true }.
+// Two ways in: the RAT_ADMIN_NAMES allowlist (a profile-name flag), or - the
+// path the admin already has - a Discord account linked to this profile whose
+// id is on the server admin allowlist (ADMIN_DISCORD_ID(S)). So whoever is
+// already a server admin gets Rat Frontier with no extra secret.
 app.get('/rat-frontier/access', requireProfile, (req, res) => {
-  res.json({ allowed: isRatAdmin(req.profile.name) });
+  let allowed = isRatAdmin(req.profile.name);
+  if (!allowed) {
+    const acct = db
+      .prepare('SELECT discord_id FROM discord_accounts WHERE profile_id = ?')
+      .get(req.profile.id);
+    if (acct && isAdminDiscordId(acct.discord_id)) allowed = true;
+  }
+  res.json({ allowed });
 });
 
 // Server-wide announcement banner (shown atop global chat). Seeded once
