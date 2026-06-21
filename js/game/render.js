@@ -4125,8 +4125,22 @@ export class MapRenderer {
 
     // Touch: 1 finger pan, 2 fingers pinch.
     this.canvas.addEventListener('touchstart', (ev) => {
+      const pts = this._activeTouches(ev);
+      // A second finger landing cancels any in-progress node grab so the
+      // gesture becomes a clean pinch-zoom instead of dragging the node.
+      if (pts.length >= 2) this._nodeDrag = null;
+      // Single-finger node grab (edit mode with drag enabled): start a node
+      // move instead of a pan, mirroring the mousedown path. Empty space (no
+      // node hit) falls through to the normal pan gesture below.
+      else if (this._nodeEdit && this._nodeEdit.active && this._nodeEdit.allowDrag) {
+        const wp = this._eventToWorld(pts[0] || { clientX: 0, clientY: 0 });
+        const id = this._hitNodeId(wp.x, wp.y);
+        if (id && (!this._nodeEdit.onPickNode || this._nodeEdit.onPickNode(id))) {
+          this._nodeDrag = { id, moved: false };
+        }
+      }
       this._gesture = {
-        touches: this._activeTouches(ev).slice(0, 2),
+        touches: pts.slice(0, 2),
         pan: { x: this.pan.x, y: this.pan.y },
         zoom: this.zoom,
         moved: false,
@@ -4134,6 +4148,19 @@ export class MapRenderer {
     }, { passive: false });
     this.canvas.addEventListener('touchmove', (ev) => {
       ev.preventDefault();
+      // Node drag owns single-finger movement: move the grabbed node instead
+      // of panning the board. Mirrors the mousemove node-drag branch.
+      if (this._nodeDrag) {
+        const points = this._activeTouches(ev);
+        if (points.length === 1) {
+          const wp = this._eventToWorld(points[0]);
+          this._nodeDrag.moved = true;
+          if (this._gesture) this._gesture.moved = true;
+          if (this._nodeEdit && this._nodeEdit.onMoveNode) this._nodeEdit.onMoveNode(this._nodeDrag.id, wp.x, wp.y);
+          this._scheduleDraw();
+          return;
+        }
+      }
       if (!this._gesture) return;
       const rect = this.canvas.getBoundingClientRect();
       const points = this._activeTouches(ev);
@@ -4177,6 +4204,13 @@ export class MapRenderer {
     }, { passive: false });
     this.canvas.addEventListener('touchend', (ev) => {
       if (ev.touches.length === 0) {
+        // A grabbed node drops here (no tap dispatch). Mirrors mouseup.
+        if (this._nodeDrag) {
+          if (this._nodeEdit && this._nodeEdit.onDropNode) this._nodeEdit.onDropNode(this._nodeDrag.id);
+          this._nodeDrag = null;
+          this._gesture = null;
+          return;
+        }
         // Treat a no-drift tap as a click.
         if (this._gesture && !this._gesture.moved) {
           const last = this._gesture.touches[0];
@@ -4203,7 +4237,7 @@ export class MapRenderer {
         };
       }
     });
-    this.canvas.addEventListener('touchcancel', () => { this._gesture = null; });
+    this.canvas.addEventListener('touchcancel', () => { this._gesture = null; this._nodeDrag = null; });
   }
 
   _activeTouches(ev) {
