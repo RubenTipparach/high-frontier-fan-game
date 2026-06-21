@@ -12731,7 +12731,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   function updateNetThrustText(wet) {
     if (!nttBody) return;
     const wm = Math.max(0, wet);
-    const wc = weightClassForMass(Math.max(1, Math.round(wm)));
+    const wc = weightClassForMass(Math.max(1, wm));
     const mod = wc.netThrust >= 0 ? `+${wc.netThrust}` : String(wc.netThrust);
     const nt = (thrust != null) ? (thrust + wc.netThrust) : null;
     const frac = (wc.fractions && wc.fractions.length) ? wc.fractions.join(' ') : 'whole steps';
