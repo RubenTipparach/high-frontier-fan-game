@@ -3199,8 +3199,8 @@ function applyBuildColony(state, op, player) {
   player.leo = player.leo || [];
   player.leo.push({ id: cardId, kind: 'crew', face: slot.face === 'secondary' ? 'secondary' : 'primary' });
   // Store the colony's location type (sent by the client, which has the site
-  // flags) so the endgame scorer can value it by type - astrobiology +1,
-  // submarine / Bernal +2, plain colony +1.
+  // flags) so the endgame scorer can value it by type - a site bonus ABOVE the
+  // +1 dome token: astrobiology +1, submarine / Bernal +2, plain colony none.
   const cType = ['astrobiology', 'submarine', 'bernal'].includes(op.colonyType) ? op.colonyType : 'other';
   state.colonies[siteId] = { ownerId: player.profileId, type: cType };
   const crew = CREW_BY_ID[cardId];
