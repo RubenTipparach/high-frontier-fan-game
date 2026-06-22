@@ -126,7 +126,7 @@ import {
   renameSave, deleteSave, loadSaveAndReload,
 } from './saves.js';
 import {
-  computeEndgameScore, SPECTRAL_DIMINISHING_SCHEDULE, COLONY_VP,
+  computeEndgameScore, SPECTRAL_DIMINISHING_SCHEDULE, COLONY_VP, COLONY_LOCATION_BONUS,
 } from './scoring.js';
 import { scorePlayer } from '../../data/endgame-scoring.js';
 import {
@@ -2366,9 +2366,13 @@ function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0 } =
   }
   const rocket = player && player.rocket && (player.rocket.stack || []).length > 0 ? 1 : 0;
   const outposts = player && player.outposts ? Object.keys(player.outposts).length : 0;
+  // First-player token: +1 to whoever sits at the snapshot's first-player seat.
+  const sp = snapshot.players || [];
+  const fpId = sp[snapshot.firstPlayerIndex || 0] && sp[snapshot.firstPlayerIndex || 0].profileId;
+  const firstPlayer = (fpId && fpId === profileId) ? 1 : 0;
   return scorePlayer({
     ownerId: profileId, factories, ownColonies,
-    claims, outposts, rocket, glory, cubeVp, awardVp,
+    claims, outposts, rocket, firstPlayer, glory, cubeVp, awardVp,
   });
 }
 
@@ -2917,7 +2921,7 @@ function renderGameOver(snapshot) {
   const voteBanner = (fv && fv.winnerName)
     ? `<p class="mp-game-over-vote">🏛 <strong>${esc(fv.winnerName)}</strong> carried the assembly vote: ${esc(fv.award || '')}${fv.awardTBD ? ' <em>(award TBD)</em>' : ''}</p>`
     : '';
-  const note = 'Final score: factory market value (Exploitation Track 8 / 5 / 4 per spectral) + 1 per token (factory, claim, outpost, rocket) + colonies by location + glory'
+  const note = 'Final score: factory market value (Exploitation Track 8 / 5 / 4 per spectral) + 1 per token (each factory, colony dome, claim disc, and the first-player token) + colony site bonuses + glory'
     + (m0 ? ' + delegate cubes + the winning ideology award' : '') + '.';
   overlay.innerHTML = `
     <div class="mp-game-over-modal" role="dialog" aria-label="Final standings">
@@ -2970,27 +2974,48 @@ function renderGameOver(snapshot) {
     const detail = document.createElement('div');
     detail.className = 'mp-go-detail';
 
-    // Factory market chart (Exploitation Track) + the +1-per-factory token.
-    const fac = cat('🏭', 'Factories', s.spectralVp + s.factoryCount);
+    // Factory market chart (Exploitation Track) - market value only; the
+    // per-factory token now scores in the Tokens category below.
+    const fac = cat('🏭', 'Factories', s.spectralVp);
     if (s.spectralRows.length) {
       for (const r of s.spectralRows) {
         const chip = document.createElement('span');
         chip.className = `mp-go-chip spectral-${esc(r.spec)}`;
         chip.innerHTML = `<b>${esc(r.spec)}</b> ×${r.count} <span class="mp-go-chip-x">@${r.price}</span> = ${r.vp}`;
-        chip.title = `${r.count} ${r.spec}-spectral factor${r.count === 1 ? 'y' : 'ies'} at market price ${r.price} (${r.globalCount} of this spectral on the map) = ${r.vp} VP, plus +1 each as a token`;
+        chip.title = `${r.count} ${r.spec}-spectral factor${r.count === 1 ? 'y' : 'ies'} at market price ${r.price} (${r.globalCount} of this spectral on the map) = ${r.vp} VP`;
         fac.chips.appendChild(chip);
       }
     } else noneChip(fac.chips);
     detail.appendChild(fac.block);
 
-    // Colonies by location type.
-    const col = cat('🏠', 'Colonies', s.colonyVp);
+    // Tokens: a flat +1 each - factories, colony domes, claim discs, first-player.
+    const tb = s.tokenBreakdown || { factories: s.factoryCount || 0, colonies: (s.colonyByType ? Object.values(s.colonyByType).reduce((a, b) => a + b, 0) : 0), claims: s.claims || 0, firstPlayer: s.firstPlayer || 0 };
+    const tok = cat('🪙', 'Tokens', s.tokenVp);
+    const tokParts = [
+      ['🏭 factories', tb.factories],
+      ['🏠 colony domes', tb.colonies],
+      ['📍 claims', tb.claims],
+      ['⭐ first player', tb.firstPlayer],
+    ].filter(([, n]) => n > 0);
+    if (tokParts.length) {
+      for (const [label, n] of tokParts) {
+        const chip = document.createElement('span');
+        chip.className = 'mp-go-chip mp-go-token-chip';
+        chip.textContent = `${label} ×${n} (+${n})`;
+        tok.chips.appendChild(chip);
+      }
+    } else noneChip(tok.chips);
+    detail.appendChild(tok.block);
+
+    // Colonies: the site bonus ABOVE the dome token (the dome's +1 is in Tokens).
+    const col = cat('🏠', 'Colony sites', s.colonyVp);
     const colTypes = Object.entries(s.colonyByType).filter(([, n]) => n > 0);
     if (colTypes.length) {
       for (const [t, n] of colTypes) {
+        const bonus = (COLONY_LOCATION_BONUS[t] || 0) * n;
         const chip = document.createElement('span');
         chip.className = `mp-go-chip mp-go-colony-${t}`;
-        chip.textContent = `${COLONY_LABEL[t] || t} ×${n} (+${(COLONY_VP[t] || 1) * n})`;
+        chip.textContent = `${COLONY_LABEL[t] || t} ×${n}${bonus ? ` (+${bonus})` : ''}`;
         col.chips.appendChild(chip);
       }
     } else noneChip(col.chips);
@@ -19000,9 +19025,18 @@ function paintGlory() {
   const host = document.getElementById('browse-milestones');
   if (!host) return;
   const vps   = getVps();
+  // The first-player token scores +1; in an online game read whether the local
+  // player holds it off the snapshot (offline solo has no token concept).
+  let holdsFirstPlayer = 0;
+  if (_online && _onlineSnapshot) {
+    const sp = _onlineSnapshot.players || [];
+    const fpId = sp[_onlineSnapshot.firstPlayerIndex || 0] && sp[_onlineSnapshot.firstPlayerIndex || 0].profileId;
+    holdsFirstPlayer = (fpId && fpId === myOwnerId()) ? 1 : 0;
+  }
   const score = computeEndgameScore({
     ownerId: myOwnerId(),
     colonyTypeOf: colonyTypeOfSite,
+    firstPlayer: holdsFirstPlayer,
   });
 
   // --- Spectrum exploitation track ----------------------------------
@@ -19030,27 +19064,32 @@ function paintGlory() {
   }).join('');
 
   // --- Tokens (+1 each) ---------------------------------------------
-  // Only factories and colony domes earn a token. The colony dome's +1 is in
-  // the colony-locations block below, so this lists the factory token only.
+  // A flat +1 per scoring token: factories, colony domes, claim discs, and the
+  // first-player token (its own category so the breakdown is legible).
+  const tk = score.tokens;
   const tokenRows = [
-    ['🏭 Factories', score.tokens.factories],
-  ].map(([label, n]) =>
-    `<li><span>${label}</span><strong>+${n} VP</strong></li>`
-  ).join('');
+    ['🏭 Factories',    tk.factories],
+    ['🏠 Colony domes', tk.colonies],
+    ['📍 Claims',       tk.claims],
+    ['⭐ First player', tk.firstPlayer],
+  ].filter(([, n]) => n > 0)
+    .map(([label, n]) =>
+      `<li><span>${label} <span class="muted">×${n}</span></span><strong>+${n} VP</strong></li>`)
+    .join('') || '<li><span class="muted">no tokens yet</span><strong>+0 VP</strong></li>';
 
-  // --- Colony locations (by type) -----------------------------------
+  // --- Colony sites (bonus above the dome token) --------------------
   const cb = score.colonies.byType;
   const colonyRows = [
-    ['🌿 Astrobiology', cb.astrobiology, COLONY_VP.astrobiology],
-    ['🌊 Submarine',    cb.submarine,    COLONY_VP.submarine],
-    ['🏙 Bernal',       cb.bernal,       COLONY_VP.bernal],
-    ['🌐 Other',        cb.other,        COLONY_VP.other],
+    ['🌿 Astrobiology', cb.astrobiology, COLONY_LOCATION_BONUS.astrobiology],
+    ['🌊 Submarine',    cb.submarine,    COLONY_LOCATION_BONUS.submarine],
+    ['🏙 Bernal',       cb.bernal,       COLONY_LOCATION_BONUS.bernal],
+    ['🌐 Other',        cb.other,        COLONY_LOCATION_BONUS.other],
   ].filter(([, n]) => n > 0)
     .map(([label, n, per]) =>
-      `<li><span>${label} <span class="muted">×${n}</span></span><strong>+${n * per} VP</strong></li>`)
+      `<li><span>${label} <span class="muted">×${n}</span></span><strong>${per ? `+${n * per}` : '+0'} VP</strong></li>`)
     .join('');
   const colonyBlock = score.colonies.count > 0
-    ? `<h4>Colony locations</h4>
+    ? `<h4>Colony sites <span class="muted">(dome token in Tokens)</span></h4>
        <ul class="glory-table">${colonyRows}</ul>`
     : '';
 

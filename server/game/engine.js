@@ -3592,7 +3592,8 @@ function computeFinalScores(state) {
   // count of each spectral drives its Exploitation Track market price).
   const allFactories = Object.values(state.factories || {})
     .map((f) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C' }));
-  const scores = state.players.map((p) => {
+  const firstIdx = state.firstPlayerIndex || 0;
+  const scores = state.players.map((p, idx) => {
     const cubeVp = m0 ? playerDelegatesPlaced(asm, p.profileId) : 0;
     const awardVp = (m0 && winnerKey) ? ideologyAwardVp(state, p, winnerKey) : 0;
     const ownColonies = Object.values(state.colonies || {})
@@ -3601,6 +3602,7 @@ function computeFinalScores(state) {
     const claims = ownedClaimCount(state.discs, p.profileId);
     const outposts = p.outposts ? Object.keys(p.outposts).length : 0;
     const rocket = (p.rocket && Array.isArray(p.rocket.stack) && p.rocket.stack.length > 0) ? 1 : 0;
+    const firstPlayer = idx === firstIdx ? 1 : 0;
     // Glory VP is derived from the claimed chits' zone + side via ZONE_CHIT_VPS
     // (the data source), not the running p.glory.vps snapshot, so a chit's value
     // edit revalues banked chits at scoring time.
@@ -3610,11 +3612,12 @@ function computeFinalScores(state) {
       : 0;
     const b = scorePlayer({
       ownerId: p.profileId, factories: allFactories, ownColonies,
-      claims, outposts, rocket, glory: gloryVp, cubeVp, awardVp,
+      claims, outposts, rocket, firstPlayer, glory: gloryVp, cubeVp, awardVp,
     });
     return {
       profileId: p.profileId, name: p.name, color: p.color || null,
       cubeVp, awardVp, spectralVp: b.spectralVp, tokenVp: b.tokenVp,
+      tokenBreakdown: b.tokenBreakdown, firstPlayer: b.firstPlayer,
       factoryVp: b.factoryCount, colonyVp: b.colonyVp, gloryVp, total: b.total, aqua: p.aqua | 0,
     };
   });

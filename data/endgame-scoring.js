@@ -8,13 +8,16 @@
 //   - Factories price off the EXPLOITATION TRACK: the Nth factory of a spectral
 //     ANYWHERE on the map sells at 8 / 5 / 4 (4 thereafter). Each player scores
 //     that current market price for every factory they own of that spectral, so
-//     a rival building your spectral trims your price.
-//   - +1 VP per scoring TOKEN: each FACTORY and each COLONY DOME. Outposts,
-//     claims, and the rocket do NOT score a token (user: outposts don't count,
-//     factories and colony domes do). The colony dome's +1 rides its COLONY_VP
-//     base below, so the token line here is just the factory count.
-//   - COLONIES score by location type: astrobiology +1, submarine +2,
-//     Bernal +2, a plain colony +1.
+//     a rival building your spectral trims your price. This is the FACTORY line;
+//     it carries NO token VP (the token is its own category below).
+//   - TOKENS: a flat +1 VP per scoring token the player owns - each FACTORY,
+//     each COLONY DOME, each CLAIM disc, and the FIRST-PLAYER token. This is its
+//     own category so the breakdown is legible (user 2026-06-22). Outposts and
+//     the rocket carry no token VP.
+//   - COLONIES score a LOCATION bonus ABOVE the dome token: astrobiology +0,
+//     submarine +1, Bernal +1, a plain colony +0. The dome's flat +1 is in the
+//     token line, so a submarine colony is still worth 2 total (1 token + 1
+//     site), just split across two categories.
 //   - Career GLORY chit VP.
 //   - M0 only: delegate cubes + the winning-ideology award (passed in; the
 //     assembly math lives server-side).
@@ -23,7 +26,12 @@
 // imports nothing and touches no DOM / db.
 
 export const SPECTRAL_DIMINISHING_SCHEDULE = [8, 5, 4];
+// Total per-colony VP by location (token + site bonus combined). Kept for any
+// reader that wants the full value; the scorer below splits it into the token
+// (a flat 1 per dome) and the COLONY_LOCATION_BONUS (the rest).
 export const COLONY_VP = { astrobiology: 1, submarine: 2, bernal: 2, other: 1 };
+// The site bonus ABOVE the dome's flat +1 token (COLONY_VP minus 1).
+export const COLONY_LOCATION_BONUS = { astrobiology: 0, submarine: 1, bernal: 1, other: 0 };
 export const SPECTRALS = ['C', 'S', 'M', 'V', 'D', 'H'];
 
 // Market price for the Nth factory of a spectral (1-indexed by the GLOBAL count
@@ -47,6 +55,7 @@ export function colonyVpType(type) {
 //   ownColonies: this player's colonies, [{ type }] (type already resolved to
 //                astrobiology | submarine | bernal | other | null).
 //   claims / outposts: this player's counts. rocket: 0 or 1. glory: chit VP.
+//   firstPlayer: 1 if this player holds the first-player token, else 0.
 //   cubeVp / awardVp: M0 assembly VP (0 in a non-M0 game).
 // Returns the full breakdown the UI renders + the grand total.
 export function scorePlayer({
@@ -56,6 +65,7 @@ export function scorePlayer({
   claims = 0,
   outposts = 0,
   rocket = 0,
+  firstPlayer = 0,
   glory = 0,
   cubeVp = 0,
   awardVp = 0,
@@ -86,14 +96,19 @@ export function scorePlayer({
 
   const colonyByType = { astrobiology: 0, submarine: 0, bernal: 0, other: 0 };
   for (const c of ownColonies) colonyByType[colonyVpType(c && c.type)] += 1;
+  // Colonies score only the site bonus ABOVE the dome token here; the dome's
+  // flat +1 is in the token line below so it isn't double-counted.
   let colonyVp = 0;
-  for (const [t, n] of Object.entries(colonyByType)) colonyVp += n * (COLONY_VP[t] || 1);
+  for (const [t, n] of Object.entries(colonyByType)) colonyVp += n * (COLONY_LOCATION_BONUS[t] || 0);
 
   const factoryCount = own.length;
-  // Only factories and colony domes earn a +1 token. The colony dome's +1 is
-  // already in colonyVp (its COLONY_VP base), so the factory count is the token
-  // line here. Outposts, claims, and the rocket carry no token VP.
-  const tokenVp = factoryCount;
+  const colonyDomes = ownColonies.length;
+  const firstPlayerToken = firstPlayer ? 1 : 0;
+  // Flat +1 per scoring token: factories, colony domes, claim discs, and the
+  // first-player token. Its own category so the breakdown reads clearly.
+  // Outposts and the rocket carry no token VP.
+  const tokenBreakdown = { factories: factoryCount, colonies: colonyDomes, claims, firstPlayer: firstPlayerToken };
+  const tokenVp = factoryCount + colonyDomes + claims + firstPlayerToken;
 
   const total = spectralVp + tokenVp + colonyVp + glory + cubeVp + awardVp;
   return {
@@ -107,6 +122,8 @@ export function scorePlayer({
     claims,
     outposts,
     rocket,
+    firstPlayer: firstPlayerToken,
+    tokenBreakdown,
     tokenVp,
     glory,
     cubeVp,
