@@ -891,18 +891,38 @@ async function maybeResumeRoomFromUrl() {
 }
 
 // skips the resume / sandbox fallback).
+// Survives a sign-in round-trip (e.g. the Discord OAuth redirect drops the
+// query string) so an invited, signed-out player still lands in the room.
+const PENDING_INVITE_KEY = 'hf-pending-invite';
+
 async function maybeClaimInviteFromUrl() {
   const url = new URL(window.location.href);
-  const code = url.searchParams.get('invite');
+  let code = url.searchParams.get('invite');
+  if (code) {
+    // Clear from the URL so a refresh doesn't double-claim.
+    url.searchParams.delete('invite');
+    window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+  }
+  // Fall back to a code stashed before a sign-in round-trip. The Discord OAuth
+  // hop navigates away and returns with a fresh `?hf_discord=...` URL, dropping
+  // the original `?invite=`, so we persist the invite in sessionStorage (which
+  // survives the same-tab round-trip) and recover it here once signed in.
+  if (!code) {
+    try { code = sessionStorage.getItem(PENDING_INVITE_KEY) || null; } catch { /* private mode */ }
+  }
   if (!code) return false;
-  // Clear from the URL so a refresh doesn't double-claim.
-  url.searchParams.delete('invite');
-  window.history.replaceState({}, '', url.pathname + url.search + url.hash);
   const me = activeProfile();
   if (!me) {
-    toast('Sign in to claim that invite link.', 'invite');
+    // Not signed in yet: remember the invite so we can claim it the instant
+    // sign-in finishes (afterSignIn calls this again). Then send them to sign
+    // in - Discord or otherwise.
+    try { sessionStorage.setItem(PENDING_INVITE_KEY, code); } catch { /* private mode */ }
+    toast('Sign in to join the game you were invited to.', 'invite');
     return false;
   }
+  // We have both a code and a session - this is the claim, so drop the stash
+  // whatever the outcome (a bad / expired link shouldn't keep retrying).
+  try { sessionStorage.removeItem(PENDING_INVITE_KEY); } catch { /* private mode */ }
   const peek = await lookupInviteLink(code);
   if (!peek.ok) { toast('Invite link not found.', 'error'); return false; }
   if (peek.data.expired) { toast('That invite link expired.', 'error'); return false; }
@@ -1038,12 +1058,17 @@ async function boot() {
     }
   } else {
     console.log('[hf:boot] no profile - going to signin');
+    // Read the invite BEFORE showView - showView('view-signin') rewrites the
+    // URL to the app root (setUrlForView), which would drop the ?invite=.
+    // Stashing it here lets it survive the sign-in round-trip (the Discord
+    // OAuth redirect also drops the query string) so it gets claimed the
+    // instant sign-in finishes - that's what drops the player into the room
+    // they were invited to. The lobby-name toast tells them where they're off to.
+    const inviteCode = new URL(window.location.href).searchParams.get('invite');
     showView('view-signin');
-    // If the URL has an invite code, stash a note so the user sees it
-    // after they sign in.
-    const url = new URL(window.location.href);
-    if (url.searchParams.get('invite')) {
-      const peek = await lookupInviteLink(url.searchParams.get('invite'));
+    if (inviteCode) {
+      try { sessionStorage.setItem(PENDING_INVITE_KEY, inviteCode); } catch { /* private mode */ }
+      const peek = await lookupInviteLink(inviteCode);
       if (peek.ok) {
         toast(`Sign in to join "${peek.data.lobbyName}".`, 'invite');
       }
