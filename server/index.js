@@ -65,6 +65,18 @@ import {
 
 const PORT = Number(process.env.PORT) || 8080;
 
+// Rat Frontier is an admin-gated experimental variant. The allowlist is a
+// secret env flag: a comma-separated list of profile names that may see and
+// open it. Re-read on every boot so rotating the secret takes effect on
+// restart, the same way the admin-allowlist seed does.
+const RAT_ADMIN_NAMES = new Set(
+  (process.env.RAT_ADMIN_NAMES || process.env.RAT_FRONTIER_ADMINS || '')
+    .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+);
+function isRatAdmin(name) {
+  return RAT_ADMIN_NAMES.has(String(name || '').toLowerCase());
+}
+
 // ----- Config / constants -----
 
 const RESERVED_NAMES = new Set([
@@ -194,6 +206,60 @@ function requireProfile(req, res, next) {
 
 app.get('/healthz', (_req, res) => {
   res.json({ ok: true, ts: nowMs() });
+});
+
+// Whether the calling profile may use the admin-gated Rat Frontier variant.
+// The client hides the menu entry unless this returns { allowed: true }.
+// Two ways in: the RAT_ADMIN_NAMES allowlist (a profile-name flag), or - the
+// path the admin already has - a Discord account linked to this profile whose
+// id is on the server admin allowlist (ADMIN_DISCORD_ID(S)). So whoever is
+// already a server admin gets Rat Frontier with no extra secret.
+// Is this profile a Rat Frontier admin? Three ways in: the RAT_ADMIN_NAMES
+// name flag, a Discord account linked to this profile whose id is on the
+// server admin allowlist (the cross-origin path - the game client sends a
+// Bearer token, not the admin cookie), or a live admin-portal cookie session
+// (same-origin). Shared by /rat-frontier/access, /profiles/me, and the
+// node-tags save below.
+function profileIsAdmin(profile, req) {
+  if (profile && isRatAdmin(profile.name)) return true;
+  if (profile) {
+    const acct = db
+      .prepare('SELECT discord_id FROM discord_accounts WHERE profile_id = ?')
+      .get(profile.id);
+    if (acct && isAdminDiscordId(acct.discord_id)) return true;
+  }
+  if (req && adminFromRequest(req)) return true;
+  return false;
+}
+
+app.get('/rat-frontier/access', requireProfile, (req, res) => {
+  res.json({ allowed: profileIsAdmin(req.profile, req), profile: req.profile.name });
+});
+
+// Assign authoritative server node-tags from the Rat Frontier map editor.
+// Bearer-authed + admin-checked (the editor runs on GitHub Pages and can't
+// use the admin cookie), so the editor writes the real node_tags store with
+// the admin's login - applied immediately. Body: { tags: { "<id2>": { lander,
+// half, hazard, aerobrake, season, site_name } } }. An entry with every flag
+// off and no season clears the override (reverts to the baseline tag).
+app.post('/rat-frontier/node-tags', requireProfile, (req, res) => {
+  if (!profileIsAdmin(req.profile, req)) return res.status(403).json({ error: 'not_admin' });
+  const tags = (req.body && req.body.tags) || {};
+  let saved = 0, cleared = 0;
+  for (const siteId of Object.keys(tags)) {
+    if (!SITE_ID_RE.test(siteId)) continue;
+    const t = tags[siteId] || {};
+    const empty = !t.lander && !t.half && !t.hazard && !t.aerobrake
+      && !SEASON_KEYS.includes(t.season);
+    if (empty) {
+      db.prepare('DELETE FROM node_tags WHERE site_id = ?').run(siteId);
+      cleared++;
+    } else {
+      saveNodeTag(siteId, String(t.site_name || ''), t);
+      saved++;
+    }
+  }
+  res.json({ ok: true, saved, cleared });
 });
 
 // Server-wide announcement banner (shown atop global chat). Seeded once
@@ -459,13 +525,21 @@ app.get('/profiles/me', requireProfile, (req, res) => {
   // shown to a signed-in user only until their account has a Discord
   // identity, then hidden. oauthEnabled lets the client skip the button
   // entirely on a deployment with no Discord OAuth.
-  const discordLinked = !!db
-    .prepare('SELECT 1 FROM discord_accounts WHERE profile_id = ?')
+  const acct = db
+    .prepare('SELECT discord_id FROM discord_accounts WHERE profile_id = ?')
     .get(req.profile.id);
+  const discordLinked = !!acct;
+  // Admin status, server-derived on every page load (restoreProfile calls
+  // this): the secret admin id lives in GitHub secrets -> ADMIN_DISCORD_ID(S)
+  // -> the allowlist, and we match it against THIS profile's linked Discord
+  // id (or the RAT_ADMIN_NAMES name flag, or a live admin-portal cookie).
+  // The raw Discord id is never sent to the client, so this can't be spoofed.
+  const isAdmin = profileIsAdmin(req.profile, req);
   res.json({
     id: req.profile.id,
     name: req.profile.name,
     discordLinked,
+    isAdmin,
     oauthEnabled: oauthEnabled(),
   });
 });
@@ -1478,8 +1552,11 @@ function dispatchTurnNotifications(gameId, kind, state) {
     const jump = url ? `\n▶ Play now: ${url}` : '';
     // Game over: one note to everyone, regardless of which op tripped it.
     if (state.status === 'finished') {
-      if (dmOn) for (const p of state.players) notifyProfile(p.profileId, 'turn', `🏁 The game in **${name}** is over.`);
-      notifyWebhook(`🏁 **${name}** has ended - final standings are in.`);
+      // Link straight to the finished room so a notified player can tap in
+      // and see the final standings.
+      const results = url ? `\n🏆 Final standings: ${url}` : '';
+      if (dmOn) for (const p of state.players) notifyProfile(p.profileId, 'turn', `🏁 The game in **${name}** is over.${results}`);
+      notifyWebhook(`🏁 **${name}** has ended - final standings are in.${results}`);
       return;
     }
     // A round just closed and the leader must name the next first player.
@@ -2834,6 +2911,9 @@ const SEASON_OPTIONS = [
   { key: 'red',    label: 'Red',    color: '#ef4444' },
   { key: 'yellow', label: 'Yellow', color: '#facc15' },
   { key: 'blue',   label: 'Blue',   color: '#60a5fa' },
+  // Rat Frontier adds two seasons.
+  { key: 'green',  label: 'Green',       color: '#22c55e' },
+  { key: 'beige',  label: 'Brown-beige', color: '#c2a878' },
 ];
 const SEASON_KEYS = SEASON_OPTIONS.map((s) => s.key);
 

@@ -525,6 +525,9 @@ const SYNODIC_COLOURS = {
   red:    '#ef4444',
   yellow: '#facc15',
   blue:   '#60a5fa',
+  // Rat Frontier seasons.
+  green:  '#22c55e',
+  beige:  '#c2a878',
 };
 
 // Tiny "#rrggbb" → "rgba(r, g, b, a)" helper. Used to dim the
@@ -828,6 +831,23 @@ export class MapRenderer {
     this._staticCanvas = null;
     this._staticCtx = null;
     this._staticEpoch = 0;
+    // Optional raster map backdrop (Rat Frontier's pixel-art board), drawn in
+    // world space behind the zones so it tracks pan/zoom + aligns with nodes.
+    this._backdropImg = null;
+    this._backdropReady = false;
+    this._backdropVisible = false;
+    // Optional node-editing hooks (Rat Frontier authoring on the live map).
+    // null = off (the main game never sets it, so behaviour is unchanged).
+    this._nodeEdit = null;
+    this._nodeDrag = null;
+    // Edit overlays (Rat Frontier authoring): a highlighted/selected node (ring
+    // + move arrows) and an in-progress line/curve preview (polyline through
+    // node ids). Drawn live so connecting + curving update on every click.
+    this._editHighlightId = null;
+    this._editPreviewIds = null;
+    // Body spheres + sun discs. On for the solar map; the Rat Frontier board
+    // turns them off (its nodes are flat markers over the pixel-art backdrop).
+    this._bodiesVisible = true;
     this._cachePan = { x: 0, y: 0 };
     this._cacheZoom = 0;
     this._cacheEpoch = -1;
@@ -1693,6 +1713,65 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
+  // Raster map backdrop: a pixel-art image painted across the whole world rect
+  // (0..VIEW_W, 0..VIEW_H) behind the zones, so it pans/zooms with the board
+  // and lines up with node coordinates. Used by the Rat Frontier map (the
+  // alpha-centauri.png board). Pass visible to set the initial state.
+  setBackdropImage(url, { visible = true } = {}) {
+    this._backdropVisible = !!visible;
+    if (!url) { this._backdropImg = null; this._backdropReady = false; this._invalidateStatic(); this._scheduleDraw(); return; }
+    const img = new Image();
+    img.onload = () => {
+      this._backdropImg = img; this._backdropReady = true;
+      this._invalidateStatic(); this._scheduleDraw();
+    };
+    img.onerror = () => { this._backdropReady = false; };
+    img.src = url;
+  }
+  setBackdropVisible(on) {
+    this._backdropVisible = !!on;
+    this._invalidateStatic();
+    this._scheduleDraw();
+  }
+  isBackdropVisible() { return this._backdropVisible; }
+  // Toggle the body spheres + sun discs (off for the rat board).
+  setBodiesVisible(on) { this._bodiesVisible = !!on; this._scheduleDraw(); }
+
+  // Node editing on the live map. Pass a handler bag to turn it on; null off.
+  //   { active, allowDrag, onPickNode(id)->bool, onMoveNode(id,wx,wy),
+  //     onDropNode(id), onClickNode(id), onClickEmpty(wx,wy) }
+  // The renderer fires these; the caller owns the data mutation. Call redraw()
+  // (live layers reread this.data) or refreshStatic() after mutating.
+  setNodeEdit(opts) { this._nodeEdit = opts || null; if (!opts) this._nodeDrag = null; }
+  // Highlight the selected node (pulsing ring + four move arrows). null clears.
+  setEditHighlight(id) { this._editHighlightId = id || null; this._scheduleDraw(); }
+  // Draw an in-progress line/curve as a dashed polyline through these node ids.
+  setEditPreview(ids) {
+    this._editPreviewIds = (Array.isArray(ids) && ids.length) ? ids.slice() : null;
+    this._scheduleDraw();
+  }
+  redraw() { this._scheduleDraw(); }
+  refreshStatic() { this._invalidateStatic(); this._scheduleDraw(); }
+  // Re-ingest this.data.sites after nodes were added/removed (moves only need
+  // redraw() since the site objects are mutated in place).
+  refreshData() { this._partitionSites(); this._invalidateStatic(); this._scheduleDraw(); }
+  eventToWorld(ev) { return this._eventToWorld(ev); }
+  hitTestNode(wx, wy) { return this._hitTest(wx, wy); }
+  // _hitTest returns the node OBJECT (or null); the edit hooks want its id.
+  _hitNodeId(wx, wy) {
+    const hit = this._hitTest(wx, wy);
+    if (!hit) return null;
+    return typeof hit === 'string' ? hit : (hit.id || hit.id2 || null);
+  }
+  _dispatchEditTap(wp) {
+    const ne = this._nodeEdit;
+    if (!ne || !ne.active) return false;
+    const id = this._hitNodeId(wp.x, wp.y);
+    if (id) { if (ne.onClickNode) ne.onClickNode(id); }
+    else if (ne.onClickEmpty) ne.onClickEmpty(wp.x, wp.y);
+    return true;
+  }
+
   // Zones nest inner -> outer (Mercury innermost). The order drives
   // the derived-assignment rule: a node belongs to the INNERMOST
   // polygon that contains it.
@@ -2071,6 +2150,14 @@ export class MapRenderer {
       sctx.save();
       sctx.translate(this.pan.x, this.pan.y);
       sctx.scale(eff, eff);
+      // Raster board backdrop (behind everything), filling the world rect so
+      // it aligns with node coordinates. Drawn pixelated to keep the art crisp.
+      if (this._backdropVisible && this._backdropReady) {
+        const sm = sctx.imageSmoothingEnabled;
+        sctx.imageSmoothingEnabled = false;
+        sctx.drawImage(this._backdropImg, 0, 0, VIEW_W, VIEW_H);
+        sctx.imageSmoothingEnabled = sm;
+      }
       this._drawCanonicalZones(sctx, eff);
       if (this.data.mode === 'clean' && Array.isArray(this.data.zones)) {
         this._drawZoneBands(sctx, this.data.zones, this.data.zoneInfo);
@@ -2153,13 +2240,13 @@ export class MapRenderer {
     ctx.translate(this.pan.x, this.pan.y);
     ctx.scale(eff, eff);
     this._step('guides', () => this._drawGuides(ctx));
-    this._step('sun/comet', () => this._drawSiteSunCometWorld(ctx));
+    if (this._bodiesVisible) this._step('sun/comet', () => this._drawSiteSunCometWorld(ctx));
     ctx.restore();
 
     // Body spheres / rocky asteroids: blitted from the sprite cache in
     // screen space, viewport-culled. Drawn before the edges so the
     // delta-v lines sit over the planets, not behind them.
-    this._step('planets (sprite)', () => this._drawSiteHalosScreen(ctx));
+    if (this._bodiesVisible) this._step('planets (sprite)', () => this._drawSiteHalosScreen(ctx));
 
     ctx.save();
     ctx.translate(this.pan.x, this.pan.y);
@@ -2209,6 +2296,10 @@ export class MapRenderer {
       // easy to miss, so we layer a thick bright yellow ring + soft
       // halo just outside the selected node's body.
       this._drawSelectionRingScreen(ctx);
+      // Map-editor overlays: the in-progress line/curve preview + the selected
+      // node's highlight ring and move arrows. Live, so authoring updates every
+      // click / drag frame.
+      this._drawEditOverlayScreen(ctx);
       // Turn-number pills (T2, T3, …) for planned rocket routes;
       // no-op for plain Navigate-to routes that have no turn tags.
       this._drawRouteTurnLabelsScreen(ctx);
@@ -2682,6 +2773,11 @@ export class MapRenderer {
     for (const [type, items] of this._waypointsByType) {
       const vis = TYPE_VIS[type] || TYPE_VIS.unknown;
       if (vis.kind === 'none') continue;     // decoratives = invisible
+      // Suns are NOT circle-batch waypoints: TYPE_VIS.sun has no fill/stroke,
+      // so they'd paint with the previous batch's leftover fillStyle (the
+      // "sphere that changes random colours"). The sun disc is drawn by
+      // drawSun off _realSites; a sun WAYPOINT just isn't drawn here.
+      if (vis.kind === 'sun') continue;
       // Per-type zoom gating: burn nodes only appear once zoomed
       // past their threshold so they don't speckle the wide view.
       if (vis.hideBelowZoom && this.zoom < vis.hideBelowZoom) continue;
@@ -3517,6 +3613,78 @@ export class MapRenderer {
     ctx.restore();
   }
 
+  // Map-editor overlays (Rat Frontier authoring). Two pieces, both screen-space
+  // so they track pan / zoom and update every frame:
+  //   - the in-progress line / curve as a dashed magenta polyline through the
+  //     node ids the editor is accumulating (setEditPreview), with a dot at
+  //     each waypoint, so connecting + curving show feedback on every click;
+  //   - the selected node's cyan ring + four outward move arrows
+  //     (setEditHighlight) so it reads as "selected, drag to move me".
+  _drawEditOverlayScreen(ctx) {
+    if (!this.data) return;
+    const eff = this.zoom * this.fitScale;
+    const screenOf = (id) => {
+      const n = this.data.byId[id];
+      if (!n) return null;
+      return { x: this.pan.x + n.x * eff, y: this.pan.y + n.y * eff, node: n };
+    };
+
+    const ids = this._editPreviewIds;
+    if (ids && ids.length) {
+      ctx.save();
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = '#e0218a';
+      ctx.setLineDash([7, 5]);
+      ctx.beginPath();
+      let started = false;
+      for (const id of ids) {
+        const p = screenOf(id);
+        if (!p) continue;
+        if (!started) { ctx.moveTo(p.x, p.y); started = true; } else ctx.lineTo(p.x, p.y);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#e0218a';
+      for (const id of ids) {
+        const p = screenOf(id);
+        if (!p) continue;
+        ctx.beginPath(); ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    const hid = this._editHighlightId;
+    if (hid) {
+      const p = screenOf(hid);
+      if (p) {
+        const vis = TYPE_VIS[p.node.type] || TYPE_VIS.unknown;
+        const hexS = this._hexScale();
+        const baseR = (vis && vis.kind === 'hex') ? vis.r * hexS : ((vis && vis.r) || 8);
+        const t = (this._animTime || 0) / 1000;
+        const pulse = (Math.sin(t * Math.PI * 1.6) + 1) * 0.5;
+        ctx.save();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#38e0ff';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, baseR + 11 + pulse * 4, 0, Math.PI * 2);
+        ctx.stroke();
+        // Four outward-pointing move arrows (up / right / down / left).
+        const ar = baseR + 22 + pulse * 4;
+        ctx.fillStyle = '#38e0ff';
+        for (const ang of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
+          ctx.save();
+          ctx.translate(p.x + Math.cos(ang) * ar, p.y + Math.sin(ang) * ar);
+          ctx.rotate(ang);
+          ctx.beginPath();
+          ctx.moveTo(6, 0); ctx.lineTo(-3, -4); ctx.lineTo(-3, 4); ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        }
+        ctx.restore();
+      }
+    }
+  }
+
   _drawPlayerShipScreen(ctx) {
     if (!this._playerShipId || !this.data) return;
     const here = this.data.byId[this._playerShipId];
@@ -3943,6 +4111,17 @@ export class MapRenderer {
           return;
         }
       }
+      // Node-edit: grabbing a node (when drag is enabled) starts a move
+      // instead of a pan. Empty space still pans.
+      if (this._nodeEdit && this._nodeEdit.active && this._nodeEdit.allowDrag) {
+        const wp = this._eventToWorld(ev);
+        const id = this._hitNodeId(wp.x, wp.y);
+        if (id && (!this._nodeEdit.onPickNode || this._nodeEdit.onPickNode(id))) {
+          this._nodeDrag = { id, moved: false };
+          this._nodeGrabConsumed = true;
+          return;
+        }
+      }
       this._dragStart = {
         x: ev.clientX, y: ev.clientY,
         panX: this.pan.x, panY: this.pan.y,
@@ -3953,6 +4132,13 @@ export class MapRenderer {
       if (this._zoneDragVertex != null) {
         const wp = this._eventToWorld(ev);
         this.moveZoneVertex(this._zoneDragVertex, wp.x, wp.y);
+        return;
+      }
+      if (this._nodeDrag) {
+        const wp = this._eventToWorld(ev);
+        this._nodeDrag.moved = true;
+        if (this._nodeEdit && this._nodeEdit.onMoveNode) this._nodeEdit.onMoveNode(this._nodeDrag.id, wp.x, wp.y);
+        this._scheduleDraw();
         return;
       }
       if (!this._dragStart) return;
@@ -3966,6 +4152,18 @@ export class MapRenderer {
     });
     window.addEventListener('mouseup', () => {
       this._dragStart = null;
+      if (this._nodeDrag) {
+        const nd = this._nodeDrag;
+        this._nodeDrag = null;
+        // A press that moved is a drag (drop the node); a press that didn't
+        // move is a tap (select / click the node) so the Select tool can pick
+        // a node to highlight without dragging it.
+        if (nd.moved) {
+          if (this._nodeEdit && this._nodeEdit.onDropNode) this._nodeEdit.onDropNode(nd.id);
+        } else if (this._nodeEdit && this._nodeEdit.onClickNode) {
+          this._nodeEdit.onClickNode(nd.id);
+        }
+      }
       if (this._zoneDragVertex != null) {
         this._zoneDragVertex = null;
         this._recomputeDerivedAssignments(); // moved vertex changed coverage
@@ -3999,6 +4197,12 @@ export class MapRenderer {
         }
         return;
       }
+      // Node-edit owns clicks: tap a node (select/connect) or empty (place).
+      if (this._nodeEdit && this._nodeEdit.active) {
+        if (this._nodeGrabConsumed) { this._nodeGrabConsumed = false; return; }
+        this._dispatchEditTap(this._eventToWorld(ev));
+        return;
+      }
       // Rocket sits on top of the map so test it first; if the
       // click landed inside the rocket sprite we fire a
       // sandbox-rocket event instead of a site select.
@@ -4017,8 +4221,22 @@ export class MapRenderer {
 
     // Touch: 1 finger pan, 2 fingers pinch.
     this.canvas.addEventListener('touchstart', (ev) => {
+      const pts = this._activeTouches(ev);
+      // A second finger landing cancels any in-progress node grab so the
+      // gesture becomes a clean pinch-zoom instead of dragging the node.
+      if (pts.length >= 2) this._nodeDrag = null;
+      // Single-finger node grab (edit mode with drag enabled): start a node
+      // move instead of a pan, mirroring the mousedown path. Empty space (no
+      // node hit) falls through to the normal pan gesture below.
+      else if (this._nodeEdit && this._nodeEdit.active && this._nodeEdit.allowDrag) {
+        const wp = this._eventToWorld(pts[0] || { clientX: 0, clientY: 0 });
+        const id = this._hitNodeId(wp.x, wp.y);
+        if (id && (!this._nodeEdit.onPickNode || this._nodeEdit.onPickNode(id))) {
+          this._nodeDrag = { id, moved: false };
+        }
+      }
       this._gesture = {
-        touches: this._activeTouches(ev).slice(0, 2),
+        touches: pts.slice(0, 2),
         pan: { x: this.pan.x, y: this.pan.y },
         zoom: this.zoom,
         moved: false,
@@ -4026,6 +4244,19 @@ export class MapRenderer {
     }, { passive: false });
     this.canvas.addEventListener('touchmove', (ev) => {
       ev.preventDefault();
+      // Node drag owns single-finger movement: move the grabbed node instead
+      // of panning the board. Mirrors the mousemove node-drag branch.
+      if (this._nodeDrag) {
+        const points = this._activeTouches(ev);
+        if (points.length === 1) {
+          const wp = this._eventToWorld(points[0]);
+          this._nodeDrag.moved = true;
+          if (this._gesture) this._gesture.moved = true;
+          if (this._nodeEdit && this._nodeEdit.onMoveNode) this._nodeEdit.onMoveNode(this._nodeDrag.id, wp.x, wp.y);
+          this._scheduleDraw();
+          return;
+        }
+      }
       if (!this._gesture) return;
       const rect = this.canvas.getBoundingClientRect();
       const points = this._activeTouches(ev);
@@ -4069,6 +4300,19 @@ export class MapRenderer {
     }, { passive: false });
     this.canvas.addEventListener('touchend', (ev) => {
       if (ev.touches.length === 0) {
+        // A grabbed node: a drag drops it, a no-move press selects it (so the
+        // Select tool can tap-to-highlight). Mirrors mouseup.
+        if (this._nodeDrag) {
+          const nd = this._nodeDrag;
+          this._nodeDrag = null;
+          this._gesture = null;
+          if (nd.moved) {
+            if (this._nodeEdit && this._nodeEdit.onDropNode) this._nodeEdit.onDropNode(nd.id);
+          } else if (this._nodeEdit && this._nodeEdit.onClickNode) {
+            this._nodeEdit.onClickNode(nd.id);
+          }
+          return;
+        }
         // Treat a no-drift tap as a click.
         if (this._gesture && !this._gesture.moved) {
           const last = this._gesture.touches[0];
@@ -4076,6 +4320,8 @@ export class MapRenderer {
             const pt = this._eventToWorld(last);
             if (this._zonePaint.active && this.options.zoneEditMode) {
               this.addZonePolyPoint(pt.x, pt.y);
+            } else if (this._nodeEdit && this._nodeEdit.active) {
+              this._dispatchEditTap(pt);          // touch tap -> place/select
             } else {
               const hit = this._hitTest(pt.x, pt.y);
               if (this.options.debug) this._emitDebugClick(pt, hit);
@@ -4093,7 +4339,7 @@ export class MapRenderer {
         };
       }
     });
-    this.canvas.addEventListener('touchcancel', () => { this._gesture = null; });
+    this.canvas.addEventListener('touchcancel', () => { this._gesture = null; this._nodeDrag = null; });
   }
 
   _activeTouches(ev) {

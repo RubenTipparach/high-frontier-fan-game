@@ -2,7 +2,8 @@
 
 import { probeServer, apiAvailable, lookupInviteLink, claimInviteLink, getLobbyByCode,
   getNotifyPrefs, setNotifyPrefs, testNotify, startDiscordOauth, whoami,
-  discordSignInEnabled, discordLoginStartUrl, discordExchange, discordSignup } from './api.js';
+  discordSignInEnabled, discordLoginStartUrl, discordExchange, discordSignup,
+  ratFrontierAccess } from './api.js';
 import {
   restoreProfile, activeProfile, signIn, signOut, mintDeviceCode,
   adoptServerSession, markDiscordLinked, onProfileChange,
@@ -16,13 +17,14 @@ import {
   initInvites, refreshInvitesList, subscribeInvitesForProfile,
 } from './invites.js';
 import { mountBrowse, isBrowseOnline, refreshRoomOverlays, requestRocketFocus } from './game/browse.js';
+import { mountRatFrontier } from './game/rat-frontier/rat-view.js';
 import { newSandboxGame, currentSandboxId, activateSandboxGame } from './game/sandbox-games.js';
 import { appBase } from './base.js';
 import { initErudaFromPref } from './debug-console.js';
 
 const VIEWS = [
   'view-signin', 'view-lobby-list', 'view-create-lobby', 'view-lobby',
-  'view-browse',
+  'view-browse', 'view-rat-frontier',
 ];
 
 // Track which view the user was on before opening Browse, so the
@@ -52,6 +54,8 @@ function setUrlForView(view) {
       // showView's URL block. Each solo game routes to /sandbox/<id>.
       const sid = currentSandboxId();
       path = base + 'sandbox' + (sid ? '/' + sid : '');
+    } else if (view === 'view-rat-frontier') {
+      path = base + 'rat-frontier';
     } else if (view === 'view-lobby-list' || view === 'view-create-lobby') {
       path = base + 'lobby';
     } else if (view === 'view-lobby') {
@@ -448,6 +452,9 @@ function initNewGameModal() {
   };
   const open = () => {
     showMode();
+    // Re-check Rat Frontier access each open so a freshly-linked admin or a
+    // just-deployed server reveals the entry without a full reload.
+    refreshRatAccess(activeProfile());
     overlay.classList.remove('hidden');
     document.addEventListener('keydown', onKey);
   };
@@ -462,6 +469,13 @@ function initNewGameModal() {
   mpBtn.addEventListener('click', () => {
     close();
     showView('view-create-lobby');
+  });
+  // Admin-gated Rat Frontier variant. The row is revealed only when the
+  // server confirms this profile is on the allowlist (see refreshRatAccess).
+  const ratBtn = document.getElementById('btn-new-game-rat');
+  if (ratBtn) ratBtn.addEventListener('click', () => {
+    close();
+    openRatFrontier();
   });
   // Solo room: pick the sandbox-style options first (starting bank + card
   // economy), then create + start a private 1-player server game.
@@ -521,6 +535,46 @@ function initNewGameModal() {
     showView('view-browse');   // setUrlForView reads currentSandboxId()
     mountBrowse({ newGame: true });
   });
+}
+
+// Mount the admin-gated Rat Frontier surface (card catalog + Alpha
+// Centauri map) into its view and switch to it.
+function openRatFrontier() {
+  const host = document.getElementById('view-rat-frontier');
+  if (!host) return;
+  showView('view-rat-frontier');
+  mountRatFrontier(host, { onBack: () => showView(_prevView || 'view-lobby-list') });
+}
+
+// Reveal or hide the Rat Frontier menu row based on whether the current
+// profile is on the server's secret allowlist. Called on every profile
+// change; fails closed (hidden) when signed out or the server says no.
+// Admin names from the client config meta tag (soft, static-site gate).
+function ratAdminsFromConfig() {
+  const el = document.querySelector('meta[name="hf-rat-admins"]');
+  return new Set((el?.content || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
+}
+let _ratAccessReqId = 0;
+async function refreshRatAccess(profile) {
+  const row = document.getElementById('new-game-rat-row');
+  if (!row) return;
+  const reqId = ++_ratAccessReqId;
+  if (!profile) { row.classList.add('hidden'); return; }
+  // Server-derived admin flag from /profiles/me (set on page load): the
+  // authoritative, page-load answer. Reveal immediately when it's true.
+  if (profile.isAdmin) { row.classList.remove('hidden'); return; }
+  // Client-config allowlist reveals the entry immediately (no round-trip).
+  const name = String(profile.name || '').toLowerCase();
+  if (name && ratAdminsFromConfig().has(name)) { row.classList.remove('hidden'); return; }
+  // Otherwise fall back to the server's real check (the authoritative gate).
+  if (!profile.token || !apiAvailable()) { row.classList.add('hidden'); return; }
+  let allowed = false;
+  try {
+    const r = await ratFrontierAccess(profile.token);
+    allowed = !!(r && r.ok && r.data && r.data.allowed);
+  } catch { allowed = false; }
+  if (reqId !== _ratAccessReqId) return;   // a newer profile change superseded us
+  row.classList.toggle('hidden', !allowed);
 }
 
 function initAccountMenu() {
@@ -765,9 +819,10 @@ function readLandingIntent() {
       sessionStorage.removeItem('hf-landing-redirect');
       if (stashed === 'sandbox') return 'sandbox';
       if (stashed === 'lobby') return 'lobby';
+      if (stashed === 'rat-frontier') return 'rat-frontier';
     }
   } catch { /* private mode */ }
-  const m = window.location.pathname.match(/\/(lobby|sandbox)(?:\/[^/]*)?\/?$/);
+  const m = window.location.pathname.match(/\/(lobby|sandbox|rat-frontier)(?:\/[^/]*)?\/?$/);
   return m ? m[1] : null;
 }
 
@@ -836,18 +891,38 @@ async function maybeResumeRoomFromUrl() {
 }
 
 // skips the resume / sandbox fallback).
+// Survives a sign-in round-trip (e.g. the Discord OAuth redirect drops the
+// query string) so an invited, signed-out player still lands in the room.
+const PENDING_INVITE_KEY = 'hf-pending-invite';
+
 async function maybeClaimInviteFromUrl() {
   const url = new URL(window.location.href);
-  const code = url.searchParams.get('invite');
+  let code = url.searchParams.get('invite');
+  if (code) {
+    // Clear from the URL so a refresh doesn't double-claim.
+    url.searchParams.delete('invite');
+    window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+  }
+  // Fall back to a code stashed before a sign-in round-trip. The Discord OAuth
+  // hop navigates away and returns with a fresh `?hf_discord=...` URL, dropping
+  // the original `?invite=`, so we persist the invite in sessionStorage (which
+  // survives the same-tab round-trip) and recover it here once signed in.
+  if (!code) {
+    try { code = sessionStorage.getItem(PENDING_INVITE_KEY) || null; } catch { /* private mode */ }
+  }
   if (!code) return false;
-  // Clear from the URL so a refresh doesn't double-claim.
-  url.searchParams.delete('invite');
-  window.history.replaceState({}, '', url.pathname + url.search + url.hash);
   const me = activeProfile();
   if (!me) {
-    toast('Sign in to claim that invite link.', 'invite');
+    // Not signed in yet: remember the invite so we can claim it the instant
+    // sign-in finishes (afterSignIn calls this again). Then send them to sign
+    // in - Discord or otherwise.
+    try { sessionStorage.setItem(PENDING_INVITE_KEY, code); } catch { /* private mode */ }
+    toast('Sign in to join the game you were invited to.', 'invite');
     return false;
   }
+  // We have both a code and a session - this is the claim, so drop the stash
+  // whatever the outcome (a bad / expired link shouldn't keep retrying).
+  try { sessionStorage.removeItem(PENDING_INVITE_KEY); } catch { /* private mode */ }
   const peek = await lookupInviteLink(code);
   if (!peek.ok) { toast('Invite link not found.', 'error'); return false; }
   if (peek.data.expired) { toast('That invite link expired.', 'error'); return false; }
@@ -904,6 +979,8 @@ async function boot() {
   initMainMenu();
   initNewGameModal();
   onProfileChange(reflectProfile);
+  onProfileChange(refreshRatAccess);
+  refreshRatAccess(activeProfile());
 
   await updateServerStatus();
 
@@ -918,6 +995,9 @@ async function boot() {
 
   const me = await restoreProfile();
   reflectProfile(me);
+  // Verify Rat Frontier (admin) access against the server on page load, once
+  // the profile is restored.
+  refreshRatAccess(me);
 
   if (me) {
     console.log('[hf:boot] signed in as @' + me.name + ' (id=' + me.id + ')');
@@ -961,6 +1041,15 @@ async function boot() {
             mountBrowse({});
             showView('view-browse');
           }
+        } else if (landing === 'rat-frontier') {
+          // Direct /rat-frontier load (or a version-reload that kept the
+          // path). Admins re-open the variant; anyone else lands on the lobby.
+          if (activeProfile() && activeProfile().isAdmin) {
+            console.log('[hf:boot] landing on rat-frontier');
+            openRatFrontier();
+          } else {
+            showView('view-lobby-list');
+          }
         } else {
           console.log('[hf:boot] landing on lobby (default)');
           showView('view-lobby-list');
@@ -969,12 +1058,17 @@ async function boot() {
     }
   } else {
     console.log('[hf:boot] no profile - going to signin');
+    // Read the invite BEFORE showView - showView('view-signin') rewrites the
+    // URL to the app root (setUrlForView), which would drop the ?invite=.
+    // Stashing it here lets it survive the sign-in round-trip (the Discord
+    // OAuth redirect also drops the query string) so it gets claimed the
+    // instant sign-in finishes - that's what drops the player into the room
+    // they were invited to. The lobby-name toast tells them where they're off to.
+    const inviteCode = new URL(window.location.href).searchParams.get('invite');
     showView('view-signin');
-    // If the URL has an invite code, stash a note so the user sees it
-    // after they sign in.
-    const url = new URL(window.location.href);
-    if (url.searchParams.get('invite')) {
-      const peek = await lookupInviteLink(url.searchParams.get('invite'));
+    if (inviteCode) {
+      try { sessionStorage.setItem(PENDING_INVITE_KEY, inviteCode); } catch { /* private mode */ }
+      const peek = await lookupInviteLink(inviteCode);
       if (peek.ok) {
         toast(`Sign in to join "${peek.data.lobbyName}".`, 'invite');
       }

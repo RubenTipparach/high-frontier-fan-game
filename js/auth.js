@@ -40,8 +40,9 @@ export async function restoreProfile() {
   if (!apiAvailable()) return _active;
   const r = await whoami(stored.token);
   if (r.ok) {
-    // Refresh id/name from the server in case anything drifted.
-    _active = { ...stored, id: r.data.id, name: r.data.name };
+    // Refresh id/name from the server in case anything drifted, and carry
+    // the server-derived admin flag (drives the Rat Frontier menu entry).
+    _active = { ...stored, id: r.data.id, name: r.data.name, isAdmin: !!r.data.isAdmin };
     saveProfile(_active);
     _publish();
     return _active;

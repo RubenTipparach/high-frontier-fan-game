@@ -59,6 +59,11 @@
       buildless; flip the value per environment by editing this tag.
     -->
     <meta name="hf-api-base" content="https://high-frontier-fan-game.fly.dev" />
+    <!-- Rat Frontier (experimental) admin allowlist: comma-separated profile
+         names that may see + open the variant. Client-side reveal only (a
+         static-site value is public, so this is a soft gate); the server's
+         /rat-frontier/access endpoint stays the real check. Edit per env. -->
+    <meta name="hf-rat-admins" content="" />
     <link
       rel="icon"
       type="image/svg+xml"
@@ -389,6 +394,9 @@
         and events on demand. The fullscreen button still promotes
         the whole shell to actual fullscreen.
       -->
+      <!-- Admin-gated Rat Frontier variant surface (card catalog + map). -->
+      <section id="view-rat-frontier" class="view hidden"></section>
+
       <section id="view-browse" class="view hidden">
         <div class="browse-shell">
           <div class="browse-stage">
@@ -643,6 +651,11 @@
           <p class="main-menu-note">Solo room is a private 1-player table on the server: the same engine as a full table, so you can try multiplayer features on your own.</p>
           <div class="main-menu-row">
             <button id="btn-new-game-sandbox" type="button">🗺 Offline sandbox (legacy)</button>
+          </div>
+          <!-- Admin-gated experimental variant. Hidden unless the server
+               says this profile is on the Rat Frontier allowlist. -->
+          <div class="main-menu-row hidden" id="new-game-rat-row">
+            <button id="btn-new-game-rat" type="button">🐀 Rat Frontier (experimental)</button>
           </div>
         </div>
         <div class="main-menu-section hidden" id="new-game-legacy-warn">

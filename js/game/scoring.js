@@ -2,9 +2,9 @@
 //
 // Computes the player's "if the game ended now" VP breakdown.
 // Per the variant spec (industrialize.md "VP timing"):
-//   - +1 VP per owned token on the map: rocket (if built),
-//     your successful claims (discs), your factories, colony
-//     domes, and outposts.
+//   - +1 VP per owned scoring token, as its own category: each factory,
+//     each colony dome, each successful claim disc, and the first-player
+//     token. Outposts and the rocket do NOT score a token.
 //   - Spectral-based stock-price bonus (rulebook M2b Exploitation
 //     Track). The track is GLOBAL: every player's factory of a
 //     spectral advances that spectral's shared disc and lowers its
@@ -45,8 +45,8 @@ import { getVps } from './glory.js';
 // pure scorer (data/endgame-scoring.js), the SAME constants the server and the
 // final-score modal use, so the live tab can never drift from them. Re-exported
 // here for the existing importers (browse.js).
-import { SPECTRAL_DIMINISHING_SCHEDULE, COLONY_VP } from '../../data/endgame-scoring.js';
-export { SPECTRAL_DIMINISHING_SCHEDULE, COLONY_VP };
+import { SPECTRAL_DIMINISHING_SCHEDULE, COLONY_VP, COLONY_LOCATION_BONUS } from '../../data/endgame-scoring.js';
+export { SPECTRAL_DIMINISHING_SCHEDULE, COLONY_VP, COLONY_LOCATION_BONUS };
 
 // Total VP for N factories of a single spectral. N <= 0 returns
 // 0. The schedule's final value is the "floor" rate that
@@ -64,7 +64,7 @@ export function spectralVpForCount(n) {
 }
 
 
-export function computeEndgameScore({ ownerId, colonyTypeOf } = {}) {
+export function computeEndgameScore({ ownerId, colonyTypeOf, firstPlayer = 0 } = {}) {
   // Tokens: rocket counts if the player has any cards in it.
   const rocketCount = getRocketStack().length > 0 ? 1 : 0;
 
@@ -102,15 +102,18 @@ export function computeEndgameScore({ ownerId, colonyTypeOf } = {}) {
     if (colonyByType[t] != null) colonyByType[t]++;
     else colonyByType.other++;
   }
+  // Colonies score only the site bonus ABOVE the dome token; the dome's flat +1
+  // is in the token line below, so it isn't double-counted.
   let colonyVp = 0;
-  for (const [t, n] of Object.entries(colonyByType)) colonyVp += n * (COLONY_VP[t] || 1);
+  for (const [t, n] of Object.entries(colonyByType)) colonyVp += n * (COLONY_LOCATION_BONUS[t] || 0);
 
-  // Token total: only FACTORIES and COLONY DOMES earn a +1 token. The colony
-  // dome's +1 rides its COLONY_VP base (scored separately below), so the token
-  // line here is just the player's own factories. Outposts, claims, and the
-  // rocket carry no token VP (user: outposts don't count, factories and colony
-  // domes do).
-  const tokensTotal = ownFactories.length;
+  // Token total: a flat +1 per scoring token - factories, colony domes, claim
+  // discs, and the first-player token. Outposts and the rocket carry no token
+  // VP. (user 2026-06-22: tokens are their own category and claims + the
+  // first-player token now count.)
+  const firstPlayerToken = firstPlayer ? 1 : 0;
+  const colonyDomes = colonyRecs.length;
+  const tokensTotal = ownFactories.length + colonyDomes + claimCount + firstPlayerToken;
 
   // Exploitation track (GLOBAL): the disc for each spectral sits at the total
   // count of that spectral's factories across ALL players, and the per-factory
@@ -149,6 +152,8 @@ export function computeEndgameScore({ ownerId, colonyTypeOf } = {}) {
       rocket: rocketCount,
       claims: claimCount,
       factories: ownFactories.length,
+      colonies: colonyDomes,
+      firstPlayer: firstPlayerToken,
       outposts: outpostList.length,
       total: tokensTotal,
     },
