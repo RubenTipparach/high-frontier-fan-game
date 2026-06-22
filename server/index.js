@@ -1552,8 +1552,11 @@ function dispatchTurnNotifications(gameId, kind, state) {
     const jump = url ? `\n▶ Play now: ${url}` : '';
     // Game over: one note to everyone, regardless of which op tripped it.
     if (state.status === 'finished') {
-      if (dmOn) for (const p of state.players) notifyProfile(p.profileId, 'turn', `🏁 The game in **${name}** is over.`);
-      notifyWebhook(`🏁 **${name}** has ended - final standings are in.`);
+      // Link straight to the finished room so a notified player can tap in
+      // and see the final standings.
+      const results = url ? `\n🏆 Final standings: ${url}` : '';
+      if (dmOn) for (const p of state.players) notifyProfile(p.profileId, 'turn', `🏁 The game in **${name}** is over.${results}`);
+      notifyWebhook(`🏁 **${name}** has ended - final standings are in.${results}`);
       return;
     }
     // A round just closed and the leader must name the next first player.
