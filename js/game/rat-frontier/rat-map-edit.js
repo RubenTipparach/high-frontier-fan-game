@@ -53,6 +53,10 @@ function injectStyle() {
   .rme-cmts .c{border-top:1px solid #2a2540;padding:3px 0;color:#bcd;}
   .rme-cmts .c .a{color:#8a86a8;}
   .rme-status{color:#7c8;font-size:11px;margin-top:6px;min-height:14px;}
+  .rme-edit-meta{font-size:11px;margin-bottom:4px;}
+  .rme-edit-hint{font-size:11px;margin-bottom:6px;}
+  .rme-row button.danger{background:#7a2540;color:#ffd9e4;}
+  .rme-row button.danger:hover{background:#9a2f50;}
   @media (max-width:720px){ .rme-panel{width:auto;left:10px;right:10px;top:auto;bottom:10px;max-height:46%;} }
   `;
   const s = document.createElement('style'); s.textContent = css; document.head.appendChild(s);
@@ -104,6 +108,7 @@ export function attachMapEditor(renderer, data, host) {
     data.neighbors = new Map();
     for (const [a, b] of data.edges) { ensureNbr(a, b); ensureNbr(b, a); }
     if (selected === id) closePanel();
+    if (editSelId === id) clearEditSelection();
     renderer.refreshData();
   }
   function connect(a, b) {
@@ -112,7 +117,11 @@ export function attachMapEditor(renderer, data, host) {
     if (!data.straightEdges) data.straightEdges = [];
     data.edges.push([a, b]); data.straightEdges.push([a, b]);
     ensureNbr(a, b); ensureNbr(b, a);
-    renderer.redraw();
+    // Edges live in the renderer's STATIC layer, so refreshStatic() - NOT
+    // redraw() - is what repaints them. (redraw() only touches the live layer,
+    // which is why a connection used to stay invisible until a mode change
+    // forced a static rebuild.)
+    renderer.refreshStatic();
   }
   function commitCurve() {
     if (curve && curve.ids.length >= 2) {
@@ -123,7 +132,9 @@ export function attachMapEditor(renderer, data, host) {
         ensureNbr(curve.ids[i], curve.ids[i + 1]); ensureNbr(curve.ids[i + 1], curve.ids[i]);
       }
     }
-    curve = null; renderer.refreshData(); syncHooks();
+    curve = null;
+    renderer.setEditPreview(null);
+    renderer.refreshData(); syncHooks();
   }
 
   // ---- UI ----
@@ -156,21 +167,59 @@ export function attachMapEditor(renderer, data, host) {
   let panel = null;
   function closePanel() { selected = null; if (panel) { panel.remove(); panel = null; } }
 
+  // Edit-mode selection: the highlighted node (ring + move arrows on the map,
+  // drawn by the renderer) plus a side panel carrying a Delete button. Distinct
+  // from the annotate panel above.
+  let editSelId = null;
+  let editPanel = null;
+  function clearEditSelection() {
+    editSelId = null;
+    renderer.setEditHighlight(null);
+    if (editPanel) { editPanel.remove(); editPanel = null; }
+  }
+  function selectEditNode(id) {
+    if (!data.byId[id]) return;
+    editSelId = id;
+    renderer.setEditHighlight(id);   // ring + move arrows on the map
+    openEditPanel(id);
+  }
+  function openEditPanel(id) {
+    const n = data.byId[id]; if (!n) return;
+    if (editPanel) editPanel.remove();
+    editPanel = document.createElement('div');
+    editPanel.className = 'rme-panel rme-edit-panel';
+    editPanel.innerHTML = `
+      <h4>${id}</h4>
+      <div class="rme-edit-meta muted">${n.type}${n.name ? ' · ' + escapeHtml(n.name) : ''}</div>
+      <div class="rme-edit-hint muted">Drag the node on the map to move it.</div>
+      <div class="rme-row"><button class="p-del danger">🗑 Delete node</button></div>`;
+    host.appendChild(editPanel);
+    editPanel.querySelector('.p-del').onclick = () => deleteNode(id);
+  }
+
   function setMode(m) {
     mode = m; edgePick = null; if (curve) commitCurve();
+    clearEditSelection(); renderer.setEditPreview(null);
     bar.querySelectorAll('[data-mode]').forEach((b) => b.classList.toggle('on', b.dataset.mode === m));
     toolsWrap.style.display = m === 'edit' ? '' : 'none';
     if (m !== 'annotate') closePanel();
     if (m === 'edit') setTool('select');
-    hint.textContent = m === 'view' ? 'Pan + zoom the live board.'
-      : m === 'edit' ? 'Tap empty to place, drag to move, tap two nodes to connect.'
+    else hint.textContent = m === 'view' ? 'Pan + zoom the live board.'
       : 'Tap a node to retype / tag / comment.';
     syncHooks();
   }
+  const TOOL_HINTS = {
+    select: 'Tap a node to select it, then drag to move or Delete it on the side.',
+    delete: 'Tap a node to delete it.',
+    straight: 'Tap node A, then node B - they connect.',
+    curve: 'Tap a node to start, tap empty space to add points, tap a node to finish.',
+  };
   function setTool(t) {
     tool = t; edgePick = null; if (curve) commitCurve();
+    clearEditSelection(); renderer.setEditPreview(null);
     toolsWrap.querySelectorAll('.rme-tool').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
     finishBtn.style.display = t === 'curve' ? '' : 'none';
+    hint.textContent = TOOL_HINTS[t] || `Tap empty space to place a ${t}.`;
     syncHooks();
   }
 
@@ -188,14 +237,36 @@ export function attachMapEditor(renderer, data, host) {
       allowDrag: tool === 'select',
       onPickNode: () => tool === 'select',
       onMoveNode: (id, wx, wy) => { const n = data.byId[id]; if (n) { n.x = round1(wx); n.y = round1(wy); } },
-      onDropNode: () => renderer.redraw(),
+      // Edges sit in the static layer, so rebuild it when a moved node lands
+      // so its connections follow to the new position.
+      onDropNode: () => renderer.refreshStatic(),
       onClickNode: (id) => {
+        if (tool === 'select') { selectEditNode(id); return; }
         if (tool === 'delete') return deleteNode(id);
-        if (tool === 'straight') { if (!edgePick) edgePick = id; else { connect(edgePick, id); edgePick = null; } return; }
-        if (tool === 'curve') { (curve || (curve = { ids: [] })).ids.push(id); renderer.redraw(); return; }
+        if (tool === 'straight') {
+          // Click node A then node B: connect. A is highlighted while we wait.
+          if (!edgePick) { edgePick = id; renderer.setEditHighlight(id); }
+          else { connect(edgePick, id); edgePick = null; renderer.setEditHighlight(null); }
+          return;
+        }
+        if (tool === 'curve') {
+          // First node starts the curve; a later node click ends + commits it.
+          if (!curve) { curve = { ids: [id] }; renderer.setEditPreview(curve.ids); return; }
+          curve.ids.push(id);
+          renderer.setEditPreview(curve.ids);
+          commitCurve();
+          return;
+        }
       },
       onClickEmpty: (wx, wy) => {
-        if (tool === 'curve') { const id = placeNode('decorative', wx, wy); (curve || (curve = { ids: [] })).ids.push(id); return; }
+        if (tool === 'select') { clearEditSelection(); return; }
+        if (tool === 'curve') {
+          if (!curve) return;   // a curve starts on a node, not empty space
+          const id = placeNode('decorative', wx, wy);
+          curve.ids.push(id);
+          renderer.setEditPreview(curve.ids);   // live segment to the new point
+          return;
+        }
         if (['site', 'sun', 'burn', 'lagrange', 'hohmann', 'orbit'].includes(tool)) placeNode(tool, wx, wy);
       },
     });

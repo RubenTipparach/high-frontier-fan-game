@@ -840,6 +840,11 @@ export class MapRenderer {
     // null = off (the main game never sets it, so behaviour is unchanged).
     this._nodeEdit = null;
     this._nodeDrag = null;
+    // Edit overlays (Rat Frontier authoring): a highlighted/selected node (ring
+    // + move arrows) and an in-progress line/curve preview (polyline through
+    // node ids). Drawn live so connecting + curving update on every click.
+    this._editHighlightId = null;
+    this._editPreviewIds = null;
     // Body spheres + sun discs. On for the solar map; the Rat Frontier board
     // turns them off (its nodes are flat markers over the pixel-art backdrop).
     this._bodiesVisible = true;
@@ -1738,6 +1743,13 @@ export class MapRenderer {
   // The renderer fires these; the caller owns the data mutation. Call redraw()
   // (live layers reread this.data) or refreshStatic() after mutating.
   setNodeEdit(opts) { this._nodeEdit = opts || null; if (!opts) this._nodeDrag = null; }
+  // Highlight the selected node (pulsing ring + four move arrows). null clears.
+  setEditHighlight(id) { this._editHighlightId = id || null; this._scheduleDraw(); }
+  // Draw an in-progress line/curve as a dashed polyline through these node ids.
+  setEditPreview(ids) {
+    this._editPreviewIds = (Array.isArray(ids) && ids.length) ? ids.slice() : null;
+    this._scheduleDraw();
+  }
   redraw() { this._scheduleDraw(); }
   refreshStatic() { this._invalidateStatic(); this._scheduleDraw(); }
   // Re-ingest this.data.sites after nodes were added/removed (moves only need
@@ -2284,6 +2296,10 @@ export class MapRenderer {
       // easy to miss, so we layer a thick bright yellow ring + soft
       // halo just outside the selected node's body.
       this._drawSelectionRingScreen(ctx);
+      // Map-editor overlays: the in-progress line/curve preview + the selected
+      // node's highlight ring and move arrows. Live, so authoring updates every
+      // click / drag frame.
+      this._drawEditOverlayScreen(ctx);
       // Turn-number pills (T2, T3, …) for planned rocket routes;
       // no-op for plain Navigate-to routes that have no turn tags.
       this._drawRouteTurnLabelsScreen(ctx);
@@ -3597,6 +3613,78 @@ export class MapRenderer {
     ctx.restore();
   }
 
+  // Map-editor overlays (Rat Frontier authoring). Two pieces, both screen-space
+  // so they track pan / zoom and update every frame:
+  //   - the in-progress line / curve as a dashed magenta polyline through the
+  //     node ids the editor is accumulating (setEditPreview), with a dot at
+  //     each waypoint, so connecting + curving show feedback on every click;
+  //   - the selected node's cyan ring + four outward move arrows
+  //     (setEditHighlight) so it reads as "selected, drag to move me".
+  _drawEditOverlayScreen(ctx) {
+    if (!this.data) return;
+    const eff = this.zoom * this.fitScale;
+    const screenOf = (id) => {
+      const n = this.data.byId[id];
+      if (!n) return null;
+      return { x: this.pan.x + n.x * eff, y: this.pan.y + n.y * eff, node: n };
+    };
+
+    const ids = this._editPreviewIds;
+    if (ids && ids.length) {
+      ctx.save();
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = '#e0218a';
+      ctx.setLineDash([7, 5]);
+      ctx.beginPath();
+      let started = false;
+      for (const id of ids) {
+        const p = screenOf(id);
+        if (!p) continue;
+        if (!started) { ctx.moveTo(p.x, p.y); started = true; } else ctx.lineTo(p.x, p.y);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#e0218a';
+      for (const id of ids) {
+        const p = screenOf(id);
+        if (!p) continue;
+        ctx.beginPath(); ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    const hid = this._editHighlightId;
+    if (hid) {
+      const p = screenOf(hid);
+      if (p) {
+        const vis = TYPE_VIS[p.node.type] || TYPE_VIS.unknown;
+        const hexS = this._hexScale();
+        const baseR = (vis && vis.kind === 'hex') ? vis.r * hexS : ((vis && vis.r) || 8);
+        const t = (this._animTime || 0) / 1000;
+        const pulse = (Math.sin(t * Math.PI * 1.6) + 1) * 0.5;
+        ctx.save();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#38e0ff';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, baseR + 11 + pulse * 4, 0, Math.PI * 2);
+        ctx.stroke();
+        // Four outward-pointing move arrows (up / right / down / left).
+        const ar = baseR + 22 + pulse * 4;
+        ctx.fillStyle = '#38e0ff';
+        for (const ang of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
+          ctx.save();
+          ctx.translate(p.x + Math.cos(ang) * ar, p.y + Math.sin(ang) * ar);
+          ctx.rotate(ang);
+          ctx.beginPath();
+          ctx.moveTo(6, 0); ctx.lineTo(-3, -4); ctx.lineTo(-3, 4); ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        }
+        ctx.restore();
+      }
+    }
+  }
+
   _drawPlayerShipScreen(ctx) {
     if (!this._playerShipId || !this.data) return;
     const here = this.data.byId[this._playerShipId];
@@ -4065,8 +4153,16 @@ export class MapRenderer {
     window.addEventListener('mouseup', () => {
       this._dragStart = null;
       if (this._nodeDrag) {
-        if (this._nodeEdit && this._nodeEdit.onDropNode) this._nodeEdit.onDropNode(this._nodeDrag.id);
+        const nd = this._nodeDrag;
         this._nodeDrag = null;
+        // A press that moved is a drag (drop the node); a press that didn't
+        // move is a tap (select / click the node) so the Select tool can pick
+        // a node to highlight without dragging it.
+        if (nd.moved) {
+          if (this._nodeEdit && this._nodeEdit.onDropNode) this._nodeEdit.onDropNode(nd.id);
+        } else if (this._nodeEdit && this._nodeEdit.onClickNode) {
+          this._nodeEdit.onClickNode(nd.id);
+        }
       }
       if (this._zoneDragVertex != null) {
         this._zoneDragVertex = null;
@@ -4204,11 +4300,17 @@ export class MapRenderer {
     }, { passive: false });
     this.canvas.addEventListener('touchend', (ev) => {
       if (ev.touches.length === 0) {
-        // A grabbed node drops here (no tap dispatch). Mirrors mouseup.
+        // A grabbed node: a drag drops it, a no-move press selects it (so the
+        // Select tool can tap-to-highlight). Mirrors mouseup.
         if (this._nodeDrag) {
-          if (this._nodeEdit && this._nodeEdit.onDropNode) this._nodeEdit.onDropNode(this._nodeDrag.id);
+          const nd = this._nodeDrag;
           this._nodeDrag = null;
           this._gesture = null;
+          if (nd.moved) {
+            if (this._nodeEdit && this._nodeEdit.onDropNode) this._nodeEdit.onDropNode(nd.id);
+          } else if (this._nodeEdit && this._nodeEdit.onClickNode) {
+            this._nodeEdit.onClickNode(nd.id);
+          }
           return;
         }
         // Treat a no-drift tap as a click.
