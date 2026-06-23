@@ -1240,64 +1240,67 @@
 /* The wet-mass total doubles as the "open fuel tank" button, so it
    gets the blue clickable-button treatment to stand apart from the
    read-only totals cells around it (cards / dry mass / rad-hard). */
-.rocket-wetmass-cell {
+/* Bright blue, raised glossy button. Uses the COMPOUND selector
+   (.rocket-totals-cell.rocket-wetmass-cell) so it OUTRANKS the base
+   .rocket-totals-cell rule that is declared later in this file - otherwise the
+   base dark background + flat shadow win the cascade and the cell looks
+   unfilled. */
+.rocket-totals-cell.rocket-wetmass-cell {
   cursor: pointer;
-  /* Raised, glossy blue button: a top-lit gradient + an inner top highlight
-     and inner bottom bevel make the FILL read as a 3D button popping up off
-     the panel, lifted by a solid base shadow + a soft outer glow. */
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0) 42%),
-    linear-gradient(180deg, #4fb8ff 0%, #2a96ec 48%, #1668bf 100%);
-  border: 1px solid #8ddcff;
-  color: #f0f9ff;
+    linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0) 46%),
+    linear-gradient(180deg, #4fb8ff 0%, #1e9bff 50%, #0a72e6 100%);
+  border: 1px solid #9fe0ff;
+  color: #ffffff;
   transform: translateY(-1px);
   box-shadow:
-    inset 0 2px 0 rgba(255, 255, 255, 0.55),          /* top gloss highlight */
-    inset 0 8px 14px rgba(255, 255, 255, 0.16),        /* upper sheen        */
-    inset 0 -7px 10px rgba(4, 38, 76, 0.55),           /* lower bevel shadow */
-    0 4px 0 #0e4d8a,                                   /* solid raised base  */
-    0 8px 16px rgba(2, 20, 45, 0.55),                  /* lift drop shadow   */
-    0 0 16px rgba(56, 189, 248, 0.45);                 /* soft outer glow    */
+    inset 0 2px 0 rgba(255, 255, 255, 0.6),            /* top gloss highlight */
+    inset 0 9px 16px rgba(255, 255, 255, 0.22),        /* upper sheen        */
+    inset 0 -8px 12px rgba(3, 38, 86, 0.55),           /* lower bevel shadow */
+    0 5px 0 #0a5bc0,                                   /* solid raised base  */
+    0 9px 18px rgba(2, 20, 45, 0.55),                  /* lift drop shadow   */
+    0 0 18px rgba(56, 189, 248, 0.5);                  /* soft outer glow    */
   transition: background 0.1s ease, border-color 0.1s ease,
               box-shadow 0.1s ease, transform 0.06s ease;
 }
-.rocket-wetmass-cell .lbl { color: #eaf6ff; text-shadow: 0 1px 1px rgba(2, 28, 58, 0.5); }
-.rocket-wetmass-cell strong { color: #ffffff; text-shadow: 0 1px 2px rgba(2, 28, 58, 0.55); }
-.rocket-wetmass-cell .cell-eqn { color: #d8eeff; }
-.rocket-wetmass-cell::after {
+.rocket-totals-cell.rocket-wetmass-cell .lbl { color: #ffffff; text-shadow: 0 1px 1px rgba(2, 28, 58, 0.55); }
+.rocket-totals-cell.rocket-wetmass-cell strong { color: #ffffff; text-shadow: 0 1px 2px rgba(2, 28, 58, 0.6); }
+.rocket-totals-cell.rocket-wetmass-cell strong small { color: #e8f6ff; }
+.rocket-totals-cell.rocket-wetmass-cell .cell-eqn { color: #e3f3ff; }
+.rocket-totals-cell.rocket-wetmass-cell::after {
   content: "💧 tap to open tank";
   font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.4px;
   text-transform: uppercase;
-  color: #eaf6ff;
-  text-shadow: 0 1px 1px rgba(2, 28, 58, 0.5);
+  color: #ffffff;
+  text-shadow: 0 1px 1px rgba(2, 28, 58, 0.55);
 }
-.rocket-wetmass-cell:hover,
-.rocket-wetmass-cell:focus-visible {
+.rocket-totals-cell.rocket-wetmass-cell:hover,
+.rocket-totals-cell.rocket-wetmass-cell:focus-visible {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0) 42%),
-    linear-gradient(180deg, #62c4ff 0%, #2f9ff5 48%, #1a76d2 100%);
-  border-color: #cdeeff;
+    linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0) 46%),
+    linear-gradient(180deg, #67c8ff 0%, #2ba6ff 50%, #0f80f2 100%);
+  border-color: #d6f1ff;
   transform: translateY(-2px);
   box-shadow:
-    inset 0 2px 0 rgba(255, 255, 255, 0.6),
-    inset 0 8px 14px rgba(255, 255, 255, 0.2),
-    inset 0 -7px 10px rgba(4, 38, 76, 0.5),
-    0 6px 0 #115a9e,
-    0 12px 22px rgba(2, 20, 45, 0.6),
-    0 0 26px rgba(56, 189, 248, 0.7);
+    inset 0 2px 0 rgba(255, 255, 255, 0.65),
+    inset 0 9px 16px rgba(255, 255, 255, 0.26),
+    inset 0 -8px 12px rgba(3, 38, 86, 0.5),
+    0 7px 0 #0c66cf,
+    0 13px 24px rgba(2, 20, 45, 0.6),
+    0 0 28px rgba(56, 189, 248, 0.75);
   outline: none;
 }
 /* Press the button DOWN on click: collapse the raised base + drop shadow. */
-.rocket-wetmass-cell:active {
-  transform: translateY(2px);
+.rocket-totals-cell.rocket-wetmass-cell:active {
+  transform: translateY(3px);
   box-shadow:
-    inset 0 2px 6px rgba(2, 28, 58, 0.5),
+    inset 0 3px 8px rgba(2, 28, 58, 0.5),
     inset 0 1px 0 rgba(255, 255, 255, 0.3),
-    0 1px 0 #0e4d8a,
+    0 1px 0 #0a5bc0,
     0 2px 6px rgba(2, 20, 45, 0.5),
-    0 0 14px rgba(56, 189, 248, 0.4);
+    0 0 14px rgba(56, 189, 248, 0.45);
 }
 
 /* Aqua transfer panel inside the fuel-tank modal. Only rendered
