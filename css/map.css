@@ -1252,12 +1252,10 @@
     linear-gradient(180deg, #2f9be6 0%, #1a80d6 50%, #0a5cba 100%);
   border: 1px solid #7fcdf2;
   color: #ffffff;
-  transform: translateY(-1px);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.4),            /* top gloss highlight */
     inset 0 9px 16px rgba(255, 255, 255, 0.10),        /* upper sheen        */
-    inset 0 -8px 12px rgba(3, 30, 70, 0.55),           /* lower bevel shadow */
-    0 5px 0 #084d9e;                                   /* solid raised base  */
+    inset 0 -8px 12px rgba(3, 30, 70, 0.55);           /* lower bevel shadow */
   transition: background 0.1s ease, border-color 0.1s ease,
               box-shadow 0.1s ease, transform 0.06s ease;
 }
@@ -1283,21 +1281,17 @@
     linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 40%),
     linear-gradient(180deg, #3ba6ee 0%, #1f8ce2 50%, #0d68c8 100%);
   border-color: #a6dcf6;
-  transform: translateY(-2px);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.45),
     inset 0 9px 16px rgba(255, 255, 255, 0.14),
-    inset 0 -8px 12px rgba(3, 30, 70, 0.5),
-    0 7px 0 #0a58b6;
+    inset 0 -8px 12px rgba(3, 30, 70, 0.5);
   outline: none;
 }
-/* Press the button DOWN on click: collapse the raised base. */
+/* Press feedback on click: deepen the inset so it reads as pushed in. */
 .rocket-totals-cell.rocket-wetmass-cell:active {
-  transform: translateY(3px);
   box-shadow:
     inset 0 3px 8px rgba(2, 28, 58, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3),
-    0 1px 0 #0a5bc0;
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
 /* Aqua transfer panel inside the fuel-tank modal. Only rendered
