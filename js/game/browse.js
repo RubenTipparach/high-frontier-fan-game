@@ -9998,10 +9998,22 @@ function openRocketStackModal() {
   const unsubRocket  = onRocketChange(repaint);
   const unsubLeo     = onLeoChange(repaint);
   const unsubOutpost = onOutpostsChange(repaint);
+  // CRITICAL fuel-strip <-> water-tank sync. The strip's WET chit must track
+  // the live tank the instant it moves. repaint() already rebuilds the strip,
+  // but it also rebuilds the entire stack body; this dedicated, cheap resync
+  // redraws ONLY the strip from the live totals on every water change (aqua <->
+  // tank, dump, burn, and the online snapshot refuel that hydrates the tank),
+  // so the strip can never lag the tank cylinder / wet-mass value.
+  const syncFuelStrip = () => {
+    const h = body.querySelector('#rocket-fuel-strip');
+    if (h) buildFuelStrip(h, getStackTotals());
+  };
+  const unsubStrip   = onRocketChange(syncFuelStrip);
   _rocketModalUnsub = () => {
     try { unsubRocket(); } catch {}
     try { unsubLeo(); } catch {}
     try { unsubOutpost(); } catch {}
+    try { unsubStrip(); } catch {}
   };
 
   mountOverlay(overlay);
@@ -12403,7 +12415,7 @@ function openBoostModal({ cards, have, opNote }) {
 // rocket's dry mass, WET at the current wet mass. Black-line =
 // FT spend (burn); red-dotted = refuel - see the legend. The
 // strip is read-only for now.
-function buildFuelStrip(host, totals) {
+function buildFuelStrip(host, totals = getStackTotals()) {
   host.innerHTML = '';
   // Grey the strip when the tank holds dirt instead of blue water.
   host.classList.toggle('is-dirt-fuel', getTankGrade() === 'dirt');
@@ -12415,11 +12427,14 @@ function buildFuelStrip(host, totals) {
   label.textContent = 'Fuel Strip Track';
   host.appendChild(label);
 
-  // The whole strip is a button into the detailed node track.
+  // The whole strip is a button into the fuel-tank modal (the tank cylinder,
+  // dump / aqua-bank / dirt controls, AND the detailed Net Thrust track all
+  // live there). Opening the same modal as the water-tank button keeps a
+  // single place to read + move fuel.
   const bands = document.createElement('div');
   bands.className = 'fuel-strip-bands is-clickable';
-  bands.title = 'Click to open the detailed Fuel Strip Track';
-  bands.addEventListener('click', () => openNetThrustDetailModal());
+  bands.title = 'Open the fuel tank';
+  bands.addEventListener('click', () => openFuelTankModal());
   // Cap how many mass cells a band lays out per row. Wide bands
   // (TUG spans 16) wrap onto extra rows instead of stretching the
   // strip past its box / off-screen on narrow viewports.
@@ -12491,7 +12506,7 @@ function buildFuelStrip(host, totals) {
     <span><i class="chit-dot is-dry-chit"></i> Dry ${dm}</span>
     <span><i class="chit-dot is-wet-chit"></i> Wet ${wm} (${wc.id} ${netMod})</span>
     <span class="muted">Max wet ${MAX_WET_MASS}</span>
-    <span class="fs-detail-hint">🔍 click for detail</span>
+    <span class="fs-detail-hint">💧 click to open tank</span>
   `;
   host.appendChild(legend);
 }
