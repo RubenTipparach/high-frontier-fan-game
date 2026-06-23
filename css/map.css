@@ -1242,15 +1242,32 @@
    read-only totals cells around it (cards / dry mass / rad-hard). */
 .rocket-wetmass-cell {
   cursor: pointer;
-  /* Solid blue button look so it reads as the primary "open the water tank"
+  /* Glowing blue button so it reads as the primary "open the water tank"
      action, not just another stat cell. */
-  background: linear-gradient(180deg, #2596e0, #1668b0);
-  border-color: #7dd3fc;
+  background: linear-gradient(180deg, #2ba6f0, #1572c4);
+  border: 1px solid #8ddcff;
   color: #f0f9ff;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22),
-              0 2px 6px rgba(8, 47, 73, 0.55);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30),
+              0 0 0 1px rgba(125, 211, 252, 0.35),
+              0 0 14px rgba(56, 189, 248, 0.55),
+              0 0 28px rgba(56, 189, 248, 0.30);
+  animation: wetmass-glow 2.4s ease-in-out infinite;
   transition: background 0.12s ease, border-color 0.12s ease,
               box-shadow 0.12s ease, transform 0.05s ease;
+}
+@keyframes wetmass-glow {
+  0%, 100% {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30),
+                0 0 0 1px rgba(125, 211, 252, 0.35),
+                0 0 12px rgba(56, 189, 248, 0.45),
+                0 0 22px rgba(56, 189, 248, 0.22);
+  }
+  50% {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34),
+                0 0 0 1px rgba(125, 211, 252, 0.6),
+                0 0 20px rgba(56, 189, 248, 0.8),
+                0 0 40px rgba(56, 189, 248, 0.5);
+  }
 }
 .rocket-wetmass-cell .lbl { color: #e0f2fe; }
 .rocket-wetmass-cell strong { color: #ffffff; }
@@ -1265,14 +1282,18 @@
 }
 .rocket-wetmass-cell:hover,
 .rocket-wetmass-cell:focus-visible {
-  background: linear-gradient(180deg, #38a9f0, #1d78c4);
-  border-color: #bae6fd;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28),
-              0 0 0 2px rgba(125, 211, 252, 0.55),
-              0 3px 10px rgba(8, 47, 73, 0.6);
+  background: linear-gradient(180deg, #46b6ff, #1d80d4);
+  border-color: #cdeeff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.36),
+              0 0 0 2px rgba(189, 230, 253, 0.7),
+              0 0 24px rgba(56, 189, 248, 0.9),
+              0 0 48px rgba(56, 189, 248, 0.55);
   outline: none;
 }
 .rocket-wetmass-cell:active { transform: translateY(1px); }
+@media (prefers-reduced-motion: reduce) {
+  .rocket-wetmass-cell { animation: none; }
+}
 
 /* Aqua transfer panel inside the fuel-tank modal. Only rendered
    when the rocket is parked at LEO - converts aqua 1:1 into water
