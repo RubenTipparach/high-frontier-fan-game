@@ -10936,27 +10936,28 @@ function siteSizeNumber(site) {
 
 // Land / liftoff gate for a single site given the rocket's current
 // net (band-adjusted) thrust. The rule: net thrust must strictly
-// exceed the site's size to settle onto or climb off it. When it
-// doesn't, a FACTORY at the site permits the maneuver anyway as a
-// "factory assist" - a hazard roll. A COLONY at the site waives the
-// roll. Returns:
+// exceed the site's size to settle onto or climb off it (so a size-1
+// site needs net thrust >= 2). When it doesn't, a FACTORY at the site
+// permits the maneuver anyway as a "factory assist" - a hazard roll. A
+// COLONY at the site waives the roll. The ONE exception is a Freighter
+// (M1, opts.isFreighter), which may settle onto a size-1 site even
+// under-thrust. Returns:
 //   ok        - the maneuver is allowed (true unless under-thrust
 //               with no factory to assist)
 //   assist    - true when a factory is carrying the maneuver
 //   needsRoll - true when the assist still requires a hazard roll
 //               (i.e. no colony to waive it)
 //   size      - the site size used for the comparison
-function maneuverGate(site, netThrust) {
+function maneuverGate(site, netThrust, opts = {}) {
   const size = siteSizeNumber(site);
   if (size <= 0 || netThrust > size) {
     return { ok: true, assist: false, needsRoll: false, size };
   }
-  // Rule exception: a size-1 site can always be landed on or lifted
-  // off by any rocket with an operational thruster. Operational means
-  // thrust > 0 (netThrust is the active thruster's net thrust) AND
-  // its supports satisfied (isRocketActive().active). No factory
-  // assist or roll required.
-  if (size === 1 && netThrust > 0 && isRocketActive().active) {
+  // Freighter exception (M1): a Freighter can land on / lift off a size-1
+  // site with any operational thruster, even though its net thrust does not
+  // beat the size. Ordinary spacecraft do NOT get this - they must satisfy
+  // net thrust > site size (or use a factory assist) like every other site.
+  if (size === 1 && opts.isFreighter && netThrust > 0 && isRocketActive().active) {
     return { ok: true, assist: false, needsRoll: false, size };
   }
   const factory = site && getFactory(site.id);

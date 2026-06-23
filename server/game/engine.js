@@ -1293,15 +1293,16 @@ function isCrewSlot(slot) {
   return slot.kind === 'crew' || !!CREW_BY_ID[slot.id];
 }
 // Liftoff / landing thrust gate (mirror of browse.js#maneuverGate). Net
-// thrust must exceed the site's size to lift off / land; a size-1 site is
-// always doable with any operational thruster. Otherwise a factory at the
-// site can carry the maneuver (assist) - free if a colony is present,
-// else a hazard roll. No factory + under-thrust = hard block.
+// thrust must exceed the site's size to lift off / land (a size-1 site needs
+// net thrust >= 2). Otherwise a factory at the site can carry the maneuver
+// (assist) - free if a colony is present, else a hazard roll. No factory +
+// under-thrust = hard block. ONE exception: a Freighter (M1, opts.isFreighter)
+// may settle onto a size-1 site under-thrust.
 //   -> { ok, assist, needsRoll, size }
-function maneuverGate(state, slug, thrust) {
+function maneuverGate(state, slug, thrust, opts = {}) {
   const size = nodeSizeNumber(slug);
   if (size <= 0 || thrust > size) return { ok: true, assist: false, needsRoll: false, size };
-  if (size === 1 && thrust > 0) return { ok: true, assist: false, needsRoll: false, size };
+  if (size === 1 && opts.isFreighter && thrust > 0) return { ok: true, assist: false, needsRoll: false, size };
   if (!state.factories[slug]) return { ok: false, assist: false, needsRoll: false, size };
   const colony = !!state.colonies[slug];
   return { ok: true, assist: true, needsRoll: !colony, size };
