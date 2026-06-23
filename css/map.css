@@ -7410,6 +7410,8 @@ html.battery-save *::after {
 }
 .mp-crew-draft-overlay.is-behind-wizard .mp-crew-draft-panel { display: none; }
 .mp-crew-draft-panel {
+  --modal-pad-t: 18px;
+  --modal-pad-x: 22px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -7469,6 +7471,8 @@ html.battery-save *::after {
   animation: modal-fade 0.18s ease-out;
 }
 .mp-auction-modal {
+  --modal-pad-t: 16px;
+  --modal-pad-x: 20px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -7696,14 +7700,33 @@ html.battery-save *::after {
    the overlay drops its backdrop and goes pointer-events:none so the
    player can still pan the board, inspect cards, and chat; only the
    chip itself stays clickable. Tapping the chip restores the modal. */
-.mp-modal-titlebar {
+/* Collapsible "important" modals share the same window-style title bar as
+   the other modals: a styled bar with the name on the left and the
+   controls (minimize / close) on the right, pinned to the top so it stays
+   put while the body scrolls. The container sets --modal-pad-t/x to its
+   own padding so the bar breaks out flush to the panel edges. */
+.mp-modal-titlebar,
+.mp-auction-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  padding: 5px 12px;
+  margin: calc(-1 * var(--modal-pad-t, 0px)) calc(-1 * var(--modal-pad-x, 0px)) 12px;
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border-bottom: 1px solid var(--border);
+  border-top-left-radius: inherit;
+  border-top-right-radius: inherit;
+  position: sticky;
+  top: calc(-1 * var(--modal-pad-t, 0px));
+  z-index: 6;
 }
-.mp-modal-titlebar h3 { margin: 0; margin-right: auto; }
-.mp-modal-titlebar .modal-x { position: static; flex: 0 0 auto; }
+.mp-modal-titlebar h3,
+.mp-auction-head h3 { margin: 0; margin-right: auto; }
+.mp-modal-titlebar .modal-x,
+.mp-auction-head .modal-x { position: static; flex: 0 0 auto; }
+.mp-modal-titlebar .mp-mini-btn,
+.mp-auction-head .mp-mini-btn { flex: 0 0 auto; align-self: center; }
 .mp-mini-btn {
   flex: 0 0 auto;
   width: 28px;
@@ -7803,6 +7826,8 @@ html.battery-save *::after {
   animation: modal-fade 0.18s ease-out;
 }
 .mp-first-player-modal {
+  --modal-pad-t: 18px;
+  --modal-pad-x: 22px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -8463,9 +8488,34 @@ html.battery-save *::after {
 .assembly-modal-overlay.is-minimized { background: transparent; backdrop-filter: none; pointer-events: none; }
 .assembly-modal-overlay.is-minimized .assembly-modal { display: none; }
 .assembly-modal-overlay.is-minimized .mp-mini-chip { display: none; }
-.assembly-modal { position: relative; background: var(--panel, #0c0a16); border: 1px solid var(--border, #2a2740);
+.assembly-modal { --modal-pad-t: 8px; --modal-pad-x: 18px; position: relative; background: var(--panel, #0c0a16); border: 1px solid var(--border, #2a2740);
   border-radius: 14px; width: min(900px, 96vw); max-height: 92vh; overflow: auto; margin: 2vh auto; padding: 8px 18px 18px; }
 .assembly-modal-title { margin: 0; font-size: 16px; }
+/* The title bar already names the modal, so hide the board panel's own
+   big "Sol Political Assembly / Module 0" heading inside the modal. */
+.assembly-modal .assembly-head { display: none; }
+
+/* Mobile: keep these centered "important" modals from sitting behind the
+   phone's status / URL bar. Anchor them to the top with a safe-area inset
+   and cap their height with dvh (the visible height) so the pinned title
+   bar is always on screen. */
+@media (max-width: 720px) {
+  .mp-auction-overlay,
+  .mp-first-player-overlay {
+    align-items: flex-start;
+    padding-top: calc(env(safe-area-inset-top, 0px) + 12px);
+  }
+  .mp-auction-modal,
+  .mp-first-player-modal,
+  .mp-crew-draft-panel,
+  .mp-trade-builder-modal {
+    max-height: calc(100dvh - 64px);
+  }
+  .assembly-modal {
+    margin-top: calc(env(safe-area-inset-top, 0px) + 10px);
+    max-height: 88dvh;
+  }
+}
 /* In the modal the board fills the (wide) panel, callouts and all. */
 .assembly-modal .assembly-panel { max-width: 100%; }
 .assembly-modal .assembly-panel-compact .assembly-board { max-width: 100%; }
