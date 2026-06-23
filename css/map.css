@@ -3011,21 +3011,23 @@
   position: absolute;
   top: 6px;
   right: 8px;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: none;
-  background: transparent;
-  color: var(--ink-dim);
-  font-size: 21px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: rgba(15, 16, 35, 0.9);
+  color: var(--ink);
+  font-size: 18px;
   line-height: 1;
   cursor: pointer;
   padding: 0;
-  transition: color 0.12s ease;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
-.map-popup .popup-close:hover { color: var(--ink); }
+.map-popup .popup-close:hover { background: #dc2626; color: #fff; border-color: #ef4444; }
 
 /* ===== Browse view ===== */
 
@@ -3498,35 +3500,44 @@ body:has(#view-browse:not(.hidden)) #main {
   position: relative;
 }
 
-/* Unified close: a minimal × in the popup's top-right corner. No
-   circle, box, or shadow - just a faint grey glyph that brightens on
-   hover. Shared by every popup (route / stack / card detail / turn
-   clock / manage room ...) so the close affordance reads the same
-   everywhere. Bottom "Close" text buttons remain as a fallback where
-   a modal already has one. */
+/* Unified close: an × inside a circle, pinned to the popup's top-right
+   corner. Neutral dark circle by default, fills RED on hover. Shared by
+   every popup (route / stack / card detail / turn clock / manage room
+   ...) so the close affordance reads the same everywhere and stands out
+   against any background. Bottom "Close" text buttons remain as a
+   fallback where a modal already has one. */
 .modal-x {
   position: absolute;
   top: 8px;
   right: 10px;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: none;
-  background: transparent;
-  color: var(--ink-dim);
-  font-size: 21px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: rgba(15, 16, 35, 0.9);
+  color: var(--ink);
+  font-size: 18px;
   line-height: 1;
   cursor: pointer;
   padding: 0;
   z-index: 10;
-  transition: color 0.12s ease;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 .modal-x:hover {
-  background: transparent;
-  color: var(--ink);
-  border-color: transparent;
+  background: #dc2626;
+  color: #fff;
+  border-color: #ef4444;
+}
+/* On a card-detail modal the panel box is smaller than the scaled card,
+   so pull the × out onto the card's own visual top-right corner where a
+   close badge is expected. */
+.card-modal-panel .modal-x {
+  top: -48px;
+  right: -10px;
 }
 .card-modal-card {
   transform: scale(1.6);
@@ -3924,21 +3935,23 @@ body:has(#view-browse:not(.hidden)) #main {
   position: absolute;
   top: 8px;
   right: 10px;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
-  border: none;
-  color: var(--ink-dim);
-  font-size: 21px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: rgba(15, 16, 35, 0.9);
+  color: var(--ink);
+  font-size: 18px;
   line-height: 1;
   cursor: pointer;
   padding: 0;
-  transition: color 0.12s ease;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
-.sidepanel-close:hover { color: var(--ink); }
+.sidepanel-close:hover { background: #dc2626; color: #fff; border-color: #ef4444; }
 
 .panel-pane { display: none; }
 .panel-pane.active { display: block; }
@@ -7885,18 +7898,20 @@ html.battery-save *::after {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  background: none;
-  border: none;
-  color: var(--ink-dim);
-  font-size: 21px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: rgba(15, 16, 35, 0.9);
+  color: var(--ink);
+  font-size: 18px;
   line-height: 1;
   cursor: pointer;
   padding: 0;
-  transition: color 0.12s ease;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
-.all-cards-close:hover { color: var(--ink); }
+.all-cards-close:hover { background: #dc2626; color: #fff; border-color: #ef4444; }
 .all-cards-body { overflow-y: auto; padding: 6px 16px 16px; }
 
 .all-cards-loc { padding: 10px 0; border-bottom: 1px solid #1c2440; }
