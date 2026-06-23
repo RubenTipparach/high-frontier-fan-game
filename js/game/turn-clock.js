@@ -30,10 +30,8 @@
 //
 // Layout (slot indexes):
 //   0   = new round marker (middle of Season Blue)
-//   0,2,4,6,8,10 = event slots. An event fires when the cube LANDS on
-//                  one of these (every 2 turns). One slot clockwise of
-//                  the old odd markers, so the event resolves the turn
-//                  AFTER the cube crosses the marker line, not on it.
+//   1,3,5,7,9,11 = event slots. An event fires when the cube LANDS on
+//                  one of these (every 2 turns).
 //   0..3  = Blue, 4..7 = Yellow, 8..11 = Red
 
 import { isOnline } from './online-mode.js';
@@ -58,15 +56,13 @@ export const SEASONS = [
   { name: 'red',    color: '#ef4444', from: 6,  to: 9, label: 'Season Red'   },
 ];
 export const NEW_ROUND_SLOT = 0;
-// Even slots. An event fires when the cube LANDS here; this is one slot
-// clockwise of the old odd markers [1,3,5,7,9,11], so each event now
-// resolves the turn AFTER the cube crosses its marker line (events used
-// to trigger one turn too early). Slot 0 fires on the new-round tick.
+// Odd slots. An event fires when the cube LANDS here (every 2 turns).
+// Slot 0 is the new-round tick only and carries no event.
 // Mirrored in server/game/state.js - keep both in sync.
-export const EVENT_SLOTS = [0, 2, 4, 6, 8, 10];
+export const EVENT_SLOTS = [1, 3, 5, 7, 9, 11];
 
 // Verbatim HF4 Sunspot-Cube event table. Triggered each time the
-// cube lands on an event slot (0, 2, 4, 6, 8, 10); the
+// cube lands on an event slot (1, 3, 5, 7, 9, 11); the
 // player rolls 1d6 and consults this table. For rolls 1-4 the
 // event is universal; for 5-6 the effect depends on the current
 // season (Blue / Yellow / Red). The text below is reproduced from
