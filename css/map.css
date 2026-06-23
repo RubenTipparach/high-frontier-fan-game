@@ -1263,7 +1263,10 @@
   transition: background 0.1s ease, border-color 0.1s ease,
               box-shadow 0.1s ease, transform 0.06s ease;
 }
-.rocket-totals-cell.rocket-wetmass-cell .lbl { color: #ffffff; text-shadow: 0 1px 1px rgba(2, 28, 58, 0.55); }
+.rocket-totals-cell.rocket-wetmass-cell .lbl {
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgba(2, 20, 50, 0.85), 0 2px 4px rgba(2, 20, 50, 0.55);
+}
 .rocket-totals-cell.rocket-wetmass-cell strong { color: #ffffff; text-shadow: 0 1px 2px rgba(2, 28, 58, 0.6); }
 .rocket-totals-cell.rocket-wetmass-cell strong small { color: #e8f6ff; }
 .rocket-totals-cell.rocket-wetmass-cell .cell-eqn { color: #e3f3ff; }
