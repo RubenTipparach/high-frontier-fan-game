@@ -9265,8 +9265,19 @@ function openRocketStackModal() {
   xBtn.className = 'modal-x';
   xBtn.textContent = '×';
   xBtn.title = 'Close (Esc)';
+  xBtn.setAttribute('aria-label', 'Close');
   xBtn.addEventListener('click', close);
-  panel.appendChild(xBtn);
+
+  // Window-style title bar: modal name on the left, close × on the
+  // right. Stays pinned at the panel top while the body scrolls.
+  const header = document.createElement('div');
+  header.className = 'modal-header';
+  const titleEl = document.createElement('h2');
+  titleEl.className = 'modal-title';
+  titleEl.textContent = '🚀 Rocket Stack';
+  header.appendChild(titleEl);
+  header.appendChild(xBtn);
+  panel.appendChild(header);
 
   // Transient selection set for the Transfer section. Cards
   // marked here can be shipped to a colocated stack (LEO if
@@ -9469,7 +9480,6 @@ function openRocketStackModal() {
       ${glitchBanner}
       <div class="rocket-stack-header">
         <div class="rocket-stack-title-row">
-          <h2 class="rocket-stack-title">🚀 LEO Rocket</h2>
           <div class="rocket-stack-locate">
             <button type="button" class="popup-btn popup-btn-secondary"
               id="rocket-find" ${hereDisabled}
