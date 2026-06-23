@@ -1212,13 +1212,19 @@ function activeNetThrust(rocket, powersat = false) {
   // Solar-driven thrusters shift by the rocket's current zone modifier; a
   // null-solar zone (Neptune outward) kills solar thrust entirely.
   let solarDriven = faceHasSolar(f);
-  if (!solarDriven && (f.requires || []).some((r) => (r.kind || r) === 'gen-electric')) {
-    for (const s of rocket.stack) {
-      if (s.id === tid) continue;
-      const c = PATENTS_BY_ID[s.id];
-      if (!c) continue;
-      const cf = slotFace(s, c);
-      if (faceHasSolar(cf) && (cf.supplies || []).includes('gen-electric')) { solarDriven = true; break; }
+  if (!solarDriven) {
+    // Mirror of rocket.js: the thruster runs on solar only if the generator
+    // actually feeding its electric power in the RESOLVED chain is a solar
+    // generator. Scanning the whole stack was the bug (an idle solar generator
+    // that powers nothing flipped a thruster wired to a non-solar generator).
+    const elecEdge = chain.edges.find((e) => e.from === tid && (e.kinds || []).includes('gen-electric'));
+    if (elecEdge) {
+      const s = rocket.stack.find((x) => x.id === elecEdge.to);
+      const c = s && PATENTS_BY_ID[s.id];
+      if (c) {
+        const cf = slotFace(s, c);
+        if (faceHasSolar(cf) && (cf.supplies || []).includes('gen-electric')) solarDriven = true;
+      }
     }
   }
   if (solarDriven) {
@@ -3104,10 +3110,22 @@ function applyDirtRefuel(state, op, player) {
   const room = cap - tank;
   if (room <= 0) return fail('tank_full');
   const want = Number(op && op.amount);
-  const gain = Number.isFinite(want) && want > 0 ? Math.min(want, room) : room;
+  let gain = Number.isFinite(want) && want > 0 ? Math.min(want, room) : room;
+  // A CREW dirt thruster scoops only 1 dirt FT per turn; a card dirt thruster
+  // scoops as much as the tank holds, any number of times. Track the crew load
+  // per turn (reset in openTurnFor, replayed correctly on undo like
+  // refueledSites) and cap the cumulative crew scoop at 1.
+  const isCrewBurner = !!CREW_BY_ID[slot.id];
+  if (isCrewBurner) {
+    const already = Number(player.dirtTanksThisTurn) || 0;
+    const allowance = Math.max(0, 1 - already);
+    if (allowance <= 0) return fail('dirt_crew_cap');
+    gain = Math.min(gain, allowance);
+  }
   if (gain <= 0) return fail('tank_full');
   player.rocket.tank = round6(tank + gain);
   player.rocket.tankGrade = 'dirt';
+  if (isCrewBurner) player.dirtTanksThisTurn = (Number(player.dirtTanksThisTurn) || 0) + gain;
   return {
     ok: true, state,
     log: `${player.name} loaded +${round6(gain)} dirt FT${gain === 1 ? '' : 's'} (tank ${round6(player.rocket.tank)} dirt).`,
@@ -4130,7 +4148,8 @@ function applyAuctionSell(state, op, ctx) {
     if (!winner) return fail('winner_gone');
     price = high;
   }
-  if ((winner.hand || []).length >= AUCTION_HAND_LIMIT) return fail('hand_limit');
+  // Skunkworks (Shimizu) ignores the academia hand limit when taking the lot.
+  if ((winner.hand || []).length >= AUCTION_HAND_LIMIT && !hasPrivilege(state, winner, 'SKUNKWORKS')) return fail('hand_limit');
   if (winner.aqua < price) return fail('winner_cannot_pay');
 
   if (winner.profileId === a.auctioneerId) {

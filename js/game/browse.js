@@ -1327,10 +1327,24 @@ function syncMpTurnBanner(snapshot) {
   banner.hidden = false;
 }
 
+// Does a given player hold a privilege key? Mirror of the server's
+// hasPrivilege: their faction power (suspended during Anarchy) OR a permanent
+// grant OR a borrowed ability (neither suspended by Anarchy). Reads the
+// snapshot, so it works for any seat, not just mine.
+function playerHasPrivilege(player, key) {
+  if (!player || !key) return false;
+  if (!isAnarchy() && factionAbilityOf(player) === key) return true;
+  if (Array.isArray(player.grantedPrivileges) && player.grantedPrivileges.includes(key)) return true;
+  return Array.isArray(player.borrowedAbilities)
+    && player.borrowedAbilities.some((g) => g && g.ability === key);
+}
+
 // A player at the hand limit can't take the lot, so the server
 // auto-passes them: they never owe an action and never block the close.
 // Hands are open info in the snapshot, so this reads for any seat.
+// Skunkworks (Shimizu) ignores the academia hand limit, so it's never full.
 function auctionHandFull(player) {
+  if (playerHasPrivilege(player, 'SKUNKWORKS')) return false;
   return !!player && Array.isArray(player.hand) && player.hand.length >= AUCTION_HAND_LIMIT;
 }
 
@@ -3139,7 +3153,7 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   if (iAutoPassed) {
     // Out for the lot - the banner above says so; offer no bid/pass
     // controls (a fresh lot resets this).
-  } else if (myHandCount >= AUCTION_HAND_LIMIT) {
+  } else if (myHandFull) {
     host.appendChild(noteEl(`Hand full (${myHandCount}/${AUCTION_HAND_LIMIT}) - you're auto-passed and can't take this lot. Build or transfer cards first.`));
   } else {
     const row = document.createElement('div');
@@ -5117,6 +5131,7 @@ function humanizeOnlineOpError(code, detail) {
     not_at_site: 'Park at a site first - dirt comes from the ground.',
     dirt_needs_mooncable: 'Taking on dirt at LEO needs the moon cable (a NASRDA crew card aboard). Scoop at a site instead.',
     dirt_needs_isru: 'Scooping dirt needs an ISRU source here: a factory at this site, or an ISRU platform aboard.',
+    dirt_crew_cap: 'A crew dirt thruster scoops only 1 dirt FT per turn - you have already loaded it this turn.',
     not_water_fuel: 'Dirt has no cash value - only water converts back to aqua.',
     no_thruster: 'Activate a thruster first.',
     not_in_outpost: 'That card is not in the outpost.',
@@ -13363,13 +13378,23 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   // can be both the active prospector AND the active thruster; it must be the
   // active THRUSTER to scoop.)
   if (isDirt && dirtSection) dirtSection.hidden = false;
+  // A CREW dirt thruster scoops only 1 dirt FT per turn; a card dirt thruster
+  // scoops as much as the tank holds, any number of times. Mirror of the
+  // server's applyDirtRefuel cap, keyed off the active thruster being a crew
+  // card (the engine doing the scooping). The per-turn tally reads the snapshot
+  // online and the local turn-stamp solo (dirtTanksLoadedThisTurn).
+  const crewDirtBurner = activeDirt && !!CREW_BY_ID[getActiveThrusterId()];
+  const dirtAllowance = (room) => {
+    if (!crewDirtBurner) return room;
+    return Math.max(0, Math.min(room, 1 - dirtTanksLoadedThisTurn()));
+  };
   function refreshDirtButtons() {
     if (!dirtSection || dirtSection.hidden) return;
     const cur = getTankWater();
     const room = Math.max(0, cap - cur);
-    // Dirt refuel is a FREE action with NO per-turn cap: the only limit is tank
-    // room. Load as much as fits, any number of times this turn.
-    const fillable = room;
+    // Load as much as fits (card dirt thruster) or just the 1-FT-per-turn crew
+    // allowance, any number of times this turn while room remains.
+    const fillable = dirtAllowance(room);
     const blocked = !activeDirt || !canScoopDirt || fillable < 1;
     if (dirtFill1)   dirtFill1.disabled   = blocked;
     if (dirtFill5)   dirtFill5.disabled   = blocked || fillable < 5;
@@ -13394,7 +13419,11 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
                 : 'Scooping dirt needs an ISRU source here: a factory at this site, or an ISRU platform (an ISRU-rated card) aboard.')
           : room < 1
             ? 'Tank is full.'
-            : 'Scoop as much dirt as the tank holds - it\'s free and unlimited per turn. No aqua value; dirt can\'t mix with water or be transferred.';
+            : (crewDirtBurner && dirtTanksLoadedThisTurn() >= 1)
+              ? 'A crew dirt thruster scoops only 1 dirt FT per turn - you have already loaded it this turn.'
+              : crewDirtBurner
+                ? 'A crew dirt thruster scoops just 1 dirt FT per turn. No aqua value; dirt can\'t mix with water or be transferred.'
+                : 'Scoop as much dirt as the tank holds - it\'s free and unlimited per turn. No aqua value; dirt can\'t mix with water or be transferred.';
     }
   }
   refreshDirtButtons();
@@ -13404,11 +13433,12 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     const cur = getTankWater();
     if (cur > 0 && getTankGrade() === 'water') { refreshDirtButtons(); return; }
     const room = Math.max(0, cap - cur);
-    const fillable = room;
+    const fillable = dirtAllowance(room);
     if (fillable < 1) { refreshDirtButtons(); return; }
     const want = amount > 0 ? Math.min(amount, fillable) : fillable;
     // Online: the server validates the active dirt thruster + grade + scoop
-    // location and fills; the snapshot repaints the grey tank.
+    // location and fills (and enforces the crew 1-FT-per-turn cap); the
+    // snapshot repaints the grey tank and the per-turn tally.
     if (_online) {
       const ok = await submitOnlineOp({ kind: 'DIRT_REFUEL', amount: want });
       if (!ok) { refreshDirtButtons(); return; }
@@ -13417,6 +13447,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     }
     setTankGrade('dirt');
     addFuel(want);
+    if (crewDirtBurner) markDirtRefueledThisTurn();
     animateTankLevel();
     logAction({
       type: 'dirt_refuel', icon: '🟤',

@@ -1371,16 +1371,21 @@ export function getActiveThrusterStats() {
   // Uranus (Neptune outward, solar=null) the solar drive goes inert.
   let solarDriven = faceHasSolar(f);
   let solarSource = solarDriven ? card.name : null;
-  if (!solarDriven && (f.requires || []).some((r) => (r.kind || r) === 'gen-electric')) {
-    for (const slot of _stack) {
-      if (slot.id === id) continue;
-      const c = cardForSlot(slot);
-      if (!c) continue;
-      const cf = installedFace(slot);
-      if (faceHasSolar(cf) && (cf.supplies || []).includes('gen-electric')) {
+  if (!solarDriven) {
+    // The thruster runs on solar only if the generator actually feeding its
+    // electric power in the RESOLVED chain is a solar generator. Scanning the
+    // whole stack was the bug: an idle solar generator that powers nothing in
+    // the chain (the thruster wired to a different, non-solar generator) must
+    // not flip the thruster to solar-driven. Read the chosen gen-electric
+    // supplier off the chain edge from this thruster, then confirm it's solar.
+    const elecEdge = chain.edges.find((e) => e.from === id && (e.kinds || []).includes('gen-electric'));
+    if (elecEdge) {
+      const sslot = _stack.find((s) => s.id === elecEdge.to);
+      const sc = sslot ? cardForSlot(sslot) : cardById(elecEdge.to);
+      const scf = sslot ? installedFace(sslot) : (sc ? activeFace(sc) : null);
+      if (sc && scf && faceHasSolar(scf) && (scf.supplies || []).includes('gen-electric')) {
         solarDriven = true;
-        solarSource = c.name;
-        break;
+        solarSource = sc.name;
       }
     }
   }
