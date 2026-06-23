@@ -3009,17 +3009,21 @@
 }
 .map-popup .popup-close {
   position: absolute;
-  top: 4px;
-  right: 6px;
-  width: 22px;
-  height: 22px;
+  top: 6px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: none;
   background: transparent;
-  color: var(--ink-mute);
-  font-size: 18px;
+  color: var(--ink-dim);
+  font-size: 21px;
   line-height: 1;
   cursor: pointer;
   padding: 0;
+  transition: color 0.12s ease;
 }
 .map-popup .popup-close:hover { color: var(--ink); }
 
@@ -3494,31 +3498,35 @@ body:has(#view-browse:not(.hidden)) #main {
   position: relative;
 }
 
-/* × close button in the modal's top-right corner. Replaces the
-   explicit text "Close" / "Cancel" that used to crowd the
-   action row, leaving the actions row for the primary verbs
-   (Discard / Exo produce / Add to LEO stack / Add to hand). */
+/* Unified close: a minimal × in the popup's top-right corner. No
+   circle, box, or shadow - just a faint grey glyph that brightens on
+   hover. Shared by every popup (route / stack / card detail / turn
+   clock / manage room ...) so the close affordance reads the same
+   everywhere. Bottom "Close" text buttons remain as a fallback where
+   a modal already has one. */
 .modal-x {
   position: absolute;
-  top: -8px;
-  right: -8px;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  font-size: 22px;
+  top: 8px;
+  right: 10px;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: 21px;
   line-height: 1;
-  background: rgba(15, 16, 35, 0.92);
-  color: var(--ink);
-  border: 1px solid var(--border);
   cursor: pointer;
   padding: 0;
   z-index: 10;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+  transition: color 0.12s ease;
 }
 .modal-x:hover {
-  background: #b91c1c;
-  color: #fff;
-  border-color: #7f1d1d;
+  background: transparent;
+  color: var(--ink);
+  border-color: transparent;
 }
 .card-modal-card {
   transform: scale(1.6);
@@ -3914,14 +3922,21 @@ body:has(#view-browse:not(.hidden)) #main {
 
 .sidepanel-close {
   position: absolute;
-  top: 6px;
-  right: 8px;
+  top: 8px;
+  right: 10px;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   border: none;
   color: var(--ink-dim);
-  font-size: 22px;
+  font-size: 21px;
   line-height: 1;
-  padding: 2px 6px;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.12s ease;
 }
 .sidepanel-close:hover { color: var(--ink); }
 
@@ -4577,6 +4592,8 @@ html.battery-save *::after {
     height: 40px;
     font-size: 26px;
     z-index: 120;
+    border-radius: 50%;
+    color: var(--ink);
     background: rgba(15, 16, 35, 0.96);
     border: 1px solid rgba(120, 130, 170, 0.7);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.55);
@@ -7865,15 +7882,21 @@ html.battery-save *::after {
 .all-cards-head h3 { margin: 0; font-size: 16px; color: #e6e9ff; }
 .all-cards-head .muted { font-size: 12px; font-weight: 400; color: #8b90b8; margin-left: 6px; }
 .all-cards-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
   background: none;
   border: none;
-  color: #9aa0c4;
-  font-size: 22px;
+  color: var(--ink-dim);
+  font-size: 21px;
   line-height: 1;
   cursor: pointer;
-  padding: 0 4px;
+  padding: 0;
+  transition: color 0.12s ease;
 }
-.all-cards-close:hover { color: #fff; }
+.all-cards-close:hover { color: var(--ink); }
 .all-cards-body { overflow-y: auto; padding: 6px 16px 16px; }
 
 .all-cards-loc { padding: 10px 0; border-bottom: 1px solid #1c2440; }
