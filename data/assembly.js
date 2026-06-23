@@ -105,6 +105,28 @@ export function freshAssembly() {
   for (const place of ASSEMBLY_PLACES) { delegates[place] = {}; seniority[place] = 0; }
   return { delegates, seniority };
 }
+// Seat (or re-seat) a player's SINGLE starting delegate in the ideology that
+// matches their faction / seat colour - colour IS ideology, so the cube's
+// colour lines up with the zone it sits in. Clears any delegate that player
+// already has on the board first (so a re-pick moves the cube rather than
+// adding a second), then drops one cube in the colour's ideology. Falls back to
+// `fallbackIdeology` when the colour has no mapping. Returns the ideology key
+// used, or null if nothing could be seated. Single source of truth for "where
+// does a player's opening cube start": both createInitialState
+// (server/game/state.js) and PICK_CREW (server/game/engine.js) call it.
+export function seatStartingDelegate(assembly, profileId, color, fallbackIdeology = null) {
+  if (!assembly || !profileId) return null;
+  const ide = ideologyForFactionColor(color) || fallbackIdeology;
+  if (!ide) return null;
+  for (const place of ASSEMBLY_PLACES) {
+    const m = assembly.delegates[place];
+    if (m && m[profileId] != null) delete m[profileId];
+  }
+  assembly.delegates[ide] = assembly.delegates[ide] || {};
+  assembly.delegates[ide][profileId] = 1;
+  return ide;
+}
+
 // Seniority discs sitting in a place (neutral; not owned by any player).
 export function seniorityInPlace(assembly, place) {
   return ((assembly && assembly.seniority && assembly.seniority[place]) | 0);

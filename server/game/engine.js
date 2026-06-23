@@ -53,7 +53,7 @@ import {
   activeLaws, freshAssembly, ASSEMBLY_PLACES, IDEOLOGY_ORDER,
   delegatesRemaining, playerDelegatesInPlace, playerDelegatesPlaced,
   seniorityInPlace, finalVote, IDEOLOGY_BY_KEY, adjacentPlaces,
-  ideologyForFactionColor, voteWinners,
+  voteWinners, seatStartingDelegate,
 } from '../../data/assembly.js';
 // Movement + metadata both come from the planner graph (the vendor
 // mission-planner data the client also uses). siteBySlug layers the
@@ -4578,20 +4578,16 @@ function applyPickCrew(state, op, ctx) {
   // way round). Since each card is claimed by one player, seat colours stay
   // unique.
   if (card.color) player.color = card.color;
-  // SOLO M0: a faction's colour IS its ideology, so seat the player's starting
-  // delegate in the matching ideology (multiplayer keeps the random seat-order
-  // ideology assigned at setup). The faction is chosen here, AFTER createInitial
-  // State placed the seat-order cube, so move it; a re-pick moves it again.
-  if (state.m0 && state.players.length === 1) {
-    const ide = ideologyForFactionColor(card.color);
+  // M0: a faction's colour IS its ideology, so seat the player's starting
+  // delegate in the matching ideology - the cube's colour lines up with the
+  // zone it sits in. createInitialState already seated by the seat colour, but
+  // re-seat here off the actually-picked card colour so a re-pick (solo can pick
+  // any colour; multiplayer is colour-locked) moves the cube to the right spot.
+  if (state.m0) {
+    const asm = state.assembly || (state.assembly = freshAssembly());
+    const prev = state.homeIdeology && state.homeIdeology[player.profileId];
+    const ide = seatStartingDelegate(asm, player.profileId, card.color, prev);
     if (ide) {
-      const asm = state.assembly || (state.assembly = freshAssembly());
-      for (const place of ASSEMBLY_PLACES) {
-        if (playerDelegatesInPlace(asm, place, player.profileId) > 0) {
-          setPlaceCount(asm, place, player.profileId, 0);
-        }
-      }
-      setPlaceCount(asm, ide, player.profileId, 1);
       state.homeIdeology = state.homeIdeology || {};
       state.homeIdeology[player.profileId] = ide;
     }

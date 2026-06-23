@@ -38,7 +38,7 @@
 
 import { PATENTS } from '../../data/patents.js';
 import { CREW } from '../../data/crew.js';
-import { freshAssembly, IDEOLOGY_ORDER } from '../../data/assembly.js';
+import { freshAssembly, IDEOLOGY_ORDER, seatStartingDelegate } from '../../data/assembly.js';
 import { makeRng, shuffle } from './rng.js';
 // (startSiteId import dropped: the rocket now opens at LEO, siteId null.)
 
@@ -241,15 +241,18 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
   // so on, wrapping past 6). Leaves DELEGATES_PER_PLAYER-1 in hand.
   const assembly = m0 ? freshAssembly() : null;
   // Each player's HOME ideology - where their starting delegate sits and the one
-  // space a new delegate may always be placed on (Fundraise rule). Multiplayer
-  // assigns it randomly by shuffled seat order; SOLO overrides it to the picked
-  // faction's colour-ideology in applyPickCrew. Keyed by profileId.
+  // space a new delegate may always be placed on (Fundraise rule). A faction's
+  // colour IS its ideology, so the opening cube starts in the ideology matching
+  // the player's seat colour (the same colour they'll pick crew in), keeping the
+  // cube colour aligned with the zone it sits in. The seat-order ideology is
+  // only a fallback if a colour has no mapping. PICK_CREW re-seats via the same
+  // helper. Keyed by profileId.
   const homeIdeology = {};
   if (assembly) {
     ordered.forEach((p, i) => {
-      const ide = IDEOLOGY_ORDER[i % IDEOLOGY_ORDER.length];
-      assembly.delegates[ide][p.profileId] = 1;
-      homeIdeology[p.profileId] = ide;
+      const color = palette[i % palette.length];
+      const fallback = IDEOLOGY_ORDER[i % IDEOLOGY_ORDER.length];
+      homeIdeology[p.profileId] = seatStartingDelegate(assembly, p.profileId, color, fallback);
     });
   }
   return {

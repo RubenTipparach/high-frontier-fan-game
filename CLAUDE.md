@@ -986,10 +986,15 @@ produce a log line that lands in it. This is not console logging - a
   `#c01f6e` = Freedom; gold = Unity; mauve = Authority; mint = Equality; grey
   = Individuality; cream/silver = Honor). The canonical map lives in
   `data/assembly.js` (`IDEOLOGY_BY_FACTION_COLOR` / `ideologyForFactionColor`).
-  Used in SOLO to seat the starting delegate in the picked faction's ideology
-  (multiplayer assigns the starting ideology randomly by shuffled seat order).
-  This colour=ideology pairing recurs in later modules - reuse the same map,
-  don't re-derive it.
+  Used to seat every player's starting delegate in the ideology matching their
+  seat/faction colour, so the cube's colour lines up with the zone it sits in -
+  in BOTH solo AND multiplayer (the old "multiplayer seats randomly by seat
+  order" behaviour was the cube-colour-mismatch bug and is gone; seat order is
+  only a fallback when a colour has no mapping). The single seating helper is
+  `data/assembly.js#seatStartingDelegate`, called by `createInitialState`
+  (server/game/state.js) at setup and by `PICK_CREW` (server/game/engine.js) on
+  (re)pick. This colour=ideology pairing recurs in later modules - reuse the
+  same map, don't re-derive it.
 - **Player names track the player's seat colour.** Every render
   of `@<name>` in the multiplayer UI tints the text in that
   player's server-assigned seat colour (the same six crew-card
