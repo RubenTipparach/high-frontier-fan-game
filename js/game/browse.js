@@ -1552,6 +1552,35 @@ function renderOnlineAuction(auction) {
     lotHost.appendChild(sec);
   }
 
+  // Next-up preview: the card waiting at the top of the CHOSEN deck. The lot
+  // was drawn off that deck's top when the auction opened, so peekTop now
+  // points at the very next card that will be auctioned from this deck. Only
+  // the chosen deck reveals its next card - the support (bonus) decks never
+  // preview what sits behind their bonus cards.
+  if (lot) {
+    const nextId = peekTop(auction.deckType);
+    const nextCard = nextId ? cardById(nextId) : null;
+    const nsec = document.createElement('div');
+    nsec.className = 'mp-auction-next';
+    const nlabel = document.createElement('div');
+    nlabel.className = 'mp-auction-next-label';
+    nlabel.textContent = 'Next up';
+    nsec.appendChild(nlabel);
+    if (nextCard) {
+      const nrow = document.createElement('div');
+      nrow.className = 'mp-auction-next-card';
+      try { nrow.appendChild(renderCard(nextCard, { type: 'patent' })); }
+      catch { nrow.textContent = nextCard.name || nextId; }
+      nsec.appendChild(nrow);
+    } else {
+      const none = document.createElement('div');
+      none.className = 'mp-auction-next-none muted';
+      none.textContent = 'This deck is empty - no card waiting.';
+      nsec.appendChild(none);
+    }
+    lotHost.appendChild(nsec);
+  }
+
   // Every player's standing bid is public now (incl. the auctioneer's),
   // so render the full table - amount, the top marker, who passed, and
   // who still has to act - each tinted with its seat colour.

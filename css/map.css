@@ -7424,6 +7424,31 @@ html.battery-save *::after {
   transform-origin: top center;
   margin-bottom: -96px;
 }
+/* "Next up" preview: a peek at the top card of the chosen deck (the card that
+   will be auctioned next). Scaled + dimmed so it reads as a coming-soon peek,
+   not part of the current lot. Only the chosen deck previews its next card. */
+.mp-auction-next {
+  width: 100%;
+  border-top: 1px dashed var(--line, #2a2f4a);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.mp-auction-next-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--muted, #9aa0c0);
+}
+.mp-auction-next-card { flex: 0 0 auto; display: flex; justify-content: center; opacity: 0.78; }
+.mp-auction-next-card .card {
+  transform: scale(0.62);
+  transform-origin: top center;
+  margin-bottom: -96px;
+}
 /* Clickable card name inside a mission-log line: looks like a link, not
    a button, but stays keyboard-focusable. */
 .mp-log-cardlink {
