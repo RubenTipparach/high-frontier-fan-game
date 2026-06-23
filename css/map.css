@@ -695,9 +695,19 @@
 .turn-clock-overlay { z-index: 60; }
 .event-legend-overlay { z-index: 90; }
 /* Fuel-tank modal: SVG cylinder with rising water level. */
-.fuel-tank-overlay { z-index: 75; }
+/* Scroll the whole overlay when the panel is taller than the viewport (it is
+   on mobile, where the columns stack). margin:auto on the panel centres it
+   when it fits and collapses to a top-aligned, scrollable layout when it does
+   not - so the title + × close button up top stay reachable instead of being
+   pushed off-screen by flex centring. */
+.fuel-tank-overlay {
+  z-index: 75;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
 .fuel-tank-panel {
   position: relative;
+  margin: auto;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 14px;
