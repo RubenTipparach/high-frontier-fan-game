@@ -3549,7 +3549,7 @@ body:has(#view-browse:not(.hidden)) #main {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 11px 14px;
+  padding: 5px 12px;
   /* Break out of any container padding so the bar sits flush at the
      panel's top + side edges. A panel with padding sets --modal-pad-t /
      --modal-pad-x to its own padding; a padding-free panel (rocket stack)
@@ -3562,7 +3562,7 @@ body:has(#view-browse:not(.hidden)) #main {
 }
 .modal-title {
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 800;
   letter-spacing: 0.5px;
   color: var(--ink);
@@ -3579,6 +3579,9 @@ body:has(#view-browse:not(.hidden)) #main {
   top: auto;
   right: auto;
   flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  font-size: 16px;
   box-shadow: none;
 }
 
@@ -4645,12 +4648,12 @@ html.battery-save *::after {
      safe-area inset so the "Rocket Stack" header isn't jammed against the
      screen edge. The close × rides the bar with a bigger tap target. */
   .rocket-stack-panel .modal-header {
-    padding-top: calc(env(safe-area-inset-top, 0px) + 12px);
+    padding-top: calc(env(safe-area-inset-top, 0px) + 7px);
   }
   .rocket-stack-panel .modal-header .modal-x {
-    width: 38px;
-    height: 38px;
-    font-size: 24px;
+    width: 30px;
+    height: 30px;
+    font-size: 19px;
   }
   .rocket-stack-body {
     padding: 14px 12px 16px;
@@ -6002,11 +6005,12 @@ html.battery-save *::after {
 .stack-inspector-head {
   flex: 0 0 auto;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
 .stack-inspector-head h3 { margin: 0; font-size: 18px; letter-spacing: 0.5px; }
+.stack-inspector-head .modal-x { position: static; margin-left: auto; }
 .stack-inspector-loc {
   font-size: 12px;
   color: var(--muted, #94a3b8);
@@ -7698,7 +7702,8 @@ html.battery-save *::after {
   justify-content: space-between;
   gap: 8px;
 }
-.mp-modal-titlebar h3 { margin: 0; }
+.mp-modal-titlebar h3 { margin: 0; margin-right: auto; }
+.mp-modal-titlebar .modal-x { position: static; flex: 0 0 auto; }
 .mp-mini-btn {
   flex: 0 0 auto;
   width: 28px;
@@ -8174,6 +8179,8 @@ html.battery-save *::after {
 
 /* ----- Draft-start mode: the deck market modal ----- */
 .draft-market-panel {
+  --modal-pad-t: 18px;
+  --modal-pad-x: 20px;
   background: var(--panel, #0f1b2e);
   border: 1px solid var(--border, #26405f);
   border-radius: 14px;
@@ -8184,6 +8191,12 @@ html.battery-save *::after {
   overflow-y: auto;
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
   color: var(--ink, #e6eefc);
+}
+/* Title bar stays pinned while the deck list scrolls under it. */
+.draft-market-panel .modal-header {
+  position: sticky;
+  top: calc(-1 * var(--modal-pad-t));
+  z-index: 5;
 }
 .draft-market-head h2 { margin: 0 0 4px; font-size: 20px; }
 .draft-market-head p { margin: 0 0 12px; }
@@ -8294,7 +8307,9 @@ html.battery-save *::after {
   color: var(--ink);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
 }
+.mp-trade-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .mp-trade-head h3 { margin: 0 0 10px; font-size: 18px; letter-spacing: 0.5px; }
+.mp-trade-head .modal-x { position: static; flex: 0 0 auto; margin-bottom: 10px; }
 .mp-trade-field { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 6px 0; }
 .mp-trade-field span { font-size: 13px; color: var(--ink-dim, #8b90b8); }
 .mp-trade-field input, .mp-trade-field select { width: 140px; }

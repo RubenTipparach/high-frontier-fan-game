@@ -1036,10 +1036,20 @@ function openDraftMarketModal() {
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   const panel = document.createElement('div');
   panel.className = 'draft-market-panel';
+  const header = document.createElement('div');
+  header.className = 'modal-header';
+  header.innerHTML = '<h2 class="modal-title">🃏 Draft a card</h2>';
+  const xBtn = document.createElement('button');
+  xBtn.type = 'button';
+  xBtn.className = 'modal-x';
+  xBtn.textContent = '×';
+  xBtn.setAttribute('aria-label', 'Close');
+  xBtn.addEventListener('click', close);
+  header.appendChild(xBtn);
+  panel.appendChild(header);
   const head = document.createElement('div');
   head.className = 'draft-market-head';
-  head.innerHTML = `<h2>🃏 Draft a card</h2>
-    <p class="muted">${myTurn
+  head.innerHTML = `<p class="muted">${myTurn
       ? (cycled
           ? 'Take the top card of any deck (free). You\'ve used your cycle this turn.'
           : 'Take the top card of any deck (free), or cycle one deck once to reveal its next card.')
@@ -1114,11 +1124,6 @@ function openDraftMarketModal() {
     list.appendChild(row);
   }
   panel.appendChild(list);
-  const foot = document.createElement('div');
-  foot.className = 'draft-market-foot';
-  foot.innerHTML = '<button type="button" class="modal-btn draft-market-close">Close</button>';
-  foot.querySelector('.draft-market-close').addEventListener('click', close);
-  panel.appendChild(foot);
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
 }
@@ -3632,6 +3637,7 @@ function openAssemblyModal(mode = 'view') {
         <div class="mp-modal-titlebar">
           <h3 class="assembly-modal-title">🏛 Sol Political Assembly</h3>
           <button type="button" class="mp-mini-btn" title="Minimize" aria-label="Minimize">&minus;</button>
+          <button type="button" class="modal-x assembly-close-x" title="Close" aria-label="Close">×</button>
         </div>
         <div class="assembly-modal-body"></div>
       </div>
@@ -3639,6 +3645,7 @@ function openAssemblyModal(mode = 'view') {
         🏛 Assembly <span class="mp-mini-chip-meta"></span>
       </button>`;
     overlay.querySelector('.mp-mini-btn').addEventListener('click', () => { _assemblyMin = true; refreshAssemblyModal(); });
+    overlay.querySelector('.assembly-close-x').addEventListener('click', closeAssemblyModal);
     overlay.querySelector('.mp-mini-chip').addEventListener('click', () => { _assemblyMin = false; setMpTurnAction('assembly', null); refreshAssemblyModal(); });
     overlay.addEventListener('click', (e) => { if (e.target === overlay && _assemblyMode === 'view') closeAssemblyModal(); });
     document.addEventListener('keydown', assemblyModalKey);
@@ -3730,7 +3737,6 @@ function renderAssemblyView(body, snapshot) {
   } else if (lobbyMode) {
     btns.append(mkBtn('↩ Done', 'modal-btn', () => { _assemblyMode = 'view'; refreshAssemblyModal(); }));
   }
-  btns.append(mkBtn('Close', 'modal-btn', closeAssemblyModal));
   body.appendChild(btns);
 }
 // Click a delegate to Lobby that ideology (server LOBBY: 1 aqua + discard, only
@@ -4678,8 +4684,10 @@ function openCubeBreakdownModal(p, snapshot) {
   };
   const head = document.createElement('div');
   head.className = 'mp-trade-head';
-  head.innerHTML = `<h3>🧊 ${esc(p.name)}'s cubes - ${used}/${FACTORY_CUBES} in play (${free} free)</h3>`;
+  head.innerHTML = `<h3>🧊 ${esc(p.name)}'s cubes - ${used}/${FACTORY_CUBES} in play (${free} free)</h3>`
+    + '<button type="button" class="modal-x mp-trade-close" aria-label="Close">×</button>';
   modal.appendChild(head);
+  head.querySelector('.mp-trade-close').addEventListener('click', close);
   const list = document.createElement('div');
   list.className = 'mp-relocate-list';
   if (!items.length) {
@@ -4701,13 +4709,6 @@ function openCubeBreakdownModal(p, snapshot) {
     }
   }
   modal.appendChild(list);
-  const btns = document.createElement('div');
-  btns.className = 'mp-trade-btns';
-  const ok = document.createElement('button');
-  ok.type = 'button'; ok.className = 'modal-btn'; ok.textContent = 'Close';
-  ok.addEventListener('click', close);
-  btns.appendChild(ok);
-  modal.appendChild(btns);
   back.appendChild(modal);
   back.addEventListener('click', (e) => { if (e.target === back) close(); });
   document.body.appendChild(back);
@@ -6321,6 +6322,7 @@ function openUnifiedStackInspector(stackId) {
       <div class="stack-inspector-head">
         <h3>${headline}</h3>
         <span class="stack-inspector-loc">${esc(locLabel)}</span>
+        <button type="button" class="modal-x stack-inspector-close" aria-label="Close" title="Close">×</button>
       </div>
       <div class="stack-inspector-body">
         ${statsHtml}
@@ -6346,7 +6348,6 @@ function openUnifiedStackInspector(stackId) {
           ${outpostPumpBtnHtml(stackId)}
           ${outpostFillBtnHtml(stackId)}
           ${outpostDissolveBtnHtml(stackId)}
-          <button type="button" class="modal-btn stack-inspector-close">Close</button>
         </div>
       </div>
     `;
@@ -6610,6 +6611,7 @@ function openEmptyOutpostModal(letter) {
   dialog.innerHTML = `
     <div class="stack-inspector-head">
       <h3>🏛${esc(letter)} - Empty slot</h3>
+      <button type="button" class="modal-x stack-inspector-close" aria-label="Close" title="Close">×</button>
     </div>
     <div class="stack-inspector-body">
       <p>Outpost slot <strong>${esc(letter)}</strong> isn't in use yet. To create an outpost in this slot:</p>
@@ -6624,9 +6626,6 @@ function openEmptyOutpostModal(letter) {
         a fresh outpost when none exists at that site - the slot
         picker will offer this letter.
       </p>
-    </div>
-    <div class="card-modal-actions">
-      <button type="button" class="modal-btn stack-inspector-close">Close</button>
     </div>
   `;
   overlay.appendChild(dialog);
