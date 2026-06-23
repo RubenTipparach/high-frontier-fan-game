@@ -2633,9 +2633,8 @@ function openNewsModal() {
     : '<li class="news-empty">No broadcasts yet - the wire is quiet.</li>';
   overlay.innerHTML = `
     <div class="et-produce-modal news-modal" role="dialog" aria-label="Galactic news">
-      <div class="et-produce-head"><h3>\u203C\uFE0F Galactic news</h3></div>
+      <div class="modal-header"><h2 class="modal-title">\u203C\uFE0F Galactic news</h2><button type="button" class="modal-x news-close" aria-label="Close">\u00D7</button></div>
       <ul class="news-list">${rows}</ul>
-      <div class="card-modal-actions"><button type="button" class="modal-btn news-close">Close</button></div>
     </div>`;
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
   overlay.querySelector('.news-close').addEventListener('click', () => overlay.remove());
@@ -2669,12 +2668,13 @@ function openNewsCardPreview(cardId) {
     el.classList.add('card-modal-card');
     panel.appendChild(el);
   } catch { panel.textContent = card.name || cardId; }
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'modal-btn';
-  btn.textContent = 'Close';
-  btn.addEventListener('click', close);
-  panel.appendChild(btn);
+  const xBtn = document.createElement('button');
+  xBtn.type = 'button';
+  xBtn.className = 'modal-x';
+  xBtn.textContent = '×';
+  xBtn.setAttribute('aria-label', 'Close');
+  xBtn.addEventListener('click', close);
+  panel.appendChild(xBtn);
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
 }
@@ -19462,15 +19462,13 @@ function openCardInfoModal(card) {
   catch { cardEl = document.createElement('div'); cardEl.textContent = card.name || card.id; }
   cardEl.classList.add('card-modal-card');
   panel.appendChild(cardEl);
-  const actions = document.createElement('div');
-  actions.className = 'card-modal-actions';
-  const closeBtn = document.createElement('button');
-  closeBtn.type = 'button';
-  closeBtn.className = 'modal-btn';
-  closeBtn.textContent = 'Close';
-  closeBtn.addEventListener('click', close);
-  actions.appendChild(closeBtn);
-  panel.appendChild(actions);
+  const xBtn = document.createElement('button');
+  xBtn.type = 'button';
+  xBtn.className = 'modal-x';
+  xBtn.textContent = '×';
+  xBtn.setAttribute('aria-label', 'Close');
+  xBtn.addEventListener('click', close);
+  panel.appendChild(xBtn);
   overlay.appendChild(panel);
   mountOverlay(overlay);
   document.addEventListener('keydown', onKey);

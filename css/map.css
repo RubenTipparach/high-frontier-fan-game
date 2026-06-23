@@ -3550,6 +3550,11 @@ body:has(#view-browse:not(.hidden)) #main {
   justify-content: space-between;
   gap: 12px;
   padding: 11px 14px;
+  /* Break out of any container padding so the bar sits flush at the
+     panel's top + side edges. A panel with padding sets --modal-pad-t /
+     --modal-pad-x to its own padding; a padding-free panel (rocket stack)
+     leaves them 0 and the margins collapse. */
+  margin: calc(-1 * var(--modal-pad-t, 0px)) calc(-1 * var(--modal-pad-x, 0px)) 0;
   background: linear-gradient(180deg, var(--panel-2), var(--panel));
   border-bottom: 1px solid var(--border);
   border-top-left-radius: inherit;
@@ -4618,11 +4623,19 @@ html.battery-save *::after {
    so it sits flush with the viewport edges. */
 @media (max-width: 720px) {
   .rocket-stack-overlay { padding: 0; }
+  .rocket-stack-overlay { align-items: stretch; }
   .rocket-stack-panel {
     width: 100vw;
     max-width: 100vw;
+    /* dvh = the CURRENTLY visible height (excludes the URL bar). Plain
+       100vh is the url-bar-hidden height, which is TALLER than what's on
+       screen; centered in the overlay it pushed the title bar up behind
+       the URL bar. dvh makes the panel match the visible area so the
+       header stays at the top. vh kept as a fallback for old engines. */
     height: 100vh;
+    height: 100dvh;
     max-height: 100vh;
+    max-height: 100dvh;
     padding: 0;
     border-radius: 0;
     border: none;
@@ -5290,6 +5303,8 @@ html.battery-save *::after {
    so the colour key stays consistent across the Stage-3 ops.
    ============================================================ */
 .et-produce-modal {
+  --modal-pad-t: 18px;
+  --modal-pad-x: 20px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;

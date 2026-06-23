@@ -80,12 +80,13 @@ function openCardPreview(cardId) {
     el.classList.add('card-modal-card');
     panel.appendChild(el);
   } catch { panel.textContent = card.name || cardId; }
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'modal-btn';
-  btn.textContent = 'Close';
-  btn.addEventListener('click', close);
-  panel.appendChild(btn);
+  const xBtn = document.createElement('button');
+  xBtn.type = 'button';
+  xBtn.className = 'modal-x';
+  xBtn.textContent = '×';
+  xBtn.setAttribute('aria-label', 'Close');
+  xBtn.addEventListener('click', close);
+  panel.appendChild(xBtn);
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
 }
