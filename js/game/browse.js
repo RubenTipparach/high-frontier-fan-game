@@ -8117,7 +8117,8 @@ function ensureMapShell(host) {
         <button id="turn-end" title="End your turn"
           aria-label="End turn">⏭ End turn</button>
         <span id="turn-budget" class="map-turn-budget" aria-live="polite">
-          <button type="button" class="turn-tag" id="turn-tag-move" title="Moves remaining this turn">move:1</button>
+          <button type="button" class="turn-tag" id="turn-tag-move" title="Rocket moves remaining this turn">move:1</button>
+          <button type="button" class="turn-tag" id="turn-tag-fmove" title="Freighter moves remaining this turn (the freighter is a second, independent mover)" hidden>🚛 move:1</button>
           <button type="button" class="turn-tag turn-tag-gear" id="game-settings" title="Route options" aria-label="Route options">⚙</button>
           <button type="button" class="turn-tag turn-tag-undo" id="turn-tag-undo" title="Undo your last action this turn" hidden>↩ undo</button>
         </span>
@@ -8331,6 +8332,7 @@ function ensureMapShell(host) {
   // so there is no separate op tag. Live-updates on any consume /
   // refund / turn rollover.
   const moveTag = host.querySelector('#turn-tag-move');
+  const fmoveTag = host.querySelector('#turn-tag-fmove');
   const undoTag = host.querySelector('#turn-tag-undo');
   const endTurnBtn = host.querySelector('#turn-end');
   function refreshTurnBudget() {
@@ -8388,6 +8390,29 @@ function ensureMapShell(host) {
             : (soloUndoFace
               ? 'Move spent - tap to undo this turn\'s move (rewinds the rocket)'
               : 'Move spent this turn. Use ↩ undo to take back your last action.')));
+    }
+    // M1: the Freighter is a second, independent mover. Show its own move budget
+    // tag (only while a freighter is in play) so the player can see they have
+    // TWO moves this turn and which is still available. (Indicator for now - the
+    // freighter route-execution flow lands once its propulsion model is set.)
+    if (fmoveTag) {
+      const fr = getMyFreighter();
+      if (!fr) {
+        fmoveTag.hidden = true;
+      } else {
+        fmoveTag.hidden = false;
+        const me = _onlineSnapshot && (_onlineSnapshot.players || [])
+          .find((p) => p.profileId === (_onlineMe && _onlineMe.id));
+        const fmoves = me && me.freighterMovesRemaining != null ? (me.freighterMovesRemaining | 0) : 1;
+        const fspent = fmoves <= 0;
+        fmoveTag.textContent = fspent ? '🚛 move spent' : `🚛 move:${fmoves}`;
+        fmoveTag.classList.toggle('is-spent', fspent);
+        fmoveTag.classList.toggle('is-locked', lockedByOnline);
+        fmoveTag.disabled = true;
+        fmoveTag.title = fspent
+          ? 'Freighter move spent this turn.'
+          : 'Your Freighter has its own move this turn, separate from the rocket.';
+      }
     }
     if (undoTag) {
       // Dedicated undo control for server games: unwinds your most recent

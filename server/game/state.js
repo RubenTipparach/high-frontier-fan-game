@@ -216,6 +216,10 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
     glory: { chits: [], claimed: [], visited: [], vps: 0 },
     opsRemaining: OPS_PER_TURN,
     movesRemaining: MOVES_PER_TURN,
+    // M1: the Freighter unit's own one-move-per-turn budget, independent of the
+    // rocket's (a player with a freighter has TWO movers). Only consumed when a
+    // freighter is in play.
+    freighterMovesRemaining: MOVES_PER_TURN,
     discardsRemaining: DISCARDS_PER_TURN,
   };
 }

@@ -3591,6 +3591,10 @@ function rebuildFromBase(baseState, actions) {
 function openTurnFor(state, player) {
   player.opsRemaining = OPS_PER_TURN;
   player.movesRemaining = MOVES_PER_TURN;
+  // M1: the Freighter is a second independent mover - it gets its own one move
+  // per turn, separate from the rocket's. Only consumable while a freighter is
+  // in play; harmless to refill otherwise.
+  player.freighterMovesRemaining = MOVES_PER_TURN;
   player.discardsRemaining = DISCARDS_PER_TURN;
   // One refuel per site per turn: clear the per-turn ledger so the
   // sites this player tapped last turn are refuellable again.
