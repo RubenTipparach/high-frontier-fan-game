@@ -35,7 +35,7 @@ import { weightClassForMass } from '../../data/net-thrust-track.js';
 // Fuel-step capacity comes from the shared graph (the same module the server
 // uses), so the client readout + the server's move check never disagree.
 import { blackStepsBetween } from '../../data/fuel-graph.js';
-import { isOnline } from './online-mode.js';
+import { isOnline, isM1 } from './online-mode.js';
 
 // Crew can act as the ship's thruster OR its robonaut
 // (prospector). Crew records have a different shape than patents
@@ -227,10 +227,15 @@ let _tankWater = (() => {
   } catch { return 0; }
 })();
 
-// Fuel grade in the tank: 'water' (blue) or 'dirt' (grey). Water and dirt
-// can't mix; a water thruster burns only water, a dirt thruster burns either.
+// Fuel grade in the tank: 'water' (blue), 'dirt' (grey), or 'isotope'
+// (gold, M1 GW thrusters). Grades never mix; a water thruster burns only
+// water, a dirt thruster burns water or dirt, a GW thruster burns only
+// isotope. Normalises any stored / incoming value to a known grade.
+function normGrade(g) {
+  return (g === 'dirt' || g === 'isotope') ? g : 'water';
+}
 let _tankGrade = (() => {
-  try { return localStorage.getItem(TANK_GRADE_KEY) === 'dirt' ? 'dirt' : 'water'; }
+  try { return normGrade(localStorage.getItem(TANK_GRADE_KEY)); }
   catch { return 'water'; }
 })();
 
@@ -263,7 +268,7 @@ function persist() {
     else                     localStorage.removeItem(PROSPECTOR_KEY);
     localStorage.setItem(AFTERBURN_KEY, _afterburnEngaged ? '1' : '0');
     localStorage.setItem(TANK_KEY, String(_tankWater));
-    localStorage.setItem(TANK_GRADE_KEY, _tankGrade === 'dirt' ? 'dirt' : 'water');
+    localStorage.setItem(TANK_GRADE_KEY, normGrade(_tankGrade));
     localStorage.setItem(WIRING_KEY, JSON.stringify(_wiring || {}));
   } catch { /* private mode */ }
 }
@@ -306,7 +311,7 @@ export function hydrateRocket({
   _activeThrusterId = activeThrusterId;
   _activeProspectorId = activeProspectorId;
   _tankWater = tank;
-  _tankGrade = tankGrade === 'dirt' ? 'dirt' : 'water';
+  _tankGrade = normGrade(tankGrade);
   _afterburnEngaged = !!afterburnEngaged;
   _wiring = (wiring && typeof wiring === 'object' && !Array.isArray(wiring)) ? _clone(wiring) : {};
   notify();
@@ -350,13 +355,15 @@ export function isInRocket(id) {
 
 export function addToStack(cardId, kind, face, radSide) {
   if (!cardId) return -1;
-  // Expansion cards (currently GW thrusters) are previewable in
-  // the library but cannot be flown until the expansion ships.
-  // Refuse silently here - the calling UI greys the +/grab
-  // buttons out on inspection so this is a defence-in-depth
-  // check, not the only gate.
+  // Expansion cards are previewable in the library but only flyable
+  // when their module is active. GW thrusters fly in an M1 game (the
+  // server's BUILD_ROCKET allows them iff state.m1); outside M1 they
+  // stay preview-only. Other expansion types (Freighters) are not yet
+  // flyable at all. Refuse silently here - the calling UI greys the
+  // +/grab buttons too, so this is defence in depth, not the only gate.
   const card = PATENTS_BY_ID[cardId];
-  if (card && card.type === 'gw-thruster') return -1;
+  if (card && card.type === 'gw-thruster' && !isM1()) return -1;
+  if (card && card.type === 'freighter') return -1;
   const slot = { id: cardId, kind: kind || 'patent' };
   // Crew carries its picked faction face; preserve it so the
   // right face's thruster / prospector is in play.
@@ -855,9 +862,9 @@ export function removeFuel(delta = 1) {
 
 // --------- Fuel grade (water blue / dirt grey) ---------
 
-export function getTankGrade() { return _tankGrade === 'dirt' ? 'dirt' : 'water'; }
+export function getTankGrade() { return normGrade(_tankGrade); }
 export function setTankGrade(grade) {
-  const g = grade === 'dirt' ? 'dirt' : 'water';
+  const g = normGrade(grade);
   if (g === _tankGrade) return false;
   _tankGrade = g;
   persist();
@@ -894,9 +901,13 @@ export function getDirtCapability() {
   return { burner, hasIsru };
 }
 
-// The fuel grade the active thruster needs ('dirt' or 'water'); 'water' when
-// there is no active thruster. Drives the tank-grade gate + grey UI.
+// The fuel grade the active thruster needs ('isotope', 'dirt', or 'water');
+// 'water' when there is no active thruster. Drives the tank-grade gate + the
+// fuel-colour UI. Mirrors the server's activeFuelGrade: a GW thruster (M1)
+// runs on isotope, a dirt thruster on dirt, everything else on water.
 export function getActiveFuelGrade() {
+  const card = _activeThrusterId ? PATENTS_BY_ID[_activeThrusterId] : null;
+  if (card && card.type === 'gw-thruster') return 'isotope';
   const stats = getActiveThrusterStats();
   return stats && stats.isDirt ? 'dirt' : 'water';
 }
@@ -1082,7 +1093,7 @@ export function computeRocketStatsFor(ctx = {}) {
     _activeThrusterId = ctx.activeThrusterId || null;
     _activeProspectorId = ctx.activeProspectorId || null;
     _tankWater = Math.max(0, Math.round((Number(ctx.tank) || 0) * 1e6) / 1e6);
-    _tankGrade = ctx.tankGrade === 'dirt' ? 'dirt' : 'water';
+    _tankGrade = normGrade(ctx.tankGrade);
     _afterburnEngaged = !!ctx.afterburnEngaged;
     _wiring = (ctx.wiring && typeof ctx.wiring === 'object' && !Array.isArray(ctx.wiring)) ? _clone(ctx.wiring) : {};
     _solarZone = ctx.solarZone != null ? ctx.solarZone : null;

@@ -802,6 +802,9 @@
 /* Dirt fuel: grey/brown column instead of blue water. */
 .fuel-tank-panel.is-dirt-fuel .tank-water { fill: #8a7f6c; }
 .fuel-tank-panel.is-dirt-fuel .tank-water-foam { fill: rgba(168, 154, 130, 0.6); }
+/* Isotope fuel (M1 GW thrusters): gold-bead column. */
+.fuel-tank-panel.is-isotope-fuel .tank-water { fill: #d8b13a; }
+.fuel-tank-panel.is-isotope-fuel .tank-water-foam { fill: rgba(232, 200, 96, 0.6); }
 /* Dry-mass block: a hatched grey rectangle anchored to the
    bottom of the tank, representing the wet-mass capacity
    already claimed by the rocket's cards. Water floats above

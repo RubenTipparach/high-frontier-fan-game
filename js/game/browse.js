@@ -145,7 +145,7 @@ import {
 // Multiplayer glue (the sandbox map, driven from a server game). These
 // are inert until mountBrowse({ online:true }) flips _online on; the
 // solo path never touches them.
-import { setOnline, isOnline } from './online-mode.js';
+import { setOnline, isOnline, setM1, isM1 } from './online-mode.js';
 import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
 } from './net-bridge.js';
@@ -615,6 +615,10 @@ function applySnapshot(snapshot, seq) {
   // no prev so it snaps without animating.
   const prevSnapshot = (seq != null) ? _onlineSnapshot : null;
   _onlineSnapshot = snapshot;
+  // Pin the M1 module flag from the snapshot BEFORE any hydrator runs, so
+  // the rocket deploy gate + isotope fuel grade read the same M1 state the
+  // server does while the stack hydrates. Mirrors the MARKET_MODE pin below.
+  setM1(!!snapshot.m1);
   // Card economy is server-authoritative in multiplayer (state.economy).
   // Pin the client's MARKET_MODE to whatever the snapshot says BEFORE
   // any hydrators run so the cart tab + Free Market / Research Auction
@@ -4804,7 +4808,7 @@ function buildMpPlayerDetail(host, p, isMe) {
         activeThrusterId: rkt.activeThrusterId || null,
         activeProspectorId: rkt.activeProspectorId || null,
         tank: rkt.tank | 0,
-        tankGrade: rkt.tankGrade === 'dirt' ? 'dirt' : 'water',
+        tankGrade: (rkt.tankGrade === 'dirt' || rkt.tankGrade === 'isotope') ? rkt.tankGrade : 'water',
         afterburnEngaged: !!rkt.afterburnEngaged,
         wiring: (rkt.wiring && typeof rkt.wiring === 'object') ? rkt.wiring : {},
         solarZone: (rkt.siteId && SITES_BY_ID[rkt.siteId] && SITES_BY_ID[rkt.siteId].solarZone) || null,
@@ -12641,17 +12645,23 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   // blue even under a dirt engine); an empty tank styles by the active
   // engine, since that's the grade you'd load next.
   const activeDirt = getActiveFuelGrade() === 'dirt';
+  const activeIso = getActiveFuelGrade() === 'isotope';
   const isDirt = (getTankWater() > 0) ? (getTankGrade() === 'dirt') : activeDirt;
+  const isIso = (getTankWater() > 0) ? (getTankGrade() === 'isotope') : activeIso;
   // Does the tank PHYSICALLY hold dirt right now? Water controls (dump / pump /
   // aqua fill) stay available unless dirt is actually loaded, because every
   // thruster can burn water: a water thruster burns ONLY water, a dirt thruster
   // burns water OR dirt. So an empty dirt-engine tank can still take on water.
   const tankDirt = getTankWater() > 0 && getTankGrade() === 'dirt';
-  const fuelWord = isDirt ? 'dirt' : 'water';
-  panel.className = 'fuel-tank-panel' + (isDirt ? ' is-dirt-fuel' : '');
+  // Isotope (M1 GW thruster) is a third grade: it can't mix with water and has
+  // no aqua value, so a loaded isotope tank hides the water controls too.
+  const tankIso = getTankWater() > 0 && getTankGrade() === 'isotope';
+  const tankNonWater = tankDirt || tankIso;
+  const fuelWord = isIso ? 'isotope' : (isDirt ? 'dirt' : 'water');
+  panel.className = 'fuel-tank-panel' + (isDirt ? ' is-dirt-fuel' : '') + (isIso ? ' is-isotope-fuel' : '');
   panel.innerHTML = `
     <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
-    <h2 class="fuel-tank-title">${isDirt ? '🟤 Dirt tank' : '💧 Water tank'}</h2>
+    <h2 class="fuel-tank-title">${isIso ? '🟡 Isotope tank' : (isDirt ? '🟤 Dirt tank' : '💧 Water tank')}</h2>
     <p class="muted fuel-tank-sub">Tap outside or press Esc to close</p>
     <div class="fuel-tank-body">
     <div class="fuel-tank-col fuel-tank-col-stage">
@@ -12717,7 +12727,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     </div>
     <div class="fuel-tank-col fuel-tank-col-controls">
     <div class="fuel-tank-actions">
-      ${tankDirt ? '' : `
+      ${tankNonWater ? '' : `
       <div class="aqua-direction aqua-direction-reverse fuel-tank-dump-row">
         <span class="aqua-direction-label">💧⤓ DUMP</span>
         <div class="aqua-actions">
@@ -12730,7 +12740,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         </div>
       </div>`}
     </div>
-    ${tankDirt ? '' : fuelTankOutpostSections()}
+    ${tankNonWater ? '' : fuelTankOutpostSections()}
 <div class="fuel-tank-aqua" id="tank-aqua-section" hidden>
       <div class="aqua-row">
         <span>🏦 Aqua bank</span>
@@ -13159,7 +13169,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     const wet = dry + before;
     const maxSteps = blackStepsBetween(dry, wet);
     const k = Math.min(steps, maxSteps);
-    const grade = getTankGrade() === 'dirt' ? 'dirt' : 'water';
+    const grade = getTankGrade();
     if (k < 1) {
       console.log('[dump] nothing to dump', { grade, tankWater: round6(before), dryMass: dry, wetMass: round6(wet), maxSteps, stepsRequested: steps });
       onRefresh && onRefresh();
@@ -13215,7 +13225,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   // poured onto a dirt tank (the grades can't mix). The bank panel shows
   // whenever the tank ISN'T already holding dirt, so a dirt-engine rocket with
   // an empty tank can still take on water (a dirt thruster burns water too).
-  if (atLeo && !tankDirt && aquaSection) aquaSection.hidden = false;
+  if (atLeo && !tankNonWater && aquaSection) aquaSection.hidden = false;
   const refreshAquaButtons = () => {
     if (!aquaSection || aquaSection.hidden) return;
     const bal = getAqua();
@@ -16835,6 +16845,49 @@ function showSitePopupFor(site) {
           _renderer.clearSitePopup();
         },
       });
+    }
+  }
+  // Isotope Refuel (M1): a GW thruster runs on gold-bead isotope, refined at a
+  // Factory whose spectral type matches the thruster. Fills the SAME tank as
+  // water, graded 'isotope' (grades never mix). Online + M1 only; shares the
+  // one-refuel-per-site-per-turn lock. Shown only when the active engine is a
+  // GW thruster and this site's spectral type matches it.
+  if (_online && isM1() && rocketSite && site.id === rocketSite.id) {
+    const activeId = getActiveThrusterId();
+    const gw = activeId ? PATENTS_BY_ID[activeId] : null;
+    if (gw && gw.type === 'gw-thruster') {
+      const factory = getFactory(site.id);
+      const spectralOk = (gw.spectralType || 'C') === (site.spectralType || 'C');
+      if (iCanUseFactory(factory) && spectralOk) {
+        const isoGain = 7;
+        const tank = getTankWater();
+        const tmax = getTankMax();
+        const headroom = Math.max(0, tmax - tank);
+        const gain = Math.min(isoGain, headroom);
+        const refueledThisTurn = hasRefueledThisTurn(site.id);
+        // Isotope can't top up a water/dirt tank (no mixing).
+        const gradeClash = tank > 0 && getTankGrade() !== 'isotope';
+        const ok = !refueledThisTurn && gain > 0 && !gradeClash;
+        const reason = refueledThisTurn
+          ? 'Already refueled at this site this turn.'
+          : (gradeClash ? 'Tank holds another fuel - burn it empty before refining isotope.'
+            : (gain <= 0 ? `Tank full (${tank}/${tmax}).` : null));
+        actions.push({
+          label: refueledThisTurn
+            ? `🟡 Isotope Refuel done`
+            : (ok ? `🟡 Isotope Refuel (+${isoGain})` : `🟡 Isotope Refuel`),
+          variant: ok ? 'rocket' : 'secondary',
+          disabled: !ok,
+          title: reason || `Refine ${isoGain} isotope FTs for your GW thruster (spectral ${gw.spectralType || 'C'} match). Costs your operation.`,
+          onClick: () => {
+            if (!ok) return;
+            const sid = toServerId(_onlineMaps, site.id);
+            if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
+            submitOnlineOp({ kind: 'SITE_REFUEL', siteId: sid, mode: 'isotope' });
+            _renderer.clearSitePopup();
+          },
+        });
+      }
     }
   }
   // Outpost Factory-Refuel: store +7 water in one of YOUR outposts at a usable
