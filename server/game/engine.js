@@ -1859,6 +1859,12 @@ function applyBoost(state, op, player) {
   for (const id of ids) {
     if (player.hand.indexOf(id) < 0) return fail('not_in_hand');
   }
+  // GW thrusters and Freighters can't be boosted (1A5d): they return to play
+  // only by ET Production, not by boosting White-Side cards from hand.
+  for (const id of ids) {
+    const c = PATENTS_BY_ID[id];
+    if (c && (c.type === 'gw-thruster' || c.type === 'freighter')) return fail('not_boostable');
+  }
   // Cost = total mass of the boosted cards (aqua). A radiator's mass depends on
   // its chosen deployed side (heavy is heavier), so factor that in per id.
   const radSides = (op.radSides && typeof op.radSides === 'object') ? op.radSides : {};

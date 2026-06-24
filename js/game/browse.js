@@ -950,6 +950,12 @@ function marketDeckTypes() {
 function isExpansionLocked(card) {
   return !!card && isExpansionType(card.type) && !isM1();
 }
+// GW thrusters + Freighters can't be boosted (1A5d): they enter play only via
+// ET Production at a Factory, never by boosting White-Side cards from hand.
+function isBoostable(card) {
+  return !(card && (card.type === 'gw-thruster' || card.type === 'freighter'));
+}
+const BOOST_BLOCKED_MSG = "GW thrusters and Freighters can't be boosted - ET Produce them at a Factory.";
 function syncCardDraftOverlay(snapshot) {
   const existing = document.getElementById('mp-card-draft-overlay');
   const drafting = !!(snapshot && snapshot.draftPhase === 'draft') && !_spectator
@@ -5543,8 +5549,9 @@ function wireHandStrip() {
           () => freeMarketSellFromHand(card)),
         qBtn('q-produce', '🏭', `Exo produce (spectral ${card.spectralType || '?'})`,
           () => setStatus(`Exo-produce needs a Stage-3 factory matching spectral ${card.spectralType || '?'}.`)),
-        qBtn('q-boost',   '🚀', isBoostMarked(id) ? 'Unmark boost' : 'Mark for boost',
-          () => toggleBoostMark(id)),
+        qBtn('q-boost',   '🚀',
+          isBoostable(card) ? (isBoostMarked(id) ? 'Unmark boost' : 'Mark for boost') : BOOST_BLOCKED_MSG,
+          () => { if (!isBoostable(card)) { setStatus(BOOST_BLOCKED_MSG); return; } toggleBoostMark(id); }),
       );
       wrap.appendChild(quick);
 
@@ -7362,11 +7369,16 @@ function openCardModal(card, kind, slotIdx, { readOnly = false, face, nav } = {}
   boostBtn.type = 'button';
   boostBtn.className = 'modal-btn stack';
   const marked = isBoostMarked(card.id);
+  const boostable = isBoostable(card);
   boostBtn.textContent = marked ? '🚀 Unmark boost' : '🚀 Boost';
-  boostBtn.title = marked
-    ? 'Remove the boost mark on this card'
-    : 'Mark this card to be boosted to the LEO rocket on the next BOOST commit';
+  boostBtn.disabled = !boostable;
+  boostBtn.title = !boostable
+    ? BOOST_BLOCKED_MSG
+    : (marked
+      ? 'Remove the boost mark on this card'
+      : 'Mark this card to be boosted to the LEO rocket on the next BOOST commit');
   boostBtn.addEventListener('click', () => {
+    if (boostBtn.disabled) return;
     toggleBoostMark(card.id);
     close();
   });
