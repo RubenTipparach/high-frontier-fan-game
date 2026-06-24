@@ -3610,7 +3610,7 @@ app.get('/admin', (req, res) => {
 
   res.set('content-type', 'text/html; charset=utf-8');
   res.send(`<!doctype html>
-<html><head><meta charset="utf-8"><title>High Frontier admin</title>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>High Frontier admin</title>
 <style>
   :root { color-scheme: dark; }
   *{box-sizing:border-box}
@@ -3775,6 +3775,56 @@ app.get('/admin', (req, res) => {
     .ge-give select,.ge-give-card,.ge-give-loc{flex:1 1 100%}
     .ge-teleport input{flex:1 1 100%}
     #game-edit-body button{padding:8px 12px;font-size:14px}
+  }
+  /* ===== Custom mobile-first theme (user pick) - additive override layer ===== */
+  :root{--acc:#6366f1;--acc2:#22d3ee;--accgrad:linear-gradient(135deg,#6366f1,#7c74f2);--surf:#141826;--surf2:#1b2030;--line:#2a3146;--ink:#e8ebf5;--mut:#93a0b8}
+  body{font-family:-apple-system,system-ui,"Segoe UI",Roboto,sans-serif;font-size:15px;background:#0a0b12;color:var(--ink);margin:0 auto;padding:16px}
+  h1{color:#eef1ff;font-size:21px;font-weight:800;letter-spacing:.2px}
+  .sub{color:var(--mut)}
+  h2{color:var(--acc2)}
+  .header-row .ws-info{background:var(--surf);border-color:var(--line)}
+  /* KPI stat cards with a gradient accent bar */
+  .kpis{gap:10px}
+  .kpi{position:relative;overflow:hidden;background:var(--surf);border:1px solid var(--line);border-radius:14px;padding:13px 14px 12px 18px}
+  .kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(var(--acc),var(--acc2))}
+  .kpi strong{font-size:24px;font-weight:800;color:#fff}
+  .kpi span{color:var(--mut)}
+  /* Tabs as gradient pills */
+  .tabbar{gap:8px}
+  .tabbar button{background:var(--surf2);border:1px solid var(--line);color:var(--mut);border-radius:999px;padding:9px 17px;font-weight:700}
+  .tabbar button.tab-active{background:var(--accgrad);border-color:#7c74f2;color:#fff;box-shadow:0 4px 14px rgba(99,102,241,.35)}
+  /* Status badges */
+  .pill{border-radius:999px;padding:4px 10px;border:1px solid transparent}
+  .pill-waiting{background:rgba(34,211,238,.14);color:#7fe3f5;border-color:rgba(34,211,238,.32)}
+  .pill-started,.pill-accepted{background:rgba(52,211,153,.14);color:#6ee7b7;border-color:rgba(52,211,153,.32)}
+  .pill-finished,.pill-pending{background:rgba(251,191,36,.14);color:#fcd34d;border-color:rgba(251,191,36,.32)}
+  .pill-cancelled,.pill-declined{background:rgba(248,113,113,.14);color:#fca5a5;border-color:rgba(248,113,113,.32)}
+  /* Inputs */
+  input[type=text],input[type=search],#room-search{background:var(--surf);border:1px solid var(--line);border-radius:12px;padding:11px 13px;color:var(--ink)}
+  input:focus{outline:none;border-color:var(--acc)}
+  /* Buttons (generic), then primary actions get the gradient */
+  button{background:var(--surf2);border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:9px 14px;font-weight:600}
+  button:hover{background:#232a3d;border-color:#3a445e}
+  button.danger{background:transparent;border-color:#5a2230;color:#ff9aa6}
+  button.danger:hover{background:#3a1620;color:#fff;border-color:#7a2230}
+  .btn-manage-game,.btn-restore-lobby,.um-actions .btn-add-token{background:var(--accgrad);border-color:#7c74f2;color:#fff}
+  .btn-manage-game:hover,.btn-restore-lobby:hover,.um-actions .btn-add-token:hover{filter:brightness(1.08);background:var(--accgrad)}
+  #show-cancelled{background:var(--surf2);border:1px solid var(--line);border-radius:10px;padding:9px 14px;color:#cdd7f0}
+  /* Tables: themed surface + clickable name links */
+  table{background:var(--surf);border:1px solid var(--line);border-radius:14px}
+  td,th{border-bottom:1px solid var(--line)}
+  th{background:#10141f;color:var(--acc2)}
+  .linklike{color:#a9b4ff;text-decoration:none;font-weight:700}
+  .linklike:hover{color:#fff;text-decoration:underline}
+  .pager a{color:var(--acc2)}
+  @media (max-width:700px){
+    body{padding:12px}
+    .kpi{flex:1 1 calc(50% - 8px)}
+    .kpi strong{font-size:22px}
+    /* polished stacked cards (label muted/uppercase, value bold) */
+    tbody tr{border:1px solid var(--line);border-radius:14px;padding:10px 14px;margin:0 0 12px;background:var(--surf)}
+    tbody td{padding:6px 0;font-weight:600}
+    tbody td::before{color:var(--mut);text-transform:uppercase;font-size:10px;letter-spacing:.5px;font-weight:700}
   }
 </style></head>
 <body>
