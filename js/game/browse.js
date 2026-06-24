@@ -937,6 +937,13 @@ const DRAFT_DECK_COLOR = {
 function draftDeckTypes(snap) {
   return (snap && snap.m1) ? [...DRAFT_DECK_TYPES, ...M1_DRAFT_DECK_TYPES] : DRAFT_DECK_TYPES;
 }
+// The deck types listed in the Patent Market (cart) tab: the base six, plus the
+// two M1 decks (GW Thrusters + Freighters) when M1 is on. Mirrors the draft +
+// auction deck lists so the same cards are obtainable across every acquisition
+// path; off-M1 games never list them (zero bleed-through).
+function marketDeckTypes() {
+  return isM1() ? [...DECK_TYPES, ...M1_DRAFT_DECK_TYPES] : DECK_TYPES;
+}
 function syncCardDraftOverlay(snapshot) {
   const existing = document.getElementById('mp-card-draft-overlay');
   const drafting = !!(snapshot && snapshot.draftPhase === 'draft') && !_spectator
@@ -4459,6 +4466,48 @@ function makeAuctionNudgeButton(snapshot, label, opts, targetIds, title) {
   return btn;
 }
 
+// A read-only "Modules & game config" block for the Multiplayer panel: module
+// chips (M0 / M1 / draft variants) + a meta line (economy, game length). Reads
+// straight off the snapshot/state so it stays live on every re-render.
+function buildMpConfigBlock(snapshot) {
+  const wrap = document.createElement('div');
+  wrap.className = 'mp-config';
+  const label = document.createElement('div');
+  label.className = 'mp-detail-label';
+  label.textContent = 'Modules & game config';
+  wrap.appendChild(label);
+
+  const tags = [];
+  if (snapshot.m0) tags.push(['tag-m0', '🏛 M0 Politics']);
+  if (snapshot.m1) tags.push(['tag-m1', '🚛 M1 Terawatt']);
+  if (snapshot.draftStart) tags.push(['tag-draft', '🃏 Draft start']);
+  if (snapshot.randomDraft) tags.push(['tag-draft', '🎲 Random draft']);
+  const tagWrap = document.createElement('div');
+  tagWrap.className = 'module-tags';
+  if (tags.length) {
+    for (const [cls, text] of tags) {
+      const t = document.createElement('span');
+      t.className = `module-tag ${cls}`;
+      t.textContent = text;
+      tagWrap.appendChild(t);
+    }
+  } else {
+    const none = document.createElement('span');
+    none.className = 'muted mp-line';
+    none.textContent = 'Standard rules (no modules)';
+    tagWrap.appendChild(none);
+  }
+  wrap.appendChild(tagWrap);
+
+  const econ = snapshot.economy === 'library' ? 'Free Library' : 'Card Market';
+  const rounds = snapshot.maxRounds || '?';
+  const meta = document.createElement('div');
+  meta.className = 'mp-line muted';
+  meta.textContent = `${econ} economy · ${rounds} rounds`;
+  wrap.appendChild(meta);
+  return wrap;
+}
+
 function renderMpPanel(snapshot) {
   const tableEl = ensureMpPanelStructure();
   if (!tableEl) return;
@@ -4503,6 +4552,11 @@ function renderMpPanel(snapshot) {
     ));
   }
   tableEl.appendChild(roster);
+
+  // Modules & game config: a read-only summary of the rules this table runs
+  // (which modules are on, the card economy, game length). Mirrors the lobby's
+  // module tags so a returning player can see at a glance what's enabled.
+  tableEl.appendChild(buildMpConfigBlock(snapshot));
 
   // Footer: turn nudge(s). Ping whoever can be nudged with a turn DM.
   // Normally that's whoever the table is waiting on; during an auction
@@ -17786,7 +17840,7 @@ function paintCart() {
   `;
 
   const decksHost = host.querySelector('#cart-decks-host');
-  for (const type of DECK_TYPES) {
+  for (const type of marketDeckTypes()) {
     const topId = peekTop(type);
     const card = topId ? cardById(topId) : null;
     const deckSize = getDeck(type).length;

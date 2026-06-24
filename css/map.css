@@ -7138,6 +7138,9 @@ html.battery-save *::after {
   margin: 6px 0 3px;
 }
 .mp-line { font-size: 12px; padding: 1px 0; }
+/* Modules & game config summary block in the MP panel. */
+.mp-config { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+.mp-config .module-tags { margin: 2px 0 4px; }
 
 /* Per-player stack inspect chips (6 stacks: LEO / Rocket / Outpost
    A-D, plus the hand row). Each is a tap target that opens a
