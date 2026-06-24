@@ -69,7 +69,7 @@ import {
 import { isBuggyRoamBody } from '../../data/buggy-roam.js';
 import { makeRng } from './rng.js';
 import {
-  SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES,
+  SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
   currentPlayer, isPlayersTurn,
   seasonForSlot, eventKindForRoll,
@@ -3972,7 +3972,10 @@ function applyAuctionStart(state, op, ctx) {
   // Skunkworks (Shimizu) ignores the academia hand limit when starting.
   if ((player.hand || []).length >= AUCTION_HAND_LIMIT && !hasPrivilege(state, player, 'SKUNKWORKS')) return fail('hand_limit');
   const deckType = String(op.deckType || '');
-  if (!DECK_TYPES.includes(deckType)) return fail('bad_deck');
+  // M1 games may also auction the two Terawatt decks; an m1-off game is the
+  // base six only (zero bleed-through).
+  const auctionableDecks = state.m1 ? [...DECK_TYPES, ...M1_DECK_TYPES] : DECK_TYPES;
+  if (!auctionableDecks.includes(deckType)) return fail('bad_deck');
   const deck = state.decks[deckType];
   if (!deck || !deck.length) return fail('deck_empty');
 

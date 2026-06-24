@@ -300,6 +300,11 @@ const MP_AUCTION_DECKS = [
   ['thruster', 'Thruster'], ['reactor', 'Reactor'], ['radiator', 'Radiator'],
   ['refinery', 'Refinery'], ['robonaut', 'Robonaut'], ['generator', 'Generator'],
 ];
+// Module 1 adds two auctionable decks; only offered when the snapshot is m1.
+const M1_AUCTION_DECKS = [['gw-thruster', 'GW Thruster'], ['freighter', 'Freighter']];
+function mpAuctionDecks(snap) {
+  return (snap && snap.m1) ? [...MP_AUCTION_DECKS, ...M1_AUCTION_DECKS] : MP_AUCTION_DECKS;
+}
 
 export function isBrowseOnline() { return _online; }
 
@@ -911,14 +916,23 @@ function syncCrewDraftOverlay(snapshot) {
 // auto-opens the deck market once). Mirrors syncCrewDraftOverlay.
 const DRAFT_HAND_TARGET = 12;
 const DRAFT_DECK_TYPES = ['thruster', 'reactor', 'radiator', 'refinery', 'robonaut', 'generator'];
+// Module 1 adds two decks; only offered when the game is m1 (see draftDeckTypes).
+const M1_DRAFT_DECK_TYPES = ['gw-thruster', 'freighter'];
 const DRAFT_DECK_GLYPH = {
   thruster: '🚀', reactor: '☢', radiator: '♨', refinery: '⚗', robonaut: '🤖', generator: '⚡',
+  'gw-thruster': '🛰', freighter: '🚛',
 };
 // Per-deck-type accent colours so the draft rows aren't all one grey band.
 const DRAFT_DECK_COLOR = {
   thruster: '#c0506a', reactor: '#7e57c2', radiator: '#3a8fb7',
   refinery: '#3f9e6b', robonaut: '#c08a2e', generator: '#caa61e',
+  'gw-thruster': '#2a9fd0', freighter: '#b04a8a',
 };
+// The deck types offered this game: the base six, plus the two M1 decks only
+// when the snapshot says m1 is on (zero bleed-through when off).
+function draftDeckTypes(snap) {
+  return (snap && snap.m1) ? [...DRAFT_DECK_TYPES, ...M1_DRAFT_DECK_TYPES] : DRAFT_DECK_TYPES;
+}
 function syncCardDraftOverlay(snapshot) {
   const existing = document.getElementById('mp-card-draft-overlay');
   const drafting = !!(snapshot && snapshot.draftPhase === 'draft') && !_spectator
@@ -1057,7 +1071,7 @@ function openDraftMarketModal() {
   panel.appendChild(head);
   const list = document.createElement('div');
   list.className = 'draft-market-list';
-  for (const dt of DRAFT_DECK_TYPES) {
+  for (const dt of draftDeckTypes(snap)) {
     const deck = Array.isArray(decks[dt]) ? decks[dt] : [];
     const topId = deck[0];
     const card = topId ? PATENTS_BY_ID[topId] : null;
@@ -3400,7 +3414,7 @@ function buildMpDeckPicker(host, snapshot) {
   host.appendChild(label);
   const row = document.createElement('div');
   row.className = 'mp-deck-row';
-  for (const [type, name] of MP_AUCTION_DECKS) {
+  for (const [type, name] of mpAuctionDecks(snapshot)) {
     const deck = (snapshot.decks && snapshot.decks[type]) || [];
     const b = document.createElement('button');
     b.type = 'button';
@@ -3424,7 +3438,7 @@ function buildMpDeckPicker(host, snapshot) {
     host.appendChild(glabel);
     const grow = document.createElement('div');
     grow.className = 'mp-deck-row';
-    for (const [type, name] of MP_AUCTION_DECKS) {
+    for (const [type, name] of mpAuctionDecks(snapshot)) {
       const deck = (snapshot.decks && snapshot.decks[type]) || [];
       const g = document.createElement('button');
       g.type = 'button';
