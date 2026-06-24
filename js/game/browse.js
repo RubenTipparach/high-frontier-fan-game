@@ -944,6 +944,12 @@ function draftDeckTypes(snap) {
 function marketDeckTypes() {
   return isM1() ? [...DECK_TYPES, ...M1_DRAFT_DECK_TYPES] : DECK_TYPES;
 }
+// An expansion card (GW thruster / Freighter) reads as "coming soon" and is
+// inspect-only ONLY when its module is off. With M1 on it is a live, playable
+// card, so the catalog drops the badge + lets it be added/dragged like any card.
+function isExpansionLocked(card) {
+  return !!card && isExpansionType(card.type) && !isM1();
+}
 function syncCardDraftOverlay(snapshot) {
   const existing = document.getElementById('mp-card-draft-overlay');
   const drafting = !!(snapshot && snapshot.draftPhase === 'draft') && !_spectator
@@ -7022,7 +7028,7 @@ function openDeckTapModal(card, kind, { allowAuction = false, inspectOnly = fals
     // play. Either way there's no add / auction here.
     const note = document.createElement('p');
     note.className = 'muted card-modal-note';
-    note.textContent = isExpansionType(card.type)
+    note.textContent = isExpansionLocked(card)
       ? '🚧 This is an upcoming expansion card. Preview only for now - flip to see both faces.'
       : '👥 Crew is chosen at New game via the starting-crew wizard.';
     actions.append(note);
@@ -18111,9 +18117,11 @@ function renderPatents() {
   for (const t of expansionTypes) counts[t] = patentsByType(t).length;
   counts.crew = CREW_FACES.length;
   counts.supports = patentsThatSupply(supplyKinds).length;
+  // Drop the "(soon)" suffix once M1 is live; the cards are playable then.
+  const m1Live = isM1();
   const TYPE_LABEL = {
-    'gw-thruster': 'GW thrusters (soon)',
-    'freighter': 'Freighters (soon)',
+    'gw-thruster': m1Live ? 'GW thrusters' : 'GW thrusters (soon)',
+    'freighter': m1Live ? 'Freighters' : 'Freighters (soon)',
     'supports': 'Supports',
   };
   // Seed initial active tab from a pending programmatic open
@@ -18240,7 +18248,7 @@ function renderPatents() {
     // card view and the Flip button shows both faces up close. Only
     // the drag / tap-to-ADD handlers are skipped (the engine refuses
     // to stack them); a CSS badge signals the "coming soon" intent.
-    if (isExpansionType(card.type)) {
+    if (isExpansionLocked(card)) {
       el.classList.add('is-expansion');
       const badge = document.createElement('div');
       badge.className = 'card-expansion-badge';

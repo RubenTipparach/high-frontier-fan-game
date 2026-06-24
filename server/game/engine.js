@@ -3340,6 +3340,7 @@ function applyBuyCard(state, op, player) {
   const card = PATENTS_BY_ID[cardId];
   if (!card) return fail('unknown_card');
   if (card.type === 'gw-thruster' && !state.m1) return fail('expansion_card');
+  if (card.type === 'freighter' && !state.m1) return fail('expansion_card');
   if (CREW_BY_ID[cardId]) return fail('crew_card');
   if ((player.hand || []).includes(cardId)) return fail('already_in_hand');
   if ((player.rocket.stack || []).some((s) => s.id === cardId)) return fail('on_rocket');
