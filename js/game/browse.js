@@ -6409,9 +6409,9 @@ function openFreighterStackModal() {
         <div class="stack-inspector-stat"><span class="muted">Location</span><strong>${esc(loc)}</strong></div>
       </div>
       <h4>Freighter</h4>
-      <div class="rocket-stack-row" id="freighter-card-host"></div>
+      <div class="rocket-stack-row fr-stack-row" id="freighter-card-host"></div>
       <h4>Cargo hold (${cargo.length})</h4>
-      <div class="rocket-stack-row" id="freighter-cargo-row"></div>
+      <div class="rocket-stack-row fr-stack-row" id="freighter-cargo-row"></div>
     </div>
   `;
   dialog.querySelector('.stack-inspector-close').addEventListener('click', close);

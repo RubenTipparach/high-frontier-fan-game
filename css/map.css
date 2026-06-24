@@ -7142,6 +7142,11 @@ html.battery-save *::after {
 .mp-config { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
 .mp-config .module-tags { margin: 2px 0 4px; }
 
+/* Freighter inspector card rows: fixed compact columns so the freighter card
+   (and any single cargo card) render at a normal slotted-card size instead of
+   stretching to fill the modal (which blew up the spectral / promotion glyphs). */
+.fr-stack-row { grid-template-columns: repeat(auto-fill, 150px); }
+
 /* Per-player stack inspect chips (6 stacks: LEO / Rocket / Outpost
    A-D, plus the hand row). Each is a tap target that opens a
    read-only card modal. Two-column grid so the six fit compactly. */
