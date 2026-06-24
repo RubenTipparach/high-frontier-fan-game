@@ -1387,6 +1387,7 @@ function adminGameStateView(gameId) {
       outposts: Object.fromEntries(
         Object.entries(p.outposts || {}).map(([k, o]) => [k, {
           letter: o.letter || k,
+          siteId: o.siteId || null,   // planner slug, for the admin map overlay
           siteName: siteNameOf(o.siteId),
           tank: o.tank || 0,
           cards: (o.cards || []).map(slotInfo),
@@ -3492,59 +3493,47 @@ app.get('/admin', (req, res) => {
 
   const profileRows = profiles.map((r) => {
     const linked = !!r.discord_id;
-    // The Discord link itself is the reassign affordance: click it to move
-    // the link onto an account that has no Discord yet.
+    // The name is the entry point: click it to open the user settings modal,
+    // which holds every edit action (device code / Discord reassign / unlink /
+    // delete). The Discord cell is display-only now.
     const discordCell = linked
-      ? `<button class="discord-link btn-reassign-discord" data-pid="${r.id}" data-pname="${esc(r.name)}" data-dname="${esc(r.discord_name || r.discord_id)}" title="Reassign this Discord to an account with no link yet">🔗 ${esc(r.discord_name || r.discord_id)}</button>`
+      ? `🔗 ${esc(r.discord_name || r.discord_id)}`
       : '<span class="muted">not linked</span>';
-    const unlinkBtn = linked
-      ? `<button class="btn-unlink-discord" data-pid="${r.id}" data-pname="${esc(r.name)}">Unlink Discord</button>`
-      : '';
     return `
     <tr>
-      <td>@${esc(r.name)}</td>
+      <td><button class="btn-user linklike" data-pid="${r.id}" data-pname="${esc(r.name)}" data-linked="${linked ? 1 : 0}" data-dname="${esc(r.discord_name || r.discord_id || '')}">@${esc(r.name)}</button></td>
       <td>${esc(r.created)}</td>
       <td>${esc(r.seen)}</td>
       <td class="num">${r.devices}</td>
       <td class="num">${r.tables}</td>
       <td class="num">${r.chats}</td>
       <td class="discord-cell">${discordCell}</td>
-      <td>
-        <button class="btn-add-token" data-pid="${r.id}" data-pname="${esc(r.name)}">Issue device code</button>
-        ${unlinkBtn}
-        <button class="btn-del-profile danger" data-pid="${r.id}" data-pname="${esc(r.name)}">Delete account</button>
-      </td>
     </tr>
   `;
-  }).join('') || '<tr><td colspan=8><em>No profiles yet.</em></td></tr>';
+  }).join('') || '<tr><td colspan=7><em>No profiles yet.</em></td></tr>';
 
   const lobbyRows = lobbies.map((r) => `
     <tr data-name="${esc(String(r.name || '').toLowerCase())}">
       <td><code>${esc(r.code)}</code></td>
-      <td>${esc(r.name)}</td>
+      <td><button class="btn-room linklike" data-lid="${r.id}" data-gid="${r.game_id || ''}" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}" data-status="active">${esc(r.name)}</button></td>
       <td>@${esc(r.host_name)}</td>
       <td><span class="pill pill-${esc(r.status)}">${esc(r.status)}</span></td>
       <td>${esc(r.join_policy)}</td>
       <td class="num">${r.members} / ${r.max_players}</td>
       <td>${esc(r.created)}</td>
-      <td>${r.game_id ? `<button class="btn-manage-game" data-gid="${r.game_id}" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}">Manage state</button>` : '<span class="muted">—</span>'}</td>
-      <td><button class="btn-del-lobby danger" data-lid="${r.id}" data-lname="${esc(r.name)}">Cancel</button></td>
     </tr>
-  `).join('') || '<tr class="empty-row"><td colspan=9><em>No active rooms.</em></td></tr>';
+  `).join('') || '<tr class="empty-row"><td colspan=7><em>No active rooms.</em></td></tr>';
 
   const endedRows = endedLobbies.map((r) => `
     <tr>
       <td><code>${esc(r.code)}</code></td>
-      <td>${esc(r.name)}</td>
+      <td><button class="btn-room linklike" data-lid="${r.id}" data-gid="" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}" data-status="${r.kind === 'finished' ? 'finished' : 'cancelled'}">${esc(r.name)}</button></td>
       <td>@${esc(r.host_name)}</td>
       <td class="num">${r.max_players}</td>
       <td><span class="pill pill-${r.kind === 'finished' ? 'finished' : 'cancelled'}">${r.kind}</span></td>
       <td>${esc(r.ended_when)}</td>
-      <td>${r.kind === 'cancelled'
-        ? `<button class="btn-restore-lobby" data-lid="${r.id}" data-lname="${esc(r.name)}">Restore</button>`
-        : '<span class="muted">—</span>'}</td>
     </tr>
-  `).join('') || '<tr><td colspan=7><em>No canceled or finished games.</em></td></tr>';
+  `).join('') || '<tr><td colspan=6><em>No canceled or finished games.</em></td></tr>';
 
   const chatRows = chats.map((r) => `
     <tr>
@@ -3625,6 +3614,17 @@ app.get('/admin', (req, res) => {
   .modal-overlay{position:fixed;inset:0;background:rgba(3,2,10,.72);display:flex;align-items:center;justify-content:center;padding:24px;z-index:50}
   .modal-overlay[hidden]{display:none}
   .modal-box{background:#0c0a16;border:1px solid #2a2740;border-radius:12px;width:min(820px,94vw);max-height:86vh;display:flex;flex-direction:column;overflow:hidden}
+  /* Full-screen state-management modal. */
+  .modal-box-full{width:100vw;max-width:100vw;height:100vh;max-height:100vh;border-radius:0;border:none}
+  .modal-overlay:has(.modal-box-full){padding:0}
+  /* Clickable name links (open the user / room modal). */
+  .linklike{background:none;border:none;padding:0;margin:0;color:#7dd3fc;cursor:pointer;font:inherit;text-decoration:underline;text-underline-offset:2px}
+  .linklike:hover{color:#a5e4ff}
+  /* User / room modal action lists. */
+  .um-line{margin:0 0 12px;color:#aab0d4}
+  .um-actions{display:flex;flex-direction:column;gap:8px;align-items:stretch}
+  .um-actions button{width:100%;text-align:left;padding:10px 12px;font-size:14px}
+  .um-actions .reassign-picker{flex-wrap:wrap}
   .modal-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #1e1b2e}
   .modal-head h3{margin:0;font-size:16px}
   .modal-x{background:none;border:none;color:#9aa0c4;font-size:22px;line-height:1;cursor:pointer;padding:0 4px}
@@ -3668,6 +3668,9 @@ app.get('/admin', (req, res) => {
   .ge-map{border:1px solid #26233c;border-radius:10px;padding:10px 12px;margin:0 0 12px;background:#0a0814}
   .ge-map h4{margin:0 0 8px;font-size:14px}
   .ge-map-tools{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 8px;font-size:12px;color:#9aa0c8}
+  .ge-locate{display:inline-flex;gap:5px;align-items:center}
+  .ge-locate button{background:#1a1730;border:1px solid #2a2740;color:#e6e9ff;border-radius:6px;padding:3px 8px;font-size:12px;cursor:pointer}
+  .ge-locate button:hover{background:#262247}
   .ge-actor{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
   .ge-actor-chip{border:1px solid #00000066;border-radius:5px;color:#0c0a16;font-weight:700;font-size:11px;padding:3px 8px;cursor:pointer;text-shadow:0 1px 0 rgba(255,255,255,.4);opacity:.5}
   .ge-actor-chip.sel{opacity:1;outline:2px solid #7dd3fc;outline-offset:1px}
@@ -3699,7 +3702,12 @@ app.get('/admin', (req, res) => {
     .ws-info{margin-left:0;width:100%}
     .modal-overlay{padding:8px}
     .modal-box{width:100%;max-height:94vh}
+    /* The state-management modal stays edge-to-edge full screen on phones. */
+    .modal-box-full{width:100vw;max-width:100vw;height:100vh;max-height:100vh}
+    .modal-overlay:has(.modal-box-full){padding:0}
     .modal-body{padding:8px 10px 14px}
+    .um-actions button{padding:11px 12px}
+    #ge-map-host{height:60vh}
     /* Manage-state modal: stack each control so it's readable + tappable on a
        phone instead of wrapping into a cramped row. */
     .ge-player{padding:10px}
@@ -3824,7 +3832,7 @@ app.get('/admin', (req, res) => {
   <table>
     <thead><tr>
       <th>Code</th><th>Name</th><th>Host</th>
-      <th>Status</th><th>Policy</th><th class="num">Players</th><th>Created</th><th>State</th><th>Manage</th>
+      <th>Status</th><th>Policy</th><th class="num">Players</th><th>Created</th>
     </tr></thead>
     <tbody id="lobby-tbody">${lobbyRows}</tbody>
   </table>
@@ -3838,7 +3846,7 @@ app.get('/admin', (req, res) => {
       <div class="modal-body">
         <table>
           <thead><tr>
-            <th>Code</th><th>Name</th><th>Host</th><th class="num">Players</th><th>Status</th><th>Ended</th><th>Manage</th>
+            <th>Code</th><th>Name</th><th>Host</th><th class="num">Players</th><th>Status</th><th>Ended</th>
           </tr></thead>
           <tbody>${endedRows}</tbody>
         </table>
@@ -3847,7 +3855,7 @@ app.get('/admin', (req, res) => {
   </div>
 
   <div id="game-edit-modal" class="modal-overlay" hidden>
-    <div class="modal-box" style="width:min(960px,96vw)">
+    <div class="modal-box modal-box-full">
       <div class="modal-head">
         <h3 id="game-edit-title">Manage game state</h3>
         <button id="game-edit-close" type="button" class="modal-x" aria-label="Close">×</button>
@@ -3855,6 +3863,26 @@ app.get('/admin', (req, res) => {
       <div class="modal-body" id="game-edit-body">
         <p><em>Loading…</em></p>
       </div>
+    </div>
+  </div>
+
+  <div id="user-modal" class="modal-overlay" hidden>
+    <div class="modal-box" style="width:min(460px,96vw)">
+      <div class="modal-head">
+        <h3 id="user-modal-title">User</h3>
+        <button id="user-modal-close" type="button" class="modal-x" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body" id="user-modal-body"></div>
+    </div>
+  </div>
+
+  <div id="room-modal" class="modal-overlay" hidden>
+    <div class="modal-box" style="width:min(460px,96vw)">
+      <div class="modal-head">
+        <h3 id="room-modal-title">Room</h3>
+        <button id="room-modal-close" type="button" class="modal-x" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body" id="room-modal-body"></div>
     </div>
   </div>
 
@@ -3888,6 +3916,83 @@ app.get('/admin', (req, res) => {
 // already hold a Discord link), used to populate the reassign picker -
 // which offers only accounts with NO link - without another round-trip.
 var ADMIN_PROFILES = ${JSON.stringify(profiles.map((p) => ({ id: p.id, name: p.name, linked: !!p.discord_id })))};
+
+// Small HTML escaper for values we re-insert into modal markup (Discord names
+// can carry anything; profile names are restricted but escape them too).
+function admEsc(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// User settings modal: clicking a username opens it; it holds EVERY per-user
+// edit action (the inline buttons moved here). The action buttons reuse the
+// existing classes/data-attrs so the existing delegated handlers fire.
+(function () {
+  var modal = document.getElementById('user-modal');
+  var body = document.getElementById('user-modal-body');
+  var title = document.getElementById('user-modal-title');
+  if (!modal) return;
+  function hide() { modal.hidden = true; }
+  document.getElementById('user-modal-close').addEventListener('click', hide);
+  modal.addEventListener('click', function (e) { if (e.target === modal) hide(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !modal.hidden) hide(); });
+  document.addEventListener('click', function (ev) {
+    var b = ev.target.closest('.btn-user');
+    if (!b) return;
+    var pid = b.getAttribute('data-pid');
+    var pname = b.getAttribute('data-pname');
+    var linked = b.getAttribute('data-linked') === '1';
+    var dname = b.getAttribute('data-dname');
+    title.textContent = '@' + pname;
+    var h = '<p class="um-line">Discord: ' + (linked ? ('🔗 ' + admEsc(dname)) : '<span class="muted">not linked</span>') + '</p>';
+    h += '<div class="um-actions">';
+    h += '<button class="btn-add-token" data-pid="' + pid + '" data-pname="' + admEsc(pname) + '">Issue device code</button>';
+    if (linked) {
+      h += '<button class="btn-reassign-discord" data-pid="' + pid + '" data-pname="' + admEsc(pname) + '" data-dname="' + admEsc(dname) + '">Reassign Discord</button>';
+      h += '<button class="btn-unlink-discord" data-pid="' + pid + '" data-pname="' + admEsc(pname) + '">Unlink Discord</button>';
+    }
+    h += '<button class="btn-del-profile danger" data-pid="' + pid + '" data-pname="' + admEsc(pname) + '">Delete account</button>';
+    h += '</div>';
+    body.innerHTML = h;
+    modal.hidden = false;
+  });
+})();
+
+// Room modal: clicking a room name opens it with the room's actions (Manage
+// state / Cancel for an active room, Restore for a cancelled one). Buttons reuse
+// the existing classes so the existing handlers fire.
+(function () {
+  var modal = document.getElementById('room-modal');
+  var body = document.getElementById('room-modal-body');
+  var title = document.getElementById('room-modal-title');
+  if (!modal) return;
+  function hide() { modal.hidden = true; }
+  document.getElementById('room-modal-close').addEventListener('click', hide);
+  modal.addEventListener('click', function (e) { if (e.target === modal) hide(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !modal.hidden) hide(); });
+  document.addEventListener('click', function (ev) {
+    var b = ev.target.closest('.btn-room');
+    if (!b) return;
+    var lid = b.getAttribute('data-lid');
+    var gid = b.getAttribute('data-gid');
+    var lname = b.getAttribute('data-lname');
+    var lcode = b.getAttribute('data-lcode');
+    var status = b.getAttribute('data-status');
+    title.textContent = lname + ' (' + lcode + ')';
+    var h = '<div class="um-actions">';
+    if (status === 'active') {
+      if (gid) h += '<button class="btn-manage-game" data-gid="' + gid + '" data-lname="' + admEsc(lname) + '" data-lcode="' + admEsc(lcode) + '">🛠 Manage state</button>';
+      else h += '<p class="muted">No game started yet.</p>';
+      h += '<button class="btn-del-lobby danger" data-lid="' + lid + '" data-lname="' + admEsc(lname) + '">Cancel table</button>';
+    } else if (status === 'cancelled') {
+      h += '<button class="btn-restore-lobby" data-lid="' + lid + '" data-lname="' + admEsc(lname) + '">Restore table</button>';
+    } else {
+      h += '<p class="muted">This game is finished. No actions.</p>';
+    }
+    h += '</div>';
+    body.innerHTML = h;
+    modal.hidden = false;
+  });
+})();
 
 // "Issue device code" - mints a fresh recovery code for the
 // profile and replaces the button cell with the one-shot code so
@@ -3951,16 +4056,15 @@ document.addEventListener('click', function (ev) {
     .then(function (res) {
       if (!res.ok) {
         btn.disabled = false;
-        btn.textContent = 'Cancel';
+        btn.textContent = 'Cancel table';
         alert('Failed: ' + (res.body && res.body.error || 'unknown'));
         return;
       }
-      var tr = btn.closest('tr');
-      if (tr) tr.remove();
+      location.reload();   // refresh the rooms table (button now lives in a modal)
     })
     .catch(function () {
       btn.disabled = false;
-      btn.textContent = 'Cancel';
+      btn.textContent = 'Cancel table';
       alert('Network error.');
     });
 });
@@ -3985,10 +4089,7 @@ document.addEventListener('click', function (ev) {
         alert('Failed: ' + (res.body && res.body.error || 'unknown'));
         return;
       }
-      var tr = btn.closest('tr');
-      var cell = tr ? tr.querySelector('.discord-cell') : null;
-      if (cell) cell.innerHTML = '<span class="muted">not linked</span>';
-      btn.remove();
+      location.reload();   // refresh the table + modal (button now lives in a modal)
     })
     .catch(function () {
       btn.disabled = false;
@@ -4091,8 +4192,7 @@ document.addEventListener('click', function (ev) {
         alert(msg);
         return;
       }
-      var tr = btn.closest('tr');
-      if (tr) tr.remove();
+      location.reload();   // refresh the table (button now lives in a modal)
     })
     .catch(function () {
       btn.disabled = false;
@@ -4237,6 +4337,10 @@ document.addEventListener('click', function (ev) {
       return '<button type="button" class="ge-actor-chip' + sel + '" data-pid="' + p.profileId + '" style="background:' + esc(p.color || '#888') + '">@' + esc(p.name) + '</button>';
     }).join('');
     var tools = '<div class="ge-map-tools"><span class="ge-actor">Acting as: ' + chips + '</span>'
+      + '<span class="ge-locate">Locate: '
+      + '<button type="button" data-loc="rocket">🚀 Rocket</button>'
+      + '<button type="button" data-loc="factories">🏭 Factories</button>'
+      + '<button type="button" data-loc="outposts">📦 Outposts</button></span>'
       + '<span style="opacity:.7">Click a site to build / teleport; click any node to teleport.</span></div>';
     return '<div class="ge-map"><h4>🗺 Solar map</h4>' + tools
       + '<div class="ge-map-wrap"><div id="ge-map-host"></div></div></div>';
@@ -4389,6 +4493,7 @@ document.addEventListener('click', function (ev) {
   }
   function load(gid, label) {
     current.gid = gid;
+    var rm = document.getElementById('room-modal'); if (rm) rm.hidden = true;   // close the room modal behind it
     title.textContent = 'Manage state: ' + label;
     body.innerHTML = '<p><em>Loading…</em></p>';
     modal.hidden = false;
@@ -4423,6 +4528,17 @@ document.addEventListener('click', function (ev) {
     // rocket focus ring follow; the player/card list below is unaffected).
     var chip = ev.target.closest('.ge-actor-chip');
     if (chip) { actorPid = Number(chip.getAttribute('data-pid')); refreshActorChips(); refreshMap(); return; }
+    // Map: "Locate" buttons fly the camera to the acting player's rocket /
+    // factories / outposts.
+    var loc = ev.target.closest('.ge-locate button[data-loc]');
+    if (loc) {
+      if (!mapApi) return;
+      var which = loc.getAttribute('data-loc');
+      if (which === 'rocket') mapApi.focusRocket();
+      else if (which === 'factories') mapApi.focusFactories();
+      else if (which === 'outposts') mapApi.focusOutposts();
+      return;
+    }
     // (Map node clicks are handled by the renderer's onSelect -> openWizard; the
     // wizard popup wires its own buttons.)
     // Assembly cube manager: click a cube to pick it up, click a space to drop.

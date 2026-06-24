@@ -64,13 +64,41 @@ export async function mountAdminMap(host, { onPickSite } = {}) {
   };
   waitForSize();
 
+  // Suppress the renderer's auto-fly-to-rocket: we frame the whole map above and
+  // re-point the rocket sprite on every acting-player switch, so it must NOT
+  // yank the camera each time setSandboxRocket runs.
+  renderer._initialViewDone = true;
+
+  // World (x,y) of a server slug, or null (waypoint with no position / unknown).
+  const worldOf = (slug) => {
+    const id = slug && _slugToId[slug];
+    const n = id && _data.byId[id];
+    return (n && Number.isFinite(n.x) && Number.isFinite(n.y)) ? { x: n.x, y: n.y } : null;
+  };
+  let _leoPos;
+  const leoWorld = () => {
+    if (_leoPos === undefined) {
+      const leo = (_data.sites || []).find((s) => s.name && String(s.name).toLowerCase() === 'leo');
+      _leoPos = (leo && Number.isFinite(leo.x)) ? { x: leo.x, y: leo.y } : null;
+    }
+    return _leoPos;
+  };
+
+  let _view = null, _actor = null;
+  const actingPlayer = () => {
+    const players = (_view && _view.players) || [];
+    return players.find((p) => p.profileId === _actor) || players[0] || null;
+  };
+
   return {
     renderer,
     data: _data,
-    // Push the current game state onto the map: factories (+ colony domes) tinted
-    // by owner colour, and a focus ring on the acting player's rocket so the
-    // admin can see where a teleport starts from.
+    // Push the current game state onto the map: ALL factories (+ colony domes)
+    // tinted by owner, plus the ACTING player's rocket sprite + outpost chits
+    // (the renderer carries one ship + one outpost set, so they follow the
+    // acting-player selector) and a focus ring on the rocket's site.
     update(view, actorPid) {
+      _view = view; _actor = actorPid;
       const facs = {}, cols = {};
       for (const f of (view && view.factories) || []) {
         const cid = _slugToId[f.slug];
@@ -80,10 +108,42 @@ export async function mountAdminMap(host, { onPickSite } = {}) {
       }
       renderer.setFactories(facs);
       renderer.setColonies(cols);
-      const players = (view && view.players) || [];
-      const me = players.find((p) => p.profileId === actorPid) || players[0] || null;
-      const slug = me && me.rocket && me.rocket.siteId;
-      renderer.setFocusedSiteId(slug ? (_slugToId[slug] || null) : null);
+      const me = actingPlayer();
+      // Rocket: place the acting player's ship at its site (null siteId = LEO).
+      const rSlug = (me && me.rocket && me.rocket.siteId) || null;
+      const rPos = worldOf(rSlug) || leoWorld();
+      renderer.setSandboxRocket(rPos ? { x: rPos.x, y: rPos.y, color: me && me.color } : null);
+      renderer.setFocusedSiteId(rSlug ? (_slugToId[rSlug] || null) : null);
+      // Outposts: the acting player's, keyed A/B/C/D with client-id siteIds.
+      const outs = {};
+      const oin = (me && me.outposts) || {};
+      for (const k of Object.keys(oin)) {
+        const o = oin[k]; const cid = o && o.siteId && _slugToId[o.siteId];
+        if (!cid) continue;
+        outs[k] = { letter: o.letter || k, siteId: cid, cards: o.cards || [], tank: o.tank || 0 };
+      }
+      if (typeof renderer.setOutpostColor === 'function') renderer.setOutpostColor(me && me.color);
+      renderer.setOutposts(outs);
+    },
+    // Camera helpers for the "Locate" buttons. Each flies to the relevant spot.
+    focusRocket() {
+      const me = actingPlayer();
+      const pos = worldOf(me && me.rocket && me.rocket.siteId) || leoWorld();
+      if (pos) renderer.flyTo(pos, 5, { ms: 400 });
+    },
+    focusOutposts() {
+      const me = actingPlayer();
+      const pts = Object.values((me && me.outposts) || {}).map((o) => worldOf(o && o.siteId)).filter(Boolean);
+      this._flyToPoints(pts);
+    },
+    focusFactories() {
+      const pts = ((_view && _view.factories) || []).map((f) => worldOf(f.slug)).filter(Boolean);
+      this._flyToPoints(pts);
+    },
+    _flyToPoints(pts) {
+      if (!pts.length) return;
+      let cx = 0, cy = 0; for (const p of pts) { cx += p.x; cy += p.y; }
+      renderer.flyTo({ x: cx / pts.length, y: cy / pts.length }, pts.length === 1 ? 5 : 2.5, { ms: 400 });
     },
     siteName(slug) { const id = _slugToId[slug]; const n = id && _data.byId[id]; return (n && n.name) || slug; },
     isSite(slug) { const id = _slugToId[slug]; const n = id && _data.byId[id]; return !!(n && n.name && n.isLandable !== false); },
