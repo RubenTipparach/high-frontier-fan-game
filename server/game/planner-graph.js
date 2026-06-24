@@ -366,6 +366,34 @@ export function findPath(fromSlug, toSlug) {
   return { path, totalBurns: dist.get(t), segments };
 }
 
+// Lightweight snapshot of every graph node for the admin map visualizer: the
+// planner x/y (the SAME coordinate space the client renders from) plus enough
+// metadata to draw + label a marker. Real sites carry curated spectralType /
+// body / solarZone (via the attached data/sites.js entry); waypoints
+// (lagrange / burn / hohmann / rad) return them null. Read-only; built from the
+// already-loaded NODES_BY_SLUG, so it needs no extra data load.
+export function allNodes() {
+  const out = [];
+  for (const n of NODES_BY_SLUG.values()) {
+    if (typeof n.x !== 'number' || typeof n.y !== 'number') continue;
+    const site = n.site || null;
+    out.push({
+      slug: n.slug,
+      x: n.x,
+      y: n.y,
+      type: n.type || 'unknown',
+      name: n.name || (site && site.name) || null,
+      isSite: isSiteNode(n.slug),
+      spectralType: site ? (site.spectralType || 'C') : null,
+      siteSize: n.siteSize || null,
+      body: site ? (site.body || null) : null,
+      solarZone: site ? (site.solarZone || null) : null,
+      hazard: !!n.hazard,
+    });
+  }
+  return out;
+}
+
 class MinHeap {
   constructor() { this.h = []; }
   get size() { return this.h.length; }
