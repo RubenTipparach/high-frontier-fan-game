@@ -9325,14 +9325,11 @@ function exportSupportChainJson() {
   let json;
   try { json = supportChainExportJson(); }
   catch (e) { setStatus('Could not build the support-chain JSON.'); return; }
-  const fallback = () => showCopyTextModal('🔗 Support chain (JSON)', json);
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(json)
-      .then(() => setStatus('🔗 Support chain copied to clipboard as JSON.'))
-      .catch(fallback);
-  } else {
-    fallback();
-  }
+  // Always open the modal so the JSON is VISIBLE (mobile browsers often have no
+  // usable clipboard API; a silent "copied" toast leaves the user with nothing).
+  // The modal's Copy button still tries the clipboard as a convenience; the
+  // textarea is always there to select / screenshot.
+  showCopyTextModal('🔗 Support chain (JSON)', json);
 }
 
 // Minimal selectable-text modal: shows `text` in a read-only textarea with a
@@ -9358,9 +9355,18 @@ function showCopyTextModal(title, text) {
   ta.value = text;
   panel.querySelector('[data-act="copy"]').addEventListener('click', () => {
     ta.focus(); ta.select();
-    let ok = false;
-    try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
-    setStatus(ok ? '🔗 Copied to clipboard.' : 'Select the text and copy it manually.');
+    const done = (ok) => setStatus(ok ? '🔗 Copied to clipboard.' : 'Select the text above and copy it manually.');
+    // Prefer the async Clipboard API (works in most mobile browsers); fall back
+    // to execCommand for older webviews, then to manual selection.
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(ta.value).then(() => done(true)).catch(() => {
+        let ok = false; try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+        done(ok);
+      });
+    } else {
+      let ok = false; try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+      done(ok);
+    }
   });
   panel.querySelector('[data-act="close"]').addEventListener('click', close);
   overlay.appendChild(panel);
