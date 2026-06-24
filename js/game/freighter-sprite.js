@@ -56,12 +56,15 @@ function freighterBody(pcol, defsId, opts = {}) {
   const win = _lighten(pcol, 0.35);
   let s = '';
 
-  // exhaust plume glow (behind everything), out of the aft engines
+  // exhaust plume glow (behind everything): one plume streaming out of EACH of
+  // the three aft engines, fanned slightly (top up-left, bottom down-left).
   s += `<defs><radialGradient id="exg${defsId}" cx="0.5" cy="0.5" r="0.5">`
     + `<stop offset="0" stop-color="${_lighten(glow, 0.4)}" stop-opacity="0.95"/>`
     + `<stop offset="0.4" stop-color="${glow}" stop-opacity="0.6"/>`
     + `<stop offset="1" stop-color="${glow}" stop-opacity="0"/></radialGradient></defs>`;
-  s += `<ellipse cx="14" cy="92" rx="26" ry="11" fill="url(#exg${defsId})" transform="rotate(-20 14 92)"/>`;
+  for (const [ny, ang] of [[64, -10], [78, 0], [92, 10]]) {
+    s += `<ellipse cx="2" cy="${ny}" rx="24" ry="8" fill="url(#exg${defsId})" transform="rotate(${ang} 2 ${ny})"/>`;
+  }
 
   // aft engine cluster: three nozzle bells
   for (const [ny, r] of [[64, 7.5], [78, 8.5], [92, 7.5]]) {
@@ -99,8 +102,6 @@ function freighterBody(pcol, defsId, opts = {}) {
   s += `<rect x="124" y="78" width="20" height="3" fill="${_shade(hull, 0.55)}"/>`;
   s += `<rect x="126" y="60" width="15" height="10" rx="2.5" fill="${win}" stroke="${k}" stroke-width="1"/>`;
   s += `<rect x="127.5" y="61.5" width="5" height="7" rx="1" fill="${_lighten(win, 0.5)}" opacity="0.8"/>`;
-  // player chevron flash on the hull side
-  s += `<path d="M86 88 L96 84 L94 89 L104 85" fill="none" stroke="${glow}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity="0.9"/>`;
 
   if (promoted) {
     s += `<rect x="122" y="54" width="24" height="32" rx="5" fill="none" stroke="${glow}" stroke-width="1.4" opacity="0.8"/>`;
