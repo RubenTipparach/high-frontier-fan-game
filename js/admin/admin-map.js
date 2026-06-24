@@ -145,6 +145,21 @@ export async function mountAdminMap(host, { onPickSite } = {}) {
       let cx = 0, cy = 0; for (const p of pts) { cx += p.x; cy += p.y; }
       renderer.flyTo({ x: cx / pts.length, y: cy / pts.length }, pts.length === 1 ? 5 : 2.5, { ms: 400 });
     },
+    // Fly to a single slug (used by the Locate pickers).
+    flyToSlug(slug) { const p = worldOf(slug) || (slug ? null : leoWorld()); if (p) renderer.flyTo(p, 5, { ms: 400 }); },
+    // Option lists for the Locate pickers (all factories; the acting player's outposts).
+    listFactories() {
+      return ((_view && _view.factories) || []).map((f) => ({
+        slug: f.slug, name: this.siteName(f.slug), owner: f.ownerName || ('#' + f.ownerId), color: f.ownerColor, hasColony: !!f.hasColony,
+      }));
+    },
+    listOutposts() {
+      const me = actingPlayer();
+      return Object.keys((me && me.outposts) || {}).map((k) => {
+        const o = me.outposts[k];
+        return { letter: o.letter || k, slug: o.siteId, name: this.siteName(o.siteId) };
+      }).filter((o) => o.slug);
+    },
     siteName(slug) { const id = _slugToId[slug]; const n = id && _data.byId[id]; return (n && n.name) || slug; },
     isSite(slug) { const id = _slugToId[slug]; const n = id && _data.byId[id]; return !!(n && n.name && n.isLandable !== false); },
   };

@@ -3388,7 +3388,8 @@ app.get('/admin', (req, res) => {
   const PER = 20;
   const pageNum = (key) => Math.max(1, parseInt(req.query[key], 10) || 1);
   const ppN = pageNum('pp'); // players
-  const rpN = pageNum('rp'); // rooms
+  const rpN = pageNum('rp'); // multiplayer rooms
+  const spN = pageNum('sp'); // solo rooms
   const cpN = pageNum('cp'); // chat
   const ipN = pageNum('ip'); // direct invites
   const lpN = pageNum('lp'); // invite links
@@ -3434,11 +3435,15 @@ app.get('/admin', (req, res) => {
   const profilesHasNext = profilesRaw.length > PER;
   const profiles = profilesRaw.slice(0, PER);
 
-  // Active rooms only - cancelled ones live in their own modal (below).
-  const lobbiesRaw = db
-    .prepare(
-      `SELECT l.id, l.code, l.name, l.status, l.join_policy, l.max_players,
+  // Active rooms only - cancelled ones live in their own modal (below). Split
+  // into Multiplayer (max_players > 1) and Solo (max_players = 1) and order each
+  // by LAST ACTIVITY (the game's latest state update = last move/op made; falls
+  // back to room-created for rooms with no game yet).
+  const LAST_ACTIVE = `COALESCE((SELECT gs.updated_at FROM game_states gs JOIN games g ON g.id = gs.game_id
+                WHERE g.lobby_id = l.id ORDER BY gs.updated_at DESC LIMIT 1), l.created_at)`;
+  const ROOM_SELECT = `SELECT l.id, l.code, l.name, l.status, l.join_policy, l.max_players,
               datetime(l.created_at / 1000, 'unixepoch') AS created,
+              datetime(${LAST_ACTIVE} / 1000, 'unixepoch') AS active_when,
               p.name AS host_name,
               (SELECT COUNT(*) FROM lobby_members lm WHERE lm.lobby_id = l.id) AS members,
               (SELECT g.id FROM games g WHERE g.lobby_id = l.id AND g.status = 'active'
@@ -3446,13 +3451,17 @@ app.get('/admin', (req, res) => {
        FROM lobbies l
        JOIN profiles p ON p.id = l.host_id
        WHERE l.status != 'cancelled'
-         AND NOT EXISTS (SELECT 1 FROM games g2 WHERE g2.lobby_id = l.id AND g2.status = 'finished')
-       ORDER BY l.created_at DESC
-       LIMIT ${PER + 1} OFFSET ${(rpN - 1) * PER}`
-    )
-    .all();
-  const lobbiesHasNext = lobbiesRaw.length > PER;
-  const lobbies = lobbiesRaw.slice(0, PER);
+         AND NOT EXISTS (SELECT 1 FROM games g2 WHERE g2.lobby_id = l.id AND g2.status = 'finished')`;
+  const mpLobbiesRaw = db.prepare(
+    `${ROOM_SELECT} AND l.max_players > 1 ORDER BY ${LAST_ACTIVE} DESC LIMIT ${PER + 1} OFFSET ${(rpN - 1) * PER}`
+  ).all();
+  const mpLobbiesHasNext = mpLobbiesRaw.length > PER;
+  const mpLobbies = mpLobbiesRaw.slice(0, PER);
+  const soloLobbiesRaw = db.prepare(
+    `${ROOM_SELECT} AND l.max_players = 1 ORDER BY ${LAST_ACTIVE} DESC LIMIT ${PER + 1} OFFSET ${(spN - 1) * PER}`
+  ).all();
+  const soloLobbiesHasNext = soloLobbiesRaw.length > PER;
+  const soloLobbies = soloLobbiesRaw.slice(0, PER);
 
   // Ended games: cancelled rooms OR rooms whose game finished. Most-recently
   // ended first (cancelled -> cancelled_at; finished -> the game's finished_at;
@@ -3555,17 +3564,19 @@ app.get('/admin', (req, res) => {
   `;
   }).join('') || '<tr><td colspan=7><em>No profiles yet.</em></td></tr>';
 
-  const lobbyRows = lobbies.map((r) => `
-    <tr data-name="${esc(String(r.name || '').toLowerCase())}" data-search="${esc((String(r.name || '') + ' ' + String(r.code || '')).toLowerCase())}">
+  const roomRowsHtml = (arr, emptyMsg) => arr.map((r) => `
+    <tr class="room-row" data-search="${esc((String(r.name || '') + ' ' + String(r.code || '')).toLowerCase())}">
       <td data-label="Code"><code>${esc(r.code)}</code></td>
       <td data-label="Name"><button class="btn-room linklike" data-lid="${r.id}" data-gid="${r.game_id || ''}" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}" data-status="active">${esc(r.name)}</button></td>
       <td data-label="Host">@${esc(r.host_name)}</td>
       <td data-label="Status"><span class="pill pill-${esc(r.status)}">${esc(r.status)}</span></td>
       <td data-label="Policy">${esc(r.join_policy)}</td>
       <td data-label="Players" class="num">${r.members} / ${r.max_players}</td>
-      <td data-label="Created">${esc(r.created)}</td>
+      <td data-label="Last active">${esc(r.active_when)}</td>
     </tr>
-  `).join('') || '<tr class="empty-row"><td colspan=7><em>No active rooms.</em></td></tr>';
+  `).join('') || `<tr class="empty-row"><td colspan=7><em>${esc(emptyMsg)}</em></td></tr>`;
+  const mpLobbyRows = roomRowsHtml(mpLobbies, 'No active multiplayer rooms.');
+  const soloLobbyRows = roomRowsHtml(soloLobbies, 'No active solo rooms.');
 
   const endedRows = endedLobbies.map((r) => `
     <tr>
@@ -3731,6 +3742,8 @@ app.get('/admin', (req, res) => {
   .ge-wiz-box{background:#12101f;border:1px solid #3a3760;border-radius:12px;padding:14px;min-width:280px;max-width:min(360px,92vw);box-shadow:0 12px 40px rgba(0,0,0,.6)}
   .ge-wiz-h{font-size:15px;font-weight:700;color:#eef0ff;margin-bottom:2px}
   .ge-wiz-sub{font-size:12px;color:#9aa0c8;margin:0 0 10px}
+  .ge-wiz-loc{font-size:12px;color:#7fe3f5;margin:0 0 8px;font-weight:600}
+  .ge-locate-item .muted{font-weight:400}
   .ge-wiz-box button{display:block;width:100%;text-align:left;background:#1a1730;border:1px solid #2a2740;color:#e6e9ff;border-radius:8px;padding:9px 12px;font-size:13px;margin:6px 0;cursor:pointer}
   .ge-wiz-box button:hover{background:#262247}
   .ge-wiz-box button.danger{background:#3a1620;border-color:#5a2230;color:#ffd0d0}
@@ -3782,6 +3795,7 @@ app.get('/admin', (req, res) => {
   h1{color:#eef1ff;font-size:21px;font-weight:800;letter-spacing:.2px}
   .sub{color:var(--mut)}
   h2{color:var(--acc2)}
+  .room-cat{font-size:12px;letter-spacing:.6px;text-transform:uppercase;color:var(--mut);margin:18px 0 8px;display:flex;align-items:center;gap:7px}
   .header-row .ws-info{background:var(--surf);border-color:var(--line)}
   /* KPI stat cards with a gradient accent bar */
   /* KPI stat cards: a compact auto-fit grid (many small panels per row) */
@@ -3956,14 +3970,24 @@ app.get('/admin', (req, res) => {
     <input id="room-search" type="search" placeholder="Search room name or code…" autocomplete="off" />
     <button id="show-cancelled" type="button">🗑 Canceled / finished games (${endedLobbies.length})</button>
   </div>
+  <h3 class="room-cat">👥 Multiplayer</h3>
   <table>
     <thead><tr>
       <th>Code</th><th>Name</th><th>Host</th>
-      <th>Status</th><th>Policy</th><th class="num">Players</th><th>Created</th>
+      <th>Status</th><th>Policy</th><th class="num">Players</th><th>Last active</th>
     </tr></thead>
-    <tbody id="lobby-tbody">${lobbyRows}</tbody>
+    <tbody>${mpLobbyRows}</tbody>
   </table>
-  ${pager('rp', rpN, lobbiesHasNext, 'rooms')}
+  ${pager('rp', rpN, mpLobbiesHasNext, 'rooms')}
+  <h3 class="room-cat">🎲 Solo</h3>
+  <table>
+    <thead><tr>
+      <th>Code</th><th>Name</th><th>Host</th>
+      <th>Status</th><th>Policy</th><th class="num">Players</th><th>Last active</th>
+    </tr></thead>
+    <tbody>${soloLobbyRows}</tbody>
+  </table>
+  ${pager('sp', spN, soloLobbiesHasNext, 'rooms')}
   </section>
 
   <div id="cancelled-modal" class="modal-overlay" hidden>
@@ -4370,15 +4394,13 @@ document.addEventListener('click', function (ev) {
 // (lowercased name + code), so a code substring matches too.
 (function () {
   var search = document.getElementById('room-search');
-  var tbody = document.getElementById('lobby-tbody');
-  if (!search || !tbody) return;
+  if (!search) return;
   search.addEventListener('input', function () {
     var q = search.value.trim().toLowerCase();
-    var rows = tbody.querySelectorAll('tr');
+    var rows = document.querySelectorAll('#tab-rooms tr.room-row');   // both MP + Solo tables
     for (var i = 0; i < rows.length; i++) {
       var tr = rows[i];
-      if (tr.classList.contains('empty-row')) continue;
-      var hay = tr.getAttribute('data-search') || tr.getAttribute('data-name') || '';
+      var hay = tr.getAttribute('data-search') || '';
       tr.style.display = (!q || hay.indexOf(q) !== -1) ? '' : 'none';
     }
   });
@@ -4539,6 +4561,31 @@ document.addEventListener('click', function (ev) {
   // Push current factories / colonies / rocket-focus onto the live map.
   function refreshMap() { if (mapApi) mapApi.update(current.state, actorPid); }
   function closeWizard() { var w = document.getElementById('ge-wiz'); if (w) w.parentNode.removeChild(w); }
+  // Locate picker: a popup list of every factory / outpost to jump to.
+  function openLocatePicker(kind) {
+    closeWizard();
+    var items = kind === 'factories' ? mapApi.listFactories() : mapApi.listOutposts();
+    var ov = document.createElement('div'); ov.id = 'ge-wiz'; ov.className = 'ge-wiz-overlay';
+    var box = document.createElement('div'); box.className = 'ge-wiz-box';
+    var title = kind === 'factories' ? '🏭 Factories' : '📦 Outposts';
+    var h = '<div class="ge-wiz-h">' + title + ' <span class="muted">(' + items.length + ')</span></div>';
+    if (!items.length) {
+      h += '<p class="ge-wiz-sub">None to locate.</p>';
+    } else {
+      items.forEach(function (it) {
+        var sub = kind === 'factories'
+          ? ('@' + esc(it.owner) + (it.hasColony ? ' · 🏠 colony' : ''))
+          : ('outpost ' + esc(it.letter));
+        h += '<button class="ge-locate-item" data-slug="' + esc(it.slug) + '" data-name="' + esc(it.name) + '">'
+          + (kind === 'factories' ? '🏭 ' : '📦 ') + esc(it.name) + ' <span class="muted">' + sub + '</span></button>';
+      });
+    }
+    h += '<button class="ge-wiz-cancel" data-w="cancel">Close</button>';
+    box.innerHTML = h;
+    box.addEventListener('click', function (e) { if (e.target.closest('[data-w="cancel"]')) closeWizard(); });
+    ov.addEventListener('click', function (e) { if (e.target === ov) closeWizard(); });
+    ov.appendChild(box); document.body.appendChild(ov);
+  }
   // A site/node was clicked on the map -> pop a wizard with the relevant actions
   // for the acting player. Sites can build / teleport / manage a factory; any
   // node (incl. waypoints) can teleport. Building asks the colony-dome question
@@ -4551,10 +4598,18 @@ document.addEventListener('click', function (ev) {
     var isSite = !!(site && site.name && site.isLandable !== false);
     var hasFactory = (current.state.factories || []).some(function (f) { return f.slug === slug; });
     var label = (site && site.name) ? site.name : slug;
+    // Target-location detail line for the popup: slug + spectral/type + size + zone.
+    var bits = [];
+    if (slug) bits.push(esc(site && site.id2 ? site.id2 : slug));
+    if (site && site.spectralType) bits.push('spectral ' + esc(site.spectralType));
+    else if (site && site.type) bits.push(esc(site.type));
+    if (site && site.siteSize) bits.push('size ' + esc(site.siteSize));
+    if (site && site.solarZone) bits.push(esc(site.solarZone) + ' zone');
+    var locLine = '<p class="ge-wiz-loc">📍 ' + bits.join(' · ') + '</p>';
     var ov = document.createElement('div'); ov.id = 'ge-wiz'; ov.className = 'ge-wiz-overlay';
     var box = document.createElement('div'); box.className = 'ge-wiz-box';
     function home() {
-      var h = '<div class="ge-wiz-h">' + esc(label) + '</div><p class="ge-wiz-sub">Acting as <strong>' + esc(who) + '</strong></p>';
+      var h = '<div class="ge-wiz-h">' + esc(label) + '</div>' + locLine + '<p class="ge-wiz-sub">Acting as <strong>' + esc(who) + '</strong></p>';
       h += '<button data-w="tp">🛸 Teleport ' + esc(who) + ' here</button>';
       if (isSite && !hasFactory) h += '<button data-w="build">🏭 Build factory here</button>';
       if (hasFactory) {
@@ -4698,15 +4753,24 @@ document.addEventListener('click', function (ev) {
     // rocket focus ring follow; the player/card list below is unaffected).
     var chip = ev.target.closest('.ge-actor-chip');
     if (chip) { actorPid = Number(chip.getAttribute('data-pid')); refreshActorChips(); refreshMap(); return; }
-    // Map: "Locate" buttons fly the camera to the acting player's rocket /
-    // factories / outposts.
+    // Map: "Locate" buttons. Rocket flies straight to the single ship; factories
+    // and outposts open a picker listing each one so you can jump to a specific
+    // site (and act on it).
     var loc = ev.target.closest('.ge-locate button[data-loc]');
     if (loc) {
       if (!mapApi) return;
       var which = loc.getAttribute('data-loc');
       if (which === 'rocket') mapApi.focusRocket();
-      else if (which === 'factories') mapApi.focusFactories();
-      else if (which === 'outposts') mapApi.focusOutposts();
+      else if (which === 'factories') openLocatePicker('factories');
+      else if (which === 'outposts') openLocatePicker('outposts');
+      return;
+    }
+    // Locate-picker row: fly to that site and open its wizard.
+    var lp = ev.target.closest('.ge-locate-item');
+    if (lp) {
+      var lslug = lp.getAttribute('data-slug');
+      if (mapApi) mapApi.flyToSlug(lslug);
+      openWizard(lslug, { name: lp.getAttribute('data-name'), id2: lslug });
       return;
     }
     // (Map node clicks are handled by the renderer's onSelect -> openWizard; the
