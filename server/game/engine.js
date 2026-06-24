@@ -1370,7 +1370,120 @@ function rocketAtLeo(player) {
   return s == null || s === leoSlug();
 }
 
+// M1 Freighter movement (user spec, docs/module-m1-plan.md): the freighter is a
+// SECOND mover with a simple model - 1 burn space per turn (no fuel; the sheet
+// has no thrust/isp), free pivots up to the card's count, lands free on size-1
+// sites (size > 1 needs factory assist), generic hazards + FINAO as normal, and
+// a failed rad roll glitches the unit (a second rad fail while glitched explodes
+// it).
+function applyMoveFreighter(state, op, player) {
+  if (!state.m1) return fail('m1_off');
+  const fr = player.freighter;
+  if (!fr) return fail('no_freighter');
+  if (!op.debug && (player.freighterMovesRemaining | 0) <= 0) return fail('no_moves_left');
+  const from = fr.siteId;                  // null = LEO
+  const here = from == null ? leoSlug() : from;
+
+  // This turn's segments (the client planner is the route source of truth, same
+  // as the rocket). Fall back to a direct destination tap.
+  let segs = null;
+  const opSegs = Array.isArray(op.segments) ? op.segments : null;
+  if (opSegs && opSegs.length) {
+    segs = opSegs.map((s) => ({ from: String(s.from), to: String(s.to), burns: Math.max(0, Math.floor(Number(s.burns) || 0)) }));
+  }
+  let dest, thisTurnBurns, arrivals;
+  if (segs && segs.length) {
+    dest = segs[segs.length - 1].to;
+    thisTurnBurns = segs.reduce((b, s) => b + s.burns, 0);
+    arrivals = segs.map((s) => s.to);
+  } else {
+    const toSlug = String(op.toSiteId || '');
+    if (!plannerSiteExists(toSlug)) return fail('unknown_site');
+    if (toSlug === here) return fail('already_here');
+    const path = plannerFindPath(from, toSlug);
+    if (!path) return fail('no_route');
+    dest = toSlug; thisTurnBurns = path.totalBurns; arrivals = path.path.slice(1);
+  }
+  if (dest === from) return fail('already_here');
+  // 1 burn space per turn (pivots are free and not counted as burns).
+  if (thisTurnBurns > 1) return fail('freighter_one_burn');
+  if (isAerobrakeNode(dest)) return fail('cannot_stop_on_aerobrake', { site: dest });
+
+  // Landing: free on a size-1 (or aerobrake-landable) site; size > 1 needs a
+  // factory assist (roll, and only if a factory is present).
+  const destSize = nodeSizeNumber(dest);
+  const landG = (isAerobrakeLandableSite(dest) || destSize <= 1)
+    ? { ok: true, needsRoll: false }
+    : maneuverGate(state, dest, 0);
+  if (!landG.ok) return fail('cannot_land', { siteSize: destSize, site: dest });
+
+  // Hazards along the arrival nodes.
+  const generic = [], rad = [];
+  for (const slug of arrivals) {
+    const k = hazardKind(slug);
+    if (k === 'rad') rad.push(slug);
+    else if (k === 'skull' || k === 'aero') generic.push(slug);
+  }
+  const rollItems = [];
+  if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
+  for (const slug of generic) rollItems.push({ slug, kind: hazardKind(slug) });
+
+  if (op.debug) {
+    return { ok: true, state, log: '', calc: { unit: 'freighter', dest, destSize, thisTurnBurns, glitched: !!fr.glitched, rollItems: rollItems.length, radZones: rad.length } };
+  }
+
+  // FINAO: pay aqua up front to skip the generic + assist rolls (rad always rolls).
+  const wantPay = !!op.hazardPay;
+  const finaoPer = hasPrivilege(state, player, 'OPEN_SOURCE_FINAO') ? 3 : HAZARD_COST_PER;
+  const finaoCost = wantPay ? rollItems.length * finaoPer : 0;
+  if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
+  if (finaoCost > 0) player.aqua -= finaoCost;
+
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const rolls = [];
+  let destroyed = false;
+  let haltSlug = dest;
+  // Generic + assist rolls: a critical (a 1) destroys the freighter.
+  if (!wantPay) {
+    for (const item of rollItems) {
+      const d6 = gen.d6();
+      const crit = d6 === 1;
+      rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, d6, crit });
+      if (crit) { destroyed = true; haltSlug = item.slug; break; }
+    }
+  }
+  // Rad rolls: a failed rad roll (a 1) glitches the freighter; a second rad fail
+  // while already glitched explodes it.
+  if (!destroyed) {
+    for (const slug of rad) {
+      const d6 = gen.d6();
+      const radFail = d6 === 1;
+      rolls.push({ slug, kind: 'rad', d6, fail: radFail });
+      if (radFail) {
+        if (fr.glitched) { destroyed = true; haltSlug = slug; break; }
+        fr.glitched = true;
+      }
+    }
+  }
+  state.rng.cursor = gen.cursor;
+  player.freighterMovesRemaining -= 1;
+  fr.rolls = rolls;
+
+  const nameOf = (slug) => (siteById(slug) && siteById(slug).name) || (slug === leoSlug() ? 'LEO' : slug);
+  const rolled = rolls.some((r) => r.d6 != null);
+  if (destroyed) {
+    player.freighter = null;
+    return { ok: true, state, rolled: true, log: `${player.name}'s Freighter was destroyed at ${nameOf(haltSlug)}.` };
+  }
+  fr.siteId = (dest === leoSlug()) ? null : dest;
+  const glitchTail = fr.glitched ? ' (glitched)' : '';
+  return { ok: true, state, rolled, log: `${player.name} moved the Freighter to ${nameOf(dest)}${glitchTail}.` };
+}
+
 function applyMove(state, op, player) {
+  // M1: a MOVE tagged for the freighter drives the freighter unit instead of
+  // the rocket (a separate mover with its own, simpler movement model).
+  if (op.unit === 'freighter') return applyMoveFreighter(state, op, player);
   // A dry-run (op.debug) skips the per-turn budget gate so the fuel breakdown
   // can be previewed any time (even with the move already spent / off-turn).
   // One move per turn: spending it (movesRemaining -> 0) is the ONLY thing

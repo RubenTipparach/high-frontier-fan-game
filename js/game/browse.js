@@ -5197,6 +5197,7 @@ function humanizeOnlineOpError(code, detail) {
     already_have_freighter: 'You already have a Freighter in play.',
     no_freighter: 'You have no Freighter in play.',
     load_limit: 'The Freighter is at its cargo load limit.',
+    freighter_one_burn: 'The Freighter can only move one burn space per turn.',
     cannot_pay: 'Not enough aqua for that card.',
     crew_already_picked: 'You have already picked your starting crew.',
     crew_draft_closed: 'Crew picks are locked - the game has started.',

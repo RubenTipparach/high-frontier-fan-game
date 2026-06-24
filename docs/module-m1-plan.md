@@ -175,3 +175,34 @@ up), and orange **future-star tokens**.
 - Which Futures exist and their printed reqs/effects/VP (all on the cards -> the
   spreadsheet, not invented here).
 - Whether we scope Futures at all before M0 + M2 land (Futures need all three).
+
+## Freighter movement (user spec 2026-06-24)
+
+The Freighter is a SECOND mover (its own one move per turn, separate from the
+rocket - see player.freighterMovesRemaining). Its movement model is NOT the
+rocket's net-thrust fuel ladder (the Freighters sheet carries no thrust / isp /
+fuel columns). Instead:
+
+- **1 burn space per turn.** A freighter move covers at most ONE burn space per
+  turn (one black connection). No fuel / water is spent for the move (no
+  thrust/isp). The per-turn budget is freighterMovesRemaining (1).
+- **Pivots are free, up to the card's pivot count.** N = the Bonus Pivots icon
+  count printed on the freighter card; pivots do not cost the burn.
+- **Landing.** No lander burns. The freighter can LAND on any size-1 site for
+  free; landing on a site larger than size 1 requires FACTORY ASSIST (the
+  assist hazard roll), same assist mechanic the rocket uses when it lacks thrust.
+- **Hazards / FINAO: normal.** Generic skull / aerobrake hazard spaces roll (or
+  are bought past with FINAO aqua) exactly as for the rocket.
+- **Radiation -> glitch -> explode.** A failed rad roll places a GLITCH token on
+  the freighter (player.freighter.glitched). If the freighter is ALREADY
+  glitched and fails another rad roll, the freighter EXPLODES (the unit is
+  destroyed / removed). [ASSUMPTION to confirm: "rad fail" interpreted as a
+  d6 critical (a 1), pending the exact rad-roll threshold for the freighter.]
+- **Factory-loading-only cards.** Some cards are flagged Factory Loading Only
+  (the sheet column): they can only be loaded into the freighter at a Factory,
+  not at an arbitrary colocated stack. (Cargo-loading rule, not movement.)
+
+Server: applyMoveFreighter handles op.unit === 'freighter' on MOVE. Client: a
+freighter route planner (the rocket planner retargeted to the freighter's
+position, capped at 1 burn space) is the remaining piece - needs deploy
+verification (the map/planner can't render in the build sandbox).
