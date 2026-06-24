@@ -128,7 +128,7 @@ import {
 import {
   computeEndgameScore, SPECTRAL_DIMINISHING_SCHEDULE, COLONY_VP, COLONY_LOCATION_BONUS,
 } from './scoring.js';
-import { scorePlayer } from '../../data/endgame-scoring.js';
+import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scoring.js';
 import {
   MARKET_MODE, FREE_MARKET_AQUA, STARTER_CASH_AMOUNT,
   getMarketMode, setMarketMode, onMarketChange,
@@ -6256,6 +6256,17 @@ function openLeoStackModal() {
   openUnifiedStackInspector('leo');
 }
 
+// Free Market (I3b) sale value for a Black-Side LEO card: the Exploitation
+// Track stock price for its spectral type, driven by the GLOBAL count of that
+// spectral's factories (the same shared math the server + scoring tab use).
+function leoBlackSideValue(card) {
+  const spec = (card && card.spectralType) || 'C';
+  let n = 0;
+  const facs = (_onlineSnapshot && _onlineSnapshot.factories) || {};
+  for (const k in facs) { if (facs[k] && (facs[k].spectralType || 'C') === spec) n += 1; }
+  return freeMarketBlackSideValue(n);
+}
+
 // Outpost inspector. Same unified shape as the LEO modal.
 // Adds factory / colony attachment chips in the stats row.
 function openOutpostStackModal(letter) {
@@ -6440,6 +6451,28 @@ function openUnifiedStackInspector(stackId) {
             await convertRadiatorToLight(stackId, slot.id);
           });
           actions.appendChild(foldBtn);
+        }
+        // Free Market (I3b): sell a Black-Side good from the LEO stack. It
+        // returns to your hand and pays the Exploitation Track stock price for
+        // its spectral type. Online only (server op); crew faces aren't goods.
+        if (stackId === 'leo' && _online && slot.kind !== 'crew' && slot.face === 'secondary') {
+          const sellVal = leoBlackSideValue(card);
+          const sellBtn = document.createElement('button');
+          sellBtn.type = 'button';
+          sellBtn.className = 'rocket-select leo-free-market';
+          sellBtn.textContent = `💱 Free Market (+${sellVal})`;
+          const lockedSell = !isOnlineMyTurn();
+          sellBtn.disabled = lockedSell;
+          sellBtn.title = lockedSell
+            ? 'Wait for your turn.'
+            : `Sell this Black-Side ${card.spectralType || 'C'} good for ${sellVal} aqua (Exploitation Track price); the card returns to your hand. Costs your operation.`;
+          sellBtn.addEventListener('click', async () => {
+            if (sellBtn.disabled) return;
+            sellBtn.disabled = true;
+            await submitOnlineOp({ kind: 'FREE_MARKET', leoCardId: slot.id });
+            close();
+          });
+          actions.appendChild(sellBtn);
         }
         wrap.appendChild(actions);
         row.appendChild(wrap);

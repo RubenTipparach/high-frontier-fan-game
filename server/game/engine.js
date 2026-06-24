@@ -41,7 +41,7 @@ import {
 import { blackStepsBetween, walkBlackDown } from '../../data/fuel-graph.js';
 // Endgame VP math, shared with the client live panel + game-over modal so the
 // authoritative score can never drift from what players see.
-import { scorePlayer } from '../../data/endgame-scoring.js';
+import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scoring.js';
 // Net-thrust band (weight class) + solar-zone modifiers, the same pure
 // tables the client folds into rocket.js#getActiveThrusterStats. The
 // engine reads them so the liftoff/landing gate uses the FINAL net thrust,
@@ -1900,6 +1900,40 @@ const FREE_MARKET_AQUA = 3;  // mirror of card-market.js
 const FREE_TRADE_AQUA = 5;   // Freedom (Free Trade Act): 2 cards for 5
 function applyFreeMarket(state, op, player) {
   if (player.opsRemaining <= 0) return fail('no_ops_left');
+  // (I3b) Sell a BLACK-SIDE card from the LEO Stack: it returns to your Hand
+  // and you receive the Exploitation Track stock price for its Spectral Type
+  // (8 / 5 / 4 by the GLOBAL count of that spectral's factories, or 10 when no
+  // factory of the type exists anywhere). Costs the operation.
+  if (op.leoCardId) {
+    const id = String(op.leoCardId);
+    player.leo = Array.isArray(player.leo) ? player.leo : [];
+    const i = player.leo.findIndex((s) => s && s.id === id);
+    if (i < 0) return fail('not_in_leo');
+    const slot = player.leo[i];
+    // Only manufactured goods (a card flipped to its Black/secondary face) sell
+    // here; crew faces aren't goods, and Purple-Side (promoted) cards can't be
+    // sold on the free market (1A5d / 2A3e).
+    if (slot.kind === 'crew') return fail('not_black_side');
+    if (slot.face !== 'secondary') return fail('not_black_side');
+    if (slot.promoted) return fail('purple_no_sell');
+    const card = PATENTS_BY_ID[id];
+    if (!card) return fail('unknown_card');
+    const spectral = card.spectralType || 'C';
+    let globalCount = 0;
+    for (const f of Object.values(state.factories || {})) {
+      if ((f.spectralType || 'C') === spectral) globalCount += 1;
+    }
+    const value = freeMarketBlackSideValue(globalCount);
+    player.leo.splice(i, 1);
+    player.hand = Array.isArray(player.hand) ? player.hand : [];
+    player.hand.push(id);              // the card returns to hand (White-Side)
+    player.aqua += value;
+    player.opsRemaining -= 1;
+    return {
+      ok: true, state,
+      log: `${player.name} sold ${card.name} (Black-Side ${spectral}) on the Free Market for +${value} aqua; the card returns to hand.`,
+    };
+  }
   // Base: sell ONE hand card for FREE_MARKET_AQUA. Freedom (Free Trade Act): a
   // player who can use the law may sell TWO cards for FREE_TRADE_AQUA total.
   const ids = (Array.isArray(op.cardIds) && op.cardIds.length)
@@ -3380,7 +3414,7 @@ function pickPayload(op) {
     case 'REFUEL': return { amount: op.amount };
     case 'CASH_WATER': return { amount: op.amount };
     case 'DUMP': return { amount: op.amount };
-    case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds };
+    case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds, leoCardId: op.leoCardId };
     case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, discard: op.discard, star: op.star };
     case 'LOBBY': return { ideology: op.ideology };
     case 'DISCARD': return { cardId: op.cardId };
