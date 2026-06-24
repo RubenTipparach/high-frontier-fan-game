@@ -3784,10 +3784,12 @@ app.get('/admin', (req, res) => {
   h2{color:var(--acc2)}
   .header-row .ws-info{background:var(--surf);border-color:var(--line)}
   /* KPI stat cards with a gradient accent bar */
-  .kpis{gap:10px}
-  .kpi{position:relative;overflow:hidden;background:var(--surf);border:1px solid var(--line);border-radius:14px;padding:13px 14px 12px 18px}
+  /* KPI stat cards: a compact auto-fit grid (many small panels per row) */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(108px,1fr));gap:8px}
+  .kpi{position:relative;overflow:hidden;background:var(--surf);border:1px solid var(--line);border-radius:12px;padding:9px 10px 8px 13px;min-width:0}
   .kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(var(--acc),var(--acc2))}
-  .kpi strong{font-size:24px;font-weight:800;color:#fff}
+  .kpi strong{font-size:20px;font-weight:800;color:#fff}
+  .kpi span{color:var(--mut);font-size:10px}
   .kpi span{color:var(--mut)}
   /* Tabs as gradient pills */
   .tabbar{gap:8px}
@@ -3819,8 +3821,8 @@ app.get('/admin', (req, res) => {
   .pager a{color:var(--acc2)}
   @media (max-width:700px){
     body{padding:12px}
-    .kpi{flex:1 1 calc(50% - 8px)}
-    .kpi strong{font-size:22px}
+    .kpis{grid-template-columns:repeat(auto-fill,minmax(92px,1fr))}
+    .kpi strong{font-size:18px}
     /* polished stacked cards (label muted/uppercase, value bold) */
     tbody tr{border:1px solid var(--line);border-radius:14px;padding:10px 14px;margin:0 0 12px;background:var(--surf)}
     tbody td{padding:6px 0;font-weight:600}
