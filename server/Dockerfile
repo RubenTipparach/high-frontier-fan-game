@@ -28,6 +28,11 @@ RUN npm install --omit=dev --no-audit --no-fund
 COPY server/ ./
 COPY data/ /app/data/
 COPY vendor/ /app/vendor/
+# Client source + assets so the /admin "Manage state" map can mount the SAME
+# solar-map renderer the player sandbox uses (served statically by index.js).
+COPY js/ /app/js/
+COPY assets/ /app/assets/
+COPY css/ /app/css/
 
 ENV NODE_ENV=production
 ENV PORT=8080

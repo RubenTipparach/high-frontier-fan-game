@@ -20,7 +20,7 @@ import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
 import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE } from './game/engine.js';
 import { randomSeed } from './game/rng.js';
-import { siteBySlug, nodeBySlug, resolveNodeRef, leoSlug, allNodes } from './game/planner-graph.js';
+import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
 import { PATENTS_BY_ID } from '../data/patents.js';
 import { ASSEMBLY_PLACES, IDEOLOGY_BY_KEY } from '../data/assembly.js';
 import { normaliseTag } from '../data/site-tags.js';
@@ -147,6 +147,17 @@ app.use(cors({
   maxAge: 86400,
 }));
 app.set('trust proxy', true);
+
+// Serve the shared client source so the /admin "Manage state" map can mount the
+// SAME solar-map renderer the player sandbox uses (js/game/render.js +
+// loadPlannerMap). These trees are already public on GH Pages; the Docker image
+// copies them (server/Dockerfile) so the imports + runtime-fetched assets
+// (vendor/.../data-hf4.json, data/site-flags.json, assets/factory PNGs) resolve
+// against this origin too. Static, read-only, no secrets.
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+for (const dir of ['js', 'data', 'assets', 'vendor', 'css']) {
+  app.use('/' + dir, express.static(resolve(REPO_ROOT, dir), { fallthrough: true, maxAge: '5m' }));
+}
 
 // ----- Rate limit (in-memory, per process) -----
 
@@ -3642,8 +3653,8 @@ app.get('/admin', (req, res) => {
   .ge-asm-cube{border:1px solid #00000066;border-radius:5px;color:#0c0a16;font-weight:700;font-size:11px !important;padding:4px 8px !important;cursor:pointer;text-shadow:0 1px 0 rgba(255,255,255,.4);box-shadow:0 1px 2px rgba(0,0,0,.4)}
   .ge-asm-cube:hover{filter:brightness(1.12)}
   .ge-asm-cube.sel{outline:3px solid #7dd3fc;outline-offset:1px;transform:translateY(-1px)}
-  /* Admin map visualizer: a simple read-only solar map for placing factories
-     and teleporting rockets. No animation, just markers + click. */
+  /* Admin map: mounts the REAL client MapRenderer (js/admin/admin-map.js). The
+     host needs an explicit size; the action bar shows the clicked site's tools. */
   .ge-map{border:1px solid #26233c;border-radius:10px;padding:10px 12px;margin:0 0 12px;background:#0a0814}
   .ge-map h4{margin:0 0 8px;font-size:14px}
   .ge-map-tools{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 8px;font-size:12px;color:#9aa0c8}
@@ -3651,14 +3662,12 @@ app.get('/admin', (req, res) => {
   .ge-actor-chip{border:1px solid #00000066;border-radius:5px;color:#0c0a16;font-weight:700;font-size:11px;padding:3px 8px;cursor:pointer;text-shadow:0 1px 0 rgba(255,255,255,.4);opacity:.5}
   .ge-actor-chip.sel{opacity:1;outline:2px solid #7dd3fc;outline-offset:1px}
   .ge-map-wrap{position:relative;width:100%;overflow:hidden;border-radius:8px;border:1px solid #1c1930}
-  .ge-map svg{display:block;width:100%;height:auto;background:radial-gradient(120% 90% at 18% 50%,#141232 0%,#070611 70%)}
-  .ge-node{cursor:pointer}
-  .ge-node:hover .ge-node-hit{stroke:#7dd3fc;stroke-width:2}
-  .ge-menu{position:absolute;z-index:5;background:#12101f;border:1px solid #3a3760;border-radius:8px;padding:6px;box-shadow:0 6px 20px rgba(0,0,0,.6);min-width:150px}
-  .ge-menu-h{font-size:11px;color:#aab0e0;font-weight:700;padding:2px 6px 6px;border-bottom:1px solid #26233c;margin-bottom:4px}
-  .ge-menu button{display:block;width:100%;text-align:left;background:#1a1730;border:1px solid #2a2740;color:#e6e9ff;border-radius:6px;padding:5px 8px;font-size:12px;margin:3px 0;cursor:pointer}
-  .ge-menu button:hover{background:#262247}
-  .ge-menu button.danger{background:#3a1620;border-color:#5a2230;color:#ffd0d0}
+  #ge-map-host{width:100%;height:520px;background:radial-gradient(120% 90% at 50% 45%,#141232 0%,#070611 75%)}
+  .ge-map-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px;min-height:30px}
+  .ge-pick-name{font-size:12px;font-weight:700;color:#cfd4ff}
+  .ge-map-actions button{background:#1a1730;border:1px solid #2a2740;color:#e6e9ff;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer}
+  .ge-map-actions button:hover{background:#262247}
+  .ge-map-actions button.danger{background:#3a1620;border-color:#5a2230;color:#ffd0d0}
   /* Mobile: keep wide tables on the page (scroll them, not the whole page),
      give controls real tap targets, and let the modal use the full width. */
   @media (max-width:700px){
@@ -4149,12 +4158,11 @@ document.addEventListener('click', function (ev) {
   var body = document.getElementById('game-edit-body');
   var title = document.getElementById('game-edit-title');
   var closeBtn = document.getElementById('game-edit-close');
-  var current = { gid: null, state: null, catalog: [], nodes: [], leo: null };
-  var actorPid = null;   // which player a map click acts on (factory owner / teleport target)
-  // Spectral colour key, mirrors render.js SPECTRAL_FILL so the admin map reads
-  // the same vocabulary as the client (C carbon / S stony / M metallic / V Vesta
-  // / D dark / H hydrous).
-  var SPECTRAL = { C:'#475569', S:'#ca8a04', M:'#9ca3af', V:'#b91c1c', D:'#1e3a8a', H:'#0ea5e9' };
+  var current = { gid: null, state: null, catalog: [] };
+  var actorPid = null;     // which player a map click acts on (factory owner / teleport target)
+  var mapApi = null;       // mounted client-map adapter (js/admin/admin-map.js) - the REAL renderer
+  var mapMounting = false;
+  var pickedSlug = null;   // site/node currently selected on the map (drives the action bar)
 
   function close() { modal.hidden = true; }
   closeBtn.addEventListener('click', close);
@@ -4195,131 +4203,76 @@ document.addEventListener('click', function (ev) {
       return '<option value="' + l + '">' + esc(locLabel(l, p)) + '</option>';
     }).join('');
   }
-  // Build the read-only solar map: a space backdrop, a decorative sun, a marker
-  // per planner node (real sites tinted by spectral type, waypoints as faint
-  // dots), and overlays for factories (+ colony domes) and each player's rocket.
-  // Clicking a marker opens an action menu (teleport / create / remove factory).
-  function buildMap() {
-    var st = current.state;
-    var nodes = current.nodes || [];
-    if (!nodes.length) return '';
-    var players = st.players || [];
+  // The map section mounts the REAL client solar map (js/admin/admin-map.js ->
+  // loadPlannerMap + MapRenderer, the SAME renderer the player sandbox uses).
+  // It is built ONCE per modal open (so re-rendering the player/card list below
+  // never tears down the live canvas); buildMapSection() returns its static
+  // shell, mountMap() loads the renderer into the host, and refreshMap() pushes
+  // the current factories / colonies / rocket-focus onto it.
+  function actorList() { return (current.state && current.state.players) || []; }
+  function actor() {
+    var ps = actorList();
+    return ps.filter(function (p) { return p.profileId === actorPid; })[0] || ps[0] || null;
+  }
+  function buildMapSection() {
+    var players = actorList();
     if (actorPid == null && players[0]) actorPid = players[0].profileId;
-    // Bounds over node positions -> viewBox (planner coord space, same as client).
-    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    nodes.forEach(function (n) {
-      if (n.x < minX) minX = n.x; if (n.x > maxX) maxX = n.x;
-      if (n.y < minY) minY = n.y; if (n.y > maxY) maxY = n.y;
-    });
-    var w = Math.max(1, maxX - minX), h = Math.max(1, maxY - minY);
-    var S = Math.max(w, h);
-    var padL = w * 0.10, pad = S * 0.05;               // extra room on the left for the sun
-    var vbX = minX - padL, vbY = minY - pad, vbW = w + padL + pad, vbH = h + pad * 2;
-    var Rs = S * 0.013, Rw = S * 0.005, sw = S * 0.0016, fs = S * 0.013;
-    var nodeBy = {};
-    nodes.forEach(function (n) { nodeBy[n.slug] = n; });
-    var factories = st.factories || [];
-    var facBy = {};
-    factories.forEach(function (f) { facBy[f.slug] = f; });
-
-    var svg = '<svg viewBox="' + vbX.toFixed(1) + ' ' + vbY.toFixed(1) + ' ' + vbW.toFixed(1) + ' ' + vbH.toFixed(1) + '" preserveAspectRatio="xMidYMid meet">';
-    svg += '<defs><radialGradient id="ge-sun" cx="50%" cy="50%" r="50%">'
-      + '<stop offset="0%" stop-color="#fff7d6"/><stop offset="45%" stop-color="#ffcf57"/>'
-      + '<stop offset="100%" stop-color="#ff8a1f" stop-opacity="0"/></radialGradient></defs>';
-    svg += '<rect x="' + vbX.toFixed(1) + '" y="' + vbY.toFixed(1) + '" width="' + vbW.toFixed(1) + '" height="' + vbH.toFixed(1) + '" fill="#070611"/>';
-    // Decorative sun, top-left flourish (the layout is burns-from-LEO, not
-    // heliocentric, so the sun is ornamental rather than positional).
-    var sunR = S * 0.06, sunX = vbX + sunR * 1.1, sunY = vbY + sunR * 1.1;
-    svg += '<circle cx="' + sunX.toFixed(1) + '" cy="' + sunY.toFixed(1) + '" r="' + (sunR * 1.6).toFixed(1) + '" fill="url(#ge-sun)"/>';
-    svg += '<circle cx="' + sunX.toFixed(1) + '" cy="' + sunY.toFixed(1) + '" r="' + sunR.toFixed(1) + '" fill="#ffd45e"/>';
-
-    // Node markers.
-    nodes.forEach(function (n) {
-      var x = n.x, y = n.y;
-      var isSite = n.isSite;
-      var r = isSite ? Rs : Rw;
-      var g = '<g class="ge-node" data-slug="' + esc(n.slug) + '">';
-      g += '<title>' + esc((n.name || n.slug) + (isSite ? (' · ' + (n.spectralType || '?') + (n.siteSize ? (' · ' + n.siteSize) : '')) : (' · ' + n.type))) + '</title>';
-      // Transparent hit target for easy clicking/tapping.
-      g += '<circle class="ge-node-hit" cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + (r * 2.2).toFixed(1) + '" fill="transparent" stroke="transparent"/>';
-      if (isSite) {
-        var fill = SPECTRAL[n.spectralType] || '#475569';
-        g += '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + r.toFixed(1) + '" fill="' + fill + '" stroke="#0b0a16" stroke-width="' + sw.toFixed(2) + '"/>';
-      } else {
-        var dot = n.hazard ? '#b45a5a' : '#5b5f86';
-        g += '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + r.toFixed(1) + '" fill="' + dot + '" opacity="0.55"/>';
-      }
-      // Factory overlay (owner-coloured square + optional colony dome).
-      var f = facBy[n.slug];
-      if (f) {
-        var fr = r * 1.15;
-        g += '<rect x="' + (x - fr).toFixed(1) + '" y="' + (y - fr).toFixed(1) + '" width="' + (fr * 2).toFixed(1) + '" height="' + (fr * 2).toFixed(1) + '" rx="' + (fr * 0.3).toFixed(1) + '" fill="' + esc(f.ownerColor || '#888') + '" stroke="#0b0a16" stroke-width="' + sw.toFixed(2) + '"/>';
-        if (f.hasColony) {
-          g += '<path d="M' + (x - fr).toFixed(1) + ' ' + (y - fr).toFixed(1) + ' A ' + fr.toFixed(1) + ' ' + fr.toFixed(1) + ' 0 0 1 ' + (x + fr).toFixed(1) + ' ' + (y - fr).toFixed(1) + ' Z" fill="#eef3ff" stroke="#0b0a16" stroke-width="' + sw.toFixed(2) + '"/>';
-        }
-      }
-      g += '</g>';
-      svg += g;
-    });
-    // Rocket pips (one per player) at their current site (null -> LEO).
-    players.forEach(function (p, i) {
-      var slug = (p.rocket && p.rocket.siteId) ? p.rocket.siteId : current.leo;
-      var n = slug ? nodeBy[slug] : null;
-      if (!n) return;
-      var px = n.x + Rs * 1.2, py = n.y - Rs * 1.2;   // offset up-right so it clears the marker
-      var col = p.color || '#fff';
-      svg += '<g class="ge-rocket"><title>@' + esc(p.name) + ' rocket</title>'
-        + '<circle cx="' + px.toFixed(1) + '" cy="' + py.toFixed(1) + '" r="' + (Rw * 1.6).toFixed(1) + '" fill="' + esc(col) + '" stroke="#0b0a16" stroke-width="' + sw.toFixed(2) + '"/></g>';
-    });
-    svg += '</svg>';
-
-    // Tools: acting-player chips + the colony-dome toggle.
     var chips = players.map(function (p) {
       var sel = (p.profileId === actorPid) ? ' sel' : '';
       return '<button type="button" class="ge-actor-chip' + sel + '" data-pid="' + p.profileId + '" style="background:' + esc(p.color || '#888') + '">@' + esc(p.name) + '</button>';
     }).join('');
     var tools = '<div class="ge-map-tools"><span class="ge-actor">Acting as: ' + chips + '</span>'
       + '<label><input type="checkbox" id="ge-colony"> with colony dome</label>'
-      + '<span style="opacity:.7">Click a site or node to act.</span></div>';
+      + '<span style="opacity:.7">Click a site to build / teleport; any node to teleport.</span></div>';
     return '<div class="ge-map"><h4>🗺 Solar map</h4>' + tools
-      + '<div class="ge-map-wrap" id="ge-map-wrap">' + svg + '</div></div>';
+      + '<div class="ge-map-wrap"><div id="ge-map-host"></div></div>'
+      + '<div class="ge-map-actions" id="ge-map-actions"></div></div>';
   }
-  function closeMapMenu() {
-    var m = document.getElementById('ge-map-menu');
-    if (m) m.parentNode.removeChild(m);
+  // Re-highlight the acting-player chips (after a chip click changes actorPid).
+  function refreshActorChips() {
+    var chips = document.querySelectorAll('.ge-actor-chip');
+    for (var i = 0; i < chips.length; i++) {
+      chips[i].classList.toggle('sel', Number(chips[i].getAttribute('data-pid')) === actorPid);
+    }
   }
-  // Open the action menu for a clicked node, anchored inside the map wrap.
-  function openMapMenu(slug, ev) {
-    closeMapMenu();
-    var wrap = document.getElementById('ge-map-wrap');
-    if (!wrap) return;
-    var node = (current.nodes || []).filter(function (n) { return n.slug === slug; })[0];
-    if (!node) return;
-    var actor = (current.state.players || []).filter(function (p) { return p.profileId === actorPid; })[0]
-      || (current.state.players || [])[0];
+  // Mount the real renderer once; subsequent opens reuse the cached planner map.
+  function mountMap() {
+    var host = document.getElementById('ge-map-host');
+    if (!host || mapApi || mapMounting) { refreshMap(); return; }
+    mapMounting = true;
+    import('/js/admin/admin-map.js').then(function (mod) {
+      return mod.mountAdminMap(host, { onPickSite: showPickActions });
+    }).then(function (api) {
+      mapApi = api; mapMounting = false; refreshMap();
+    }).catch(function (e) {
+      mapMounting = false;
+      host.innerHTML = '<p class="ge-msg err" style="padding:10px">Map failed to load: ' + esc(e && e.message || e) + '</p>';
+    });
+  }
+  // Push current factories / colonies / rocket-focus onto the live map.
+  function refreshMap() { if (mapApi) mapApi.update(current.state, actorPid); }
+  // A site/node was clicked on the map -> show its action bar (teleport / build).
+  function showPickActions(slug, site) {
+    pickedSlug = slug;
+    var bar = document.getElementById('ge-map-actions');
+    if (!bar) return;
+    var a = actor();
+    var who = a ? ('@' + a.name) : 'player';
+    var isSite = !!(site && site.name && site.isLandable !== false);
     var hasFactory = (current.state.factories || []).some(function (f) { return f.slug === slug; });
-    var menu = document.createElement('div');
-    menu.className = 'ge-menu';
-    menu.id = 'ge-map-menu';
-    var who = actor ? ('@' + actor.name) : 'player';
-    var h = '<div class="ge-menu-h">' + esc(node.name || node.slug) + (node.isSite ? (' · ' + (node.spectralType || '?')) : (' · ' + node.type)) + '</div>';
-    h += '<button data-mact="teleport" data-slug="' + esc(slug) + '">🛸 Teleport ' + esc(who) + ' here</button>';
-    if (node.isSite) h += '<button data-mact="create_factory" data-slug="' + esc(slug) + '">🏭 Create factory here</button>';
+    var label = (site && site.name) ? site.name : slug;
+    var h = '<span class="ge-pick-name">📍 ' + esc(label) + '</span>';
+    h += '<button data-mact="teleport" data-slug="' + esc(slug) + '">🛸 Teleport ' + esc(who) + '</button>';
+    if (isSite) h += '<button data-mact="create_factory" data-slug="' + esc(slug) + '">🏭 Build factory for ' + esc(who) + '</button>';
     if (hasFactory) h += '<button class="danger" data-mact="remove_factory" data-slug="' + esc(slug) + '">× Remove factory</button>';
-    menu.innerHTML = h;
-    // Position near the click, clamped into the wrap.
-    var rect = wrap.getBoundingClientRect();
-    var lx = ev.clientX - rect.left, ly = ev.clientY - rect.top;
-    lx = Math.max(4, Math.min(lx, rect.width - 160));
-    ly = Math.max(4, Math.min(ly, rect.height - 110));
-    menu.style.left = lx + 'px';
-    menu.style.top = ly + 'px';
-    wrap.appendChild(menu);
+    bar.innerHTML = h;
   }
   function render() {
+    // Only the dynamic section (players / cards / assembly) is rebuilt here; the
+    // map host lives in #ge-map-section and is preserved across re-renders.
     var st = current.state;
+    var dyn = document.getElementById('ge-dynamic') || body;
     var html = '<p class="ge-msg" id="ge-msg"></p>';
-    html += buildMap();
     (st.players || []).forEach(function (p) {
       var locs = locsFor(p);
       html += '<div class="ge-player" data-pid="' + p.profileId + '">';
@@ -4370,7 +4323,8 @@ document.addEventListener('click', function (ev) {
       });
       html += '</div></div>';
     }
-    body.innerHTML = html;
+    dyn.innerHTML = html;
+    refreshMap();
   }
   function msg(text, ok) {
     var el = document.getElementById('ge-msg');
@@ -4380,7 +4334,7 @@ document.addEventListener('click', function (ev) {
   }
   function reload(after) {
     fetch('/admin/games/' + current.gid + '/state').then(function (r) { return r.json(); }).then(function (d) {
-      if (d.ok) { current.state = d.state; current.catalog = d.catalog || current.catalog; current.nodes = d.nodes || current.nodes; current.leo = d.leo != null ? d.leo : current.leo; render(); if (after) after(); }
+      if (d.ok) { current.state = d.state; current.catalog = d.catalog || current.catalog; render(); if (after) after(); }
     });
   }
   function load(gid, label) {
@@ -4388,11 +4342,15 @@ document.addEventListener('click', function (ev) {
     title.textContent = 'Manage state: ' + label;
     body.innerHTML = '<p><em>Loading…</em></p>';
     modal.hidden = false;
+    mapApi = null; pickedSlug = null;   // fresh modal -> remount the map
     fetch('/admin/games/' + gid + '/state').then(function (r) { return r.json(); }).then(function (d) {
       if (!d.ok) { body.innerHTML = '<p class="ge-msg err">Failed: ' + esc(d.error || 'error') + '</p>'; return; }
       current.state = d.state; current.catalog = d.catalog || [];
-      current.nodes = d.nodes || []; current.leo = d.leo != null ? d.leo : null;
       actorPid = null;   // reset acting player to the first on a fresh load
+      // Skeleton: the map section (built once, holds the live canvas) + a
+      // dynamic section render() rewrites for the player / card / cube tools.
+      body.innerHTML = buildMapSection() + '<div id="ge-dynamic"></div>';
+      mountMap();
       render();
     }).catch(function () { body.innerHTML = '<p class="ge-msg err">Network error.</p>'; });
   }
@@ -4411,15 +4369,16 @@ document.addEventListener('click', function (ev) {
     pickedCube = null;
   }
   body.addEventListener('click', function (ev) {
-    // Map: acting-player chip -> set who clicks act on, then re-render.
+    // Map: acting-player chip -> set who map clicks act on (re-highlight + the
+    // rocket focus ring follow; the player/card list below is unaffected).
     var chip = ev.target.closest('.ge-actor-chip');
-    if (chip) { actorPid = Number(chip.getAttribute('data-pid')); closeMapMenu(); render(); return; }
-    // Map: an action-menu button (teleport / create / remove factory).
-    var mbtn = ev.target.closest('.ge-menu button[data-mact]');
+    if (chip) { actorPid = Number(chip.getAttribute('data-pid')); refreshActorChips(); refreshMap(); return; }
+    // Map: an action-bar button (teleport / build / remove factory) for the
+    // site/node the admin last clicked on the map.
+    var mbtn = ev.target.closest('button[data-mact]');
     if (mbtn) {
       var mact = mbtn.getAttribute('data-mact');
       var mslug = mbtn.getAttribute('data-slug');
-      closeMapMenu();
       if (mact === 'teleport') postEdit({ action: 'teleport', profileId: actorPid, node: mslug }, 'Rocket teleported.');
       else if (mact === 'create_factory') {
         var colEl = document.getElementById('ge-colony');
@@ -4427,11 +4386,6 @@ document.addEventListener('click', function (ev) {
       } else if (mact === 'remove_factory') postEdit({ action: 'remove_factory', profileId: actorPid, siteId: mslug }, 'Factory removed.');
       return;
     }
-    // Map: a node marker -> open its action menu.
-    var nodeEl = ev.target.closest('.ge-node');
-    if (nodeEl) { openMapMenu(nodeEl.getAttribute('data-slug'), ev); return; }
-    // Click anywhere else dismisses an open map menu.
-    if (!ev.target.closest('.ge-menu')) closeMapMenu();
     // Assembly cube manager: click a cube to pick it up, click a space to drop.
     var cube = ev.target.closest('.ge-asm-cube');
     if (cube) {
@@ -4648,7 +4602,7 @@ app.get('/admin/games/:gameId/state', requireAdmin, (req, res) => {
   if (!Number.isFinite(gameId)) return res.status(400).json({ error: 'bad_id' });
   const view = adminGameStateView(gameId);
   if (!view) return res.status(404).json({ error: 'no_game_state' });
-  res.json({ ok: true, gameId, state: view, catalog: cardCatalog(), nodes: allNodes(), leo: leoSlug() });
+  res.json({ ok: true, gameId, state: view, catalog: cardCatalog() });
 });
 
 // Admin game-state editor: apply one mutation to a player's state. Actions:
