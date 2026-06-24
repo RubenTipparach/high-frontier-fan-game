@@ -125,9 +125,9 @@ for now. Don't pull them in without a discussion first.
 
 ## Module gating - ZERO bleed-through
 
-Optional HF4 modules (M0 Politics, M1 Terawatt & Futures, ...) are opt-in
+Optional HF4 modules (M0 Politics, M1 Terawatt, M2 Futures, ...) are opt-in
 per room and carried into the game state as a boolean (`state.m0`,
-`state.m1`, ...). The hard rule:
+`state.m1`, `state.m2`, ...). The hard rule:
 
 - **NOTHING from a module may activate unless its flag is true.** No rule,
   op, free action, card, deck, board piece, UI affordance, or score effect
@@ -139,18 +139,27 @@ per room and carried into the game state as a boolean (`state.m0`,
   column -> `createInitialState({ m\<n\> })` -> `state.m\<n\>`). Default
   OFF for every legacy + normal room, so games already in flight never
   retro-acquire a module.
-- **M1 is ADMIN-ONLY + experimental.** The M1 room-creation / settings
-  checkbox is revealed only to admins (same gate as the Rat Frontier
+- **M1 AND M2 are ADMIN-ONLY + experimental.** Their room-creation / settings
+  checkboxes are revealed only to admins (same gate as the Rat Frontier
   feature: `profile.isAdmin` / `profileIsAdmin`), AND the server FORCES
-  `m1 = 0` for any non-admin request regardless of what the client sends
-  (`/lobbies` create + `/settings`). Never trust the client for this - the
-  server admin check is the real gate; the hidden checkbox is only UI.
+  `m1 = 0` / `m2 = 0` for any non-admin request regardless of what the client
+  sends (`/lobbies` create + `/settings`). Never trust the client for this - the
+  server admin check is the real gate; the hidden checkbox is only UI. `m2` is
+  plumbed as an exact mirror of `m1` (db column, create/settings admin gate,
+  `createInitialState` -> `state.m2`, client `isM2()`/`setM2()` + tags), but
+  adds NO decks (unlike M1's two Terawatt decks).
+- **Futures gate on `state.m2`.** The Futures deck physically ships in M1, but a
+  Future is not playable until M2 (it needs Bernals / anchoring / the Epic-Hazard
+  economy), so in this implementation futures are an M2 mechanic: every futures
+  code path MUST gate on `state.m2` (practically M0+M1+M2). Nothing is wired yet;
+  the `m2` flag exists so it can be when futures land. (User decision 2026-06-24.)
 - When you build a module's mechanics, gate them behind the flag FIRST,
   then add the rule. New M1 cards/decks still come from the spreadsheet
   (see "Card data - single source of truth"); do not hand-author them.
 
-M1 design lives in `docs/module-m1-plan.md`; the extracted module rules
-are in `reference/manuals/`.
+M1 design lives in `docs/module-m1-plan.md` (incl. the Space Elevator + Big Cube
+Swap + Futures-gating plan); the extracted module rules are in
+`reference/manuals/`.
 
 ## Card data - single source of truth
 
@@ -798,7 +807,8 @@ Operations (each one spends the turn's single operation):
 | Nanofacture | Create a Mobile Factory at an anchored non-Home Bernal. | M1+M2 |
 | Anchor | Anchor a Bernal as a space station; gain its ability. | M2 |
 | Homesteading | Build a Colony at a Factory that has none. | M2 |
-| Epic Hazard | Complete a Future or build a Space Elevator (Epic Hazard roll). | M1 |
+| Epic Hazard (Space Elevator) | Build a Space Elevator (Epic Hazard roll). | M1 |
+| Epic Hazard (Future) | Complete a Future (Epic Hazard roll). | M2 |
 
 Free actions (no operation cost; any number per turn):
 

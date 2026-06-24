@@ -629,6 +629,7 @@ function lobbyRow(lobbyId) {
     randomDraft: !!row.random_draft,
     m0: !!row.m0,
     m1: !!row.m1,
+    m2: !!row.m2,
     status: row.status,
     createdAt: row.created_at,
     startedAt: row.started_at,
@@ -737,6 +738,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // so M1 can never be enabled by a normal player (mirrors the Rat Frontier
   // admin gate). Experimental.
   const m1 = (body.m1 && profileIsAdmin(req.profile, req)) ? 1 : 0;
+  // Opt-in Module 2 (Futures). ADMIN-ONLY, mirrors M1: a non-admin request is
+  // forced to 0 regardless of what it sends, so M2 can never be enabled by a
+  // normal player. Experimental.
+  const m2 = (body.m2 && profileIsAdmin(req.profile, req)) ? 1 : 0;
   const now = nowMs();
   let code, info;
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -744,10 +749,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
     try {
       info = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, m0, m1)
-           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, m0, m1, m2)
+           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, m0, m1);
+        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, m0, m1, m2);
       break;
     } catch (err) {
       if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -787,6 +792,7 @@ app.get('/lobbies', (_req, res) => {
               l.random_draft AS randomDraft,
               l.m0          AS m0,
               l.m1          AS m1,
+              l.m2          AS m2,
               l.created_at  AS createdAt,
               p.name        AS hostName,
               (SELECT COUNT(*) FROM lobby_members lm WHERE lm.lobby_id = l.id) AS memberCount,
@@ -820,6 +826,7 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
               l.random_draft AS randomDraft,
               l.m0          AS m0,
               l.m1          AS m1,
+              l.m2          AS m2,
               l.created_at  AS createdAt,
               p.name        AS hostName,
               (SELECT COUNT(*) FROM lobby_members lm2 WHERE lm2.lobby_id = l.id) AS memberCount,
@@ -1058,6 +1065,8 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   if (body.m0 !== undefined) { sets.push('m0 = ?'); args.push(body.m0 ? 1 : 0); }
   // M1 is admin-only: a non-admin host can never set it, even via /settings.
   if (body.m1 !== undefined) { sets.push('m1 = ?'); args.push((body.m1 && profileIsAdmin(req.profile, req)) ? 1 : 0); }
+  // M2 is admin-only: a non-admin host can never set it, even via /settings.
+  if (body.m2 !== undefined) { sets.push('m2 = ?'); args.push((body.m2 && profileIsAdmin(req.profile, req)) ? 1 : 0); }
   if (body.joinPolicy !== undefined) {
     sets.push('join_policy = ?'); args.push(body.joinPolicy === 'invite-only' ? 'invite-only' : 'open');
   }
@@ -1088,7 +1097,7 @@ app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
 app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, m0, m1 FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, m0, m1, m2 FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -1124,7 +1133,8 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const randomDraft = !!lobby.random_draft;
   const m0 = !!lobby.m0;
   const m1 = !!lobby.m1;
-  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1 });
+  const m2 = !!lobby.m2;
+  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2 });
 
   const now = nowMs();
   const gameId = db.transaction(() => {

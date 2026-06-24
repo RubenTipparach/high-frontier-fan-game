@@ -294,6 +294,7 @@ export function moduleTagsHtml(lobby) {
   const tags = [];
   if (lobby && lobby.m0) tags.push('<span class="module-tag tag-m0">🏛 M0 Politics</span>');
   if (lobby && lobby.m1) tags.push('<span class="module-tag tag-m1">🚛 M1 Terawatt</span>');
+  if (lobby && lobby.m2) tags.push('<span class="module-tag tag-m2">🔮 M2 Futures</span>');
   if (lobby && lobby.draftStart) tags.push('<span class="module-tag tag-draft">🃏 Draft start</span>');
   if (lobby && lobby.randomDraft) tags.push('<span class="module-tag tag-draft">🎲 Random draft</span>');
   return tags.length ? `<span class="module-tags">${tags.join('')}</span>` : '';
@@ -699,13 +700,14 @@ async function onCreateSubmit(ev) {
   const me = activeProfile();
   if (!me) return;
   const m1 = !!(me.isAdmin && document.getElementById('create-m1')?.checked);
+  const m2 = !!(me.isAdmin && document.getElementById('create-m2')?.checked);
   if (!_createIdemKey) _createIdemKey = newIdemKey();   // stable across retries of this intent
   const submitBtn = ev.target.querySelector('button[type="submit"]');
   _creatingLobby = true;
   if (submitBtn) submitBtn.disabled = true;
   try {
     const r = await createLobby(
-      { name, maxPlayers, maxRounds, joinPolicy, draftStart, randomDraft, m0, m1, idempotencyKey: _createIdemKey }, me.token
+      { name, maxPlayers, maxRounds, joinPolicy, draftStart, randomDraft, m0, m1, m2, idempotencyKey: _createIdemKey }, me.token
     );
     if (!r.ok) { errEl.textContent = humanizeError(r.error); return; }   // keep the key so a retry dedupes
     _createIdemKey = null;   // success: the next room starts a fresh intent
@@ -720,16 +722,18 @@ async function onCreateSubmit(ev) {
 // you in it, started right away. It runs the same server-backed engine as a
 // full table, so it's the way to exercise multiplayer features alone. Needs
 // the server to allow maxPlayers=1 (it does); start only needs >=1 member.
-export async function createSoloRoom({ startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, m0 = false, m1 = false } = {}) {
+export async function createSoloRoom({ startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, m0 = false, m1 = false, m2 = false } = {}) {
   const me = activeProfile();
   if (!me) return { ok: false, error: 'no_profile' };
   // M1 is admin-only; force off for non-admins (server also enforces this).
   const m1Flag = !!(me.isAdmin && m1);
+  // M2 is admin-only; force off for non-admins (server also enforces this).
+  const m2Flag = !!(me.isAdmin && m2);
   const create = await createLobby(
     { name: `${me.name}'s solo room`, maxPlayers: 1,
       maxRounds: [4, 5, 6, 7].includes(Number(maxRounds)) ? Number(maxRounds) : 5,
       joinPolicy: 'invite-only', idempotencyKey: newIdemKey(),
-      startingAqua, economy, draftStart, randomDraft, m0, m1: m1Flag },
+      startingAqua, economy, draftStart, randomDraft, m0, m1: m1Flag, m2: m2Flag },
     me.token,
   );
   if (!create.ok) return create;
@@ -870,6 +874,7 @@ function renderLobbySettings(lobby, iAmHost, me) {
     const mods = [];
     if (lobby.m0) mods.push('🏛 M0 Politics');
     if (lobby.m1) mods.push('🚛 M1 Terawatt');
+    if (lobby.m2) mods.push('🔮 M2 Futures');
     if (lobby.draftStart) mods.push('🃏 Draft start');
     if (lobby.randomDraft) mods.push('🎲 Random draft');
     box.innerHTML = `<div class="lobby-settings-ro">⚙ ${escapeHtml(roundLabel)}`
@@ -909,7 +914,9 @@ function renderLobbySettings(lobby, iAmHost, me) {
       <span><strong>Module 0: Politics</strong> - adds the Sol Political Assembly</span></label>`
     + ((me && me.isAdmin) ? `
     <label class="check-row"><input type="checkbox" id="set-m1"${lobby.m1 ? ' checked' : ''}/>
-      <span><strong>Module 1: Terawatt &amp; Futures</strong> - admin only, experimental</span></label>` : '');
+      <span><strong>Module 1: Terawatt</strong> - admin only, experimental</span></label>
+    <label class="check-row"><input type="checkbox" id="set-m2"${lobby.m2 ? ' checked' : ''}/>
+      <span><strong>Module 2: Futures</strong> - admin only, experimental</span></label>` : '');
 
   const saved = box.querySelector('.lobby-settings-saved');
   const save = async (settings) => {
@@ -944,6 +951,8 @@ function renderLobbySettings(lobby, iAmHost, me) {
   box.querySelector('#set-m0').addEventListener('change', (e) => save({ m0: e.target.checked }));
   // M1 row only exists for an admin host; server also enforces the admin gate.
   box.querySelector('#set-m1')?.addEventListener('change', (e) => save({ m1: e.target.checked }));
+  // M2 row only exists for an admin host; server also enforces the admin gate.
+  box.querySelector('#set-m2')?.addEventListener('change', (e) => save({ m2: e.target.checked }));
 }
 
 function renderLobby(lobby) {

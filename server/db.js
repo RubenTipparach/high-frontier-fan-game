@@ -382,6 +382,12 @@ ensureColumn('lobbies', 'm0', 'm0 INTEGER NOT NULL DEFAULT 0');
 // request is forced to 0. NOTHING in the engine may act on M1 rules unless
 // state.m1 is true (see CLAUDE.md "Module gating").
 ensureColumn('lobbies', 'm1', 'm1 INTEGER NOT NULL DEFAULT 0');
+// m2: opt-in Module 2 (Futures). ADMIN-ONLY + experimental, mirrors m1. 0 = off,
+// the default for every legacy + normal room, so no game ever gets M2 (Futures)
+// mechanics unless an admin explicitly checked it at creation. The server only
+// ever writes 1 when the host passes the admin gate (profileIsAdmin); a non-admin
+// request is forced to 0. NOTHING M2 may activate unless state.m2 is true.
+ensureColumn('lobbies', 'm2', 'm2 INTEGER NOT NULL DEFAULT 0');
 // random_draft: opt-in "random draft" opening - instead of interactive picks,
 // each player is dealt 12 random cards from random decks, then play begins
 // (banks at 6). 0 = off (default). Independent of draft_start; random wins if

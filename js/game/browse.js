@@ -145,7 +145,7 @@ import {
 // Multiplayer glue (the sandbox map, driven from a server game). These
 // are inert until mountBrowse({ online:true }) flips _online on; the
 // solo path never touches them.
-import { setOnline, isOnline, setM1, isM1 } from './online-mode.js';
+import { setOnline, isOnline, setM1, isM1, setM2, isM2 } from './online-mode.js';
 import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
 } from './net-bridge.js';
@@ -619,6 +619,7 @@ function applySnapshot(snapshot, seq) {
   // the rocket deploy gate + isotope fuel grade read the same M1 state the
   // server does while the stack hydrates. Mirrors the MARKET_MODE pin below.
   setM1(!!snapshot.m1);
+  setM2(!!snapshot.m2);
   // Card economy is server-authoritative in multiplayer (state.economy).
   // Pin the client's MARKET_MODE to whatever the snapshot says BEFORE
   // any hydrators run so the cart tab + Free Market / Research Auction
@@ -4495,6 +4496,7 @@ function buildMpConfigBlock(snapshot) {
   const tags = [];
   if (snapshot.m0) tags.push(['tag-m0', '🏛 M0 Politics']);
   if (snapshot.m1) tags.push(['tag-m1', '🚛 M1 Terawatt']);
+  if (snapshot.m2) tags.push(['tag-m2', '🔮 M2 Futures']);
   if (snapshot.draftStart) tags.push(['tag-draft', '🃏 Draft start']);
   if (snapshot.randomDraft) tags.push(['tag-draft', '🎲 Random draft']);
   const tagWrap = document.createElement('div');

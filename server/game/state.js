@@ -226,7 +226,7 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
 
 // players: [{ profileId, name, seat }] (seat 1-based, any order).
 // maxRounds: game length (rounds = Sunspot Cube cycles); default 5.
-export function createInitialState({ players, seed, maxRounds = 5, startingAqua, economy, draftStart, randomDraft, m0, m1 } = {}) {
+export function createInitialState({ players, seed, maxRounds = 5, startingAqua, economy, draftStart, randomDraft, m0, m1, m2 } = {}) {
   // Sort by the incoming (lobby) seat first so the shuffle has a
   // deterministic base regardless of how the caller ordered the array,
   // then randomise the turn order with the seeded RNG. Turn order IS
@@ -358,6 +358,9 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
     // M1 rule/op/UI path MUST gate on this flag so an M1-off game is byte-for-
     // byte the base game (see CLAUDE.md "Module gating").
     m1: !!m1,
+    // Module 2 (Futures). ADMIN-ONLY + experimental, fixed at game start. Defaults
+    // false. NOTHING M2 (Futures) may activate unless state.m2 is true.
+    m2: !!m2,
     assembly,
     homeIdeology,
     // Active-law star: the marker for the in-power ideology, moved by the
