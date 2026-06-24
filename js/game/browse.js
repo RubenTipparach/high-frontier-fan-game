@@ -9291,6 +9291,82 @@ function chainChip(card, face, kind, { ring, valid, radSide } = {}) {
 // reactor -> radiator), drawn as a nested list with folder connectors. A card
 // reached a second time (a cycle back-edge, or a supplier shared within the
 // tree) renders as a reference leaf and is NOT re-expanded, mirroring the
+// Debug export: serialize the resolved support-chain view (the same object the
+// visualizer draws from), plus the rocket stack and the player's wiring map, to
+// pretty JSON. Copies to the clipboard; falls back to a selectable modal when
+// the clipboard API is unavailable (e.g. some mobile webviews).
+function supportChainExportJson() {
+  let view = null;
+  try { view = getSupportChainView(); } catch (e) { view = { error: String(e && e.message || e) }; }
+  let wiring;
+  try { wiring = (typeof getWiring === 'function') ? getWiring() : undefined; } catch (_) { wiring = undefined; }
+  let stack;
+  try { stack = getRocketStack(); } catch (_) { stack = undefined; }
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    online: !!_online,
+    view,
+    stack,
+    wiring,
+  };
+  // Drop functions / undefined; tolerate any stray circular ref.
+  const seen = new WeakSet();
+  return JSON.stringify(payload, (k, v) => {
+    if (typeof v === 'function') return undefined;
+    if (v && typeof v === 'object') {
+      if (seen.has(v)) return '[circular]';
+      seen.add(v);
+    }
+    return v;
+  }, 2);
+}
+
+function exportSupportChainJson() {
+  let json;
+  try { json = supportChainExportJson(); }
+  catch (e) { setStatus('Could not build the support-chain JSON.'); return; }
+  const fallback = () => showCopyTextModal('🔗 Support chain (JSON)', json);
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(json)
+      .then(() => setStatus('🔗 Support chain copied to clipboard as JSON.'))
+      .catch(fallback);
+  } else {
+    fallback();
+  }
+}
+
+// Minimal selectable-text modal: shows `text` in a read-only textarea with a
+// Copy button, for exporting debug data when the clipboard API is blocked.
+function showCopyTextModal(title, text) {
+  document.querySelector('.copy-text-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay copy-text-overlay';
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const panel = document.createElement('div');
+  panel.className = 'turn-confirm-panel copy-text-panel';
+  panel.innerHTML = `
+    <h3>${esc(title)}</h3>
+    <textarea class="copy-text-area" readonly spellcheck="false"></textarea>
+    <div class="turn-confirm-actions">
+      <button type="button" class="popup-btn primary" data-act="copy">Copy</button>
+      <button type="button" class="popup-btn" data-act="close">Close</button>
+    </div>`;
+  const ta = panel.querySelector('.copy-text-area');
+  ta.value = text;
+  panel.querySelector('[data-act="copy"]').addEventListener('click', () => {
+    ta.focus(); ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+    setStatus(ok ? '🔗 Copied to clipboard.' : 'Select the text and copy it manually.');
+  });
+  panel.querySelector('[data-act="close"]').addEventListener('click', close);
+  overlay.appendChild(panel);
+  mountOverlay(overlay);
+}
+
 // resolver's visit-once walk. Read-only: rebuilt from getSupportChainView() on
 // every repaint.
 function buildSupportChainViz(host, lookup) {
@@ -9310,8 +9386,11 @@ function buildSupportChainViz(host, lookup) {
   const header = document.createElement('div');
   header.className = 'chain-viz-head';
   header.innerHTML = '<h4>🔗 Support chains</h4>'
-    + '<span class="muted">the cards powering each active card</span>';
+    + '<span class="muted">the cards powering each active card</span>'
+    + '<button type="button" class="chain-viz-export" title="Copy this support chain (resolved view + stack + wiring) as JSON, for debugging">⧉ JSON</button>';
   wrap.appendChild(header);
+  const exportBtn = header.querySelector('.chain-viz-export');
+  if (exportBtn) exportBtn.addEventListener('click', () => exportSupportChainJson());
 
   const stack = getRocketStack();
   const slotOf = (id) => stack.find((x) => x.id === id) || null;
