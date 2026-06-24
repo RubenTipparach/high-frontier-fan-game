@@ -3544,67 +3544,67 @@ app.get('/admin', (req, res) => {
       : '<span class="muted">not linked</span>';
     return `
     <tr>
-      <td><button class="btn-user linklike" data-pid="${r.id}" data-pname="${esc(r.name)}" data-linked="${linked ? 1 : 0}" data-dname="${esc(r.discord_name || r.discord_id || '')}">@${esc(r.name)}</button></td>
-      <td>${esc(r.created)}</td>
-      <td>${esc(r.seen)}</td>
-      <td class="num">${r.devices}</td>
-      <td class="num">${r.tables}</td>
-      <td class="num">${r.chats}</td>
-      <td class="discord-cell">${discordCell}</td>
+      <td data-label="Name"><button class="btn-user linklike" data-pid="${r.id}" data-pname="${esc(r.name)}" data-linked="${linked ? 1 : 0}" data-dname="${esc(r.discord_name || r.discord_id || '')}">@${esc(r.name)}</button></td>
+      <td data-label="Created">${esc(r.created)}</td>
+      <td data-label="Last seen">${esc(r.seen)}</td>
+      <td data-label="Devices" class="num">${r.devices}</td>
+      <td data-label="Tables" class="num">${r.tables}</td>
+      <td data-label="Chats" class="num">${r.chats}</td>
+      <td data-label="Discord" class="discord-cell">${discordCell}</td>
     </tr>
   `;
   }).join('') || '<tr><td colspan=7><em>No profiles yet.</em></td></tr>';
 
   const lobbyRows = lobbies.map((r) => `
     <tr data-name="${esc(String(r.name || '').toLowerCase())}" data-search="${esc((String(r.name || '') + ' ' + String(r.code || '')).toLowerCase())}">
-      <td><code>${esc(r.code)}</code></td>
-      <td><button class="btn-room linklike" data-lid="${r.id}" data-gid="${r.game_id || ''}" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}" data-status="active">${esc(r.name)}</button></td>
-      <td>@${esc(r.host_name)}</td>
-      <td><span class="pill pill-${esc(r.status)}">${esc(r.status)}</span></td>
-      <td>${esc(r.join_policy)}</td>
-      <td class="num">${r.members} / ${r.max_players}</td>
-      <td>${esc(r.created)}</td>
+      <td data-label="Code"><code>${esc(r.code)}</code></td>
+      <td data-label="Name"><button class="btn-room linklike" data-lid="${r.id}" data-gid="${r.game_id || ''}" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}" data-status="active">${esc(r.name)}</button></td>
+      <td data-label="Host">@${esc(r.host_name)}</td>
+      <td data-label="Status"><span class="pill pill-${esc(r.status)}">${esc(r.status)}</span></td>
+      <td data-label="Policy">${esc(r.join_policy)}</td>
+      <td data-label="Players" class="num">${r.members} / ${r.max_players}</td>
+      <td data-label="Created">${esc(r.created)}</td>
     </tr>
   `).join('') || '<tr class="empty-row"><td colspan=7><em>No active rooms.</em></td></tr>';
 
   const endedRows = endedLobbies.map((r) => `
     <tr>
-      <td><code>${esc(r.code)}</code></td>
-      <td><button class="btn-room linklike" data-lid="${r.id}" data-gid="" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}" data-status="${r.kind === 'finished' ? 'finished' : 'cancelled'}">${esc(r.name)}</button></td>
-      <td>@${esc(r.host_name)}</td>
-      <td class="num">${r.max_players}</td>
-      <td><span class="pill pill-${r.kind === 'finished' ? 'finished' : 'cancelled'}">${r.kind}</span></td>
-      <td>${esc(r.ended_when)}</td>
+      <td data-label="Code"><code>${esc(r.code)}</code></td>
+      <td data-label="Name"><button class="btn-room linklike" data-lid="${r.id}" data-gid="" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}" data-status="${r.kind === 'finished' ? 'finished' : 'cancelled'}">${esc(r.name)}</button></td>
+      <td data-label="Host">@${esc(r.host_name)}</td>
+      <td data-label="Players" class="num">${r.max_players}</td>
+      <td data-label="Status"><span class="pill pill-${r.kind === 'finished' ? 'finished' : 'cancelled'}">${r.kind}</span></td>
+      <td data-label="Ended">${esc(r.ended_when)}</td>
     </tr>
   `).join('') || '<tr><td colspan=6><em>No canceled or finished games.</em></td></tr>';
 
   const chatRows = chats.map((r) => `
     <tr>
-      <td>${esc(r.sent)}</td>
-      <td>@${esc(r.profile_name)}</td>
-      <td>${r.lobby_code ? `<code>${esc(r.lobby_code)}</code> ${esc(r.lobby_name)}` : '<em>(deleted)</em>'}</td>
-      <td>${esc(r.body)}</td>
+      <td data-label="When">${esc(r.sent)}</td>
+      <td data-label="Who">@${esc(r.profile_name)}</td>
+      <td data-label="Lobby">${r.lobby_code ? `<code>${esc(r.lobby_code)}</code> ${esc(r.lobby_name)}` : '<em>(deleted)</em>'}</td>
+      <td data-label="Body">${esc(r.body)}</td>
     </tr>
   `).join('') || '<tr><td colspan=4><em>No chat messages yet.</em></td></tr>';
 
   const inviteRows = invites.map((r) => `
     <tr>
-      <td>${esc(r.sent)}</td>
-      <td><span class="pill pill-${esc(r.status)}">${esc(r.status)}</span></td>
-      <td>@${esc(r.from_name)} → @${esc(r.to_name)}</td>
-      <td><code>${esc(r.lobby_code)}</code> ${esc(r.lobby_name)}</td>
+      <td data-label="Sent">${esc(r.sent)}</td>
+      <td data-label="Status"><span class="pill pill-${esc(r.status)}">${esc(r.status)}</span></td>
+      <td data-label="From / To">@${esc(r.from_name)} → @${esc(r.to_name)}</td>
+      <td data-label="Lobby"><code>${esc(r.lobby_code)}</code> ${esc(r.lobby_name)}</td>
     </tr>
   `).join('') || '<tr><td colspan=4><em>No direct invites yet.</em></td></tr>';
 
   const linkRows = links.map((r) => `
     <tr>
-      <td><code>${esc(r.code)}</code></td>
-      <td>${esc(r.created)}</td>
-      <td>${esc(r.expires) || '-'}</td>
-      <td>${r.single_use ? 'single-use' : 'unlimited'}</td>
-      <td class="num">${r.used_count}</td>
-      <td>@${esc(r.by_name)}</td>
-      <td><code>${esc(r.lobby_code)}</code> ${esc(r.lobby_name)}</td>
+      <td data-label="Code"><code>${esc(r.code)}</code></td>
+      <td data-label="Created">${esc(r.created)}</td>
+      <td data-label="Expires">${esc(r.expires) || '-'}</td>
+      <td data-label="Mode">${r.single_use ? 'single-use' : 'unlimited'}</td>
+      <td data-label="Uses" class="num">${r.used_count}</td>
+      <td data-label="Created by">@${esc(r.by_name)}</td>
+      <td data-label="Lobby"><code>${esc(r.lobby_code)}</code> ${esc(r.lobby_name)}</td>
     </tr>
   `).join('') || '<tr><td colspan=7><em>No invite links yet.</em></td></tr>';
 
@@ -3735,13 +3735,20 @@ app.get('/admin', (req, res) => {
   .ge-wiz-box button:hover{background:#262247}
   .ge-wiz-box button.danger{background:#3a1620;border-color:#5a2230;color:#ffd0d0}
   .ge-wiz-box button.ge-wiz-cancel{background:transparent;border-color:#2a2740;color:#9aa0c8;text-align:center}
-  /* Mobile: keep wide tables on the page (scroll them, not the whole page),
+  /* Mobile: stack each table row as a card (each cell shows its column label),
      give controls real tap targets, and let the modal use the full width. */
   @media (max-width:700px){
     body{padding:12px}
     h1{font-size:19px}
     .sub{margin-bottom:12px}
-    table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap}
+    table{display:block;width:100%;border:none}
+    thead{position:absolute;left:-9999px}              /* hide header row visually */
+    tbody{display:block}
+    tbody tr{display:block;border:1px solid #2a2740;border-radius:10px;padding:6px 10px;margin:0 0 10px;background:#0c0a16}
+    tbody td{display:flex;justify-content:space-between;gap:12px;border:none;padding:5px 0;white-space:normal;text-align:right}
+    tbody td::before{content:attr(data-label);color:#8b90b8;font-size:12px;font-weight:600;text-align:left;flex:0 0 auto}
+    tbody td:empty,tbody td:not([data-label]){display:block;text-align:left}   /* empty-state rows stay simple */
+    .num{justify-content:space-between}
     .kpis{gap:8px}
     .kpi{flex:1 1 calc(50% - 8px);min-width:0}
     .kpi strong{font-size:19px}
