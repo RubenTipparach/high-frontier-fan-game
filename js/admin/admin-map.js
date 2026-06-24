@@ -43,13 +43,26 @@ export async function mountAdminMap(host, { onPickSite } = {}) {
       onPickSite(slug, site);
     },
   });
+  // Make WAYPOINTS clickable too (lagrange / burn / hohmann), not just landable
+  // sites, so the admin can teleport a rocket to any node - same hit mode the
+  // route planner uses.
+  renderer.setRoutingHit(true);
   // Wide framing so the whole system is visible (admin overview, not a focused
-  // play camera): centre on the mean site position at the renderer's min zoom.
+  // play camera). Defer until the host actually has a size: mounting inside a
+  // just-shown modal can leave clientWidth at 0 for a frame, which would make
+  // the camera (and click hit-testing) resolve against a zero-size canvas.
   let cx = 0, cy = 0, k = 0;
   for (const s of _data.sites || []) {
     if (Number.isFinite(s.x) && Number.isFinite(s.y)) { cx += s.x; cy += s.y; k++; }
   }
-  if (k) renderer.flyTo({ x: cx / k, y: cy / k }, 1, { ms: 0 });
+  const frame = () => { if (k) renderer.flyTo({ x: cx / k, y: cy / k }, 1, { ms: 0 }); };
+  let tries = 0;
+  const waitForSize = () => {
+    if (host.clientWidth > 0 && host.clientHeight > 0) { frame(); return; }
+    if (tries++ > 60) { frame(); return; }
+    requestAnimationFrame(waitForSize);
+  };
+  waitForSize();
 
   return {
     renderer,

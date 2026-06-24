@@ -3654,7 +3654,7 @@ app.get('/admin', (req, res) => {
   .ge-asm-cube:hover{filter:brightness(1.12)}
   .ge-asm-cube.sel{outline:3px solid #7dd3fc;outline-offset:1px;transform:translateY(-1px)}
   /* Admin map: mounts the REAL client MapRenderer (js/admin/admin-map.js). The
-     host needs an explicit size; the action bar shows the clicked site's tools. */
+     host needs an explicit size; clicking a node pops the .ge-wiz wizard. */
   .ge-map{border:1px solid #26233c;border-radius:10px;padding:10px 12px;margin:0 0 12px;background:#0a0814}
   .ge-map h4{margin:0 0 8px;font-size:14px}
   .ge-map-tools{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 8px;font-size:12px;color:#9aa0c8}
@@ -3663,11 +3663,15 @@ app.get('/admin', (req, res) => {
   .ge-actor-chip.sel{opacity:1;outline:2px solid #7dd3fc;outline-offset:1px}
   .ge-map-wrap{position:relative;width:100%;overflow:hidden;border-radius:8px;border:1px solid #1c1930}
   #ge-map-host{width:100%;height:520px;background:radial-gradient(120% 90% at 50% 45%,#141232 0%,#070611 75%)}
-  .ge-map-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px;min-height:30px}
-  .ge-pick-name{font-size:12px;font-weight:700;color:#cfd4ff}
-  .ge-map-actions button{background:#1a1730;border:1px solid #2a2740;color:#e6e9ff;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer}
-  .ge-map-actions button:hover{background:#262247}
-  .ge-map-actions button.danger{background:#3a1620;border-color:#5a2230;color:#ffd0d0}
+  /* Map action wizard (popped on a node click). Above the manage-state modal. */
+  .ge-wiz-overlay{position:fixed;inset:0;z-index:60;background:rgba(4,3,10,.6);display:flex;align-items:center;justify-content:center}
+  .ge-wiz-box{background:#12101f;border:1px solid #3a3760;border-radius:12px;padding:14px;min-width:280px;max-width:min(360px,92vw);box-shadow:0 12px 40px rgba(0,0,0,.6)}
+  .ge-wiz-h{font-size:15px;font-weight:700;color:#eef0ff;margin-bottom:2px}
+  .ge-wiz-sub{font-size:12px;color:#9aa0c8;margin:0 0 10px}
+  .ge-wiz-box button{display:block;width:100%;text-align:left;background:#1a1730;border:1px solid #2a2740;color:#e6e9ff;border-radius:8px;padding:9px 12px;font-size:13px;margin:6px 0;cursor:pointer}
+  .ge-wiz-box button:hover{background:#262247}
+  .ge-wiz-box button.danger{background:#3a1620;border-color:#5a2230;color:#ffd0d0}
+  .ge-wiz-box button.ge-wiz-cancel{background:transparent;border-color:#2a2740;color:#9aa0c8;text-align:center}
   /* Mobile: keep wide tables on the page (scroll them, not the whole page),
      give controls real tap targets, and let the modal use the full width. */
   @media (max-width:700px){
@@ -4162,7 +4166,8 @@ document.addEventListener('click', function (ev) {
   var actorPid = null;     // which player a map click acts on (factory owner / teleport target)
   var mapApi = null;       // mounted client-map adapter (js/admin/admin-map.js) - the REAL renderer
   var mapMounting = false;
-  var pickedSlug = null;   // site/node currently selected on the map (drives the action bar)
+  var pickedSlug = null;   // site/node currently selected on the map
+  var pendingMove = null;  // slug of a factory awaiting a move-destination click
 
   function close() { modal.hidden = true; }
   closeBtn.addEventListener('click', close);
@@ -4222,11 +4227,9 @@ document.addEventListener('click', function (ev) {
       return '<button type="button" class="ge-actor-chip' + sel + '" data-pid="' + p.profileId + '" style="background:' + esc(p.color || '#888') + '">@' + esc(p.name) + '</button>';
     }).join('');
     var tools = '<div class="ge-map-tools"><span class="ge-actor">Acting as: ' + chips + '</span>'
-      + '<label><input type="checkbox" id="ge-colony"> with colony dome</label>'
-      + '<span style="opacity:.7">Click a site to build / teleport; any node to teleport.</span></div>';
+      + '<span style="opacity:.7">Click a site to build / teleport; click any node to teleport.</span></div>';
     return '<div class="ge-map"><h4>🗺 Solar map</h4>' + tools
-      + '<div class="ge-map-wrap"><div id="ge-map-host"></div></div>'
-      + '<div class="ge-map-actions" id="ge-map-actions"></div></div>';
+      + '<div class="ge-map-wrap"><div id="ge-map-host"></div></div></div>';
   }
   // Re-highlight the acting-player chips (after a chip click changes actorPid).
   function refreshActorChips() {
@@ -4241,7 +4244,7 @@ document.addEventListener('click', function (ev) {
     if (!host || mapApi || mapMounting) { refreshMap(); return; }
     mapMounting = true;
     import('/js/admin/admin-map.js').then(function (mod) {
-      return mod.mountAdminMap(host, { onPickSite: showPickActions });
+      return mod.mountAdminMap(host, { onPickSite: openWizard });
     }).then(function (api) {
       mapApi = api; mapMounting = false; refreshMap();
     }).catch(function (e) {
@@ -4251,21 +4254,58 @@ document.addEventListener('click', function (ev) {
   }
   // Push current factories / colonies / rocket-focus onto the live map.
   function refreshMap() { if (mapApi) mapApi.update(current.state, actorPid); }
-  // A site/node was clicked on the map -> show its action bar (teleport / build).
-  function showPickActions(slug, site) {
+  function closeWizard() { var w = document.getElementById('ge-wiz'); if (w) w.parentNode.removeChild(w); }
+  // A site/node was clicked on the map -> pop a wizard with the relevant actions
+  // for the acting player. Sites can build / teleport / manage a factory; any
+  // node (incl. waypoints) can teleport. Building asks the colony-dome question
+  // as a second step.
+  function openWizard(slug, site) {
+    closeWizard();
     pickedSlug = slug;
-    var bar = document.getElementById('ge-map-actions');
-    if (!bar) return;
     var a = actor();
     var who = a ? ('@' + a.name) : 'player';
     var isSite = !!(site && site.name && site.isLandable !== false);
     var hasFactory = (current.state.factories || []).some(function (f) { return f.slug === slug; });
     var label = (site && site.name) ? site.name : slug;
-    var h = '<span class="ge-pick-name">📍 ' + esc(label) + '</span>';
-    h += '<button data-mact="teleport" data-slug="' + esc(slug) + '">🛸 Teleport ' + esc(who) + '</button>';
-    if (isSite) h += '<button data-mact="create_factory" data-slug="' + esc(slug) + '">🏭 Build factory for ' + esc(who) + '</button>';
-    if (hasFactory) h += '<button class="danger" data-mact="remove_factory" data-slug="' + esc(slug) + '">× Remove factory</button>';
-    bar.innerHTML = h;
+    var ov = document.createElement('div'); ov.id = 'ge-wiz'; ov.className = 'ge-wiz-overlay';
+    var box = document.createElement('div'); box.className = 'ge-wiz-box';
+    function home() {
+      var h = '<div class="ge-wiz-h">' + esc(label) + '</div><p class="ge-wiz-sub">Acting as <strong>' + esc(who) + '</strong></p>';
+      h += '<button data-w="tp">🛸 Teleport ' + esc(who) + ' here</button>';
+      if (isSite && !hasFactory) h += '<button data-w="build">🏭 Build factory here</button>';
+      if (hasFactory) {
+        h += '<button data-w="reassign">👤 Reassign factory to ' + esc(who) + '</button>';
+        h += '<button data-w="move">↔ Move this factory…</button>';
+        h += '<button class="danger" data-w="remove">× Remove factory</button>';
+      }
+      if (pendingMove && pendingMove !== slug && isSite && !hasFactory) {
+        h += '<button data-w="moveHere">📦 Move pending factory here</button>';
+      }
+      h += '<button class="ge-wiz-cancel" data-w="cancel">Cancel</button>';
+      box.innerHTML = h;
+    }
+    box.addEventListener('click', function (ev) {
+      var b = ev.target.closest('button[data-w]'); if (!b) return;
+      var w = b.getAttribute('data-w');
+      if (w === 'cancel') { closeWizard(); return; }
+      if (w === 'tp') { closeWizard(); postEdit({ action: 'teleport', profileId: actorPid, node: slug }, 'Rocket teleported.'); return; }
+      if (w === 'build') {
+        box.innerHTML = '<div class="ge-wiz-h">Build factory at ' + esc(label) + '</div>'
+          + '<p class="ge-wiz-sub">Add a colony dome?</p>'
+          + '<button data-w="domeYes">🏭 + 🏠 Yes, with colony dome</button>'
+          + '<button data-w="domeNo">🏭 No dome</button>'
+          + '<button class="ge-wiz-cancel" data-w="cancel">Cancel</button>';
+        return;
+      }
+      if (w === 'domeYes' || w === 'domeNo') { closeWizard(); postEdit({ action: 'create_factory', profileId: actorPid, siteId: slug, colony: w === 'domeYes' }, 'Factory placed.'); return; }
+      if (w === 'reassign') { closeWizard(); postEdit({ action: 'reassign_factory', profileId: actorPid, siteId: slug }, 'Factory reassigned.'); return; }
+      if (w === 'remove') { closeWizard(); postEdit({ action: 'remove_factory', profileId: actorPid, siteId: slug }, 'Factory removed.'); return; }
+      if (w === 'move') { pendingMove = slug; closeWizard(); msg('Move started - click the destination site for this factory.', true); return; }
+      if (w === 'moveHere') { var from = pendingMove; pendingMove = null; closeWizard(); postEdit({ action: 'move_factory', fromSiteId: from, toSiteId: slug }, 'Factory moved.'); return; }
+    });
+    ov.addEventListener('click', function (ev) { if (ev.target === ov) closeWizard(); });
+    ov.appendChild(box); document.body.appendChild(ov);
+    home();
   }
   function render() {
     // Only the dynamic section (players / cards / assembly) is rebuilt here; the
@@ -4342,7 +4382,7 @@ document.addEventListener('click', function (ev) {
     title.textContent = 'Manage state: ' + label;
     body.innerHTML = '<p><em>Loading…</em></p>';
     modal.hidden = false;
-    mapApi = null; pickedSlug = null;   // fresh modal -> remount the map
+    mapApi = null; pickedSlug = null; pendingMove = null;   // fresh modal -> remount the map
     fetch('/admin/games/' + gid + '/state').then(function (r) { return r.json(); }).then(function (d) {
       if (!d.ok) { body.innerHTML = '<p class="ge-msg err">Failed: ' + esc(d.error || 'error') + '</p>'; return; }
       current.state = d.state; current.catalog = d.catalog || [];
@@ -4373,19 +4413,8 @@ document.addEventListener('click', function (ev) {
     // rocket focus ring follow; the player/card list below is unaffected).
     var chip = ev.target.closest('.ge-actor-chip');
     if (chip) { actorPid = Number(chip.getAttribute('data-pid')); refreshActorChips(); refreshMap(); return; }
-    // Map: an action-bar button (teleport / build / remove factory) for the
-    // site/node the admin last clicked on the map.
-    var mbtn = ev.target.closest('button[data-mact]');
-    if (mbtn) {
-      var mact = mbtn.getAttribute('data-mact');
-      var mslug = mbtn.getAttribute('data-slug');
-      if (mact === 'teleport') postEdit({ action: 'teleport', profileId: actorPid, node: mslug }, 'Rocket teleported.');
-      else if (mact === 'create_factory') {
-        var colEl = document.getElementById('ge-colony');
-        postEdit({ action: 'create_factory', profileId: actorPid, siteId: mslug, colony: !!(colEl && colEl.checked) }, 'Factory placed.');
-      } else if (mact === 'remove_factory') postEdit({ action: 'remove_factory', profileId: actorPid, siteId: mslug }, 'Factory removed.');
-      return;
-    }
+    // (Map node clicks are handled by the renderer's onSelect -> openWizard; the
+    // wizard popup wires its own buttons.)
     // Assembly cube manager: click a cube to pick it up, click a space to drop.
     var cube = ev.target.closest('.ge-asm-cube');
     if (cube) {
@@ -4612,8 +4641,10 @@ app.get('/admin/games/:gameId/state', requireAdmin, (req, res) => {
 //   set_aqua    { profileId, value }
 //   set_water   { profileId, value, grade? }
 //   teleport    { profileId, node }              (node id/slug OR site name)
-//   create_factory { profileId, siteId, colony } (site slug/name; colony = bool)
-//   remove_factory { siteId }
+//   create_factory   { profileId, siteId, colony }  (+ claim disc; colony = bool)
+//   reassign_factory { profileId, siteId }           (give factory+colony+claim)
+//   move_factory     { fromSiteId, toSiteId }        (relocate to another site)
+//   remove_factory   { siteId }
 // `from` / `to` are 'hand' | 'leo' | 'rocket' | 'outpost:<letter>'.
 app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
   const gameId = Number(req.params.gameId);
@@ -4670,24 +4701,56 @@ app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
     // Place a factory (optionally with a colony dome) at a real site for testing.
     // Factories sit on sites only - a waypoint (lagrange / burn) has no site
     // record, so reject those. Spectral type follows the site, like INDUSTRIALIZE.
+    // A factory always carries the owner's CLAIM disc (a real factory is built on
+    // a successful claim), so place a success disc too.
     const slug = resolveNodeRef(body.siteId);
     const site = slug ? siteBySlug(slug) : null;
     if (!site) return res.status(400).json({ error: 'not_a_site' });
     state.factories = state.factories || {};
+    state.discs = state.discs || {};
     state.factories[slug] = { ownerId: player.profileId, spectralType: site.spectralType || 'C' };
+    state.discs[slug] = { outcome: 'success', ownerId: player.profileId, roll: 1, canReroll: false };
     let tail = '';
     if (body.colony) {
       state.colonies = state.colonies || {};
       state.colonies[slug] = { ownerId: player.profileId };
       tail = ' with a colony dome';
     }
-    log = `Correction: Factory${tail} placed at ${site.name || slug} (spectral ${site.spectralType || 'C'}) for ${name}.`;
+    log = `Correction: Factory${tail} (+ claim) placed at ${site.name || slug} (spectral ${site.spectralType || 'C'}) for ${name}.`;
+  } else if (body.action === 'reassign_factory') {
+    // Give an existing factory (and its colony + claim) to the chosen player.
+    const slug = resolveNodeRef(body.siteId);
+    if (!slug || !(state.factories && state.factories[slug])) return res.status(400).json({ error: 'no_factory_here' });
+    state.factories[slug].ownerId = player.profileId;
+    if (state.colonies && state.colonies[slug]) state.colonies[slug].ownerId = player.profileId;
+    if (state.discs && state.discs[slug]) state.discs[slug].ownerId = player.profileId;
+    log = `Correction: Factory at ${siteNameOf(slug)} reassigned to ${name}.`;
+  } else if (body.action === 'move_factory') {
+    // Relocate a factory (with its colony + claim) to another real site - e.g.
+    // when components run out and the admin wants to reposition it for testing.
+    const from = resolveNodeRef(body.fromSiteId);
+    const to = resolveNodeRef(body.toSiteId);
+    if (!from || !(state.factories && state.factories[from])) return res.status(400).json({ error: 'no_factory_here' });
+    const toSite = to ? siteBySlug(to) : null;
+    if (!toSite) return res.status(400).json({ error: 'not_a_site' });
+    if (from === to) return res.status(400).json({ error: 'same_site' });
+    if (state.factories[to]) return res.status(400).json({ error: 'target_has_factory' });
+    const fac = state.factories[from];
+    fac.spectralType = toSite.spectralType || fac.spectralType || 'C';   // spectral follows the new site
+    state.factories[to] = fac;
+    delete state.factories[from];
+    state.colonies = state.colonies || {};
+    if (state.colonies[from]) { state.colonies[to] = state.colonies[from]; delete state.colonies[from]; }
+    state.discs = state.discs || {};
+    if (state.discs[from]) { state.discs[to] = state.discs[from]; delete state.discs[from]; }
+    log = `Correction: Factory moved from ${siteNameOf(from)} to ${toSite.name || to}.`;
   } else if (body.action === 'remove_factory') {
     const slug = resolveNodeRef(body.siteId);
     if (!slug) return res.status(400).json({ error: 'unknown_node' });
     const had = !!(state.factories && state.factories[slug]);
     if (state.factories) delete state.factories[slug];
     if (state.colonies) delete state.colonies[slug];
+    if (state.discs) delete state.discs[slug];
     if (!had) return res.status(400).json({ error: 'no_factory_here' });
     log = `Correction: Factory removed at ${siteNameOf(slug)}.`;
   } else if (body.action === 'move_cube') {
