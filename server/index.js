@@ -3659,7 +3659,7 @@ app.get('/admin', (req, res) => {
   <div class="header-row">
     <div>
       <h1>High Frontier admin</h1>
-      <div class="sub">stage 2 · ${esc(new Date().toISOString())}</div>
+      <div class="sub">${esc(new Date().toISOString())}</div>
     </div>
     <div class="ws-info">
       <strong>${wsCount}</strong> open sockets · <strong>${wsAuthed}</strong> authed
