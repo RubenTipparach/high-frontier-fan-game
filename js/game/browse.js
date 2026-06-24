@@ -5195,6 +5195,8 @@ function humanizeOnlineOpError(code, detail) {
     already_own_gw: 'You may only own one GW thruster, promoted or not.',
     already_own_freighter: 'You may only own one Freighter, promoted or not.',
     already_have_freighter: 'You already have a Freighter in play.',
+    no_freighter: 'You have no Freighter in play.',
+    load_limit: 'The Freighter is at its cargo load limit.',
     cannot_pay: 'Not enough aqua for that card.',
     crew_already_picked: 'You have already picked your starting crew.',
     crew_draft_closed: 'Crew picks are locked - the game has started.',
@@ -6023,7 +6025,7 @@ function flyToStack(id) {
 function openStackInspectorModal(id) {
   if (id === 'leo') { openLeoStackModal(); return; }
   if (id === 'rocket') { openRocketStackModal(); return; }
-  if (id === 'freighter') { openFreighterStackModal(); return; }
+  if (id === 'freighter') { openUnifiedStackInspector('freighter'); return; }
   if (id && id.startsWith('outpost')) {
     const letter = id.slice('outpost'.length);
     const op = getOutpost(letter);
@@ -6064,6 +6066,15 @@ function getStackSiteId(stackId) {
     const site = getRocketSite();
     return site?.id || null;
   }
+  if (stackId === 'freighter') {
+    const fr = getMyFreighter();
+    if (!fr) return null;
+    if (fr.siteId == null) return getLeoSiteId();
+    // Convert the server slug into the planner-id space the other stacks use,
+    // the same translation hydrateOutposts applies, so colocation compares like
+    // for like.
+    return (_onlineMaps && toPlannerId(_onlineMaps, fr.siteId)) || fr.siteId;
+  }
   if (stackId && stackId.startsWith('outpost')) {
     const letter = stackId.slice('outpost'.length);
     const op = getOutpost(letter);
@@ -6088,6 +6099,10 @@ function getLeoSiteId() {
 function getStackCards(stackId) {
   if (stackId === 'leo')    return getLeoCards();
   if (stackId === 'rocket') return getRocketStack();
+  if (stackId === 'freighter') {
+    const fr = getMyFreighter();
+    return (fr && Array.isArray(fr.stack)) ? fr.stack.slice() : [];
+  }
   if (stackId && stackId.startsWith('outpost')) {
     const letter = stackId.slice('outpost'.length);
     const op = getOutpost(letter);
@@ -6132,6 +6147,10 @@ function getColocatedDestinations(sourceId) {
     if (op && op.siteId === sourceSite) {
       dests.push({ id: opId, label: `Outpost ${letter}` });
     }
+  }
+  // The Freighter unit, when it's colocated (load cargo into the big cube).
+  if (sourceId !== 'freighter' && getMyFreighter() && getStackSiteId('freighter') === sourceSite) {
+    dests.push({ id: 'freighter', label: 'Freighter' });
   }
   return dests;
 }
@@ -6383,67 +6402,17 @@ function openOutpostStackModal(letter) {
 // freighter card itself plus its cargo hold (Black-Side goods) and water.
 // Cargo transfer / movement layer on in later increments; for now this gives
 // the player the freighter "stack" in their stacks bar that they can inspect.
-function openFreighterStackModal() {
+// Cargo capacity of the player's freighter (the installed face's load limit).
+// Mirrors the server's freighterLoadLimit in engine.js.
+function freighterCargoLimit() {
   const fr = getMyFreighter();
-  if (!fr) { setStatus('No freighter in play yet. ET Produce a freighter card at one of your factories to launch it.'); return; }
-  document.querySelector('.stack-inspector-overlay')?.remove();
-  const overlay = document.createElement('div');
-  overlay.className = 'card-modal-overlay stack-inspector-overlay';
-  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
-  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
-  document.addEventListener('keydown', onKey);
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  const dialog = document.createElement('div');
-  dialog.className = 'stack-inspector-modal';
-  overlay.appendChild(dialog);
-
-  const frCard = cardById(fr.cardId);
-  const loc = freighterLocLabel(fr);
-  const cargo = Array.isArray(fr.stack) ? fr.stack : [];
-  dialog.innerHTML = `
-    <div class="stack-inspector-head">
-      <h3>🚛 Freighter${fr.promoted ? ' <span class="muted">(promoted)</span>' : ''}</h3>
-      <span class="stack-inspector-loc">${esc(loc)}</span>
-      <button type="button" class="modal-x stack-inspector-close" aria-label="Close" title="Close">×</button>
-    </div>
-    <div class="stack-inspector-body">
-      <div class="stack-inspector-stat-row">
-        <div class="stack-inspector-stat"><span class="muted">Cargo</span><strong>${esc(String(cargo.length))}</strong></div>
-        <div class="stack-inspector-stat"><span class="muted">Water</span><strong class="stat-water">${esc(String(fr.tank | 0))} 💧</strong></div>
-        <div class="stack-inspector-stat"><span class="muted">Location</span><strong>${esc(loc)}</strong></div>
-      </div>
-      <h4>Freighter</h4>
-      <div class="rocket-stack-row fr-stack-row" id="freighter-card-host"></div>
-      <h4>Cargo hold (${cargo.length})</h4>
-      <div class="rocket-stack-row fr-stack-row" id="freighter-cargo-row"></div>
-    </div>
-  `;
-  dialog.querySelector('.stack-inspector-close').addEventListener('click', close);
-
-  const fhost = dialog.querySelector('#freighter-card-host');
-  if (frCard) {
-    const slot = document.createElement('div');
-    slot.className = 'rocket-slot';
-    slot.appendChild(renderCard(frCard, { type: 'patent', face: fr.face || 'secondary' }));
-    fhost.appendChild(slot);
-  } else {
-    fhost.innerHTML = '<p class="muted">Freighter card unavailable.</p>';
-  }
-
-  const crow = dialog.querySelector('#freighter-cargo-row');
-  if (!cargo.length) {
-    crow.innerHTML = '<p class="muted">Hold is empty. Load Black-Side goods at a factory (cargo transfer coming soon).</p>';
-  } else {
-    for (const c of cargo) {
-      const card = cardById(c.id);
-      if (!card) continue;
-      const slot = document.createElement('div');
-      slot.className = 'rocket-slot';
-      slot.appendChild(renderCard(card, { type: c.kind || 'patent', face: c.face, radSide: c.radSide || 'heavy' }));
-      crow.appendChild(slot);
-    }
-  }
-  mountOverlay(overlay);
+  if (!fr) return 0;
+  const card = cardById(fr.cardId);
+  if (!card) return 0;
+  const face = fr.face === 'primary' ? 'primary' : 'secondary';
+  const fd = card.faces && card.faces[face];
+  if (fd && fd.loadLimit != null) return fd.loadLimit | 0;
+  return (card.loadLimit | 0) || 0;
 }
 
 // Unified inspector for any non-rocket stack (LEO, Outpost
@@ -6506,19 +6475,35 @@ function openUnifiedStackInspector(stackId) {
           <div class="stack-inspector-stat"><span class="muted">Colony</span><strong>${colony ? '🌐 dome' : '<span class="muted">none</span>'}</strong></div>
           ${carriedChits ? `<div class="stack-inspector-stat"><span class="muted">Glory chits</span><strong title="Carried by the crew stationed here; rides home for VP when they return to LEO">🎖 ${carriedChits}</strong></div>` : ''}
         </div>`;
+    } else if (stackId === 'freighter') {
+      const fr = getMyFreighter();
+      if (!fr) { close(); return; }
+      const lim = freighterCargoLimit();
+      statsHtml = `
+        <div class="stack-inspector-stat-row">
+          <div class="stack-inspector-stat"><span class="muted">Cargo</span><strong>${esc(String(cards.length))} / ${esc(String(lim))}</strong></div>
+          <div class="stack-inspector-stat"><span class="muted">Water</span><strong class="stat-water">${esc(String(fr.tank | 0))} 💧</strong></div>
+          <div class="stack-inspector-stat"><span class="muted">Location</span><strong>${esc(freighterLocLabel(fr))}</strong></div>
+        </div>
+        <h4>Freighter</h4>
+        <div class="rocket-stack-row fr-stack-row" id="freighter-unit-host"></div>`;
     }
 
     const headline = stackId === 'leo'
       ? '🌍 LEO Stack'
-      : `🏛${esc(stackId.slice('outpost'.length))} - Outpost`;
+      : stackId === 'freighter'
+        ? '🚛 Freighter'
+        : `🏛${esc(stackId.slice('outpost'.length))} - Outpost`;
     const locLabel = stackId === 'leo'
       ? 'orbital staging'
-      : (() => {
-          const letter = stackId.slice('outpost'.length);
-          const op = getOutpost(letter);
-          const site = _activeData?.byId?.[op?.siteId];
-          return site?.name || op?.siteId || '';
-        })();
+      : stackId === 'freighter'
+        ? freighterLocLabel(getMyFreighter())
+        : (() => {
+            const letter = stackId.slice('outpost'.length);
+            const op = getOutpost(letter);
+            const site = _activeData?.byId?.[op?.siteId];
+            return site?.name || op?.siteId || '';
+          })();
 
     dialog.innerHTML = `
       <div class="stack-inspector-head">
@@ -6542,8 +6527,8 @@ function openUnifiedStackInspector(stackId) {
       <div class="stack-inspector-footer">
         <div id="stack-inspector-transfer"></div>
         <div class="card-modal-actions">
-          <button type="button" class="modal-btn decommission stack-decom-btn"
-            title="Return the selected cards to your hand" disabled>♻ Decommission to hand</button>
+          ${stackId === 'freighter' ? '' : `<button type="button" class="modal-btn decommission stack-decom-btn"
+            title="Return the selected cards to your hand" disabled>♻ Decommission to hand</button>`}
           ${stackId === 'leo' && isLeoSite(getRocketSite())
             ? '<button type="button" class="modal-btn stack leo-fuel-tank" title="Open the docked rocket\'s water tank to transfer fuel">💧 Rocket fuel tank</button>'
             : ''}
@@ -6658,6 +6643,23 @@ function openUnifiedStackInspector(stackId) {
       if (claimedChits.length) {
         if (!cards.length) row.innerHTML = '';
         for (const c of claimedChits) row.appendChild(buildChitToken(c.zone, { side: c.side, crewId: c.crewId }));
+      }
+    }
+
+    // The Freighter unit card itself (the built freighter, not cargo): shown
+    // above the cargo list, view-only (the unit can't be selected / transferred
+    // like cargo).
+    if (stackId === 'freighter') {
+      const fr = getMyFreighter();
+      const uhost = dialog.querySelector('#freighter-unit-host');
+      const ucard = fr && cardById(fr.cardId);
+      if (uhost && ucard) {
+        const w = document.createElement('div');
+        w.className = 'rocket-slot';
+        const ce = renderCard(ucard, { type: 'patent', face: fr.face || 'secondary' });
+        makeCardViewable(ce, ucard, 'patent', fr.face || 'secondary');
+        w.appendChild(ce);
+        uhost.appendChild(w);
       }
     }
 

@@ -2163,11 +2163,24 @@ function slotName(slot) {
 function stackArrayOf(player, id) {
   if (id === 'leo') return (player.leo = player.leo || []);
   if (id === 'rocket') return player.rocket.stack;
+  if (id === 'freighter') return player.freighter ? (player.freighter.stack = player.freighter.stack || []) : null;
   if (id && id.startsWith('outpost')) {
     const op = player.outposts && player.outposts[id.slice('outpost'.length)];
     return op ? op.cards : null;
   }
   return null;
+}
+
+// Cargo capacity of a player's freighter unit (the installed face's loadLimit).
+// 0 (no spare room) when there is no freighter.
+function freighterLoadLimit(player) {
+  if (!player.freighter) return 0;
+  const card = PATENTS_BY_ID[player.freighter.cardId];
+  if (!card) return 0;
+  const face = player.freighter.face === 'primary' ? 'primary' : 'secondary';
+  const fd = card.faces && card.faces[face];
+  if (fd && fd.loadLimit != null) return fd.loadLimit | 0;
+  return (card.loadLimit | 0) || 0;
 }
 function applyTransfer(state, op, player) {
   let to = op.to;
@@ -2175,9 +2188,11 @@ function applyTransfer(state, op, player) {
   // Legacy shorthand: only `to` (rocket|leo) given -> the other is `from`.
   if (!from && (to === 'rocket' || to === 'leo')) from = (to === 'rocket' ? 'leo' : 'rocket');
   if (!from || !to || from === to) return fail('bad_transfer');
-  const validEndpoint = (ep) => ep === 'leo' || ep === 'rocket'
+  const validEndpoint = (ep) => ep === 'leo' || ep === 'rocket' || ep === 'freighter'
     || (typeof ep === 'string' && ep.startsWith('outpost') && ['A', 'B', 'C', 'D'].includes(ep.slice('outpost'.length)));
   if (!validEndpoint(from) || !validEndpoint(to)) return fail('bad_transfer');
+  // A freighter endpoint needs the unit in play.
+  if ((from === 'freighter' || to === 'freighter') && !player.freighter) return fail('no_freighter');
 
   const ids = Array.isArray(op.cardIds)
     ? op.cardIds.map(String)
@@ -2196,6 +2211,7 @@ function applyTransfer(state, op, player) {
   const siteOf = (ep) => {
     if (ep === 'leo') return null;
     if (ep === 'rocket') return player.rocket.siteId == null ? null : player.rocket.siteId;
+    if (ep === 'freighter') return player.freighter.siteId == null ? null : player.freighter.siteId;
     return outpostOf(ep).siteId;
   };
   const rocketEmpty = player.rocket.stack.length === 0;
@@ -2213,6 +2229,12 @@ function applyTransfer(state, op, player) {
   if (!srcArr || !dstArr) return fail('bad_transfer');
   for (const id of ids) {
     if (!srcArr.some((s) => s.id === id)) return fail('not_in_source');
+  }
+  // Freighter cargo can't exceed the unit's load limit (cards already aboard
+  // that are being moved out don't count against the incoming room).
+  if (to === 'freighter') {
+    const aboard = dstArr.length - ids.filter((id) => dstArr.some((s) => s.id === id)).length;
+    if (aboard + ids.length > freighterLoadLimit(player)) return fail('load_limit');
   }
 
   const moved = [];
@@ -2235,7 +2257,9 @@ function applyTransfer(state, op, player) {
   if (from === 'rocket') recallIfEmpty(player);
   const label = moved.length === 1 ? slotName(moved[0]) : `${moved.length} cards`;
   const dstName = to === 'rocket' ? 'the rocket'
-    : to === 'leo' ? 'the LEO Stack' : `Outpost ${to.slice('outpost'.length)}`;
+    : to === 'leo' ? 'the LEO Stack'
+    : to === 'freighter' ? 'the Freighter'
+    : `Outpost ${to.slice('outpost'.length)}`;
   return { ok: true, state, log: `${player.name} moved ${label} to ${dstName}.` };
 }
 
