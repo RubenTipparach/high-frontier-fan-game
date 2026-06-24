@@ -3035,6 +3035,52 @@ function applySiteRefuel(state, op, player) {
   }
 
   if (player.rocket.siteId !== siteId) return fail('not_at_site');
+
+  // Isotope Refuel (M1): a GW thruster runs on gold-bead isotope, refined at a
+  // Factory whose spectral type matches the thruster. This fills the SAME tank
+  // as water (reuse the water tank, just graded 'isotope'); a chemical engine
+  // can never burn it and the tank never mixes grades. Gated hard on M1.
+  if (op.mode === 'isotope') {
+    if (!state.m1) return fail('m1_off');
+    const tid = player.rocket.activeThrusterId;
+    const tslot = tid && player.rocket.stack.find((s) => s.id === tid);
+    const tcard = tslot && PATENTS_BY_ID[tslot.id];
+    if (!tcard || tcard.type !== 'gw-thruster') return fail('no_gw_thruster');
+    const fac = state.factories[siteId];
+    if (!canUseFactoryNonVictory(state, player, fac)) return fail('no_factory');
+    // The factory inherits the site's spectral type; isotope only refines where
+    // it matches the GW thruster's spectral type.
+    const thrSpectral = tcard.spectralType || 'C';
+    const facSpectral = site.spectralType || 'C';
+    if (thrSpectral !== facSpectral) return fail('spectral_mismatch', { need: thrSpectral, have: facSpectral });
+    if (player.opsRemaining <= 0) return fail('no_ops_left');
+    player.refueledSites = Array.isArray(player.refueledSites) ? player.refueledSites : [];
+    if (player.refueledSites.includes(siteId)) return fail('already_refueled');
+    const idry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+    const icap = Math.max(0, TANK_MAX - idry);
+    const itank = Number(player.rocket.tank) || 0;
+    // Isotope can't top up a water/dirt tank, and vice versa (no mixing).
+    if (itank > 0 && tankGradeOf(player.rocket) !== 'isotope') return fail('cannot_mix_fuel');
+    if (itank >= icap) return fail('tank_full');
+    const igain = Math.min(7, icap - itank);
+    if (igain <= 0) return fail('tank_full');
+    player.rocket.tank = round6(itank + igain);
+    player.rocket.tankGrade = 'isotope';
+    player.refueledSites.push(siteId);
+    player.opsRemaining -= 1;
+    // First isotope ever refined monetizes the substance (M1 economy hook;
+    // the price consequences land in a later slice).
+    let monetizeNote = '';
+    if (!state.isotopeMonetized) {
+      state.isotopeMonetized = true;
+      monetizeNote = ' Isotope is now monetized.';
+    }
+    return {
+      ok: true, state,
+      log: `${player.name}: Isotope Refuel at ${site.name} (+${round6(igain)} isotope; tank ${round6(player.rocket.tank)}).${monetizeNote}`,
+    };
+  }
+
   // Atmospheric Scoop (subsystem 5) can raise an aerostat site to hydration 2.
   const water = effectiveHydration(site, player);
   if (water <= 0) return fail('dry_site');
