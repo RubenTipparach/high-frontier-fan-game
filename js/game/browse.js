@@ -645,6 +645,9 @@ function applySnapshot(snapshot, seq) {
   syncMeColor(snapshot);
   // Opponent rockets on the map (colour-coded, offset when colocated).
   syncMpRockets(snapshot);
+  // Refresh the stack switcher so the Freighter chip appears/updates once the
+  // big cube is produced (it reads getMyFreighter() off this snapshot).
+  renderStackSwitcher();
   // Animate everything that MOVED between the last applied state and
   // this one: rockets sliding along their route (mine, opponents', and
   // the undo rewind), prospect dice, and cards drifting between stacks.
@@ -5918,6 +5921,21 @@ function renderStackSwitcher() {
     }
   }
 
+  // M1 Freighter chip: only once the player's freighter unit is in play (the
+  // big cube). Sits after the outposts so the bar reads LEO / Rocket / outposts
+  // / freighter. Read-only inspector for now (cargo transfer lands next).
+  const fr = getMyFreighter();
+  if (fr) {
+    const cargoN = Array.isArray(fr.stack) ? fr.stack.length : 0;
+    slots.push({
+      id: 'freighter', icon: 'freighter', sub: 'Freighter',
+      water: (fr.tank | 0) > 0,
+      title: `Freighter${fr.promoted ? ' (promoted)' : ''} - ${cargoN} cargo, ${fr.tank | 0} water, at ${freighterLocLabel(fr)}`,
+      siteAvailable: true,
+      isEmpty: false,
+    });
+  }
+
   // Small cyan droplet badge marking an outpost that holds water.
   const waterDot = '<svg class="chip-water" viewBox="0 0 24 24" width="11" height="11" aria-hidden="true">'
     + '<path d="M12 3 C12 3 19 12 19 17 A7 7 0 0 1 5 17 C5 12 12 3 12 3Z" fill="#52caf2" stroke="#d6f3ff" stroke-width="1.2"/></svg>';
@@ -6001,6 +6019,7 @@ function flyToStack(id) {
 function openStackInspectorModal(id) {
   if (id === 'leo') { openLeoStackModal(); return; }
   if (id === 'rocket') { openRocketStackModal(); return; }
+  if (id === 'freighter') { openFreighterStackModal(); return; }
   if (id && id.startsWith('outpost')) {
     const letter = id.slice('outpost'.length);
     const op = getOutpost(letter);
@@ -6024,6 +6043,7 @@ const STACK_LABELS = {
   outpostB: { glyph: '🏛', sub: 'B',       name: 'Outpost B' },
   outpostC: { glyph: '🏛', sub: 'C',       name: 'Outpost C' },
   outpostD: { glyph: '🏛', sub: 'D',       name: 'Outpost D' },
+  freighter:{ glyph: '🚛', sub: 'Freighter', name: 'Freighter' },
 };
 
 // Where does a stack physically sit? Returns the siteId the
@@ -6334,10 +6354,92 @@ function leoBlackSideValue(card) {
   return freeMarketBlackSideValue(n);
 }
 
+// My M1 Freighter unit from the live snapshot, or null. Online + M1 only (the
+// server only ever sets player.freighter in an M1 game).
+function getMyFreighter() {
+  if (!_online || !_onlineSnapshot || !_onlineMe) return null;
+  const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
+  return (me && me.freighter) || null;
+}
+// Human-readable location for a freighter's server-slug siteId (null = LEO).
+function freighterLocLabel(fr) {
+  if (!fr || !fr.siteId) return 'LEO';
+  const cid = (_onlineMaps && toPlannerId(_onlineMaps, fr.siteId)) || fr.siteId;
+  const site = cid && _activeData && _activeData.byId && _activeData.byId[cid];
+  return (site && site.name) || fr.siteId;
+}
+
 // Outpost inspector. Same unified shape as the LEO modal.
 // Adds factory / colony attachment chips in the stats row.
 function openOutpostStackModal(letter) {
   openUnifiedStackInspector(`outpost${letter}`);
+}
+
+// M1 Freighter inspector: a read-only view of the player's big cube - the
+// freighter card itself plus its cargo hold (Black-Side goods) and water.
+// Cargo transfer / movement layer on in later increments; for now this gives
+// the player the freighter "stack" in their stacks bar that they can inspect.
+function openFreighterStackModal() {
+  const fr = getMyFreighter();
+  if (!fr) { setStatus('No freighter in play yet. ET Produce a freighter card at one of your factories to launch it.'); return; }
+  document.querySelector('.stack-inspector-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay stack-inspector-overlay';
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const dialog = document.createElement('div');
+  dialog.className = 'stack-inspector-modal';
+  overlay.appendChild(dialog);
+
+  const frCard = cardById(fr.cardId);
+  const loc = freighterLocLabel(fr);
+  const cargo = Array.isArray(fr.stack) ? fr.stack : [];
+  dialog.innerHTML = `
+    <div class="stack-inspector-head">
+      <h3>🚛 Freighter${fr.promoted ? ' <span class="muted">(promoted)</span>' : ''}</h3>
+      <span class="stack-inspector-loc">${esc(loc)}</span>
+      <button type="button" class="modal-x stack-inspector-close" aria-label="Close" title="Close">×</button>
+    </div>
+    <div class="stack-inspector-body">
+      <div class="stack-inspector-stat-row">
+        <div class="stack-inspector-stat"><span class="muted">Cargo</span><strong>${esc(String(cargo.length))}</strong></div>
+        <div class="stack-inspector-stat"><span class="muted">Water</span><strong class="stat-water">${esc(String(fr.tank | 0))} 💧</strong></div>
+        <div class="stack-inspector-stat"><span class="muted">Location</span><strong>${esc(loc)}</strong></div>
+      </div>
+      <h4>Freighter</h4>
+      <div class="rocket-stack-row" id="freighter-card-host"></div>
+      <h4>Cargo hold (${cargo.length})</h4>
+      <div class="rocket-stack-row" id="freighter-cargo-row"></div>
+    </div>
+  `;
+  dialog.querySelector('.stack-inspector-close').addEventListener('click', close);
+
+  const fhost = dialog.querySelector('#freighter-card-host');
+  if (frCard) {
+    const slot = document.createElement('div');
+    slot.className = 'rocket-slot';
+    slot.appendChild(renderCard(frCard, { type: 'patent', face: fr.face || 'secondary' }));
+    fhost.appendChild(slot);
+  } else {
+    fhost.innerHTML = '<p class="muted">Freighter card unavailable.</p>';
+  }
+
+  const crow = dialog.querySelector('#freighter-cargo-row');
+  if (!cargo.length) {
+    crow.innerHTML = '<p class="muted">Hold is empty. Load Black-Side goods at a factory (cargo transfer coming soon).</p>';
+  } else {
+    for (const c of cargo) {
+      const card = cardById(c.id);
+      if (!card) continue;
+      const slot = document.createElement('div');
+      slot.className = 'rocket-slot';
+      slot.appendChild(renderCard(card, { type: c.kind || 'patent', face: c.face, radSide: c.radSide || 'heavy' }));
+      crow.appendChild(slot);
+    }
+  }
+  mountOverlay(overlay);
 }
 
 // Unified inspector for any non-rocket stack (LEO, Outpost
