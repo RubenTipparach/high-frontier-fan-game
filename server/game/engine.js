@@ -3359,6 +3359,42 @@ function applyBuildColony(state, op, player) {
 // and op.cost to charge a price. Mirrors the sandbox addToHand guards (no crew,
 // no expansion card, no duplicates, not currently on the rocket) and also pulls
 // the card out of its shuffled deck so the library stays consistent.
+// M1 ownership cap (1A4): a player may own at most ONE GW thruster and ONE
+// freighter card at a time, promoted or not. The card counts wherever it sits:
+// hand, LEO, rocket, an outpost, or the freighter unit (its own card + cargo).
+// This gates ACQUISITION (buy / auction win). Production and promotion never
+// add a new card of the type, so they don't need the check.
+const SINGLETON_CARD_TYPES = new Set(['gw-thruster', 'freighter']);
+function* ownedCardIds(player) {
+  for (const id of (player.hand || [])) if (id) yield id;
+  for (const s of (player.leo || [])) if (s && s.id) yield s.id;
+  if (player.rocket && Array.isArray(player.rocket.stack)) {
+    for (const s of player.rocket.stack) if (s && s.id) yield s.id;
+  }
+  const ops = player.outposts || {};
+  for (const k in ops) {
+    const o = ops[k];
+    if (o && Array.isArray(o.cards)) for (const s of o.cards) if (s && s.id) yield s.id;
+  }
+  if (player.freighter) {
+    if (player.freighter.cardId) yield player.freighter.cardId;
+    if (Array.isArray(player.freighter.stack)) {
+      for (const s of player.freighter.stack) if (s && s.id) yield s.id;
+    }
+  }
+}
+function countOwnedOfType(player, type) {
+  let n = 0;
+  for (const id of ownedCardIds(player)) {
+    const c = PATENTS_BY_ID[id];
+    if (c && c.type === type) n += 1;
+  }
+  return n;
+}
+function ownsSingletonAlready(player, type) {
+  return SINGLETON_CARD_TYPES.has(type) && countOwnedOfType(player, type) >= 1;
+}
+
 function applyBuyCard(state, op, player) {
   const cardId = String(op.cardId || '');
   const card = PATENTS_BY_ID[cardId];
@@ -3366,6 +3402,9 @@ function applyBuyCard(state, op, player) {
   if (card.type === 'gw-thruster' && !state.m1) return fail('expansion_card');
   if (card.type === 'freighter' && !state.m1) return fail('expansion_card');
   if (CREW_BY_ID[cardId]) return fail('crew_card');
+  if (ownsSingletonAlready(player, card.type)) {
+    return fail(card.type === 'freighter' ? 'already_own_freighter' : 'already_own_gw');
+  }
   if ((player.hand || []).includes(cardId)) return fail('already_in_hand');
   if ((player.rocket.stack || []).some((s) => s.id === cardId)) return fail('on_rocket');
   const free = op.free !== false;             // default: free action (no op spent)
@@ -4149,6 +4188,12 @@ function applyAuctionBid(state, op, ctx) {
   if (!bidder) return fail('not_a_player');
   // Skunkworks (Shimizu) ignores the academia hand limit when bidding.
   if ((bidder.hand || []).length >= AUCTION_HAND_LIMIT && !hasPrivilege(state, bidder, 'SKUNKWORKS')) return fail('hand_limit');
+  // M1 ownership cap (1A4): can't bid on a GW thruster / freighter you already
+  // own one of - winning it would give you a second, which is illegal.
+  const lotCard = PATENTS_BY_ID[a.cardId];
+  if (lotCard && ownsSingletonAlready(bidder, lotCard.type)) {
+    return fail(lotCard.type === 'freighter' ? 'already_own_freighter' : 'already_own_gw');
+  }
   const amount = Number(op.amount);
   // Bids can be 0 (claim it free); only negatives are invalid.
   if (!Number.isInteger(amount) || amount < 0) return fail('bad_amount');
