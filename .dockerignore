@@ -13,6 +13,13 @@
 # COPY fails with "/vendor: not found". The submodule must also be checked
 # out for the file to exist on disk (deploy-api uses submodules: recursive).
 !vendor
+# Re-include the client source + assets the /admin "Manage state" map mounts
+# (the SAME MapRenderer the player sandbox uses). server/Dockerfile COPYs these
+# and index.js serves them statically; without these the COPY fails with
+# "/js: not found".
+!js
+!assets
+!css
 
 # Re-exclude things that live under the allowed dirs but must not ship.
 # Drop the parts of the planner submodule that aren't needed at runtime
