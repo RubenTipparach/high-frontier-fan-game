@@ -81,12 +81,6 @@ function freighterBody(pcol, defsId, opts = {}) {
   for (const lx of [58, 74, 92, 108]) s += `<line x1="${lx}" y1="61" x2="${lx}" y2="93" stroke="${_shade(hull, 0.62)}" stroke-width="0.9"/>`;
   s += `<rect x="48" y="78" width="70" height="3" fill="${_shade(hull, 0.55)}"/>`;
 
-  // radiator panels (behind the containers; the stack occludes their base)
-  for (const fx of [70, 92]) {
-    s += `<path d="M${fx} 40 L${fx + 11} 18 L${fx + 19} 20 L${fx + 8} 42 Z" fill="#414752" fill-opacity="0.96" stroke="${k}" stroke-width="0.9" stroke-linejoin="round"/>`;
-    for (let i = 1; i < 5; i++) s += `<line x1="${fx + 2 + i * 1.7}" y1="${40 - i * 4.4}" x2="${fx + 10 + i * 1.7}" y2="${42 - i * 4.4}" stroke="#2b2f38" stroke-width="0.7"/>`;
-  }
-
   // cargo containers riding the top deck (the hold)
   const conts = [{ x: 52, col: band }, { x: 74, col: _shade(band, 0.78) }, { x: 96, col: _lighten(band, 0.18) }];
   for (const c of conts) {
@@ -111,8 +105,9 @@ function freighterBody(pcol, defsId, opts = {}) {
   return s;
 }
 
-// Bounding frame: includes the exhaust glow (left/bottom) and fin tops.
-const VB_X = -18, VB_Y = 12, VB_W = 178, VB_H = 92;
+// Bounding frame: includes the exhaust glow (left/bottom), the container tops,
+// and the engine/hull extents.
+const VB_X = -24, VB_Y = 30, VB_W = 182, VB_H = 76;
 
 // Pure: the freighter as a standalone SVG string, tinted to `colour`.
 export function freighterSvg(colour, opts = {}) {
