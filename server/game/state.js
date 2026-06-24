@@ -205,7 +205,7 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
 
 // players: [{ profileId, name, seat }] (seat 1-based, any order).
 // maxRounds: game length (rounds = Sunspot Cube cycles); default 5.
-export function createInitialState({ players, seed, maxRounds = 5, startingAqua, economy, draftStart, randomDraft, m0 } = {}) {
+export function createInitialState({ players, seed, maxRounds = 5, startingAqua, economy, draftStart, randomDraft, m0, m1 } = {}) {
   // Sort by the incoming (lobby) seat first so the shuffle has a
   // deterministic base regardless of how the caller ordered the array,
   // then randomise the turn order with the seeded RNG. Turn order IS
@@ -331,6 +331,12 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
     // room creation); games already in flight default to false (no retro apply).
     // `assembly` holds delegate placements + drives the active-law resolver.
     m0: !!m0,
+    // Module 1 (Terawatt & Futures). ADMIN-ONLY + experimental, fixed at game
+    // start. Defaults false. NOTHING M1 (freighters, GW thrusters, isotope fuel,
+    // mobile factories, Futures) may activate unless state.m1 is true - every
+    // M1 rule/op/UI path MUST gate on this flag so an M1-off game is byte-for-
+    // byte the base game (see CLAUDE.md "Module gating").
+    m1: !!m1,
     assembly,
     homeIdeology,
     // Active-law star: the marker for the in-power ideology, moved by the
