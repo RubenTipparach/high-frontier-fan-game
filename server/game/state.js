@@ -97,6 +97,9 @@ export const AQUA_DEFAULT = 6;
 export const DECK_TYPES = [
   'thruster', 'reactor', 'radiator', 'refinery', 'robonaut', 'generator',
 ];
+// Module 1 adds two decks (Terawatt & Futures). Only dealt when state.m1 is on;
+// an M1-off game never builds or sees them (zero bleed-through).
+export const M1_DECK_TYPES = ['gw-thruster', 'freighter'];
 
 // Per-seat marker colours = the six crew-card colours. Each crew
 // card is associated with one of these slots; a player assigned
@@ -109,15 +112,20 @@ export const PLAYER_COLORS = CREW.map((c) => c.color);
 // js/game/decks.js#buildShuffledFresh but driven by the game's RNG so
 // the deal is reproducible. Expansion (gw-thruster) cards are excluded,
 // same as the sandbox.
-function buildShuffledDecks(gen) {
+function buildShuffledDecks(gen, m1 = false) {
+  // The base six always; the two M1 decks ONLY when m1. The base decks are
+  // built + shuffled first in the SAME order regardless of m1, so an m1-off
+  // game's deal is byte-for-byte identical to before (the M1 decks just consume
+  // extra RNG at the end of an m1 game).
+  const types = m1 ? [...DECK_TYPES, ...M1_DECK_TYPES] : DECK_TYPES;
   const decks = {};
-  for (const t of DECK_TYPES) decks[t] = [];
+  for (const t of types) decks[t] = [];
   for (const card of PATENTS) {
-    if (card.type === 'gw-thruster') continue;
+    if (!m1 && M1_DECK_TYPES.includes(card.type)) continue;
     if (!decks[card.type]) continue;
     decks[card.type].push(card.id);
   }
-  for (const t of DECK_TYPES) decks[t] = shuffle(gen, decks[t]);
+  for (const t of types) decks[t] = shuffle(gen, decks[t]);
   return decks;
 }
 
@@ -222,7 +230,7 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
   // still being reproducible from (seed). Colours are assigned in the
   // shuffled turn order so no one is always "the yellow player".
   const palette = shuffle(gen, PLAYER_COLORS);
-  const decks = buildShuffledDecks(gen);
+  const decks = buildShuffledDecks(gen, !!m1);
   const rounds = [4, 5, 6, 7].includes(maxRounds) ? maxRounds : 5;
   // Card economy + starting bank. Standard multiplayer is always 'market' +
   // AQUA_DEFAULT (the caller enforces that for 2+ player games); a solo game
