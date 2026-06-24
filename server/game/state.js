@@ -199,6 +199,15 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
     // the data/sites.js slug the outpost was built at (any non-LEO
     // node the player chose).
     outposts: {},
+    // M1 Freighter unit (the player's "big cube"): null until ET-produced at a
+    // Factory (see engine.js#applyEtProduce). One per player (1A4). Shape when
+    // live:
+    //   { cardId, face:'secondary', promoted:false, siteId:<slug>|null,
+    //     stack:[{id,kind,face?}], tank:<water>, wiring:{} }
+    // siteId is the map node it sits on (null = LEO); stack is its cargo
+    // (Black-Side goods + supports); tank is its water. Only reachable when
+    // state.m1 is true (every freighter code path gates on it).
+    freighter: null,
     hand: [],
     boostMarks: [],
     // Starting bank. Defaults to the standard AQUA_DEFAULT; a solo game may

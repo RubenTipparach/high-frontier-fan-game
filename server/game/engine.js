@@ -2841,6 +2841,24 @@ function applyEtProduce(state, op, player) {
   const cardId = String(op.cardId || '');
   const hIdx = player.hand.indexOf(cardId);
   if (hIdx < 0) return fail('not_in_hand');
+  const prodCard = PATENTS_BY_ID[cardId];
+  // M1 Freighter: producing a freighter card spawns the player's Freighter
+  // UNIT (the big cube) at this Factory's site, NOT a card in an outpost. One
+  // freighter per player (1A4). Gated on M1 (zero bleed-through when off).
+  if (prodCard && prodCard.type === 'freighter') {
+    if (!state.m1) return fail('m1_off');
+    if (player.freighter) return fail('already_have_freighter');
+    player.hand.splice(hIdx, 1);
+    player.freighter = {
+      cardId, face: 'secondary', promoted: false,
+      siteId, stack: [], tank: 0, wiring: {},
+    };
+    player.opsRemaining -= 1;
+    return {
+      ok: true, state,
+      log: `${player.name} ET-produced ${prodCard.name} (Freighter) at ${site.name}; the big cube launches.`,
+    };
+  }
   const letter = String(op.letter || '');
   if (!OUTPOST_LETTERS.includes(letter)) return fail('bad_outpost');
   player.outposts = player.outposts || {};
