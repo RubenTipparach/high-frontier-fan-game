@@ -7693,9 +7693,10 @@ function routeMetricPriority() {
 //   - Entering a burn node → its `landing` value (default 1,
 //     half-landers cost 2 the second time).
 //   - Pivoting at a Hohmann (changing direction at a labelled
-//     edge node) → +1 burn. The first pivot of the manual route
-//     is FREE if the active thruster has `bonusPivots > 0`
-//     (pirouette thrusters in the rulebook).
+//     edge node) → +1 burn. Pivots are FREE up to the mover's
+//     Bonus Pivot count (N): a pirouette thruster's `bonusPivots`
+//     for the rocket (or the freighter card's, for the freighter).
+//     All N are free, not just the first.
 //
 // Each manual hop becomes a turn-1 segment in _plannedRoute;
 // once the player hits Move the existing moveRocket flow consumes
@@ -7710,6 +7711,7 @@ let _manualDir = null;          // direction we entered the tip on
 let _manualPivotsUsed = 0;
 let _manualPirouettes = 0;      // free pivots remaining (bonusPivots)
 let _manualBonus = 0;           // banked gravity-assist / slingshot credit
+let _manualUnit = 'rocket';     // which mover this route drives: 'rocket' | 'freighter'
 // Solo manual travel: each hop slides the rocket sprite forward one segment so
 // the player watches the ship advance one segment at a time as they plot. The
 // state isn't committed until Move (one move per turn), so the commit animation
@@ -7730,22 +7732,51 @@ function activeThrusterBonusPivots() {
   const stats = getActiveThrusterStats();
   return stats ? (Number(stats.bonusPivots) || 0) : 0;
 }
-function enterManualMoveMode() {
+// Free pivots the player's Freighter unit carries (the Bonus Pivots icon count
+// on its INSTALLED face). Mirrors freighterCargoLimit's installed-face read.
+function freighterBonusPivots() {
+  const fr = getMyFreighter();
+  if (!fr) return 0;
+  const card = cardById(fr.cardId);
+  if (!card) return 0;
+  const face = fr.face === 'primary' ? 'primary' : 'secondary';
+  const fd = card.faces && card.faces[face];
+  if (fd && fd.bonusPivots != null) return fd.bonusPivots | 0;
+  return (card.bonusPivots | 0) || 0;
+}
+// Enter the manual route plotter. opts.unit selects the mover:
+//   'rocket'    (default) - budget = active thruster thrust, pivots = thruster
+//                 bonusPivots, origin = the rocket's site. Unchanged behaviour.
+//   'freighter' - the M1 big cube rides the SAME plotter: budget = 1 burn space
+//                 per turn (the freighter's propulsion model), pivots = the
+//                 freighter card's Bonus Pivots (N), origin = the freighter's
+//                 site. The route commits as a MOVE with unit:'freighter'.
+function enterManualMoveMode(opts = {}) {
+  const unit = opts.unit === 'freighter' ? 'freighter' : 'rocket';
+  _manualUnit = unit;
   _routeFrom = null;
   _routeTo = null;
   _plannedRoute = null;
   persistPlannedRoute();
-  const thrStats = getActiveThrusterStats();
-  const thrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 4;
   _manualMode = true;
-  _manualBudget = thrust;
-  _manualBudgetMax = thrust;
   _manualDir = null;
   _manualPivotsUsed = 0;
-  _manualPirouettes = activeThrusterBonusPivots();
   _manualBonus = 0;
-  const here = getRocketSite();
-  _manualOriginId = here ? here.id : null;
+  if (unit === 'freighter') {
+    // The freighter moves at most one burn space per turn (no thrust/isp/fuel).
+    _manualBudget = 1;
+    _manualBudgetMax = 1;
+    _manualPirouettes = freighterBonusPivots();
+    _manualOriginId = getStackSiteId('freighter');
+  } else {
+    const thrStats = getActiveThrusterStats();
+    const thrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 4;
+    _manualBudget = thrust;
+    _manualBudgetMax = thrust;
+    _manualPirouettes = activeThrusterBonusPivots();
+    const here = getRocketSite();
+    _manualOriginId = here ? here.id : null;
+  }
   _plannedRoute = [];
   persistPlannedRoute();
   if (_renderer) {
@@ -7762,6 +7793,7 @@ function enterManualMoveMode() {
 }
 function exitManualMoveMode() {
   _manualMode = false;
+  _manualUnit = 'rocket';
   _manualBudget = 0;
   _manualBudgetMax = 0;
   _manualOriginId = null;
@@ -8394,8 +8426,9 @@ function ensureMapShell(host) {
     }
     // M1: the Freighter is a second, independent mover. Show its own move budget
     // tag (only while a freighter is in play) so the player can see they have
-    // TWO moves this turn and which is still available. (Indicator for now - the
-    // freighter route-execution flow lands once its propulsion model is set.)
+    // TWO moves this turn and which is still available. Tapping it (on your turn,
+    // with the move unspent) starts plotting the freighter's route in the same
+    // plotter the rocket uses.
     if (fmoveTag) {
       const fr = getMyFreighter();
       if (!fr) {
@@ -8406,13 +8439,17 @@ function ensureMapShell(host) {
           .find((p) => p.profileId === (_onlineMe && _onlineMe.id));
         const fmoves = me && me.freighterMovesRemaining != null ? (me.freighterMovesRemaining | 0) : 1;
         const fspent = fmoves <= 0;
+        const ftappable = !fspent && !lockedByOnline;
         fmoveTag.textContent = fspent ? '🚛 move spent' : `🚛 move:${fmoves}`;
         fmoveTag.classList.toggle('is-spent', fspent);
         fmoveTag.classList.toggle('is-locked', lockedByOnline);
-        fmoveTag.disabled = true;
-        fmoveTag.title = fspent
-          ? 'Freighter move spent this turn.'
-          : 'Your Freighter has its own move this turn, separate from the rocket.';
+        fmoveTag.disabled = !ftappable;
+        fmoveTag.style.cursor = ftappable ? 'pointer' : '';
+        fmoveTag.title = lockedByOnline
+          ? 'Waiting for your turn.'
+          : (fspent
+            ? 'Freighter move spent this turn.'
+            : 'Freighter move remaining - tap to plot its route (a second mover, separate from the rocket).');
       }
     }
     if (undoTag) {
@@ -8547,6 +8584,14 @@ function ensureMapShell(host) {
   if (moveTag) {
     moveTag.style.cursor = 'pointer';
     onTap(moveTag, () => {
+      // While a freighter route is being plotted, the Move tag commits IT
+      // (moveRocket branches on _manualUnit), regardless of the rocket's own
+      // move budget - the freighter is a separate mover.
+      if (_manualMode && _manualUnit === 'freighter') {
+        if (_plannedRoute && _plannedRoute.length) moveRocket();
+        else setStatus('Tap a neighbouring space to plot the Freighter route first.');
+        return;
+      }
       if (getMovesRemaining() > 0) {
         // Guard the tap too (not just the disabled state): no thruster
         // support chain means there's nothing to move.
@@ -8559,6 +8604,17 @@ function ensureMapShell(host) {
         // dedicated ↩ undo tag (it can take back any action, not just a move).
         undoRocketMove();
       }
+    });
+  }
+  if (fmoveTag) {
+    onTap(fmoveTag, () => {
+      if (fmoveTag.disabled || fmoveTag.hidden) return;
+      const fr = getMyFreighter();
+      if (!fr) return;
+      // Plot the freighter's route in the shared plotter (origin = freighter
+      // site, budget = 1 burn, free pivots = the card's Bonus Pivots).
+      enterManualMoveMode({ unit: 'freighter' });
+      setStatus('Plotting the Freighter route - tap a neighbouring space, then Move. Pivots are free up to the card\'s count.');
     });
   }
   if (undoTag) {
@@ -15379,7 +15435,10 @@ function buildTurn1MoveOp() {
     if (!f || !t) return { error: 'That route is not on the map.' };
     segments.push({ from: f, to: t, burns: Number(s.burns) || 0, turn: 1 });
   }
-  return { toSiteId, segments, turn1Segs, destPlannerId };
+  // The freighter is a separate mover: tag the op so the server routes it to
+  // applyMoveFreighter (1-burn cap, free pivots, its own move budget).
+  const unit = _manualUnit === 'freighter' ? 'freighter' : undefined;
+  return { toSiteId, segments, turn1Segs, destPlannerId, unit };
 }
 
 // Dry-run THIS turn's planned move against the server (debug:true) and return
@@ -15441,6 +15500,71 @@ function wireSimulate(btn, resEl) {
   });
 }
 
+// Commit the planned FREIGHTER route as a MOVE unit:'freighter'. The freighter
+// shares the rocket's route plotter (buildTurn1MoveOp, routeHazards, the hazard
+// modals, submitOnlineOp); only the pre-flight differs. Its model: 1 burn space
+// per turn (already capped by _manualBudget), free pivots, free landing on a
+// size-1 / aerobrake-landable site (size > 1 needs a factory assist), generic +
+// FINAO hazards as normal, and a non-payable rad roll that glitches (then
+// destroys) the unit. The server resolves every die authoritatively.
+async function commitFreighterMoveOnline() {
+  const built = buildTurn1MoveOp();
+  if (built.error) { _onlineToast(built.error, 'error'); return false; }
+  const { toSiteId, segments, turn1Segs, destPlannerId } = built;
+  const destSite = _activeData.byId?.[destPlannerId]
+    || _activeData.sites.find((s) => s.id === destPlannerId);
+  // Landing gate mirrors the server: a size-1 (or aerobrake-landable) site is
+  // free; size > 1 needs a factory assist (a roll unless a colony waives it),
+  // evaluated at thrust 0 because the freighter carries no thrust value.
+  const destSize = siteSizeNumber(destSite);
+  const landG = (!destSite || destSite.aeroLandable || destSize <= 1)
+    ? { ok: true, needsRoll: false }
+    : maneuverGate(destSite, 0);
+  if (destSite && !landG.ok) {
+    _onlineToast(`Can't land the Freighter on ${destSite.name} - a size-${destSize} site needs a factory to assist.`, 'error');
+    return false;
+  }
+  // Season gate: a seasonal space is only enterable while the Sunspot Cube is
+  // in its season (the plotter blocks it too; this catches a stale plan).
+  const destSeason = destSite ? ((NODE_TAGS[destSite.id2] && NODE_TAGS[destSite.id2].season) || destSite.siteSynodic || null) : null;
+  let curSeasonName = null; try { curSeasonName = getSeason()?.name || null; } catch { curSeasonName = null; }
+  if (destSeason && curSeasonName && destSeason !== curSeasonName) {
+    const cap = destSeason[0].toUpperCase() + destSeason.slice(1);
+    _onlineToast(`${destSite.name} is a ${destSeason}-season space - only enterable during Season ${cap} (the Sunspot Cube is in ${curSeasonName} now).`, 'error');
+    return false;
+  }
+  // Hazards along this turn's arrival nodes. Generic (skull / aerobrake) +
+  // landing assist are aqua-payable (FINAO) or rolled; rad is rolled only.
+  const hz = routeHazards(turn1Segs);
+  const radHz = hz.filter((h) => h.site.type === 'radhaz');
+  const genericHz = hz.filter((h) => h.site.type !== 'radhaz');
+  const assistHz = (landG.needsRoll && destSite) ? [{ site: destSite, glyph: '🏭', label: 'landing assist' }] : [];
+  const payable = genericHz.concat(assistHz);
+  let hazardPay = false;
+  if (payable.length) {
+    const choice = await hazardConfirmModal(payable);
+    if (choice === 'cancel' || choice == null) { setStatus('Freighter move cancelled - no aqua spent, no rolls made.'); return false; }
+    hazardPay = choice === 'pay';
+    if (hazardPay) {
+      const cost = payable.length * HAZARD_COST_PER;
+      if (getAqua() < cost) { setStatus(`Need ${cost} aqua for FINAO - balance only ${getAqua()}.`); return false; }
+    }
+  }
+  // Radiation: not aqua-payable. Each zone rolls a d6; a 1 glitches the
+  // Freighter, and a glitched Freighter that fails again is destroyed.
+  if (radHz.length) {
+    const ok = await confirmModal({
+      title: '☢ Radiation zone',
+      body: `This route crosses ${radHz.length} radiation zone${radHz.length === 1 ? '' : 's'}. Each rolls a die: a critical glitches your Freighter, and a glitched Freighter that fails again is destroyed. This can't be bought past.`,
+      yes: 'Roll it', no: 'Cancel',
+    });
+    if (!ok) { setStatus('Freighter move cancelled at the rad check.'); return false; }
+  }
+  const ok = await submitOnlineOp({ kind: 'MOVE', unit: 'freighter', toSiteId, hazardPay, segments });
+  if (ok) clearRoute();
+  return ok;
+}
+
 // Step the rocket through its planned route's "turn 1" segments
 // (one move per turn, capped at BURNS_PER_TURN burns of cumulative
 // dv). The remaining segments shift down a turn so the next move
@@ -15456,13 +15580,17 @@ async function moveRocket() {
   // fuel math (and before the server round-trip) so a broken stack reports
   // the real reason - a missing reactor / radiator / unmet therm balance -
   // instead of falling through to a misleading "not enough water" error.
-  const act = isRocketActive();
-  if (!act.active) {
-    const why = (act.missing && act.missing.length)
-      ? act.missing.join('; ')
-      : (act.reason || 'support chain not satisfied');
-    setStatus(`⛓️ Can't move - support chain broken: ${why}`);
-    return false;
+  // The freighter is a self-contained mover (no support chain, no fuel), so
+  // this rocket-only gate is skipped when this route drives the freighter.
+  if (_manualUnit !== 'freighter') {
+    const act = isRocketActive();
+    if (!act.active) {
+      const why = (act.missing && act.missing.length)
+        ? act.missing.join('; ')
+        : (act.reason || 'support chain not satisfied');
+      setStatus(`⛓️ Can't move - support chain broken: ${why}`);
+      return false;
+    }
   }
   // Can't END this turn on an aerobrake corridor (the 🪂 parachute space): the
   // stack is falling through the atmosphere, so the descent has to finish on a
@@ -15486,6 +15614,10 @@ async function moveRocket() {
   // server resolves every die and publishes the results in rocket.lastMove,
   // which the snapshot animator plays back. Skip the local dice path below.
   if (_online) {
+    // The freighter rides the SAME route plotter but its own pre-flight (no
+    // support chain, no fuel, landing assist on size > 1, generic + rad
+    // hazards). The server (applyMoveFreighter) is authoritative.
+    if (_manualUnit === 'freighter') return await commitFreighterMoveOnline();
     // Execute ONLY this turn's segments - a multi-turn Hohmann transfer's
     // later legs are NOT charged now. The server is sent these segments
     // (with the planner's Hohmann-aware burns) and charges just them.

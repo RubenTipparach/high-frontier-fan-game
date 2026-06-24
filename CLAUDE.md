@@ -1044,6 +1044,14 @@ produce a log line that lands in it. This is not console logging - a
 
 ## Don'ts
 
+- **NEVER rebuild a feature that already exists. Improve / extend the
+  existing code instead.** Before adding a new mode, flow, planner, panel,
+  or UI affordance, FIND the current implementation and parameterize it.
+  If the rocket already has a route planner, the freighter rides the SAME
+  one with different inputs; you do not author a second planner. Adding a
+  parallel implementation of something we already have is the single most
+  wasteful mistake here. Search first, extend second, rebuild never.
+  (User directive 2026-06-24.)
 - **Don't build a separate multiplayer UI.** Multiplayer reuses the
   sandbox front-end (classic map + all panels + card rendering); only
   the data source (server snapshot) and action sink (`submitGameOp`)
