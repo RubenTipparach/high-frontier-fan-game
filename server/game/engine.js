@@ -303,12 +303,26 @@ function activeFuelGrade(rocket) {
   if (!tid) return 'water';
   const slot = rocket.stack.find((s) => s.id === tid);
   if (!slot) return 'water';
+  // GW thrusters (M1) run on isotope (gold-bead) fuel, never water/dirt.
+  const card = PATENTS_BY_ID[slot.id];
+  if (card && card.type === 'gw-thruster') return 'isotope';
   return faceBurnsDirt(thrusterFaceOf(slot)) ? 'dirt' : 'water';
+}
+// Can a tank of grade `have` fuel an engine that needs grade `need`? A dirt
+// engine burns dirt OR water; a water engine burns water only; a GW engine
+// burns isotope only, and no chemical engine can burn isotope.
+function fuelCompatible(need, have) {
+  if (need === 'isotope') return have === 'isotope';
+  if (have === 'isotope') return false;
+  if (need === 'dirt') return have === 'dirt' || have === 'water';
+  return have === 'water';
 }
 
 // The grade currently in the tank ('water' default; meaningless at tank 0).
 function tankGradeOf(rocket) {
-  return rocket.tankGrade === 'dirt' ? 'dirt' : 'water';
+  if (rocket.tankGrade === 'dirt') return 'dirt';
+  if (rocket.tankGrade === 'isotope') return 'isotope';   // M1 GW-thruster fuel
+  return 'water';
 }
 
 // Heliocentric-zone distance from Earth (Delivery cost driver). Earth = 0,
@@ -1466,14 +1480,14 @@ function applyMove(state, op, player) {
     fuelStepsNeeded: stepsNeeded,
     enough: stepsNeeded <= stepsAvail,
   };
-  // Fuel-grade gate: a dirt thruster can burn EITHER grade (dirt or water); a
-  // water thruster can burn ONLY water. So the lone incompatible case is a
-  // water engine drawing on a dirt tank (clearer than "insufficient" - the
-  // fuel is there, just incompatible). Tank still never mixes the two grades.
+  // Fuel-grade gate: a dirt thruster burns dirt OR water; a water thruster
+  // burns water only; a GW thruster (M1) burns isotope only, and no chemical
+  // thruster can burn isotope. An incompatible tank fails clearly (the fuel is
+  // there, just wrong grade). Tank never mixes grades.
   if (stepsNeeded > 0 && (Number(player.rocket.tank) || 0) > 0) {
     const need = activeFuelGrade(player.rocket);
     const have = tankGradeOf(player.rocket);
-    if (need === 'water' && have === 'dirt') return fail('wrong_fuel_grade', { need, have });
+    if (!fuelCompatible(need, have)) return fail('wrong_fuel_grade', { need, have });
   }
   if (stepsNeeded > stepsAvail) {
     return fail('insufficient_water', moveCalc);
@@ -1791,7 +1805,11 @@ function applyBuildRocket(state, op, player) {
   if (idx < 0) return fail('not_in_hand');
   const card = PATENTS_BY_ID[cardId];
   if (!card) return fail('unknown_card');
-  if (card.type === 'gw-thruster') return fail('expansion_card');
+  // GW thrusters boost onto the rocket only in an M1 game (off = expansion-
+  // locked). Freighters NEVER boost onto the rocket - they are a separate
+  // big-cube unit (deployed by their own op in a later slice).
+  if (card.type === 'gw-thruster' && !state.m1) return fail('expansion_card');
+  if (card.type === 'freighter') return fail('freighter_not_stackable');
 
   player.hand.splice(idx, 1);
   const slot = { id: cardId, kind: 'patent' };
@@ -3241,7 +3259,7 @@ function applyBuyCard(state, op, player) {
   const cardId = String(op.cardId || '');
   const card = PATENTS_BY_ID[cardId];
   if (!card) return fail('unknown_card');
-  if (card.type === 'gw-thruster') return fail('expansion_card');
+  if (card.type === 'gw-thruster' && !state.m1) return fail('expansion_card');
   if (CREW_BY_ID[cardId]) return fail('crew_card');
   if ((player.hand || []).includes(cardId)) return fail('already_in_hand');
   if ((player.rocket.stack || []).some((s) => s.id === cardId)) return fail('on_rocket');
