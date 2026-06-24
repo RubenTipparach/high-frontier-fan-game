@@ -53,9 +53,12 @@ up), and orange **future-star tokens**.
 ### Proposed UI / board
 
 - **Freighter Stack modal** - same shape as the Rocket Stack modal (title bar +
-  cards + net-thrust readout), but for the big-cube freighter: its cargo hold
-  (which Black-Side goods / gold beads it's carrying), its thruster + supports,
-  and its current map node. The big cube is the map marker.
+  cards + net-thrust readout), but for the big-cube freighter. Freighters (and
+  mobile freighters) **carry cards**; the hold capacity is a **MAX MASS HOLD**
+  (a mass budget), not a fixed cargo-slot count - show carried mass vs the
+  freighter's max (e.g. "mass hold 5 / 8"), the cards/gold beads it's carrying,
+  its thruster + supports, and its current map node. The big cube is the map
+  marker.
 - A board marker distinct from the rocket sprite (the player-colour **big**
   cube vs the small rocket).
 - White-Side vs Purple-Side faces in card rendering (we already render
@@ -165,7 +168,7 @@ up), and orange **future-star tokens**.
 
 ## Open questions (confirm against rulebook + spreadsheet before building)
 
-- Exact Freighter cargo capacity + how net thrust scales with cargo.
+- Exact Freighter max-mass-hold value + how net thrust scales with carried mass.
 - Delivery FT cost interaction once the Freighter (not the rocket) hauls.
 - Isotope tank size / how many gold beads a GW burn spends (the fuel-step ladder
   for isotope vs water).
