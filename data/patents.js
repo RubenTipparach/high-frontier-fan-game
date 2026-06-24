@@ -122,6 +122,11 @@ const PROPERTY_COLUMNS_NUM = {
 function requiresFromFace(face, type) {
   const reqs = [];
   if (!face) return reqs;
+  // Freighters carry a "Support Provided" matrix, not "Support Requirements"
+  // (verified against the spreadsheet banner): they SUPPLY these supports to
+  // the stack instead of needing them (mapped in suppliesFromFace). The
+  // freighter sheet has no Therms column either, so no cooling requirement.
+  if (type === 'freighter') return reqs;
   for (const [col, kind] of Object.entries(BOOLEAN_TO_REQ)) {
     if (face[col]) reqs.push({ kind, count: 1 });
   }
@@ -160,6 +165,14 @@ const GENERATOR_TYPE_COLS = {
 // cards' supports rows).
 function suppliesFromFace(face, type) {
   if (!face) return [];
+  // Freighters' "Support Provided" matrix (same power-source columns as the
+  // thruster "Support Requirements" matrix) are supplies: the freighter feeds
+  // these reactor / generator chips into the stack.
+  if (type === 'freighter') {
+    return Object.entries(BOOLEAN_TO_REQ)
+      .filter(([col]) => face[col])
+      .map(([, kind]) => kind);
+  }
   if (type === 'reactor') {
     return Object.entries(REACTOR_TYPE_COLS)
       .filter(([col]) => face[col])
