@@ -505,11 +505,13 @@ function initNewGameModal() {
     const draftStart = !!document.getElementById('solo-draft')?.checked;
     const randomDraft = !!document.getElementById('solo-random-draft')?.checked;
     const m0 = !!document.getElementById('solo-m0')?.checked;
+    // M1 admin-only: row hidden for non-admins, server forces off too.
+    const m1 = !!document.getElementById('solo-m1')?.checked;
     soloCreate.disabled = true;
     const prev = soloCreate.textContent;
     soloCreate.textContent = 'Creating room…';
     try {
-      const r = await createSoloRoom({ startingAqua, economy, maxRounds, draftStart, randomDraft, m0 });
+      const r = await createSoloRoom({ startingAqua, economy, maxRounds, draftStart, randomDraft, m0, m1 });
       if (r && r.ok) { close(); }
       else { toast('Could not start a solo room: ' + ((r && r.error) || 'network'), 'error'); }
     } catch (err) {
@@ -555,26 +557,45 @@ function ratAdminsFromConfig() {
   return new Set((el?.content || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
 }
 let _ratAccessReqId = 0;
+// Reveal / hide admin-only module toggles (currently the M1 room-creation
+// checkboxes). Same admin gate as Rat Frontier; when hidden the checkbox is
+// also force-unchecked so a stale tick can't ride along (the server enforces
+// the admin gate regardless, this is just UI hygiene).
+function setAdminModuleRows(allowed) {
+  for (const id of ['create-m1-row', 'solo-m1-row']) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.classList.toggle('hidden', !allowed);
+    if (!allowed) {
+      const cb = el.querySelector('input[type=checkbox]');
+      if (cb) cb.checked = false;
+    }
+  }
+}
+
 async function refreshRatAccess(profile) {
   const row = document.getElementById('new-game-rat-row');
-  if (!row) return;
   const reqId = ++_ratAccessReqId;
-  if (!profile) { row.classList.add('hidden'); return; }
+  const apply = (allowed) => {
+    if (row) row.classList.toggle('hidden', !allowed);
+    setAdminModuleRows(allowed);
+  };
+  if (!profile) { apply(false); return; }
   // Server-derived admin flag from /profiles/me (set on page load): the
   // authoritative, page-load answer. Reveal immediately when it's true.
-  if (profile.isAdmin) { row.classList.remove('hidden'); return; }
+  if (profile.isAdmin) { apply(true); return; }
   // Client-config allowlist reveals the entry immediately (no round-trip).
   const name = String(profile.name || '').toLowerCase();
-  if (name && ratAdminsFromConfig().has(name)) { row.classList.remove('hidden'); return; }
+  if (name && ratAdminsFromConfig().has(name)) { apply(true); return; }
   // Otherwise fall back to the server's real check (the authoritative gate).
-  if (!profile.token || !apiAvailable()) { row.classList.add('hidden'); return; }
+  if (!profile.token || !apiAvailable()) { apply(false); return; }
   let allowed = false;
   try {
     const r = await ratFrontierAccess(profile.token);
     allowed = !!(r && r.ok && r.data && r.data.allowed);
   } catch { allowed = false; }
   if (reqId !== _ratAccessReqId) return;   // a newer profile change superseded us
-  row.classList.toggle('hidden', !allowed);
+  apply(allowed);
 }
 
 function initAccountMenu() {

@@ -123,6 +123,35 @@ implementation right now:
 Other variants (campaign, scenarios) are explicitly out of scope
 for now. Don't pull them in without a discussion first.
 
+## Module gating - ZERO bleed-through
+
+Optional HF4 modules (M0 Politics, M1 Terawatt & Futures, ...) are opt-in
+per room and carried into the game state as a boolean (`state.m0`,
+`state.m1`, ...). The hard rule:
+
+- **NOTHING from a module may activate unless its flag is true.** No rule,
+  op, free action, card, deck, board piece, UI affordance, or score effect
+  from a module can be reachable when the module is off. An
+  M\<n\>-off game must be byte-for-byte identical to the same game without
+  that module. Every M\<n\> code path MUST gate on `state.m\<n\>` (engine)
+  / `snapshot.state.m\<n\>` (client) - no exceptions, no "harmless" leaks.
+- **The flag is fixed at room creation** (a checkbox -> the `lobbies.m\<n\>`
+  column -> `createInitialState({ m\<n\> })` -> `state.m\<n\>`). Default
+  OFF for every legacy + normal room, so games already in flight never
+  retro-acquire a module.
+- **M1 is ADMIN-ONLY + experimental.** The M1 room-creation / settings
+  checkbox is revealed only to admins (same gate as the Rat Frontier
+  feature: `profile.isAdmin` / `profileIsAdmin`), AND the server FORCES
+  `m1 = 0` for any non-admin request regardless of what the client sends
+  (`/lobbies` create + `/settings`). Never trust the client for this - the
+  server admin check is the real gate; the hidden checkbox is only UI.
+- When you build a module's mechanics, gate them behind the flag FIRST,
+  then add the rule. New M1 cards/decks still come from the spreadsheet
+  (see "Card data - single source of truth"); do not hand-author them.
+
+M1 design lives in `docs/module-m1-plan.md`; the extracted module rules
+are in `reference/manuals/`.
+
 ## Card data - single source of truth
 
 **Card data MUST come from the spreadsheet.** The authoritative
@@ -986,10 +1015,15 @@ produce a log line that lands in it. This is not console logging - a
   `#c01f6e` = Freedom; gold = Unity; mauve = Authority; mint = Equality; grey
   = Individuality; cream/silver = Honor). The canonical map lives in
   `data/assembly.js` (`IDEOLOGY_BY_FACTION_COLOR` / `ideologyForFactionColor`).
-  Used in SOLO to seat the starting delegate in the picked faction's ideology
-  (multiplayer assigns the starting ideology randomly by shuffled seat order).
-  This colour=ideology pairing recurs in later modules - reuse the same map,
-  don't re-derive it.
+  Used to seat every player's starting delegate in the ideology matching their
+  seat/faction colour, so the cube's colour lines up with the zone it sits in -
+  in BOTH solo AND multiplayer (the old "multiplayer seats randomly by seat
+  order" behaviour was the cube-colour-mismatch bug and is gone; seat order is
+  only a fallback when a colour has no mapping). The single seating helper is
+  `data/assembly.js#seatStartingDelegate`, called by `createInitialState`
+  (server/game/state.js) at setup and by `PICK_CREW` (server/game/engine.js) on
+  (re)pick. This colour=ideology pairing recurs in later modules - reuse the
+  same map, don't re-derive it.
 - **Player names track the player's seat colour.** Every render
   of `@<name>` in the multiplayer UI tints the text in that
   player's server-assigned seat colour (the same six crew-card

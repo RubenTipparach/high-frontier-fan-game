@@ -695,9 +695,19 @@
 .turn-clock-overlay { z-index: 60; }
 .event-legend-overlay { z-index: 90; }
 /* Fuel-tank modal: SVG cylinder with rising water level. */
-.fuel-tank-overlay { z-index: 75; }
+/* Scroll the whole overlay when the panel is taller than the viewport (it is
+   on mobile, where the columns stack). margin:auto on the panel centres it
+   when it fits and collapses to a top-aligned, scrollable layout when it does
+   not - so the title + × close button up top stay reachable instead of being
+   pushed off-screen by flex centring. */
+.fuel-tank-overlay {
+  z-index: 75;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
 .fuel-tank-panel {
   position: relative;
+  margin: auto;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -792,6 +802,9 @@
 /* Dirt fuel: grey/brown column instead of blue water. */
 .fuel-tank-panel.is-dirt-fuel .tank-water { fill: #8a7f6c; }
 .fuel-tank-panel.is-dirt-fuel .tank-water-foam { fill: rgba(168, 154, 130, 0.6); }
+/* Isotope fuel (M1 GW thrusters): gold-bead column. */
+.fuel-tank-panel.is-isotope-fuel .tank-water { fill: #d8b13a; }
+.fuel-tank-panel.is-isotope-fuel .tank-water-foam { fill: rgba(232, 200, 96, 0.6); }
 /* Dry-mass block: a hatched grey rectangle anchored to the
    bottom of the tank, representing the wet-mass capacity
    already claimed by the rocket's cards. Water floats above
@@ -1230,34 +1243,59 @@
 /* The wet-mass total doubles as the "open fuel tank" button, so it
    gets the blue clickable-button treatment to stand apart from the
    read-only totals cells around it (cards / dry mass / rad-hard). */
-.rocket-wetmass-cell {
+/* Bright blue, raised glossy button. Uses the COMPOUND selector
+   (.rocket-totals-cell.rocket-wetmass-cell) so it OUTRANKS the base
+   .rocket-totals-cell rule that is declared later in this file - otherwise the
+   base dark background + flat shadow win the cascade and the cell looks
+   unfilled. */
+.rocket-totals-cell.rocket-wetmass-cell {
   cursor: pointer;
-  background: linear-gradient(180deg, rgba(56, 189, 248, 0.26), rgba(14, 116, 187, 0.20));
-  border-color: rgba(56, 189, 248, 0.65);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10),
-              0 1px 4px rgba(8, 47, 73, 0.45);
-  transition: background 0.12s ease, border-color 0.12s ease,
-              box-shadow 0.12s ease, transform 0.05s ease;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0) 40%),
+    linear-gradient(180deg, #2f9be6 0%, #1a80d6 50%, #0a5cba 100%);
+  border: 1px solid #7fcdf2;
+  color: #ffffff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),            /* top gloss highlight */
+    inset 0 9px 16px rgba(255, 255, 255, 0.10),        /* upper sheen        */
+    inset 0 -8px 12px rgba(3, 30, 70, 0.55);           /* lower bevel shadow */
+  transition: background 0.1s ease, border-color 0.1s ease,
+              box-shadow 0.1s ease, transform 0.06s ease;
 }
-.rocket-wetmass-cell .lbl { color: #bae6fd; }
-.rocket-wetmass-cell::after {
+.rocket-totals-cell.rocket-wetmass-cell .lbl {
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgba(2, 20, 50, 0.85), 0 2px 4px rgba(2, 20, 50, 0.55);
+}
+.rocket-totals-cell.rocket-wetmass-cell strong { color: #ffffff; text-shadow: 0 1px 2px rgba(2, 28, 58, 0.6); }
+.rocket-totals-cell.rocket-wetmass-cell strong small { color: #e8f6ff; }
+.rocket-totals-cell.rocket-wetmass-cell .cell-eqn { color: #e3f3ff; }
+.rocket-totals-cell.rocket-wetmass-cell::after {
   content: "💧 tap to open tank";
   font-size: 9px;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: 0.4px;
   text-transform: uppercase;
-  color: #7dd3fc;
+  color: #ffffff;
+  text-shadow: 0 1px 1px rgba(2, 28, 58, 0.55);
 }
-.rocket-wetmass-cell:hover,
-.rocket-wetmass-cell:focus-visible {
-  background: linear-gradient(180deg, rgba(56, 189, 248, 0.38), rgba(14, 116, 187, 0.30));
-  border-color: rgba(125, 211, 252, 0.9);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16),
-              0 0 0 1px rgba(125, 211, 252, 0.45),
-              0 2px 8px rgba(8, 47, 73, 0.55);
+.rocket-totals-cell.rocket-wetmass-cell:hover,
+.rocket-totals-cell.rocket-wetmass-cell:focus-visible {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 40%),
+    linear-gradient(180deg, #3ba6ee 0%, #1f8ce2 50%, #0d68c8 100%);
+  border-color: #a6dcf6;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 9px 16px rgba(255, 255, 255, 0.14),
+    inset 0 -8px 12px rgba(3, 30, 70, 0.5);
   outline: none;
 }
-.rocket-wetmass-cell:active { transform: translateY(1px); }
+/* Press feedback on click: deepen the inset so it reads as pushed in. */
+.rocket-totals-cell.rocket-wetmass-cell:active {
+  box-shadow:
+    inset 0 3px 8px rgba(2, 28, 58, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
 
 /* Aqua transfer panel inside the fuel-tank modal. Only rendered
    when the rocket is parked at LEO - converts aqua 1:1 into water
@@ -2974,19 +3012,25 @@
 }
 .map-popup .popup-close {
   position: absolute;
-  top: 4px;
-  right: 6px;
-  width: 22px;
-  height: 22px;
-  border: none;
-  background: transparent;
-  color: var(--ink-mute);
+  top: 6px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: rgba(15, 16, 35, 0.9);
+  color: var(--ink);
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
   padding: 0;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
-.map-popup .popup-close:hover { color: var(--ink); }
+.map-popup .popup-close:hover { background: #dc2626; color: #fff; border-color: #ef4444; }
 
 /* ===== Browse view ===== */
 
@@ -3459,32 +3503,91 @@ body:has(#view-browse:not(.hidden)) #main {
   position: relative;
 }
 
-/* × close button in the modal's top-right corner. Replaces the
-   explicit text "Close" / "Cancel" that used to crowd the
-   action row, leaving the actions row for the primary verbs
-   (Discard / Exo produce / Add to LEO stack / Add to hand). */
+/* Unified close: an × inside a circle, pinned to the popup's top-right
+   corner. Neutral dark circle by default, fills RED on hover. Shared by
+   every popup (route / stack / card detail / turn clock / manage room
+   ...) so the close affordance reads the same everywhere and stands out
+   against any background. Bottom "Close" text buttons remain as a
+   fallback where a modal already has one. */
 .modal-x {
   position: absolute;
-  top: -8px;
-  right: -8px;
-  width: 32px;
-  height: 32px;
+  top: 8px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 50%;
-  font-size: 22px;
-  line-height: 1;
-  background: rgba(15, 16, 35, 0.92);
-  color: var(--ink);
   border: 1px solid var(--border);
+  background: rgba(15, 16, 35, 0.9);
+  color: var(--ink);
+  font-size: 18px;
+  line-height: 1;
   cursor: pointer;
   padding: 0;
   z-index: 10;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 .modal-x:hover {
-  background: #b91c1c;
+  background: #dc2626;
   color: #fff;
-  border-color: #7f1d1d;
+  border-color: #ef4444;
 }
+/* On a card-detail modal the panel box is smaller than the scaled card,
+   so pull the × out onto the card's own visual top-right corner where a
+   close badge is expected. */
+.card-modal-panel .modal-x {
+  top: -48px;
+  right: -10px;
+}
+/* Window-style modal title bar: the modal's name on the left, the close
+   × on the right, a divider underneath. Sits flush at the top of the
+   panel (panels that use it set their own padding to 0). The × inside a
+   header drops its absolute corner positioning and rides the flex row. */
+.modal-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 12px;
+  /* Break out of any container padding so the bar sits flush at the
+     panel's top + side edges. A panel with padding sets --modal-pad-t /
+     --modal-pad-x to its own padding; a padding-free panel (rocket stack)
+     leaves them 0 and the margins collapse. */
+  margin: calc(-1 * var(--modal-pad-t, 0px)) calc(-1 * var(--modal-pad-x, 0px)) 0;
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border-bottom: 1px solid var(--border);
+  border-top-left-radius: inherit;
+  border-top-right-radius: inherit;
+}
+.modal-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modal-header .modal-x {
+  position: static;
+  top: auto;
+  right: auto;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  font-size: 16px;
+  box-shadow: none;
+}
+
 .card-modal-card {
   transform: scale(1.6);
   transform-origin: center;
@@ -3879,16 +3982,25 @@ body:has(#view-browse:not(.hidden)) #main {
 
 .sidepanel-close {
   position: absolute;
-  top: 6px;
-  right: 8px;
-  background: transparent;
-  border: none;
-  color: var(--ink-dim);
-  font-size: 22px;
+  top: 8px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: rgba(15, 16, 35, 0.9);
+  color: var(--ink);
+  font-size: 18px;
   line-height: 1;
-  padding: 2px 6px;
+  cursor: pointer;
+  padding: 0;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
-.sidepanel-close:hover { color: var(--ink); }
+.sidepanel-close:hover { background: #dc2626; color: #fff; border-color: #ef4444; }
 
 .panel-pane { display: none; }
 .panel-pane.active { display: block; }
@@ -4410,7 +4522,7 @@ html.battery-save *::after {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 22px 24px;
+  padding: 0;
   width: min(820px, 90vw);
   max-height: 90vh;
   overflow: hidden;
@@ -4453,10 +4565,10 @@ html.battery-save *::after {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  /* Soft pad on the right so the scrollbar doesn't crowd the
-     panel content; the cap on padding-right preserves visual
-     balance with the panel's own padding. */
-  padding-right: 4px;
+  /* The panel itself is padding-free (the title bar sits flush), so the
+     body owns the content inset; a slimmer right pad keeps the scrollbar
+     from crowding the content. */
+  padding: 16px 20px 22px 24px;
 }
 .rocket-stack-header {
   flex: 0 0 auto;
@@ -4517,34 +4629,37 @@ html.battery-save *::after {
    so it sits flush with the viewport edges. */
 @media (max-width: 720px) {
   .rocket-stack-overlay { padding: 0; }
+  .rocket-stack-overlay { align-items: stretch; }
   .rocket-stack-panel {
     width: 100vw;
     max-width: 100vw;
+    /* dvh = the CURRENTLY visible height (excludes the URL bar). Plain
+       100vh is the url-bar-hidden height, which is TALLER than what's on
+       screen; centered in the overlay it pushed the title bar up behind
+       the URL bar. dvh makes the panel match the visible area so the
+       header stays at the top. vh kept as a fallback for old engines. */
     height: 100vh;
+    height: 100dvh;
     max-height: 100vh;
-    padding: 14px 12px;
+    max-height: 100dvh;
+    padding: 0;
     border-radius: 0;
     border: none;
     box-shadow: none;
   }
-  /* The shared modal-x sits at top:-8 right:-8 by default,
-     which puts it OUTSIDE the panel - fine on desktop where
-     the overlay backdrop has 24px padding, but on a full-
-     bleed phone panel that's off-screen behind the URL bar.
-     Pin it to the viewport top-right with position:fixed +
-     a beefy z-index so no overlapping element can hide it,
-     and a bigger tap target so a thumb can hit it reliably. */
-  .rocket-stack-panel .modal-x {
-    position: fixed;
-    top: max(8px, env(safe-area-inset-top, 8px));
-    right: max(8px, env(safe-area-inset-right, 8px));
-    width: 40px;
-    height: 40px;
-    font-size: 26px;
-    z-index: 120;
-    background: rgba(15, 16, 35, 0.96);
-    border: 1px solid rgba(120, 130, 170, 0.7);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.55);
+  /* Push the title bar down below the phone's status / URL bar via the
+     safe-area inset so the "Rocket Stack" header isn't jammed against the
+     screen edge. The close × rides the bar with a bigger tap target. */
+  .rocket-stack-panel .modal-header {
+    padding-top: calc(env(safe-area-inset-top, 0px) + 7px);
+  }
+  .rocket-stack-panel .modal-header .modal-x {
+    width: 30px;
+    height: 30px;
+    font-size: 19px;
+  }
+  .rocket-stack-body {
+    padding: 14px 12px 16px;
   }
 }
 
@@ -5194,6 +5309,8 @@ html.battery-save *::after {
    so the colour key stays consistent across the Stage-3 ops.
    ============================================================ */
 .et-produce-modal {
+  --modal-pad-t: 18px;
+  --modal-pad-x: 20px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -5891,11 +6008,12 @@ html.battery-save *::after {
 .stack-inspector-head {
   flex: 0 0 auto;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
 .stack-inspector-head h3 { margin: 0; font-size: 18px; letter-spacing: 0.5px; }
+.stack-inspector-head .modal-x { position: static; margin-left: auto; }
 .stack-inspector-loc {
   font-size: 12px;
   color: var(--muted, #94a3b8);
@@ -7020,6 +7138,9 @@ html.battery-save *::after {
   margin: 6px 0 3px;
 }
 .mp-line { font-size: 12px; padding: 1px 0; }
+/* Modules & game config summary block in the MP panel. */
+.mp-config { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+.mp-config .module-tags { margin: 2px 0 4px; }
 
 /* Per-player stack inspect chips (6 stacks: LEO / Rocket / Outpost
    A-D, plus the hand row). Each is a tap target that opens a
@@ -7295,6 +7416,8 @@ html.battery-save *::after {
 }
 .mp-crew-draft-overlay.is-behind-wizard .mp-crew-draft-panel { display: none; }
 .mp-crew-draft-panel {
+  --modal-pad-t: 18px;
+  --modal-pad-x: 22px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -7354,6 +7477,8 @@ html.battery-save *::after {
   animation: modal-fade 0.18s ease-out;
 }
 .mp-auction-modal {
+  --modal-pad-t: 16px;
+  --modal-pad-x: 20px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -7420,6 +7545,31 @@ html.battery-save *::after {
 }
 .mp-auction-bonus-card { flex: 0 0 auto; display: flex; justify-content: center; }
 .mp-auction-bonus-card .card {
+  transform: scale(0.62);
+  transform-origin: top center;
+  margin-bottom: -96px;
+}
+/* "Next up" preview: a peek at the top card of the chosen deck (the card that
+   will be auctioned next). Scaled + dimmed so it reads as a coming-soon peek,
+   not part of the current lot. Only the chosen deck previews its next card. */
+.mp-auction-next {
+  width: 100%;
+  border-top: 1px dashed var(--line, #2a2f4a);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.mp-auction-next-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--muted, #9aa0c0);
+}
+.mp-auction-next-card { flex: 0 0 auto; display: flex; justify-content: center; opacity: 0.78; }
+.mp-auction-next-card .card {
   transform: scale(0.62);
   transform-origin: top center;
   margin-bottom: -96px;
@@ -7556,13 +7706,33 @@ html.battery-save *::after {
    the overlay drops its backdrop and goes pointer-events:none so the
    player can still pan the board, inspect cards, and chat; only the
    chip itself stays clickable. Tapping the chip restores the modal. */
-.mp-modal-titlebar {
+/* Collapsible "important" modals share the same window-style title bar as
+   the other modals: a styled bar with the name on the left and the
+   controls (minimize / close) on the right, pinned to the top so it stays
+   put while the body scrolls. The container sets --modal-pad-t/x to its
+   own padding so the bar breaks out flush to the panel edges. */
+.mp-modal-titlebar,
+.mp-auction-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  padding: 5px 12px;
+  margin: calc(-1 * var(--modal-pad-t, 0px)) calc(-1 * var(--modal-pad-x, 0px)) 12px;
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border-bottom: 1px solid var(--border);
+  border-top-left-radius: inherit;
+  border-top-right-radius: inherit;
+  position: sticky;
+  top: calc(-1 * var(--modal-pad-t, 0px));
+  z-index: 6;
 }
-.mp-modal-titlebar h3 { margin: 0; }
+.mp-modal-titlebar h3,
+.mp-auction-head h3 { margin: 0; margin-right: auto; }
+.mp-modal-titlebar .modal-x,
+.mp-auction-head .modal-x { position: static; flex: 0 0 auto; }
+.mp-modal-titlebar .mp-mini-btn,
+.mp-auction-head .mp-mini-btn { flex: 0 0 auto; align-self: center; }
 .mp-mini-btn {
   flex: 0 0 auto;
   width: 28px;
@@ -7662,6 +7832,8 @@ html.battery-save *::after {
   animation: modal-fade 0.18s ease-out;
 }
 .mp-first-player-modal {
+  --modal-pad-t: 18px;
+  --modal-pad-x: 22px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -7805,15 +7977,23 @@ html.battery-save *::after {
 .all-cards-head h3 { margin: 0; font-size: 16px; color: #e6e9ff; }
 .all-cards-head .muted { font-size: 12px; font-weight: 400; color: #8b90b8; margin-left: 6px; }
 .all-cards-close {
-  background: none;
-  border: none;
-  color: #9aa0c4;
-  font-size: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: rgba(15, 16, 35, 0.9);
+  color: var(--ink);
+  font-size: 18px;
   line-height: 1;
   cursor: pointer;
-  padding: 0 4px;
+  padding: 0;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
-.all-cards-close:hover { color: #fff; }
+.all-cards-close:hover { background: #dc2626; color: #fff; border-color: #ef4444; }
 .all-cards-body { overflow-y: auto; padding: 6px 16px 16px; }
 
 .all-cards-loc { padding: 10px 0; border-bottom: 1px solid #1c2440; }
@@ -8030,6 +8210,8 @@ html.battery-save *::after {
 
 /* ----- Draft-start mode: the deck market modal ----- */
 .draft-market-panel {
+  --modal-pad-t: 18px;
+  --modal-pad-x: 20px;
   background: var(--panel, #0f1b2e);
   border: 1px solid var(--border, #26405f);
   border-radius: 14px;
@@ -8040,6 +8222,12 @@ html.battery-save *::after {
   overflow-y: auto;
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
   color: var(--ink, #e6eefc);
+}
+/* Title bar stays pinned while the deck list scrolls under it. */
+.draft-market-panel .modal-header {
+  position: sticky;
+  top: calc(-1 * var(--modal-pad-t));
+  z-index: 5;
 }
 .draft-market-head h2 { margin: 0 0 4px; font-size: 20px; }
 .draft-market-head p { margin: 0 0 12px; }
@@ -8150,7 +8338,9 @@ html.battery-save *::after {
   color: var(--ink);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
 }
+.mp-trade-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .mp-trade-head h3 { margin: 0 0 10px; font-size: 18px; letter-spacing: 0.5px; }
+.mp-trade-head .modal-x { position: static; flex: 0 0 auto; margin-bottom: 10px; }
 .mp-trade-field { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 6px 0; }
 .mp-trade-field span { font-size: 13px; color: var(--ink-dim, #8b90b8); }
 .mp-trade-field input, .mp-trade-field select { width: 140px; }
@@ -8304,9 +8494,34 @@ html.battery-save *::after {
 .assembly-modal-overlay.is-minimized { background: transparent; backdrop-filter: none; pointer-events: none; }
 .assembly-modal-overlay.is-minimized .assembly-modal { display: none; }
 .assembly-modal-overlay.is-minimized .mp-mini-chip { display: none; }
-.assembly-modal { position: relative; background: var(--panel, #0c0a16); border: 1px solid var(--border, #2a2740);
+.assembly-modal { --modal-pad-t: 8px; --modal-pad-x: 18px; position: relative; background: var(--panel, #0c0a16); border: 1px solid var(--border, #2a2740);
   border-radius: 14px; width: min(900px, 96vw); max-height: 92vh; overflow: auto; margin: 2vh auto; padding: 8px 18px 18px; }
 .assembly-modal-title { margin: 0; font-size: 16px; }
+/* The title bar already names the modal, so hide the board panel's own
+   big "Sol Political Assembly / Module 0" heading inside the modal. */
+.assembly-modal .assembly-head { display: none; }
+
+/* Mobile: keep these centered "important" modals from sitting behind the
+   phone's status / URL bar. Anchor them to the top with a safe-area inset
+   and cap their height with dvh (the visible height) so the pinned title
+   bar is always on screen. */
+@media (max-width: 720px) {
+  .mp-auction-overlay,
+  .mp-first-player-overlay {
+    align-items: flex-start;
+    padding-top: calc(env(safe-area-inset-top, 0px) + 12px);
+  }
+  .mp-auction-modal,
+  .mp-first-player-modal,
+  .mp-crew-draft-panel,
+  .mp-trade-builder-modal {
+    max-height: calc(100dvh - 64px);
+  }
+  .assembly-modal {
+    margin-top: calc(env(safe-area-inset-top, 0px) + 10px);
+    max-height: 88dvh;
+  }
+}
 /* In the modal the board fills the (wide) panel, callouts and all. */
 .assembly-modal .assembly-panel { max-width: 100%; }
 .assembly-modal .assembly-panel-compact .assembly-board { max-width: 100%; }

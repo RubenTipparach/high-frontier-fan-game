@@ -375,6 +375,13 @@ ensureColumn('lobbies', 'draft_start', 'draft_start INTEGER NOT NULL DEFAULT 0')
 // legacy + normal room, so games already in flight stay m0=false (no retro
 // apply). Chosen at room creation, carried into the game state at start.
 ensureColumn('lobbies', 'm0', 'm0 INTEGER NOT NULL DEFAULT 0');
+// m1: opt-in Module 1 (Terawatt & Futures). ADMIN-ONLY + experimental. 0 = off,
+// the default for every legacy + normal room, so no game ever gets M1 mechanics
+// unless an admin explicitly checked it at creation. The server only ever
+// writes 1 when the host passes the admin gate (profileIsAdmin); a non-admin
+// request is forced to 0. NOTHING in the engine may act on M1 rules unless
+// state.m1 is true (see CLAUDE.md "Module gating").
+ensureColumn('lobbies', 'm1', 'm1 INTEGER NOT NULL DEFAULT 0');
 // random_draft: opt-in "random draft" opening - instead of interactive picks,
 // each player is dealt 12 random cards from random decks, then play begins
 // (banks at 6). 0 = off (default). Independent of draft_start; random wins if

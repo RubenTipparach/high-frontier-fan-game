@@ -128,7 +128,7 @@ import {
 import {
   computeEndgameScore, SPECTRAL_DIMINISHING_SCHEDULE, COLONY_VP, COLONY_LOCATION_BONUS,
 } from './scoring.js';
-import { scorePlayer } from '../../data/endgame-scoring.js';
+import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scoring.js';
 import {
   MARKET_MODE, FREE_MARKET_AQUA, STARTER_CASH_AMOUNT,
   getMarketMode, setMarketMode, onMarketChange,
@@ -145,7 +145,7 @@ import {
 // Multiplayer glue (the sandbox map, driven from a server game). These
 // are inert until mountBrowse({ online:true }) flips _online on; the
 // solo path never touches them.
-import { setOnline, isOnline } from './online-mode.js';
+import { setOnline, isOnline, setM1, isM1 } from './online-mode.js';
 import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
 } from './net-bridge.js';
@@ -300,6 +300,11 @@ const MP_AUCTION_DECKS = [
   ['thruster', 'Thruster'], ['reactor', 'Reactor'], ['radiator', 'Radiator'],
   ['refinery', 'Refinery'], ['robonaut', 'Robonaut'], ['generator', 'Generator'],
 ];
+// Module 1 adds two auctionable decks; only offered when the snapshot is m1.
+const M1_AUCTION_DECKS = [['gw-thruster', 'GW Thruster'], ['freighter', 'Freighter']];
+function mpAuctionDecks(snap) {
+  return (snap && snap.m1) ? [...MP_AUCTION_DECKS, ...M1_AUCTION_DECKS] : MP_AUCTION_DECKS;
+}
 
 export function isBrowseOnline() { return _online; }
 
@@ -610,6 +615,10 @@ function applySnapshot(snapshot, seq) {
   // no prev so it snaps without animating.
   const prevSnapshot = (seq != null) ? _onlineSnapshot : null;
   _onlineSnapshot = snapshot;
+  // Pin the M1 module flag from the snapshot BEFORE any hydrator runs, so
+  // the rocket deploy gate + isotope fuel grade read the same M1 state the
+  // server does while the stack hydrates. Mirrors the MARKET_MODE pin below.
+  setM1(!!snapshot.m1);
   // Card economy is server-authoritative in multiplayer (state.economy).
   // Pin the client's MARKET_MODE to whatever the snapshot says BEFORE
   // any hydrators run so the cart tab + Free Market / Research Auction
@@ -911,14 +920,42 @@ function syncCrewDraftOverlay(snapshot) {
 // auto-opens the deck market once). Mirrors syncCrewDraftOverlay.
 const DRAFT_HAND_TARGET = 12;
 const DRAFT_DECK_TYPES = ['thruster', 'reactor', 'radiator', 'refinery', 'robonaut', 'generator'];
+// Module 1 adds two decks; only offered when the game is m1 (see draftDeckTypes).
+const M1_DRAFT_DECK_TYPES = ['gw-thruster', 'freighter'];
 const DRAFT_DECK_GLYPH = {
   thruster: '🚀', reactor: '☢', radiator: '♨', refinery: '⚗', robonaut: '🤖', generator: '⚡',
+  'gw-thruster': '🛰', freighter: '🚛',
 };
 // Per-deck-type accent colours so the draft rows aren't all one grey band.
 const DRAFT_DECK_COLOR = {
   thruster: '#c0506a', reactor: '#7e57c2', radiator: '#3a8fb7',
   refinery: '#3f9e6b', robonaut: '#c08a2e', generator: '#caa61e',
+  'gw-thruster': '#2a9fd0', freighter: '#b04a8a',
 };
+// The deck types offered this game: the base six, plus the two M1 decks only
+// when the snapshot says m1 is on (zero bleed-through when off).
+function draftDeckTypes(snap) {
+  return (snap && snap.m1) ? [...DRAFT_DECK_TYPES, ...M1_DRAFT_DECK_TYPES] : DRAFT_DECK_TYPES;
+}
+// The deck types listed in the Patent Market (cart) tab: the base six, plus the
+// two M1 decks (GW Thrusters + Freighters) when M1 is on. Mirrors the draft +
+// auction deck lists so the same cards are obtainable across every acquisition
+// path; off-M1 games never list them (zero bleed-through).
+function marketDeckTypes() {
+  return isM1() ? [...DECK_TYPES, ...M1_DRAFT_DECK_TYPES] : DECK_TYPES;
+}
+// An expansion card (GW thruster / Freighter) reads as "coming soon" and is
+// inspect-only ONLY when its module is off. With M1 on it is a live, playable
+// card, so the catalog drops the badge + lets it be added/dragged like any card.
+function isExpansionLocked(card) {
+  return !!card && isExpansionType(card.type) && !isM1();
+}
+// GW thrusters + Freighters can't be boosted (1A5d): they enter play only via
+// ET Production at a Factory, never by boosting White-Side cards from hand.
+function isBoostable(card) {
+  return !(card && (card.type === 'gw-thruster' || card.type === 'freighter'));
+}
+const BOOST_BLOCKED_MSG = "GW thrusters and Freighters can't be boosted - ET Produce them at a Factory.";
 function syncCardDraftOverlay(snapshot) {
   const existing = document.getElementById('mp-card-draft-overlay');
   const drafting = !!(snapshot && snapshot.draftPhase === 'draft') && !_spectator
@@ -1036,10 +1073,20 @@ function openDraftMarketModal() {
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   const panel = document.createElement('div');
   panel.className = 'draft-market-panel';
+  const header = document.createElement('div');
+  header.className = 'modal-header';
+  header.innerHTML = '<h2 class="modal-title">🃏 Draft a card</h2>';
+  const xBtn = document.createElement('button');
+  xBtn.type = 'button';
+  xBtn.className = 'modal-x';
+  xBtn.textContent = '×';
+  xBtn.setAttribute('aria-label', 'Close');
+  xBtn.addEventListener('click', close);
+  header.appendChild(xBtn);
+  panel.appendChild(header);
   const head = document.createElement('div');
   head.className = 'draft-market-head';
-  head.innerHTML = `<h2>🃏 Draft a card</h2>
-    <p class="muted">${myTurn
+  head.innerHTML = `<p class="muted">${myTurn
       ? (cycled
           ? 'Take the top card of any deck (free). You\'ve used your cycle this turn.'
           : 'Take the top card of any deck (free), or cycle one deck once to reveal its next card.')
@@ -1047,7 +1094,7 @@ function openDraftMarketModal() {
   panel.appendChild(head);
   const list = document.createElement('div');
   list.className = 'draft-market-list';
-  for (const dt of DRAFT_DECK_TYPES) {
+  for (const dt of draftDeckTypes(snap)) {
     const deck = Array.isArray(decks[dt]) ? decks[dt] : [];
     const topId = deck[0];
     const card = topId ? PATENTS_BY_ID[topId] : null;
@@ -1114,11 +1161,6 @@ function openDraftMarketModal() {
     list.appendChild(row);
   }
   panel.appendChild(list);
-  const foot = document.createElement('div');
-  foot.className = 'draft-market-foot';
-  foot.innerHTML = '<button type="button" class="modal-btn draft-market-close">Close</button>';
-  foot.querySelector('.draft-market-close').addEventListener('click', close);
-  panel.appendChild(foot);
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
 }
@@ -1327,10 +1369,24 @@ function syncMpTurnBanner(snapshot) {
   banner.hidden = false;
 }
 
+// Does a given player hold a privilege key? Mirror of the server's
+// hasPrivilege: their faction power (suspended during Anarchy) OR a permanent
+// grant OR a borrowed ability (neither suspended by Anarchy). Reads the
+// snapshot, so it works for any seat, not just mine.
+function playerHasPrivilege(player, key) {
+  if (!player || !key) return false;
+  if (!isAnarchy() && factionAbilityOf(player) === key) return true;
+  if (Array.isArray(player.grantedPrivileges) && player.grantedPrivileges.includes(key)) return true;
+  return Array.isArray(player.borrowedAbilities)
+    && player.borrowedAbilities.some((g) => g && g.ability === key);
+}
+
 // A player at the hand limit can't take the lot, so the server
 // auto-passes them: they never owe an action and never block the close.
 // Hands are open info in the snapshot, so this reads for any seat.
+// Skunkworks (Shimizu) ignores the academia hand limit, so it's never full.
 function auctionHandFull(player) {
+  if (playerHasPrivilege(player, 'SKUNKWORKS')) return false;
   return !!player && Array.isArray(player.hand) && player.hand.length >= AUCTION_HAND_LIMIT;
 }
 
@@ -1536,6 +1592,35 @@ function renderOnlineAuction(auction) {
       sec.appendChild(none);
     }
     lotHost.appendChild(sec);
+  }
+
+  // Next-up preview: the card waiting at the top of the CHOSEN deck. The lot
+  // was drawn off that deck's top when the auction opened, so peekTop now
+  // points at the very next card that will be auctioned from this deck. Only
+  // the chosen deck reveals its next card - the support (bonus) decks never
+  // preview what sits behind their bonus cards.
+  if (lot) {
+    const nextId = peekTop(auction.deckType);
+    const nextCard = nextId ? cardById(nextId) : null;
+    const nsec = document.createElement('div');
+    nsec.className = 'mp-auction-next';
+    const nlabel = document.createElement('div');
+    nlabel.className = 'mp-auction-next-label';
+    nlabel.textContent = 'Next up';
+    nsec.appendChild(nlabel);
+    if (nextCard) {
+      const nrow = document.createElement('div');
+      nrow.className = 'mp-auction-next-card';
+      try { nrow.appendChild(renderCard(nextCard, { type: 'patent' })); }
+      catch { nrow.textContent = nextCard.name || nextId; }
+      nsec.appendChild(nrow);
+    } else {
+      const none = document.createElement('div');
+      none.className = 'mp-auction-next-none muted';
+      none.textContent = 'This deck is empty - no card waiting.';
+      nsec.appendChild(none);
+    }
+    lotHost.appendChild(nsec);
   }
 
   // Every player's standing bid is public now (incl. the auctioneer's),
@@ -2590,9 +2675,8 @@ function openNewsModal() {
     : '<li class="news-empty">No broadcasts yet - the wire is quiet.</li>';
   overlay.innerHTML = `
     <div class="et-produce-modal news-modal" role="dialog" aria-label="Galactic news">
-      <div class="et-produce-head"><h3>\u203C\uFE0F Galactic news</h3></div>
+      <div class="modal-header"><h2 class="modal-title">\u203C\uFE0F Galactic news</h2><button type="button" class="modal-x news-close" aria-label="Close">\u00D7</button></div>
       <ul class="news-list">${rows}</ul>
-      <div class="card-modal-actions"><button type="button" class="modal-btn news-close">Close</button></div>
     </div>`;
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
   overlay.querySelector('.news-close').addEventListener('click', () => overlay.remove());
@@ -2626,12 +2710,13 @@ function openNewsCardPreview(cardId) {
     el.classList.add('card-modal-card');
     panel.appendChild(el);
   } catch { panel.textContent = card.name || cardId; }
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'modal-btn';
-  btn.textContent = 'Close';
-  btn.addEventListener('click', close);
-  panel.appendChild(btn);
+  const xBtn = document.createElement('button');
+  xBtn.type = 'button';
+  xBtn.className = 'modal-x';
+  xBtn.textContent = '×';
+  xBtn.setAttribute('aria-label', 'Close');
+  xBtn.addEventListener('click', close);
+  panel.appendChild(xBtn);
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
 }
@@ -3139,7 +3224,7 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   if (iAutoPassed) {
     // Out for the lot - the banner above says so; offer no bid/pass
     // controls (a fresh lot resets this).
-  } else if (myHandCount >= AUCTION_HAND_LIMIT) {
+  } else if (myHandFull) {
     host.appendChild(noteEl(`Hand full (${myHandCount}/${AUCTION_HAND_LIMIT}) - you're auto-passed and can't take this lot. Build or transfer cards first.`));
   } else {
     const row = document.createElement('div');
@@ -3352,7 +3437,7 @@ function buildMpDeckPicker(host, snapshot) {
   host.appendChild(label);
   const row = document.createElement('div');
   row.className = 'mp-deck-row';
-  for (const [type, name] of MP_AUCTION_DECKS) {
+  for (const [type, name] of mpAuctionDecks(snapshot)) {
     const deck = (snapshot.decks && snapshot.decks[type]) || [];
     const b = document.createElement('button');
     b.type = 'button';
@@ -3376,7 +3461,7 @@ function buildMpDeckPicker(host, snapshot) {
     host.appendChild(glabel);
     const grow = document.createElement('div');
     grow.className = 'mp-deck-row';
-    for (const [type, name] of MP_AUCTION_DECKS) {
+    for (const [type, name] of mpAuctionDecks(snapshot)) {
       const deck = (snapshot.decks && snapshot.decks[type]) || [];
       const g = document.createElement('button');
       g.type = 'button';
@@ -3589,6 +3674,7 @@ function openAssemblyModal(mode = 'view') {
         <div class="mp-modal-titlebar">
           <h3 class="assembly-modal-title">🏛 Sol Political Assembly</h3>
           <button type="button" class="mp-mini-btn" title="Minimize" aria-label="Minimize">&minus;</button>
+          <button type="button" class="modal-x assembly-close-x" title="Close" aria-label="Close">×</button>
         </div>
         <div class="assembly-modal-body"></div>
       </div>
@@ -3596,6 +3682,7 @@ function openAssemblyModal(mode = 'view') {
         🏛 Assembly <span class="mp-mini-chip-meta"></span>
       </button>`;
     overlay.querySelector('.mp-mini-btn').addEventListener('click', () => { _assemblyMin = true; refreshAssemblyModal(); });
+    overlay.querySelector('.assembly-close-x').addEventListener('click', closeAssemblyModal);
     overlay.querySelector('.mp-mini-chip').addEventListener('click', () => { _assemblyMin = false; setMpTurnAction('assembly', null); refreshAssemblyModal(); });
     overlay.addEventListener('click', (e) => { if (e.target === overlay && _assemblyMode === 'view') closeAssemblyModal(); });
     document.addEventListener('keydown', assemblyModalKey);
@@ -3687,7 +3774,6 @@ function renderAssemblyView(body, snapshot) {
   } else if (lobbyMode) {
     btns.append(mkBtn('↩ Done', 'modal-btn', () => { _assemblyMode = 'view'; refreshAssemblyModal(); }));
   }
-  btns.append(mkBtn('Close', 'modal-btn', closeAssemblyModal));
   body.appendChild(btns);
 }
 // Click a delegate to Lobby that ideology (server LOBBY: 1 aqua + discard, only
@@ -4392,6 +4478,48 @@ function makeAuctionNudgeButton(snapshot, label, opts, targetIds, title) {
   return btn;
 }
 
+// A read-only "Modules & game config" block for the Multiplayer panel: module
+// chips (M0 / M1 / draft variants) + a meta line (economy, game length). Reads
+// straight off the snapshot/state so it stays live on every re-render.
+function buildMpConfigBlock(snapshot) {
+  const wrap = document.createElement('div');
+  wrap.className = 'mp-config';
+  const label = document.createElement('div');
+  label.className = 'mp-detail-label';
+  label.textContent = 'Modules & game config';
+  wrap.appendChild(label);
+
+  const tags = [];
+  if (snapshot.m0) tags.push(['tag-m0', '🏛 M0 Politics']);
+  if (snapshot.m1) tags.push(['tag-m1', '🚛 M1 Terawatt']);
+  if (snapshot.draftStart) tags.push(['tag-draft', '🃏 Draft start']);
+  if (snapshot.randomDraft) tags.push(['tag-draft', '🎲 Random draft']);
+  const tagWrap = document.createElement('div');
+  tagWrap.className = 'module-tags';
+  if (tags.length) {
+    for (const [cls, text] of tags) {
+      const t = document.createElement('span');
+      t.className = `module-tag ${cls}`;
+      t.textContent = text;
+      tagWrap.appendChild(t);
+    }
+  } else {
+    const none = document.createElement('span');
+    none.className = 'muted mp-line';
+    none.textContent = 'Standard rules (no modules)';
+    tagWrap.appendChild(none);
+  }
+  wrap.appendChild(tagWrap);
+
+  const econ = snapshot.economy === 'library' ? 'Free Library' : 'Card Market';
+  const rounds = snapshot.maxRounds || '?';
+  const meta = document.createElement('div');
+  meta.className = 'mp-line muted';
+  meta.textContent = `${econ} economy · ${rounds} rounds`;
+  wrap.appendChild(meta);
+  return wrap;
+}
+
 function renderMpPanel(snapshot) {
   const tableEl = ensureMpPanelStructure();
   if (!tableEl) return;
@@ -4436,6 +4564,11 @@ function renderMpPanel(snapshot) {
     ));
   }
   tableEl.appendChild(roster);
+
+  // Modules & game config: a read-only summary of the rules this table runs
+  // (which modules are on, the card economy, game length). Mirrors the lobby's
+  // module tags so a returning player can see at a glance what's enabled.
+  tableEl.appendChild(buildMpConfigBlock(snapshot));
 
   // Footer: turn nudge(s). Ping whoever can be nudged with a turn DM.
   // Normally that's whoever the table is waiting on; during an auction
@@ -4635,8 +4768,10 @@ function openCubeBreakdownModal(p, snapshot) {
   };
   const head = document.createElement('div');
   head.className = 'mp-trade-head';
-  head.innerHTML = `<h3>🧊 ${esc(p.name)}'s cubes - ${used}/${FACTORY_CUBES} in play (${free} free)</h3>`;
+  head.innerHTML = `<h3>🧊 ${esc(p.name)}'s cubes - ${used}/${FACTORY_CUBES} in play (${free} free)</h3>`
+    + '<button type="button" class="modal-x mp-trade-close" aria-label="Close">×</button>';
   modal.appendChild(head);
+  head.querySelector('.mp-trade-close').addEventListener('click', close);
   const list = document.createElement('div');
   list.className = 'mp-relocate-list';
   if (!items.length) {
@@ -4658,13 +4793,6 @@ function openCubeBreakdownModal(p, snapshot) {
     }
   }
   modal.appendChild(list);
-  const btns = document.createElement('div');
-  btns.className = 'mp-trade-btns';
-  const ok = document.createElement('button');
-  ok.type = 'button'; ok.className = 'modal-btn'; ok.textContent = 'Close';
-  ok.addEventListener('click', close);
-  btns.appendChild(ok);
-  modal.appendChild(btns);
   back.appendChild(modal);
   back.addEventListener('click', (e) => { if (e.target === back) close(); });
   document.body.appendChild(back);
@@ -4746,7 +4874,7 @@ function buildMpPlayerDetail(host, p, isMe) {
         activeThrusterId: rkt.activeThrusterId || null,
         activeProspectorId: rkt.activeProspectorId || null,
         tank: rkt.tank | 0,
-        tankGrade: rkt.tankGrade === 'dirt' ? 'dirt' : 'water',
+        tankGrade: (rkt.tankGrade === 'dirt' || rkt.tankGrade === 'isotope') ? rkt.tankGrade : 'water',
         afterburnEngaged: !!rkt.afterburnEngaged,
         wiring: (rkt.wiring && typeof rkt.wiring === 'object') ? rkt.wiring : {},
         solarZone: (rkt.siteId && SITES_BY_ID[rkt.siteId] && SITES_BY_ID[rkt.siteId].solarZone) || null,
@@ -5117,6 +5245,7 @@ function humanizeOnlineOpError(code, detail) {
     not_at_site: 'Park at a site first - dirt comes from the ground.',
     dirt_needs_mooncable: 'Taking on dirt at LEO needs the moon cable (a NASRDA crew card aboard). Scoop at a site instead.',
     dirt_needs_isru: 'Scooping dirt needs an ISRU source here: a factory at this site, or an ISRU platform aboard.',
+    dirt_crew_cap: 'A crew dirt thruster scoops only 1 dirt FT per turn - you have already loaded it this turn.',
     not_water_fuel: 'Dirt has no cash value - only water converts back to aqua.',
     no_thruster: 'Activate a thruster first.',
     not_in_outpost: 'That card is not in the outpost.',
@@ -5420,8 +5549,9 @@ function wireHandStrip() {
           () => freeMarketSellFromHand(card)),
         qBtn('q-produce', '🏭', `Exo produce (spectral ${card.spectralType || '?'})`,
           () => setStatus(`Exo-produce needs a Stage-3 factory matching spectral ${card.spectralType || '?'}.`)),
-        qBtn('q-boost',   '🚀', isBoostMarked(id) ? 'Unmark boost' : 'Mark for boost',
-          () => toggleBoostMark(id)),
+        qBtn('q-boost',   '🚀',
+          isBoostable(card) ? (isBoostMarked(id) ? 'Unmark boost' : 'Mark for boost') : BOOST_BLOCKED_MSG,
+          () => { if (!isBoostable(card)) { setStatus(BOOST_BLOCKED_MSG); return; } toggleBoostMark(id); }),
       );
       wrap.appendChild(quick);
 
@@ -6193,6 +6323,17 @@ function openLeoStackModal() {
   openUnifiedStackInspector('leo');
 }
 
+// Free Market (I3b) sale value for a Black-Side LEO card: the Exploitation
+// Track stock price for its spectral type, driven by the GLOBAL count of that
+// spectral's factories (the same shared math the server + scoring tab use).
+function leoBlackSideValue(card) {
+  const spec = (card && card.spectralType) || 'C';
+  let n = 0;
+  const facs = (_onlineSnapshot && _onlineSnapshot.factories) || {};
+  for (const k in facs) { if (facs[k] && (facs[k].spectralType || 'C') === spec) n += 1; }
+  return freeMarketBlackSideValue(n);
+}
+
 // Outpost inspector. Same unified shape as the LEO modal.
 // Adds factory / colony attachment chips in the stats row.
 function openOutpostStackModal(letter) {
@@ -6277,6 +6418,7 @@ function openUnifiedStackInspector(stackId) {
       <div class="stack-inspector-head">
         <h3>${headline}</h3>
         <span class="stack-inspector-loc">${esc(locLabel)}</span>
+        <button type="button" class="modal-x stack-inspector-close" aria-label="Close" title="Close">×</button>
       </div>
       <div class="stack-inspector-body">
         ${statsHtml}
@@ -6302,7 +6444,6 @@ function openUnifiedStackInspector(stackId) {
           ${outpostPumpBtnHtml(stackId)}
           ${outpostFillBtnHtml(stackId)}
           ${outpostDissolveBtnHtml(stackId)}
-          <button type="button" class="modal-btn stack-inspector-close">Close</button>
         </div>
       </div>
     `;
@@ -6377,6 +6518,28 @@ function openUnifiedStackInspector(stackId) {
             await convertRadiatorToLight(stackId, slot.id);
           });
           actions.appendChild(foldBtn);
+        }
+        // Free Market (I3b): sell a Black-Side good from the LEO stack. It
+        // returns to your hand and pays the Exploitation Track stock price for
+        // its spectral type. Online only (server op); crew faces aren't goods.
+        if (stackId === 'leo' && _online && slot.kind !== 'crew' && slot.face === 'secondary') {
+          const sellVal = leoBlackSideValue(card);
+          const sellBtn = document.createElement('button');
+          sellBtn.type = 'button';
+          sellBtn.className = 'rocket-select leo-free-market';
+          sellBtn.textContent = `💱 Free Market (+${sellVal})`;
+          const lockedSell = !isOnlineMyTurn();
+          sellBtn.disabled = lockedSell;
+          sellBtn.title = lockedSell
+            ? 'Wait for your turn.'
+            : `Sell this Black-Side ${card.spectralType || 'C'} good for ${sellVal} aqua (Exploitation Track price); the card returns to your hand. Costs your operation.`;
+          sellBtn.addEventListener('click', async () => {
+            if (sellBtn.disabled) return;
+            sellBtn.disabled = true;
+            await submitOnlineOp({ kind: 'FREE_MARKET', leoCardId: slot.id });
+            close();
+          });
+          actions.appendChild(sellBtn);
         }
         wrap.appendChild(actions);
         row.appendChild(wrap);
@@ -6566,6 +6729,7 @@ function openEmptyOutpostModal(letter) {
   dialog.innerHTML = `
     <div class="stack-inspector-head">
       <h3>🏛${esc(letter)} - Empty slot</h3>
+      <button type="button" class="modal-x stack-inspector-close" aria-label="Close" title="Close">×</button>
     </div>
     <div class="stack-inspector-body">
       <p>Outpost slot <strong>${esc(letter)}</strong> isn't in use yet. To create an outpost in this slot:</p>
@@ -6580,9 +6744,6 @@ function openEmptyOutpostModal(letter) {
         a fresh outpost when none exists at that site - the slot
         picker will offer this letter.
       </p>
-    </div>
-    <div class="card-modal-actions">
-      <button type="button" class="modal-btn stack-inspector-close">Close</button>
     </div>
   `;
   overlay.appendChild(dialog);
@@ -6874,7 +7035,7 @@ function openDeckTapModal(card, kind, { allowAuction = false, inspectOnly = fals
     // play. Either way there's no add / auction here.
     const note = document.createElement('p');
     note.className = 'muted card-modal-note';
-    note.textContent = isExpansionType(card.type)
+    note.textContent = isExpansionLocked(card)
       ? '🚧 This is an upcoming expansion card. Preview only for now - flip to see both faces.'
       : '👥 Crew is chosen at New game via the starting-crew wizard.';
     actions.append(note);
@@ -7208,11 +7369,16 @@ function openCardModal(card, kind, slotIdx, { readOnly = false, face, nav } = {}
   boostBtn.type = 'button';
   boostBtn.className = 'modal-btn stack';
   const marked = isBoostMarked(card.id);
+  const boostable = isBoostable(card);
   boostBtn.textContent = marked ? '🚀 Unmark boost' : '🚀 Boost';
-  boostBtn.title = marked
-    ? 'Remove the boost mark on this card'
-    : 'Mark this card to be boosted to the LEO rocket on the next BOOST commit';
+  boostBtn.disabled = !boostable;
+  boostBtn.title = !boostable
+    ? BOOST_BLOCKED_MSG
+    : (marked
+      ? 'Remove the boost mark on this card'
+      : 'Mark this card to be boosted to the LEO rocket on the next BOOST commit');
   boostBtn.addEventListener('click', () => {
+    if (boostBtn.disabled) return;
     toggleBoostMark(card.id);
     close();
   });
@@ -9221,8 +9387,19 @@ function openRocketStackModal() {
   xBtn.className = 'modal-x';
   xBtn.textContent = '×';
   xBtn.title = 'Close (Esc)';
+  xBtn.setAttribute('aria-label', 'Close');
   xBtn.addEventListener('click', close);
-  panel.appendChild(xBtn);
+
+  // Window-style title bar: modal name on the left, close × on the
+  // right. Stays pinned at the panel top while the body scrolls.
+  const header = document.createElement('div');
+  header.className = 'modal-header';
+  const titleEl = document.createElement('h2');
+  titleEl.className = 'modal-title';
+  titleEl.textContent = '🚀 Rocket Stack';
+  header.appendChild(titleEl);
+  header.appendChild(xBtn);
+  panel.appendChild(header);
 
   // Transient selection set for the Transfer section. Cards
   // marked here can be shipped to a colocated stack (LEO if
@@ -9425,7 +9602,6 @@ function openRocketStackModal() {
       ${glitchBanner}
       <div class="rocket-stack-header">
         <div class="rocket-stack-title-row">
-          <h2 class="rocket-stack-title">🚀 LEO Rocket</h2>
           <div class="rocket-stack-locate">
             <button type="button" class="popup-btn popup-btn-secondary"
               id="rocket-find" ${hereDisabled}
@@ -9954,10 +10130,22 @@ function openRocketStackModal() {
   const unsubRocket  = onRocketChange(repaint);
   const unsubLeo     = onLeoChange(repaint);
   const unsubOutpost = onOutpostsChange(repaint);
+  // CRITICAL fuel-strip <-> water-tank sync. The strip's WET chit must track
+  // the live tank the instant it moves. repaint() already rebuilds the strip,
+  // but it also rebuilds the entire stack body; this dedicated, cheap resync
+  // redraws ONLY the strip from the live totals on every water change (aqua <->
+  // tank, dump, burn, and the online snapshot refuel that hydrates the tank),
+  // so the strip can never lag the tank cylinder / wet-mass value.
+  const syncFuelStrip = () => {
+    const h = body.querySelector('#rocket-fuel-strip');
+    if (h) buildFuelStrip(h, getStackTotals());
+  };
+  const unsubStrip   = onRocketChange(syncFuelStrip);
   _rocketModalUnsub = () => {
     try { unsubRocket(); } catch {}
     try { unsubLeo(); } catch {}
     try { unsubOutpost(); } catch {}
+    try { unsubStrip(); } catch {}
   };
 
   mountOverlay(overlay);
@@ -10871,27 +11059,28 @@ function siteSizeNumber(site) {
 
 // Land / liftoff gate for a single site given the rocket's current
 // net (band-adjusted) thrust. The rule: net thrust must strictly
-// exceed the site's size to settle onto or climb off it. When it
-// doesn't, a FACTORY at the site permits the maneuver anyway as a
-// "factory assist" - a hazard roll. A COLONY at the site waives the
-// roll. Returns:
+// exceed the site's size to settle onto or climb off it (so a size-1
+// site needs net thrust >= 2). When it doesn't, a FACTORY at the site
+// permits the maneuver anyway as a "factory assist" - a hazard roll. A
+// COLONY at the site waives the roll. The ONE exception is a Freighter
+// (M1, opts.isFreighter), which may settle onto a size-1 site even
+// under-thrust. Returns:
 //   ok        - the maneuver is allowed (true unless under-thrust
 //               with no factory to assist)
 //   assist    - true when a factory is carrying the maneuver
 //   needsRoll - true when the assist still requires a hazard roll
 //               (i.e. no colony to waive it)
 //   size      - the site size used for the comparison
-function maneuverGate(site, netThrust) {
+function maneuverGate(site, netThrust, opts = {}) {
   const size = siteSizeNumber(site);
   if (size <= 0 || netThrust > size) {
     return { ok: true, assist: false, needsRoll: false, size };
   }
-  // Rule exception: a size-1 site can always be landed on or lifted
-  // off by any rocket with an operational thruster. Operational means
-  // thrust > 0 (netThrust is the active thruster's net thrust) AND
-  // its supports satisfied (isRocketActive().active). No factory
-  // assist or roll required.
-  if (size === 1 && netThrust > 0 && isRocketActive().active) {
+  // Freighter exception (M1): a Freighter can land on / lift off a size-1
+  // site with any operational thruster, even though its net thrust does not
+  // beat the size. Ordinary spacecraft do NOT get this - they must satisfy
+  // net thrust > site size (or use a factory assist) like every other site.
+  if (size === 1 && opts.isFreighter && netThrust > 0 && isRocketActive().active) {
     return { ok: true, assist: false, needsRoll: false, size };
   }
   const factory = site && getFactory(site.id);
@@ -12359,7 +12548,7 @@ function openBoostModal({ cards, have, opNote }) {
 // rocket's dry mass, WET at the current wet mass. Black-line =
 // FT spend (burn); red-dotted = refuel - see the legend. The
 // strip is read-only for now.
-function buildFuelStrip(host, totals) {
+function buildFuelStrip(host, totals = getStackTotals()) {
   host.innerHTML = '';
   // Grey the strip when the tank holds dirt instead of blue water.
   host.classList.toggle('is-dirt-fuel', getTankGrade() === 'dirt');
@@ -12371,11 +12560,14 @@ function buildFuelStrip(host, totals) {
   label.textContent = 'Fuel Strip Track';
   host.appendChild(label);
 
-  // The whole strip is a button into the detailed node track.
+  // The whole strip is a button into the fuel-tank modal (the tank cylinder,
+  // dump / aqua-bank / dirt controls, AND the detailed Net Thrust track all
+  // live there). Opening the same modal as the water-tank button keeps a
+  // single place to read + move fuel.
   const bands = document.createElement('div');
   bands.className = 'fuel-strip-bands is-clickable';
-  bands.title = 'Click to open the detailed Fuel Strip Track';
-  bands.addEventListener('click', () => openNetThrustDetailModal());
+  bands.title = 'Open the fuel tank';
+  bands.addEventListener('click', () => openFuelTankModal());
   // Cap how many mass cells a band lays out per row. Wide bands
   // (TUG spans 16) wrap onto extra rows instead of stretching the
   // strip past its box / off-screen on narrow viewports.
@@ -12447,7 +12639,7 @@ function buildFuelStrip(host, totals) {
     <span><i class="chit-dot is-dry-chit"></i> Dry ${dm}</span>
     <span><i class="chit-dot is-wet-chit"></i> Wet ${wm} (${wc.id} ${netMod})</span>
     <span class="muted">Max wet ${MAX_WET_MASS}</span>
-    <span class="fs-detail-hint">🔍 click for detail</span>
+    <span class="fs-detail-hint">💧 click to open tank</span>
   `;
   host.appendChild(legend);
 }
@@ -12558,17 +12750,23 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   // blue even under a dirt engine); an empty tank styles by the active
   // engine, since that's the grade you'd load next.
   const activeDirt = getActiveFuelGrade() === 'dirt';
+  const activeIso = getActiveFuelGrade() === 'isotope';
   const isDirt = (getTankWater() > 0) ? (getTankGrade() === 'dirt') : activeDirt;
+  const isIso = (getTankWater() > 0) ? (getTankGrade() === 'isotope') : activeIso;
   // Does the tank PHYSICALLY hold dirt right now? Water controls (dump / pump /
   // aqua fill) stay available unless dirt is actually loaded, because every
   // thruster can burn water: a water thruster burns ONLY water, a dirt thruster
   // burns water OR dirt. So an empty dirt-engine tank can still take on water.
   const tankDirt = getTankWater() > 0 && getTankGrade() === 'dirt';
-  const fuelWord = isDirt ? 'dirt' : 'water';
-  panel.className = 'fuel-tank-panel' + (isDirt ? ' is-dirt-fuel' : '');
+  // Isotope (M1 GW thruster) is a third grade: it can't mix with water and has
+  // no aqua value, so a loaded isotope tank hides the water controls too.
+  const tankIso = getTankWater() > 0 && getTankGrade() === 'isotope';
+  const tankNonWater = tankDirt || tankIso;
+  const fuelWord = isIso ? 'isotope' : (isDirt ? 'dirt' : 'water');
+  panel.className = 'fuel-tank-panel' + (isDirt ? ' is-dirt-fuel' : '') + (isIso ? ' is-isotope-fuel' : '');
   panel.innerHTML = `
     <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
-    <h2 class="fuel-tank-title">${isDirt ? '🟤 Dirt tank' : '💧 Water tank'}</h2>
+    <h2 class="fuel-tank-title">${isIso ? '🟡 Isotope tank' : (isDirt ? '🟤 Dirt tank' : '💧 Water tank')}</h2>
     <p class="muted fuel-tank-sub">Tap outside or press Esc to close</p>
     <div class="fuel-tank-body">
     <div class="fuel-tank-col fuel-tank-col-stage">
@@ -12634,7 +12832,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     </div>
     <div class="fuel-tank-col fuel-tank-col-controls">
     <div class="fuel-tank-actions">
-      ${tankDirt ? '' : `
+      ${tankNonWater ? '' : `
       <div class="aqua-direction aqua-direction-reverse fuel-tank-dump-row">
         <span class="aqua-direction-label">💧⤓ DUMP</span>
         <div class="aqua-actions">
@@ -12647,7 +12845,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         </div>
       </div>`}
     </div>
-    ${tankDirt ? '' : fuelTankOutpostSections()}
+    ${tankNonWater ? '' : fuelTankOutpostSections()}
 <div class="fuel-tank-aqua" id="tank-aqua-section" hidden>
       <div class="aqua-row">
         <span>🏦 Aqua bank</span>
@@ -13076,7 +13274,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     const wet = dry + before;
     const maxSteps = blackStepsBetween(dry, wet);
     const k = Math.min(steps, maxSteps);
-    const grade = getTankGrade() === 'dirt' ? 'dirt' : 'water';
+    const grade = getTankGrade();
     if (k < 1) {
       console.log('[dump] nothing to dump', { grade, tankWater: round6(before), dryMass: dry, wetMass: round6(wet), maxSteps, stepsRequested: steps });
       onRefresh && onRefresh();
@@ -13132,7 +13330,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   // poured onto a dirt tank (the grades can't mix). The bank panel shows
   // whenever the tank ISN'T already holding dirt, so a dirt-engine rocket with
   // an empty tank can still take on water (a dirt thruster burns water too).
-  if (atLeo && !tankDirt && aquaSection) aquaSection.hidden = false;
+  if (atLeo && !tankNonWater && aquaSection) aquaSection.hidden = false;
   const refreshAquaButtons = () => {
     if (!aquaSection || aquaSection.hidden) return;
     const bal = getAqua();
@@ -13363,13 +13561,23 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   // can be both the active prospector AND the active thruster; it must be the
   // active THRUSTER to scoop.)
   if (isDirt && dirtSection) dirtSection.hidden = false;
+  // A CREW dirt thruster scoops only 1 dirt FT per turn; a card dirt thruster
+  // scoops as much as the tank holds, any number of times. Mirror of the
+  // server's applyDirtRefuel cap, keyed off the active thruster being a crew
+  // card (the engine doing the scooping). The per-turn tally reads the snapshot
+  // online and the local turn-stamp solo (dirtTanksLoadedThisTurn).
+  const crewDirtBurner = activeDirt && !!CREW_BY_ID[getActiveThrusterId()];
+  const dirtAllowance = (room) => {
+    if (!crewDirtBurner) return room;
+    return Math.max(0, Math.min(room, 1 - dirtTanksLoadedThisTurn()));
+  };
   function refreshDirtButtons() {
     if (!dirtSection || dirtSection.hidden) return;
     const cur = getTankWater();
     const room = Math.max(0, cap - cur);
-    // Dirt refuel is a FREE action with NO per-turn cap: the only limit is tank
-    // room. Load as much as fits, any number of times this turn.
-    const fillable = room;
+    // Load as much as fits (card dirt thruster) or just the 1-FT-per-turn crew
+    // allowance, any number of times this turn while room remains.
+    const fillable = dirtAllowance(room);
     const blocked = !activeDirt || !canScoopDirt || fillable < 1;
     if (dirtFill1)   dirtFill1.disabled   = blocked;
     if (dirtFill5)   dirtFill5.disabled   = blocked || fillable < 5;
@@ -13394,7 +13602,11 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
                 : 'Scooping dirt needs an ISRU source here: a factory at this site, or an ISRU platform (an ISRU-rated card) aboard.')
           : room < 1
             ? 'Tank is full.'
-            : 'Scoop as much dirt as the tank holds - it\'s free and unlimited per turn. No aqua value; dirt can\'t mix with water or be transferred.';
+            : (crewDirtBurner && dirtTanksLoadedThisTurn() >= 1)
+              ? 'A crew dirt thruster scoops only 1 dirt FT per turn - you have already loaded it this turn.'
+              : crewDirtBurner
+                ? 'A crew dirt thruster scoops just 1 dirt FT per turn. No aqua value; dirt can\'t mix with water or be transferred.'
+                : 'Scoop as much dirt as the tank holds - it\'s free and unlimited per turn. No aqua value; dirt can\'t mix with water or be transferred.';
     }
   }
   refreshDirtButtons();
@@ -13404,11 +13616,12 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     const cur = getTankWater();
     if (cur > 0 && getTankGrade() === 'water') { refreshDirtButtons(); return; }
     const room = Math.max(0, cap - cur);
-    const fillable = room;
+    const fillable = dirtAllowance(room);
     if (fillable < 1) { refreshDirtButtons(); return; }
     const want = amount > 0 ? Math.min(amount, fillable) : fillable;
     // Online: the server validates the active dirt thruster + grade + scoop
-    // location and fills; the snapshot repaints the grey tank.
+    // location and fills (and enforces the crew 1-FT-per-turn cap); the
+    // snapshot repaints the grey tank and the per-turn tally.
     if (_online) {
       const ok = await submitOnlineOp({ kind: 'DIRT_REFUEL', amount: want });
       if (!ok) { refreshDirtButtons(); return; }
@@ -13417,6 +13630,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     }
     setTankGrade('dirt');
     addFuel(want);
+    if (crewDirtBurner) markDirtRefueledThisTurn();
     animateTankLevel();
     logAction({
       type: 'dirt_refuel', icon: '🟤',
@@ -16738,6 +16952,49 @@ function showSitePopupFor(site) {
       });
     }
   }
+  // Isotope Refuel (M1): a GW thruster runs on gold-bead isotope, refined at a
+  // Factory whose spectral type matches the thruster. Fills the SAME tank as
+  // water, graded 'isotope' (grades never mix). Online + M1 only; shares the
+  // one-refuel-per-site-per-turn lock. Shown only when the active engine is a
+  // GW thruster and this site's spectral type matches it.
+  if (_online && isM1() && rocketSite && site.id === rocketSite.id) {
+    const activeId = getActiveThrusterId();
+    const gw = activeId ? PATENTS_BY_ID[activeId] : null;
+    if (gw && gw.type === 'gw-thruster') {
+      const factory = getFactory(site.id);
+      const spectralOk = (gw.spectralType || 'C') === (site.spectralType || 'C');
+      if (iCanUseFactory(factory) && spectralOk) {
+        const isoGain = 7;
+        const tank = getTankWater();
+        const tmax = getTankMax();
+        const headroom = Math.max(0, tmax - tank);
+        const gain = Math.min(isoGain, headroom);
+        const refueledThisTurn = hasRefueledThisTurn(site.id);
+        // Isotope can't top up a water/dirt tank (no mixing).
+        const gradeClash = tank > 0 && getTankGrade() !== 'isotope';
+        const ok = !refueledThisTurn && gain > 0 && !gradeClash;
+        const reason = refueledThisTurn
+          ? 'Already refueled at this site this turn.'
+          : (gradeClash ? 'Tank holds another fuel - burn it empty before refining isotope.'
+            : (gain <= 0 ? `Tank full (${tank}/${tmax}).` : null));
+        actions.push({
+          label: refueledThisTurn
+            ? `🟡 Isotope Refuel done`
+            : (ok ? `🟡 Isotope Refuel (+${isoGain})` : `🟡 Isotope Refuel`),
+          variant: ok ? 'rocket' : 'secondary',
+          disabled: !ok,
+          title: reason || `Refine ${isoGain} isotope FTs for your GW thruster (spectral ${gw.spectralType || 'C'} match). Costs your operation.`,
+          onClick: () => {
+            if (!ok) return;
+            const sid = toServerId(_onlineMaps, site.id);
+            if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
+            submitOnlineOp({ kind: 'SITE_REFUEL', siteId: sid, mode: 'isotope' });
+            _renderer.clearSitePopup();
+          },
+        });
+      }
+    }
+  }
   // Outpost Factory-Refuel: store +7 water in one of YOUR outposts at a usable
   // factory here - no rocket needs to be present (the outpost holds its own
   // fuel). Online only (server op); shares the one-per-site-per-turn lock.
@@ -17601,7 +17858,7 @@ function paintCart() {
   `;
 
   const decksHost = host.querySelector('#cart-decks-host');
-  for (const type of DECK_TYPES) {
+  for (const type of marketDeckTypes()) {
     const topId = peekTop(type);
     const card = topId ? cardById(topId) : null;
     const deckSize = getDeck(type).length;
@@ -17872,9 +18129,11 @@ function renderPatents() {
   for (const t of expansionTypes) counts[t] = patentsByType(t).length;
   counts.crew = CREW_FACES.length;
   counts.supports = patentsThatSupply(supplyKinds).length;
+  // Drop the "(soon)" suffix once M1 is live; the cards are playable then.
+  const m1Live = isM1();
   const TYPE_LABEL = {
-    'gw-thruster': 'GW thrusters (soon)',
-    'freighter': 'Freighters (soon)',
+    'gw-thruster': m1Live ? 'GW thrusters' : 'GW thrusters (soon)',
+    'freighter': m1Live ? 'Freighters' : 'Freighters (soon)',
     'supports': 'Supports',
   };
   // Seed initial active tab from a pending programmatic open
@@ -18001,7 +18260,7 @@ function renderPatents() {
     // card view and the Flip button shows both faces up close. Only
     // the drag / tap-to-ADD handlers are skipped (the engine refuses
     // to stack them); a CSS badge signals the "coming soon" intent.
-    if (isExpansionType(card.type)) {
+    if (isExpansionLocked(card)) {
       el.classList.add('is-expansion');
       const badge = document.createElement('div');
       badge.className = 'card-expansion-badge';
@@ -19377,15 +19636,13 @@ function openCardInfoModal(card) {
   catch { cardEl = document.createElement('div'); cardEl.textContent = card.name || card.id; }
   cardEl.classList.add('card-modal-card');
   panel.appendChild(cardEl);
-  const actions = document.createElement('div');
-  actions.className = 'card-modal-actions';
-  const closeBtn = document.createElement('button');
-  closeBtn.type = 'button';
-  closeBtn.className = 'modal-btn';
-  closeBtn.textContent = 'Close';
-  closeBtn.addEventListener('click', close);
-  actions.appendChild(closeBtn);
-  panel.appendChild(actions);
+  const xBtn = document.createElement('button');
+  xBtn.type = 'button';
+  xBtn.className = 'modal-x';
+  xBtn.textContent = '×';
+  xBtn.setAttribute('aria-label', 'Close');
+  xBtn.addEventListener('click', close);
+  panel.appendChild(xBtn);
   overlay.appendChild(panel);
   mountOverlay(overlay);
   document.addEventListener('keydown', onKey);

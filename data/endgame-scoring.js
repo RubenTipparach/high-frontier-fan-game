@@ -45,6 +45,15 @@ export function spectralPrice(globalCount) {
     : last;
 }
 
+// Free Market (rulebook I3b) sale value for a Black-Side LEO card of a given
+// spectral type: the Exploitation Track stock price for that spectral. With NO
+// factories of the type anywhere, the card sells for 10 aqua; otherwise the
+// diminishing schedule (8 / 5 / 4, 4 thereafter) by the GLOBAL factory count.
+export function freeMarketBlackSideValue(globalCount) {
+  if (!Number.isFinite(globalCount) || globalCount <= 0) return 10;
+  return spectralPrice(globalCount);
+}
+
 // Normalise a colony's location type to a COLONY_VP key.
 export function colonyVpType(type) {
   return (type && COLONY_VP[type] != null) ? type : 'other';

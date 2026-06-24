@@ -41,7 +41,7 @@ import {
 import { blackStepsBetween, walkBlackDown } from '../../data/fuel-graph.js';
 // Endgame VP math, shared with the client live panel + game-over modal so the
 // authoritative score can never drift from what players see.
-import { scorePlayer } from '../../data/endgame-scoring.js';
+import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scoring.js';
 // Net-thrust band (weight class) + solar-zone modifiers, the same pure
 // tables the client folds into rocket.js#getActiveThrusterStats. The
 // engine reads them so the liftoff/landing gate uses the FINAL net thrust,
@@ -53,7 +53,7 @@ import {
   activeLaws, freshAssembly, ASSEMBLY_PLACES, IDEOLOGY_ORDER,
   delegatesRemaining, playerDelegatesInPlace, playerDelegatesPlaced,
   seniorityInPlace, finalVote, IDEOLOGY_BY_KEY, adjacentPlaces,
-  ideologyForFactionColor, voteWinners,
+  voteWinners, seatStartingDelegate,
 } from '../../data/assembly.js';
 // Movement + metadata both come from the planner graph (the vendor
 // mission-planner data the client also uses). siteBySlug layers the
@@ -69,7 +69,7 @@ import {
 import { isBuggyRoamBody } from '../../data/buggy-roam.js';
 import { makeRng } from './rng.js';
 import {
-  SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES,
+  SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
   currentPlayer, isPlayersTurn,
   seasonForSlot, eventKindForRoll,
@@ -303,12 +303,26 @@ function activeFuelGrade(rocket) {
   if (!tid) return 'water';
   const slot = rocket.stack.find((s) => s.id === tid);
   if (!slot) return 'water';
+  // GW thrusters (M1) run on isotope (gold-bead) fuel, never water/dirt.
+  const card = PATENTS_BY_ID[slot.id];
+  if (card && card.type === 'gw-thruster') return 'isotope';
   return faceBurnsDirt(thrusterFaceOf(slot)) ? 'dirt' : 'water';
+}
+// Can a tank of grade `have` fuel an engine that needs grade `need`? A dirt
+// engine burns dirt OR water; a water engine burns water only; a GW engine
+// burns isotope only, and no chemical engine can burn isotope.
+function fuelCompatible(need, have) {
+  if (need === 'isotope') return have === 'isotope';
+  if (have === 'isotope') return false;
+  if (need === 'dirt') return have === 'dirt' || have === 'water';
+  return have === 'water';
 }
 
 // The grade currently in the tank ('water' default; meaningless at tank 0).
 function tankGradeOf(rocket) {
-  return rocket.tankGrade === 'dirt' ? 'dirt' : 'water';
+  if (rocket.tankGrade === 'dirt') return 'dirt';
+  if (rocket.tankGrade === 'isotope') return 'isotope';   // M1 GW-thruster fuel
+  return 'water';
 }
 
 // Heliocentric-zone distance from Earth (Delivery cost driver). Earth = 0,
@@ -1212,13 +1226,19 @@ function activeNetThrust(rocket, powersat = false) {
   // Solar-driven thrusters shift by the rocket's current zone modifier; a
   // null-solar zone (Neptune outward) kills solar thrust entirely.
   let solarDriven = faceHasSolar(f);
-  if (!solarDriven && (f.requires || []).some((r) => (r.kind || r) === 'gen-electric')) {
-    for (const s of rocket.stack) {
-      if (s.id === tid) continue;
-      const c = PATENTS_BY_ID[s.id];
-      if (!c) continue;
-      const cf = slotFace(s, c);
-      if (faceHasSolar(cf) && (cf.supplies || []).includes('gen-electric')) { solarDriven = true; break; }
+  if (!solarDriven) {
+    // Mirror of rocket.js: the thruster runs on solar only if the generator
+    // actually feeding its electric power in the RESOLVED chain is a solar
+    // generator. Scanning the whole stack was the bug (an idle solar generator
+    // that powers nothing flipped a thruster wired to a non-solar generator).
+    const elecEdge = chain.edges.find((e) => e.from === tid && (e.kinds || []).includes('gen-electric'));
+    if (elecEdge) {
+      const s = rocket.stack.find((x) => x.id === elecEdge.to);
+      const c = s && PATENTS_BY_ID[s.id];
+      if (c) {
+        const cf = slotFace(s, c);
+        if (faceHasSolar(cf) && (cf.supplies || []).includes('gen-electric')) solarDriven = true;
+      }
     }
   }
   if (solarDriven) {
@@ -1287,15 +1307,16 @@ function isCrewSlot(slot) {
   return slot.kind === 'crew' || !!CREW_BY_ID[slot.id];
 }
 // Liftoff / landing thrust gate (mirror of browse.js#maneuverGate). Net
-// thrust must exceed the site's size to lift off / land; a size-1 site is
-// always doable with any operational thruster. Otherwise a factory at the
-// site can carry the maneuver (assist) - free if a colony is present,
-// else a hazard roll. No factory + under-thrust = hard block.
+// thrust must exceed the site's size to lift off / land (a size-1 site needs
+// net thrust >= 2). Otherwise a factory at the site can carry the maneuver
+// (assist) - free if a colony is present, else a hazard roll. No factory +
+// under-thrust = hard block. ONE exception: a Freighter (M1, opts.isFreighter)
+// may settle onto a size-1 site under-thrust.
 //   -> { ok, assist, needsRoll, size }
-function maneuverGate(state, slug, thrust) {
+function maneuverGate(state, slug, thrust, opts = {}) {
   const size = nodeSizeNumber(slug);
   if (size <= 0 || thrust > size) return { ok: true, assist: false, needsRoll: false, size };
-  if (size === 1 && thrust > 0) return { ok: true, assist: false, needsRoll: false, size };
+  if (size === 1 && opts.isFreighter && thrust > 0) return { ok: true, assist: false, needsRoll: false, size };
   if (!state.factories[slug]) return { ok: false, assist: false, needsRoll: false, size };
   const colony = !!state.colonies[slug];
   return { ok: true, assist: true, needsRoll: !colony, size };
@@ -1459,14 +1480,14 @@ function applyMove(state, op, player) {
     fuelStepsNeeded: stepsNeeded,
     enough: stepsNeeded <= stepsAvail,
   };
-  // Fuel-grade gate: a dirt thruster can burn EITHER grade (dirt or water); a
-  // water thruster can burn ONLY water. So the lone incompatible case is a
-  // water engine drawing on a dirt tank (clearer than "insufficient" - the
-  // fuel is there, just incompatible). Tank still never mixes the two grades.
+  // Fuel-grade gate: a dirt thruster burns dirt OR water; a water thruster
+  // burns water only; a GW thruster (M1) burns isotope only, and no chemical
+  // thruster can burn isotope. An incompatible tank fails clearly (the fuel is
+  // there, just wrong grade). Tank never mixes grades.
   if (stepsNeeded > 0 && (Number(player.rocket.tank) || 0) > 0) {
     const need = activeFuelGrade(player.rocket);
     const have = tankGradeOf(player.rocket);
-    if (need === 'water' && have === 'dirt') return fail('wrong_fuel_grade', { need, have });
+    if (!fuelCompatible(need, have)) return fail('wrong_fuel_grade', { need, have });
   }
   if (stepsNeeded > stepsAvail) {
     return fail('insufficient_water', moveCalc);
@@ -1784,7 +1805,11 @@ function applyBuildRocket(state, op, player) {
   if (idx < 0) return fail('not_in_hand');
   const card = PATENTS_BY_ID[cardId];
   if (!card) return fail('unknown_card');
-  if (card.type === 'gw-thruster') return fail('expansion_card');
+  // GW thrusters boost onto the rocket only in an M1 game (off = expansion-
+  // locked). Freighters NEVER boost onto the rocket - they are a separate
+  // big-cube unit (deployed by their own op in a later slice).
+  if (card.type === 'gw-thruster' && !state.m1) return fail('expansion_card');
+  if (card.type === 'freighter') return fail('freighter_not_stackable');
 
   player.hand.splice(idx, 1);
   const slot = { id: cardId, kind: 'patent' };
@@ -1834,6 +1859,12 @@ function applyBoost(state, op, player) {
   for (const id of ids) {
     if (player.hand.indexOf(id) < 0) return fail('not_in_hand');
   }
+  // GW thrusters and Freighters can't be boosted (1A5d): they return to play
+  // only by ET Production, not by boosting White-Side cards from hand.
+  for (const id of ids) {
+    const c = PATENTS_BY_ID[id];
+    if (c && (c.type === 'gw-thruster' || c.type === 'freighter')) return fail('not_boostable');
+  }
   // Cost = total mass of the boosted cards (aqua). A radiator's mass depends on
   // its chosen deployed side (heavy is heavier), so factor that in per id.
   const radSides = (op.radSides && typeof op.radSides === 'object') ? op.radSides : {};
@@ -1875,6 +1906,40 @@ const FREE_MARKET_AQUA = 3;  // mirror of card-market.js
 const FREE_TRADE_AQUA = 5;   // Freedom (Free Trade Act): 2 cards for 5
 function applyFreeMarket(state, op, player) {
   if (player.opsRemaining <= 0) return fail('no_ops_left');
+  // (I3b) Sell a BLACK-SIDE card from the LEO Stack: it returns to your Hand
+  // and you receive the Exploitation Track stock price for its Spectral Type
+  // (8 / 5 / 4 by the GLOBAL count of that spectral's factories, or 10 when no
+  // factory of the type exists anywhere). Costs the operation.
+  if (op.leoCardId) {
+    const id = String(op.leoCardId);
+    player.leo = Array.isArray(player.leo) ? player.leo : [];
+    const i = player.leo.findIndex((s) => s && s.id === id);
+    if (i < 0) return fail('not_in_leo');
+    const slot = player.leo[i];
+    // Only manufactured goods (a card flipped to its Black/secondary face) sell
+    // here; crew faces aren't goods, and Purple-Side (promoted) cards can't be
+    // sold on the free market (1A5d / 2A3e).
+    if (slot.kind === 'crew') return fail('not_black_side');
+    if (slot.face !== 'secondary') return fail('not_black_side');
+    if (slot.promoted) return fail('purple_no_sell');
+    const card = PATENTS_BY_ID[id];
+    if (!card) return fail('unknown_card');
+    const spectral = card.spectralType || 'C';
+    let globalCount = 0;
+    for (const f of Object.values(state.factories || {})) {
+      if ((f.spectralType || 'C') === spectral) globalCount += 1;
+    }
+    const value = freeMarketBlackSideValue(globalCount);
+    player.leo.splice(i, 1);
+    player.hand = Array.isArray(player.hand) ? player.hand : [];
+    player.hand.push(id);              // the card returns to hand (White-Side)
+    player.aqua += value;
+    player.opsRemaining -= 1;
+    return {
+      ok: true, state,
+      log: `${player.name} sold ${card.name} (Black-Side ${spectral}) on the Free Market for +${value} aqua; the card returns to hand.`,
+    };
+  }
   // Base: sell ONE hand card for FREE_MARKET_AQUA. Freedom (Free Trade Act): a
   // player who can use the law may sell TWO cards for FREE_TRADE_AQUA total.
   const ids = (Array.isArray(op.cardIds) && op.cardIds.length)
@@ -2776,6 +2841,24 @@ function applyEtProduce(state, op, player) {
   const cardId = String(op.cardId || '');
   const hIdx = player.hand.indexOf(cardId);
   if (hIdx < 0) return fail('not_in_hand');
+  const prodCard = PATENTS_BY_ID[cardId];
+  // M1 Freighter: producing a freighter card spawns the player's Freighter
+  // UNIT (the big cube) at this Factory's site, NOT a card in an outpost. One
+  // freighter per player (1A4). Gated on M1 (zero bleed-through when off).
+  if (prodCard && prodCard.type === 'freighter') {
+    if (!state.m1) return fail('m1_off');
+    if (player.freighter) return fail('already_have_freighter');
+    player.hand.splice(hIdx, 1);
+    player.freighter = {
+      cardId, face: 'secondary', promoted: false,
+      siteId, stack: [], tank: 0, wiring: {},
+    };
+    player.opsRemaining -= 1;
+    return {
+      ok: true, state,
+      log: `${player.name} ET-produced ${prodCard.name} (Freighter) at ${site.name}; the big cube launches.`,
+    };
+  }
   const letter = String(op.letter || '');
   if (!OUTPOST_LETTERS.includes(letter)) return fail('bad_outpost');
   player.outposts = player.outposts || {};
@@ -3010,6 +3093,52 @@ function applySiteRefuel(state, op, player) {
   }
 
   if (player.rocket.siteId !== siteId) return fail('not_at_site');
+
+  // Isotope Refuel (M1): a GW thruster runs on gold-bead isotope, refined at a
+  // Factory whose spectral type matches the thruster. This fills the SAME tank
+  // as water (reuse the water tank, just graded 'isotope'); a chemical engine
+  // can never burn it and the tank never mixes grades. Gated hard on M1.
+  if (op.mode === 'isotope') {
+    if (!state.m1) return fail('m1_off');
+    const tid = player.rocket.activeThrusterId;
+    const tslot = tid && player.rocket.stack.find((s) => s.id === tid);
+    const tcard = tslot && PATENTS_BY_ID[tslot.id];
+    if (!tcard || tcard.type !== 'gw-thruster') return fail('no_gw_thruster');
+    const fac = state.factories[siteId];
+    if (!canUseFactoryNonVictory(state, player, fac)) return fail('no_factory');
+    // The factory inherits the site's spectral type; isotope only refines where
+    // it matches the GW thruster's spectral type.
+    const thrSpectral = tcard.spectralType || 'C';
+    const facSpectral = site.spectralType || 'C';
+    if (thrSpectral !== facSpectral) return fail('spectral_mismatch', { need: thrSpectral, have: facSpectral });
+    if (player.opsRemaining <= 0) return fail('no_ops_left');
+    player.refueledSites = Array.isArray(player.refueledSites) ? player.refueledSites : [];
+    if (player.refueledSites.includes(siteId)) return fail('already_refueled');
+    const idry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+    const icap = Math.max(0, TANK_MAX - idry);
+    const itank = Number(player.rocket.tank) || 0;
+    // Isotope can't top up a water/dirt tank, and vice versa (no mixing).
+    if (itank > 0 && tankGradeOf(player.rocket) !== 'isotope') return fail('cannot_mix_fuel');
+    if (itank >= icap) return fail('tank_full');
+    const igain = Math.min(7, icap - itank);
+    if (igain <= 0) return fail('tank_full');
+    player.rocket.tank = round6(itank + igain);
+    player.rocket.tankGrade = 'isotope';
+    player.refueledSites.push(siteId);
+    player.opsRemaining -= 1;
+    // First isotope ever refined monetizes the substance (M1 economy hook;
+    // the price consequences land in a later slice).
+    let monetizeNote = '';
+    if (!state.isotopeMonetized) {
+      state.isotopeMonetized = true;
+      monetizeNote = ' Isotope is now monetized.';
+    }
+    return {
+      ok: true, state,
+      log: `${player.name}: Isotope Refuel at ${site.name} (+${round6(igain)} isotope; tank ${round6(player.rocket.tank)}).${monetizeNote}`,
+    };
+  }
+
   // Atmospheric Scoop (subsystem 5) can raise an aerostat site to hydration 2.
   const water = effectiveHydration(site, player);
   if (water <= 0) return fail('dry_site');
@@ -3104,10 +3233,22 @@ function applyDirtRefuel(state, op, player) {
   const room = cap - tank;
   if (room <= 0) return fail('tank_full');
   const want = Number(op && op.amount);
-  const gain = Number.isFinite(want) && want > 0 ? Math.min(want, room) : room;
+  let gain = Number.isFinite(want) && want > 0 ? Math.min(want, room) : room;
+  // A CREW dirt thruster scoops only 1 dirt FT per turn; a card dirt thruster
+  // scoops as much as the tank holds, any number of times. Track the crew load
+  // per turn (reset in openTurnFor, replayed correctly on undo like
+  // refueledSites) and cap the cumulative crew scoop at 1.
+  const isCrewBurner = !!CREW_BY_ID[slot.id];
+  if (isCrewBurner) {
+    const already = Number(player.dirtTanksThisTurn) || 0;
+    const allowance = Math.max(0, 1 - already);
+    if (allowance <= 0) return fail('dirt_crew_cap');
+    gain = Math.min(gain, allowance);
+  }
   if (gain <= 0) return fail('tank_full');
   player.rocket.tank = round6(tank + gain);
   player.rocket.tankGrade = 'dirt';
+  if (isCrewBurner) player.dirtTanksThisTurn = (Number(player.dirtTanksThisTurn) || 0) + gain;
   return {
     ok: true, state,
     log: `${player.name} loaded +${round6(gain)} dirt FT${gain === 1 ? '' : 's'} (tank ${round6(player.rocket.tank)} dirt).`,
@@ -3222,7 +3363,8 @@ function applyBuyCard(state, op, player) {
   const cardId = String(op.cardId || '');
   const card = PATENTS_BY_ID[cardId];
   if (!card) return fail('unknown_card');
-  if (card.type === 'gw-thruster') return fail('expansion_card');
+  if (card.type === 'gw-thruster' && !state.m1) return fail('expansion_card');
+  if (card.type === 'freighter' && !state.m1) return fail('expansion_card');
   if (CREW_BY_ID[cardId]) return fail('crew_card');
   if ((player.hand || []).includes(cardId)) return fail('already_in_hand');
   if ((player.rocket.stack || []).some((s) => s.id === cardId)) return fail('on_rocket');
@@ -3297,7 +3439,7 @@ function pickPayload(op) {
     case 'REFUEL': return { amount: op.amount };
     case 'CASH_WATER': return { amount: op.amount };
     case 'DUMP': return { amount: op.amount };
-    case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds };
+    case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds, leoCardId: op.leoCardId };
     case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, discard: op.discard, star: op.star };
     case 'LOBBY': return { ideology: op.ideology };
     case 'DISCARD': return { cardId: op.cardId };
@@ -3953,7 +4095,10 @@ function applyAuctionStart(state, op, ctx) {
   // Skunkworks (Shimizu) ignores the academia hand limit when starting.
   if ((player.hand || []).length >= AUCTION_HAND_LIMIT && !hasPrivilege(state, player, 'SKUNKWORKS')) return fail('hand_limit');
   const deckType = String(op.deckType || '');
-  if (!DECK_TYPES.includes(deckType)) return fail('bad_deck');
+  // M1 games may also auction the two Terawatt decks; an m1-off game is the
+  // base six only (zero bleed-through).
+  const auctionableDecks = state.m1 ? [...DECK_TYPES, ...M1_DECK_TYPES] : DECK_TYPES;
+  if (!auctionableDecks.includes(deckType)) return fail('bad_deck');
   const deck = state.decks[deckType];
   if (!deck || !deck.length) return fail('deck_empty');
 
@@ -4130,7 +4275,8 @@ function applyAuctionSell(state, op, ctx) {
     if (!winner) return fail('winner_gone');
     price = high;
   }
-  if ((winner.hand || []).length >= AUCTION_HAND_LIMIT) return fail('hand_limit');
+  // Skunkworks (Shimizu) ignores the academia hand limit when taking the lot.
+  if ((winner.hand || []).length >= AUCTION_HAND_LIMIT && !hasPrivilege(state, winner, 'SKUNKWORKS')) return fail('hand_limit');
   if (winner.aqua < price) return fail('winner_cannot_pay');
 
   if (winner.profileId === a.auctioneerId) {
@@ -4559,20 +4705,16 @@ function applyPickCrew(state, op, ctx) {
   // way round). Since each card is claimed by one player, seat colours stay
   // unique.
   if (card.color) player.color = card.color;
-  // SOLO M0: a faction's colour IS its ideology, so seat the player's starting
-  // delegate in the matching ideology (multiplayer keeps the random seat-order
-  // ideology assigned at setup). The faction is chosen here, AFTER createInitial
-  // State placed the seat-order cube, so move it; a re-pick moves it again.
-  if (state.m0 && state.players.length === 1) {
-    const ide = ideologyForFactionColor(card.color);
+  // M0: a faction's colour IS its ideology, so seat the player's starting
+  // delegate in the matching ideology - the cube's colour lines up with the
+  // zone it sits in. createInitialState already seated by the seat colour, but
+  // re-seat here off the actually-picked card colour so a re-pick (solo can pick
+  // any colour; multiplayer is colour-locked) moves the cube to the right spot.
+  if (state.m0) {
+    const asm = state.assembly || (state.assembly = freshAssembly());
+    const prev = state.homeIdeology && state.homeIdeology[player.profileId];
+    const ide = seatStartingDelegate(asm, player.profileId, card.color, prev);
     if (ide) {
-      const asm = state.assembly || (state.assembly = freshAssembly());
-      for (const place of ASSEMBLY_PLACES) {
-        if (playerDelegatesInPlace(asm, place, player.profileId) > 0) {
-          setPlaceCount(asm, place, player.profileId, 0);
-        }
-      }
-      setPlaceCount(asm, ide, player.profileId, 1);
       state.homeIdeology = state.homeIdeology || {};
       state.homeIdeology[player.profileId] = ide;
     }

@@ -22,6 +22,7 @@ import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE } from './game/engine.js
 import { randomSeed } from './game/rng.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
 import { PATENTS_BY_ID } from '../data/patents.js';
+import { ASSEMBLY_PLACES, IDEOLOGY_BY_KEY } from '../data/assembly.js';
 import { normaliseTag } from '../data/site-tags.js';
 import { NODE_TAGS as STATIC_NODE_TAGS } from '../data/node-tags.js';
 import { makeRefId, disambiguate } from '../data/planner-ids.js';
@@ -616,6 +617,7 @@ function lobbyRow(lobbyId) {
     draftStart: !!row.draft_start,
     randomDraft: !!row.random_draft,
     m0: !!row.m0,
+    m1: !!row.m1,
     status: row.status,
     createdAt: row.created_at,
     startedAt: row.started_at,
@@ -719,6 +721,11 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // Opt-in Module 0 (Sol Political Assembly). Fixed at creation; games already
   // running default to off (no retroactive apply).
   const m0 = body.m0 ? 1 : 0;
+  // Opt-in Module 1 (Terawatt & Futures). ADMIN-ONLY: only an admin host may
+  // turn it on; a non-admin request is forced to 0 regardless of what it sends,
+  // so M1 can never be enabled by a normal player (mirrors the Rat Frontier
+  // admin gate). Experimental.
+  const m1 = (body.m1 && profileIsAdmin(req.profile, req)) ? 1 : 0;
   const now = nowMs();
   let code, info;
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -726,10 +733,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
     try {
       info = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, m0)
-           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, m0, m1)
+           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, m0);
+        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, m0, m1);
       break;
     } catch (err) {
       if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -768,6 +775,7 @@ app.get('/lobbies', (_req, res) => {
               l.draft_start AS draftStart,
               l.random_draft AS randomDraft,
               l.m0          AS m0,
+              l.m1          AS m1,
               l.created_at  AS createdAt,
               p.name        AS hostName,
               (SELECT COUNT(*) FROM lobby_members lm WHERE lm.lobby_id = l.id) AS memberCount,
@@ -800,6 +808,7 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
               l.draft_start AS draftStart,
               l.random_draft AS randomDraft,
               l.m0          AS m0,
+              l.m1          AS m1,
               l.created_at  AS createdAt,
               p.name        AS hostName,
               (SELECT COUNT(*) FROM lobby_members lm2 WHERE lm2.lobby_id = l.id) AS memberCount,
@@ -1036,6 +1045,8 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   if (body.draftStart !== undefined) { sets.push('draft_start = ?'); args.push(body.draftStart ? 1 : 0); }
   if (body.randomDraft !== undefined) { sets.push('random_draft = ?'); args.push(body.randomDraft ? 1 : 0); }
   if (body.m0 !== undefined) { sets.push('m0 = ?'); args.push(body.m0 ? 1 : 0); }
+  // M1 is admin-only: a non-admin host can never set it, even via /settings.
+  if (body.m1 !== undefined) { sets.push('m1 = ?'); args.push((body.m1 && profileIsAdmin(req.profile, req)) ? 1 : 0); }
   if (body.joinPolicy !== undefined) {
     sets.push('join_policy = ?'); args.push(body.joinPolicy === 'invite-only' ? 'invite-only' : 'open');
   }
@@ -1066,7 +1077,7 @@ app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
 app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, m0 FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, m0, m1 FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -1101,7 +1112,8 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const draftStart = !!lobby.draft_start;
   const randomDraft = !!lobby.random_draft;
   const m0 = !!lobby.m0;
-  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0 });
+  const m1 = !!lobby.m1;
+  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1 });
 
   const now = nowMs();
   const gameId = db.transaction(() => {
@@ -1362,7 +1374,36 @@ function adminGameStateView(gameId) {
       hand: (p.hand || []).map((id) => ({ id, name: cardLabel(id) })),
     };
   });
-  return { seq: st.seq, round: state.round, status: state.status, players };
+  const assembly = (state.m0 && state.assembly) ? adminAssemblyView(state) : null;
+  return { seq: st.seq, round: state.round, status: state.status, players, assembly };
+}
+// Politics-space label + colour for the admin cube manager. Ideology spaces
+// pull their name + colour from the canonical map; Centrist is the neutral hub.
+function assemblyPlaceMeta(key) {
+  if (key === 'centrist') return { key, name: 'Centrist', color: '#d8d3c4' };
+  const ide = IDEOLOGY_BY_KEY[key];
+  return { key, name: (ide && ide.name) || key, color: (ide && ide.color) || '#888' };
+}
+// Assembly cubes grouped by space, each cube tinted with its owner's seat
+// colour, for the admin "move a cube" tool. One entry per cube (a space may
+// hold several of a player's cubes once factories/Fundraise come into play).
+function adminAssemblyView(state) {
+  const asm = state.assembly;
+  const byId = Object.fromEntries(
+    (state.players || []).map((p) => [String(p.profileId), { name: p.name, color: p.color || '#888' }])
+  );
+  const places = ASSEMBLY_PLACES.map((key) => {
+    const meta = assemblyPlaceMeta(key);
+    const seats = (asm.delegates && asm.delegates[key]) || {};
+    const cubes = [];
+    for (const pid of Object.keys(seats)) {
+      const n = seats[pid] | 0;
+      const who = byId[pid] || { name: `#${pid}`, color: '#888' };
+      for (let i = 0; i < n; i++) cubes.push({ profileId: Number(pid), name: who.name, color: who.color });
+    }
+    return { ...meta, cubes };
+  });
+  return { places };
 }
 // Sorted catalog of every patent id for the "give arbitrary card" picker.
 function cardCatalog() {
@@ -3572,6 +3613,18 @@ app.get('/admin', (req, res) => {
   .ge-msg{font-size:12px;margin:0 0 8px;min-height:14px}
   .ge-msg.ok{color:#86efac}
   .ge-msg.err{color:#fda4af}
+  .ge-asm{border:1px solid #26233c;border-radius:10px;padding:10px 12px;margin:0 0 12px}
+  .ge-asm>h4{margin:0 0 4px;font-size:14px}
+  .ge-asm-hint{margin:0 0 10px;font-size:12px;color:#8b90b8}
+  .ge-asm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+  .ge-asm-space{border:1px solid #2a2740;border-radius:8px;overflow:hidden;cursor:pointer;background:#0a0814}
+  .ge-asm-space:hover{border-color:#7dd3fc}
+  .ge-asm-space-h{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#10101a;padding:4px 8px;text-shadow:0 1px 0 rgba(255,255,255,.35)}
+  .ge-asm-cubes{display:flex;flex-wrap:wrap;gap:5px;padding:8px;min-height:34px}
+  .ge-asm-empty{color:#6b7194;font-size:11px;font-style:italic;align-self:center}
+  .ge-asm-cube{border:1px solid #00000066;border-radius:5px;color:#0c0a16;font-weight:700;font-size:11px !important;padding:4px 8px !important;cursor:pointer;text-shadow:0 1px 0 rgba(255,255,255,.4);box-shadow:0 1px 2px rgba(0,0,0,.4)}
+  .ge-asm-cube:hover{filter:brightness(1.12)}
+  .ge-asm-cube.sel{outline:3px solid #7dd3fc;outline-offset:1px;transform:translateY(-1px)}
   /* Mobile: keep wide tables on the page (scroll them, not the whole page),
      give controls real tap targets, and let the modal use the full width. */
   @media (max-width:700px){
@@ -3606,7 +3659,7 @@ app.get('/admin', (req, res) => {
   <div class="header-row">
     <div>
       <h1>High Frontier admin</h1>
-      <div class="sub">stage 2 · ${esc(new Date().toISOString())}</div>
+      <div class="sub">${esc(new Date().toISOString())}</div>
     </div>
     <div class="ws-info">
       <strong>${wsCount}</strong> open sockets · <strong>${wsAuthed}</strong> authed
@@ -4139,6 +4192,23 @@ document.addEventListener('click', function (ev) {
       html += '<div class="ge-give">Give <select class="ge-give-card">' + opts + '</select> to <select class="ge-give-loc">' + locOpts + '</select><button data-act="give">Give</button></div>';
       html += '</div>';
     });
+    if (st.assembly && st.assembly.places) {
+      html += '<div class="ge-asm"><h4>🏛 Political Assembly cubes</h4>';
+      html += '<p class="ge-asm-hint">Click a cube to pick it up, then click a space to drop it there. Cube colour = player; space colour = ideology.</p>';
+      html += '<div class="ge-asm-grid">';
+      st.assembly.places.forEach(function (pl) {
+        html += '<div class="ge-asm-space" data-place="' + pl.key + '">';
+        html += '<div class="ge-asm-space-h" style="background:' + esc(pl.color) + '">' + esc(pl.name) + '</div>';
+        html += '<div class="ge-asm-cubes">';
+        if (!pl.cubes.length) html += '<span class="ge-asm-empty">empty</span>';
+        pl.cubes.forEach(function (c) {
+          html += '<button type="button" class="ge-asm-cube" data-place="' + pl.key + '" data-pid="' + c.profileId + '" '
+            + 'title="' + esc(c.name) + '" style="background:' + esc(c.color) + '">' + esc(c.name) + '</button>';
+        });
+        html += '</div></div>';
+      });
+      html += '</div></div>';
+    }
     body.innerHTML = html;
   }
   function msg(text, ok) {
@@ -4171,7 +4241,32 @@ document.addEventListener('click', function (ev) {
       else msg('Failed: ' + (d.error || 'error'), false);
     }).catch(function () { msg('Network error.', false); });
   }
+  var pickedCube = null;   // { pid, from } for the assembly cube move tool
+  function clearCubeSel() {
+    var el = body.querySelector('.ge-asm-cube.sel');
+    if (el) el.classList.remove('sel');
+    pickedCube = null;
+  }
   body.addEventListener('click', function (ev) {
+    // Assembly cube manager: click a cube to pick it up, click a space to drop.
+    var cube = ev.target.closest('.ge-asm-cube');
+    if (cube) {
+      if (cube.classList.contains('sel')) { clearCubeSel(); return; }   // toggle off
+      clearCubeSel();
+      cube.classList.add('sel');
+      pickedCube = { pid: Number(cube.getAttribute('data-pid')), from: cube.getAttribute('data-place') };
+      msg('Cube picked up - click a space to move it there.', true);
+      return;
+    }
+    var space = ev.target.closest('.ge-asm-space');
+    if (space && pickedCube) {
+      var to = space.getAttribute('data-place');
+      var sel = pickedCube;
+      if (to === sel.from) { clearCubeSel(); return; }
+      clearCubeSel();
+      postEdit({ action: 'move_cube', profileId: sel.pid, from: sel.from, to: to }, 'Cube moved.');
+      return;
+    }
     var btn = ev.target.closest('button[data-act]');
     if (!btn) return;
     var act = btn.getAttribute('data-act');
@@ -4430,6 +4525,22 @@ app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
     const node = nodeBySlug(slug);
     const where = (node && node.name) ? node.name : slug;
     log = `Correction: ${name}'s rocket teleported to ${where} (${slug}).`;
+  } else if (body.action === 'move_cube') {
+    // Move one of this player's Assembly delegates from one politics space to
+    // another. Admin-only correction; does not touch homeIdeology.
+    const asm = state.assembly;
+    if (!asm || !asm.delegates) return res.status(400).json({ error: 'no_assembly' });
+    const from = String(body.from || '');
+    const to = String(body.to || '');
+    if (!ASSEMBLY_PLACES.includes(from) || !ASSEMBLY_PLACES.includes(to)) return res.status(400).json({ error: 'bad_place' });
+    if (from === to) return res.status(400).json({ error: 'same_place' });
+    const fromM = asm.delegates[from] || {};
+    if ((fromM[player.profileId] | 0) <= 0) return res.status(400).json({ error: 'no_cube_in_from' });
+    fromM[player.profileId] -= 1;
+    if (fromM[player.profileId] <= 0) delete fromM[player.profileId];
+    asm.delegates[to] = asm.delegates[to] || {};
+    asm.delegates[to][player.profileId] = (asm.delegates[to][player.profileId] | 0) + 1;
+    log = `Correction: ${name}'s delegate moved from ${assemblyPlaceMeta(from).name} to ${assemblyPlaceMeta(to).name}.`;
   } else {
     return res.status(400).json({ error: 'bad_action' });
   }

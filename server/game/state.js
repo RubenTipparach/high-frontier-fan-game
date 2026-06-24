@@ -38,17 +38,17 @@
 
 import { PATENTS } from '../../data/patents.js';
 import { CREW } from '../../data/crew.js';
-import { freshAssembly, IDEOLOGY_ORDER } from '../../data/assembly.js';
+import { freshAssembly, IDEOLOGY_ORDER, seatStartingDelegate } from '../../data/assembly.js';
 import { makeRng, shuffle } from './rng.js';
 // (startSiteId import dropped: the rocket now opens at LEO, siteId null.)
 
 // --- Sunspot Cube clock (mirror of js/game/turn-clock.js) ---
 export const SLOTS = 12;
 export const NEW_ROUND_SLOT = 0;
-// Even slots - an event fires when the cube LANDS here, one slot
-// clockwise of the old odd markers so it resolves the turn AFTER the
-// marker line is crossed. Mirror of js/game/turn-clock.js; keep synced.
-export const EVENT_SLOTS = [0, 2, 4, 6, 8, 10];
+// Odd slots - an event fires when the cube LANDS here (every 2 turns);
+// slot 0 is the new-round tick only and carries no event.
+// Mirror of js/game/turn-clock.js; keep synced.
+export const EVENT_SLOTS = [1, 3, 5, 7, 9, 11];
 // Season wedges mirror js/game/turn-clock.js: the new-round marker
 // (slot 0) sits in the middle of Season Blue, so Blue WRAPS slot 0
 // (slots 10, 11, 0, 1). A `from > to` entry wraps past slot 0.
@@ -97,6 +97,9 @@ export const AQUA_DEFAULT = 6;
 export const DECK_TYPES = [
   'thruster', 'reactor', 'radiator', 'refinery', 'robonaut', 'generator',
 ];
+// Module 1 adds two decks (Terawatt & Futures). Only dealt when state.m1 is on;
+// an M1-off game never builds or sees them (zero bleed-through).
+export const M1_DECK_TYPES = ['gw-thruster', 'freighter'];
 
 // Per-seat marker colours = the six crew-card colours. Each crew
 // card is associated with one of these slots; a player assigned
@@ -109,15 +112,20 @@ export const PLAYER_COLORS = CREW.map((c) => c.color);
 // js/game/decks.js#buildShuffledFresh but driven by the game's RNG so
 // the deal is reproducible. Expansion (gw-thruster) cards are excluded,
 // same as the sandbox.
-function buildShuffledDecks(gen) {
+function buildShuffledDecks(gen, m1 = false) {
+  // The base six always; the two M1 decks ONLY when m1. The base decks are
+  // built + shuffled first in the SAME order regardless of m1, so an m1-off
+  // game's deal is byte-for-byte identical to before (the M1 decks just consume
+  // extra RNG at the end of an m1 game).
+  const types = m1 ? [...DECK_TYPES, ...M1_DECK_TYPES] : DECK_TYPES;
   const decks = {};
-  for (const t of DECK_TYPES) decks[t] = [];
+  for (const t of types) decks[t] = [];
   for (const card of PATENTS) {
-    if (card.type === 'gw-thruster') continue;
+    if (!m1 && M1_DECK_TYPES.includes(card.type)) continue;
     if (!decks[card.type]) continue;
     decks[card.type].push(card.id);
   }
-  for (const t of DECK_TYPES) decks[t] = shuffle(gen, decks[t]);
+  for (const t of types) decks[t] = shuffle(gen, decks[t]);
   return decks;
 }
 
@@ -191,6 +199,15 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
     // the data/sites.js slug the outpost was built at (any non-LEO
     // node the player chose).
     outposts: {},
+    // M1 Freighter unit (the player's "big cube"): null until ET-produced at a
+    // Factory (see engine.js#applyEtProduce). One per player (1A4). Shape when
+    // live:
+    //   { cardId, face:'secondary', promoted:false, siteId:<slug>|null,
+    //     stack:[{id,kind,face?}], tank:<water>, wiring:{} }
+    // siteId is the map node it sits on (null = LEO); stack is its cargo
+    // (Black-Side goods + supports); tank is its water. Only reachable when
+    // state.m1 is true (every freighter code path gates on it).
+    freighter: null,
     hand: [],
     boostMarks: [],
     // Starting bank. Defaults to the standard AQUA_DEFAULT; a solo game may
@@ -205,7 +222,7 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
 
 // players: [{ profileId, name, seat }] (seat 1-based, any order).
 // maxRounds: game length (rounds = Sunspot Cube cycles); default 5.
-export function createInitialState({ players, seed, maxRounds = 5, startingAqua, economy, draftStart, randomDraft, m0 } = {}) {
+export function createInitialState({ players, seed, maxRounds = 5, startingAqua, economy, draftStart, randomDraft, m0, m1 } = {}) {
   // Sort by the incoming (lobby) seat first so the shuffle has a
   // deterministic base regardless of how the caller ordered the array,
   // then randomise the turn order with the seeded RNG. Turn order IS
@@ -222,7 +239,7 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
   // still being reproducible from (seed). Colours are assigned in the
   // shuffled turn order so no one is always "the yellow player".
   const palette = shuffle(gen, PLAYER_COLORS);
-  const decks = buildShuffledDecks(gen);
+  const decks = buildShuffledDecks(gen, !!m1);
   const rounds = [4, 5, 6, 7].includes(maxRounds) ? maxRounds : 5;
   // Card economy + starting bank. Standard multiplayer is always 'market' +
   // AQUA_DEFAULT (the caller enforces that for 2+ player games); a solo game
@@ -241,15 +258,18 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
   // so on, wrapping past 6). Leaves DELEGATES_PER_PLAYER-1 in hand.
   const assembly = m0 ? freshAssembly() : null;
   // Each player's HOME ideology - where their starting delegate sits and the one
-  // space a new delegate may always be placed on (Fundraise rule). Multiplayer
-  // assigns it randomly by shuffled seat order; SOLO overrides it to the picked
-  // faction's colour-ideology in applyPickCrew. Keyed by profileId.
+  // space a new delegate may always be placed on (Fundraise rule). A faction's
+  // colour IS its ideology, so the opening cube starts in the ideology matching
+  // the player's seat colour (the same colour they'll pick crew in), keeping the
+  // cube colour aligned with the zone it sits in. The seat-order ideology is
+  // only a fallback if a colour has no mapping. PICK_CREW re-seats via the same
+  // helper. Keyed by profileId.
   const homeIdeology = {};
   if (assembly) {
     ordered.forEach((p, i) => {
-      const ide = IDEOLOGY_ORDER[i % IDEOLOGY_ORDER.length];
-      assembly.delegates[ide][p.profileId] = 1;
-      homeIdeology[p.profileId] = ide;
+      const color = palette[i % palette.length];
+      const fallback = IDEOLOGY_ORDER[i % IDEOLOGY_ORDER.length];
+      homeIdeology[p.profileId] = seatStartingDelegate(assembly, p.profileId, color, fallback);
     });
   }
   return {
@@ -328,6 +348,12 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
     // room creation); games already in flight default to false (no retro apply).
     // `assembly` holds delegate placements + drives the active-law resolver.
     m0: !!m0,
+    // Module 1 (Terawatt & Futures). ADMIN-ONLY + experimental, fixed at game
+    // start. Defaults false. NOTHING M1 (freighters, GW thrusters, isotope fuel,
+    // mobile factories, Futures) may activate unless state.m1 is true - every
+    // M1 rule/op/UI path MUST gate on this flag so an M1-off game is byte-for-
+    // byte the base game (see CLAUDE.md "Module gating").
+    m1: !!m1,
     assembly,
     homeIdeology,
     // Active-law star: the marker for the in-power ideology, moved by the

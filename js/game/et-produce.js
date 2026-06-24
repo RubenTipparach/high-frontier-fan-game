@@ -89,12 +89,13 @@ function openCardZoom(card) {
   } catch {
     panel.textContent = card.name || '';
   }
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'modal-btn et-zoom-close';
-  btn.textContent = 'Close';
-  btn.addEventListener('click', close);
-  panel.appendChild(btn);
+  const xBtn = document.createElement('button');
+  xBtn.type = 'button';
+  xBtn.className = 'modal-x';
+  xBtn.textContent = '×';
+  xBtn.setAttribute('aria-label', 'Close');
+  xBtn.addEventListener('click', close);
+  panel.appendChild(xBtn);
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
 }
@@ -159,8 +160,9 @@ export function openEtProduceModal({
            <div class="et-section-label">Target outpost: <strong>${escapeHtml(existingOutpost)}</strong></div>
          </div>`;
     dialog.innerHTML = `
-      <div class="et-produce-head">
-        <h3>🏭 ET Produce at ${escapeHtml(siteName)}</h3>
+      <div class="modal-header">
+        <h2 class="modal-title">🏭 ET Produce at ${escapeHtml(siteName)}</h2>
+        <button type="button" class="modal-x et-cancel" aria-label="Close">×</button>
       </div>
       <div class="et-produce-body">
         <div class="et-spectral">
@@ -181,7 +183,6 @@ export function openEtProduceModal({
         ${slotHtml}
       </div>
       <div class="card-modal-actions">
-        <button type="button" class="modal-btn et-cancel">Cancel</button>
         <button type="button" class="modal-btn primary et-commit" ${selectedSlot ? '' : 'disabled'}>🏭 Produce</button>
       </div>
     `;

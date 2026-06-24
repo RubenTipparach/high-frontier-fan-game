@@ -1055,6 +1055,7 @@ body.in-lobby .main-menu-fab { display: none; }
   white-space: nowrap;
 }
 .module-tag.tag-m0 { background: rgba(120,140,220,0.16); color: #cdd6ff; border-color: #3a4a7a; }
+.module-tag.tag-m1 { background: rgba(56,189,248,0.16); color: #bfe9ff; border-color: #2a6f8a; }
 .module-tag.tag-draft { background: rgba(200,160,80,0.16); color: #f0d9a8; border-color: #7a6326; }
 
 /* Lobby room-settings editor (host) + read-only summary (others). */
