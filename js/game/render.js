@@ -1,4 +1,5 @@
 import { getRocketSprite, getRocketSpriteSize } from './rocket-sprite.js';
+import { getFreighterSprite, getFreighterSpriteSize, onFreighterSpriteReady } from './freighter-sprite.js';
 import { thrustVisual } from './card-ui.js';
 import { assetUrl } from '../base.js';
 import { isBatterySave, onBatterySaveChange } from '../prefs.js';
@@ -1052,6 +1053,19 @@ export class MapRenderer {
       this._initialViewDone = true;
       this.flyTo({ x: opts.x, y: opts.y }, this._focusRocketZoom || 5, { ms: this._focusRocketMs || 420 });
       this._focusRocketMs = 0;
+    }
+    this._scheduleDraw();
+  }
+
+  // The local player's M1 Freighter (the big cube), drawn on the map at its site
+  // the same way the rocket is. opts = { x, y, colour, promoted } or null when
+  // there is no freighter in play. A second, independent mover, so it never
+  // yanks the opening camera (that's the rocket's job).
+  setFreighterUnit(opts) {
+    this._freighterUnit = opts || null;
+    if (!this._freighterReadyHooked) {
+      this._freighterReadyHooked = true;
+      onFreighterSpriteReady(() => this._scheduleDraw());   // repaint when the SVG decodes
     }
     this._scheduleDraw();
   }
@@ -2290,6 +2304,7 @@ export class MapRenderer {
       this._drawPlayerShipScreen(ctx);
       if (this._mpRockets && this._mpRockets.length) this._drawMpRocketsScreen(ctx);
       if (this._sandboxRocket) this._drawSandboxRocketScreen(ctx);
+      if (this._freighterUnit) this._drawFreighterUnitScreen(ctx);
       if (this._explosion)     this._drawExplosionScreen(ctx);
       // Selection ring drawn LAST so nothing - labels, ships, hexes
       // - paints over it. On mobile the in-hex orange/gold border is
@@ -3783,6 +3798,29 @@ export class MapRenderer {
       }
       ctx.restore();
     }
+  }
+
+  // Draw the local player's Freighter big cube at its site. Positioned BELOW
+  // the node anchor (the rocket sits above it), so when both movers share a site
+  // they read as two distinct pieces. Tinted to the player's seat colour.
+  _drawFreighterUnitScreen(ctx) {
+    const f = this._freighterUnit;
+    if (!f || !Number.isFinite(f.x) || !Number.isFinite(f.y)) return;
+    const img = getFreighterSprite(f.colour || 'white', { promoted: !!f.promoted });
+    if (!img || !img.complete || !img.naturalWidth) return;   // decodes async; repaint on ready
+    const eff = this.zoom * this.fitScale;
+    const { width: vbW, height: vbH } = getFreighterSpriteSize();
+    const targetW = 52;                       // on-screen width; cube reads clearly
+    const scale = targetW / vbW;
+    const w = vbW * scale, h = vbH * scale;
+    const sx = this.pan.x + f.x * eff + this._factoryParkShift(f.x, f.y, w);
+    const sy = this.pan.y + f.y * eff;
+    const px = sx - w / 2;
+    const py = sy + 3;                         // hang below the node (rocket is above)
+    ctx.save();
+    if (f.canFly === false) ctx.globalAlpha = 0.5;
+    ctx.drawImage(img, px, py, w, h);
+    ctx.restore();
   }
 
   _drawSandboxRocketScreen(ctx) {

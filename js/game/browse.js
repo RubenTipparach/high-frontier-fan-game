@@ -8174,8 +8174,9 @@ function ensureMapShell(host) {
           aria-label="End turn">⏭ End turn</button>
         <span id="turn-budget" class="map-turn-budget" aria-live="polite">
           <button type="button" class="turn-tag" id="turn-tag-move" title="Rocket moves remaining this turn">🚀 move:1</button>
+          <button type="button" class="turn-tag turn-tag-gear" id="game-settings" title="Rocket route options" aria-label="Rocket route options">⚙</button>
           <button type="button" class="turn-tag" id="turn-tag-fmove" title="Freighter moves remaining this turn (the freighter is a second, independent mover)" hidden>🚛 move:1</button>
-          <button type="button" class="turn-tag turn-tag-gear" id="game-settings" title="Route options" aria-label="Route options">⚙</button>
+          <button type="button" class="turn-tag turn-tag-gear" id="game-settings-fr" title="Freighter route options" aria-label="Freighter route options" hidden>⚙</button>
           <button type="button" class="turn-tag turn-tag-undo" id="turn-tag-undo" title="Undo your last action this turn" hidden>↩ undo</button>
         </span>
         <span id="aqua-chip" class="map-aqua-chip"
@@ -8389,6 +8390,7 @@ function ensureMapShell(host) {
   // refund / turn rollover.
   const moveTag = host.querySelector('#turn-tag-move');
   const fmoveTag = host.querySelector('#turn-tag-fmove');
+  const fmoveGear = host.querySelector('#game-settings-fr');
   const undoTag = host.querySelector('#turn-tag-undo');
   const endTurnBtn = host.querySelector('#turn-end');
   function refreshTurnBudget() {
@@ -8456,6 +8458,9 @@ function ensureMapShell(host) {
     // plotter the rocket uses.
     if (fmoveTag) {
       const fr = getMyFreighter();
+      // The freighter's route-options gear tracks the move tag: both appear only
+      // once the big cube is live.
+      if (fmoveGear) fmoveGear.hidden = !fr;
       if (!fr) {
         fmoveTag.hidden = true;
       } else {
@@ -8691,7 +8696,9 @@ function ensureMapShell(host) {
     onTap(aquaChip, () => openLeoStackModal());
   }
   const gearBtn = host.querySelector('#game-settings');
-  if (gearBtn) onTap(gearBtn, () => openGameSettingsModal());
+  if (gearBtn) onTap(gearBtn, () => openGameSettingsModal('rocket'));
+  const gearFrBtn = host.querySelector('#game-settings-fr');
+  if (gearFrBtn) onTap(gearFrBtn, () => openGameSettingsModal('freighter'));
   host.querySelector('#dbg-close').addEventListener('click', () => {
     host.querySelector('#map-debug').classList.add('hidden');
     try { localStorage.setItem(STORAGE_DBG_PANEL_OPEN, '0'); }
@@ -14683,11 +14690,31 @@ function syncMpRockets(snapshot) {
   if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) {
     _renderer.setMpRockets(null);
     _renderer.setSandboxRocketOffset(0);
+    syncFreighterUnit(snapshot);
     return;
   }
   const { opponents, localOffsetX } = computeMpRockets(snapshot);
   _renderer.setSandboxRocketOffset(localOffsetX);
   _renderer.setMpRockets(opponents);
+  syncFreighterUnit(snapshot);
+}
+
+// Place the local player's Freighter big cube on the map (M1, online only). The
+// renderer carries one freighter sprite for the local player, drawn at its site
+// (null siteId = LEO). Cleared when there's no freighter in play.
+function syncFreighterUnit(snapshot) {
+  if (!_renderer || typeof _renderer.setFreighterUnit !== 'function') return;
+  if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) {
+    _renderer.setFreighterUnit(null);
+    return;
+  }
+  const me = snapshot.players.find((p) => p.profileId === _onlineMe.id);
+  const fr = me && me.freighter;
+  if (!fr) { _renderer.setFreighterUnit(null); return; }
+  const pid = fr.siteId ? toPlannerId(_onlineMaps, fr.siteId) : leoPlannerId();
+  const pos = coordOfPlanner(pid);
+  if (!pos) { _renderer.setFreighterUnit(null); return; }
+  _renderer.setFreighterUnit({ x: pos.x, y: pos.y, colour: myRocketColour(), promoted: !!fr.promoted });
 }
 
 // ----- online transition animation (animate the diff, don't snap) -----
@@ -16834,17 +16861,20 @@ function openConfigModal() {
   mountOverlay(overlay);
 }
 
-function openGameSettingsModal() {
+function openGameSettingsModal(unit = 'rocket') {
   // For now the only setting block IS the route options; reuse
   // the same modal so the player sees one familiar surface.
   // When more settings land, this becomes the parent surface
   // and route-options collapses into a section heading.
   openRouteOptionsModal(() => {
     if (_selectedId) refreshOpenSitePopup();
-  });
+  }, unit);
 }
 
-function openRouteOptionsModal(onClose) {
+// unit: 'rocket' (default) | 'freighter' - selects which mover the manual-plot
+// button drives and labels the modal accordingly. The planner-preference rows
+// (priority / avoid hazards / avoid radiation) are shared planner settings.
+function openRouteOptionsModal(onClose, unit = 'rocket') {
   document.querySelector('.route-options-overlay')?.remove();
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay route-options-overlay';
@@ -16857,13 +16887,20 @@ function openRouteOptionsModal(onClose) {
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
 
+  const isFreighter = unit === 'freighter';
   const thrStats = getActiveThrusterStats();
-  const thrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 4;
+  // The manual plotter's per-turn hop budget: the freighter moves one burn
+  // space per turn; the rocket uses its active-thruster thrust.
+  const thrust = isFreighter
+    ? 1
+    : (thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 4);
+  const unitLabel = isFreighter ? 'Freighter' : 'Rocket';
+  const unitIcon = isFreighter ? '🚛' : '🚀';
   const panel = document.createElement('div');
   panel.className = 'route-options-panel';
   panel.innerHTML = `
     <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
-    <h2 class="route-options-title">⚙ Route options</h2>
+    <h2 class="route-options-title">${unitIcon} ${unitLabel} route options</h2>
     <p class="muted route-options-sub">
       Which metric should the planner minimize first? The other
       one becomes the tiebreaker.
@@ -16909,13 +16946,14 @@ function openRouteOptionsModal(onClose) {
     </label>
     <div class="route-options-manual">
       <button type="button" class="popup-btn route-options-manual-btn">
-        ✋ Manual move - plot ${thrust} hops by hand
+        ✋ Manual ${unitLabel.toLowerCase()} move - plot ${thrust} hop${thrust === 1 ? '' : 's'} by hand
       </button>
       <p class="muted route-options-manual-help">
         Cancels any auto-planned route and lets you tap adjacent
         nodes one at a time - sites AND Hohmann-transfer dots - to
-        advance the ship one hop at a time. Capped at the active
-        thruster's thrust (${thrust}). Tap Move to fly, or Stop.
+        advance the ${unitLabel.toLowerCase()} one hop at a time. Capped at
+        ${isFreighter ? 'one burn space per turn' : `the active thruster's thrust (${thrust})`}.
+        Tap Move to fly, or Stop.
       </p>
     </div>
     ${_online ? `
@@ -16983,10 +17021,10 @@ function openRouteOptionsModal(onClose) {
   panel.querySelector('.route-options-manual-btn').addEventListener('click', () => {
     close();
     // Close the underlying site popup too - manual mode plots
-    // from the rocket's position, the popup site isn't relevant
+    // from the mover's position, the popup site isn't relevant
     // any more and leaving it open would block taps under it.
     if (_renderer) _renderer.setSitePopup(null);
-    enterManualMoveMode();
+    enterManualMoveMode({ unit });
   });
   wireSimulate(panel.querySelector('.route-options-sim-btn'),
     panel.querySelector('.route-options-sim-result'));
@@ -17051,9 +17089,9 @@ function showSitePopupFor(site) {
   // pure-inspection affordance (no game state changes) and goes
   // LAST per the CLAUDE.md style rule - all real game actions
   // (Plan rocket route, Prospect, Refuel) precede it.
-  const openRouteOptions = () => openRouteOptionsModal(() => {
+  const openRouteOptions = (unit) => openRouteOptionsModal(() => {
     if (_selectedId) refreshOpenSitePopup();
-  });
+  }, unit);
   const actions = [
     {
       // Plan the rocket's actual flight from LEO to this site,
@@ -17061,7 +17099,7 @@ function showSitePopupFor(site) {
       // budget. Turn-1 segments paint as the bright highlight;
       // later turns get a "T2 / T3" pill at midpoint so the
       // player can read the trip plan at a glance.
-      label: '🛸 Plan rocket route',
+      label: '🚀 Plan rocket route',
       variant: 'rocket',
       disabled: !canNavigate,
       onClick: () => {
@@ -17070,18 +17108,38 @@ function showSitePopupFor(site) {
         if (ok) _renderer.clearSitePopup();
       },
       // Inline ⚙ gear next to the plan-route button. Opens the
-      // route-options modal so the player can flip the metric
+      // rocket route-options modal so the player can flip the metric
       // priority (turns vs burns) without leaving the popup.
-      // Same modal is also reachable from the toolbar's ⚙
-      // game-settings button.
       trailing: {
         label: '⚙',
         variant: 'secondary',
-        title: `Route options (current priority: ${_routePriority} first)`,
-        onClick: openRouteOptions,
+        title: `Rocket route options (current priority: ${_routePriority} first)`,
+        onClick: () => openRouteOptions('rocket'),
       },
     },
   ];
+  // Plan FREIGHTER route - a parallel button (with its own ⚙ gear) shown only
+  // when the player has a freighter in play. The freighter is a second,
+  // independent mover, so it gets its own plan affordance right under the
+  // rocket's.
+  if (canPlanFreighter()) {
+    actions.push({
+      label: '🚛 Plan freighter route',
+      variant: 'rocket',
+      disabled: !canNavigate,
+      onClick: () => {
+        if (!canNavigate) return;
+        const ok = planFreighterRouteTo(site);
+        if (ok) _renderer.clearSitePopup();
+      },
+      trailing: {
+        label: '⚙',
+        variant: 'secondary',
+        title: 'Freighter route options',
+        onClick: () => openRouteOptions('freighter'),
+      },
+    });
+  }
   // Prospect action - only show when there's an active prospector
   // in the stack AND it's eligible to scan this site. Missile /
   // buggy require the rocket to be parked on the target; raygun
@@ -17738,7 +17796,69 @@ function canPlanRocketRoute() {
 // when no auto route is plotted.
 function replanCurrentRoute() {
   if (_manualMode || !_routeTo) return;
-  try { planRocketRouteTo(_routeTo); } catch (e) { console.error('replan route:', e); }
+  try {
+    if (_plannedRouteUnit === 'freighter') planFreighterRouteTo(_routeTo);
+    else planRocketRouteTo(_routeTo);
+  } catch (e) { console.error('replan route:', e); }
+}
+// A freighter is plannable whenever the player has one in play.
+function canPlanFreighter() { return !!getMyFreighter(); }
+// Plan a FREIGHTER route from the freighter's current site to `destSite`,
+// reusing the SAME mission planner the rocket uses (planRoute) with the
+// freighter's movement model: a 1-burn-space-per-turn budget and the
+// freighter card's free pivots. The freighter's land/assist gate is resolved
+// at MOVE time by the engine, so this only plots + draws the path.
+function planFreighterRouteTo(destSite) {
+  if (!_renderer || !_activeData) return false;
+  const fr = getMyFreighter();
+  if (!fr) { setStatus('No freighter in play.'); return false; }
+  const originId = getStackSiteId('freighter');
+  const origin = originId
+    ? (_activeData.byId ? _activeData.byId[originId] : _activeData.sites.find((s) => s.id === originId))
+    : null;
+  if (!origin) { setStatus('Could not find the freighter\'s position.'); return false; }
+  if (destSite.id === origin.id) {
+    setStatus(`Freighter is already at ${esc(origin.name)} - pick a different destination.`);
+    return false;
+  }
+  // Synodic-season gate (same as the rocket): a seasonal space is only on the
+  // board during its Sunspot phase.
+  let nowSeason = null;
+  try { nowSeason = getSeason()?.name || null; } catch { nowSeason = null; }
+  const destSeason = (NODE_TAGS[destSite.id2] && NODE_TAGS[destSite.id2].season) || destSite.siteSynodic || null;
+  if (destSeason && nowSeason && destSeason !== nowSeason) {
+    const cap = destSeason[0].toUpperCase() + destSeason.slice(1);
+    setStatus(`🗓 <strong>${esc(destSite.name)}</strong> is a ${destSeason}-season space: enter it only during Season ${cap}.`);
+    _renderer.setRoute(null); _renderer.setRouteEndpoints(origin.id, destSite.id);
+    return false;
+  }
+  const result = planRoute(_activeData, origin.id, destSite.id, {
+    thrust: 1,                               // freighter: one burn space per turn
+    metricPriority: routeMetricPriority(),
+    solarSeason: nowSeason || 'red',
+    freePivots: freighterBonusPivots(),
+  });
+  if (!result || !result.segments.length) {
+    setStatus(`No freighter route found to <strong>${esc(destSite.name)}</strong>.`);
+    _renderer.setRoute(null); _renderer.setRouteEndpoints(origin.id, destSite.id);
+    return false;
+  }
+  _routeFrom = origin;
+  _routeTo = destSite;
+  _plannedRoute = result.segments;
+  _plannedRouteUnit = 'freighter';
+  persistPlannedRoute();
+  submitSetRouteOnline();
+  _renderer.setRoute(result.segments);
+  _renderer.setRouteEndpoints(origin.id, destSite.id);
+  document.getElementById('route-clear').hidden = false;
+  const turns = result.totalTurns;
+  setStatus(
+    `🚛 <strong>${esc(origin.name)}</strong> → <strong>${esc(destSite.name)}</strong>: `
+    + `<strong class="big">${result.totalBurns}</strong> burn${result.totalBurns === 1 ? '' : 's'} over `
+    + `<strong>${turns}</strong> turn${turns === 1 ? '' : 's'}.`
+  );
+  return true;
 }
 function planRocketRouteTo(destSite) {
   if (!_renderer || !_activeData) return false;
