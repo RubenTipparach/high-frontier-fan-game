@@ -733,11 +733,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // Opt-in Module 0 (Sol Political Assembly). Fixed at creation; games already
   // running default to off (no retroactive apply).
   const m0 = body.m0 ? 1 : 0;
-  // Opt-in Module 1 (Terawatt & Futures). ADMIN-ONLY: only an admin host may
-  // turn it on; a non-admin request is forced to 0 regardless of what it sends,
-  // so M1 can never be enabled by a normal player (mirrors the Rat Frontier
-  // admin gate). Experimental.
-  const m1 = (body.m1 && profileIsAdmin(req.profile, req)) ? 1 : 0;
+  // Opt-in Module 1 (Terawatt & Futures). Released for OPEN playtesting: any
+  // host may turn it on (the admin gate was removed). Still experimental, and
+  // still fixed at creation. M2 remains admin-only below.
+  const m1 = body.m1 ? 1 : 0;
   // Opt-in Module 2 (Futures). ADMIN-ONLY, mirrors M1: a non-admin request is
   // forced to 0 regardless of what it sends, so M2 can never be enabled by a
   // normal player. Experimental.
@@ -1064,8 +1063,8 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   if (body.draftStart !== undefined) { sets.push('draft_start = ?'); args.push(body.draftStart ? 1 : 0); }
   if (body.randomDraft !== undefined) { sets.push('random_draft = ?'); args.push(body.randomDraft ? 1 : 0); }
   if (body.m0 !== undefined) { sets.push('m0 = ?'); args.push(body.m0 ? 1 : 0); }
-  // M1 is admin-only: a non-admin host can never set it, even via /settings.
-  if (body.m1 !== undefined) { sets.push('m1 = ?'); args.push((body.m1 && profileIsAdmin(req.profile, req)) ? 1 : 0); }
+  // M1 is open for playtesting: any host may toggle it (admin gate removed).
+  if (body.m1 !== undefined) { sets.push('m1 = ?'); args.push(body.m1 ? 1 : 0); }
   // M2 is admin-only: a non-admin host can never set it, even via /settings.
   if (body.m2 !== undefined) { sets.push('m2 = ?'); args.push((body.m2 && profileIsAdmin(req.profile, req)) ? 1 : 0); }
   if (body.joinPolicy !== undefined) {

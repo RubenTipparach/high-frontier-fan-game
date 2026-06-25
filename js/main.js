@@ -559,12 +559,13 @@ function ratAdminsFromConfig() {
   return new Set((el?.content || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
 }
 let _ratAccessReqId = 0;
-// Reveal / hide admin-only module toggles (currently the M1 room-creation
-// checkboxes). Same admin gate as Rat Frontier; when hidden the checkbox is
-// also force-unchecked so a stale tick can't ride along (the server enforces
-// the admin gate regardless, this is just UI hygiene).
+// Reveal / hide admin-only module toggles (currently the M2 room-creation
+// checkboxes; M1 is open for playtesting and always shown). Same admin gate as
+// Rat Frontier; when hidden the checkbox is also force-unchecked so a stale
+// tick can't ride along (the server enforces the admin gate regardless, this is
+// just UI hygiene).
 function setAdminModuleRows(allowed) {
-  for (const id of ['create-m1-row', 'solo-m1-row', 'create-m2-row', 'solo-m2-row']) {
+  for (const id of ['create-m2-row', 'solo-m2-row']) {
     const el = document.getElementById(id);
     if (!el) continue;
     el.classList.toggle('hidden', !allowed);

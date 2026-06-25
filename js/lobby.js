@@ -713,11 +713,11 @@ async function onCreateSubmit(ev) {
   const draftStart = !!document.getElementById('create-draft')?.checked;
   const randomDraft = !!document.getElementById('create-random-draft')?.checked;
   const m0 = !!document.getElementById('create-m0')?.checked;
-  // M1 is admin-only: only read the checkbox for an admin (the row is hidden for
-  // everyone else, and the server forces m1=0 for non-admins regardless).
   const me = activeProfile();
   if (!me) return;
-  const m1 = !!(me.isAdmin && document.getElementById('create-m1')?.checked);
+  // M1 is open for playtesting: read its checkbox for everyone. M2 stays
+  // admin-only (its row is hidden for non-admins, and the server forces m2=0).
+  const m1 = !!document.getElementById('create-m1')?.checked;
   const m2 = !!(me.isAdmin && document.getElementById('create-m2')?.checked);
   if (!_createIdemKey) _createIdemKey = newIdemKey();   // stable across retries of this intent
   const submitBtn = ev.target.querySelector('button[type="submit"]');
@@ -743,8 +743,8 @@ async function onCreateSubmit(ev) {
 export async function createSoloRoom({ startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, m0 = false, m1 = false, m2 = false } = {}) {
   const me = activeProfile();
   if (!me) return { ok: false, error: 'no_profile' };
-  // M1 is admin-only; force off for non-admins (server also enforces this).
-  const m1Flag = !!(me.isAdmin && m1);
+  // M1 is open for playtesting: any host may enable it.
+  const m1Flag = !!m1;
   // M2 is admin-only; force off for non-admins (server also enforces this).
   const m2Flag = !!(me.isAdmin && m2);
   const create = await createLobby(
@@ -929,10 +929,10 @@ function renderLobbySettings(lobby, iAmHost, me) {
     <label class="check-row"><input type="checkbox" id="set-random-draft"${lobby.randomDraft ? ' checked' : ''}/>
       <span><strong>Random draft</strong> - dealt 12 random cards, no picking</span></label>
     <label class="check-row"><input type="checkbox" id="set-m0"${lobby.m0 ? ' checked' : ''}/>
-      <span><strong>Module 0: Politics</strong> - adds the Sol Political Assembly</span></label>`
-    + ((me && me.isAdmin) ? `
+      <span><strong>Module 0: Politics</strong> - adds the Sol Political Assembly</span></label>
     <label class="check-row"><input type="checkbox" id="set-m1"${lobby.m1 ? ' checked' : ''}/>
-      <span><strong>Module 1: Terawatt</strong> - admin only, experimental</span></label>
+      <span><strong>Module 1: Terawatt</strong> - experimental (open playtest)</span></label>`
+    + ((me && me.isAdmin) ? `
     <label class="check-row"><input type="checkbox" id="set-m2"${lobby.m2 ? ' checked' : ''}/>
       <span><strong>Module 2: Futures</strong> - admin only, experimental</span></label>` : '');
 
@@ -967,7 +967,7 @@ function renderLobbySettings(lobby, iAmHost, me) {
     save({ randomDraft: e.target.checked, draftStart: setDraftEl ? setDraftEl.checked : false });
   });
   box.querySelector('#set-m0').addEventListener('change', (e) => save({ m0: e.target.checked }));
-  // M1 row only exists for an admin host; server also enforces the admin gate.
+  // M1 is open for playtesting: its row shows for every host.
   box.querySelector('#set-m1')?.addEventListener('change', (e) => save({ m1: e.target.checked }));
   // M2 row only exists for an admin host; server also enforces the admin gate.
   box.querySelector('#set-m2')?.addEventListener('change', (e) => save({ m2: e.target.checked }));
