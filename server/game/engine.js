@@ -1481,6 +1481,16 @@ function applyMoveFreighter(state, op, player) {
     return { ok: true, state, rolled: true, log: `${player.name}'s Freighter was destroyed at ${nameOf(haltSlug)}.` };
   }
   fr.siteId = (dest === leoSlug()) ? null : dest;
+  // Truncate the freighter's own planned route as it walks it (mirror the
+  // rocket): drop this turn's leg, advancing later turns forward by one.
+  if (Array.isArray(fr.route) && fr.route.length) {
+    if (fr.route.some((s) => s.turn != null)) {
+      fr.route = fr.route.filter((s) => (s.turn || 1) > 1).map((s) => ({ ...s, turn: (s.turn || 1) - 1 }));
+    } else {
+      const idx = fr.route.findIndex((s) => s.to === dest);
+      if (idx >= 0) fr.route = fr.route.slice(idx + 1);
+    }
+  }
   const glitchTail = fr.glitched ? ' (glitched)' : '';
   return { ok: true, state, rolled, log: `${player.name} moved the Freighter to ${nameOf(dest)}${glitchTail}.` };
 }
@@ -2156,7 +2166,13 @@ function applyRefuel(state, op, player) {
 // so it persists until the player clears it or completes it. The
 // route is the source of truth; the client only computes shortest
 // path via the planner graph and submits the segment list.
-// op = { segments: [{ from, to, burns }, ...] }.
+// op = { segments: [{ from, to, burns }, ...], unit?: 'rocket' | 'freighter' }.
+// Each vehicle keeps its OWN secret route (rocket.route, freighter.route) so a
+// freighter plan never overwrites the rocket's and vice versa.
+function routeHolderForUnit(player, unit) {
+  if (unit === 'freighter') return player.freighter || null;
+  return player.rocket;
+}
 function applySetRoute(state, op, player) {
   const segs = Array.isArray(op.segments) ? op.segments : [];
   const norm = [];
@@ -2172,12 +2188,15 @@ function applySetRoute(state, op, player) {
   // existence) - routing is the client's planner job; this op just persists
   // the (secret) plan. MOVE trusts these segments and validates only the
   // burns. See CLAUDE.md "Movement authority".
-  player.rocket.route = norm;
+  const holder = routeHolderForUnit(player, op.unit);
+  if (!holder) return fail('no_freighter');   // a freighter route with no freighter
+  holder.route = norm;
   return { ok: true, state, log: '' };  // empty log: routes are secret
 }
 
-function applyClearRoute(state, _op, player) {
-  player.rocket.route = [];
+function applyClearRoute(state, op, player) {
+  const holder = routeHolderForUnit(player, op.unit);
+  if (holder) holder.route = [];
   return { ok: true, state, log: '' };
 }
 
@@ -3000,7 +3019,7 @@ function applyEtProduce(state, op, player) {
     // the back). Promotion later flips face -> 'secondary'.
     player.freighter = {
       cardId, face: 'primary', promoted: false,
-      siteId, stack: [], tank: 0, wiring: {},
+      siteId, stack: [], tank: 0, wiring: {}, route: [],
     };
     player.opsRemaining -= 1;
     return {
@@ -3653,9 +3672,9 @@ function pickPayload(op) {
     // an UNDO/REDO replay (rebuildFromBase) must carry their payload or
     // the replay would re-run SET_ROUTE with no segments and silently
     // wipe a route the player still has planned.
-    case 'SET_ROUTE': return { segments: op.segments };
+    case 'SET_ROUTE': return { segments: op.segments, ...(op.unit ? { unit: op.unit } : {}) };
     case 'SET_WIRING': return { wiring: op.wiring };
-    case 'CLEAR_ROUTE': return {};
+    case 'CLEAR_ROUTE': return op.unit ? { unit: op.unit } : {};
     default: return {};
   }
 }
@@ -4090,6 +4109,10 @@ function carryOffTurnRoutes(rebuilt, live) {
     const lp = live.players && live.players[i];
     if (lp && lp.rocket && rebuilt.players[i] && rebuilt.players[i].rocket) {
       rebuilt.players[i].rocket.route = lp.rocket.route;
+    }
+    // Carry the freighter's separate route too (same secret, per-vehicle plan).
+    if (lp && lp.freighter && rebuilt.players[i] && rebuilt.players[i].freighter) {
+      rebuilt.players[i].freighter.route = lp.freighter.route;
     }
   }
   return rebuilt;

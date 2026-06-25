@@ -1251,8 +1251,9 @@ function redactRoutes(rawState, viewerId) {
   if (!rawState || !Array.isArray(rawState.players)) return rawState;
   const clone = JSON.parse(JSON.stringify(rawState));
   for (const p of clone.players) {
-    if (p.profileId === viewerId) continue;          // your own route stays
+    if (p.profileId === viewerId) continue;          // your own routes stay
     if (p.rocket) p.rocket.route = [];               // opponents: hidden
+    if (p.freighter) p.freighter.route = [];         // freighter route also secret
   }
   return clone;
 }

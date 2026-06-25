@@ -5903,6 +5903,33 @@ function renderStackSwitcher() {
       isEmpty: false,
     },
   ];
+
+  // M1 Freighter chip sits RIGHT AFTER the Rocket chip (the two movers side by
+  // side), so the bar reads LEO / Rocket / Freighter / outposts. It is shown in
+  // every M1 game but DISABLED (greyed, no map pin) until the big cube is in
+  // play; the cube enters play by ET-Producing a Freighter card.
+  {
+    const fr = getMyFreighter();
+    if (fr) {
+      const cargoN = Array.isArray(fr.stack) ? fr.stack.length : 0;
+      slots.push({
+        id: 'freighter', icon: 'freighter', sub: 'Freighter',
+        water: (fr.tank | 0) > 0,
+        title: `Freighter${fr.promoted ? ' (promoted)' : ''} - ${cargoN} cargo, ${fr.tank | 0} water, at ${freighterLocLabel(fr)}`,
+        siteAvailable: true,
+        isEmpty: false,
+      });
+    } else if (_online && isM1()) {
+      slots.push({
+        id: 'freighter', icon: 'freighter', sub: 'Freighter',
+        water: false,
+        title: 'Freighter not in play yet - ET Produce a Freighter card at a Factory to launch your big cube.',
+        siteAvailable: false,
+        isEmpty: true,
+      });
+    }
+  }
+
   for (const letter of ['A', 'B', 'C', 'D']) {
     const op = outposts[letter];
     if (op) {
@@ -5928,30 +5955,6 @@ function renderStackSwitcher() {
         isEmpty: true,
       });
     }
-  }
-
-  // M1 Freighter chip: shown in every M1 game so the player can SEE the
-  // freighter slot, but DISABLED (greyed, no map pin) until the big cube is in
-  // play. Sits after the outposts so the bar reads LEO / Rocket / outposts /
-  // freighter. The cube enters play by ET-Producing a Freighter card.
-  const fr = getMyFreighter();
-  if (fr) {
-    const cargoN = Array.isArray(fr.stack) ? fr.stack.length : 0;
-    slots.push({
-      id: 'freighter', icon: 'freighter', sub: 'Freighter',
-      water: (fr.tank | 0) > 0,
-      title: `Freighter${fr.promoted ? ' (promoted)' : ''} - ${cargoN} cargo, ${fr.tank | 0} water, at ${freighterLocLabel(fr)}`,
-      siteAvailable: true,
-      isEmpty: false,
-    });
-  } else if (_online && isM1()) {
-    slots.push({
-      id: 'freighter', icon: 'freighter', sub: 'Freighter',
-      water: false,
-      title: 'Freighter not in play yet - ET Produce a Freighter card at a Factory to launch your big cube.',
-      siteAvailable: false,
-      isEmpty: true,
-    });
   }
 
   // Small cyan droplet badge marking an outpost that holds water.
@@ -7619,6 +7622,14 @@ let _activeData = null;
 const STORAGE_ROCKET_SITE  = 'hf-sandbox-rocket-site';
 const STORAGE_ROCKET_TRAIL = 'hf-sandbox-rocket-trail';
 const STORAGE_ROCKET_ROUTE = 'hf-sandbox-planned-route';
+const STORAGE_FREIGHTER_ROUTE = 'hf-sandbox-planned-route-freighter';
+// Which vehicle the CURRENT _plannedRoute belongs to ('rocket' | 'freighter').
+// Each vehicle keeps its OWN persisted plan (separate localStorage key + a
+// separate server-side route) so plotting one never overwrites the other.
+let _plannedRouteUnit = 'rocket';
+function routeStorageKey(unit) {
+  return (unit || _plannedRouteUnit) === 'freighter' ? STORAGE_FREIGHTER_ROUTE : STORAGE_ROCKET_ROUTE;
+}
 // Pre-move snapshot written while a (possibly hazardous) move is
 // being resolved. If the tab is closed / refreshed mid-resolution
 // the queue is abandoned, so on the next load we roll the move back
@@ -7765,6 +7776,7 @@ function freighterBonusPivots() {
 function enterManualMoveMode(opts = {}) {
   const unit = opts.unit === 'freighter' ? 'freighter' : 'rocket';
   _manualUnit = unit;
+  _plannedRouteUnit = unit;   // this plot belongs to the chosen vehicle
   _routeFrom = null;
   _routeTo = null;
   _plannedRoute = null;
@@ -8161,7 +8173,7 @@ function ensureMapShell(host) {
         <button id="turn-end" title="End your turn"
           aria-label="End turn">⏭ End turn</button>
         <span id="turn-budget" class="map-turn-budget" aria-live="polite">
-          <button type="button" class="turn-tag" id="turn-tag-move" title="Rocket moves remaining this turn">move:1</button>
+          <button type="button" class="turn-tag" id="turn-tag-move" title="Rocket moves remaining this turn">🚀 move:1</button>
           <button type="button" class="turn-tag" id="turn-tag-fmove" title="Freighter moves remaining this turn (the freighter is a second, independent mover)" hidden>🚛 move:1</button>
           <button type="button" class="turn-tag turn-tag-gear" id="game-settings" title="Route options" aria-label="Route options">⚙</button>
           <button type="button" class="turn-tag turn-tag-undo" id="turn-tag-undo" title="Undo your last action this turn" hidden>↩ undo</button>
@@ -8419,7 +8431,9 @@ function ensureMapShell(host) {
       let canMove = true;
       try { const ra = isRocketActive(); canMove = !!(ra && ra.active); } catch { canMove = true; }
       const blocked = !spent && !canMove;
-      moveTag.textContent = !spent ? `move:${moves}` : (soloUndoFace ? '↩ undo move' : 'move spent');
+      // 🚀 prefix mirrors the freighter's 🚛 tag so the two movers read as a
+      // clearly-separated pair (Rocket move vs Freighter move).
+      moveTag.textContent = !spent ? `🚀 move:${moves}` : (soloUndoFace ? '↩ undo move' : '🚀 move spent');
       moveTag.classList.toggle('is-spent', spent);
       moveTag.classList.toggle('is-undo', soloUndoFace && !lockedByOnline);
       moveTag.classList.toggle('is-locked', lockedByOnline);
@@ -14411,6 +14425,7 @@ function rollbackMove(ctx) {
   _rocketTrail = Array.isArray(ctx.trail) ? ctx.trail : [];
   persistRocketTrail();
   _plannedRoute = Array.isArray(ctx.route) && ctx.route.length ? ctx.route : null;
+  _plannedRouteUnit = 'rocket';   // rollback restores the rocket's own route
   persistPlannedRoute();
   if (Number(ctx.fuelCost) > 0) addFuel(Number(ctx.fuelCost));
   refundMove();
@@ -14426,10 +14441,11 @@ function rollbackMove(ctx) {
 // close the tab, come back tomorrow and expect to continue.
 function persistPlannedRoute() {
   try {
+    const key = routeStorageKey(_plannedRouteUnit);
     if (_plannedRoute && _plannedRoute.length) {
-      localStorage.setItem(STORAGE_ROCKET_ROUTE, JSON.stringify(_plannedRoute));
+      localStorage.setItem(key, JSON.stringify(_plannedRoute));
     } else {
-      localStorage.removeItem(STORAGE_ROCKET_ROUTE);
+      localStorage.removeItem(key);
     }
   } catch { /* private mode */ }
 }
@@ -14742,7 +14758,7 @@ function submitSetRouteOnline() {
   // turn, so a plan persists while you wait. Spectators still can't.
   const segments = routeSegmentsForServer();
   if (!segments || !segments.length) return;
-  submitGameOp(_onlineGameId, { kind: 'SET_ROUTE', segments }, _onlineMe.token)
+  submitGameOp(_onlineGameId, { kind: 'SET_ROUTE', segments, unit: _plannedRouteUnit }, _onlineMe.token)
     .then((r) => {
       // Absorb our own op's snapshot quietly (no re-hydrate / no canvas
       // blink); the route is already drawn locally. Covers the case where
@@ -14755,7 +14771,7 @@ function submitClearRouteOnline() {
   if (!_online || _spectator || !_onlineGameId || !_onlineMe) return;
   // Allowed off-turn too (see submitSetRouteOnline) - the server clears the
   // caller's own secret route whether or not it's their turn.
-  submitGameOp(_onlineGameId, { kind: 'CLEAR_ROUTE' }, _onlineMe.token)
+  submitGameOp(_onlineGameId, { kind: 'CLEAR_ROUTE', unit: _plannedRouteUnit }, _onlineMe.token)
     .then((r) => {
       if (r && r.ok && r.data && r.data.game) noteQuietSnapshot(r.data.game.state, r.data.game.seq);
     })
@@ -16483,6 +16499,7 @@ async function undoRocketMove() {
   _rocketSiteId = _moveSnapshot.siteId;
   persistRocketSite();
   _plannedRoute = _moveSnapshot.route;
+  _plannedRouteUnit = 'rocket';   // a resumed rocket move is always the rocket's route
   persistPlannedRoute();
   if (_plannedRoute && _plannedRoute.length) {
     _renderer.setRoute(_plannedRoute);
@@ -17852,6 +17869,7 @@ function planRocketRouteTo(destSite) {
   _routeFrom = origin;
   _routeTo = destSite;
   _plannedRoute = result.segments;
+  _plannedRouteUnit = 'rocket';   // the Plan rocket route action is rocket-only
   persistPlannedRoute();
   // Mirror the freshly-planned route up to the server so it persists +
   // truncates as the rocket walks it (online only, no-op solo).
