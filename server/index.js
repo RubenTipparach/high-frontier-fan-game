@@ -3479,6 +3479,7 @@ app.get('/admin', (req, res) => {
   const LAST_ACTIVE = `COALESCE((SELECT gs.updated_at FROM game_states gs JOIN games g ON g.id = gs.game_id
                 WHERE g.lobby_id = l.id ORDER BY gs.updated_at DESC LIMIT 1), l.created_at)`;
   const ROOM_SELECT = `SELECT l.id, l.code, l.name, l.status, l.join_policy, l.max_players,
+              l.max_rounds, l.m0, l.m1, l.m2,
               ${LAST_ACTIVE} AS active_ms,
               p.name AS host_name,
               (SELECT COUNT(*) FROM lobby_members lm WHERE lm.lobby_id = l.id) AS members,
@@ -3498,6 +3499,24 @@ app.get('/admin', (req, res) => {
   ).all();
   const soloLobbiesHasNext = soloLobbiesRaw.length > PER;
   const soloLobbies = soloLobbiesRaw.slice(0, PER);
+  // Decorate each room that has a live game with its round + whose turn it is,
+  // parsed from the game state (same read as the Live games list).
+  const roomStateStmt = db.prepare('SELECT state FROM game_states WHERE game_id = ?');
+  const decorateRoom = (r) => {
+    if (!r.game_id) return;
+    try {
+      const st = roomStateStmt.get(r.game_id);
+      if (!st) return;
+      const state = JSON.parse(st.state);
+      const players = Array.isArray(state.players) ? state.players : [];
+      const active = players[state.activeIndex];
+      r.round = state.round;
+      r.maxRounds = state.maxRounds != null ? state.maxRounds : r.max_rounds;
+      r.activeName = active ? active.name : null;
+    } catch { /* ignore a malformed state blob */ }
+  };
+  mpLobbies.forEach(decorateRoom);
+  soloLobbies.forEach(decorateRoom);
   const mpTotal = db.prepare(
     `SELECT COUNT(*) c FROM lobbies l WHERE l.status!='cancelled' AND NOT EXISTS (SELECT 1 FROM games g2 WHERE g2.lobby_id=l.id AND g2.status='finished') AND l.max_players>1`
   ).get().c;
@@ -3614,17 +3633,36 @@ app.get('/admin', (req, res) => {
   `;
   }).join('') || '<tr><td colspan=7><em>No profiles yet.</em></td></tr>';
 
+  // Module-flag chips for a room (M0 / M1 / M2), shown only for those that are on.
+  const roomModulesHtml = (r) => {
+    const mods = [];
+    if (r.m0) mods.push('M0');
+    if (r.m1) mods.push('M1');
+    if (r.m2) mods.push('M2');
+    return mods.length
+      ? mods.map((m) => `<span class="mod-chip">${m}</span>`).join(' ')
+      : '<span class="muted">base</span>';
+  };
+  // Turn cell: round X / Y plus whose turn it is, or a dash when no game yet.
+  const roomTurnHtml = (r) => {
+    if (!r.game_id || r.round == null) return '<span class="muted">-</span>';
+    const rounds = r.maxRounds ? `${r.round} / ${r.maxRounds}` : String(r.round);
+    const who = r.activeName ? ` <span class="muted">@${esc(r.activeName)}</span>` : '';
+    return `R${esc(rounds)}${who}`;
+  };
   const roomRowsHtml = (arr, emptyMsg) => arr.map((r) => `
     <tr class="room-row" data-search="${esc((String(r.name || '') + ' ' + String(r.code || '')).toLowerCase())}">
       <td data-label="Code"><code>${esc(r.code)}</code></td>
       <td data-label="Name"><button class="btn-room linklike" data-lid="${r.id}" data-gid="${r.game_id || ''}" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}" data-status="active">${esc(r.name)}</button></td>
       <td data-label="Host">@${esc(r.host_name)}</td>
       <td data-label="Status"><span class="pill pill-${esc(r.status)}">${esc(r.status)}</span></td>
+      <td data-label="Turn">${roomTurnHtml(r)}</td>
+      <td data-label="Modules">${roomModulesHtml(r)}</td>
       <td data-label="Policy">${esc(r.join_policy)}</td>
       <td data-label="Players" class="num">${r.members} / ${r.max_players}</td>
       <td data-label="Last active">${esc(fmtCt(r.active_ms))}</td>
     </tr>
-  `).join('') || `<tr class="empty-row"><td colspan=7><em>${esc(emptyMsg)}</em></td></tr>`;
+  `).join('') || `<tr class="empty-row"><td colspan=9><em>${esc(emptyMsg)}</em></td></tr>`;
   const mpLobbyRows = roomRowsHtml(mpLobbies, 'No active multiplayer rooms.');
   const soloLobbyRows = roomRowsHtml(soloLobbies, 'No active solo rooms.');
 
@@ -3698,6 +3736,7 @@ app.get('/admin', (req, res) => {
   code{background:#0f172a;padding:1px 6px;border-radius:4px;font-size:12px;color:#7dd3fc}
   em{color:#5a5f80;font-style:normal}
   .pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600}
+  .mod-chip{display:inline-block;padding:1px 6px;border-radius:6px;font-size:10px;font-weight:700;letter-spacing:.5px;background:#312a52;color:#c4b5fd;border:1px solid #4c3f7a}
   .pill-waiting{background:#1e293b;color:#7dd3fc}
   .pill-started{background:#14532d;color:#86efac}
   .pill-finished{background:#451a03;color:#fdba74}
@@ -4032,7 +4071,7 @@ app.get('/admin', (req, res) => {
   <table>
     <thead><tr>
       <th>Code</th><th>Name</th><th>Host</th>
-      <th>Status</th><th>Policy</th><th class="num">Players</th><th>Last active</th>
+      <th>Status</th><th>Turn</th><th>Modules</th><th>Policy</th><th class="num">Players</th><th>Last active</th>
     </tr></thead>
     <tbody>${mpLobbyRows}</tbody>
   </table>
@@ -4042,7 +4081,7 @@ app.get('/admin', (req, res) => {
   <table>
     <thead><tr>
       <th>Code</th><th>Name</th><th>Host</th>
-      <th>Status</th><th>Policy</th><th class="num">Players</th><th>Last active</th>
+      <th>Status</th><th>Turn</th><th>Modules</th><th>Policy</th><th class="num">Players</th><th>Last active</th>
     </tr></thead>
     <tbody>${soloLobbyRows}</tbody>
   </table>
