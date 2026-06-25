@@ -15422,7 +15422,18 @@ function syncSandboxRocket() {
 // mount time + on every disc change.
 function syncDiscs() {
   if (!_renderer) return;
-  _renderer.setDiscs(getDiscs());
+  // Tint each success (claim) disc by its OWNER's seat colour so a claim reads
+  // as that player's, the same way factories are tinted. Fail discs stay red.
+  const discs = getDiscs() || {};
+  const map = {};
+  for (const id in discs) {
+    const d = discs[id];
+    if (!d) continue;
+    map[id] = d.outcome === 'success'
+      ? { ...d, color: factoryOwnerColor(d.ownerId) }
+      : d;
+  }
+  _renderer.setDiscs(map);
 }
 
 // Resolve a factory owner's seat colour. Online, read it off the snapshot

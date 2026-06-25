@@ -3297,10 +3297,14 @@ export class MapRenderer {
       const sy = this.pan.y + site.y * eff;
       // Skip if offscreen.
       if (sx < -40 || sx > this.hostW + 40 || sy < -40 || sy > this.hostH + 40) continue;
-      const outcome = this._discs[id].outcome;
+      const disc = this._discs[id];
+      const outcome = disc.outcome;
       const radius = Math.max(7, Math.min(18, 10 * Math.sqrt(this.zoom)));
-      // Success = player's yellow claim disc; fail = red exhausted.
-      const fill = outcome === 'success' ? '#facc15' : '#ef4444';
+      // Success = the claiming player's seat-colour claim disc; fail = red
+      // exhausted. The owner colour rides on the disc (disc.color); fall back
+      // to yellow only when it's unknown.
+      const success = outcome === 'success';
+      const fill = success ? (disc.color || '#facc15') : '#ef4444';
       // Whole disc paints at 60% opacity so the underlying site
       // hex / label / halo stays legible through it.
       ctx.globalAlpha = 0.6;
@@ -3309,14 +3313,14 @@ export class MapRenderer {
       ctx.fillStyle = fill;
       ctx.fill();
       ctx.lineWidth = 1.5;
-      ctx.strokeStyle = outcome === 'success' ? '#854d0e' : '#7f1d1d';
+      ctx.strokeStyle = success ? shadeHex(fill, 0.55) : '#7f1d1d';
       ctx.stroke();
-      // Inner pip glyph: ✓ for success, ✕ for fail.
-      ctx.fillStyle = '#0c0a16';
+      // Inner pip glyph: ✓ for success, ✕ for fail (contrast-picked ink).
+      ctx.fillStyle = success ? inkOn(fill) : '#0c0a16';
       ctx.font = `700 ${Math.round(radius * 1.1)}px ui-sans-serif, system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(outcome === 'success' ? '✓' : '✕', sx, sy + 1);
+      ctx.fillText(success ? '✓' : '✕', sx, sy + 1);
     }
     ctx.restore();
   }
