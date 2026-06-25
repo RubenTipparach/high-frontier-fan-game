@@ -187,6 +187,16 @@
   background: var(--crew-color, #fde047);
   color: var(--crew-ink, #0c0a16);
 }
+/* The crew member's NAME rides in the typebar (replacing the redundant "CREW"
+   label). Names are long, so drop the uppercase + wide tracking the type label
+   uses and let it wrap to two lines if needed. */
+.card.kind-crew .card-typebar.crew-name-bar {
+  text-transform: none;
+  letter-spacing: 0.2px;
+  font-size: 12.5px;
+  line-height: 1.18;
+  white-space: normal;
+}
 .card.kind-crew .card-face {
   border: 3px solid var(--crew-color, #fde047);
   border-radius: 10px;

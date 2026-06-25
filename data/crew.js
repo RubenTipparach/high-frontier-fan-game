@@ -75,7 +75,7 @@ export const CREW = [
     color: '#b40054',
     faces: {
       primary:   { name: 'Shimizu Corp Entrepreneurs', role: 'Faction M', bonus: 'SKUNKWORKS', blurb: 'Ignore academia hand limit when bidding or starting an auction.', mass: 1, radHardness: 3, isru: 4, prospector: 'buggy',  thruster: null },
-      secondary: { name: 'NASRDA Astronauts',          role: 'Faction L', bonus: 'MOONCABLE',  blurb: 'Once-per-turn free action: refuel an activated dirt thrust triangle at LEO/Home Bernal with 7 tanks (non-crew thruster) or 1 tank (Crew thruster). Negotiable. An activated dirt thruster can accept 1 tank of dirt max per Turn.', mass: 1, radHardness: 4, isru: 4, prospector: 'raygun', thruster: { name: 'Pegasus XL', thrustMN: 0.074, specImpKs: 0.37, thrust: 7, fuelPerBurn: 11, afterburn: null, dirt: true } },
+      secondary: { name: 'NASRDA Astronauts',          role: 'Faction L', bonus: 'MOONCABLE',  blurb: 'Free action 1/turn at LEO/Home Bernal: refuel an active dirt thruster (7 tanks, or 1 if a Crew thruster). Negotiable. Only 1 dirt tank refuel per turn.', mass: 1, radHardness: 4, isru: 4, prospector: 'raygun', thruster: { name: 'Pegasus XL', thrustMN: 0.074, specImpKs: 0.37, thrust: 7, fuelPerBurn: 11, afterburn: null, dirt: true } },
     },
   },
   {
@@ -83,7 +83,7 @@ export const CREW = [
     color: '#9c9c9c',
     faces: {
       primary:   { name: 'SpaceX',           role: 'Faction J', bonus: 'MARKETEER',             blurb: 'If you make the highest bid in an auction, you win even if tied.',                                                       mass: 1, radHardness: 4, isru: 4, prospector: 'raygun', thruster: { name: 'Starship', thrustMN: 12.0, specImpKs: 0.38, thrust: 15, fuelPerBurn: 10, afterburn: 2 } },
-      secondary: { name: 'Norse Astronauts', role: 'Faction K', bonus: 'SCRUM TROUBLESHOOTERS', blurb: 'You may perform Glitch repair anywhere (even without Humans present). Negotiable. An activated dirt thruster can accept 1 tank of dirt max per Turn.', mass: 1, radHardness: 3, isru: 4, prospector: 'buggy', thruster: { name: 'OmegA SE', thrustMN: 12.0, specImpKs: 0.30, thrust: 15, fuelPerBurn: 14, afterburn: null, dirt: true } },
+      secondary: { name: 'Norse Astronauts', role: 'Faction K', bonus: 'SCRUM TROUBLESHOOTERS', blurb: 'Perform Glitch repair anywhere, even without Humans present. Negotiable. Only 1 dirt tank refuel per turn.', mass: 1, radHardness: 3, isru: 4, prospector: 'buggy', thruster: { name: 'OmegA SE', thrustMN: 12.0, specImpKs: 0.30, thrust: 15, fuelPerBurn: 14, afterburn: null, dirt: true } },
     },
   },
 ];

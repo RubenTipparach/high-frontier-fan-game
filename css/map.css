@@ -4065,6 +4065,12 @@ body:has(#view-browse:not(.hidden)) #main {
 .patent-filter button.active[data-type="crew"]      { background: #fde047; color: #3a2a02; border-color: #a16207; }
 .patent-filter button[data-type="supports"]         { border-left-color: #34d399; }
 .patent-filter button.active[data-type="supports"]  { background: #34d399; color: #022c1f; border-color: #047857; }
+/* M1 expansion decks: accents match their card typebars (gw-thruster #ca6c18,
+   freighter #00aeef in cards.css). */
+.patent-filter button[data-type="gw-thruster"]        { border-left-color: #ca6c18; }
+.patent-filter button.active[data-type="gw-thruster"] { background: #ca6c18; color: #2a1402; border-color: #9a3412; }
+.patent-filter button[data-type="freighter"]          { border-left-color: #00aeef; }
+.patent-filter button.active[data-type="freighter"]   { background: #00aeef; color: #042430; border-color: #0369a1; }
 
 /* Library name search: a global filter row under the type tabs. While the
    input has text it overrides the tabs (renderPatents shows every matching

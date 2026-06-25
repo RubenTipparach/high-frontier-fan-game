@@ -4660,7 +4660,18 @@ document.addEventListener('click', function (ev) {
     }
     h += '<button class="ge-wiz-cancel" data-w="cancel">Close</button>';
     box.innerHTML = h;
-    box.addEventListener('click', function (e) { if (e.target.closest('[data-w="cancel"]')) closeWizard(); });
+    // Wire the row clicks DIRECTLY here: this popup is appended to document.body,
+    // outside the modal-body element that carries the delegated click handler, so
+    // a delegated listener never sees these rows. Clicking a row pans/zooms the
+    // map to that site and replaces this picker with the site's action wizard.
+    box.addEventListener('click', function (e) {
+      if (e.target.closest('[data-w="cancel"]')) { closeWizard(); return; }
+      var row = e.target.closest('.ge-locate-item');
+      if (!row) return;
+      var slug = row.getAttribute('data-slug');
+      if (mapApi) mapApi.flyToSlug(slug);
+      openWizard(slug, { name: row.getAttribute('data-name'), id2: slug });
+    });
     ov.addEventListener('click', function (e) { if (e.target === ov) closeWizard(); });
     ov.appendChild(box); document.body.appendChild(ov);
   }
@@ -4843,14 +4854,8 @@ document.addEventListener('click', function (ev) {
       else if (which === 'outposts') openLocatePicker('outposts');
       return;
     }
-    // Locate-picker row: fly to that site and open its wizard.
-    var lp = ev.target.closest('.ge-locate-item');
-    if (lp) {
-      var lslug = lp.getAttribute('data-slug');
-      if (mapApi) mapApi.flyToSlug(lslug);
-      openWizard(lslug, { name: lp.getAttribute('data-name'), id2: lslug });
-      return;
-    }
+    // (Locate-picker rows wire their own click handler in openLocatePicker; the
+    // popup is appended to document.body, outside this delegated listener.)
     // (Map node clicks are handled by the renderer's onSelect -> openWizard; the
     // wizard popup wires its own buttons.)
     // Assembly cube manager: click a cube to pick it up, click a space to drop.

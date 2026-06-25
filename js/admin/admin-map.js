@@ -112,7 +112,10 @@ export async function mountAdminMap(host, { onPickSite } = {}) {
       // Rocket: place the acting player's ship at its site (null siteId = LEO).
       const rSlug = (me && me.rocket && me.rocket.siteId) || null;
       const rPos = worldOf(rSlug) || leoWorld();
-      renderer.setSandboxRocket(rPos ? { x: rPos.x, y: rPos.y, color: me && me.color } : null);
+      // The renderer reads the seat hex off `colour` (British spelling) and the
+      // sprite tints from it; passing `color` left it undefined and every rocket
+      // fell back to the default yellow sprite.
+      renderer.setSandboxRocket(rPos ? { x: rPos.x, y: rPos.y, colour: (me && me.color) || 'white', canFly: true } : null);
       renderer.setFocusedSiteId(rSlug ? (_slugToId[rSlug] || null) : null);
       // Outposts: the acting player's, keyed A/B/C/D with client-id siteIds.
       const outs = {};

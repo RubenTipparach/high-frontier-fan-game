@@ -119,7 +119,7 @@ import {
   onLeoChange, resetLeoStack,
 } from './leo-stack.js';
 import {
-  findEtProduceOptions, openEtProduceModal,
+  findEtProduceOptions, openEtProduceModal, spectralProducibleAt,
 } from './et-produce.js';
 import {
   defaultSaveName, listSaves, createSave, overwriteSave,
@@ -5930,9 +5930,10 @@ function renderStackSwitcher() {
     }
   }
 
-  // M1 Freighter chip: only once the player's freighter unit is in play (the
-  // big cube). Sits after the outposts so the bar reads LEO / Rocket / outposts
-  // / freighter. Read-only inspector for now (cargo transfer lands next).
+  // M1 Freighter chip: shown in every M1 game so the player can SEE the
+  // freighter slot, but DISABLED (greyed, no map pin) until the big cube is in
+  // play. Sits after the outposts so the bar reads LEO / Rocket / outposts /
+  // freighter. The cube enters play by ET-Producing a Freighter card.
   const fr = getMyFreighter();
   if (fr) {
     const cargoN = Array.isArray(fr.stack) ? fr.stack.length : 0;
@@ -5942,6 +5943,14 @@ function renderStackSwitcher() {
       title: `Freighter${fr.promoted ? ' (promoted)' : ''} - ${cargoN} cargo, ${fr.tank | 0} water, at ${freighterLocLabel(fr)}`,
       siteAvailable: true,
       isEmpty: false,
+    });
+  } else if (_online && isM1()) {
+    slots.push({
+      id: 'freighter', icon: 'freighter', sub: 'Freighter',
+      water: false,
+      title: 'Freighter not in play yet - ET Produce a Freighter card at a Factory to launch your big cube.',
+      siteAvailable: false,
+      isEmpty: true,
     });
   }
 
@@ -7455,7 +7464,7 @@ function openCardModal(card, kind, slotIdx, { readOnly = false, face, nav } = {}
     }
     for (const s of candidates) {
       const f = getFactory(s.id);
-      if (!f || !iCanUseFactory(f) || f.spectralType !== cardSpectral) continue;
+      if (!f || !iCanUseFactory(f) || !spectralProducibleAt(cardSpectral, f.spectralType)) continue;
       const outpostsHere = Object.values(getOutposts()).filter((o) => o.siteId === s.id);
       if (outpostsHere.length > 0 || exoFreeSlots.length > 0) {
         exoSite = s; exoFactory = f; exoOutposts = outpostsHere;

@@ -194,22 +194,24 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   // blurb, mass/rad/spectral footer).
   if (kind === 'crew') {
     const c = card.faces[sideName];
+    // The crew member's NAME lives in the typebar (it's obviously a crew card,
+    // so "CREW" was redundant and left a gap above the name). The body then
+    // opens straight on the faction/role line.
     face.innerHTML = `
-      <div class="card-typebar">CREW</div>
+      <div class="card-typebar crew-name-bar"></div>
       <div class="card-statbox">
         <span><strong class="m"></strong> MASS</span>
         <span><strong class="r"></strong> RAD</span>
         <span class="crew-isru"></span>
       </div>
       <div class="card-body">
-        <h4 class="card-name"></h4>
         <p class="card-role"></p>
         <p class="card-bonus"></p>
         <p class="card-blurb"></p>
       </div>
       <div class="crew-thrust"></div>
     `;
-    face.querySelector('.card-name').textContent = c.name || '';
+    face.querySelector('.crew-name-bar').textContent = c.name || '';
     face.querySelector('.card-role').textContent = c.role || '';
     face.querySelector('.card-bonus').textContent = c.bonus || '';
     face.querySelector('.card-blurb').textContent = c.blurb || '';

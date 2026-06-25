@@ -34,14 +34,23 @@ function escapeHtml(s) {
 // it injected rather than importing the lookup ourselves so
 // this module stays decoupled from the deck data and easy to
 // reason about / smoke-test.
+// A card's spectral matches a factory when they're equal OR the card is the
+// "Any" wildcard (freighters / some GW thrusters), which produces at a factory
+// of ANY spectral type. Exported so the same rule gates the card-driven Exo
+// produce button.
+export function spectralProducibleAt(cardSpectral, factorySpectral) {
+  if (!cardSpectral || !factorySpectral) return false;
+  if (String(cardSpectral).toLowerCase() === 'any') return true;
+  return cardSpectral === factorySpectral;
+}
+
 export function findEtProduceOptions(handIds, lookupCard, factorySpectral) {
   const out = [];
   if (!Array.isArray(handIds) || !factorySpectral) return out;
   for (const id of handIds) {
     const card = lookupCard(id);
     if (!card) continue;
-    const spec = card.spectralType;
-    if (!spec || spec !== factorySpectral) continue;
+    if (!spectralProducibleAt(card.spectralType, factorySpectral)) continue;
     out.push({ id, card, name: card.name || id });
   }
   return out;
