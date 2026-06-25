@@ -114,18 +114,23 @@ function paintRocket(ctx, w, h, base, gw = false) {
   const ox = w / 2 - ((minX + maxX) / 2) * s;
   const oy = h * 0.97 - maxY * s;               // base near the bottom of the box
   const drawn = [];
+  const goldGlow = [];   // front-facing gold facet polylines, for the bloom pass
   for (const f of faces) {
     const vp = f.v;
     const fc = f.gold ? GW_GOLD : rgb;
     let N = norm(cross(sub(vp[1], vp[0]), sub(vp[2], vp[0])));
+    const frontFacing = N[1] < 0;               // normal points toward camera (-y)
     if (N[1] > 0) N = scl(N, -1);               // orient toward camera (-y)
     const diff = Math.max(0, dot(N, L));
     const rd = sub(scl(N, 2 * dot(N, L)), L); const spec = Math.pow(Math.max(0, dot(rd, [0, -1, 0])), 18);
-    const I = 0.42 + 0.72 * diff, sp = 0.5 * spec * 255;
+    // Gold (GW) facets are emissive: a high light floor keeps the band vivid
+    // even on the shadow side, so it never sinks into a yellow / purple hull.
+    const I = (f.gold ? 0.86 : 0.42) + (f.gold ? 0.40 : 0.72) * diff, sp = 0.5 * spec * 255;
     const col = `rgb(${_clamp(fc[0] * I + sp)},${_clamp(fc[1] * I + sp)},${_clamp(fc[2] * I + sp)})`;
     const depth = vp.reduce((a, p) => a + p[1], 0) / vp.length;
     const pts = vp.map((p) => [ox + p[0] * s, oy + (-p[2]) * s]);
     drawn.push({ depth, pts, col });
+    if (f.gold && frontFacing) goldGlow.push(pts);
   }
   drawn.sort((a, b) => b.depth - a.depth);       // painter's: far first
   for (const d of drawn) {
@@ -135,6 +140,29 @@ function paintRocket(ctx, w, h, base, gw = false) {
     ctx.closePath();
     ctx.fillStyle = d.col; ctx.fill();
     ctx.strokeStyle = d.col; ctx.lineWidth = 0.6; ctx.stroke();   // seal facet seams
+  }
+  // Bloom pass: re-draw the visible gold band with additive light + a soft halo
+  // so the GW stripes read as GLOWING, not painted - obvious on any hull colour
+  // (the flat band sank into yellow / purple ships). Two passes: a wide soft
+  // halo, then a tighter brighter core.
+  if (goldGlow.length) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const paintGlow = (fill, blur, shadow) => {
+      ctx.shadowColor = shadow;
+      ctx.shadowBlur = blur;
+      ctx.fillStyle = fill;
+      for (const pts of goldGlow) {
+        ctx.beginPath();
+        ctx.moveTo(pts[0][0], pts[0][1]);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+        ctx.closePath();
+        ctx.fill();
+      }
+    };
+    paintGlow('rgba(255, 186, 44, 0.45)', 6, 'rgba(255, 198, 70, 0.95)');   // soft outer halo
+    paintGlow('rgba(255, 224, 130, 0.55)', 2, 'rgba(255, 214, 96, 0.9)');   // bright core
+    ctx.restore();
   }
 }
 
