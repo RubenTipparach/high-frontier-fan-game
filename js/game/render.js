@@ -3321,9 +3321,13 @@ export class MapRenderer {
       const base = this._factorySprites[(f.color || '').toLowerCase()] || this._factorySprites._default;
       if (base && base.complete && base.naturalWidth) ctx.drawImage(base, dx, dy, dw, dh);
       // Colony dome composites at the SAME rect, landing on the install pad.
+      // Tinted toward the OWNER's seat colour so a colony reads as that player's
+      // (the raw asset is one fixed hue); falls back to the raw dome until the
+      // tinted copy caches.
       if (this._colonies && this._colonies[id]
           && this._domeSprite && this._domeSprite.complete && this._domeSprite.naturalWidth) {
-        ctx.drawImage(this._domeSprite, dx, dy, dw, dh);
+        const dome = this._tintedDome((f.color || '').toLowerCase()) || this._domeSprite;
+        ctx.drawImage(dome, dx, dy, dw, dh);
       }
       // Player-coloured label sits BELOW the site name (drawn at sy + HEX_R +
       // 12). {size}{spectral}, plus " | {outpost}" when an outpost is stationed
@@ -3337,6 +3341,28 @@ export class MapRenderer {
       if (text) this._drawFactoryLabel(ctx, cxs, cys + HEX_R + 30, text, f.color || '#9c9c9c', r, op);
     }
     ctx.restore();
+  }
+
+  // A copy of the colony-dome sprite tinted toward a seat colour, cached per
+  // hex. The raw asset is one fixed hue; we overlay the owner's colour on the
+  // dome's opaque pixels (source-atop) so it reads as that player's colony while
+  // keeping the dome's shape + shading. Returns null until the dome image loads.
+  _tintedDome(hex) {
+    if (!hex || hex === '#9c9c9c') return this._domeSprite;   // gray owner = leave as-is
+    const img = this._domeSprite;
+    if (!img || !img.complete || !img.naturalWidth) return null;
+    this._domeTint = this._domeTint || {};
+    if (this._domeTint[hex]) return this._domeTint[hex];
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const x = c.getContext('2d');
+    x.drawImage(img, 0, 0);
+    x.globalCompositeOperation = 'source-atop';   // tint only the dome's pixels
+    x.globalAlpha = 0.6;
+    x.fillStyle = hex;
+    x.fillRect(0, 0, c.width, c.height);
+    this._domeTint[hex] = c;
+    return c;
   }
 
   // The outpost stationed at a site (letter + water + glory), or null. Drives
