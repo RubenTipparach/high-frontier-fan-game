@@ -4193,7 +4193,11 @@ export class MapRenderer {
         }
       }
 
-      if (labelAlpha > 0) {
+      // Skip the plain site-name label when a factory sits here: the factory's
+      // player-coloured pill already carries the site name ("Eureka 1S"), so
+      // drawing the bare name too would be redundant (two names on one site).
+      const hasFactory = !!(this._factories && this._factories[site.id]);
+      if (labelAlpha > 0 && !hasFactory) {
         ctx.globalAlpha = labelAlpha;
         const labelOffset = vis.r + 12;
         ctx.font = '500 11px ui-sans-serif, system-ui, sans-serif';
