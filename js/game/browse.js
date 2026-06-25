@@ -34,6 +34,7 @@ import {
   removeFromStack as rocketRemoveCard, clearStack as rocketClearStack,
   onRocketChange, isRocketActive,
   getActiveThrusterId, setActiveThruster, stackHasMoonCable, getDirtCapability,
+  pacManReady,
   getTankWater, setTankWater, addFuel, removeFuel, getTankMax, getWaterCap,
   getTankGrade, setTankGrade, getActiveFuelGrade,
   getStackTotals, getActiveThrusterStats, setSolarZone, setHasPowersat,
@@ -5275,7 +5276,10 @@ function humanizeOnlineOpError(code, detail) {
     nothing_decommissioned: 'Nothing decommissioned (crew can\'t return to the hand).',
     cannot_liftoff: 'Not enough thrust to lift off (and no factory here to assist).',
     cannot_land: 'Not enough thrust to land there (and no factory to assist).',
-    cannot_stop_on_aerobrake: 'Can\'t stop on a parachute space - aerobraking carries you through, so finish your move on a landing site or node.',
+    cannot_stop_on_aerobrake: 'Can\'t stop on a parachute space - aerobraking carries you through, so finish your move on a landing site or node (unless you carry an air-eater).',
+    not_on_aerobrake: 'The rocket must be sitting on an aerobrake (parachute) space to scoop the atmosphere.',
+    no_pacman: 'Air-eater scooping needs an air-eater card AND an active thruster in the stack.',
+    no_air_eater_gain: 'This engine\'s fuel consumption is too high to scoop fuel here (needs to be under 5).',
     raygun_out_of_range: 'The raygun has no line of sight to that site from here.',
     buggy_out_of_range: 'The buggy can only road to sites on the same connected body (Mars, the Moon, Io, Callisto, Ganymede, Europa).',
     not_a_radiator: 'That card is not a radiator.',
@@ -16572,6 +16576,7 @@ function describeTurnAction(a) {
     ET_PRODUCE: 'ET production',
     INCOME: 'income',
     SITE_REFUEL: 'refuel',
+    AIR_EATER_REFUEL: 'air-eater refuel',
     DIRT_REFUEL: 'dirt refuel',
     DELIVERY: 'delivery',
     BUILD_COLONY: 'colony build',
@@ -17467,6 +17472,35 @@ function showSitePopupFor(site) {
         });
       }
     }
+  }
+  // Air-Eater Refuel (rule c): when the rocket is parked on an Aerobrake Hazard
+  // with a Pac-Man stack (an air-eater card + an active thruster), it can scoop
+  // the atmosphere for fuel: +(5 - floor(fuel consumption)) water. Diver Orbit:
+  // each scoop is a Hazard roll (a 1 is fatal). Costs the operation. Online only.
+  if (_online && rocketSite && site.id === rocketSite.id && isAerobrakeSite(site) && pacManReady()) {
+    const stats = getActiveThrusterStats();
+    const fc = stats && Number.isFinite(stats.fuel) ? Math.floor(stats.fuel) : 99;
+    const tanks = 5 - fc;
+    const tank = getTankWater();
+    const headroom = Math.max(0, getTankMax() - tank);
+    const gradeClash = tank > 0 && getTankGrade() !== 'water';
+    const gain = Math.min(Math.max(0, tanks), headroom);
+    const ok = tanks > 0 && gain > 0 && !gradeClash;
+    const reason = tanks <= 0
+      ? `This engine's fuel consumption (${fc}) is too high to scoop here (need under 5).`
+      : (gradeClash ? 'Tank holds another fuel - burn it empty before scooping atmosphere.'
+        : (gain <= 0 ? `Tank full (${tank}/${getTankMax()}).` : null));
+    actions.push({
+      label: ok ? `⛅ Air-eater refuel (+${gain})` : '⛅ Air-eater refuel',
+      variant: ok ? 'rocket' : 'secondary',
+      disabled: !ok,
+      title: reason || `Scoop the atmosphere for +${gain} water. Diver Orbit: this is a Hazard roll (a 1 is fatal) or pay FINAO. Costs your operation.`,
+      onClick: () => {
+        if (!ok) return;
+        submitOnlineOp({ kind: 'AIR_EATER_REFUEL' });
+        _renderer.clearSitePopup();
+      },
+    });
   }
   // Dirt refuel is NOT a site-popup action: it lives in the rocket fuel
   // tank modal, shown only when the ACTIVE engine is a dirt thruster (open
@@ -20049,7 +20083,7 @@ const MP_LOG_ICONS = {
   SET_ACTIVE_THRUSTER: '🔥', SET_ACTIVE_PROSPECTOR: '⛏',
   BUILD_ROCKET: '🚀', BUY_CARD: '📚', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',
   INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧', MINE_REVIVAL: '⛏',
-  ET_PRODUCE: '🏭', SITE_REFUEL: '💧', EVENT_CHOICE: '☄️',
+  ET_PRODUCE: '🏭', SITE_REFUEL: '💧', AIR_EATER_REFUEL: '⛅', EVENT_CHOICE: '☄️',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
   DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🏠',
   REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',

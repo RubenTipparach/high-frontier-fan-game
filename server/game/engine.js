@@ -1568,8 +1568,10 @@ function applyMove(state, op, player) {
   // Can't END the turn on an aerobrake corridor (the 🪂 parachute space): you
   // are falling through the atmosphere, so the descent must finish this turn on
   // a real node. The corridor is fine to cross (it's in `arrivals` and rolls as
-  // an aero hazard); it just can't be where the rocket stops.
-  if (isAerobrakeNode(dest)) return fail('cannot_stop_on_aerobrake', { site: dest });
+  // an aero hazard); it just can't be where the rocket stops - UNLESS the stack
+  // is a Pac-Man (an Operational air-eater card + an Activated thruster), which
+  // may sit on an Aerobrake Hazard in a Diver Orbit to scoop fuel (rule c).
+  if (isAerobrakeNode(dest) && !pacManReady(player.rocket)) return fail('cannot_stop_on_aerobrake', { site: dest });
 
   // Fuel-step model (shared with the client via data/fuel-graph.js): a burn
   // spends fuel STEPS - black connections on the ladder - NOT water 1-to-1.
@@ -3597,12 +3599,101 @@ function applyBuyCard(state, op, player) {
 }
 
 // pure (state, op, player) -> { ok, state, log } transform; the
+// Pac-Man (rule c): the stack contains an Operational card with the air-eater
+// icon AND an Activated thruster. The air-eater card MAY share the thruster's
+// support chain but need not. "Operational" here = the card is in the stack with
+// the air-eater property on its installed face (air-eater cards are
+// self-contained, carrying no supports of their own).
+function faceHasAirEater(f) {
+  return !!(f && Array.isArray(f.properties)
+    && f.properties.some((p) => p.key === 'airEater' && p.value));
+}
+function stackHasAirEater(rocket) {
+  for (const slot of rocket.stack) {
+    const c = PATENTS_BY_ID[slot.id];
+    if (!c) continue;
+    if (faceHasAirEater(slotFace(slot, c))) return true;
+  }
+  return false;
+}
+function pacManReady(rocket) {
+  return !!(rocket && rocket.activeThrusterId
+    && rocket.stack.some((s) => s.id === rocket.activeThrusterId)
+    && stackHasAirEater(rocket));
+}
+
+// Air-Eater Refuel Op (rule c). At the end of its movement a Spacecraft sitting
+// on an Aerobrake Hazard with a Pac-Man stack scoops the atmosphere for fuel:
+// the wet-mass chit moves up the red line by (5 - floor(activated fuel
+// consumption)) tanks. Diver Orbit: each refuel counts as a Hazard requiring
+// either a Hazard Roll (a 1 destroys the stack) or FINAO (pay aqua to skip).
+// Costs the turn's single operation.
+function applyAirEaterRefuel(state, op, player) {
+  const here = player.rocket.siteId;
+  if (!here || !isAerobrakeNode(here)) return fail('not_on_aerobrake');
+  if (!pacManReady(player.rocket)) return fail('no_pacman');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  // Tanks gained = 5 - fuel consumption (drop fractions of fuel consumption
+  // before subtracting). Non-positive = nothing to scoop with this engine.
+  const fc = Math.floor(thrusterFuelPerBurn(player.rocket));
+  const tanks = 5 - fc;
+  if (tanks <= 0) return fail('no_air_eater_gain', { fuelConsumption: fc });
+  // Scooped atmosphere counts as water; can't pour onto a dirt / isotope tank.
+  const tank = Number(player.rocket.tank) || 0;
+  if (tank > 0 && tankGradeOf(player.rocket) !== 'water') return fail('cannot_mix_fuel');
+  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const room = Math.floor(Math.max(0, TANK_MAX - dry - tank));
+  if (room <= 0) return fail('tank_full');
+
+  // Diver Orbit hazard: roll a d6 (a 1 destroys the stack) unless paid past with
+  // FINAO. Validate the FINAO balance before mutating anything.
+  const wantPay = !!op.hazardPay;
+  const finaoPer = hasPrivilege(state, player, 'OPEN_SOURCE_FINAO') ? 3 : HAZARD_COST_PER;
+  if (wantPay && finaoPer > (player.aqua | 0)) return fail('insufficient_aqua');
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const rolls = [];
+  let destroyed = false;
+  if (wantPay) {
+    player.aqua -= finaoPer;
+  } else {
+    const d6 = gen.d6();
+    rolls.push({ slug: here, kind: 'aero', phase: 'diver', d6, crit: d6 === 1 });
+    if (d6 === 1) destroyed = true;
+  }
+  state.rng.cursor = gen.cursor;
+  player.rocket.rolls = rolls;
+
+  const siteName = (siteById(here) && siteById(here).name) || here;
+  if (destroyed) {
+    for (const slot of player.rocket.stack) {
+      if (isCrewSlot(slot)) (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+      else player.hand.push(slot.id);
+    }
+    player.rocket.stack = [];
+    player.rocket.activeThrusterId = null;
+    player.rocket.activeProspectorId = null;
+    player.rocket.tank = 0;
+    recallIfEmpty(player);
+    player.opsRemaining -= 1;
+    return { ok: true, state, rolled: true, log: `${player.name}'s air-eater scoop at ${siteName} burned up in the atmosphere (Diver Orbit roll 1); the stack was lost.` };
+  }
+  const gain = Math.min(tanks, room);
+  player.rocket.tank = round6(tank + gain);
+  player.rocket.tankGrade = 'water';
+  player.opsRemaining -= 1;
+  return {
+    ok: true, state, rolled: !wantPay,
+    log: `${player.name} air-eater scooped +${gain} water at ${siteName}${wantPay ? ' (FINAO)' : ''} (tank ${round6(player.rocket.tank)}).`,
+  };
+}
+
 // dispatcher (not the handler) maintains turnActions / turnRedo.
 const FUNCTIONAL = {
   INCOME: applyIncome,
   FUNDRAISE: applyFundraise,
   LOBBY: applyLobby,
   SITE_REFUEL: applySiteRefuel,
+  AIR_EATER_REFUEL: applyAirEaterRefuel,
   DIRT_REFUEL: applyDirtRefuel,
   DELIVERY: applyDelivery,
   BUILD_COLONY: applyBuildColony,
@@ -3639,6 +3730,7 @@ const FUNCTIONAL = {
 function pickPayload(op) {
   switch (op.kind) {
     case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, pickupChit: op.pickupChit !== false };
+    case 'AIR_EATER_REFUEL': return { hazardPay: !!op.hazardPay };
     case 'LOAD_GLORY': return {};
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face, radSide: op.radSide };
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };
