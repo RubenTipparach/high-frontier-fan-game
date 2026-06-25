@@ -14679,11 +14679,12 @@ function animateRocketAlong(segments, totalMs = 700) {
     }
     if (totalLen === 0) { resolve(); return; }
     const r = isRocketActive();
+    const gw = isGwThrusterId(getActiveThrusterId());   // gold stripes hold across the move
     // Instant snap (a manual route already walked during plotting): drop the
     // sprite on the final point and resolve, no per-frame tween.
     if (totalMs <= 0) {
       const last = pts[pts.length - 1];
-      _renderer.setSandboxRocket({ x: last.x, y: last.y, colour: myRocketColour(), canFly: r.active });
+      _renderer.setSandboxRocket({ x: last.x, y: last.y, colour: myRocketColour(), canFly: r.active, gw });
       resolve(); return;
     }
     const t0 = performance.now();
@@ -14710,6 +14711,7 @@ function animateRocketAlong(segments, totalMs = 700) {
         x: pos.x, y: pos.y,
         colour: myRocketColour(),
         canFly: r.active,
+        gw,
       });
       if (t < 1) requestAnimationFrame(step);
       else {
@@ -14778,6 +14780,13 @@ function myRocketColour() {
   }
   return 'yellow';
 }
+// Is the card id an active TW/GW (Terawatt/Gigawatt) thruster? Drives the gold
+// stripes on the rocket sprite. The class is the card type (TW is a future
+// member of the same family); both faces of a GW card share the type.
+function isGwThrusterId(id) {
+  const card = id ? PATENTS_BY_ID[id] : null;
+  return !!(card && card.type === 'gw-thruster');
+}
 
 // Publish the local player's seat colour as --me-color on the browse
 // shell so the player's own chrome (top bar, hand strip, hand title)
@@ -14841,6 +14850,8 @@ function computeMpRockets(snapshot) {
       colour: p.color || 'white',
       name: p.name,
       inactive: !(p.rocket && p.rocket.activeThrusterId),
+      gw: isGwThrusterId(p.rocket && p.rocket.activeThrusterId),   // gold TW/GW stripes
+
       // Loaded glory chits this ship is carrying home (shown as a 🏆 badge).
       chits: (p.glory && Array.isArray(p.glory.chits)) ? p.glory.chits.length : 0,
       isLocal: p.profileId === myId,
@@ -14858,7 +14869,7 @@ function computeMpRockets(snapshot) {
       } else {
         opponents.push({
           profileId: r.profileId, x: r.x, y: r.y, offsetX,
-          colour: r.colour, name: r.name, inactive: r.inactive, chits: r.chits,
+          colour: r.colour, name: r.name, inactive: r.inactive, chits: r.chits, gw: r.gw,
         });
       }
     });
@@ -15055,6 +15066,7 @@ function animateLocalMoveAlong(segs) {
   if (o) {
     _renderer.setSandboxRocket({
       x: o.x, y: o.y, colour: myRocketColour(), canFly: isRocketActive().active,
+      gw: isGwThrusterId(getActiveThrusterId()),
     });
   }
   animateRocketAlong(segs).then(() => {
@@ -15487,6 +15499,7 @@ function syncSandboxRocket() {
     x, y,
     colour: myRocketColour(),
     canFly: r.active,       // drives the 🚫 + transparency overlay
+    gw: isGwThrusterId(getActiveThrusterId()),   // gold stripes for a TW/GW thruster
     glitch: isMyRocketGlitched(),   // red glitch disc on the sprite
     prospectorKind,
     prospectorName,

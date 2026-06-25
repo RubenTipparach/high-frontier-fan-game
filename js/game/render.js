@@ -3842,7 +3842,7 @@ export class MapRenderer {
       if (this._mpRocketBoxes) this._mpRocketBoxes.push({ profileId: r.profileId, x: px, y: py, w, h });
       ctx.save();
       if (r.inactive) ctx.globalAlpha = 0.5;
-      ctx.drawImage(getRocketSprite(r.colour || 'white'), px, py, w, h);
+      ctx.drawImage(getRocketSprite(r.colour || 'white', { gw: !!r.gw }), px, py, w, h);
       // 🚫 inactive badge, mirroring the local rocket's empty-stack cue.
       if (r.inactive) {
         ctx.globalAlpha = 1;
@@ -3943,7 +3943,7 @@ export class MapRenderer {
     ctx.save();
     if (!r.canFly) ctx.globalAlpha = 0.5;
     if (onFactory) { ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 6; ctx.shadowOffsetX = 1; ctx.shadowOffsetY = 3; }
-    ctx.drawImage(getRocketSprite(r.colour || 'yellow'), px, py, w, h);
+    ctx.drawImage(getRocketSprite(r.colour || 'yellow', { gw: !!r.gw }), px, py, w, h);
     ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
     if (!r.canFly) {
       ctx.globalAlpha = 1;
