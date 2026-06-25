@@ -874,6 +874,7 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
         }
         row.round = state.round;
         row.maxRounds = state.maxRounds;
+        row.turn = state.turn | 0;   // 0-based slot within the round (12 per round)
       }
     } catch { /* ignore a malformed state blob */ }
     const last = lastTurnStmt.get(row.gameId);
@@ -2165,6 +2166,7 @@ app.get('/games/public', requireProfile, (req, res) => {
         }
         row.round = state.round;
         row.maxRounds = state.maxRounds != null ? state.maxRounds : row.maxRounds;
+        row.turn = state.turn | 0;   // 0-based slot within the round (12 per round)
       }
     } catch { /* ignore a malformed state blob */ }
     const last = pubLastTurn.get(row.gameId);
@@ -3513,6 +3515,7 @@ app.get('/admin', (req, res) => {
       const active = players[state.activeIndex];
       r.round = state.round;
       r.maxRounds = state.maxRounds != null ? state.maxRounds : r.max_rounds;
+      r.turn = state.turn | 0;   // 0-based slot within the round (12 per round)
       r.activeName = active ? active.name : null;
     } catch { /* ignore a malformed state blob */ }
   };
@@ -3647,9 +3650,11 @@ app.get('/admin', (req, res) => {
   // Turn cell: round X / Y plus whose turn it is, or a dash when no game yet.
   const roomTurnHtml = (r) => {
     if (!r.game_id || r.round == null) return '<span class="muted">-</span>';
-    const rounds = r.maxRounds ? `${r.round} / ${r.maxRounds}` : String(r.round);
+    // round.slot/maxRounds.totalSlots (slot 1-based, 12 slots per round), e.g. 1.1/5.12.
+    const slot = (r.turn | 0) + 1;
+    const tn = r.maxRounds ? `${r.round}.${slot}/${r.maxRounds}.12` : `${r.round}.${slot}`;
     const who = r.activeName ? ` <span class="muted">@${esc(r.activeName)}</span>` : '';
-    return `R${esc(rounds)}${who}`;
+    return `${esc(tn)}${who}`;
   };
   const roomRowsHtml = (arr, emptyMsg) => arr.map((r) => `
     <tr class="room-row" data-search="${esc((String(r.name || '') + ' ' + String(r.code || '')).toLowerCase())}">

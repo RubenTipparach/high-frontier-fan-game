@@ -496,7 +496,8 @@ export async function refreshPublicGames() {
     const turnMeta = li.querySelector('.turn-meta');
     if (g.activePlayerName || g.pendingFirstPlayerName) {
       const tail = [];
-      if (g.round && g.maxRounds) tail.push(`Round ${g.round}/${g.maxRounds}`);
+      // round.slot/maxRounds.totalSlots (slot 1-based, 12 slots per round), e.g. Turn 1.1/5.12.
+      if (g.round && g.maxRounds) tail.push(`Turn ${g.round}.${(g.turn | 0) + 1}/${g.maxRounds}.12`);
       if (g.lastTurnEndedAt) tail.push(`last turn ended ${timeAgo(g.lastTurnEndedAt)}`);
       const tailText = tail.length ? ` · ${tail.join(' · ')}` : '';
       if (g.pendingFirstPlayerName) {
@@ -615,7 +616,8 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
     const turnMeta = li.querySelector('.turn-meta');
     if (!cancelled && g.gameStatus === 'active' && (g.activePlayerName || g.pendingFirstPlayerName)) {
       const tail = [];
-      if (g.round && g.maxRounds) tail.push(`Round ${g.round}/${g.maxRounds}`);
+      // round.slot/maxRounds.totalSlots (slot 1-based, 12 slots per round), e.g. Turn 1.1/5.12.
+      if (g.round && g.maxRounds) tail.push(`Turn ${g.round}.${(g.turn | 0) + 1}/${g.maxRounds}.12`);
       if (g.lastTurnEndedAt) tail.push(`last turn ended ${timeAgo(g.lastTurnEndedAt)}`);
       const tailText = tail.length ? ` · ${tail.join(' · ')}` : '';
       if (g.pendingFirstPlayerName) {
