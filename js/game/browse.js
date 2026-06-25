@@ -6022,6 +6022,18 @@ function flyToStack(id) {
     }
     return;
   }
+  if (id === 'freighter') {
+    const fr = getMyFreighter();
+    if (!fr) return;
+    const pid = getStackSiteId('freighter');
+    const site = pid && _activeData?.byId?.[pid];
+    if (site && Number.isFinite(site.x) && Number.isFinite(site.y)) {
+      _renderer.flyTo(site, locateZoom(4));
+    } else {
+      _renderer.flyTo(LEO_ANCHOR, locateZoom(4));
+    }
+    return;
+  }
   if (id && id.startsWith('outpost')) {
     const letter = id.slice('outpost'.length);
     const op = getOutpost(letter);

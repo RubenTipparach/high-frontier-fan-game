@@ -242,9 +242,21 @@
   border-color: #7dd3fc;
 }
 #turn-tag-move:hover { filter: brightness(1.1); }
-/* Weld: the move tag keeps its left corners rounded and flattens its right
-   edge into the seam shared with the gear. */
-.map-turn-budget #turn-tag-move {
+/* The Freighter move tag is the SAME filled chip as the rocket's (a matched
+   pair of movers); the 🚀 / 🚛 glyphs tell them apart. Without this it fell back
+   to the dark base style and looked like a different control. */
+#turn-tag-fmove {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(0, 0, 0, 0.30)),
+    #0ea5e9;
+  color: #f0f9ff;
+  border-color: #7dd3fc;
+}
+#turn-tag-fmove:hover { filter: brightness(1.1); }
+/* Weld: each move tag keeps its left corners rounded and flattens its right
+   edge into the seam shared with its gear. */
+.map-turn-budget #turn-tag-move,
+.map-turn-budget #turn-tag-fmove {
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
 }
