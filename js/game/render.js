@@ -3494,7 +3494,7 @@ export class MapRenderer {
   // read as two pieces parked together on the factory.
   _factoryStand(rect, w, h, side) {
     const cx = rect.cxs + side * rect.dw * 0.17;   // flank the building centre
-    const footY = rect.cys - rect.dh * 0.10;       // sit high on the building, light overlap
+    const footY = rect.cys - rect.dh * 0.04;       // sit high on the building, light overlap
     return { px: cx - w / 2, py: footY - h };
   }
 
