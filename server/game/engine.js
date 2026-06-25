@@ -839,9 +839,12 @@ function exposedLeo(p) {
 //   - Van Allen Shielding: cards at LEO (rocket.siteId == null) are immune.
 //   - Bunker Shielding: cards on a Site are immune. That covers every outpost
 //     (always built on a site) AND a rocket parked / landed at a site.
+//   - Radiation belt shadow: a rocket sheltering inside a radiation space (a
+//     rad-hazard node) is shielded from the flare too.
 // So the ONLY thing a flare can reach in this engine is a rocket caught in deep
-// space at a transit waypoint (a lagrange / burn / hohmann node, isSiteNode ==
-// false). Each affected card adds its heliocentric-zone modifier before the
+// space at a non-radiation transit waypoint (a lagrange / burn / hohmann node,
+// isSiteNode == false, hazardKind != 'rad'). Each affected card adds its
+// heliocentric-zone modifier before the
 // rad-hardness check. Pushes gameplay sentences to notesArr; returns the number
 // of cards affected.
 function applyFlareToPlayer(state, p, flare, notesArr) {
@@ -878,8 +881,10 @@ function applyFlareToPlayer(state, p, flare, notesArr) {
   };
   // Rocket: hit ONLY when caught in deep space (a transit waypoint that is not
   // a Site and not LEO). A rocket parked at a Site rides out the flare (Bunker
-  // Shielding); a rocket at LEO is immune (Van Allen).
-  if (p.rocket.siteId && !isSiteNode(p.rocket.siteId)) {
+  // Shielding); a rocket at LEO is immune (Van Allen); a rocket sheltering in a
+  // radiation belt rides out the flare too (the belt's own shadow shields it),
+  // so a flare never reaches a ship sitting on a radiation space.
+  if (p.rocket.siteId && !isSiteNode(p.rocket.siteId) && hazardKind(p.rocket.siteId) !== 'rad') {
     const before = p.rocket.stack.length;
     p.rocket.stack = sweep(p.rocket.stack, p.rocket.siteId, 'aboard the rocket');
     if (p.rocket.stack.length !== before) {
