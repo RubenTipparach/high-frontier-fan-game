@@ -3369,6 +3369,10 @@ app.get('/admin', (req, res) => {
   if (!adminFromRequest(req, res)) {
     return res.type('html').send(adminLoginPage());
   }
+  // Timestamps render in US Central time (CST/CDT, DST-aware via the IANA zone)
+  // instead of UTC. Queries return raw ms; this formats at render time.
+  const CT_FMT = new Intl.DateTimeFormat('en-US',{timeZone:'America/Chicago',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false,timeZoneName:'short'});
+  const fmtCt = (ms) => (ms==null ? '' : CT_FMT.format(new Date(Number(ms))));
   const kpi = db
     .prepare(
       `SELECT
@@ -3383,9 +3387,10 @@ app.get('/admin', (req, res) => {
     )
     .get();
 
-  // Tabbed dashboard: each table paginates 20 rows/page (server-side OFFSET, no
-  // COUNT - we fetch PER+1 and use the extra row only to know "has next").
-  const PER = 20;
+  // Tabbed dashboard: each table paginates server-side (OFFSET). 10 rows/page on
+  // mobile, 20 elsewhere. A COUNT per dataset drives the pager's page totals.
+  const isMobileUA = /Mobi|Android|iPhone|iPad|iPod/i.test(req.headers['user-agent'] || '');
+  const PER = isMobileUA ? 10 : 20;
   const pageNum = (key) => Math.max(1, parseInt(req.query[key], 10) || 1);
   const ppN = pageNum('pp'); // players
   const rpN = pageNum('rp'); // multiplayer rooms
@@ -3406,22 +3411,27 @@ app.get('/admin', (req, res) => {
     params.set(param, String(n));
     return `/admin?${params.toString()}#${tab}`;
   };
-  // pager(param, n, hasNext, tab): Prev / page N / Next under a table.
-  const pager = (param, n, hasNext, tab) => {
-    const prev = n > 1
-      ? `<a href="${esc(pageHref(param, n - 1, tab))}">‹ Prev</a>`
-      : '<span class="muted">‹ Prev</span>';
-    const next = hasNext
-      ? `<a href="${esc(pageHref(param, n + 1, tab))}">Next ›</a>`
-      : '<span class="muted">Next ›</span>';
-    return `<div class="pager">${prev}<span>page ${n}</span>${next}</div>`;
+  // pager(param, n, total, tab): First / Prev / "page X of Y · N results" /
+  // Next / Last under a table, computed from the dataset's total row count.
+  const pager = (param, n, total, tab) => {
+    const pages = Math.max(1, Math.ceil(total / PER));
+    const cur = Math.min(n, pages);
+    const link = (p, label, disabled) => disabled
+      ? `<span class="pg-btn pg-off">${label}</span>`
+      : `<a class="pg-btn" href="${esc(pageHref(param, p, tab))}">${label}</a>`;
+    return `<nav class="pager">`
+      + link(1, '« First', cur<=1) + link(cur-1, '‹ Prev', cur<=1)
+      + `<span class="pg-info">Page ${cur} of ${pages} · ${total} result${total===1?'':'s'}</span>`
+      + link(cur+1, 'Next ›', cur>=pages) + link(pages, 'Last »', cur>=pages)
+      + `</nav>`;
   };
 
+  const profilesTotal = db.prepare(`SELECT COUNT(*) c FROM profiles`).get().c;
   const profilesRaw = db
     .prepare(
       `SELECT p.id, p.name,
-              datetime(p.created_at   / 1000, 'unixepoch') AS created,
-              datetime(p.last_seen_at / 1000, 'unixepoch') AS seen,
+              p.created_at   AS created_ms,
+              p.last_seen_at AS seen_ms,
               (SELECT COUNT(*) FROM tokens t WHERE t.profile_id = p.id) AS devices,
               (SELECT COUNT(*) FROM lobby_members lm WHERE lm.profile_id = p.id) AS tables,
               (SELECT COUNT(*) FROM chat_messages cm WHERE cm.profile_id = p.id) AS chats,
@@ -3442,8 +3452,7 @@ app.get('/admin', (req, res) => {
   const LAST_ACTIVE = `COALESCE((SELECT gs.updated_at FROM game_states gs JOIN games g ON g.id = gs.game_id
                 WHERE g.lobby_id = l.id ORDER BY gs.updated_at DESC LIMIT 1), l.created_at)`;
   const ROOM_SELECT = `SELECT l.id, l.code, l.name, l.status, l.join_policy, l.max_players,
-              datetime(l.created_at / 1000, 'unixepoch') AS created,
-              datetime(${LAST_ACTIVE} / 1000, 'unixepoch') AS active_when,
+              ${LAST_ACTIVE} AS active_ms,
               p.name AS host_name,
               (SELECT COUNT(*) FROM lobby_members lm WHERE lm.lobby_id = l.id) AS members,
               (SELECT g.id FROM games g WHERE g.lobby_id = l.id AND g.status = 'active'
@@ -3462,6 +3471,12 @@ app.get('/admin', (req, res) => {
   ).all();
   const soloLobbiesHasNext = soloLobbiesRaw.length > PER;
   const soloLobbies = soloLobbiesRaw.slice(0, PER);
+  const mpTotal = db.prepare(
+    `SELECT COUNT(*) c FROM lobbies l WHERE l.status!='cancelled' AND NOT EXISTS (SELECT 1 FROM games g2 WHERE g2.lobby_id=l.id AND g2.status='finished') AND l.max_players>1`
+  ).get().c;
+  const soloTotal = db.prepare(
+    `SELECT COUNT(*) c FROM lobbies l WHERE l.status!='cancelled' AND NOT EXISTS (SELECT 1 FROM games g2 WHERE g2.lobby_id=l.id AND g2.status='finished') AND l.max_players=1`
+  ).get().c;
 
   // Ended games: cancelled rooms OR rooms whose game finished. Most-recently
   // ended first (cancelled -> cancelled_at; finished -> the game's finished_at;
@@ -3472,10 +3487,10 @@ app.get('/admin', (req, res) => {
     .prepare(
       `SELECT l.id, l.code, l.name, l.max_players, p.name AS host_name,
               CASE WHEN l.status = 'cancelled' THEN 'cancelled' ELSE 'finished' END AS kind,
-              datetime(COALESCE(
+              COALESCE(
                 l.cancelled_at,
                 (SELECT MAX(g.finished_at) FROM games g WHERE g.lobby_id = l.id AND g.status = 'finished'),
-                l.created_at) / 1000, 'unixepoch') AS ended_when
+                l.created_at) AS ended_ms
        FROM lobbies l
        JOIN profiles p ON p.id = l.host_id
        WHERE l.status = 'cancelled'
@@ -3488,10 +3503,11 @@ app.get('/admin', (req, res) => {
     )
     .all();
 
+  const chatTotal = db.prepare(`SELECT COUNT(*) c FROM chat_messages`).get().c;
   const chatsRaw = db
     .prepare(
       `SELECT cm.id, cm.body,
-              datetime(cm.created_at / 1000, 'unixepoch') AS sent,
+              cm.created_at AS sent_ms,
               p.name AS profile_name,
               l.name AS lobby_name, l.code AS lobby_code
        FROM chat_messages cm
@@ -3504,10 +3520,17 @@ app.get('/admin', (req, res) => {
   const chatsHasNext = chatsRaw.length > PER;
   const chats = chatsRaw.slice(0, PER);
 
+  const invitesTotal = db.prepare(
+    `SELECT COUNT(*) c
+       FROM direct_invites di
+       JOIN profiles fp ON fp.id = di.from_id
+       JOIN profiles tp ON tp.id = di.to_id
+       JOIN lobbies  l  ON l.id  = di.lobby_id`
+  ).get().c;
   const invitesRaw = db
     .prepare(
       `SELECT di.id, di.status,
-              datetime(di.created_at / 1000, 'unixepoch') AS sent,
+              di.created_at AS sent_ms,
               fp.name AS from_name, tp.name AS to_name,
               l.name AS lobby_name, l.code AS lobby_code
        FROM direct_invites di
@@ -3521,12 +3544,12 @@ app.get('/admin', (req, res) => {
   const invitesHasNext = invitesRaw.length > PER;
   const invites = invitesRaw.slice(0, PER);
 
+  const linksTotal = db.prepare(`SELECT COUNT(*) c FROM invite_links`).get().c;
   const linksRaw = db
     .prepare(
       `SELECT il.code, il.single_use, il.used_count,
-              datetime(il.created_at / 1000, 'unixepoch') AS created,
-              CASE WHEN il.expires_at IS NULL THEN ''
-                   ELSE datetime(il.expires_at / 1000, 'unixepoch') END AS expires,
+              il.created_at AS created_ms,
+              il.expires_at AS expires_ms,
               cp.name AS by_name, l.name AS lobby_name, l.code AS lobby_code
        FROM invite_links il
        JOIN profiles cp ON cp.id = il.created_by
@@ -3554,8 +3577,8 @@ app.get('/admin', (req, res) => {
     return `
     <tr>
       <td data-label="Name"><button class="btn-user linklike" data-pid="${r.id}" data-pname="${esc(r.name)}" data-linked="${linked ? 1 : 0}" data-dname="${esc(r.discord_name || r.discord_id || '')}">@${esc(r.name)}</button></td>
-      <td data-label="Created">${esc(r.created)}</td>
-      <td data-label="Last seen">${esc(r.seen)}</td>
+      <td data-label="Created">${esc(fmtCt(r.created_ms))}</td>
+      <td data-label="Last seen">${esc(fmtCt(r.seen_ms))}</td>
       <td data-label="Devices" class="num">${r.devices}</td>
       <td data-label="Tables" class="num">${r.tables}</td>
       <td data-label="Chats" class="num">${r.chats}</td>
@@ -3572,7 +3595,7 @@ app.get('/admin', (req, res) => {
       <td data-label="Status"><span class="pill pill-${esc(r.status)}">${esc(r.status)}</span></td>
       <td data-label="Policy">${esc(r.join_policy)}</td>
       <td data-label="Players" class="num">${r.members} / ${r.max_players}</td>
-      <td data-label="Last active">${esc(r.active_when)}</td>
+      <td data-label="Last active">${esc(fmtCt(r.active_ms))}</td>
     </tr>
   `).join('') || `<tr class="empty-row"><td colspan=7><em>${esc(emptyMsg)}</em></td></tr>`;
   const mpLobbyRows = roomRowsHtml(mpLobbies, 'No active multiplayer rooms.');
@@ -3585,13 +3608,13 @@ app.get('/admin', (req, res) => {
       <td data-label="Host">@${esc(r.host_name)}</td>
       <td data-label="Players" class="num">${r.max_players}</td>
       <td data-label="Status"><span class="pill pill-${r.kind === 'finished' ? 'finished' : 'cancelled'}">${r.kind}</span></td>
-      <td data-label="Ended">${esc(r.ended_when)}</td>
+      <td data-label="Ended">${esc(fmtCt(r.ended_ms))}</td>
     </tr>
   `).join('') || '<tr><td colspan=6><em>No canceled or finished games.</em></td></tr>';
 
   const chatRows = chats.map((r) => `
     <tr>
-      <td data-label="When">${esc(r.sent)}</td>
+      <td data-label="When">${esc(fmtCt(r.sent_ms))}</td>
       <td data-label="Who">@${esc(r.profile_name)}</td>
       <td data-label="Lobby">${r.lobby_code ? `<code>${esc(r.lobby_code)}</code> ${esc(r.lobby_name)}` : '<em>(deleted)</em>'}</td>
       <td data-label="Body">${esc(r.body)}</td>
@@ -3600,7 +3623,7 @@ app.get('/admin', (req, res) => {
 
   const inviteRows = invites.map((r) => `
     <tr>
-      <td data-label="Sent">${esc(r.sent)}</td>
+      <td data-label="Sent">${esc(fmtCt(r.sent_ms))}</td>
       <td data-label="Status"><span class="pill pill-${esc(r.status)}">${esc(r.status)}</span></td>
       <td data-label="From / To">@${esc(r.from_name)} → @${esc(r.to_name)}</td>
       <td data-label="Lobby"><code>${esc(r.lobby_code)}</code> ${esc(r.lobby_name)}</td>
@@ -3610,8 +3633,8 @@ app.get('/admin', (req, res) => {
   const linkRows = links.map((r) => `
     <tr>
       <td data-label="Code"><code>${esc(r.code)}</code></td>
-      <td data-label="Created">${esc(r.created)}</td>
-      <td data-label="Expires">${esc(r.expires) || '-'}</td>
+      <td data-label="Created">${esc(fmtCt(r.created_ms))}</td>
+      <td data-label="Expires">${r.expires_ms ? esc(fmtCt(r.expires_ms)) : '-'}</td>
       <td data-label="Mode">${r.single_use ? 'single-use' : 'unlimited'}</td>
       <td data-label="Uses" class="num">${r.used_count}</td>
       <td data-label="Created by">@${esc(r.by_name)}</td>
@@ -3833,6 +3856,13 @@ app.get('/admin', (req, res) => {
   .linklike{color:#a9b4ff;text-decoration:none;font-weight:700}
   .linklike:hover{color:#fff;text-decoration:underline}
   .pager a{color:var(--acc2)}
+  .room-toggle{display:inline-flex;gap:0;margin:0 0 12px;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .room-toggle button{background:var(--surf2);border:none;border-radius:0;color:var(--mut);padding:9px 16px;font:inherit;font-weight:700;cursor:pointer}
+  .room-toggle button.on{background:var(--accgrad);color:#fff}
+  .pager{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0}
+  .pg-btn{font-size:13px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;color:var(--acc2);text-decoration:none;background:var(--surf2)}
+  .pg-off{opacity:.4;color:var(--mut)}
+  .pg-info{font-size:13px;color:var(--mut);padding:0 6px}
   @media (max-width:700px){
     body{padding:12px}
     .kpis{grid-template-columns:repeat(auto-fill,minmax(92px,1fr))}
@@ -3961,7 +3991,7 @@ app.get('/admin', (req, res) => {
     </tr></thead>
     <tbody>${profileRows}</tbody>
   </table>
-  ${pager('pp', ppN, profilesHasNext, 'players')}
+  ${pager('pp', ppN, profilesTotal, 'players')}
   </section>
 
   <section class="tab-panel" id="tab-rooms" hidden>
@@ -3970,7 +4000,8 @@ app.get('/admin', (req, res) => {
     <input id="room-search" type="search" placeholder="Search room name or code…" autocomplete="off" />
     <button id="show-cancelled" type="button">🗑 Canceled / finished games (${endedLobbies.length})</button>
   </div>
-  <h3 class="room-cat">👥 Multiplayer</h3>
+  <div class="room-toggle"><button type="button" data-room-mode="mp" class="on">👥 Multiplayer (${mpTotal})</button><button type="button" data-room-mode="solo">🎲 Solo (${soloTotal})</button></div>
+  <div id="rooms-mp">
   <table>
     <thead><tr>
       <th>Code</th><th>Name</th><th>Host</th>
@@ -3978,8 +4009,9 @@ app.get('/admin', (req, res) => {
     </tr></thead>
     <tbody>${mpLobbyRows}</tbody>
   </table>
-  ${pager('rp', rpN, mpLobbiesHasNext, 'rooms')}
-  <h3 class="room-cat">🎲 Solo</h3>
+  ${pager('rp', rpN, mpTotal, 'rooms')}
+  </div>
+  <div id="rooms-solo" hidden>
   <table>
     <thead><tr>
       <th>Code</th><th>Name</th><th>Host</th>
@@ -3987,7 +4019,26 @@ app.get('/admin', (req, res) => {
     </tr></thead>
     <tbody>${soloLobbyRows}</tbody>
   </table>
-  ${pager('sp', spN, soloLobbiesHasNext, 'rooms')}
+  ${pager('sp', spN, soloTotal, 'rooms')}
+  </div>
+  <script>
+  (function () {
+    var btns = document.querySelectorAll('[data-room-mode]');
+    var mp = document.getElementById('rooms-mp');
+    var solo = document.getElementById('rooms-solo');
+    if (!btns.length || !mp || !solo) return;
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].addEventListener('click', function () {
+        var mode = this.getAttribute('data-room-mode');
+        for (var j = 0; j < btns.length; j++) {
+          btns[j].classList.toggle('on', btns[j].getAttribute('data-room-mode') === mode);
+        }
+        mp.hidden = mode !== 'mp';
+        solo.hidden = mode !== 'solo';
+      });
+    }
+  })();
+  </script>
   </section>
 
   <div id="cancelled-modal" class="modal-overlay" hidden>
@@ -4047,7 +4098,7 @@ app.get('/admin', (req, res) => {
     </tr></thead>
     <tbody>${chatRows}</tbody>
   </table>
-  ${pager('cp', cpN, chatsHasNext, 'chat')}
+  ${pager('cp', cpN, chatTotal, 'chat')}
   </section>
 
   <section class="tab-panel" id="tab-invites" hidden>
@@ -4058,7 +4109,7 @@ app.get('/admin', (req, res) => {
     </tr></thead>
     <tbody>${inviteRows}</tbody>
   </table>
-  ${pager('ip', ipN, invitesHasNext, 'invites')}
+  ${pager('ip', ipN, invitesTotal, 'invites')}
 
   <h2>Invite links</h2>
   <table>
@@ -4068,7 +4119,7 @@ app.get('/admin', (req, res) => {
     </tr></thead>
     <tbody>${linkRows}</tbody>
   </table>
-  ${pager('lp', lpN, linksHasNext, 'invites')}
+  ${pager('lp', lpN, linksTotal, 'invites')}
   </section>
 
 <script>
