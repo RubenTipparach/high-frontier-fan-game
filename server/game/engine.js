@@ -2995,8 +2995,11 @@ function applyEtProduce(state, op, player) {
     if (!state.m1) return fail('m1_off');
     if (player.freighter) return fail('already_have_freighter');
     player.hand.splice(hIdx, 1);
+    // Produced on its BLACK side (the primary face for GW thrusters / freighters,
+    // which carry the working card on the front and the PURPLE promoted card on
+    // the back). Promotion later flips face -> 'secondary'.
     player.freighter = {
-      cardId, face: 'secondary', promoted: false,
+      cardId, face: 'primary', promoted: false,
       siteId, stack: [], tank: 0, wiring: {},
     };
     player.opsRemaining -= 1;
@@ -3016,7 +3019,12 @@ function applyEtProduce(state, op, player) {
   }
   player.hand.splice(hIdx, 1);
   const card = PATENTS_BY_ID[cardId];
-  const produced = { id: cardId, kind: 'patent', face: 'secondary' };
+  // Produced on the card's BLACK installed side. For most cards that is the
+  // secondary face; GW thrusters / freighters carry their working (black) card
+  // on the PRIMARY face (the secondary is the PURPLE promoted side, reached via
+  // Promotion), so they produce primary-side-up.
+  const blackFace = (card && (card.type === 'gw-thruster' || card.type === 'freighter')) ? 'primary' : 'secondary';
+  const produced = { id: cardId, kind: 'patent', face: blackFace };
   // Radiators deploy a Light or Heavy side; the producer picks it (default
   // Heavy = max cooling). Non-radiators carry no side.
   if (card && card.type === 'radiator') produced.radSide = op.radSide === 'light' ? 'light' : 'heavy';

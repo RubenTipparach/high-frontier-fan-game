@@ -23,6 +23,14 @@
 
 import { renderCard } from './card-ui.js';
 
+// The BLACK installed face a card lands on when produced. Most cards: the
+// secondary face. GW thrusters / freighters carry their working (black) card on
+// the PRIMARY face (secondary is the PURPLE promoted side), so they land
+// primary-side-up. Mirrors the server's blackFace choice in applyEtProduce.
+function blackFaceOf(card) {
+  return (card && (card.type === 'gw-thruster' || card.type === 'freighter')) ? 'primary' : 'secondary';
+}
+
 function escapeHtml(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -92,7 +100,7 @@ function openCardZoom(card) {
   const panel = document.createElement('div');
   panel.className = 'card-modal-panel et-zoom-panel';
   try {
-    const el = renderCard(card, { type: card.type, face: 'secondary' });
+    const el = renderCard(card, { type: card.type, face: blackFaceOf(card) });
     el.classList.add('card-modal-card');
     panel.appendChild(el);
   } catch {
@@ -209,7 +217,7 @@ export function openEtProduceModal({
         // The selected radiator previews its currently-chosen side; others
         // show the default (heavy / max cooling).
         const rs = (opt.card.type === 'radiator' && i === selectedCard) ? radSide : 'heavy';
-        pick.appendChild(renderCard(opt.card, { type: opt.card.type, face: 'secondary', radSide: rs }));
+        pick.appendChild(renderCard(opt.card, { type: opt.card.type, face: blackFaceOf(opt.card), radSide: rs }));
       } catch {
         pick.textContent = opt.name;
       }
