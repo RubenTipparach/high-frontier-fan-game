@@ -348,6 +348,9 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
     discs: {},
     factories: {},
     colonies: {},
+    // M1 Space Elevators (rule 1B9): { [pairKey]: { ownerId } }. Default {} so an
+    // M1-off game carries none (zero-bleed); only reachable when state.m1 is true.
+    elevators: {},
     // Module 0 (Sol Political Assembly). m0 is fixed at game start (chosen at
     // room creation); games already in flight default to false (no retro apply).
     // `assembly` holds delegate placements + drives the active-law resolver.

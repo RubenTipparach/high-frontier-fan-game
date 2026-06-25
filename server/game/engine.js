@@ -49,6 +49,7 @@ import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scorin
 // not the printed base value.
 import { weightClassForMass } from '../../data/net-thrust-track.js';
 import { SOLAR_ZONE_INFO, adjacentSites } from '../../data/sites.js';
+import { elevatorPairByKey, elevatorOtherEnd } from '../../data/space-elevators.js';
 import { ZONE_CHIT_VPS } from '../../data/zone-chits.js';
 import {
   activeLaws, freshAssembly, ASSEMBLY_PLACES, IDEOLOGY_ORDER,
@@ -495,6 +496,17 @@ function advanceClock(state) {
     const kind = eventKindForRoll(dieRoll, season);
     state.lastEvent = { turn: state.turn, round: state.round, dieRoll, kind, notes: [] };
     resolveSunspotEvent(state, kind);
+  }
+
+  // M1 Space Elevator decay (1B9f): an elevator whose BOTH ends have lost their
+  // Factory collapses at the turn boundary. (No GEO pair in the current data, so
+  // the GEO exception isn't needed yet.) Gated on m1 (zero-bleed).
+  if (state.m1 && state.elevators) {
+    for (const key of Object.keys(state.elevators)) {
+      const pair = elevatorPairByKey(key);
+      if (!pair) { delete state.elevators[key]; continue; }
+      if (!state.factories[pair.a] && !state.factories[pair.b]) delete state.elevators[key];
+    }
   }
 
   // NOTE: there is deliberately NO passive "factory income" here. An earlier
@@ -3816,12 +3828,105 @@ function applySwapBigCube(state, op, player) {
     log: `${player.name} swapped the Freighter big cube with the Factory at ${(facSite && facSite.name) || factorySiteId} - the Factory is now at ${frSite.name}.` };
 }
 
+// Build a Space Elevator (Epic Hazard operation, rule 1A6 / 1B9). Spends the
+// turn's operation. One end must hold the caller's Factory; the caller's cube (a
+// Factory or the promoted Freighter) sits at the OTHER end and performs an Epic
+// Hazard roll (a single Hazard Roll, avoidable with FINAO). Rolling a 1 fails
+// the build AND decommissions that performing unit. Success places the elevator
+// and auto-claims any unclaimed connected Site. M1-gated.
+function applyBuildElevator(state, op, player) {
+  if (!state.m1) return fail('m1_off');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  const pair = elevatorPairByKey(String(op.pairKey || ''));
+  if (!pair) return fail('unknown_elevator');
+  state.elevators = state.elevators || {};
+  if (state.elevators[pair.key]) return fail('elevator_exists');
+  const facA = state.factories[pair.a];
+  const facB = state.factories[pair.b];
+  const myFacA = !!(facA && facA.ownerId === player.profileId);
+  const myFacB = !!(facB && facB.ownerId === player.profileId);
+  if (!myFacA && !myFacB) return fail('elevator_needs_factory');
+  const factoryEnd = myFacA ? pair.a : pair.b;
+  const otherEnd = myFacA ? pair.b : pair.a;
+  const facOther = state.factories[otherEnd];
+  const myFacOther = !!(facOther && facOther.ownerId === player.profileId);
+  const fr = player.freighter;
+  const frAtOther = !!(fr && (fr.promoted || fr.face === 'secondary') && fr.siteId === otherEnd);
+  if (!myFacOther && !frAtOther) return fail('elevator_needs_cube');
+  const nameOf = (slug) => (siteById(slug) && siteById(slug).name) || slug;
+
+  const wantPay = !!op.hazardPay;
+  const finaoPer = hasPrivilege(state, player, 'OPEN_SOURCE_FINAO') ? 3 : HAZARD_COST_PER;
+  if (wantPay && finaoPer > (player.aqua | 0)) return fail('insufficient_aqua');
+  if (op.debug) {
+    return { ok: true, state, log: '', calc: { pair: pair.key, factoryEnd, otherEnd, wouldPay: wantPay, performer: frAtOther ? 'freighter' : 'factory' } };
+  }
+
+  let rolled = false, d6 = null, failed = false;
+  if (wantPay) {
+    player.aqua -= finaoPer;
+  } else {
+    const gen = makeRng(state.seed, state.rng.cursor);
+    d6 = gen.d6();
+    state.rng.cursor = gen.cursor;
+    rolled = true;
+    failed = d6 === 1;
+  }
+  player.opsRemaining -= 1;
+  if (failed) {
+    let lost = 'unit';
+    if (frAtOther) { player.freighter = null; lost = 'Freighter'; }
+    else { delete state.factories[otherEnd]; if (state.colonies) delete state.colonies[otherEnd]; lost = 'Factory'; }
+    return { ok: true, state, rolled: true,
+      log: `${player.name}'s Space Elevator build failed the Epic Hazard (rolled a 1) - the ${lost} at ${nameOf(otherEnd)} was lost.` };
+  }
+  state.elevators[pair.key] = { ownerId: player.profileId };
+  // Auto-claim any unclaimed connected Site (even a Busted one).
+  let claimed = false;
+  for (const slug of [pair.a, pair.b]) {
+    const d = state.discs[slug];
+    if (!d || d.outcome !== 'success') {
+      state.discs[slug] = { outcome: 'success', ownerId: player.profileId, roll: 1, canReroll: false };
+      claimed = true;
+    }
+  }
+  const via = wantPay ? ' (paid FINAO)' : ` (Epic Hazard rolled ${d6})`;
+  return { ok: true, state, rolled,
+    log: `${player.name} built a Space Elevator between ${nameOf(pair.a)} and ${nameOf(pair.b)}${via}.${claimed ? ' Connected Site claimed.' : ''}` };
+}
+
+// Ride a Space Elevator between its two ends (free action, rule 1B9). No burn /
+// move cost. The unit (rocket or freighter) must sit at one end; it lands at the
+// other. M1-gated.
+function applyElevatorMove(state, op, player) {
+  if (!state.m1) return fail('m1_off');
+  const pair = elevatorPairByKey(String(op.pairKey || ''));
+  if (!pair) return fail('unknown_elevator');
+  if (!(state.elevators && state.elevators[pair.key])) return fail('no_elevator');
+  const nameOf = (slug) => (siteById(slug) && siteById(slug).name) || slug;
+  if (op.unit === 'freighter') {
+    const fr = player.freighter;
+    if (!fr) return fail('no_freighter');
+    const other = elevatorOtherEnd(pair, fr.siteId);
+    if (!other) return fail('not_at_elevator');
+    fr.siteId = other;
+    return { ok: true, state, log: `${player.name} rode the Space Elevator (Freighter) to ${nameOf(other)}.` };
+  }
+  if (!player.rocket.stack.length) return fail('empty_rocket');
+  const other = elevatorOtherEnd(pair, player.rocket.siteId);
+  if (!other) return fail('not_at_elevator');
+  player.rocket.siteId = other;
+  return { ok: true, state, log: `${player.name} rode the Space Elevator to ${nameOf(other)}.` };
+}
+
 // dispatcher (not the handler) maintains turnActions / turnRedo.
 const FUNCTIONAL = {
   INCOME: applyIncome,
   FUNDRAISE: applyFundraise,
   PROMOTE: applyPromote,
   SWAP_BIG_CUBE: applySwapBigCube,
+  BUILD_ELEVATOR: applyBuildElevator,
+  ELEVATOR_MOVE: applyElevatorMove,
   LOBBY: applyLobby,
   SITE_REFUEL: applySiteRefuel,
   AIR_EATER_REFUEL: applyAirEaterRefuel,
@@ -3864,6 +3969,8 @@ function pickPayload(op) {
     case 'AIR_EATER_REFUEL': return { hazardPay: !!op.hazardPay };
     case 'PROMOTE': return { unit: op.unit, cardId: op.cardId, from: op.from };
     case 'SWAP_BIG_CUBE': return { factorySiteId: op.factorySiteId };
+    case 'BUILD_ELEVATOR': return { pairKey: op.pairKey, hazardPay: !!op.hazardPay };
+    case 'ELEVATOR_MOVE': return { pairKey: op.pairKey, unit: op.unit };
     case 'LOAD_GLORY': return {};
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face, radSide: op.radSide };
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };
