@@ -97,6 +97,10 @@ export async function mountAdminMap(host, { onPickSite } = {}) {
     // tinted by owner, plus the ACTING player's rocket sprite + outpost chits
     // (the renderer carries one ship + one outpost set, so they follow the
     // acting-player selector) and a focus ring on the rocket's site.
+    // Push the current game state onto the map: ALL factories (+ colony domes),
+    // ALL players' rockets, and ALL players' outposts, each tinted by owner, so
+    // the admin sees every piece at once. The acting-player selector only
+    // chooses WHO map clicks act on (teleport / build), not what's visible.
     update(view, actorPid) {
       _view = view; _actor = actorPid;
       const facs = {}, cols = {};
@@ -108,24 +112,37 @@ export async function mountAdminMap(host, { onPickSite } = {}) {
       }
       renderer.setFactories(facs);
       renderer.setColonies(cols);
-      const me = actingPlayer();
-      // Rocket: place the acting player's ship at its site (null siteId = LEO).
-      const rSlug = (me && me.rocket && me.rocket.siteId) || null;
-      const rPos = worldOf(rSlug) || leoWorld();
-      // The renderer reads the seat hex off `colour` (British spelling) and the
-      // sprite tints from it; passing `color` left it undefined and every rocket
-      // fell back to the default yellow sprite.
-      renderer.setSandboxRocket(rPos ? { x: rPos.x, y: rPos.y, colour: (me && me.color) || 'white', canFly: true } : null);
-      renderer.setFocusedSiteId(rSlug ? (_slugToId[rSlug] || null) : null);
-      // Outposts: the acting player's, keyed A/B/C/D with client-id siteIds.
-      const outs = {};
-      const oin = (me && me.outposts) || {};
-      for (const k of Object.keys(oin)) {
-        const o = oin[k]; const cid = o && o.siteId && _slugToId[o.siteId];
-        if (!cid) continue;
-        outs[k] = { letter: o.letter || k, siteId: cid, cards: o.cards || [], tank: o.tank || 0 };
+      const players = (view && view.players) || [];
+      // Every player's rocket, drawn via the multi-ship path (each seat-colored).
+      // Stagger ships that share a site so they fan out instead of stacking dead-on.
+      const rockets = [];
+      const seenAt = {};
+      for (const p of players) {
+        const rSlug = (p.rocket && p.rocket.siteId) || null;
+        const pos = worldOf(rSlug) || leoWorld();
+        if (!pos) continue;
+        const key = rSlug || 'leo';
+        const n = (seenAt[key] = (seenAt[key] || 0) + 1) - 1;
+        rockets.push({ x: pos.x, y: pos.y, colour: p.color || 'white', name: p.name, offsetX: n * 22 });
       }
-      if (typeof renderer.setOutpostColor === 'function') renderer.setOutpostColor(me && me.color);
+      renderer.setSandboxRocket(null);     // no single "acting" ship - show them all
+      renderer.setMpRockets(rockets);
+      // Focus ring on the ACTING player's rocket so the selector still reads.
+      const me = actingPlayer();
+      const meSlug = (me && me.rocket && me.rocket.siteId) || null;
+      renderer.setFocusedSiteId(meSlug ? (_slugToId[meSlug] || null) : null);
+      // Every player's outposts, keyed uniquely (pid+letter) with the owner color.
+      const outs = {};
+      for (const p of players) {
+        const oin = (p && p.outposts) || {};
+        for (const k of Object.keys(oin)) {
+          const o = oin[k]; const cid = o && o.siteId && _slugToId[o.siteId];
+          if (!cid) continue;
+          outs[`${p.profileId}${o.letter || k}`] = {
+            letter: o.letter || k, siteId: cid, cards: o.cards || [], tank: o.tank || 0, color: p.color || null,
+          };
+        }
+      }
       renderer.setOutposts(outs);
     },
     // Camera helpers for the "Locate" buttons. Each flies to the relevant spot.

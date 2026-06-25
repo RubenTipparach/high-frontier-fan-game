@@ -3462,9 +3462,13 @@ export class MapRenderer {
     const r = Math.max(7, Math.min(18, 10 * Math.sqrt(this.zoom)));
     const chitSize = r * 1.5;
     ctx.save();
-    for (const letter of ['A', 'B', 'C', 'D']) {
-      const op = this._outposts[letter];
+    // Iterate every key in the map (not just A-D): the normal game passes the
+    // local player's A/B/C/D, while the admin overview passes EVERY player's
+    // outposts under unique keys (e.g. "12A"), each carrying its own owner color.
+    for (const key of Object.keys(this._outposts)) {
+      const op = this._outposts[key];
       if (!op || !op.siteId) continue;
+      const letter = op.letter || key;
       const site = this.data.byId[op.siteId];
       if (!site) continue;
       // A factory at this site already shows the outpost letter in its label,
@@ -3474,7 +3478,7 @@ export class MapRenderer {
       // Stagger by letter index so multiple outposts at the same
       // site don't overlap (rare, but possible). Each outpost is
       // pushed right by an extra chitSize per letter index.
-      const idx = ['A', 'B', 'C', 'D'].indexOf(letter);
+      const idx = Math.max(0, ['A', 'B', 'C', 'D'].indexOf(letter));
       const hasFactory = this._factories && this._factories[op.siteId];
       const xOffset = (hasFactory ? r * 2.0 : r * 1.2) + idx * chitSize * 1.05;
       const yOffset = -r * 1.6;
@@ -3488,7 +3492,7 @@ export class MapRenderer {
       } else {
         ctx.rect(sx - half, sy - half, chitSize, chitSize);
       }
-      const fill = this._outpostColor || '#1e3a8a';
+      const fill = op.color || this._outpostColor || '#1e3a8a';
       ctx.fillStyle = fill;
       ctx.globalAlpha = 0.94;
       ctx.fill();
