@@ -6539,8 +6539,8 @@ function openUnifiedStackInspector(stackId) {
       <div class="stack-inspector-footer">
         <div id="stack-inspector-transfer"></div>
         <div class="card-modal-actions">
-          ${stackId === 'freighter' ? '' : `<button type="button" class="modal-btn decommission stack-decom-btn"
-            title="Return the selected cards to your hand" disabled>♻ Decommission to hand</button>`}
+          <button type="button" class="modal-btn decommission stack-decom-btn"
+            title="Return the selected cards to your hand" disabled>♻ Decommission to hand</button>
           ${stackId === 'leo' && isLeoSite(getRocketSite())
             ? '<button type="button" class="modal-btn stack leo-fuel-tank" title="Open the docked rocket\'s water tank to transfer fuel">💧 Rocket fuel tank</button>'
             : ''}

@@ -2399,6 +2399,10 @@ function applyDecommission(state, op, player) {
   const fromRaw = String(op.from || 'rocket');
   let from, src;
   if (fromRaw === 'leo') { from = 'leo'; src = (player.leo = player.leo || []); }
+  else if (fromRaw === 'freighter') {
+    if (!player.freighter) return fail('no_freighter');
+    from = 'freighter'; src = (player.freighter.stack = player.freighter.stack || []);
+  }
   else if (fromRaw.startsWith('outpost')) {
     const o = player.outposts && player.outposts[fromRaw.slice('outpost'.length)];
     if (!o) return fail('no_outpost');
