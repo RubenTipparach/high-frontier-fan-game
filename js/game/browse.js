@@ -5252,7 +5252,15 @@ function humanizeOnlineOpError(code, detail) {
     already_have_freighter: 'You already have a Freighter in play.',
     no_freighter: 'You have no Freighter in play.',
     load_limit: 'The Freighter is at its cargo load limit.',
+    factory_only: 'This Freighter can only take on cargo while parked at a Factory.',
     freighter_one_burn: 'The Freighter can only move one burn space per turn.',
+    not_promoted: 'Promote the Freighter first (flip it to its Purple-Side).',
+    freighter_glitched: 'The Freighter is glitched - repair it before swapping.',
+    freighter_has_cargo: 'Empty the Freighter\'s cargo hold before swapping its cube.',
+    not_your_factory: 'You can only swap with your own Factory.',
+    not_a_site: 'The Freighter must be parked on a landable Site to swap (not a transit waypoint or LEO).',
+    target_has_factory: 'There is already a Factory where the Freighter sits.',
+    same_site: 'The Freighter is already at that Factory\'s site.',
     cannot_pay: 'Not enough aqua for that card.',
     crew_already_picked: 'You have already picked your starting crew.',
     crew_draft_closed: 'Crew picks are locked - the game has started.',
@@ -6505,6 +6513,62 @@ function freighterLocLabel(fr) {
   const site = cid && _activeData && _activeData.byId && _activeData.byId[cid];
   return (site && site.name) || fr.siteId;
 }
+// My Factories that a Big Cube Swap could target: my own factories, excluding the
+// one (if any) at the Freighter's own site (swapping with itself is rejected).
+function mySwappableFactories() {
+  const snap = _onlineSnapshot;
+  if (!snap || !snap.factories || !_onlineMe) return [];
+  const fr = getMyFreighter();
+  const frSite = fr ? fr.siteId : null;
+  const out = [];
+  for (const sid in snap.factories) {
+    const f = snap.factories[sid];
+    if (f && f.ownerId === _onlineMe.id && sid !== frSite) {
+      out.push({ siteId: sid, name: onlineSiteLabel(sid), spectralType: f.spectralType || 'C' });
+    }
+  }
+  return out;
+}
+// Factory picker for the Big Cube Swap (1B8). Lists my factories; choosing one
+// submits SWAP_BIG_CUBE and closes. onDone closes the freighter inspector behind it.
+function openCubeSwapPicker(onDone) {
+  document.querySelector('.cube-swap-overlay')?.remove();
+  const facs = mySwappableFactories();
+  const fr = getMyFreighter();
+  const frHere = fr ? freighterLocLabel(fr) : '';
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay cube-swap-overlay';
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const dialog = document.createElement('div');
+  dialog.className = 'mp-trade-builder-modal';
+  dialog.style.maxWidth = '420px';
+  dialog.innerHTML = `
+    <div class="mp-trade-head">
+      <h3>🔄 Swap big cube</h3>
+      <button type="button" class="modal-x cube-swap-close" aria-label="Close">×</button>
+    </div>
+    <p class="muted" style="padding:2px 14px 6px">Pick a Factory to swap with. It moves to the Freighter's spot (<strong>${esc(frHere)}</strong>) and the Freighter takes the Factory's site. Free action.</p>
+    <div class="mp-relocate-list" id="cube-swap-list"></div>`;
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  dialog.querySelector('.cube-swap-close').addEventListener('click', close);
+  const list = dialog.querySelector('#cube-swap-list');
+  for (const f of facs) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'modal-btn mp-relocate-item mp-cube-row';
+    b.innerHTML = `<span class="mp-cube-ic">🏭</span> ${esc(f.name)} <span class="industrialize-spectral-badge spectral-${esc(f.spectralType)}">${esc(f.spectralType)}</span>`;
+    b.addEventListener('click', async () => {
+      b.disabled = true;
+      const ok = await submitOnlineOp({ kind: 'SWAP_BIG_CUBE', factorySiteId: f.siteId });
+      if (ok) { close(); if (onDone) onDone(); } else { b.disabled = false; }
+    });
+    list.appendChild(b);
+  }
+}
 
 // Outpost inspector. Same unified shape as the LEO modal.
 // Adds factory / colony attachment chips in the stats row.
@@ -6796,13 +6860,13 @@ function openUnifiedStackInspector(stackId) {
         const ce = renderCard(ucard, { type: 'patent', face: fr.face || 'secondary' });
         makeCardViewable(ce, ucard, 'patent', fr.face || 'secondary');
         w.appendChild(ce);
+        const acts = document.createElement('div');
+        acts.className = 'rocket-slot-actions';
         // Promotion (M1/M2): flip the Freighter to its Purple-Side at a colony
         // dome matching its promotion colony. Shown when parked at a valid
         // Promotion Site and not already promoted. Costs the operation.
         if (isM1() && !fr.promoted && fr.face !== 'secondary'
             && colonyPromotesAt(getStackSiteId('freighter'), ucard.promotionColony)) {
-          const acts = document.createElement('div');
-          acts.className = 'rocket-slot-actions';
           const promoBtn = document.createElement('button');
           promoBtn.type = 'button';
           promoBtn.className = 'rocket-select gw-promote';
@@ -6818,8 +6882,25 @@ function openUnifiedStackInspector(stackId) {
             close();
           });
           acts.appendChild(promoBtn);
-          w.appendChild(acts);
         }
+        // Big Cube Swap (1B8): free action. A Promoted Freighter with no cargo or
+        // glitch swaps its big cube with one of your Factory cubes (the Factory
+        // moves to the Freighter's spot, the Freighter takes the Factory's site).
+        if (_online && isM1() && (fr.promoted || fr.face === 'secondary')
+            && !fr.glitched && !(Array.isArray(fr.stack) ? fr.stack.length : 0)
+            && mySwappableFactories().length) {
+          const swapBtn = document.createElement('button');
+          swapBtn.type = 'button';
+          swapBtn.className = 'rocket-select cube-swap';
+          swapBtn.textContent = '🔄 Swap big cube';
+          const lockedSwap = !isOnlineMyTurn();
+          swapBtn.disabled = lockedSwap;
+          swapBtn.title = lockedSwap ? 'Wait for your turn.'
+            : 'Free action: swap the Freighter with one of your Factories. The Factory (with its colony + claim) moves to the Freighter\'s spot, and the Freighter takes the Factory\'s old site.';
+          swapBtn.addEventListener('click', () => { if (!swapBtn.disabled) openCubeSwapPicker(close); });
+          acts.appendChild(swapBtn);
+        }
+        if (acts.children.length) w.appendChild(acts);
         uhost.appendChild(w);
       }
     }
@@ -16805,6 +16886,7 @@ function describeTurnAction(a) {
     SITE_REFUEL: 'refuel',
     AIR_EATER_REFUEL: 'air-eater refuel',
     PROMOTE: 'promotion',
+    SWAP_BIG_CUBE: 'big cube swap',
     DIRT_REFUEL: 'dirt refuel',
     DELIVERY: 'delivery',
     BUILD_COLONY: 'colony build',
@@ -20320,6 +20402,7 @@ const MP_LOG_ICONS = {
   BUILD_ROCKET: '🚀', BUY_CARD: '📚', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',
   INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧', MINE_REVIVAL: '⛏',
   ET_PRODUCE: '🏭', SITE_REFUEL: '💧', AIR_EATER_REFUEL: 'ᗧ', PROMOTE: '🟣', EVENT_CHOICE: '☄️',
+  SWAP_BIG_CUBE: '🔄',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
   DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🏠',
   REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',

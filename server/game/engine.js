@@ -2343,6 +2343,18 @@ function freighterLoadLimit(player) {
   if (fd && fd.loadLimit != null) return fd.loadLimit | 0;
   return (card.loadLimit | 0) || 0;
 }
+// Some freighters carry the "Factory Loading Only" flag: they can only take on
+// cargo while parked at a Factory (rule 1B). Reads the same installed face
+// freighterLoadLimit does.
+function freighterFactoryOnly(player) {
+  if (!player.freighter) return false;
+  const card = PATENTS_BY_ID[player.freighter.cardId];
+  if (!card) return false;
+  const face = player.freighter.face === 'primary' ? 'primary' : 'secondary';
+  const fd = card.faces && card.faces[face];
+  if (fd && fd.factoryOnly != null) return !!fd.factoryOnly;
+  return !!card.factoryOnly;
+}
 function applyTransfer(state, op, player) {
   let to = op.to;
   let from = op.from;
@@ -2396,6 +2408,12 @@ function applyTransfer(state, op, player) {
   if (to === 'freighter') {
     const aboard = dstArr.length - ids.filter((id) => dstArr.some((s) => s.id === id)).length;
     if (aboard + ids.length > freighterLoadLimit(player)) return fail('load_limit');
+    // Factory-Loading-Only freighters can only take on cargo at a Factory (1B):
+    // the freighter's site must hold a factory.
+    if (freighterFactoryOnly(player)) {
+      const frSite = player.freighter.siteId;
+      if (!(frSite && state.factories && state.factories[frSite])) return fail('factory_only');
+    }
   }
 
   const moved = [];
@@ -3760,11 +3778,50 @@ function applyPromote(state, op, player) {
   return { ok: true, state, log: `${player.name} promoted ${nm || cardId} (GW thruster) at ${(site && site.name) || siteId}.` };
 }
 
+// Big Cube Swap (rule 1B8): a FREE action. When your Promoted Freighter carries
+// no cargo and no glitch, swap its big cube with one of your Factory cubes - the
+// Factory (with its colony + claim) moves to the Freighter's spot, the Freighter
+// takes the Factory's old site. Does NOT spend the operation or the freighter's
+// move. M1-gated. Mirrors the admin move_factory relocation.
+function applySwapBigCube(state, op, player) {
+  if (!state.m1) return fail('m1_off');
+  const fr = player.freighter;
+  if (!fr) return fail('no_freighter');
+  if (!fr.promoted && fr.face !== 'secondary') return fail('not_promoted');
+  if (fr.glitched) return fail('freighter_glitched');
+  if ((fr.stack || []).length > 0) return fail('freighter_has_cargo');
+  const factorySiteId = String(op.factorySiteId || '');
+  const fac = state.factories[factorySiteId];
+  if (!fac) return fail('no_factory_here');
+  if (fac.ownerId !== player.profileId) return fail('not_your_factory');
+  // The Freighter's current spot becomes the Factory's new home: it must be a
+  // real Site (not a transit waypoint / LEO) and not already industrialized.
+  const frSlug = fr.siteId;
+  const frSite = frSlug ? siteById(frSlug) : null;
+  if (!frSite) return fail('not_a_site');
+  if (frSlug === factorySiteId) return fail('same_site');
+  if (state.factories[frSlug]) return fail('target_has_factory');
+  // Swap: Factory (+ colony + claim) -> Freighter's old site (spectral follows
+  // the new site, like INDUSTRIALIZE); Freighter -> Factory's old site.
+  fac.spectralType = frSite.spectralType || fac.spectralType || 'C';
+  state.factories[frSlug] = fac;
+  delete state.factories[factorySiteId];
+  state.colonies = state.colonies || {};
+  if (state.colonies[factorySiteId]) { state.colonies[frSlug] = state.colonies[factorySiteId]; delete state.colonies[factorySiteId]; }
+  state.discs = state.discs || {};
+  if (state.discs[factorySiteId]) { state.discs[frSlug] = state.discs[factorySiteId]; delete state.discs[factorySiteId]; }
+  fr.siteId = factorySiteId;
+  const facSite = siteById(factorySiteId);
+  return { ok: true, state,
+    log: `${player.name} swapped the Freighter big cube with the Factory at ${(facSite && facSite.name) || factorySiteId} - the Factory is now at ${frSite.name}.` };
+}
+
 // dispatcher (not the handler) maintains turnActions / turnRedo.
 const FUNCTIONAL = {
   INCOME: applyIncome,
   FUNDRAISE: applyFundraise,
   PROMOTE: applyPromote,
+  SWAP_BIG_CUBE: applySwapBigCube,
   LOBBY: applyLobby,
   SITE_REFUEL: applySiteRefuel,
   AIR_EATER_REFUEL: applyAirEaterRefuel,
@@ -3806,6 +3863,7 @@ function pickPayload(op) {
     case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, pickupChit: op.pickupChit !== false };
     case 'AIR_EATER_REFUEL': return { hazardPay: !!op.hazardPay };
     case 'PROMOTE': return { unit: op.unit, cardId: op.cardId, from: op.from };
+    case 'SWAP_BIG_CUBE': return { factorySiteId: op.factorySiteId };
     case 'LOAD_GLORY': return {};
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face, radSide: op.radSide };
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };
