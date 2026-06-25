@@ -1087,6 +1087,14 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
+  // Built Space Elevators (M1). list = [{ ax, ay, bx, by, color }] in world
+  // coords (the two end nodes + the owner's seat colour) or null. Drawn as a
+  // cable between the ends, behind the markers.
+  setElevators(list) {
+    this._elevators = Array.isArray(list) ? list : null;
+    this._scheduleDraw();
+  }
+
   // Opponent rockets in multiplayer. list = [{ x, y, colour, name }].
   // Drawn as smaller colour-coded sprites; the local player's own
   // rocket is still the full-featured _sandboxRocket draw. Colocation
@@ -2312,6 +2320,7 @@ export class MapRenderer {
     // profiler step so the breakdown total reconciles with the sum.
     this._step('overlays', () => {
       this._drawHazardPulseScreen(ctx);
+      if (this._elevators && this._elevators.length) this._drawElevatorsScreen(ctx);
       this._drawMoveTargetsScreen(ctx);
       this._drawProspectDiscsScreen(ctx);
       this._drawFactoriesScreen(ctx);
@@ -3868,6 +3877,35 @@ export class MapRenderer {
       }
       ctx.restore();
     }
+  }
+
+  // Draw built Space Elevators as a cable between their two end nodes: a dark
+  // base line, a dashed owner-colour core, and a 🛗 glyph at the midpoint. Drawn
+  // early in the overlay pass so site markers / ships sit on top of it.
+  _drawElevatorsScreen(ctx) {
+    const eff = this.zoom * this.fitScale;
+    ctx.save();
+    ctx.lineCap = 'round';
+    for (const e of this._elevators) {
+      if (!Number.isFinite(e.ax) || !Number.isFinite(e.bx)) continue;
+      const ax = this.pan.x + e.ax * eff, ay = this.pan.y + e.ay * eff;
+      const bx = this.pan.x + e.bx * eff, by = this.pan.y + e.by * eff;
+      ctx.strokeStyle = 'rgba(8, 10, 22, 0.82)';
+      ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      ctx.strokeStyle = e.color || '#cbd5e1';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 5]);
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      ctx.setLineDash([]);
+      const mx = (ax + bx) / 2, my = (ay + by) / 2;
+      const fs = Math.max(12, Math.round(13 * Math.sqrt(this.zoom)));
+      ctx.font = `${fs}px ${EMOJI_FONT}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('\u{1F6D7}', mx, my);
+    }
+    ctx.restore();
   }
 
   // Draw every Freighter big cube on the board: the local player's, then each

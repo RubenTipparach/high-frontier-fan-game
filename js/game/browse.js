@@ -74,6 +74,7 @@ import { renderDetailTrack, massLabel, blackStepsBetween } from './net-thrust-de
 import { walkBlackDown } from '../../data/fuel-graph.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
+import { elevatorPairByKey, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { ZONE_POLYGONS } from '../../data/zones.js';
 import {
@@ -5261,6 +5262,12 @@ function humanizeOnlineOpError(code, detail) {
     not_a_site: 'The Freighter must be parked on a landable Site to swap (not a transit waypoint or LEO).',
     target_has_factory: 'There is already a Factory where the Freighter sits.',
     same_site: 'The Freighter is already at that Factory\'s site.',
+    unknown_elevator: 'That is not a Space Elevator location.',
+    elevator_exists: 'A Space Elevator already spans those two Spaces.',
+    elevator_needs_factory: 'Build a Space Elevator needs your Factory at one end.',
+    elevator_needs_cube: 'You need a Factory or your promoted Freighter at the other end.',
+    no_elevator: 'There is no Space Elevator here to ride.',
+    not_at_elevator: 'That unit is not parked at an end of this Space Elevator.',
     cannot_pay: 'Not enough aqua for that card.',
     crew_already_picked: 'You have already picked your starting crew.',
     crew_draft_closed: 'Crew picks are locked - the game has started.',
@@ -14964,12 +14971,35 @@ function syncMpRockets(snapshot) {
     _renderer.setMpRockets(null);
     _renderer.setSandboxRocketOffset(0);
     syncFreighterUnit(snapshot);
+    syncElevators(snapshot);
     return;
   }
   const { opponents, localOffsetX } = computeMpRockets(snapshot);
   _renderer.setSandboxRocketOffset(localOffsetX);
   _renderer.setMpRockets(opponents);
   syncFreighterUnit(snapshot);
+  syncElevators(snapshot);
+}
+
+// Draw built Space Elevators (M1) on the map. Resolves each pair's two endpoint
+// slugs to world coords and the owner's seat colour, then hands the renderer a
+// flat list. Cleared when m1 is off or none are built (zero-bleed).
+function syncElevators(snapshot) {
+  if (!_renderer || typeof _renderer.setElevators !== 'function') return;
+  if (!_online || !snapshot || !snapshot.elevators || !isM1()) { _renderer.setElevators(null); return; }
+  const out = [];
+  for (const key in snapshot.elevators) {
+    const e = snapshot.elevators[key];
+    if (!e) continue;
+    const pair = elevatorPairByKey(key);
+    if (!pair) continue;
+    const aPos = mpRocketCoords(pair.a);
+    const bPos = mpRocketCoords(pair.b);
+    if (!aPos || !bPos) continue;
+    const owner = (snapshot.players || []).find((p) => p.profileId === e.ownerId);
+    out.push({ ax: aPos.x, ay: aPos.y, bx: bPos.x, by: bPos.y, color: (owner && owner.color) || '#cbd5e1' });
+  }
+  _renderer.setElevators(out);
 }
 
 // Place every player's Freighter big cube on the map (M1, online only): the
@@ -16887,6 +16917,8 @@ function describeTurnAction(a) {
     AIR_EATER_REFUEL: 'air-eater refuel',
     PROMOTE: 'promotion',
     SWAP_BIG_CUBE: 'big cube swap',
+    BUILD_ELEVATOR: 'elevator build',
+    ELEVATOR_MOVE: 'elevator ride',
     DIRT_REFUEL: 'dirt refuel',
     DELIVERY: 'delivery',
     BUILD_COLONY: 'colony build',
@@ -17762,6 +17794,63 @@ function showSitePopupFor(site) {
             _renderer.clearSitePopup();
           },
         });
+      }
+    }
+  }
+  // Space Elevator (M1, rule 1B9): this site may be one end of an elevator pair.
+  // If an elevator is built, offer a free RIDE to the other end for whichever of
+  // my units sits here; otherwise offer to BUILD one (Epic Hazard operation) when
+  // I hold the required cubes. Online + M1 only.
+  if (_online && isM1() && _onlineMaps) {
+    const siteSlug = toServerId(_onlineMaps, site.id);
+    const snap = _onlineSnapshot;
+    const myId = _onlineMe && _onlineMe.id;
+    const me = snap && snap.players && snap.players.find((p) => p.profileId === myId);
+    const myTurn = isOnlineMyTurn();
+    for (const pair of (siteSlug ? elevatorPairsForSite(siteSlug) : [])) {
+      const otherSlug = elevatorOtherEnd(pair, siteSlug);
+      const otherName = onlineSiteLabel(otherSlug);
+      const built = !!(snap && snap.elevators && snap.elevators[pair.key]);
+      if (built) {
+        const atEnd = (sid) => sid === pair.a || sid === pair.b;
+        if (me && me.rocket && atEnd(me.rocket.siteId) && (me.rocket.stack || []).length) {
+          actions.push({
+            label: '🚡 Ride elevator (rocket)', variant: myTurn ? 'rocket' : 'secondary', disabled: !myTurn,
+            title: myTurn ? `Free action: ride the Space Elevator to ${otherName}.` : 'Wait for your turn.',
+            onClick: () => { if (!myTurn) return; submitOnlineOp({ kind: 'ELEVATOR_MOVE', pairKey: pair.key, unit: 'rocket' }); _renderer.clearSitePopup(); },
+          });
+        }
+        if (me && me.freighter && atEnd(me.freighter.siteId)) {
+          actions.push({
+            label: '🚡 Ride elevator (freighter)', variant: myTurn ? 'rocket' : 'secondary', disabled: !myTurn,
+            title: myTurn ? `Free action: ride the Freighter up the Space Elevator to ${otherName}.` : 'Wait for your turn.',
+            onClick: () => { if (!myTurn) return; submitOnlineOp({ kind: 'ELEVATOR_MOVE', pairKey: pair.key, unit: 'freighter' }); _renderer.clearSitePopup(); },
+          });
+        }
+      } else {
+        const facA = snap && snap.factories && snap.factories[pair.a];
+        const facB = snap && snap.factories && snap.factories[pair.b];
+        const myFacA = !!(facA && facA.ownerId === myId);
+        const myFacB = !!(facB && facB.ownerId === myId);
+        const fr = me && me.freighter;
+        const frPromoted = !!(fr && (fr.promoted || fr.face === 'secondary'));
+        const frAtA = frPromoted && fr.siteId === pair.a;
+        const frAtB = frPromoted && fr.siteId === pair.b;
+        // A factory at one end + a cube (factory or promoted Freighter) at the other.
+        const eligible = (myFacA && (myFacB || frAtB)) || (myFacB && (myFacA || frAtA));
+        if (eligible) {
+          actions.push({
+            label: '🛗 Build Space Elevator', variant: myTurn ? 'rocket' : 'secondary', disabled: !myTurn,
+            title: myTurn ? `Epic Hazard: build a cable to ${otherName}. A 1 fails and decommissions the unit at the far end (pay FINAO to skip the roll). Costs your operation.` : 'Wait for your turn.',
+            onClick: async () => {
+              if (!myTurn) return;
+              const choice = await hazardConfirmModal([{ site, glyph: '🛗', label: 'Epic Hazard' }]);
+              if (choice === 'cancel' || choice == null) { setStatus('Space Elevator build cancelled.'); return; }
+              submitOnlineOp({ kind: 'BUILD_ELEVATOR', pairKey: pair.key, hazardPay: choice === 'pay' });
+              _renderer.clearSitePopup();
+            },
+          });
+        }
       }
     }
   }
@@ -20402,7 +20491,7 @@ const MP_LOG_ICONS = {
   BUILD_ROCKET: '🚀', BUY_CARD: '📚', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',
   INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧', MINE_REVIVAL: '⛏',
   ET_PRODUCE: '🏭', SITE_REFUEL: '💧', AIR_EATER_REFUEL: 'ᗧ', PROMOTE: '🟣', EVENT_CHOICE: '☄️',
-  SWAP_BIG_CUBE: '🔄',
+  SWAP_BIG_CUBE: '🔄', BUILD_ELEVATOR: '🛗', ELEVATOR_MOVE: '🚡',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
   DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🏠',
   REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',
