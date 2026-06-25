@@ -9,7 +9,7 @@
 // secondaries render rotated 180° so the "stowed" face reads
 // upside-down when installed.
 
-import { supportIconSvg, thermBadgeSvg, hasSupportIcon, typeIconSvg } from './support-icons.js';
+import { supportIconSvg, thermBadgeSvg, hasSupportIcon, typeIconSvg, pacmanSvg } from './support-icons.js';
 
 // Spectral type -> { glyph, fill, ink }. Used for the per-card
 // spectral hex. Falls back to 'unknown' for anything unmapped.
@@ -493,8 +493,9 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
       ? `<b>+${p.value}</b>`
       : ((typeof p.value === 'number' && p.value > 1) ? `<b>×${p.value}</b>` : '');
     // Robonaut prospector types (missile / raygun / buggy) get the custom
-    // support-icon glyph; everything else keeps its emoji.
-    const propIcon = supportIconSvg(p.key, { size: 27 });
+    // support-icon glyph; the air-eater gets the PAC-MAN icon; everything else
+    // keeps its emoji.
+    const propIcon = p.key === 'airEater' ? pacmanSvg({ size: 27 }) : supportIconSvg(p.key, { size: 27 });
     if (propIcon) { b.classList.add('has-support-icon'); b.innerHTML = `${propIcon}${count}`; }
     else b.innerHTML = `<em>${p.glyph}</em>${count}`;
     propHost.appendChild(b);

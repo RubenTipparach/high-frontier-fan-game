@@ -17515,7 +17515,7 @@ function showSitePopupFor(site) {
       : (gradeClash ? 'Tank holds another fuel - burn it empty before scooping atmosphere.'
         : (gain <= 0 ? `Tank full (${tank}/${getTankMax()}).` : null));
     actions.push({
-      label: ok ? `⛅ Air-eater refuel (+${gain})` : '⛅ Air-eater refuel',
+      label: ok ? `ᗧ Air-eater refuel (+${gain})` : 'ᗧ Air-eater refuel',
       variant: ok ? 'rocket' : 'secondary',
       disabled: !ok,
       title: reason || `Scoop the atmosphere for +${gain} water. Diver Orbit: this is a Hazard roll (a 1 is fatal) or pay FINAO. Costs your operation.`,
@@ -20107,7 +20107,7 @@ const MP_LOG_ICONS = {
   SET_ACTIVE_THRUSTER: '🔥', SET_ACTIVE_PROSPECTOR: '⛏',
   BUILD_ROCKET: '🚀', BUY_CARD: '📚', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',
   INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧', MINE_REVIVAL: '⛏',
-  ET_PRODUCE: '🏭', SITE_REFUEL: '💧', AIR_EATER_REFUEL: '⛅', EVENT_CHOICE: '☄️',
+  ET_PRODUCE: '🏭', SITE_REFUEL: '💧', AIR_EATER_REFUEL: 'ᗧ', EVENT_CHOICE: '☄️',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
   DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🏠',
   REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',

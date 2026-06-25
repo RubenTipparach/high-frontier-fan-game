@@ -171,6 +171,19 @@ export function supportIconSvg(kind, opts = {}) {
   return coin(cat, kind, opts);
 }
 
+// Air-eater PAC-MAN icon (rules: the air-eater / pac-man icon). A yellow disc
+// with a wedge mouth opening right + an eye. Self-contained (fixed yellow so it
+// reads on both the parchment white face and the dark black face). Used for the
+// `airEater` card property badge + anywhere the air-eater op is surfaced.
+export function pacmanSvg({ size = 24 } = {}) {
+  const r = 13, cx = 16, cy = 16, a = 38 * Math.PI / 180;
+  const ux = (cx + r * Math.cos(-a)).toFixed(1), uy = (cy + r * Math.sin(-a)).toFixed(1);
+  const lx = (cx + r * Math.cos(a)).toFixed(1), ly = (cy + r * Math.sin(a)).toFixed(1);
+  return `<svg class="ui-icon ui-icon-pacman" viewBox="0 0 32 32" width="${size}" height="${size}" aria-hidden="true">`
+    + `<path d="M${cx} ${cy} L${ux} ${uy} A${r} ${r} 0 1 0 ${lx} ${ly} Z" fill="#f6b51e" stroke="#0c0a16" stroke-width="1.4" stroke-linejoin="round"/>`
+    + `<circle cx="13" cy="9.2" r="1.7" fill="#0c0a16"/></svg>`;
+}
+
 // Inline icon for a card TYPE (thruster / refinery / robonaut) shown next to
 // the card-header label. Returns null for types that render their supplied
 // chips instead.

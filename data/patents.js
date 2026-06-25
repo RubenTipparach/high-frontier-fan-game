@@ -89,7 +89,7 @@ const PROPERTY_COLUMNS_BOOL = {
     desc: 'Push-sat: adds +1 to thrust for any card that carries this icon, and helps avoid needing factory assist to land or take off.' },
   'Solar':          { key: 'solar',          glyph: '☀',  label: 'Solar',
     desc: 'Solar-powered: output scales with how close you are to the Sun and falls off in the outer system / in shadow.' },
-  'Air Eater':      { key: 'airEater',       glyph: '⛅', label: 'Air-eater',
+  'Air Eater':      { key: 'airEater',       glyph: 'ᗧ', label: 'Air-eater',
     desc: 'Air-eater: scoops atmosphere at a gas giant or thick-atmosphere body for fuel or aerobraking.' },
   'Missile':        { key: 'missile',        glyph: '🚀', label: 'Missile',
     desc: 'Missile robonaut: a one-shot impactor prospector, consumed when it fires.' },
