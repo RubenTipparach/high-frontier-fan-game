@@ -3359,13 +3359,14 @@ export class MapRenderer {
         ctx.drawImage(dome, dx, dy, dw, dh);
       }
       // Player-coloured label sits BELOW the site name (drawn at sy + HEX_R +
-      // 12). {size}{spectral}, plus " | {outpost}" when an outpost is stationed
-      // here; the colocated outpost's water / glory ride on the label.
+      // 12). {site name} {size}{spectral}, plus " | {outpost}" when an outpost
+      // is stationed here; the colocated outpost's water / glory ride on the label.
       const op = this._outpostAt(id);
       // siteSize is a tag like "4C" (size + prospect class), so take only its
       // numeric part and append the spectral once -> "4C", not "4CC".
       const size = String(site.siteSize || '').replace(/[^0-9]/g, '');
       let text = `${size}${f.spectralType || ''}`;
+      if (site.name) text = `${site.name} ${text}`;
       if (op && op.letter) text += ` | ${op.letter}`;
       if (text) this._drawFactoryLabel(ctx, cxs, cys + HEX_R + 30, text, f.color || '#9c9c9c', r, op);
     }
@@ -3493,7 +3494,7 @@ export class MapRenderer {
   // read as two pieces parked together on the factory.
   _factoryStand(rect, w, h, side) {
     const cx = rect.cxs + side * rect.dw * 0.17;   // flank the building centre
-    const footY = rect.cys + rect.dh * 0.24;       // lower-half overlap baseline
+    const footY = rect.cys - rect.dh * 0.10;       // sit high on the building, light overlap
     return { px: cx - w / 2, py: footY - h };
   }
 
