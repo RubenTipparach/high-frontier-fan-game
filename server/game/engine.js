@@ -39,6 +39,7 @@ import {
 // STEPS (black connections), and the water it costs is the non-linear mass
 // drop, leaving a possibly-fractional remainder.
 import { blackStepsBetween, walkBlackDown } from '../../data/fuel-graph.js';
+import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 // Endgame VP math, shared with the client live panel + game-over modal so the
 // authoritative score can never drift from what players see.
 import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scoring.js';
@@ -1410,6 +1411,15 @@ function applyMoveFreighter(state, op, player) {
     dest = toSlug; thisTurnBurns = path.totalBurns; arrivals = path.path.slice(1);
   }
   if (dest === from) return fail('already_here');
+  // One-way aerobrake (B7e / rule c): no traversal against the arrow.
+  {
+    const hopNodes = [here, ...arrivals];
+    for (let i = 1; i < hopNodes.length; i++) {
+      if (!aeroHopAllowed(hopNodes[i - 1], hopNodes[i])) {
+        return fail('aero_wrong_way', { from: hopNodes[i - 1], to: hopNodes[i] });
+      }
+    }
+  }
   // 1 burn space per turn (pivots are free and not counted as burns).
   if (thisTurnBurns > 1) return fail('freighter_one_burn');
   if (isAerobrakeNode(dest)) return fail('cannot_stop_on_aerobrake', { site: dest });
@@ -1565,6 +1575,18 @@ function applyMove(state, op, player) {
     arrivals = path.path.slice(1);
   }
   if (dest === from) return fail('already_here');
+  // One-way aerobrake (B7e / rule c): a route may not traverse an aerobrake
+  // corridor against its arrow (you can't aerobrake to climb out of the well).
+  // Check every hop in [from, ...arrivals]; corridors with no known arrow are
+  // unrestricted (see data/aerobrake-direction.js).
+  {
+    const hopNodes = [from, ...arrivals];
+    for (let i = 1; i < hopNodes.length; i++) {
+      if (!aeroHopAllowed(hopNodes[i - 1], hopNodes[i])) {
+        return fail('aero_wrong_way', { from: hopNodes[i - 1], to: hopNodes[i] });
+      }
+    }
+  }
   // Can't END the turn on an aerobrake corridor (the 🪂 parachute space): you
   // are falling through the atmosphere, so the descent must finish this turn on
   // a real node. The corridor is fine to cross (it's in `arrivals` and rolls as

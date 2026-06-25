@@ -72,6 +72,7 @@ import {
 } from '../../data/net-thrust-track.js';
 import { renderDetailTrack, massLabel, blackStepsBetween } from './net-thrust-detail.js';
 import { walkBlackDown } from '../../data/fuel-graph.js';
+import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { ZONE_POLYGONS } from '../../data/zones.js';
@@ -5289,6 +5290,7 @@ function humanizeOnlineOpError(code, detail) {
     cannot_liftoff: 'Not enough thrust to lift off (and no factory here to assist).',
     cannot_land: 'Not enough thrust to land there (and no factory to assist).',
     cannot_stop_on_aerobrake: 'Can\'t stop on a parachute space - aerobraking carries you through, so finish your move on a landing site or node (unless you carry an air-eater).',
+    aero_wrong_way: 'Aerobrake paths are one-way - you can only descend through the parachute corridor, not climb out against the arrow.',
     not_on_aerobrake: 'The rocket must be sitting on an aerobrake (parachute) space to scoop the atmosphere.',
     no_pacman: 'Air-eater scooping needs an air-eater card AND an active thruster in the stack.',
     no_air_eater_gain: 'This engine\'s fuel consumption is too high to scoop fuel here (needs to be under 5).',
@@ -8068,6 +8070,14 @@ function manualAppendSegment(toId) {
   // final segment (the one that actually enters `toId`); the decorative
   // in-between segments are 0-burn coasting.
   const path = (r.path && r.path.length >= 2) ? r.path : [tipId, toId];
+  // One-way aerobrake (rule c): reject a hop that threads an aerobrake corridor
+  // against its arrow (you can only descend through it).
+  for (let i = 1; i < path.length; i++) {
+    if (!aeroHopAllowed(plannerIdToSlug(path[i - 1]), plannerIdToSlug(path[i]))) {
+      setStatus('Manual: aerobrake paths are one-way - you can only descend through the parachute corridor.');
+      return false;
+    }
+  }
   for (let i = 1; i < path.length; i++) {
     const last = i === path.length - 1;
     _plannedRoute.push({
@@ -15527,6 +15537,10 @@ function buildTurn1MoveOp() {
     const f = plannerIdToSlug(s.from);
     const t = plannerIdToSlug(s.to);
     if (!f || !t) return { error: 'That route is not on the map.' };
+    // One-way aerobrake (rule c): can't fly against the corridor's arrow.
+    if (!aeroHopAllowed(f, t)) {
+      return { error: 'That route flies the wrong way through an aerobrake (one-way - you can only descend through it).' };
+    }
     segments.push({ from: f, to: t, burns: Number(s.burns) || 0, turn: 1 });
   }
   // The freighter is a separate mover: tag the op so the server routes it to
