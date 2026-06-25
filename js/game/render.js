@@ -3900,11 +3900,12 @@ export class MapRenderer {
     if (fr) {
       onFactory = true;
       ({ px, py } = this._factoryStand(fr, w, h, 1));
+      py -= h * 0.16;                          // lift the cube up onto the building
     } else {
       const sx = this.pan.x + f.x * eff + (f.offsetX || 0);
       const sy = this.pan.y + f.y * eff;
       px = sx - w / 2;
-      py = sy + 3;                            // hang below the node (rocket is above)
+      py = sy - 3;                            // sit just under the node (raised a bit)
     }
     if (this._freighterBoxes) {
       this._freighterBoxes.push({ profileId: f.profileId == null ? null : f.profileId, x: px, y: py, w, h });
