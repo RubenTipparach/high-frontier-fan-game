@@ -5291,6 +5291,9 @@ function humanizeOnlineOpError(code, detail) {
     cannot_land: 'Not enough thrust to land there (and no factory to assist).',
     cannot_stop_on_aerobrake: 'Can\'t stop on a parachute space - aerobraking carries you through, so finish your move on a landing site or node (unless you carry an air-eater).',
     aero_wrong_way: 'Aerobrake paths are one-way - you can only descend through the parachute corridor, not climb out against the arrow.',
+    no_promotion_colony: 'Promote needs a matching colony dome at this site (a colony whose factory matches the card\'s promotion colour).',
+    already_promoted: 'That card is already on its Purple-Side.',
+    not_promotable: 'Only a GW thruster or Freighter can be promoted.',
     not_on_aerobrake: 'The rocket must be sitting on an aerobrake (parachute) space to scoop the atmosphere.',
     no_pacman: 'Air-eater scooping needs an air-eater card AND an active thruster in the stack.',
     no_air_eater_gain: 'This engine\'s fuel consumption is too high to scoop fuel here (needs to be under 5).',
@@ -6441,6 +6444,16 @@ function getMyFreighter() {
   const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
   return (me && me.freighter) || null;
 }
+// Is `siteId` (a client planner id) a valid Promotion Site for a card needing
+// colony `need` (a spectral letter or 'Push')? A colony dome must be present,
+// and for a spectral need the factory there must match. Mirrors the server's
+// colonyPromotes. 'Push' / unspecified accepts any colony.
+function colonyPromotesAt(siteId, need) {
+  if (!siteId || !getColony(siteId)) return false;
+  if (!need || need === 'Push') return true;
+  const f = getFactory(siteId);
+  return !!(f && (f.spectralType || 'C') === need);
+}
 // Human-readable location for a freighter's server-slug siteId (null = LEO).
 function freighterLocLabel(fr) {
   if (!fr || !fr.siteId) return 'LEO';
@@ -6649,6 +6662,29 @@ function openUnifiedStackInspector(stackId) {
           refreshFooter();
         });
         actions.appendChild(selBtn);
+        // Promotion (M1/M2): flip a GW thruster to its Purple-Side at a colony
+        // dome whose factory matches the card's promotion colony. Shown on a
+        // GW thruster slot in the rocket / an outpost when parked at a valid
+        // Promotion Site. Online + M1 only; flips the card to its TW side.
+        if (card.type === 'gw-thruster' && slot.face !== 'secondary' && _online && isM1()
+            && (stackId === 'rocket' || stackId.startsWith('outpost'))
+            && colonyPromotesAt(getStackSiteId(stackId), card.promotionColony)) {
+          const promoBtn = document.createElement('button');
+          promoBtn.type = 'button';
+          promoBtn.className = 'rocket-select gw-promote';
+          promoBtn.textContent = '🟣 Promote';
+          const lockedPromo = !isOnlineMyTurn();
+          promoBtn.disabled = lockedPromo;
+          promoBtn.title = lockedPromo ? 'Wait for your turn.'
+            : `Promote to its Purple-Side (TW thruster) at this ${card.promotionColony}-colony. Costs your operation.`;
+          promoBtn.addEventListener('click', async () => {
+            if (promoBtn.disabled) return;
+            promoBtn.disabled = true;
+            await submitOnlineOp({ kind: 'PROMOTE', cardId: slot.id, from: stackId });
+            close();
+          });
+          actions.appendChild(promoBtn);
+        }
         // A deployed radiator on its heavy side can be folded down to light
         // (hardier, less cooling) - one-way, mirroring the rad-damage flip.
         if (card.type === 'radiator' && (slot.radSide || 'heavy') !== 'light') {
@@ -6716,6 +6752,30 @@ function openUnifiedStackInspector(stackId) {
         const ce = renderCard(ucard, { type: 'patent', face: fr.face || 'secondary' });
         makeCardViewable(ce, ucard, 'patent', fr.face || 'secondary');
         w.appendChild(ce);
+        // Promotion (M1/M2): flip the Freighter to its Purple-Side at a colony
+        // dome matching its promotion colony. Shown when parked at a valid
+        // Promotion Site and not already promoted. Costs the operation.
+        if (isM1() && !fr.promoted && fr.face !== 'secondary'
+            && colonyPromotesAt(getStackSiteId('freighter'), ucard.promotionColony)) {
+          const acts = document.createElement('div');
+          acts.className = 'rocket-slot-actions';
+          const promoBtn = document.createElement('button');
+          promoBtn.type = 'button';
+          promoBtn.className = 'rocket-select gw-promote';
+          promoBtn.textContent = '🟣 Promote';
+          const lockedPromo = !isOnlineMyTurn();
+          promoBtn.disabled = lockedPromo;
+          promoBtn.title = lockedPromo ? 'Wait for your turn.'
+            : `Promote the Freighter to its Purple-Side at this ${ucard.promotionColony}-colony. Costs your operation.`;
+          promoBtn.addEventListener('click', async () => {
+            if (promoBtn.disabled) return;
+            promoBtn.disabled = true;
+            await submitOnlineOp({ kind: 'PROMOTE', unit: 'freighter' });
+            close();
+          });
+          acts.appendChild(promoBtn);
+          w.appendChild(acts);
+        }
         uhost.appendChild(w);
       }
     }
@@ -16615,6 +16675,7 @@ function describeTurnAction(a) {
     INCOME: 'income',
     SITE_REFUEL: 'refuel',
     AIR_EATER_REFUEL: 'air-eater refuel',
+    PROMOTE: 'promotion',
     DIRT_REFUEL: 'dirt refuel',
     DELIVERY: 'delivery',
     BUILD_COLONY: 'colony build',
@@ -20121,7 +20182,7 @@ const MP_LOG_ICONS = {
   SET_ACTIVE_THRUSTER: '🔥', SET_ACTIVE_PROSPECTOR: '⛏',
   BUILD_ROCKET: '🚀', BUY_CARD: '📚', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',
   INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧', MINE_REVIVAL: '⛏',
-  ET_PRODUCE: '🏭', SITE_REFUEL: '💧', AIR_EATER_REFUEL: 'ᗧ', EVENT_CHOICE: '☄️',
+  ET_PRODUCE: '🏭', SITE_REFUEL: '💧', AIR_EATER_REFUEL: 'ᗧ', PROMOTE: '🟣', EVENT_CHOICE: '☄️',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
   DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🏠',
   REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',

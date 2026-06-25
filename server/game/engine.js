@@ -3709,10 +3709,60 @@ function applyAirEaterRefuel(state, op, player) {
   };
 }
 
+// A site is a valid Promotion Site for a card needing colony `need` (a spectral
+// letter, or 'Push'): it must carry a colony dome, and (for a spectral need) the
+// factory there must match that spectral. 'Push' / unspecified = any colony.
+function colonyPromotes(state, siteId, need) {
+  if (!siteId || !state.colonies[siteId]) return false;
+  if (!need || need === 'Push') return true;
+  const fac = state.factories[siteId];
+  return !!(fac && (fac.spectralType || 'C') === need);
+}
+
+// Promotion Op (M1/M2, rules: Promotion). Flip a Freighter or GW thruster to its
+// Purple-Side (secondary face) at its Promotion Site - a colony dome whose
+// factory matches the card's promotion colony. Costs the turn's operation.
+function applyPromote(state, op, player) {
+  if (!state.m1) return fail('m1_off');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  if (op.unit === 'freighter') {
+    const fr = player.freighter;
+    if (!fr) return fail('no_freighter');
+    if (fr.promoted || fr.face === 'secondary') return fail('already_promoted');
+    const card = PATENTS_BY_ID[fr.cardId];
+    if (!colonyPromotes(state, fr.siteId, card && card.promotionColony)) return fail('no_promotion_colony');
+    fr.face = 'secondary'; fr.promoted = true;
+    player.opsRemaining -= 1;
+    const site = siteById(fr.siteId);
+    const nm = card && card.faces && card.faces.secondary && card.faces.secondary.name;
+    return { ok: true, state, log: `${player.name} promoted the Freighter${nm ? ` to ${nm}` : ''} at ${(site && site.name) || fr.siteId}.` };
+  }
+  // GW thruster in the rocket stack or an outpost.
+  const cardId = String(op.cardId || '');
+  const from = String(op.from || 'rocket');
+  let slot = null, siteId = null;
+  if (from === 'rocket') { slot = player.rocket.stack.find((s) => s.id === cardId); siteId = player.rocket.siteId; }
+  else if (from.startsWith('outpost')) {
+    const o = player.outposts && player.outposts[from.slice('outpost'.length)];
+    if (o) { slot = (o.cards || []).find((s) => s.id === cardId); siteId = o.siteId; }
+  }
+  if (!slot) return fail('not_in_stack');
+  const card = PATENTS_BY_ID[cardId];
+  if (!card || card.type !== 'gw-thruster') return fail('not_promotable');
+  if (slot.face === 'secondary') return fail('already_promoted');
+  if (!colonyPromotes(state, siteId, card.promotionColony)) return fail('no_promotion_colony');
+  slot.face = 'secondary';
+  player.opsRemaining -= 1;
+  const site = siteById(siteId);
+  const nm = card.faces && card.faces.secondary && card.faces.secondary.name;
+  return { ok: true, state, log: `${player.name} promoted ${nm || cardId} (GW thruster) at ${(site && site.name) || siteId}.` };
+}
+
 // dispatcher (not the handler) maintains turnActions / turnRedo.
 const FUNCTIONAL = {
   INCOME: applyIncome,
   FUNDRAISE: applyFundraise,
+  PROMOTE: applyPromote,
   LOBBY: applyLobby,
   SITE_REFUEL: applySiteRefuel,
   AIR_EATER_REFUEL: applyAirEaterRefuel,
@@ -3753,6 +3803,7 @@ function pickPayload(op) {
   switch (op.kind) {
     case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, pickupChit: op.pickupChit !== false };
     case 'AIR_EATER_REFUEL': return { hazardPay: !!op.hazardPay };
+    case 'PROMOTE': return { unit: op.unit, cardId: op.cardId, from: op.from };
     case 'LOAD_GLORY': return {};
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face, radSide: op.radSide };
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };
