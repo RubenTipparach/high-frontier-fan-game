@@ -7906,6 +7906,7 @@ function enterManualMoveMode(opts = {}) {
   persistPlannedRoute();
   if (_renderer) {
     _renderer.setRoute(null);
+    if (typeof _renderer.setRouteUnit === 'function') _renderer.setRouteUnit(unit);  // freighter route = green
     _renderer.setRouteEndpoints(_manualOriginId, _manualOriginId);
     // Make route waypoints (hohmann / lagrange / burn) tappable so the player
     // can plot INTO a Hohmann transfer, not just between landable sites.
@@ -9389,6 +9390,7 @@ async function mountMapFor() {
       );
       if (allValid) {
         _renderer.setRoute(_plannedRoute);
+        if (typeof _renderer.setRouteUnit === 'function') _renderer.setRouteUnit(_plannedRouteUnit);
         const first = _plannedRoute[0];
         const last  = _plannedRoute[_plannedRoute.length - 1];
         _renderer.setRouteEndpoints(first.from, last.to);
@@ -16660,6 +16662,7 @@ async function undoRocketMove() {
   persistPlannedRoute();
   if (_plannedRoute && _plannedRoute.length) {
     _renderer.setRoute(_plannedRoute);
+    if (typeof _renderer.setRouteUnit === 'function') _renderer.setRouteUnit('rocket');
     const first = _plannedRoute[0];
     const last  = _plannedRoute[_plannedRoute.length - 1];
     _renderer.setRouteEndpoints(first.from, last.to);
@@ -16815,6 +16818,7 @@ function onSiteSelect(site) {
       return;
     }
     _renderer.setRoute(result.segments);
+    if (typeof _renderer.setRouteUnit === 'function') _renderer.setRouteUnit('rocket');
     _renderer.setRouteEndpoints(_routeFrom.id, _routeTo.id);
     _selectedId = _routeTo.id;
     showSitePopupFor(_routeTo);
@@ -18016,6 +18020,7 @@ function planFreighterRouteTo(destSite) {
   persistPlannedRoute();
   submitSetRouteOnline();
   _renderer.setRoute(result.segments);
+  if (typeof _renderer.setRouteUnit === 'function') _renderer.setRouteUnit('freighter');
   _renderer.setRouteEndpoints(origin.id, destSite.id);
   document.getElementById('route-clear').hidden = false;
   const turns = result.totalTurns;
@@ -18161,6 +18166,7 @@ function planRocketRouteTo(destSite) {
   // truncates as the rocket walks it (online only, no-op solo).
   submitSetRouteOnline();
   _renderer.setRoute(result.segments);
+  if (typeof _renderer.setRouteUnit === 'function') _renderer.setRouteUnit('rocket');
   _renderer.setRouteEndpoints(origin.id, destSite.id);
   document.getElementById('route-clear').hidden = false;
   const turns = result.totalTurns;

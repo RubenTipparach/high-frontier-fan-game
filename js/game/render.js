@@ -784,6 +784,7 @@ export class MapRenderer {
     // an open panel. Updated externally via setInsets().
     this.insets = { left: 0, top: 0, right: 0, bottom: 0 };
     this._route = null;             // [{from,to,dv}]
+    this._routeUnit = 'rocket';     // 'rocket' (orange/gold) | 'freighter' (green)
     this._routeFromId = null;
     this._routeToId = null;
     // Manual-move candidate glow: Map<nodeId, 'ok' | 'blocked'>. Set while
@@ -985,6 +986,13 @@ export class MapRenderer {
   }
 
   // ---- public surface ----
+
+  // Which mover the drawn route belongs to: 'rocket' (orange/gold) or
+  // 'freighter' (green) - so the two planners' lines read distinctly.
+  setRouteUnit(unit) {
+    const u = unit === 'freighter' ? 'freighter' : 'rocket';
+    if (this._routeUnit !== u) { this._routeUnit = u; this._scheduleDraw(); }
+  }
 
   setRoute(segments) {
     this._route = segments && segments.length ? segments : null;
@@ -2677,6 +2685,12 @@ export class MapRenderer {
     if (!this._route) return;
     const eff = this.zoom * this.fitScale;
     ctx.lineCap = 'round';
+    // Palette per mover: the freighter plots in GREEN so its line never reads
+    // as the rocket's orange/gold route.
+    const fr = this._routeUnit === 'freighter';
+    const PAL = fr
+      ? { later: '74, 222, 128', solid: 'rgba(22, 163, 74, 0.95)', dash: 'rgba(74, 222, 128, 0.95)', glow: 'rgba(22, 163, 74, 0.65)' }
+      : { later: '251, 191, 36', solid: 'rgba(249, 115, 22, 0.95)', dash: 'rgba(251, 191, 36, 0.95)', glow: 'rgba(249, 115, 22, 0.65)' };
     // Segments tagged `turn: 1` (or untagged - plain Navigate-to
     // routes have no turn data) render as the bright orange/gold
     // highlight. Segments on later turns render as a dimmer
@@ -2702,7 +2716,7 @@ export class MapRenderer {
     for (const [turn, segs] of sortedLater) {
       const alpha = Math.max(0.22, 0.55 - (turn - 2) * 0.08);
       ctx.lineWidth = 2.5 / eff;
-      ctx.strokeStyle = `rgba(251, 191, 36, ${alpha})`;
+      ctx.strokeStyle = `rgba(${PAL.later}, ${alpha})`;
       ctx.setLineDash([6 / eff, 5 / eff]);
       ctx.beginPath();
       for (const seg of segs) {
@@ -2722,7 +2736,7 @@ export class MapRenderer {
     if (turn1.length) {
       ctx.lineWidth = 4 / eff;
       ctx.shadowBlur = 6 / eff;
-      ctx.shadowColor = 'rgba(249, 115, 22, 0.65)';
+      ctx.shadowColor = PAL.glow;
       ctx.beginPath();
       for (const seg of turn1) {
         const sa = this.data.byId[seg.from];
@@ -2731,9 +2745,9 @@ export class MapRenderer {
         ctx.moveTo(sa.x, sa.y);
         ctx.lineTo(sb.x, sb.y);
       }
-      ctx.strokeStyle = 'rgba(249, 115, 22, 0.95)';
+      ctx.strokeStyle = PAL.solid;
       ctx.stroke();
-      ctx.strokeStyle = 'rgba(251, 191, 36, 0.95)';
+      ctx.strokeStyle = PAL.dash;
       ctx.setLineDash([8 / eff, 8 / eff]);
       ctx.stroke();
       ctx.setLineDash([]);
