@@ -100,7 +100,11 @@ function openCardZoom(card) {
   const panel = document.createElement('div');
   panel.className = 'card-modal-panel et-zoom-panel';
   try {
-    const el = renderCard(card, { type: card.type, face: blackFaceOf(card) });
+    // renderCard's `type` is the card KIND ('patent' / 'crew'), not the card's
+    // own .type - ET Produce options are always patents. Passing the specific
+    // type (e.g. 'gw-thruster') dropped the type-* class, so GW thruster /
+    // freighter cards lost their black/purple styling and fell back to parchment.
+    const el = renderCard(card, { type: 'patent', face: blackFaceOf(card) });
     el.classList.add('card-modal-card');
     panel.appendChild(el);
   } catch {
@@ -217,7 +221,8 @@ export function openEtProduceModal({
         // The selected radiator previews its currently-chosen side; others
         // show the default (heavy / max cooling).
         const rs = (opt.card.type === 'radiator' && i === selectedCard) ? radSide : 'heavy';
-        pick.appendChild(renderCard(opt.card, { type: opt.card.type, face: blackFaceOf(opt.card), radSide: rs }));
+        // type is the card KIND ('patent'), not opt.card.type - see the zoom note.
+        pick.appendChild(renderCard(opt.card, { type: 'patent', face: blackFaceOf(opt.card), radSide: rs }));
       } catch {
         pick.textContent = opt.name;
       }
