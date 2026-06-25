@@ -6668,7 +6668,7 @@ function openUnifiedStackInspector(stackId) {
       if (uhost && ucard) {
         const w = document.createElement('div');
         w.className = 'rocket-slot';
-        const ce = renderCard(ucard, { type: 'patent', face: fr.face || 'secondary', promoted: !!fr.promoted });
+        const ce = renderCard(ucard, { type: 'patent', face: fr.face || 'secondary' });
         makeCardViewable(ce, ucard, 'patent', fr.face || 'secondary');
         w.appendChild(ce);
         uhost.appendChild(w);
