@@ -3368,7 +3368,7 @@ export class MapRenderer {
       let text = `${size}${f.spectralType || ''}`;
       if (site.name) text = `${site.name} ${text}`;
       if (op && op.letter) text += ` | ${op.letter}`;
-      if (text) this._drawFactoryLabel(ctx, cxs, cys + HEX_R + 30, text, f.color || '#9c9c9c', r, op);
+      if (text) this._drawFactoryLabel(ctx, cxs, cys + HEX_R + 14, text, f.color || '#9c9c9c', r, op);
     }
     ctx.restore();
   }
